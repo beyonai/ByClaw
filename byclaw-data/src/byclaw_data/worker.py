@@ -372,6 +372,9 @@ async def _consume_agent_events(
     context: Any,
     reco_task: asyncio.Task[list[str]] | None,
     emit_done: bool = True,
+    agent_id: str | None = None,
+    dyn_object_ids: list[str] | None = None,
+    dyn_view_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """消费 OntologyAgent 事件流，翻译为 Gateway SSE。"""
     from datacloud_analysis.ontology_agent import (  # noqa: PLC0415
@@ -491,6 +494,10 @@ async def _consume_agent_events(
                     "interrupt_reason": interrupt_ev.reason,
                     "paradigmList": paradigm_list,
                     "query": interrupt_ev.query,
+                    "agent_id": agent_id or "",
+                    "is_dynamic_agent": True,
+                    "call_object_ids": dyn_object_ids or [],
+                    "call_view_ids": dyn_view_ids or [],
                 },
             )
         )
@@ -501,6 +508,10 @@ async def _consume_agent_events(
                 metadata={
                     "thread_id": interrupt_ev.thread_id,
                     "interrupt_reason": interrupt_ev.reason,
+                    "agent_id": agent_id or "",
+                    "is_dynamic_agent": True,
+                    "call_object_ids": dyn_object_ids or [],
+                    "call_view_ids": dyn_view_ids or [],
                 },
             )
         )
@@ -1027,6 +1038,7 @@ class DataCloudWorker(GatewayWorker):
 
         # 来源 1：extra_payload.call_object_ids / call_view_ids（内部委派）
         # 来源 2：extra_payload.resource_list 中的 OBJECT / VIEW 资源码（前端选择）
+        # 来源 3：header_metadata 中由 interrupt 写入的恢复值（ResumeCommand 时）
         # 任一来源非空即激活动态路径，旁路 AgentConfig；两源合并去重，call_*_ids 优先。
         _dyn_object_ids: list[str] = [
             s.strip()
@@ -1052,6 +1064,27 @@ class DataCloudWorker(GatewayWorker):
         for _code in _res_view_codes:
             if _code not in _dyn_view_ids:
                 _dyn_view_ids.append(_code)
+
+        # 来源 3：ResumeCommand 时从 header_metadata 恢复 interrupt 时写入的动态路径标识
+        if not _dyn_object_ids and not _dyn_view_ids:
+            _resume_object_ids: list[str] = [
+                s for s in (header_metadata.get("call_object_ids") or [])
+                if isinstance(s, str) and s.strip()
+            ]
+            _resume_view_ids: list[str] = [
+                s for s in (header_metadata.get("call_view_ids") or [])
+                if isinstance(s, str) and s.strip()
+            ]
+            if _resume_object_ids or _resume_view_ids:
+                _dyn_object_ids = _resume_object_ids
+                _dyn_view_ids = _resume_view_ids
+                logger.info(
+                    "dynamic agent path restored from header_metadata: session=%s "
+                    "object_ids=%s view_ids=%s",
+                    context.session_id,
+                    _dyn_object_ids,
+                    _dyn_view_ids,
+                )
         if _res_object_codes or _res_view_codes:
             logger.info(
                 "resource_list tool whitelist activated: session=%s "
@@ -1340,7 +1373,13 @@ class DataCloudWorker(GatewayWorker):
                 )
 
             dynamic_result = await _consume_agent_events(
-                event_iter, context, reco_task=None, emit_done=False
+                event_iter,
+                context,
+                reco_task=None,
+                emit_done=False,
+                agent_id=str(by_agent_id or ""),
+                dyn_object_ids=_dyn_object_ids,
+                dyn_view_ids=_dyn_view_ids,
             )
             if resume_cache_key is not None:
                 self._cache_resume_result(resume_cache_key, dynamic_result)
