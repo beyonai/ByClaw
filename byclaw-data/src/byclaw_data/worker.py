@@ -455,6 +455,15 @@ async def _consume_agent_events(
         )
         return {"status": "waiting"}
 
+    await context.emit_chunk(
+        StreamChunkEvent(
+            content="回答完成",
+            metadata={"relatedResources": _related_resources_from_reco_task(reco_task)},
+        ),
+        event_type=EventType.APP_STREAM_RESPONSE.value,
+        content_type=SseMessageType.text.value,
+    )
+
     if interrupt_ev.reason == "PARADIGM_CLARIFICATION":
         paradigm_list: list[dict[str, Any]] = []
         for group in interrupt_ev.paradigm_list or []:
@@ -463,13 +472,17 @@ async def _consume_agent_events(
                     "paradigmId": group.paradigm_id,
                     "paradigmName": group.paradigm_name,
                     "paradigmResult": [
-                        {"choiceKeyword": opt.choice_keyword, "recall": opt.recall}
+                        {
+                            "keyword": opt.keyword,
+                            "recall": opt.recall,
+                            "kid": opt.kid,
+                            "ktype": opt.ktype,
+                            "choiceKeyword": opt.choice_keyword,
+                        }
                         for opt in group.options
                     ],
                 }
             )
-        # complex_ask_user 先推 answerDelta（paradigmList），再推 APP_STREAM_RESPONSE，
-        # 与静态路径（_stream_graph）保持一致，避免前端因 APP_STREAM_RESPONSE 提前到达而丢弃 paradigmList。
         await context.complex_ask_user(
             AskUserEvent(
                 prompt=interrupt_ev.prompt,
@@ -477,6 +490,7 @@ async def _consume_agent_events(
                     "thread_id": interrupt_ev.thread_id,
                     "interrupt_reason": interrupt_ev.reason,
                     "paradigmList": paradigm_list,
+                    "query": interrupt_ev.query,
                 },
             )
         )
@@ -490,18 +504,6 @@ async def _consume_agent_events(
                 },
             )
         )
-
-    # 动态路径 interrupt 时不推 APP_STREAM_RESPONSE：
-    # complex_ask_user / ask_user 推完 answerDelta 后由前端自行结束本轮，
-    # 提前推 APP_STREAM_RESPONSE 会导致前端丢弃后续的 answerDelta（paradigmList）。
-    # await context.emit_chunk(
-    #     StreamChunkEvent(
-    #         content="回答完成",
-    #         metadata={"relatedResources": _related_resources_from_reco_task(reco_task)},
-    #     ),
-    #     event_type=EventType.APP_STREAM_RESPONSE.value,
-    #     content_type=SseMessageType.text.value,
-    # )
     return {"status": "waiting"}
 
 
