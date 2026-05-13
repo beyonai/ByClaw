@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,15 @@ logger = logging.getLogger(__name__)
 # 需要等待过期。默认 10s × 7 次 = 70s 覆盖窗口足够等锁自动过期。
 _WORKER_RETRY_MAX = int(os.environ.get("DATACLOUD_WORKER_RETRY_MAX", "7"))
 _WORKER_RETRY_INTERVAL = int(os.environ.get("DATACLOUD_WORKER_RETRY_INTERVAL", "10"))
+
+
+def _default_worker_id() -> str:
+    try:
+        ip = socket.gethostbyname(socket.gethostname())
+    except OSError:
+        ip = "unknown"
+    base = os.environ.get("DATACLOUD_GATEWAY_WORKER_ID", "datacloud")
+    return f"{base}-{ip}-{os.getpid()}"
 
 
 @dataclass(frozen=True)
@@ -64,7 +74,7 @@ class WorkerConfig:
             api_key=opt("OPENAI_API_KEY"),
             base_url=opt("OPENAI_BASE_URL"),
             model_name=os.environ.get("DATACLOUD_LLM_MODEL", "main.py未设置"),
-            worker_id=os.environ.get("DATACLOUD_GATEWAY_WORKER_ID", "datacloud"),
+            worker_id=_default_worker_id(),
             redis_host=os.environ.get("DATACLOUD_GATEWAY_REDIS_HOST", "localhost"),
             redis_port=as_int("DATACLOUD_GATEWAY_REDIS_PORT", 6379),
             redis_db=as_int("DATACLOUD_GATEWAY_REDIS_DB", 0),

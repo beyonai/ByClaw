@@ -416,13 +416,23 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
                 continue
 
             previous_cfg = current_map.get(agent_id)
-            did_load = self._handle_single_agent_detail(
-                current_map=current_map,
-                agent_id=agent_id,
-                detail_data=detail_data,
-                skipped_no_tools=skipped_no_tools,
-                source_path=file_path,
-            )
+            try:
+                did_load = self._handle_single_agent_detail(
+                    current_map=current_map,
+                    agent_id=agent_id,
+                    detail_data=detail_data,
+                    skipped_no_tools=skipped_no_tools,
+                    source_path=file_path,
+                )
+            except Exception as _exc:  # noqa: BLE001
+                logger.warning(
+                    "[InitPlugin] Unexpected error loading agent: agent_id=%s path=%s err=%s",
+                    agent_id,
+                    file_path,
+                    _exc,
+                )
+                failed_agent_ids.append(agent_id)
+                continue
             if not did_load:
                 failed_agent_ids.append(agent_id)
                 continue
@@ -684,6 +694,8 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
                 "redirect_tools": redirect_tools,
                 "_loaded_by_plugin": self.plugin_id,
                 "_source_path": str(source_path.resolve()) if source_path else "",
+                # prologue 原始字段（含 modelInfo.modelId），供 worker 按 agent 选模型
+                "prologue": detail_data.get("prologue") or "",
             },
         )
         self._save_offline_cache(agent_id, detail_data)
@@ -692,7 +704,9 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
     @staticmethod
     def _compile_task_prompt(detail: dict[str, Any]) -> str:
         parts: list[str] = []
-        parts.append(f"{detail['corePersonaDefinition']}")
+        core_persona = str(detail.get("corePersonaDefinition") or "").strip()
+        if core_persona:
+            parts.append(core_persona)
         return "\n\n".join(parts)
 
     @staticmethod
@@ -1155,6 +1169,25 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
                 scene_path,
             )
 
+            # 与动态路径（worker.py 构造 OntologyAgent 时）保持一致：
+            # 静态路径 loader 同样用 byclaw 后端 HTTP 文件存储，
+            # 让大结果集 CSV 走 /writeTxt 上传而非落本地盘。
+            # 构造失败时降级为 None，由 configure_loader 自动回退至 LocalResultFileStorage。
+            result_file_storage: Any = None
+            try:
+                from byclaw_data.mcp.result_file_storage import (  # noqa: PLC0415
+                    build_result_file_storage,
+                )
+                from datacloud_data_service.config import get_settings  # noqa: PLC0415
+
+                result_file_storage = build_result_file_storage(settings=get_settings())
+            except Exception as _rfs_exc:  # noqa: BLE001
+                logger.warning(
+                    "[InitPlugin] _build_shared_loader: build_result_file_storage failed,"
+                    " fallback to local storage: %s",
+                    _rfs_exc,
+                )
+
             configure_loader(
                 loader,
                 model=os.environ.get(
@@ -1173,6 +1206,7 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
                     "DATACLOUD_GATEWAY_WORKSPACE_DIR", self._default_workspace_dir()
                 ),
                 sql_execution_mode="internal",
+                result_file_storage=result_file_storage,
             )
             logger.info(
                 "[InitPlugin] _build_shared_loader: loader ready scene_path=%s",
