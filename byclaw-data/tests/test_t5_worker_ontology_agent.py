@@ -63,6 +63,48 @@ def test_t5_src_dynamic_path_uses_ontology_agent() -> None:
     assert "_ontology_agent.ask" in src or "_ontology_agent.resume" in src
 
 
+# ── 方案 A 红测试：动态路径透传 result_file_storage 与 gateway_context ───────
+
+
+def test_dynamic_path_passes_result_file_storage_to_ontology_agent_config() -> None:
+    """创建 OntologyAgentConfig 时必须注入 result_file_storage。"""
+    src = _src()
+    assert "result_file_storage=" in src
+    assert "build_result_file_storage" in src
+
+
+def _slice_after(src: str, marker: str, span: int = 800) -> str:
+    """Return up to ``span`` chars starting at ``marker`` (empty if not found)."""
+    idx = src.find(marker)
+    return "" if idx < 0 else src[idx : idx + span]
+
+
+def test_dynamic_path_ask_passes_session_id() -> None:
+    """worker.py 调用 `_ontology_agent.ask(` 时必须传 `session_id=context.session_id`。
+
+    解耦原则:不向 datacloud-analysis 公开 API 传 `gateway_context`,
+    只传 datacloud 自己的具体字段(user_code 已有,session_id 新增)。
+    """
+    src = _src()
+    block = _slice_after(src, "_ontology_agent.ask(")
+    assert block, "_ontology_agent.ask( 调用未找到"
+    assert "session_id=context.session_id" in block
+    assert "gateway_context=" not in block, (
+        "动态分支不应在 ask() 上传 gateway_context(违反 by-datacloud 解耦)"
+    )
+
+
+def test_dynamic_path_resume_passes_session_id() -> None:
+    """worker.py 调用 `_ontology_agent.resume(` 时也必须传 `session_id=context.session_id`。"""
+    src = _src()
+    block = _slice_after(src, "_ontology_agent.resume(")
+    assert block, "_ontology_agent.resume( 调用未找到"
+    assert "session_id=context.session_id" in block
+    assert "gateway_context=" not in block, (
+        "动态分支不应在 resume() 上传 gateway_context(违反 by-datacloud 解耦)"
+    )
+
+
 # ===========================================================================
 # PART 2 — _dict_to_paradigm_answer 单元测试
 # ===========================================================================
@@ -287,6 +329,7 @@ async def test_t5_consume_error_event_returns_done() -> None:
 
 def _make_worker_bare_t5() -> Any:
     """裸 DataCloudWorker 实例（含 T5 新属性）。"""
+    import asyncio  # noqa: PLC0415
     from collections import OrderedDict  # noqa: PLC0415
 
     from byclaw_data.worker import DataCloudWorker  # noqa: PLC0415
@@ -302,6 +345,9 @@ def _make_worker_bare_t5() -> Any:
     w.command_plugin_manager = MagicMock()
     w.worker_id = "test_worker"
     w._resource_path = "/fake/resource"
+    w._ontology_agent = None
+    w._model_config_sig = ""
+    w._ontology_agent_lock = asyncio.Lock()
 
     registry = MagicMock()
     registry.agent_configs = []
@@ -350,8 +396,8 @@ def _patch_external() -> list[Any]:
     import unittest.mock as m  # noqa: PLC0415
 
     return [
-        m.patch("byclaw_data.model_environment.build_llm_config"),
-        m.patch("byclaw_data.model_environment.build_embedding_config"),
+        m.patch("byclaw_data.model_environment.build_llm_config", return_value={}),
+        m.patch("byclaw_data.model_environment.build_embedding_config", return_value={}),
         m.patch("by_framework.worker.sandbox.hook_sandbox.active_workspace"),
         m.patch(
             "byclaw_data.worker._load_recent_history_messages",
@@ -389,7 +435,8 @@ async def test_t5_dynamic_path_calls_ontology_agent_ask() -> None:
 
     mock_agent.ask.assert_called_once()
     worker._build_graph.assert_not_called()
-    assert result.get("status") == "done"
+    # 动态路径将 "done" 转换为 "COMPLETED" 返回给框架层（触发 stream_end 信号）
+    assert result.get("status") in {"done", "COMPLETED"}
 
 
 @pytest.mark.asyncio

@@ -71,7 +71,10 @@ class ByclawResultFileStorage(ResultFileStorage):
             "content": content,
         }
         data = self._post_json("/byaiService/open/api/v1/conversation/writeTxt", payload)
-        stored_path = self._extract_string(data, "filePath")
+
+        stored_path = self._extract_string(data, "objectKey") or self._extract_string(
+            data, "filePath"
+        )
         return stored_path or file_path
 
     def append_text(self, file_path: str, content: str) -> str:
@@ -81,14 +84,16 @@ class ByclawResultFileStorage(ResultFileStorage):
             "content": content,
         }
         data = self._post_json("/byaiService/open/api/v1/conversation/appendTxt", payload)
-        stored_path = self._extract_string(data, "filePath")
+        stored_path = self._extract_string(data, "objectKey") or self._extract_string(
+            data, "filePath"
+        )
         return stored_path or file_path
 
     def read_text(self, file_path: str, begin_line: int = 0, end_line: int = -1) -> str | None:
         payload = {
             **self._build_context_payload(),
             "filePath": str(self._normalize_logical_file_path(file_path)),
-            "fileType": "txt",
+            # "fileType": "txt",
             "begin_line": begin_line,
             "end_line": end_line,
         }

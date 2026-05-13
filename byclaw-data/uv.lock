@@ -279,7 +279,7 @@ wheels = [
 
 [[package]]
 name = "by-datacloud"
-version = "0.1.17"
+version = "0.1.35"
 source = { registry = "https://pypi.org/simple/" }
 dependencies = [
     { name = "aiochclient", extra = ["aiohttp"] },
@@ -315,14 +315,14 @@ dependencies = [
     { name = "uvicorn" },
     { name = "watchfiles" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/32/43/e39b516089a0354e6fdab2d86560b2e47fda408d36fe77165f0d3f76fb50/by_datacloud-0.1.17.tar.gz", hash = "sha256:e391af68ef5f5676d6ec09cc01706fb20a59e1141034b4f0dc0dd4c5707d1067", size = 20529781, upload-time = "2026-04-29T17:44:41.606Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f2/22/19b82eee7f6042d2fd22f54cd20f5f40ec4bd6141f9f7c2e58b97833a27a/by_datacloud-0.1.35.tar.gz", hash = "sha256:d25644556fe8d2a0867aaa3364c1c31a6946e57f70d56d4910586531e0633e7f", size = 988398, upload-time = "2026-05-13T04:46:01.383Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/80/95/acf9309a5a452b1b30f61aa8abd3c24605719e2292cf1e127650da354a94/by_datacloud-0.1.17-py3-none-any.whl", hash = "sha256:f36795e1a0a746b6dc61cfc47232388a718a6ef2b3cd2214c32456fbace89440", size = 3107474, upload-time = "2026-04-29T17:44:30.507Z" },
+    { url = "https://files.pythonhosted.org/packages/71/3c/203aaefcfde5df841995bc1b1b4513f41013b5358556f85f7f2d76cf353a/by_datacloud-0.1.35-py3-none-any.whl", hash = "sha256:b6a5312413eb492d51c87ce0b586a54fcca2dc1b54ce61d4ac411f19f3817cd6", size = 728841, upload-time = "2026-05-13T04:45:59.356Z" },
 ]
 
 [[package]]
 name = "by-framework"
-version = "0.1.13"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple/" }
 dependencies = [
     { name = "dill" },
@@ -330,21 +330,21 @@ dependencies = [
     { name = "redis" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/df/6c/30391ea97832756b1409d340a3e53b004c2ea5f6a5cadf4d3c6a4a0d9fba/by_framework-0.1.13.tar.gz", hash = "sha256:9ae061021188d7db26c9ba1be803ae79ff54c4d5db618a230077d8d4fd3d1dcc", size = 853897, upload-time = "2026-04-27T13:08:14.698Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6c/c0/f7b668dfd3f04a93f729386688be1b8f98011395f2db559d0cc0055e138b/by_framework-0.2.0.tar.gz", hash = "sha256:b0369fca424f67c49b6194921f634bc44e61344a6ea0db0f5d2906a29075f749", size = 262666, upload-time = "2026-05-13T03:44:58.183Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/23/5c/4e0fe1c4843102c1bd76a2fd6147216005a88ffaeb829229ccf94ef54a6b/by_framework-0.1.13-py3-none-any.whl", hash = "sha256:a02065813dda6d658dcf29f86b4d5e351f085b15ad2d8c701d43febb64ecd8a1", size = 127277, upload-time = "2026-04-27T13:08:13.007Z" },
+    { url = "https://files.pythonhosted.org/packages/82/16/d7e622501f00c399c6078e5b4d8839ddc517cabede25c9a1bd7a724f77b8/by_framework-0.2.0-py3-none-any.whl", hash = "sha256:90f803892f002811ebaa54c54a9ccbc5870848c75de41745b1766023ca5a41a4", size = 126875, upload-time = "2026-05-13T03:44:56.595Z" },
 ]
 
 [[package]]
 name = "by-framework-history-byclaw"
-version = "0.1.0"
+version = "0.0.1"
 source = { registry = "https://pypi.org/simple/" }
 dependencies = [
     { name = "by-framework" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1d/f2/7d3ffcbb0462938465a14687e519c5cbaba1fa3ea8aa6032c08ce36efb34/by_framework_history_byclaw-0.1.0.tar.gz", hash = "sha256:e1525db1f890a00c35fc43cecdc5cc7c016ff0827d3a70843099a0d0c9105a39", size = 2912, upload-time = "2026-04-10T06:40:52.793Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0b/36/fb98e14a304fe849c22277bf6cf6771175aa71a9ab0d543bc58706338a50/by_framework_history_byclaw-0.0.1.tar.gz", hash = "sha256:a3aaccb98937a3ab5b965fb514a0d93d9ee167a0e88e0e6b924c152fcd25de7e", size = 4715, upload-time = "2026-05-13T04:25:03.61Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a9/33/b987d2a706ae5887c7d16086b631ab10908e7add388df4ccbfc3e07783ab/by_framework_history_byclaw-0.1.0-py3-none-any.whl", hash = "sha256:b59dfd23f51987129d9369872e9fb4d4c671bccc4bd249035d7cb3faa1f8f699", size = 2846, upload-time = "2026-04-10T06:40:51.419Z" },
+    { url = "https://files.pythonhosted.org/packages/23/f5/db7a1201b26da193f2765f1c1a278e79c2cf25a67e1d599a9216b1f9e8b2/by_framework_history_byclaw-0.0.1-py3-none-any.whl", hash = "sha256:fdc10456ba6bb2c9588da193a9fd2498511dcb94a1a023608e442e51bac413ed", size = 3941, upload-time = "2026-05-13T04:25:02.514Z" },
 ]
 
 [[package]]
@@ -369,9 +369,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "by-datacloud", specifier = ">=0.1.17" },
-    { name = "by-framework", specifier = ">=0.1.13", index = "https://pypi.org/simple/" },
-    { name = "by-framework-history-byclaw", specifier = ">=0.1.0" },
+    { name = "by-datacloud", specifier = ">=0.1.35" },
+    { name = "by-framework", specifier = ">=0.2.0", index = "https://pypi.org/simple/" },
+    { name = "by-framework-history-byclaw", specifier = ">=0.0.1" },
     { name = "langchain-openai", specifier = ">=1.1.11" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
 ]
