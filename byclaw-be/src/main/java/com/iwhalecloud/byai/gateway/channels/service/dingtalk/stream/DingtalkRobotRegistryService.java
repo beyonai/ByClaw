@@ -3,6 +3,10 @@ package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream;
 import com.dingtalk.open.app.api.OpenDingTalkClient;
 import com.dingtalk.open.app.api.OpenDingTalkStreamClientBuilder;
 import com.dingtalk.open.app.api.security.AuthClientCredential;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.config.DingtalkStreamProperties;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.listener.DingtalkBotListener;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.listener.DingtalkStreamBotLifecycle;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.DingtalkRobotChannelConfig;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto;
 import jakarta.annotation.PreDestroy;
@@ -32,7 +36,8 @@ public class DingtalkRobotRegistryService {
     private final DingtalkStreamProperties properties;
     private final DingtalkBotListener dingtalkBotListener;
     private final SsResExtDigEmployeeService ssResExtDigEmployeeService;
-    private final DingtalkOpenApiService dingtalkOpenApiService;
+    private final DingtalkRobotConfigService dingtalkRobotConfigService;
+    private final DingtalkTokenService dingtalkTokenService;
     private final AtomicBoolean started = new AtomicBoolean(false);
     private final ExecutorService streamExecutor = Executors.newCachedThreadPool(new StreamThreadFactory());
     private final Object refreshLock = new Object();
@@ -44,11 +49,13 @@ public class DingtalkRobotRegistryService {
             DingtalkStreamProperties properties,
             DingtalkBotListener dingtalkBotListener,
             SsResExtDigEmployeeService ssResExtDigEmployeeService,
-            DingtalkOpenApiService dingtalkOpenApiService) {
+            DingtalkRobotConfigService dingtalkRobotConfigService,
+            DingtalkTokenService dingtalkTokenService) {
         this.properties = properties;
         this.dingtalkBotListener = dingtalkBotListener;
         this.ssResExtDigEmployeeService = ssResExtDigEmployeeService;
-        this.dingtalkOpenApiService = dingtalkOpenApiService;
+        this.dingtalkRobotConfigService = dingtalkRobotConfigService;
+        this.dingtalkTokenService = dingtalkTokenService;
     }
 
     public void initializeRobotClients() {
@@ -78,12 +85,12 @@ public class DingtalkRobotRegistryService {
                 logger.warn("Skip register DingTalk robot clients because resource not found. resourceId={}", resourceId);
                 return;
             }
-            List<DingtalkRobotChannelConfig> robotConfigs = dingtalkOpenApiService.buildRobotConfigs(digitalEmployee);
+            List<DingtalkRobotChannelConfig> robotConfigs = dingtalkRobotConfigService.buildRobotConfigs(digitalEmployee);
             if (robotConfigs.isEmpty()) {
                 logger.info("No DingTalk robot configs found for resource. resourceId={}", resourceId);
                 return;
             }
-            dingtalkOpenApiService.replaceRobotConfigsForResource(resourceId, robotConfigs);
+            dingtalkRobotConfigService.replaceRobotConfigsForResource(resourceId, robotConfigs);
             for (DingtalkRobotChannelConfig robotConfig : robotConfigs) {
                 if (activeRobotConfigs.containsKey(robotConfig.getRobotCode())) {
                     logger.info("Skip register existing DingTalk stream bot. robotCode={}, resourceId={}",
@@ -104,12 +111,12 @@ public class DingtalkRobotRegistryService {
             ResourceExtDigEmployeeDto digitalEmployee = ssResExtDigEmployeeService.findExtDigEmployeeById(resourceId);
             List<DingtalkRobotChannelConfig> desiredRobotConfigs = digitalEmployee == null
                     ? Collections.emptyList()
-                    : dingtalkOpenApiService.buildRobotConfigs(digitalEmployee);
+                    : dingtalkRobotConfigService.buildRobotConfigs(digitalEmployee);
             Map<String, DingtalkRobotChannelConfig> desiredRobotConfigMap = new HashMap<>();
             for (DingtalkRobotChannelConfig desiredRobotConfig : desiredRobotConfigs) {
                 desiredRobotConfigMap.put(desiredRobotConfig.getRobotCode(), desiredRobotConfig);
             }
-            List<DingtalkRobotChannelConfig> currentRobotConfigs = new ArrayList<>(dingtalkOpenApiService.getRobotConfigsByResourceId(resourceId));
+            List<DingtalkRobotChannelConfig> currentRobotConfigs = new ArrayList<>(dingtalkRobotConfigService.getRobotConfigsByResourceId(resourceId));
 
             for (DingtalkRobotChannelConfig currentConfig : currentRobotConfigs) {
                 DingtalkRobotChannelConfig desiredConfig = desiredRobotConfigMap.get(currentConfig.getRobotCode());
@@ -128,7 +135,7 @@ public class DingtalkRobotRegistryService {
                 }
             }
 
-            dingtalkOpenApiService.replaceRobotConfigsForResource(resourceId, desiredRobotConfigs);
+            dingtalkRobotConfigService.replaceRobotConfigsForResource(resourceId, desiredRobotConfigs);
             for (DingtalkRobotChannelConfig desiredConfig : desiredRobotConfigs) {
                 if (!activeRobotConfigs.containsKey(desiredConfig.getRobotCode())) {
                     startRobotClient(desiredConfig);
@@ -146,14 +153,14 @@ public class DingtalkRobotRegistryService {
             if (resourceId == null) {
                 return;
             }
-            List<DingtalkRobotChannelConfig> currentRobotConfigs = new ArrayList<>(dingtalkOpenApiService.getRobotConfigsByResourceId(resourceId));
+            List<DingtalkRobotChannelConfig> currentRobotConfigs = new ArrayList<>(dingtalkRobotConfigService.getRobotConfigsByResourceId(resourceId));
             for (DingtalkRobotChannelConfig currentRobotConfig : currentRobotConfigs) {
                 stopRobotClient(currentRobotConfig.getRobotCode());
                 activeRobotConfigs.remove(currentRobotConfig.getRobotCode());
                 logger.info("Unregister DingTalk stream bot by resource. robotCode={}, resourceId={}",
                         currentRobotConfig.getRobotCode(), currentRobotConfig.getResourceId());
             }
-            dingtalkOpenApiService.removeRobotConfigsByResourceId(resourceId);
+            dingtalkRobotConfigService.removeRobotConfigsByResourceId(resourceId);
             started.set(!openDingTalkClients.isEmpty());
         }
     }
@@ -224,7 +231,7 @@ public class DingtalkRobotRegistryService {
 
     private void stopRobotClient(String robotCode) {
         OpenDingTalkClient client = openDingTalkClients.remove(robotCode);
-        dingtalkOpenApiService.evictAccessTokensByRobotCode(robotCode);
+        dingtalkTokenService.evictAccessTokensByRobotCode(robotCode);
         if (client == null) {
             return;
         }
