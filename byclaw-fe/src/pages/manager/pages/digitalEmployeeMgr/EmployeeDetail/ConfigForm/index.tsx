@@ -443,6 +443,7 @@ const ConfigForm = (props) => {
   const [inputTag, setInputTag] = useState('');
   const [selectedTags, setSelectedTags] = useState([]);
   const [uploadImgs, setUploadImgs] = useState([]);
+  const [avatarUploadLoading, setAvatarUploadLoading] = useState(false);
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
   const [exampleOpen, setExampleOpen] = useState(false);
   const [memoryModalOpen, setMemoryModalOpen] = useState(false);
@@ -1090,7 +1091,7 @@ const ConfigForm = (props) => {
     },
   ];
 
-  const onAvatarClick = (url) => () => {
+  const onAvatarClick = (url, onLoadCallback?) => () => {
     // 如果url是对象，表示还在上传中，不进行处理
     if (typeof url !== 'string') {
       return;
@@ -1100,6 +1101,18 @@ const ConfigForm = (props) => {
       avatar: url,
     };
     setAvatar(url);
+
+    // 如果有回调函数，等待图片加载完成后执行
+    if (onLoadCallback) {
+      const img = new Image();
+      img.onload = () => {
+        onLoadCallback();
+      };
+      img.onerror = () => {
+        onLoadCallback();
+      };
+      img.src = getAvatarUrl(url);
+    }
   };
 
   const avatarMenuRender = (menu) => (
@@ -1123,6 +1136,11 @@ const ConfigForm = (props) => {
               height={40}
               defaultSrc={getAvatarUrl()}
             />
+            {it.localUrl && avatarUploadLoading && (
+              <div className={pStyles.avatarLoading}>
+                <Spin size="small" />
+              </div>
+            )}
           </figure>
         ))}
       </div>
@@ -1143,25 +1161,39 @@ const ConfigForm = (props) => {
       // 先显示本地图片
       setUploadImgs((v) => [...v, { localUrl }]);
 
-      const res = await compressImgFileAndUpload({ file: img });
-      if (res?.datasetLogosUrl) {
-        const { datasetLogosUrl } = res;
+      // 开始上传，设置loading状态
+      setAvatarUploadLoading(true);
 
-        setUploadImgs((v) => {
-          const idx = v.findIndex((x) => typeof x !== 'string' && x.localUrl === localUrl);
+      try {
+        const res = await compressImgFileAndUpload({ file: img });
+        if (res && res.datasetLogosUrl) {
+          const { datasetLogosUrl } = res;
 
-          if (idx !== -1) {
-            window.URL.revokeObjectURL(v[idx].localUrl);
-            v[idx] = datasetLogosUrl;
-          }
-          return [...v];
-        });
+          setUploadImgs((v) => {
+            const idx = v.findIndex((x) => typeof x !== 'string' && x.localUrl === localUrl);
 
-        onAvatarClick(datasetLogosUrl)();
+            if (idx !== -1) {
+              window.URL.revokeObjectURL(v[idx].localUrl);
+              v[idx] = datasetLogosUrl;
+            }
+            return [...v];
+          });
 
-        return;
+          // 等待新头像图片加载完成后再关闭loading
+          onAvatarClick(datasetLogosUrl, () => {
+            setAvatarUploadLoading(false);
+          })();
+
+          return;
+        }
+        message.error(res?.msg || intl.formatMessage({ id: 'employeeDetail.uploadFail' }));
+        // 上传失败也需要关闭loading
+        setAvatarUploadLoading(false);
+      } catch (error) {
+        message.error(intl.formatMessage({ id: 'employeeDetail.uploadFail' }));
+        // 发生异常也需要关闭loading
+        setAvatarUploadLoading(false);
       }
-      message.error(res?.msg || intl.formatMessage({ id: 'employeeDetail.uploadFail' }));
     }
   };
 
@@ -1238,8 +1270,15 @@ const ConfigForm = (props) => {
                 menu={{ items: avatarMenu, onClick: handleAvatarMenuClick }}
               >
                 <div>
-                  <figure className={pStyles.currentAvatar}>
+                  <figure
+                    className={classnames(pStyles.currentAvatar, { [pStyles.avatarLoadingWrap]: avatarUploadLoading })}
+                  >
                     <Image src={getAvatarUrl(avatar)} width="100%" />
+                    {avatarUploadLoading && (
+                      <div className={pStyles.avatarLoadingOverlay}>
+                        <Spin size="small" />
+                      </div>
+                    )}
                   </figure>
                 </div>
               </Dropdown>
