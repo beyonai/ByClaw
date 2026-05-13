@@ -201,6 +201,8 @@ def test_tc14_same_resources_same_key() -> None:
 
 def _make_worker_bare() -> Any:
     """不调用 GatewayWorker.__init__ 的裸 DataCloudWorker 实例。"""
+    import asyncio  # noqa: PLC0415
+
     from byclaw_data.worker import DataCloudWorker  # noqa: PLC0415
 
     w = DataCloudWorker.__new__(DataCloudWorker)
@@ -213,6 +215,8 @@ def _make_worker_bare() -> Any:
     w._shared_loader = None
     w._resource_path = "/fake/resource"
     w._ontology_agent = None
+    w._model_config_sig = ""
+    w._ontology_agent_lock = asyncio.Lock()
     w.command_plugin_manager = MagicMock()
     w.worker_id = "test_worker"
 
@@ -349,8 +353,8 @@ def _patch_process_command_external_deps(worker: Any) -> list[Any]:
     import unittest.mock as mock_module  # noqa: PLC0415
 
     patches = [
-        mock_module.patch("byclaw_data.model_environment.build_llm_config"),
-        mock_module.patch("byclaw_data.model_environment.build_embedding_config"),
+        mock_module.patch("byclaw_data.model_environment.build_llm_config", return_value={}),
+        mock_module.patch("byclaw_data.model_environment.build_embedding_config", return_value={}),
         mock_module.patch(
             "by_framework.worker.sandbox.hook_sandbox.active_workspace"
         ),

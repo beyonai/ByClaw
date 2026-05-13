@@ -159,7 +159,7 @@ class RecommendedQuestionsPlugin(Plugin):
                 plugin_id="datacloud_recommended_questions",
                 version="1.0.0",
                 priority=5,
-                enabled=True,
+                enabled=False,  # temporarily disabled: rules are hardcoded
             )
         )
 
