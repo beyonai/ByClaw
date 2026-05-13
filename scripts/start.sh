@@ -95,12 +95,14 @@ fi
 
 mkdir -p "$ROOT/logs"
 LOG_DIR="$ROOT/logs"
+PID_FILE="$ROOT/logs/.pids"
 
 PIDS=()
 NAMES=()
 
 cleanup() {
   set +e
+  rm -f "$PID_FILE"
   [[ ${#PIDS[@]} -eq 0 ]] && return
   for pid in "${PIDS[@]}"; do
     [[ -n "$pid" ]] && kill -TERM "$pid" 2>/dev/null || true
@@ -134,6 +136,12 @@ if [[ $START_QA -eq 1 ]]; then
   launch "qa-worker" "$SCRIPTS/start-qa.sh" worker
 fi
 [[ $START_DATA -eq 1 ]] && launch "data" "$SCRIPTS/start-data.sh"
+
+# Write PID file for stop.sh
+: > "$PID_FILE"
+for i in "${!PIDS[@]}"; do
+  echo "${NAMES[$i]}=${PIDS[$i]}" >> "$PID_FILE"
+done
 
 echo
 echo "[ready] Started modules. Press Ctrl+C to stop."

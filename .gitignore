@@ -8,6 +8,7 @@ Thumbs.db
 *.swo
 
 # Logs & temp
+logs
 *.log
 tmp/
 .cache/
