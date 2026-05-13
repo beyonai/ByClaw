@@ -10,7 +10,13 @@ import AntdIcon from '@/pages/manager/components/AntdIcon';
 import UserDropdown from '@/pages/manager/layout/sider/components/userDropdown';
 
 import { isAdminVip } from '@/pages/manager/utils/auth';
-import { menuConfig, filterMenusByAdminVip } from './menuConfig';
+import {
+  fallbackMenuConfig,
+  filterMenusByAdminVip,
+  filterMenusByMenuDisplay,
+  getManagerMenuConfig,
+  normalizeMenuUrl,
+} from './menuConfig';
 import { buildSiderMenuItems, flattenSiderMenuItems, getInitialOpenKeys } from './menuHelpers';
 
 import styles from './index.module.less';
@@ -58,25 +64,50 @@ const Sider: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [openKeys, setOpenKeys] = useState<string[]>([]);
+  const [menuConfig, setMenuConfig] = useState<any[]>(fallbackMenuConfig);
+
+  useEffect(() => {
+    let mounted = true;
+
+    getManagerMenuConfig()
+      .then((menus) => {
+        if (mounted && menus.length > 0) {
+          setMenuConfig(menus.filter((item) => item.routePath));
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setMenuConfig(fallbackMenuConfig);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Filter menu items by blockedPaths
   const filteredMenus = useMemo(() => {
     // 根据userInfo判断isAdminVip过滤menuConfig中的adminVipOnly
-    const filterMenus = filterMenusByAdminVip(menuConfig, isAdminVip(userInfo));
+    const filterMenus = filterMenusByMenuDisplay(filterMenusByAdminVip(menuConfig, isAdminVip(userInfo)), userInfo);
 
     // blockedPaths 为 null 表示接口还未返回，先展示全部菜单；为空数组表示无需屏蔽
     return filterRoutesByBlockedPaths(filterMenus, blockedPaths || []);
-  }, [blockedPaths, userInfo]);
+  }, [blockedPaths, menuConfig, userInfo]);
 
   // Build antd Menu items from filtered config
   const menuItems = useMemo(() => {
     return buildSiderMenuItems(
       filteredMenus,
       (item) =>
-        intl.formatMessage({
-          id: item.localeId,
-          defaultMessage: item.name,
-        }),
+        item.localeId
+          ? intl.formatMessage({
+            id: item.localeId,
+            defaultMessage: isEnglish ? item.nameEn || item.name : item.name,
+          })
+          : isEnglish
+            ? item.nameEn || item.name
+            : item.name,
       (icon) => {
         const IconComponent = icon;
         return IconComponent ? <IconComponent style={{ fontSize: 16 }} /> : null;
@@ -122,7 +153,13 @@ const Sider: React.FC = () => {
   }, [filteredMenus, flatMenuItems]);
 
   const handleMenuClick = ({ key }: { key: string }) => {
-    navigate(key);
+    const menu = flatMenuItems.find((item) => item.path === key);
+    if (menu?.menuUrl) {
+      window.open(normalizeMenuUrl(menu.menuUrl), '_blank');
+      return;
+    }
+
+    navigate(menu?.routePath || key);
   };
 
   return (

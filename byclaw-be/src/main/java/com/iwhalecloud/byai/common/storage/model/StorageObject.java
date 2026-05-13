@@ -17,4 +17,6 @@ public class StorageObject {
     private Long size;
 
     private String contentType;
+
+    private boolean isDir = false;
 }

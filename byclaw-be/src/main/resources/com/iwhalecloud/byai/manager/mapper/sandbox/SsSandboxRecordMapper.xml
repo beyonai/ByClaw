@@ -8,33 +8,56 @@
         <result column="user_code" jdbcType="VARCHAR" property="userCode" />
         <result column="sandbox_type" jdbcType="VARCHAR" property="sandboxType" />
         <result column="endpoint" jdbcType="VARCHAR" property="endpoint" />
+        <result column="sandbox_id" jdbcType="VARCHAR" property="sandboxId" />
         <result column="chat_id" jdbcType="VARCHAR" property="chatId" />
         <result column="status" jdbcType="VARCHAR" property="status" />
         <result column="auto_release" jdbcType="INTEGER" property="autoRelease" />
+        <result column="lease_policy" jdbcType="VARCHAR" property="leasePolicy" />
+        <result column="timeout_seconds" jdbcType="INTEGER" property="timeoutSeconds" />
+        <result column="remote_expires_at" jdbcType="TIMESTAMP" property="remoteExpiresAt" />
+        <result column="last_renew_at" jdbcType="TIMESTAMP" property="lastRenewAt" />
+        <result column="next_renew_at" jdbcType="TIMESTAMP" property="nextRenewAt" />
         <result column="last_access_time" jdbcType="TIMESTAMP" property="lastAccessTime" />
+        <result column="release_time" jdbcType="TIMESTAMP" property="releaseTime" />
+        <result column="release_reason" jdbcType="VARCHAR" property="releaseReason" />
+        <result column="version" jdbcType="INTEGER" property="version" />
         <result column="create_time" jdbcType="TIMESTAMP" property="createTime" />
         <result column="update_time" jdbcType="TIMESTAMP" property="updateTime" />
     </resultMap>
 
     <sql id="Base_Column_List">
-        id, resource_id, user_code, sandbox_type, endpoint, chat_id,
-        status, auto_release, last_access_time, create_time, update_time
+        id, resource_id, user_code, sandbox_type, endpoint, sandbox_id, chat_id,
+        status, auto_release, lease_policy, timeout_seconds, remote_expires_at,
+        last_renew_at, next_renew_at, last_access_time, release_time, release_reason,
+        version, create_time, update_time
     </sql>
 
     <!-- 新增沙箱记录 -->
-    <insert id="insert" parameterType="com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord">
+    <insert id="insert" parameterType="com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord"
+            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
         INSERT INTO ss_sandbox_record (
-            resource_id, user_code, sandbox_type, endpoint, chat_id,
-            status, auto_release, last_access_time, create_time, update_time
+            resource_id, user_code, sandbox_type, endpoint, sandbox_id, chat_id,
+            status, auto_release, lease_policy, timeout_seconds, remote_expires_at,
+            last_renew_at, next_renew_at, last_access_time, release_time, release_reason,
+            version, create_time, update_time
         ) VALUES (
             #{resourceId,jdbcType=BIGINT},
             #{userCode,jdbcType=VARCHAR},
             #{sandboxType,jdbcType=VARCHAR},
             #{endpoint,jdbcType=VARCHAR},
+            #{sandboxId,jdbcType=VARCHAR},
             #{chatId,jdbcType=VARCHAR},
             #{status,jdbcType=VARCHAR},
             #{autoRelease,jdbcType=INTEGER},
+            #{leasePolicy,jdbcType=VARCHAR},
+            #{timeoutSeconds,jdbcType=INTEGER},
+            #{remoteExpiresAt,jdbcType=TIMESTAMP},
+            #{lastRenewAt,jdbcType=TIMESTAMP},
+            #{nextRenewAt,jdbcType=TIMESTAMP},
             #{lastAccessTime,jdbcType=TIMESTAMP},
+            #{releaseTime,jdbcType=TIMESTAMP},
+            #{releaseReason,jdbcType=VARCHAR},
+            COALESCE(#{version,jdbcType=INTEGER}, 0),
             #{createTime,jdbcType=TIMESTAMP},
             #{updateTime,jdbcType=TIMESTAMP}
         )
@@ -52,6 +75,22 @@
           AND resource_id = #{resourceId,jdbcType=BIGINT}
         </if>
         AND status = 'RUNNING'
+        ORDER BY create_time DESC
+        LIMIT 1
+    </select>
+
+    <!-- 根据用户编码和资源ID查询未终结的沙箱记录 -->
+    <select id="selectActiveByUserAndResource" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE user_code = #{userCode,jdbcType=VARCHAR}
+        <if test="sandboxType != null and sandboxType != ''">
+          AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
+        </if>
+        <if test="resourceId != null">
+          AND resource_id = #{resourceId,jdbcType=BIGINT}
+        </if>
+        AND status IN ('STARTING', 'RUNNING', 'RELEASING')
         ORDER BY create_time DESC
         LIMIT 1
     </select>
@@ -74,13 +113,59 @@
         ORDER BY create_time DESC
     </select>
 
+    <select id="selectRunningByUser" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE user_code = #{userCode,jdbcType=VARCHAR}
+          AND status = 'RUNNING'
+        ORDER BY create_time DESC
+    </select>
+
     <!-- 更新沙箱状态为已释放 -->
     <update id="updateStatusToReleased">
         UPDATE ss_sandbox_record
         SET status = 'RELEASED',
+            release_time = CURRENT_TIMESTAMP,
             update_time = CURRENT_TIMESTAMP
         WHERE id = #{id,jdbcType=BIGINT}
-          AND status = 'RUNNING'
+          AND status IN ('RUNNING', 'RELEASING')
+    </update>
+
+    <update id="markReleased">
+        UPDATE ss_sandbox_record
+        SET status = 'RELEASED',
+            release_reason = #{reason,jdbcType=VARCHAR},
+            release_time = #{releaseTime,jdbcType=TIMESTAMP},
+            update_time = #{releaseTime,jdbcType=TIMESTAMP},
+            version = version + 1
+        WHERE id = #{id,jdbcType=BIGINT}
+          AND status != 'RELEASED'
+    </update>
+
+    <update id="updateLaunchSuccess">
+        UPDATE ss_sandbox_record
+        SET status = 'RUNNING',
+            sandbox_id = #{sandboxId,jdbcType=VARCHAR},
+            endpoint = #{endpoint,jdbcType=VARCHAR},
+            timeout_seconds = #{timeoutSeconds,jdbcType=INTEGER},
+            remote_expires_at = #{remoteExpiresAt,jdbcType=TIMESTAMP},
+            last_renew_at = #{lastRenewAt,jdbcType=TIMESTAMP},
+            next_renew_at = #{nextRenewAt,jdbcType=TIMESTAMP},
+            last_access_time = #{lastAccessTime,jdbcType=TIMESTAMP},
+            update_time = #{lastAccessTime,jdbcType=TIMESTAMP},
+            version = version + 1
+        WHERE id = #{id,jdbcType=BIGINT}
+          AND status = 'STARTING'
+    </update>
+
+    <update id="updateStatusToFailed">
+        UPDATE ss_sandbox_record
+        SET status = 'FAILED',
+            release_reason = #{reason,jdbcType=VARCHAR},
+            update_time = #{updateTime,jdbcType=TIMESTAMP},
+            version = version + 1
+        WHERE id = #{id,jdbcType=BIGINT}
+          AND status IN ('STARTING', 'RUNNING', 'RELEASING')
     </update>
 
     <!-- 更新最近一次访问时间（使用应用传入的系统时间，避免数据库时间与应用时间不一致） -->
@@ -97,12 +182,58 @@
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
         WHERE status = 'RUNNING'
-          AND auto_release = 1
+          AND lease_policy = 'LOCAL_IDLE_RELEASE'
           AND last_access_time IS NOT NULL
           <![CDATA[
           AND last_access_time < (CURRENT_TIMESTAMP - #{timeoutMinutes} * INTERVAL '1' MINUTE)
           ]]>
     </select>
+
+    <select id="selectDueRenewSandboxes" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE status = 'RUNNING'
+          AND lease_policy = 'REMOTE_AUTO_EXPIRE'
+          AND sandbox_id IS NOT NULL
+          AND sandbox_id != ''
+          AND timeout_seconds IS NOT NULL
+          AND timeout_seconds > 0
+          AND next_renew_at IS NOT NULL
+          AND next_renew_at &lt;= #{now,jdbcType=TIMESTAMP}
+        ORDER BY next_renew_at ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectReconcileSandboxes" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE status != 'RELEASED'
+          AND sandbox_id IS NOT NULL
+          AND sandbox_id != ''
+        ORDER BY update_time ASC
+        LIMIT #{limit}
+    </select>
+
+    <update id="updateRenewSuccess">
+        UPDATE ss_sandbox_record
+        SET remote_expires_at = #{remoteExpiresAt,jdbcType=TIMESTAMP},
+            last_renew_at = #{lastRenewAt,jdbcType=TIMESTAMP},
+            next_renew_at = #{nextRenewAt,jdbcType=TIMESTAMP},
+            update_time = #{lastRenewAt,jdbcType=TIMESTAMP},
+            version = version + 1
+        WHERE id = #{id,jdbcType=BIGINT}
+          AND status = 'RUNNING'
+    </update>
+
+    <update id="markReleasing">
+        UPDATE ss_sandbox_record
+        SET status = 'RELEASING',
+            release_reason = #{reason,jdbcType=VARCHAR},
+            update_time = #{updateTime,jdbcType=TIMESTAMP},
+            version = version + 1
+        WHERE id = #{id,jdbcType=BIGINT}
+          AND status = 'RUNNING'
+    </update>
 
     <!-- 统计当前运行中的沙箱数量 -->
     <select id="countRunningSandboxes" resultType="int">
@@ -162,6 +293,10 @@
     <update id="updateAutoRelease">
         UPDATE ss_sandbox_record
         SET auto_release = #{autoRelease,jdbcType=INTEGER},
+            lease_policy = CASE
+                WHEN #{autoRelease,jdbcType=INTEGER} = 1 THEN 'REMOTE_AUTO_EXPIRE'
+                ELSE 'LOCAL_IDLE_RELEASE'
+            END,
             update_time = CURRENT_TIMESTAMP
         WHERE id = #{id,jdbcType=BIGINT}
     </update>

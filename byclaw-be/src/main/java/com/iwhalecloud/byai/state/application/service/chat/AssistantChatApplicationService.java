@@ -6,8 +6,8 @@ import com.iwhalecloud.byai.common.constants.chat.ConversationObjectType;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
-import com.iwhalecloud.byai.common.log.exception.BaseRuntimeException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.storage.impl.MinioStorageService;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.util.DateUtils;
 import com.iwhalecloud.byai.common.util.StringUtil;
@@ -73,6 +73,8 @@ public class AssistantChatApplicationService {
 
     @Autowired
     private SsResExtDigEmployeeService ssResExtDigEmployeeService;
+
+
 
     AssistantChatApplicationService(GatewayClient<?> gatewayClient) {
         this.gatewayClient = gatewayClient;
@@ -237,4 +239,6 @@ public class AssistantChatApplicationService {
         }
         return null;
     }
+
+
 }

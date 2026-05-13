@@ -8,7 +8,6 @@ import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.manager.dto.resource.UploadResult;
 import com.iwhalecloud.byai.state.application.service.callback.CallbackApplicationService;
 import com.iwhalecloud.byai.state.application.service.chat.AssistantChatApplicationService;
-import com.iwhalecloud.byai.state.aspect.ManageLogAspect;
 import com.iwhalecloud.byai.state.domain.callback.dto.CallbackRequest;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
 import jakarta.servlet.http.HttpServletRequest;

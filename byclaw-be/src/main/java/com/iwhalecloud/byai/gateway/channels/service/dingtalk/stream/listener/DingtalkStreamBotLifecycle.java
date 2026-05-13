@@ -1,5 +1,7 @@
-package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream;
+package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.listener;
 
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotRegistryService;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.config.DingtalkStreamProperties;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

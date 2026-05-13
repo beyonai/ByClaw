@@ -31,6 +31,10 @@ public interface SsSandboxRecordMapper {
                                                    @Param("sandboxType") String sandboxType,
                                                    @Param("resourceId") Long resourceId);
 
+    SsSandboxRecord selectActiveByUserAndResource(@Param("userCode") String userCode,
+                                                  @Param("sandboxType") String sandboxType,
+                                                  @Param("resourceId") Long resourceId);
+
     /**
      * 根据用户编码和资源ID列表批量查询运行中的沙箱记录
      *
@@ -42,6 +46,8 @@ public interface SsSandboxRecordMapper {
                                                           @Param("sandboxType") String sandboxType,
                                                           @Param("resourceIds") List<Long> resourceIds);
 
+    List<SsSandboxRecord> selectRunningByUser(@Param("userCode") String userCode);
+
     /**
      * 更新沙箱状态为已释放
      *
@@ -49,6 +55,23 @@ public interface SsSandboxRecordMapper {
      * @return 影响行数
      */
     int updateStatusToReleased(@Param("id") Long id);
+
+    int markReleased(@Param("id") Long id,
+                     @Param("reason") String reason,
+                     @Param("releaseTime") Date releaseTime);
+
+    int updateLaunchSuccess(@Param("id") Long id,
+                            @Param("sandboxId") String sandboxId,
+                            @Param("endpoint") String endpoint,
+                            @Param("timeoutSeconds") Integer timeoutSeconds,
+                            @Param("remoteExpiresAt") Date remoteExpiresAt,
+                            @Param("lastRenewAt") Date lastRenewAt,
+                            @Param("nextRenewAt") Date nextRenewAt,
+                            @Param("lastAccessTime") Date lastAccessTime);
+
+    int updateStatusToFailed(@Param("id") Long id,
+                             @Param("reason") String reason,
+                             @Param("updateTime") Date updateTime);
 
     /**
      * 更新最近一次访问时间
@@ -66,6 +89,19 @@ public interface SsSandboxRecordMapper {
      * @return 超时的沙箱记录列表
      */
     List<SsSandboxRecord> selectExpiredSandboxes(@Param("timeoutMinutes") int timeoutMinutes);
+
+    List<SsSandboxRecord> selectDueRenewSandboxes(@Param("now") Date now, @Param("limit") int limit);
+
+    List<SsSandboxRecord> selectReconcileSandboxes(@Param("limit") int limit);
+
+    int updateRenewSuccess(@Param("id") Long id,
+                           @Param("remoteExpiresAt") Date remoteExpiresAt,
+                           @Param("lastRenewAt") Date lastRenewAt,
+                           @Param("nextRenewAt") Date nextRenewAt);
+
+    int markReleasing(@Param("id") Long id,
+                      @Param("reason") String reason,
+                      @Param("updateTime") Date updateTime);
 
     /**
      * 统计当前运行中的沙箱数量

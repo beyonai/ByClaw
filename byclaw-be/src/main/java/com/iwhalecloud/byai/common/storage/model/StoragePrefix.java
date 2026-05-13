@@ -20,19 +20,27 @@ public class StoragePrefix {
 
     private final String shareType;
 
-    private StoragePrefix(String namespace, String bucketOrRoot, String prefix, String shareType) {
+    private boolean recursive = true;
+
+    private StoragePrefix(String namespace, String bucketOrRoot, String prefix, String shareType, boolean recursive) {
         this.namespace = StringUtils.trimToEmpty(namespace);
         this.bucketOrRoot = StringUtils.trimToEmpty(bucketOrRoot);
         this.prefix = normalizePrefix(prefix);
         this.shareType = StringUtils.trimToEmpty(shareType);
+        this.recursive = recursive;
     }
 
     public static StoragePrefix of(String namespace, String bucketOrRoot, String prefix) {
-        return new StoragePrefix(namespace, bucketOrRoot, prefix, null);
+        return new StoragePrefix(namespace, bucketOrRoot, prefix, null, true);
     }
 
     public static StoragePrefix of(String namespace, String bucketOrRoot, String prefix, String shareType) {
-        return new StoragePrefix(namespace, bucketOrRoot, prefix, shareType);
+        return new StoragePrefix(namespace, bucketOrRoot, prefix, shareType, true);
+    }
+
+    public static StoragePrefix of(String namespace, String bucketOrRoot, String prefix, String shareType,
+        boolean recursive) {
+        return new StoragePrefix(namespace, bucketOrRoot, prefix, shareType, recursive);
     }
 
     private static String normalizePrefix(String prefix) {

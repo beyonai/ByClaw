@@ -106,11 +106,23 @@ public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
 
     @Override
     public void heartbeat(String userCode, String sandboxType, SandboxInfo sandboxInfo) {
-        if (sandboxInfo == null || sandboxInfo.getTimeoutSeconds() == null || sandboxInfo.getTimeoutSeconds() <= 0) {
+        if (sandboxInfo == null
+            || sandboxInfo.getSandboxId() == null
+            || sandboxInfo.getSandboxId().isBlank()
+            || sandboxInfo.getTimeoutSeconds() == null
+            || sandboxInfo.getTimeoutSeconds() <= 0) {
             return;
         }
         OffsetDateTime newExpiresAt = OffsetDateTime.now().plusSeconds(sandboxInfo.getTimeoutSeconds());
         openSandboxClient.renewExpiration(sandboxInfo.getSandboxId(), new RenewSandboxExpirationRequest(newExpiresAt));
+    }
+
+    @Override
+    public boolean exists(String userCode, String sandboxType, SandboxInfo sandboxInfo) {
+        if (sandboxInfo == null || sandboxInfo.getSandboxId() == null || sandboxInfo.getSandboxId().isBlank()) {
+            return false;
+        }
+        return openSandboxClient.getSandboxIfExists(sandboxInfo.getSandboxId()) != null;
     }
 
     private static boolean matchesSandboxMetadata(SandboxDetail detail, String userCode, String sandboxType) {

@@ -21,9 +21,9 @@ public class SandboxCleanupJob {
     private SandboxService sandboxService;
 
     /**
-     * 定时清理超时沙箱 默认一小时执行一次，可通过sandbox.cleanup.cron配置调整
+     * 定时清理超时沙箱，默认每分钟检测一次。
      */
-    @Scheduled(cron = "${sandbox.cleanup.cron:0 0 */1 * * ?}")
+    @Scheduled(fixedDelayString = "${sandbox.cleanup.fixed-delay:60000}")
     public void cleanupExpiredSandboxes() {
         LOGGER.info("开始执行沙箱清理任务");
         try {

@@ -37,8 +37,8 @@ import okhttp3.ResponseBody;
 import okio.BufferedSource;
 
 /**
- * 处理 createType=FROM_THIRD 且 integrationType=INTERFACE 的外部智能体调用。
- * 直接 POST 到外部智能体的 SSE 地址，逐行解析后通过 PythonSseService 转写到客户端。
+ * 处理 createType=FROM_THIRD 且 integrationType=INTERFACE 的外部智能体调用。 直接 POST 到外部智能体的 SSE 地址，逐行解析后通过 PythonSseService
+ * 转写到客户端。
  */
 @Slf4j
 @Service
@@ -88,17 +88,14 @@ public class InterfaceRouteService {
     private AgentResourceChatInfoDto findExternalAgent(ChatProcessContext ctx) {
         Long agentId = ctx.getAssistantChatDto().getAgentId();
         @SuppressWarnings("unchecked")
-        List<AgentResourceChatInfoDto> agentList =
-                (List<AgentResourceChatInfoDto>) ctx.getParams().get("agent_list");
+        List<AgentResourceChatInfoDto> agentList = (List<AgentResourceChatInfoDto>) ctx.getParams().get("agent_list");
         if (CollectionUtils.isEmpty(agentList) || agentId == null) {
             throw new BdpRuntimeException(I18nUtil.get("route.interface.agent.not.found"));
         }
         return agentList.stream()
-                .filter(a -> agentId.equals(a.getId())
-                        && "FROM_THIRD".equals(a.getCreateType())
-                        && "INTERFACE".equals(a.getIntegrationType()))
-                .findFirst()
-                .orElseThrow(() -> new BdpRuntimeException(I18nUtil.get("route.interface.agent.not.found")));
+            .filter(a -> agentId.equals(a.getId()) && "FROM_THIRD".equals(a.getCreateType())
+                && "INTERFACE".equals(a.getIntegrationType()))
+            .findFirst().orElseThrow(() -> new BdpRuntimeException(I18nUtil.get("route.interface.agent.not.found")));
     }
 
     private Map<String, Object> buildRequestBody(ChatProcessContext ctx, AgentResourceChatInfoDto agent) {
@@ -124,9 +121,8 @@ public class InterfaceRouteService {
         }
         body.put("files", files);
 
-        Map<String, Object> extParam = chatDto.getExtParams() != null
-                ? new HashMap<>(chatDto.getExtParams())
-                : new HashMap<>();
+        Map<String, Object> extParam = chatDto.getExtParams() != null ? new HashMap<>(chatDto.getExtParams())
+            : new HashMap<>();
         body.put("extParam", extParam);
 
         body.put("histories", paramService.getChatHistories(ctx.sessionId, HISTORY_MAX_ROUNDS));
@@ -134,19 +130,15 @@ public class InterfaceRouteService {
         return body;
     }
 
-    private void streamFromExternalAgent(String url, Map<String, Object> body,
-                                         Map<String, Object> headers, ChatProcessContext ctx) throws IOException {
-        OkHttpClient client = new OkHttpClient.Builder()
-                .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .writeTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .build();
+    private void streamFromExternalAgent(String url, Map<String, Object> body, Map<String, Object> headers,
+        ChatProcessContext ctx) throws IOException {
+        OkHttpClient client = new OkHttpClient.Builder().connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS).writeTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .build();
 
         String jsonBody = JSON.toJSONString(body);
-        Request.Builder reqBuilder = new Request.Builder()
-                .url(url)
-                .post(RequestBody.create(jsonBody, JSON_TYPE))
-                .addHeader("Accept", "*/*");
+        Request.Builder reqBuilder = new Request.Builder().url(url).post(RequestBody.create(jsonBody, JSON_TYPE))
+            .addHeader("Accept", "*/*");
         if (headers != null) {
             for (Map.Entry<String, Object> entry : headers.entrySet()) {
                 if (entry.getValue() != null) {
@@ -172,8 +164,8 @@ public class InterfaceRouteService {
     }
 
     /**
-     * 逐行读取上游 SSE 流，将 event:/data: 配对后组装为 {event,data} JSON 行，
-     * 复用 PythonSseService.getContentFromPythonStreamV3 处理（写流 + 累计）。
+     * 逐行读取上游 SSE 流，将 event:/data: 配对后组装为 {event,data} JSON 行， 复用 PythonSseService.getContentFromPythonStreamV3 处理（写流 +
+     * 累计）。
      */
     private void consumeSseStream(BufferedSource source, ChatProcessContext ctx) throws IOException {
         String currentEvent = null;
@@ -195,6 +187,12 @@ public class InterfaceRouteService {
                 // SSE 注释行
                 continue;
             }
+
+            // 参考python,丢掉结束符号
+            if (line.endsWith("[DONE]")) {
+                break;
+            }
+
             if (line.startsWith("event:")) {
                 currentEvent = line.substring("event:".length()).trim();
             }
@@ -216,8 +214,8 @@ public class InterfaceRouteService {
         JSONObject lineJson = new JSONObject();
         lineJson.put("event", event);
         lineJson.put("data", dataBuf.toString());
-        pythonSseService.getContentFromPythonStreamV3(lineJson.toJSONString(), ctx.res,
-                ctx.messageContext, ctx.getAgentIds(), ctx);
+        pythonSseService.getContentFromPythonStreamV3(lineJson.toJSONString(), ctx.res, ctx.messageContext,
+            ctx.getAgentIds(), ctx);
     }
 
     private void writeErrorEvent(ChatProcessContext ctx, String message) {

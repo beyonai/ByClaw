@@ -1157,6 +1157,8 @@ const ConfigForm = (props) => {
           return [...v];
         });
 
+        onAvatarClick(datasetLogosUrl)();
+
         return;
       }
       message.error(res?.msg || intl.formatMessage({ id: 'employeeDetail.uploadFail' }));

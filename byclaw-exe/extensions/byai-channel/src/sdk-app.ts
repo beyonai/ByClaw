@@ -10,7 +10,7 @@ import {
   ActionType,
 } from "@byclaw/by-framework";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import type { ResolvedByaiAccount, ByaiSdkInboundMessage } from "./types.js";
+import type { ResolvedByaiAccount, ByaiSdkInboundMessage, SdkInboundFile } from "./types.js";
 import { getByaiRuntime } from "./runtime.js";
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -166,15 +166,34 @@ export class ByaiSdkApp {
         created_at: Date.now(),
         updated_at: Date.now()
       });
+      let questionText = "";
+      let files: SdkInboundFile[] | undefined;
+      if (typeof gatewayMsg.content === "string") {
+        questionText = gatewayMsg.content;
+      } else if (Array.isArray(gatewayMsg.content)) {
+        const questionTextArr: string[] = [];
+        gatewayMsg.content.forEach(item => {
+          if (typeof item.content === "string") {
+            questionTextArr.push(item.content);
+          } else if (item.content && typeof item.content === "object") {
+            questionTextArr.push(item.content.text || "");
+            if (item.content.files) {
+              files = [...(files || []), ...item.content.files];
+            }
+          }
+        });
+        questionText = questionTextArr.join("\n");
+      }
 
       const metadataLanguage =
         typeof metadata?.language === "string" ? metadata.language : undefined;
       const { language, languageProvided } = resolveInboundLanguage(metadataLanguage);
       const inbound: ByaiSdkInboundMessage = {
+        files,
         messageId,
         sessionId: sessionId,
         userId: userCode,
-        text: gatewayMsg.content as string,
+        text: questionText,
         timestamp: Date.now(),
         traceId: traceId || "",
         accountId: this.account.accountId,
