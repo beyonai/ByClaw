@@ -63,3 +63,6 @@ byclaw-data/resource/agents/
 byclaw-data/resource/object/
 byclaw-data/resource/view/
 byclaw-data/resource/import_package_owl_onto_bak/
+
+# Claude
+.claude/
