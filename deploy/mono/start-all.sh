@@ -3,7 +3,7 @@ cd "$(dirname "$0")"
 . ../compose-detect.sh
 
 echo "Starting byclaw-all..."
-$COMPOSE $COMPOSE_ENV_FLAG up -d
+$COMPOSE $COMPOSE_ENV_FLAG up -d --force-recreate
 echo ""
 echo "==================== 部署完成 ===================="
 echo "前端: http://localhost:8080"

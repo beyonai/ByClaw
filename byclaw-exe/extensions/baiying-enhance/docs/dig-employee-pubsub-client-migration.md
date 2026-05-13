@@ -1,6 +1,6 @@
 # OpenClaw baiying-enhance：数字员工 Redis Pub/Sub 消费端说明
 
-本文描述 **baiying-enhance** 插件如何消费与后端 [dig-employee-redis-change-notify.md](../dig-employee-redis-change-notify.md) 一致的 **数字员工变更广播**，并与本机 **用户授权数字员工列表**（Redis Hash）对齐后更新 OpenClaw 托管 agent。
+本文描述 **baiying-enhance** 插件如何消费与仓库根目录 [dig-employee-redis-change-notify.md](../../../../dig-employee-redis-change-notify.md) 所述一致的 **数字员工变更广播**，并与本机 **用户授权数字员工列表**（Redis Hash）对齐后更新 OpenClaw 托管 agent。
 
 ## 代码改造范围
 
@@ -13,7 +13,7 @@
 | 修改 | [index.ts](../index.ts) | `resolveDigEmployeePubSub` 合并插件配置与环境变量；装配 subscriber；`stop` 顺序：subscriber → auth watch → agent sync。 |
 | 修改 | [src/types.ts](../src/types.ts) | 插件配置类型含 Redis 相关字段；`watchAgentDir` / `skillDirs` / `pollIntervalMs` 等标为 **@deprecated**，运行时忽略，仅保留类型与校验兼容。 |
 | 修改 | [openclaw.plugin.json](../openclaw.plugin.json) | `configSchema`：`additionalProperties: true` 兼容任意遗留键；显式保留 `watchAgentDir`（boolean，已废弃、忽略）以免旧配置在「已知键」路径上类型报错。 |
-| 修改 | [dig-employee-redis-change-notify.md](../dig-employee-redis-change-notify.md) | 文末增加指向本文的「OpenClaw 插件消费端」链接（文档层，非运行时）。 |
+| 修改 | [dig-employee-redis-change-notify.md](../../../../dig-employee-redis-change-notify.md) | 文末增加指向本文的「OpenClaw 插件消费端」链接（文档层，非运行时）。 |
 | 测试 | [src/dig-employee-change-subscriber.test.ts](../src/dig-employee-change-subscriber.test.ts)、[src/agent-watchdog.test.ts](../src/agent-watchdog.test.ts) | 解析/合并/幂等辅助函数；`deletedSourceKeys` 在文件仍存在时仍能驱动配置同步。 |
 
 **未改动的相关模块（行为保持，仅被复用）**

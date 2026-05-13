@@ -8,6 +8,7 @@ START_FE=0
 START_BE=0
 START_QA=0
 START_DATA=0
+SKIP_CHECKS=0
 
 usage() {
   cat <<'EOF'
@@ -20,6 +21,7 @@ Options:
   --be             Start backend (byclaw-be).
   --qa             Start QA services (byclaw-qa, api + worker).
   --data           Start data gateway (byclaw-data).
+  --skip-checks    Skip preflight environment checks.
   --help           Show this message.
 
 Environment:
@@ -69,6 +71,7 @@ while [[ $# -gt 0 ]]; do
     --be)   START_BE=1;   shift ;;
     --qa)   START_QA=1;   shift ;;
     --data) START_DATA=1; shift ;;
+    --skip-checks) SKIP_CHECKS=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -83,6 +86,12 @@ if [[ $START_FE -eq 0 && $START_BE -eq 0 && $START_QA -eq 0 && $START_DATA -eq 0
 fi
 
 print_welcome
+
+# --- Preflight environment checks ---
+if [[ $SKIP_CHECKS -eq 0 ]]; then
+  source "$SCRIPTS/preflight.sh"
+  run_preflight "$START_FE" "$START_BE" "$START_QA" "$START_DATA"
+fi
 
 mkdir -p "$ROOT/logs"
 LOG_DIR="$ROOT/logs"

@@ -95,6 +95,22 @@ function nonEmpty(val: unknown): string {
   return typeof val === "string" && val.trim() ? val.trim() : "";
 }
 
+/** OpenClaw `agents.list[].skills`: default `[]`; fill from `relSkills` on Baiying detail / agent JSON, else legacy root `skills`. */
+function normalizeAgentListSkills(raw: Record<string, unknown>): string[] {
+  const toStrings = (arr: unknown): string[] =>
+    Array.isArray(arr) ? arr.map((s) => String(s).trim()).filter(Boolean) : [];
+
+  const fromRel = toStrings(raw.relSkills);
+  if (fromRel.length > 0) {
+    return fromRel;
+  }
+  const fromSkills = toStrings(raw.skills);
+  if (fromSkills.length > 0) {
+    return fromSkills;
+  }
+  return [];
+}
+
 /** Check if raw is a Baiying platform detail response (has resourceId + resourceName at root). */
 function isRawBaiyingDetail(raw: Record<string, unknown>): boolean {
   return typeof raw.resourceId === "string" && typeof raw.resourceName === "string";
@@ -181,11 +197,14 @@ function adaptRawBaiyingDetail(params: {
   const isBackendAgent =
     integrationType === "INTERFACE" || integrationType === "A2A" || integrationType === "PAGE";
 
+  const listSkills = normalizeAgentListSkills(detail);
+
   if (isBackendAgent) {
     const listEntry: AgentListEntry = {
       id: agentId,
       name,
       identity: { name },
+      skills: listSkills,
       tools: {
         alsoAllow: ["baiying_call"],
       },
@@ -212,6 +231,7 @@ function adaptRawBaiyingDetail(params: {
     id: agentId,
     name,
     identity: { name },
+    skills: listSkills,
     tools: {
       alsoAllow: ["baiying_call"],
     },
@@ -284,6 +304,7 @@ export function adaptAgentJson(params: {
       id: agentId,
       name,
       identity: { name },
+      skills: normalizeAgentListSkills(asRecord),
     };
 
     return {
@@ -322,7 +343,7 @@ export function adaptAgentJson(params: {
     identity: {
       name: typeof native.name === "string" && native.name.trim() ? native.name.trim() : agentId,
     },
-    ...(Array.isArray(native.skills) ? { skills: native.skills } : {}),
+    skills: normalizeAgentListSkills(asRecord),
   };
 
   return {

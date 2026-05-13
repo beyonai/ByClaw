@@ -6,6 +6,6 @@ cd "$(dirname "$0")"
 sh gen-opensandbox-config.sh
 
 echo "Starting OpenSandbox Server..."
-$COMPOSE $COMPOSE_ENV_FLAG up -d opensandbox-server
+$COMPOSE $COMPOSE_ENV_FLAG up -d --force-recreate opensandbox-server
 echo ""
 $COMPOSE ps opensandbox-server

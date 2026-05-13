@@ -1,6 +1,15 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { adaptAgentJson } from "./agent-adapter.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const digEmployee10000115Fixture = path.join(
+  __dirname,
+  "../resource/dig_employee/DIG_EMPLOYEE_10000115.json",
+);
 
 describe("adaptAgentJson", () => {
   it("maps Baiying agent_list export", () => {
@@ -32,6 +41,7 @@ describe("adaptAgentJson", () => {
     expect(res.modelRef).toBe("");
     expect(res.systemPrompt).toBe("Be brief.");
     expect(res.listEntry.model).toBeUndefined();
+    expect(res.listEntry.skills).toEqual([]);
   });
 
   it("ignores native provider/model and keeps default-model fallback", () => {
@@ -56,6 +66,7 @@ describe("adaptAgentJson", () => {
     expect(res.provider).toBeUndefined();
     expect(res.listEntry.model).toBeUndefined();
     expect(res.systemPrompt).toBe("Help users.");
+    expect(res.listEntry.skills).toEqual([]);
   });
 
   it("does not embed JSON array corePersonaDefinition in systemPrompt", () => {
@@ -170,6 +181,25 @@ describe("adaptAgentJson", () => {
     expect(res.associatedResources![0].parentResourceId).toBe("-1");
     expect(res.coreCompetencies).toHaveLength(1);
     expect(res.coreCompetencies![0].coreCompetency).toBe("Password Reset");
+    expect(res.listEntry.skills).toEqual([]);
+  });
+
+  it("smoke: DIG_EMPLOYEE_10000115.json maps relSkills to agents.list skills", () => {
+    const raw = JSON.parse(readFileSync(digEmployee10000115Fixture, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const res = adaptAgentJson({
+      raw,
+      fileName: "DIG_EMPLOYEE_10000115.json",
+      embedApiKeysFromJson: false,
+    });
+    expect("error" in res).toBe(false);
+    if ("error" in res) {
+      return;
+    }
+    expect(res.agentId).toBe(`${MANAGED_AGENT_PREFIX}10000115`);
+    expect(res.listEntry.skills).toEqual(["dws", "clawhub"]);
   });
 
   it("maps raw Baiying detail (integrationType INTERFACE)", () => {

@@ -29,10 +29,10 @@ if [ "$MIDDLEWARE_MODULES" = "NONE" ]; then
 elif [ -n "$MIDDLEWARE_MODULES" ]; then
     SERVICES=$(echo "$MIDDLEWARE_MODULES" | tr ',' ' ')
     echo "Starting middleware services: $SERVICES"
-    $COMPOSE $COMPOSE_ENV_FLAG up -d $SERVICES
+    $COMPOSE $COMPOSE_ENV_FLAG up -d --force-recreate $SERVICES
 else
     echo "Starting all middleware services..."
-    $COMPOSE $COMPOSE_ENV_FLAG up -d
+    $COMPOSE $COMPOSE_ENV_FLAG up -d --force-recreate
 fi
 
 echo ""

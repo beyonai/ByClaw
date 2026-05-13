@@ -15,10 +15,10 @@ if [ "$STANDALONE_MODULES" = "NONE" ]; then
 elif [ -n "$STANDALONE_MODULES" ]; then
     SERVICES=$(echo "$STANDALONE_MODULES" | tr ',' ' ')
     echo "Starting standalone services: $SERVICES"
-    $COMPOSE $COMPOSE_ENV_FLAG up -d $SERVICES
+    $COMPOSE $COMPOSE_ENV_FLAG up -d --force-recreate $SERVICES
 else
     echo "Starting all services..."
-    $COMPOSE $COMPOSE_ENV_FLAG up -d
+    $COMPOSE $COMPOSE_ENV_FLAG up -d --force-recreate
 fi
 
 echo ""

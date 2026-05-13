@@ -1,0 +1,32 @@
+# Windows override: remove /etc/localtime mounts (not available on Windows)
+services:
+  fe:
+    volumes:
+      - ../config/nginx-standalone.conf:/etc/nginx/conf.d/default.conf
+      - ./logs/nginx:/var/log/nginx
+
+  be:
+    volumes:
+      - ../config:/app/config
+      - ./logs/be:/app/logs
+
+  qa-manager:
+    volumes:
+      - ../config:/app/config
+      - ./logs/qa:/app/logs
+
+  qa-worker:
+    volumes:
+      - ../config:/app/config
+      - ./logs/qa:/app/logs
+
+  data:
+    volumes:
+      - ../config:/app/config
+      - ./logs/data:/app/logs
+      - ${FILE_STORAGE_MINIO_MOUNT_PATH:-C:/ProgramData/byclaw/minio}:${FILE_STORAGE_MINIO_MOUNT_PATH:-C:/ProgramData/byclaw/minio}
+
+  demo:
+    volumes:
+      - ../config/logback.xml:/app/config/logback.xml:ro
+      - ./logs/demo:/app/logs
