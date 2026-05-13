@@ -33,6 +33,9 @@ public class SsSandboxRecord {
     /** 沙箱访问端点地址 */
     private String endpoint;
 
+    /** Runtime returned sandbox id. */
+    private String sandboxId;
+
     /** 会话ID */
     private String chatId;
 
@@ -42,9 +45,37 @@ public class SsSandboxRecord {
     /** 是否自动释放 1:自动释放 0:特权用户（长期沙箱） */
     private Integer autoRelease;
 
+    /** Lifecycle release policy. */
+    private String leasePolicy;
+
+    /** Remote automatic expiration timeout in seconds. */
+    private Integer timeoutSeconds;
+
+    /** Remote expiration time when leasePolicy=REMOTE_AUTO_EXPIRE. */
+    @JSONField(format = "yyyy-MM-dd HH:mm:ss")
+    private Date remoteExpiresAt;
+
+    /** Last successful remote renewal time. */
+    @JSONField(format = "yyyy-MM-dd HH:mm:ss")
+    private Date lastRenewAt;
+
+    /** Next time this sandbox should be considered for remote renewal. */
+    @JSONField(format = "yyyy-MM-dd HH:mm:ss")
+    private Date nextRenewAt;
+
     /** 最近一次访问时间 */
     @JSONField(format = "yyyy-MM-dd HH:mm:ss")
     private Date lastAccessTime;
+
+    /** Release completion time. */
+    @JSONField(format = "yyyy-MM-dd HH:mm:ss")
+    private Date releaseTime;
+
+    /** Release reason. */
+    private String releaseReason;
+
+    /** Optimistic lock version. */
+    private Integer version;
 
     /** 创建时间 */
     @JSONField(format = "yyyy-MM-dd HH:mm:ss")

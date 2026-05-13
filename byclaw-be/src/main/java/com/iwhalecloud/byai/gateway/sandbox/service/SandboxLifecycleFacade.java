@@ -1,7 +1,5 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
-import java.util.List;
-
 import com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest;
 import com.iwhalecloud.byai.common.feign.response.SandboxResponse;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
@@ -17,11 +15,9 @@ public interface SandboxLifecycleFacade {
 
     SandboxResponse<SandboxLaunchData> launchSandbox(SandboxLaunchRequest request);
 
-    SandboxResponse<Void> removeSandbox(SandboxLaunchRequest request);
+    SandboxResponse<Void> removeSandbox(SandboxInfo sandboxInfo);
 
-    SandboxResponse<Void> heartbeat(String userCode);
+    SandboxResponse<Void> renewSandbox(SandboxInfo sandboxInfo);
 
-    SandboxResponse<List<SandboxInfo>> sandboxInfo(String userCode);
-
-    SandboxResponse<SandboxInfo> sandboxInfo(String userCode, String sandboxType);
+    SandboxResponse<Boolean> sandboxExists(SandboxInfo sandboxInfo);
 }

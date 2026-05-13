@@ -61,11 +61,28 @@ class StandardSandboxLifecycleServiceTest {
     }
 
     @Test
-    void launchSandbox_returnsCachedEndpointWithoutCallingProvider() {
+    void launchSandbox_ignoresRedisMetadataAndCreatesFromSpec() {
         String cacheKey = "byai:worker:sandbox:user001:openclaw";
+        String lockKey = cacheKey + ":create-lock";
         when(valueOperations.get(cacheKey)).thenReturn(
             "{\"sandboxId\":\"sb-1\",\"userCode\":\"user001\",\"sandboxType\":\"openclaw\",\"endpoints\":[\"http://cached\"]}"
         );
+        when(valueOperations.setIfAbsent(any(), any(), any())).thenReturn(true);
+        when(valueOperations.get(lockKey)).thenReturn("lock-token-mismatch");
+
+        SandboxServiceSpec spec = new SandboxServiceSpec();
+        when(specRepository.findByServiceKey("openclaw")).thenReturn(java.util.Optional.of(spec));
+        CreateSandboxRequest createRequest = CreateSandboxRequest.builder().timeout(300).build();
+        when(specProcessor.buildCreateRequest("user001", "openclaw", null, null, spec)).thenReturn(createRequest);
+        when(runtimeProvider.findReusable("user001", "openclaw")).thenReturn(java.util.Optional.empty());
+        SandboxRuntimeInstance createdInstance = SandboxRuntimeInstance.builder()
+            .sandboxId("sb-2")
+            .endpoints(List.of("http://created"))
+            .build();
+        when(runtimeProvider.create(eq(createRequest), eq(spec), eq("user001"), eq("openclaw"), any()))
+            .thenReturn(createdInstance);
+        when(runtimeProvider.resolveEndpoints(eq(createdInstance), eq(spec), eq(createRequest)))
+            .thenReturn(List.of("http://created"));
 
         SandboxLaunchRequest request = new SandboxLaunchRequest();
         request.setUserCode("user001");
@@ -74,8 +91,9 @@ class StandardSandboxLifecycleServiceTest {
         var response = service.launchSandbox(request);
 
         assertThat(response.isSuccess()).isTrue();
-        assertThat(response.getData().getEndpoint()).isEqualTo("http://cached");
-        verify(runtimeProvider, never()).create(any(), any(), any(), any(), any());
+        assertThat(response.getData().getEndpoint()).isEqualTo("http://created");
+        assertThat(response.getData().getSandboxId()).isEqualTo("sb-2");
+        verify(runtimeProvider).create(any(), any(), any(), any(), any());
     }
 
     @Test

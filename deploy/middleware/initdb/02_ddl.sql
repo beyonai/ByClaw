@@ -131,7 +131,7 @@ CREATE TABLE byai.ss_resource_position_relation (position_rel_id bigint, positio
 CREATE TABLE byai.ss_resource_rel_detail (resource_rel_detail_id bigint, resource_id bigint, rel_resource_id bigint, create_by bigint, create_time timestamp with time zone, update_by bigint, update_time timestamp with time zone, com_acct_id bigint, rel_type_name character varying(500), rel_status smallint, rel_resource_info text);
 CREATE TABLE byai.ss_resource_syn (syn_id bigint NOT NULL, resource_id bigint, system_code character varying(32), resource_source_pk_id bigint, resource_biz_type character varying(20), resource_type character varying(10), resource_name character varying(128), resource_desc character varying(4000), create_by bigint, create_date timestamp without time zone, update_date timestamp without time zone, repository character varying(4000));
 CREATE TABLE byai.ss_resource_version (resource_version_id bigint, resource_id bigint, system_code character varying(32), resource_source_pk_id bigint, resource_biz_type character varying(20), resource_type character varying(10), resource_name character varying(128), resource_desc character varying(1024), avatar character varying(1024), sample text, tags text, version_no character varying(20), catalog_id bigint, man_org_id bigint, man_user_id character varying(500), index_list text, publisher character varying(20), ext_info text, rel_resource_list text, resource_status integer, version_status integer, create_by bigint, create_time timestamp without time zone, update_by bigint, update_time timestamp without time zone, com_acct_id bigint);
-CREATE TABLE byai.ss_sandbox_record (id bigint NOT NULL DEFAULT nextval('byai.ss_sandbox_record_id_seq'::regclass), resource_id bigint NOT NULL, user_code character varying(500) NOT NULL, sandbox_type character varying(500) NOT NULL, endpoint character varying(3000), chat_id character varying(128), status character varying(32) NOT NULL DEFAULT 'RUNNING'::character varying, auto_release integer DEFAULT 1, last_access_time timestamp(6) without time zone, create_time timestamp(6) without time zone NOT NULL DEFAULT pg_systimestamp(), update_time timestamp(6) without time zone NOT NULL DEFAULT pg_systimestamp());
+CREATE TABLE byai.ss_sandbox_record (id bigint NOT NULL DEFAULT nextval('byai.ss_sandbox_record_id_seq'::regclass), resource_id bigint NOT NULL, user_code character varying(500) NOT NULL, sandbox_type character varying(500) NOT NULL, endpoint character varying(3000), sandbox_id character varying(128), chat_id character varying(128), status character varying(32) NOT NULL DEFAULT 'RUNNING'::character varying, auto_release integer DEFAULT 1, lease_policy character varying(32) DEFAULT 'REMOTE_AUTO_EXPIRE'::character varying, timeout_seconds integer, remote_expires_at timestamp(6) without time zone, last_renew_at timestamp(6) without time zone, next_renew_at timestamp(6) without time zone, last_access_time timestamp(6) without time zone, release_time timestamp(6) without time zone, release_reason character varying(128), version integer DEFAULT 0, create_time timestamp(6) without time zone NOT NULL DEFAULT pg_systimestamp(), update_time timestamp(6) without time zone NOT NULL DEFAULT pg_systimestamp());
 CREATE TABLE byai.ss_superassist_kw_catalog (kw_catalog_id bigint, superassist_id bigint, session_type character varying(200), is_last_session character varying(200), session_id bigint, session_datasetid bigint, catalog_id bigint, create_time timestamp without time zone, create_user bigint, enterprise_id bigint);
 CREATE TABLE byai.suas_superassist (superassist_id bigint, avatar character varying(255), intro text, name character varying(255), create_time timestamp with time zone, prologue text, status character varying(2), com_acct_id bigint, session_dataset_id bigint, create_user bigint, default_dig_employee_id bigint);
 CREATE TABLE byai.suas_superassist_resource_privilege (id bigint, superassist_id bigint, resource_id bigint, resource_type character varying(32), create_time timestamp without time zone, privilege_type character varying(5));
@@ -144,6 +144,9 @@ CREATE TABLE byai.template_rule_info (template_id bigint, template_type characte
 CREATE INDEX idx_sandbox_user_resource ON byai.ss_sandbox_record USING btree (user_code, resource_id, status) TABLESPACE pg_default;
 CREATE INDEX idx_sandbox_status ON byai.ss_sandbox_record USING btree (status) TABLESPACE pg_default;
 CREATE INDEX idx_sandbox_auto_release_timeout ON byai.ss_sandbox_record USING btree (status, auto_release, last_access_time) TABLESPACE pg_default;
+CREATE INDEX idx_ss_sandbox_record_active ON byai.ss_sandbox_record USING btree (user_code, sandbox_type, resource_id, status) TABLESPACE pg_default;
+CREATE INDEX idx_ss_sandbox_record_due_renew ON byai.ss_sandbox_record USING btree (status, lease_policy, next_renew_at) TABLESPACE pg_default;
+CREATE INDEX idx_ss_sandbox_record_idle_release ON byai.ss_sandbox_record USING btree (status, lease_policy, last_access_time) TABLESPACE pg_default;
 
 -- ========== 约束 ==========
 ALTER TABLE byai.byai_message ADD PRIMARY KEY (id);
@@ -396,10 +399,19 @@ COMMENT ON COLUMN byai.ss_sandbox_record.resource_id IS '资源ID';
 COMMENT ON COLUMN byai.ss_sandbox_record.user_code IS '用户编码';
 COMMENT ON COLUMN byai.ss_sandbox_record.sandbox_type IS '沙箱类型';
 COMMENT ON COLUMN byai.ss_sandbox_record.endpoint IS '沙箱访问端点地址';
+COMMENT ON COLUMN byai.ss_sandbox_record.sandbox_id IS '沙箱运行时实例ID';
 COMMENT ON COLUMN byai.ss_sandbox_record.chat_id IS '会话ID';
-COMMENT ON COLUMN byai.ss_sandbox_record.status IS '沙箱状态：RUNNING-运行中，RELEASED-已释放';
-COMMENT ON COLUMN byai.ss_sandbox_record.auto_release IS '是否自动释放：1-自动释放（普通用户），0-不自动释放（特权用户长期沙箱）';
+COMMENT ON COLUMN byai.ss_sandbox_record.status IS '沙箱状态：STARTING-启动中，RUNNING-运行中，RELEASING-释放中，RELEASED-已释放，FAILED-失败';
+COMMENT ON COLUMN byai.ss_sandbox_record.auto_release IS '远端是否自动过期：1-OpenSandbox自动过期，0-不自动过期';
+COMMENT ON COLUMN byai.ss_sandbox_record.lease_policy IS '生命周期策略：REMOTE_AUTO_EXPIRE-远端过期需续约，LOCAL_IDLE_RELEASE-本地空闲释放，MANUAL-人工释放';
+COMMENT ON COLUMN byai.ss_sandbox_record.timeout_seconds IS '远端自动过期超时时间（秒）';
+COMMENT ON COLUMN byai.ss_sandbox_record.remote_expires_at IS '远端过期时间';
+COMMENT ON COLUMN byai.ss_sandbox_record.last_renew_at IS '最近一次远端续约时间';
+COMMENT ON COLUMN byai.ss_sandbox_record.next_renew_at IS '下一次应检测续约时间';
 COMMENT ON COLUMN byai.ss_sandbox_record.last_access_time IS '最近一次访问时间（用于空闲超时判断）';
+COMMENT ON COLUMN byai.ss_sandbox_record.release_time IS '释放完成时间';
+COMMENT ON COLUMN byai.ss_sandbox_record.release_reason IS '释放原因';
+COMMENT ON COLUMN byai.ss_sandbox_record.version IS '乐观锁版本号';
 COMMENT ON COLUMN byai.ss_sandbox_record.create_time IS '创建时间';
 COMMENT ON COLUMN byai.ss_sandbox_record.update_time IS '更新时间';
 COMMENT ON COLUMN byai.ss_res_ext_doc.resource_catalog_main IS '知识库一级分类：enterprise-企业知识库，personal-个人知识库';
