@@ -66,3 +66,6 @@ byclaw-data/resource/import_package_owl_onto_bak/
 
 # Claude
 .claude/
+
+# Vscode
+.vscode/
