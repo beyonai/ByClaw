@@ -10,6 +10,8 @@ type MenuNode = {
 type FlatMenuItem = {
   path: string;
   parentPath?: string;
+  routePath?: string;
+  menuUrl?: string;
 };
 
 type MenuItem = {
@@ -42,7 +44,12 @@ export function buildSiderMenuItems(
 
 export function flattenSiderMenuItems(menus: MenuNode[], parentPath?: string): FlatMenuItem[] {
   return menus.flatMap((item) => {
-    const currentItem = { path: item.path, parentPath };
+    const currentItem = {
+      path: item.path,
+      parentPath,
+      routePath: (item as any).routePath,
+      menuUrl: (item as any).menuUrl,
+    };
 
     if (!item.routes?.length) {
       return [currentItem];
