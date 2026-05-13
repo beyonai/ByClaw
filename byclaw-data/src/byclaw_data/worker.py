@@ -1065,25 +1065,36 @@ class DataCloudWorker(GatewayWorker):
             if _code not in _dyn_view_ids:
                 _dyn_view_ids.append(_code)
 
-        # 来源 3：ResumeCommand 时从 header_metadata 恢复 interrupt 时写入的动态路径标识
+        # 来源 3：resume 时从 header_metadata 或 humanInput.metadata 恢复动态路径标识
         if not _dyn_object_ids and not _dyn_view_ids:
+            # ResumeCommand：从 header_metadata 取
+            # AskAgentCommand + humanInput（paradigm 回复）：从 extra_payload.ext_params.humanInput.metadata 取
+            _human_input_meta: dict[str, Any] = {}
+            _ext = extra_payload.get("ext_params")
+            if isinstance(_ext, dict):
+                _hi = _ext.get("humanInput")
+                if isinstance(_hi, dict) and isinstance(_hi.get("metadata"), dict):
+                    _human_input_meta = _hi["metadata"]
+
+            _resume_meta = _human_input_meta or header_metadata
             _resume_object_ids: list[str] = [
-                s for s in (header_metadata.get("call_object_ids") or [])
+                s for s in (_resume_meta.get("call_object_ids") or [])
                 if isinstance(s, str) and s.strip()
             ]
             _resume_view_ids: list[str] = [
-                s for s in (header_metadata.get("call_view_ids") or [])
+                s for s in (_resume_meta.get("call_view_ids") or [])
                 if isinstance(s, str) and s.strip()
             ]
             if _resume_object_ids or _resume_view_ids:
                 _dyn_object_ids = _resume_object_ids
                 _dyn_view_ids = _resume_view_ids
                 logger.info(
-                    "dynamic agent path restored from header_metadata: session=%s "
-                    "object_ids=%s view_ids=%s",
+                    "dynamic agent path restored from resume metadata: session=%s "
+                    "object_ids=%s view_ids=%s source=%s",
                     context.session_id,
                     _dyn_object_ids,
                     _dyn_view_ids,
+                    "humanInput.metadata" if _human_input_meta else "header_metadata",
                 )
         if _res_object_codes or _res_view_codes:
             logger.info(
