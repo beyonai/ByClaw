@@ -263,7 +263,7 @@ public class MessageContext {
             // 获取最后一个消息内容
             AnswerDelta lastAnswerDelta = messageList.get(messageList.size() - 1);
             StringBuilder builder = textList.get(textList.size() - 1);
-            boolean ifMerge = answerDelta.getContentType().equals(lastAnswerDelta.getContentType());
+            boolean ifMerge = StringUtils.equals(answerDelta.getContentType(), lastAnswerDelta.getContentType());
             if (StringUtils.isNotBlank(answerDelta.getOrderId())) {
                 ifMerge = ifMerge && answerDelta.getOrderId().equals(lastAnswerDelta.getOrderId());
             }
@@ -275,7 +275,10 @@ public class MessageContext {
             else {
                 // 判断类型是否一致不一致生成新的对象
                 messageList.add(answerDelta);
-                textList.add(new StringBuilder(answerDelta.getChoices().get(0).getDelta().getContent()));
+                String content = answerDelta.getChoices().get(0).getDelta().getContent();
+                if (content != null) {
+                    textList.add(new StringBuilder());
+                }
             }
         }
         catch (Exception e) {
