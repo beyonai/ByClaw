@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    // ---------------------------------------------------------------
+    // byclaw-data — Gateway Worker
+    // 依赖：先在仓库根目录执行 `uv sync`
+    // ---------------------------------------------------------------
+    {
+      "name": "DataCloud Worker (byclaw-data)",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "program": "${workspaceFolder}/src/byclaw_data/main.py",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {},
+      "justMyCode": false
+    }
+  ]
+}

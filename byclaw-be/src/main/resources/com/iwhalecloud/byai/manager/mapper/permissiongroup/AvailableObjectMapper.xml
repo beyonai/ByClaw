@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.permissiongroup.AvailableObjectMapper">
+
+    <!-- 可用授权对象VO结果映射 -->
+    <resultMap id="AvailableObjectVOResultMap" type="com.iwhalecloud.byai.manager.vo.permissiongroup.AvailableObjectVO">
+        <result column="object_id" property="objectId"/>
+        <result column="object_type" property="objectType"/>
+        <result column="object_name" property="objectName"/>
+        <result column="object_code" property="objectCode"/>
+        <result column="org_id" property="orgId"/>
+        <result column="org_name" property="orgName"/>
+        <result column="authorized" property="authorized"/>
+    </resultMap>
+
+    <!-- 分页查询可用用户列表 -->
+    <select id="selectAvailableUsers" resultMap="AvailableObjectVOResultMap">
+        SELECT
+            u.user_id AS object_id,
+            'user' AS object_type,
+            u.user_name AS object_name,
+            u.user_code AS object_code,
+            uo.org_id AS org_id,
+            o.org_name AS org_name,
+            CASE WHEN EXISTS (
+                SELECT 1 FROM permission_group_authorized_objects pgao
+                WHERE pgao.permission_group_id = #{query.permissionGroupId}
+                AND pgao.object_type = 'user'
+                AND pgao.authorized_object_id = u.user_id
+            ) THEN true ELSE false END AS authorized
+        FROM po_users u
+        LEFT JOIN po_users_organization uo ON u.user_id = uo.user_id
+        LEFT JOIN po_organization o ON uo.org_id = o.org_id
+        <where>
+            u.status_cd = 'A'
+            <if test="query.objectName != null and query.objectName != ''">
+                AND u.user_name LIKE CONCAT('%', #{query.objectName}, '%')
+            </if>
+            <if test="query.orgId != null">
+                AND uo.org_id = #{query.orgId}
+            </if>
+        </where>
+        ORDER BY u.user_name
+    </select>
+
+    <!-- 分页查询可用组织列表 -->
+    <select id="selectAvailableOrganizations" resultMap="AvailableObjectVOResultMap">
+        SELECT
+            o.org_id AS object_id,
+            'org' AS object_type,
+            o.org_name AS object_name,
+            o.org_code AS object_code,
+            o.parent_org_id AS org_id,
+            po.org_name AS org_name,
+            CASE WHEN EXISTS (
+                SELECT 1 FROM permission_group_authorized_objects pgao
+                WHERE pgao.permission_group_id = #{query.permissionGroupId}
+                AND pgao.object_type = 'org'
+                AND pgao.authorized_object_id = o.org_id
+            ) THEN true ELSE false END AS authorized
+        FROM po_organization o
+        LEFT JOIN po_organization po ON o.parent_org_id = po.org_id
+        <where>
+            <if test="query.objectName != null and query.objectName != ''">
+                AND o.org_name LIKE CONCAT('%', #{query.objectName}, '%')
+            </if>
+            <if test="query.orgId != null">
+                AND (o.org_id = #{query.orgId} OR o.parent_org_id = #{query.orgId})
+            </if>
+        </where>
+        ORDER BY o.org_name
+    </select>
+
+    <!-- 查询可用用户列表（不分页） -->
+    <select id="selectAvailableUserList" resultMap="AvailableObjectVOResultMap">
+        SELECT
+            u.user_id AS object_id,
+            'user' AS object_type,
+            u.user_name AS object_name,
+            u.user_code AS object_code,
+            uo.org_id AS org_id,
+            o.org_name AS org_name,
+            CASE WHEN EXISTS (
+                SELECT 1 FROM permission_group_authorized_objects pgao
+                WHERE pgao.permission_group_id = #{query.permissionGroupId}
+                AND pgao.object_type = 'user'
+                AND pgao.authorized_object_id = u.user_id
+            ) THEN true ELSE false END AS authorized
+        FROM po_users u
+        LEFT JOIN po_users_organization uo ON u.user_id = uo.user_id
+        LEFT JOIN po_organization o ON uo.org_id = o.org_id
+        <where>
+            u.status_cd = 'A'
+            <if test="query.objectName != null and query.objectName != ''">
+                AND u.user_name LIKE CONCAT('%', #{query.objectName}, '%')
+            </if>
+            <if test="query.orgId != null">
+                AND uo.org_id = #{query.orgId}
+            </if>
+        </where>
+        ORDER BY u.user_name
+        LIMIT 100
+    </select>
+
+    <!-- 查询可用组织列表（不分页） -->
+    <select id="selectAvailableOrganizationList" resultMap="AvailableObjectVOResultMap">
+        SELECT
+            o.org_id AS object_id,
+            'org' AS object_type,
+            o.org_name AS object_name,
+            o.org_code AS object_code,
+            o.parent_org_id AS org_id,
+            po.org_name AS org_name,
+            CASE WHEN EXISTS (
+                SELECT 1 FROM permission_group_authorized_objects pgao
+                WHERE pgao.permission_group_id = #{query.permissionGroupId}
+                AND pgao.object_type = 'org'
+                AND pgao.authorized_object_id = o.org_id
+            ) THEN true ELSE false END AS authorized
+        FROM po_organization o
+        LEFT JOIN po_organization po ON o.parent_org_id = po.org_id
+        <where>
+            <if test="query.objectName != null and query.objectName != ''">
+                AND o.org_name LIKE CONCAT('%', #{query.objectName}, '%')
+            </if>
+            <if test="query.orgId != null">
+                AND (o.org_id = #{query.orgId} OR o.parent_org_id = #{query.orgId})
+            </if>
+        </where>
+        ORDER BY o.org_name
+        LIMIT 100
+    </select>
+
+</mapper>
+

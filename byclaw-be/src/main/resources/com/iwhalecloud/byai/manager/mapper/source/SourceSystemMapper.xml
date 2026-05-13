@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.source.SourceSystemMapper">
+
+    <resultMap id="baseResultMap" type="com.iwhalecloud.byai.manager.entity.source.SourceSystem">
+        <result property="systemCode" column="system_code"/>
+        <result property="systemName" column="system_name"/>
+    </resultMap>
+
+
+   <select id="getSourceSystemList" resultMap="baseResultMap">
+       select
+           system_name,
+           system_code
+       from
+           po_source_system
+       where
+           system_code != 'BYAI'
+   </select>
+
+</mapper>

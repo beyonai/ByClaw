@@ -1,0 +1,266 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.datacloud.DatacloudScriptExecutionMapper">
+
+    <!-- 脚本执行记录表结果映 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.datacloud.DatacloudScriptExecution">
+        <id column="execution_id" property="executionId" jdbcType="BIGINT"/>
+        <result column="script_id" property="scriptId" jdbcType="BIGINT"/>
+        <result column="execution_name" property="executionName" jdbcType="VARCHAR"/>
+        <result column="execution_status" property="executionStatus" jdbcType="VARCHAR"/>
+        <result column="start_time" property="startTime" jdbcType="TIMESTAMP"/>
+        <result column="end_time" property="endTime" jdbcType="TIMESTAMP"/>
+        <result column="duration" property="duration" jdbcType="BIGINT"/>
+        <result column="execution_result" property="executionResult" jdbcType="VARCHAR"/>
+        <result column="error_message" property="errorMessage" jdbcType="VARCHAR"/>
+        <result column="execution_params" property="executionParams" jdbcType="VARCHAR"/>
+        <result column="enterprise_id" property="enterpriseId" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <!-- 脚本执行记录DTO结果映射 -->
+    <resultMap id="ExecutionDTOResultMap" type="com.iwhalecloud.byai.manager.dto.datacloud.DatacloudScriptExecutionDTO">
+        <id column="execution_id" property="executionId" jdbcType="BIGINT"/>
+        <result column="script_id" property="scriptId" jdbcType="BIGINT"/>
+        <result column="execution_name" property="executionName" jdbcType="VARCHAR"/>
+        <result column="execution_status" property="executionStatus" jdbcType="VARCHAR"/>
+        <result column="start_time" property="startTime" jdbcType="TIMESTAMP"/>
+        <result column="end_time" property="endTime" jdbcType="TIMESTAMP"/>
+        <result column="duration" property="duration" jdbcType="BIGINT"/>
+        <result column="execution_result" property="executionResult" jdbcType="VARCHAR"/>
+        <result column="error_message" property="errorMessage" jdbcType="VARCHAR"/>
+        <result column="execution_params" property="executionParams" jdbcType="VARCHAR"/>
+        <result column="enterprise_id" property="enterpriseId" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="script_name" property="scriptName" jdbcType="VARCHAR"/>
+    </resultMap>
+
+    <!-- 基础字段列表 -->
+    <sql id="Base_Column_List">
+        execution_id, script_id, execution_name, execution_status, start_time, end_time, 
+        duration, execution_result, error_message, execution_params, executor_id, 
+        enterprise_id, create_time, update_time
+    </sql>
+
+    <!-- 分页查询脚本执行记录列表 -->
+    <select id="selectScriptExecutionListByPage" resultMap="ExecutionDTOResultMap">
+        SELECT 
+            e.execution_id,
+            e.script_id,
+            e.execution_name,
+            e.execution_status,
+            e.start_time,
+            e.end_time,
+            e.duration,
+            e.execution_result,
+            e.error_message,
+            e.execution_params,
+            e.executor_id,
+            e.enterprise_id,
+            e.create_time,
+            e.update_time,
+            s.script_name,
+            u.user_name AS executor_name
+        FROM datacloud_script_execution e
+        LEFT JOIN datacloud_script s ON e.script_id = s.script_id
+        LEFT JOIN sys_user u ON e.executor_id = u.user_id
+        WHERE e.enterprise_id = #{query.enterpriseId}
+        <if test="query.scriptId != null">
+            AND e.script_id = #{query.scriptId}
+        </if>
+        <if test="query.executionStatus != null and query.executionStatus != ''">
+            AND e.execution_status = #{query.executionStatus}
+        </if>
+        <if test="query.executorId != null">
+            AND e.executor_id = #{query.executorId}
+        </if>
+        <if test="query.startTimeBegin != null">
+            AND e.start_time >= #{query.startTimeBegin}
+        </if>
+        <if test="query.startTimeEnd != null">
+            AND e.start_time &lt;= #{query.startTimeEnd}
+        </if>
+        ORDER BY e.start_time DESC
+    </select>
+
+    <!-- 根据脚本ID查询执行记录列表 -->
+    <select id="selectExecutionsByScriptId" resultMap="ExecutionDTOResultMap">
+        SELECT 
+            e.execution_id,
+            e.script_id,
+            e.execution_name,
+            e.execution_status,
+            e.start_time,
+            e.end_time,
+            e.duration,
+            e.execution_result,
+            e.error_message,
+            e.execution_params,
+            e.executor_id,
+            e.enterprise_id,
+            e.create_time,
+            e.update_time,
+            s.script_name,
+            u.user_name AS executor_name
+        FROM datacloud_script_execution e
+        LEFT JOIN datacloud_script s ON e.script_id = s.script_id
+        LEFT JOIN sys_user u ON e.executor_id = u.user_id
+        WHERE e.script_id = #{scriptId}
+        AND e.enterprise_id = #{enterpriseId}
+        ORDER BY e.start_time DESC
+        <if test="limit != null and limit > 0">
+            LIMIT #{limit}
+        </if>
+    </select>
+
+    <!-- 查询正在执行的记 -->
+    <select id="selectRunningExecutions" resultMap="ExecutionDTOResultMap">
+        SELECT 
+            e.execution_id,
+            e.script_id,
+            e.execution_name,
+            e.execution_status,
+            e.start_time,
+            e.end_time,
+            e.duration,
+            e.execution_result,
+            e.error_message,
+            e.execution_params,
+            e.executor_id,
+            e.enterprise_id,
+            e.create_time,
+            e.update_time,
+            s.script_name,
+            u.user_name AS executor_name
+        FROM datacloud_script_execution e
+        LEFT JOIN datacloud_script s ON e.script_id = s.script_id
+        LEFT JOIN sys_user u ON e.executor_id = u.user_id
+        WHERE e.execution_status = 'running'
+        <if test="scriptId != null">
+            AND e.script_id = #{scriptId}
+        </if>
+        AND e.enterprise_id = #{enterpriseId}
+        ORDER BY e.start_time DESC
+    </select>
+
+    <!-- 统计脚本执行次数 -->
+    <select id="countExecutionsByScriptId" resultType="int">
+        SELECT COUNT(*)
+        FROM datacloud_script_execution
+        WHERE script_id = #{scriptId}
+    </select>
+
+    <!-- 统计脚本成功执行次数 -->
+    <select id="countSuccessExecutionsByScriptId" resultType="int">
+        SELECT COUNT(*)
+        FROM datacloud_script_execution
+        WHERE script_id = #{scriptId}
+        AND execution_status = 'success'
+    </select>
+
+    <!-- 统计脚本失败执行次数 -->
+    <select id="countFailedExecutionsByScriptId" resultType="int">
+        SELECT COUNT(*)
+        FROM datacloud_script_execution
+        WHERE script_id = #{scriptId}
+        AND execution_status = 'failed'
+    </select>
+
+    <!-- 获取脚本最后执行时 -->
+    <select id="getLastExecutionTimeByScriptId" resultType="java.util.Date">
+        SELECT MAX(start_time)
+        FROM datacloud_script_execution
+        WHERE script_id = #{scriptId}
+    </select>
+
+    <!-- 获取脚本平均执行时长 -->
+    <select id="getAverageExecutionDurationByScriptId" resultType="long">
+        SELECT AVG(duration)
+        FROM datacloud_script_execution
+        WHERE script_id = #{scriptId}
+        AND execution_status = 'success'
+        AND duration IS NOT NULL
+    </select>
+
+    <!-- 查询执行记录统计信息 -->
+    <select id="selectExecutionStatistics" resultType="java.util.Map">
+        SELECT 
+            COUNT(*) AS total_executions,
+            COUNT(CASE WHEN execution_status = 'success' THEN 1 END) AS success_executions,
+            COUNT(CASE WHEN execution_status = 'failed' THEN 1 END) AS failed_executions,
+            COUNT(CASE WHEN execution_status = 'running' THEN 1 END) AS running_executions,
+            COUNT(CASE WHEN execution_status = 'cancelled' THEN 1 END) AS cancelled_executions,
+            AVG(CASE WHEN execution_status = 'success' AND duration IS NOT NULL THEN duration END) AS avg_duration
+        FROM datacloud_script_execution
+        WHERE enterprise_id = #{enterpriseId}
+    </select>
+
+    <!-- 查询执行状态统 -->
+    <select id="selectExecutionStatusStatistics" resultType="java.util.Map">
+        SELECT 
+            execution_status,
+            COUNT(*) AS count
+        FROM datacloud_script_execution
+        WHERE enterprise_id = #{enterpriseId}
+        GROUP BY execution_status
+        ORDER BY count DESC
+    </select>
+
+    <!-- 查询脚本执行统计 -->
+    <select id="selectScriptExecutionStatistics" resultType="java.util.Map">
+        SELECT 
+            s.script_id,
+            s.script_name,
+            COUNT(e.execution_id) AS execution_count,
+            COUNT(CASE WHEN e.execution_status = 'success' THEN 1 END) AS success_count,
+            COUNT(CASE WHEN e.execution_status = 'failed' THEN 1 END) AS failed_count
+        FROM datacloud_script s
+        LEFT JOIN datacloud_script_execution e ON s.script_id = e.script_id
+        WHERE s.enterprise_id = #{enterpriseId}
+        GROUP BY s.script_id, s.script_name
+        ORDER BY execution_count DESC
+        <if test="limit != null and limit > 0">
+            LIMIT #{limit}
+        </if>
+    </select>
+
+    <!-- 查询最近执行记 -->
+    <select id="selectRecentExecutions" resultMap="ExecutionDTOResultMap">
+        SELECT 
+            e.execution_id,
+            e.script_id,
+            e.execution_name,
+            e.execution_status,
+            e.start_time,
+            e.end_time,
+            e.duration,
+            e.execution_result,
+            e.error_message,
+            e.execution_params,
+            e.executor_id,
+            e.enterprise_id,
+            e.create_time,
+            e.update_time,
+            s.script_name,
+            u.user_name AS executor_name
+        FROM datacloud_script_execution e
+        LEFT JOIN datacloud_script s ON e.script_id = s.script_id
+        LEFT JOIN sys_user u ON e.executor_id = u.user_id
+        WHERE e.enterprise_id = #{enterpriseId}
+        ORDER BY e.start_time DESC
+        <if test="limit != null and limit > 0">
+            LIMIT #{limit}
+        </if>
+    </select>
+
+    <!-- 批量删除脚本执行记录 -->
+    <delete id="batchDeleteScriptExecutions">
+        DELETE FROM datacloud_script_execution
+        WHERE execution_id IN
+        <foreach collection="executionIds" item="executionId" open="(" separator="," close=")">
+            #{executionId}
+        </foreach>
+        AND enterprise_id = #{enterpriseId}
+    </delete>
+
+</mapper>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.men.MenTaskStatusLogMapper">
+
+    <!-- 根据任务ID删除状态日志 -->
+    <delete id="deleteByTaskId" parameterType="long">
+        delete from men_task_status_log where task_id = #{taskId}
+    </delete>
+
+</mapper>

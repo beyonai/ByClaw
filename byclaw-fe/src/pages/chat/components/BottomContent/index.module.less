@@ -1,0 +1,94 @@
+// 新增的底部内容区域样式
+.bottomContent {
+  // margin-top: 20px;
+  background-color: transparent;
+  width: 96%;
+  max-width: 850px;
+  margin: 20px auto;
+  position: relative;
+}
+
+.entryRow {
+  position: relative;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.todoTotal {
+  margin: 0 2px;
+  color: var(~'--@{antPrefix}-color-primary');
+}
+
+@keyframes entry-item-showup {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.hoverEntry {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 16px;
+  height: 34px;
+
+  .itemText {
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .down {
+    background: #fff;
+    padding: 0 8px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 16px;
+    border: 1px solid #0000000f;
+    margin-left: auto;
+  }
+
+  &.active,
+  &:hover {
+    background: #5a6ca70a;
+  }
+
+  &.showup {
+    animation: entry-item-showup 0.3s ease forwards;
+  }
+}
+
+@keyframes expandable-fake-div-hide {
+  100% {
+    width: 0;
+    // display: none;
+  }
+}
+
+@keyframes expandable-fake-div-show25 {
+  0% {
+    width: 0;
+  }
+  100% {
+    width: 25%;
+  }
+}
+
+.fakeHiding {
+  animation: expandable-fake-div-hide 0.3s ease forwards;
+}
+
+.bothSideFakeDiv {
+  width: 25%;
+}
+
+.fakeShow25 {
+  animation: expandable-fake-div-show25 0.3s ease forwards;
+}

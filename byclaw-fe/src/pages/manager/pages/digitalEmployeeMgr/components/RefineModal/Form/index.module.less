@@ -1,0 +1,668 @@
+.container {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+  padding: 8px 16px;
+  border-bottom: 1px solid #ced3d9;
+
+  .headerLeft,
+  .headerRight {
+    display: flex;
+    align-items: center;
+  }
+
+  .backButton {
+    :global {
+      .@{antPrefix}-btn {
+        margin-right: 8px;
+      }
+
+      .anticon {
+        font-size: 20px;
+      }
+    }
+  }
+
+  .headerLeft {
+    width: 50%;
+
+    :global {
+      .@{antPrefix}-space,
+      .@{antPrefix}-space-item:last-child {
+        overflow: hidden;
+      }
+    }
+
+    .title {
+      display: flex;
+      flex-direction: column;
+      color: #0d111a;
+      font-size: 16px;
+
+      .desc {
+        overflow: hidden;
+        color: #707680;
+        font-size: 12px;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+    }
+  }
+
+  .headerRight {
+    .updateTime {
+      display: flex;
+      align-items: center;
+      margin-right: 16px;
+      color: #707680;
+      font-size: 13px;
+    }
+
+    :global {
+      .@{antPrefix}-btn {
+        border-radius: 8px;
+      }
+    }
+  }
+}
+
+.card {
+  border: none;
+  :global {
+    .@{antPrefix}-card-body {
+      padding: 4px;
+    }
+  }
+}
+
+.content {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+
+  .contentLeft,
+  .contentRight {
+    flex: 1;
+  }
+
+  .contentLeft {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 750px;
+    height: 100%;
+    margin: 0 auto;
+    padding: 0 16px !important;
+    overflow-y: auto;
+    border-right: 1px solid #0000000f;
+  }
+
+  .contentRight {
+    display: flex;
+    flex-direction: column;
+    padding: 14px 16px;
+    background-color: #f7fafc;
+  }
+}
+
+.topSection {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 100%;
+  padding: 12px 16px;
+
+  .configBox {
+    display: flex;
+    gap: 4px;
+    align-content: center;
+    align-items: center;
+    padding: 3px 8px;
+    color: #14161a;
+    font-size: 14px;
+    background: #0000000a;
+    border-radius: 6px;
+    cursor: pointer;
+
+    &:hover {
+      color: #165dff;
+    }
+
+    .modelName {
+      margin: 0 5px;
+    }
+  }
+}
+
+.avatarSection {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 15px;
+
+  :global {
+    .@{antPrefix}-upload.@{antPrefix}-upload-select {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+    }
+  }
+
+  .pagePhotoContent {
+    border-radius: 50%;
+  }
+}
+
+.quickCreate {
+  display: flex;
+  align-items: center;
+  // color: #1890ff;
+  cursor: pointer;
+  // color: #ccc;
+  // cursor: not-allowed;
+}
+
+.magicIcon {
+  margin-right: 4px;
+}
+
+.formSection {
+  width: 100%;
+
+  :global {
+    .@{antPrefix}-input,
+    .@{antPrefix}-select-selector {
+      min-height: 40px;
+    }
+
+    .@{antPrefix}-select-selection-item {
+      align-items: center;
+      height: 28px;
+    }
+  }
+
+  .selectSuffix {
+    :global {
+      .@{antPrefix}-form-item-control-input-content {
+        position: relative;
+      }
+
+      .@{antPrefix}-select-selection-item {
+        color: #165dff;
+        font-weight: 400;
+        font-size: 14px;
+        background-color: #e8f3ff;
+      }
+    }
+
+    .suffixIcon {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      color: #165dff;
+      font-size: 20px;
+      cursor: pointer;
+    }
+  }
+}
+
+// 公共配置区域样式（对齐外层基础设置）
+.abilitySection,
+.workStandardSection {
+  margin-bottom: 24px;
+
+  .sectionLabel {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #14161a;
+  }
+}
+
+.abilityContent,
+.workStandardContent {
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  padding: 16px;
+  background: #fff;
+}
+
+.abilityItem,
+.workStandardItem {
+  margin-bottom: 16px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+
+  .itemLabel {
+    .itemTitle {
+      font-size: 14px;
+      color: #0da5aa;
+    }
+  }
+
+  :global {
+    .@{antPrefix}-input:not(.@{antPrefix}-input-textarea) {
+      border: none !important;
+      box-shadow: none !important;
+      padding: 0 !important;
+    }
+
+    .@{antPrefix}-input:not(.@{antPrefix}-input-textarea):focus {
+      outline: none !important;
+      border: none !important;
+      box-shadow: none !important;
+    }
+  }
+}
+
+.commonQuestion {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 24px;
+
+  .questionLabel {
+    display: flex;
+    justify-content: space-between;
+    padding-bottom: 8px;
+    color: #14161a;
+    font-weight: 500;
+    font-size: 14px;
+    line-height: 22px;
+
+    :global {
+      .anticon {
+        color: #165dff;
+        font-size: 16px;
+        cursor: pointer;
+      }
+    }
+  }
+
+  .questionContent {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    :global {
+      .@{antPrefix}-card:hover {
+        background-color: #f7fafc;
+
+        .@{antPrefix}-input {
+          background-color: #f7fafc;
+        }
+      }
+
+      .@{antPrefix}-card-body {
+        padding: 0 16px;
+      }
+
+      .anticon {
+        cursor: pointer;
+      }
+
+      .@{antPrefix}-input {
+        padding: 0;
+        border: none;
+      }
+    }
+
+    .content {
+      display: flex;
+      justify-content: space-between;
+    }
+  }
+}
+
+.preViewTitle {
+  color: #1f2533;
+  font-weight: 500;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.preViewChat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  margin-top: 34px;
+  padding: 20px 32px;
+}
+
+.beyondTitle {
+  color: #40454d;
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.beyondTag {
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  background: #165dff1a;
+  border-radius: 4px;
+
+  > span {
+    font-weight: 500;
+    font-size: 12px;
+    line-height: 18px;
+    background: linear-gradient(90deg, #088cff 0%, #00cdd5 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+}
+
+.ask {
+  margin-top: 8px;
+  color: #14161a;
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.actionsBar {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 40px;
+  margin-top: 18px;
+
+  .actionsBarItem {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    // color: #707680;
+    color: #ccc;
+    font-size: 20px;
+    column-gap: 4px;
+    // cursor: pointer;
+    cursor: not-allowed;
+  }
+}
+
+.questionTips {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 24px;
+
+  .bubleButton {
+    color: #14161a;
+    font-size: 14px;
+    background-color: #0000000a;
+    border: none;
+    border-radius: 12px;
+
+    &:hover,
+    &:active,
+    &:focus {
+      color: #14161a;
+      background-color: #0000000a;
+      border: none;
+    }
+  }
+}
+
+.queryInput {
+  position: relative;
+  margin: 10px 0 50px;
+  padding-bottom: 12px;
+  background-color: #fff;
+  border: 1px solid #d8dee5;
+  border-radius: 20px;
+  box-shadow: 0 6px 10px 0 rgba(42, 60, 79, 0.1);
+}
+
+.inputWrapper {
+  width: 100%;
+  margin-top: 10px;
+  padding: 0 12px;
+  background: transparent;
+
+  textarea {
+    --line-height: 23px;
+    --min-rows: 1;
+
+    width: 100%;
+    height: var(--line-height, 1.5);
+    min-height: calc(var(--line-height) * var(--min-rows));
+    max-height: calc(var(--line-height) * var(--max-rows));
+    overflow-x: hidden;
+    overflow-y: auto;
+    font-size: 16px;
+    line-height: var(--line-height, 1.5);
+    background-color: transparent;
+    border: none;
+    outline: none;
+    transition: height 0.2s ease;
+    resize: none;
+    resize: none;
+  }
+
+  textarea::placeholder {
+    color: #a4aab2;
+    font-size: 14px;
+  }
+}
+
+.tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 12px;
+  padding: 0 12px;
+
+  .sendBtn {
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+  }
+}
+
+// 核心能力部分样式（与外层保持一致）
+.coreAbilitySection {
+  margin-bottom: 24px;
+
+  .sectionLabel {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #14161a;
+
+    .labelActions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+  }
+
+  .abilityHint {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 12px;
+    line-height: 18px;
+  }
+
+  .abilityCollapse {
+    :global {
+      .@{antPrefix}-collapse-item {
+        border: 1px solid #e8e8e8;
+        border-radius: 6px;
+        margin-bottom: 8px;
+
+        &:last-child {
+          margin-bottom: 0;
+        }
+
+        .@{antPrefix}-collapse-header {
+          padding: 0px 12px;
+          align-items: center;
+        }
+
+        .@{antPrefix}-collapse-content-box {
+          padding: 0 !important;
+        }
+      }
+      .@{antPrefix}-input:not(.@{antPrefix}-input-textarea) {
+        border: none !important;
+        font-size: 14px;
+      }
+      .@{antPrefix}-input:not(.@{antPrefix}-input-textarea):focus {
+        outline: none !important;
+        border: none !important;
+        box-shadow: none !important;
+      }
+    }
+  }
+
+  .abilityPanelHeader {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding-right: 8px;
+
+    .abilityIcon {
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      transition: all 0.2s ease;
+
+      &:hover {
+        opacity: 0.8;
+      }
+    }
+
+    .abilityNameInput {
+      flex: 1;
+      font-size: 14px;
+      font-weight: 500;
+      color: #14161a;
+
+      :global {
+        .@{antPrefix}-input {
+          padding: 0;
+          border: none;
+          background: transparent;
+        }
+      }
+    }
+
+    .abilityPanelActions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+
+      .actionIcon {
+        color: #999;
+        font-size: 16px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+
+        &:hover {
+          color: #165dff;
+        }
+      }
+    }
+  }
+
+  .abilityPanelContent {
+    padding-top: 8px;
+  }
+}
+
+// 图标和颜色选择器样式
+.iconColorPicker {
+  width: 280px;
+  padding: 8px 0;
+
+  .pickerSection {
+    margin-bottom: 16px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+
+    .pickerTitle {
+      font-size: 13px;
+      font-weight: 500;
+      color: #14161a;
+      margin-bottom: 8px;
+    }
+
+    .iconOptions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+
+      .iconOption {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        cursor: pointer;
+        border: 1px solid #e8e8e8;
+        border-radius: 4px;
+        transition: all 0.2s ease;
+
+        &:hover {
+          border-color: #165dff;
+        }
+
+        &.iconOptionActive {
+          border-color: #165dff;
+          background-color: #e8f3ff;
+        }
+      }
+    }
+
+    .colorOptions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+
+      .colorOption {
+        width: 24px;
+        height: 24px;
+        cursor: pointer;
+        border: 2px solid transparent;
+        border-radius: 4px;
+        transition: all 0.2s ease;
+
+        &:hover {
+          transform: scale(1.1);
+        }
+
+        &.colorOptionActive {
+          border-color: #165dff;
+          box-shadow: 0 0 0 2px rgba(22, 93, 255, 0.2);
+        }
+      }
+    }
+  }
+}

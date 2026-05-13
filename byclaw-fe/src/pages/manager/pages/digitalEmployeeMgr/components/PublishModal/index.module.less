@@ -1,0 +1,104 @@
+.modalWrap {
+  overflow: auto !important;
+}
+
+.documentLibraryInfoModal {
+  .documentType {
+    flex: 1;
+    // display: flex;
+    padding: 8px 12px;
+    border: 1px solid var(--grey-grey-0515, #d8dee5);
+    // flex-direction: column;
+    // align-items: flex-start;
+    // gap: 8px;
+    // flex: 1 0 0;
+    border-radius: 4px;
+
+    span {
+      display: inline-block;
+      width: 138px;
+      // display: -webkit-box;
+      // -webkit-box-orient: vertical;
+      // -webkit-line-clamp: 1;
+      // flex: 1 0 0;
+      // overflow: hidden;
+      color: #1f2533;
+      font-weight: 400;
+      font-size: 12px;
+      // text-overflow: ellipsis;
+      font-family: 'PingFang SC';
+      font-style: normal;
+      line-height: 20px;
+    }
+  }
+
+  .iconKnowledgeBox {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    padding: 8.97px 9.34px 9.7px 9.34px;
+    border-radius: 8px;
+    // background: #126DFF;
+
+    .iconKnowledge {
+      flex-shrink: 0;
+      color: rgba(242, 245, 255, 1);
+      font-size: 36px;
+      filter: drop-shadow(0 3.67px 3.67px #2d50ca70);
+      fill: linear-gradient(180deg, #f2f5ff 0%, #d8e1ff 100%);
+      stroke: #fff;
+      stroke-width: 0.37px;
+    }
+  }
+
+  .labelLeftStyle {
+    display: inline-block;
+    width: 3px;
+    height: 12px;
+    margin-right: 8px;
+    background: var(--Primary-Primary-06, #126dff);
+    border-radius: 0 2px 2px 0;
+  }
+
+  .labelRightStyle {
+    margin-left: 8px;
+    color: #126dff;
+    font-size: 15px !important;
+  }
+
+  .releaseChannel {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: flex-start;
+    align-self: stretch;
+    padding: 8px 12px;
+    background: var(--user-fill-color-fill-34, #f2f6fa);
+    border: 1px solid var(--user-primary-primary-3, #94bfff);
+    border-radius: 6px;
+
+    .releaseChannelTitle {
+      align-self: stretch;
+      margin: 0;
+      color: #14161a;
+      font-weight: 500;
+      font-size: 14px;
+      font-family: 'PingFang SC';
+      font-style: normal;
+      line-height: 22px;
+    }
+
+    .releaseChannelContent {
+      align-self: stretch;
+      margin: 0;
+      color: #14161a;
+      font-weight: 400;
+      font-size: 13px;
+      font-family: 'PingFang SC';
+      font-style: normal;
+      line-height: 22px;
+    }
+  }
+}

@@ -1,0 +1,984 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.index.IndexMapper">
+
+    <resultMap id="AuthDigitEmployVoResultMap" type="com.iwhalecloud.byai.manager.vo.index.AuthDigitEmployVo">
+        <id column="resource_id" property="id" />
+        <result column="resource_name" property="name" />
+        <result column="resource_desc" property="resourceDesc" />
+        <result column="resource_code" property="resourceCode" />
+        <result column="agent_type" property="agentType" />
+        <result column="agent_home_url" property="agentHomeUrl" />
+        <result column="avatar" property="avatar" />
+        <result column="create_by" property="creatorId" />
+        <result column="chat_avatar" property="chatAvatar" />
+        <result column="is_top" property="isTop" />
+        <result column="top_time" property="topTime" />
+        <result column="grantType" property="grantType" />
+        <result column="latest_grant_time" property="latestGrantTime" />
+        <result column="prologue" property="prologue" />
+        <result column="integration_type" property="integrationType" />
+        <result column="agent_dev_type" property="agentDevType" />
+        <result column="create_type" property="createType" />
+        <result column="terminal" property="terminal" />
+        <result column="open_super_helper" property="openSuperHelper" />
+        <result column="tag_name" property="tagName" />
+        <result column="skills" property="skills" />
+    </resultMap>
+
+    <resultMap id="DigitEmployMarketVoResultMap" type="com.iwhalecloud.byai.manager.vo.index.DigitEmployMarketVo">
+        <id column="resource_id" property="id" />
+        <result column="resource_id" property="resourceId" />
+        <result column="resource_biz_type" property="resourceBizType" />
+        <result column="resource_name" property="name" />
+        <result column="resource_code" property="resourceCode" />
+        <result column="resource_desc" property="resourceDesc" />
+        <result column="avatar" property="avatar" />
+        <result column="owner_type" property="ownerType" />
+        <result column="catalog_id" property="catalogId" />
+        <result column="create_time" property="createTime" />
+        <result column="man_user_id" property="manUserId" />
+        <result column="agent_type" property="agentType" />
+        <result column="agent_home_url" property="agentHomeUrl" />
+        <result column="prologue" property="prologue" />
+        <result column="integration_type" property="integrationType" />
+        <result column="agent_dev_type" property="agentDevType" />
+        <result column="create_type" property="createType" />
+        <result column="terminal" property="terminal" />
+        <result column="open_super_helper" property="openSuperHelper" />
+        <result column="useCount" property="useCount" />
+        <result column="focusCount" property="focusCount" />
+        <result column="create_by" property="creatorId" />
+        <result column="creator_name" property="creatorName" />
+        <result column="myCreate" property="myCreate" />
+        <result column="usesPermissions" property="usesPermissions" />
+        <result column="tag_name" property="tagName" />
+    </resultMap>
+
+    <resultMap id="DigitEmployMarketExtVoResultMap" extends="DigitEmployMarketVoResultMap" type="com.iwhalecloud.byai.manager.vo.index.DigitEmployMarketExtVo">
+        <result column="red_count" property="redCount" />
+        <result column="black_count" property="blackCount" />
+        <result column="force_use_count" property="forceUseCount" />
+        <result column="available_use_count" property="availableUseCount" />
+        <result column="approve_status_count" property="approveStatusCount" />
+    </resultMap>
+
+    <resultMap id="ManPrivVoResultMap" type="com.iwhalecloud.byai.manager.vo.index.ManPrivVo">
+        <result column="grant_obj_id" property="grantObjId"/>
+        <result column="manPrivId" property="manPrivId"/>
+        <result column="manPrivName" property="manPrivName"/>
+    </resultMap>
+
+    <resultMap id="DepartmentRangeVoResultMap" type="com.iwhalecloud.byai.manager.vo.index.DepartmentRangeVo">
+        <id column="org_id" property="orgId"/>
+        <result column="org_name" property="orgName"/>
+        <result column="parent_org_id" property="parentOrgId"/>
+        <result column="path_code" property="pathCode"/>
+    </resultMap>
+
+    <resultMap id="SessionResourceVoResultMap" type="com.iwhalecloud.byai.manager.vo.index.SessionMemberResourceVo">
+        <id column="resource_id" property="resourceId" />
+        <result column="resource_name" property="resourceName" />
+        <result column="resource_code" property="resourceCode" />
+        <result column="resource_desc" property="resourceDesc" />
+        <result column="avatar" property="avatar" />
+        <result column="agent_type" property="agentType" />
+        <result column="agent_home_url" property="agentHomeUrl" />
+        <result column="terminal" property="terminal" />
+        <result column="tag_name" property="tagName" />
+        <result column="session_id" property="sessionId" />
+    </resultMap>
+
+    <resultMap id="AuthResourceVoResultMap" type="com.iwhalecloud.byai.manager.vo.index.AuthResourceVo">
+        <id column="resource_id" property="resourceId" />
+        <result column="resource_source_pk_id" property="resourceSourcePkId" />
+        <result column="resource_code" property="resourceCode" />
+        <result column="resource_name" property="resourceName" />
+        <result column="resource_desc" property="resourceDesc" />
+        <result column="resource_biz_type" property="resourceBizType" />
+        <result column="create_by" property="createBy" />
+        <result column="create_time" property="createTime" />
+        <result column="man_user_id" property="manUserId" />
+        <result column="man_org_id" property="manOrgId" />
+        <result column="update_time" property="updateTime" />
+    </resultMap>
+
+    <select id="selectAuthDigitEmploy" resultMap="AuthDigitEmployVoResultMap">
+        select a.resource_id,
+               a.resource_name,
+               a.resource_code,
+               a.resource_desc,
+               a.avatar,
+               a.create_by,
+               b.agent_type,
+               b.agent_home_url,
+               b.prologue,
+               b.integration_type,
+               b.agent_dev_type,
+               b.create_type,
+               b.terminal,
+               b.open_super_helper,
+               b.tag_name,
+               c.is_top,
+               c.top_time,
+               case
+                   when COALESCE(k.force_use_count, 0) &gt; 0 then 'FORCE_USE'
+                   when COALESCE(k.available_use_count, 0) &gt; 0 then 'AVAILABLE_USE'
+                   else null
+               end as grantType,
+               k.latest_grant_time
+        from ss_resource a
+                 left join ss_res_ext_dig_employee b
+                     on a.resource_id = b.resource_id
+                 <!-- 当前用户超级助手下的子智能体置顶信息 -->
+                 left join (
+                     select suas.is_top,
+                            suas.top_time,
+                            suas.agent_id
+                     from suas_superassist_sub_agent suas
+                              join po_users pu
+                                  on suas.superassist_id = pu.assistant_id
+                     where suas.status_cd = '00A'
+                       and pu.user_id = #{userId}
+                 ) c
+                     on a.resource_id = c.agent_id
+                 <!-- 会话使用频次统计：统计最近使用次数 -->
+                 left join (
+                     select mem_obj_id,
+                            count(1) as total
+                     from byai_session_member
+                     where mem_obj_type = 'AGENT'
+                       and creator_id = #{userId}
+                       and create_time &gt;= #{recentlyStartDate}
+                     group by mem_obj_id
+                 ) d
+                     on a.resource_id = d.mem_obj_id
+                 <!-- 权限聚合查询：同时完成红黑名单判断和获取授权时间 -->
+                 left join (
+                     select grant_obj_id,
+                            sum(case
+                                    when grant_to_type = 'RED'
+                                         and status_cd = 'A' then 1
+                                    else 0
+                                end) as red_count,
+                            sum(case
+                                    when grant_to_type = 'BLACK'
+                                         and status_cd = 'A' then 1
+                                    else 0
+                                end) as black_count,
+                            sum(case
+                                    when grant_to_type = 'RED'
+                                         and status_cd = 'A'
+                                         and grant_type = 'FORCE_USE' then 1
+                                    else 0
+                                end) as force_use_count,
+                            sum(case
+                                    when grant_to_type = 'RED'
+                                         and status_cd = 'A'
+                                         and grant_type = 'AVAILABLE_USE' then 1
+                                    else 0
+                                end) as available_use_count,
+                            max(case
+                                    when grant_to_type = 'RED'
+                                         and status_cd = 'A' then create_date
+                                    else null
+                                end) as latest_grant_time
+                     from au_privilege_grant
+                     where grant_type in ('AVAILABLE_USE', 'FORCE_USE')
+                       and grant_obj_type = 'DIG_EMPLOYEE'
+                       and status_cd = 'A'
+                       <trim prefix="and (" suffix=")" prefixOverrides="or">
+                           <if test="userOrgIds != null and userOrgIds.size() > 0">
+                               or (grant_to_obj_type = 'ORG' and grant_to_obj_id in
+                                   <foreach collection="userOrgIds" item="orgId" open="(" separator="," close=")">
+                                       #{orgId}
+                                   </foreach>
+                               )
+                           </if>
+                           <if test="userId != null">
+                               or (grant_to_obj_type = 'USER' and grant_to_obj_id = #{userId})
+                           </if>
+                           <if test="userPositionIds != null and userPositionIds.size() > 0">
+                               or (grant_to_obj_type = 'POST' and grant_to_obj_id in
+                                   <foreach collection="userPositionIds" item="positionId" open="(" separator="," close=")">
+                                       #{positionId}
+                                   </foreach>
+                               )
+                           </if>
+                           <if test="userStationId != null">
+                               or (grant_to_obj_type = 'STATION' and grant_to_obj_id = #{userStationId})
+                           </if>
+                       </trim>
+                     group by grant_obj_id
+                 ) k
+                     on a.resource_id = k.grant_obj_id
+        <where>
+            <!-- 基础过滤条件 -->
+            and a.resource_biz_type = 'DIG_EMPLOYEE'
+            and a.resource_status = 2
+            <!-- 黑名单排除：不能有黑名单记录 -->
+            and (k.black_count = 0 or k.black_count is null)
+            <!-- 类型过滤：all-全部，owner-我创建的，authorize-授权给我的 -->
+            <choose>
+                <!-- owner: 我创建的 -->
+                <when test="type == 'owner'">
+                    and a.create_by = #{userId}
+                </when>
+                <!-- authorize: 授权给我的 -->
+                <when test="type == 'authorize'">
+                    and k.red_count &gt; 0
+                </when>
+                <!-- 默认=all: 全部=红名单判断+我创建的 -->
+                <otherwise>
+                    and (k.red_count &gt; 0 or a.create_by = #{userId})
+                </otherwise>
+            </choose>
+            <!-- 关键字搜索 -->
+            <if test="keyword != null and keyword != ''">
+                and a.resource_name like concat('%', #{keyword}, '%')
+            </if>
+            <!-- 终端类型过滤 -->
+            <if test="terminals != null and terminals.size() > 0">
+                and b.terminal in
+                <foreach collection="terminals" item="terminal" open="(" separator="," close=")">
+                    #{terminal}
+                </foreach>
+            </if>
+            <!-- 机器渠道过滤（模糊匹配） -->
+            <if test="machineChannel != null and machineChannel != ''">
+                and b.machine_channel like concat('%', #{machineChannel}, '%')
+            </if>
+        </where>
+        <!-- 按置顶和最新授权时间倒序排序 -->
+        order by COALESCE(c.is_top, 0) desc,
+                 COALESCE(c.top_time, '1970-01-01 00:00:00') desc,
+                 COALESCE(d.total, 0) desc,
+                 a.create_time desc,
+                 COALESCE(k.latest_grant_time, '1970-01-01 00:00:00') desc
+    </select>
+
+    <select id="queryMyUsual" resultMap="AuthDigitEmployVoResultMap">
+        select a.resource_id,
+               a.resource_name,
+               a.resource_code,
+               a.resource_desc,
+               a.avatar,
+               a.create_by,
+               b.agent_type,
+               b.agent_home_url,
+               b.prologue,
+               b.integration_type,
+               b.agent_dev_type,
+               b.create_type,
+               b.terminal,
+               b.open_super_helper,
+               b.tag_name,
+               case when COALESCE(k.available_use_count, 0) > 0 THEN 'AVAILABLE_USE' ELSE NULL END AS grantType,
+               k.latest_grant_time
+        from ss_resource a
+                 left join ss_res_ext_dig_employee b
+                     on a.resource_id = b.resource_id
+                 <!-- 会话使用频次统计：统计最近使用次数 -->
+                 left join (
+                     select mem_obj_id,
+                            count(1) as total
+                     from byai_session_member
+                     where mem_obj_type = 'AGENT'
+                       and creator_id = #{userId}
+                       and create_time &gt;= #{recentlyStartDate}
+                     group by mem_obj_id
+                 ) c
+                     on a.resource_id = c.mem_obj_id
+                 <!-- 权限聚合查询：同时完成红黑名单判断和获取授权时间 -->
+                 left join (
+                     select grant_obj_id,
+                            sum(case when grant_to_type = 'RED'   and status_cd = 'A' then 1 else 0 end) as red_count,
+                            sum(case when grant_to_type = 'BLACK' and status_cd = 'A' then 1 else 0 end) as black_count,
+                            sum(case when grant_to_type = 'RED'   and status_cd = 'A'  and grant_type = 'AVAILABLE_USE' and grant_to_obj_type='USER' then 1 else 0 end) as available_use_count,
+                            max(case when grant_to_type = 'RED'   and status_cd = 'A' then create_date else null end) as latest_grant_time
+                     from au_privilege_grant
+                     where grant_type in ('AVAILABLE_USE', 'FORCE_USE')
+                       and grant_obj_type = 'DIG_EMPLOYEE'
+                       and status_cd = 'A'
+                       <trim prefix="and (" suffix=")" prefixOverrides="or">
+                           <if test="userOrgIds != null and userOrgIds.size() > 0">
+                               or (grant_to_obj_type = 'ORG' and grant_to_obj_id in
+                                   <foreach collection="userOrgIds" item="orgId" open="(" separator="," close=")">
+                                       #{orgId}
+                                   </foreach>
+                               )
+                           </if>
+                           <if test="userId != null">
+                               or (grant_to_obj_type = 'USER' and grant_to_obj_id = #{userId})
+                           </if>
+                           <if test="userPositionIds != null and userPositionIds.size() > 0">
+                               or (grant_to_obj_type = 'POST' and grant_to_obj_id in
+                                   <foreach collection="userPositionIds" item="positionId" open="(" separator="," close=")">
+                                       #{positionId}
+                                   </foreach>
+                               )
+                           </if>
+                           <if test="userStationId != null">
+                               or (grant_to_obj_type = 'STATION' and grant_to_obj_id = #{userStationId})
+                           </if>
+                       </trim>
+                     group by grant_obj_id
+                 ) k
+                     on a.resource_id = k.grant_obj_id
+        <where>
+            <!-- 基础过滤条件 -->
+            and a.resource_biz_type = 'DIG_EMPLOYEE'
+            and a.resource_status = 2
+            <!-- 红名单判断：必须有红名单授权或自己创建的 -->
+            and (k.red_count > 0 or a.create_by = #{userId})
+            <!-- 黑名单排除：不能有黑名单记录 -->
+            and (k.black_count = 0 or k.black_count is null)
+            <!-- 关键字搜索 -->
+            <if test="keyword != null and keyword != ''">
+                and a.resource_name like concat('%', #{keyword}, '%')
+            </if>
+            <!-- 终端类型过滤 -->
+            <if test="terminals != null and terminals.size() > 0">
+                and b.terminal in
+                <foreach collection="terminals" item="terminal" open="(" separator="," close=")">
+                    #{terminal}
+                </foreach>
+            </if>
+            and COALESCE(c.total, 0) &gt; 0
+        </where>
+        <!-- 按使用频次倒序排序 -->
+        order by COALESCE(c.total, 0) desc
+    </select>
+
+    <select id="queryRecentlyAdded" resultMap="AuthDigitEmployVoResultMap">
+        select a.resource_id,
+               a.resource_name,
+               a.resource_code,
+               a.resource_desc,
+               a.avatar,
+               a.create_by,
+               b.agent_type,
+               b.agent_home_url,
+               b.prologue,
+               b.integration_type,
+               b.agent_dev_type,
+               b.create_type,
+               b.terminal,
+               b.open_super_helper,
+               b.tag_name,
+               case when COALESCE(k.available_use_count, 0) > 0 THEN 'AVAILABLE_USE' ELSE NULL END AS grantType,
+               k.latest_grant_time
+        from ss_resource a
+                 left join ss_res_ext_dig_employee b on a.resource_id = b.resource_id
+                 <!-- 权限聚合查询：同时完成红黑名单判断和获取授权时间 -->
+                 left join (
+                     select grant_obj_id,
+                            sum(case when grant_to_type = 'RED'   and status_cd = 'A' then 1 else 0 end) as red_count,
+                            sum(case when grant_to_type = 'BLACK' and status_cd = 'A' then 1 else 0 end) as black_count,
+                            sum(case when grant_to_type = 'RED'   and status_cd = 'A'  and grant_type = 'AVAILABLE_USE' and grant_to_obj_type='USER' then 1 else 0 end) as available_use_count,
+                            max(case when grant_to_type = 'RED'   and status_cd = 'A' then create_date else null end) as latest_grant_time
+                     from au_privilege_grant
+                     where grant_type in('AVAILABLE_USE','FORCE_USE')
+                       and grant_obj_type = 'DIG_EMPLOYEE'
+                       and status_cd = 'A'
+                       <trim prefix="and (" suffix=")" prefixOverrides="or">
+                           <if test="userOrgIds != null and userOrgIds.size() > 0">
+                               or (grant_to_obj_type = 'ORG' and grant_to_obj_id in
+                                   <foreach collection="userOrgIds" item="orgId" open="(" separator="," close=")">
+                                       #{orgId}
+                                   </foreach>
+                               )
+                           </if>
+                           <if test="userId != null">
+                               or (grant_to_obj_type = 'USER' and grant_to_obj_id = #{userId})
+                           </if>
+                           <if test="userPositionIds != null and userPositionIds.size() > 0">
+                               or (grant_to_obj_type = 'POST' and grant_to_obj_id in
+                                   <foreach collection="userPositionIds" item="positionId" open="(" separator="," close=")">
+                                       #{positionId}
+                                   </foreach>
+                               )
+                           </if>
+                           <if test="userStationId != null">
+                               or (grant_to_obj_type = 'STATION' and grant_to_obj_id = #{userStationId})
+                           </if>
+                       </trim>
+                     group by grant_obj_id
+                 ) k on a.resource_id = k.grant_obj_id
+        <where>
+            and a.resource_biz_type = 'DIG_EMPLOYEE'
+            and a.resource_status = 2
+            <!-- 红名单判断：必须有红名单授权 -->
+            and (k.red_count > 0 or a.create_by = #{userId})
+            <!-- 黑名单排除：不能有黑名单记录 -->
+            and (k.black_count = 0 or k.black_count is null)
+            <!-- 关键字搜索 -->
+            <if test="keyword != null and keyword != ''">
+                and a.resource_name like concat('%', #{keyword}, '%')
+            </if>
+            <!-- 终端类型过滤 -->
+            <if test="terminals != null and terminals.size() > 0">
+                and b.terminal in
+                <foreach collection="terminals" item="terminal" open="(" separator="," close=")">
+                    #{terminal}
+                </foreach>
+            </if>
+        </where>
+        <!-- 按红名单最新授权时间倒序排序 -->
+        ORDER BY a.create_time DESC,COALESCE(k.latest_grant_time,'1970-01-01 00:00:00') DESC
+     </select>
+
+    <select id="queryMyCreated" resultMap="DigitEmployMarketVoResultMap">
+        select a.resource_id,
+               a.resource_name,
+               a.resource_code,
+               a.resource_desc,
+               a.avatar,
+               a.owner_type,
+               a.catalog_id,
+               a.create_time,
+               a.man_user_id,
+               a.create_by,
+               b.agent_type,
+               b.agent_home_url,
+               b.prologue,
+               b.integration_type,
+               b.agent_dev_type,
+               b.create_type,
+               b.terminal,
+               b.open_super_helper,
+               b.tag_name,
+               b.skills,
+               c.user_name as creator_name,
+               COALESCE(d.total, 0) useCount,
+               COALESCE(e.total, 0) focusCount,
+               true as myCreate,
+               true as usesPermissions
+        from ss_resource a
+                 left join ss_res_ext_dig_employee b on a.resource_id = b.resource_id
+                 left join po_users c on a.create_by = c.user_id
+                 <!-- 会话使用频次统计：统计所有历史使用次数 -->
+                 left join (
+                     select mem_obj_id,
+                            count(1) as total
+                     from byai_session_member
+                     where mem_obj_type = 'AGENT'
+                     group by mem_obj_id
+                 ) d
+                     on a.resource_id = d.mem_obj_id
+                 <!-- 用户申请授权统计：统计用户主动申请授权的次数 -->
+                 left join (
+                     select grant_obj_id,
+                            sum(1) as total
+                     from au_privilege_grant
+                     where grant_obj_type = 'DIG_EMPLOYEE'
+                       and grant_type in ('AVAILABLE_USE','FORCE_USE')
+                       and status_cd = 'A'
+                       and grant_to_type = 'RED'
+                       and grant_to_obj_type = 'USER'
+                     group by grant_obj_id
+                 ) e
+                     on a.resource_id = e.grant_obj_id
+        <where>
+            <!-- 基础过滤条件 -->
+            and a.resource_biz_type = 'DIG_EMPLOYEE'
+            and a.resource_status = 2
+            <if test="userId !=null">
+                and a.create_by = #{userId}
+            </if>
+            <!-- 目录过滤 -->
+            <if test="catalogIds != null and catalogIds.size() > 0">
+                and a.catalog_id in
+                <foreach collection="catalogIds" item="catalogIdItem" open="(" separator="," close=")">
+                    #{catalogIdItem}
+                </foreach>
+            </if>
+            <if test="(catalogIds == null or catalogIds.size() == 0) and catalogId != null">
+                and a.catalog_id = #{catalogId}
+            </if>
+            <!-- 关键字搜索 -->
+            <if test="keyword != null and keyword != ''">
+                and a.resource_name like concat('%', #{keyword}, '%')
+            </if>
+        </where>
+        <!-- 按创建时间倒序排序 -->
+        order by a.create_time desc
+    </select>
+
+    <select id="discover" resultMap="DigitEmployMarketExtVoResultMap">
+        select a.resource_id,
+               a.resource_biz_type,
+               a.resource_name,
+               a.resource_code,
+               a.resource_desc,
+               a.avatar,
+               a.owner_type,
+               a.catalog_id,
+               a.create_time,
+               a.man_user_id,
+               a.create_by,
+               b.agent_type,
+               b.agent_home_url,
+               b.prologue,
+               b.integration_type,
+               b.agent_dev_type,
+               b.create_type,
+               b.terminal,
+               b.open_super_helper,
+               b.tag_name,
+               b.skills,
+               c.user_name as creator_name,
+               COALESCE(d.total, 0) useCount,
+               COALESCE(e.total, 0) focusCount,
+               COALESCE(k.red_count, 0) as red_count,
+               COALESCE(k.black_count, 0) as black_count,
+               COALESCE(k.force_use_count, 0) as force_use_count,
+               COALESCE(k.available_use_count, 0) as available_use_count,
+               COALESCE(k.approve_status_count, 0) as approve_status_count
+        from ss_resource a
+                 left join ss_res_ext_dig_employee b
+                     on a.resource_id = b.resource_id
+                 left join po_users c
+                     on a.create_by = c.user_id
+                 <!-- 会话使用频次统计：统计所有历史使用次数 -->
+                 left join (
+                     select mem_obj_id,
+                            count(1) as total
+                     from byai_session_member
+                     where mem_obj_type = 'AGENT'
+                     group by mem_obj_id
+                 ) d
+                     on a.resource_id = d.mem_obj_id
+                 <!-- 用户申请授权统计：统计用户主动申请授权的次数 -->
+                 left join (
+                     select grant_obj_id,
+                            sum(1) as total
+                     from au_privilege_grant
+                     where grant_obj_type = 'DIG_EMPLOYEE'
+                       and grant_type = 'AVAILABLE_USE'
+                       and status_cd = 'A'
+                       and grant_to_type = 'RED'
+                       and grant_to_obj_type = 'USER'
+                     group by grant_obj_id
+                 ) e
+                     on a.resource_id = e.grant_obj_id
+                 <!-- 权限聚合查询：同时完成红黑名单判断和获取授权时间 -->
+                 left join (
+                     select grant_obj_id,
+                            sum(case when grant_to_type = 'RED'   and status_cd = 'A' then 1 else 0 end) as red_count,
+                            sum(case when grant_to_type = 'BLACK' and status_cd = 'A' then 1 else 0 end) as black_count,
+                            sum(case when grant_type = 'FORCE_USE'     and status_cd = 'A' then 1 else 0 end) as force_use_count,
+                            sum(case when grant_type = 'AVAILABLE_USE' and status_cd = 'A' then 1 else 0 end) as available_use_count,
+                            sum(case when grant_type = 'AVAILABLE_USE' and status_cd = 'S' then 1 else 0 end) as approve_status_count,
+                            sum(case when grant_type = 'ALLOW_MANAGE'  and status_cd = 'A' then 1 else 0 end) as allow_manage_count,
+                            max(case when grant_to_type = 'RED' and status_cd = 'A' then create_date else null end) as latest_grant_time
+                     from au_privilege_grant
+                     where grant_type in ('AVAILABLE_USE', 'FORCE_USE', 'ALLOW_MANAGE')
+                       and grant_obj_type = 'DIG_EMPLOYEE'
+                       and status_cd in ('A', 'S')
+                       <trim prefix="and (" suffix=")" prefixOverrides="or">
+                           <if test="userOrgIds != null and userOrgIds.size() > 0">
+                               or (grant_to_obj_type = 'ORG' and grant_to_obj_id in
+                                   <foreach collection="userOrgIds" item="orgId" open="(" separator="," close=")">
+                                       #{orgId}
+                                   </foreach>
+                               )
+                           </if>
+                           <if test="userId != null">
+                               or (grant_to_obj_type = 'USER' and grant_to_obj_id = #{userId})
+                           </if>
+                           <if test="userPositionIds != null and userPositionIds.size() > 0">
+                               or (grant_to_obj_type = 'POST' and grant_to_obj_id in
+                                   <foreach collection="userPositionIds" item="positionId" open="(" separator="," close=")">
+                                       #{positionId}
+                                   </foreach>
+                               )
+                           </if>
+                           <if test="userStationId != null">
+                               or (grant_to_obj_type = 'STATION' and grant_to_obj_id = #{userStationId})
+                           </if>
+                       </trim>
+                     group by grant_obj_id
+                 ) k
+                     on a.resource_id = k.grant_obj_id
+                 <!-- 待审批申请聚合：用于 PENDING_MY_APPROVAL / APPLIED_BY_ME 权限筛选 -->
+                 left join (
+                     select grant_obj_id,
+                            count(1) as pending_apply_count,
+                            sum(case when grant_to_obj_type = 'USER' and grant_to_obj_id = #{userId} then 1 else 0 end) as my_pending_apply_count
+                     from au_privilege_grant
+                     where grant_type = 'AVAILABLE_USE'
+                       and grant_to_type = 'RED'
+                       and status_cd = 'P'
+                     group by grant_obj_id
+                 ) p
+                     on a.resource_id = p.grant_obj_id
+        <where>
+            <!-- 基础过滤条件 -->
+            and a.resource_biz_type = 'DIG_EMPLOYEE'
+            <choose>
+                <when test="resourceStatus != null">
+                    and a.resource_status = #{resourceStatus}
+                </when>
+                <when test="includeAllResourceStatus == true">
+                    <!-- 查询全部状态：不附加 resource_status 过滤 -->
+                </when>
+                <otherwise>
+                    and a.resource_status = 2
+                </otherwise>
+            </choose>
+            <if test="ownerType != null and ownerType !=''">
+                and a.owner_type = #{ownerType}
+            </if>
+            <!-- 资源标识过滤 -->
+            <if test="resourceId != null">
+                and a.resource_id = #{resourceId}
+            </if>
+            <!-- 资源标识过滤 -->
+            <if test="resourceId != null">
+                and a.resource_id = #{resourceId}
+            </if>
+            <if test="catalogIds != null and catalogIds.size() > 0">
+                and a.catalog_id in
+                <foreach collection="catalogIds" item="catalogIdItem" open="(" separator="," close=")">
+                    #{catalogIdItem}
+                </foreach>
+            </if>
+            <if test="(catalogIds == null or catalogIds.size() == 0) and catalogId != null">
+                and a.catalog_id = #{catalogId}
+            </if>
+            <!-- 关键字搜索 -->
+            <if test="keyword != null and keyword != ''">
+                and a.resource_name like concat('%', #{keyword}, '%')
+            </if>
+            <!-- 黑名单排除：通过聚合结果直接过滤 -->
+            <if test="(userOrgIds != null and userOrgIds.size() > 0) or userId != null">
+                and (k.black_count = 0 or k.black_count is null)
+            </if>
+            <!-- 发布组织过滤 -->
+            <if test="publishOrgIds != null and publishOrgIds.size() > 0">
+                and a.man_org_id in
+                <foreach collection="publishOrgIds" item="orgId" open="(" separator="," close=")">
+                    #{orgId}
+                </foreach>
+            </if>
+            <!-- 被授权（获得使用权限的数字员工，不含自主申请） -->
+            <if test="metaStatus != null and metaStatus == 'AUTHORIZED'">
+                and COALESCE(k.force_use_count, 0) &gt; 0 and COALESCE(k.approve_status_count, 0) &lt;= 0
+            </if>
+            <!-- 已过审（自主申请审核通过可使用的数字员工） -->
+            <if test="metaStatus != null and metaStatus == 'APPROVED'">
+                and COALESCE(k.available_use_count, 0) &gt; 0 and COALESCE(k.approve_status_count, 0) &lt;= 0
+            </if>
+            <!-- 审核中（待审核的数字员工） -->
+            <if test="metaStatus != null and metaStatus == 'AUDITING'">
+                and COALESCE(k.approve_status_count, 0) &gt; 0
+            </if>
+            <!-- 可申请（未获权限但可发起申请的数字员工,且不在申请中的） -->
+            <if test="metaStatus != null and metaStatus == 'APPLY_AVAILABLE'">
+                and COALESCE(k.red_count, 0) &lt;= 0 and COALESCE(k.approve_status_count, 0) &lt;= 0
+            </if>
+            <!-- 权限筛选：CREATED_BY_ME / AUTHORIZED_TO_ME / PENDING_MY_APPROVAL / APPLIED_BY_ME -->
+            <choose>
+                <when test="permission != null and permission == 'CREATED_BY_ME'">
+                    and a.create_by = #{userId}
+                </when>
+                <when test="permission != null and permission == 'AUTHORIZED_TO_ME'">
+                    and (a.create_by is null or a.create_by != #{userId})
+                    and (k.red_count &gt; 0 or k.allow_manage_count &gt; 0)
+                </when>
+                <when test="permission != null and permission == 'PENDING_MY_APPROVAL'">
+                    and coalesce(p.pending_apply_count, 0) &gt; 0
+                    and (
+                        a.create_by = #{userId}
+                        or k.allow_manage_count &gt; 0
+                        <if test="platformManager == true">
+                            or 1 = 1
+                        </if>
+                        <if test="managerOrgPathCodes != null and managerOrgPathCodes.size() > 0">
+                            or exists (
+                                select 1
+                                  from po_organization org
+                                 where org.org_id = a.man_org_id
+                                   and (
+                                    <foreach collection="managerOrgPathCodes" item="pathCode" separator=" or ">
+                                        org.path_code = #{pathCode}
+                                        or org.path_code like concat(#{pathCode}, '.%')
+                                    </foreach>
+                                   )
+                            )
+                        </if>
+                    )
+                </when>
+                <when test="permission != null and permission == 'APPLIED_BY_ME'">
+                    and coalesce(p.my_pending_apply_count, 0) &gt; 0
+                </when>
+            </choose>
+        </where>
+        <!-- 排序规则 -->
+        <choose>
+            <when test="orderField == 'use' and orderBy == 'asc'">
+                order by COALESCE(d.total, 0) asc
+            </when>
+            <when test="orderField == 'use' and orderBy == 'desc'">
+                order by COALESCE(d.total, 0) desc
+            </when>
+            <when test="orderField == 'focus' and orderBy == 'asc'">
+                order by  COALESCE(e.total, 0) asc
+            </when>
+            <when test="orderField == 'focus' and orderBy == 'desc'">
+                order by COALESCE(e.total, 0) desc
+            </when>
+            <when test="orderField == 'createTime' and orderBy == 'asc'">
+                order by a.create_time asc
+            </when>
+            <when test="orderField == 'createTime' and orderBy == 'desc'">
+                order by a.create_time desc
+            </when>
+            <when test="orderField == 'updateTime' and orderBy == 'asc'">
+                order by COALESCE(a.update_time, '9999-12-31 23:59:59') asc
+            </when>
+            <when test="orderField == 'updateTime' and orderBy == 'desc'">
+                order by COALESCE(a.update_time, '1970-01-01 00:00:00') desc
+            </when>
+            <when test="orderField == 'publishTime' and orderBy == 'asc'">
+                order by COALESCE(a.publish_time, '9999-12-31 23:59:59') asc
+            </when>
+            <when test="orderField == 'publishTime' and orderBy == 'desc'">
+                order by COALESCE(a.publish_time, '1970-01-01 00:00:00') desc
+            </when>
+            <otherwise>
+                order by COALESCE(a.update_time, '1970-01-01 00:00:00') desc, a.create_time desc
+            </otherwise>
+        </choose>
+    </select>
+
+    <!-- 查询顶级组织ID -->
+    <select id="findTopOrgId" resultType="java.lang.Long">
+        select org_id
+        from po_organization
+        <where>
+            <!-- 顶级组织标识：父组织ID为-1 -->
+            and parent_org_id = -1
+        </where>
+    </select>
+
+    <select id="findManPrivVo" resultMap="ManPrivVoResultMap">
+        select a.grant_obj_id,
+               b.user_id   as manPrivId,
+               b.user_name as manPrivName
+        from au_privilege_grant a
+                 join po_users b
+                 on a.grant_to_obj_id = b.user_id
+        where grant_type = 'ALLOW_MANAGE'
+          and a.grant_obj_type = 'DIG_EMPLOYEE'
+          and a.grant_to_obj_type = 'USER'
+          and a.status_cd = 'A'
+          <if test="resourceIds != null and resourceIds.size() > 0">
+              and a.grant_obj_id in
+              <foreach collection="resourceIds" item="item" open="(" separator="," close=")">
+                  #{item}
+              </foreach>
+          </if>
+    </select>
+
+    <!-- 查询用户所属部门范围信息 -->
+    <select id="findMyDepartmentRange" resultMap="DepartmentRangeVoResultMap">
+        select a.org_id,
+               a.org_name,
+               a.parent_org_id,
+               a.path_code
+        from po_organization a
+                 inner join po_users_organization b
+                     on a.org_id = b.org_id
+        <where>
+            <!-- 用户ID过滤 -->
+            and b.user_id = #{userId}
+        </where>
+        <!-- 按组织层级和组织ID升序排序 -->
+        order by a.org_level asc, a.org_id asc
+    </select>
+
+    <!-- 根据会话ID列表查询资源信息 -->
+    <select id="selectResourcesBySessionIds" resultMap="SessionResourceVoResultMap">
+        select
+            a.resource_id,
+            a.resource_name,
+            a.resource_code,
+            a.resource_desc,
+            a.avatar,
+            b.agent_type,
+            b.agent_home_url,
+            b.terminal,
+            b.tag_name,
+            c.session_id
+        from ss_resource a, ss_res_ext_dig_employee b, byai_session_member c
+        where a.resource_id = b.resource_id
+          and a.resource_id = c.mem_obj_id
+          and c.user_role = 'MEMBER'
+          and c.session_id in
+        <foreach collection="sessionIds" item="sessionId" open="(" separator="," close=")">
+            #{sessionId}
+        </foreach>
+    </select>
+
+    <select id="queryAuthDoc" resultMap="AuthResourceVoResultMap">
+        select a.resource_id,
+               a.resource_source_pk_id,
+               a.resource_code,
+               a.resource_name,
+               a.resource_desc,
+               a.resource_biz_type,
+               a.create_by,
+               a.create_time,
+               a.man_org_id,
+               a.man_user_id,
+               a.update_time
+        from ss_resource a
+                 left join (
+                     select grant_obj_id,
+                            sum(case when grant_to_type = 'RED'    and status_cd = 'A' then 1 else 0 end) as red_count,
+                            sum(case when grant_to_type = 'BLACK'  and status_cd = 'A' then 1 else 0 end) as black_count
+                     from au_privilege_grant
+                     where grant_type in ('AVAILABLE_USE', 'FORCE_USE')
+                       and grant_obj_type in ('KG_DOC', 'KG_QA', 'KG_TERM')
+                       and status_cd = 'A'
+                       <trim prefix="and (" suffix=")" prefixOverrides="or">
+                           <if test="userOrgIds != null and userOrgIds.size() > 0">
+                               or (grant_to_obj_type = 'ORG' and grant_to_obj_id in
+                                   <foreach collection="userOrgIds" item="orgId" open="(" separator="," close=")">
+                                       #{orgId}
+                                   </foreach>
+                               )
+                           </if>
+                           <if test="userId != null">
+                               or (grant_to_obj_type = 'USER' and grant_to_obj_id = #{userId})
+                           </if>
+                           <if test="userPositionIds != null and userPositionIds.size() > 0">
+                               or (grant_to_obj_type = 'POST' and grant_to_obj_id in
+                                   <foreach collection="userPositionIds" item="positionId" open="(" separator="," close=")">
+                                       #{positionId}
+                                   </foreach>
+                               )
+                           </if>
+                           <if test="userStationId != null">
+                               or (grant_to_obj_type = 'STATION' and grant_to_obj_id = #{userStationId})
+                           </if>
+                       </trim>
+                     group by grant_obj_id
+                 ) k
+                     on a.resource_id = k.grant_obj_id
+         left join ss_res_ext_doc b
+                 on a.resource_id=b.resource_id
+        <where>
+            <!-- 基础过滤条件 -->
+            and a.resource_status = 2
+            <!-- 黑名单排除：不能有黑名单记录 -->
+            and (k.black_count = 0 or k.black_count is null)
+            <!-- 类型过滤：all-全部，owner-我创建的，authorize-授权给我的 -->
+            <choose>
+                <!-- owner: 我创建的 -->
+                <when test="type == 'owner'">
+                    and a.create_by = #{userId}
+                </when>
+                <!-- authorize: 授权给我的,排除自己创建的 -->
+                <when test="type == 'authorize'">
+                    and (k.red_count > 0 and a.create_by != #{userId})
+                </when>
+                <!-- 默认=all: 全部=红名单判断+我创建的 -->
+                <otherwise>
+                    and (k.red_count > 0 or a.create_by = #{userId})
+                </otherwise>
+            </choose>
+            <!-- 关键字搜索 -->
+            <if test="keyword != null and keyword != ''">
+                and a.resource_name like concat('%', #{keyword}, '%')
+            </if>
+            <!-- 资源类型过滤：如果有指定则使用指定值，否则默认过滤KG_DOC、KG_QA、KG_TERM -->
+            <choose>
+                <when test="resourceBizTypes != null and resourceBizTypes.size() > 0">
+                    and a.resource_biz_type in
+                    <foreach collection="resourceBizTypes" item="bizType" open="(" separator="," close=")">
+                        #{bizType}
+                    </foreach>
+                </when>
+                <otherwise>
+                    and a.resource_biz_type in ('KG_DOC', 'KG_QA', 'KG_TERM')
+                </otherwise>
+            </choose>
+            order by a.create_time desc, a.update_time desc
+        </where>
+    </select>
+
+    <select id="queryAuthTools" resultMap="AuthResourceVoResultMap">
+        select a.resource_id,
+               a.resource_source_pk_id,
+               a.resource_code,
+               a.resource_name,
+               a.resource_desc,
+               a.resource_biz_type,
+               a.create_by,
+               a.create_time,
+               a.man_org_id,
+               a.man_user_id,
+               a.update_time
+        from ss_resource a
+                 left join (
+                     select grant_obj_id,
+                            sum(case when grant_to_type = 'RED'    and status_cd = 'A' then 1 else 0 end) as red_count,
+                            sum(case when grant_to_type = 'BLACK'  and status_cd = 'A' then 1 else 0 end) as black_count
+                     from au_privilege_grant
+                     where grant_type in ('AVAILABLE_USE', 'FORCE_USE')
+                       and grant_obj_type in ('AGENT', 'TOOLKIT', 'TOOL', 'MCP_TOOL', 'MCP')
+                       and status_cd = 'A'
+                       <trim prefix="and (" suffix=")" prefixOverrides="or">
+                           <if test="userOrgIds != null and userOrgIds.size() > 0">
+                               or (grant_to_obj_type = 'ORG' and grant_to_obj_id in
+                                   <foreach collection="userOrgIds" item="orgId" open="(" separator="," close=")">
+                                       #{orgId}
+                                   </foreach>
+                               )
+                           </if>
+                           <if test="userId != null">
+                               or (grant_to_obj_type = 'USER' and grant_to_obj_id = #{userId})
+                           </if>
+                           <if test="userPositionIds != null and userPositionIds.size() > 0">
+                               or (grant_to_obj_type = 'POST' and grant_to_obj_id in
+                                   <foreach collection="userPositionIds" item="positionId" open="(" separator="," close=")">
+                                       #{positionId}
+                                   </foreach>
+                               )
+                           </if>
+                           <if test="userStationId != null">
+                               or (grant_to_obj_type = 'STATION' and grant_to_obj_id = #{userStationId})
+                           </if>
+                       </trim>
+                     group by grant_obj_id
+                 ) k
+                     on a.resource_id = k.grant_obj_id
+        <where>
+            <!-- 基础过滤条件 -->
+            and a.resource_status = 2
+            <!-- 黑名单排除：不能有黑名单记录 -->
+            and (k.black_count = 0 or k.black_count is null)
+            <!-- 关键字搜索 -->
+            <if test="keyword != null and keyword != ''">
+                and a.resource_name like concat('%', #{keyword}, '%')
+            </if>
+            <!-- 资源类型过滤：如果有指定则使用指定值，否则默认过滤AGENT、TOOLKIT、TOOL、MCP_TOOL、MCP -->
+            <choose>
+                <when test="resourceBizTypes != null and resourceBizTypes.size() > 0">
+                    and a.resource_biz_type in
+                    <foreach collection="resourceBizTypes" item="bizType" open="(" separator="," close=")">
+                        #{bizType}
+                    </foreach>
+                </when>
+                <otherwise>
+                    and a.resource_biz_type in ('AGENT', 'TOOLKIT', 'TOOL', 'MCP_TOOL', 'MCP')
+                </otherwise>
+            </choose>
+            order by a.create_time desc, a.update_time desc
+        </where>
+    </select>
+
+</mapper>

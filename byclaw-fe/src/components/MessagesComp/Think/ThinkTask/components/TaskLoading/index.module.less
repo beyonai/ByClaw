@@ -1,0 +1,103 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  width: 240px;
+  height: 75px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid #e6ebf0;
+  background: linear-gradient(182deg, #e8f3ff 0.93%, #fff 69.16%); // 设计稿渐变角度和色值
+  box-shadow: 0 2px 8px 0 rgba(25, 25, 41, 0.03);
+  position: relative;
+  overflow: hidden;
+  &:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    // transform: translateY(-2px);
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.icon {
+  font-size: 16px;
+  color: #8a8f99;
+  margin-right: 8px;
+}
+
+.title {
+  font-size: 14px;
+  color: #707680;
+  font-weight: 500;
+}
+
+.statusRow {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.hourglass {
+  font-size: 14px;
+  color: #1677ff;
+  margin-right: 4px;
+  animation: spin 1.2s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
+}
+
+.statusText {
+  font-size: 12px;
+  color: #1677ff;
+  line-height: 1;
+}
+
+.progressBar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, #a64cff 0%, #165dff 100%);
+  border-radius: 0 0 8px 8px;
+  overflow: hidden;
+
+  // 流光动画
+  &::after {
+    content: '';
+    position: absolute;
+    left: -40px;
+    top: 0;
+    width: 40px;
+    height: 100%;
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.7) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+    animation: shine 1.5s linear infinite;
+    border-radius: 0 0 8px 8px;
+  }
+}
+
+@keyframes shine {
+  0% {
+    left: -40px;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}

@@ -1,0 +1,146 @@
+.cardWrapper {
+  margin: 8px 0;
+  max-width: 600px;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px var(~'--@{antPrefix}-line-type') var(~'--@{antPrefix}-color-border-secondary');
+}
+
+.card {
+  width: 100%;
+  word-break: break-word;
+  border-radius: 0;
+  border: 0;
+}
+
+// .cardClickable {
+//   cursor: pointer;
+//   transition: all 0.3s;
+
+//   &:hover {
+//     transform: translateY(-2px);
+//     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+//   }
+// }
+
+.cardShadow {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+// 标题样式
+.cardTitle {
+  background: #e8f3ff;
+  padding: 8px 12px;
+
+  .titleMain {
+    font-size: 14px;
+    font-weight: 600;
+    color: #14161a;
+  }
+
+  .titleSubtitle {
+    display: block;
+    margin-top: 4px;
+    font-size: 14px;
+  }
+}
+
+// 内容样式
+.cardContent {
+  min-height: 20px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 320px;
+  overflow-y: hidden;
+  position: relative;
+  :global {
+    .@{antPrefix}-typography {
+      margin-bottom: 0;
+    }
+  }
+
+  // 展开状态：移除最大高度限制
+  &.cardContentExpanded {
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
+// 模糊层样式
+.moreOverlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  background: linear-gradient(180deg, #ffffff00 0%, #fff 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+}
+
+// "查看更多"文字样式
+.moreText {
+  font-size: 14px;
+  color: var(~'--@{antPrefix}-color-primary');
+  font-weight: 400;
+  user-select: none;
+  pointer-events: none;
+  background: #fff;
+}
+
+.textBlock {
+  line-height: 1.6;
+  color: #333;
+}
+
+.htmlBlock {
+  :global {
+    img {
+      max-width: 100%;
+      height: auto;
+    }
+  }
+}
+
+.imageBlock {
+  text-align: center;
+  :global {
+    .@{antPrefix}-image {
+      max-width: 100%;
+    }
+  }
+}
+
+// 按钮样式
+.cardButtons {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 12px 12px;
+}
+
+.cardButton {
+  min-width: 80px;
+}
+
+.agentInfoList {
+  .agentInfoItem {
+    padding: 6px;
+  }
+  .agentInfoAvatar {
+    width: 34px;
+    height: 34px;
+  }
+  :global {
+    .@{antPrefix}-list-item .@{antPrefix}-list-item-meta {
+      align-items: center;
+      .@{antPrefix}-list-item-meta-avatar {
+        margin-right: 6px;
+      }
+    }
+  }
+}

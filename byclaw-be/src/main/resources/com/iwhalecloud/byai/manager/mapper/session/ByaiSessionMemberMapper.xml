@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember">
+        <id column="byai_session_member_id" property="byaiSessionMemberId" />
+        <result column="session_id" property="sessionId" />
+        <result column="mem_obj_type" property="memObjType" />
+        <result column="mem_obj_id" property="memObjId" />
+        <result column="user_role" property="userRole" />
+        <result column="create_time" property="createTime" />
+        <result column="creator_id" property="creatorId" />
+        <result column="mem_name" property="memName" />
+        <result column="request_count" property="requestCount" />
+        <result column="com_acct_id" property="comAcctId" />
+    </resultMap>
+
+
+    <!-- 查询会话成员 -->
+    <select id="findSessionMember" resultMap="BaseResultMap">
+        select
+            byai_session_member_id,
+            session_id,
+            mem_obj_type,
+            mem_obj_id,
+            user_role,
+            create_time,
+            creator_id,
+            mem_name,
+            request_count,
+            com_acct_id
+        from byai_session_member
+        where session_id = #{sessionId}
+          and mem_obj_type = #{memObjType}
+          and mem_obj_id = #{memObjId}
+        limit 1
+    </select>
+
+    <!-- 根据ID更新会话成员（只更新非空字段） -->
+    <update id="updateSelective" >
+        update byai_session_member
+        <set>
+            <if test="sessionId != null">
+                session_id = #{sessionId},
+            </if>
+            <if test="memObjType != null and memObjType != ''">
+                mem_obj_type = #{memObjType},
+            </if>
+            <if test="memObjId != null">
+                    mem_obj_id = #{memObjId},
+                </if>
+                <if test="userRole != null and userRole != ''">
+                    user_role = #{userRole},
+            </if>
+            <if test="createTime != null">
+                create_time = #{createTime},
+            </if>
+            <if test="creatorId != null">
+                creator_id = #{creatorId},
+            </if>
+            <if test="memName != null and memName != ''">
+                mem_name = #{memName},
+            </if>
+            <if test="requestCount != null">
+                request_count = #{requestCount},
+            </if>
+            <if test="comAcctId != null">
+                com_acct_id = #{comAcctId},
+            </if>
+        </set>
+        where byai_session_member_id = #{byaiSessionMemberId}
+    </update>
+
+    <!-- 根据成员对象ID和时间范围查询会话成员列表 -->
+    <select id="findByMemObjIdAndTimeRange" resultMap="BaseResultMap">
+        select
+            byai_session_member_id,
+            session_id,
+            mem_obj_type,
+            mem_obj_id,
+            user_role,
+            create_time,
+            creator_id,
+            mem_name,
+            request_count,
+            com_acct_id
+        from byai_session_member
+        where mem_obj_id = #{memObjId}
+          and mem_obj_type = 'AGENT'
+          and create_time &gt;= #{startTime}
+          and create_time &lt;= #{endTime}
+    </select>
+
+    <!-- 会话基础信息映射，字段转为驼峰命名 -->
+    <resultMap id="SessionBaseInfoResultMap" type="java.util.Map">
+        <result column="session_id" property="sessionId"/>
+        <result column="session_name" property="sessionName"/>
+        <result column="session_type" property="sessionType"/>
+    </resultMap>
+
+    <!-- 根据用户和Agent查询会话：创建人为公共条件，会话ID要么来自成员表中该Agent所属会话，要么等于objectId本身 -->
+    <select id="querySessionByAgent" resultMap="SessionBaseInfoResultMap">
+        select
+            a.session_id,
+            a.session_name,
+            a.session_type
+        from byai_session a
+        where a.creator_id = #{userId}
+          and (
+            a.session_id in (
+                select b.session_id
+                from byai_session_member b
+                where b.mem_obj_type = 'AGENT'
+                  and b.mem_obj_id = #{objectId}
+            )
+            or a.object_id = #{objectId}
+          )
+    </select>
+
+
+</mapper>

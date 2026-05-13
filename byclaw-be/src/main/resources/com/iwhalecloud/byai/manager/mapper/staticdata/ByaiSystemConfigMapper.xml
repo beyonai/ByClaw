@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.staticdata.ByaiSystemConfigMapper">
+
+    <!-- 系统配置实体类结果映射（父类） -->
+    <resultMap id="ByaiSystemConfigResultMap" type="com.iwhalecloud.byai.manager.entity.staticdata.ByaiSystemConfig">
+        <id property="paramId" column="param_id"/>
+        <result property="paramType" column="param_type"/>
+        <result property="paramCode" column="param_code"/>
+        <result property="paramName" column="param_name"/>
+        <result property="paramEnName" column="param_en_name"/>
+        <result property="paramValue" column="param_value"/>
+        <result property="paramDesc" column="param_desc"/>
+    </resultMap>
+
+    <!-- 系统配置VO结果映射（继承自ByaiSystemConfig） -->
+    <resultMap id="SystemConfigVoResultMap" type="com.iwhalecloud.byai.manager.vo.staticdata.SystemConfigVo" extends="ByaiSystemConfigResultMap">
+        <!-- cacheJson字段不在数据库表中，由Service层从Redis获取，此处不映射 -->
+    </resultMap>
+
+    <!-- 根据查询条件查询系统配置 -->
+    <select id="selectSystemConfigByQo" resultMap="SystemConfigVoResultMap">
+        SELECT
+            param_id,
+            param_type,
+            param_code,
+            param_name,
+            param_en_name,
+            param_value,
+            param_desc
+        FROM byai_system_config
+        <where>
+            <if test="keyword != null and keyword != ''">
+                AND (
+                    param_code LIKE CONCAT('%', #{keyword}, '%')
+                    OR param_name LIKE CONCAT('%', #{keyword}, '%')
+                    OR param_en_name LIKE CONCAT('%', #{keyword}, '%')
+                    OR param_value LIKE CONCAT('%', #{keyword}, '%')
+                    OR param_desc LIKE CONCAT('%', #{keyword}, '%')
+                )
+            </if>
+        </where>
+        ORDER BY param_id desc
+    </select>
+
+</mapper>

@@ -1,0 +1,62 @@
+.cardWrap {
+  .user .icon {
+    width: 48px;
+    height: 48px;
+    line-height: 48px;
+    font-size: 18px;
+  }
+
+  .userInfo > div:first-child {
+    font-size: 24px;
+  }
+
+  .userItem {
+    div:first-child {
+      color: #707680;
+      width: 50px;
+    }
+  }
+
+  .userPopoverBtn {
+    background: #e8f3ff;
+    padding: 5px 12px;
+    border-radius: 24px;
+  }
+}
+
+.userPopover {
+  :global {
+    .beyond-popover-inner {
+      border: 1px solid #fff;
+      background: radial-gradient(61.35% 73.64% at 97.5% 1.79%, #adfbff59 0%, #ffffff00 100%),
+        linear-gradient(180deg, #e8edff 0%, #fff 39.89%);
+      box-shadow: 0 4px 16px -8px #00000014, 0 8px 24px 0 #0000000d, 0 12px 48px 16px #00000008;
+      border-radius: 20px;
+      padding: 27px 24px 16px;
+    }
+  }
+}
+
+.icon {
+  height: 100%;
+  width: 100%;
+
+  border-radius: 8px;
+  display: inline-block;
+  margin-right: 8px;
+  line-height: 1;
+  overflow: hidden;
+  flex-shrink: 0;
+
+  width: 32px;
+  height: 32px;
+  color: #fff;
+  line-height: 32px;
+  text-align: center;
+  font-size: 12px;
+  background: var(~'--@{antPrefix}-color-primary-hover', #4080ff);
+
+  & > :global(.anticon) {
+    font-size: 32px;
+  }
+}

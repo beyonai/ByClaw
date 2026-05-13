@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.men.MenResComMapper">
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.men.MenResCom">
+        <id column="res_com_id" property="resComId" jdbcType="BIGINT"/>
+        <result column="res_type" property="resType" jdbcType="INTEGER"/>
+        <result column="res_page" property="resPage" jdbcType="VARCHAR"/>
+        <result column="create_by" property="createBy" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="update_by" property="updateBy" jdbcType="BIGINT"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
+        <result column="com_acct_id" property="comAcctId" jdbcType="BIGINT"/>
+    </resultMap>
+    <!-- 通用查询结果列 -->
+    <sql id="Base_Column_List">
+        a.res_com_id, a.res_type, a.res_page, a.create_by, a.create_time, a.update_by, a.update_time, a.com_acct_id
+    </sql>
+
+    <!-- 根据子任务查询父任务的卡片信息 -->
+    <select id="getParentResComBySubTaskExtId" resultMap="BaseResultMap">
+         SELECT <include refid="Base_Column_List" /> from  men_task t
+        INNER  JOIN   men_task b on t.p_task_id = b.task_id
+        INNER JOIN men_res_com a on b.res_com_id = a.res_com_id
+        where t.system_no =  #{systemNo} and t.task_ext_id =  #{taskExtId}
+    </select>
+
+    <resultMap id="FixedMemoryMemoryTaskVoResultMap" type="com.iwhalecloud.byai.manager.vo.men.FixedMemoryMemoryTaskVo">
+       <result column="task_id" property="taskId" />
+       <result column="task_type" property="taskType" />
+       <result column="title" property="title" />
+       <result column="create_time" property="createTime" />
+       <result column="content" property="content" />
+       <result column="res_com_id" property="resComId" />
+       <result column="res_page" property="resPage" />
+    </resultMap>
+
+    <select id="selectFixedMemoryMemoryTaskVoByQo" resultMap="FixedMemoryMemoryTaskVoResultMap">
+        select a.task_id,
+               a.task_type,
+               a.title,
+               a.create_time,
+               a.content,
+               a.res_com_id,
+               b.res_page
+        from men_task a
+                 join men_res_com b on a.res_com_id = b.res_com_id
+        <where>
+            a.task_type = 'FIXMEMORY'
+            <if test="createBy !=null">
+              and a.create_by =#{createBy}
+            </if>
+        </where>
+        order by a.create_time desc
+    </select>
+
+</mapper>

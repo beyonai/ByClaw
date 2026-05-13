@@ -1,0 +1,125 @@
+package com.iwhalecloud.byai.manager.dto.datacloud;
+
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+import com.iwhalecloud.byai.common.vo.SortField;
+import lombok.Data;
+
+import java.util.Date;
+import java.util.List;
+
+/**
+ * 脚本查询DTO
+ * 
+ * @author system
+ * @date 2025-01-15
+ */
+@Data
+public class DatacloudScriptQueryDTO {
+
+    private String keyword;
+
+    /**
+     * 脚本名称（模糊查询）
+     */
+    private String scriptName;
+
+    private Long scriptId;
+
+    /**
+     * 脚本类型：playwright、api
+     */
+    private String scriptType;
+
+    /**
+     * 脚本状态：active、inactive、draft
+     */
+    private String scriptStatus;
+
+
+    private Long resourceProjectId;
+
+    /**
+     * 关联场景ID
+     */
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long scenarioId;
+
+    /**
+     * 关联登录类型ID
+     */
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long loginTypeId;
+
+    /**
+     * 企业ID
+     */
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long enterpriseId;
+
+    /**
+     * 创建人ID
+     */
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long creatorId;
+
+    /**
+     * 标签（模糊查询）
+     */
+    private String tags;
+
+    /**
+     * 创建时间开始
+     */
+    private Date createTimeStart;
+
+    /**
+     * 创建时间结束
+     */
+    private Date createTimeEnd;
+
+    /**
+     * 更新时间开始
+     */
+    private Date updateTimeStart;
+
+    /**
+     * 更新时间结束
+     */
+    private Date updateTimeEnd;
+
+    /**
+     * 是否包含执行统计信息
+     */
+    private Boolean includeExecutionStats;
+
+    /**
+     * 是否只查询我的脚本
+     */
+    private Boolean onlyMyScripts;
+
+    /**
+     * 脚本类型列表（用于多选查询）
+     */
+    private List<String> scriptTypes;
+
+    /**
+     * 脚本状态列表（用于多选查询）
+     */
+    private List<String> scriptStatuses;
+
+    /**
+     * 分页参数 - 页码
+     */
+    private Integer pageNum = 1;
+
+    /**
+     * 分页参数 - 每页大小
+     */
+    private Integer pageSize = 10;
+
+    /**
+     * 排序字段列表
+     */
+    private List<SortField> sortFields;
+}

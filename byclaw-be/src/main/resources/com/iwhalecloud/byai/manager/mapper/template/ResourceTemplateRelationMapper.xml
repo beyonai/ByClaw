@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.template.ResourceTemplateRelationMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.template.ResourceTemplateRelation">
+        <id column="resource_template_id" property="resourceTemplateId" />
+        <result column="template_id" property="templateId" />
+        <result column="resource_id" property="resourceId" />
+        <result column="create_time" property="createTime" />
+        <result column="create_by" property="createBy" />
+        <result column="memory_rule_id" property="memoryRuleId" />
+    </resultMap>
+
+    <!-- 通用查询列 -->
+    <sql id="Base_Column_List">
+        resource_template_id, template_id, resource_id, create_time, create_by, memory_rule_id
+    </sql>
+
+    <!-- 根据资源ID删除关联关系 -->
+    <delete id="deleteByResourceId">
+        DELETE FROM resource_template_relation
+        WHERE resource_id = #{resourceId}
+    </delete>
+
+    <!-- 根据资源ID和用户ID查询关联关系列表 -->
+    <select id="selectByResourceIdAndUserId" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM resource_template_relation
+        WHERE resource_id = #{resourceId}
+        AND create_by = #{userId}
+    </select>
+
+    <!-- 批量插入关联关系 -->
+    <insert id="batchInsert" parameterType="java.util.List">
+        INSERT INTO resource_template_relation (resource_template_id, template_id, resource_id, create_time, create_by, memory_rule_id)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.resourceTemplateId}, #{item.templateId}, #{item.resourceId}, #{item.createTime}, #{item.createBy}, #{item.memoryRuleId})
+        </foreach>
+    </insert>
+
+    <!-- 根据模板ID查询关联关系列表 -->
+    <select id="selectByTemplateId" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM resource_template_relation
+        WHERE template_id = #{templateId}
+    </select>
+
+    <!-- 根据模板ID和资源ID查询关联关系（唯一记录） -->
+    <select id="selectByTemplateIdAndResourceId" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM resource_template_relation
+        WHERE template_id = #{templateId}
+        AND resource_id = #{resourceId}
+        LIMIT 1
+    </select>
+
+    <!-- 根据资源ID列表批量查询关联关系（查询resource_id和memory_rule_id字段） -->
+    <select id="selectByResourceIds" resultType="java.util.Map">
+        SELECT resource_id, memory_rule_id
+        FROM resource_template_relation
+        WHERE resource_id IN
+        <foreach collection="resourceIds" item="resourceId" open="(" separator="," close=")">
+            #{resourceId}
+        </foreach>
+    </select>
+
+</mapper>
+

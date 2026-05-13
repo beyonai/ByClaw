@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.position.ResourcePositionRelationMapper">
+
+    <!-- 通用结果映射 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.position.ResourcePositionRelation">
+        <id column="resource_position_rel_id" property="resourcePositionRelId"/>
+        <result column="position_id" property="positionId"/>
+        <result column="resource_id" property="resourceId"/>
+        <result column="status" property="status"/>
+        <result column="create_by" property="createBy"/>
+        <result column="approver" property="approver"/>
+        <result column="on_job_time" property="onJobTime"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <!-- 通用列 -->
+    <sql id="Base_Column_List">
+        resource_position_rel_id, position_id, resource_id, status, create_by, approver, on_job_time, create_time, update_by, update_time
+    </sql>
+
+    <!-- 岗位数字员工VO结果映射 -->
+    <resultMap id="PositionDigitalEmployeeVoResultMap" type="com.iwhalecloud.byai.manager.vo.position.PositionDigitalEmployeeVo">
+        <!-- 基础资源字段 -->
+        <result column="resource_id" property="resourceId"/>
+        <result column="resource_name" property="resourceName"/>
+        <result column="resource_desc" property="resourceDesc"/>
+        <result column="resource_status" property="resourceStatus"/>
+        <result column="resource_type" property="resourceType"/>
+        <result column="system_code" property="systemCode"/>
+        <result column="tags" property="tags"/>
+        <result column="avatar" property="avatar"/>
+        <result column="resource_biz_type" property="resourceBizType"/>
+        <result column="publish_time" property="publishTime"/>
+
+        <!-- 岗位关联字段 -->
+        <result column="position_id" property="positionId"/>
+        <result column="status" property="status"/>
+        <result column="approver" property="approver"/>
+        <result column="on_job_time" property="onJobTime"/>
+    </resultMap>
+
+    <!-- 查询岗位下的数字员工信息（分页） -->
+    <select id="selectDigitalEmployeesByPositionIdPage" resultMap="PositionDigitalEmployeeVoResultMap">
+        SELECT
+            rpr.resource_position_rel_id,
+            rpr.position_id,
+            rpr.resource_id,
+            rpr.status,
+            rpr.approver,
+            rpr.on_job_time,
+            r.resource_name,
+            r.resource_desc,
+            r.resource_status,
+            r.resource_type,
+            r.system_code,
+            r.resource_biz_type,
+            r.publish_time,
+            r.tags,
+            r.avatar,
+            r.create_time,
+            r.update_time
+        FROM ss_res_position_relation rpr
+        INNER JOIN ss_resource r ON rpr.resource_id = r.resource_id
+        WHERE rpr.position_id = #{searchQO.positionId}
+        AND r.resource_biz_type = 'DIG_EMPLOYEE'
+        <if test="searchQO.resourceName != null and searchQO.resourceName != ''">
+            AND r.resource_name LIKE CONCAT('%', #{searchQO.resourceName}, '%')
+        </if>
+        ORDER BY rpr.create_time DESC
+    </select>
+
+</mapper>
+

@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.datacloud.DatacloudScriptTemplateMapper">
+
+    <!-- 脚本模板表结果映射-->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.datacloud.DatacloudScriptTemplate">
+        <id column="template_id" property="templateId" jdbcType="BIGINT"/>
+        <result column="template_name" property="templateName" jdbcType="VARCHAR"/>
+        <result column="template_type" property="templateType" jdbcType="VARCHAR"/>
+        <result column="framework" property="framework" jdbcType="VARCHAR"/>
+        <result column="py_template_content" property="pyTemplateContent" jdbcType="LONGVARCHAR"/>
+        <result column="node_template_content" property="nodeTemplateContent" jdbcType="LONGVARCHAR"/>
+        <result column="meta_infos" property="metaInfos" jdbcType="LONGVARCHAR"/>
+        <result column="template_description" property="templateDescription" jdbcType="VARCHAR"/>
+        <result column="is_active" property="isActive" jdbcType="INTEGER"/>
+        <result column="enterprise_id" property="enterpriseId" jdbcType="BIGINT"/>
+        <result column="creator_id" property="creatorId" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="update_by" property="updateBy" jdbcType="BIGINT"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <!-- 基础字段 -->
+    <sql id="Base_Column_List">
+        template_id, template_name, template_type, framework, py_template_content, 
+        node_template_content, meta_infos, template_description, is_active, 
+        enterprise_id, creator_id, create_time, update_by, update_time
+    </sql>
+
+    <!-- 分页查询脚本模板列表 -->
+    <select id="selectTemplateListByPage" resultMap="BaseResultMap">
+        SELECT 
+        <include refid="Base_Column_List"/>
+        FROM datacloud_script_template
+        <where>
+            <if test="templateType != null and templateType != ''">
+                AND template_type = #{templateType}
+            </if>
+            <if test="framework != null and framework != ''">
+                AND framework = #{framework}
+            </if>
+            <if test="enterpriseId != null">
+                AND enterprise_id = #{enterpriseId}
+            </if>
+        </where>
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- 查询可用的脚本模板列表-->
+    <select id="selectAvailableTemplates" resultMap="BaseResultMap">
+        SELECT 
+        <include refid="Base_Column_List"/>
+        FROM datacloud_script_template
+        <where>
+            is_active = 1
+            <if test="templateType != null and templateType != ''">
+                AND template_type = #{templateType}
+            </if>
+            <if test="framework != null and framework != ''">
+                AND framework = #{framework}
+            </if>
+            <if test="enterpriseId != null">
+                AND enterprise_id = #{enterpriseId}
+            </if>
+        </where>
+        ORDER BY create_time DESC
+    </select>
+
+</mapper>

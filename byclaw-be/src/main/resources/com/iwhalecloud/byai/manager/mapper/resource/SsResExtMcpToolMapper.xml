@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.SsResExtMcpToolMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.resource.SsResExtMcpTool">
+        <id column="resource_id" property="resourceId" />
+        <result column="input_schema" property="inputSchema" />
+    </resultMap>
+
+    <!-- 通用查询结果-->
+    <sql id="Base_Column_List">
+        resource_id, input_schema
+    </sql>
+
+</mapper>

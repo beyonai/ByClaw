@@ -1,0 +1,45 @@
+div.switch-button {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+
+  &.switch-button-block {
+    display: flex;
+    justify-content: flex-start;
+
+    div.switch-button-item {
+      // flex: 1;
+      // width: 64px;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: center;
+    }
+  }
+
+  div.switch-button-item {
+    cursor: pointer;
+    padding: 4px 8px;
+    transition: all 300ms ease;
+    color: rgb(64, 69, 77);
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 26px;
+
+    &.switch-button-item-active {
+      color: rgb(22, 93, 255);
+      /* user/primary/primary-6 */
+      border-bottom: 3px solid rgb(22, 93, 255);
+    }
+
+    &:first-child {
+      border-top-left-radius: 2px;
+      border-bottom-left-radius: 2px;
+    }
+
+    &:last-child {
+      border-top-right-radius: 2px;
+      border-bottom-right-radius: 2px;
+    }
+  }
+}

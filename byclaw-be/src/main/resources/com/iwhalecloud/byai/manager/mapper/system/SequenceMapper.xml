@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.system.SequenceMapper">
+
+	<select id="nextValForUdal" resultType="java.lang.Long" useCache="false" flushCache="true">
+		select ${sequenceName}.nextval
+	</select>
+
+	<select id="nextValForOracle" resultType="java.lang.Long" useCache="false" flushCache="true">
+		select ${sequenceName}.nextval  from dual
+	</select>
+
+    <select id="nextValForPostgreSql" resultType="java.lang.Long" useCache="false" flushCache="true">
+        SELECT nextval(#{sequenceName})
+    </select>
+
+	<insert id="nextValForMySqlIncrement" useGeneratedKeys="true" keyProperty="id">
+		  insert into id(id) values(null)
+	</insert>
+
+  <delete id="clearMySqlIncrement" parameterType="long">
+	  delete from id where id <![CDATA[ < ]]> #{id}
+  </delete>
+
+</mapper>

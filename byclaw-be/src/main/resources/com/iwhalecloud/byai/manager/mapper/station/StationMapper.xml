@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.station.StationMapper">
+    <!-- 驻地信息resultMap -->
+    <resultMap id="StationResultMap" type="com.iwhalecloud.byai.manager.entity.station.Station">
+        <id property="stationId" column="station_id" />
+        <result property="stationName" column="station_name" />
+        <result property="stationType" column="station_type" />
+        <result property="stationIdPath" column="station_id_path" />
+        <result property="pStationId" column="p_station_id" />
+        <result property="isAbroad" column="is_abroad" />
+        <result property="createBy" column="create_by" />
+        <result property="createTime" column="create_time" />
+        <result property="updateBy" column="update_by" />
+        <result property="updateTime" column="update_time" />
+        <result property="comAcctId" column="com_acct_id" />
+    </resultMap>
+
+
+    <!-- 通用查询结果 -->
+    <sql id="Base_Column_List">
+        a.station_id,  a.station_name,   a.station_type,   a.station_id_path,   a.p_station_id,
+         a.is_abroad,   a.create_by,   a.create_time,    a.update_by,   a.update_time,  a.com_acct_id
+    </sql>
+
+    <!-- 查询驻地 -->
+    <select id="getStationTree" resultMap="StationResultMap">
+        select   <include refid="Base_Column_List" />  from po_station a
+        <where>
+           <if test="parentStationId != null">
+              and a.p_station_id = #{parentStationId}
+           </if>
+           <if test="keyword != null and keyword != ''">
+              and a.station_name like concat(concat('%',#{keyword}),'%')
+           </if>
+           <if test="stationIds != null and stationIds.size() > 0">
+               <foreach collection="stationIds" open="AND a.station_id IN (" close=")" item="stationId" separator=",">
+                    #{stationId}
+               </foreach>
+           </if>
+           <if test="stationType != null">
+              and a.station_type = #{stationType}
+           </if>
+           <if test="isAbroad != null">
+              and a.is_abroad = #{isAbroad}
+           </if>
+        </where>
+     </select>
+
+
+    <select id="getStationByUserId" resultMap="StationResultMap">
+        select   <include refid="Base_Column_List" />  from po_station a
+        inner join po_users b on a.station_id = b.station_id
+        where b.user_id = #{userId}
+    </select>
+
+    <!-- 通过模糊查询驻地路径获取所有下属驻地ID -->
+    <select id="selectUnderlingStationList" resultType="java.lang.Long">
+        select station_id
+        from po_station
+        where station_id_path is not null
+        and (station_id_path = cast(#{stationId} as varchar) OR station_id_path LIKE concat(cast(#{stationId} as varchar), '.%'))
+        order by station_id
+    </select>
+
+</mapper>

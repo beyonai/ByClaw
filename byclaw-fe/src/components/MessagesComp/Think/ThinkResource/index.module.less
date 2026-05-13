@@ -1,0 +1,65 @@
+@offsetLeft: 16px;
+
+.carouselCardContainer {
+  position: relative;
+  overflow: hidden;
+  padding: calc(@offsetLeft - 8px) 0 @offsetLeft @offsetLeft;
+  // margin-left: -@offsetLeft;
+}
+
+.carouselCardIcon {
+  height: 100%;
+  width: 52px;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-56%);
+  z-index: 9;
+  :global {
+    .anticon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      width: 28px;
+      height: 28px;
+      border-radius: 20px;
+      border: 1px solid var(--beyond-color-border);
+      background-color: #fff;
+      cursor: pointer;
+    }
+  }
+}
+
+.carouselCardIconLeft {
+  .carouselCardIcon;
+  left: 0;
+  width: calc(52px + @offsetLeft);
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 1) 0%,
+    rgba(255, 255, 255, 0.8) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  :global {
+    .anticon {
+      margin-left: calc(@offsetLeft - 4px);
+    }
+  }
+}
+
+.carouselCardIconRight {
+  .carouselCardIcon;
+  right: 0;
+  justify-content: flex-end;
+  background-image: linear-gradient(to right, rgba(255, 255, 255, 0), rgba(255, 255, 255, 1));
+}
+
+.carouselCardBlock {
+  width: auto;
+  transform: translateX(0);
+  transition: transform 0.5s ease;
+}
+
+.cardContent {
+  margin-bottom: 0 !important;
+}

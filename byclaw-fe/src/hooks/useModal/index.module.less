@@ -1,0 +1,19 @@
+.modal {
+  width: auto !important;
+  max-width: 80vw;
+  min-width: 50vw;
+  :global {
+    .@{antPrefix}-modal-body {
+      max-height: 70vh;
+      min-height: 20vh;
+      overflow: auto;
+      &::-webkit-scrollbar {
+        width: 0;
+        height: 0;
+      }
+    }
+    .@{antPrefix}-modal-title {
+      margin-right: 12px;
+    }
+  }
+}

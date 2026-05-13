@@ -1,0 +1,27 @@
+{
+  "name": "@openclaw/baiying-enhance",
+  "version": "2026.3.13",
+  "private": true,
+  "description": "Baiying-style dynamic agent registration and dispatch for OpenClaw",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild index.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/index.js --sourcemap --external:openclaw --external:minio --loader:.md=text",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "0.34.48",
+    "@byclaw/by-framework": "1.2.5",
+    "ioredis": "^5.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.21.0",
+    "vitest": "^3.0.5"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  }
+}

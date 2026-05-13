@@ -1,0 +1,130 @@
+.container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+
+  :global {
+    .@{antPrefix}-tree-treenode {
+      padding-top: 4px;
+    }
+  }
+
+  .sider {
+    width: 240px;
+    background: #fff;
+    padding: 16px;
+  }
+
+  .content {
+    flex: 1;
+    height: 100%;
+    border-left: 1px solid #f0f0f0;
+    width: 0px;
+    position: relative;
+
+    .triggerTop {
+      width: 0;
+      height: 0;
+      border-top: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-left: 4px solid #e6ebf0;
+      border-bottom: 4px solid #e6ebf0;
+    }
+
+    .triggerBottom {
+      width: 0;
+      height: 0;
+      border-bottom: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-left: 4px solid #e6ebf0;
+      border-top: 4px solid #e6ebf0;
+    }
+
+    .trigger {
+      position: absolute;
+      left: 0px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 8px;
+      height: 64px;
+      border-left: none;
+      cursor: pointer;
+      z-index: 100;
+      transition: all 0.2s;
+      font-size: 8px;
+    }
+
+    .infoContainer {
+      padding: 12px 16px 0px;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .organization {
+      width: 100%;
+      border-bottom: 1px solid var(--user-line-color-border-26, #e6ebf0);
+    }
+
+    .member {
+      width: 100%;
+      flex: 1;
+      height: 0px;
+    }
+  }
+
+  :global {
+    .@{antPrefix}-tabs-nav {
+      padding: 0 16px;
+      margin: 0px;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      padding: 11px 8px;
+      font-size: 13px;
+
+      &:hover {
+        color: #165dff;
+      }
+    }
+
+    .@{antPrefix}-tabs-ink-bar {
+      background-color: #165dff;
+    }
+
+    .@{antPrefix}-tabs-tabpane,
+    .@{antPrefix}-tabs-content {
+      height: 100%;
+    }
+
+    .@{antPrefix}-tabs-nav-list {
+      .@{antPrefix}-tabs-tab {
+        padding: 12px 20px;
+        margin: 0px;
+
+        &:first-child::after {
+          content: '';
+          position: absolute;
+          right: 0;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 1px;
+          height: 14px;
+          background-color: #e8e8e8;
+        }
+
+        &.@{antPrefix}-tabs-tab-active {
+          .@{antPrefix}-tabs-tab-btn {
+            color: #165dff;
+          }
+        }
+      }
+
+      .@{antPrefix}-tabs-tab + .@{antPrefix}-tabs-tab {
+        margin: 0;
+      }
+    }
+  }
+}

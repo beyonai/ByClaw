@@ -1,0 +1,197 @@
+@InputMinH: 220px;
+
+.loginModal {
+  :global {
+    .@{antPrefix}-modal-content {
+      padding: 0;
+      overflow: hidden;
+      height: 500px;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      font-weight: 500;
+    }
+
+    .@{antPrefix}-modal-body {
+      height: 100%;
+    }
+  }
+}
+
+.container {
+  display: flex;
+  height: 100%;
+}
+
+.leftSection {
+  width: 360px;
+  // background-image: url('../../../public/beyond/loginBg.png');
+  // background-size: cover;
+  // background-position: center;
+  // background-repeat: no-repeat;
+}
+
+.rightSection {
+  flex: 1;
+  padding: 24px 36px;
+  background-color: var(--beyond-modal-content-bg);
+  // height: 100%;
+  display: flex;
+  flex-direction: column;
+
+  // &.whale {
+  // padding-top: 80px;
+  // }
+
+  .title {
+    font-size: 20px;
+    font-weight: bold;
+    margin-bottom: 12px;
+  }
+
+  .loginContent {
+    // flex: 1;
+    display: flex;
+    flex-direction: column;
+    // min-height: 280px;
+    margin-top: 12px;
+
+    :global(.@{antPrefix}-form) {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    &.phone {
+      // min-height: @InputMinH;
+    }
+
+    &.whale {
+      min-height: @InputMinH;
+      justify-content: center;
+
+      :global(.@{antPrefix}-form) {
+        justify-content: center;
+      }
+    }
+  }
+
+  .tabs {
+    :global {
+      .@{antPrefix}-tabs-tab {
+        padding: 4px 0;
+      }
+    }
+  }
+
+  .qrcodeContainer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    padding-bottom: 17px;
+    position: relative;
+
+    .qrcodeWrapper {
+      position: relative;
+      background-color: #f2f6fa;
+      padding: 8px;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .qrcodeText {
+      margin-top: 8px;
+      font-size: 14px;
+
+      .bold {
+        font-weight: bold;
+      }
+    }
+
+    .qrcodeOverlay {
+      position: absolute;
+      top: 8px;
+      width: 232px;
+      height: 232px;
+      background-color: rgba(13, 17, 26, 0.65);
+      // opacity: 0.65;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      color: #fff;
+      z-index: 2;
+    }
+  }
+
+  .inputIcon {
+    color: #475366;
+  }
+
+  .otpInput {
+    width: 100%;
+    margin-bottom: 16px;
+
+    :global(.@{antPrefix}-input-number-input) {
+      text-align: center;
+    }
+  }
+
+  .otherLoginWays {
+    margin: 14px 0;
+
+    .divider {
+      margin-top: 12px;
+      color: #7a8799;
+      font-size: var(--beyond-font-size-sm);
+    }
+
+    .socialIcons {
+      display: flex;
+      justify-content: center;
+      gap: 32px;
+
+      :global(.@{antPrefix}-btn-circle) {
+        border: 1px solid var(--grey-grey-046, #e6ebf0);
+        color: rgba(0, 0, 0, 0.45);
+
+        &:hover {
+          background-color: #f2f6fa !important;
+        }
+      }
+    }
+  }
+}
+
+.agreement {
+  a {
+    margin: 0 4px;
+  }
+}
+
+.inputWithAddonBefore {
+  :global {
+    .@{antPrefix}-input-group-addon {
+      background-color: transparent;
+    }
+    .@{antPrefix}-input {
+      // font-size: 14px !important;
+    }
+  }
+}
+
+.inputWithAddonAfter {
+  :global {
+    .@{antPrefix}-input {
+      // font-size: 14px !important;
+    }
+    .@{antPrefix}-input-group-addon {
+      background-color: transparent;
+    }
+  }
+}

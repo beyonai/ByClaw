@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.mode.ByaiModeMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.mode.ByaiMode">
+        <id column="mode_name" property="modeName" />
+        <result column="mode_code" property="modeCode" />
+        <result column="is_default" property="isDefault" />
+        <result column="show_digital_human" property="showDigitalHuman"/>
+    </resultMap>
+
+
+
+    <resultMap id="DigResultMap" type="com.iwhalecloud.byai.manager.dto.mode.ModeRelationDto">
+        <id column="rel_id" property="relId" />
+        <result column="mode_code" property="modeCode" />
+        <result column="resource_id" property="resourceId" />
+        <result column="resource_name" property="resourceName"/>
+    </resultMap>
+
+
+
+
+    <!-- 通用查询列 -->
+    <sql id="Base_Column_List">
+        mode_name, mode_code, is_default, show_digital_human
+    </sql>
+
+
+
+
+    <select id="selectRelationByModeCode" resultMap="DigResultMap">
+        SELECT
+        a.mode_code,
+        c.resource_id,
+        c.resource_name
+        FROM byai_mode_dig_rel a
+        LEFT JOIN byai_mode b
+        on a.mode_code = b.mode_code
+        LEFT JOIN ss_resource c
+        on a.resource_id = c.resource_id
+        <where>
+            <if test="modeCode != null and modeCode != ''">
+                AND a.mode_code = #{modeCode}
+            </if>
+        </where>
+    </select>
+
+
+    <select id="selectList" resultMap="BaseResultMap">
+        select
+            <include refid="Base_Column_List"/>
+        from
+            byai_mode
+    </select>
+
+</mapper>

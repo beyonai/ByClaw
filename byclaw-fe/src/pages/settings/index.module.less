@@ -1,0 +1,102 @@
+.settingsContainer {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 24px;
+}
+
+.settingsContent {
+  width: 100%;
+  max-width: 600px;
+  margin-top: 50px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settingsTitle {
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 28px;
+  color: var(--beyond-color-text);
+}
+
+.settingsCard {
+  background-color: #0000000a;
+  border: none;
+  cursor: pointer;
+
+  &.noRadius {
+    border-radius: unset;
+  }
+
+  :global {
+    .@{antPrefix}-card-body {
+      padding: 16px;
+    }
+  }
+}
+
+.userInfoContainer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--beyond-color-text);
+
+  .userInfo {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    .userName {
+      font-size: 16px;
+    }
+
+    .userId {
+      font-size: 14px;
+      color: var(--beyond-color-text-tertiary);
+    }
+  }
+}
+
+.settingBox {
+  border-radius: 12px;
+  background-color: #0000000a;
+  padding: 16px 16px 16px 24px;
+  gap: 16px;
+
+  &.canClick {
+    cursor: pointer;
+  }
+}
+
+.settingItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  .settingLabel {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 16px;
+
+    .settingIcon {
+      font-size: 16px;
+    }
+  }
+
+  .arrowIcon {
+    color: var(--beyond-color-text-tertiary);
+  }
+}
+
+.selectBox {
+  width: 120px;
+
+  :global {
+    .@{antPrefix}-select-selector {
+      border-radius: 6px;
+    }
+  }
+}

@@ -1,0 +1,27 @@
+[project]
+name = "byclaw-qa"
+version = "0.1.0"
+description = "Question answering application module for byclaw."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "by-qa[all]==0.1.5",
+    "by-framework>=0.1.13",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["worker", "redis_model_config", "redis_agent_config", "byclaw_plugin", "minio_client", "minio_agent_config", "api"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+]

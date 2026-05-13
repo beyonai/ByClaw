@@ -1,0 +1,118 @@
+.taskPage {
+  width: 100%;
+  min-height: 100%;
+  background: #fff;
+  margin-top: 16px;
+}
+
+.taskHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.searchBox {
+  flex: 1;
+  border-radius: 8px;
+  border: 1px solid var(--grey-grey-0515, #d8dee5);
+}
+
+.searchInput {
+  border-radius: 100px;
+}
+
+.filter {
+  color: '#14161A';
+  font-size: 14px;
+  margin-left: 8px;
+}
+
+.filterBtn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: #f7f8fa;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s;
+  padding: 0;
+}
+
+.taskTitle {
+  margin-top: 12px;
+
+  .taskTitleText {
+    color: #14161a;
+    font-size: 12px;
+    font-weight: 400;
+  }
+}
+
+.taskList {
+  margin-top: 12px;
+  overflow: auto;
+}
+
+.taskCard {
+  background: #fff;
+  border-radius: 12px;
+  padding: 18px 16px 12px 16px;
+  margin-bottom: 18px;
+  border: 0.5px solid #ced3d9;
+}
+
+.taskCard:last-child {
+  margin-bottom: 0;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cardIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.cardTitle {
+  font-size: 14px;
+  font-weight: 500;
+  color: #14161a;
+  flex: 1;
+  margin-left: 2px;
+}
+
+.cardStatus {
+  font-size: 12px;
+  font-weight: 400;
+  border-radius: 4px;
+  border: 1px solid;
+  padding: 0px 8px;
+  margin-left: 8px;
+  background: #f4f8ff;
+  transition: background 0.2s, color 0.2s;
+}
+
+.cardDesc {
+  font-size: 12px;
+  font-weight: 400;
+  color: #707680;
+  margin-bottom: 10px;
+  line-height: 1.7;
+}
+
+.cardFooter {
+  font-size: 12px;
+  font-weight: 400;
+  color: #707680;
+  text-align: right;
+}

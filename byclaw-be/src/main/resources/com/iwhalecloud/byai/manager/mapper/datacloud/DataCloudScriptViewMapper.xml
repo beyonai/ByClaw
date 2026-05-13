@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.datacloud.DataCloudScriptViewMapper">
+
+    <!-- 脚本模板表结果映射-->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.datacloud.DatacloudScriptTemplate">
+        <id column="template_id" property="templateId" jdbcType="BIGINT"/>
+        <result column="template_name" property="templateName" jdbcType="VARCHAR"/>
+        <result column="template_type" property="templateType" jdbcType="VARCHAR"/>
+        <result column="framework" property="framework" jdbcType="VARCHAR"/>
+        <result column="py_template_content" property="pyTemplateContent" jdbcType="LONGVARCHAR"/>
+        <result column="node_template_content" property="nodeTemplateContent" jdbcType="LONGVARCHAR"/>
+        <result column="meta_infos" property="metaInfos" jdbcType="LONGVARCHAR"/>
+        <result column="template_description" property="templateDescription" jdbcType="VARCHAR"/>
+        <result column="is_active" property="isActive" jdbcType="INTEGER"/>
+        <result column="enterprise_id" property="enterpriseId" jdbcType="BIGINT"/>
+        <result column="creator_id" property="creatorId" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="update_by" property="updateBy" jdbcType="BIGINT"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+        <!-- 分页查询脚本视图列表 -->
+        <select id="selectScriptListByPage" resultType="com.iwhalecloud.byai.manager.dto.datacloud.DataCloudViewScriptDTO">
+            select
+                dss.scenario_id as  scenarioId,
+                dss.scenario_name as  scenarioName,
+                dlt.login_type_name as loginTypeName,
+                ds.script_id as scriptId,
+                ds.script_name as scriptName,
+                ds.script_type as scriptType,
+                ds.script_description as scriptDescription,
+                ds.script_status as scriptStatus,
+                ds.creator_id as creatorId,
+                ds.enterprise_id as enterpriseId,
+                ds.update_by as updateBy,
+                ds.create_time as createTime,
+                ds.update_time as updateTime,
+                ds.view_id as viewId,
+                ds.publish_status as publishStatus
+            from datacloud_script_scenario dss
+                     left join datacloud_script ds on dss.scenario_id = ds.scenario_id
+                     left join datacloud_login_type dlt on dss.login_type_id = dlt.login_type_id
+            <where>
+                <if test="query.viewId != null">
+                     and ds.view_id = #{query.viewId}
+                </if>
+                <if test="query.keyword != null and query.keyword != ''">
+                    and dss.scenario_name like concat('%', #{query.keyword}, '%')
+                    or ds.script_name like concat('%', #{query.keyword}, '%')
+                </if>
+            </where>
+            order by ds.create_time desc
+        </select>
+
+</mapper>

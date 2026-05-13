@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.conversation.FeedbackMsgInfoMapper">
+
+    <!-- 批量保存反馈消息信息 -->
+    <insert id="saveBatch" parameterType="java.util.List">
+        INSERT INTO feedback_msg_info (
+            feedback_msg_id,
+            create_time,
+            create_user,
+            is_handle,
+            is_assign,
+            assign_user,
+            handle_user,
+            handle_time
+        ) VALUES
+        <foreach collection="feedbackMsgInfoList" item="item" separator=",">
+            (
+                #{item.feedbackMsgId},
+                #{item.createTime},
+                #{item.createUser},
+                #{item.isHandle},
+                #{item.isAssign},
+                #{item.assignUser},
+                #{item.handleUser},
+                #{item.handleTime}
+            )
+        </foreach>
+    </insert>
+
+</mapper>

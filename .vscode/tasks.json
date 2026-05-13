@@ -1,0 +1,11 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "byclaw-be: prepare debug classpath",
+      "type": "shell",
+      "command": "mvn -B -f \"${workspaceFolder}/byclaw-be/pom.xml\" -DskipTests compile dependency:copy-dependencies -DincludeScope=runtime -DoutputDirectory=\"${workspaceFolder}/byclaw-be/target/dependency\"",
+      "problemMatcher": []
+    }
+  ]
+}

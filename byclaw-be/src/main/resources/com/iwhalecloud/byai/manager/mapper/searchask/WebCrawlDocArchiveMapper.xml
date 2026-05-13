@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.searchask.WebCrawlDocArchiveMapper">
+
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.searchask.WebCrawlArchiveDoc">
+        <id column="doc_archive_id" jdbcType="BIGINT" property="docArchiveId"/>
+        <result column="request_id" jdbcType="BIGINT" property="requestId"/>
+        <result column="title" jdbcType="VARCHAR" property="title"/>
+        <result column="source_url" jdbcType="VARCHAR" property="sourceUrl"/>
+        <result column="content_snippet" jdbcType="VARCHAR" property="contentSnippet"/>
+        <result column="status" jdbcType="VARCHAR" property="status"/>
+        <result column="file_id" jdbcType="BIGINT" property="fileId"/>
+        <result column="failure_reason" jdbcType="VARCHAR" property="failureReason"/>
+        <result column="score" jdbcType="DOUBLE" property="score"/>
+        <result column="create_time" jdbcType="TIMESTAMP" property="createTime"/>
+        <result column="create_by" jdbcType="BIGINT" property="createBy"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        doc_archive_id,
+        request_id,
+        title,
+        source_url,
+        content_snippet,
+        status,
+        file_id,
+        failure_reason,
+        score,
+        create_time,
+        create_by
+    </sql>
+
+    <insert id="insert" parameterType="com.iwhalecloud.byai.manager.entity.searchask.WebCrawlArchiveDoc">
+        INSERT INTO byai_web_crawl_archive_doc (
+            doc_archive_id,
+            request_id,
+            title,
+            source_url,
+            content_snippet,
+            status,
+            file_id,
+            failure_reason,
+            score,
+            create_time,
+            create_by
+        ) VALUES (
+            #{docArchiveId,jdbcType=BIGINT},
+            #{requestId,jdbcType=BIGINT},
+            #{title,jdbcType=VARCHAR},
+            #{sourceUrl,jdbcType=VARCHAR},
+            #{contentSnippet,jdbcType=VARCHAR},
+            #{status,jdbcType=VARCHAR},
+            #{fileId,jdbcType=BIGINT},
+            #{failureReason,jdbcType=VARCHAR},
+            #{score,jdbcType=DOUBLE},
+            #{createTime,jdbcType=TIMESTAMP},
+            #{createBy,jdbcType=BIGINT}
+        )
+    </insert>
+
+    <!-- 批量插入文档归档（兼容 MySQL、PostgreSQL） -->
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO byai_web_crawl_archive_doc (
+            doc_archive_id,
+            request_id,
+            title,
+            source_url,
+            content_snippet,
+            status,
+            file_id,
+            failure_reason,
+            score,
+            create_time,
+            create_by
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.docArchiveId,jdbcType=BIGINT},
+                #{item.requestId,jdbcType=BIGINT},
+                #{item.title,jdbcType=VARCHAR},
+                #{item.sourceUrl,jdbcType=VARCHAR},
+                #{item.contentSnippet,jdbcType=VARCHAR},
+                #{item.status,jdbcType=VARCHAR},
+                #{item.fileId,jdbcType=BIGINT},
+                #{item.failureReason,jdbcType=VARCHAR},
+                #{item.score,jdbcType=DOUBLE},
+                #{item.createTime,jdbcType=TIMESTAMP},
+                #{item.createBy,jdbcType=BIGINT}
+            )
+        </foreach>
+    </insert>
+
+    <select id="listByRequestId" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM byai_web_crawl_archive_doc
+        WHERE request_id = #{requestId,jdbcType=BIGINT}
+        ORDER BY doc_archive_id ASC
+    </select>
+</mapper>

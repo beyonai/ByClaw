@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.showcase.ByaiShowcaseMapper">
+  <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.showcase.ByaiShowcase">
+    <id column="id" jdbcType="BIGINT" property="id"/>
+    <result column="session_id" jdbcType="BIGINT" property="sessionId"/>
+    <result column="type" jdbcType="VARCHAR" property="type"/>
+    <result column="task_id" jdbcType="BIGINT" property="taskId"/>
+    <result column="content" jdbcType="VARCHAR" property="content"/>
+    <result column="status" jdbcType="INTEGER" property="status"/>
+    <result column="file_code" jdbcType="VARCHAR" property="fileCode"/>
+    <result column="file_id" jdbcType="VARCHAR" property="fileId"/>
+    <result column="url" jdbcType="VARCHAR" property="url"/>
+    <result column="name" jdbcType="VARCHAR" property="name"/>
+    <result column="message_id" jdbcType="BIGINT" property="messageId"/>
+    <result column="agent_id" jdbcType="BIGINT" property="agentId"/>
+    <result column="agent_code" jdbcType="VARCHAR" property="agentCode"/>
+    <result column="session_mode" jdbcType="VARCHAR" property="sessionMode"/>
+    <result column="create_time" jdbcType="TIMESTAMP" property="createTime"/>
+    <result column="update_time" jdbcType="TIMESTAMP" property="updateTime"/>
+    <result column="create_by" jdbcType="BIGINT" property="createBy"/>
+    <result column="update_by" jdbcType="BIGINT" property="updateBy"/>
+  </resultMap>
+
+  <resultMap id="ByaiShowcaseVoResultMap" extends="BaseResultMap" type="com.iwhalecloud.byai.manager.vo.showcase.ByaiShowcaseVo" >
+    <result column="user_code" jdbcType="VARCHAR" property="createUserCode"/>
+  </resultMap>
+
+  <sql id="Base_Column_List">
+    id, session_id, type, task_id, content, status, file_code, file_id, url, name, message_id, agent_id, agent_code, session_mode, create_time,
+    update_time, create_by, update_by
+  </sql>
+
+  <insert id="insert" parameterType="com.iwhalecloud.byai.manager.entity.showcase.ByaiShowcase">
+    INSERT INTO byai_showcase
+    (id, session_id, type, task_id, content, status, file_code, file_id, url, name, message_id, agent_id, agent_code, session_mode, create_time,
+    update_time, create_by, update_by)
+    VALUES
+    (#{id,jdbcType=BIGINT}, #{sessionId,jdbcType=BIGINT}, #{type,jdbcType=VARCHAR},
+    #{taskId,jdbcType=BIGINT}, #{content,jdbcType=VARCHAR}, #{status,jdbcType=INTEGER}, #{fileCode,jdbcType=VARCHAR}, #{fileId,jdbcType=VARCHAR}, #{url,jdbcType=VARCHAR}, #{name,jdbcType=VARCHAR},
+    #{messageId,jdbcType=BIGINT}, #{agentId,jdbcType=BIGINT}, #{agentCode,jdbcType=VARCHAR},
+    #{sessionMode,jdbcType=VARCHAR}, #{createTime,jdbcType=TIMESTAMP}, #{updateTime,jdbcType=TIMESTAMP},
+    #{createBy,jdbcType=BIGINT}, #{updateBy,jdbcType=BIGINT})
+  </insert>
+
+  <insert id="insertBatch" parameterType="java.util.List">
+    INSERT INTO byai_showcase
+    (id, session_id, type, task_id, content, status, file_code, file_id, url, name, message_id, agent_id, agent_code, session_mode, create_time,
+    update_time, create_by, update_by)
+    VALUES
+    <foreach collection="list" item="item" separator=",">
+      (#{item.id,jdbcType=BIGINT}, #{item.sessionId,jdbcType=BIGINT}, #{item.type,jdbcType=VARCHAR},
+      #{item.taskId,jdbcType=BIGINT}, #{item.content,jdbcType=VARCHAR}, #{item.status,jdbcType=INTEGER}, #{item.fileCode,jdbcType=VARCHAR}, #{item.fileId,jdbcType=VARCHAR}, #{item.url,jdbcType=VARCHAR}, #{item.name,jdbcType=VARCHAR},
+      #{item.messageId,jdbcType=BIGINT}, #{item.agentId,jdbcType=BIGINT}, #{item.agentCode,jdbcType=VARCHAR},
+      #{item.sessionMode,jdbcType=VARCHAR}, #{item.createTime,jdbcType=TIMESTAMP}, #{item.updateTime,jdbcType=TIMESTAMP},
+      #{item.createBy,jdbcType=BIGINT}, #{item.updateBy,jdbcType=BIGINT})
+    </foreach>
+  </insert>
+
+  <update id="updateById" parameterType="com.iwhalecloud.byai.manager.entity.showcase.ByaiShowcase">
+    UPDATE byai_showcase
+    <set>
+      <if test="sessionId != null">
+        session_id = #{sessionId,jdbcType=BIGINT},
+      </if>
+      <if test="type != null">
+        type = #{type,jdbcType=VARCHAR},
+      </if>
+      <if test="taskId != null">
+        task_id = #{taskId,jdbcType=BIGINT},
+      </if>
+      <if test="content != null">
+        content = #{content,jdbcType=VARCHAR},
+      </if>
+      <if test="status != null">
+        status = #{status,jdbcType=INTEGER},
+      </if>
+      <if test="fileCode != null">
+        file_code = #{fileCode,jdbcType=VARCHAR},
+      </if>
+      <if test="fileId != null">
+        file_id = #{fileId,jdbcType=VARCHAR},
+      </if>
+      <if test="url != null">
+        url = #{url,jdbcType=VARCHAR},
+      </if>
+      <if test="name != null">
+        name = #{name,jdbcType=VARCHAR},
+      </if>
+      <if test="messageId != null">
+        message_id = #{messageId,jdbcType=BIGINT},
+      </if>
+      <if test="agentId != null">
+        agent_id = #{agentId,jdbcType=BIGINT},
+      </if>
+      <if test="agentCode != null">
+        agent_code = #{agentCode,jdbcType=VARCHAR},
+      </if>
+      <if test="sessionMode != null">
+        session_mode = #{sessionMode,jdbcType=VARCHAR},
+      </if>
+      <if test="updateTime != null">
+        update_time = #{updateTime,jdbcType=TIMESTAMP},
+      </if>
+      <if test="updateBy != null">
+        update_by = #{updateBy,jdbcType=BIGINT},
+      </if>
+    </set>
+    WHERE id = #{id,jdbcType=BIGINT}
+  </update>
+
+  <select id="selectById" parameterType="java.lang.Long" resultMap="BaseResultMap">
+    SELECT
+    <include refid="Base_Column_List"/>
+    FROM byai_showcase
+    WHERE id = #{id,jdbcType=BIGINT}
+  </select>
+
+  <select id="selectByCondition"  resultMap="ByaiShowcaseVoResultMap">
+    SELECT a.id,
+           a.session_id,
+           a.type,
+           a.task_id,
+           a.content,
+           a.name,
+           a.message_id,
+           a.agent_id,
+           a.agent_code,
+           a.session_mode,
+           a.create_time,
+           a.update_time,
+           a.create_by,
+           a.update_by,
+           a.url,
+           a.file_id,
+           a.file_code,
+           a.status,
+           b.user_code
+    FROM byai_showcase a
+             left join po_users b on a.create_by = b.user_id
+    <where>
+      <if test="sessionId != null">
+        AND session_id = #{sessionId,jdbcType=BIGINT}
+      </if>
+      <if test="type != null">
+        AND type = #{type,jdbcType=VARCHAR}
+      </if>
+      <if test="agentId != null">
+        AND agent_id = #{agentId,jdbcType=BIGINT}
+      </if>
+      <if test="taskId != null">
+        AND task_id = #{taskId,jdbcType=BIGINT}
+      </if>
+
+      <if test="createBy != null">
+        AND create_by = #{createBy,jdbcType=BIGINT}
+      </if>
+
+      <if test="keyword != null">
+        AND UPPER(name) LIKE CONCAT(CONCAT('%', UPPER(#{keyword,jdbcType=VARCHAR})), '%')
+      </if>
+      <if test="sessionMode != null">
+        AND session_mode = #{sessionMode,jdbcType=VARCHAR}
+      </if>
+      <if test="status != null">
+        AND status = #{status,jdbcType=INTEGER}
+      </if>
+      <if test="messageIds != null and messageIds.size() >0">
+        AND message_id in
+        <foreach collection="messageIds" separator="," close=")" item="item" open="(">
+          #{item}
+        </foreach>
+      </if>
+    </where>
+    ORDER BY update_time DESC, create_time DESC
+  </select>
+
+
+  <update id="updateStatusByCondition">
+    UPDATE byai_showcase
+    SET status = #{status,jdbcType=INTEGER}, update_time = #{updateTime,jdbcType=TIMESTAMP}
+    WHERE session_id = #{sessionId,jdbcType=BIGINT}
+      <if test="type != null and type != ''">
+        AND type = #{type,jdbcType=VARCHAR}
+      </if>
+      <if test="fileCode != null and fileCode != ''">
+        AND file_code = #{fileCode,jdbcType=VARCHAR}
+      </if>
+      <if test="messageId != null">
+        AND message_id = #{messageId,jdbcType=BIGINT}
+      </if>
+  </update>
+
+  <select id="selectDeletedRecord" resultMap="BaseResultMap">
+    SELECT
+    <include refid="Base_Column_List"/>
+    FROM byai_showcase
+    WHERE session_id = #{sessionId,jdbcType=BIGINT}
+      AND type = #{type,jdbcType=VARCHAR}
+      <if test="messageId != null">
+        AND message_id = #{messageId,jdbcType=BIGINT}
+      </if>
+      <if test="fileCode != null and fileCode != ''">
+        AND file_code = #{fileCode,jdbcType=VARCHAR}
+      </if>
+    LIMIT 1
+  </select>
+</mapper>
+
+

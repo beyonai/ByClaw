@@ -1,0 +1,99 @@
+.card-radio {
+  &-group {
+    display: flex;
+    gap: 12px;
+
+    :global {
+      .@{antPrefix}-space-item {
+        flex: 1;
+        overflow: auto;
+      }
+    }
+  }
+
+  &-item {
+    display: flex;
+    // flex: 1;
+    flex-direction: column;
+    flex-shrink: 0;
+    padding: 8px 12px;
+    font-size: 12px;
+    background: #fff;
+    border: 1.5px solid #00000026;
+    border-radius: 4px;
+    cursor: pointer;
+    height: 100px;
+
+    max-width: 264px;
+
+    &:hover {
+      border: 1.5px solid #165dff;
+    }
+
+    &-title {
+      display: flex;
+      align-items: center;
+
+      .icon {
+        margin-right: 8px;
+        font-size: 16px;
+      }
+
+      .label {
+        color: #1f2533;
+        line-height: 20px;
+      }
+    }
+
+    &-desc {
+      // height: 30px;
+      margin-top: 4px;
+      overflow: hidden;
+      color: #7a8799;
+    }
+  }
+
+  &-item-active {
+    position: relative;
+    background-color: #fafcff;
+    border: 1.5px solid #165dff;
+
+    &::before {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 0;
+      height: 0;
+      border-right: 16px solid #165dff;
+      border-bottom: 16px solid transparent;
+      content: '';
+    }
+
+    &::after {
+      position: absolute;
+      top: 1.5px;
+      right: 1.5px;
+      display: block;
+      width: 6px;
+      height: 4px;
+      border-bottom: 1.5px solid #fff;
+      border-left: 1.5px solid #fff;
+      transform: rotate(-45deg);
+      content: '';
+    }
+  }
+
+  &-item-disabled {
+    background-color: rgba(0, 0, 0, 0.04);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    cursor: not-allowed;
+
+    .label {
+      color: #707680 !important;
+    }
+
+    &:hover {
+      border: 1px solid rgba(0, 0, 0, 0.06);
+    }
+  }
+}

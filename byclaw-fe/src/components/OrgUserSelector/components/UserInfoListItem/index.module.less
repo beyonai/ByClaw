@@ -1,0 +1,73 @@
+.item {
+  display: flex;
+  align-items: center;
+  padding: 2px 8px;
+  min-height: 52px;
+  max-height: 62px;
+  cursor: pointer;
+  border: 0.5px dashed transparent;
+  border-radius: 10px;
+  position: relative;
+  &:hover {
+    border-color: #6aa1ff;
+    background-color: #fff;
+    .action {
+      display: block;
+    }
+  }
+  &.loading .action {
+    display: block;
+  }
+}
+
+.info {
+  flex: 1 1 auto;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.action {
+  display: none;
+  flex-shrink: 0;
+  flex-basis: auto;
+  margin-left: auto;
+  cursor: pointer;
+  color: var(~'--@{antPrefix}-color-primary');
+}
+
+.icon {
+  border-radius: 8px;
+  display: inline-block;
+  margin-right: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+
+  width: 32px;
+  height: 32px;
+  color: #fff;
+  line-height: 32px;
+  text-align: center;
+  font-size: 12px;
+  background: var(~'--@{antPrefix}-color-primary-hover', #4080ff);
+
+  & > :global(.anticon) {
+    font-size: 32px;
+  }
+}
+
+.userPath {
+  font-size: 10px;
+  // display: -webkit-box;
+  // -webkit-line-clamp: 3;
+  // -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(~'--@{antPrefix}-color-text-quaternary', #a4aab2);
+}
+
+.name {
+  font-size: 15px;
+  margin-right: 8px;
+  flex-shrink: 0;
+}

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.SsResExtAgentMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.resource.SsResExtAgent">
+        <id column="resource_id" property="resourceId" />
+        <result column="agent_type" property="agentType" />
+        <result column="agent_sse_url" property="agentSseUrl" />
+        <result column="agent_web_url" property="agentWebUrl" />
+        <result column="agent_admin_url" property="agentAdminUrl" />
+        <result column="prologue" property="prologue" />
+        <result column="agent_sse_url_ori" property="agentSseUrlOri" />
+        <result column="agent_web_url_ori" property="agentWebUrlOri" />
+        <result column="agent_admin_url_ori" property="agentAdminUrlOri" />
+        <result column="agent_dev_type" property="agentDevType" />
+        <result column="agent_sse_head" property="agentSseHead" />
+        <result column="auth_type" property="authType" />
+        <result column="integration_type" property="integrationType" />
+    </resultMap>
+
+    <resultMap id="resourceExtAgentDtoResultMap"
+               type="com.iwhalecloud.byai.manager.dto.resource.ResourceExtAgentDto"
+               extends="com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper.BaseResultMap">
+        <association property="ssResExtAgent" javaType="com.iwhalecloud.byai.manager.entity.resource.SsResExtAgent" resultMap="BaseResultMap" />
+    </resultMap>
+
+    <select id="findResourceExtAgentByIds" resultMap="resourceExtAgentDtoResultMap">
+        SELECT a.resource_id,
+               a.resource_code,
+               a.system_code,
+               a.resource_source_pk_id,
+               a.resource_biz_type,
+               a.resource_type,
+               a.resource_name,
+               a.resource_desc,
+               a.avatar,
+               a.sample,
+               a.tags,
+               a.resource_version_id,
+               a.host_type,
+               a.catalog_id,
+               a.man_org_id,
+               a.man_user_id,
+               a.index_list,
+               a.create_by,
+               a.create_time,
+               a.update_by,
+               a.update_time,
+               a.com_acct_id,
+               a.resource_status,
+               a.resource_d_verid,
+               a.resource_r_verid,
+               a.auth_status,
+               a.publish_time,
+               a.shelf_time,
+               a.unshelf_time,
+               a.publish_portal,
+               b.resource_id,
+               b.agent_type,
+               b.agent_sse_url,
+               b.agent_web_url,
+               b.agent_admin_url,
+               b.prologue,
+               b.agent_sse_url_ori,
+               b.agent_web_url_ori,
+               b.agent_admin_url_ori,
+               b.agent_dev_type,
+               b.agent_sse_head,
+               b.auth_type,
+               b.integration_type
+        FROM ss_resource a
+        LEFT JOIN ss_res_ext_agent b ON a.resource_id = b.resource_id
+        WHERE a.resource_biz_type = 'AGENT'
+        AND a.resource_id IN
+        <foreach collection="resourceIds" item="item" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+    </select>
+
+</mapper>

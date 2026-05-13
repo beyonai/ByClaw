@@ -1,0 +1,19 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/byclaw-data/.venv/Scripts/python.exe",
+  "java.import.exclusions": [
+    "**/node_modules/**",
+    "**/.git/**",
+    "**/byclaw-fe/**",
+    "**/byclaw-qa/**",
+    "**/byclaw-data/**",
+    "**/byclaw-exe/**"
+  ],
+  "java.project.sourcePaths": [
+    "byclaw-be/src/main/java",
+    "byclaw-be/src/test/java"
+  ],
+  "java.project.referencedLibraries": [
+    "byclaw-be/target/lib/**/*.jar"
+  ],
+  "java.configuration.updateBuildConfiguration": "automatic"
+}

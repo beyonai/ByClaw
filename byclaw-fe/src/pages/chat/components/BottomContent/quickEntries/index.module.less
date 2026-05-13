@@ -1,0 +1,68 @@
+.expandableBox {
+  position: relative;
+  min-height: 34px; // 大约是一个item的高度，确保不会影响后续元素
+}
+
+.expandable {
+  z-index: 1;
+  padding: 6px 12px;
+  border-radius: 16px;
+  background: #f8f9fb;
+  overflow: hidden;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  transition: max-height 1s ease-in-out;
+  max-height: 34px; // 大约是一个item的高度
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  &:hover {
+    max-height: 999px;
+    .quickItem {
+      opacity: 1;
+    }
+    .down {
+      display: none;
+    }
+  }
+}
+
+.quickItem {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  // transition: opacity 1s ease-in-out;
+
+  .itemText {
+    flex: 1;
+    overflow: hidden;
+  }
+
+  &:hover {
+    .action {
+      display: inline-block;
+    }
+  }
+}
+
+.down {
+  background: #fff;
+  padding: 0 8px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  border: 1px solid #0000000f;
+  margin-left: auto;
+}
+
+.action {
+  display: none;
+  font-size: 12px;
+  border-color: transparent;
+}

@@ -1,0 +1,82 @@
+@import '../../common-list.module.less';
+
+// 主容器
+.container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+// 搜索区域
+.searchArea {
+  margin-bottom: 10px;
+}
+
+// 搜索控件
+.searchControls {
+  display: flex;
+  gap: 8px;
+}
+
+.searchInput {
+  flex: 1;
+}
+
+.breadcrumb {
+  margin: 8px 0;
+
+  & > ol > li:first-child {
+    cursor: pointer;
+
+    :global {
+      .anticon {
+        font-size: 12px;
+        margin-right: 4px;
+      }
+    }
+  }
+}
+
+.tree:global(.@{antPrefix}-tree) {
+  background: transparent;
+
+  :global {
+    .@{antPrefix}-tree-treenode {
+      align-items: center;
+      min-height: 36px;
+    }
+
+    .@{antPrefix}-tree-switcher {
+      align-self: center;
+    }
+
+    .@{antPrefix}-tree-node-content-wrapper {
+      padding-left: 0;
+      padding-right: 22px;
+    }
+
+    .@{antPrefix}-tree-treenode .@{antPrefix}-tree-node-content-wrapper > .@{antPrefix}-tree-title {
+      position: static;
+    }
+
+    .@{antPrefix}-tree-treenode:hover {
+      :local {
+        .treeActionIcon {
+          visibility: visible;
+        }
+      }
+    }
+
+    .@{antPrefix}-tree-treenode-draggable .@{antPrefix}-tree-draggable-icon {
+      width: 0;
+    }
+  }
+}
+
+.treeActionIcon {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  visibility: hidden;
+}

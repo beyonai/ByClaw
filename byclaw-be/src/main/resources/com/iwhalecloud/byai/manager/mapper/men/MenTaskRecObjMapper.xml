@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.men.MenTaskRecObjMapper">
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.men.MenTaskRecObj">
+        <id column="task_rec_obj_id" property="taskRecObjId" jdbcType="BIGINT"/>
+        <result column="task_id" property="taskId" jdbcType="BIGINT"/>
+        <result column="reci_type" property="reciType" jdbcType="VARCHAR"/>
+        <result column="reci_obj_id" property="reciObjId" jdbcType="BIGINT"/>
+        <result column="create_by" property="createBy" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="update_by" property="updateBy" jdbcType="BIGINT"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
+        <result column="com_acct_id" property="comAcctId" jdbcType="BIGINT"/>
+    </resultMap>
+
+    <resultMap id="MenTaskRecObjVoResultMap" type="com.iwhalecloud.byai.manager.vo.men.MenTaskRecObjVo" extends="BaseResultMap">
+        <result column="user_code" property="userCode" jdbcType="VARCHAR"/>
+        <result column="user_name" property="userName" jdbcType="VARCHAR"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        a.task_rec_obj_id, a.task_id, a.reci_type, a.reci_obj_id, a.create_by, a.create_time, a.update_by, a.update_time, a.com_acct_id
+    </sql>
+
+    <select id="selectByTaskId" resultMap="BaseResultMap">
+        select <include refid="Base_Column_List"/> from men_task_rec_obj a where a.task_id = #{taskId}
+    </select>
+
+    <insert id="insertBatch" parameterType="java.util.List">
+        insert into men_task_rec_obj (
+            task_rec_obj_id, task_id, reci_type, reci_obj_id, create_by, create_time, update_by, update_time, com_acct_id
+        ) values
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.taskRecObjId},
+                #{item.taskId},
+                #{item.reciType},
+                #{item.reciObjId},
+                #{item.createBy},
+                #{item.createTime},
+                #{item.updateBy},
+                #{item.updateTime},
+                #{item.comAcctId}
+            )
+        </foreach>
+    </insert>
+
+    <delete id="deleteByTaskId" parameterType="long">
+        delete from men_task_rec_obj a where a.task_id = #{taskId}
+    </delete>
+
+    <select id="selectTaskResUserByTaskId" resultMap="MenTaskRecObjVoResultMap">
+        select <include refid="Base_Column_List"/>,d.user_code,d.user_name from men_task_rec_obj a
+        inner join po_users d on d.user_id = a.reci_obj_id and a.reci_type ='HUMAN'
+        where task_id = #{taskId}
+    </select>
+</mapper>

@@ -1,0 +1,201 @@
+@above-content-height: 42px;
+
+// 渐变边框的通用样式 mixin
+.gradient-border(@start-color, @end-color) {
+  border: none;
+  background: linear-gradient(90deg, @start-color, @end-color);
+  padding: 2px 1px 12px 1px;
+
+  // 内部容器，保持原有的背景色和圆角
+  &::before {
+    content: '';
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    right: 1px;
+    bottom: 1px;
+    background: #fff;
+    border-radius: 19px;
+    z-index: 0;
+  }
+
+  // 确保内容在渐变边框内部
+  > * {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+.inputBlock {
+  overflow: hidden;
+  position: relative;
+  border-radius: 20px;
+  border: 1px solid #d8dee5;
+  padding-bottom: 12px;
+
+  // overflow: hidden;
+  &.withAboveContent {
+    margin-top: @above-content-height;
+  }
+
+  // 智办模式下的渐变边框
+  &.beyondSmart {
+    .gradient-border(#3150ff, #C067FF);
+  }
+
+  // 专家模式下的渐变边框
+  &.expert {
+    .gradient-border(#1882ff, #36ebca);
+  }
+}
+
+.chatTarget {
+  position: absolute;
+  left: 0;
+  top: -@above-content-height;
+  height: @above-content-height - 8px;
+  border-radius: 10px;
+  border: 1px solid #165dff33;
+  background: #165dff1a;
+  padding: 6px 10px 6px 8px;
+  display: flex;
+  align-items: center;
+  line-height: 1;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(~'--@{antPrefix}-color-primary');
+
+  & > div:first-child {
+    width: 22px;
+    height: 22px;
+    margin-right: 2px;
+  }
+
+  &.off {
+    background: #fff;
+    border-color: #0000000f;
+    color: var(~'--@{antPrefix}-color-text-tertiary');
+
+    & > div:first-child {
+      opacity: 0.5;
+    }
+  }
+}
+
+.tools {
+  display: flex;
+  // justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  padding: 0 12px;
+
+  :global {
+    .@{antPrefix}-btn {
+      gap: 4px;
+    }
+    .@{antPrefix}-space-item {
+      display: flex;
+      align-items: center;
+    }
+    .@{antPrefix}-select-selector,
+    .@{antPrefix}-select-selection-item {
+      font-weight: 500;
+    }
+    .@{antPrefix}-select-prefix > .anticon {
+      vertical-align: middle;
+    }
+  }
+
+  // padding-top: 12px;
+
+  .toolOption {
+    padding: 6px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--grey-grey-0515, #d8dee5);
+  }
+
+  .attachment {
+    padding: 5px;
+    font-size: 16px;
+    cursor: pointer;
+  }
+
+  .sendBtn {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    border: none;
+    :global {
+      .@{antPrefix}-btn-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+    }
+  }
+
+  .cancelBtn {
+    // background-color: var(--beyond-color-fill-quaternary) !important;
+  }
+
+  .toolsRight {
+    margin-left: auto;
+  }
+}
+
+.inputUpperBlock {
+  min-height: 6px;
+  // margin-bottom: 6px;
+
+  // .filesListBlock {
+  // margin: 6px;
+  // gap: 8px
+  // }
+
+  .agentHeader {
+    height: 42px;
+    line-height: 42px;
+    padding: 0 12px;
+
+    border-top-left-radius: 20px;
+    border-top-right-radius: 20px;
+
+    gap: 6px;
+
+    background-color: var(--beyond-color-fill-quaternary);
+  }
+}
+
+.assistant.assistant.assistant {
+  position: relative;
+  top: 11px;
+  right: 12px;
+  border-radius: 8px;
+  padding: 3px 8px;
+  background-color: transparent;
+
+  &.active {
+    background-color: var(--beyond-color-fill-tertiary);
+  }
+}
+
+.assistantPopoverContent {
+  width: 100%;
+  // 和ChatLayoutComp组件的queryInputWrapper节点max-width一致
+  max-width: 850px;
+  z-index: 999;
+
+  :global {
+    .@{antPrefix}-popover-inner {
+      border-radius: 20px;
+      padding-left: 0;
+      padding-right: 0;
+    }
+  }
+
+  .title {
+    color: var(--beyond-color-text);
+    padding: 0 var(--beyond-popover-inner-padding) var(--beyond-popover-inner-padding);
+    border-bottom: 0.5px solid var(--beyond-color-border-secondary);
+  }
+}

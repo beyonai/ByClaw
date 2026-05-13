@@ -1,0 +1,152 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 4px 0 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.title {
+  color: #1d2129;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 22px;
+  margin-bottom: 10px;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.toolbarLeft {
+  display: flex;
+  align-items: center;
+  column-gap: 12px;
+}
+
+.addBtn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border-color: #94b7ff;
+  color: #165dff;
+  background: #f2f7ff;
+  font-size: 12px;
+}
+
+.search {
+  margin-bottom: 10px;
+
+  :global {
+    .@{antPrefix}-input-affix-wrapper {
+      height: 30px;
+      border-radius: 8px;
+      background: #fff;
+      border-color: #e5e6eb;
+    }
+  }
+}
+
+.myOrg {
+  margin-bottom: 0;
+  color: #475366;
+  font-size: 12px;
+}
+
+.tree {
+  flex: 1;
+  overflow: auto;
+  padding-right: 4px;
+
+  :global {
+    .@{antPrefix}-tree {
+      background: transparent;
+    }
+
+    .@{antPrefix}-tree-treenode {
+      width: 100%;
+      padding: 1px 0;
+    }
+
+    .@{antPrefix}-tree-indent-unit {
+      width: 16px;
+    }
+
+    .@{antPrefix}-tree-switcher {
+      // width: 16px;
+      // display: flex;
+      // align-items: center;
+      // justify-content: center;
+      // color: #86909c;
+    }
+
+    .@{antPrefix}-tree-node-content-wrapper {
+      width: calc(100% - 16px);
+      padding: 0 !important;
+      background: transparent !important;
+    }
+
+    .@{antPrefix}-tree-list-holder-inner {
+      min-width: 100%;
+    }
+  }
+}
+
+.switcherIcon {
+  font-size: 12px;
+  color: #7a8799;
+}
+
+.node {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  padding: 0 8px;
+  border-radius: 6px;
+}
+
+.nodeActive {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: #edf4ff;
+}
+
+.nodeMain {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  column-gap: 8px;
+}
+
+.nodeIcon {
+  font-size: 14px;
+  color: #165dff;
+}
+
+.nodeText {
+  color: #475366;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.nodeTextActive {
+  color: #165dff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.nodeMore {
+  color: #7a8799;
+}

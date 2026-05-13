@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.SsResExtAttributeMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.resource.SsResExtAttribute">
+        <id column="ext_attribute_id" property="extAttributeId" />
+        <result column="resource_id" property="resourceId" />
+        <result column="attribute_type" property="attributeType" />
+        <result column="attribute_code" property="attributeCode" />
+        <result column="attribute_value" property="attributeValue" />
+        <result column="type" property="type" />
+        <result column="format_exp_st" property="formatExpSt" />
+        <result column="unit" property="unit" />
+        <result column="is_required" property="isRequired" />
+        <result column="term_type_code" property="termTypeCode" />
+        <result column="term_field" property="termField" />
+        <result column="attribute_desc" property="attributeDesc" />
+        <result column="ext_meta" property="extMeta" />
+        <result column="sort" property="sort" />
+        <result column="obj_id" property="objId" />
+    </resultMap>
+
+    <!-- 通用查询结果-->
+    <sql id="Base_Column_List">
+        ext_attribute_id, resource_id, obj_id, attribute_type, attribute_code, attribute_value, 
+        type, format_exp_st, unit, is_required, term_type_code, term_field, 
+        attribute_desc, ext_meta, sort
+    </sql>
+
+    <!-- 根据资源ID查询扩展属性列表 -->
+    <select id="selectByResourceId" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List" />
+        FROM ss_res_ext_attribute
+        WHERE resource_id = #{resourceId}
+        ORDER BY sort ASC, ext_attribute_id ASC
+    </select>
+
+    <!-- 根据资源ID列表批量查询扩展属性列表 -->
+    <select id="selectByResourceIds" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List" />
+        FROM ss_res_ext_attribute
+        WHERE resource_id IN
+        <foreach collection="resourceIds" item="item" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+        ORDER BY resource_id ASC, sort ASC, ext_attribute_id ASC
+    </select>
+
+    <!-- 根据资源ID和属性类型查询扩展属性列表 -->
+    <select id="selectByResourceIdAndType" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List" />
+        FROM ss_res_ext_attribute
+        WHERE resource_id = #{resourceId}
+        <if test="attributeType != null and attributeType != ''">
+            AND attribute_type = #{attributeType}
+        </if>
+        ORDER BY sort ASC, ext_attribute_id ASC
+    </select>
+
+    <!-- 批量插入扩展属性 -->
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO ss_res_ext_attribute (
+            ext_attribute_id, resource_id, obj_id, attribute_type, attribute_code, 
+            attribute_value, type, format_exp_st, unit, is_required, 
+            term_type_code, term_field, attribute_desc, ext_meta, sort
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.extAttributeId}, #{item.resourceId}, #{item.objId}, 
+                #{item.attributeType}, #{item.attributeCode}, #{item.attributeValue}, 
+                #{item.type}, #{item.formatExpSt}, #{item.unit}, #{item.isRequired}, 
+                #{item.termTypeCode}, #{item.termField}, #{item.attributeDesc}, 
+                #{item.extMeta}, #{item.sort}
+            )
+        </foreach>
+    </insert>
+
+    <!-- 批量更新扩展属性 -->
+    <update id="updateBatch" parameterType="java.util.List">
+        UPDATE ss_res_ext_attribute
+        <trim prefix="SET" suffixOverrides=",">
+            <trim prefix="resource_id = CASE ext_attribute_id" suffix="END,">
+                <foreach collection="list" item="item">
+                    <if test="item.resourceId != null">
+                        WHEN #{item.extAttributeId} THEN #{item.resourceId}
+                    </if>
+                </foreach>
+            </trim>
+            <trim prefix="obj_id = CASE ext_attribute_id" suffix="END,">
+                <foreach collection="list" item="item">
+                    <if test="item.objId != null">
+                        WHEN #{item.extAttributeId} THEN #{item.objId}
+                    </if>
+                </foreach>
+            </trim>
+            <trim prefix="attribute_type = CASE ext_attribute_id" suffix="END,">
+                <foreach collection="list" item="item">
+                    <if test="item.attributeType != null">
+                        WHEN #{item.extAttributeId} THEN #{item.attributeType}
+                    </if>
+                </foreach>
+            </trim>
+            <trim prefix="attribute_code = CASE ext_attribute_id" suffix="END,">
+                <foreach collection="list" item="item">
+                    <if test="item.attributeCode != null">
+                        WHEN #{item.extAttributeId} THEN #{item.attributeCode}
+                    </if>
+                </foreach>
+            </trim>
+            <trim prefix="attribute_value = CASE ext_attribute_id" suffix="END,">
+                <foreach collection="list" item="item">
+                    <if test="item.attributeValue != null">
+                        WHEN #{item.extAttributeId} THEN #{item.attributeValue}
+                    </if>
+                </foreach>
+            </trim>
+            <trim prefix="type = CASE ext_attribute_id" suffix="END,">
+                <foreach collection="list" item="item">
+                    <if test="item.type != null">
+                        WHEN #{item.extAttributeId} THEN #{item.type}
+                    </if>
+                </foreach>
+            </trim>
+            <trim prefix="format_exp_st = CASE ext_attribute_id" suffix="END,">
+                <foreach collection="list" item="item">
+                    <if test="item.formatExpSt != null">
+                        WHEN #{item.extAttributeId} THEN #{item.formatExpSt}
+                    </if>
+                </foreach>
+            </trim>
+            <trim prefix="unit = CASE ext_attribute_id" suffix="END,">
+                <foreach collection="list" item="item">
+                    <if test="item.unit != null">
+                        WHEN #{item.extAttributeId} THEN #{item.unit}
+                    </if>
+                </foreach>
+            </trim>
+            <trim prefix="is_required = CASE ext_attribute_id" suffix="END,">
+                <foreach collection="list" item="item">
+                    <if test="item.isRequired != null">
+                        WHEN #{item.extAttributeId} THEN #{item.isRequired}
+                    </if>
+                </foreach>
+            </trim>
+            <trim prefix="term_type_code = CASE ext_attribute_id" suffix="END,">
+                <foreach collection="list" item="item">
+                    <if test="item.termTypeCode != null">
+                        WHEN #{item.extAttributeId} THEN #{item.termTypeCode}
+                    </if>
+                </foreach>
+            </trim>
+            <trim prefix="term_field = CASE ext_attribute_id" suffix="END,">
+                <foreach collection="list" item="item">
+                    <if test="item.termField != null">
+                        WHEN #{item.extAttributeId} THEN #{item.termField}
+                    </if>
+                </foreach>
+            </trim>
+            <trim prefix="attribute_desc = CASE ext_attribute_id" suffix="END,">
+                <foreach collection="list" item="item">
+                    <if test="item.attributeDesc != null">
+                        WHEN #{item.extAttributeId} THEN #{item.attributeDesc}
+                    </if>
+                </foreach>
+            </trim>
+            <trim prefix="ext_meta = CASE ext_attribute_id" suffix="END,">
+                <foreach collection="list" item="item">
+                    <if test="item.extMeta != null">
+                        WHEN #{item.extAttributeId} THEN #{item.extMeta}
+                    </if>
+                </foreach>
+            </trim>
+            <trim prefix="sort = CASE ext_attribute_id" suffix="END,">
+                <foreach collection="list" item="item">
+                    <if test="item.sort != null">
+                        WHEN #{item.extAttributeId} THEN #{item.sort}
+                    </if>
+                </foreach>
+            </trim>
+        </trim>
+        WHERE ext_attribute_id IN
+        <foreach collection="list" item="item" open="(" separator="," close=")">
+            #{item.extAttributeId}
+        </foreach>
+    </update>
+
+</mapper>
+

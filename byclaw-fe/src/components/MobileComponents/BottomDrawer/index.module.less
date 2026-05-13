@@ -1,0 +1,44 @@
+.wrapper:global(.@{antPrefix}-drawer) {
+  :global {
+    .@{antPrefix}-drawer-content-wrapper {
+      box-shadow: 0 -4px 8px 0 rgba(31, 37, 51, 0.08);
+      border-radius: 16px 16px 0 0;
+      overflow: hidden;
+    }
+    .@{antPrefix}-drawer-header {
+      border-bottom: none;
+      padding: 8px 8px 12px 8px;
+    }
+    .@{antPrefix}-drawer-body {
+      padding: 0 8px 8px 8px;
+    }
+    .@{antPrefix}-drawer-close {
+      width: 32px;
+      height: 32px;
+      background-color: rgba(247, 250, 252, 1);
+      border-radius: 32px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+  }
+}
+
+.centerTitle:global(.@{antPrefix}-drawer) {
+  :global {
+    .@{antPrefix}-drawer-title {
+      text-align: center;
+    }
+  }
+}
+
+.absoluteClose:global(.@{antPrefix}-drawer) {
+  :global {
+    .@{antPrefix}-drawer-close {
+      position: absolute;
+      top: 12px;
+      right: 20px;
+      margin-right: 0;
+    }
+  }
+}

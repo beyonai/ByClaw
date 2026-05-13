@@ -1,0 +1,21 @@
+{
+  "!src/assets/**/*": "echo 'Skipping assets files'",
+  "!src/**/__tests__/**/*": "echo 'Skipping all test files'",
+  "!src/**/*.test.{js,jsx,ts,tsx}": "echo 'Skipping test files'",
+  "!src/**/*.spec.{js,jsx,ts,tsx}": "echo 'Skipping spec files'",
+  "src/**/*.{md,json}": [
+    "prettier --cache --write"
+  ],
+  "src/**/*.{js,jsx}": [
+    "prettier --cache --write",
+    "max lint --fix --eslint-only"
+  ],
+  "src/**/*.{css,less}": [
+    "prettier --cache --write",
+    "max lint --fix --stylelint-only"
+  ],
+  "src/**/*.ts?(x)": [
+    "prettier --cache --parser=typescript --write",
+    "max lint --fix --eslint-only"
+  ]
+}

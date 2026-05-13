@@ -1,0 +1,38 @@
+export const workList = [
+  {
+    id: '1',
+    fileName: '我创建的文档',
+    type: 'folder',
+    icon: 'folder',
+    modifiedTime: '3月13日 14:42',
+    sharingScope: 'Private',
+    manager: 'xxx',
+  },
+  {
+    id: '2',
+    fileName: '未命名文件夹',
+    type: 'folder',
+    icon: 'folder',
+    modifiedTime: '今天 20:20',
+    sharingScope: 'Private',
+    manager: 'xxx',
+  },
+  {
+    id: '3',
+    fileName: '角色@2x.png',
+    type: 'image',
+    icon: 'image',
+    modifiedTime: '今天 20:21',
+    sharingScope: 'Private',
+    manager: 'xxx',
+  },
+  {
+    id: '4',
+    fileName: '老李使用经分问数辅助农贷工作.docx',
+    type: 'doc',
+    icon: 'doc',
+    modifiedTime: '今天 20:21',
+    sharingScope: 'Private',
+    manager: 'xxx',
+  },
+];

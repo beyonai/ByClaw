@@ -1,0 +1,1533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>活动报名 - 精彩活动等你来参与</title>
+
+    <!-- CDN 资源引入 -->
+    <!-- Ant Design CSS - 使用国内CDN -->
+    <link rel="stylesheet" href="https://unpkg.com/antd@5.21.0/dist/reset.css" />
+
+    <!-- Animate.css 动画库 - 使用国内CDN -->
+    <link rel="stylesheet" href="https://unpkg.com/animate.css@4.1.1/animate.min.css" />
+
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+          'Helvetica Neue', Helvetica, Arial, sans-serif;
+        background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 50%, #bae6fd 100%);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px 20px 40px 20px;
+        line-height: 1.6;
+        margin: 0;
+        overflow-x: hidden;
+      }
+
+      .registration-container {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(20px);
+        border-radius: 20px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        padding: 30px;
+        max-width: 700px;
+        width: 100%;
+        position: relative;
+        overflow: hidden;
+        max-height: calc(100vh - 40px);
+        overflow-y: auto;
+      }
+
+      .registration-container::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(90deg, #0ea5e9, #06b6d4, #0891b2, #0284c7);
+        background-size: 300% 300%;
+        animation: gradientShift 3s ease infinite;
+      }
+
+      @keyframes gradientShift {
+        0% {
+          background-position: 0% 50%;
+        }
+        50% {
+          background-position: 100% 50%;
+        }
+        100% {
+          background-position: 0% 50%;
+        }
+      }
+
+      .header {
+        text-align: center;
+        margin-bottom: 30px;
+      }
+
+      .header h1 {
+        font-size: 2rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, #0ea5e9, #0284c7);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+      }
+
+      .header p {
+        color: #666;
+        font-size: 1rem;
+        font-weight: 400;
+        margin: 0;
+      }
+
+      /* 表单样式 */
+      .form-group {
+        margin-bottom: 18px;
+      }
+
+      .form-group label {
+        display: flex;
+        align-items: center;
+        font-weight: 500;
+        color: #333;
+        font-size: 0.9rem;
+        margin-bottom: 6px;
+      }
+
+      .form-input {
+        width: 100%;
+        padding: 12px 16px;
+        border: 2px solid #e1e5e9;
+        border-radius: 10px;
+        font-size: 0.95rem;
+        transition: all 0.3s ease;
+        background: #fff;
+        font-family: inherit;
+      }
+
+      .form-input:focus {
+        outline: none;
+        border-color: #0ea5e9;
+        box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+        transform: translateY(-2px);
+      }
+
+      .form-input::placeholder {
+        color: #999;
+      }
+
+      textarea.form-input {
+        resize: vertical;
+        min-height: 80px;
+      }
+
+      /* 本地SVG图标样式 */
+      .icon {
+        width: 16px;
+        height: 16px;
+        fill: #0ea5e9;
+        margin-right: 8px;
+        display: inline-block;
+        vertical-align: middle;
+      }
+
+      .icon-large {
+        width: 24px;
+        height: 24px;
+      }
+
+      .icon-xl {
+        width: 48px;
+        height: 48px;
+      }
+
+      /* 按钮样式 */
+      .submit-btn {
+        width: 100%;
+        padding: 14px;
+        background: linear-gradient(135deg, #0ea5e9, #0284c7);
+        color: white;
+        border: none;
+        border-radius: 10px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .submit-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 25px rgba(14, 165, 233, 0.3);
+      }
+
+      .submit-btn:active {
+        transform: translateY(0);
+      }
+
+      .submit-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .submit-btn .loading {
+        display: none;
+      }
+
+      .submit-btn.loading .loading {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .submit-btn.loading .text {
+        display: none;
+      }
+
+      .submit-btn.loading .loading svg {
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* 成功消息样式 */
+      .success-message {
+        display: none;
+        text-align: center;
+        padding: 40px;
+        background: linear-gradient(135deg, #52c41a, #73d13d);
+        color: white;
+        border-radius: 16px;
+        margin-top: 20px;
+      }
+
+      .success-message.show {
+        display: block;
+        animation: fadeInUp 0.6s ease;
+      }
+
+      .success-icon {
+        margin-bottom: 20px;
+      }
+
+      .success-message h3 {
+        font-size: 1.5rem;
+        margin-bottom: 10px;
+      }
+
+      .success-message p {
+        color: rgba(255, 255, 255, 0.9);
+      }
+
+      .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+      }
+
+      @keyframes fadeInUp {
+        from {
+          opacity: 0;
+          transform: translateY(30px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      /* 响应式设计 */
+      @media (max-width: 768px) {
+        body {
+          padding: 15px 15px 30px 15px;
+        }
+
+        .registration-container {
+          padding: 25px 20px;
+          max-height: calc(100vh - 60px);
+        }
+
+        .header {
+          margin-bottom: 25px;
+        }
+
+        .header h1 {
+          font-size: 1.8rem;
+        }
+
+        .form-row {
+          grid-template-columns: 1fr;
+          gap: 16px;
+        }
+
+        .form-group {
+          margin-bottom: 16px;
+        }
+      }
+
+      @media (max-width: 480px) {
+        body {
+          padding: 10px 10px 20px 10px;
+        }
+
+        .registration-container {
+          padding: 20px 15px;
+          max-height: calc(100vh - 40px);
+        }
+
+        .header h1 {
+          font-size: 1.6rem;
+        }
+
+        .header p {
+          font-size: 0.9rem;
+        }
+
+        .form-input {
+          padding: 10px 14px;
+          font-size: 0.9rem;
+        }
+
+        /* 步骤指示器响应式 */
+        .step-indicator {
+          margin-bottom: 20px;
+          padding: 15px 0;
+        }
+
+        .step-circle {
+          width: 35px;
+          height: 35px;
+          font-size: 0.8rem;
+        }
+
+        .step-title {
+          font-size: 0.8rem;
+        }
+
+        .step-description {
+          font-size: 0.7rem;
+        }
+
+        .activity-details {
+          padding: 20px 15px;
+          max-height: 50vh;
+        }
+
+        .activity-title {
+          font-size: 1.3rem;
+        }
+
+        .activity-meta {
+          grid-template-columns: 1fr;
+          gap: 10px;
+        }
+
+        .step-navigation {
+          flex-direction: column;
+          gap: 10px;
+        }
+
+        .nav-btn {
+          width: 100%;
+          min-width: auto;
+        }
+      }
+
+      /* 步骤指示器样式 */
+      .step-indicator {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin-bottom: 30px;
+        position: relative;
+      }
+
+      .step-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        position: relative;
+        flex: 1;
+        max-width: 200px;
+      }
+
+      .step-circle {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        font-size: 0.9rem;
+        margin-bottom: 8px;
+        transition: all 0.3s ease;
+        position: relative;
+        z-index: 2;
+      }
+
+      .step-circle.active {
+        background: linear-gradient(135deg, #0ea5e9, #0284c7);
+        color: white;
+        box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+      }
+
+      .step-circle.completed {
+        background: linear-gradient(135deg, #52c41a, #73d13d);
+        color: white;
+      }
+
+      .step-circle.inactive {
+        background: #f0f0f0;
+        color: #999;
+        border: 2px solid #e0e0e0;
+      }
+
+      .step-title {
+        font-size: 0.85rem;
+        font-weight: 500;
+        text-align: center;
+        color: #333;
+        margin-bottom: 4px;
+      }
+
+      .step-description {
+        font-size: 0.75rem;
+        color: #666;
+        text-align: center;
+        line-height: 1.3;
+      }
+
+      .step-line {
+        position: absolute;
+        top: 20px;
+        left: 50%;
+        right: -50%;
+        height: 2px;
+        background: #e0e0e0;
+        z-index: 1;
+      }
+
+      .step-line.completed {
+        background: linear-gradient(90deg, #52c41a, #73d13d);
+      }
+
+      .step-item:last-child .step-line {
+        display: none;
+      }
+
+      /* 步骤内容区域 */
+      .step-content {
+        display: none;
+        animation: fadeInUp 0.5s ease;
+      }
+
+      .step-content.active {
+        display: block;
+      }
+
+      /* 活动详情样式 */
+      .activity-details {
+        background: #fafafa;
+        border-radius: 12px;
+        padding: 25px;
+        margin-bottom: 20px;
+        border: 1px solid #e8e8e8;
+        max-height: 60vh;
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+
+      /* 自定义滚动条样式 */
+      .activity-details::-webkit-scrollbar {
+        width: 6px;
+      }
+
+      .activity-details::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 3px;
+      }
+
+      .activity-details::-webkit-scrollbar-thumb {
+        background: #c1c1c1;
+        border-radius: 3px;
+        transition: background 0.3s ease;
+      }
+
+      .activity-details::-webkit-scrollbar-thumb:hover {
+        background: #a8a8a8;
+      }
+
+      .activity-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #333;
+        margin-bottom: 15px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .activity-meta {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin-bottom: 20px;
+        padding: 15px;
+        background: white;
+        border-radius: 8px;
+        border: 1px solid #e8e8e8;
+      }
+
+      .meta-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.9rem;
+        color: #666;
+      }
+
+      .meta-item .icon {
+        width: 16px;
+        height: 16px;
+        fill: #0ea5e9;
+      }
+
+      .activity-description {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        border: 1px solid #e8e8e8;
+        line-height: 1.6;
+        color: #333;
+      }
+
+      .activity-description h1,
+      .activity-description h2,
+      .activity-description h3,
+      .activity-description h4,
+      .activity-description h5,
+      .activity-description h6 {
+        color: #333;
+        margin: 20px 0 10px 0;
+        font-weight: 600;
+      }
+
+      .activity-description h1 {
+        font-size: 1.5rem;
+      }
+      .activity-description h2 {
+        font-size: 1.3rem;
+      }
+      .activity-description h3 {
+        font-size: 1.1rem;
+      }
+
+      .activity-description p {
+        margin: 10px 0;
+      }
+
+      .activity-description ul,
+      .activity-description ol {
+        margin: 10px 0;
+        padding-left: 20px;
+      }
+
+      .activity-description li {
+        margin: 5px 0;
+      }
+
+      .activity-description blockquote {
+        border-left: 4px solid #0ea5e9;
+        padding-left: 15px;
+        margin: 15px 0;
+        color: #666;
+        font-style: italic;
+      }
+
+      .activity-description code {
+        background: #f5f5f5;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        font-size: 0.9em;
+      }
+
+      .activity-description pre {
+        background: #f5f5f5;
+        padding: 15px;
+        border-radius: 8px;
+        overflow-x: auto;
+        margin: 15px 0;
+      }
+
+      .activity-description pre code {
+        background: none;
+        padding: 0;
+      }
+
+      .activity-description img {
+        max-width: 100%;
+        height: auto;
+        border-radius: 8px;
+        margin: 15px 0;
+      }
+
+      .activity-description table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 15px 0;
+      }
+
+      .activity-description th,
+      .activity-description td {
+        border: 1px solid #e8e8e8;
+        padding: 8px 12px;
+        text-align: left;
+      }
+
+      .activity-description th {
+        background: #f5f5f5;
+        font-weight: 600;
+      }
+
+      /* 活动描述分区样式 */
+      .activity-section {
+        margin-bottom: 25px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid #e8e8e8;
+      }
+
+      .activity-section:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+      }
+
+      .activity-section h3 {
+        color: #0ea5e9;
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .activity-section h3::before {
+        content: '';
+        width: 4px;
+        height: 16px;
+        background: linear-gradient(135deg, #0ea5e9, #0284c7);
+        border-radius: 2px;
+      }
+
+      .activity-desc-content,
+      .activity-requirement,
+      .activity-material {
+        line-height: 1.6;
+        color: #333;
+      }
+
+      .activity-link a {
+        display: inline-flex;
+        align-items: center;
+        color: #0ea5e9;
+        text-decoration: none;
+        padding: 8px 16px;
+        border: 1px solid #0ea5e9;
+        border-radius: 6px;
+        transition: all 0.3s ease;
+        font-weight: 500;
+      }
+
+      .activity-link a:hover {
+        background: #0ea5e9;
+        color: white;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+      }
+
+      /* 导航按钮 */
+      .step-navigation {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 30px;
+        gap: 15px;
+      }
+
+      .nav-btn {
+        padding: 12px 24px;
+        border: none;
+        border-radius: 8px;
+        font-size: 0.95rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 120px;
+        justify-content: center;
+      }
+
+      .nav-btn.primary {
+        background: linear-gradient(135deg, #0ea5e9, #0284c7);
+        color: white;
+      }
+
+      .nav-btn.primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(14, 165, 233, 0.3);
+      }
+
+      .nav-btn.secondary {
+        background: #f5f5f5;
+        color: #666;
+        border: 1px solid #e0e0e0;
+      }
+
+      .nav-btn.secondary:hover {
+        background: #e8e8e8;
+        transform: translateY(-1px);
+      }
+
+      .nav-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      /* 加载状态 */
+      .loading-spinner {
+        display: inline-block;
+        width: 16px;
+        height: 16px;
+        border: 2px solid #ffffff;
+        border-radius: 50%;
+        border-top-color: transparent;
+        animation: spin 1s linear infinite;
+      }
+
+      /* 浮动装饰元素 */
+      .floating-elements {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: -1;
+      }
+
+      .floating-element {
+        position: absolute;
+        background: rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        animation: float 6s ease-in-out infinite;
+      }
+
+      .floating-element:nth-child(1) {
+        width: 80px;
+        height: 80px;
+        top: 20%;
+        left: 10%;
+        animation-delay: 0s;
+      }
+
+      .floating-element:nth-child(2) {
+        width: 120px;
+        height: 120px;
+        top: 60%;
+        right: 10%;
+        animation-delay: 2s;
+      }
+
+      .floating-element:nth-child(3) {
+        width: 60px;
+        height: 60px;
+        bottom: 20%;
+        left: 20%;
+        animation-delay: 4s;
+      }
+
+      @keyframes float {
+        0%,
+        100% {
+          transform: translateY(0px) rotate(0deg);
+        }
+        50% {
+          transform: translateY(-20px) rotate(180deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 浮动装饰元素 -->
+    <div class="floating-elements">
+      <div class="floating-element"></div>
+      <div class="floating-element"></div>
+      <div class="floating-element"></div>
+    </div>
+
+    <div class="registration-container animate__animated animate__fadeInUp">
+      <div class="header">
+        <h1>
+          <svg class="icon icon-large" viewBox="0 0 24 24">
+            <path
+              d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"
+            />
+          </svg>
+          活动报名
+        </h1>
+      </div>
+
+      <!-- 步骤指示器 -->
+      <div class="step-indicator">
+        <div class="step-item">
+          <div class="step-circle active" id="step1Circle">1</div>
+          <div class="step-line" id="step1Line"></div>
+          <div class="step-title">活动详情</div>
+          <div class="step-description">查看活动信息</div>
+        </div>
+        <div class="step-item">
+          <div class="step-circle inactive" id="step2Circle">2</div>
+          <div class="step-line" id="step2Line"></div>
+          <div class="step-title">填写报名</div>
+          <div class="step-description">完成报名信息</div>
+        </div>
+      </div>
+
+      <!-- 步骤1：活动详情 -->
+      <div class="step-content active" id="step1Content">
+        <div class="activity-details" id="activityDetails">
+          <div class="loading-spinner" id="activityLoading"></div>
+          <div id="activityContent" style="display: none">
+            <div class="activity-title" id="activityTitle">
+              <svg class="icon icon-large" viewBox="0 0 24 24">
+                <path
+                  d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
+                />
+              </svg>
+              <span id="activityTitleText">活动标题</span>
+            </div>
+
+            <div class="activity-meta" id="activityMeta">
+              <!-- 活动元信息将通过JavaScript动态填充 -->
+            </div>
+
+            <div class="activity-description" id="activityDescription">
+              <!-- 活动描述将通过JavaScript动态填充 -->
+            </div>
+          </div>
+        </div>
+
+        <div class="step-navigation">
+          <div></div>
+          <button type="button" class="nav-btn primary" id="nextToRegistration">
+            <span>下一步</span>
+            <svg class="icon" viewBox="0 0 24 24">
+              <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- 步骤2：报名表单 -->
+      <div class="step-content" id="step2Content">
+        <form id="registrationForm" class="registration-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="firstName">
+                <svg class="icon" viewBox="0 0 24 24">
+                  <path
+                    d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"
+                  />
+                </svg>
+                姓名 *
+              </label>
+              <input type="text" id="firstName" name="firstName" class="form-input" required />
+            </div>
+            <div class="form-group">
+              <label for="phone">
+                <svg class="icon" viewBox="0 0 24 24">
+                  <path
+                    d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"
+                  />
+                </svg>
+                手机号
+              </label>
+              <input type="tel" id="phone" name="phone" class="form-input" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="email">
+              <svg class="icon" viewBox="0 0 24 24">
+                <path
+                  d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"
+                />
+              </svg>
+              邮箱地址
+            </label>
+            <input type="email" id="email" name="email" class="form-input" />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="age">
+                <svg class="icon" viewBox="0 0 24 24">
+                  <path
+                    d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"
+                  />
+                </svg>
+                年龄
+              </label>
+              <select id="age" name="age" class="form-input">
+                <option value="">请选择年龄</option>
+                <option value="18-25">18-25岁</option>
+                <option value="26-35">26-35岁</option>
+                <option value="36-45">36-45岁</option>
+                <option value="46-55">46-55岁</option>
+                <option value="55+">55岁以上</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="gender">
+                <svg class="icon" viewBox="0 0 24 24">
+                  <path
+                    d="M16 4c0-1.11.89-2 2-2s2 .89 2 2-.89 2-2 2-2-.89-2-2zm4 18v-6h2.5l-2.54-7.63A1.5 1.5 0 0 0 18.54 8H17c-.8 0-1.54.37-2.01.99L14 10.5 11.5 8.99A2.5 2.5 0 0 0 9.5 8H7.46c-.8 0-1.54.37-2.01.99L4 10.5 2.5 8.99A2.5 2.5 0 0 0 .5 8v10h2v-6h2v6h2v-6h2v6h2v-6h2v6h2z"
+                  />
+                </svg>
+                性别
+              </label>
+              <select id="gender" name="gender" class="form-input">
+                <option value="">请选择性别</option>
+                <option value="male">男</option>
+                <option value="female">女</option>
+                <option value="other">其他</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="company">
+              <svg class="icon" viewBox="0 0 24 24">
+                <path
+                  d="M12 7V3H2v18h20V7H12zM6 19H4v-2h2v2zm0-4H4v-2h2v2zm0-4H4V9h2v2zm0-4H4V5h2v2zm4 12H8v-2h2v2zm0-4H8v-2h2v2zm0-4H8V9h2v2zm0-4H8V5h2v2zm10 12h-8v-2h2v-2h-2v-2h2v-2h-2V9h8v10zm-2-8h-2v2h2v-2zm0 4h-2v2h2v-2z"
+                />
+              </svg>
+              公司/组织
+            </label>
+            <input type="text" id="company" name="company" class="form-input" />
+          </div>
+
+          <div class="form-group">
+            <label for="message">
+              <svg class="icon" viewBox="0 0 24 24">
+                <path
+                  d="M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"
+                />
+              </svg>
+              备注信息
+            </label>
+            <textarea
+              id="message"
+              name="message"
+              class="form-input"
+              placeholder="请告诉我们您的特殊需求或任何想了解的信息..."
+            ></textarea>
+          </div>
+
+          <button type="submit" class="submit-btn">
+            <span class="text">
+              <svg class="icon" viewBox="0 0 24 24">
+                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+              </svg>
+              立即报名
+            </span>
+            <span class="loading" style="display: none">
+              <svg class="icon" viewBox="0 0 24 24">
+                <path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z" />
+              </svg>
+              提交中...
+            </span>
+          </button>
+        </form>
+
+        <div class="step-navigation">
+          <button type="button" class="nav-btn secondary" id="backToDetails">
+            <svg class="icon" viewBox="0 0 24 24">
+              <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
+            </svg>
+            <span>上一步</span>
+          </button>
+          <div></div>
+        </div>
+      </div>
+
+      <div class="success-message" id="successMessage">
+        <div class="success-icon">
+          <svg class="icon icon-xl" viewBox="0 0 24 24">
+            <path
+              d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"
+            />
+          </svg>
+        </div>
+        <h3>报名成功！</h3>
+        <p>感谢您的参与，我们会在活动开始前通过邮件和短信通知您详细信息。</p>
+      </div>
+    </div>
+
+    <!-- Ant Design JS - 使用国内CDN -->
+    <!-- 备选方案1: BootCDN -->
+    <script src="https://unpkg.com/antd@5.27.4/dist/antd.min.js"></script>
+    <!-- 备选方案2: 字节跳动CDN (如果上面失败，取消注释下面这行，注释上面这行) -->
+    <!-- <script src="https://lf26-cdn-tos.bytecdntp.com/cdn/expire-1-M/antd/5.21.0/dist/antd.min.js"></script> -->
+    <!-- 备选方案3: 七牛云CDN (如果上面都失败，取消注释下面这行，注释上面这行) -->
+    <!-- <script src="https://staticfile.qnssl.com/antd/5.21.0/dist/antd.min.js"></script> -->
+
+    <!-- SweetAlert2 CDN - 使用国内CDN -->
+    <script src="https://unpkg.com/sweetalert2@11/dist/sweetalert2.min.js"></script>
+
+    <!-- Marked.js for Markdown parsing - 使用国内CDN -->
+    <script src="https://unpkg.com/marked@9.1.6/marked.min.js"></script>
+
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        const form = document.getElementById('registrationForm');
+        const submitBtn = document.querySelector('.submit-btn');
+        const successMessage = document.getElementById('successMessage');
+
+        // 步骤相关元素
+        const step1Content = document.getElementById('step1Content');
+        const step2Content = document.getElementById('step2Content');
+        const step1Circle = document.getElementById('step1Circle');
+        const step2Circle = document.getElementById('step2Circle');
+        const step1Line = document.getElementById('step1Line');
+        const nextToRegistrationBtn = document.getElementById('nextToRegistration');
+        const backToDetailsBtn = document.getElementById('backToDetails');
+
+        // 活动详情相关元素
+        const activityLoading = document.getElementById('activityLoading');
+        const activityContent = document.getElementById('activityContent');
+        const activityTitleText = document.getElementById('activityTitleText');
+        const activityMeta = document.getElementById('activityMeta');
+        const activityDescription = document.getElementById('activityDescription');
+
+        // 当前步骤
+        let currentStep = 1;
+
+        // 检查URL参数
+        const urlParams = new URLSearchParams(window.location.search);
+        const userCode = urlParams.get('userCode');
+        const activityCode = urlParams.get('activityCode');
+
+        if (!userCode || !activityCode) {
+          Swal.fire({
+            icon: 'warning',
+            title: '参数错误',
+            text: '页面缺少必要的参数，请检查链接是否正确',
+            confirmButtonColor: '#0ea5e9',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+          }).then(() => {
+            // 可以选择重定向到首页或关闭页面
+            // window.location.href = '/';
+          });
+          return;
+        }
+
+        // 初始化：加载活动详情
+        loadActivityDetails(activityCode);
+
+        // 加载活动详情
+        async function loadActivityDetails(activityCode) {
+          try {
+            activityLoading.style.display = 'block';
+            activityContent.style.display = 'none';
+            console.log(activityCode);
+
+            // 发送GET请求获取活动详情
+            const response = await fetch(
+              `${window.location.protocol}//${window.location.host}/api/v1/esg/activity/detail?activityCode=${activityCode}`,
+              {
+                method: 'GET',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+              }
+            );
+            console.log(response);
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const result = await response.json();
+            console.log('活动详情响应:', result);
+
+            // 检查API响应状态
+            if (result.code !== 200) {
+              throw new Error(`API error! code: ${result.code}, message: ${result.message}`);
+            }
+
+            // 根据实际API响应结构获取数据
+            const activityData = result.data;
+
+            // 更新活动标题
+            activityTitleText.textContent = activityData.activityName || '活动详情';
+
+            // 更新活动元信息
+            updateActivityMeta(activityData);
+
+            // 更新活动描述（支持Markdown）
+            let descriptionContent = '';
+
+            if (activityData.activityDesc) {
+              descriptionContent += `<div class="activity-section">
+                <h3>活动简介</h3>
+                <div class="activity-desc-content">${marked.parse(activityData.activityDesc)}</div>
+              </div>`;
+            }
+
+            if (activityData.activityRequirement) {
+              descriptionContent += `<div class="activity-section">
+                <h3>参与要求</h3>
+                <div class="activity-requirement">${marked.parse(activityData.activityRequirement)}</div>
+              </div>`;
+            }
+
+            if (activityData.activityMaterialDesc) {
+              descriptionContent += `<div class="activity-section">
+                <h3>活动材料</h3>
+                <div class="activity-material">${marked.parse(activityData.activityMaterialDesc)}</div>
+              </div>`;
+            }
+
+            if (activityData.activityQrcodeUrl) {
+              descriptionContent += `<div class="activity-section">
+                <h3>相关链接</h3>
+                <div class="activity-link">
+                  <a href="${activityData.activityQrcodeUrl}" target="_blank" rel="noopener noreferrer">
+                    <svg class="icon" viewBox="0 0 24 24" style="width: 16px; height: 16px; margin-right: 8px;">
+                      <path d="M10 6H6c-1.1 0-1.99.9-1.99 2v10c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2v-4h-2v4H6V8h4v-2zm7-3h-2v2h-2v2h2v2h2V7h2V5h-2V3z"/>
+                    </svg>
+                    查看活动详情
+                  </a>
+                </div>
+              </div>`;
+            }
+
+            if (descriptionContent) {
+              activityDescription.innerHTML = descriptionContent;
+            } else {
+              activityDescription.innerHTML = '<p>暂无活动描述</p>';
+            }
+
+            // 显示内容
+            activityLoading.style.display = 'none';
+            activityContent.style.display = 'block';
+          } catch (error) {
+            console.error('加载活动详情失败:', error);
+            activityLoading.style.display = 'none';
+            activityContent.style.display = 'block';
+
+            // 显示错误信息
+            activityTitleText.textContent = '活动详情加载失败';
+            activityDescription.innerHTML = `
+              <div style="text-align: center; padding: 20px; color: #999;">
+                <p>无法加载活动详情，请稍后重试</p>
+                <button onclick="loadActivityDetails('${activityCode}')" style="
+                  background: #0ea5e9; 
+                  color: white; 
+                  border: none; 
+                  padding: 8px 16px; 
+                  border-radius: 6px; 
+                  cursor: pointer;
+                  margin-top: 10px;
+                ">重新加载</button>
+              </div>
+            `;
+          }
+        }
+
+        // 更新活动元信息
+        function updateActivityMeta(activityData) {
+          const metaItems = [];
+
+          // 活动时间
+          if (activityData.activityStartTime) {
+            metaItems.push(`
+              <div class="meta-item">
+                <svg class="icon" viewBox="0 0 24 24">
+                  <path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"/>
+                </svg>
+                <span>开始时间：${formatDate(activityData.activityStartTime)}</span>
+              </div>
+            `);
+          }
+
+          if (activityData.activityEndTime) {
+            metaItems.push(`
+              <div class="meta-item">
+                <svg class="icon" viewBox="0 0 24 24">
+                  <path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"/>
+                </svg>
+                <span>结束时间：${formatDate(activityData.activityEndTime)}</span>
+              </div>
+            `);
+          }
+
+          // 活动地点
+          if (activityData.activityRegistrationAddress) {
+            metaItems.push(`
+              <div class="meta-item">
+                <svg class="icon" viewBox="0 0 24 24">
+                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                </svg>
+                <span>活动地点：${activityData.activityRegistrationAddress}</span>
+              </div>
+            `);
+          }
+
+          // 参与人数限制
+          if (activityData.activityMemberCountLimit && activityData.activityMemberCountLimit > 0) {
+            metaItems.push(`
+              <div class="meta-item">
+                <svg class="icon" viewBox="0 0 24 24">
+                  <path d="M16 4c0-1.11.89-2 2-2s2 .89 2 2-.89 2-2 2-2-.89-2-2zm4 18v-6h2.5l-2.54-7.63A1.5 1.5 0 0 0 18.54 8H17c-.8 0-1.54.37-2.01.99L14 10.5 11.5 8.99A2.5 2.5 0 0 0 9.5 8H7.46c-.8 0-1.54.37-2.01.99L4 10.5 2.5 8.99A2.5 2.5 0 0 0 .5 8v10h2v-6h2v6h2v-6h2v6h2v-6h2v6h2z"/>
+                </svg>
+                <span>参与人数限制：${activityData.activityMemberCountLimit}人</span>
+              </div>
+            `);
+          }
+
+          // 活动标签
+          if (activityData.activityTags) {
+            metaItems.push(`
+              <div class="meta-item">
+                <svg class="icon" viewBox="0 0 24 24">
+                  <path d="M17.63 5.84C17.27 5.33 16.67 5 16 5L5 5.01C3.9 5.01 3 5.9 3 7v10c0 1.1.9 1.99 2 1.99L16 19c.67 0 1.27-.33 1.63-.84L22 12l-4.37-6.16z"/>
+                </svg>
+                <span>活动标签：${activityData.activityTags}</span>
+              </div>
+            `);
+          }
+
+          // 活动方式
+          if (activityData.activityAttachmentAddress) {
+            metaItems.push(`
+              <div class="meta-item">
+                <svg class="icon" viewBox="0 0 24 24">
+                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                </svg>
+                <span>活动方式：${activityData.activityAttachmentAddress}</span>
+              </div>
+            `);
+          }
+
+          // 活动时长
+          if (activityData.activityHours && activityData.activityHours > 0) {
+            metaItems.push(`
+              <div class="meta-item">
+                <svg class="icon" viewBox="0 0 24 24">
+                  <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm4.2 14.2L11 13V7h1.5v5.2l4.5 2.7-.8 1.3z"/>
+                </svg>
+                <span>活动时长：${activityData.activityHours}小时</span>
+              </div>
+            `);
+          }
+
+          activityMeta.innerHTML = metaItems.join('');
+        }
+
+        // 格式化日期时间
+        function formatDateTime(dateTimeString) {
+          if (!dateTimeString) return '';
+          const date = new Date(dateTimeString);
+          return date.toLocaleString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+          });
+        }
+
+        // 格式化日期（YYYYMMDD格式）
+        function formatDate(dateString) {
+          if (!dateString) return '';
+          // 将YYYYMMDD格式转换为YYYY-MM-DD
+          const year = dateString.substring(0, 4);
+          const month = dateString.substring(4, 6);
+          const day = dateString.substring(6, 8);
+          return `${year}年${month}月${day}日`;
+        }
+
+        // 步骤导航函数
+        function goToStep(step) {
+          if (step === 1) {
+            // 显示步骤1，隐藏步骤2
+            step1Content.classList.add('active');
+            step2Content.classList.remove('active');
+
+            // 更新步骤指示器
+            step1Circle.classList.remove('inactive');
+            step1Circle.classList.add('active');
+            step2Circle.classList.remove('active');
+            step2Circle.classList.add('inactive');
+            step1Line.classList.remove('completed');
+
+            currentStep = 1;
+          } else if (step === 2) {
+            // 显示步骤2，隐藏步骤1
+            step1Content.classList.remove('active');
+            step2Content.classList.add('active');
+
+            // 更新步骤指示器
+            step1Circle.classList.remove('active');
+            step1Circle.classList.add('completed');
+            step2Circle.classList.remove('inactive');
+            step2Circle.classList.add('active');
+            step1Line.classList.add('completed');
+
+            currentStep = 2;
+          }
+        }
+
+        // 步骤导航事件监听
+        nextToRegistrationBtn.addEventListener('click', function () {
+          goToStep(2);
+        });
+
+        backToDetailsBtn.addEventListener('click', function () {
+          goToStep(1);
+        });
+
+        // 表单验证函数
+        function validateForm() {
+          let isValid = true;
+          const errors = {};
+
+          // 验证姓名
+          const firstName = document.getElementById('firstName').value.trim();
+          if (!firstName) {
+            errors.firstName = '请输入您的姓名';
+            isValid = false;
+          } else if (firstName.length < 2) {
+            errors.firstName = '姓名至少需要2个字符';
+            isValid = false;
+          }
+
+          // 验证手机号（可选，但如果填写了需要验证格式）
+          const phone = document.getElementById('phone').value.trim();
+          const phoneRegex = /^1[3-9]\d{9}$/;
+          if (phone && !phoneRegex.test(phone)) {
+            errors.phone = '请输入正确的手机号格式';
+            isValid = false;
+          }
+
+          // 验证邮箱（可选，但如果填写了需要验证格式）
+          const email = document.getElementById('email').value.trim();
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (email && !emailRegex.test(email)) {
+            errors.email = '请输入正确的邮箱格式';
+            isValid = false;
+          }
+
+          // 显示错误信息
+          Object.keys(errors).forEach((field) => {
+            const errorElement = document.getElementById(field + 'Error');
+            if (errorElement) {
+              errorElement.textContent = errors[field];
+              errorElement.classList.add('show');
+            }
+          });
+
+          // 清除之前的错误信息
+          Object.keys(errors).forEach((field) => {
+            const errorElement = document.getElementById(field + 'Error');
+            if (errorElement && !errors[field]) {
+              errorElement.textContent = '';
+              errorElement.classList.remove('show');
+            }
+          });
+
+          return isValid;
+        }
+
+        // 清除错误信息
+        function clearErrors() {
+          const errorElements = document.querySelectorAll('.error-message');
+          errorElements.forEach((element) => {
+            element.textContent = '';
+            element.classList.remove('show');
+          });
+        }
+
+        // 表单提交处理
+        form.addEventListener('submit', async function (e) {
+          e.preventDefault();
+
+          if (!validateForm()) {
+            return;
+          }
+
+          // 显示加载状态
+          submitBtn.classList.add('loading');
+          submitBtn.disabled = true;
+          const loadingSpan = submitBtn.querySelector('.loading');
+          const textSpan = submitBtn.querySelector('.text');
+          if (loadingSpan) loadingSpan.style.display = 'flex';
+          if (textSpan) textSpan.style.display = 'none';
+
+          try {
+            // 获取URL参数
+            const urlParams = new URLSearchParams(window.location.search);
+            const userCode = urlParams.get('userCode');
+            const activityCode = urlParams.get('activityCode');
+
+            if (!userCode || !activityCode) {
+              throw new Error('缺少必要的URL参数：userCode 或 activityCode');
+            }
+
+            // 获取表单数据
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+
+            // 添加URL参数到请求数据
+            const requestData = {
+              ...data,
+              userCode: userCode,
+              activityCode: activityCode,
+            };
+
+            console.log('提交的数据:', requestData);
+
+            // 发送POST请求进行报名
+            const response = await fetch(
+              `${window.location.protocol}//${window.location.host}/api/v1/esg/activity/register`,
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData),
+              }
+            );
+
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const result = await response.json();
+            console.log('报名响应:', result);
+
+            // 显示成功消息
+            form.style.display = 'none';
+            successMessage.classList.add('show');
+
+            // 使用SweetAlert2显示成功提示
+            Swal.fire({
+              icon: 'success',
+              title: '报名成功！',
+              // text: '感谢您的参与，我们会尽快与您联系。',
+              confirmButtonColor: '#0ea5e9',
+              timer: 3000,
+              timerProgressBar: true,
+            });
+          } catch (error) {
+            console.error('提交失败:', error);
+            let errorMessage = '网络错误，请稍后重试';
+
+            if (error.message.includes('userCode') || error.message.includes('activityCode')) {
+              errorMessage = '页面参数错误，请检查链接是否正确';
+            } else if (error.message.includes('HTTP error')) {
+              errorMessage = '服务器错误，请稍后重试';
+            }
+
+            Swal.fire({
+              icon: 'error',
+              title: '提交失败',
+              text: errorMessage,
+              confirmButtonColor: '#e74c3c',
+            });
+          } finally {
+            // 恢复按钮状态
+            submitBtn.classList.remove('loading');
+            submitBtn.disabled = false;
+            const loadingSpan = submitBtn.querySelector('.loading');
+            const textSpan = submitBtn.querySelector('.text');
+            if (loadingSpan) loadingSpan.style.display = 'none';
+            if (textSpan) textSpan.style.display = 'flex';
+          }
+        });
+
+        // 实时验证
+        const requiredInputs = form.querySelectorAll('input[required]');
+        const optionalInputs = form.querySelectorAll('input:not([required])');
+
+        // 必填字段的实时验证
+        requiredInputs.forEach((input) => {
+          input.addEventListener('blur', function () {
+            validateForm();
+          });
+
+          input.addEventListener('input', function () {
+            const errorElement = document.getElementById(input.name + 'Error');
+            if (errorElement && errorElement.classList.contains('show')) {
+              validateForm();
+            }
+          });
+        });
+
+        // 可选字段的格式验证（仅在用户输入时）
+        optionalInputs.forEach((input) => {
+          input.addEventListener('blur', function () {
+            if (input.value.trim()) {
+              validateForm();
+            }
+          });
+        });
+
+        // 添加输入动画效果
+        const formGroups = document.querySelectorAll('.form-group');
+        formGroups.forEach((group, index) => {
+          group.style.animationDelay = `${index * 0.1}s`;
+          group.classList.add('animate__animated', 'animate__fadeInUp');
+        });
+      });
+    </script>
+  </body>
+</html>

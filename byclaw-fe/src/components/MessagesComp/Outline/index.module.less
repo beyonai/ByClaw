@@ -1,0 +1,149 @@
+.outline {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  animation: fadeInUp 0.3s ease-out forwards;
+
+  .textAreaBlock {
+    border: none;
+    resize: none;
+    width: 100%;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .paragraph {
+    color: var(--beyond-color-text-quaternary);
+  }
+
+  .titleCard {
+    margin-bottom: 16px;
+    border-radius: var(--beyond-border-radius);
+    // box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    border: 1px solid #e6ebf0;
+
+    textarea {
+      font-size: 20px;
+      font-weight: 500;
+      margin: 0;
+      padding: 0;
+      color: var(--beyond-color-text);
+      height: 32px;
+    }
+
+    :global {
+      .@{antPrefix}-card-body {
+        padding: 12px 24px;
+      }
+    }
+  }
+
+  .sectionCard {
+    margin-bottom: 16px;
+    border-radius: var(--beyond-border-radius);
+    // box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    border: 1px solid #e6ebf0;
+
+    :global {
+      .@{antPrefix}-card-head {
+        border-bottom: none;
+        min-height: 48px;
+        padding: 0 16px;
+      }
+
+      .@{antPrefix}-card-body {
+        padding: 0 16px;
+      }
+    }
+  }
+
+  .sectionCardTitle {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+
+    textarea {
+      font-size: 16px;
+      font-weight: 500;
+      margin: 0;
+      padding: 0;
+      color: var(--beyond-color-text);
+      height: 32px;
+      flex: 1;
+    }
+
+    .cardActions {
+      margin-left: auto;
+    }
+  }
+
+  .section {
+    margin-bottom: 8px;
+    overflow: hidden;
+
+    .sectionContentBlock {
+      border: 1px solid transparent;
+      border-radius: 12px;
+      overflow: hidden;
+      padding: 4px 0 8px;
+
+      .sectionHeader {
+        display: flex;
+        align-items: center;
+        margin-bottom: 4px;
+        // padding: 4px 12px;
+
+        textarea {
+          height: 32px;
+          font-weight: 500;
+        }
+      }
+
+      .sectionContent {
+        padding-left: 14px;
+
+        p {
+          margin: 0;
+          color: var(--beyond-color-text-secondary);
+          line-height: 1.6;
+        }
+      }
+      &:hover {
+        background-color: #f5f7fa;
+      }
+      &.active {
+        border-color: var(--beyond-color-primary);
+        .paragraph {
+          color: var(--beyond-color-text-secondary);
+        }
+      }
+    }
+  }
+
+  .addSectionContainer {
+    display: flex;
+    align-items: center;
+    margin-top: 20px;
+
+    background-color: #fff;
+    border: 1px solid #e6ebf0;
+    border-radius: 12px;
+
+    height: 48px;
+    line-height: 48px;
+    padding: 0 24px;
+    color: #165dff;
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -1,0 +1,170 @@
+.sourceTreeWrapper {
+  width: 100%;
+  padding: 0 0 8px;
+}
+
+.collapse {
+  :global {
+    .@{antPrefix}-collapse-header {
+      display: none !important;
+    }
+    .@{antPrefix}-collapse-content-box {
+      padding: 0 !important;
+    }
+  }
+}
+
+.folderHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.2s ease;
+
+  &:hover {
+    background: #f5f5f5;
+  }
+}
+
+.folderLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.expandIcon {
+  font-size: 12px;
+  color: #999;
+  margin-right: 4px;
+  transition: transform 0.2s ease;
+}
+
+.expandIconExpanded {
+  transform: rotate(90deg);
+}
+
+.nodeIcon {
+  font-size: 16px;
+  flex-shrink: 0;
+  width: 20px;
+  display: flex;
+  align-items: center;
+}
+
+.folderTitle {
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folderRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.checkedCount {
+  min-width: 24px;
+  text-align: right;
+  font-size: 12px;
+}
+
+.summaryCount {
+  min-width: 48px;
+  text-align: right;
+  font-size: 12px;
+  color: #165dff;
+  cursor: pointer;
+}
+
+.addButton {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--primary-color);
+
+  &:hover {
+    background: rgba(22, 119, 255, 0.1);
+  }
+
+  :global(.anticon) {
+    font-size: 14px;
+  }
+}
+
+.emptyFolder {
+  padding: 10px 12px;
+  border-radius: 8px;
+
+  .folderLeft {
+    opacity: 0.6;
+  }
+}
+
+.sourceNode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 8px;
+  transition: background 0.2s ease;
+  cursor: pointer;
+
+  &:hover {
+    background: #f5f5f5;
+  }
+}
+
+.sourceLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.sourceTitle {
+  font-size: 13px;
+  color: #555;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// loading 节点样式
+.loadingNode {
+  cursor: not-allowed;
+
+  .sourceLeft {
+    opacity: 0.8;
+  }
+
+  .sourceTitle {
+    color: #888;
+  }
+}
+
+.loadingIcon {
+  font-size: 16px;
+  color: var(--primary-color);
+  flex-shrink: 0;
+  width: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.moreIcon {
+  margin-right: 4px;
+}

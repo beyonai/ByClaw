@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.aimodel.ByaiAimodelMapper">
+
+    <!-- 表 byai_aimodel 与实体 ByaiAimodel 映射；isDefault 为非表字段，仅 listModel 等查询可产出 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.aimodel.ByaiAimodel">
+        <id column="model_id" property="modelId"/>
+        <result column="model_type" property="modelType"/>
+        <result column="model_name" property="modelName"/>
+        <result column="model_no" property="modelNo"/>
+        <result column="url" property="url"/>
+        <result column="ori_url" property="oriUrl"/>
+        <result column="auth_token" property="authToken"/>
+        <result column="status" property="status"/>
+        <result column="is_support_chart" property="isSupportChart"/>
+        <result column="is_deepthink" property="isDeepthink"/>
+        <result column="max_content_token" property="maxContentToken"/>
+        <result column="in_params" property="inParams"/>
+        <result column="inparam_template" property="inparamTemplate"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="is_default" property="isDefault"/>
+    </resultMap>
+
+    <!-- 表 byai_aimodel 列（含 inparam_template），严禁引用不存在的列 -->
+    <sql id="Base_Column_List">
+        model_id, model_type, model_name, model_no, url, ori_url, auth_token,
+        status, is_support_chart, is_deepthink, max_content_token, in_params, inparam_template,
+        create_by, create_time
+    </sql>
+
+    <!-- 分页列表用：byai_aimodel 别名 a，与 byai_tag_relation（tag_id=3）左关联以产出 is_default -->
+    <sql id="Condition_Where_WithTag">
+        <where>
+            <if test="status != null and status != ''">
+                AND a.status = #{status}
+            </if>
+            <if test="modelId != null">
+                AND a.model_id = #{modelId}
+            </if>
+            <if test="modelName != null and modelName != ''">
+                <bind name="modelNamePattern" value="'%' + modelName + '%'"/>
+                AND a.model_name LIKE #{modelNamePattern}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                <bind name="keywordPattern" value="'%' + keyword + '%'"/>
+                AND (a.model_name LIKE #{keywordPattern}
+                    OR a.model_no LIKE #{keywordPattern}
+                    OR (a.in_params IS NOT NULL AND a.in_params LIKE #{keywordPattern}))
+            </if>
+            <if test="ability != null and ability != ''">
+                AND d.tag_id = #{ability}
+            </if>
+            <if test="system != null and system != ''">
+                <bind name="systemPattern" value="'%' + system + '%'"/>
+                AND a.in_params LIKE #{systemPattern}
+            </if>
+        </where>
+    </sql>
+
+    <!-- 按条件查询（不分页）；配合 PageHelper.startPage 使用；LEFT JOIN byai_tag_relation 以产出 is_default -->
+    <select id="selectByCondition" resultMap="BaseResultMap">
+        SELECT
+            distinct a.model_id, a.model_type, a.model_name, a.model_no, a.url, a.ori_url, a.auth_token,
+            a.status, a.is_support_chart, a.is_deepthink, a.max_content_token, a.in_params, a.inparam_template,
+            a.create_by, a.create_time,
+            CASE WHEN d.obj_id IS NOT NULL THEN 1 ELSE 0 END AS is_default
+        FROM byai_aimodel a
+        LEFT JOIN  byai_tag_relation d
+           ON a.model_id = d.obj_id
+            AND d.obj_type = 'AI_MODEL'
+        <include refid="Condition_Where_WithTag"/>
+        ORDER BY a.create_time DESC
+    </select>
+
+    <select id="countByCondition" resultType="long">
+        SELECT COUNT(1)
+        FROM byai_aimodel a
+        LEFT JOIN (
+            SELECT obj_id FROM byai_tag_relation
+            WHERE obj_type = 'AI_MODEL'
+            GROUP BY obj_id
+        ) d ON a.model_id = d.obj_id
+        <include refid="Condition_Where_WithTag"/>
+    </select>
+
+    <!-- 按 model_name 精确匹配统计条数；excludeModelId 不为空时排除该 id -->
+    <select id="countByModelNameExcludeId" resultType="long">
+        SELECT COUNT(1) FROM byai_aimodel
+        WHERE model_name = #{modelName}
+        <if test="excludeModelId != null">
+            AND model_id != #{excludeModelId}
+        </if>
+    </select>
+
+
+    <select id="listModel" resultMap="BaseResultMap">
+        select
+        model_id,
+        model_type,
+        model_name,
+        model_no,
+        status,
+        is_support_chart,
+        is_deepthink,
+        max_content_token,
+        in_params,
+        CASE WHEN d.obj_id IS NOT NULL THEN 1 ELSE 0 END AS is_default
+        from byai_aimodel a
+        inner join
+            byai_tag_relation b
+        on
+            a.model_id = b.obj_id
+        left join
+            byai_tag_relation d
+        on
+            a.model_id = d.obj_id
+        and
+            d.obj_type = 'AI_MODEL'
+        and
+            d.tag_id = 3
+        <where>
+            and b.obj_type = 'AI_MODEL'
+            <if test="status != null and status != ''">
+                AND a.status = #{status}
+            </if>
+            <if test="tagId != null and tagId != ''">
+                AND b.tag_id = #{tagId}
+            </if>
+        </where>
+
+    </select>
+
+
+    <select id="listModelInner" resultMap="BaseResultMap">
+        select
+        model_id,
+        model_type,
+        model_name,
+        model_no,
+        url,
+        auth_token,
+        status,
+        is_support_chart,
+        is_deepthink,
+        max_content_token,
+        in_params,
+        CASE WHEN d.obj_id IS NOT NULL THEN 1 ELSE 0 END AS is_default
+        from byai_aimodel a
+        inner join
+        byai_tag_relation b
+        on
+        a.model_id = b.obj_id
+        left join
+        byai_tag_relation d
+        on
+        a.model_id = d.obj_id
+        and
+        d.obj_type = 'AI_MODEL'
+        and
+        d.tag_id = 3
+        <where>
+            and b.obj_type = 'AI_MODEL'
+            <if test="status != null and status != ''">
+                AND a.status = #{status}
+            </if>
+            <if test="tagId != null and tagId != ''">
+                AND b.tag_id = #{tagId}
+            </if>
+        </where>
+
+    </select>
+</mapper>

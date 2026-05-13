@@ -1,0 +1,63 @@
+.beyondRender {
+  // min-height: 146px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 0.5px solid #00000026;
+  margin: 0 8px 12px 8px;
+
+  &:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+}
+
+.icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  margin-right: 8px;
+}
+
+.comp1 {
+  min-height: 146px;
+
+  .title {
+    color: var(--beyond-color-text);
+    font-size: 14px;
+    font-style: normal;
+    font-weight: bold;
+    line-height: 22px;
+  }
+
+  .desc {
+    color: var(--beyond-color-text);
+    font-size: 13px;
+    line-height: 20px;
+    margin-bottom: 0 !important;
+  }
+
+  .user {
+    font-size: 12px;
+    color: var(--beyond-color-text-secondary);
+  }
+
+  .time {
+    font-size: 12px;
+    color: var(--beyond-color-text-secondary);
+  }
+}
+
+.markdownRender {
+  position: relative;
+}
+
+.markdown {
+  p {
+    line-height: 1.5;
+  }
+  p:not(:last-child) {
+    margin-bottom: 8px;
+  }
+  mark {
+    padding: 0;
+  }
+}

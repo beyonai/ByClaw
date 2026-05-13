@@ -1,0 +1,141 @@
+.resultCard {
+  margin-top: 12px;
+  background: #f0f4ff;
+  border-radius: 12px;
+  padding: 8px;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.headerIcon {
+  font-size: 16px;
+  color: var(--primary-color);
+}
+
+.headerTitle {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+}
+
+.viewButton {
+  padding: 0;
+  font-size: 14px;
+  height: auto;
+  font-weight: 500;
+}
+
+.resultList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.resultItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #ffffff;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  }
+}
+
+.resultIcon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.favicon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+// .defaultIcon {
+//   width: 20px;
+//   height: 20px;
+//   background: var(--primary-color);
+//   color: #fff;
+//   font-size: 10px;
+//   font-weight: 500;
+//   display: flex;
+//   align-items: center;
+//   justify-content: center;
+//   border-radius: 4px;
+// }
+
+.resultContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.resultTitle {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.moreSources {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 8px;
+  cursor: pointer;
+
+  .moreIcon {
+    font-size: 14px;
+    color: var(--primary-color);
+  }
+
+  .moreText {
+    font-size: 13px;
+    color: var(--primary-color);
+    font-weight: 500;
+  }
+}
+
+.cardFooter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.deleteButton {
+  padding: 0 12px;
+  font-size: 13px;
+  height: 32px;
+}
+
+.importButton {
+  height: 32px;
+  padding: 0 20px;
+  font-size: 13px;
+  border-radius: 16px;
+  font-weight: 500;
+}

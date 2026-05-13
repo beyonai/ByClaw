@@ -1,0 +1,98 @@
+.headWrap {
+  display: flex;
+  background-color: #f2f6fa;
+  border-radius: 8px;
+  padding: 4px 12px;
+  font-size: 13px;
+  :global(.userHead) {
+    background-image: url('/image/head/small/head7.png');
+    width: 32px;
+    height: 32px;
+    background-position: center;
+    background-size: 100% auto;
+  }
+  :global(.iconHead) {
+    background-image: url('~@/pages/manager/assets/defResourceIcon.png');
+    width: 28px;
+    height: 28px;
+    background-position: center;
+    background-size: 100% auto;
+  }
+  .tips {
+    font-size: 12px;
+    color: #707680;
+  }
+}
+
+.selectionWrap {
+  padding-top: 12px;
+  > div > div {
+    border: 1px solid #e6ebf0;
+    padding: 0 12px 12px 12px;
+    border-radius: 8px;
+  }
+}
+
+.selectTitle {
+  line-height: 44px;
+  font-size: 14px;
+  font-weight: 500;
+  display: block;
+  border-bottom: 1px solid #eee;
+  margin-bottom: 14px;
+
+  span {
+    color: #707680;
+  }
+}
+
+.orgItem {
+  display: flex;
+  padding: 4px 8px 4px 4px;
+  align-items: center;
+  column-gap: 8px;
+  border-radius: 19px;
+  background: #e8f3ff;
+
+  .img {
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #165dff;
+    color: #ffffff;
+    font-size: 10px;
+  }
+}
+
+.applicantAuditList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.applicantAuditItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f7f8fa;
+}
+
+.applicantAuditName {
+  min-width: 0;
+  flex: 1;
+  color: #1f2533;
+  word-break: break-all;
+}
+
+.applicantAuditActions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}

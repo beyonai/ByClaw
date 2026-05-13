@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.men.MenTaskCatalogMapper">
+
+  <!-- 批量插入任务目录 -->
+  <insert id="batchInsert" parameterType="java.util.List">
+    insert into men_task_catalog (task_catalog_id, cata_name, p_catalog_id,
+      create_by, create_time, update_by,
+      update_time, com_acct_id, task_id)
+    values
+    <foreach collection="list" item="item" separator=",">
+      (#{item.taskCatalogId,jdbcType=BIGINT}, #{item.cataName,jdbcType=VARCHAR}, #{item.pCatalogId,jdbcType=CHAR},
+      #{item.createBy,jdbcType=BIGINT}, #{item.createTime,jdbcType=TIMESTAMP}, #{item.updateBy,jdbcType=BIGINT},
+      #{item.updateTime,jdbcType=TIMESTAMP}, #{item.comAcctId,jdbcType=BIGINT}, #{item.taskId,jdbcType=BIGINT})
+    </foreach>
+  </insert>
+
+</mapper>

@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.message.MessageShareLinkMapper">
+
+    <!-- 实体映射 -->
+    <resultMap id="BaseResultMap"
+        type="com.iwhalecloud.byai.manager.entity.message.MessageShareLink">
+        <id column="link_id" jdbcType="BIGINT" property="linkId"/>
+        <result column="link_token" jdbcType="VARCHAR" property="linkToken"/>
+        <result column="title" jdbcType="VARCHAR" property="title"/>
+        <result column="creator_id" jdbcType="BIGINT" property="creatorId"/>
+        <result column="status" jdbcType="VARCHAR" property="status"/>
+        <result column="access_permission" jdbcType="VARCHAR" property="accessPermission"/>
+        <result column="expire_time" jdbcType="TIMESTAMP" property="expireTime"/>
+        <result column="max_access_count" jdbcType="BIGINT" property="maxAccessCount"/>
+        <result column="current_access_count" jdbcType="BIGINT" property="currentAccessCount"/>
+        <result column="last_access_time" jdbcType="TIMESTAMP" property="lastAccessTime"/>
+        <result column="create_time" jdbcType="TIMESTAMP" property="createTime"/>
+        <result column="update_time" jdbcType="TIMESTAMP" property="updateTime"/>
+        <result column="com_acct_id" jdbcType="BIGINT" property="comAcctId"/>
+    </resultMap>
+
+    <!-- 列清单 -->
+    <sql id="Base_Column_List">
+        link_id,
+        link_token,
+        title,
+        creator_id,
+        status,
+        access_permission,
+        expire_time,
+        max_access_count,
+        current_access_count,
+        last_access_time,
+        create_time,
+        update_time,
+        com_acct_id
+    </sql>
+
+    <!-- 新增分享链接 -->
+    <insert id="insert"
+        parameterType="com.iwhalecloud.byai.manager.entity.message.MessageShareLink">
+        INSERT INTO message_share_link (
+            link_id,
+            link_token,
+            creator_id,
+            status,
+            access_permission,
+            expire_time,
+            max_access_count,
+            current_access_count,
+            last_access_time,
+            create_time,
+            update_time,
+            com_acct_id,
+            title
+        ) VALUES (
+            #{linkId,jdbcType=BIGINT},
+            #{linkToken,jdbcType=VARCHAR},
+            #{creatorId,jdbcType=BIGINT},
+            #{status,jdbcType=VARCHAR},
+            #{accessPermission,jdbcType=VARCHAR},
+            #{expireTime,jdbcType=TIMESTAMP},
+            #{maxAccessCount,jdbcType=BIGINT},
+            #{currentAccessCount,jdbcType=BIGINT},
+            #{lastAccessTime,jdbcType=TIMESTAMP},
+            #{createTime,jdbcType=TIMESTAMP},
+            #{updateTime,jdbcType=TIMESTAMP},
+            #{comAcctId,jdbcType=BIGINT},
+            #{title,jdbcType=VARCHAR}
+        )
+    </insert>
+
+    <select id="selectByLinkToken" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM message_share_link
+        WHERE link_token = #{linkToken,jdbcType=VARCHAR}
+    </select>
+
+    <update id="incrementAccessCountAndUpdateTime">
+        UPDATE message_share_link
+        SET current_access_count = current_access_count + 1,
+            last_access_time = #{lastAccessTime,jdbcType=TIMESTAMP},
+            update_time = #{lastAccessTime,jdbcType=TIMESTAMP}
+        WHERE link_id = #{linkId,jdbcType=BIGINT}
+    </update>
+</mapper>
+

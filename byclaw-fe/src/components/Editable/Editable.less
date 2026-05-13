@@ -1,0 +1,14 @@
+.x-editable {
+  > *[contenteditable] {
+    border: none;
+    outline: none;
+    appearance: none;
+
+    &:empty {
+      &::after {
+        content: '请输入';
+        color: rgba(0, 0, 0, 0.45);
+      }
+    }
+  }
+}

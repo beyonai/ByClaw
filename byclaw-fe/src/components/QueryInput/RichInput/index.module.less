@@ -1,0 +1,43 @@
+@padding-top-for-delete-icon: 5px;
+
+.wrap {
+  position: relative;
+  padding: 12px 12px 0;
+  // 因为删除按钮是绝对定位的，overflow: auto会导致删除按钮溢出部分看不见
+  // 因为editorWrap加了padding-top，所以这里要减去padding-top
+  margin-top: -@padding-top-for-delete-icon;
+}
+
+.editorWrap {
+  display: flex;
+  min-height: 56px;
+  font-size: 16px;
+  position: relative;
+  z-index: 1;
+  max-height: (28px * 12); // 最多12行
+  overflow: auto;
+  // 因为删除按钮是绝对定位的，overflow: auto会导致删除按钮溢出部分看不见，因此这里需要加个padding-top
+  padding-top: @padding-top-for-delete-icon;
+}
+
+.slate {
+  outline: none;
+  flex: 1 1 auto;
+}
+
+.myPlaceholder {
+  position: absolute;
+  display: none;
+  left: 0;
+  // 保持和editorWrap内容相同的top值
+  top: @padding-top-for-delete-icon;
+  width: 100%;
+  z-index: 0;
+  opacity: 0.333;
+  user-select: none;
+  pointer-events: none;
+
+  & > span:first-child {
+    display: inline-block;
+  }
+}

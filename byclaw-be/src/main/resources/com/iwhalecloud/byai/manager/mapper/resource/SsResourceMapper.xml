@@ -1,0 +1,1268 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper">
+
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.resource.SsResource">
+        <id column="resource_id" property="resourceId" />
+        <result column="resource_code" property="resourceCode" />
+        <result column="system_code" property="systemCode" />
+        <result column="resource_source_pk_id" property="resourceSourcePkId" />
+        <result column="resource_biz_type" property="resourceBizType" />
+        <result column="resource_type" property="resourceType" />
+        <result column="resource_name" property="resourceName" />
+        <result column="resource_desc" property="resourceDesc" />
+        <result column="avatar" property="avatar" />
+        <result column="sample" property="sample" />
+        <result column="tags" property="tags" />
+        <result column="resource_version_id" property="resourceVersionId" />
+        <result column="host_type" property="hostType" />
+        <result column="catalog_id" property="catalogId" />
+        <result column="man_org_id" property="manOrgId" />
+        <result column="man_user_id" property="manUserId" />
+        <result column="index_list" property="indexList" />
+        <result column="create_by" property="createBy" />
+        <result column="create_time" property="createTime" />
+        <result column="update_by" property="updateBy" />
+        <result column="update_time" property="updateTime" />
+        <result column="com_acct_id" property="comAcctId" />
+        <result column="resource_status" property="resourceStatus" />
+        <result column="resource_d_verid" property="resourceDVerid" />
+        <result column="resource_r_verid" property="resourceRVerid" />
+        <result column="auth_status" property="authStatus"/>
+        <result column="parent_resource_id" property="parentResourceId"/>
+        <result column="impl_type" property="implType"/>
+        <result column="worker_agent_type" property="workerAgentType"/>
+    </resultMap>
+
+
+    <resultMap id="DatasetVoResultMap" type="com.iwhalecloud.byai.state.domain.resource.vo.DatasetVo" extends="BaseResultMap">
+
+    </resultMap>
+
+    <resultMap id="DatasetDetailVoResultMap" type="com.iwhalecloud.byai.state.domain.resource.vo.DatasetDetailVo"
+        extends="BaseResultMap">
+        <result column="type" property="type"/>
+    </resultMap>
+
+    <resultMap id="SsResourceDTOResultMap" extends="BaseResultMap" type="com.iwhalecloud.byai.manager.dto.digitemploy.SsResourceDTO">
+        <result column="resource_rel_detail_id" property="relDetailId"/>
+        <result column="rel_resource_id" property="relResourceId"/>
+        <result column="rel_resource_info" property="relResourceInfo"/>
+    </resultMap>
+
+    <resultMap id="relResourceListWithSourceType" extends="BaseResultMap" type="com.iwhalecloud.byai.manager.vo.resource.ShelfResourceVo">
+        <result column="rel_resource_biz_type" property="resourceBizType" />
+        <result column="resource_biz_type" property="resourceSourceType" />
+    </resultMap>
+
+    <resultMap id="statusNumMap" type="java.util.Map">
+        <result column="resource_status" property="resourceStatus" />
+        <result column="num" property="num" />
+    </resultMap>
+
+    <!-- 通用查询结果-->
+    <sql id="Base_Column_List">
+        resource_id, system_code, resource_source_pk_id, resource_biz_type, resource_type,
+        resource_name, resource_desc, avatar, sample, tags, resource_version_id, host_type,
+        catalog_id, man_org_id, man_user_id, index_list, create_by, create_time, update_by,
+        update_time, com_acct_id, resource_status, resource_d_verid, resource_r_verid, resource_code,
+        parent_resource_id, impl_type, worker_agent_type
+    </sql>
+
+    <resultMap id="pageDto" extends="BaseResultMap" type="com.iwhalecloud.byai.manager.dto.resource.ResourcePageDto">
+        <result column="man_org_name" property="manOrgName" />
+        <result column="agent_type" property="agentType" />
+        <result column="type" property="type" />
+        <result column="plugin_machine_id" property="pluginMachineId" />
+        <result column="kdb_Id" property="kdbId" />
+        <result column="task_id" property="taskId" />
+        <result column="deal_desc" property="approvalContent"/>
+        <result column="create_user_name" property="createUserName"/>
+        <result column="catalog_type" property="catalogType"/>
+        <result column="pid" property="pid"/>
+    </resultMap>
+
+
+    <resultMap id="digitalEmployeeVoResultMap" extends="BaseResultMap" type="com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo">
+    </resultMap>
+
+    <resultMap id="DigitalEmployeeDTOResultMap" extends="BaseResultMap" type="com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo">
+    </resultMap>
+
+    <!-- queryDirAndFileByLevel：目录 union 文件，列别名与 SQL 中 as 一致 -->
+    <resultMap id="DirAndFileVoResultMap" type="com.iwhalecloud.byai.manager.vo.resource.DirAndFileVo">
+        <id column="id" property="id"/>
+        <result column="name" property="name"/>
+        <result column="type" property="type"/>
+        <result column="fileId" property="fileId"/>
+        <result column="fileName" property="fileName"/>
+        <result column="createTime" property="createTime"/>
+        <result column="createBy" property="createBy"/>
+        <result column="createStaffName" property="createStaffName"/>
+    </resultMap>
+
+    <!-- DigEmployeeDto 结果映射 -->
+    <resultMap id="DigEmployeeDtoResultMap" type="com.iwhalecloud.byai.manager.dto.resource.DigEmployeeDto">
+        <id column="resource_id" property="id" />
+        <result column="resource_name" property="name" />
+        <result column="resource_desc" property="resourceDesc" />
+        <result column="resource_status" property="metaStatus" />
+        <result column="avatar" property="avatar" />
+        <result column="resource_code" property="resourceCode" />
+        <result column="is_top" property="isTop" />
+        <result column="max_create_time" property="latestGrantTime" />
+        <result column="agent_type" property="agentType" />
+        <result column="terminal" property="terminal" />
+        <result column="top_time" property="topTime" />
+    </resultMap>
+
+
+    <resultMap id="sourceSystemMap" type="com.iwhalecloud.byai.manager.entity.source.SourceSystem">
+        <result property="systemCode" column="system_code"/>
+        <result property="systemName" column="system_name"/>
+    </resultMap>
+
+    <select id="getResourceListByPage" resultMap="pageDto">
+        SELECT
+        <if test="query.suasSuperassistSubAgent != null and query.suasSuperassistSubAgent != ''">
+            agent.is_top,
+            agent.top_time,
+        </if>
+        r.resource_id,
+        r.system_code,
+        r.resource_source_pk_id,
+        r.resource_biz_type,
+        r.resource_type,
+        r.resource_name,
+        r.resource_desc,
+        r.avatar,
+        r.sample,
+        r.tags,
+        r.resource_version_id,
+        r.host_type,
+        src.catalog_id,
+        src.catalog_name,
+        src.catalog_type,
+        r.man_org_id,
+        po.org_name as man_org_name,
+        r.man_user_id,
+        r.index_list,
+        r.create_by,
+        r.create_time,
+        r.update_by,
+        r.update_time,
+        r.com_acct_id,
+        r.resource_status,
+        r.resource_d_verid,
+        r.resource_r_verid,
+        r.resource_code,
+        r.auth_status,
+        r.publish_portal,
+        srede.create_type,
+        CASE
+        WHEN r.resource_biz_type = 'AGENT' THEN a.agent_type
+        ELSE NULL
+        END as agent_type,
+        r.publish_time,
+        r.shelf_time,
+        r.unshelf_time,
+        b.plugin_machine_id,
+        b.type,
+        b.kdb_id,
+        t.task_id,
+        ont.pid,
+        t.deal_desc
+        FROM ss_resource r
+        <if test="query.suasSuperassistSubAgent != null and query.suasSuperassistSubAgent != ''">
+            LEFT JOIN suas_superassist_sub_agent agent on agent.agent_id =r.resource_id
+        </if>
+        LEFT JOIN ss_res_ext_agent a ON r.resource_id = a.resource_id AND r.resource_biz_type = 'AGENT'
+        LEFT JOIN ss_res_ext_doc b ON r.resource_id = b.resource_id AND r.resource_biz_type in ('KG_DOC', 'KG_DB', 'KG_QA')
+        LEFT JOIN ss_res_ext_dig_employee srede ON r.resource_id = srede.resource_id AND r.resource_biz_type = 'DIG_EMPLOYEE'
+        LEFT JOIN po_organization po on po.org_id = r.man_org_id
+        LEFT JOIN ss_resource_catalog src on src.catalog_id = r.catalog_id
+        LEFT JOIN ss_res_ext_ontology ont ON r.resource_id = ont.resource_id
+        LEFT JOIN (
+        SELECT
+            t1.task_id,
+            t1.deal_desc,
+            t1.resource_id
+        FROM men_task t1
+        INNER JOIN (
+        SELECT
+        resource_id,
+        MAX(task_id) as max_task_id
+        FROM men_task
+        WHERE resource_id IS NOT NULL
+        GROUP BY resource_id
+        ) t2 ON t1.resource_id = t2.resource_id AND t1.task_id = t2.max_task_id
+        ) t ON t.resource_id = r.resource_id
+        <where>
+                and r.parent_resource_id =-1 and resource_status !=6
+            <if test="query.resourceName != null and query.resourceName != ''">
+                and r.resource_name like concat('%', concat(#{query.resourceName}, '%'))
+            </if>
+            <if test="query.pid != null and query.pid != ''">
+                AND ont.pid = #{query.pid}
+            </if>
+            <if test="query.enterpriseId != null and query.enterpriseId != ''">
+                and r.com_acct_id = #{query.enterpriseId}
+            </if>
+            <if test="query.systemCodes != null and query.systemCodes.size() > 0">
+                and r.system_code in
+                <foreach collection="query.systemCodes" item="item" open="(" close=")" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+            <!-- 当resourceTypeList不为空时使用IN条件，同时排除resourceBizType条件 -->
+            <if test="query.resourceTypeList != null and query.resourceTypeList.size() > 0">
+                and r.resource_biz_type in
+                <foreach collection="query.resourceTypeList" item="item" open="(" close=")" separator=",">
+                    #{item}
+                </foreach>
+                <if test="query.resourceTypeList.contains('DIG_EMPLOYEE')">
+                    and (r.owner_type is null or r.owner_type = 'enterprise')
+                </if>
+            </if>
+            <if test="query.catalogIds != null and query.catalogIds.size() > 0">
+                and (src.catalog_path IN (
+                SELECT sc.catalog_path
+                FROM ss_resource_catalog sc
+                WHERE sc.catalog_id IN
+                <foreach collection="query.catalogIds" item="item" open="(" close=")" separator=",">
+                    #{item}
+                </foreach>
+
+                )
+                OR src.catalog_path LIKE ANY (
+                SELECT CONCAT(sc.catalog_path, '.%')
+                FROM ss_resource_catalog sc
+                WHERE sc.catalog_id IN
+                    <foreach collection="query.catalogIds" item="item" open="(" close=")" separator=",">
+                        #{item}
+                    </foreach>
+                )
+                )
+            </if>
+
+            <if test="query.resourceIdList != null and query.resourceIdList.size() > 0">
+                and r.resource_id in
+                <foreach collection="query.resourceIdList" item="item" open="(" close=")" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+            <!-- 仅当resourceTypeList为空时才检查resourceBizType -->
+            <if test="(query.resourceTypeList == null or query.resourceTypeList.size() == 0) and query.resourceBizType != null and query.resourceBizType != ''">
+                and r.resource_biz_type = #{query.resourceBizType}
+            </if>
+            <if test="query.statusList != null and query.statusList.size() >0 ">
+                and r.resource_status in
+                <foreach collection="query.statusList" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="query.ownershipType != null and query.ownershipType != ''">
+                <if test="query.ownershipType == 1">
+                    and r.create_by = #{query.userId}
+                </if>
+                <if test="query.ownershipType == 2">
+                    and r.man_user_id = #{query.userId}
+                </if>
+            </if>
+            <!-- 用于过滤不是自己创建的 -->
+            <if test="query.isFilterCreate != null and query.isFilterCreate">
+                and r.create_by != #{query.userId}
+            </if>
+            <if test="query.catalogId != null and query.catalogId != ''">
+                and r.catalog_id = #{query.catalogId}
+            </if>
+        </where>
+        <!-- 多字段排序 -->
+        <choose>
+            <when test="query.sortFields != null and query.sortFields.size() > 0">
+                ORDER BY
+                <foreach collection="query.sortFields" item="sortField" separator=",">
+                    <choose>
+                        <when test="sortField.field == 'createTime'">r.create_time</when>
+                        <when test="sortField.field == 'updateTime'">r.update_time</when>
+                        <when test="sortField.field == 'resourceName'">r.resource_name</when>
+                        <when test="sortField.field == 'resourceStatus'">r.resource_status</when>
+                        <when test="sortField.field == 'publishTime'">r.publish_time</when>
+                        <when test="sortField.field == 'shelfTime'">r.shelf_time</when>
+                        <when test="sortField.field == 'isTop' and query.suasSuperassistSubAgent != null and query.suasSuperassistSubAgent != ''">
+                            COALESCE(agent.is_top, 0)
+                        </when>
+                        <when test="sortField.field == 'topTime' and query.suasSuperassistSubAgent != null and query.suasSuperassistSubAgent != ''">
+                            agent.top_time
+                        </when>
+                        <otherwise>r.create_time</otherwise>
+                    </choose>
+                    <if test="sortField.order == 'asc'">ASC</if>
+                    <if test="sortField.order == 'desc'">DESC</if>
+                </foreach>
+            </when>
+            <otherwise>
+                ORDER BY r.create_time DESC, r.update_time DESC
+            </otherwise>
+        </choose>
+    </select>
+
+
+
+    <select id="selectRelResourceList" resultMap="BaseResultMap">
+        select
+            b.resource_code,
+            b.resource_id
+        from
+            ss_resource_rel_detail a
+        join
+            ss_resource b
+        on
+            a.rel_resource_id = b.resource_id
+        <where>
+            <if test="resourceIdList != null and resourceIdList.size() > 0">
+                and a.resource_id in
+                <foreach collection="resourceIdList" open="(" close=")" item="item" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+        </where>
+    </select>
+
+
+    <select id="selectRelResourceListByType" resultMap="SsResourceDTOResultMap">
+        select
+            a.resource_rel_detail_id,
+            b.resource_biz_type,
+            b.resource_id,
+            b.resource_code,
+            b.resource_status,
+            b.resource_name,
+            a.resource_id,
+            a.rel_resource_id
+        from
+        ss_resource_rel_detail a
+        join
+            ss_resource b
+        on a.rel_resource_id = b.resource_id
+        <where>
+               and b.resource_status = 2
+            <if test="resourceIdList != null and resourceIdList.size() > 0">
+                and a.resource_id in
+                <foreach collection="resourceIdList" open="(" close=")" item="item" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="type != null and type != ''">
+                and b.resource_biz_type = #{type}
+            </if>
+        </where>
+    </select>
+
+
+    <!-- 查询与指定资源关联的、指定业务类型的关联资源；返回的 resourceId=主侧资源ID，relResourceId=关联侧资源ID（用于 OBJECT->ACTION 时主侧=对象、关联侧=动作） -->
+    <select id="selectRelResourceListByTypeIgnoreStatus" resultMap="SsResourceDTOResultMap">
+        select
+        a.resource_rel_detail_id,
+        b.resource_biz_type,
+        a.resource_id,
+        a.rel_resource_id,
+        b.resource_code,
+        b.resource_status,
+        b.resource_name
+        from
+        ss_resource_rel_detail a
+        join
+        ss_resource b
+        on a.rel_resource_id = b.resource_id
+        <where>
+            <if test="resourceIdList != null and resourceIdList.size() > 0">
+                and a.resource_id in
+                <foreach collection="resourceIdList" open="(" close=")" item="item" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="type != null and type != ''">
+                and b.resource_biz_type = #{type}
+            </if>
+        </where>
+    </select>
+
+
+
+
+    <select id="selectRelResourceListWithSourceType" resultMap="relResourceListWithSourceType">
+        SELECT
+            b.resource_code,
+            b.resource_id,
+            b.resource_biz_type AS rel_resource_biz_type,
+            c.resource_biz_type AS resource_biz_type
+        FROM
+            ss_resource_rel_detail a
+        JOIN
+            ss_resource b
+        ON
+            a.rel_resource_id = b.resource_id
+        AND
+            b.resource_biz_type = 'TOOL'
+        JOIN
+            ss_resource c
+        ON
+            a.resource_id = c.resource_id
+        AND
+            c.resource_biz_type = 'TOOLKIT'
+        <where>
+            <if test="resourceIdList != null and resourceIdList.size() > 0">
+                AND a.resource_id IN
+                <foreach collection="resourceIdList" open="(" close=")" item="item" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="statusList != null and statusList.size() > 0">
+                AND b.resource_status IN
+                <foreach collection="statusList" open="(" close=")" item="status" separator=",">
+                    #{status}
+                </foreach>
+            </if>
+        </where>
+    </select>
+
+    <select id="getStatusNumStatics" resultMap="statusNumMap">
+        SELECT
+        r.resource_status,
+        count(1) as num
+        FROM ss_resource r
+        LEFT JOIN ss_res_ext_ontology ont ON r.resource_id = ont.resource_id
+        <where>
+            and r.parent_resource_id =-1 and resource_status !=6
+            <if test="query.resourceName != null and query.resourceName != ''">
+                and r.resource_name like concat('%', concat(#{query.resourceName}, '%'))
+            </if>
+            <!-- 当resourceTypeList不为空时使用IN条件，同时排除resourceBizType条件 -->
+            <if test="query.resourceTypeList != null and query.resourceTypeList.size() > 0">
+                and r.resource_biz_type in
+                <foreach collection="query.resourceTypeList" item="item" open="(" close=")" separator=",">
+                    #{item}
+                </foreach>
+                <if test="query.resourceTypeList.contains('DIG_EMPLOYEE')">
+                    and (r.owner_type is null or r.owner_type = 'enterprise')
+                </if>
+            </if>
+            <if test="query.pid != null and query.pid != ''">
+                and ont.pid = #{query.pid}
+            </if>
+            <!-- 根据ownershipType判断resourceIdList和create_by的关系 -->
+            <choose>
+                <!-- ownershipType=0时，resourceIdList和create_by之间是OR关系 -->
+                <when test="query.ownershipType != null and query.ownershipType == 0">
+                    <if test="query.resourceIdList != null and query.resourceIdList.size() > 0 and query.userId != null">
+                        and (r.resource_id in
+                        <foreach collection="query.resourceIdList" item="item" open="(" close=")" separator=",">
+                            #{item}
+                        </foreach>
+                        or r.create_by = #{query.userId})
+                    </if>
+                    <if test="(query.resourceIdList == null or query.resourceIdList.size() == 0) and query.userId != null">
+                        and r.create_by = #{query.userId}
+                    </if>
+                    <if test="query.resourceIdList != null and query.resourceIdList.size() > 0 and (query.userId == null or query.userId == 0)">
+                        and r.resource_id in
+                        <foreach collection="query.resourceIdList" item="item" open="(" close=")" separator=",">
+                            #{item}
+                        </foreach>
+                    </if>
+                </when>
+                <!-- ownershipType!=0时，resourceIdList和create_by之间是AND关系 -->
+                <otherwise>
+                    <if test="query.resourceIdList != null and query.resourceIdList.size() > 0">
+                        and r.resource_id in
+                        <foreach collection="query.resourceIdList" item="item" open="(" close=")" separator=",">
+                            #{item}
+                        </foreach>
+                    </if>
+                    <!--我创建的-->
+                    <if test="query.ownershipType != null and query.ownershipType == 1 and query.userId != null">
+                        and r.create_by = #{query.userId}
+                    </if>
+                </otherwise>
+            </choose>
+        </where>
+        group by r.resource_status
+    </select>
+
+
+    <resultMap id="resourceDetailDtoResultMap" type="com.iwhalecloud.byai.manager.dto.resource.ResourceDetailDto">
+       <result column="resource_rel_detail_id" property="resourceRelDetailId" />
+       <result column="resource_id" property="resourceId" />
+       <result column="rel_resource_id" property="relResourceId" />
+       <result column="resource_source_pk_id" property="resourceSourcePkId" />
+    </resultMap>
+
+    <select id="findRelResourceDetail" resultMap="resourceDetailDtoResultMap">
+        select a.resource_rel_detail_id,
+               a.resource_id,
+               a.rel_resource_id,
+               b.resource_source_pk_id
+        from ss_resource_rel_detail a
+                 join ss_resource b on a.rel_resource_id = b.resource_id
+        where a.resource_id =#{resourceId}
+    </select>
+
+    <select id="getAllResourceListByPage" resultMap="pageDto">
+        SELECT
+        <if test="request.suasSuperassistSubAgent != null and request.suasSuperassistSubAgent != ''">
+            agent.is_top,
+            agent.top_time,
+        </if>
+        r.resource_id,
+        r.system_code,
+        r.resource_source_pk_id,
+        r.resource_biz_type,
+        r.resource_type,
+        r.resource_name,
+        r.resource_desc,
+        r.avatar,
+        r.sample,
+        r.tags,
+        r.resource_version_id,
+        r.host_type,
+        src.catalog_id,
+        src.catalog_name,
+        src.catalog_type,
+        r.man_org_id,
+        ont.pid,
+        po.org_name as man_org_name,
+        r.man_user_id,
+        r.index_list,
+        r.create_by,
+        r.create_time,
+        r.update_by,
+        r.update_time,
+        r.com_acct_id,
+        r.resource_status,
+        r.resource_d_verid,
+        r.resource_r_verid,
+        r.resource_code,
+        r.auth_status,
+        r.publish_portal,
+        srede.create_type,
+        CASE
+        WHEN r.resource_biz_type = 'AGENT' THEN a.agent_type
+        ELSE NULL
+        END as agent_type,
+        r.publish_time,
+        r.shelf_time,
+        r.unshelf_time,
+        b.plugin_machine_id,
+        b.type,
+        b.kdb_id,
+        t.task_id,
+        t.deal_desc
+        FROM ss_resource r
+        <if test="request.suasSuperassistSubAgent != null and request.suasSuperassistSubAgent != ''">
+            LEFT JOIN suas_superassist_sub_agent agent on agent.agent_id =r.resource_id
+        </if>
+        LEFT JOIN ss_res_ext_agent a ON r.resource_id = a.resource_id AND r.resource_biz_type = 'AGENT'
+        LEFT JOIN ss_res_ext_doc b ON r.resource_id = b.resource_id AND r.resource_biz_type in ('KG_DOC', 'KG_DB', 'KG_QA')
+        LEFT JOIN ss_res_ext_dig_employee srede ON r.resource_id = srede.resource_id AND r.resource_biz_type = 'DIG_EMPLOYEE'
+        LEFT JOIN po_organization po on po.org_id = r.man_org_id
+        LEFT JOIN ss_resource_catalog src on src.catalog_id = r.catalog_id
+        LEFT JOIN ss_res_ext_ontology ont ON r.resource_id = ont.resource_id
+        LEFT JOIN (
+        SELECT
+        t1.task_id,
+        t1.deal_desc,
+        t1.resource_id
+        FROM men_task t1
+        INNER JOIN (
+        SELECT
+        resource_id,
+        MAX(task_id) as max_task_id
+        FROM men_task
+        WHERE resource_id IS NOT NULL
+        GROUP BY resource_id
+        ) t2 ON t1.resource_id = t2.resource_id AND t1.task_id = t2.max_task_id
+        ) t ON t.resource_id = r.resource_id
+        <where>
+            and r.parent_resource_id =-1 and resource_status !=6
+            <if test="request.resourceTypeList != null and request.resourceTypeList.size() > 0">
+                AND r.resource_biz_type IN
+                <foreach collection="request.resourceTypeList" item="type" open="(" separator="," close=")">
+                    #{type}
+                </foreach>
+            </if>
+            <if test="request.pid != null and request.pid != ''">
+                AND ont.pid = #{request.pid}
+            </if>
+            <if test="request.resourceBizType != null">
+                AND r.resource_biz_type = #{request.bizType}
+            </if>
+            <if test="request.systemCodes != null and request.systemCodes.size() > 0">
+                and r.system_code in
+                <foreach collection="request.systemCodes" item="item" open="(" close=")" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="request.catalogIds != null and request.catalogIds.size() > 0">
+                and (src.catalog_path IN (
+                    SELECT sc.catalog_path
+                    FROM ss_resource_catalog sc
+                    WHERE sc.catalog_id IN
+                    <foreach collection="request.catalogIds" item="item" open="(" close=")" separator=",">
+                        #{item}
+                    </foreach>
+                )
+                OR src.catalog_path LIKE ANY (
+                    SELECT CONCAT(sc.catalog_path, '.%')
+                    FROM ss_resource_catalog sc
+                    WHERE sc.catalog_id IN
+                    <foreach collection="request.catalogIds" item="item" open="(" close=")" separator=",">
+                        #{item}
+                    </foreach>
+                ))
+            </if>
+
+            <!-- 状态列表条件（原有逻辑保留） -->
+            <if test="request.statusList != null and request.statusList.size() > 0">
+                AND r.resource_status IN
+                <foreach collection="request.statusList" item="status" open="(" separator="," close=")">
+                    #{status}
+                </foreach>
+            </if>
+            <!-- 核心优化：动态判断userId和resourceIdList是否有效 -->
+            <if test="request.userId != null or (request.resourceIdList != null and request.resourceIdList.size() > 0)">
+                AND (
+                <!-- userId不为空时，添加"我创建的"条件 -->
+                <if test="request.userId != null">
+                    r.create_by = #{request.userId}
+                </if>
+                <!-- 当userId不为空且resourceIdList有效时，添加OR连接 -->
+                <if test="request.userId != null and request.resourceIdList != null and request.resourceIdList.size() > 0">
+                    OR
+                </if>
+                <!-- resourceIdList有效时，添加"我管理的"条件 -->
+                <if test="request.resourceIdList != null and request.resourceIdList.size() > 0">
+                    r.resource_id IN
+                    <foreach collection="request.resourceIdList" item="id" open="(" separator="," close=")">
+                        #{id}
+                    </foreach>
+                </if>
+                )
+            </if>
+            <!-- 其他查询条件 -->
+            <if test="request.resourceName != null and request.resourceName != ''">
+                AND r.resource_name LIKE CONCAT('%', #{request.resourceName}, '%')
+            </if>
+        </where>
+        <!-- ORDER BY 移到 <where> 外面 -->
+        <choose>
+            <when test="request.sortFields != null and request.sortFields.size() > 0">
+                ORDER BY
+                <foreach collection="request.sortFields" item="sortField" separator=",">
+                    <choose>
+                        <when test="sortField.field == 'createTime'">r.create_time</when>
+                        <when test="sortField.field == 'updateTime'">r.update_time</when>
+                        <when test="sortField.field == 'resourceName'">r.resource_name</when>
+                        <when test="sortField.field == 'resourceStatus'">r.resource_status</when>
+                        <when test="sortField.field == 'publishTime'">r.publish_time</when>
+                        <when test="sortField.field == 'shelfTime'">r.shelf_time</when>
+                        <when test="sortField.field == 'isTop' and request.suasSuperassistSubAgent != null and request.suasSuperassistSubAgent != ''">
+                            COALESCE(agent.is_top, 0)
+                        </when>
+                        <when test="sortField.field == 'topTime' and request.suasSuperassistSubAgent != null and request.suasSuperassistSubAgent != ''">
+                            agent.top_time
+                        </when>
+                        <otherwise>r.create_time</otherwise>
+                    </choose>
+                    <if test="sortField.order == 'asc'">ASC</if>
+                    <if test="sortField.order == 'desc'">DESC</if>
+                </foreach>
+            </when>
+            <otherwise>
+                ORDER BY r.create_time DESC, r.update_time DESC
+            </otherwise>
+        </choose>
+    </select>
+
+
+    <select id="findDigitalEmployeeDetailsById" resultMap="DigitalEmployeeDTOResultMap">
+        select a.resource_id,
+               a.system_code,
+               a.resource_source_pk_id,
+               a.resource_biz_type,
+               a.resource_type,
+               a.resource_name,
+               a.resource_desc,
+               a.avatar,
+               a.sample,
+               a.tags,
+               a.host_type,
+               a.catalog_id,
+               a.man_org_id,
+               a.man_user_id,
+               a.index_list,
+               a.create_by,
+               a.create_time,
+               a.resource_status,
+               a.resource_code,
+               b.resource_id,
+               b.agent_type,
+               b.agent_dev_type,
+               b.agent_sse_head,
+               b.agent_sse_url,
+               b.agent_web_url,
+               b.agent_admin_url_list,
+               b.prologue,
+               b.agent_sse_url_ori,
+               b.agent_web_url_ori,
+               b.agent_admin_url_ori_list,
+               b.create_type,
+               b.agent_home_url,
+               b.home_type,
+               b.auth_type,
+               b.integration_type,
+               b.ability,
+               b.constraints,
+               b.faqs,
+               b.role_attributes,
+               b.processing_flow,
+               b.personality_dimensions,
+               b.word_preferences,
+               b.sentence_and_tone
+        from ss_resource a
+                 join ss_res_ext_dig_employee b on a.resource_id = b.resource_id
+         where a.resource_id =#{resourceId}
+    </select>
+
+
+    <select id="selectAllPrivList" resultMap="DigEmployeeDtoResultMap">
+        SELECT
+            a.resource_id,
+            a.resource_name,
+            a.resource_desc,
+            a.resource_status,
+            a.avatar,
+            a.resource_code,
+            sssa.is_top,
+            b.max_create_time,
+            d.agent_type,
+            d.terminal,
+            sssa.top_time
+        FROM ss_resource a
+        INNER JOIN (
+            SELECT
+                grant_obj_id,
+                MAX(create_date) AS max_create_time
+            FROM au_privilege_grant
+            <where>
+                AND status_cd = 'A'
+                AND grant_type IN ('AVAILABLE_USE', 'FORCE_USE')
+                <if test="grantToIdList != null and grantToIdList.size()>0">
+                    AND grant_to_obj_id IN
+                    <foreach collection="grantToIdList" item="id" open="(" separator="," close=")">
+                        #{id}
+                    </foreach>
+                </if>
+                <if test="resourceIdList != null and resourceIdList.size()>0">
+                    AND grant_obj_id IN
+                    <foreach collection="resourceIdList" item="id" open="(" separator="," close=")">
+                        #{id}
+                    </foreach>
+                </if>
+            </where>
+            GROUP BY grant_obj_id
+        ) b ON b.grant_obj_id = a.resource_id
+        LEFT JOIN suas_superassist_sub_agent sssa
+            ON sssa.agent_id = a.resource_id
+            AND sssa.status_cd = '00A'
+            AND sssa.superassist_id = #{userId}
+        LEFT JOIN ss_res_ext_dig_employee d
+            ON d.resource_id = a.resource_id
+        <where>
+            AND a.resource_status = 2
+            AND a.resource_biz_type = 'DIG_EMPLOYEE'
+            <if test="name != null and name != ''">
+                AND a.resource_name LIKE CONCAT('%', #{name}, '%')
+            </if>
+            <if test="type != null and type == 'owner'">
+                AND a.create_by = #{userId}
+            </if>
+            <if test="type != null and type == 'authorize'">
+                AND a.create_by != #{userId}
+            </if>
+            <if test="terminals != null and terminals.size() > 0">
+                AND d.terminal IN
+                <foreach collection="terminals" item="terminal" open="(" separator="," close=")">
+                    #{terminal}
+                </foreach>
+            </if>
+        </where>
+        ORDER BY
+            COALESCE(CAST(sssa.is_top AS INTEGER), 0) DESC,
+            CASE
+                WHEN COALESCE(CAST(sssa.is_top AS INTEGER), 0) = 1 THEN sssa.top_time
+                ELSE NULL
+            END DESC NULLS LAST,
+            COALESCE(b.max_create_time, TIMESTAMP '1970-01-01 00:00:00') DESC
+    </select>
+
+    <!-- 查询资源关联的其他资源列表 -->
+    <select id="findRelResource" resultMap="SsResourceDTOResultMap">
+        select b.resource_id,
+               b.resource_code,
+               b.system_code,
+               b.resource_source_pk_id,
+               b.resource_biz_type,
+               b.resource_type,
+               b.resource_name,
+               b.resource_desc,
+               b.avatar,
+               b.sample,
+               b.tags,
+               b.resource_version_id,
+               b.host_type,
+               b.catalog_id,
+               b.man_org_id,
+               b.man_user_id,
+               b.index_list,
+               b.create_by,
+               b.create_time,
+               b.update_by,
+               b.update_time,
+               b.com_acct_id,
+               b.resource_status,
+               b.resource_d_verid,
+               b.resource_r_verid,
+               b.parent_resource_id,
+               b.impl_type,
+               b.worker_agent_type,
+               a.rel_resource_info
+        from ss_resource_rel_detail a
+                 join ss_resource b on a.rel_resource_id = b.resource_id
+        where a.resource_id = #{resourceId}
+    </select>
+
+
+
+    <select id="getSourceSystemListByTypes" resultMap="sourceSystemMap">
+        SELECT
+        distinct r.system_code,
+        ss.system_name
+        FROM ss_resource r
+        INNER JOIN po_source_system ss ON ss.system_code = r.system_code
+        LEFT JOIN po_organization po ON po.org_id = r.man_org_id
+        LEFT JOIN ss_resource_catalog src ON src.catalog_id = r.catalog_id
+        <where>
+            AND r.system_code is not null
+            <if test="query.keyword != null and query.keyword != ''">
+
+                and r.resource_name like concat('%', #{query.keyword}, '%')
+            </if>
+
+            <if test="query.types != null and query.types.size() > 0">
+                and r.resource_biz_type in
+                <foreach collection="query.types" item="item" open="(" close=")" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+
+
+            <if test="query.catalogIds != null and query.catalogIds.size() > 0">
+                and (
+                src.catalog_path IN (
+                SELECT sc.catalog_path
+                FROM ss_resource_catalog sc
+                WHERE sc.catalog_id IN
+                <foreach collection="query.catalogIds" item="item" open="(" close=")" separator=",">
+                    #{item}
+                </foreach>
+                )
+                OR src.catalog_path LIKE ANY (
+                SELECT CONCAT(sc.catalog_path, '.%')
+                FROM ss_resource_catalog sc
+                WHERE sc.catalog_id IN
+                <foreach collection="query.catalogIds" item="item" open="(" close=")" separator=",">
+                    #{item}
+                </foreach>
+                )
+                )
+            </if>
+
+            <if test="query.orgId != null and query.orgId != ''">
+                and (
+                po.path_code = (
+                SELECT pp.path_code
+                FROM po_organization pp
+                WHERE pp.org_id = #{query.orgId}
+                )
+                OR po.path_code LIKE ANY(
+                SELECT CONCAT(pp_inner.path_code, '.%')
+                FROM po_organization pp_inner
+                WHERE pp_inner.org_id = #{query.orgId}
+                )
+                )
+            </if>
+
+            <if test="query.statusList != null and query.statusList.size() >0 ">
+                and r.resource_status in
+                <foreach collection="query.statusList" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach>
+            </if>
+        </where>
+    </select>
+
+
+    <select id="queryBasicInfoById" resultType="com.iwhalecloud.byai.manager.dto.digitemploy.DigEmployeeInfo">
+        SELECT
+            a.resource_id as resourceId,
+            b.org_name as orgName,
+            c.catalog_name as catalogName,
+            d.target_quality as score,
+            COALESCE(
+                    (SELECT STRING_AGG(u.user_name, ',')
+                     FROM au_privilege_grant g
+                              LEFT JOIN po_users u ON g.grant_to_obj_id = u.user_id
+                     WHERE g.grant_type = 'ALLOW_MANAGE'
+                       AND g.grant_obj_type = 'DIG_EMPLOYEE'
+                       AND g.grant_to_obj_type = 'USER'
+                       AND g.grant_obj_id = a.resource_id),
+                    ''
+            ) AS manUserName
+        FROM
+            ss_resource a
+                LEFT JOIN po_organization b ON a.man_org_id = b.org_id
+                LEFT JOIN ss_resource_catalog c ON a.catalog_id = c.catalog_id
+                LEFT JOIN byai_monitor_target d ON a.resource_id = d.agent_id
+        WHERE a.resource_id = #{resourceId};
+    </select>
+
+
+    <select id="queryRelObjects" resultType="com.iwhalecloud.byai.manager.dto.ontology.ObjectDto">
+        select
+            a.resource_id as resourceId,
+            a.resource_name as name,
+            a.resource_code as code,
+            a.resource_desc as desc,
+            a.catalog_id as catalogId,
+            a.resource_status as status,
+            b.catalog_type as catalogType,
+            b.catalog_name as catalogName,
+            CASE a.resource_type
+            WHEN 'API' THEN 1
+            WHEN 'DOCUMENT' THEN 2
+            WHEN 'DB_TABLE' THEN 3
+            WHEN 'COMMON_DB' THEN 4
+            ELSE NULL
+            END AS type
+        from ss_resource a
+        left join ss_resource_catalog b on a.catalog_id = b.catalog_id
+        where a.resource_id in
+        <foreach collection="resourceIds" item="item" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+        and a.resource_biz_type = 'OBJECT'
+    </select>
+
+    <!-- 批量插入资源 -->
+    <insert id="insertBatch" parameterType="java.util.List">
+        insert into ss_resource (
+            resource_id, system_code, resource_source_pk_id, resource_biz_type, resource_type,
+            resource_name, resource_desc, avatar, sample, tags, resource_version_id, host_type,
+            catalog_id, man_org_id, man_user_id, index_list, create_by, create_time, update_by,
+            update_time, com_acct_id, resource_status, resource_d_verid, resource_r_verid, resource_code, parent_resource_id,
+            impl_type, worker_agent_type
+        ) values
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.resourceId}, #{item.systemCode}, #{item.resourceSourcePkId}, #{item.resourceBizType}, #{item.resourceType},
+                #{item.resourceName}, #{item.resourceDesc}, #{item.avatar}, #{item.sample}, #{item.tags}, #{item.resourceVersionId}, #{item.hostType},
+                #{item.catalogId}, #{item.manOrgId}, #{item.manUserId}, #{item.indexList}, #{item.createBy}, #{item.createTime}, #{item.updateBy},
+                #{item.updateTime}, #{item.comAcctId}, #{item.resourceStatus}, #{item.resourceDVerid}, #{item.resourceRVerid}, #{item.resourceCode}, #{item.parentResourceId},
+                #{item.implType}, #{item.workerAgentType}
+            )
+        </foreach>
+    </insert>
+
+
+    <!-- 数字员工基本信息结果映射 -->
+    <resultMap id="DigEmployeeBasicInfoResultMap" type="com.iwhalecloud.byai.manager.vo.operations.DigEmployeeOperationsVO">
+        <result column="resource_id" property="resourceId" />
+        <result column="resource_name" property="resourceName" />
+        <result column="resource_biz_type" property="resourceBizType" />
+        <result column="org_name" property="orgName" />
+        <result column="man_user_id" property="manUserId" />
+        <result column="catalog_name" property="catalogName" />
+        <result column="position_id" property="positionId" />
+        <result column="position_name" property="positionName" />
+        <result column="on_job_time" property="onJobTime" />
+        <result column="status" property="onDutyStatus" />
+        <result column="position_name" property="positionName" />
+        <result column="target_quality" property="targetQuality" />
+    </resultMap>
+
+    <!-- 查询数字员工基本信息 -->
+    <select id="queryDigEmployeeBasicInfo" resultMap="DigEmployeeBasicInfoResultMap">
+        SELECT
+            r.resource_id,
+            r.resource_biz_type,
+            r.resource_name,
+            r.man_user_id,
+            org.org_name,
+            c.catalog_name,
+            pr.position_id,
+            p.position_name,
+            mt.target_quality,
+            pr.status,
+            pr.on_job_time
+        FROM ss_resource r
+                 LEFT JOIN ss_res_position_relation pr ON pr.resource_id = r.resource_id
+                 LEFT JOIN po_position p ON pr.position_id = p.position_id
+                 LEFT JOIN po_organization org ON r.man_org_id = org.org_id
+                 LEFT JOIN ss_resource_catalog c ON r.catalog_id = c.catalog_id
+                 LEFT JOIN byai_monitor_target mt ON r.resource_id = mt.agent_id
+        WHERE r.resource_id = #{resourceId}
+          AND r.resource_biz_type = 'DIG_EMPLOYEE'
+            LIMIT 1
+    </select>
+
+    <!-- 关联资源结果映射 -->
+    <resultMap id="RelResourceResultMap" type="com.iwhalecloud.byai.manager.vo.operations.RelResourceVO">
+        <result column="rel_resource_id" property="relResourceId" />
+        <result column="resource_name" property="resourceName" />
+        <result column="resource_biz_type" property="resourceBizType" />
+    </resultMap>
+
+    <!-- 查询数字员工关联的资源列表 -->
+    <select id="queryDigEmployeeRelResources" resultMap="RelResourceResultMap">
+        SELECT
+            ss_resource_rel_detail.rel_resource_id,
+            ss_resource.resource_name,
+            ss_resource.resource_biz_type
+        FROM ss_resource_rel_detail
+                 LEFT JOIN ss_resource ON ss_resource_rel_detail.rel_resource_id = ss_resource.resource_id
+        WHERE ss_resource_rel_detail.resource_id = #{resourceId}
+    </select>
+
+    <select id="queryDigEmployeeRelResourceAuthList" resultType="com.iwhalecloud.byai.manager.vo.auth.ResourceAuthVo">
+        SELECT
+            a.resource_id,
+            a.resource_source_pk_id,
+            a.system_code,
+            a.resource_biz_type,
+            a.resource_type,
+            a.resource_name,
+            a.resource_code,
+            a.resource_desc,
+            a.avatar,
+            a.sample,
+            a.tags,
+            a.resource_version_id,
+            a.host_type,
+            a.catalog_id,
+            a.man_org_id,
+            a.man_user_id,
+            a.index_list,
+            a.create_by,
+            a.create_time,
+            a.update_by,
+            a.update_time,
+            a.com_acct_id,
+            a.resource_status,
+            a.resource_d_verid,
+            a.resource_r_verid,
+            a.resource_code,
+            a.publish_time,
+            a.shelf_time,
+            a.unshelf_time,
+            a.auth_status,
+            a.publish_portal,
+            a.parent_resource_id,
+            a.publish_type,
+            a.owner_type
+        FROM (
+                 SELECT DISTINCT rel_resource_id
+                 FROM ss_resource_rel_detail
+                 WHERE resource_id = #{resourceId}
+             ) d
+                 INNER JOIN ss_resource a ON d.rel_resource_id = a.resource_id
+        WHERE 1 = 1
+          AND a.resource_status = 2
+          AND a.resource_biz_type IN ('KG_DOC', 'KG_QA', 'OBJECT', 'VIEW', 'TOOLKIT', 'MCP', 'AGENT')
+          <if test="catalogIds != null and catalogIds.size() > 0">
+              AND a.catalog_id IN
+              <foreach collection="catalogIds" item="catalogIdItem" open="(" separator="," close=")">
+                  #{catalogIdItem}
+              </foreach>
+          </if>
+          <if test="(catalogIds == null or catalogIds.size() == 0) and catalogId != null">
+              AND a.catalog_id = #{catalogId}
+          </if>
+          <if test="keyword != null and keyword != ''">
+              AND a.resource_name LIKE CONCAT('%', #{keyword}, '%')
+          </if>
+        ORDER BY
+            CASE WHEN a.resource_biz_type IN ('KG_DOC', 'KG_QA') THEN 0 ELSE 1 END,
+            a.update_time DESC,
+            a.resource_id DESC
+    </select>
+
+
+    <!-- 根据资源ID删除 resource_rule_enabled 表的数据 -->
+    <delete id="deleteResourceRuleEnabledByResourceId">
+        DELETE FROM resource_rule_enabled
+        WHERE resource_id = #{resourceId}
+    </delete>
+
+    <!-- 统计数字员工的知识和技能数量 -->
+    <select id="countEmployeeResourceStats" resultType="com.iwhalecloud.byai.manager.dto.resource.ResourceCountDto">
+        SELECT
+            rrd.resource_id as employeeId,
+            sr.resource_biz_type as resourceBizType,
+            COUNT(*) as count
+        FROM ss_resource_rel_detail rrd
+        INNER JOIN ss_resource sr ON rrd.rel_resource_id = sr.resource_id
+        WHERE rrd.resource_id IN
+        <foreach item="employeeId" collection="employeeIds" open="(" separator="," close=")">
+            #{employeeId}
+        </foreach>
+        AND sr.resource_biz_type IN ('KG_DOC', 'KG_QA', 'KG_TERM', 'AGENT', 'MCP', 'TOOLKIT', 'TOOL', 'OBJECT', 'VIEW')
+        AND sr.resource_status = 2
+        AND sr.parent_resource_id &lt; 0
+        GROUP BY rrd.resource_id, sr.resource_biz_type
+        ORDER BY rrd.resource_id, sr.resource_biz_type
+    </select>
+
+    <select id="selectByResourceCodeAndStatus" resultMap="BaseResultMap">
+        SELECT * FROM ss_resource
+        WHERE resource_code = #{resourceCode}
+          AND resource_status = #{resourceStatus}
+        LIMIT 1
+    </select>
+
+    <select id="selectListByResourceCodes" resultMap="BaseResultMap" parameterType="java.util.List">
+        SELECT * FROM ss_resource
+        where   resource_status = 3 and  resource_code in
+        <foreach collection="list" item="code" open="(" separator="," close=")">
+            #{code}
+        </foreach>
+    </select>
+
+    <select id="findResourceIdsByBizTypeAndNameWithOptionalList" resultType="java.lang.String">
+        SELECT resource_id FROM byai.ss_resource
+        WHERE resource_biz_type = #{resourceBizType}
+        AND resource_name LIKE CONCAT('%', #{resourceName}, '%')
+        <if test="resourceIds != null and !resourceIds.isEmpty()">
+            AND resource_id IN
+            <foreach collection="resourceIds" item="resourceId" open="(" separator="," close=")">
+                #{resourceId}
+            </foreach>
+        </if>
+    </select>
+
+    <select id="findRestrictedResources" resultType="java.util.Map">
+        SELECT resource_id, create_by FROM byai.ss_resource
+        WHERE resource_id IN
+        <foreach collection="resourceIds" item="resourceId" open="(" separator="," close=")">
+            #{resourceId}
+        </foreach>
+        AND publish_portal = #{publishPortal}
+    </select>
+
+    <select id="selectByResourceId" resultMap="BaseResultMap">
+        SELECT * FROM ss_resource
+        WHERE resource_id = #{resourceId}
+        LIMIT 1
+    </select>
+
+    <!-- 数据集资源分页；keyword 模糊；createBy 传入时按创建人精确过滤 -->
+    <select id="selectDatasetByQo" resultMap="DatasetVoResultMap">
+        SELECT
+            a.resource_id,
+            a.system_code,
+            a.resource_source_pk_id,
+            a.resource_biz_type,
+            a.resource_type,
+            a.resource_name,
+            a.resource_desc,
+            a.avatar,
+            a.sample,
+            a.tags,
+            a.resource_version_id,
+            a.host_type,
+            a.catalog_id,
+            a.man_org_id,
+            a.man_user_id,
+            a.index_list,
+            a.create_by,
+            a.create_time,
+            a.update_by,
+            a.update_time,
+            a.com_acct_id,
+            a.resource_status,
+            a.resource_d_verid,
+            a.resource_r_verid,
+            a.resource_code,
+            a.parent_resource_id
+        FROM ss_resource a
+        <where>
+            <if test="createBy != null">
+                AND a.create_by = #{createBy}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND (
+                    a.resource_name LIKE CONCAT('%', #{keyword}, '%')
+                    OR a.resource_desc LIKE CONCAT('%', #{keyword}, '%')
+                )
+            </if>
+        </where>
+        ORDER BY a.update_time DESC,
+                 a.create_time DESC
+    </select>
+
+    <select id="queryDirAndFileByLevel" resultMap="DirAndFileVoResultMap">
+     select a.catalog_id   as id,
+               a.catalog_name as name,
+               'folder'       as type,
+               null           as fileId,
+               null           as fileName,
+               a.create_time  as createTime,
+               a.create_by    as createBy,
+               b.user_name    as createStaffName
+        from ss_resource_catalog a
+                 join po_users b on a.create_by = b.user_id
+        where resource_id = #{resourceId}
+          and p_catalog_id = #{pCatalogId}
+        union all
+        select a.file_id       as id,
+               a.file_name     as name,
+               'file'          as type,
+               a.file_id       as fileId,
+               a.file_name     as fileName,
+               a.complete_time as createTime,
+               a.create_by     as createBy,
+               b.user_name     as createStaffName
+        from byai_files a
+                 join po_users b on a.create_by = b.user_id
+        where a.dataset_id =#{resourceId}
+                  and a.file_collect_id =  #{pCatalogId}
+    </select>
+
+
+    <select id="findDatasetDetailById" resultMap="DatasetDetailVoResultMap">
+        select a.resource_id,
+               a.system_code,
+               a.resource_source_pk_id,
+               a.resource_biz_type,
+               a.resource_type,
+               a.resource_name,
+               a.resource_desc,
+               a.create_by,
+               a.create_time,
+               b.type
+        from ss_resource a
+                 left join ss_res_ext_doc b on a.resource_id = b.resource_id
+        where a.resource_id = #{resourceId}
+    </select>
+
+</mapper>

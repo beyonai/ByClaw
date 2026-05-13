@@ -1,0 +1,74 @@
+.titleWriter {
+  color: #0d111a;
+  font-weight: bold;
+  margin: 100px auto 0;
+  padding-bottom: 30px;
+  width: 96%;
+  max-width: 850px;
+  &.withAssistant {
+    position: relative;
+    padding-right: 150px + 20px;
+  }
+
+  .assistant {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 150px;
+  }
+
+  .title {
+    font-size: 32px;
+  }
+
+  .subtitle {
+    font-size: 24px;
+    margin-top: 10px;
+
+    .blinkWriter {
+      display: inline-block;
+      width: 20px;
+      height: 3px;
+      background-color: #126dff;
+      margin-left: 2px;
+      margin-bottom: -3px;
+      animation: blink 1s infinite;
+    }
+  }
+
+  .highlight {
+    background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+
+  .subtitle,
+  .highlight {
+    .text {
+      opacity: 1;
+      animation: fadeIn 0.1s;
+    }
+  }
+
+  @keyframes blink {
+    0%,
+    100% {
+      opacity: 1;
+    }
+
+    50% {
+      opacity: 0;
+    }
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
+  }
+}

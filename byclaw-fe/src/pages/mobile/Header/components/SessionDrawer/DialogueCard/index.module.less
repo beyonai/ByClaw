@@ -1,0 +1,123 @@
+.dialogueItem {
+  padding: 10px 8px;
+  transition: background-color 0.3s;
+  border-radius: 12px;
+  position: relative;
+
+  &:hover {
+    background-color: rgba(0, 0, 0, 0.04);
+
+    :global {
+      .@{antPrefix}-dropdown-trigger {
+        display: block;
+      }
+    }
+
+    .createTime {
+      display: none;
+    }
+  }
+
+  &.activeItem {
+    background: rgba(0, 0, 0, 0.04) !important;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  }
+
+  .avatarWrapper {
+    margin-right: 8px;
+    position: relative;
+    line-height: 1;
+    display: flex;
+  }
+
+  .titleWrap {
+    display: flex;
+    overflow: hidden;
+
+    .dialogueItemContent {
+      display: flex;
+      align-items: center;
+      position: relative;
+
+      .dialogueItemContentBox {
+        position: relative;
+        width: 100%;
+      }
+
+      .dialogueTitle {
+        color: #14161a;
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 22px;
+        // max-width: 165px;
+      }
+
+      .dialogueDesc {
+        flex: 1 0 0;
+        overflow: hidden;
+        color: #707680;
+        text-overflow: ellipsis;
+        font-size: 12px;
+        font-weight: 400;
+        line-height: 20px;
+      }
+
+      .createTime {
+        color: #a4aab2;
+        font-size: 12px;
+        font-weight: 400;
+        line-height: 20px;
+        position: absolute;
+        top: 0;
+        right: 0;
+      }
+    }
+  }
+
+  :global {
+    .@{antPrefix}-dropdown-trigger {
+      display: none;
+      margin-left: 6px;
+    }
+  }
+}
+
+.unreadCount {
+  margin-left: 5px;
+}
+
+.mentionTips {
+  position: relative;
+
+  .tips {
+    position: absolute;
+    top: 0;
+    inset-inline-end: 0;
+    transform: translate(50%, -50%);
+    transform-origin: 100% 0%;
+
+    display: inline-flex;
+    justify-content: center;
+    z-index: 1;
+    background-color: red;
+    font-size: 9px;
+    color: #fff;
+
+    line-height: 1;
+    border-radius: 10px;
+    letter-spacing: 0px;
+    // transform: scale(0.9);
+    padding: 1px 3px;
+  }
+}
+
+.spin {
+  flex: 1;
+  :global {
+    .@{antPrefix}-spin-container {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+  }
+}

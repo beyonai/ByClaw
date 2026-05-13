@@ -1,0 +1,33 @@
+package com.iwhalecloud.byai.gateway.sandbox.service;
+
+import java.util.Map;
+
+/**
+ * 沙箱启动上下文。
+ */
+public class SandboxLaunchContext {
+
+    private final String sandboxType;
+
+    private final Map<String, String> envs;
+
+    private final Map<String, Object> userInfo;
+
+    public SandboxLaunchContext(String sandboxType, Map<String, String> envs, Map<String, Object> userInfo) {
+        this.sandboxType = sandboxType;
+        this.envs = envs;
+        this.userInfo = userInfo;
+    }
+
+    public String getSandboxType() {
+        return sandboxType;
+    }
+
+    public Map<String, String> getEnvs() {
+        return envs;
+    }
+
+    public Map<String, Object> getUserInfo() {
+        return userInfo;
+    }
+}

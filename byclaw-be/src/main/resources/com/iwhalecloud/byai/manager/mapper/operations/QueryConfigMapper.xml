@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.operations.QueryConfigMapper">
+
+    <resultMap id="QueryConfigResultMap" type="com.iwhalecloud.byai.manager.entity.operations.QueryConfig">
+        <result column="query_id" property="queryId" />
+        <result column="query_code" property="queryCode" />
+        <result column="name" property="name" />
+        <result column="description" property="description" />
+        <result column="sql_template" property="sqlTemplate" />
+        <result column="dimension_fields" property="dimensionFields" />
+        <result column="measure_fields" property="measureFields" />
+        <result column="condition_fields" property="conditionFields" />
+        <result column="query_type" property="queryType" />
+        <result column="query_method" property="queryMethod" />
+        <result column="db_type" property="dbType" />
+        <result column="status" property="status" />
+        <result column="created_time" property="createdTime" />
+        <result column="updated_time" property="updatedTime" />
+        <result column="created_by" property="createdBy" />
+    </resultMap>
+
+    <!-- 根据查询编码获取查询配置 -->
+    <select id="selectByQueryCode" resultMap="QueryConfigResultMap">
+        SELECT
+            query_id,
+            query_code,
+            name,
+            description,
+            sql_template,
+            dimension_fields,
+            measure_fields,
+            condition_fields,
+            query_type,
+            query_method,
+            db_type,
+            status,
+            created_time,
+            updated_time,
+            created_by
+        FROM query_config
+        WHERE query_code = #{queryCode}
+          AND status = 1
+    </select>
+
+    <!-- 根据查询编码和查询类型获取查询配置-->
+    <select id="selectByQueryCodeAndType" resultMap="QueryConfigResultMap">
+        SELECT query_id,
+               query_code,
+               name,
+               description,
+               sql_template,
+               dimension_fields,
+               measure_fields,
+               condition_fields,
+               query_type,
+               query_method,
+               db_type,
+               status,
+               created_time,
+               updated_time,
+               created_by
+        FROM query_config
+        WHERE query_code = #{queryCode}
+          AND status = 1 LIMIT 1
+    </select>
+
+    <!-- 执行动态SQL查询 -->
+    <!-- 注意：这里使用#{}来插入SQL模板，SQL模板中的${}占位符应该已经在Service层被替换 -->
+    <!-- SQL模板应该使用${param}占位符，Service层会进行参数替换 -->
+    <!-- 参数通过params Map传入，但这里的params主要用于调试-->
+    <select id="executeDynamicSql" resultType="java.util.HashMap">
+        ${sqlTemplate}
+    </select>
+
+    <!-- 查询所有启用的查询配置列表（不包含SQL模板-->
+    <resultMap id="QueryConfigListResultMap" type="com.iwhalecloud.byai.manager.dto.operations.QueryConfigListDTO">
+        <result column="query_code" property="queryCode" />
+        <result column="name" property="queryName" />
+        <result column="dimension_fields" property="dimensionFields" />
+        <result column="measure_fields" property="measureFields" />
+        <result column="condition_fields" property="conditionFields" />
+    </resultMap>
+
+    <select id="selectAllConfigList" resultMap="QueryConfigListResultMap">
+        SELECT
+            query_code,
+            name,
+            dimension_fields,
+            measure_fields,
+            condition_fields
+        FROM query_config
+        WHERE status = 1
+        ORDER BY query_code
+    </select>
+
+</mapper>

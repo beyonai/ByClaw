@@ -1,0 +1,32 @@
+.pinBadge {
+  display: inline-block;
+  font-size: 12px;
+  color: #a4aab2;
+  vertical-align: text-top;
+  margin-left: 4px;
+}
+
+.nameText {
+  display: inline-block;
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selectable {
+  :global {
+    .@{antPrefix}-tree-treenode,
+    .@{antPrefix}-tree-node-content-wrapper {
+      cursor: pointer;
+    }
+  }
+}
+.notselectable {
+  :global {
+    .@{antPrefix}-tree-treenode,
+    .@{antPrefix}-tree-node-content-wrapper {
+      cursor: default;
+    }
+  }
+}

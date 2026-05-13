@@ -1,0 +1,71 @@
+.tipsWrap {
+  padding: 9px 16px;
+  border-radius: 0 0 12px 12px;
+  border: 1px solid #ced3d9;
+  border-top: none;
+  line-height: 20px;
+
+  + p {
+    line-height: 38px;
+    margin: 4px 0;
+  }
+}
+
+.tips {
+  color: #40454d;
+}
+
+.selectWrap {
+  :global {
+    .@{antPrefix}-select-selector {
+      border-radius: 12px 12px 0 0;
+      padding: 0 !important;
+    }
+
+    .@{antPrefix}-select-arrow {
+      right: 0;
+    }
+  }
+}
+
+.shareWrap {
+  textarea {
+    height: 80px;
+    margin-bottom: 42px;
+  }
+
+  :global {
+    .@{antPrefix}-modal-title {
+      margin-bottom: 20px;
+    }
+  }
+}
+
+.addIcon {
+  color: #40454d;
+  width: 48px;
+  height: 48px;
+  font-size: 20px;
+  cursor: pointer;
+  pointer-events: all;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.selectListContainer {
+  display: flex;
+  align-items: center;
+  border: 1px solid #ced3d9;
+  border-radius: 12px 12px 0 0;
+
+  .selectList {
+    border-right: 1px solid #ced3d9;
+    flex: 1;
+    max-height: 128px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    align-content: flex-start;
+  }
+}

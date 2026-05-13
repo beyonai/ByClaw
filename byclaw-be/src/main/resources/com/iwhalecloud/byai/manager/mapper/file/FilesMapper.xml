@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.file.FilesMapper">
+
+    <!-- 文件上传响应DTO结果映射 -->
+    <resultMap id="UploadFilesRespDtoResultMap" type="com.iwhalecloud.byai.manager.dto.file.UploadFilesRespDto">
+        <id column="file_id" property="fileId" />
+        <result column="file_name" property="fileName" />
+        <result column="file_url" property="fileUrl" />
+        <result column="tags" property="tags" />
+        <result column="upload_date" property="uploadDate" jdbcType="TIMESTAMP" />
+        <result column="dataset_id" property="datasetId" />
+    </resultMap>
+
+    <!-- 根据聊天ID和标签查询文件列表 -->
+    <select id="selectByMatchTags" resultMap="UploadFilesRespDtoResultMap">
+        SELECT
+            file_id,
+            file_name,
+            file_url,
+            tags,
+            upload_date,
+            dataset_id
+        FROM byai_files
+        WHERE chat_id = #{chatId}
+        <if test="tags != null and tags != ''">
+            <choose>
+                <when test="matchMode != null and matchMode == 'any'">
+                    AND string_to_array(tags, ',') <![CDATA[ && ]]> string_to_array(#{tags}, ',')
+                </when>
+                <otherwise>
+                    AND string_to_array(tags, ',') <![CDATA[ @> ]]> string_to_array(#{tags}, ',')
+                </otherwise>
+            </choose>
+        </if>
+    </select>
+
+    <!-- 批量插入文件（联网搜索归档等场景，仅插入常用字段；兼容 MySQL、PostgreSQL） -->
+    <insert id="insertBatch">
+        INSERT INTO byai_files (
+            file_id,
+            file_name,
+            content_type,
+            length,
+            file_url,
+            file_type,
+            file_md5,
+            file_system_type,
+            upload_date,
+            create_by
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.fileId,jdbcType=BIGINT},
+                #{item.fileName,jdbcType=VARCHAR},
+                #{item.contentType,jdbcType=VARCHAR},
+                #{item.length,jdbcType=BIGINT},
+                #{item.fileUrl,jdbcType=VARCHAR},
+                #{item.fileType,jdbcType=VARCHAR},
+                #{item.fileMd5,jdbcType=VARCHAR},
+                #{item.fileSystemType,jdbcType=VARCHAR},
+                #{item.uploadDate,jdbcType=TIMESTAMP},
+                #{item.createBy,jdbcType=BIGINT}
+            )
+        </foreach>
+    </insert>
+
+</mapper>

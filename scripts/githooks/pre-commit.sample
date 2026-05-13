@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+# Copy to .git/hooks/pre-commit and adjust commands for your machine.
+
+set -e
+ROOT=$(git rev-parse --show-toplevel)
+
+if [ -f "$ROOT/byclaw-fe/package.json" ]; then
+  (cd "$ROOT/byclaw-fe" && pnpm run lint-staged 2>/dev/null) || true
+fi
+
+exit 0

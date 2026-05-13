@@ -1,0 +1,464 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.message.ByaiMessageRelMapper">
+
+    <!-- 通用字段映射 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.common.message.entity.ByaiMessageRel">
+        <id column="id" property="id" />
+        <result column="ask_access_terminal" property="askAccessTerminal" />
+        <result column="ask_content" property="askContent" />
+        <result column="ask_content_tags" property="askContentTags" />
+        <result column="ask_content_vector" property="askContentVector" />
+        <result column="ask_msg_id" property="askMsgId" />
+        <result column="ask_obj_id" property="askObjId" />
+        <result column="ask_obj_type" property="askObjType" />
+        <result column="ask_time" property="askTime" />
+        <result column="com_acct_id" property="comAcctId" />
+        <result column="create_time" property="createTime" />
+        <result column="feedback_content" property="feedbackContent" />
+        <result column="feedback_label" property="feedbackLabel" />
+        <result column="feedback_score" property="feedbackScore" />
+        <result column="feedback_time" property="feedbackTime" />
+        <result column="feedback_type" property="feedbackType" />
+        <result column="first_text_duration" property="firstTextDuration" />
+        <result column="input_token_count" property="inputTokenCount" />
+        <result column="output_token_count" property="outputTokenCount" />
+        <result column="output_token_per_second" property="outputTokenPerSecond" />
+        <result column="project_id" property="projectId" />
+        <result column="rel_id" property="relId" />
+        <result column="request_status" property="requestStatus" />
+        <result column="res_access_terminal" property="resAccessTerminal" />
+        <result column="res_content" property="resContent" />
+        <result column="res_content_tags" property="resContentTags" />
+        <result column="res_content_vector" property="resContentVector" />
+        <result column="res_msg_id" property="resMsgId" />
+        <result column="res_obj_id" property="resObjId" />
+        <result column="res_obj_type" property="resObjType" />
+        <result column="res_time" property="resTime" />
+        <result column="session_id" property="sessionId" />
+        <result column="task_due_time" property="taskDueTime" />
+        <result column="task_id" property="taskId" />
+
+        <result column="doc_ask_access_terminal" property="docAskAccessTerminal" />
+        <result column="doc_ask_content" property="docAskContent" />
+        <result column="doc_ask_msg_id" property="docAskMsgId" />
+        <result column="doc_ask_obj_id" property="docAskObjId" />
+        <result column="doc_ask_obj_type" property="docAskObjType" />
+        <result column="doc_ask_time" property="docAskTime" />
+        <result column="doc_com_acct_id" property="docComAcctId" />
+        <result column="doc_create_time" property="docCreateTime" />
+        <result column="doc_feedback_type" property="docFeedbackType" />
+        <result column="doc_first_text_duration" property="docFirstTextDuration" />
+        <result column="doc_input_token_count" property="docInputTokenCount" />
+        <result column="doc_output_token_count" property="docOutputTokenCount" />
+        <result column="doc_output_token_per_second" property="docOutputTokenPerSecond" />
+        <result column="doc_project_id" property="docProjectId" />
+        <result column="doc_request_status" property="docRequestStatus" />
+        <result column="doc_res_access_terminal" property="docResAccessTerminal" />
+        <result column="doc_res_content" property="docResContent" />
+        <result column="doc_res_msg_id" property="docResMsgId" />
+        <result column="doc_res_obj_id" property="docResObjId" />
+        <result column="doc_res_obj_type" property="docResObjType" />
+        <result column="doc_res_time" property="docResTime" />
+        <result column="doc_session_id" property="docSessionId" />
+        <result column="doc_task_due_time" property="docTaskDueTime" />
+        <result column="doc_task_id" property="docTaskId" />
+    </resultMap>
+
+    <!-- 通用查询列 -->
+    <sql id="Base_Column_List">
+        id, ask_access_terminal, ask_content, ask_content_tags, ask_content_vector,
+        ask_msg_id, ask_obj_id, ask_obj_type, ask_time, com_acct_id, create_time,
+        feedback_content, feedback_label, feedback_score, feedback_time, feedback_type,
+        first_text_duration, input_token_count, output_token_count, output_token_per_second,
+        project_id, rel_id, request_status, res_access_terminal, res_content, res_content_tags,
+        res_content_vector, res_msg_id, res_obj_id, res_obj_type, res_time, session_id,
+        task_due_time, task_id,
+        doc_ask_access_terminal, doc_ask_content, doc_ask_msg_id, doc_ask_obj_id, doc_ask_obj_type,
+        doc_ask_time, doc_com_acct_id, doc_create_time, doc_feedback_type, doc_first_text_duration,
+        doc_input_token_count, doc_output_token_count, doc_output_token_per_second, doc_project_id,
+        doc_request_status, doc_res_access_terminal, doc_res_content, doc_res_msg_id, doc_res_obj_id,
+        doc_res_obj_type, doc_res_time, doc_session_id, doc_task_due_time, doc_task_id
+    </sql>
+
+    <select id="selectByRelId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message_relobj
+        WHERE rel_id = #{relId}
+        LIMIT 1
+    </select>
+
+    <insert id="insertOne">
+        INSERT INTO byai_message_relobj (
+            rel_id, com_acct_id, ask_time, ask_obj_id, ask_access_terminal, task_due_time,
+            ask_msg_id, ask_obj_type, res_obj_type, res_time, res_content, res_obj_id,
+            create_time, res_msg_id, res_access_terminal, project_id, task_id,
+            request_status, ask_content, ask_content_tags, res_content_tags,
+            ask_content_vector, res_content_vector, input_token_count, output_token_count,
+            output_token_per_second, first_text_duration, feedback_type, feedback_time,
+            feedback_label, feedback_score, feedback_content, session_id
+        ) VALUES (
+            #{item.relId,jdbcType=BIGINT},
+            #{item.comAcctId,jdbcType=BIGINT},
+            #{item.askTime,jdbcType=TIMESTAMP},
+            #{item.askObjId,jdbcType=BIGINT},
+            #{item.askAccessTerminal,jdbcType=VARCHAR},
+            #{item.taskDueTime},
+            #{item.askMsgId,jdbcType=BIGINT},
+            #{item.askObjType,jdbcType=VARCHAR},
+            #{item.resObjType,jdbcType=VARCHAR},
+            #{item.resTime,jdbcType=VARCHAR},
+            #{item.resContent,jdbcType=VARCHAR},
+            #{item.resObjId,jdbcType=BIGINT},
+            #{item.createTime,jdbcType=TIMESTAMP},
+            #{item.resMsgId,jdbcType=BIGINT},
+            #{item.resAccessTerminal,jdbcType=VARCHAR},
+            #{item.projectId,jdbcType=BIGINT},
+            #{item.taskId,jdbcType=BIGINT},
+            #{item.requestStatus,jdbcType=INTEGER},
+            #{item.askContent,jdbcType=VARCHAR},
+            #{item.askContentTags,jdbcType=VARCHAR},
+            #{item.resContentTags,jdbcType=VARCHAR},
+            #{item.askContentVector,jdbcType=VARCHAR},
+            #{item.resContentVector,jdbcType=VARCHAR},
+            #{item.inputTokenCount},
+            #{item.outputTokenCount},
+            #{item.outputTokenPerSecond},
+            #{item.firstTextDuration},
+            #{item.feedbackType,jdbcType=VARCHAR},
+            #{item.feedbackTime,jdbcType=VARCHAR},
+            #{item.feedbackLabel,jdbcType=VARCHAR},
+            #{item.feedbackScore},
+            #{item.feedbackContent,jdbcType=VARCHAR},
+            #{item.sessionId,jdbcType=BIGINT}
+        )
+    </insert>
+
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO byai_message_relobj (
+            rel_id, com_acct_id, ask_time, ask_obj_id, ask_access_terminal, task_due_time,
+            ask_msg_id, ask_obj_type, res_obj_type, res_time, res_content, res_obj_id,
+            create_time, res_msg_id, res_access_terminal, project_id, task_id,
+            request_status, ask_content, ask_content_tags, res_content_tags,
+            ask_content_vector, res_content_vector, input_token_count, output_token_count,
+            output_token_per_second, first_text_duration, feedback_type, feedback_time,
+            feedback_label, feedback_score, feedback_content, session_id
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+            #{item.relId,jdbcType=BIGINT},
+            #{item.comAcctId,jdbcType=BIGINT},
+            #{item.askTime,jdbcType=TIMESTAMP},
+            #{item.askObjId,jdbcType=BIGINT},
+            #{item.askAccessTerminal,jdbcType=VARCHAR},
+            #{item.taskDueTime},
+            #{item.askMsgId,jdbcType=BIGINT},
+            #{item.askObjType,jdbcType=VARCHAR},
+            #{item.resObjType,jdbcType=VARCHAR},
+            #{item.resTime,jdbcType=VARCHAR},
+            #{item.resContent,jdbcType=VARCHAR},
+            #{item.resObjId,jdbcType=BIGINT},
+            #{item.createTime,jdbcType=TIMESTAMP},
+            #{item.resMsgId,jdbcType=BIGINT},
+            #{item.resAccessTerminal,jdbcType=VARCHAR},
+            #{item.projectId,jdbcType=BIGINT},
+            #{item.taskId,jdbcType=BIGINT},
+            #{item.requestStatus,jdbcType=INTEGER},
+            #{item.askContent,jdbcType=VARCHAR},
+            #{item.askContentTags,jdbcType=VARCHAR},
+            #{item.resContentTags,jdbcType=VARCHAR},
+            #{item.askContentVector,jdbcType=VARCHAR},
+            #{item.resContentVector,jdbcType=VARCHAR},
+            #{item.inputTokenCount},
+            #{item.outputTokenCount},
+            #{item.outputTokenPerSecond},
+            #{item.firstTextDuration},
+            #{item.feedbackType,jdbcType=VARCHAR},
+            #{item.feedbackTime,jdbcType=VARCHAR},
+            #{item.feedbackLabel,jdbcType=VARCHAR},
+            #{item.feedbackScore},
+            #{item.feedbackContent,jdbcType=VARCHAR},
+            #{item.sessionId,jdbcType=BIGINT}
+            )
+        </foreach>
+    </insert>
+
+    <delete id="deleteByRelId">
+        DELETE FROM byai_message_relobj
+        WHERE rel_id = #{relId}
+    </delete>
+
+    <update id="updateByRelId">
+        UPDATE byai_message_relobj
+        <set>
+            <if test="item.comAcctId != null">com_acct_id = #{item.comAcctId},</if>
+            <if test="item.askTime != null">ask_time = #{item.askTime},</if>
+            <if test="item.askObjId != null">ask_obj_id = #{item.askObjId},</if>
+            <if test="item.askAccessTerminal != null">ask_access_terminal = #{item.askAccessTerminal},</if>
+            <if test="item.taskDueTime != null">task_due_time = #{item.taskDueTime},</if>
+            <if test="item.askMsgId != null">ask_msg_id = #{item.askMsgId},</if>
+            <if test="item.askObjType != null">ask_obj_type = #{item.askObjType},</if>
+            <if test="item.resObjType != null">res_obj_type = #{item.resObjType},</if>
+            <if test="item.resTime != null">res_time = #{item.resTime},</if>
+            <if test="item.resContent != null">res_content = #{item.resContent},</if>
+            <if test="item.resObjId != null">res_obj_id = #{item.resObjId},</if>
+            <if test="item.createTime != null">create_time = #{item.createTime},</if>
+            <if test="item.resMsgId != null">res_msg_id = #{item.resMsgId},</if>
+            <if test="item.resAccessTerminal != null">res_access_terminal = #{item.resAccessTerminal},</if>
+            <if test="item.projectId != null">project_id = #{item.projectId},</if>
+            <if test="item.taskId != null">task_id = #{item.taskId},</if>
+            <if test="item.requestStatus != null">request_status = #{item.requestStatus},</if>
+            <if test="item.askContent != null">ask_content = #{item.askContent},</if>
+            <if test="item.askContentTags != null">ask_content_tags = #{item.askContentTags},</if>
+            <if test="item.resContentTags != null">res_content_tags = #{item.resContentTags},</if>
+            <if test="item.inputTokenCount != null">input_token_count = #{item.inputTokenCount},</if>
+            <if test="item.outputTokenCount != null">output_token_count = #{item.outputTokenCount},</if>
+            <if test="item.outputTokenPerSecond != null">output_token_per_second = #{item.outputTokenPerSecond},</if>
+            <if test="item.firstTextDuration != null">first_text_duration = #{item.firstTextDuration},</if>
+            <if test="item.feedbackType != null">feedback_type = #{item.feedbackType},</if>
+            <if test="item.feedbackTime != null">feedback_time = #{item.feedbackTime},</if>
+            <if test="item.feedbackLabel != null">feedback_label = #{item.feedbackLabel},</if>
+            <if test="item.feedbackScore != null">feedback_score = #{item.feedbackScore},</if>
+            <if test="item.feedbackContent != null">feedback_content = #{item.feedbackContent},</if>
+            <if test="item.sessionId != null">session_id = #{item.sessionId},</if>
+        </set>
+        WHERE rel_id = #{item.relId}
+    </update>
+
+    <update id="updateFeedbackByRelId">
+        UPDATE byai_message_relobj
+        SET
+            feedback_type = #{item.feedbackType,jdbcType=VARCHAR},
+            feedback_time = #{item.feedbackTime,jdbcType=TIMESTAMP},
+            feedback_label = #{item.feedbackLabel,jdbcType=VARCHAR},
+            feedback_score = #{item.feedbackScore},
+            feedback_content = #{item.feedbackContent,jdbcType=VARCHAR}
+        WHERE rel_id = #{item.relId}
+    </update>
+
+    <update id="updateFeedbackByMessagePair">
+        UPDATE byai_message_relobj
+        SET
+            feedback_type = #{item.feedbackType,jdbcType=VARCHAR},
+            feedback_time = #{item.feedbackTime,jdbcType=TIMESTAMP},
+            feedback_label = #{item.feedbackLabel,jdbcType=VARCHAR},
+            feedback_score = #{item.feedbackScore},
+            feedback_content = #{item.feedbackContent,jdbcType=VARCHAR}
+        WHERE ask_msg_id = #{item.askMsgId}
+          AND res_msg_id = #{item.resMsgId}
+    </update>
+
+    <select id="selectByQo" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message_relobj
+        <where>
+            <if test="qo.messageId != null">
+                AND message_id = #{qo.messageId}
+            </if>
+            <if test="qo.taskIds != null and qo.taskIds.size() > 0">
+                AND task_id IN
+                <foreach collection="qo.taskIds" item="tid" open="(" separator="," close=")">
+                    #{tid}
+                </foreach>
+            </if>
+            <if test="qo.askMsgIds != null and qo.askMsgIds.size() > 0">
+                AND ask_msg_id IN
+                <foreach collection="qo.askMsgIds" item="aid" open="(" separator="," close=")">
+                    #{aid}
+                </foreach>
+            </if>
+            <if test="qo.resMsgIds != null and qo.resMsgIds.size() > 0">
+                AND res_msg_id IN
+                <foreach collection="qo.resMsgIds" item="rid" open="(" separator="," close=")">
+                    #{rid}
+                </foreach>
+            </if>
+        </where>
+        ORDER BY create_time DESC
+    </select>
+
+    <sql id="SearchMemWhere">
+        <where>
+            <if test="req.isAllNotSelect == false and req.relIdList != null and req.relIdList.size() > 0">
+                AND rel_id IN
+                <foreach collection="req.relIdList" item="id" open="(" separator="," close=")">
+                    #{id}
+                </foreach>
+            </if>
+            <if test="!(req.isAllNotSelect == false and req.relIdList != null and req.relIdList.size() > 0)">
+                <if test="req.taskIds != null and req.taskIds.size() > 0">
+                    AND task_id IN
+                    <foreach collection="req.taskIds" item="item" open="(" separator="," close=")">
+                        #{item}
+                    </foreach>
+                </if>
+                <if test="req.sessionIds != null and req.sessionIds.size() > 0">
+                    AND session_id IN
+                    <foreach collection="req.sessionIds" item="item" open="(" separator="," close=")">
+                        #{item}
+                    </foreach>
+                </if>
+                <if test="req.projectIds != null and req.projectIds.size() > 0">
+                    AND project_id IN
+                    <foreach collection="req.projectIds" item="item" open="(" separator="," close=")">
+                        #{item}
+                    </foreach>
+                </if>
+                <if test="req.comAcctIds != null and req.comAcctIds.size() > 0">
+                    AND com_acct_id IN
+                    <foreach collection="req.comAcctIds" item="item" open="(" separator="," close=")">
+                        #{item}
+                    </foreach>
+                </if>
+                <if test="req.askMsgIds != null and req.askMsgIds.size() > 0">
+                    AND ask_msg_id IN
+                    <foreach collection="req.askMsgIds" item="item" open="(" separator="," close=")">
+                        #{item}
+                    </foreach>
+                </if>
+                <if test="req.resMsgIds != null and req.resMsgIds.size() > 0">
+                    AND res_msg_id IN
+                    <foreach collection="req.resMsgIds" item="item" open="(" separator="," close=")">
+                        #{item}
+                    </foreach>
+                </if>
+                <if test="req.askObjIds != null and req.askObjIds.size() > 0">
+                    AND ask_obj_id IN
+                    <foreach collection="req.askObjIds" item="item" open="(" separator="," close=")">
+                        #{item}
+                    </foreach>
+                </if>
+                <if test="req.askObjTypes != null and req.askObjTypes.size() > 0">
+                    AND ask_obj_type IN
+                    <foreach collection="req.askObjTypes" item="item" open="(" separator="," close=")">
+                        #{item}
+                    </foreach>
+                </if>
+                <if test="req.askAccessTerminals != null and req.askAccessTerminals.size() > 0">
+                    AND ask_access_terminal IN
+                    <foreach collection="req.askAccessTerminals" item="item" open="(" separator="," close=")">
+                        #{item}
+                    </foreach>
+                </if>
+                <if test="req.resObjIds != null and req.resObjIds.size() > 0">
+                    AND res_obj_id IN
+                    <foreach collection="req.resObjIds" item="item" open="(" separator="," close=")">
+                        #{item}
+                    </foreach>
+                </if>
+                <if test="req.resObjTypes != null and req.resObjTypes.size() > 0">
+                    AND res_obj_type IN
+                    <foreach collection="req.resObjTypes" item="item" open="(" separator="," close=")">
+                        #{item}
+                    </foreach>
+                </if>
+                <if test="req.resAccessTerminals != null and req.resAccessTerminals.size() > 0">
+                    AND res_access_terminal IN
+                    <foreach collection="req.resAccessTerminals" item="item" open="(" separator="," close=")">
+                        #{item}
+                    </foreach>
+                </if>
+                <if test="req.askContent != null and req.askContent != ''">
+                    AND ask_content LIKE CONCAT('%', #{req.askContent}, '%')
+                </if>
+                <if test="req.resContent != null and req.resContent != ''">
+                    AND res_content LIKE CONCAT('%', #{req.resContent}, '%')
+                </if>
+                <if test="req.feedbackType != null and req.feedbackType != ''">
+                    AND feedback_type = #{req.feedbackType}
+                </if>
+                <if test="req.feedbackLabels != null and req.feedbackLabels.size() > 0">
+                    AND (
+                    <foreach collection="req.feedbackLabels" item="label" separator=" OR ">
+                        feedback_label LIKE CONCAT('%', #{label}, '%')
+                    </foreach>
+                    )
+                </if>
+                <if test="req.requestStatuses != null and req.requestStatuses.size() > 0">
+                    AND request_status IN
+                    <foreach collection="req.requestStatuses" item="item" open="(" separator="," close=")">
+                        #{item}
+                    </foreach>
+                </if>
+                <if test="req.feedbackScoreRange != null and req.feedbackScoreRange.size() >= 2">
+                    AND feedback_score <![CDATA[ >= ]]> #{req.feedbackScoreRange[0]}
+                    AND feedback_score <![CDATA[ <= ]]> #{req.feedbackScoreRange[1]}
+                </if>
+                <if test="req.taskDueTimeRange != null and req.taskDueTimeRange.size() >= 2">
+                    AND task_due_time <![CDATA[ >= ]]> #{req.taskDueTimeRange[0]}
+                    AND task_due_time <![CDATA[ <= ]]> #{req.taskDueTimeRange[1]}
+                </if>
+                <if test="req.askTimeRange != null and req.askTimeRange.size() >= 2">
+                    AND ask_time BETWEEN #{req.askTimeRange[0]} AND #{req.askTimeRange[1]}
+                </if>
+                <if test="req.resTimeRange != null and req.resTimeRange.size() >= 2">
+                    AND res_time BETWEEN #{req.resTimeRange[0]} AND #{req.resTimeRange[1]}
+                </if>
+                <if test="req.feedbackTimeRange != null and req.feedbackTimeRange.size() >= 2">
+                    AND feedback_time BETWEEN #{req.feedbackTimeRange[0]} AND #{req.feedbackTimeRange[1]}
+                </if>
+                <if test="req.createTimeRange != null and req.createTimeRange.size() >= 2">
+                    AND create_time BETWEEN #{req.createTimeRange[0]} AND #{req.createTimeRange[1]}
+                </if>
+                <if test="req.keyword != null and req.keyword != ''">
+                    AND (ask_content LIKE CONCAT('%', #{req.keyword}, '%')
+                      OR res_content LIKE CONCAT('%', #{req.keyword}, '%'))
+                </if>
+            </if>
+        </where>
+    </sql>
+
+    <select id="countSearchMem" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM byai_message_relobj
+        <include refid="SearchMemWhere" />
+    </select>
+
+    <select id="selectSearchMemPage" resultMap="BaseResultMap">
+        SELECT
+            rel_id,
+            task_id,
+            project_id,
+            com_acct_id,
+            session_id,
+            ask_msg_id,
+            ask_content,
+            ask_obj_type,
+            ask_obj_id,
+            ask_access_terminal,
+            ask_time,
+            ask_content_tags,
+            res_msg_id,
+            res_content,
+            res_obj_type,
+            res_obj_id,
+            res_access_terminal,
+            res_time,
+            res_content_tags,
+            feedback_type,
+            feedback_score,
+            feedback_content,
+            feedback_time,
+            feedback_label,
+            request_status,
+            task_due_time,
+            first_text_duration,
+            create_time
+        FROM byai_message_relobj
+        <include refid="SearchMemWhere" />
+        ORDER BY
+        <choose>
+            <when test="req.sortField == 'askTime'">ask_time</when>
+            <when test="req.sortField == 'resTime'">res_time</when>
+            <when test="req.sortField == 'feedbackTime'">feedback_time</when>
+            <when test="req.sortField == 'taskDueTime'">task_due_time</when>
+            <when test="req.sortField == 'feedbackScore'">feedback_score</when>
+            <otherwise>create_time</otherwise>
+        </choose>
+        <choose>
+            <when test="req.sortDirection != null and (req.sortDirection == 'ASC' or req.sortDirection == 'asc')">ASC</when>
+            <otherwise>DESC</otherwise>
+        </choose>
+    </select>
+
+</mapper>

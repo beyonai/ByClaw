@@ -1,0 +1,70 @@
+@offsetBottom: 40px;
+
+.tipsBlock {
+  position: absolute;
+  bottom: calc(100% - @offsetBottom);
+  left: 0;
+  z-index: 100;
+  display: block;
+  width: 100%;
+  margin: 0 auto;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 100%);
+  border-radius: 12px;
+  box-shadow: 4px 0 20px 0 rgba(0, 0, 0, 6%);
+}
+
+.tipsBlockContent {
+  position: relative;
+  min-height: 100px;
+  max-height: 50vh;
+  // overflow-y: auto;
+  // overflow-x: hidden;
+  padding: 24px 12px 12px;
+  // margin-bottom: @offsetBottom;
+  .closeBtn {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    color: var(--beyond-color-text-quaternary);
+    font-size: 16px;
+  }
+}
+
+.rectifyQuestionTips {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  z-index: 99;
+  width: 100%;
+  height: 100%;
+  color: #fff;
+  font-size: 14px;
+  letter-spacing: 1px;
+  background-color: rgba(255, 255, 255, 100%);
+  border-radius: 20px;
+}
+
+.smoothHeight {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s;
+  will-change: max-height;
+
+  &.smoothHeightOpen {
+    max-height: max-content;
+    overflow: hidden auto;
+    border: 1px solid var(--beyond-color-border);
+  }
+}
+
+.smoothOpacity {
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.3s;
+
+  &.smoothOpacityVisible {
+    z-index: 9;
+    opacity: 0.5;
+  }
+}

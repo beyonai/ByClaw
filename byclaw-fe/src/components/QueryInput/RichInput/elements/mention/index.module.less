@@ -1,0 +1,74 @@
+.mention {
+  font-weight: 500;
+  color: var(~'--@{antPrefix}-color-primary');
+  background: var(~'--@{antPrefix}-color-primary-bg');
+  border-radius: 6px;
+  padding: 0 4px;
+  margin: 0 8px;
+  display: inline-block;
+  height: 28px;
+  line-height: 28px;
+  position: relative;
+
+  &:global(.default-agent) {
+    cursor: pointer;
+    background: initial;
+    margin-left: 0;
+  }
+
+  &:global(.default-agent):hover {
+    background: var(~'--@{antPrefix}-color-primary-bg') !important;
+
+    .deleteIcon {
+      opacity: 1;
+    }
+  }
+}
+
+.deleteIcon {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  font-size: 10px;
+  color: var(~'--@{antPrefix}-color-text', #000);
+  opacity: 0;
+  transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.name {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  margin-right: 4px;
+  vertical-align: text-top;
+  white-space: nowrap;
+  color: #fff;
+  background: var(~'--@{antPrefix}-color-primary-hover', #4080ff);
+
+  & > span {
+    font-size: 12px;
+    transform: scale(0.6);
+  }
+}
+
+.aiMark {
+  height: 18px;
+  line-height: 18px;
+  display: inline-block;
+  padding: 0 4px;
+  font-size: 12px;
+  border-radius: 4px;
+  background: #504bff1a;
+  color: #504bff;
+  font-weight: 500;
+  margin-left: 6px;
+  vertical-align: text-bottom;
+
+  & > span {
+    background: linear-gradient(0deg, #52acff 0%, #725cfa 100%);
+    background-clip: text;
+  }
+}

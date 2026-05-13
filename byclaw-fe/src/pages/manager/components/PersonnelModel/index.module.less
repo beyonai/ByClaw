@@ -1,0 +1,242 @@
+/** 左侧列表滚动容器：整段 Checkbox + 无限滚动区域在此区域内纵向滚动 */
+.scrollListWrap {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  -webkit-overflow-scrolling: touch;
+}
+
+/** 内层 Checkbox.Group 仅纵向排布，由外层 scrollListWrap 承担滚动 */
+.checkboxGroupInner {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.content {
+  width: 100%;
+  height: 560px;
+  display: flex;
+
+  .left {
+    height: 100%;
+    min-height: 0;
+    width: 50%;
+    border-right: 1px solid #e6ebf0;
+    padding: 0 24px;
+    display: flex;
+    flex-direction: column;
+
+    .header {
+      color: #1c1f23;
+      font-family: PingFang SC;
+      font-size: 18px;
+      font-style: normal;
+      font-weight: 500;
+      line-height: 26px;
+      padding: 19px 0px;
+    }
+
+    .list {
+      flex: 1;
+      height: 0px;
+      min-height: 0;
+      min-width: 0;
+      padding-bottom: 10px;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      overflow-y: hidden;
+
+      &:not(&.isSearch) {
+        :global {
+          .infinite-scroll-component__outerdiv {
+            width: 100%;
+            min-width: 0;
+          }
+
+          .infinite-scroll-component {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+          }
+        }
+      }
+
+      &.isSearch {
+        overflow-x: hidden;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .searchTip {
+        margin-top: 8;
+        margin-bottom: 60px;
+        color: #707680;
+        font-size: 13px;
+      }
+
+      .groupTitle {
+        color: #707680;
+        font-size: 14px;
+      }
+    }
+
+    :global {
+      .@{antPrefix}-checkbox-group {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .@{antPrefix}-checkbox-wrapper + .@{antPrefix}-checkbox-wrapper {
+        margin-left: 0px !important;
+      }
+
+      .@{antPrefix}-checkbox-wrapper {
+        padding: 8px;
+        border-radius: 10px;
+      }
+
+      .@{antPrefix}-checkbox-wrapper:hover {
+        background-color: #f2f6fa;
+      }
+
+      .@{antPrefix}-checkbox + span {
+        flex: 1;
+      }
+
+      .@{antPrefix}-btn-link {
+        width: fit-content;
+      }
+
+      .@{antPrefix}-divider {
+        margin: 2px 0;
+      }
+    }
+
+    .listItem {
+      display: flex;
+      align-items: center;
+      column-gap: 8px;
+
+      .img {
+        border-radius: 6px;
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: #165dff;
+        color: #ffffff;
+        font-size: 10px;
+      }
+    }
+  }
+
+  .right {
+    height: 100%;
+    flex: 1;
+    padding: 20px 24px 24px;
+    display: flex;
+    flex-direction: column;
+
+    .header {
+      color: #40454d;
+      font-family: PingFang SC;
+      font-size: 16px;
+      font-style: normal;
+      font-weight: 400;
+      line-height: 24px;
+      margin-bottom: 28px;
+    }
+
+    .selectedList {
+      flex: 1;
+      display: flex;
+      flex-wrap: wrap;
+      height: 0px;
+      min-width: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
+      gap: 8px;
+      align-items: flex-start;
+      align-content: flex-start;
+    }
+
+    .listItem {
+      display: flex;
+      align-items: center;
+      column-gap: 8px;
+      background-color: #f2f6fa;
+      padding: 5px 6px;
+      border-radius: 6px;
+
+      .img {
+        border-radius: 6px;
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: #165dff;
+        color: #ffffff;
+        font-size: 10px;
+      }
+
+      .close {
+        color: #a4aab2;
+        font-size: 10px;
+        cursor: pointer;
+      }
+    }
+
+    .btn {
+      margin-top: 8px;
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      column-gap: 8px;
+    }
+  }
+
+  :global {
+    .@{antPrefix}-tree {
+      .@{antPrefix}-tree-node-content-wrapper {
+        // display: flex;
+        // align-items: center;
+        // min-height: 32px;
+        // padding: 0 8px;
+        // border-radius: 4px;
+        color: #475366;
+
+        &:hover {
+          background: transparent;
+        }
+
+        // &.@{antPrefix}-tree-node-selected {
+        // }
+      }
+
+      .@{antPrefix}-tree-treenode-selected {
+        background: #f5f5f5;
+      }
+
+      .@{antPrefix}-tree-node-content-wrapper.@{antPrefix}-tree-node-selected {
+        font-weight: 400 !important;
+        color: #0d111a !important;
+      }
+
+      .@{antPrefix}-tree-treenode:hover {
+        background: #f5f5f5;
+      }
+    }
+  }
+}

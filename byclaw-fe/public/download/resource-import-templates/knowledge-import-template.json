@@ -1,0 +1,37 @@
+{
+  "systemCode": "BYAI",
+  "resourceCode": "100001",
+  "resourceName": "示例知识库",
+  "resourceDesc": "用于导入的知识库模板，请按实际知识库信息修改。",
+  "resourceType": "external",
+  "ownerType": "enterprise",
+  "resourceCatalogSub": "KG_DOC",
+  "resourceBizType": "KG_DOC",
+  "version": "1.0.0",
+  "domainName": "示例知识库服务",
+  "domainURL": "https://api.example.com/knowledge",
+  "resourceService": [
+    {
+      "serviceCode": "search_knowledge",
+      "serviceName": "知识检索",
+      "serviceDesc": "示例知识库检索接口",
+      "method": "POST",
+      "path": "/v1/knowledge/search",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json",
+          "required": true
+        }
+      ],
+      "bodyParams": [
+        {
+          "name": "query",
+          "type": "string",
+          "required": true,
+          "description": "检索问题"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.permissiongroup.AuthorizedObjectDataPermissionMapper">
+
+    <!-- 授权对象数据权限结果映射 -->
+    <resultMap id="AuthorizedObjectDataPermissionResultMap" type="com.iwhalecloud.byai.manager.entity.permissiongroup.AuthorizedObjectDataPermission">
+        <id column="id" property="id"/>
+        <result column="permission_group_id" property="permissionGroupId"/>
+        <result column="user_id" property="userId"/>
+        <result column="permissions" property="permissions"/>
+        <result column="status" property="status"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <!-- 授权对象数据权限VO结果映射 -->
+    <resultMap id="AuthorizedObjectDataPermissionVOResultMap" type="com.iwhalecloud.byai.manager.vo.permissiongroup.AuthorizedObjectDataPermissionVO">
+        <result column="id" property="id"/>
+        <result column="permission_group_id" property="permissionGroupId"/>
+        <result column="user_id" property="userId"/>
+        <result column="object_type" property="objectType"/>
+        <result column="object_name" property="objectName"/>
+        <result column="object_code" property="objectCode"/>
+        <result column="permissions" property="permissions"/>
+        <result column="status" property="status"/>
+    </resultMap>
+
+    <!-- 通用查询列 -->
+    <sql id="Base_Column_List">
+        aodp.id, aodp.permission_group_id, aodp.user_id, aodp.permissions, aodp.status,
+        aodp.create_by, aodp.create_time, aodp.update_by, aodp.update_time
+    </sql>
+
+    <!-- 授权对象查询列 -->
+    <sql id="Authorized_Object_Column_List">
+        ao.object_type, ao.object_name, ao.object_id as object_code
+    </sql>
+
+    <!-- 根据权限组ID查询授权对象数据权限列表 -->
+    <select id="selectByPermissionGroupId" resultMap="AuthorizedObjectDataPermissionVOResultMap">
+        SELECT
+            <include refid="Base_Column_List"/>,
+            <include refid="Authorized_Object_Column_List"/>
+        FROM authorized_object_data_permissions aodp
+        INNER JOIN authorized_objects ao ON aodp.user_id = ao.id
+        WHERE aodp.permission_group_id = #{permissionGroupId}
+        AND aodp.status = 'active'
+        ORDER BY ao.object_type, ao.object_name
+    </select>
+
+    <!-- 根据权限组ID和用户ID查询数据权限 -->
+    <select id="selectByPermissionGroupIdAndUserId" resultMap="AuthorizedObjectDataPermissionVOResultMap">
+        SELECT
+            <include refid="Base_Column_List"/>,
+            u.user_name AS object_name,
+            u.user_code AS object_code
+        FROM authorized_object_data_permissions aodp
+        INNER JOIN po_users u ON aodp.user_id = u.user_id
+        WHERE aodp.permission_group_id = #{permissionGroupId}
+        AND aodp.user_id = #{userId}
+        AND aodp.status = 'active'
+    </select>
+
+    <!-- 根据权限组ID删除所有授权对象数据权限 -->
+    <delete id="deleteByPermissionGroupId">
+        DELETE FROM authorized_object_data_permissions
+        WHERE permission_group_id = #{permissionGroupId}
+    </delete>
+
+    <!-- 根据权限组ID和用户ID删除所有数据权限 -->
+    <delete id="deleteByPermissionGroupIdAndUserId">
+        DELETE FROM authorized_object_data_permissions
+        WHERE permission_group_id = #{permissionGroupId}
+        AND user_id = #{userId}
+    </delete>
+
+
+    <!-- 批量插入授权对象数据权限 -->
+    <insert id="batchInsert">
+        INSERT INTO authorized_object_data_permissions (
+            id, permission_group_id, user_id, permissions, status, create_by, create_time
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.id}, #{item.permissionGroupId}, #{item.userId}, #{item.permissions},
+                #{item.status}, #{item.createBy}, #{item.createTime}
+            )
+        </foreach>
+    </insert>
+
+    <!-- 批量删除指定权限组下的多个授权对象的数据权限 -->
+    <delete id="batchDeleteByPermissionGroupIdAndUserIds">
+        DELETE FROM authorized_object_data_permissions
+        WHERE permission_group_id = #{permissionGroupId}
+        AND user_id IN
+        <foreach collection="userIds" item="id" open="(" close=")" separator=",">
+            #{id}
+        </foreach>
+    </delete>
+
+</mapper>

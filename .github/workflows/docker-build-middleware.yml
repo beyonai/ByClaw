@@ -1,0 +1,146 @@
+name: Docker Build Middleware
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+    paths:
+      - "middleware/**"
+      - ".github/workflows/docker-build-middleware.yml"
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "middleware/**"
+      - ".github/workflows/docker-build-middleware.yml"
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      opengauss: ${{ steps.filter.outputs.opengauss }}
+      minio: ${{ steps.filter.outputs.minio }}
+      redis: ${{ steps.filter.outputs.redis }}
+      openclaw: ${{ steps.filter.outputs.openclaw }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            opengauss:
+              - "middleware/opengauss/**"
+              - ".github/workflows/docker-build-middleware.yml"
+            minio:
+              - "middleware/minio/**"
+              - ".github/workflows/docker-build-middleware.yml"
+            redis:
+              - "middleware/redis/**"
+              - ".github/workflows/docker-build-middleware.yml"
+            openclaw:
+              - "middleware/openclaw/**"
+              - ".github/workflows/docker-build-middleware.yml"
+
+  build-and-push:
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: byclaw-opengauss
+            context: middleware/opengauss
+            changed: opengauss
+            platforms: linux/amd64
+          - service: byclaw-minio
+            context: middleware/minio
+            changed: minio
+            platforms: linux/amd64,linux/arm64
+          - service: byclaw-redis
+            context: middleware/redis
+            changed: redis
+            platforms: linux/amd64,linux/arm64
+          - service: byclaw-openclaw
+            context: middleware/openclaw
+            changed: openclaw
+            platforms: linux/amd64,linux/arm64
+    # 只构建有变更的服务，或 workflow_dispatch 全部构建
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.changes.outputs.opengauss == 'true' ||
+      needs.changes.outputs.minio == 'true' ||
+      needs.changes.outputs.redis == 'true' ||
+      needs.changes.outputs.openclaw == 'true'
+    steps:
+      - name: Check if this service changed
+        id: should-build
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ needs.changes.outputs[matrix.changed] }}" == "true" ]]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout repository
+        if: steps.should-build.outputs.build == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        if: steps.should-build.outputs.build == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: steps.should-build.outputs.build == 'true' && github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        if: steps.should-build.outputs.build == 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.service }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=,suffix=,format=short
+
+      - name: Build and push Docker image
+        if: steps.should-build.outputs.build == 'true'
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          platforms: ${{ matrix.platforms }}
+
+      - name: Output image digest
+        if: steps.should-build.outputs.build == 'true'
+        run: |
+          echo "Service: ${{ matrix.service }}"
+          echo "Image digest: ${{ steps.push.outputs.digest }}"
+          echo "Image tags: ${{ steps.meta.outputs.tags }}"

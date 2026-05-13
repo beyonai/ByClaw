@@ -1,0 +1,41 @@
+{
+  "id": "byclaw-sqlite",
+  "name": "Byclaw SQLite",
+  "description": "Expose the local byclaw SQLite database through a single sqlExecute capability for tools and Gateway HTTP callers.",
+  "version": "2026.4.23",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "dbPath": {
+        "type": "string",
+        "description": "SQLite database file path. Relative paths resolve from this plugin directory."
+      },
+      "toolName": {
+        "type": "string",
+        "description": "Registered OpenClaw tool name.",
+        "default": "sqlExecute"
+      },
+      "httpPath": {
+        "type": "string",
+        "description": "Gateway HTTP route path used for direct external invocation.",
+        "default": "/plugins/byclaw-sqlite/sqlExecute"
+      },
+      "busyTimeoutMs": {
+        "type": "number",
+        "description": "SQLite busy timeout in milliseconds.",
+        "default": 5000
+      },
+      "maxRows": {
+        "type": "number",
+        "description": "Maximum number of result rows returned by read queries.",
+        "default": 200
+      },
+      "allowWrite": {
+        "type": "boolean",
+        "description": "Whether INSERT/UPDATE/DELETE/DDL statements are allowed.",
+        "default": true
+      }
+    }
+  }
+}

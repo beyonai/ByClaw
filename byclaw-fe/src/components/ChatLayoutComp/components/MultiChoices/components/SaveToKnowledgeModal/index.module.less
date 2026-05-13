@@ -1,0 +1,103 @@
+.modalContent {
+  min-height: 280px;
+  padding-top: 8px;
+}
+
+.listContainer {
+  width: 100%;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(5, 5, 5, 0.06);
+  border-radius: 8px;
+  background-color: #fff;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    border-color: rgba(22, 93, 255, 0.3);
+  }
+}
+
+.cardSelected {
+  border-color: #165dff;
+  background-color: #f0f5ff;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cardIcon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 6px;
+  // background-color: #e8f4ff;
+}
+
+.icon {
+  font-size: 22px;
+  color: #088cff;
+}
+
+.cardTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  color: #1d2129;
+  font-weight: 400;
+}
+
+.cardDesc {
+  font-size: 12px;
+  color: #86909c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: 40px;
+}
+
+.fileNameRow {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+}
+
+.fileNameLabel {
+  margin-right: 12px;
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+
+.countdownText {
+  color: #666;
+}
+
+.searchInput {
+  width: 220px;
+}
+
+.fileNameRow :global(.ant-input) {
+  flex: 1;
+}

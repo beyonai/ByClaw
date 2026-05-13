@@ -1,0 +1,116 @@
+.modalTitle {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+// 统一控制Modal高度（80vh）与最小高度（500px），并让body可铺满
+.exampleModal {
+  :global(.@{antPrefix}-modal-content) {
+    height: 90vh;
+    min-height: 500px;
+    display: flex;
+    flex-direction: column;
+    background-color: #f7fafc;
+  }
+
+  :global(.@{antPrefix}-modal-body) {
+    flex: 1;
+    overflow: auto;
+    padding: 16px;
+    :global(.@{antPrefix}-list-item) {
+      padding: 10px 12px;
+      display: block;
+    }
+  }
+
+  :global(.@{antPrefix}-modal-footer) {
+    padding: 10px 16px;
+  }
+  :global(.@{antPrefix}-modal-header) {
+    background: #f7fafc;
+  }
+}
+
+.container {
+  display: flex;
+  gap: 16px;
+}
+
+.leftPane {
+  width: 248px;
+  flex-shrink: 0;
+  overflow: hidden;
+  height: 100%;
+}
+
+.listItem,
+.activeItem {
+  cursor: pointer;
+  padding: 12px 12px;
+}
+
+.activeItem {
+  border-radius: 8px;
+  background: #e8f3ff;
+  border: 1px solid var(--user-primary-primary-6, #165dff) !important;
+  .itemTitle {
+    color: #165dff;
+  }
+}
+
+.itemTitle {
+  color: #14161a;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.itemSub {
+  color: #707680;
+  font-size: 13px;
+  margin-top: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rightPane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sectionBox {
+}
+
+.sectionHeader {
+  font-size: 14px;
+  font-weight: 500;
+  color: #14161a;
+  margin-bottom: 8px;
+}
+
+.sectionBody {
+  border-radius: 8px;
+  background: #fff;
+  padding: 9px 16px;
+  border: 1px solid #dcdada;
+}
+
+.block {
+  margin-bottom: 12px;
+}
+
+.blockTitle .tagTitle {
+  font-size: 14px;
+  color: #0da5aa;
+}
+
+.textArea {
+  color: #14161a;
+  line-height: 22px;
+}
+.subBlockTitle {
+  font-weight: bold;
+}

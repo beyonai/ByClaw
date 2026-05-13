@@ -1,0 +1,126 @@
+.container {
+  padding: 16px 24px;
+  background-color: #f2f6fa;
+  border-radius: 4px;
+}
+
+:global {
+  .@{antPrefix}-tooltip {
+    .@{antPrefix}-tooltip-inner {
+      color: rgba(20, 22, 26, 0.85);
+      font-size: 12px;
+      line-height: 20px;
+      padding: 8px 12px;
+      background-color: #fff;
+      box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.15);
+    }
+    .@{antPrefix}-tooltip-arrow {
+      .@{antPrefix}-tooltip-arrow-content {
+        background-color: #fff;
+      }
+    }
+  }
+}
+
+.container {
+  .topContainer {
+    display: flex;
+    column-gap: 12px;
+    align-items: center;
+  }
+
+  .left {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 12px;
+    background: var(--beyond-color-primary-bg-hover);
+    color: var(--beyond-color-primary-text-hover);
+  }
+
+  .middle {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    // max-width: 60%;
+
+    .title {
+      color: #14161a;
+      font-family: PingFang SC;
+      font-size: 18px;
+      font-style: normal;
+      font-weight: 600;
+      line-height: 26px;
+      display: flex;
+      align-items: center;
+      column-gap: 8px;
+
+      .edit {
+        font-size: 16px;
+        color: var(--beyond-color-text-tertiary);
+      }
+    }
+
+    .desc {
+      color: var(--beyond-color-text-tertiary);
+      font-family: PingFang SC;
+      font-size: 12px;
+      font-style: normal;
+      font-weight: 400;
+      line-height: 20px;
+      min-height: 20px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      width: 100%;
+    }
+  }
+
+  .right {
+    display: flex;
+    column-gap: 16px;
+  }
+
+  .content {
+    display: flex;
+    column-gap: 88px;
+    padding: 12px 60px 0px;
+  }
+
+  .item {
+    display: flex;
+    font-family: PingFang SC;
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 20px;
+  }
+
+  .label {
+    color: var(--beyond-color-text-tertiary);
+  }
+}
+
+.infoContainer {
+  padding: 12px 16px 0px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  .organization {
+    width: 100%;
+    border-bottom: 1px solid var(--user-line-color-border-26, #e6ebf0);
+  }
+
+  .member {
+    width: 100%;
+    flex: 1;
+    height: 0px;
+  }
+}

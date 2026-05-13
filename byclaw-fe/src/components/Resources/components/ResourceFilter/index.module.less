@@ -1,0 +1,76 @@
+.container {
+  width: 448px;
+  padding: 8px 12px 12px 12px;
+  border-radius: 8px;
+  border: 1px solid #e6ebf0;
+  background: #fff;
+  box-shadow: 0 6px 10px 0 rgba(42, 60, 79, 0.1);
+
+  .filterTitle {
+    font-size: 13px;
+    line-height: 22px;
+    color: #707680;
+  }
+  .statusItem,
+  .belongItem {
+    padding: 3px 14px;
+    border-radius: 30px;
+    border: 1px solid #ced3d9;
+    &.active {
+      color: var(--beyond-color-primary);
+      background: rgba(22, 93, 255, 0.1);
+      border-color: transparent;
+    }
+    &:hover:not(.active) {
+      color: var(--beyond-color-primary);
+      border-color: rgba(22, 93, 255, 0.5);
+    }
+  }
+
+  .customFilter {
+    height: 105px;
+    overflow: auto;
+    padding: 6px;
+    border-radius: 12px;
+    border: 1px solid #ced3d9;
+    background: #fff;
+    align-content: flex-start;
+    &:hover {
+      border-color: rgba(22, 93, 255, 0.5);
+    }
+
+    .listItem {
+      padding: 5px 4px 5px 6px;
+      border-radius: 6px;
+      background: #f2f6fa;
+      .closeBtn {
+        font-size: 12px;
+        color: var(--beyond-color-text-secondary);
+        &:hover {
+          transform: scale(1.2);
+          color: var(--beyond-color-text);
+        }
+      }
+    }
+
+    .placeholderText {
+      color: #ced3d9;
+    }
+  }
+}
+
+.relatedToMeDropdown {
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px solid #ced3d9;
+  min-width: 100px;
+  font-size: 13px;
+  &:hover {
+    border-color: var(--beyond-color-primary-hover);
+  }
+  .selectedItem {
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: #f2f6fa;
+  }
+}

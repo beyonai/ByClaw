@@ -1,0 +1,64 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# Logs & temp
+*.log
+tmp/
+.cache/
+
+# Node (byclaw-fe 等)
+node_modules/
+dist/
+.next/
+.nuxt/
+coverage/
+
+# Java (byclaw-be 等)
+target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# Python (byclaw-exe 等)
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+byclaw-qa/client.py
+
+# Env & secrets
+.env*
+.env.*
+!.env.example
+upload.sh
+
+# byclaw-data：本体 OWL 包（体积大/环境差异大，由部署或本地生成；仅保留 README 占位）
+byclaw-data/resource/import_package_owl_onto/**
+!byclaw-data/resource/import_package_owl_onto/
+!byclaw-data/resource/import_package_owl_onto/README.md
+
+# byclaw-data：大工具调用结果缓存（本地/运行时生成）
+byclaw-data/large_tool_results/
+
+# byclaw-data：会话历史落盘（本地/运行时生成）
+byclaw-data/conversation_history/
+
+# byclaw-data：评测/报告输出（本地生成）
+byclaw-data/reports/
+
+# byclaw-data：数字员工/Agent 资源（本地或环境生成）
+byclaw-data/resource/agents/
+byclaw-data/resource/object/
+byclaw-data/resource/view/
+byclaw-data/resource/import_package_owl_onto_bak/

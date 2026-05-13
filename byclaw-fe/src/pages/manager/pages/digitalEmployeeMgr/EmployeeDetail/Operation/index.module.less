@@ -1,0 +1,542 @@
+.operation {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 12px 16px;
+  background: #f7f9fc;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+
+  // 隐藏滚动条但保持滚动功能
+  scrollbar-width: none;
+  /* Firefox */
+  -ms-overflow-style: none;
+  /* IE and Edge */
+
+  &::-webkit-scrollbar {
+    display: none;
+    /* Chrome, Safari and Opera */
+  }
+
+  // 右上角操作按钮
+  .actionButtons {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 10;
+    display: flex;
+    gap: 8px;
+  }
+
+  .content {
+    margin: 0 auto;
+  }
+
+  // 分区标题
+  .section {
+    margin-bottom: 12px;
+    background: #fff;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 1px 2px 0 #00000008, 0 1px 6px 0 #00000005, 0 2px 4px 0 #00000005;
+  }
+
+  .sectionTitle {
+    font-size: 14px;
+    font-weight: 600;
+    color: #14161a;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+
+    .sectionTitleText {
+      width: 3px;
+      height: 14px;
+      border-radius: 1px 3px 3px 1px;
+      background: var(--user-primary-primary-6, #165dff);
+      margin-right: 8px;
+    }
+  }
+
+  // 基本信息区域
+  .basicInfo {
+    .infoGrid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+
+    .infoCard {
+      display: flex;
+      gap: 8px;
+      box-sizing: border-box;
+      font-size: 14px;
+
+      .infoLabel {
+        color: #707680;
+      }
+
+      .infoValue {
+        color: #14161a;
+      }
+    }
+
+    .tagCard {
+      .tagList {
+        flex: 1;
+        .tag {
+          display: inline-flex;
+          align-items: center;
+          padding: 4px 10px;
+          font-size: 14px;
+          color: #1f2329;
+        }
+      }
+
+      .emptyText {
+        font-size: 14px;
+        color: #c9cdd4;
+      }
+    }
+  }
+
+  // 规范性指标区域
+  .normativeMetrics {
+    display: flex;
+    gap: 24px;
+
+    .metricCard {
+      flex: 1;
+
+      .metricLabel {
+        font-size: 14px;
+        color: #475366;
+      }
+
+      .metricValue {
+        font-size: 20px;
+        font-weight: 600;
+        color: #1f2533;
+      }
+    }
+  }
+
+  // 高频问题列表区域
+  .frequentQuestionsList {
+    width: 100%;
+
+    .questionsScrollContainer {
+      max-height: 200px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding-right: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-content: flex-start;
+
+      // 自定义滚动条样式
+      &::-webkit-scrollbar {
+        width: 6px;
+      }
+
+      &::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 3px;
+      }
+
+      &::-webkit-scrollbar-thumb {
+        background: #c1c1c1;
+        border-radius: 3px;
+
+        &:hover {
+          background: #a8a8a8;
+        }
+      }
+    }
+
+    .questionItem {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: #f2f6fa;
+      border-radius: 14px;
+      transition: all 0.2s;
+      flex-shrink: 0;
+      color: #14161a;
+
+      &:hover {
+        background: #e8f0f8;
+      }
+
+      .questionIcon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 14px;
+        height: 14px;
+        flex-shrink: 0;
+      }
+
+      .questionText {
+        font-size: 13px;
+        color: #1f2329;
+        line-height: 1.4;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 280px;
+      }
+    }
+
+    .emptyQuestions {
+      padding: 40px 0;
+      text-align: center;
+      color: #86909c;
+      font-size: 14px;
+    }
+  }
+
+  // 使用指标区域
+  .usageSection {
+    .timeSelector {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 24px;
+
+      .periodTabs {
+        :global(.@{antPrefix}-segmented-item) {
+          font-size: 14px;
+        }
+      }
+
+      .datePicker {
+        width: 140px;
+      }
+    }
+
+    // 趋势图行 - 参照 Dashboard 样式
+    .chartsRow,
+    .chartsRow2,
+    .chartsRow4 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+
+      .chartCard {
+        border-radius: 12px;
+        background: #fff;
+        box-shadow: 0 1px 2px 0 #00000008, 0 1px 6px 0 #00000005, 0 2px 4px 0 #00000005;
+        display: flex;
+        flex-direction: column;
+
+        .cardHeader {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 16px 20px;
+          flex-shrink: 0;
+
+          .cardTitle {
+            font-size: 16px;
+            font-weight: 500;
+            color: #1f2329;
+          }
+        }
+
+        .cardBody {
+          padding: 0px 20px 20px 20px;
+          flex: 1;
+
+          .chartContainer {
+            width: 100%;
+            height: 300px;
+          }
+        }
+      }
+    }
+    .chartsRow2 {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .chartsRow4 {
+      grid-template-columns: repeat(4, 1fr);
+    }
+  }
+
+  // 关键指标卡片行 - 参照 Dashboard 样式
+  .metricsRow,
+  .accuracyMetrics,
+  .technicalMetrics {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+
+    .metricCard {
+      border-radius: 12px;
+      border: 1px solid #fff;
+      background: #fff;
+      padding: 20px;
+
+      .metricContent {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+
+        .metricIcon {
+          width: 32px;
+          height: 32px;
+          border-radius: 6px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 24px;
+          flex-shrink: 0;
+        }
+
+        .metricInfo {
+          flex: 1;
+
+          .metricTitle {
+            font-size: 14px;
+            color: #475366;
+          }
+
+          .metricValue {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1f2533;
+          }
+        }
+      }
+    }
+  }
+  .metricValueUnit {
+    color: #1f2533;
+    font-size: 12px;
+    margin-left: 2px;
+  }
+
+  // 产品助理测试集按钮样式
+  .accuracyMetricsBtn {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: #fff;
+    border: 1px solid #e5e6eb;
+    border-radius: 6px;
+    color: #14161a;
+    font-size: 12px;
+    height: 32px;
+    padding: 0 12px;
+  }
+  .productAssistantTestSetBtn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    &:hover {
+      border-color: #165dff;
+      color: #165dff;
+    }
+
+    :global(.anticon) {
+      margin-right: 0;
+    }
+  }
+
+  // 加载中的动态点效果
+  .loadingDots {
+    display: inline-block;
+    margin-left: 2px;
+
+    span {
+      display: inline-block;
+      animation: loadingDot 1.4s infinite;
+      animation-fill-mode: both;
+      font-size: 14px;
+
+      &:nth-child(1) {
+        animation-delay: 0s;
+      }
+
+      &:nth-child(2) {
+        animation-delay: 0.2s;
+      }
+
+      &:nth-child(3) {
+        animation-delay: 0.4s;
+      }
+    }
+  }
+
+  @keyframes loadingDot {
+    0%,
+    80%,
+    100% {
+      opacity: 0.3;
+    }
+    40% {
+      opacity: 1;
+    }
+  }
+  // 准确性指标区域
+  .accuracyMetrics {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .technicalMetrics {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  // 右侧徽章
+  .badge {
+    position: absolute;
+    right: 24px;
+    top: 200px;
+    z-index: 10;
+
+    .badgeContent {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #e8edff 0%, #f0f5ff 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 12px rgba(18, 109, 255, 0.15);
+      padding: 16px;
+      box-sizing: border-box;
+
+      .badgeText {
+        font-size: 14px;
+        font-weight: 500;
+        color: #126dff;
+        text-align: center;
+        margin-bottom: 8px;
+      }
+
+      .badgeLink {
+        font-size: 12px;
+
+        a {
+          color: #126dff;
+          text-decoration: none;
+
+          &:hover {
+            text-decoration: underline;
+          }
+        }
+      }
+    }
+  }
+}
+
+// 响应式设计
+@media (max-width: 1400px) {
+  .operation {
+    .metricsRow {
+      grid-template-columns: repeat(3, 1fr);
+    }
+    .usageSection {
+      .chartsRow {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .chartsRow2 {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .chartsRow4 {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+    .basicInfo {
+      .infoGrid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+    .accuracyMetrics {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .technicalMetrics {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+}
+
+@media (max-width: 1024px) {
+  .operation {
+    .metricsRow {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .usageSection {
+      .chartsRow {
+        grid-template-columns: 1fr;
+      }
+      .chartsRow2 {
+        grid-template-columns: 1fr;
+      }
+      .chartsRow4 {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+    .basicInfo {
+      .infoGrid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+    .accuracyMetrics {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .technicalMetrics {
+      grid-template-columns: 1fr;
+    }
+
+    .badge {
+      display: none;
+    }
+  }
+}
+
+@media (max-width: 768px) {
+  .operation {
+    padding: 16px;
+
+    .metricsRow {
+      grid-template-columns: 1fr;
+    }
+
+    .normativeMetrics {
+      flex-direction: column;
+    }
+
+    .basicInfo {
+      .infoGrid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .accuracyMetrics {
+      grid-template-columns: 1fr;
+
+      .accuracyCard {
+        min-width: 100%;
+      }
+    }
+
+    .technicalMetrics {
+      grid-template-columns: 1fr;
+    }
+
+    .usageSection {
+      .chartsRow2 {
+        grid-template-columns: 1fr;
+      }
+      .chartsRow4 {
+        grid-template-columns: 1fr;
+      }
+    }
+  }
+}

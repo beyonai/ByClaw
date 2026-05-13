@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.SsResExtEvaluateMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.resource.SsResExtEvaluate">
+        <id column="evaluate_id" property="evaluateId" />
+        <result column="resource_id" property="resourceId" />
+        <result column="evaluate_time" property="evaluateTime" />
+        <result column="test_set_accuracy" property="testSetAccuracy" />
+        <result column="actual_use_accuracy" property="actualUseAccuracy" />
+        <result column="conversation_error_rate" property="conversationErrorRate" />
+        <result column="avg_first_response_duration" property="avgFirstResponseDuration" />
+        <result column="persona_specification_score" property="personaSpecificationScore" />
+        <result column="ability_post_matching_score" property="abilityPostMatchingScore" />
+        <result column="evaluate_result" property="evaluateResult" />
+        <result column="is_qualified_for_post" property="isQualifiedForPost" />
+        <result column="create_by" property="createBy" />
+        <result column="create_time" property="createTime" />
+        <result column="update_time" property="updateTime" />
+    </resultMap>
+
+    <!-- 根据资源ID查询评估时间最新的记录 -->
+    <select id="selectLatestByResourceId" resultMap="BaseResultMap">
+        SELECT evaluate_id,
+               resource_id,
+               evaluate_time,
+               test_set_accuracy,
+               actual_use_accuracy,
+               conversation_error_rate,
+               avg_first_response_duration,
+               persona_specification_score,
+               ability_post_matching_score,
+               evaluate_result,
+               is_qualified_for_post,
+               create_by,
+               create_time,
+               update_time
+        FROM ss_res_ext_evaluate
+        WHERE resource_id = #{resourceId}
+        ORDER BY evaluate_time DESC
+        LIMIT 1
+    </select>
+
+    <!-- 分页查询数字员工评估结果 -->
+    <select id="selectPageByQO" resultMap="BaseResultMap">
+        SELECT evaluate_id,
+               resource_id,
+               evaluate_time,
+               test_set_accuracy,
+               actual_use_accuracy,
+               conversation_error_rate,
+               avg_first_response_duration,
+               persona_specification_score,
+               ability_post_matching_score,
+               evaluate_result,
+               is_qualified_for_post,
+               create_by,
+               create_time,
+               update_time
+        FROM ss_res_ext_evaluate
+        <where>
+            <if test="qo.resourceId != null">
+                AND resource_id = #{qo.resourceId}
+            </if>
+        </where>
+        ORDER BY evaluate_time DESC
+    </select>
+
+</mapper>

@@ -1,0 +1,45 @@
+.passwordAlert {
+  margin-bottom: 16px;
+  border-radius: 8px;
+  &:global(.@{antPrefix}-alert) {
+    align-items: baseline;
+  }
+}
+
+.passwordPopover {
+  :global {
+    .@{antPrefix}-popover-inner {
+      padding: 6px 10px;
+    }
+  }
+
+  .passwordRuleTooltip {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    .ruleItem {
+      display: flex;
+      align-items: center;
+      font-size: 11px;
+
+      .checkIcon {
+        color: var(--beyond-color-success-hover);
+        margin-right: 8px;
+        font-size: 10px;
+      }
+
+      .closeIcon {
+        color: var(--beyond-color-error-hover);
+        margin-right: 8px;
+        font-size: 10px;
+      }
+    }
+  }
+}
+
+.logoutBtn {
+  position: absolute;
+  right: 9px;
+  top: 16px;
+}

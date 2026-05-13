@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.customer.ByaiCustomerLeadsMapper">
+
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.customer.ByaiCustomerLeads">
+        <id column="id" property="id" />
+        <result column="company_name" property="companyName" />
+        <result column="contact_name" property="contactName" />
+        <result column="industry" property="industry" />
+        <result column="phone" property="phone" />
+        <result column="wechat" property="wechat" />
+        <result column="demand" property="demand" />
+        <result column="create_time" property="createTime" />
+    </resultMap>
+
+    <insert id="insertLead" parameterType="com.iwhalecloud.byai.manager.entity.customer.ByaiCustomerLeads">
+        INSERT INTO byai_customer_leads (
+            id, company_name, contact_name, industry, phone, wechat, demand, create_time
+        ) VALUES (
+            #{id}, #{companyName}, #{contactName}, #{industry}, #{phone}, #{wechat}, #{demand}, #{createTime}
+        )
+    </insert>
+
+    <insert id="insertBatch">
+        INSERT INTO byai_customer_leads (
+            id, company_name, contact_name, industry, phone, wechat, demand, create_time
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.id}, #{item.companyName}, #{item.contactName}, #{item.industry}, #{item.phone}, #{item.wechat}, #{item.demand}, #{item.createTime})
+        </foreach>
+    </insert>
+
+</mapper> 

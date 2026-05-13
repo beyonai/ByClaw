@@ -1,0 +1,268 @@
+.messageContent {
+  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
+  margin: 0 auto 8px;
+  padding-bottom: 8px;
+
+  // -webkit-overflow-scrolling: touch;
+
+  /* 禁用回弹效果 */
+  // overscroll-behavior: none;
+}
+
+.messageRowWrap {
+  width: 100%;
+  min-width: 300px;
+  height: 100%;
+  min-height: 100%;
+
+  &.hasMore {
+    padding-top: 36px !important;
+  }
+
+  .msgWrapper {
+    margin: 0 auto;
+
+    padding: 8px 16px;
+    &:not(:first-child) {
+      margin-top: 12px;
+    }
+  }
+
+  .msgWrapperSelected {
+    background-color: #f3f4f6;
+    border-radius: 16px;
+  }
+}
+
+@left-logo-size: 40px;
+
+.messageRow {
+  position: relative;
+  display: flex;
+  flex-flow: column wrap;
+  align-items: flex-start;
+  justify-content: center;
+  transform: translateY(20px);
+
+  opacity: 0;
+  animation: fade-in-up 0.3s ease-out forwards;
+  /* Fixed animation name */
+
+  &.left {
+    padding-left: @left-logo-size + 2px;
+  }
+
+  &.right {
+    padding-right: @left-logo-size + 2px;
+  }
+
+  .name {
+    display: flex;
+    align-items: center;
+    line-height: 20px;
+    gap: 4px;
+    color: var(~'--@{antPrefix}-color-text-tertiary');
+    margin-bottom: -8px; // 因为messageRow声明了gap=12px，想要margin-bottom=4px，所以这里要-8px
+  }
+
+  .assistantMark {
+    padding: 0 4px;
+    border-radius: 4px;
+    background: #504bff1a;
+
+    & > span {
+      font-size: 12px;
+      font-weight: 500;
+      background: linear-gradient(0deg, #52acff 0%, #725cfa 100%);
+      background-clip: text;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+  }
+
+  .createTime {
+    visibility: hidden;
+  }
+
+  &:hover {
+    .createTime {
+      visibility: visible;
+    }
+  }
+
+  .bubble {
+    display: flex;
+    width: 100%;
+
+    .compRender {
+      max-width: 100%;
+      font-size: 15px;
+      border-radius: var(--beyond-border-radius);
+    }
+  }
+
+  .actionsBar {
+    display: flex;
+    width: 100%;
+    height: 36px;
+
+    .actionsBarItem {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 24px;
+      height: 24px;
+      color: var(--beyond-color-text-tertiary);
+      font-size: 20px;
+      column-gap: 4px;
+      cursor: pointer;
+
+      .actionsBarText {
+        font-size: 12px;
+        color: var(--beyond-color-text-tertiary);
+        line-height: 1;
+        min-width: max-content;
+      }
+    }
+  }
+}
+
+.messageRow[data-frombeyond='true'] {
+  .bubble {
+    .compRender {
+      // max-width: 100%;
+      width: 100%;
+    }
+  }
+}
+
+.pureTextStyle {
+  padding: 8px 16px;
+  border-radius: 8px;
+  max-width: 450px;
+}
+
+.messageRow[data-frombeyond='false'] {
+  align-items: end;
+
+  .bubble {
+    flex-direction: row-reverse;
+    align-items: center;
+
+    .compRender {
+      color: var(--beyond-color-text);
+      // background: var(--beyond-color-fill-tertiary);
+    }
+    .compRender :global(.askText) {
+      background: #165dff1a;
+      .pureTextStyle();
+    }
+  }
+
+  .actionsBar {
+    flex-direction: row-reverse;
+    opacity: 0;
+  }
+
+  &:hover {
+    .actionsBar {
+      opacity: 1;
+    }
+  }
+}
+
+.messageRow[data-frombeyond='true'] .bubble > .pureText {
+  .pureTextStyle();
+  width: auto;
+  background: #0d3b800a;
+}
+
+.errorIcon {
+  display: inline-flex;
+  margin-right: 12px;
+  color: var(--beyond-color-error) !important;
+  font-size: var(--beyond-font-size-lg);
+}
+
+.fileList {
+  margin: 12px 0;
+}
+
+.beyondLogo {
+  width: @left-logo-size;
+  height: @left-logo-size;
+  border-radius: 50%;
+  position: absolute;
+  left: 0;
+  top: 0;
+
+  .leftIcon {
+    width: 32px;
+    height: 32px;
+    // background: linear-gradient(0deg, rgba(114, 92, 250, 0.3) 0%, rgba(114, 92, 250, 1) 100%);
+    border-radius: 50%;
+    color: #fff;
+  }
+}
+
+.right .beyondLogo.userName {
+  left: initial;
+  right: 0;
+}
+
+.toBottomBtn {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  z-index: 99;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  transform: translate(-50%, 0);
+}
+
+.questionTips {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  // margin-top: 12px;
+
+  .bubleButton {
+    display: flex;
+    gap: 8px;
+    width: max-content;
+    max-width: 100%;
+    padding: 6px 12px 6px 16px;
+    color: #14161a;
+    font-size: 15px;
+    line-height: 1.5;
+    background-color: var(--beyond-color-fill-tertiary);
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+
+    &:hover,
+    &:active,
+    &:focus {
+      color: #14161a;
+      background-color: var(--beyond-color-fill-secondary);
+      border: none;
+    }
+  }
+}
+
+/* Fixed keyframe name */
+@keyframes fade-in-up {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}

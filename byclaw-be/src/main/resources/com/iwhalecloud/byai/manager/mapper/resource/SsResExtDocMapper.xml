@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.SsResExtDocMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.resource.SsResExtDoc">
+        <id column="resource_id" property="resourceId" />
+        <result column="resource_agent_id" property="resourceAgentId" />
+        <result column="type" property="type" />
+        <result column="plugin_machine_id" property="pluginMachineId" />
+        <result column="kdb_id" property="kdbId" />
+        <result column="resource_catalog_sub" property="resourceCatalogSub" />
+        <result column="source_content" property="sourceContent" />
+        <result column="target_content" property="targetContent" />
+    </resultMap>
+
+    <!-- 通用查询结果-->
+    <sql id="Base_Column_List">
+        resource_id, resource_agent_id, type, plugin_machine_id, kdb_id,
+        resource_catalog_sub, source_content, target_content
+    </sql>
+
+    <resultMap id="resourceExtDocDtoResultMap"
+               type="com.iwhalecloud.byai.manager.dto.resource.ResourceExtDocDto"
+               extends="com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper.BaseResultMap">
+        <association property="ssResExtDoc" javaType="com.iwhalecloud.byai.manager.entity.resource.SsResExtDoc" resultMap="BaseResultMap" />
+    </resultMap>
+
+    <select id="findResourceExtDocByIds" resultMap="resourceExtDocDtoResultMap">
+        SELECT a.resource_id,
+               a.resource_code,
+               a.system_code,
+               a.resource_source_pk_id,
+               a.resource_biz_type,
+               a.resource_type,
+               a.resource_name,
+               a.resource_desc,
+               a.avatar,
+               a.sample,
+               a.tags,
+               a.resource_version_id,
+               a.host_type,
+               a.catalog_id,
+               a.man_org_id,
+               a.man_user_id,
+               a.index_list,
+               a.create_by,
+               a.create_time,
+               a.update_by,
+               a.update_time,
+               a.com_acct_id,
+               a.resource_status,
+               a.resource_d_verid,
+               a.resource_r_verid,
+               a.auth_status,
+               a.publish_time,
+               a.shelf_time,
+               a.unshelf_time,
+               a.publish_portal,
+               b.resource_id,
+               b.resource_agent_id,
+               b.type,
+               b.plugin_machine_id,
+               b.kdb_id,
+               b.resource_catalog_sub,
+               b.source_content,
+               b.target_content
+        FROM ss_resource a
+        LEFT JOIN ss_res_ext_doc b ON a.resource_id = b.resource_id
+        WHERE a.resource_biz_type IN ('KG_TERM', 'KG_QA', 'KG_DOC','KG_DB')
+        AND a.resource_id IN
+        <foreach collection="resourceIds" item="item" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+    </select>
+
+    <!-- 根据资源ID列表批量查询文档库扩展数据（不JOIN，直接查扩展表） -->
+    <select id="selectListByResourceIds" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List" />
+        FROM ss_res_ext_doc
+        WHERE resource_id IN
+        <foreach collection="resourceIds" item="item" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+    </select>
+
+</mapper>

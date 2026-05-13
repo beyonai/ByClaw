@@ -1,0 +1,70 @@
+nav.chatTitle {
+  // gap: 8px;
+  // display: flex;
+  // padding: 8px 20px;
+  min-height: 48px;
+  // align-items: center;
+  // flex-direction: row;
+  // box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px 0 rgba(0, 0, 0, 0.02);
+  z-index: 100;
+
+  .chatTitleWrap {
+    padding: 8px 20px;
+    // min-height: 48px;
+    animation: slideDownIn 0.3s ease-out;
+    transform-origin: top;
+  }
+
+  div.avatarWrap {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  div.chatTitle {
+    flex: 1;
+    width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: #14161a;
+    font-size: 16px;
+    font-style: normal;
+    font-weight: 500;
+    line-height: 24px;
+  }
+
+  .actions {
+    gap: 4px;
+    display: flex;
+    align-items: center;
+    flex-direction: row;
+
+    .btn {
+      cursor: pointer;
+      gap: 4px;
+      height: 32px;
+      min-width: 32px;
+      display: flex;
+      border-radius: 99px;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease-in-out;
+
+      &:hover {
+        background: #0000000f;
+      }
+    }
+  }
+}
+
+@keyframes slideDownIn {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}

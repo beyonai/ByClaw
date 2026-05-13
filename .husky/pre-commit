@@ -1,0 +1,132 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# ============================================================
+# Pre-commit hook — smart module-level checks
+# Only runs checks for modules that have staged changes.
+# ============================================================
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Detect which modules have staged changes
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
+
+HAS_FE=false
+HAS_BE=false
+HAS_EXE=false
+HAS_DATA=false
+
+for file in $STAGED_FILES; do
+  case "$file" in
+    byclaw-fe/*) HAS_FE=true ;;
+    byclaw-be/*) HAS_BE=true ;;
+    byclaw-exe/*) HAS_EXE=true ;;
+    byclaw-data/*) HAS_DATA=true ;;
+  esac
+done
+
+EXIT_CODE=0
+
+# ────────────────────────────────────────────────────────────
+# Frontend checks: lint-staged (on staged files) + tests
+# ────────────────────────────────────────────────────────────
+if [ "$HAS_FE" = true ]; then
+  echo "🔍 [pre-commit] Running frontend checks..."
+
+  # lint-staged: prettier + eslint + stylelint on staged files
+  cd "$REPO_ROOT/byclaw-fe"
+  npx lint-staged --concurrent false
+  if [ $? -ne 0 ]; then
+    echo "❌ [pre-commit] Frontend lint-staged failed"
+    EXIT_CODE=1
+  fi
+
+  # Jest tests
+  pnpm run test --passWithNoTests 2>&1
+  if [ $? -ne 0 ]; then
+    echo "❌ [pre-commit] Frontend tests failed"
+    EXIT_CODE=1
+  else
+    echo "✅ [pre-commit] Frontend checks passed"
+  fi
+
+  cd "$REPO_ROOT"
+fi
+
+# ────────────────────────────────────────────────────────────
+# Backend checks: mvn test
+# ────────────────────────────────────────────────────────────
+if [ "$HAS_BE" = true ]; then
+  echo "🔍 [pre-commit] Running backend checks..."
+
+  mvn -B -f "$REPO_ROOT/byclaw-be/pom.xml" test
+  if [ $? -ne 0 ]; then
+    echo "❌ [pre-commit] Backend tests failed"
+    EXIT_CODE=1
+  else
+    echo "✅ [pre-commit] Backend checks passed"
+  fi
+fi
+
+# ────────────────────────────────────────────────────────────
+# Python (byclaw-exe) checks: ruff + pytest
+# ────────────────────────────────────────────────────────────
+if [ "$HAS_EXE" = true ]; then
+  echo "🔍 [pre-commit] Running byclaw-exe checks..."
+
+  cd "$REPO_ROOT/byclaw-exe"
+  if command -v ruff >/dev/null 2>&1; then
+    ruff check .
+    if [ $? -ne 0 ]; then
+      echo "❌ [pre-commit] byclaw-exe ruff check failed"
+      EXIT_CODE=1
+    fi
+  fi
+
+  if command -v pytest >/dev/null 2>&1; then
+    pytest
+    if [ $? -ne 0 ]; then
+      echo "❌ [pre-commit] byclaw-exe pytest failed"
+      EXIT_CODE=1
+    fi
+  fi
+
+  if [ $EXIT_CODE -eq 0 ]; then
+    echo "✅ [pre-commit] byclaw-exe checks passed"
+  fi
+  cd "$REPO_ROOT"
+fi
+
+# ────────────────────────────────────────────────────────────
+# Python (byclaw-data) checks: ruff
+# ────────────────────────────────────────────────────────────
+if [ "$HAS_DATA" = true ]; then
+  echo "🔍 [pre-commit] Running byclaw-data checks..."
+
+  cd "$REPO_ROOT/byclaw-data"
+  if command -v ruff >/dev/null 2>&1; then
+    ruff check .
+    if [ $? -ne 0 ]; then
+      echo "❌ [pre-commit] byclaw-data ruff check failed"
+      EXIT_CODE=1
+    else
+      echo "✅ [pre-commit] byclaw-data checks passed"
+    fi
+  fi
+  cd "$REPO_ROOT"
+fi
+
+# ────────────────────────────────────────────────────────────
+# Summary
+# ────────────────────────────────────────────────────────────
+if [ "$HAS_FE" = false ] && [ "$HAS_BE" = false ] && [ "$HAS_EXE" = false ] && [ "$HAS_DATA" = false ]; then
+  echo "⏭️  [pre-commit] No module changes detected, skipping checks"
+fi
+
+if [ $EXIT_CODE -ne 0 ]; then
+  echo ""
+  echo "🚫 Pre-commit checks failed. Please fix the issues above before committing."
+  echo "   To bypass (emergency only): git commit --no-verify"
+fi
+
+exit $EXIT_CODE

@@ -1,0 +1,53 @@
+section.achievements {
+  position: relative;
+  // width: 360px;
+  height: 100%;
+  min-height: 0;
+  // min-width: 360px;
+  // max-width: calc(100vw - 550px);
+  z-index: 99;
+  flex-shrink: 0;
+  // border-left: 0.5px solid #00000026;
+  display: flex;
+  align-items: stretch;
+  flex-direction: column;
+
+  .header {
+    display: flex;
+    padding: 8px 12px;
+    flex-shrink: 0;
+    align-items: center;
+
+    .title {
+      flex: 1;
+      width: 0;
+      margin: 0;
+      font-size: 16px;
+      font-weight: 500;
+    }
+
+    .closeButton {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      color: #333333;
+      transition: opacity 0.3s ease;
+
+      &:hover {
+        opacity: 0.8;
+      }
+    }
+  }
+
+  .content {
+    flex: 1 1 0%;
+    min-height: 0;
+    width: 100%;
+
+    display: flex;
+    flex-direction: column;
+  }
+}

@@ -1,0 +1,199 @@
+.addSourceModal {
+  :global {
+    .@{antPrefix}-modal-content {
+      border-radius: 16px;
+      overflow: hidden;
+    }
+
+    .@{antPrefix}-modal-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .@{antPrefix}-modal-title {
+      font-size: 16px;
+      font-weight: 500;
+    }
+
+    .@{antPrefix}-modal-body {
+      padding: 20px 24px;
+    }
+
+    .@{antPrefix}-modal-close {
+      top: 16px;
+      right: 16px;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+
+      &:hover {
+        background: #f5f5f5;
+      }
+    }
+  }
+}
+
+.modalContent {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+// 拖拽上传区域
+.dragUpload {
+  :global {
+    .@{antPrefix}-upload-drag {
+      background: #fafafa;
+      border: 2px dashed #e0e0e0;
+      border-radius: 12px;
+      transition: all 0.2s ease;
+
+      &:hover {
+        border-color: var(--primary-color);
+        background: rgba(22, 119, 255, 0.02);
+      }
+
+      .@{antPrefix}-upload-drag-container {
+        padding: 0;
+      }
+    }
+  }
+}
+
+.uploadSection {
+  padding: 32px 24px;
+  text-align: center;
+}
+
+.uploadDragIcon {
+  font-size: 48px;
+  color: var(--primary-color);
+  margin-bottom: 16px;
+
+  :global(.anticon) {
+    color: var(--primary-color);
+  }
+}
+
+.uploadTitle {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.uploadActions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.uploadButton {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 18px;
+  border: 1px solid #e0e0e0;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  &:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    background: #fff;
+  }
+
+  :global(.anticon) {
+    font-size: 14px;
+  }
+}
+
+// 粘贴视图样式
+.pasteView {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pasteHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.backButton {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+
+  &:hover {
+    background: #f5f5f5;
+  }
+}
+
+.pasteTitle {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.pasteDesc {
+  margin: 0;
+  margin-bottom: 8px;
+}
+
+.pasteTextArea {
+  border-radius: 8px;
+  resize: none;
+  font-size: 14px;
+
+  &:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.1);
+  }
+}
+
+.pasteFooter {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+
+  :global(.@{antPrefix}-btn) {
+    height: 36px;
+    padding: 0 24px;
+    border-radius: 18px;
+    font-size: 14px;
+  }
+}
+
+.divider {
+  margin: 4px 0;
+}
+
+.emptyState {
+  text-align: center;
+  padding: 16px 0;
+}
+
+.emptyIcon {
+  font-size: 32px;
+  margin-bottom: 12px;
+}
+
+.emptyTitle {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.emptyDesc {
+  font-size: 12px;
+  line-height: 1.5;
+  max-width: 400px;
+  margin: 0 auto;
+}

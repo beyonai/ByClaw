@@ -1,0 +1,33 @@
+.wrapper {
+  :global {
+    .@{antPrefix}-table tbody.@{antPrefix}-table-tbody > tr > td,
+    .@{antPrefix}-table thead.@{antPrefix}-table-thead > tr > th {
+      font-size: 12px;
+      border-radius: 0 !important;
+      font-weight: 400;
+      border: none;
+      &::before {
+        content: none !important;
+      }
+    }
+    .@{antPrefix}-table thead.@{antPrefix}-table-thead > tr > th {
+      font-weight: 500;
+      background-color: rgba(211, 238, 249, 1);
+      &:nth-child(2n) {
+        background-color: rgba(205, 221, 253, 1);
+      }
+      &:nth-child(3n) {
+        background-color: rgba(205, 243, 228, 1);
+      }
+      &:nth-child(4n) {
+        background-color: rgba(255, 224, 199, 1);
+      }
+    }
+    .@{antPrefix}-table-pagination.@{antPrefix}-table-pagination {
+      margin: 8px 0 0 0;
+    }
+    .@{antPrefix}-table tbody.@{antPrefix}-table-tbody > tr:nth-child(2n - 1) + tr > td {
+      background-color: rgba(242, 246, 250, 1);
+    }
+  }
+}

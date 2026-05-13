@@ -1,0 +1,119 @@
+.uploadModal {
+  :global {
+    .@{antPrefix}-modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #e5e6eb;
+    }
+
+    .@{antPrefix}-modal-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #14161a;
+    }
+
+    .@{antPrefix}-modal-body {
+      padding: 20px;
+    }
+
+    .@{antPrefix}-modal-footer {
+      padding: 12px 20px;
+      border-top: 1px solid #e5e6eb;
+    }
+  }
+}
+
+.uploadContent {
+  width: 100%;
+}
+
+.uploadDragger {
+  :global {
+    .@{antPrefix}-upload-drag {
+      border: 1px dashed #d9d9d9;
+      border-radius: 8px;
+      background: #fafafa;
+      padding: 40px 20px;
+      transition: all 0.3s ease;
+      min-height: 200px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      &:hover {
+        border-color: #165dff;
+        background: #f0f7ff;
+      }
+    }
+
+    .@{antPrefix}-upload-drag-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+    }
+
+    .@{antPrefix}-upload-btn {
+      padding: 0;
+    }
+  }
+}
+
+.uploadIcon {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  :global {
+    .anticon {
+      position: relative;
+    }
+
+    .anticon-file {
+      font-size: 48px;
+    }
+
+    .anticon-plus {
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      font-size: 20px;
+      background: #fff;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+  }
+}
+
+.uploadText {
+  font-size: 14px;
+  color: #14161a;
+  margin: 0 0 8px 0;
+  text-align: center;
+  line-height: 22px;
+}
+
+.selectFileLink {
+  color: #165dff;
+  cursor: pointer;
+  margin-left: 4px;
+
+  &:hover {
+    color: #0e42d2;
+    text-decoration: underline;
+  }
+}
+
+.uploadHint {
+  font-size: 12px;
+  color: #86909c;
+  margin: 0;
+  text-align: center;
+  line-height: 18px;
+}

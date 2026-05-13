@@ -1,0 +1,94 @@
+.testSetResultModal {
+  :global {
+    .@{antPrefix}-modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #e5e6eb;
+    }
+
+    .@{antPrefix}-modal-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #14161a;
+    }
+
+    .@{antPrefix}-modal-body {
+      padding: 20px;
+    }
+  }
+}
+
+.testSetResultContent {
+  width: 100%;
+}
+
+.testSetInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.infoItem {
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.infoLabel {
+  color: #86909c;
+  margin-right: 8px;
+  min-width: 80px;
+}
+
+.infoValue {
+  color: #14161a;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+}
+
+.testSetResultContent {
+  :global {
+    .@{antPrefix}-table-body {
+      min-height: 300px !important;
+    }
+    .@{antPrefix}-table-cell {
+      line-height: 36px !important;
+      span {
+        display: inline !important;
+      }
+    }
+  }
+}
+
+.tableCell {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.correctResult {
+  display: inline-flex;
+  align-items: center;
+  color: #15cc3e;
+  font-size: 12px;
+}
+
+.errorResult {
+  display: inline-flex;
+  align-items: center;
+  color: #f53f3f;
+  font-size: 12px;
+}
+
+.excelPreview {
+  :global {
+    .@{antPrefix}-spin-nested-loading {
+      height: 100% !important;
+    }
+    .@{antPrefix}-spin-container {
+      height: 100% !important;
+    }
+  }
+}

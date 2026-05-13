@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.position.PositionExtCatalogMapper">
+
+    <!-- 通用结果映射 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.position.PositionExtCatalog">
+        <id column="id" property="id"/>
+        <result column="position_id" property="positionId"/>
+        <result column="catalog_id" property="catalogId"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <!-- 通用列 -->
+    <sql id="Base_Column_List">
+        id, position_id, catalog_id, create_by, create_time, update_by, update_time
+    </sql>
+
+    <!-- 校验指定领域下数字岗位名称是否重复 -->
+    <select id="countPositionNameInCatalogs" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM po_position p
+        INNER JOIN po_position_ext_catalog r ON p.position_id = r.position_id
+        WHERE p.position_name = #{positionName}
+        AND p.is_digital_position = 1
+        AND r.catalog_id IN
+        <foreach collection="catalogIds" item="item" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+    </select>
+
+    <!-- 批量插入岗位-领域关系 -->
+    <insert id="saveBatch">
+        INSERT INTO po_position_ext_catalog
+        (position_id, catalog_id, create_by, create_time, update_by, update_time)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.positionId}, #{item.catalogId}, #{item.createBy}, #{item.createTime},
+            #{item.updateBy}, #{item.updateTime})
+        </foreach>
+    </insert>
+
+    <!-- 数字岗位DTO结果映射 -->
+    <resultMap id="DigitalPositionDTOResultMap" type="com.iwhalecloud.byai.manager.dto.position.DigitalPositionDTO">
+        <id column="position_id" property="positionId"/>
+        <result column="position_name" property="positionName"/>
+        <result column="position_desc" property="positionDesc"/>
+        <result column="is_digital_position" property="isDigitalPosition"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+        <collection property="catalogs" ofType="com.iwhalecloud.byai.manager.dto.position.DigitalPositionDTO$CatalogInfo">
+            <result column="catalog_id" property="catalogId"/>
+            <result column="catalog_name" property="catalogName"/>
+            <result column="catalog_desc" property="catalogDesc"/>
+        </collection>
+    </resultMap>
+
+    <!-- 查询数字岗位列表（包含领域信息） -->
+    <select id="selectDigitalPositionsByCatalog" resultMap="DigitalPositionDTOResultMap">
+        SELECT
+            p.position_id,
+            p.position_name,
+            p.position_desc,
+            p.is_digital_position,
+            p.create_time,
+            p.update_time,
+            c.catalog_id,
+            c.catalog_name,
+            c.catalog_desc
+        FROM po_position p
+        LEFT JOIN po_position_ext_catalog pec ON p.position_id = pec.position_id
+        LEFT JOIN ss_resource_catalog c ON pec.catalog_id = c.catalog_id
+        WHERE p.is_digital_position = 1
+        <if test="catalogId != null">
+            AND pec.catalog_id = #{catalogId}
+        </if>
+        <if test="positionName != null and positionName != ''">
+            AND p.position_name LIKE CONCAT('%', #{positionName}, '%')
+        </if>
+        ORDER BY p.create_time DESC
+    </select>
+
+    <!-- 领域及其岗位DTO结果映射 -->
+    <resultMap id="CatalogWithPositionsDTOResultMap" type="com.iwhalecloud.byai.manager.dto.position.CatalogWithPositionsDTO">
+        <id column="catalog_id" property="catalogId"/>
+        <result column="catalog_name" property="catalogName"/>
+        <result column="catalog_desc" property="catalogDesc"/>
+        <collection property="positions" ofType="com.iwhalecloud.byai.manager.dto.position.CatalogWithPositionsDTO$PositionInfo">
+            <result column="position_id" property="positionId"/>
+            <result column="position_name" property="positionName"/>
+            <result column="position_desc" property="positionDesc"/>
+            <result column="is_digital_position" property="isDigitalPosition"/>
+        </collection>
+    </resultMap>
+
+    <!-- 查询领域及其关联的数字岗位列表 -->
+    <select id="selectCatalogsWithPositions" resultMap="CatalogWithPositionsDTOResultMap">
+        SELECT
+            c.catalog_id,
+            c.catalog_name,
+            c.catalog_desc,
+            p.position_id,
+            p.position_name,
+            p.position_desc,
+            p.is_digital_position
+        FROM ss_resource_catalog c
+        LEFT JOIN po_position_ext_catalog pec ON pec.catalog_id = c.catalog_id
+        LEFT JOIN po_position p ON pec.position_id = p.position_id AND p.is_digital_position = 1
+        WHERE c.catalog_type = 6
+        <if test="catalogId != null">
+            AND c.catalog_id = #{catalogId}
+        </if>
+        <if test="positionName != null and positionName != ''">
+            AND p.position_name LIKE CONCAT('%', #{positionName}, '%') OR p.position_desc LIKE CONCAT('%', #{positionName}, '%')
+        </if>
+        ORDER BY c.catalog_id ,pec.create_time DESC
+    </select>
+
+</mapper>
+

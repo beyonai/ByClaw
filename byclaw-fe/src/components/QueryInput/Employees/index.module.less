@@ -1,0 +1,70 @@
+@primary-color: #1677ff;
+@primary-color-bg: #e8f3ff;
+
+.toolOptionBtn {
+  border-color: var(--beyond-color-fill-secondary) !important;
+  height: 36px;
+
+  :global {
+    .@{antPrefix}-btn {
+      border-width: 1px;
+      border-style: solid;
+      border-radius: var(--beyond-border-radius-sm);
+    }
+    .@{antPrefix}-btn-icon {
+      display: flex;
+    }
+  }
+
+  &.active {
+    background-color: @primary-color-bg !important;
+    border-color: fade(@primary-color, 50%) !important;
+  }
+
+  &.activeDisabled {
+    background-color: @primary-color-bg !important;
+    color: fade(@primary-color, 50%) !important;
+    cursor: not-allowed !important;
+    border-color: fade(@primary-color, 50%) !important;
+  }
+}
+
+.toolOptionSwitch {
+  display: flex;
+  align-items: center;
+
+  border: 1px solid var(--beyond-color-border-secondary);
+  border-radius: var(--beyond-border-radius-sm);
+  padding: 4px 15px;
+
+  :global {
+    .@{antPrefix}-space-item {
+      display: flex;
+      align-items: center;
+    }
+  }
+}
+
+.attachment {
+  font-size: 18px !important;
+  color: #666;
+  cursor: pointer;
+
+  &:hover {
+    color: @primary-color;
+  }
+}
+
+.bottomRight {
+  :global {
+    .@{antPrefix}-space-item {
+      display: flex;
+      align-items: center;
+    }
+
+    .@{antPrefix}-upload {
+      display: flex;
+      align-items: center;
+    }
+  }
+}

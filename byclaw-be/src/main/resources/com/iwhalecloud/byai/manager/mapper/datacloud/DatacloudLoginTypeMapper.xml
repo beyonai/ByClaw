@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.datacloud.DatacloudLoginTypeMapper">
+
+    <!-- 登录类型表结果映-->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.datacloud.DatacloudLoginType">
+        <id column="login_type_id" property="loginTypeId" jdbcType="BIGINT"/>
+        <result column="login_type_name" property="loginTypeName" jdbcType="VARCHAR"/>
+        <result column="login_type_code" property="loginTypeCode" jdbcType="VARCHAR"/>
+        <result column="login_type_description" property="loginTypeDescription" jdbcType="VARCHAR"/>
+        <result column="login_type_config" property="loginTypeConfig" jdbcType="VARCHAR"/>
+        <result column="is_active" property="isActive" jdbcType="INTEGER"/>
+        <result column="sort_order" property="sortOrder" jdbcType="INTEGER"/>
+        <result column="enterprise_id" property="enterpriseId" jdbcType="BIGINT"/>
+        <result column="creator_id" property="creatorId" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="update_by" property="updateBy" jdbcType="BIGINT"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <!-- 登录类型DTO结果映射 -->
+    <resultMap id="LoginTypeDTOResultMap" type="com.iwhalecloud.byai.manager.dto.datacloud.DatacloudLoginTypeDTO">
+        <id column="login_type_id" property="loginTypeId" jdbcType="BIGINT"/>
+        <result column="login_type_name" property="loginTypeName" jdbcType="VARCHAR"/>
+        <result column="login_type_code" property="loginTypeCode" jdbcType="VARCHAR"/>
+        <result column="login_type_description" property="loginTypeDescription" jdbcType="VARCHAR"/>
+        <result column="login_type_config" property="loginTypeConfig" jdbcType="VARCHAR"/>
+        <result column="is_active" property="isActive" jdbcType="INTEGER"/>
+        <result column="sort_order" property="sortOrder" jdbcType="INTEGER"/>
+        <result column="enterprise_id" property="enterpriseId" jdbcType="BIGINT"/>
+        <result column="creator_id" property="creatorId" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="update_by" property="updateBy" jdbcType="BIGINT"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
+        <result column="script_count" property="scriptCount" jdbcType="INTEGER"/>
+    </resultMap>
+
+    <!-- 基础字段列表 -->
+    <sql id="Base_Column_List">
+        login_type_id, login_type_name, login_type_code, login_type_description, 
+        login_type_config, is_active, sort_order, enterprise_id, creator_id, create_time, 
+        update_by, update_time
+    </sql>
+
+    <!-- 分页查询登录类型列表 -->
+    <select id="selectLoginTypeListByPage" resultMap="LoginTypeDTOResultMap">
+        SELECT 
+            lt.login_type_id,
+            lt.login_type_name,
+            lt.login_type_code,
+            lt.login_type_description,
+            lt.login_type_config,
+            lt.is_active,
+            lt.sort_order,
+            lt.enterprise_id,
+            lt.creator_id,
+            lt.create_time,
+            lt.update_by,
+            lt.update_time,
+            COUNT(s.script_id) AS script_count
+        FROM datacloud_login_type lt
+        LEFT JOIN datacloud_script s ON lt.login_type_id = s.login_type_id
+        WHERE lt.enterprise_id = #{query.enterpriseId}
+        <if test="query.loginTypeName != null and query.loginTypeName != ''">
+            AND lt.login_type_name LIKE CONCAT('%', #{query.loginTypeName}, '%')
+        </if>
+        <if test="query.loginTypeCode != null and query.loginTypeCode != ''">
+            AND lt.login_type_code LIKE CONCAT('%', #{query.loginTypeCode}, '%')
+        </if>
+        <if test="query.isActive != null">
+            AND lt.is_active = #{query.isActive}
+        </if>
+        GROUP BY lt.login_type_id
+        ORDER BY lt.sort_order ASC, lt.create_time DESC
+    </select>
+
+    <!-- 查询所有启用的登录类型 -->
+    <select id="selectActiveLoginTypes" resultMap="LoginTypeDTOResultMap">
+        SELECT 
+            lt.login_type_id,
+            lt.login_type_name,
+            lt.login_type_code,
+            lt.login_type_description,
+            lt.login_type_config,
+            lt.is_active,
+            lt.sort_order,
+            lt.enterprise_id,
+            lt.creator_id,
+            lt.create_time,
+            lt.update_by,
+            lt.update_time,
+            COUNT(s.script_id) AS script_count
+        FROM datacloud_login_type lt
+        LEFT JOIN datacloud_script s ON lt.login_type_id = s.login_type_id
+        WHERE lt.enterprise_id = #{enterpriseId}
+        AND lt.is_active = 1
+        GROUP BY lt.login_type_id
+        ORDER BY lt.sort_order ASC
+    </select>
+
+    <!-- 检查登录类型编码是否存�?-->
+    <select id="checkLoginTypeCodeExists" resultType="int">
+        SELECT COUNT(*)
+        FROM datacloud_login_type
+        WHERE login_type_code = #{loginTypeCode}
+        AND enterprise_id = #{enterpriseId}
+        <if test="excludeId != null">
+            AND login_type_id != #{excludeId}
+        </if>
+    </select>
+
+    <!-- 统计登录类型关联的脚本数-->
+    <select id="countScriptsByLoginType" resultType="int">
+        SELECT COUNT(*)
+        FROM datacloud_script
+        WHERE login_type_id = #{loginTypeId}
+    </select>
+
+    <!-- 查询登录类型统计信息 -->
+    <select id="selectLoginTypeStatistics" resultType="java.util.Map">
+        SELECT 
+            COUNT(*) AS total_login_types,
+            COUNT(CASE WHEN is_active = 1 THEN 1 END) AS active_login_types,
+            COUNT(CASE WHEN is_active = 0 THEN 1 END) AS inactive_login_types
+        FROM datacloud_login_type
+        WHERE enterprise_id = #{enterpriseId}
+    </select>
+
+    <!-- 批量删除登录类型 -->
+    <delete id="batchDeleteLoginTypes">
+        DELETE FROM datacloud_login_type
+        WHERE login_type_id IN
+        <foreach collection="loginTypeIds" item="loginTypeId" open="(" separator="," close=")">
+            #{loginTypeId}
+        </foreach>
+        AND enterprise_id = #{enterpriseId}
+    </delete>
+
+</mapper>

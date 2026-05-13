@@ -1,0 +1,308 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.organization.OrganizationMapper">
+
+    <resultMap id="organizationResultMap" type="com.iwhalecloud.byai.manager.entity.organization.Organization">
+        <result column="org_id" property="orgId"/>
+        <result column="org_code" property="orgCode"/>
+        <result column="org_name" property="orgName"/>
+        <result column="org_index" property="orgIndex"/>
+        <result column="parent_org_id" property="parentOrgId"/>
+        <result column="org_desc" property="orgDesc"/>
+    </resultMap>
+
+    <resultMap id="organizationVoResultMap" type="com.iwhalecloud.byai.manager.vo.organization.OrganizationVo">
+        <result column="org_id" property="orgId"/>
+        <result column="org_code" property="orgCode"/>
+        <result column="org_name" property="orgName"/>
+        <result column="org_index" property="orgIndex"/>
+        <result column="parent_org_id" property="parentOrgId"/>
+        <result column="parent_org_name" property="parentOrgName"/>
+        <result column="org_desc" property="orgDesc"/>
+    </resultMap>
+
+    <resultMap id="orgTreeVoResultMap" type="com.iwhalecloud.byai.manager.vo.organization.OrgTreeVo">
+        <result column="org_id" property="orgId" />
+        <result column="org_name" property="orgName" />
+        <result column="parent_org_id" property="parentOrgId" />
+        <result column="path_code" property="pathCode" />
+        <result column="total" property="total" />
+    </resultMap>
+
+    <resultMap id="orgManagerVoResultMap" type="com.iwhalecloud.byai.manager.vo.organization.OrgManagerVo">
+        <result column="user_id" property="userId" />
+        <result column="user_code" property="userCode" />
+        <result column="user_name" property="userName" />
+        <result column="org_id" property="orgId" />
+    </resultMap>
+
+    <resultMap id="UsersOrganizationResultMap" type="com.iwhalecloud.byai.common.login.bean.UsersOrganization">
+        <result column="org_id" property="orgId" />
+        <result column="org_name" property="orgName" />
+        <result column="path_code" property="pathCode" />
+        <result column="position_id" property="positionId" />
+        <result column="position_name" property="positionName" />
+        <result column="user_type" property="userType" />
+        <result column="path_name" property="pathName" />
+    </resultMap>
+
+    <resultMap id="belongOrgManagerVoResultMap" type="com.iwhalecloud.byai.manager.vo.organization.BelongOrgManagerVo">
+       <result column="user_id" property="userId" />
+       <result column="user_code" property="userCode" />
+       <result column="user_name" property="userName" />
+       <result column="grant_obj_id" property="grantObjId" />
+    </resultMap>
+
+    <select id="getUsersOrganization" resultMap="UsersOrganizationResultMap">
+        select a.org_id,
+               a.user_type,
+               a.position_id,
+               c.org_name,
+               c.path_code,
+               b.position_name,
+               string_agg(d.org_name, '-')   path_name
+        from po_users_organization a
+                 left join po_position b on a.position_id = b.position_id
+                 left join po_organization c on a.org_id = c.org_id
+                 left join po_organization d on STRPOS(concat('.', c.path_code, '.'), concat('.', d.org_id, '.')) > 0
+        where user_id =#{userId}
+        group by a.org_id,
+                 a.user_type,
+                 a.position_id,
+                 c.org_name,
+                 c.path_code,
+                 b.position_name
+    </select>
+
+    <select id="searchOrg" resultMap="organizationVoResultMap">
+        select a.org_id,
+               a.org_code,
+               a.org_name,
+               a.org_index,
+               a.parent_org_id,
+               a.org_desc,
+               b.org_name parent_org_name
+        from po_organization a
+                 left join po_organization b on a.parent_org_id = b.org_id
+        where a.org_id =#{orgId}
+    </select>
+
+    <select id="getOrgTree" resultMap="orgTreeVoResultMap">
+        select a.org_id,
+               a.org_name,
+               a.parent_org_id,
+               a.path_code
+        from po_organization a
+        <where>
+           <if test="parentOrgId !=null">
+              and a.parent_org_id =#{parentOrgId}
+           </if>
+           <if test="keyword !=null and keyword !=''">
+              and a.org_name like concat(concat('%',#{keyword}),'%')
+           </if>
+           <if test="orgIds != null and orgIds.size() > 0">
+               <foreach collection="orgIds" open="AND a.org_id IN (" close=")" item="orgId" separator=",">
+                    #{orgId}
+               </foreach>
+           </if>
+        </where>
+        order by a.org_index asc
+    </select>
+
+    <select id="countByParentOrgId" resultType="java.lang.Long">
+        select
+            count(1)
+        from po_organization
+        where parent_org_id =#{parentOrgId}
+    </select>
+
+    <select id="countDuplicate" resultType="java.lang.Long">
+        select
+            count(1)
+        from po_organization
+        <where>
+            <if test="orgName !=null and orgName !=''">
+                and org_name =#{orgName}
+            </if>
+            <if test="orgCode !=null and orgCode !=''">
+                and org_code =#{orgCode}
+            </if>
+            <if test="orgIdNoEqual !=null">
+                and org_id !=#{orgIdNoEqual}
+            </if>
+        </where>
+    </select>
+
+    <select id="qryByUserType" resultMap="orgManagerVoResultMap">
+        select a.user_id,
+               a.user_code,
+               a.user_name,
+               #{orgId} as org_id
+        from po_users a
+        <where>
+          a.user_id in (
+            select b.user_id 
+            from po_users_organization b 
+            where b.org_id = #{orgId}
+            <if test="userTypes != null and userTypes.size() > 0">
+                 <foreach collection="userTypes" open="AND b.user_type IN(" close=")" item="item" separator=",">
+                      #{item}
+                  </foreach>
+             </if>
+          )
+        </where>
+    </select>
+
+    <select id="findOrganizationByUserId" resultType="com.iwhalecloud.byai.manager.entity.organization.Organization">
+        select a.org_id,
+               a.org_code,
+               a.org_name,
+               a.org_type,
+               a.parent_org_id,
+               a.org_level,
+               a.org_index,
+               a.create_date,
+               a.update_date,
+               a.path_code,
+               a.org_desc
+        from po_organization a
+                 join po_users_organization b on a.org_id = b.org_id
+            and b.user_id = #{userId}
+    </select>
+
+    <select id="countUsersByOrgId" resultType="java.lang.Long" parameterType="java.lang.Long">
+        select count(1)
+        from po_users_organization a
+                 join po_users b on a.user_id = b.user_id
+        where b.state != 'X'  and a.org_id =#{userId}
+    </select>
+
+    <select id="getFirstOrgId" resultType="java.lang.Long">
+        select
+            min(org_id)
+        from
+            po_organization
+        where
+            parent_org_id = -1
+    </select>
+
+
+    <select id="selectUnderlingList" resultType="java.lang.Long">
+        select
+            org_id
+        from po_organization
+        where path_code like CONCAT(#{pathCode},'%')
+    </select>
+
+    <select id="getCurrentAndBeyondOrgIdList" resultType="java.lang.Long">
+        select
+            a.org_id
+        from po_organization a
+        where a.state != 'X'
+        <if test="orgIdList != null and orgIdList.size()>0">
+            and
+            <foreach collection="orgIdList" item="item" open="(" close=")" separator="or">
+                a.path_code like concat('%', #{item} '%')
+            </foreach>
+        </if>
+    </select>
+
+    <select id="findByUnionId" resultMap="organizationResultMap">
+        select a.org_id,
+               a.org_code,
+               a.org_name,
+               a.org_type,
+               a.parent_org_id,
+               a.org_level,
+               a.org_index,
+               a.create_date,
+               a.update_date,
+               a.path_code,
+               a.org_desc
+        from po_organization a
+                 join po_org_external_system b on a.org_id = b.org_id
+        where a.unionid =#{unionId}
+    </select>
+
+    <select id="qryAllBelongOrgManagers" resultMap="belongOrgManagerVoResultMap">
+        select a.user_id,
+               a.user_code,
+               a.user_name,
+               b.grant_obj_id
+        from po_users a
+                 join au_privilege_grant b on a.user_id = b.grant_to_obj_id
+        where a.state = 'A'
+          and b.grant_type = 'ALLOW_MANAGE'
+          and b.grant_obj_type = 'AGENT'
+          and b.status_cd = 'A'
+          and b.grant_to_type = 'RED'
+          and b.grant_to_obj_type = 'USER'
+          and b.grant_obj_id = #{grantObjId}
+    </select>
+
+    <select id="getOpenOrgTree" resultMap="orgTreeVoResultMap">
+        SELECT a.org_id,
+               a.org_name,
+               a.parent_org_id,
+               a.path_code,
+               count(b.org_id) AS total
+        FROM po_organization a
+                 LEFT JOIN po_organization b
+                           ON strpos(concat('.', b.path_code, '.'), concat('.', a.org_id, '.')) > 0
+        <where>
+           <if test="parentOrgId !=null">
+              and a.parent_org_id =#{parentOrgId}
+           </if>
+           <if test="keyword !=null and keyword !=''">
+              and a.org_name like concat(concat('%',#{keyword}),'%')
+           </if>
+           <if test="orgIds != null and orgIds.size() > 0">
+               <foreach collection="orgIds" open="AND a.org_id IN (" close=")" item="orgId" separator=",">
+                    #{orgId}
+               </foreach>
+           </if>
+        </where>
+        GROUP BY a.org_id,
+                 a.org_name,
+                 a.parent_org_id,
+                 a.path_code
+        ORDER BY a.org_index asc
+    </select>
+
+    <!-- 批量查询组织信息（包含路径名称），基于path_code构建路径 -->
+    <select id="selectOrganizationsWithPathNames" resultType="java.util.HashMap">
+        SELECT 
+            o.org_id as "orgId",
+            o.org_name as "orgName",
+            o.path_code as "pathCode",
+            (
+                SELECT string_agg(parent.org_name, '-')
+                FROM (
+                    SELECT parent.org_name, parent.org_level
+                    FROM po_organization parent
+                    WHERE parent.org_id = ANY(
+                        SELECT unnest(string_to_array(o.path_code, '.')::bigint[])
+                    )
+                    ORDER BY parent.org_level
+                ) parent
+            ) as "pathName"
+        FROM po_organization o
+        WHERE o.org_id IN
+        <foreach collection="orgIds" item="orgId" open="(" separator="," close=")">
+            #{orgId}
+        </foreach>
+        ORDER BY o.org_id
+    </select>
+
+    <select id="getTopOrgList" resultType="java.lang.Long">
+        select
+            org_id
+        from
+            po_organization
+        where
+            parent_org_id = -1
+    </select>
+
+</mapper>

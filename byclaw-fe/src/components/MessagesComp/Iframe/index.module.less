@@ -1,0 +1,30 @@
+.iframeComp {
+  padding: 7px 12px 7px 8px;
+  gap: 8px;
+  border-radius: 10px;
+  background: #0000000a;
+  max-width: max-content;
+}
+
+.spin {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.spinWrapper {
+  height: 100%;
+  width: 100%;
+  max-height: 100% !important;
+  :global {
+    .@{antPrefix}-spin-container {
+      height: 100%;
+      width: 100%;
+    }
+    .@{antPrefix}-spin-blur {
+      opacity: 1 !important;
+    }
+  }
+}

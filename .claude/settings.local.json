@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(java:*)",
+      "Bash(mvn:*)",
+      "Bash(npx tsc *)",
+      "Read(//Users/musoon/.claude/**)",
+      "Read(//Users/musoon/**)",
+      "WebSearch"
+    ]
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "name": "@openclaw/byclaw-sqlite",
+  "version": "2026.4.23",
+  "private": true,
+  "description": "OpenClaw dev plugin that exposes a SQLite-backed sqlExecute capability for the byclaw database.",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --sourcemap --external:openclaw",
+    "build:fast": "esbuild index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --external:openclaw",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.48"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.6.3",
+    "vitest": "^3.0.5"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.4.16",
+      "minGatewayVersion": ">=2026.4.16"
+    },
+    "build": {
+      "openclawVersion": "2026.4.16",
+      "pluginSdkVersion": "2026.4.16"
+    }
+  }
+}

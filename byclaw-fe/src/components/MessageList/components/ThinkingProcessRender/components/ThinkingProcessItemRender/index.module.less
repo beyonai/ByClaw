@@ -1,0 +1,28 @@
+.thinkingProcessItem {
+  width: 100%;
+  line-height: 22px;
+  font-size: var(--beyond-font-size);
+  color: var(--beyond-color-text-tertiary);
+  border-left: 2px solid #ced3d9;
+  padding: 4px 4px 4px 12px;
+  margin-left: 8px;
+  min-height: 22px;
+}
+.thinkingProcessItemInline {
+  display: inline-flex;
+  padding: 4px 4px 16px 4px;
+  // margin-left: 8px;
+}
+
+.isThinkTaskPrepare {
+  border-left: 2px solid #ced3d9;
+}
+
+// [data-type='noLine'] .thinkStatusTitle,
+// [data-type='noLine'] .thinkTaskUserInput,
+[data-type='noLine'] .thinkingProcessItem,
+[data-type='noLine'] .isThinkTaskPrepare {
+  border-left: none;
+  padding-left: 0;
+  margin-left: 0;
+}

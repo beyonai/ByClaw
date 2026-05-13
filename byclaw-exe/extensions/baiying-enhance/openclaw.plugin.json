@@ -1,0 +1,121 @@
+{
+  "id": "baiying-enhance",
+  "name": "Baiying Enhance",
+  "description": "Sync Baiying agent JSON from disk into OpenClaw and expose resources through baiying_call (Redis-driven updates).",
+  "version": "1.0.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "description": "Unknown keys are tolerated for backward compatibility (deprecated examples, typos in non-critical fields). Prefer documented properties only.",
+    "properties": {
+      "agentConfigDir": {
+        "type": "string",
+        "description": "Directory containing agent JSON files (flat *.json or subdirs with config.json)."
+      },
+      "executorResourcesDir": {
+        "type": "string",
+        "description": "Directory containing resource JSON files (flat *.json or subdirs with config.json)."
+      },
+      "watchDebounceMs": {
+        "type": "number",
+        "description": "Debounce (ms) for coalescing dig-employee Redis flush triggers and optional initial scan scheduling.",
+        "default": 500
+      },
+      "mainParentAgentId": {
+        "type": "string",
+        "description": "Agent id that may spawn managed sub-agents (allowAgents updated).",
+        "default": "main"
+      },
+      "mergeAllowSpawnForMain": {
+        "type": "boolean",
+        "description": "Merge managed agent ids into mainParentAgentId subagents.allowAgents.",
+        "default": true
+      },
+      "embedApiKeysFromJson": {
+        "type": "boolean",
+        "description": "If true, write plaintext api keys from JSON into the active config file (openclaw.json) (not recommended).",
+        "default": false
+      },
+      "envApiKeyTemplate": {
+        "type": "string",
+        "description": "Env var name template for provider apiKey; use {sourceKey} placeholder (default OPENCLAW_BAIYING_{sourceKey})."
+      },
+      "workspaceAutoSeed": {
+        "type": "boolean",
+        "description": "Create ~/.openclaw/workspace-<agentId>/ and seed SOUL.md/AGENTS.md/BYAI_BUSINESS_EXTENSIONS.md/… from JSON after each sync (default true).",
+        "default": true
+      },
+      "mainAgentsMdMode": {
+        "type": "string",
+        "enum": [
+          "off",
+          "if_missing",
+          "if_managed_marker",
+          "always"
+        ],
+        "description": "How to write main agent AGENTS.md. Default always (overwrite on each seed). Set if_managed_marker or if_missing to avoid clobbering unmarked files; foreign takeover applies only when if_managed_marker."
+      },
+      "mainAgentsMdPath": {
+        "type": "string",
+        "description": "Override template file for main AGENTS.md. When unset, uses the template embedded in dist/index.js at build time (source: templates/main-agents.md)."
+      },
+      "useBundledMainAgentsMd": {
+        "type": "boolean",
+        "description": "If false, do not use the template embedded in the bundle (set mainAgentsMdPath or mainAgentsMdMode off)."
+      },
+      "mainWorkspaceAgentsAutoSeed": {
+        "type": "boolean",
+        "description": "When true (default), seed main workspace AGENTS.md at plugin register and on each sync flush, independent of workspaceAutoSeed.",
+        "default": true
+      },
+      "mainAgentsMdForeignTakeover": {
+        "type": "boolean",
+        "description": "When true (default), with if_managed_marker, replace a stock AGENTS.md without plugin marker once per workspace (tracked under OPENCLAW_STATE_DIR/baiying-enhance/).",
+        "default": true
+      },
+      "defaultProxyUrl": {
+        "type": "string",
+        "description": "Default proxy URL for LLM-proxy agents (integrationType=NONE), e.g. https://lab.iwhalecloud.com/gpt-proxy/v1."
+      },
+      "defaultApiKey": {
+        "type": "string",
+        "description": "Default API key for the proxy endpoint."
+      },
+      "persistAgentContentIndex": {
+        "type": "boolean",
+        "description": "Persist per-agent source JSON SHA-256 hashes to avoid full re-sync after gateway restart (default true).",
+        "default": true
+      },
+      "agentContentIndexPath": {
+        "type": "string",
+        "description": "Optional path to the content index file; default is ~/.openclaw/baiying-enhance/agent-content-index-<id>.json (writable; avoids RO mounts on agentConfigDir)."
+      },
+      "digEmployeeChangeSubscribe": {
+        "type": "boolean",
+        "description": "Subscribe to Redis Pub/Sub for digital-employee change events (same Redis as USER_CODE auth). Can also enable with env BAIYING_DIG_EMPLOYEE_CHANGE_SUBSCRIBE=true."
+      },
+      "digEmployeeChangeChannel": {
+        "type": "string",
+        "description": "Redis channel for DigEmployeeChangeEvent JSON (default byai:pub:dig_employee_change; env BAIYING_DIG_EMPLOYEE_CHANGE_CHANNEL overrides when unset)."
+      },
+      "digEmployeeChangeSubscribeStrictAuth": {
+        "type": "boolean",
+        "description": "When true (default), ignore Pub/Sub events until dig-employee auth returns a Set of authorized resource ids. Set false to process events without auth filter."
+      },
+      "configSyncHotPluginEntriesPrefixes": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Optional. Extra plugins.entries paths (plugin id or plugins.entries.<id>) to hot-reload when agent sync rewrites openclaw.json; omit to only register this plugin entry. Add entries your sync co-touches (e.g. byai-channel) to avoid full gateway restart."
+      },
+      "watchAgentDir": {
+        "type": "boolean",
+        "description": "Deprecated: directory filesystem watch was removed; value is ignored. Retained so older openclaw.json does not fail validation."
+      }
+    }
+  },
+  "activation": {
+    "onStartup": true
+  }
+}

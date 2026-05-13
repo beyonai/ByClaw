@@ -1,0 +1,321 @@
+@antPrefix: ant;
+
+.resourceCard {
+  height: 150px;
+  width: 100%;
+  min-width: 280px;
+  display: flex;
+  border-radius: 16px;
+  border: var(~'--@{antPrefix}-line-width') solid var(~'--@{antPrefix}-color-border');
+  transition: all 0.3s;
+  position: relative;
+
+  .renderContent {
+    position: relative;
+    padding: 12px;
+    width: 100%;
+    height: 100%;
+  }
+
+  &:hover {
+    box-shadow: 0 6px 10px 0 #2a3c4f1a;
+  }
+
+  @media (max-width: 767px) {
+    min-width: 0;
+  }
+}
+
+.tag {
+  padding: 0px 4px;
+  border-radius: 4px;
+  background-color: rgba(22, 93, 255, 0.1);
+  flex-shrink: 0;
+  max-width: 150px;
+  color: #088cff;
+  font-size: 12px;
+  font-weight: 600;
+
+  .tagText {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 600;
+    background: linear-gradient(90deg, #088cff 0%, #00cdd5 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: #088cff;
+  }
+}
+
+.personalDefaultTag {
+  background: linear-gradient(135deg, #0068ff 0%, #003681 100%);
+  color: #fff;
+}
+
+.avatarContainer {
+  flex-shrink: 0;
+}
+
+.avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  object-fit: cover;
+}
+
+.defaultAvatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.resourceMeta {
+  width: 100%;
+  min-width: 0;
+  color: #707680;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.resourceMetaLabel {
+  flex-shrink: 0;
+}
+
+.resourceMetaName {
+  color: var(--beyond-color-text-secondary);
+}
+
+.resourceInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.resourceInfoHeader {
+  align-items: flex-start;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.resourceInfoHeaderWithTag {
+  padding-right: 70px; // 为 topRightTag 预留空间
+}
+
+.resourceName {
+  font-size: 16px;
+  font-weight: 500;
+  color: #1f2533;
+  margin-bottom: 0 !important;
+  max-width: 100%;
+}
+
+.cardActionBtn {
+  display: none;
+  &:hover {
+    color: #165dff;
+  }
+}
+
+.resourceCard:hover .cardActionBtn {
+  display: block;
+}
+
+.resourceDescription {
+  color: #666;
+  font-size: 14px;
+  line-height: 22px;
+  margin-bottom: 0 !important;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  margin-top: auto;
+  font-size: 12px;
+  line-height: 20px;
+  color: #707680;
+  font-family: 'PingFang SC';
+  min-height: 22px;
+
+  .count,
+  .dot,
+  .creator {
+    font-size: 12px;
+    color: #707680;
+    font-family: 'PingFang SC';
+    line-height: 20px;
+  }
+}
+
+.metaPrimary {
+  flex: 1;
+  min-width: 0;
+}
+
+.metaPrimaryWithHover {
+  display: flex;
+}
+
+.metaHover {
+  display: none;
+  margin-left: auto;
+}
+
+.metaItem {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: calc(50% - 3px);
+  gap: 6px;
+
+  &:first-child {
+    margin-right: 6px;
+  }
+
+  &:last-child {
+    margin-left: auto;
+  }
+}
+
+.nameText {
+  color: var(--beyond-color-text-secondary);
+}
+
+.creator {
+  margin-bottom: 0 !important;
+  width: 100%;
+  gap: 6px;
+
+  & > * {
+    width: calc(50% - 3px);
+  }
+
+  .nameText {
+    color: var(--beyond-color-text-secondary);
+  }
+}
+
+.antdIconStyle {
+  font-size: 14px;
+  margin-right: 4px;
+  color: #707680;
+}
+
+.resourceCard:hover .metaHover {
+  display: block;
+}
+
+.resourceCard:hover .metaPrimaryWithHover {
+  display: none;
+}
+
+.defaultAvatarIcon {
+  font-size: 36px;
+}
+
+.cardActionBtnIcon {
+  font-size: 16px;
+}
+
+.renderRightBottom {
+  margin-left: auto;
+}
+
+.skeletonContainer {
+  padding: 12px;
+}
+
+.cardActionBtn {
+  position: absolute;
+  bottom: 14px;
+  right: 14px;
+  display: none;
+
+  &:hover {
+    color: #165dff;
+  }
+}
+
+.resourceCard:hover .cardActionBtn {
+  display: block;
+}
+
+.logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.defaultLogo {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #f2f6fa;
+  color: #165dff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.title {
+  flex: 1;
+  color: #1f2533;
+  font-size: 16px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desc {
+  height: 44px;
+  color: #9aa1ac;
+  font-size: 12px;
+  line-height: 22px;
+  overflow: hidden;
+}
+
+.meta {
+  margin-top: 8px;
+  color: #9aa1ac;
+  font-size: 11px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  // span {
+  //   margin-right: 12px;
+  // }
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.menuItemDisabled {
+  color: #b7bdc8;
+  cursor: not-allowed;
+}
+
+// 修复 typography 组件的 margin-bottom 问题
+div.beyond-typography,
+.beyond-typography p {
+  margin-bottom: 0;
+}

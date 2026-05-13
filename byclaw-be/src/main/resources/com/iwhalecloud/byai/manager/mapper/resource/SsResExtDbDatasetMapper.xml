@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.SsResExtDbDatasetMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.resource.SsResExtDbDataset">
+        <id column="dataset_id" property="datasetId" />
+        <result column="resource_id" property="resourceId" />
+        <result column="table_join_info" property="tableJoinInfo" />
+        <result column="table_location" property="tableLocation" />
+        <result column="execute_sql" property="executeSql" />
+        <result column="execute_sql" property="executeSql" />
+        <result column="main_data_source_id" property="mainDataSourceId" />
+        <result column="create_by" property="createBy" />
+        <result column="create_time" property="createTime" />
+        <result column="update_time" property="updateTime" />
+    </resultMap>
+
+    <!-- 通用查询结果列 -->
+    <sql id="Base_Column_List">
+        dataset_id, resource_id, table_join_info, table_location,
+        execute_sql, main_data_source_id, create_by, create_time, update_time
+    </sql>
+
+    <!-- 根据资源ID查询数据集信息 -->
+    <select id="selectByResourceId" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List" />
+        FROM ss_res_ext_dbdataset
+        WHERE resource_id = #{resourceId}
+        LIMIT 1
+    </select>
+
+    <!-- 根据资源ID查询数据集信息列表（防御性，不加LIMIT） -->
+    <select id="selectListByResourceId" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List" />
+        FROM ss_res_ext_dbdataset
+        WHERE resource_id = #{resourceId}
+    </select>
+
+    <!-- 根据资源ID列表批量查询数据集信息 -->
+    <select id="selectListByResourceIds" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List" />
+        FROM ss_res_ext_dbdataset
+        WHERE resource_id IN
+        <foreach collection="resourceIds" item="item" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+    </select>
+
+</mapper>
+

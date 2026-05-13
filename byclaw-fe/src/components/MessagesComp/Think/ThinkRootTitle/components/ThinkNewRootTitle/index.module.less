@@ -1,0 +1,144 @@
+.thinkingTitle {
+  position: relative;
+  line-height: 22px;
+  font-size: var(--beyond-font-size);
+  color: var(--beyond-color-text-tertiary);
+  color: var(--beyond-color-text-tertiary);
+  //   border-left: 2px solid #ced3d9;
+  // padding: 6px 0;
+  // margin-left: 8px;
+  min-height: 22px;
+  align-items: center;
+}
+
+.titleText {
+  padding: 8px;
+  font-size: 14px;
+  color: var(--beyond-color-text);
+  font-weight: bold;
+}
+
+.sectionContent {
+  border-left: 1px dashed #ced3d9;
+  margin-left: 6px;
+}
+
+.childItem {
+  position: relative;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  margin-left: 15px;
+  .itemHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    // background: linear-gradient(180deg, #f2f6fa00 0%, #F2F6FA 50%);
+
+    // box-shadow: 0 5px 10px rgba(0, 0, 0, 0.2);
+    padding: 0 10px;
+    &.collapsible {
+      cursor: pointer;
+    }
+    .itemCollapseIcon {
+      color: #999;
+      font-size: 12px;
+    }
+  }
+  &.childItemBigSmartOffice {
+    background: #f2f6fa;
+    border: 1px solid #e6e8f0;
+  }
+}
+
+.childItemILF {
+  display: inline-flex;
+  margin-left: 0;
+}
+
+.itemChildHeader {
+  // max-height: 300px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  // padding: 10px 0 10px 10px;
+  padding-left: 10px;
+  padding-right: 10px;
+  scroll-behavior: smooth; /* Optional for smooth scrolling */
+
+  &.open {
+    animation: openHeight 0.3s ease-in-out forwards;
+  }
+
+  &.close {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+}
+
+@keyframes openHeight {
+  from {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  to {
+    max-height: 300px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+}
+
+@keyframes closeHeight {
+  from {
+    max-height: 300px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  to {
+  }
+}
+
+.topGradient {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 10px;
+  height: 24px;
+  z-index: 100;
+  background: linear-gradient(to bottom, rgba(242, 246, 250, 1), rgba(242, 246, 250, 0));
+  display: none;
+  &.open {
+    display: block;
+    animation: fadeIn 0.3s ease-in-out forwards;
+  }
+  &.close {
+    display: none;
+  }
+}
+
+.bottomGradient {
+  position: absolute;
+  bottom: 0;
+  left: 10px;
+  right: 10px;
+  height: 24px;
+  z-index: 100;
+  background: linear-gradient(to top, rgba(242, 246, 250, 1) 50%, rgba(242, 246, 250, 0));
+  display: none;
+  &.open {
+    display: block;
+    animation: fadeIn 0.3s ease-in-out forwards;
+  }
+  &.close {
+    display: none;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

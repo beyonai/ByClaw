@@ -1,0 +1,114 @@
+.cardContent {
+  border-radius: 8px;
+  transition: all 0.3s;
+  width: 100%;
+  border: 1px solid #e6ebf0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+
+  &:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    // transform: translateY(-2px);
+  }
+
+  .cardHeader {
+    display: flex;
+    align-items: flex-start;
+    margin-bottom: 8px;
+  }
+
+  .cardTitle {
+    font-size: 16px;
+    font-weight: 500;
+    margin-bottom: 8px;
+    color: #1f2533;
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  .maskTransparent {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+  }
+
+  .maskTransparent::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 10%; /* 100px - 80px */
+    height: 100%;
+    z-index: 10;
+    background: linear-gradient(to right, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 1));
+  }
+
+  .cardDesc {
+    font-size: 14px;
+    color: #475366;
+    margin-bottom: 16px;
+    line-height: 1.5;
+    max-height: 42px;
+
+    :global {
+      table {
+        width: max-content;
+      }
+    }
+  }
+
+  .cardFooter {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+
+    .leftInfo {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+
+      .cardIcon {
+        :global(.anticon) {
+          color: #126dff;
+        }
+      }
+
+      .source {
+        color: #7a8799;
+        margin-right: 8px;
+      }
+
+      .category {
+        background-color: #f2f6fa;
+        color: #7a8799;
+        border: none;
+        padding: 0 8px;
+        height: 20px;
+        line-height: 20px;
+        border-radius: 4px;
+        margin-right: 8px;
+      }
+
+      .date {
+        color: #b8c0cc;
+      }
+    }
+
+    .views {
+      display: flex;
+      align-items: center;
+      color: #b8c0cc;
+
+      &::before {
+        content: '';
+        display: inline-block;
+        width: 16px;
+        height: 16px;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23b8c0cc' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='3'%3E%3C/circle%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'%3E%3C/path%3E%3C/svg%3E");
+        background-size: contain;
+        margin-right: 4px;
+      }
+    }
+  }
+}

@@ -1,0 +1,80 @@
+.fileItem {
+  width: 220px;
+  height: 54px;
+  padding: 8px;
+  border-radius: 12px;
+  background-color: rgba(0, 0, 0, 0.04);
+  position: relative;
+
+  .fileItemIcon {
+    width: 28px;
+    height: 28px;
+  }
+
+  .actionList {
+    position: absolute;
+    right: 0;
+    top: 0;
+    z-index: 1;
+    padding: 12px;
+    background-color: rgba(0, 0, 0, 0.2);
+    display: none;
+
+    .fileItemDownload {
+      background-color: #fff;
+      padding: 6px;
+      height: 100%;
+      width: 100%;
+      border-radius: 50%;
+    }
+  }
+
+  .fileItemInfo {
+    margin: 0 6px;
+    .fileItemName {
+      font-size: var(--beyond-font-size);
+      color: var(--beyond-color-text-secondary);
+      font-weight: bold;
+      // margin-bottom: 4px;
+    }
+    .fileItemMore {
+      font-size: var(--beyond-font-size-sm);
+      color: var(--beyond-color-text-quaternary);
+    }
+  }
+  .fileItemClose {
+    position: absolute;
+    right: 1px;
+    top: 1px;
+    z-index: 2;
+    display: none;
+  }
+  &:hover {
+    .fileItemClose {
+      display: block;
+    }
+
+    .actionList {
+      display: flex;
+    }
+  }
+}
+
+.infiniteScroll {
+  & > * {
+    margin-bottom: 12px;
+  }
+}
+
+.modal {
+  min-width: 60vw;
+  :global {
+    .@{antPrefix}-modal-body {
+      min-height: 50vh;
+    }
+  }
+}
+
+.preview {
+  line-height: 1;
+}

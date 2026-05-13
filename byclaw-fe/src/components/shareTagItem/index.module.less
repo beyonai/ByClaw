@@ -1,0 +1,45 @@
+.userTag {
+  border: none;
+  padding: 6px;
+  margin: 6px;
+  color: #14161a !important;
+  display: flex;
+  align-items: center;
+
+  :global {
+    .@{antPrefix}-tag-close-icon {
+      color: #a4aab2;
+      position: relative;
+      top: -1px;
+
+      &:hover {
+        color: #333;
+      }
+    }
+  }
+}
+
+.userHead {
+  width: 20px;
+  height: 20px;
+  display: inline-block;
+  background-color: var(--beyond-color-primary);
+  margin-right: 4px;
+  border-radius: 4px;
+  text-align: center;
+  color: #fff;
+  line-height: 20px;
+  overflow: hidden;
+}
+
+.orgAvatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: #bedaff;
+  color: #4080ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 4px;
+}

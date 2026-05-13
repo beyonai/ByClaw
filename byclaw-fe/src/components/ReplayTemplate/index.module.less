@@ -1,0 +1,75 @@
+.spinWrapper {
+  height: 100%;
+  :global {
+    .@{antPrefix}-spin-container {
+      height: 100%;
+    }
+  }
+}
+
+.footer {
+  width: 400px;
+  height: 48px;
+  border-radius: 34px;
+  padding: 8px 8px 8px 16px;
+  border: 1px solid #0000000f;
+  background: #fff;
+  box-shadow: 0 6px 10px 0 #2a3c4f1a;
+  position: relative;
+  overflow: hidden;
+
+  &.running {
+    &::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      border-radius: 34px;
+      padding: 1px;
+      background: linear-gradient(45deg, #1890ff, #52c41a, #faad14, #f5222d, #722ed1, #1890ff);
+      background-size: 300% 300%;
+      animation: borderFlow 3s ease-in-out infinite;
+      mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      mask-composite: xor;
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+    }
+
+    // &::after {
+    //   content: '';
+    //   position: absolute;
+    //   top: 0;
+    //   left: -100%;
+    //   width: 100%;
+    //   height: 100%;
+    //   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+    //   animation: shimmer 2s infinite;
+    // }
+  }
+}
+
+.wrapper {
+}
+
+@keyframes borderFlow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 100%;
+  }
+}

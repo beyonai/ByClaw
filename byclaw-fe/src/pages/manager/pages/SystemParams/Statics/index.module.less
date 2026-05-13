@@ -1,0 +1,44 @@
+.container {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/** 与 Params 一致：外层不滚动；表头、分页固定，仅表体由 scroll.y 滚动 */
+.tableScroll {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.table {
+  :global {
+    .@{antPrefix}-table-body {
+      overflow-x: hidden !important;
+    }
+    .@{antPrefix}-typography {
+      margin-bottom: 0;
+    }
+  }
+}
+
+.jsonDrawerScroll {
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  border: 1px solid rgba(5, 5, 5, 0.06);
+  border-radius: 8px;
+}
+
+.jsonDrawerPre {
+  margin: 0;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  padding: 12px 14px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 8px;
+}

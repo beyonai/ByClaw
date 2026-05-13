@@ -1,0 +1,63 @@
+.leftTop {
+  width: 100%;
+
+  .leftTopTitle {
+    color: #14161a;
+    font-family: PingFang SC;
+    font-size: 14px;
+    font-style: normal;
+    font-weight: 500;
+    line-height: 22px;
+    margin-bottom: 10px;
+  }
+
+  :global {
+    .@{antPrefix}-tabs-nav {
+      &:before {
+        display: none;
+      }
+
+      .@{antPrefix}-tabs-tab {
+        padding: 6px 19px;
+        border-radius: 8px;
+        background-color: #f7fafc;
+        color: #40454d;
+
+        &.@{antPrefix}-tabs-tab-active {
+          background-color: #bedaff;
+          color: #165dff;
+        }
+
+        & + .@{antPrefix}-tabs-tab {
+          margin-left: 14px;
+        }
+      }
+
+      .@{antPrefix}-tabs-ink-bar {
+        display: none;
+      }
+
+      .@{antPrefix}-tabs-nav-more {
+        padding: 5px 8px;
+      }
+    }
+  }
+}
+
+.rightBottomContainer {
+  border-top: 1px solid #e5e6e8;
+  padding: 12px 0px 40px;
+
+  .rightItem {
+    display: flex;
+    align-items: center;
+  }
+
+  .label {
+    color: #475366;
+    font-size: 14px;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 22px;
+  }
+}

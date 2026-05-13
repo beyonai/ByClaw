@@ -1,0 +1,73 @@
+.container {
+  width: 100%;
+
+  .tableHeader {
+    display: flex;
+    align-items: center;
+    padding: 12px 0px;
+    border-bottom: 0.5px solid #e6ebf0;
+    color: #707680;
+    font-family: PingFang SC;
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 20px;
+  }
+
+  .tableSelect {
+    width: 32px;
+  }
+
+  .tableBody {
+    flex: 1 1 auto;
+    overflow: auto;
+
+    :global(.@{antPrefix}-list-item) {
+      &:hover {
+        background-color: var(--beyond-color-bg-text-hover);
+      }
+    }
+  }
+  .tableHeaderBase,
+  .tableBodyBase {
+    .th {
+      &:nth-child(1) {
+        width: 380px;
+      }
+
+      &:nth-child(2) {
+        width: 180px;
+      }
+    }
+  }
+
+  .tableHeader,
+  .tableBody {
+    .th,
+    .tr {
+      &:nth-child(2) {
+        width: 300px;
+      }
+
+      &:nth-child(3) {
+        width: 180px;
+      }
+      &:nth-child(4) {
+        width: 120px;
+      }
+    }
+  }
+
+  .breadcrumb {
+    margin: 20px 0px 8px;
+  }
+
+  .listItem {
+    justify-content: flex-start;
+    padding-left: 6px;
+  }
+  .listItemBase {
+    cursor: pointer;
+    padding-left: 6px;
+  }
+}

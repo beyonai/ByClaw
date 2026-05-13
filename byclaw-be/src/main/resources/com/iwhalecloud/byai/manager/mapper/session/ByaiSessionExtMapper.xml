@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.session.ByaiSessionExtMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt">
+        <id column="ext_id" property="extId" />
+        <result column="session_id" property="sessionId" />
+        <result column="ext_param_name" property="extParamName" />
+        <result column="ext_param_code" property="extParamCode" />
+        <result column="ext_param_value" property="extParamValue" />
+    </resultMap>
+
+    <!-- 通用查询列 -->
+    <sql id="Base_Column_List">
+        ext_id, session_id, ext_param_name, ext_param_code, ext_param_value
+    </sql>
+
+    <!-- 根据会话ID查询扩展参数列表 -->
+    <select id="selectBySessionId" resultMap="BaseResultMap">
+        SELECT ext_id, session_id, ext_param_name, ext_param_code, ext_param_value
+        FROM byai_session_ext
+        WHERE session_id = #{sessionId}
+        ORDER BY ext_id ASC
+    </select>
+
+</mapper>

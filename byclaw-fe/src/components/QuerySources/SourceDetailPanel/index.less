@@ -1,0 +1,230 @@
+// 遮罩层
+.mask {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(2px);
+  z-index: 99;
+  border-radius: 12px;
+}
+
+// 内容层 - 占满整个区域
+.detailPanel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #ffffff;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.breadcrumbTitle {
+  font-size: 14px;
+  color: #666;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--primary-color);
+  }
+}
+
+.breadcrumbSeparator {
+  font-size: 12px;
+  color: #999;
+}
+
+.breadcrumbCurrent {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.closeButton {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 8px;
+
+  &:hover {
+    background: #f5f5f5;
+  }
+}
+
+.panelBody {
+  flex: 1;
+  overflow: auto;
+  padding: 20px;
+}
+
+// 通用预览区域
+.previewLoading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.previewEmpty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.previewContainer {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.preview {
+  flex: 1;
+  height: 100%;
+}
+
+.previewSpin {
+  height: 100%;
+}
+
+// 搜索结果内容样式
+.searchResultsContent {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.selectAllBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+
+.selectAllText {
+  color: #333;
+  margin-left: 8px;
+}
+
+.selectedCount {
+  color: #666;
+}
+
+.divider {
+  margin: 12px 0;
+}
+
+.resultsList {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.resultDetailItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: #fafafa;
+  border-radius: 8px;
+  border: 1px solid #f0f0f0;
+}
+
+.resultCheckbox {
+  margin-top: 2px;
+}
+
+.resultDetailContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.resultDetailHeader {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.resultFavicon {
+  // width: 20px;
+  // height: 20px;
+  flex-shrink: 0;
+
+  img {
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+  }
+}
+
+.defaultFavicon {
+  width: 20px;
+  height: 20px;
+  background: var(--primary-color);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.resultDetailTitle {
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.resultUrl {
+  color: var(--primary-color);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  word-break: break-all;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.panelFooter {
+  padding-top: 16px;
+  border-top: 1px solid #f0f0f0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.confirmButton {
+  height: 36px;
+  padding: 0 24px;
+  border-radius: 18px;
+  font-weight: 500;
+}

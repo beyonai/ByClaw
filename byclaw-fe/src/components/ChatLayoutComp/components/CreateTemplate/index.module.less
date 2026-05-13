@@ -1,0 +1,53 @@
+.uploadWrapper {
+  :global {
+    .@{antPrefix}-upload.@{antPrefix}-upload.@{antPrefix}-upload-select {
+      width: 90px;
+      height: 120px;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+  }
+}
+
+.imageContainer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+
+  &:hover {
+    .deleteOverlay {
+      display: flex;
+    }
+  }
+}
+
+.uploadedImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.deleteOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+
+.actionIcon {
+  color: #ffffff;
+  font-size: 16px;
+  transition: all 0.3s ease;
+
+  &:hover {
+    transform: scale(1.1);
+  }
+}

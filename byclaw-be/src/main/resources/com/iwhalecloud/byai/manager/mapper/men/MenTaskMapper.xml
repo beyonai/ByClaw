@@ -1,0 +1,411 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.men.MenTaskMapper">
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.men.MenTask">
+        <id column="task_id" property="taskId" jdbcType="BIGINT"/>
+        <result column="task_type" property="taskType" jdbcType="VARCHAR"/>
+        <result column="title" property="title" jdbcType="VARCHAR"/>
+        <result column="content" property="content" jdbcType="VARCHAR"/>
+        <result column="res_com_id" property="resComId" jdbcType="BIGINT"/>
+        <result column="file_out_type" property="fileOutType" jdbcType="VARCHAR"/>
+        <result column="file_out" property="fileOut" jdbcType="VARCHAR"/>
+        <result column="task_dealine_time" property="taskDealineTime" jdbcType="TIMESTAMP"/>
+        <result column="send_type" property="sendType" jdbcType="VARCHAR"/>
+        <result column="send_obj_id" property="sendObjId" jdbcType="BIGINT"/>
+        <result column="deal_type" property="dealType" jdbcType="VARCHAR"/>
+        <result column="deal_obj_id" property="dealObjId" jdbcType="BIGINT"/>
+        <result column="deal_desc" property="dealDesc" jdbcType="VARCHAR"/>
+        <result column="session_id" property="sessionId" jdbcType="BIGINT"/>
+        <result column="ori_task_id" property="oriTaskId" jdbcType="BIGINT"/>
+        <result column="message_id" property="messageId" jdbcType="BIGINT"/>
+        <result column="message_step_code" property="messageStepCode" jdbcType="VARCHAR"/>
+        <result column="status_cd" property="statusCd" jdbcType="VARCHAR"/>
+        <result column="p_task_id" property="pTaskId" jdbcType="BIGINT"/>
+        <result column="task_ext_id" property="taskExtId" jdbcType="VARCHAR"/>
+        <result column="priority" property="priority" jdbcType="VARCHAR"/>
+        <result column="page_id" property="pageId" jdbcType="VARCHAR"/>
+        <result column="system_no" property="systemNo" jdbcType="VARCHAR"/>
+        <result column="load_sso_iframe_url" property="loadSsoIframeUrl" jdbcType="VARCHAR"/>
+        <result column="create_by" property="createBy" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" />
+        <result column="update_by" property="updateBy" jdbcType="BIGINT"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
+        <result column="com_acct_id" property="comAcctId" jdbcType="BIGINT"/>
+        <result column="resource_biz_type" property="resourceBizType" jdbcType="VARCHAR"/>
+        <result column="resource_id" property="resourceId" jdbcType="BIGINT"/>
+    </resultMap>
+
+    <resultMap id="MenTaskVoResultMap" type="com.iwhalecloud.byai.manager.vo.men.MenTaskVo" extends="BaseResultMap">
+        <result column="res_type" property="resType" jdbcType="INTEGER"/>
+        <result column="res_page" property="resPage" jdbcType="VARCHAR"/>
+        <result column="deal_obj_name" property="dealObjName" jdbcType="VARCHAR"/>
+        <result column="create_by_name" property="createByName" jdbcType="VARCHAR"/>
+        <result column="reci_obj_name" property="reciObjName" jdbcType="VARCHAR"/>
+        <result column="create_type" property="createType" jdbcType="VARCHAR"/>
+        <result column="resource_source_pk_id" property="resourceSourcePkId" jdbcType="BIGINT"/>
+        <result column="resource_id" property="resourceId" jdbcType="BIGINT"/>
+        <result column="resource_name" property="resourceName" jdbcType="VARCHAR"/>
+        <result column="resource_type" property="resourceType" jdbcType="VARCHAR"/>
+        <result column="resource_biz_type" property="resourceBizType" jdbcType="VARCHAR"/>
+    </resultMap>
+
+    <!-- 通用查询结果列 -->
+    <sql id="Base_Column_List">
+        a.task_id, a.task_type, a.title, a.content, a.res_com_id, a.file_out_type, a.file_out, a.task_dealine_time, a.send_type, a.send_obj_id, a.deal_type, a.deal_obj_id, a.deal_desc, a.session_id, a.ori_task_id, a.message_id, a.message_step_code, a.status_cd, a.p_task_id, a.task_ext_id, a.priority, a.page_id, a.system_no, a.load_sso_iframe_url, a.create_by, a.create_time, a.update_by, a.update_time, a.com_acct_id, a.resource_biz_type, a.resource_id
+    </sql>
+
+    <!-- 根据外部任务ID和系统编码查询任务详情 -->
+    <select id="selectByTaskExtIdAndSystemCode" resultMap="BaseResultMap">
+        select <include refid="Base_Column_List"/> from men_task a
+        <where>
+            <if test="taskExtId !=null and taskExtId !=''">
+                and a.task_ext_id = #{taskExtId}
+            </if>
+            <if test="systemNo !=null and systemNo !=''">
+                and a.system_no = #{systemNo}
+            </if>
+        </where>
+    </select>
+
+    <!-- 根据资源ID查询任务（通过res_page字段中的资源ID） -->
+    <select id="selectByResourceId" resultMap="BaseResultMap">
+        select distinct <include refid="Base_Column_List"/>
+        from men_task a
+        inner join men_res_com b on a.res_com_id = b.res_com_id
+        where b.res_page like concat('%', 'resourceId', '%')
+        and b.res_page like concat('%', #{resourceId}, '%')
+        order by a.create_time desc
+    </select>
+
+    <!-- 根据资源ID查询任务（带状态过滤） -->
+    <select id="selectByResourceIdWithStatus" resultMap="BaseResultMap">
+        select distinct <include refid="Base_Column_List"/>
+        from men_task a
+        inner join men_res_com b on a.res_com_id = b.res_com_id
+        where b.res_page like concat('%', 'resourceId', '%')
+        and b.res_page like concat('%', #{resourceId}, '%')
+        <if test="statusCodes != null and statusCodes.size() > 0">
+            and a.status_cd in
+            <foreach collection="statusCodes" item="statusCode" open="(" separator="," close=")">
+                #{statusCode}
+            </foreach>
+        </if>
+        order by a.create_time desc
+    </select>
+
+    <!-- 分页条件查询待办任务列表；如果是我发起的和taskHandleType为空的不查询men_task_rec_obj-->
+    <select id="listTasksByPage" resultMap="MenTaskVoResultMap">
+        select <include refid="Base_Column_List"/> , b.res_type, b.res_page,d.user_name as deal_obj_name ,u.user_name as create_by_name from men_task a
+        left join men_res_com b on a.res_com_id = b.res_com_id
+        <if test="qo.taskHandleType != null and qo.taskHandleType != 'MY_INITIATED'">
+            inner join men_task_rec_obj c on a.task_id = c.task_id and c.reci_obj_id = #{qo.userId} and c.reci_type = 'HUMAN'
+        </if>
+        left join po_users d on d.user_id = a.deal_obj_id and a.deal_type ='HUMAN'
+        left join po_users u on u.user_id = a.create_by
+        <where>
+            <!-- 成果空间查询的是 INPUT 类型 并是父任务-->
+            <if test="qo.taskType == 'INPUT'">
+                and a.p_task_id  is null
+            </if>
+            <if test="qo.taskType != null and qo.taskType != ''">
+                and a.task_type = #{qo.taskType}
+            </if>
+            <if test="qo.title != null and qo.title != ''">
+                and a.title like concat('%', #{qo.title}, '%')
+            </if>
+            <if test="qo.statusCd != null and qo.statusCd != ''">
+                and a.status_cd = #{qo.statusCd}
+            </if>
+            <if test="qo.dealObjId != null">
+                and a.deal_obj_id = #{qo.dealObjId}
+            </if>
+            <if test="qo.sendObjId != null">
+                and a.send_obj_id = #{qo.sendObjId}
+            </if>
+            <if test="qo.statusCdList != null and qo.statusCdList.size > 0">
+                and a.status_cd in
+                <foreach collection="qo.statusCdList" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="qo.pTaskId != null">
+                and a.p_task_id = #{qo.pTaskId}
+            </if>
+            <if test="qo.sessionId != null">
+                and a.session_id = #{qo.sessionId}
+            </if>
+            <!-- 创建时间开始筛选 -->
+            <if test="qo.startTime != null">
+                and a.create_time >= #{qo.startTime}
+            </if>
+            <!-- 创建时间结束筛选 -->
+            <if test="qo.endTime != null">
+                and a.create_time <![CDATA[<=]]> #{qo.endTime}
+            </if>
+        </where>
+        order by a.create_time desc
+        limit #{pageSize} offset #{offset}
+    </select>
+
+    <!-- 查询待办任务总数 -->
+    <select id="countTasks" resultType="int">
+        select count(1) from men_task a
+        left join men_res_com b on a.res_com_id = b.res_com_id
+        <if test="qo.taskHandleType != null and qo.taskHandleType != 'MY_INITIATED'">
+            inner join men_task_rec_obj c on a.task_id = c.task_id and c.reci_obj_id = #{qo.userId} and c.reci_type = 'HUMAN'
+        </if>
+        left join po_users d on d.user_id = a.deal_obj_id and a.deal_type ='HUMAN'
+        <where>
+            <!-- 成果空间查询的是 INPUT 类型 并是父任务-->
+            <if test="qo.taskType == 'INPUT'">
+                and a.p_task_id  is null
+            </if>
+            <if test="qo.taskType != null and qo.taskType != ''">
+                and a.task_type = #{qo.taskType}
+            </if>
+            <if test="qo.title != null and qo.title != ''">
+                and a.title like concat('%', #{qo.title}, '%')
+            </if>
+            <if test="qo.statusCd != null and qo.statusCd != ''">
+                and a.status_cd = #{qo.statusCd}
+            </if>
+            <if test="qo.dealObjId != null">
+                and a.deal_obj_id = #{qo.dealObjId}
+            </if>
+            <if test="qo.sendObjId != null">
+                and a.send_obj_id = #{qo.sendObjId}
+            </if>
+            <if test="qo.statusCdList != null and qo.statusCdList.size > 0">
+                and a.status_cd in
+                <foreach collection="qo.statusCdList" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="qo.pTaskId != null">
+                and a.p_task_id = #{qo.pTaskId}
+            </if>
+            <if test="qo.sessionId != null">
+                and a.session_id = #{qo.sessionId}
+            </if>
+            <!-- 创建时间开始筛选 -->
+            <if test="qo.startTime != null">
+                and a.create_time >= #{qo.startTime}
+            </if>
+            <!-- 创建时间结束筛选 -->
+            <if test="qo.endTime != null">
+                and a.create_time <![CDATA[<=]]> #{qo.endTime}
+            </if>
+        </where>
+    </select>
+
+    <!-- 成果空间根据父任务查询子任务 'HUMAN' , 'HUMAN_ASSISTANT' 这二个都是人（第二个是海天那边规划YY给过来的）-->
+    <select id="listTasksByPTask" resultMap="MenTaskVoResultMap">
+        select <include refid="Base_Column_List"/> , b.res_type, b.res_page,d.user_name as deal_obj_name
+         ,u.user_name as create_by_name,t.reci_obj_name from men_task a
+        left join men_res_com b on a.res_com_id = b.res_com_id
+        left join po_users d on d.user_id = a.deal_obj_id and a.deal_type ='HUMAN'
+        left join po_users u on u.user_id = a.create_by
+        LEFT JOIN (
+        SELECT
+            c.task_id,
+            STRING_AGG(
+            CASE
+               WHEN c.reci_type IN ('HUMAN', 'HUMAN_ASSISTANT', 'ASSITENT') THEN u.user_name
+               ELSE r.resource_name
+            END,
+              ', '
+             ) AS reci_obj_name
+            FROM
+                men_task_rec_obj c
+                LEFT JOIN po_users u ON c.reci_obj_id = u.user_id AND c.reci_type IN ('HUMAN' , 'HUMAN_ASSISTANT', 'ASSITENT')
+                LEFT JOIN ss_resource r ON c.reci_obj_id = r.resource_id AND c.reci_type IN ('DIG_EMPLOYEE', 'AGENT')
+                GROUP BY   c.task_id
+        ) t ON a.task_id = t.task_id
+        <where>
+            <if test="qo.taskType != null and qo.taskType != ''">
+                and a.task_type = #{qo.taskType}
+            </if>
+            <if test="qo.title != null and qo.title != ''">
+                and a.title like concat('%', #{qo.title}, '%')
+            </if>
+            <if test="qo.statusCd != null and qo.statusCd != ''">
+                and a.status_cd = #{qo.statusCd}
+            </if>
+            <if test="qo.dealObjId != null">
+                and a.deal_obj_id = #{qo.dealObjId}
+            </if>
+            <if test="qo.sendObjId != null">
+                and a.send_obj_id = #{qo.sendObjId}
+            </if>
+            <if test="qo.statusCdList != null and qo.statusCdList.size > 0">
+                and a.status_cd in
+                <foreach collection="qo.statusCdList" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="qo.pTaskId != null">
+                and a.p_task_id = #{qo.pTaskId}
+            </if>
+            <if test="qo.sessionId != null">
+                and a.session_id = #{qo.sessionId}
+            </if>
+        </where>
+        order by a.create_time desc
+     </select>
+
+    <!-- 根据任务查找 -->
+    <select id="findByResComId" resultMap="BaseResultMap">
+        select <include refid="Base_Column_List"/> from men_task a
+        <where>
+            <if test="resComId != null">
+                and a.res_com_id = #{resComId}
+            </if>
+        </where>
+    </select>
+
+    <!-- ========== 以下从 todolist.MenTaskMapper 迁移 ========== -->
+
+    <!-- 待办列表分页查询（含资源信息） -->
+    <select id="listTasksByPageForTodolist" resultMap="MenTaskVoResultMap">
+        select <include refid="Base_Column_List"/> , b.res_type, b.res_page, e.create_type, s.resource_id,s.resource_name,s.resource_type,s.resource_biz_type, s.resource_source_pk_id, d.user_name as deal_obj_name ,u.user_name as create_by_name from men_task a
+        left join men_res_com b on a.res_com_id = b.res_com_id
+        <if test="qo.taskHandleType != null and qo.taskHandleType != 'MY_INITIATED'">
+            inner join men_task_rec_obj c on a.task_id = c.task_id and c.reci_obj_id = #{qo.userId} and c.reci_type = 'HUMAN'
+        </if>
+        left join po_users d on d.user_id = a.deal_obj_id and a.deal_type ='HUMAN'
+        left join po_users u on u.user_id = a.create_by
+        left join ss_resource s on s.resource_id = a.resource_id
+        left join ss_res_ext_dig_employee e on e.resource_id = a.resource_id
+        <where>
+            and a.resource_biz_type is not null
+            <if test="qo.taskType != null and qo.taskType != ''">
+                and a.task_type = #{qo.taskType}
+            </if>
+            <if test="qo.title != null and qo.title != ''">
+                and a.title like concat('%', #{qo.title}, '%')
+            </if>
+            <if test="qo.sendObjId != null">
+                and a.send_obj_id = #{qo.sendObjId}
+            </if>
+            <if test="qo.statusCdList != null and qo.statusCdList.size > 0">
+                and a.status_cd in
+                <foreach collection="qo.statusCdList" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="qo.resourceBizType != null">
+                and a.resource_biz_type = #{qo.resourceBizType}
+            </if>
+            <if test="qo.startTime != null">
+                and a.create_time >= #{qo.startTime}
+            </if>
+            <if test="qo.endTime != null">
+                and a.create_time <![CDATA[<=]]> #{qo.endTime}
+            </if>
+            <if test="qo.resourceBizTypeList != null and qo.resourceBizTypeList.size()>0">
+                and a.resource_biz_type in
+                <foreach collection="qo.resourceBizTypeList" item="item" open="(" close=")" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+        </where>
+        order by a.create_time desc
+    </select>
+
+    <!-- 根据任务ID查询任务详情（含资源信息） -->
+    <select id="queryTaskInfoByTaskId" resultMap="MenTaskVoResultMap">
+        select <include refid="Base_Column_List"/> , b.res_type, b.res_page, e.create_type, s.resource_id,s.resource_name,s.resource_type,s.resource_biz_type, s.resource_source_pk_id, d.user_name as deal_obj_name ,u.user_name as create_by_name from men_task a
+        left join men_res_com b on a.res_com_id = b.res_com_id
+        <if test="qo.taskHandleType != null and qo.taskHandleType != 'MY_INITIATED'">
+            inner join men_task_rec_obj c on a.task_id = c.task_id and c.reci_obj_id = #{qo.userId} and c.reci_type = 'HUMAN'
+        </if>
+        left join po_users d on d.user_id = a.deal_obj_id and a.deal_type ='HUMAN'
+        left join po_users u on u.user_id = a.create_by
+        left join ss_resource s on s.resource_id = a.resource_id
+        left join ss_res_ext_dig_employee e on e.resource_id = a.resource_id
+        <where>
+            and a.resource_biz_type is not null
+            and a.task_id = #{qo.taskId}
+            <if test="qo.taskType != null and qo.taskType != ''">
+                and a.task_type = #{qo.taskType}
+            </if>
+            <if test="qo.title != null and qo.title != ''">
+                and a.title like concat('%', #{qo.title}, '%')
+            </if>
+            <if test="qo.sendObjId != null">
+                and a.send_obj_id = #{qo.sendObjId}
+            </if>
+            <if test="qo.statusCdList != null and qo.statusCdList.size > 0">
+                and a.status_cd in
+                <foreach collection="qo.statusCdList" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="qo.resourceBizType != null">
+                and a.resource_biz_type = #{qo.resourceBizType}
+            </if>
+            <if test="qo.startTime != null">
+                and a.create_time >= #{qo.startTime}
+            </if>
+            <if test="qo.endTime != null">
+                and a.create_time <![CDATA[<=]]> #{qo.endTime}
+            </if>
+            <if test="qo.resourceBizTypeList != null and qo.resourceBizTypeList.size()>0">
+                and a.resource_biz_type in
+                <foreach collection="qo.resourceBizTypeList" item="item" open="(" close=")" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+        </where>
+        order by a.create_time desc
+        limit 1
+    </select>
+
+    <!-- 统计不同状态的任务数量 -->
+    <select id="countTasksByStatus" resultType="java.util.Map">
+        select
+            a.status_cd, count(1) as task_count
+        from men_task a
+        inner join men_task_rec_obj c on a.task_id = c.task_id and c.reci_obj_id = #{qo.userId} and c.reci_type = 'HUMAN'
+        where resource_biz_type is not null
+        <if test="qo.resourceBizType != null">
+            and a.resource_biz_type = #{qo.resourceBizType}
+        </if>
+        <if test="qo.startTime != null">
+            and a.create_time >= #{qo.startTime}
+        </if>
+        <if test="qo.endTime != null">
+            and a.create_time <![CDATA[<=]]> #{qo.endTime}
+        </if>
+        <if test="qo.resourceBizTypeList != null and qo.resourceBizTypeList.size()>0">
+            and a.resource_biz_type in
+            <foreach collection="qo.resourceBizTypeList" item="item" open="(" close=")" separator=",">
+                #{item}
+            </foreach>
+        </if>
+        group by a.status_cd
+    </select>
+
+    <!-- 根据任务ID删除任务 -->
+    <delete id="deleteByTaskId">
+        delete from men_task where task_id = #{taskId}
+    </delete>
+
+    <!-- 根据资源ID查询任务 -->
+    <select id="selectTaskByResourceId" resultMap="BaseResultMap">
+        select <include refid="Base_Column_List"/>
+        from men_task a
+        where a.resource_id = #{resourceId}
+    </select>
+
+    <!-- 根据任务ID删除接收对象 -->
+    <delete id="deleteRecObjByResourceId">
+        delete from men_task_rec_obj where task_id = #{taskId}
+    </delete>
+
+    <!-- 根据组件ID删除资源组件 -->
+    <delete id="deleteResComByResourceId">
+        delete from men_res_com where res_com_id = #{resComId}
+    </delete>
+
+</mapper>

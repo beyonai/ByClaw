@@ -1,0 +1,35 @@
+.office {
+  position: relative;
+  width: 100%;
+  height: 100%;
+
+  .loading {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  :global {
+    .docx-wrapper {
+      padding: 0 !important;
+      background: transparent !important;
+    }
+
+    .vue-office-pdf-wrapper {
+      padding: 0 !important;
+      background: transparent !important;
+    }
+
+    // docx 段落行高和间距
+    .docx {
+      box-shadow: none !important;
+      p {
+        margin: 4pt;
+        line-height: 22pt !important;
+      }
+    }
+  }
+}

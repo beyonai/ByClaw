@@ -1,0 +1,52 @@
+.scrollArea {
+  margin-top: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.spinningWrapper {
+  display: flex;
+  min-height: 400px;
+
+  // 为空时居中
+  &:has(.emptyWrap) {
+    justify-content: center;
+  }
+}
+
+.emptyWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
+}
+
+.infiniteScroll {
+  flex: 1;
+  overflow: visible;
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  padding: 4px;
+
+  // 屏幕宽度小于1200px时，展示3列卡片
+  @media (max-width: 1300px) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  // 屏幕宽度小于768px时，展示2列卡片
+  @media (max-width: 1000px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

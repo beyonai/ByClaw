@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>DOCX</title>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script type="module" crossorigin src="./assets/docx-znROFqK6.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/docx-DlzDd1un.css" />
+  </head>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+    }
+    .vue-office-pdf {
+      background-color: gray;
+    }
+    .loader {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .loader span {
+      font-size: 40px;
+      font-family: system-ui, sans-serif;
+      font-weight: bold;
+      color: #165dff00;
+      -webkit-text-stroke: 1px #165dff;
+      text-transform: uppercase;
+      background: linear-gradient(-60deg, #165dff00 33%, #165dff 0 67%, #165dff00 0) 0/300% 100% no-repeat text;
+      animation: l2 10s linear infinite;
+    }
+
+    .loader span:before {
+      content: 'Beyond AI';
+    }
+
+    @keyframes l2 {
+      0% {
+        background-position: 100%;
+      }
+    }
+  </style>
+  <script>
+    window.onload = () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      let url = urlParams.get('url');
+      if (url && jsPreviewDocx) {
+        url = decodeURIComponent(url);
+        if (!url.startsWith('http')) {
+          url = window.location.origin + url;
+        }
+
+        let loader = document.createElement('div');
+        loader.className = 'loader';
+        loader.appendChild(document.createElement('span'));
+        document.body.appendChild(loader);
+
+        // jsPreviewDocx 已加载
+        const docx = jsPreviewDocx.init(document.getElementById('app'));
+        docx
+          .preview(url)
+          .then((res) => {
+            console.log('预览完成');
+          })
+          .catch((e) => {
+            console.log('预览失败', e);
+
+            document.body.innerText = '预览失败';
+          })
+          .finally(() => {
+            if (loader) {
+              loader.remove();
+              loader = null;
+            }
+          });
+      }
+    };
+  </script>
+  <body>
+    <div id="app" style="width: 100vw; height: 100vh"></div>
+  </body>
+</html>

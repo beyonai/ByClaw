@@ -1,0 +1,69 @@
+.cardContainer {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  height: 75px; // 设计稿高度
+  width: 240px; // 设计稿宽度
+  padding: 8px 16px;
+  border-radius: 8px; // 设计稿圆角
+  border: 1px solid #e6ebf0; // 设计稿边框色
+  background: linear-gradient(182deg, #e8f3ff 0.93%, #fff 69.16%); // 设计稿渐变角度和色值
+  box-shadow: 0 2px 8px 0 rgba(25, 25, 41, 0.03);
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  &:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    // transform: translateY(-2px);
+  }
+}
+.header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.icon {
+  font-size: 16px;
+  color: #8a8f99;
+  margin-right: 8px;
+}
+
+.title {
+  font-size: 14px;
+  color: #707680;
+  font-weight: 500;
+}
+
+.cardFooter {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+}
+.status {
+  color: #8c8c8c;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+}
+.statusIcon {
+  margin-right: 4px;
+}
+.detailLink {
+  color: #1677ff;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.detailLink:hover {
+  color: #0958d9;
+}
+.arrow {
+  font-size: 14px;
+}

@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>钉钉登录成功</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      }
+
+      html,
+      body {
+        background: #ffffff;
+        color: #333;
+        min-height: 100vh;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        height: 100%;
+        overflow: hidden;
+      }
+
+      .container {
+        width: 100%;
+        max-width: 500px;
+        text-align: center;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        padding: 200px 20px 100px;
+        min-height: 100vh;
+        box-sizing: border-box;
+      }
+
+      /* 成功图标容器 */
+      .success-icon-wrapper {
+        position: relative;
+        width: 120px;
+        height: 120px;
+        margin-bottom: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-top: 0;
+      }
+
+      /* 外层光晕效果 */
+      .success-icon-glow {
+        position: absolute;
+        width: 112px;
+        height: 112px;
+        border-radius: 50%;
+        background: #e5fff7;
+        animation: pulse 2s ease-in-out infinite;
+      }
+
+      /* 内层绿色圆形 */
+      .success-icon-circle {
+        position: relative;
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        background: #14cc87;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1;
+      }
+
+      /* 白色对勾 */
+      .success-icon-check {
+        width: 40px;
+        height: 40px;
+        position: relative;
+      }
+
+      .success-icon-check svg {
+        width: 100%;
+        height: 100%;
+      }
+
+      .title {
+        margin-bottom: 0;
+        margin-top: 0;
+        flex: 1;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding-top: 0;
+        align-self: stretch;
+        color: #707680;
+        text-align: center;
+        font-family: 'PingFang SC';
+        font-size: 15px;
+        font-style: normal;
+        font-weight: 600;
+        line-height: 24px;
+      }
+
+      #actionSection {
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        margin-top: auto;
+        padding-top: 80px;
+        padding-bottom: 20px;
+      }
+
+      .btn {
+        width: 320px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s;
+        border: none;
+        outline: none;
+        display: flex;
+        padding: 14px 16px;
+        justify-content: center;
+        align-items: center;
+        gap: 4px;
+        border-radius: 12px;
+        background: var(--user-primary-primary-6, #165dff);
+        color: #ffffff;
+        font-family: 'PingFang SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-size: 17px;
+        font-style: normal;
+        font-weight: 500;
+        line-height: 22px;
+      }
+
+      .btn:active {
+        opacity: 0.8;
+        transform: scale(0.98);
+      }
+
+      /* 提示框样式 */
+      .tooltip-container {
+        display: none;
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        z-index: 1000;
+      }
+
+      .tooltip-content {
+        background-color: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 12px 16px;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        max-width: 240px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        animation: fadeIn 0.3s ease-in-out;
+        position: relative;
+        word-break: break-all;
+      }
+
+      /* 右上角的小箭头 */
+      .tooltip-content::before {
+        content: '';
+        position: absolute;
+        top: -10px;
+        right: 10px;
+        width: 0;
+        height: 0;
+        border-left: 10px solid transparent;
+        border-right: 10px solid transparent;
+        border-bottom: 10px solid rgba(0, 0, 0, 0.8);
+        z-index: 1;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(-10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes pulse {
+        0% {
+          transform: scale(1);
+        }
+        50% {
+          transform: scale(1.1);
+        }
+        100% {
+          transform: scale(1);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="tooltip" class="tooltip-container">
+      <div class="tooltip-content">尝试自动跳转失败，请点击右上角"..."，选择“默认浏览器打开”</div>
+    </div>
+
+    <div class="container">
+      <div class="success-icon-wrapper">
+        <div class="success-icon-glow"></div>
+        <div class="success-icon-circle">
+          <div class="success-icon-check">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M5 12L10 17L20 7"
+                stroke="#ffffff"
+                stroke-width="4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </div>
+        </div>
+      </div>
+      <h1 class="title">钉钉授权成功</h1>
+      <div id="actionSection" class="action-section">
+        <button id="goByai" class="btn">返回百应</button>
+      </div>
+    </div>
+
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        function autoClickLink() {
+          const goByai = document.getElementById('goByai');
+
+          // iOS跳转url
+          const url = `https://www.iwhaleai.com/beyond/dingtalkjzby/${window.location.search}`;
+
+          // 安卓跳转url
+          const customSchemeLink = `byai://byai.iwhalecloud.com/beyond/dingtalk/${window.location.search}`;
+
+          const userAgent = navigator.userAgent.toLowerCase();
+
+          // 检测是否为iOS设备
+          const isIOS = /iphone|ipad|ipod/.test(userAgent);
+
+          // 检测是否为Android设备
+          const isAndroid = /android/.test(userAgent);
+
+          // 检测是否为钉钉环境
+          const isDingTalk = /dingtalk/.test(userAgent);
+
+          // Android设备的自动跳转处理函数
+          function handleAndroidAutoJump() {
+            // 非钉钉环境下延迟500ms执行跳转
+            if (!isDingTalk) {
+              setTimeout(() => {
+                window.location.href = customSchemeLink;
+              }, 500);
+              return;
+            }
+
+            // 钉钉环境下的跳转处理（带失败检测）
+            // 创建一个计时器来检测跳转是否成功
+            let jumpTimer = setTimeout(() => {
+              // 如果0.5秒后页面仍未跳转，说明跳转失败，显示页面提示
+              console.log('自动跳转失败，显示浏览器打开提示');
+              const tooltip = document.getElementById('tooltip');
+              tooltip.style.display = 'block';
+            }, 500);
+
+            try {
+              // 尝试执行跳转
+              window.location.href = customSchemeLink;
+
+              // 监听页面隐藏事件，如果页面被隐藏，说明跳转成功，清除计时器
+              document.addEventListener('visibilitychange', function clearTimer() {
+                if (document.visibilityState === 'hidden') {
+                  clearTimeout(jumpTimer);
+                  document.removeEventListener('visibilitychange', clearTimer);
+                }
+              });
+
+              // 为了安全起见，也监听页面卸载事件
+              window.addEventListener('beforeunload', function clearTimer() {
+                clearTimeout(jumpTimer);
+                window.removeEventListener('beforeunload', clearTimer);
+              });
+            } catch (error) {
+              console.error('跳转执行失败:', error);
+              clearTimeout(jumpTimer);
+              const tooltip = document.getElementById('tooltip');
+              tooltip.style.display = 'block';
+            }
+          }
+
+          // 执行Android设备的自动跳转逻辑
+          if (isAndroid) {
+            handleAndroidAutoJump();
+          }
+
+          // 点击事件处理函数
+          goByai.addEventListener('click', function () {
+            if (isIOS) {
+              // iOS设备
+              window.location.href = url;
+            } else if (isAndroid) {
+              // Android设备
+              window.location.href = customSchemeLink;
+            } else {
+              // 其他情况
+              window.location.href = customSchemeLink;
+            }
+          });
+        }
+
+        autoClickLink();
+      });
+    </script>
+  </body>
+</html>

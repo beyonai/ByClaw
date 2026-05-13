@@ -1,0 +1,129 @@
+.wrapper {
+  // min-width: 100px;
+  // max-width: 200px;
+  width: fit-content;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: rgba(204, 204, 204, 0.2);
+  border-radius: 12px;
+  padding: 2px 12px;
+  font-size: 13px;
+
+  .title {
+    display: flex;
+    gap: 4px;
+  }
+
+  .body {
+    flex: 0 1 auto;
+    display: flex;
+    min-width: 0;
+    gap: 2px;
+
+    .selectedWrapper {
+      display: flex;
+      gap: 4px;
+    }
+
+    .item {
+      padding: 2px 4px;
+      color: #707680;
+      min-width: 20px;
+      max-width: 100px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .selectedItem {
+      color: #165dff;
+    }
+  }
+}
+
+.dropdownRender {
+  // width: 250px;
+  width: fit-content;
+  background-color: #fff;
+  display: flex;
+  flex-direction: column;
+  // flex-wrap: wrap;
+  // gap: 8px;
+  padding: 12px 0;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  .selectItem {
+    // min-width: 50px;
+    // max-width: 100%;
+    width: 110px;
+
+    cursor: pointer;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 4px 8px;
+    gap: 10px;
+    border-radius: 12px;
+    background: #0000000a;
+
+    .text {
+      text-align: center;
+      width: 100%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    &.selectItemActive {
+      background: #165dff17;
+      color: #165dff;
+    }
+    &:not(.selectItemActive):hover {
+      background: #165dff17;
+      // color: #165dff;
+    }
+  }
+
+  .left {
+    display: flex;
+    // flex-direction: column;
+    gap: 8px;
+    padding: 0 6px;
+    overflow: auto;
+    &.isMutil {
+      height: 200px;
+      width: 150px;
+      flex-direction: column;
+      align-items: center;
+    }
+    &.isSingle {
+      max-width: 250px;
+      max-height: 200px;
+      flex-direction: row;
+      flex-wrap: wrap;
+      justify-content: space-between;
+    }
+  }
+  .right {
+    width: 250px;
+    height: 200px;
+    display: flex;
+    align-content: flex-start;
+    gap: 8px;
+    border-left: 1px solid #e6ebf0;
+    padding: 0 6px;
+    flex-wrap: wrap;
+    overflow: auto;
+  }
+  .footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    border-top: 1px solid #e6ebf0;
+    margin-top: 8px;
+    padding: 8px 12px 0 12px;
+  }
+}

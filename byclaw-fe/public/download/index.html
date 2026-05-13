@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>鲸智百应 - 下载应用</title>
+    <meta name="keywords" content="鲸智百应, 下载, APP, 智能助手, 办公助手, AI应用, 微信扫码, 超级助手" />
+    <meta name="description" content="下载鲸智百应 APP，成为你工作上一呼百应的超级助手，扫码即可体验高效智能办公。" />
+    <link rel="icon" href="./favicon2.png" type="image/png" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://byai.iwhalecloud.com/beyond/",
+        "@type": "MobileApplication",
+        "name": "鲸智百应",
+        "operatingSystem": "ANDROID, IOS",
+        "applicationCategory": "ProductivityApplication",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "CNY"
+        },
+        "aggregateRating": {
+          "@type": "AggregateRating",
+          "ratingValue": "5",
+          "reviewCount": "1000"
+        },
+        "description": "下载鲸智百应 APP，成为你工作上一呼百应的超级助手，扫码即可体验高效智能办公。",
+        "image": "logo.png"
+      }
+    </script>
+    <style>
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        min-height: 100vh;
+        height: 100vh;
+        width: 100vw;
+        background: url('./downloadBG.png') 0 0 / cover no-repeat, linear-gradient(180deg, #f7f8fa 0%, #fff 100%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+        color: #222;
+        box-sizing: border-box;
+      }
+      #container {
+        width: 100vw;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        border-radius: 0;
+        box-shadow: none;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      .avatar {
+        width: 100px;
+        height: 100px;
+        flex-shrink: 0;
+        background: url('./logo.png') rgb(255, 255, 255) 50% / cover no-repeat;
+        border-radius: 50%;
+        margin-bottom: 16px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .app-name {
+        font-size: 22px;
+        font-weight: 600;
+        margin-bottom: 32px;
+        letter-spacing: 1px;
+        margin-bottom: 10vh;
+        text-align: center;
+      }
+      .qrcode {
+        width: 220px;
+        height: 220px;
+        margin-bottom: 24px;
+        border-radius: 16px;
+        background: #fff;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        object-fit: cover;
+      }
+      .desc {
+        font-size: 16px;
+        font-weight: 500;
+        margin-bottom: 8px;
+        color: #222;
+        text-align: center;
+      }
+      .sub-desc {
+        font-size: 13px;
+        color: #888;
+        margin-bottom: 10vh;
+        text-align: center;
+      }
+      .download-btn {
+        width: 100%;
+        max-width: 250px;
+        height: 56px;
+        background: #165dff;
+        color: #fff;
+        font-size: 17px;
+        font-weight: 500;
+        border: none;
+        border-radius: 14px;
+        cursor: pointer;
+        transition: background 0.2s;
+        margin-top: 8px;
+        box-shadow: 0 2px 8px rgba(22, 119, 255, 0.08);
+        letter-spacing: 3px;
+      }
+      .download-btn:hover {
+        background: #1456c2;
+      }
+      #qrcode {
+        width: 160px;
+        height: 160px;
+        margin-bottom: 2vh;
+      }
+    </style>
+  </head>
+  <script>
+    function downloadAPP() {
+      const ua = navigator.userAgent || navigator.vendor || window.opera;
+
+      if (/iPad|iPhone|iPod/.test(ua) && !window.MSStream) {
+        // iOS，跳转App Store或TestFlight
+        const iosUrl = 'https://apps.apple.com/app/id6753131524'; // App Store
+        // const iosUrl = 'https://testflight.apple.com/join/FYyRWEfs'; // testflight
+        window.location.href = iosUrl;
+      } else {
+        // 鸿蒙下载 /OpenHarmony/i.test(navigator.userAgent)
+        // 安卓，下载apk /android/i.test(ua)
+        const a = document.createElement('a');
+        a.href = window.location.origin + '/app/download/app-release.apk';
+        a.download = 'app-release.apk';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        // alert('请使用鸿蒙、安卓、iOS设备访问本页面以下载安装包。');
+      }
+    }
+  </script>
+  <body>
+    <main id="container">
+      <header>
+        <div class="avatar" aria-label="鲸智百应头像"></div>
+        <h1 class="app-name">鲸智百应</h1>
+      </header>
+      <section>
+        <!-- <img class="qrcode" src="./qr.png" alt="微信二维码" /> -->
+        <div id="qrcode"></div>
+        <div class="desc">下载鲸智百应 APP</div>
+        <div class="sub-desc">一呼百应的超级智能体</div>
+      </section>
+      <!-- <button class="download-btn" onclick="downloadAPP()">下载应用</button> -->
+    </main>
+  </body>
+  <script src="./qr.js"></script>
+  <script type="text/javascript">
+    const searchParams = new URLSearchParams(window.location.search);
+    const downloadBtn = searchParams.get('downloadBtn') || 'true';
+    console.log(downloadBtn);
+    if (downloadBtn === 'true') {
+      const downloadBtn = document.createElement('button');
+      downloadBtn.className = 'download-btn';
+      downloadBtn.onclick = downloadAPP;
+      downloadBtn.innerHTML = '下载应用';
+
+      document.getElementById('container').appendChild(downloadBtn);
+    }
+  </script>
+  <script type="text/javascript">
+    const ua = navigator.userAgent || navigator.vendor || window.opera;
+
+    // 扫描二维码都引导到下载页
+    new QRCode(document.getElementById('qrcode'), {
+      text: 'https://byai.iwhalecloud.com/beyond/download/index.html',
+      width: 160,
+      height: 160,
+      colorDark: '#000000',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.H,
+      margin: 0,
+    });
+
+    // if (/android/i.test(ua)) {
+    //   new QRCode(
+    //     document.getElementById("qrcode"),
+    //     {
+    //       text: window.location.origin+'/app/download/app-release.apk',
+    //       width: 160,
+    //       height: 160,
+    //       colorDark : "#000000",
+    //       colorLight : "#ffffff",
+    //       correctLevel : QRCode.CorrectLevel.H
+    //     }
+    //   )
+    // } else {
+    // }
+
+    // if (/iPad|iPhone|iPod/.test(ua) && !window.MSStream) {}
+  </script>
+</html>

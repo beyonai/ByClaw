@@ -1,0 +1,89 @@
+.linkShareModal {
+  :global(.@{antPrefix}-modal-header) {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--beyond-color-border);
+  }
+
+  :global(.@{antPrefix}-modal-title) {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--beyond-color-text);
+  }
+
+  :global(.@{antPrefix}-modal-body) {
+    padding: 0;
+  }
+}
+
+.content {
+}
+
+.section {
+  margin-bottom: 24px;
+
+  &:last-of-type {
+    margin-bottom: 32px;
+  }
+}
+
+.label {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--beyond-color-text);
+  // margin-bottom: 12px;
+  line-height: 22px;
+}
+
+.required {
+  color: #ff4d4f;
+  margin-left: 2px;
+}
+
+.durationButtons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.radioGroup {
+  :global(.@{antPrefix}-radio-wrapper) {
+    font-size: 14px;
+    color: var(--beyond-color-text);
+    margin-right: 24px;
+  }
+}
+
+.switchContainer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.switchLabel {
+  font-size: 14px;
+  color: var(--beyond-color-text);
+}
+
+.inputContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.maxAccessInput {
+  width: 200px;
+}
+
+.inputHint {
+  font-size: 12px;
+  color: var(--beyond-color-text-tertiary);
+  line-height: 20px;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 16px;
+  border-top: 1px solid var(--beyond-color-border);
+  margin-top: 8px;
+}

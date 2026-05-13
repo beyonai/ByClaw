@@ -1,0 +1,63 @@
+.Auth {
+  .title {
+    display: flex;
+    column-gap: 11px;
+    align-items: center;
+    color: #14161a;
+    font-family: PingFang SC;
+    font-size: 13px;
+    font-style: normal;
+    font-weight: 500;
+    line-height: 22px;
+    margin-bottom: 13px;
+
+    .rect {
+      width: 3px;
+      height: 12px;
+      border-radius: 0 2px 2px 0;
+      background: #165dff;
+    }
+  }
+
+  .contentWrap {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    .content {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+
+      .selectTag {
+        border-color: #f2f6fa;
+        background-color: #f2f6fa;
+        border-radius: 4px;
+        line-height: 22px;
+      }
+    }
+
+    :global {
+      .@{antPrefix}-divider {
+        margin: 8px 0;
+      }
+    }
+  }
+
+  .btn {
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 4px;
+    border: 1px dashed #7abdff;
+    color: #165dff;
+    font-family: PingFang SC;
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 400;
+    border-radius: 4px;
+    padding: 2px 8px;
+    width: fit-content;
+  }
+}

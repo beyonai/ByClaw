@@ -1,0 +1,163 @@
+.messageListWrapper {
+  height: 100vh;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 16px 12px 12px;
+  box-sizing: border-box;
+
+  // PC 端样式：限制最大宽度并增加左右留白
+  @media screen and (min-width: 992px) {
+    width: 100%;
+    max-width: 1200px;
+    padding: 5vh 32px 2vh;
+  }
+
+  .content {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    border-radius: 12px;
+    background-color: #fff;
+    padding-top: 2em;
+    // margin-bottom: 1em;
+    .header {
+      margin: 0 auto;
+      padding: 0 16px;
+      // padding-bottom: 1rem;
+      position: relative;
+      // background: linear-gradient(rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0));
+    }
+  }
+
+  // 移动端样式优化（按不同宽度分级）
+
+  // ≤ 320px 超小屏
+  @media screen and (max-width: 320px) {
+    padding: 12px 8px 8px;
+
+    .content {
+      // 保留默认的 12px 圆角
+      box-shadow: none;
+      padding-top: 8px;
+
+      .header {
+        padding: 0 8px;
+
+        h1 {
+          font-size: 16px;
+          line-height: 1.3;
+        }
+
+        p {
+          font-size: 11px;
+        }
+      }
+    }
+  }
+
+  // 321px ~ 375px 主流小屏手机
+  @media screen and (min-width: 321px) and (max-width: 375px) {
+    padding: 14px 10px 10px;
+    .content {
+      // 保留默认圆角
+      box-shadow: none;
+      padding-top: 10px;
+
+      .header {
+        padding: 0 10px;
+
+        h1 {
+          font-size: 17px;
+          line-height: 1.3;
+        }
+
+        p {
+          font-size: 11px;
+        }
+      }
+    }
+  }
+
+  // 376px ~ 414px 大一点的手机（Plus / Pro Max）
+  @media screen and (min-width: 376px) and (max-width: 414px) {
+    padding: 16px 12px 12px;
+    .content {
+      // 保留默认圆角
+      box-shadow: none;
+      padding-top: 12px;
+
+      .header {
+        padding: 0 12px;
+
+        h1 {
+          font-size: 18px;
+          line-height: 1.3;
+        }
+
+        p {
+          font-size: 12px;
+        }
+      }
+    }
+  }
+
+  // 415px ~ 480px 更宽一点的手机
+  @media screen and (min-width: 415px) and (max-width: 480px) {
+    padding: 18px 14px 14px;
+    .content {
+      // 保留默认圆角
+      box-shadow: none;
+      padding-top: 14px;
+
+      .header {
+        padding: 0 14px;
+
+        h1 {
+          font-size: 19px;
+          line-height: 1.3;
+        }
+
+        p {
+          font-size: 12px;
+        }
+      }
+    }
+  }
+
+  // 481px ~ 768px 通用平板/横屏手机
+  @media screen and (min-width: 481px) and (max-width: 768px) {
+    padding: 20px 16px 16px;
+    .content {
+      // 保留默认圆角
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+      padding-top: 16px;
+
+      .header {
+        padding: 0 16px;
+
+        h1 {
+          font-size: 20px;
+          line-height: 1.3;
+        }
+
+        p {
+          font-size: 13px;
+        }
+      }
+    }
+  }
+}
+
+.spinningWrapper {
+  height: 100%;
+  // flex: 1;
+  width: 100%;
+  :global {
+    .@{antPrefix}-spin-container {
+      display: flex;
+      flex-direction: column;
+
+      height: 100%;
+      width: 100%;
+    }
+  }
+}

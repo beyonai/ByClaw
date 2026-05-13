@@ -1,0 +1,98 @@
+// 此处样式会被第三方依赖覆盖
+// 若需覆盖第三方样式，请写在overrides.less
+
+@import url('./assets/iconfont/iconfont.css');
+@import './global.vars.less';
+// @import "tailwindcss";
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* qiankun 微前端容器样式 */
+#subapp-container,
+#subapp-container > * {
+  height: 100%;
+  width: 100%;
+}
+
+[id^='__qiankun_microapp_wrapper'] {
+  height: 100% !important;
+  width: 100% !important;
+}
+
+.@{antPrefix}-app {
+  height: 100%;
+}
+
+.full-height {
+  height: 100%;
+}
+
+.view-center {
+  margin: 0 auto;
+}
+
+@media screen and (min-width: @g-screen-xxl-min) {
+  .view-center {
+    width: @g-screen-xxl-view-w;
+  }
+}
+
+@media screen and (min-width: @g-screen-xl-min) and (max-width: @g-screen-xl-max) {
+  .view-center {
+    width: @g-screen-xl-view-w;
+  }
+}
+
+@media screen and (min-width: @g-screen-lg-min) and (max-width: @g-screen-lg-max) {
+  .view-center {
+    width: @g-screen-lg-view-w;
+  }
+}
+
+@media screen and (min-width: @g-screen-l-min) and (max-width: @g-screen-l-max) {
+  .view-center {
+    width: @g-screen-lg-view-w;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}
+
+@media screen and (max-width: @g-screen-md-max) {
+  .view-center {
+    width: 100%;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0px 1000px white inset;
+  /* 用白色覆盖淡紫色背景 */
+  transition: background-color 5000s ease-in-out 0s;
+  /* 防止颜色闪回 */
+}
+.sb {
+  overflow: auto;
+  overflow: overlay;
+}
+
+.sb::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sb::-webkit-scrollbar-thumb {
+  border-radius: 9px;
+  background: #484854;
+}
+
+.sb::-webkit-scrollbar-thumb:hover {
+  background: #999;
+}

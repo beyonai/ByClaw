@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.position.PositionUserRelationMapper">
+
+    <!-- 通用结果映射 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.position.PositionUserRelation">
+        <id column="dig_position_rel_id" property="digPositionRelId"/>
+        <result column="position_id" property="positionId"/>
+        <result column="user_id" property="userId"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <!-- 通用列 -->
+    <sql id="Base_Column_List">
+        dig_position_rel_id, position_id, user_id, create_by, create_time, update_by, update_time
+    </sql>
+
+    <resultMap id="positionUsersVoResultMap" type="com.iwhalecloud.byai.manager.vo.position.PositionUsersVo">
+        <result column="user_id" property="userId" />
+        <result column="user_code" property="userCode" />
+        <result column="user_name" property="userName" />
+        <result column="phone" property="phone" />
+        <result column="user_number" property="userNumber" />
+        <result column="orgIds" property="orgIds"/>
+        <result column="userTypes" property="userTypes" />
+    </resultMap>
+
+    <!-- 查询数字岗位下的管理员用户信息（分页） -->
+    <select id="selectUsersByPositionIdPage" resultMap="positionUsersVoResultMap">
+        SELECT
+            u.user_id,
+            u.user_name,
+            u.user_code,
+            u.phone,
+            u.user_number,
+            MAX(pur.create_time) as create_time,
+            <choose>
+                <when test="_databaseId == 'postgresql'">
+                    ARRAY_TO_STRING(ARRAY_AGG(puo.org_id), ',')    orgIds,
+                    ARRAY_TO_STRING(ARRAY_AGG(DISTINCT puo.user_type), ',') userTypes
+                </when>
+                <otherwise>
+                    GROUP_CONCAT(puo.org_id) orgIds,
+                    GROUP_CONCAT(DISTINCT puo.user_type) userTypes
+                </otherwise>
+            </choose>
+        FROM digital_position_user_relation pur
+        INNER JOIN po_users u ON pur.user_id = u.user_id
+        LEFT JOIN po_users_organization puo ON u.user_id = puo.user_id
+        WHERE pur.position_id = #{searchQO.positionId}
+        <if test="searchQO.userName != null and searchQO.userName != ''">
+            AND u.user_name LIKE CONCAT('%', #{searchQO.userName}, '%')
+        </if>
+        GROUP BY u.user_id, u.user_name, u.user_code, u.phone
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- 批量保存数字岗位与管理员用户关系 -->
+    <insert id="saveBatch">
+        INSERT INTO digital_position_user_relation
+        (dig_position_rel_id, position_id, user_id, create_by, create_time, update_by, update_time)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.digPositionRelId}, #{item.positionId}, #{item.userId}, #{item.createBy}, #{item.createTime}, #{item.updateBy}, #{item.updateTime})
+        </foreach>
+    </insert>
+
+</mapper>
+

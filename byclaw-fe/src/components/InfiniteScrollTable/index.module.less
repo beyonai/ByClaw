@@ -1,0 +1,49 @@
+.infiniteScrollTable {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+
+  .tableHeader {
+    display: flex;
+    align-items: center;
+    padding: 12px 0px;
+    border-bottom: 0.5px solid #e6ebf0;
+    color: var(--beyond-color-text-tertiary);
+    font-family: PingFang SC;
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 20px;
+
+    // .th {
+    //   flex: 1;
+    // }
+  }
+
+  .tableSelect {
+    width: 32px;
+    padding: 0px 8px;
+  }
+
+  .tableBody {
+    flex: 1;
+    overflow: hidden;
+    height: 0px;
+
+    .tr {
+      color: var(--beyond-color-text-secondary);
+      font-family: PingFang SC;
+      font-size: 14px;
+      font-style: normal;
+      font-weight: 400;
+      line-height: 22px;
+    }
+
+    :global(.@{antPrefix}-list-item) {
+      &:hover {
+        background-color: #fafafa;
+      }
+    }
+  }
+}

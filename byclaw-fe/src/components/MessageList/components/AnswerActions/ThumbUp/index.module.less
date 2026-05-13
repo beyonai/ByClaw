@@ -1,0 +1,130 @@
+.wrapper {
+  position: relative;
+
+  .successTips {
+    position: absolute;
+    top: 0;
+    left: 0;
+    font-size: 12px;
+    color: #fff;
+    white-space: nowrap;
+    opacity: 0;
+    transform: translateY(0);
+    pointer-events: none;
+    padding: 3px 5px;
+    background: linear-gradient(90deg, #ff5a5a 0%, #ff903e 100%);
+    border-radius: 20px;
+
+    &.animate {
+      animation: slideUpAndFade 2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    }
+  }
+}
+
+@keyframes slideUpAndFade {
+  0% {
+    opacity: 1;
+    transform: translateY(-10px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+}
+
+.thumbUp {
+  font-size: 12px;
+  align-items: flex-start;
+  border-radius: 8px;
+  // padding: 6px 8px;
+  background: #fff;
+
+  border-radius: 20px;
+  border: 0.5px solid transparent;
+}
+
+.thumbUpContent {
+  transform-origin: left center;
+  overflow: hidden;
+
+  &:not(.slideIn) {
+    display: none;
+  }
+
+  &.slideIn {
+    animation: slideInFromLeft 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+}
+
+.feedbackButton {
+  font-size: 12px;
+  color: var(--beyond-color-text-tertiary);
+  border-radius: 20px;
+}
+.feedbackButton1 {
+  font-size: 12px;
+  border-radius: 20px;
+  color: var(--beyond-color-text-tertiary);
+  border: 0.5px solid #ced3d9;
+}
+.feedbackButton2 {
+  font-size: 12px;
+  color: #fff;
+  background: linear-gradient(90deg, #ff5a5a 0%, #ff903e 100%);
+  border-radius: 20px;
+}
+
+.feedbackButtonIcon {
+  font-size: 16px !important;
+  min-width: 16px !important;
+}
+
+@keyframes slideInFromLeft {
+  0% {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+/******************** feedbackPanel ********************/
+
+.feedbackPanel {
+  display: none;
+
+  padding: 16px;
+  align-items: flex-start;
+  gap: 8px;
+  align-self: stretch;
+  border-radius: 8px;
+  border: 0.5px solid #00000026;
+  background: #f7fafc;
+  width: 100%;
+
+  /* 初始状态：隐藏 */
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  transform: translateY(-10px) scaleY(0.95);
+  transform-origin: top center;
+
+  /* 过渡动画 */
+  transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    margin-top 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding-top 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    padding-bottom 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* 展开状态 */
+  &.open {
+    display: flex;
+    max-height: 500px;
+    opacity: 1;
+    margin-top: 8px;
+    padding-top: 16px;
+    padding-bottom: 16px;
+    transform: translateY(0) scaleY(1);
+  }
+}

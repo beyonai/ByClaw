@@ -1,0 +1,298 @@
+.toolConfigModal {
+  :global {
+    .@{antPrefix}-modal-content {
+      border: none !important;
+      box-shadow: none !important;
+    }
+
+    /* 主题层对 Modal 内容区加了 padding（.beyond-modal .beyond-modal-content） */
+    .beyond-modal-content {
+      padding: 0;
+    }
+  }
+}
+
+.container {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+
+  // 自定义tab样式
+  :global {
+    .@{antPrefix}-tabs-tab.@{antPrefix}-tabs-tab-active .@{antPrefix}-tabs-tab-btn {
+      color: #635bff !important;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      color: #7a8799;
+
+      &.@{antPrefix}-tabs-tab-active {
+        color: #635bff;
+      }
+
+      &:hover {
+        color: #635bff;
+      }
+    }
+
+    .@{antPrefix}-tabs-ink-bar {
+      background-color: #635bff;
+    }
+
+    .@{antPrefix}-tabs-tab-btn {
+      &:focus {
+        color: #635bff;
+      }
+    }
+  }
+
+  .left {
+    display: flex;
+    flex-direction: column;
+    width: 220px;
+    padding: 16px 16px 0;
+    overflow: hidden;
+    background-color: #f7fafc;
+    border-top-left-radius: 8px;
+    border-bottom-left-radius: 8px;
+
+    .modalTitle {
+      margin-bottom: 18px;
+      color: #14161a;
+      font-weight: 500;
+      font-size: 16px;
+    }
+
+    .catalogList {
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+      margin-top: 15px;
+      // padding:15px 0;
+
+      &.isLoading {
+        display: flex;
+        justify-content: center;
+      }
+    }
+
+    :global {
+      .beyond-tree.beyond-tree-block-node.beyond-tree-directory {
+        background-color: transparent !important;
+      }
+
+      .beyond-tree-treenode,
+      .beyond-tree-treenode:hover,
+      .beyond-tree-treenode.beyond-tree-treenode-selected {
+        padding: 5px 0 !important;
+      }
+
+      .@{antPrefix}-input-affix-wrapper {
+        background-color: #fff;
+        border-radius: 4px;
+      }
+
+      .@{antPrefix}-tree {
+        margin-top: 5px;
+        color: #40454d;
+        font-size: 14px !important;
+        background-color: transparent;
+      }
+
+      .@{antPrefix}-tree-treenode {
+        display: flex;
+        align-items: center;
+        padding: 5px 0 !important;
+        color: #40454d;
+        font-size: 14px;
+
+        &:hover,
+        &.@{antPrefix}-tree-treenode-selected {
+          padding: 5px 0 !important;
+        }
+
+        &::before {
+          border-radius: 8px;
+          background-color: transparent !important;
+        }
+
+        &:hover::before {
+          background-color: transparent !important;
+        }
+
+        &.@{antPrefix}-tree-treenode-selected {
+          color: #14161a;
+          font-weight: bold;
+
+          &::before {
+            background-color: transparent !important;
+          }
+        }
+      }
+
+      .@{antPrefix}-tree-node-content-wrapper,
+      .@{antPrefix}-tree-node-content-wrapper:hover,
+      .@{antPrefix}-tree-node-content-wrapper.@{antPrefix}-tree-node-selected {
+        background-color: transparent !important;
+      }
+
+      .@{antPrefix}-tree-switcher {
+        display: none;
+      }
+    }
+  }
+
+  .right {
+    flex: 1;
+    padding: 16px 16px 0;
+    overflow: hidden;
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      height: 28px;
+      margin-bottom: 12px;
+      color: #707680;
+      font-size: 14px;
+
+      .tabsContainer {
+        flex: 1;
+        margin-top: 15px;
+      }
+
+      .label {
+        margin-right: 8px;
+        font-weight: 400;
+      }
+
+      .headerRight {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+      }
+
+      :global {
+        .@{antPrefix}-tabs-top > .@{antPrefix}-tabs-nav {
+          margin-bottom: 0;
+        }
+
+        .@{antPrefix}-tabs-top > .@{antPrefix}-tabs-nav::before {
+          display: none;
+        }
+      }
+    }
+
+    .cardListWrap {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+  }
+}
+
+.cardList {
+  height: 535px;
+  overflow: auto;
+
+  .cardItemWrap {
+    border-radius: 8px;
+    // border-bottom: solid 1px #e5e5e5;
+    // &:last-child {
+    //   border-bottom: none;
+    // }
+
+    // border:solid 1px blue;
+    &:hover,
+    &.expand {
+      background-color: #f7fafc;
+    }
+
+    :global {
+      .@{antPrefix}-divider {
+        margin: 12px 0;
+      }
+
+      .@{antPrefix}-tag {
+        color: #40454d;
+        background: #0000000f;
+        border: none;
+        border-radius: 4px;
+      }
+    }
+  }
+}
+
+.cardItem {
+  display: flex;
+  align-items: center;
+  height: 100px;
+  padding: 8px;
+  color: #707680;
+  font-weight: 400;
+  font-size: 12px;
+  // border:solid 1px green;
+}
+
+.title {
+  color: #14161a;
+  font-weight: 500;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.desc {
+  overflow: hidden;
+  color: #707680;
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.actionButton {
+  width: 68px;
+  height: 28px;
+  border-radius: 4px;
+
+  &.notAdd {
+    color: #165dff;
+    border: 1px solid #0000000f;
+  }
+
+  &.isAdd {
+    color: #707680;
+    border: 1px solid #0000000f;
+  }
+}
+
+.pluginList {
+  display: none;
+  height: 0;
+  padding: 8px;
+  opacity: 0;
+  transition: all 0.3s;
+
+  &.isExpand {
+    display: block;
+    height: auto;
+    opacity: 1;
+  }
+}
+
+.spinningWrapper {
+  // height: 100%;
+  flex: 1;
+  width: 100%;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      height: 100%;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+  }
+}

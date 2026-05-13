@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      fe: ${{ steps.filter.outputs.fe }}
+      be: ${{ steps.filter.outputs.be }}
+      exe: ${{ steps.filter.outputs.exe }}
+      data: ${{ steps.filter.outputs.data }}
+      qa: ${{ steps.filter.outputs.qa }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            fe:
+              - 'byclaw-fe/**'
+              - '.github/workflows/**'
+            be:
+              - 'byclaw-be/**'
+              - '.github/workflows/**'
+            exe:
+              - 'byclaw-exe/**'
+              - '.github/workflows/**'
+            data:
+              - 'byclaw-data/**'
+              - '.github/workflows/**'
+            qa:
+              - 'byclaw-qa/**'
+              - '.github/workflows/**'
+
+  fe:
+    needs: changes
+    if: needs.changes.outputs.fe == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: byclaw-fe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: byclaw-fe/pnpm-lock.yaml
+      - name: Install & verify
+        env:
+          HUSKY: "0"
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run lint
+          pnpm run test
+          pnpm run build
+
+  be:
+    needs: changes
+    if: needs.changes.outputs.be == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Maven verify
+        run: mvn -B -f byclaw-be/pom.xml verify
+
+  exe:
+    needs: changes
+    if: needs.changes.outputs.exe == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect byclaw-exe project
+        id: exe_project
+        run: |
+          if [ -f byclaw-exe/pyproject.toml ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Skip byclaw-exe job: byclaw-exe/pyproject.toml not found."
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.exe_project.outputs.exists == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: byclaw-exe/pyproject.toml
+      - name: Install & test (byclaw-exe)
+        if: steps.exe_project.outputs.exists == 'true'
+        working-directory: byclaw-exe
+        run: |
+          pip install -e ".[dev]"
+          ruff check .
+          pytest
+
+  data:
+    needs: changes
+    if: needs.changes.outputs.data == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install & test (byclaw-data)
+        working-directory: byclaw-data
+        run: |
+          uv sync --frozen --dev
+          uv run ruff check .
+
+  qa:
+    needs: changes
+    if: needs.changes.outputs.qa == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install & test (byclaw-qa)
+        working-directory: byclaw-qa
+        run: |
+          uv sync --group dev
+          uv run python -m pytest tests/ -v

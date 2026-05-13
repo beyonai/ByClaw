@@ -1,0 +1,115 @@
+@contentPadding: 16px;
+@queryInputMargin: 8px;
+
+.homePage {
+  height: 100%;
+  padding: 0;
+  position: relative;
+}
+
+.agentCard {
+  margin: 0 auto;
+  width: 96%;
+}
+
+.agentAvatar {
+  width: 120px;
+  height: 120px;
+  margin-right: 12px;
+  margin-top: 12px;
+  &:hover {
+    cursor: pointer;
+  }
+}
+
+.agentName {
+  color: var(--beyond-color-text);
+  font-size: 24px;
+  font-weight: bold;
+}
+
+.agentDescription {
+  color: var(--beyond-color-text-secondary);
+  font-size: var(--beyond-font-size);
+  margin: 6px 0;
+  min-height: 22px;
+}
+.agentDescriptionMore {
+  color: var(--beyond-color-text-tertiary);
+  font-size: var(--beyond-font-size-sm);
+  margin-bottom: 6px;
+  .agentInfo {
+    flex-wrap: nowrap;
+    overflow: hidden;
+    & > * {
+      width: auto !important;
+    }
+    & > *:nth-child(n + 3) {
+      min-width: 100px;
+    }
+  }
+}
+
+.functionArea {
+  width: 100%;
+  margin-top: 32px;
+}
+
+.prologueText {
+  font-size: 16px;
+  margin-top: 24px;
+  color: var(--beyond-color-text);
+}
+
+.functionCard {
+  background-color: #f5f8ff;
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s;
+  width: 130px;
+
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 6px 16px rgba(22, 119, 255, 0.1);
+  }
+
+  .functionIcon {
+    font-size: 16px;
+    // color: #1677ff;
+    margin-bottom: 8px;
+    display: block;
+  }
+
+  .functionName {
+    font-size: 14px;
+    color: #333;
+    font-weight: 500;
+  }
+}
+
+.commonQuestionList {
+  margin-top: 24px;
+  .commonQuestion {
+    padding: 8px 12px;
+    border-radius: 12px;
+    background: #0000000a;
+    width: max-content;
+    margin-bottom: 8px;
+    max-width: 80%;
+  }
+}
+
+.spinningWrapper {
+  height: 100%;
+  // flex: 1;
+  width: 100%;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      height: 100%;
+      width: 100%;
+    }
+  }
+}

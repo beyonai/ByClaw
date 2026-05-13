@@ -1,0 +1,94 @@
+.employeeCard {
+  height: 125px;
+  display: flex;
+  position: relative;
+
+  .renderRightBottom {
+    // display: none;
+  }
+
+  .renderContent {
+    position: relative;
+    padding: 12px;
+  }
+
+  // &:hover:not(.offline) {
+  //   box-shadow: 0 6px 10px 0 #2a3c4f1a;
+
+  //   .renderRightBottom {
+  //     display: block;
+  //   }
+  //   .creator {
+  //     display: none;
+  //   }
+  // }
+
+  &.offline {
+    cursor: not-allowed;
+    opacity: 0.5;
+    background-color: #eee;
+  }
+}
+
+.avatarContainer {
+  // margin-right: 12px;
+}
+
+.avatar {
+  width: 56px;
+  height: 56px;
+}
+
+.employeeInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  margin-top: auto;
+
+  .count,
+  .dot,
+  .creator {
+    font-size: 12px;
+    color: #707680;
+    font-family: 'PingFang SC';
+    line-height: 20px;
+  }
+}
+
+.creator {
+  margin-bottom: 0 !important;
+  // width: 100%;
+
+  gap: 6px;
+
+  & > * {
+    width: calc(50% - 3px);
+  }
+
+  .nameText {
+    color: var(--beyond-color-text-secondary);
+  }
+}
+
+.employeeName {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 0 !important;
+}
+
+.employeeDescription {
+  color: #666;
+  font-size: 14px;
+  margin-bottom: 0 !important;
+  // margin-bottom: 10px;
+}
+
+.employeeFooter {
+  display: flex;
+  color: #999;
+  font-size: 12px;
+}

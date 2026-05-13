@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.ontology.ByaiDbresourceRelMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.ontology.ByaiDbresourceRel">
+        <id column="rel_id" property="relId" />
+        <result column="obj_id" property="objId" />
+        <result column="obj_type" property="objType" />
+        <result column="record_id" property="recordId" />
+    </resultMap>
+
+    <!-- 通用查询结果列 -->
+    <sql id="Base_Column_List">
+        rel_id, obj_id, obj_type, record_id
+    </sql>
+
+    <!-- 根据用户ID查询关联关系 -->
+    <select id="findByObjId" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM byai_dbresource_rel
+        WHERE obj_id = #{objId}
+        ORDER BY rel_id DESC
+    </select>
+
+    <!-- 根据用户ID和对象类型查询关联关系 -->
+    <select id="findByObjIdAndObjType" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM byai_dbresource_rel
+        WHERE obj_id = #{objId}
+        <if test="objType != null and objType != ''">
+            AND obj_type = #{objType}
+        </if>
+        ORDER BY rel_id DESC
+    </select>
+
+    <!-- 根据库ID查询关联关系 -->
+    <select id="findByRecordId" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM byai_dbresource_rel
+        WHERE record_id = #{recordId}
+        ORDER BY rel_id DESC
+    </select>
+
+    <!-- 根据用户ID和库ID查询关联关系 -->
+    <select id="findByObjIdAndRecordId" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM byai_dbresource_rel
+        WHERE obj_id = #{objId}
+        AND record_id = #{recordId}
+        LIMIT 1
+    </select>
+
+    <!-- 根据用户ID删除关联关系 -->
+    <delete id="deleteByObjId">
+        DELETE FROM byai_dbresource_rel
+        WHERE obj_id = #{objId}
+    </delete>
+
+    <!-- 根据库ID删除关联关系 -->
+    <delete id="deleteByRecordId">
+        DELETE FROM byai_dbresource_rel
+        WHERE record_id = #{recordId}
+    </delete>
+
+    <!-- 批量插入关联关系（兼容MySQL、Oracle、PostgreSQL） -->
+    <insert id="insertBatch" parameterType="java.util.List">
+        <choose>
+            <!-- PostgreSQL -->
+            <when test="_databaseId == 'postgresql'">
+                INSERT INTO byai_dbresource_rel (rel_id, obj_id, obj_type, record_id)
+                VALUES
+                <foreach collection="list" item="item" separator=",">
+                    (#{item.relId}, #{item.objId}, #{item.objType}, #{item.recordId})
+                </foreach>
+            </when>
+            <!-- MySQL -->
+            <when test="_databaseId == 'mysql'">
+                INSERT INTO byai_dbresource_rel (rel_id, obj_id, obj_type, record_id)
+                VALUES
+                <foreach collection="list" item="item" separator=",">
+                    (#{item.relId}, #{item.objId}, #{item.objType}, #{item.recordId})
+                </foreach>
+            </when>
+            <!-- Oracle -->
+            <when test="_databaseId == 'oracle'">
+                INSERT ALL
+                <foreach collection="list" item="item">
+                    INTO byai_dbresource_rel (rel_id, obj_id, obj_type, record_id)
+                    VALUES (#{item.relId}, #{item.objId}, #{item.objType}, #{item.recordId})
+                </foreach>
+                SELECT * FROM DUAL
+            </when>
+            <!-- 默认使用PostgreSQL语法 -->
+            <otherwise>
+                INSERT INTO byai_dbresource_rel (rel_id, obj_id, obj_type, record_id)
+                VALUES
+                <foreach collection="list" item="item" separator=",">
+                    (#{item.relId}, #{item.objId}, #{item.objType}, #{item.recordId})
+                </foreach>
+            </otherwise>
+        </choose>
+    </insert>
+
+</mapper>
+

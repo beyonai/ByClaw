@@ -1,0 +1,533 @@
+@defFont: 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+
+body {
+  text-rendering: optimizelegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  position: relative;
+  font-family: @defFont;
+
+  :global {
+    --beyond-theme-color: @primary-color;
+    --beyond-header-height: 52px;
+
+    .clearFloat {
+      zoom: 1;
+
+      &::after {
+        clear: both;
+        content: '.';
+        display: block;
+        width: 0;
+        height: 0;
+        visibility: hidden;
+      } /* ==for FF/chrome/opera/IE8== */
+    }
+
+    pre,
+    code,
+    kbd,
+    samp {
+      font-family: @defFont;
+    }
+
+    a {
+      color: @primary-color;
+      text-decoration: none;
+    }
+
+    a:hover {
+      color: @primary-color 60%;
+    }
+
+    a:active {
+      color: @primary-color;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    ul,
+    ol,
+    li {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    pre {
+      white-space: pre-wrap;
+    }
+
+    p,
+    pre {
+      margin: 0;
+    }
+
+    // flex开始
+    .ub {
+      display: flex;
+      display: -moz-flex;
+      display: flexbox;
+      display: flex;
+    }
+
+    .ub-f1 {
+      -webkit-box-flex: 1;
+      flex: 1 0 0;
+      -moz-box-flex: 1;
+      flex: 1 0 0;
+      flex: 1 0 0;
+      flex: 1 0 0;
+      min-height: 0;
+      min-width: 0;
+    }
+
+    .ub-f2 {
+      -webkit-box-flex: 2;
+      flex: 2 0 10%;
+      -moz-box-flex: 2;
+      flex: 2 0 10%;
+      flex: 2 0 10%;
+      flex: 2 0 10%;
+      min-height: 0;
+      min-width: 0;
+    }
+
+    .ub-ac {
+      -webkit-box-align: center;
+      -ms-flex-align: center;
+      align-items: center;
+      align-items: center;
+      align-items: center;
+    }
+
+    .ub-ae {
+      -webkit-box-align: end;
+      -ms-flex-align: end;
+      align-items: flex-end;
+      align-items: flex-end;
+      align-items: flex-end;
+    }
+
+    .ub-as {
+      -webkit-box-align: start;
+      -ms-flex-align: start;
+      align-items: flex-start;
+      align-items: flex-start;
+      align-items: flex-start;
+    }
+
+    .ub-pc {
+      -webkit-box-pack: center;
+      justify-content: center;
+      justify-content: center;
+      justify-content: center;
+    }
+
+    .ub-ps {
+      -webkit-box-pack: start;
+      justify-content: flex-start;
+      justify-content: flex-start;
+      justify-content: flex-start;
+    }
+
+    .ub-pe {
+      -webkit-box-pack: end;
+      justify-content: flex-end;
+      justify-content: flex-end;
+      justify-content: flex-end;
+    }
+
+    .ub-pj {
+      -webkit-box-pack: justify;
+      justify-content: space-between;
+      justify-content: space-between;
+      justify-content: space-between;
+    }
+
+    .ub-pa {
+      -webkit-box-pack: around;
+      justify-content: space-around;
+      justify-content: space-around;
+      justify-content: space-around;
+    }
+
+    .ub-ver {
+      -webkit-box-orient: vertical;
+      flex-direction: column;
+      flex-direction: column;
+      flex-direction: column;
+    }
+
+    .ub-wrap {
+      flex-wrap: wrap;
+      flex-wrap: wrap;
+      flex-wrap: wrap;
+    }
+
+    .ub > img,
+    .ub > span,
+    .ub > i,
+    .ub > a {
+      display: block;
+    }
+    // flex结束
+
+    ::-webkit-scrollbar {
+      width: 6px; /* 纵向滚动条 */
+      height: 6px; /* 横向滚动条 */
+      background-color: transparent;
+    }
+
+    /* 定义滚动条轨道 内阴影 */
+    ::-webkit-scrollbar-track {
+      // box-shadow: inset 0 0 6px rgba(0, 0, 0, 0);
+      background-color: transparent;
+    }
+
+    /* 定义滑块 内阴影 */
+    ::-webkit-scrollbar-thumb {
+      // box-shadow: inset 0 0 6px rgb(193, 193, 193);
+      background-color: rgba(0, 0, 0, 20%);
+      border-radius: 3px;
+    }
+
+    .full-width {
+      width: 100%;
+    }
+
+    .full-height {
+      height: 100%;
+    }
+
+    .pointer {
+      cursor: pointer;
+    }
+
+    .float-left {
+      float: left;
+    }
+
+    .float-right {
+      float: right;
+    }
+
+    .ellipsis {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .bold {
+      font-weight: bold;
+    }
+
+    .text-align-center {
+      text-align: center;
+    }
+
+    .text-align-right {
+      text-align: right;
+    }
+
+    .overflow-auto {
+      overflow: auto;
+    }
+
+    .overflow-hidden {
+      overflow: hidden;
+    }
+
+    .nowrap {
+      white-space: nowrap;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .mt-0 {
+      margin-top: 0 !important;
+    }
+
+    .mb-0 {
+      margin-bottom: 0 !important;
+    }
+
+    .ml-8 {
+      margin-left: 8px;
+    }
+
+    .mr-6 {
+      margin-right: 6px;
+    }
+
+    .mr-8 {
+      margin-right: 8px;
+    }
+
+    .mt-8 {
+      margin-top: 8px;
+    }
+
+    .mb-8 {
+      margin-bottom: 8px;
+    }
+
+    .ml-10 {
+      margin-left: 10px;
+    }
+
+    .mr-10 {
+      margin-right: 10px;
+    }
+
+    .mt-10 {
+      margin-top: 10px;
+    }
+
+    .mb-10 {
+      margin-bottom: 10px;
+    }
+
+    .mt-16 {
+      margin-top: 16px;
+    }
+
+    .mb-16 {
+      margin-bottom: 16px;
+    }
+
+    .ml-16 {
+      margin-left: 16px;
+    }
+
+    .mr-16 {
+      margin-right: 16px;
+    }
+
+    .pt-16 {
+      padding-top: 16px;
+    }
+
+    .pb-16 {
+      padding-bottom: 16px;
+    }
+
+    .pl-16 {
+      padding-left: 16px;
+    }
+
+    .pr-16 {
+      padding-right: 16px;
+    }
+
+    .mW1200 {
+      max-width: 1200px;
+    }
+
+    .mW1100 {
+      max-width: 1100px;
+    }
+
+    .mW1000 {
+      max-width: 1000px;
+    }
+
+    .mW900 {
+      max-width: 900px;
+    }
+
+    .mW850 {
+      max-width: 850px;
+    }
+
+    .mW800 {
+      max-width: 800px;
+    }
+
+    .mW600 {
+      max-width: 600px;
+    }
+
+    .mW450 {
+      max-width: 450px;
+    }
+
+    .minW600 {
+      min-width: 600px;
+    }
+
+    .minW550 {
+      min-width: 550px;
+    }
+
+    .primary {
+      // color: @primary-color;
+      color: var(~'--@{antPrefix}-color-primary', @primary-color);
+    }
+
+    .showInit {
+      transition: all 0.5s ease;
+      opacity: 0;
+    }
+
+    .showFromBottom {
+      .showInit;
+
+      transform: translate3d(0, 30px, 0);
+    }
+
+    .animateAction {
+      &.showFromBottom {
+        will-change: transform, opacity;
+        transform: translate3d(0, 0, 0);
+        opacity: 1;
+      }
+    }
+
+    .delay-200 {
+      transition-delay: 0.2s;
+    }
+
+    .delay-400 {
+      transition-delay: 0.4s;
+    }
+
+    .delay-600 {
+      transition-delay: 0.6s;
+    }
+
+    .hideThumb {
+      &::-webkit-scrollbar {
+        width: 0;
+        height: 0;
+      }
+    }
+
+    .@{antPrefix}-notification-notice {
+      margin-bottom: 0 !important;
+    }
+
+    #nprogress .bar {
+      background: '#1237b3' !important; //自定义颜色
+    }
+
+    .textEllipsis {
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .textEllipsis3 {
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .textEllipsis2 {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .grecaptcha-badge {
+      display: none !important;
+    }
+
+    .textlg {
+      background: linear-gradient(to bottom right, #1237b3 0%, #3370ff 40%, #4e83fd 80%, #85b1ff 100%);
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .disabled {
+      color: var(--beyond-color-text-quaternary) !important;
+      cursor: not-allowed !important;
+    }
+
+    // 背景灰色，表单项、表格透明
+    .gray-bg {
+      .@{antPrefix}-input-css-var {
+        --beyond-input-hover-bg: transparent;
+        --beyond-input-active-bg: transparent;
+        --beyond-color-bg-container: transparent;
+      }
+      .@{antPrefix}-select-css-var {
+        --beyond-select-selector-bg: transparent;
+        --beyond-select-clear-bg: transparent;
+      }
+      .@{antPrefix}-table-css-var {
+        --beyond-color-bg-layout: transparent;
+        --beyond-color-bg-container: transparent;
+        --beyond-color-bg-elevated: transparent;
+        --beyond-table-header-bg: transparent;
+        --beyond-table-header-color: #7a8799;
+        --beyond-table-border-color: #d8dee6;
+      }
+    }
+
+    span[tabindex='0'] {
+      line-height: 1;
+    }
+
+    .gap2 {
+      gap: 2px;
+    }
+
+    .gap4 {
+      gap: 4px;
+    }
+
+    .gap6 {
+      gap: 6px;
+    }
+
+    .gap8 {
+      gap: 8px;
+    }
+
+    .gap10 {
+      gap: 10px;
+    }
+
+    .gap12 {
+      gap: 12px;
+    }
+
+    .gap16 {
+      gap: 16px;
+    }
+
+    @keyframes zoomStopIcon {
+      0% {
+        transform: scale(0.8);
+      }
+
+      100% {
+        transform: scale(1.2);
+      }
+    }
+    .full-height-tabs {
+      height: 100%;
+      & > .@{antPrefix}-tabs-content-holder > .@{antPrefix}-tabs-content {
+        height: 100%;
+        & > .@{antPrefix}-tabs-tabpane {
+          height: 100%;
+        }
+      }
+    }
+    .full-height-spin {
+      height: 100%;
+      & > .@{antPrefix}-spin-container {
+        height: 100%;
+      }
+    }
+  }
+}

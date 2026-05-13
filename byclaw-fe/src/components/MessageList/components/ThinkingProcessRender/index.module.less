@@ -1,0 +1,54 @@
+.thinkingProcessWrapper {
+  color: var(--beyond-color-text-tertiary);
+  // border-left: 2px solid #ced3d9;
+  padding: 2px 0;
+  // margin-bottom: 12px;
+  min-height: 22px;
+}
+
+.thinkingProcessResourceList {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 8px;
+  border: 1px solid #e6ebf0;
+  color: #707680;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+/* 基础样式 */
+.highlightText {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  color: #707680;
+  padding: 0 2px;
+}
+
+/* 斜线效果 */
+.highlightText::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 150%;
+  height: 5px;
+  background: linear-gradient(90deg, transparent 10%, rgba(255, 255, 255, 0.8) 70%, transparent 90%);
+  transform: rotate(20deg) translateX(-10%);
+  animation: shine 3s ease-in-out infinite;
+  mix-blend-mode: lighten;
+}
+
+@keyframes shine {
+  0% {
+    left: -100%;
+  }
+
+  80% {
+    left: 100%;
+  }
+
+  100% {
+    left: 100%;
+  }
+}

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.message.MessageShareLinkMessageMapper">
+
+    <resultMap id="BaseResultMap"
+        type="com.iwhalecloud.byai.manager.entity.message.MessageShareLinkMessage">
+        <id column="id" jdbcType="BIGINT" property="id"/>
+        <result column="link_id" jdbcType="BIGINT" property="linkId"/>
+        <result column="message_id" jdbcType="BIGINT" property="messageId"/>
+        <result column="create_time" jdbcType="TIMESTAMP" property="createTime"/>
+        <result column="com_acct_id" jdbcType="BIGINT" property="comAcctId"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, link_id, message_id, create_time, com_acct_id
+    </sql>
+
+    <insert id="insert"
+        parameterType="com.iwhalecloud.byai.manager.entity.message.MessageShareLinkMessage">
+        INSERT INTO message_share_link_message (
+            id,
+            link_id,
+            message_id,
+            create_time,
+            com_acct_id
+        ) VALUES (
+            #{id,jdbcType=BIGINT},
+            #{linkId,jdbcType=BIGINT},
+            #{messageId,jdbcType=BIGINT},
+            #{createTime,jdbcType=TIMESTAMP},
+            #{comAcctId,jdbcType=BIGINT}
+        )
+    </insert>
+
+    <select id="selectMessageIdsByLinkId" resultType="java.lang.Long">
+        SELECT message_id
+        FROM message_share_link_message
+        WHERE link_id = #{linkId,jdbcType=BIGINT}
+        ORDER BY id
+    </select>
+
+    <!-- 批量插入分享链接-消息关联记录 -->
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO message_share_link_message (
+            id,
+            link_id,
+            message_id,
+            create_time,
+            com_acct_id
+        ) VALUES
+        <foreach collection="records" item="record" separator=",">
+            (
+                #{record.id,jdbcType=BIGINT},
+                #{record.linkId,jdbcType=BIGINT},
+                #{record.messageId,jdbcType=BIGINT},
+                #{record.createTime,jdbcType=TIMESTAMP},
+                #{record.comAcctId,jdbcType=BIGINT}
+            )
+        </foreach>
+    </insert>
+</mapper>

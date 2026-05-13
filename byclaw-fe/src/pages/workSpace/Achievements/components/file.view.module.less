@@ -1,0 +1,95 @@
+.fileViewHeader {
+  max-width: 100%;
+  margin: 0 12px;
+}
+
+.dataSpin {
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: auto;
+
+  :global {
+    .beyond-spin-nested-loading {
+      flex: 1 1 0%;
+      min-height: 0;
+      overflow: auto;
+      padding: 0 12px 12px;
+    }
+  }
+}
+
+.fileView {
+  flex: 1 1 0%;
+  min-height: 0;
+}
+
+.tree {
+  margin-top: 12px;
+
+  :global {
+    .beyond-tree-treenode {
+      padding: 3px 0;
+    }
+
+    .beyond-tree-list-holder-inner {
+      gap: 2px;
+    }
+
+    .beyond-tree-node-content-wrapper {
+      padding-left: 0px;
+      display: inline-flex;
+
+      .beyond-tree-title {
+        flex: 1;
+        display: inline-flex;
+      }
+    }
+  }
+}
+
+.treeNode {
+  flex: 1;
+  display: inline-flex;
+  flex-direction: row;
+
+  &:hover {
+    .treeNodeActions {
+      display: flex;
+    }
+  }
+
+  &.treeNodeParent {
+    .treeNodeActions {
+      display: flex;
+    }
+  }
+
+  .treeNodeTitle {
+    position: relative;
+    padding-right: 8px;
+    flex: 1;
+    width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .treeNodeActions {
+    display: none;
+    align-items: center;
+
+    .icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
+      color: #4e535b;
+
+      &:hover {
+        color: #14161a;
+      }
+    }
+  }
+}

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.ontology.SsResExtOntologyMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.ontology.SsResExtOntology">
+        <id column="resource_id" property="resourceId" />
+        <result column="pid" property="pid" />
+    </resultMap>
+
+    <!-- 通用查询结果列 -->
+    <sql id="Base_Column_List">
+        resource_id, pid
+    </sql>
+
+    <!-- 根据资源ID查询本体扩展信息 -->
+    <select id="selectByResourceId" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List" />
+        FROM ss_res_ext_ontology
+        WHERE resource_id = #{resourceId}
+    </select>
+
+    <!-- 根据资源ID列表批量查询本体扩展信息 -->
+    <select id="selectByResourceIds" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List" />
+        FROM ss_res_ext_ontology
+        WHERE resource_id IN
+        <foreach collection="resourceIds" item="item" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+        ORDER BY resource_id ASC
+    </select>
+
+    <!-- 根据项目ID查询本体扩展信息列表 -->
+    <select id="selectByPid" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List" />
+        FROM ss_res_ext_ontology
+        WHERE pid = #{pid}
+        ORDER BY resource_id ASC
+    </select>
+
+    <!-- 插入本体扩展信息 -->
+    <insert id="insert" parameterType="com.iwhalecloud.byai.manager.entity.ontology.SsResExtOntology">
+        INSERT INTO ss_res_ext_ontology (
+            resource_id, pid
+        ) VALUES (
+            #{resourceId}, #{pid}
+        )
+    </insert>
+
+    <!-- 批量插入本体扩展信息 -->
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO ss_res_ext_ontology (
+            resource_id, pid
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.resourceId}, #{item.pid}
+            )
+        </foreach>
+    </insert>
+
+    <!-- 根据资源ID删除本体扩展信息 -->
+    <delete id="deleteByResourceId">
+        DELETE FROM ss_res_ext_ontology
+        WHERE resource_id = #{resourceId}
+    </delete>
+
+    <!-- 根据资源ID列表批量删除本体扩展信息 -->
+    <delete id="deleteByResourceIds">
+        DELETE FROM ss_res_ext_ontology
+        WHERE resource_id IN
+        <foreach collection="resourceIds" item="item" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+    </delete>
+
+</mapper>
+

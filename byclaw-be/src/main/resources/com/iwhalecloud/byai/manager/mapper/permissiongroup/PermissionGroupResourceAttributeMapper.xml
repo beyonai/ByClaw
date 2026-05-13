@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.permissiongroup.PermissionGroupResourceAttributeMapper">
+
+    <!-- 资源属性权限VO结果映射 -->
+    <resultMap id="ResourceAttributePermissionVOResultMap" type="com.iwhalecloud.byai.manager.vo.permissiongroup.ResourceAttributePermissionVO">
+        <id column="id" property="id"/>
+        <result column="resource_id" property="resourceId"/>
+        <result column="resource_name" property="resourceName"/>
+        <result column="resource_attribute_id" property="resourceAttributeId"/>
+        <result column="attribute_name" property="attributeName"/>
+        <result column="attribute_code" property="attributeCode"/>
+        <result column="data_scope_type" property="dataScopeType"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <!-- 根据资源ID查询资源属性权限列表 -->
+    <select id="selectByResourceId" resultMap="ResourceAttributePermissionVOResultMap">
+        SELECT
+            rap.id,
+            rap.resource_id,
+            r.resource_name AS resource_name,
+            rap.resource_attribute_id,
+            ra.attribute_desc AS attribute_name,
+            ra.attribute_code AS attribute_code,
+            rap.data_scope_type,
+            rap.create_by,
+            rap.create_time,
+            rap.update_by,
+            rap.update_time
+        FROM resource_attribute_permissions rap
+        LEFT JOIN ss_resource r ON rap.resource_id = r.resource_id
+        LEFT JOIN ss_res_ext_attribute ra ON rap.resource_attribute_id = ra.ext_attribute_id
+        WHERE rap.resource_id = #{resourceId}
+        ORDER BY rap.resource_attribute_id
+    </select>
+
+    <!-- 根据资源ID删除资源属性权限 -->
+    <delete id="deleteByResourceId">
+        DELETE FROM resource_attribute_permissions
+        WHERE resource_id = #{resourceId}
+    </delete>
+
+    <!-- 批量插入资源属性权限 -->
+    <insert id="batchInsert">
+        INSERT INTO resource_attribute_permissions (
+            id, resource_id, resource_attribute_id, data_scope_type, create_by, create_time
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.id},
+                #{item.resourceId},
+                #{item.resourceAttributeId},
+                #{item.dataScopeType},
+                #{item.createBy},
+                #{item.createTime}
+            )
+        </foreach>
+    </insert>
+
+</mapper>
+

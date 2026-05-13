@@ -1,0 +1,33 @@
+.temporaryComp {
+  display: flex;
+  // width: 336px;
+  width: 100%;
+  height: 66px;
+  padding: 12px;
+  // flex-direction: column;
+  // align-items: flex-start;
+  // gap: 8px;
+  border-radius: 12px;
+  border: 0.5px solid var(--user-line-2-color-border-115, #00000026);
+  background-image: linear-gradient(180deg, #f2f9ff 0%, #fff 50%);
+  .agentInfo {
+    display: flex;
+  }
+  .content {
+    display: none;
+    font-size: 14px;
+  }
+  &:hover {
+    // width: 100%;
+    .content {
+      display: flex;
+    }
+    .agentInfo {
+      display: none;
+    }
+  }
+}
+.avatar {
+  width: 32px;
+  height: 32px;
+}

@@ -1,0 +1,85 @@
+.dialogueRecordPage {
+  max-width: 950px;
+  margin: 0 auto;
+  padding: var(--beyond-header-height) 30px 0;
+}
+
+.dialogueRecordContent {
+  height: 100%;
+
+  .headerSection {
+    margin-bottom: 20px;
+
+    .pageTitle {
+      color: var(--beyond-color-text);
+      font-size: 20px;
+      font-weight: 600;
+    }
+  }
+
+  .filterButtons {
+    margin-bottom: 20px;
+
+    :global {
+      .@{antPrefix}-btn-default.@{antPrefix}-btn-outlined:not(:disabled):not(.@{antPrefix}-btn-disabled) {
+        &:hover {
+          border-color: var(--beyond-button-default-border-color);
+          color: var(--beyond-button-default-color);
+          background-color: var(--beyond-button-text-hover-bg);
+        }
+      }
+    }
+  }
+
+  .dialogueList {
+    overflow: hidden;
+    height: calc(100vh - 170px);
+  }
+}
+
+.dialogueItem {
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  margin-bottom: 12px;
+  cursor: pointer;
+
+  .dialogueTime {
+    margin-bottom: 20px;
+    font-size: var(--beyond-font-size-sm);
+    color: #00000080;
+    font-weight: bold;
+
+    &.notToday {
+      margin-top: 30px;
+    }
+  }
+
+  &:hover {
+    .dialogueTitle {
+      color: var(--beyond-color-primary);
+    }
+  }
+
+  .dialogueInfo {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 5px;
+  }
+
+  .dialogueTitle {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: var(--beyond-color-text);
+    font-size: var(--beyond-font-size-lg);
+    font-weight: 500;
+  }
+
+  .dialogueDesc {
+    font-size: 13px;
+    color: var(--beyond-color-text-secondary);
+    display: flex;
+    align-items: center;
+  }
+}

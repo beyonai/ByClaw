@@ -1,0 +1,46 @@
+.noticeListContent {
+  display: flex;
+  flex-direction: column;
+  width: 400px;
+  height: 600px;
+  padding: 0 10px;
+  flex: 1 1 auto;
+  overflow: hidden;
+  .header {
+    padding-bottom: 8px;
+    :global {
+      .@{antPrefix}-segmented-item {
+        width: 90px;
+      }
+    }
+    .clearIcon {
+      color: var(--beyond-color-success-active);
+      // margin-right: 6px;
+    }
+  }
+
+  .tabs {
+    :global {
+      .@{antPrefix}-tabs-nav {
+        display: none;
+      }
+    }
+  }
+}
+
+.proactiveContent {
+  width: 360px;
+  padding: 10px;
+  overflow: hidden;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px -8px #00000014, 0 8px 24px 0 #0000000d, 0 12px 48px 16px #00000008;
+}
+
+.cardDesc {
+  margin: 12px 0 0 !important;
+
+  font-size: 14px;
+  font-weight: bold;
+  line-height: 22px;
+}

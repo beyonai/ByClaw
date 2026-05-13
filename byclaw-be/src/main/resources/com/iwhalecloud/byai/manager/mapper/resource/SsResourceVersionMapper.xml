@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.SsResourceVersionMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.resource.SsResourceVersion">
+        <id column="resource_version_id" property="resourceVersionId" />
+        <result column="resource_id" property="resourceId" />
+        <result column="system_code" property="systemCode" />
+        <result column="resource_source_pk_id" property="resourceSourcePkId" />
+        <result column="resource_biz_type" property="resourceBizType" />
+        <result column="resource_type" property="resourceType" />
+        <result column="resource_name" property="resourceName" />
+        <result column="resource_desc" property="resourceDesc" />
+        <result column="avatar" property="avatar" />
+        <result column="sample" property="sample" />
+        <result column="tags" property="tags" />
+        <result column="version_no" property="versionNo" />
+        <result column="catalog_id" property="catalogId" />
+        <result column="man_org_id" property="manOrgId" />
+        <result column="man_user_id" property="manUserId" />
+        <result column="index_list" property="indexList" />
+        <result column="publisher" property="publisher" />
+        <result column="ext_info" property="extInfo" />
+        <result column="rel_resource_list" property="relResourceList" />
+        <result column="resource_status" property="resourceStatus" />
+        <result column="version_status" property="versionStatus" />
+        <result column="create_by" property="createBy" />
+        <result column="create_time" property="createTime" />
+        <result column="update_by" property="updateBy" />
+        <result column="update_time" property="updateTime" />
+        <result column="com_acct_id" property="comAcctId" />
+    </resultMap>
+
+    <!-- 通用查询结果 -->
+    <sql id="Base_Column_List">
+        resource_version_id, resource_id, system_code, resource_source_pk_id, resource_biz_type, 
+        resource_type, resource_name, resource_desc, avatar, sample, tags, version_no, 
+        catalog_id, man_org_id, man_user_id, index_list, publisher, ext_info, rel_resource_list, 
+        resource_status, version_status, create_by, create_time, update_by, update_time, com_acct_id
+    </sql>
+
+</mapper>

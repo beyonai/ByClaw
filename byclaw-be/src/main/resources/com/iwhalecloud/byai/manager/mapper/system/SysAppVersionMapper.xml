@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.system.SysAppVersionMapper">
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.system.SysAppVersion">
+        <id column="version_id" property="versionId" jdbcType="BIGINT"/>
+        <result column="device_type" property="deviceType" jdbcType="VARCHAR"/>
+        <result column="app_version" property="appVersion" jdbcType="VARCHAR"/>
+        <result column="url" property="url" jdbcType="VARCHAR"/>
+        <result column="update_type" property="updateType" jdbcType="VARCHAR"/>
+        <result column="update_msg" property="updateMsg" jdbcType="VARCHAR"/>
+        <result column="publish_time" property="publishTime" jdbcType="TIMESTAMP"/>
+        <result column="update_status" property="updateStatus" jdbcType="VARCHAR"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        version_id, device_type, app_version, url, update_type, update_msg, publish_time, update_status
+    </sql>
+
+    <select id="selectLatestVersionByDeviceType" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from sys_app_version
+        where device_type = #{deviceType}
+        order by publish_time desc
+        limit 1
+    </select>
+
+</mapper> 

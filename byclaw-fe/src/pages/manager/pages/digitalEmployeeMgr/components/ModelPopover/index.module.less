@@ -1,0 +1,36 @@
+.popoverConfig {
+  width: 360px;
+
+  .leftItem {
+    display: flex;
+    flex-direction: row;
+    margin-bottom: 8px;
+  }
+
+  .rightItem {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    width: 100%;
+  }
+
+  .headerTitle {
+    display: flex;
+    align-content: center;
+    align-items: center;
+    color: #1f2533;
+    font-weight: 500;
+    font-size: 14px;
+    font-family: 'PingFang SC';
+    font-style: normal;
+
+    &::before {
+      display: inline-block;
+      width: 3px;
+      height: 14px;
+      margin-right: 6px;
+      background-color: #165dff;
+      content: ' ';
+    }
+  }
+}

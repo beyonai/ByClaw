@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.SsResourceCatalogMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.resource.SsResourceCatalog">
+        <id column="catalog_id" property="catalogId" />
+        <result column="catalog_name" property="catalogName" />
+        <result column="catalog_desc" property="catalogDesc" />
+        <result column="p_catalog_id" property="pCatalogId" />
+        <result column="catalog_type" property="catalogType" />
+        <result column="create_by" property="createBy" />
+        <result column="create_time" property="createTime" />
+        <result column="update_by" property="updateBy" />
+        <result column="update_time" property="updateTime" />
+        <result column="com_acct_id" property="comAcctId" />
+        <result column="catalog_path" property="catalogPath" />
+    </resultMap>
+
+    <!-- 资源目录查询结果映射 -->
+    <resultMap id="ResourceCatalogDtoResultMap" type="com.iwhalecloud.byai.manager.dto.resource.ResourceCatalogDto">
+        <id column="resourceId" property="resourceId" />
+        <result column="resourceSourcePkId" property="resourceSourcePkId" />
+        <result column="resourceBizType" property="resourceBizType" />
+        <result column="resourceName" property="resourceName" />
+        <result column="resourceDesc" property="resourceDesc" />
+        <result column="avatar" property="avatar" />
+        <result column="tags" property="tags" />
+        <result column="catalogId" property="catalogId" />
+        <result column="catalogName" property="catalogName" />
+        <result column="manOrgId" property="manOrgId" />
+        <result column="orgName" property="orgName" />
+        <result column="resourceStatus" property="resourceStatus" />
+        <result column="shelfTime" property="shelfTime" jdbcType="TIMESTAMP" />
+        <result column="publishTime" property="publishTime" jdbcType="TIMESTAMP" />
+        <result column="updateTime" property="updateTime" jdbcType="TIMESTAMP" />
+        <result column="orderIndex" property="orderIndex" />
+    </resultMap>
+
+    <resultMap id="catalogMap" type="com.iwhalecloud.byai.manager.qo.resource.CatalogDto">
+        <id column="catalog_id" property="catalogId" />
+        <result column="catalog_name" property="catalogName" />
+        <result column="catalog_desc" property="catalogDesc" />
+        <result column="p_catalog_id" property="pCatalogId" />
+        <result column="catalog_type" property="catalogType" />
+        <result column="p_catalog_name" property="pCatalogName" />
+    </resultMap>
+
+
+
+    <!-- 通用查询结果-->
+    <sql id="Base_Column_List">
+        catalog_id, catalog_name, catalog_desc, p_catalog_id, catalog_type, 
+        create_by, create_time, update_by, update_time, com_acct_id,catalog_path,order_index
+    </sql>
+
+    <!-- 树状查询结果�?-->
+    <sql id="Tree_Column_List">
+        c.catalog_id, c.catalog_name, c.catalog_desc, c.p_catalog_id, c.catalog_type, 
+        c.create_by, c.create_time, c.update_by, c.update_time, c.com_acct_id,
+        CASE WHEN EXISTS (SELECT 1 FROM ss_resource_catalog WHERE p_catalog_id = c.catalog_id) THEN true ELSE false END as has_children,
+        CASE 
+            WHEN c.p_catalog_id = -1 THEN 1
+            ELSE 2
+        END as level
+    </sql>
+
+    <select id="queryCatalogTree" resultMap="BaseResultMap">
+        select
+            <include refid="Base_Column_List"/>
+        from
+            ss_resource_catalog
+        <where>
+            <if test="catalogType != null and catalogType != ''">
+                AND catalog_type = #{catalogType}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND catalog_name like concat('%', concat(#{keyword}, '%'))
+            </if>
+            <if test="catalogIds != null and catalogIds.size()>0">
+                AND catalog_id in
+                <foreach collection="catalogIds" open="(" separator="," close=")" item="item">
+                    #{item}
+                </foreach>
+            </if>
+        </where>
+        order by order_index asc, create_time desc
+    </select>
+
+    <select id="queryResourceListByCatalogId" resultMap="ResourceCatalogDtoResultMap">
+        select
+            a.resource_id as resourceId,
+            a.resource_source_pk_id as resourceSourcePkId,
+            a.resource_biz_type as resourceBizType,
+            a.resource_type as resourceType,
+            a.resource_name as resourceName,
+            a.resource_desc as resourceDesc,
+            a.resource_code as resourceCode,
+            a.avatar,
+            a.tags,
+            a.catalog_id as catalogId,
+            a.man_org_id as manOrgId,
+            a.resource_status as resourceStatus,
+            a.shelf_time as shelfTime,
+            a.publish_time as publishTime,
+            a.update_time as updateTime,
+            b.catalog_name as catalogName,
+            c.org_name as orgName
+        from
+            ss_resource a
+        left join
+                ss_resource_catalog b
+            on
+                a.catalog_id = b.catalog_id
+        left join
+                po_organization c
+            on
+                a.man_org_id = c.org_id
+        <where>
+            <if test="catalogDto.isQueryParent != null">
+                <if test="catalogDto.isQueryParent == true">
+                    and a.parent_resource_id &lt; 0
+                </if>
+                <if test="catalogDto.isQueryParent == false">
+                    and a.parent_resource_id > 0
+                </if>
+            </if>
+            <if test="catalogDto.resourceStatusList != null and catalogDto.resourceStatusList.size()>0">
+                and a.resource_status in
+                <foreach collection="catalogDto.resourceStatusList" open="(" item="item" close=")" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="catalogDto.catalogId != null and catalogDto.catalogId != ''">
+                AND EXISTS (
+                SELECT 1
+                FROM ss_resource_catalog target_sc
+                WHERE target_sc.catalog_id = #{catalogDto.catalogId}
+                AND (
+                b.catalog_id = target_sc.catalog_id
+                OR b.catalog_path LIKE CONCAT(target_sc.catalog_path, '.%')
+                )
+                )
+            </if>
+            <if test="catalogDto.keyword != null and catalogDto.keyword != ''">
+                and a.resource_name like concat('%', concat(#{catalogDto.keyword},'%'))
+            </if>
+            <if test="catalogDto.resourceBizTypeList != null and catalogDto.resourceBizTypeList.size()>0">
+                and a.resource_biz_type in
+                <foreach collection="catalogDto.resourceBizTypeList" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach>
+            </if>
+        </where>
+        <trim prefix="order by" suffix="" suffixOverrides=",">
+            <if test="catalogDto.shelfTime != null and catalogDto.shelfTime != ''">
+                shelf_time 
+                <choose>
+                    <when test="catalogDto.shelfTime == 'asc' or catalogDto.shelfTime == 'ASC'">
+                        asc
+                    </when>
+                    <otherwise>
+                        desc
+                    </otherwise>
+                </choose>,
+            </if>
+            <if test="catalogDto.publishTime != null and catalogDto.publishTime != ''">
+                publish_time 
+                <choose>
+                    <when test="catalogDto.publishTime == 'asc' or catalogDto.publishTime == 'ASC'">
+                        asc
+                    </when>
+                    <otherwise>
+                        desc
+                    </otherwise>
+                </choose>
+            </if>
+        </trim>
+    </select>
+
+
+    <select id="queryCatalogById" resultMap="catalogMap">
+        select
+            catalog_id,
+            catalog_name,
+            catalog_desc,
+            (select catalog_name from ss_resource_catalog where catalog_id = a.p_catalog_id) as p_catalog_name
+        from
+            ss_resource_catalog a
+        where catalog_id = #{catalogId}
+    </select>
+
+    <select id="querySelfAndDescendantIds" resultType="java.lang.Long">
+        select catalog_id
+        from ss_resource_catalog
+        where catalog_id = #{catalogId}
+           or catalog_path like concat(#{catalogPath}, '.%')
+    </select>
+
+    <select id="queryChildrenByParentId" resultMap="BaseResultMap">
+        select
+            <include refid="Base_Column_List"/>
+        from
+            ss_resource_catalog
+        <where>
+            <if test="pCatalogId != null and pCatalogId != ''">
+                and p_catalog_id = #{pCatalogId}
+            </if>
+        </where>
+        order by update_time desc, create_time desc
+    </select>
+
+    <!-- 资源目录关联树查询结果映射 -->
+    <resultMap id="ResourceCatalogTreeResultMap" type="com.iwhalecloud.byai.manager.dto.resource.ResourceCatalogTreeVO">
+        <result column="catalog_name" property="catalogName" />
+        <result column="catalog_id" property="catalogId" />
+        <result column="resource_biz_type" property="resourceBizType" />
+        <result column="resource_type" property="resourceType" />
+        <result column="resource_name" property="resourceName" />
+        <result column="p_catalog_id" property="pCatalogId" />
+        <result column="catalog_type" property="catalogType" />
+        <result column="catalog_path" property="catalogPath" />
+        <result column="order_index" property="orderIndex" />
+        <result column="rel_catalog_id" property="relCatalogId" />
+        <result column="rel_resource_id" property="relResourceId" />
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP" />
+    </resultMap>
+
+    <!-- 查询资源目录关联树 -->
+    <select id="queryResourceCatalogTree" resultMap="ResourceCatalogTreeResultMap">
+        SELECT
+            c.catalog_name,
+            c.catalog_id,
+            r.resource_biz_type,
+            r.resource_type,
+            r.resource_name,
+            c.p_catalog_id,
+            c.catalog_type,
+            c.catalog_path,
+            c.order_index,
+            r.catalog_id AS rel_catalog_id,
+            r.resource_id AS rel_resource_id,
+            r.create_time
+        FROM
+            ss_resource_catalog c
+        LEFT JOIN
+            ss_resource r ON c.catalog_id = r.catalog_id AND r.resource_biz_type = 'OBJECT'
+        WHERE
+             c.catalog_type = #{catalogType}
+    </select>
+
+</mapper>

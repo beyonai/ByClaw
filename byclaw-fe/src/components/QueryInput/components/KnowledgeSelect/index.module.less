@@ -1,0 +1,79 @@
+.popoverContent {
+  border-radius: 16px;
+
+  :global {
+    .@{antPrefix}-popover-inner {
+      padding: 0;
+    }
+
+    .@{antPrefix}-menu {
+      border-radius: 8px;
+      border: none;
+    }
+
+    .@{antPrefix}-menu-item {
+      border-radius: 8px;
+      padding: 0 12px;
+    }
+
+    .@{antPrefix}-menu-title-content {
+      width: 100%;
+    }
+  }
+}
+
+.knowledgeSelectBtn {
+  height: 32px;
+  line-height: 32px;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid var(--knowledge-color-border);
+
+  :global {
+    .@{antPrefix}-select {
+      border: none !important;
+
+      .@{antPrefix}-select-selector {
+        border: none !important;
+        box-shadow: none !important;
+      }
+
+      .@{antPrefix}-select-arrow {
+        right: 8px;
+      }
+
+      .@{antPrefix}-select-clear {
+        right: 8px;
+        opacity: 0;
+        transition: opacity 0.3s;
+      }
+
+      &:hover {
+        .@{antPrefix}-select-clear {
+          opacity: 1;
+        }
+      }
+    }
+  }
+}
+
+.closeCircleFilled {
+  display: none;
+  color: var(--beyond-color-text-quaternary);
+  &:hover {
+    color: var(--beyond-color-text);
+  }
+}
+.downOutlined {
+  display: block;
+}
+
+&:hover {
+  border-color: var(--beyond-color-primary);
+  .downOutlined {
+    display: none;
+  }
+  .closeCircleFilled {
+    display: block;
+  }
+}

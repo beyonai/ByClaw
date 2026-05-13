@@ -1,0 +1,332 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.users.UsersMapper">
+
+
+    <resultMap id="usersResultMap" type="com.iwhalecloud.byai.manager.entity.users.Users">
+        <result column="user_id" property="userId" />
+        <result column="user_code" property="userCode" />
+        <result column="user_name" property="userName" />
+        <result column="phone" property="phone" />
+        <result column="user_number" property="userNumber" />
+        <result column="station_id" property="stationId" />
+    </resultMap>
+
+    <resultMap id="usersOrgVoResultMap" type="com.iwhalecloud.byai.manager.vo.users.UsersOrgVo">
+        <result column="user_id" property="userId" />
+        <result column="user_code" property="userCode" />
+        <result column="user_name" property="userName" />
+        <result column="phone" property="phone" />
+        <result column="org_id" property="orgId" />
+        <result column="org_name" property="orgName" />
+        <result column="user_number" property="userNumber" />
+        <result column="user_types_str" property="userTypes"
+                typeHandler="com.iwhalecloud.byai.common.typehandler.StringListTypeHandler" />
+        <result column="position_name" property="positionName" />
+        <result column="position_id" property="positionId" />
+        <result column="station_id" property="stationId" />
+        <result column="superassist_id" property="superassistId" />
+    </resultMap>
+
+    <resultMap id="usersDetailVoResultMap" type="com.iwhalecloud.byai.manager.vo.users.UsersDetailVo">
+        <result column="user_id" property="userId" />
+        <result column="user_code" property="userCode" />
+        <result column="user_name" property="userName" />
+        <result column="email" property="email" />
+        <result column="phone" property="phone" />
+        <result column="user_types_str" property="userTypes"
+                typeHandler="com.iwhalecloud.byai.common.typehandler.StringListTypeHandler" />
+        <result column="position_id" property="positionId" />
+        <result column="org_id" property="orgId" />
+        <result column="org_name" property="orgName" />
+        <result column="user_number" property="userNumber" />
+        <result column="station_id" property="stationId" />
+    </resultMap>
+
+    <select id="getUsersByOrgId" resultMap="usersOrgVoResultMap">
+        select a.user_id,
+               a.user_code,
+               a.user_name,
+               a.phone,
+               a.user_number,
+               a.station_id,
+               c.org_id,
+               c.org_name,
+               d.position_name,
+               e.superassist_id,
+               e.avatar,
+               e.intro,
+               e.name,
+        <choose>
+            <when test="_databaseId == 'postgresql'">
+                COALESCE(ARRAY_TO_STRING(ARRAY_AGG(DISTINCT b.user_type), ','), '') as user_types_str
+            </when>
+            <when test="_databaseId == 'oracle'">
+                COALESCE(LISTAGG(DISTINCT b.user_type, ',') WITHIN GROUP (ORDER BY b.user_type), '') as user_types_str
+            </when>
+            <otherwise>
+                COALESCE(GROUP_CONCAT(DISTINCT b.user_type), '') as user_types_str
+            </otherwise>
+        </choose>
+        from po_users a
+                 left join po_users_organization b on a.user_id = b.user_id
+                 left join po_organization c on b.org_id = c.org_id
+                 left join po_position d on b.position_id = d.position_id
+                 left join suas_superassist e on a.user_id = e.superassist_id and e.status = '00'
+        <where>
+            and a.state ='A'
+            <choose>
+               <when test="containsChildren == true">
+                    <if test="orgId !=null">
+                        <choose>
+                            <when test="_databaseId == 'postgresql'">
+                                AND STRPOS(concat('.', c.path_code, '.'), concat('.', #{orgId}, '.')) > 0
+                            </when>
+                            <otherwise>
+                                AND INSTR(concat('.', c.path_code, '.'), concat('.', #{orgId}, '.')) > 0
+                            </otherwise>
+                        </choose>
+                    </if>
+                </when>
+                <otherwise>
+                    <if test="orgId !=null">
+                         AND c.org_id =#{orgId}
+                    </if>
+                </otherwise>
+            </choose>
+            <if test="keyword !=null and keyword !=''">
+                AND (a.user_code LIKE CONCAT(CONCAT('%',#{keyword}),'%') OR a.user_name LIKE CONCAT(CONCAT('%',#{keyword}),'%'))
+            </if>
+            <if test="positionId !=null">
+               and b.position_id =#{positionId}
+            </if>
+            <if test="userType !=null and userType !=''">
+               and b.user_type =#{userType}
+            </if>
+        </where>
+        group by a.user_id,
+                 a.user_code,
+                 a.user_name,
+                 a.phone,
+                 a.user_number,
+                 a.station_id,
+                 b.org_id,
+                 c.org_id,
+                 c.org_name,
+                 b.position_id,
+                 d.position_name,
+                 e.superassist_id,
+                 e.avatar,
+                 e.intro,
+                 e.name
+    </select>
+
+    <select id="selectUsersDetailVo" resultMap="usersDetailVoResultMap">
+        select a.user_id,
+               a.user_code,
+               a.user_name,
+               a.email,
+               a.phone,
+               a.user_number,
+               a.station_id,
+               b.position_id,
+               b.org_id,
+               c.org_name,
+        <choose>
+            <when test="_databaseId == 'postgresql'">
+                COALESCE(ARRAY_TO_STRING(ARRAY_AGG(DISTINCT b.user_type), ','), '') as user_types_str
+            </when>
+            <when test="_databaseId == 'oracle'">
+                COALESCE(LISTAGG(DISTINCT b.user_type, ',') WITHIN GROUP (ORDER BY b.user_type), '') as user_types_str
+            </when>
+            <otherwise>
+                COALESCE(GROUP_CONCAT(DISTINCT b.user_type), '') as user_types_str
+            </otherwise>
+        </choose>
+        from po_users a
+                 left join po_users_organization b on a.user_id = b.user_id
+                 left join po_organization c on b.org_id = c.org_id
+        <where>
+               a.state !='X'
+            <if test="userId !=null">
+                and a.user_id =#{userId}
+            </if>
+            <if test="orgId !=null">
+                and b.org_id =#{orgId}
+            </if>
+        </where>
+        group by a.user_id,
+                 a.user_code,
+                 a.user_name,
+                 a.email,
+                 a.phone,
+                 a.user_number,
+                 a.station_id,
+                 b.org_id,
+                 c.org_id,
+                 c.org_name,
+                 b.position_id
+    </select>
+
+    <select id="countUsers" resultType="java.lang.Long">
+       select count(1) from po_users
+       <where>
+             state !='X'
+          <if test="userCode !=null and userCode !=''">
+               and user_code = #{userCode}
+          </if>
+          <if test="userNumber !=null and userNumber !=''">
+               and user_number = #{userNumber}
+          </if>
+          <if test="userIdNotEqual !=null">
+               and user_id != #{userIdNotEqual}
+          </if>
+        </where>
+    </select>
+
+    <select id="findUserIdsByOrgId" resultType="java.lang.Long" parameterType="java.lang.Long">
+        select a.user_id
+        from po_users a
+                 join po_users_organization b on a.user_id = b.user_id
+        where a.state != 'X'
+          and b.org_id = #{orgId}
+        group by a.user_id
+    </select>
+
+    <select id="findUserIdsByPostId" resultType="java.lang.Long" parameterType="java.lang.Long">
+        select a.user_id
+        from po_users a
+                 join po_users_organization b on a.user_id = b.user_id
+        where a.state != 'X'
+          and b.position_id = #{postId}
+        group by a.user_id
+    </select>
+
+    <select id="findUserIdsByStationId" resultType="java.lang.Long" parameterType="java.lang.Long">
+        select a.user_id
+        from po_users a
+        where a.state != 'X'
+          and a.station_id = #{stationId}
+        group by a.user_id
+    </select>
+
+    <select id="findUserByUnionId" resultMap="usersResultMap">
+        select a.user_id,
+               a.user_name,
+               a.email,
+               a.phone,
+               a.user_code,
+               a.pwd,
+               a.address,
+               a.remark,
+               a.user_eff_date,
+               a.user_exp_date,
+               a.create_date,
+               a.update_date,
+               a.state,
+               a.state_time,
+               a.is_locked,
+               a.last_login_date,
+               a.security_question_id,
+               a.security_answer,
+               a.thumbnail_uri,
+               a.ext_attr,
+               a.assistant_id,
+               a.user_number,
+               a.po_user_external_system_id,
+               a.station_id
+        from po_users a
+                 join po_user_external_system b on a.user_id = b.user_id
+        where b.union_id =#{unionId}
+    </select>
+
+    <select id="findUserIdsByOrgIdList" resultType="java.lang.Long">
+        select a.user_id
+        from po_users a
+                 join po_users_organization b on a.user_id = b.user_id
+        where a.state != 'X'
+        <if test="orgIdList != null and orgIdList.size() > 0">
+            and b.org_id in
+            <foreach collection="orgIdList" item="orgId" open="(" separator="," close=")">
+                #{orgId}
+            </foreach>
+        </if>
+        group by a.user_id
+    </select>
+
+    <select id="findUserIdsByStationIdList" resultType="java.lang.Long">
+        select a.user_id
+        from po_users a
+        where a.state != 'X'
+        <if test="stationIdList != null and stationIdList.size() > 0">
+            and a.station_id in
+            <foreach collection="stationIdList" item="stationId" open="(" separator="," close=")">
+                #{stationId}
+            </foreach>
+        </if>
+        group by a.user_id
+    </select>
+
+
+    <select id="queryEmailByOrgAndName" resultType="java.lang.String">
+        select
+            distinct a.email
+        from po_users a
+                left join po_users_organization b on a.user_id = b.user_id
+        left join po_organization c on b.org_id = c.org_id
+        where a.state != 'X'
+        <if test="orgName != null and orgName != ''">
+            AND c.org_name = #{orgName}
+        </if>
+        <if test="names != null and names.size()>0">
+            AND a.user_name in
+            <foreach collection="names" item="item" open="(" separator="," close=")">
+                #{item}
+            </foreach>
+        </if>
+    </select>
+
+    <select id="queryNameByOrgAndName" resultType="java.lang.String">
+        select
+        distinct a.user_name
+        from po_users a
+        left join po_users_organization b on a.user_id = b.user_id
+        left join po_organization c on b.org_id = c.org_id
+        where a.state != 'X'
+        <if test="orgName != null and orgName != ''">
+            AND c.org_name = #{orgName}
+        </if>
+        <if test="names != null and names.size()>0">
+            AND a.user_name in
+            <foreach collection="names" item="item" open="(" separator="," close=")">
+                #{item}
+            </foreach>
+        </if>
+    </select>
+
+    <update id="batchUpdateUsers">
+        <foreach collection="usersList" item="user" separator=";">
+            UPDATE po_users
+            SET phone = #{user.phone}
+            WHERE user_id = #{user.userId}
+        </foreach>
+    </update>
+
+    <select id="selectUsersDetailVoByCode" resultMap="usersDetailVoResultMap" parameterType="java.util.List">
+        select a.user_id,
+        a.user_code,
+        a.user_name,
+        a.email,
+        a.phone,
+        a.user_number,
+        a.station_id  from po_users a
+        where  a.state !='X'
+             and a.user_code in
+            <foreach collection="list" item="code" open="(" separator="," close=")">
+                #{code}
+            </foreach>
+      </select>
+
+</mapper>

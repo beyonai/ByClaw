@@ -1,0 +1,205 @@
+name: Docker Build and Push
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      fe: ${{ steps.filter.outputs.fe }}
+      be: ${{ steps.filter.outputs.be }}
+      exe: ${{ steps.filter.outputs.exe }}
+      data: ${{ steps.filter.outputs.data }}
+      qa: ${{ steps.filter.outputs.qa }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            fe:
+              - "byclaw-fe/**"
+              - ".github/workflows/docker-build.yml"
+            be:
+              - "byclaw-be/**"
+              - ".github/workflows/docker-build.yml"
+            exe:
+              - "byclaw-exe/**"
+              - ".github/workflows/docker-build.yml"
+            data:
+              - "byclaw-data/**"
+              - ".github/workflows/docker-build.yml"
+            qa:
+              - "byclaw-qa/**"
+              - ".github/workflows/docker-build.yml"
+
+  prepare-matrix:
+    needs: changes
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      has_targets: ${{ steps.set-matrix.outputs.has_targets }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build matrix from changed services
+        id: set-matrix
+        uses: actions/github-script@v7
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FE_CHANGED: ${{ needs.changes.outputs.fe }}
+          BE_CHANGED: ${{ needs.changes.outputs.be }}
+          EXE_CHANGED: ${{ needs.changes.outputs.exe }}
+          DATA_CHANGED: ${{ needs.changes.outputs.data }}
+          QA_CHANGED: ${{ needs.changes.outputs.qa }}
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+
+            const services = [
+              { id: "fe", name: "byclaw-fe", context: "byclaw-fe", dockerfile: "byclaw-fe/Dockerfile", platforms: "linux/amd64,linux/arm64" },
+              { id: "be", name: "byclaw-be", context: "byclaw-be", dockerfile: "byclaw-be/Dockerfile", platforms: "linux/amd64,linux/arm64" },
+              { id: "exe", name: "byclaw-exe", context: "byclaw-exe", dockerfile: "byclaw-exe/Dockerfile", platforms: "linux/amd64,linux/arm64" },
+              { id: "data", name: "byclaw-data", context: ".", dockerfile: "byclaw-data/Dockerfile", platforms: "linux/amd64,linux/arm64" },
+              { id: "qa", name: "byclaw-qa", context: "byclaw-qa", dockerfile: "byclaw-qa/Dockerfile", platforms: "linux/amd64,linux/arm64" },
+            ];
+
+            const isDispatch = process.env.EVENT_NAME === "workflow_dispatch";
+            const changedMap = {
+              fe: process.env.FE_CHANGED === "true",
+              be: process.env.BE_CHANGED === "true",
+              exe: process.env.EXE_CHANGED === "true",
+              data: process.env.DATA_CHANGED === "true",
+              qa: process.env.QA_CHANGED === "true",
+            };
+
+            const include = services
+              .filter((svc) => (isDispatch || changedMap[svc.id]) && fs.existsSync(path.join(process.cwd(), svc.dockerfile)))
+              .map((svc) => ({
+                service: svc.name,
+                context: svc.context,
+                dockerfile: svc.dockerfile,
+                platforms: svc.platforms,
+                image: `${process.env.REGISTRY}/${context.repo.owner}/${context.repo.repo}/${svc.name}`,
+              }));
+
+            const matrix = { include };
+            core.info(`Matrix: ${JSON.stringify(matrix)}`);
+            core.setOutput("matrix", JSON.stringify(matrix));
+            core.setOutput("has_targets", include.length > 0 ? "true" : "false");
+
+  build-and-push:
+    needs: prepare-matrix
+    if: needs.prepare-matrix.outputs.has_targets == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm (byclaw-fe only)
+        if: matrix.service == 'byclaw-fe'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js (byclaw-fe only)
+        if: matrix.service == 'byclaw-fe'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: byclaw-fe/pnpm-lock.yaml
+
+      - name: Build frontend assets (byclaw-fe only)
+        if: matrix.service == 'byclaw-fe'
+        working-directory: byclaw-fe
+        env:
+          HUSKY: "0"
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build publicPath=/beyond/
+
+      - name: Setup Java (byclaw-be only)
+        if: matrix.service == 'byclaw-be'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build backend JAR (byclaw-be only)
+        if: matrix.service == 'byclaw-be'
+        working-directory: byclaw-be
+        run: mvn -B -DskipTests package
+
+      - name: Setup uv (byclaw-qa only)
+        if: matrix.service == 'byclaw-qa'
+        uses: astral-sh/setup-uv@v5
+
+      - name: Validate QA lockfile (byclaw-qa only)
+        if: matrix.service == 'byclaw-qa'
+        working-directory: byclaw-qa
+        run: uv lock --check
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ matrix.image }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=,suffix=,format=short
+
+      - name: Build and push Docker image
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          platforms: ${{ matrix.platforms }}
+
+      - name: Output image digest
+        run: |
+          echo "Service: ${{ matrix.service }}"
+          echo "Image digest: ${{ steps.push.outputs.digest }}"
+          echo "Image tags: ${{ steps.meta.outputs.tags }}"

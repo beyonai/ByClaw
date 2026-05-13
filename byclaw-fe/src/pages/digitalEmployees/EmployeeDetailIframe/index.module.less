@@ -1,0 +1,18 @@
+.spin {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.spinWrapper {
+  height: 100%;
+  width: 100%;
+  :global {
+    .@{antPrefix}-spin-container {
+      height: 100%;
+      width: 100%;
+    }
+  }
+}

@@ -1,0 +1,32 @@
+.chatBottom {
+  width: 96%;
+  max-width: 860px;
+  padding: 0 12px;
+  margin: 16px auto;
+}
+
+.messageContent {
+  padding: 12px;
+  margin: 0 -12px;
+  box-sizing: content-box;
+}
+
+.cardsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: 98px;
+  gap: 16px;
+}
+
+.dialogueCard {
+  overflow: hidden;
+  :global {
+    .@{antPrefix}-card-body {
+      display: flex;
+      flex-direction: column;
+      // justify-content: space-between;
+      height: 100%;
+      padding: 10px 12px;
+    }
+  }
+}

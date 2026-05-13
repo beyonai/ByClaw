@@ -1,0 +1,39 @@
+.noticeListBlock {
+  padding-bottom: 10px;
+  :global {
+    .@{antPrefix}-list-item {
+      display: block;
+      border-bottom: 1px solid #eaeaea;
+    }
+    .@{antPrefix}-list-item:last-child {
+      border: none;
+    }
+  }
+  .titleIcon {
+    display: flex;
+    width: 22px;
+    height: 22px;
+    background-color: #ff9a2e;
+    border-radius: 4px;
+    .noticeIcon {
+      color: #fff;
+      font-size: 14px;
+    }
+  }
+  .unReadTag {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #f53f3f;
+  }
+}
+.spin {
+  height: 100%;
+  width: 100%;
+  :global {
+    .@{antPrefix}-spin-container {
+      height: 100%;
+      width: 100%;
+    }
+  }
+}

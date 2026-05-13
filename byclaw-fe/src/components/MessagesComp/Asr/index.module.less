@@ -1,0 +1,38 @@
+.asr {
+  position: relative;
+
+  width: 320px;
+  padding: 16px;
+  align-items: center;
+  gap: 8px;
+  border-radius: 10px;
+  border: 0.5px solid #00000026;
+
+  background: linear-gradient(90deg, #fff 35%, #f0f6ff 100%);
+
+  .collectItem {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 1;
+
+    padding: 3px;
+  }
+
+  .collect {
+    display: none;
+    border-radius: 50%;
+
+    &.collected {
+      display: block;
+    }
+  }
+
+  &:hover {
+    box-shadow: 0 4px 16px -8px #00000014, 0 8px 24px 0 #0000000d, 0 12px 48px 16px #00000008;
+
+    .collect {
+      display: block;
+    }
+  }
+}

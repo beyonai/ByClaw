@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.staticdata.ByaiSystemConfigListMapper">
+
+    <!-- 系统配置列表结果映射 -->
+    <resultMap id="ByaiSystemConfigListResultMap" type="com.iwhalecloud.byai.manager.entity.staticdata.ByaiSystemConfigList">
+        <id property="paramId" column="param_id"/>
+        <result property="paramGroupCode" column="param_group_code"/>
+        <result property="paramGroupName" column="param_group_name"/>
+        <result property="paramName" column="param_name"/>
+        <result property="paramEnName" column="param_en_name"/>
+        <result property="paramValue" column="param_value"/>
+        <result property="paramDesc" column="param_desc"/>
+        <result property="paramSeq" column="param_seq"/>
+    </resultMap>
+
+    <resultMap id="SystemConfigListGroupVoResultMap" type="com.iwhalecloud.byai.manager.vo.staticdata.SystemConfigListGroupVo">
+        <result property="paramGroupCode" column="param_group_code"/>
+        <result property="paramGroupName" column="param_group_name"/>
+    </resultMap>
+
+    <!-- 系统配置列表DTO结果映射（一对多） -->
+    <resultMap id="SystemConfigListDTOResultMap" type="com.iwhalecloud.byai.manager.dto.staticdata.SystemConfigListDTO">
+        <id property="paramGroupCode" column="param_group_code"/>
+        <result property="paramGroupName" column="param_group_name"/>
+        <collection property="byaiSystemConfigLists" ofType="com.iwhalecloud.byai.manager.entity.staticdata.ByaiSystemConfigList">
+            <id property="paramId" column="param_id"/>
+            <result property="paramGroupCode" column="param_group_code"/>
+            <result property="paramGroupName" column="param_group_name"/>
+            <result property="paramName" column="param_name"/>
+            <result property="paramEnName" column="param_en_name"/>
+            <result property="paramValue" column="param_value"/>
+            <result property="paramDesc" column="param_desc"/>
+            <result property="paramSeq" column="param_seq"/>
+        </collection>
+    </resultMap>
+
+    <!-- 分页查询系统配置列表分组 -->
+    <select id="selectSystemConfigListGroupByQo" resultMap="SystemConfigListGroupVoResultMap">
+        SELECT
+            param_group_code,
+            MAX(param_group_name) AS param_group_name
+        FROM byai_system_config_list
+        <where>
+            <if test="keyword != null and keyword != ''">
+                AND (param_group_code LIKE CONCAT('%', #{keyword}, '%') OR param_group_name LIKE CONCAT('%', #{keyword}, '%') )
+            </if>
+        </where>
+        GROUP BY param_group_code
+        ORDER BY MAX(param_id) DESC
+    </select>
+
+
+    <!-- 根据分组编码查询系统配置列表详情 -->
+    <select id="selectByParamGroupCode" resultMap="SystemConfigListDTOResultMap">
+        SELECT
+            param_id,
+            param_group_code,
+            param_group_name,
+            param_name,
+            param_en_name,
+            param_value,
+            param_desc,
+            param_seq
+        FROM byai_system_config_list
+        WHERE param_group_code = #{paramGroupCode}
+        ORDER BY param_seq ASC
+    </select>
+
+</mapper>

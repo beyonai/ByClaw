@@ -1,0 +1,25 @@
+.container {
+  margin-top: 27px;
+  height: 336px;
+  border: 1px solid var(--beyond-color-border-secondary);
+  border-radius: 8px;
+
+  :global {
+    .@{antPrefix}-tree-node-content-wrapper {
+      height: 40px;
+      display: flex;
+      align-items: center;
+      column-gap: 10px;
+    }
+
+    .@{antPrefix}-tree .@{antPrefix}-tree-switcher {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .@{antPrefix}-tree .@{antPrefix}-tree-switcher:before {
+      visibility: hidden;
+    }
+  }
+}

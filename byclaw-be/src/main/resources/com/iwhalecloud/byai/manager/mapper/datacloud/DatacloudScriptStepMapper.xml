@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.datacloud.DatacloudScriptStepMapper">
+
+    <!-- 脚本步骤表结果映 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.datacloud.DatacloudScriptStep">
+        <id column="step_id" property="stepId" jdbcType="BIGINT"/>
+        <result column="script_id" property="scriptId" jdbcType="BIGINT"/>
+        <result column="step_order" property="stepOrder" jdbcType="INTEGER"/>
+        <result column="enterprise_id" property="enterpriseId" jdbcType="BIGINT"/>
+        <result column="creator_id" property="creatorId" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="update_by" property="updateBy" jdbcType="BIGINT"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <!-- 脚本步骤DTO结果映射 -->
+    <resultMap id="StepDTOResultMap" type="com.iwhalecloud.byai.manager.dto.datacloud.DatacloudScriptStepDTO">
+        <id column="step_id" property="stepId" jdbcType="BIGINT"/>
+        <result column="script_id" property="scriptId" jdbcType="BIGINT"/>
+        <result column="step_order" property="stepOrder" jdbcType="INTEGER"/>
+        <result column="enterprise_id" property="enterpriseId" jdbcType="BIGINT"/>
+        <result column="creator_id" property="creatorId" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="update_by" property="updateBy" jdbcType="BIGINT"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
+        <result column="script_name" property="scriptName" jdbcType="VARCHAR"/>
+    </resultMap>
+
+    <!-- 基础字段列表 -->
+    <sql id="Base_Column_List">
+        step_id, script_id, step_name, step_type, step_description, step_content, 
+        selector_info, input_schema, output_schema, param_mapping, step_order, 
+        is_required, is_active, enterprise_id, creator_id, create_time, 
+        update_by, update_time
+    </sql>
+
+    <!-- 分页查询脚本步骤列表 -->
+    <select id="selectScriptStepListByPage" resultMap="StepDTOResultMap">
+        SELECT 
+            s.step_id,
+            s.script_id,
+            s.step_name,
+            s.step_type,
+            s.step_description,
+            s.step_content,
+            s.selector_info,
+            s.input_schema,
+            s.output_schema,
+            s.param_mapping,
+            s.step_order,
+            s.is_required,
+            s.is_active,
+            s.enterprise_id,
+            s.creator_id,
+            s.create_time,
+            s.update_by,
+            s.update_time,
+            sc.script_name
+        FROM datacloud_script_step s
+        LEFT JOIN datacloud_script sc ON s.script_id = sc.script_id
+        WHERE s.enterprise_id = #{query.enterpriseId}
+        <if test="query.scriptId != null">
+            AND s.script_id = #{query.scriptId}
+        </if>
+        <if test="query.stepName != null and query.stepName != ''">
+            AND s.step_name LIKE CONCAT('%', #{query.stepName}, '%')
+        </if>
+        <if test="query.stepType != null and query.stepType != ''">
+            AND s.step_type = #{query.stepType}
+        </if>
+        <if test="query.isActive != null">
+            AND s.is_active = #{query.isActive}
+        </if>
+        ORDER BY s.step_order ASC, s.create_time DESC
+    </select>
+
+    <!-- 根据脚本ID查询步骤列表 -->
+    <select id="selectStepsByScriptId" resultMap="StepDTOResultMap">
+        SELECT 
+            s.step_id,
+            s.script_id,
+            s.step_name,
+            s.step_type,
+            s.step_description,
+            s.step_content,
+            s.selector_info,
+            s.input_schema,
+            s.output_schema,
+            s.param_mapping,
+            s.step_order,
+            s.is_required,
+            s.is_active,
+            s.enterprise_id,
+            s.creator_id,
+            s.create_time,
+            s.update_by,
+            s.update_time,
+            sc.script_name
+        FROM datacloud_script_step s
+        LEFT JOIN datacloud_script sc ON s.script_id = sc.script_id
+        WHERE s.script_id = #{scriptId}
+        AND s.enterprise_id = #{enterpriseId}
+        ORDER BY s.step_order ASC
+    </select>
+
+    <!-- 根据脚本ID和步骤类型查询步骤列表-->
+    <select id="selectStepsByScriptIdAndType" resultMap="StepDTOResultMap">
+        SELECT 
+            s.step_id,
+            s.script_id,
+            s.step_name,
+            s.step_type,
+            s.step_description,
+            s.step_content,
+            s.selector_info,
+            s.input_schema,
+            s.output_schema,
+            s.param_mapping,
+            s.step_order,
+            s.is_required,
+            s.is_active,
+            s.enterprise_id,
+            s.creator_id,
+            s.create_time,
+            s.update_by,
+            s.update_time,
+            sc.script_name
+        FROM datacloud_script_step s
+        LEFT JOIN datacloud_script sc ON s.script_id = sc.script_id
+        WHERE s.script_id = #{scriptId}
+        AND s.step_type = #{stepType}
+        AND s.enterprise_id = #{enterpriseId}
+        ORDER BY s.step_order ASC
+    </select>
+
+    <!-- 统计脚本的步骤数 -->
+    <select id="countStepsByScriptId" resultType="int">
+        SELECT COUNT(*)
+        FROM datacloud_script_step
+        WHERE script_id = #{scriptId}
+    </select>
+
+    <!-- 获取脚本的最大步骤顺序-->
+    <select id="getMaxStepOrderByScriptId" resultType="Integer">
+        SELECT MAX(step_order)
+        FROM datacloud_script_step
+        WHERE script_id = #{scriptId}
+    </select>
+
+    <!-- 批量更新步骤顺序 -->
+    <update id="batchUpdateStepOrder">
+        UPDATE datacloud_script_step
+        SET step_order = CASE step_id
+        <foreach collection="stepOrders" item="order" index="stepId">
+            WHEN #{stepId} THEN #{order}
+        </foreach>
+        END,
+        update_time = NOW()
+        WHERE script_id = #{scriptId}
+        AND step_id IN
+        <foreach collection="stepOrders" item="order" index="stepId" open="(" separator="," close=")">
+            #{stepId}
+        </foreach>
+    </update>
+
+    <!-- 查询步骤统计信息 -->
+    <select id="selectStepStatistics" resultType="java.util.Map">
+        SELECT 
+            COUNT(*) AS total_steps,
+            COUNT(CASE WHEN is_active = 1 THEN 1 END) AS active_steps,
+            COUNT(CASE WHEN is_active = 0 THEN 1 END) AS inactive_steps,
+            COUNT(CASE WHEN is_required = 1 THEN 1 END) AS required_steps,
+            COUNT(CASE WHEN is_required = 0 THEN 1 END) AS optional_steps
+        FROM datacloud_script_step
+        WHERE script_id = #{scriptId}
+    </select>
+
+    <!-- 查询步骤类型统计 -->
+    <select id="selectStepTypeStatistics" resultType="java.util.Map">
+        SELECT 
+            step_type,
+            COUNT(*) AS count
+        FROM datacloud_script_step
+        WHERE script_id = #{scriptId}
+        GROUP BY step_type
+        ORDER BY count DESC
+    </select>
+
+    <!-- 批量删除脚本步骤 -->
+    <delete id="batchDeleteScriptSteps">
+        DELETE FROM datacloud_script_step
+        WHERE step_id IN
+        <foreach collection="stepIds" item="stepId" open="(" separator="," close=")">
+            #{stepId}
+        </foreach>
+        AND script_id = #{scriptId}
+    </delete>
+
+</mapper>

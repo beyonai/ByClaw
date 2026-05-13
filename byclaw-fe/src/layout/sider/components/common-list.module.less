@@ -1,0 +1,67 @@
+.listSpinner {
+  flex: 1 1 auto;
+  overflow: hidden;
+
+  & > :global(.@{antPrefix}-spin-container) {
+    height: 100%;
+  }
+}
+
+.listLoader {
+  text-align: center;
+  padding: 16px;
+}
+
+.list {
+  :global {
+    .@{antPrefix}-list-item .@{antPrefix}-list-item-action {
+      visibility: hidden;
+      margin-left: auto;
+
+      & > li {
+        cursor: pointer;
+      }
+    }
+  }
+
+  :global {
+    .@{antPrefix}-list-item {
+      cursor: pointer;
+      padding: 7px 10px;
+      border: 1px solid transparent;
+      border-radius: 10px;
+
+      .@{antPrefix}-list-item-meta {
+        align-items: center;
+
+        .@{antPrefix}-list-item-meta-avatar {
+          line-height: 1;
+        }
+
+        .@{antPrefix}-list-item-meta-avatar img {
+          width: 24px;
+          // height: 24px;
+        }
+
+        .@{antPrefix}-list-item-meta-avatar .anticon {
+          font-size: 24px;
+        }
+
+        .@{antPrefix}-list-item-meta-title,
+        .@{antPrefix}-list-item-meta-description {
+          word-break: break-all;
+          margin-bottom: 0;
+        }
+      }
+    }
+
+    .@{antPrefix}-list-item:hover {
+      background: #fff;
+      border-color: var(~'--@{antPrefix}-color-border');
+
+      .@{antPrefix}-list-item-action {
+        visibility: visible;
+      }
+    }
+  }
+}

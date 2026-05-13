@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.log.ManageLogMapper">
+
+    <resultMap id="ManageLogResultMap" type="com.iwhalecloud.byai.manager.entity.log.ManageLog">
+        <id column="log_id" property="logId" jdbcType="BIGINT"/>
+        <result column="module_name" property="moduleName" jdbcType="VARCHAR"/>
+        <result column="module_description" property="moduleDescription" jdbcType="VARCHAR"/>
+        <result column="operator_user_id" property="operatorUserId" jdbcType="BIGINT"/>
+        <result column="operator_user_name" property="operatorUserName" jdbcType="VARCHAR"/>
+        <result column="ip_from" property="ipFrom" jdbcType="VARCHAR"/>
+        <result column="operator_param" property="operatorParam" jdbcType="CLOB"/>
+        <result column="operator_response" property="operatorResponse" jdbcType="CLOB"/>
+        <result column="operator_time" property="operatorTime" jdbcType="TIMESTAMP"/>
+        <result column="class_name" property="className" jdbcType="VARCHAR"/>
+        <result column="method" property="method" jdbcType="VARCHAR"/>
+    </resultMap>
+
+</mapper>

@@ -1,0 +1,420 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.permissiongroup.PermissionGroupAuthorizedObjectMapper">
+
+    <!-- 权限组授权对象结果映射 -->
+    <resultMap id="PermissionGroupAuthorizedObjectResultMap" type="com.iwhalecloud.byai.manager.entity.permissiongroup.PermissionGroupAuthorizedObject">
+        <id column="id" property="id"/>
+        <result column="permission_group_id" property="permissionGroupId"/>
+        <result column="authorized_object_id" property="authorizedObjectId"/>
+        <result column="object_type" property="objectType"/>
+        <result column="effective_at" property="effectiveAt"/>
+        <result column="expires_at" property="expiresAt"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <!-- 授权对象VO结果映射 -->
+    <resultMap id="AuthorizedObjectVOResultMap" type="com.iwhalecloud.byai.manager.vo.permissiongroup.AuthorizedObjectVO">
+        <result column="id" property="id"/>
+        <result column="authorized_object_id" property="authorizedObjectId"/>
+        <result column="object_type" property="objectType"/>
+        <result column="object_type_name" property="objectTypeName"/>
+        <result column="object_id" property="objectId"/>
+        <result column="object_name" property="objectName"/>
+        <result column="effective_at" property="effectiveAt"/>
+        <result column="expires_at" property="expiresAt"/>
+        <result column="create_time" property="createTime"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_by_name" property="createByName"/>
+    </resultMap>
+
+    <!-- 授权用户VO结果映射 -->
+    <resultMap id="AuthorizedUserVOResultMap" type="com.iwhalecloud.byai.manager.vo.permissiongroup.AuthorizedUserVO">
+        <result column="user_id" property="userId"/>
+        <result column="user_code" property="userCode"/>
+        <result column="user_name" property="userName"/>
+        <result column="user_email" property="userEmail"/>
+        <result column="user_phone" property="userPhone"/>
+        <result column="org_name" property="orgName"/>
+        <result column="hasExtPer" property="hasExtPer" javaType="java.lang.Boolean"/>
+    </resultMap>
+
+    <!-- 通用查询列 -->
+    <sql id="Base_Column_List">
+        pgao.id, pgao.permission_group_id, pgao.authorized_object_id, pgao.object_type,
+        pgao.effective_at, pgao.expires_at, pgao.create_by, pgao.create_time,
+        pgao.update_by, pgao.update_time
+    </sql>
+
+    <!-- 分页查询授权对象列表 -->
+    <select id="selectAuthorizedObjectPage" resultMap="AuthorizedObjectVOResultMap">
+        SELECT
+            pgao.id,
+            pgao.authorized_object_id,
+            pgao.object_type,
+            CASE pgao.object_type
+                WHEN 'user' THEN '用户'
+                WHEN 'org' THEN '组织'
+                WHEN 'station' THEN '驻地'
+                WHEN 'position' THEN '岗位'
+                ELSE pgao.object_type
+            END AS object_type_name,
+            pgao.authorized_object_id AS object_id,
+            CASE pgao.object_type
+                WHEN 'user' THEN (SELECT u.user_name FROM po_users u WHERE u.user_id = pgao.authorized_object_id)
+                WHEN 'org' THEN (SELECT o.org_name FROM po_organization o WHERE o.org_id = pgao.authorized_object_id)
+                WHEN 'station' THEN (SELECT p.station_name FROM po_station p WHERE p.station_id = pgao.authorized_object_id)
+                ELSE NULL
+            END AS object_name,
+            pgao.effective_at,
+            pgao.expires_at,
+            pgao.create_time,
+            pgao.create_by,
+            u.user_name AS create_by_name
+        FROM permission_group_authorized_objects pgao
+        LEFT JOIN po_users u ON pgao.create_by = u.user_id
+        <where>
+            pgao.permission_group_id = #{query.permissionGroupId}
+            <if test="query.objectType != null and query.objectType != ''">
+                AND pgao.object_type = #{query.objectType}
+            </if>
+            <if test="query.objectName != null and query.objectName != ''">
+                AND (
+                    (pgao.object_type = 'user' AND EXISTS (
+                        SELECT 1 FROM po_users us WHERE us.user_id = pgao.authorized_object_id 
+                        AND us.user_name LIKE CONCAT('%', #{query.objectName}, '%')
+                    ))
+                    OR (pgao.object_type = 'org' AND EXISTS (
+                        SELECT 1 FROM po_organization os WHERE os.org_id = pgao.authorized_object_id 
+                        AND os.org_name LIKE CONCAT('%', #{query.objectName}, '%')
+                    ))
+                )
+            </if>
+        </where>
+        ORDER BY pgao.create_time DESC
+    </select>
+
+    <!-- 根据权限组ID查询授权对象列表（不分页） -->
+    <select id="selectByPermissionGroupId" resultMap="AuthorizedObjectVOResultMap">
+        SELECT
+            pgao.id,
+            pgao.authorized_object_id,
+            pgao.object_type,
+            CASE pgao.object_type
+                WHEN 'user' THEN '用户'
+                WHEN 'org' THEN '组织'
+                WHEN 'station' THEN '驻地'
+                WHEN 'position' THEN '岗位'
+                ELSE pgao.object_type
+            END AS object_type_name,
+            pgao.authorized_object_id AS object_id,
+            CASE pgao.object_type
+                WHEN 'user' THEN (SELECT u.user_name FROM po_users u WHERE u.user_id = pgao.authorized_object_id)
+                WHEN 'org' THEN (SELECT o.org_name FROM po_organization o WHERE o.org_id = pgao.authorized_object_id)
+                ELSE NULL
+            END AS object_name,
+            pgao.effective_at,
+            pgao.expires_at,
+            pgao.create_time,
+            pgao.create_by
+        FROM permission_group_authorized_objects pgao
+        WHERE pgao.permission_group_id = #{permissionGroupId}
+        ORDER BY pgao.create_time DESC
+    </select>
+
+    <!-- 根据权限组ID删除授权对象关联 -->
+    <delete id="deleteByPermissionGroupId">
+        DELETE FROM permission_group_authorized_objects
+        WHERE permission_group_id = #{permissionGroupId}
+    </delete>
+
+    <!-- 批量插入授权对象关联 -->
+    <insert id="batchInsert">
+        INSERT INTO permission_group_authorized_objects 
+        (id, permission_group_id, authorized_object_id, object_type, effective_at, expires_at, create_by, create_time)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.id}, #{item.permissionGroupId}, #{item.authorizedObjectId}, #{item.objectType},
+             #{item.effectiveAt}, #{item.expiresAt}, #{item.createBy}, #{item.createTime})
+        </foreach>
+    </insert>
+
+    <!-- 查询授权对象数量 -->
+    <select id="countByPermissionGroupId" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM permission_group_authorized_objects
+        WHERE permission_group_id = #{permissionGroupId}
+    </select>
+
+    <!-- 检查授权对象是否已存在 -->
+    <select id="countByObject" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM permission_group_authorized_objects
+        WHERE permission_group_id = #{permissionGroupId}
+        AND object_type = #{objectType}
+        AND authorized_object_id = #{authorizedObjectId}
+    </select>
+
+    <!-- 批量删除授权对象关联 -->
+    <delete id="batchDeleteByIds">
+        DELETE FROM permission_group_authorized_objects
+        WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <!-- 检查授权对象是否属于权限组 -->
+    <select id="countByPermissionGroupIdAndAuthorizedObjectId" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM permission_group_authorized_objects
+        WHERE permission_group_id = #{permissionGroupId}
+        AND authorized_object_id = #{authorizedObjectId}
+    </select>
+
+    <!-- 根据权限组ID和对象类型查询授权对象列表 -->
+    <select id="selectByPermissionGroupIdAndObjectType" resultMap="PermissionGroupAuthorizedObjectResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM permission_group_authorized_objects pgao
+        WHERE permission_group_id = #{permissionGroupId}
+        AND object_type = #{objectType}
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- 分页查询权限组授权用户列表（去重，过滤排除用户） -->
+    <select id="selectAuthorizedUserPage" resultMap="AuthorizedUserVOResultMap">
+        SELECT DISTINCT
+            u.user_id AS user_id,
+            u.user_code AS user_code,
+            u.user_name AS user_name,
+            u.email AS user_email,
+            u.phone AS user_phone,
+            o.org_name AS org_name,
+            CASE WHEN EXISTS (
+                SELECT 1 FROM authorized_object_data_permissions aodp
+                WHERE aodp.permission_group_id = #{query.permissionGroupId}
+                AND aodp.user_id = u.user_id
+                AND aodp.status = 'active'
+            ) THEN 1 ELSE 0 END AS hasExtPer
+        FROM (
+            SELECT DISTINCT u.user_id AS user_id
+            FROM permission_group_authorized_objects pgao
+            INNER JOIN po_users u ON (
+                pgao.object_type = 'user' AND pgao.authorized_object_id = u.user_id
+            )
+            WHERE pgao.permission_group_id = #{query.permissionGroupId}
+                AND u.state != 'X'
+
+            UNION
+
+            SELECT DISTINCT u.user_id AS user_id
+            FROM permission_group_authorized_objects pgao
+            INNER JOIN po_organization org_auth ON pgao.authorized_object_id = org_auth.org_id AND pgao.object_type = 'org'
+            INNER JOIN po_users_organization uo ON uo.org_id = org_auth.org_id
+            INNER JOIN po_users u ON u.user_id = uo.user_id
+            WHERE pgao.permission_group_id = #{query.permissionGroupId}
+                AND u.state != 'X'
+
+            UNION
+
+            SELECT DISTINCT u.user_id AS user_id
+            FROM permission_group_authorized_objects pgao
+            INNER JOIN po_position pos ON pgao.authorized_object_id = pos.position_id AND pgao.object_type = 'position'
+            INNER JOIN po_users_organization uo ON uo.position_id = pos.position_id
+            INNER JOIN po_users u ON u.user_id = uo.user_id
+            WHERE pgao.permission_group_id = #{query.permissionGroupId}
+                AND u.state != 'X'
+        ) authorized_users
+        INNER JOIN po_users u ON authorized_users.user_id = u.user_id
+        LEFT JOIN po_users_organization uo ON u.user_id = uo.user_id
+        LEFT JOIN po_organization o ON uo.org_id = o.org_id
+
+        <where>
+
+            NOT EXISTS (
+                SELECT 1 FROM permission_group_excluded_objects pgeo
+                WHERE pgeo.permission_group_id = #{query.permissionGroupId}
+                AND pgeo.object_type = 'user'
+                AND pgeo.excluded_object_id = u.user_id
+            )
+
+            AND NOT EXISTS (
+                SELECT 1 FROM permission_group_excluded_objects pgeo
+                WHERE pgeo.permission_group_id = #{query.permissionGroupId}
+                AND pgeo.object_type = 'org'
+                AND pgeo.excluded_object_id = uo.org_id
+            )
+
+            AND NOT EXISTS (
+                SELECT 1 FROM permission_group_excluded_objects pgeo
+                WHERE pgeo.permission_group_id = #{query.permissionGroupId}
+                AND pgeo.object_type = 'position'
+                AND pgeo.excluded_object_id = uo.position_id
+            )
+            <if test="query.userName != null and query.userName != ''">
+                AND u.user_name LIKE CONCAT('%', #{query.userName}, '%')
+            </if>
+            <if test="query.userCode != null and query.userCode != ''">
+                AND u.user_code LIKE CONCAT('%', #{query.userCode}, '%')
+            </if>
+            <if test="query.orgId != null">
+                AND uo.org_id = #{query.orgId}
+            </if>
+        </where>
+
+        ORDER BY u.user_name ASC
+    </select>
+
+    <!-- 分页查询多个权限组授权用户列表（支持permissionGroupId IN查询，去重，过滤排除用户） -->
+    <select id="selectAuthorizedUserPageByPermissionGroupIds" resultMap="AuthorizedUserVOResultMap">
+        SELECT DISTINCT
+            u.user_id AS user_id,
+            u.user_code AS user_code,
+            u.user_name AS user_name,
+            u.email AS user_email,
+            u.phone AS user_phone,
+            o.org_name AS org_name,
+            CASE WHEN EXISTS (
+                SELECT 1 FROM authorized_object_data_permissions aodp
+                WHERE aodp.permission_group_id IN
+                <foreach collection="query.permissionGroupIds" item="permissionGroupId" open="(" close=")" separator=",">
+                    #{permissionGroupId}
+                </foreach>
+                AND aodp.user_id = u.user_id
+                AND aodp.status = 'active'
+            ) THEN 1 ELSE 0 END AS hasExtPer
+        FROM (
+            SELECT DISTINCT u.user_id AS user_id
+            FROM permission_group_authorized_objects pgao
+            INNER JOIN po_users u ON (
+                pgao.object_type = 'user' AND pgao.authorized_object_id = u.user_id
+            )
+            WHERE pgao.permission_group_id IN
+                <foreach collection="query.permissionGroupIds" item="permissionGroupId" open="(" close=")" separator=",">
+                    #{permissionGroupId}
+                </foreach>
+                AND u.state != 'X'
+
+            UNION
+
+            SELECT DISTINCT u.user_id AS user_id
+            FROM permission_group_authorized_objects pgao
+            INNER JOIN po_organization org_auth ON pgao.authorized_object_id = org_auth.org_id AND pgao.object_type = 'org'
+            INNER JOIN po_users_organization uo ON uo.org_id = org_auth.org_id
+            INNER JOIN po_users u ON u.user_id = uo.user_id
+            WHERE pgao.permission_group_id IN
+                <foreach collection="query.permissionGroupIds" item="permissionGroupId" open="(" close=")" separator=",">
+                    #{permissionGroupId}
+                </foreach>
+                AND u.state != 'X'
+
+            UNION
+
+            SELECT DISTINCT u.user_id AS user_id
+            FROM permission_group_authorized_objects pgao
+            INNER JOIN po_position pos ON pgao.authorized_object_id = pos.position_id AND pgao.object_type = 'position'
+            INNER JOIN po_users_organization uo ON uo.position_id = pos.position_id
+            INNER JOIN po_users u ON u.user_id = uo.user_id
+            WHERE pgao.permission_group_id IN
+                <foreach collection="query.permissionGroupIds" item="permissionGroupId" open="(" close=")" separator=",">
+                    #{permissionGroupId}
+                </foreach>
+                AND u.state != 'X'
+        ) authorized_users
+        INNER JOIN po_users u ON authorized_users.user_id = u.user_id
+        LEFT JOIN po_users_organization uo ON u.user_id = uo.user_id
+        LEFT JOIN po_organization o ON uo.org_id = o.org_id
+
+        <where>
+
+            NOT EXISTS (
+                SELECT 1 FROM permission_group_excluded_objects pgeo
+                WHERE pgeo.permission_group_id IN
+                <foreach collection="query.permissionGroupIds" item="permissionGroupId" open="(" close=")" separator=",">
+                    #{permissionGroupId}
+                </foreach>
+                AND pgeo.object_type = 'user'
+                AND pgeo.excluded_object_id = u.user_id
+            )
+
+            AND NOT EXISTS (
+                SELECT 1 FROM permission_group_excluded_objects pgeo
+                WHERE pgeo.permission_group_id IN
+                <foreach collection="query.permissionGroupIds" item="permissionGroupId" open="(" close=")" separator=",">
+                    #{permissionGroupId}
+                </foreach>
+                AND pgeo.object_type = 'org'
+                AND pgeo.excluded_object_id = uo.org_id
+            )
+
+            AND NOT EXISTS (
+                SELECT 1 FROM permission_group_excluded_objects pgeo
+                WHERE pgeo.permission_group_id IN
+                <foreach collection="query.permissionGroupIds" item="permissionGroupId" open="(" close=")" separator=",">
+                    #{permissionGroupId}
+                </foreach>
+                AND pgeo.object_type = 'position'
+                AND pgeo.excluded_object_id = uo.position_id
+            )
+            <if test="query.userName != null and query.userName != ''">
+                AND u.user_name LIKE CONCAT('%', #{query.userName}, '%')
+            </if>
+            <if test="query.userCode != null and query.userCode != ''">
+                AND u.user_code LIKE CONCAT('%', #{query.userCode}, '%')
+            </if>
+            <if test="query.orgId != null">
+                AND uo.org_id = #{query.orgId}
+            </if>
+            <if test="query.userCodeList != null and query.userCodeList.size() > 0">
+                AND u.user_code IN
+                <foreach collection="query.userCodeList" item="userCode" open="(" close=")" separator=",">
+                    #{userCode}
+                </foreach>
+            </if>
+        </where>
+
+        ORDER BY u.user_name ASC
+    </select>
+
+
+    <select id="selectAuthorizedUserUserScope" resultMap="AuthorizedUserVOResultMap">
+    SELECT DISTINCT
+        pu.user_id AS user_id,
+        pu.user_code AS user_code
+    from po_users pu
+    left join po_users_organization uo on pu.user_id = uo.user_id
+    <where>
+        <if test="query.userScopeOrgList != null and query.userScopeOrgList.size() > 0">
+            AND uo.org_id IN
+            <foreach collection="query.userScopeOrgList" item="orgId" open="(" close=")" separator=",">
+                #{orgId}
+            </foreach>
+        </if>
+        <if test="query.userScopePositionList != null and query.userScopePositionList.size() > 0">
+            AND uo.position_id IN
+            <foreach collection="query.userScopePositionList" item="positionId" open="(" close=")" separator=",">
+                #{positionId}
+            </foreach>
+        </if>
+        <if test="query.userScopeUserList != null and query.userScopeUserList.size() > 0">
+            AND pu.user_id IN
+            <foreach collection="query.userScopeUserList" item="userId" open="(" close=")" separator=",">
+                #{userId}
+            </foreach>
+        </if>
+        <if test="query.userCodeList != null and query.userCodeList.size() > 0">
+            AND pu.user_code IN
+            <foreach collection="query.userCodeList" item="userCode" open="(" close=")" separator=",">
+                #{userCode}
+            </foreach>
+        </if>
+    </where>
+    </select>
+
+</mapper>
+

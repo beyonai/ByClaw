@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.template.TemplateRuleInfoMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.template.TemplateRuleInfo">
+        <id column="template_id" property="templateId" />
+        <result column="template_type" property="templateType" />
+        <result column="user_id" property="userId" />
+        <result column="rule_name" property="ruleName" />
+        <result column="rule_content" property="ruleContent" />
+        <result column="update_by" property="updateBy" />
+        <result column="create_time" property="createTime" />
+        <result column="update_time" property="updateTime" />
+    </resultMap>
+
+    <!-- 通用查询列 -->
+    <sql id="Base_Column_List">
+        template_id, template_type, user_id, rule_name, rule_content, update_by, create_time, update_time
+    </sql>
+
+    <!-- 根据条件查询模版规则信息列表（分页） -->
+    <!-- MyBatis Plus 分页插件会自动拦截此方法，并自动添加 LIMIT 和 COUNT 查询 -->
+    <select id="selectByCondition" resultMap="BaseResultMap">
+        SELECT
+        tri.template_id, tri.template_type, tri.user_id, tri.rule_name, tri.rule_content, 
+        tri.update_by, tri.create_time, tri.update_time
+        FROM template_rule_info tri
+        <if test="queryQo.resourceId != null">
+            INNER JOIN resource_template_relation rtr ON tri.template_id = rtr.template_id 
+            AND rtr.resource_id = #{queryQo.resourceId}
+        </if>
+        <where>
+            <!-- 精确查询：template_id -->
+            <if test="queryQo.templateId != null">
+                AND tri.template_id = #{queryQo.templateId}
+            </if>
+            <!-- 精确查询：user_id -->
+            <if test="queryQo.userId != null">
+                AND tri.user_id = #{queryQo.userId}
+            </if>
+            <!-- 记忆模版 -->
+            <if test="queryQo.isMemoryTemplate">
+                AND tri.is_memory_template = #{queryQo.isMemoryTemplate}
+            </if>
+            <!-- 精确查询：resource_id（已通过 JOIN 处理） -->
+            <!-- 模糊查询：rule_name -->
+            <if test="queryQo.ruleName != null and queryQo.ruleName != ''">
+                AND tri.rule_name LIKE CONCAT('%', #{queryQo.ruleName}, '%')
+            </if>
+            <!-- 精确查询：templateType -->
+            <if test="queryQo.templateType != null and queryQo.templateType != ''">
+                AND tri.template_type = #{queryQo.templateType}
+            </if>
+            <!-- 模糊查询：rule_content -->
+            <if test="queryQo.ruleContent != null and queryQo.ruleContent != ''">
+                AND tri.rule_content LIKE CONCAT('%', #{queryQo.ruleContent}, '%')
+            </if>
+            <!-- 时间段查询：create_time -->
+            <if test="queryQo.createTimeStart != null">
+                AND tri.create_time &gt;= #{queryQo.createTimeStart}
+            </if>
+            <if test="queryQo.createTimeEnd != null">
+                AND tri.create_time &lt;= #{queryQo.createTimeEnd}
+            </if>
+            <!-- 时间段查询：update_time -->
+            <if test="queryQo.updateTimeStart != null">
+                AND tri.update_time &gt;= #{queryQo.updateTimeStart}
+            </if>
+            <if test="queryQo.updateTimeEnd != null">
+                AND tri.update_time &lt;= #{queryQo.updateTimeEnd}
+            </if>
+        </where>
+        ORDER BY tri.create_time DESC, tri.update_time DESC
+    </select>
+
+    <!-- 根据资源ID和用户ID查询模版规则信息列表 -->
+    <select id="selectByResourceIdAndUserId" resultMap="BaseResultMap">
+        SELECT
+        tri.template_id,
+        tri.template_type,
+        tri.user_id,
+        tri.rule_name,
+        tri.rule_content,
+        tri.update_by,
+        tri.create_time,
+        tri.update_time
+        FROM template_rule_info tri
+        INNER JOIN resource_template_relation rtr ON tri.template_id = rtr.template_id
+        WHERE rtr.resource_id = #{resourceId}
+        AND tri.user_id = #{userId}
+        ORDER BY tri.create_time DESC
+    </select>
+
+    <!-- 根据条件查询模版规则信息列表（返回Map，包含memory_rule_id） -->
+    <select id="selectByConditionWithMemoryRuleId" resultType="java.util.Map">
+        SELECT
+        tri.template_id as "templateId",
+        tri.template_type as "templateType",
+        tri.user_id as "userId",
+        tri.rule_name as "ruleName",
+        tri.rule_content as "ruleContent",
+        tri.update_by as "updateBy",
+        tri.create_time as "createTime",
+        tri.update_time as "updateTime",
+        rtr.memory_rule_id as "memoryRuleId"
+        FROM template_rule_info tri
+        INNER JOIN resource_template_relation rtr ON tri.template_id = rtr.template_id 
+        AND rtr.resource_id = #{queryQo.resourceId}
+        <where>
+            <!-- 精确查询：template_id -->
+            <if test="queryQo.templateId != null">
+                AND tri.template_id = #{queryQo.templateId}
+            </if>
+            <!-- 精确查询：user_id -->
+            <if test="queryQo.userId != null">
+                AND tri.user_id = #{queryQo.userId}
+            </if>
+            <!-- 记忆模版 -->
+            <if test="queryQo.isMemoryTemplate">
+                AND tri.is_memory_template = #{queryQo.isMemoryTemplate}
+            </if>
+            <!-- 模糊查询：rule_name -->
+            <if test="queryQo.ruleName != null and queryQo.ruleName != ''">
+                AND tri.rule_name LIKE CONCAT('%', #{queryQo.ruleName}, '%')
+            </if>
+            <!-- 精确查询：templateType -->
+            <if test="queryQo.templateType != null and queryQo.templateType != ''">
+                AND tri.template_type = #{queryQo.templateType}
+            </if>
+            <!-- 模糊查询：rule_content -->
+            <if test="queryQo.ruleContent != null and queryQo.ruleContent != ''">
+                AND tri.rule_content LIKE CONCAT('%', #{queryQo.ruleContent}, '%')
+            </if>
+            <!-- 时间段查询：create_time -->
+            <if test="queryQo.createTimeStart != null">
+                AND tri.create_time &gt;= #{queryQo.createTimeStart}
+            </if>
+            <if test="queryQo.createTimeEnd != null">
+                AND tri.create_time &lt;= #{queryQo.createTimeEnd}
+            </if>
+            <!-- 时间段查询：update_time -->
+            <if test="queryQo.updateTimeStart != null">
+                AND tri.update_time &gt;= #{queryQo.updateTimeStart}
+            </if>
+            <if test="queryQo.updateTimeEnd != null">
+                AND tri.update_time &lt;= #{queryQo.updateTimeEnd}
+            </if>
+        </where>
+        ORDER BY tri.create_time DESC, tri.update_time DESC
+    </select>
+
+    <!-- 根据资源ID查询关联关系（只查询memory_rule_id字段） -->
+    <select id="selectByResourceId" resultType="java.util.Map">
+        SELECT memory_rule_id
+        FROM resource_template_relation
+        WHERE resource_id = #{resourceId}
+    </select>
+
+    <!-- 根据资源ID列表批量查询关联关系（查询resource_id和memory_rule_id字段） -->
+    <select id="selectByResourceIds" resultType="java.util.Map">
+        SELECT resource_id, memory_rule_id
+        FROM resource_template_relation
+        WHERE resource_id IN
+        <foreach collection="resourceIds" item="resourceId" open="(" separator="," close=")">
+            #{resourceId}
+        </foreach>
+    </select>
+
+</mapper>
+

@@ -1,0 +1,81 @@
+{
+  // by-datacloud 与 byclaw-all 同级时用 ../by-datacloud；若仓库层级不同，请改为 ../../by-datacloud 等
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "Debug: byclaw-be (Launch Hardened)",
+      "request": "launch",
+      "mainClass": "com.iwhalecloud.byai.ByaiServerApplication",
+      "cwd": "${workspaceFolder}/byclaw-be",
+      "preLaunchTask": "byclaw-be: prepare debug classpath",
+      "classPaths": [
+        "${workspaceFolder}/byclaw-be/target/classes",
+        "${workspaceFolder}/byclaw-be/target/test-classes",
+        "${workspaceFolder}/byclaw-be/target/dependency/*"
+      ],
+      "args": [
+        "${workspaceFolder}/byclaw-be/config/application",
+        "--spring.profiles.active=local",
+        "--logging.config=${workspaceFolder}/byclaw-be/config/logback.xml"
+      ],
+      "vmArgs": "-Denv.file=${workspaceFolder}/.env",
+      "console": "integratedTerminal"
+    },
+    {
+      // ── 源码调试模式 ──────────────────────────────────────────────────────
+      // PYTHONPATH 把 by-datacloud 源码目录排在最前，覆盖 venv 里的已安装包，
+      // 可在 by-datacloud 源仓库直接打断点。
+      // 切换回"已安装包模式"时，改用下方 "byclaw-data-worker [已安装]" 配置。
+      "name": "byclaw-data-worker [源码调试]",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "${workspaceFolder}/byclaw-data/.venv/Scripts/python.exe",
+      "program": "${workspaceFolder}/byclaw-data/src/byclaw_data/main.py",
+      "cwd": "${workspaceFolder}/byclaw-data",
+      "envFile": "${workspaceFolder}/byclaw-data/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/../by-framework-python/src;${workspaceFolder}/../by-datacloud/packages/datacloud-analysis/src;${workspaceFolder}/../by-datacloud/packages/datacloud-data/src;${workspaceFolder}/../by-datacloud/packages/datacloud-knowledge/src;${env:PYTHONPATH}",
+      },
+      "justMyCode": false
+    },
+    {
+      // ── 已安装包模式 ──────────────────────────────────────────────────────
+      // 不设置 PYTHONPATH，完全走 venv 里 uv install 的包。
+      // 修改完源码、重新 uv install 后用此配置验收。
+      "name": "byclaw-data-worker [已安装]",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "${workspaceFolder}/byclaw-data/.venv/Scripts/python.exe",
+      "program": "${workspaceFolder}/byclaw-data/src/byclaw_data/main.py",
+      "cwd": "${workspaceFolder}/byclaw-data",
+      "envFile": "${workspaceFolder}/byclaw-data/.env",
+      "env": {
+        "DATACLOUD_LLM_API_BASE": "https://lab.iwhalecloud.com/gpt-proxy/anthropic",
+      },
+      "justMyCode": false
+    },
+    {
+      "name": "Data-mcp 服务",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "${workspaceFolder}/byclaw-data/.venv/Scripts/python.exe",
+      "module": "uvicorn",
+      "args": [
+        "datacloud_data_service.api.routes:create_app",
+        "--factory",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8080"
+      ],
+      "cwd": "${workspaceFolder}/../by-datacloud",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/../by-datacloud/packages/datacloud-data/src;${workspaceFolder}/../by-datacloud/packages/datacloud-knowledge/src;${workspaceFolder}/../by-datacloud"
+      },
+      "envFile": "${workspaceFolder}/byclaw-data/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}

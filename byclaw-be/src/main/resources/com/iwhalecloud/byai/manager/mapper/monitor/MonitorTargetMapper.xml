@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.monitor.MonitorTargetMapper">
+
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.monitor.MonitorTarget">
+        <id column="target_id" property="targetId"/>
+        <result column="target_name" property="targetName"/>
+        <result column="target_type" property="targetType"/>
+        <result column="enabled" property="enabled"/>
+        <result column="alert_enabled" property="alertEnabled"/>
+        <result column="availability" property="availability"/>
+        <result column="alter_count" property="alterCount"/>
+        <result column="target_sub_type" property="targetSubType"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+        <result column="create_by" property="createBy"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="agent_id" property="agentId"/>
+        <result column="target_quality" property="targetQuality"/>
+        <result column="quality_description" property="qualityDescription"/>
+    </resultMap>
+
+    <sql id="BaseColumns">
+        target_id, target_name, target_type, enabled, alert_enabled, availability, alter_count,
+        target_sub_type, create_time, update_time, create_by, update_by, agent_id, target_quality, quality_description
+    </sql>
+
+    <select id="selectByAgentId" resultMap="BaseResultMap">
+        SELECT
+        <include refid="BaseColumns"/>
+        FROM byai_monitor_target
+        WHERE agent_id = #{agentId}
+    </select>
+
+    <delete id="deleteByTargetTypeExcludeAgentIds">
+        DELETE FROM byai_monitor_target
+        WHERE target_type = #{targetType}
+        <if test="agentIds != null and agentIds.size() > 0">
+            AND agent_id NOT IN
+            <foreach collection="agentIds" item="agentId" open="(" separator="," close=")">
+                #{agentId}
+            </foreach>
+        </if>
+    </delete>
+
+    <select id="selectLtTargetQuality" resultType="java.lang.Long">
+        select agent_id from byai_monitor_target where target_sub_type=#{targetSubType} and target_quality &lt; #{targetQuality}
+    </select>
+
+</mapper>
+

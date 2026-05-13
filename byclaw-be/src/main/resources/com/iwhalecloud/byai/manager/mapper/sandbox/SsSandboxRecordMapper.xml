@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper">
+
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord">
+        <id column="id" jdbcType="BIGINT" property="id" />
+        <result column="resource_id" jdbcType="BIGINT" property="resourceId" />
+        <result column="user_code" jdbcType="VARCHAR" property="userCode" />
+        <result column="sandbox_type" jdbcType="VARCHAR" property="sandboxType" />
+        <result column="endpoint" jdbcType="VARCHAR" property="endpoint" />
+        <result column="chat_id" jdbcType="VARCHAR" property="chatId" />
+        <result column="status" jdbcType="VARCHAR" property="status" />
+        <result column="auto_release" jdbcType="INTEGER" property="autoRelease" />
+        <result column="last_access_time" jdbcType="TIMESTAMP" property="lastAccessTime" />
+        <result column="create_time" jdbcType="TIMESTAMP" property="createTime" />
+        <result column="update_time" jdbcType="TIMESTAMP" property="updateTime" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, resource_id, user_code, sandbox_type, endpoint, chat_id,
+        status, auto_release, last_access_time, create_time, update_time
+    </sql>
+
+    <!-- 新增沙箱记录 -->
+    <insert id="insert" parameterType="com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord">
+        INSERT INTO ss_sandbox_record (
+            resource_id, user_code, sandbox_type, endpoint, chat_id,
+            status, auto_release, last_access_time, create_time, update_time
+        ) VALUES (
+            #{resourceId,jdbcType=BIGINT},
+            #{userCode,jdbcType=VARCHAR},
+            #{sandboxType,jdbcType=VARCHAR},
+            #{endpoint,jdbcType=VARCHAR},
+            #{chatId,jdbcType=VARCHAR},
+            #{status,jdbcType=VARCHAR},
+            #{autoRelease,jdbcType=INTEGER},
+            #{lastAccessTime,jdbcType=TIMESTAMP},
+            #{createTime,jdbcType=TIMESTAMP},
+            #{updateTime,jdbcType=TIMESTAMP}
+        )
+    </insert>
+
+    <!-- 根据用户编码和资源ID查询运行中的沙箱记录 -->
+    <select id="selectRunningByUserAndResource" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE user_code = #{userCode,jdbcType=VARCHAR}
+        <if test="sandboxType != null and sandboxType != ''">
+          AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
+        </if>
+        <if test="resourceId != null">
+          AND resource_id = #{resourceId,jdbcType=BIGINT}
+        </if>
+        AND status = 'RUNNING'
+        ORDER BY create_time DESC
+        LIMIT 1
+    </select>
+
+    <!-- 批量查询运行中的沙箱记录 -->
+    <select id="selectRunningByUserAndResources" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE user_code = #{userCode,jdbcType=VARCHAR}
+          AND status = 'RUNNING'
+        <if test="sandboxType != null and sandboxType != ''">
+          AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
+        </if>
+        <if test="resourceIds != null and !resourceIds.isEmpty()">
+          AND resource_id IN
+            <foreach collection="resourceIds" item="resourceId" open="(" separator="," close=")">
+                #{resourceId,jdbcType=BIGINT}
+            </foreach>
+        </if>
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- 更新沙箱状态为已释放 -->
+    <update id="updateStatusToReleased">
+        UPDATE ss_sandbox_record
+        SET status = 'RELEASED',
+            update_time = CURRENT_TIMESTAMP
+        WHERE id = #{id,jdbcType=BIGINT}
+          AND status = 'RUNNING'
+    </update>
+
+    <!-- 更新最近一次访问时间（使用应用传入的系统时间，避免数据库时间与应用时间不一致） -->
+    <update id="updateLastAccessTime">
+        UPDATE ss_sandbox_record
+        SET last_access_time = #{lastAccessTime,jdbcType=TIMESTAMP},
+            update_time = #{lastAccessTime,jdbcType=TIMESTAMP}
+        WHERE id = #{id,jdbcType=BIGINT}
+          AND status = 'RUNNING'
+    </update>
+
+    <!-- 查询超时的自动释放沙箱记录 -->
+    <select id="selectExpiredSandboxes" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE status = 'RUNNING'
+          AND auto_release = 1
+          AND last_access_time IS NOT NULL
+          <![CDATA[
+          AND last_access_time < (CURRENT_TIMESTAMP - #{timeoutMinutes} * INTERVAL '1' MINUTE)
+          ]]>
+    </select>
+
+    <!-- 统计当前运行中的沙箱数量 -->
+    <select id="countRunningSandboxes" resultType="int">
+        SELECT COUNT(*)
+        FROM ss_sandbox_record
+        WHERE status = 'RUNNING'
+    </select>
+
+    <!-- 分页查询沙箱记录 -->
+    <select id="selectByPage" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        <where>
+            <if test="status != null and status != ''">
+                AND status = #{status,jdbcType=VARCHAR}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND (
+                    user_code LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                    OR endpoint LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                    OR chat_id LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                    OR CAST(resource_id AS VARCHAR) LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                )
+            </if>
+        </where>
+        ORDER BY create_time DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <!-- 统计满足条件的沙箱记录总数 -->
+    <select id="countByCondition" resultType="int">
+        SELECT COUNT(*)
+        FROM ss_sandbox_record
+        <where>
+            <if test="status != null and status != ''">
+                AND status = #{status,jdbcType=VARCHAR}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND (
+                    user_code LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                    OR endpoint LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                    OR chat_id LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                    OR CAST(resource_id AS VARCHAR) LIKE CONCAT('%', #{keyword,jdbcType=VARCHAR}, '%')
+                )
+            </if>
+        </where>
+    </select>
+
+    <!-- 根据ID查询沙箱记录 -->
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE id = #{id,jdbcType=BIGINT}
+    </select>
+
+    <!-- 更新自动释放状态 -->
+    <update id="updateAutoRelease">
+        UPDATE ss_sandbox_record
+        SET auto_release = #{autoRelease,jdbcType=INTEGER},
+            update_time = CURRENT_TIMESTAMP
+        WHERE id = #{id,jdbcType=BIGINT}
+    </update>
+
+</mapper>

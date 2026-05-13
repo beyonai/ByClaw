@@ -1,0 +1,52 @@
+# # 格式说明： 每一行都是一个 glob 模式表明哪些路径应该忽略检测
+# # glob 模式说明： **配置零个或多个目录及子目录， *匹配除了斜杠(/)之外的所有字符， !排除符
+# # 如：**/*.js 将忽略所有的 JavaScript 文件
+# # 如：!code/portal-static/src/main/webapp/modules/**/*.js  忽略所有JavaScript 文件，但除去code/portal-static/src/main/webapp/modules下所有js
+# # 也就是说 检测code/portal-static/src/main/webapp/modules 目录下所有的 js
+
+# #例外文件需要通过注释的方式说明例外的原因，PQA会不定期对例外的合规性进行审计，被允许的例外场景如下
+# #例外场景1：工具误报的情况。允许按照告警类型配置，需要说明误报的告警类型名称。
+# #例外场景2：高复杂度函数。业务代码复杂度过高，修改概率极低，同时修改引入缺陷风险高，为避免被同文件中代码修改关联影响而设置例外。如增加设置需要先进行邮件备案审批。
+# #例外场景3：外部引入的开源软件。允许目录和文件级例外，需要给出开源代码对应的访问地址。
+# #例外场景4：工具自动生成的代码。允许目录和文件级例外，需要给出代码生成工具的名称。
+# #例外场景5：测试代码。允许目录和文件级例外，路径或文件名中必须有test字样。
+# #例外场景6：特殊场景。框架或平台类代码的特殊处理，例如对 Exception 或者 Throwable 的捕获。如增加设置需要先进行邮件备案审批。
+
+
+# # 例外场景3：外部引入的开源软件。允许目录和文件级例外，需要给出开源代码对应的访问地址。
+# # public目录里是引入的第三方js，开源地址：https://xxx
+# public
+# # node_modules目录是第三方库，开源地址：https://yyy
+# node_modules
+# # d.ts是第三方类型文件，开源地址：https://zzz
+# **/*.d.tss
+
+# # 例外场景4：工具自动生成的代码。允许目录和文件级例外，需要给出代码生成工具的名称。
+# # 压缩后的js文件
+# **/*.min.js
+
+# # 例外场景5：测试代码。允许目录和文件级例外，路径或文件名中必须有test字样。
+# # tests目录存的是 测试代码
+# tests
+
+# 测试文件忽略规则
+__tests__/
+
+lambda
+scripts
+#config
+public
+history
+*.d.ts
+#mock
+#src/components/Saturation
+src/assets/iconfont
+src/components/MyIcon
+src/components/aceEditor
+src/utils/encrypt/sm/gm-crypt
+#src/components/globalMessage
+src/pages/Chat/components/message/components/STTComp/STT
+src/depend/metabot/actions
+src/depend/components/fetch-event-source
+src/typescript
+.umirc.ts

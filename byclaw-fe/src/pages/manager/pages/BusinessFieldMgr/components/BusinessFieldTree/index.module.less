@@ -1,0 +1,100 @@
+.treeContainer {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-top-left-radius: 4px;
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+
+    .title {
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .iconAdd {
+      font-size: 14px;
+      color: #40454d;
+      cursor: pointer;
+
+      &:hover {
+        color: #165dff;
+      }
+    }
+  }
+  :global {
+    .@{antPrefix}-tree {
+      .@{antPrefix}-tree-node-content-wrapper {
+        color: #14161a;
+
+        &:hover {
+          background: transparent;
+        }
+      }
+
+      .@{antPrefix}-tree-treenode-selected {
+        background: #f2f6fa;
+      }
+
+      .@{antPrefix}-tree-node-content-wrapper.@{antPrefix}-tree-node-selected {
+        font-weight: 400 !important;
+        color: #165dff !important;
+      }
+
+      .@{antPrefix}-tree-treenode:hover {
+        background: #f2f6fa;
+      }
+
+      .@{antPrefix}-tree-switcher {
+        color: #707680;
+      }
+    }
+
+    .@{antPrefix}-dropdown-menu-item {
+      margin: 0 8px;
+    }
+
+    .@{antPrefix}-dropdown-menu-item-active {
+      background-color: #f2f6fa;
+    }
+  }
+
+  .treeNode {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+
+    .actionIcon {
+      visibility: visible;
+      cursor: pointer;
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      margin: 0px 4px;
+
+      &:hover {
+        background-color: #e6ebf0;
+      }
+    }
+  }
+
+  .editBtn,
+  .deleteBtn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    column-gap: 10px;
+  }
+
+  .deleteBtn {
+    color: var(--beyond-error-hover-color);
+  }
+}

@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.datacloud.DatacloudScriptCategoryMapper">
+
+    <!-- 脚本分类表结果映-->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.datacloud.DatacloudScriptCategory">
+        <id column="category_id" property="categoryId" jdbcType="BIGINT"/>
+        <result column="category_name" property="categoryName" jdbcType="VARCHAR"/>
+        <result column="category_code" property="categoryCode" jdbcType="VARCHAR"/>
+        <result column="category_description" property="categoryDescription" jdbcType="VARCHAR"/>
+        <result column="parent_id" property="parentId" jdbcType="BIGINT"/>
+        <result column="enterprise_id" property="enterpriseId" jdbcType="BIGINT"/>
+        <result column="creator_id" property="creatorId" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="update_by" property="updateBy" jdbcType="BIGINT"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <!-- 脚本分类DTO结果映射 -->
+    <resultMap id="CategoryDTOResultMap" type="com.iwhalecloud.byai.manager.dto.datacloud.DatacloudScriptCategoryDTO">
+        <id column="category_id" property="categoryId" jdbcType="BIGINT"/>
+        <result column="category_name" property="categoryName" jdbcType="VARCHAR"/>
+        <result column="category_code" property="categoryCode" jdbcType="VARCHAR"/>
+        <result column="category_description" property="categoryDescription" jdbcType="VARCHAR"/>
+        <result column="parent_id" property="parentId" jdbcType="BIGINT"/>
+        <result column="enterprise_id" property="enterpriseId" jdbcType="BIGINT"/>
+        <result column="creator_id" property="creatorId" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="update_by" property="updateBy" jdbcType="BIGINT"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
+        <result column="script_count" property="scriptCount" jdbcType="INTEGER"/>
+        <result column="child_count" property="childCount" jdbcType="INTEGER"/>
+    </resultMap>
+
+    <!-- 基础字段列表 -->
+    <sql id="Base_Column_List">
+        category_id, category_name, category_code, category_description, parent_id, 
+        category_level, sort_order, is_active, enterprise_id, creator_id, create_time, 
+        update_by, update_time
+    </sql>
+
+    <!-- 分页查询脚本分类列表 -->
+    <select id="selectScriptCategoryListByPage" resultMap="CategoryDTOResultMap">
+        SELECT 
+            c.category_id,
+            c.category_name,
+            c.category_code,
+            c.category_description,
+            c.parent_id,
+            c.category_level,
+            c.sort_order,
+            c.is_active,
+            c.enterprise_id,
+            c.creator_id,
+            c.create_time,
+            c.update_by,
+            c.update_time,
+            p.category_name AS parent_name,
+            COUNT(s.script_id) AS script_count,
+            COUNT(child.category_id) AS child_count
+        FROM datacloud_script_category c
+        LEFT JOIN datacloud_script_category p ON c.parent_id = p.category_id
+        LEFT JOIN datacloud_script s ON c.category_id = s.category_id
+        LEFT JOIN datacloud_script_category child ON c.category_id = child.parent_id
+        WHERE c.enterprise_id = #{query.enterpriseId}
+        <if test="query.categoryName != null and query.categoryName != ''">
+            AND c.category_name LIKE CONCAT('%', #{query.categoryName}, '%')
+        </if>
+        <if test="query.categoryCode != null and query.categoryCode != ''">
+            AND c.category_code LIKE CONCAT('%', #{query.categoryCode}, '%')
+        </if>
+        <if test="query.parentId != null">
+            AND c.parent_id = #{query.parentId}
+        </if>
+        <if test="query.isActive != null">
+            AND c.is_active = #{query.isActive}
+        </if>
+        GROUP BY c.category_id
+        ORDER BY c.sort_order ASC, c.create_time DESC
+    </select>
+
+    <!-- 查询脚本分类树形结构 -->
+    <select id="selectScriptCategoryTree" resultMap="CategoryDTOResultMap">
+        SELECT 
+            c.category_id,
+            c.category_name,
+            c.category_code,
+            c.category_description,
+            c.parent_id,
+            c.category_level,
+            c.sort_order,
+            c.is_active,
+            c.enterprise_id,
+            c.creator_id,
+            c.create_time,
+            c.update_by,
+            c.update_time,
+            p.category_name AS parent_name,
+            COUNT(s.script_id) AS script_count,
+            COUNT(child.category_id) AS child_count
+        FROM datacloud_script_category c
+        LEFT JOIN datacloud_script_category p ON c.parent_id = p.category_id
+        LEFT JOIN datacloud_script s ON c.category_id = s.category_id
+        LEFT JOIN datacloud_script_category child ON c.category_id = child.parent_id
+        WHERE c.enterprise_id = #{enterpriseId}
+        AND c.is_active = 1
+        GROUP BY c.category_id
+        ORDER BY c.category_level ASC, c.sort_order ASC
+    </select>
+
+    <!-- 根据父分类ID查询子分类列 -->
+    <select id="selectChildCategories" resultMap="CategoryDTOResultMap">
+        SELECT 
+            c.category_id,
+            c.category_name,
+            c.category_code,
+            c.category_description,
+            c.parent_id,
+            c.category_level,
+            c.sort_order,
+            c.is_active,
+            c.enterprise_id,
+            c.creator_id,
+            c.create_time,
+            c.update_by,
+            c.update_time,
+            p.category_name AS parent_name,
+            COUNT(s.script_id) AS script_count,
+            COUNT(child.category_id) AS child_count
+        FROM datacloud_script_category c
+        LEFT JOIN datacloud_script_category p ON c.parent_id = p.category_id
+        LEFT JOIN datacloud_script s ON c.category_id = s.category_id
+        LEFT JOIN datacloud_script_category child ON c.category_id = child.parent_id
+        WHERE c.parent_id = #{parentId}
+        AND c.enterprise_id = #{enterpriseId}
+        GROUP BY c.category_id
+        ORDER BY c.sort_order ASC, c.create_time DESC
+    </select>
+
+    <!-- 检查分类编码是否存 -->
+    <select id="checkCategoryCodeExists" resultType="int">
+        SELECT COUNT(*)
+        FROM datacloud_script_category
+        WHERE category_code = #{categoryCode}
+        AND enterprise_id = #{enterpriseId}
+        <if test="excludeId != null">
+            AND category_id != #{excludeId}
+        </if>
+    </select>
+
+    <!-- 统计分类下的脚本数量 -->
+    <select id="countScriptsByCategory" resultType="int">
+        SELECT COUNT(*)
+        FROM datacloud_script
+        WHERE category_id = #{categoryId}
+    </select>
+
+    <!-- 统计分类下的子分类数 -->
+    <select id="countChildCategories" resultType="int">
+        SELECT COUNT(*)
+        FROM datacloud_script_category
+        WHERE parent_id = #{categoryId}
+    </select>
+
+    <!-- 查询分类统计信息 -->
+    <select id="selectCategoryStatistics" resultType="java.util.Map">
+        SELECT 
+            COUNT(*) AS total_categories,
+            COUNT(CASE WHEN is_active = 1 THEN 1 END) AS active_categories,
+            COUNT(CASE WHEN is_active = 0 THEN 1 END) AS inactive_categories,
+            COUNT(CASE WHEN parent_id IS NULL THEN 1 END) AS root_categories,
+            COUNT(CASE WHEN parent_id IS NOT NULL THEN 1 END) AS child_categories
+        FROM datacloud_script_category
+        WHERE enterprise_id = #{enterpriseId}
+    </select>
+
+    <!-- 批量删除脚本分类 -->
+    <delete id="batchDeleteScriptCategories">
+        DELETE FROM datacloud_script_category
+        WHERE category_id IN
+        <foreach collection="categoryIds" item="categoryId" open="(" separator="," close=")">
+            #{categoryId}
+        </foreach>
+        AND enterprise_id = #{enterpriseId}
+    </delete>
+
+</mapper>

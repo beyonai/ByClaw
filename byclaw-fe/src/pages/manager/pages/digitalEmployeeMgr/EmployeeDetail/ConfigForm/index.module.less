@@ -1,0 +1,1319 @@
+.formSection {
+  width: 100%;
+
+  .basicSettings {
+    flex: 1;
+    padding: 12px;
+    overflow: auto;
+    border-right: 1px solid #e8e8e8;
+  }
+
+  .configurationDetails {
+    flex: 1;
+    padding: 12px;
+    overflow: auto;
+  }
+
+  :global {
+    .@{antPrefix}-input,
+    .@{antPrefix}-select-selector {
+      min-height: 40px;
+    }
+
+    .@{antPrefix}-select-selection-item {
+      align-items: center;
+      height: 28px;
+    }
+  }
+
+  .selectSuffix {
+    :global {
+      .@{antPrefix}-form-item-control-input-content {
+        position: relative;
+      }
+
+      .@{antPrefix}-select-selection-item {
+        color: #165dff;
+        font-weight: 400;
+        font-size: 14px;
+        background-color: #e8f3ff;
+      }
+    }
+
+    .suffixIcon {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      color: #165dff;
+      font-size: 20px;
+      cursor: pointer;
+    }
+  }
+}
+
+// 头像选择区域
+.avatarSection {
+  margin-bottom: 24px;
+
+  .avatarLabel {
+    color: #14161a;
+    font-weight: 500;
+    font-size: 14px;
+    line-height: 22px;
+    margin-bottom: 12px;
+  }
+
+  .avatarGrid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+
+    .avatarOption {
+      cursor: pointer;
+      border: 2px solid transparent;
+      transition: all 0.2s ease;
+
+      &:hover {
+        border-color: #165dff;
+      }
+
+      &.selected {
+        border-color: #165dff;
+        box-shadow: 0 0 0 2px rgba(22, 93, 255, 0.2);
+      }
+    }
+  }
+
+  .avatarActions {
+    display: flex;
+    gap: 12px;
+
+    :global {
+      .@{antPrefix}-btn {
+        border-style: dashed;
+        border-color: #d9d9d9;
+        color: #666;
+      }
+    }
+  }
+}
+
+// 类型标签样式
+.typeTag {
+  padding: 0px 4px;
+  border-radius: 4px;
+  background-color: rgba(22, 93, 255, 0.1);
+  flex-shrink: 0;
+  max-width: 150px;
+  color: #088cff;
+  font-size: 12px;
+  font-weight: 600;
+
+  .tagText {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 600;
+    background: linear-gradient(90deg, #088cff 0%, #00cdd5 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+}
+
+// 标签管理区域
+.tagsSection {
+  margin-bottom: 24px;
+
+  .tagsLabel {
+    color: #14161a;
+    font-weight: 500;
+    font-size: 14px;
+    line-height: 22px;
+    margin-bottom: 12px;
+  }
+
+  .tagsContent {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+
+    .tag {
+      margin: 0;
+      background-color: #f0f0f0;
+      border: 1px solid #d9d9d9;
+      color: #666;
+    }
+  }
+}
+
+// 技能配置区域
+.skillsSection {
+  margin-bottom: 24px;
+
+  .sectionHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    // margin-bottom: 16px;
+
+    .sectionTitle {
+      color: #14161a;
+      font-weight: 500;
+      font-size: 14px;
+      line-height: 22px;
+    }
+  }
+
+  .skillsList {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+
+    .skillCard {
+      .skillContent {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+
+        .skillInfo {
+          flex: 1;
+
+          .skillHeader {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+
+            .starIcon {
+              color: #52c41a;
+              font-size: 16px;
+            }
+
+            .skillName {
+              font-weight: 500;
+              font-size: 14px;
+              color: #14161a;
+            }
+
+            .skillTag {
+              margin: 0;
+              font-size: 12px;
+              background-color: #e8f3ff;
+              border: 1px solid #94bfff;
+              color: #4080ff;
+            }
+          }
+
+          .skillDescription {
+            color: #666;
+            font-size: 12px;
+            line-height: 18px;
+            /* 最多展示三行：超出后只在该区域上下滚动 */
+            max-height: 54px; /* 18px * 3 */
+            overflow-y: auto;
+            overflow-x: hidden;
+            min-width: 0;
+            word-break: break-word;
+          }
+        }
+
+        .skillActions {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+
+          .moreIcon {
+            color: #999;
+            font-size: 16px;
+            cursor: pointer;
+          }
+        }
+      }
+    }
+  }
+}
+
+// 统一的配置卡片样式
+.configCard {
+  border-radius: 6px;
+  border: 1px solid #f0f0f0;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: #d9d9d9;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  }
+
+  :global {
+    .@{antPrefix}-card-body {
+      padding: 16px;
+    }
+  }
+}
+
+// 配置区域
+.skillsSection,
+.knowledgeSection,
+.memorySection,
+.robotSection {
+  margin-bottom: 24px;
+
+  .sectionHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+
+    .sectionTitle {
+      color: #14161a;
+      font-weight: 500;
+      font-size: 14px;
+      line-height: 22px;
+    }
+  }
+
+  .knowledgeCategory {
+    // margin-bottom: 16px;
+    overflow: hidden;
+    transition: all 0.3s ease;
+
+    &:hover {
+      border-color: #d9d9d9;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    }
+
+    .categoryHeader {
+      display: flex;
+      align-items: center;
+      column-gap: 4px;
+      padding: 8px;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+
+      &:hover {
+        background-color: #f5f5f5;
+      }
+
+      .categoryTitle {
+        color: #14161a;
+        font-weight: 500;
+        font-size: 14px;
+        line-height: 22px;
+      }
+
+      .expandIcon,
+      .collapseIcon {
+        color: #999;
+        font-size: 12px;
+        transition: transform 0.3s ease;
+      }
+
+      .expandIcon {
+        transform: rotate(0deg);
+      }
+
+      .collapseIcon {
+        transform: rotate(0deg);
+      }
+    }
+
+    .knowledgeItems {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease, padding 0.3s ease;
+
+      &.expanded {
+        max-height: 1000px;
+      }
+
+      .knowledgeCard {
+        margin-bottom: 8px;
+
+        &:last-child {
+          margin-bottom: 0;
+        }
+
+        .knowledgeContent {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          width: 100%;
+          overflow: hidden;
+
+          .knowledgeInfo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+            min-width: 0;
+
+            .docIcon {
+              color: #165dff;
+              font-size: 20px;
+              flex-shrink: 0;
+            }
+
+            .knowledgeDetails {
+              flex: 1;
+              min-width: 0;
+
+              .knowledgeHeader {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-bottom: 4px;
+              }
+
+              .knowledgeName {
+                font-weight: 500;
+                font-size: 14px;
+                color: #14161a;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+              }
+
+              .knowledgeTag {
+                margin: 0;
+                font-size: 12px;
+                background-color: #e8f3ff;
+                border: 1px solid #94bfff;
+                color: #4080ff;
+              }
+
+              .knowledgeDescription {
+                color: #666;
+                font-size: 12px;
+                line-height: 18px;
+                // overflow: hidden;
+                // text-overflow: ellipsis;
+                // white-space: nowrap;
+                word-break: break-all;
+              }
+            }
+          }
+
+          .knowledgeActions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+
+            .settingsIcon,
+            .moreIcon {
+              color: #999;
+              font-size: 16px;
+              cursor: pointer;
+              padding: 4px;
+              border-radius: 4px;
+              transition: all 0.2s ease;
+
+              &:hover {
+                color: #165dff;
+                background-color: #f0f8ff;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    .emptyState {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 16px;
+      color: #999;
+      text-align: center;
+
+      .emptyIcon {
+        font-size: 48px;
+        margin-bottom: 12px;
+        color: #d9d9d9;
+      }
+
+      .emptyText {
+        font-size: 14px;
+        color: #999;
+      }
+    }
+  }
+
+  :global {
+    .@{antPrefix}-card-body {
+      padding: 16px;
+    }
+  }
+  .knowledgeContent {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .knowledgeInfo {
+    flex: 1;
+  }
+  .knowledgeActions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .knowledgeDescription {
+    color: #666;
+    font-size: 12px;
+    line-height: 18px;
+    word-break: break-all;
+  }
+  .knowledgeName {
+    font-weight: 500;
+    font-size: 14px;
+    color: #14161a;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .knowledgeTag {
+    margin: 0;
+    font-size: 12px;
+    background-color: #e8f3ff;
+    border: 1px solid #94bfff;
+    color: #4080ff;
+  }
+  .knowledgeHeader {
+    display: flex;
+    align-items: center;
+  }
+}
+
+.bundledSkillList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.bundledSkillContent {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  overflow: hidden;
+}
+
+.bundledSkillInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.bundledSkillModal {
+  :global {
+    .@{antPrefix}-modal-content {
+      border: none !important;
+      box-shadow: none !important;
+    }
+
+    .beyond-modal-content {
+      padding: 0;
+    }
+  }
+
+  .modalContent {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 640px;
+    padding: 16px;
+    overflow: hidden;
+
+    .modalHeader {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 28px;
+      margin-bottom: 12px;
+      color: #707680;
+      font-size: 14px;
+
+      .modalTitle {
+        color: #14161a;
+        font-weight: 500;
+        font-size: 16px;
+      }
+
+      .headerRight {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+      }
+
+      .searchInput {
+        width: 220px;
+      }
+
+      .modalCloseIcon {
+        font-size: 16px;
+        cursor: pointer;
+      }
+    }
+
+    .bundledSkillCardListWrap {
+      flex: 1;
+      width: 100%;
+      overflow: hidden;
+
+      :global {
+        .@{antPrefix}-spin-nested-loading,
+        .@{antPrefix}-spin-container {
+          height: 100%;
+        }
+      }
+    }
+
+    .bundledSkillCardList {
+      height: 100%;
+      overflow: auto;
+    }
+
+    .bundledSkillModalCard {
+      border-radius: 4px;
+
+      &:hover {
+        background-color: #f7fafc;
+      }
+
+      :global {
+        .@{antPrefix}-tag {
+          color: #40454d;
+          background: #0000000f;
+          border: none;
+          border-radius: 4px;
+        }
+      }
+    }
+
+    .bundledSkillModalCardInner {
+      display: flex;
+      align-items: center;
+      min-height: 100px;
+      padding: 8px;
+      color: #707680;
+      font-weight: 400;
+      font-size: 12px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .bundledSkillModalCardInfo {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .bundledSkillModalCardTitle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #14161a;
+      font-weight: 500;
+      font-size: 14px;
+    }
+
+    .bundledSkillModalCardDesc {
+      overflow: hidden;
+      color: #707680;
+      font-size: 12px;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .actionButton {
+      width: 68px;
+      height: 28px;
+      border-radius: 4px;
+
+      &.notAdd {
+        color: #165dff;
+        border: 1px solid #0000000f;
+      }
+
+      &.isAdd {
+        color: #707680;
+        border: 1px solid #0000000f;
+      }
+    }
+  }
+}
+
+.commonQuestion {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 24px;
+
+  .questionLabel {
+    display: flex;
+    justify-content: space-between;
+    padding-bottom: 8px;
+    color: #14161a;
+    font-weight: 500;
+    font-size: 14px;
+    line-height: 22px;
+
+    :global {
+      .anticon {
+        color: #165dff;
+        font-size: 16px;
+        cursor: pointer;
+      }
+    }
+  }
+
+  .abilityHint {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 12px;
+    line-height: 18px;
+  }
+
+  .questionContent {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    :global {
+      .@{antPrefix}-card:hover {
+        background-color: #f7fafc;
+
+        .@{antPrefix}-input {
+          background-color: #f7fafc;
+        }
+      }
+
+      .@{antPrefix}-card-body {
+        padding: 0 16px;
+      }
+
+      .anticon {
+        cursor: pointer;
+      }
+
+      .@{antPrefix}-input {
+        padding: 0;
+        border: none;
+      }
+    }
+
+    .content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+  }
+}
+
+// 可编辑表格样式
+.editableTable {
+  :global {
+    .@{antPrefix}-table-tbody > tr > td {
+      padding: 8px 12px;
+      transition: all 0.2s ease;
+    }
+
+    .@{antPrefix}-table-tbody > tr:hover > td {
+      background-color: #fafafa;
+    }
+
+    .editable-cell {
+      position: relative;
+
+      .edit-btn {
+        opacity: 0;
+        transition: opacity 0.2s ease;
+        margin-left: 8px;
+
+        &:hover {
+          color: #165dff;
+        }
+      }
+
+      &:hover .edit-btn {
+        opacity: 1;
+      }
+    }
+
+    .editing-cell {
+      .@{antPrefix}-input {
+        border-color: #165dff;
+        box-shadow: 0 0 0 2px rgba(22, 93, 255, 0.2);
+      }
+
+      .@{antPrefix}-btn {
+        padding: 4px 8px;
+        height: 24px;
+        border-radius: 4px;
+
+        &.save-btn {
+          color: #52c41a;
+          border-color: #52c41a;
+
+          &:hover {
+            background-color: #f6ffed;
+            border-color: #52c41a;
+          }
+        }
+
+        &.cancel-btn {
+          color: #ff4d4f;
+          border-color: #ff4d4f;
+
+          &:hover {
+            background-color: #fff2f0;
+            border-color: #ff4d4f;
+          }
+        }
+      }
+    }
+
+    .empty-cell {
+      color: #999;
+      font-style: italic;
+    }
+  }
+}
+
+// 公共配置区域样式
+.abilitySection,
+.workStandardSection {
+  margin-bottom: 24px;
+
+  .sectionLabel {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #14161a;
+
+    .labelActions {
+      display: flex;
+      gap: 12px;
+
+      .labelExample,
+      .labelAI {
+        color: #14161a;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 400;
+
+        &:hover {
+          color: #165dff;
+        }
+      }
+
+      .labelAI {
+        color: #165dff;
+
+        &:hover {
+          color: #4080ff;
+        }
+      }
+    }
+  }
+}
+
+.personalityDefinitionSection {
+  margin-bottom: 24px;
+
+  .customPromptAddButton {
+    height: 32px;
+    padding: 0 4px;
+  }
+
+  .promptFieldLabel {
+    font-size: 14px;
+    // font-weight: 500;
+    color: #14161a;
+  }
+
+  .customPromptTabLabel {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .customPromptDeleteIcon {
+    color: #999;
+    font-size: 12px;
+    cursor: pointer;
+
+    &:hover {
+      color: #ff4d4f;
+    }
+  }
+}
+
+.personalityDefinitionTextArea {
+  font-family: inherit;
+  line-height: 1.6;
+}
+
+// 公共内容容器样式
+.abilityContent,
+.workStandardContent {
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  padding: 16px;
+  background: #fff;
+}
+
+// 公共内容项样式
+.abilityItem,
+.workStandardItem {
+  margin-bottom: 16px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+
+  .itemLabel {
+    .itemTitle {
+      font-size: 14px;
+      color: #0da5aa;
+    }
+  }
+
+  // TextArea 样式，去掉边框和轮廓
+  :global {
+    .@{antPrefix}-input {
+      border: none !important;
+      box-shadow: none !important;
+      padding: 0 !important;
+    }
+
+    .@{antPrefix}-input:focus {
+      outline: none !important;
+      border: none !important;
+      box-shadow: none !important;
+    }
+  }
+
+  .editableContent {
+    font-size: 14px;
+    line-height: 22px;
+    color: #94bfff;
+    padding: 1px 4px 4px 4px;
+    min-height: 44px;
+    outline: none;
+    border: none;
+    word-break: break-word;
+    white-space: pre-wrap;
+
+    /* 背景紧贴文字，按行断开（仿富文本高亮） */
+    display: inline;
+    /* 每行底部留出 2px 透明间距 */
+    background-image: linear-gradient(
+      to bottom,
+      rgba(232, 243, 255, 0.65) 0,
+      rgba(232, 243, 255, 0.65) calc(100% - 3px),
+      rgba(232, 243, 255, 0) calc(100% - 3px),
+      rgba(232, 243, 255, 0) 100%
+    );
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    border-radius: 2px;
+
+    &:focus {
+      background-image: linear-gradient(
+        to bottom,
+        rgba(232, 243, 255, 0.65) 0,
+        rgba(232, 243, 255, 0.65) calc(100% - 3px),
+        rgba(232, 243, 255, 0) calc(100% - 3px),
+        rgba(232, 243, 255, 0) 100%
+      );
+    }
+
+    &:empty::before {
+      content: attr(placeholder);
+      color: #bfbfbf;
+      background: none;
+    }
+  }
+}
+
+// 核心能力部分样式
+.coreAbilitySection {
+  margin-bottom: 24px;
+
+  .sectionLabel {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #14161a;
+
+    .labelActions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+
+      .labelExample {
+        color: #14161a;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 400;
+
+        &:hover {
+          color: #165dff;
+        }
+      }
+    }
+  }
+
+  .abilityHint {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 12px;
+    line-height: 18px;
+  }
+
+  .abilityCollapse {
+    :global {
+      .@{antPrefix}-collapse-item {
+        // border: 1px solid #d9d9d9;
+        border-radius: 4px;
+        // margin-bottom: 8px;
+
+        &:last-child {
+          margin-bottom: 0;
+        }
+
+        .@{antPrefix}-collapse-header {
+          padding: 0px 12px;
+          align-items: center;
+        }
+
+        .@{antPrefix}-collapse-content-box {
+          padding: 0 !important;
+        }
+      }
+    }
+  }
+  .abilityPanel {
+    border: 1px solid #e8e8e8;
+    border-radius: 10px;
+    padding: 0px 12px;
+    background: #fff;
+  }
+
+  .abilityPanelHeader {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding-right: 8px;
+
+    .abilityIcon {
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      transition: all 0.2s ease;
+
+      &:hover {
+        opacity: 0.8;
+      }
+
+      &:not([data-readonly='true']):hover {
+        opacity: 0.8;
+      }
+
+      &[data-readonly='true'] {
+        cursor: default;
+        opacity: 1;
+      }
+    }
+
+    .abilityNameInput {
+      flex: 1;
+      font-size: 14px;
+      // font-weight: 500;
+      color: #14161a;
+
+      :global {
+        .@{antPrefix}-input {
+          padding: 0;
+          border: none;
+          background: transparent;
+        }
+      }
+    }
+
+    .abilityPanelActions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+
+      .actionIcon {
+        color: #999;
+        font-size: 16px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+
+        &:hover {
+          color: #165dff;
+        }
+      }
+    }
+  }
+
+  .abilityPanelContent {
+    padding-top: 8px;
+
+    :global {
+      .@{antPrefix}-input:not(.@{antPrefix}-input-textarea) {
+        border: none !important;
+        // padding: 0 !important;
+      }
+
+      .@{antPrefix}-input:not(.@{antPrefix}-input-textarea):focus {
+        border: none !important;
+        box-shadow: none !important;
+        outline: none !important;
+      }
+    }
+  }
+}
+
+// 图标和颜色选择器样式
+.iconColorPicker {
+  width: 280px;
+  padding: 8px 0;
+
+  .pickerSection {
+    margin-bottom: 16px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+
+    .pickerTitle {
+      font-size: 13px;
+      font-weight: 500;
+      color: #14161a;
+      margin-bottom: 8px;
+    }
+
+    .iconOptions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+
+      .iconOption {
+        width: 36px;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid #e8e8e8;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+
+        &:hover {
+          border-color: #165dff;
+          background-color: #f0f8ff;
+        }
+
+        &.iconOptionActive {
+          border-color: #165dff;
+          background-color: #e8f3ff;
+        }
+      }
+    }
+
+    .colorOptions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+
+      .colorOption {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        cursor: pointer;
+        border: 2px solid transparent;
+        transition: all 0.2s ease;
+        position: relative;
+
+        &:hover {
+          transform: scale(1.1);
+        }
+
+        &.colorOptionActive {
+          border-color: #165dff;
+          box-shadow: 0 0 0 2px rgba(22, 93, 255, 0.2);
+        }
+      }
+    }
+  }
+}
+
+// 通用内联样式类
+.fontWeightBold {
+  font-weight: bold;
+}
+
+.paddingHorizontalNone {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.marginBottomNone {
+  margin-bottom: 0;
+}
+
+.paddingHorizontal16 {
+  padding: 0 16px;
+}
+
+.fontSize16Weight500 {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.displayNone {
+  display: none;
+}
+
+.paddingNoneHeightAuto {
+  padding: 0;
+  height: auto;
+}
+
+.marginBottomNoneFlex1 {
+  margin-bottom: 0;
+  flex: 1;
+}
+
+.marginBottom12 {
+  margin-bottom: 12px;
+}
+
+.fontSize20 {
+  font-size: 20px;
+}
+
+.rowFlexBetween {
+  margin-bottom: 16px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.marginLeft4 {
+  margin-left: 4px;
+}
+
+.marginBottom8 {
+  margin-bottom: 8px;
+}
+
+.fontSize36MarginRight12 {
+  font-size: 36px;
+  margin-right: 12px;
+}
+
+.fontSize32PrimaryColor {
+  font-size: 32px;
+  color: var(--beyond-color-primary);
+}
+
+.textTertiaryColor {
+  color: var(--beyond-color-text-tertiary);
+}
+
+.marginLeftAuto {
+  margin-left: auto;
+}
+
+.colorGray999 {
+  color: #999;
+}
+
+// 管理地址添加按钮样式
+.managementAddressAddBtn {
+  margin-top: 12px;
+  width: 100%;
+  height: 40px;
+  border: 1px dashed rgba(22, 93, 255, 0.5);
+  border-radius: 6px;
+  color: #165dff;
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+}
+
+.tooltipIcon {
+  margin-left: 6px;
+  color: #000 !important;
+  font-size: 14px !important;
+  cursor: pointer;
+}
+
+// 能力边界弹窗样式
+.boundaryModal {
+  .boundaryList {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+    max-height: 500px;
+    overflow-y: auto;
+    padding-right: 4px;
+
+    .boundaryItem {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+
+      .boundaryDeleteIcon {
+        color: #999;
+        cursor: pointer;
+        font-size: 16px;
+
+        &:hover {
+          color: #ff4d4f;
+        }
+      }
+    }
+
+    .boundaryAddBtn {
+      margin-top: 4px;
+    }
+  }
+
+  .boundaryPreview {
+    margin-top: 16px;
+
+    :global {
+      .@{antPrefix}-input-disabled {
+        color: #999;
+      }
+    }
+  }
+}

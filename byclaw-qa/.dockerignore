@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
+tests/
+agent_data/
+byclaw_qa.egg-info/

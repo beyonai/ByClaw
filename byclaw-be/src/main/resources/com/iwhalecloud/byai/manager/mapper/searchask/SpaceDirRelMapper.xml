@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.searchask.SpaceDirRelMapper">
+
+    <!-- 批量插入目录关联记录（兼容 MySQL / Oracle / PostgreSQL） -->
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO byai_space_dir_rel (
+            dir_rel_id,
+            dir_id,
+            data_id,
+            data_type,
+            ext_json
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.dirRelId},
+                #{item.dirId},
+                #{item.dataId},
+                #{item.dataType},
+                #{item.extJson}
+            )
+        </foreach>
+    </insert>
+
+</mapper>

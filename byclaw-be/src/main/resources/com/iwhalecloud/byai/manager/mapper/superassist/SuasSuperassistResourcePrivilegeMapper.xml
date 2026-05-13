@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.superassist.SuasSuperassistResourcePrivilegeMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassistResourcePrivilege">
+        <id column="id" property="id" jdbcType="BIGINT"/>
+        <result column="superassist_id" property="superassistId" jdbcType="BIGINT"/>
+        <result column="resource_id" property="resourceId" jdbcType="BIGINT"/>
+        <result column="resource_type" property="resourceType" jdbcType="VARCHAR"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="privilege_type" property="privilegeType" jdbcType="VARCHAR"/>
+    </resultMap>
+
+
+    <!-- 根据条件查询 -->
+    <select id="selectByCondition" resultMap="BaseResultMap">
+        SELECT
+            id, superassist_id, resource_id, resource_type, create_time, privilege_type
+        FROM suas_superassist_resource_privilege
+        <where> 1=1
+            <if test="assistantId != null">
+                AND superassist_id = #{assistantId,jdbcType=BIGINT}
+            </if>
+            <if test="resourceId != null">
+                AND resource_id = #{resourceId,jdbcType=BIGINT}
+            </if>
+            <if test="resourceType != null and resourceType != ''">
+                AND resource_type = #{resourceType,jdbcType=VARCHAR}
+            </if>
+        </where>
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- 根据助理ID查询所有权限记录 -->
+    <select id="selectByAssistantId" parameterType="java.lang.Long" resultMap="BaseResultMap">
+        SELECT
+            ssrp.id, ssrp.superassist_id, ssrp.resource_id, ssrp.resource_type, ssrp.create_time, ssrp.privilege_type
+        FROM suas_superassist_resource_privilege ssrp
+        WHERE ssrp.superassist_id = #{assistantId,jdbcType=BIGINT}
+        ORDER BY ssrp.create_time DESC
+    </select>
+
+    <!-- 根据助理ID查询权限信息（关联查询资源名称和描述） -->
+    <select id="selectByAssistantIdWithResourceName" parameterType="java.lang.Long" resultType="java.util.Map">
+        SELECT 
+            p.id,
+            p.superassist_id,
+            p.resource_id,
+            p.resource_type,
+            p.create_time,
+            p.privilege_type,
+            r.resource_name,
+            r.resource_desc,
+            r.resource_biz_type
+        FROM suas_superassist_resource_privilege p
+        LEFT JOIN ss_resource r ON p.resource_id = r.resource_id
+        WHERE p.superassist_id = #{assistantId,jdbcType=BIGINT}
+        ORDER BY p.create_time DESC
+    </select>
+
+    <!-- 根据助理ID、权限类型、资源类型查询权限信息（关联查询资源名称和描述） -->
+    <select id="selectByAssistantIdWithResourceNameAndConditions" resultType="java.util.Map">
+        SELECT 
+            p.id,
+            p.superassist_id,
+            p.resource_id,
+            p.resource_type,
+            p.create_time,
+            p.privilege_type,
+            r.resource_name,
+            r.resource_desc
+        FROM suas_superassist_resource_privilege p
+        LEFT JOIN ss_resource r ON p.resource_id = r.resource_id
+        WHERE p.superassist_id = #{assistantId,jdbcType=BIGINT}
+        <if test="privilegeType != null and privilegeType != ''">
+            AND p.privilege_type = #{privilegeType,jdbcType=VARCHAR}
+        </if>
+        <if test="resourceType != null and resourceType != ''">
+            AND p.resource_type = #{resourceType,jdbcType=VARCHAR}
+        </if>
+        ORDER BY p.create_time DESC
+    </select>
+
+    <!-- 插入记录 -->
+    <insert id="insert" parameterType="com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassistResourcePrivilege"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO suas_superassist_resource_privilege (
+            id, superassist_id, resource_id, resource_type, create_time, privilege_type
+        ) VALUES (
+            #{id,jdbcType=BIGINT},
+            #{superassistId,jdbcType=BIGINT},
+            #{resourceId,jdbcType=BIGINT},
+            #{resourceType,jdbcType=VARCHAR},
+            #{createTime,jdbcType=TIMESTAMP},
+            #{privilegeType,jdbcType=VARCHAR}
+        )
+    </insert>
+
+    <!-- 批量插入记录 -->
+    <insert id="batchInsert" parameterType="java.util.List">
+        INSERT INTO suas_superassist_resource_privilege (
+            id, superassist_id, resource_id, resource_type, create_time, privilege_type
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.id,jdbcType=BIGINT},
+                #{item.superassistId,jdbcType=BIGINT},
+                #{item.resourceId,jdbcType=BIGINT},
+                #{item.resourceType,jdbcType=VARCHAR},
+                #{item.createTime,jdbcType=TIMESTAMP},
+                #{item.privilegeType,jdbcType=VARCHAR}
+            )
+        </foreach>
+    </insert>
+
+
+
+
+</mapper>

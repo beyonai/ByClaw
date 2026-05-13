@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.searchask.WebCrawlRequestMapper">
+
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.searchask.WebCrawlRequest">
+        <id column="request_id" jdbcType="BIGINT" property="requestId"/>
+        <result column="session_id" jdbcType="BIGINT" property="sessionId"/>
+        <result column="query" jdbcType="VARCHAR" property="query"/>
+        <result column="create_time" jdbcType="TIMESTAMP" property="createTime"/>
+        <result column="create_by" jdbcType="VARCHAR" property="createBy"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        request_id,
+        session_id,
+        query,
+        create_time,
+        create_by
+    </sql>
+
+    <insert id="insert" parameterType="com.iwhalecloud.byai.manager.entity.searchask.WebCrawlRequest">
+        INSERT INTO byai_web_crawl_request (
+            request_id,
+            session_id,
+            query,
+            create_time,
+            create_by
+        ) VALUES (
+            #{requestId,jdbcType=BIGINT},
+            #{sessionId,jdbcType=BIGINT},
+            #{query,jdbcType=VARCHAR},
+            #{createTime,jdbcType=TIMESTAMP},
+            #{createBy,jdbcType=VARCHAR}
+        )
+    </insert>
+
+    <select id="listBySessionId" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM byai_web_crawl_request
+        WHERE session_id = #{sessionId,jdbcType=BIGINT}
+        ORDER BY create_time ASC
+    </select>
+</mapper>

@@ -1,0 +1,53 @@
+.preview {
+  flex: 1;
+  height: 0;
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid #ced3d9;
+  display: flex;
+  flex-direction: column;
+
+  &.fullScreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: auto;
+    z-index: 1000;
+  }
+
+  .head {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 8px 12px;
+
+    .icon {
+      font-size: 14px;
+      width: 14px;
+      height: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+
+      &:hover {
+        opacity: 0.5;
+      }
+    }
+  }
+
+  .body {
+    height: calc(100vh - 268px);
+    overflow: auto;
+    padding: 12px;
+    background-color: #ffffff;
+
+    pre {
+      width: 100%;
+    }
+  }
+}

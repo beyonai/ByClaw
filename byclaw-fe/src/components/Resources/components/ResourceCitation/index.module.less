@@ -1,0 +1,291 @@
+.container {
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  padding: 4px;
+  overflow-y: auto;
+  // flex: 1;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: #e8e8e8;
+    border-radius: 2px;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: #d9d9d9;
+  }
+
+  // 屏幕宽度小于1200px时，展示3列卡片
+  @media (max-width: 1199px) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  // 屏幕宽度小于768px时，展示2列卡片
+  @media (max-width: 767px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.card {
+  border: 1px solid #eef0f3;
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+
+  &:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+}
+
+.topRightTag {
+  padding: 0px 4px;
+  border-radius: 4px;
+  background-color: rgba(22, 93, 255, 0.1);
+  flex-shrink: 0;
+  max-width: 150px;
+  color: #088cff;
+  font-size: 12px;
+  font-weight: 600;
+
+  .topRightTagText {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 600;
+    background: linear-gradient(90deg, #088cff 0%, #00cdd5 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: #088cff;
+  }
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+  position: relative;
+  // padding-right: 30px; /* 为更多按钮留出空间 */
+}
+
+.defaultLogo {
+  // width: 36px;
+  // height: 36px;
+  // border-radius: 8px;
+  color: #165dff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.title {
+  flex: 1;
+  color: #1f2533;
+  font-size: 16px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: break-all;
+}
+
+.spaceTitle {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  line-height: 22px;
+  max-height: 66px;
+}
+
+.nameText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desc {
+  height: 35px;
+  color: #9aa1ac;
+  font-size: 12px;
+  // line-height: 22px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  margin-bottom: 8px;
+}
+
+.meta {
+  margin-top: 8px;
+  color: #9aa1ac;
+  font-size: 11px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.disabledCard {
+  cursor: not-allowed;
+}
+
+.defaultLogoIcon {
+  font-size: 24px;
+}
+
+.moreButton {
+  // color: #9aa1ac;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  position: absolute;
+  top: -5px;
+  right: -10px;
+  z-index: 1;
+
+  &:hover {
+    color: #165dff;
+  }
+}
+
+.loadingContainer {
+  margin-top: 10px;
+}
+
+.emptyWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
+}
+
+.loadingContainer {
+  min-height: 200px;
+}
+
+.emptyContainer {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.checkboxContainer {
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.objectsList {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.relatedObjectsLayout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+  height: 400px;
+  min-height: 0;
+}
+
+.relatedObjectsLeft,
+.relatedObjectsRight {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.relatedObjectsLeft {
+  border-right: 1px solid var(~'--@{antPrefix}-color-border');
+  padding-right: 12px;
+}
+
+.relatedObjectItem {
+  cursor: pointer;
+  display: block !important;
+  padding: 10px 12px !important;
+  border-radius: 6px;
+}
+
+.relatedObjectItemActive {
+  background: #eaf2ff;
+}
+
+.relatedObjectContent {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.relatedObjectInfo {
+  min-width: 0;
+}
+
+.relatedObjectName {
+  color: var(--beyond-color-text);
+  line-height: 22px;
+}
+
+.relatedObjectCode {
+  color: var(--beyond-color-text-secondary);
+  font-size: 12px;
+  line-height: 20px;
+  margin-top: 2px;
+}
+
+.relatedObjectLoading {
+  min-height: 240px;
+}
+
+.propertiesContainer {
+  height: 400px;
+  overflow-y: auto;
+}
+
+.propertiesGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.propertyItem {
+  display: flex;
+  align-items: center;
+}
+
+.propertyName {
+  margin-left: 8px;
+}
+
+.searchInput {
+  width: 300px;
+}

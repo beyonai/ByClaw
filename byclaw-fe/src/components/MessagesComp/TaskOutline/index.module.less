@@ -1,0 +1,142 @@
+.descCard {
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  :global {
+    .@{antPrefix}-card-head {
+      padding: 0;
+      min-height: 0;
+      border-bottom: 0;
+      font-size: 14px;
+    }
+    .@{antPrefix}-card-body {
+      padding: 0;
+      font-size: 13px;
+      color: #707680;
+      line-height: 1.8;
+      margin-top: 2px;
+    }
+  }
+}
+
+.sectionCard {
+  padding: 15px;
+  :global {
+    .@{antPrefix}-card-head {
+      padding: 0;
+      min-height: 0;
+      border-bottom: 0;
+      font-size: 14px;
+    }
+    .@{antPrefix}-card-body {
+      padding: 0;
+      font-size: 14px;
+    }
+  }
+
+  .textAreaBlock {
+    border: 0.5px solid transparent;
+    border-radius: 6px;
+    padding: 4px 8px;
+
+    resize: none;
+    width: 100%;
+    background: transparent;
+    box-shadow: none;
+
+    &:hover {
+      background-color: #f5f7fa;
+    }
+    &:focus {
+      border-color: var(--beyond-color-primary);
+    }
+  }
+}
+
+.myFormContent {
+  width: 400px; /* 设置表单宽度 */
+  border-radius: 8px; /* 圆角 */
+  :global {
+    textarea.beyond-input,
+    textarea.beyond-input:hover,
+    textarea.beyond-input:focus {
+      border: none;
+      box-shadow: none;
+      resize: none;
+    }
+  }
+}
+.updateIcon {
+  background: #fff;
+}
+
+.stepConfigBlock {
+  // position: absolute;
+  // z-index: 9999;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  border-radius: 12px;
+  padding: 12px;
+  width: 600px;
+  // top: 54px;
+  // right: -30px;
+  // transform: translateY(0px);
+}
+.stepConfigClose {
+  cursor: pointer;
+  font-size: 20px;
+}
+.stepConfigTitle {
+  font-weight: 600;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid #e5e5e5;
+  padding-bottom: 10px;
+}
+
+.validateButton {
+  width: 130px;
+  color: #333;
+  opacity: 1;
+  margin-bottom: 10px;
+}
+.validateAlert {
+  padding: 10px;
+  margin-bottom: 10px;
+  :global {
+    .anticon-exclamation-circle {
+      font-size: 16px;
+      margin-top: 4px;
+    }
+    .beyond-alert-message {
+      font-size: 14px;
+      font-weight: 600;
+      margin: 0;
+    }
+  }
+}
+
+.updateCircle {
+  width: 8px;
+  height: 8px;
+  background: #ff9a2e;
+  border-radius: 8px;
+  margin-top: 8px;
+  flex-shrink: 0;
+}
+
+.adviceText {
+  font-size: 12px;
+  background: linear-gradient(90deg, #088cff 0%, #00cdd5 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.descBlock {
+  margin-bottom: 10px;
+  .expandBtn {
+    margin-left: 8px;
+  }
+  .expandBlock {
+  }
+}

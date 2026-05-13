@@ -1,0 +1,690 @@
+.memoryContainer {
+  display: flex;
+  flex-direction: column;
+  padding: 20px 0;
+  .headCard {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    align-self: stretch;
+    padding: 0 20px;
+    border-radius: 16px;
+    background: var(--user-fill-color-fill-42, #f7fafc);
+  }
+  .sectionTitle {
+    font-size: 16px;
+    font-weight: 500;
+    color: #14161a;
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+    .sectionTitleText {
+      width: 3px;
+      height: 14px;
+      border-radius: 1px 3px 3px 1px;
+      background: var(--user-primary-primary-6, #165dff);
+      margin-right: 8px;
+      flex-shrink: 0;
+    }
+    :global {
+      .@{antPrefix}-btn {
+        margin-left: auto;
+        padding: 0;
+        height: auto;
+        line-height: 1;
+        flex-shrink: 0;
+      }
+    }
+  }
+}
+
+// 用户信息卡片（头像 + 基本信息一行展示）
+.userInfoCard {
+  display: flex;
+  column-gap: 32px;
+  padding: 24px 0;
+  row-gap: 16px;
+  // 头像方块
+  .avatarStyle {
+    content: attr(data-avatar);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    flex: none;
+    border-radius: 12px;
+    background: #165dff;
+    color: #fff;
+    font-size: 18px;
+    font-weight: 500;
+  }
+  .userInfoContent {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  // 左侧姓名区域
+  .userBadge {
+    display: inline-flex;
+    align-items: center;
+    column-gap: 12px;
+    margin-bottom: 0;
+
+    .badgeName {
+      font-size: 18px;
+      font-weight: 600;
+      color: #262626;
+      line-height: 1.4;
+    }
+
+    .badgePosition {
+      margin-top: 4px;
+      font-size: 13px;
+      color: #707680;
+      line-height: 1.4;
+    }
+  }
+
+  // 右侧字段区域
+  .userDetails {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    row-gap: 8px;
+    column-gap: 32px;
+  }
+
+  .userDetailRow {
+    display: flex;
+    align-items: center;
+    font-size: 14px;
+    line-height: 1.5;
+    min-width: 160px;
+
+    // 部门字段占满一行
+    &.departmentRow {
+      flex-basis: 100%;
+      align-items: flex-start;
+    }
+
+    .detailLabel {
+      margin-right: 8px;
+      color: #707680;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    .detailValue {
+      flex: 1;
+      color: #262626;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      word-break: break-all;
+
+      .editIcon {
+        color: #165dff;
+        font-size: 14px;
+        cursor: pointer;
+        transition: color 0.3s;
+        flex-shrink: 0;
+
+        &:hover {
+          color: #165dff;
+        }
+      }
+    }
+  }
+}
+
+// 通用记忆卡片
+.memoryCard {
+  width: 100%;
+}
+
+// 画像记忆
+.portraitContent {
+  .portraitData {
+    display: flex;
+    flex-direction: column;
+    max-height: 400px;
+    overflow-y: auto;
+    gap: 24px;
+  }
+
+  .firstLevelSection {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .firstLevelTitle {
+    font-size: 14px;
+    font-weight: 500;
+    color: #14161a;
+    display: flex;
+    align-items: center;
+
+    &::before {
+      content: '';
+      width: 3px;
+      height: 14px;
+      border-radius: 1px 3px 3px 1px;
+      background: var(--user-primary-primary-6, #165dff);
+      margin-right: 8px;
+      flex-shrink: 0;
+    }
+  }
+
+  .firstLevelLabel {
+    font-size: 14px;
+    font-weight: 500;
+    color: #14161a;
+    margin-bottom: 8px;
+  }
+
+  .firstLevelContent {
+    font-size: 14px;
+    color: #262626;
+    line-height: 1.8;
+  }
+
+  .secondLevelContainer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px 60px;
+    margin-left: 24px;
+  }
+
+  .secondLevelSection {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+    min-width: 0;
+  }
+
+  .secondLevelLabel {
+    font-size: 13px;
+    white-space: nowrap;
+    color: #14161a;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+
+  .secondLevelContent {
+    font-size: 13px;
+    color: #262626;
+    line-height: 1.6;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .secondLevelText {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tagContainer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .portraitTag {
+    display: flex;
+    padding: 1px 6px;
+    justify-content: center;
+    align-items: center;
+    border: none !important;
+    color: #707680;
+    gap: 8px;
+    border-radius: 4px;
+    background: var(--user-fill-color-fill-34, #f2f6fa);
+  }
+
+  .portraitText {
+    font-size: 14px;
+    color: #262626;
+    line-height: 1.8;
+    white-space: pre-wrap;
+  }
+}
+
+// 两列布局
+.twoColumnLayout {
+  display: grid;
+  gap: 24px;
+
+  @media (max-width: 1200px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.leftColumn,
+.rightColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+// 常用数字员工
+.employeeGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.employeeCard {
+  padding: 12px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  transition: all 0.3s;
+  cursor: pointer;
+  background: #fff;
+
+  &:hover {
+    border-color: #165dff;
+    box-shadow: 0 2px 8px rgba(22, 93, 255, 0.1);
+  }
+
+  .employeeHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .employeeLeft {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .employeeAvatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .employeeName {
+    font-size: 14px;
+    font-weight: 500;
+    color: #262626;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .rankBadge {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+
+    img {
+      width: 100%;
+      height: 100%;
+    }
+  }
+
+  .employeeDescription {
+    font-size: 12px;
+    color: #8c8c8c;
+    line-height: 1.5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    word-break: break-all;
+  }
+}
+
+// 自定义记忆规则
+.ruleHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding-right: 16px;
+}
+
+.ruleActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-right: 8px;
+
+  .editIcon,
+  .deleteIcon {
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.3s;
+    flex-shrink: 0;
+  }
+
+  .editIcon {
+    color: #165dff;
+
+    &:hover {
+      color: #4080ff;
+    }
+  }
+
+  .deleteIcon {
+    color: #ff4d4f;
+
+    &:hover {
+      color: #ff7875;
+    }
+  }
+}
+
+// sectionTitle 中的按钮样式调整
+.sectionTitle {
+  :global {
+    .@{antPrefix}-btn {
+      margin-left: auto;
+      padding: 0;
+      height: auto;
+      line-height: 1;
+    }
+  }
+}
+
+.ruleDescription {
+  font-size: 14px;
+  color: #8c8c8c;
+  line-height: 1.6;
+}
+
+.preferenceSection {
+  margin-top: 16px;
+
+  .preferenceTitle {
+    font-size: 14px;
+    font-weight: 500;
+    color: #262626;
+    margin-bottom: 12px;
+  }
+
+  .preferenceTags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .preferenceTag {
+    margin: 0;
+    padding: 4px 12px;
+    background: #f5f5f5;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #262626;
+  }
+}
+
+// 常问的问题
+.questionList {
+  max-height: 248px;
+  overflow-y: auto;
+}
+
+.questionItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px;
+  border-radius: 8px;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background: #fafafa;
+  }
+
+  .questionContent {
+    flex: 1;
+    font-size: 14px;
+    color: #262626;
+    line-height: 1.6;
+    max-width: 500px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .questionResources {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .resourceAvatars {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    position: relative;
+
+    .resourceAvatarWrapper {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      position: relative;
+      flex-shrink: 0;
+      z-index: 1;
+
+      &:not(:first-child) {
+        margin-left: -8px;
+      }
+
+      &:hover {
+        z-index: 10;
+      }
+    }
+
+    .resourceAvatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      overflow: hidden;
+      border: 2px solid #fff;
+      background: #fff;
+      flex-shrink: 0;
+      cursor: pointer;
+      transition: transform 0.2s ease;
+      position: relative;
+
+      &:hover {
+        transform: scale(1.1);
+      }
+
+      img {
+        width: 100%;
+        height: 100%;
+        vertical-align: initial !important;
+        object-fit: cover;
+      }
+    }
+  }
+
+  .resourceName {
+    position: relative;
+    font-size: 13px;
+    color: #707680;
+    white-space: nowrap;
+    flex-shrink: 0;
+    opacity: 0;
+    width: 0;
+    padding: 0;
+    overflow: hidden;
+    transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+      padding 0.25s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+    z-index: 10;
+    background: transparent;
+
+    &.resourceNameActive {
+      opacity: 1;
+      width: 120px !important;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: 0 4px;
+      pointer-events: auto;
+    }
+  }
+}
+
+// 固化的任务记忆
+.taskList {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.taskItem {
+  padding: 16px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  transition: all 0.3s;
+
+  &:hover {
+    border-color: #165dff;
+    box-shadow: 0 2px 8px rgba(22, 93, 255, 0.1);
+  }
+
+  .taskTitle {
+    font-size: 16px;
+    font-weight: 500;
+    color: #262626;
+    margin-bottom: 8px;
+  }
+
+  .taskDescription {
+    font-size: 14px;
+    color: #8c8c8c;
+    line-height: 1.6;
+    margin-bottom: 12px;
+  }
+
+  .taskDetails {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .taskDetailItem {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 13px;
+  }
+
+  .taskDetailLabel {
+    color: #8c8c8c;
+    flex-shrink: 0;
+  }
+
+  .taskDetailValue {
+    color: #262626;
+    flex: 1;
+  }
+}
+.memoryRuleCollapse {
+  :global(.beyond-collapse-item) {
+    margin-bottom: 8px;
+    padding: 8px 12px;
+    gap: 8px;
+    align-self: stretch;
+    border-radius: 8px !important;
+    border: 0.5px solid var(--user-line-2-color-border-115, #00000026) !important;
+  }
+}
+.addRuleModal {
+  :global(.@{antPrefix}-modal-body) {
+    padding: 24px;
+  }
+}
+
+.addRuleForm {
+  :global(.@{antPrefix}-form-item-label > label) {
+    font-size: 14px;
+    color: #14161a;
+  }
+}
+
+.extractionRulesTextArea {
+  :global(.@{antPrefix}-input) {
+    font-size: 14px;
+    line-height: 1.5;
+    font-family: inherit;
+  }
+}
+
+.addRuleFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 24px;
+
+  :global(.@{antPrefix}-btn) {
+    height: 40px;
+    padding: 0 24px;
+    border-radius: 6px;
+    font-size: 14px;
+  }
+}
+
+/* 你常问的问题 - 分类按钮样式（替代 Tabs） */
+.questionCategoryTabs {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.questionCategoryTab {
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  padding: 4px 14px;
+  background-color: #f9fafb;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  color: #4b5563;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: #1677ff;
+    color: #1677ff;
+    background-color: #eff6ff;
+  }
+}
+
+.questionCategoryTabActive {
+  border-color: #1677ff;
+  background-color: #eff6ff;
+  color: #1677ff;
+}
+
+.questionCategoryLabel {
+  margin-right: 4px;
+}
+
+.questionCategoryCount {
+  color: #9ca3af;
+}

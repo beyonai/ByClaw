@@ -1,0 +1,841 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.SsResExtDigEmployeeMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee">
+        <id column="resource_id" property="resourceId" />
+        <result column="agent_type" property="agentType" />
+        <result column="agent_dev_type" property="agentDevType" />
+        <result column="agent_sse_head" property="agentSseHead" />
+        <result column="agent_sse_url" property="agentSseUrl" />
+        <result column="agent_web_url" property="agentWebUrl" />
+        <result column="agent_admin_url_list" property="agentAdminUrlList" />
+        <result column="prologue" property="prologue" />
+        <result column="agent_home_url" property="agentHomeUrl" />
+        <result column="home_type" property="homeType" />
+        <result column="agent_sse_url_ori" property="agentSseUrlOri" />
+        <result column="agent_web_url_ori" property="agentWebUrlOri" />
+        <result column="agent_admin_url_ori_list" property="agentAdminUrlOriList" />
+        <result column="create_type" property="createType" />
+        <result column="auth_type" property="authType" />
+        <result column="integration_type" property="integrationType" />
+        <result column="ability" property="ability" />
+        <result column="constraints" property="constraints" />
+        <result column="faqs" property="faqs" />
+        <result column="role_attributes" property="roleAttributes" />
+        <result column="processing_flow" property="processingFlow" />
+        <result column="personality_dimensions" property="personalityDimensions" />
+        <result column="word_preferences" property="wordPreferences" />
+        <result column="sentence_and_tone" property="sentenceAndTone" />
+        <result column="terminal" property="terminal" />
+        <result column="tag_name" property="tagName" />
+        <result column="skills" property="skills" />
+        <result column="core_competencies" property="coreCompetencies" />
+        <result column="open_super_helper" property="openSuperHelper" />
+        <result column="machine_channel" property="machineChannel" />
+        <result column="core_persona_definition" property="corePersonaDefinition" />
+        <result column="advanced_settings" property="advancedSettings" />
+
+    </resultMap>
+
+    <resultMap id="digitalEmployeeVoResultMap" extends="BaseResultMap" type="com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo">
+        <result column="catalog_id" property="catalogId" />
+        <result column="createUserName" property="createUserName" />
+        <result column="manOrgName" property="manOrgName" />
+        <result column="resource_id" property="id" />
+    </resultMap>
+
+    <!-- selectDigitalEmployeeByQo：仅映射该 SQL 实际返回列 -> DigitalEmployeePageVo -->
+    <resultMap id="digitalEmployeePageVoResultMap" type="com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeePageVo">
+        <id column="resource_id" property="resourceId" />
+        <result column="system_code" property="systemCode" />
+        <result column="resource_source_pk_id" property="resourceSourcePkId" />
+        <result column="resource_biz_type" property="resourceBizType" />
+        <result column="resource_type" property="resourceType" />
+        <result column="resource_name" property="resourceName" />
+        <result column="resource_desc" property="resourceDesc" />
+        <result column="catalog_id" property="catalogId" />
+        <result column="man_org_id" property="manOrgId" />
+        <result column="man_user_id" property="manUserId" />
+        <result column="create_by" property="createBy" />
+        <result column="create_time" property="createTime" />
+        <result column="update_time" property="updateTime" />
+        <result column="com_acct_id" property="comAcctId" />
+        <result column="resource_status" property="resourceStatus" />
+        <result column="resource_code" property="resourceCode" />
+        <result column="publish_time" property="publishTime" />
+        <result column="resource_d_verid" property="resourceDverid" />
+        <result column="resource_r_verid" property="resourceRverid" />
+        <result column="shelf_time" property="shelfTime" />
+        <result column="unshelf_time" property="unshelfTime" />
+        <result column="auth_status" property="authStatus" />
+        <result column="create_type" property="createType" />
+        <result column="tag_name" property="tagName" />
+        <result column="skills" property="skills" />
+        <result column="publish_portal" property="publishPortal" />
+        <result column="createUserName" property="createUserName" />
+        <result column="manOrgName" property="manOrgName" />
+        <result column="manUserName" property="manUserName" />
+        <result column="manUserName" property="manUserName" />
+    </resultMap>
+
+    <resultMap id="digitalEmployeeDTOResultMap" extends="BaseResultMap" type="com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO">
+        <result column="system_code" property="systemCode" />
+        <result column="resource_biz_type" property="resourceBizType" />
+        <result column="resource_type" property="resourceType" />
+        <result column="resource_name" property="resourceName" />
+        <result column="resource_status" property="resourceStatus" />
+        <result column="resource_desc" property="resourceDesc" />
+        <result column="avatar" property="avatar" />
+        <result column="sample" property="sample" />
+        <result column="tags" property="tags" />
+        <result column="resource_version_id" property="resourceVersionId" />
+        <result column="host_type" property="hostType" />
+        <result column="impl_type" property="implType" />
+        <result column="worker_agent_type" property="workerAgentType" />
+        <result column="owner_type" property="ownerType" />
+    </resultMap>
+
+    <resultMap id="digitalEmployeeDetailsResultMap" extends="digitalEmployeeDTOResultMap" type="com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO">
+        <result column="catalog_id" property="catalogId" />
+        <result column="man_org_id" property="manOrgId" />
+        <result column="man_user_id" property="manUserId" />
+    </resultMap>
+
+    <resultMap id="resourceDetailDtoResultMap" type="com.iwhalecloud.byai.manager.dto.resource.ResourceDetailDto">
+       <result column="resource_rel_detail_id" property="resourceRelDetailId" />
+       <result column="resource_id" property="resourceId" />
+       <result column="rel_resource_id" property="relResourceId" />
+       <result column="resource_source_pk_id" property="resourceSourcePkId" />
+    </resultMap>
+
+    <resultMap id="resourceExtDigEmployeeDtoResultMap"
+               type="com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto"
+               extends="com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper.BaseResultMap">
+        <association property="ssResExtDigEmployee" javaType="com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee" resultMap="BaseResultMap" />
+    </resultMap>
+
+    <select id="selectDigitalEmployeeByQo" resultMap="digitalEmployeePageVoResultMap">
+        select a.resource_id,
+               a.system_code,
+               a.resource_source_pk_id,
+               a.resource_biz_type,
+               a.resource_type,
+               a.resource_name,
+               a.resource_desc,
+               a.catalog_id,
+               a.man_org_id,
+               a.man_user_id,
+               a.create_by,
+               a.create_time,
+               a.update_time,
+               a.com_acct_id,
+               a.resource_status,
+               a.resource_code,
+               a.publish_time,
+               a.resource_d_verid,
+               a.resource_r_verid,
+               a.shelf_time,
+               a.unshelf_time,
+               a.auth_status,
+               a.publish_portal,
+               e.tag_name,
+               e.skills,
+               c.user_name as createUserName,
+               d.org_name  as manOrgName,
+               e.create_type
+        from ss_resource a
+                 left join ss_res_ext_dig_employee e
+                           on a.resource_id = e.resource_id
+                 left join ss_resource_catalog b
+                           on a.catalog_id = b.catalog_id
+                 left join po_users c
+                           on a.create_by = c.user_id
+                 left join po_organization d
+                           on a.man_org_id = d.org_id
+                left join (
+                    select
+                        grant_obj_id,
+                        sum(case when grant_to_type = 'RED' and status_cd = 'A' then 1 else 0 end) as red_count,
+                        sum(case when grant_to_type = 'BLACK' and status_cd = 'A' then 1 else 0 end) as black_count,
+                        sum(case when grant_type = 'FORCE_USE' and status_cd = 'A' then 1 else 0 end) as force_use_count,
+                        sum(case when grant_type = 'AVAILABLE_USE' and status_cd = 'A' then 1 else 0 end) as available_use_count,
+                        sum(case when grant_type = 'ALLOW_MANAGE' and status_cd = 'A' then 1 else 0 end) as allow_manage_count
+                    from au_privilege_grant
+                    where grant_type in ('AVAILABLE_USE', 'FORCE_USE', 'ALLOW_MANAGE')
+                        and grant_obj_type = 'DIG_EMPLOYEE'
+                        and status_cd in ('A')
+                        <trim prefix="and (" suffix=")" prefixOverrides="or">
+                            <if test="userOrgIds != null and userOrgIds.size() > 0">
+                                or (
+                                    grant_to_obj_type = 'ORG'
+                                    and grant_to_obj_id in
+                                    <foreach collection="userOrgIds" item="orgId" open="(" separator="," close=")">
+                                        #{orgId}
+                                    </foreach>
+                                )
+                            </if>
+                            <if test="userId != null">
+                                or (grant_to_obj_type = 'USER' and grant_to_obj_id = #{userId})
+                            </if>
+                            <if test="userPositionIds != null and userPositionIds.size() > 0">
+                                or (
+                                    grant_to_obj_type = 'POST'
+                                    and grant_to_obj_id in
+                                    <foreach collection="userPositionIds" item="positionId" open="(" separator="," close=")">
+                                        #{positionId}
+                                    </foreach>
+                                )
+                            </if>
+                            <if test="userStationId != null">
+                                or (grant_to_obj_type = 'STATION' and grant_to_obj_id = #{userStationId})
+                            </if>
+                        </trim>
+                    group by grant_obj_id
+                ) k
+                    on a.resource_id = k.grant_obj_id
+                left join (
+                    select grant_obj_id,
+                           count(1) as pending_apply_count,
+                           sum(case when grant_to_obj_type = 'USER' and grant_to_obj_id = #{userId} then 1 else 0 end) as my_pending_apply_count
+                    from au_privilege_grant
+                    where grant_type = 'AVAILABLE_USE'
+                      and grant_to_type = 'RED'
+                      and status_cd = 'P'
+                    group by grant_obj_id
+                ) p
+                    on a.resource_id = p.grant_obj_id
+            <where>
+                and a.resource_biz_type = 'DIG_EMPLOYEE'
+                and a.owner_type = 'enterprise'
+                and (k.black_count = 0 or k.black_count is null)
+                <choose>
+                    <when test="type != null and type == 'owner'">
+                        and a.create_by = #{userId}
+                    </when>
+                    <when test="type != null and type == 'authorize'">
+                        and (k.force_use_count > 0 or k.available_use_count > 0)
+                    </when>
+                    <when test="type != null and type == 'manager'">
+                        and k.allow_manage_count > 0
+                    </when>
+                </choose>
+                <if test="systemCodes != null and systemCodes.size() > 0">
+                    and a.system_code in
+                    <foreach collection="systemCodes" item="item" open="(" separator="," close=")">
+                        #{item}
+                    </foreach>
+                </if>
+                <if test="catalogIds != null and catalogIds.size() > 0">
+                    and a.catalog_id in
+                    <foreach collection="catalogIds" item="catalogIdItem" open="(" separator="," close=")">
+                        #{catalogIdItem}
+                    </foreach>
+                </if>
+                <if test="(catalogIds == null or catalogIds.size() == 0) and catalogId != null">
+                    and a.catalog_id = #{catalogId}
+                </if>
+                <if test="publishOrgIds != null and publishOrgIds.size() > 0">
+                    and a.man_org_id in
+                    <foreach collection="publishOrgIds" item="orgId" open="(" separator="," close=")">
+                        #{orgId}
+                    </foreach>
+                </if>
+                <if test="publishType != null and publishType != ''">
+                    and a.publish_type = #{publishType}
+                </if>
+                <if test="resourceStatus != null">
+                    and a.resource_status = #{resourceStatus}
+                </if>
+                <choose>
+                    <when test="permission != null and permission == 'CREATED_BY_ME'">
+                        and a.create_by = #{userId}
+                    </when>
+                    <when test="permission != null and permission == 'AUTHORIZED_TO_ME'">
+                        and (a.create_by is null or a.create_by != #{userId})
+                        and (k.force_use_count > 0 or k.available_use_count > 0 or k.allow_manage_count > 0)
+                    </when>
+                    <when test="permission != null and permission == 'PENDING_MY_APPROVAL'">
+                        and coalesce(p.pending_apply_count, 0) > 0
+                        and (
+                            a.create_by = #{userId}
+                            or k.allow_manage_count > 0
+                            <if test="platformManager == true">
+                                or 1 = 1
+                            </if>
+                            <if test="managerOrgPathCodes != null and managerOrgPathCodes.size() > 0">
+                                or exists (
+                                    select 1
+                                      from po_organization org
+                                     where org.org_id = a.man_org_id
+                                       and (
+                                        <foreach collection="managerOrgPathCodes" item="pathCode" separator=" or ">
+                                            org.path_code = #{pathCode}
+                                            or org.path_code like concat(#{pathCode}, '.%')
+                                        </foreach>
+                                       )
+                                )
+                            </if>
+                        )
+                    </when>
+                    <when test="permission != null and permission == 'APPLIED_BY_ME'">
+                        and coalesce(p.my_pending_apply_count, 0) > 0
+                    </when>
+                </choose>
+                <if test="keyword != null and keyword != ''">
+                    and (
+                        a.resource_name like concat('%', #{keyword}, '%')
+                        or a.resource_desc like concat('%', #{keyword}, '%'))
+                </if>
+            </where>
+    </select>
+
+    <select id="selectPersonalDigitalEmployeeByQo" resultMap="digitalEmployeeVoResultMap">
+        select
+            a.resource_id,
+            a.system_code,
+            a.resource_source_pk_id,
+            a.resource_biz_type,
+            a.resource_type,
+            a.resource_name,
+            a.resource_desc,
+            a.avatar,
+            a.catalog_id,
+            a.man_org_id,
+            a.man_user_id,
+            a.create_by,
+            a.create_time,
+            a.com_acct_id,
+            a.resource_status,
+            a.owner_type,
+            a.resource_code,
+            a.publish_time,
+            a.shelf_time,
+            a.unshelf_time,
+            a.auth_status,
+            a.publish_portal,
+            b.agent_type,
+            b.agent_home_url,
+            b.prologue,
+            b.integration_type,
+            b.agent_dev_type,
+            b.create_type,
+            b.terminal,
+            b.tag_name,
+            b.skills,
+            b.open_super_helper,
+            c.user_name as createUserName,
+            d.org_name as manOrgName
+        from ss_resource a
+            left join ss_res_ext_dig_employee b
+                on a.resource_id = b.resource_id
+            left join ss_resource_catalog cat
+                on a.catalog_id = cat.catalog_id
+            left join po_users c
+                on a.create_by = c.user_id
+            left join po_organization d
+                on a.man_org_id = d.org_id
+            left join (
+                select
+                    grant_obj_id,
+                    sum(case when grant_to_type = 'RED' and status_cd = 'A' then 1 else 0 end) as red_count,
+                    sum(case when grant_to_type = 'BLACK' and status_cd = 'A' then 1 else 0 end) as black_count,
+                    sum(case when grant_type = 'FORCE_USE' and status_cd = 'A' then 1 else 0 end) as force_use_count,
+                    sum(case when grant_type = 'AVAILABLE_USE' and status_cd = 'A' then 1 else 0 end) as available_use_count,
+                    sum(case when grant_type = 'ALLOW_MANAGE' and status_cd = 'A' then 1 else 0 end) as allow_manage_count
+                from au_privilege_grant
+                where grant_type in ('AVAILABLE_USE', 'FORCE_USE', 'ALLOW_MANAGE')
+                    and grant_obj_type = 'DIG_EMPLOYEE'
+                    and status_cd in ('A')
+                    <trim prefix="and (" suffix=")" prefixOverrides="or">
+                        <if test="userOrgIds != null and userOrgIds.size() > 0">
+                            or (
+                                grant_to_obj_type = 'ORG'
+                                and grant_to_obj_id in
+                                <foreach collection="userOrgIds" item="orgId" open="(" separator="," close=")">
+                                    #{orgId}
+                                </foreach>
+                            )
+                        </if>
+                        <if test="userId != null">
+                            or (grant_to_obj_type = 'USER' and grant_to_obj_id = #{userId})
+                        </if>
+                        <if test="userPositionIds != null and userPositionIds.size() > 0">
+                            or (
+                                grant_to_obj_type = 'POST'
+                                and grant_to_obj_id in
+                                <foreach collection="userPositionIds" item="positionId" open="(" separator="," close=")">
+                                    #{positionId}
+                                </foreach>
+                            )
+                        </if>
+                        <if test="userStationId != null">
+                            or (grant_to_obj_type = 'STATION' and grant_to_obj_id = #{userStationId})
+                        </if>
+                    </trim>
+                group by grant_obj_id
+            ) k
+                on a.resource_id = k.grant_obj_id
+            left join (
+                select grant_obj_id,
+                       count(1) as pending_apply_count,
+                       sum(case when grant_to_obj_type = 'USER' and grant_to_obj_id = #{userId} then 1 else 0 end) as my_pending_apply_count
+                from au_privilege_grant
+                where grant_type = 'AVAILABLE_USE'
+                  and grant_to_type = 'RED'
+                  and status_cd = 'P'
+                group by grant_obj_id
+            ) p
+                on a.resource_id = p.grant_obj_id
+        <where>
+            <!-- 基础过滤条件 -->
+            and a.resource_biz_type = 'DIG_EMPLOYEE'
+            and (
+                <if test="defaultDigEmployeeId != null and includeAllResourceStatus != true and (resourceStatus == null or resourceStatus == 2)">
+                    (a.owner_type = 'personal_default' and a.resource_id = #{defaultDigEmployeeId})
+                    or
+                </if>
+                <if test="defaultSuperAssistantResourceCode != null and defaultSuperAssistantResourceCode != '' and includeAllResourceStatus != true and (resourceStatus == null or resourceStatus == 2)">
+                    (a.owner_type = 'personal_default' and a.resource_code = #{defaultSuperAssistantResourceCode})
+                    or
+                </if>
+                <choose>
+                    <when test="resourceStatus != null">
+                        a.resource_status = #{resourceStatus}
+                    </when>
+                    <when test="includeAllResourceStatus == true">
+                        1 = 1
+                    </when>
+                    <otherwise>
+                        a.resource_status = 2
+                    </otherwise>
+                </choose>
+            )
+            <!-- 黑名单排除：不能有黑名单记录 -->
+            and (k.black_count = 0 or k.black_count is null)
+            and (
+                (
+                    a.owner_type = 'personal'
+                    and (
+                        a.create_by = #{userId}
+                        or k.allow_manage_count > 0
+                        or k.red_count > 0
+                        or k.force_use_count > 0
+                        or k.available_use_count > 0
+                    )
+                )
+                <if test="defaultDigEmployeeId != null or (defaultSuperAssistantResourceCode != null and defaultSuperAssistantResourceCode != '')">
+                    or (
+                        a.owner_type = 'personal_default'
+                        <trim prefix="and (" suffix=")" prefixOverrides="or">
+                            <if test="defaultDigEmployeeId != null">
+                                or a.resource_id = #{defaultDigEmployeeId}
+                            </if>
+                            <if test="defaultSuperAssistantResourceCode != null and defaultSuperAssistantResourceCode != ''">
+                                or a.resource_code = #{defaultSuperAssistantResourceCode}
+                            </if>
+                        </trim>
+                    )
+                </if>
+            )
+            <if test="systemCodes != null and systemCodes.size() > 0">
+                and a.system_code in
+                <foreach collection="systemCodes" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="catalogIds != null and catalogIds.size() > 0">
+                and a.catalog_id in
+                <foreach collection="catalogIds" item="catalogIdItem" open="(" separator="," close=")">
+                    #{catalogIdItem}
+                </foreach>
+            </if>
+            <if test="(catalogIds == null or catalogIds.size() == 0) and catalogId != null">
+                and a.catalog_id = #{catalogId}
+            </if>
+            <choose>
+                <when test="permission != null and permission == 'CREATED_BY_ME'">
+                    and a.create_by = #{userId}
+                </when>
+                <when test="permission != null and permission == 'AUTHORIZED_TO_ME'">
+                    and a.owner_type = 'personal'
+                    and (a.create_by is null or a.create_by != #{userId})
+                    and (k.red_count > 0 or k.allow_manage_count > 0)
+                </when>
+                <when test="permission != null and permission == 'PENDING_MY_APPROVAL'">
+                    and coalesce(p.pending_apply_count, 0) > 0
+                    and (
+                        a.create_by = #{userId}
+                        or k.allow_manage_count > 0
+                        <if test="platformManager == true">
+                            or 1 = 1
+                        </if>
+                        <if test="managerOrgPathCodes != null and managerOrgPathCodes.size() > 0">
+                            or exists (
+                                select 1
+                                  from po_organization org
+                                 where org.org_id = a.man_org_id
+                                   and (
+                                    <foreach collection="managerOrgPathCodes" item="pathCode" separator=" or ">
+                                        org.path_code = #{pathCode}
+                                        or org.path_code like concat(#{pathCode}, '.%')
+                                    </foreach>
+                                   )
+                            )
+                        </if>
+                        <if test="defaultDigEmployeeId != null or (defaultSuperAssistantResourceCode != null and defaultSuperAssistantResourceCode != '')">
+                            or (
+                                a.owner_type = 'personal_default'
+                                <trim prefix="and (" suffix=")" prefixOverrides="or">
+                                    <if test="defaultDigEmployeeId != null">
+                                        or a.resource_id = #{defaultDigEmployeeId}
+                                    </if>
+                                    <if test="defaultSuperAssistantResourceCode != null and defaultSuperAssistantResourceCode != ''">
+                                        or a.resource_code = #{defaultSuperAssistantResourceCode}
+                                    </if>
+                                </trim>
+                            )
+                        </if>
+                    )
+                </when>
+                <when test="permission != null and permission == 'APPLIED_BY_ME'">
+                    and coalesce(p.my_pending_apply_count, 0) > 0
+                </when>
+            </choose>
+            <if test="keyword != null and keyword != ''">
+                and (
+                    a.resource_name like concat('%', #{keyword}, '%')
+                    or a.resource_desc like concat('%', #{keyword}, '%')
+                )
+            </if>
+            order by COALESCE(a.update_time, '1970-01-01 00:00:00') desc, a.create_time desc
+        </where>
+    </select>
+
+
+    <select id="findDetailsById" resultMap="digitalEmployeeDetailsResultMap">
+        select a.resource_id,
+               a.system_code,
+               a.resource_biz_type,
+               a.resource_type,
+               a.resource_name,
+               a.resource_desc,
+               a.avatar,
+               a.sample,
+               a.tags,
+               a.owner_type,
+               a.host_type,
+               a.impl_type,
+               a.worker_agent_type,
+               a.catalog_id,
+               a.man_org_id,
+               a.man_user_id,
+               a.resource_status,
+               a.resource_code,
+               b.resource_id,
+               b.agent_type,
+               b.agent_dev_type,
+               b.agent_sse_head,
+               b.agent_sse_url,
+               b.agent_web_url,
+               b.agent_admin_url_list,
+               b.prologue,
+               b.agent_sse_url_ori,
+               b.agent_web_url_ori,
+               b.agent_admin_url_ori_list,
+               b.create_type,
+               b.agent_home_url,
+               b.home_type,
+               b.auth_type,
+               b.integration_type,
+               b.ability,
+               b.constraints,
+               b.faqs,
+               b.role_attributes,
+               b.processing_flow,
+               b.personality_dimensions,
+               b.word_preferences,
+               b.sentence_and_tone,
+               b.terminal,
+               b.tag_name,
+               b.skills,
+               b.core_competencies,
+               b.open_super_helper,
+               b.machine_channel,
+               b.core_persona_definition,
+               b.advanced_settings
+        from ss_resource a
+             left join ss_res_ext_dig_employee b on a.resource_id = b.resource_id
+         where a.resource_id =#{resourceId}
+    </select>
+
+    <!-- 根据资源标识查询数字员工信息 -->
+    <select id="findExtDigEmployeeByIds" resultMap="resourceExtDigEmployeeDtoResultMap">
+        SELECT a.resource_id,
+               a.resource_code,
+               a.system_code,
+               a.resource_source_pk_id,
+               a.resource_biz_type,
+               a.resource_type,
+               a.resource_name,
+               a.resource_desc,
+               a.avatar,
+               a.sample,
+               a.tags,
+               a.resource_version_id,
+               a.host_type,
+               a.catalog_id,
+               a.man_org_id,
+               a.man_user_id,
+               a.index_list,
+               a.create_by,
+               a.create_time,
+               a.update_by,
+               a.update_time,
+               a.com_acct_id,
+               a.resource_status,
+               a.resource_d_verid,
+               a.resource_r_verid,
+               a.auth_status,
+               a.publish_time,
+               a.shelf_time,
+               a.unshelf_time,
+               a.publish_portal,
+               b.resource_id,
+               b.agent_type,
+               b.agent_dev_type,
+               b.agent_sse_head,
+               b.agent_sse_url,
+               b.agent_web_url,
+               b.agent_admin_url_list,
+               b.prologue,
+               b.agent_home_url,
+               b.home_type,
+               b.agent_sse_url_ori,
+               b.agent_web_url_ori,
+               b.agent_admin_url_ori_list,
+               b.create_type,
+               b.auth_type,
+               b.integration_type,
+               b.ability,
+               b.constraints,
+               b.faqs,
+               b.role_attributes,
+               b.processing_flow,
+               b.personality_dimensions,
+               b.word_preferences,
+               b.sentence_and_tone,
+               b.terminal,
+               b.core_competencies,
+               b.machine_channel
+        FROM ss_resource a
+        LEFT JOIN ss_res_ext_dig_employee b ON a.resource_id = b.resource_id
+        WHERE a.resource_biz_type = 'DIG_EMPLOYEE'
+        AND a.resource_id IN
+        <foreach collection="resourceIds" item="item" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+    </select>
+
+    <!-- 查询所有已上架数字员工及扩展信息?-->
+    <select id="findOnlineResourceExtDigEmployees" resultMap="resourceExtDigEmployeeDtoResultMap">
+        SELECT a.resource_id,
+               a.resource_code,
+               a.system_code,
+               a.resource_source_pk_id,
+               a.resource_biz_type,
+               a.resource_type,
+               a.resource_name,
+               a.resource_desc,
+               a.avatar,
+               a.sample,
+               a.tags,
+               a.resource_version_id,
+               a.host_type,
+               a.catalog_id,
+               a.man_org_id,
+               a.man_user_id,
+               a.index_list,
+               a.create_by,
+               a.create_time,
+               a.update_by,
+               a.update_time,
+               a.com_acct_id,
+               a.resource_status,
+               a.resource_d_verid,
+               a.resource_r_verid,
+               a.auth_status,
+               a.publish_time,
+               a.shelf_time,
+               a.unshelf_time,
+               a.publish_portal,
+               b.resource_id,
+               b.agent_type,
+               b.agent_dev_type,
+               b.agent_sse_head,
+               b.agent_sse_url,
+               b.agent_web_url,
+               b.agent_admin_url_list,
+               b.prologue,
+               b.agent_home_url,
+               b.home_type,
+               b.agent_sse_url_ori,
+               b.agent_web_url_ori,
+               b.agent_admin_url_ori_list,
+               b.create_type,
+               b.auth_type,
+               b.integration_type,
+               b.ability,
+               b.constraints,
+               b.faqs,
+               b.role_attributes,
+               b.processing_flow,
+               b.personality_dimensions,
+               b.word_preferences,
+               b.sentence_and_tone,
+               b.terminal,
+               b.core_competencies,
+               b.machine_channel
+        FROM ss_resource a
+        LEFT JOIN ss_res_ext_dig_employee b ON a.resource_id = b.resource_id
+        WHERE a.resource_biz_type = 'DIG_EMPLOYEE'
+          AND a.resource_status = 2
+        <if test="machineChannel != null and machineChannel != ''">
+          AND b.machine_channel like concat('%', #{machineChannel}, '%')
+        </if>
+        ORDER BY a.resource_id
+    </select>
+
+    <!-- 根据资源标识查询数字员工信息 -->
+    <select id="findExtDigEmployeeByQo" resultMap="resourceExtDigEmployeeDtoResultMap">
+        SELECT a.resource_id,
+               a.resource_code,
+               a.system_code,
+               a.resource_source_pk_id,
+               a.resource_biz_type,
+               a.resource_type,
+               a.resource_name,
+               a.resource_desc,
+               a.avatar,
+               a.sample,
+               a.tags,
+               a.resource_version_id,
+               a.host_type,
+               a.catalog_id,
+               a.man_org_id,
+               a.man_user_id,
+               a.index_list,
+               a.create_by,
+               a.create_time,
+               a.update_by,
+               a.update_time,
+               a.com_acct_id,
+               a.resource_status,
+               a.resource_d_verid,
+               a.resource_r_verid,
+               b.resource_id,
+               b.agent_type,
+               b.agent_dev_type,
+               b.agent_sse_head,
+               b.agent_sse_url,
+               b.agent_web_url,
+               b.agent_admin_url_list,
+               b.prologue,
+               b.agent_home_url,
+               b.home_type,
+               b.agent_sse_url_ori,
+               b.agent_web_url_ori,
+               b.agent_admin_url_ori_list,
+               b.create_type,
+               b.auth_type,
+               b.integration_type,
+               b.ability,
+               b.constraints,
+               b.faqs,
+               b.role_attributes,
+               b.processing_flow,
+               b.personality_dimensions,
+               b.word_preferences,
+               b.sentence_and_tone,
+               b.terminal
+        FROM ss_resource a
+        LEFT JOIN ss_res_ext_dig_employee b ON a.resource_id = b.resource_id
+        <where>
+            AND a.resource_biz_type = 'DIG_EMPLOYEE'
+          <if test="resourceId !=null">
+            AND a.resource_id =#{resourceId}
+          </if>
+          <if test="resourceCode !=null and resourceCode !=''">
+            AND a.resource_code =#{resourceCode}
+          </if>
+        </where>
+    </select>
+
+    <!-- 开放接口：根据数字员工类型和名称模糊查询已上架的数字员工列表 -->
+    <select id="findDigEmployeeListForOpenApi" resultMap="digitalEmployeeDetailsResultMap">
+        select a.resource_id,
+               a.system_code,
+               a.resource_biz_type,
+               a.resource_type,
+               a.resource_name,
+               a.resource_desc,
+               a.avatar,
+               a.sample,
+               a.tags,
+               a.host_type,
+               a.impl_type,
+               a.worker_agent_type,
+               a.catalog_id,
+               a.man_org_id,
+               a.man_user_id,
+               a.resource_status,
+               a.resource_code,
+               b.resource_id,
+               b.agent_type,
+               b.agent_dev_type,
+               b.agent_sse_head,
+               b.agent_sse_url,
+               b.agent_web_url,
+               b.agent_admin_url_list,
+               b.prologue,
+               b.agent_sse_url_ori,
+               b.agent_web_url_ori,
+               b.agent_admin_url_ori_list,
+               b.create_type,
+               b.agent_home_url,
+               b.home_type,
+               b.auth_type,
+               b.integration_type,
+               b.ability,
+               b.constraints,
+               b.faqs,
+               b.role_attributes,
+               b.processing_flow,
+               b.personality_dimensions,
+               b.word_preferences,
+               b.sentence_and_tone,
+               b.terminal,
+               b.tag_name,
+               b.skills,
+               b.core_competencies,
+               b.open_super_helper,
+               b.machine_channel,
+               b.core_persona_definition,
+               b.advanced_settings
+        from ss_resource a
+             left join ss_res_ext_dig_employee b on a.resource_id = b.resource_id
+        <where>
+            and a.resource_biz_type = 'DIG_EMPLOYEE'
+            and a.resource_status = 2
+            <if test="agentType != null and agentType != ''">
+                and b.agent_type = #{agentType}
+            </if>
+            <if test="resourceName != null and resourceName != ''">
+                and a.resource_name like concat('%', #{resourceName}, '%')
+            </if>
+        </where>
+        order by a.create_time desc
+    </select>
+
+</mapper>

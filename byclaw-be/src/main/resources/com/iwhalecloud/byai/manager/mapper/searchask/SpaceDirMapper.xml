@@ -1,0 +1,235 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.searchask.SpaceDirMapper">
+
+    <resultMap id="SpaceResourceVoResultMap" type="com.iwhalecloud.byai.manager.vo.searchask.SpaceResourceVo">
+        <id column="dir_id" property="dirId"/>
+        <result column="parent_dir_id" property="parentDirId"/>
+        <result column="name" property="name"/>
+        <result column="data_type" property="dataType"/>
+        <result column="data_id" property="dataId"/>
+    </resultMap>
+
+    <resultMap id="SpaceKbResourceVoResultMap" extends="SpaceResourceVoResultMap" type="com.iwhalecloud.byai.manager.vo.searchask.SpaceKbResourceVo">
+        <result column="dataset_id" property="datasetId"/>
+    </resultMap>
+
+    <select id="listImportResource" resultMap="SpaceResourceVoResultMap">
+        select dir_id,
+               parent_dir_id,
+               name,
+               null as data_type,
+               null as data_id
+        from byai_space_dir a
+        where a.dir_type in ('WEB_SEARCH')
+          and a.session_id = #{sessionId}
+          and a.create_by = #{createBy}
+        union all
+        select c.file_id as dir_id,
+               a.dir_id as parent_dir_id,
+               c.file_name as name,
+               b.data_type,
+               b.data_id
+        from byai_space_dir a
+        join byai_space_dir_rel b on a.dir_id = b.dir_id
+        join byai_files c on b.data_id = c.file_id
+        where a.dir_type = 'IMPORT'
+          and a.session_id = #{sessionId}
+          and a.create_by = #{createBy}
+        union all
+        select d.doc_archive_id as dir_id,
+               a.dir_id as parent_dir_id,
+               d.title as name,
+               b.data_type,
+               b.data_id
+        from byai_space_dir a
+        join byai_space_dir_rel b on a.dir_id = b.dir_id
+        join byai_web_crawl_request c on b.data_id = c.request_id
+        join byai_web_crawl_archive_doc d on c.request_id = d.request_id
+        where a.dir_type = 'WEB_SEARCH'
+          and a.session_id = #{sessionId}
+          and a.create_by = #{createBy}
+    </select>
+
+    <select id="listCollectResource" resultMap="SpaceResourceVoResultMap">
+        select dir_id,
+               parent_dir_id,
+               name,
+               null as data_type,
+               null as data_id
+        from byai_space_dir a
+        where a.dir_type in ('COLLECT') and a.create_by = #{createBy}
+        union all
+        select c.id     as dir_id,
+               a.dir_id as parent_dir_id,
+               c.name   as name,
+               b.data_type,
+               b.data_id
+        from byai_space_dir a
+                 join byai_space_dir_rel b on a.dir_id = b.dir_id
+                 join byai_showcase c on b.data_id = c.id
+        where a.dir_type in ('COLLECT') and a.create_by = #{createBy}
+    </select>
+
+    <!-- 批量插入空间目录（兼容 MySQL / Oracle / PostgreSQL） -->
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO byai_space_dir (
+            dir_id,
+            parent_dir_id,
+            name,
+            dir_type,
+            sort,
+            description,
+            create_by,
+            create_time,
+            update_time,
+            session_id
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.dirId},
+                #{item.parentDirId},
+                #{item.name},
+                #{item.dirType},
+                #{item.sort},
+                #{item.description},
+                #{item.createBy},
+                #{item.createTime},
+                #{item.updateTime},
+                #{item.sessionId}
+            )
+        </foreach>
+    </insert>
+
+    <select id="listSkills" resultMap="SpaceResourceVoResultMap">
+        select a.resource_id as dir_id,
+               a.parent_resource_id as parent_dir_id,
+               a.resource_name as name,
+               'RESOURCE' as data_type,
+               a.resource_id as data_id
+        from ss_resource a
+        <where>
+            <if test="resourceIds != null and resourceIds.size() > 0">
+                (a.resource_id in
+                <foreach collection="resourceIds" item="id" open="(" separator="," close=")">
+                    #{id}
+                </foreach>
+                or a.parent_resource_id in
+                <foreach collection="resourceIds" item="id" open="(" separator="," close=")">
+                    #{id}
+                </foreach>)
+            </if>
+        </where>
+    </select>
+
+    <select id="listSelectedKb" resultMap="SpaceKbResourceVoResultMap">
+        select
+               b.data_id as data_type,
+               b.data_id as data_id,
+               c.resource_id as dir_id,
+               c.parent_resource_id as parent_dir_id,
+               c.resource_name as name,
+               c.resource_source_pk_id as dataset_id
+        from byai_space_dir a
+                 join byai_space_dir_rel b on a.dir_id = b.dir_id
+                 join ss_resource c on b.data_id = c.resource_id
+        <where>
+            b.data_type in ('RESOURCE')
+            and c.resource_status in (2)
+            <if test="dirType != null and dirType != ''">
+                and a.dir_type = #{dirType}
+            </if>
+            <if test="sessionId != null">
+                and a.session_id = #{sessionId}
+            </if>
+        </where>
+    </select>
+
+    <select id="listPersonalKb" resultMap="SpaceKbResourceVoResultMap" >
+        select a.resource_id as dir_id,
+               a.parent_resource_id as parent_dir_id,
+               a.resource_name as name,
+               'RESOURCE' as data_type,
+               a.resource_id as data_id,
+               a.resource_source_pk_id as dataset_id
+        from ss_resource a
+        <where>
+            a.resource_status in (2) and a.resource_biz_type in ('KG_DOC', 'KG_QA', 'KG_TERM')
+            <if test="createBy != null">
+                and a.create_by = #{createBy}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                and a.resource_name like concat('%', #{keyword}, '%')
+            </if>
+        </where>
+    </select>
+
+    <select id="listEnterpriseKb" resultMap="SpaceKbResourceVoResultMap">
+        select a.resource_id as dir_id,
+               a.parent_resource_id as parent_dir_id,
+               a.resource_name as name,
+               'RESOURCE' as data_type,
+               a.resource_id as data_id,
+               a.resource_source_pk_id as dataset_id
+        from ss_resource a
+                 left join (
+            select grant_obj_id,
+                   sum(case when grant_to_type = 'RED' and status_cd = 'A' then 1 else 0 end) as red_count,
+                   sum(case when grant_to_type = 'BLACK' and status_cd = 'A' then 1 else 0 end) as black_count
+            from au_privilege_grant
+            where grant_type in ('AVAILABLE_USE', 'FORCE_USE')
+              and grant_obj_type in ('KG_DOC', 'KG_QA', 'KG_TERM')
+              and status_cd = 'A'
+            <trim prefix="and (" suffix=")" prefixOverrides="or">
+                <if test="userOrgIds != null and userOrgIds.size() > 0">
+                    or (
+                        grant_to_obj_type = 'ORG'
+                        and grant_to_obj_id in
+                        <foreach collection="userOrgIds" item="orgId" open="(" separator="," close=")">
+                            #{orgId}
+                        </foreach>
+                    )
+                </if>
+                <if test="userId != null">
+                    or (
+                        grant_to_obj_type = 'USER'
+                        and grant_to_obj_id = #{userId}
+                    )
+                </if>
+                <if test="userPositionIds != null and userPositionIds.size() > 0">
+                    or (
+                        grant_to_obj_type = 'POST'
+                        and grant_to_obj_id in
+                        <foreach collection="userPositionIds" item="positionId" open="(" separator="," close=")">
+                            #{positionId}
+                        </foreach>
+                    )
+                </if>
+                <if test="userStationId != null">
+                    or (
+                        grant_to_obj_type = 'STATION'
+                        and grant_to_obj_id = #{userStationId}
+                    )
+                </if>
+            </trim>
+            group by grant_obj_id
+        ) k on a.resource_id = k.grant_obj_id
+        <where>
+            <!-- 基础过滤条件 -->
+            a.resource_status = 2
+            and a.resource_biz_type in ('KG_DOC', 'KG_QA', 'KG_TERM')
+            <!-- 黑名单排除：不能有黑名单记录 -->
+            and (k.black_count = 0 or k.black_count is null)
+            <!-- 授权给我的 -->
+            <if test="userId != null">
+                and (k.red_count > 0 and a.create_by != #{userId})
+            </if>
+            <!-- 关键字搜索 -->
+            <if test="keyword != null and keyword != ''">
+                and a.resource_name like concat('%', #{keyword}, '%')
+            </if>
+        </where>
+        order by a.create_time desc, a.update_time desc
+    </select>
+
+</mapper>

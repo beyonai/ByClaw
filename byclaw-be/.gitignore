@@ -1,0 +1,9 @@
+.idea/*
+**/target/**
+logs/*
+*.iml
+Temp/*
+vscode/*
+*.class
+*.DS_Store
+.env

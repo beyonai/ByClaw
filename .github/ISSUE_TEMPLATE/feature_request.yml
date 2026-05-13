@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest an idea or improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. If multiple modules are involved, describe boundaries and deliverables.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Primary area
+      options:
+        - byclaw-fe
+        - byclaw-be
+        - byclaw-exe
+        - byclaw-data
+        - byclaw-qa
+        - cross-cutting / docs / infra
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution (optional)
+      description: Desired behavior, API shape, or references
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to open a PR (full or partial)
+          required: false

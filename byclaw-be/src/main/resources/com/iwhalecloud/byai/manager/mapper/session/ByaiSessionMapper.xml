@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.session.ByaiSession">
+        <id column="session_id" property="sessionId" />
+        <result column="parent_session_id" property="parentSessionId" />
+        <result column="session_name" property="sessionName" />
+        <result column="session_content" property="sessionContent" />
+        <result column="session_type" property="sessionType" />
+        <result column="create_time" property="createTime" />
+        <result column="creator_id" property="creatorId" />
+        <result column="object_type" property="objectType" />
+        <result column="object_id" property="objectId" />
+        <result column="enterprise_id" property="enterpriseId" />
+        <result column="update_by" property="updateBy" />
+        <result column="update_time" property="updateTime" />
+        <result column="state" property="state" />
+    </resultMap>
+
+    <!-- 模板会话查询结果映射 -->
+    <resultMap id="TemplateSessionQueryResultMap" type="com.iwhalecloud.byai.manager.dto.session.TemplateSessionQueryResponseDto">
+        <id column="session_id" property="sessionId" />
+        <result column="session_name" property="sessionName" />
+        <result column="creator_id" property="creatorId" />
+        <result column="enterprise_id" property="enterpriseId" />
+        <result column="create_time" property="createTime" />
+        <result column="update_time" property="updateTime" />
+        <result column="is_template" property="isTemplate" />
+    </resultMap>
+
+    <!-- 通用查询列 -->
+    <sql id="Base_Column_List">
+        session_id, parent_session_id, session_name, session_content, session_type,
+        create_time, creator_id, object_type, object_id, enterprise_id,
+        update_by, update_time, state
+    </sql>
+
+    <!-- 会话查询结果映射（含头像、扩展属性一对多） -->
+    <resultMap id="ByaiSessionDtoResultMap" type="com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto" extends="BaseResultMap">
+        <result column="avatar" property="avatar" />
+        <collection property="sessionExts"
+                    ofType="com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt"
+                    select="com.iwhalecloud.byai.manager.mapper.session.ByaiSessionExtMapper.selectBySessionId"
+                    column="session_id" />
+    </resultMap>
+
+    <resultMap id="RecentlySearchAskVoResultMap" type="com.iwhalecloud.byai.manager.vo.searchask.RecentlySearchAskVo" extends="BaseResultMap">
+    </resultMap>
+
+    <!-- 查询会话列表 -->
+    <select id="qryConversations" resultMap="ByaiSessionDtoResultMap">
+        SELECT a.session_id,
+               a.parent_session_id,
+               a.session_name,
+               a.session_content,
+               a.session_type,
+               a.create_time,
+               a.creator_id,
+               a.object_type,
+               a.object_id,
+               a.enterprise_id,
+               a.update_by,
+               a.update_time,
+               a.state,
+               b.avatar
+        FROM byai_session a
+        LEFT JOIN ss_resource b ON a.object_id = b.resource_id
+        <where>
+            <if test="creatorId != null">
+                AND a.creator_id = #{creatorId}
+            </if>
+            <if test="enterpriseId != null">
+                AND a.enterprise_id = #{enterpriseId}
+            </if>
+            <if test="objectType != null and objectType != ''">
+                AND a.object_type = #{objectType}
+            </if>
+            <if test="objectId != null">
+                AND a.object_id = #{objectId}
+            </if>
+            <if test="isDebug != null">
+                AND a.is_debug = #{isDebug}
+            </if>
+            <if test="sessionType != null and sessionType.size() > 0">
+                AND a.session_type IN
+                <foreach collection="sessionType" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="searchKeyword != null and searchKeyword != ''">
+                AND (a.session_name LIKE CONCAT('%', #{searchKeyword}, '%')
+                     OR a.session_content LIKE CONCAT('%', #{searchKeyword}, '%'))
+            </if>
+        </where>
+        ORDER BY a.create_time DESC
+    </select>
+
+    <!-- 查询模板会话列表 -->
+    <select id="queryTemplateSessions" resultMap="TemplateSessionQueryResultMap">
+        SELECT s.session_id,
+               s.parent_session_id,
+               s.session_name,
+               s.session_content,
+               s.session_type,
+               s.create_time,
+               s.creator_id,
+               s.object_type,
+               s.object_id,
+               s.enterprise_id,
+               CASE WHEN s.is_debug = 2 THEN 1 ELSE 0 END AS is_template,
+               s.update_by,
+               s.update_time,
+               s.state
+        FROM byai_session s
+        <where>
+            AND s.is_debug = #{isDebug}
+            AND (s.state IS NULL OR s.state != 'DELETED')
+            <if test="templateTypes != null and templateTypes.trim() != ''">
+                AND EXISTS (
+                    SELECT 1
+                    FROM byai_session_ext b
+                    WHERE b.session_id = s.session_id
+                      AND b.ext_param_code = 'template_type'
+                      AND b.ext_param_value IN
+                    <foreach collection="templateTypes.split(',')" item="templateType" open="(" separator="," close=")">
+                        #{templateType}
+                    </foreach>
+                )
+            </if>
+            <if test="terminals != null and terminals.size() > 0">
+                AND EXISTS (
+                    SELECT 1
+                    FROM byai_session_ext c
+                    WHERE c.session_id = s.session_id
+                      AND c.ext_param_code = 'terminal'
+                      AND c.ext_param_value IN
+                    <foreach collection="terminals" item="terminal" open="(" separator="," close=")">
+                        #{terminal}
+                    </foreach>
+                )
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND s.session_name LIKE #{keyword}
+            </if>
+            <if test="creatorId != null">
+                AND s.creator_id = #{creatorId}
+            </if>
+            <if test="enterpriseId != null">
+                AND s.enterprise_id = #{enterpriseId}
+            </if>
+        </where>
+        ORDER BY
+        <choose>
+            <when test="sortField == 'updateTime'">s.update_time</when>
+            <when test="sortField == 'sessionName'">s.session_name</when>
+            <otherwise>s.create_time</otherwise>
+        </choose>
+        <choose>
+            <when test="sortOrder == 'asc'">ASC</when>
+            <otherwise>DESC</otherwise>
+        </choose>
+    </select>
+
+    <select id="queryRecentlySearchAsk" resultMap="RecentlySearchAskVoResultMap">
+        SELECT a.session_id,
+               a.parent_session_id,
+               a.session_name,
+               a.create_time,
+               a.creator_id,
+               a.object_type,
+               a.object_id,
+               a.session_content,
+               a.session_type
+        FROM byai_session a
+        <where>
+            <if test="creatorId != null">
+                AND a.creator_id = #{creatorId}
+            </if>
+            <if test="sessionType != null">
+                AND a.session_type = #{sessionType}
+            </if>
+            <if test="objectType != null and objectType != ''">
+                AND a.object_type = #{objectType}
+            </if>
+            <if test="objectId != null">
+                AND a.object_id = #{objectId}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND (a.session_name LIKE CONCAT('%', #{keyword}, '%')
+                     OR a.session_content LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+            order by a.create_time desc,a.update_time desc
+        </where>
+    </select>
+
+</mapper>

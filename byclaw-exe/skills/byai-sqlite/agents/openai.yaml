@@ -1,0 +1,4 @@
+interface:
+  display_name: "ByAI SQLite"
+  short_description: "Operate local SQLite database files directly from a standard skill."
+  default_prompt: "Use the byai-sqlite skill to inspect, query, and safely modify a local SQLite database file through the bundled local execution script."

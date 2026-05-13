@@ -1,0 +1,414 @@
+.settingsRoot {
+  display: flex;
+  justify-content: center;
+
+  .settingsContainer {
+    width: 800px;
+    background: #fff;
+    //max-width: 900px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    .settingsTitle {
+      display: flex;
+      gap: 20px;
+      margin: 34px 0 20px;
+      flex-shrink: 0;
+      h1 {
+        font-size: 18px;
+        cursor: pointer;
+      }
+      .activeTitle {
+        border-bottom: 2px solid #000;
+      }
+    }
+    .memoryTabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 20px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .memoryTab {
+      padding: 12px 24px;
+      font-size: 16px;
+      cursor: pointer;
+      color: #8c8c8c;
+      border-bottom: 2px solid transparent;
+      transition: all 0.3s;
+      &:hover {
+        color: #262626;
+      }
+      &.activeMemoryTab {
+        color: #262626;
+        border-bottom-color: #165dff;
+        font-weight: 500;
+      }
+    }
+    .memoryContent {
+      width: 100%;
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding-right: 10px;
+      margin-right: -10px;
+      &::-webkit-scrollbar {
+        width: 6px;
+      }
+      &::-webkit-scrollbar-thumb {
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 3px;
+        &:hover {
+          background: rgba(0, 0, 0, 0.3);
+        }
+      }
+      &::-webkit-scrollbar-track {
+        background: transparent;
+      }
+    }
+    .settingsContent {
+      display: flex;
+      gap: 16px;
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding-right: 10px;
+      margin-right: -10px;
+      &::-webkit-scrollbar {
+        width: 6px;
+      }
+      &::-webkit-scrollbar-thumb {
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 3px;
+        &:hover {
+          background: rgba(0, 0, 0, 0.3);
+        }
+      }
+      &::-webkit-scrollbar-track {
+        background: transparent;
+      }
+    }
+    .infoCard {
+      position: relative;
+      flex: 1;
+    }
+    .infoGrid {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-top: 10px;
+    }
+    .infoTag {
+      position: absolute;
+      right: 0;
+      top: 0;
+      background: #f2f6fa;
+      padding: 4px 24px;
+      border-radius: 0 12px 0 12px;
+    }
+    .infoHeader {
+      display: flex;
+      align-items: flex-start;
+      .avatarStyle {
+        border-radius: 8px;
+        display: inline-block;
+        margin-right: 15px;
+        overflow: hidden;
+        flex-shrink: 0;
+
+        width: 44px;
+        height: 44px;
+        color: #fff;
+        line-height: 44px;
+        text-align: center;
+        font-size: 16px;
+        background: var(~'--@{antPrefix}-color-primary-hover', #4080ff);
+      }
+      .infoHeaderName {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        .nameText {
+          font-size: 16px;
+          font-weight: bold;
+        }
+      }
+      .subtext {
+        font-size: 13px;
+        margin-top: 4px;
+      }
+    }
+    .infoRow {
+      display: flex;
+      align-items: flex-start;
+    }
+    .infoLabel {
+      width: 100px;
+      flex-shrink: 0;
+      color: #707680;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .infoValue {
+      flex: 1;
+      color: #262626;
+      font-size: 14px;
+    }
+
+    .saveButton {
+      position: absolute;
+      right: 24px;
+      bottom: 24px;
+    }
+
+    .saveBth {
+      position: absolute;
+      right: 24px;
+      bottom: 0px;
+      margin-bottom: 24px;
+    }
+
+    .labelExtra {
+      margin-left: 8px;
+      color: #8c8c8c;
+      font-size: 12px;
+    }
+    .official {
+      display: flex;
+      align-items: center;
+      background-color: #504bff1a;
+      padding: 0 4px;
+      border-radius: 4px;
+      font-weight: normal;
+      margin-left: 6px;
+      > span {
+        background-clip: text;
+        font-size: 11px;
+        line-height: 18px;
+        background: linear-gradient(90deg, #3150ff 0%, #c067ff 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+    }
+
+    .aiMark {
+      height: 18px;
+      line-height: 18px;
+      display: inline-block;
+      padding: 0 4px;
+      font-size: 12px;
+      border-radius: 4px;
+      background: #504bff1a;
+      color: #504bff;
+      font-weight: 500;
+      margin-left: 6px;
+      vertical-align: text-bottom;
+      font-weight: normal;
+      & > span {
+        background: linear-gradient(0deg, #52acff 0%, #725cfa 100%);
+        background-clip: text;
+      }
+    }
+    // :global{
+    //     .@{antPrefix}-collapse-header{
+    //         padding: 0;
+    //     }
+    //     .@{antPrefix}-collapse-content-box{
+    //         padding: 16px 0;
+    //     }
+    //   }
+    .abilitiesList {
+      display: flex;
+      gap: 16px;
+
+      .abilityItem {
+        font-size: 12px;
+        color: #707680;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        .abilityIcon {
+          width: 45px;
+          height: 45px;
+          background: #f5f5ff;
+          border-radius: 12px;
+          text-align: center;
+          line-height: 45px;
+          position: relative;
+          color: #c067ff;
+        }
+      }
+    }
+  }
+}
+
+.avatarMenu {
+  width: 240px;
+  border-radius: 12px;
+  background-color: #fff;
+  box-shadow: 0 4px 16px -8px #00000014, 0 8px 24px 0 #0000000d, 0 12px 48px 16px #00000008;
+
+  .menuHead {
+    position: relative;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    flex-direction: row;
+    padding: 10px 16px;
+
+    .menuTitle {
+      color: #000000;
+      font-size: 16px;
+      font-weight: 500;
+      line-height: 24px;
+      flex: 1 1 0%;
+      min-width: 0;
+    }
+
+    .menuClose {
+      position: absolute;
+      z-index: 1;
+      color: #a4aab2;
+      cursor: pointer;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      right: 8px;
+    }
+  }
+
+  .menuBody {
+    gap: 16px;
+    padding: 8px 16px;
+    display: grid;
+    overflow: auto;
+    max-height: 240px;
+    grid-template-columns: repeat(auto-fill, 40px);
+
+    align-items: start;
+    justify-content: start;
+    border-bottom: 1px solid #0000000f;
+
+    .avatarItem {
+      position: relative;
+      margin: 0;
+      line-height: 0;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      overflow: hidden;
+
+      &::after {
+        position: absolute;
+        z-index: 1;
+        inset: 0;
+        border-radius: 50%;
+        border: 4px solid #ffffffe7;
+        border-bottom-color: #165dffcc;
+      }
+
+      &.loadingimage {
+        cursor: not-allowed;
+
+        &::after {
+          content: '';
+          animation: rotation 2s linear infinite;
+        }
+      }
+
+      img {
+        width: 100%;
+        object-fit: cover;
+      }
+    }
+  }
+
+  .menuFoot {
+    :global {
+      .@{antPrefix}-dropdown-menu {
+        border-radius: none;
+        box-shadow: none;
+        background-color: transparent;
+
+        .@{antPrefix}-dropdown-menu-title-content {
+          font-size: 14px;
+          font-weight: 500;
+          line-height: 22px;
+        }
+      }
+    }
+  }
+}
+.currentAvatar {
+  margin: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 48px;
+  overflow: hidden;
+  margin-right: 15px;
+}
+.avatarOut {
+  position: relative;
+  .addAvatar {
+    position: absolute;
+    right: 15px;
+    bottom: 0;
+    width: 15px;
+    height: 15px;
+    text-align: center;
+    line-height: 12px;
+    color: #fff;
+    background-color: #165dff;
+    border-radius: 15px;
+    border: 0.67px solid #f5f6fa;
+  }
+}
+// 知识库选项样式
+.knowledgeOption {
+  padding: 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  .knowledgeIcon {
+    color: #165dff;
+    font-size: 16px;
+  }
+
+  .knowledgeType {
+    background: rgba(0, 0, 0, 0.06);
+    color: #707680;
+    padding: 1px 3px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .owner {
+    background: rgba(22, 93, 255, 0.1);
+    color: #165dff;
+  }
+
+  .knowledgeName {
+    color: #262626;
+    font-size: 14px;
+  }
+
+  .knowledgeDesc {
+    color: #8c8c8c;
+    font-size: 12px;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 200px;
+  }
+}
+
+.dropdownSearch {
+  padding: 8px 12px;
+}
+
+::-webkit-scrollbar {
+  width: 0 !important;
+}

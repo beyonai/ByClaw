@@ -1,0 +1,136 @@
+.fileItem {
+  width: 220px;
+  height: 54px;
+  padding: 8px;
+  border-radius: 12px;
+  background-color: rgba(0, 0, 0, 0.04);
+  position: relative;
+
+  .fileItemIcon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    font-size: 28px;
+    height: 100%;
+    max-width: 32px;
+    // width: 32px;
+    aspect-ratio: 1 / 1;
+  }
+
+  .fileItemLoading {
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 1;
+    background-color: rgba(0, 0, 0, 0.1);
+    height: 100%;
+    width: 100%;
+  }
+
+  .actionList {
+    position: absolute;
+    right: 0;
+    top: 0;
+    z-index: 2;
+    padding: 12px;
+    background-color: rgba(0, 0, 0, 0.2);
+    display: none;
+
+    .fileItemDownload {
+      background-color: #fff;
+      padding: 6px;
+      height: 32px;
+      width: 32px;
+      border-radius: 50%;
+      &:hover {
+        color: #000;
+      }
+    }
+  }
+
+  .fileItemInfo {
+    margin: 0 6px;
+
+    .fileItemName {
+      font-size: var(--beyond-font-size);
+      color: var(--beyond-color-text-secondary);
+      font-weight: bold;
+      // margin-bottom: 4px;
+    }
+
+    .fileItemMore {
+      font-size: var(--beyond-font-size-sm);
+      color: var(--beyond-color-text-quaternary);
+    }
+  }
+
+  &:hover {
+    .actionList {
+      display: flex;
+    }
+  }
+}
+
+.useTypeOutline {
+  padding: 3px 4px;
+  background-color: #f5e8ff;
+  border-radius: 4px;
+  color: #8d4eda;
+  font-family: PingFang SC;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 500;
+  line-height: 13px;
+}
+
+.useTypeContent {
+  padding: 3px 4px;
+  background-color: #e8fffb;
+  border-radius: 4px;
+  color: #0da5aa;
+  font-family: PingFang SC;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 500;
+  line-height: 13px;
+}
+
+.preview {
+  height: 100%;
+  position: relative;
+  line-height: 1;
+}
+
+// .fullscreen {
+//   position: fixed;
+//   inset: 0;
+//   background-color: rgba(0, 0, 0, 0.3);
+//   z-index: 1000;
+//   padding: 52px 12px 12px 58px;
+//   overflow: hidden;
+//   display: flex;
+//   flex-direction: column;
+//   transition: all 0.3s ease-in-out;
+
+//   .twins {
+//     transform: translateY(0%);
+//     transition: all 0.3s ease-in-out;
+//   }
+// }
+
+// .none {
+//   position: fixed;
+//   inset: 0;
+//   padding: 52px 12px 12px 58px;
+//   overflow: hidden;
+//   display: flex;
+//   flex-direction: column;
+//   background-color: rgba(0, 0, 0, 0);
+//   transition: all 0.3s ease-in-out;
+
+//   .twins {
+//     transform: translateY(110%);
+//     transition: all 0.3s ease-in-out;
+//   }
+// }

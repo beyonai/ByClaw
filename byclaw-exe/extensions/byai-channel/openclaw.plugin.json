@@ -1,0 +1,28 @@
+{
+  "id": "byai-channel",
+  "channels": ["byai-channel"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "enabled": { "type": "boolean" },
+      "sessionKeyPerSessionId": { "type": "boolean" },
+      "webhookPath": { "type": "string" },
+      "streamEnabled": { "type": "boolean", "description": "Enable streaming output" },
+      "streamMode": { "type": "string", "enum": ["delta", "final"] },
+      "forceReasoningStream": {
+        "type": "boolean",
+        "description": "Force reasoningLevel=stream for inbound SDK sessions before dispatch"
+      },
+      "dmPolicy": { "type": "string", "enum": ["open", "allowlist", "pairing"] },
+      "allowFrom": { "type": "array", "items": { "type": "string" } },
+      "defaultTo": { "type": "string" },
+      "sdk": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

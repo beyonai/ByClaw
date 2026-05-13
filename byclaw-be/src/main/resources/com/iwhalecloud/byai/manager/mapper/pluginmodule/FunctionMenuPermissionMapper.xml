@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.pluginmodule.FunctionMenuPermissionMapper">
+
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.pluginmodule.FunctionMenuPermission">
+        <id column="id" property="id"/>
+        <result column="employee_id" property="employeeId"/>
+        <result column="menu_code" property="menuCode"/>
+        <result column="menu_name" property="menuName"/>
+        <result column="permission_type" property="permissionType"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <insert id="batchInsert" parameterType="java.util.List">
+        INSERT INTO function_menu_permission (employee_id, menu_code, menu_name, permission_type, create_time, update_time)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.employeeId}, #{item.menuCode}, #{item.menuName}, #{item.permissionType}, #{item.createTime}, #{item.updateTime})
+        </foreach>
+    </insert>
+
+    <select id="selectByEmployeeId" resultMap="BaseResultMap">
+        SELECT id, employee_id, menu_code, menu_name, permission_type, create_time, update_time
+        FROM function_menu_permission
+        WHERE employee_id = #{employeeId}
+    </select>
+
+</mapper>

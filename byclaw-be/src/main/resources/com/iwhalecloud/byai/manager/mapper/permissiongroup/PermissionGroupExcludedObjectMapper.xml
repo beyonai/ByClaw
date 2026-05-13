@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.permissiongroup.PermissionGroupExcludedObjectMapper">
+
+    <!-- 权限组排除对象结果映射 -->
+    <resultMap id="PermissionGroupExcludedObjectResultMap" type="com.iwhalecloud.byai.manager.entity.permissiongroup.PermissionGroupExcludedObject">
+        <id column="id" property="id"/>
+        <result column="permission_group_id" property="permissionGroupId"/>
+        <result column="excluded_object_id" property="excludedObjectId"/>
+        <result column="object_type" property="objectType"/>
+        <result column="effective_at" property="effectiveAt"/>
+        <result column="expires_at" property="expiresAt"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <!-- 排除对象VO结果映射 -->
+    <resultMap id="ExcludedObjectVOResultMap" type="com.iwhalecloud.byai.manager.vo.permissiongroup.AuthorizedObjectVO">
+        <result column="id" property="id"/>
+        <result column="excluded_object_id" property="authorizedObjectId"/>
+        <result column="object_type" property="objectType"/>
+        <result column="object_type_name" property="objectTypeName"/>
+        <result column="object_id" property="objectId"/>
+        <result column="object_name" property="objectName"/>
+        <result column="effective_at" property="effectiveAt"/>
+        <result column="expires_at" property="expiresAt"/>
+        <result column="create_time" property="createTime"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_by_name" property="createByName"/>
+    </resultMap>
+
+    <!-- 通用查询列 -->
+    <sql id="Base_Column_List">
+        pgeo.id, pgeo.permission_group_id, pgeo.excluded_object_id, pgeo.object_type,
+        pgeo.effective_at, pgeo.expires_at, pgeo.create_by, pgeo.create_time,
+        pgeo.update_by, pgeo.update_time
+    </sql>
+
+    <!-- 分页查询排除对象列表 -->
+    <select id="selectExcludedObjectPage" resultMap="ExcludedObjectVOResultMap">
+        SELECT
+            pgeo.id,
+            pgeo.excluded_object_id,
+            pgeo.object_type,
+            CASE pgeo.object_type
+                WHEN 'user' THEN '用户'
+                WHEN 'org' THEN '组织'
+                WHEN 'station' THEN '驻地'
+                WHEN 'position' THEN '岗位'
+                ELSE pgeo.object_type
+            END AS object_type_name,
+            pgeo.excluded_object_id AS object_id,
+            CASE pgeo.object_type
+                WHEN 'user' THEN (SELECT u.user_name FROM po_users u WHERE u.user_id = pgeo.excluded_object_id)
+                WHEN 'org' THEN (SELECT o.org_name FROM po_organization o WHERE o.org_id = pgeo.excluded_object_id)
+                ELSE NULL
+            END AS object_name,
+            pgeo.effective_at,
+            pgeo.expires_at,
+            pgeo.create_time,
+            pgeo.create_by,
+            u.user_name AS create_by_name
+        FROM permission_group_excluded_objects pgeo
+        LEFT JOIN po_users u ON pgeo.create_by = u.user_id
+        <where>
+            pgeo.permission_group_id = #{query.permissionGroupId}
+            <if test="query.objectType != null and query.objectType != ''">
+                AND pgeo.object_type = #{query.objectType}
+            </if>
+            <if test="query.objectName != null and query.objectName != ''">
+                AND (
+                    (pgeo.object_type = 'user' AND EXISTS (
+                        SELECT 1 FROM po_users us WHERE us.user_id = pgeo.excluded_object_id
+                        AND us.user_name LIKE CONCAT('%', #{query.objectName}, '%')
+                    ))
+                    OR (pgeo.object_type = 'org' AND EXISTS (
+                        SELECT 1 FROM po_organization os WHERE os.org_id = pgeo.excluded_object_id
+                        AND os.org_name LIKE CONCAT('%', #{query.objectName}, '%')
+                    ))
+                )
+            </if>
+        </where>
+        ORDER BY pgeo.create_time DESC
+    </select>
+
+    <!-- 根据权限组ID查询排除对象列表（不分页） -->
+    <select id="selectByPermissionGroupId" resultMap="ExcludedObjectVOResultMap">
+        SELECT
+            pgeo.id,
+            pgeo.excluded_object_id,
+            pgeo.object_type,
+            CASE pgeo.object_type
+                WHEN 'user' THEN '用户'
+                WHEN 'org' THEN '组织'
+                WHEN 'station' THEN '驻地'
+                WHEN 'position' THEN '岗位'
+                ELSE pgeo.object_type
+            END AS object_type_name,
+            pgeo.excluded_object_id AS object_id,
+            CASE pgeo.object_type
+                WHEN 'user' THEN (SELECT u.user_name FROM po_users u WHERE u.user_id = pgeo.excluded_object_id)
+                WHEN 'org' THEN (SELECT o.org_name FROM po_organization o WHERE o.org_id = pgeo.excluded_object_id)
+                ELSE NULL
+            END AS object_name,
+            pgeo.effective_at,
+            pgeo.expires_at,
+            pgeo.create_time,
+            pgeo.create_by
+        FROM permission_group_excluded_objects pgeo
+        WHERE pgeo.permission_group_id = #{permissionGroupId}
+        ORDER BY pgeo.create_time DESC
+    </select>
+
+    <!-- 根据权限组ID删除排除对象关联 -->
+    <delete id="deleteByPermissionGroupId">
+        DELETE FROM permission_group_excluded_objects
+        WHERE permission_group_id = #{permissionGroupId}
+    </delete>
+
+    <!-- 批量插入排除对象关联 -->
+    <insert id="batchInsert">
+        INSERT INTO permission_group_excluded_objects
+        (id, permission_group_id, excluded_object_id, object_type, effective_at, expires_at, create_by, create_time)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.id}, #{item.permissionGroupId}, #{item.excludedObjectId}, #{item.objectType},
+             #{item.effectiveAt}, #{item.expiresAt}, #{item.createBy}, #{item.createTime})
+        </foreach>
+    </insert>
+
+    <!-- 查询排除对象数量 -->
+    <select id="countByPermissionGroupId" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM permission_group_excluded_objects
+        WHERE permission_group_id = #{permissionGroupId}
+    </select>
+
+    <!-- 检查排除对象是否已存在 -->
+    <select id="countByObject" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM permission_group_excluded_objects
+        WHERE permission_group_id = #{permissionGroupId}
+        AND object_type = #{objectType}
+        AND excluded_object_id = #{excludedObjectId}
+    </select>
+
+    <!-- 批量删除排除对象关联 -->
+    <delete id="batchDeleteByIds">
+        DELETE FROM permission_group_excluded_objects
+        WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <!-- 根据权限组ID和对象类型查询排除的用户ID列表 -->
+    <select id="selectExcludedUserIdsByPermissionGroupId" resultType="java.lang.Long">
+        SELECT pgeo.excluded_object_id
+        FROM permission_group_excluded_objects pgeo
+        WHERE pgeo.permission_group_id = #{permissionGroupId}
+        AND pgeo.object_type = #{objectType}
+    </select>
+
+    <!-- 根据权限组ID和对象类型查询排除的组织ID列表 -->
+    <select id="selectExcludedOrgIdsByPermissionGroupId" resultType="java.lang.Long">
+        SELECT pgeo.excluded_object_id
+        FROM permission_group_excluded_objects pgeo
+        WHERE pgeo.permission_group_id = #{permissionGroupId}
+        AND pgeo.object_type = #{objectType}
+    </select>
+
+    <!-- 根据权限组ID和对象类型查询排除的岗位ID列表 -->
+    <select id="selectExcludedPositionIdsByPermissionGroupId" resultType="java.lang.Long">
+        SELECT pgeo.excluded_object_id
+        FROM permission_group_excluded_objects pgeo
+        WHERE pgeo.permission_group_id = #{permissionGroupId}
+        AND pgeo.object_type = #{objectType}
+    </select>
+
+    <!-- 根据权限组ID和对象类型查询排除对象列表 -->
+    <select id="selectByPermissionGroupIdAndObjectType" resultMap="PermissionGroupExcludedObjectResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM permission_group_excluded_objects pgeo
+        WHERE permission_group_id = #{permissionGroupId}
+        AND object_type = #{objectType}
+        ORDER BY create_time DESC
+    </select>
+
+</mapper>

@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a reproducible defect
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please search existing issues first to avoid duplicates.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - byclaw-fe
+        - byclaw-be
+        - byclaw-exe
+        - byclaw-data
+        - byclaw-qa
+        - other / unsure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or branch
+      description: Commit, tag, or release identifier
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps from a clean setup
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, browser, JDK/Node/Python versions, etc., if relevant

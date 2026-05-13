@@ -1,0 +1,36 @@
+{
+  "systemCode": "BYAI",
+  "resourceCode": "demo_toolkit_001",
+  "resourceName": "示例工具集",
+  "resourceDesc": "用于导入的工具集模板，请按实际工具信息修改。",
+  "resourceBizType": "TOOLKIT",
+  "version": "1.0.0",
+  "implType": "API",
+  "domainName": "示例工具服务",
+  "domainURL": "https://api.example.com",
+  "resourceService": [
+    {
+      "serviceCode": "query_demo",
+      "serviceName": "示例查询",
+      "serviceDesc": "示例 GET 接口",
+      "method": "GET",
+      "path": "/v1/demo/query",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer ${token}",
+          "required": false
+        }
+      ],
+      "queryParams": [
+        {
+          "name": "keyword",
+          "type": "string",
+          "required": true,
+          "description": "查询关键词"
+        }
+      ],
+      "bodyParams": []
+    }
+  ]
+}

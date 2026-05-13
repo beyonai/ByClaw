@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.permissiongroup.PermissionGroupResourceMapper">
+
+    <!-- 权限组资源结果映射 -->
+    <resultMap id="PermissionGroupResourceResultMap" type="com.iwhalecloud.byai.manager.entity.permissiongroup.PermissionGroupResource">
+        <id column="id" property="id"/>
+        <result column="permission_group_id" property="permissionGroupId"/>
+        <result column="resource_id" property="resourceId"/>
+        <result column="resource_type" property="resourceType"/>
+        <result column="permission_type" property="permissionType"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <!-- 权限资源VO结果映射 -->
+    <resultMap id="PermissionResourceVOResultMap" type="com.iwhalecloud.byai.manager.vo.permissiongroup.PermissionResourceVO">
+        <result column="resource_id" property="resourceId"/>
+        <result column="resource_code" property="resourceCode"/>
+        <result column="resource_name" property="resourceName"/>
+        <result column="resource_type" property="resourceType"/>
+        <result column="parent_id" property="parentId"/>
+        <!-- 注意：permissionTypes 是 List<String> 类型，需要在 SQL 查询中使用聚合函数（如 GROUP_CONCAT、STRING_AGG 等）来生成列表 -->
+        <!-- 如果直接映射单个 permission_type 字段，会导致类型转换错误 -->
+    </resultMap>
+
+    <!-- 通用查询列 -->
+    <sql id="Base_Column_List">
+        pgr.id, pgr.permission_group_id, pgr.resource_id, pgr.resource_type,
+        pgr.permission_type, pgr.create_by, pgr.create_time, pgr.update_by, pgr.update_time
+    </sql>
+
+    <!-- 根据权限组ID查询资源权限列表 -->
+    <select id="selectByPermissionGroupId" resultType="com.iwhalecloud.byai.manager.vo.permissiongroup.PermissionResourceVO">
+        SELECT
+            pgr.resource_id AS resourceId,
+            pgr.resource_type AS resourceType,
+            pgr.permission_type AS permissionType
+        FROM permission_group_resources pgr
+        WHERE pgr.permission_group_id = #{permissionGroupId}
+        ORDER BY pgr.resource_id
+    </select>
+
+    <!-- 根据权限组ID删除资源权限 -->
+    <delete id="deleteByPermissionGroupId">
+        DELETE FROM permission_group_resources
+        WHERE permission_group_id = #{permissionGroupId}
+    </delete>
+
+    <!-- 根据权限组ID和资源ID删除资源权限 -->
+    <delete id="deleteByPermissionGroupIdAndResourceId">
+        DELETE FROM permission_group_resources
+        WHERE permission_group_id = #{permissionGroupId}
+          AND resource_id = #{resourceId}
+    </delete>
+
+    <!-- 批量插入资源权限 -->
+    <insert id="batchInsert">
+        INSERT INTO permission_group_resources
+        (id, permission_group_id, resource_id, resource_type, permission_type, create_by, create_time)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.id}, #{item.permissionGroupId}, #{item.resourceId}, #{item.resourceType},
+            #{item.permissionType}, #{item.createBy}, #{item.createTime})
+        </foreach>
+    </insert>
+
+    <!-- 分页查询权限组授权资源列表 -->
+    <select id="selectResourcePermissionPage" resultType="com.iwhalecloud.byai.manager.vo.permissiongroup.PermissionResourceVO">
+        SELECT
+        pgr.resource_id AS resourceId,
+        r.resource_code AS resourceCode,
+        r.resource_name AS resourceName,
+        r.resource_desc AS resourceDesc,
+        r.resource_biz_type AS resourceType,
+        r.parent_resource_id AS parentId,
+        pgr.permission_type AS permissionType,
+        pgr.create_by AS createBy,
+        u.user_name AS createByName,
+        pgr.create_time AS createTime,
+        pgr.update_by AS updateBy,
+        u2.user_name AS updateByName,
+        pgr.update_time AS updateTime
+        FROM permission_group_resources pgr
+        LEFT JOIN ss_resource r ON pgr.resource_id = r.resource_id
+        LEFT JOIN po_users u ON pgr.create_by = u.user_id
+        LEFT JOIN po_users u2 ON pgr.update_by = u2.user_id
+        WHERE pgr.permission_group_id = #{queryQO.permissionGroupId}
+        and pgr.resource_type is null
+        <if test="queryQO.resourceType != null and queryQO.resourceType != ''">
+            AND pgr.resource_type = #{queryQO.resourceType}
+        </if>
+        <if test="queryQO.resourceName != null and queryQO.resourceName != ''">
+            AND r.resource_name LIKE CONCAT('%', #{queryQO.resourceName}, '%')
+        </if>
+        <if test="queryQO.permissionType != null and queryQO.permissionType != ''">
+            AND pgr.permission_type = #{queryQO.permissionType}
+        </if>
+        ORDER BY pgr.resource_id, pgr.permission_type
+    </select>
+
+    <!-- 批量删除资源权限（根据ID列表） -->
+    <delete id="batchDeleteByIds">
+        DELETE FROM permission_group_resources
+        WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <!-- 根据权限组ID和资源ID列表批量删除资源权限 -->
+    <delete id="batchDeleteByPermissionGroupIdAndResourceIds">
+        DELETE FROM permission_group_resources
+        WHERE permission_group_id = #{permissionGroupId}
+        AND resource_id IN
+        <foreach collection="resourceIds" item="resourceId" open="(" separator="," close=")">
+            #{resourceId}
+        </foreach>
+    </delete>
+
+    <!-- 根据资源ID查询关联的权限组列表 -->
+    <select id="selectPermissionGroupsByResourceId" resultType="com.iwhalecloud.byai.manager.vo.permissiongroup.PermissionResourceVO">
+        SELECT
+            pg.id AS permissionGroupId,
+            pg.group_code AS groupCode,
+            pg.group_name AS groupName,
+            pg.description AS groupDesc,
+            pg.status AS status,
+            pgr.resource_id AS resourceId,
+            pgr.resource_type AS resourceType,
+            pgr.permission_type AS permissionType,
+            pgr.create_by AS createBy,
+            u.user_name AS createByName,
+            pgr.create_time AS createTime,
+            pgr.update_by AS updateBy,
+            u2.user_name AS updateByName,
+            pgr.update_time AS updateTime
+        FROM permission_group_resources pgr
+                 LEFT JOIN permission_groups pg ON pgr.permission_group_id = pg.id
+                 LEFT JOIN po_users u ON pgr.create_by = u.user_id
+                 LEFT JOIN po_users u2 ON pgr.update_by = u2.user_id
+        WHERE pgr.resource_id = #{resourceId}
+        ORDER BY pg.id
+    </select>
+
+    <!-- 根据资源ID删除所有关联的权限组 -->
+    <delete id="deleteByResourceId">
+        DELETE FROM permission_group_resources
+        WHERE resource_id = #{resourceId}
+    </delete>
+
+</mapper>
+

@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.SsResExtToolMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.resource.SsResExtTool">
+        <id column="resource_id" property="resourceId" />
+        <result column="path_schema" property="pathSchema" />
+        <result column="query_schema" property="querySchema" />
+        <result column="method" property="method" />
+        <result column="input_schema" property="inputSchema" />
+        <result column="output_schema" property="outputSchema" />
+        <result column="url" property="url" />
+        <result column="url_ori" property="urlOri" />
+        <result column="tool_add_type" property="toolAddType" />
+        <result column="source_content" property="sourceContent" />
+        <result column="target_content" property="targetContent" />
+    </resultMap>
+
+    <!-- 通用查询结果列 -->
+    <sql id="Base_Column_List">
+        resource_id, path_schema, query_schema, method, input_schema, output_schema, url, url_ori,
+        tool_add_type, source_content, target_content
+    </sql>
+    <select id="findWithHeaderByResourceIds"
+            resultType="com.iwhalecloud.byai.manager.dto.resource.SsResExtPluginToolDto">
+        select srept.resource_id as resourceId,
+               srept.input_schema as inputSchema,
+               srept.output_schema as outputSchema,
+               srept.url_ori as urlOri,
+               srept.method as method,
+               srept.path_schema as pathSchema,
+               srept.query_schema as querySchema,
+               srept.url,
+               srep.headers,
+               srep.resource_id as pluginResourceId
+        from ss_res_ext_tool srept
+            left join ss_resource_rel_detail srrd
+            on srept.resource_id=srrd.rel_resource_id
+            left join ss_res_ext_toolkit srep
+            on srrd.resource_id = srep.resource_id
+        where srept.resource_id in
+        <foreach collection="ids" open="(" close=")" item="item" separator=",">
+        #{item}
+        </foreach>
+    </select>
+
+    <resultMap id="resourceExtToolDtoResultMap"
+               type="com.iwhalecloud.byai.manager.dto.resource.ResourceExtToolDto"
+               extends="com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper.BaseResultMap">
+        <association property="ssResExtTool" javaType="com.iwhalecloud.byai.manager.entity.resource.SsResExtTool" resultMap="BaseResultMap" />
+    </resultMap>
+
+    <select id="findResourceExtToolByIds" resultMap="resourceExtToolDtoResultMap">
+        SELECT a.resource_id,
+               a.resource_code,
+               a.system_code,
+               a.resource_source_pk_id,
+               a.resource_biz_type,
+               a.resource_type,
+               a.resource_name,
+               a.resource_desc,
+               a.avatar,
+               a.sample,
+               a.tags,
+               a.resource_version_id,
+               a.host_type,
+               a.catalog_id,
+               a.man_org_id,
+               a.man_user_id,
+               a.index_list,
+               a.create_by,
+               a.create_time,
+               a.update_by,
+               a.update_time,
+               a.com_acct_id,
+               a.resource_status,
+               a.resource_d_verid,
+               a.resource_r_verid,
+               a.auth_status,
+               a.publish_time,
+               a.shelf_time,
+               a.unshelf_time,
+               a.publish_portal,
+               b.resource_id,
+               b.path_schema,
+               b.query_schema,
+               b.method,
+               b.input_schema,
+               b.output_schema,
+               b.url,
+               b.url_ori
+        FROM ss_resource a
+        LEFT JOIN ss_res_ext_tool b ON a.resource_id = b.resource_id
+        WHERE a.resource_biz_type = 'TOOL'
+        AND a.resource_id IN
+        <foreach collection="resourceIds" item="item" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+    </select>
+
+    <!-- 根据资源ID列表批量查询工具扩展数据（不JOIN，直接查扩展表） -->
+    <select id="selectListByResourceIds" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List" />
+        FROM ss_res_ext_tool
+        WHERE resource_id IN
+        <foreach collection="resourceIds" item="item" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+    </select>
+
+</mapper>

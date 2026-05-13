@@ -1,0 +1,85 @@
+@modalZIndex: 2000;
+
+.modal {
+  .leftWraper {
+    width: 30%;
+    min-width: 340px;
+    max-width: 500px;
+    padding: 18px 24px 6px 24px;
+    border-right: 1px solid var(--beyond-color-border);
+    .title {
+      font-size: 18px;
+      font-weight: 500;
+      line-height: 26px;
+      padding-bottom: 12px;
+    }
+    .checkboxGroup {
+      width: 100%;
+      :global {
+        .@{antPrefix}-checkbox-wrapper {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          .@{antPrefix}-checkbox-label {
+            flex: 1 1 auto;
+            width: calc(100% - 16px);
+          }
+        }
+      }
+    }
+  }
+
+  .rightWraper {
+    padding: 18px;
+
+    .listItem {
+      padding: 5px 4px 5px 6px;
+      border-radius: 6px;
+      background: #f2f6fa;
+      .closeBtn {
+        font-size: 12px;
+        color: var(--beyond-color-text-secondary);
+        &:hover {
+          transform: scale(1.2);
+          color: var(--beyond-color-text);
+        }
+      }
+    }
+  }
+
+  :global {
+    .@{antPrefix}-modal-wrap {
+      z-index: calc(@modalZIndex + 1);
+    }
+    .@{antPrefix}-modal-mask {
+      z-index: @modalZIndex;
+    }
+    .@{antPrefix}-modal {
+      width: 680px !important;
+      height: 580px !important;
+
+      // width: 80vw !important;
+      // min-width: 700px;
+      // max-width: 1000px;
+      // height: 80vh !important;
+      // min-height: 700px;
+      // max-height: 1000px;
+
+      & > div {
+        height: 100%;
+      }
+    }
+    .@{antPrefix}-modal-close {
+      z-index: calc(@modalZIndex + 2);
+    }
+    .@{antPrefix}-modal-content {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      padding: 0;
+    }
+    .@{antPrefix}-modal-body {
+      flex: 1;
+    }
+  }
+}

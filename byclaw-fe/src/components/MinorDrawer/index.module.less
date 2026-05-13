@@ -1,0 +1,56 @@
+@keyframes drawer-open {
+  from {
+    max-width: 0;
+    opacity: 0;
+  }
+
+  to {
+    max-width: 100vw;
+    opacity: 1;
+  }
+}
+@keyframes drawer-close {
+  from {
+    max-width: 100vw;
+    opacity: 1;
+  }
+
+  to {
+    max-width: 0;
+    opacity: 0;
+  }
+}
+
+.myDrawer {
+  height: 100%;
+  overflow: hidden;
+  background-color: #fff;
+  // border-right: 0.5px var(--beyond-color-border) solid;
+  opacity: 1;
+  // 默认无动画
+  &.opening {
+    // animation: drawer-open 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    margin-left: var(--layout-gap);
+  }
+
+  &.closing {
+    width: 0;
+    animation: drawer-close 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+
+  .header {
+    align-items: center;
+    // box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px 0 rgba(0, 0, 0, 0.02);
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    min-height: 48px;
+    padding: 8px 20px;
+    z-index: 100;
+  }
+}
+
+.icon {
+  width: 24px;
+  height: 24px;
+}

@@ -1,0 +1,96 @@
+section.twins {
+  position: relative;
+  border: 1px solid #ced3d9;
+  border-radius: 8px;
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: auto;
+  background-color: #fff;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 12px;
+
+  :global {
+    .css-var-rd {
+      --beyond-border-radius: 99px;
+      --beyond-border-radius-sm: 99px;
+      --beyond-control-padding-horizontal: 8px;
+    }
+  }
+
+  nav.twins {
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    background-color: #fff;
+    padding: 8px 12px;
+
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+
+    .icon {
+      width: 28px;
+      height: 28px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 99px;
+
+      &:hover {
+        background-color: #f5f5f5;
+      }
+    }
+  }
+
+  div.twins {
+    position: relative;
+    flex: 1 1 0%;
+    min-height: 0;
+    overflow: auto;
+    padding-left: 12px;
+    padding-right: 10px;
+
+    .loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+  }
+}
+
+.fullscreen {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  padding: 52px 12px 12px 58px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.3s ease-in-out;
+
+  .twins {
+    transform: translateY(0%);
+    transition: all 0.3s ease-in-out;
+  }
+}
+
+.none {
+  position: fixed;
+  inset: 0;
+  padding: 52px 12px 12px 58px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background-color: rgba(0, 0, 0, 0);
+  transition: all 0.3s ease-in-out;
+
+  .twins {
+    transform: translateY(110%);
+    transition: all 0.3s ease-in-out;
+  }
+}

@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper">
+
+    <!-- 通用字段映射 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.common.message.entity.ByaiMessage">
+        <id column="id" property="id" />
+        <result column="access_terminal" property="accessTerminal" />
+        <result column="append_index" property="appendIndex" />
+        <result column="archived_at" property="archivedAt" />
+        <result column="belong_date" property="belongDate" />
+        <result column="call_logs" property="callLogs" />
+        <result column="create_time" property="createTime" />
+        <result column="creator_id" property="creatorId" />
+        <result column="creator_name" property="creatorName" />
+        <result column="enterprise_id" property="enterpriseId" />
+        <result column="final_content" property="finalContent" />
+        <result column="final_message_struct" property="finalMessageStruct" />
+        <result column="infer_log" property="inferLog" />
+        <result column="is_complete" property="isComplete" />
+        <result column="message_content" property="messageContent" />
+        <result column="message_id" property="messageId" />
+        <result column="message_ref" property="messageRef" />
+        <result column="message_struct" property="messageStruct" />
+        <result column="metadata" property="metadata" />
+        <result column="msg_status" property="msgStatus" />
+        <result column="project_id" property="projectId" />
+        <result column="rel_message_id" property="relMessageId" />
+        <result column="rel_objs" property="relObjs" />
+        <result column="related_resources" property="relatedResources" />
+        <result column="res_com_id" property="resComId" />
+        <result column="res_com_ids" property="resComIds" />
+        <result column="role" property="role" />
+        <result column="session_id" property="sessionId" />
+        <result column="task_id" property="taskId" />
+        <result column="update_time" property="updateTime" />
+        <result column="usage" property="usage" />
+
+        <result column="doc_access_terminal" property="docAccessTerminal" />
+        <result column="doc_belong_date" property="docBelongDate" />
+        <result column="doc_create_time" property="docCreateTime" />
+        <result column="doc_creator_id" property="docCreatorId" />
+        <result column="doc_infer_log" property="docInferLog" />
+        <result column="doc_is_complete" property="docIsComplete" />
+        <result column="doc_message_content" property="docMessageContent" />
+        <result column="doc_message_id" property="docMessageId" />
+        <result column="doc_message_struct" property="docMessageStruct" />
+        <result column="doc_metadata" property="docMetadata" />
+        <result column="doc_msg_status" property="docMsgStatus" />
+        <result column="doc_project_id" property="docProjectId" />
+        <result column="doc_related_resources" property="docRelatedResources" />
+        <result column="doc_res_com_ids" property="docResComIds" />
+        <result column="doc_session_id" property="docSessionId" />
+        <result column="doc_task_id" property="docTaskId" />
+        <result column="doc_usage" property="docUsage" />
+    </resultMap>
+
+    <!-- 通用查询列 -->
+    <sql id="Base_Column_List">
+        id, access_terminal, append_index, archived_at, belong_date, call_logs, create_time, creator_id, creator_name, enterprise_id,
+        final_content, final_message_struct, infer_log, is_complete, message_content, message_id, message_ref, message_struct, metadata,
+        msg_status, project_id, rel_message_id, rel_objs, related_resources, res_com_id, res_com_ids, "role", session_id, task_id, update_time,
+        "usage",
+        doc_access_terminal, doc_belong_date, doc_create_time, doc_creator_id, doc_infer_log, doc_is_complete, doc_message_content, doc_message_id,
+        doc_message_struct, doc_metadata, doc_msg_status, doc_project_id, doc_related_resources, doc_res_com_ids, doc_session_id, doc_task_id,
+        doc_usage
+    </sql>
+
+    <select id="selectBySessionId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+        ORDER BY create_time DESC
+    </select>
+
+    <select id="selectByTaskId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message
+        WHERE task_id = #{taskId}
+        ORDER BY create_time DESC
+    </select>
+
+    <select id="selectByMessageId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message
+        WHERE message_id = #{messageId}
+        LIMIT 1
+    </select>
+
+    <delete id="deleteBySessionId">
+        DELETE FROM byai_message
+        WHERE session_id = #{sessionId}
+    </delete>
+
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO byai_message (
+        id, session_id, task_id, access_terminal, metadata, "role", "usage", creator_id,
+        message_id, message_struct, create_time, belong_date, message_content, related_resources,
+        call_logs, infer_log, msg_status, project_id, res_com_ids, is_complete, archived_at, update_time
+        )
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+            #{item.id,jdbcType=BIGINT},
+            #{item.sessionId,jdbcType=BIGINT},
+            #{item.taskId,jdbcType=BIGINT},
+            #{item.accessTerminal,jdbcType=VARCHAR},
+            #{item.metadata,jdbcType=VARCHAR},
+            #{item.role,jdbcType=VARCHAR},
+            #{item.usage,jdbcType=INTEGER},
+            #{item.creatorId,jdbcType=BIGINT},
+            #{item.messageId,jdbcType=BIGINT},
+            #{item.messageStruct,jdbcType=VARCHAR},
+            #{item.createTime,jdbcType=TIMESTAMP},
+            #{item.belongDate,jdbcType=DATE},
+            #{item.messageContent,jdbcType=VARCHAR},
+            #{item.relatedResources,jdbcType=VARCHAR},
+            #{item.callLogs,jdbcType=VARCHAR},
+            #{item.inferLog,jdbcType=VARCHAR},
+            #{item.msgStatus,jdbcType=INTEGER},
+            #{item.projectId,jdbcType=BIGINT},
+            #{item.resComIds,jdbcType=VARCHAR},
+            #{item.isComplete,jdbcType=BOOLEAN},
+            #{item.archivedAt,jdbcType=TIMESTAMP},
+            #{item.updateTime,jdbcType=TIMESTAMP}
+            )
+        </foreach>
+    </insert>
+
+    <delete id="deleteByMessageId">
+        DELETE FROM byai_message
+        WHERE message_id = #{messageId}
+    </delete>
+
+    <update id="updateByMessageId">
+        UPDATE byai_message
+        <set>
+            <if test="item.metadata != null">metadata = #{item.metadata},</if>
+            <if test="item.role != null">"role" = #{item.role},</if>
+            <if test="item.usage != null">"usage" = #{item.usage},</if>
+            <if test="item.creatorId != null">creator_id = #{item.creatorId},</if>
+            <if test="item.sessionId != null">session_id = #{item.sessionId},</if>
+            <if test="item.taskId != null">task_id = #{item.taskId},</if>
+            <if test="item.messageStruct != null">message_struct = #{item.messageStruct},</if>
+            <!-- update by qin.guoquan 2026-03-29 ByaiMessageHotDto 中 createTime/belongDate 为毫秒时间戳字符串，需转为 timestamp/date -->
+            <if test="item.createTimeMillis != null and item.createTimeMillis != ''">create_time = to_timestamp(CAST(#{item.createTimeMillis} AS BIGINT) / 1000.0),</if>
+            <if test="item.belongDateMillis != null and item.belongDateMillis != ''">belong_date = (to_timestamp(CAST(#{item.belongDateMillis} AS BIGINT) / 1000.0))::date,</if>
+            <if test="item.messageContent != null">message_content = #{item.messageContent},</if>
+            <if test="item.relatedResources != null">related_resources = #{item.relatedResources},</if>
+            <if test="item.callLogs != null">call_logs = #{item.callLogs},</if>
+            <if test="item.inferLog != null">infer_log = #{item.inferLog},</if>
+            <if test="item.msgStatus != null">msg_status = #{item.msgStatus},</if>
+            <if test="item.projectId != null">project_id = #{item.projectId},</if>
+            <if test="item.accessTerminal != null">access_terminal = #{item.accessTerminal},</if>
+            <if test="item.resComIds != null">res_com_ids = #{item.resComIds},</if>
+            <if test="item.archivedAt != null">archived_at = #{item.archivedAt},</if>
+            <if test="item.updateTime != null">update_time = #{item.updateTime},</if>
+        </set>
+        WHERE message_id = #{item.messageId}
+    </update>
+
+    <select id="selectByPageQo" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message
+        <where>
+            <if test="qo.sessionId != null">AND session_id = #{qo.sessionId}</if>
+            <if test="qo.creatorId != null">AND creator_id = #{qo.creatorId}</if>
+        </where>
+        ORDER BY create_time DESC
+    </select>
+
+    <select id="selectByQo" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message
+        <where>
+            <if test="qo.sessionId != null">
+                AND session_id = #{qo.sessionId}
+            </if>
+            <if test="qo.messageIds != null and qo.messageIds.size() > 0">
+                AND message_id IN
+                <foreach collection="qo.messageIds" item="mid" open="(" separator="," close=")">
+                    #{mid}
+                </foreach>
+            </if>
+            <if test="qo.creatorId != null">
+                AND creator_id = #{qo.creatorId}
+            </if>
+            <if test="qo.keyword != null and qo.keyword != ''">
+                AND message_content LIKE REPLACE(REPLACE(#{qo.keyword}, '*', '%'), '?', '_')
+            </if>
+        </where>
+        ORDER BY create_time DESC
+        <if test="qo.topK != null">
+            LIMIT #{qo.topK}
+        </if>
+    </select>
+
+
+    <delete id="deleteByQo">
+        DELETE FROM byai_message
+        <where>
+            <if test="qo.sessionId != null">AND session_id = #{qo.sessionId}</if>
+            <if test="qo.messageId != null">AND message_id = #{qo.messageId}</if>
+        </where>
+    </delete>
+
+    <select id="countBySessionId" resultType="long">
+        SELECT COUNT(1)
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+    </select>
+
+    <select id="countPositionInSession" resultType="long">
+        SELECT COUNT(1)
+        FROM byai_message
+        WHERE session_id = #{sessionId}
+          AND message_id &lt;= #{messageId}
+    </select>
+
+</mapper>

@@ -1,0 +1,84 @@
+.wrap {
+  padding: 12px;
+  height: 100%;
+  // width: fit-content;
+  // width: 1100px;
+  min-width: 100%;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  border: 1px solid #eef0f3;
+  overflow: hidden;
+}
+
+.tabsWrap {
+  flex: 1;
+  min-width: fit-content;
+  overflow: hidden;
+}
+
+.actionBtn {
+  background: #0000000f;
+  font-weight: 500;
+}
+
+.headerRow {
+  // min-width: fit-content;
+  // overflow-x: auto;
+  // overflow-y: hidden;
+}
+
+.tabButtons {
+  // min-width: fit-content;
+
+  :global {
+    .@{antPrefix}-tabs-nav {
+      display: inline-flex;
+      // min-width: fit-content;
+      flex-wrap: nowrap;
+      margin: 0;
+    }
+
+    .@{antPrefix}-tabs-nav-wrap {
+      flex: 0 0 auto;
+      // min-width: fit-content;
+    }
+
+    .@{antPrefix}-tabs-nav-list {
+      flex-wrap: nowrap;
+    }
+
+    .@{antPrefix}-tabs-extra-content {
+      flex: 0 0 auto;
+      min-width: fit-content;
+    }
+
+    .@{antPrefix}-tabs-content-holder {
+      display: none;
+    }
+  }
+}
+
+.searchRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-width: fit-content;
+}
+
+.searchInput {
+  display: flex;
+  flex: 0 0 220px;
+  min-width: 220px;
+}
+
+.listContainer {
+  padding: 0;
+  height: 100%;
+  min-width: fit-content;
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.AiModelMapper">
+
+    <!-- 查询所有AI模型列表 -->
+    <select id="selectAllAiModels" resultType="com.iwhalecloud.byai.manager.entity.resource.AiModel">
+        SELECT 
+            model_id,
+            model_type,
+            model_name,
+            model_no,
+            url,
+            ori_url,
+            auth_token,
+            status,
+            is_support_chart,
+            is_deepthink,
+            max_content_token,
+            in_params,
+            create_by,
+            create_time
+        FROM byai_aimodel
+        ORDER BY create_time DESC
+    </select>
+
+</mapper> 

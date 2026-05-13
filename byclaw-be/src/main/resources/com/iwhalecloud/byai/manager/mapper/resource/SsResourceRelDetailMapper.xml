@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.SsResourceRelDetailMapper">
+
+    <!-- 通用查询映射结果（仅包含表字段） -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail">
+        <id column="resource_rel_detail_id" property="resourceRelDetailId" />
+        <result column="resource_id" property="resourceId" />
+        <result column="rel_resource_id" property="relResourceId" />
+        <result column="create_by" property="createBy" />
+        <result column="create_time" property="createTime" />
+        <result column="update_by" property="updateBy" />
+        <result column="update_time" property="updateTime" />
+        <result column="com_acct_id" property="comAcctId" />
+        <result column="rel_type_name" property="relTypeName" />
+        <result column="rel_status" property="relStatus" />
+        <result column="rel_resource_info" property="relResourceInfo" />
+    </resultMap>
+
+    <!-- 包含资源类型的查询映射结果（用于DTO，包含关联查询字段） -->
+    <resultMap id="ResourceRelDetailDTOMap" type="com.iwhalecloud.byai.manager.dto.resource.SsResourceRelDetailDTO">
+        <id column="resource_rel_detail_id" property="resourceRelDetailId" />
+        <result column="resource_id" property="resourceId" />
+        <result column="rel_resource_id" property="relResourceId" />
+        <result column="create_by" property="createBy" />
+        <result column="create_time" property="createTime" />
+        <result column="update_by" property="updateBy" />
+        <result column="update_time" property="updateTime" />
+        <result column="com_acct_id" property="comAcctId" />
+        <result column="rel_type_name" property="relTypeName" />
+        <result column="rel_status" property="relStatus" />
+        <result column="rel_resource_info" property="relResourceInfo" />
+        <result column="resource_type" property="resourceType" />
+        <result column="resource_code" property="resourceCode" />
+        <result column="resource_name" property="resourceName" />
+        <result column="resource_desc" property="resourceDesc" />
+        <result column="resource_biz_type" property="resourceBizType" />
+        <result column="rel_resource_type" property="relResourceType" />
+        <result column="rel_resource_biz_type" property="relResourceBizType" />
+    </resultMap>
+
+    <!-- 通用查询结果-->
+    <sql id="Base_Column_List">
+        resource_rel_detail_id, resource_id, rel_resource_id, create_by, create_time,
+        update_by, update_time, com_acct_id, rel_type_name, rel_status, rel_resource_info
+    </sql>
+
+    <!-- 批量插入资源关联明细 -->
+    <insert id="insertBatch" parameterType="java.util.List">
+
+        INSERT INTO ss_resource_rel_detail (
+            resource_rel_detail_id, resource_id, rel_resource_id,
+            create_by, create_time, update_by, update_time, com_acct_id,
+            rel_type_name, rel_status, rel_resource_info
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.resourceRelDetailId}, #{item.resourceId}, #{item.relResourceId},
+                #{item.createBy}, #{item.createTime}, #{item.updateBy},
+                #{item.updateTime}, #{item.comAcctId}, #{item.relTypeName}, #{item.relStatus},
+                #{item.relResourceInfo}
+            )
+        </foreach>
+
+    </insert>
+
+
+    <!-- 根据JSON字段中的viewResourceId删除关联关系（兼容MySQL、Oracle、PostgreSQL） -->
+    <delete id="deleteByViewResourceId">
+        DELETE FROM ss_resource_rel_detail
+        WHERE 1=1
+        <choose>
+            <!-- PostgreSQL -->
+            <when test="_databaseId == 'postgresql'">
+                AND rel_resource_info::jsonb->>'viewResourceId' = CAST(#{viewResourceId} AS TEXT)
+            </when>
+            <!-- MySQL -->
+            <when test="_databaseId == 'mysql'">
+                AND JSON_EXTRACT(rel_resource_info, '$.viewResourceId') = #{viewResourceId}
+            </when>
+            <!-- Oracle -->
+            <when test="_databaseId == 'oracle'">
+                AND JSON_VALUE(rel_resource_info, '$.viewResourceId') = TO_CHAR(#{viewResourceId})
+            </when>
+            <!-- 默认使用PostgreSQL语法 -->
+            <otherwise>
+                AND rel_resource_info::jsonb->>'viewResourceId' = CAST(#{viewResourceId} AS TEXT)
+            </otherwise>
+        </choose>
+    </delete>
+
+    <!-- 根据JSON字段中的viewResourceId查询关联关系（兼容MySQL、Oracle、PostgreSQL） -->
+    <select id="findByViewResourceId" resultMap="ResourceRelDetailDTOMap">
+        SELECT
+        rrd.resource_rel_detail_id,
+        rrd.resource_id,
+        rrd.rel_resource_id,
+        rrd.create_by,
+        rrd.create_time,
+        rrd.update_by,
+        rrd.update_time,
+        rrd.com_acct_id,
+        rrd.rel_type_name,
+        rrd.rel_status,
+        rrd.rel_resource_info,
+        r1.resource_type,
+        r2.resource_type AS rel_resource_type,
+        r2.resource_biz_type AS rel_resource_biz_type
+        FROM ss_resource_rel_detail rrd
+        LEFT JOIN ss_resource r1 ON rrd.resource_id = r1.resource_id
+        LEFT JOIN ss_resource r2 ON rrd.rel_resource_id = r2.resource_id
+        WHERE 1=1
+        <choose>
+            <!-- PostgreSQL -->
+            <when test="_databaseId == 'postgresql'">
+                AND rrd.rel_resource_info::jsonb->>'viewResourceId' = CAST(#{viewResourceId} AS TEXT)
+            </when>
+            <!-- MySQL -->
+            <when test="_databaseId == 'mysql'">
+                AND JSON_EXTRACT(rrd.rel_resource_info, '$.viewResourceId') = #{viewResourceId}
+            </when>
+            <!-- Oracle -->
+            <when test="_databaseId == 'oracle'">
+                AND JSON_VALUE(rrd.rel_resource_info, '$.viewResourceId') = TO_CHAR(#{viewResourceId})
+            </when>
+            <!-- 默认使用PostgreSQL语法 -->
+            <otherwise>
+                AND rrd.rel_resource_info::jsonb->>'viewResourceId' = CAST(#{viewResourceId} AS TEXT)
+            </otherwise>
+        </choose>
+        ORDER BY rrd.create_time DESC
+    </select>
+
+
+    <!-- 根据JSON字段中的viewResourceId查询关联关系（兼容MySQL、Oracle、PostgreSQL） -->
+    <select id="findByViewResourceIdExceptSelf" resultMap="ResourceRelDetailDTOMap">
+        SELECT
+        rrd.resource_rel_detail_id,
+        rrd.resource_id,
+        rrd.rel_resource_id,
+        rrd.create_by,
+        rrd.create_time,
+        rrd.update_by,
+        rrd.update_time,
+        rrd.com_acct_id,
+        rrd.rel_type_name,
+        rrd.rel_status,
+        rrd.rel_resource_info,
+        r1.resource_type,
+        r2.resource_type AS rel_resource_type,
+        r2.resource_biz_type AS rel_resource_biz_type
+        FROM ss_resource_rel_detail rrd
+        LEFT JOIN ss_resource r1 ON rrd.resource_id = r1.resource_id
+        LEFT JOIN ss_resource r2 ON rrd.rel_resource_id = r2.resource_id
+        WHERE
+        rrd.resource_id != #{viewResourceId}
+        <choose>
+            <!-- PostgreSQL -->
+            <when test="_databaseId == 'postgresql'">
+                AND rrd.rel_resource_info::jsonb->>'viewResourceId' = CAST(#{viewResourceId} AS TEXT)
+            </when>
+            <!-- MySQL -->
+            <when test="_databaseId == 'mysql'">
+                AND JSON_EXTRACT(rrd.rel_resource_info, '$.viewResourceId') = #{viewResourceId}
+            </when>
+            <!-- Oracle -->
+            <when test="_databaseId == 'oracle'">
+                AND JSON_VALUE(rrd.rel_resource_info, '$.viewResourceId') = TO_CHAR(#{viewResourceId})
+            </when>
+            <!-- 默认使用PostgreSQL语法 -->
+            <otherwise>
+                AND rrd.rel_resource_info::jsonb->>'viewResourceId' = CAST(#{viewResourceId} AS TEXT)
+            </otherwise>
+        </choose>
+        ORDER BY rrd.create_time DESC
+    </select>
+
+    <!-- 根据主资源ID（resource_id）查询关联关系（所有关联类型） -->
+    <select id="findByResourceIdAsDetail" resultMap="ResourceRelDetailDTOMap">
+        SELECT
+        rrd.resource_rel_detail_id,
+        rrd.resource_id,
+        rrd.rel_resource_id,
+        rrd.create_by,
+        rrd.create_time,
+        rrd.update_by,
+        rrd.update_time,
+        rrd.com_acct_id,
+        rrd.rel_type_name,
+        rrd.rel_status,
+        rrd.rel_resource_info,
+        r1.resource_type,
+        r1.resource_code,
+        r1.resource_name,
+        r1.resource_desc,
+        r1.resource_biz_type,
+        r2.resource_type AS rel_resource_type,
+        r2.resource_biz_type AS rel_resource_biz_type
+        FROM ss_resource_rel_detail rrd
+        LEFT JOIN ss_resource r1 ON rrd.resource_id = r1.resource_id
+        LEFT JOIN ss_resource r2 ON rrd.rel_resource_id = r2.resource_id
+        WHERE rrd.resource_id = #{resourceId}
+        ORDER BY rrd.create_time DESC
+    </select>
+
+    <select id="queryDigEmployeeRelations" resultType="com.iwhalecloud.byai.manager.dto.resource.ResourceRelationDto">
+        select
+        a.resource_id,
+        a.resource_name,
+        a.resource_biz_type,
+        a.resource_type,
+        a.resource_desc,
+        a.resource_source_pk_id
+        from
+        ss_resource_rel_detail b
+        left join ss_resource a on a.resource_id = b.rel_resource_id
+        <where>
+            and a.resource_status = 2 and a.parent_resource_id &lt; 0
+            <if test="request.resourceId != null">
+                and b.resource_id = #{request.resourceId}
+            </if>
+            <if test="request.resourceName != null">
+                and a.resourceName like concat('%', concat(#{request.resourceName}, '%'))
+            </if>
+            <if test="request.resourceBizTypeList != null and request.resourceBizTypeList.size()>0">
+                and a.resource_biz_type in
+                <foreach collection="request.resourceBizTypeList" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="request.resourceIdList != null and request.resourceIdList.size()>0">
+                and a.resource_id in
+                <foreach collection="request.resourceIdList" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="request.resourceIds != null and request.resourceIds.size()>0">
+                and b.resource_id in
+                <foreach collection="request.resourceIds" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach>
+            </if>
+        </where>
+    </select>
+
+
+</mapper>

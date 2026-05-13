@@ -1,0 +1,33 @@
+.tabs {
+  :global {
+    .@{antPrefix}-tabs-nav {
+      font-weight: 400;
+
+      .@{antPrefix}-tabs-tab {
+        font-size: 20px;
+        padding: 6px 0;
+        line-height: 28px;
+        + .@{antPrefix}-tabs-tab {
+          margin-left: 24px;
+        }
+      }
+
+      .@{antPrefix}-tabs-tab-btn {
+        color: var(--beyond-color-text) !important;
+        text-shadow: none !important;
+        font-weight: 500;
+      }
+
+      .@{antPrefix}-tabs-extra-content {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .@{antPrefix}-tabs-ink-bar {
+        height: 3px;
+        background-color: var(--beyond-color-text);
+      }
+    }
+  }
+}

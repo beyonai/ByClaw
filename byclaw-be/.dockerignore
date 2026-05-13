@@ -1,0 +1,6 @@
+**/target
+!target/*.jar
+.git
+.idea
+*.iml
+**/.DS_Store

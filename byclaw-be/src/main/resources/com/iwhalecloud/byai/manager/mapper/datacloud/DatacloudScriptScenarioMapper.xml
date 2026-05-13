@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.datacloud.DatacloudScriptScenarioMapper">
+
+    <!-- 脚本场景表结果映 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.datacloud.DatacloudScriptScenario">
+        <id column="scenario_id" property="scenarioId" jdbcType="BIGINT"/>
+        <result column="scenario_name" property="scenarioName" jdbcType="VARCHAR"/>
+        <result column="scenario_description" property="scenarioDescription" jdbcType="VARCHAR"/>
+        <result column="scenario_code" property="scenarioCode" jdbcType="VARCHAR"/>
+        <result column="target_url" property="targetUrl" jdbcType="VARCHAR"/>
+        <result column="attribution_system" property="attributionSystem" jdbcType="VARCHAR"/>
+        <result column="parent_id" property="parentId" jdbcType="BIGINT"/>
+        <result column="login_type_id" property="loginTypeId" jdbcType="BIGINT"/>
+        <result column="scenario_order" property="scenarioOrder" jdbcType="INTEGER"/>
+        <result column="enterprise_id" property="enterpriseId" jdbcType="BIGINT"/>
+        <result column="creator_id" property="creatorId" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="update_by" property="updateBy" jdbcType="BIGINT"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <!-- 脚本场景DTO结果映射 -->
+    <resultMap id="ScenarioDTOResultMap" type="com.iwhalecloud.byai.manager.dto.datacloud.DatacloudScriptScenarioDTO">
+        <id column="scenario_id" property="scenarioId" jdbcType="BIGINT"/>
+        <result column="scenario_name" property="scenarioName" jdbcType="VARCHAR"/>
+        <result column="scenario_description" property="scenarioDescription" jdbcType="VARCHAR"/>
+        <result column="scenario_code" property="scenarioCode" jdbcType="VARCHAR"/>
+        <result column="target_url" property="targetUrl" jdbcType="VARCHAR"/>
+        <result column="attribution_system" property="attributionSystem" jdbcType="VARCHAR"/>
+        <result column="login_type_id" property="loginTypeId" jdbcType="VARCHAR"/>
+        <result column="login_type_name" property="loginTypeName" jdbcType="VARCHAR"/>
+        <result column="parent_id" property="parentId" jdbcType="BIGINT"/>
+        <result column="scenario_order" property="scenarioOrder" jdbcType="INTEGER"/>
+        <result column="enterprise_id" property="enterpriseId" jdbcType="BIGINT"/>
+        <result column="creator_id" property="creatorId" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="update_by" property="updateBy" jdbcType="BIGINT"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
+        <result column="child_count" property="childCount" jdbcType="INTEGER"/>
+        <result column="script_count" property="scriptCount" jdbcType="INTEGER"/>
+    </resultMap>
+
+    <!-- 基础字段 -->
+    <sql id="Base_Column_List">
+        scenario_id, scenario_name, scenario_description, scenario_code, target_url, 
+        attribution_system, parent_id, login_type_id, scenario_order, enterprise_id, 
+        creator_id, create_time, update_by, update_time
+    </sql>
+
+    <!-- 查询条件 -->
+    <sql id="Query_Condition">
+        <where>
+            <if test="query.scenarioName != null and query.scenarioName != ''">
+                AND scenario_name LIKE CONCAT('%', #{query.scenarioName}, '%')
+            </if>
+            <if test="query.scenarioCode != null and query.scenarioCode != ''">
+                AND scenario_code LIKE CONCAT('%', #{query.scenarioCode}, '%')
+            </if>
+            <if test="query.parentId != null">
+                AND parent_id = #{query.parentId}
+            </if>
+            <if test="query.enterpriseId != null">
+                AND enterprise_id = #{query.enterpriseId}
+            </if>
+            <if test="query.creatorId != null">
+                AND creator_id = #{query.creatorId}
+            </if>
+            <if test="query.onlyTopLevel != null and query.onlyTopLevel == true">
+                AND parent_id IS NULL
+            </if>
+        </where>
+    </sql>
+
+    <!-- 分页查询脚本场景列表 -->
+    <select id="selectScenarioListByPage" resultMap="ScenarioDTOResultMap">
+        SELECT 
+            s.scenario_id,
+            s.scenario_name,
+            s.scenario_description,
+            s.scenario_code,
+            s.scenario_code,
+            s.target_url,
+            s.attribution_system,
+            s.parent_id,
+            s.login_type_id,
+            p.login_type_name,
+            s.scenario_order,
+            s.enterprise_id,
+            s.creator_id,
+            s.create_time,
+            s.update_by,
+            s.update_time
+            <if test="query.includeScriptCount != null and query.includeScriptCount == true">
+                , (SELECT COUNT(*) FROM datacloud_script WHERE scenario_id = s.scenario_id) AS script_count
+            </if>
+        FROM datacloud_script_scenario s
+        LEFT JOIN datacloud_login_type p ON s.login_type_id = p.login_type_id
+        <include refid="Query_Condition"/>
+        ORDER BY s.scenario_order ASC, s.create_time DESC
+    </select>
+
+    <!-- 查询脚本场景树形结构 -->
+    <select id="selectScenarioTree" resultMap="ScenarioDTOResultMap">
+        WITH RECURSIVE scenario_tree AS (
+            -- 根节�?
+            SELECT 
+                scenario_id,
+                scenario_name,
+                scenario_description,
+                scenario_code,
+                parent_id,
+                scenario_order,
+                enterprise_id,
+                creator_id,
+                create_time,
+                update_by,
+                update_time,
+                0 AS level
+            FROM datacloud_script_scenario 
+            WHERE parent_id IS NULL 
+            AND enterprise_id = #{enterpriseId}
+            
+            UNION ALL
+            
+            -- 子节�?
+            SELECT 
+                s.scenario_id,
+                s.scenario_name,
+                s.scenario_description,
+                s.scenario_code,
+                s.parent_id,
+                s.scenario_order,
+                s.enterprise_id,
+                s.creator_id,
+                s.create_time,
+                s.update_by,
+                s.update_time,
+                st.level + 1
+            FROM datacloud_script_scenario s
+            INNER JOIN scenario_tree st ON s.parent_id = st.scenario_id
+        )
+        SELECT 
+            scenario_id,
+            scenario_name,
+            scenario_description,
+            scenario_code,
+            parent_id,
+            scenario_order,
+            enterprise_id,
+            creator_id,
+            create_time,
+            update_by,
+            update_time,
+            level
+        FROM scenario_tree
+        ORDER BY level ASC, scenario_order ASC, create_time DESC
+    </select>
+
+    <!-- 根据父场景ID查询子场景列 -->
+    <select id="selectChildScenarios" resultMap="ScenarioDTOResultMap">
+        SELECT 
+            <include refid="Base_Column_List"/>
+        FROM datacloud_script_scenario
+        WHERE parent_id = #{parentId}
+        AND enterprise_id = #{enterpriseId}
+        ORDER BY scenario_order ASC, create_time DESC
+    </select>
+
+    <!-- 检查场景编码是否存-->
+    <select id="checkScenarioCodeExists" resultType="int">
+        SELECT COUNT(*)
+        FROM datacloud_script_scenario
+        WHERE scenario_code = #{scenarioCode}
+        AND enterprise_id = #{enterpriseId}
+        <if test="excludeId != null">
+            AND scenario_id != #{excludeId}
+        </if>
+    </select>
+
+    <!-- 统计场景下的脚本数量 -->
+    <select id="countScriptsByScenario" resultType="int">
+        SELECT COUNT(*)
+        FROM datacloud_script
+        WHERE scenario_id = #{scenarioId}
+    </select>
+
+    <!-- 统计场景下的子场景数 -->
+    <select id="countChildScenarios" resultType="int">
+        SELECT COUNT(*)
+        FROM datacloud_script_scenario
+        WHERE parent_id = #{scenarioId}
+    </select>
+
+    <!-- 批量删除脚本场景 -->
+    <delete id="batchDeleteScenarios">
+        DELETE FROM datacloud_script_scenario
+        WHERE scenario_id IN
+        <foreach collection="scenarioIds" item="scenarioId" open="(" separator="," close=")">
+            #{scenarioId}
+        </foreach>
+        AND enterprise_id = #{enterpriseId}
+    </delete>
+
+</mapper>

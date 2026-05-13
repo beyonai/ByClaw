@@ -1,0 +1,15 @@
+export const themes = [
+  'green',
+  'cyan',
+  'blue',
+  'geekblue',
+  'purple',
+  'pink',
+  'magenta',
+  'red',
+  'orange',
+  'orange',
+  'gold',
+  'yellow',
+  'lime',
+];

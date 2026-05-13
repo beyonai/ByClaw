@@ -1,0 +1,73 @@
+.firstCard {
+  background-color: #f8f8ff;
+  border-radius: 8px;
+  padding: 16px 12px;
+
+  > div:first-child {
+    flex: 1;
+    max-width: calc(100% - 36px);
+  }
+
+  > .cardIcon {
+    margin-left: 12px;
+    width: 24px;
+    height: 24px;
+    border-radius: 24px;
+    background-color: rgba(250, 140, 22, 1);
+    color: #fff;
+    text-align: center;
+    line-height: 24px;
+    i {
+      font-size: 14px;
+    }
+  }
+}
+
+.labelName {
+  line-height: 24px;
+  font-size: 16px;
+  color: rgba(71, 83, 102, 1);
+  margin-bottom: 8px;
+  word-wrap: break-word;
+}
+
+.labelValue {
+  font-size: 24px;
+  line-height: 28px;
+  color: #0d1666;
+  font-weight: bold;
+  word-wrap: break-word;
+  min-height: 28px;
+  span {
+    font-size: 18px;
+    margin-left: 3px;
+    vertical-align: bottom;
+  }
+}
+
+.measureRows {
+  display: grid;
+  grid-template-columns: 100%;
+  column-gap: 12px;
+  row-gap: 12px;
+}
+
+.measureRowsOne {
+  padding-right: 10px;
+  grid-template-columns: 50% 50%;
+}
+
+.measureRowsMb {
+  .labelName {
+    line-height: 1.5rem;
+    font-size: 0.875rem;
+    margin-bottom: 0;
+  }
+  .labelValue {
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+  }
+  .firstCard {
+    padding: 0.5rem 0.75rem;
+  }
+}

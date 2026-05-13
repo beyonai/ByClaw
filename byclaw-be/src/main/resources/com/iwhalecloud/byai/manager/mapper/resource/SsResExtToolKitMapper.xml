@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.SsResExtToolKitMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.resource.SsResExtToolKit">
+        <id column="resource_id" property="resourceId" />
+        <result column="headers" property="headers" />
+    </resultMap>
+
+    <!-- 通用查询结果-->
+    <sql id="Base_Column_List">
+        resource_id, headers
+    </sql>
+
+    <resultMap id="resourceExtToolKitDtoResultMap"
+               type="com.iwhalecloud.byai.manager.dto.resource.ResourceExtToolKitDto"
+               extends="com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper.BaseResultMap">
+        <result column="toolkit_headers" property="headers" />
+        <collection property="resourceExtToolDtos" ofType="com.iwhalecloud.byai.manager.dto.resource.ResourceExtToolDto" columnPrefix="tool_">
+            <id column="resource_id" property="resourceId" />
+            <result column="resource_code" property="resourceCode" />
+            <result column="system_code" property="systemCode" />
+            <result column="resource_source_pk_id" property="resourceSourcePkId" />
+            <result column="resource_biz_type" property="resourceBizType" />
+            <result column="resource_type" property="resourceType" />
+            <result column="resource_name" property="resourceName" />
+            <result column="resource_desc" property="resourceDesc" />
+            <result column="avatar" property="avatar" />
+            <result column="sample" property="sample" />
+            <result column="tags" property="tags" />
+            <result column="resource_version_id" property="resourceVersionId" />
+            <result column="host_type" property="hostType" />
+            <result column="catalog_id" property="catalogId" />
+            <result column="man_org_id" property="manOrgId" />
+            <result column="man_user_id" property="manUserId" />
+            <result column="index_list" property="indexList" />
+            <result column="create_by" property="createBy" />
+            <result column="create_time" property="createTime" />
+            <result column="update_by" property="updateBy" />
+            <result column="update_time" property="updateTime" />
+            <result column="com_acct_id" property="comAcctId" />
+            <result column="resource_status" property="resourceStatus" />
+            <result column="resource_d_verid" property="resourceDVerid" />
+            <result column="resource_r_verid" property="resourceRVerid" />
+            <result column="auth_status" property="authStatus" />
+            <result column="publish_time" property="publishTime" />
+            <result column="shelf_time" property="shelfTime" />
+            <result column="unshelf_time" property="unshelfTime" />
+            <result column="publish_portal" property="publishPortal" />
+            <association property="ssResExtTool" javaType="com.iwhalecloud.byai.manager.entity.resource.SsResExtTool" columnPrefix="ext_">
+                <id column="resource_id" property="resourceId" />
+                <result column="path_schema" property="pathSchema" />
+                <result column="query_schema" property="querySchema" />
+                <result column="method" property="method" />
+                <result column="input_schema" property="inputSchema" />
+                <result column="output_schema" property="outputSchema" />
+                <result column="url" property="url" />
+                <result column="url_ori" property="urlOri" />
+            </association>
+        </collection>
+    </resultMap>
+
+    <select id="findResourceExtToolKitByIds" resultMap="resourceExtToolKitDtoResultMap">
+        SELECT a.resource_id,
+               a.resource_code,
+               a.system_code,
+               a.resource_source_pk_id,
+               a.resource_biz_type,
+               a.resource_type,
+               a.resource_name,
+               a.resource_desc,
+               a.avatar,
+               a.sample,
+               a.tags,
+               a.resource_version_id,
+               a.host_type,
+               a.catalog_id,
+               a.man_org_id,
+               a.man_user_id,
+               a.index_list,
+               a.create_by,
+               a.create_time,
+               a.update_by,
+               a.update_time,
+               a.com_acct_id,
+               a.resource_status,
+               a.resource_d_verid,
+               a.resource_r_verid,
+               a.auth_status,
+               a.publish_time,
+               a.shelf_time,
+               a.unshelf_time,
+               a.publish_portal,
+               b.headers AS toolkit_headers,
+               c.resource_id AS tool_resource_id,
+               c.resource_code AS tool_resource_code,
+               c.system_code AS tool_system_code,
+               c.resource_source_pk_id AS tool_resource_source_pk_id,
+               c.resource_biz_type AS tool_resource_biz_type,
+               c.resource_type AS tool_resource_type,
+               c.resource_name AS tool_resource_name,
+               c.resource_desc AS tool_resource_desc,
+               c.avatar AS tool_avatar,
+               c.sample AS tool_sample,
+               c.tags AS tool_tags,
+               c.resource_version_id AS tool_resource_version_id,
+               c.host_type AS tool_host_type,
+               c.catalog_id AS tool_catalog_id,
+               c.man_org_id AS tool_man_org_id,
+               c.man_user_id AS tool_man_user_id,
+               c.index_list AS tool_index_list,
+               c.create_by AS tool_create_by,
+               c.create_time AS tool_create_time,
+               c.update_by AS tool_update_by,
+               c.update_time AS tool_update_time,
+               c.com_acct_id AS tool_com_acct_id,
+               c.resource_status AS tool_resource_status,
+               c.resource_d_verid AS tool_resource_d_verid,
+               c.resource_r_verid AS tool_resource_r_verid,
+               c.auth_status AS tool_auth_status,
+               c.publish_time AS tool_publish_time,
+               c.shelf_time AS tool_shelf_time,
+               c.unshelf_time AS tool_unshelf_time,
+               c.publish_portal AS tool_publish_portal,
+               d.resource_id AS tool_ext_resource_id,
+               d.path_schema AS tool_path_schema,
+               d.query_schema AS tool_query_schema,
+               d.method AS tool_method,
+               d.input_schema AS tool_input_schema,
+               d.output_schema AS tool_output_schema,
+               d.url AS tool_url,
+               d.url_ori AS tool_url_ori
+        FROM ss_resource a
+        LEFT JOIN ss_res_ext_toolkit b ON a.resource_id = b.resource_id
+        LEFT JOIN ss_resource_rel_detail rel ON a.resource_id = rel.resource_id
+        LEFT JOIN ss_resource c ON rel.rel_resource_id = c.resource_id
+        LEFT JOIN ss_res_ext_tool d ON c.resource_id = d.resource_id
+        WHERE a.resource_biz_type = 'TOOLKIT'
+        AND a.resource_id IN
+        <foreach collection="resourceIds" item="item" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+    </select>
+
+    <select id="findToolKitIdByToolsId" resultType="long">
+        select a.resource_id
+        from ss_resource a
+                 join ss_resource_rel_detail b on a.resource_id = b.resource_id
+        where a.resource_biz_type = 'TOOLKIT'
+          and b.rel_resource_id =#{resourceId}
+    </select>
+
+    <!-- 根据资源ID列表批量查询工具集扩展数据（不JOIN，直接查扩展表） -->
+    <select id="selectListByResourceIds" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List" />
+        FROM ss_res_ext_toolkit
+        WHERE resource_id IN
+        <foreach collection="resourceIds" item="item" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+    </select>
+
+</mapper>

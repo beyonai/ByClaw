@@ -1,0 +1,56 @@
+.container {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/** 外层不滚动；表头、分页固定，仅表体区域滚动（与 scroll.y 一致） */
+.tableScroll {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.table {
+  :global {
+    /** 表体不出现横向滚动条（高度与纵向滚动由 Table scroll.y 控制） */
+    .@{antPrefix}-table-body {
+      overflow-x: hidden !important;
+    }
+    .@{antPrefix}-typography {
+      margin-bottom: 0;
+    }
+  }
+}
+
+.valueDrawerScroll {
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  border: 1px solid rgba(5, 5, 5, 0.06);
+  border-radius: 8px;
+}
+
+.valueDrawerPre {
+  margin: 0;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  padding: 12px 14px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 8px;
+}
+
+.paramValue {
+  height: 100%;
+  :global {
+    .@{antPrefix}-row,
+    .@{antPrefix}-form-item-control-input,
+    .@{antPrefix}-form-item-control-input-content {
+      height: 100%;
+    }
+  }
+}

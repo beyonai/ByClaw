@@ -1,0 +1,27 @@
+package com.iwhalecloud.byai.gateway.sandbox.client.model;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Map;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class CreateSandboxResponse {
+
+    private String id;
+
+    private SandboxStatus status;
+
+    private Map<String, String> metadata;
+
+    private OffsetDateTime expiresAt;
+
+    private OffsetDateTime createdAt;
+
+    private List<String> entrypoint;
+}

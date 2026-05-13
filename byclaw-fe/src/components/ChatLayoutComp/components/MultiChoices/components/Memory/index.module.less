@@ -1,0 +1,42 @@
+@iconW: 16px;
+
+.steps {
+  padding: 8px;
+  background-color: #f7fafc;
+  border-radius: 8px;
+  max-height: 50vh;
+
+  :global {
+    .@{antPrefix}-steps-item-tail {
+      left: calc(@iconW / 2) !important;
+      background-color: rgba(22, 93, 255, 0.15);
+    }
+    .@{antPrefix}-steps-item-icon {
+      margin-top: 4px !important;
+      margin-right: 8px !important;
+    }
+  }
+}
+
+.stepIcon {
+  width: @iconW;
+  height: @iconW;
+
+  border-radius: 50%;
+  font-size: 12px;
+  background-color: rgba(22, 93, 255, 0.15);
+  color: #fff;
+}
+
+.tag {
+  padding: 2px 8px;
+  margin-right: 0;
+}
+
+.resourceItem {
+  padding: 4px;
+  border-radius: 4px;
+  background-color: #e8f3ff;
+  font-size: 12px;
+  color: #333;
+}

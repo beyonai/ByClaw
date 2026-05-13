@@ -1,0 +1,17 @@
+.root {
+  flex: 1;
+  padding-inline: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  :global {
+    .@{antPrefix}-tabs-content.@{antPrefix}-tabs-content-top {
+      height: 100%;
+
+      .@{antPrefix}-tabs-tabpane {
+        height: 100%;
+      }
+    }
+  }
+}

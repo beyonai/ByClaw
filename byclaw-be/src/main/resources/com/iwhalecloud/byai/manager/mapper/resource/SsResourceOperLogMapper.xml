@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.SsResourceOperLogMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.resource.SsResourceOperLog">
+        <id column="resource_oper_log_id" property="resourceOperLogId" />
+        <result column="resource_id" property="resourceId" />
+        <result column="oper_type" property="operType" />
+        <result column="oper_user" property="operUser" />
+        <result column="oper_desc" property="operDesc" />
+        <result column="oper_param" property="operParam" />
+        <result column="version_no" property="versionNo" />
+        <result column="create_by" property="createBy" />
+        <result column="create_time" property="createTime" />
+        <result column="update_by" property="updateBy" />
+        <result column="update_time" property="updateTime" />
+        <result column="com_acct_id" property="comAcctId" />
+    </resultMap>
+
+    <!-- 通用查询结果-->
+    <sql id="Base_Column_List">
+        resource_oper_log_id, resource_id, oper_type, oper_user, oper_desc, oper_param, 
+        version_no, create_by, create_time, update_by, update_time, com_acct_id
+    </sql>
+
+</mapper>

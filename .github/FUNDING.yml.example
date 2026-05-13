@@ -1,0 +1,7 @@
+# Copy to FUNDING.yml and fill in real values (invalid placeholders break the sponsor button).
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/displaying-a-sponsor-button-in-your-repository
+#
+# github: your-org-or-username
+# open_collective: project-name
+# custom:
+#   - https://example.com/donate

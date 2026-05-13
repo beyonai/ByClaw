@@ -1,0 +1,30 @@
+.customEditable {
+  border-radius: 8px;
+  display: inline-block;
+  background: var(~'--@{antPrefix}-color-primary-bg');
+  padding: 0 6px;
+  margin: 0 4px;
+  color: var(~'--@{antPrefix}-color-primary');
+  box-sizing: content-box;
+}
+
+.p {
+  height: 0;
+  overflow: visible;
+  position: relative;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+  width: 0;
+}
+
+.placeholder {
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  width: -moz-max-content;
+  width: max-content;
+  font-weight: 500;
+  color: var(~'--@{antPrefix}-color-primary-border-hover');
+}

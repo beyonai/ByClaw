@@ -1,0 +1,284 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.datacloud.DatacloudScriptMapper">
+
+    <!-- 脚本主表结果映射 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.datacloud.DatacloudScript">
+        <id column="script_id" property="scriptId" jdbcType="BIGINT"/>
+        <result column="script_name" property="scriptName" jdbcType="VARCHAR"/>
+        <result column="script_type" property="scriptType" jdbcType="VARCHAR"/>
+        <result column="script_description" property="scriptDescription" jdbcType="VARCHAR"/>
+        <result column="script_status" property="scriptStatus" jdbcType="VARCHAR"/>
+        <result column="scenario_id" property="scenarioId" jdbcType="BIGINT"/>
+        <result column="enterprise_id" property="enterpriseId" jdbcType="BIGINT"/>
+        <result column="creator_id" property="creatorId" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="update_by" property="updateBy" jdbcType="BIGINT"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
+        <result column="version" property="version" jdbcType="INTEGER"/>
+        <result column="tags" property="tags" jdbcType="VARCHAR"/>
+        <result column="step_count" property="stepCount" jdbcType="INTEGER"/>
+    </resultMap>
+
+    <!-- 脚本DTO结果映射 -->
+    <resultMap id="ScriptDTOResultMap" type="com.iwhalecloud.byai.manager.dto.datacloud.DatacloudScriptDTO">
+        <id column="script_id" property="scriptId" jdbcType="BIGINT"/>
+        <result column="script_name" property="scriptName" jdbcType="VARCHAR"/>
+        <result column="script_type" property="scriptType" jdbcType="VARCHAR"/>
+        <result column="script_description" property="scriptDescription" jdbcType="VARCHAR"/>
+        <result column="script_status" property="scriptStatus" jdbcType="VARCHAR"/>
+        <result column="scenario_id" property="scenarioId" jdbcType="BIGINT"/>
+        <result column="enterprise_id" property="enterpriseId" jdbcType="BIGINT"/>
+        <result column="creator_id" property="creatorId" jdbcType="BIGINT"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="update_by" property="updateBy" jdbcType="BIGINT"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
+        <result column="version" property="version" jdbcType="INTEGER"/>
+        <result column="tags" property="tags" jdbcType="VARCHAR"/>
+        <result column="step_count" property="stepCount" jdbcType="INTEGER"/>
+        <result column="scenario_name" property="scenarioName" jdbcType="VARCHAR"/>
+        <result column="login_type_name" property="loginTypeName" jdbcType="VARCHAR"/>
+        <result column="category_name" property="categoryName" jdbcType="VARCHAR"/>
+        <result column="creator_name" property="creatorName" jdbcType="VARCHAR"/>
+        <result column="update_by_name" property="updateByName" jdbcType="VARCHAR"/>
+        <result column="last_execution_time" property="lastExecutionTime" jdbcType="TIMESTAMP"/>
+        <result column="execution_count" property="executionCount" jdbcType="INTEGER"/>
+        <result column="success_count" property="successCount" jdbcType="INTEGER"/>
+        <result column="fail_count" property="failCount" jdbcType="INTEGER"/>
+    </resultMap>
+
+    <!-- 基础字段 -->
+    <sql id="Base_Column_List">
+        script_id, script_name, script_type, script_description, script_status,
+        scenario_id, enterprise_id, creator_id, create_time,
+        update_by, update_time, version, tags, step_count
+    </sql>
+
+    <!-- 查询条件 -->
+    <sql id="Query_Condition">
+        <where>
+            <if test="query.scriptName != null and query.scriptName != ''">
+                AND s.script_name LIKE CONCAT('%', #{query.scriptName}, '%')
+            </if>
+            <if test="query.scriptType != null and query.scriptType != ''">
+                AND s.script_type = #{query.scriptType}
+            </if>
+            <if test="query.scriptStatus != null and query.scriptStatus != ''">
+                AND s.script_status = #{query.scriptStatus}
+            </if>
+            <if test="query.scenarioId != null">
+                AND s.scenario_id = #{query.scenarioId}
+            </if>
+            <if test="query.categoryId != null">
+                AND s.category_id = #{query.categoryId}
+            </if>
+            <if test="query.enterpriseId != null">
+                AND s.enterprise_id = #{query.enterpriseId}
+            </if>
+            <if test="query.creatorId != null">
+                AND s.creator_id = #{query.creatorId}
+            </if>
+            <if test="query.isTemplate != null">
+                AND s.is_template = #{query.isTemplate}
+            </if>
+            <if test="query.tags != null and query.tags != ''">
+                AND s.tags LIKE CONCAT('%', #{query.tags}, '%')
+            </if>
+            <if test="query.targetUrl != null and query.targetUrl != ''">
+                AND s.target_url LIKE CONCAT('%', #{query.targetUrl}, '%')
+            </if>
+            <if test="query.createTimeStart != null">
+                AND s.create_time >= #{query.createTimeStart}
+            </if>
+            <if test="query.createTimeEnd != null">
+                AND s.create_time &lt;= #{query.createTimeEnd}
+            </if>
+            <if test="query.updateTimeStart != null">
+                AND s.update_time >= #{query.updateTimeStart}
+            </if>
+            <if test="query.updateTimeEnd != null">
+                AND s.update_time &lt;= #{query.updateTimeEnd}
+            </if>
+            <if test="query.scriptTypes != null and query.scriptTypes.size() > 0">
+                AND s.script_type IN
+                <foreach collection="query.scriptTypes" item="type" open="(" separator="," close=")">
+                    #{type}
+                </foreach>
+            </if>
+            <if test="query.scriptStatuses != null and query.scriptStatuses.size() > 0">
+                AND s.script_status IN
+                <foreach collection="query.scriptStatuses" item="status" open="(" separator="," close=")">
+                    #{status}
+                </foreach>
+            </if>
+            <if test="query.onlyMyScripts != null and query.onlyMyScripts == true">
+                AND s.creator_id = #{query.creatorId}
+            </if>
+        </where>
+    </sql>
+
+    <!-- 分页查询脚本列表 -->
+    <select id="selectScriptListByPage" resultMap="ScriptDTOResultMap">
+        SELECT 
+            s.script_id,
+            s.script_name,
+            s.script_type,
+            s.script_description,
+            s.script_status,
+            s.scenario_id,
+            s.enterprise_id,
+            s.creator_id,
+            s.create_time,
+            s.update_by,
+            s.update_time,
+            s.version,
+            s.is_template,
+            s.category_id,
+            s.tags,
+            s.step_count,
+            sc.scenario_name,
+            cat.category_name,
+            u1.user_name AS creator_name,
+            u2.user_name AS update_by_name
+            <if test="query.includeExecutionStats != null and query.includeExecutionStats == true">
+                , (SELECT MAX(start_time) FROM datacloud_script_execution WHERE script_id = s.script_id) AS last_execution_time
+                , (SELECT COUNT(*) FROM datacloud_script_execution WHERE script_id = s.script_id) AS execution_count
+                , (SELECT COUNT(*) FROM datacloud_script_execution WHERE script_id = s.script_id AND execution_status = 'success') AS success_count
+                , (SELECT COUNT(*) FROM datacloud_script_execution WHERE script_id = s.script_id AND execution_status = 'failed') AS fail_count
+            </if>
+        FROM datacloud_script s
+        LEFT JOIN datacloud_script_scenario sc ON s.scenario_id = sc.scenario_id
+        LEFT JOIN datacloud_script_category cat ON s.category_id = cat.category_id
+        LEFT JOIN po_users u1 ON s.creator_id = u1.user_id
+        LEFT JOIN po_users u2 ON s.update_by = u2.user_id
+        <include refid="Query_Condition"/>
+        ORDER BY s.create_time DESC
+    </select>
+
+    <!-- 根据场景ID查询脚本列表 -->
+    <select id="selectScriptsByScenario" resultMap="ScriptDTOResultMap">
+        SELECT 
+            <include refid="Base_Column_List"/>
+        FROM datacloud_script
+        WHERE scenario_id = #{scenarioId}
+        AND enterprise_id = #{enterpriseId}
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- 根据分类ID查询脚本列表 -->
+    <select id="selectScriptsByCategory" resultMap="ScriptDTOResultMap">
+        SELECT 
+            <include refid="Base_Column_List"/>
+        FROM datacloud_script
+        WHERE category_id = #{categoryId}
+        AND enterprise_id = #{enterpriseId}
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- 查询模板脚本列表 -->
+    <select id="selectTemplateScripts" resultMap="ScriptDTOResultMap">
+        SELECT 
+            <include refid="Base_Column_List"/>
+        FROM datacloud_script
+        WHERE is_template = 1
+        AND enterprise_id = #{enterpriseId}
+        <if test="scriptType != null and scriptType != ''">
+            AND script_type = #{scriptType}
+        </if>
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- 根据标签查询脚本列表 -->
+    <select id="selectScriptsByTags" resultMap="ScriptDTOResultMap">
+        SELECT 
+            <include refid="Base_Column_List"/>
+        FROM datacloud_script
+        WHERE tags LIKE CONCAT('%', #{tags}, '%')
+        AND enterprise_id = #{enterpriseId}
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- 统计脚本执行次数 -->
+    <select id="countScriptExecutions" resultType="int">
+        SELECT COUNT(*)
+        FROM datacloud_script_execution
+        WHERE script_id = #{scriptId}
+    </select>
+
+    <!-- 统计脚本成功执行次数 -->
+    <select id="countScriptSuccessExecutions" resultType="int">
+        SELECT COUNT(*)
+        FROM datacloud_script_execution
+        WHERE script_id = #{scriptId}
+        AND execution_status = 'success'
+    </select>
+
+    <!-- 获取脚本最后执行时�?-->
+    <select id="getScriptLastExecutionTime" resultType="java.util.Date">
+        SELECT MAX(start_time)
+        FROM datacloud_script_execution
+        WHERE script_id = #{scriptId}
+    </select>
+
+    <!-- 查询热门脚本列表（按执行次数排序）-->
+    <select id="selectPopularScripts" resultMap="ScriptDTOResultMap">
+        SELECT 
+            s.script_id,
+            s.script_name,
+            s.script_type,
+            s.script_description,
+            s.script_status,
+            s.target_url,
+            s.scenario_id,
+            s.enterprise_id,
+            s.creator_id,
+            s.create_time,
+            s.version,
+            s.is_template,
+            s.category_id,
+            s.tags,
+            s.step_count,
+            COUNT(e.execution_id) AS execution_count
+        FROM datacloud_script s
+        LEFT JOIN datacloud_script_execution e ON s.script_id = e.script_id
+        WHERE s.enterprise_id = #{enterpriseId}
+        GROUP BY s.script_id
+        ORDER BY execution_count DESC, s.create_time DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 查询最近创建的脚本列表 -->
+    <select id="selectRecentScripts" resultMap="ScriptDTOResultMap">
+        SELECT 
+            <include refid="Base_Column_List"/>
+        FROM datacloud_script
+        WHERE enterprise_id = #{enterpriseId}
+        ORDER BY create_time DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 查询脚本统计信息 -->
+    <select id="selectScriptStatistics" resultType="java.util.Map">
+        SELECT 
+            COUNT(*) AS total_scripts,
+            COUNT(CASE WHEN script_status = 'active' THEN 1 END) AS active_scripts,
+            COUNT(CASE WHEN script_status = 'inactive' THEN 1 END) AS inactive_scripts,
+            COUNT(CASE WHEN script_status = 'draft' THEN 1 END) AS draft_scripts,
+            COUNT(CASE WHEN script_type = 'playwright' THEN 1 END) AS playwright_scripts,
+            COUNT(CASE WHEN script_type = 'api' THEN 1 END) AS api_scripts,
+            COUNT(CASE WHEN is_template = 1 THEN 1 END) AS template_scripts
+        FROM datacloud_script
+        WHERE enterprise_id = #{enterpriseId}
+    </select>
+
+    <!-- 批量删除脚本 -->
+    <delete id="batchDeleteScripts">
+        DELETE FROM datacloud_script
+        WHERE script_id IN
+        <foreach collection="scriptIds" item="scriptId" open="(" separator="," close=")">
+            #{scriptId}
+        </foreach>
+        AND enterprise_id = #{enterpriseId}
+    </delete>
+
+</mapper>

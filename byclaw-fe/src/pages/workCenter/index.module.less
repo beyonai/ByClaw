@@ -1,0 +1,213 @@
+.workCenter {
+  width: 100%;
+  height: 100%;
+  padding: var(--beyond-header-height) 30px 0;
+
+  .searchWork {
+    color: #a4aab2;
+  }
+
+  .grid {
+    margin-top: 20px;
+    overflow: auto;
+    height: calc(100vh - 145px);
+  }
+
+  .gridContainer {
+    //  overflow-y: auto;
+    column-count: 4;
+    /* 4列 */
+    column-gap: 16px;
+
+    /* 列间距 */
+    .gridItem {
+      break-inside: avoid;
+      /* 禁止内容块被分割到不同列 */
+      padding: 16px;
+      margin-bottom: 16px;
+      /* 内容块间距 */
+      display: flex;
+      padding: 16px;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+      align-self: stretch;
+      border-radius: 12px;
+      border: 1px solid #ced3d9;
+      background: #fff;
+      position: relative;
+
+      video {
+        width: 100%;
+        /* 宽度撑满父容器 */
+        max-width: 100%;
+        /* 双重保障防溢出 */
+        height: auto;
+        /* 高度自适应比例 */
+        display: block;
+        /* 消除行内元素间隙 */
+      }
+
+      .title {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        align-self: stretch;
+        overflow: hidden;
+        color: #14161a;
+        text-overflow: ellipsis;
+        font-family: 'PingFang SC';
+        font-size: 16px;
+        font-style: normal;
+        font-weight: 500;
+        line-height: 24px;
+      }
+
+      .description {
+        align-self: stretch;
+        color: #40454d;
+        text-align: justify;
+        font-family: 'PingFang SC';
+        font-size: 12px;
+        font-style: normal;
+        font-weight: 400;
+        line-height: 20px;
+        //  max-height: 157px;
+        overflow: hidden;
+        position: relative;
+      }
+
+      /* 渐变遮罩层 */
+      .description::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 1.5em;
+        /* 匹配行高 */
+        background: linear-gradient(
+          to top,
+          rgba(255, 255, 255, 1) 20%,
+          /* 背景色（此处为白色） */ rgba(255, 255, 255, 0) 80%
+        );
+
+        /* 深色模式适配 */
+        @media (prefers-color-scheme: dark) {
+          background: linear-gradient(to top, rgba(0, 0, 0, 1) 20%, /* 深色背景 */ rgba(0, 0, 0, 0) 80%);
+        }
+      }
+
+      .operate {
+        position: absolute;
+        right: 8px;
+        bottom: 8px;
+        background: rgba(0, 0, 0, 0.5);
+      }
+
+      .operateActive {
+        //  display: flex;
+        padding: 3px 12px 3px 9px;
+        align-items: center;
+        //  gap: 6px;
+        position: absolute;
+        right: 8px;
+        bottom: 8px;
+        border-radius: 32px;
+        background: #000000b3;
+
+        .iconVideo {
+          font-size: 14px;
+          cursor: pointer;
+        }
+
+        span {
+          color: #ffffff;
+          font-family: 'PingFang SC';
+          font-size: 12px;
+          font-style: normal;
+          font-weight: 500;
+          //  line-height: 16px;
+          cursor: pointer;
+        }
+      }
+    }
+  }
+
+  /* 修复 Antd Col 默认对齐问题 */
+  .@{antPrefix}-row {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .@{antPrefix}-col {
+    display: flex;
+    /* 让 Col 成为 Flex 容器 */
+  }
+
+  /* 确保内容块高度自适应 */
+  .@{antPrefix}-col > .card {
+    flex: 1;
+    /* 撑满剩余空间 */
+  }
+
+  .noContent {
+    color: #14161a;
+    text-align: center;
+    font-family: 'PingFang SC';
+    font-size: 16px;
+    font-style: normal;
+    font-weight: 500;
+    line-height: 24px;
+  }
+
+  .noContentSub {
+    color: #707680;
+    font-family: 'PingFang SC';
+    font-size: 14px;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 22px;
+  }
+
+  .videoModal {
+    background: #00000080;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+
+    .videoModalContent {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    video {
+      width: 60vw;
+    }
+
+    .videoModalClose {
+      position: absolute;
+      right: -41px;
+      top: 0;
+      //  display: flex;
+      width: 36px;
+      height: 36px;
+      padding: 9px;
+      justify-content: center;
+      align-items: center;
+      border-radius: 10px;
+      background: var(--user-text-2-color-text-350, #00000080);
+      cursor: pointer;
+
+      .iconClose {
+        color: #fff;
+        font-size: 18px;
+      }
+    }
+  }
+}

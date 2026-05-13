@@ -1,0 +1,72 @@
+services:
+  redis:
+    image: ${IMAGE_REDIS:-ghcr.io/beyonclaw/byclaw-all/byclaw-redis:main}
+    container_name: byclaw-redis-${CONTAINER_SUFFIX:-middleware}
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - byclaw-network
+    restart: unless-stopped
+
+  minio:
+    image: ${IMAGE_MINIO:-ghcr.io/beyonclaw/byclaw-all/byclaw-minio:main}
+    container_name: byclaw-minio-${CONTAINER_SUFFIX:-middleware}
+    ports:
+      - "${FILE_STORAGE_MINIO_API_PORT:-9000}:9000"
+      - "${FILE_STORAGE_MINIO_UI_PORT:-9001}:9001"
+    environment:
+      MINIO_ROOT_USER: ${FILE_STORAGE_MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${FILE_STORAGE_MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - ./miniodata:/data
+    networks:
+      - byclaw-network
+    restart: unless-stopped
+
+  opengauss:
+    image: ${IMAGE_OPENGAUSS:-ghcr.io/beyonclaw/byclaw-all/byclaw-opengauss:main}
+    container_name: byclaw-opengauss-${CONTAINER_SUFFIX:-middleware}
+    privileged: true
+    user: root
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        chmod -R a+r /docker-entrypoint-initdb.d
+        chown -R omm:omm /var/lib/opengauss
+        exec gosu omm entrypoint.sh gaussdb
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    environment:
+      GS_PASSWORD: ${DB_PASS}
+      GS_USERNAME: ${DB_USER:-gaussdb}
+      GS_PORT: "5432"
+      GS_DB: postgres
+      OTHER_PG_CONF: |
+        shared_preload_libraries = 'age'
+    volumes:
+      - ./data:/var/lib/opengauss
+      - ./initdb:/docker-entrypoint-initdb.d
+    networks:
+      - byclaw-network
+    restart: unless-stopped
+
+  opensandbox-server:
+    image: ${IMAGE_SANDBOX_SERVER:-sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server:v0.1.9}
+    container_name: byclaw-opensandbox-${CONTAINER_SUFFIX:-middleware}
+    ports:
+      - "${BYCLAW_SANDBOX_PORT:-9005}:9005"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./opensandbox-server.toml:/etc/opensandbox/config.toml:ro
+    environment:
+      - SANDBOX_CONFIG_PATH=/etc/opensandbox/config.toml
+    networks:
+      - byclaw-network
+    restart: unless-stopped
+
+networks:
+  byclaw-network:
+    name: byclaw-network-${CONTAINER_SUFFIX:-default}
+    driver: bridge

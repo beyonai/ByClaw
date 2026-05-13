@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.permissiongroup.PermissionGroupCategoryMapper">
+
+    <!-- 目录VO结果映射 -->
+    <resultMap id="CategoryVOResultMap" type="com.iwhalecloud.byai.manager.vo.permissiongroup.PermissionGroupCategoryVO">
+        <id column="id" property="id"/>
+        <result column="category_name" property="categoryName"/>
+        <result column="parent_id" property="parentId"/>
+        <result column="parent_name" property="parentName"/>
+        <result column="category_code" property="categoryCode"/>
+        <result column="description" property="description"/>
+        <result column="icon" property="icon"/>
+        <result column="sort_order" property="sortOrder"/>
+        <result column="status" property="status"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_by_name" property="createByName"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+        <result column="org_id" property="orgId"/>
+        <result column="org_name" property="orgName"/>
+        <result column="permission_group_count" property="permissionGroupCount"/>
+    </resultMap>
+
+    <!-- 基础查询列 -->
+    <sql id="Base_Column_List">
+        c.id,
+        c.category_name,
+        c.parent_id,
+        c.category_code,
+        c.description,
+        c.icon,
+        c.sort_order,
+        c.status,
+        c.create_by,
+        c.create_time,
+        c.update_by,
+        c.update_time,
+        c.org_id
+    </sql>
+
+    <!-- 分页查询目录列表 -->
+    <select id="selectCategoryPage" resultMap="CategoryVOResultMap">
+        SELECT
+            <include refid="Base_Column_List"/>,
+            pc.category_name AS parent_name,
+            u.user_name AS create_by_name,
+            o.org_name AS org_name,
+            (SELECT COUNT(1) FROM permission_groups pg WHERE pg.category_id = c.id) AS permission_group_count
+        FROM permission_group_categories c
+        LEFT JOIN permission_group_categories pc ON c.parent_id = pc.id
+        LEFT JOIN po_users u ON c.create_by = u.user_id
+        LEFT JOIN po_organization o ON c.org_id = o.org_id
+        <where>
+            <if test="query.categoryName != null and query.categoryName != ''">
+                AND c.category_name LIKE CONCAT('%', #{query.categoryName}, '%')
+            </if>
+            <if test="query.categoryCode != null and query.categoryCode != ''">
+                AND c.category_code = #{query.categoryCode}
+            </if>
+            <if test="query.parentId != null">
+                AND c.parent_id = #{query.parentId}
+            </if>
+            <if test="query.status != null and query.status != ''">
+                AND c.status = #{query.status}
+            </if>
+            <if test="query.orgId != null">
+                AND c.org_id = #{query.orgId}
+            </if>
+        </where>
+        ORDER BY c.sort_order ASC, c.create_time DESC
+    </select>
+
+    <!-- 查询目录列表（不分页） -->
+    <select id="selectCategoryList" resultMap="CategoryVOResultMap">
+        SELECT
+            <include refid="Base_Column_List"/>,
+            pc.category_name AS parent_name,
+            u.user_name AS create_by_name,
+            o.org_name AS org_name,
+            (SELECT COUNT(1) FROM permission_groups pg WHERE pg.category_id = c.id) AS permission_group_count
+        FROM permission_group_categories c
+        LEFT JOIN permission_group_categories pc ON c.parent_id = pc.id
+        LEFT JOIN po_users u ON c.create_by = u.user_id
+        LEFT JOIN po_organization o ON c.org_id = o.org_id
+        <where>
+            <if test="query.categoryName != null and query.categoryName != ''">
+                AND c.category_name LIKE CONCAT('%', #{query.categoryName}, '%')
+            </if>
+            <if test="query.categoryCode != null and query.categoryCode != ''">
+                AND c.category_code = #{query.categoryCode}
+            </if>
+            <if test="query.parentId != null">
+                AND c.parent_id = #{query.parentId}
+            </if>
+            <if test="query.status != null and query.status != ''">
+                AND c.status = #{query.status}
+            </if>
+            <if test="query.orgId != null">
+                AND c.org_id = #{query.orgId}
+            </if>
+        </where>
+        ORDER BY c.sort_order ASC, c.create_time DESC
+    </select>
+
+    <!-- 查询目录详情 -->
+    <select id="selectCategoryDetail" resultMap="CategoryVOResultMap">
+        SELECT
+            <include refid="Base_Column_List"/>,
+            pc.category_name AS parent_name,
+            u.user_name AS create_by_name,
+            o.org_name AS org_name,
+            (SELECT COUNT(1) FROM permission_groups pg WHERE pg.category_id = c.id) AS permission_group_count
+        FROM permission_group_categories c
+        LEFT JOIN permission_group_categories pc ON c.parent_id = pc.id
+        LEFT JOIN po_users u ON c.create_by = u.user_id
+        LEFT JOIN po_organization o ON c.org_id = o.org_id
+        WHERE c.id = #{id}
+    </select>
+
+    <!-- 根据编码查询目录数量 -->
+    <select id="countByCategoryCode" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM permission_group_categories
+        WHERE category_code = #{categoryCode}
+        <if test="excludeId != null">
+            AND id != #{excludeId}
+        </if>
+    </select>
+
+    <!-- 根据名称查询目录数量（同级别下名称不能重复） -->
+    <select id="countByCategoryName" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM permission_group_categories
+        WHERE category_name = #{categoryName}
+        <choose>
+            <when test="parentId != null">
+                AND parent_id = #{parentId}
+            </when>
+            <otherwise>
+                AND parent_id IS NULL
+            </otherwise>
+        </choose>
+        <if test="excludeId != null">
+            AND id != #{excludeId}
+        </if>
+    </select>
+
+    <!-- 查询子目录数量 -->
+    <select id="countByParentId" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM permission_group_categories
+        WHERE parent_id = #{parentId}
+    </select>
+
+    <!-- 查询目录下的权限组数量 -->
+    <select id="countPermissionGroupByCategoryId" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM permission_groups
+        WHERE category_id = #{categoryId}
+    </select>
+
+    <!-- 查询所有子目录ID（递归） -->
+    <select id="selectChildrenIds" resultType="java.lang.Long">
+        WITH RECURSIVE category_tree AS (
+            SELECT id
+            FROM permission_group_categories
+            WHERE parent_id = #{parentId}
+            UNION ALL
+            SELECT c.id
+            FROM permission_group_categories c
+            INNER JOIN category_tree ct ON c.parent_id = ct.id
+        )
+        SELECT id FROM category_tree
+    </select>
+
+    <!-- 目录简化信息结果映射 -->
+    <resultMap id="CatalogSimpleVOResultMap" type="com.iwhalecloud.byai.manager.vo.permissiongroup.CatalogSimpleVO">
+        <result column="catalog_id" property="catalogId"/>
+        <result column="catalog_name" property="catalogName"/>
+        <result column="catalog_path" property="catalogPath"/>
+        <result column="obj_type" property="objType"/>
+        <result column="parent_catalog_id" property="parentCatalogId"/>
+        <result column="sort_id" property="sortId"/>
+        <result column="state" property="state"/>
+        <result column="user_id" property="userId"/>
+        <result column="comments" property="comments"/>
+        <result column="is_system" property="isSystem"/>
+    </resultMap>
+
+    <!-- 根据目录名称模糊查询目录列表 -->
+    <select id="selectCatalogByCatalogName" resultMap="CatalogSimpleVOResultMap">
+        SELECT
+            c.id AS catalog_id,
+            c.category_name AS catalog_name,
+            CONCAT('-1.', CAST(c.id AS CHAR)) AS catalog_path,
+            19 AS obj_type,
+            c.parent_id AS parent_catalog_id,
+            c.sort_order AS sort_id,
+            CASE WHEN c.status = 'active' THEN 'A' ELSE 'I' END AS state,
+            c.create_by AS user_id,
+            c.description AS comments,
+            'N' AS is_system
+        FROM permission_group_categories c
+        <where>
+            c.status = 'active'
+            <if test="catalogName != null and catalogName != ''">
+                AND c.category_name LIKE CONCAT('%', #{catalogName}, '%')
+            </if>
+            <if test="userId != null">
+                AND c.create_by = #{userId}
+            </if>
+        </where>
+        ORDER BY c.sort_order ASC, c.create_time DESC
+    </select>
+
+</mapper>
+

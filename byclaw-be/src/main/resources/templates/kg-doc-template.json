@@ -1,0 +1,1081 @@
+{
+  "systemCode": "BYAI",
+  "resourceCode": "795333012060229",
+  "resourceName": "文档库0416",
+  "resourceDesc": "文档库0416描述信息",
+  "resourceBizType": "KG_DOC",
+  "version": "1",
+  "domainName": "byclaw-qa-manager",
+  "domainURL": "http://10.10.196.92:19900/knowledge/knowledgeService/",
+  "ownerType": "enterprise",
+  "headers": {
+    "pid": -1000
+  },
+  "resourceService": [
+    {
+      "openapiSchema": {
+        "openapi": "3.0.1",
+        "info": {
+          "title": "创建目录",
+          "description": "在指定的知识库下面创建目录",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://10.10.196.92:19900/knowledge/knowledgeService/"
+          }
+        ],
+        "paths": {
+          "/api/v1/directories/create": {
+            "post": {
+              "operationId": "createDir",
+              "summary": "创建目录",
+              "description": "在指定的知识库下面创建目录",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": [
+                        "knCode",
+                        "directoryPath"
+                      ],
+                      "properties": {
+                        "knCode": {
+                          "type": "string",
+                          "description": "知识库编码"
+                        },
+                        "directoryPath": {
+                          "type": "string",
+                          "description": "需创建的目录路径（以\"/\"开头，不包括知识库名称），支持递归创建目录"
+                        },
+                        "directoryDescription": {
+                          "type": "string",
+                          "description": "目录描述"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "操作成功",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "resultCode": {
+                            "type": "string",
+                            "description": "接口状态码，0成功，非0失败"
+                          },
+                          "resultMsg": {
+                            "type": "string",
+                            "description": "接口返回说明"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "openapiSchema": {
+        "openapi": "3.0.1",
+        "info": {
+          "title": "修改目录",
+          "description": "修改指定知识库的目录",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://10.10.196.92:19900/knowledge/knowledgeService/"
+          }
+        ],
+        "paths": {
+          "/api/v1/directories/update": {
+            "post": {
+              "operationId": "editDir",
+              "summary": "修改目录",
+              "description": "修改指定知识库的目录",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": [
+                        "knCode",
+                        "directoryPath",
+                        "directoryName"
+                      ],
+                      "properties": {
+                        "knCode": {
+                          "type": "string",
+                          "description": "知识库编码"
+                        },
+                        "directoryPath": {
+                          "type": "string",
+                          "description": "需要修改的目录路径（以\"/\"开头，不包括知识库名称）"
+                        },
+                        "directoryName": {
+                          "type": "string",
+                          "description": "新目录名称，仅修改directoryPath指定的目录路径最后一个层级的名称"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "操作成功",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "resultCode": {
+                            "type": "string",
+                            "description": "接口状态码，0成功，非0失败"
+                          },
+                          "resultMsg": {
+                            "type": "string",
+                            "description": "接口返回说明"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "openapiSchema": {
+        "openapi": "3.0.1",
+        "info": {
+          "title": "删除目录",
+          "description": "删除指定知识库的目录",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://10.10.196.92:19900/knowledge/knowledgeService/"
+          }
+        ],
+        "paths": {
+          "/api/v1/directories/delete": {
+            "post": {
+              "operationId": "deleteDir",
+              "summary": "删除目录",
+              "description": "删除指定知识库的目录",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": [
+                        "knCode",
+                        "directoryPath"
+                      ],
+                      "properties": {
+                        "knCode": {
+                          "type": "string",
+                          "description": "知识库编码"
+                        },
+                        "directoryPath": {
+                          "type": "string",
+                          "description": "需删除的目录路径（以\"/\"开头，不包括知识库名称）"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "操作成功",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "resultCode": {
+                            "type": "string",
+                            "description": "接口状态码，0成功，非0失败"
+                          },
+                          "resultMsg": {
+                            "type": "string",
+                            "description": "接口返回说明"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "openapiSchema": {
+        "openapi": "3.0.1",
+        "info": {
+          "title": "上传文档",
+          "description": "将文档上传到指定的知识库下面",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://10.10.196.92:19900/knowledge/knowledgeService/"
+          }
+        ],
+        "paths": {
+          "/api/v1/knowledge-items/import": {
+            "post": {
+              "operationId": "uploadFile",
+              "summary": "上传文档",
+              "description": "将文档上传到指定的知识库下面",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "multipart/form-data": {
+                    "schema": {
+                      "type": "object",
+                      "required": [
+                        "knCode",
+                        "filePath",
+                        "fileContent"
+                      ],
+                      "properties": {
+                        "knCode": {
+                          "type": "string",
+                          "description": "知识库编码"
+                        },
+                        "filePath": {
+                          "type": "string",
+                          "description": "上传到知识库后的文件全路径（以\"/\"开头，不包括知识库名称）"
+                        },
+                        "fileDescription": {
+                          "type": "string",
+                          "description": "文件描述"
+                        },
+                        "fileContent": {
+                          "type": "string",
+                          "format": "binary",
+                          "description": "文件二进制内容"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "操作成功",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "resultCode": {
+                            "type": "string",
+                            "description": "接口状态码，0成功，非0失败"
+                          },
+                          "resultMsg": {
+                            "type": "string",
+                            "description": "接口返回说明"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "openapiSchema": {
+        "openapi": "3.0.1",
+        "info": {
+          "title": "删除文档",
+          "description": "删除指定知识库下面的文档",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://10.10.196.92:19900/knowledge/knowledgeService/"
+          }
+        ],
+        "paths": {
+          "/api/v1/knowledge-items/delete": {
+            "post": {
+              "operationId": "deleteFile",
+              "summary": "删除文档",
+              "description": "删除指定知识库下面的文档",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": [
+                        "knCode",
+                        "filePath"
+                      ],
+                      "properties": {
+                        "knCode": {
+                          "type": "string",
+                          "description": "知识库编码"
+                        },
+                        "filePath": {
+                          "type": "string",
+                          "description": "需删除的文档的全路径（以\"/\"开头，不包括知识库名称）"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "操作成功",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "resultCode": {
+                            "type": "string",
+                            "description": "接口状态码，0成功，非0失败"
+                          },
+                          "resultMsg": {
+                            "type": "string",
+                            "description": "接口返回说明"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "openapiSchema": {
+        "openapi": "3.0.1",
+        "info": {
+          "title": "获取目录内容",
+          "description": "获取指定知识库目录下的所有文件和文件夹",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://10.10.196.92:19900/knowledge/knowledgeService/"
+          }
+        ],
+        "paths": {
+          "/api/v1/listDir": {
+            "post": {
+              "operationId": "listDir",
+              "summary": "获取目录内容",
+              "description": "获取指定知识库目录下的所有文件和文件夹",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": [
+                        "knCode",
+                        "directoryPath"
+                      ],
+                      "properties": {
+                        "knCode": {
+                          "type": "string",
+                          "description": "知识库编码"
+                        },
+                        "directoryPath": {
+                          "type": "string",
+                          "description": "目录路径（以\"/\"开头，不包括知识库名称）"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "操作成功",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "resultCode": {
+                            "type": "string",
+                            "description": "接口状态码，0成功，非0失败"
+                          },
+                          "resultMsg": {
+                            "type": "string",
+                            "description": "接口返回说明"
+                          },
+                          "resultObject": {
+                            "type": "object",
+                            "properties": {
+                              "data": {
+                                "type": "array",
+                                "description": "目录内容列表",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "knCode": {
+                                      "type": "string",
+                                      "description": "知识库编码"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "description": "文件或目录完整路径"
+                                    },
+                                    "type": {
+                                      "type": "string",
+                                      "description": "节点类型，file表示文件，directory表示目录",
+                                      "enum": [
+                                        "file",
+                                        "directory"
+                                      ]
+                                    },
+                                    "size": {
+                                      "type": "integer",
+                                      "description": "文件的大小（字节），如果是目录填0"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "openapiSchema": {
+        "openapi": "3.0.1",
+        "info": {
+          "title": "按路径模式匹配",
+          "description": "基于路径模式匹配查找指定知识库下面的文件或目录",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://10.10.196.92:19900/knowledge/knowledgeService/"
+          }
+        ],
+        "paths": {
+          "/api/v1/glob": {
+            "post": {
+              "operationId": "glob",
+              "summary": "按路径模式匹配",
+              "description": "基于路径模式匹配查找指定知识库下面的文件或目录",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": [
+                        "knCode",
+                        "pathRule"
+                      ],
+                      "properties": {
+                        "knCode": {
+                          "type": "string",
+                          "description": "知识库编码"
+                        },
+                        "pathRule": {
+                          "type": "string",
+                          "description": "匹配模式规则，支持通配符匹配多层级文件全路径/目录路径（以\"/\"开头，不包括知识库名称）"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "操作成功",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "resultCode": {
+                            "type": "string",
+                            "description": "接口状态码，0成功，非0失败"
+                          },
+                          "resultMsg": {
+                            "type": "string",
+                            "description": "接口返回说明"
+                          },
+                          "resultObject": {
+                            "type": "object",
+                            "properties": {
+                              "data": {
+                                "type": "array",
+                                "description": "匹配结果列表",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "knCode": {
+                                      "type": "string",
+                                      "description": "知识库编码"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "description": "文件或目录完整路径"
+                                    },
+                                    "type": {
+                                      "type": "string",
+                                      "description": "节点类型，file表示文件，directory表示目录",
+                                      "enum": [
+                                        "file",
+                                        "directory"
+                                      ]
+                                    },
+                                    "size": {
+                                      "type": "integer",
+                                      "description": "文件的大小（字节），如果是目录填0"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "openapiSchema": {
+        "openapi": "3.0.1",
+        "info": {
+          "title": "读取文件内容",
+          "description": "根据文件路径读取指定知识库下的原始文件内容（以Markdown格式返回）",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://10.10.196.92:19900/knowledge/knowledgeService/"
+          }
+        ],
+        "paths": {
+          "/api/v1/readFile": {
+            "post": {
+              "operationId": "readFile",
+              "summary": "读取文件内容",
+              "description": "根据文件路径读取指定知识库下的原始文件内容（以Markdown格式返回）",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": [
+                        "knCode",
+                        "filePath"
+                      ],
+                      "properties": {
+                        "knCode": {
+                          "type": "string",
+                          "description": "知识库编码"
+                        },
+                        "filePath": {
+                          "type": "string",
+                          "description": "需读取的文件的全路径（以\"/\"开头，不包括知识库名称）"
+                        },
+                        "startLine": {
+                          "type": "integer",
+                          "description": "Markdown起始行（默认不填，全部读取）"
+                        },
+                        "endLine": {
+                          "type": "integer",
+                          "description": "Markdown结束行（默认不填，全部读取）"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "操作成功",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "resultCode": {
+                            "type": "string",
+                            "description": "接口状态码，0成功，非0失败"
+                          },
+                          "resultMsg": {
+                            "type": "string",
+                            "description": "接口返回说明"
+                          },
+                          "resultObject": {
+                            "type": "object",
+                            "properties": {
+                              "knCode": {
+                                "type": "string",
+                                "description": "知识库编码"
+                              },
+                              "filePath": {
+                                "type": "string",
+                                "description": "文件全路径（以\"/\"开头，不包括知识库名称）"
+                              },
+                              "startLine": {
+                                "type": "integer",
+                                "description": "Markdown起始行"
+                              },
+                              "endLine": {
+                                "type": "integer",
+                                "description": "Markdown结束行"
+                              },
+                              "data": {
+                                "type": "string",
+                                "description": "Markdown文本内容"
+                              },
+                              "reachedEof": {
+                                "type": "boolean",
+                                "description": "是否到达文件末尾，默认填true"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "openapiSchema": {
+        "openapi": "3.0.1",
+        "info": {
+          "title": "下载原始文件",
+          "description": "根据文件路径下载指定知识库下的原始文件（原文件二进制字节流）",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://10.10.196.92:19900/knowledge/knowledgeService/"
+          }
+        ],
+        "paths": {
+          "/api/v1/downloadFile": {
+            "post": {
+              "operationId": "downloadFile",
+              "summary": "下载原始文件",
+              "description": "根据文件路径下载指定知识库下的原始文件（原文件二进制字节流）",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": [
+                        "knCode",
+                        "filePath"
+                      ],
+                      "properties": {
+                        "knCode": {
+                          "type": "string",
+                          "description": "知识库编码"
+                        },
+                        "filePath": {
+                          "type": "string",
+                          "description": "需下载的文件的全路径（以\"/\"开头，不包括知识库名称）"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "文件下载成功",
+                  "headers": {
+                    "Content-Type": {
+                      "schema": {
+                        "type": "string"
+                      },
+                      "description": "原文件MIME类型，未知时为application/octet-stream"
+                    },
+                    "Content-Disposition": {
+                      "schema": {
+                        "type": "string"
+                      },
+                      "description": "附件下载头，ASCII文件名时为attachment; filename=\"xxx.pdf\"；非ASCII文件名时额外带filename*"
+                    },
+                    "Content-Length": {
+                      "schema": {
+                        "type": "integer"
+                      },
+                      "description": "文件字节长度（可选）"
+                    }
+                  },
+                  "content": {
+                    "application/octet-stream": {
+                      "schema": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "原始文件二进制字节流"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "openapiSchema": {
+        "openapi": "3.0.1",
+        "info": {
+          "title": "知识构建",
+          "description": "根据文件路径异步构建指定知识库下面的文件，构建时自动完成原始文件转Markdown、切片和切片向量化处理",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://10.10.196.92:19900/knowledge/knowledgeService/"
+          }
+        ],
+        "paths": {
+          "/api/v1/fileToMarkdownIndex": {
+            "post": {
+              "operationId": "knowledgeBuild",
+              "summary": "知识构建",
+              "description": "根据文件路径异步构建指定知识库下面的文件，构建时自动完成原始文件转Markdown、切片和切片向量化处理",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": [
+                        "knCode",
+                        "filePath"
+                      ],
+                      "properties": {
+                        "knCode": {
+                          "type": "string",
+                          "description": "知识库编码"
+                        },
+                        "filePath": {
+                          "type": "string",
+                          "description": "需构建的文档的全路径（以\"/\"开头，不包括知识库名称）"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "操作成功",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "resultCode": {
+                            "type": "string",
+                            "description": "接口状态码，0成功，非0失败"
+                          },
+                          "resultMsg": {
+                            "type": "string",
+                            "description": "接口返回说明"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "openapiSchema": {
+        "openapi": "3.0.1",
+        "info": {
+          "title": "知识检索",
+          "description": "根据用户提问召回对应的知识chunk",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://10.10.196.92:19900/knowledge/knowledgeService/"
+          }
+        ],
+        "paths": {
+          "/api/v1/knowledge-items/search": {
+            "post": {
+              "operationId": "knowledgeSearch",
+              "summary": "知识检索",
+              "description": "根据用户提问召回对应的知识chunk",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": [
+                        "query",
+                        "knCodeList",
+                        "topK",
+                        "searchMode"
+                      ],
+                      "properties": {
+                        "query": {
+                          "type": "string",
+                          "description": "需要检索的内容"
+                        },
+                        "knCodeList": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "知识库编码列表"
+                        },
+                        "topK": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "description": "最终返回条数，必须大于0"
+                        },
+                        "fileTypeList": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "按照文件类型过滤"
+                        },
+                        "searchMode": {
+                          "type": "string",
+                          "description": "检索模式：fullTextRecall全文检索，embedding语义检索，mixedRecall混合检索",
+                          "enum": [
+                            "fullTextRecall",
+                            "embedding",
+                            "mixedRecall"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "操作成功",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "resultCode": {
+                            "type": "string",
+                            "description": "接口状态码，0成功，非0失败"
+                          },
+                          "resultMsg": {
+                            "type": "string",
+                            "description": "接口返回说明"
+                          },
+                          "resultObject": {
+                            "type": "object",
+                            "properties": {
+                              "data": {
+                                "type": "array",
+                                "description": "检索结果列表",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "knCode": {
+                                      "type": "string",
+                                      "description": "知识库编码"
+                                    },
+                                    "filePath": {
+                                      "type": "string",
+                                      "description": "文档的全路径（以\"/\"开头，不包括知识库名称）"
+                                    },
+                                    "chunkNo": {
+                                      "type": "integer",
+                                      "description": "切片在文档中的编号"
+                                    },
+                                    "chunkId": {
+                                      "type": "integer",
+                                      "description": "切片的唯一编号"
+                                    },
+                                    "chunkText": {
+                                      "type": "string",
+                                      "description": "切片的文本内容"
+                                    },
+                                    "score": {
+                                      "type": "integer",
+                                      "description": "融合得分"
+                                    },
+                                    "imagePath": {
+                                      "type": "string",
+                                      "description": "图片的短地址URL，知识引擎负责将短地址URL映射为实际的地址URL"
+                                    },
+                                    "startLine": {
+                                      "type": "integer",
+                                      "description": "Markdown起始行"
+                                    },
+                                    "endLine": {
+                                      "type": "integer",
+                                      "description": "Markdown结束行"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "openapiSchema": {
+        "openapi": "3.0.1",
+        "info": {
+          "title": "构建状态查询",
+          "description": "查询文档的构建状态，包括状态，当前环节的描述",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://10.10.196.92:19900/knowledge/knowledgeService/"
+          }
+        ],
+        "paths": {
+          "/api/v1/fileBuildStatus": {
+            "post": {
+              "operationId": "buildStatusQuery",
+              "summary": "构建状态查询",
+              "description": "查询文档的构建状态，包括状态，当前环节的描述",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": [
+                        "knCode",
+                        "filePath"
+                      ],
+                      "properties": {
+                        "knCode": {
+                          "type": "string",
+                          "description": "知识库编码"
+                        },
+                        "filePath": {
+                          "type": "string",
+                          "description": "需查询状态的文件的全路径（以\"/\"开头，不包括知识库名称）"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "操作成功",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "resultCode": {
+                            "type": "string",
+                            "description": "接口状态码，0成功，非0失败"
+                          },
+                          "resultMsg": {
+                            "type": "string",
+                            "description": "接口返回说明"
+                          },
+                          "resultObject": {
+                            "type": "object",
+                            "properties": {
+                              "status": {
+                                "type": "string",
+                                "description": "状态"
+                              },
+                              "currentStep": {
+                                "type": "string",
+                                "description": "当前环节"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

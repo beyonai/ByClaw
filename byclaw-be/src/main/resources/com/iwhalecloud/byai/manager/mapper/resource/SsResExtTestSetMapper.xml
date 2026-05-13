@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.SsResExtTestSetMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.resource.SsResExtTestSet">
+        <id column="test_set_id" property="testSetId" />
+        <result column="resource_id" property="resourceId" />
+        <result column="batch_id" property="batchId" />
+        <result column="file_url" property="fileUrl" />
+        <result column="file_id" property="fileId" />
+        <result column="file_name" property="fileName" />
+        <result column="process_status" property="processStatus" />
+        <result column="fail_reason" property="failReason" />
+        <result column="test_set_accuracy" property="testSetAccuracy" />
+        <result column="test_set_intent_recognition_accuracy" property="testSetIntentRecognitionAccuracy" />
+        <result column="create_by" property="createBy" />
+        <result column="create_time" property="createTime" />
+        <result column="update_time" property="updateTime" />
+    </resultMap>
+
+    <!-- SsResExtTestSetVo查询映射结果 -->
+    <resultMap id="SsResExtTestSetVoResultMap" type="com.iwhalecloud.byai.manager.vo.resource.SsResExtTestSetVo">
+        <id column="test_set_id" property="testSetId" />
+        <result column="resource_id" property="resourceId" />
+        <result column="batch_id" property="batchId" />
+        <result column="file_url" property="fileUrl" />
+        <result column="file_id" property="fileId" />
+        <result column="file_name" property="fileName" />
+        <result column="process_status" property="processStatus" />
+        <result column="process_status_name" property="processStatusName" />
+        <result column="fail_reason" property="failReason" />
+        <result column="test_set_accuracy" property="testSetAccuracy" />
+        <result column="test_set_intent_recognition_accuracy" property="testSetIntentRecognitionAccuracy" />
+        <result column="create_by" property="createBy" />
+        <result column="create_time" property="createTime" />
+        <result column="update_time" property="updateTime" />
+    </resultMap>
+
+    <!-- 通用查询结果-->
+    <sql id="Base_Column_List">
+        test_set_id, resource_id, batch_id, file_url, file_id, file_name,
+        process_status, fail_reason,
+        test_set_accuracy, test_set_intent_recognition_accuracy,
+        create_by, create_time, update_time
+    </sql>
+
+    <!-- SsResExtTestSetVo查询列-->
+    <sql id="SsResExtTestSetVo_Column_List">
+        test_set_id, resource_id, batch_id,, file_url, file_id, file_name,
+        process_status,
+        CASE process_status
+            WHEN 0 THEN '测试集处理成功'
+            WHEN 1 THEN '测试集处理中'
+            WHEN 2 THEN '测试集处理失败'
+            ELSE '未知状态'
+        END AS process_status_name,
+        fail_reason,
+        test_set_accuracy, test_set_intent_recognition_accuracy,
+        create_by, create_time, update_time
+    </sql>
+
+    <!-- 根据资源ID和批次ID查询测试集记录 -->
+    <select id="selectByResourceIdAndBatchId" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List" />
+        FROM ss_res_ext_test_set
+        WHERE resource_id = #{resourceId} AND batch_id = #{batchId}
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- 根据资源ID查询最新的测试集记录 -->
+    <select id="selectLatestByResourceId" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List" />
+        FROM ss_res_ext_test_set
+        WHERE resource_id = #{resourceId} and process_status != 2
+        ORDER BY create_time DESC
+        LIMIT 1
+    </select>
+
+    <!-- 分页查询测试集记录 -->
+    <select id="selectTestSetByQo" resultMap="SsResExtTestSetVoResultMap">
+        SELECT
+        test_set_id,
+        resource_id,
+        batch_id,
+        file_url,
+        file_id,
+        file_name,
+        process_status,
+        CASE process_status
+            WHEN 0 THEN '成功'
+            WHEN 1 THEN '解析中'
+            WHEN 2 THEN '失败'
+            ELSE '未知状态'
+        END AS process_status_name,
+        fail_reason,
+        test_set_accuracy,
+        test_set_intent_recognition_accuracy,
+        create_by,
+        create_time,
+        update_time
+        FROM ss_res_ext_test_set
+        <where>
+            <if test="qo.resourceId != null">
+                AND resource_id = #{qo.resourceId}
+            </if>
+            <if test="qo.batchId != null and qo.batchId != ''">
+                AND batch_id = #{qo.batchId}
+            </if>
+            <if test="qo.processStatus != null">
+                AND process_status = #{qo.processStatus}
+            </if>
+            <if test="qo.createBy != null and qo.createBy != ''">
+                AND create_by = #{qo.createBy}
+            </if>
+            <if test="qo.createTimeStart != null and qo.createTimeStart != ''">
+                AND create_time >= #{qo.createTimeStart}
+            </if>
+            <if test="qo.createTimeEnd != null and qo.createTimeEnd != ''">
+                AND create_time <![CDATA[<=]]> #{qo.createTimeEnd}
+            </if>
+        </where>
+        ORDER BY create_time DESC
+    </select>
+
+</mapper>

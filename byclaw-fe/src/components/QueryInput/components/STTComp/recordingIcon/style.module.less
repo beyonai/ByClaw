@@ -1,0 +1,83 @@
+@line1: 6px;
+@line2: 10px;
+@line3: 20px;
+
+.wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  height: 100%;
+  width: 100%;
+  border-radius: 100%;
+
+  // background-color: rgba(22, 93, 255, 0.1);
+}
+
+.block {
+  display: inline-flex;
+  align-items: center;
+}
+
+@keyframes pillar1 {
+  0% {
+    height: @line1;
+  }
+  50% {
+    height: @line2;
+  }
+  100% {
+    height: @line1;
+  }
+}
+
+@keyframes pillar2 {
+  0% {
+    height: @line2;
+  }
+  50% {
+    height: @line3;
+  }
+  100% {
+    height: @line2;
+  }
+}
+
+@keyframes pillar3 {
+  0% {
+    height: @line3;
+  }
+  50% {
+    height: @line1;
+  }
+  100% {
+    height: @line3;
+  }
+}
+
+.pillar {
+  line-height: 1;
+  margin-left: 2px;
+  width: 2.4px;
+  height: 3px;
+  border-radius: 30px;
+  display: inline-block;
+  background-color: var(--beyond-color-primary);
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  animation-duration: 1s;
+}
+.pillar:nth-child(1) {
+  margin-left: 0;
+}
+.pillar:nth-child(1),
+.pillar:nth-child(5) {
+  animation-name: pillar1;
+}
+.pillar:nth-child(2),
+.pillar:nth-child(4) {
+  animation-name: pillar2;
+}
+.pillar:nth-child(3) {
+  animation-name: pillar3;
+}

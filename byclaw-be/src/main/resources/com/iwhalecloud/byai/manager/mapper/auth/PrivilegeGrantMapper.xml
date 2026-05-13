@@ -1,0 +1,1006 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper">
+
+    <resultMap id="privilegeGrantResultMap" type="com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant">
+        <result column="privilege_grant_id" property="privilegeGrantId"/>
+        <result column="grant_type" property="grantType"/>
+        <result column="oper_type" property="operType"/>
+        <result column="grant_obj_type" property="grantObjType"/>
+        <result column="grant_obj_id" property="grantObjId"/>
+        <result column="grant_to_obj_id" property="grantToObjId"/>
+        <result column="grant_to_obj_type" property="grantToObjType"/>
+        <result column="grant_to_type" property="grantToType"/>
+        <result column="allow_unsubscribe" property="allowUnsubscribe"/>
+    </resultMap>
+
+    <resultMap id="privilegeGrantVoResultMap" type="com.iwhalecloud.byai.manager.vo.auth.PrivilegeGrantVo">
+        <result column="privilege_grant_id" property="privilegeGrantId"/>
+        <result column="grant_type" property="grantType"/>
+        <result column="oper_type" property="operType"/>
+        <result column="grant_obj_type" property="grantObjType"/>
+        <result column="grant_obj_id" property="grantObjId"/>
+        <result column="grant_obj_name" property="grantObjName"/>
+        <result column="grant_obj_desc" property="grantObjDesc"/>
+        <result column="grant_to_obj_id" property="grantToObjId"/>
+        <result column="grant_to_obj_type" property="grantToObjType"/>
+        <result column="grant_to_type" property="grantToType"/>
+        <result column="allow_unsubscribe" property="allowUnsubscribe"/>
+    </resultMap>
+
+
+    <resultMap id="subNumMap" type="java.util.Map">
+        <result column="agentId" property="agentId"/>
+        <result column="subNum" property="subNum"/>
+    </resultMap>
+
+
+
+    <resultMap id="manPrivDto" type="com.iwhalecloud.byai.manager.vo.auth.ManPrivDto">
+        <result column="grant_obj_id" property="grantObjId"/>
+        <result column="grant_to_obj_id" property="grantToObjId"/>
+        <result column="user_name" property="userName"/>
+    </resultMap>
+
+    <resultMap id="authVoResultMap" type="com.iwhalecloud.byai.manager.vo.auth.AuthVo">
+        <result column="privilege_grant_id" property="privilegeGrantId"/>
+        <result column="grant_type" property="grantType"/>
+        <result column="oper_type" property="operType"/>
+        <result column="grant_obj_type" property="grantResourceType"/>
+        <result column="grant_obj_id" property="grantResourceId"/>
+        <result column="createdBy" property="createdBy"/>
+        <result column="memberName" property="memberName"/>
+        <result column="grant_to_obj_id" property="grantToObjId"/>
+        <result column="grant_to_obj_type" property="grantToObjType"/>
+        <result column="grant_to_type" property="grantToType"/>
+    </resultMap>
+
+    <!-- listResourceAuth：ss_resource 列 → ResourceAuthVo；同列可写入父类字段便于复用 AuthVo 语义 -->
+    <resultMap id="resourceAuthVoResultMap" type="com.iwhalecloud.byai.manager.vo.auth.ResourceAuthVo">
+        <result column="resource_id" property="resourceId"/>
+        <result column="resource_id" property="grantResourceId"/>
+        <result column="system_code" property="systemCode"/>
+        <result column="resource_source_pk_id" property="resourceSourcePkId"/>
+        <result column="resource_biz_type" property="resourceBizType"/>
+        <result column="resource_biz_type" property="grantResourceType"/>
+        <result column="resource_type" property="resourceType"/>
+        <result column="resource_name" property="resourceName"/>
+        <result column="resource_desc" property="resourceDesc"/>
+        <result column="avatar" property="avatar"/>
+        <result column="sample" property="sample"/>
+        <result column="tags" property="tags"/>
+        <result column="resource_version_id" property="resourceVersionId"/>
+        <result column="host_type" property="hostType"/>
+        <result column="catalog_id" property="catalogId"/>
+        <result column="man_org_id" property="manOrgId"/>
+        <result column="man_user_id" property="manUserId"/>
+        <result column="index_list" property="indexList"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+        <result column="com_acct_id" property="comAcctId"/>
+        <result column="resource_status" property="resourceStatus"/>
+        <result column="resource_d_verid" property="resourceDVerid"/>
+        <result column="resource_r_verid" property="resourceRVerid"/>
+        <result column="resource_code" property="resourceCode"/>
+        <result column="publish_time" property="publishTime"/>
+        <result column="shelf_time" property="shelfTime"/>
+        <result column="unshelf_time" property="unshelfTime"/>
+        <result column="auth_status" property="authStatus"/>
+        <result column="publish_portal" property="publishPortal"/>
+        <result column="parent_resource_id" property="parentResourceId"/>
+        <result column="publish_type" property="publishType"/>
+        <result column="owner_type" property="ownerType"/>
+        <result column="catalog_name" property="catalogName"/>
+        <result column="createUserName" property="createUserName"/>
+        <result column="hasPermission" property="hasPermission"/>
+        <result column="manOrgName" property="manOrgName"/>
+    </resultMap>
+
+    <!-- listDigitalEmployeeAuthByUser：查询列 → DigitalEmployeeAuthVo -->
+    <resultMap id="digitalEmployeeAuthVoResultMap" type="com.iwhalecloud.byai.manager.vo.auth.DigitalEmployeeAuthVo">
+        <result column="obj_id" property="objId"/>
+        <result column="resource_id_str" property="resourceIdStr"/>
+        <result column="resource_id" property="resourceId"/>
+        <result column="resource_name" property="name"/>
+        <result column="resource_desc" property="intro"/>
+        <result column="has_permission" property="hasPermission"/>
+        <result column="create_time" property="createTime"/>
+        <result column="resource_type" property="resourceType"/>
+        <result column="resource_biz_type" property="resourceBizType"/>
+        <result column="create_by" property="createBy"/>
+        <result column="resource_status" property="resourceStatus"/>
+        <result column="catalog_name" property="catalogName"/>
+        <result column="tags" property="tags"/>
+        <result column="man_org_id" property="manOrgId"/>
+        <result column="man_org_name" property="manOrgName"/>
+        <result column="shelf_time" property="shelfTime"/>
+        <result column="unshelf_time" property="unshelfTime"/>
+        <result column="publish_time" property="publishTime"/>
+        <result column="red_count" property="redCount"/>
+        <result column="black_count" property="blackCount"/>
+        <result column="force_use_count" property="forceUseCount"/>
+        <result column="available_use_count" property="availableUseCount"/>
+        <result column="allow_manage_count" property="allowManageCount"/>
+    </resultMap>
+
+
+    <resultMap id="privilegeGrantAuditVoResultMap" type="com.iwhalecloud.byai.manager.vo.auth.PrivilegeGrantAuditVo">
+        <result column="grant_obj_id" property="grantObjId" />
+        <result column="status_cd" property="statusCd" />
+        <result column="grant_to_type" property="grantToType" />
+        <result column="grant_to_obj_id" property="grantToObjId" />
+        <result column="grant_to_obj_type" property="grantToObjType" />
+        <result column="path_code" property="pathCode" />
+    </resultMap>
+
+
+    <select id="findPrivilegeByQo" resultMap="privilegeGrantResultMap">
+        select
+        a.privilege_grant_id,
+        a.grant_type,
+        a.oper_type,
+        a.grant_obj_type,
+        a.grant_obj_id,
+        a.eff_date,
+        a.exp_date,
+        a.status_cd,
+        a.grant_to_obj_type,
+        a.grant_to_obj_id,
+        a.grant_to_type,
+        a.allow_unsubscribe
+        from au_privilege_grant a
+        <where>
+            <if test="grantType !=null and grantType !=''">
+                AND a.grant_type =#{grantType}
+            </if>
+            <if test="grantTypes !=null and grantTypes.size() > 0">
+                <foreach collection="grantTypes" open="AND a.grant_type IN(" close=")" item="item" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="grantObjType !=null and grantObjType !=''">
+                AND a.grant_obj_type =#{grantObjType}
+            </if>
+            <if test="grantObjTypes != null and grantObjTypes.size() > 0">
+                <foreach collection="grantObjTypes" open="AND a.grant_obj_type IN(" close=")" item="item" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="grantObjId !=null">
+                AND a.grant_obj_id =#{grantObjId}
+            </if>
+            <if test="grantObjIds != null and grantObjIds.size() > 0">
+                <foreach collection="grantObjIds" open="AND a.grant_obj_id IN(" close=")" item="item" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="color != null and color != ''">
+                AND a.grant_to_type = #{color}
+            </if>
+            <if test="grantToObjType !=null and grantToObjType !=''">
+                AND a.grant_to_obj_type =#{grantToObjType}
+            </if>
+            <if test="grantToObjIds != null and grantToObjIds.size() > 0">
+                <foreach collection="grantToObjIds" open="AND a.grant_to_obj_id IN (" close=")" item="item" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="grantToObjId != null">
+                AND a.grant_to_obj_id =#{grantToObjId}
+            </if>
+            <choose>
+                <when test="statusCd != null and statusCd !=''">
+                    AND a.status_cd =#{statusCd}
+                </when>
+                <otherwise>
+                    AND status_cd ='A'
+                </otherwise>
+            </choose>
+        </where>
+    </select>
+
+    <select id="listDigitalEmployeeAuth" resultMap="authVoResultMap">
+        select grant_type,
+        oper_type,
+        grant_obj_type,
+        grant_obj_id
+        from au_privilege_grant
+        <where>
+            and status_cd ='A' and grant_obj_type ='AGENT'
+            <if test="digitalEmployeeAuthQo.grantType !=null and digitalEmployeeAuthQo.grantType !=''">
+                and grant_type =#{digitalEmployeeAuthQo.grantType}
+            </if>
+            <if test="digitalEmployeeAuthQo.grantObjId !=null and digitalEmployeeAuthQo.grantObjId !=''">
+                and (red_to_obj_id =#{digitalEmployeeAuthQo.grantObjId}
+                or
+                black_to_obj_id = #{digitalEmployeeAuthQo.grantObjId}
+                )
+            </if>
+            <if test="digitalEmployeeAuthQo.grantToObjType !=null and digitalEmployeeAuthQo.grantToObjType !=''">
+                and (red_to_obj_type =#{digitalEmployeeAuthQo.grantToObjType}
+                or
+                black_to_obj_type =#{digitalEmployeeAuthQo.grantToObjType}
+                )
+            </if>
+        </where>
+    </select>
+
+    <select id="listResourceAuth" resultMap="resourceAuthVoResultMap">
+        select a.resource_id,
+               a.system_code,
+               a.resource_source_pk_id,
+               a.resource_biz_type,
+               a.resource_type,
+               a.resource_name,
+               a.resource_desc,
+               a.avatar,
+               a.sample,
+               a.tags,
+               a.resource_version_id,
+               a.host_type,
+               a.catalog_id,
+               a.man_org_id,
+               a.man_user_id,
+               a.index_list,
+               a.create_by,
+               a.create_time,
+               a.update_by,
+               a.update_time,
+               a.com_acct_id,
+               a.resource_status,
+               a.resource_d_verid,
+               a.resource_r_verid,
+               a.resource_code,
+               a.publish_time,
+               a.shelf_time,
+               a.unshelf_time,
+               a.auth_status,
+               a.publish_portal,
+               a.parent_resource_id,
+               a.publish_type,
+               a.owner_type,
+               b.user_name as createUserName
+        from ss_resource a
+             left join po_users b on a.create_by = b.user_id
+             left join (
+                 select grant_obj_id,
+                        sum(case when grant_to_type = 'RED' and status_cd = 'A' then 1 else 0 end) as red_count,
+                        sum(case when grant_to_type = 'BLACK' and status_cd = 'A' then 1 else 0 end) as black_count,
+                        sum(case when grant_type = 'ALLOW_MANAGE' and grant_to_type = 'RED' and status_cd = 'A' then 1 else 0 end) as allow_manage_count
+                   from au_privilege_grant
+                  where grant_type in ('AVAILABLE_USE', 'FORCE_USE', 'ALLOW_MANAGE')
+                    and status_cd = 'A'
+                    <trim prefix="and (" suffix=")" prefixOverrides="or">
+                        <if test="userOrgIds != null and userOrgIds.size() > 0">
+                            or (grant_to_obj_type = 'ORG'
+                                and grant_to_obj_id in
+                                <foreach collection="userOrgIds" item="orgId" open="(" separator="," close=")">
+                                    #{orgId}
+                                </foreach>
+                                )
+                        </if>
+                        <if test="userId != null">
+                            or (grant_to_obj_type = 'USER' and grant_to_obj_id = #{userId})
+                        </if>
+                        <if test="userPositionIds != null and userPositionIds.size() > 0">
+                            or (grant_to_obj_type = 'POST'
+                                and grant_to_obj_id in
+                                <foreach collection="userPositionIds" item="positionId" open="(" separator="," close=")">
+                                    #{positionId}
+                                </foreach>
+                                )
+                        </if>
+                        <if test="userStationId != null">
+                            or (grant_to_obj_type = 'STATION' and grant_to_obj_id = #{userStationId})
+                        </if>
+                    </trim>
+                  group by grant_obj_id
+             ) k
+                on a.resource_id = k.grant_obj_id
+             left join (
+                 select grant_obj_id,
+                        count(1) as pending_apply_count,
+                        sum(case when grant_to_obj_type = 'USER' and grant_to_obj_id = #{userId} then 1 else 0 end) as my_pending_apply_count
+                   from au_privilege_grant
+                  where grant_type = 'AVAILABLE_USE'
+                    and grant_to_type = 'RED'
+                    and status_cd = 'P'
+                  group by grant_obj_id
+             ) p
+                on a.resource_id = p.grant_obj_id
+        <where>
+            <!-- 基础过滤条件 -->
+            and (
+                <if test="defaultPersonalResourceId != null and (resourceStatus == null or resourceStatus == '' or resourceStatus == '2')">
+                    (a.owner_type = 'personal_default' and a.resource_id = #{defaultPersonalResourceId})
+                    or
+                </if>
+                <choose>
+                    <when test="resourceStatus != null and resourceStatus != ''">
+                        a.resource_status = #{resourceStatus}
+                    </when>
+                    <when test="resourceStatus != null and resourceStatus == ''">
+                        1 = 1
+                    </when>
+                    <otherwise>
+                        a.resource_status = 2
+                    </otherwise>
+                </choose>
+            )
+            and (k.black_count = 0 or k.black_count is null)
+            <choose>
+                <when test="includeAllEnterpriseOwnerType == true">
+                    and a.owner_type = 'enterprise'
+                </when>
+                <when test="ownerType == 'personal' and includeDefaultOwnerType == true">
+                    and (
+                        (a.owner_type = 'personal' and (k.red_count > 0 or a.create_by = #{userId}))
+                        <if test="defaultPersonalResourceId != null">
+                            or (a.owner_type = 'personal_default' and a.resource_id = #{defaultPersonalResourceId})
+                        </if>
+                    )
+                </when>
+                <otherwise>
+                    and (
+                        k.red_count > 0
+                        or a.create_by = #{userId}
+                    )
+                    <if test="ownerType != null and ownerType != ''">
+                        and a.owner_type = #{ownerType}
+                    </if>
+                </otherwise>
+            </choose>
+            <if test="resourceBizTypeList != null and resourceBizTypeList.size() > 0">
+                and a.resource_biz_type in
+                <foreach collection="resourceBizTypeList" item="bizType" open="(" separator="," close=")">
+                    #{bizType}
+                </foreach>
+            </if>
+            <if test="catalogIds != null and catalogIds.size() > 0">
+                and a.catalog_id in
+                <foreach collection="catalogIds" item="catalogIdItem" open="(" separator="," close=")">
+                    #{catalogIdItem}
+                </foreach>
+            </if>
+            <if test="(catalogIds == null or catalogIds.size() == 0) and catalogId != null">
+                and a.catalog_id = #{catalogId}
+            </if>
+            <if test="ownerType == 'enterprise' and publishOrgIds != null and publishOrgIds.size() > 0">
+                and a.man_org_id in
+                <foreach collection="publishOrgIds" item="orgId" open="(" separator="," close=")">
+                    #{orgId}
+                </foreach>
+            </if>
+            <choose>
+                <when test="permission != null and permission == 'CREATED_BY_ME'">
+                    and a.create_by = #{userId}
+                </when>
+                <when test="permission != null and permission == 'AUTHORIZED_TO_ME'">
+                    and (a.create_by is null or a.create_by != #{userId})
+                    and (k.red_count > 0 or k.allow_manage_count > 0)
+                </when>
+                <when test="permission != null and permission == 'PENDING_MY_APPROVAL'">
+                    and coalesce(p.pending_apply_count, 0) > 0
+                    and (
+                        a.create_by = #{userId}
+                        or k.allow_manage_count > 0
+                        <if test="platformManager == true">
+                            or 1 = 1
+                        </if>
+                        <if test="managerOrgPathCodes != null and managerOrgPathCodes.size() > 0">
+                            or exists (
+                                select 1
+                                  from po_organization org
+                                 where org.org_id = a.man_org_id
+                                   and (
+                                    <foreach collection="managerOrgPathCodes" item="pathCode" separator=" or ">
+                                        org.path_code = #{pathCode}
+                                        or org.path_code like concat(#{pathCode}, '.%')
+                                    </foreach>
+                                   )
+                            )
+                        </if>
+                        <if test="defaultPersonalResourceId != null">
+                            or (a.owner_type = 'personal_default' and a.resource_id = #{defaultPersonalResourceId})
+                        </if>
+                    )
+                </when>
+                <when test="permission != null and permission == 'APPLIED_BY_ME'">
+                    and coalesce(p.my_pending_apply_count, 0) > 0
+                </when>
+            </choose>
+            <if test="keyword != null and keyword != ''">
+                and (a.resource_name like concat('%', #{keyword}, '%')
+                    or a.resource_desc like concat('%', #{keyword}, '%'))
+            </if>
+        </where>
+        order by COALESCE(a.update_time, '1970-01-01 00:00:00') desc, a.create_time desc
+    </select>
+
+    <select id="findPrivilegeGrant" resultMap="privilegeGrantResultMap">
+        select privilege_grant_id,
+        grant_type,
+        oper_type,
+        grant_obj_type,
+        grant_obj_id,
+        grant_to_obj_type,
+        grant_to_obj_id,
+        grant_to_type
+        from au_privilege_grant
+        <where>
+            and status_cd ='A'
+            and grant_to_obj_id is not null and grant_to_obj_type is not null
+            <if test="grantType !=null and grantType !=''">
+                and grant_type =#{grantType}
+            </if>
+            <if test="grantObjType !=null and grantObjType !=''">
+                and grant_obj_type =#{grantObjType}
+            </if>
+            <if test="grantObjId !=null and grantObjId !=''">
+                and grant_obj_id =#{grantObjId}
+            </if>
+            <if test="color !=null and color !=''">
+                and grant_to_type =#{color}
+            </if>
+        </where>
+    </select>
+
+    <select id="findAllowManagePrivilegeGrant" resultType="java.lang.Long">
+        select
+        grant_obj_id
+        from au_privilege_grant
+        where status_cd = 'A'
+        and grant_type in('ALLOW_MANAGE','OWNER')
+        and grant_to_type ='RED'
+        and grant_to_obj_type = 'USER'
+        and grant_to_obj_id =  #{userId}
+        <if test="grantObjTypes != null and grantObjTypes.size() > 0">
+            and grant_obj_type in
+            <foreach collection="grantObjTypes" item="item" open="(" close=")" separator=",">
+                #{item}
+            </foreach>
+        </if>
+    </select>
+
+    <select id="getAuthList" resultMap="authVoResultMap">
+        SELECT
+        a.privilege_grant_id,
+        a.grant_type,
+        a.oper_type,
+        a.grant_obj_type,
+        a.grant_obj_id,
+        a.grant_to_obj_id,
+        a.grant_to_obj_type,
+        a.grant_to_type,
+        CASE
+        WHEN a.grant_to_obj_type = 'ORG' THEN o.org_name
+        WHEN a.grant_to_obj_type = 'USER' THEN u.user_name
+        WHEN a.grant_to_obj_type = 'POST' THEN p.position_name
+        ELSE NULL
+        END AS memberName,
+        add_user.user_name AS createdBy
+        FROM (
+        SELECT
+        privilege_grant_id,
+        grant_type,
+        grant_to_obj_id,
+        grant_to_obj_type,
+        grant_to_type,
+        oper_type,
+        grant_obj_type,
+        grant_obj_id,
+        create_staff
+        FROM au_privilege_grant
+        WHERE status_cd = 'A'
+        and grant_to_obj_id is not null and grant_to_type = 'RED'
+        and grant_type != 'FORCE_USE'
+        <if test="priviledgeQo.grantObjType != null and priviledgeQo.grantObjType != ''">
+            AND grant_obj_type = #{priviledgeQo.grantObjType}
+        </if>
+        <if test="priviledgeQo.grantObjId != null and priviledgeQo.grantObjId != ''">
+            AND grant_obj_id = #{priviledgeQo.grantObjId}
+        </if>
+        ) a
+        LEFT JOIN po_organization o ON a.grant_to_obj_id = o.org_id
+        LEFT JOIN po_users u ON a.grant_to_obj_id = u.user_id
+        LEFT JOIN po_users add_user ON a.create_staff = add_user.user_id
+        LEFT JOIN po_position p on a.grant_to_obj_id = p.position_id
+        <if test="priviledgeQo.keyWord != null and priviledgeQo.keyWord != ''">
+            WHERE (
+            o.org_name LIKE CONCAT('%', #{priviledgeQo.keyWord}, '%') OR
+            u.user_name LIKE CONCAT('%', #{priviledgeQo.keyWord}, '%') OR
+            p.position_name LIKE CONCAT('%', #{priviledgeQo.keyWord}, '%')
+            )
+        </if>
+    </select>
+
+    <resultMap id="manOrgDTOResultMap" type="com.iwhalecloud.byai.manager.dto.auth.ManOrgDTO">
+        <result column="grant_obj_id" property="grantObjId"/>
+        <result column="grant_obj_type" property="grantObjType"/>
+        <result column="grant_obj_name" property="grantObjName"/>
+    </resultMap>
+
+    <resultMap id="resourceMemberVoResultMap" type="com.iwhalecloud.byai.manager.vo.auth.ResourceMemberItemVo">
+        <result column="grant_to_obj_type" property="grantToObjType"/>
+        <result column="grant_to_obj_id" property="grantToObjId"/>
+        <result column="grant_to_obj_name" property="grantToObjName"/>
+        <result column="grant_type" property="grantType"/>
+        <result column="grant_to_type" property="grantToType"/>
+    </resultMap>
+
+    <select id="listMangerOrgUseDetail" resultMap="manOrgDTOResultMap">
+        select a.grant_obj_id,
+               a.grant_obj_type,
+               b.user_name grant_obj_name
+        from au_privilege_grant a
+                 join po_users b on a.grant_obj_id = b.user_id
+        where grant_type = 'AVAILABLE_USE'
+          and status_cd = 'A'
+          and grant_obj_type = 'MAN_USER'
+          and grant_to_type = 'RED'
+          and grant_to_obj_type = 'ORG'
+          and a.grant_to_obj_id = #{grantToObjId}
+    </select>
+
+    <select id="queryResourceMembers" resultMap="resourceMemberVoResultMap">
+        select a.grant_to_obj_type,
+               a.grant_to_obj_id,
+               a.grant_type,
+               a.grant_to_type,
+               case
+                   when a.grant_to_obj_type = 'ORG' then o.org_name
+                   when a.grant_to_obj_type = 'USER' then u.user_name
+                   when a.grant_to_obj_type = 'POST' then p.position_name
+                   when a.grant_to_obj_type = 'STATION' then s.station_name
+                   else null
+               end as grant_to_obj_name
+          from au_privilege_grant a
+          left join po_organization o on a.grant_to_obj_id = o.org_id and a.grant_to_obj_type = 'ORG'
+          left join po_users u on a.grant_to_obj_id = u.user_id and a.grant_to_obj_type = 'USER'
+          left join po_position p on a.grant_to_obj_id = p.position_id and a.grant_to_obj_type = 'POST'
+          left join po_station s on a.grant_to_obj_id = s.station_id and a.grant_to_obj_type = 'STATION'
+         where a.grant_obj_id = #{resourceId}
+           and a.grant_obj_type = #{resourceBizType}
+           and a.status_cd = 'A'
+           and a.oper_type = 'READ'
+           and a.grant_type in
+           <foreach collection="grantTypes" item="grantType" open="(" separator="," close=")">
+               #{grantType}
+           </foreach>
+    </select>
+
+    <resultMap id="userManageOrgResultMap" type="com.iwhalecloud.byai.common.login.bean.UserManageOrg">
+        <result column="user_id" property="userId" />
+        <result column="org_id" property="orgId" />
+        <result column="org_name" property="orgName" />
+    </resultMap>
+
+    <select id="findUserManageOrg" resultMap="userManageOrgResultMap">
+        select a.grant_to_obj_id org_id,
+               b.org_name,
+               a.grant_obj_id  user_id
+        from au_privilege_grant a
+                 join po_organization b on a.grant_to_obj_id = b.org_id
+        where status_cd = 'A'
+          and grant_type = 'AVAILABLE_USE'
+          and grant_to_type = 'RED'
+          and grant_to_obj_type = 'ORG'
+          and grant_obj_type = 'MAN_USER'
+          and grant_obj_id = #{userId}
+    </select>
+
+    <select id="listOwnResourceOrEmployee" resultType="long">
+        select a.grant_obj_id
+        from au_privilege_grant a
+        join po_organization b
+        on a.grant_to_obj_id = b.org_id
+        <where>
+            and a.grant_type = 'OWNER'
+            and a.status_cd = 'A'
+            and a.grant_to_obj_type = 'ORG'
+            <if test="grantObjTypes != null and grantObjTypes.size() >0">
+                <foreach collection="grantObjTypes" item="item" open="and a.grant_obj_type in(" close=")" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="orgId !=null">
+                <choose>
+                    <when test="_databaseId == 'postgresql'">
+                        and STRPOS(concat('.', b.path_code, '.'), concat('.', #{orgId}, '.')) > 0
+                    </when>
+                    <otherwise>
+                        and  INSTR(concat('.', b.path_code, '.'), concat('.', #{orgId}, '.')) > 0
+                    </otherwise>
+                </choose>
+            </if>
+            <if test="mangerOrgIds != null and mangerOrgIds.size() >0">
+                <foreach collection="mangerOrgIds" item="orgId" open=" and (" close=")" separator="or">
+                    <choose>
+                        <when test="_databaseId == 'postgresql'">
+                            STRPOS(concat('.', b.path_code, '.'), concat('.', #{orgId}, '.')) > 0
+                        </when>
+                        <otherwise>
+                            INSTR(concat('.', b.path_code, '.'), concat('.', #{orgId}, '.')) > 0
+                        </otherwise>
+                    </choose>
+                </foreach>
+            </if>
+        </where>
+        group by a.grant_obj_id
+    </select>
+
+    <select id="queryPriviledgeWithOrgLevel" resultMap="privilegeGrantResultMap">
+        select
+        a.privilege_grant_id,
+        a.grant_type,
+        a.oper_type,
+        a.grant_obj_type,
+        a.grant_obj_id,
+        a.grant_to_obj_id,
+        a.grant_to_obj_type,
+        a.grant_to_type
+        from
+        au_privilege_grant a
+        left join
+        po_organization b
+        on a.grant_to_obj_id = b.org_id
+        and a.grant_to_obj_type = 'ORG'
+        where
+        a.status_cd = 'A'
+        <if test="grantType != null and grantType !=''">
+            and a.grant_type = #{grantType}
+        </if>
+        <if test="grantObjId != null and grantObjId !=''">
+            and a.grant_obj_id = #{grantObjId}
+        </if>
+        order by b.org_level asc,a.create_date desc
+    </select>
+
+    <select id="findPrivilegeGrantAuditVo" resultMap="privilegeGrantAuditVoResultMap">
+        select a.grant_obj_id,
+        a.grant_to_type,
+        a.grant_to_obj_id,
+        a.grant_to_obj_type,
+        a.status_cd,
+        b.path_code
+        from au_privilege_grant a
+        left join po_organization b on a.grant_to_obj_id = b.org_id and a.grant_to_obj_type = 'ORG'
+        where a.grant_type = 'AVAILABLE_USE'
+        and a.oper_type = 'READ'
+        and a.grant_obj_type = 'DIG_EMPLOYEE'
+        and a.status_cd in ('A', 'S')
+        <if test="grantObjIdList != null and grantObjIdList.size() >0">
+            and a.grant_obj_id in
+            <foreach collection="grantObjIdList" item="item" open="(" close=")" separator=",">
+                #{item}
+            </foreach>
+        </if>
+    </select>
+
+
+    <!-- 联表查询权限授权记录（包含组织和驻地路径信息�?-->
+    <select id="selectResourceGrantsWithOrgPath" resultType="com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrantWithOrgPath">
+        SELECT
+        a.grant_obj_id,
+        a.grant_obj_type,
+        a.grant_to_type,
+        a.grant_to_obj_id,
+        a.grant_to_obj_type,
+        a.status_cd,
+        b.path_code as org_path,
+        c.station_id_path as station_path
+        FROM au_privilege_grant a
+        LEFT JOIN po_organization b ON a.grant_to_obj_id = b.org_id AND a.grant_to_obj_type = 'ORG'
+        LEFT JOIN po_station c ON a.grant_to_obj_id = c.station_id AND a.grant_to_obj_type = 'STATION'
+        WHERE a.grant_obj_id IN
+        <foreach collection="permissionDto.resourceIds" item="resourceId" open="(" separator="," close=")">
+            #{resourceId}
+        </foreach>
+        AND a.status_cd = 'A'
+        AND a.oper_type = 'READ'
+        AND a.grant_type IN
+        <foreach collection="permissionDto.grantTypes" item="grantType" open="(" separator="," close=")">
+            #{grantType}
+        </foreach>
+    </select>
+
+
+    <select id="getAllAdminUserIds" resultType="java.lang.Long">
+        select
+            grant_to_obj_id
+        from
+            au_privilege_grant
+        where
+            grant_type = 'ALLOW_MANAGE'
+            and grant_to_type = 'RED'
+            and grant_obj_id = #{resourceId}
+            and status_cd = 'A'
+    </select>
+    <select id="findPrivilegeGrantByCondition" resultMap="privilegeGrantVoResultMap">
+        select
+        a.privilege_grant_id,
+        a.grant_type,
+        a.oper_type,
+        a.grant_obj_type,
+        a.grant_obj_id,
+        sr.resource_name as grant_obj_name,
+        sr.resource_desc as grant_obj_desc,
+        a.eff_date,
+        a.exp_date,
+        a.status_cd,
+        a.grant_to_obj_type,
+        a.grant_to_obj_id,
+        a.grant_to_type,
+        a.allow_unsubscribe
+        from au_privilege_grant a left join ss_resource sr on a.grant_obj_id = sr.resource_id
+        <where>
+            <if test="grantType !=null and grantType !=''">
+                AND a.grant_type =#{grantType}
+            </if>
+            <if test="grantTypes !=null and grantTypes.size() > 0">
+                <foreach collection="grantTypes" open="AND a.grant_type IN(" close=")" item="item" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="grantObjType !=null and grantObjType !=''">
+                AND a.grant_obj_type =#{grantObjType}
+            </if>
+            <if test="grantObjTypes != null and grantObjTypes.size() > 0">
+                <foreach collection="grantObjTypes" open="AND a.grant_obj_type IN(" close=")" item="item" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="grantObjId !=null">
+                AND a.grant_obj_id =#{grantObjId}
+            </if>
+            <if test="grantObjIds != null and grantObjIds.size() > 0">
+                <foreach collection="grantObjIds" open="AND a.grant_obj_id IN(" close=")" item="item" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="color != null and color != ''">
+                AND a.grant_to_type = #{color}
+            </if>
+            <if test="grantToObjType !=null and grantToObjType !=''">
+                AND a.grant_to_obj_type =#{grantToObjType}
+            </if>
+            <if test="grantToObjIds != null and grantToObjIds.size() > 0">
+                <foreach collection="grantToObjIds" open="AND a.grant_to_obj_id IN (" close=")" item="item" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="grantToObjId != null">
+                AND a.grant_to_obj_id =#{grantToObjId}
+            </if>
+            <choose>
+                <when test="statusCd != null and statusCd !=''">
+                    AND a.status_cd =#{statusCd}
+                </when>
+                <otherwise>
+                    AND status_cd ='A'
+                </otherwise>
+            </choose>
+        </where>
+    </select>
+
+    <select id="getAgentSubNum" resultMap="subNumMap">
+        select
+            grant_obj_id as agentId,
+            count(1)  as subNum
+        from
+            au_privilege_grant
+        where
+            grant_obj_type ='DIG_EMPLOYEE'
+          and
+            grant_type = 'AVAILABLE_USE'
+          and
+            status_cd = 'A'
+          and
+            grant_to_type = 'RED'
+          and
+            grant_to_obj_type = 'USER'
+        group by grant_obj_id;
+    </select>
+
+
+    <select id="queryAllManPrivInfo" resultMap="manPrivDto">
+        select
+            a.grant_obj_id,
+            a.grant_to_obj_id,
+            b.user_name
+        from
+            au_privilege_grant a
+        left join
+            po_users b
+        on
+            a.grant_to_obj_id = b.user_id
+        where
+            grant_type = 'ALLOW_MANAGE'
+          and grant_to_obj_type ='USER'
+          and status_cd = 'A'
+          <if test="resourceIds != null and resourceIds.size()>0">
+            and grant_obj_id in
+            <foreach collection="resourceIds" open="(" item="item" close=")" separator=",">
+                #{item}
+            </foreach>
+          </if>
+    </select>
+
+
+    <select id="listResource" resultMap="resourceAuthVoResultMap">
+        SELECT
+            a.resource_id,
+            a.system_code,
+            a.resource_source_pk_id,
+            a.resource_biz_type,
+            a.resource_type,
+            a.resource_name,
+            a.resource_code,
+            a.resource_desc,
+            a.tags,
+            a.catalog_id,
+            a.man_org_id,
+            a.man_user_id,
+            a.index_list,
+            a.create_by,
+            a.create_time,
+            a.com_acct_id,
+            a.resource_status,
+            a.publish_time,
+            a.shelf_time,
+            a.unshelf_time,
+            b.catalog_name,
+            c.user_name AS createUserName,
+            d.org_name AS manOrgName,
+            CASE
+                WHEN (k.black_count = 0 OR k.black_count IS NULL) AND k.red_count > 0 THEN TRUE
+                ELSE FALSE
+            END AS hasPermission
+        FROM ss_resource a
+            LEFT JOIN ss_resource_catalog b ON a.catalog_id = b.catalog_id
+            LEFT JOIN po_users c ON a.create_by = c.user_id
+            LEFT JOIN po_organization d ON a.man_org_id = d.org_id
+            LEFT JOIN (
+                SELECT
+                    grant_obj_id,
+                    SUM(CASE WHEN grant_to_type = 'RED' AND status_cd = 'A' THEN 1 ELSE 0 END) AS red_count,
+                    SUM(CASE WHEN grant_to_type = 'BLACK' AND status_cd = 'A' THEN 1 ELSE 0 END) AS black_count
+                FROM au_privilege_grant
+                WHERE grant_type IN ('AVAILABLE_USE', 'FORCE_USE','ALLOW_MANAGE')
+                    <if test="grantResourceTypeList != null and grantResourceTypeList.size() > 0">
+                        <foreach collection="grantResourceTypeList" item="item" open="AND grant_obj_type IN (" separator="," close=")">
+                            #{item}
+                        </foreach>
+                    </if>
+                    AND status_cd = 'A'
+                    <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                        <if test="userOrgIds != null and userOrgIds.size() > 0">
+                            OR (
+                                grant_to_obj_type = 'ORG'
+                                AND grant_to_obj_id IN
+                                <foreach collection="userOrgIds" item="orgId" open="(" separator="," close=")">
+                                    #{orgId}
+                                </foreach>
+                            )
+                        </if>
+                        <if test="userId != null">
+                            OR (grant_to_obj_type = 'USER' AND grant_to_obj_id = #{userId})
+                        </if>
+                        <if test="userPositionIds != null and userPositionIds.size() > 0">
+                            OR (
+                                grant_to_obj_type = 'POST'
+                                AND grant_to_obj_id IN
+                                <foreach collection="userPositionIds" item="positionId" open="(" separator="," close=")">
+                                    #{positionId}
+                                </foreach>
+                            )
+                        </if>
+                        <if test="userStationId != null">
+                            OR (grant_to_obj_type = 'STATION' AND grant_to_obj_id = #{userStationId})
+                        </if>
+                    </trim>
+                GROUP BY grant_obj_id
+            ) k ON a.resource_id = k.grant_obj_id
+        <where>
+            AND EXISTS (
+                SELECT 1
+                FROM au_privilege_grant au
+                WHERE au.status_cd = 'A'
+                  AND au.grant_obj_id = a.resource_id
+                <if test="grantResourceTypeList != null and grantResourceTypeList.size() > 0">
+                    <foreach collection="grantResourceTypeList" item="item" open="AND au.grant_obj_type IN (" separator="," close=")">
+                        #{item}
+                    </foreach>
+                </if>
+                <if test="grantToObjType != null and grantToObjType != ''">
+                  AND au.grant_to_obj_type = #{grantToObjType}
+                </if>
+                <if test="grantToObjId != null">
+                  AND au.grant_to_obj_id = #{grantToObjId}
+                </if>
+            )
+        </where>
+    </select>
+
+    <select id="listDigitalEmployeeAuthByUser" resultMap="digitalEmployeeAuthVoResultMap">
+        select
+            a.resource_id  as obj_id,
+            a.resource_id,
+            a.resource_biz_type,
+            a.create_by,
+            a.resource_name,
+            a.resource_desc,
+            a.create_time,
+            a.resource_status,
+            a.man_org_id,
+            a.shelf_time,
+            a.unshelf_time,
+            a.publish_time,
+            cat.catalog_name,
+            d.org_name as man_org_name,
+            coalesce(k.red_count, 0) as red_count,
+            coalesce(k.black_count, 0) as black_count,
+            coalesce(k.force_use_count, 0) as force_use_count,
+            coalesce(k.available_use_count, 0) as available_use_count,
+            coalesce(k.allow_manage_count, 0) as allow_manage_count
+        from ss_resource a
+            left join ss_resource_catalog cat
+                on a.catalog_id = cat.catalog_id
+            left join po_organization d
+                on a.man_org_id = d.org_id
+            left join (
+                select
+                    grant_obj_id,
+                    sum(case when grant_to_type = 'RED' and status_cd = 'A' then 1 else 0 end) as red_count,
+                    sum(case when grant_to_type = 'BLACK' and status_cd = 'A' then 1 else 0 end) as black_count,
+                    sum(case when grant_type = 'FORCE_USE' and status_cd = 'A' then 1 else 0 end) as force_use_count,
+                    sum(case when grant_type = 'AVAILABLE_USE' and status_cd = 'A' then 1 else 0 end) as available_use_count,
+                    sum(case when grant_type = 'ALLOW_MANAGE' and status_cd = 'A' then 1 else 0 end) as allow_manage_count
+                from au_privilege_grant
+                where grant_type in ('AVAILABLE_USE', 'FORCE_USE', 'ALLOW_MANAGE')
+                    and grant_obj_type = 'DIG_EMPLOYEE'
+                    and status_cd in ('A')
+                    <trim prefix="and (" suffix=")" prefixOverrides="or">
+                        <if test="userOrgIds != null and userOrgIds.size() > 0">
+                            or (
+                                grant_to_obj_type = 'ORG'
+                                and grant_to_obj_id in
+                                <foreach collection="userOrgIds" item="orgId" open="(" separator="," close=")">
+                                    #{orgId}
+                                </foreach>
+                            )
+                        </if>
+                        <if test="userId != null">
+                            or (grant_to_obj_type = 'USER' and grant_to_obj_id = #{userId})
+                        </if>
+                        <if test="userPositionIds != null and userPositionIds.size() > 0">
+                            or (
+                                grant_to_obj_type = 'POST'
+                                and grant_to_obj_id in
+                                <foreach collection="userPositionIds" item="positionId" open="(" separator="," close=")">
+                                    #{positionId}
+                                </foreach>
+                            )
+                        </if>
+                        <if test="userStationId != null">
+                            or (grant_to_obj_type = 'STATION' and grant_to_obj_id = #{userStationId})
+                        </if>
+                    </trim>
+                group by grant_obj_id
+            ) k
+                on a.resource_id = k.grant_obj_id
+        <where>
+            and a.resource_biz_type = 'DIG_EMPLOYEE'
+            and a.resource_status = 2
+            <if test="keyword != null and keyword != ''">
+                and a.resource_name like concat('%', #{keyword}, '%')
+            </if>
+        </where>
+        order by a.create_time desc, a.update_time desc
+    </select>
+
+</mapper>

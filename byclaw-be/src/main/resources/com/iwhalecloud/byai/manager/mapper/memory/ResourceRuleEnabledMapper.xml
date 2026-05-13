@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.memory.ResourceRuleEnabledMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.memory.ResourceRuleEnabled">
+        <id column="resource_template_id" property="resourceTemplateId" />
+        <result column="template_id" property="templateId" />
+        <result column="resource_id" property="resourceId" />
+        <result column="user_id" property="userId" />
+        <result column="resource_enabled" property="resourceEnabled" />
+        <result column="update_by" property="updateBy" />
+        <result column="create_time" property="createTime" />
+        <result column="update_time" property="updateTime" />
+    </resultMap>
+
+    <!-- 通用查询列 -->
+    <sql id="Base_Column_List">
+        resource_template_id, template_id, resource_id, user_id, resource_enabled, update_by, create_time, update_time
+    </sql>
+
+    <!-- 插入资源规则启用状态 -->
+    <insert id="insert" parameterType="com.iwhalecloud.byai.manager.entity.memory.ResourceRuleEnabled">
+        INSERT INTO resource_rule_enabled (
+            resource_template_id, template_id, resource_id, user_id, resource_enabled, update_by, create_time, update_time
+        ) VALUES (
+            #{resourceTemplateId}, #{templateId}, #{resourceId}, #{userId}, #{resourceEnabled}, #{updateBy}, #{createTime}, #{updateTime}
+        )
+    </insert>
+
+    <!-- 根据主键更新 -->
+    <update id="updateById" parameterType="com.iwhalecloud.byai.manager.entity.memory.ResourceRuleEnabled">
+        UPDATE resource_rule_enabled
+        <set>
+            <if test="templateId != null">
+                template_id = #{templateId},
+            </if>
+            <if test="resourceId != null">
+                resource_id = #{resourceId},
+            </if>
+            <if test="userId != null">
+                user_id = #{userId},
+            </if>
+            <if test="resourceEnabled != null">
+                resource_enabled = #{resourceEnabled},
+            </if>
+            <if test="updateBy != null">
+                update_by = #{updateBy},
+            </if>
+            <if test="updateTime != null">
+                update_time = #{updateTime},
+            </if>
+        </set>
+        WHERE resource_template_id = #{resourceTemplateId}
+    </update>
+
+    <!-- 根据主键删除 -->
+    <delete id="deleteById">
+        DELETE FROM resource_rule_enabled
+        WHERE resource_template_id = #{resourceTemplateId}
+    </delete>
+
+    <!-- 根据资源ID、模版ID和用户ID查询 -->
+    <select id="selectByResourceIdAndTemplateIdAndUserId" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM resource_rule_enabled
+        WHERE resource_id = #{resourceId}
+        AND template_id = #{templateId}
+        AND user_id = #{userId}
+        LIMIT 1
+    </select>
+
+    <!-- 根据资源ID和用户ID查询所有关闭状态的记录 -->
+    <select id="selectDisabledByResourceIdAndUserId" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM resource_rule_enabled
+        WHERE resource_id = #{resourceId}
+        AND user_id = #{userId}
+        AND resource_enabled = 0
+    </select>
+
+    <!-- 根据资源ID、模版ID和用户ID删除 -->
+    <delete id="deleteByResourceIdAndTemplateIdAndUserId">
+        DELETE FROM resource_rule_enabled
+        WHERE resource_id = #{resourceId}
+        AND template_id = #{templateId}
+        AND user_id = #{userId}
+    </delete>
+
+</mapper>
+

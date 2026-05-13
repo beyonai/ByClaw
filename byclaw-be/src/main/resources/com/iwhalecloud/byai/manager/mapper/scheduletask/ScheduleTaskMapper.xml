@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.scheduletask.ScheduleTaskMapper">
+  <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.scheduletask.ScheduleTask">
+    <id column="task_id" jdbcType="BIGINT" property="taskId"/>
+    <result column="schedule_task_id" jdbcType="VARCHAR" property="scheduleTaskId"/>
+    <result column="task_name" jdbcType="VARCHAR" property="taskName"/>
+    <result column="task_type" jdbcType="VARCHAR" property="taskType"/>
+    <result column="status_cd" jdbcType="VARCHAR" property="statusCd"/>
+    <result column="resource_id" jdbcType="BIGINT" property="resourceId"/>
+    <result column="executor_id" jdbcType="BIGINT" property="executorId"/>
+    <result column="execution_cycle" jdbcType="VARCHAR" property="executionCycle"/>
+    <result column="execution_frequency" jdbcType="VARCHAR" property="executionFrequency"/>
+    <result column="execution_time" jdbcType="VARCHAR" property="executionTime"/>
+    <result column="execution_content" jdbcType="VARCHAR" property="executionContent"/>
+    <result column="create_by" jdbcType="VARCHAR" property="createBy"/>
+    <result column="create_time" jdbcType="TIMESTAMP" property="createTime"/>
+    <result column="update_by" jdbcType="VARCHAR" property="updateBy"/>
+    <result column="update_time" jdbcType="TIMESTAMP" property="updateTime"/>
+  </resultMap>
+
+  <resultMap id="ScheduleTaskVoResultMap" extends="BaseResultMap" type="com.iwhalecloud.byai.manager.vo.scheduletask.ScheduleTaskVo">
+    <result column="resource_name" jdbcType="VARCHAR" property="resourceName"/>
+    <result column="executor_name" jdbcType="VARCHAR" property="executorName"/>
+  </resultMap>
+
+  <sql id="Base_Column_List">
+    task_id, schedule_task_id, task_name, task_type, status_cd, resource_id, executor_id,
+    execution_cycle, execution_frequency, execution_time, execution_content, create_time
+  </sql>
+
+  <select id="selectVoById" resultMap="ScheduleTaskVoResultMap">
+    SELECT a.task_id,
+           a.schedule_task_id,
+           a.task_name,
+           a.task_type,
+           a.status_cd,
+           a.resource_id,
+           a.executor_id,
+           a.execution_cycle,
+           a.execution_frequency,
+           a.execution_time,
+           a.execution_content,
+           a.create_time,
+           b.resource_name,
+           c.user_name AS executor_name
+    FROM byai_schedule_task a
+             LEFT JOIN ss_resource b ON a.resource_id = b.resource_id
+             LEFT JOIN po_users c ON a.executor_id = c.user_id
+        WHERE a.task_id = #{taskId}
+  </select>
+</mapper>
+

@@ -1,0 +1,10 @@
+# Assign owners per path; uncomment and replace with real @users or @org/teams
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# * @org/core
+# /byclaw-fe/ @org/fe
+# /byclaw-be/ @org/be
+# /byclaw-exe/ @org/exe
+# /byclaw-data/ @org/data
+# /byclaw-qa/ @org/qa
+# /docs/ @org/docs

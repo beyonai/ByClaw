@@ -1,0 +1,370 @@
+// @import '~antd/lib/style/themes/default.less';
+
+.employeesDrawer {
+  cursor: pointer;
+  transition: all 0.3s;
+  &:hover {
+    transform: scale(1.1);
+  }
+}
+
+.drawer {
+  :global {
+    .@{antPrefix}-drawer-header {
+      display: none;
+    }
+    .@{antPrefix}-drawer-body {
+      padding: 0;
+      overflow: hidden;
+    }
+  }
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: #fff;
+}
+
+.header {
+  display: flex;
+  padding: 12px 16px 24px;
+  // border-bottom: 1px solid #f0f0f0;
+}
+
+.headerMain {
+  display: flex;
+  flex: 1;
+  & > * {
+    margin: 4px 0;
+  }
+}
+
+.avatarWrapper {
+  display: flex;
+  align-items: center;
+}
+
+.headerContent {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  & > * {
+    margin: 4px 0;
+  }
+}
+
+.title {
+  margin: 0 !important;
+  font-size: 18px !important;
+  line-height: 26px !important;
+  font-weight: 600 !important;
+  color: rgba(0, 0, 0, 0.88);
+  text-align: center;
+}
+
+.descriptionRow {
+  text-align: center;
+}
+
+.description {
+  font-size: 14px;
+  line-height: 22px;
+  color: rgba(0, 0, 0, 0.65);
+  text-align: center;
+}
+
+.infoRow {
+  text-align: center;
+}
+
+.info {
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.headerAction {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.callButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 12px;
+  height: 32px;
+  border-radius: 19px;
+  background-color: #fff;
+  border: 1px solid #e8e8e8;
+
+  &:hover {
+    border-color: #d9d9d9;
+    color: rgba(0, 0, 0, 0.85);
+  }
+}
+
+.collapse {
+  //flex: 1;
+  overflow: auto;
+  border: none;
+  background-color: #fff;
+
+  :global {
+    .@{antPrefix}-collapse {
+      border: none;
+      background-color: transparent;
+    }
+
+    .@{antPrefix}-collapse-item {
+      border-bottom: none;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .@{antPrefix}-collapse-header {
+      padding: 4px 12px !important;
+      background: #fff;
+      height: 34px;
+    }
+
+    .@{antPrefix}-collapse-content {
+      border-top: none;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .@{antPrefix}-collapse-content-box {
+      padding: 0 !important;
+      height: 100%;
+    }
+  }
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+}
+
+.panelTitle {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.memoryEntryWrapper {
+  padding: 0 12px 12px;
+}
+
+.memoryEntry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  //padding: 8px 10px;
+  //border-radius: 10px;
+  //background: #f8f9fb;
+  cursor: pointer;
+  //transition: all 0.2s ease-in-out;
+}
+
+.memoryEntryLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memoryIcon {
+  color: #3054ff;
+  font-size: 16px;
+}
+
+.memoryArrow {
+  color: #333;
+  font-size: 12px;
+}
+
+.functionArea {
+  width: 100%;
+  padding: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.functionCard {
+  background-color: #f5f8ff;
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s;
+  flex: 0 0 calc((100% - 24px) / 3);
+  min-width: 0;
+  box-sizing: border-box;
+
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 6px 16px rgba(22, 119, 255, 0.1);
+  }
+
+  .functionIcon {
+    font-size: 16px;
+    // color: #1677ff;
+    margin-bottom: 8px;
+    display: block;
+  }
+
+  .functionName {
+    font-size: 14px;
+    color: #333;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+// 对话记录部分
+.chatGroup {
+  padding: 0 24px;
+}
+
+.chatDateHeader {
+  padding: 12px 0 0;
+  :global {
+    .@{antPrefix}-typography {
+      color: #a4aab2;
+    }
+  }
+}
+
+.chatDate {
+  font-size: 14px;
+}
+
+.chatList {
+  width: 100%;
+}
+
+.chatItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0 !important;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+
+  &:hover {
+    background-color: #f5f7fa;
+  }
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  :global {
+    .@{antPrefix}-list-item {
+      padding: 12px 0;
+    }
+  }
+}
+
+.chatItemContent {
+  display: flex;
+  flex-direction: column;
+}
+
+.chatItemTitle {
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.85);
+  margin-bottom: 4px;
+}
+
+.chatItemTime {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+  margin-left: 20px;
+}
+
+.avatarGroup {
+  :global {
+    .@{antPrefix}-avatar {
+      width: 24px;
+      height: 24px;
+      font-size: 14px;
+    }
+  }
+}
+
+.smallAvatar {
+  width: 24px;
+  height: 24px;
+}
+
+.memoryDrawer {
+  :global {
+    .@{antPrefix}-drawer-body {
+      padding: 16px;
+      background: #f7f8fa;
+    }
+  }
+}
+
+.memoryIntro {
+  font-size: 13px;
+  color: #525866;
+  line-height: 20px;
+  margin-bottom: 16px;
+}
+
+.memoryList {
+  background: transparent;
+}
+
+.memorySectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.memorySectionTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2329;
+}
+
+.ruleDescription {
+  font-size: 14px;
+  color: #8c8c8c;
+  line-height: 1.6;
+}
+
+.preferenceSection {
+  margin-top: 16px;
+
+  .preferenceTitle {
+    font-size: 14px;
+    font-weight: 500;
+    color: #262626;
+    margin-bottom: 12px;
+  }
+
+  .preferenceTags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .preferenceTag {
+    margin: 0;
+    padding: 4px 12px;
+    background: var(--user-fill-2-color-fill-34, #0000000a);
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #262626;
+  }
+}

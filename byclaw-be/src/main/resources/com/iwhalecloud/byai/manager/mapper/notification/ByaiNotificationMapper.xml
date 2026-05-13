@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.notification.ByaiNotificationMapper">
+
+    <!-- 通用字段映射 -->
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.notification.ByaiNotification">
+        <id column="id" property="id" />
+        <result column="title" property="title" />
+        <result column="content" property="content" />
+        <result column="biz_type" property="bizType" />
+        <result column="priority" property="priority" />
+        <result column="is_read" property="isRead" />
+        <result column="resource_biz_type" property="resourceBizType" />
+        <result column="resource_id" property="resourceId" />
+        <result column="is_deleted" property="isDeleted" />
+        <result column="sender_id" property="senderId" />
+        <result column="target_id" property="targetId" />
+        <result column="create_time" property="createTime" />
+        <result column="read_time" property="readTime" />
+        <result column="expire_time" property="expireTime" />
+        <result column="extra_info" property="extraInfo" />
+    </resultMap>
+
+    <!-- 批量插入 -->
+    <insert id="batchInsert">
+        INSERT INTO byai_notification
+        (id, title, content, biz_type, priority, is_read, resource_biz_type, resource_id, is_deleted, sender_id, target_id, create_time, read_time, expire_time, extra_info)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.id}, #{item.title}, #{item.content}, #{item.bizType}, #{item.priority}, #{item.isRead}, #{item.resourceBizType}, #{item.resourceId},
+             #{item.isDeleted}, #{item.senderId}, #{item.targetId}, #{item.createTime}, #{item.readTime}, #{item.expireTime}, #{item.extraInfo})
+        </foreach>
+    </insert>
+
+    <!-- 分页查询通知列表 -->
+    <select id="selectNotificationPage" resultMap="BaseResultMap">
+        SELECT 
+            id, title, content, biz_type, priority, is_read, resource_biz_type, resource_id, 
+            is_deleted, sender_id, target_id, create_time, read_time, expire_time, extra_info
+        FROM byai_notification
+        <where>
+            is_deleted = '0'
+            <if test="query.targetId != null">
+                AND target_id = #{query.targetId}
+            </if>
+            <if test="query.title != null and query.title != ''">
+                AND title LIKE CONCAT('%', #{query.title}, '%')
+            </if>
+            <if test="query.content != null and query.content != ''">
+                AND content LIKE CONCAT('%', #{query.content}, '%')
+            </if>
+            <if test="query.bizType != null">
+                AND biz_type = #{query.bizType}
+            </if>
+            <if test="query.priority != null">
+                AND priority = #{query.priority}
+            </if>
+            <if test="query.isRead != null and query.isRead != ''">
+                AND is_read = #{query.isRead}
+            </if>
+            <if test="query.resourceBizType != null and query.resourceBizType != ''">
+                AND resource_biz_type = #{query.resourceBizType}
+            </if>
+            <if test="query.resourceIdList != null and query.resourceIdList.size() > 0">
+                AND resource_id IN
+                <foreach collection="query.resourceIdList" item="resourceId" open="(" separator="," close=")">
+                    #{resourceId}
+                </foreach>
+            </if>
+            <if test="query.createStartTime != null and query.createStartTime != ''">
+                AND create_time >= CAST(#{query.createStartTime} AS DATE)
+            </if>
+            <if test="query.createEndTime != null and query.createEndTime != ''">
+                AND create_time &lt; CAST(#{query.createEndTime} AS DATE) + INTERVAL '1 day'
+            </if>
+            <if test="query.readStartTime != null and query.readStartTime != ''">
+                AND read_time >= CAST(#{query.readStartTime} AS DATE)
+            </if>
+            <if test="query.readEndTime != null and query.readEndTime != ''">
+                AND read_time &lt; CAST(#{query.readEndTime} AS DATE) + INTERVAL '1 day'
+            </if>
+        </where>
+        ORDER BY
+        is_read ASC,
+        CASE WHEN is_read = '0' THEN create_time ELSE read_time END DESC
+    </select>
+
+    <!-- 批量设置通知已读 -->
+    <update id="batchSetNotificationRead">
+        update byai_notification
+        set is_read = '1',
+            read_time = CURRENT_TIMESTAMP
+        where id in
+        <foreach collection="idList" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+        and target_id = #{targetId}
+        and is_deleted = '0'
+    </update>
+
+    <!-- 设置当前用户所有通知为已读 -->
+    <update id="setAllNotificationRead">
+        update byai_notification
+        set is_read = '1',
+            read_time = CURRENT_TIMESTAMP
+        where target_id = #{targetId}
+        and is_deleted = '0'
+        and is_read = '0'
+    </update>
+
+</mapper>
+
+

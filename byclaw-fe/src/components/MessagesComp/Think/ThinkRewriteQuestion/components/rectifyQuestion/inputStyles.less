@@ -1,0 +1,95 @@
+@height: 46px;
+@prefix-w: 90px;
+
+.wrap {
+  // border-radius: 25px;
+  height: auto;
+  min-height: @height;
+  background: #fff;
+  width: 100%;
+  // position: relative;
+  // overflow: visible;
+  display: flex;
+  // box-shadow: 0 5px 16px 0 rgba(80, 75, 255, 0.15);
+  box-shadow: unset;
+  align-items: flex-end;
+}
+
+@prefix-margin: ((@height - @prefix-w) / 2);
+
+@padding-h: 10px;
+
+.prefix {
+  // cursor: not-allowed;
+  // display: inline-block;
+  min-width: @prefix-w;
+  // height: @prefix-w;
+  border-radius: 100%;
+  // margin: @prefix-margin @padding-h @prefix-margin @prefix-margin;
+  // line-height: @prefix-w;
+  margin: 0 8px 0 12px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  // background: rgba(80, 75, 255, 0.1);
+}
+
+@suffix-w: 38px;
+
+.suffix {
+  cursor: pointer;
+  width: @suffix-w;
+  height: @suffix-w;
+  margin-top: ((@height - @suffix-w) / 2);
+  margin-bottom: ((@height - @suffix-w) / 2);
+  margin-left: @padding-h;
+  margin-right: (@padding-h / 2);
+  color: #fff;
+  line-height: @suffix-w;
+  border: none;
+  border-radius: 50%;
+  display: inline-flex;
+  justify-content: center;
+  background: linear-gradient(90deg, #504bff 0%, #8773ff 100%);
+  // 当按钮被禁用时，覆盖为灰色
+  &:disabled,
+  &[disabled] {
+    background: var(--beyond-color-fill) !important;
+    color: #fff !important;
+    cursor: not-allowed;
+    opacity: 1;
+  }
+}
+
+@total-w: (@prefix-w + @prefix-margin + @suffix-w + @padding-h * 2.5);
+
+.inputW {
+  flex: 1;
+  height: 100%;
+  overflow: auto;
+}
+
+.input {
+  // display: inline-block;
+  // width: calc(100% - @total-w);
+  outline: none;
+  padding: calc((@height - 24px) / 2) 0;
+  line-height: 24px;
+  text-align: left;
+  color: #1f2533;
+  font-size: 16px;
+  margin: 0 6px;
+}
+
+.input::before {
+  pointer-events: none;
+}
+
+.input:empty::before {
+  content: attr(placeholder);
+  color: rgba(0, 0, 0, 0.25);
+}
+
+.input:focus::before {
+  content: none;
+}

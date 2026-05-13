@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.permissiongroup.DefaultDataPermissionMapper">
+
+    <!-- 默认数据权限结果映射 -->
+    <resultMap id="DefaultDataPermissionResultMap" type="com.iwhalecloud.byai.manager.entity.permissiongroup.DefaultDataPermission">
+        <id column="id" property="id"/>
+        <result column="permission_group_id" property="permissionGroupId"/>
+        <result column="data_scope_type" property="dataScopeType"/>
+        <result column="data_scope_config" property="dataScopeConfig"/>
+        <result column="field_permissions" property="fieldPermissions"/>
+        <result column="row_permissions" property="rowPermissions"/>
+        <result column="status" property="status"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <!-- 数据权限VO结果映射 -->
+    <resultMap id="DataPermissionVOResultMap" type="com.iwhalecloud.byai.manager.vo.permissiongroup.DataPermissionVO">
+        <result column="id" property="id"/>
+        <result column="data_scope_type" property="dataScopeType"/>
+        <result column="data_scope_type_name" property="dataScopeTypeName"/>
+        <result column="data_scope_config" property="dataScopeConfig"/>
+        <result column="field_permissions" property="fieldPermissions"/>
+        <result column="row_permissions" property="rowPermissions"/>
+        <result column="status" property="status"/>
+    </resultMap>
+
+    <!-- 通用查询列 -->
+    <sql id="Base_Column_List">
+        ddp.id, ddp.permission_group_id, ddp.data_scope_type, ddp.data_scope_config,
+        ddp.field_permissions, ddp.row_permissions, ddp.status,
+        ddp.create_by, ddp.create_time, ddp.update_by, ddp.update_time
+    </sql>
+
+    <!-- 根据权限组ID查询数据权限 -->
+    <select id="selectByPermissionGroupId" resultMap="DataPermissionVOResultMap">
+        SELECT
+            ddp.id,
+            ddp.data_scope_type,
+            CASE ddp.data_scope_type
+                WHEN 'self' THEN '本人数据'
+                WHEN 'org' THEN '组织数据'
+                WHEN 'position' THEN '岗位数据'
+                WHEN 'station' THEN '驻地数据'
+                ELSE ddp.data_scope_type
+            END AS data_scope_type_name,
+            ddp.data_scope_config,
+            ddp.field_permissions,
+            ddp.row_permissions,
+            ddp.status
+        FROM default_data_permissions ddp
+        WHERE ddp.permission_group_id = #{permissionGroupId}
+        AND ddp.status = 'active'
+    </select>
+
+    <!-- 根据权限组ID删除数据权限 -->
+    <delete id="deleteByPermissionGroupId">
+        DELETE FROM default_data_permissions
+        WHERE permission_group_id = #{permissionGroupId}
+    </delete>
+
+</mapper>
+

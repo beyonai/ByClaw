@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration scan="true" scanPeriod="10 seconds" debug="true">
+
+    <springProperty scope="context" name="appName" source="spring.application.name"/>
+    <springProperty scope="context" name="port" source="server.port"/>
+    <property name="logFile" value="${appName}${port}"/>
+
+    <!-- Define common properties used throughout the configuration -->
+    <property name="logDir" value="logs"/>         <!-- Unified log directory: logs -->
+    <property name="maxHistory" value="7"/>        <!-- Maximum number of days to keep log files -->
+    <property name="maxFileSize" value="20MB"/>    <!-- Maximum size of a single log file before rolling -->
+    <property name="totalSizeCap" value="100MB"/>  <!-- Total maximum size of all archived log files -->
+
+    <property name="consolePattern" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %X{trace_id} %X{span_id} %c - %msg%n"/>
+    <property name="filePattern" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %X{trace_id} %X{span_id} %c - %msg%n"/>
+
+
+    <!-- Console appender configuration - Outputs logs to the console -->
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${consolePattern}</pattern>
+            <charset class="java.nio.charset.Charset">UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- DEBUG logs appender - Captures DEBUG level logs to a dedicated file -->
+    <appender name="DEBUG" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${logDir}/${logFile}_DEBUG.log</file>
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>DEBUG</level>
+            <onMatch>ACCEPT</onMatch>
+            <onMismatch>ACCEPT</onMismatch>
+        </filter>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>${filePattern}</pattern>
+        </encoder>
+        <!-- Policy for rolling files by size and date - Creates dated directories and numbered files -->
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <FileNamePattern>${logDir}/%d{yyyy-MM-dd}/%d{yyyy-MM-dd}_${logFile}_DEBUG_%i.log.tar.gz</FileNamePattern>
+            <maxFileSize>${maxFileSize}</maxFileSize>
+            <MaxHistory>${maxHistory}</MaxHistory>
+            <totalSizeCap>${totalSizeCap}</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- ERROR logs appender - Captures only ERROR level logs to a dedicated file -->
+    <appender name="ERROR" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${logDir}/${logFile}_ERROR.log</file>
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>ERROR</level>
+            <onMatch>ACCEPT</onMatch>
+            <onMismatch>DENY</onMismatch>
+        </filter>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>${filePattern}</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <FileNamePattern>${logDir}/%d{yyyy-MM-dd}/%d{yyyy-MM-dd}_${logFile}_ERROR_%i.log.tar.gz</FileNamePattern>
+            <maxFileSize>${maxFileSize}</maxFileSize>
+            <MaxHistory>${maxHistory}</MaxHistory>
+            <totalSizeCap>${totalSizeCap}</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- Async appenders -->
+    <appender name="ASYNC_DEBUG" class="ch.qos.logback.classic.AsyncAppender">
+        <discardingThreshold>0</discardingThreshold>
+        <queueSize>512</queueSize>
+        <includeCallerData>true</includeCallerData>
+        <appender-ref ref="DEBUG"/>
+    </appender>
+
+    <appender name="ASYNC_ERROR" class="ch.qos.logback.classic.AsyncAppender">
+        <!--discardingThreshold=queueSize/5  提前丢弃日志以避免队列满，平衡可靠性和性能。-->
+        <discardingThreshold>0</discardingThreshold>
+        <queueSize>512</queueSize>
+        <includeCallerData>true</includeCallerData>
+        <appender-ref ref="ERROR"/>
+    </appender>
+
+<!-- Logger-specific configuration with unified log level control -->
+
+    <!-- 业务包日志级别配置 - 限制DEBUG级别输出 -->
+<!--    <logger name="com.ztesoft.byai.assistantengine" level="INFO" additivity="false">-->
+<!--        <appender-ref ref="STDOUT"/>-->
+<!--        <appender-ref ref="ASYNC_ERROR"/>-->
+<!--        <appender-ref ref="ASYNC_WARN"/>-->
+<!--        <appender-ref ref="ASYNC_INFO"/>-->
+<!--    </logger>-->
+
+    <!-- 第三方框架日志级别配置 - 减少无用日志 -->
+    <logger name="org.apache" level="WARN"/>
+    <logger name="httpclient" level="WARN"/>
+    <logger name="com.netflix.discovery" level="WARN"/>
+    <logger name="org.springframework" level="INFO"/>
+    <logger name="io.lettuce.core" level="ERROR"/>
+    <logger name="org.springframework.data.redis" level="ERROR"/>
+    <logger name="org.mybatis" level="WARN"/>
+    <logger name="org.apache.kafka" level="WARN"/>
+    <logger name="io.netty" level="INFO"/>
+
+    <!-- 特定包禁止DEBUG级别日志输出 -->
+    <logger name="org.springframework.web" level="INFO"/>
+    <logger name="org.springframework.security" level="WARN"/>
+    <logger name="org.apache.catalina" level="WARN"/>
+    <logger name="org.hibernate" level="WARN"/>
+    <logger name="com.zaxxer.hikari" level="WARN"/>
+    <logger name="org.springframework.security.web.FilterChainProxy" level="INFO"/>
+    <logger name="org.postgresql.core.v3.ConnectionFactoryImpl" level="WARN"/>
+    <logger name="org.opengauss.core.v3.ConnectionFactoryImpl" level="WARN"/>
+    <logger name="org.springframework.web.servlet.DispatcherServlet" level="WARN"/>
+    <logger name="org.springframework.kafka.listener.KafkaMessageListenerContainer" level="WARN"/>
+    <logger name="ch.qos.logback.core.rolling.helper" level="WARN"/>
+
+    <!-- 特定包日志级别配置 -->
+    <logger name="interceptor.com.iwhalecloud.byai.manager.datasource.DataSourceMethodInterceptor" level="WARN"/>
+
+    <!-- Root logger configuration - Applies to all loggers unless overridden -->
+    <root level="INFO">
+        <appender-ref ref="STDOUT"/>
+        <appender-ref ref="ASYNC_ERROR"/>
+        <!-- DEBUG级别日志仅在开发环境启用 -->
+        <appender-ref ref="ASYNC_DEBUG"/>
+    </root>
+
+</configuration>

@@ -1,0 +1,136 @@
+.spinComp {
+  width: 100%;
+  height: 100%;
+  :global {
+    .@{antPrefix}-spin-nested-loading {
+      height: 100%;
+      width: 100%;
+    }
+    .@{antPrefix}-spin-container {
+      height: 100%;
+      width: 100%;
+    }
+  }
+}
+
+@contentPadding: 16px;
+@queryInputMargin: 10px;
+
+// const height = window.inne
+
+.chatLayoutCompBox {
+  display: flex;
+  position: relative;
+  // border: 1px solid #f00
+}
+
+.chatLayoutComp {
+  overflow: auto;
+}
+
+.messageList {
+  margin-bottom: 12px;
+  // padding: 0 6px;
+}
+
+.queryInputWrapper {
+  position: relative;
+  width: 96%;
+  max-width: 850px;
+  margin: 0 auto;
+
+  &.messageListDisappear {
+    display: none;
+  }
+
+  .btn {
+    padding: 5px 16px;
+    align-items: center;
+    gap: 8px;
+    border-radius: 12px;
+    font-size: 13px;
+  }
+}
+
+.queryInput {
+  margin-bottom: @queryInputMargin;
+  border-radius: 20px;
+  // overflow: hidden;
+
+  // min-width: 100%;
+  // &[data-isbottom='true'] {
+  box-shadow: 0 6px 10px 0 rgba(42, 60, 79, 10%);
+  // }
+}
+
+.shortcuts {
+  display: flex;
+  // justify-content: center;
+  // position: relative;
+  // bottom: 0;
+  // left: 50%;
+  // transform: translate(-50%, 0%);
+
+  .shortcutBtn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: var(--beyond-border-radius-sm);
+    padding: 0 8px;
+
+    .shortcutBtnIcon {
+      font-size: var(--beyond-font-size-xl);
+    }
+  }
+}
+
+// .relativeDrawer {
+//   width: 20%;
+//   min-width: 320px;
+//   position: relative;
+
+//   :global {
+//     .@{antPrefix}-drawer-content-wrapper {
+//       position: relative;
+//       height: 100%;
+//       box-shadow: none;
+//       border-left: 1px solid var(--beyond-color-border-secondary);
+//     }
+//   }
+// }
+
+// .mainRelativeDrawer {
+//   .relativeDrawer;
+
+//   width: 60%;
+// }
+
+// .relativeDrawerClose {
+//   width: 0;
+//   min-width: 0;
+// }
+
+.queryInputDisabled {
+  position: relative;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 100%;
+    z-index: 1;
+    background-color: rgba(0, 0, 0, 5%);
+    border-radius: 20px;
+    cursor: not-allowed;
+  }
+}
+
+.switchButton {
+  position: absolute;
+  top: 50px;
+  right: 10px;
+  background-color: rgba(255, 255, 255, 0.8);
+  border-radius: 8px;
+}

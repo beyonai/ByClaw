@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.auth.ResourceAuthContextMapper">
+
+    <resultMap id="AuthResourceTypeResultMap" type="com.iwhalecloud.byai.manager.dto.auth.AuthResourceType">
+        <result column="resource_id"       property="resourceId"/>
+        <result column="resource_biz_type" property="resourceBizType"/>
+    </resultMap>
+
+
+    <resultMap id="resourceMap" type="com.iwhalecloud.byai.manager.entity.resource.SsResource">
+        <result column="resource_id" property="resourceId"/>
+        <result column="resource_biz_type" property="resourceBizType"/>
+        <result column="resource_name" property="resourceName"/>
+        <result column="resource_code" property="resourceCode"/>
+        <result column="resource_source_pk_id" property="resourceSourcePkId"/>
+        <result column="resource_desc" property="resourceDesc"/>
+    </resultMap>
+
+    <select id="getAuthResourceType" resultMap="AuthResourceTypeResultMap">
+        SELECT
+            a.resource_id,
+            a.resource_biz_type
+        FROM ss_resource a
+        JOIN (
+            SELECT
+                grant_obj_id,
+                SUM(CASE WHEN grant_to_type = 'RED'   AND status_cd = 'A' THEN 1 ELSE 0 END) AS red_count,
+                SUM(CASE WHEN grant_to_type = 'BLACK' AND status_cd = 'A' THEN 1 ELSE 0 END) AS black_count
+            FROM au_privilege_grant
+            WHERE grant_type IN ('AVAILABLE_USE', 'FORCE_USE')
+              AND status_cd = 'A'
+            <if test="resourceBizType != null and resourceBizType != ''">
+              AND grant_obj_type = #{resourceBizType}
+            </if>
+            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                <if test="userOrgIds != null and userOrgIds.size() > 0">
+                    OR (grant_to_obj_type = 'ORG' AND grant_to_obj_id IN
+                        <foreach collection="userOrgIds" item="orgId" open="(" separator="," close=")">
+                            #{orgId}
+                        </foreach>
+                    )
+                </if>
+                <if test="userId != null">
+                    OR (grant_to_obj_type = 'USER' AND grant_to_obj_id = #{userId})
+                </if>
+                <if test="userPositionIds != null and userPositionIds.size() > 0">
+                    OR (grant_to_obj_type = 'POST' AND grant_to_obj_id IN
+                        <foreach collection="userPositionIds" item="positionId" open="(" separator="," close=")">
+                            #{positionId}
+                        </foreach>
+                    )
+                </if>
+                <if test="userStationId != null">
+                    OR (grant_to_obj_type = 'STATION' AND grant_to_obj_id = #{userStationId})
+                </if>
+            </trim>
+            GROUP BY grant_obj_id
+        ) k
+            ON a.resource_id = k.grant_obj_id
+        <where>
+            AND a.resource_status = 2
+            <!-- 黑名单排除：不能有黑名单记录 -->
+            AND (k.black_count = 0 OR k.black_count IS NULL)
+            <if test="resourceBizType != null and resourceBizType != ''">
+                AND a.resource_biz_type = #{resourceBizType}
+            </if>
+        </where>
+    </select>
+
+
+
+    <select id="getResourceByIds" resultMap="resourceMap">
+        select
+            a.resource_id,
+            a.resource_biz_type,
+            a.resource_name,
+            a.resource_desc,
+            a.resource_code,
+            a.resource_source_pk_id
+        from ss_resource a
+        <where>
+            <if test="resourceIds != null and resourceIds.size()>0">
+                a.resource_id in
+                <foreach collection="resourceIds" item="resourceId" open="(" separator="," close=")">
+                    #{resourceId}
+                </foreach>
+            </if>
+        </where>
+    </select>
+
+    <select id="getDatasetByDigEmployeeIds" resultMap="resourceMap">
+        select
+        a.resource_id,
+        a.resource_biz_type,
+        a.resource_name,
+        a.resource_desc,
+        a.resource_code,
+        a.resource_source_pk_id
+        FROM ss_resource_rel_detail b
+        INNER JOIN ss_resource a
+        ON a.resource_id = b.rel_resource_id
+        <where>
+            AND a.resource_biz_type in ('KG_DOC','KG_QA','KG_TERM')  AND a.resource_status = 2
+            <if test="resourceIds != null and resourceIds.size()>0">
+                AND b.resource_id in
+                <foreach collection="resourceIds" item="resourceId" open="(" separator="," close=")">
+                    #{resourceId}
+                </foreach>
+            </if>
+        </where>
+    </select>
+</mapper>

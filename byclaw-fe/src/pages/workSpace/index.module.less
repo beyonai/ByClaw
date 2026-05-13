@@ -1,0 +1,158 @@
+.workSpaceContainer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  background: transparent;
+  position: relative;
+
+  .switchButton {
+    position: absolute;
+    top: 10px;
+    left: -40px;
+    background-color: rgba(255, 255, 255, 0.8);
+    border-radius: 8px;
+  }
+
+  .content {
+    width: 360px;
+    padding: 12px;
+    flex-direction: column;
+    align-items: center;
+    border-left: 0.5px solid #00000026;
+    background: var(--user-text-color-white, #fff);
+    height: 100%;
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+
+      .title {
+        color: #14161a;
+        font-family: 'PingFang SC';
+        font-size: 14px;
+        font-style: normal;
+        font-weight: 500;
+        line-height: 22px;
+      }
+
+      .closeBtn {
+        color: #333;
+        font-size: 16px;
+        transition: color 0.2s;
+
+        &:hover {
+          color: #333;
+        }
+      }
+    }
+
+    .tabs {
+      margin-top: 15px;
+      display: flex;
+      padding: 2px;
+      align-items: center;
+      flex: 1 0 0;
+      border-radius: 10px;
+      background: var(--user-fill-color-fill-34, #f2f6fa);
+      cursor: pointer;
+
+      .tabItem {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        flex: 1 0 0;
+        overflow: hidden;
+        color: #40454d;
+        text-align: center;
+        text-overflow: ellipsis;
+        font-family: 'PingFang SC';
+        font-size: 14px;
+        font-style: normal;
+        font-weight: 400;
+        line-height: 22px;
+      }
+
+      .tabItemActive {
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        text-align: center;
+        display: flex;
+        padding: 5px 0;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        border-radius: 8px;
+        background: #fff;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        flex: 1 0 0;
+        overflow: hidden;
+        color: #14161a;
+        font-size: 14px;
+        font-style: normal;
+        font-weight: 500;
+        line-height: 22px;
+      }
+    }
+  }
+}
+
+.searchInput {
+  margin: 12px 16px 8px 16px;
+  border-radius: 6px;
+  background: #f7f8fa;
+}
+
+.taskList {
+  padding: 0 16px;
+}
+
+.taskBlock {
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f0f0f0;
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.taskTitle {
+  font-size: 15px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  display: block;
+}
+
+.stepList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stepItem {
+  align-items: flex-start;
+}
+
+.iconDone {
+  color: #52c41a;
+  font-size: 18px;
+  margin-top: 2px;
+}
+
+.iconLoading {
+  color: #1890ff;
+  font-size: 18px;
+  margin-top: 2px;
+}
+
+.iconTodo {
+  color: #d9d9d9;
+  font-size: 18px;
+  margin-top: 2px;
+}
+
+.stepText {
+  font-size: 14px;
+  color: #333;
+}

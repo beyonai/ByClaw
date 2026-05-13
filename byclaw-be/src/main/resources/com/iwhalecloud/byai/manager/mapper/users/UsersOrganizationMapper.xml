@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.users.UsersOrganizationMapper">
+
+    <resultMap id="usersOrganizationResultMap" type="com.iwhalecloud.byai.manager.entity.users.UsersOrganization">
+        <result column="id" property="id" />
+        <result column="user_id" property="userId" />
+        <result column="org_id" property="orgId" />
+        <result column="position_id" property="positionId" />
+        <result column="user_type" property="userType" />
+    </resultMap>
+
+    <resultMap id="usersOrganizationVoResultMap" type="com.iwhalecloud.byai.manager.vo.users.UsersOrganizationVo" extends="usersOrganizationResultMap">
+        <result column="org_name" property="orgName" />
+        <result column="position_name" property="positionName" />
+    </resultMap>
+
+    <resultMap id="usersOrgPostVoResultMap" type="com.iwhalecloud.byai.manager.vo.users.UsersOrgPostVo">
+         <id column="user_id" property="userId" />
+         <collection property="usersOrganizationVos" ofType="com.iwhalecloud.byai.manager.vo.users.UsersOrganizationVo">
+            <result column="user_id" property="userId" />
+            <result column="org_id" property="orgId" />
+            <result column="position_id" property="positionId" />
+            <result column="user_type" property="userType" />
+            <result column="org_name" property="orgName" />
+            <result column="position_name" property="positionName" />
+         </collection>
+    </resultMap>
+
+    <insert id="saveBatch" parameterType="java.util.List">
+        INSERT INTO po_users_organization (id,user_id,org_id,position_id,user_type)
+        VALUES
+        <foreach collection="usersOrganizations" item="item" separator=",">
+            (#{item.id},#{item.userId},#{item.orgId},#{item.positionId},#{item.userType})
+        </foreach>
+    </insert>
+
+
+    <select id="countExcludeCurrent" resultType="java.lang.Long">
+        select
+            count(1)
+        from po_users_organization
+        where user_id = #{userId}
+          and id not in (select id from po_users_organization where user_id =#{userId} and org_id =#{orgId})
+    </select>
+
+    <select id="selectUsersOrganizationVoList" resultMap="usersOrgPostVoResultMap">
+        select a.user_id,
+               a.org_id,
+               a.position_id,
+               a.user_type,
+               b.org_name,
+               c.position_name
+        from po_users_organization a
+                 left join po_organization b on a.org_id = b.org_id
+                 left join po_position c on a.position_id = c.position_id
+        order by user_id
+    </select>
+
+
+    <!-- 一次性批量查询组织、岗位、驻地下的用�?-->
+    <select id="selectUsersInBatch" resultType="java.lang.Long">
+        <if test="orgIds != null and orgIds.size() > 0">
+            SELECT DISTINCT puo.user_id
+            FROM po_users_organization puo
+            INNER JOIN po_organization po ON puo.org_id = po.org_id
+            <where>
+                <foreach collection="orgIds" item="orgId" separator=" OR " open="(" close=")">
+                    po.org_id = #{orgId}
+                </foreach>
+            </where>
+        </if>
+
+        <if test="positionIds != null and positionIds.size() > 0">
+            <if test="orgIds != null and orgIds.size() > 0">UNION ALL</if>
+            SELECT user_id FROM po_users_organization
+            WHERE position_id IN
+            <foreach collection="positionIds" item="positionId" open="(" separator="," close=")">
+                #{positionId}
+            </foreach>
+        </if>
+
+        <if test="stationIds != null and stationIds.size() > 0">
+            <if test="(orgIds != null and orgIds.size() > 0) or (positionIds != null and positionIds.size() > 0)">UNION ALL</if>
+            SELECT DISTINCT u.user_id
+            FROM po_users u
+            INNER JOIN po_station s ON u.station_id = s.station_id
+            WHERE
+            <foreach collection="stationIds" item="stationId" separator=" OR " open="(" close=")">
+                s.station_id = #{stationId}
+            </foreach>
+        </if>
+
+    </select>
+
+
+</mapper>
