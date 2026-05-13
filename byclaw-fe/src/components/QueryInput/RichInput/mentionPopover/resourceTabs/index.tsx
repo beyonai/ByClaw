@@ -9,7 +9,7 @@ import Empty from '@/components/Empty';
 import { ResourceType } from '../../utils/constants';
 import { IResourceType } from '../../types';
 import { ResourceTypeMap } from '@/constants/resource';
-import { queryDigEmployeeRelResourceAuth } from '@/pages/manager/service/resources';
+import { queryDigEmployeeRelResourceAuth, listUserSpace } from '@/pages/manager/service/resources';
 import { getDcSystemConfigListByStandType } from '@/service/auth';
 import { DEFAULT_MENU_CONFIG, getVisibleMenuKeysFromConfig } from '@/constants/system';
 import styles from './style.module.less';
@@ -53,6 +53,11 @@ const ResourceTabs: React.FC<Props> = ({
   const [sharedLoading, setSharedLoading] = useState(false);
   const sharedQueryKeyRef = useRef('');
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+
+  const [fileList, setFileList] = useState<any[]>([]);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [currentPath, setCurrentPath] = useState('by/.openclaw/workspace-baiying-agent-10006728/');
+  const [pathHistory, setPathHistory] = useState<string[]>([]);
 
   const { layoutMode, agentInfo } = useGlobal();
 
@@ -103,6 +108,57 @@ const ResourceTabs: React.FC<Props> = ({
     },
     [onSelect]
   );
+
+  const onSelectFile = useCallback(
+    (item: any) => {
+      onSelect(item, ResourceType.OBJECT);
+    },
+    [onSelect]
+  );
+
+  const fetchFileList = useCallback(
+    async (path: string) => {
+      setFileLoading(true);
+      try {
+        const response = await listUserSpace({
+          prefix: path,
+          resourceId: agentId,
+        });
+        console.log('response111', response);
+        setFileList(response || []);
+      } catch (error) {
+        console.error('Failed to load file list:', error);
+        setFileList([]);
+      } finally {
+        setFileLoading(false);
+      }
+    },
+    [agentId]
+  );
+
+  const handleFolderClick = useCallback(
+    (folderPath: string) => {
+      setPathHistory((prev) => [...prev, currentPath]);
+      setCurrentPath(folderPath);
+      fetchFileList(folderPath);
+    },
+    [currentPath, fetchFileList]
+  );
+
+  const handleBackClick = useCallback(() => {
+    if (pathHistory.length > 0) {
+      const previousPath = pathHistory[pathHistory.length - 1];
+      setPathHistory((prev) => prev.slice(0, -1));
+      setCurrentPath(previousPath);
+      fetchFileList(previousPath);
+    }
+  }, [pathHistory, fetchFileList]);
+
+  useEffect(() => {
+    if (activeTab === 'file') {
+      fetchFileList(currentPath);
+    }
+  }, [activeTab, currentPath, fetchFileList]);
 
   const hasAnyTab = true;
 
@@ -197,6 +253,7 @@ const ResourceTabs: React.FC<Props> = ({
     if (visibleKeys.includes('tool')) visible.push('tool');
     if (visibleKeys.includes('view')) visible.push('view');
     if (visibleKeys.includes('object')) visible.push('object');
+    if (visibleKeys.includes('file')) visible.push('file');
     visible.push('skill');
     if (!visible.length) return;
     const newActiveTabValue = activeTab && visible.includes(activeTab) ? activeTab : visible[0];
@@ -312,12 +369,68 @@ const ResourceTabs: React.FC<Props> = ({
         </div>
       ),
     });
+    items.push({
+      key: 'file',
+      label: intl.formatMessage({ id: 'common.file' }),
+      children: (
+        <div className={styles.listContainer}>
+          {pathHistory.length > 0 && (
+            <div className={styles.filePathHeader}>
+              <button type="button" className={styles.backButton} onClick={handleBackClick}>
+                ← 返回上一级
+              </button>
+            </div>
+          )}
+          <div className={styles.fileList}>
+            {fileLoading ? (
+              <div className={styles.loading}>加载中...</div>
+            ) : fileList.length === 0 ? (
+              <Empty />
+            ) : (
+              fileList.map((file, index) => (
+                <div
+                  key={`${file.name}-${index}`}
+                  className={`${styles.fileItem} ${file.dir ? styles.folderItem : styles.fileItem}`}
+                  onClick={() => {
+                    if (file.dir) {
+                      handleFolderClick(file.filePath);
+                    } else {
+                      onSelectFile({
+                        resourceId: `${file.filePath}/${file.name}`,
+                        resourceName: file.name,
+                        resourceType: 'FILE',
+                      });
+                    }
+                  }}
+                >
+                  <span className={styles.fileIcon}>{file.dir ? '📁' : '📄'}</span>
+                  <span className={styles.fileName}>{file.name}</span>
+                  {!file.dir && (
+                    <button
+                      type="button"
+                      className={styles.downloadBtn}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.open(`/commonFile/preview?filePath=${file.filePath}/${file.name}`);
+                      }}
+                    >
+                      下载
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      ),
+    });
     return items;
   }, [
     intl,
     onSelect,
     onSelectObject,
     onSelectTool,
+    onSelectFile,
     queryKeyword,
     agentId,
     agentIds,
@@ -327,6 +440,11 @@ const ResourceTabs: React.FC<Props> = ({
     sharedLoading,
     getSharedTabResources,
     resolvedSessionId,
+    fileList,
+    fileLoading,
+    pathHistory,
+    handleBackClick,
+    handleFolderClick,
   ]);
 
   const visibleTabs = useMemo(() => {
@@ -361,6 +479,11 @@ const ResourceTabs: React.FC<Props> = ({
       label: intl.formatMessage({ id: 'common.skill' }),
     };
 
+    const fileTab = {
+      key: 'file',
+      label: intl.formatMessage({ id: 'common.file' }),
+    };
+
     const filteredConditionalTabs = conditionalTabs.filter((tab) => {
       if (agentType === '005') {
         return !['knowledge', 'tool'].includes(tab.key);
@@ -371,7 +494,7 @@ const ResourceTabs: React.FC<Props> = ({
       return visibleKeys.includes(tab.key);
     });
 
-    return [...baseTabs, ...filteredConditionalTabs, skillTab];
+    return [...baseTabs, ...filteredConditionalTabs, skillTab, fileTab];
   }, [agentType, intl, visibleKeys]);
 
   if (!hasAnyTab) {
