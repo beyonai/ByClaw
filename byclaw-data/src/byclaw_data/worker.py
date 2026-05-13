@@ -338,20 +338,18 @@ async def _consume_agent_events(
     if interrupt_ev is None:
         return {"status": "done"}
 
-    # 先推送"回答完成"信号
-    await context.emit_chunk(
-        StreamChunkEvent(
-            content="回答完成",
-            metadata={"relatedResources": _related_resources_from_reco_task(reco_task)},
-        ),
-        event_type=EventType.APP_STREAM_RESPONSE.value,
-        content_type=SseMessageType.text.value,
-    )
-
     if interrupt_ev.reason == "AGENT_DELEGATE_WAIT":
         logger.info(
             "_consume_agent_events: delegate wait interrupt thread_id=%s",
             interrupt_ev.thread_id,
+        )
+        await context.emit_chunk(
+            StreamChunkEvent(
+                content="回答完成",
+                metadata={"relatedResources": _related_resources_from_reco_task(reco_task)},
+            ),
+            event_type=EventType.APP_STREAM_RESPONSE.value,
+            content_type=SseMessageType.text.value,
         )
         return {"status": "waiting"}
 
@@ -368,6 +366,8 @@ async def _consume_agent_events(
                     ],
                 }
             )
+        # complex_ask_user 先推 answerDelta（paradigmList），再推 APP_STREAM_RESPONSE，
+        # 与静态路径（_stream_graph）保持一致，避免前端因 APP_STREAM_RESPONSE 提前到达而丢弃 paradigmList。
         await context.complex_ask_user(
             AskUserEvent(
                 prompt=interrupt_ev.prompt,
@@ -389,6 +389,17 @@ async def _consume_agent_events(
             )
         )
 
+    # 动态路径 interrupt 时不推 APP_STREAM_RESPONSE：
+    # complex_ask_user / ask_user 推完 answerDelta 后由前端自行结束本轮，
+    # 提前推 APP_STREAM_RESPONSE 会导致前端丢弃后续的 answerDelta（paradigmList）。
+    # await context.emit_chunk(
+    #     StreamChunkEvent(
+    #         content="回答完成",
+    #         metadata={"relatedResources": _related_resources_from_reco_task(reco_task)},
+    #     ),
+    #     event_type=EventType.APP_STREAM_RESPONSE.value,
+    #     content_type=SseMessageType.text.value,
+    # )
     return {"status": "waiting"}
 
 
