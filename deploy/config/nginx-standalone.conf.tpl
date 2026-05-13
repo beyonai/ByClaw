@@ -1,3 +1,5 @@
+{{RESOLVER_BLOCK}}
+
 server {
     listen       8080;
     server_name  localhost;
@@ -12,6 +14,8 @@ server {
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript image/svg+xml;
     gzip_min_length 1024;
 
+    {{BACKEND_VARS}}
+
     location /beyond {
         alias   /usr/share/nginx/html;
         index  index.html index.htm;
@@ -20,7 +24,7 @@ server {
     }
 
     location /byaiService {
-        proxy_pass http://byclaw-be-{{CONTAINER_SUFFIX}}:{{BE_SERVER_PORT}}/byaiService;
+        proxy_pass {{PROXY_HTTP}}/byaiService;
 
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -39,7 +43,7 @@ server {
     }
 
     location /byaiService/ws {
-        proxy_pass http://byclaw-be-{{CONTAINER_SUFFIX}}:{{BE_WS_PORT}}/byaiService/ws;
+        proxy_pass {{PROXY_WS}}/byaiService/ws;
         proxy_http_version 1.1;
         proxy_set_header Upgrade websocket;
         proxy_set_header Connection "upgrade";

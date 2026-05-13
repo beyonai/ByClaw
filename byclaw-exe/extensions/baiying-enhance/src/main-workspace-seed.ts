@@ -213,6 +213,14 @@ export async function seedMainAgentAgentsMd(params: {
   if (mode === "if_missing") {
     if (filePresent && destStat && destStat.size > 0) {
       params.log.info?.(`baiying-enhance: main ${AGENTS_FILENAME} skip (if_missing, file exists): ${dest}`);
+      // Still seed `SUBAGENT_ROUTING.md` under the same policy (e.g. AGENTS.md pre-exists from OpenClaw
+      // stock while routing is missing — register-time init must not skip routing only).
+      await writeSubagentRoutingWithPolicy({
+        workspaceDir,
+        mode,
+        managedAgents,
+        log: params.log,
+      });
       return;
     }
     await fs.writeFile(dest, content, "utf8");
@@ -274,6 +282,12 @@ export async function seedMainAgentAgentsMd(params: {
           ? "Foreign takeover already recorded for this workspace; delete AGENTS.md, set mainAgentsMdMode to \"always\", or remove this path from baiying-enhance/main-agents-foreign-takeover.json under OPENCLAW_STATE_DIR."
           : "Enable mainAgentsMdForeignTakeover (default true) for one-time replace of OpenClaw stock files, or set mainAgentsMdMode to \"always\"."),
     );
+    await writeSubagentRoutingWithPolicy({
+      workspaceDir,
+      mode,
+      managedAgents,
+      log: params.log,
+    });
     return;
   }
 

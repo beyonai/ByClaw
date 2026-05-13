@@ -45,7 +45,7 @@
 
 | 文件 | 职责 |
 |------|------|
-| [`src/subagent-routing-seed.ts`](../src/subagent-routing-seed.ts) | `buildSubagentRoutingMarkdown(managed)`：从 `AdaptedManagedAgent[]` 生成 Markdown；可选读 `sourceFilePath` 取百应详情 `resourceDesc` 或 `agent_list[0].instructions`；控制总长度约 14k 字符。 |
+| [`src/subagent-routing-seed.ts`](../src/subagent-routing-seed.ts) | `buildSubagentRoutingMarkdown(managed)`：从 `AdaptedManagedAgent[]` 生成 Markdown；可选读 `sourceFilePath` 取百应详情 `resourceDesc` 或 `agent_list[0].instructions`；总输出上限与 `MAX_TOTAL_CHARS` 一致（当前 **9000** 字符）。 |
 | [`src/main-workspace-seed.ts`](../src/main-workspace-seed.ts) | `seedMainAgentAgentsMd({ ..., managedAgents })`：写主 `AGENTS.md` 后调用 `writeSubagentRoutingWithPolicy`（`if_missing` / `if_managed_marker` / `always` 与主文件对齐）。 |
 | [`src/agent-watchdog.ts`](../src/agent-watchdog.ts) | `trySeedMainAgentsMd` 传入 `managedAgents: filteredManaged`，保证路由表与 **当前可见托管集合** 同步。 |
 | [`index.ts`](../index.ts) | 注册时 `managedAgents: []`（尚无扫描结果时写空表说明）。 |
@@ -79,20 +79,16 @@
 
 ---
 
-## 5. 仓库内示例：`docs/SUBAGENT_ROUTING.md`
+## 5. 离线生成路由表示例（可选）
 
-为便于 **离线审阅**（不启动网关），可使用扩展根目录下脚本，根据 **`resource/dig_employee/*.json`** 快照生成与运行时 **同形态** 的路由表：
+历史上曾计划在扩展内提供 `scripts/generate-subagent-routing-from-resources.ts` 与 `docs/SUBAGENT_ROUTING.md` 样例输出；**当前本仓库扩展目录下未必包含该脚本或生成文件**。需要审阅路由表形态时，可：
 
-```bash
-cd byclaw-exe/extensions/baiying-enhance
-npx tsx scripts/generate-subagent-routing-from-resources.ts
-```
+- 启动网关并完成一次 agent flush 后，查看主工作区（默认 `main`）目录下的 **`SUBAGENT_ROUTING.md`**；或  
+- 在本地调用 `buildSubagentRoutingMarkdown`（`src/subagent-routing-seed.ts`）对一组 `AdaptedManagedAgent` 做离线生成。
 
-- **输出文件**：[docs/SUBAGENT_ROUTING.md](./SUBAGENT_ROUTING.md)（已加入「离线生成」说明块，避免与运行时 main 工作区文件混淆）。
-- **脚本**：[scripts/generate-subagent-routing-from-resources.ts](../scripts/generate-subagent-routing-from-resources.ts)。
-- **输入**：[`resource/dig_employee/`](../resource/dig_employee/) 下当前仓库内的数字员工导出 JSON（与插件 `executorResourcesDir` 默认资源树中的样例一致）。
+若后续补回脚本，可再在本节恢复具体命令与路径说明。
 
-运行时 main 工作区中的同名文件仍 **仅由插件** 在 agent 配置目录同步后写入，勿手动把 `docs/SUBAGENT_ROUTING.md` 复制为生产唯一来源。
+运行时 main 工作区中的 **`SUBAGENT_ROUTING.md` 仍仅由插件** 在 agent 配置目录同步后写入；勿将任意离线草稿当作生产唯一来源。
 
 ---
 

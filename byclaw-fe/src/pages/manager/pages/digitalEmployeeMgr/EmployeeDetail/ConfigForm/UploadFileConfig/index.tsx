@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Collapse, InputNumber, Checkbox, Switch } from 'antd';
 import type { CheckboxValueType } from 'antd/es/checkbox/Group';
 import { get, unionBy } from 'lodash';
-import { useIntl } from '@umijs/max';
+import { useIntl, getLocale } from '@umijs/max';
 import { getDcSystemConfig, getDcSystemConfigListByStandType } from '@/pages/manager/service/session';
 import { queryResourceListByDefaultType } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { skillHandler } from '../..';
@@ -48,24 +48,26 @@ async function getFileTypes() {
   const res = await getDcSystemConfigListByStandType({
     standType: 'DIG_EMPLOYEE_FILE_UPLOAD_TYPE',
   });
-  const data = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md', 'ofd'];
+
   if (res?.code === 0 && Array.isArray(res.data)) {
+    const isEN = getLocale().includes('en');
+
     const fileTypes = res.data
-      .map((item: { standCode?: string; standDisplayValue?: string }) => {
-        const standCode = String(item?.standCode || '').replace(/^\./, '');
-        if (!standCode) {
-          return null;
-        }
+      .map((item: { paramName: string; paramEnName?: string; paramValue?: string }) => {
+        if (!item.paramValue) return false;
         return {
-          label: item?.standDisplayValue || standCode,
-          value: `.${standCode}`,
+          label: isEN ? item.paramEnName : item.paramName,
+          value: item.paramValue,
         };
       })
       .filter(Boolean);
+
     if (fileTypes.length) {
       return fileTypes;
     }
   }
+
+  const data = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md', 'ofd'];
   return data.map((item) => {
     const label = item.replace(/^\./, '');
     return {

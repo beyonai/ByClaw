@@ -1,13 +1,10 @@
 import React from 'react';
 
-import { generateUniqueId } from '@/utils/math';
-import { chain, concat, pick } from 'lodash';
 import { Spin } from 'antd';
-import { getLocale, useSelector, useDispatch } from '@umijs/max';
+import { useSelector, useDispatch } from '@umijs/max';
 
 import useIframeAction from './useIframeAction';
-import { getToken, getssoToken } from '@/utils/auth';
-import { spliceOrigin, getFileUrl } from '@/utils/file';
+import { agentHomeUrlHandler } from '@/utils/agent';
 
 import { IAgentCache } from '@/typescript/agent';
 import type { ISessionState } from '@/models/session';
@@ -16,14 +13,13 @@ import styles from './index.module.less';
 import useGlobal from '@/hooks/useGlobal';
 
 type IProps = {
-  agent: Partial<IAgentCache> & Pick<IAgentCache, 'agentHomeUrl' | 'id'>;
+  agent: IAgentCache;
 };
 
 function AgentIframe(props: IProps) {
   const dispatch = useDispatch();
 
   const { agent } = props;
-  const { agentHomeUrl, id, resourceCode } = agent;
 
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const uuidRef = React.useRef<string>('');
@@ -44,50 +40,16 @@ function AgentIframe(props: IProps) {
   });
 
   const iframeSrc = React.useMemo(() => {
-    if (!agentHomeUrl) return '';
+    if (!agent.agentHomeUrl) return '';
 
-    const myUrl = chain(agentHomeUrl)
-      .replace('{beyond-token}', getToken())
-      .replace('{sso-token}', getssoToken())
-      .value();
+    const myUrl = agentHomeUrlHandler(agent, sessionId, nextSessionIFileCache);
+    if (!myUrl) return '';
 
-    const srcObj = new URL(myUrl);
+    const u = new URL(myUrl);
+    uuidRef.current = u.searchParams.get('uuid') || '';
 
-    if (!agentHomeUrl.includes('{beyond-token}')) {
-      srcObj.searchParams.append('beyondtoken', getToken());
-    }
-
-    const uniqueId = generateUniqueId();
-    uuidRef.current = uniqueId;
-
-    const files: Array<{
-      fileId: number;
-      fileName: string;
-      fileType: string;
-      fileUrl: string;
-    }> = [];
-    concat([], nextSessionIFileCache || []).forEach((item) => {
-      if (item.queryFile) {
-        files.push({
-          ...(pick(item.queryFile, ['fileId', 'fileName', 'fileType']) as {
-            fileId: number;
-            fileName: string;
-            fileType: string;
-          }),
-          fileUrl: spliceOrigin(getFileUrl(item?.queryFile?.fileUrl || '')),
-        });
-      }
-    });
-
-    srcObj.searchParams.append('uuid', uuidRef.current);
-    srcObj.searchParams.append('objectId', `${id}`);
-    srcObj.searchParams.append('resourceCode', resourceCode || '');
-    srcObj.searchParams.append('sessionId', `${sessionId}`);
-    srcObj.searchParams.append('files', btoa(encodeURIComponent(JSON.stringify(files))));
-    srcObj.searchParams.append('language', `${getLocale()}`);
-
-    return srcObj.toString();
-  }, [agentHomeUrl, id, resourceCode, sessionId, nextSessionIFileCache]);
+    return myUrl;
+  }, [agent, sessionId, nextSessionIFileCache]);
 
   React.useEffect(() => {
     setIsLoading(true);
