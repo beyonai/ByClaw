@@ -162,11 +162,14 @@ public class ByClawFileQueryApplicationService {
         String prefix = userSpaceDto.getPrefix();
         Long resourceId = userSpaceDto.getResourceId();
 
-        if (resourceId != null) {
+        if (StringUtil.isNotEmpty(prefix)) {
+            logger.info("use current prefix={}", prefix);
+        }
+        else if (resourceId != null) {
             prefix = this.buildAgentRootPrefix(resourceId);
         }
-        else if (StringUtil.isEmpty(prefix)) {
-            prefix = "/by/.openclaw";
+        else {
+            prefix = "/by/.openclaw/";
         }
 
         StoragePrefix storagePrefix = StoragePrefix.of("workspace", bucketOrRoot, prefix, "private", false);
@@ -188,6 +191,12 @@ public class ByClawFileQueryApplicationService {
                 userSpaceVo.setName(StringUtils.substringAfterLast(path, "/"));
             }
             userSpaceVo.setDir(storageObject.isDir());
+
+            // 排除目录本身
+            if (prefix.equals(userSpaceVo.getFilePath())) {
+                continue;
+            }
+
             resultList.add(userSpaceVo);
         }
 
