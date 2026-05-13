@@ -29,11 +29,11 @@ def build_redis_client():
     if redis is None:
         raise RuntimeError("redis package is not installed")
     return redis.Redis(
-        host=os.environ.get("DATACLOUD_GATEWAY_REDIS_HOST", "10.10.168.204"),
+        host=os.environ.get("DATACLOUD_GATEWAY_REDIS_HOST", ""),
         port=_as_int("DATACLOUD_GATEWAY_REDIS_PORT", 6379),
         db=_as_int("DATACLOUD_GATEWAY_REDIS_DB", 0),
-        username=os.environ.get("DATACLOUD_GATEWAY_REDIS_USERNAME", "default"),
-        password=os.environ.get("DATACLOUD_GATEWAY_REDIS_PASSWORD", "admin123"),
+        username=os.environ.get("DATACLOUD_GATEWAY_REDIS_USERNAME", ""),
+        password=os.environ.get("DATACLOUD_GATEWAY_REDIS_PASSWORD", ""),
         decode_responses=True,
     )
 
@@ -53,6 +53,17 @@ def get_models_by_ability(client, model_type: str, ability: str) -> list[dict[st
         for model in get_models_by_type(client, model_type)
         if ability in (model.get("instanceParam") or {}).get("abilities", [])
     ]
+
+
+def get_model_by_instance_id(client, instance_id: str | int) -> dict[str, Any] | None:
+    """从 Redis LLM 列表中按 instanceId 精确匹配模型。未找到返回 None。"""
+    if client is None:
+        client = build_redis_client()
+    target = str(instance_id).strip()
+    for model in get_models_by_type(client, "LLM"):
+        if str(model.get("instanceId") or "").strip() == target:
+            return model
+    return None
 
 
 def get_default_llm(client) -> dict[str, Any] | None:

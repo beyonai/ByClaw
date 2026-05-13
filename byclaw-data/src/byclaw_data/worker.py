@@ -72,25 +72,77 @@ _ANALYSIS_HINT_TOKENS = {
     "analy",
 }
 
-_NODE_THINKING_DESC: dict[str, str] = {
+_NODE_THINKING_DESC_ZH: dict[str, str] = {
     "knowledge_enhance": "正在理解问题并补充上下文...\n\n",
     "planning": "正在生成任务计划...\n\n",
     "execution": "正在执行任务...\n\n",
     "end": "正在整理结果...",
 }
-_DEFAULT_THINKING_DESC = "正在处理，请稍候...\n\n"
+_NODE_THINKING_DESC_EN: dict[str, str] = {
+    "knowledge_enhance": "Understanding your question...\n\n",
+    "planning": "Generating task plan...\n\n",
+    "execution": "Executing tasks...\n\n",
+    "end": "Summarizing results...",
+}
+_DEFAULT_THINKING_DESC_ZH = "正在处理，请稍候...\n\n"
+_DEFAULT_THINKING_DESC_EN = "Processing, please wait...\n\n"
 
-_NODE_PHASE_TITLE: dict[str, str] = {
+_NODE_PHASE_TITLE_ZH: dict[str, str] = {
     "knowledge_enhance": "问题理解",
     "execution": "任务执行",
     "end": "结果生成",
 }
+_NODE_PHASE_TITLE_EN: dict[str, str] = {
+    "knowledge_enhance": "Understanding",
+    "execution": "Execution",
+    "end": "Result",
+}
 
-_PLANNING_PHASE_TITLE = "任务生成"
+_PLANNING_PHASE_TITLE_ZH = "任务生成"
+_PLANNING_PHASE_TITLE_EN = "Planning"
+
+_LOCALE_ALIAS: dict[str, str] = {
+    "zh-cn": "zh_CN",
+    "zh_cn": "zh_CN",
+    "en-us": "en_US",
+    "en_us": "en_US",
+}
+_SUPPORTED_LOCALES: frozenset[str] = frozenset({"zh_CN", "en_US"})
+_FALLBACK_LOCALE = "zh_CN"
+
+
+def _normalize_locale(raw: str) -> str:
+    """将前端 language 字段规范化为内部 locale 码。"""
+    if not raw:
+        return _FALLBACK_LOCALE
+    normalized = _LOCALE_ALIAS.get(raw.lower(), raw)
+    return normalized if normalized in _SUPPORTED_LOCALES else _FALLBACK_LOCALE
+
+
+def _get_node_thinking_desc(node: str, locale: str) -> str:
+    if locale == "en_US":
+        return _NODE_THINKING_DESC_EN.get(node, _DEFAULT_THINKING_DESC_EN)
+    return _NODE_THINKING_DESC_ZH.get(node, _DEFAULT_THINKING_DESC_ZH)
+
+
+def _get_node_phase_title(node: str, locale: str) -> str | None:
+    if locale == "en_US":
+        return _NODE_PHASE_TITLE_EN.get(node)
+    return _NODE_PHASE_TITLE_ZH.get(node)
+
+
+def _get_planning_phase_title(locale: str) -> str:
+    return _PLANNING_PHASE_TITLE_EN if locale == "en_US" else _PLANNING_PHASE_TITLE_ZH
+
+
+def _get_received_message_text(locale: str) -> str:
+    return "Message received, processing..." if locale == "en_US" else "已接收到用户消息，开始处理"
 
 _HEARTBEAT_INTERVAL: float = 3.0
 
 _LOG_COMMAND_CONTENT_MAX_CHARS: int = 4000
+
+_RESOURCE_LIST_TOOL_TYPES: frozenset[str] = frozenset({"OBJECT", "VIEW"})
 
 
 def _format_paradigm_form(form_str: str) -> str:
@@ -133,7 +185,7 @@ def _truncate_for_command_log(value: Any, max_chars: int) -> Any:
     """Shorten long strings inside command dicts so a single log line stays usable."""
 
     if isinstance(value, str) and len(value) > max_chars:
-        return "{0}...<truncated total_chars={1}".format(value[:max_chars], len(value))
+        return f"{value[:max_chars]}...<truncated total_chars={len(value)}"
     if isinstance(value, list):
         return [_truncate_for_command_log(item, max_chars) for item in value]
     if isinstance(value, dict):
@@ -142,12 +194,12 @@ def _truncate_for_command_log(value: Any, max_chars: int) -> Any:
 
 
 def _json_line_for_console(obj: Any) -> str:
-    """Serialize to one line using ASCII escapes (Windows GBK consoles cannot print some Unicode)."""
+    """Serialize to one JSON line, preserving non-ASCII characters (e.g. Chinese)."""
 
     try:
-        return json.dumps(obj, ensure_ascii=True, default=str, separators=(",", ":"))
+        return json.dumps(obj, ensure_ascii=False, default=str, separators=(",", ":"))
     except (TypeError, ValueError):
-        return json.dumps(str(obj), ensure_ascii=True)
+        return json.dumps(str(obj), ensure_ascii=False)
 
 
 def _command_question_for_log(command: GatewayCommand) -> str:
@@ -160,12 +212,9 @@ def _command_question_for_log(command: GatewayCommand) -> str:
         clipped = (
             raw
             if len(raw) <= _LOG_COMMAND_CONTENT_MAX_CHARS
-            else "{0}...<truncated total_chars={1}>".format(
-                raw[:_LOG_COMMAND_CONTENT_MAX_CHARS],
-                len(raw),
-            )
+            else f"{raw[:_LOG_COMMAND_CONTENT_MAX_CHARS]}...<truncated total_chars={len(raw)}>"
         )
-        return json.dumps(clipped, ensure_ascii=True)
+        return json.dumps(clipped, ensure_ascii=False)
     truncated = _truncate_for_command_log(raw, _LOG_COMMAND_CONTENT_MAX_CHARS)
     return _json_line_for_console(truncated)
 
@@ -219,6 +268,51 @@ def _build_dynamic_cache_key(mounted_objects: list[str]) -> str:
         :12
     ]
     return f"dynamic:{fingerprint}"
+
+
+def _extract_tool_resource_codes(
+    resource_list: list[Any],
+) -> tuple[list[str], list[str]]:
+    """从 resource_list 中提取 OBJECT / VIEW 的资源码。
+
+    Args:
+        resource_list: 前端透传的资源清单，元素为 dict。
+
+    Returns:
+        (object_codes, view_codes)，分别保留首次出现顺序、内部去重。
+        资源码优先取 ``resouceCode``（前端历史拼写），回退 ``resourceCode``。
+        非 dict / 资源类型不在 OBJECT/VIEW / 资源码空白 的项被跳过。
+
+    每个返回的 code 在下游 ``OntologyToolLoader`` 中会被展开为该资源下的
+    全部工具：虚拟 ``{QUERY_PREFIX}{code}`` / ``{COMPUTE_PREFIX}{code}``
+    及 OWL/视图定义的 Action 工具。
+    """
+    object_codes: list[str] = []
+    view_codes: list[str] = []
+    seen_obj: set[str] = set()
+    seen_view: set[str] = set()
+
+    for item in resource_list:
+        if not isinstance(item, dict):
+            continue
+        rtype_raw = item.get("resourceType")
+        if not isinstance(rtype_raw, str):
+            continue
+        rtype = rtype_raw.strip().upper()
+        if rtype not in _RESOURCE_LIST_TOOL_TYPES:
+            continue
+        code_raw = item.get("resouceCode") or item.get("resourceCode") or ""
+        code = str(code_raw).strip()
+        if not code:
+            continue
+        if rtype == "OBJECT" and code not in seen_obj:
+            object_codes.append(code)
+            seen_obj.add(code)
+        elif rtype == "VIEW" and code not in seen_view:
+            view_codes.append(code)
+            seen_view.add(code)
+
+    return object_codes, view_codes
 
 
 def _dict_to_paradigm_answer(raw: Any) -> Any:
@@ -277,6 +371,7 @@ async def _consume_agent_events(
     event_iter: AsyncGenerator[Any, None],
     context: Any,
     reco_task: asyncio.Task[list[str]] | None,
+    emit_done: bool = True,
 ) -> dict[str, Any]:
     """消费 OntologyAgent 事件流，翻译为 Gateway SSE。"""
     from datacloud_analysis.ontology_agent import (  # noqa: PLC0415
@@ -288,6 +383,7 @@ async def _consume_agent_events(
     )
 
     interrupt_ev: Any = None
+    _answer_parts: list[str] = []
 
     async for event in event_iter:
         if isinstance(event, ThinkingEvent):
@@ -304,21 +400,27 @@ async def _consume_agent_events(
             )
         elif isinstance(event, AnswerEvent):
             if event.content:
+                _answer_parts.append(event.content)
                 await context.emit_chunk(
                     StreamChunkEvent(content=event.content),
                     event_type=EventType.ANSWER_DELTA.value,
                     content_type=SseMessageType.text.value,
                 )
             await context.flush_to_history()
-            await context.emit_chunk(
-                StreamChunkEvent(
-                    content="回答完成",
-                    metadata={"relatedResources": _related_resources_from_reco_task(reco_task)},
-                ),
-                event_type=EventType.APP_STREAM_RESPONSE.value,
-                content_type=SseMessageType.text.value,
-            )
-            return {"status": "done"}
+            if emit_done:
+                await context.emit_chunk(
+                    StreamChunkEvent(
+                        content="回答完成",
+                        metadata={
+                            "relatedResources": _related_resources_from_reco_task(
+                                reco_task
+                            )
+                        },
+                    ),
+                    event_type=EventType.APP_STREAM_RESPONSE.value,
+                    content_type=SseMessageType.text.value,
+                )
+            return {"status": "done", "content": "".join(_answer_parts)}
         elif isinstance(event, InterruptEvent):
             interrupt_ev = event
             break
@@ -469,6 +571,8 @@ class DataCloudWorker(GatewayWorker):
         self._shared_loader: Any | None = None
         self._resource_path: str = os.environ.get("DATACLOUD_ONTOLOGY_PATH", "")
         self._ontology_agent: Any | None = None
+        self._model_config_sig: str = ""
+        self._ontology_agent_lock: asyncio.Lock = asyncio.Lock()
 
     def _build_resume_dedup_key(
         self,
@@ -723,7 +827,15 @@ class DataCloudWorker(GatewayWorker):
         # 若 DATACLOUD_ONTOLOGY_PATH 未设置，仅警告，不阻断静态路径启动；
         # 实际发起动态请求时再通过 assert 给出明确错误。
         if self._resource_path:
-            from datacloud_analysis.ontology_agent import OntologyAgent, OntologyAgentConfig  # noqa: PLC0415
+            from datacloud_analysis.ontology_agent import (
+                OntologyAgent,
+                OntologyAgentConfig,
+            )  # noqa: PLC0415
+            from datacloud_data_service.config import get_settings  # noqa: PLC0415
+
+            from byclaw_data.mcp.result_file_storage import (
+                build_result_file_storage,  # noqa: PLC0415
+            )
 
             self._ontology_agent = OntologyAgent(
                 OntologyAgentConfig(
@@ -731,10 +843,14 @@ class DataCloudWorker(GatewayWorker):
                     model=self.model_name or "",
                     base_url=self.base_url,
                     resource_path=self._resource_path,
+                    result_file_storage=build_result_file_storage(
+                        settings=get_settings()
+                    ),
                 )
             )
             logger.info(
-                "DataCloudWorker: OntologyAgent initialized resource_path=%s", self._resource_path
+                "DataCloudWorker: OntologyAgent initialized resource_path=%s",
+                self._resource_path,
             )
         else:
             logger.warning(
@@ -750,6 +866,23 @@ class DataCloudWorker(GatewayWorker):
             if self._shared_loader is not None
             else "None (dynamic agents will skip OWL inject)",
         )
+
+    async def _resolve_agent_configs_snapshot(
+        self,
+        execution: Any,
+        session_id: str,
+    ) -> Any:
+        """Return the current in-memory snapshot without dill serialization.
+
+        The framework's default implementation serializes AgentConfig objects via dill,
+        which fails because OntologyLoader's LLM client holds ssl.SSLContext objects that
+        are not picklable. Overriding here returns the current plugin_registry snapshot
+        directly, bypassing persist/restore entirely.
+
+        For resume cases this is safe: the current in-memory configs carry the real
+        OntologyLoader (with plan_generator), which is what graph building needs anyway.
+        """
+        return self.plugin_registry.get_agent_configs_snapshot()
 
     def get_capabilities(self) -> list[str]:
         """Capabilities registered by this worker."""
@@ -796,10 +929,66 @@ class DataCloudWorker(GatewayWorker):
         from byclaw_data.model_environment import (
             build_embedding_config,
             build_llm_config,
+            get_model_by_instance_id,
         )
 
-        build_llm_config(None)
+        _new_llm_cfg = build_llm_config(None) or {}
         build_embedding_config(None)
+
+        # 根据 Redis 返回的全量配置计算签名（涵盖 url/token/model/provider/temperature 等所有字段），
+        # 任一字段变更都会触发 graph 缓存失效和 OntologyAgent 重建。
+        _new_api_key = str(_new_llm_cfg.get("DATACLOUD_LLM_API_KEY") or "")
+        _new_model = str(_new_llm_cfg.get("DATACLOUD_LLM_MODEL") or "")
+        _new_base_url = str(_new_llm_cfg.get("DATACLOUD_LLM_API_BASE") or "")
+        _model_sig: str = self._model_config_sig
+
+        if _new_llm_cfg:
+            _model_sig = hashlib.sha1(
+                json.dumps(_new_llm_cfg, sort_keys=True, ensure_ascii=True).encode()
+            ).hexdigest()[:12]
+            if _model_sig != self._model_config_sig:
+                async with self._ontology_agent_lock:
+                    if _model_sig != self._model_config_sig:
+                        logger.info(
+                            "LLM config changed: old_sig=%s new_sig=%s session=%s",
+                            self._model_config_sig,
+                            _model_sig,
+                            context.session_id,
+                        )
+                        if _new_api_key:
+                            self.api_key = _new_api_key
+                        if _new_model:
+                            self.model_name = _new_model
+                        if _new_base_url:
+                            self.base_url = _new_base_url
+                        self._model_config_sig = _model_sig
+                        if self._resource_path and self._ontology_agent is not None:
+                            from datacloud_analysis.ontology_agent import (
+                                OntologyAgent,
+                                OntologyAgentConfig,
+                            )  # noqa: PLC0415
+                            from datacloud_data_service.config import get_settings  # noqa: PLC0415
+
+                            from byclaw_data.mcp.result_file_storage import (
+                                build_result_file_storage,
+                            )  # noqa: PLC0415
+
+                            self._ontology_agent = OntologyAgent(
+                                OntologyAgentConfig(
+                                    api_key=self.api_key or "",
+                                    model=self.model_name or "",
+                                    base_url=self.base_url,
+                                    resource_path=self._resource_path,
+                                    result_file_storage=build_result_file_storage(
+                                        settings=get_settings()
+                                    ),
+                                )
+                            )
+                            logger.info(
+                                "OntologyAgent recreated: sig=%s session=%s",
+                                _model_sig,
+                                context.session_id,
+                            )
 
         # if self.api_key:
         #     os.environ["DATACLOUD_LLM_API_KEY"] = self.api_key
@@ -818,9 +1007,25 @@ class DataCloudWorker(GatewayWorker):
             getattr(getattr(command, "header", None), "metadata", None) or {}
         )
 
-        # ── 动态 Agent 路径检测 ─────────────────────────────────────────────
-        # header_metadata 中存在非空 object_ids 或 view_ids 时进入动态路径，
-        # 跳过 AgentConfig 查找，直接以这些资源码组装 mounted_objects 构建 graph。
+        # ── locale 设置（从 header_metadata.language 读取，规范化后写入 context）──
+        _raw_language = str(header_metadata.get("language") or "").strip()
+        _resolved_locale = _normalize_locale(_raw_language)
+        try:
+            context.locale = _resolved_locale
+        except AttributeError:
+            pass
+        logger.debug(
+            "[i18n-diag] locale resolved: header_metadata.language=%r → _resolved_locale=%r"
+            " → context.locale(after set)=%r",
+            _raw_language,
+            _resolved_locale,
+            getattr(context, "locale", "<not set>"),
+        )
+
+
+        # 来源 1：extra_payload.call_object_ids / call_view_ids（内部委派）
+        # 来源 2：extra_payload.resource_list 中的 OBJECT / VIEW 资源码（前端选择）
+        # 任一来源非空即激活动态路径，旁路 AgentConfig；两源合并去重，call_*_ids 优先。
         _dyn_object_ids: list[str] = [
             s.strip()
             for s in (extra_payload.get("call_object_ids") or [])
@@ -831,6 +1036,29 @@ class DataCloudWorker(GatewayWorker):
             for s in (extra_payload.get("call_view_ids") or [])
             if isinstance(s, str) and s.strip()
         ]
+
+        _resource_list_raw = extra_payload.get("resource_list")
+        _resource_list_for_extract: list[Any] = (
+            _resource_list_raw if isinstance(_resource_list_raw, list) else []
+        )
+        _res_object_codes, _res_view_codes = _extract_tool_resource_codes(
+            _resource_list_for_extract
+        )
+        for _code in _res_object_codes:
+            if _code not in _dyn_object_ids:
+                _dyn_object_ids.append(_code)
+        for _code in _res_view_codes:
+            if _code not in _dyn_view_ids:
+                _dyn_view_ids.append(_code)
+        if _res_object_codes or _res_view_codes:
+            logger.info(
+                "resource_list tool whitelist activated: session=%s "
+                "object_codes=%s view_codes=%s",
+                context.session_id,
+                _res_object_codes,
+                _res_view_codes,
+            )
+
         _is_dynamic_agent: bool = bool(_dyn_object_ids or _dyn_view_ids)
         if _is_dynamic_agent:
             logger.info(
@@ -862,7 +1090,7 @@ class DataCloudWorker(GatewayWorker):
 
         by_agent_name_log = json.dumps(
             "" if by_agent_name is None else str(by_agent_name),
-            ensure_ascii=True,
+            ensure_ascii=False,
         )
 
         logger.info(
@@ -888,6 +1116,28 @@ class DataCloudWorker(GatewayWorker):
         # os.environ["DATACLOUD_LLM_MODEL"] = self.model_name
 
         ext_params = extra_payload.get("ext_params")
+        resource_list = _resource_list_for_extract
+        # 仅支持 KG_DOC_FILE 类型的附件引用,且最多 1 个;多于 1 个直接抛错。
+        _kg_doc_files: list[str] = [
+            str(item.get("resourceId") or "").strip()
+            for item in resource_list
+            if isinstance(item, dict)
+            and str(item.get("resourceType") or "").strip().upper() == "KG_DOC_FILE"
+            and str(item.get("resourceId") or "").strip()
+        ]
+        if len(_kg_doc_files) > 1:
+            raise ValueError(
+                "目前仅支持引用 1 个 KG_DOC_FILE 附件,"
+                f"收到 {len(_kg_doc_files)} 个:{_kg_doc_files}"
+            )
+        attached_file_path: str = _kg_doc_files[0] if _kg_doc_files else ""
+        if attached_file_path:
+            logger.info(
+                "Attached file detected: session=%s path=%s",
+                context.session_id,
+                attached_file_path,
+            )
+
         runtime_agent_key = self._resolve_runtime_agent_key(
             command=command,
             by_agent_id=by_agent_id,
@@ -1002,15 +1252,21 @@ class DataCloudWorker(GatewayWorker):
         if isinstance(command, AskAgentCommand) and _paradigm_resume_value is None:
             # 推送初始思考内容（不再包裹"问题理解"标题）
             _init_msg_id = context.generate_message_id()
+            _locale_for_msg = getattr(context, "locale", "zh_CN")
+            logger.debug(
+                "[i18n-diag] received_message: context.locale=%r → text=%r",
+                _locale_for_msg,
+                _get_received_message_text(_locale_for_msg),
+            )
             await context.emit_chunk(
-                StreamChunkEvent(content="已接收到用户消息，开始处理"),
+                StreamChunkEvent(content=_get_received_message_text(_locale_for_msg)),
                 event_type=EventType.REASONING_LOG_START.value,
                 content_type=SseReasonMessageType.think_text.value,
                 message_id=_init_msg_id,
             )
             context._knowledge_enhance_node_id = _init_msg_id
             user_text = _latest_user_text_from_content(command.content)
-            if _is_light_chitchat(user_text):
+            if _is_light_chitchat(user_text) and not attached_file_path:
                 await context.emit_chunk(
                     StreamChunkEvent(
                         content=_CHITCHAT_DIRECT_REPLY,
@@ -1053,7 +1309,8 @@ class DataCloudWorker(GatewayWorker):
                     if _paradigm_resume_value is not None
                     else (
                         command.reply_data
-                        if isinstance(command, ResumeCommand) and command.reply_data is not None
+                        if isinstance(command, ResumeCommand)
+                        and command.reply_data is not None
                         else command.content  # type: ignore[union-attr]
                     )
                 )
@@ -1063,20 +1320,35 @@ class DataCloudWorker(GatewayWorker):
                     resume_input,
                     view_codes=_dyn_view_ids,
                     object_codes=_dyn_object_ids,
+                    user_code=_get_gateway_user_code(context),
+                    session_id=context.session_id,
                 )
             else:
                 latest_user_text_dyn = _latest_user_text_from_content(command.content)
+                latest_user_text_dyn = latest_user_text_dyn + _build_attachment_hint(
+                    attached_file_path
+                )
                 event_iter = self._ontology_agent.ask(
                     question=latest_user_text_dyn,
                     view_codes=_dyn_view_ids,
                     object_codes=_dyn_object_ids,
                     thread_id=dyn_thread_id,
                     user_code=_get_gateway_user_code(context),
+                    session_id=context.session_id,
                 )
 
-            dynamic_result = await _consume_agent_events(event_iter, context, reco_task=None)
+            dynamic_result = await _consume_agent_events(
+                event_iter, context, reco_task=None, emit_done=False
+            )
             if resume_cache_key is not None:
                 self._cache_resume_result(resume_cache_key, dynamic_result)
+            # "done" 不是框架的 terminal state（COMPLETED/FAILED/CANCELLED），
+            # 必须转换才能触发 framework worker.py 的 should_emit_stream_end → line 609
+            if (
+                isinstance(dynamic_result, dict)
+                and dynamic_result.get("status") == "done"
+            ):
+                dynamic_result = {**dynamic_result, "status": "COMPLETED"}
             return dynamic_result
 
         else:
@@ -1118,7 +1390,11 @@ class DataCloudWorker(GatewayWorker):
                 getattr(config_for_this_call, "agent_id", None),
             )
 
-            prompts_dict = getattr(config_for_this_call, "prompts", None) or {}
+            prompts_dict = dict(getattr(config_for_this_call, "prompts", None) or {})
+            # 将 request locale 注入 prompts_overwrite，供 graph_builder 选择系统提示词语言
+            _req_locale = str(getattr(context, "locale", "") or "zh_CN")
+            if "locale" not in prompts_dict:
+                prompts_dict["locale"] = _req_locale
             config_extra = getattr(config_for_this_call, "extra", None) or {}
             tools_dict = config_extra.get("redirect_tools", {})
             tool_metadata = config_extra.get("tool_metadata", {})
@@ -1207,7 +1483,9 @@ class DataCloudWorker(GatewayWorker):
                     )
             conf_hash = resume_conf_hash or computed_conf_hash
             cache_key = (
-                f"{by_agent_id}:{conf_hash}" if by_agent_id else f"default:{conf_hash}"
+                f"{by_agent_id}:{conf_hash}:{_model_sig}"
+                if by_agent_id
+                else f"default:{conf_hash}:{_model_sig}"
             )
 
             target_graph = self.graphs.get(cache_key)
@@ -1246,6 +1524,54 @@ class DataCloudWorker(GatewayWorker):
                 session_id=context.session_id,
                 agent_key=runtime_agent_key,
             )
+
+        # ── per-agent llm_config：从 prologue.modelInfo.modelId 查 Redis ──────
+        _agent_llm_config: dict[str, Any] | None = None
+        if config_for_this_call is not None:
+            _config_extra = getattr(config_for_this_call, "extra", None) or {}
+            _prologue_raw = _config_extra.get("prologue") or {}
+            if isinstance(_prologue_raw, str):
+                try:
+                    import json as _json_mod
+                    _prologue_raw = _json_mod.loads(_prologue_raw)
+                except Exception:
+                    _prologue_raw = {}
+            _model_info = (_prologue_raw.get("modelInfo") or {}) if isinstance(_prologue_raw, dict) else {}
+            _prologue_model_id = str(_model_info.get("modelId") or "").strip()
+            if _prologue_model_id and _prologue_model_id not in ("", "0"):
+                try:
+                    _redis_model = get_model_by_instance_id(None, _prologue_model_id)
+                    if _redis_model:
+                        _ip = _redis_model.get("instanceParam") or {}
+                        _agent_llm_config = {
+                            "model": _redis_model.get("modelCode") or "",
+                            "api_key": _redis_model.get("authToken") or "",
+                            "base_url": _redis_model.get("url") or "",
+                            "provider": str(_ip.get("providerName") or "openai").lower(),
+                            "temperature": float(_ip.get("temperature") or 0.0),
+                        }
+                        logger.info(
+                            "[per-agent-model] agent_id=%s prologue_model_id=%s "
+                            "resolved model=%s base_url=%s",
+                            by_agent_id,
+                            _prologue_model_id,
+                            _agent_llm_config["model"],
+                            _agent_llm_config["base_url"],
+                        )
+                    else:
+                        logger.warning(
+                            "[per-agent-model] agent_id=%s prologue_model_id=%s "
+                            "not found in Redis, falling back to default",
+                            by_agent_id,
+                            _prologue_model_id,
+                        )
+                except Exception as _exc:
+                    logger.warning(
+                        "[per-agent-model] agent_id=%s failed to resolve model: %s",
+                        by_agent_id,
+                        _exc,
+                    )
+
         config = {
             "configurable": {
                 "thread_id": thread_id,
@@ -1261,6 +1587,8 @@ class DataCloudWorker(GatewayWorker):
                 "knowledge_enhance_node_id": getattr(
                     context, "_knowledge_enhance_node_id", ""
                 ),
+                # per-agent LLM 配置（非 None 时覆盖环境变量）
+                **({"llm_config": _agent_llm_config} if _agent_llm_config else {}),
             }
         }
         context._langgraph_thread_id = thread_id
@@ -1305,6 +1633,8 @@ class DataCloudWorker(GatewayWorker):
             graph_input = Command(resume=_paradigm_resume_value)
         else:
             latest_user_text = _latest_user_text_from_content(command.content)
+            _attachment_hint = _build_attachment_hint(attached_file_path)
+            # 历史去重用未拼接版本匹配，避免提示文本干扰
             history_messages = await _load_recent_history_messages(
                 context=context,
                 limit=_history_inject_limit(),
@@ -1313,12 +1643,32 @@ class DataCloudWorker(GatewayWorker):
             input_messages = _normalize_messages(command.content)
             # content 为 [] 或无法解析时，避免只有历史且最后一条为 assistant → intend 误用 AIMessage
             if not input_messages and latest_user_text:
-                input_messages = [HumanMessage(content=latest_user_text)]
+                input_messages = [
+                    HumanMessage(content=latest_user_text + _attachment_hint)
+                ]
+            elif _attachment_hint and input_messages:
+                # 把附件提示追加到最后一条 HumanMessage
+                _last = input_messages[-1]
+                if isinstance(_last, HumanMessage):
+                    input_messages[-1] = HumanMessage(
+                        content=str(_last.content) + _attachment_hint
+                    )
             combined_messages = history_messages + input_messages
             graph_input = {
                 "messages": combined_messages,
                 "query_received_at": _now_monotonic(),
+                # 新问题进来时清除上一轮残留的澄清状态，防止 REPLAY GUARD 误触发
+                "pending_clarification_context": None,
+                "clarification_formatted_params": None,
+                "agent_abort": False,
+                "prompts_overwrite": {
+                    "locale": str(getattr(context, "locale", "") or "zh_CN"),
+                },
             }
+            logger.debug(
+                "[i18n-diag] graph_input.prompts_overwrite set: locale=%r",
+                str(getattr(context, "locale", "") or "zh_CN"),
+            )
 
         if isinstance(command, ResumeCommand) or _paradigm_resume_value is not None:
             # paradigm resume：checkpoint_id 在 humanInput.metadata 而非请求头，需合并后解析
@@ -1599,10 +1949,11 @@ class DataCloudWorker(GatewayWorker):
                     )
                     if (
                         node_name == "planning"
-                        and _PLANNING_PHASE_TITLE not in phase_emitted
+                        and _get_planning_phase_title(getattr(context, "locale", "zh_CN")) not in phase_emitted
                     ):
-                        phase_emitted.add(_PLANNING_PHASE_TITLE)
-                        async with context.sub_step(_PLANNING_PHASE_TITLE):
+                        _planning_title = _get_planning_phase_title(getattr(context, "locale", "zh_CN"))
+                        phase_emitted.add(_planning_title)
+                        async with context.sub_step(_planning_title):
                             pass
 
                 elif kind == "on_chain_end":
@@ -1678,10 +2029,11 @@ class DataCloudWorker(GatewayWorker):
                         (event.get("metadata") or {}).get("langgraph_node") or ""
                     )
                     if _node == "respond":
-                        if _NODE_PHASE_TITLE["end"] not in phase_emitted:
-                            phase_emitted.add(_NODE_PHASE_TITLE["end"])
+                        _end_title = _get_node_phase_title("end", getattr(context, "locale", "zh_CN"))
+                        if _end_title and _end_title not in phase_emitted:
+                            phase_emitted.add(_end_title)
                             await context.emit_chunk(
-                                StreamChunkEvent(content=_NODE_THINKING_DESC["end"]),
+                                StreamChunkEvent(content=_get_node_thinking_desc("end", getattr(context, "locale", "zh_CN"))),
                                 event_type=EventType.REASONING_LOG_START.value,
                                 content_type=SseReasonMessageType.think_text.value,
                             )
@@ -1979,6 +2331,8 @@ async def _load_recent_history_messages(
     if not isinstance(raw_history, list):
         return []
 
+    raw_history = list(reversed(raw_history))
+
     history_messages: list[HumanMessage | AIMessage | SystemMessage] = []
     for item in raw_history:
         if not isinstance(item, dict):
@@ -2026,6 +2380,17 @@ def _related_resources_from_reco_task(
     if not isinstance(out, list):
         return []
     return [str(x).strip() for x in out if str(x).strip()]
+
+
+def _build_attachment_hint(attached_file_path: str) -> str:
+    """生成附件提示文本,追加到用户消息末尾,由 LLM 自主决定是否调用 read_file。"""
+    if not attached_file_path:
+        return ""
+    return (
+        f"\n\n[用户附件] 用户引用了 1 个文件,路径:{attached_file_path}\n"
+        f"如需读取该文件内容以辅助回答,请调用 read_file 工具,"
+        f"path 参数传入:{attached_file_path}"
+    )
 
 
 def _latest_user_text_from_content(content: Any) -> str:
