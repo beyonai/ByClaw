@@ -5,13 +5,16 @@ description = "Question answering application module for byclaw."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "by-qa[all]==0.1.5",
+    "by-qa[all]==0.1.8",
     "by-framework>=0.1.13",
 ]
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-dir]
+"" = "src"
 
 [tool.setuptools]
 py-modules = ["worker", "redis_model_config", "redis_agent_config", "byclaw_plugin", "minio_client", "minio_agent_config", "api"]

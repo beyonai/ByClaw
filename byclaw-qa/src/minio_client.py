@@ -15,6 +15,7 @@ import aioboto3
 from botocore.exceptions import ClientError
 
 from by_qa.core import logger
+from exceptions import ConfigurationError, StorageError
 
 _TRANSIENT_STATUS_CODES = {500, 502, 503, 504}
 
@@ -22,7 +23,7 @@ _TRANSIENT_STATUS_CODES = {500, 502, 503, 504}
 def _build_endpoint_url() -> str:
     raw = os.getenv("MINIO_ENDPOINT")
     if not raw:
-        raise RuntimeError("MINIO_ENDPOINT environment variable is required")
+        raise ConfigurationError("MINIO_ENDPOINT environment variable is required")
     secure = os.getenv("MINIO_SECURE", "false").lower() in ("true", "1", "yes")
     host = raw.removeprefix("http://").removeprefix("https://")
     scheme = "https" if secure else "http"

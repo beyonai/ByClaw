@@ -1,8 +1,9 @@
 import json
 import pytest
 from unittest.mock import AsyncMock, patch
-from by_qa.qa.instant.runtime.operation_registry import OperationType
+from by_qa.qa.common.operation_registry import OperationType
 
+from exceptions import ModelConfigError
 from redis_agent_config import (
     RESOURCE_DIG_EMPLOYEE_REDIS_KEY_PREFIX,
     build_dig_employee_redis_key,
@@ -30,12 +31,12 @@ def test_validate_payload_list_passes():
 
 
 def test_validate_payload_non_list_raises():
-    with pytest.raises(ValueError, match="must be a data list"):
+    with pytest.raises(ModelConfigError, match="must be a data list"):
         validate_dig_employee_skill_payload({"key": "value"})
 
 
 def test_validate_payload_string_raises():
-    with pytest.raises(ValueError):
+    with pytest.raises(ModelConfigError):
         validate_dig_employee_skill_payload("not a list")
 
 
@@ -64,7 +65,7 @@ def test_decode_redis_json_already_list():
 
 
 def test_decode_redis_json_non_list_raises():
-    with pytest.raises(ValueError):
+    with pytest.raises(ModelConfigError):
         _decode_redis_json(json.dumps({"key": "value"}))
 
 
@@ -75,7 +76,7 @@ def _make_kb_item(
     resource_name="KB One",
     resource_desc="desc",
     domain_name="svc.local",
-    operation_id=OperationType.SEARCH.value,
+    operation_id=OperationType.KNOWLEDGE_SEARCH.value,
     path="/search",
     headers=None,
 ):
@@ -111,7 +112,7 @@ def test_extract_knowledge_bases_normal():
     assert kb["kb_code"] == "kb1"
     assert kb["kb_name"] == "KB One"
     assert kb["service_name"] == "svc.local"
-    assert OperationType.SEARCH in kb["urls"]
+    assert OperationType.KNOWLEDGE_SEARCH in kb["urls"]
 
 
 def test_extract_knowledge_bases_missing_resource_code_skipped():
@@ -130,14 +131,14 @@ def test_extract_knowledge_bases_unknown_action_skipped():
     payload = [_make_kb_item(operation_id="unknownAction")]
     result = extract_knowledge_bases_from_agent_payload(payload)
     assert len(result) == 1
-    assert OperationType.SEARCH not in result[0]["urls"]
+    assert OperationType.KNOWLEDGE_SEARCH not in result[0]["urls"]
 
 
 def test_extract_knowledge_bases_legacy_knowledge_search_maps_to_search():
     payload = [_make_kb_item(operation_id="knowledgeSearch")]
     result = extract_knowledge_bases_from_agent_payload(payload)
     assert len(result) == 1
-    assert result[0]["urls"][OperationType.SEARCH] == "/search"
+    assert result[0]["urls"][OperationType.KNOWLEDGE_SEARCH] == "/search"
 
 
 def test_extract_knowledge_bases_headers_passed_through():
@@ -173,7 +174,7 @@ def test_convert_agent_config_normal():
         "kb_code": "kb1",
         "kb_name": "KB One",
         "kb_desc": "desc",
-        "urls": {OperationType.SEARCH: "/search"},
+        "urls": {OperationType.KNOWLEDGE_SEARCH: "/search"},
         "service_name": "svc.local",
     }
     config = _FakeAgentConfig({"agent1": [kb]})
@@ -181,7 +182,7 @@ def test_convert_agent_config_normal():
     kbs = result["retrieval"]["knowledge_bases"]
     assert len(kbs) == 1
     assert kbs[0]["kb_code"] == "kb1"
-    assert kbs[0]["operations"] == {OperationType.SEARCH: "/search"}
+    assert kbs[0]["operations"] == {OperationType.KNOWLEDGE_SEARCH: "/search"}
     assert kbs[0]["service_name"] == "svc.local"
 
 
@@ -190,7 +191,7 @@ def test_convert_agent_config_missing_service_name_skipped():
         "kb_code": "kb1",
         "kb_name": "KB One",
         "kb_desc": "desc",
-        "urls": {OperationType.SEARCH: "/search"},
+        "urls": {OperationType.KNOWLEDGE_SEARCH: "/search"},
         "service_name": None,
     }
     config = _FakeAgentConfig({"agent1": [kb]})
@@ -216,7 +217,7 @@ def test_convert_agent_config_headers_passed_through():
         "kb_code": "kb1",
         "kb_name": "KB One",
         "kb_desc": "desc",
-        "urls": {OperationType.SEARCH: "/search"},
+        "urls": {OperationType.KNOWLEDGE_SEARCH: "/search"},
         "service_name": "svc.local",
         "headers": {"X-Token": "abc"},
     }

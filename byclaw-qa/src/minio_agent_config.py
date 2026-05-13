@@ -30,6 +30,7 @@ def _kg_doc_to_skill_item(
     """
     target_content = {
         "domainName": kg_doc_config.get("domainName"),
+        "domainURL": kg_doc_config.get("domainURL"),
         "headers": kg_doc_config.get("headers"),
         "resourceService": kg_doc_config.get("resourceService", []),
     }
@@ -121,3 +122,25 @@ async def resolve_call_kb_ids(
         else:
             codes.append(code)
     return codes, failed
+
+
+def extract_prologue_model_id(employee_config: dict[str, Any] | None) -> str | None:
+    """从数字员工配置的 prologue 字段中提取 modelId。
+
+    prologue 是一个 JSON 字符串，格式如：
+    {"modelInfo": {...}, "modelId": -2000, ...}
+    返回 modelId 的字符串形式，或 None（解析失败/字段不存在时）。
+    """
+    if not employee_config:
+        return None
+    prologue_raw = employee_config.get("prologue")
+    if prologue_raw is None:
+        return None
+    try:
+        prologue = json.loads(prologue_raw) if isinstance(prologue_raw, str) else prologue_raw
+        model_id = prologue.get("modelInfo", {}).get("modelId")
+        if model_id is None:
+            return None
+        return str(model_id)
+    except (json.JSONDecodeError, AttributeError):
+        return None

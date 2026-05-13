@@ -7,7 +7,8 @@ from typing import Any, TypedDict
 
 from by_framework.core.extensions import AgentConfig
 from by_qa.core import logger
-from by_qa.qa.instant.runtime.operation_registry import OperationType
+from by_qa.qa.common.operation_registry import OperationType
+from exceptions import ModelConfigError
 
 
 RESOURCE_DIG_EMPLOYEE_REDIS_KEY_PREFIX = "RESOURCE_DIG_EMPLOYEE_"
@@ -34,7 +35,7 @@ def validate_dig_employee_skill_payload(
     payload: Any,
 ) -> DigEmployeeSkillDataSchema:
     if not isinstance(payload, list):
-        raise ValueError("Redis digital employee payload must be a data list")
+        raise ModelConfigError("Redis digital employee payload must be a data list")
     return payload
 
 
@@ -59,6 +60,7 @@ def extract_knowledge_bases_from_agent_payload(
                 ((item or {}).get("extDoc") or {}).get("targetContent") or "{}"
             )
             domain_name = target_content.get("domainName", None)
+            domain_url = target_content.get("domainURL", None)
             headers = target_content.get("headers", None)
             kb_code = item.get("resourceCode", None)
             kb_name = item.get("resourceName", None)
@@ -72,25 +74,22 @@ def extract_knowledge_bases_from_agent_payload(
                     action = path_item.get("post", {}).get("operationId", None)
                     if not action:
                         continue
-                    if action == "knowledgeSearch":
-                        operation_type = OperationType.SEARCH
-                    else:
-                        try:
-                            operation_type = OperationType(action)
-                        except ValueError:
-                            logger.warning(f"Skip unknown action: {action}")
-                            continue
-                    if operation_type is not OperationType.SEARCH:
+                    try:
+                        operation_type = OperationType(action)
+                    except ValueError:
+                        logger.warning(f"Skip unknown action: {action}")
+                        continue
+                    if operation_type is not OperationType.KNOWLEDGE_SEARCH:
                         logger.warning(f"Skip unknown action: {action}")
                         continue
                     services[operation_type] = path
 
-            if OperationType.SEARCH not in services:
+            if OperationType.KNOWLEDGE_SEARCH not in services:
                 logger.warning(
                     "Knowledge base %s(%s) does not provide %s service",
                     kb_code,
                     kb_name,
-                    OperationType.SEARCH.value,
+                    OperationType.KNOWLEDGE_SEARCH.value,
                 )
 
             knowledge_base = {
@@ -99,6 +98,7 @@ def extract_knowledge_bases_from_agent_payload(
                 "kb_desc": str(kb_desc),
                 "urls": services,
                 "service_name": domain_name,
+                "base_url": domain_url
             }
             if headers is not None:
                 knowledge_base["headers"] = headers
@@ -135,7 +135,7 @@ def convert_agent_config_to_engine_config(agent_config: Any) -> dict[str, Any]:
     for employee_knowledge_bases in (agent_config.knowledge_bases or {}).values():
         for knowledge_base in employee_knowledge_bases or []:
             operations = dict(knowledge_base.get("urls") or {})
-            kb_url = operations.get(OperationType.SEARCH)
+            kb_url = operations.get(OperationType.KNOWLEDGE_SEARCH)
             kb_service_name = knowledge_base.get("service_name", None)
             if not kb_url or not kb_service_name:
                 continue
@@ -143,9 +143,10 @@ def convert_agent_config_to_engine_config(agent_config: Any) -> dict[str, Any]:
                 "kb_code": str(knowledge_base.get("kb_code") or ""),
                 "kb_name": str(knowledge_base.get("kb_name") or ""),
                 "kb_description": str(knowledge_base.get("kb_desc") or ""),
+                "base_url": knowledge_base.get("base_url", None),
                 "service_name": str(kb_service_name or ""),
                 "operations": {
-                    OperationType.SEARCH: str(kb_url),
+                    OperationType.KNOWLEDGE_SEARCH: str(kb_url),
                 },
             }
             headers = knowledge_base.get("headers", None)

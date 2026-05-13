@@ -185,6 +185,7 @@ unset HOST
 export HOST="0.0.0.0"
 
 cd "$SCRIPT_DIR"
+export PYTHONPATH="$SCRIPT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
 
 map_env_if_unset "BYAI_REDIS_HOST" "REDIS_HOST"
 map_env_if_unset "BYAI_REDIS_PORT" "REDIS_PORT"
@@ -306,8 +307,8 @@ case "$MODE" in
         ;;
     worker)
         if [[ "$PYTHON_RUNNER" == "uv run python" ]]; then
-            exec uv run python "$SCRIPT_DIR/worker.py"
+            exec uv run python "$SCRIPT_DIR/src/worker.py"
         fi
-        exec "$PYTHON_RUNNER" "$SCRIPT_DIR/worker.py"
+        exec "$PYTHON_RUNNER" "$SCRIPT_DIR/src/worker.py"
         ;;
 esac

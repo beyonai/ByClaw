@@ -2,9 +2,12 @@ import json
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
+from exceptions import ModelConfigError, ModelNotFoundError
 from redis_model_config import (
     AI_MODEL_TYPE_REDIS_KEY,
+    AI_MODEL_CONFIG_REDIS_KEY,
     RedisModelConfigProvider,
+    request_prologue_model_id,
     _decode_redis_json,
     _decode_model_type_hash,
     _extract_abilities,
@@ -50,13 +53,13 @@ def test_decode_model_type_hash_normal():
 
 
 def test_decode_model_type_hash_non_dict_raises():
-    with pytest.raises(ValueError, match="must be a hash"):
+    with pytest.raises(ModelConfigError, match="must be a hash"):
         _decode_model_type_hash("not a dict")
 
 
 def test_decode_model_type_hash_non_list_value_raises():
     payload = {b"LLM": json.dumps({"not": "a list"}).encode("utf-8")}
-    with pytest.raises(ValueError, match="must be a JSON list"):
+    with pytest.raises(ModelConfigError, match="must be a JSON list"):
         _decode_model_type_hash(payload)
 
 
@@ -234,7 +237,7 @@ async def test_get_config_unknown_type_raises(mock_redis):
         llm_models=[_make_llm_model()]
     )
     provider = RedisModelConfigProvider(mock_redis)
-    with pytest.raises(ValueError, match="Unknown model_type"):
+    with pytest.raises(ModelConfigError, match="Unknown model_type"):
         await provider.get_config("unknown_type")
 
 
@@ -243,5 +246,71 @@ async def test_get_config_no_llm_with_required_ability_raises(mock_redis):
     model = _make_llm_model(abilities=["1", "2"])
     mock_redis.hgetall.return_value = _make_redis_payload(llm_models=[model])
     provider = RedisModelConfigProvider(mock_redis)
-    with pytest.raises(ValueError, match="No LLM model"):
+    with pytest.raises(ModelNotFoundError, match="No LLM model"):
         await provider.get_config("classifier")
+
+
+# --- prologue_model_id priority ---
+
+@pytest.mark.asyncio
+async def test_get_config_uses_prologue_model_id_when_found(mock_redis):
+    """prologue modelId 命中时，返回该模型而非 type-list 中的模型。"""
+    prologue_model = _make_llm_model(model_code="prologue-model", url="http://prologue", token="pkey")
+    typelist_model = _make_llm_model(model_code="typelist-model", url="http://typelist", token="tkey")
+    mock_redis.hgetall.return_value = _make_redis_payload(llm_models=[typelist_model])
+    mock_redis.hget.return_value = json.dumps(prologue_model).encode("utf-8")
+
+    token = request_prologue_model_id.set("42")
+    try:
+        provider = RedisModelConfigProvider(mock_redis)
+        with patch("redis_model_config.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                embedding_dimension=None, embedding_distance_metric=None
+            )
+            config = await provider.get_config("generator")
+    finally:
+        request_prologue_model_id.reset(token)
+
+    assert config.model_name == "prologue-model"
+    assert config.base_url == "http://prologue"
+    mock_redis.hget.assert_called_once_with(AI_MODEL_CONFIG_REDIS_KEY, "42")
+
+
+@pytest.mark.asyncio
+async def test_get_config_falls_back_when_prologue_model_id_not_found(mock_redis):
+    """prologue modelId 在 Redis 中不存在时，回退到 type-list 逻辑。"""
+    typelist_model = _make_llm_model(model_code="typelist-model", url="http://typelist", token="tkey")
+    mock_redis.hgetall.return_value = _make_redis_payload(llm_models=[typelist_model])
+    mock_redis.hget.return_value = None  # 未命中
+
+    token = request_prologue_model_id.set("99")
+    try:
+        provider = RedisModelConfigProvider(mock_redis)
+        with patch("redis_model_config.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                embedding_dimension=None, embedding_distance_metric=None
+            )
+            config = await provider.get_config("classifier")
+    finally:
+        request_prologue_model_id.reset(token)
+
+    assert config.model_name == "typelist-model"
+    mock_redis.hget.assert_called_once_with(AI_MODEL_CONFIG_REDIS_KEY, "99")
+
+
+@pytest.mark.asyncio
+async def test_get_config_no_prologue_model_id_uses_type_list(mock_redis):
+    """request_prologue_model_id 未设置时，直接走 type-list 逻辑，不调用 hget。"""
+    typelist_model = _make_llm_model(model_code="typelist-model", url="http://typelist", token="tkey")
+    mock_redis.hgetall.return_value = _make_redis_payload(llm_models=[typelist_model])
+
+    # ContextVar 默认为 None，不需要额外设置
+    provider = RedisModelConfigProvider(mock_redis)
+    with patch("redis_model_config.get_settings") as mock_settings:
+        mock_settings.return_value = MagicMock(
+            embedding_dimension=None, embedding_distance_metric=None
+        )
+        config = await provider.get_config("retrieval")
+
+    assert config.model_name == "typelist-model"
+    mock_redis.hget.assert_not_called()

@@ -66,7 +66,8 @@ RUN uv sync --frozen --no-dev --no-install-project && \
     find .venv -path "*/dist-info/RECORD" -delete 2>/dev/null; \
     true
 
-COPY byclaw-qa/redis_agent_config.py byclaw-qa/redis_model_config.py byclaw-qa/minio_client.py byclaw-qa/minio_agent_config.py byclaw-qa/api.py byclaw-qa/start.sh byclaw-qa/worker.py ./
+COPY byclaw-qa/start.sh ./
+COPY byclaw-qa/src/ ./src/
 
 # ---------------------------------------------------------------------------
 # Stage 4: Nginx 运行时 (Debian 变体，glibc 兼容)
