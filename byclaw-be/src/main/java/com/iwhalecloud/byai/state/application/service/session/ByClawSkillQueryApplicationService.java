@@ -9,6 +9,9 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
+import com.iwhalecloud.byai.common.storage.model.StorageObject;
+import com.iwhalecloud.byai.common.storage.model.StoragePrefix;
+import com.iwhalecloud.byai.state.domain.chat.vo.UserSpaceVo;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -29,19 +32,17 @@ import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 public class ByClawSkillQueryApplicationService {
 
     static final String SKILL_ROOT_PREFIX_TEMPLATE = "/.openclaw/workspace-baiying-agent-%s/skills/";
+
     static final String WORKSPACE_SKILL_ROOT_PREFIX = "/.openclaw/workspace/skills/";
+
     private static final String SKILL_DOC_FILE_NAME = "SKILL.md";
 
     @Autowired
     private UserFS userFS;
 
     /**
-     * 查询指定用户在其工作空间下的 skill 列表。
-     * 1. 只在 minio 模式下开放；
-     * 2. 仅查询 resourceId 对应工作空间的 skills 根目录；
-     * 3. 只识别 skills/{skillName}/SKILL.md，不递归采纳更深层级对象；
-     * 4. keyword 只按一层 skillFileName 目录名匹配；
-     * 5. 若桶或目录不存在，返回空列表。
+     * 查询指定用户在其工作空间下的 skill 列表。 1. 只在 minio 模式下开放； 2. 仅查询 resourceId 对应工作空间的 skills 根目录； 3. 只识别
+     * skills/{skillName}/SKILL.md，不递归采纳更深层级对象； 4. keyword 只按一层 skillFileName 目录名匹配； 5. 若桶或目录不存在，返回空列表。
      */
     public List<ByClawSkillDto> qrySkillListByUserCode(String userCode, Long resourceId, String keyword) {
         if (StringUtils.isBlank(userCode)) {
@@ -55,14 +56,15 @@ public class ByClawSkillQueryApplicationService {
 
         String skillRootPrefix = buildSkillRootPrefix(resourceId);
         Map<String, SkillDocInfo> skillDocMap = new LinkedHashMap<>();
-        collectSkillDocs(skillDocMap, safeObjectKeys(withUserContext(userCode, () -> userFS.list(skillRootPrefix, null))), skillRootPrefix);
-        collectSkillDocs(skillDocMap, safeObjectKeys(withUserContext(userCode, () -> userFS.list(WORKSPACE_SKILL_ROOT_PREFIX, null))), WORKSPACE_SKILL_ROOT_PREFIX);
+        collectSkillDocs(skillDocMap,
+            safeObjectKeys(withUserContext(userCode, () -> userFS.list(skillRootPrefix, null))), skillRootPrefix);
+        collectSkillDocs(skillDocMap,
+            safeObjectKeys(withUserContext(userCode, () -> userFS.list(WORKSPACE_SKILL_ROOT_PREFIX, null))),
+            WORKSPACE_SKILL_ROOT_PREFIX);
 
-        return skillDocMap.entrySet().stream()
-            .filter(entry -> matchKeyword(entry.getKey(), normalizedKeyword))
+        return skillDocMap.entrySet().stream().filter(entry -> matchKeyword(entry.getKey(), normalizedKeyword))
             .map(entry -> buildSkillDto(entry.getKey(), entry.getValue()))
-            .sorted(Comparator.comparing(ByClawSkillDto::getSkillName))
-            .collect(Collectors.toList());
+            .sorted(Comparator.comparing(ByClawSkillDto::getSkillName)).collect(Collectors.toList());
     }
 
     private String buildSkillRootPrefix(Long resourceId) {
@@ -73,9 +75,9 @@ public class ByClawSkillQueryApplicationService {
         return objectKeys == null ? Collections.emptyList() : objectKeys;
     }
 
-    private void collectSkillDocs(Map<String, SkillDocInfo> skillDocMap, List<String> objectKeys, String skillRootPrefix) {
-        objectKeys.stream()
-            .filter(StringUtils::isNotBlank)
+    private void collectSkillDocs(Map<String, SkillDocInfo> skillDocMap, List<String> objectKeys,
+        String skillRootPrefix) {
+        objectKeys.stream().filter(StringUtils::isNotBlank)
             .forEach(objectKey -> collectSkillDoc(skillDocMap, objectKey, skillRootPrefix));
     }
 
@@ -93,8 +95,7 @@ public class ByClawSkillQueryApplicationService {
     }
 
     /**
-     * keyword 仅按 skills/{skillFileName}/SKILL.md 中的 skillFileName 目录名做模糊匹配，
-     * 不按 SKILL.md 文件名或完整对象路径匹配。
+     * keyword 仅按 skills/{skillFileName}/SKILL.md 中的 skillFileName 目录名做模糊匹配， 不按 SKILL.md 文件名或完整对象路径匹配。
      */
     private boolean matchKeyword(String skillName, String normalizedKeyword) {
         if (StringUtils.isBlank(normalizedKeyword)) {
@@ -136,6 +137,7 @@ public class ByClawSkillQueryApplicationService {
 
     private static final class SkillDocInfo {
         private final String skillPath;
+
         private final String skillDocObjectKey;
 
         private SkillDocInfo(String skillPath, String skillDocObjectKey) {
@@ -143,4 +145,6 @@ public class ByClawSkillQueryApplicationService {
             this.skillDocObjectKey = skillDocObjectKey;
         }
     }
+
+
 }

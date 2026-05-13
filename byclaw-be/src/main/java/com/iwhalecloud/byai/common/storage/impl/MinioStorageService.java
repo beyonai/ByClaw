@@ -1,6 +1,5 @@
 package com.iwhalecloud.byai.common.storage.impl;
 
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.io.ByteArrayInputStream;
@@ -44,19 +43,8 @@ import io.minio.Result;
 import io.minio.errors.ErrorResponseException;
 
 /**
- * MinIO 存储基础设施实现。
- *
- * 职责说明：
- * 1. 负责 MinIO client 的创建与底层 SDK 调用；
- * 2. 提供文件上传、下载、删除、元数据查询等通用存储能力；
- * 3. 对外暴露“存在即跳过”的建桶能力，供上层业务复用。
- *
- * 不负责：
- * 1. 用户、租户等业务对象和桶名之间的映射规则；
- * 2. 失败是否影响主流程的业务决策；
- * 3. 业务侧的日志语义和补偿策略。
- *
- * 因此，如果是“管理员创建用户后初始化默认桶”这类场景，
+ * MinIO 存储基础设施实现。 职责说明： 1. 负责 MinIO client 的创建与底层 SDK 调用； 2. 提供文件上传、下载、删除、元数据查询等通用存储能力； 3. 对外暴露“存在即跳过”的建桶能力，供上层业务复用。
+ * 不负责： 1. 用户、租户等业务对象和桶名之间的映射规则； 2. 失败是否影响主流程的业务决策； 3. 业务侧的日志语义和补偿策略。 因此，如果是“管理员创建用户后初始化默认桶”这类场景，
  * 应由应用服务编排，再通过更轻量的桶管理服务复用当前类。
  *
  * @author he.duming
@@ -66,7 +54,6 @@ import io.minio.errors.ErrorResponseException;
 public class MinioStorageService extends AbstractFileIngressStorageService<MinioClient> {
 
     private static final Logger logger = LoggerFactory.getLogger(MinioStorageService.class);
-
 
     @Autowired
     private MinioConfig minioConfig;
@@ -88,9 +75,8 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
     }
 
     /**
-     * 对外暴露“存在即跳过，不存在则创建”的桶管理能力。
-     * 这样上层业务在需要动态建桶时，可以直接复用当前 MinIO 存储实现，
-     * 不必重复维护一套 MinIO client 构造与 bucketExists / makeBucket 逻辑。
+     * 对外暴露“存在即跳过，不存在则创建”的桶管理能力。 这样上层业务在需要动态建桶时，可以直接复用当前 MinIO 存储实现， 不必重复维护一套 MinIO client 构造与 bucketExists / makeBucket
+     * 逻辑。
      *
      * @param bucketName 存储桶名称
      * @return true 表示本次新创建，false 表示桶已存在
@@ -114,12 +100,8 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
     }
 
     /**
-     * 向指定桶下覆盖写入对象内容。
-     *
-     * 职责边界：
-     * 1. 这里不关心 userCode、sessionId 等业务语义；
-     * 2. 这里只负责确保 bucket 存在后，将字节数组按 objectKey 写入 MinIO；
-     * 3. 上层应用服务负责对象路径规划、内容类型选择和异常兜底策略。
+     * 向指定桶下覆盖写入对象内容。 职责边界： 1. 这里不关心 userCode、sessionId 等业务语义； 2. 这里只负责确保 bucket 存在后，将字节数组按 objectKey 写入 MinIO； 3.
+     * 上层应用服务负责对象路径规划、内容类型选择和异常兜底策略。
      *
      * @param bucketName 存储桶
      * @param objectKey 对象路径
@@ -129,12 +111,8 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
     public void uploadBytes(String bucketName, String objectKey, byte[] bytes, String contentType) {
         try {
             createBucketIfAbsent(bucketName);
-            PutObjectArgs putObjectArgs = PutObjectArgs.builder()
-                .bucket(bucketName)
-                .object(objectKey)
-                .stream(new ByteArrayInputStream(bytes), bytes.length, -1)
-                .contentType(contentType)
-                .build();
+            PutObjectArgs putObjectArgs = PutObjectArgs.builder().bucket(bucketName).object(objectKey)
+                .stream(new ByteArrayInputStream(bytes), bytes.length, -1).contentType(contentType).build();
             getClient().putObject(putObjectArgs);
         }
         catch (Exception e) {
@@ -144,8 +122,7 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
     }
 
     /**
-     * 判断对象是否存在。
-     * 这个能力主要给“追加写”“按行读取”等需要先判断文件是否存在的上层场景复用。
+     * 判断对象是否存在。 这个能力主要给“追加写”“按行读取”等需要先判断文件是否存在的上层场景复用。
      *
      * @param bucketName 存储桶
      * @param objectKey 对象路径
@@ -158,8 +135,7 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
             return true;
         }
         catch (ErrorResponseException e) {
-            if ("NoSuchKey".equals(e.errorResponse().code())
-                || "NoSuchObject".equals(e.errorResponse().code())
+            if ("NoSuchKey".equals(e.errorResponse().code()) || "NoSuchObject".equals(e.errorResponse().code())
                 || "NoSuchBucket".equals(e.errorResponse().code())) {
                 return false;
             }
@@ -171,18 +147,17 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
     }
 
     /**
-     * 列举指定前缀下的对象键列表。
-     * 用于 MinIO 场景下模拟“目录遍历”“目录重命名”“目录删除”等能力。
+     * 列举指定前缀下的对象键列表。 用于 MinIO 场景下模拟“目录遍历”“目录重命名”“目录删除”等能力。
      */
-    public List<String> listObjectKeys(String bucketName, String prefix) {
-        List<String> objectKeys = new ArrayList<>();
+    public List<Item> listObjectKeys(String bucketName, String prefix, boolean recursive) {
+        List<Item> objectKeys = new ArrayList<>();
         try {
-            Iterable<Result<Item>> results = getClient().listObjects(
-                ListObjectsArgs.builder().bucket(bucketName).prefix(prefix).recursive(true).build());
+            Iterable<Result<Item>> results = getClient()
+                .listObjects(ListObjectsArgs.builder().bucket(bucketName).prefix(prefix).recursive(recursive).build());
             for (Result<Item> result : results) {
                 Item item = result.get();
                 if (item != null && StringUtils.isNotBlank(item.objectName())) {
-                    objectKeys.add(item.objectName());
+                    objectKeys.add(item);
                 }
             }
             return objectKeys;
@@ -199,20 +174,13 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
     }
 
     /**
-     * 复制对象到新路径。
-     * MinIO 没有原生 rename，这个能力会被上层“copy + delete”逻辑复用。
+     * 复制对象到新路径。 MinIO 没有原生 rename，这个能力会被上层“copy + delete”逻辑复用。
      */
     public void copyObject(String bucketName, String sourceObjectKey, String targetObjectKey) {
         try {
-            CopySource source = CopySource.builder()
-                .bucket(bucketName)
-                .object(sourceObjectKey)
-                .build();
-            CopyObjectArgs copyObjectArgs = CopyObjectArgs.builder()
-                .bucket(bucketName)
-                .object(targetObjectKey)
-                .source(source)
-                .build();
+            CopySource source = CopySource.builder().bucket(bucketName).object(sourceObjectKey).build();
+            CopyObjectArgs copyObjectArgs = CopyObjectArgs.builder().bucket(bucketName).object(targetObjectKey)
+                .source(source).build();
             getClient().copyObject(copyObjectArgs);
         }
         catch (Exception e) {
@@ -242,12 +210,8 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
             String bucketName = location.getBucketOrRoot();
             String objectKey = location.getPath();
             createBucketIfAbsent(bucketName);
-            PutObjectArgs putObjectArgs = PutObjectArgs.builder()
-                .bucket(bucketName)
-                .object(objectKey)
-                .stream(inputStream, size, -1)
-                .contentType(contentType)
-                .build();
+            PutObjectArgs putObjectArgs = PutObjectArgs.builder().bucket(bucketName).object(objectKey)
+                .stream(inputStream, size, -1).contentType(contentType).build();
             ObjectWriteResponse response = getClient().putObject(putObjectArgs);
             FileMetadata metadata = new FileMetadata();
             metadata.setBucketName(bucketName);
@@ -280,15 +244,19 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
         if (maxDepth != null && maxDepth < 0) {
             throw new IllegalArgumentException("list maxDepth cannot be negative");
         }
+
+        List<Item> items = listObjectKeys(prefix.getBucketOrRoot(), prefix.getPrefix(), prefix.isRecursive());
+
         List<StorageObject> objects = new ArrayList<>();
-        for (String objectKey : listObjectKeys(prefix.getBucketOrRoot(), prefix.getPrefix())) {
-            if (!isWithinDepth(prefix.getPrefix(), objectKey, maxDepth)) {
+        for (Item item : items) {
+
+            if (!isWithinDepth(prefix.getPrefix(), item.objectName(), maxDepth)) {
                 continue;
             }
-            objects.add(StorageObject.builder()
-                .bucketOrRoot(prefix.getBucketOrRoot())
-                .path(objectKey)
-                .build());
+
+            StorageObject storageObject = StorageObject.builder().bucketOrRoot(prefix.getBucketOrRoot())
+                .path(item.objectName()).isDir(item.isDir()).size(item.size()).build();
+            objects.add(storageObject);
         }
         return objects;
     }
@@ -366,15 +334,15 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
 
             validateMinioClientConfig(endpoint, accessKey, secretKey);
             String normalizedEndpoint = normalizeEndpoint(endpoint, secure);
-            MinioClient.Builder builder = MinioClient.builder()
-                .endpoint(normalizedEndpoint)
-                .credentials(accessKey, secretKey);
+            MinioClient.Builder builder = MinioClient.builder().endpoint(normalizedEndpoint).credentials(accessKey,
+                secretKey);
             return builder.build();
         }
         catch (Exception e) {
             logger.error("创建MinIO客户端失败, endpoint={}, secure={}, accessKeyPresent={}, secretKeyPresent={}",
                 minioConfig.getEndpoint(), Boolean.TRUE.equals(minioConfig.getSecure()),
-                StringUtils.isNotBlank(minioConfig.getAccessKey()), StringUtils.isNotBlank(minioConfig.getSecretKey()), e);
+                StringUtils.isNotBlank(minioConfig.getAccessKey()), StringUtils.isNotBlank(minioConfig.getSecretKey()),
+                e);
             throw new BaseException(I18nUtil.get("storage.minio.create.client.failed", e.getMessage()), e);
         }
     }
@@ -413,7 +381,7 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
      */
     @Override
     protected FileMetadata doUploadFile(MultipartFile multipartFile, String storagePath, String bucketName,
-                                        FileStorageContext fileStorageContext) {
+        FileStorageContext fileStorageContext) {
         try {
             String objectName = storagePath + multipartFile.getOriginalFilename();
             PutObjectArgs putObjectArgs = PutObjectArgs.builder().bucket(bucketName).object(objectName)
@@ -523,8 +491,6 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
         }
     }
 
-
-
     /**
      * 创建MinIO存储桶
      *
@@ -546,8 +512,8 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
             return false;
         }
         catch (Exception e) {
-            logger.error("创建MinIO存储桶失败, bucketName={}, endpoint={}, secure={}",
-                bucketName, minioConfig.getEndpoint(), Boolean.TRUE.equals(minioConfig.getSecure()), e);
+            logger.error("创建MinIO存储桶失败, bucketName={}, endpoint={}, secure={}", bucketName, minioConfig.getEndpoint(),
+                Boolean.TRUE.equals(minioConfig.getSecure()), e);
             throw new BaseException(I18nUtil.get("storage.minio.create.bucket.failed", bucketName), e);
         }
     }
