@@ -28,9 +28,9 @@ import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkFil
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkReplyDispatcher;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkTokenService;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkUserService;
-import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.card.DingtalkCardService;
-import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.card.DingtalkCardStreamSession;
-import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.card.DingtalkCardStreamingOutputStream;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards.DingtalkCardService;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards.DingtalkCardStreamSession;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards.DingtalkCardStreamingOutputStream;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.DingtalkCallbackMessage;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.DingtalkMessageDownloadInfo;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.DingtalkMessageFileDownloadResult;
