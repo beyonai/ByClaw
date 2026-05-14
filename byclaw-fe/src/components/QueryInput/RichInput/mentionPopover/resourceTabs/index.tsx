@@ -10,7 +10,7 @@ import { Empty as AntdEmpty } from 'antd';
 import { ResourceType } from '../../utils/constants';
 import { IResourceType } from '../../types';
 import { ResourceTypeMap } from '@/constants/resource';
-import { queryDigEmployeeRelResourceAuth, listUserSpace } from '@/pages/manager/service/resources';
+import { queryDigEmployeeRelResourceAuth, listUserSpace, previewFile } from '@/pages/manager/service/resources';
 import { getDcSystemConfigListByStandType } from '@/service/auth';
 import { DEFAULT_MENU_CONFIG, getVisibleMenuKeysFromConfig } from '@/constants/system';
 import styles from './style.module.less';
@@ -57,7 +57,7 @@ const ResourceTabs: React.FC<Props> = ({
 
   const [fileList, setFileList] = useState<any[]>([]);
   const [fileLoading, setFileLoading] = useState(false);
-  const [currentPath, setCurrentPath] = useState('by/.openclaw/workspace-baiying-agent-10006728/');
+  const [currentPath, setCurrentPath] = useState('');
   const [pathHistory, setPathHistory] = useState<string[]>([]);
 
   const { layoutMode, agentInfo } = useGlobal();
@@ -414,9 +414,21 @@ const ResourceTabs: React.FC<Props> = ({
                     <button
                       type="button"
                       className={styles.downloadBtn}
-                      onClick={(e) => {
+                      onClick={async (e) => {
                         e.stopPropagation();
-                        window.open(`/byaiService/commonFile/preview?filePath=${file.filePath}`);
+                        try {
+                          const response = await previewFile(file.filePath);
+                          const url = window.URL.createObjectURL(new Blob([response]));
+                          const link = document.createElement('a');
+                          link.href = url;
+                          link.download = file.name;
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                          window.URL.revokeObjectURL(url);
+                        } catch (error) {
+                          console.error('文件下载失败:', error);
+                        }
                       }}
                     >
                       下载

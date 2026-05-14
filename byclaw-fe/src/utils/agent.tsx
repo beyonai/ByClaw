@@ -228,9 +228,19 @@ export const agentHomeUrlHandler = (
 
   if (!agentHomeUrl) return '';
 
+  console.log('agentHomeUrl', agentHomeUrl);
+
   const myUrl = chain(agentHomeUrl).replace('{beyond-token}', getToken()).replace('{sso-token}', getssoToken()).value();
 
-  const srcObj = new URL(myUrl);
+  console.log('myUrl', myUrl);
+
+  const protocolRegex = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
+  let urlWithProtocol = myUrl;
+  if (!protocolRegex.test(myUrl)) {
+    urlWithProtocol = `https://${myUrl}`;
+  }
+
+  const srcObj = new URL(urlWithProtocol);
 
   if (!agentHomeUrl.includes('{beyond-token}')) {
     srcObj.searchParams.append('beyondtoken', getToken());
