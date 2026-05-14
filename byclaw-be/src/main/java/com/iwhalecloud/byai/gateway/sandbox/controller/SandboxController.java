@@ -227,15 +227,7 @@ public class SandboxController {
             return ResponseUtil.fail("id must be a valid number");
         }
 
-        SsSandboxRecord record = sandboxRecordMapper.selectById(id);
-        if (record == null) {
-            return ResponseUtil.fail("sandbox record not found");
-        }
-
-        if ("RUNNING".equals(record.getStatus())) {
-            sandboxService.removeSandbox(record.getUserCode(), record.getResourceId());
-        }
-
+        sandboxService.removeSandboxById(id);
         return ResponseUtil.successResponse();
     }
 
