@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import com.iwhaleai.byai.framework.core.WorkerRegistry;
@@ -56,6 +57,10 @@ public class SandboxService {
 
     /** 沙箱状态：已释放 */
     private static final String STATUS_RELEASED = "RELEASED";
+
+    private static final String RELEASE_REASON_IDLE_TIMEOUT = "idle-timeout";
+
+    private static final String RELEASE_REASON_MANUAL = "manual-release";
 
     /** 集成类型：沙箱 */
     private static final String INTEGRATION_TYPE_SANDBOX = "FROM_SANDBOX";
@@ -185,14 +190,8 @@ public class SandboxService {
             if (existingRecord != null && STATUS_RUNNING.equals(existingRecord.getStatus())
                 && StringUtils.isNotBlank(existingRecord.getEndpoint())) {
                 LOGGER.info("复用已有沙箱，用户编码：{}，资源ID：{}，endpoint：{}", userCode, resourceId, existingRecord.getEndpoint());
-                SandboxLaunchData reuseData = new SandboxLaunchData();
-                reuseData.setEndpoint(existingRecord.getEndpoint());
-                reuseData.setSandboxId(existingRecord.getSandboxId());
-                reuseData.setTimeoutSeconds(existingRecord.getTimeoutSeconds());
-                reuseData.setRemoteExpiresAt(existingRecord.getRemoteExpiresAt());
-                reuseData.setEndpoints(List.of(existingRecord.getEndpoint()));
                 sandboxMetadataCache.put(toSandboxInfo(existingRecord));
-                return reuseData;
+                return buildLaunchData(existingRecord);
             }
             if (existingRecord != null) {
                 LOGGER.warn("沙箱处于非可复用状态，用户编码：{}，沙箱类型：{}，资源ID：{}，状态：{}",
@@ -357,7 +356,24 @@ public class SandboxService {
         record.setCreateTime(now);
         record.setUpdateTime(now);
         record.setVersion(0);
-        sandboxRecordMapper.insert(record);
+        try {
+            sandboxRecordMapper.insert(record);
+        }
+        catch (DuplicateKeyException e) {
+            SsSandboxRecord existingRecord = sandboxRecordMapper.selectActiveByUserAndResource(userCode,
+                launchContext.getSandboxType(), routing.getEffectiveResourceId());
+            if (existingRecord != null && STATUS_RUNNING.equals(existingRecord.getStatus())
+                && StringUtils.isNotBlank(existingRecord.getEndpoint())) {
+                LOGGER.info("插入沙箱记录发生唯一键冲突，复用已有沙箱，用户编码：{}，资源ID：{}，endpoint：{}", userCode, resourceId,
+                    existingRecord.getEndpoint());
+                sandboxMetadataCache.put(toSandboxInfo(existingRecord));
+                return buildLaunchData(existingRecord);
+            }
+            LOGGER.warn("插入沙箱记录发生唯一键冲突，用户编码：{}，沙箱类型：{}，资源ID：{}，已有记录状态：{}",
+                userCode, launchContext.getSandboxType(), routing.getEffectiveResourceId(),
+                existingRecord == null ? null : existingRecord.getStatus());
+            throw new BdpRuntimeException(I18nUtil.get("sandbox.launch.busy"));
+        }
 
         LOGGER.info("启动沙箱，用户编码：{}，资源ID：{}，沙箱类型：{}", userCode, resourceId, launchContext.getSandboxType());
         SandboxResponse<SandboxLaunchData> response = sandboxLifecycleFacade.launchSandbox(request);
@@ -396,6 +412,16 @@ public class SandboxService {
 
         LOGGER.info("沙箱启动成功，用户编码：{}，资源ID：{}，沙箱类型：{}，endpoint：{}", userCode, resourceId,
             launchContext.getSandboxType(), endpoint);
+        return launchData;
+    }
+
+    private SandboxLaunchData buildLaunchData(SsSandboxRecord record) {
+        SandboxLaunchData launchData = new SandboxLaunchData();
+        launchData.setEndpoint(record.getEndpoint());
+        launchData.setSandboxId(record.getSandboxId());
+        launchData.setTimeoutSeconds(record.getTimeoutSeconds());
+        launchData.setRemoteExpiresAt(record.getRemoteExpiresAt());
+        launchData.setEndpoints(StringUtils.isNotBlank(record.getEndpoint()) ? List.of(record.getEndpoint()) : List.of());
         return launchData;
     }
 
@@ -535,8 +561,23 @@ public class SandboxService {
             return;
         }
         for (SsSandboxRecord record : records) {
-            doRemoveSandbox(record);
+            doRemoveSandbox(record, RELEASE_REASON_MANUAL);
         }
+    }
+
+    public void removeSandboxById(Long id) {
+        if (id == null) {
+            throw new BdpRuntimeException("sandbox record id is required");
+        }
+        SsSandboxRecord record = sandboxRecordMapper.selectById(id);
+        if (record == null) {
+            throw new BdpRuntimeException("sandbox record not found");
+        }
+        if (!STATUS_RUNNING.equals(record.getStatus())) {
+            LOGGER.warn("沙箱手动释放跳过，记录非运行中，记录ID：{}，状态：{}", id, record.getStatus());
+            return;
+        }
+        doRemoveSandbox(record, RELEASE_REASON_MANUAL);
     }
 
     public void updateSandboxById(Long id, Integer autoRelease) {
@@ -683,7 +724,7 @@ public class SandboxService {
         int cleanedCount = 0;
         for (SsSandboxRecord record : expiredRecords) {
             try {
-                doRemoveSandbox(record);
+                doRemoveSandbox(record, RELEASE_REASON_IDLE_TIMEOUT);
                 cleanedCount++;
             }
             catch (Exception e) {
@@ -795,9 +836,9 @@ public class SandboxService {
      *
      * @param record 沙箱记录
      */
-    private void doRemoveSandbox(SsSandboxRecord record) {
+    private void doRemoveSandbox(SsSandboxRecord record, String releaseReason) {
         Date now = new Date();
-        int marked = sandboxRecordMapper.markReleasing(record.getId(), "idle-timeout", now);
+        int marked = sandboxRecordMapper.markReleasing(record.getId(), releaseReason, now);
         if (marked == 0 && STATUS_RUNNING.equals(record.getStatus())) {
             LOGGER.warn("沙箱释放跳过，记录状态已变化，记录ID：{}", record.getId());
             return;
