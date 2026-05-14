@@ -1,4 +1,4 @@
-# 🐋 ByClaw — 企业级智能体执行框架
+# <img src="byclaw-fe/public/favicon.svg" width="16" height="16"> ByClaw — 企业级智能体执行框架
 
 <p align="center">
   <strong>鲸智百应 · 重塑人机协作，驱动组织进化</strong>
