@@ -21,7 +21,7 @@ public class AuthRequestFactory {
 
     /**
      * 获取单个的request
-     * 
+     *
      * @param socialType 社交账号类型
      * @return AuthRequest
      */
@@ -32,17 +32,9 @@ public class AuthRequestFactory {
         // 根据类型匹配
         switch (socialType) {
             case "wechatMp":
-                builder.clientId("wxdcb1348014d6fd9d");
-                builder.clientSecret("05a86f22444448d091abec0200b1a94f");
-                builder.redirectUri("http://548724vc4um0.vicp.fun/aiFactoryServer/system/social/wechatMp/callback");
-                builder.scopes(List.of("snsapi_userinfo"));
-                return new AuthWeChatMpRequest(builder.build());
+                // todo
             case "dingtalkAccount":
-                builder.clientId("wxdcb1348014d6fd9d");
-                builder.clientSecret("05a86f22444448d091abec0200b1a94f");
-                builder
-                    .redirectUri("http://548724vc4um0.vicp.fun/aiFactoryServer/system/social/dingtalkAccount/callback");
-                return new AuthDingTalkAccountRequest(builder.build());
+                // todo
             default:
 
         }
