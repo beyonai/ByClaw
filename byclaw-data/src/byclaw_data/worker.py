@@ -2340,7 +2340,12 @@ def _normalize_messages(
     for item in content:
         if isinstance(item, dict) and "role" in item:
             role = item["role"]
-            text = item.get("content", "")
+            raw_content = item.get("content", "")
+            # 前端多模态格式：content 是 {"files": [...], "text": "..."} 结构
+            if isinstance(raw_content, dict):
+                text = str(raw_content.get("text") or "")
+            else:
+                text = str(raw_content) if raw_content is not None else ""
             if role == "assistant":
                 messages.append(AIMessage(content=text))
             elif role == "system":
@@ -2453,6 +2458,9 @@ def _latest_user_text_from_content(content: Any) -> str:
     last = content[-1]
     if isinstance(last, dict):
         raw = last.get("content", "")
+        # 前端多模态格式：content 是 {"files": [...], "text": "..."} 结构
+        if isinstance(raw, dict):
+            return str(raw.get("text") or "").strip()
         return raw.strip() if isinstance(raw, str) else str(raw).strip()
     return str(last).strip()
 
