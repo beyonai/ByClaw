@@ -47,6 +47,7 @@ import com.iwhalecloud.byai.manager.domain.auth.enums.GrantToObjType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.OperType;
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventType;
 import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
@@ -176,6 +177,9 @@ public class ToolManService {
 
     @Autowired
     private ResourceDiscoveryRegistrationService resourceDiscoveryRegistrationService;
+
+    @Autowired
+    private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
 
     @Autowired
     private ResourceRuntimeInfoResolver resourceRuntimeInfoResolver;
@@ -1246,6 +1250,8 @@ public class ToolManService {
         // 7. 若是数字员工，删除后同步清理其技能 Redis 缓存。
         removeDigEmployeeFromRedisIfNecessary(resourceId, resourceBizType);
         if (StringUtils.equals(resourceBizType, ResourceBizType.DIG_EMPLOYEE.getCode())) {
+            // 数字员工注销若曾被任意用户设为默认助理，回退到各自超级助手，避免“默认指向已注销资源”。
+            digitalEmployeeApplicationService.resetDefaultForAffectedUsers(resourceId);
             digEmployeeChangeEventPublisher.publishNowQuietly(DigEmployeeChangeEventType.DIG_EMPLOYEE_DELETED,
                 resourceId, "tool-man-service");
         }
@@ -1281,6 +1287,8 @@ public class ToolManService {
         ssResourceService.removeById(resourceId);
         removeDigEmployeeFromRedisIfNecessary(resourceId, resourceBizType);
         if (StringUtils.equals(resourceBizType, ResourceBizType.DIG_EMPLOYEE.getCode())) {
+            // 硬删除也需要回退默认助理指向，避免遗留无效引用。
+            digitalEmployeeApplicationService.resetDefaultForAffectedUsers(resourceId);
             digEmployeeChangeEventPublisher.publishNowQuietly(DigEmployeeChangeEventType.DIG_EMPLOYEE_DELETED,
                 resourceId, "tool-man-service-hard-delete");
         }
