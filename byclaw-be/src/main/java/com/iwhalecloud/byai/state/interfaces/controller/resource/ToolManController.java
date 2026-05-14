@@ -308,6 +308,40 @@ public class ToolManController {
     }
 
     /**
+     * 恢复资源。
+     * 将已注销（状态3）的资源恢复为已上架（状态2）。
+     *
+     * @author qin.guoquan
+     * @date 2026-05-14
+     */
+    @PostMapping("/restoreResourceById")
+    public ResponseUtil<Void> restoreResourceById(@RequestBody(required = false) DeleteResourceQo request,
+        @Parameter(description = "资源ID", required = false) @RequestParam(value = "resourceId",
+            required = false) Long resourceId,
+        @Parameter(description = "是否强制恢复", required = false) @RequestParam(value = "forceRestore",
+            required = false) Boolean forceRestore) {
+        try {
+            Long finalResourceId = request != null && request.getResourceId() != null ? request.getResourceId()
+                : resourceId;
+            Boolean finalForceRestore = request != null && request.getForceDelete() != null ? request.getForceDelete()
+                : forceRestore;
+            toolManService.restoreManagedResource(finalResourceId, Boolean.TRUE.equals(finalForceRestore));
+            return ResponseUtil.success(I18nUtil.get("tool.resource.restore.success"));
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(resolveResourceNotFoundMessage(e));
+        }
+        catch (BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("restoreResourceById failed", e);
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.restore.failed"));
+        }
+    }
+
+    /**
      * 查询资源详情，支持 GET query 参数与 POST body/query 参数。
      *
      * @author qin.guoquan
