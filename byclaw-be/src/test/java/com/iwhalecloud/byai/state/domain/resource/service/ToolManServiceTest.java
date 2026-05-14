@@ -5,6 +5,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventType;
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
@@ -73,6 +74,7 @@ class ToolManServiceTest {
         DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher = mock(DigEmployeeChangeEventPublisher.class);
         SsResExtDigEmployeeService ssResExtDigEmployeeService = mock(SsResExtDigEmployeeService.class);
         ResourceDiscoveryRegistrationService resourceDiscoveryRegistrationService = mock(ResourceDiscoveryRegistrationService.class);
+        DigitalEmployeeApplicationService digitalEmployeeApplicationService = mock(DigitalEmployeeApplicationService.class);
 
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
         ReflectionTestUtils.setField(service, "authApplicationService", authApplicationService);
@@ -83,6 +85,7 @@ class ToolManServiceTest {
         ReflectionTestUtils.setField(service, "digEmployeeChangeEventPublisher", digEmployeeChangeEventPublisher);
         ReflectionTestUtils.setField(service, "ssResExtDigEmployeeService", ssResExtDigEmployeeService);
         ReflectionTestUtils.setField(service, "resourceDiscoveryRegistrationService", resourceDiscoveryRegistrationService);
+        ReflectionTestUtils.setField(service, "digitalEmployeeApplicationService", digitalEmployeeApplicationService);
         ReflectionTestUtils.setField(service, "datasetSystem", "");
         prepareRedisUtil();
 

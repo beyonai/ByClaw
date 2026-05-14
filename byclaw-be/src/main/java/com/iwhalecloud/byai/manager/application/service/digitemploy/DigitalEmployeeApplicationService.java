@@ -808,8 +808,9 @@ public class DigitalEmployeeApplicationService {
     /**
      * 数字员工注销/删除后，把所有把它设为默认助理的用户回退到各自的超级助手；找不到超级助手时清空。
      * 同时若当前登录用户在受影响列表里，需要刷新 session 中的 defaultDigEmployeeId。
+     * 暴露为 public 以便其他注销链路（如 ToolManService.deleteManagedResource）复用。
      */
-    private void resetDefaultForAffectedUsers(Long resourceId) {
+    public void resetDefaultForAffectedUsers(Long resourceId) {
         if (resourceId == null) {
             return;
         }
