@@ -1,14 +1,15 @@
 package com.iwhalecloud.byai.common.storage.impl;
 
-import com.iwhalecloud.byai.common.exception.BaseException;
-import com.iwhalecloud.byai.common.storage.config.MinioConfig;
+import java.util.stream.Collectors;
+
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.util.stream.Collectors;
+import com.iwhalecloud.byai.common.exception.BaseException;
+import com.iwhalecloud.byai.common.storage.config.MinioConfig;
 
 @Component
 public class MinioBucketMountSupport {
@@ -139,7 +140,7 @@ public class MinioBucketMountSupport {
             + " --poll-interval 2s"
             + " --dir-cache-time 2s"
             + " --attr-timeout 2s"
-            + " --vfs-refresh"
+//            + " --vfs-refresh"
             + " --daemon";
     }
 

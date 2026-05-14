@@ -92,7 +92,9 @@ public class SandboxLaunchContextFactory {
         catch (Exception e) {
             LOGGER.warn("查询资源 workerAgentType 异常，降级为默认沙箱类型，资源ID：{}，原因：{}", resourceId, e.getMessage());
         }
-        return new SandboxLaunchRouting(SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE, resourceId);
+        // openclaw 是用户级沙箱，DB 活跃唯一键中的 resource_id 固定归一为 -1。
+        return new SandboxLaunchRouting(SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE,
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
     }
 
     public SandboxLaunchContext buildContext(String userCode, Long resourceId, String sandboxType) {
