@@ -100,10 +100,12 @@ export default {
   'resource.personalDefaultAssistant': 'Default',
   'resource.personalDefaultKnowledgeDoc': 'Default',
   'resource.personalAssistant': 'Assistant',
+  'resource.superAssistant': 'Super Assistant',
+  'resource.currentDefaultAssistant': 'Default',
   'resource.setDefaultAssistant': 'Set as Default',
   'resource.setDefaultAssistantSuccess': 'Successfully set as default assistant',
   'resource.setDefaultAssistantConfirm':
-    'Are you sure you want to set this digital employee as the default personal assistant? After setting, other default personal assistants will become regular personal assistants!',
+    'Set this digital employee as the default assistant? It will be used when the chat box does not mention any digital employee.',
   'resource.createdByMe': 'Created by me',
   'resource.authorizedToMe': 'Authorized to me',
   'resource.pendingMyApproval': 'Pending my approval',

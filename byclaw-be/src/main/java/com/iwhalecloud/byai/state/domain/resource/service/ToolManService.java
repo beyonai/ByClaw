@@ -10,7 +10,9 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
+import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceArtifactTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtAgentService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceArtifactService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDocService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtMcpService;
@@ -32,6 +34,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResExtTool;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtToolKit;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtView;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.entity.resource.SsResourceArtifact;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceCatalog;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.common.constants.Constants;
@@ -160,6 +163,9 @@ public class ToolManService {
 
     @Autowired
     private ResourceArtifactStorageService resourceArtifactStorageService;
+
+    @Autowired
+    private SsResourceArtifactService ssResourceArtifactService;
 
     @Autowired
     private ObjectOwlImportParser objectOwlImportParser;
@@ -885,6 +891,8 @@ public class ToolManService {
         //    再把最终 JSON 同步到开放资源目录。
         ssResourceService.clearResourceDraftAndReleaseVerIds(resource.getResourceId());
         resourceArtifactStorageService.syncResourceJsonByBizType(finalJsonStr, resourceBizType, resource.getResourceId());
+        ssResourceArtifactService.upsertStandardJsonArtifact(resource.getResourceId(), resourceBizType,
+            "tool-json-import");
 
         if (updated) {
             LOGGER.info("工具JSON导入完成，准备重注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}", resourceBizType, resource.getResourceId(), resourceCode);
@@ -1086,6 +1094,8 @@ public class ToolManService {
         String finalDirRelativePath = zipUploadSubDirectory + "/" + finalExtractedRoot.getFileName();
         finalizeImportedBundleDirectory(bundleStagingDirectory, finalDirRelativePath, originalZipFileName,
             zipUploadSubDirectory);
+        replaceImportedBundleArtifacts(importedResourceIds, ResourceBizType.OBJECT.getCode(), finalDirRelativePath,
+            originalZipFileName);
 
         LOGGER.info("对象压缩包导入完成, zipFileName={}, resourceBundleDir={}, resourceZipPath={}, importedResourceIds={}",
             storedZipPath.getFileName(), finalDirRelativePath, finalDirRelativePath + "/" + storedZipPath.getFileName(),
@@ -1173,6 +1183,8 @@ public class ToolManService {
         // 若历史上已经存在同名 bundle，则先清理旧 bundle，再把这次 staging 目录整体提升为最终目录。
         finalizeImportedBundleDirectory(bundleStagingDirectory, finalDirRelativePath, originalZipFileName,
             zipUploadSubDirectory);
+        replaceImportedBundleArtifacts(importedResourceIds, ResourceBizType.VIEW.getCode(), finalDirRelativePath,
+            originalZipFileName);
 
         LOGGER.info("视图压缩包导入完成, zipFileName={}, resourceBundleDir={}, resourceZipPath={}, importedResourceIds={}",
             storedZipPath.getFileName(), finalDirRelativePath, finalDirRelativePath + "/" + storedZipPath.getFileName(),
@@ -1243,6 +1255,41 @@ public class ToolManService {
             resourceDiscoveryRegistrationService.unregisterAfterCommit(resourceBizType, resourceId, resource.getResourceCode(), targetContent);
         }
 
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteResourceAndAllRel(Long resourceId) {
+        if (resourceId == null) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.resourceid.notnull"));
+        }
+
+        SsResource resource = ssResourceService.findById(resourceId);
+        if (resource == null) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
+        }
+        validateResourceManagePermission(resource);
+        validateCommercialEditionKnowledgeOrToolWritable(resource);
+
+        String resourceBizType = StringUtils.trimToEmpty(resource.getResourceBizType());
+        String targetContent = findTargetContentByBizType(resourceBizType, resourceId);
+
+        deleteRegisteredArtifacts(resourceId, resourceBizType);
+        privilegeGrantService.removeAllByGrantObj(resourceBizType, resourceId);
+        ssResourceRelDetailService.removeAllByResourceIdOrRelResourceId(resourceId);
+        deleteResourceExtByBizType(resourceId, resourceBizType);
+        ssResourceService.removeById(resourceId);
+        removeDigEmployeeFromRedisIfNecessary(resourceId, resourceBizType);
+        if (StringUtils.equals(resourceBizType, ResourceBizType.DIG_EMPLOYEE.getCode())) {
+            digEmployeeChangeEventPublisher.publishNowQuietly(DigEmployeeChangeEventType.DIG_EMPLOYEE_DELETED,
+                resourceId, "tool-man-service-hard-delete");
+        }
+        if (shouldRegisterDiscoveryService(resourceBizType)) {
+            LOGGER.info("资源硬删除完成，准备反注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}", resourceBizType,
+                resourceId, resource.getResourceCode());
+            resourceDiscoveryRegistrationService.unregisterAfterCommit(resourceBizType, resourceId,
+                resource.getResourceCode(), targetContent);
+        }
+        ssResourceArtifactService.removeArtifactsByResourceId(resourceId);
     }
 
     /**
@@ -1454,6 +1501,7 @@ public class ToolManService {
         }
 
         resourceArtifactStorageService.syncResourceJsonByBizType(targetContent, resourceBizType, resourceId);
+        ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, resourceBizType, "resource-basic-info-sync");
         LOGGER.info("资源基础信息更新后已同步targetContent到开放资源目录, resourceId={}, resourceBizType={}",
             resourceId, resourceBizType);
     }
@@ -1636,6 +1684,20 @@ public class ToolManService {
             return;
         }
         RedisUtil.removeKey(DIG_EMPLOYEE_SKILL_CACHE_KEY_PREFIX + resourceId);
+    }
+
+    private void deleteRegisteredArtifacts(Long resourceId, String resourceBizType) {
+        List<SsResourceArtifact> artifacts = ssResourceArtifactService.listActiveArtifactsByResourceId(resourceId);
+        if (CollectionUtils.isEmpty(artifacts)) {
+            resourceArtifactStorageService.deleteResourceJsonByBizType(resourceBizType, resourceId);
+            return;
+        }
+        for (SsResourceArtifact artifact : artifacts) {
+            if (artifact == null || StringUtils.isBlank(artifact.getArtifactPath())) {
+                continue;
+            }
+            resourceArtifactStorageService.deleteWithinResourceRoot(artifact.getArtifactPath());
+        }
     }
 
     private void deleteResourceExtByBizType(Long resourceId, String resourceBizType) {
@@ -2548,6 +2610,35 @@ public class ToolManService {
             uploadSubDirectory,
             fileName,
             "application/json");
+    }
+
+    private void replaceImportedBundleArtifacts(List<Long> importedResourceIds, String resourceBizType,
+        String finalDirRelativePath, String originalZipFileName) {
+        if (CollectionUtils.isEmpty(importedResourceIds)) {
+            return;
+        }
+        for (Long importedResourceId : importedResourceIds) {
+            if (importedResourceId == null) {
+                continue;
+            }
+            List<SsResourceArtifact> artifacts = new ArrayList<>();
+            artifacts.add(ssResourceArtifactService.buildArtifact(ResourceArtifactTypeEnum.STANDARD_JSON.name(),
+                buildStandardJsonPath(resourceBizType, importedResourceId), "bundle-standard-json"));
+            artifacts.add(ssResourceArtifactService.buildArtifact(ResourceArtifactTypeEnum.IMPORT_BUNDLE_DIR.name(),
+                finalDirRelativePath, "bundle-directory"));
+            artifacts.add(ssResourceArtifactService.buildArtifact(ResourceArtifactTypeEnum.IMPORT_ZIP.name(),
+                finalDirRelativePath + "/" + originalZipFileName, "bundle-zip"));
+            ssResourceArtifactService.replaceArtifacts(importedResourceId, resourceBizType, "minio", artifacts);
+        }
+    }
+
+    private String buildStandardJsonPath(String resourceBizType, Long resourceId) {
+        String directory = StringUtils.startsWithIgnoreCase(resourceBizType, "KG_")
+            ? "doc"
+            : StringUtils.trimToEmpty(resourceBizType).toLowerCase(Locale.ROOT);
+        String fileName = StringUtils.trimToEmpty(resourceBizType).toUpperCase(Locale.ROOT) + "_" + resourceId
+            + ".json";
+        return directory + "/" + fileName;
     }
 
     /**

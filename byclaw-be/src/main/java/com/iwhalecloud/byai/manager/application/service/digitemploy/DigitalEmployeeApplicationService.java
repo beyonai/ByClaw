@@ -32,6 +32,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDocService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtAgentService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtMcpService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtObjectService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceArtifactService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceCatalogService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtToolKitService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
@@ -41,6 +42,7 @@ import com.iwhalecloud.byai.manager.domain.session.service.ByaiSessionService;
 import com.iwhalecloud.byai.manager.domain.staticdata.service.ByaiSystemConfigListService;
 import com.iwhalecloud.byai.manager.domain.staticdata.service.SystemConfigService;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
+import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceQueryRequest;
 import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
 import com.iwhalecloud.byai.manager.vo.digitemploy.DebugSessionCleanupVo;
@@ -67,6 +69,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.staticdata.ByaiSystemConfigList;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
+import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.qo.index.OrgFilterQo;
 import com.iwhalecloud.byai.manager.qo.resource.AgentListQo;
 import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
@@ -201,6 +204,9 @@ public class DigitalEmployeeApplicationService {
     private ResourceArtifactStorageService resourceArtifactStorageService;
 
     @Autowired
+    private SsResourceArtifactService ssResourceArtifactService;
+
+    @Autowired
     private ByaiSessionService byaiSessionService;
 
     @Autowired
@@ -232,6 +238,9 @@ public class DigitalEmployeeApplicationService {
 
     @Autowired
     private SuasSuperassistService suasSuperassistService;
+
+    @Autowired
+    private UserService userService;
 
     @Autowired
     private DingtalkRobotRegistryService dingtalkRobotRegistryService;
@@ -283,6 +292,7 @@ public class DigitalEmployeeApplicationService {
         digitalEmployeeQo.setType(null);
         PageInfo<DigitalEmployeeVo> pageInfo = ssResExtDigEmployeeService
             .selectAllDigitalEmployeeByQo(digitalEmployeeQo);
+        fillRuntimeDigitalEmployeeTags(pageInfo);
         return pageInfo;
     }
 
@@ -300,7 +310,25 @@ public class DigitalEmployeeApplicationService {
         fillCatalogIds(digitalEmployeeQo);
         PageInfo<DigitalEmployeeVo> pageInfo = ssResExtDigEmployeeService
             .selectPersonalDigitalEmployeeByQo(digitalEmployeeQo);
+        fillRuntimeDigitalEmployeeTags(pageInfo);
         return pageInfo;
+    }
+
+    /**
+     * 数字员工标签不再依赖 ss_res_ext_dig_employee.tag_name 落库值，列表返回前按当前资源归属实时计算：
+     * personal + resourceCode 后缀 _main 为超级助手，其他 personal 为个人助理，enterprise 按 agentType 显示类型。
+     */
+    private void fillRuntimeDigitalEmployeeTags(PageInfo<DigitalEmployeeVo> pageInfo) {
+        if (pageInfo == null || CollectionUtils.isEmpty(pageInfo.getList())) {
+            return;
+        }
+        for (DigitalEmployeeVo digitalEmployeeVo : pageInfo.getList()) {
+            if (digitalEmployeeVo == null) {
+                continue;
+            }
+            digitalEmployeeVo.setTagName(buildDigitalEmployeeTagName(digitalEmployeeVo.getOwnerType(),
+                digitalEmployeeVo.getResourceCode(), digitalEmployeeVo.getAgentType()));
+        }
     }
 
     private void fillPublishOrgIds(DigitalEmployeeQo digitalEmployeeQo) {
@@ -384,11 +412,6 @@ public class DigitalEmployeeApplicationService {
         ssResExtDigEmployee.setAgentSseUrl(ssResExtDigEmployee.getAgentSseUrlOri());
         ssResExtDigEmployee.setAgentWebUrl(ssResExtDigEmployee.getAgentWebUrlOri());
         ssResExtDigEmployee.setAgentAdminUrlList(ssResExtDigEmployee.getAgentAdminUrlOriList());
-        // tag_name 供前端侧边栏等位置直接展示：个人资源按归属展示，企业资源按数字员工类型展示。
-        String tagName = buildDigitalEmployeeTagName(ssResource, digitalEmployeeDTO.getAgentType());
-        if (StringUtils.isNotBlank(tagName)) {
-            ssResExtDigEmployee.setTagName(tagName);
-        }
         ssResExtDigEmployeeService.save(ssResExtDigEmployee);
 
         // 保存关联关系
@@ -456,7 +479,8 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 创建用户默认超级助手，资源保存仍复用 saveDigitalEmployee 主链路。 默认超级助手本质上仍是真实 DIG_EMPLOYEE 资源，固定 resourceCode={userCode}_main，
+     * 创建用户默认超级助手，资源保存仍复用 saveDigitalEmployee 主链路。
+     * 默认超级助手本质上仍是真实 DIG_EMPLOYEE 资源，固定 resourceCode={userCode}_main，
      * 前后端都按数字员工处理，避免再出现 HUMAN_ASSISTANT / DIG_EMPLOYEE 两套表达。
      *
      * @author qin.guoquan
@@ -476,7 +500,7 @@ public class DigitalEmployeeApplicationService {
         dto.setResourceName(resourceName);
         dto.setResourceCode(buildDefaultSuperAssistantResourceCode(safeUserCode, userId));
         dto.setResourceDesc(resourceName);
-        dto.setOwnerType(OwnerType.PERSONAL_DEFAULT);
+        dto.setOwnerType(OwnerType.PERSONAL);
         dto.setAvatar("default");
         dto.setAgentType(DigitalEmployType.AGENT_TYPE_ASSISTANT.getCode());
         dto.setAgentDevType("byai");
@@ -513,48 +537,17 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * x * 构造当前默认个人助理展示标签。 resourceCode={userCode}_main 表示超级助手被设为默认，否则表示普通个人助理被设为默认。
-     *
-     * @author qin.guoquan
-     * @date 2026-05-09 16:30:00
+     * 数字员工展示标签统一运行时生成，不再写入扩展表 tag_name。
      */
-    private String buildDefaultPersonalResourceTagName(SsResource ssResource) {
-        if (isDefaultSuperAssistantResource(ssResource)) {
-            return I18nUtil.get("digemployee.tag.default.super.assistant");
+    private String buildDigitalEmployeeTagName(String ownerType, String resourceCode, String agentType) {
+        if (OwnerType.PERSONAL.equals(ownerType) || OwnerType.PERSONAL_DEFAULT.equals(ownerType)) {
+            return StringUtils.endsWith(resourceCode, DEFAULT_SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX)
+                ? I18nUtil.get("digemployee.tag.super.assistant")
+                : I18nUtil.get("digemployee.tag.personal.assistant");
         }
-        return I18nUtil.get("digemployee.tag.personal.default.assistant");
-    }
-
-    /**
-     * 构造个人侧非默认资源展示标签。默认超级助手即使 owner_type 保持 personal_default， 在被普通个人助理替换为当前默认后，也需要展示为“超级助手”。
-     */
-    private String buildPersonalResourceTagName(SsResource ssResource) {
-        if (isDefaultSuperAssistantResource(ssResource)) {
-            return I18nUtil.get("digemployee.tag.super.assistant");
-        }
-        return I18nUtil.get("digemployee.tag.personal.assistant");
-    }
-
-    /**
-     * 创建数字员工时统一写入展示标签：个人侧按默认/普通助理展示，企业侧按 agent_type 展示“助手型/问数型”等类型名称。
-     *
-     * @author qin.guoquan
-     * @date 2026-05-09 17:55:00
-     */
-    private String buildDigitalEmployeeTagName(SsResource ssResource, String agentType) {
-        if (ssResource == null) {
-            return null;
-        }
-        if (OwnerType.PERSONAL_DEFAULT.equals(ssResource.getOwnerType())) {
-            return buildDefaultPersonalResourceTagName(ssResource);
-        }
-        if (OwnerType.PERSONAL.equals(ssResource.getOwnerType())) {
-            return I18nUtil.get("digemployee.tag.personal.assistant");
-        }
-        if (OwnerType.ENTERPRISE.equals(ssResource.getOwnerType())) {
+        if (OwnerType.ENTERPRISE.equals(ownerType)) {
             DigitalEmployType digitalEmployType = DigitalEmployType.getByCode(agentType);
-            return digitalEmployType == null ? null
-                : I18nUtil.get(getEnterpriseDigitalEmployeeTagNameKey(digitalEmployType));
+            return digitalEmployType == null ? null : I18nUtil.get(getEnterpriseDigitalEmployeeTagNameKey(digitalEmployType));
         }
         return null;
     }
@@ -585,9 +578,10 @@ public class DigitalEmployeeApplicationService {
         prologue.setDescText(resourceDesc);
         prologue.setRole(resourceDesc);
         prologue.setBackground(resourceDesc);
-        prologue.setOpeningQuestion(
-            JSON.toJSONString(List.of(I18nUtil.get("digemployee.default.super.assistant.opening.question.intro"),
-                I18nUtil.get("digemployee.default.super.assistant.opening.question.summary"))));
+        prologue.setOpeningQuestion(JSON.toJSONString(List.of(
+            I18nUtil.get("digemployee.default.super.assistant.opening.question.intro"),
+            I18nUtil.get("digemployee.default.super.assistant.opening.question.summary")
+        )));
 
         AgentPrologueDto.DatasetSearchConfig datasetSearchConfig = new AgentPrologueDto.DatasetSearchConfig();
         datasetSearchConfig.setSearchMode("embedding");
@@ -667,6 +661,8 @@ public class DigitalEmployeeApplicationService {
         ssResExtDigEmployee.setAgentSseUrl(ssResExtDigEmployee.getAgentSseUrlOri());
         ssResExtDigEmployee.setAgentWebUrl(ssResExtDigEmployee.getAgentWebUrlOri());
         ssResExtDigEmployee.setAgentAdminUrlList(ssResExtDigEmployee.getAgentAdminUrlOriList());
+        // tagName 统一由查询接口运行时计算，避免前端回传旧标签又写回扩展表。
+        ssResExtDigEmployee.setTagName(null);
         ssResExtDigEmployeeService.update(ssResExtDigEmployee);
 
         // 关联资源对比
@@ -717,8 +713,9 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 设置当前用户默认数字员工。 默认关系以 suas_superassist.default_dig_employee_id 为主，同时同步维护 ss_resource.owner_type，
-     * 避免个人数字员工列表与会话读取口径不一致。
+     * 设置当前用户默认数字员工。
+     * 默认关系只维护在 suas_superassist.default_dig_employee_id 上，不再修改资源 owner_type 或扩展表 tag_name。
+     * 这样超级助手、个人助理、企业数字员工都保持自身资源归属，默认身份只作为当前用户会话兜底 @ 对象。
      *
      * @param dto 请求参数
      * @return 默认数字员工切换结果
@@ -731,18 +728,10 @@ public class DigitalEmployeeApplicationService {
         SuasSuperassist superassist = loadCurrentUserSuperassist();
         Long newDefaultResourceId = targetResource.getResourceId();
         Long oldDefaultResourceId = superassist.getDefaultDigEmployeeId();
-        boolean defaultMappingConsistent = Objects.equals(oldDefaultResourceId, newDefaultResourceId)
-            && StringUtils.equals(targetResource.getOwnerType(), OwnerType.PERSONAL_DEFAULT);
-        if (defaultMappingConsistent) {
-            // 默认映射已经一致时仍刷新 tag_name，兼容旧数据或文案变更后的展示修正。
-            syncTagNameByOwnerType(newDefaultResourceId, OwnerType.PERSONAL_DEFAULT);
+        if (Objects.equals(oldDefaultResourceId, newDefaultResourceId)) {
             refreshCurrentDefaultDigitalEmployeeSession(newDefaultResourceId);
             return buildSetDefaultDigitalEmployeeResult(newDefaultResourceId, oldDefaultResourceId);
         }
-
-        resetOldDefaultDigitalEmployeeIfNecessary(oldDefaultResourceId, currentUserId, newDefaultResourceId);
-        markResourceAsDefault(targetResource, currentUserId);
-        reconcilePersonalDefaultDigitalEmployees(currentUserId, newDefaultResourceId);
         updateUserDefaultDigitalEmployee(superassist, newDefaultResourceId);
         refreshCurrentDefaultDigitalEmployeeSession(newDefaultResourceId);
         operationLogService.recordOperationLog(targetResource, OperationTypeEnum.UPDATE);
@@ -753,20 +742,10 @@ public class DigitalEmployeeApplicationService {
         Long oldDefaultResourceId) {
         SetDefaultDigitalEmployeeResultVo result = new SetDefaultDigitalEmployeeResultVo();
         result.setNewResourceId(newDefaultResourceId);
-        result.setNewPersonalDefaultTagName(loadDigitalEmployeeTagName(newDefaultResourceId));
         result.setNewOwnerType(loadDigitalEmployeeOwnerType(newDefaultResourceId));
         result.setOldResourceId(oldDefaultResourceId);
-        result.setOldPersonalDefaultTagName(loadDigitalEmployeeTagName(oldDefaultResourceId));
         result.setOldOwnerType(loadDigitalEmployeeOwnerType(oldDefaultResourceId));
         return result;
-    }
-
-    private String loadDigitalEmployeeTagName(Long resourceId) {
-        if (resourceId == null) {
-            return null;
-        }
-        SsResExtDigEmployee ssResExtDigEmployee = ssResExtDigEmployeeService.findById(resourceId);
-        return ssResExtDigEmployee == null ? null : ssResExtDigEmployee.getTagName();
     }
 
     private String loadDigitalEmployeeOwnerType(Long resourceId) {
@@ -795,6 +774,9 @@ public class DigitalEmployeeApplicationService {
         ssResource.setUpdateTime(new Date());
         ssResourceService.updateResourceEntity(ssResource);
 
+        // 该数字员工若被其它用户设为默认助理，回退他们的默认助理为自己的超级助手，避免出现“默认指向已注销资源”。
+        resetDefaultForAffectedUsers(resourceId);
+
         // 注销后不再可被会话调用：清理技能缓存/产物/外部注册
         removeDigEmployeeFromRedisQuietly(resourceId);
         removeDigEmployeeJsonFromResourceStorageQuietly(resourceId);
@@ -821,6 +803,55 @@ public class DigitalEmployeeApplicationService {
             return;
         }
         throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+    }
+
+    /**
+     * 数字员工注销/删除后，把所有把它设为默认助理的用户回退到各自的超级助手；找不到超级助手时清空。
+     * 同时若当前登录用户在受影响列表里，需要刷新 session 中的 defaultDigEmployeeId。
+     */
+    private void resetDefaultForAffectedUsers(Long resourceId) {
+        if (resourceId == null) {
+            return;
+        }
+        List<SuasSuperassist> affected = suasSuperassistService.findByDefaultDigEmployeeId(resourceId);
+        if (affected == null || affected.isEmpty()) {
+            return;
+        }
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        for (SuasSuperassist suasSuperassist : affected) {
+            Long userId = suasSuperassist.getSuperassistId();
+            Long fallbackResourceId = resolveSuperAssistantResourceId(userId);
+            suasSuperassist.setDefaultDigEmployeeId(fallbackResourceId);
+            try {
+                suasSuperassistService.updateById(suasSuperassist);
+            }
+            catch (Exception e) {
+                logger.warn("回退默认数字员工失败，userId={}, fallback={}", userId, fallbackResourceId, e);
+                continue;
+            }
+            if (Objects.equals(userId, currentUserId)) {
+                refreshCurrentDefaultDigitalEmployeeSession(fallbackResourceId);
+            }
+        }
+    }
+
+    /**
+     * 按 resource_code={userCode}_main 反查指定用户的超级助手资源ID，找不到返回 null。
+     */
+    private Long resolveSuperAssistantResourceId(Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        Users user = userService.findById(userId);
+        if (user == null) {
+            return null;
+        }
+        String resourceCode = buildDefaultSuperAssistantResourceCode(user.getUserCode(), userId);
+        if (StringUtils.isBlank(resourceCode)) {
+            return null;
+        }
+        SsResource superAssistant = ssResourceService.findByIdOrCode(null, resourceCode);
+        return superAssistant == null ? null : superAssistant.getResourceId();
     }
 
     private void validateDigitalEmployeeUpdatePermission(SsResource ssResource) {
@@ -872,19 +903,38 @@ public class DigitalEmployeeApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
                 I18nUtil.get("digemployee.default.set.resource.not.digital"));
         }
-        if (!StringUtils.equalsAny(resource.getOwnerType(), OwnerType.PERSONAL, OwnerType.PERSONAL_DEFAULT)) {
+        if (!canCurrentUserSetAsDefault(resource, currentUserId)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
-                I18nUtil.get("digemployee.default.set.resource.owner.invalid"));
-        }
-        if (!Objects.equals(resource.getCreateBy(), currentUserId)) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
-                I18nUtil.get("digemployee.default.set.resource.creator.invalid"));
+                I18nUtil.get("digemployee.default.set.resource.permission.invalid"));
         }
         return resource;
     }
 
+    /**
+     * 左侧“全部列表项”中可见的数字员工才允许设为默认：
+     * 我创建的、我有使用授权的、或我有 ALLOW_MANAGE 管理授权的资源均可。
+     */
+    private boolean canCurrentUserSetAsDefault(SsResource resource, Long currentUserId) {
+        if (resource == null || currentUserId == null) {
+            return false;
+        }
+        if (Objects.equals(resource.getCreateBy(), currentUserId)) {
+            return true;
+        }
+        List<Long> resourceIds = List.of(resource.getResourceId());
+        List<String> resourceBizTypes = List.of(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        if (authApplicationService.queryCurrentUserUsePermittedResourceIds(resourceIds, resourceBizTypes)
+            .contains(resource.getResourceId())) {
+            return true;
+        }
+        return authApplicationService.hasCurrentUserAllowManagePrivilege(resource);
+    }
+
     private SuasSuperassist loadCurrentUserSuperassist() {
         Long assistantId = CurrentUserHolder.getAssistantId();
+        if (assistantId == null || assistantId <= 0) {
+            assistantId = CurrentUserHolder.getCurrentUserId();
+        }
         if (assistantId == null || assistantId <= 0) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
                 I18nUtil.get("digemployee.default.set.superassist.not.exists"));
@@ -895,116 +945,6 @@ public class DigitalEmployeeApplicationService {
                 I18nUtil.get("digemployee.default.set.superassist.not.exists"));
         }
         return superassist;
-    }
-
-    private void resetOldDefaultDigitalEmployeeIfNecessary(Long oldDefaultResourceId, Long currentUserId,
-        Long newDefaultResourceId) {
-        if (oldDefaultResourceId == null || Objects.equals(oldDefaultResourceId, newDefaultResourceId)) {
-            return;
-        }
-        SsResource oldDefaultResource = ssResourceService.findById(oldDefaultResourceId);
-        if (oldDefaultResource == null) {
-            logger.warn("旧默认数字员工不存在，跳过重置, oldDefaultResourceId={}, currentUserId={}", oldDefaultResourceId,
-                currentUserId);
-            return;
-        }
-        if (!StringUtils.equals(oldDefaultResource.getResourceBizType(), ResourceBizTypeEnum.DIG_EMPLOYEE.name())) {
-            logger.warn("旧默认资源不是数字员工，跳过重置, oldDefaultResourceId={}, resourceBizType={}, currentUserId={}",
-                oldDefaultResourceId, oldDefaultResource.getResourceBizType(), currentUserId);
-            return;
-        }
-        if (!Objects.equals(oldDefaultResource.getCreateBy(), currentUserId)) {
-            logger.warn("旧默认资源创建人与当前用户不一致，跳过重置, oldDefaultResourceId={}, resourceCreateBy={}, currentUserId={}",
-                oldDefaultResourceId, oldDefaultResource.getCreateBy(), currentUserId);
-            return;
-        }
-        // 旧默认助理是"默认超级助手"（resource_code 后缀 _main）时，保持 owner_type=personal_default 不变，
-        // 仅由 superassist.default_dig_employee_id 切换到新助理；超级助手始终是 personal_default 资源。
-        if (isDefaultSuperAssistantResource(oldDefaultResource)) {
-            logger.info("旧默认助理是默认超级助手，保留 owner_type=personal_default 不重置, oldDefaultResourceId={}, currentUserId={}",
-                oldDefaultResourceId, currentUserId);
-            // 超级助手不再作为当前默认个人助理时，只回退展示标签，不改变 owner_type。
-            syncTagName(oldDefaultResourceId, buildPersonalResourceTagName(oldDefaultResource));
-            return;
-        }
-        oldDefaultResource.setOwnerType(OwnerType.PERSONAL);
-        oldDefaultResource.setUpdateBy(currentUserId);
-        oldDefaultResource.setUpdateTime(new Date());
-        ssResourceService.updateResourceEntity(oldDefaultResource);
-        // 同步重置 ext 表 tag_name 为"个人助理"（与 saveDigitalEmployee 的填充口径一致）
-        syncTagNameByOwnerType(oldDefaultResourceId, OwnerType.PERSONAL);
-    }
-
-    private void markResourceAsDefault(SsResource resource, Long currentUserId) {
-        resource.setOwnerType(OwnerType.PERSONAL_DEFAULT);
-        resource.setUpdateBy(currentUserId);
-        resource.setUpdateTime(new Date());
-        ssResourceService.updateResourceEntity(resource);
-        // 同步刷新 ext 表 tag_name，避免左侧 sider 等按 tag_name 渲染时不一致。
-        syncTagNameByOwnerType(resource.getResourceId(), OwnerType.PERSONAL_DEFAULT);
-    }
-
-    /**
-     * 收敛当前用户名下 personal_default 数字员工，保证“默认个人助理”全局唯一。 允许保留两类 personal_default： 1. 当前新设为默认的个人助理 2.
-     * resource_code={userCode}_main 的默认超级助手
-     */
-    private void reconcilePersonalDefaultDigitalEmployees(Long currentUserId, Long newDefaultResourceId) {
-        if (currentUserId == null) {
-            return;
-        }
-        List<SsResource> personalDefaultResources = ssResourceService
-            .findPersonalDefaultDigitalEmployeesByCreator(currentUserId);
-        if (CollectionUtils.isEmpty(personalDefaultResources)) {
-            return;
-        }
-        for (SsResource resource : personalDefaultResources) {
-            if (resource == null || resource.getResourceId() == null) {
-                continue;
-            }
-            if (!StringUtils.equals(resource.getOwnerType(), OwnerType.PERSONAL_DEFAULT)) {
-                continue;
-            }
-            if (Objects.equals(resource.getResourceId(), newDefaultResourceId)
-                || isDefaultSuperAssistantResource(resource)) {
-                continue;
-            }
-            resource.setOwnerType(OwnerType.PERSONAL);
-            resource.setUpdateBy(currentUserId);
-            resource.setUpdateTime(new Date());
-            ssResourceService.updateResourceEntity(resource);
-            syncTagNameByOwnerType(resource.getResourceId(), OwnerType.PERSONAL);
-        }
-    }
-
-    /**
-     * 根据当前 owner_type 同步刷新 ss_res_ext_dig_employee.tag_name。 personal_default 需要复用 saveDigitalEmployee
-     * 的识别口径：resourceCode={userCode}_main → "默认超级助手"， 其他 personal_default → "默认个人助理"，personal → "个人助理"。
-     */
-    private void syncTagNameByOwnerType(Long resourceId, String ownerType) {
-        if (resourceId == null) {
-            return;
-        }
-        String tagName;
-        if (OwnerType.PERSONAL_DEFAULT.equals(ownerType)) {
-            SsResource ssResource = ssResourceService.findById(resourceId);
-            tagName = buildDefaultPersonalResourceTagName(ssResource);
-        }
-        else {
-            tagName = I18nUtil.get("digemployee.tag.personal.assistant");
-        }
-        syncTagName(resourceId, tagName);
-    }
-
-    private void syncTagName(Long resourceId, String tagName) {
-        if (resourceId == null) {
-            return;
-        }
-        SsResExtDigEmployee ssResExtDigEmployee = ssResExtDigEmployeeService.findById(resourceId);
-        if (ssResExtDigEmployee == null) {
-            return;
-        }
-        ssResExtDigEmployee.setTagName(tagName);
-        ssResExtDigEmployeeService.update(ssResExtDigEmployee);
     }
 
     private void updateUserDefaultDigitalEmployee(SuasSuperassist superassist, Long resourceId) {
@@ -1060,19 +1000,21 @@ public class DigitalEmployeeApplicationService {
         String effectiveStorageType = StringUtils.defaultIfBlank(storageType, "minio");
         String resourceDir = ResourceBizTypeEnum.DIG_EMPLOYEE.name().toLowerCase();
 
-        logger.info("数字员工同步开始, storageType={}, resourceId={}, resourcePath={}/{}", effectiveStorageType, resourceId,
-            resourceDir, fileName);
+        logger.info("数字员工同步开始, storageType={}, resourceId={}, resourcePath={}/{}", effectiveStorageType,
+            resourceId, resourceDir, fileName);
 
         resourceArtifactStorageService.syncResourceJsonByBizType(jsonContent, ResourceBizTypeEnum.DIG_EMPLOYEE.name(),
             resourceId);
+        ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, ResourceBizTypeEnum.DIG_EMPLOYEE.name(),
+            "dig-employee-sync");
 
         // 数字员工自己的 JSON 同步完成后，再检查并补齐其关联资源的标准 JSON 产物。
         // 这样可以确保前端保存/更新数字员工后，关联的 toolkit / mcp / agent / kg_* / view / object
         // 也都能在开放资源目录中按标准命名被下游读取到。
         syncMissingRelatedResourceJsons(resourceId);
 
-        logger.info("数字员工已同步至开放资源目录, storageType={}, resourceId={}, resourcePath={}/{}", effectiveStorageType,
-            resourceId, resourceDir, fileName);
+        logger.info("数字员工已同步至开放资源目录, storageType={}, resourceId={}, resourcePath={}/{}",
+            effectiveStorageType, resourceId, resourceDir, fileName);
     }
 
     /**
@@ -1164,6 +1106,8 @@ public class DigitalEmployeeApplicationService {
                 "数字员工关联资源JSON缺失，开始补发, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
                 digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType);
             resourceArtifactStorageService.syncResourceJsonByBizType(targetContent, resourceBizType, relResourceId);
+            ssResourceArtifactService.upsertStandardJsonArtifact(relResourceId, resourceBizType,
+                "dig-employee-related-sync");
             logger.info(
                 "数字员工关联资源JSON补发成功, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
                 digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType);
@@ -1260,11 +1204,11 @@ public class DigitalEmployeeApplicationService {
         String effectiveStorageType = StringUtils.defaultIfBlank(storageType, "minio");
         String resourceDir = ResourceBizTypeEnum.DIG_EMPLOYEE.name().toLowerCase();
         String fileName = buildDigEmployeeJsonFileName(resourceId);
-        logger.info("删除数字员工开放资源目录文件开始, storageType={}, resourceId={}, resourcePath={}/{}", effectiveStorageType,
-            resourceId, resourceDir, fileName);
+        logger.info("删除数字员工开放资源目录文件开始, storageType={}, resourceId={}, resourcePath={}/{}",
+            effectiveStorageType, resourceId, resourceDir, fileName);
         resourceArtifactStorageService.deleteResourceJsonByBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name(), resourceId);
-        logger.info("删除数字员工开放资源目录文件完成, storageType={}, resourceId={}, resourcePath={}/{}", effectiveStorageType,
-            resourceId, resourceDir, fileName);
+        logger.info("删除数字员工开放资源目录文件完成, storageType={}, resourceId={}, resourcePath={}/{}",
+            effectiveStorageType, resourceId, resourceDir, fileName);
     }
 
     private String buildDigEmployeeJsonFileName(Long resourceId) {
@@ -1698,10 +1642,6 @@ public class DigitalEmployeeApplicationService {
             return debugSessionCleanupVo;
         }
 
-        // 删除调试会话
-        byaiSessionService.remove(sessionId);
-
-        // 删除消息
         MessageHotDelQo messageHotDelQo = new MessageHotDelQo();
         messageHotDelQo.setSessionId(sessionId);
         byaiMessageHotService.deleteByQo(messageHotDelQo);

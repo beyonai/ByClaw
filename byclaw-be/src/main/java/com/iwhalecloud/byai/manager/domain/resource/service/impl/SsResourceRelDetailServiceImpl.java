@@ -110,6 +110,18 @@ public class SsResourceRelDetailServiceImpl extends ServiceImpl<SsResourceRelDet
         return ssResourceRelDetailMapper.selectList(queryWrapper);
     }
 
+    @Override
+    public void removeAllByResourceIdOrRelResourceId(Long resourceId) {
+        if (resourceId == null) {
+            return;
+        }
+        LambdaQueryWrapper<SsResourceRelDetail> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(SsResourceRelDetail::getResourceId, resourceId)
+            .or()
+            .eq(SsResourceRelDetail::getRelResourceId, resourceId);
+        ssResourceRelDetailMapper.delete(queryWrapper);
+    }
+
     /**
      * 校验视图资源是否存在
      *

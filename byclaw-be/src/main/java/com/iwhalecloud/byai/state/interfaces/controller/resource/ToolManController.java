@@ -308,6 +308,32 @@ public class ToolManController {
     }
 
     /**
+     * 硬删除资源及其所有关联关系与资源产物。
+     */
+    @PostMapping("/deleteResourceAndAllRel")
+    public ResponseUtil<Void> deleteResourceAndAllRel(@RequestBody(required = false) DeleteResourceQo request,
+        @Parameter(description = "资源ID", required = false) @RequestParam(value = "resourceId",
+            required = false) Long resourceId) {
+        try {
+            Long finalResourceId = request != null && request.getResourceId() != null ? request.getResourceId()
+                : resourceId;
+            toolManService.deleteResourceAndAllRel(finalResourceId);
+            return ResponseUtil.success(I18nUtil.get("tool.resource.delete.success"));
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(resolveResourceNotFoundMessage(e));
+        }
+        catch (BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("deleteResourceAndAllRel failed", e);
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.delete.failed"));
+        }
+    }
+
+    /**
      * 查询资源详情，支持 GET query 参数与 POST body/query 参数。
      *
      * @author qin.guoquan

@@ -6,7 +6,7 @@ import classnames from 'classnames';
 import { Spin, message, Tabs } from 'antd';
 import { isEmpty, size, head, compact } from 'lodash';
 import Empty from '@/components/Empty';
-import { deleteDigitalEmployee, queryMyCreated, setDefaultDigitalEmployee } from '@/service/digitalEmployees';
+import { deleteDigitalEmployee, queryMyCreated } from '@/service/digitalEmployees';
 import { getDefaultPagination, paginationReducer } from '@/utils/pageInfo';
 import { agentHandler } from '@/utils/agent';
 import { getTopLevelCatalogs } from '@/utils/catalog';
@@ -320,63 +320,6 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
     [EventEmitter, intl]
   );
 
-  const onSetDefaultAssistant = React.useCallback(
-    (employee: IAgentCache) => {
-      const resourceId = employee?.resourceId ?? employee?.id ?? employee?.agentId;
-      if (!resourceId) return;
-
-      setIsLoading(true);
-
-      setDefaultDigitalEmployee({
-        ownerType: 'personal_default',
-        resourceId,
-      })
-        .then((data) => {
-          if (!data) return;
-          message.success(intl.formatMessage({ id: 'resource.setDefaultAssistantSuccess' }));
-
-          getSearch(searchName || '', dropdownParam, 1, curActiveLink);
-
-          const {
-            newResourceId,
-            newPersonalDefaultTagName,
-            newOwnerType,
-            oldResourceId,
-            oldPersonalDefaultTagName,
-            oldOwnerType,
-          } = data;
-
-          // 刷新数字员工前端缓存数据
-          dispatch({
-            type: 'employees/setDefaultEmployee',
-            payload: { resourceId: `${newResourceId}` },
-          });
-
-          EventEmitter.emit('beyond-update-employee', {
-            updateList: [
-              {
-                agentId: newResourceId,
-                ownerType: newOwnerType,
-                tagName: newPersonalDefaultTagName,
-              },
-              {
-                agentId: oldResourceId,
-                ownerType: oldOwnerType,
-                tagName: oldPersonalDefaultTagName,
-              },
-            ],
-          });
-        })
-        .catch((error: any) => {
-          message.error(error?.message || error || intl.formatMessage({ id: 'common.operateFailed' }));
-        })
-        .finally(() => {
-          setIsLoading(false);
-        });
-    },
-    [curActiveLink, dropdownParam, getSearch, searchName, EventEmitter, setIsLoading]
-  );
-
   const onAuthEmployee = React.useCallback((employee: IAgentCache, type: 'useAuth' | 'mgrAuth') => {
     setSelectRecord(employee);
     setAuthType(type);
@@ -473,13 +416,11 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
                         onCardClick={() => onClickEmployee(employee)}
                         actionConfig={{
                           scene: 'personal',
-                          showSetDefault: true,
                           onEdit: () => onEditEmployee(employee),
                           onAuth: (type: any) => onAuthEmployee(employee, type),
                           onApplyUse: () => onApplyEmployee(employee),
                           onAuditUse: () => onAuditEmployee(employee),
                           onDelete: () => onDeleteEmployee(employee),
-                          onSetDefault: () => onSetDefaultAssistant(employee),
                         }}
                       />
                     );

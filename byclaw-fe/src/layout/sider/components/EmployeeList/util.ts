@@ -1,16 +1,15 @@
 import { IAgentCache } from '@/typescript/agent';
-import { agentTypeMap, ownerTypeMap } from '@/constants/agent';
+import { agentTypeMap } from '@/constants/agent';
 
 export function sortBySuperHelperFirst(items: IAgentCache[]) {
-  // 定义排序优先级：isTop=1 > tagName='默认个人助理' > tagName='个人助理' > 其他
+  // 定义排序优先级：置顶 > 当前默认助理 > 助手型/问答型 > 其他。
+  // 默认身份现在来自后端 isDefault，不再依赖 ownerType=personal_default 或落库 tagName。
   const getPriority = (item: IAgentCache) => {
     if (`${item?.isTop}` === '1') return 10;
 
-    if (item?.ownerType === ownerTypeMap.personalDefault) return 8;
-    if (item?.ownerType === '默认个人助理') return 8; //谁这么决策这样写的谁负责
+    if (item?.isDefault) return 8;
 
     if ([agentTypeMap.agent, agentTypeMap.qAndaAgent].includes(item.agentType || '')) return 6;
-    if (item?.tagName === '个人助理') return 6; //谁这么决策这样写的谁负责
 
     return 1;
   };
