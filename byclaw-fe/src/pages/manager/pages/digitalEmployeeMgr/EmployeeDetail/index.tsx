@@ -1093,9 +1093,9 @@ const EmployeeDetail = ({ loading }) => {
 
             setUpdateTime(dayjs().format('HH:mm:ss'));
 
-            if (!queryData.resourceId && resp) {
-              const url = `${PREVIEW_HOST}iframes/employee?canCleanSession=1&agentId=${resp}`;
-              setAgentId(resp);
+            if (!queryData.resourceId && resp?.resourceId) {
+              const url = `${PREVIEW_HOST}iframes/employee?canCleanSession=1&agentId=${resp.resourceId}`;
+              setAgentId(resp.resourceId);
               setDebugPage(url);
             }
 

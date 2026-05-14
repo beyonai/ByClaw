@@ -90,14 +90,18 @@ public class DigitalEmployeeController {
      */
     @ManageLogAnnotation(name = "数字员工", description = "创建数字员工")
     @RequestMapping(value = "/saveDigitalEmployee", method = RequestMethod.POST)
-    public ResponseUtil<SsResource> saveDigitalEmployee(@RequestBody DigitalEmployeeDTO digitalEmployeeDTO) {
+    public ResponseUtil<DigitalEmployeeDetailsDTO> saveDigitalEmployee(@RequestBody DigitalEmployeeDTO digitalEmployeeDTO) {
 
         SsResource ssResource = digitalEmployeeApplicationService.saveDigitalEmployee(digitalEmployeeDTO);
 
         // 同步openClaw工作空间
         digitalEmployeeApplicationService.synOpenClawWorkSpace(ssResource.getResourceId());
 
-        return ResponseUtil.successResponse(I18nUtil.get("digemployee.save.success"), ssResource);
+        EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
+        employeeIdDTO.setResourceId(ssResource.getResourceId());
+        DigitalEmployeeDetailsDTO details = digitalEmployeeApplicationService.findDetailsById(employeeIdDTO);
+
+        return ResponseUtil.successResponse(I18nUtil.get("digemployee.save.success"), details);
     }
 
     /**
@@ -108,14 +112,18 @@ public class DigitalEmployeeController {
      */
     @ManageLogAnnotation(name = "数字员工", description = "更新数字员工")
     @RequestMapping(value = "/updateDigitalEmployee", method = RequestMethod.POST)
-    public ResponseUtil<SsResource> updateDigitalEmployee(@RequestBody DigitalEmployeeDTO digitalEmployeeDTO) {
+    public ResponseUtil<DigitalEmployeeDetailsDTO> updateDigitalEmployee(@RequestBody DigitalEmployeeDTO digitalEmployeeDTO) {
 
         SsResource ssResource = digitalEmployeeApplicationService.updateDigitalEmployee(digitalEmployeeDTO);
 
         // 同步openClaw工作空间
         digitalEmployeeApplicationService.synOpenClawWorkSpace(ssResource.getResourceId());
 
-        return ResponseUtil.successResponse(I18nUtil.get("digemployee.update.success"), ssResource);
+        EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
+        employeeIdDTO.setResourceId(ssResource.getResourceId());
+        DigitalEmployeeDetailsDTO details = digitalEmployeeApplicationService.findDetailsById(employeeIdDTO);
+
+        return ResponseUtil.successResponse(I18nUtil.get("digemployee.update.success"), details);
     }
 
     /**
