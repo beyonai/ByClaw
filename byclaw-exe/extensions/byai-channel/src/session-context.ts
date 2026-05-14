@@ -13,6 +13,35 @@ export function getSessionPathBySessionId(sessionId: string) {
   return path.posix.join(SESSION_FILES_ROOT, sessionId.trim());
 }
 
+export function resolveSdkLocalFilePath(rawPath: string, sessionId: string): string {
+  const sessionRoot = getSessionPathBySessionId(sessionId);
+  if (!path.posix.isAbsolute(rawPath)) {
+    return path.posix.resolve(sessionRoot, rawPath);
+  }
+
+  const normalizedRawPath = path.posix.normalize(rawPath);
+  const normalizedSessionRoot = path.posix.normalize(sessionRoot);
+  if (
+    normalizedRawPath === normalizedSessionRoot ||
+    normalizedRawPath.startsWith(`${normalizedSessionRoot}/`)
+  ) {
+    return normalizedRawPath;
+  }
+
+  for (let start = 0; start < normalizedSessionRoot.length; start += 1) {
+    const overlap = normalizedSessionRoot.slice(start);
+    if (
+      overlap.length <= 1 ||
+      (normalizedRawPath !== overlap && !normalizedRawPath.startsWith(`${overlap}/`))
+    ) {
+      continue;
+    }
+    return `${normalizedSessionRoot.slice(0, start)}${normalizedRawPath}`;
+  }
+
+  return normalizedRawPath;
+}
+
 export interface ByaiSdkSessionContext {
   accountId: string;
   sessionId: string;
