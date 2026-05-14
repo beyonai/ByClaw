@@ -15,8 +15,8 @@ import { buildAgentSessionKey, resolveAgentIdFromSessionKey } from "openclaw/plu
 import type { SdkInboundFile, SdkProcessorDeps } from "./types.js";
 import {
   bindActiveSdkRequestRunId,
-  getSessionPathBySessionId,
   registerActiveSdkRequest,
+  resolveSdkLocalFilePath,
 } from "./session-context.js";
 import { ensureSessionReasoningStream, shouldForceReasoningStream } from "./reasoning-stream.js";
 import { EventType, SseReasonMessageType } from "@byclaw/by-framework";
@@ -86,34 +86,6 @@ function resolveSdkSessionKey(params: {
   });
 }
 
-function resolveSdkLocalFilePath(rawPath: string, sessionRoot: string): string {
-  if (!path.posix.isAbsolute(rawPath)) {
-    return path.posix.resolve(sessionRoot, rawPath);
-  }
-
-  const normalizedRawPath = path.posix.normalize(rawPath);
-  const normalizedSessionRoot = path.posix.normalize(sessionRoot);
-  if (
-    normalizedRawPath === normalizedSessionRoot ||
-    normalizedRawPath.startsWith(`${normalizedSessionRoot}/`)
-  ) {
-    return normalizedRawPath;
-  }
-
-  for (let start = 0; start < normalizedSessionRoot.length; start += 1) {
-    const overlap = normalizedSessionRoot.slice(start);
-    if (
-      overlap.length <= 1 ||
-      (normalizedRawPath !== overlap && !normalizedRawPath.startsWith(`${overlap}/`))
-    ) {
-      continue;
-    }
-    return `${normalizedSessionRoot.slice(0, start)}${normalizedRawPath}`;
-  }
-
-  return normalizedRawPath;
-}
-
 async function resolveSdkInboundMediaPayload(params: {
   cfg: import("openclaw/plugin-sdk").OpenClawConfig;
   accountId: string;
@@ -136,7 +108,6 @@ async function resolveSdkInboundMediaPayload(params: {
     return {};
   }
 
-  const sessionRoot = getSessionPathBySessionId(params.sessionId);
   const mediaPaths: string[] = [];
   const mediaTypes: string[] = [];
   const seenSources = new Set<string>();
@@ -194,7 +165,7 @@ async function resolveSdkInboundMediaPayload(params: {
       continue;
     }
 
-    const resolvedPath = resolveSdkLocalFilePath(rawPath, sessionRoot);
+    const resolvedPath = resolveSdkLocalFilePath(rawPath, params.sessionId);
 
     if (seenSources.has(resolvedPath)) {
       continue;
