@@ -9,7 +9,7 @@ import { getRuntimeActualUrl } from '@/utils';
 import { isAdminVip } from '@/utils/auth';
 import useAppStore from '@/models/common/useAppStore';
 import { getDisplayUserNameInChat } from '@/utils/chat';
-import { getssoToken } from '@/utils/auth';
+import { getssoToken, getToken } from '@/utils/auth';
 import {
   fallbackMenuConfig,
   filterMenusByAdminVip,
@@ -73,7 +73,7 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
       if (matchedMenu?.menuUrl) {
         let url = normalizeMenuUrl(matchedMenu.menuUrl);
         if (url.includes('${Beyond-token}')) {
-          url = url.replace('${Beyond-token}', getssoToken());
+          url = url.replace('${Beyond-token}', getToken());
         }
         console.log('menuUrl', url);
         console.log('url', url);
