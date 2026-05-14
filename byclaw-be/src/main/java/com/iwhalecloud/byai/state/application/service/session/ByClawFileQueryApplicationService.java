@@ -167,6 +167,9 @@ public class ByClawFileQueryApplicationService {
         }
         else if (resourceId != null) {
             prefix = this.buildAgentRootPrefix(resourceId);
+            if (!prefix.endsWith("/")) {
+                prefix = prefix.concat("/");
+            }
         }
         else {
             prefix = "/by/.openclaw/";

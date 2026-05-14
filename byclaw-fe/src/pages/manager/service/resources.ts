@@ -343,3 +343,15 @@ export interface FileItem {
 export const listUserSpace = async (params: { prefix: string; resourceId?: string | number }) => {
   return await POST<any>('/byaiService/tool/listUserSpace', params);
 };
+
+/**
+ * 预览文件
+ * 通过文件路径获取文件预览内容
+ * @param filePath 文件路径
+ * @returns Promise 文件预览内容（Blob格式）
+ */
+export const previewFile = (filePath: string) => {
+  return GET<Blob>(`/byaiService/commonFile/preview?filePath=${encodeURIComponent(filePath)}`, undefined, {
+    responseType: 'blob',
+  });
+};
