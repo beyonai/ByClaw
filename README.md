@@ -99,7 +99,11 @@ cd ByClaw
 
 # 2. 配置环境变量
 cp .env.example .env
-# 编辑 .env，填入数据库密码、Redis 地址等
+# ⚠️ 重要：.env.example 中所有地址默认为 127.0.0.1，
+#    你需要根据 deploy/middleware 中各中间件实际暴露的端口，
+#    逐项回填 DB_URL、DB_USER、DB_PASS、REDIS_HOST、REDIS_PORT、
+#    REDIS_PASSWORD、MID_FTP_* 等配置。
+#    如果中间件部署在远程机器，请替换为对应 IP。
 
 # 3. 启动中间件（Redis、MinIO、OpenGauss、Sandbox）
 cd deploy/middleware && sh start-all.sh && cd ../..
