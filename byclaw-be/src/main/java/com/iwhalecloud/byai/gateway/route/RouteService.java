@@ -406,7 +406,7 @@ public class RouteService {
         List<MessageFileDto> files = chatDto.getFiles();
         JSONArray contentObjects = new JSONArray();
         Object messageContent = content;
-        if (files != null) {
+        if (CollectionUtils.isNotEmpty(files)) {
             JSONObject contentObject = new JSONObject();
             contentObject.put("text", content);
             contentObject.put("files", files);

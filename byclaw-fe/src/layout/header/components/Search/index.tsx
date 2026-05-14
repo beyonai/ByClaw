@@ -59,15 +59,11 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
     [result?.digitList]
   );
 
-  // 模糊搜索
+  // 模糊搜索（keyword 为空时也请求后端，用于首次打开展示默认列表）
   const myGetSearchList = useCallback(
     debounce((myKeyword: string) => {
       if (cancelTokenQKRef.current) {
         cancelTokenQKRef.current.abort();
-      }
-
-      if (!myKeyword) {
-        return;
       }
 
       cancelTokenQKRef.current = new AbortController();
@@ -79,7 +75,7 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
           pageSize: 20,
           pageIndex: 1,
           type: 'all',
-          keyword: myKeyword,
+          keyword: myKeyword.trim(),
         },
         cancelTokenQKRef.current
       )
@@ -97,8 +93,19 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
   );
 
   useEffect(() => {
+    if (!showSearch) {
+      return;
+    }
     myGetSearchList(keyword);
-  }, [keyword]);
+  }, [keyword, showSearch, myGetSearchList]);
+
+  /** 弹窗首次打开时立即拉取，避免仅依赖 debounce 的首帧延迟 */
+  useEffect(() => {
+    if (!showSearch) {
+      return;
+    }
+    myGetSearchList.flush();
+  }, [showSearch, myGetSearchList]);
 
   // 搜索高亮
   const highlight = useCallback(

@@ -78,6 +78,8 @@ function getInboundMessageFromByFramework(data: AskAgentCommand) {
       }
     });
     questionText = questionTextArr.join("\n");
+  } else {
+    questionText = String(data.content);
   }
   if (Array.isArray(data.extraPayload?.resource_list)) {
     const remindTextArr: string[] = [];

@@ -1,4 +1,4 @@
-package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.card;
+package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
