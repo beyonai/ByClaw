@@ -3,8 +3,8 @@ import { IMessage } from '@/typescript/message';
 import useGlobal from '@/hooks/useGlobal';
 import { getLocale, useIntl } from '@umijs/max';
 import { Button, Col, Row, Divider } from 'antd';
-import { cloneDeep, get, pick, set } from 'lodash';
-import React, { useCallback, useEffect, useState } from 'react';
+import { cloneDeep, get, pick, set, isNil } from 'lodash';
+import React, { useCallback, useEffect, useState, useMemo } from 'react';
 import ConditionItem from './ConditionItem';
 import FieldItem from './FieldItem';
 import useCountDown from '@/hooks/useCountDown';
@@ -44,6 +44,19 @@ export default function ThinkRewriteQuestion(props: IProps) {
 
   const { getMessageList, totalMesageListSize } = React.useContext(ChatLayoutCompContext);
 
+  const list = useMemo(() => {
+    if (isThinkingProcess) {
+      return message.thinkList || [];
+    }
+    return message?.messageList || [];
+  }, [message.messageList, message.thinkList, isThinkingProcess]);
+
+  const curMessageIdx = useMemo(() => {
+    const messageList = getMessageList();
+    return messageList.findIndex((item) => message.msgId === item.msgId);
+  }, [getMessageList, message]);
+
+  // 最后一个问题才显示按钮
   // 最后一个问题才显示按钮
   useEffect(() => {
     if (isHistoryMsg) {
@@ -51,16 +64,11 @@ export default function ThinkRewriteQuestion(props: IProps) {
       return;
     }
 
-    let list = message?.messageList || [];
-    if (isThinkingProcess) {
-      list = message.thinkList || [];
-    }
-
     let lastIndex = list?.findLastIndex((item) => {
       return `${get(item, 'contentType')}` === `${SSEMessageType.thinkRewriteQuestion}`;
     });
     switchShowSubmitBtn(lastIndex === messageIdx);
-  }, [message.messageList, message.thinkList, isThinkingProcess, messageIdx, isHistoryMsg]);
+  }, [list, messageIdx, isHistoryMsg]);
 
   // 同步消息中的paradigmList，用于确定时提交入参
   const updateParadigmListToMessage = useCallback(
@@ -150,7 +158,7 @@ export default function ThinkRewriteQuestion(props: IProps) {
   const handleSubmit = useCallback(() => {
     setHasSubmit(true);
     const newParadigmList =
-      message?.messageList
+      list
         ?.filter((item) => `${item?.contentType}` === `${SSEMessageType.thinkRewriteQuestion}`)
         .map((item) => {
           const substance = get(item, 'content.substance', {});
@@ -185,20 +193,16 @@ export default function ThinkRewriteQuestion(props: IProps) {
         }) || [];
     console.log('newParadigmList', newParadigmList);
     sendRewriteQuestion(newParadigmList);
-  }, [sendRewriteQuestion, message?.messageList]);
+  }, [sendRewriteQuestion, list]);
 
   const { remainingTime, isRunning, start, reset } = useCountDown(15000, handleSubmit);
 
   React.useEffect(() => {
     reset();
-
-    const messageList = getMessageList();
-    const idx = messageList.findIndex((item) => message.msgId === item.msgId);
-
-    if (!defParadigmList || !showSubmitBtn || idx !== totalMesageListSize - 1) return;
+    if (isNil(defParadigmList) || !showSubmitBtn || curMessageIdx !== totalMesageListSize - 1) return;
 
     start();
-  }, [defParadigmList, showSubmitBtn, message, totalMesageListSize]);
+  }, [isNil(defParadigmList), showSubmitBtn, totalMesageListSize, curMessageIdx]);
 
   if (!paradigmList) return null;
 
