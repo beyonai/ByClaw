@@ -1,4 +1,4 @@
-import { Button, Tabs, Input } from 'antd';
+import { Button, Tabs, Input, Spin } from 'antd';
 import { useIntl, useNavigate } from '@umijs/max';
 import classNames from 'classnames';
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
@@ -6,6 +6,7 @@ import { SearchOutlined } from '@ant-design/icons';
 import { trim } from 'lodash';
 import ResourceCitation from '@/components/Resources/components/ResourceCitation';
 import Empty from '@/components/Empty';
+import { Empty as AntdEmpty } from 'antd';
 import { ResourceType } from '../../utils/constants';
 import { IResourceType } from '../../types';
 import { ResourceTypeMap } from '@/constants/resource';
@@ -383,9 +384,13 @@ const ResourceTabs: React.FC<Props> = ({
           )}
           <div className={styles.fileList}>
             {fileLoading ? (
-              <div className={styles.loading}>加载中...</div>
+              <div className={classNames('ub ub-ac ub-pc', styles.loadingContainer)}>
+                <Spin />
+              </div>
             ) : fileList.length === 0 ? (
-              <Empty />
+              <div className={styles.emptyContainer}>
+                <Empty image={AntdEmpty.PRESENTED_IMAGE_SIMPLE} />
+              </div>
             ) : (
               fileList.map((file, index) => (
                 <div
@@ -411,7 +416,7 @@ const ResourceTabs: React.FC<Props> = ({
                       className={styles.downloadBtn}
                       onClick={(e) => {
                         e.stopPropagation();
-                        window.open(`/commonFile/preview?filePath=${file.filePath}/${file.name}`);
+                        window.open(`/byaiService/commonFile/preview?filePath=${file.filePath}`);
                       }}
                     >
                       下载
