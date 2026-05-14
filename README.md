@@ -11,6 +11,10 @@
   <a href="https://github.com/beyonai/ByClaw/stargazers"><img src="https://img.shields.io/github/stars/beyonai/ByClaw?style=for-the-badge" alt="Stars"></a>
 </p>
 
+<p align="center">
+  <strong>中文</strong> | <a href="README_EN.md">English</a>
+</p>
+
 90% 的企业在智能体转型中卡在"最后一公里"——概念很火、试点很美，但一规模化、一进生产、一碰核心数据，就遇到四大死结：**不敢用、不会用、接不通、算不清**。
 
 我们总结了智能体组织的必赢公式：
@@ -121,22 +125,30 @@ cd deploy/standalone && docker compose up -d
 
 ### 本地开发
 
+本地开发同样需要先配置 `.env` 文件（步骤与上方 Docker 部署一致）。
+
+中间件可以部署在本地，也可以部署在远程服务器——只需在 `.env` 中将 `127.0.0.1` 替换为远程服务器的 IP 和端口即可。
+
 ```bash
-# 启动中间件
+# 1. 配置环境变量（同上，必须先完成）
+cp .env.example .env
+# 根据中间件实际地址回填 DB_URL、REDIS_HOST 等
+
+# 2. 启动中间件（本地部署时执行，远程部署则跳过此步）
 cd deploy/middleware && sh start-all.sh && cd ../..
 
-# 方式一：统一脚本（推荐）
-./scripts/start.sh --all
+# 3. 启动应用（推荐统一脚本）
+scripts/start.sh --all
 
-# 方式二：按模块启动
-./scripts/start.sh --fe      # 前端 :8000
-./scripts/start.sh --be      # 后端 :8086
-./scripts/start.sh --qa      # QA 服务
-./scripts/start.sh --data    # 数据云服务
+# 按模块启动
+scripts/start.sh --fe      # 前端 :8000
+scripts/start.sh --be      # 后端 :8086
+scripts/start.sh --qa      # QA 服务
+scripts/start.sh --data    # 数据云服务
 
 # 停止服务
-./scripts/stop.sh            # 停止全部
-./scripts/stop.sh --fe       # 仅停止前端
+scripts/stop.sh            # 停止全部
+scripts/stop.sh --fe       # 仅停止前端
 ```
 
 启动脚本会自动执行**环境预检**——校验所有工具、版本和依赖是否就绪，有问题会立即报错并给出修复建议。使用 `--skip-checks` 可跳过预检。
