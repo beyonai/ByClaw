@@ -125,8 +125,10 @@
     <update id="updateStatusToReleased">
         UPDATE ss_sandbox_record
         SET status = 'RELEASED',
-            release_time = CURRENT_TIMESTAMP,
-            update_time = CURRENT_TIMESTAMP
+            release_reason = COALESCE(NULLIF(release_reason, ''), #{reason,jdbcType=VARCHAR}),
+            release_time = #{releaseTime,jdbcType=TIMESTAMP},
+            update_time = #{releaseTime,jdbcType=TIMESTAMP},
+            version = version + 1
         WHERE id = #{id,jdbcType=BIGINT}
           AND status IN ('RUNNING', 'RELEASING')
     </update>
@@ -177,40 +179,92 @@
           AND status = 'RUNNING'
     </update>
 
-    <!-- 查询超时的自动释放沙箱记录 -->
-    <select id="selectExpiredSandboxes" resultMap="BaseResultMap">
-        SELECT <include refid="Base_Column_List" />
+    <select id="countExpiredSandboxes" resultType="int">
+        SELECT COUNT(*)
         FROM ss_sandbox_record
         WHERE status = 'RUNNING'
-          AND lease_policy = 'LOCAL_IDLE_RELEASE'
+          AND auto_release = 1
           AND last_access_time IS NOT NULL
           <![CDATA[
           AND last_access_time < (CURRENT_TIMESTAMP - #{timeoutMinutes} * INTERVAL '1' MINUTE)
           ]]>
     </select>
 
-    <select id="selectDueRenewSandboxes" resultMap="BaseResultMap">
+    <!-- 查询超时的自动释放沙箱记录：按最早访问时间优先，使用游标避免状态更新导致 offset 跳过 -->
+    <select id="selectExpiredSandboxesPage" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
         WHERE status = 'RUNNING'
-          AND lease_policy = 'REMOTE_AUTO_EXPIRE'
+          AND auto_release = 1
+          AND last_access_time IS NOT NULL
+          <![CDATA[
+          AND last_access_time < (CURRENT_TIMESTAMP - #{timeoutMinutes} * INTERVAL '1' MINUTE)
+          ]]>
+        <if test="cursorTime != null and cursorId != null">
+          <![CDATA[
+          AND (last_access_time > #{cursorTime,jdbcType=TIMESTAMP}
+               OR (last_access_time = #{cursorTime,jdbcType=TIMESTAMP} AND id > #{cursorId,jdbcType=BIGINT}))
+          ]]>
+        </if>
+        ORDER BY last_access_time ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="countDueRenewSandboxes" resultType="int">
+        SELECT COUNT(*)
+        FROM ss_sandbox_record
+        WHERE status = 'RUNNING'
+          AND (lease_policy IN ('REMOTE_AUTO_EXPIRE', 'MANUAL') OR auto_release = 0)
           AND sandbox_id IS NOT NULL
           AND sandbox_id != ''
           AND timeout_seconds IS NOT NULL
           AND timeout_seconds > 0
           AND next_renew_at IS NOT NULL
           AND next_renew_at &lt;= #{now,jdbcType=TIMESTAMP}
-        ORDER BY next_renew_at ASC
+    </select>
+
+    <select id="selectDueRenewSandboxesPage" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE status = 'RUNNING'
+          AND (lease_policy IN ('REMOTE_AUTO_EXPIRE', 'MANUAL') OR auto_release = 0)
+          AND sandbox_id IS NOT NULL
+          AND sandbox_id != ''
+          AND timeout_seconds IS NOT NULL
+          AND timeout_seconds > 0
+          AND next_renew_at IS NOT NULL
+          AND next_renew_at &lt;= #{now,jdbcType=TIMESTAMP}
+        <if test="cursorTime != null and cursorId != null">
+          <![CDATA[
+          AND (next_renew_at > #{cursorTime,jdbcType=TIMESTAMP}
+               OR (next_renew_at = #{cursorTime,jdbcType=TIMESTAMP} AND id > #{cursorId,jdbcType=BIGINT}))
+          ]]>
+        </if>
+        ORDER BY next_renew_at ASC, id ASC
         LIMIT #{limit}
     </select>
 
-    <select id="selectReconcileSandboxes" resultMap="BaseResultMap">
+    <select id="countReconcileSandboxes" resultType="int">
+        SELECT COUNT(*)
+        FROM ss_sandbox_record
+        WHERE status != 'RELEASED'
+          AND sandbox_id IS NOT NULL
+          AND sandbox_id != ''
+    </select>
+
+    <select id="selectReconcileSandboxesPage" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
         WHERE status != 'RELEASED'
           AND sandbox_id IS NOT NULL
           AND sandbox_id != ''
-        ORDER BY update_time ASC
+        <if test="cursorTime != null and cursorId != null">
+          <![CDATA[
+          AND (update_time > #{cursorTime,jdbcType=TIMESTAMP}
+               OR (update_time = #{cursorTime,jdbcType=TIMESTAMP} AND id > #{cursorId,jdbcType=BIGINT}))
+          ]]>
+        </if>
+        ORDER BY update_time ASC, id ASC
         LIMIT #{limit}
     </select>
 
@@ -295,7 +349,7 @@
         SET auto_release = #{autoRelease,jdbcType=INTEGER},
             lease_policy = CASE
                 WHEN #{autoRelease,jdbcType=INTEGER} = 1 THEN 'REMOTE_AUTO_EXPIRE'
-                ELSE 'LOCAL_IDLE_RELEASE'
+                ELSE 'MANUAL'
             END,
             update_time = CURRENT_TIMESTAMP
         WHERE id = #{id,jdbcType=BIGINT}

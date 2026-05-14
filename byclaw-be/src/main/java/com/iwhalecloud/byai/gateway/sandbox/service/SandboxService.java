@@ -62,17 +62,19 @@ public class SandboxService {
 
     private static final String RELEASE_REASON_MANUAL = "manual-release";
 
+    private static final String RELEASE_REASON_REMOTE_SANDBOX_EXIT = RELEASE_REASON_IDLE_TIMEOUT;
+
     /** 集成类型：沙箱 */
     private static final String INTEGRATION_TYPE_SANDBOX = "FROM_SANDBOX";
 
     /** 来源系统：沙箱 */
     private static final String SYS_CODE = "SANDBOX";
 
-    /** OpenSandbox 自动过期。 */
+    /** 自动释放：超出闲置时间后由 cleanup 释放。 */
     private static final Integer AUTO_RELEASE_REMOTE = 1;
 
-    /** OpenSandbox 不自动过期，由 ByClaw 本地空闲释放。 */
-    private static final Integer AUTO_RELEASE_LOCAL = 0;
+    /** 手动释放：持续续约，只能由用户或管理员显式释放。 */
+    private static final Integer AUTO_RELEASE_MANUAL = 0;
 
     @Lazy
     @Autowired
@@ -115,6 +117,9 @@ public class SandboxService {
     /** 等待 Gateway worker 注册完成的轮询间隔（毫秒） */
     private static final long WORKER_READY_POLL_INTERVAL_MS = 100L;
 
+    /** Lifecycle jobs scan all candidates in fixed internal pages. */
+    private static final int LIFECYCLE_SCAN_PAGE_SIZE = 100;
+
     /** 沙箱空闲超时时间（分钟） */
     @Value("${sandbox.idle.timeout.minutes:30}")
     private int idleTimeoutMinutes;
@@ -128,12 +133,6 @@ public class SandboxService {
 
     @Value("${byclaw.sandbox.renew-ahead-seconds:120}")
     private long renewAheadSeconds;
-
-    @Value("${byclaw.sandbox.renew-batch-size:100}")
-    private int renewBatchSize;
-
-    @Value("${byclaw.sandbox.reconcile-batch-size:100}")
-    private int reconcileBatchSize;
 
     @Lazy
     @Autowired
@@ -164,6 +163,50 @@ public class SandboxService {
     }
 
     /**
+     * 远端沙箱退出后的重拉流程。
+     * <p>调用方已确认当前 worker 不可用时使用：先终结旧活跃记录，释放 DB 唯一键，再重新走标准启动流程。</p>
+     */
+    public SandboxLaunchData restartSandboxAfterRemoteExit(String userCode, Long resourceId, String targetAgentType) {
+        SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId);
+        String lockKey = buildLaunchLockKey(userCode, routing);
+        String lockValue = UUID.randomUUID().toString();
+        boolean locked = false;
+
+        try {
+            locked = RedisUtil.lock(lockKey, lockValue, SANDBOX_LAUNCH_LOCK_EXPIRE_SECONDS);
+            if (!locked) {
+                LOGGER.warn("获取沙箱重拉锁失败，用户编码：{}，沙箱类型：{}，资源ID：{}，可能并发创建中",
+                    userCode, routing.getSandboxType(), routing.getEffectiveResourceId());
+                throw new BdpRuntimeException(I18nUtil.get("sandbox.launch.busy"));
+            }
+
+            SsSandboxRecord existingRecord = sandboxRecordMapper.selectActiveByUserAndResource(userCode,
+                routing.getSandboxType(), routing.getEffectiveResourceId());
+            if (existingRecord != null) {
+                int marked = sandboxRecordMapper.markReleased(existingRecord.getId(),
+                    RELEASE_REASON_REMOTE_SANDBOX_EXIT, new Date());
+                if (marked > 0) {
+                    sandboxMetadataCache.evict(existingRecord.getUserCode(), existingRecord.getSandboxType());
+                    LOGGER.warn("远端沙箱退出，已终结旧沙箱记录，记录ID：{}，用户编码：{}，沙箱类型：{}，资源ID：{}，sandboxId：{}",
+                        existingRecord.getId(), existingRecord.getUserCode(), existingRecord.getSandboxType(),
+                        existingRecord.getResourceId(), existingRecord.getSandboxId());
+                }
+            }
+
+            SandboxLaunchData launchData = doLaunchSandbox(userCode, resourceId, routing);
+            if (launchData != null && StringUtils.isNotBlank(targetAgentType)) {
+                waitWorkerReadySync(targetAgentType);
+            }
+            return launchData;
+        }
+        finally {
+            if (locked) {
+                RedisUtil.releaseLock(lockKey, lockValue);
+            }
+        }
+    }
+
+    /**
      * 启动沙箱（内部实现），支持沙箱类型覆盖。
      *
      * @param userCode            用户编码
@@ -172,8 +215,7 @@ public class SandboxService {
      * @return 沙箱启动响应数据
      */
     private SandboxLaunchData launchSandboxInternal(String userCode, Long resourceId, SandboxLaunchRouting routing) {
-        String lockKey = SANDBOX_LAUNCH_LOCK_PREFIX + userCode + ":" + routing.getSandboxType() + ":"
-            + routing.getEffectiveResourceId();
+        String lockKey = buildLaunchLockKey(userCode, routing);
         String lockValue = UUID.randomUUID().toString();
         boolean locked = false;
 
@@ -206,6 +248,11 @@ public class SandboxService {
                 RedisUtil.releaseLock(lockKey, lockValue);
             }
         }
+    }
+
+    private String buildLaunchLockKey(String userCode, SandboxLaunchRouting routing) {
+        return SANDBOX_LAUNCH_LOCK_PREFIX + userCode + ":" + routing.getSandboxType() + ":"
+            + routing.getEffectiveResourceId();
     }
 
     /**
@@ -339,8 +386,8 @@ public class SandboxService {
         // request.setChatId(String.valueOf(System.currentTimeMillis()));
         request.setSandboxType(launchContext.getSandboxType());
         SandboxLeasePolicy leasePolicy = resolveDefaultLeasePolicy();
-        request.setAutoRelease(leasePolicy == SandboxLeasePolicy.REMOTE_AUTO_EXPIRE
-            ? AUTO_RELEASE_REMOTE : AUTO_RELEASE_LOCAL);
+        Integer autoRelease = leasePolicy == SandboxLeasePolicy.REMOTE_AUTO_EXPIRE
+            ? AUTO_RELEASE_REMOTE : AUTO_RELEASE_MANUAL;
         request.setEnvs(launchContext.getEnvs());
         request.setUserInfo(launchContext.getUserInfo());
 
@@ -350,7 +397,7 @@ public class SandboxService {
         record.setUserCode(userCode);
         record.setSandboxType(launchContext.getSandboxType());
         record.setStatus(STATUS_STARTING);
-        record.setAutoRelease(request.getAutoRelease());
+        record.setAutoRelease(autoRelease);
         record.setLeasePolicy(leasePolicy.name());
         record.setLastAccessTime(now);
         record.setCreateTime(now);
@@ -716,24 +763,39 @@ public class SandboxService {
      * @return 清理的沙箱数量
      */
     public int cleanupExpiredSandboxes() {
-        List<SsSandboxRecord> expiredRecords = sandboxRecordMapper.selectExpiredSandboxes(idleTimeoutMinutes);
-        if (expiredRecords == null || expiredRecords.isEmpty()) {
+        int total = sandboxRecordMapper.countExpiredSandboxes(idleTimeoutMinutes);
+        if (total <= 0) {
             return 0;
         }
 
         int cleanedCount = 0;
-        for (SsSandboxRecord record : expiredRecords) {
-            try {
-                doRemoveSandbox(record, RELEASE_REASON_IDLE_TIMEOUT);
-                cleanedCount++;
+        int scannedCount = 0;
+        Date cursorTime = null;
+        Long cursorId = null;
+        while (scannedCount < total) {
+            List<SsSandboxRecord> records = sandboxRecordMapper.selectExpiredSandboxesPage(idleTimeoutMinutes,
+                cursorTime, cursorId, Math.min(LIFECYCLE_SCAN_PAGE_SIZE, total - scannedCount));
+            if (records == null || records.isEmpty()) {
+                break;
             }
-            catch (Exception e) {
-                LOGGER.error("清理超时沙箱失败，沙箱记录ID：{}，用户编码：{}，资源ID：{}", record.getId(), record.getUserCode(),
-                    record.getResourceId(), e);
+            SsSandboxRecord last = records.get(records.size() - 1);
+            cursorTime = last.getLastAccessTime();
+            cursorId = last.getId();
+            scannedCount += records.size();
+
+            for (SsSandboxRecord record : records) {
+                try {
+                    doRemoveSandbox(record, RELEASE_REASON_IDLE_TIMEOUT);
+                    cleanedCount++;
+                }
+                catch (Exception e) {
+                    LOGGER.error("清理超时沙箱失败，沙箱记录ID：{}，用户编码：{}，资源ID：{}", record.getId(),
+                        record.getUserCode(), record.getResourceId(), e);
+                }
             }
         }
 
-        LOGGER.info("清理超时沙箱完成，共清理 {} 个沙箱", cleanedCount);
+        LOGGER.info("清理超时沙箱完成，候选 {} 个，扫描 {} 个，清理 {} 个沙箱", total, scannedCount, cleanedCount);
         return cleanedCount;
     }
 
@@ -744,41 +806,56 @@ public class SandboxService {
      */
     public int renewDueSandboxes() {
         Date now = new Date();
-        List<SsSandboxRecord> dueRecords = sandboxRecordMapper.selectDueRenewSandboxes(now,
-            Math.max(1, renewBatchSize));
-        if (dueRecords == null || dueRecords.isEmpty()) {
+        int total = sandboxRecordMapper.countDueRenewSandboxes(now);
+        if (total <= 0) {
             return 0;
         }
 
         int renewedCount = 0;
+        int scannedCount = 0;
+        Date cursorTime = null;
+        Long cursorId = null;
         long idleTimeoutMillis = TimeUnit.MINUTES.toMillis(idleTimeoutMinutes);
-        for (SsSandboxRecord record : dueRecords) {
-            if (record.getLastAccessTime() == null
-                || now.getTime() - record.getLastAccessTime().getTime() > idleTimeoutMillis) {
-                LOGGER.info("沙箱已空闲，跳过远端续约，等待释放策略处理，记录ID：{}，用户编码：{}",
-                    record.getId(), record.getUserCode());
-                continue;
+        while (scannedCount < total) {
+            List<SsSandboxRecord> records = sandboxRecordMapper.selectDueRenewSandboxesPage(now,
+                cursorTime, cursorId, Math.min(LIFECYCLE_SCAN_PAGE_SIZE, total - scannedCount));
+            if (records == null || records.isEmpty()) {
+                break;
             }
-            try {
-                Date remoteExpiresAt = new Date(now.getTime() + TimeUnit.SECONDS.toMillis(record.getTimeoutSeconds()));
-                SandboxInfo info = toSandboxInfo(record);
-                info.setLastHeartbeatTime(java.time.LocalDateTime.now());
-                SandboxResponse<Void> response = sandboxLifecycleFacade.renewSandbox(info);
-                if (response == null || !response.isSuccess()) {
-                    LOGGER.warn("沙箱远端续约失败，记录ID：{}，原因：{}", record.getId(),
-                        response != null ? response.getMessage() : "响应为空");
+            SsSandboxRecord last = records.get(records.size() - 1);
+            cursorTime = last.getNextRenewAt();
+            cursorId = last.getId();
+            scannedCount += records.size();
+
+            for (SsSandboxRecord record : records) {
+                if (AUTO_RELEASE_REMOTE.equals(record.getAutoRelease())
+                    && (record.getLastAccessTime() == null
+                    || now.getTime() - record.getLastAccessTime().getTime() > idleTimeoutMillis)) {
+                    LOGGER.info("沙箱已空闲，跳过远端续约，等待释放策略处理，记录ID：{}，用户编码：{}",
+                        record.getId(), record.getUserCode());
                     continue;
                 }
-                Date nextRenewAt = computeNextRenewAt(remoteExpiresAt);
-                sandboxRecordMapper.updateRenewSuccess(record.getId(), remoteExpiresAt, now, nextRenewAt);
-                record.setRemoteExpiresAt(remoteExpiresAt);
-                record.setLastRenewAt(now);
-                record.setNextRenewAt(nextRenewAt);
-                sandboxMetadataCache.put(toSandboxInfo(record));
-                renewedCount++;
-            }
-            catch (Exception e) {
-                LOGGER.error("沙箱远端续约异常，记录ID：{}，用户编码：{}", record.getId(), record.getUserCode(), e);
+                try {
+                    Date remoteExpiresAt = new Date(now.getTime() + TimeUnit.SECONDS.toMillis(record.getTimeoutSeconds()));
+                    SandboxInfo info = toSandboxInfo(record);
+                    info.setLastHeartbeatTime(java.time.LocalDateTime.now());
+                    SandboxResponse<Void> response = sandboxLifecycleFacade.renewSandbox(info);
+                    if (response == null || !response.isSuccess()) {
+                        LOGGER.warn("沙箱远端续约失败，记录ID：{}，原因：{}", record.getId(),
+                            response != null ? response.getMessage() : "响应为空");
+                        continue;
+                    }
+                    Date nextRenewAt = computeNextRenewAt(remoteExpiresAt);
+                    sandboxRecordMapper.updateRenewSuccess(record.getId(), remoteExpiresAt, now, nextRenewAt);
+                    record.setRemoteExpiresAt(remoteExpiresAt);
+                    record.setLastRenewAt(now);
+                    record.setNextRenewAt(nextRenewAt);
+                    sandboxMetadataCache.put(toSandboxInfo(record));
+                    renewedCount++;
+                }
+                catch (Exception e) {
+                    LOGGER.error("沙箱远端续约异常，记录ID：{}，用户编码：{}", record.getId(), record.getUserCode(), e);
+                }
             }
         }
         return renewedCount;
@@ -792,40 +869,55 @@ public class SandboxService {
      * @return restarted sandbox count
      */
     public int reconcileSandboxes() {
-        List<SsSandboxRecord> records = sandboxRecordMapper.selectReconcileSandboxes(Math.max(1, reconcileBatchSize));
-        if (records == null || records.isEmpty()) {
+        int total = sandboxRecordMapper.countReconcileSandboxes();
+        if (total <= 0) {
             return 0;
         }
 
         int restartedCount = 0;
-        for (SsSandboxRecord record : records) {
-            try {
-                SandboxResponse<Boolean> response = sandboxLifecycleFacade.sandboxExists(toSandboxInfo(record));
-                if (response == null || !response.isSuccess()) {
-                    LOGGER.warn("沙箱一致性检测失败，保留当前状态，记录ID：{}，sandboxId：{}，原因：{}",
-                        record.getId(), record.getSandboxId(), response != null ? response.getMessage() : "响应为空");
-                    continue;
-                }
-                if (Boolean.TRUE.equals(response.getData())) {
-                    sandboxMetadataCache.put(toSandboxInfo(record));
-                    continue;
-                }
-
-                LOGGER.warn("沙箱一致性检测发现远端沙箱不存在，准备重新拉起，记录ID：{}，用户编码：{}，沙箱类型：{}，资源ID：{}，sandboxId：{}",
-                    record.getId(), record.getUserCode(), record.getSandboxType(), record.getResourceId(), record.getSandboxId());
-                int marked = sandboxRecordMapper.markReleased(record.getId(), "reconcile-missing-runtime", new Date());
-                if (marked == 0) {
-                    LOGGER.warn("沙箱一致性检测跳过重拉，记录状态已变化，记录ID：{}", record.getId());
-                    continue;
-                }
-                sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
-                SandboxLaunchData launchData = launchSandbox(record.getUserCode(), record.getResourceId());
-                if (launchData != null && StringUtils.isNotBlank(launchData.getEndpoint())) {
-                    restartedCount++;
-                }
+        int scannedCount = 0;
+        Date cursorTime = null;
+        Long cursorId = null;
+        while (scannedCount < total) {
+            List<SsSandboxRecord> records = sandboxRecordMapper.selectReconcileSandboxesPage(cursorTime, cursorId,
+                Math.min(LIFECYCLE_SCAN_PAGE_SIZE, total - scannedCount));
+            if (records == null || records.isEmpty()) {
+                break;
             }
-            catch (Exception e) {
-                LOGGER.error("沙箱一致性检测异常，记录ID：{}，sandboxId：{}", record.getId(), record.getSandboxId(), e);
+            SsSandboxRecord last = records.get(records.size() - 1);
+            cursorTime = last.getUpdateTime();
+            cursorId = last.getId();
+            scannedCount += records.size();
+
+            for (SsSandboxRecord record : records) {
+                try {
+                    SandboxResponse<Boolean> response = sandboxLifecycleFacade.sandboxExists(toSandboxInfo(record));
+                    if (response == null || !response.isSuccess()) {
+                        LOGGER.warn("沙箱一致性检测失败，保留当前状态，记录ID：{}，sandboxId：{}，原因：{}",
+                            record.getId(), record.getSandboxId(), response != null ? response.getMessage() : "响应为空");
+                        continue;
+                    }
+                    if (Boolean.TRUE.equals(response.getData())) {
+                        sandboxMetadataCache.put(toSandboxInfo(record));
+                        continue;
+                    }
+
+                    LOGGER.warn("沙箱一致性检测发现远端沙箱不存在，准备重新拉起，记录ID：{}，用户编码：{}，沙箱类型：{}，资源ID：{}，sandboxId：{}",
+                        record.getId(), record.getUserCode(), record.getSandboxType(), record.getResourceId(), record.getSandboxId());
+                    int marked = sandboxRecordMapper.markReleased(record.getId(), RELEASE_REASON_REMOTE_SANDBOX_EXIT, new Date());
+                    if (marked == 0) {
+                        LOGGER.warn("沙箱一致性检测跳过重拉，记录状态已变化，记录ID：{}", record.getId());
+                        continue;
+                    }
+                    sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
+                    SandboxLaunchData launchData = launchSandbox(record.getUserCode(), record.getResourceId());
+                    if (launchData != null && StringUtils.isNotBlank(launchData.getEndpoint())) {
+                        restartedCount++;
+                    }
+                }
+                catch (Exception e) {
+                    LOGGER.error("沙箱一致性检测异常，记录ID：{}，sandboxId：{}", record.getId(), record.getSandboxId(), e);
+                }
             }
         }
         return restartedCount;
@@ -858,7 +950,7 @@ public class SandboxService {
             LOGGER.error("远程释放沙箱失败，沙箱记录ID：{}，用户编码：{}", record.getId(), record.getUserCode(), e);
         }
         // 无论远程调用是否成功，都更新本地记录状态
-        sandboxRecordMapper.updateStatusToReleased(record.getId());
+        sandboxRecordMapper.updateStatusToReleased(record.getId(), releaseReason, new Date());
         sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
         LOGGER.info("沙箱释放完成，记录ID：{}", record.getId());
     }
@@ -891,6 +983,7 @@ public class SandboxService {
             .sandboxType(record.getSandboxType())
             .endpoints(endpoints)
             .timeoutSeconds(record.getTimeoutSeconds())
+            .remoteExpiresAt(record.getRemoteExpiresAt())
             .createdTime(toLocalDateTime(record.getCreateTime()))
             .lastHeartbeatTime(toLocalDateTime(record.getLastAccessTime()))
             .build();

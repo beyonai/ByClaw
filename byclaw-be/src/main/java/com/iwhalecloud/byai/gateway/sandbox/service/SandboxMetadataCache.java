@@ -25,7 +25,6 @@ public class SandboxMetadataCache {
     private static final Logger log = LoggerFactory.getLogger(SandboxMetadataCache.class);
     private static final String REDIS_KEY_PREFIX = "byai:worker:sandbox:";
     private static final String REDIS_USER_INDEX_PREFIX = "byai:worker:sandbox:user-index:";
-    private static final long TTL_MULTIPLIER = 2L;
 
     private final StringRedisTemplate redisTemplate;
     private final SandboxProperties properties;
@@ -44,7 +43,7 @@ public class SandboxMetadataCache {
             return;
         }
         try {
-            long ttlSeconds = Math.max(60L, properties.getHeartbeatTimeout().toSeconds() * TTL_MULTIPLIER);
+            long ttlSeconds = Math.max(60L, properties.getMetadataCacheTtl().toSeconds());
             String redisKey = buildRedisKey(info.getUserCode(), info.getSandboxType());
             String userIndexKey = buildUserIndexKey(info.getUserCode());
             redisTemplate.opsForValue().set(redisKey, objectMapper.writeValueAsString(info), ttlSeconds, TimeUnit.SECONDS);
