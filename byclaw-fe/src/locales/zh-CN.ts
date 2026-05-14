@@ -98,10 +98,12 @@ export default {
   'resource.personalDefaultAssistant': '默认个人助理',
   'resource.personalDefaultKnowledgeDoc': '默认知识库',
   'resource.personalAssistant': '个人助理',
+  'resource.superAssistant': '超级助手',
+  'resource.currentDefaultAssistant': '默认',
   'resource.setDefaultAssistant': '设为默认',
   'resource.setDefaultAssistantSuccess': '设为默认助理成功',
   'resource.setDefaultAssistantConfirm':
-    '确认将该数字员工设为默认个人助理吗？设置成功后其他默认个人助理将变为普通个人助理！',
+    '确认将该数字员工设为默认助理吗？设置后，对话框未@任何数字员工时会默认使用它。',
   'resource.createdByMe': '我创建的',
   'resource.authorizedToMe': '授权给我的',
   'resource.pendingMyApproval': '待我审核的',

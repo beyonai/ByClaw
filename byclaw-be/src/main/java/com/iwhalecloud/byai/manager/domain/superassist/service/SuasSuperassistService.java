@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.superassist.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.mapper.superassist.SuasSuperassistMapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -7,7 +8,9 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.Collections;
 import java.util.Date;
+import java.util.List;
 
 /**
  * @author he.duming
@@ -41,6 +44,22 @@ public class SuasSuperassistService {
      */
     public SuasSuperassist findByUserId(Long userId) {
         return suasSuperassistMapper.selectById(userId);
+    }
+
+    /**
+     * 查询所有把指定数字员工资源设为默认助理的超级助手记录。
+     * 用于在数字员工注销/删除时，找出受影响的用户，回退他们的默认助理设置。
+     *
+     * @param defaultDigEmployeeId 数字员工资源ID
+     * @return 受影响的 SuasSuperassist 列表（可能为空）
+     */
+    public List<SuasSuperassist> findByDefaultDigEmployeeId(Long defaultDigEmployeeId) {
+        if (defaultDigEmployeeId == null) {
+            return Collections.emptyList();
+        }
+        LambdaQueryWrapper<SuasSuperassist> qw = new LambdaQueryWrapper<>();
+        qw.eq(SuasSuperassist::getDefaultDigEmployeeId, defaultDigEmployeeId);
+        return suasSuperassistMapper.selectList(qw);
     }
 
     /**

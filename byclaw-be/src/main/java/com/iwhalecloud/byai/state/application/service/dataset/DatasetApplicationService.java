@@ -32,6 +32,7 @@ import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceRuntimeInfoResolver;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceTargetJsonBuilder;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDocService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceArtifactService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
@@ -100,6 +101,9 @@ public class DatasetApplicationService {
 
     @Autowired
     private ResourceArtifactStorageService resourceArtifactStorageService;
+
+    @Autowired
+    private SsResourceArtifactService ssResourceArtifactService;
 
     @Autowired
     private ResourceArtifactPathResolver resourceArtifactPathResolver;
@@ -331,6 +335,7 @@ public class DatasetApplicationService {
         String scene) {
         try {
             resourceArtifactStorageService.syncResourceJsonByBizType(targetContent, resourceBizType, resourceId);
+            ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, resourceBizType, scene);
             logImportedDatasetArtifactLocation(resourceBizType, resourceId);
         }
         catch (Exception e) {
@@ -804,6 +809,8 @@ public class DatasetApplicationService {
         // 导入成功后，把最终 target_content JSON 同步到开放资源目录。
         resourceArtifactStorageService.syncResourceJsonByBizType(extDoc.getTargetContent(),
             datasetImportDto.getResourceBizType(), myResource.getResourceId());
+        ssResourceArtifactService.upsertStandardJsonArtifact(myResource.getResourceId(),
+            datasetImportDto.getResourceBizType(), "dataset-import-create");
         logImportedDatasetArtifactLocation(datasetImportDto.getResourceBizType(), myResource.getResourceId());
 
         // 第三方资源注册，给下游openclaw调用
@@ -838,6 +845,8 @@ public class DatasetApplicationService {
         SsResExtDoc extDoc = saveOrUpdateExtDoc(dto, rawJson, resourceId);
         resourceArtifactStorageService.syncResourceJsonByBizType(extDoc.getTargetContent(), dto.getResourceBizType(),
             resourceId);
+        ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, dto.getResourceBizType(),
+            "dataset-import-update");
         logImportedDatasetArtifactLocation(dto.getResourceBizType(), resourceId);
 
         logger.info("知识库JSON导入完成，准备重注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}",

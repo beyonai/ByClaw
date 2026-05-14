@@ -129,6 +129,35 @@ class AuthApplicationServiceTest {
     }
 
     /**
+     * 默认超级助手即使是当前用户绑定的默认助理，也不允许编辑，避免登录初始化的底座资源被改坏。
+     */
+    @Test
+    void queryResourceOperationPermissions_rejectsDefaultSuperAssistantEditAction() {
+        AuthApplicationService service = new AuthApplicationService();
+        SsResourceService ssResourceService = mock(SsResourceService.class);
+        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserId(2L);
+        loginInfo.setDefaultDigEmployeeId(205L);
+        CurrentUserHolder.setLoginInfo(loginInfo);
+
+        SsResource defaultSuperAssistant = new SsResource();
+        defaultSuperAssistant.setResourceId(205L);
+        defaultSuperAssistant.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        defaultSuperAssistant.setOwnerType(OwnerType.PERSONAL_DEFAULT);
+        defaultSuperAssistant.setResourceCode("user001_main");
+        defaultSuperAssistant.setCreateBy(2L);
+        defaultSuperAssistant.setPublishPortal(1);
+        when(ssResourceService.findById(205L)).thenReturn(defaultSuperAssistant);
+
+        ResourceOperationPermissionsVo vo = service.queryResourceOperationPermissions(205L);
+
+        assertThat(vo.getCanEdit()).isFalse();
+        assertThat(vo.getCanDelete()).isFalse();
+    }
+
+    /**
      * 个人 tab 下知识/工具/对象/视图只允许有管理权限的人主动授权，不开放使用申请和申请审核。
      */
     @Test

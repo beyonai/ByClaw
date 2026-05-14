@@ -119,4 +119,5 @@ export type IAgentCache = IAgent & {
   canApplyUse?: boolean;
   canAuditUse?: boolean;
   canSetDefault?: boolean;
+  isDefault?: boolean;
 };

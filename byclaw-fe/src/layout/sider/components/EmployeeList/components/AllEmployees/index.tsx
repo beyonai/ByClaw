@@ -158,8 +158,16 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
       pinList?: string[];
       unpinList?: string[];
       updateList?: Partial<IAgentCache>[];
+      defaultResourceId?: string | number;
     }) => {
-      const { delIdList = [], unApplyList = [], pinList = [], unpinList = [], updateList = [] } = param || {};
+      const {
+        delIdList = [],
+        unApplyList = [],
+        pinList = [],
+        unpinList = [],
+        updateList = [],
+        defaultResourceId,
+      } = param || {};
 
       setEmployeesList((prevList) => {
         // 处理删除和取消关注
@@ -211,6 +219,11 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
           });
         }
 
+        if (defaultResourceId !== undefined && defaultResourceId !== null) {
+          getSearch(searchName);
+          return prevList;
+        }
+
         return [...prevList];
       });
     };
@@ -218,7 +231,7 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
     return () => {
       EventEmitter.off('beyond-update-employee', handler);
     };
-  }, [EventEmitter]);
+  }, [EventEmitter, getSearch, searchName]);
 
   useImperativeHandle(
     ref,
