@@ -807,10 +807,10 @@ const ConfigForm = (props) => {
       roleObj.roleAttributes = current.roleAttributes || current.workStandard || '';
 
       // 将所有配置存成 JSON 放到 corePersonaDefinition 字段（数组格式）
-      const corePersonaDefinition: Array<{ name: string; key: string; value: string }> = [];
+      const corePersonaDefinition: Array<{ name: string; nameEn?: string; key: string; value: string }> = [];
 
       // 获取所有 prompt 字段的名称映射（从模板数据中获取）
-      const fieldNameMap: Record<string, { name: string; key: string }> = {};
+      const fieldNameMap: Record<string, { name: string; nameEn?: string; key: string }> = {};
 
       // 尝试从模板数据中获取字段映射
       if (templateData && Array.isArray(templateData)) {
@@ -818,6 +818,7 @@ const ConfigForm = (props) => {
           if (item.paramEnName && item.paramName) {
             fieldNameMap[item.paramEnName] = {
               name: item.paramName,
+              nameEn: item.paramEnName,
               key: item.paramEnName,
             };
           }
@@ -825,13 +826,16 @@ const ConfigForm = (props) => {
       }
 
       // 从现有的 corePersonaDefinition 中获取 name 信息（用于编辑时保持原有值）
-      const existingNameMap: Record<string, string> = {};
+      const existingMetaMap: Record<string, { name?: string; nameEn?: string }> = {};
       try {
         const existingData = JSON.parse(current.corePersonaDefinition || '[]');
         if (Array.isArray(existingData)) {
           existingData.forEach((item: any) => {
             if (item && item.key) {
-              existingNameMap[item.key] = item.name || item.key;
+              existingMetaMap[item.key] = {
+                name: item.name,
+                nameEn: item.nameEn,
+              };
             }
           });
         }
@@ -842,17 +846,20 @@ const ConfigForm = (props) => {
       // 遍历所有 tab，将值存入 corePersonaDefinition
       allTabs.forEach((tab) => {
         const fieldValue = current[tab.key];
-        if (fieldValue) {
-          const fieldInfo = fieldNameMap[tab.key];
-          const key = fieldInfo?.key || tab.key;
-          const name = existingNameMap[key] || fieldInfo?.name || tab.name || tab.key;
+        const fieldInfo = fieldNameMap[tab.key];
+        const key = fieldInfo?.key || tab.key;
+        const existingMeta = existingMetaMap[key] || {};
+        const item: { name: string; nameEn?: string; key: string; value: string } = {
+          name: existingMeta.name || fieldInfo?.name || tab.name || tab.key,
+          key,
+          value: fieldValue || '',
+        };
 
-          corePersonaDefinition.push({
-            name,
-            key,
-            value: fieldValue,
-          });
+        if (existingMeta.nameEn || fieldInfo?.nameEn) {
+          item.nameEn = existingMeta.nameEn || fieldInfo?.nameEn;
         }
+
+        corePersonaDefinition.push(item);
       });
 
       const corePersonaDefinitionJson = JSON.stringify(corePersonaDefinition);

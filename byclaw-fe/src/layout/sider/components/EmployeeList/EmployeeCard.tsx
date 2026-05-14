@@ -67,6 +67,7 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
       });
     }
 
+    // 置顶
     if (`${item.isTop}` === '0' && !disabledAction.includes('pin')) {
       items.push({
         key: 'pin',
@@ -79,6 +80,7 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
       });
     }
 
+    // 取消置顶
     if (`${item.isTop}` === '1' && !disabledAction.includes('unpin')) {
       items.push({
         key: 'unpin',

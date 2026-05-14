@@ -60,6 +60,8 @@ const ResourceTabs: React.FC<Props> = ({
   const [currentPath, setCurrentPath] = useState('');
   const [pathHistory, setPathHistory] = useState<string[]>([]);
   const [downloadingFile, setDownloadingFile] = useState<string | null>(null);
+  const downloadTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const downloadLockRef = useRef(false);
 
   const { layoutMode, agentInfo } = useGlobal();
 
@@ -156,6 +158,42 @@ const ResourceTabs: React.FC<Props> = ({
     }
   }, [pathHistory, fetchFileList]);
 
+  const handleDownloadFile = useCallback(
+    (filePath: string, fileName: string) => {
+      if (downloadLockRef.current || downloadingFile === filePath) {
+        return;
+      }
+
+      downloadLockRef.current = true;
+      setDownloadingFile(filePath);
+
+      if (downloadTimerRef.current) {
+        clearTimeout(downloadTimerRef.current);
+      }
+
+      downloadTimerRef.current = setTimeout(async () => {
+        try {
+          const response = await previewFile(filePath);
+          const url = window.URL.createObjectURL(new Blob([response.file]));
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = fileName;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(url);
+        } catch (error) {
+          console.error('文件下载失败:', error);
+        } finally {
+          downloadLockRef.current = false;
+          setDownloadingFile(null);
+          downloadTimerRef.current = null;
+        }
+      }, 200);
+    },
+    [downloadingFile]
+  );
+
   useEffect(() => {
     if (activeTab === 'file') {
       fetchFileList(currentPath);
@@ -189,6 +227,14 @@ const ResourceTabs: React.FC<Props> = ({
       }
     };
   }, [searchValue, queryKeyword]);
+
+  useEffect(() => {
+    return () => {
+      if (downloadTimerRef.current) {
+        clearTimeout(downloadTimerRef.current);
+      }
+    };
+  }, []);
 
   const fetchSharedResources = useCallback(
     async (keywordValue: string, force = false) => {
@@ -417,24 +463,10 @@ const ResourceTabs: React.FC<Props> = ({
                       size="small"
                       className={styles.downloadBtn}
                       loading={downloadingFile === file.filePath}
-                      onClick={async (e) => {
+                      disabled={!!downloadingFile}
+                      onClick={(e) => {
                         e.stopPropagation();
-                        setDownloadingFile(file.filePath);
-                        try {
-                          const response = await previewFile(file.filePath);
-                          const url = window.URL.createObjectURL(new Blob([response.file]));
-                          const link = document.createElement('a');
-                          link.href = url;
-                          link.download = file.name;
-                          document.body.appendChild(link);
-                          link.click();
-                          document.body.removeChild(link);
-                          window.URL.revokeObjectURL(url);
-                        } catch (error) {
-                          console.error('文件下载失败:', error);
-                        } finally {
-                          setDownloadingFile(null);
-                        }
+                        handleDownloadFile(file.filePath, file.name);
                       }}
                     >
                       下载
@@ -466,8 +498,10 @@ const ResourceTabs: React.FC<Props> = ({
     fileList,
     fileLoading,
     pathHistory,
+    downloadingFile,
     handleBackClick,
     handleFolderClick,
+    handleDownloadFile,
   ]);
 
   const visibleTabs = useMemo(() => {
