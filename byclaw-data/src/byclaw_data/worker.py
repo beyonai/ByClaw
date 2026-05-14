@@ -1236,14 +1236,14 @@ class DataCloudWorker(GatewayWorker):
 
         resume_cache_key: str | None = None
         if isinstance(command, ResumeCommand) or _paradigm_resume_value is not None:
-            if isinstance(command, ResumeCommand):
+            if _paradigm_resume_value is not None:
+                resume_value_probe = _paradigm_resume_value
+            elif isinstance(command, ResumeCommand):
                 resume_value_probe = (
                     command.reply_data
                     if command.reply_data is not None
                     else command.content
                 )
-            else:
-                resume_value_probe = _paradigm_resume_value
             # paradigm resume：checkpoint_id 在 humanInput.metadata 而非请求头，需合并后解析
             _probe_metadata = (
                 {**_paradigm_human_input_metadata, **header_metadata}
@@ -1651,7 +1651,10 @@ class DataCloudWorker(GatewayWorker):
         }
         context._langgraph_thread_id = thread_id
 
-        if isinstance(command, ResumeCommand):
+        if _paradigm_resume_value is not None:
+            # AskAgentCommand 携带 paradigm 回复：转为图恢复，不重新执行
+            graph_input = Command(resume=_paradigm_resume_value)
+        elif isinstance(command, ResumeCommand):
             try:
                 resume_payload_json = json.dumps(
                     command.to_dict(),
