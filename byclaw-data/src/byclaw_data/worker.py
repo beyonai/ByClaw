@@ -1209,27 +1209,26 @@ class DataCloudWorker(GatewayWorker):
 
         # --- paradigm resume 检测（提前到 resume cache 之前）---
         # 前端通过 AskAgentCommand.ext_params.humanInput.paradigmList 回传 paradigm 选择结果，
-        # 但后端图已 interrupt 等待 resume。将其转换为 Command(resume=...)，
-        # 并复用 ResumeCommand 的幂等去重、inflight dedup 与 checkpoint 注入路径。
+        # 也可能通过 ResumeCommand.ext_params.humanInput.paradigmList 回传（静态路径）。
+        # 将其转换为 Command(resume=...)，并复用幂等去重、inflight dedup 与 checkpoint 注入路径。
         _paradigm_resume_value: Any = None
         _paradigm_human_input_metadata: dict[str, Any] = {}
-        if isinstance(command, AskAgentCommand) and isinstance(ext_params, dict):
+        _check_human_input = isinstance(ext_params, dict)
+        if _check_human_input and (isinstance(command, AskAgentCommand) or isinstance(command, ResumeCommand)):
             _human_input = ext_params.get("humanInput")
             if isinstance(_human_input, dict) and isinstance(
                 _human_input.get("paradigmList"), list
             ):
                 _paradigm_resume_value = _human_input
-                # humanInput.metadata 由前端从 SSE 事件 metadata 中透传，
-                # 包含 checkpoint_id / checkpoint_ns / thread_id，
-                # 供 _resolve_resume_checkpoint_target 使用。
                 _paradigm_human_input_metadata = (
                     _human_input.get("metadata")
                     if isinstance(_human_input.get("metadata"), dict)
                     else {}
                 )
                 logger.info(
-                    "AskAgentCommand carries paradigm reply, converting to graph resume: "
+                    "%s carries paradigm reply via humanInput, converting to graph resume: "
                     "session=%s paradigmList_len=%d checkpoint_id=%s",
+                    type(command).__name__,
                     context.session_id,
                     len(_human_input["paradigmList"]),
                     _paradigm_human_input_metadata.get("checkpoint_id", ""),
