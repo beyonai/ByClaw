@@ -7,6 +7,7 @@
         <result column="resource_name" property="name" />
         <result column="resource_desc" property="resourceDesc" />
         <result column="resource_code" property="resourceCode" />
+        <result column="owner_type" property="ownerType" />
         <result column="agent_type" property="agentType" />
         <result column="agent_home_url" property="agentHomeUrl" />
         <result column="avatar" property="avatar" />
@@ -108,6 +109,7 @@
                a.resource_name,
                a.resource_code,
                a.resource_desc,
+               a.owner_type,
                a.avatar,
                a.create_by,
                b.agent_type,
@@ -124,6 +126,7 @@
                case
                    when COALESCE(k.force_use_count, 0) &gt; 0 then 'FORCE_USE'
                    when COALESCE(k.available_use_count, 0) &gt; 0 then 'AVAILABLE_USE'
+                   when COALESCE(k.allow_manage_count, 0) &gt; 0 then 'ALLOW_MANAGE'
                    else null
                end as grantType,
                k.latest_grant_time
@@ -178,13 +181,19 @@
                                          and grant_type = 'AVAILABLE_USE' then 1
                                     else 0
                                 end) as available_use_count,
+                            sum(case
+                                    when grant_to_type = 'RED'
+                                         and status_cd = 'A'
+                                         and grant_type = 'ALLOW_MANAGE' then 1
+                                    else 0
+                                end) as allow_manage_count,
                             max(case
                                     when grant_to_type = 'RED'
                                          and status_cd = 'A' then create_date
                                     else null
                                 end) as latest_grant_time
                      from au_privilege_grant
-                     where grant_type in ('AVAILABLE_USE', 'FORCE_USE')
+                     where grant_type in ('AVAILABLE_USE', 'FORCE_USE', 'ALLOW_MANAGE')
                        and grant_obj_type = 'DIG_EMPLOYEE'
                        and status_cd = 'A'
                        <trim prefix="and (" suffix=")" prefixOverrides="or">

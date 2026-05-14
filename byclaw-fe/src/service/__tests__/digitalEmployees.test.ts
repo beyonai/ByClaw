@@ -166,7 +166,7 @@ describe('Digital Employees Service', () => {
 
   describe('setDefaultDigitalEmployee', () => {
     it('should call POST with correct endpoint and payload', () => {
-      const payload = { ownerType: 'personal_default', resourceId: 'agent1' };
+      const payload = { resourceId: 'agent1' };
       setDefaultDigitalEmployee(payload);
       expect(mockPOST).toHaveBeenCalledWith(
         '/byaiService/digitalEmployeeController/setDefaultDigitalEmployee',
