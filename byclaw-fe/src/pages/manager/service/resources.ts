@@ -345,13 +345,26 @@ export const listUserSpace = async (params: { prefix: string; resourceId?: strin
 };
 
 /**
+ * 文件预览响应
+ * 包含文件名和文件内容的响应对象
+ */
+export interface FilePreviewResponse {
+  fileName: string;
+  file: Blob;
+}
+
+/**
  * 预览文件
  * 通过文件路径获取文件预览内容
  * @param filePath 文件路径
- * @returns Promise 文件预览内容（Blob格式）
+ * @returns Promise<FilePreviewResponse> 文件预览响应
  */
 export const previewFile = (filePath: string) => {
-  return GET<Blob>(`/byaiService/commonFile/preview?filePath=${encodeURIComponent(filePath)}`, undefined, {
-    responseType: 'blob',
-  });
+  return GET<FilePreviewResponse>(
+    `/byaiService/commonFile/preview?filePath=${encodeURIComponent(filePath)}`,
+    undefined,
+    {
+      responseType: 'blob',
+    }
+  );
 };

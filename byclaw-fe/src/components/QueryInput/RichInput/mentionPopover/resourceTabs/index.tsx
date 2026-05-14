@@ -59,6 +59,7 @@ const ResourceTabs: React.FC<Props> = ({
   const [fileLoading, setFileLoading] = useState(false);
   const [currentPath, setCurrentPath] = useState('');
   const [pathHistory, setPathHistory] = useState<string[]>([]);
+  const [downloadingFile, setDownloadingFile] = useState<string | null>(null);
 
   const { layoutMode, agentInfo } = useGlobal();
 
@@ -411,14 +412,17 @@ const ResourceTabs: React.FC<Props> = ({
                   <span className={styles.fileIcon}>{file.dir ? '📁' : '📄'}</span>
                   <span className={styles.fileName}>{file.name}</span>
                   {!file.dir && (
-                    <button
-                      type="button"
+                    <Button
+                      type="text"
+                      size="small"
                       className={styles.downloadBtn}
+                      loading={downloadingFile === file.filePath}
                       onClick={async (e) => {
                         e.stopPropagation();
+                        setDownloadingFile(file.filePath);
                         try {
                           const response = await previewFile(file.filePath);
-                          const url = window.URL.createObjectURL(new Blob([response]));
+                          const url = window.URL.createObjectURL(new Blob([response.file]));
                           const link = document.createElement('a');
                           link.href = url;
                           link.download = file.name;
@@ -428,11 +432,13 @@ const ResourceTabs: React.FC<Props> = ({
                           window.URL.revokeObjectURL(url);
                         } catch (error) {
                           console.error('文件下载失败:', error);
+                        } finally {
+                          setDownloadingFile(null);
                         }
                       }}
                     >
                       下载
-                    </button>
+                    </Button>
                   )}
                 </div>
               ))
