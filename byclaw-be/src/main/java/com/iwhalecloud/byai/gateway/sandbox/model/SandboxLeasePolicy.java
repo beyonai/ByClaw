@@ -11,12 +11,7 @@ public enum SandboxLeasePolicy {
     REMOTE_AUTO_EXPIRE,
 
     /**
-     * OpenSandbox should not expire the sandbox automatically. ByClaw releases it after idle timeout.
-     */
-    LOCAL_IDLE_RELEASE,
-
-    /**
-     * The sandbox is only released by explicit user/admin action.
+     * The sandbox is kept alive locally and only released by explicit user/admin action.
      */
     MANUAL;
 

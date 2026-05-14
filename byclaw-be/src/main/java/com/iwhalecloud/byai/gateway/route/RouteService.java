@@ -443,9 +443,9 @@ public class RouteService {
             if (retryAttemptsAfterWorkerReady < maxRetryAttemptsAfterWorkerReady
                     && shouldRetryAfterSandboxReady(targetAgentType, userCode, response)) {
                 retryAttemptsAfterWorkerReady++;
-                log.info("Gateway SDK 消息发送失败，等待用户沙箱就绪后重试一次, sessionId: {}, userCode: {}, agentId: {}, targetAgentType: {}, errorCode: {}",
+                log.info("Gateway SDK 消息发送失败，按远端沙箱退出处理并重拉后重试一次, sessionId: {}, userCode: {}, agentId: {}, targetAgentType: {}, errorCode: {}",
                         sessionId, userCode, agentId, targetAgentType, response.getErrorCode());
-                sandboxService.ensureSandboxReady(userCode, agentId, targetAgentType);
+                sandboxService.restartSandboxAfterRemoteExit(userCode, agentId, targetAgentType);
                 continue;
             }
 

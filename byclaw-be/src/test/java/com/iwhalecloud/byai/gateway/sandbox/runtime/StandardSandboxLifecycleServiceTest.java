@@ -8,7 +8,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -54,7 +53,6 @@ class StandardSandboxLifecycleServiceTest {
         when(runtimeProvider.providerType()).thenReturn("test");
 
         SandboxProperties properties = new SandboxProperties();
-        properties.setHeartbeatTimeout(Duration.ofMinutes(5));
 
         service = new StandardSandboxLifecycleService(
             properties, redisTemplate, specRepository, specProcessor, runtimeProvider);

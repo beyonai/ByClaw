@@ -4,6 +4,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.List;
 import java.util.Objects;
@@ -38,7 +41,6 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
     private static final String REDIS_KEY_PREFIX = "byai:worker:sandbox:";
     private static final String REDIS_CREATE_LOCK_SUFFIX = ":create-lock";
     private static final String REDIS_USER_INDEX_PREFIX = "byai:worker:sandbox:user-index:";
-    private static final long SANDBOX_INFO_TTL_MULTIPLIER = 2L;
     private static final int K8S_LABEL_VALUE_MAX_LEN = 63;
 
     private final SandboxProperties properties;
@@ -74,7 +76,7 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
             data.setEndpointHeaders(info.getEndpointHeaders());
             data.setSandboxId(info.getSandboxId());
             data.setTimeoutSeconds(info.getTimeoutSeconds());
-            data.setRemoteExpiresAt(resolveRemoteExpiresAt(info));
+            data.setRemoteExpiresAt(info.getRemoteExpiresAt());
             return SandboxResponse.success(data);
         } catch (Exception e) {
             log.error("Failed to launch sandbox by provider={}, user={}, type={}: {}",
@@ -104,21 +106,22 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
         try {
             var request = specProcessor.buildCreateRequest(
                 userCode, sandboxType, launchRequest.getEnvs(), launchRequest.getUserInfo(), spec);
-            request.setTimeout(resolveTimeoutSeconds(request.getTimeout(), launchRequest.getAutoRelease()));
             String idempotencyKey = buildIdempotencyKey(userCode, sandboxType);
 
             SandboxRuntimeInstance instance = runtimeProvider.findReusable(userCode, sandboxType)
                 .orElseGet(() -> runtimeProvider.create(request, spec, userCode, sandboxType, idempotencyKey));
 
             List<String> endpoints = runtimeProvider.resolveEndpoints(instance, spec, request);
+            Integer timeoutSeconds = resolveTimeoutSeconds(instance, request.getTimeout());
             SandboxInfo info = SandboxInfo.builder()
                 .sandboxId(instance.getSandboxId())
                 .userCode(userCode)
                 .sandboxType(sandboxType)
                 .endpoints(endpoints)
                 .endpointHeaders(runtimeProvider.resolveEndpointHeaders(instance))
-                .timeoutSeconds(request.getTimeout())
-                .createdTime(LocalDateTime.now())
+                .timeoutSeconds(timeoutSeconds)
+                .remoteExpiresAt(resolveRemoteExpiresAt(instance, timeoutSeconds))
+                .createdTime(resolveCreatedTime(instance))
                 .lastHeartbeatTime(LocalDateTime.now())
                 .build();
             persistSandbox(redisKey, info);
@@ -190,7 +193,7 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
     }
 
     private void persistSandbox(String redisKey, SandboxInfo info) {
-        long ttlSeconds = properties.getHeartbeatTimeout().multipliedBy(SANDBOX_INFO_TTL_MULTIPLIER).toSeconds();
+        long ttlSeconds = Math.max(60L, properties.getMetadataCacheTtl().toSeconds());
         redisTemplate.opsForValue().set(redisKey, serialize(info), ttlSeconds, TimeUnit.SECONDS);
         touchUserIndex(info.getUserCode(), info.getSandboxType());
     }
@@ -218,28 +221,32 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
         return REDIS_USER_INDEX_PREFIX + userCode;
     }
 
-    private Integer resolveTimeoutSeconds(Integer specTimeout, Integer autoRelease) {
-        if (autoRelease == null) {
-            return normalizeTimeoutSeconds(specTimeout);
+    private Integer resolveTimeoutSeconds(SandboxRuntimeInstance instance, Integer specTimeout) {
+        if (instance != null && instance.getCreatedAt() != null && instance.getExpiresAt() != null) {
+            long seconds = ChronoUnit.SECONDS.between(instance.getCreatedAt(), instance.getExpiresAt());
+            if (seconds > 0) {
+                return Math.toIntExact(seconds);
+            }
         }
-        if (autoRelease <= 0) {
-            return null;
-        }
-        if (autoRelease == 1) {
-            return Math.toIntExact(properties.getHeartbeatTimeout().toSeconds());
-        }
-        return autoRelease;
+        return specTimeout != null && specTimeout > 0 ? specTimeout : null;
     }
 
-    private Integer normalizeTimeoutSeconds(Integer timeout) {
-        return timeout != null && timeout > 0 ? timeout : null;
-    }
-
-    private Date resolveRemoteExpiresAt(SandboxInfo info) {
-        if (info == null || info.getTimeoutSeconds() == null || info.getTimeoutSeconds() <= 0) {
+    private Date resolveRemoteExpiresAt(SandboxRuntimeInstance instance, Integer timeoutSeconds) {
+        if (instance != null && instance.getExpiresAt() != null) {
+            return Date.from(instance.getExpiresAt().toInstant());
+        }
+        if (timeoutSeconds == null || timeoutSeconds <= 0) {
             return null;
         }
-        return Date.from(Instant.now().plusSeconds(info.getTimeoutSeconds()));
+        return Date.from(Instant.now().plusSeconds(timeoutSeconds));
+    }
+
+    private LocalDateTime resolveCreatedTime(SandboxRuntimeInstance instance) {
+        OffsetDateTime createdAt = instance != null ? instance.getCreatedAt() : null;
+        if (createdAt == null) {
+            return LocalDateTime.now();
+        }
+        return LocalDateTime.ofInstant(createdAt.toInstant(), ZoneId.systemDefault());
     }
 
     private String serialize(SandboxInfo info) {

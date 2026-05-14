@@ -71,7 +71,13 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
       }
       const matchedMenu = menuConfig.find((item: any) => item.path === key);
       if (matchedMenu?.menuUrl) {
-        window.open(normalizeMenuUrl(matchedMenu.menuUrl), '_blank');
+        let url = normalizeMenuUrl(matchedMenu.menuUrl);
+        if (url.includes('${Beyond-token}')) {
+          url = url.replace('${Beyond-token}', getssoToken());
+        }
+        console.log('menuUrl', url);
+        console.log('url', url);
+        window.open(url, '_blank');
         return;
       }
       if (key?.startsWith('/manager/')) {

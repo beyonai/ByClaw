@@ -264,6 +264,16 @@ export function deleteResource(params: any) {
 }
 
 /**
+ * 恢复资源
+ * 根据资源ID恢复已注销的资源
+ * @param params 恢复参数（包含resourceId资源ID）
+ * @returns Promise 恢复结果
+ */
+export function restoreResource(params: any) {
+  return POST<any>('/byaiService/tool/restoreResourceById', params);
+}
+
+/**
  * 查询用户空间文件列表
  * 获取用户在知识库空间中的文件列表
  * @param params 查询参数（包含userCode用户编码、keyword搜索关键字、sessionId会话ID）
@@ -311,6 +321,7 @@ export interface ResourceOperationPermissions {
   canApplyUse: boolean; // 是否可以申请使用
   canAuditUse: boolean; // 是否有审核权限
   canSetDefault: boolean; // 是否有设为默认权限
+  canRestore: boolean; // 是否有恢复权限
 }
 
 /**
