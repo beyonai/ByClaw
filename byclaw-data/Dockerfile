@@ -10,10 +10,14 @@ WORKDIR /workspace
 COPY byclaw-data /workspace/byclaw-data
 
 WORKDIR /workspace/byclaw-data
-# ✅ 新增这一行：配置 uv 使用国内镜像源
 RUN uv config set pypi-index-url https://mirrors.aliyun.com/pypi/simple/
-
-RUN uv sync --frozen --no-dev
+RUN set -- packages/by_datacloud-*.whl; \
+    if [ -f "$1" ]; then \
+      uv sync --frozen --no-dev --no-install-package by-datacloud; \
+      uv pip install --python .venv/bin/python "$1"; \
+    else \
+      uv sync --frozen --no-dev; \
+    fi
 
 EXPOSE 8080
 

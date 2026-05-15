@@ -103,7 +103,8 @@ VS Code / Cursor 里可以直接使用调试配置：
 
 ## Docker
 
-`byclaw-data/Dockerfile` 会在镜像构建时直接执行 `uv sync --frozen --no-dev`，无需额外拉取 `by-datacloud` 源码仓库。
+`byclaw-data/Dockerfile` 会优先安装 `byclaw-data/packages/by_datacloud-*.whl`。
+如果本地 wheel 不存在，则回退为从 PyPI 安装 `by-datacloud`。
 
 镜像启动示例：
 
