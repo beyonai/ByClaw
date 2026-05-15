@@ -6,27 +6,30 @@ import inspect
 import json
 import os
 import asyncio
+from contextvars import ContextVar
 from dataclasses import fields, is_dataclass
 from typing import Any
 
 from by_qa.config import get_settings
 from by_qa.core import logger
-from by_qa.core.model_config import ModelConfig, ModelConfigProvider
+from by_qa.core.model_config import LLMModelProfile, ModelConfig, ModelConfigProvider
+from exceptions import ModelConfigError, ModelNotFoundError
 
 
 AI_MODEL_TYPE_REDIS_KEY = "byai:aimodel:typelist"
+AI_MODEL_CONFIG_REDIS_KEY = "byai:aimodel:config"
+
+# Set this ContextVar before calling InstantQAEngine so the provider can pick
+# up the prologue modelId without needing constructor arguments.
+request_prologue_model_id: ContextVar[str | None] = ContextVar(
+    "request_prologue_model_id", default=None
+)
 LLM_MODEL_TYPE = "LLM"
 EMBEDDING_MODEL_TYPE = "EMBEDDING"
 LLM_REQUIRED_ABILITY = "6"
 
-LLM_MODEL_TYPES = {
-    "classifier",
-    "retrieval",
-    "generator",
-    "quality",
-    "decomposer",
-    "aggregator",
-}
+LLM_PROFILES = {LLMModelProfile.STANDARD.value, LLMModelProfile.LIGHTWEIGHT.value}
+EMBEDDING_PROFILE = LLMModelProfile.EMBEDDING.value
 
 
 class RedisModelConfigProvider(ModelConfigProvider):
@@ -49,15 +52,16 @@ class RedisModelConfigProvider(ModelConfigProvider):
             self._cache_loaded = True
             self._log_loaded_cache()
 
-    async def get_config(self, model_type: str) -> ModelConfig:
+    async def get_config(self, model_type: str | LLMModelProfile) -> ModelConfig:
         await self.load_cache()
-        if model_type in LLM_MODEL_TYPES:
+        profile_value = model_type.value if isinstance(model_type, LLMModelProfile) else model_type
+        if profile_value in LLM_PROFILES:
             model = await self._load_first_llm_model()
             return self._build_model_config(
                 model,
                 temperature=_extract_temperature(model),
             )
-        if model_type == "embedding":
+        if profile_value == EMBEDDING_PROFILE:
             settings = get_settings()
             model = await self._load_first_model_by_type(EMBEDDING_MODEL_TYPE)
             return self._build_model_config(
@@ -69,14 +73,45 @@ class RedisModelConfigProvider(ModelConfigProvider):
                 ),
                 distance_metric=getattr(settings, "embedding_distance_metric", None),
             )
-        raise ValueError(f"Unknown model_type: {model_type!r}")
+        raise ModelConfigError(f"Unknown model_type: {model_type!r}")
+
+    async def _load_model_by_id(self, model_id: str) -> dict[str, Any] | None:
+        # The prologue model is used as-is without ability validation;
+        # the caller is trusted to supply a valid, ability-checked model ID.
+        raw = await self._redis.hget(AI_MODEL_CONFIG_REDIS_KEY, model_id)
+        if raw is None:
+            return None
+        value = _decode_redis_json(raw)
+        if not isinstance(value, dict):
+            return None
+        return value
 
     async def _load_first_llm_model(self) -> dict[str, Any]:
+        prologue_model_id = request_prologue_model_id.get()
+        if prologue_model_id:
+            model = await self._load_model_by_id(prologue_model_id)
+            if model is not None:
+                logger.info(
+                    "Using prologue model_id=%s (key=%s)",
+                    prologue_model_id,
+                    AI_MODEL_CONFIG_REDIS_KEY,
+                )
+                return model
+            logger.warning(
+                "Prologue model_id=%s not found in Redis key=%s, falling back to type-list",
+                prologue_model_id,
+                AI_MODEL_CONFIG_REDIS_KEY,
+            )
+        else:
+            logger.info(
+                "No prologue_model_id set, using type-list (key=%s)",
+                AI_MODEL_TYPE_REDIS_KEY,
+            )
         models = await self._load_models_by_type(LLM_MODEL_TYPE)
         for model in models:
             if LLM_REQUIRED_ABILITY in _extract_abilities(model):
                 return model
-        raise ValueError(
+        raise ModelNotFoundError(
             f"No {LLM_MODEL_TYPE} model with ability {LLM_REQUIRED_ABILITY!r} "
             f"found in Redis key {AI_MODEL_TYPE_REDIS_KEY}"
         )
@@ -84,7 +119,7 @@ class RedisModelConfigProvider(ModelConfigProvider):
     async def _load_first_model_by_type(self, redis_model_type: str) -> dict[str, Any]:
         models = await self._load_models_by_type(redis_model_type)
         if not models:
-            raise ValueError(
+            raise ModelNotFoundError(
                 f"No {redis_model_type} model found in Redis key {AI_MODEL_TYPE_REDIS_KEY}"
             )
         return models[0]
@@ -92,7 +127,7 @@ class RedisModelConfigProvider(ModelConfigProvider):
     async def _load_models_by_type(self, redis_model_type: str) -> list[dict[str, Any]]:
         models = self._models_by_type.get(redis_model_type, [])
         if not isinstance(models, list):
-            raise ValueError(
+            raise ModelConfigError(
                 f"Redis model payload for {redis_model_type} must be a JSON list"
             )
         return [model for model in models if isinstance(model, dict)]
@@ -142,13 +177,13 @@ def _decode_model_type_hash(payload: Any) -> dict[str, list[dict[str, Any]]]:
     if not payload:
         return {}
     if not isinstance(payload, dict):
-        raise ValueError("Redis model type payload must be a hash")
+        raise ModelConfigError("Redis model type payload must be a hash")
     models_by_type: dict[str, list[dict[str, Any]]] = {}
     for raw_key, raw_value in payload.items():
         key = raw_key.decode("utf-8") if isinstance(raw_key, bytes) else str(raw_key)
         value = _decode_redis_json(raw_value)
         if not isinstance(value, list):
-            raise ValueError(f"Redis model payload for {key} must be a JSON list")
+            raise ModelConfigError(f"Redis model payload for {key} must be a JSON list")
         models_by_type[key] = [model for model in value if isinstance(model, dict)]
     return models_by_type
 
@@ -286,5 +321,7 @@ def _create_redis_client_from_env() -> Any:
 
 __all__ = [
     "AI_MODEL_TYPE_REDIS_KEY",
+    "AI_MODEL_CONFIG_REDIS_KEY",
+    "request_prologue_model_id",
     "RedisModelConfigProvider",
 ]

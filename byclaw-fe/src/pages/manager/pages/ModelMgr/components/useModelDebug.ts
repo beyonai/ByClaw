@@ -2,6 +2,7 @@ import { message } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { IntlShape } from 'react-intl';
 import { normalizeModelType } from './modelFormUtils';
+import { copyTextToClipboard } from '@/pages/manager/utils/copy';
 
 type Params = {
   intl: IntlShape;
@@ -233,7 +234,7 @@ const useModelDebug = ({ intl, dispatch, open, currentModelType, getCurrentModel
     async (text: string, successMessageId: string) => {
       if (!text) return;
       try {
-        await navigator.clipboard.writeText(text);
+        await copyTextToClipboard(text);
         message.success(intl.formatMessage({ id: successMessageId }));
       } catch (e) {
         message.error(intl.formatMessage({ id: 'common.copyFail' }));
