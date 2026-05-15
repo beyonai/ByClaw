@@ -54,7 +54,9 @@ def test_t5_src_get_gateway_user_code_exists() -> None:
 def test_t5_src_consume_agent_events_exists() -> None:
     """`_consume_agent_events` 模块级函数已定义（async）。"""
     src = _src()
-    assert "async def _consume_agent_events" in src or "def _consume_agent_events" in src
+    assert (
+        "async def _consume_agent_events" in src or "def _consume_agent_events" in src
+    )
 
 
 def test_t5_src_dynamic_path_uses_ontology_agent() -> None:
@@ -158,7 +160,7 @@ def test_t5_dict_to_paradigm_answer_options_mapped() -> None:
     options = result.selections[0].chosen_options  # type: ignore[union-attr]
     assert len(options) == 2
     assert options[0].choice_keyword == "华东"
-    assert options[0].recall == "east_china"
+    assert options[0].recall == ["east_china"]
 
 
 def test_t5_dict_to_paradigm_answer_empty_paradigm_list() -> None:
@@ -209,12 +211,17 @@ async def test_t5_consume_thinking_event_emits_reasoning_log() -> None:
     async def _gen():  # type: ignore[no-untyped-def]
         yield ThinkingEvent(content="思考中...")
         from datacloud_analysis.ontology_agent import AnswerEvent  # noqa: PLC0415
+
         yield AnswerEvent(content="答案")
 
     await fn(_gen(), ctx, reco_task=None)
 
     calls = ctx.emit_chunk.call_args_list
-    reasoning_calls = [c for c in calls if c.kwargs.get("event_type") == EventType.REASONING_LOG_START.value]
+    reasoning_calls = [
+        c
+        for c in calls
+        if c.kwargs.get("event_type") == EventType.REASONING_LOG_START.value
+    ]
     assert len(reasoning_calls) >= 1
 
 
@@ -234,7 +241,11 @@ async def test_t5_consume_step_event_emits_reasoning_log() -> None:
     await fn(_gen(), ctx, reco_task=None)
 
     calls = ctx.emit_chunk.call_args_list
-    reasoning_calls = [c for c in calls if c.kwargs.get("event_type") == EventType.REASONING_LOG_START.value]
+    reasoning_calls = [
+        c
+        for c in calls
+        if c.kwargs.get("event_type") == EventType.REASONING_LOG_START.value
+    ]
     assert len(reasoning_calls) >= 1
 
 
@@ -258,7 +269,11 @@ async def test_t5_consume_answer_event_returns_done() -> None:
 @pytest.mark.asyncio
 async def test_t5_consume_paradigm_interrupt_returns_waiting() -> None:
     """InterruptEvent(PARADIGM_CLARIFICATION) → complex_ask_user + {'status': 'waiting'}。"""
-    from datacloud_analysis.ontology_agent import InterruptEvent, ParadigmGroup, ParadigmOption  # noqa: PLC0415
+    from datacloud_analysis.ontology_agent import (
+        InterruptEvent,
+        ParadigmGroup,
+        ParadigmOption,
+    )  # noqa: PLC0415
 
     fn = _import_consume_agent_events()
     ctx = _make_ctx()
@@ -397,7 +412,9 @@ def _patch_external() -> list[Any]:
 
     return [
         m.patch("byclaw_data.model_environment.build_llm_config", return_value={}),
-        m.patch("byclaw_data.model_environment.build_embedding_config", return_value={}),
+        m.patch(
+            "byclaw_data.model_environment.build_embedding_config", return_value={}
+        ),
         m.patch("by_framework.worker.sandbox.hook_sandbox.active_workspace"),
         m.patch(
             "byclaw_data.worker._load_recent_history_messages",
@@ -414,7 +431,9 @@ async def test_t5_dynamic_path_calls_ontology_agent_ask() -> None:
     from datacloud_analysis.ontology_agent import AnswerEvent  # noqa: PLC0415
 
     worker = _make_worker_bare_t5()
-    worker.command_plugin_manager.handle_ext_command = AsyncMock(return_value=(False, None))
+    worker.command_plugin_manager.handle_ext_command = AsyncMock(
+        return_value=(False, None)
+    )
     worker._build_graph = MagicMock()
 
     mock_agent = MagicMock()
@@ -447,7 +466,9 @@ async def test_t5_dynamic_path_no_reco_task() -> None:
     from datacloud_analysis.ontology_agent import AnswerEvent  # noqa: PLC0415
 
     worker = _make_worker_bare_t5()
-    worker.command_plugin_manager.handle_ext_command = AsyncMock(return_value=(False, None))
+    worker.command_plugin_manager.handle_ext_command = AsyncMock(
+        return_value=(False, None)
+    )
 
     mock_agent = MagicMock()
 
@@ -462,7 +483,9 @@ async def test_t5_dynamic_path_no_reco_task() -> None:
     gen_fn = AsyncMock(return_value=["推荐问题1"])
     reco_plugin.generate_recommended_questions = gen_fn
     worker.plugin_registry.get_plugin = MagicMock(
-        side_effect=lambda pid: reco_plugin if pid == "datacloud_recommended_questions" else None
+        side_effect=lambda pid: reco_plugin
+        if pid == "datacloud_recommended_questions"
+        else None
     )
 
     cmd = _make_ask_command_t5(call_object_ids=["by_order"])
@@ -474,3 +497,489 @@ async def test_t5_dynamic_path_no_reco_task() -> None:
         await worker.process_command(cmd, ctx)
 
     gen_fn.assert_not_called()
+
+
+# ===========================================================================
+# PART 2-B — _paradigm_option_to_dict 单元测试（BUGFIX: 过滤字段不丢失）
+# ===========================================================================
+
+
+def _import_paradigm_option_to_dict() -> Any:
+    from byclaw_data.worker import _paradigm_option_to_dict  # type: ignore[attr-defined]
+
+    return _paradigm_option_to_dict
+
+
+class TestParadigmOptionToDict:
+    """T-BUGFIX: _paradigm_option_to_dict 序列化包含查询值和过滤条件全部字段。"""
+
+    @staticmethod
+    def _make_option(**kwargs: Any) -> Any:
+        """构造 ParadigmOption，未指定的字段使用默认值。"""
+        from datacloud_analysis.ontology_agent import ParadigmOption  # noqa: PLC0415
+
+        defaults: dict[str, Any] = {
+            "choice_keyword": "",
+            "recall": [],
+            "keyword": "",
+            "kid": 0,
+            "ktype": "",
+            "filter_field": "",
+            "comparison": "",
+            "value": "",
+            "choice_field": "",
+            "choice_comparison": "",
+            "field_recall": [],
+            "comparison_recall": [],
+            "value_recall": [],
+        }
+        defaults.update(kwargs)
+        return ParadigmOption(**defaults)
+
+    # ── 查询值 option ──
+
+    def test_query_value_option_outputs_only_query_fields(self) -> None:
+        """查询值 option：输出 keyword/kid/ktype/choiceKeyword，不含过滤键。"""
+        fn = _import_paradigm_option_to_dict()
+        opt = self._make_option(
+            choice_keyword="商机名称",
+            recall=["商机名称"],
+            keyword="opp_name",
+            kid=1,
+            ktype="select",
+        )
+        result = fn(opt)
+        assert result["choiceKeyword"] == "商机名称"
+        assert result["recall"] == ["商机名称"]
+        assert result["keyword"] == "opp_name"
+        assert result["kid"] == 1
+        assert result["ktype"] == "select"
+        # 过滤键不应出现（字段为空/默认值）
+        assert "field" not in result
+        assert "comparison" not in result
+        assert "value" not in result
+        assert "choiceField" not in result
+        assert "choiceComparison" not in result
+        assert "fieldRecall" not in result
+        assert "comparisonRecall" not in result
+        assert "valueRecall" not in result
+
+    def test_query_value_default_fields_still_output(self) -> None:
+        """即使 keyword/kid 为默认值，查询基础字段仍输出（前端依赖）。"""
+        fn = _import_paradigm_option_to_dict()
+        opt = self._make_option()
+        result = fn(opt)
+        assert result["keyword"] == ""
+        assert result["recall"] == []
+        assert result["kid"] == 0
+        assert result["ktype"] == ""
+        assert result["choiceKeyword"] == ""
+
+    # ── 过滤条件 option ──
+
+    def test_filter_option_outputs_all_filter_fields(self) -> None:
+        """过滤条件 option：输出 field/comparison/value 及 recall 列表。"""
+        fn = _import_paradigm_option_to_dict()
+        opt = self._make_option(
+            filter_field="sales_user_id",
+            comparison="eq",
+            value="韦小二",
+            choice_field="所属销售用户编码",
+            choice_comparison="eq",
+            field_recall=["所属销售用户编码"],
+            comparison_recall=["eq", "gt", "lt"],
+            value_recall=["韦小宝", "韦一笑", "韦小二"],
+        )
+        result = fn(opt)
+        assert result["field"] == "sales_user_id"
+        assert result["comparison"] == "eq"
+        assert result["value"] == "韦小二"
+        assert result["choiceField"] == "所属销售用户编码"
+        assert result["choiceComparison"] == "eq"
+        assert result["fieldRecall"] == ["所属销售用户编码"]
+        assert result["comparisonRecall"] == ["eq", "gt", "lt"]
+        assert result["valueRecall"] == ["韦小宝", "韦一笑", "韦小二"]
+
+    def test_filter_option_partial_fields(self) -> None:
+        """仅有 filter_field 时，只输出 field/choiceField，不输出空的 comparison/value。"""
+        fn = _import_paradigm_option_to_dict()
+        opt = self._make_option(
+            filter_field="code",
+            choice_field="编码",
+        )
+        result = fn(opt)
+        assert result["field"] == "code"
+        assert result["choiceField"] == "编码"
+        assert "comparison" not in result
+        assert "value" not in result
+        assert "choiceComparison" not in result
+
+    def test_filter_option_with_empty_recall_lists(self) -> None:
+        """空 recall 列表不应出现在输出中。"""
+        fn = _import_paradigm_option_to_dict()
+        opt = self._make_option(
+            filter_field="code",
+            choice_field="编码",
+            field_recall=[],
+            comparison_recall=[],
+            value_recall=[],
+        )
+        result = fn(opt)
+        assert "fieldRecall" not in result
+        assert "comparisonRecall" not in result
+        assert "valueRecall" not in result
+
+    # ── 混合 option（防御性）──
+
+    def test_mixed_option_outputs_both_query_and_filter_fields(self) -> None:
+        """同时有 keyword + filter_field 时，两边字段都输出，互不覆盖。"""
+        fn = _import_paradigm_option_to_dict()
+        opt = self._make_option(
+            choice_keyword="商机名称",
+            keyword="opp_name",
+            kid=1,
+            ktype="select",
+            filter_field="sales_user_id",
+            comparison="eq",
+            value="韦小二",
+            choice_field="销售用户",
+            choice_comparison="eq",
+        )
+        result = fn(opt)
+        # 查询字段
+        assert result["choiceKeyword"] == "商机名称"
+        assert result["keyword"] == "opp_name"
+        # 过滤字段
+        assert result["field"] == "sales_user_id"
+        assert result["comparison"] == "eq"
+        assert result["value"] == "韦小二"
+
+
+# ===========================================================================
+# PART 2-C — _dict_to_paradigm_answer 过滤字段解析测试（BUGFIX: resume 保留 filter）
+# ===========================================================================
+
+
+class TestDictToParadigmAnswerFilterFields:
+    """T-BUGFIX: _dict_to_paradigm_answer 从用户回复中提取过滤条件字段。"""
+
+    def test_filter_fields_extracted_from_input(self) -> None:
+        """用户回复含 field/comparison/value 时，ParadigmOption 对应字段正确。"""
+        fn = _import_dict_to_paradigm_answer()
+        raw: dict[str, Any] = {
+            "paradigmList": [
+                {
+                    "paradigmList": [
+                        {
+                            "field": "sales_user_id",
+                            "comparison": "eq",
+                            "value": "韦小二",
+                            "choiceField": "所属销售用户编码",
+                            "choiceComparison": "eq",
+                            "fieldRecall": ["所属销售用户编码"],
+                            "comparisonRecall": ["eq", "gt"],
+                            "valueRecall": ["韦小宝", "韦小二"],
+                        }
+                    ]
+                }
+            ]
+        }
+        result = fn(raw)
+        opt = result.selections[0].chosen_options[0]  # type: ignore[union-attr]
+        assert opt.filter_field == "sales_user_id"
+        assert opt.comparison == "eq"
+        assert opt.value == "韦小二"
+        assert opt.choice_field == "所属销售用户编码"
+        assert opt.choice_comparison == "eq"
+        assert opt.field_recall == ["所属销售用户编码"]
+        assert opt.comparison_recall == ["eq", "gt"]
+        assert opt.value_recall == ["韦小宝", "韦小二"]
+
+    def test_filter_recall_list_not_string(self) -> None:
+        """recall 列表输入为 list 时保持 list，不转为字符串。"""
+        fn = _import_dict_to_paradigm_answer()
+        raw: dict[str, Any] = {
+            "paradigmList": [
+                {
+                    "paradigmList": [
+                        {
+                            "field": "code",
+                            "comparison": "eq",
+                            "value": "test",
+                            "fieldRecall": ["编码A", "编码B"],
+                            "comparisonRecall": ["eq"],
+                            "valueRecall": ["值1", "值2"],
+                        }
+                    ]
+                }
+            ]
+        }
+        result = fn(raw)
+        opt = result.selections[0].chosen_options[0]  # type: ignore[union-attr]
+        assert isinstance(opt.field_recall, list)
+        assert opt.field_recall == ["编码A", "编码B"]
+        assert isinstance(opt.comparison_recall, list)
+        assert isinstance(opt.value_recall, list)
+
+    def test_recall_string_fallback(self) -> None:
+        """recall 为字符串时（旧格式），filter 字段回退为空列表。"""
+        fn = _import_dict_to_paradigm_answer()
+        raw: dict[str, Any] = {
+            "paradigmList": [
+                {
+                    "paradigmList": [
+                        {
+                            "field": "code",
+                            "comparison": "eq",
+                            "fieldRecall": "not-a-list",
+                            "comparisonRecall": "not-a-list",
+                            "valueRecall": "not-a-list",
+                        }
+                    ]
+                }
+            ]
+        }
+        result = fn(raw)
+        opt = result.selections[0].chosen_options[0]  # type: ignore[union-attr]
+        assert opt.field_recall == []
+        assert opt.comparison_recall == []
+        assert opt.value_recall == []
+
+    def test_mixed_query_and_filter_items(self) -> None:
+        """同一回复中同时有查询值和过滤条件 items，各自字段不串。"""
+        fn = _import_dict_to_paradigm_answer()
+        raw: dict[str, Any] = {
+            "paradigmList": [
+                {
+                    "paradigmList": [
+                        {"choiceKeyword": "商机名称", "recall": ["商机名称"]},
+                        {
+                            "field": "code",
+                            "comparison": "gt",
+                            "value": "100",
+                            "choiceField": "编码",
+                        },
+                    ]
+                }
+            ]
+        }
+        result = fn(raw)
+        opts = result.selections[0].chosen_options  # type: ignore[union-attr]
+        assert len(opts) == 2
+        # 查询值 item
+        assert opts[0].choice_keyword == "商机名称"
+        assert opts[0].recall == ["商机名称"]
+        assert opts[0].filter_field == ""  # 无过滤字段
+        # 过滤 item
+        assert opts[1].filter_field == "code"
+        assert opts[1].comparison == "gt"
+        assert opts[1].value == "100"
+
+    def test_old_format_no_filter_fields_still_works(self) -> None:
+        """旧格式（仅有 choiceKeyword/recall）不受影响。"""
+        fn = _import_dict_to_paradigm_answer()
+        raw: dict[str, Any] = {
+            "paradigmList": [
+                {
+                    "paradigmList": [
+                        {"choiceKeyword": "华东", "recall": "east_china"},
+                    ]
+                }
+            ]
+        }
+        result = fn(raw)
+        opt = result.selections[0].chosen_options[0]  # type: ignore[union-attr]
+        assert opt.choice_keyword == "华东"
+        assert opt.recall == ["east_china"]
+        assert opt.filter_field == ""
+        assert opt.comparison == ""
+
+
+# ===========================================================================
+# PART 3-B — _consume_agent_events SSE paradigm 集成测试（BUGFIX: 过滤字段不丢）
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_consume_filter_paradigm_metadata_has_filter_fields() -> None:
+    """InterruptEvent 含过滤 paradigm 时，complex_ask_user metadata.paradigmList
+    应包含 field/comparison/value/choiceField 等过滤字段。"""
+    from datacloud_analysis.ontology_agent import InterruptEvent, ParadigmGroup, ParadigmOption  # noqa: PLC0415
+
+    fn = _import_consume_agent_events()
+    ctx = _make_ctx()
+
+    async def _gen():  # type: ignore[no-untyped-def]
+        yield InterruptEvent(
+            thread_id="tid_filter",
+            reason="PARADIGM_CLARIFICATION",
+            prompt="请确认过滤条件",
+            paradigm_list=[
+                ParadigmGroup(
+                    paradigm_id="3",
+                    paradigm_name="过滤条件",
+                    options=[
+                        ParadigmOption(
+                            choice_keyword="",
+                            recall=[],
+                            filter_field="sales_user_id",
+                            comparison="eq",
+                            value="韦小二",
+                            choice_field="所属销售用户编码",
+                            choice_comparison="eq",
+                            field_recall=["所属销售用户编码"],
+                            comparison_recall=["eq", "gt"],
+                            value_recall=["韦小宝", "韦小二"],
+                        )
+                    ],
+                )
+            ],
+        )
+
+    await fn(_gen(), ctx, reco_task=None)
+
+    ctx.complex_ask_user.assert_awaited_once()
+    # complex_ask_user 第一个位置参数是 AskUserEvent
+    event_arg = ctx.complex_ask_user.call_args[0][0]
+    metadata = event_arg.metadata
+    paradigm_list = metadata["paradigmList"]
+    assert len(paradigm_list) == 1
+
+    grp = paradigm_list[0]
+    assert grp["paradigmId"] == "3"
+    assert grp["paradigmName"] == "过滤条件"
+    results = grp["paradigmResult"]
+    assert len(results) == 1
+
+    # 过滤项
+    r0 = results[0]
+    assert r0["field"] == "sales_user_id"
+    assert r0["comparison"] == "eq"
+    assert r0["value"] == "韦小二"
+    assert r0["choiceField"] == "所属销售用户编码"
+    assert r0["choiceComparison"] == "eq"
+    assert r0["fieldRecall"] == ["所属销售用户编码"]
+    assert r0["comparisonRecall"] == ["eq", "gt"]
+    assert r0["valueRecall"] == ["韦小宝", "韦小二"]
+
+
+@pytest.mark.asyncio
+async def test_consume_mixed_paradigm_metadata_preserves_both_types() -> None:
+    """InterruptEvent 含查询值 + 过滤条件时，metadata 中两种类型字段均存在。"""
+    from datacloud_analysis.ontology_agent import (  # noqa: PLC0415
+        InterruptEvent,
+        ParadigmGroup,
+        ParadigmOption,
+    )
+
+    fn = _import_consume_agent_events()
+    ctx = _make_ctx()
+
+    async def _gen():  # type: ignore[no-untyped-def]
+        yield InterruptEvent(
+            thread_id="tid_mixed",
+            reason="PARADIGM_CLARIFICATION",
+            prompt="请确认",
+            paradigm_list=[
+                ParadigmGroup(
+                    paradigm_id="1",
+                    paradigm_name="查询值",
+                    options=[
+                        ParadigmOption(
+                            choice_keyword="商机名称",
+                            recall=["商机名称"],
+                            keyword="opp_name",
+                            kid=1,
+                            ktype="select",
+                        )
+                    ],
+                ),
+                ParadigmGroup(
+                    paradigm_id="3",
+                    paradigm_name="过滤条件",
+                    options=[
+                ParadigmOption(
+                    choice_keyword="",
+                    recall=[],
+                    filter_field="code",
+                    comparison="eq",
+                    value="test",
+                    choice_field="编码",
+                    choice_comparison="eq",
+                    field_recall=["编码"],
+                    comparison_recall=["eq"],
+                    value_recall=["test"],
+                )
+                    ],
+                ),
+            ],
+        )
+
+    await fn(_gen(), ctx, reco_task=None)
+
+    event_arg = ctx.complex_ask_user.call_args[0][0]
+    paradigm_list = event_arg.metadata["paradigmList"]
+    assert len(paradigm_list) == 2
+
+    # 查询值
+    qv = paradigm_list[0]
+    assert qv["paradigmId"] == "1"
+    qv_r = qv["paradigmResult"][0]
+    assert qv_r["keyword"] == "opp_name"
+    assert qv_r["choiceKeyword"] == "商机名称"
+    assert "field" not in qv_r  # 查询值不含过滤键
+
+    # 过滤条件
+    fc = paradigm_list[1]
+    assert fc["paradigmId"] == "3"
+    fc_r = fc["paradigmResult"][0]
+    assert fc_r["field"] == "code"
+    assert fc_r["comparison"] == "eq"
+    assert fc_r["value"] == "test"
+    assert fc_r["choiceField"] == "编码"
+
+
+@pytest.mark.asyncio
+async def test_consume_query_only_paradigm_no_filter_keys_in_metadata() -> None:
+    """仅含查询值 paradigm 时，metadata 中不出现过滤键。"""
+    from datacloud_analysis.ontology_agent import (  # noqa: PLC0415
+        InterruptEvent,
+        ParadigmGroup,
+        ParadigmOption,
+    )
+
+    fn = _import_consume_agent_events()
+    ctx = _make_ctx()
+
+    async def _gen():  # type: ignore[no-untyped-def]
+        yield InterruptEvent(
+            thread_id="tid_query",
+            reason="PARADIGM_CLARIFICATION",
+            prompt="请选择字段",
+            paradigm_list=[
+                ParadigmGroup(
+                    paradigm_id="1",
+                    paradigm_name="查询值",
+                    options=[
+                        ParadigmOption(
+                            choice_keyword="商机名称",
+                            recall=["商机名称"],
+                            keyword="opp_name",
+                            kid=1,
+                            ktype="select",
+                        )
+                    ],
+                ),
+            ],
+        )
+
+    await fn(_gen(), ctx, reco_task=None)
+
+    event_arg = ctx.complex_ask_user.call_args[0][0]
+    results = event_arg.metadata["paradigmList"][0]["paradigmResult"]
+    r0 = results[0]
+    assert r0["keyword"] == "opp_name"
+    assert r0["choiceKeyword"] == "商机名称"
+    assert "field" not in r0
+    assert "comparison" not in r0
+    assert "value" not in r0
