@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLifecycleJobReport;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 
 /**
@@ -26,12 +27,12 @@ public class SandboxRenewJob {
     @Scheduled(fixedDelayString = "${sandbox.renew.fixed-delay:60000}")
     public void renewDueSandboxes() {
         try {
-            int renewedCount = sandboxService.renewDueSandboxes();
-            if (renewedCount > 0) {
-                LOGGER.info("沙箱续约任务执行完成，本次续约 {} 个沙箱", renewedCount);
-            }
-        }
-        catch (Exception e) {
+            SandboxLifecycleJobReport report = sandboxService.renewDueSandboxes();
+            LOGGER.info("沙箱续约任务执行完成，候选 {} 个，扫描 {} 个，续约 {} 个，跳过 {} 个，失败 {} 个，成功记录：{}，跳过记录：{}，失败记录：{}",
+                report.getTotalCandidates(), report.getScannedCount(), report.getAffectedCount(),
+                report.getSkippedCount(), report.getFailedCount(), report.getAffectedSandboxes(),
+                report.getSkippedSandboxes(), report.getFailedSandboxes());
+        } catch (Exception e) {
             LOGGER.error("沙箱续约任务执行异常", e);
         }
     }

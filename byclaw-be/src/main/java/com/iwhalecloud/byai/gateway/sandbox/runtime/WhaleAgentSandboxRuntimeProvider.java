@@ -41,14 +41,16 @@ public class WhaleAgentSandboxRuntimeProvider implements SandboxRuntimeProvider 
             return Optional.empty();
         }
         try {
+            log.info("WhaleAgent 查询可复用沙箱，userCode={}，sandboxType={}", userCode, sandboxType);
             KnowledgeResponse<WhaleAgentSandboxPageResult> response = withUserCode(userCode, () -> feignWhaleAgentService.listSandboxes(
                 SandboxRuntimeRequestFactory.buildWhaleAgentListSandboxesRequest(userCode, sandboxType)));
             validateOperationResponse(response, "WhaleAgent sandbox list failed");
             WhaleAgentSandboxPageResult pageResult = response.getResultObject();
             if (pageResult == null || pageResult.getItems() == null || pageResult.getItems().isEmpty()) {
+                log.info("WhaleAgent 未找到可复用沙箱，userCode={}，sandboxType={}", userCode, sandboxType);
                 return Optional.empty();
             }
-            return pageResult.getItems().stream()
+            Optional<SandboxRuntimeInstance> reusable = pageResult.getItems().stream()
                 .filter(detail -> detail != null && StringUtils.isNotBlank(detail.getId()))
                 .filter(detail -> SandboxRuntimeRequestFactory.isReusableSandboxState(detail.getStatus()))
                 .sorted(this::compareSandboxReusePreference)
@@ -58,9 +60,13 @@ public class WhaleAgentSandboxRuntimeProvider implements SandboxRuntimeProvider 
                     .expiresAt(detail.getExpiresAt())
                     .build())
                 .findFirst();
+            log.info("WhaleAgent 可复用沙箱查询完成，userCode={}，sandboxType={}，selectedSandboxId={}",
+                userCode, sandboxType, reusable.map(SandboxRuntimeInstance::getSandboxId).orElse(null));
+            return reusable;
         }
         catch (Exception e) {
-            log.debug("WhaleAgent listSandboxes failed (will create new if needed): {}", e.getMessage());
+            log.info("WhaleAgent listSandboxes failed (will create new if needed), userCode={}, sandboxType={}, cause={}",
+                userCode, sandboxType, e.getMessage());
             return Optional.empty();
         }
     }
@@ -71,6 +77,7 @@ public class WhaleAgentSandboxRuntimeProvider implements SandboxRuntimeProvider 
                                          String userCode,
                                          String sandboxType,
                                          String idempotencyKey) {
+        log.info("WhaleAgent 创建沙箱，userCode={}，sandboxType={}，idempotencyKey={}", userCode, sandboxType, idempotencyKey);
         SandboxRuntimeRequestFactory.applyIdempotencyMetadata(request, idempotencyKey);
         Map<String, Object> payload = SandboxRuntimeRequestFactory.buildWhaleAgentLaunchPayload(
             request, spec, WHALE_AGENT_SANDBOX_TYPE);
@@ -79,6 +86,8 @@ public class WhaleAgentSandboxRuntimeProvider implements SandboxRuntimeProvider 
         SandboxCreateResult result = response.getResultObject();
         String sandboxId = result != null ? result.getSandboxId() : null;
         String endpoint = result != null ? result.getEndpoint() : null;
+        log.info("WhaleAgent 创建沙箱成功，userCode={}，sandboxType={}，sandboxId={}，endpoint={}",
+            userCode, sandboxType, sandboxId, endpoint);
         List<String> endpoints = StringUtils.isNotBlank(endpoint) ? List.of(endpoint) : List.of();
         return SandboxRuntimeInstance.builder()
             .sandboxId(StringUtils.defaultIfBlank(sandboxId, userCode + ":" + sandboxType))
@@ -91,6 +100,8 @@ public class WhaleAgentSandboxRuntimeProvider implements SandboxRuntimeProvider 
         if (sandboxInfo == null || StringUtils.isBlank(sandboxInfo.getSandboxId())) {
             return;
         }
+        log.info("WhaleAgent 删除沙箱，userCode={}，sandboxType={}，sandboxId={}",
+            userCode, sandboxType, sandboxInfo.getSandboxId());
         withUserCode(userCode, () -> feignWhaleAgentService.destroySandbox(
             SandboxRuntimeRequestFactory.buildSandboxIdRequest(sandboxInfo.getSandboxId())));
     }
@@ -101,11 +112,18 @@ public class WhaleAgentSandboxRuntimeProvider implements SandboxRuntimeProvider 
             || StringUtils.isBlank(sandboxInfo.getSandboxId())
             || sandboxInfo.getTimeoutSeconds() == null
             || sandboxInfo.getTimeoutSeconds() <= 0) {
+            log.debug("WhaleAgent 跳过续约，参数不足，userCode={}，sandboxType={}，sandboxId={}，timeoutSeconds={}",
+                userCode, sandboxType, sandboxInfo != null ? sandboxInfo.getSandboxId() : null,
+                sandboxInfo != null ? sandboxInfo.getTimeoutSeconds() : null);
             return;
         }
         RenewSandboxTimeoutRequest request = SandboxRuntimeRequestFactory.buildWhaleAgentRenewRequest(sandboxInfo);
+        log.info("WhaleAgent 续约沙箱，userCode={}，sandboxType={}，sandboxId={}，duration={}",
+            userCode, sandboxType, sandboxInfo.getSandboxId(), request.getDuration());
         KnowledgeResponse<?> response = withUserCode(userCode, () -> feignWhaleAgentService.renewSandboxTimeout(request));
         validateOperationResponse(response, "WhaleAgent sandbox heartbeat failed");
+        log.info("WhaleAgent 续约沙箱成功，userCode={}，sandboxType={}，sandboxId={}",
+            userCode, sandboxType, sandboxInfo.getSandboxId());
     }
 
     @Override
@@ -117,7 +135,11 @@ public class WhaleAgentSandboxRuntimeProvider implements SandboxRuntimeProvider 
             SandboxRuntimeRequestFactory.buildSandboxIdRequest(sandboxInfo.getSandboxId())));
         validateOperationResponse(response, "WhaleAgent sandbox query failed");
         SandboxDetail detail = response.getResultObject();
-        return detail != null && SandboxRuntimeRequestFactory.isReusableSandboxState(detail.getStatus());
+        boolean exists = detail != null && SandboxRuntimeRequestFactory.isReusableSandboxState(detail.getStatus());
+        log.info("WhaleAgent 查询远端状态，userCode={}，sandboxType={}，sandboxId={}，exists={}，remoteState={}",
+            userCode, sandboxType, sandboxInfo.getSandboxId(), exists,
+            detail != null && detail.getStatus() != null ? detail.getStatus().getState() : null);
+        return exists;
     }
 
     private void validateLaunchResponse(KnowledgeResponse<SandboxCreateResult> response) {
