@@ -153,6 +153,7 @@ public class DingtalkFileDownloadService {
         List<DingtalkMessageDownloadInfo> downloadInfos = extractDownloadInfos(DDMessage);
         String senderStaffId = DDMessage.getSenderStaffId();
         String robotCode = DDMessage.getRobotCode();
+        String msgType = DDMessage.getMsgtype();
         if (downloadInfos.isEmpty()) {
             return Collections.emptyList();
         }
@@ -206,6 +207,11 @@ public class DingtalkFileDownloadService {
                     dto.setFileName(item.getFileName());
                     dto.setFilePath(item.getFilePath());
                     dto.setFileUrl(item.getFileUrl());
+                    if (DingtalkMsgType.PICTURE.matches(msgType) || DingtalkMsgType.RICH_TEXT.matches(msgType)) {
+                        dto.setFileType("image");
+                    } else {
+                        dto.setFileType("file");
+                    }
                     dto.setUseType("content");
                     messageFiles.add(dto);
                 }
