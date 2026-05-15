@@ -6,7 +6,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
 import com.iwhalecloud.byai.common.storage.model.StorageObject;
@@ -17,8 +16,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
-import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
-import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 
@@ -32,10 +29,6 @@ import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 public class ByClawSkillQueryApplicationService {
 
     static final String SKILL_ROOT_PREFIX_TEMPLATE = "/.openclaw/workspace-baiying-agent-%s/skills/";
-
-    static final String WORKSPACE_SKILL_ROOT_PREFIX = "/.openclaw/workspace/skills/";
-
-    private static final String SKILL_DOC_FILE_NAME = "SKILL.md";
 
     @Autowired
     private UserFS userFS;
@@ -57,10 +50,12 @@ public class ByClawSkillQueryApplicationService {
         String skillRootPrefix = buildSkillRootPrefix(resourceId);
         Map<String, SkillDocInfo> skillDocMap = new LinkedHashMap<>();
         collectSkillDocs(skillDocMap,
-            safeObjectKeys(withUserContext(userCode, () -> userFS.list(skillRootPrefix, null))), skillRootPrefix);
+            safeObjectKeys(ByClawSkillPaths.withUserContext(userCode, () -> userFS.list(skillRootPrefix, null))),
+            skillRootPrefix);
         collectSkillDocs(skillDocMap,
-            safeObjectKeys(withUserContext(userCode, () -> userFS.list(WORKSPACE_SKILL_ROOT_PREFIX, null))),
-            WORKSPACE_SKILL_ROOT_PREFIX);
+            safeObjectKeys(ByClawSkillPaths.withUserContext(userCode,
+                () -> userFS.list(ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX, null))),
+            ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX);
 
         return skillDocMap.entrySet().stream().filter(entry -> matchKeyword(entry.getKey(), normalizedKeyword))
             .map(entry -> buildSkillDto(entry.getKey(), entry.getValue()))
@@ -88,7 +83,7 @@ public class ByClawSkillQueryApplicationService {
         String relativePath = objectKey.substring(skillRootPrefix.length());
         String[] segments = StringUtils.split(relativePath, '/');
         if (segments == null || segments.length != 2 || StringUtils.isBlank(segments[0])
-            || !StringUtils.equals(segments[1], SKILL_DOC_FILE_NAME)) {
+            || !StringUtils.equals(segments[1], ByClawSkillPaths.SKILL_DOC_FILE_NAME)) {
             return;
         }
         skillDocMap.putIfAbsent(segments[0], new SkillDocInfo(skillRootPrefix + segments[0], objectKey));
@@ -106,33 +101,6 @@ public class ByClawSkillQueryApplicationService {
 
     private ByClawSkillDto buildSkillDto(String skillName, SkillDocInfo skillDocInfo) {
         return new ByClawSkillDto(skillName, skillDocInfo.skillPath, skillDocInfo.skillDocObjectKey);
-    }
-
-    private static <T> T withUserContext(String userCode, Callable<T> callable) {
-        LoginInfo originalLoginInfo = CurrentUserHolder.getLoginInfo();
-        LoginInfo loginInfo = new LoginInfo();
-        loginInfo.setUserCode(userCode.trim());
-        CurrentUserHolder.setLoginInfo(loginInfo);
-        try {
-            return callable.call();
-        }
-        catch (RuntimeException e) {
-            throw e;
-        }
-        catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
-        finally {
-            restoreLoginInfo(originalLoginInfo);
-        }
-    }
-
-    private static void restoreLoginInfo(LoginInfo originalLoginInfo) {
-        if (originalLoginInfo == null) {
-            CurrentUserHolder.clearLoginInfo();
-            return;
-        }
-        CurrentUserHolder.setLoginInfo(originalLoginInfo);
     }
 
     private static final class SkillDocInfo {
