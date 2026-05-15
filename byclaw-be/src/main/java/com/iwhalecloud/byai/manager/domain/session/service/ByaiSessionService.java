@@ -30,6 +30,15 @@ public class ByaiSessionService {
     }
 
     /**
+     * 删除会话
+     *
+     * @param sessionId 会话标识
+     */
+    public void remove(Long sessionId) {
+        byaiSessionMapper.deleteById(sessionId);
+    }
+
+    /**
      * 查询调试会话
      *
      * @param agentId 数据员工标识

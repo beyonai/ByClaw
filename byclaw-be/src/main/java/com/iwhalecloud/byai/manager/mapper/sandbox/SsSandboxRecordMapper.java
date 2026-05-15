@@ -54,7 +54,9 @@ public interface SsSandboxRecordMapper {
      * @param id 沙箱记录ID
      * @return 影响行数
      */
-    int updateStatusToReleased(@Param("id") Long id);
+    int updateStatusToReleased(@Param("id") Long id,
+                               @Param("reason") String reason,
+                               @Param("releaseTime") Date releaseTime);
 
     int markReleased(@Param("id") Long id,
                      @Param("reason") String reason,
@@ -88,11 +90,25 @@ public interface SsSandboxRecordMapper {
      * @param timeoutMinutes 超时时间（分钟）
      * @return 超时的沙箱记录列表
      */
-    List<SsSandboxRecord> selectExpiredSandboxes(@Param("timeoutMinutes") int timeoutMinutes);
+    int countExpiredSandboxes(@Param("timeoutMinutes") int timeoutMinutes);
 
-    List<SsSandboxRecord> selectDueRenewSandboxes(@Param("now") Date now, @Param("limit") int limit);
+    List<SsSandboxRecord> selectExpiredSandboxesPage(@Param("timeoutMinutes") int timeoutMinutes,
+                                                     @Param("cursorTime") Date cursorTime,
+                                                     @Param("cursorId") Long cursorId,
+                                                     @Param("limit") int limit);
 
-    List<SsSandboxRecord> selectReconcileSandboxes(@Param("limit") int limit);
+    int countDueRenewSandboxes(@Param("now") Date now);
+
+    List<SsSandboxRecord> selectDueRenewSandboxesPage(@Param("now") Date now,
+                                                      @Param("cursorTime") Date cursorTime,
+                                                      @Param("cursorId") Long cursorId,
+                                                      @Param("limit") int limit);
+
+    int countReconcileSandboxes();
+
+    List<SsSandboxRecord> selectReconcileSandboxesPage(@Param("cursorTime") Date cursorTime,
+                                                       @Param("cursorId") Long cursorId,
+                                                       @Param("limit") int limit);
 
     int updateRenewSuccess(@Param("id") Long id,
                            @Param("remoteExpiresAt") Date remoteExpiresAt,

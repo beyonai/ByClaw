@@ -147,6 +147,7 @@ CREATE INDEX idx_sandbox_auto_release_timeout ON byai.ss_sandbox_record USING bt
 CREATE INDEX idx_ss_sandbox_record_active ON byai.ss_sandbox_record USING btree (user_code, sandbox_type, resource_id, status) TABLESPACE pg_default;
 CREATE INDEX idx_ss_sandbox_record_due_renew ON byai.ss_sandbox_record USING btree (status, lease_policy, next_renew_at) TABLESPACE pg_default;
 CREATE INDEX idx_ss_sandbox_record_idle_release ON byai.ss_sandbox_record USING btree (status, lease_policy, last_access_time) TABLESPACE pg_default;
+CREATE UNIQUE INDEX ux_ss_sandbox_record_active ON byai.ss_sandbox_record USING btree (user_code, sandbox_type, resource_id) TABLESPACE pg_default WHERE status IN ('STARTING'::character varying, 'RUNNING'::character varying, 'RELEASING'::character varying);
 
 -- ========== 约束 ==========
 ALTER TABLE byai.byai_message ADD PRIMARY KEY (id);

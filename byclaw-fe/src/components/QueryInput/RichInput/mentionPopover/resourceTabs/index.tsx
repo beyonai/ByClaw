@@ -10,7 +10,7 @@ import { Empty as AntdEmpty } from 'antd';
 import { ResourceType } from '../../utils/constants';
 import { IResourceType } from '../../types';
 import { ResourceTypeMap } from '@/constants/resource';
-import { queryDigEmployeeRelResourceAuth, listUserSpace } from '@/pages/manager/service/resources';
+import { queryDigEmployeeRelResourceAuth, listUserSpace, previewFile } from '@/pages/manager/service/resources';
 import { getDcSystemConfigListByStandType } from '@/service/auth';
 import { DEFAULT_MENU_CONFIG, getVisibleMenuKeysFromConfig } from '@/constants/system';
 import styles from './style.module.less';
@@ -57,8 +57,11 @@ const ResourceTabs: React.FC<Props> = ({
 
   const [fileList, setFileList] = useState<any[]>([]);
   const [fileLoading, setFileLoading] = useState(false);
-  const [currentPath, setCurrentPath] = useState('by/.openclaw/workspace-baiying-agent-10006728/');
+  const [currentPath, setCurrentPath] = useState('');
   const [pathHistory, setPathHistory] = useState<string[]>([]);
+  const [downloadingFile, setDownloadingFile] = useState<string | null>(null);
+  const downloadTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const downloadLockRef = useRef(false);
 
   const { layoutMode, agentInfo } = useGlobal();
 
@@ -155,6 +158,42 @@ const ResourceTabs: React.FC<Props> = ({
     }
   }, [pathHistory, fetchFileList]);
 
+  const handleDownloadFile = useCallback(
+    (filePath: string, fileName: string) => {
+      if (downloadLockRef.current || downloadingFile === filePath) {
+        return;
+      }
+
+      downloadLockRef.current = true;
+      setDownloadingFile(filePath);
+
+      if (downloadTimerRef.current) {
+        clearTimeout(downloadTimerRef.current);
+      }
+
+      downloadTimerRef.current = setTimeout(async () => {
+        try {
+          const response = await previewFile(filePath);
+          const url = window.URL.createObjectURL(new Blob([response.file]));
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = fileName;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(url);
+        } catch (error) {
+          console.error('文件下载失败:', error);
+        } finally {
+          downloadLockRef.current = false;
+          setDownloadingFile(null);
+          downloadTimerRef.current = null;
+        }
+      }, 200);
+    },
+    [downloadingFile]
+  );
+
   useEffect(() => {
     if (activeTab === 'file') {
       fetchFileList(currentPath);
@@ -188,6 +227,14 @@ const ResourceTabs: React.FC<Props> = ({
       }
     };
   }, [searchValue, queryKeyword]);
+
+  useEffect(() => {
+    return () => {
+      if (downloadTimerRef.current) {
+        clearTimeout(downloadTimerRef.current);
+      }
+    };
+  }, []);
 
   const fetchSharedResources = useCallback(
     async (keywordValue: string, force = false) => {
@@ -411,16 +458,19 @@ const ResourceTabs: React.FC<Props> = ({
                   <span className={styles.fileIcon}>{file.dir ? '📁' : '📄'}</span>
                   <span className={styles.fileName}>{file.name}</span>
                   {!file.dir && (
-                    <button
-                      type="button"
+                    <Button
+                      type="text"
+                      size="small"
                       className={styles.downloadBtn}
+                      loading={downloadingFile === file.filePath}
+                      disabled={!!downloadingFile}
                       onClick={(e) => {
                         e.stopPropagation();
-                        window.open(`/byaiService/commonFile/preview?filePath=${file.filePath}`);
+                        handleDownloadFile(file.filePath, file.name);
                       }}
                     >
                       下载
-                    </button>
+                    </Button>
                   )}
                 </div>
               ))
@@ -448,8 +498,10 @@ const ResourceTabs: React.FC<Props> = ({
     fileList,
     fileLoading,
     pathHistory,
+    downloadingFile,
     handleBackClick,
     handleFolderClick,
+    handleDownloadFile,
   ]);
 
   const visibleTabs = useMemo(() => {

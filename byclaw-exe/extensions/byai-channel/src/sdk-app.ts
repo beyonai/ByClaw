@@ -80,6 +80,8 @@ function getInboundMessageFromByFramework(data: AskAgentCommand) {
       }
     });
     questionText = questionTextArr.join("\n");
+  } else {
+    questionText = String(data.content);
   }
   if (Array.isArray(data.extraPayload?.resource_list)) {
     const remindTextArr: string[] = [];
@@ -99,11 +101,19 @@ function getInboundMessageFromByFramework(data: AskAgentCommand) {
       }
     });
     if (remindTextArr.length) {
+      let handleResourceTips = "";
+      if (resourceList.some(item => item.resourceType !== "KG_DOC_FILE" && item.resourceType !== "DIG_EMPLOYEE")) {
+        if (data.extraPayload?.agent_id || data.extraPayload?.agent_code) {
+          handleResourceTips = "For the resources, you can use \`baiying_call\` tool to handle them.";
+        } else {
+          handleResourceTips = "For the resources, you can find a subagent to handle them.";
+        }
+      }
       const remindPrefix = [
-        "<remind_context>",
+        "<!-- remind_context:start -->",
         `The user mentions:\n${remindTextArr.join("\n")}`,
-        resourceList.some(item => item.resourceType !== "KG_DOC_FILE" && item.resourceType !== "DIG_EMPLOYEE") ? "For the resources, you can use \`baiying_call\` tool to handle them." : "",
-        "</remind_context>",
+         handleResourceTips,
+        "<!-- remind_context:end -->",
       ].filter(Boolean).join("\n");
       questionText = `${remindPrefix}\n${questionText}`;
     }

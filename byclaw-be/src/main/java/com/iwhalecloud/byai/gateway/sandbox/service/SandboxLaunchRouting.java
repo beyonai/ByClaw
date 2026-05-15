@@ -20,7 +20,7 @@ public class SandboxLaunchRouting {
 
     public SandboxLaunchRouting(String sandboxType, Long effectiveResourceId) {
         this.sandboxType = sandboxType;
-        this.effectiveResourceId = effectiveResourceId;
+        this.effectiveResourceId = normalizeEffectiveResourceId(sandboxType, effectiveResourceId);
     }
 
     public String getSandboxType() {
@@ -33,5 +33,15 @@ public class SandboxLaunchRouting {
 
     public boolean isByclawCodeAgent() {
         return BYCLAW_CODE_AGENT_SANDBOX_TYPE.equals(sandboxType);
+    }
+
+    public static Long normalizeEffectiveResourceId(String sandboxType, Long resourceId) {
+        if (DEFAULT_SANDBOX_TYPE.equals(sandboxType)) {
+            return DEFAULT_RESOURCE_ID;
+        }
+        if (BYCLAW_CODE_AGENT_SANDBOX_TYPE.equals(sandboxType)) {
+            return DEFAULT_CODE_AGENT_RESOURCE_ID;
+        }
+        return resourceId;
     }
 }

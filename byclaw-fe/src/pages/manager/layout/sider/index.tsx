@@ -67,9 +67,13 @@ const Sider: React.FC = () => {
   const [menuConfig, setMenuConfig] = useState<any[]>(fallbackMenuConfig);
 
   useEffect(() => {
+    if (!userInfo) {
+      return;
+    }
+
     let mounted = true;
 
-    getManagerMenuConfig()
+    getManagerMenuConfig({ refresh: true })
       .then((menus) => {
         if (mounted && menus.length > 0) {
           setMenuConfig(menus.filter((item) => item.routePath));
@@ -84,7 +88,7 @@ const Sider: React.FC = () => {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [userInfo?.userId]);
 
   // Filter menu items by blockedPaths
   const filteredMenus = useMemo(() => {
@@ -99,15 +103,18 @@ const Sider: React.FC = () => {
   const menuItems = useMemo(() => {
     return buildSiderMenuItems(
       filteredMenus,
-      (item) =>
-        item.localeId
-          ? intl.formatMessage({
+      (item) => {
+        const name = isEnglish ? item.nameEn || item.name : item.name;
+
+        if (item.localeId) {
+          return intl.formatMessage({
             id: item.localeId,
-            defaultMessage: isEnglish ? item.nameEn || item.name : item.name,
-          })
-          : isEnglish
-            ? item.nameEn || item.name
-            : item.name,
+            defaultMessage: name,
+          });
+        }
+
+        return name;
+      },
       (icon) => {
         const IconComponent = icon;
         return IconComponent ? <IconComponent style={{ fontSize: 16 }} /> : null;

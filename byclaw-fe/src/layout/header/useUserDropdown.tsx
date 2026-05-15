@@ -9,7 +9,7 @@ import { getRuntimeActualUrl } from '@/utils';
 import { isAdminVip } from '@/utils/auth';
 import useAppStore from '@/models/common/useAppStore';
 import { getDisplayUserNameInChat } from '@/utils/chat';
-import { getssoToken } from '@/utils/auth';
+import { getssoToken, getToken } from '@/utils/auth';
 import {
   fallbackMenuConfig,
   filterMenusByAdminVip,
@@ -31,9 +31,13 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
   const [menuConfig, setMenuConfig] = useState<any[]>(fallbackMenuConfig);
 
   useEffect(() => {
+    if (!userInfo) {
+      return;
+    }
+
     let mounted = true;
 
-    getManagerMenuConfig()
+    getManagerMenuConfig({ refresh: true })
       .then((menus) => {
         if (mounted && menus.length > 0) {
           setMenuConfig(menus);
@@ -48,7 +52,7 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [userInfo?.userId]);
 
   const handleClick = useCallback(
     ({ key }: any) => {
@@ -71,7 +75,13 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
       }
       const matchedMenu = menuConfig.find((item: any) => item.path === key);
       if (matchedMenu?.menuUrl) {
-        window.open(normalizeMenuUrl(matchedMenu.menuUrl), '_blank');
+        let url = normalizeMenuUrl(matchedMenu.menuUrl);
+        if (url.includes('${Beyond-token}')) {
+          url = url.replace('${Beyond-token}', getToken());
+        }
+        console.log('menuUrl', url);
+        console.log('url', url);
+        window.open(url, '_blank');
         return;
       }
       if (key?.startsWith('/manager/')) {
@@ -105,16 +115,19 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
       blockedPaths || []
     ).map((item: any) => {
       const IconComponent = item.icon;
+      let label = item.name;
+
+      if (item.localeId) {
+        label = intl.formatMessage({
+          id: item.localeId,
+          defaultMessage: item.name,
+        });
+      }
 
       return {
         key: item.path,
         icon: IconComponent ? <IconComponent className={styles.menuIcon} /> : null,
-        label: item.localeId
-          ? intl.formatMessage({
-            id: item.localeId,
-            defaultMessage: item.name,
-          })
-          : item.name,
+        label,
       };
     });
 

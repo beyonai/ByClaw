@@ -33,6 +33,11 @@ public class AuthDigitEmployVo {
     private String resourceCode;
 
     /**
+     * 资源归属类型：enterprise-企业，personal-个人。
+     */
+    private String ownerType;
+
+    /**
      * 智能体类型。
      */
     private String agentType;
@@ -102,6 +107,16 @@ public class AuthDigitEmployVo {
      * 标签名称
      */
     private String tagName;
+
+    /**
+     * 是否为当前用户默认助理。
+     */
+    private Boolean isDefault;
+
+    /**
+     * 是否允许当前用户将该数字员工设为默认助理。
+     */
+    private Boolean canSetDefault;
 
     /**
      * 优先返回订阅的授权类型

@@ -14,6 +14,7 @@ import { getDcSystemConfig } from '@/pages/manager/service/session';
 
 const MANAGER_MENU_PARAM_CODE = 'SYSTEM_BACKEND_MENU_MANAGE';
 let managerMenuConfigPromise: Promise<any[]> | null = null;
+let managerMenuConfigCache: any[] | null = null;
 
 const iconByMenuCode: Record<string, any> = {
   menu_org: ApartmentOutlined,
@@ -129,15 +130,42 @@ export const normalizeManagerMenuConfig = (menus: any[]) =>
     }))
     .filter((item) => item.path);
 
-export const getManagerMenuConfig = async () => {
+export const resetManagerMenuConfigCache = () => {
+  managerMenuConfigPromise = null;
+  managerMenuConfigCache = null;
+};
+
+export const getManagerMenuConfig = async (options?: { refresh?: boolean }) => {
+  if (options?.refresh) {
+    managerMenuConfigPromise = null;
+    managerMenuConfigCache = null;
+  }
+
+  if (managerMenuConfigCache) {
+    return managerMenuConfigCache;
+  }
+
   if (!managerMenuConfigPromise) {
     managerMenuConfigPromise = getDcSystemConfig({
       paramCode: MANAGER_MENU_PARAM_CODE,
-    }).then((res) => {
-      const response: any = res;
-      const list = parseConfigList(response?.paramValue || response?.data?.paramValue || response?.data || response);
-      return normalizeManagerMenuConfig(list);
-    });
+    })
+      .then((res) => {
+        const response: any = res;
+        const list = parseConfigList(response?.paramValue || response?.data?.paramValue || response?.data || response);
+        const menus = normalizeManagerMenuConfig(list);
+
+        if (menus.length > 0) {
+          managerMenuConfigCache = menus;
+        } else {
+          managerMenuConfigPromise = null;
+        }
+
+        return menus;
+      })
+      .catch((error) => {
+        managerMenuConfigPromise = null;
+        throw error;
+      });
   }
 
   return managerMenuConfigPromise;

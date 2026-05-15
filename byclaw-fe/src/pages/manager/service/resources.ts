@@ -264,6 +264,16 @@ export function deleteResource(params: any) {
 }
 
 /**
+ * 恢复资源
+ * 根据资源ID恢复已注销的资源
+ * @param params 恢复参数（包含resourceId资源ID）
+ * @returns Promise 恢复结果
+ */
+export function restoreResource(params: any) {
+  return POST<any>('/byaiService/tool/restoreResourceById', params);
+}
+
+/**
  * 查询用户空间文件列表
  * 获取用户在知识库空间中的文件列表
  * @param params 查询参数（包含userCode用户编码、keyword搜索关键字、sessionId会话ID）
@@ -311,6 +321,7 @@ export interface ResourceOperationPermissions {
   canApplyUse: boolean; // 是否可以申请使用
   canAuditUse: boolean; // 是否有审核权限
   canSetDefault: boolean; // 是否有设为默认权限
+  canRestore: boolean; // 是否有恢复权限
 }
 
 /**
@@ -342,4 +353,29 @@ export interface FileItem {
  */
 export const listUserSpace = async (params: { prefix: string; resourceId?: string | number }) => {
   return await POST<any>('/byaiService/tool/listUserSpace', params);
+};
+
+/**
+ * 文件预览响应
+ * 包含文件名和文件内容的响应对象
+ */
+export interface FilePreviewResponse {
+  fileName: string;
+  file: Blob;
+}
+
+/**
+ * 预览文件
+ * 通过文件路径获取文件预览内容
+ * @param filePath 文件路径
+ * @returns Promise<FilePreviewResponse> 文件预览响应
+ */
+export const previewFile = (filePath: string) => {
+  return GET<FilePreviewResponse>(
+    `/byaiService/commonFile/preview?filePath=${encodeURIComponent(filePath)}`,
+    undefined,
+    {
+      responseType: 'blob',
+    }
+  );
 };
