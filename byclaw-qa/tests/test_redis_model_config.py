@@ -2,6 +2,7 @@ import json
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
+from by_qa.core.model_config import LLMModelProfile
 from exceptions import ModelConfigError, ModelNotFoundError
 from redis_model_config import (
     AI_MODEL_TYPE_REDIS_KEY,
@@ -209,10 +210,38 @@ async def test_get_config_llm_type(mock_redis):
         mock_settings.return_value = MagicMock(
             embedding_dimension=None, embedding_distance_metric=None
         )
-        config = await provider.get_config("classifier")
+        config = await provider.get_config("standard")
     assert config.model_name == "gpt4"
     assert config.base_url == "http://llm"
     assert config.temperature == 0.5
+
+
+@pytest.mark.asyncio
+async def test_get_config_lightweight_uses_same_llm_pool(mock_redis):
+    mock_redis.hgetall.return_value = _make_redis_payload(
+        llm_models=[_make_llm_model()]
+    )
+    provider = RedisModelConfigProvider(mock_redis)
+    with patch("redis_model_config.get_settings") as mock_settings:
+        mock_settings.return_value = MagicMock(
+            embedding_dimension=None, embedding_distance_metric=None
+        )
+        config = await provider.get_config(LLMModelProfile.LIGHTWEIGHT)
+    assert config.model_name == "gpt4"
+
+
+@pytest.mark.asyncio
+async def test_get_config_accepts_profile_enum(mock_redis):
+    mock_redis.hgetall.return_value = _make_redis_payload(
+        llm_models=[_make_llm_model()]
+    )
+    provider = RedisModelConfigProvider(mock_redis)
+    with patch("redis_model_config.get_settings") as mock_settings:
+        mock_settings.return_value = MagicMock(
+            embedding_dimension=None, embedding_distance_metric=None
+        )
+        config = await provider.get_config(LLMModelProfile.STANDARD)
+    assert config.model_name == "gpt4"
 
 
 @pytest.mark.asyncio
@@ -238,7 +267,7 @@ async def test_get_config_unknown_type_raises(mock_redis):
     )
     provider = RedisModelConfigProvider(mock_redis)
     with pytest.raises(ModelConfigError, match="Unknown model_type"):
-        await provider.get_config("unknown_type")
+        await provider.get_config("classifier")
 
 
 @pytest.mark.asyncio
@@ -247,7 +276,7 @@ async def test_get_config_no_llm_with_required_ability_raises(mock_redis):
     mock_redis.hgetall.return_value = _make_redis_payload(llm_models=[model])
     provider = RedisModelConfigProvider(mock_redis)
     with pytest.raises(ModelNotFoundError, match="No LLM model"):
-        await provider.get_config("classifier")
+        await provider.get_config("standard")
 
 
 # --- prologue_model_id priority ---
@@ -267,7 +296,7 @@ async def test_get_config_uses_prologue_model_id_when_found(mock_redis):
             mock_settings.return_value = MagicMock(
                 embedding_dimension=None, embedding_distance_metric=None
             )
-            config = await provider.get_config("generator")
+            config = await provider.get_config("standard")
     finally:
         request_prologue_model_id.reset(token)
 
@@ -290,7 +319,7 @@ async def test_get_config_falls_back_when_prologue_model_id_not_found(mock_redis
             mock_settings.return_value = MagicMock(
                 embedding_dimension=None, embedding_distance_metric=None
             )
-            config = await provider.get_config("classifier")
+            config = await provider.get_config("standard")
     finally:
         request_prologue_model_id.reset(token)
 
@@ -310,7 +339,7 @@ async def test_get_config_no_prologue_model_id_uses_type_list(mock_redis):
         mock_settings.return_value = MagicMock(
             embedding_dimension=None, embedding_distance_metric=None
         )
-        config = await provider.get_config("retrieval")
+        config = await provider.get_config("standard")
 
     assert config.model_name == "typelist-model"
     mock_redis.hget.assert_not_called()

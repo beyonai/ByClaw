@@ -12,7 +12,7 @@ from typing import Any
 
 from by_qa.config import get_settings
 from by_qa.core import logger
-from by_qa.core.model_config import ModelConfig, ModelConfigProvider
+from by_qa.core.model_config import LLMModelProfile, ModelConfig, ModelConfigProvider
 from exceptions import ModelConfigError, ModelNotFoundError
 
 
@@ -28,14 +28,8 @@ LLM_MODEL_TYPE = "LLM"
 EMBEDDING_MODEL_TYPE = "EMBEDDING"
 LLM_REQUIRED_ABILITY = "6"
 
-LLM_MODEL_TYPES = {
-    "classifier",
-    "retrieval",
-    "generator",
-    "quality",
-    "decomposer",
-    "aggregator",
-}
+LLM_PROFILES = {LLMModelProfile.STANDARD.value, LLMModelProfile.LIGHTWEIGHT.value}
+EMBEDDING_PROFILE = LLMModelProfile.EMBEDDING.value
 
 
 class RedisModelConfigProvider(ModelConfigProvider):
@@ -58,15 +52,16 @@ class RedisModelConfigProvider(ModelConfigProvider):
             self._cache_loaded = True
             self._log_loaded_cache()
 
-    async def get_config(self, model_type: str) -> ModelConfig:
+    async def get_config(self, model_type: str | LLMModelProfile) -> ModelConfig:
         await self.load_cache()
-        if model_type in LLM_MODEL_TYPES:
+        profile_value = model_type.value if isinstance(model_type, LLMModelProfile) else model_type
+        if profile_value in LLM_PROFILES:
             model = await self._load_first_llm_model()
             return self._build_model_config(
                 model,
                 temperature=_extract_temperature(model),
             )
-        if model_type == "embedding":
+        if profile_value == EMBEDDING_PROFILE:
             settings = get_settings()
             model = await self._load_first_model_by_type(EMBEDDING_MODEL_TYPE)
             return self._build_model_config(
