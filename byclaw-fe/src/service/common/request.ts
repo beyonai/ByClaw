@@ -275,11 +275,28 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
     .then((res) => {
       if (config && config.responseType === 'blob') {
         // @ts-ignore
-        const fileName = res.headers.get('content-disposition') || '';
-        const str = 'filename=';
-        const name = fileName.replace(/"/g, '').substr(fileName.indexOf(str) + str.length);
+        const disposition = res.headers.get('content-disposition') || '';
+        // 解析 Content-Disposition 文件名：优先取 RFC 5987 的 filename*=UTF-8''xxx（中文 / 特殊字符更稳），
+        // 缺失时再退回 filename="xxx"。两条都用各自的正则截断到下一个 ';' 或行尾，
+        // 避免之前的 substr(indexOf('filename=')+...) 把后续 filename*=... 一起拼进文件名。
+        let rawName = '';
+        const star = disposition.match(/filename\*=([^']*)''([^;\r\n]+)/i);
+        if (star) {
+          rawName = star[2];
+        } else {
+          const plain = disposition.match(/filename="?([^";\r\n]+)"?/i);
+          if (plain) {
+            rawName = plain[1];
+          }
+        }
+        let resolvedName = '';
+        try {
+          resolvedName = rawName ? window.decodeURIComponent(rawName) : '';
+        } catch (e) {
+          resolvedName = rawName;
+        }
         return {
-          fileName: window.decodeURIComponent(name),
+          fileName: resolvedName,
           file: res.data,
         };
       }
