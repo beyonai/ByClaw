@@ -9,7 +9,6 @@
       "name": "DataCloud Worker (byclaw-data)",
       "type": "debugpy",
       "request": "launch",
-      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
       "program": "${workspaceFolder}/src/byclaw_data/main.py",
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
