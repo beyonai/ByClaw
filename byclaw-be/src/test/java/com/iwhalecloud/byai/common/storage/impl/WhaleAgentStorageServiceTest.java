@@ -294,6 +294,24 @@ class WhaleAgentStorageServiceTest {
             "fileShareType", SHARE_TYPE_PUBLIC)));
     }
 
+    @Test
+    void getMetadata_listsParentDirectoryAndMapsFileMetadata() {
+        FeignWhaleAgentService feignWhaleAgentService = mock(FeignWhaleAgentService.class);
+        when(feignWhaleAgentService.listFiles(eq(new WhaleAgentListFilesRequest("/byclaw-user001/public/reports",
+            SHARE_TYPE_PUBLIC)))).thenReturn(KnowledgeResponse.success(List.of(
+            fileItem(false, "byclaw-user001/public/reports/report.md", "report.md", 5L))));
+
+        WhaleAgentStorageService service = objectStorage(feignWhaleAgentService);
+        FileMetadata metadata = service.getMetadata("/public/reports/report.md", "byclaw-user001");
+
+        assertThat(metadata.getBucketName()).isEqualTo("byclaw-user001");
+        assertThat(metadata.getFileName()).isEqualTo("report.md");
+        assertThat(metadata.getFileUrl()).isEqualTo("/byclaw-user001/public/reports/report.md");
+        assertThat(metadata.getFileSize()).isEqualTo(5L);
+        assertThat(metadata.getFileType()).isEqualTo("md");
+        assertThat(metadata.getStorageType()).isEqualTo("whale-agent");
+    }
+
     private DefaultFileIngressService ingressService(FeignWhaleAgentService feignWhaleAgentService) {
         FileIngressBackendRegistry backendRegistry = mock(FileIngressBackendRegistry.class);
         ObjectStorageConfiguration configuration = mock(ObjectStorageConfiguration.class);
