@@ -308,25 +308,17 @@ public class ToolManController {
     }
 
     /**
-     * 恢复资源。
-     * 将已注销（状态3）的资源恢复为已上架（状态2）。
-     *
-     * @author qin.guoquan
-     * @date 2026-05-14
+     * 硬删除资源及其所有关联关系与资源产物。
      */
-    @PostMapping("/restoreResourceById")
-    public ResponseUtil<Void> restoreResourceById(@RequestBody(required = false) DeleteResourceQo request,
+    @PostMapping("/deleteResourceAndAllRel")
+    public ResponseUtil<Void> deleteResourceAndAllRel(@RequestBody(required = false) DeleteResourceQo request,
         @Parameter(description = "资源ID", required = false) @RequestParam(value = "resourceId",
-            required = false) Long resourceId,
-        @Parameter(description = "是否强制恢复", required = false) @RequestParam(value = "forceRestore",
-            required = false) Boolean forceRestore) {
+            required = false) Long resourceId) {
         try {
             Long finalResourceId = request != null && request.getResourceId() != null ? request.getResourceId()
                 : resourceId;
-            Boolean finalForceRestore = request != null && request.getForceDelete() != null ? request.getForceDelete()
-                : forceRestore;
-            toolManService.restoreManagedResource(finalResourceId, Boolean.TRUE.equals(finalForceRestore));
-            return ResponseUtil.success(I18nUtil.get("tool.resource.restore.success"));
+            toolManService.deleteResourceAndAllRel(finalResourceId);
+            return ResponseUtil.success(I18nUtil.get("tool.resource.delete.success"));
         }
         catch (IllegalArgumentException e) {
             return ResponseUtil.fail(resolveResourceNotFoundMessage(e));
@@ -335,9 +327,9 @@ public class ToolManController {
             return ResponseUtil.fail(e.getMessage());
         }
         catch (Exception e) {
-            logger.error("restoreResourceById failed", e);
+            logger.error("deleteResourceAndAllRel failed", e);
             return ResponseUtil
-                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.restore.failed"));
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.delete.failed"));
         }
     }
 

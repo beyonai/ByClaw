@@ -15,6 +15,7 @@ export type ResourceCardActionScene = 'personal' | 'enterprise';
 export interface IResourceCardItem {
   resourceId?: string;
   resourceName?: string;
+  resourceCode?: string;
   name?: string;
   resourceDesc?: string;
   intro?: string;
@@ -47,7 +48,6 @@ export interface IResourceCardItem {
 
 type ResourceCardActionConfig = {
   scene?: ResourceCardActionScene;
-  showSetDefault?: boolean;
   enableKnowledgeManage?: boolean;
   editDisabledTip?: React.ReactNode;
   manageAuthDisabledTip?: React.ReactNode;
@@ -142,12 +142,16 @@ const RenderContent = (props: ResourceCardProps) => {
     if (resource.tagName) {
       return resource.tagName;
     }
-    // 默认个人助理
-    if (resource.resourceBizType === 'DIG_EMPLOYEE' && ownerType === 'personal_default') {
-      return intl.formatMessage({ id: 'resource.personalDefaultAssistant' });
+    // 超级助手只按 resourceCode 后缀识别，不再依赖 ownerType=personal_default。
+    if (
+      resource.resourceBizType === 'DIG_EMPLOYEE' &&
+      ownerType === 'personal' &&
+      resource.resourceCode?.endsWith('_main')
+    ) {
+      return intl.formatMessage({ id: 'resource.superAssistant' });
     }
     // 个人助理
-    if (resource.resourceBizType === 'DIG_EMPLOYEE' && ownerType === 'personal') {
+    if (resource.resourceBizType === 'DIG_EMPLOYEE' && (ownerType === 'personal' || ownerType === 'personal_default')) {
       return intl.formatMessage({ id: 'resource.personalAssistant' });
     }
     // 默认知识库
