@@ -9,6 +9,7 @@ public class DingtalkMessageDownloadInfo {
 
     private String downloadCode;
     private String fileName;
+    private String downloadUrl;
 
     public DingtalkMessageDownloadInfo(String downloadCode, String fileName) {
         this.downloadCode = downloadCode;
