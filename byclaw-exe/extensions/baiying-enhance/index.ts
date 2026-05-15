@@ -77,8 +77,8 @@ function resolveExecutorResourcesDir(api: OpenClawPluginApi, cfg: BaiyingEnhance
 }
 
 /** `plugins.entries.*` paths registered as in-process reload when this plugin syncs via `writeConfigFile` (see `configSyncHotPluginEntriesPrefixes` in openclaw.json). */
-function resolveConfigSyncHotPrefixes(cfg: BaiyingEnhancePluginConfig): string[] {
-  const out = new Set<string>(["plugins.entries.baiying-enhance"]);
+export function resolveConfigSyncHotPrefixes(cfg: BaiyingEnhancePluginConfig): string[] {
+  const out = new Set<string>(["plugins.entries.baiying-enhance", "agents"]);
   const extras = cfg.configSyncHotPluginEntriesPrefixes;
   if (Array.isArray(extras)) {
     for (const entry of extras) {

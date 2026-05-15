@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
 import { MAIN_AGENTS_MARKER } from "./main-workspace-seed.js";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -20,7 +20,13 @@ function stableHash(): string {
 
 function createMockApi(
   writeConfigFile: ReturnType<typeof vi.fn>,
-  agentList?: Array<{ id: string; name: string; workspace?: string; identity?: { name: string } }>,
+  agentList?: Array<{
+    id: string;
+    name: string;
+    workspace?: string;
+    identity?: { name: string };
+    skills?: string[];
+  }>,
 ) {
   const loadConfig = vi.fn(() => ({
     agents: {
@@ -41,6 +47,11 @@ function createMockApi(
       },
     },
   };
+}
+
+async function writeWorkspaceSkill(workspaceDir: string, name: string): Promise<void> {
+  await mkdir(path.join(workspaceDir, "skills", name), { recursive: true });
+  await writeFile(path.join(workspaceDir, "skills", name, "SKILL.md"), `# ${name}\n`, "utf8");
 }
 
 describe("createAgentWatchdog", () => {
@@ -69,6 +80,7 @@ describe("createAgentWatchdog", () => {
       pluginConfig: {
         embedApiKeysFromJson: true,
         workspaceAutoSeed: false,
+        workspaceSkillAutoEnable: false,
         persistAgentContentIndex: true,
       },
       debounceMs: 60_000,
@@ -106,6 +118,7 @@ describe("createAgentWatchdog", () => {
       pluginConfig: {
         embedApiKeysFromJson: true,
         workspaceAutoSeed: false,
+        workspaceSkillAutoEnable: false,
         persistAgentContentIndex: true,
       },
       debounceMs: 60_000,
@@ -143,6 +156,7 @@ describe("createAgentWatchdog", () => {
       pluginConfig: {
         embedApiKeysFromJson: true,
         workspaceAutoSeed: false,
+        workspaceSkillAutoEnable: false,
         persistAgentContentIndex: true,
       },
       debounceMs: 60_000,
@@ -171,6 +185,7 @@ describe("createAgentWatchdog", () => {
       pluginConfig: {
         embedApiKeysFromJson: true,
         workspaceAutoSeed: false,
+        workspaceSkillAutoEnable: false,
         persistAgentContentIndex: true,
       },
       debounceMs: 60_000,
@@ -251,6 +266,7 @@ describe("createAgentWatchdog", () => {
       pluginConfig: {
         embedApiKeysFromJson: true,
         workspaceAutoSeed: false,
+        workspaceSkillAutoEnable: false,
         persistAgentContentIndex: true,
       },
       debounceMs: 60_000,
@@ -384,5 +400,386 @@ describe("createAgentWatchdog", () => {
     const routingMd = await readFile(path.join(mainWs, SUBAGENT_ROUTING_FILENAME), "utf8");
     expect(routingMd.startsWith(SUBAGENT_ROUTING_MARKER)).toBe(true);
     expect(routingMd).toContain(agentId);
+  });
+
+  it("calls writeConfigFile when only workspace skills changed", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-skill-"));
+    const agentWs = await mkdtemp(path.join(tmpdir(), "baiying-agentws-"));
+    const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-"));
+    await writeFile(path.join(dir, "demo.json"), STABLE_AGENT_JSON, "utf8");
+    await writeWorkspaceSkill(agentWs, "alpha");
+    const agentId = `${MANAGED_AGENT_PREFIX}10863047`;
+    await writeFile(
+      path.join(dir, DEFAULT_INDEX_FILENAME),
+      JSON.stringify({
+        version: INDEX_VERSION,
+        entries: { [agentId]: stableHash() },
+      }),
+      "utf8",
+    );
+
+    const writeConfigFile = vi.fn(async () => {});
+    const api = createMockApi(writeConfigFile, [
+      { id: "main", name: "Main", workspace: mainWs, identity: { name: "Main" } },
+      { id: agentId, name: "Demo", workspace: agentWs, identity: { name: "Demo" }, skills: [] },
+    ]) as any;
+
+    const wd = createAgentWatchdog({
+      api,
+      registry: new AgentRegistryState(),
+      absoluteDir: dir,
+      contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+      executorPath: path.join(dir, "executor.py"),
+      pluginConfig: {
+        embedApiKeysFromJson: true,
+        workspaceAutoSeed: false,
+        persistAgentContentIndex: true,
+        workspaceSkillScanIntervalMs: 0,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start();
+    await wd.__flushNow!();
+    await wd.stop();
+
+    expect(writeConfigFile).toHaveBeenCalledTimes(1);
+    const next = writeConfigFile.mock.calls[0][0];
+    const entry = next.agents.list.find((a: any) => a.id === agentId);
+    expect(entry.skills).toEqual(["alpha"]);
+  });
+
+  it("merges JSON, agent workspace, and main shared workspace skills", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-skill-"));
+    const agentWs = await mkdtemp(path.join(tmpdir(), "baiying-agentws-"));
+    const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-"));
+    await writeFile(
+      path.join(dir, "demo.json"),
+      JSON.stringify({
+        skills: ["json-skill", "shared-skill"],
+        agent_list: [{ id: 10863047, name: "Demo", instructions: "Be brief." }],
+      }),
+      "utf8",
+    );
+    await writeWorkspaceSkill(agentWs, "agent-skill");
+    await writeWorkspaceSkill(mainWs, "shared-skill");
+    await writeWorkspaceSkill(mainWs, "main-skill");
+    const agentId = `${MANAGED_AGENT_PREFIX}10863047`;
+
+    const writeConfigFile = vi.fn(async () => {});
+    const api = createMockApi(writeConfigFile, [
+      { id: "main", name: "Main", workspace: mainWs, identity: { name: "Main" } },
+      { id: agentId, name: "Demo", workspace: agentWs, identity: { name: "Demo" }, skills: [] },
+    ]) as any;
+
+    const wd = createAgentWatchdog({
+      api,
+      registry: new AgentRegistryState(),
+      absoluteDir: dir,
+      contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+      executorPath: path.join(dir, "executor.py"),
+      pluginConfig: {
+        embedApiKeysFromJson: true,
+        workspaceAutoSeed: false,
+        persistAgentContentIndex: false,
+        workspaceSkillIncludeMainShared: true,
+        workspaceSkillScanIntervalMs: 0,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start();
+    await wd.__flushNow!();
+    await wd.stop();
+
+    expect(writeConfigFile).toHaveBeenCalledTimes(1);
+    const next = writeConfigFile.mock.calls[0][0];
+    const entry = next.agents.list.find((a: any) => a.id === agentId);
+    expect(entry.skills).toEqual(["json-skill", "shared-skill", "agent-skill", "main-skill"]);
+  });
+
+  it("does not merge main workspace skills by default", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-skill-"));
+    const agentWs = await mkdtemp(path.join(tmpdir(), "baiying-agentws-"));
+    const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-"));
+    await writeFile(path.join(dir, "demo.json"), STABLE_AGENT_JSON, "utf8");
+    await writeWorkspaceSkill(mainWs, "main-only-skill");
+    const agentId = `${MANAGED_AGENT_PREFIX}10863047`;
+
+    const writeConfigFile = vi.fn(async () => {});
+    const api = createMockApi(writeConfigFile, [
+      { id: "main", name: "Main", workspace: mainWs, identity: { name: "Main" } },
+      { id: agentId, name: "Demo", workspace: agentWs, identity: { name: "Demo" }, skills: [] },
+    ]) as any;
+
+    const wd = createAgentWatchdog({
+      api,
+      registry: new AgentRegistryState(),
+      absoluteDir: dir,
+      contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+      executorPath: path.join(dir, "executor.py"),
+      pluginConfig: {
+        embedApiKeysFromJson: true,
+        workspaceAutoSeed: false,
+        persistAgentContentIndex: false,
+        workspaceSkillScanIntervalMs: 0,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start();
+    await wd.__flushNow!();
+    await wd.stop();
+
+    expect(writeConfigFile).toHaveBeenCalledTimes(1);
+    const next = writeConfigFile.mock.calls[0][0];
+    const entry = next.agents.list.find((a: any) => a.id === agentId);
+    expect(entry.skills).toEqual([]);
+  });
+
+  it("does not merge skills from another managed agent workspace", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-skill-"));
+    const agentOneWs = await mkdtemp(path.join(tmpdir(), "baiying-agent-one-ws-"));
+    const agentTwoWs = await mkdtemp(path.join(tmpdir(), "baiying-agent-two-ws-"));
+    const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-"));
+    await writeFile(
+      path.join(dir, "one.json"),
+      JSON.stringify({
+        relSkills: ["dws", "clawhub"],
+        agent_list: [{ id: 10863047, name: "One", instructions: "Be brief." }],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(dir, "two.json"),
+      JSON.stringify({
+        agent_list: [{ id: 10863048, name: "Two", instructions: "Be brief." }],
+      }),
+      "utf8",
+    );
+    await writeWorkspaceSkill(agentTwoWs, "other-agent-skill");
+    const agentOneId = `${MANAGED_AGENT_PREFIX}10863047`;
+    const agentTwoId = `${MANAGED_AGENT_PREFIX}10863048`;
+
+    const writeConfigFile = vi.fn(async () => {});
+    const api = createMockApi(writeConfigFile, [
+      { id: "main", name: "Main", workspace: mainWs, identity: { name: "Main" } },
+      {
+        id: agentOneId,
+        name: "One",
+        workspace: agentOneWs,
+        identity: { name: "One" },
+        skills: [],
+      },
+      {
+        id: agentTwoId,
+        name: "Two",
+        workspace: agentTwoWs,
+        identity: { name: "Two" },
+        skills: [],
+      },
+    ]) as any;
+
+    const wd = createAgentWatchdog({
+      api,
+      registry: new AgentRegistryState(),
+      absoluteDir: dir,
+      contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+      executorPath: path.join(dir, "executor.py"),
+      pluginConfig: {
+        embedApiKeysFromJson: true,
+        workspaceAutoSeed: false,
+        persistAgentContentIndex: false,
+        workspaceSkillScanIntervalMs: 0,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start();
+    await wd.__flushNow!();
+    await wd.stop();
+
+    expect(writeConfigFile).toHaveBeenCalledTimes(1);
+    const next = writeConfigFile.mock.calls[0][0];
+    const one = next.agents.list.find((a: any) => a.id === agentOneId);
+    const two = next.agents.list.find((a: any) => a.id === agentTwoId);
+    expect(one.skills).toEqual(["dws", "clawhub"]);
+    expect(two.skills).toEqual(["other-agent-skill"]);
+  });
+
+  it("removes stale workspace skills from config when the uploaded SKILL.md is gone", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-skill-"));
+    const agentWs = await mkdtemp(path.join(tmpdir(), "baiying-agentws-"));
+    const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-"));
+    await writeFile(path.join(dir, "demo.json"), STABLE_AGENT_JSON, "utf8");
+    const agentId = `${MANAGED_AGENT_PREFIX}10863047`;
+    await writeFile(
+      path.join(dir, DEFAULT_INDEX_FILENAME),
+      JSON.stringify({
+        version: INDEX_VERSION,
+        entries: { [agentId]: stableHash() },
+      }),
+      "utf8",
+    );
+
+    const writeConfigFile = vi.fn(async () => {});
+    const api = createMockApi(writeConfigFile, [
+      { id: "main", name: "Main", workspace: mainWs, identity: { name: "Main" } },
+      {
+        id: agentId,
+        name: "Demo",
+        workspace: agentWs,
+        identity: { name: "Demo" },
+        skills: ["deleted-skill"],
+      },
+    ]) as any;
+
+    const wd = createAgentWatchdog({
+      api,
+      registry: new AgentRegistryState(),
+      absoluteDir: dir,
+      contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+      executorPath: path.join(dir, "executor.py"),
+      pluginConfig: {
+        embedApiKeysFromJson: true,
+        workspaceAutoSeed: false,
+        persistAgentContentIndex: true,
+        workspaceSkillScanIntervalMs: 0,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start();
+    await wd.__flushNow!();
+    await wd.stop();
+
+    expect(writeConfigFile).toHaveBeenCalledTimes(1);
+    const next = writeConfigFile.mock.calls[0][0];
+    const entry = next.agents.list.find((a: any) => a.id === agentId);
+    expect(entry.skills).toEqual([]);
+  });
+
+  it("periodic workspace skill scan does not unregister agents when agent JSON is unavailable", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-skill-"));
+    const agentWs = await mkdtemp(path.join(tmpdir(), "baiying-agentws-"));
+    const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-"));
+    const jsonPath = path.join(dir, "demo.json");
+    await writeFile(jsonPath, STABLE_AGENT_JSON, "utf8");
+    const agentId = `${MANAGED_AGENT_PREFIX}10863047`;
+
+    let activeAgentList: any[] = [
+      { id: "main", name: "Main", workspace: mainWs, identity: { name: "Main" } },
+    ];
+    const writeConfigFile = vi.fn(async (next) => {
+      activeAgentList = next.agents.list;
+    });
+    const api = createMockApi(writeConfigFile) as any;
+    api.runtime.config.loadConfig = vi.fn(() => ({
+      agents: { list: activeAgentList },
+      models: { providers: {} },
+    }));
+
+    const wd = createAgentWatchdog({
+      api,
+      registry: new AgentRegistryState(),
+      absoluteDir: dir,
+      contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+      executorPath: path.join(dir, "executor.py"),
+      pluginConfig: {
+        embedApiKeysFromJson: true,
+        workspaceAutoSeed: false,
+        persistAgentContentIndex: false,
+        workspaceSkillScanIntervalMs: 100,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start();
+    await wd.__flushNow!();
+    writeConfigFile.mockClear();
+
+    await unlink(jsonPath);
+    await writeWorkspaceSkill(agentWs, "alpha");
+    activeAgentList = [
+      ...activeAgentList.map((entry) =>
+        entry.id === agentId ? { ...entry, workspace: agentWs } : entry,
+      ),
+      {
+        id: `${MANAGED_AGENT_PREFIX}99999999`,
+        name: "Other Managed",
+        identity: { name: "Other Managed" },
+        skills: ["keep-me"],
+      },
+    ];
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await wd.stop();
+
+    expect(writeConfigFile).toHaveBeenCalled();
+    const next = writeConfigFile.mock.calls.at(-1)?.[0];
+    const ids = next.agents.list.map((entry: any) => entry.id);
+    expect(ids).toContain(agentId);
+    expect(ids).toContain(`${MANAGED_AGENT_PREFIX}99999999`);
+    expect(ids).not.toEqual(["main"]);
+    const agentEntry = next.agents.list.find((entry: any) => entry.id === agentId);
+    expect(agentEntry.skills).toContain("alpha");
+    const otherEntry = next.agents.list.find((entry: any) => entry.id === `${MANAGED_AGENT_PREFIX}99999999`);
+    expect(otherEntry.skills).toEqual(["keep-me"]);
+    const logText = api.logger.info.mock.calls.map((call: any[]) => String(call[0])).join("\n");
+    expect(logText).toContain(`workspace skill sync`);
+    expect(logText).toContain(`${agentId} (Demo)`);
+    expect(logText).toContain("enabled=[alpha]");
+    expect(logText).toContain("active=[alpha]");
+  });
+
+  it("suppresses repeated workspace skill write failure logs for the same desired state", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-skill-"));
+    const agentWs = await mkdtemp(path.join(tmpdir(), "baiying-agentws-"));
+    const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-"));
+    await writeFile(path.join(dir, "demo.json"), STABLE_AGENT_JSON, "utf8");
+    const agentId = `${MANAGED_AGENT_PREFIX}10863047`;
+
+    let activeAgentList: any[] = [
+      { id: "main", name: "Main", workspace: mainWs, identity: { name: "Main" } },
+    ];
+    const writeConfigFile = vi.fn(async (next) => {
+      activeAgentList = next.agents.list;
+    });
+    const api = createMockApi(writeConfigFile) as any;
+    api.runtime.config.loadConfig = vi.fn(() => ({
+      agents: { list: activeAgentList },
+      models: { providers: {} },
+    }));
+
+    const wd = createAgentWatchdog({
+      api,
+      registry: new AgentRegistryState(),
+      absoluteDir: dir,
+      contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+      executorPath: path.join(dir, "executor.py"),
+      pluginConfig: {
+        embedApiKeysFromJson: true,
+        workspaceAutoSeed: false,
+        persistAgentContentIndex: false,
+        workspaceSkillScanIntervalMs: 50,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start();
+    await wd.__flushNow!();
+    activeAgentList = activeAgentList.map((entry) =>
+      entry.id === agentId ? { ...entry, workspace: agentWs } : entry,
+    );
+    api.runtime.config.writeConfigFile = vi.fn(async () => {
+      throw new Error("Config write rejected");
+    });
+    await writeWorkspaceSkill(agentWs, "alpha");
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    await wd.stop();
+
+    const warnings = api.logger.warn.mock.calls
+      .map((call: any[]) => String(call[0]))
+      .filter((message: string) => message.includes("workspace skill sync failed"));
+    expect(warnings).toHaveLength(1);
   });
 });

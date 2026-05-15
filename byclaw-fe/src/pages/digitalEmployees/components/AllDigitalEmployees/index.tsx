@@ -246,10 +246,19 @@ function AllDigitalEmployees(
       });
     };
     EventEmitter.on('beyond-update-employee', handler);
+
+    const handleResourceChanged = () => {
+      getSearch(searchName || '', dropdownParam, 1, curActiveLink);
+    };
+    window.addEventListener('resourceDeleted', handleResourceChanged);
+    window.addEventListener('resourceRestored', handleResourceChanged);
+
     return () => {
       EventEmitter.off('beyond-update-employee', handler);
+      window.removeEventListener('resourceDeleted', handleResourceChanged);
+      window.removeEventListener('resourceRestored', handleResourceChanged);
     };
-  }, [EventEmitter]);
+  }, [EventEmitter, curActiveLink, dropdownParam, getSearch, searchName]);
 
   const onClickEmployee = React.useCallback(
     (employee: IAgentCache) => {

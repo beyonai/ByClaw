@@ -4,7 +4,7 @@ import java.util.Collection;
 import java.util.Map;
 
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.DingtalkCallbackMessage;
-import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.DingtalkMessageDownloadInfo;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.DingtalkMsgType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
@@ -13,9 +13,6 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class DingtalkCallbackMessageParser {
-
-    private static final String MSG_TYPE_TEXT = "text";
-    private static final String MSG_TYPE_RICH_TEXT = "richText";
 
     private final ObjectMapper objectMapper;
 
@@ -68,11 +65,14 @@ public class DingtalkCallbackMessageParser {
     }
 
     private String extractContent(Map<String, Object> callbackData, String msgtype) {
-        if (MSG_TYPE_TEXT.equalsIgnoreCase(msgtype)) {
+        if (DingtalkMsgType.TEXT.matches(msgtype)) {
             return extractTextContent(callbackData.get("text"));
         }
-        if (MSG_TYPE_RICH_TEXT.equalsIgnoreCase(msgtype)) {
+        if (DingtalkMsgType.RICH_TEXT.matches(msgtype)) {
             return extractRichTextContent(callbackData.get("content"));
+        }
+        if (DingtalkMsgType.AUDIO.matches(msgtype)) {
+            return extractAudioRecognition(callbackData.get("content"));
         }
         return "";
     }
@@ -113,6 +113,14 @@ public class DingtalkCallbackMessageParser {
             builder.append(textValue);
         }
         return builder.toString();
+    }
+
+    private String extractAudioRecognition(Object contentNode) {
+        if (contentNode instanceof Map<?, ?> contentMap) {
+            Object recognition = contentMap.get("recognition");
+            return recognition == null ? "" : String.valueOf(recognition);
+        }
+        return "";
     }
 
     private String getAsText(Map<String, Object> source, String key) {

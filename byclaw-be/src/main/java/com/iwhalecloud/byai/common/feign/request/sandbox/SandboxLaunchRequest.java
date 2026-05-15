@@ -24,10 +24,6 @@ public class SandboxLaunchRequest {
 //    @JsonProperty("chat_id")
 //    private String chatId;
 
-    /** 是否自动释放：1-自动释放，0-不自动（特权用户长期沙箱）。序列化必须为 JSON 数字，不能为字符串 */
-    @JsonProperty("auto_release")
-    private Integer autoRelease;
-
     /** 沙箱专用参数 */
     @JsonProperty("envs")
     private Map<String, String> envs;

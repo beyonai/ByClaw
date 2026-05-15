@@ -1,11 +1,12 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { Typography, Dropdown, Button, Popconfirm, Tooltip } from 'antd';
+import { Typography, Dropdown, Button, Popconfirm, Tooltip, message } from 'antd';
 import type { MenuProps } from 'antd';
 import { useIntl } from '@umijs/max';
 import classnames from 'classnames';
 import { debounce, noop } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
-import { queryResourceOperationPermissions } from '@/pages/manager/service/resources';
+import { queryResourceOperationPermissions, restoreResource } from '@/pages/manager/service/resources';
+import { useRequest } from '@/hooks/useRequest';
 import styles from './index.module.less';
 
 const { Paragraph } = Typography;
@@ -39,6 +40,7 @@ export interface IResourceCardItem {
   canAuditUse?: boolean;
   canDelete?: boolean;
   canSetDefault?: boolean;
+  canRestore?: boolean;
   ownerType?: string;
   openSuperHelper?: string;
   tagName?: string;
@@ -53,13 +55,16 @@ type ResourceCardActionConfig = {
   applyUseDisabledTip?: React.ReactNode;
   auditUseDisabledTip?: React.ReactNode;
   deleteDisabledTip?: React.ReactNode;
+  restoreDisabledTip?: React.ReactNode;
   applyDisabledTip?: React.ReactNode;
   deleteConfirmTitle?: React.ReactNode;
   deleteConfirmDescription?: React.ReactNode;
+  restoreConfirmTitle?: React.ReactNode;
   extraMenuItems?: MenuProps['items'];
   onApplyUse?: () => void;
   onAuditUse?: () => void;
   onDelete?: () => void;
+  onRestore?: () => void;
   onAuth?: (authType: 'useAuth' | 'mgrAuth') => void;
   onEdit?: () => void;
   onApply?: () => void;
@@ -105,6 +110,7 @@ const RenderContent = (props: ResourceCardProps) => {
     onAuth = noop,
     onApplyUse = noop,
     onAuditUse = noop,
+    onRestore = noop,
     onDelete = noop,
     onSetDefault = noop,
   } = actionConfig || {};
@@ -112,6 +118,21 @@ const RenderContent = (props: ResourceCardProps) => {
   const intl = useIntl();
   const [settingDefault, setSettingDefault] = useState(false);
   const defaultDisabledTip = intl.formatMessage({ id: 'common.noPermissionOperation' });
+
+  const { mutate: handleRestore, isLoading: restoring } = useRequest({
+    mutationFn: (params: any) => {
+      return restoreResource({ resourceId: params.resourceId });
+    },
+    onSuccess: () => {
+      message.success(intl.formatMessage({ id: 'common.restoreSuccess' }));
+      onRestore?.();
+      // 触发自定义事件通知父组件刷新列表
+      window.dispatchEvent(new CustomEvent('resourceRestored', { detail: { resourceId: resource?.resourceId } }));
+    },
+    onError: () => {
+      message.error(intl.formatMessage({ id: 'common.operationFailed' }));
+    },
+  });
 
   const displayTitle = resource.resourceName || resource.name || intl.formatMessage({ id: 'common.none' });
   const displayDescription =
@@ -155,31 +176,34 @@ const RenderContent = (props: ResourceCardProps) => {
   const displayTopRightTag = getDisplayTopRightTag();
 
   const menuItems = useMemo<MenuProps['items']>(() => {
-    const { canSetDefault, canEdit, canManageAuth, canUseAuth, canApplyUse, canAuditUse, canDelete } = resource || {};
+    const { canSetDefault, canEdit, canManageAuth, canUseAuth, canApplyUse, canAuditUse, canDelete, canRestore } =
+      resource || {};
     const items: NonNullable<MenuProps['items']> = [];
     const buildMenuLabel = ({
       icon,
       text,
       disabled,
       disabledTip,
+      loading,
     }: {
       icon: string;
       text: string;
       disabled?: boolean;
       disabledTip?: React.ReactNode;
+      loading?: boolean;
     }) => {
       const content = (
         <div
           className={classnames(styles.menuItem, {
-            [styles.menuItemDisabled]: disabled,
+            [styles.menuItemDisabled]: disabled || loading,
           })}
         >
-          <AntdIcon type={icon} />
-          <span>{text}</span>
+          {loading ? <AntdIcon type="icon-a-loading" className={styles.menuItemLoading} /> : <AntdIcon type={icon} />}
+          <span>{loading ? intl.formatMessage({ id: 'common.processing' }) : text}</span>
         </div>
       );
 
-      if (!disabled) {
+      if (!disabled && !loading) {
         return content;
       }
 
@@ -208,7 +232,7 @@ const RenderContent = (props: ResourceCardProps) => {
             {buildMenuLabel({
               icon: 'icon-a-Useryonghu',
               text: intl.formatMessage({ id: 'resource.setDefaultAssistant' }),
-              disabled: settingDefault,
+              loading: settingDefault,
             })}
           </Popconfirm>
         ),
@@ -308,12 +332,38 @@ const RenderContent = (props: ResourceCardProps) => {
             title={intl.formatMessage({ id: 'common.deactivateConfirm' })}
             onConfirm={(e) => {
               e?.stopPropagation();
-              onDelete?.();
+              onDelete();
             }}
             okText={intl.formatMessage({ id: 'common.confirm' })}
             cancelText={intl.formatMessage({ id: 'common.cancel' })}
           >
             {deleteContent}
+          </Popconfirm>
+        ),
+      });
+    }
+
+    // 恢复数据
+    if (canRestore) {
+      const restoreContent = buildMenuLabel({
+        icon: 'icon-a-Returnfanhui',
+        text: intl.formatMessage({ id: 'common.restoreResource' }),
+        loading: restoring,
+      });
+      items.push({
+        key: 'restore',
+        label: (
+          <Popconfirm
+            title={intl.formatMessage({ id: 'common.restoreConfirm' })}
+            onConfirm={(e) => {
+              e?.stopPropagation();
+              handleRestore({ resourceId: resource?.resourceId });
+            }}
+            okText={intl.formatMessage({ id: 'common.confirm' })}
+            cancelText={intl.formatMessage({ id: 'common.cancel' })}
+            disabled={restoring}
+          >
+            {restoreContent}
           </Popconfirm>
         ),
       });
@@ -335,8 +385,11 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.canApplyUse,
     resource?.canAuditUse,
     resource?.canDelete,
+    resource?.canRestore,
     resource?.ownerType,
     resource?.resourceBizType,
+    restoring,
+    settingDefault,
   ]);
 
   const getDefaultIcon = () => {
@@ -466,8 +519,16 @@ function ResourceCard(props: ResourceCardProps) {
               const res: any = await queryResourceOperationPermissions({ resourceId });
               const permissions = res?.data || res;
               if (!cancelled && permissions) {
-                const { canEdit, canManageAuth, canUseAuth, canDelete, canApplyUse, canAuditUse, canSetDefault } =
-                  permissions;
+                const {
+                  canEdit,
+                  canManageAuth,
+                  canUseAuth,
+                  canDelete,
+                  canApplyUse,
+                  canAuditUse,
+                  canSetDefault,
+                  canRestore,
+                } = permissions;
                 setResourceWithPermissions({
                   ...resource,
                   canEdit,
@@ -477,6 +538,7 @@ function ResourceCard(props: ResourceCardProps) {
                   canApplyUse,
                   canAuditUse,
                   canSetDefault,
+                  canRestore,
                 });
               }
             } catch {

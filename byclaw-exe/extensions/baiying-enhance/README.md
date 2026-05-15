@@ -60,7 +60,7 @@
 
 ### 同步写盘后避免整网关重启（可选）
 
-数字员工同步会 `writeConfigFile`；若 diff 里出现其它插件的 `plugins.entries.*`，OpenClaw 可能判定需要**进程级重启**。本插件始终为自身条目注册热重载规则；若你的 `openclaw.json` 在同步时还会规范化/改写其它插件条目，请在 **`plugins.entries.baiying-enhance.config`** 里增加 **`configSyncHotPluginEntriesPrefixes`**（仅当你需要时配置，可省略）：
+数字员工同步会 `writeConfigFile`；本插件默认把 `plugins.entries.baiying-enhance` 与 `agents` 注册为热重载前缀，因此托管 Agent 条目、`agents.list[].skills`、`main.subagents.allowAgents` 等变化会走热加载，不需要整网关重启。若 diff 里出现其它插件的 `plugins.entries.*`，OpenClaw 仍可能判定需要**进程级重启**；这种情况下请在 **`plugins.entries.baiying-enhance.config`** 里增加 **`configSyncHotPluginEntriesPrefixes`**（仅当你需要时配置，可省略）：
 
 ```json
 "config": {
@@ -112,6 +112,7 @@
 - 默认 **`[]`**（不再省略该字段）。
 - 若 JSON **根**上存在非空的 **`relSkills`**（字符串数组，例如 `["dws","clawhub"]`），则写入 **`agents.list[].skills`**（元素会 `trim`，空串丢弃）。
 - 若无有效 `relSkills`，则回退读取根级 **`skills`**（兼容旧版原生 JSON）；仍无则为 **`[]`**。
+- 若 `workspaceSkillAutoEnable` 未关闭，插件还会自动扫描用户上传的 `skills/<skillName>/SKILL.md`：默认只把当前 agent workspace 下的 skill 并入该 agent，不读取其它 agent workspace；main workspace (`workspace/skills`) 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 并入托管子 agent。扫描有 `fs.watch` 与 `workspaceSkillScanIntervalMs` 兜底（默认 `500` ms）；兜底扫描只做 skill diff，不重新扫描 Agent JSON 目录，也不会触发托管 Agent 增删。
 
 更细的说明见 [docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md](docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md) 与 [docs/PLUGIN_OVERVIEW.zh-CN.md](docs/PLUGIN_OVERVIEW.zh-CN.md)。
 

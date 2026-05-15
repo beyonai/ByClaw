@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from minio_agent_config import (
     _kg_doc_to_skill_item,
+    extract_prologue_model_id,
     load_agent_config_from_minio,
     resolve_call_kb_ids,
 )
@@ -239,3 +240,35 @@ async def test_resolve_call_kb_ids_missing_resource_code():
     codes, failed = await resolve_call_kb_ids(minio, [10000003])
     assert codes == []
     assert failed == ["10000003"]
+
+
+# --- extract_prologue_model_id ---
+
+
+def test_extract_prologue_model_id_normal():
+    config = {"prologue": json.dumps({"modelInfo": {"modelId": -2000}})}
+    assert extract_prologue_model_id(config) == "-2000"
+
+
+def test_extract_prologue_model_id_none_config():
+    assert extract_prologue_model_id(None) is None
+
+
+def test_extract_prologue_model_id_missing_prologue():
+    assert extract_prologue_model_id({"other": "field"}) is None
+
+
+def test_extract_prologue_model_id_missing_model_id():
+    config = {"prologue": json.dumps({"modelInfo": {}})}
+    assert extract_prologue_model_id(config) is None
+
+
+def test_extract_prologue_model_id_invalid_json():
+    config = {"prologue": "not-json"}
+    assert extract_prologue_model_id(config) is None
+
+
+def test_extract_prologue_model_id_dict_prologue():
+    """prologue 已经是 dict（非字符串）时也能处理。"""
+    config = {"prologue": {"modelInfo": {"modelId": 100}}}
+    assert extract_prologue_model_id(config) == "100"

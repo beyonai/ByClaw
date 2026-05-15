@@ -96,7 +96,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
   };
 
   // @ts-ignore
-  getSendPayload = async () => {
+  getSendPayload = () => {
     const { inputValue, fileList, deepThink, chatSettings, connectNet } = this.state;
     const { userInfo, chatMode, myAgentType } = this.props;
     const { agentId } = this.props.globalContext;

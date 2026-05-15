@@ -1,6 +1,6 @@
 # byclaw-data
 
-`byclaw-data` 负责把已经发布到 PyPI 的 DataCloud 能力接到 `byclaw-all`，并在本仓库里补一层 byclaw 定制的 MCP 启动逻辑。
+`byclaw-data` 负责把已经发布到 PyPI 的 DataCloud 能力接到 ByClaw 平台，并在本仓库里补一层 byclaw 定制的 MCP 启动逻辑。
 
 当前涉及的四个核心模块是：
 

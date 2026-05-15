@@ -20,6 +20,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.feign.client.FeignWhaleAgentService;
+import com.iwhalecloud.byai.common.feign.interceptor.WhaleAgentUserContextHolder;
 import com.iwhalecloud.byai.common.feign.request.sandbox.WhaleAgentListFilesRequest;
 import com.iwhalecloud.byai.common.feign.response.KnowledgeResponse;
 import com.iwhalecloud.byai.common.feign.response.sandbox.WhaleAgentFileItem;
@@ -76,24 +77,43 @@ public class WhaleAgentStorageService extends AbstractFileIngressStorageService<
             throw new IllegalArgumentException("WhaleAgent upload file name cannot be empty");
         }
         String filePath = buildRemoteFilePath(storagePath, bucketName, originalFilename);
-        return uploadFile(multipartFile, bucketName, filePath, SHARE_TYPE_PUBLIC);
+        return uploadFile(multipartFile, bucketName, filePath, SHARE_TYPE_PUBLIC, extractUserCode(bucketName, filePath));
     }
 
     @Override
     protected InputStream doDownloadFile(String fileId, String bucketName) {
         String filePath = buildRemoteFilePath(fileId, bucketName);
-        return downloadFile(filePath, SHARE_TYPE_PUBLIC);
+        return downloadFile(filePath, SHARE_TYPE_PUBLIC, extractUserCode(bucketName, filePath));
     }
 
     @Override
     protected void doDeleteFile(String objectUrl, String bucketName) {
         String remoteFilePath = buildRemoteFilePath(objectUrl, bucketName);
-        deleteFile(remoteFilePath, SHARE_TYPE_PUBLIC);
+        deleteFile(remoteFilePath, SHARE_TYPE_PUBLIC, extractUserCode(bucketName, remoteFilePath));
     }
 
     @Override
     protected FileMetadata doGetObjectMetadata(String objectKey, String bucketName) {
-        return null;
+        String remoteFilePath = buildRemoteFilePath(objectKey, bucketName);
+        KnowledgeResponse<List<WhaleAgentFileItem>> response = callWhaleAgent(LIST_FAILED_KEY,
+            extractUserCode(bucketName, remoteFilePath),
+            () -> feignWhaleAgentService.listFiles(
+                new WhaleAgentListFilesRequest(resolveParentRemotePath(remoteFilePath), SHARE_TYPE_PUBLIC)));
+        validateListResponse(response);
+
+        WhaleAgentFileItem target = findFileItem(response.getResultObject(), remoteFilePath);
+        if (target == null || Boolean.TRUE.equals(target.getDirectory())) {
+            throw new IllegalStateException("WhaleAgent file metadata failed: " + remoteFilePath);
+        }
+
+        FileMetadata metadata = new FileMetadata();
+        metadata.setBucketName(bucketName);
+        metadata.setFileName(StringUtils.defaultIfBlank(target.getName(), FilenameUtils.getName(objectKey)));
+        metadata.setFileUrl(remoteFilePath);
+        metadata.setFileSize(target.getSize());
+        metadata.setFileType(FilenameUtils.getExtension(metadata.getFileName()));
+        metadata.setStorageType(getStorageType());
+        return metadata;
     }
 
     @Override
@@ -121,7 +141,8 @@ public class WhaleAgentStorageService extends AbstractFileIngressStorageService<
         MultipartFile multipartFile = new InputStreamMultipartFile(fileName, inputStream, size, contentType);
         String filePath = buildRemoteFilePath(objectPath, location.getBucketOrRoot());
         return uploadFile(multipartFile, location.getBucketOrRoot(), filePath,
-            resolveShareType(location == null ? null : location.getShareType(), SHARE_TYPE_PRIVATE));
+            resolveShareType(location == null ? null : location.getShareType(), SHARE_TYPE_PRIVATE),
+            extractUserCode(location.getBucketOrRoot(), filePath));
     }
 
     @Override
@@ -130,7 +151,8 @@ public class WhaleAgentStorageService extends AbstractFileIngressStorageService<
             throw new IllegalArgumentException("storage location cannot be null");
         }
         String filePath = buildRemoteFilePath(location.getPath(), location.getBucketOrRoot());
-        return downloadFile(filePath, resolveShareType(location.getShareType(), SHARE_TYPE_PRIVATE));
+        return downloadFile(filePath, resolveShareType(location.getShareType(), SHARE_TYPE_PRIVATE),
+            extractUserCode(location.getBucketOrRoot(), filePath));
     }
 
     @Override
@@ -139,8 +161,8 @@ public class WhaleAgentStorageService extends AbstractFileIngressStorageService<
         String bucketName = location == null ? null : location.getBucketOrRoot();
         String remoteFilePath = buildRemoteFilePath(filePath, bucketName);
         String fileShareType = resolveShareType(location == null ? null : location.getShareType(), SHARE_TYPE_PRIVATE);
-        KnowledgeResponse<Boolean> response = callWhaleAgent(EXISTS_FAILED_KEY, () -> feignWhaleAgentService.existsFile(
-            new WhaleAgentListFilesRequest(remoteFilePath, fileShareType)));
+        KnowledgeResponse<Boolean> response = callWhaleAgent(EXISTS_FAILED_KEY, extractUserCode(bucketName, remoteFilePath),
+            () -> feignWhaleAgentService.existsFile(new WhaleAgentListFilesRequest(remoteFilePath, fileShareType)));
         validateExistsResponse(response);
         return Boolean.TRUE.equals(response.getResultObject());
     }
@@ -153,11 +175,12 @@ public class WhaleAgentStorageService extends AbstractFileIngressStorageService<
         String prefixPath = normalizePrefixPath(prefix == null ? null : prefix.getPrefix());
         String remoteFilePath = buildRemotePrefixPath(prefixPath, prefix == null ? null : prefix.getBucketOrRoot());
         String fileShareType = resolveShareType(prefix == null ? null : prefix.getShareType(), SHARE_TYPE_PRIVATE);
-        return listByDepth(prefix, remoteFilePath, fileShareType, maxDepth);
+        return listByDepth(prefix, remoteFilePath, fileShareType, maxDepth,
+            extractUserCode(prefix == null ? null : prefix.getBucketOrRoot(), remoteFilePath));
     }
 
     private List<StorageObject> listByDepth(StoragePrefix prefix, String remoteFilePath, String fileShareType,
-        Integer maxDepth) {
+        Integer maxDepth, String userCode) {
         List<StorageObject> objects = new ArrayList<>();
         List<ListPath> pendingPaths = new ArrayList<>();
         Set<String> visitedRemotePaths = new HashSet<>();
@@ -173,7 +196,7 @@ public class WhaleAgentStorageService extends AbstractFileIngressStorageService<
                 continue;
             }
 
-            KnowledgeResponse<List<WhaleAgentFileItem>> response = callWhaleAgent(LIST_FAILED_KEY,
+            KnowledgeResponse<List<WhaleAgentFileItem>> response = callWhaleAgent(LIST_FAILED_KEY, userCode,
                 () -> feignWhaleAgentService.listFiles(
                     new WhaleAgentListFilesRequest(currentPath.remoteFilePath(), fileShareType)));
             validateListResponse(response);
@@ -198,7 +221,8 @@ public class WhaleAgentStorageService extends AbstractFileIngressStorageService<
         String filePath = location == null ? null : location.getPath();
         String bucketName = location == null ? null : location.getBucketOrRoot();
         String remoteFilePath = buildRemoteFilePath(filePath, bucketName);
-        deleteFile(remoteFilePath, resolveShareType(location == null ? null : location.getShareType(), SHARE_TYPE_PRIVATE));
+        deleteFile(remoteFilePath, resolveShareType(location == null ? null : location.getShareType(), SHARE_TYPE_PRIVATE),
+            extractUserCode(bucketName, remoteFilePath));
     }
 
     @Override
@@ -211,7 +235,11 @@ public class WhaleAgentStorageService extends AbstractFileIngressStorageService<
             "WhaleAgent storage " + operation + " API is not configured on FeignWhaleAgentService yet");
     }
 
-    private <T> T callWhaleAgent(String messageKey, Supplier<T> supplier) {
+    private <T> T callWhaleAgent(String messageKey, String userCode, Supplier<T> supplier) {
+        String previousUserCode = WhaleAgentUserContextHolder.getUserCode();
+        if (StringUtils.isNotBlank(userCode)) {
+            WhaleAgentUserContextHolder.setUserCode(userCode);
+        }
         try {
             return supplier.get();
         }
@@ -221,6 +249,14 @@ public class WhaleAgentStorageService extends AbstractFileIngressStorageService<
         catch (Exception e) {
             logger.error("WhaleAgent storage feign call failed, messageKey={}", messageKey, e);
             throw new BaseException(messageKey, e);
+        }
+        finally {
+            if (StringUtils.isNotBlank(previousUserCode)) {
+                WhaleAgentUserContextHolder.setUserCode(previousUserCode);
+            }
+            else {
+                WhaleAgentUserContextHolder.clear();
+            }
         }
     }
 
@@ -334,18 +370,51 @@ public class WhaleAgentStorageService extends AbstractFileIngressStorageService<
         return normalized.isEmpty() ? "" : "/" + normalized;
     }
 
-    private FileMetadata uploadFile(MultipartFile multipartFile, String bucketName, String filePath, String fileShareType) {
-        KnowledgeResponse<Void> response = callWhaleAgent(UPLOAD_FAILED_KEY,
+    private String resolveParentRemotePath(String remoteFilePath) {
+        String normalized = normalizeRemotePath(remoteFilePath);
+        int lastSlash = normalized.lastIndexOf('/');
+        if (lastSlash <= 0) {
+            return "/";
+        }
+        return normalized.substring(0, lastSlash);
+    }
+
+    private String normalizeRemotePath(String value) {
+        String normalized = FilenameUtils.separatorsToUnix(StringUtils.defaultString(value).trim()).replaceAll("/+", "/");
+        if (normalized.isEmpty()) {
+            return "/";
+        }
+        return normalized.startsWith("/") ? normalized : "/" + normalized;
+    }
+
+    private String extractUserCode(String bucketName, String remoteFilePath) {
+        String candidate = StringUtils.trimToEmpty(bucketName);
+        if (StringUtils.isBlank(candidate) && StringUtils.isNotBlank(remoteFilePath)) {
+            String normalized = normalizeRemotePath(remoteFilePath);
+            String[] parts = normalized.substring(1).split("/", 2);
+            if (parts.length > 0) {
+                candidate = parts[0];
+            }
+        }
+        if (StringUtils.startsWith(candidate, "byclaw-")) {
+            return candidate.substring("byclaw-".length());
+        }
+        return candidate;
+    }
+
+    private FileMetadata uploadFile(MultipartFile multipartFile, String bucketName, String filePath, String fileShareType,
+        String userCode) {
+        KnowledgeResponse<Void> response = callWhaleAgent(UPLOAD_FAILED_KEY, userCode,
             () -> feignWhaleAgentService.uploadFile(filePath, fileShareType, multipartFile));
         validateUploadResponse(response);
         return buildFileMetadata(multipartFile, filePath, bucketName, null);
     }
 
-    private InputStream downloadFile(String filePath, String fileShareType) {
+    private InputStream downloadFile(String filePath, String fileShareType, String userCode) {
         Map<String, Object> request = new LinkedHashMap<>();
         request.put("filePath", filePath);
         request.put("fileShareType", fileShareType);
-        Response response = callWhaleAgent(DOWNLOAD_FAILED_KEY, () -> feignWhaleAgentService.downloadFile(request));
+        Response response = callWhaleAgent(DOWNLOAD_FAILED_KEY, userCode, () -> feignWhaleAgentService.downloadFile(request));
         if (response == null || response.body() == null) {
             throw new BaseException(DOWNLOAD_FAILED_KEY);
         }
@@ -358,10 +427,26 @@ public class WhaleAgentStorageService extends AbstractFileIngressStorageService<
         }
     }
 
-    private void deleteFile(String remoteFilePath, String fileShareType) {
-        KnowledgeResponse<Void> response = callWhaleAgent(DELETE_FAILED_KEY, () -> feignWhaleAgentService.deleteFile(
+    private void deleteFile(String remoteFilePath, String fileShareType, String userCode) {
+        KnowledgeResponse<Void> response = callWhaleAgent(DELETE_FAILED_KEY, userCode, () -> feignWhaleAgentService.deleteFile(
             new WhaleAgentListFilesRequest(remoteFilePath, fileShareType)));
         validateDeleteResponse(response);
+    }
+
+    private WhaleAgentFileItem findFileItem(List<WhaleAgentFileItem> items, String remoteFilePath) {
+        if (items == null || items.isEmpty()) {
+            return null;
+        }
+        String normalizedTarget = normalizeRemotePath(remoteFilePath);
+        for (WhaleAgentFileItem item : items) {
+            if (item == null || StringUtils.isBlank(item.getFilePath())) {
+                continue;
+            }
+            if (normalizedTarget.equals(normalizeRemotePath(item.getFilePath()))) {
+                return item;
+            }
+        }
+        return null;
     }
 
     private String resolveShareType(String shareType, String defaultShareType) {

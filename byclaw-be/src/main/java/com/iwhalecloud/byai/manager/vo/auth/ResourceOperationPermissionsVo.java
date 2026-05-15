@@ -80,4 +80,10 @@ public class ResourceOperationPermissionsVo {
      */
     @Schema(description = "是否可设为默认（仅数字员工有效）")
     private Boolean canSetDefault;
+
+    /**
+     * 是否可恢复资源（仅当资源状态为已注销时为true）。
+     */
+    @Schema(description = "是否可恢复资源")
+    private Boolean canRestore;
 }

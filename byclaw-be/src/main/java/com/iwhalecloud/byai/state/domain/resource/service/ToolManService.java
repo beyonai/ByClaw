@@ -82,6 +82,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import java.util.Objects;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -1318,6 +1319,84 @@ public class ToolManService {
 
         if (StringUtils.equals(resourceBizType, ResourceBizType.OBJECT.getCode())) {
             validateNoViewRelation(resourceId, resource);
+        }
+    }
+
+    /**
+     * 恢复资源。
+     * 将已注销（状态3）的资源恢复为已上架（状态2），并重新生成产物、同步缓存和注册服务。
+     *
+     * @author liu.yafei
+     * @date 2026-05-14
+     */
+    public void restoreManagedResource(Long resourceId) {
+        restoreManagedResource(resourceId, false);
+    }
+
+    /**
+     * 恢复资源。
+     *
+     * @author liu.yafei
+     * @date 2026-05-14
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void restoreManagedResource(Long resourceId, boolean forceRestore) {
+        // 1. 校验请求参数。
+        if (resourceId == null) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.resourceid.notnull"));
+        }
+
+        // 2. 查询主表资源，确认资源存在。
+        SsResource resource = ssResourceService.findById(resourceId);
+        if (resource == null) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
+        }
+        validateResourceManagePermission(resource);
+        String resourceBizType = StringUtils.trimToEmpty(resource.getResourceBizType());
+        // 商业版本（dataset.system=WHALE_AGENT）下，知识/工具由智能体门户发布，本系统不允许恢复。
+        validateCommercialEditionKnowledgeOrToolWritable(resource);
+        String targetContent = findTargetContentByBizType(resourceBizType, resourceId);
+
+        if (!forceRestore) {
+            validateResourceCanRestore(resourceId, resource, resourceBizType);
+        }
+
+        // 5. 恢复：将资源状态从已注销（3）改为已上架（2）。
+        resource.setResourceStatus(ResourceStatus.LIST.getNum());
+        resource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        resource.setUpdateTime(new Date());
+        ssResourceService.updateResourceEntity(resource);
+
+        // 6. 重新保存资源发布到开放资源目录的标准 JSON 产物（参考更新接口）。
+        updateExtTargetContentAndSync(resource);
+
+        // 7. 若是数字员工，恢复后重新同步其技能到 Redis 缓存。
+        if (StringUtils.equals(resourceBizType, ResourceBizType.DIG_EMPLOYEE.getCode())) {
+            digEmployeeChangeEventPublisher.publishNowQuietly(DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED,
+                resourceId, "tool-man-service");
+        }
+
+        // 8. 恢复资源后，同步重新注册其对应的服务。
+        if (shouldRegisterDiscoveryService(resourceBizType)) {
+            LOGGER.info("资源恢复完成，准备重新注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}", resourceBizType, resourceId, resource.getResourceCode());
+            resourceDiscoveryRegistrationService.registerAfterCommit(resourceBizType, resourceId, resource.getResourceCode(), targetContent);
+        }
+    }
+
+    /**
+     * 恢复资源前的业务校验。
+     *
+     * @author liu.yafei
+     * @date 2026-05-14
+     */
+    private void validateResourceCanRestore(Long resourceId, SsResource resource, String resourceBizType) {
+        // 校验当前资源类型是否在本接口支持恢复的范围内（同删除类型）。
+        if (!DELETE_RESOURCE_BIZ_TYPES.contains(resourceBizType)) {
+            throw new IllegalArgumentException(I18nUtil.get("tool.resource.restore.type.unsupported"));
+        }
+        // 校验资源状态必须是已注销（3），否则不能恢复。
+        if (!Objects.equals(resource.getResourceStatus(), ResourceStatus.REMOVED.getNum())) {
+            throw new IllegalArgumentException(I18nUtil.get("tool.resource.restore.status.invalid"));
         }
     }
 

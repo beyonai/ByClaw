@@ -103,10 +103,10 @@ ruff check . && pytest
 
 ```bash
 # 构建 Docker 镜像
-docker build -t byclaw-all:v1.2.0 -f Dockerfile-all .
+docker build -t byclaw-be:v1.2.0 -f byclaw-be/Dockerfile .
 
 # 本地测试部署
-docker-compose -f deploy/mono/docker-compose.yml up
+docker-compose -f deploy/standalone/docker-compose.yml up
 ```
 
 ## 正式发布

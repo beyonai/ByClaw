@@ -90,6 +90,21 @@
         "type": "string",
         "description": "Optional path to the content index file; default is ~/.openclaw/baiying-enhance/agent-content-index-<id>.json (writable; avoids RO mounts on agentConfigDir)."
       },
+      "workspaceSkillAutoEnable": {
+        "type": "boolean",
+        "description": "Merge user-uploaded workspace skills (skills/<name>/SKILL.md) into managed agents.list[].skills alongside JSON relSkills/skills (default true).",
+        "default": true
+      },
+      "workspaceSkillScanIntervalMs": {
+        "type": "number",
+        "description": "Fallback scan interval in milliseconds for workspace skill changes. Set <= 0 to disable periodic scan and rely on fs.watch plus normal sync triggers.",
+        "default": 500
+      },
+      "workspaceSkillIncludeMainShared": {
+        "type": "boolean",
+        "description": "When true, skills uploaded to the main workspace (workspace/skills) are shared into managed sub-agents. Default false: managed agents only auto-load their own workspace skills.",
+        "default": false
+      },
       "digEmployeeChangeSubscribe": {
         "type": "boolean",
         "description": "Subscribe to Redis Pub/Sub for digital-employee change events (same Redis as USER_CODE auth). Can also enable with env BAIYING_DIG_EMPLOYEE_CHANGE_SUBSCRIBE=true."

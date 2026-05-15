@@ -118,11 +118,14 @@ cp .env.example .env
 #    REDIS_PASSWORD, MID_FTP_*, etc.
 #    If middleware is on a remote server, replace with the corresponding IP.
 
-# 3. Start middleware (Redis, MinIO, OpenGauss, Sandbox)
-cd deploy/middleware && sh start-all.sh && cd ../..
+# 3. Pull middleware images (first-time only, requires GHCR_USER/GHCR_TOKEN in .env)
+(cd deploy/middleware && sh pull.sh)
 
-# 4. Start application
-cd deploy/standalone && docker compose up -d
+# 4. Start middleware (Redis, MinIO, OpenGauss, Sandbox)
+(cd deploy/middleware && sh start-all.sh)
+
+# 5. Start application
+(cd deploy/standalone && docker compose up -d)
 ```
 
 Visit **http://localhost:8080** to start using ByClaw.
@@ -138,8 +141,8 @@ Middleware can be deployed locally or on a remote server — just replace `127.0
 cp .env.example .env
 # Fill in DB_URL, REDIS_HOST, etc. based on actual middleware addresses
 
-# 2. Start middleware (run for local deployment, skip if remote)
-cd deploy/middleware && sh start-all.sh && cd ../..
+# 2. Pull and start middleware (run for local deployment, skip if remote)
+(cd deploy/middleware && sh pull.sh && sh start-all.sh)
 
 # 3. Start application (unified script recommended)
 scripts/start.sh --all

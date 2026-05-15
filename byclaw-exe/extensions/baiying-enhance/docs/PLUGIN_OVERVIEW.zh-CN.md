@@ -6,7 +6,7 @@
 
 ## 1. 插件做什么（一句话）
 
-**把磁盘上的百应数字员工 Agent JSON 同步为 OpenClaw 可运行的托管 Agent（`baiying-agent-*`），并在运行时通过工具 `baiying_call` 与内置 TypeScript 执行器访问知识库、Toolkit、MCP、下游 Agent 等资源；变更由 Redis Pub/Sub（可选）与 dig-employee 授权视图驱动重新扫描，不再依赖目录文件系统 watch。**
+**把磁盘上的百应数字员工 Agent JSON 同步为 OpenClaw 可运行的托管 Agent（`baiying-agent-*`），并在运行时通过工具 `baiying_call` 与内置 TypeScript 执行器访问知识库、Toolkit、MCP、下游 Agent 等资源；Agent JSON 变更由 Redis Pub/Sub（可选）与 dig-employee 授权视图驱动重新扫描，workspace skill 上传由 `fs.watch` 与短周期扫描自动感知。**
 
 ---
 
@@ -19,11 +19,12 @@
 | **Redis Pub/Sub** | 订阅 `digEmployeeChangeChannel`（默认 `byai:pub:dig_employee_change`），合并去抖后触发与目录扫描一致的 flush（含 `DIG_EMPLOYEE_DELETED` 等）。 |
 | **内容索引** | 可选持久化各 Agent 源 JSON 的 SHA-256（`agent-content-index-*.json`），减少网关重启后的无意义全量写盘。 |
 | **工作区种子** | `workspaceAutoSeed`：由 `seedManagedAgentWorkspace` 为每个托管 Agent 创建目录并写入 `SOUL.md`、`AGENTS.md` 等；主 Agent 工作区另由 `main-workspace-seed` 维护 `AGENTS.md` 与 `SUBAGENT_ROUTING.md`。默认 workspace 路径见 `resolveDefaultManagedWorkspacePath`（`main` 为 `<stateDir>/workspace/`，其余为 `<stateDir>/workspace-<agentId>/`）。 |
-| **热重载协作** | 同步写配置时可为其它 `plugins.entries.*` 注册热前缀，避免整进程重启（`configSyncHotPluginEntriesPrefixes`）。 |
+| **Workspace Skill 自动感知** | 默认扫描 `skills/<skillName>/SKILL.md`，只把当前 agent workspace 下的用户上传 skill 合并到该托管 Agent 的 `agents.list[].skills`，不读取其它 agent workspace；main workspace 的 `workspace/skills` 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 来源。兜底扫描只做 skill diff，不重新扫描 Agent JSON 目录，也不会触发托管 Agent 增删。 |
+| **热重载协作** | 默认将 `plugins.entries.baiying-enhance` 与 `agents` 作为热前缀；同步写 `agents.list[].skills` 时不触发整进程重启。也可为其它 `plugins.entries.*` 注册热前缀（`configSyncHotPluginEntriesPrefixes`）。 |
 | **`baiying_call` 工具** | 按 Agent JSON 中的关联资源列表，在进程内调用执行器（`src/executor/`）完成文档检索、工具调用、MCP、子 Agent 调用等。 |
 | **HTTP 探针** | 健康检查、当前内存注册表中的托管 Agent 列表、文档异步任务查询与完成回调。 |
 
-> **`agents.list[].skills`（托管子 agent）**：写回网关配置时，列表项**始终包含** `skills`。取值由 Agent JSON **根**上的 **`relSkills`**（非空字符串数组，优先）或根级 **`skills`**（兼容旧版）推导；二者皆无时为 **`[]`**。实现见 [`src/agent-adapter.ts`](../src/agent-adapter.ts) 中的 `normalizeAgentListSkills`。
+> **`agents.list[].skills`（托管子 agent）**：写回网关配置时，列表项**始终包含** `skills`。取值由 Agent JSON **根**上的 **`relSkills`**（非空字符串数组，优先）或根级 **`skills`**（兼容旧版）推导，并在 `workspaceSkillAutoEnable` 默认开启时合并 workspace 上传 skill；二者皆无时为 **`[]`**。实现见 [`src/agent-adapter.ts`](../src/agent-adapter.ts) 与 [`src/workspace-skills.ts`](../src/workspace-skills.ts)。
 
 ---
 
@@ -88,7 +89,7 @@ flowchart TB
 
 | 组件 | 主要源文件 | 职责摘要 |
 |------|------------|----------|
-| **AgentWatchdog** | `src/agent-watchdog.ts` | `loadManagedAgentsFromDir` → 授权过滤 → diff → `mergeManagedAgentsIntoConfig` → `writeConfigFile`；按需 `seedManagedAgentWorkspace`、`seedMainAgentAgentsMd`。 |
+| **AgentWatchdog** | `src/agent-watchdog.ts` | `loadManagedAgentsFromDir` → 授权过滤 → 合并 workspace skills → diff → `mergeManagedAgentsIntoConfig` → `writeConfigFile`；按需 `seedManagedAgentWorkspace`、`seedMainAgentAgentsMd`。 |
 | **DigEmployeeAuthWatch** | `src/dig-employee-auth-watch.ts` | `USER_CODE` + `REDIS_*` 连接 Redis；定时 `hgetall` 刷新授权 id，并对 `USER:RESOURCES:AUTH:{userId}` 做 **keyspace 通知**（`pmessage`）；变化时 `onChange` → `__flushNow({ fullWorkspaceReseed: true })`。 |
 | **DigEmployeeChangeSubscriber** | `src/dig-employee-change-subscriber.ts` | 订阅频道，解析 `DigEmployeeChangeEvent`，合并去抖后 `flushNow`；`strictAuth` 时可要求在拿到授权集后再处理事件。 |
 | **baiying_call** | `src/baiying-call-tool.ts` + `src/executor/` | 根据当前托管 Agent 与资源元数据路由到 doc / toolkit / tool / mcp / agent 等执行路径。 |

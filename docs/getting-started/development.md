@@ -26,7 +26,7 @@
 
 ```bash
 git clone <repo-url>
-cd byclaw-all
+cd ByClaw
 ```
 
 ### 2. 配置环境变量
