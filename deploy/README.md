@@ -1,6 +1,6 @@
 # Deploy
 
-部署目录，支持三种部署模式：中间件、单体应用（mono）、拆分应用（standalone）。
+部署目录，支持两种部署模式：中间件、拆分应用（standalone）。
 
 ## 目录结构
 
@@ -8,10 +8,8 @@
 deploy/
 ├── compose-detect.sh    # Docker Compose 版本自动检测（V1/V2 兼容）
 ├── config/              # 共享配置（nginx.conf, application.properties, logback.xml）
-│   ├── nginx-mono.conf            # 单体模式 nginx 配置（端口固定）
 │   └── nginx-standalone.conf.tpl  # 拆分模式 nginx 模板（端口从 .env 读取）
 ├── middleware/           # 中间件：Redis、MinIO、OpenGauss、OpenSandbox
-├── mono/                # 单体模式：一个镜像包含 fe + be + qa + data
 └── standalone/          # 拆分模式：fe、be、qa、data 各自独立镜像
 ```
 
@@ -70,30 +68,7 @@ MIDDLEWARE_MODULES=redis,opensandbox-server
 
 OpenGauss 首次启动时会自动执行 `initdb/` 下的初始化脚本（建 schema、建表、授权），仅在数据目录为空时执行一次。
 
-## 2. 单体模式（mono）
-
-所有应用模块打包在一个镜像中，通过 supervisord 管理进程。
-
-```bash
-cd mono
-
-# 拉取镜像
-sh pull.sh
-
-# 启动
-sh start-all.sh
-
-# 停止
-sh stop-all.sh
-```
-
-| 服务 | 默认端口 | 环境变量 |
-|------|---------|---------|
-| 前端 | 8080 | `NGINX_PORT` |
-| 后端 | 8086 / 8082 | `BE_SERVER_PORT` / `BE_WS_PORT` |
-| QA | 8090 | `BYCLAW_QA_PORT` |
-
-## 3. 拆分模式（standalone）
+## 2. 拆分模式（standalone）
 
 每个模块独立镜像，可单独启停。
 

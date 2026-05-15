@@ -98,15 +98,6 @@ ByClaw 架构遵循以下设计原则：
 └── byclaw-fe (本地启动)
 ```
 
-### 生产环境（单体模式）
-
-```
-服务器
-├── Docker Compose
-│   ├── middleware (Redis, OpenGauss, MinIO)
-│   └── mono (fe + be + qa + data in one container)
-```
-
 ### 生产环境（拆分模式）
 
 ```

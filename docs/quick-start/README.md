@@ -18,17 +18,17 @@
 ```bash
 # 克隆仓库
 git clone <repo-url>
-cd byclaw-all
+cd ByClaw
 
 # 配置环境变量
 cp .env.example .env
 # 编辑 .env 填入必要配置（数据库密码、GHCR 凭证等）
 
 # 启动中间件（Redis、PostgreSQL、MinIO、OpenSandbox）
-cd deploy/middleware && sh start-all.sh && cd ../..
+(cd deploy/middleware && sh start-all.sh)
 
-# 启动单体应用
-cd deploy/mono && sh start-all.sh && cd ../..
+# 启动应用
+(cd deploy/standalone && docker compose up -d)
 ```
 
 ## 本地开发启动

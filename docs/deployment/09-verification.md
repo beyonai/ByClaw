@@ -13,8 +13,8 @@
 cd deploy/middleware
 docker compose ps
 
-# 应用（单体或拆分）
-cd ../mono  # 或 ../standalone
+# 应用
+cd ../standalone
 docker compose ps
 ```
 
@@ -153,7 +153,7 @@ docker network inspect byclaw-network
 
 1. 检查后端是否正常启动
 2. 查看浏览器开发者工具 (F12) 的 Network 标签，查看请求错误
-3. 检查 Nginx 配置 (`deploy/config/nginx-standalone.conf` 或 `nginx-mono.conf`)
+3. 检查 Nginx 配置 (`deploy/config/nginx-standalone.conf`)
 
 ### 问题 6：QA Worker 不工作
 
@@ -179,7 +179,7 @@ docker compose logs qa-worker
 cd deploy/middleware
 docker compose logs --tail=500 > middleware.log
 
-cd ../standalone  # 或 ../mono
+cd ../standalone
 docker compose logs --tail=500 > app.log
 ```
 
@@ -194,10 +194,7 @@ docker exec -it byclaw-redis sh
 # 进入 OpenGauss
 docker exec -it byclaw-opengauss bash
 
-# 进入应用容器（单体）
-docker exec -it byclaw-all bash
-
-# 进入应用容器（拆分）
+# 进入应用容器
 docker exec -it byclaw-fe-standalone bash
 docker exec -it byclaw-be-standalone bash
 ```
@@ -209,7 +206,7 @@ docker exec -it byclaw-be-standalone bash
 ```bash
 # 停止所有服务
 cd deploy
-sh stop-standalone.sh  # 或 sh stop-mono.sh
+sh stop-standalone.sh
 
 # 删除容器和 volumes
 cd middleware

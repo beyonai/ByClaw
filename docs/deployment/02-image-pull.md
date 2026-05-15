@@ -15,7 +15,6 @@
 | BE | `ghcr.io/beyonai/byclaw/byclaw-be:main` | 后端服务 |
 | QA | `ghcr.io/beyonai/byclaw/byclaw-qa:main` | 问答服务 |
 | Data | `ghcr.io/beyonai/byclaw/byclaw-data:main` | DataCloud 服务 |
-| ByClaw All-in-One | `ghcr.io/beyonai/byclaw/byclaw-all:main` | 包含所有服务的单体镜像 |
 
 ### 2. 其他外网镜像
 
@@ -42,7 +41,6 @@
    docker pull ghcr.io/beyonai/byclaw/byclaw-be:main
    docker pull ghcr.io/beyonai/byclaw/byclaw-qa:main
    docker pull ghcr.io/beyonai/byclaw/byclaw-data:main
-   docker pull ghcr.io/beyonai/byclaw/byclaw-all:main
    docker pull sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server:v0.1.9
    ```
 
@@ -61,7 +59,6 @@
        ghcr.io/beyonai/byclaw/byclaw-be:main \
        ghcr.io/beyonai/byclaw/byclaw-qa:main \
        ghcr.io/beyonai/byclaw/byclaw-data:main \
-       ghcr.io/beyonai/byclaw/byclaw-all:main \
        sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server:v0.1.9
    do
        filename=$(echo $image | sed 's/\//_/g' | sed 's/:/-/g').tar
@@ -100,10 +97,6 @@
 cd deploy/middleware
 sh pull.sh
 
-# 拉取单体模式镜像
-cd ../mono
-sh pull.sh
-
 # 拉取拆分模式镜像
 cd ../standalone
 sh pull.sh
@@ -132,14 +125,11 @@ docker pull ghcr.io/beyonai/byclaw/byclaw-minio:main
 docker pull ghcr.io/beyonai/byclaw/byclaw-opengauss:main
 docker pull sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server:v0.1.9
 
-# 拉取所有应用镜像（拆分模式）
+# 拉取所有应用镜像
 docker pull ghcr.io/beyonai/byclaw/byclaw-fe:main
 docker pull ghcr.io/beyonai/byclaw/byclaw-be:main
 docker pull ghcr.io/beyonai/byclaw/byclaw-qa:main
 docker pull ghcr.io/beyonai/byclaw/byclaw-data:main
-
-# 拉取单体模式镜像
-docker pull ghcr.io/beyonai/byclaw/byclaw-all:main
 ```
 
 ### 方法 3：批量拉取脚本（外网环境）
@@ -165,7 +155,6 @@ docker pull ghcr.io/beyonai/byclaw/byclaw-fe:main
 docker pull ghcr.io/beyonai/byclaw/byclaw-be:main
 docker pull ghcr.io/beyonai/byclaw/byclaw-qa:main
 docker pull ghcr.io/beyonai/byclaw/byclaw-data:main
-docker pull ghcr.io/beyonai/byclaw/byclaw-all:main
 
 echo "✅ 所有镜像拉取完成！"
 ```
