@@ -10,7 +10,7 @@ WORKDIR /workspace
 COPY byclaw-data /workspace/byclaw-data
 
 WORKDIR /workspace/byclaw-data
-RUN uv config set pypi-index-url https://mirrors.aliyun.com/pypi/simple/
+
 RUN set -- packages/by_datacloud-*.whl; \
     if [ -f "$1" ]; then \
       uv sync --frozen --no-dev --no-install-package by-datacloud; \
