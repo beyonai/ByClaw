@@ -36,6 +36,7 @@
         <result column="machine_channel" property="machineChannel" />
         <result column="core_persona_definition" property="corePersonaDefinition" />
         <result column="advanced_settings" property="advancedSettings" />
+        <result column="target_content" property="targetContent" />
 
     </resultMap>
 

@@ -19,15 +19,8 @@ import com.iwhalecloud.byai.common.storage.UserFS;
 
 /**
  * 用户工作空间 skill 下载应用服务。
- *
- * 工作流程：
- * 1. 入参 skillPath 必须落在 {@link ByClawSkillPaths#WORKSPACE_SKILL_ROOT_PREFIX} 之内，
- *    防止越权读取 bucket 内其它路径（如 .sessions / .personal_agent）。
- * 2. 切换到目标用户上下文后，userFS.list 拿到 skill 目录下所有对象 key。
- * 3. 通过 StreamingResponseBody 逐个 read 后写入 ZipOutputStream，避免把整 skill 内容缓存到内存。
- * 4. 返回的 zip 内 entry 路径相对 skill 根目录（与上传 zip 的结构对称：顶层不再嵌套 skillName 目录）。
- *
- * 内存占用：单文件下载流式拷贝（8KB 缓冲），全程不缓存。
+ * @author qin.guoquan
+ * @date 2026-05-15 18:37:18
  */
 @Service
 public class ByClawSkillDownloadApplicationService {
