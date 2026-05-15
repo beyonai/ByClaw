@@ -26,7 +26,7 @@ pull() {
 }
 
 # 拉取 all-in-one 镜像
-pull "${IMAGE_ALL:-ghcr.io/beyonclaw/byclaw-all/byclaw-all:main}"
+pull "${IMAGE_ALL:-ghcr.io/beyonai/byclaw/byclaw-all:main}"
 
 if [ "$FAILED" -gt 0 ]; then
     echo ""

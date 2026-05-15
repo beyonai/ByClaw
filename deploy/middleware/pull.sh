@@ -33,9 +33,9 @@ pull() {
 }
 
 # 拉取中间件镜像
-pull "${IMAGE_REDIS:-ghcr.io/beyonclaw/byclaw-all/byclaw-redis:main}"
-pull "${IMAGE_MINIO:-ghcr.io/beyonclaw/byclaw-all/byclaw-minio:main}"
-pull "${IMAGE_OPENGAUSS:-ghcr.io/beyonclaw/byclaw-all/byclaw-opengauss:main}"
+pull "${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}"
+pull "${IMAGE_MINIO:-ghcr.io/beyonai/byclaw/byclaw-minio:main}"
+pull "${IMAGE_OPENGAUSS:-ghcr.io/beyonai/byclaw/byclaw-opengauss:main}"
 pull "${IMAGE_OPENCLAW:-ghcr.io/beyonai/byclaw-middleware/byclaw-openclaw:main}"
 
 pull "${IMAGE_SANDBOX_SERVER:-sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server:v0.1.9}"

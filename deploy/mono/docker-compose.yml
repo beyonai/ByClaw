@@ -1,6 +1,6 @@
 services:
   byclaw-all:
-    image: ${IMAGE_ALL:-ghcr.io/beyonclaw/byclaw-all/byclaw-all:main}
+    image: ${IMAGE_ALL:-ghcr.io/beyonai/byclaw/byclaw-all:main}
     container_name: byclaw-all-${CONTAINER_SUFFIX:-mono}
     user: root
     ports:
