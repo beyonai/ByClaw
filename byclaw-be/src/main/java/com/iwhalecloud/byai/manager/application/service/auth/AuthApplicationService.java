@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.application.service.auth;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.Arrays;
+import java.util.Objects;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -53,6 +54,7 @@ import com.iwhalecloud.byai.manager.qo.auth.ResourceUseApplyQo;
 import com.iwhalecloud.byai.manager.qo.resource.PrivListQo;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
+import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.constants.auth.GrantObjType;
@@ -2398,7 +2400,23 @@ public class AuthApplicationService {
         vo.setOwnerType(ssResource.getOwnerType());
         vo.setResourceBizType(ssResource.getResourceBizType());
 
+        boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum());
         boolean canManage = hasResourceManagePermission(ssResource);
+        
+        // 如果资源已注销，只允许恢复操作，其他操作全部禁用
+        if (isResourceRemoved) {
+            vo.setCanEdit(false);
+            vo.setCanManageAuth(false);
+            vo.setCanUseAuth(false);
+            vo.setCanDelete(false);
+            vo.setCanAuditUse(false);
+            vo.setCanApplyUse(false);
+            vo.setCanSetDefault(false);
+            vo.setCanRestore(canManage);
+            return vo;
+        }
+
+        // 资源未注销时的原有逻辑
         boolean canSetUse = hasResourceUseSettingPermission(ssResource);
         boolean isDefaultResource = isDefaultPersonalResource(ssResource);
         boolean isDefaultSuperAssistantResource = isDefaultSuperAssistantResource(ssResource);
@@ -2425,6 +2443,7 @@ public class AuthApplicationService {
         if (isDigitalEmployee) {
             vo.setCanSetDefault(checkCanSetDefaultDigitalEmployee(ssResource));
         }
+        vo.setCanRestore(false);
         return vo;
     }
 

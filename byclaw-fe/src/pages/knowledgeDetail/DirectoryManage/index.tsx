@@ -713,18 +713,19 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       //   },
       // },
 
-      {
-        title: intl.formatMessage({ id: 'directoryManage.creator' }),
-        dataIndex: 'createStaffName',
-        align: 'center',
-      },
-      {
-        title: intl.formatMessage({ id: 'baseListModal.createTime' }),
-        dataIndex: 'createTime',
-        align: 'center',
-        width: 200,
-        // render: (v: string) => dayjs(Number(v)).format('YYYY-MM-DD HH:mm:ss'),
-      },
+      // 暂不展示创建人、创建时间
+      // {
+      //   title: intl.formatMessage({ id: 'directoryManage.creator' }),
+      //   dataIndex: 'createStaffName',
+      //   align: 'center',
+      // },
+      // {
+      //   title: intl.formatMessage({ id: 'baseListModal.createTime' }),
+      //   dataIndex: 'createTime',
+      //   align: 'center',
+      //   width: 200,
+      // },
+
       {
         title: '构建进度',
         dataIndex: 'buildProgress',

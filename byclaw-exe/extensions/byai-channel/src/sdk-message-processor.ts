@@ -12,11 +12,11 @@ import {
 } from "openclaw/plugin-sdk/media-runtime";
 import { getByaiRuntime } from "./runtime.js";
 import { buildAgentSessionKey, resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
-import type { SdkProcessorDeps } from "./types.js";
+import type { SdkInboundFile, SdkProcessorDeps } from "./types.js";
 import {
   bindActiveSdkRequestRunId,
-  getSessionPathBySessionId,
   registerActiveSdkRequest,
+  resolveSdkLocalFilePath,
 } from "./session-context.js";
 import { ensureSessionReasoningStream, shouldForceReasoningStream } from "./reasoning-stream.js";
 import { EventType, SseReasonMessageType } from "@byclaw/by-framework";
@@ -86,46 +86,11 @@ function resolveSdkSessionKey(params: {
   });
 }
 
-type SdkInboundFileRef = {
-  fileUrl?: string; // 这种格式的url：commonFile/preview?style=
-  filePath?: string; // 这种格式的path：/by/.sessions/
-  contentType?: string;
-  mimeType?: string;
-};
-
-function resolveSdkLocalFilePath(rawPath: string, sessionRoot: string): string {
-  if (!path.posix.isAbsolute(rawPath)) {
-    return path.posix.resolve(sessionRoot, rawPath);
-  }
-
-  const normalizedRawPath = path.posix.normalize(rawPath);
-  const normalizedSessionRoot = path.posix.normalize(sessionRoot);
-  if (
-    normalizedRawPath === normalizedSessionRoot ||
-    normalizedRawPath.startsWith(`${normalizedSessionRoot}/`)
-  ) {
-    return normalizedRawPath;
-  }
-
-  for (let start = 0; start < normalizedSessionRoot.length; start += 1) {
-    const overlap = normalizedSessionRoot.slice(start);
-    if (
-      overlap.length <= 1 ||
-      (normalizedRawPath !== overlap && !normalizedRawPath.startsWith(`${overlap}/`))
-    ) {
-      continue;
-    }
-    return `${normalizedSessionRoot.slice(0, start)}${normalizedRawPath}`;
-  }
-
-  return normalizedRawPath;
-}
-
 async function resolveSdkInboundMediaPayload(params: {
   cfg: import("openclaw/plugin-sdk").OpenClawConfig;
   accountId: string;
   sessionId: string;
-  files?: SdkInboundFileRef[];
+  files?: SdkInboundFile[];
   log?: {
     info?: (msg: string) => void;
     warn?: (msg: string) => void;
@@ -143,7 +108,6 @@ async function resolveSdkInboundMediaPayload(params: {
     return {};
   }
 
-  const sessionRoot = getSessionPathBySessionId(params.sessionId);
   const mediaPaths: string[] = [];
   const mediaTypes: string[] = [];
   const seenSources = new Set<string>();
@@ -201,7 +165,7 @@ async function resolveSdkInboundMediaPayload(params: {
       continue;
     }
 
-    const resolvedPath = resolveSdkLocalFilePath(rawPath, sessionRoot);
+    const resolvedPath = resolveSdkLocalFilePath(rawPath, params.sessionId);
 
     if (seenSources.has(resolvedPath)) {
       continue;
@@ -254,7 +218,6 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
     agent_id?: string;
     agent_code?: string;
     agent_name?: string;
-    files?: SdkInboundFileRef[];
   };
 
   const targetAgentId = resolveSdkTargetAgentId(routing.agentId, extraPayload);
@@ -264,7 +227,6 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
     sessionId: message.sessionId,
     userId: message.userId,
     perSessionId:
-      ((account.config as Record<string, unknown>).sessionKeyPerSessionI as boolean | undefined) ??
       account.config.sessionKeyPerSessionId ??
       false,
   });
@@ -326,7 +288,7 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
     cfg,
     accountId: account.accountId,
     sessionId: message.sessionId,
-    files: extraPayload.files,
+    files: message.files,
     log,
   });
 

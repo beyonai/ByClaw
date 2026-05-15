@@ -402,7 +402,7 @@ public class FilesApplicationService {
      * @param filePath 文件路径
      */
     public void preview(HttpServletResponse response, String style, String bucketName, String filePath) {
-        if (bucketName == null) {
+        if (StringUtil.isEmpty(bucketName)) {
             bucketName = userBucketNamingService.buildUserBucketName(CurrentUserHolder.getCurrentUserCode());
         }
         try (InputStream inputStream = openCommonFileInputStream(bucketName, filePath);) {
@@ -446,13 +446,15 @@ public class FilesApplicationService {
             String userFsFallbackPath = prefixUserFsRootPath(fallbackPath);
             InputStream userFsInputStream = tryReadCommonFile(bucketName, userFsFallbackPath);
             if (userFsInputStream != null) {
-                logger.warn("Common file preview fallback succeeded with UserFS root prefix, bucketName={}, filePath={}, fallbackPath={}",
+                logger.warn(
+                    "Common file preview fallback succeeded with UserFS root prefix, bucketName={}, filePath={}, fallbackPath={}",
                     bucketName, filePath, userFsFallbackPath);
                 return userFsInputStream;
             }
             try {
                 InputStream inputStream = commonFileStorage.read(commonFilePathResolver.arbitrary(null, fallbackPath));
-                logger.warn("Common file preview fallback succeeded without bucket prefix, bucketName={}, filePath={}, fallbackPath={}",
+                logger.warn(
+                    "Common file preview fallback succeeded without bucket prefix, bucketName={}, filePath={}, fallbackPath={}",
                     bucketName, filePath, fallbackPath);
                 return inputStream;
             }

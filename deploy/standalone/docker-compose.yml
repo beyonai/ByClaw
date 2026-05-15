@@ -10,6 +10,8 @@ services:
       - ./logs/nginx:/var/log/nginx
     networks:
       - byclaw-network
+    depends_on:
+      - be
     restart: unless-stopped
 
   be:
@@ -22,6 +24,8 @@ services:
       - "${BE_WS_PORT:-8082}:${BE_WS_PORT:-8082}"
     env_file:
       - ../../.env
+    environment:
+      - JAVA_OPTS=-Xms512m -Xmx2g -XX:TieredStopAtLevel=1 -XX:+UseParallelGC -Dspring.jmx.enabled=false
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ../config:/app/config
@@ -70,6 +74,8 @@ services:
       - "${DATACLOUD_PORT:-8087}:${DATACLOUD_PORT:-8087}"
     env_file:
       - ../../.env
+    environment:
+      - JAVA_OPTS=-Xms256m -Xmx1g -XX:TieredStopAtLevel=1 -XX:+UseParallelGC -Dspring.jmx.enabled=false
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ../config:/app/config

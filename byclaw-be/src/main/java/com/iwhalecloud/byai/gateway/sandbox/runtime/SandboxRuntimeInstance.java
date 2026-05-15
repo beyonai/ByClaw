@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.sandbox.runtime;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -22,4 +23,8 @@ public class SandboxRuntimeInstance {
     private List<String> endpoints;
 
     private Map<String, String> endpointHeaders;
+
+    private OffsetDateTime createdAt;
+
+    private OffsetDateTime expiresAt;
 }

@@ -8,6 +8,6 @@ sudo chown -R 70:70 data
 sudo chmod -R a+r initdb
 
 echo "Starting OpenGauss..."
-$COMPOSE $COMPOSE_ENV_FLAG up -d opengauss
+$COMPOSE $COMPOSE_ENV_FLAG up -d --force-recreate opengauss
 echo ""
 $COMPOSE ps opengauss

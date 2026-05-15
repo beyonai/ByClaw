@@ -1,4 +1,4 @@
-package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.Card;
+package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards;
 
 import com.aliyun.dingtalkcard_1_0.Client;
 import com.aliyun.dingtalkcard_1_0.models.CreateAndDeliverHeaders;
@@ -14,7 +14,8 @@ import com.aliyun.tea.TeaPair;
 import com.aliyun.teaopenapi.models.Config;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkOpenApiService;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotConfigService;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkTokenService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,11 +60,13 @@ public class DingtalkCardService {
     private static final String CARDPARAMMAP_COPYCONTENT_KEY = "copyContent";
 
     private final ObjectMapper objectMapper;
-    private final DingtalkOpenApiService dingtalkOpenApiService;
+    private final DingtalkTokenService dingtalkTokenService;
+    private final DingtalkRobotConfigService dingtalkRobotConfigService;
 
-    public DingtalkCardService(ObjectMapper objectMapper, DingtalkOpenApiService dingtalkOpenApiService) {
+    public DingtalkCardService(ObjectMapper objectMapper, DingtalkTokenService dingtalkTokenService, DingtalkRobotConfigService dingtalkRobotConfigService) {
         this.objectMapper = objectMapper;
-        this.dingtalkOpenApiService = dingtalkOpenApiService;
+        this.dingtalkTokenService = dingtalkTokenService;
+        this.dingtalkRobotConfigService = dingtalkRobotConfigService;
     }
 
     /**
@@ -89,7 +92,7 @@ public class DingtalkCardService {
             throw new IllegalStateException("DingTalk assistant reply card template not configured");
         }
 
-        String accessToken = dingtalkOpenApiService.getAccessToken(senderStaffId, robotCode);
+        String accessToken = dingtalkTokenService.getAccessToken(senderStaffId, robotCode);
         String outTrackId = resolveOutTrackId(robotCode, senderStaffId, conversationType);
         Map<String, String> cardParamMap = buildAssistantReplyCardParamMap(agentName);
         CreateAndDeliverHeaders headers = buildCreateAndDeliverHeaders(accessToken);
@@ -420,7 +423,7 @@ public class DingtalkCardService {
     String resolveCardTemplateId(String robotCode) {
         if (StringUtils.hasText(robotCode)) {
             try {
-                String configuredCardTemplateId = dingtalkOpenApiService.getRobotConfig(robotCode).getCardTemplateId();
+                String configuredCardTemplateId = dingtalkRobotConfigService.getRobotConfig(robotCode).getCardTemplateId();
                 if (StringUtils.hasText(configuredCardTemplateId)) {
                     return configuredCardTemplateId;
                 }

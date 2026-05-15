@@ -443,6 +443,7 @@ const ConfigForm = (props) => {
   const [inputTag, setInputTag] = useState('');
   const [selectedTags, setSelectedTags] = useState([]);
   const [uploadImgs, setUploadImgs] = useState([]);
+  const [avatarUploadLoading, setAvatarUploadLoading] = useState(false);
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
   const [exampleOpen, setExampleOpen] = useState(false);
   const [memoryModalOpen, setMemoryModalOpen] = useState(false);
@@ -806,10 +807,10 @@ const ConfigForm = (props) => {
       roleObj.roleAttributes = current.roleAttributes || current.workStandard || '';
 
       // 将所有配置存成 JSON 放到 corePersonaDefinition 字段（数组格式）
-      const corePersonaDefinition: Array<{ name: string; key: string; value: string }> = [];
+      const corePersonaDefinition: Array<{ name: string; nameEn?: string; key: string; value: string }> = [];
 
       // 获取所有 prompt 字段的名称映射（从模板数据中获取）
-      const fieldNameMap: Record<string, { name: string; key: string }> = {};
+      const fieldNameMap: Record<string, { name: string; nameEn?: string; key: string }> = {};
 
       // 尝试从模板数据中获取字段映射
       if (templateData && Array.isArray(templateData)) {
@@ -817,6 +818,7 @@ const ConfigForm = (props) => {
           if (item.paramEnName && item.paramName) {
             fieldNameMap[item.paramEnName] = {
               name: item.paramName,
+              nameEn: item.paramEnName,
               key: item.paramEnName,
             };
           }
@@ -824,13 +826,16 @@ const ConfigForm = (props) => {
       }
 
       // 从现有的 corePersonaDefinition 中获取 name 信息（用于编辑时保持原有值）
-      const existingNameMap: Record<string, string> = {};
+      const existingMetaMap: Record<string, { name?: string; nameEn?: string }> = {};
       try {
         const existingData = JSON.parse(current.corePersonaDefinition || '[]');
         if (Array.isArray(existingData)) {
           existingData.forEach((item: any) => {
             if (item && item.key) {
-              existingNameMap[item.key] = item.name || item.key;
+              existingMetaMap[item.key] = {
+                name: item.name,
+                nameEn: item.nameEn,
+              };
             }
           });
         }
@@ -841,17 +846,20 @@ const ConfigForm = (props) => {
       // 遍历所有 tab，将值存入 corePersonaDefinition
       allTabs.forEach((tab) => {
         const fieldValue = current[tab.key];
-        if (fieldValue) {
-          const fieldInfo = fieldNameMap[tab.key];
-          const key = fieldInfo?.key || tab.key;
-          const name = existingNameMap[key] || fieldInfo?.name || tab.name || tab.key;
+        const fieldInfo = fieldNameMap[tab.key];
+        const key = fieldInfo?.key || tab.key;
+        const existingMeta = existingMetaMap[key] || {};
+        const item: { name: string; nameEn?: string; key: string; value: string } = {
+          name: existingMeta.name || fieldInfo?.name || tab.name || tab.key,
+          key,
+          value: fieldValue || '',
+        };
 
-          corePersonaDefinition.push({
-            name,
-            key,
-            value: fieldValue,
-          });
+        if (existingMeta.nameEn || fieldInfo?.nameEn) {
+          item.nameEn = existingMeta.nameEn || fieldInfo?.nameEn;
         }
+
+        corePersonaDefinition.push(item);
       });
 
       const corePersonaDefinitionJson = JSON.stringify(corePersonaDefinition);
@@ -1090,7 +1098,7 @@ const ConfigForm = (props) => {
     },
   ];
 
-  const onAvatarClick = (url) => () => {
+  const onAvatarClick = (url, onLoadCallback?) => () => {
     // 如果url是对象，表示还在上传中，不进行处理
     if (typeof url !== 'string') {
       return;
@@ -1100,6 +1108,18 @@ const ConfigForm = (props) => {
       avatar: url,
     };
     setAvatar(url);
+
+    // 如果有回调函数，等待图片加载完成后执行
+    if (onLoadCallback) {
+      const img = new Image();
+      img.onload = () => {
+        onLoadCallback();
+      };
+      img.onerror = () => {
+        onLoadCallback();
+      };
+      img.src = getAvatarUrl(url);
+    }
   };
 
   const avatarMenuRender = (menu) => (
@@ -1123,6 +1143,11 @@ const ConfigForm = (props) => {
               height={40}
               defaultSrc={getAvatarUrl()}
             />
+            {it.localUrl && avatarUploadLoading && (
+              <div className={pStyles.avatarLoading}>
+                <Spin size="small" />
+              </div>
+            )}
           </figure>
         ))}
       </div>
@@ -1143,23 +1168,39 @@ const ConfigForm = (props) => {
       // 先显示本地图片
       setUploadImgs((v) => [...v, { localUrl }]);
 
-      const res = await compressImgFileAndUpload({ file: img });
-      if (res?.datasetLogosUrl) {
-        const { datasetLogosUrl } = res;
+      // 开始上传，设置loading状态
+      setAvatarUploadLoading(true);
 
-        setUploadImgs((v) => {
-          const idx = v.findIndex((x) => typeof x !== 'string' && x.localUrl === localUrl);
+      try {
+        const res = await compressImgFileAndUpload({ file: img });
+        if (res && res.datasetLogosUrl) {
+          const { datasetLogosUrl } = res;
 
-          if (idx !== -1) {
-            window.URL.revokeObjectURL(v[idx].localUrl);
-            v[idx] = datasetLogosUrl;
-          }
-          return [...v];
-        });
+          setUploadImgs((v) => {
+            const idx = v.findIndex((x) => typeof x !== 'string' && x.localUrl === localUrl);
 
-        return;
+            if (idx !== -1) {
+              window.URL.revokeObjectURL(v[idx].localUrl);
+              v[idx] = datasetLogosUrl;
+            }
+            return [...v];
+          });
+
+          // 等待新头像图片加载完成后再关闭loading
+          onAvatarClick(datasetLogosUrl, () => {
+            setAvatarUploadLoading(false);
+          })();
+
+          return;
+        }
+        message.error(res?.msg || intl.formatMessage({ id: 'employeeDetail.uploadFail' }));
+        // 上传失败也需要关闭loading
+        setAvatarUploadLoading(false);
+      } catch (error) {
+        message.error(intl.formatMessage({ id: 'employeeDetail.uploadFail' }));
+        // 发生异常也需要关闭loading
+        setAvatarUploadLoading(false);
       }
-      message.error(res?.msg || intl.formatMessage({ id: 'employeeDetail.uploadFail' }));
     }
   };
 
@@ -1236,8 +1277,15 @@ const ConfigForm = (props) => {
                 menu={{ items: avatarMenu, onClick: handleAvatarMenuClick }}
               >
                 <div>
-                  <figure className={pStyles.currentAvatar}>
+                  <figure
+                    className={classnames(pStyles.currentAvatar, { [pStyles.avatarLoadingWrap]: avatarUploadLoading })}
+                  >
                     <Image src={getAvatarUrl(avatar)} width="100%" />
+                    {avatarUploadLoading && (
+                      <div className={pStyles.avatarLoadingOverlay}>
+                        <Spin size="small" />
+                      </div>
+                    )}
                   </figure>
                 </div>
               </Dropdown>

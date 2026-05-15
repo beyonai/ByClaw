@@ -44,7 +44,11 @@ public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
             .filter(d -> matchesSandboxMetadata(d, userCode, sandboxType))
             .filter(d -> isReusableSandboxState(d.getStatus()))
             .sorted(this::compareSandboxReusePreference)
-            .map(d -> SandboxRuntimeInstance.builder().sandboxId(d.getId()).build())
+            .map(d -> SandboxRuntimeInstance.builder()
+                .sandboxId(d.getId())
+                .createdAt(d.getCreatedAt())
+                .expiresAt(d.getExpiresAt())
+                .build())
             .findFirst();
     }
 
@@ -61,7 +65,11 @@ public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
         meta.put("idempotencyKey", idempotencyKey);
         request.setMetadata(meta);
         CreateSandboxResponse response = openSandboxClient.createSandbox(request, idempotencyKey);
-        return SandboxRuntimeInstance.builder().sandboxId(response.getId()).build();
+        return SandboxRuntimeInstance.builder()
+            .sandboxId(response.getId())
+            .createdAt(response.getCreatedAt())
+            .expiresAt(response.getExpiresAt())
+            .build();
     }
 
     @Override
@@ -106,11 +114,24 @@ public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
 
     @Override
     public void heartbeat(String userCode, String sandboxType, SandboxInfo sandboxInfo) {
-        if (sandboxInfo == null || sandboxInfo.getTimeoutSeconds() == null || sandboxInfo.getTimeoutSeconds() <= 0) {
+        if (sandboxInfo == null
+            || sandboxInfo.getSandboxId() == null
+            || sandboxInfo.getSandboxId().isBlank()
+            || sandboxInfo.getTimeoutSeconds() == null
+            || sandboxInfo.getTimeoutSeconds() <= 0) {
             return;
         }
         OffsetDateTime newExpiresAt = OffsetDateTime.now().plusSeconds(sandboxInfo.getTimeoutSeconds());
         openSandboxClient.renewExpiration(sandboxInfo.getSandboxId(), new RenewSandboxExpirationRequest(newExpiresAt));
+    }
+
+    @Override
+    public boolean exists(String userCode, String sandboxType, SandboxInfo sandboxInfo) {
+        if (sandboxInfo == null || sandboxInfo.getSandboxId() == null || sandboxInfo.getSandboxId().isBlank()) {
+            return false;
+        }
+        SandboxDetail detail = openSandboxClient.getSandboxIfExists(sandboxInfo.getSandboxId());
+        return detail != null && isReusableSandboxState(detail.getStatus());
     }
 
     private static boolean matchesSandboxMetadata(SandboxDetail detail, String userCode, String sandboxType) {
@@ -126,7 +147,12 @@ public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
         }
         String state = status.getState().trim().toLowerCase(Locale.ROOT);
         return !"failed".equals(state)
+            && !"exited".equals(state)
+            && !"exit".equals(state)
+            && !"stopped".equals(state)
             && !"terminated".equals(state)
+            && !"deleted".equals(state)
+            && !"removed".equals(state)
             && !"canceled".equals(state)
             && !"cancelled".equals(state);
     }

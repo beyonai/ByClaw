@@ -8,7 +8,7 @@
 
 插件按顺序尝试两种结构（取第一个可用的 Agent 条目）：
 
-1. **`agent_list` 数组**：使用 **`agent_list[0]`** 作为条目（字段名与下文「条目字段」一致）。
+1. **`agent_list` 数组**：使用 **`agent_list[0]`** 作为条目（字段名与下文「条目字段」一致）。关联资源字段：优先 `relResourceInfoList`；若缺失且存在 **`relResourceList`**，则在读取阶段视为同一列表（与 `src/agent-adapter.ts` 对详情 JSON 的处理一致）。
 2. **百应详情根对象**：根上同时存在 **`resourceId`** 与 **`resourceName`**（字符串）时，视为详情格式；部分字段会从 JSON 字符串再解析（如 `prologue`、`coreCompetencies`）。
 
 若两种方式都得不到有效条目：
@@ -18,9 +18,26 @@
 
 写入策略：首访创建工作区并生成文件；之后仅当某 `.md` **文件首行**为托管标记 `<!-- baiying-enhance: managed seed -->` 时才会被插件覆盖更新，用户手动编辑过的文件不会被覆盖。
 
+---
+
+## 同步到 OpenClaw 配置：`agents.list[].skills`（非工作区 `.md`）
+
+工作区 Markdown 由 `workspace-seed.ts` 负责；而 **`openclaw.json`（或当前生效网关配置）** 里托管 agent 的列表项由 **`src/agent-adapter.ts`** 的 `adaptAgentJson` / `normalizeAgentListSkills` 生成，经 `mergeManagedAgentsIntoConfig` 合并写盘。
+
+| 规则 | 说明 |
+|------|------|
+| 始终写出 `skills` | 每个托管子 agent（`baiying-agent-*`）在 **`agents.list[]`** 中都带有 **`skills`** 字段，不再依赖「有值才出现」。 |
+| 默认空数组 | 无可用配置时为 **`[]`**。 |
+| **`relSkills`（优先）** | JSON **根**上为非空字符串数组时（如数字员工详情里的 `["dws","clawhub"]`），**`agents.list[].skills`** 即为该数组（元素 `trim`，去掉空串）。 |
+| **`skills`（兼容）** | 若无有效 **`relSkills`**，则读取根级 **`skills`**（旧版「原生简化」JSON）；仍无则为 **`[]`**。 |
+
+适用结构：百应详情根对象、`agent_list` 与首条目同文件根上的字段、以及原生根对象——均从**根对象**读取 `relSkills` / `skills`。
+
+---
+
 ## 生成的 Workspace 文件清单
 
-默认工作区目录：`~/.openclaw/workspace-<agentId>/`（或配置里为该 Agent 指定的 `workspace` 路径）。
+默认工作区目录：与 `resolveAgentWorkspaceDir` / `resolveDefaultManagedWorkspacePath` 一致——一般为 `<stateDir>/workspace-<agentId>/`；若 agent id 为 `main` 且未在配置中覆盖 `workspace`，则为 `<stateDir>/workspace/`（与 OpenClaw 默认主工作区布局一致）。托管体 id 形如 `baiying-agent-<数字>`，故目录多为 `workspace-baiying-agent-...`。
 
 | 文件名 | 作用简述 |
 |--------|----------|
@@ -120,4 +137,4 @@ DOC 类资源类型（用于决定是否展示 `agent_id`）：`DOC`、`ATOM`、
 | `USER.md` | `prologue.openingQuestion` |
 | `TOOLS.md` | 关联资源列表 + `resourceId`（及适配层 id 兜底） |
 
-如需确认行为是否与当前代码一致，请以 `src/workspace-seed.ts` 中 `buildSoul`、`buildByaiBusinessExtensionsMd`、`buildAgentsMd`、`buildIdentityMd`、`buildUserMd`、`buildToolsMd` 及 `src/core-persona-definition.ts` 为准。
+如需确认行为是否与当前代码一致，请以 `src/workspace-seed.ts` 中 `buildSoul`、`buildByaiBusinessExtensionsMd`、`buildAgentsMd`、`buildIdentityMd`、`buildUserMd`、`buildToolsMd` 及 `src/core-persona-definition.ts` 为准；**网关配置中的 `agents.list[].skills`** 以 `src/agent-adapter.ts`（`normalizeAgentListSkills`）为准。

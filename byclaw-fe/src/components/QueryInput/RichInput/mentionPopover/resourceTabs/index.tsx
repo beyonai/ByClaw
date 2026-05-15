@@ -1,4 +1,4 @@
-import { Button, Tabs, Input } from 'antd';
+import { Button, Tabs, Input, Spin } from 'antd';
 import { useIntl, useNavigate } from '@umijs/max';
 import classNames from 'classnames';
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
@@ -6,10 +6,11 @@ import { SearchOutlined } from '@ant-design/icons';
 import { trim } from 'lodash';
 import ResourceCitation from '@/components/Resources/components/ResourceCitation';
 import Empty from '@/components/Empty';
+import { Empty as AntdEmpty } from 'antd';
 import { ResourceType } from '../../utils/constants';
 import { IResourceType } from '../../types';
 import { ResourceTypeMap } from '@/constants/resource';
-import { queryDigEmployeeRelResourceAuth } from '@/pages/manager/service/resources';
+import { queryDigEmployeeRelResourceAuth, listUserSpace, previewFile } from '@/pages/manager/service/resources';
 import { getDcSystemConfigListByStandType } from '@/service/auth';
 import { DEFAULT_MENU_CONFIG, getVisibleMenuKeysFromConfig } from '@/constants/system';
 import styles from './style.module.less';
@@ -53,6 +54,14 @@ const ResourceTabs: React.FC<Props> = ({
   const [sharedLoading, setSharedLoading] = useState(false);
   const sharedQueryKeyRef = useRef('');
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+
+  const [fileList, setFileList] = useState<any[]>([]);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [currentPath, setCurrentPath] = useState('');
+  const [pathHistory, setPathHistory] = useState<string[]>([]);
+  const [downloadingFile, setDownloadingFile] = useState<string | null>(null);
+  const downloadTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const downloadLockRef = useRef(false);
 
   const { layoutMode, agentInfo } = useGlobal();
 
@@ -104,6 +113,93 @@ const ResourceTabs: React.FC<Props> = ({
     [onSelect]
   );
 
+  const onSelectFile = useCallback(
+    (item: any) => {
+      onSelect(item, ResourceType.OBJECT);
+    },
+    [onSelect]
+  );
+
+  const fetchFileList = useCallback(
+    async (path: string) => {
+      setFileLoading(true);
+      try {
+        const response = await listUserSpace({
+          prefix: path,
+          resourceId: agentId,
+        });
+        console.log('response111', response);
+        setFileList(response || []);
+      } catch (error) {
+        console.error('Failed to load file list:', error);
+        setFileList([]);
+      } finally {
+        setFileLoading(false);
+      }
+    },
+    [agentId]
+  );
+
+  const handleFolderClick = useCallback(
+    (folderPath: string) => {
+      setPathHistory((prev) => [...prev, currentPath]);
+      setCurrentPath(folderPath);
+      fetchFileList(folderPath);
+    },
+    [currentPath, fetchFileList]
+  );
+
+  const handleBackClick = useCallback(() => {
+    if (pathHistory.length > 0) {
+      const previousPath = pathHistory[pathHistory.length - 1];
+      setPathHistory((prev) => prev.slice(0, -1));
+      setCurrentPath(previousPath);
+      fetchFileList(previousPath);
+    }
+  }, [pathHistory, fetchFileList]);
+
+  const handleDownloadFile = useCallback(
+    (filePath: string, fileName: string) => {
+      if (downloadLockRef.current || downloadingFile === filePath) {
+        return;
+      }
+
+      downloadLockRef.current = true;
+      setDownloadingFile(filePath);
+
+      if (downloadTimerRef.current) {
+        clearTimeout(downloadTimerRef.current);
+      }
+
+      downloadTimerRef.current = setTimeout(async () => {
+        try {
+          const response = await previewFile(filePath);
+          const url = window.URL.createObjectURL(new Blob([response.file]));
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = fileName;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(url);
+        } catch (error) {
+          console.error('文件下载失败:', error);
+        } finally {
+          downloadLockRef.current = false;
+          setDownloadingFile(null);
+          downloadTimerRef.current = null;
+        }
+      }, 200);
+    },
+    [downloadingFile]
+  );
+
+  useEffect(() => {
+    if (activeTab === 'file') {
+      fetchFileList(currentPath);
+    }
+  }, [activeTab, currentPath, fetchFileList]);
+
   const hasAnyTab = true;
 
   const shouldUseSharedResourceQuery = !!normalizedAgentId;
@@ -131,6 +227,14 @@ const ResourceTabs: React.FC<Props> = ({
       }
     };
   }, [searchValue, queryKeyword]);
+
+  useEffect(() => {
+    return () => {
+      if (downloadTimerRef.current) {
+        clearTimeout(downloadTimerRef.current);
+      }
+    };
+  }, []);
 
   const fetchSharedResources = useCallback(
     async (keywordValue: string, force = false) => {
@@ -197,6 +301,7 @@ const ResourceTabs: React.FC<Props> = ({
     if (visibleKeys.includes('tool')) visible.push('tool');
     if (visibleKeys.includes('view')) visible.push('view');
     if (visibleKeys.includes('object')) visible.push('object');
+    if (visibleKeys.includes('file')) visible.push('file');
     visible.push('skill');
     if (!visible.length) return;
     const newActiveTabValue = activeTab && visible.includes(activeTab) ? activeTab : visible[0];
@@ -312,12 +417,75 @@ const ResourceTabs: React.FC<Props> = ({
         </div>
       ),
     });
+    items.push({
+      key: 'file',
+      label: intl.formatMessage({ id: 'common.file' }),
+      children: (
+        <div className={styles.listContainer}>
+          {pathHistory.length > 0 && (
+            <div className={styles.filePathHeader}>
+              <button type="button" className={styles.backButton} onClick={handleBackClick}>
+                ← 返回上一级
+              </button>
+            </div>
+          )}
+          <div className={styles.fileList}>
+            {fileLoading ? (
+              <div className={classNames('ub ub-ac ub-pc', styles.loadingContainer)}>
+                <Spin />
+              </div>
+            ) : fileList.length === 0 ? (
+              <div className={styles.emptyContainer}>
+                <Empty image={AntdEmpty.PRESENTED_IMAGE_SIMPLE} />
+              </div>
+            ) : (
+              fileList.map((file, index) => (
+                <div
+                  key={`${file.name}-${index}`}
+                  className={`${styles.fileItem} ${file.dir ? styles.folderItem : styles.fileItem}`}
+                  onClick={() => {
+                    if (file.dir) {
+                      handleFolderClick(file.filePath);
+                    } else {
+                      onSelectFile({
+                        resourceId: `${file.filePath}/${file.name}`,
+                        resourceName: file.name,
+                        resourceType: 'FILE',
+                      });
+                    }
+                  }}
+                >
+                  <span className={styles.fileIcon}>{file.dir ? '📁' : '📄'}</span>
+                  <span className={styles.fileName}>{file.name}</span>
+                  {!file.dir && (
+                    <Button
+                      type="text"
+                      size="small"
+                      className={styles.downloadBtn}
+                      loading={downloadingFile === file.filePath}
+                      disabled={!!downloadingFile}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDownloadFile(file.filePath, file.name);
+                      }}
+                    >
+                      下载
+                    </Button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      ),
+    });
     return items;
   }, [
     intl,
     onSelect,
     onSelectObject,
     onSelectTool,
+    onSelectFile,
     queryKeyword,
     agentId,
     agentIds,
@@ -327,6 +495,13 @@ const ResourceTabs: React.FC<Props> = ({
     sharedLoading,
     getSharedTabResources,
     resolvedSessionId,
+    fileList,
+    fileLoading,
+    pathHistory,
+    downloadingFile,
+    handleBackClick,
+    handleFolderClick,
+    handleDownloadFile,
   ]);
 
   const visibleTabs = useMemo(() => {
@@ -361,6 +536,11 @@ const ResourceTabs: React.FC<Props> = ({
       label: intl.formatMessage({ id: 'common.skill' }),
     };
 
+    const fileTab = {
+      key: 'file',
+      label: intl.formatMessage({ id: 'common.file' }),
+    };
+
     const filteredConditionalTabs = conditionalTabs.filter((tab) => {
       if (agentType === '005') {
         return !['knowledge', 'tool'].includes(tab.key);
@@ -371,7 +551,7 @@ const ResourceTabs: React.FC<Props> = ({
       return visibleKeys.includes(tab.key);
     });
 
-    return [...baseTabs, ...filteredConditionalTabs, skillTab];
+    return [...baseTabs, ...filteredConditionalTabs, skillTab, fileTab];
   }, [agentType, intl, visibleKeys]);
 
   if (!hasAnyTab) {

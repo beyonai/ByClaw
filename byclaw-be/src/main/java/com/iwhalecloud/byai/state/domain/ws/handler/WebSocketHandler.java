@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.ws.handler;
 
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.state.domain.notification.service.NotificationService;
 import com.iwhalecloud.byai.common.log.util.RequestContextUtil;
 import com.iwhalecloud.byai.common.log.util.SnowFlake;
@@ -34,6 +35,9 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
     @Autowired
     private NotificationService notificationService;
 
+    @Autowired
+    private SandboxService sandboxService;
+
     public WebSocketHandler() {
         super(true);
     }
@@ -65,7 +69,7 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
         Long requestId = SnowFlake.nextId();
         RequestContextUtil.setRequestId(requestId);
         log.debug("WebSocket 消息处理开始，REQUEST_ID: {}", requestId);
-        
+
         try {
             ChatMessage chatMessage = JSON.parseObject(message, ChatMessage.class);
             LoginInfo userInfo = ctx.channel().attr(Constant.ATT_USER_INFO).get();
@@ -92,6 +96,15 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
     }
 
     private void handleHeartbeat(ChannelHandlerContext ctx) {
+        LoginInfo userInfo = ctx.channel().attr(Constant.ATT_USER_INFO).get();
+        if (userInfo != null) {
+            try {
+                sandboxService.heartbeat(userInfo.getUserCode(), -1L);
+            }
+            catch (Exception e) {
+                log.error("ws 沙箱活跃时间更新异常", e);
+            }
+        }
         ChatMessage heartbeatResponse = new ChatMessage();
         heartbeatResponse.setType(MessageType.HEARTBEAT);
         PushUtil.sendMessageToChannel(ctx.channel(), new TextWebSocketFrame(JSON.toJSONString(heartbeatResponse)));

@@ -3,8 +3,11 @@ import AntdIcon from '@/components/AntdIcon';
 import { agentMap, agentTypeMap, specialAgentCode } from '@/constants/agent';
 import { IAgent, IAgentCache } from '@/typescript/agent';
 import { getPublicPath } from '@/utils';
-import { isBase64 } from '@/utils/file';
-import { get, trimStart } from 'lodash';
+import { isBase64, spliceOrigin, getFileUrl } from '@/utils/file';
+import { get, trimStart, chain, concat, pick } from 'lodash';
+import { getToken, getssoToken } from '@/utils/auth';
+import { generateUniqueId } from '@/utils/math';
+import type { IFile } from '@/typescript/file';
 import React from 'react';
 
 export const getDefaultAgentAvatar = () => {
@@ -214,4 +217,62 @@ export const canJumpAgent = (agent: IAgent) => {
     return false;
   }
   return true;
+};
+
+export const agentHomeUrlHandler = (
+  agent: Pick<IAgentCache, 'agentHomeUrl' | 'id' | 'resourceCode'>,
+  sessionId?: string,
+  nextSessionIFileCache?: IFile[]
+) => {
+  const { agentHomeUrl, id, resourceCode } = agent || {};
+
+  if (!agentHomeUrl) return '';
+
+  console.log('agentHomeUrl', agentHomeUrl);
+
+  const myUrl = chain(agentHomeUrl).replace('{beyond-token}', getToken()).replace('{sso-token}', getssoToken()).value();
+
+  console.log('myUrl', myUrl);
+
+  const protocolRegex = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
+  let urlWithProtocol = myUrl;
+  if (!protocolRegex.test(myUrl)) {
+    urlWithProtocol = `https://${myUrl}`;
+  }
+
+  const srcObj = new URL(urlWithProtocol);
+
+  if (!agentHomeUrl.includes('{beyond-token}')) {
+    srcObj.searchParams.append('beyondtoken', getToken());
+  }
+
+  const uniqueId = generateUniqueId();
+
+  const files: Array<{
+    fileId: number;
+    fileName: string;
+    fileType: string;
+    fileUrl: string;
+  }> = [];
+  concat([], nextSessionIFileCache || []).forEach((item) => {
+    if (item.queryFile) {
+      files.push({
+        ...(pick(item.queryFile, ['fileId', 'fileName', 'fileType']) as {
+          fileId: number;
+          fileName: string;
+          fileType: string;
+        }),
+        fileUrl: spliceOrigin(getFileUrl(item?.queryFile?.fileUrl || '')),
+      });
+    }
+  });
+
+  srcObj.searchParams.append('uuid', uniqueId);
+  srcObj.searchParams.append('objectId', `${id}`);
+  srcObj.searchParams.append('resourceCode', resourceCode || '');
+  srcObj.searchParams.append('sessionId', `${sessionId}`);
+  srcObj.searchParams.append('files', btoa(encodeURIComponent(JSON.stringify(files))));
+  srcObj.searchParams.append('language', `${getLocale()}`);
+
+  return srcObj.toString();
 };

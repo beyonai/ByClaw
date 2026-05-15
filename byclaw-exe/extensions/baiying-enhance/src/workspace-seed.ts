@@ -77,7 +77,16 @@ function getFirstAgentItem(raw: unknown): BaiyingAgentItem | null {
     return null;
   }
   const first = list[0];
-  return first && typeof first === "object" ? (first as BaiyingAgentItem) : null;
+  if (!first || typeof first !== "object") {
+    return null;
+  }
+  const o = first as Record<string, unknown>;
+  const relResourceInfoList = Array.isArray(o.relResourceInfoList)
+    ? (o.relResourceInfoList as NonNullable<BaiyingAgentItem["relResourceInfoList"]>)
+    : Array.isArray(o.relResourceList)
+      ? (o.relResourceList as NonNullable<BaiyingAgentItem["relResourceInfoList"]>)
+      : undefined;
+  return { ...(first as BaiyingAgentItem), relResourceInfoList } as BaiyingAgentItem;
 }
 
 /** Parse raw Baiying detail format (resourceId + resourceName at root) into BaiyingAgentItem. */

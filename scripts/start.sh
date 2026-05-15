@@ -8,6 +8,7 @@ START_FE=0
 START_BE=0
 START_QA=0
 START_DATA=0
+SKIP_CHECKS=0
 
 usage() {
   cat <<'EOF'
@@ -20,6 +21,7 @@ Options:
   --be             Start backend (byclaw-be).
   --qa             Start QA services (byclaw-qa, api + worker).
   --data           Start data gateway (byclaw-data).
+  --skip-checks    Skip preflight environment checks.
   --help           Show this message.
 
 Environment:
@@ -69,6 +71,7 @@ while [[ $# -gt 0 ]]; do
     --be)   START_BE=1;   shift ;;
     --qa)   START_QA=1;   shift ;;
     --data) START_DATA=1; shift ;;
+    --skip-checks) SKIP_CHECKS=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -84,14 +87,22 @@ fi
 
 print_welcome
 
+# --- Preflight environment checks ---
+if [[ $SKIP_CHECKS -eq 0 ]]; then
+  source "$SCRIPTS/preflight.sh"
+  run_preflight "$START_FE" "$START_BE" "$START_QA" "$START_DATA"
+fi
+
 mkdir -p "$ROOT/logs"
 LOG_DIR="$ROOT/logs"
+PID_FILE="$ROOT/logs/.pids"
 
 PIDS=()
 NAMES=()
 
 cleanup() {
   set +e
+  rm -f "$PID_FILE"
   [[ ${#PIDS[@]} -eq 0 ]] && return
   for pid in "${PIDS[@]}"; do
     [[ -n "$pid" ]] && kill -TERM "$pid" 2>/dev/null || true
@@ -125,6 +136,12 @@ if [[ $START_QA -eq 1 ]]; then
   launch "qa-worker" "$SCRIPTS/start-qa.sh" worker
 fi
 [[ $START_DATA -eq 1 ]] && launch "data" "$SCRIPTS/start-data.sh"
+
+# Write PID file for stop.sh
+: > "$PID_FILE"
+for i in "${!PIDS[@]}"; do
+  echo "${NAMES[$i]}=${PIDS[$i]}" >> "$PID_FILE"
+done
 
 echo
 echo "[ready] Started modules. Press Ctrl+C to stop."

@@ -2,8 +2,9 @@
 
 ## 文档
 
-- **中文集成说明（最新，推荐）**：[docs/openclaw-baiying-integration.zh-CN.md](docs/openclaw-baiying-integration.zh-CN.md)
-- **中文旧手册（历史版本，含较多 `baiying_dispatch` 旧叙述）**：[USER_GUIDE.zh-CN.md](USER_GUIDE.zh-CN.md)
+- **中文总览（架构与流程图，推荐）**：[docs/PLUGIN_OVERVIEW.zh-CN.md](docs/PLUGIN_OVERVIEW.zh-CN.md)
+- **中文集成说明（历史路径）**：若仓库中未包含 `openclaw-baiying-integration.zh-CN.md`，请以 `PLUGIN_OVERVIEW.zh-CN.md` 与下列专题文档为准。
+- **中文旧手册**：若仓库根目录存在 `USER_GUIDE.zh-CN.md`（历史版本，含较多 `baiying_dispatch` 旧叙述），可作参考；本扩展目录内未必附带该文件。
 - **English（文档站）**：[Baiying Enhance](https://docs.openclaw.ai/plugins/baiying-enhance)
 
 ## 概述
@@ -11,8 +12,8 @@
 本插件随 OpenClaw 提供，用于：
 
 1. 从配置的目录读取百应导出的 Agent JSON（百应 `agent_list` 导出或本插件支持的简化 JSON 模式）；变更由 **Redis Pub/Sub**（或 dig-employee 授权变更、启动时 flush）触发重新扫描与同步，**不再监听目录文件系统事件**。
-2. 将条目合并进**当前网关配置文件**中的托管 Agent（`baiying-agent-*`）与 OpenAI 兼容的 `models.providers`（`baiying-m-*`），并把 **`agents.list[].workspace`** 设为 `<stateDir>/workspace-<agentId>/`（默认在 `~/.openclaw` 下）。
-3. 可选地在每次同步后初始化工作区（`workspaceAutoSeed`，默认开启）：调用核心的 `ensureAgentWorkspace`，并根据 JSON 写入 `SOUL.md` / `AGENTS.md` / `IDENTITY.md` / `USER.md` / `TOOLS.md`。
+2. 将条目合并进**当前网关配置文件**中的托管 Agent（`baiying-agent-*`）与 OpenAI 兼容的 `models.providers`（`baiying-m-*`），并把 **`agents.list[].workspace`** 设为状态目录下的默认路径（托管体为 `<stateDir>/workspace-<agentId>/`；与 OpenClaw 默认一致时，`main` 对应 `<stateDir>/workspace/` 而非 `workspace-main`，见 `src/workspace-paths.ts`）。
+3. 可选地在每次同步后初始化工作区（`workspaceAutoSeed`，默认开启）：由 `seedManagedAgentWorkspace`（`src/workspace-seed.ts`）创建目录并按 JSON 写入或更新带托管标记的 `SOUL.md` / `AGENTS.md` / `IDENTITY.md` / `USER.md` / `TOOLS.md`（以及可选的 `BYAI_BUSINESS_EXTENSIONS.md`）。
 4. 为每个托管 Agent 动态挂载工具 **`baiying_call`**，把百应关联的知识库、toolkit、MCP、下游 agent 等资源暴露给大模型。
 
 > **说明**：当前代码主链路已经切到 **`baiying_call + 插件内置 TypeScript 执行器（`src/executor/`）**`，历史上的 `~/.openclaw/skills/baiying/executor.py` 仍可保留作参考，但已不再被调用。`USER_GUIDE.zh-CN.md` 中仍保留一些 `baiying_dispatch` 的历史说明，可作为旧方案参考，但不再代表当前推荐实现。
@@ -93,16 +94,30 @@
 - 在提示词中展开知识库、toolkit、MCP、AGENT 等能力
 - 由插件内置的 **TypeScript 执行器**（`src/executor/`，按资源类型拆分为 `toolkit.ts` / `tool.ts` / `agent.ts` / `mcp.ts` / `doc.ts` 等）在进程内统一执行并做参数校验/回填；历史上的 `~/.openclaw/skills/baiying/executor.py` 已废弃不再调用
 
-如需完整运行态说明、字段映射、流程图与当前环境示例，请优先阅读：
+如需完整运行态说明、架构与流程图，请优先阅读：
 
-- [docs/openclaw-baiying-integration.zh-CN.md](docs/openclaw-baiying-integration.zh-CN.md)
+- [docs/PLUGIN_OVERVIEW.zh-CN.md](docs/PLUGIN_OVERVIEW.zh-CN.md)
+- [docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md](docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md)（JSON → 工作区 Markdown 映射）
 
 ## 磁盘上的 Agent JSON 格式
 
 - **百应导出**：顶层为 `agent_list` 数组；首元素可含 `runConfig.baseUrl`、`runConfig.model`、可选 `runConfig.apiKey`。
 - **原生简化**：`id`、`name`，以及 `model: "provider/model"` **或** 带 `baseUrl` + `model` 的 `runConfig`。
+- **百应详情（数字员工等）**：根对象上同时存在字符串类型的 `resourceId` 与 `resourceName` 时，按详情格式解析（见 `src/agent-adapter.ts`）。
+
+### `relSkills` 与网关里的 `agents.list[].skills`
+
+插件把托管 agent 合并进当前生效配置（通常为 **`openclaw.json`**）时，每个 **`baiying-agent-*`** 列表项都会写出 **`skills`** 字段：
+
+- 默认 **`[]`**（不再省略该字段）。
+- 若 JSON **根**上存在非空的 **`relSkills`**（字符串数组，例如 `["dws","clawhub"]`），则写入 **`agents.list[].skills`**（元素会 `trim`，空串丢弃）。
+- 若无有效 `relSkills`，则回退读取根级 **`skills`**（兼容旧版原生 JSON）；仍无则为 **`[]`**。
+
+更细的说明见 [docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md](docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md) 与 [docs/PLUGIN_OVERVIEW.zh-CN.md](docs/PLUGIN_OVERVIEW.zh-CN.md)。
 
 ## HTTP
 
 - `GET /plugins/baiying-enhance/health`（需网关认证）
 - `GET /plugins/baiying-enhance/agents`（需网关认证）
+- `GET /plugins/baiying-enhance/doc-async/tasks`（需网关认证）
+- `POST /plugins/baiying-enhance/doc-async/complete`（需网关认证）

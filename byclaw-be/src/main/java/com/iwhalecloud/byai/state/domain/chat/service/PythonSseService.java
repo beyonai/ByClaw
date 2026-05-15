@@ -1,6 +1,5 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.io.BufferedReader;
@@ -51,7 +50,6 @@ import lombok.extern.slf4j.Slf4j;
 public class PythonSseService {
 
     private static final Logger logger = LoggerFactory.getLogger(PythonSseService.class);
-
 
     @Autowired
     private PythonWebService pythonWebService;
@@ -167,7 +165,7 @@ public class PythonSseService {
             handleTokenCount(value, ctx);
         }
 
-        this.buildAgentIdsAndDatasetIds(ctx, agentIds, value);
+        // this.buildAgentIdsAndDatasetIds(ctx, agentIds, value);
 
         // 添加推荐问题
         this.appendRelatedQuestions(ctx, value);
@@ -262,6 +260,7 @@ public class PythonSseService {
     }
 
     private void buildAgentIdsAndDatasetIds(ChatProcessContext ctx, Set<Long> agentIds, String value) {
+
         Map<String, Object> data = JSONObject.parseObject(value);
         if (data.containsKey("agentId")) {
             String agentId = MapUtils.getString(data, "agentId");

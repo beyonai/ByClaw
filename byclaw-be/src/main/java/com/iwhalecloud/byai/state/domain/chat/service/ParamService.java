@@ -197,11 +197,6 @@ public class ParamService {
             }
         }
 
-        List<MessageFileDto> files = ctx.assistantChatDto.getFiles();
-        if (files != null) {
-            params.put("files", files);
-        }
-
         return params;
     }
 

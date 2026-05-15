@@ -5,12 +5,10 @@ import {
   GatewayDataEmitter,
   EventType,
   type AskAgentCommand, WorkerHeartbeat,
-  ResumeCommand,
-  CancelTaskCommand,
   ActionType,
 } from "@byclaw/by-framework";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import type { ResolvedByaiAccount, ByaiSdkInboundMessage } from "./types.js";
+import type { ResolvedByaiAccount, ByaiSdkInboundMessage, SdkInboundFile } from "./types.js";
 import { getByaiRuntime } from "./runtime.js";
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -21,6 +19,7 @@ import {
   registerSdkEmitter,
   shouldDeferActiveSdkFinal,
   clearActiveSdkRequestRecord,
+  resolveSdkLocalFilePath,
 } from "./session-context.js";
 import { deliverReplyToAgentViaSdk } from "./sdk-message-processor.js";
 import { resolveInboundLanguage } from "./i18n.js";
@@ -59,6 +58,60 @@ function getRedisInfo() {
 function getUserCode(): string | null {
   const code = String(process.env.USER_CODE ?? "").trim();
   return code || null;
+}
+
+function getInboundMessageFromByFramework(data: AskAgentCommand) {
+  let questionText = "";
+  let files: SdkInboundFile[] | undefined;
+  if (typeof data.content === "string") {
+    questionText = data.content;
+  } else if (Array.isArray(data.content)) {
+    const questionTextArr: string[] = [];
+    data.content.forEach(item => {
+      if (typeof item.content === "string") {
+        questionTextArr.push(item.content);
+      } else if (item.content && typeof item.content === "object") {
+        questionTextArr.push(item.content.text || "");
+        if (item.content.files) {
+          files = [...(files || []), ...item.content.files];
+        }
+      }
+    });
+    questionText = questionTextArr.join("\n");
+  } else {
+    questionText = String(data.content);
+  }
+  if (Array.isArray(data.extraPayload?.resource_list)) {
+    const remindTextArr: string[] = [];
+    const resourceList: {
+      resourceId: string;
+      resourceType: string;
+      resourceName: string;
+    }[] = data.extraPayload?.resource_list || [];
+    const { sessionId } = data.header;
+    resourceList.forEach(item => {
+      if (item.resourceType !== "DIG_EMPLOYEE") {
+        if (item.resourceType === "KG_DOC_FILE") {
+          remindTextArr.push(`- file: ${resolveSdkLocalFilePath(item.resourceId, sessionId)}`);
+        } else {
+          remindTextArr.push(`- resource: resource_id=${item.resourceId}, resource_type=${item.resourceType}, resource_name=${item.resourceName}`);
+        }
+      }
+    });
+    if (remindTextArr.length) {
+      const remindPrefix = [
+        "<remind_context>",
+        `The user mentions:\n${remindTextArr.join("\n")}`,
+        resourceList.some(item => item.resourceType !== "KG_DOC_FILE" && item.resourceType !== "DIG_EMPLOYEE") ? "For the resources, you can use \`baiying_call\` tool to handle them." : "",
+        "</remind_context>",
+      ].filter(Boolean).join("\n");
+      questionText = `${remindPrefix}\n${questionText}`;
+    }
+  }
+  return {
+    files,
+    text: questionText,
+  }
 }
 
 export class ByaiSdkApp {
@@ -144,7 +197,6 @@ export class ByaiSdkApp {
         return;
       }
       const gatewayMsg = data as AskAgentCommand;
-      info?.(`收到新问题: ${gatewayMsg.content}`);
       const {
         sessionId,
         messageId,
@@ -166,15 +218,18 @@ export class ByaiSdkApp {
         created_at: Date.now(),
         updated_at: Date.now()
       });
+      const { text, files } = getInboundMessageFromByFramework(gatewayMsg);
+      info?.(`处理问题: ${text}`);
 
       const metadataLanguage =
         typeof metadata?.language === "string" ? metadata.language : undefined;
       const { language, languageProvided } = resolveInboundLanguage(metadataLanguage);
       const inbound: ByaiSdkInboundMessage = {
+        files,
+        text,
         messageId,
         sessionId: sessionId,
         userId: userCode,
-        text: gatewayMsg.content as string,
         timestamp: Date.now(),
         traceId: traceId || "",
         accountId: this.account.accountId,

@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.interfaces.controller.resource;
 
-
+import com.iwhalecloud.byai.state.domain.chat.dto.UserSpaceDto;
+import com.iwhalecloud.byai.state.domain.chat.vo.UserSpaceVo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -37,7 +38,6 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
-
 import java.util.List;
 import java.util.Map;
 
@@ -46,7 +46,6 @@ import java.util.Map;
 public class ToolManController {
 
     private static final Logger logger = LoggerFactory.getLogger(ToolManController.class);
-
 
     @Autowired
     private ToolManService toolManService;
@@ -76,15 +75,19 @@ public class ToolManController {
      * @date 2026-05-08 00:00:00
      */
     @PostMapping("/generateResourceCurl")
-    public ResponseUtil<ResourceCurlGenerateResult> generateResourceCurl(@RequestBody ResourceCurlGenerateRequest request) {
+    public ResponseUtil<ResourceCurlGenerateResult> generateResourceCurl(
+        @RequestBody ResourceCurlGenerateRequest request) {
         try {
             ResourceCurlGenerateResult result = toolManService.generateResourceCurl(request);
             return ResponseUtil.successResponse("curl脚本生成成功", result);
-        } catch (IllegalArgumentException e) {
+        }
+        catch (IllegalArgumentException e) {
             return ResponseUtil.fail(e.getMessage());
-        } catch (BdpRuntimeException e) {
+        }
+        catch (BdpRuntimeException e) {
             return ResponseUtil.fail(e.getMessage());
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.error("generateResourceCurl failed", e);
             return ResponseUtil.fail(e.getMessage() != null ? e.getMessage() : "curl脚本生成失败");
         }
@@ -101,11 +104,14 @@ public class ToolManController {
         try {
             ResourceCurlRunResult result = toolManService.runResourceCurl(request);
             return ResponseUtil.successResponse("curl运行完成", result);
-        } catch (IllegalArgumentException e) {
+        }
+        catch (IllegalArgumentException e) {
             return ResponseUtil.fail(e.getMessage());
-        } catch (BdpRuntimeException e) {
+        }
+        catch (BdpRuntimeException e) {
             return ResponseUtil.fail(e.getMessage());
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.error("runResourceCurl failed", e);
             return ResponseUtil.fail(e.getMessage() != null ? e.getMessage() : "curl运行失败");
         }
@@ -125,31 +131,36 @@ public class ToolManController {
      */
     @PostMapping("/importToolJson")
     public ResponseUtil<Map<String, Object>> importToolJson(
-            @Parameter(description = "资源 JSON 文件", required = true) @RequestParam("file") MultipartFile file,
-            @Parameter(description = "所属目录 ID，可选") @RequestParam(value = "catalogId", required = false) Long catalogId,
-            @Parameter(description = "资源归属类型：enterprise-企业，personal-个人", required = false) @RequestParam(value = "ownerType", required = false) String ownerType) {
+        @Parameter(description = "资源 JSON 文件", required = true) @RequestParam("file") MultipartFile file,
+        @Parameter(description = "所属目录 ID，可选") @RequestParam(value = "catalogId", required = false) Long catalogId,
+        @Parameter(description = "资源归属类型：enterprise-企业，personal-个人",
+            required = false) @RequestParam(value = "ownerType", required = false) String ownerType) {
         try {
             // 新入口只负责接收上传文件和目录/归属参数，
             // 具体的 JSON 校验、主表新增或更新、子表落库、FTP 同步，都统一下沉到 service。
             Map<String, Object> data = toolManService.importToolJsonNewFromMultipart(file, catalogId, ownerType);
             return ResponseUtil.successResponse(I18nUtil.get("tool.resource.import.success"), data);
-        } catch (IllegalArgumentException e) {
+        }
+        catch (IllegalArgumentException e) {
             // 参数缺失、JSON结构不合法、resourceBizType 不支持等可预期错误，
             // 直接把可读提示返回给前端，方便联调定位。
             return ResponseUtil.fail(e.getMessage());
-        } catch (BdpRuntimeException e) {
+        }
+        catch (BdpRuntimeException e) {
             // 登录态失效、业务态校验失败等运行时异常，按业务失败返回。
             return ResponseUtil.fail(e.getMessage());
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.error("importToolJson failed", e);
             // 兜底保护，避免底层实现异常直接暴露给前端。
-            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.import.failed"));
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.import.failed"));
         }
     }
 
     /**
-     * 工具超市：接收第三方直接传来的 JSON 全量内容，转内存文件后复用导入主流程。
-     * 仅用于已登录场景，catalogId 从 JSON 顶层读取，缺省时默认 0。
+     * 工具超市：接收第三方直接传来的 JSON 全量内容，转内存文件后复用导入主流程。 仅用于已登录场景，catalogId 从 JSON 顶层读取，缺省时默认 0。
+     *
      * @author qin.guoquan
      * @date 2026-04-23 18:17:00
      */
@@ -158,13 +169,17 @@ public class ToolManController {
         try {
             Map<String, Object> data = toolManService.addToolFromThird(jsonContent);
             return ResponseUtil.successResponse(I18nUtil.get("tool.resource.import.success"), data);
-        } catch (IllegalArgumentException e) {
+        }
+        catch (IllegalArgumentException e) {
             return ResponseUtil.fail(e.getMessage());
-        } catch (BdpRuntimeException e) {
+        }
+        catch (BdpRuntimeException e) {
             return ResponseUtil.fail(e.getMessage());
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.error("addToolFromThird failed", e);
-            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.import.failed"));
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.import.failed"));
         }
     }
 
@@ -173,9 +188,10 @@ public class ToolManController {
      */
     @PostMapping("/importObjectZip")
     public ResponseUtil<ObjectZipImportResult> importObjectZip(
-            @Parameter(description = "对象 zip 文件", required = true) @RequestParam("file") MultipartFile file,
-            @Parameter(description = "所属目录 ID，可选") @RequestParam(value = "catalogId", required = false) Long catalogId,
-            @Parameter(description = "资源归属类型：enterprise-企业，personal-个人", required = false) @RequestParam(value = "ownerType", required = false) String ownerType) {
+        @Parameter(description = "对象 zip 文件", required = true) @RequestParam("file") MultipartFile file,
+        @Parameter(description = "所属目录 ID，可选") @RequestParam(value = "catalogId", required = false) Long catalogId,
+        @Parameter(description = "资源归属类型：enterprise-企业，personal-个人",
+            required = false) @RequestParam(value = "ownerType", required = false) String ownerType) {
         try {
             // 核心流程统一下沉到 service：
             // 1. zip 落盘并解压；
@@ -184,16 +200,20 @@ public class ToolManController {
             // 4. 同步对象 json 与批次 zip 到 FTP。
             ObjectZipImportResult data = toolManService.importObjectZipFromMultipart(file, catalogId, ownerType);
             return ResponseUtil.successResponse(I18nUtil.get("tool.object.zip.import.success"), data);
-        } catch (IllegalArgumentException e) {
+        }
+        catch (IllegalArgumentException e) {
             // 参数、目录结构、文件内容等校验失败，直接返回可读提示给前端。
             return ResponseUtil.fail(e.getMessage());
-        } catch (BdpRuntimeException e) {
+        }
+        catch (BdpRuntimeException e) {
             // 登录态、业务态等运行时异常，按业务失败返回。
             return ResponseUtil.fail(e.getMessage());
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.error("importObjectZip failed", e);
             // 兜底保护，避免实现细节异常直接暴露给前端。
-            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.object.zip.import.failed"));
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.object.zip.import.failed"));
         }
     }
 
@@ -202,9 +222,10 @@ public class ToolManController {
      */
     @PostMapping("/importViewZip")
     public ResponseUtil<ObjectZipImportResult> importViewZip(
-            @Parameter(description = "视图 zip 文件", required = true) @RequestParam("file") MultipartFile file,
-            @Parameter(description = "所属目录 ID，可选") @RequestParam(value = "catalogId", required = false) Long catalogId,
-            @Parameter(description = "资源归属类型：enterprise-企业，personal-个人", required = false) @RequestParam(value = "ownerType", required = false) String ownerType) {
+        @Parameter(description = "视图 zip 文件", required = true) @RequestParam("file") MultipartFile file,
+        @Parameter(description = "所属目录 ID，可选") @RequestParam(value = "catalogId", required = false) Long catalogId,
+        @Parameter(description = "资源归属类型：enterprise-企业，personal-个人",
+            required = false) @RequestParam(value = "ownerType", required = false) String ownerType) {
         try {
             // 核心流程统一下沉到 service：
             // 1. zip 落盘并解压；
@@ -213,16 +234,20 @@ public class ToolManController {
             // 4. 同步视图 json 与批次 zip 到 FTP。
             ObjectZipImportResult data = toolManService.importViewZipFromMultipart(file, catalogId, ownerType);
             return ResponseUtil.successResponse(I18nUtil.get("tool.view.zip.import.success"), data);
-        } catch (IllegalArgumentException e) {
+        }
+        catch (IllegalArgumentException e) {
             // 参数、目录结构、object_codes 格式等校验失败，直接返回可读提示给前端。
             return ResponseUtil.fail(e.getMessage());
-        } catch (BdpRuntimeException e) {
+        }
+        catch (BdpRuntimeException e) {
             // 登录态、业务态等运行时异常，按业务失败返回。
             return ResponseUtil.fail(e.getMessage());
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.error("importViewZip failed", e);
             // 兜底保护，避免实现细节异常直接暴露给前端。
-            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.view.zip.import.failed"));
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.view.zip.import.failed"));
         }
     }
 
@@ -231,17 +256,21 @@ public class ToolManController {
      */
     @PostMapping("/deleteResource")
     public ResponseUtil<Void> deleteResource(
-            @Parameter(description = "资源ID", required = true) @RequestParam("resourceId") Long resourceId) {
+        @Parameter(description = "资源ID", required = true) @RequestParam("resourceId") Long resourceId) {
         try {
             toolManService.deleteManagedResource(resourceId);
             return ResponseUtil.success(I18nUtil.get("tool.resource.delete.success"));
-        } catch (IllegalArgumentException e) {
+        }
+        catch (IllegalArgumentException e) {
             return ResponseUtil.fail(e.getMessage());
-        } catch (BdpRuntimeException e) {
+        }
+        catch (BdpRuntimeException e) {
             return ResponseUtil.fail(e.getMessage());
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.error("deleteResource failed", e);
-            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.delete.failed"));
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.delete.failed"));
         }
     }
 
@@ -253,20 +282,62 @@ public class ToolManController {
      */
     @PostMapping("/deleteResourceById")
     public ResponseUtil<Void> deleteResourceById(@RequestBody(required = false) DeleteResourceQo request,
-        @Parameter(description = "资源ID", required = false) @RequestParam(value = "resourceId", required = false) Long resourceId,
-        @Parameter(description = "是否强行删除", required = false) @RequestParam(value = "forceDelete", required = false) Boolean forceDelete) {
+        @Parameter(description = "资源ID", required = false) @RequestParam(value = "resourceId",
+            required = false) Long resourceId,
+        @Parameter(description = "是否强行删除", required = false) @RequestParam(value = "forceDelete",
+            required = false) Boolean forceDelete) {
         try {
-            Long finalResourceId = request != null && request.getResourceId() != null ? request.getResourceId() : resourceId;
-            Boolean finalForceDelete = request != null && request.getForceDelete() != null ? request.getForceDelete() : forceDelete;
+            Long finalResourceId = request != null && request.getResourceId() != null ? request.getResourceId()
+                : resourceId;
+            Boolean finalForceDelete = request != null && request.getForceDelete() != null ? request.getForceDelete()
+                : forceDelete;
             toolManService.deleteManagedResource(finalResourceId, Boolean.TRUE.equals(finalForceDelete));
             return ResponseUtil.success(I18nUtil.get("tool.resource.delete.success"));
-        } catch (IllegalArgumentException e) {
+        }
+        catch (IllegalArgumentException e) {
             return ResponseUtil.fail(resolveResourceNotFoundMessage(e));
-        } catch (BdpRuntimeException e) {
+        }
+        catch (BdpRuntimeException e) {
             return ResponseUtil.fail(e.getMessage());
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.error("deleteResourceById failed", e);
-            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.delete.failed"));
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.delete.failed"));
+        }
+    }
+
+    /**
+     * 恢复资源。
+     * 将已注销（状态3）的资源恢复为已上架（状态2）。
+     *
+     * @author qin.guoquan
+     * @date 2026-05-14
+     */
+    @PostMapping("/restoreResourceById")
+    public ResponseUtil<Void> restoreResourceById(@RequestBody(required = false) DeleteResourceQo request,
+        @Parameter(description = "资源ID", required = false) @RequestParam(value = "resourceId",
+            required = false) Long resourceId,
+        @Parameter(description = "是否强制恢复", required = false) @RequestParam(value = "forceRestore",
+            required = false) Boolean forceRestore) {
+        try {
+            Long finalResourceId = request != null && request.getResourceId() != null ? request.getResourceId()
+                : resourceId;
+            Boolean finalForceRestore = request != null && request.getForceDelete() != null ? request.getForceDelete()
+                : forceRestore;
+            toolManService.restoreManagedResource(finalResourceId, Boolean.TRUE.equals(finalForceRestore));
+            return ResponseUtil.success(I18nUtil.get("tool.resource.restore.success"));
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(resolveResourceNotFoundMessage(e));
+        }
+        catch (BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("restoreResourceById failed", e);
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.restore.failed"));
         }
     }
 
@@ -276,11 +347,15 @@ public class ToolManController {
      * @author qin.guoquan
      * @date 2026-04-26 14:20:00
      */
-    @RequestMapping(value = "/queryResourceDetail", method = {RequestMethod.GET, RequestMethod.POST})
+    @RequestMapping(value = "/queryResourceDetail", method = {
+        RequestMethod.GET, RequestMethod.POST
+    })
     public ResponseUtil<ResourceDetailVo> queryResourceDetail(@RequestBody(required = false) ResourceDetailQo request,
-        @Parameter(description = "资源ID", required = false) @RequestParam(value = "resourceId", required = false) Long resourceId) {
+        @Parameter(description = "资源ID", required = false) @RequestParam(value = "resourceId",
+            required = false) Long resourceId) {
         try {
-            Long finalResourceId = request != null && request.getResourceId() != null ? request.getResourceId() : resourceId;
+            Long finalResourceId = request != null && request.getResourceId() != null ? request.getResourceId()
+                : resourceId;
             if (finalResourceId == null) {
                 return ResponseUtil.fail(I18nUtil.get("resource.resourceid.notnull"));
             }
@@ -291,15 +366,18 @@ public class ToolManController {
                 return ResponseUtil.fail(I18nUtil.get("resource.notfound"));
             }
             return ResponseUtil.successResponse(I18nUtil.get("tool.resource.query.success"), resourceDetailVo);
-        } catch (IllegalArgumentException e) {
+        }
+        catch (IllegalArgumentException e) {
             return ResponseUtil.fail(resolveResourceNotFoundMessage(e));
-        } catch (BdpRuntimeException e) {
+        }
+        catch (BdpRuntimeException e) {
             return ResponseUtil.fail(e.getMessage());
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.error("queryResourceDetail failed, resourceId={}",
-                request != null && request.getResourceId() != null ? request.getResourceId() : resourceId,
-                e);
-            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.query.detail.failed"));
+                request != null && request.getResourceId() != null ? request.getResourceId() : resourceId, e);
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.query.detail.failed"));
         }
     }
 
@@ -314,19 +392,24 @@ public class ToolManController {
      * 通用更新资源基础信息：更新资源名称、资源描述和所属目录。
      */
     @PostMapping("/updateResourceBasicInfo")
-    public ResponseUtil<Void> updateResourceBasicInfo(
-            @RequestBody(required = false) UpdateResourceBasicInfoQo request,
-            @Parameter(description = "资源ID", required = false) @RequestParam(value = "resourceId", required = false) Long resourceId,
-            @Parameter(description = "资源名称", required = false) @RequestParam(value = "resourceName", required = false) String resourceName,
-            @Parameter(description = "资源描述", required = false) @RequestParam(value = "resourceDesc", required = false) String resourceDesc,
-            @Parameter(description = "所属目录ID", required = false) @RequestParam(value = "catalogId", required = false) Long catalogId) {
+    public ResponseUtil<Void> updateResourceBasicInfo(@RequestBody(required = false) UpdateResourceBasicInfoQo request,
+        @Parameter(description = "资源ID", required = false) @RequestParam(value = "resourceId",
+            required = false) Long resourceId,
+        @Parameter(description = "资源名称", required = false) @RequestParam(value = "resourceName",
+            required = false) String resourceName,
+        @Parameter(description = "资源描述", required = false) @RequestParam(value = "resourceDesc",
+            required = false) String resourceDesc,
+        @Parameter(description = "所属目录ID", required = false) @RequestParam(value = "catalogId",
+            required = false) Long catalogId) {
         try {
-            Long finalResourceId = request != null && request.getResourceId() != null ? request.getResourceId() : resourceId;
-            String finalResourceName = request != null && request.getResourceName() != null
-                ? request.getResourceName() : resourceName;
-            String finalResourceDesc = request != null && request.getResourceDesc() != null
-                ? request.getResourceDesc() : resourceDesc;
-            Long finalCatalogId = request != null && request.getCatalogId() != null ? request.getCatalogId() : catalogId;
+            Long finalResourceId = request != null && request.getResourceId() != null ? request.getResourceId()
+                : resourceId;
+            String finalResourceName = request != null && request.getResourceName() != null ? request.getResourceName()
+                : resourceName;
+            String finalResourceDesc = request != null && request.getResourceDesc() != null ? request.getResourceDesc()
+                : resourceDesc;
+            Long finalCatalogId = request != null && request.getCatalogId() != null ? request.getCatalogId()
+                : catalogId;
 
             if (finalResourceId == null) {
                 return ResponseUtil.fail(I18nUtil.get("resource.resourceid.notnull"));
@@ -337,49 +420,51 @@ public class ToolManController {
             toolManService.updateResourceBasicInfo(finalResourceId, finalResourceName, finalResourceDesc,
                 finalCatalogId);
             return ResponseUtil.success(I18nUtil.get("tool.resource.basic.info.update.success"));
-        } catch (IllegalArgumentException e) {
+        }
+        catch (IllegalArgumentException e) {
             return ResponseUtil.fail(e.getMessage());
-        } catch (BdpRuntimeException e) {
+        }
+        catch (BdpRuntimeException e) {
             return ResponseUtil.fail(e.getMessage());
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.error("updateResourceBasicInfo failed", e);
-            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.basic.info.update.failed"));
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.basic.info.update.failed"));
         }
     }
 
     /**
-     * 知识前端：按用户编码 + 当前对话 sessionId 查询其 byclaw 桶下当前会话目录的文件。
-     * 这里的 sessionId 明确指前端当前对话的会话 ID，例如 10014538，
-     * 不是登录态 HTTP Session，也不是后端从上下文里反查出来的 session。
+     * 知识前端：按用户编码 + 当前对话 sessionId 查询其 byclaw 桶下当前会话目录的文件。 这里的 sessionId 明确指前端当前对话的会话 ID，例如 10014538， 不是登录态 HTTP
+     * Session，也不是后端从上下文里反查出来的 session。
      */
     @PostMapping("/qryByClawFileByUserCode")
     public ResponseUtil<List<ByClawFileDto>> qryByClawFileByUserCode(@RequestBody QryByClawFileByUserCodeQo request) {
         try {
             String requestUserCode = request == null ? null : request.getUserCode();
-            String resolvedUserCode = requestUserCode != null && !requestUserCode.trim().isEmpty()
-                ? requestUserCode : CurrentUserHolder.getCurrentUserCode();
-            List<ByClawFileDto> data = byClawFileQueryApplicationService.qryByClawFileByUserCode(
-                resolvedUserCode,
-                request == null ? null : request.getKeyword(),
-                request == null ? null : request.getSessionId());
+            String resolvedUserCode = requestUserCode != null && !requestUserCode.trim().isEmpty() ? requestUserCode
+                : CurrentUserHolder.getCurrentUserCode();
+            List<ByClawFileDto> data = byClawFileQueryApplicationService.qryByClawFileByUserCode(resolvedUserCode,
+                request == null ? null : request.getKeyword(), request == null ? null : request.getSessionId());
             return ResponseUtil.successResponse(I18nUtil.get("byclaw.user.file.list.query.success"), data);
-        } catch (IllegalArgumentException e) {
+        }
+        catch (IllegalArgumentException e) {
             return ResponseUtil.fail(e.getMessage());
-        } catch (BdpRuntimeException e) {
+        }
+        catch (BdpRuntimeException e) {
             return ResponseUtil.fail(e.getMessage());
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.error("qryByClawFileByUserCode failed, userCode={}, keyword={}, sessionId={}",
-                request == null ? null : request.getUserCode(),
-                request == null ? null : request.getKeyword(),
-                request == null ? null : request.getSessionId(),
-                e);
-            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("byclaw.user.file.list.query.failed"));
+                request == null ? null : request.getUserCode(), request == null ? null : request.getKeyword(),
+                request == null ? null : request.getSessionId(), e);
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("byclaw.user.file.list.query.failed"));
         }
     }
 
     /**
-     * 查询用户工作空间下 skills 目录的 skill 列表。
-     * userCode 为空时回退到当前登录用户；仅支持 MinIO 存储模式。
+     * 查询用户工作空间下 skills 目录的 skill 列表。 userCode 为空时回退到当前登录用户；仅支持 MinIO 存储模式。
      */
     @PostMapping("/qrySkillListByUserCode")
     public ResponseUtil<List<ByClawSkillDto>> qrySkillListByUserCode(@RequestBody QrySkillListByUserCodeQo request) {
@@ -388,24 +473,41 @@ public class ToolManController {
                 return ResponseUtil.fail(I18nUtil.get("resource.resourceid.notnull"));
             }
             String requestUserCode = request == null ? null : request.getUserCode();
-            String resolvedUserCode = requestUserCode != null && !requestUserCode.trim().isEmpty()
-                ? requestUserCode : CurrentUserHolder.getCurrentUserCode();
-            List<ByClawSkillDto> data = byClawSkillQueryApplicationService.qrySkillListByUserCode(
-                resolvedUserCode,
-                request.getResourceId(),
-                request == null ? null : request.getKeyword());
+            String resolvedUserCode = requestUserCode != null && !requestUserCode.trim().isEmpty() ? requestUserCode
+                : CurrentUserHolder.getCurrentUserCode();
+            List<ByClawSkillDto> data = byClawSkillQueryApplicationService.qrySkillListByUserCode(resolvedUserCode,
+                request.getResourceId(), request == null ? null : request.getKeyword());
             return ResponseUtil.successResponse(I18nUtil.get("byclaw.user.skill.list.query.success"), data);
-        } catch (IllegalArgumentException e) {
+        }
+        catch (IllegalArgumentException e) {
             return ResponseUtil.fail(e.getMessage());
-        } catch (BdpRuntimeException e) {
+        }
+        catch (BdpRuntimeException e) {
             return ResponseUtil.fail(e.getMessage());
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.error("qrySkillListByUserCode failed, userCode={}, resourceId={}, keyword={}",
-                request == null ? null : request.getUserCode(),
-                request == null ? null : request.getResourceId(),
-                request == null ? null : request.getKeyword(),
-                e);
-            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("byclaw.user.skill.list.query.failed"));
+                request == null ? null : request.getUserCode(), request == null ? null : request.getResourceId(),
+                request == null ? null : request.getKeyword(), e);
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("byclaw.user.skill.list.query.failed"));
+        }
+    }
+
+    /**
+     * 列出空间
+     *
+     * @return ResponseUtil
+     */
+    @PostMapping("/listUserSpace")
+    public ResponseUtil<List<UserSpaceVo>> listUserSpace(@RequestBody UserSpaceDto userSpaceDto) {
+        try {
+            List<UserSpaceVo> userSpaceVos = byClawFileQueryApplicationService.listUserSpace(userSpaceDto);
+            return ResponseUtil.success(userSpaceVos);
+        }
+        catch (Exception e) {
+            logger.error(e.getMessage(), e);
+            return ResponseUtil.fail(e.getMessage());
         }
     }
 }

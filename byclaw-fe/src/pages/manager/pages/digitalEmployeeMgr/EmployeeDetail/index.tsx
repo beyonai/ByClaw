@@ -12,6 +12,7 @@ import useShowModal from '@/pages/manager/hooks/useShowModal';
 import { getAvatarUrl } from '@/pages/manager/utils/agent';
 import { showAuditConfirm } from '@/pages/manager/utils/auditConfirm';
 import { getIframeUrl, getValidValue } from '@/pages/manager/utils/managerUtils';
+import { agentHomeUrlHandler } from '@/pages/manager/utils/agent';
 import { ArrowLeftOutlined, ArrowRightOutlined, EllipsisOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import { Button, Divider, Form, message, Space, Spin, Tooltip } from 'antd';
 import classnames from 'classnames';
@@ -236,7 +237,15 @@ const EmployeeDetail = ({ loading }) => {
     if (agentId && homeType !== undefined) {
       let url;
       if (homeType === 'custom' && agentHomeUrl) {
-        url = getIframeUrl(agentHomeUrl);
+        url = agentHomeUrlHandler(
+          {
+            agentHomeUrl,
+            id: agentId,
+            resourceCode: '',
+          },
+          '',
+          agentHomeUrl
+        );
       } else {
         url = `${PREVIEW_HOST}iframes/employee?canCleanSession=1&agentId=${agentId}`;
       }
@@ -1084,9 +1093,9 @@ const EmployeeDetail = ({ loading }) => {
 
             setUpdateTime(dayjs().format('HH:mm:ss'));
 
-            if (!queryData.resourceId && resp) {
-              const url = `${PREVIEW_HOST}iframes/employee?canCleanSession=1&agentId=${resp}`;
-              setAgentId(resp);
+            if (!queryData.resourceId && resp?.resourceId) {
+              const url = `${PREVIEW_HOST}iframes/employee?canCleanSession=1&agentId=${resp.resourceId}`;
+              setAgentId(resp.resourceId);
               setDebugPage(url);
             }
 

@@ -15,19 +15,9 @@ public class SandboxProperties {
     private OpenSandboxConfig opensandbox = new OpenSandboxConfig();
 
     /**
-     * 心跳超时时间，超过该时间未收到心跳则回收沙箱
+     * Redis metadata cache TTL. DB remains the lifecycle source of truth.
      */
-    private Duration heartbeatTimeout = Duration.ofMinutes(5);
-
-    /**
-     * 清理任务执行间隔
-     */
-    private Duration cleanupInterval = Duration.ofMinutes(5);
-
-    /**
-     * 是否永久保留沙箱（不自动回收）
-     */
-    private boolean permanentKeep = false;
+    private Duration metadataCacheTtl = Duration.ofMinutes(10);
 
     /**
      * 创建沙箱时轮询状态的间隔

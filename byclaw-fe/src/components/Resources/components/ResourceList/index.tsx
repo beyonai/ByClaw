@@ -129,6 +129,19 @@ const ResourceList: React.FC<ResourceListProps> = ({
     getList({ pageIndex: 1 });
   }, [baseResourceBizTypeList, activeTab, catalogId, dropdownParam, getList]);
 
+  // 监听资源操作事件，刷新列表
+  useEffect(() => {
+    const handleResourceChanged = () => {
+      onRefresh();
+    };
+    window.addEventListener('resourceRestored', handleResourceChanged);
+    window.addEventListener('resourceDeleted', handleResourceChanged);
+    return () => {
+      window.removeEventListener('resourceRestored', handleResourceChanged);
+      window.removeEventListener('resourceDeleted', handleResourceChanged);
+    };
+  }, [onRefresh]);
+
   const loadMore = useCallback(() => {
     if (loading || !hasMore) return;
     // 直接使用当前的pageInfo状态，避免将其作为依赖项

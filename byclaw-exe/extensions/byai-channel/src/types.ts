@@ -40,6 +40,7 @@ export interface ByaiSdkInboundMessage {
   text: string;
   timestamp: number;
   traceId: string;
+  files?: SdkInboundFile[];
   extraPayload?: Record<string, unknown>;
   accountId: string;
   language: Language;
@@ -49,6 +50,13 @@ export interface ByaiSdkInboundMessage {
   channelExtension?: Record<string, unknown> | string;
   beyondToken?: string;
 }
+
+export type SdkInboundFile = {
+  fileUrl?: string; // 这种格式的url：commonFile/preview?style=
+  filePath?: string; // 这种格式的path：/by/.sessions/
+  contentType?: string;
+  mimeType?: string;
+};
 
 /** SDK 模式处理器依赖 */
 export interface SdkProcessorDeps {

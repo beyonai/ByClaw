@@ -21,7 +21,10 @@ const config: Config = {
     '\\.(less|css|scss)$': 'identity-obj-proxy',
     '\\.(png|jpg|jpeg|gif|svg|webp|ico)$': '<rootDir>/src/__mocks__/fileMock.js',
   },
-  transformIgnorePatterns: ['node_modules/(?!(@umijs|@ant-design|antd)/)'],
+  transformIgnorePatterns: [
+    'node_modules/(?!\\.pnpm|@umijs|@ant-design|antd|nanoid)',
+    'node_modules/.pnpm/(?!(?:@umijs\\+|@ant-design\\+|antd@|nanoid@))',
+  ],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   testMatch: [
     '<rootDir>/src/**/__tests__/**/*.test.{ts,tsx,js,jsx}',

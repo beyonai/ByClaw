@@ -130,6 +130,7 @@ const botHandler = (sseDataObj: any) => {
 const thinkRewriteQuestionHandler = (sseDataObj: any) => {
   const contentType = get(sseDataObj, 'contentType');
   const metadata = get(sseDataObj, 'metadata');
+  const sourceAgentType = get(sseDataObj, 'agentId');
 
   const content = get(sseDataObj, 'choices.0.delta.content', '');
 
@@ -143,7 +144,7 @@ const thinkRewriteQuestionHandler = (sseDataObj: any) => {
   return {
     message: {
       contentType,
-      content: { substance, metadata },
+      content: { substance, metadata, sourceAgentType },
       status: SSEEventStatus.done,
     },
   };

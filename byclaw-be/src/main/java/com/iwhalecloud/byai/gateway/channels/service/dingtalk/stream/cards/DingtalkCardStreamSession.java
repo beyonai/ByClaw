@@ -1,4 +1,4 @@
-package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.Card;
+package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards;
 
 import com.aliyun.dingtalkcard_1_0.Client;
 
