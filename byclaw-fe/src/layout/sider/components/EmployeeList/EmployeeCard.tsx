@@ -55,20 +55,7 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
   const menuItems = (item: IAgentCache) => {
     const items = [];
 
-    if (item.grantType === 'AVAILABLE_USE' && !disabledAction.includes('unapply')) {
-      items.push({
-        key: 'unapply',
-        label: (
-          <UnApplyButton employee={item} isLoading={isUnApplyLoading} setIsLoading={setIsUnApplyLoading}>
-            <div className={styles.dropdownMenuItem}>
-              <AntdIcon type="icon-quxiaodingyue" style={{ marginRight: '10px' }} />
-              {intl.formatMessage({ id: 'digitalEmployees.unapply' })}
-            </div>
-          </UnApplyButton>
-        ),
-      });
-    }
-
+    // 设为默认
     if (item.canSetDefault && !disabledAction.includes('setDefault')) {
       items.push({
         key: 'setDefault',
@@ -114,6 +101,7 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
       });
     }
 
+    // 置顶
     if (`${item.isTop}` === '0' && !disabledAction.includes('pin')) {
       items.push({
         key: 'pin',
@@ -126,6 +114,7 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
       });
     }
 
+    // 取消置顶
     if (`${item.isTop}` === '1' && !disabledAction.includes('unpin')) {
       items.push({
         key: 'unpin',
@@ -134,6 +123,21 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
             <AntdIcon type="icon-quxiaozhiding" style={{ marginRight: '10px' }} />
             {intl.formatMessage({ id: 'common.unpin' })}
           </div>
+        ),
+      });
+    }
+
+    // 移除
+    if (item.grantType === 'AVAILABLE_USE' && !disabledAction.includes('unapply')) {
+      items.push({
+        key: 'unapply',
+        label: (
+          <UnApplyButton employee={item} isLoading={isUnApplyLoading} setIsLoading={setIsUnApplyLoading}>
+            <div className={styles.dropdownMenuItem}>
+              <AntdIcon type="icon-quxiaodingyue" style={{ marginRight: '10px' }} />
+              {intl.formatMessage({ id: 'digitalEmployees.unapply' })}
+            </div>
+          </UnApplyButton>
         ),
       });
     }
@@ -265,7 +269,7 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
               <span className={classNames(styles.nameRow)}>
                 <span className={classNames(styles.nameText)}>
                   {employee?.resourceName || employee?.name || ''}
-                  {employee?.isDefault ? `（${intl.formatMessage({ id: 'resource.currentDefaultAssistant' })}）` : ''}
+                  {/* {employee?.isDefault ? `（${intl.formatMessage({ id: 'resource.currentDefaultAssistant' })}）` : ''} */}
                 </span>
                 {`${employee?.isTop}` === '1' && <AntdIcon type="icon-zhiding-fill" className={styles.pinBadge} />}
                 {employee?.tagName && (
