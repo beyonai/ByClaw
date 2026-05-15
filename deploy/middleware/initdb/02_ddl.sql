@@ -109,7 +109,7 @@ CREATE TABLE byai.ss_res_ext_agent (resource_id bigint, agent_type character var
 CREATE TABLE byai.ss_res_ext_attribute (ext_attribute_id bigint, resource_id bigint, attribute_type character varying(64), attribute_code character varying(255), attribute_value text, type character varying(64), format_exp_st character varying(1024), unit character varying(12), is_required smallint, term_type_code character varying(32), term_field character varying(12), attribute_desc character varying(3000), ext_meta text, sort integer, obj_id bigint);
 CREATE TABLE byai.ss_res_ext_db (resource_id bigint, chatbi_base_id character varying(128));
 CREATE TABLE byai.ss_res_ext_dbdataset (dataset_id bigint, resource_id bigint, table_join_info text, table_location text, execute_sql text, create_by character varying(100), create_time timestamp without time zone, update_time timestamp without time zone, main_data_source_id bigint);
-CREATE TABLE byai.ss_res_ext_dig_employee (resource_id bigint, agent_type character varying(5), agent_dev_type character varying(10), agent_sse_head text, agent_sse_url character varying(2000), agent_web_url character varying(2000), agent_admin_url_list text, prologue text, agent_sse_url_ori character varying(2000), agent_web_url_ori character varying(2000), agent_admin_url_ori_list text, create_type character varying(20), agent_home_url character varying(2000), home_type character varying(128), auth_type character varying(32), integration_type character varying(20), ability character varying(4000), constraints character varying(4000), faqs character varying(4000), role_attributes character varying(4000), processing_flow character varying(5000), personality_dimensions character varying(4000), word_preferences character varying(4000), sentence_and_tone character varying(4000), terminal character varying(10) DEFAULT 'ALL'::character varying, tag_name character varying(255), core_competencies text, open_super_helper character(1) DEFAULT 'N'::bpchar, machine_channel character varying(500), core_persona_definition text, advanced_settings character varying(2000));
+CREATE TABLE byai.ss_res_ext_dig_employee (resource_id bigint, agent_type character varying(5), agent_dev_type character varying(10), agent_sse_head text, agent_sse_url character varying(2000), agent_web_url character varying(2000), agent_admin_url_list text, prologue text, agent_sse_url_ori character varying(2000), agent_web_url_ori character varying(2000), agent_admin_url_ori_list text, create_type character varying(20), agent_home_url character varying(2000), home_type character varying(128), auth_type character varying(32), integration_type character varying(20), ability character varying(4000), constraints character varying(4000), faqs character varying(4000), role_attributes character varying(4000), processing_flow character varying(5000), personality_dimensions character varying(4000), word_preferences character varying(4000), sentence_and_tone character varying(4000), terminal character varying(10) DEFAULT 'ALL'::character varying, tag_name character varying(255), core_competencies text, open_super_helper character(1) DEFAULT 'N'::bpchar, machine_channel character varying(500), core_persona_definition text, advanced_settings character varying(2000), skills text, target_content text );
 CREATE TABLE byai.ss_res_ext_doc (resource_id bigint, resource_agent_id bigint, type character varying(20) DEFAULT 'dataset'::character varying, plugin_machine_id bigint, kdb_id bigint, resource_catalog_main character varying(50) DEFAULT 'personal'::character varying, resource_catalog_sub character varying(50), source_content text, target_content text);
 CREATE TABLE byai.ss_res_ext_evaluate (evaluate_id bigint, resource_id bigint, evaluate_time timestamp without time zone, test_set_accuracy numeric(5,2), actual_use_accuracy numeric(5,2), conversation_error_rate numeric(5,2), avg_first_response_duration numeric(10,2), persona_specification_score numeric(5,2), ability_post_matching_score numeric(5,2), is_qualified_for_post smallint, create_by character varying(100), create_time timestamp without time zone, update_time timestamp without time zone, evaluate_result character varying(200));
 CREATE TABLE byai.ss_res_ext_mcpserver (resource_id bigint, mcp_server_url character varying(2000), mcp_transfer_type character varying(20), mcp_header character varying(1024), mcp_command character varying(1024), mcp_args text, mcp_env text, mcp_timeout integer, mcp_server_url_ori character varying(2000));
@@ -131,6 +131,7 @@ CREATE TABLE byai.ss_resource_position_relation (position_rel_id bigint, positio
 CREATE TABLE byai.ss_resource_rel_detail (resource_rel_detail_id bigint, resource_id bigint, rel_resource_id bigint, create_by bigint, create_time timestamp with time zone, update_by bigint, update_time timestamp with time zone, com_acct_id bigint, rel_type_name character varying(500), rel_status smallint, rel_resource_info text);
 CREATE TABLE byai.ss_resource_syn (syn_id bigint NOT NULL, resource_id bigint, system_code character varying(32), resource_source_pk_id bigint, resource_biz_type character varying(20), resource_type character varying(10), resource_name character varying(128), resource_desc character varying(4000), create_by bigint, create_date timestamp without time zone, update_date timestamp without time zone, repository character varying(4000));
 CREATE TABLE byai.ss_resource_version (resource_version_id bigint, resource_id bigint, system_code character varying(32), resource_source_pk_id bigint, resource_biz_type character varying(20), resource_type character varying(10), resource_name character varying(128), resource_desc character varying(1024), avatar character varying(1024), sample text, tags text, version_no character varying(20), catalog_id bigint, man_org_id bigint, man_user_id character varying(500), index_list text, publisher character varying(20), ext_info text, rel_resource_list text, resource_status integer, version_status integer, create_by bigint, create_time timestamp without time zone, update_by bigint, update_time timestamp without time zone, com_acct_id bigint);
+CREATE TABLE byai.ss_resource_artifact ( artifact_id BIGINT NOT NULL, resource_id BIGINT NOT NULL, resource_biz_type VARCHAR(100) NOT NULL, artifact_type VARCHAR(100) NOT NULL, storage_type VARCHAR(32) NOT NULL, artifact_path VARCHAR(1024) NOT NULL, status_cd VARCHAR(8) NOT NULL DEFAULT 'A', remark VARCHAR(1000) DEFAULT NULL, create_by BIGINT DEFAULT NULL, create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, update_by BIGINT DEFAULT NULL, update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, com_acct_id BIGINT DEFAULT NULL, CONSTRAINT pk_ss_resource_artifact PRIMARY KEY (artifact_id) );
 CREATE TABLE byai.ss_sandbox_record (id bigint NOT NULL DEFAULT nextval('byai.ss_sandbox_record_id_seq'::regclass), resource_id bigint NOT NULL, user_code character varying(500) NOT NULL, sandbox_type character varying(500) NOT NULL, endpoint character varying(3000), sandbox_id character varying(128), chat_id character varying(128), status character varying(32) NOT NULL DEFAULT 'RUNNING'::character varying, auto_release integer DEFAULT 1, lease_policy character varying(32) DEFAULT 'REMOTE_AUTO_EXPIRE'::character varying, timeout_seconds integer, remote_expires_at timestamp(6) without time zone, last_renew_at timestamp(6) without time zone, next_renew_at timestamp(6) without time zone, last_access_time timestamp(6) without time zone, release_time timestamp(6) without time zone, release_reason character varying(128), version integer DEFAULT 0, create_time timestamp(6) without time zone NOT NULL DEFAULT pg_systimestamp(), update_time timestamp(6) without time zone NOT NULL DEFAULT pg_systimestamp());
 CREATE TABLE byai.ss_superassist_kw_catalog (kw_catalog_id bigint, superassist_id bigint, session_type character varying(200), is_last_session character varying(200), session_id bigint, session_datasetid bigint, catalog_id bigint, create_time timestamp without time zone, create_user bigint, enterprise_id bigint);
 CREATE TABLE byai.suas_superassist (superassist_id bigint, avatar character varying(255), intro text, name character varying(255), create_time timestamp with time zone, prologue text, status character varying(2), com_acct_id bigint, session_dataset_id bigint, create_user bigint, default_dig_employee_id bigint);
@@ -144,10 +145,13 @@ CREATE TABLE byai.template_rule_info (template_id bigint, template_type characte
 CREATE INDEX idx_sandbox_user_resource ON byai.ss_sandbox_record USING btree (user_code, resource_id, status) TABLESPACE pg_default;
 CREATE INDEX idx_sandbox_status ON byai.ss_sandbox_record USING btree (status) TABLESPACE pg_default;
 CREATE INDEX idx_sandbox_auto_release_timeout ON byai.ss_sandbox_record USING btree (status, auto_release, last_access_time) TABLESPACE pg_default;
-CREATE INDEX idx_ss_sandbox_record_active ON byai.ss_sandbox_record USING btree (user_code, sandbox_type, resource_id, status) TABLESPACE pg_default;
-CREATE INDEX idx_ss_sandbox_record_due_renew ON byai.ss_sandbox_record USING btree (status, lease_policy, next_renew_at) TABLESPACE pg_default;
-CREATE INDEX idx_ss_sandbox_record_idle_release ON byai.ss_sandbox_record USING btree (status, lease_policy, last_access_time) TABLESPACE pg_default;
 CREATE UNIQUE INDEX ux_ss_sandbox_record_active ON byai.ss_sandbox_record USING btree (user_code, sandbox_type, resource_id) TABLESPACE pg_default WHERE status IN ('STARTING'::character varying, 'RUNNING'::character varying, 'RELEASING'::character varying);
+CREATE INDEX idx_ss_sandbox_record_due_renew ON byai.ss_sandbox_record USING btree (status, lease_policy, next_renew_at) TABLESPACE pg_default;
+CREATE INDEX idx_ss_sandbox_record_auto_release ON byai.ss_sandbox_record USING btree (status, auto_release, last_access_time) TABLESPACE pg_default;
+CREATE INDEX IF NOT EXISTS idx_ss_res_artifact_resid_status ON byai.ss_resource_artifact (resource_id, status_cd);
+CREATE INDEX IF NOT EXISTS idx_ss_res_artifact_biztype_status ON byai.ss_resource_artifact (resource_biz_type, status_cd);
+CREATE INDEX IF NOT EXISTS idx_ss_res_artifact_path_status ON byai.ss_resource_artifact (artifact_path, status_cd);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_ss_res_artifact_unique_active ON byai.ss_resource_artifact (resource_id, artifact_type, artifact_path, status_cd);
 
 -- ========== 约束 ==========
 ALTER TABLE byai.byai_message ADD PRIMARY KEY (id);
@@ -234,6 +238,8 @@ COMMENT ON COLUMN byai.ss_res_ext_dig_employee.open_super_helper IS '打开超�
 COMMENT ON COLUMN byai.ss_res_ext_dig_employee.machine_channel IS '数据员工机器渠道配置';
 COMMENT ON COLUMN byai.ss_res_ext_dig_employee.core_persona_definition IS '核心人设';
 COMMENT ON COLUMN byai.ss_res_ext_dig_employee.advanced_settings IS '高级设置';
+COMMENT ON COLUMN byai.ss_res_ext_dig_employee.skills IS '数字员工技能';
+COMMENT ON COLUMN byai.ss_res_ext_dig_employee.target_content IS '数字员工目标json';
 COMMENT ON TABLE byai.ss_resource IS 'ss_resource resource_source_id & resource_pk_id 形成唯一索引';
 COMMENT ON COLUMN byai.ss_resource.resource_id IS '资源标识';
 COMMENT ON COLUMN byai.ss_resource.system_code IS '外系统编码，BYAI：百应，WHAGE_AGENT:老智能体，BOT：博特，DIFY：DIFY';
@@ -346,6 +352,22 @@ COMMENT ON COLUMN byai.ss_resource.worker_agent_type IS '资源工作类型:
       6.4. 问数类: implType = ASK_AGENT, workerAgentType = BYCLAW_QA
       6.5. 调试类：implType = ASK_AGENT, workerAgentType = DEBUG_{resourceId}
 ';
+
+COMMENT ON TABLE byai.ss_resource_artifact IS '资源产物映射表';
+COMMENT ON COLUMN byai.ss_resource_artifact.artifact_id IS '主键ID';
+COMMENT ON COLUMN byai.ss_resource_artifact.resource_id IS '资源ID';
+COMMENT ON COLUMN byai.ss_resource_artifact.resource_biz_type IS '资源业务类型';
+COMMENT ON COLUMN byai.ss_resource_artifact.artifact_type IS '产物类型: STANDARD_JSON/IMPORT_ZIP/IMPORT_BUNDLE_DIR';
+COMMENT ON COLUMN byai.ss_resource_artifact.storage_type IS '存储类型: minio';
+COMMENT ON COLUMN byai.ss_resource_artifact.artifact_path IS '资源根目录下的相对路径';
+COMMENT ON COLUMN byai.ss_resource_artifact.status_cd IS '状态: A有效, X失效';
+COMMENT ON COLUMN byai.ss_resource_artifact.remark IS '备注';
+COMMENT ON COLUMN byai.ss_resource_artifact.create_by IS '创建人';
+COMMENT ON COLUMN byai.ss_resource_artifact.create_time IS '创建时间';
+COMMENT ON COLUMN byai.ss_resource_artifact.update_by IS '更新人';
+COMMENT ON COLUMN byai.ss_resource_artifact.update_time IS '更新时间';
+COMMENT ON COLUMN byai.ss_resource_artifact.com_acct_id IS '企业账号ID';
+
 COMMENT ON COLUMN byai.ss_res_ext_tool.tool_add_type IS '技能添加方式：curl-curl方式导入、json-curl方式导入';
 COMMENT ON COLUMN byai.ss_res_ext_tool.source_content IS '技能源内容：存放curl内容或json内容';
 COMMENT ON COLUMN byai.ss_res_ext_tool.target_content IS '技能目标内容：存放json内容或curl转化后的json内容';

@@ -179,4 +179,11 @@ public class SsResExtDigEmployee {
      * 高级设置
      */
     private String advancedSettings;
+
+    /**
+     * 数字员工同步到 MinIO 的标准 JSON 串镜像（含 relSkills / relTools 等运行期字段）。
+     * 写入时机：在 doSyncOpenClawWorkSpace 生成 JSON 之后、推送 MinIO 之前。
+     * 读取时机：findDetailsById 从此字段反序列化 relTools 等"不入库"的运行期入参，避免编辑回显丢失。
+     */
+    private String targetContent;
 }

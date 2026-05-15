@@ -9,6 +9,8 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
  * skill 路径与上下文切换的内部工具。
  * 同一份口径供 {@link ByClawSkillQueryApplicationService} 与 {@link ByClawSkillUploadApplicationService} 复用，
  * 避免常量与 LoginInfo 切换逻辑各写一遍导致 query / upload 路径漂移。
+ * @author qin.guoquan
+ * @date 2026-05-15 18:37:18
  */
 final class ByClawSkillPaths {
 

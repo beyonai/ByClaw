@@ -418,12 +418,15 @@ const ResourceList = (props: Props) => {
 
         const response = await downloadSkillZip(params);
 
-        if (response) {
-          const blob = new Blob([response], { type: 'application/zip' });
+        // request.ts 在 responseType=blob 时统一封装成 { fileName, file }；这里只用 file 字段构造 Blob，
+        // 直接 new Blob([response]) 会把整个对象当字符串塞进去（变成 "[object Object]"），导致下载文件无法解压。
+        const fileBlob = response?.file;
+        if (fileBlob) {
+          const blob = fileBlob instanceof Blob ? fileBlob : new Blob([fileBlob], { type: 'application/zip' });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = `${item.resourceName || 'skill'}.zip`;
+          a.download = response?.fileName || `${item.resourceName || 'skill'}.zip`;
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);

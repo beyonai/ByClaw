@@ -25,6 +25,7 @@ import com.iwhalecloud.byai.state.domain.resource.dto.ResourceCurlRunRequest;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceCurlRunResult;
 import com.iwhalecloud.byai.state.domain.resource.dto.ToolSaveRequest;
 import com.iwhalecloud.byai.state.domain.resource.qo.DeleteResourceQo;
+import com.iwhalecloud.byai.state.domain.resource.qo.DownloadSkillZipQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.ResourceDetailQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.UpdateResourceBasicInfoQo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceApplicationService;
@@ -567,19 +568,30 @@ public class ToolManController {
      * 下载 skill 目录为 zip。
      * - 入参 skillPath 必须落在 /.openclaw/workspace/skills/ 之下，且至少指向某一个具体 skill 目录。
      * - userCode 留空时退回当前登录用户。
+     * - 入参兼容 application/json body 与 query/form 两种形式：body 优先，缺失时退到 query 参数。
      * - 出参为 application/zip 流，文件名形如 {skillName}.zip。
      * - 失败场景（路径非法 / skill 不存在 / 读对象异常）返回纯文本 400，避免中途出 zip 时再插入 JSON 错误体。
      */
     @PostMapping("/downloadSkillZip")
     public ResponseEntity<StreamingResponseBody> downloadSkillZip(
-        @Parameter(description = "skill 目录路径，例如 /.openclaw/workspace/skills/fol-auto-biztravel", required = true)
-        @RequestParam("skillPath") String skillPath,
+        @RequestBody(required = false) DownloadSkillZipQo request,
+        @Parameter(description = "skill 目录路径，例如 /.openclaw/workspace/skills/fol-auto-biztravel")
+        @RequestParam(value = "skillPath", required = false) String skillPath,
         @Parameter(description = "目标用户编码，可选；留空则使用当前登录用户")
         @RequestParam(value = "userCode", required = false) String userCode) {
-        String resolvedUserCode = StringUtils.isNotBlank(userCode) ? userCode : CurrentUserHolder.getCurrentUserCode();
+        // body 优先；body 缺失时再退到 query 参数。两种来源都允许，避免前端必须指定其一。
+        String finalSkillPath = request != null && StringUtils.isNotBlank(request.getSkillPath())
+            ? request.getSkillPath() : skillPath;
+        String finalUserCode = request != null && StringUtils.isNotBlank(request.getUserCode())
+            ? request.getUserCode() : userCode;
+        String resolvedUserCode = StringUtils.isNotBlank(finalUserCode) ? finalUserCode
+            : CurrentUserHolder.getCurrentUserCode();
         try {
+            if (StringUtils.isBlank(finalSkillPath)) {
+                throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.path.invalid"));
+            }
             ByClawSkillDownloadApplicationService.SkillZipDownload download = byClawSkillDownloadApplicationService
-                .prepare(resolvedUserCode, skillPath);
+                .prepare(resolvedUserCode, finalSkillPath);
             // RFC 5987 风格的 filename*：兼容中文 / 特殊字符 skill 名，避免浏览器侧文件名乱码。
             String encoded = UriUtils.encode(download.getZipFileName(), java.nio.charset.StandardCharsets.UTF_8);
             String contentDisposition = "attachment; filename=\"" + encoded + "\"; filename*=UTF-8''" + encoded;
@@ -591,7 +603,7 @@ public class ToolManController {
                 .body(out -> out.write(e.getMessage().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         }
         catch (Exception e) {
-            logger.error("downloadSkillZip failed, userCode={}, skillPath={}", resolvedUserCode, skillPath, e);
+            logger.error("downloadSkillZip failed, userCode={}, skillPath={}", resolvedUserCode, finalSkillPath, e);
             String fallbackMsg = StringUtils.defaultIfBlank(e.getMessage(),
                 I18nUtil.get("byclaw.skill.download.failed"));
             return ResponseEntity.badRequest().contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
