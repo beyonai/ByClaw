@@ -22,7 +22,7 @@
 
 ## 同步到 OpenClaw 配置：`agents.list[].skills`（非工作区 `.md`）
 
-工作区 Markdown 由 `workspace-seed.ts` 负责；而 **`openclaw.json`（或当前生效网关配置）** 里托管 agent 的列表项由 **`src/agent-adapter.ts`** 的 `adaptAgentJson` / `normalizeAgentListSkills` 生成，经 `mergeManagedAgentsIntoConfig` 合并写盘。
+工作区 Markdown 由 `workspace-seed.ts` 负责；而 **`openclaw.json`（或当前生效网关配置）** 里托管 agent 的列表项由 **`src/agent-adapter.ts`** 的 `adaptAgentJson` / `normalizeAgentListSkills` 生成，并在 `workspaceSkillAutoEnable` 默认开启时由 **`src/workspace-skills.ts`** 合并用户上传 skill，最后经 `mergeManagedAgentsIntoConfig` 合并写盘。
 
 | 规则 | 说明 |
 |------|------|
@@ -30,8 +30,9 @@
 | 默认空数组 | 无可用配置时为 **`[]`**。 |
 | **`relSkills`（优先）** | JSON **根**上为非空字符串数组时（如数字员工详情里的 `["dws","clawhub"]`），**`agents.list[].skills`** 即为该数组（元素 `trim`，去掉空串）。 |
 | **`skills`（兼容）** | 若无有效 **`relSkills`**，则读取根级 **`skills`**（旧版「原生简化」JSON）；仍无则为 **`[]`**。 |
+| **Workspace 上传 skill** | 默认扫描 `skills/<skillName>/SKILL.md`：只把当前 agent workspace 下的 skill 并入该 agent，不读取其它 agent workspace；main workspace (`workspace/skills`) 下的 skill 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 并入托管子 agent。 |
 
-适用结构：百应详情根对象、`agent_list` 与首条目同文件根上的字段、以及原生根对象——均从**根对象**读取 `relSkills` / `skills`。
+适用结构：百应详情根对象、`agent_list` 与首条目同文件根上的字段、以及原生根对象——均从**根对象**读取 `relSkills` / `skills`。Workspace skill 只识别一层目录下的 `SKILL.md`，不会采纳更深层级文件。该配置写回默认走 `agents` hot reload，不需要重启 OpenClaw。
 
 ---
 
@@ -137,4 +138,4 @@ DOC 类资源类型（用于决定是否展示 `agent_id`）：`DOC`、`ATOM`、
 | `USER.md` | `prologue.openingQuestion` |
 | `TOOLS.md` | 关联资源列表 + `resourceId`（及适配层 id 兜底） |
 
-如需确认行为是否与当前代码一致，请以 `src/workspace-seed.ts` 中 `buildSoul`、`buildByaiBusinessExtensionsMd`、`buildAgentsMd`、`buildIdentityMd`、`buildUserMd`、`buildToolsMd` 及 `src/core-persona-definition.ts` 为准；**网关配置中的 `agents.list[].skills`** 以 `src/agent-adapter.ts`（`normalizeAgentListSkills`）为准。
+如需确认行为是否与当前代码一致，请以 `src/workspace-seed.ts` 中 `buildSoul`、`buildByaiBusinessExtensionsMd`、`buildAgentsMd`、`buildIdentityMd`、`buildUserMd`、`buildToolsMd` 及 `src/core-persona-definition.ts` 为准；**网关配置中的 `agents.list[].skills`** 以 `src/agent-adapter.ts`（`normalizeAgentListSkills`）与 `src/workspace-skills.ts` 为准。

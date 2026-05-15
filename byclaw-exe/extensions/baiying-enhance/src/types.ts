@@ -66,6 +66,21 @@ export type BaiyingEnhancePluginConfig = {
   skillDirs?: unknown;
   /** @deprecated Ignored. Legacy copy-paste from older README examples. */
   pollIntervalMs?: number;
+  /**
+   * When true (default), merge user-uploaded workspace skills (`skills/<name>/SKILL.md`) into
+   * managed agents' `agents.list[].skills` alongside JSON `relSkills` / `skills`.
+   */
+  workspaceSkillAutoEnable?: boolean;
+  /**
+   * Fallback scan interval in milliseconds for workspace skill changes. Default 500.
+   * Set to 0 or a negative value to disable the periodic scan and rely on fs.watch + normal sync triggers.
+   */
+  workspaceSkillScanIntervalMs?: number;
+  /**
+   * When true, skills uploaded to the main workspace (`workspace/skills`) are treated
+   * as shared skills and merged into managed sub-agents.
+   */
+  workspaceSkillIncludeMainShared?: boolean;
   /** Subscribe to `digEmployeeChangeChannel` for digital-employee change broadcasts (Redis PUBLISH). */
   digEmployeeChangeSubscribe?: boolean;
   /** Redis Pub/Sub channel for `DigEmployeeChangeEvent` JSON (default `byai:pub:dig_employee_change`). */
