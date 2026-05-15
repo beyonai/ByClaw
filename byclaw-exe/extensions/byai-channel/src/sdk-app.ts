@@ -35,6 +35,8 @@ export interface ByaiSdkAppOptions {
   };
 }
 
+type ByaiSdkLogger = NonNullable<ByaiSdkAppOptions["log"]>;
+
 function getRedisInfo() {
   const {
     REDIS_USERNAME,
@@ -112,6 +114,73 @@ function getInboundMessageFromByFramework(data: AskAgentCommand) {
   }
 }
 
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return String(err);
+}
+
+function isRedisNoGroupError(err: unknown): boolean {
+  const message = getErrorMessage(err);
+  return message.includes("NOGROUP");
+}
+
+function installNoGroupRecovery(params: {
+  runner: WorkerRunner;
+  registry: WorkerRegistry;
+  workerId: string;
+  agentTypes: string[];
+  log?: ByaiSdkLogger;
+}): void {
+  const { runner, registry, workerId, agentTypes, log } = params;
+  const originalPoll = runner.poll.bind(runner);
+  const originalRunControlOnce = runner.runControlOnce.bind(runner);
+  let recoveryPromise: Promise<void> | null = null;
+
+  const recoverStreams = async (source: string): Promise<void> => {
+    if (!recoveryPromise) {
+      recoveryPromise = (async () => {
+        log?.warn?.(
+          `[${workerId}] byai-channel Redis stream consumer group missing during ${source}; recreating worker and agent_type control streams`,
+        );
+        await registry.registerWorkerMembership(workerId, agentTypes);
+        await registry.heartbeatWorker(workerId);
+        await runner.setupStreams();
+        await runner.setupControlStreams();
+        log?.info?.(`[${workerId}] byai-channel Redis stream consumer groups recovered`);
+      })().finally(() => {
+        recoveryPromise = null;
+      });
+    }
+    await recoveryPromise;
+  };
+
+  runner.poll = async (options) => {
+    try {
+      return await originalPoll(options);
+    } catch (err) {
+      if (!isRedisNoGroupError(err)) {
+        throw err;
+      }
+      await recoverStreams("subscription poll");
+      return originalPoll(options);
+    }
+  };
+
+  runner.runControlOnce = async (block) => {
+    try {
+      return await originalRunControlOnce(block);
+    } catch (err) {
+      if (!isRedisNoGroupError(err)) {
+        throw err;
+      }
+      await recoverStreams("control poll");
+      return originalRunControlOnce(block);
+    }
+  };
+}
+
 export class ByaiSdkApp {
   private readonly account: ResolvedByaiAccount;
   private readonly cfg: OpenClawConfig;
@@ -165,6 +234,13 @@ export class ByaiSdkApp {
     // 关键：轮询必须拥有自己的独占连接
     const runner = new WorkerRunner({ workerId, agentTypes, registry }, {
         redisClient: createRedis(redisInfo)
+    });
+    installNoGroupRecovery({
+      runner,
+      registry,
+      workerId,
+      agentTypes,
+      log: this.log,
     });
     const emitter = new GatewayDataEmitter(redis, {
       sourceAgentType: agentTypes[0],
@@ -381,6 +457,14 @@ export class ByaiSdkApp {
     }
 
     try {
+      await this.workerHeartbeat?.stop();
+    } catch (err) {
+      error?.(
+        `[${this.account.accountId}] byai-channel failed to stop worker heartbeat: ${String(err)}`,
+      );
+    }
+
+    try {
       await this.runner?.release();
     } catch (err) {
       error?.(
@@ -396,17 +480,10 @@ export class ByaiSdkApp {
       );
     }
 
-    try {
-      await this.workerHeartbeat?.stop();
-    } catch (err) {
-      error?.(
-        `[${this.account.accountId}] byai-channel failed to stop worker heartbeat: ${String(err)}`,
-      );
-    }
-
     this.runner = null;
     this.stopSubscription = null;
     this.redis = null;
+    this.workerHeartbeat = null;
 
     info?.(`[${this.account.accountId}] byai-channel SDK app stopped`);
   }
