@@ -54,7 +54,7 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
   });
 
   describe('buildLlmHeaders', () => {
-    it('prefers previous Authorization header over form values and token', () => {
+    it('prefers form Authorization header over previous headers and token', () => {
       expect(
         buildLlmHeaders({
           formApiToken: 'new-token',
@@ -66,7 +66,7 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
         })
       ).toEqual({
         'X-App': 'manager',
-        Authorization: 'Bearer prev-token',
+        Authorization: 'Bearer form-token',
       });
     });
 
@@ -84,7 +84,7 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
   });
 
   describe('buildRerankHeaders', () => {
-    it('prefers previous X-Api-Key over form values and token', () => {
+    it('prefers form X-Api-Key over previous headers and token', () => {
       expect(
         buildRerankHeaders({
           formApiToken: 'new-key',
@@ -96,7 +96,7 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
         })
       ).toEqual({
         'X-App': 'manager',
-        'X-Api-Key': 'prev-key',
+        'X-Api-Key': 'form-key',
       });
     });
 
