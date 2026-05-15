@@ -112,11 +112,10 @@ const RenderContent = (props: ResourceCardProps) => {
     onAuditUse = noop,
     onRestore = noop,
     onDelete = noop,
-    onSetDefault = noop,
   } = actionConfig || {};
 
   const intl = useIntl();
-  const [settingDefault, setSettingDefault] = useState(false);
+  const [settingDefault] = useState(false);
   const defaultDisabledTip = intl.formatMessage({ id: 'common.noPermissionOperation' });
 
   const { mutate: handleRestore, isLoading: restoring } = useRequest({
@@ -176,8 +175,7 @@ const RenderContent = (props: ResourceCardProps) => {
   const displayTopRightTag = getDisplayTopRightTag();
 
   const menuItems = useMemo<MenuProps['items']>(() => {
-    const { canSetDefault, canEdit, canManageAuth, canUseAuth, canApplyUse, canAuditUse, canDelete, canRestore } =
-      resource || {};
+    const { canEdit, canManageAuth, canUseAuth, canApplyUse, canAuditUse, canDelete, canRestore } = resource || {};
     const items: NonNullable<MenuProps['items']> = [];
     const buildMenuLabel = ({
       icon,
@@ -211,33 +209,33 @@ const RenderContent = (props: ResourceCardProps) => {
     };
 
     // 设为默认
-    if (canSetDefault) {
-      items.push({
-        key: 'setDefaultAssistant',
-        label: (
-          <Popconfirm
-            title={intl.formatMessage({ id: 'resource.setDefaultAssistantConfirm' })}
-            onConfirm={async (e) => {
-              e?.stopPropagation();
-              setSettingDefault(true);
-              try {
-                await onSetDefault?.();
-              } finally {
-                setSettingDefault(false);
-              }
-            }}
-            okText={intl.formatMessage({ id: 'common.confirm' })}
-            cancelText={intl.formatMessage({ id: 'common.cancel' })}
-          >
-            {buildMenuLabel({
-              icon: 'icon-a-Useryonghu',
-              text: intl.formatMessage({ id: 'resource.setDefaultAssistant' }),
-              loading: settingDefault,
-            })}
-          </Popconfirm>
-        ),
-      });
-    }
+    // if (canSetDefault) {
+    //   items.push({
+    //     key: 'setDefaultAssistant',
+    //     label: (
+    //       <Popconfirm
+    //         title={intl.formatMessage({ id: 'resource.setDefaultAssistantConfirm' })}
+    //         onConfirm={async (e) => {
+    //           e?.stopPropagation();
+    //           setSettingDefault(true);
+    //           try {
+    //             await onSetDefault?.();
+    //           } finally {
+    //             setSettingDefault(false);
+    //           }
+    //         }}
+    //         okText={intl.formatMessage({ id: 'common.confirm' })}
+    //         cancelText={intl.formatMessage({ id: 'common.cancel' })}
+    //       >
+    //         {buildMenuLabel({
+    //           icon: 'icon-a-Useryonghu',
+    //           text: intl.formatMessage({ id: 'resource.setDefaultAssistant' }),
+    //           loading: settingDefault,
+    //         })}
+    //       </Popconfirm>
+    //     ),
+    //   });
+    // }
 
     // 编辑信息
     if (canEdit) {

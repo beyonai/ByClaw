@@ -1,5 +1,5 @@
 import React, { useCallback, useState, useEffect, useMemo } from 'react';
-import { Spin } from 'antd';
+import { Spin, message } from 'antd';
 import { useIntl } from '@umijs/max';
 import InfiniteScroll from '@/components/InfiniteScroll';
 import Empty from '@/components/Empty';
@@ -118,10 +118,8 @@ const ResourceList: React.FC<ResourceListProps> = ({
       return deleteResource({ resourceId: params.resourceId });
     },
     onSuccess: () => {
-      import('antd').then(({ message }) => {
-        message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
-        onRefresh();
-      });
+      message.success(intl.formatMessage({ id: 'common.deactivateSuccess' }));
+      onRefresh();
     },
   });
 

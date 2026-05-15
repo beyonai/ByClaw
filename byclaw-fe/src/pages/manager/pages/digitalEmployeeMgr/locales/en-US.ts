@@ -151,6 +151,8 @@ export default {
   'baseListModal.tabs.object': 'Object',
   'baseListModal.tabs.qa': 'Q&A KB',
   'baseListModal.tabs.document': 'Document KB',
+  'baseListModal.tabs.external': 'External',
+  'baseListModal.tabs.builtin': 'Built-in',
 
   // ItemCard
   'itemCard.remove': 'Remove',

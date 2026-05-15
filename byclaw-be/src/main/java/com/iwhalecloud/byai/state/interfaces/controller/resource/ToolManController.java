@@ -8,7 +8,9 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.application.service.session.ByClawFileQueryApplicationService;
+import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDownloadApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillQueryApplicationService;
+import com.iwhalecloud.byai.state.application.service.session.ByClawSkillUploadApplicationService;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawFileDto;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
@@ -29,8 +31,10 @@ import com.iwhalecloud.byai.state.domain.resource.service.ResourceApplicationSer
 import com.iwhalecloud.byai.state.domain.resource.service.ToolManService;
 import com.iwhalecloud.byai.state.domain.resource.vo.ResourceDetailVo;
 import io.swagger.v3.oas.annotations.Parameter;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -38,6 +42,8 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import org.springframework.web.util.UriUtils;
 import java.util.List;
 import java.util.Map;
 
@@ -58,6 +64,12 @@ public class ToolManController {
 
     @Autowired
     private ByClawSkillQueryApplicationService byClawSkillQueryApplicationService;
+
+    @Autowired
+    private ByClawSkillUploadApplicationService byClawSkillUploadApplicationService;
+
+    @Autowired
+    private ByClawSkillDownloadApplicationService byClawSkillDownloadApplicationService;
 
     /**
      * 阶段一：解析 curl，返回结构化预览（不入库）
@@ -483,6 +495,73 @@ public class ToolManController {
                 request == null ? null : request.getKeyword(), e);
             return ResponseUtil
                 .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("byclaw.user.skill.list.query.failed"));
+        }
+    }
+
+    /**
+     * 上传 skill 压缩包到用户工作空间。
+     * - 落盘 bucket: byclaw-{userCode}（与 qrySkillListByUserCode 同口径）
+     * - 落盘前缀: /by/.openclaw/workspace/skills/{skillName}/...
+     * - zip 仅允许包含一个顶层目录，且必须含 SKILL.md；同名 skill 会先清空旧目录再写入。
+     * - userCode 留空时退回当前登录用户。
+     */
+    @PostMapping(value = "/uploadSkillZip", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseUtil<ByClawSkillDto> uploadSkillZip(
+        @Parameter(description = "skill zip 文件", required = true) @RequestParam("file") MultipartFile file,
+        @Parameter(description = "目标用户编码，可选；留空则使用当前登录用户")
+        @RequestParam(value = "userCode", required = false) String userCode) {
+        try {
+            String resolvedUserCode = StringUtils.isNotBlank(userCode) ? userCode
+                : CurrentUserHolder.getCurrentUserCode();
+            ByClawSkillDto data = byClawSkillUploadApplicationService.uploadSkillZip(resolvedUserCode, file);
+            return ResponseUtil.successResponse(I18nUtil.get("byclaw.skill.upload.success"), data);
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("uploadSkillZip failed, userCode={}", userCode, e);
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("byclaw.skill.upload.failed"));
+        }
+    }
+
+    /**
+     * 下载 skill 目录为 zip。
+     * - 入参 skillPath 必须落在 /.openclaw/workspace/skills/ 之下，且至少指向某一个具体 skill 目录。
+     * - userCode 留空时退回当前登录用户。
+     * - 出参为 application/zip 流，文件名形如 {skillName}.zip。
+     * - 失败场景（路径非法 / skill 不存在 / 读对象异常）返回纯文本 400，避免中途出 zip 时再插入 JSON 错误体。
+     */
+    @PostMapping("/downloadSkillZip")
+    public ResponseEntity<StreamingResponseBody> downloadSkillZip(
+        @Parameter(description = "skill 目录路径，例如 /.openclaw/workspace/skills/fol-auto-biztravel", required = true)
+        @RequestParam("skillPath") String skillPath,
+        @Parameter(description = "目标用户编码，可选；留空则使用当前登录用户")
+        @RequestParam(value = "userCode", required = false) String userCode) {
+        String resolvedUserCode = StringUtils.isNotBlank(userCode) ? userCode : CurrentUserHolder.getCurrentUserCode();
+        try {
+            ByClawSkillDownloadApplicationService.SkillZipDownload download = byClawSkillDownloadApplicationService
+                .prepare(resolvedUserCode, skillPath);
+            // RFC 5987 风格的 filename*：兼容中文 / 特殊字符 skill 名，避免浏览器侧文件名乱码。
+            String encoded = UriUtils.encode(download.getZipFileName(), java.nio.charset.StandardCharsets.UTF_8);
+            String contentDisposition = "attachment; filename=\"" + encoded + "\"; filename*=UTF-8''" + encoded;
+            return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/zip"))
+                .header("Content-Disposition", contentDisposition).body(download.getBody());
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
+                .body(out -> out.write(e.getMessage().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        }
+        catch (Exception e) {
+            logger.error("downloadSkillZip failed, userCode={}, skillPath={}", resolvedUserCode, skillPath, e);
+            String fallbackMsg = StringUtils.defaultIfBlank(e.getMessage(),
+                I18nUtil.get("byclaw.skill.download.failed"));
+            return ResponseEntity.badRequest().contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
+                .body(out -> out.write(fallbackMsg.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         }
     }
 
