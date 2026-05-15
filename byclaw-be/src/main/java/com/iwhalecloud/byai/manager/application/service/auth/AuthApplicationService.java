@@ -779,6 +779,18 @@ public class AuthApplicationService {
     }
 
     /**
+     * 判断当前登录用户是否被显式授予资源管理权限。
+     * 该方法只看 ALLOW_MANAGE 授权，不叠加平台管理员/组织管理员等管理兜底能力，
+     * 适用于“左侧列表可见即可设为默认”等需要与授权列表保持一致的场景。
+     */
+    public boolean hasCurrentUserAllowManagePrivilege(SsResource ssResource) {
+        if (ssResource == null) {
+            return false;
+        }
+        return hasEffectiveAllowManagePrivilege(ssResource, CurrentUserHolder.getCurrentUserId());
+    }
+
+    /**
      * 判断当前登录用户是否具备资源使用授权维护权限。
      */
     public boolean hasResourceUseSettingPermission(SsResource ssResource) {
@@ -2377,7 +2389,8 @@ public class AuthApplicationService {
     }
 
     /**
-     * 查询当前登录用户对指定资源的 6 项操作权限（数字员工额外返回 canSetDefault）。
+     * 查询当前登录用户对指定资源的 6 项操作权限。
+     * canSetDefault 已统一迁移到左侧“全部列表项”接口计算，这里固定返回 false，避免资源卡片继续出现旧入口。
      * 与列表查询返回的 canEdit/canManageAuth/... 字段语义保持一致。
      *
      * @param resourceId 资源 ID
@@ -2402,7 +2415,7 @@ public class AuthApplicationService {
 
         boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum());
         boolean canManage = hasResourceManagePermission(ssResource);
-        
+
         // 如果资源已注销，只允许恢复操作，其他操作全部禁用
         if (isResourceRemoved) {
             vo.setCanEdit(false);
@@ -2431,19 +2444,19 @@ public class AuthApplicationService {
         boolean canEdit = isDigitalEmployee
             ? (canManage || isBoundDefaultDigEmployee)
             : (canManage && !isDefaultResource);
-        vo.setCanEdit(canEdit && !isWhaleAgentExternalKnowledgeOrToolResource);
+        // 默认超级助手是登录初始化的个人底座资源，即使当前用户绑定为默认助理，也不开放编辑入口。
+        vo.setCanEdit(canEdit && !isDefaultSuperAssistantResource && !isWhaleAgentExternalKnowledgeOrToolResource);
         vo.setCanManageAuth(canManage && !isDefaultResource && !isDefaultSuperAssistantResource
             && !isPersonalAssistantResource);
         vo.setCanUseAuth(canSetUse && !isDefaultSuperAssistantResource);
-        vo.setCanDelete(canManage && !isDefaultResource && !isWhaleAgentExternalKnowledgeOrToolResource);
+        vo.setCanDelete(canManage && !isDefaultResource && !isDefaultSuperAssistantResource
+            && !isWhaleAgentExternalKnowledgeOrToolResource);
         vo.setCanAuditUse(canSetUse && !isDefaultSuperAssistantResource && !isPersonalResourceUseApplyUnsupported);
         vo.setCanApplyUse(!isDefaultSuperAssistantResource && !isPersonalResourceUseApplyUnsupported
             && checkCanApplyUse(ssResource));
 
-        if (isDigitalEmployee) {
-            vo.setCanSetDefault(checkCanSetDefaultDigitalEmployee(ssResource));
-        }
-        vo.setCanRestore(false);
+        // “设为默认”入口统一收敛到左侧“全部列表项”，个人/企业资源卡片不再展示该操作。
+        vo.setCanSetDefault(false);
         return vo;
     }
 
@@ -2518,7 +2531,7 @@ public class AuthApplicationService {
      * @return 是否默认超级助手
      */
     private boolean isDefaultSuperAssistantResource(SsResource ssResource) {
-        return isDefaultPersonalResource(ssResource)
+        return ssResource != null
             && ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(ssResource.getResourceBizType())
             && StringUtils.endsWith(ssResource.getResourceCode(), DEFAULT_SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX);
     }
@@ -2574,39 +2587,4 @@ public class AuthApplicationService {
         return true;
     }
 
-    /**
-     * 计算 canSetDefault：仅数字员工，且满足以下全部条件：
-     * 1. resourceBizType = DIG_EMPLOYEE
-     * 2. create_by = 当前用户
-     * 3. ownerType ∈ { personal, personal_default }
-     * 4. resourceId 不等于当前用户已绑定的默认助理 ID（即资源还没成为默认助理）
-     *
-     * 设计意图：
-     * - 我自己创建的个人助理（personal） → 可设为我的默认助理 ✓
-     * - 我的默认超级助手（personal_default 且 resource_code 后缀 _main） → 也可设为我的默认助理 ✓
-     * - 已经是当前默认助理（resource_id 命中 superassist.default_dig_employee_id） → false（不再展示按钮）
-     */
-    private boolean checkCanSetDefaultDigitalEmployee(SsResource ssResource) {
-        if (ssResource == null
-            || !ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(ssResource.getResourceBizType())) {
-            return false;
-        }
-        Long currentUserId = CurrentUserHolder.getCurrentUserId();
-        if (currentUserId == null) {
-            return false;
-        }
-        if (!currentUserId.equals(ssResource.getCreateBy())) {
-            return false;
-        }
-        String ownerType = ssResource.getOwnerType();
-        if (!OwnerType.PERSONAL.equals(ownerType) && !OwnerType.PERSONAL_DEFAULT.equals(ownerType)) {
-            return false;
-        }
-        // 已经是当前用户绑定的默认助理 → 不再展示"设为默认"
-        Long defaultDigEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
-        if (defaultDigEmployeeId != null && defaultDigEmployeeId.equals(ssResource.getResourceId())) {
-            return false;
-        }
-        return true;
-    }
 }

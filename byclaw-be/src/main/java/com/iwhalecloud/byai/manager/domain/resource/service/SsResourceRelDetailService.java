@@ -12,6 +12,8 @@ public interface SsResourceRelDetailService extends IService<SsResourceRelDetail
 
     List<SsResourceRelDetail> findByResourceId(Long resourceId);
 
+    void removeAllByResourceIdOrRelResourceId(Long resourceId);
+
     /**
      * 查询数字员工关联的技能列表（用于 OpenAPI） 返回技能资源基础字段（resourceId、resourceCode、resourceName、resourceDesc、resourceBizType）
      * 及对应子表扩展数据（extDoc/extTool/extToolKit/extDbDatasets）

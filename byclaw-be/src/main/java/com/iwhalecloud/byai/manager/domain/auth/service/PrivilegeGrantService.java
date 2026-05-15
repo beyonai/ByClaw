@@ -46,6 +46,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -218,6 +219,16 @@ public class PrivilegeGrantService {
 
         }
 
+    }
+
+    public void removeAllByGrantObj(String grantObjType, Long grantObjId) {
+        if (StringUtils.isBlank(grantObjType) || grantObjId == null) {
+            return;
+        }
+        LambdaQueryWrapper<PrivilegeGrant> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(PrivilegeGrant::getGrantObjType, grantObjType)
+            .eq(PrivilegeGrant::getGrantObjId, grantObjId);
+        privilegeGrantMapper.delete(wrapper);
     }
 
     private void updatePriviledgeStatus(PrivilegeGrant privilegeGrant, SsResource ssResource) {
