@@ -955,8 +955,13 @@ const EmployeeDetail = ({ loading }) => {
 
         const relResourceInfoList = [];
         const relIds = [];
+        const relTools = [];
         skills.forEach((it) => {
-          relIds.push(`${it.resourceId}`);
+          if (it.relTools) {
+            relTools.push(it.relTools);
+          } else {
+            relIds.push(`${it.resourceId}`);
+          }
 
           if (['VIEW', 'OBJECT'].includes(it.grantResourceType)) {
             const p = {
@@ -983,6 +988,9 @@ const EmployeeDetail = ({ loading }) => {
         set(param, 'relResourceInfoList', relResourceInfoList);
         set(param, 'createType', effectiveDigitalType);
         set(param, 'relIds', relIds);
+        if (relTools.length > 0) {
+          set(param, 'relTools', relTools);
+        }
         set(queryData, 'recommendPrompt.prompt', prompt);
         set(queryData, 'integrationType', integrationType || 'NONE');
         set(param, 'agentDevType', agentDevType.current || 'byai');
