@@ -565,7 +565,8 @@
                b.open_super_helper,
                b.machine_channel,
                b.core_persona_definition,
-               b.advanced_settings
+               b.advanced_settings,
+               b.target_content
         from ss_resource a
              left join ss_res_ext_dig_employee b on a.resource_id = b.resource_id
          where a.resource_id =#{resourceId}
