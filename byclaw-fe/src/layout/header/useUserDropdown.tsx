@@ -31,9 +31,13 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
   const [menuConfig, setMenuConfig] = useState<any[]>(fallbackMenuConfig);
 
   useEffect(() => {
+    if (!userInfo) {
+      return;
+    }
+
     let mounted = true;
 
-    getManagerMenuConfig()
+    getManagerMenuConfig({ refresh: true })
       .then((menus) => {
         if (mounted && menus.length > 0) {
           setMenuConfig(menus);
@@ -48,7 +52,7 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [userInfo?.userId]);
 
   const handleClick = useCallback(
     ({ key }: any) => {
@@ -111,16 +115,19 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
       blockedPaths || []
     ).map((item: any) => {
       const IconComponent = item.icon;
+      let label = item.name;
+
+      if (item.localeId) {
+        label = intl.formatMessage({
+          id: item.localeId,
+          defaultMessage: item.name,
+        });
+      }
 
       return {
         key: item.path,
         icon: IconComponent ? <IconComponent className={styles.menuIcon} /> : null,
-        label: item.localeId
-          ? intl.formatMessage({
-            id: item.localeId,
-            defaultMessage: item.name,
-          })
-          : item.name,
+        label,
       };
     });
 
