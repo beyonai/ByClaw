@@ -15,13 +15,6 @@ if [ "$STANDALONE_MODULES" = "NONE" ]; then
     exit 0
 fi
 
-if [ -z "$GHCR_USER" ] || [ -z "$GHCR_TOKEN" ]; then
-    echo "Error: GHCR_USER and GHCR_TOKEN must be set in .env"
-    exit 1
-fi
-
-echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-
 FAILED=0
 
 pull() {

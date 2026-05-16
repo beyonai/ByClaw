@@ -608,7 +608,7 @@ INSERT INTO byai.byai_tag_relation (relation_id,tag_id,obj_id,obj_type,create_ti
 	 (10000284,6,-2000,'AI_MODEL','2026-04-30 16:19:52.235',NULL,NULL);
 
 -- 初始化沙箱服务表
-INSERT INTO "byai"."sandbox_service_spec" ("service_key", "spec_json", "template_json", "updated_at") VALUES ('openclaw', '{"env": {"TZ": "Asia/Shanghai", "MODEL_ID": "${MODEL_ID}", "NODE_ENV": "production", "USER_CODE": "${user_code}", "MODEL_NAME": "${MODEL_NAME}", "REDIS_HOST": "${REDIS_HOST}", "REDIS_PORT": "${REDIS_PORT}", "MODEL_ALIAS": "${MODEL_ALIAS}", "OPENCLAW_TZ": "Asia/Shanghai", "BEYOND_TOKEN": "${BEYOND_TOKEN}", "NODE_OPTIONS": "--max-old-space-size=4096", "MODEL_API_KEY": "${MODEL_API_KEY}", "DWS_CONFIG_DIR": "/by/.openclaw/.dws", "MODEL_BASE_URL": "${MODEL_BASE_URL}", "REDIS_DATABASE": "${REDIS_DATABASE}", "REDIS_PASSWORD": "${REDIS_PASSWORD}", "REDIS_USERNAME": "${REDIS_USERNAME}", "BAIYING_SESSION": "${BAIYING_SESSION}", "BAIYING_AGENT_AUTH": "${BAIYING_AGENT_AUTH}", "OPENCLAW_STATE_DIR": "/by/.openclaw", "OPENCLAW_GATEWAY_TOKEN": "${OPENCLAW_GATEWAY_TOKEN}", "FILE_STORAGE_MINIO_MOUNT_PATH": "${FILE_STORAGE_MINIO_MOUNT_PATH}"}, "image": "ghcr.io/beyonai/byclaw-middleware/byclaw-openclaw:main", "ports": [{"port": 8080, "protocol": "http"}, {"port": 8081, "protocol": "http"}, {"port": 9222, "protocol": "http"}, {"port": 5901, "protocol": "http"}, {"port": 18789, "protocol": "http"}], "startup": {"entrypoint": ["node", "dist/index.js", "gateway", "--bind=lan", "--port=8080", "--allow-unconfigured", "--verbose"]}, "volumes": [{"key": "base", "scope": "PRIVATE", "subPath": "byclaw-${user_code}/by", "hostPath": "${FILE_STORAGE_MINIO_MOUNT_PATH}", "readOnly": false, "mountPath": "/by"}, {"scope": "PUBLIC", "subPath": "byclaw/resource", "hostPath": "${FILE_STORAGE_MINIO_MOUNT_PATH}", "readOnly": false, "mountPath": "/by/.openclaw/byresources"}], "bootstrap": {"copyTemplate": {"copyIfMissing": true, "targetVolumeKey": "base"}}, "resourceLimits": {"cpu": "2", "memory": "4Gi"}}', '{
+INSERT INTO "byai"."sandbox_service_spec" ("service_key", "spec_json", "template_json", "updated_at") VALUES ('openclaw', '{"env": {"TZ": "Asia/Shanghai", "MODEL_ID": "${MODEL_ID}", "NODE_ENV": "production", "USER_CODE": "${user_code}", "MODEL_NAME": "${MODEL_NAME}", "REDIS_HOST": "${REDIS_HOST}", "REDIS_PORT": "${REDIS_PORT}", "MODEL_ALIAS": "${MODEL_ALIAS}", "OPENCLAW_TZ": "Asia/Shanghai", "BEYOND_TOKEN": "${BEYOND_TOKEN}", "NODE_OPTIONS": "--max-old-space-size=4096", "MODEL_API_KEY": "${MODEL_API_KEY}", "DWS_CONFIG_DIR": "/by/.openclaw/.dws", "MODEL_BASE_URL": "${MODEL_BASE_URL}", "REDIS_DATABASE": "${REDIS_DATABASE}", "REDIS_PASSWORD": "${REDIS_PASSWORD}", "REDIS_USERNAME": "${REDIS_USERNAME}", "BAIYING_SESSION": "${BAIYING_SESSION}", "BAIYING_AGENT_AUTH": "${BAIYING_AGENT_AUTH}", "OPENCLAW_STATE_DIR": "/by/.openclaw", "OPENCLAW_GATEWAY_TOKEN": "${OPENCLAW_GATEWAY_TOKEN}", "FILE_STORAGE_MINIO_MOUNT_PATH": "${FILE_STORAGE_MINIO_MOUNT_PATH}"}, "image": "ghcr.io/beyonai/byclaw/byclaw-openclaw:main", "ports": [{"port": 8080, "protocol": "http"}, {"port": 8081, "protocol": "http"}, {"port": 9222, "protocol": "http"}, {"port": 5901, "protocol": "http"}, {"port": 18789, "protocol": "http"}], "startup": {"entrypoint": ["node", "dist/index.js", "gateway", "--bind=lan", "--port=8080", "--allow-unconfigured", "--verbose"]}, "volumes": [{"key": "base", "scope": "PRIVATE", "subPath": "byclaw-${user_code}/by", "hostPath": "${FILE_STORAGE_MINIO_MOUNT_PATH}", "readOnly": false, "mountPath": "/by"}, {"scope": "PUBLIC", "subPath": "byclaw/resource", "hostPath": "${FILE_STORAGE_MINIO_MOUNT_PATH}", "readOnly": false, "mountPath": "/by/.openclaw/byresources"}], "bootstrap": {"copyTemplate": {"copyIfMissing": true, "targetVolumeKey": "base"}}, "resourceLimits": {"cpu": "2", "memory": "4Gi"}}', '{
     "meta": {
         "lastTouchedAt": "2026-03-27T08:46:51.148Z",
         "lastTouchedVersion": "2026.3.28"
@@ -792,46 +792,46 @@ INSERT INTO "byai"."sandbox_service_spec" ("service_key", "spec_json", "template
 
 -- 初始化趋势图查询语句
 INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(3, 'USER_STATICS', '用户登录和对话统计', 'WITH login_data AS (
-  SELECT 
+  SELECT
     TO_CHAR(login_time, ''YYYY-MM-DD'') AS time,
     COUNT(1) AS loginCount
-  FROM po_login_log 
-  WHERE status = 0 
+  FROM po_login_log
+  WHERE status = 0
   and login_time >= ${start_time}
   and login_time <= ${end_time}
   GROUP BY time
 ),
 chat_data AS (
-  SELECT 
+  SELECT
     TO_CHAR(create_time, ''YYYY-MM-DD'') AS time,
     COUNT(1) AS chatCount
-  FROM byai_session_member 
-  WHERE mem_obj_type = ''USER'' 
+  FROM byai_session_member
+  WHERE mem_obj_type = ''USER''
   and create_time >= ${start_time}
   and create_time <= ${end_time}
   GROUP BY time
 )
-SELECT 
+SELECT
   COALESCE(l.time, c.time) AS time,
   COALESCE(l.loginCount, 0) AS login_count,
   COALESCE(c.chatCount, 0) AS chat_count
 FROM login_data l
-FULL JOIN chat_data c 
+FULL JOIN chat_data c
   ON l.time = c.time
 ORDER BY time ASC', 'time', 'login_count,chat_count', 'start_time,end_time', 1, '2025-11-21 15:52:43.941', '2025-11-21 15:52:43.941', NULL, NULL, NULL, 'DB', 'POSTGRESQL');
 
 INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(7, 'ACTIVITY_TOP_ORG_LEVEL3', '三级组织活跃度top10', 'WITH current_period_data AS (
-    SELECT 
+    SELECT
         org3.org_id,
         org3.org_name,
         COUNT(1) AS total_chat_cnt,
         COUNT(DISTINCT a.mem_obj_id) AS active_user_cnt
     FROM byai_session_member a
-    LEFT JOIN po_users_organization b 
+    LEFT JOIN po_users_organization b
         ON a.mem_obj_id = b.user_id
-    LEFT JOIN po_organization user_org 
+    LEFT JOIN po_organization user_org
         ON b.org_id = user_org.org_id
-    LEFT JOIN po_organization org3 
+    LEFT JOIN po_organization org3
         ON org3.org_level = 2
         AND org3.org_id = substring(
             user_org.path_code,
@@ -845,17 +845,17 @@ INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_
     LIMIT 10
 ),
 previous_period_data AS (
-    SELECT 
+    SELECT
         org3.org_id,
         org3.org_name,
         COUNT(1) AS prev_total_chat_cnt,
         COUNT(DISTINCT a.mem_obj_id) AS prev_active_user_cnt
     FROM byai_session_member a
-    LEFT JOIN po_users_organization b 
+    LEFT JOIN po_users_organization b
         ON a.mem_obj_id = b.user_id
-    LEFT JOIN po_organization user_org 
+    LEFT JOIN po_organization user_org
         ON b.org_id = user_org.org_id
-    LEFT JOIN po_organization org3 
+    LEFT JOIN po_organization org3
         ON org3.org_level = 2
         AND org3.org_id = substring(
             user_org.path_code,
@@ -873,13 +873,13 @@ previous_period_data AS (
       AND org3.org_id IN (SELECT org_id FROM current_period_data)
     GROUP BY org3.org_id, org3.org_name
 )
-SELECT 
+SELECT
     COALESCE(cpd.org_name, ppd.org_name) AS three_level_org_name,
     COALESCE(cpd.total_chat_cnt, 0) AS current_total_chat_cnt,
     COALESCE(cpd.active_user_cnt, 0) AS current_active_user_cnt,
     COALESCE(ppd.prev_total_chat_cnt, 0) AS prev_total_chat_cnt,
     COALESCE(ppd.prev_active_user_cnt, 0) AS prev_active_user_cnt,
-    CASE 
+    CASE
         WHEN COALESCE(ppd.prev_total_chat_cnt, 0) = 0 THEN
             NULL
         ELSE
@@ -889,7 +889,7 @@ SELECT
                 2
             )
     END AS chat_cnt_growth_rate,
-    CASE 
+    CASE
         WHEN COALESCE(ppd.prev_active_user_cnt, 0) = 0 THEN
             NULL
         ELSE
@@ -905,30 +905,30 @@ FULL OUTER JOIN previous_period_data ppd
 ORDER BY cpd.total_chat_cnt DESC NULLS LAST limit 10;', 'three_level_org_name', 'current_total_chat_cnt,active_user_growth_rate,current_total_chat_cnt,chat_cnt_growth_rate', 'start_time,end_time,period_type', 1, '2025-11-24 14:45:55.341', '2025-11-24 14:45:55.341', NULL, NULL, NULL, 'DB', 'POSTGRESQL');
 
 INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(1, 'DIG_EMPLOYEE_SERVICE_TOP', '数字员工服务统计', 'WITH current_data AS (
-    SELECT 
-        CAST(b.resource_id AS VARCHAR) AS resource_id, 
+    SELECT
+        CAST(b.resource_id AS VARCHAR) AS resource_id,
         b.resource_name,
         b.avatar,
         sum(a.request_count) AS curCnt
-    FROM byai_session_member a 
-    INNER JOIN ss_resource b 
+    FROM byai_session_member a
+    INNER JOIN ss_resource b
         ON a.mem_obj_id = b.resource_id
     LEFT JOIN ss_res_ext_dig_employee c
-        ON a.mem_obj_id = c.resource_id 
-    WHERE a.mem_obj_type = ''AGENT'' AND c.integration_type <> ''PAGE''    
+        ON a.mem_obj_id = c.resource_id
+    WHERE a.mem_obj_type = ''AGENT'' AND c.integration_type <> ''PAGE''
       AND a.create_time >= ${start_time}::TIMESTAMP
       AND a.create_time <= ${end_time}::TIMESTAMP
     GROUP BY b.resource_id, b.resource_name, b.avatar
-    
-    UNION ALL 
-    
-    select 
+
+    UNION ALL
+
+    select
         CAST(temp_table.resource_id AS VARCHAR) AS resource_id,
         temp_table.resource_name,
         temp_table.avatar,
         temp_table.curCnt
-    from 
-    (select 
+    from
+    (select
         b.resource_id,
         b.resource_name,
         b.avatar,
@@ -938,27 +938,27 @@ INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_
     inner join ss_resource b
     on btl.object_id = b.resource_id
     LEFT JOIN ss_res_ext_dig_employee c
-        ON btl.object_id = c.resource_id 
-    where btl.object_type = ''DIG_EMPLOYEE'' 
+        ON btl.object_id = c.resource_id
+    where btl.object_type = ''DIG_EMPLOYEE''
     and c.integration_type = ''PAGE''
     AND btl.create_time >= ${start_time}::TIMESTAMP
     AND btl.create_time <= ${end_time}::TIMESTAMP
-      
+
     GROUP BY b.resource_id, b.resource_name, b.avatar, btl.object_id) as temp_table
 ),
 previous_data AS (
-    
-    SELECT 
-        CAST(b.resource_id AS VARCHAR) AS resource_id, 
+
+    SELECT
+        CAST(b.resource_id AS VARCHAR) AS resource_id,
         b.resource_name,
         b.avatar,
         sum(a.request_count) AS preCnt
-    FROM byai_session_member a 
-    INNER JOIN ss_resource b 
+    FROM byai_session_member a
+    INNER JOIN ss_resource b
         ON a.mem_obj_id = b.resource_id
     LEFT JOIN ss_res_ext_dig_employee c
-        ON a.mem_obj_id = c.resource_id 
-    WHERE a.mem_obj_type = ''AGENT'' 
+        ON a.mem_obj_id = c.resource_id
+    WHERE a.mem_obj_type = ''AGENT''
       AND c.integration_type <> ''PAGE''
       AND a.create_time >= CASE ${period_type}
           WHEN ''day'' THEN ${start_time}::TIMESTAMP - INTERVAL ''1 day''
@@ -971,16 +971,16 @@ previous_data AS (
           WHEN ''month'' THEN ${end_time}::TIMESTAMP - INTERVAL ''1 month''
       END
     GROUP BY b.resource_id, b.resource_name, b.avatar
-    
-    UNION ALL 
-    
-    select 
-        CAST(temp_table.resource_id AS VARCHAR) AS resource_id, 
+
+    UNION ALL
+
+    select
+        CAST(temp_table.resource_id AS VARCHAR) AS resource_id,
         temp_table.resource_name,
         temp_table.avatar,
         temp_table.preCnt
-    from 
-    (select 
+    from
+    (select
         b.resource_id,
         b.resource_name,
         b.avatar,
@@ -990,8 +990,8 @@ previous_data AS (
     inner join ss_resource b
     on btl.object_id = b.resource_id
     LEFT JOIN ss_res_ext_dig_employee c
-        ON btl.object_id = c.resource_id 
-    where btl.object_type = ''DIG_EMPLOYEE'' 
+        ON btl.object_id = c.resource_id
+    where btl.object_type = ''DIG_EMPLOYEE''
     and c.integration_type = ''PAGE''
     AND btl.create_time >= CASE ${period_type}
         WHEN ''day'' THEN ${start_time}::TIMESTAMP - INTERVAL ''1 day''
@@ -1005,40 +1005,40 @@ previous_data AS (
     END
     GROUP BY b.resource_id, b.resource_name, b.avatar, btl.object_id) as temp_table
 )
-SELECT 
+SELECT
     COALESCE(cd.resource_id, pd.resource_id) AS resource_id,
     COALESCE(cd.resource_name, pd.resource_name) AS resource_name,
     COALESCE(cd.curCnt, 0) AS current_service_count,
     COALESCE(pd.preCnt, 0) AS previous_service_count,
     COALESCE(cd.avatar, '''') AS avatar,
-    CASE 
-        WHEN COALESCE(pd.preCnt, 0) = 0 THEN 
+    CASE
+        WHEN COALESCE(pd.preCnt, 0) = 0 THEN
             NULL
-        ELSE 
+        ELSE
             ROUND(
-                (COALESCE(cd.curCnt, 0) - COALESCE(pd.preCnt, 0)) * 100.0 / 
-                COALESCE(pd.preCnt, 0), 
+                (COALESCE(cd.curCnt, 0) - COALESCE(pd.preCnt, 0)) * 100.0 /
+                COALESCE(pd.preCnt, 0),
                 2
             )
     END AS growth_rate,
     CASE ${period_type}
         WHEN ''day'' THEN ''日环比''
-        WHEN ''week'' THEN ''周环比'' 
+        WHEN ''week'' THEN ''周环比''
         WHEN ''month'' THEN ''月环比''
     END AS period_type_name
 FROM current_data cd
-FULL OUTER JOIN previous_data pd 
-    ON cd.resource_id = pd.resource_id 
+FULL OUTER JOIN previous_data pd
+    ON cd.resource_id = pd.resource_id
     AND cd.resource_name = pd.resource_name
 ORDER BY current_service_count DESC
 limit 10;', 'resource_id,resource_name,period_type', 'current_service_count,growth_rate', 'start_time,end_time,period_type', 1, '2025-11-20 17:01:32.553', '2025-11-20 17:01:32.553', NULL, NULL, NULL, 'DB', 'POSTGRESQL');
 
-INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(5, 'DIG_EMPLOYEE_QUALITY_DETAIL', '数字员工规范校验质量明细', 'SELECT 
+INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(5, 'DIG_EMPLOYEE_QUALITY_DETAIL', '数字员工规范校验质量明细', 'SELECT
     b.resource_name,
     b.resource_id,
     b.avatar,
-    c.user_name, 
-    a.target_quality AS score, 
+    c.user_name,
+    a.target_quality AS score,
     a.quality_description AS "desc",
     COALESCE(
         (SELECT STRING_AGG(pu.user_name, '','')
@@ -1051,22 +1051,22 @@ INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_
                AND apg.grant_obj_id = a.agent_id
          )),
         ''''
-    ) AS man_user_name 
+    ) AS man_user_name
 FROM byai_monitor_target a
-INNER JOIN ss_resource b 
+INNER JOIN ss_resource b
     ON a.agent_id = b.resource_id
-LEFT JOIN po_users c  
+LEFT JOIN po_users c
     ON b.create_by = c.user_id
 WHERE b.resource_status = 2
 ORDER BY a.target_quality ASC, b.shelf_time DESC', '', 'resource_name,user_name,score,desc,avatar', 'page_size,page_index', 1, '2025-11-24 11:08:01.029', '2025-11-24 11:08:01.029', NULL, NULL, NULL, 'DB', 'POSTGRESQL');
 
 INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(2, 'DIG_EMPLOYEE_SUBSCRIBE_TOP', '数字员工订阅统计', 'WITH current_period_data AS (
-    SELECT 
-        CAST(b.resource_id AS VARCHAR) AS resource_id, 
+    SELECT
+        CAST(b.resource_id AS VARCHAR) AS resource_id,
         b.resource_name,
         b.avatar,
         COUNT(1) AS focus_count
-    FROM au_privilege_grant a 
+    FROM au_privilege_grant a
     JOIN ss_resource b ON a.grant_obj_id = b.resource_id
     WHERE grant_type = ''AVAILABLE_USE''
       AND grant_to_obj_type = ''USER''
@@ -1076,23 +1076,23 @@ INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_
     GROUP BY b.resource_id, b.resource_name, b.avatar
 ),
 previous_period_data AS (
-    SELECT 
-        CAST(b.resource_id AS VARCHAR) AS resource_id, 
+    SELECT
+        CAST(b.resource_id AS VARCHAR) AS resource_id,
         b.resource_name,
         b.avatar,
         COUNT(1) AS previous_focus_count
-    FROM au_privilege_grant a 
+    FROM au_privilege_grant a
     JOIN ss_resource b ON a.grant_obj_id = b.resource_id
     WHERE grant_type = ''AVAILABLE_USE''
       AND grant_to_obj_type = ''USER''
       AND grant_obj_type = ''DIG_EMPLOYEE''
-      AND a.create_date >= 
+      AND a.create_date >=
           CASE ${period_type}
               WHEN ''day'' THEN ${start_time}::TIMESTAMP - INTERVAL ''1 day''
               WHEN ''week'' THEN ${start_time}::TIMESTAMP - INTERVAL ''1 week''
               WHEN ''month'' THEN ${start_time}::TIMESTAMP - INTERVAL ''1 month''
           END
-      AND a.create_date <= 
+      AND a.create_date <=
           CASE ${period_type}
               WHEN ''day'' THEN ${end_time}::TIMESTAMP - INTERVAL ''1 day''
               WHEN ''week'' THEN ${end_time}::TIMESTAMP - INTERVAL ''1 week''
@@ -1100,36 +1100,36 @@ previous_period_data AS (
           END
     GROUP BY b.resource_id, b.resource_name, b.avatar
 )
-SELECT 
-    COALESCE(cpd.resource_id, ppd.resource_id) AS resource_id, 
+SELECT
+    COALESCE(cpd.resource_id, ppd.resource_id) AS resource_id,
     COALESCE(cpd.resource_name, ppd.resource_name) AS resource_name,
     COALESCE(cpd.avatar, '''') AS avatar,
     COALESCE(cpd.focus_count, 0) AS focus_count,
     COALESCE(ppd.previous_focus_count, 0) AS previous_focus_count,
-    CASE 
-        WHEN COALESCE(ppd.previous_focus_count, 0) = 0 THEN 
+    CASE
+        WHEN COALESCE(ppd.previous_focus_count, 0) = 0 THEN
             NULL
-        ELSE 
+        ELSE
             ROUND(
-                (COALESCE(cpd.focus_count, 0) - COALESCE(ppd.previous_focus_count, 0)) * 100.0 / 
-                COALESCE(ppd.previous_focus_count, 0), 
+                (COALESCE(cpd.focus_count, 0) - COALESCE(ppd.previous_focus_count, 0)) * 100.0 /
+                COALESCE(ppd.previous_focus_count, 0),
                 2
             )
     END AS growth_rate,
     CASE ${period_type}
         WHEN ''day'' THEN ''日环比''
-        WHEN ''week'' THEN ''周环比'' 
+        WHEN ''week'' THEN ''周环比''
         WHEN ''month'' THEN ''月环比''
     END AS period_type_name
 FROM current_period_data cpd
-FULL OUTER JOIN previous_period_data ppd 
-    ON cpd.resource_id = ppd.resource_id 
+FULL OUTER JOIN previous_period_data ppd
+    ON cpd.resource_id = ppd.resource_id
     AND cpd.resource_name = ppd.resource_name
 ORDER BY focus_count DESC
 LIMIT 10;', 'resource_id,resource_name,period_type', 'focus_count,growth_rate', 'start_time,end_time,period_type', 1, '2025-11-20 17:34:07.061', '2025-11-20 17:34:07.061', NULL, NULL, NULL, 'DB', 'POSTGRESQL');
 
 INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(6, 'ACTIVITY_TOP_USER', '员工活跃度TOP10', 'WITH current_period_data AS (
-    SELECT 
+    SELECT
         a.mem_obj_id AS user_id,
         b.user_name,
         COUNT(1) AS chat_cnt
@@ -1143,7 +1143,7 @@ INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_
     LIMIT 10
 ),
 previous_period_data AS (
-    SELECT 
+    SELECT
         a.mem_obj_id AS user_id,
         b.user_name,
         COUNT(1) AS previous_chat_cnt
@@ -1160,11 +1160,11 @@ previous_period_data AS (
       END
     GROUP BY a.mem_obj_id, b.user_name
 )
-SELECT 
+SELECT
     COALESCE(cpd.user_name, ppd.user_name) AS user_name,
     COALESCE(cpd.chat_cnt, 0) AS current_chat_cnt,
     COALESCE(ppd.previous_chat_cnt, 0) AS previous_chat_cnt,
-    CASE 
+    CASE
         WHEN COALESCE(ppd.previous_chat_cnt, 0) = 0 THEN
             NULL
         ELSE
@@ -1185,17 +1185,17 @@ ORDER BY cpd.chat_cnt DESC NULLS LAST
 LIMIT 10;', 'user_name', 'current_chat_cnt,growth_rate', 'start_time,end_time,period_type', 1, '2025-11-24 14:39:21.384', '2025-11-24 14:39:21.384', NULL, NULL, NULL, 'DB', 'POSTGRESQL');
 
 INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(8, 'ACTIVITY_TOP_ORG_LEVEL4', '四级组织活跃度top10', 'WITH current_period_data AS (
-    SELECT 
+    SELECT
         org4.org_id,
         org4.org_name,
         COUNT(1) AS total_chat_cnt,
         COUNT(DISTINCT a.mem_obj_id) AS active_user_cnt
     FROM byai_session_member a
-    LEFT JOIN po_users_organization b 
+    LEFT JOIN po_users_organization b
         ON a.mem_obj_id = b.user_id
-    LEFT JOIN po_organization user_org 
+    LEFT JOIN po_organization user_org
         ON b.org_id = user_org.org_id
-    LEFT JOIN po_organization org4 
+    LEFT JOIN po_organization org4
         ON org4.org_level = 3
         AND org4.org_id = substring(
             user_org.path_code,
@@ -1209,17 +1209,17 @@ INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_
     LIMIT 10
 ),
 previous_period_data AS (
-    SELECT 
+    SELECT
         org4.org_id,
         org4.org_name,
         COUNT(1) AS prev_total_chat_cnt,
         COUNT(DISTINCT a.mem_obj_id) AS prev_active_user_cnt
     FROM byai_session_member a
-    LEFT JOIN po_users_organization b 
+    LEFT JOIN po_users_organization b
         ON a.mem_obj_id = b.user_id
-    LEFT JOIN po_organization user_org 
+    LEFT JOIN po_organization user_org
         ON b.org_id = user_org.org_id
-    LEFT JOIN po_organization org4 
+    LEFT JOIN po_organization org4
         ON org4.org_level = 3
         AND org4.org_id = substring(
             user_org.path_code,
@@ -1237,14 +1237,14 @@ previous_period_data AS (
       AND org4.org_id IN (SELECT org_id FROM current_period_data)
     GROUP BY org4.org_id, org4.org_name
 )
-SELECT 
+SELECT
     COALESCE(cpd.org_id, ppd.org_id) AS four_level_org_id,
     COALESCE(cpd.org_name, ppd.org_name) AS four_level_org_name,
     COALESCE(cpd.total_chat_cnt, 0) AS current_total_chat_cnt,
     COALESCE(cpd.active_user_cnt, 0) AS current_active_user_cnt,
     COALESCE(ppd.prev_total_chat_cnt, 0) AS prev_total_chat_cnt,
     COALESCE(ppd.prev_active_user_cnt, 0) AS prev_active_user_cnt,
-    CASE 
+    CASE
         WHEN COALESCE(ppd.prev_total_chat_cnt, 0) = 0 THEN
             NULL
         ELSE
@@ -1254,7 +1254,7 @@ SELECT
                 2
             )
     END AS chat_cnt_growth_rate,
-    CASE 
+    CASE
         WHEN COALESCE(ppd.prev_active_user_cnt, 0) = 0 THEN
             NULL
         ELSE
@@ -1273,56 +1273,56 @@ FULL OUTER JOIN previous_period_data ppd
     ON cpd.org_id = ppd.org_id
 ORDER BY cpd.total_chat_cnt DESC NULLS LAST;', 'four_level_org_name', 'current_total_chat_cnt,active_user_growth_rate,current_total_chat_cnt,chat_cnt_growth_rate', 'start_time,end_time,period_type', 1, '2025-11-24 14:46:20.214', '2025-11-24 14:46:20.214', NULL, NULL, NULL, 'DB', 'POSTGRESQL');
 
-INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(10, 'DIG_EMPLOYEE_QUALITY', '数字员工质量统计', 'SELECT 
+INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(10, 'DIG_EMPLOYEE_QUALITY', '数字员工质量统计', 'SELECT
     CAST(b.resource_id AS VARCHAR) AS resource_id,
     b.resource_name,
     b.avatar,
     a.target_quality
 FROM byai_monitor_target a
 INNER JOIN ss_resource b
-    ON a.agent_id = b.resource_id 
+    ON a.agent_id = b.resource_id
 ORDER BY a.target_quality DESC
 LIMIT 10;', 'resource_id,resource_name,avatar', 'target_quality', '', 1, '2025-11-24 20:31:48.167', '2025-11-24 20:31:48.167', NULL, NULL, NULL, 'DB', 'POSTGRESQL');
 
 INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(11, 'SINGLE_DIG_EMPLOYEE_SERVICE', '单个数字员工服务数据统计', 'SELECT
   COALESCE(SUM(request_count), 0) AS service_count,
   COALESCE(COUNT(DISTINCT creator_id), 0) AS service_people_count,
-  CASE 
+  CASE
     WHEN COALESCE(COUNT(DISTINCT creator_id), 0) = 0 THEN 0.00
     ELSE ROUND(SUM(request_count) / COUNT(DISTINCT creator_id), 2)
   END AS avg_service_count
 FROM byai_session_member
-WHERE mem_obj_type = ''AGENT'' AND mem_obj_id = ${agent_id} 
+WHERE mem_obj_type = ''AGENT'' AND mem_obj_id = ${agent_id}
 and create_time >= ${start_time} and create_time <=${end_time};
 ', NULL, 'service_count,service_people_count,avg_service_count', 'agent_id', 1, '2025-12-05 10:06:54.933', '2025-12-05 10:06:54.933', NULL, NULL, NULL, 'DB', 'POSTGRESQL');
 
 INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(9, 'INDEX_TAB', 'tab卡片指标，数字员工已上架总数，数字员工活跃度，上线用户和数字员工服务总次数', 'WITH current_period_data AS (
-    SELECT 
+    SELECT
         COALESCE(shelf.shelf_agent, 0) AS current_shelf_agent,
         COALESCE(login.login_user, 0) AS current_login_user,
         COALESCE(service.service_cnt, 0) AS current_service_cnt,
         COALESCE(active.active_agent, 0) AS current_active_agent,
         COALESCE(total_shelf_agent.shelf_agent, 0) AS cur_total_shelf_agent,
-        CASE 
+        CASE
             WHEN total_shelf_agent.shelf_agent = 0 THEN 0.00
             ELSE ROUND(active.active_agent * 100.0 / total_shelf_agent.shelf_agent, 2)
         END AS current_agent_activity_rate
     FROM (
         SELECT COUNT(1) AS shelf_agent
-        FROM ss_resource 
+        FROM ss_resource
         WHERE resource_status = 2
           AND shelf_time >= ${start_time}::TIMESTAMP
           AND shelf_time <= ${end_time}::TIMESTAMP
     ) shelf,
     (
         SELECT COUNT(DISTINCT user_id) AS login_user
-        FROM po_login_log 
+        FROM po_login_log
         WHERE login_time >= ${start_time}::TIMESTAMP
           AND login_time <= ${end_time}::TIMESTAMP
     ) login,
     (
         SELECT COUNT(1) AS shelf_agent
-        FROM ss_resource 
+        FROM ss_resource
         WHERE resource_status = 2
           AND resource_biz_type = ''DIG_EMPLOYEE''
           AND shelf_time <= ${end_time}::TIMESTAMP
@@ -1332,21 +1332,21 @@ INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_
             FROM (
                 SELECT sum(request_count) AS total_num
                 FROM byai_session_member a
-                LEFT JOIN ss_res_ext_dig_employee b 
-                ON a.mem_obj_id = b.resource_id 
+                LEFT JOIN ss_res_ext_dig_employee b
+                ON a.mem_obj_id = b.resource_id
                 WHERE a.mem_obj_type = ''AGENT'' AND b.integration_type <> ''PAGE''
                 AND create_time >= ${start_time}::TIMESTAMP
                 AND create_time <= ${end_time}::TIMESTAMP
-            
-                UNION ALL 
+
+                UNION ALL
                 SELECT sum(1) AS total_num
-                FROM byai_track_log btl 
-                left join ss_res_ext_dig_employee srede 
+                FROM byai_track_log btl
+                left join ss_res_ext_dig_employee srede
                 on btl.object_id = srede.resource_id
                 WHERE object_type = ''DIG_EMPLOYEE''
                 and srede.integration_type = ''PAGE''
                 AND create_time >= ${start_time}::TIMESTAMP
-                AND create_time <= ${end_time}::TIMESTAMP 
+                AND create_time <= ${end_time}::TIMESTAMP
             ) AS temp_table
     ) service,
     (
@@ -1354,43 +1354,43 @@ INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_
         FROM (
             SELECT bsm.mem_obj_id AS agent_id
             FROM ss_resource sr
-            JOIN byai_session_member bsm 
+            JOIN byai_session_member bsm
                 ON sr.resource_id = bsm.mem_obj_id
-            LEFT JOIN ss_res_ext_dig_employee b 
-                ON bsm.mem_obj_id = b.resource_id 
+            LEFT JOIN ss_res_ext_dig_employee b
+                ON bsm.mem_obj_id = b.resource_id
             WHERE sr.resource_status = 2
               AND bsm.mem_obj_type = ''AGENT''
-              AND b.integration_type <> ''PAGE''   
+              AND b.integration_type <> ''PAGE''
               AND bsm.create_time >= ${start_time}::TIMESTAMP
               AND bsm.create_time <= ${end_time}::TIMESTAMP
-              
-            UNION ALL 
-            
+
+            UNION ALL
+
             SELECT btl.object_id AS agent_id
             FROM byai_track_log btl
-            left join ss_res_ext_dig_employee srede 
+            left join ss_res_ext_dig_employee srede
                 on btl.object_id = srede.resource_id
             WHERE btl.object_type = ''DIG_EMPLOYEE''
                 and srede.integration_type = ''PAGE''
               AND btl.create_time >= ${start_time}::TIMESTAMP
               AND btl.create_time <= ${end_time}::TIMESTAMP
-        ) AS union_agent_ids 
+        ) AS union_agent_ids
     ) active
 ),
 previous_period_data AS (
-    SELECT 
+    SELECT
         COALESCE(shelf.shelf_agent, 0) AS prev_shelf_agent,
         COALESCE(login.login_user, 0) AS prev_login_user,
         COALESCE(service.service_cnt, 0) AS prev_service_cnt,
         COALESCE(active.active_agent, 0) AS prev_active_agent,
         COALESCE(total_shelf_agent.shelf_agent, 0) AS pre_total_shelf_agent,
-        CASE 
+        CASE
             WHEN total_shelf_agent.shelf_agent = 0 THEN 0.00
             ELSE ROUND(active.active_agent * 100.0 / total_shelf_agent.shelf_agent, 2)
         END AS prev_agent_activity_rate
     FROM (
         SELECT COUNT(1) AS shelf_agent
-        FROM ss_resource 
+        FROM ss_resource
         WHERE resource_status = 2
           AND shelf_time >= CASE ${period_type}
               WHEN ''week'' THEN ${start_time}::TIMESTAMP - INTERVAL ''1 week''
@@ -1403,7 +1403,7 @@ previous_period_data AS (
     ) shelf,
     (
         SELECT COUNT(DISTINCT user_id) AS login_user
-        FROM po_login_log 
+        FROM po_login_log
         WHERE login_time >= CASE ${period_type}
               WHEN ''week'' THEN ${start_time}::TIMESTAMP - INTERVAL ''1 week''
               WHEN ''month'' THEN ${start_time}::TIMESTAMP - INTERVAL ''1 month''
@@ -1415,7 +1415,7 @@ previous_period_data AS (
     ) login,
     (
         SELECT COUNT(1) AS shelf_agent
-        FROM ss_resource 
+        FROM ss_resource
         WHERE resource_status = 2
           AND resource_biz_type = ''DIG_EMPLOYEE''
           AND shelf_time <= CASE ${period_type}
@@ -1428,8 +1428,8 @@ previous_period_data AS (
         FROM (
             SELECT sum(request_count) AS total_num
             FROM byai_session_member a
-            LEFT JOIN ss_res_ext_dig_employee b 
-            ON a.mem_obj_id = b.resource_id 
+            LEFT JOIN ss_res_ext_dig_employee b
+            ON a.mem_obj_id = b.resource_id
             WHERE a.mem_obj_type = ''AGENT'' AND b.integration_type <> ''PAGE''
             AND create_time >= CASE ${period_type}
                 WHEN ''week'' THEN ${start_time}::TIMESTAMP - INTERVAL ''1 week''
@@ -1439,10 +1439,10 @@ previous_period_data AS (
                 WHEN ''week'' THEN ${end_time}::TIMESTAMP - INTERVAL ''1 week''
                 WHEN ''month'' THEN ${end_time}::TIMESTAMP - INTERVAL ''1 month''
             END
-            UNION ALL 
+            UNION ALL
             SELECT sum(1) AS total_num
-            FROM byai_track_log btl 
-            left join ss_res_ext_dig_employee srede 
+            FROM byai_track_log btl
+            left join ss_res_ext_dig_employee srede
             on btl.object_id = srede.resource_id
             WHERE object_type = ''DIG_EMPLOYEE''
             and srede.integration_type = ''PAGE''
@@ -1461,13 +1461,13 @@ previous_period_data AS (
         FROM (
             SELECT bsm.mem_obj_id AS agent_id
             FROM ss_resource sr
-            JOIN byai_session_member bsm 
+            JOIN byai_session_member bsm
                 ON sr.resource_id = bsm.mem_obj_id
-            LEFT JOIN ss_res_ext_dig_employee b 
-            ON bsm.mem_obj_id = b.resource_id 
+            LEFT JOIN ss_res_ext_dig_employee b
+            ON bsm.mem_obj_id = b.resource_id
             WHERE sr.resource_status = 2
               AND bsm.mem_obj_type = ''AGENT''
-              AND b.integration_type <> ''PAGE''   
+              AND b.integration_type <> ''PAGE''
               AND bsm.create_time >= CASE ${period_type}
                   WHEN ''week'' THEN ${start_time}::TIMESTAMP - INTERVAL ''1 week''
                   WHEN ''month'' THEN ${start_time}::TIMESTAMP - INTERVAL ''1 month''
@@ -1476,10 +1476,10 @@ previous_period_data AS (
                   WHEN ''week'' THEN ${end_time}::TIMESTAMP - INTERVAL ''1 week''
                   WHEN ''month'' THEN ${end_time}::TIMESTAMP - INTERVAL ''1 month''
               END
-            UNION ALL 
+            UNION ALL
             SELECT btl.object_id AS agent_id
             FROM byai_track_log btl
-            left join ss_res_ext_dig_employee srede 
+            left join ss_res_ext_dig_employee srede
             on btl.object_id = srede.resource_id
             WHERE btl.object_type = ''DIG_EMPLOYEE''
             and srede.integration_type = ''PAGE''
@@ -1494,7 +1494,7 @@ previous_period_data AS (
         ) AS union_agent_ids
     ) active
 )
-SELECT 
+SELECT
     cpd.current_shelf_agent,
     cpd.current_login_user,
     cpd.current_service_cnt,
@@ -1507,15 +1507,15 @@ SELECT
     ppd.prev_service_cnt,
     cpd.current_agent_activity_rate,
     ppd.prev_agent_activity_rate,
-    CASE 
+    CASE
         WHEN ppd.prev_shelf_agent = 0 THEN NULL
         ELSE ROUND((cpd.current_shelf_agent - ppd.prev_shelf_agent) * 100.0 / ppd.prev_shelf_agent, 2)
     END AS shelf_agent_growth_rate,
-    CASE 
+    CASE
         WHEN ppd.prev_login_user = 0 THEN NULL
         ELSE ROUND((cpd.current_login_user - ppd.prev_login_user) * 100.0 / ppd.prev_login_user, 2)
     END AS login_user_growth_rate,
-    CASE 
+    CASE
         WHEN ppd.prev_service_cnt = 0 THEN NULL
         ELSE ROUND((cpd.current_service_cnt - ppd.prev_service_cnt) * 100.0 / ppd.prev_service_cnt, 2)
     END AS service_cnt_growth_rate,
@@ -1528,11 +1528,11 @@ FROM current_period_data cpd
 CROSS JOIN previous_period_data ppd;', NULL, 'current_shelf_agent,shelf_agent_growth_rate,current_agent_activity_rate,activity_rate_growth,current_login_user,login_user_growth_rate,current_service_cnt,service_cnt_growth_rate', 'start_time,end_time,period_type', 1, '2025-11-24 18:20:16.252', '2025-11-24 18:20:16.252', NULL, NULL, NULL, 'DB', 'POSTGRESQL');
 
 INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(12, 'SINGLE_DIG_EMPLOYEE_SERVICE_PERIOD', '单个数字员工服务数据周期趋势统计', '
-WITH 
+WITH
 date_series AS (
   SELECT generate_series(
-           ${start_time}::date, 
-           ${end_time}::date, 
+           ${start_time}::date,
+           ${end_time}::date,
            ''1 day''::interval
          )::date AS time
 ),
@@ -1541,13 +1541,13 @@ service_data AS (
     TO_CHAR(create_time, ''YYYY-MM-DD'') AS time,
     COALESCE(SUM(request_count), 0) AS service_count,
     COALESCE(COUNT(DISTINCT creator_id), 0) AS service_people_count,
-    CASE 
+    CASE
       WHEN COALESCE(COUNT(DISTINCT creator_id), 0) = 0 THEN 0.00
       ELSE ROUND(SUM(request_count) / COUNT(DISTINCT creator_id), 2)
     END AS avg_service_count
   FROM byai_session_member
-  WHERE 
-    mem_obj_type = ''AGENT'' 
+  WHERE
+    mem_obj_type = ''AGENT''
     AND mem_obj_id = ${agent_id}
     AND create_time >= ${start_time}
     AND create_time <= ${end_time}
@@ -1559,11 +1559,11 @@ SELECT
   COALESCE(sd.service_people_count, 0) AS service_people_count,
   COALESCE(sd.avg_service_count, 0.00) AS avg_service_count
 FROM date_series ds
-LEFT JOIN service_data sd 
+LEFT JOIN service_data sd
   ON TO_CHAR(ds.time, ''YYYY-MM-DD'') = sd.time
 ORDER BY ds.time ASC;', NULL, NULL, 'start_time,end_time,period_type,agent_id', 1, '2025-12-05 10:51:59.826', '2025-12-05 10:51:59.826', NULL, NULL, NULL, 'DB', 'POSTGRESQL');
 
-INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(4, 'DIG_EMPLOYEE_TREND_STATISTICS', '数字员工趋势统计', 'WITH 
+INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(4, 'DIG_EMPLOYEE_TREND_STATISTICS', '数字员工趋势统计', 'WITH
 date_series AS (
     SELECT generate_series(
         ${start_time}::DATE,
@@ -1573,91 +1573,91 @@ date_series AS (
 ),
 total_agent AS (
     SELECT COUNT(DISTINCT b.resource_id) AS total_cnt
-    FROM ss_resource b 
-    WHERE b.resource_status = 2 
+    FROM ss_resource b
+    WHERE b.resource_status = 2
 	  AND b.resource_biz_type = ''DIG_EMPLOYEE''
       AND b.shelf_time <= ${end_time}::TIMESTAMP
 ),
 agent_active_union AS (
-    SELECT 
+    SELECT
         count(distinct a.mem_obj_id) AS active_agent,
         TO_CHAR(a.create_time, ''YYYY-MM-DD'') AS stat_date
-    FROM byai_session_member a 
-    LEFT JOIN ss_res_ext_dig_employee b 
+    FROM byai_session_member a
+    LEFT JOIN ss_res_ext_dig_employee b
     ON a.mem_obj_id = b.resource_id
     WHERE mem_obj_type = ''AGENT'' and b.integration_type <> ''PAGE''
       AND a.create_time >= ${start_time}::TIMESTAMP
       AND a.create_time <= ${end_time}::TIMESTAMP
     GROUP BY TO_CHAR(create_time, ''YYYY-MM-DD'')
-    
-    UNION ALL  
-    
-    SELECT 
+
+    UNION ALL
+
+    SELECT
     	count(distinct a.object_id) as active_agent,
     	TO_CHAR(a.create_time, ''YYYY-MM-DD'') AS stat_date
     FROM byai_track_log a
-    LEFT JOIN ss_res_ext_dig_employee b 
-    ON a.object_id = b.resource_id 
+    LEFT JOIN ss_res_ext_dig_employee b
+    ON a.object_id = b.resource_id
     WHERE a.object_type = ''DIG_EMPLOYEE'' and b.integration_type = ''PAGE''
       AND a.create_time >= ${start_time}::TIMESTAMP
       AND a.create_time <= ${end_time}::TIMESTAMP
     GROUP BY TO_CHAR(create_time, ''YYYY-MM-DD'')
 ),
 service_agent_union AS (
-    SELECT 
+    SELECT
         SUM(a.request_count) AS serviceCnt,
         TO_CHAR(a.create_time, ''YYYY-MM-DD'') AS stat_date
-    FROM byai_session_member a 
-    LEFT JOIN ss_res_ext_dig_employee b 
+    FROM byai_session_member a
+    LEFT JOIN ss_res_ext_dig_employee b
     ON a.mem_obj_id = b.resource_id
     WHERE mem_obj_type = ''AGENT'' and b.integration_type <> ''PAGE''
       AND a.create_time >= ${start_time}::TIMESTAMP
       AND a.create_time <= ${end_time}::TIMESTAMP
     GROUP BY TO_CHAR(create_time, ''YYYY-MM-DD'')
-    
-    UNION ALL  
-    
-    SELECT 
+
+    UNION ALL
+
+    SELECT
     	count(a.object_id) as serviceCnt,
     	TO_CHAR(a.create_time, ''YYYY-MM-DD'') AS stat_date
     FROM byai_track_log a
-    LEFT JOIN ss_res_ext_dig_employee b 
-    ON a.object_id = b.resource_id 
+    LEFT JOIN ss_res_ext_dig_employee b
+    ON a.object_id = b.resource_id
     WHERE a.object_type = ''DIG_EMPLOYEE'' and b.integration_type = ''PAGE''
       AND a.create_time >= ${start_time}::TIMESTAMP
       AND a.create_time <= ${end_time}::TIMESTAMP
     GROUP BY TO_CHAR(create_time, ''YYYY-MM-DD'')
 ),
 total_service_agent AS (
-    SELECT 
+    SELECT
         stat_date,
-        SUM(serviceCnt) AS serviceCnt  
+        SUM(serviceCnt) AS serviceCnt
     FROM service_agent_union
-    GROUP BY stat_date  
-    ORDER BY stat_date ASC  
+    GROUP BY stat_date
+    ORDER BY stat_date ASC
 ),
 total_active_agent AS (
-    SELECT 
+    SELECT
         stat_date,
         SUM(active_agent) AS active_agent
     FROM agent_active_union
-    GROUP BY stat_date  
-    ORDER BY stat_date ASC  
+    GROUP BY stat_date
+    ORDER BY stat_date ASC
 )
-SELECT 
+SELECT
     TO_CHAR(ds.stat_date, ''YYYY-MM-DD'') AS stat_date,
 	COALESCE(tsa.serviceCnt, 0) AS chat_cnt,
 	COALESCE(ta.total_cnt, 0) AS total_agent_cnt,
     ROUND(
-        COALESCE(taa.active_agent::NUMERIC, 0) / NULLIF(ta.total_cnt::NUMERIC, 0) * 100, 
+        COALESCE(taa.active_agent::NUMERIC, 0) / NULLIF(ta.total_cnt::NUMERIC, 0) * 100,
         2
     ) AS activity
 FROM date_series ds
 LEFT JOIN total_service_agent tsa
 	ON TO_CHAR(ds.stat_date, ''YYYY-MM-DD'') = tsa.stat_date
-LEFT JOIN total_active_agent taa 
-	ON TO_CHAR(ds.stat_date, ''YYYY-MM-DD'') = taa.stat_date  
-CROSS JOIN total_agent ta  
+LEFT JOIN total_active_agent taa
+	ON TO_CHAR(ds.stat_date, ''YYYY-MM-DD'') = taa.stat_date
+CROSS JOIN total_agent ta
 ORDER BY ds.stat_date ASC;', 'stat_date', 'chat_cnt,activity', 'start_time,end_time', 1, '2025-11-24 10:26:30.112', '2025-11-24 10:26:30.112', NULL, NULL, NULL, 'DB', 'POSTGRESQL');
 
 INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(21, 'DATASET_DIG_EMPLOYEE_TOP5_CATALOG', '数据资产指标-数字员工使用前5', 'WITH current_data AS (
@@ -1803,7 +1803,7 @@ INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_
 FROM ss_resource
 WHERE resource_biz_type IN (''KG_DOC'',''KG_DB'',''KG_QA'',''VIEW'',''OBJECT'')  AND resource_status not in(1,6)
   AND (${catalog_id} < 0 OR catalog_id = ${catalog_id});', NULL, NULL, 'catalog_id', 1, '2026-01-23 09:20:03.825', '2026-01-23 09:20:03.825', NULL, NULL, NULL, 'DB', 'POSTGRESQL');
-  
+
 INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(23, 'DATASET_SKILLS', '数据资产指标-技能数量统计', 'SELECT
     COUNT(CASE WHEN type_group = ''AGENT''     THEN 1 END) AS AGENT,
     COUNT(CASE WHEN type_group = ''TOOLKIT''  THEN 1 END) AS TOOLKIT,
@@ -1822,7 +1822,7 @@ FROM (
       AND parent_resource_id < 0
       AND (${catalog_id} < 0 OR catalog_id = ${catalog_id})
  AND system_code  = ${system_code}) AS temp;', NULL, NULL, 'catalog_id,system_code', 1, '2026-01-23 09:27:05.181', '2026-01-23 09:27:05.181', NULL, NULL, NULL, 'DB', 'POSTGRESQL');
- 
+
 INSERT INTO query_config (query_id, query_code, "name", sql_template, dimension_fields, measure_fields, condition_fields, status, created_time, updated_time, created_by, description, query_type, query_method, db_type) VALUES(24, 'DATASET_DIG_EMPLOYEE', '数据资产指标-数字员工各类型数量统计', 'SELECT
     COUNT(CASE WHEN b.create_type = ''FROM_MANUALLY'' AND b.agent_type = ''001'' THEN 1 END) AS "001",
     COUNT(CASE WHEN b.create_type = ''FROM_MANUALLY'' AND b.agent_type = ''005'' THEN 1 END) AS "005",
@@ -1990,9 +1990,9 @@ ${description}
 
 
 delete from byai.byai_system_config_list where param_group_code in('TEMPLATE_PERSONAL_ASSISTANT');
-INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'TEMPLATE_PERSONAL_ASSISTANT', '数字员工模板设置-个人助手', '工作规范', 'agent', '', '工作规范', 1);
-INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'TEMPLATE_PERSONAL_ASSISTANT', '数字员工模板设置-个人助手', '人格定义', 'soul', '', '人格定义', 2);
-INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'TEMPLATE_PERSONAL_ASSISTANT', '数字员工模板设置-个人助手', '工具规范', 'tools', '', '工具规范', 3);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'TEMPLATE_PERSONAL_ASSISTANT', '数字员工模板设置-个人助手', '工作规范', 'agent', '{"priorityPrompt": "", "sourceFields": [{ "prologue.descText": "生成 Greeting" }, { "resourceDesc": "生成 Capabilities overview" }, { "coreCompetencies": "生成 Core competencies" }, { "corePersonaDefinition": "生成百应业务拓展摘要" }, { "relResourceInfoList": "生成 Associated resources" }, { "relResourceList": "relResourceInfoList 缺失时作为关联资源兜底" }]}', '工作规范', 1);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'TEMPLATE_PERSONAL_ASSISTANT', '数字员工模板设置-个人助手', '人格定义', 'soul', '{"priorityPrompt":"","sourceFields":[{"prologue.descText":"生成 Greeting"},{"resourceDesc":"生成 Capabilities overview"},{"coreCompetencies":"生成 Core competencies"},{"corePersonaDefinition":"生成百应业务拓展摘要"},{"relResourceInfoList":"生成 Associated resources"},{"relResourceList":"relResourceInfoList 缺失时作为关联资源兜底"}]}', '人格定义', 2);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'TEMPLATE_PERSONAL_ASSISTANT', '数字员工模板设置-个人助手', '工具规范', 'tools', '{"priorityPrompt":"","sourceFields":[{"resourceId":"生成 DOC 类资源调用所需 agent_id 兜底"},{"relResourceInfoList":"生成 Available resources"},{"relResourceList":"relResourceInfoList 缺失时作为资源列表兜底"},{"resourceName":"生成资源展示名称"},{"resourceBizType":"生成资源类型，优先于 resourceType"},{"resourceType":"生成资源类型兜底"},{"resourceCode":"生成资源 code"},{"resourceDesc":"生成资源描述"}]}', '工具规范', 3);
 INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'TEMPLATE_PERSONAL_ASSISTANT', '数字员工模板设置-个人助手', '记忆规范', 'memory', '', '记忆规范', 4);
 
 delete from byai.byai_system_config_list where param_group_code in('TEMPLATE_GENERAL_QUESTIONS_ANSWERS');

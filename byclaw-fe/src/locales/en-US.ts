@@ -1079,6 +1079,13 @@ export default {
   'resourceTabs.objectCenter': 'Object Center',
   'resourceTabs.viewCenter': 'View Center',
   'resourceTabs.toolCenter': 'Tool Center',
+  'resourceTabs.skillUpload.uploadButton': 'Upload Skill',
+  'resourceTabs.skillUpload.onlyZip': 'Only .zip format files are supported',
+  'resourceTabs.skillUpload.noUserCode': 'Unable to get user code, please login again',
+  'resourceTabs.skillUpload.success': 'Skill uploaded successfully',
+  'resourceTabs.skillUpload.failed': 'Skill upload failed',
+  'resource.skillDownload.noSkillPath': 'Skill path not found',
+  'resource.skillDownload.failed': 'Skill download failed',
 
   // Skill Detail
   'skillDetail.type': 'Type',

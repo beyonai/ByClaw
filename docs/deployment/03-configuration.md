@@ -6,14 +6,7 @@
 
 项目根目录下的 `.env` 文件是所有配置的集中管理文件。您可以参考 `.env.example` 文件来创建自己的配置。
 
-## 1. GHCR 认证配置（必需）
-
-| 变量名 | 说明 | 示例 |
-|--------|------|------|
-| `GHCR_USER` | 您的 GitHub 用户名 | `john_doe` |
-| `GHCR_TOKEN` | GitHub Personal Access Token | `ghp_xxxxxxxxxxxx` |
-
-## 2. 域名配置
+## 1. 域名配置
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
@@ -21,7 +14,7 @@
 | `QA_DOMAINNAME` | QA 服务域名 | `byclaw-qa-manager` |
 | `DATACLOUD_DOMAINNAME` | DataCloud 域名 | `byclaw-datacloud` |
 
-## 3. 服务端口配置
+## 2. 服务端口配置
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
@@ -31,7 +24,7 @@
 | `BYCLAW_QA_PORT` | QA 服务端口 | `8000` |
 | `DATACLOUD_PORT` | DataCloud 端口 | `8087` |
 
-## 4. 数据库配置（OpenGauss）
+## 3. 数据库配置（OpenGauss）
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
@@ -43,7 +36,7 @@
 | `DB_USER` | 数据库用户名 | `gaussdb` |
 | `DB_PASS` | 数据库密码 | `Admin@123` |
 
-## 5. Redis 配置
+## 4. Redis 配置
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
@@ -53,7 +46,7 @@
 | `REDIS_PASSWORD` | Redis 密码 | `admin123` |
 | `REDIS_DATABASE` | Redis 数据库号 | `0` |
 
-## 6. MinIO 对象存储配置
+## 5. MinIO 对象存储配置
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
@@ -72,7 +65,7 @@
 > 详细步骤请参考 [前置条件 - 数据目录准备](./01-prerequisites.md#5-⚠️-重要数据目录准备必须)。
 > 如果不需要挂载功能，可以设置 `FILE_STORAGE_MINIO_MOUNT_ENABLED=false`。
 
-## 7. OpenSandbox 配置
+## 6. OpenSandbox 配置
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
@@ -84,7 +77,7 @@
 | `BYCLAW_SANDBOX_STORAGE_MODE` | 沙箱存储模式 | `minio` |
 | `BYCLAW_SANDBOX_HEARTBEAT_TIMEOUT` | 心跳超时 | `PT5M` |
 
-## 8. QA 模块配置
+## 7. QA 模块配置
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
@@ -93,7 +86,7 @@
 | `BYCLAW_QA_KB_MINIO_BUCKET` | 知识库 Bucket | `knowledge-base` |
 | `BYCLAW_QA_KB_MINIO_MARKDOWN_BUCKET` | Markdown 知识库 Bucket | `knowledge-base-markdown` |
 
-## 9. DataCloud 配置
+## 8. DataCloud 配置
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
@@ -108,10 +101,6 @@
 对于快速开始，您只需要配置以下必需项：
 
 ```bash
-# GHCR
-GHCR_USER=your_github_username
-GHCR_TOKEN=your_ghcr_personal_access_token
-
 # 数据库密码（建议修改）
 DB_PASS=your_secure_password
 

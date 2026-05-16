@@ -114,7 +114,7 @@ cp .env.example .env
 #    REDIS_PASSWORD、MID_FTP_* 等配置。
 #    如果中间件部署在远程机器，请替换为对应 IP。
 
-# 3. 拉取中间件镜像（首次部署需要，需要 GHCR_USER/GHCR_TOKEN 配置在 .env 中）
+# 3. 拉取中间件镜像（首次部署需要）
 (cd deploy/middleware && sh pull.sh)
 
 # 4. 启动中间件（Redis、MinIO、OpenGauss、Sandbox）

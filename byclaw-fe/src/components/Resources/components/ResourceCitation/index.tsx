@@ -12,7 +12,12 @@ import {
   queryDigEmployeeRelResourceAuth,
   queryResourceMembers,
 } from '@/pages/manager/service/resources';
-import { qryByClawFileByUserCode, qrySkillListByUserCode, readFile } from '@/pages/manager/service/resources';
+import {
+  qryByClawFileByUserCode,
+  qrySkillListByUserCode,
+  readFile,
+  downloadSkillZip,
+} from '@/pages/manager/service/resources';
 import useGlobal from '@/hooks/useGlobal';
 
 const Draggable = withDrag(DragType.tool);
@@ -33,6 +38,7 @@ interface IResourceItem {
   };
   objectKey?: string;
   isFromResourceModule?: boolean;
+  skillPath?: string;
 }
 
 interface Props {
@@ -88,6 +94,7 @@ const ResourceList = (props: Props) => {
   const [selectedRelatedObject, setSelectedRelatedObject] = useState<any>(null);
   const [relatedObjectDetailMap, setRelatedObjectDetailMap] = useState<Record<string, any>>({});
   const [relatedObjectLoading, setRelatedObjectLoading] = useState(false);
+  const [downloadingSkill, setDownloadingSkill] = useState<string | null>(null);
 
   const intl = useIntl();
   const { userInfo } = useSelector((state: any) => state.user);
@@ -391,6 +398,52 @@ const ResourceList = (props: Props) => {
   const handleMouseLeave = () => {
     setHoveredCard(null);
   };
+
+  // 处理技能下载（带防抖）
+  const handleDownloadSkill = useMemo(() => {
+    const download = async (item: IResourceItem) => {
+      const skillPath = item.skillPath || item.resourceId || item.objectKey;
+      if (!skillPath) {
+        message.error(intl.formatMessage({ id: 'resource.skillDownload.noSkillPath' }));
+        return;
+      }
+
+      setDownloadingSkill(skillPath);
+
+      try {
+        const params: { skillPath: string; userCode?: string } = { skillPath };
+        if (userInfo?.userCode) {
+          params.userCode = userInfo.userCode;
+        }
+
+        const response = await downloadSkillZip(params);
+
+        // request.ts 在 responseType=blob 时统一封装成 { fileName, file }；这里只用 file 字段构造 Blob，
+        // 直接 new Blob([response]) 会把整个对象当字符串塞进去（变成 "[object Object]"），导致下载文件无法解压。
+        const fileBlob = response?.file;
+        if (fileBlob) {
+          const blob = fileBlob instanceof Blob ? fileBlob : new Blob([fileBlob], { type: 'application/zip' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = response?.fileName || `${item.resourceName || 'skill'}.zip`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        } else {
+          message.error(intl.formatMessage({ id: 'resource.skillDownload.failed' }));
+        }
+      } catch (error) {
+        console.error('技能下载失败：', error);
+        message.error(intl.formatMessage({ id: 'resource.skillDownload.failed' }));
+      } finally {
+        setDownloadingSkill(null);
+      }
+    };
+
+    return debounce(download, 500, { leading: true, trailing: false });
+  }, [userInfo, intl]);
 
   const handleRelatedObjectClick = async (object: any, forceRefresh = false) => {
     const objectKey = getRelatedObjectKey(object);
@@ -699,8 +752,6 @@ const ResourceList = (props: Props) => {
                           objectKey: item.objectKey || '',
                         });
 
-                        // console.log('response111',JSON.stringify(response))
-
                         if (response?.file) {
                           // 创建下载链接
                           const blob = new Blob([response.file], { type: 'text/plain' });
@@ -722,6 +773,22 @@ const ResourceList = (props: Props) => {
                     }}
                   >
                     <Button size="small">{intl.formatMessage({ id: 'common.download' })}</Button>
+                  </div>
+                )}
+                {resourceType === 'SKILL' && hoveredCard === item.resourceId && (
+                  <div
+                    className={styles.moreButton}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDownloadSkill(item);
+                    }}
+                  >
+                    <Button
+                      size="small"
+                      loading={downloadingSkill === (item.skillPath || item.resourceId || item.objectKey)}
+                    >
+                      {intl.formatMessage({ id: 'common.download' })}
+                    </Button>
                   </div>
                 )}
               </div>

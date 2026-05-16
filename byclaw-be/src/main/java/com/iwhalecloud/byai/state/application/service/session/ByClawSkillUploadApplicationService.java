@@ -37,6 +37,9 @@ import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
  *
  * 覆盖语义：上传若同 skillName 已存在，先整体清空旧目录再写新内容。
  * 不在服务端保留 zip 本体；解压后逐 entry 流式写入 MinIO。
+ *
+ * @author qin.guoquan
+ * @date 2026-05-15 18:37:18
  */
 @Service
 public class ByClawSkillUploadApplicationService {

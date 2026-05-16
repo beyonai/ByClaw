@@ -32,11 +32,6 @@ public class DigitalEmployeeDetailsDTO extends DigitalEmployeeDTO {
     private List<SsResourceDTO> relResourceList;
 
     /**
-     * 关联技能标识列表
-     */
-    private List<String> relSkills;
-
-    /**
      * 记忆配置列表（规则名称、规则内容）
      */
     private List<MemoryConfigDTO> memoryConfigList;

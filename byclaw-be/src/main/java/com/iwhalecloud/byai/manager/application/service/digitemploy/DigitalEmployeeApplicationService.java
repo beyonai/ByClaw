@@ -412,6 +412,8 @@ public class DigitalEmployeeApplicationService {
         ssResExtDigEmployee.setAgentSseUrl(ssResExtDigEmployee.getAgentSseUrlOri());
         ssResExtDigEmployee.setAgentWebUrl(ssResExtDigEmployee.getAgentWebUrlOri());
         ssResExtDigEmployee.setAgentAdminUrlList(ssResExtDigEmployee.getAgentAdminUrlOriList());
+        // 前端传 relSkills（List<String>），按既有约定序列化进 skills 列。relTools 不入库，留待 doSyncOpenClawWorkSpace 写入 target_content。
+        applyRelSkillsToEntity(digitalEmployeeDTO, ssResExtDigEmployee);
         ssResExtDigEmployeeService.save(ssResExtDigEmployee);
 
         // 保存关联关系
@@ -663,6 +665,8 @@ public class DigitalEmployeeApplicationService {
         ssResExtDigEmployee.setAgentAdminUrlList(ssResExtDigEmployee.getAgentAdminUrlOriList());
         // tagName 统一由查询接口运行时计算，避免前端回传旧标签又写回扩展表。
         ssResExtDigEmployee.setTagName(null);
+        // 同 save 链路：relSkills 序列化进 skills；relTools 留到 sync 阶段再写入 target_content。
+        applyRelSkillsToEntity(digitalEmployeeDTO, ssResExtDigEmployee);
         ssResExtDigEmployeeService.update(ssResExtDigEmployee);
 
         // 关联资源对比
@@ -982,19 +986,35 @@ public class DigitalEmployeeApplicationService {
      * @param resourceId 标识
      */
     public void synOpenClawWorkSpace(Long resourceId) {
+        synOpenClawWorkSpace(resourceId, null);
+    }
+
+    /**
+     * 同步数字员工到 openClaw（带原始入参版本）。
+     * 之所以单独承接 inputDto，是因为 relTools 不入 DB，重新 findDetailsById 拿不回，
+     * 需要从前端原始入参直接透传到 JSON 与 target_content。
+     *
+     * @param resourceId 标识
+     * @param inputDto   前端 save/update 时传入的原始 DTO；为 null 时退化为纯 DB 拼装
+     */
+    public void synOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto) {
         try {
-            doSyncOpenClawWorkSpace(resourceId);
+            doSyncOpenClawWorkSpace(resourceId, inputDto);
         }
         catch (Exception e) {
             logger.error("同步数字员工资源文件失败，resourceId: {}, error: {}", resourceId, e.getMessage(), e);
         }
     }
 
-    private void doSyncOpenClawWorkSpace(Long resourceId) {
+    private void doSyncOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto) {
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(resourceId);
         DigitalEmployeeDetailsDTO details = this.findDetailsById(employeeIdDTO);
         fillDigitalEmployeeSyncRuntimeFields(details, resourceId);
+        // 用前端原始入参覆盖运行期字段：
+        // - relTools 不入库，必须从入参直接透传，否则首次保存的 JSON 中 relTools 会丢；
+        // - relPrompt 与 corePersonaDefinition 同源，入参更"新"则优先用入参，避免编辑场景被旧库值覆盖。
+        applyInputRuntimeFields(details, inputDto);
 
         String jsonContent = com.alibaba.fastjson.JSON.toJSONString(details);
         String fileName = buildDigEmployeeJsonFileName(resourceId);
@@ -1003,6 +1023,11 @@ public class DigitalEmployeeApplicationService {
 
         logger.info("数字员工同步开始, storageType={}, resourceId={}, resourcePath={}/{}", effectiveStorageType,
             resourceId, resourceDir, fileName);
+
+        // 先把同步到 MinIO 的 JSON 串镜像写入 ss_res_ext_dig_employee.target_content。
+        // 这样：1) 即便后续 MinIO 推送失败，DB 也保留了上一次成功生成的 JSON；
+        //      2) 前端编辑回显时（findDetailsById）可以从这里反序列化 relTools 等不入库的运行期字段。
+        persistTargetContent(resourceId, jsonContent);
 
         resourceArtifactStorageService.syncResourceJsonByBizType(jsonContent, ResourceBizTypeEnum.DIG_EMPLOYEE.name(),
             resourceId);
@@ -1353,6 +1378,16 @@ public class DigitalEmployeeApplicationService {
         digitalEmployeeDetailsDTO.setRelIds(relIds);
         digitalEmployeeDetailsDTO.setRelResourceList(relResourceList);
         digitalEmployeeDetailsDTO.setRelSkills(parseSkills(digitalEmployeeDetailsDTO.getSkills()));
+        // relTools 不入库，直接从最近一次 sync 写入的 target_content 镜像里反序列化回填，保证编辑回显不丢数据。
+        digitalEmployeeDetailsDTO
+            .setRelTools(parseRelToolsFromTargetContent(digitalEmployeeDetailsDTO.getTargetContent()));
+        // relPrompt 与 corePersonaDefinition 同源：以 DB 列 core_persona_definition 为准，
+        // 没有时再从上一次 target_content 中反查（兼容历史保存路径未带 corePersonaDefinition 的情况）。
+        String corePersonaDefinition = digitalEmployeeDetailsDTO.getCorePersonaDefinition();
+        if (StringUtils.isBlank(corePersonaDefinition)) {
+            corePersonaDefinition = parseRelPromptFromTargetContent(digitalEmployeeDetailsDTO.getTargetContent());
+        }
+        digitalEmployeeDetailsDTO.setRelPrompt(corePersonaDefinition);
 
         // 查询记忆配置列表（根据数字员工ID和用户ID查询）
         Long userId = CurrentUserHolder.getCurrentUserId();
@@ -1363,11 +1398,98 @@ public class DigitalEmployeeApplicationService {
         return digitalEmployeeDetailsDTO;
     }
 
+    /**
+     * 用前端原始入参覆盖 details 上的运行期字段。
+     * 仅处理"不入 DB" 或"前端入参更新"的字段（relTools / relPrompt），其它字段以 DB 现状为准。
+     */
+    private void applyInputRuntimeFields(DigitalEmployeeDetailsDTO details, DigitalEmployeeDTO inputDto) {
+        if (details == null || inputDto == null) {
+            return;
+        }
+        if (inputDto.getRelTools() != null) {
+            details.setRelTools(inputDto.getRelTools());
+        }
+        // relPrompt 优先取前端入参；fallback 到 corePersonaDefinition（DB 列），最终空值由 findDetailsById 已兜底设置。
+        String inputPrompt = StringUtils.defaultIfBlank(inputDto.getRelPrompt(), inputDto.getCorePersonaDefinition());
+        if (StringUtils.isNotBlank(inputPrompt)) {
+            details.setRelPrompt(inputPrompt);
+        }
+    }
+
+    /**
+     * 把刚刚生成的标准 JSON 串镜像写入 ss_res_ext_dig_employee.target_content。
+     * 失败仅记日志，不阻断后续 MinIO 同步——target_content 是辅助快照，缺失不影响主流程。
+     */
+    private void persistTargetContent(Long resourceId, String jsonContent) {
+        if (resourceId == null || StringUtils.isBlank(jsonContent)) {
+            return;
+        }
+        try {
+            SsResExtDigEmployee ssResExtDigEmployee = ssResExtDigEmployeeService.findById(resourceId);
+            if (ssResExtDigEmployee == null) {
+                logger.warn("写入 target_content 失败：扩展表记录不存在, resourceId={}", resourceId);
+                return;
+            }
+            ssResExtDigEmployee.setTargetContent(jsonContent);
+            ssResExtDigEmployeeService.update(ssResExtDigEmployee);
+        }
+        catch (Exception e) {
+            logger.warn("写入 target_content 异常, resourceId={}, ignored. err={}", resourceId, e.getMessage());
+        }
+    }
+
     private List<String> parseSkills(String skills) {
         if (StringUtils.isBlank(skills)) {
             return null;
         }
         return JSON.parseArray(skills, String.class);
+    }
+
+    /**
+     * 把入参中的 relSkills（List<String>）序列化到 SsResExtDigEmployee.skills 列。
+     * - 入参为 null：不动 entity，避免覆盖 update 场景下既存的 skills；
+     * - 入参为空 list：序列化为 "[]"，符合"用户清空 skill"的语义；
+     * - 入参非空：序列化为 JSON 数组字符串。
+     */
+    private void applyRelSkillsToEntity(DigitalEmployeeDTO dto, SsResExtDigEmployee entity) {
+        List<String> relSkills = dto.getRelSkills();
+        if (relSkills == null) {
+            return;
+        }
+        entity.setSkills(JSON.toJSONString(relSkills));
+    }
+
+    /** 反序列化 target_content 里的 relTools 数组；不存在或解析失败返回 null。 */
+    private List<String> parseRelToolsFromTargetContent(String targetContent) {
+        com.alibaba.fastjson2.JSONObject obj = parseTargetContentSafely(targetContent);
+        if (obj == null) {
+            return null;
+        }
+        com.alibaba.fastjson2.JSONArray arr = obj.getJSONArray("relTools");
+        return arr == null ? null : arr.toJavaList(String.class);
+    }
+
+    /** 反序列化 target_content 里的 relPrompt 字符串；不存在或解析失败返回 null。 */
+    private String parseRelPromptFromTargetContent(String targetContent) {
+        com.alibaba.fastjson2.JSONObject obj = parseTargetContentSafely(targetContent);
+        if (obj == null) {
+            return null;
+        }
+        return obj.getString("relPrompt");
+    }
+
+    /** 通用：把 target_content 解析为 JSONObject，失败返回 null 并记 warn。 */
+    private com.alibaba.fastjson2.JSONObject parseTargetContentSafely(String targetContent) {
+        if (StringUtils.isBlank(targetContent)) {
+            return null;
+        }
+        try {
+            return JSON.parseObject(targetContent);
+        }
+        catch (Exception e) {
+            logger.warn("解析 target_content 失败, ignored. err={}", e.getMessage());
+            return null;
+        }
     }
 
     /**
