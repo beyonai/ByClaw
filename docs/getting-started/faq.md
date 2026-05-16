@@ -46,11 +46,11 @@ docker exec -i opengauss gsql -d postgres -U gaussdb -W 'Secretpassword@123' < d
 
 **A:** 
 
-1. 检查网络连接和 Docker Hub 访问
-2. 配置镜像加速器（国内用户）
-3. 如需登录私有仓库：
+1. 检查网络连接和 ghcr.io 的可访问性（所有镜像为公开仓库，无需登录）
+2. 配置镜像加速器或使用代理（国内用户）
+3. 手动测试：
 ```bash
-docker login ghcr.io -u YOUR_USERNAME
+docker pull ghcr.io/beyonai/byclaw/byclaw-redis:main
 ```
 
 ## 开发相关问题

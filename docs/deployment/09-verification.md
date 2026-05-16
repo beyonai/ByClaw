@@ -96,18 +96,18 @@ lsof -i :8086
 # 检查其他端口...
 ```
 
-### 问题 2：无法连接 GHCR
+### 问题 2：镜像拉取失败
 
 **症状：** `pull.sh` 失败
 
 **解决方法：**
 
-1. 检查 `.env` 中的 `GHCR_USER` 和 `GHCR_TOKEN` 是否正确
-2. 手动测试登录
+1. 确认网络可以访问 ghcr.io（镜像为公开仓库，无需登录）
+2. 手动测试拉取
 ```bash
-echo "your_token" | docker login ghcr.io -u "your_username" --password-stdin
+docker pull ghcr.io/beyonai/byclaw/byclaw-redis:main
 ```
-3. 确认 Token 是否有 `read:packages` 权限
+3. 如果是国内网络环境，可能需要配置 Docker 镜像加速器或使用代理
 
 ### 问题 3：OpenGauss 启动失败
 

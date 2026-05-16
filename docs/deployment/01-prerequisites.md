@@ -44,50 +44,14 @@ docker compose version
 - Git（可选，用于克隆代码仓库）
 - 文本编辑器（用于修改配置文件）
 
-## 3. GitHub Container Registry (GHCR) 认证
-
-ByClaw 的镜像托管在 GitHub Container Registry (ghcr.io)，您需要配置访问凭证。
-
-### 步骤 1：创建 GitHub Personal Access Token (PAT)
-
-1. 访问 https://github.com/settings/tokens
-2. 点击 "Generate new token" → "Generate new token (classic)"
-3. 勾选以下权限：
-   - `write:packages`
-   - `read:packages`
-   - `delete:packages`
-4. 生成并保存您的 token（只显示一次！）
-
-### 步骤 2：配置 .env 文件
-
-复制项目根目录的 `.env.example` 为 `.env`：
-
-```bash
-cp .env.example .env
-```
-
-编辑 `.env` 文件，填入您的 GitHub 信息：
-
-```bash
-# GHCR (GitHub Container Registry)
-GHCR_USER=your_github_username
-GHCR_TOKEN=your_ghcr_personal_access_token
-```
-
-### 步骤 3：登录 GHCR
-
-部署脚本会自动使用 `.env` 中的凭证登录，但您也可以手动测试：
-
-```bash
-echo "your_ghcr_personal_access_token" | docker login ghcr.io -u "your_github_username" --password-stdin
-```
-
-## 4. 网络要求
+## 3. 网络要求
 
 - 能够访问 GitHub Container Registry (ghcr.io)
 - 如果是国内环境，可能需要配置镜像加速器
 
-## 5. rclone（MinIO 文件挂载）
+> **说明：** ByClaw 的所有镜像均托管在 GHCR 公开仓库，无需登录即可拉取。
+
+## 4. rclone（MinIO 文件挂载）
 
 ByClaw 使用 [rclone](https://rclone.org/) 将 MinIO 对象存储桶以 FUSE 文件系统的方式挂载到宿主机。这样数字员工的沙箱环境可以像访问本地目录一样读写 MinIO 中的文件，无需通过 S3 API 中转。
 
@@ -166,7 +130,7 @@ FILE_STORAGE_MINIO_MOUNT_TARGET_0_ENABLED=true
 
 如果不需要文件挂载功能，设置 `FILE_STORAGE_MINIO_MOUNT_ENABLED=false` 即可跳过。
 
-## 6. ⚠️ 重要：数据目录准备（必须）
+## 5. ⚠️ 重要：数据目录准备（必须）
 
 在部署之前，**必须**提前准备好 MinIO 挂载目录，否则容器可能无法正常启动！
 

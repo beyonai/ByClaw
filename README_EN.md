@@ -118,7 +118,7 @@ cp .env.example .env
 #    REDIS_PASSWORD, MID_FTP_*, etc.
 #    If middleware is on a remote server, replace with the corresponding IP.
 
-# 3. Pull middleware images (first-time only, requires GHCR_USER/GHCR_TOKEN in .env)
+# 3. Pull middleware images (first-time only)
 (cd deploy/middleware && sh pull.sh)
 
 # 4. Start middleware (Redis, MinIO, OpenGauss, Sandbox)

@@ -30,10 +30,7 @@
 
 1. **在外网环境拉取镜像**：
    ```bash
-   # 登录 GHCR
-   echo "your_ghcr_token" | docker login ghcr.io -u "your_github_username" --password-stdin
-   
-   # 拉取所有镜像
+   # 拉取所有镜像（公开仓库，无需登录）
    docker pull ghcr.io/beyonai/byclaw/byclaw-redis:main
    docker pull ghcr.io/beyonai/byclaw/byclaw-minio:main
    docker pull ghcr.io/beyonai/byclaw/byclaw-opengauss:main
@@ -102,18 +99,9 @@ cd ../standalone
 sh pull.sh
 ```
 
-### 方法 2：手动拉取（外网环境）
+### 方法 2：手动拉取
 
-如果需要手动拉取某个特定的镜像：
-
-1. **登录 GHCR**：
-
-```bash
-# 使用您的 GitHub Personal Access Token
-echo "your_ghcr_token" | docker login ghcr.io -u "your_github_username" --password-stdin
-```
-
-2. **拉取镜像**：
+如果需要手动拉取某个特定的镜像（公开仓库，无需登录）：
 
 ```bash
 # 拉取单个镜像
@@ -140,10 +128,7 @@ docker pull ghcr.io/beyonai/byclaw/byclaw-data:main
 #!/bin/bash
 set -e
 
-# 登录 GHCR
-echo "your_ghcr_token" | docker login ghcr.io -u "your_github_username" --password-stdin
-
-# 拉取所有镜像
+# 拉取所有镜像（公开仓库，无需登录）
 echo "拉取中间件镜像..."
 docker pull ghcr.io/beyonai/byclaw/byclaw-redis:main
 docker pull ghcr.io/beyonai/byclaw/byclaw-minio:main
