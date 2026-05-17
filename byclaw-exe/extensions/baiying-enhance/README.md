@@ -120,7 +120,7 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 
 对百应详情 / 数字员工格式，插件会读取 JSON **根**上的 **`relTools`**（字符串数组）并写入托管 agent 的 **`agents.list[].tools.allow`**；元素会 `trim`，空串丢弃。配置 `["*"]` 表示允许全部 OpenClaw tools。
 
-该格式的托管 agent 仍会额外保留 **`tools.alsoAllow: ["baiying_call"]`**，用于调用百应关联资源桥接工具。数字员工 JSON 内容变化后，Redis Pub/Sub 或显式 flush 触发重新扫描时，`relTools` 变更会随配置同步写回。
+该格式的托管 agent 仍会保留 **`baiying_call`**，用于调用百应关联资源桥接工具：当 `relTools` 非空时合并进 `tools.allow`，否则写为 `tools.alsoAllow`。数字员工 JSON 内容变化后，Redis Pub/Sub 或显式 flush 触发重新扫描时，`relTools` 变更会随配置同步写回；插件同时写入一个禁用的内部 `skills.entries.__baiying_enhance_reload` 标记，让 OpenClaw 刷新 skills/tools 快照，无需重启网关。
 
 ## HTTP
 

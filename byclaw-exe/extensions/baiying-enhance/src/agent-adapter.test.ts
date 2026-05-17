@@ -211,8 +211,7 @@ describe("adaptAgentJson", () => {
       return;
     }
     expect(res.listEntry.tools).toEqual({
-      allow: ["*", "read", "write"],
-      alsoAllow: ["baiying_call"],
+      allow: ["*", "read", "write", "baiying_call"],
     });
   });
 

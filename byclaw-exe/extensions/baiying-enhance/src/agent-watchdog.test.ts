@@ -28,6 +28,7 @@ function createMockApi(
     workspace?: string;
     identity?: { name: string };
     skills?: string[];
+    tools?: unknown;
   }>,
 ) {
   const loadConfig = vi.fn(() => ({
@@ -225,6 +226,71 @@ describe("createAgentWatchdog", () => {
     await wd.stop();
 
     expect(writeConfigFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("touches skills reload marker when relTools changes the managed agent tool policy", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-tools-"));
+    const raw = {
+      resourceId: "10000455",
+      resourceName: "Demo",
+      roleAttributes: "Be brief.",
+      integrationType: "NONE",
+      relTools: ["read"],
+    };
+    const content = JSON.stringify(raw);
+    await writeFile(path.join(dir, "demo.json"), content, "utf8");
+    const agentId = `${MANAGED_AGENT_PREFIX}10000455`;
+    await writeFile(
+      path.join(dir, DEFAULT_INDEX_FILENAME),
+      JSON.stringify({
+        version: INDEX_VERSION,
+        entries: {
+          [agentId]: createHash("sha256").update(content, "utf8").digest("hex"),
+        },
+      }),
+      "utf8",
+    );
+
+    const writeConfigFile = vi.fn(async () => {});
+    const api = createMockApi(writeConfigFile, [
+      { id: "main", name: "Main", identity: { name: "Main" } },
+      {
+        id: agentId,
+        name: "Demo",
+        identity: { name: "Demo" },
+        skills: [],
+        tools: { allow: ["*", "read", "write", "baiying_call"] },
+      },
+    ]) as any;
+
+    const wd = createAgentWatchdog({
+      api,
+      registry: new AgentRegistryState(),
+      absoluteDir: dir,
+      contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+      executorPath: path.join(dir, "executor.py"),
+      pluginConfig: {
+        embedApiKeysFromJson: true,
+        workspaceAutoSeed: false,
+        workspaceSkillAutoEnable: false,
+        persistAgentContentIndex: true,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start();
+    await wd.__flushNow!();
+    await wd.stop();
+
+    expect(writeConfigFile).toHaveBeenCalledTimes(1);
+    const next = writeConfigFile.mock.calls[0][0];
+    const entry = next.agents.list.find((a: any) => a.id === agentId);
+    expect(entry.tools).toEqual({ allow: ["read", "baiying_call"] });
+    expect(next.skills.entries.__baiying_enhance_reload.enabled).toBe(false);
+    expect(next.skills.entries.__baiying_enhance_reload.config.reason).toBe("agent-tool-policy-sync");
+    expect(next.skills.entries.__baiying_enhance_reload.config.managedSnapshotSignature).toContain(
+      "tools={\"allow\":[\"read\",\"baiying_call\"]}",
+    );
   });
 
   it("calls writeConfigFile once when index is missing", async () => {

@@ -225,16 +225,17 @@ relTools?: string[];
 
 | 场景 | 结果 |
 |------|------|
-| `agent.json` 存在 `relTools` | 写入 `agents.list[].tools.allow = relTools` |
+| `agent.json` 存在 `relTools` | 写入 `agents.list[].tools.allow = relTools + baiying_call` |
 | `relTools: ["*"]` | 明确允许 OpenClaw 全部工具 |
 | `relTools: []` | 明确 allowlist 为空 |
-| `relTools: ["exec"]` | 只允许 `exec` 这类 allow 工具 |
+| `relTools: ["exec"]` | 只允许 `exec` 这类 allow 工具与 `baiying_call` |
 
 注意：
 
 - `relTools` 对应 OpenClaw 内置工具。
 - “OpenClaw 全部工具”统一通过 `relTools: ["*"]` 表达。
-- 若 Agent 仍需 `baiying_call`，应继续保留在 `tools.alsoAllow`，不要被 `relTools` 覆盖。
+- 百应详情 / 数字员工格式会始终保留 `baiying_call`；当 `relTools` 非空时并入 `tools.allow`，否则写入 `tools.alsoAllow`。
+- `relTools` 或 workspace skill 热同步时，插件会写入禁用的内部 `skills.entries.__baiying_enhance_reload` 标记，用于触发 OpenClaw 刷新 skills/tools 快照，无需重启网关。
 
 ---
 
