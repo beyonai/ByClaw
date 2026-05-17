@@ -149,7 +149,9 @@ export async function buildSubagentRoutingMarkdown(managed: AdaptedManagedAgent[
 
   for (const adapted of managedOnly) {
     let hints: { resourceDesc?: string; instructionsSnippet?: string } = {};
-    if (adapted.sourceFilePath) {
+    if (adapted.sourceJson !== undefined) {
+      hints = parseSourceJsonHints(adapted.sourceJson);
+    } else if (adapted.sourceFilePath) {
       try {
         const rawText = await fs.readFile(adapted.sourceFilePath, "utf8");
         hints = parseSourceJsonHints(JSON.parse(rawText) as unknown);

@@ -1,8 +1,6 @@
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { AgentRegistryState } from "./agent-state.js";
-import { adaptAgentJson, type AdaptedManagedAgent } from "./agent-adapter.js";
+import type { AdaptedManagedAgent } from "./agent-adapter.js";
 import { buildExecutorResourceContext, compactText, runBaiyingExecutor } from "./resource-metadata.js";
 import { docAsyncState, type DocAsyncTaskRecord } from "./doc-async-state.js";
 import type { BaiyingAssociatedResource } from "./types.js";
@@ -200,7 +198,7 @@ function formatRootAgentLine(agent: AdaptedManagedAgent): string {
 /**
  * Tool description uses only fields present on `agent.associatedResources` (from
  * the latest agent sync). Enriched snapshot details are not cached here; each
- * `baiying_call` execution loads capability from disk via the executor.
+ * `baiying_call` execution loads capability from Redis via the executor.
  */
 export function buildBaiyingCallDescription(params: { agent: AdaptedManagedAgent }): string {
   const resources = params.agent.associatedResources ?? [];
@@ -278,7 +276,6 @@ export function buildBaiyingCallDescription(params: { agent: AdaptedManagedAgent
 export function createBaiyingCallToolFactory(params: {
   registry: AgentRegistryState;
   executorPath: string;
-  agentConfigDir?: string;
   embedApiKeysFromJson?: boolean;
   envApiKeyTemplate?: string;
   defaultProxyUrl?: string;
@@ -308,67 +305,6 @@ export function createBaiyingCallToolFactory(params: {
     }
   }
 
-  function collectAgentJsonFilesSync(rootDir: string): string[] {
-    const out: string[] = [];
-    let entries: ReturnType<typeof readdirSync>;
-    try {
-      entries = readdirSync(rootDir, { withFileTypes: true });
-    } catch {
-      return out;
-    }
-    for (const ent of entries) {
-      if (ent.name.startsWith(".")) {
-        continue;
-      }
-      const p = path.join(rootDir, ent.name);
-      if (ent.isFile() && ent.name.toLowerCase().endsWith(".json")) {
-        out.push(p);
-      }
-      if (ent.isDirectory()) {
-        const cfgPath = path.join(p, "config.json");
-        try {
-          readFileSync(cfgPath, "utf8");
-          out.push(cfgPath);
-        } catch {
-          // ignore missing config.json
-        }
-      }
-    }
-    return out;
-  }
-
-  /** Registry miss: scan agent config dir on each resolution (no in-memory agent cache). */
-  function findAdaptedAgentOnDisk(agentId: string): AdaptedManagedAgent | undefined {
-    const rootDir = params.agentConfigDir?.trim();
-    if (!rootDir) {
-      return undefined;
-    }
-    const files = collectAgentJsonFilesSync(rootDir);
-    for (const filePath of files) {
-      let raw: unknown;
-      try {
-        raw = JSON.parse(readFileSync(filePath, "utf8"));
-      } catch {
-        continue;
-      }
-      const adapted = adaptAgentJson({
-        raw,
-        fileName: path.basename(filePath),
-        embedApiKeysFromJson: params.embedApiKeysFromJson === true,
-        envApiKeyTemplate: params.envApiKeyTemplate,
-        defaultProxyUrl: params.defaultProxyUrl,
-        defaultApiKey: params.defaultApiKey,
-      });
-      if ("error" in adapted) {
-        continue;
-      }
-      if (adapted.agentId === agentId) {
-        return adapted;
-      }
-    }
-    return undefined;
-  }
-
   return (ctx: any) => {
     const agentId = ctx.agentId;
     if (!agentId || !agentId.startsWith(MANAGED_AGENT_PREFIX)) {
@@ -376,13 +312,9 @@ export function createBaiyingCallToolFactory(params: {
       return null;
     }
 
-    const registryHit = params.registry.get(agentId);
-    const fallbackHit = registryHit ? undefined : findAdaptedAgentOnDisk(agentId);
-    const agent = registryHit ?? fallbackHit;
+    const agent = params.registry.get(agentId);
     debugLog(
-      `resolve: agentId=${agentId} registryHit=${registryHit ? "yes" : "no"} diskFallback=${
-        fallbackHit ? "yes" : "no"
-      } registrySize=${params.registry.list().length}`,
+      `resolve: agentId=${agentId} registryHit=${agent ? "yes" : "no"} redisOnly=yes registrySize=${params.registry.list().length}`,
     );
     if (!agent) {
       return null;

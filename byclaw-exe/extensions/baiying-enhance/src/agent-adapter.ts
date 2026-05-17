@@ -54,6 +54,8 @@ export type AdaptedManagedAgent = {
   systemPrompt?: string;
   /** Absolute path to the source JSON (for workspace seeding). */
   sourceFilePath?: string;
+  /** Parsed source JSON when the authoritative copy came from Redis instead of disk. */
+  sourceJson?: unknown;
   /** SSE endpoint for INTERFACE-type agents. */
   agentSseUrl?: string;
   /** Integration type: "NONE" (proxy LLM) or "INTERFACE" (SSE backend). */

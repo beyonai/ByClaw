@@ -1,14 +1,16 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
+import { readdirSync, readFileSync } from "node:fs";
 import { MAIN_AGENTS_MARKER } from "./main-workspace-seed.js";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_INDEX_FILENAME, INDEX_VERSION, loadAgentContentIndex } from "./agent-content-index.js";
-import { createAgentWatchdog } from "./agent-watchdog.js";
+import { createAgentWatchdog as createAgentWatchdogBase } from "./agent-watchdog.js";
 import { AgentRegistryState } from "./agent-state.js";
 import { SUBAGENT_ROUTING_FILENAME, SUBAGENT_ROUTING_MARKER } from "./subagent-routing-seed.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
+import type { BaiyingRedisJsonStore, RedisJsonPayload } from "./redis-json-store.js";
 
 /** Fixed JSON string so SHA-256 is stable across runs. */
 const STABLE_AGENT_JSON =
@@ -54,8 +56,64 @@ async function writeWorkspaceSkill(workspaceDir: string, name: string): Promise<
   await writeFile(path.join(workspaceDir, "skills", name, "SKILL.md"), `# ${name}\n`, "utf8");
 }
 
+function payloadFromContent(key: string, content: string): RedisJsonPayload {
+  return {
+    key,
+    content,
+    raw: JSON.parse(content) as unknown,
+    hash: createHash("sha256").update(content, "utf8").digest("hex"),
+  };
+}
+
+function sourceKeyFromRaw(raw: any, fallback: string): string {
+  if (raw?.resourceId != null) return String(raw.resourceId);
+  if (Array.isArray(raw?.agent_list) && raw.agent_list[0]?.id != null) return String(raw.agent_list[0].id);
+  if (raw?.id != null) return String(raw.id).replace(/^baiying-agent-/i, "");
+  return fallback;
+}
+
+function loadDigEmployeeFixtures(dir: string): Map<string, RedisJsonPayload> {
+  const out = new Map<string, RedisJsonPayload>();
+  for (const ent of readdirSync(dir, { withFileTypes: true })) {
+    if (!ent.isFile() || !ent.name.toLowerCase().endsWith(".json") || ent.name === DEFAULT_INDEX_FILENAME) {
+      continue;
+    }
+    const content = readFileSync(path.join(dir, ent.name), "utf8");
+    const raw = JSON.parse(content) as any;
+    const id = sourceKeyFromRaw(raw, ent.name.replace(/\.json$/i, ""));
+    out.set(id, payloadFromContent(`DIG_EMPLOYEE_${id}`, content));
+  }
+  return out;
+}
+
+function createMemoryRedisJsonStore(entries: Map<string, RedisJsonPayload>): BaiyingRedisJsonStore {
+  return {
+    getJsonByKey: async (key) => {
+      const id = key.replace(/^DIG_EMPLOYEE_/, "");
+      return entries.get(id) ?? null;
+    },
+    getDigEmployeeJson: async (resourceId) => entries.get(resourceId) ?? null,
+    getResourceJson: async ({ resourceBizType, resourceId }) =>
+      entries.get(`${resourceBizType}_${resourceId}`) ?? null,
+    close: async () => {},
+  };
+}
+
+function createAgentWatchdog(params: any) {
+  const fixtureDir = path.dirname(params.contentIndexPath);
+  const entries = loadDigEmployeeFixtures(fixtureDir);
+  const authorizedIds = new Set(entries.keys());
+  return createAgentWatchdogBase({
+    redisJsonStore: createMemoryRedisJsonStore(entries),
+    authorizationFilter: {
+      getAuthorizedSourceKeys: () => new Set(authorizedIds),
+    },
+    ...params,
+  });
+}
+
 describe("createAgentWatchdog", () => {
-  it("does not call writeConfigFile when index matches disk content", async () => {
+  it("does not call writeConfigFile when index matches Redis content", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-"));
     await writeFile(path.join(dir, "demo.json"), STABLE_AGENT_JSON, "utf8");
     const agentId = `${MANAGED_AGENT_PREFIX}10863047`;

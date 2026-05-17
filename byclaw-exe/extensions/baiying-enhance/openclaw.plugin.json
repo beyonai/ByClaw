@@ -1,7 +1,7 @@
 {
   "id": "baiying-enhance",
   "name": "Baiying Enhance",
-  "description": "Sync Baiying agent JSON from disk into OpenClaw and expose resources through baiying_call (Redis-driven updates).",
+  "description": "Sync authorized Baiying digital employee JSON from Redis into OpenClaw and expose Redis-backed resources through baiying_call.",
   "version": "1.0.0",
   "configSchema": {
     "type": "object",
@@ -10,11 +10,11 @@
     "properties": {
       "agentConfigDir": {
         "type": "string",
-        "description": "Directory containing agent JSON files (flat *.json or subdirs with config.json)."
+        "description": "Deprecated: ignored. Digital employee JSON is loaded from Redis key DIG_EMPLOYEE_{resourceId} using the auth Hash."
       },
       "executorResourcesDir": {
         "type": "string",
-        "description": "Directory containing resource JSON files (flat *.json or subdirs with config.json)."
+        "description": "Deprecated for Baiying resource snapshots: associated resource JSON is loaded from Redis key {BIZTYPE}_{resourceId}."
       },
       "watchDebounceMs": {
         "type": "number",
@@ -88,7 +88,7 @@
       },
       "agentContentIndexPath": {
         "type": "string",
-        "description": "Optional path to the content index file; default is ~/.openclaw/baiying-enhance/agent-content-index-<id>.json (writable; avoids RO mounts on agentConfigDir)."
+        "description": "Optional path to the content index file; default is ~/.openclaw/baiying-enhance/agent-content-index-<id>.json."
       },
       "workspaceSkillAutoEnable": {
         "type": "boolean",
@@ -107,7 +107,7 @@
       },
       "digEmployeeChangeSubscribe": {
         "type": "boolean",
-        "description": "Subscribe to Redis Pub/Sub for digital-employee change events (same Redis as USER_CODE auth). Can also enable with env BAIYING_DIG_EMPLOYEE_CHANGE_SUBSCRIBE=true."
+        "description": "Subscribe to Redis Pub/Sub for digital-employee change events. Default true; set false or env BAIYING_DIG_EMPLOYEE_CHANGE_SUBSCRIBE=false to disable."
       },
       "digEmployeeChangeChannel": {
         "type": "string",

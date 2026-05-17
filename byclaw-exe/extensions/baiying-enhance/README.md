@@ -11,7 +11,7 @@
 
 本插件随 OpenClaw 提供，用于：
 
-1. 从配置的目录读取百应导出的 Agent JSON（百应 `agent_list` 导出或本插件支持的简化 JSON 模式）；变更由 **Redis Pub/Sub**（或 dig-employee 授权变更、启动时 flush）触发重新扫描与同步，**不再监听目录文件系统事件**。
+1. 从 Redis 按授权读取百应数字员工 JSON：`USER:RESOURCES:AUTH:{userId}` 决定当前可见数字员工，插件只读取对应 `DIG_EMPLOYEE_{resourceId}`；授权不存在或为空时不注册任何数字员工。
 2. 将条目合并进**当前网关配置文件**中的托管 Agent（`baiying-agent-*`）与 OpenAI 兼容的 `models.providers`（`baiying-m-*`），并把 **`agents.list[].workspace`** 设为状态目录下的默认路径（托管体为 `<stateDir>/workspace-<agentId>/`；与 OpenClaw 默认一致时，`main` 对应 `<stateDir>/workspace/` 而非 `workspace-main`，见 `src/workspace-paths.ts`）。
 3. 可选地在每次同步后初始化工作区（`workspaceAutoSeed`，默认开启）：由 `seedManagedAgentWorkspace`（`src/workspace-seed.ts`）创建目录并按 JSON 写入或更新带托管标记的 `SOUL.md` / `AGENTS.md` / `IDENTITY.md` / `USER.md` / `TOOLS.md`（以及可选的 `BYAI_BUSINESS_EXTENSIONS.md`）。
 4. 为每个托管 Agent 动态挂载工具 **`baiying_call`**，把百应关联的知识库、toolkit、MCP、下游 agent 等资源暴露给大模型。
@@ -43,7 +43,6 @@
       "baiying-enhance": {
         "enabled": true,
         "config": {
-          "agentConfigDir": "by/agents",
           "watchDebounceMs": 500,
           "mainParentAgentId": "main",
           "mergeAllowSpawnForMain": true,
@@ -56,7 +55,9 @@
 }
 ```
 
-字段含义与默认值以插件清单中的 `configSchema`（`openclaw.plugin.json`）为准；`agentConfigDir` 默认为相对 **OpenClaw 状态目录**（如 `~/.openclaw/`）下的 `resources/dig_employee`（见清单说明）。**`config` 允许额外键**（例如历史遗留的 `watchAgentDir`、`skillDirs`、`pollIntervalMs`），不会因「未知字段」导致插件校验失败；已声明的字段仍会按类型校验，建议仍以文档列出的键为主以免笔误。
+字段含义与默认值以插件清单中的 `configSchema`（`openclaw.plugin.json`）为准。历史上的 `agentConfigDir` / `executorResourcesDir` 仍被配置校验接受，但当前运行时不再用它们读取数字员工或关联资源 JSON；权威来源是 Redis。**`config` 允许额外键**（例如历史遗留的 `watchAgentDir`、`skillDirs`、`pollIntervalMs`），不会因「未知字段」导致插件校验失败；已声明的字段仍会按类型校验，建议仍以文档列出的键为主以免笔误。
+
+Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscribe: false` 或环境变量 `BAIYING_DIG_EMPLOYEE_CHANGE_SUBSCRIBE=false`。插件会读取现有环境变量，也会尝试从 `BAIYING_ENV_FILE`、当前工作目录向上的 `.env`、以及 OpenClaw 状态目录 `.env` 加载 Redis 默认值（不覆盖已存在环境变量），与 `scripts/listen_dig_employee_redis_pubsub.py` 的本地调试体验保持一致。
 
 ### 同步写盘后避免整网关重启（可选）
 
@@ -64,7 +65,6 @@
 
 ```json
 "config": {
-  "agentConfigDir": "resources/dig_employee",
   "configSyncHotPluginEntriesPrefixes": [
     "byai-channel",
     "minimax",
@@ -89,8 +89,8 @@
 
 当前实现中，托管 agent 会自动带上 `baiying_call`。该工具会：
 
-- 读取 `agent.json` 中的 `relResourceList / relResourceInfoList`
-- 后台预热资源元数据
+- 使用注册时从 `DIG_EMPLOYEE_{resourceId}` 读取的 `relResourceList / relResourceInfoList`
+- 按需从 Redis 读取关联资源 `{BIZTYPE}_{resourceId}`，不扫描本地资源目录
 - 在提示词中展开知识库、toolkit、MCP、AGENT 等能力
 - 由插件内置的 **TypeScript 执行器**（`src/executor/`，按资源类型拆分为 `toolkit.ts` / `tool.ts` / `agent.ts` / `mcp.ts` / `doc.ts` 等）在进程内统一执行并做参数校验/回填；历史上的 `~/.openclaw/skills/baiying/executor.py` 已废弃不再调用
 
@@ -99,11 +99,11 @@
 - [docs/PLUGIN_OVERVIEW.zh-CN.md](docs/PLUGIN_OVERVIEW.zh-CN.md)
 - [docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md](docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md)（JSON → 工作区 Markdown 映射）
 
-## 磁盘上的 Agent JSON 格式
+## Redis Agent JSON 格式
 
-- **百应导出**：顶层为 `agent_list` 数组；首元素可含 `runConfig.baseUrl`、`runConfig.model`、可选 `runConfig.apiKey`。
-- **原生简化**：`id`、`name`，以及 `model: "provider/model"` **或** 带 `baseUrl` + `model` 的 `runConfig`。
-- **百应详情（数字员工等）**：根对象上同时存在字符串类型的 `resourceId` 与 `resourceName` 时，按详情格式解析（见 `src/agent-adapter.ts`）。
+- **数字员工键**：`DIG_EMPLOYEE_{resourceId}`，值为后端同步的完整数字员工配置 JSON。
+- **关联资源键**：`{BIZTYPE}_{resourceId}`，例如 `TOOLKIT_10000050`、`MCP_10001`、`KG_DOC_10002`。
+- **兼容格式**：适配器仍支持百应详情、旧 `agent_list` 导出、原生简化 JSON；生产注册路径只按授权 id 从 Redis 读取。
 
 ### `relSkills` 与网关里的 `agents.list[].skills`
 
@@ -112,7 +112,7 @@
 - 默认 **`[]`**（不再省略该字段）。
 - 若 JSON **根**上存在非空的 **`relSkills`**（字符串数组，例如 `["dws","clawhub"]`），则写入 **`agents.list[].skills`**（元素会 `trim`，空串丢弃）。
 - 若无有效 `relSkills`，则回退读取根级 **`skills`**（兼容旧版原生 JSON）；仍无则为 **`[]`**。
-- 若 `workspaceSkillAutoEnable` 未关闭，插件还会自动扫描用户上传的 `skills/<skillName>/SKILL.md`：默认只把当前 agent workspace 下的 skill 并入该 agent，不读取其它 agent workspace；main workspace (`workspace/skills`) 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 并入托管子 agent。扫描有 `fs.watch` 与 `workspaceSkillScanIntervalMs` 兜底（默认 `500` ms）；兜底扫描只做 skill diff，不重新扫描 Agent JSON 目录，也不会触发托管 Agent 增删。
+- 若 `workspaceSkillAutoEnable` 未关闭，插件还会自动扫描用户上传的 `skills/<skillName>/SKILL.md`：默认只把当前 agent workspace 下的 skill 并入该 agent，不读取其它 agent workspace；main workspace (`workspace/skills`) 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 并入托管子 agent。扫描有 `fs.watch` 与 `workspaceSkillScanIntervalMs` 兜底（默认 `500` ms）；兜底扫描只做 skill diff，不重新读取数字员工 Redis，也不会触发托管 Agent 增删。
 
 更细的说明见 [docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md](docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md) 与 [docs/PLUGIN_OVERVIEW.zh-CN.md](docs/PLUGIN_OVERVIEW.zh-CN.md)。
 

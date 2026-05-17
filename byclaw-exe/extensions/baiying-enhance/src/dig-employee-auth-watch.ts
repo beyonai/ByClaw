@@ -20,9 +20,6 @@ function parseAuthorizedIds(payload: Record<string, string>): Set<string> {
   const out = new Set<string>();
   for (const [field, value] of Object.entries(payload)) {
     const fieldId = normalizeId(field);
-    if (/^\d+$/.test(fieldId)) {
-      out.add(fieldId);
-    }
     const trimmed = String(value ?? "").trim();
     if (!trimmed) {
       continue;
@@ -38,6 +35,10 @@ function parseAuthorizedIds(payload: Record<string, string>): Set<string> {
       } catch {
         // ignore parse failures and continue best-effort extraction.
       }
+      continue;
+    }
+    if (/^\d+$/.test(fieldId) && trimmed.toUpperCase() === "DIG_EMPLOYEE") {
+      out.add(fieldId);
     }
   }
   return out;
@@ -103,10 +104,10 @@ export function createDigEmployeeAuthWatch(params: {
     authFilterEnabled = false;
     authorizedIds = new Set();
     if (changed) {
-      params.logger.warn(`baiying-enhance: dig-employee auth fallback to full directory load: ${reason}`);
+      params.logger.warn(`baiying-enhance: dig-employee auth unavailable; no digital employees will be registered: ${reason}`);
       await params.onChange(new Set());
     } else {
-      // params.logger.warn(`baiying-enhance: dig-employee auth unavailable, keep full directory load: ${reason}`);
+      // Keep quiet during startup; the agent sync path treats unavailable auth as an empty registration set.
     }
   };
 
