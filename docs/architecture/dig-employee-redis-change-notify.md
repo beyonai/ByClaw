@@ -46,6 +46,62 @@
 - **未改** 授权主链路：`AuthApplicationService#handleAuth`、`AuthRedisApplicationService` 的 Hash 结构不变。
 - **未改** 数字员工技能缓存键 `RESOURCE_DIG_EMPLOYEE_{resourceId}` 的读写逻辑；Pub/Sub 仅多一层「变更已发生」的广播信号。
 
+## Redis 配置快照键（完整 JSON）
+
+管理端在 `synOpenClawWorkSpace` / `doSyncOpenClawWorkSpace` 将数字员工同步到开放资源目录后，可选将**同一份**标准 JSON 写入 Redis 字符串键，便于下游按文件名语义直接读取，无需访问 MinIO。
+
+| 项 | 约定 |
+|----|------|
+| **Key** | `DIG_EMPLOYEE_{resourceId}`（与 `resource/dig_employee/DIG_EMPLOYEE_{resourceId}.json` 基名一致，无 `.json` 后缀） |
+| **Value** | 与 MinIO 中该文件相同的 UTF-8 JSON（`DigitalEmployeeDetailsDTO` 序列化结果，含 `relTools` 等运行期字段） |
+| **TTL** | 无；软删除数字员工时 `DEL` |
+| **开关** | `byai.dig-employee.json-redis-sync-enabled`（默认 `true`） |
+| **实现** | [`DigitalEmployeeApplicationService`](../../byclaw-be/src/main/java/com/iwhalecloud/byai/manager/application/service/digitemploy/DigitalEmployeeApplicationService.java)、键名 [`DigEmployeeRedisKeys`](../../byclaw-be/src/main/java/com/iwhalecloud/byai/manager/domain/resource/util/DigEmployeeRedisKeys.java) |
+
+### 与技能缓存键的区别
+
+| Key | 内容 |
+|-----|------|
+| `RESOURCE_DIG_EMPLOYEE_{resourceId}` | 技能列表（`querySkillsForOpenApi` 的 JSON 数组），在 save/update 主流程写入 |
+| `DIG_EMPLOYEE_{resourceId}` | **完整**数字员工配置快照，在开放资源目录同步后写入 |
+
+二者并存，互不替代。
+
+### 下游读取示例
+
+```bash
+redis-cli GET DIG_EMPLOYEE_10000005
+```
+
+收到 Pub/Sub `DIG_EMPLOYEE_UPDATED` 后，若需要最新完整配置，可 `GET DIG_EMPLOYEE_{resourceId}`（消息体本身仍不含扩展表全量字段）。
+
+### 数字员工关联资源（技能）
+
+在 `doSyncOpenClawWorkSpace` 完成数字员工自身 Redis 写入后，对其关联且类型为 `TOOLKIT` / `MCP` / `AGENT` / `KG_*` / `VIEW` / `OBJECT` 的资源，将扩展表 `target_content`（与 MinIO 标准 JSON 同源）**始终**写入 Redis，键名与开放资源文件名基名一致：
+
+| 类型示例 | Redis Key 示例 |
+|----------|----------------|
+| AGENT | `AGENT_1111` |
+| TOOLKIT | `TOOLKIT_10000050` |
+| KG_DOC | `KG_DOC_10000001` |
+| MCP | `MCP_{resourceId}` |
+
+```bash
+redis-cli GET AGENT_1111
+```
+
+与 MinIO 补齐逻辑独立：MinIO 仅在产物缺失时补写；Redis 在每次数字员工同步时覆盖更新（受同一开关 `byai.dig-employee.json-redis-sync-enabled` 控制）。
+
+### 启动时全量同步（异步）
+
+参考 [`InitUserResourcesAuthRedisRunner`](../../byclaw-be/src/main/java/com/iwhalecloud/byai/manager/application/runner/InitUserResourcesAuthRedisRunner.java)，[`InitDigEmployeeRedisRunner`](../../byclaw-be/src/main/java/com/iwhalecloud/byai/manager/application/runner/InitDigEmployeeRedisRunner.java) 在应用启动后通过 `CompletableFuture.runAsync` 分页拉取未注销的数字员工，逐个写入 Redis（含关联的 AGENT / TOOLKIT 等），**不阻塞** Spring Boot 启动。
+
+| 配置项 | 默认 | 说明 |
+|--------|------|------|
+| `INIT_DIG_EMPLOYEE_REDIS_ENABLED` | `false` | 是否启用启动全量同步 |
+| `byai.dig-employee.json-redis-sync-enabled` | `true` | 为 `false` 时 Runner 直接跳过 |
+| `load.to.redis.batchSize` | `1000` | 分页大小（与用户权限全量初始化共用） |
+
 ## 背景
 
 - **授权变更**：`AuthApplicationService#handleAuth` 在授权对比落库后调用 `AuthRedisSyncService#asyncSyncAuthChangedUsers`，按用户重写 `USER:RESOURCES:AUTH:{userId}`（见 `AuthRedisApplicationService`）。
