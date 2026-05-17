@@ -97,20 +97,33 @@ function nonEmpty(val: unknown): string {
   return typeof val === "string" && val.trim() ? val.trim() : "";
 }
 
+function normalizeStringList(raw: unknown): string[] {
+  return Array.isArray(raw) ? raw.map((s) => String(s).trim()).filter(Boolean) : [];
+}
+
 /** OpenClaw `agents.list[].skills`: default `[]`; fill from `relSkills` on Baiying detail / agent JSON, else legacy root `skills`. */
 function normalizeAgentListSkills(raw: Record<string, unknown>): string[] {
-  const toStrings = (arr: unknown): string[] =>
-    Array.isArray(arr) ? arr.map((s) => String(s).trim()).filter(Boolean) : [];
-
-  const fromRel = toStrings(raw.relSkills);
+  const fromRel = normalizeStringList(raw.relSkills);
   if (fromRel.length > 0) {
     return fromRel;
   }
-  const fromSkills = toStrings(raw.skills);
+  const fromSkills = normalizeStringList(raw.skills);
   if (fromSkills.length > 0) {
     return fromSkills;
   }
   return [];
+}
+
+/** OpenClaw `agents.list[].tools`: map root `relTools` to `tools.allow` and keep the plugin bridge available. */
+function normalizeAgentListTools(raw: Record<string, unknown>): NonNullable<AgentListEntry["tools"]> {
+  const allow = normalizeStringList(raw.relTools);
+  return allow.length > 0
+    ? {
+        allow: Array.from(new Set([...allow, "baiying_call"])),
+      }
+    : {
+        alsoAllow: ["baiying_call"],
+      };
 }
 
 /** Check if raw is a Baiying platform detail response (has resourceId + resourceName at root). */
@@ -200,6 +213,7 @@ function adaptRawBaiyingDetail(params: {
     integrationType === "INTERFACE" || integrationType === "A2A" || integrationType === "PAGE";
 
   const listSkills = normalizeAgentListSkills(detail);
+  const listTools = normalizeAgentListTools(detail);
 
   if (isBackendAgent) {
     const listEntry: AgentListEntry = {
@@ -207,9 +221,7 @@ function adaptRawBaiyingDetail(params: {
       name,
       identity: { name },
       skills: listSkills,
-      tools: {
-        alsoAllow: ["baiying_call"],
-      },
+      tools: listTools,
     };
 
     return {
@@ -234,9 +246,7 @@ function adaptRawBaiyingDetail(params: {
     name,
     identity: { name },
     skills: listSkills,
-    tools: {
-      alsoAllow: ["baiying_call"],
-    },
+    tools: listTools,
   };
 
   return {

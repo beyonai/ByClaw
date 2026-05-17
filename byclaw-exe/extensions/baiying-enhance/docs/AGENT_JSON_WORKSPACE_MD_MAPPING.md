@@ -20,9 +20,11 @@
 
 ---
 
-## 同步到 OpenClaw 配置：`agents.list[].skills`（非工作区 `.md`）
+## 同步到 OpenClaw 配置：`agents.list[].skills` / `tools`（非工作区 `.md`）
 
 工作区 Markdown 由 `workspace-seed.ts` 负责；而 **`openclaw.json`（或当前生效网关配置）** 里托管 agent 的列表项由 **`src/agent-adapter.ts`** 的 `adaptAgentJson` / `normalizeAgentListSkills` 生成，并在 `workspaceSkillAutoEnable` 默认开启时由 **`src/workspace-skills.ts`** 合并用户上传 skill，最后经 `mergeManagedAgentsIntoConfig` 合并写盘。
+
+### `agents.list[].skills`
 
 | 规则 | 说明 |
 |------|------|
@@ -33,6 +35,15 @@
 | **Workspace 上传 skill** | 默认扫描 `skills/<skillName>/SKILL.md`：只把当前 agent workspace 下的 skill 并入该 agent，不读取其它 agent workspace；main workspace (`workspace/skills`) 下的 skill 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 并入托管子 agent。 |
 
 适用结构：百应详情根对象、`agent_list` 与首条目同文件根上的字段、以及原生根对象——均从**根对象**读取 `relSkills` / `skills`。Workspace skill 只识别一层目录下的 `SKILL.md`，不会采纳更深层级文件。该配置写回默认走 `agents` hot reload，不需要重启 OpenClaw。
+
+### `agents.list[].tools`
+
+| 规则 | 说明 |
+|------|------|
+| 默认保留 `baiying_call` | 百应详情 / 数字员工格式的托管子 agent 带有 **`tools.alsoAllow: ["baiying_call"]`**，用于调用百应关联资源桥接工具。 |
+| **`relTools`** | 百应详情 / 数字员工格式的 JSON **根**上为非空字符串数组时，写入 **`agents.list[].tools.allow`**（元素 `trim`，去掉空串）。 |
+| 通配符 | `relTools: ["*"]` 表示允许全部 OpenClaw tools。 |
+| 热同步 | 源 JSON 中 `relTools` 变化会改变内容 hash；Redis Pub/Sub 或显式 flush 触发重新扫描后会写回当前生效配置。 |
 
 ---
 

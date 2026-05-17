@@ -194,6 +194,28 @@ describe("adaptAgentJson", () => {
     expect(res.listEntry.skills).toEqual(["dws", "clawhub"]);
   });
 
+  it("maps raw Baiying detail relTools to agents.list tools.allow", () => {
+    const raw = {
+      resourceId: "10011257",
+      resourceName: "Tool limited employee",
+      integrationType: "NONE",
+      relTools: ["*", " read ", "", "write"],
+    };
+    const res = adaptAgentJson({
+      raw,
+      fileName: "DIG_EMPLOYEE_10011257.json",
+      embedApiKeysFromJson: false,
+    });
+    expect("error" in res).toBe(false);
+    if ("error" in res) {
+      return;
+    }
+    expect(res.listEntry.tools).toEqual({
+      allow: ["*", "read", "write"],
+      alsoAllow: ["baiying_call"],
+    });
+  });
+
   it("maps raw Baiying detail (integrationType INTERFACE)", () => {
     const raw = {
       resourceId: "20001",
