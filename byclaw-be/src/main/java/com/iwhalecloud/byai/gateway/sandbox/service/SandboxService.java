@@ -1,6 +1,9 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
 import java.time.Duration;
+import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -132,10 +135,6 @@ public class SandboxService {
     /** 沙箱空闲超时时间（分钟） */
     @Value("${sandbox.idle.timeout.minutes:30}")
     private int idleTimeoutMinutes;
-
-    /** 沙箱网关令牌 */
-    @Value("${sandbox.gateway.token:ztesoft}")
-    private String sandboxGatewayToken;
 
     @Value("${byclaw.sandbox.default-lease-policy:REMOTE_AUTO_EXPIRE}")
     private String defaultLeasePolicy;
@@ -408,6 +407,7 @@ public class SandboxService {
             ? AUTO_RELEASE_REMOTE : AUTO_RELEASE_MANUAL;
         request.setEnvs(launchContext.getEnvs());
         request.setUserInfo(launchContext.getUserInfo());
+        String gatewayToken = launchContext.getGatewayToken();
 
         Date now = new Date();
         SsSandboxRecord record = new SsSandboxRecord();
@@ -452,7 +452,7 @@ public class SandboxService {
         }
 
         SandboxLaunchData launchData = response.getData();
-        String endpoint = new SandboxEndpointUrlCustomizer(sandboxGatewayToken)
+        String endpoint = new SandboxEndpointUrlCustomizer(gatewayToken)
             .toAccessEndpoint(launchData.getEndpoint(), launchData.getImageType());
         launchData.setEndpoint(endpoint);
         launchData.setEndpoints(StringUtils.isNotBlank(endpoint) ? List.of(endpoint) : List.of());
@@ -480,7 +480,7 @@ public class SandboxService {
         sandboxMetadataCache.put(toSandboxInfo(record));
 
         registerSandboxEndpoint(userCode, routing, endpoint, launchData.getImageType(), launchData.getSandboxId(),
-            launchData.getServicePort());
+            launchData.getServicePort(), gatewayToken);
         LOGGER.info("沙箱启动成功，记录：{}，endpoint：{}，timeoutSeconds：{}，remoteExpiresAt：{}，nextRenewAt：{}",
             sandboxRef(record), endpoint, launchData.getTimeoutSeconds(), remoteExpiresAt, nextRenewAt);
         return launchData;
@@ -598,6 +598,7 @@ public class SandboxService {
         }
         List<SandboxInfo> cached = sandboxMetadataCache.listByUser(userCode);
         if (cached != null && !cached.isEmpty()) {
+            cached.forEach(this::hydrateGatewayToken);
             return cached;
         }
         List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUser(userCode);
@@ -1069,7 +1070,7 @@ public class SandboxService {
     }
 
     private void registerSandboxEndpoint(String userCode, SandboxLaunchRouting routing, String endpoint, String imageType,
-        String sandboxId, Integer servicePort) {
+        String sandboxId, Integer servicePort, String gatewayToken) {
         if (StringUtils.isBlank(endpoint)) {
             LOGGER.warn("沙箱endpoint为空，跳过服务注册，用户编码：{}，沙箱类型：{}", userCode,
                 routing != null ? routing.getSandboxType() : null);
@@ -1085,7 +1086,7 @@ public class SandboxService {
         try {
             SandboxEndpointRegistryTarget target = new SandboxEndpointRegistryTargetResolver()
                 .resolve(endpoint, imageType, sandboxId, servicePort);
-            Map<String, Object> metadata = new SandboxEndpointRegistryMetadataFactory(sandboxGatewayToken)
+            Map<String, Object> metadata = new SandboxEndpointRegistryMetadataFactory(gatewayToken)
                 .build(imageType);
             cleanupSandboxRegistryKeys(serviceName);
 
@@ -1172,11 +1173,54 @@ public class SandboxService {
             .userCode(record.getUserCode())
             .sandboxType(record.getSandboxType())
             .endpoints(endpoints)
+            .gatewayToken(extractGatewayToken(endpoints))
             .timeoutSeconds(record.getTimeoutSeconds())
             .remoteExpiresAt(record.getRemoteExpiresAt())
             .createdTime(toLocalDateTime(record.getCreateTime()))
             .lastHeartbeatTime(toLocalDateTime(record.getLastAccessTime()))
             .build();
+    }
+
+    private void hydrateGatewayToken(SandboxInfo info) {
+        if (info == null || StringUtils.isNotBlank(info.getGatewayToken())) {
+            return;
+        }
+        info.setGatewayToken(extractGatewayToken(info.getEndpoints()));
+    }
+
+    private String extractGatewayToken(List<String> endpoints) {
+        if (endpoints == null || endpoints.isEmpty()) {
+            return null;
+        }
+        for (String endpoint : endpoints) {
+            String token = extractGatewayToken(endpoint);
+            if (StringUtils.isNotBlank(token)) {
+                return token;
+            }
+        }
+        return null;
+    }
+
+    private String extractGatewayToken(String endpoint) {
+        if (StringUtils.isBlank(endpoint)) {
+            return null;
+        }
+        try {
+            String rawQuery = URI.create(endpoint).getRawQuery();
+            if (StringUtils.isBlank(rawQuery)) {
+                return null;
+            }
+            for (String pair : rawQuery.split("&")) {
+                String[] parts = pair.split("=", 2);
+                if (parts.length == 2 && "token".equals(URLDecoder.decode(parts[0], StandardCharsets.UTF_8))) {
+                    return URLDecoder.decode(parts[1], StandardCharsets.UTF_8);
+                }
+            }
+        }
+        catch (IllegalArgumentException e) {
+            LOGGER.warn("解析沙箱endpoint token失败，endpoint：{}，原因：{}", endpoint, e.getMessage());
+        }
+        return null;
     }
 
     private java.time.LocalDateTime toLocalDateTime(Date date) {

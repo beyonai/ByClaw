@@ -13,13 +13,22 @@ class SandboxEndpointUrlCustomizer {
     }
 
     String toAccessEndpoint(String endpoint, String imageType) {
-        if (StringUtils.isBlank(endpoint) || SandboxImageType.isUiAgent(imageType)) {
+        if (StringUtils.isBlank(endpoint)) {
             return endpoint;
         }
-        String chatEndpoint = StringUtils.removeEnd(endpoint, "/") + "/chat";
         if (StringUtils.isBlank(sandboxGatewayToken)) {
-            return chatEndpoint;
+            return SandboxImageType.isUiAgent(imageType) ? endpoint : StringUtils.removeEnd(endpoint, "/") + "/chat";
         }
-        return chatEndpoint + "?token=" + sandboxGatewayToken;
+        String accessEndpoint = SandboxImageType.isUiAgent(imageType)
+            ? endpoint : StringUtils.removeEnd(endpoint, "/") + "/chat";
+        return appendToken(accessEndpoint);
+    }
+
+    private String appendToken(String endpoint) {
+        int fragmentIndex = endpoint.indexOf('#');
+        String base = fragmentIndex >= 0 ? endpoint.substring(0, fragmentIndex) : endpoint;
+        String fragment = fragmentIndex >= 0 ? endpoint.substring(fragmentIndex) : "";
+        String separator = base.contains("?") ? "&" : "?";
+        return base + separator + "token=" + sandboxGatewayToken + fragment;
     }
 }

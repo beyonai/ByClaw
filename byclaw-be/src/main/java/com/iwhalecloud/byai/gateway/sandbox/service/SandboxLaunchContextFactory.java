@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.gateway.sandbox.service;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -36,9 +37,6 @@ import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 public class SandboxLaunchContextFactory {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SandboxLaunchContextFactory.class);
-
-    @Value("${sandbox.gateway.token:ztesoft}")
-    private String sandboxGatewayToken;
 
     @Value("${sandbox.model_provider_name:iwhalecloud}")
     private String modelProviderName;
@@ -98,9 +96,14 @@ public class SandboxLaunchContextFactory {
     }
 
     public SandboxLaunchContext buildContext(String userCode, Long resourceId, String sandboxType) {
-        Map<String, String> envs = buildSandboxEnvs(userCode, queryDigEmployee(resourceId), resourceId);
+        String gatewayToken = generateGatewayToken();
+        Map<String, String> envs = buildSandboxEnvs(userCode, queryDigEmployee(resourceId), resourceId, gatewayToken);
         applySandboxAgentTypeEnv(envs, sandboxType, userCode);
-        return new SandboxLaunchContext(sandboxType, envs, buildUserInfo());
+        return new SandboxLaunchContext(sandboxType, envs, buildUserInfo(), gatewayToken);
+    }
+
+    private String generateGatewayToken() {
+        return UUID.randomUUID().toString().replace("-", "");
     }
 
     private void applySandboxAgentTypeEnv(Map<String, String> envs, String sandboxType, String userCode) {
@@ -161,10 +164,13 @@ public class SandboxLaunchContextFactory {
         return digEmployee;
     }
 
-    private Map<String, String> buildSandboxEnvs(String userCode, SsResExtDigEmployee digEmployee, Long resourceId) {
+    private Map<String, String> buildSandboxEnvs(String userCode, SsResExtDigEmployee digEmployee, Long resourceId,
+        String gatewayToken) {
         Map<String, String> envs = new HashMap<>(8);
 
         loadEnvFile(envs);
+        envs.put("gateway_token", gatewayToken);
+        envs.put("OPENCLAW_GATEWAY_TOKEN", gatewayToken);
 
         if (digEmployee == null || StringUtils.isBlank(digEmployee.getPrologue())) {
             LOGGER.warn("资源ID：{} 的prologue为空，无法构建模型环境变量", resourceId);
@@ -199,10 +205,6 @@ public class SandboxLaunchContextFactory {
             if (StringUtils.isNotBlank(modelDto.getAuthToken())) {
                 envs.put("model_api_key", modelDto.getAuthToken());
                 envs.put("MODEL_API_KEY", modelDto.getAuthToken());
-            }
-            if (StringUtils.isNotBlank(sandboxGatewayToken)) {
-                envs.put("gateway_token", sandboxGatewayToken);
-                envs.put("OPENCLAW_GATEWAY_TOKEN", sandboxGatewayToken);
             }
             String bearer = byaiSystemConfigService.getDcSystemConfigValueByCode("AUTHORIZATION_BEARER");
             if (StringUtil.isNotEmpty(bearer)) {
