@@ -393,7 +393,7 @@ export interface UploadSkillZipResponse {
 /**
  * 上传技能zip文件
  * 上传技能zip包到服务器
- * @param data FormData格式的上传数据（包含file文件和userCode用户编码）
+ * @param data FormData格式的上传数据（包含file文件、resourceId资源ID和userCode用户编码）
  * @returns Promise<UploadSkillZipResponse> 上传结果
  */
 export const uploadSkillZip = (data: FormData) => {
@@ -412,10 +412,10 @@ export const uploadSkillZip = (data: FormData) => {
 /**
  * 下载技能zip文件
  * 下载指定路径的技能zip包
- * @param params 参数（包含skillPath技能路径和可选的userCode用户编码）
+ * @param params 参数（包含skillPath技能路径、resourceId资源ID和可选的userCode用户编码）
  * @returns Promise<Blob> 文件流
  */
-export const downloadSkillZip = (params: { skillPath: string; userCode?: string }) => {
+export const downloadSkillZip = (params: { skillPath: string; resourceId?: string | number; userCode?: string }) => {
   return POST<any>('/byaiService/tool/downloadSkillZip', params, {
     timeout: 480000,
     responseType: 'blob',

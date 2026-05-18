@@ -178,7 +178,7 @@ const ResourceList = (props: Props) => {
         const response = await qrySkillListByUserCode({
           userCode: userInfo?.userCode,
           keyword: searchValue.current.trim(),
-          resourceId: agentId,
+          resourceId: normalizedAgentId,
         });
         const dataList = Array.isArray(response) ? response : [];
         // 将返回的数据映射为组件需要的格式
@@ -407,11 +407,13 @@ const ResourceList = (props: Props) => {
         message.error(intl.formatMessage({ id: 'resource.skillDownload.noSkillPath' }));
         return;
       }
-
       setDownloadingSkill(skillPath);
 
       try {
-        const params: { skillPath: string; userCode?: string } = { skillPath };
+        const params: { skillPath: string; resourceId?: string | number; userCode?: string } = { skillPath };
+        if (normalizedAgentId) {
+          params.resourceId = normalizedAgentId;
+        }
         if (userInfo?.userCode) {
           params.userCode = userInfo.userCode;
         }
@@ -443,7 +445,7 @@ const ResourceList = (props: Props) => {
     };
 
     return debounce(download, 500, { leading: true, trailing: false });
-  }, [userInfo, intl]);
+  }, [userInfo, normalizedAgentId, intl]);
 
   const handleRelatedObjectClick = async (object: any, forceRefresh = false) => {
     const objectKey = getRelatedObjectKey(object);

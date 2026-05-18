@@ -10,6 +10,8 @@ import java.util.zip.ZipOutputStream;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.storage.UserFS;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,16 +35,24 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class ByClawSkillUploadApplicationServiceTest {
 
     private static final String USER_CODE = "adminvip";
 
-    private static final String WORKSPACE_PREFIX = "/.openclaw/workspace/skills/";
+    private static final Long RESOURCE_ID = 10000417L;
+
+    private static final String AGENT_PREFIX = "/.openclaw/workspace-baiying-agent-10000417/skills/";
+
+    private static final String SUPER_PREFIX = "/.openclaw/workspace/skills/";
 
     @Mock
     private UserFS userFS;
+
+    @Mock
+    private SsResourceService ssResourceService;
 
     private ByClawSkillUploadApplicationService service;
 
@@ -59,6 +69,7 @@ class ByClawSkillUploadApplicationServiceTest {
 
         service = new ByClawSkillUploadApplicationService();
         ReflectionTestUtils.setField(service, "userFS", userFS);
+        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
     }
 
     @AfterEach
@@ -71,18 +82,19 @@ class ByClawSkillUploadApplicationServiceTest {
         MultipartFile zip = buildZip("skill.zip",
             "fol-auto-biztravel/SKILL.md", "# Skill",
             "fol-auto-biztravel/scripts/run.py", "print('hi')");
+        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
 
-        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, zip);
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
 
         verify(userFS).init();
-        verify(userFS).delete(WORKSPACE_PREFIX + "fol-auto-biztravel/");
+        verify(userFS).delete(AGENT_PREFIX + "fol-auto-biztravel/");
         ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
         verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
-        assertTrue(pathCaptor.getAllValues().contains(WORKSPACE_PREFIX + "fol-auto-biztravel/SKILL.md"));
-        assertTrue(pathCaptor.getAllValues().contains(WORKSPACE_PREFIX + "fol-auto-biztravel/scripts/run.py"));
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "fol-auto-biztravel/SKILL.md"));
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "fol-auto-biztravel/scripts/run.py"));
 
         assertEquals("fol-auto-biztravel", dto.getSkillName());
-        assertEquals(WORKSPACE_PREFIX + "fol-auto-biztravel", dto.getSkillPath());
+        assertEquals(AGENT_PREFIX + "fol-auto-biztravel", dto.getSkillPath());
         assertNotNull(dto.getSkillDocObjectKey());
         assertTrue(dto.getSkillDocObjectKey().endsWith("/SKILL.md"));
     }
@@ -92,12 +104,13 @@ class ByClawSkillUploadApplicationServiceTest {
         // skill.md（小写）也被识别，但写入时统一规范化为 SKILL.md。
         MultipartFile zip = buildZip("skill.zip",
             "alpha/skill.md", "# alpha");
+        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
 
-        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, zip);
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
 
         ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
         verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
-        assertTrue(pathCaptor.getAllValues().contains(WORKSPACE_PREFIX + "alpha/SKILL.md"));
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "alpha/SKILL.md"));
         assertEquals("alpha", dto.getSkillName());
     }
 
@@ -109,7 +122,7 @@ class ByClawSkillUploadApplicationServiceTest {
             "b/SKILL.md", "y");
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-            () -> service.uploadSkillZip(USER_CODE, zip));
+            () -> service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip));
         assertTrue(ex.getMessage().contains("SKILL.md"));
     }
 
@@ -118,7 +131,7 @@ class ByClawSkillUploadApplicationServiceTest {
         MultipartFile zip = buildZip("skill.zip", "alpha/README.md", "no doc");
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-            () -> service.uploadSkillZip(USER_CODE, zip));
+            () -> service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip));
         assertTrue(ex.getMessage().contains("SKILL.md"));
     }
 
@@ -127,15 +140,16 @@ class ByClawSkillUploadApplicationServiceTest {
         MultipartFile zip = buildZip("fol-auto-biztravel.zip",
             "SKILL.md", "# root",
             "scripts/run.py", "print('hi')");
+        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
 
-        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, zip);
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
 
         assertEquals("fol-auto-biztravel", dto.getSkillName());
-        verify(userFS).delete(WORKSPACE_PREFIX + "fol-auto-biztravel/");
+        verify(userFS).delete(AGENT_PREFIX + "fol-auto-biztravel/");
         ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
         verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
-        assertTrue(pathCaptor.getAllValues().contains(WORKSPACE_PREFIX + "fol-auto-biztravel/SKILL.md"));
-        assertTrue(pathCaptor.getAllValues().contains(WORKSPACE_PREFIX + "fol-auto-biztravel/scripts/run.py"));
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "fol-auto-biztravel/SKILL.md"));
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "fol-auto-biztravel/scripts/run.py"));
     }
 
     @Test
@@ -144,8 +158,9 @@ class ByClawSkillUploadApplicationServiceTest {
         MultipartFile zip = buildZip("skill.zip",
             "alpha/SKILL.md", "ok",
             "alpha/../../etc/passwd", "hack");
+        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
 
-        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, zip);
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
 
         assertEquals("alpha", dto.getSkillName());
         ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
@@ -158,7 +173,7 @@ class ByClawSkillUploadApplicationServiceTest {
     void shouldRejectEmptyUserCode() {
         MultipartFile zip = buildZip("skill.zip", "a/SKILL.md", "x");
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-            () -> service.uploadSkillZip("  ", zip));
+            () -> service.uploadSkillZip("  ", RESOURCE_ID, zip));
         assertEquals("userCode不能为空", ex.getMessage());
     }
 
@@ -166,8 +181,31 @@ class ByClawSkillUploadApplicationServiceTest {
     void shouldRejectEmptyZip() {
         MockMultipartFile zip = new MockMultipartFile("file", "empty.zip", "application/zip", new byte[0]);
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-            () -> service.uploadSkillZip(USER_CODE, zip));
+            () -> service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip));
         assertEquals("Skill 压缩包不能为空", ex.getMessage());
+    }
+
+    @Test
+    void shouldUploadToSuperAssistantWorkspaceWhenResourceIdIsNull() {
+        MultipartFile zip = buildZip("assistant-core.zip",
+            "assistant-core/SKILL.md", "# Skill",
+            "assistant-core/scripts/run.py", "print('hi')");
+        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("adminvip_main"));
+
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
+
+        verify(userFS).delete(SUPER_PREFIX + "assistant-core/");
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
+        assertTrue(pathCaptor.getAllValues().contains(SUPER_PREFIX + "assistant-core/SKILL.md"));
+        assertTrue(pathCaptor.getAllValues().contains(SUPER_PREFIX + "assistant-core/scripts/run.py"));
+        assertEquals(SUPER_PREFIX + "assistant-core", dto.getSkillPath());
+    }
+
+    private SsResource resource(String resourceCode) {
+        SsResource resource = new SsResource();
+        resource.setResourceCode(resourceCode);
+        return resource;
     }
 
     /** 构造一个 zip MultipartFile，参数按 (entryName, content) 成对传入；filename 决定 originalFilename。 */

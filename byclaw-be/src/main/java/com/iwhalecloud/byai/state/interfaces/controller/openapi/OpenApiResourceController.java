@@ -2,13 +2,17 @@ package com.iwhalecloud.byai.state.interfaces.controller.openapi;
 
 import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
 import com.iwhalecloud.byai.common.feign.request.manager.ResourceOperQo;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.application.service.openapi.OpenResourceApplicationService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
 import com.iwhalecloud.byai.manager.dto.resource.SsResourceRelDetailDTO;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+import com.iwhalecloud.byai.manager.qo.resource.DirAndFileQo;
 import com.iwhalecloud.byai.manager.qo.resource.ResourceQo;
+import com.iwhalecloud.byai.manager.vo.resource.DirAndFileVo;
+import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
 import com.iwhalecloud.byai.state.domain.resource.qo.OpenApiDigEmployeeQueryQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.OpenApiDigEmployeeSkillQo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceApplicationService;
@@ -30,6 +34,9 @@ import java.util.List;
 @RequestMapping("/open/api")
 @Slf4j
 public class OpenApiResourceController {
+
+    @Autowired
+    private DatasetApplicationService datasetApplicationService;
 
     @Autowired
     private ResourceApplicationService resourceApplicationService;
@@ -116,5 +123,17 @@ public class OpenApiResourceController {
     public ResponseUtil<PageInfo<SsResource>> getUserAuthResource(@RequestBody ResourceQo resourceQo) {
         PageInfo<SsResource> pageVO = openResourceApplicationService.getUserAuthResource(resourceQo);
         return ResponseUtil.successResponse(pageVO);
+    }
+
+    /**
+     * 列出知识库文件
+     *
+     * @param dirAndFileQo 入参
+     * @return ResponseUtil
+     */
+    @PostMapping("/v1/dataset/listDir")
+    public ResponseUtil<List<DirAndFileVo>> listDirAndFile(@RequestBody DirAndFileQo dirAndFileQo) {
+        List<DirAndFileVo> dirAndFileVos = datasetApplicationService.queryDirAndFileByLevel(dirAndFileQo);
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"), dirAndFileVos);
     }
 }
