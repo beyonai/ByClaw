@@ -14,6 +14,8 @@ import io.modelcontextprotocol.spec.McpSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
 import java.util.Map;
 import java.util.Set;
 
@@ -22,6 +24,7 @@ import java.util.Set;
  * @date 2026-05-18 17:10:34
  * @description TODO
  */
+@Service
 public class SsResExtMcpService {
 
     private static final Logger logger = LoggerFactory.getLogger(SsResExtMcpService.class);
