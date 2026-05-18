@@ -116,6 +116,12 @@ export function agentHandler(item: IAgent) {
     myAgentType = agentTypeMap.openclaw;
   }
 
+  const rawIsDefault = item.isDefault ?? (item as Record<string, unknown>).default;
+  const normalizedIsDefault =
+    rawIsDefault === undefined
+      ? undefined
+      : rawIsDefault === true || String(rawIsDefault) === 'true' || String(rawIsDefault) === '1';
+
   return {
     ...item,
     name: item.resourceName || item.name || '',
@@ -124,6 +130,12 @@ export function agentHandler(item: IAgent) {
 
     chatAvatar: myAvatar,
     category: 'all',
+    ...(normalizedIsDefault === undefined
+      ? {}
+      : {
+        isDefault: normalizedIsDefault,
+        canSetDefault: item.canSetDefault ?? !normalizedIsDefault,
+      }),
 
     ...get(agentMap, myAgentType, {}),
   };
