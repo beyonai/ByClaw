@@ -380,8 +380,15 @@ describe("createAgentWatchdog", () => {
 
   it("removes managed agent when deletedSourceKeys is set even if JSON file still exists", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-del-"));
+    const stateDir = path.join(dir, ".openclaw");
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
     await writeFile(path.join(dir, "demo.json"), STABLE_AGENT_JSON, "utf8");
     const agentId = `${MANAGED_AGENT_PREFIX}10863047`;
+    const activeWs = path.join(stateDir, `workspace-${agentId}`);
+    const archiveRoot = path.join(dir, ".baiying-workspaces");
+    const archiveWs = path.join(archiveRoot, path.basename(activeWs));
+    await mkdir(activeWs, { recursive: true });
+    await writeFile(path.join(activeWs, "deleted.txt"), "delete signal delete", "utf8");
     const indexPayload = {
       version: INDEX_VERSION,
       entries: { [agentId]: stableHash() },
@@ -403,6 +410,7 @@ describe("createAgentWatchdog", () => {
       pluginConfig: {
         embedApiKeysFromJson: true,
         workspaceAutoSeed: false,
+        workspaceArchiveDir: archiveRoot,
         workspaceSkillAutoEnable: false,
         persistAgentContentIndex: true,
       },
@@ -417,6 +425,10 @@ describe("createAgentWatchdog", () => {
     await wd.stop();
 
     expect(writeConfigFile).toHaveBeenCalledTimes(1);
+    expect(await pathExists(activeWs)).toBe(false);
+    expect(await pathExists(archiveWs)).toBe(false);
+    const logText = api.logger.info.mock.calls.map((call: any[]) => String(call[0])).join("\n");
+    expect(logText).toContain(`deleted workspace for ${agentId} (DIG_EMPLOYEE_DELETED)`);
   });
 
   it("unregisters agent when authorization filter excludes it", async () => {
@@ -502,6 +514,51 @@ describe("createAgentWatchdog", () => {
     expect(writeConfigFile).toHaveBeenCalledTimes(1);
     expect(await pathExists(activeWs)).toBe(false);
     expect(await readFile(path.join(archiveWs, "secret.txt"), "utf8")).toBe("do not expose");
+  });
+
+  it("archives unauthorized mounted managed workspaces on startup even when config has no agent entry", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "baiying-wd-mounted-orphan-"));
+    const stateDir = path.join(root, ".openclaw");
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+    const orphanAgentId = `${MANAGED_AGENT_PREFIX}222`;
+    const activeWs = path.join(stateDir, `workspace-${orphanAgentId}`);
+    const archiveRoot = path.join(root, ".baiying-workspaces");
+    const archiveWs = path.join(archiveRoot, path.basename(activeWs));
+    await mkdir(activeWs, { recursive: true });
+    await writeFile(path.join(activeWs, "history.txt"), "archived on startup", "utf8");
+
+    const writeConfigFile = vi.fn(async () => {});
+    const api = createMockApi(writeConfigFile) as any;
+
+    const wd = createAgentWatchdogBase({
+      api,
+      registry: new AgentRegistryState(),
+      redisJsonStore: createMemoryRedisJsonStore(new Map()),
+      authorizationFilter: { getAuthorizedSourceKeys: () => new Set() },
+      contentIndexPath: path.join(root, "agent-content-index.json"),
+      executorPath: path.join(root, "executor.py"),
+      pluginConfig: {
+        embedApiKeysFromJson: true,
+        workspaceAutoSeed: false,
+        workspaceArchiveDir: archiveRoot,
+        workspaceSkillAutoEnable: false,
+        persistAgentContentIndex: false,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start();
+    await wd.__flushNow!();
+    await wd.stop();
+
+    expect(writeConfigFile).not.toHaveBeenCalled();
+    expect(await pathExists(activeWs)).toBe(false);
+    expect(await readFile(path.join(archiveWs, "history.txt"), "utf8")).toBe("archived on startup");
+    const logText = api.logger.info.mock.calls.map((call: any[]) => String(call[0])).join("\n");
+    expect(logText).toContain("startup/no-sync unauthorized workspace archive check");
+    expect(logText).toContain("unauthorizedActiveWorkspaces=1");
+    expect(logText).toContain(orphanAgentId);
+    expect(logText).toContain(`${activeWs} -> ${archiveWs}`);
   });
 
   it("restores an archived workspace and seeds latest managed markdown on reauthorization", async () => {

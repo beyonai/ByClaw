@@ -14,6 +14,22 @@ type LoggerLike = {
   warn: (message: string) => void;
 };
 
+export type ManagedWorkspaceArchiveResult = {
+  agentId: string;
+  activeDir: string;
+  archiveDir: string;
+  rotatedArchiveDir?: string;
+  archived: boolean;
+  error?: string;
+};
+
+export type ManagedWorkspaceDeleteResult = {
+  agentId: string;
+  workspaceDir: string;
+  deleted: boolean;
+  error?: string;
+};
+
 function expandHome(raw: string): string {
   return raw === "~" ? homedir() : path.join(homedir(), raw.slice(1));
 }
@@ -31,6 +47,10 @@ export function resolveWorkspaceArchiveRoot(config: BaiyingEnhancePluginConfig =
 
 function isManagedAgentId(agentId: string): boolean {
   return agentId.startsWith(MANAGED_AGENT_PREFIX);
+}
+
+function sourceKeyFromManagedAgentId(agentId: string): string | undefined {
+  return isManagedAgentId(agentId) ? agentId.slice(MANAGED_AGENT_PREFIX.length) : undefined;
 }
 
 function archivePathForAgent(params: {
@@ -118,11 +138,12 @@ export async function archiveUnauthorizedManagedAgentWorkspaces(params: {
   pluginConfig: BaiyingEnhancePluginConfig;
   agents: Array<{ agentId: string; workspaceDir: string }>;
   log: LoggerLike;
-}): Promise<void> {
+}): Promise<ManagedWorkspaceArchiveResult[]> {
   if (params.pluginConfig.workspaceArchiveOnUnauthorized === false) {
-    return;
+    return [];
   }
   const archiveRoot = resolveWorkspaceArchiveRoot(params.pluginConfig);
+  const results: ManagedWorkspaceArchiveResult[] = [];
   for (const agent of params.agents) {
     if (!isManagedAgentId(agent.agentId)) {
       continue;
@@ -132,21 +153,176 @@ export async function archiveUnauthorizedManagedAgentWorkspaces(params: {
       continue;
     }
     const archiveDir = archivePathForAgent({ archiveRoot, activeWorkspaceDir: activeDir });
+    let rotatedArchiveDir: string | undefined;
     try {
       if (await exists(archiveDir)) {
-        const rotated = await rotateExistingArchive(archiveDir);
+        rotatedArchiveDir = await rotateExistingArchive(archiveDir);
         params.log.info(
-          `baiying-enhance: rotated existing workspace archive for ${agent.agentId} from ${archiveDir} to ${rotated}`,
+          `baiying-enhance: rotated existing workspace archive for ${agent.agentId} from ${archiveDir} to ${rotatedArchiveDir}`,
         );
       }
       await movePath(activeDir, archiveDir);
       params.log.info(`baiying-enhance: archived workspace for ${agent.agentId} from ${activeDir} to ${archiveDir}`);
+      results.push({
+        agentId: agent.agentId,
+        activeDir,
+        archiveDir,
+        rotatedArchiveDir,
+        archived: true,
+      });
     } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
       params.log.warn(
-        `baiying-enhance: workspace archive failed for ${agent.agentId}: ${
+        `baiying-enhance: workspace archive failed for ${agent.agentId}: ${error}`,
+      );
+      results.push({
+        agentId: agent.agentId,
+        activeDir,
+        archiveDir,
+        rotatedArchiveDir,
+        archived: false,
+        error,
+      });
+    }
+  }
+  return results;
+}
+
+export async function deleteManagedAgentWorkspaces(params: {
+  agents: Array<{ agentId: string; workspaceDir: string }>;
+  log: LoggerLike;
+  reason: string;
+}): Promise<ManagedWorkspaceDeleteResult[]> {
+  const results: ManagedWorkspaceDeleteResult[] = [];
+  for (const agent of params.agents) {
+    if (!isManagedAgentId(agent.agentId)) {
+      continue;
+    }
+    if (!(await exists(agent.workspaceDir))) {
+      continue;
+    }
+    try {
+      await fs.rm(agent.workspaceDir, { recursive: true, force: true });
+      params.log.info(
+        `baiying-enhance: deleted workspace for ${agent.agentId} (${params.reason}) at ${agent.workspaceDir}`,
+      );
+      results.push({
+        agentId: agent.agentId,
+        workspaceDir: agent.workspaceDir,
+        deleted: true,
+      });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      params.log.warn(
+        `baiying-enhance: workspace delete failed for ${agent.agentId} (${params.reason}) at ${agent.workspaceDir}: ${error}`,
+      );
+      results.push({
+        agentId: agent.agentId,
+        workspaceDir: agent.workspaceDir,
+        deleted: false,
+        error,
+      });
+    }
+  }
+  return results;
+}
+
+export async function archiveUnauthorizedActiveManagedWorkspaces(params: {
+  pluginConfig: BaiyingEnhancePluginConfig;
+  authorizedSourceKeys: Set<string>;
+  ignoredSourceKeys?: Set<string>;
+  log: LoggerLike;
+  checkLabel?: string;
+}): Promise<ManagedWorkspaceArchiveResult[]> {
+  const label = params.checkLabel?.trim() || "auth";
+  if (params.pluginConfig.workspaceArchiveOnUnauthorized === false) {
+    params.log.info(
+      `baiying-enhance: ${label} unauthorized workspace archive check skipped (workspaceArchiveOnUnauthorized=false)`,
+    );
+    return [];
+  }
+
+  const stateDir = resolveStateDir();
+  const archiveRoot = resolveWorkspaceArchiveRoot(params.pluginConfig);
+  const authorized = new Set([...params.authorizedSourceKeys].map((id) => id.trim()).filter(Boolean));
+  const ignored = new Set([...(params.ignoredSourceKeys ?? [])].map((id) => id.trim()).filter(Boolean));
+  const activeWorkspaces: Array<{ agentId: string; workspaceDir: string; sourceKey: string }> = [];
+
+  try {
+    const entries = await fs.readdir(stateDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.startsWith(`workspace-${MANAGED_AGENT_PREFIX}`)) {
+        continue;
+      }
+      const agentId = entry.name.slice("workspace-".length);
+      const sourceKey = sourceKeyFromManagedAgentId(agentId);
+      if (!sourceKey) {
+        continue;
+      }
+      activeWorkspaces.push({
+        agentId,
+        sourceKey,
+        workspaceDir: path.join(stateDir, entry.name),
+      });
+    }
+  } catch (err) {
+    const code = err && typeof err === "object" ? (err as { code?: unknown }).code : undefined;
+    if (code !== "ENOENT") {
+      params.log.warn(
+        `baiying-enhance: ${label} unauthorized workspace archive check failed to scan ${stateDir}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
+      return [];
     }
   }
+
+  const unauthorized = activeWorkspaces.filter(
+    (workspace) => !authorized.has(workspace.sourceKey) && !ignored.has(workspace.sourceKey),
+  );
+  const ignoredActiveCount = activeWorkspaces.filter((workspace) => ignored.has(workspace.sourceKey)).length;
+  params.log.info(
+    `baiying-enhance: ${label} unauthorized workspace archive check — stateDir=${stateDir}; archiveRoot=${archiveRoot}; authorized=${authorized.size}; activeManagedWorkspaces=${activeWorkspaces.length}; unauthorizedActiveWorkspaces=${unauthorized.length}; ignoredActiveWorkspaces=${ignoredActiveCount}`,
+  );
+
+  if (unauthorized.length === 0) {
+    params.log.info(`baiying-enhance: ${label} unauthorized workspace archive check — no migration needed`);
+    return [];
+  }
+
+  params.log.info(
+    `baiying-enhance: ${label} unauthorized workspace archive candidates:\n${unauthorized
+      .map((workspace) => `  * ${workspace.agentId} sourceKey=${workspace.sourceKey} active=${workspace.workspaceDir}`)
+      .join("\n")}`,
+  );
+
+  const results = await archiveUnauthorizedManagedAgentWorkspaces({
+    pluginConfig: params.pluginConfig,
+    agents: unauthorized,
+    log: params.log,
+  });
+  const archived = results.filter((result) => result.archived);
+  const failed = results.filter((result) => !result.archived);
+  params.log.info(
+    `baiying-enhance: ${label} unauthorized workspace archive check completed — migrated=${archived.length}; failed=${failed.length}${
+      archived.length > 0
+        ? `\n${archived
+            .map(
+              (result) =>
+                `  * ${result.agentId} ${result.activeDir} -> ${result.archiveDir}${
+                  result.rotatedArchiveDir ? ` (rotatedPrevious=${result.rotatedArchiveDir})` : ""
+                }`,
+            )
+            .join("\n")}`
+        : ""
+    }`,
+  );
+  if (failed.length > 0) {
+    params.log.warn(
+      `baiying-enhance: ${label} unauthorized workspace archive failures:\n${failed
+        .map((result) => `  * ${result.agentId} ${result.activeDir}: ${result.error ?? "unknown error"}`)
+        .join("\n")}`,
+    );
+  }
+  return results;
 }

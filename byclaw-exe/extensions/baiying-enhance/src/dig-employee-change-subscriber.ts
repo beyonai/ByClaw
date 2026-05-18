@@ -218,10 +218,15 @@ export function createDigEmployeeChangeSubscriber(params: {
         );
         continue;
       }
-      if (!isAuthorized(ev.resourceIdStr)) {
+      const isDelete = ev.eventType === "DIG_EMPLOYEE_DELETED";
+      const authSet = params.getAuthorizedIds();
+      if (!isDelete && !isAuthorized(ev.resourceIdStr)) {
         params.logger.info(
           `baiying-enhance: dig-employee change skipped (not authorized) resourceId=${ev.resourceIdStr} type=${ev.eventType}`,
         );
+        continue;
+      }
+      if (isDelete && !authSet && params.strictAuth && !isAuthorized(ev.resourceIdStr)) {
         continue;
       }
       if (isStaleChangedAt(ev)) {
@@ -233,13 +238,16 @@ export function createDigEmployeeChangeSubscriber(params: {
       const changedAtPart =
         ev.changedAt !== undefined ? ` changedAt=${ev.changedAt}` : "";
       const sourcePart = ev.source ? ` source=${ev.source}` : "";
-      const authSet = params.getAuthorizedIds();
-      const authNote = authSet ? "in authorized id set" : "no auth set (non-strict pass-through)";
+      const authNote = authSet
+        ? isDelete && !authSet.has(ev.resourceIdStr)
+          ? "delete cleanup; id not in authorized id set"
+          : "in authorized id set"
+        : "no auth set (non-strict pass-through)";
       params.logger.info(
         `baiying-enhance: dig-employee change triggering flush (${authNote}) resourceId=${ev.resourceIdStr} eventType=${ev.eventType}${changedAtPart}${sourcePart}`,
       );
       recordChangedAt(ev);
-      if (ev.eventType === "DIG_EMPLOYEE_DELETED") {
+      if (isDelete) {
         deletes.push(ev.resourceIdStr);
       } else {
         otherIds.push(ev.resourceIdStr);
