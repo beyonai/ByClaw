@@ -34,9 +34,11 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.manager.qo.index.MyAuthEmployQo;
 import com.iwhalecloud.byai.manager.vo.index.AuthDigitEmployVo;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
+import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
 import com.iwhalecloud.byai.state.domain.index.service.IndexService;
+import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
 import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
@@ -182,7 +184,7 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
             List<MessageFileDto> messageFiles = dingtalkFileDownloadService.downloadMessageFiles(DDMessage, assistantChatDto);
             if (CollectionUtils.isNotEmpty(messageFiles)) {
                 assistantChatDto.setFiles(messageFiles);
-                assistantChatDto.getExtParams().put("files", messageFiles);
+                assistantChatDto.getExtParams().put("files", buildExtParamFiles(messageFiles, userInfo));
                 if (assistantChatDto.getChatContent() == null || assistantChatDto.getChatContent().isBlank()) {
                     assistantChatDto.setChatContent(" ");
                 }
@@ -347,13 +349,14 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
         String userText = DDMessage.getTextContent();
 
         AssistantChatDto assistantChatDto = new AssistantChatDto();
-        assistantChatDto.setAssistantId(-1L);
+        // assistantChatDto.setAssistantId(-1L);
         assistantChatDto.setAccessTerminal(ChannelType.DINGTALK.getCode());
         assistantChatDto.setChatContent(userText == null || userText.isBlank() ? " " : userText);
         assistantChatDto.setRelModelId(-1L);
         assistantChatDto.setAgentId(digitEmployVo.getId());
         assistantChatDto.setAgentType(digitEmployVo.getAgentType());
         assistantChatDto.setSessionId(resolveSessionId(userText, sessionExtValue, digitEmployVo.getId()));
+        assistantChatDto.setResourceList(buildResourceList(digitEmployVo));
 
         Map<String, String> channelExt = new HashMap<>();
         channelExt.put(ChatChannelExtensionKeys.CHANNEL_TYPE, AssistantAccessChannel.DINGTALK.getTypeCode());
@@ -361,8 +364,52 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
         channelExt.put(ChatChannelExtensionKeys.DINGTALK_CONVERSATION_ID, conversationId == null ? "" : conversationId);
         channelExt.put(ChatChannelExtensionKeys.DINGTALK_SENDER_STAFF_ID, senderStaffId == null ? "" : senderStaffId);
         assistantChatDto.setChannelExtension(channelExt);
-        assistantChatDto.getExtParams().put("files", assistantChatDto.getFiles());
+        assistantChatDto.getExtParams().put("files", Collections.emptyList());
         return assistantChatDto;
+    }
+
+    private List<ResourceVo> buildResourceList(AuthDigitEmployVo digitEmployVo) {
+        ResourceVo resourceVo = new ResourceVo();
+        resourceVo.setResourceId(String.valueOf(digitEmployVo.getId()));
+        resourceVo.setResourceName(digitEmployVo.getName());
+        resourceVo.setResourceType(AgentMetaEnum.DIG_EMPLOYEE);
+        resourceVo.setResourceCode(digitEmployVo.getResourceCode());
+        return List.of(resourceVo);
+    }
+
+    private List<Map<String, Object>> buildExtParamFiles(List<MessageFileDto> messageFiles, LoginInfo userInfo) {
+        if (CollectionUtils.isEmpty(messageFiles)) {
+            return Collections.emptyList();
+        }
+
+        Map<String, Object> extParamFile = new LinkedHashMap<>();
+        extParamFile.put("knowledgeId", userInfo.getSessionDatasetId() == null
+                ? ""
+                : String.valueOf(userInfo.getSessionDatasetId()));
+        extParamFile.put("fileIds", messageFiles.stream()
+                .map(MessageFileDto::getFileId)
+                .filter(StringUtils::hasText)
+                .toList());
+        extParamFile.put("files", messageFiles.stream()
+                .map(this::buildExtParamFileInfo)
+                .toList());
+        return List.of(extParamFile);
+    }
+
+    private Map<String, Object> buildExtParamFileInfo(MessageFileDto messageFile) {
+        Map<String, Object> fileInfo = new LinkedHashMap<>();
+        fileInfo.put("fileId", messageFile.getFileId());
+        fileInfo.put("fileName", messageFile.getFileName());
+        fileInfo.put("filePath", messageFile.getFilePath());
+        fileInfo.put("fileUrl", StringUtils.hasText(messageFile.getFileUrl())
+                ? messageFile.getFileUrl()
+                : firstNonBlank(messageFile.getFilePath(), messageFile.getFileId()));
+        fileInfo.put("fileType", messageFile.getFileType());
+        return fileInfo;
+    }
+
+    private String firstNonBlank(String first, String second) {
+        return StringUtils.hasText(first) ? first : second;
     }
 
     private Long resolveSessionId(String userText, String sessionExtValue, Long agentId) {

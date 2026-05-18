@@ -15,8 +15,10 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.DingtalkCallbackMessage;
 import com.iwhalecloud.byai.manager.domain.enterprise.service.EnterpriseInfoService;
+import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserExternalSystemService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
+import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.entity.users.UserExternalSystem;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -41,6 +43,8 @@ public class DingtalkUserService {
     private UserExternalSystemService userExternalSystemService;
     @Autowired
     private EnterpriseInfoService enterpriseInfoService;
+    @Autowired
+    private SuasSuperassistService suasSuperassistService;
     @Autowired
     private SequenceService sequenceService;
     @Autowired
@@ -210,6 +214,11 @@ public class DingtalkUserService {
         userInfo.setUserName(matchedUser.getUserName());
         userInfo.setAssistantId(matchedUser.getAssistantId());
         userInfo.setEnterpriseId(enterpriseInfoService.getEnterpriseId());
+        SuasSuperassist suasSuperassist = suasSuperassistService.findByUserId(matchedUser.getUserId());
+        if (suasSuperassist != null) {
+            userInfo.setSessionDatasetId(suasSuperassist.getSessionDatasetId());
+            userInfo.setDefaultDigEmployeeId(suasSuperassist.getDefaultDigEmployeeId());
+        }
         CurrentUserHolder.setLoginInfo(userInfo);
         return userInfo;
     }
