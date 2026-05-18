@@ -117,6 +117,9 @@ final class SandboxRuntimeRequestFactory {
     }
 
     private static int resolveServicePort(SandboxServiceSpec spec) {
+        if (spec != null && spec.getServicePort() != null && spec.getServicePort() > 0) {
+            return spec.getServicePort();
+        }
         if (spec != null && spec.getPorts() != null) {
             for (PortSpec port : spec.getPorts()) {
                 if (port != null && port.getPort() != null && port.getPort() > 0) {

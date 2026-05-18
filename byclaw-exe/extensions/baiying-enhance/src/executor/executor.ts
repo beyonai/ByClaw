@@ -147,6 +147,7 @@ export class BaiyingExecutor {
         authContext,
         session: this.session,
         logger: params.logger,
+        signal: params.signal,
       });
     }
     if (resType === "toolkit") {

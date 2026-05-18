@@ -88,13 +88,12 @@ public class DingtalkFileDownloadService {
                 JsonNode resultNode = root.has("result") ? root.get("result") : root;
                 DingtalkMessageFileDownloadResult result = new DingtalkMessageFileDownloadResult();
                 result.setDownloadUrl(getText(resultNode, "downloadUrl"));
-
+                result.setContentType(getText(resultNode, "contentType"));
                 result.setFileName(getText(
                     resultNode,
                     "fileName",
                     downloadInfo.getFileName()
                 ));
-                result.setContentType(getText(resultNode, "contentType", "application/octet-stream"));
 
                 if (!StringUtils.hasText(result.getDownloadUrl())) {
                     throw new IllegalStateException("Download DingTalk message file failed, downloadUrl is empty");
@@ -126,14 +125,14 @@ public class DingtalkFileDownloadService {
             }
             byte[] bytes = body.bytes();
 
-            if (!StringUtils.hasText(downloadResult.getContentType())) {
-                String responseContentType = response.header("Content-Type");
-                if (StringUtils.hasText(responseContentType)) {
-                    downloadResult.setContentType(responseContentType);
-                }
-            }
             if (downloadResult.getFileSize() == null) {
                 downloadResult.setFileSize((long) bytes.length);
+            }
+            if (!StringUtils.hasText(downloadResult.getContentType())) {
+                MediaType contentType = body.contentType();
+                if (contentType != null) {
+                    downloadResult.setContentType(contentType.toString());
+                }
             }
             if (StringUtils.hasText(downloadResult.getFileName()) && !downloadResult.getFileName().contains(".")) {
                 String ext = extractExtensionFromContentType(downloadResult.getContentType());
@@ -174,8 +173,8 @@ public class DingtalkFileDownloadService {
             logger.info("downloadMessageFiles={}, downloadCode={}", downloadResult, downloadInfo.getDownloadCode());
 
             byte[] fileBytes = downloadMessageFileBinary(downloadResult);
-            String fileName = downloadResult.getFileName();
 
+            String fileName = downloadResult.getFileName();
             String contentType = downloadResult.getContentType();
 
             multipartFiles.add(new DingtalkDownloadedMultipartFile(
@@ -209,10 +208,11 @@ public class DingtalkFileDownloadService {
                     dto.setFileUrl(item.getFileUrl());
                     if (DingtalkMsgType.PICTURE.matches(msgType) || DingtalkMsgType.RICH_TEXT.matches(msgType)) {
                         dto.setFileType("image");
+                        // dto.setFileType("file");
                     } else {
                         dto.setFileType("file");
                     }
-                    dto.setUseType("content");
+                    // dto.setUseType("content");
                     messageFiles.add(dto);
                 }
             }
@@ -291,16 +291,16 @@ public class DingtalkFileDownloadService {
     }
 
     private void collectInteractiveCardDownloadInfos(DingtalkCallbackMessage DDMessage, Map<String, DingtalkMessageDownloadInfo> downloadInfoMap) {
-        Object contentNode = DDMessage.getContent();
-        if (!(contentNode instanceof Map<?, ?> nodeMap)) {
-            return;
-        }
-        Object bizCustomActionUrlNode = nodeMap.get("biz_custom_action_url");
-        if (bizCustomActionUrlNode == null) {
-            return;
-        }
+        return;
+        // Object contentNode = DDMessage.getContent();
+        // if (!(contentNode instanceof Map<?, ?> nodeMap)) {
+        //     return;
+        // }
+        // Object bizCustomActionUrlNode = nodeMap.get("biz_custom_action_url");
+        // if (bizCustomActionUrlNode == null) {
+        //     return;
+        // }
 
-        DDMessage.setTextContent(String.valueOf(bizCustomActionUrlNode));
         // String actionUrl = String.valueOf(bizCustomActionUrlNode);
         // if (actionUrl.isBlank()) {
         //     return;
@@ -402,7 +402,7 @@ public class DingtalkFileDownloadService {
 
     private String resolveDownloadFileName(String rawFileName, String msgtype, String robotCode) {
         if (!StringUtils.hasText(rawFileName)) {
-            String defaultName = "dingtalk_" + robotCode + "_" + System.currentTimeMillis();
+            String defaultName = robotCode + "_" + System.currentTimeMillis();
             if (DingtalkMsgType.PICTURE.matches(msgtype) || DingtalkMsgType.RICH_TEXT.matches(msgtype)) {
                 defaultName += ".png";
             } else if (DingtalkMsgType.VIDEO.matches(msgtype)) {

@@ -175,6 +175,14 @@ public class IndexApplicationServiceV2 {
             authDigitEmployVo.getResourceCode(), authDigitEmployVo.getAgentType()));
     }
 
+    private void fillRuntimeTag(DigitEmployMarketVo digitEmployMarketVo) {
+        if (digitEmployMarketVo == null) {
+            return;
+        }
+        digitEmployMarketVo.setTagName(buildRuntimeDigitalEmployeeTagName(digitEmployMarketVo.getOwnerType(),
+            digitEmployMarketVo.getResourceCode(), digitEmployMarketVo.getAgentType()));
+    }
+
     /**
      * 数字员工标签统一运行时生成：个人侧按超级助手/个人助理展示，企业侧按 agentType 展示类型。
      */
@@ -220,10 +228,11 @@ public class IndexApplicationServiceV2 {
 
         PageInfo<AuthDigitEmployVo> pageInfo = PageHelperUtil.toPageInfo(page);
 
-        // 标记是否我常用的
+        Long defaultDigitalEmployeeId = resolveCurrentUserDefaultDigitalEmployeeId();
         List<AuthDigitEmployVo> authDigitEmployVos = pageInfo.getList();
         for (AuthDigitEmployVo authDigitEmployVo : authDigitEmployVos) {
             this.setIsMyCreate(authDigitEmployVo);
+            this.fillDefaultAndRuntimeTag(authDigitEmployVo, defaultDigitalEmployeeId);
         }
 
         return pageInfo;
@@ -251,8 +260,10 @@ public class IndexApplicationServiceV2 {
         // 为每个数字员工添加知识和技能统计信息
         this.fillResourceStatsForAuthDigitEmployVos(authDigitEmployVos);
 
+        Long defaultDigitalEmployeeId = resolveCurrentUserDefaultDigitalEmployeeId();
         for (AuthDigitEmployVo authDigitEmployVo : authDigitEmployVos) {
             this.setIsMyCreate(authDigitEmployVo);
+            this.fillDefaultAndRuntimeTag(authDigitEmployVo, defaultDigitalEmployeeId);
         }
 
         return pageInfo;
@@ -337,6 +348,7 @@ public class IndexApplicationServiceV2 {
         for (DigitEmployMarketExtVo digitEmployMarketVo : discoverList) {
             // 设置权限状态
             this.buildPermissionStatus(digitEmployMarketVo);
+            this.fillRuntimeTag(digitEmployMarketVo);
 
             digitEmployMarketVoMap.put(digitEmployMarketVo.getId(), digitEmployMarketVo);
         }

@@ -13,9 +13,8 @@ import com.iwhalecloud.byai.gateway.sandbox.client.model.CreateSandboxRequest;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.CreateSandboxResponse;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.RenewSandboxExpirationRequest;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxDetail;
-import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxEndpoint;
+import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
-import com.iwhalecloud.byai.gateway.sandbox.spec.PortSpec;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
 
 public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
@@ -23,9 +22,15 @@ public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
     private static final Logger log = LoggerFactory.getLogger(OpenSandboxRuntimeProvider.class);
 
     private final OpenSandboxClient openSandboxClient;
+    private final OpenSandboxEndpointResolver endpointResolver;
 
     public OpenSandboxRuntimeProvider(OpenSandboxClient openSandboxClient) {
+        this(openSandboxClient, new SandboxProperties());
+    }
+
+    public OpenSandboxRuntimeProvider(OpenSandboxClient openSandboxClient, SandboxProperties properties) {
         this.openSandboxClient = openSandboxClient;
+        this.endpointResolver = new OpenSandboxEndpointResolver(openSandboxClient, properties);
     }
 
     @Override
@@ -78,36 +83,7 @@ public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
 
     @Override
     public List<String> resolveEndpoints(SandboxRuntimeInstance instance, SandboxServiceSpec spec, CreateSandboxRequest request) {
-        if (instance.getEndpoints() != null) {
-            log.debug("OpenSandbox 直接返回已有 endpoints，sandboxId={}，endpoints={}",
-                instance.getSandboxId(), instance.getEndpoints());
-            return instance.getEndpoints();
-        }
-        java.util.ArrayList<String> endpoints = new java.util.ArrayList<>();
-        Map<String, String> endpointHeaders = null;
-        if (spec.getPorts() != null) {
-            for (PortSpec port : spec.getPorts()) {
-                if (port == null || port.getPort() == null) {
-                    continue;
-                }
-                SandboxEndpoint endpoint = openSandboxClient.getSandboxEndpoint(instance.getSandboxId(), port.getPort());
-                if (endpointHeaders == null) {
-                    endpointHeaders = endpoint.getHeaders();
-                    instance.setEndpointHeaders(endpointHeaders);
-                }
-                String endpointResult = endpoint.getEndpoint();
-                String protocol = port.getProtocol();
-                if (endpointResult != null
-                    && !endpointResult.startsWith("http://")
-                    && !endpointResult.startsWith("https://")
-                    && protocol != null
-                    && !protocol.isBlank()) {
-                    endpointResult = protocol + "://" + endpointResult;
-                }
-                endpoints.add(endpointResult);
-            }
-        }
-        instance.setEndpoints(endpoints);
+        List<String> endpoints = endpointResolver.resolve(instance, spec);
         log.info("OpenSandbox 解析 endpoints 完成，sandboxId={}，endpoints={}", instance.getSandboxId(), endpoints);
         return endpoints;
     }

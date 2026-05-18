@@ -47,7 +47,7 @@ public class SandboxAutoConfiguration {
         if (StorageType.WHALE_AGENT.equalsIgnoreCase(storageType)) {
             provider = new WhaleAgentSandboxRuntimeProvider(feignWhaleAgentService);
         } else {
-            provider = new OpenSandboxRuntimeProvider(openSandboxClient);
+            provider = new OpenSandboxRuntimeProvider(openSandboxClient, properties);
         }
         return new StandardSandboxLifecycleService(properties, stringRedisTemplate,
             sandboxServiceSpecRepository, specProcessor, provider);

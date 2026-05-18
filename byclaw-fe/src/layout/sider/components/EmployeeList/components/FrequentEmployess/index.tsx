@@ -24,7 +24,7 @@ import { getDefaultPagination, paginationReducer } from '@/utils/pageInfo';
 import useGlobal from '@/hooks/useGlobal';
 import EmptyTips from '@/components/EmptyTips';
 import { EmployeeListProps, EmployeeListContext, isInputMode } from '@/layout/sider/components/EmployeeList';
-import { sortBySuperHelperFirst } from '@/layout/sider/components/EmployeeList/util';
+import { sortBySuperHelperFirst, updateDefaultEmployee } from '@/layout/sider/components/EmployeeList/util';
 
 import pStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import { Platform } from '@/layout/components/provider/global';
@@ -152,8 +152,16 @@ const FrequentEmployees = (props: IProps, ref: any) => {
       pinList?: string[];
       unpinList?: string[];
       updateList?: Partial<IAgentCache>[];
+      defaultResourceId?: string | number;
     }) => {
-      const { delIdList = [], unApplyList = [], pinList = [], unpinList = [], updateList = [] } = param || {};
+      const {
+        delIdList = [],
+        unApplyList = [],
+        pinList = [],
+        unpinList = [],
+        updateList = [],
+        defaultResourceId,
+      } = param || {};
       setEmployeesList((prevList) => {
         // 处理删除和取消关注
         pullAllBy(
@@ -202,6 +210,10 @@ const FrequentEmployees = (props: IProps, ref: any) => {
               Object.assign(target, item);
             }
           });
+        }
+
+        if (defaultResourceId !== undefined && defaultResourceId !== null) {
+          return updateDefaultEmployee(prevList, defaultResourceId);
         }
 
         return [...prevList];

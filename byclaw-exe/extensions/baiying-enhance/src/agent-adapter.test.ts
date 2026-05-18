@@ -222,6 +222,7 @@ describe("adaptAgentJson", () => {
       resourceDesc: "Query weather",
       integrationType: "INTERFACE",
       agentSseUrl: "https://sse.example.com/agent/20001",
+      agentHomeUrl: "https://home.example.com/agent/20001",
       prologue: JSON.stringify({
         modelInfo: { model: "gpt-4o" },
       }),
@@ -239,6 +240,7 @@ describe("adaptAgentJson", () => {
     expect(res.agentId).toBe(`${MANAGED_AGENT_PREFIX}20001`);
     expect(res.integrationType).toBe("INTERFACE");
     expect(res.agentSseUrl).toBe("https://sse.example.com/agent/20001");
+    expect(res.agentHomeUrl).toBe("https://home.example.com/agent/20001");
   });
 
   it("does not require defaultProxyUrl for raw detail format", () => {

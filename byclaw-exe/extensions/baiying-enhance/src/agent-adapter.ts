@@ -50,6 +50,8 @@ export type AdaptedManagedAgent = {
   allowSpawnFrom: string[];
   listEntry: AgentListEntry;
   provider?: ProviderBundle;
+  /** Agent description from Baiying detail. */
+  resourceDesc?: string;
   /** Agent instructions used for workspace seeding (SOUL.md). */
   systemPrompt?: string;
   /** Absolute path to the source JSON (for workspace seeding). */
@@ -58,6 +60,8 @@ export type AdaptedManagedAgent = {
   sourceJson?: unknown;
   /** SSE endpoint for INTERFACE-type agents. */
   agentSseUrl?: string;
+  /** Home URL for PAGE-type / home-page based backend agents. */
+  agentHomeUrl?: string;
   /** Integration type: "NONE" (proxy LLM) or "INTERFACE" (SSE backend). */
   integrationType?: string;
   /** Associated resources from Baiying detail. */
@@ -165,9 +169,10 @@ function adaptRawBaiyingDetail(params: {
   ].filter(Boolean);
   const instructions = instructionParts.join("\n\n") || "You are a helpful assistant.";
 
-  // Integration type and SSE URL.
+  // Integration type and backend URLs.
   const integrationType = nonEmpty(detail.integrationType) || undefined;
   const agentSseUrl = nonEmpty(detail.agentSseUrl) || undefined;
+  const agentHomeUrl = nonEmpty(detail.agentHomeUrl) || undefined;
 
   // Associated resources (API may return either relResourceInfoList or relResourceList).
   const relResources = Array.isArray(detail.relResourceInfoList)
@@ -207,37 +212,8 @@ function adaptRawBaiyingDetail(params: {
 
   const agentId = `${MANAGED_AGENT_PREFIX}${sourceKey}`;
 
-  // For INTERFACE/A2A/PAGE agents: they have their own backend (agentSseUrl or agentWebUrl),
-  // no LLM provider needed. They are registered as tool-based agents and work via baiying_call.
-  const isBackendAgent =
-    integrationType === "INTERFACE" || integrationType === "A2A" || integrationType === "PAGE";
-
   const listSkills = normalizeAgentListSkills(detail);
   const listTools = normalizeAgentListTools(detail);
-
-  if (isBackendAgent) {
-    const listEntry: AgentListEntry = {
-      id: agentId,
-      name,
-      identity: { name },
-      skills: listSkills,
-      tools: listTools,
-    };
-
-    return {
-      sourceKey,
-      agentId,
-      providerKey: "",
-      modelRef: "",
-      allowSpawnFrom: ["main"],
-      listEntry,
-      systemPrompt: instructions,
-      integrationType,
-      agentSseUrl,
-      associatedResources: associatedResources.length > 0 ? associatedResources : undefined,
-      coreCompetencies: coreCompetencies.length > 0 ? coreCompetencies : undefined,
-    };
-  }
 
   // For NONE-type agents, do not bind model/provider from agent JSON.
   // Leave model unset so OpenClaw can use its default model configuration.
@@ -259,6 +235,8 @@ function adaptRawBaiyingDetail(params: {
     systemPrompt: instructions,
     integrationType,
     agentSseUrl,
+    agentHomeUrl,
+    resourceDesc: String(detail.resourceDesc),
     associatedResources: associatedResources.length > 0 ? associatedResources : undefined,
     coreCompetencies: coreCompetencies.length > 0 ? coreCompetencies : undefined,
   };

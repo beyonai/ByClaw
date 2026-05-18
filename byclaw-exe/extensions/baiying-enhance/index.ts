@@ -94,6 +94,8 @@ export function resolveConfigSyncHotPrefixes(cfg: BaiyingEnhancePluginConfig): s
   return Array.from(out);
 }
 
+const registry = new AgentRegistryState();
+
 console.log("============Baiying Enhance module imported============");
 const plugin = {
   id: "baiying-enhance",
@@ -112,7 +114,6 @@ const plugin = {
     api.registerReload({
       hotPrefixes: resolveConfigSyncHotPrefixes(pluginCfg),
     });
-    const registry = new AgentRegistryState();
     const debounceMs = pluginCfg.watchDebounceMs ?? 500;
     const executorResourcesDir = resolveExecutorResourcesDir(api, pluginCfg);
     const redisJsonStore = createRedisJsonStore({
@@ -148,27 +149,6 @@ const plugin = {
     let agentWatch: Awaited<ReturnType<typeof createAgentWatchdog>> | undefined;
     let digEmployeeAuthWatch: ReturnType<typeof createDigEmployeeAuthWatch> | undefined;
     let digEmployeeChangeSubscriber: ReturnType<typeof createDigEmployeeChangeSubscriber> | undefined;
-
-    if (pluginCfg.mainWorkspaceAgentsAutoSeed !== false) {
-      const mdMode = resolveEffectiveMainAgentsMdMode(pluginCfg);
-      if (mdMode !== "off") {
-        void seedMainAgentAgentsMd({
-          api,
-          pluginConfig: pluginCfg,
-          managedAgents: [],
-          log: {
-            warn: (m) => api.logger.warn(m),
-            info: (m) => api.logger.info(m),
-          },
-        }).catch((err) =>
-          api.logger.warn(
-            `baiying-enhance: main AGENTS.md register-time init failed: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          ),
-        );
-      }
-    }
 
     api.registerService({
       id: "baiying-enhance-watchdogs",

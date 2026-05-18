@@ -303,7 +303,7 @@ describe("capability builder", () => {
     expect(capability?.tools?.[0]?.url).toBe("https://fixed.example.com/weather");
   });
 
-  it("builds an AGENT capability reading agentSseUrl from metaContent (snapshot JSON shape)", () => {
+  it("builds an AGENT capability reading agent URLs from metaContent (snapshot JSON shape)", () => {
     const capability = buildCapabilityFromDetail({
       resourceId: "10034319",
       detail: {
@@ -315,6 +315,7 @@ describe("capability builder", () => {
         headers: { pid: -1000 },
         metaContent: {
           agentSseUrl: "http://10.10.196.92:19902/pingress/agent/4e1fc33f660650a33a30b9ec",
+          agentHomeUrl: "/agent-home/4e1fc33f660650a33a30b9ec",
           agentType: "001",
           agentWebUrl: "",
         },
@@ -325,8 +326,28 @@ describe("capability builder", () => {
     expect(capability?.agent?.sse_url).toBe(
       "http://10.10.196.92:19902/pingress/agent/4e1fc33f660650a33a30b9ec",
     );
+    expect(capability?.agent?.agent_home_url).toBe(
+      "http://10.10.196.92:19902/pingress/agent-home/4e1fc33f660650a33a30b9ec",
+    );
     expect(capability?.agent?.integration_type).toBe("001");
     expect(capability?.metadata?.impl_type).toBe("STREAMING_AGENT");
+  });
+
+  it("builds a root AGENT capability from resource_context when only agentHomeUrl exists", () => {
+    const capability = buildCapabilityFromResourceContext("10034319", "AGENT", {
+      root_agent: {
+        resourceId: "10034319",
+        resourceName: "Home Agent",
+        integrationType: "PAGE",
+        agentHomeUrl: "https://home.example.com/agent/10034319",
+      },
+      selected_resource: null,
+    });
+
+    expect(capability).not.toBeNull();
+    expect(capability?.resource_type).toBe("AGENT");
+    expect(capability?.agent?.agent_home_url).toBe("https://home.example.com/agent/10034319");
+    expect(capability?.agent?.integration_type).toBe("PAGE");
   });
 
   it("builds an MCP capability reading mcpType from metaContent", () => {

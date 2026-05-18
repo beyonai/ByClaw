@@ -74,7 +74,21 @@ public class DingtalkCallbackMessageParser {
         if (DingtalkMsgType.AUDIO.matches(msgtype)) {
             return extractAudioRecognition(callbackData.get("content"));
         }
+
+        if (DingtalkMsgType.INTERACTIVE_CARD.matches(msgtype)) {
+            return extractInteractiveCardContent(callbackData.get("content"));
+        }
+
         return "";
+    }
+
+    private String extractInteractiveCardContent(Object contentNode) {
+        Map<?, ?> contentMap = toMap(contentNode);
+        if (contentMap == null) {
+            return "";
+        }
+        Object bizCustomActionUrl = contentMap.get("biz_custom_action_url");
+        return bizCustomActionUrl == null ? "" : String.valueOf(bizCustomActionUrl);
     }
 
     private String extractTextContent(Object textNode) {
@@ -126,5 +140,12 @@ public class DingtalkCallbackMessageParser {
     private String getAsText(Map<String, Object> source, String key) {
         Object value = source.get(key);
         return value == null ? "" : String.valueOf(value);
+    }
+
+    private Map<?, ?> toMap(Object node) {
+        if (node instanceof Map<?, ?> nodeMap) {
+            return nodeMap;
+        }
+        return objectMapper.convertValue(node, Map.class);
     }
 }
