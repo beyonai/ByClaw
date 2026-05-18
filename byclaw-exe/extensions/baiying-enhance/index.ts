@@ -149,27 +149,6 @@ const plugin = {
     let digEmployeeAuthWatch: ReturnType<typeof createDigEmployeeAuthWatch> | undefined;
     let digEmployeeChangeSubscriber: ReturnType<typeof createDigEmployeeChangeSubscriber> | undefined;
 
-    if (pluginCfg.mainWorkspaceAgentsAutoSeed !== false) {
-      const mdMode = resolveEffectiveMainAgentsMdMode(pluginCfg);
-      if (mdMode !== "off") {
-        void seedMainAgentAgentsMd({
-          api,
-          pluginConfig: pluginCfg,
-          managedAgents: [],
-          log: {
-            warn: (m) => api.logger.warn(m),
-            info: (m) => api.logger.info(m),
-          },
-        }).catch((err) =>
-          api.logger.warn(
-            `baiying-enhance: main AGENTS.md register-time init failed: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          ),
-        );
-      }
-    }
-
     api.registerService({
       id: "baiying-enhance-watchdogs",
       start: async (ctx) => {

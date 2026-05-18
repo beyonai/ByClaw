@@ -90,6 +90,7 @@ export function describeResource(params: {
     const agentInfo = isRecord(capability.agent) ? (capability.agent as Dict) : {};
     resource.integration_type = agentInfo.integration_type;
     resource.agent_sse_url = agentInfo.sse_url;
+    resource.agent_home_url = agentInfo.agent_home_url;
   } else {
     resource.unsupported_reason = `Unknown resource type: ${resType}`;
     resource.executable = false;

@@ -38,12 +38,16 @@ export function buildExecutorResourceContext(params: {
   const rootAgent: Record<string, unknown> = {
     resourceId: params.agent.sourceKey,
     resourceName: params.agent.listEntry.name ?? params.agent.agentId,
+    resourceDesc: params.agent.resourceDesc ?? params.agent.agentId,
   };
   if (params.agent.integrationType) {
     rootAgent.integrationType = params.agent.integrationType;
   }
   if (params.agent.agentSseUrl) {
     rootAgent.agentSseUrl = params.agent.agentSseUrl;
+  }
+  if (params.agent.agentHomeUrl) {
+    rootAgent.agentHomeUrl = params.agent.agentHomeUrl;
   }
 
   const resource = params.resource
