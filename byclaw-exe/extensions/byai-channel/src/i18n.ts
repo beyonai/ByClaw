@@ -3,7 +3,7 @@ import type { Language } from "./types.js";
 import {
     buildBaiyingCallToolResultTitle,
     buildBaiyingCallToolStartTitle,
-} from "./baiying-call-progress-title.js";
+} from "./baiying-call-process-title";
 
 const ALWAYS_USE_CHINESE_SYSTEM_PROMPT = [
   "## 渠道语言（强制 · 最高优先级）",
