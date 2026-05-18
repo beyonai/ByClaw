@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import classNames from 'classnames';
 import { Button, Layout, Spin } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
@@ -6,7 +6,7 @@ import { isFunction, last, get, isString, noop, set, concat, cloneDeep } from 'l
 import { getLocale, useDispatch, useSelector, useIntl } from '@umijs/max';
 
 import ChatLayoutComp from '@/components/ChatLayoutComp';
-import { agentTypeMap } from '@/constants/agent';
+import { agentTypeMap, ROOT_AGENT_ID } from '@/constants/agent';
 
 import AntdProvider from '@/layout/components/provider/antd';
 
@@ -28,6 +28,7 @@ import type { IDrawerMessage } from '@/components/FullAbsoluteDrawer';
 
 import styles from './index.module.less';
 import useGlobal from '@/hooks/useGlobal';
+import { getResponseAgentInfo } from '../MessageList/utils';
 
 const { Content } = Layout;
 
@@ -60,14 +61,10 @@ function ApplicationSession(props: IProps) {
   } = props;
   const { substance: agentInfo } = messageListItemContent || {};
 
-  const { args, agentHomeUrl, integrationType } = get(messageListItemContent, 'substance') || {};
+  const { args } = get(messageListItemContent, 'substance') || {};
   const { input: chatInput, files } = args;
 
-  const isPage = integrationType === 'PAGE'; // 整个页面打开iframe，如：慧记
-  const isInterface = integrationType === 'INTERFACE'; // 主驾页面打开iframe，如：慧笔
-  const isNONE = integrationType === 'NONE' || !integrationType; // 纯主驾聊天
-
-  const { sessionId } = agentInfo;
+  const { sessionId, isSubagent } = agentInfo;
   const mySessionId = `${sessionId || ''}`;
 
   const [agentId, setAgentId] = React.useState<string>(agentInfo.agentId);
@@ -85,11 +82,33 @@ function ApplicationSession(props: IProps) {
     employeesList: employees.employeesList,
   }));
 
+  const { metadata } = currentMessage;
+  const messageAgentInfo = useMemo(
+    () => getResponseAgentInfo({ agentList, employeesList }, metadata),
+    [metadata, agentList, employeesList]
+  );
+
   const curAgentInfo = React.useMemo(() => {
     return [...(agentList || []), ...(employeesList || [])].find(
       (item) => `${item.id}` === `${agentId}` || `${item.resourceCode}` === `${agentId}`
     );
   }, [agentList, employeesList, agentId]);
+
+  const { agentHomeUrl, integrationType } = curAgentInfo || {};
+
+  const isPage = integrationType === 'PAGE'; // 整个页面打开iframe，如：慧记
+  const isInterface = integrationType === 'INTERFACE'; // 主驾页面打开iframe，如：慧笔
+  const isNONE = integrationType === 'NONE' || !integrationType; // 纯主驾聊天
+
+  const getSendPayloadAgentId = React.useCallback(() => {
+    if (isSubagent) {
+      // 如果是subagent，则取这次会话原本的目标agent。如果没有，那就是跟默认数字员工聊的。
+      // 在拿到任何summary后，应该都是找回main agent，因为再找subagent，main的流程走不下去。
+      // 因此如果subagent在处理任务的时候失败了，应该通过提示词告诉main agent缺失的信息，重新通过main agent发起流程
+      return messageAgentInfo?.agentId || ROOT_AGENT_ID;
+    }
+    return agentId;
+  }, [isSubagent, agentId, messageAgentInfo]);
 
   const getLastMessageInLoop = React.useCallback(() => {
     const getLast = () => {
@@ -125,7 +144,7 @@ function ApplicationSession(props: IProps) {
     const sendProps = {
       queryQuestion: chatInput,
       payload: {
-        agentId: agentInfo.agentId,
+        agentId: getSendPayloadAgentId(),
         agentType: agentInfo.agentType,
         files,
         extParams,
@@ -153,8 +172,7 @@ function ApplicationSession(props: IProps) {
     };
 
     if (`${agentInfo.agentType}` === agentTypeMap.chatbi) {
-      Object.assign(extParams, {
-      });
+      Object.assign(extParams, {});
     }
     if (`${agentInfo.agentType}` === agentTypeMap.writer) {
       Object.assign(extParams, {
@@ -211,7 +229,7 @@ function ApplicationSession(props: IProps) {
     return '';
   }, [intl]);
 
-  const contentRender = React.useMemo(() => {
+  const contentRender = React.useCallback(() => {
     if (loading) {
       return (
         <div className="full-width full-height ub ub-ac ub-pc">
@@ -261,9 +279,15 @@ function ApplicationSession(props: IProps) {
         queryQuestion: mySummaryText,
         payload: {
           files,
-          agentId,
+          agentId: getSendPayloadAgentId(),
           agentType,
           extParams: {
+            resumeFromSubAgent: isSubagent
+              ? {
+                agentName: curAgentInfo.name,
+                agentId: curAgentInfo.id,
+              }
+              : undefined,
             contentType: `${SSEMessageType.application}`,
             agentCard: {
               ...(get(messageListItemContent, 'substance') || {}),
@@ -276,8 +300,7 @@ function ApplicationSession(props: IProps) {
           taskStepId: get(messageListItemContent, 'stepId'),
         },
         msgOpt: {
-          answerMsg: {
-          },
+          answerMsg: {},
         },
       },
       sendConf: {
@@ -408,8 +431,18 @@ function ApplicationSession(props: IProps) {
     };
   }, []);
 
+  // 必须用memo，对象参数的变化会导致iframe刷新（不是基于React或者vue这类框架的话，页面就会闪一下）
+  const iframeAgentMemo = React.useMemo(() => {
+    return {
+      agentHomeUrl: encodeAgentHomeUrl,
+      id: agentId,
+      agentId,
+      agentType,
+    };
+  }, [agentId, agentType, encodeAgentHomeUrl]);
+
   // todo: 不能智办
-  if (!mySessionId) return null;
+  if (!mySessionId && !isPage) return null;
 
   return (
     <div className="full-width full-height ub ub-ver" ref={layoutRef}>
@@ -456,7 +489,6 @@ function ApplicationSession(props: IProps) {
             )}
           </div>
         )}
-
       </div>
       <div className="ub-f1 overflow-hidden" style={{ backgroundColor: '#fff' }}>
         <AntdProvider>
@@ -486,17 +518,8 @@ function ApplicationSession(props: IProps) {
                 style={{ position: 'relative', flexDirection: 'row' }}
               >
                 <MinorDrawer />
-                {(isNONE || isInterface) && contentRender}
-                {isPage && (
-                  <AgentIframe
-                    agent={{
-                      agentHomeUrl: encodeAgentHomeUrl,
-                      id: agentId,
-                      agentId,
-                      agentType,
-                    }}
-                  />
-                )}
+                {(isNONE || isInterface) && contentRender()}
+                {isPage && <AgentIframe agent={iframeAgentMemo} />}
                 <MainDrawer />
               </Layout>
               <AbsoluteDrawer getContainer={() => layoutRef.current || window.document.body} />

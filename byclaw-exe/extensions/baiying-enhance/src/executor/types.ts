@@ -38,6 +38,7 @@ export type CapabilityDoc = {
 
 export type CapabilityAgent = {
   sse_url?: unknown;
+  agent_home_url?: unknown;
   integration_type?: unknown;
   headers?: Record<string, string>;
 };
@@ -84,7 +85,7 @@ export type ExecutorSuccess = { success: true; [k: string]: unknown };
 export type ExecutorFailure = {
   success: false;
   error_code: string;
-  error: string;
+  error: string | Dict;
   [k: string]: unknown;
 };
 export type ExecutorResponse = ExecutorSuccess | ExecutorFailure;

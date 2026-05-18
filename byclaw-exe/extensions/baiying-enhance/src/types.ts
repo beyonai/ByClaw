@@ -93,6 +93,15 @@ export type BaiyingEnhancePluginConfig = {
    * Set false to flush on every event without an auth filter (high load).
    */
   digEmployeeChangeSubscribeStrictAuth?: boolean;
+  /**
+   * Public gateway base URL used to build PAGE-agent callback URLs.
+   * Configure this when the browser frontend is not on the same host as the gateway.
+   */
+  pageAgentCallbackBaseUrl?: string;
+  /** PAGE-agent callback wait timeout. Defaults to 1 hour. */
+  pageAgentCallbackTimeoutMs?: number;
+  /** Maximum accepted `responseText` size in bytes. Defaults to 256 KiB. */
+  pageAgentCallbackMaxResponseTextBytes?: number;
 };
 
 export type BaiyingAssociatedResource = {

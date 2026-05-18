@@ -83,6 +83,19 @@ function getInboundMessageFromByFramework(data: AskAgentCommand) {
   } else {
     questionText = String(data.content);
   }
+
+  const extParams: Record<string, any> = data.extraPayload?.ext_params || {};
+  const resumeFromSubAgent = extParams.resumeFromSubAgent as {
+    agentName?: string;
+    agentId?: string;
+  };
+  if (resumeFromSubAgent) {
+    questionText = [
+      `Message from subagent: ${resumeFromSubAgent.agentName} | feedback: ${questionText}`,
+      "- If the task is done, NOT spawn this subagent again.",
+      "- If the task failed, collect enough information from user, then spawn this subagent again.",
+    ].join("\n");
+  }
   if (Array.isArray(data.extraPayload?.resource_list)) {
     const remindTextArr: string[] = [];
     const resourceList: {

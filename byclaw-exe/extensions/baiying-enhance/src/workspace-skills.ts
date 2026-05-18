@@ -31,6 +31,22 @@ export function skillSignature(skills: unknown[]): string {
   return mergeSkillNames(skills).join("\u0000");
 }
 
+async function isDirectoryEntry(parentDir: string, ent: Awaited<ReturnType<typeof fs.readdir>>[number]): Promise<boolean> {
+  if (ent.isDirectory()) {
+    return true;
+  }
+  if (ent.isFile() || ent.isSymbolicLink()) {
+    return false;
+  }
+  // Some FUSE/rclone mounts report directory entries as DT_UNKNOWN. Fall back to stat
+  // so periodic scans still discover uploaded workspace skills on object-store mounts.
+  try {
+    return (await fs.stat(path.join(parentDir, ent.name))).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 export async function scanWorkspaceSkillNames(workspaceDir: string): Promise<string[]> {
   const skillsDir = path.join(workspaceDir, SKILLS_DIR_NAME);
   let entries: Awaited<ReturnType<typeof fs.readdir>>;
@@ -45,7 +61,7 @@ export async function scanWorkspaceSkillNames(workspaceDir: string): Promise<str
     if (ent.name.startsWith(".")) {
       continue;
     }
-    if (!ent.isDirectory()) {
+    if (!(await isDirectoryEntry(skillsDir, ent))) {
       continue;
     }
     const skillName = normalizeSkillName(ent.name);
