@@ -62,6 +62,10 @@ public interface SsSandboxRecordMapper {
                      @Param("reason") String reason,
                      @Param("releaseTime") Date releaseTime);
 
+    int markStartingReleased(@Param("id") Long id,
+                             @Param("reason") String reason,
+                             @Param("releaseTime") Date releaseTime);
+
     int updateLaunchSuccess(@Param("id") Long id,
                             @Param("sandboxId") String sandboxId,
                             @Param("endpoint") String endpoint,

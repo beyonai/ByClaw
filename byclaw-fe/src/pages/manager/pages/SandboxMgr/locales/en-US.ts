@@ -4,8 +4,11 @@ export default {
 
   // Status
   'sandboxMgr.status.all': 'All',
+  'sandboxMgr.status.starting': 'Starting',
   'sandboxMgr.status.running': 'Running',
+  'sandboxMgr.status.releasing': 'Releasing',
   'sandboxMgr.status.released': 'Released',
+  'sandboxMgr.status.failed': 'Failed',
 
   // Table columns
   'sandboxMgr.table.id': 'ID',
@@ -32,7 +35,7 @@ export default {
 
   // Actions
   'sandboxMgr.action.view': 'View',
-  'sandboxMgr.action.delete': 'Delete',
+  'sandboxMgr.action.delete': 'Release',
   'sandboxMgr.action.refresh': 'Refresh',
 
   // Delete confirm
