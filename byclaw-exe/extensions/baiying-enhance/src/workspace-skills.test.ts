@@ -50,6 +50,18 @@ describe("workspace-skills", () => {
     }
   });
 
+  it("uses SKILL.md frontmatter name as the OpenClaw skill filter name", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "baiying-skills-name-"));
+    await mkdir(path.join(workspace, "skills", "uploaded-folder"), { recursive: true });
+    await writeFile(
+      path.join(workspace, "skills", "uploaded-folder", "SKILL.md"),
+      "---\nname: weread-skills\ndescription: Read and organize WeRead notes\n---\n# WeRead\n",
+      "utf8",
+    );
+
+    await expect(scanWorkspaceSkillNames(workspace)).resolves.toEqual(["weread-skills"]);
+  });
+
   it("keeps earlier skill groups first while de-duplicating", () => {
     expect(mergeSkillNames(["json", "shared"], ["alpha", "shared"], ["beta"])).toEqual([
       "json",

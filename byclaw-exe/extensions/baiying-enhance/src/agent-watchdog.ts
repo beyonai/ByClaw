@@ -6,7 +6,11 @@ import { AgentRegistryState } from "./agent-state.js";
 import { MANAGED_AGENT_PREFIX, type BaiyingEnhancePluginConfig } from "./types.js";
 import type { BaiyingRedisJsonStore } from "./redis-json-store.js";
 import { resolveEffectiveMainAgentsMdMode, seedMainAgentAgentsMd } from "./main-workspace-seed.js";
-import { seedManagedAgentWorkspace } from "./workspace-seed.js";
+import { resolveAgentWorkspaceDir, seedManagedAgentWorkspace } from "./workspace-seed.js";
+import {
+  archiveUnauthorizedManagedAgentWorkspaces,
+  restoreManagedAgentWorkspaces,
+} from "./workspace-archive.js";
 import {
   mergeSkillNames,
   mergeWorkspaceSkillsIntoManagedAgents,
@@ -357,6 +361,15 @@ export function createAgentWatchdog(params: {
         managed = managed.filter((agent) => !deleteBatchSet.has(agent.sourceKey));
       }
       const filteredManaged = managed;
+      await restoreManagedAgentWorkspaces({
+        api: params.api,
+        pluginConfig: params.pluginConfig,
+        agentIds: filteredManaged.map((agent) => agent.agentId),
+        log: {
+          info: (m) => params.api.logger.info(m),
+          warn: (m) => params.api.logger.warn(m),
+        },
+      });
       lastBaseManaged = filteredManaged;
       const effectiveManaged = workspaceSkillAutoEnable
         ? await mergeWorkspaceSkillsIntoManagedAgents({
@@ -404,6 +417,12 @@ export function createAgentWatchdog(params: {
       }
 
       const removed = [...removedSet];
+      const removedWorkspaces = removed
+        .filter((agentId) => agentId.startsWith(MANAGED_AGENT_PREFIX))
+        .map((agentId) => ({
+          agentId,
+          workspaceDir: resolveAgentWorkspaceDir(params.api, agentId),
+        }));
       let hasMissingManagedRegistrations = false;
       let hasSkillChanges = false;
       let hasToolChanges = false;
@@ -577,6 +596,14 @@ export function createAgentWatchdog(params: {
       }
 
       await params.api.runtime.config.writeConfigFile(next);
+      await archiveUnauthorizedManagedAgentWorkspaces({
+        pluginConfig: params.pluginConfig,
+        agents: removedWorkspaces,
+        log: {
+          info: (m) => params.api.logger.info(m),
+          warn: (m) => params.api.logger.warn(m),
+        },
+      });
 
       const parts: string[] = [];
       if (added.length > 0) {

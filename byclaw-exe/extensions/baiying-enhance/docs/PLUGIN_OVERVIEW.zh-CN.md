@@ -18,13 +18,14 @@
 | **授权过滤** | 通过 Redis 中 `USER_CODE` 关联的 dig-employee 授权集合，仅同步当前用户可见的数字员工；授权集合变化会触发全量工作区再种子化（`fullWorkspaceReseed`）。 |
 | **Redis Pub/Sub** | 订阅 `digEmployeeChangeChannel`（默认 `byai:pub:dig_employee_change`），合并去抖后触发与目录扫描一致的 flush（含 `DIG_EMPLOYEE_DELETED` 等）。 |
 | **内容索引** | 可选持久化各 Agent 源 JSON 的 SHA-256（`agent-content-index-*.json`），减少网关重启后的无意义全量写盘。 |
-| **工作区种子** | `workspaceAutoSeed`：由 `seedManagedAgentWorkspace` 为每个托管 Agent 创建目录并写入 `SOUL.md`、`AGENTS.md` 等；主 Agent 工作区另由 `main-workspace-seed` 维护 `AGENTS.md` 与 `SUBAGENT_ROUTING.md`。默认 workspace 路径见 `resolveDefaultManagedWorkspacePath`（`main` 为 `<stateDir>/workspace/`，其余为 `<stateDir>/workspace-<agentId>/`）。 |
-| **Workspace Skill 自动感知** | 默认扫描 `skills/<skillName>/SKILL.md`，只把当前 agent workspace 下的用户上传 skill 合并到该托管 Agent 的 `agents.list[].skills`，不读取其它 agent workspace；main workspace 的 `workspace/skills` 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 来源。兜底扫描只做 skill diff，不重新扫描 Agent JSON 目录，也不会触发托管 Agent 增删。 |
+| **工作区种子** | `workspaceAutoSeed`：由 `seedManagedAgentWorkspace` 为每个托管 Agent 创建目录并写入 `SOUL.md`、`AGENTS.md` 等；主 Agent 工作区另由 `main-workspace-seed` 维护 `AGENTS.md` 与 `SUBAGENT_ROUTING.md`。已有 `agents.list[].workspace` 会保留；新建托管 Agent 的默认 workspace 路径见 `resolveDefaultManagedWorkspacePath`（`main` 为 `<stateDir>/workspace/`，其余为 `<stateDir>/workspace-<agentId>/`）。 |
+| **取消授权归档** | `workspaceArchiveOnUnauthorized` 默认开启：未授权或删除的 `baiying-agent-*` workspace 会从 `<stateDir>/workspace-baiying-agent-*` 移到 `<dirname(stateDir)>/.baiying-workspaces/`；重新授权时先恢复目录，再按最新 JSON 更新托管 Markdown。 |
+| **Workspace Skill 自动感知** | 默认扫描 `skills/<目录>/SKILL.md`，优先读取 `SKILL.md` frontmatter 的 `name` 作为真正写入 `agents.list[].skills` 的 skill filter 名称；只把当前 agent workspace 下的用户上传 skill 合并到该托管 Agent，不读取其它 agent workspace；main workspace 的 `workspace/skills` 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 来源。兜底扫描只做 skill diff，不重新扫描 Agent JSON 目录，也不会触发托管 Agent 增删。 |
 | **热重载协作** | 默认将 `plugins.entries.baiying-enhance` 与 `agents` 作为热前缀；同步写 `agents.list[].skills` 时不触发整进程重启。也可为其它 `plugins.entries.*` 注册热前缀（`configSyncHotPluginEntriesPrefixes`）。 |
 | **`baiying_call` 工具** | 按 Agent JSON 中的关联资源列表，在进程内调用执行器（`src/executor/`）完成文档检索、工具调用、MCP、子 Agent 调用等。 |
 | **HTTP 探针** | 健康检查、当前内存注册表中的托管 Agent 列表、文档异步任务查询与完成回调。 |
 
-> **`agents.list[].skills`（托管子 agent）**：写回网关配置时，列表项**始终包含** `skills`。取值由 Agent JSON **根**上的 **`relSkills`**（非空字符串数组，优先）或根级 **`skills`**（兼容旧版）推导，并在 `workspaceSkillAutoEnable` 默认开启时合并 workspace 上传 skill；二者皆无时为 **`[]`**。实现见 [`src/agent-adapter.ts`](../src/agent-adapter.ts) 与 [`src/workspace-skills.ts`](../src/workspace-skills.ts)。
+> **`agents.list[].skills`（托管子 agent）**：写回网关配置时，列表项**始终包含** `skills`。取值由 Agent JSON **根**上的 **`relSkills`**（非空字符串数组，优先）或根级 **`skills`**（兼容旧版）推导，并在 `workspaceSkillAutoEnable` 默认开启时合并 workspace 上传 skill（优先使用 `SKILL.md` frontmatter `name`）；二者皆无时为 **`[]`**。实现见 [`src/agent-adapter.ts`](../src/agent-adapter.ts) 与 [`src/workspace-skills.ts`](../src/workspace-skills.ts)。
 
 ---
 
@@ -89,7 +90,7 @@ flowchart TB
 
 | 组件 | 主要源文件 | 职责摘要 |
 |------|------------|----------|
-| **AgentWatchdog** | `src/agent-watchdog.ts` | `loadManagedAgentsFromDir` → 授权过滤 → 合并 workspace skills → diff → `mergeManagedAgentsIntoConfig` → `writeConfigFile`；按需 `seedManagedAgentWorkspace`、`seedMainAgentAgentsMd`。 |
+| **AgentWatchdog** | `src/agent-watchdog.ts` | 从 Redis 授权视图加载数字员工 → 恢复已归档 workspace → 合并 workspace skills → diff → `mergeManagedAgentsIntoConfig` → `writeConfigFile`；按需归档已移除 workspace、`seedManagedAgentWorkspace`、`seedMainAgentAgentsMd`。 |
 | **DigEmployeeAuthWatch** | `src/dig-employee-auth-watch.ts` | `USER_CODE` + `REDIS_*` 连接 Redis；定时 `hgetall` 刷新授权 id，并对 `USER:RESOURCES:AUTH:{userId}` 做 **keyspace 通知**（`pmessage`）；变化时 `onChange` → `__flushNow({ fullWorkspaceReseed: true })`。 |
 | **DigEmployeeChangeSubscriber** | `src/dig-employee-change-subscriber.ts` | 订阅频道，解析 `DigEmployeeChangeEvent`，合并去抖后 `flushNow`；`strictAuth` 时可要求在拿到授权集后再处理事件。 |
 | **baiying_call** | `src/baiying-call-tool.ts` + `src/executor/` | 根据当前托管 Agent 与资源元数据路由到 doc / toolkit / tool / mcp / agent 等执行路径。 |
@@ -132,17 +133,20 @@ flowchart TD
   T --> L{flushInFlight?}
   L -->|是| Q[flushQueued = true]
   L -->|否| F[进入 flush]
-  F --> D[处理 pending delete：unlink AGENT_*.json]
-  D --> R[loadManagedAgentsFromDir]
+  F --> D[处理 pending delete]
+  D --> R[loadManagedAgentsFromRedis]
   R --> A{授权过滤启用?\ngetAuthorizedIds 返回 Set\n（undefined=不过滤全量）}
   A -->|是| F2[按 sourceKey 与 Set 求交]
   A -->|否| F3[不过滤]
-  F2 --> DIFF[对比 prevHashes：added/updated/removed]
-  F3 --> DIFF
+  F2 --> RESTORE[恢复当前授权托管 workspace\n若 active 缺失且 archive 存在]
+  F3 --> RESTORE
+  RESTORE --> SKILL[合并 workspace skills]
+  SKILL --> DIFF[对比 prevHashes：added/updated/removed]
   DIFF --> C{需要写配置或强制 reseed?}
   C -->|否| M[仅尝试主 AGENTS.md seed]
   C -->|是| W[mergeManagedAgentsIntoConfig + writeConfigFile]
-  W --> S{workspaceAutoSeed?}
+  W --> AR[归档已移除托管 workspace\n默认到 ../.baiying-workspaces]
+  AR --> S{workspaceAutoSeed?}
   S -->|是| SEED[seed 各托管 workspace；auth 全量时全量 reseed]
   S -->|否| M2[seedMainAgentAgentsMd]
   SEED --> M2
