@@ -181,6 +181,8 @@ async function handleAssistantEvent(
     return;
   }
   await emitSdkChunk(request, sdkEmitter, delta as string, {
+    messageId: request.sessionKey,
+    parentMessageId: "-1",
     eventType: isChildSession ? EventType.REASONING_LOG_DELTA : EventType.ANSWER_DELTA,
   });
 }
