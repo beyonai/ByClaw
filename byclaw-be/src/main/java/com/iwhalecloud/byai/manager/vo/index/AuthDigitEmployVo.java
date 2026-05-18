@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.vo.index;
 
 import com.alibaba.fastjson.annotation.JSONField;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Date;
 import lombok.Getter;
 import lombok.Setter;
@@ -111,6 +112,7 @@ public class AuthDigitEmployVo {
     /**
      * 是否为当前用户默认助理。
      */
+    @JsonProperty("isDefault")
     private Boolean isDefault;
 
     /**

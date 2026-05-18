@@ -220,8 +220,16 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
         }
 
         if (defaultResourceId !== undefined && defaultResourceId !== null) {
-          getSearch(searchName);
-          return prevList;
+          const nextList = prevList.map((item) => {
+            const itemResourceId = item.resourceId ?? item.id ?? item.agentId;
+            const isDefault = String(itemResourceId) === String(defaultResourceId);
+            return {
+              ...item,
+              isDefault,
+              canSetDefault: !isDefault,
+            };
+          });
+          return sortBySuperHelperFirst(nextList);
         }
 
         return [...prevList];

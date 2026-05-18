@@ -267,14 +267,18 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
           title={
             <Title className={styles.name}>
               <span className={classNames(styles.nameRow)}>
-                <span className={classNames(styles.nameText)}>
-                  {employee?.resourceName || employee?.name || ''}
-                  {/* {employee?.isDefault ? `（${intl.formatMessage({ id: 'resource.currentDefaultAssistant' })}）` : ''} */}
-                </span>
+                <span className={classNames(styles.nameText)}>{employee?.resourceName || employee?.name || ''}</span>
                 {`${employee?.isTop}` === '1' && <AntdIcon type="icon-zhiding-fill" className={styles.pinBadge} />}
                 {employee?.tagName && (
                   <span className={styles.tag}>
-                    <span className={styles.tagText}>{employee?.tagName}</span>
+                    <span className={styles.tagText}>
+                      {employee?.tagName}
+                      {employee?.isDefault ? (
+                        <>（{intl.formatMessage({ id: 'resource.currentDefaultAssistant' })}）</>
+                      ) : (
+                        ''
+                      )}
+                    </span>
                   </span>
                 )}
               </span>

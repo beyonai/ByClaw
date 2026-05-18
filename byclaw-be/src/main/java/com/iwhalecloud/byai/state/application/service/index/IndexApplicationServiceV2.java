@@ -171,12 +171,8 @@ public class IndexApplicationServiceV2 {
             && Objects.equals(authDigitEmployVo.getId(), defaultDigitalEmployeeId);
         authDigitEmployVo.setIsDefault(isDefault);
         authDigitEmployVo.setCanSetDefault(!isDefault);
-        String tagName = buildRuntimeDigitalEmployeeTagName(authDigitEmployVo.getOwnerType(),
-            authDigitEmployVo.getResourceCode(), authDigitEmployVo.getAgentType());
-        if (isDefault && StringUtils.isNotBlank(tagName)) {
-            tagName = tagName + I18nUtil.get("digemployee.tag.default.suffix");
-        }
-        authDigitEmployVo.setTagName(tagName);
+        authDigitEmployVo.setTagName(buildRuntimeDigitalEmployeeTagName(authDigitEmployVo.getOwnerType(),
+            authDigitEmployVo.getResourceCode(), authDigitEmployVo.getAgentType()));
     }
 
     /**
