@@ -1111,7 +1111,7 @@ const ConfigForm = (props) => {
 
     // 如果有回调函数，等待图片加载完成后执行
     if (onLoadCallback) {
-      const img = new Image();
+      const img = new window.Image();
       img.onload = () => {
         onLoadCallback();
       };

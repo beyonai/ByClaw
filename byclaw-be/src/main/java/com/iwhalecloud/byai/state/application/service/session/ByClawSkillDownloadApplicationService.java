@@ -16,6 +16,8 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.storage.UserFS;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 
 /**
  * 用户工作空间 skill 下载应用服务。
@@ -33,18 +35,23 @@ public class ByClawSkillDownloadApplicationService {
     @Autowired
     private UserFS userFS;
 
+    @Autowired
+    private SsResourceService ssResourceService;
+
     /**
      * 准备一次 skill 下载。校验路径合规并返回 (zipFileName, body) 二元组；body 由 controller 直接交给 Spring 写回响应。
      *
      * @param userCode  目标用户编码（决定 bucket 名）
-     * @param skillPath 形如 "/.openclaw/workspace/skills/fol-auto-biztravel" 或带尾部斜杠
+     * @param resourceId 数字员工资源 ID；为空时按超级助手 skills 根目录解析
+     * @param skillPath 数字员工形如 "/.openclaw/workspace-baiying-agent-{resourceId}/skills/fol-auto-biztravel"，
+     *                  超级助手形如 "/.openclaw/workspace/skills/fol-auto-biztravel"
      * @return 可直接 ResponseEntity.body() 的 StreamingResponseBody + 建议下载文件名
      */
-    public SkillZipDownload prepare(String userCode, String skillPath) {
+    public SkillZipDownload prepare(String userCode, Long resourceId, String skillPath) {
         if (StringUtils.isBlank(userCode)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.user.code.notempty"));
         }
-        String normalizedSkillPath = normalizeSkillPath(skillPath);
+        String normalizedSkillPath = normalizeSkillPath(skillPath, resourceId);
         String skillName = extractSkillName(normalizedSkillPath);
 
         // 提前列对象一次：让"路径不存在 / skill 为空"在 controller 进入流式输出前就能转成可读错误。
@@ -96,15 +103,16 @@ public class ByClawSkillDownloadApplicationService {
 
     /**
      * 入参合规化：
-     * - 必须以 {@link ByClawSkillPaths#WORKSPACE_SKILL_ROOT_PREFIX} 开头；
+     * - 必须以当前 resourceId 对应的 skills 根目录开头；
      * - 拒绝 ".." 段；
      * - 去除尾部 '/'；
      * - 必须至少落在一个具体的 skill 目录上（前缀本身不允许，避免一次拉走所有 skills）。
      */
-    private String normalizeSkillPath(String skillPath) {
+    private String normalizeSkillPath(String skillPath, Long resourceId) {
         if (StringUtils.isBlank(skillPath)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.path.invalid"));
         }
+        String skillRootPrefix = resolveSkillRootPrefix(resourceId);
         String normalized = skillPath.replace('\\', '/').replaceAll("/+", "/");
         if (!normalized.startsWith("/")) {
             normalized = "/" + normalized;
@@ -112,7 +120,7 @@ public class ByClawSkillDownloadApplicationService {
         if (normalized.endsWith("/")) {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
-        if (!normalized.startsWith(ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX)) {
+        if (!normalized.startsWith(skillRootPrefix)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.path.invalid"));
         }
         for (String seg : normalized.split("/")) {
@@ -120,12 +128,23 @@ public class ByClawSkillDownloadApplicationService {
                 throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.path.invalid"));
             }
         }
-        // 必须比 WORKSPACE_SKILL_ROOT_PREFIX 多至少一段（具体 skill 名）。
-        String tail = normalized.substring(ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX.length());
+        // 必须比 skills 根目录多至少一段（具体 skill 名）。
+        String tail = normalized.substring(skillRootPrefix.length());
         if (StringUtils.isBlank(tail)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.path.invalid"));
         }
         return normalized;
+    }
+
+    private String resolveSkillRootPrefix(Long resourceId) {
+        if (resourceId == null) {
+            return ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX;
+        }
+        SsResource resource = ssResourceService.findById(resourceId);
+        String resourceCode = resource == null ? null : resource.getResourceCode();
+        return ByClawSkillPaths.isSuperAssistantResourceCode(resourceCode)
+            ? ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX
+            : ByClawSkillPaths.buildAgentSkillRootPrefix(resourceId);
     }
 
     private String extractSkillName(String normalizedSkillPath) {

@@ -14,13 +14,31 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
  */
 final class ByClawSkillPaths {
 
-    /** workspace 模式下 skill 根目录前缀，与 query 服务硬编码完全一致。 */
+    /** 超级助手 skills 根目录前缀。 */
     static final String WORKSPACE_SKILL_ROOT_PREFIX = "/.openclaw/workspace/skills/";
+
+    /** 数字员工 agent skills 根目录模板。 */
+    static final String AGENT_SKILL_ROOT_PREFIX_TEMPLATE = "/.openclaw/workspace-baiying-agent-%s/skills/";
 
     /** skill 元信息文件名；query 仅识别此文件作为 skill 的标志。 */
     static final String SKILL_DOC_FILE_NAME = "SKILL.md";
 
     private ByClawSkillPaths() {
+    }
+
+    static String buildAgentSkillRootPrefix(Long resourceId) {
+        if (resourceId == null) {
+            throw new IllegalArgumentException("resourceId must not be null");
+        }
+        return String.format(AGENT_SKILL_ROOT_PREFIX_TEMPLATE, resourceId);
+    }
+
+    static String resolveSkillRootPrefix(Long resourceId) {
+        return resourceId == null ? WORKSPACE_SKILL_ROOT_PREFIX : buildAgentSkillRootPrefix(resourceId);
+    }
+
+    static boolean isSuperAssistantResourceCode(String resourceCode) {
+        return resourceCode != null && resourceCode.endsWith("_main");
     }
 
     /**

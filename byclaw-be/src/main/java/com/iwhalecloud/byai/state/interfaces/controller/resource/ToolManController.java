@@ -514,8 +514,8 @@ public class ToolManController {
     @PostMapping("/qrySkillListByUserCode")
     public ResponseUtil<List<ByClawSkillDto>> qrySkillListByUserCode(@RequestBody QrySkillListByUserCodeQo request) {
         try {
-            if (request == null || request.getResourceId() == null) {
-                return ResponseUtil.fail(I18nUtil.get("resource.resourceid.notnull"));
+            if (request == null) {
+                return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
             }
             String requestUserCode = request == null ? null : request.getUserCode();
             String resolvedUserCode = requestUserCode != null && !requestUserCode.trim().isEmpty() ? requestUserCode
@@ -540,19 +540,23 @@ public class ToolManController {
     }
 
     /**
-     * 上传 skill 压缩包到用户工作空间。 - 落盘 bucket: byclaw-{userCode}（与 qrySkillListByUserCode 同口径） - 落盘前缀:
-     * /by/.openclaw/workspace/skills/{skillName}/... - zip 仅允许包含一个顶层目录，且必须含 SKILL.md；同名 skill 会先清空旧目录再写入。 - userCode
+     * 上传 skill 压缩包到用户工作空间。 - 落盘 bucket: byclaw-{userCode}（与 qrySkillListByUserCode 同口径） - 落盘前缀：数字员工
+     * /.openclaw/workspace-baiying-agent-{resourceId}/skills/{skillName}/...； 超级助手
+     * /.openclaw/workspace/skills/{skillName}/... - zip 仅允许包含一个顶层目录，且必须含 SKILL.md；同名 skill 会先清空旧目录再写入。 - userCode
      * 留空时退回当前登录用户。
      */
     @PostMapping(value = "/uploadSkillZip", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseUtil<ByClawSkillDto> uploadSkillZip(
         @Parameter(description = "skill zip 文件", required = true) @RequestParam("file") MultipartFile file,
+        @Parameter(description = "数字员工资源ID；超级助手可不传") @RequestParam(value = "resourceId",
+            required = false) Long resourceId,
         @Parameter(description = "目标用户编码，可选；留空则使用当前登录用户") @RequestParam(value = "userCode",
             required = false) String userCode) {
         try {
             String resolvedUserCode = StringUtils.isNotBlank(userCode) ? userCode
                 : CurrentUserHolder.getCurrentUserCode();
-            ByClawSkillDto data = byClawSkillUploadApplicationService.uploadSkillZip(resolvedUserCode, file);
+            ByClawSkillDto data = byClawSkillUploadApplicationService.uploadSkillZip(resolvedUserCode, resourceId,
+                file);
             return ResponseUtil.successResponse(I18nUtil.get("byclaw.skill.upload.success"), data);
         }
         catch (IllegalArgumentException e) {
@@ -562,28 +566,34 @@ public class ToolManController {
             return ResponseUtil.fail(e.getMessage());
         }
         catch (Exception e) {
-            logger.error("uploadSkillZip failed, userCode={}", userCode, e);
+            logger.error("uploadSkillZip failed, userCode={}, resourceId={}", userCode, resourceId, e);
             return ResponseUtil
                 .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("byclaw.skill.upload.failed"));
         }
     }
 
     /**
-     * 下载 skill 目录为 zip。 - 入参 skillPath 必须落在 /.openclaw/workspace/skills/ 之下，且至少指向某一个具体 skill 目录。 - userCode
-     * 留空时退回当前登录用户。 - 入参兼容 application/json body 与 query/form 两种形式：body 优先，缺失时退到 query 参数。 - 出参为 application/zip 流，文件名形如
-     * {skillName}.zip。 - 失败场景（路径非法 / skill 不存在 / 读对象异常）返回纯文本 400，避免中途出 zip 时再插入 JSON 错误体。
+     * 下载 skill 目录为 zip。 - 数字员工：skillPath 必须落在 /.openclaw/workspace-baiying-agent-{resourceId}/skills/ 之下。 -
+     * 超级助手：skillPath 必须落在 /.openclaw/workspace/skills/ 之下。 - userCode 留空时退回当前登录用户。 - 入参兼容 application/json body 与
+     * query/form 两种形式：body 优先，缺失时退到 query 参数。 - 出参为 application/zip 流，文件名形如 {skillName}.zip。 - 失败场景（路径非法 / skill 不存在 /
+     * 读对象异常）返回纯文本 400，避免中途出 zip 时再插入 JSON 错误体。
      */
     @PostMapping("/downloadSkillZip")
     public ResponseEntity<StreamingResponseBody> downloadSkillZip(
         @RequestBody(required = false) DownloadSkillZipQo request,
-        @Parameter(description = "skill 目录路径，例如 /.openclaw/workspace/skills/fol-auto-biztravel") @RequestParam(
-            value = "skillPath", required = false) String skillPath,
+        @Parameter(
+            description = "skill 目录路径，例如 /.openclaw/workspace-baiying-agent-10000417/skills/fol-auto-biztravel") @RequestParam(
+                value = "skillPath", required = false) String skillPath,
+        @Parameter(description = "数字员工资源ID；超级助手可不传", required = false) @RequestParam(value = "resourceId",
+            required = false) Long resourceId,
         @Parameter(description = "目标用户编码，可选；留空则使用当前登录用户") @RequestParam(value = "userCode",
             required = false) String userCode) {
         // body 优先；body 缺失时再退到 query 参数。两种来源都允许，避免前端必须指定其一。
         String finalSkillPath = request != null && StringUtils.isNotBlank(request.getSkillPath())
             ? request.getSkillPath()
             : skillPath;
+        Long finalResourceId = request != null && request.getResourceId() != null ? request.getResourceId()
+            : resourceId;
         String finalUserCode = request != null && StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
             : userCode;
         String resolvedUserCode = StringUtils.isNotBlank(finalUserCode) ? finalUserCode
@@ -593,7 +603,7 @@ public class ToolManController {
                 throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.path.invalid"));
             }
             ByClawSkillDownloadApplicationService.SkillZipDownload download = byClawSkillDownloadApplicationService
-                .prepare(resolvedUserCode, finalSkillPath);
+                .prepare(resolvedUserCode, finalResourceId, finalSkillPath);
             // RFC 5987 风格的 filename*：兼容中文 / 特殊字符 skill 名，避免浏览器侧文件名乱码。
             String encoded = UriUtils.encode(download.getZipFileName(), java.nio.charset.StandardCharsets.UTF_8);
             String contentDisposition = "attachment; filename=\"" + encoded + "\"; filename*=UTF-8''" + encoded;
@@ -605,7 +615,8 @@ public class ToolManController {
                 .body(out -> out.write(e.getMessage().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         }
         catch (Exception e) {
-            logger.error("downloadSkillZip failed, userCode={}, skillPath={}", resolvedUserCode, finalSkillPath, e);
+            logger.error("downloadSkillZip failed, userCode={}, resourceId={}, skillPath={}", resolvedUserCode,
+                finalResourceId, finalSkillPath, e);
             String fallbackMsg = StringUtils.defaultIfBlank(e.getMessage(),
                 I18nUtil.get("byclaw.skill.download.failed"));
             return ResponseEntity.badRequest().contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))

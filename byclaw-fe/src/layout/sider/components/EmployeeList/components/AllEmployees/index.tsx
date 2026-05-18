@@ -27,7 +27,7 @@ import EmptyTips from '@/components/EmptyTips';
 import { EmployeeListProps, EmployeeListContext, isInputMode } from '@/layout/sider/components/EmployeeList';
 import { Platform } from '@/layout/components/provider/global';
 import { agentTypeMap } from '@/constants/agent';
-import { sortBySuperHelperFirst } from '@/layout/sider/components/EmployeeList/util';
+import { sortBySuperHelperFirst, updateDefaultEmployee } from '@/layout/sider/components/EmployeeList/util';
 
 import pStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 
@@ -220,16 +220,7 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
         }
 
         if (defaultResourceId !== undefined && defaultResourceId !== null) {
-          const nextList = prevList.map((item) => {
-            const itemResourceId = item.resourceId ?? item.id ?? item.agentId;
-            const isDefault = String(itemResourceId) === String(defaultResourceId);
-            return {
-              ...item,
-              isDefault,
-              canSetDefault: !isDefault,
-            };
-          });
-          return sortBySuperHelperFirst(nextList);
+          return updateDefaultEmployee(prevList, defaultResourceId);
         }
 
         return [...prevList];

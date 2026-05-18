@@ -144,6 +144,17 @@
           AND status != 'RELEASED'
     </update>
 
+    <update id="markStartingReleased">
+        UPDATE ss_sandbox_record
+        SET status = 'RELEASED',
+            release_reason = #{reason,jdbcType=VARCHAR},
+            release_time = #{releaseTime,jdbcType=TIMESTAMP},
+            update_time = #{releaseTime,jdbcType=TIMESTAMP},
+            version = version + 1
+        WHERE id = #{id,jdbcType=BIGINT}
+          AND status = 'STARTING'
+    </update>
+
     <update id="updateLaunchSuccess">
         UPDATE ss_sandbox_record
         SET status = 'RUNNING',
