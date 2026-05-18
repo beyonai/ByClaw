@@ -1,9 +1,10 @@
 import { getTitle, type ModalStore } from '@/pages/manager/hooks/useShowModal';
 import { getSourceSystemList } from '@/pages/manager/service/OrgMgr';
 import { getDcSystemConfigListByStandType } from '@/pages/manager/service/session';
+import { getByParamGroupCode } from '@/pages/manager/service/System';
 import { Button, Form, message, Modal } from 'antd';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useDispatch, useIntl } from '@umijs/max';
+import { useDispatch, useIntl, getLocale } from '@umijs/max';
 import ModelDebugPanel from './ModelDebugPanel';
 import ModelFormFields from './ModelFormFields';
 import {
@@ -31,6 +32,11 @@ const ModelFormModal: React.FC<Props> = (props) => {
   const [tokenVisible, setTokenVisible] = useState(false);
   const [abilityOptions, setAbilityOptions] = useState<Array<{ label: string; value: string }>>([]);
   const [systemOptions, setSystemOptions] = useState<Array<{ label: string; value: string }>>([]);
+  const [modelTypeOptions, setModelTypeOptions] = useState<Array<{ label: string; value: string }>>(() => [
+    { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeLLM' }), value: 'LLM' },
+    { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeRERANK' }), value: 'RERANK' },
+    { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeEMBEDDING' }), value: 'EMBEDDING' },
+  ]);
   const [activeSections, setActiveSections] = useState<string[]>(['basic', 'connection']);
   const [submitAction, setSubmitAction] = useState<'save_continue' | 'save_close' | null>(null);
 
@@ -57,21 +63,34 @@ const ModelFormModal: React.FC<Props> = (props) => {
     [intl]
   );
 
-  /** 模型类型：中文展示「大语言模型（LLM）」/「重排模型（RERANK）」/「向量模型（EMBEDDING）」，英文仅展示括号内 LLM/RERANK/EMBEDDING */
-  const modelTypeOptions = useMemo(
-    () => [
-      { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeLLM' }), value: 'LLM' },
-      { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeRERANK' }), value: 'RERANK' },
-      { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeEMBEDDING' }), value: 'EMBEDDING' },
-    ],
-    [intl]
-  );
-
   const debugDefaults = useMemo(() => buildDebugDefaults(intl), [intl]);
+
+  const local = getLocale();
+  const isEN = React.useMemo(() => {
+    return local.includes('en');
+  }, [local]);
 
   useEffect(() => {
     if (!open) return;
     setActiveSections(type === 'debug' ? ['basic', 'connection', 'params'] : ['basic', 'connection']);
+
+    // 模型类型动态下发：paramGroupCode=SYSTEM_MODEL_TYPE
+    getByParamGroupCode({ paramGroupCode: 'SYSTEM_MODEL_TYPE' })
+      .then((res: any) => {
+        const list = res?.data?.byaiSystemConfigLists;
+        if (Array.isArray(list) && list.length > 0) {
+          const opts = list
+            .map((item: any) => ({
+              label: isEN ? item.paramEnName : item.paramName,
+              value: item?.paramValue,
+            }))
+            .filter((item: any) => item.value);
+          setModelTypeOptions(opts);
+        }
+      })
+      .catch(() => {
+        // ignore
+      });
 
     // 能力（模型标签）动态下发：standType=MODEL_TAGS
     getDcSystemConfigListByStandType({ standType: 'MODEL_TAGS' })
@@ -460,7 +479,6 @@ const ModelFormModal: React.FC<Props> = (props) => {
 
         <div className={styles.right}>
           <ModelDebugPanel
-            intl={intl}
             debugInputMode={debugInputMode}
             debugInput={debugInput}
             setDebugInput={setDebugInput}

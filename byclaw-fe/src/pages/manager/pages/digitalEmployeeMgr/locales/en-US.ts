@@ -144,7 +144,7 @@ export default {
   // BaseListModal
   'baseListModal.createTime': 'Create Time',
   'baseListModal.tabs.agent': 'Agent',
-  'baseListModal.tabs.toolSet': 'Tool Set',
+  'baseListModal.tabs.toolSet': 'Tool',
   'baseListModal.tabs.tool': 'Tool',
   'baseListModal.tabs.mcp': 'MCP',
   'baseListModal.tabs.view': 'View',

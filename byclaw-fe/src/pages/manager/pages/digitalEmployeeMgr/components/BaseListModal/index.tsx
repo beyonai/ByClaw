@@ -3,7 +3,7 @@
 /* eslint-disable no-nested-ternary */
 import { Input, Spin, Empty, Tree, Tabs, Select } from 'antd';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useDispatch, useSelector, useIntl } from '@umijs/max';
+import { useDispatch, useSelector, useIntl, getLocale } from '@umijs/max';
 import classnames from 'classnames';
 import AntdIcon from '@/pages/manager/components/AntdIcon';
 import Pagination from '@/pages/manager/components/Pagination';
@@ -200,6 +200,11 @@ function BaseListModal(props) {
     ];
   }, [intl]);
 
+  const local = getLocale();
+  const isEN = React.useMemo(() => {
+    return local.includes('en');
+  }, [local]);
+
   const fetchBundledTools = useCallback(async () => {
     if (bundledTools.length > 0) return;
     setBundledToolLoading(true);
@@ -215,7 +220,7 @@ function BaseListModal(props) {
           id: item.toolCode,
           resourceId: item.toolCode,
           resourceName: item.toolName,
-          description: item.toolDescZh || item.toolDescEn || '',
+          description: isEN ? item.toolDescEn || '' : item.toolDescZh || '',
           avatar: item.toolGroupName,
           toolCode: item.toolCode,
           toolName: item.toolName,
@@ -223,7 +228,7 @@ function BaseListModal(props) {
           toolGroup: item.toolGroup,
           toolGroupName: item.toolGroupName,
           grantResourceType: 'TOOLKIT',
-          createUserName: item.createUserName || item.creatorName || item.toolGroupName,
+          createUserName: isEN ? item.toolGroup : item.toolGroupName,
         }))
       );
     } catch {
@@ -425,7 +430,7 @@ function BaseListModal(props) {
   return (
     <ModalDrawer
       type="modal"
-      width={900}
+      width={1000}
       height={640}
       className={styles.toolConfigModal}
       closable={false}
@@ -434,8 +439,6 @@ function BaseListModal(props) {
       open={open}
       onCancel={onCancel}
       paddingSize="padding-none"
-      bodyStyle={{ padding: 0, height: 640 }}
-      styles={{ body: { padding: 0, height: 640 } }}
     >
       <div className={styles.container}>
         <div className={styles.left}>
@@ -457,7 +460,7 @@ function BaseListModal(props) {
           >
             <Spin spinning={catalogLoading}>
               <DirectoryTree
-                style={{ minHeight: 100 }}
+                className={styles.directoryTree}
                 selectedKeys={catalogId}
                 treeData={filteredCatalogList}
                 fieldNames={{
@@ -501,7 +504,7 @@ function BaseListModal(props) {
             <div className={styles.headerRight}>
               {activeTab === 'TOOLKIT' && (
                 <Select
-                  style={{ width: 80 }}
+                  className={styles.toolSubSelect}
                   value={toolSubTab}
                   onChange={(value) => {
                     setToolSubTab(value);
@@ -514,7 +517,7 @@ function BaseListModal(props) {
               )}
               <div className={styles.searchContainer}>
                 <Input
-                  style={{ width: 150 }}
+                  className={styles.searchInput}
                   suffix={<AntdIcon type="icon-a-Searchsousuo" onClick={() => onSearch()} />}
                   value={searchKeyword}
                   onChange={(e) => setSearchKeyword(e.target.value)}
@@ -524,7 +527,7 @@ function BaseListModal(props) {
                   })}
                 />
               </div>
-              <AntdIcon type="icon-a-Closeguanbi" style={{ fontSize: '16px' }} onClick={onCancel} />
+              <AntdIcon className={styles.closeIcon} type="icon-a-Closeguanbi" onClick={onCancel} />
             </div>
           </div>
           <Spin
