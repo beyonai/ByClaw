@@ -113,6 +113,7 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 - 若 JSON **根**上存在非空的 **`relSkills`**（字符串数组，例如 `["dws","clawhub"]`），则写入 **`agents.list[].skills`**（元素会 `trim`，空串丢弃）。
 - 若无有效 `relSkills`，则回退读取根级 **`skills`**（兼容旧版原生 JSON）；仍无则为 **`[]`**。
 - 若 `workspaceSkillAutoEnable` 未关闭，插件还会自动扫描用户上传的 `skills/<skillName>/SKILL.md`：默认只把当前 agent workspace 下的 skill 并入该 agent，不读取其它 agent workspace；main workspace (`workspace/skills`) 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 并入托管子 agent。扫描有 `fs.watch` 与 `workspaceSkillScanIntervalMs` 兜底（默认 `500` ms）；兜底扫描只做 skill diff，不重新读取数字员工 Redis，也不会触发托管 Agent 增删。
+- 对 rclone/FUSE 等网盘挂载，`fs.watch` 与目录类型上报可能不可靠；插件会依赖周期扫描，并在 `Dirent` 类型未知时用 `stat()` 兜底识别 skill 目录。
 
 更细的说明见 [docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md](docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md) 与 [docs/PLUGIN_OVERVIEW.zh-CN.md](docs/PLUGIN_OVERVIEW.zh-CN.md)。
 
