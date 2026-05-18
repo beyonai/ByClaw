@@ -122,6 +122,7 @@ public class DigitalEmployeeController {
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(ssResource.getResourceId());
         DigitalEmployeeDetailsDTO details = digitalEmployeeApplicationService.findDetailsById(employeeIdDTO);
+        digitalEmployeeApplicationService.applyInputRuntimeFieldsForResponse(details, digitalEmployeeDTO);
 
         return ResponseUtil.successResponse(I18nUtil.get("digemployee.update.success"), details);
     }

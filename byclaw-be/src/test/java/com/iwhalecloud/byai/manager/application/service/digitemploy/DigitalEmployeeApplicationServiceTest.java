@@ -481,6 +481,81 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(result.getRelSkills()).containsExactly("1", "2", "3");
     }
 
+    @Test
+    void findDetailsById_populatesRelToolsFromTargetContent() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(100L);
+
+        DigitalEmployeeDetailsDTO detailsDTO = new DigitalEmployeeDetailsDTO();
+        detailsDTO.setResourceId(100L);
+        detailsDTO.setPrologue("{}");
+        detailsDTO.setTargetContent("{\"relTools\":[\"tool-a\",\"tool-b\"]}");
+
+        when(ssResExtDigEmployeeService.findDetailsById(100L)).thenReturn(detailsDTO);
+        when(ssResourceService.findRelResource(100L)).thenReturn(List.of());
+        when(templateRuleInfoApplicationService.findMemoryConfigsByResourceIdAndUserId(100L, 1L)).thenReturn(List.of());
+
+        DigitalEmployeeDetailsDTO result = service.findDetailsById(dto);
+
+        assertThat(result.getRelTools()).containsExactly("tool-a", "tool-b");
+    }
+
+    @Test
+    void findDetailsById_prefersStoredRelPromptFromTargetContent() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(100L);
+
+        DigitalEmployeeDetailsDTO detailsDTO = new DigitalEmployeeDetailsDTO();
+        detailsDTO.setResourceId(100L);
+        detailsDTO.setPrologue("{}");
+        detailsDTO.setCorePersonaDefinition("db-core-prompt");
+        detailsDTO.setTargetContent("{\"relPrompt\":\"stored-rel-prompt\"}");
+
+        when(ssResExtDigEmployeeService.findDetailsById(100L)).thenReturn(detailsDTO);
+        when(ssResourceService.findRelResource(100L)).thenReturn(List.of());
+        when(templateRuleInfoApplicationService.findMemoryConfigsByResourceIdAndUserId(100L, 1L)).thenReturn(List.of());
+
+        DigitalEmployeeDetailsDTO result = service.findDetailsById(dto);
+
+        assertThat(result.getRelPrompt()).isEqualTo("stored-rel-prompt");
+    }
+
+    @Test
+    void findDetailsById_fallsBackToCorePersonaDefinitionWhenStoredRelPromptMissing() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(100L);
+
+        DigitalEmployeeDetailsDTO detailsDTO = new DigitalEmployeeDetailsDTO();
+        detailsDTO.setResourceId(100L);
+        detailsDTO.setPrologue("{}");
+        detailsDTO.setCorePersonaDefinition("db-core-prompt");
+        detailsDTO.setTargetContent("{\"relTools\":[\"tool-a\"]}");
+
+        when(ssResExtDigEmployeeService.findDetailsById(100L)).thenReturn(detailsDTO);
+        when(ssResourceService.findRelResource(100L)).thenReturn(List.of());
+        when(templateRuleInfoApplicationService.findMemoryConfigsByResourceIdAndUserId(100L, 1L)).thenReturn(List.of());
+
+        DigitalEmployeeDetailsDTO result = service.findDetailsById(dto);
+
+        assertThat(result.getRelPrompt()).isEqualTo("db-core-prompt");
+    }
+
+    @Test
+    void applyInputRuntimeFieldsForResponse_allowsClearingRelPromptAndOverridingRelTools() {
+        DigitalEmployeeDetailsDTO detailsDTO = new DigitalEmployeeDetailsDTO();
+        detailsDTO.setRelPrompt("old-prompt");
+        detailsDTO.setRelTools(List.of("old-tool"));
+
+        DigitalEmployeeDTO inputDto = new DigitalEmployeeDTO();
+        inputDto.setCorePersonaDefinition("");
+        inputDto.setRelTools(List.of());
+
+        service.applyInputRuntimeFieldsForResponse(detailsDTO, inputDto);
+
+        assertThat(detailsDTO.getRelPrompt()).isEmpty();
+        assertThat(detailsDTO.getRelTools()).isEmpty();
+    }
+
     private SsResource buildDigitalEmployee(Long resourceId, String ownerType, Long createBy) {
         SsResource resource = new SsResource();
         resource.setResourceId(resourceId);

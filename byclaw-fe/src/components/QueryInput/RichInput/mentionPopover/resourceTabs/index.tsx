@@ -222,12 +222,14 @@ const ResourceTabs: React.FC<Props> = ({
         message.error(intl.formatMessage({ id: 'resourceTabs.skillUpload.noUserCode' }));
         return false;
       }
-
       setSkillUploading(true);
       try {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('userCode', userCode);
+        if (normalizedAgentId) {
+          formData.append('resourceId', normalizedAgentId);
+        }
 
         const response = await uploadSkillZip(formData);
 
@@ -240,7 +242,7 @@ const ResourceTabs: React.FC<Props> = ({
         setSkillUploading(false);
       }
     },
-    [userInfo, intl, message]
+    [userInfo, normalizedAgentId, intl, message]
   );
 
   const hasAnyTab = true;

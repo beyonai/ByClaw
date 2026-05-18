@@ -1528,13 +1528,13 @@ public class DigitalEmployeeApplicationService {
         // relTools 不入库，直接从最近一次 sync 写入的 target_content 镜像里反序列化回填，保证编辑回显不丢数据。
         digitalEmployeeDetailsDTO
             .setRelTools(parseRelToolsFromTargetContent(digitalEmployeeDetailsDTO.getTargetContent()));
-        // relPrompt 与 corePersonaDefinition 同源：以 DB 列 core_persona_definition 为准，
-        // 没有时再从上一次 target_content 中反查（兼容历史保存路径未带 corePersonaDefinition 的情况）。
-        String corePersonaDefinition = digitalEmployeeDetailsDTO.getCorePersonaDefinition();
-        if (StringUtils.isBlank(corePersonaDefinition)) {
-            corePersonaDefinition = parseRelPromptFromTargetContent(digitalEmployeeDetailsDTO.getTargetContent());
+        // relPrompt 优先取保存时写入 target_content 的运行期值；
+        // 历史数据若没有该字段，再兜底到 corePersonaDefinition，兼容旧数据。
+        String relPrompt = parseRelPromptFromTargetContent(digitalEmployeeDetailsDTO.getTargetContent());
+        if (StringUtils.isBlank(relPrompt)) {
+            relPrompt = digitalEmployeeDetailsDTO.getCorePersonaDefinition();
         }
-        digitalEmployeeDetailsDTO.setRelPrompt(corePersonaDefinition);
+        digitalEmployeeDetailsDTO.setRelPrompt(relPrompt);
 
         // 查询记忆配置列表（根据数字员工ID和用户ID查询）
         Long userId = CurrentUserHolder.getCurrentUserId();
@@ -1556,11 +1556,21 @@ public class DigitalEmployeeApplicationService {
         if (inputDto.getRelTools() != null) {
             details.setRelTools(inputDto.getRelTools());
         }
-        // relPrompt 优先取前端入参；fallback 到 corePersonaDefinition（DB 列），最终空值由 findDetailsById 已兜底设置。
-        String inputPrompt = StringUtils.defaultIfBlank(inputDto.getRelPrompt(), inputDto.getCorePersonaDefinition());
-        if (StringUtils.isNotBlank(inputPrompt)) {
-            details.setRelPrompt(inputPrompt);
+        // relPrompt 以本次提交为准：
+        // - 显式传 relPrompt：直接使用，允许空串表达"清空"；
+        // - 否则若传了 corePersonaDefinition：按同源字段同步，允许空串覆盖；
+        // - 两者都未传：保持 findDetailsById 查出的值不变。
+        if (inputDto.getRelPrompt() != null) {
+            details.setRelPrompt(inputDto.getRelPrompt());
         }
+        else if (inputDto.getCorePersonaDefinition() != null) {
+            details.setRelPrompt(inputDto.getCorePersonaDefinition());
+        }
+    }
+
+    /** 更新/保存接口返回详情时，用本次入参兜底覆盖运行期字段，避免响应仍回显旧值。 */
+    public void applyInputRuntimeFieldsForResponse(DigitalEmployeeDetailsDTO details, DigitalEmployeeDTO inputDto) {
+        applyInputRuntimeFields(details, inputDto);
     }
 
     /**
