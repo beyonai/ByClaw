@@ -94,6 +94,8 @@ export function resolveConfigSyncHotPrefixes(cfg: BaiyingEnhancePluginConfig): s
   return Array.from(out);
 }
 
+const registry = new AgentRegistryState();
+
 console.log("============Baiying Enhance module imported============");
 const plugin = {
   id: "baiying-enhance",
@@ -112,7 +114,6 @@ const plugin = {
     api.registerReload({
       hotPrefixes: resolveConfigSyncHotPrefixes(pluginCfg),
     });
-    const registry = new AgentRegistryState();
     const debounceMs = pluginCfg.watchDebounceMs ?? 500;
     const executorResourcesDir = resolveExecutorResourcesDir(api, pluginCfg);
     const redisJsonStore = createRedisJsonStore({
