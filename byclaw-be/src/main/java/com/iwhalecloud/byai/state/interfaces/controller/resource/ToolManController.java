@@ -1,7 +1,11 @@
 package com.iwhalecloud.byai.state.interfaces.controller.resource;
 
+import com.iwhalecloud.byai.manager.dto.resource.CallMcpParamsDto;
+import com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.UserSpaceDto;
 import com.iwhalecloud.byai.state.domain.chat.vo.UserSpaceVo;
+import com.iwhalecloud.byai.state.domain.resource.service.SsResExtMcpService;
+import io.modelcontextprotocol.spec.McpSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -56,6 +60,9 @@ public class ToolManController {
 
     @Autowired
     private ToolManService toolManService;
+
+    @Autowired
+    private SsResExtMcpService ssResExtMcpService;
 
     @Autowired
     private ResourceApplicationService resourceApplicationService;
@@ -321,8 +328,7 @@ public class ToolManController {
     }
 
     /**
-     * 恢复资源。
-     * 将已注销（状态3）的资源恢复为已上架（状态2）。
+     * 恢复资源。 将已注销（状态3）的资源恢复为已上架（状态2）。
      *
      * @author qin.guoquan
      * @date 2026-05-14
@@ -534,17 +540,15 @@ public class ToolManController {
     }
 
     /**
-     * 上传 skill 压缩包到用户工作空间。
-     * - 落盘 bucket: byclaw-{userCode}（与 qrySkillListByUserCode 同口径）
-     * - 落盘前缀: /by/.openclaw/workspace/skills/{skillName}/...
-     * - zip 仅允许包含一个顶层目录，且必须含 SKILL.md；同名 skill 会先清空旧目录再写入。
-     * - userCode 留空时退回当前登录用户。
+     * 上传 skill 压缩包到用户工作空间。 - 落盘 bucket: byclaw-{userCode}（与 qrySkillListByUserCode 同口径） - 落盘前缀:
+     * /by/.openclaw/workspace/skills/{skillName}/... - zip 仅允许包含一个顶层目录，且必须含 SKILL.md；同名 skill 会先清空旧目录再写入。 - userCode
+     * 留空时退回当前登录用户。
      */
     @PostMapping(value = "/uploadSkillZip", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseUtil<ByClawSkillDto> uploadSkillZip(
         @Parameter(description = "skill zip 文件", required = true) @RequestParam("file") MultipartFile file,
-        @Parameter(description = "目标用户编码，可选；留空则使用当前登录用户")
-        @RequestParam(value = "userCode", required = false) String userCode) {
+        @Parameter(description = "目标用户编码，可选；留空则使用当前登录用户") @RequestParam(value = "userCode",
+            required = false) String userCode) {
         try {
             String resolvedUserCode = StringUtils.isNotBlank(userCode) ? userCode
                 : CurrentUserHolder.getCurrentUserCode();
@@ -565,25 +569,23 @@ public class ToolManController {
     }
 
     /**
-     * 下载 skill 目录为 zip。
-     * - 入参 skillPath 必须落在 /.openclaw/workspace/skills/ 之下，且至少指向某一个具体 skill 目录。
-     * - userCode 留空时退回当前登录用户。
-     * - 入参兼容 application/json body 与 query/form 两种形式：body 优先，缺失时退到 query 参数。
-     * - 出参为 application/zip 流，文件名形如 {skillName}.zip。
-     * - 失败场景（路径非法 / skill 不存在 / 读对象异常）返回纯文本 400，避免中途出 zip 时再插入 JSON 错误体。
+     * 下载 skill 目录为 zip。 - 入参 skillPath 必须落在 /.openclaw/workspace/skills/ 之下，且至少指向某一个具体 skill 目录。 - userCode
+     * 留空时退回当前登录用户。 - 入参兼容 application/json body 与 query/form 两种形式：body 优先，缺失时退到 query 参数。 - 出参为 application/zip 流，文件名形如
+     * {skillName}.zip。 - 失败场景（路径非法 / skill 不存在 / 读对象异常）返回纯文本 400，避免中途出 zip 时再插入 JSON 错误体。
      */
     @PostMapping("/downloadSkillZip")
     public ResponseEntity<StreamingResponseBody> downloadSkillZip(
         @RequestBody(required = false) DownloadSkillZipQo request,
-        @Parameter(description = "skill 目录路径，例如 /.openclaw/workspace/skills/fol-auto-biztravel")
-        @RequestParam(value = "skillPath", required = false) String skillPath,
-        @Parameter(description = "目标用户编码，可选；留空则使用当前登录用户")
-        @RequestParam(value = "userCode", required = false) String userCode) {
+        @Parameter(description = "skill 目录路径，例如 /.openclaw/workspace/skills/fol-auto-biztravel") @RequestParam(
+            value = "skillPath", required = false) String skillPath,
+        @Parameter(description = "目标用户编码，可选；留空则使用当前登录用户") @RequestParam(value = "userCode",
+            required = false) String userCode) {
         // body 优先；body 缺失时再退到 query 参数。两种来源都允许，避免前端必须指定其一。
         String finalSkillPath = request != null && StringUtils.isNotBlank(request.getSkillPath())
-            ? request.getSkillPath() : skillPath;
-        String finalUserCode = request != null && StringUtils.isNotBlank(request.getUserCode())
-            ? request.getUserCode() : userCode;
+            ? request.getSkillPath()
+            : skillPath;
+        String finalUserCode = request != null && StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
+            : userCode;
         String resolvedUserCode = StringUtils.isNotBlank(finalUserCode) ? finalUserCode
             : CurrentUserHolder.getCurrentUserCode();
         try {
@@ -626,5 +628,29 @@ public class ToolManController {
             logger.error(e.getMessage(), e);
             return ResponseUtil.fail(e.getMessage());
         }
+    }
+
+    /**
+     * 获取mcp工具信息
+     *
+     * @param resourceIdDto 请求
+     * @return ResponseUtil
+     */
+    @PostMapping("/mcp/listTools")
+    public ResponseUtil<McpSchema.ListToolsResult> listTools(@RequestBody ResourceIdDto resourceIdDto) {
+        McpSchema.ListToolsResult listToolsResult = ssResExtMcpService.listTools(resourceIdDto);
+        return ResponseUtil.success(listToolsResult);
+    }
+
+    /**
+     * 获取mcp工具信息
+     *
+     * @param callMcpParamsDto 请求
+     * @return ResponseUtil
+     */
+    @PostMapping("/mcp/callToolRequest")
+    public ResponseUtil<McpSchema.CallToolResult> callToolRequest(@RequestBody CallMcpParamsDto callMcpParamsDto) {
+        McpSchema.CallToolResult callToolResult = ssResExtMcpService.callToolRequest(callMcpParamsDto);
+        return ResponseUtil.success(callToolResult);
     }
 }

@@ -97,7 +97,7 @@
         <resilience4j.version>2.0.2</resilience4j.version>
 
         <!-- JSON Processing -->
-        <jackson.version>2.15.3</jackson.version>
+        <jackson.version>3.0.3</jackson.version>
         <fastjson.version>2.0.53</fastjson.version>
         <guava.version>33.4.8-jre</guava.version>
 
@@ -331,19 +331,19 @@
             </dependency>
 
             <dependency>
-                <groupId>com.fasterxml.jackson.core</groupId>
+                <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
                 <version>${jackson.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.fasterxml.jackson.core</groupId>
+                <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-core</artifactId>
                 <version>${jackson.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-annotations</artifactId>
-                <version>${jackson.version}</version>
+                <version>3.0-rc5</version>
             </dependency>
 
             <dependency>
@@ -1219,11 +1219,11 @@
             <version>1.0.5</version>
         </dependency>
 
-        <!-- MCP -->
+        <!-- MCP（0.7.0 为单一 JAR；1.0.0 为 BOM 需 mcp-core 等，易缺本地 JAR 导致符号无法解析） -->
         <dependency>
             <groupId>io.modelcontextprotocol.sdk</groupId>
             <artifactId>mcp</artifactId>
-            <version>0.7.0</version>
+            <version>1.0.0</version>
         </dependency>
 
         <dependency>
