@@ -228,10 +228,11 @@ public class IndexApplicationServiceV2 {
 
         PageInfo<AuthDigitEmployVo> pageInfo = PageHelperUtil.toPageInfo(page);
 
-        // 标记是否我常用的
+        Long defaultDigitalEmployeeId = resolveCurrentUserDefaultDigitalEmployeeId();
         List<AuthDigitEmployVo> authDigitEmployVos = pageInfo.getList();
         for (AuthDigitEmployVo authDigitEmployVo : authDigitEmployVos) {
             this.setIsMyCreate(authDigitEmployVo);
+            this.fillDefaultAndRuntimeTag(authDigitEmployVo, defaultDigitalEmployeeId);
         }
 
         return pageInfo;
@@ -259,8 +260,10 @@ public class IndexApplicationServiceV2 {
         // 为每个数字员工添加知识和技能统计信息
         this.fillResourceStatsForAuthDigitEmployVos(authDigitEmployVos);
 
+        Long defaultDigitalEmployeeId = resolveCurrentUserDefaultDigitalEmployeeId();
         for (AuthDigitEmployVo authDigitEmployVo : authDigitEmployVos) {
             this.setIsMyCreate(authDigitEmployVo);
+            this.fillDefaultAndRuntimeTag(authDigitEmployVo, defaultDigitalEmployeeId);
         }
 
         return pageInfo;

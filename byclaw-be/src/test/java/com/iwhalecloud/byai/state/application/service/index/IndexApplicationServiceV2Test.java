@@ -10,6 +10,7 @@ import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceCatalogService;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.qo.index.DiscoverQo;
+import com.iwhalecloud.byai.manager.vo.index.AuthDigitEmployVo;
 import com.iwhalecloud.byai.manager.vo.index.DigitEmployMarketExtVo;
 import com.iwhalecloud.byai.state.domain.index.service.IndexService;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceAuthContextService;
@@ -80,6 +81,30 @@ class IndexApplicationServiceV2Test {
 
         assertThat(superAssistant.getTagName()).isEqualTo("digemployee.tag.super.assistant");
         assertThat(dataAgent.getTagName()).isEqualTo("digemployee.tag.agent.data");
+    }
+
+    @Test
+    void authDigitEmployDefaultAndRuntimeTagNameUsesSameRuleAsMyAuthEmploy() {
+        AuthDigitEmployVo personalAssistant = new AuthDigitEmployVo();
+        personalAssistant.setId(100L);
+        personalAssistant.setOwnerType(OwnerType.PERSONAL);
+        personalAssistant.setResourceCode("zhangsan_assistant");
+
+        AuthDigitEmployVo qaAgent = new AuthDigitEmployVo();
+        qaAgent.setId(101L);
+        qaAgent.setOwnerType(OwnerType.ENTERPRISE);
+        qaAgent.setResourceCode("qa-agent");
+        qaAgent.setAgentType(DigitalEmployType.AGENT_TYPE_QA.getCode());
+
+        ReflectionTestUtils.invokeMethod(service, "fillDefaultAndRuntimeTag", personalAssistant, 100L);
+        ReflectionTestUtils.invokeMethod(service, "fillDefaultAndRuntimeTag", qaAgent, 100L);
+
+        assertThat(personalAssistant.getTagName()).isEqualTo("digemployee.tag.personal.assistant");
+        assertThat(personalAssistant.getIsDefault()).isTrue();
+        assertThat(personalAssistant.getCanSetDefault()).isFalse();
+        assertThat(qaAgent.getTagName()).isEqualTo("digemployee.tag.agent.qa");
+        assertThat(qaAgent.getIsDefault()).isFalse();
+        assertThat(qaAgent.getCanSetDefault()).isTrue();
     }
 
     private DigitEmployMarketExtVo buildDigitEmployee(Long id, String ownerType, String resourceCode, String agentType) {
