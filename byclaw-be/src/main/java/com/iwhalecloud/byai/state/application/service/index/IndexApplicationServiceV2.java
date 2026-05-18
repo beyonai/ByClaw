@@ -175,6 +175,14 @@ public class IndexApplicationServiceV2 {
             authDigitEmployVo.getResourceCode(), authDigitEmployVo.getAgentType()));
     }
 
+    private void fillRuntimeTag(DigitEmployMarketVo digitEmployMarketVo) {
+        if (digitEmployMarketVo == null) {
+            return;
+        }
+        digitEmployMarketVo.setTagName(buildRuntimeDigitalEmployeeTagName(digitEmployMarketVo.getOwnerType(),
+            digitEmployMarketVo.getResourceCode(), digitEmployMarketVo.getAgentType()));
+    }
+
     /**
      * 数字员工标签统一运行时生成：个人侧按超级助手/个人助理展示，企业侧按 agentType 展示类型。
      */
@@ -337,6 +345,7 @@ public class IndexApplicationServiceV2 {
         for (DigitEmployMarketExtVo digitEmployMarketVo : discoverList) {
             // 设置权限状态
             this.buildPermissionStatus(digitEmployMarketVo);
+            this.fillRuntimeTag(digitEmployMarketVo);
 
             digitEmployMarketVoMap.put(digitEmployMarketVo.getId(), digitEmployMarketVo);
         }
