@@ -1,10 +1,10 @@
 package com.iwhalecloud.byai.state.interfaces.controller.resource;
 
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtMcpService;
 import com.iwhalecloud.byai.manager.dto.resource.CallMcpParamsDto;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.UserSpaceDto;
 import com.iwhalecloud.byai.state.domain.chat.vo.UserSpaceVo;
-import com.iwhalecloud.byai.state.domain.resource.service.SsResExtMcpService;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
