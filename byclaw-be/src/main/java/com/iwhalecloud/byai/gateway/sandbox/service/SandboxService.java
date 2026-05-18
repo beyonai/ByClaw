@@ -453,11 +453,10 @@ public class SandboxService {
         }
 
         SandboxLaunchData launchData = response.getData();
-        String endpoint = launchData.getEndpoint();
-
-        endpoint = endpoint + "/chat?token=" + sandboxGatewayToken;
+        String endpoint = new SandboxEndpointUrlCustomizer(sandboxGatewayToken)
+            .toAccessEndpoint(launchData.getEndpoint(), launchData.getImageType());
         launchData.setEndpoint(endpoint);
-        launchData.setEndpoints(List.of(endpoint));
+        launchData.setEndpoints(StringUtils.isNotBlank(endpoint) ? List.of(endpoint) : List.of());
 
         Date lastAccessTime = new Date();
         Date remoteExpiresAt = launchData.getRemoteExpiresAt();
@@ -476,7 +475,7 @@ public class SandboxService {
         record.setLastAccessTime(lastAccessTime);
         sandboxMetadataCache.put(toSandboxInfo(record));
 
-        registerSandboxEndpoint(userCode, routing, endpoint);
+        registerSandboxEndpoint(userCode, routing, endpoint, launchData.getImageType());
         LOGGER.info("沙箱启动成功，记录：{}，endpoint：{}，timeoutSeconds：{}，remoteExpiresAt：{}，nextRenewAt：{}",
             sandboxRef(record), endpoint, launchData.getTimeoutSeconds(), remoteExpiresAt, nextRenewAt);
         return launchData;
@@ -1024,7 +1023,7 @@ public class SandboxService {
         LOGGER.info("沙箱释放完成：{}，releaseReason：{}", sandboxRef(record), releaseReason);
     }
 
-    private void registerSandboxEndpoint(String userCode, SandboxLaunchRouting routing, String endpoint) {
+    private void registerSandboxEndpoint(String userCode, SandboxLaunchRouting routing, String endpoint, String imageType) {
         if (StringUtils.isBlank(endpoint)) {
             LOGGER.warn("沙箱endpoint为空，跳过服务注册，用户编码：{}，沙箱类型：{}", userCode,
                 routing != null ? routing.getSandboxType() : null);
@@ -1039,10 +1038,12 @@ public class SandboxService {
 
         try {
             SandboxEndpointTarget target = parseSandboxEndpoint(endpoint);
+            Map<String, Object> metadata = new SandboxEndpointRegistryMetadataFactory(sandboxGatewayToken)
+                .build(imageType);
             cleanupSandboxRegistryKeys(serviceName);
 
             ServiceRegistry registry = new ServiceRegistry(redisClient);
-            registry.registerOnly(serviceName, target.protocol(), target.host(), target.port(), target.pathPrefix());
+            registry.registerOnly(serviceName, target.protocol(), target.host(), target.port(), target.pathPrefix(), 1, metadata);
             LOGGER.info("沙箱endpoint注册成功，serviceName={}，endpoint={}，protocol={}，host={}，port={}，pathPrefix={}",
                 serviceName, endpoint, target.protocol(), target.host(), target.port(), target.pathPrefix());
         }
