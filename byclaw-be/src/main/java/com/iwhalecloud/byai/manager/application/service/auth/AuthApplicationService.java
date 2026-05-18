@@ -116,6 +116,9 @@ public class AuthApplicationService {
 
     private static final String DEFAULT_SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX = "_main";
 
+    private static final Set<String> MANAGE_USE_INHERIT_TARGET_TYPES = Set.of(GrantToObjType.USER, GrantToObjType.ORG,
+        GrantToObjType.POST, GrantToObjType.STATION);
+
     @Value("${dataset.system:}")
     private String datasetSystem;
 
@@ -1407,6 +1410,10 @@ public class AuthApplicationService {
             this.writeRedisForShareUse(compareVo, grantObjId);
         }
 
+        if (GrantType.ALLOW_MANAGE.equals(grantType)) {
+            this.ensureUsePrivilegeForAllowManageTargets(authRedBlackDTO);
+        }
+
         // 同步涉及用户的权限到Redis
         // 授权变更后，为所有涉及的用户重新构建权限缓存
         try {
@@ -1419,6 +1426,97 @@ public class AuthApplicationService {
         catch (Exception e) {
             logger.error("同步用户权限到Redis失败：{}", e.getMessage());
         }
+    }
+
+    /**
+     * 管理权限隐含使用能力：当资源管理红名单新增/保留 USER/ORG/POST/STATION 维度对象时，自动补齐同维度 FORCE_USE。
+     * 如果同维度已经在使用黑名单中，说明业务明确禁止其使用，此时只保留管理权限，不自动覆盖黑名单。
+     * 取消管理权限不会触发使用权限删除，避免误删用户已有的直接使用授权。
+     */
+    private void ensureUsePrivilegeForAllowManageTargets(AuthRedBlackDTO authRedBlackDTO) {
+        List<AuthDTO> inheritTargets = extractManageUseInheritTargets(authRedBlackDTO);
+        if (CollectionUtils.isEmpty(inheritTargets)) {
+            return;
+        }
+        List<AuthDTO> forceUseTargets = inheritTargets.stream()
+            .filter(target -> !hasActiveUseBlackSameDimension(authRedBlackDTO.getGrantObjType(),
+                authRedBlackDTO.getGrantObjId(), target.getGrantToObjType(), target.getGrantToObjId()))
+            .collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(forceUseTargets)) {
+            return;
+        }
+        AuthRedBlackDTO useAuthDto = new AuthRedBlackDTO();
+        useAuthDto.setGrantObjId(authRedBlackDTO.getGrantObjId());
+        useAuthDto.setGrantObjType(authRedBlackDTO.getGrantObjType());
+        useAuthDto.setGrantType(GrantType.FORCE_USE);
+        useAuthDto.setSourceSystem(authRedBlackDTO.getSourceSystem());
+        useAuthDto.setAllowUnSubscribe(authRedBlackDTO.isAllowUnSubscribe());
+        useAuthDto.setOrgId(authRedBlackDTO.getOrgId());
+        useAuthDto.setRedList(forceUseTargets);
+        handleAuth(useAuthDto);
+    }
+
+    /**
+     * 提取本次管理红名单中需要继承使用权限的授权对象；若同维度同时出现在管理黑名单中，则不参与补使用权限。
+     */
+    private List<AuthDTO> extractManageUseInheritTargets(AuthRedBlackDTO authRedBlackDTO) {
+        if (authRedBlackDTO == null || CollectionUtils.isEmpty(authRedBlackDTO.getRedList())) {
+            return Collections.emptyList();
+        }
+        Set<String> manageBlackKeys = buildGrantTargetKeys(authRedBlackDTO.getBlackList());
+        Map<String, AuthDTO> targetMap = new LinkedHashMap<>();
+        for (AuthDTO authDTO : authRedBlackDTO.getRedList()) {
+            if (!isManageUseInheritTarget(authDTO)) {
+                continue;
+            }
+            String targetKey = buildGrantTargetKey(authDTO);
+            if (manageBlackKeys.contains(targetKey)) {
+                continue;
+            }
+            targetMap.putIfAbsent(targetKey, authDTO);
+        }
+        return new ArrayList<>(targetMap.values());
+    }
+
+    private Set<String> buildGrantTargetKeys(List<AuthDTO> authList) {
+        if (CollectionUtils.isEmpty(authList)) {
+            return Collections.emptySet();
+        }
+        return authList.stream()
+            .filter(this::isManageUseInheritTarget)
+            .map(this::buildGrantTargetKey)
+            .collect(Collectors.toSet());
+    }
+
+    private boolean isManageUseInheritTarget(AuthDTO authDTO) {
+        return authDTO != null
+            && authDTO.getGrantToObjId() != null
+            && MANAGE_USE_INHERIT_TARGET_TYPES.contains(authDTO.getGrantToObjType());
+    }
+
+    private String buildGrantTargetKey(AuthDTO authDTO) {
+        return authDTO.getGrantToObjType() + "_" + authDTO.getGrantToObjId();
+    }
+
+    /**
+     * 同资源、同授权维度已有使用黑名单时，不自动补 FORCE_USE，保持“显式禁止使用”的优先级。
+     */
+    private boolean hasActiveUseBlackSameDimension(String grantObjType, Long grantObjId, String grantToObjType,
+        Long grantToObjId) {
+        if (StringUtils.isBlank(grantObjType) || grantObjId == null || StringUtils.isBlank(grantToObjType)
+            || grantToObjId == null) {
+            return false;
+        }
+        LambdaQueryWrapper<PrivilegeGrant> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(PrivilegeGrant::getGrantObjType, grantObjType);
+        queryWrapper.eq(PrivilegeGrant::getGrantObjId, grantObjId);
+        queryWrapper.eq(PrivilegeGrant::getGrantToObjType, grantToObjType);
+        queryWrapper.eq(PrivilegeGrant::getGrantToObjId, grantToObjId);
+        queryWrapper.eq(PrivilegeGrant::getGrantToType, Color.BLACK);
+        queryWrapper.eq(PrivilegeGrant::getOperType, OperType.READ);
+        queryWrapper.eq(PrivilegeGrant::getStatusCd, "A");
+        queryWrapper.in(PrivilegeGrant::getGrantType, GrantType.AVAILABLE_USE, GrantType.FORCE_USE);
+        return privilegeGrantMapper.selectCount(queryWrapper) > 0;
     }
 
     /**
