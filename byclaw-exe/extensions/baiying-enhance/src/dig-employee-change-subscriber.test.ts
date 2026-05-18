@@ -1,10 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
+  hasDigEmployeePubSubRedisConfig,
   isStaleDigEmployeeChangedAt,
   mergeDigEmployeeChangeEvents,
   parseDigEmployeeChangeMessage,
   recordDigEmployeeChangedAt,
 } from "./dig-employee-change-subscriber.js";
+
+describe("hasDigEmployeePubSubRedisConfig", () => {
+  it("does not require USER_CODE to subscribe", () => {
+    expect(
+      hasDigEmployeePubSubRedisConfig({
+        host: "127.0.0.1",
+        port: 6379,
+        db: 0,
+        channel: "byai:pub:dig_employee_change",
+      }),
+    ).toBe(true);
+  });
+});
 
 describe("parseDigEmployeeChangeMessage", () => {
   it("parses valid payload", () => {

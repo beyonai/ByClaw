@@ -38,6 +38,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtToolKitServi
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtViewService;
+import com.iwhalecloud.byai.manager.domain.resource.util.DigEmployeeRedisKeys;
 import com.iwhalecloud.byai.manager.domain.session.service.ByaiSessionService;
 import com.iwhalecloud.byai.manager.domain.staticdata.service.ByaiSystemConfigListService;
 import com.iwhalecloud.byai.manager.domain.staticdata.service.SystemConfigService;
@@ -130,8 +131,6 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 public class DigitalEmployeeApplicationService {
 
     public static final Logger logger = LoggerFactory.getLogger(DigitalEmployeeApplicationService.class);
-
-    private static final String DIG_EMPLOYEE_SKILL_CACHE_KEY_PREFIX = "RESOURCE_DIG_EMPLOYEE_";
 
     private static final String BELONG_COMPANY = "COMPANY";
 
@@ -247,6 +246,9 @@ public class DigitalEmployeeApplicationService {
 
     @Autowired
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
+
+    @Autowired
+    private DigEmployeeRedisSyncProperties digEmployeeRedisSyncProperties;
 
     /**
      * 查询列表
@@ -1006,6 +1008,47 @@ public class DigitalEmployeeApplicationService {
         }
     }
 
+    /**
+     * 将已有数字员工及其关联资源的标准 JSON 同步至 Redis（供启动全量初始化等场景调用）。
+     * 优先使用扩展表 {@code target_content}，缺失时再组装详情 JSON。
+     */
+    public void syncExistingDigEmployeeConfigToRedisQuietly(Long resourceId) {
+        try {
+            syncExistingDigEmployeeConfigToRedis(resourceId);
+        }
+        catch (Exception e) {
+            logger.error("同步已有数字员工配置到Redis失败，resourceId: {}, error: {}", resourceId, e.getMessage(), e);
+        }
+    }
+
+    private void syncExistingDigEmployeeConfigToRedis(Long resourceId) {
+        if (resourceId == null || digEmployeeRedisSyncProperties == null
+            || !digEmployeeRedisSyncProperties.isJsonRedisSyncEnabled()) {
+            return;
+        }
+        String jsonContent = resolveDigEmployeeJsonForRedisSync(resourceId);
+        if (StringUtils.isNotBlank(jsonContent)) {
+            syncResourceConfigJsonToRedis(ResourceBizTypeEnum.DIG_EMPLOYEE.name(), resourceId, jsonContent);
+        }
+        syncRelatedResourceConfigJsonsToRedisQuietly(resourceId);
+    }
+
+    private String resolveDigEmployeeJsonForRedisSync(Long resourceId) {
+        SsResExtDigEmployee ext = ssResExtDigEmployeeService.findById(resourceId);
+        if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
+            return ext.getTargetContent();
+        }
+        EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
+        employeeIdDTO.setResourceId(resourceId);
+        DigitalEmployeeDetailsDTO details = findDetailsById(employeeIdDTO);
+        if (details == null) {
+            logger.warn("数字员工详情不存在，无法组装Redis配置JSON, resourceId={}", resourceId);
+            return null;
+        }
+        fillDigitalEmployeeSyncRuntimeFields(details, resourceId);
+        return com.alibaba.fastjson.JSON.toJSONString(details);
+    }
+
     private void doSyncOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto) {
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(resourceId);
@@ -1034,10 +1077,13 @@ public class DigitalEmployeeApplicationService {
         ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, ResourceBizTypeEnum.DIG_EMPLOYEE.name(),
             "dig-employee-sync");
 
+        syncDigEmployeeConfigJsonToRedisQuietly(resourceId, jsonContent);
+
         // 数字员工自己的 JSON 同步完成后，再检查并补齐其关联资源的标准 JSON 产物。
         // 这样可以确保前端保存/更新数字员工后，关联的 toolkit / mcp / agent / kg_* / view / object
         // 也都能在开放资源目录中按标准命名被下游读取到。
         syncMissingRelatedResourceJsons(resourceId);
+        syncRelatedResourceConfigJsonsToRedisQuietly(resourceId);
 
         logger.info("数字员工已同步至开放资源目录, storageType={}, resourceId={}, resourcePath={}/{}",
             effectiveStorageType, resourceId, resourceDir, fileName);
@@ -1094,6 +1140,69 @@ public class DigitalEmployeeApplicationService {
         for (SsResource relResource : relResources) {
             syncSingleRelatedResourceJsonIfMissing(digEmployeeResourceId, relResource);
         }
+    }
+
+    /**
+     * 将数字员工关联资源的标准 JSON 同步至 Redis（与 MinIO 产物同内容，键名为 {@code {BIZTYPE}_{resourceId}}）。
+     * 每次数字员工开放目录同步后执行，不依赖 MinIO 是否缺失。
+     */
+    private void syncRelatedResourceConfigJsonsToRedisQuietly(Long digEmployeeResourceId) {
+        if (digEmployeeResourceId == null) {
+            return;
+        }
+        List<SsResourceRelDetail> relDetails = ssResourceRelDetailService.findByResourceId(digEmployeeResourceId);
+        if (CollectionUtils.isEmpty(relDetails)) {
+            return;
+        }
+        List<Long> relResourceIds = relDetails.stream().map(SsResourceRelDetail::getRelResourceId)
+            .filter(java.util.Objects::nonNull).distinct().collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(relResourceIds)) {
+            return;
+        }
+        List<SsResource> relResources = ssResourceService.findByIdList(relResourceIds);
+        if (CollectionUtils.isEmpty(relResources)) {
+            return;
+        }
+        logger.info("数字员工关联资源Redis同步开始, digEmployeeResourceId={}, relResourceIds={}", digEmployeeResourceId,
+            relResourceIds);
+        for (SsResource relResource : relResources) {
+            syncSingleRelatedResourceConfigJsonToRedisQuietly(digEmployeeResourceId, relResource);
+        }
+    }
+
+    private void syncSingleRelatedResourceConfigJsonToRedisQuietly(Long digEmployeeResourceId, SsResource relResource) {
+        try {
+            syncSingleRelatedResourceConfigJsonToRedis(digEmployeeResourceId, relResource);
+        }
+        catch (Exception e) {
+            logger.error(
+                "同步数字员工关联资源配置到Redis失败，不影响主流程, digEmployeeResourceId={}, relResourceId={}, resourceBizType={}, reason={}",
+                digEmployeeResourceId, relResource == null ? null : relResource.getResourceId(),
+                relResource == null ? null : relResource.getResourceBizType(), e.getMessage(), e);
+        }
+    }
+
+    private void syncSingleRelatedResourceConfigJsonToRedis(Long digEmployeeResourceId, SsResource relResource) {
+        if (relResource == null || relResource.getResourceId() == null) {
+            return;
+        }
+        String resourceBizType = StringUtils.trimToEmpty(relResource.getResourceBizType());
+        if (!isSupportedRelatedResourceBizType(resourceBizType)) {
+            return;
+        }
+        Long relResourceId = relResource.getResourceId();
+        String targetContent = loadRelatedResourceTargetContent(resourceBizType, relResourceId);
+        if (StringUtils.isBlank(targetContent)) {
+            logger.warn(
+                "数字员工关联资源targetContent为空，跳过Redis同步, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
+                digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType);
+            return;
+        }
+        syncResourceConfigJsonToRedis(resourceBizType, relResourceId, targetContent);
+        logger.info(
+            "数字员工关联资源配置已同步至Redis, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}, redisKey={}",
+            digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType,
+            DigEmployeeRedisKeys.resourceConfigJsonKey(resourceBizType, relResourceId));
     }
 
     private void syncSingleRelatedResourceJsonIfMissing(Long digEmployeeResourceId, SsResource relResource) {
@@ -1194,8 +1303,37 @@ public class DigitalEmployeeApplicationService {
             return;
         }
         List<SsResourceRelDetailDTO> skills = ssResourceRelDetailService.querySkillsForOpenApi(resourceId);
-        String key = DIG_EMPLOYEE_SKILL_CACHE_KEY_PREFIX + resourceId;
-        RedisUtil.setString(key, JSON.toJSONString(skills == null ? Collections.emptyList() : skills));
+        RedisUtil.setString(DigEmployeeRedisKeys.skillCacheKey(resourceId),
+            JSON.toJSONString(skills == null ? Collections.emptyList() : skills));
+    }
+
+    private void syncDigEmployeeConfigJsonToRedisQuietly(Long resourceId, String jsonContent) {
+        try {
+            syncDigEmployeeConfigJsonToRedis(resourceId, jsonContent);
+        }
+        catch (Exception e) {
+            logger.error("同步数字员工完整配置到Redis失败，resourceId: {}, error: {}", resourceId, e.getMessage(), e);
+        }
+    }
+
+    private void syncDigEmployeeConfigJsonToRedis(Long resourceId, String jsonContent) {
+        syncResourceConfigJsonToRedis(ResourceBizTypeEnum.DIG_EMPLOYEE.name(), resourceId, jsonContent);
+    }
+
+    private void syncResourceConfigJsonToRedis(String resourceBizType, Long resourceId, String jsonContent) {
+        if (resourceId == null || digEmployeeRedisSyncProperties == null
+            || !digEmployeeRedisSyncProperties.isJsonRedisSyncEnabled()) {
+            return;
+        }
+        if (StringUtils.isBlank(jsonContent)) {
+            logger.warn("资源完整配置JSON为空，跳过Redis同步, resourceBizType={}, resourceId={}", resourceBizType,
+                resourceId);
+            return;
+        }
+        String redisKey = DigEmployeeRedisKeys.resourceConfigJsonKey(resourceBizType, resourceId);
+        RedisUtil.setString(redisKey, jsonContent);
+        logger.info("资源完整配置已同步至Redis, resourceBizType={}, resourceId={}, redisKey={}", resourceBizType,
+            resourceId, redisKey);
     }
 
     private void removeDigEmployeeFromRedisQuietly(Long resourceId) {
@@ -1211,7 +1349,16 @@ public class DigitalEmployeeApplicationService {
         if (resourceId == null) {
             return;
         }
-        RedisUtil.removeKey(DIG_EMPLOYEE_SKILL_CACHE_KEY_PREFIX + resourceId);
+        RedisUtil.removeKey(DigEmployeeRedisKeys.skillCacheKey(resourceId));
+        removeDigEmployeeConfigJsonFromRedis(resourceId);
+    }
+
+    private void removeDigEmployeeConfigJsonFromRedis(Long resourceId) {
+        if (resourceId == null || digEmployeeRedisSyncProperties == null
+            || !digEmployeeRedisSyncProperties.isJsonRedisSyncEnabled()) {
+            return;
+        }
+        RedisUtil.removeKey(DigEmployeeRedisKeys.configJsonKey(resourceId));
     }
 
     private void removeDigEmployeeJsonFromResourceStorageQuietly(Long resourceId) {

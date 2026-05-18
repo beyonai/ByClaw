@@ -20,7 +20,7 @@ import { executeToolkit } from "./resource-types/toolkit.js";
 import type { DocDeltaCallback } from "./doc-shared.js";
 
 export type BaiyingExecutorOptions = {
-  /** Absolute path to the `skills/baiying/resources` directory. */
+  /** Deprecated. Retained for API compatibility; resource snapshots are read from Redis. */
   resourcesDir: string;
   /**
    * Optional auth file path. Defaults to `~/.openclaw/workspace/baiying-session.json`
@@ -34,10 +34,9 @@ export type BaiyingExecutorOptions = {
 /**
  * In-process Baiying executor.
  *
- * Resource snapshot files (`<resourcesDir>/<folder>/<PREFIX>_<id>.json`) are
- * read from disk for each `describe` / `execute` call (`resolveCapability` tries
- * the snapshot before in-memory `resource_context` stubs). There is no in-memory
- * index of snapshots.
+ * Resource snapshots (`<PREFIX>_<id>`) are read from Redis for each `describe`
+ * / `execute` call. When Redis has no snapshot, capability resolution falls
+ * back only to the current `resource_context` and minimal stubs.
  *
  * Auth context (`~/.openclaw/workspace/baiying-session.json`) is still cached
  * because it contains session cookies that are stable within a plugin process

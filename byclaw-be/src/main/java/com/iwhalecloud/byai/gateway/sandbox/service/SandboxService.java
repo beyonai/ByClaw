@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Date;
@@ -18,7 +19,11 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
+import com.iwhaleai.byai.framework.common.Constants;
+import com.iwhaleai.byai.framework.common.RedisClient;
 import com.iwhaleai.byai.framework.core.WorkerRegistry;
+import com.iwhaleai.byai.framework.core.discovery.ServiceRegistry;
+import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest;
 import com.iwhalecloud.byai.common.feign.response.SandboxResponse;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
@@ -37,6 +42,7 @@ import io.github.resilience4j.retry.RetryConfig;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
+import redis.clients.jedis.Jedis;
 
 /**
  * 沙箱服务 提供沙箱环境的启动、释放、查询和自动清理等功能
@@ -95,6 +101,10 @@ public class SandboxService {
     @Lazy
     @Autowired
     private SandboxMetadataCache sandboxMetadataCache;
+
+    @Lazy
+    @Autowired
+    private RedisClient redisClient;
 
     /** 系统参数：允许同时使用的沙箱数量上限，paramCode=ENABLE_USE_SANDBOX_NUM */
     private static final String PARAM_ENABLE_USE_SANDBOX_NUM = "ENABLE_USE_SANDBOX_NUM";
@@ -466,6 +476,7 @@ public class SandboxService {
         record.setLastAccessTime(lastAccessTime);
         sandboxMetadataCache.put(toSandboxInfo(record));
 
+        registerSandboxEndpoint(userCode, routing, endpoint);
         LOGGER.info("沙箱启动成功，记录：{}，endpoint：{}，timeoutSeconds：{}，remoteExpiresAt：{}，nextRenewAt：{}",
             sandboxRef(record), endpoint, launchData.getTimeoutSeconds(), remoteExpiresAt, nextRenewAt);
         return launchData;
@@ -1009,7 +1020,111 @@ public class SandboxService {
         // 无论远程调用是否成功，都更新本地记录状态
         sandboxRecordMapper.updateStatusToReleased(record.getId(), releaseReason, new Date());
         sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
+        unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType());
         LOGGER.info("沙箱释放完成：{}，releaseReason：{}", sandboxRef(record), releaseReason);
+    }
+
+    private void registerSandboxEndpoint(String userCode, SandboxLaunchRouting routing, String endpoint) {
+        if (StringUtils.isBlank(endpoint)) {
+            LOGGER.warn("沙箱endpoint为空，跳过服务注册，用户编码：{}，沙箱类型：{}", userCode,
+                routing != null ? routing.getSandboxType() : null);
+            return;
+        }
+        String serviceName = buildSandboxWorkerAgentType(userCode, routing != null ? routing.getSandboxType() : null);
+        if (StringUtils.isBlank(serviceName)) {
+            LOGGER.warn("无法解析沙箱worker_agent_type，跳过服务注册，用户编码：{}，沙箱类型：{}", userCode,
+                routing != null ? routing.getSandboxType() : null);
+            return;
+        }
+
+        try {
+            SandboxEndpointTarget target = parseSandboxEndpoint(endpoint);
+            cleanupSandboxRegistryKeys(serviceName);
+
+            ServiceRegistry registry = new ServiceRegistry(redisClient);
+            registry.registerOnly(serviceName, target.protocol(), target.host(), target.port(), target.pathPrefix());
+            LOGGER.info("沙箱endpoint注册成功，serviceName={}，endpoint={}，protocol={}，host={}，port={}，pathPrefix={}",
+                serviceName, endpoint, target.protocol(), target.host(), target.port(), target.pathPrefix());
+        }
+        catch (Exception e) {
+            LOGGER.error("沙箱endpoint注册失败，不影响启动返回，serviceName={}，endpoint={}，reason={}",
+                serviceName, endpoint, e.getMessage(), e);
+        }
+    }
+
+    private void unregisterSandboxEndpoint(String userCode, String sandboxType) {
+        String serviceName = buildSandboxWorkerAgentType(userCode, sandboxType);
+        if (StringUtils.isBlank(serviceName)) {
+            return;
+        }
+        try {
+            cleanupSandboxRegistryKeys(serviceName);
+            LOGGER.info("沙箱endpoint反注册完成，serviceName={}，userCode={}，sandboxType={}",
+                serviceName, userCode, sandboxType);
+        }
+        catch (Exception e) {
+            LOGGER.error("沙箱endpoint反注册失败，serviceName={}，userCode={}，sandboxType={}，reason={}",
+                serviceName, userCode, sandboxType, e.getMessage(), e);
+        }
+    }
+
+    private String buildSandboxWorkerAgentType(String userCode, String sandboxType) {
+        if (StringUtils.isBlank(userCode) || StringUtils.isBlank(sandboxType)) {
+            return null;
+        }
+        if (SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(sandboxType)) {
+            return WorkerAgentType.BYCLAW_EXE.getCode() + "_" + userCode;
+        }
+        if (SandboxLaunchRouting.BYCLAW_CODE_AGENT_SANDBOX_TYPE.equals(sandboxType)) {
+            return WorkerAgentType.BYCLAW_CODE.getCode() + "_" + userCode;
+        }
+        return sandboxType + "_" + userCode;
+    }
+
+    private SandboxEndpointTarget parseSandboxEndpoint(String endpoint) {
+        URI uri = URI.create(StringUtils.trimToEmpty(endpoint));
+        String protocol = StringUtils.defaultIfBlank(uri.getScheme(), "http");
+        String host = StringUtils.trimToEmpty(uri.getHost());
+        if (StringUtils.isBlank(host)) {
+            throw new IllegalArgumentException("endpoint host is blank: " + endpoint);
+        }
+        int port = resolveEndpointPort(uri);
+        if (port <= 0) {
+            throw new IllegalArgumentException("endpoint port is invalid: " + endpoint);
+        }
+        return new SandboxEndpointTarget(protocol, host, port, "/");
+    }
+
+    private int resolveEndpointPort(URI uri) {
+        if (uri.getPort() > 0) {
+            return uri.getPort();
+        }
+        if (StringUtils.equalsIgnoreCase(uri.getScheme(), "http")) {
+            return 80;
+        }
+        if (StringUtils.equalsIgnoreCase(uri.getScheme(), "https")) {
+            return 443;
+        }
+        return -1;
+    }
+
+    private void cleanupSandboxRegistryKeys(String serviceName) {
+        try (Jedis jedis = redisClient.getResource()) {
+            String instancesKey = Constants.RegistryKeys.sdInstanceDetails(serviceName);
+            String activeKey = Constants.RegistryKeys.sdActiveInstances(serviceName);
+            Map<String, String> instanceMap = jedis.hgetAll(instancesKey);
+            if (instanceMap != null && !instanceMap.isEmpty()) {
+                String[] instanceIds = instanceMap.keySet().toArray(new String[0]);
+                jedis.hdel(instancesKey, instanceIds);
+                jedis.zrem(activeKey, instanceIds);
+            }
+            jedis.del(instancesKey);
+            jedis.del(activeKey);
+            jedis.srem(Constants.RegistryKeys.SD_SERVICES, serviceName);
+        }
+    }
+
+    private record SandboxEndpointTarget(String protocol, String host, int port, String pathPrefix) {
     }
 
     private String buildSandboxRecordKey(String sandboxType, Long resourceId) {

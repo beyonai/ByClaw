@@ -345,7 +345,7 @@ function buildToolsMd(item: BaiyingAgentItem, fallbackAgentId?: string): string 
   lines.push(
     "## Notes",
     "",
-    "- `TOOLKIT` and `MCP` resources may expose child actions discovered from local snapshots or remote metadata.",
+    "- `TOOLKIT` and `MCP` resources may expose child actions discovered from Redis snapshots or remote metadata.",
     "- For DOC resources (`KG_DOC`/`KG_DB`/`KG_QA`), executor requires `agent_id`. `baiying_call` will auto-fill it from the current agent.json `resourceId` and send it as top-level payload `agent_id`.",
     "- `OBJECT` and `VIEW` resources are dispatched through SDK `callAgent` to `BYCLAW_DATA`; `baiying_call` fills `call_object_ids` / `call_view_ids` from the selected resource code.",
     "- For large `OBJECT`/`VIEW` results, backend may return `file_url`, and `file_url` is a local file path; treat it as the authoritative full payload and use this local path for downstream business processing.",
@@ -416,14 +416,15 @@ export async function seedManagedAgentWorkspace(params: {
   await fs.mkdir(dir, { recursive: true });
 
   // Read source JSON for content extraction.
-  let raw: unknown;
-  if (params.adapted.sourceFilePath) {
+  let raw: unknown = params.adapted.sourceJson;
+  if (raw === undefined && params.adapted.sourceFilePath) {
     try {
       raw = JSON.parse(await fs.readFile(params.adapted.sourceFilePath, "utf8"));
     } catch {
       raw = {};
     }
-  } else {
+  }
+  if (raw === undefined) {
     raw = {};
   }
 

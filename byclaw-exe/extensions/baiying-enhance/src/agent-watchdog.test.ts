@@ -1,14 +1,16 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
+import { readdirSync, readFileSync } from "node:fs";
 import { MAIN_AGENTS_MARKER } from "./main-workspace-seed.js";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_INDEX_FILENAME, INDEX_VERSION, loadAgentContentIndex } from "./agent-content-index.js";
-import { createAgentWatchdog } from "./agent-watchdog.js";
+import { createAgentWatchdog as createAgentWatchdogBase } from "./agent-watchdog.js";
 import { AgentRegistryState } from "./agent-state.js";
 import { SUBAGENT_ROUTING_FILENAME, SUBAGENT_ROUTING_MARKER } from "./subagent-routing-seed.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
+import type { BaiyingRedisJsonStore, RedisJsonPayload } from "./redis-json-store.js";
 
 /** Fixed JSON string so SHA-256 is stable across runs. */
 const STABLE_AGENT_JSON =
@@ -26,6 +28,7 @@ function createMockApi(
     workspace?: string;
     identity?: { name: string };
     skills?: string[];
+    tools?: unknown;
   }>,
 ) {
   const loadConfig = vi.fn(() => ({
@@ -54,8 +57,64 @@ async function writeWorkspaceSkill(workspaceDir: string, name: string): Promise<
   await writeFile(path.join(workspaceDir, "skills", name, "SKILL.md"), `# ${name}\n`, "utf8");
 }
 
+function payloadFromContent(key: string, content: string): RedisJsonPayload {
+  return {
+    key,
+    content,
+    raw: JSON.parse(content) as unknown,
+    hash: createHash("sha256").update(content, "utf8").digest("hex"),
+  };
+}
+
+function sourceKeyFromRaw(raw: any, fallback: string): string {
+  if (raw?.resourceId != null) return String(raw.resourceId);
+  if (Array.isArray(raw?.agent_list) && raw.agent_list[0]?.id != null) return String(raw.agent_list[0].id);
+  if (raw?.id != null) return String(raw.id).replace(/^baiying-agent-/i, "");
+  return fallback;
+}
+
+function loadDigEmployeeFixtures(dir: string): Map<string, RedisJsonPayload> {
+  const out = new Map<string, RedisJsonPayload>();
+  for (const ent of readdirSync(dir, { withFileTypes: true })) {
+    if (!ent.isFile() || !ent.name.toLowerCase().endsWith(".json") || ent.name === DEFAULT_INDEX_FILENAME) {
+      continue;
+    }
+    const content = readFileSync(path.join(dir, ent.name), "utf8");
+    const raw = JSON.parse(content) as any;
+    const id = sourceKeyFromRaw(raw, ent.name.replace(/\.json$/i, ""));
+    out.set(id, payloadFromContent(`DIG_EMPLOYEE_${id}`, content));
+  }
+  return out;
+}
+
+function createMemoryRedisJsonStore(entries: Map<string, RedisJsonPayload>): BaiyingRedisJsonStore {
+  return {
+    getJsonByKey: async (key) => {
+      const id = key.replace(/^DIG_EMPLOYEE_/, "");
+      return entries.get(id) ?? null;
+    },
+    getDigEmployeeJson: async (resourceId) => entries.get(resourceId) ?? null,
+    getResourceJson: async ({ resourceBizType, resourceId }) =>
+      entries.get(`${resourceBizType}_${resourceId}`) ?? null,
+    close: async () => {},
+  };
+}
+
+function createAgentWatchdog(params: any) {
+  const fixtureDir = path.dirname(params.contentIndexPath);
+  const entries = loadDigEmployeeFixtures(fixtureDir);
+  const authorizedIds = new Set(entries.keys());
+  return createAgentWatchdogBase({
+    redisJsonStore: createMemoryRedisJsonStore(entries),
+    authorizationFilter: {
+      getAuthorizedSourceKeys: () => new Set(authorizedIds),
+    },
+    ...params,
+  });
+}
+
 describe("createAgentWatchdog", () => {
-  it("does not call writeConfigFile when index matches disk content", async () => {
+  it("does not call writeConfigFile when index matches Redis content", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-"));
     await writeFile(path.join(dir, "demo.json"), STABLE_AGENT_JSON, "utf8");
     const agentId = `${MANAGED_AGENT_PREFIX}10863047`;
@@ -167,6 +226,71 @@ describe("createAgentWatchdog", () => {
     await wd.stop();
 
     expect(writeConfigFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("touches skills reload marker when relTools changes the managed agent tool policy", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-tools-"));
+    const raw = {
+      resourceId: "10000455",
+      resourceName: "Demo",
+      roleAttributes: "Be brief.",
+      integrationType: "NONE",
+      relTools: ["read"],
+    };
+    const content = JSON.stringify(raw);
+    await writeFile(path.join(dir, "demo.json"), content, "utf8");
+    const agentId = `${MANAGED_AGENT_PREFIX}10000455`;
+    await writeFile(
+      path.join(dir, DEFAULT_INDEX_FILENAME),
+      JSON.stringify({
+        version: INDEX_VERSION,
+        entries: {
+          [agentId]: createHash("sha256").update(content, "utf8").digest("hex"),
+        },
+      }),
+      "utf8",
+    );
+
+    const writeConfigFile = vi.fn(async () => {});
+    const api = createMockApi(writeConfigFile, [
+      { id: "main", name: "Main", identity: { name: "Main" } },
+      {
+        id: agentId,
+        name: "Demo",
+        identity: { name: "Demo" },
+        skills: [],
+        tools: { allow: ["*", "read", "write", "baiying_call"] },
+      },
+    ]) as any;
+
+    const wd = createAgentWatchdog({
+      api,
+      registry: new AgentRegistryState(),
+      absoluteDir: dir,
+      contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+      executorPath: path.join(dir, "executor.py"),
+      pluginConfig: {
+        embedApiKeysFromJson: true,
+        workspaceAutoSeed: false,
+        workspaceSkillAutoEnable: false,
+        persistAgentContentIndex: true,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start();
+    await wd.__flushNow!();
+    await wd.stop();
+
+    expect(writeConfigFile).toHaveBeenCalledTimes(1);
+    const next = writeConfigFile.mock.calls[0][0];
+    const entry = next.agents.list.find((a: any) => a.id === agentId);
+    expect(entry.tools).toEqual({ allow: ["read", "baiying_call"] });
+    expect(next.skills.entries.__baiying_enhance_reload.enabled).toBe(false);
+    expect(next.skills.entries.__baiying_enhance_reload.config.reason).toBe("agent-tool-policy-sync");
+    expect(next.skills.entries.__baiying_enhance_reload.config.managedSnapshotSignature).toContain(
+      "tools={\"allow\":[\"read\",\"baiying_call\"]}",
+    );
   });
 
   it("calls writeConfigFile once when index is missing", async () => {

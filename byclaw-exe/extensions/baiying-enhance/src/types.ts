@@ -3,12 +3,9 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk/compat";
 export type AgentListEntry = NonNullable<NonNullable<OpenClawConfig["agents"]>["list"]>[number];
 
 export type BaiyingEnhancePluginConfig = {
-  /**
-   * In-process executor snapshot root (`resources/` with `agent/`, `doc/`, …).
-   * Default: directory bundled next to this extension (`baiying-enhance/resources`).
-   * Relative paths resolve under `OPENCLAW_STATE_DIR` / `~/.openclaw/` (same rules as `agentConfigDir`).
-   */
+  /** @deprecated Ignored for Baiying resource snapshots; associated resources are read from Redis. */
   executorResourcesDir?: string;
+  /** @deprecated Ignored; digital employees are read from Redis key `DIG_EMPLOYEE_{resourceId}`. */
   agentConfigDir?: string;
   /** Debounce (ms) for coalescing dig-employee Redis flush triggers. */
   watchDebounceMs?: number;
@@ -51,13 +48,13 @@ export type BaiyingEnhancePluginConfig = {
   /** Default API key for the proxy endpoint. */
   defaultApiKey?: string;
   /**
-   * When true (default), persist agent source JSON content hashes to disk so cold restarts
-   * do not treat every managed agent as newly added.
+   * When true (default), persist Redis source JSON content hashes to disk so cold restarts
+   * do not treat every managed agent as newly changed.
    */
   persistAgentContentIndex?: boolean;
   /**
    * Override path for the content index JSON file. Relative paths resolve under ~/.openclaw/ (see plugin path rules).
-   * Default: `~/.openclaw/baiying-enhance/agent-content-index-<sha16>.json` (derived from absolute agentConfigDir).
+   * Default: `~/.openclaw/baiying-enhance/agent-content-index-<sha16>.json`.
    */
   agentContentIndexPath?: string;
   /** @deprecated Ignored. Former directory watcher toggle; kept so older `openclaw.json` entries do not fail validation. */
@@ -81,7 +78,7 @@ export type BaiyingEnhancePluginConfig = {
    * as shared skills and merged into managed sub-agents.
    */
   workspaceSkillIncludeMainShared?: boolean;
-  /** Subscribe to `digEmployeeChangeChannel` for digital-employee change broadcasts (Redis PUBLISH). */
+  /** Subscribe to `digEmployeeChangeChannel` for digital-employee change broadcasts (Redis PUBLISH). Default true. */
   digEmployeeChangeSubscribe?: boolean;
   /** Redis Pub/Sub channel for `DigEmployeeChangeEvent` JSON (default `byai:pub:dig_employee_change`). */
   digEmployeeChangeChannel?: string;

@@ -251,7 +251,7 @@ describe("main-workspace-seed", () => {
     });
     const out = await readFile(path.join(ws, "AGENTS.md"), "utf8");
     expect(out.startsWith(MAIN_AGENTS_MARKER)).toBe(true);
-    expect(out).toContain("Orchestrator");
+    expect(out).toContain("一呼百应");
 
     const routing = await readFile(path.join(ws, SUBAGENT_ROUTING_FILENAME), "utf8");
     expect(routing.startsWith(SUBAGENT_ROUTING_MARKER)).toBe(true);

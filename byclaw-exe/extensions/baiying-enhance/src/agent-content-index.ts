@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-/** Bump when the on-disk JSON shape changes incompatibly. */
+/** Bump when the indexed JSON shape changes incompatibly. */
 export const INDEX_VERSION = 1;
 
 /**
@@ -14,7 +14,7 @@ export const DEFAULT_INDEX_FILENAME = ".baiying-enhance-content-index.json";
 /**
  * Default writable location for the content index: `~/.openclaw/baiying-enhance/agent-content-index-<id>.json`
  * where `<id>` is the first 16 hex chars of SHA-256(absoluteAgentDir), so different agent dirs do not collide.
- * Avoids EROFS when `agentConfigDir` is a read-only mount.
+ * Kept in the writable state dir rather than any deprecated resource directory.
  */
 export function resolveDefaultContentIndexPath(stateDir: string, absoluteAgentDir: string): string {
   const id = createHash("sha256").update(absoluteAgentDir).digest("hex").slice(0, 16);

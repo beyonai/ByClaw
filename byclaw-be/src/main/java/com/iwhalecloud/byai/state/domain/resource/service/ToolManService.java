@@ -23,7 +23,9 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtViewService;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceRuntimeInfoResolver;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceTargetJsonBuilder;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceCatalogService;
+import com.iwhalecloud.byai.manager.application.service.digitemploy.DigEmployeeRedisSyncProperties;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.domain.resource.util.DigEmployeeRedisKeys;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetImportDto;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtAgent;
@@ -106,8 +108,6 @@ public class ToolManService {
 
     public static final Logger LOGGER = LoggerFactory.getLogger(ToolManService.class);
 
-    private static final String DIG_EMPLOYEE_SKILL_CACHE_KEY_PREFIX = "RESOURCE_DIG_EMPLOYEE_";
-
     /**
      * 知识库/数字员工系统来源配置；配置为 WHALE_AGENT 时表示接入老智能体商业版本，
      * 知识/工具资源由外部智能体体系发布，本系统不允许编辑基础信息或注销。
@@ -156,6 +156,9 @@ public class ToolManService {
 
     @Autowired
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
+
+    @Autowired
+    private DigEmployeeRedisSyncProperties digEmployeeRedisSyncProperties;
 
     @Autowired
     private SequenceService sequenceService;
@@ -1770,7 +1773,10 @@ public class ToolManService {
         if (!StringUtils.equals(resourceBizType, ResourceBizType.DIG_EMPLOYEE.getCode()) || resourceId == null) {
             return;
         }
-        RedisUtil.removeKey(DIG_EMPLOYEE_SKILL_CACHE_KEY_PREFIX + resourceId);
+        RedisUtil.removeKey(DigEmployeeRedisKeys.skillCacheKey(resourceId));
+        if (digEmployeeRedisSyncProperties != null && digEmployeeRedisSyncProperties.isJsonRedisSyncEnabled()) {
+            RedisUtil.removeKey(DigEmployeeRedisKeys.configJsonKey(resourceId));
+        }
     }
 
     private void deleteRegisteredArtifacts(Long resourceId, String resourceBizType) {

@@ -1,15 +1,6 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { adaptAgentJson } from "./agent-adapter.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const digEmployee10000115Fixture = path.join(
-  __dirname,
-  "../resource/dig_employee/DIG_EMPLOYEE_10000115.json",
-);
 
 describe("adaptAgentJson", () => {
   it("maps Baiying agent_list export", () => {
@@ -185,10 +176,11 @@ describe("adaptAgentJson", () => {
   });
 
   it("smoke: DIG_EMPLOYEE_10000115.json maps relSkills to agents.list skills", () => {
-    const raw = JSON.parse(readFileSync(digEmployee10000115Fixture, "utf8")) as Record<
-      string,
-      unknown
-    >;
+    const raw = {
+      resourceId: "10000115",
+      resourceName: "Skill Demo",
+      relSkills: ["dws", "clawhub"],
+    };
     const res = adaptAgentJson({
       raw,
       fileName: "DIG_EMPLOYEE_10000115.json",
@@ -200,6 +192,27 @@ describe("adaptAgentJson", () => {
     }
     expect(res.agentId).toBe(`${MANAGED_AGENT_PREFIX}10000115`);
     expect(res.listEntry.skills).toEqual(["dws", "clawhub"]);
+  });
+
+  it("maps raw Baiying detail relTools to agents.list tools.allow", () => {
+    const raw = {
+      resourceId: "10011257",
+      resourceName: "Tool limited employee",
+      integrationType: "NONE",
+      relTools: ["*", " read ", "", "write"],
+    };
+    const res = adaptAgentJson({
+      raw,
+      fileName: "DIG_EMPLOYEE_10011257.json",
+      embedApiKeysFromJson: false,
+    });
+    expect("error" in res).toBe(false);
+    if ("error" in res) {
+      return;
+    }
+    expect(res.listEntry.tools).toEqual({
+      allow: ["*", "read", "write", "baiying_call"],
+    });
   });
 
   it("maps raw Baiying detail (integrationType INTERFACE)", () => {

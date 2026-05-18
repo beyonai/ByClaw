@@ -1,12 +1,10 @@
-import { createHash } from "node:crypto";
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import { loadAgentContentIndex, saveAgentContentIndex } from "./agent-content-index.js";
 import { adaptAgentJson, type AdaptedManagedAgent } from "./agent-adapter.js";
 import { mergeManagedAgentsIntoConfig } from "./agent-registry.js";
 import { AgentRegistryState } from "./agent-state.js";
 import { MANAGED_AGENT_PREFIX, type BaiyingEnhancePluginConfig } from "./types.js";
+import type { BaiyingRedisJsonStore } from "./redis-json-store.js";
 import { resolveEffectiveMainAgentsMdMode, seedMainAgentAgentsMd } from "./main-workspace-seed.js";
 import { seedManagedAgentWorkspace } from "./workspace-seed.js";
 import {
@@ -16,61 +14,16 @@ import {
   watchWorkspaceSkillDirs,
 } from "./workspace-skills.js";
 
-export async function collectAgentJsonFiles(rootDir: string): Promise<string[]> {
-  const out: string[] = [];
-  let entries: Awaited<ReturnType<typeof fs.readdir>>;
-  try {
-    entries = await fs.readdir(rootDir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const ent of entries) {
-    if (ent.name.startsWith(".")) {
-      continue;
-    }
-    const p = path.join(rootDir, ent.name);
-    if (ent.isFile() && ent.name.toLowerCase().endsWith(".json")) {
-      out.push(p);
-    }
-    if (ent.isDirectory()) {
-      const cfgPath = path.join(p, "config.json");
-      try {
-        await fs.access(cfgPath);
-        out.push(cfgPath);
-      } catch {
-        // no config.json in this subdirectory
-      }
-    }
-  }
-  return out;
-}
-
-/** Read a JSON file and return both the parsed object and a content hash. */
-async function readJsonWithHash(filePath: string): Promise<{ raw: unknown; hash: string } | null> {
-  let content: string;
-  try {
-    content = await fs.readFile(filePath, "utf8");
-  } catch {
-    return null;
-  }
-  let raw: unknown;
-  try {
-    raw = JSON.parse(content);
-  } catch {
-    return null;
-  }
-  const hash = createHash("sha256").update(content).digest("hex");
-  return { raw, hash };
-}
-
 export type LoadedManagedAgent = AdaptedManagedAgent & {
   /** SHA-256 hash of the source JSON content for change detection. */
   contentHash: string;
+  /** Redis key that supplied this digital employee snapshot. */
+  sourceRedisKey?: string;
 };
 
 function formatAgentDeltaLine(agent: LoadedManagedAgent): string {
   const name = agent.listEntry.name?.trim() || agent.agentId;
-  const src = agent.sourceFilePath ?? "(no source path)";
+  const src = agent.sourceRedisKey ? `redis:${agent.sourceRedisKey}` : agent.sourceFilePath ?? "(no source path)";
   return `${agent.agentId} (${name}) ← ${src}`;
 }
 
@@ -87,35 +40,98 @@ function formatSkillList(skills: string[]): string {
   return skills.length > 0 ? skills.join(", ") : "(none)";
 }
 
-export async function loadManagedAgentsFromDir(params: {
-  rootDir: string;
+const SNAPSHOT_INVALIDATION_ENTRY = "__baiying_enhance_reload";
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJson(item)).join(",")}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  return `{${entries.map(([key, val]) => `${JSON.stringify(key)}:${stableJson(val)}`).join(",")}}`;
+}
+
+function toolSignature(tools: unknown): string {
+  return stableJson(tools ?? null);
+}
+
+function managedSnapshotSignature(managed: LoadedManagedAgent[]): string {
+  return managed
+    .map(
+      (m) =>
+        `${m.agentId}:skills=${skillSignature(m.listEntry.skills ?? [])};tools=${toolSignature(
+          m.listEntry.tools,
+        )}`,
+    )
+    .sort((a, b) => a.localeCompare(b))
+    .join("|");
+}
+
+function touchSkillsSnapshotInvalidation<T extends { skills?: any }>(
+  cfg: T,
+  params: { managed: LoadedManagedAgent[]; reason: string },
+): T {
+  cfg.skills = {
+    ...(cfg.skills ?? {}),
+    entries: {
+      ...(cfg.skills?.entries ?? {}),
+      [SNAPSHOT_INVALIDATION_ENTRY]: {
+        enabled: false,
+        config: {
+          reason: params.reason,
+          managedSnapshotSignature: managedSnapshotSignature(params.managed),
+        },
+      },
+    },
+  };
+  return cfg;
+}
+
+export async function loadManagedAgentsFromRedis(params: {
+  redisJsonStore: BaiyingRedisJsonStore;
+  authorizedSourceKeys: Set<string> | undefined;
   embedApiKeysFromJson: boolean;
   envApiKeyTemplate?: string;
   defaultProxyUrl?: string;
   defaultApiKey?: string;
   log: { warn: (m: string) => void };
 }): Promise<LoadedManagedAgent[]> {
-  const files = await collectAgentJsonFiles(params.rootDir);
+  const authorizedIds = params.authorizedSourceKeys
+    ? [...params.authorizedSourceKeys].map((id) => id.trim()).filter((id) => /^\d+$/.test(id))
+    : [];
   const out: LoadedManagedAgent[] = [];
-  for (const filePath of files) {
-    const result = await readJsonWithHash(filePath);
+  if (authorizedIds.length === 0) {
+    return out;
+  }
+  for (const sourceKey of authorizedIds) {
+    const result = await params.redisJsonStore.getDigEmployeeJson(sourceKey);
     if (!result) {
-      params.log.warn(`baiying-enhance: failed to read ${filePath}`);
+      params.log.warn(`baiying-enhance: Redis digital employee JSON missing/unreadable key=DIG_EMPLOYEE_${sourceKey}`);
       continue;
     }
     const res = adaptAgentJson({
       raw: result.raw,
-      fileName: path.basename(filePath),
+      fileName: `${result.key}.json`,
       embedApiKeysFromJson: params.embedApiKeysFromJson,
       envApiKeyTemplate: params.envApiKeyTemplate,
       defaultProxyUrl: params.defaultProxyUrl,
       defaultApiKey: params.defaultApiKey,
     });
     if ("error" in res) {
-      params.log.warn(`baiying-enhance: skip ${filePath}: ${res.error}`);
+      params.log.warn(`baiying-enhance: skip Redis key ${result.key}: ${res.error}`);
       continue;
     }
-    out.push({ ...res, sourceFilePath: filePath, contentHash: result.hash });
+    if (res.sourceKey !== sourceKey) {
+      params.log.warn(
+        `baiying-enhance: skip Redis key ${result.key}: JSON resourceId/sourceKey=${res.sourceKey} does not match authorized id=${sourceKey}`,
+      );
+      continue;
+    }
+    out.push({ ...res, sourceJson: result.raw, sourceRedisKey: result.key, contentHash: result.hash });
   }
   return out;
 }
@@ -124,7 +140,7 @@ export type AgentFlushNowOptions = {
   /** dig-employee auth set changed — force config write and workspace markdown re-seed for all visible agents. */
   fullWorkspaceReseed?: boolean;
   /**
-   * Soft-delete / Pub/Sub delete: unlink `AGENT_<id>.json` when present, drop managed agent from sync even if the file remains.
+   * Soft-delete / Pub/Sub delete: drop managed agent from sync even if Redis still has a stale JSON value.
    * Each entry is the numeric resource id string (same as `sourceKey`).
    */
   deletedSourceKeys?: string[];
@@ -146,7 +162,7 @@ export type AgentWatchdog = {
 export function createAgentWatchdog(params: {
   api: OpenClawPluginApi;
   registry: AgentRegistryState;
-  absoluteDir: string;
+  redisJsonStore: BaiyingRedisJsonStore;
   contentIndexPath: string;
   executorPath: string;
   pluginConfig: BaiyingEnhancePluginConfig;
@@ -162,10 +178,12 @@ export function createAgentWatchdog(params: {
   let pendingFullWorkspaceReseed = false;
   /** Resource ids pending explicit delete (Pub/Sub DIG_EMPLOYEE_DELETED). */
   const pendingDeletedSourceKeys = new Set<string>();
-  /** Content hash of each agent's source JSON from the last successful sync (and loaded from disk index at start when enabled). */
+  /** Content hash of each Redis agent JSON from the last successful sync (loaded from persisted index at start when enabled). */
   const prevHashes = new Map<string, string>();
   /** Effective `agents.list[].skills` signatures from the last successful sync. */
   const prevSkillSignatures = new Map<string, string>();
+  /** Effective `agents.list[].tools` signatures from the last successful sync. */
+  const prevToolSignatures = new Map<string, string>();
   /** Last successful JSON/auth-filtered baseline, before workspace-uploaded skills are merged. */
   let lastBaseManaged: LoadedManagedAgent[] = [];
   let skillRefreshInFlight = false;
@@ -266,12 +284,20 @@ export function createAgentWatchdog(params: {
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([id, skills]) => `${id}:${skillSignature(skills)}`)
         .join("|");
+      touchSkillsSnapshotInvalidation(next, {
+        managed: effectiveManaged,
+        reason: "workspace-skill-sync",
+      });
       await params.api.runtime.config.writeConfigFile(next);
       lastSkillSyncFailureSignature = "";
       params.registry.replaceAll(effectiveManaged);
       prevSkillSignatures.clear();
       for (const m of effectiveManaged) {
         prevSkillSignatures.set(m.agentId, skillSignature(m.listEntry.skills ?? []));
+      }
+      prevToolSignatures.clear();
+      for (const m of effectiveManaged) {
+        prevToolSignatures.set(m.agentId, toolSignature(m.listEntry.tools));
       }
       closeSkillWatchers?.();
       closeSkillWatchers = watchWorkspaceSkillDirs({
@@ -316,26 +342,11 @@ export function createAgentWatchdog(params: {
     pendingDeletedSourceKeys.clear();
     const deleteBatchSet = new Set(deleteBatch.map((k) => k.trim()).filter(Boolean));
 
-    const tryUnlinkAgentJson = async (sourceKey: string) => {
-      const id = sourceKey.trim();
-      if (!id) {
-        return;
-      }
-      const flat = path.join(params.absoluteDir, `AGENT_${id}.json`);
-      try {
-        await fs.unlink(flat);
-      } catch {
-        // ignore missing file
-      }
-    };
-
-    for (const key of deleteBatchSet) {
-      await tryUnlinkAgentJson(key);
-    }
-
     try {
-      let managed = await loadManagedAgentsFromDir({
-        rootDir: params.absoluteDir,
+      const authorizedSourceKeys = params.authorizationFilter?.getAuthorizedSourceKeys();
+      let managed = await loadManagedAgentsFromRedis({
+        redisJsonStore: params.redisJsonStore,
+        authorizedSourceKeys,
         embedApiKeysFromJson: params.pluginConfig.embedApiKeysFromJson === true,
         envApiKeyTemplate: params.pluginConfig.envApiKeyTemplate,
         defaultProxyUrl: params.pluginConfig.defaultProxyUrl,
@@ -345,11 +356,7 @@ export function createAgentWatchdog(params: {
       if (deleteBatchSet.size > 0) {
         managed = managed.filter((agent) => !deleteBatchSet.has(agent.sourceKey));
       }
-      const authorizedSourceKeys = params.authorizationFilter?.getAuthorizedSourceKeys();
-      const filteredManaged =
-        authorizedSourceKeys
-          ? managed.filter((agent) => authorizedSourceKeys.has(agent.sourceKey))
-          : managed;
+      const filteredManaged = managed;
       lastBaseManaged = filteredManaged;
       const effectiveManaged = workspaceSkillAutoEnable
         ? await mergeWorkspaceSkillsIntoManagedAgents({
@@ -383,7 +390,7 @@ export function createAgentWatchdog(params: {
         removedSet.add(`${MANAGED_AGENT_PREFIX}${sourceKey}`);
       }
 
-      // Every flush: drop managed agents listed in config but missing from disk (e.g. files removed while gateway was down).
+      // Every flush: drop managed agents listed in config but absent from the current authorized Redis view.
       try {
         const cfg = params.api.runtime.config.loadConfig();
         const existingList = cfg?.agents?.list ?? [];
@@ -399,6 +406,7 @@ export function createAgentWatchdog(params: {
       const removed = [...removedSet];
       let hasMissingManagedRegistrations = false;
       let hasSkillChanges = false;
+      let hasToolChanges = false;
       try {
         const cfg = params.api.runtime.config.loadConfig();
         const existingIds = new Set((cfg?.agents?.list ?? []).map((entry) => entry.id).filter(Boolean));
@@ -407,10 +415,14 @@ export function createAgentWatchdog(params: {
             .filter((entry) => entry.id)
             .map((entry) => [entry.id!, skillSignature(entry.skills ?? [])]),
         );
+        const existingToolsById = new Map(
+          (cfg?.agents?.list ?? [])
+            .filter((entry) => entry.id)
+            .map((entry) => [entry.id!, toolSignature(entry.tools)]),
+        );
         for (const id of currentIds) {
           if (!existingIds.has(id)) {
             hasMissingManagedRegistrations = true;
-            break;
           }
         }
         for (const m of effectiveManaged) {
@@ -421,11 +433,26 @@ export function createAgentWatchdog(params: {
           if (existingSkillsById.get(m.agentId) !== nextSig) {
             hasSkillChanges = true;
           }
+          const nextToolSig = toolSignature(m.listEntry.tools);
+          if (prevToolSignatures.has(m.agentId) && prevToolSignatures.get(m.agentId) !== nextToolSig) {
+            hasToolChanges = true;
+          }
+          if (existingToolsById.get(m.agentId) !== nextToolSig) {
+            hasToolChanges = true;
+          }
         }
         for (const oldId of prevSkillSignatures.keys()) {
           if (!currentIds.has(oldId)) {
             hasSkillChanges = true;
           }
+        }
+        for (const oldId of prevToolSignatures.keys()) {
+          if (!currentIds.has(oldId)) {
+            hasToolChanges = true;
+          }
+        }
+        if (removed.length > 0) {
+          hasToolChanges = true;
         }
       } catch {
         // ignore config read errors
@@ -437,11 +464,12 @@ export function createAgentWatchdog(params: {
         removed.length > 0 ||
         hasMissingManagedRegistrations ||
         hasSkillChanges ||
+        hasToolChanges ||
         deleteBatchSet.size > 0;
       const forceFullReseed = forceAuthReseed;
       const shouldSync = hasChanges || forceFullReseed;
 
-      if (shouldSync && (deleteBatchSet.size > 0 || forceAuthReseed || added.length > 0 || updated.length > 0 || removed.length > 0 || hasSkillChanges)) {
+      if (shouldSync && (deleteBatchSet.size > 0 || forceAuthReseed || added.length > 0 || updated.length > 0 || removed.length > 0 || hasSkillChanges || hasToolChanges)) {
         const trigger =
           deleteBatchSet.size > 0
             ? `explicit delete (${[...deleteBatchSet].join(", ")})`
@@ -451,7 +479,7 @@ export function createAgentWatchdog(params: {
                 ? "workspace skill sync"
                 : `managed agent sync (${params.debounceMs}ms coalesce)`;
         params.api.logger.info(
-          `baiying-enhance: ${trigger} — delta: +${added.length} ~${updated.length} -${removed.length}; skillChanges=${hasSkillChanges}; fullWorkspaceReseed=${forceFullReseed}`,
+          `baiying-enhance: ${trigger} — delta: +${added.length} ~${updated.length} -${removed.length}; skillChanges=${hasSkillChanges}; toolChanges=${hasToolChanges}; fullWorkspaceReseed=${forceFullReseed}`,
         );
         const detailLines: string[] = [];
         for (const a of added) {
@@ -514,8 +542,10 @@ export function createAgentWatchdog(params: {
       if (!shouldSync) {
         await trySeedMainAgentsMd();
         prevSkillSignatures.clear();
+        prevToolSignatures.clear();
         for (const m of effectiveManaged) {
           prevSkillSignatures.set(m.agentId, skillSignature(m.listEntry.skills ?? []));
+          prevToolSignatures.set(m.agentId, toolSignature(m.listEntry.tools));
         }
         if (workspaceSkillAutoEnable) {
           closeSkillWatchers?.();
@@ -539,6 +569,12 @@ export function createAgentWatchdog(params: {
         mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
         mergeAllowSpawnForMain: params.pluginConfig.mergeAllowSpawnForMain !== false,
       });
+      if (hasSkillChanges || hasToolChanges || added.length > 0 || removed.length > 0 || deleteBatchSet.size > 0) {
+        touchSkillsSnapshotInvalidation(next, {
+          managed: effectiveManaged,
+          reason: hasToolChanges ? "agent-tool-policy-sync" : "agent-skill-sync",
+        });
+      }
 
       await params.api.runtime.config.writeConfigFile(next);
 
@@ -579,8 +615,10 @@ export function createAgentWatchdog(params: {
         prevHashes.set(m.agentId, m.contentHash);
       }
       prevSkillSignatures.clear();
+      prevToolSignatures.clear();
       for (const m of effectiveManaged) {
         prevSkillSignatures.set(m.agentId, skillSignature(m.listEntry.skills ?? []));
+        prevToolSignatures.set(m.agentId, toolSignature(m.listEntry.tools));
       }
       if (workspaceSkillAutoEnable) {
         closeSkillWatchers?.();
@@ -618,13 +656,8 @@ export function createAgentWatchdog(params: {
 
   return {
     start: async (options?: { deferInitialFlush?: boolean }) => {
-      try {
-        await fs.mkdir(params.absoluteDir, { recursive: true });
-      } catch {
-        // ignore
-      }
       params.api.logger.info(
-        "baiying-enhance: agent sync engine started (directory scan on flush only; triggers: Redis Pub/Sub, dig-employee auth, __flushNow)",
+        "baiying-enhance: agent sync engine started (Redis JSON loading only; triggers: Redis Pub/Sub, dig-employee auth, __flushNow)",
       );
       if (persistIndex) {
         const loaded = await loadAgentContentIndex(params.contentIndexPath, {
