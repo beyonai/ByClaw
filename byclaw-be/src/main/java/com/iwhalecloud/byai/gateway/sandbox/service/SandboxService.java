@@ -461,7 +461,7 @@ public class SandboxService {
         Date remoteExpiresAt = launchData.getRemoteExpiresAt();
         Date lastRenewAt = remoteExpiresAt != null ? lastAccessTime : null;
         Date nextRenewAt = computeNextRenewAt(remoteExpiresAt);
-        sandboxRecordMapper.updateLaunchSuccess(record.getId(), launchData.getSandboxId(), endpoint,
+        int updated = sandboxRecordMapper.updateLaunchSuccess(record.getId(), launchData.getSandboxId(), endpoint,
             launchData.getTimeoutSeconds(), remoteExpiresAt, lastRenewAt, nextRenewAt, lastAccessTime);
 
         record.setStatus(STATUS_RUNNING);
@@ -472,6 +472,11 @@ public class SandboxService {
         record.setLastRenewAt(lastRenewAt);
         record.setNextRenewAt(nextRenewAt);
         record.setLastAccessTime(lastAccessTime);
+        if (updated == 0) {
+            LOGGER.warn("沙箱启动完成后记录状态已变化，准备释放刚创建的远端沙箱：{}", sandboxRef(record));
+            cleanupLaunchedSandboxAfterRecordReleased(record);
+            return null;
+        }
         sandboxMetadataCache.put(toSandboxInfo(record));
 
         registerSandboxEndpoint(userCode, routing, endpoint, launchData.getImageType(), launchData.getSandboxId(),
@@ -639,8 +644,12 @@ public class SandboxService {
         if (record == null) {
             throw new BdpRuntimeException("sandbox record not found");
         }
+        if (STATUS_STARTING.equals(record.getStatus())) {
+            markStartingSandboxReleased(record, RELEASE_REASON_MANUAL);
+            return;
+        }
         if (!STATUS_RUNNING.equals(record.getStatus())) {
-            LOGGER.warn("沙箱手动释放跳过，记录非运行中：{}", sandboxRef(record));
+            LOGGER.warn("沙箱手动释放跳过，记录非可释放状态：{}", sandboxRef(record));
             return;
         }
         doRemoveSandbox(record, RELEASE_REASON_MANUAL);
@@ -1021,6 +1030,42 @@ public class SandboxService {
         sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
         unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType());
         LOGGER.info("沙箱释放完成：{}，releaseReason：{}", sandboxRef(record), releaseReason);
+    }
+
+    private void markStartingSandboxReleased(SsSandboxRecord record, String releaseReason) {
+        Date now = new Date();
+        int marked = sandboxRecordMapper.markStartingReleased(record.getId(), releaseReason, now);
+        if (marked == 0) {
+            SsSandboxRecord latestRecord = sandboxRecordMapper.selectById(record.getId());
+            if (latestRecord != null && STATUS_RUNNING.equals(latestRecord.getStatus())) {
+                LOGGER.info("启动中沙箱释放时记录已运行，改用运行中释放流程：{}", sandboxRef(latestRecord));
+                doRemoveSandbox(latestRecord, releaseReason);
+                return;
+            }
+            LOGGER.warn("启动中沙箱释放跳过，记录状态已变化：{}", sandboxRef(latestRecord));
+            return;
+        }
+        String lockKey = SANDBOX_LAUNCH_LOCK_PREFIX + record.getUserCode() + ":" + record.getSandboxType() + ":"
+            + record.getResourceId();
+        RedisUtil.del(lockKey);
+        sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
+        unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType());
+        LOGGER.info("启动中沙箱已标记释放：{}，releaseReason：{}", sandboxRef(record), releaseReason);
+    }
+
+    private void cleanupLaunchedSandboxAfterRecordReleased(SsSandboxRecord record) {
+        try {
+            SandboxResponse<Void> response = sandboxLifecycleFacade.removeSandbox(toSandboxInfo(record));
+            if (response == null || !response.isSuccess()) {
+                LOGGER.warn("释放已取消启动的远端沙箱返回失败：{}，原因：{}", sandboxRef(record),
+                    response != null ? response.getMessage() : "响应为空");
+            }
+        }
+        catch (Exception e) {
+            LOGGER.error("释放已取消启动的远端沙箱异常：{}", sandboxRef(record), e);
+        }
+        sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
+        unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType());
     }
 
     private void registerSandboxEndpoint(String userCode, SandboxLaunchRouting routing, String endpoint, String imageType,
