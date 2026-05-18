@@ -391,6 +391,17 @@ function BaseListModal(props) {
     });
   }, [open, digitalType, displayTabs]);
 
+  const filteredBundledTools = useMemo(() => {
+    const keyword = searchKeyword.trim().toLowerCase();
+    if (!keyword) return bundledTools;
+    return bundledTools.filter(
+      (item) =>
+        item.toolName?.toLowerCase().includes(keyword) ||
+        item.toolDescZh?.toLowerCase().includes(keyword) ||
+        item.toolDescEn?.toLowerCase().includes(keyword)
+    );
+  }, [bundledTools, searchKeyword]);
+
   const onSearch = useCallback(
     (values) => {
       if (isPlugin) {
@@ -521,7 +532,8 @@ function BaseListModal(props) {
             wrapperClassName={styles.spinningWrapper}
           >
             {(() => {
-              const displayList = activeTab === 'TOOLKIT' && toolSubTab === BUILTIN_TOOLS_TAB ? bundledTools : list;
+              const displayList =
+                activeTab === 'TOOLKIT' && toolSubTab === BUILTIN_TOOLS_TAB ? filteredBundledTools : list;
               const isBuiltinMode = activeTab === 'TOOLKIT' && toolSubTab === BUILTIN_TOOLS_TAB;
               if (displayList.length) {
                 return (

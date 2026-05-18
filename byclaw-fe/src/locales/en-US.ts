@@ -1079,7 +1079,7 @@ export default {
   'resourceTabs.objectCenter': 'Object Center',
   'resourceTabs.viewCenter': 'View Center',
   'resourceTabs.toolCenter': 'Tool Center',
-  'resourceTabs.skillUpload.uploadButton': 'Upload Skill',
+  'resourceTabs.skillUpload.uploadButton': 'Upload',
   'resourceTabs.skillUpload.onlyZip': 'Only .zip format files are supported',
   'resourceTabs.skillUpload.noUserCode': 'Unable to get user code, please login again',
   'resourceTabs.skillUpload.success': 'Skill uploaded successfully',
