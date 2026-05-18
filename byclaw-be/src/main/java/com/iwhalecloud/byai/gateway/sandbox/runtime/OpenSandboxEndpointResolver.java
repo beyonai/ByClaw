@@ -85,8 +85,19 @@ class OpenSandboxEndpointResolver {
         if (StringUtils.isBlank(baseUrl)) {
             throw new IllegalArgumentException("byclaw.sandbox.opensandbox.ui-agent-proxy-base-url is required for uiagent");
         }
-        return StringUtils.removeEnd(baseUrl.trim(), "/")
+        String proxyEndpoint = StringUtils.removeEnd(baseUrl.trim(), "/")
             + "/" + sandboxId + "/proxy/" + servicePort + "/";
+        return proxyEndpoint + "?gatewayUrl=" + toWebsocketGatewayUrl(proxyEndpoint);
+    }
+
+    private String toWebsocketGatewayUrl(String proxyEndpoint) {
+        if (StringUtils.startsWith(proxyEndpoint, "https://")) {
+            return "wss://" + StringUtils.removeStart(proxyEndpoint, "https://");
+        }
+        if (StringUtils.startsWith(proxyEndpoint, "http://")) {
+            return "ws://" + StringUtils.removeStart(proxyEndpoint, "http://");
+        }
+        return proxyEndpoint;
     }
 
     private int resolveRequiredServicePort(SandboxServiceSpec spec) {

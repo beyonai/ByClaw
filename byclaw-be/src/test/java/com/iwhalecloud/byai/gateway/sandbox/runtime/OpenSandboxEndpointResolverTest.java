@@ -54,7 +54,8 @@ class OpenSandboxEndpointResolverTest {
 
         List<String> endpoints = new OpenSandboxEndpointResolver(client, properties).resolve(instance, spec);
 
-        assertThat(endpoints).containsExactly("https://uiagent-proxy.example.test/sandboxes/sb-2/proxy/3000/");
+        assertThat(endpoints).containsExactly("https://uiagent-proxy.example.test/sandboxes/sb-2/proxy/3000/"
+            + "?gatewayUrl=wss://uiagent-proxy.example.test/sandboxes/sb-2/proxy/3000/");
         verify(client, never()).getSandboxEndpoint("sb-2", 3000);
     }
 

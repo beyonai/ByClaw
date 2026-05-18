@@ -21,7 +21,9 @@ class SandboxEndpointUrlCustomizerTest {
         SandboxEndpointUrlCustomizer customizer = new SandboxEndpointUrlCustomizer("ztesoft");
 
         assertThat(customizer.toAccessEndpoint(
-            "https://host:8443/sandboxes/sb-1/proxy/3000/", "uiagent"))
-            .isEqualTo("https://host:8443/sandboxes/sb-1/proxy/3000/");
+            "https://host:8443/sandboxes/sb-1/proxy/3000/?gatewayUrl=wss://host:8443/sandboxes/sb-1/proxy/3000/",
+            "uiagent"))
+            .isEqualTo("https://host:8443/sandboxes/sb-1/proxy/3000/"
+                + "?gatewayUrl=wss://host:8443/sandboxes/sb-1/proxy/3000/");
     }
 }
