@@ -7,13 +7,10 @@ import {
   GatewayDataEmitter,
   EventType,
   SseReasonMessageType,
-  WorkerRunner,
-  WorkerRegistry,
-  ActionType,
-  AskAgentCommand,
   SseMessageType,
 } from "@byclaw/by-framework";
 import type { Redis } from "ioredis";
+import { GatewayClient } from "openclaw/plugin-sdk/gateway-runtime";
 import type { Capability, Dict, ExecutorResponse } from "../types.js";
 import { asString, isRecord } from "../types.js";
 import type { AuthContext } from "../auth.js";
@@ -87,16 +84,197 @@ async function getA2ASseUrl(cardUrl: string, headers: Record<string, any> = {}) 
     }
     let { url } = cardJson;
     const cardUrlObj = new URL(cardUrl);
-    const xApiKey = cardUrlObj.searchParams.get("x-api-key");
-    if (xApiKey) {
+    const parameters = cardUrlObj.searchParams;
+    if (parameters.size) {
       const urlObj = new URL(url);
-      urlObj.searchParams.set("x-api-key", xApiKey);
+      // Copy all parameters to the rpc url
+      for (const [key, value] of parameters) {
+        urlObj.searchParams.set(key, value);
+      }
       return urlObj.toString();
     }
     return url;
   } catch (error) {
     return "";
   }
+}
+
+async function withGatewayClient<T>(
+  opts: ConstructorParameters<typeof GatewayClient>[0],
+  fn: (client: GatewayClient) => Promise<T>,
+): Promise<T> {
+  let client!: GatewayClient;
+
+  await new Promise<void>((resolve, reject) => {
+    client = new GatewayClient({
+      ...opts,
+      onHelloOk: () => resolve(),
+      onConnectError: (err: Error) => reject(err),
+    });
+
+    client.start();
+  });
+
+  let result: T;
+  try {
+    result = await fn(client);
+  } finally {
+    await client.stopAndWait();
+  }
+  return result;
+}
+
+async function getHistoryBySessionKey(sessionKey: string) {
+  const token = process.env.OPENCLAW_GATEWAY_TOKEN;
+  if (!token || !sessionKey) {
+    return [];
+  }
+
+  try {
+    const history = await withGatewayClient({ token }, (client) =>
+      client.request("chat.history", { sessionKey, limit: 20 }),
+    );
+    if (!isRecord(history) || !Array.isArray(history.messages)) {
+      return [];
+    }
+    return history.messages.reduce((acc, cur) => {
+      const { role, content } = cur;
+      if (role !== "user" && role !== "assistant") {
+        return acc;
+      }
+      const text = content.map((item: { type: string; text: string }) => {
+        if (item.type === "text" && item.text?.trim()) {
+          return item.text.trim();
+        }
+        return "";
+      }).filter(Boolean).join("\n");
+      if (!text) {
+        return acc;
+      }
+      acc.push(`[${role}] said: ${text}`);
+      return acc;
+    }, []).join("\n");
+  } catch (error) {
+    console.error("Failed to get gateway history:", error);
+    return "";
+  }
+}
+
+async function buildA2aJsonRpcRequest(chatContent: string, historySessionKey?: string) {
+  const parts = [{ kind: "text", text: chatContent ?? "" }];
+  if (historySessionKey) {
+    const history = await getHistoryBySessionKey(historySessionKey);
+    if (history) {
+      parts.unshift({ kind: "text", text: history });
+    }
+  }
+  return {
+    jsonrpc: "2.0",
+    id: crypto.randomUUID(),
+    method: "message/stream",
+    params: {
+      message: {
+        messageId: crypto.randomUUID(),
+        role: "user",
+        parts,
+        contextId: crypto.randomUUID(),
+        kind: "message",
+      },
+    },
+  };
+}
+
+function extractTextFromA2aParts(parts: unknown): string {
+  if (!Array.isArray(parts) || parts.length === 0) return "";
+  let out = "";
+  for (const part of parts) {
+    if (!isRecord(part)) continue;
+    const kind = typeof part.kind === "string" ? part.kind.toLowerCase() : "";
+    if (kind === "text") {
+      const t = typeof part.text === "string" ? part.text : "";
+      out += t;
+    }
+  }
+  return out;
+}
+
+type A2aChunk = { chunk: Dict; isAnswer: boolean; text: string };
+
+/** Mirrors Java A2aRouteService.convertA2aResponseToInternalLine. Returns null when nothing should be forwarded. */
+function convertA2aResponseToOpenAiChunk(rpc: unknown): A2aChunk | null {
+  if (!isRecord(rpc)) return null;
+  const result = isRecord(rpc.result) ? rpc.result : null;
+  if (!result) return null;
+
+  let kind = typeof result.kind === "string" ? result.kind.toLowerCase() : "";
+  if (!kind) {
+    if ("artifact" in result) kind = "artifact-update";
+    else if ("history" in result) kind = "task";
+    else if (isRecord(result.status) && "state" in result.status) kind = "status-update";
+    else if ("parts" in result && "role" in result) kind = "message";
+  }
+
+  let text = "";
+  let contentType: string = SseMessageType.text;
+  let isAnswer = true;
+
+  if (kind === "task") {
+    const status = isRecord(result.status) ? result.status : null;
+    const message = status && isRecord(status.message) ? status.message : null;
+    text = message ? extractTextFromA2aParts(message.parts) : "";
+    contentType = SseReasonMessageType.think_sub_title;
+    isAnswer = false;
+  } else if (kind === "message") {
+    text = extractTextFromA2aParts(result.parts);
+  } else if (kind === "status-update") {
+    const status = isRecord(result.status) ? result.status : null;
+    const state = status && typeof status.state === "string" ? status.state : "";
+    const message = status && isRecord(status.message) ? status.message : null;
+    text = message ? extractTextFromA2aParts(message.parts) : "";
+    contentType = state.toLowerCase() === "auth_required" ? "4003" : "1002";
+  } else if (kind === "artifact-update") {
+    const artifact = isRecord(result.artifact) ? result.artifact : null;
+    text = artifact ? extractTextFromA2aParts(artifact.parts) : "";
+  } else {
+    return null;
+  }
+
+  return {
+    chunk: {
+      choices: [{ index: 0, delta: { role: "assistant", content: text } }],
+      contentType,
+    },
+    isAnswer,
+    text,
+  };
+}
+
+/** OpenAI-style fallback, mirrors Java A2aRouteService.convertOpenAiChunkToInternalLine. */
+function convertOpenAiChunkToA2aChunk(rpc: unknown): A2aChunk | null {
+  if (!isRecord(rpc)) return null;
+  const choices = Array.isArray(rpc.choices) ? rpc.choices : null;
+  if (!choices || choices.length === 0) return null;
+  let text = "";
+  let hasContent = false;
+  for (const c of choices) {
+    if (!isRecord(c)) continue;
+    const delta = isRecord(c.delta) ? c.delta : null;
+    if (delta && typeof delta.content === "string") {
+      hasContent = true;
+      text += delta.content;
+    }
+  }
+  if (!hasContent) return null;
+  const chunk: Dict = { ...rpc };
+  if (typeof chunk.contentType !== "string") chunk.contentType = "1002";
+  return { chunk, isAnswer: true, text };
+}
+
+function extractA2aRpcError(rpc: unknown): string | null {
+  if (!isRecord(rpc)) return null;
+  const err = rpc.error;
+  if (!isRecord(err)) return null;
+  return typeof err.message === "string" ? err.message : "A2A agent error";
 }
 
 /** Mirror of `BaiYingExecutor._execute_agent`. */
@@ -118,10 +296,14 @@ export async function executeAgent(params: {
     selected_resource?: Record<string, unknown>;
     channel_session_id?: string;
     channel_trace_id?: string;
+    session_key: string;
+    parent_session_key?: string;
   };
   const sessionId = String(parameters.session_id || resourceContext.channel_session_id || "");
   const traceId = String(parameters.trace_id || resourceContext.channel_trace_id || "");
   const chatContent = String(parameters.query ?? parameters.message ?? "");
+  const sessionKey = resourceContext.session_key;
+  const parentSessionKey = String(resourceContext.parent_session_key ?? "");
 
   const isSubagent = !!parameters.is_subagent;
 
@@ -294,6 +476,7 @@ You MUST:
             isSubagent,
             agentDescription: capability.description,
             args: {
+              ...(params.parameters.parameters ?? {}),
               input: chatContent,
             }
           },
@@ -355,23 +538,6 @@ You MUST:
     Object.assign(headers, request_headers);
   }
 
-  if (agent.integration_type === "A2A") {
-    const cardUrl = sseUrl;
-    /** 从 A2A 卡片 URL 获取真正的 SSE URL */
-    sseUrl = await getA2ASseUrl(cardUrl, headers);
-    if (!sseUrl) {
-      return makeError("SSE_URL_NOT_FOUND", `Cannot fetch sse url from A2A cardUrl: ${cardUrl}`);
-    }
-  }
-
-  logBaiyingRequest(params.logger, "agent.sse.post", {
-    resource_id: capability.metadata?.resource_id,
-    resource_type: capability.resource_type,
-    url: sseUrl,
-    payload,
-    headers,
-  });
-
   const byFrameworkEmitter = generateByFrameworkEmitter();
   const sendByFrameworkStreamData = createSerializedByFrameworkStreamSender(
     byFrameworkEmitter,
@@ -383,24 +549,83 @@ You MUST:
     },
   );
 
+  if (agent.integration_type === "A2A") {
+    const cardUrl = sseUrl;
+    /** 从 A2A 卡片 URL 获取真正的 SSE URL */
+    const rpcUrl = await getA2ASseUrl(cardUrl, headers);
+    if (!rpcUrl) {
+      return makeError("SSE_URL_NOT_FOUND", `Cannot fetch sse url from A2A url: ${cardUrl}`);
+    }
+
+    const jsonRpcPayload = await buildA2aJsonRpcRequest(chatContent, isSubagent ? parentSessionKey : sessionKey);
+
+    logBaiyingRequest(params.logger, "agent.sse.post", {
+      resource_id: capability.metadata?.resource_id,
+      resource_type: capability.resource_type,
+      url: rpcUrl,
+      payload: jsonRpcPayload,
+      headers,
+    });
+
+    const answerParts: string[] = [];
+    let capturedError: string | null = null;
+
+    const a2aRes = await readSseEvents({
+      url: rpcUrl,
+      payload: jsonRpcPayload,
+      headers,
+      timeoutMs: params.timeoutMs,
+      onEventStream: (raw) => {
+        const errMsg = extractA2aRpcError(raw);
+        if (errMsg) {
+          capturedError = errMsg;
+          return;
+        }
+        const out = convertA2aResponseToOpenAiChunk(raw) ?? convertOpenAiChunkToA2aChunk(raw);
+        if (!out) return;
+        sendByFrameworkStreamData.enqueue(out.chunk);
+        if (out.isAnswer && out.text) answerParts.push(out.text);
+      },
+    });
+    if ("error" in a2aRes) return a2aRes.error;
+
+    await sendByFrameworkStreamData.awaitAll();
+
+    if (capturedError) {
+      return makeError("A2A_AGENT_ERROR", capturedError);
+    }
+
+    return {
+      success: true,
+      content: { type: "text", text: answerParts.join("") },
+      type: "agent",
+      target: { resource_id: capability.metadata?.resource_id },
+    };
+  }
+
+  logBaiyingRequest(params.logger, "agent.sse.post", {
+    resource_id: capability.metadata?.resource_id,
+    resource_type: capability.resource_type,
+    url: sseUrl,
+    payload,
+    headers,
+  });
+
+  const contentParts: string[] = [];
   const sseRes = await readSseEvents({
     url: sseUrl,
     payload,
     headers,
-    timeoutMs: params.timeoutMs ?? 60_000,
+    timeoutMs: params.timeoutMs,
     onEventStream: (data) => {
+      const content = extractTextContentFromEventData(data);
+      if (content) contentParts.push(content);
       sendByFrameworkStreamData.enqueue(data);
     },
   });
   if ("error" in sseRes) return sseRes.error;
 
   await sendByFrameworkStreamData.awaitAll();
-
-  const contentParts: string[] = [];
-  for (const event of sseRes.events) {
-    const content = extractTextContentFromEventData(event);
-    if (content) contentParts.push(content);
-  }
 
   return {
     success: true,
