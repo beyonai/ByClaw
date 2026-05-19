@@ -9,7 +9,7 @@ class SandboxEndpointRegistryTargetResolverTest {
     private final SandboxEndpointRegistryTargetResolver resolver = new SandboxEndpointRegistryTargetResolver();
 
     @Test
-    void resolve_uiAgentUsesSandboxProxyPathPrefix() {
+    void resolve_uiAgentKeepsRootPathPrefix() {
         SandboxEndpointRegistryTarget target = resolver.resolve(
             "https://gateway.example.test:18082/sandboxes/sb-1/proxy/8080/?gatewayUrl=wss://gateway.example.test:18082/sandboxes/sb-1/proxy/8080/",
             "uiagent", "sb-1", 8080);
@@ -17,7 +17,7 @@ class SandboxEndpointRegistryTargetResolverTest {
         assertThat(target.protocol()).isEqualTo("https");
         assertThat(target.host()).isEqualTo("gateway.example.test");
         assertThat(target.port()).isEqualTo(18082);
-        assertThat(target.pathPrefix()).isEqualTo("sandboxes/sb-1/proxy/8080/");
+        assertThat(target.pathPrefix()).isEqualTo("/");
     }
 
     @Test
