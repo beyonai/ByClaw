@@ -596,7 +596,7 @@ describe("createAgentWatchdog", () => {
     expect(await pathExists(activeWs)).toBe(false);
     expect(await readFile(path.join(archiveWs, "history.txt"), "utf8")).toBe("archived on startup");
     const logText = api.logger.info.mock.calls.map((call: any[]) => String(call[0])).join("\n");
-    expect(logText).toContain("startup/no-sync unauthorized workspace archive check");
+    expect(logText).toContain("cold-start/pre-restore unauthorized workspace archive check");
     expect(logText).toContain("unauthorizedActiveWorkspaces=1");
     expect(logText).toContain(orphanAgentId);
     expect(logText).toContain(`${activeWs} -> ${archiveWs}`);

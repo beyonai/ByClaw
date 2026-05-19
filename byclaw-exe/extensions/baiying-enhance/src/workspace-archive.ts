@@ -357,9 +357,28 @@ export type ActiveManagedWorkspace = {
   workspaceDir: string;
 };
 
-/** Lists `workspace-baiying-agent-*` directories under the OpenClaw state dir. */
-export async function listActiveManagedWorkspaces(stateDir = resolveStateDir()): Promise<ActiveManagedWorkspace[]> {
-  const activeWorkspaces: ActiveManagedWorkspace[] = [];
+function registerActiveWorkspace(
+  out: Map<string, ActiveManagedWorkspace>,
+  agentId: string,
+  workspaceDir: string,
+): void {
+  const sourceKey = sourceKeyFromManagedAgentId(agentId);
+  if (!sourceKey) {
+    return;
+  }
+  out.set(agentId, {
+    agentId,
+    sourceKey,
+    workspaceDir,
+  });
+}
+
+/** Lists on-disk managed workspaces: `workspace-baiying-agent-*` under state dir plus config overrides. */
+export async function listActiveManagedWorkspaces(
+  stateDir = resolveStateDir(),
+  api?: OpenClawPluginApi,
+): Promise<ActiveManagedWorkspace[]> {
+  const activeByAgentId = new Map<string, ActiveManagedWorkspace>();
   try {
     const entries = await fs.readdir(stateDir, { withFileTypes: true });
     for (const entry of entries) {
@@ -367,15 +386,10 @@ export async function listActiveManagedWorkspaces(stateDir = resolveStateDir()):
         continue;
       }
       const agentId = entry.name.slice("workspace-".length);
-      const sourceKey = sourceKeyFromManagedAgentId(agentId);
-      if (!sourceKey) {
-        continue;
+      const workspaceDir = path.join(stateDir, entry.name);
+      if (await exists(workspaceDir)) {
+        registerActiveWorkspace(activeByAgentId, agentId, workspaceDir);
       }
-      activeWorkspaces.push({
-        agentId,
-        sourceKey,
-        workspaceDir: path.join(stateDir, entry.name),
-      });
     }
   } catch (err) {
     const code = err && typeof err === "object" ? (err as { code?: unknown }).code : undefined;
@@ -383,7 +397,26 @@ export async function listActiveManagedWorkspaces(stateDir = resolveStateDir()):
       throw err;
     }
   }
-  return activeWorkspaces;
+
+  if (api) {
+    try {
+      const cfg = api.runtime.config.loadConfig() as { agents?: { list?: Array<{ id?: string; workspace?: string }> } };
+      for (const entry of cfg?.agents?.list ?? []) {
+        const agentId = typeof entry?.id === "string" ? entry.id.trim() : "";
+        if (!isManagedAgentId(agentId)) {
+          continue;
+        }
+        const workspaceDir = resolveAgentWorkspaceDir(api, agentId);
+        if (await exists(workspaceDir)) {
+          registerActiveWorkspace(activeByAgentId, agentId, workspaceDir);
+        }
+      }
+    } catch {
+      // ignore config read errors
+    }
+  }
+
+  return [...activeByAgentId.values()];
 }
 
 /**
@@ -394,6 +427,7 @@ export async function reconcileUnauthorizedMountedWorkspacesOnColdStart(params: 
   pluginConfig: BaiyingEnhancePluginConfig;
   authorizedSourceKeys: Set<string>;
   workspaceArchiveApi?: WorkspaceArchiveApi;
+  api?: OpenClawPluginApi;
   log: LoggerLike;
 }): Promise<ManagedWorkspaceArchiveResult[]> {
   params.log.info(
@@ -403,6 +437,7 @@ export async function reconcileUnauthorizedMountedWorkspacesOnColdStart(params: 
     pluginConfig: params.pluginConfig,
     authorizedSourceKeys: params.authorizedSourceKeys,
     workspaceArchiveApi: params.workspaceArchiveApi,
+    api: params.api,
     checkLabel: "cold-start",
     log: params.log,
   });
@@ -415,6 +450,7 @@ export async function archiveUnauthorizedActiveManagedWorkspaces(params: {
   log: LoggerLike;
   checkLabel?: string;
   workspaceArchiveApi?: WorkspaceArchiveApi;
+  api?: OpenClawPluginApi;
 }): Promise<ManagedWorkspaceArchiveResult[]> {
   const label = params.checkLabel?.trim() || "auth";
   if (params.pluginConfig.workspaceArchiveOnUnauthorized === false) {
@@ -431,7 +467,7 @@ export async function archiveUnauthorizedActiveManagedWorkspaces(params: {
   const ignored = new Set([...(params.ignoredSourceKeys ?? [])].map((id) => id.trim()).filter(Boolean));
   let activeWorkspaces: ActiveManagedWorkspace[] = [];
   try {
-    activeWorkspaces = await listActiveManagedWorkspaces(stateDir);
+    activeWorkspaces = await listActiveManagedWorkspaces(stateDir, params.api);
   } catch (err) {
     params.log.warn(
       `baiying-enhance: ${label} unauthorized workspace archive check failed to scan ${stateDir}: ${

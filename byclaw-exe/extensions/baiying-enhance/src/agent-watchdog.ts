@@ -384,6 +384,42 @@ export function createAgentWatchdog(params: {
         }
         return;
       }
+
+      const authorizedForMountedWorkspaceCheck = new Set(
+        [...authorizedSourceKeys].map((id) => id.trim()).filter(Boolean),
+      );
+      for (const id of deleteBatchSet) {
+        authorizedForMountedWorkspaceCheck.delete(id);
+      }
+
+      const shouldRunMountedWorkspaceCheck =
+        !unauthorizedMountedWorkspaceCheckDone || forceAuthReseed || deleteBatchSet.size > 0;
+      let mountedWorkspaceCheckDoneThisFlush = false;
+      const runMountedWorkspaceCheck = async (stage: string) => {
+        if (!shouldRunMountedWorkspaceCheck || mountedWorkspaceCheckDoneThisFlush) {
+          return;
+        }
+        mountedWorkspaceCheckDoneThisFlush = true;
+        await archiveUnauthorizedActiveManagedWorkspaces({
+          pluginConfig: params.pluginConfig,
+          authorizedSourceKeys: authorizedForMountedWorkspaceCheck,
+          ignoredSourceKeys: deleteBatchSet,
+          workspaceArchiveApi: params.workspaceArchiveApi,
+          api: params.api,
+          checkLabel: unauthorizedMountedWorkspaceCheckDone
+            ? `auth-refresh/${stage}`
+            : `cold-start/${stage}`,
+          log: {
+            info: (m) => params.api.logger.info(m),
+            warn: (m) => params.api.logger.warn(m),
+          },
+        });
+        unauthorizedMountedWorkspaceCheckDone = true;
+      };
+
+      // Cold start / auth refresh: compare auth dig-employee ids with on-disk workspaces BEFORE restore/sync.
+      await runMountedWorkspaceCheck("pre-restore");
+
       let managed = await loadManagedAgentsFromRedis({
         redisJsonStore: params.redisJsonStore,
         authorizedSourceKeys,
@@ -397,46 +433,6 @@ export function createAgentWatchdog(params: {
         managed = managed.filter((agent) => !deleteBatchSet.has(agent.sourceKey));
       }
       const filteredManaged = managed;
-      const authorizedForMountedWorkspaceCheck =
-        authorizedSourceKeys === undefined
-          ? undefined
-          : new Set([...authorizedSourceKeys].map((id) => id.trim()).filter(Boolean));
-      if (authorizedForMountedWorkspaceCheck) {
-        for (const id of deleteBatchSet) {
-          authorizedForMountedWorkspaceCheck.delete(id);
-        }
-      }
-      const shouldRunMountedWorkspaceCheck =
-        authorizedForMountedWorkspaceCheck !== undefined &&
-        (!unauthorizedMountedWorkspaceCheckDone || forceAuthReseed || deleteBatchSet.size > 0);
-      const runMountedWorkspaceCheck = async (stage: string) => {
-        if (authorizedForMountedWorkspaceCheck === undefined) {
-          if (!unauthorizedMountedWorkspaceCheckDeferredLogged) {
-            unauthorizedMountedWorkspaceCheckDeferredLogged = true;
-            params.api.logger.info(
-              "baiying-enhance: startup unauthorized workspace archive check deferred (dig-employee auth set not available yet)",
-            );
-          }
-          return;
-        }
-        if (!shouldRunMountedWorkspaceCheck) {
-          return;
-        }
-        await archiveUnauthorizedActiveManagedWorkspaces({
-          pluginConfig: params.pluginConfig,
-          authorizedSourceKeys: authorizedForMountedWorkspaceCheck,
-          ignoredSourceKeys: deleteBatchSet,
-          workspaceArchiveApi: params.workspaceArchiveApi,
-          checkLabel: unauthorizedMountedWorkspaceCheckDone
-            ? `auth-refresh/${stage}`
-            : `startup/${stage}`,
-          log: {
-            info: (m) => params.api.logger.info(m),
-            warn: (m) => params.api.logger.warn(m),
-          },
-        });
-        unauthorizedMountedWorkspaceCheckDone = true;
-      };
       await restoreManagedAgentWorkspaces({
         api: params.api,
         pluginConfig: params.pluginConfig,

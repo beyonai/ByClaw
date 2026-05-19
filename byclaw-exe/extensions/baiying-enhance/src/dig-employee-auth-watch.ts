@@ -112,6 +112,7 @@ export function createDigEmployeeAuthWatch(params: {
   let refreshAgain = false;
   let keyspaceEnabled = false;
   let nextPollDelayMs: number | undefined;
+  let initialAuthEmitted = false;
 
   const shareUserCodeKey = `SHARE_BFM_USER_CODE_${userCode}`;
   const authKeyOf = (uid: string) => `USER:RESOURCES:AUTH:${uid}`;
@@ -132,9 +133,11 @@ export function createDigEmployeeAuthWatch(params: {
   const emitIfChanged = async (nextIds: Set<string>) => {
     authKeyMissingSince = 0;
     lastUnavailableReason = "";
-    if (authFilterEnabled && isSameSet(authorizedIds, nextIds)) {
+    const isFirstReady = !initialAuthEmitted;
+    if (authFilterEnabled && isSameSet(authorizedIds, nextIds) && !isFirstReady) {
       return;
     }
+    initialAuthEmitted = true;
     const previousCount = authorizedIds.size;
     authFilterEnabled = true;
     authorizedIds = nextIds;
