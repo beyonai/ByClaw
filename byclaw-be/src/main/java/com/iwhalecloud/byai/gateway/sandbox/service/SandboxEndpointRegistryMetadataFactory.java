@@ -5,8 +5,6 @@ import java.util.Map;
 
 import org.apache.commons.lang3.StringUtils;
 
-import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxImageType;
-
 class SandboxEndpointRegistryMetadataFactory {
 
     static final String AUTH_TYPE_KEY = "authType";
@@ -22,7 +20,7 @@ class SandboxEndpointRegistryMetadataFactory {
     }
 
     Map<String, Object> build(String imageType) {
-        if (!requiresGatewayToken(imageType) || StringUtils.isBlank(sandboxGatewayToken)) {
+        if (StringUtils.isBlank(sandboxGatewayToken)) {
             return null;
         }
         Map<String, Object> metadata = new LinkedHashMap<>();
@@ -30,9 +28,5 @@ class SandboxEndpointRegistryMetadataFactory {
         metadata.put(AUTH_PARAM_KEY, TOKEN_PARAM_NAME);
         metadata.put(TOKEN_KEY, sandboxGatewayToken);
         return metadata;
-    }
-
-    private boolean requiresGatewayToken(String imageType) {
-        return StringUtils.isBlank(imageType) || SandboxImageType.isOpenclaw(imageType);
     }
 }
