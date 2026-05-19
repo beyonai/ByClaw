@@ -19,6 +19,17 @@ export type BaiyingEnhancePluginConfig = {
    */
   workspaceAutoSeed?: boolean;
   /**
+   * When true (default), move unauthorized managed digital employee workspaces out of the
+   * OpenClaw state dir so stale prompts/resources are not discoverable from `.openclaw`.
+   */
+  workspaceArchiveOnUnauthorized?: boolean;
+  /**
+   * Archive root for unauthorized managed workspaces. Absolute paths and `~` are honored;
+   * relative paths resolve under the parent of `OPENCLAW_STATE_DIR`.
+   * Default: `.baiying-workspaces` next to `.openclaw`.
+   */
+  workspaceArchiveDir?: string;
+  /**
    * How to write main workspace `AGENTS.md` for `mainParentAgentId` (default `main`).
    * Omitted defaults to `always` (overwrite each seed) while a template source exists (built-in or `mainAgentsMdPath`).
    * Set to `if_managed_marker` or `if_missing` to avoid clobbering unmarked files. Set to `off` to disable.

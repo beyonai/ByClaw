@@ -6,7 +6,13 @@ import { AgentRegistryState } from "./agent-state.js";
 import { MANAGED_AGENT_PREFIX, type BaiyingEnhancePluginConfig } from "./types.js";
 import type { BaiyingRedisJsonStore } from "./redis-json-store.js";
 import { resolveEffectiveMainAgentsMdMode, seedMainAgentAgentsMd } from "./main-workspace-seed.js";
-import { seedManagedAgentWorkspace } from "./workspace-seed.js";
+import { resolveAgentWorkspaceDir, seedManagedAgentWorkspace } from "./workspace-seed.js";
+import {
+  archiveUnauthorizedActiveManagedWorkspaces,
+  archiveUnauthorizedManagedAgentWorkspaces,
+  deleteManagedAgentWorkspaces,
+  restoreManagedAgentWorkspaces,
+} from "./workspace-archive.js";
 import {
   mergeSkillNames,
   mergeWorkspaceSkillsIntoManagedAgents,
@@ -190,6 +196,8 @@ export function createAgentWatchdog(params: {
   let lastSkillSyncFailureSignature = "";
   let skillScanTimer: ReturnType<typeof setInterval> | undefined;
   let closeSkillWatchers: (() => void) | undefined;
+  let unauthorizedMountedWorkspaceCheckDone = false;
+  let unauthorizedMountedWorkspaceCheckDeferredLogged = false;
 
   const persistIndex = params.pluginConfig.persistAgentContentIndex !== false;
   const workspaceSkillAutoEnable = params.pluginConfig.workspaceSkillAutoEnable !== false;
@@ -357,6 +365,54 @@ export function createAgentWatchdog(params: {
         managed = managed.filter((agent) => !deleteBatchSet.has(agent.sourceKey));
       }
       const filteredManaged = managed;
+      const authorizedForMountedWorkspaceCheck =
+        authorizedSourceKeys === undefined
+          ? undefined
+          : new Set([...authorizedSourceKeys].map((id) => id.trim()).filter(Boolean));
+      if (authorizedForMountedWorkspaceCheck) {
+        for (const id of deleteBatchSet) {
+          authorizedForMountedWorkspaceCheck.delete(id);
+        }
+      }
+      const shouldRunMountedWorkspaceCheck =
+        authorizedForMountedWorkspaceCheck !== undefined &&
+        (!unauthorizedMountedWorkspaceCheckDone || forceAuthReseed || deleteBatchSet.size > 0);
+      const runMountedWorkspaceCheck = async (stage: string) => {
+        if (authorizedForMountedWorkspaceCheck === undefined) {
+          if (!unauthorizedMountedWorkspaceCheckDeferredLogged) {
+            unauthorizedMountedWorkspaceCheckDeferredLogged = true;
+            params.api.logger.info(
+              "baiying-enhance: startup unauthorized workspace archive check deferred (dig-employee auth set not available yet)",
+            );
+          }
+          return;
+        }
+        if (!shouldRunMountedWorkspaceCheck) {
+          return;
+        }
+        await archiveUnauthorizedActiveManagedWorkspaces({
+          pluginConfig: params.pluginConfig,
+          authorizedSourceKeys: authorizedForMountedWorkspaceCheck,
+          ignoredSourceKeys: deleteBatchSet,
+          checkLabel: unauthorizedMountedWorkspaceCheckDone
+            ? `auth-refresh/${stage}`
+            : `startup/${stage}`,
+          log: {
+            info: (m) => params.api.logger.info(m),
+            warn: (m) => params.api.logger.warn(m),
+          },
+        });
+        unauthorizedMountedWorkspaceCheckDone = true;
+      };
+      await restoreManagedAgentWorkspaces({
+        api: params.api,
+        pluginConfig: params.pluginConfig,
+        agentIds: filteredManaged.map((agent) => agent.agentId),
+        log: {
+          info: (m) => params.api.logger.info(m),
+          warn: (m) => params.api.logger.warn(m),
+        },
+      });
       lastBaseManaged = filteredManaged;
       const effectiveManaged = workspaceSkillAutoEnable
         ? await mergeWorkspaceSkillsIntoManagedAgents({
@@ -404,6 +460,19 @@ export function createAgentWatchdog(params: {
       }
 
       const removed = [...removedSet];
+      const deletedAgentIds = new Set(
+        [...deleteBatchSet].map((sourceKey) => `${MANAGED_AGENT_PREFIX}${sourceKey}`),
+      );
+      const deletedWorkspaces = [...deletedAgentIds].map((agentId) => ({
+        agentId,
+        workspaceDir: resolveAgentWorkspaceDir(params.api, agentId),
+      }));
+      const removedWorkspaces = removed
+        .filter((agentId) => agentId.startsWith(MANAGED_AGENT_PREFIX) && !deletedAgentIds.has(agentId))
+        .map((agentId) => ({
+          agentId,
+          workspaceDir: resolveAgentWorkspaceDir(params.api, agentId),
+        }));
       let hasMissingManagedRegistrations = false;
       let hasSkillChanges = false;
       let hasToolChanges = false;
@@ -540,6 +609,7 @@ export function createAgentWatchdog(params: {
       };
 
       if (!shouldSync) {
+        await runMountedWorkspaceCheck("no-sync");
         await trySeedMainAgentsMd();
         prevSkillSignatures.clear();
         prevToolSignatures.clear();
@@ -577,6 +647,23 @@ export function createAgentWatchdog(params: {
       }
 
       await params.api.runtime.config.writeConfigFile(next);
+      await deleteManagedAgentWorkspaces({
+        agents: deletedWorkspaces,
+        reason: "DIG_EMPLOYEE_DELETED",
+        log: {
+          info: (m) => params.api.logger.info(m),
+          warn: (m) => params.api.logger.warn(m),
+        },
+      });
+      await archiveUnauthorizedManagedAgentWorkspaces({
+        pluginConfig: params.pluginConfig,
+        agents: removedWorkspaces,
+        log: {
+          info: (m) => params.api.logger.info(m),
+          warn: (m) => params.api.logger.warn(m),
+        },
+      });
+      await runMountedWorkspaceCheck("post-sync");
 
       const parts: string[] = [];
       if (added.length > 0) {

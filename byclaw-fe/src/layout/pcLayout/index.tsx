@@ -44,6 +44,14 @@ const pcUnShowLayoutRoute: Record<string, boolean> = {
   '/digitalEmployeesCreate': true,
 };
 
+function isPcUnShowLayoutRoute(pathname: string) {
+  let path = pathname;
+  if (pathname.endsWith('/')) {
+    path = pathname.slice(0, -1);
+  }
+  return !!pcUnShowLayoutRoute[path || pathname];
+}
+
 const PCSessionId = 'pcSessionId';
 const PCAgentId = 'pcAgentId';
 
@@ -53,18 +61,18 @@ const PCLayout = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const { pathname } = location;
-  
+
   // 检查当前路由是否需要隐藏侧边栏
   const [siderContentWidth, setSiderContentWidth] = React.useState(DEFAULT_SIDER_CONTENT_WIDTH);
-  
+
   React.useEffect(() => {
     // 参考 sider 组件的逻辑，检查当前路径是否需要隐藏侧边栏
-    const currentTab = tabItems.find(item => item.navigatePath === pathname);
-    
+    const currentTab = tabItems.find((item) => item.navigatePath === pathname);
+
     // 检查 tabItems 中的 hideSider 属性
     if (currentTab?.hideSider) {
       setSiderContentWidth(0);
-    } 
+    }
     // 检查特定路由是否需要隐藏侧边栏
     else if (pathname === '/knowledgeDetail') {
       setSiderContentWidth(0);
@@ -221,7 +229,7 @@ const PCLayout = () => {
           }}
         >
           <Auth>
-            {pcUnShowLayoutRoute[pathname] ? (
+            {isPcUnShowLayoutRoute(pathname) ? (
               <Outlet />
             ) : (
               <Layout

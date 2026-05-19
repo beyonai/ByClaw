@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.feign.request.manager.AgentResourceChatInfoDto;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -188,19 +189,19 @@ public class InterfaceRouteService {
                 continue;
             }
 
-            // 参考python,丢掉结束符号
-            if (line.endsWith("[DONE]")) {
-                break;
-            }
-
             if (line.startsWith("event:")) {
                 currentEvent = line.substring("event:".length()).trim();
             }
             else if (line.startsWith("data:")) {
+                String data = line.substring("data:".length()).trim();
+                if ("[DONE]".equals(data)) {
+                    flushDoneEvent(ctx);
+                    return;
+                }
                 if (dataBuf.length() > 0) {
                     dataBuf.append('\n');
                 }
-                dataBuf.append(line.substring("data:".length()).trim());
+                dataBuf.append(data);
             }
         }
         // 流结束时若仍有未刷出的事件
@@ -208,12 +209,84 @@ public class InterfaceRouteService {
     }
 
     private void flushEvent(String event, StringBuilder dataBuf, ChatProcessContext ctx) {
-        if (StringUtils.isBlank(event) || dataBuf.length() == 0) {
+        if (dataBuf.length() == 0) {
             return;
         }
+        String actualEvent = StringUtils.isNotBlank(event) ? event : inferOpenAiEvent(dataBuf.toString());
+        if (StringUtils.isBlank(actualEvent)) {
+            return;
+        }
+        dispatchInternalLine(actualEvent, normalizeOpenAiData(actualEvent, dataBuf.toString()), ctx);
+    }
+
+    private String inferOpenAiEvent(String data) {
+        try {
+            JSONObject json = JSON.parseObject(data);
+            if (json == null) {
+                return null;
+            }
+            if (json.containsKey("error")) {
+                return SseResponseEventEnum.error;
+            }
+            if (hasOpenAiDeltaContent(json)) {
+                return SseResponseEventEnum.answerDelta;
+            }
+        }
+        catch (Exception e) {
+            log.warn("INTERFACE SSE data 非 JSON，跳过: {}", data);
+        }
+        return null;
+    }
+
+    private String normalizeOpenAiData(String event, String data) {
+        try {
+            JSONObject json = JSON.parseObject(data);
+            if (SseResponseEventEnum.answerDelta.equals(event) && json != null && json.containsKey("choices")
+                && !json.containsKey("contentType")) {
+                json.put("contentType", "1002");
+                return json.toJSONString();
+            }
+            if (SseResponseEventEnum.error.equals(event) && json != null && json.containsKey("error")) {
+                JSONObject error = json.getJSONObject("error");
+                JSONObject errPayload = new JSONObject();
+                errPayload.put("message", error != null ? error.getString("message") : json.getString("error"));
+                errPayload.put("traceback", errPayload.getString("message"));
+                errPayload.put("error_code", error != null ? error.getInteger("code") : null);
+                return errPayload.toJSONString();
+            }
+        }
+        catch (Exception e) {
+            log.warn("INTERFACE SSE data 规范化失败，按原样转发: {}", data, e);
+        }
+        return data;
+    }
+
+    private boolean hasOpenAiDeltaContent(JSONObject json) {
+        JSONArray choices = json.getJSONArray("choices");
+        if (choices == null || choices.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < choices.size(); i++) {
+            JSONObject choice = choices.getJSONObject(i);
+            if (choice == null) {
+                continue;
+            }
+            JSONObject delta = choice.getJSONObject("delta");
+            if (delta != null && delta.containsKey("content")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void flushDoneEvent(ChatProcessContext ctx) {
+        dispatchInternalLine(SseResponseEventEnum.answerEnd, "{}", ctx);
+    }
+
+    private void dispatchInternalLine(String event, String data, ChatProcessContext ctx) {
         JSONObject lineJson = new JSONObject();
         lineJson.put("event", event);
-        lineJson.put("data", dataBuf.toString());
+        lineJson.put("data", data);
         pythonSseService.getContentFromPythonStreamV3(lineJson.toJSONString(), ctx.res, ctx.messageContext,
             ctx.getAgentIds(), ctx);
     }

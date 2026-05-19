@@ -22,6 +22,7 @@ import com.iwhalecloud.byai.gateway.channels.service.ChannelService;
 import com.iwhalecloud.byai.gateway.channels.service.ChannelServiceFactory;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkFileDownloadService;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkReplyDispatcher;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkSessionService;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkUserService;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards.DingtalkCardService;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards.DingtalkCardStreamSession;
@@ -29,8 +30,6 @@ import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards.Dingt
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.DingtalkCallbackMessage;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.DingtalkMsgType;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.support.DingtalkCallbackMessageParser;
-import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
-import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.manager.qo.index.MyAuthEmployQo;
 import com.iwhalecloud.byai.manager.vo.index.AuthDigitEmployVo;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
@@ -39,10 +38,6 @@ import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
 import com.iwhalecloud.byai.state.domain.index.service.IndexService;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
-import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
-import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
-import com.iwhalecloud.byai.state.domain.session.service.SessionService;
-import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,7 +52,6 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
 
     private static final Logger logger = LoggerFactory.getLogger(DingtalkBotListener.class);
     private static final String DEFAULT_FALLBACK_REPLY = "抱歉，遇到了点问题，请稍后再试";
-    private static final String EXT_CODE_PREFIX = "dingtalkConversationId";
     private static final String MESSAGE_DEDUP_KEY_PREFIX = "dingtalk:stream:msg:";
     private static final long MESSAGE_DEDUP_TTL_SECONDS = 30 * 60L;
 
@@ -70,6 +64,7 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
     private final DingtalkReplyDispatcher dingtalkReplyDispatcher;
     private final DingtalkCardService dingtalkCardService;
     private final DingtalkCallbackMessageParser dingtalkCallbackMessageParser;
+    private final DingtalkSessionService dingtalkSessionService;
     private final ExecutorService messageExecutor = new ThreadPoolExecutor(
             8,
             32,
@@ -82,12 +77,6 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
 
     @Autowired
     private IndexService indexService;
-    @Autowired
-    private SessionService sessionService;
-    @Autowired
-    private SequenceService sequenceService;
-    @Autowired
-    private SessionExtService sessionExtService;
 
     public DingtalkBotListener(
             ObjectMapper objectMapper,
@@ -95,7 +84,8 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
             DingtalkFileDownloadService dingtalkFileDownloadService,
             DingtalkReplyDispatcher dingtalkReplyDispatcher,
             DingtalkCardService dingtalkCardService,
-            DingtalkCallbackMessageParser dingtalkCallbackMessageParser
+            DingtalkCallbackMessageParser dingtalkCallbackMessageParser,
+            DingtalkSessionService dingtalkSessionService
     ) {
         this.objectMapper = objectMapper;
         this.dingtalkUserService = dingtalkUserService;
@@ -103,6 +93,7 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
         this.dingtalkReplyDispatcher = dingtalkReplyDispatcher;
         this.dingtalkCardService = dingtalkCardService;
         this.dingtalkCallbackMessageParser = dingtalkCallbackMessageParser;
+        this.dingtalkSessionService = dingtalkSessionService;
     }
 
     @Override
@@ -351,11 +342,15 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
         AssistantChatDto assistantChatDto = new AssistantChatDto();
         // assistantChatDto.setAssistantId(-1L);
         assistantChatDto.setAccessTerminal(ChannelType.DINGTALK.getCode());
-        assistantChatDto.setChatContent(userText == null || userText.isBlank() ? " " : userText);
+        assistantChatDto.setChatContent(userText == null || userText.isBlank() ? "" : userText);
         assistantChatDto.setRelModelId(-1L);
         assistantChatDto.setAgentId(digitEmployVo.getId());
         assistantChatDto.setAgentType(digitEmployVo.getAgentType());
-        assistantChatDto.setSessionId(resolveSessionId(userText, sessionExtValue, digitEmployVo.getId()));
+        assistantChatDto.setSessionId(dingtalkSessionService.resolveSessionId(
+                userText,
+                sessionExtValue,
+                digitEmployVo.getId()
+        ));
         assistantChatDto.setResourceList(buildResourceList(digitEmployVo));
 
         Map<String, String> channelExt = new HashMap<>();
@@ -401,56 +396,9 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
         fileInfo.put("fileId", messageFile.getFileId());
         fileInfo.put("fileName", messageFile.getFileName());
         fileInfo.put("filePath", messageFile.getFilePath());
-        fileInfo.put("fileUrl", StringUtils.hasText(messageFile.getFileUrl())
-                ? messageFile.getFileUrl()
-                : firstNonBlank(messageFile.getFilePath(), messageFile.getFileId()));
+        fileInfo.put("fileUrl", StringUtils.hasText(messageFile.getFileUrl()));
         fileInfo.put("fileType", messageFile.getFileType());
         return fileInfo;
-    }
-
-    private String firstNonBlank(String first, String second) {
-        return StringUtils.hasText(first) ? first : second;
-    }
-
-    private Long resolveSessionId(String userText, String sessionExtValue, Long agentId) {
-        ByaiSessionExt sessionExt = sessionExtService.selectByParamCodeAndValue(buildExtCode(), sessionExtValue);
-        if (sessionExt != null) {
-            return sessionExt.getSessionId();
-        }
-        ByaiSession session = createSession(userText, sessionExtValue, agentId);
-        return session.getSessionId();
-    }
-
-    private ByaiSession createSession(String userText, String sessionExtValue, Long agentId) {
-        Long sessionId = sequenceService.nextVal();
-
-        ByaiSession session = new ByaiSession();
-        session.setSessionName(userText);
-        session.setSessionContent(userText);
-        session.setCreateTime(new Date());
-        session.setObjectId(agentId);
-        session.setObjectType("DigEmployee");
-        session.setSessionType(SessionType.H_AS.getCode());
-        session.setSessionId(sessionId);
-        session.setIsDebug(0);
-        session.setCreatorId(CurrentUserHolder.getCurrentUserId());
-        session.setCreateTime(new Date());
-        session.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
-        sessionService.save(session);
-
-        ByaiSessionExt ext = new ByaiSessionExt();
-        ext.setExtId(sequenceService.nextVal());
-        ext.setSessionId(sessionId);
-        ext.setExtParamName("钉钉会话ID");
-        ext.setExtParamCode(buildExtCode());
-        ext.setExtParamValue(sessionExtValue);
-        sessionExtService.save(ext);
-
-        return session;
-    }
-
-    private String buildExtCode() {
-        return EXT_CODE_PREFIX;
     }
 
     private boolean isSupportedMessageType(String msgtype) {

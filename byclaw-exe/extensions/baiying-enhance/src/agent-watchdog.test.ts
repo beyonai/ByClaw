@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { readdirSync, readFileSync } from "node:fs";
 import { MAIN_AGENTS_MARKER } from "./main-workspace-seed.js";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_INDEX_FILENAME, INDEX_VERSION, loadAgentContentIndex } from "./agent-content-index.js";
 import { createAgentWatchdog as createAgentWatchdogBase } from "./agent-watchdog.js";
 import { AgentRegistryState } from "./agent-state.js";
@@ -100,6 +100,15 @@ function createMemoryRedisJsonStore(entries: Map<string, RedisJsonPayload>): Bai
   };
 }
 
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await access(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function createAgentWatchdog(params: any) {
   const fixtureDir = path.dirname(params.contentIndexPath);
   const entries = loadDigEmployeeFixtures(fixtureDir);
@@ -114,6 +123,10 @@ function createAgentWatchdog(params: any) {
 }
 
 describe("createAgentWatchdog", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("does not call writeConfigFile when index matches Redis content", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-"));
     await writeFile(path.join(dir, "demo.json"), STABLE_AGENT_JSON, "utf8");
@@ -367,8 +380,15 @@ describe("createAgentWatchdog", () => {
 
   it("removes managed agent when deletedSourceKeys is set even if JSON file still exists", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-del-"));
+    const stateDir = path.join(dir, ".openclaw");
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
     await writeFile(path.join(dir, "demo.json"), STABLE_AGENT_JSON, "utf8");
     const agentId = `${MANAGED_AGENT_PREFIX}10863047`;
+    const activeWs = path.join(stateDir, `workspace-${agentId}`);
+    const archiveRoot = path.join(dir, ".baiying-workspaces");
+    const archiveWs = path.join(archiveRoot, path.basename(activeWs));
+    await mkdir(activeWs, { recursive: true });
+    await writeFile(path.join(activeWs, "deleted.txt"), "delete signal delete", "utf8");
     const indexPayload = {
       version: INDEX_VERSION,
       entries: { [agentId]: stableHash() },
@@ -390,6 +410,7 @@ describe("createAgentWatchdog", () => {
       pluginConfig: {
         embedApiKeysFromJson: true,
         workspaceAutoSeed: false,
+        workspaceArchiveDir: archiveRoot,
         workspaceSkillAutoEnable: false,
         persistAgentContentIndex: true,
       },
@@ -404,6 +425,10 @@ describe("createAgentWatchdog", () => {
     await wd.stop();
 
     expect(writeConfigFile).toHaveBeenCalledTimes(1);
+    expect(await pathExists(activeWs)).toBe(false);
+    expect(await pathExists(archiveWs)).toBe(false);
+    const logText = api.logger.info.mock.calls.map((call: any[]) => String(call[0])).join("\n");
+    expect(logText).toContain(`deleted workspace for ${agentId} (DIG_EMPLOYEE_DELETED)`);
   });
 
   it("unregisters agent when authorization filter excludes it", async () => {
@@ -438,6 +463,319 @@ describe("createAgentWatchdog", () => {
     await wd.stop();
 
     expect(writeConfigFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("archives a managed workspace when authorization excludes the agent", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "baiying-wd-archive-"));
+    const activeWs = path.join(root, ".openclaw", `workspace-${MANAGED_AGENT_PREFIX}10863047`);
+    const archiveRoot = path.join(root, ".baiying-workspaces");
+    const archiveWs = path.join(archiveRoot, path.basename(activeWs));
+    await mkdir(activeWs, { recursive: true });
+    await writeFile(path.join(activeWs, "secret.txt"), "do not expose", "utf8");
+
+    const agentId = `${MANAGED_AGENT_PREFIX}10863047`;
+    let activeAgentList: any[] = [
+      { id: "main", name: "Main", identity: { name: "Main" } },
+      { id: agentId, name: "Demo", workspace: activeWs, identity: { name: "Demo" } },
+    ];
+    const writeConfigFile = vi.fn(async (next) => {
+      activeAgentList = next.agents.list;
+    });
+    const api = createMockApi(writeConfigFile) as any;
+    api.runtime.config.loadConfig = vi.fn(() => ({
+      agents: { list: activeAgentList },
+      models: { providers: {} },
+    }));
+
+    const entries = new Map<string, RedisJsonPayload>([
+      ["10863047", payloadFromContent("DIG_EMPLOYEE_10863047", STABLE_AGENT_JSON)],
+    ]);
+    const wd = createAgentWatchdogBase({
+      api,
+      registry: new AgentRegistryState(),
+      redisJsonStore: createMemoryRedisJsonStore(entries),
+      authorizationFilter: { getAuthorizedSourceKeys: () => new Set() },
+      contentIndexPath: path.join(root, "agent-content-index.json"),
+      executorPath: path.join(root, "executor.py"),
+      pluginConfig: {
+        embedApiKeysFromJson: true,
+        workspaceAutoSeed: false,
+        workspaceArchiveDir: archiveRoot,
+        workspaceSkillAutoEnable: false,
+        persistAgentContentIndex: false,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start();
+    await wd.__flushNow!();
+    await wd.stop();
+
+    expect(writeConfigFile).toHaveBeenCalledTimes(1);
+    expect(await pathExists(activeWs)).toBe(false);
+    expect(await readFile(path.join(archiveWs, "secret.txt"), "utf8")).toBe("do not expose");
+  });
+
+  it("archives unauthorized mounted managed workspaces on startup even when config has no agent entry", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "baiying-wd-mounted-orphan-"));
+    const stateDir = path.join(root, ".openclaw");
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+    const orphanAgentId = `${MANAGED_AGENT_PREFIX}222`;
+    const activeWs = path.join(stateDir, `workspace-${orphanAgentId}`);
+    const archiveRoot = path.join(root, ".baiying-workspaces");
+    const archiveWs = path.join(archiveRoot, path.basename(activeWs));
+    await mkdir(activeWs, { recursive: true });
+    await writeFile(path.join(activeWs, "history.txt"), "archived on startup", "utf8");
+
+    const writeConfigFile = vi.fn(async () => {});
+    const api = createMockApi(writeConfigFile) as any;
+
+    const wd = createAgentWatchdogBase({
+      api,
+      registry: new AgentRegistryState(),
+      redisJsonStore: createMemoryRedisJsonStore(new Map()),
+      authorizationFilter: { getAuthorizedSourceKeys: () => new Set() },
+      contentIndexPath: path.join(root, "agent-content-index.json"),
+      executorPath: path.join(root, "executor.py"),
+      pluginConfig: {
+        embedApiKeysFromJson: true,
+        workspaceAutoSeed: false,
+        workspaceArchiveDir: archiveRoot,
+        workspaceSkillAutoEnable: false,
+        persistAgentContentIndex: false,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start();
+    await wd.__flushNow!();
+    await wd.stop();
+
+    expect(writeConfigFile).not.toHaveBeenCalled();
+    expect(await pathExists(activeWs)).toBe(false);
+    expect(await readFile(path.join(archiveWs, "history.txt"), "utf8")).toBe("archived on startup");
+    const logText = api.logger.info.mock.calls.map((call: any[]) => String(call[0])).join("\n");
+    expect(logText).toContain("startup/no-sync unauthorized workspace archive check");
+    expect(logText).toContain("unauthorizedActiveWorkspaces=1");
+    expect(logText).toContain(orphanAgentId);
+    expect(logText).toContain(`${activeWs} -> ${archiveWs}`);
+  });
+
+  it("restores an archived workspace and seeds latest managed markdown on reauthorization", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "baiying-wd-restore-"));
+    const stateDir = path.join(root, ".openclaw");
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+    const activeWs = path.join(stateDir, `workspace-${MANAGED_AGENT_PREFIX}10863047`);
+    const archiveRoot = path.join(root, ".baiying-workspaces");
+    const archiveWs = path.join(archiveRoot, path.basename(activeWs));
+    await mkdir(archiveWs, { recursive: true });
+    await writeFile(path.join(archiveWs, "notes.txt"), "keep me", "utf8");
+    await writeFile(
+      path.join(archiveWs, "SOUL.md"),
+      "<!-- baiying-enhance: managed seed -->\n\nOld prompt\n",
+      "utf8",
+    );
+
+    const content = JSON.stringify({
+      agent_list: [{ id: 10863047, name: "Demo", instructions: "Fresh prompt." }],
+    });
+    const entries = new Map<string, RedisJsonPayload>([
+      ["10863047", payloadFromContent("DIG_EMPLOYEE_10863047", content)],
+    ]);
+
+    let activeAgentList: any[] = [{ id: "main", name: "Main", identity: { name: "Main" } }];
+    const writeConfigFile = vi.fn(async (next) => {
+      activeAgentList = next.agents.list;
+    });
+    const api = createMockApi(writeConfigFile) as any;
+    api.runtime.config.loadConfig = vi.fn(() => ({
+      agents: { list: activeAgentList },
+      models: { providers: {} },
+    }));
+
+    const wd = createAgentWatchdogBase({
+      api,
+      registry: new AgentRegistryState(),
+      redisJsonStore: createMemoryRedisJsonStore(entries),
+      authorizationFilter: { getAuthorizedSourceKeys: () => new Set(["10863047"]) },
+      contentIndexPath: path.join(root, "agent-content-index.json"),
+      executorPath: path.join(root, "executor.py"),
+      pluginConfig: {
+        embedApiKeysFromJson: true,
+        workspaceArchiveDir: archiveRoot,
+        workspaceSkillAutoEnable: false,
+        persistAgentContentIndex: false,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start();
+    await wd.__flushNow!();
+    await wd.stop();
+
+    expect(await pathExists(archiveWs)).toBe(false);
+    expect(await readFile(path.join(activeWs, "notes.txt"), "utf8")).toBe("keep me");
+    expect(await readFile(path.join(activeWs, "SOUL.md"), "utf8")).toContain("Fresh prompt.");
+  });
+
+  it("keeps an existing active workspace during restore and still updates managed markdown", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "baiying-wd-restore-existing-"));
+    const stateDir = path.join(root, ".openclaw");
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+    const activeWs = path.join(stateDir, `workspace-${MANAGED_AGENT_PREFIX}10863047`);
+    const archiveRoot = path.join(root, ".baiying-workspaces");
+    const archiveWs = path.join(archiveRoot, path.basename(activeWs));
+    await mkdir(activeWs, { recursive: true });
+    await mkdir(archiveWs, { recursive: true });
+    await writeFile(path.join(archiveWs, "archive-only.txt"), "archived", "utf8");
+    await writeFile(
+      path.join(activeWs, "SOUL.md"),
+      "<!-- baiying-enhance: managed seed -->\n\nOld active prompt\n",
+      "utf8",
+    );
+
+    const content = JSON.stringify({
+      agent_list: [{ id: 10863047, name: "Demo", instructions: "Fresh active prompt." }],
+    });
+    const entries = new Map<string, RedisJsonPayload>([
+      ["10863047", payloadFromContent("DIG_EMPLOYEE_10863047", content)],
+    ]);
+    let activeAgentList: any[] = [{ id: "main", name: "Main", identity: { name: "Main" } }];
+    const writeConfigFile = vi.fn(async (next) => {
+      activeAgentList = next.agents.list;
+    });
+    const api = createMockApi(writeConfigFile) as any;
+    api.runtime.config.loadConfig = vi.fn(() => ({
+      agents: { list: activeAgentList },
+      models: { providers: {} },
+    }));
+
+    const wd = createAgentWatchdogBase({
+      api,
+      registry: new AgentRegistryState(),
+      redisJsonStore: createMemoryRedisJsonStore(entries),
+      authorizationFilter: { getAuthorizedSourceKeys: () => new Set(["10863047"]) },
+      contentIndexPath: path.join(root, "agent-content-index.json"),
+      executorPath: path.join(root, "executor.py"),
+      pluginConfig: {
+        embedApiKeysFromJson: true,
+        workspaceArchiveDir: archiveRoot,
+        workspaceSkillAutoEnable: false,
+        persistAgentContentIndex: false,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start();
+    await wd.__flushNow!();
+    await wd.stop();
+
+    expect(await readFile(path.join(archiveWs, "archive-only.txt"), "utf8")).toBe("archived");
+    expect(await readFile(path.join(activeWs, "SOUL.md"), "utf8")).toContain("Fresh active prompt.");
+  });
+
+  it("rotates an existing archive before archiving the active workspace", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "baiying-wd-archive-rotate-"));
+    const activeWs = path.join(root, ".openclaw", `workspace-${MANAGED_AGENT_PREFIX}10863047`);
+    const archiveRoot = path.join(root, ".baiying-workspaces");
+    const archiveWs = path.join(archiveRoot, path.basename(activeWs));
+    await mkdir(activeWs, { recursive: true });
+    await mkdir(archiveWs, { recursive: true });
+    await writeFile(path.join(activeWs, "active.txt"), "new active", "utf8");
+    await writeFile(path.join(archiveWs, "old.txt"), "old archive", "utf8");
+
+    const agentId = `${MANAGED_AGENT_PREFIX}10863047`;
+    let activeAgentList: any[] = [
+      { id: "main", name: "Main", identity: { name: "Main" } },
+      { id: agentId, name: "Demo", workspace: activeWs, identity: { name: "Demo" } },
+    ];
+    const writeConfigFile = vi.fn(async (next) => {
+      activeAgentList = next.agents.list;
+    });
+    const api = createMockApi(writeConfigFile) as any;
+    api.runtime.config.loadConfig = vi.fn(() => ({
+      agents: { list: activeAgentList },
+      models: { providers: {} },
+    }));
+
+    const wd = createAgentWatchdogBase({
+      api,
+      registry: new AgentRegistryState(),
+      redisJsonStore: createMemoryRedisJsonStore(new Map()),
+      authorizationFilter: { getAuthorizedSourceKeys: () => new Set() },
+      contentIndexPath: path.join(root, "agent-content-index.json"),
+      executorPath: path.join(root, "executor.py"),
+      pluginConfig: {
+        embedApiKeysFromJson: true,
+        workspaceAutoSeed: false,
+        workspaceArchiveDir: archiveRoot,
+        workspaceSkillAutoEnable: false,
+        persistAgentContentIndex: false,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start();
+    await wd.__flushNow!();
+    await wd.stop();
+
+    expect(await pathExists(activeWs)).toBe(false);
+    expect(await readFile(path.join(archiveWs, "active.txt"), "utf8")).toBe("new active");
+    const rotated = (await readdir(archiveRoot)).filter((name) =>
+      name.startsWith(`${path.basename(activeWs)}.`),
+    );
+    expect(rotated).toHaveLength(1);
+    expect(await readFile(path.join(archiveRoot, rotated[0], "old.txt"), "utf8")).toBe("old archive");
+  });
+
+  it("restores before workspace skill merge even when workspaceAutoSeed is false", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "baiying-wd-restore-skills-"));
+    const stateDir = path.join(root, ".openclaw");
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+    const activeWs = path.join(stateDir, `workspace-${MANAGED_AGENT_PREFIX}10863047`);
+    const archiveRoot = path.join(root, ".baiying-workspaces");
+    const archiveWs = path.join(archiveRoot, path.basename(activeWs));
+    await writeWorkspaceSkill(archiveWs, "alpha");
+    const agentId = `${MANAGED_AGENT_PREFIX}10863047`;
+    const entries = new Map<string, RedisJsonPayload>([
+      ["10863047", payloadFromContent("DIG_EMPLOYEE_10863047", STABLE_AGENT_JSON)],
+    ]);
+
+    let activeAgentList: any[] = [{ id: "main", name: "Main", identity: { name: "Main" } }];
+    const writeConfigFile = vi.fn(async (next) => {
+      activeAgentList = next.agents.list;
+    });
+    const api = createMockApi(writeConfigFile) as any;
+    api.runtime.config.loadConfig = vi.fn(() => ({
+      agents: { list: activeAgentList },
+      models: { providers: {} },
+    }));
+
+    const wd = createAgentWatchdogBase({
+      api,
+      registry: new AgentRegistryState(),
+      redisJsonStore: createMemoryRedisJsonStore(entries),
+      authorizationFilter: { getAuthorizedSourceKeys: () => new Set(["10863047"]) },
+      contentIndexPath: path.join(root, "agent-content-index.json"),
+      executorPath: path.join(root, "executor.py"),
+      pluginConfig: {
+        embedApiKeysFromJson: true,
+        workspaceAutoSeed: false,
+        workspaceArchiveDir: archiveRoot,
+        persistAgentContentIndex: false,
+        workspaceSkillScanIntervalMs: 0,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start();
+    await wd.__flushNow!();
+    await wd.stop();
+
+    expect(await pathExists(activeWs)).toBe(true);
+    const next = writeConfigFile.mock.calls[0][0];
+    const entry = next.agents.list.find((a: any) => a.id === agentId);
+    expect(entry.skills).toEqual(["alpha"]);
   });
 
   it("seeds main AGENTS.md when mainAgentsMdPath is set (default mainWorkspaceAgentsAutoSeed)", async () => {
@@ -571,6 +909,7 @@ describe("createAgentWatchdog", () => {
     const next = writeConfigFile.mock.calls[0][0];
     const entry = next.agents.list.find((a: any) => a.id === agentId);
     expect(entry.skills).toEqual(["alpha"]);
+    expect(entry.workspace).toBe(agentWs);
   });
 
   it("merges JSON, agent workspace, and main shared workspace skills", async () => {

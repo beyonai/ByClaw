@@ -291,16 +291,16 @@ public class DingtalkFileDownloadService {
     }
 
     private void collectInteractiveCardDownloadInfos(DingtalkCallbackMessage DDMessage, Map<String, DingtalkMessageDownloadInfo> downloadInfoMap) {
-        Object contentNode = DDMessage.getContent();
-        if (!(contentNode instanceof Map<?, ?> nodeMap)) {
-            return;
-        }
-        Object bizCustomActionUrlNode = nodeMap.get("biz_custom_action_url");
-        if (bizCustomActionUrlNode == null) {
-            return;
-        }
+        return;
+        // Object contentNode = DDMessage.getContent();
+        // if (!(contentNode instanceof Map<?, ?> nodeMap)) {
+        //     return;
+        // }
+        // Object bizCustomActionUrlNode = nodeMap.get("biz_custom_action_url");
+        // if (bizCustomActionUrlNode == null) {
+        //     return;
+        // }
 
-        DDMessage.setTextContent(String.valueOf(bizCustomActionUrlNode));
         // String actionUrl = String.valueOf(bizCustomActionUrlNode);
         // if (actionUrl.isBlank()) {
         //     return;
