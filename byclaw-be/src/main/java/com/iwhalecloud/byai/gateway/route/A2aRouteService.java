@@ -317,10 +317,15 @@ public class A2aRouteService {
                 continue;
             }
             if (line.startsWith("data:")) {
+                String data = line.substring("data:".length()).trim();
+                if ("[DONE]".equals(data)) {
+                    dispatchA2aChunkEnd(ctx);
+                    return;
+                }
                 if (dataBuf.length() > 0) {
                     dataBuf.append('\n');
                 }
-                dataBuf.append(line.substring("data:".length()).trim());
+                dataBuf.append(data);
             }
         }
         if (dataBuf.length() > 0) {
@@ -343,9 +348,17 @@ public class A2aRouteService {
 
         String internalLine = convertA2aResponseToInternalLine(jsonRpc);
         if (internalLine == null) {
+            internalLine = convertOpenAiChunkToInternalLine(jsonRpc);
+        }
+        if (internalLine == null) {
             return;
         }
         pythonSseService.getContentFromPythonStreamV3(internalLine, ctx.res,
+                ctx.messageContext, ctx.getAgentIds(), ctx);
+    }
+
+    private void dispatchA2aChunkEnd(ChatProcessContext ctx) {
+        pythonSseService.getContentFromPythonStreamV3(wrapLine(SseResponseEventEnum.answerEnd, "{}"), ctx.res,
                 ctx.messageContext, ctx.getAgentIds(), ctx);
     }
 
@@ -410,6 +423,47 @@ public class A2aRouteService {
             return buildAnswerLine(SseResponseEventEnum.answerDelta, text, "1002");
         }
         return null;
+    }
+
+    /**
+     * 兼容 OpenAI Chat Completions 的 data-only SSE chunk：
+     * data: {"choices":[{"delta":{"content":"..."}}]}
+     * data: [DONE]
+     */
+    private String convertOpenAiChunkToInternalLine(JSONObject chunk) {
+        if (chunk.containsKey("error")) {
+            JSONObject error = chunk.getJSONObject("error");
+            JSONObject errPayload = new JSONObject();
+            errPayload.put("message", error != null ? error.getString("message") : chunk.getString("error"));
+            errPayload.put("traceback", errPayload.getString("message"));
+            errPayload.put("error_code", error != null ? error.getInteger("code") : null);
+            return wrapLine(SseResponseEventEnum.error, errPayload.toJSONString());
+        }
+        if (!hasOpenAiDeltaContent(chunk)) {
+            return null;
+        }
+        if (!chunk.containsKey("contentType")) {
+            chunk.put("contentType", "1002");
+        }
+        return wrapLine(SseResponseEventEnum.answerDelta, chunk.toJSONString());
+    }
+
+    private boolean hasOpenAiDeltaContent(JSONObject chunk) {
+        JSONArray choices = chunk.getJSONArray("choices");
+        if (choices == null || choices.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < choices.size(); i++) {
+            JSONObject choice = choices.getJSONObject(i);
+            if (choice == null) {
+                continue;
+            }
+            JSONObject delta = choice.getJSONObject("delta");
+            if (delta != null && delta.containsKey("content")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String extractTaskText(JSONObject task) {
