@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentsMd,
+  buildBootstrapMd,
   buildByaiBusinessExtensionsMd,
   buildSoul,
 } from "./workspace-seed.js";
+
+describe("workspace-seed bootstrap", () => {
+  it("buildBootstrapMd is marker-only with no onboarding instructions", () => {
+    const md = buildBootstrapMd();
+    expect(md).toBe("<!-- baiying-enhance: managed seed -->\n");
+    expect(md).not.toMatch(/woke up|Who am I/i);
+  });
+});
 
 describe("workspace-seed corePersonaDefinition", () => {
   it("buildSoul uses instructions and pointer when corePersona is JSON extensions", () => {

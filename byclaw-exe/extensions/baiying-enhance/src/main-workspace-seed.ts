@@ -10,11 +10,21 @@ import {
 import type { AdaptedManagedAgent } from "./agent-adapter.js";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
 import { SUBAGENT_ROUTING_FILENAME, buildSubagentRoutingMarkdown, SUBAGENT_ROUTING_MARKER } from "./subagent-routing-seed.js";
-import { resolveAgentWorkspaceDir } from "./workspace-seed.js";
+import { buildBootstrapMd, resolveAgentWorkspaceDir } from "./workspace-seed.js";
 
 export const MAIN_AGENTS_MARKER = "<!-- baiying-enhance: main agents template -->";
 
 const AGENTS_FILENAME = "AGENTS.md";
+const BOOTSTRAP_FILENAME = "BOOTSTRAP.md";
+
+async function seedMainWorkspaceBootstrap(params: {
+  workspaceDir: string;
+  log: { info?: (m: string) => void };
+}): Promise<void> {
+  const bootstrapPath = path.join(params.workspaceDir, BOOTSTRAP_FILENAME);
+  await fs.writeFile(bootstrapPath, buildBootstrapMd(), "utf8");
+  params.log.info?.(`baiying-enhance: wrote main ${BOOTSTRAP_FILENAME} (empty managed): ${bootstrapPath}`);
+}
 
 async function writeSubagentRoutingWithPolicy(params: {
   workspaceDir: string;
@@ -164,13 +174,17 @@ export async function seedMainAgentAgentsMd(params: {
   /** Current managed baiying agents; used to generate `SUBAGENT_ROUTING.md`. */
   managedAgents?: AdaptedManagedAgent[];
 }): Promise<void> {
+  const mainId = params.pluginConfig.mainParentAgentId?.trim() || "main";
+  const workspaceDir = resolveAgentWorkspaceDir(params.api, mainId);
+  await fs.mkdir(workspaceDir, { recursive: true });
+  await seedMainWorkspaceBootstrap({ workspaceDir, log: params.log });
+
   const mode = resolveEffectiveMainAgentsMdMode(params.pluginConfig);
   if (mode === "off") {
     params.log.info?.("baiying-enhance: main AGENTS.md seed skipped (mainAgentsMdMode=off)");
     return;
   }
 
-  const mainId = params.pluginConfig.mainParentAgentId?.trim() || "main";
   const loaded = await loadMainAgentsTemplate(params.pluginConfig);
   const templateLabel = loaded?.kind === "file" ? loaded.path : "(bundled in dist/index.js)";
   params.log.info?.(
@@ -192,9 +206,7 @@ export async function seedMainAgentAgentsMd(params: {
 
   const rawTemplate = loaded.body;
   const content = ensureMainAgentsMarkerPrefix(rawTemplate);
-  const workspaceDir = resolveAgentWorkspaceDir(params.api, mainId);
   params.log.info?.(`baiying-enhance: main workspace dir resolved: ${workspaceDir}`);
-  await fs.mkdir(workspaceDir, { recursive: true });
   const dest = path.join(workspaceDir, AGENTS_FILENAME);
 
   let existing = "";

@@ -16,9 +16,15 @@ function stripLeadingBom(s: string): string {
 const SOUL_FILENAME = "SOUL.md";
 const AGENTS_FILENAME = "AGENTS.md";
 export const BUSINESS_EXTENSIONS_FILENAME = "BYAI_BUSINESS_EXTENSIONS.md";
+const BOOTSTRAP_FILENAME = "BOOTSTRAP.md";
 const IDENTITY_FILENAME = "IDENTITY.md";
 const USER_FILENAME = "USER.md";
 const TOOLS_FILENAME = "TOOLS.md";
+
+/** Marker-only BOOTSTRAP: satisfies OpenClaw file presence without onboarding instructions. */
+export function buildBootstrapMd(): string {
+  return `${MARKER}\n`;
+}
 
 type BaiyingAgentItem = {
   resourceId?: string;
@@ -487,4 +493,7 @@ export async function seedManagedAgentWorkspace(params: {
 
   // Ensure TOOLS.md exists even when source JSON has no Baiying payload.
   await writeIfMissing(path.join(dir, TOOLS_FILENAME), `${MARKER}\n\n# Tools\n\n(none)\n`);
+
+  // Replace OpenClaw's default BOOTSTRAP onboarding doc so the first turn uses SOUL/AGENTS only.
+  await fs.writeFile(path.join(dir, BOOTSTRAP_FILENAME), buildBootstrapMd(), "utf8");
 }

@@ -8,7 +8,7 @@
 
 ### 1.1 编排链路
 
-主会话（通常为 `main`）在 [`templates/main-agents.md`](../templates/main-agents.md) 中被定义为 **Orchestrator**：对复杂任务应分解并通过 `sessions_spawn` 委托子 agent。模板要求在同一轮对话中 **先调用 `agents_list`**，再依据返回的 `agentId` 白名单进行 spawn。
+主会话（通常为 `main`）在 [`templates/main-agents.md`](../templates/main-agents.md) 中被定义为 **Orchestrator**：对复杂任务应先读取或复用 `SUBAGENT_ROUTING.md` 做意图路由，再在同一轮对话中调用 **`agents_list`** 获取真实 `agentId` 白名单，最后依据该白名单进行拆解与 `sessions_spawn` 委托。
 
 ### 1.2 信息密度不足
 
@@ -45,7 +45,7 @@
 
 | 文件 | 职责 |
 |------|------|
-| [`src/subagent-routing-seed.ts`](../src/subagent-routing-seed.ts) | `buildSubagentRoutingMarkdown(managed)`：从 `AdaptedManagedAgent[]` 生成 Markdown；可选读 `sourceFilePath` 取百应详情 `resourceDesc` 或 `agent_list[0].instructions`；总输出上限与 `MAX_TOTAL_CHARS` 一致（当前 **9000** 字符）。 |
+| [`src/subagent-routing-seed.ts`](../src/subagent-routing-seed.ts) | `buildSubagentRoutingMarkdown(managed)`：从 `AdaptedManagedAgent[]` 生成 Markdown；可选读 `sourceJson` / `sourceFilePath` 取百应详情 `resourceDesc`、`corePersonaDefinition`、`coreCompetencies` 或 `agent_list[0].instructions`；总输出上限与 `MAX_TOTAL_CHARS` 一致（当前 **9000** 字符）。 |
 | [`src/main-workspace-seed.ts`](../src/main-workspace-seed.ts) | `seedMainAgentAgentsMd({ ..., managedAgents })`：写主 `AGENTS.md` 后调用 `writeSubagentRoutingWithPolicy`（`if_missing` / `if_managed_marker` / `always` 与主文件对齐）。 |
 | [`src/agent-watchdog.ts`](../src/agent-watchdog.ts) | `trySeedMainAgentsMd` 传入 `managedAgents: filteredManaged`，保证路由表与 **当前可见托管集合** 同步。 |
 | [`index.ts`](../index.ts) | 注册时 `managedAgents: []`（尚无扫描结果时写空表说明）。 |
@@ -54,8 +54,8 @@
 
 [`templates/main-agents.md`](../templates/main-agents.md) 已更新：
 
-- **Session Startup** 中列出 `SUBAGENT_ROUTING.md`，并增加 **编排例外**：为 `sessions_spawn` 可先读该文件。
-- **Hard gate** 顺序：**（可选）读 `SUBAGENT_ROUTING.md` → `agents_list` → 分解与 spawn**。
+- **Session Startup** 中列出 `SUBAGENT_ROUTING.md`，并增加 **编排要求**：编排类任务必须先读取或复用该文件。
+- **Hard gate** 顺序：**读/复用 `SUBAGENT_ROUTING.md` → `agents_list` 白名单 → 结合两者拆解子任务与 spawn**。
 
 构建时模板内联进 `dist/index.js`（`npm run build`）。
 
@@ -69,9 +69,11 @@
 |-----------|------------|
 | `## 展示名` | `listEntry.name` |
 | 一行三要素 | `` `agentId` ``、`integrationType`、路由形态（`LLM` 或 `BACKEND:INTERFACE` / `A2A` / `PAGE`，后者表示子会话内多依赖 `baiying_call`） |
-| **role** | `resourceDesc` 或 `systemPrompt` / `instructions` 截断（约 220 字内） |
-| **scope**（可选） | 从 `coreCompetencies` 各取至多 **2** 条 accept / reject，单条约 44 字，合并为 `in: … \| out: …` |
-| **ex**（可选） | 至多 **2** 条示例短语 |
+| **role** | `resourceDesc`、`AdaptedManagedAgent.resourceDesc` 或 `systemPrompt` / `instructions` 截断（约 220 字内） |
+| **persona**（可选） | `corePersonaDefinition` 的长文本人格，或 JSON 拓展数组中至多 **3** 条 `name: value` 摘要 |
+| **cap**（可选） | 从 `coreCompetencies` 中取至多 **4** 条 `coreCompetency: description` 摘要，优先展示任务领域与能力边界 |
+| **scope**（可选） | 从 `coreCompetencies` 的 accept / reject 中分布式抽取至多 **4** 条，避免只展示第一个能力项 |
+| **ex**（可选） | 从 `coreCompetencies` 的 example 中分布式抽取至多 **4** 条示例短语 |
 
 全文总预算约 **9000** 字符，超出则尾部截断并附提示。关联资源（OBJECT/VIEW 等）不在此表展示，请需要时查看各子 agent 工作区 `TOOLS.md` 或导出 JSON。
 

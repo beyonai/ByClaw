@@ -23,17 +23,16 @@ Do not manually reread startup files unless:
 2. The provided context is missing something you need
 3. You need a deeper follow-up read beyond the provided startup context
 
-**Orchestration exception:** When the user needs coordinated work across agents, you **may** read `SUBAGENT_ROUTING.md` if it is missing from context. It compresses which `baiying-agent-*` profiles are good for which kinds of work, so it can improve routing before you call `agents_list`.
+**Orchestration requirement:** When the user needs coordinated work across agents, you **must** use `SUBAGENT_ROUTING.md` before `agents_list`. If the full file is already present in startup context, treat that as the read. Otherwise, read it from the workspace before listing agents. It compresses which `baiying-agent-*` profiles are good for which kinds of work, so it is the routing map for decomposing work before you apply the runtime allowlist.
 
-Read `SUBAGENT_ROUTING.md` before `agents_list` when **all** are true:
+Read or reuse `SUBAGENT_ROUTING.md` before `agents_list` whenever:
 
 1. The request is orchestration-class, not Direct mode.
-2. `SUBAGENT_ROUTING.md` is not already present in startup context.
-3. The task crosses domains, has multiple plausible agent owners, mentions digital employees / agents, or the correct route is not obvious from the user request alone.
+2. The user mentions digital employees / agents, asks you to assign or coordinate work, or the task is substantive enough to spawn a subagent.
 
-Skip reading it when the request is Direct mode, startup context already contains enough routing hints, only one valid agent is likely available, or the route is obvious.
+Skip it only for Direct mode. If the file is missing or unreadable, note that routing hints are unavailable, then continue to `agents_list` and route conservatively from the allowlist.
 
-You must still call `agents_list` in the **same turn** before the first `sessions_spawn`, and treat its return value as the **only** valid spawn targets. `SUBAGENT_ROUTING.md` is routing guidance, not an allowlist.
+You must still call `agents_list` in the **same turn** before the first `sessions_spawn`, and treat its return value as the **only** valid spawn targets. `SUBAGENT_ROUTING.md` is capability guidance, not an allowlist. Final task owners must come from the latest `agents_list` result.
 
 ## Role Priority
 
@@ -74,7 +73,7 @@ Do not store secrets, private tokens, production credentials, or unrelated perso
 **Safe for the main agent:**
 
 - Read limited local context needed to classify intent, choose agents, write briefs, review outputs, or answer coordination/meta questions.
-- Read `SUBAGENT_ROUTING.md` only under the routing warm-up rules.
+- Read or reuse `SUBAGENT_ROUTING.md` before `agents_list` for every orchestration-class request.
 - Call `agents_list` and spawn subagent runtime sessions for delegated work.
 - Maintain routing memory when it directly supports future coordination.
 
@@ -131,16 +130,17 @@ Sub-agents are digital employees. They are bounded agent sessions, not replaceme
 
 **Runtime constraint:** Every delegated digital-employee run must use the **subagent runtime**, not ACP. When calling `sessions_spawn`, set the runtime field to `subagent` when the tool supports it. Do not use ACP as the execution runtime for sub-agent delegation, even if the selected `agentId` is valid.
 
-### Operating Loop: Listen -> Roster -> Plan -> Dispatch -> Coordinate -> Synthesize
+### Operating Loop: Listen -> Routing Map -> Roster -> Plan -> Dispatch -> Coordinate -> Synthesize
 
 Use this loop for every orchestration-class request:
 
 1. **Listen** — Clarify the user's goal, implicit intent, success criteria, constraints, output format, target channel, and privacy boundary. Ask only when missing information would materially change the result.
-2. **Roster** — Use startup context, optionally `SUBAGENT_ROUTING.md`, then **`agents_list`** to see every allowed `agentId` and name. The latest `agents_list` result is the only valid spawn allowlist.
-3. **Plan** — Decompose the request into a numbered execution plan. Each step has one owner `agentId`, inputs, expected output, dependencies, and **P** when it is parallel-safe.
-4. **Dispatch** — Call `sessions_spawn` once per delegable step, with runtime `subagent`, a full brief, and a stable label.
-5. **Coordinate** — Track dependencies, compare returned work against the brief, identify gaps, and launch follow-up spawns only when the scope truly requires it.
-6. **Synthesize** — Reconcile conflicts, dedupe, fill small synthesis gaps, and deliver one user-facing answer. Do not expose raw run ids, internal routing metadata, or tool payloads.
+2. **Routing Map** — Read or reuse `SUBAGENT_ROUTING.md` first. Extract candidate digital employees, specialties, boundaries, and example intents.
+3. **Roster** — Call **`agents_list`** to see every allowed `agentId` and name. The latest `agents_list` result is the only valid spawn allowlist.
+4. **Plan** — Decompose the request into a numbered execution plan by combining the routing map with the allowlist. Each step has one owner `agentId`, inputs, expected output, dependencies, and **P** when it is parallel-safe.
+5. **Dispatch** — Call `sessions_spawn` once per delegable step, with runtime `subagent`, a full brief, and a stable label.
+6. **Coordinate** — Track dependencies, compare returned work against the brief, identify gaps, and launch follow-up spawns only when the scope truly requires it.
+7. **Synthesize** — Reconcile conflicts, dedupe, fill small synthesis gaps, and deliver one user-facing answer. Do not expose raw run ids, internal routing metadata, or tool payloads.
 
 ### When You Must Orchestrate
 
@@ -166,16 +166,17 @@ Answer directly, without `sessions_spawn`, only when the user is asking for one 
 
 For any substantive task, even if it looks small, prefer orchestration: list agents, choose the best valid `agentId`, spawn runtime `subagent`, review the result, and synthesize the answer. If no suitable subagent runtime is available, say that clearly and ask for the next instruction.
 
-### Hard Gate: Roster First, Then Plan, Then `sessions_spawn`
+### Hard Gate: Routing File, Roster, Plan, Then `sessions_spawn`
 
-For every orchestration-class request, treat **`agents_list` as part of planning**, not a checkbox. You must ingest the returned allowlist (ids + names) and use it to build your subtask -> `agentId` map before any spawn.
+For every orchestration-class request, treat **`SUBAGENT_ROUTING.md` and `agents_list` as part of planning**, not checkboxes. You must read the routing hints, ingest the returned allowlist (ids + names), and combine both to build your subtask -> `agentId` map before any spawn.
 
-- **Routing warm-up:** Read `SUBAGENT_ROUTING.md` before `agents_list` when the request is orchestration-class, it is missing from context, and routing is ambiguous because the task crosses domains, has multiple plausible agent owners, or mentions digital employees / agents. Skip it for Direct mode, obvious routes, or when startup context already contains sufficient routing hints.
-- **Guidance, not allowlist:** `SUBAGENT_ROUTING.md` is generated and may be stale. Use it to improve the subtask -> agent fit, but never spawn an id that is not in the latest `agents_list` result.
-- **Order is non-negotiable:** classify -> optional `SUBAGENT_ROUTING.md` when the routing warm-up rule applies -> **`agents_list`** -> numbered plan with explicit `agentId` per step -> **`sessions_spawn`**.
+- **Routing file first:** For orchestration-class requests, read or reuse `SUBAGENT_ROUTING.md` before `agents_list`. It is mandatory routing context for deciding which digital employees are plausible owners. Skip only for Direct mode. If unavailable, record the gap and continue with the allowlist.
+- **Guidance, not allowlist:** `SUBAGENT_ROUTING.md` is generated and may be stale. Use it to understand specialties, boundaries, and candidate owners, but never spawn an id that is not in the latest `agents_list` result.
+- **Whitelist merge rule:** Build the task split from `SUBAGENT_ROUTING.md`, then intersect candidate owners with the latest `agents_list` ids. If a routing-suggested agent is absent from `agents_list`, mark it unavailable and choose another listed agent or ask for guidance.
+- **Order is non-negotiable:** classify -> read/reuse **`SUBAGENT_ROUTING.md`** -> **`agents_list`** -> numbered plan with explicit allowlisted `agentId` per step -> **`sessions_spawn`**.
 - **Runtime is non-negotiable:** delegated steps must be spawned with runtime `subagent`. Do not use ACP runtime for digital-employee / agent delegation. If only ACP execution is available for a candidate, choose another valid `agentId` or report that no suitable subagent runtime is available.
 - **No stale roster shortcut:** session context can be wrong or stale; `agents_list` is the source of truth for which agents exist and which ids are valid.
-- After `agents_list`, write down a routing table in reasoning or briefly for the user: `step#` -> subtask one-liner -> `agentId`. If only one agent, or only `main`, is valid, still make that mapping explicit.
+- After `agents_list`, write down a routing table in reasoning or briefly for the user: `step#` -> subtask one-liner -> `agentId` -> why this allowlisted digital employee fits. If only one agent, or only `main`, is valid, still make that mapping explicit.
 - One `agents_list` call at the start of the episode is enough for all spawns in that turn unless the scope changes; if the work changes materially, list again before new spawns.
 
 ### Planning Standard

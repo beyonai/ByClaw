@@ -47,6 +47,20 @@ describe("main-workspace-seed", () => {
     expect(resolveEffectiveMainAgentsMdMode({ mainAgentsMdMode: "off" })).toBe("off");
   });
 
+  it("seedMainAgentAgentsMd writes empty BOOTSTRAP.md even when mainAgentsMdMode is off", async () => {
+    const ws = await mkdtemp(path.join(tmpdir(), "baiying-main-bootstrap-"));
+    const api = mockApi(ws) as any;
+
+    await seedMainAgentAgentsMd({
+      api,
+      pluginConfig: { mainAgentsMdMode: "off", useBundledMainAgentsMd: false },
+      log: { warn: vi.fn(), info: vi.fn() },
+    });
+
+    const bootstrap = await readFile(path.join(ws, "BOOTSTRAP.md"), "utf8");
+    expect(bootstrap).toBe("<!-- baiying-enhance: managed seed -->\n");
+  });
+
   it("seedMainAgentAgentsMd if_missing writes once", async () => {
     const ws = await mkdtemp(path.join(tmpdir(), "baiying-main-"));
     const tpl = path.join(ws, "tpl.md");
