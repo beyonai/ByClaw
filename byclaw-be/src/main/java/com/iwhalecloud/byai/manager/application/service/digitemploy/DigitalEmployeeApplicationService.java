@@ -1046,6 +1046,8 @@ public class DigitalEmployeeApplicationService {
             return null;
         }
         fillDigitalEmployeeSyncRuntimeFields(details, resourceId);
+        // target_content 只是上一次同步快照，不能再作为当前标准 JSON 的一个字段递归写回。
+        details.setTargetContent(null);
         return com.alibaba.fastjson.JSON.toJSONString(details);
     }
 
@@ -1058,6 +1060,8 @@ public class DigitalEmployeeApplicationService {
         // - relTools 不入库，必须从入参直接透传，否则首次保存的 JSON 中 relTools 会丢；
         // - relPrompt 与 corePersonaDefinition 同源，入参更"新"则优先用入参，避免编辑场景被旧库值覆盖。
         applyInputRuntimeFields(details, inputDto);
+        // target_content 只是镜像快照，不能参与本次 JSON 序列化，否则会出现 JSON 套 JSON 的递归膨胀。
+        details.setTargetContent(null);
 
         String jsonContent = com.alibaba.fastjson.JSON.toJSONString(details);
         String fileName = buildDigEmployeeJsonFileName(resourceId);
@@ -1541,6 +1545,8 @@ public class DigitalEmployeeApplicationService {
         List<MemoryConfigDTO> memoryConfigList = templateRuleInfoApplicationService
             .findMemoryConfigsByResourceIdAndUserId(resourceId, userId);
         digitalEmployeeDetailsDTO.setMemoryConfigList(memoryConfigList);
+        // target_content 仅供后端内部回填运行期字段使用，不对前端详情接口暴露。
+        digitalEmployeeDetailsDTO.setTargetContent(null);
 
         return digitalEmployeeDetailsDTO;
     }
