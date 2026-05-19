@@ -19,13 +19,19 @@ export type BaiyingEnhancePluginConfig = {
    */
   workspaceAutoSeed?: boolean;
   /**
-   * When true (default), move unauthorized managed digital employee workspaces out of the
-   * OpenClaw state dir so stale prompts/resources are not discoverable from `.openclaw`.
+   * When true (default), archive unauthorized managed digital employee workspaces outside
+   * the active OpenClaw state dir. The default remote backend removes local active data
+   * only after the backend archive API upload succeeds.
    */
   workspaceArchiveOnUnauthorized?: boolean;
   /**
-   * Archive root for unauthorized managed workspaces. Absolute paths and `~` are honored;
-   * relative paths resolve under the parent of `OPENCLAW_STATE_DIR`.
+   * Workspace archive backend. Default `remote` uploads to the backend archive API.
+   * Set `local` to keep the legacy `.baiying-workspaces` directory behavior.
+   */
+  workspaceArchiveBackend?: "remote" | "local";
+  /**
+   * Legacy local archive root when `workspaceArchiveBackend` is `local`.
+   * Absolute paths and `~` are honored; relative paths resolve under the parent of `OPENCLAW_STATE_DIR`.
    * Default: `.baiying-workspaces` next to `.openclaw`.
    */
   workspaceArchiveDir?: string;

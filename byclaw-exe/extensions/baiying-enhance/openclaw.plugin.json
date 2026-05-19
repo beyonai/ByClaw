@@ -47,12 +47,21 @@
       },
       "workspaceArchiveOnUnauthorized": {
         "type": "boolean",
-        "description": "When true (default), move unauthorized managed digital employee workspaces out of OPENCLAW_STATE_DIR so stale prompt/data files are not discoverable under .openclaw.",
+        "description": "When true (default), archive unauthorized managed digital employee workspaces outside the active OPENCLAW_STATE_DIR. The default remote backend uploads through the backend API and removes local active workspaces only after upload success.",
         "default": true
+      },
+      "workspaceArchiveBackend": {
+        "type": "string",
+        "enum": [
+          "remote",
+          "local"
+        ],
+        "description": "Workspace archive backend. Default remote uploads archives to the backend API; local keeps the legacy .baiying-workspaces directory behavior.",
+        "default": "remote"
       },
       "workspaceArchiveDir": {
         "type": "string",
-        "description": "Archive root for unauthorized managed workspaces. Absolute paths and ~ are honored; relative paths resolve under the parent of OPENCLAW_STATE_DIR. Default: .baiying-workspaces next to .openclaw."
+        "description": "Legacy local archive root for unauthorized managed workspaces when workspaceArchiveBackend=local. Absolute paths and ~ are honored; relative paths resolve under the parent of OPENCLAW_STATE_DIR. Default: .baiying-workspaces next to .openclaw."
       },
       "mainAgentsMdMode": {
         "type": "string",

@@ -50,6 +50,7 @@
           "embedApiKeysFromJson": false,
           "workspaceAutoSeed": true,
           "workspaceArchiveOnUnauthorized": true,
+          "workspaceArchiveBackend": "remote",
           "workspaceArchiveDir": ".baiying-workspaces"
         }
       }
@@ -62,7 +63,20 @@
 
 ### 取消授权 Workspace 归档
 
-`workspaceArchiveOnUnauthorized` 默认开启。每次授权视图或 `DIG_EMPLOYEE_DELETED` 事件导致托管数字员工从 `agents.list` 移除后，插件会把该 agent 的 workspace 移出 `.openclaw`：
+`workspaceArchiveOnUnauthorized` 默认开启。默认 `workspaceArchiveBackend: "remote"`，插件会通过后端内部 API 把 workspace 上传到 MinIO，成功后才删除 `.openclaw` 下的 active workspace；上传失败时保留本地目录并输出 warn 日志，避免丢数据。后端地址来自 Redis 服务发现：
+
+- `BE_DOMAINNAME` 默认 `ByaiService`
+- Redis key：`byai_gateway:sd:instances:${BE_DOMAINNAME}`
+- API token：`BYAI_WORKSPACE_ARCHIVE_API_TOKEN`
+
+远端对象位置固定为：
+
+- 取消授权：`bucket=byclaw-<USER_CODE>`，`objectKey=/openclaw-workspace-archives/workspace-baiying-agent-<resourceId>/cancel_auth_latest.tar.gz`
+- 删除广播：`bucket=byclaw-<USER_CODE>`，`objectKey=/openclaw-workspace-archives/workspace-baiying-agent-<resourceId>/del_latest.tar.gz`
+
+重新授权时，如果 active workspace 不存在，会尝试下载 `cancel_auth` 归档恢复；`delete` 归档只用于审计留存，不参与恢复。
+
+如需保留旧本地兼容模式，可显式配置 `workspaceArchiveBackend: "local"`。本地模式下，每次授权视图导致托管数字员工从 `agents.list` 移除后，插件会把该 agent 的 workspace 移出 `.openclaw`：
 
 - 默认 active 路径：`<OPENCLAW_STATE_DIR>/workspace-baiying-agent-<resourceId>`
 - 默认 archive 路径：`<dirname(OPENCLAW_STATE_DIR)>/.baiying-workspaces/workspace-baiying-agent-<resourceId>`

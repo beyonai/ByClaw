@@ -431,6 +431,47 @@ describe("createAgentWatchdog", () => {
     expect(logText).toContain(`deleted workspace for ${agentId} (DIG_EMPLOYEE_DELETED)`);
   });
 
+  it("cleans up an explicit delete workspace even when auth is not ready", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-del-auth-pending-"));
+    const stateDir = path.join(dir, ".openclaw");
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+    const agentId = `${MANAGED_AGENT_PREFIX}10863047`;
+    const activeWs = path.join(stateDir, `workspace-${agentId}`);
+    await mkdir(activeWs, { recursive: true });
+    await writeFile(path.join(activeWs, "deleted.txt"), "delete despite pending auth", "utf8");
+
+    const writeConfigFile = vi.fn(async () => {});
+    const api = createMockApi(writeConfigFile, [
+      { id: "main", name: "Main", identity: { name: "Main" } },
+      { id: agentId, name: "Demo", workspace: activeWs, identity: { name: "Demo" } },
+    ]) as any;
+
+    const wd = createAgentWatchdogBase({
+      api,
+      registry: new AgentRegistryState(),
+      redisJsonStore: createMemoryRedisJsonStore(new Map()),
+      authorizationFilter: { getAuthorizedSourceKeys: () => undefined },
+      contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+      executorPath: path.join(dir, "executor.py"),
+      pluginConfig: {
+        embedApiKeysFromJson: true,
+        workspaceAutoSeed: false,
+        workspaceSkillAutoEnable: false,
+        persistAgentContentIndex: false,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start({ deferInitialFlush: true });
+    await wd.__flushNow!({ deletedSourceKeys: ["10863047"] });
+    await wd.stop();
+
+    expect(writeConfigFile).not.toHaveBeenCalled();
+    expect(await pathExists(activeWs)).toBe(false);
+    const warnText = api.logger.warn.mock.calls.map((call: any[]) => String(call[0])).join("\n");
+    expect(warnText).toContain("applying explicit delete workspace cleanup only for 10863047");
+  });
+
   it("unregisters agent when authorization filter excludes it", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-"));
     await writeFile(path.join(dir, "demo.json"), STABLE_AGENT_JSON, "utf8");

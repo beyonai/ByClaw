@@ -4,6 +4,7 @@ import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
+import type { WorkspaceArchiveApi, WorkspaceArchiveKind } from "./workspace-archive-api.js";
 import { resolveAgentWorkspaceDir } from "./workspace-seed.js";
 import { resolveStateDir } from "./workspace-paths.js";
 
@@ -51,6 +52,14 @@ function isManagedAgentId(agentId: string): boolean {
 
 function sourceKeyFromManagedAgentId(agentId: string): string | undefined {
   return isManagedAgentId(agentId) ? agentId.slice(MANAGED_AGENT_PREFIX.length) : undefined;
+}
+
+function currentUserCode(): string {
+  return process.env.USER_CODE?.trim() || "";
+}
+
+function useRemoteArchive(config: BaiyingEnhancePluginConfig): boolean {
+  return config.workspaceArchiveBackend !== "local";
 }
 
 function archivePathForAgent(params: {
@@ -104,8 +113,43 @@ export async function restoreManagedAgentWorkspaces(params: {
   pluginConfig: BaiyingEnhancePluginConfig;
   agentIds: string[];
   log: LoggerLike;
+  workspaceArchiveApi?: WorkspaceArchiveApi;
 }): Promise<void> {
   if (params.pluginConfig.workspaceArchiveOnUnauthorized === false) {
+    return;
+  }
+  if (params.workspaceArchiveApi && useRemoteArchive(params.pluginConfig)) {
+    const userCode = currentUserCode();
+    for (const agentId of params.agentIds) {
+      if (!isManagedAgentId(agentId)) {
+        continue;
+      }
+      const sourceKey = sourceKeyFromManagedAgentId(agentId);
+      if (!sourceKey) {
+        continue;
+      }
+      const activeDir = resolveAgentWorkspaceDir(params.api, agentId);
+      if (await exists(activeDir)) {
+        continue;
+      }
+      try {
+        const restored = await params.workspaceArchiveApi.downloadWorkspace({
+          userCode,
+          resourceId: sourceKey,
+          archiveKind: "cancel_auth",
+          destinationWorkspaceDir: activeDir,
+        });
+        if (restored) {
+          params.log.info(`baiying-enhance: restored workspace for ${agentId} from remote cancel_auth archive to ${activeDir}`);
+        }
+      } catch (err) {
+        params.log.warn(
+          `baiying-enhance: remote workspace restore failed for ${agentId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
     return;
   }
   const archiveRoot = resolveWorkspaceArchiveRoot(params.pluginConfig);
@@ -138,9 +182,19 @@ export async function archiveUnauthorizedManagedAgentWorkspaces(params: {
   pluginConfig: BaiyingEnhancePluginConfig;
   agents: Array<{ agentId: string; workspaceDir: string }>;
   log: LoggerLike;
+  workspaceArchiveApi?: WorkspaceArchiveApi;
+  archiveKind?: WorkspaceArchiveKind;
 }): Promise<ManagedWorkspaceArchiveResult[]> {
   if (params.pluginConfig.workspaceArchiveOnUnauthorized === false) {
     return [];
+  }
+  if (params.workspaceArchiveApi && useRemoteArchive(params.pluginConfig)) {
+    return archiveManagedAgentWorkspacesToRemote({
+      agents: params.agents,
+      archiveKind: params.archiveKind ?? "cancel_auth",
+      workspaceArchiveApi: params.workspaceArchiveApi,
+      log: params.log,
+    });
   }
   const archiveRoot = resolveWorkspaceArchiveRoot(params.pluginConfig);
   const results: ManagedWorkspaceArchiveResult[] = [];
@@ -188,11 +242,81 @@ export async function archiveUnauthorizedManagedAgentWorkspaces(params: {
   return results;
 }
 
+export async function archiveManagedAgentWorkspacesToRemote(params: {
+  agents: Array<{ agentId: string; workspaceDir: string }>;
+  archiveKind: WorkspaceArchiveKind;
+  workspaceArchiveApi: WorkspaceArchiveApi;
+  log: LoggerLike;
+}): Promise<ManagedWorkspaceArchiveResult[]> {
+  const results: ManagedWorkspaceArchiveResult[] = [];
+  const userCode = currentUserCode();
+  for (const agent of params.agents) {
+    if (!isManagedAgentId(agent.agentId)) {
+      continue;
+    }
+    const sourceKey = sourceKeyFromManagedAgentId(agent.agentId);
+    const activeDir = agent.workspaceDir;
+    if (!sourceKey) {
+      continue;
+    }
+    if (!(await exists(activeDir))) {
+      continue;
+    }
+    try {
+      const status = await params.workspaceArchiveApi.uploadWorkspace({
+        userCode,
+        resourceId: sourceKey,
+        archiveKind: params.archiveKind,
+        workspaceDir: activeDir,
+      });
+      await fs.rm(activeDir, { recursive: true, force: true });
+      const remoteTarget = status.objectKey ?? `remote:${params.archiveKind}`;
+      params.log.info(
+        `baiying-enhance: uploaded ${params.archiveKind} workspace archive for ${agent.agentId} from ${activeDir} to ${remoteTarget}; local workspace removed`,
+      );
+      results.push({
+        agentId: agent.agentId,
+        activeDir,
+        archiveDir: remoteTarget,
+        archived: true,
+      });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      params.log.warn(
+        `baiying-enhance: remote ${params.archiveKind} workspace archive failed for ${agent.agentId}; keeping local workspace at ${activeDir}: ${error}`,
+      );
+      results.push({
+        agentId: agent.agentId,
+        activeDir,
+        archiveDir: `remote:${params.archiveKind}`,
+        archived: false,
+        error,
+      });
+    }
+  }
+  return results;
+}
+
 export async function deleteManagedAgentWorkspaces(params: {
   agents: Array<{ agentId: string; workspaceDir: string }>;
   log: LoggerLike;
   reason: string;
+  workspaceArchiveApi?: WorkspaceArchiveApi;
 }): Promise<ManagedWorkspaceDeleteResult[]> {
+  if (params.workspaceArchiveApi) {
+    const archived = await archiveManagedAgentWorkspacesToRemote({
+      agents: params.agents,
+      archiveKind: "delete",
+      workspaceArchiveApi: params.workspaceArchiveApi,
+      log: params.log,
+    });
+    return archived.map((result) => ({
+      agentId: result.agentId,
+      workspaceDir: result.activeDir,
+      deleted: result.archived,
+      error: result.error,
+    }));
+  }
   const results: ManagedWorkspaceDeleteResult[] = [];
   for (const agent of params.agents) {
     if (!isManagedAgentId(agent.agentId)) {
@@ -233,6 +357,7 @@ export async function archiveUnauthorizedActiveManagedWorkspaces(params: {
   ignoredSourceKeys?: Set<string>;
   log: LoggerLike;
   checkLabel?: string;
+  workspaceArchiveApi?: WorkspaceArchiveApi;
 }): Promise<ManagedWorkspaceArchiveResult[]> {
   const label = params.checkLabel?.trim() || "auth";
   if (params.pluginConfig.workspaceArchiveOnUnauthorized === false) {
@@ -244,6 +369,7 @@ export async function archiveUnauthorizedActiveManagedWorkspaces(params: {
 
   const stateDir = resolveStateDir();
   const archiveRoot = resolveWorkspaceArchiveRoot(params.pluginConfig);
+  const archiveTarget = params.workspaceArchiveApi && useRemoteArchive(params.pluginConfig) ? "remote backend API" : archiveRoot;
   const authorized = new Set([...params.authorizedSourceKeys].map((id) => id.trim()).filter(Boolean));
   const ignored = new Set([...(params.ignoredSourceKeys ?? [])].map((id) => id.trim()).filter(Boolean));
   const activeWorkspaces: Array<{ agentId: string; workspaceDir: string; sourceKey: string }> = [];
@@ -282,7 +408,7 @@ export async function archiveUnauthorizedActiveManagedWorkspaces(params: {
   );
   const ignoredActiveCount = activeWorkspaces.filter((workspace) => ignored.has(workspace.sourceKey)).length;
   params.log.info(
-    `baiying-enhance: ${label} unauthorized workspace archive check — stateDir=${stateDir}; archiveRoot=${archiveRoot}; authorized=${authorized.size}; activeManagedWorkspaces=${activeWorkspaces.length}; unauthorizedActiveWorkspaces=${unauthorized.length}; ignoredActiveWorkspaces=${ignoredActiveCount}`,
+    `baiying-enhance: ${label} unauthorized workspace archive check — stateDir=${stateDir}; archiveTarget=${archiveTarget}; authorized=${authorized.size}; activeManagedWorkspaces=${activeWorkspaces.length}; unauthorizedActiveWorkspaces=${unauthorized.length}; ignoredActiveWorkspaces=${ignoredActiveCount}`,
   );
 
   if (unauthorized.length === 0) {
@@ -299,6 +425,8 @@ export async function archiveUnauthorizedActiveManagedWorkspaces(params: {
   const results = await archiveUnauthorizedManagedAgentWorkspaces({
     pluginConfig: params.pluginConfig,
     agents: unauthorized,
+    workspaceArchiveApi: params.workspaceArchiveApi,
+    archiveKind: "cancel_auth",
     log: params.log,
   });
   const archived = results.filter((result) => result.archived);
