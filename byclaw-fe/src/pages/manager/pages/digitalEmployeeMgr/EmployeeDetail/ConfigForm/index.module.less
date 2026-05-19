@@ -625,11 +625,17 @@
     }
 
     .bundledSkillModalCardDesc {
+      display: -webkit-box;
       overflow: hidden;
       color: #707680;
       font-size: 12px;
-      white-space: nowrap;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
       text-overflow: ellipsis;
+    }
+
+    .bundledSkillModalTooltip {
+      max-width: 500px;
     }
 
     .actionButton {

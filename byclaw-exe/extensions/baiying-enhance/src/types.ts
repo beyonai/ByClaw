@@ -3,12 +3,9 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk/compat";
 export type AgentListEntry = NonNullable<NonNullable<OpenClawConfig["agents"]>["list"]>[number];
 
 export type BaiyingEnhancePluginConfig = {
-  /**
-   * In-process executor snapshot root (`resources/` with `agent/`, `doc/`, …).
-   * Default: directory bundled next to this extension (`baiying-enhance/resources`).
-   * Relative paths resolve under `OPENCLAW_STATE_DIR` / `~/.openclaw/` (same rules as `agentConfigDir`).
-   */
+  /** @deprecated Ignored for Baiying resource snapshots; associated resources are read from Redis. */
   executorResourcesDir?: string;
+  /** @deprecated Ignored; digital employees are read from Redis key `DIG_EMPLOYEE_{resourceId}`. */
   agentConfigDir?: string;
   /** Debounce (ms) for coalescing dig-employee Redis flush triggers. */
   watchDebounceMs?: number;
@@ -21,6 +18,23 @@ export type BaiyingEnhancePluginConfig = {
    * under the OpenClaw state dir and seed SOUL.md / AGENTS.md / … from the JSON export.
    */
   workspaceAutoSeed?: boolean;
+  /**
+   * When true (default), archive unauthorized managed digital employee workspaces outside
+   * the active OpenClaw state dir. The default remote backend removes local active data
+   * only after the backend archive API upload succeeds.
+   */
+  workspaceArchiveOnUnauthorized?: boolean;
+  /**
+   * Workspace archive backend. Default `remote` uploads to the backend archive API.
+   * Set `local` to keep the legacy `.baiying-workspaces` directory behavior.
+   */
+  workspaceArchiveBackend?: "remote" | "local";
+  /**
+   * Legacy local archive root when `workspaceArchiveBackend` is `local`.
+   * Absolute paths and `~` are honored; relative paths resolve under the parent of `OPENCLAW_STATE_DIR`.
+   * Default: `.baiying-workspaces` next to `.openclaw`.
+   */
+  workspaceArchiveDir?: string;
   /**
    * How to write main workspace `AGENTS.md` for `mainParentAgentId` (default `main`).
    * Omitted defaults to `always` (overwrite each seed) while a template source exists (built-in or `mainAgentsMdPath`).
@@ -51,13 +65,13 @@ export type BaiyingEnhancePluginConfig = {
   /** Default API key for the proxy endpoint. */
   defaultApiKey?: string;
   /**
-   * When true (default), persist agent source JSON content hashes to disk so cold restarts
-   * do not treat every managed agent as newly added.
+   * When true (default), persist Redis source JSON content hashes to disk so cold restarts
+   * do not treat every managed agent as newly changed.
    */
   persistAgentContentIndex?: boolean;
   /**
    * Override path for the content index JSON file. Relative paths resolve under ~/.openclaw/ (see plugin path rules).
-   * Default: `~/.openclaw/baiying-enhance/agent-content-index-<sha16>.json` (derived from absolute agentConfigDir).
+   * Default: `~/.openclaw/baiying-enhance/agent-content-index-<sha16>.json`.
    */
   agentContentIndexPath?: string;
   /** @deprecated Ignored. Former directory watcher toggle; kept so older `openclaw.json` entries do not fail validation. */
@@ -66,7 +80,22 @@ export type BaiyingEnhancePluginConfig = {
   skillDirs?: unknown;
   /** @deprecated Ignored. Legacy copy-paste from older README examples. */
   pollIntervalMs?: number;
-  /** Subscribe to `digEmployeeChangeChannel` for digital-employee change broadcasts (Redis PUBLISH). */
+  /**
+   * When true (default), merge user-uploaded workspace skills (`skills/<name>/SKILL.md`) into
+   * managed agents' `agents.list[].skills` alongside JSON `relSkills` / `skills`.
+   */
+  workspaceSkillAutoEnable?: boolean;
+  /**
+   * Fallback scan interval in milliseconds for workspace skill changes. Default 500.
+   * Set to 0 or a negative value to disable the periodic scan and rely on fs.watch + normal sync triggers.
+   */
+  workspaceSkillScanIntervalMs?: number;
+  /**
+   * When true, skills uploaded to the main workspace (`workspace/skills`) are treated
+   * as shared skills and merged into managed sub-agents.
+   */
+  workspaceSkillIncludeMainShared?: boolean;
+  /** Subscribe to `digEmployeeChangeChannel` for digital-employee change broadcasts (Redis PUBLISH). Default true. */
   digEmployeeChangeSubscribe?: boolean;
   /** Redis Pub/Sub channel for `DigEmployeeChangeEvent` JSON (default `byai:pub:dig_employee_change`). */
   digEmployeeChangeChannel?: string;
@@ -81,6 +110,15 @@ export type BaiyingEnhancePluginConfig = {
    * Set false to flush on every event without an auth filter (high load).
    */
   digEmployeeChangeSubscribeStrictAuth?: boolean;
+  /**
+   * Public gateway base URL used to build PAGE-agent callback URLs.
+   * Configure this when the browser frontend is not on the same host as the gateway.
+   */
+  pageAgentCallbackBaseUrl?: string;
+  /** PAGE-agent callback wait timeout. Defaults to 1 hour. */
+  pageAgentCallbackTimeoutMs?: number;
+  /** Maximum accepted `responseText` size in bytes. Defaults to 256 KiB. */
+  pageAgentCallbackMaxResponseTextBytes?: number;
 };
 
 export type BaiyingAssociatedResource = {

@@ -94,8 +94,8 @@ MINIO_BUCKET=byclaw
 cd deploy/middleware
 sh start-all.sh
 
-# 启动应用（单体模式）
-cd ../mono
+# 启动应用（拆分模式）
+cd ../standalone
 sh start-all.sh
 ```
 

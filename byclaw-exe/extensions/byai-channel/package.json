@@ -7,7 +7,7 @@
     "build": "esbuild index.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/index.js --sourcemap --external:openclaw --external:minio"
   },
   "dependencies": {
-    "@byclaw/by-framework": "^1.3.0",
+    "@byclaw/by-framework": "^1.3.1",
     "esbuild": "^0.25.0",
     "ioredis": "^5.3.2",
     "uuid": "^9.0.1",

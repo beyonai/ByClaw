@@ -28,8 +28,8 @@ export type IMessageListItemContent = {
     sessionId: string;
     agentHomeUrl?: string;
     agentDescription: string;
+    isSubagent?: boolean;
     integrationType: 'PAGE' | 'INTERFACE' | 'NONE';
-
     recover: boolean;
     status?: number; // 暂时小置办才会有这个字段，且初始化时没有； 0 或 空 - 未完成； 1 - 已完成
   };
@@ -90,7 +90,7 @@ function Application(props: IProps) {
           currentUpdateMessageListItemContent: updateMessageListItemContent,
           autoAsk: isLastMessageItem,
           toRecover: recover,
-          isDone: !isLastMessageItem || `${status}` === '1',
+          isDone: (!isLastMessageItem || `${status}` === '1') && !!status,
         });
       }}
     >

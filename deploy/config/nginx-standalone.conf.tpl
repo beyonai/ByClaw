@@ -17,6 +17,12 @@ server {
     {{BACKEND_VARS}}
 
     location /beyond {
+        if ($request_filename ~* .*\.(?:htm|html)$) {
+            add_header Cache-Control "no-cache, must-revalidate, proxy-revalidate";
+        }
+        if ($uri ~* "\.[0-9a-f]{8}\.(async\.|chunk\.)?(js|css)$") {
+            add_header Cache-Control "public, max-age=31536000, immutable";
+        }
         alias   /usr/share/nginx/html;
         index  index.html index.htm;
         try_files $uri $uri/ /index.html;

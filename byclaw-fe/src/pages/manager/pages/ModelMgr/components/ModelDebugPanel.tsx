@@ -1,12 +1,12 @@
 import { CopyOutlined, DeleteOutlined } from '@ant-design/icons';
 import { Button, Input, Segmented, Space, Spin, Table } from 'antd';
-import React from 'react';
-import type { IntlShape } from 'react-intl';
-import styles from './ModelFormModal.module.less';
+import React, { useState, useMemo } from 'react';
+import { debounce } from 'lodash';
+import { useIntl } from '@umijs/max';
 import type { DebugInputMode } from './modelFormUtils';
+import styles from './ModelFormModal.module.less';
 
 type Props = {
-  intl: IntlShape;
   debugInputMode: DebugInputMode;
   debugInput: string;
   setDebugInput: (value: string) => void;
@@ -22,7 +22,6 @@ type Props = {
 };
 
 const ModelDebugPanel: React.FC<Props> = ({
-  intl,
   debugInputMode,
   debugInput,
   setDebugInput,
@@ -36,6 +35,27 @@ const ModelDebugPanel: React.FC<Props> = ({
   setRerankView,
   rerankTableData,
 }) => {
+  const intl = useIntl();
+  const [isRunning, setIsRunning] = useState(false);
+
+  const debouncedRunDebug = useMemo(
+    () =>
+      debounce(
+        async () => {
+          if (isRunning) return;
+          setIsRunning(true);
+          try {
+            await runDebug();
+          } finally {
+            setIsRunning(false);
+          }
+        },
+        500,
+        { leading: true, trailing: false }
+      ),
+    [runDebug, isRunning]
+  );
+
   return (
     <div className={styles.debugPanel}>
       <div className={styles.debugHero}>
@@ -68,7 +88,12 @@ const ModelDebugPanel: React.FC<Props> = ({
               >
                 {intl.formatMessage({ id: 'common.copy' })}
               </Button>
-              <Button size="small" type="primary" onClick={runDebug}>
+              <Button
+                size="small"
+                type="primary"
+                onClick={debouncedRunDebug}
+                disabled={isRunning || debugOutputLoading}
+              >
                 {intl.formatMessage({ id: 'modelMgr.modal.run' })}
               </Button>
             </Space>

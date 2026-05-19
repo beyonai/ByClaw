@@ -1,11 +1,11 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useRef } from 'react';
 import classnames from 'classnames';
 import Achievements, { TriggerRef } from '@/pages/workSpace/Achievements';
 import AntdIcon from '@/components/AntdIcon';
 import useGlobal from '@/hooks/useGlobal';
 import ChatAvatar from '@/components/ChatAvatar';
 import { ISession } from '@/typescript/session';
-// import { SessionType } from '@/constants/session';
+import { SessionType } from '@/constants/session';
 import CreateTemplate from '@/components/ChatLayoutComp/components/CreateTemplate';
 import styles from './ChatTitle.module.less';
 import { IAgentType } from '@/typescript/agent';
@@ -22,7 +22,7 @@ interface ChatTitleProps {
 }
 
 export default function ChatTitle(props: ChatTitleProps) {
-  const { sessionId, currentSession, lastAnswer } = props;
+  const { sessionId, currentSession } = props;
   const intl = useIntl();
   const achievementRef = useRef<TriggerRef>(null);
   const { EventEmitter } = useGlobal();
@@ -30,18 +30,11 @@ export default function ChatTitle(props: ChatTitleProps) {
 
   const [openTemplate, setOpenTemplate] = React.useState<boolean>(false);
 
-  // const onToggleAchievements = () => {
-  //   achievementRef.current?.toggle();
-  // };
+  const onToggleAchievements = () => {
+    achievementRef.current?.toggle();
+  };
 
-  // const isSimpleSession = currentSession?.sessionType === SessionType.simple;
-
-  const updateKey = useMemo(() => {
-    if (lastAnswer) {
-      return Date.now();
-    }
-    return undefined;
-  }, [lastAnswer]);
+  const isSimpleSession = currentSession?.sessionType === SessionType.simple;
 
   return (
     <>
@@ -58,11 +51,11 @@ export default function ChatTitle(props: ChatTitleProps) {
                   <span>{intl.formatMessage({ id: 'chatTitle.saveAsTemplate' })}</span>
                 </span>
               )}
-              {/* {!isSimpleSession && (
+              {!isSimpleSession && (
                 <span className={styles.btn} onClick={onToggleAchievements}>
                   <AntdIcon type="icon-a-Folder-withdrawal-onetuichuwenjianjia1" />
                 </span>
-              )} */}
+              )}
             </div>
           </div>
         )}
@@ -72,7 +65,6 @@ export default function ChatTitle(props: ChatTitleProps) {
           // container="#chat_wrapper,#employees_wrapper"
           ref={achievementRef}
           key={`${sessionId}_Achievements`}
-          updateAt={updateKey}
           sessionId={sessionId}
           EventEmitter={EventEmitter}
         />

@@ -1,7 +1,7 @@
 import React, { lazy, memo, Suspense, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import { IProps as pIProps } from '@/components/QueryInput/queryInputBase';
 import ChatLayoutCompContext from '@/components/ChatLayoutComp/hooks/useContext';
-import CleanSession from './components/CleanSession';
+// import CleanSession from './components/CleanSession';
 import { agentTypeMap } from '@/constants/agent';
 import { chatModeMap, IChatModeType } from '@/constants/query';
 import useGlobal from '@/hooks/useGlobal';
@@ -104,7 +104,7 @@ function QueryInput(props: IProps) {
 
   return (
     <Suspense fallback="">
-      <CleanSession />
+      {/* <CleanSession /> */}
       <QueryInputComp
         {...rest}
         cannotSTT={cannotSTT || !!ENV?.includes?.('asr')}

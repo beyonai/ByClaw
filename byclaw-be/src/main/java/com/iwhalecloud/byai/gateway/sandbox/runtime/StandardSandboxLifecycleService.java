@@ -10,6 +10,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -68,15 +69,22 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
     @Override
     public SandboxResponse<SandboxLaunchData> launchSandbox(SandboxLaunchRequest request) {
         try {
+            log.info("生命周期服务开始启动沙箱，provider={}，user={}，type={}",
+                runtimeProvider.providerType(), request.getUserCode(), request.getSandboxType());
             SandboxInfo info = createSandbox(request);
             SandboxLaunchData data = new SandboxLaunchData();
             List<String> endpoints = info.getEndpoints();
             data.setEndpoint(CollectionUtils.isNotEmpty(endpoints) ? endpoints.getFirst() : "");
             data.setEndpoints(endpoints);
+            data.setServicePort(info.getServicePort());
+            data.setImageType(info.getImageType());
             data.setEndpointHeaders(info.getEndpointHeaders());
             data.setSandboxId(info.getSandboxId());
             data.setTimeoutSeconds(info.getTimeoutSeconds());
             data.setRemoteExpiresAt(info.getRemoteExpiresAt());
+            log.info("生命周期服务启动沙箱成功，provider={}，user={}，type={}，sandboxId={}，endpoints={}，remoteExpiresAt={}",
+                runtimeProvider.providerType(), request.getUserCode(), request.getSandboxType(),
+                info.getSandboxId(), endpoints, info.getRemoteExpiresAt());
             return SandboxResponse.success(data);
         } catch (Exception e) {
             log.error("Failed to launch sandbox by provider={}, user={}, type={}: {}",
@@ -104,11 +112,22 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
         }
 
         try {
+            log.info("生命周期服务已获取创建锁，provider={}，user={}，type={}，lockKey={}",
+                runtimeProvider.providerType(), userCode, sandboxType, lockKey);
             var request = specProcessor.buildCreateRequest(
                 userCode, sandboxType, launchRequest.getEnvs(), launchRequest.getUserInfo(), spec);
             String idempotencyKey = buildIdempotencyKey(userCode, sandboxType);
 
-            SandboxRuntimeInstance instance = runtimeProvider.findReusable(userCode, sandboxType)
+            Optional<SandboxRuntimeInstance> reusable = runtimeProvider.findReusable(userCode, sandboxType);
+            if (reusable.isPresent()) {
+                log.info("生命周期服务命中可复用远端沙箱，provider={}，user={}，type={}，sandboxId={}",
+                    runtimeProvider.providerType(), userCode, sandboxType, reusable.get().getSandboxId());
+            }
+            else {
+                log.info("生命周期服务未命中可复用沙箱，准备创建新沙箱，provider={}，user={}，type={}，idempotencyKey={}",
+                    runtimeProvider.providerType(), userCode, sandboxType, idempotencyKey);
+            }
+            SandboxRuntimeInstance instance = reusable
                 .orElseGet(() -> runtimeProvider.create(request, spec, userCode, sandboxType, idempotencyKey));
 
             List<String> endpoints = runtimeProvider.resolveEndpoints(instance, spec, request);
@@ -118,6 +137,8 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
                 .userCode(userCode)
                 .sandboxType(sandboxType)
                 .endpoints(endpoints)
+                .servicePort(spec.getServicePort())
+                .imageType(spec.getImageType())
                 .endpointHeaders(runtimeProvider.resolveEndpointHeaders(instance))
                 .timeoutSeconds(timeoutSeconds)
                 .remoteExpiresAt(resolveRemoteExpiresAt(instance, timeoutSeconds))
@@ -125,6 +146,8 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
                 .lastHeartbeatTime(LocalDateTime.now())
                 .build();
             persistSandbox(redisKey, info);
+            log.info("生命周期服务已写入 redis 元数据，provider={}，user={}，type={}，sandboxId={}，redisKey={}",
+                runtimeProvider.providerType(), userCode, sandboxType, info.getSandboxId(), redisKey);
             return info;
         } finally {
             releaseCreationLock(lockKey, lockToken);
@@ -137,10 +160,16 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
             if (sandboxInfo == null) {
                 return SandboxResponse.success(null);
             }
+            log.info("生命周期服务开始释放沙箱，provider={}，user={}，type={}，sandboxId={}",
+                runtimeProvider.providerType(), sandboxInfo.getUserCode(), sandboxInfo.getSandboxType(),
+                sandboxInfo.getSandboxId());
             runtimeProvider.remove(sandboxInfo.getUserCode(), sandboxInfo.getSandboxType(), sandboxInfo);
             redisTemplate.delete(buildRedisKey(sandboxInfo.getUserCode(), sandboxInfo.getSandboxType()));
             redisTemplate.delete(buildCreationLockKey(sandboxInfo.getUserCode(), sandboxInfo.getSandboxType()));
             redisTemplate.opsForSet().remove(buildUserIndexKey(sandboxInfo.getUserCode()), sandboxInfo.getSandboxType());
+            log.info("生命周期服务释放沙箱完成，provider={}，user={}，type={}，sandboxId={}",
+                runtimeProvider.providerType(), sandboxInfo.getUserCode(), sandboxInfo.getSandboxType(),
+                sandboxInfo.getSandboxId());
             return SandboxResponse.success(null);
         } catch (Exception e) {
             log.error("Failed to remove sandbox by provider={}, user={}, type={}: {}",
@@ -158,9 +187,15 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
             if (sandboxInfo == null) {
                 return SandboxResponse.error("sandboxInfo is required");
             }
+            log.info("生命周期服务开始续约沙箱，provider={}，user={}，type={}，sandboxId={}，timeoutSeconds={}，remoteExpiresAt={}",
+                runtimeProvider.providerType(), sandboxInfo.getUserCode(), sandboxInfo.getSandboxType(),
+                sandboxInfo.getSandboxId(), sandboxInfo.getTimeoutSeconds(), sandboxInfo.getRemoteExpiresAt());
             runtimeProvider.heartbeat(sandboxInfo.getUserCode(), sandboxInfo.getSandboxType(), sandboxInfo);
             sandboxInfo.setLastHeartbeatTime(LocalDateTime.now());
             persistSandbox(buildRedisKey(sandboxInfo.getUserCode(), sandboxInfo.getSandboxType()), sandboxInfo);
+            log.info("生命周期服务续约沙箱完成，provider={}，user={}，type={}，sandboxId={}",
+                runtimeProvider.providerType(), sandboxInfo.getUserCode(), sandboxInfo.getSandboxType(),
+                sandboxInfo.getSandboxId());
             return SandboxResponse.success(null);
         }
         catch (Exception e) {
@@ -179,8 +214,12 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
             if (sandboxInfo == null) {
                 return SandboxResponse.success(false);
             }
-            return SandboxResponse.success(runtimeProvider.exists(
-                sandboxInfo.getUserCode(), sandboxInfo.getSandboxType(), sandboxInfo));
+            boolean exists = runtimeProvider.exists(
+                sandboxInfo.getUserCode(), sandboxInfo.getSandboxType(), sandboxInfo);
+            log.info("生命周期服务查询远端沙箱存在性，provider={}，user={}，type={}，sandboxId={}，exists={}",
+                runtimeProvider.providerType(), sandboxInfo.getUserCode(), sandboxInfo.getSandboxType(),
+                sandboxInfo.getSandboxId(), exists);
+            return SandboxResponse.success(exists);
         }
         catch (Exception e) {
             log.warn("Failed to reconcile sandbox by provider={}, user={}, type={}, sandboxId={}: {}",

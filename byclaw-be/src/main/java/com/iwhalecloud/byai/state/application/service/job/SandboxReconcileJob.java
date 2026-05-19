@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLifecycleJobReport;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 
 /**
@@ -26,10 +27,11 @@ public class SandboxReconcileJob {
     @Scheduled(fixedDelayString = "${sandbox.reconcile.fixed-delay:60000}")
     public void reconcileSandboxes() {
         try {
-            int restartedCount = sandboxService.reconcileSandboxes();
-            if (restartedCount > 0) {
-                LOGGER.info("沙箱一致性检测完成，本次重新拉起 {} 个沙箱", restartedCount);
-            }
+            SandboxLifecycleJobReport report = sandboxService.reconcileSandboxes();
+            LOGGER.info("沙箱一致性检测完成，候选 {} 个，扫描 {} 个，重拉 {} 个，保持 {} 个，失败 {} 个，重拉记录：{}，保持记录：{}，失败记录：{}",
+                report.getTotalCandidates(), report.getScannedCount(), report.getAffectedCount(),
+                report.getSkippedCount(), report.getFailedCount(), report.getAffectedSandboxes(),
+                report.getSkippedSandboxes(), report.getFailedSandboxes());
         }
         catch (Exception e) {
             LOGGER.error("沙箱一致性检测任务执行异常", e);

@@ -20,3 +20,17 @@ export function sortBySuperHelperFirst(items: IAgentCache[]) {
     return bPriority - aPriority;
   });
 }
+
+export function updateDefaultEmployee(items: IAgentCache[], defaultResourceId: string | number) {
+  return sortBySuperHelperFirst(
+    items.map((item) => {
+      const itemResourceId = item.resourceId ?? item.id ?? item.agentId;
+      const isDefault = String(itemResourceId) === String(defaultResourceId);
+      return {
+        ...item,
+        isDefault,
+        canSetDefault: !isDefault,
+      };
+    })
+  );
+}

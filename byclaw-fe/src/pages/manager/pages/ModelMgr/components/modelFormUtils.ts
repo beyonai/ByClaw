@@ -109,7 +109,7 @@ export function buildLlmHeaders(options: { formApiToken?: any; formHeaders?: any
   const authFromFormHeader = typeof formObj.Authorization === 'string' ? formObj.Authorization : '';
   const token = `${formApiToken ?? ''}`.trim();
   const authFromToken = token ? `Bearer ${token}` : '';
-  const auth = authFromPrev || authFromFormHeader || authFromToken;
+  const auth = authFromFormHeader || authFromToken || authFromPrev;
 
   Object.keys(formObj).forEach((k) => {
     if (k === 'Authorization') return;
@@ -131,7 +131,7 @@ export function buildRerankHeaders(options: { formApiToken?: any; formHeaders?: 
   const keyFromFormHeader = typeof formObj['X-Api-Key'] === 'string' ? formObj['X-Api-Key'] : '';
   const token = `${formApiToken ?? ''}`.trim();
   const keyFromToken = token ? `${token}` : '';
-  const apiKey = keyFromPrev || keyFromFormHeader || keyFromToken;
+  const apiKey = keyFromFormHeader || keyFromToken || keyFromPrev;
 
   Object.keys(formObj).forEach((k) => {
     if (k === 'X-Api-Key') return;
@@ -175,7 +175,7 @@ export function buildAutoDebugRequestText(options: {
   const prevObj = prevText ? safeParseJsonObject(prevText) : null;
   const modelType = normalizeModelType(formValues?.modelType);
   const isTypeSwitch = Array.isArray(changedKeys) && changedKeys.includes('modelType');
-
+  console.log(formValues);
   if (modelType === 'LLM') {
     const apiEndpoint = `${formValues?.apiEndpoint ?? ''}`.trim();
     const prevUrl = typeof prevObj?.url === 'string' ? prevObj.url.trim() : '';

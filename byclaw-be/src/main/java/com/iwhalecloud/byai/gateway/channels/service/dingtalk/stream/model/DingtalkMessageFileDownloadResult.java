@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model;
 
+import java.util.Map;
+
 import lombok.Getter;
 import lombok.Setter;
 

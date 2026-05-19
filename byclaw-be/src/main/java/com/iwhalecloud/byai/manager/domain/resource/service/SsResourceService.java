@@ -9,6 +9,7 @@ import com.iwhalecloud.byai.common.constants.resource.ImplType;
 import com.iwhalecloud.byai.common.constants.resource.SystemCode;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SsResourceDTO;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceQueryRequest;
@@ -582,5 +583,24 @@ public class SsResourceService {
         com.baomidou.mybatisplus.extension.plugins.pagination.Page<SsResource> ssResourcePage = ssResourceMapper
             .selectPage(page, queryWrapper);
         return PageHelperUtil.toPageInfo(ssResourcePage);
+    }
+
+    /**
+     * 分页查询未注销的数字员工资源（用于启动时 Redis 全量同步等批处理场景）。
+     *
+     * @param pageNum 页码，从 1 开始
+     * @param pageSize 每页条数
+     * @return 当前页资源列表，无数据时返回空列表
+     */
+    public List<SsResource> pageActiveDigitalEmployees(int pageNum, int pageSize) {
+        int safePageNum = pageNum > 0 ? pageNum : 1;
+        int safePageSize = pageSize > 0 ? pageSize : 1000;
+        LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(SsResource::getResourceBizType, ResourceBizTypeEnum.DIG_EMPLOYEE.name());
+        queryWrapper.ne(SsResource::getResourceStatus, ResourceStatus.REMOVED.getNum());
+        queryWrapper.orderByAsc(SsResource::getResourceId);
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<SsResource> page =
+            new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(safePageNum, safePageSize, false);
+        return ssResourceMapper.selectPage(page, queryWrapper).getRecords();
     }
 }

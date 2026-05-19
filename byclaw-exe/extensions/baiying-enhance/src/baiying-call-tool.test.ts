@@ -54,6 +54,17 @@ describe("buildBaiyingCallDescription", () => {
     expect(desc).toContain("待办视图 (VIEW, id: 10810924, name: 待办视图, resource_code: todo_view");
   });
 
+  it("lists the root agent resource when agentHomeUrl is present", () => {
+    const agent = makeAgent();
+    agent.agentHomeUrl = "https://home.example.com/agent/10863047";
+
+    const desc = buildBaiyingCallDescription({ agent });
+
+    expect(desc).toContain("厦门信和达IT助手 (AGENT, id: 10863047");
+    expect(desc).toContain("agent_home_url: https://home.example.com/agent/10863047");
+    expect(desc).toContain("信和达知识库 (KG_DOC, id: 10863004");
+  });
+
   it("surfaces MCP URL fields from resource.raw when present on export", () => {
     const agent = makeAgent();
     const mcp = agent.associatedResources!.find((r) => r.resourceId === "752299921044997")!;

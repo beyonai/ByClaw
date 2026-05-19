@@ -47,9 +47,9 @@ cd byclaw
 # 复制环境配置
 cp .env.example .env
 
-# 启动中间件和单体应用
+# 启动中间件和应用
 cd deploy/middleware && sh start-all.sh
-cd ../mono && sh start-all.sh
+cd ../standalone && sh start-all.sh
 ```
 
 访问 http://localhost:8080 开始使用。

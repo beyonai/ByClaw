@@ -44,48 +44,91 @@ docker compose version
 - Git（可选，用于克隆代码仓库）
 - 文本编辑器（用于修改配置文件）
 
-## 3. GitHub Container Registry (GHCR) 认证
-
-ByClaw 的镜像托管在 GitHub Container Registry (ghcr.io)，您需要配置访问凭证。
-
-### 步骤 1：创建 GitHub Personal Access Token (PAT)
-
-1. 访问 https://github.com/settings/tokens
-2. 点击 "Generate new token" → "Generate new token (classic)"
-3. 勾选以下权限：
-   - `write:packages`
-   - `read:packages`
-   - `delete:packages`
-4. 生成并保存您的 token（只显示一次！）
-
-### 步骤 2：配置 .env 文件
-
-复制项目根目录的 `.env.example` 为 `.env`：
-
-```bash
-cp .env.example .env
-```
-
-编辑 `.env` 文件，填入您的 GitHub 信息：
-
-```bash
-# GHCR (GitHub Container Registry)
-GHCR_USER=your_github_username
-GHCR_TOKEN=your_ghcr_personal_access_token
-```
-
-### 步骤 3：登录 GHCR
-
-部署脚本会自动使用 `.env` 中的凭证登录，但您也可以手动测试：
-
-```bash
-echo "your_ghcr_personal_access_token" | docker login ghcr.io -u "your_github_username" --password-stdin
-```
-
-## 4. 网络要求
+## 3. 网络要求
 
 - 能够访问 GitHub Container Registry (ghcr.io)
 - 如果是国内环境，可能需要配置镜像加速器
+
+> **说明：** ByClaw 的所有镜像均托管在 GHCR 公开仓库，无需登录即可拉取。
+
+## 4. rclone（MinIO 文件挂载）
+
+ByClaw 使用 [rclone](https://rclone.org/) 将 MinIO 对象存储桶以 FUSE 文件系统的方式挂载到宿主机。这样数字员工的沙箱环境可以像访问本地目录一样读写 MinIO 中的文件，无需通过 S3 API 中转。
+
+> **注意：** rclone 需要安装在**目标宿主机**上（即 `FILE_STORAGE_MINIO_MOUNT_TARGET_*_HOST` 指向的机器），而不是运行 ByClaw 后端的机器。后端通过 SSH 远程执行 rclone 命令。
+
+### 为什么需要 rclone
+
+- 沙箱环境需要以本地文件路径访问用户上传的文件和知识库数据
+- rclone mount 将 MinIO bucket 映射为本地目录，对应用层完全透明
+- 支持自动恢复断开的挂载点（Transport endpoint is not connected）
+
+### 安装 rclone
+
+在**每台目标宿主机**上安装：
+
+**Linux（推荐）：**
+```bash
+# 官方一键安装脚本
+curl https://rclone.org/install.sh | sudo bash
+
+# 或使用包管理器
+# Debian/Ubuntu
+sudo apt install rclone
+
+# CentOS/RHEL
+sudo yum install rclone
+```
+
+**macOS：**
+```bash
+brew install rclone
+```
+
+### 验证安装
+
+```bash
+rclone version
+# 应输出 rclone v1.60+ 版本信息
+```
+
+### 额外依赖
+
+rclone mount 依赖 FUSE，请确保目标宿主机已安装：
+
+```bash
+# Debian/Ubuntu
+sudo apt install fuse3
+
+# CentOS/RHEL
+sudo yum install fuse3
+
+# 验证
+fusermount3 --version
+```
+
+### 配置说明
+
+rclone 本身**不需要配置文件**。ByClaw 后端在执行挂载时会通过命令行参数直接传入 MinIO 的 endpoint、access key 和 secret key。
+
+您只需在 `.env` 中配置以下变量：
+
+```bash
+# 启用 MinIO 挂载功能
+FILE_STORAGE_MINIO_MOUNT_ENABLED=true
+
+# 挂载基础路径（bucket 会挂载到该路径下的子目录）
+FILE_STORAGE_MINIO_MOUNT_PATH=/data/8080
+
+# 目标宿主机 SSH 连接信息（支持多台，索引从 0 开始）
+FILE_STORAGE_MINIO_MOUNT_TARGET_0_HOST=192.168.1.100
+FILE_STORAGE_MINIO_MOUNT_TARGET_0_PORT=22
+FILE_STORAGE_MINIO_MOUNT_TARGET_0_USER=root
+FILE_STORAGE_MINIO_MOUNT_TARGET_0_PASSWORD=your_password
+FILE_STORAGE_MINIO_MOUNT_TARGET_0_ENABLED=true
+```
+
+如果不需要文件挂载功能，设置 `FILE_STORAGE_MINIO_MOUNT_ENABLED=false` 即可跳过。
 
 ## 5. ⚠️ 重要：数据目录准备（必须）
 

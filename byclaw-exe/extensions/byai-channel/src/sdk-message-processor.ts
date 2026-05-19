@@ -306,7 +306,12 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
     SenderId: message.userId,
     Provider: CHANNEL_ID,
     Surface: CHANNEL_ID,
-    MessageSid: message.messageId,
+    /**
+     * 不能使用message.messageId作为MessageSid，因为在需要用户交互的场景下，messageId可能会传入和上一次任务一样的messageId
+     * 相同的MessageSid，会使openclaw判断为相同的入站消息，导致直接跳过
+     */
+    // MessageSid: message.messageId,
+    MessageSid: crypto.randomUUID(),
     OriginatingChannel: CHANNEL_ID,
     OriginatingTo: `user:${message.sessionId}`,
     /** Explicit gateway session id for tools (e.g. baiying_call); OpenClaw may forward to tool ctx. */

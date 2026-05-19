@@ -10,18 +10,23 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import com.iwhalecloud.byai.common.feign.client.FeignWhaleAgentService;
+import com.iwhalecloud.byai.common.feign.request.sandbox.WhaleAgentListSandboxesRequest;
 import com.iwhalecloud.byai.common.feign.request.sandbox.RenewSandboxTimeoutRequest;
 import com.iwhalecloud.byai.common.feign.response.KnowledgeResponse;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxCreateResult;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxRenewResult;
+import com.iwhalecloud.byai.common.feign.response.sandbox.WhaleAgentSandboxPageResult;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.CreateSandboxRequest;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.HostVolume;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.ImageSpec;
+import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxDetail;
+import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxStatus;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.Volume;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.spec.PortSpec;
@@ -43,6 +48,7 @@ class WhaleAgentSandboxRuntimeProviderTest {
         CreateSandboxRequest request = CreateSandboxRequest.builder()
             .entrypoint(List.of("node", "dist/index.js", "gateway"))
             .env(Map.of("OPENCLAW_GATEWAY_TOKEN", "ztesoft"))
+            .metadata(Map.of("userCode", "user001", "serviceKey", "byclaw-code-agent"))
             .image(ImageSpec.builder().uri("10.10.236.107:8099/sandbox/openclaw:2026.3.2").build())
             .resourceLimits(Map.of("cpu", "2", "memory", "2Gi"))
             .volumes(List.of(Volume.builder()
@@ -72,6 +78,10 @@ class WhaleAgentSandboxRuntimeProviderTest {
         assertThat(payload.get("resourceLimits")).isEqualTo(Map.of("cpu", "2", "memory", "2Gi"));
         assertThat(payload.get("servicePort")).isEqualTo(18789);
         assertThat(payload.get("sandboxType")).isEqualTo("byclaw");
+        assertThat(payload.get("metadata")).isEqualTo(Map.of(
+            "userCode", "user001",
+            "serviceKey", "byclaw-code-agent",
+            "idempotencyKey", "idem-1"));
 
         @SuppressWarnings("unchecked")
         Map<String, Object> image = (Map<String, Object>) payload.get("image");
@@ -136,5 +146,68 @@ class WhaleAgentSandboxRuntimeProviderTest {
         provider.heartbeat("user001", "byclaw-code-agent", SandboxInfo.builder().sandboxId("sandbox-1").timeoutSeconds(0).build());
 
         verify(feignWhaleAgentService, never()).renewSandboxTimeout(any());
+    }
+
+    @Test
+    void findReusable_usesMetadataFilterAndReturnsNewestRunningSandbox() {
+        FeignWhaleAgentService feignWhaleAgentService = mock(FeignWhaleAgentService.class);
+        WhaleAgentSandboxRuntimeProvider provider = new WhaleAgentSandboxRuntimeProvider(feignWhaleAgentService);
+
+        SandboxDetail older = new SandboxDetail();
+        older.setId("sandbox-older");
+        older.setCreatedAt(java.time.OffsetDateTime.parse("2026-05-15T10:00:00Z"));
+        older.setExpiresAt(java.time.OffsetDateTime.parse("2026-05-15T11:00:00Z"));
+        older.setStatus(new SandboxStatus("Running", "CONTAINER_RUNNING", "running", null));
+
+        SandboxDetail newer = new SandboxDetail();
+        newer.setId("sandbox-newer");
+        newer.setCreatedAt(java.time.OffsetDateTime.parse("2026-05-15T10:05:00Z"));
+        newer.setExpiresAt(java.time.OffsetDateTime.parse("2026-05-15T11:05:00Z"));
+        newer.setStatus(new SandboxStatus("Running", "CONTAINER_RUNNING", "running", null));
+
+        WhaleAgentSandboxPageResult result = new WhaleAgentSandboxPageResult();
+        result.setItems(List.of(older, newer));
+        when(feignWhaleAgentService.listSandboxes(any()))
+            .thenReturn(KnowledgeResponse.success(result));
+
+        Optional<SandboxRuntimeInstance> reusable = provider.findReusable("user001", "byclaw-code-agent");
+
+        assertThat(reusable).isPresent();
+        assertThat(reusable.get().getSandboxId()).isEqualTo("sandbox-newer");
+        verify(feignWhaleAgentService).listSandboxes(
+            new WhaleAgentListSandboxesRequest(1, 100, Map.of("userCode", "user001", "serviceKey", "byclaw-code-agent")));
+    }
+
+    @Test
+    void exists_returnsTrueWhenSandboxIsRunning() {
+        FeignWhaleAgentService feignWhaleAgentService = mock(FeignWhaleAgentService.class);
+        WhaleAgentSandboxRuntimeProvider provider = new WhaleAgentSandboxRuntimeProvider(feignWhaleAgentService);
+        SandboxDetail detail = new SandboxDetail();
+        detail.setId("sandbox-1");
+        detail.setStatus(new SandboxStatus("Running", "CONTAINER_RUNNING", "running", null));
+        when(feignWhaleAgentService.getSandboxInfo(anyMap())).thenReturn(KnowledgeResponse.success(detail));
+
+        boolean exists = provider.exists("user001", "byclaw-code-agent", SandboxInfo.builder().sandboxId("sandbox-1").build());
+
+        assertThat(exists).isTrue();
+        verify(feignWhaleAgentService).getSandboxInfo(Map.of("sandboxId", "sandbox-1"));
+    }
+
+    @Test
+    void exists_returnsFalseWhenSandboxDetailMissingOrExited() {
+        FeignWhaleAgentService feignWhaleAgentService = mock(FeignWhaleAgentService.class);
+        WhaleAgentSandboxRuntimeProvider provider = new WhaleAgentSandboxRuntimeProvider(feignWhaleAgentService);
+
+        SandboxDetail exited = new SandboxDetail();
+        exited.setId("sandbox-1");
+        exited.setStatus(new SandboxStatus("Exited", "CONTAINER_EXITED", "exited", null));
+        when(feignWhaleAgentService.getSandboxInfo(anyMap()))
+            .thenReturn(KnowledgeResponse.success(null))
+            .thenReturn(KnowledgeResponse.success(exited));
+
+        assertThat(provider.exists("user001", "byclaw-code-agent", SandboxInfo.builder().sandboxId("sandbox-1").build()))
+            .isFalse();
+        assertThat(provider.exists("user001", "byclaw-code-agent", SandboxInfo.builder().sandboxId("sandbox-1").build()))
+            .isFalse();
     }
 }

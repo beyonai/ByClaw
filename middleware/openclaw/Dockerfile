@@ -37,7 +37,7 @@ RUN set -eux; \
     echo ">>> built extensions:"; ls -la /build/out/
 
 ## ── stage 2: final image ─────────────────────────────────────────
-FROM ghcr.io/openclaw/openclaw:2026.4.14
+FROM ghcr.io/openclaw/openclaw:2026.4.21
 
 USER root
 

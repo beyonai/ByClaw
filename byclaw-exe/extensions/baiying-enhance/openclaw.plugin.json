@@ -1,7 +1,7 @@
 {
   "id": "baiying-enhance",
   "name": "Baiying Enhance",
-  "description": "Sync Baiying agent JSON from disk into OpenClaw and expose resources through baiying_call (Redis-driven updates).",
+  "description": "Sync authorized Baiying digital employee JSON from Redis into OpenClaw and expose Redis-backed resources through baiying_call.",
   "version": "1.0.0",
   "configSchema": {
     "type": "object",
@@ -10,11 +10,11 @@
     "properties": {
       "agentConfigDir": {
         "type": "string",
-        "description": "Directory containing agent JSON files (flat *.json or subdirs with config.json)."
+        "description": "Deprecated: ignored. Digital employee JSON is loaded from Redis key DIG_EMPLOYEE_{resourceId} using the auth Hash."
       },
       "executorResourcesDir": {
         "type": "string",
-        "description": "Directory containing resource JSON files (flat *.json or subdirs with config.json)."
+        "description": "Deprecated for Baiying resource snapshots: associated resource JSON is loaded from Redis key {BIZTYPE}_{resourceId}."
       },
       "watchDebounceMs": {
         "type": "number",
@@ -44,6 +44,24 @@
         "type": "boolean",
         "description": "Create ~/.openclaw/workspace-<agentId>/ and seed SOUL.md/AGENTS.md/BYAI_BUSINESS_EXTENSIONS.md/… from JSON after each sync (default true).",
         "default": true
+      },
+      "workspaceArchiveOnUnauthorized": {
+        "type": "boolean",
+        "description": "When true (default), archive unauthorized managed digital employee workspaces outside the active OPENCLAW_STATE_DIR. The default remote backend uploads through the backend API and removes local active workspaces only after upload success.",
+        "default": true
+      },
+      "workspaceArchiveBackend": {
+        "type": "string",
+        "enum": [
+          "remote",
+          "local"
+        ],
+        "description": "Workspace archive backend. Default remote uploads archives to the backend API; local keeps the legacy .baiying-workspaces directory behavior.",
+        "default": "remote"
+      },
+      "workspaceArchiveDir": {
+        "type": "string",
+        "description": "Legacy local archive root for unauthorized managed workspaces when workspaceArchiveBackend=local. Absolute paths and ~ are honored; relative paths resolve under the parent of OPENCLAW_STATE_DIR. Default: .baiying-workspaces next to .openclaw."
       },
       "mainAgentsMdMode": {
         "type": "string",
@@ -88,11 +106,26 @@
       },
       "agentContentIndexPath": {
         "type": "string",
-        "description": "Optional path to the content index file; default is ~/.openclaw/baiying-enhance/agent-content-index-<id>.json (writable; avoids RO mounts on agentConfigDir)."
+        "description": "Optional path to the content index file; default is ~/.openclaw/baiying-enhance/agent-content-index-<id>.json."
+      },
+      "workspaceSkillAutoEnable": {
+        "type": "boolean",
+        "description": "Merge user-uploaded workspace skills (skills/<dir>/SKILL.md, using SKILL.md frontmatter name when present) into managed agents.list[].skills alongside JSON relSkills/skills (default true).",
+        "default": true
+      },
+      "workspaceSkillScanIntervalMs": {
+        "type": "number",
+        "description": "Fallback scan interval in milliseconds for workspace skill changes. Set <= 0 to disable periodic scan and rely on fs.watch plus normal sync triggers.",
+        "default": 500
+      },
+      "workspaceSkillIncludeMainShared": {
+        "type": "boolean",
+        "description": "When true, skills uploaded to the main workspace (workspace/skills) are shared into managed sub-agents. Default false: managed agents only auto-load their own workspace skills.",
+        "default": false
       },
       "digEmployeeChangeSubscribe": {
         "type": "boolean",
-        "description": "Subscribe to Redis Pub/Sub for digital-employee change events (same Redis as USER_CODE auth). Can also enable with env BAIYING_DIG_EMPLOYEE_CHANGE_SUBSCRIBE=true."
+        "description": "Subscribe to Redis Pub/Sub for digital-employee change events. Default true; set false or env BAIYING_DIG_EMPLOYEE_CHANGE_SUBSCRIBE=false to disable."
       },
       "digEmployeeChangeChannel": {
         "type": "string",

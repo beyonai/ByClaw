@@ -32,6 +32,7 @@ import ModalDrawer from '@/pages/manager/components/ModalDrawer';
 import styles from './index.module.less';
 
 const { Option } = Select;
+const RELEASABLE_STATUSES = ['STARTING', 'RUNNING'];
 
 const formatTimestamp = (value?: string | number | null) => {
   if (!value) return '-';
@@ -223,6 +224,8 @@ const SandboxMgr = () => {
     window.open(endpoint, '_blank');
   }, []);
 
+  const canReleaseSandbox = useCallback((record: SsSandboxRecord) => RELEASABLE_STATUSES.includes(record.status), []);
+
   const handleAutoReleaseChange = useCallback(
     (record: SsSandboxRecord, checked: boolean) => {
       setUpdatingId(record.id);
@@ -393,8 +396,17 @@ const SandboxMgr = () => {
         if (value === 'RUNNING') {
           return <Tag color="green">{intl.formatMessage({ id: 'sandboxMgr.status.running' })}</Tag>;
         }
+        if (value === 'STARTING') {
+          return <Tag color="blue">{intl.formatMessage({ id: 'sandboxMgr.status.starting' })}</Tag>;
+        }
+        if (value === 'RELEASING') {
+          return <Tag color="orange">{intl.formatMessage({ id: 'sandboxMgr.status.releasing' })}</Tag>;
+        }
         if (value === 'RELEASED') {
           return <Tag color="default">{intl.formatMessage({ id: 'sandboxMgr.status.released' })}</Tag>;
+        }
+        if (value === 'FAILED') {
+          return <Tag color="red">{intl.formatMessage({ id: 'sandboxMgr.status.failed' })}</Tag>;
         }
         return <Tag>{value}</Tag>;
       },
@@ -485,19 +497,21 @@ const SandboxMgr = () => {
       fixed: 'right' as const,
       width: 160,
       render: (_: any, record: SsSandboxRecord) => {
-        if (record.status !== 'RUNNING') return null;
+        if (!canReleaseSandbox(record)) return null;
 
         return (
           <Space size="small">
-            <Button
-              size="small"
-              type="link"
-              icon={<EyeOutlined />}
-              onClick={() => handleView(record.endpoint)}
-              disabled={!record.endpoint}
-            >
-              {intl.formatMessage({ id: 'sandboxMgr.action.view' })}
-            </Button>
+            {record.status === 'RUNNING' && (
+              <Button
+                size="small"
+                type="link"
+                icon={<EyeOutlined />}
+                onClick={() => handleView(record.endpoint)}
+                disabled={!record.endpoint}
+              >
+                {intl.formatMessage({ id: 'sandboxMgr.action.view' })}
+              </Button>
+            )}
             <Popconfirm
               title={intl.formatMessage({ id: 'sandboxMgr.delete.confirm' })}
               onConfirm={() => handleDelete(record)}
@@ -536,8 +550,11 @@ const SandboxMgr = () => {
             />
             <Select value={status} onChange={handleStatusChange} style={{ width: 150 }}>
               <Option value="">{intl.formatMessage({ id: 'sandboxMgr.status.all' })}</Option>
+              <Option value="STARTING">{intl.formatMessage({ id: 'sandboxMgr.status.starting' })}</Option>
               <Option value="RUNNING">{intl.formatMessage({ id: 'sandboxMgr.status.running' })}</Option>
+              <Option value="RELEASING">{intl.formatMessage({ id: 'sandboxMgr.status.releasing' })}</Option>
               <Option value="RELEASED">{intl.formatMessage({ id: 'sandboxMgr.status.released' })}</Option>
+              <Option value="FAILED">{intl.formatMessage({ id: 'sandboxMgr.status.failed' })}</Option>
             </Select>
           </Space>
         </Col>

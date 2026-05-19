@@ -116,6 +116,12 @@ export function agentHandler(item: IAgent) {
     myAgentType = agentTypeMap.openclaw;
   }
 
+  const rawIsDefault = item.isDefault ?? (item as Record<string, unknown>).default;
+  const normalizedIsDefault =
+    rawIsDefault === undefined
+      ? undefined
+      : rawIsDefault === true || String(rawIsDefault) === 'true' || String(rawIsDefault) === '1';
+
   return {
     ...item,
     name: item.resourceName || item.name || '',
@@ -124,6 +130,12 @@ export function agentHandler(item: IAgent) {
 
     chatAvatar: myAvatar,
     category: 'all',
+    ...(normalizedIsDefault === undefined
+      ? {}
+      : {
+        isDefault: normalizedIsDefault,
+        canSetDefault: item.canSetDefault ?? !normalizedIsDefault,
+      }),
 
     ...get(agentMap, myAgentType, {}),
   };
@@ -228,51 +240,55 @@ export const agentHomeUrlHandler = (
 
   if (!agentHomeUrl) return '';
 
-  console.log('agentHomeUrl', agentHomeUrl);
+  try {
+    const myUrl = chain(agentHomeUrl)
+      .replace('{beyond-token}', getToken())
+      .replace('{sso-token}', getssoToken())
+      .value();
 
-  const myUrl = chain(agentHomeUrl).replace('{beyond-token}', getToken()).replace('{sso-token}', getssoToken()).value();
-
-  console.log('myUrl', myUrl);
-
-  const protocolRegex = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
-  let urlWithProtocol = myUrl;
-  if (!protocolRegex.test(myUrl)) {
-    urlWithProtocol = `https://${myUrl}`;
-  }
-
-  const srcObj = new URL(urlWithProtocol);
-
-  if (!agentHomeUrl.includes('{beyond-token}')) {
-    srcObj.searchParams.append('beyondtoken', getToken());
-  }
-
-  const uniqueId = generateUniqueId();
-
-  const files: Array<{
-    fileId: number;
-    fileName: string;
-    fileType: string;
-    fileUrl: string;
-  }> = [];
-  concat([], nextSessionIFileCache || []).forEach((item) => {
-    if (item.queryFile) {
-      files.push({
-        ...(pick(item.queryFile, ['fileId', 'fileName', 'fileType']) as {
-          fileId: number;
-          fileName: string;
-          fileType: string;
-        }),
-        fileUrl: spliceOrigin(getFileUrl(item?.queryFile?.fileUrl || '')),
-      });
+    const protocolRegex = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
+    let urlWithProtocol = myUrl;
+    if (!protocolRegex.test(myUrl)) {
+      urlWithProtocol = `http://${myUrl}`;
     }
-  });
 
-  srcObj.searchParams.append('uuid', uniqueId);
-  srcObj.searchParams.append('objectId', `${id}`);
-  srcObj.searchParams.append('resourceCode', resourceCode || '');
-  srcObj.searchParams.append('sessionId', `${sessionId}`);
-  srcObj.searchParams.append('files', btoa(encodeURIComponent(JSON.stringify(files))));
-  srcObj.searchParams.append('language', `${getLocale()}`);
+    const srcObj = new URL(urlWithProtocol);
 
-  return srcObj.toString();
+    if (!agentHomeUrl.includes('{beyond-token}')) {
+      srcObj.searchParams.append('beyondtoken', getToken());
+    }
+
+    const uniqueId = generateUniqueId();
+
+    const files: Array<{
+      fileId: number;
+      fileName: string;
+      fileType: string;
+      fileUrl: string;
+    }> = [];
+    concat([], nextSessionIFileCache || []).forEach((item) => {
+      if (item.queryFile) {
+        files.push({
+          ...(pick(item.queryFile, ['fileId', 'fileName', 'fileType']) as {
+            fileId: number;
+            fileName: string;
+            fileType: string;
+          }),
+          fileUrl: spliceOrigin(getFileUrl(item?.queryFile?.fileUrl || '')),
+        });
+      }
+    });
+
+    srcObj.searchParams.append('uuid', uniqueId);
+    srcObj.searchParams.append('objectId', `${id}`);
+    srcObj.searchParams.append('resourceCode', resourceCode || '');
+    srcObj.searchParams.append('sessionId', `${sessionId}`);
+    srcObj.searchParams.append('files', btoa(encodeURIComponent(JSON.stringify(files))));
+    srcObj.searchParams.append('language', `${getLocale()}`);
+
+    return srcObj.toString();
+  } catch (e) {
+    console.error('agentHomeUrlHandler error', agentHomeUrl, e);
+    return '';
+  }
 };

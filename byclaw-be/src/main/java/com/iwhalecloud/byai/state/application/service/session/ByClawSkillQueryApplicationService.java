@@ -6,20 +6,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
-import com.iwhalecloud.byai.common.storage.model.StorageObject;
-import com.iwhalecloud.byai.common.storage.model.StoragePrefix;
-import com.iwhalecloud.byai.state.domain.chat.vo.UserSpaceVo;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
-import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
-import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.storage.UserFS;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 
 /**
@@ -31,48 +27,50 @@ import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 @Service
 public class ByClawSkillQueryApplicationService {
 
-    static final String SKILL_ROOT_PREFIX_TEMPLATE = "/.openclaw/workspace-baiying-agent-%s/skills/";
-
-    static final String WORKSPACE_SKILL_ROOT_PREFIX = "/.openclaw/workspace/skills/";
-
-    private static final String SKILL_DOC_FILE_NAME = "SKILL.md";
-
     @Autowired
     private UserFS userFS;
 
+    @Autowired
+    private SsResourceService ssResourceService;
+
     /**
-     * 查询指定用户在其工作空间下的 skill 列表。 1. 只在 minio 模式下开放； 2. 仅查询 resourceId 对应工作空间的 skills 根目录； 3. 只识别
-     * skills/{skillName}/SKILL.md，不递归采纳更深层级对象； 4. keyword 只按一层 skillFileName 目录名匹配； 5. 若桶或目录不存在，返回空列表。
+     * 查询指定用户在其工作空间下的 skill 列表。
+     * 1. resourceId 有值时查询数字员工路径 /.openclaw/workspace-baiying-agent-{resourceId}/skills/；
+     * 2. resourceId 为空时查询超级助手路径 /.openclaw/workspace/skills/；
+     * 3. 只识别 skills/{skillName}/SKILL.md，不递归采纳更深层级对象；
+     * 4. keyword 只按一层 skillFileName 目录名匹配；5. 若桶或目录不存在，返回空列表。
      */
     public List<ByClawSkillDto> qrySkillListByUserCode(String userCode, Long resourceId, String keyword) {
         if (StringUtils.isBlank(userCode)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.user.code.notempty"));
         }
-        if (resourceId == null) {
-            throw new IllegalArgumentException(I18nUtil.get("resource.resourceid.notnull"));
-        }
 
         String normalizedKeyword = StringUtils.trimToEmpty(keyword).toLowerCase(Locale.ROOT);
 
-        String skillRootPrefix = buildSkillRootPrefix(resourceId);
+        String skillRootPrefix = resolveSkillRootPrefix(resourceId);
         Map<String, SkillDocInfo> skillDocMap = new LinkedHashMap<>();
         collectSkillDocs(skillDocMap,
-            safeObjectKeys(withUserContext(userCode, () -> userFS.list(skillRootPrefix, null))), skillRootPrefix);
-        collectSkillDocs(skillDocMap,
-            safeObjectKeys(withUserContext(userCode, () -> userFS.list(WORKSPACE_SKILL_ROOT_PREFIX, null))),
-            WORKSPACE_SKILL_ROOT_PREFIX);
+            safeObjectKeys(ByClawSkillPaths.withUserContext(userCode, () -> userFS.list(skillRootPrefix, null))),
+            skillRootPrefix);
 
         return skillDocMap.entrySet().stream().filter(entry -> matchKeyword(entry.getKey(), normalizedKeyword))
             .map(entry -> buildSkillDto(entry.getKey(), entry.getValue()))
             .sorted(Comparator.comparing(ByClawSkillDto::getSkillName)).collect(Collectors.toList());
     }
 
-    private String buildSkillRootPrefix(Long resourceId) {
-        return String.format(SKILL_ROOT_PREFIX_TEMPLATE, resourceId);
-    }
-
     private List<String> safeObjectKeys(List<String> objectKeys) {
         return objectKeys == null ? Collections.emptyList() : objectKeys;
+    }
+
+    private String resolveSkillRootPrefix(Long resourceId) {
+        if (resourceId == null) {
+            return ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX;
+        }
+        SsResource resource = ssResourceService.findById(resourceId);
+        String resourceCode = resource == null ? null : resource.getResourceCode();
+        return ByClawSkillPaths.isSuperAssistantResourceCode(resourceCode)
+            ? ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX
+            : ByClawSkillPaths.buildAgentSkillRootPrefix(resourceId);
     }
 
     private void collectSkillDocs(Map<String, SkillDocInfo> skillDocMap, List<String> objectKeys,
@@ -88,7 +86,7 @@ public class ByClawSkillQueryApplicationService {
         String relativePath = objectKey.substring(skillRootPrefix.length());
         String[] segments = StringUtils.split(relativePath, '/');
         if (segments == null || segments.length != 2 || StringUtils.isBlank(segments[0])
-            || !StringUtils.equals(segments[1], SKILL_DOC_FILE_NAME)) {
+            || !StringUtils.equals(segments[1], ByClawSkillPaths.SKILL_DOC_FILE_NAME)) {
             return;
         }
         skillDocMap.putIfAbsent(segments[0], new SkillDocInfo(skillRootPrefix + segments[0], objectKey));
@@ -106,33 +104,6 @@ public class ByClawSkillQueryApplicationService {
 
     private ByClawSkillDto buildSkillDto(String skillName, SkillDocInfo skillDocInfo) {
         return new ByClawSkillDto(skillName, skillDocInfo.skillPath, skillDocInfo.skillDocObjectKey);
-    }
-
-    private static <T> T withUserContext(String userCode, Callable<T> callable) {
-        LoginInfo originalLoginInfo = CurrentUserHolder.getLoginInfo();
-        LoginInfo loginInfo = new LoginInfo();
-        loginInfo.setUserCode(userCode.trim());
-        CurrentUserHolder.setLoginInfo(loginInfo);
-        try {
-            return callable.call();
-        }
-        catch (RuntimeException e) {
-            throw e;
-        }
-        catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
-        finally {
-            restoreLoginInfo(originalLoginInfo);
-        }
-    }
-
-    private static void restoreLoginInfo(LoginInfo originalLoginInfo) {
-        if (originalLoginInfo == null) {
-            CurrentUserHolder.clearLoginInfo();
-            return;
-        }
-        CurrentUserHolder.setLoginInfo(originalLoginInfo);
     }
 
     private static final class SkillDocInfo {

@@ -171,12 +171,16 @@ public class IndexApplicationServiceV2 {
             && Objects.equals(authDigitEmployVo.getId(), defaultDigitalEmployeeId);
         authDigitEmployVo.setIsDefault(isDefault);
         authDigitEmployVo.setCanSetDefault(!isDefault);
-        String tagName = buildRuntimeDigitalEmployeeTagName(authDigitEmployVo.getOwnerType(),
-            authDigitEmployVo.getResourceCode(), authDigitEmployVo.getAgentType());
-        if (isDefault && StringUtils.isNotBlank(tagName)) {
-            tagName = tagName + I18nUtil.get("digemployee.tag.default.suffix");
+        authDigitEmployVo.setTagName(buildRuntimeDigitalEmployeeTagName(authDigitEmployVo.getOwnerType(),
+            authDigitEmployVo.getResourceCode(), authDigitEmployVo.getAgentType()));
+    }
+
+    private void fillRuntimeTag(DigitEmployMarketVo digitEmployMarketVo) {
+        if (digitEmployMarketVo == null) {
+            return;
         }
-        authDigitEmployVo.setTagName(tagName);
+        digitEmployMarketVo.setTagName(buildRuntimeDigitalEmployeeTagName(digitEmployMarketVo.getOwnerType(),
+            digitEmployMarketVo.getResourceCode(), digitEmployMarketVo.getAgentType()));
     }
 
     /**
@@ -224,10 +228,11 @@ public class IndexApplicationServiceV2 {
 
         PageInfo<AuthDigitEmployVo> pageInfo = PageHelperUtil.toPageInfo(page);
 
-        // 标记是否我常用的
+        Long defaultDigitalEmployeeId = resolveCurrentUserDefaultDigitalEmployeeId();
         List<AuthDigitEmployVo> authDigitEmployVos = pageInfo.getList();
         for (AuthDigitEmployVo authDigitEmployVo : authDigitEmployVos) {
             this.setIsMyCreate(authDigitEmployVo);
+            this.fillDefaultAndRuntimeTag(authDigitEmployVo, defaultDigitalEmployeeId);
         }
 
         return pageInfo;
@@ -255,8 +260,10 @@ public class IndexApplicationServiceV2 {
         // 为每个数字员工添加知识和技能统计信息
         this.fillResourceStatsForAuthDigitEmployVos(authDigitEmployVos);
 
+        Long defaultDigitalEmployeeId = resolveCurrentUserDefaultDigitalEmployeeId();
         for (AuthDigitEmployVo authDigitEmployVo : authDigitEmployVos) {
             this.setIsMyCreate(authDigitEmployVo);
+            this.fillDefaultAndRuntimeTag(authDigitEmployVo, defaultDigitalEmployeeId);
         }
 
         return pageInfo;
@@ -341,6 +348,7 @@ public class IndexApplicationServiceV2 {
         for (DigitEmployMarketExtVo digitEmployMarketVo : discoverList) {
             // 设置权限状态
             this.buildPermissionStatus(digitEmployMarketVo);
+            this.fillRuntimeTag(digitEmployMarketVo);
 
             digitEmployMarketVoMap.put(digitEmployMarketVo.getId(), digitEmployMarketVo);
         }

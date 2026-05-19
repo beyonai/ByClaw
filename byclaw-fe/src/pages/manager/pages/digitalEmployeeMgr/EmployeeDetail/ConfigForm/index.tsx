@@ -55,6 +55,7 @@ import { DEFAULT_PERSONALITY_DEFINITION } from '../personalityDefinitionDefault'
 import RobotModal from './RobotModal';
 import { normalizeCatalogTree } from '@/utils/catalog';
 import { DEFAULT_AGENT_TYPE_OPTIONS, DEFAULT_TEMPLATE_DATA } from '../../constants';
+import Ellipsis from '@/pages/manager/components/Ellipsis';
 
 const { TextArea } = Input;
 
@@ -1111,7 +1112,7 @@ const ConfigForm = (props) => {
 
     // 如果有回调函数，等待图片加载完成后执行
     if (onLoadCallback) {
-      const img = new Image();
+      const img = new window.Image();
       img.onload = () => {
         onLoadCallback();
       };
@@ -1767,6 +1768,84 @@ const ConfigForm = (props) => {
             {/* )} */}
             {/* {digitalType === 'FROM_MANUALLY' && ( */}
             <>
+              {/* 配置知识 */}
+              {employeeType !== '005' && (
+                <div className={styles.knowledgeSection}>
+                  <div className={styles.sectionHeader}>
+                    <span className={styles.sectionTitle}>
+                      {intl.formatMessage({
+                        id: 'employeeDetail.configureKnowledge',
+                      })}
+                    </span>
+                    <Button
+                      type="link"
+                      size="small"
+                      onClick={() => {
+                        showBaseList('006');
+                      }}
+                      disabled={isReadOnly}
+                    >
+                      + {intl.formatMessage({ id: 'common.plus' })}
+                    </Button>
+                  </div>
+
+                  {/* 知识库类别列表 */}
+                  {knowledgeBases.map((category, i) => (
+                    <div key={[category.id, i].join()} className={styles.knowledgeCategory}>
+                      <div className={`${styles.knowledgeItems} ${category.expanded ? styles.expanded : ''}`}>
+                        {category.items.length > 0
+                          ? category.items.map((item, i) => (
+                              <Card
+                                key={[item.id, i].join()}
+                                className={classnames(styles.configCard, styles.knowledgeCard)}
+                              >
+                                <div className={styles.knowledgeContent}>
+                                  <AntdIcon type="icon-zhishiku2" className={styles.fontSize36MarginRight12} />
+                                  <div className={styles.knowledgeInfo}>
+                                    <div className={styles.knowledgeDetails}>
+                                      <div className={styles.knowledgeHeader}>
+                                        <div className={styles.knowledgeName} title={item.resourceName}>
+                                          {item.resourceName}
+                                        </div>
+                                        <Tag size="small" className={styles.knowledgeTag}>
+                                          {knowledgeTypeLabelMap[item.grantResourceType] ||
+                                            knowledgeTypeLabelMap[item.resourceBizType] ||
+                                            knowledgeTypeLabelMap[category.id] ||
+                                            category.title}
+                                        </Tag>
+                                      </div>
+                                      <div className={styles.knowledgeDescription}>{item.description}</div>
+                                    </div>
+                                  </div>
+                                  {!isReadOnly && (
+                                    <AntdIcon
+                                      type="icon-a-Deleteshanchu"
+                                      onClick={() => {
+                                        setKnowledgeBases(
+                                          knowledgeBases.map((it) => {
+                                            if (it.id === category.id) {
+                                              return {
+                                                ...it,
+                                                items: it.items.filter((i) => i.resourceId !== item.resourceId),
+                                              };
+                                            }
+                                            return it;
+                                          })
+                                        );
+                                      }}
+                                      disabled={isReadOnly}
+                                    />
+                                  )}
+                                </div>
+                              </Card>
+                            ))
+                          : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* 配置工具 */}
               {employeeType !== '006' && (
                 <div className={styles.skillsSection}>
@@ -1858,84 +1937,6 @@ const ConfigForm = (props) => {
                       );
                     })}
                   </div>
-                </div>
-              )}
-
-              {/* 配置知识 */}
-              {employeeType !== '005' && (
-                <div className={styles.knowledgeSection}>
-                  <div className={styles.sectionHeader}>
-                    <span className={styles.sectionTitle}>
-                      {intl.formatMessage({
-                        id: 'employeeDetail.configureKnowledge',
-                      })}
-                    </span>
-                    <Button
-                      type="link"
-                      size="small"
-                      onClick={() => {
-                        showBaseList('006');
-                      }}
-                      disabled={isReadOnly}
-                    >
-                      + {intl.formatMessage({ id: 'common.plus' })}
-                    </Button>
-                  </div>
-
-                  {/* 知识库类别列表 */}
-                  {knowledgeBases.map((category, i) => (
-                    <div key={[category.id, i].join()} className={styles.knowledgeCategory}>
-                      <div className={`${styles.knowledgeItems} ${category.expanded ? styles.expanded : ''}`}>
-                        {category.items.length > 0
-                          ? category.items.map((item, i) => (
-                              <Card
-                                key={[item.id, i].join()}
-                                className={classnames(styles.configCard, styles.knowledgeCard)}
-                              >
-                                <div className={styles.knowledgeContent}>
-                                  <AntdIcon type="icon-zhishiku2" className={styles.fontSize36MarginRight12} />
-                                  <div className={styles.knowledgeInfo}>
-                                    <div className={styles.knowledgeDetails}>
-                                      <div className={styles.knowledgeHeader}>
-                                        <div className={styles.knowledgeName} title={item.resourceName}>
-                                          {item.resourceName}
-                                        </div>
-                                        <Tag size="small" className={styles.knowledgeTag}>
-                                          {knowledgeTypeLabelMap[item.grantResourceType] ||
-                                            knowledgeTypeLabelMap[item.resourceBizType] ||
-                                            knowledgeTypeLabelMap[category.id] ||
-                                            category.title}
-                                        </Tag>
-                                      </div>
-                                      <div className={styles.knowledgeDescription}>{item.description}</div>
-                                    </div>
-                                  </div>
-                                  {!isReadOnly && (
-                                    <AntdIcon
-                                      type="icon-a-Deleteshanchu"
-                                      onClick={() => {
-                                        setKnowledgeBases(
-                                          knowledgeBases.map((it) => {
-                                            if (it.id === category.id) {
-                                              return {
-                                                ...it,
-                                                items: it.items.filter((i) => i.resourceId !== item.resourceId),
-                                              };
-                                            }
-                                            return it;
-                                          })
-                                        );
-                                      }}
-                                      disabled={isReadOnly}
-                                    />
-                                  )}
-                                </div>
-                              </Card>
-                            ))
-                          : null}
-                      </div>
-                    </div>
-                  ))}
                 </div>
               )}
 
@@ -2624,7 +2625,15 @@ const ConfigForm = (props) => {
                               {item.label}
                               {/* <Tag>{item.value}</Tag> */}
                             </div>
-                            <div className={styles.bundledSkillModalCardDesc}>{item.description || '-'}</div>
+                            <Ellipsis
+                              lines={1}
+                              tooltip
+                              tooltipProps={{
+                                overlayStyle: { maxWidth: 500, overflowWrap: 'break-word', wordWrap: 'break-word' },
+                              }}
+                            >
+                              {item.description || '-'}
+                            </Ellipsis>
                           </div>
                           <Button
                             className={classnames(styles.actionButton, {

@@ -462,6 +462,34 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
+    void updateDigitalEmployee_persistsSkillsAndIgnoresStaleRelSkills() {
+        DigitalEmployeeDTO dto = new DigitalEmployeeDTO();
+        dto.setResourceId(100L);
+        dto.setResourceName("数字员工");
+        dto.setOwnerType(OwnerType.PERSONAL);
+        dto.setAgentType(DigitalEmployType.AGENT_TYPE_ASSISTANT.getCode());
+        dto.setSkills("[\"dws\",\"blucli\"]");
+        dto.setRelSkills(List.of("old"));
+
+        SsResource resource = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResExtDigEmployee ext = buildDigitalEmployeeExt(100L, "数字员工");
+        ext.setSkills("[\"old\"]");
+
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        when(ssResExtDigEmployeeService.findById(100L)).thenReturn(ext);
+        when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of());
+        when(ssResourceRelDetailService.querySkillsForOpenApi(100L)).thenReturn(List.of());
+
+        service.updateDigitalEmployee(dto);
+
+        ArgumentCaptor<SsResExtDigEmployee> extCaptor = ArgumentCaptor.forClass(SsResExtDigEmployee.class);
+        verify(ssResExtDigEmployeeService).update(extCaptor.capture());
+
+        assertThat(extCaptor.getValue().getSkills()).isEqualTo("[\"dws\",\"blucli\"]");
+    }
+
+    @Test
     void findDetailsById_populatesRelSkillsFromStoredSkills() {
         EmployeeIdDTO dto = new EmployeeIdDTO();
         dto.setResourceId(100L);
@@ -479,6 +507,112 @@ class DigitalEmployeeApplicationServiceTest {
 
         assertThat(result.getSkills()).isEqualTo("[\"1\",\"2\",\"3\"]");
         assertThat(result.getRelSkills()).containsExactly("1", "2", "3");
+    }
+
+    @Test
+    void applyInputRuntimeFieldsForResponse_usesSubmittedSkillsAndIgnoresSubmittedRelSkills() {
+        DigitalEmployeeDetailsDTO details = new DigitalEmployeeDetailsDTO();
+        details.setSkills("[\"old\"]");
+        details.setRelSkills(List.of("old"));
+
+        DigitalEmployeeDTO input = new DigitalEmployeeDTO();
+        input.setSkills("[\"dws\",\"blucli\"]");
+        input.setRelSkills(List.of("old"));
+
+        service.applyInputRuntimeFieldsForResponse(details, input);
+
+        assertThat(details.getSkills()).isEqualTo("[\"dws\",\"blucli\"]");
+        assertThat(details.getRelSkills()).containsExactly("dws", "blucli");
+    }
+
+    @Test
+    void applyInputRuntimeFieldsForResponse_ignoresSubmittedRelSkillsWhenSkillsAbsent() {
+        DigitalEmployeeDetailsDTO details = new DigitalEmployeeDetailsDTO();
+        details.setSkills("[\"old\"]");
+        details.setRelSkills(List.of("old"));
+
+        DigitalEmployeeDTO input = new DigitalEmployeeDTO();
+        input.setRelSkills(List.of("dws", "blucli"));
+
+        service.applyInputRuntimeFieldsForResponse(details, input);
+
+        assertThat(details.getSkills()).isEqualTo("[\"old\"]");
+        assertThat(details.getRelSkills()).containsExactly("old");
+    }
+
+    @Test
+    void findDetailsById_populatesRelToolsFromTargetContent() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(100L);
+
+        DigitalEmployeeDetailsDTO detailsDTO = new DigitalEmployeeDetailsDTO();
+        detailsDTO.setResourceId(100L);
+        detailsDTO.setPrologue("{}");
+        detailsDTO.setTargetContent("{\"relTools\":[\"tool-a\",\"tool-b\"]}");
+
+        when(ssResExtDigEmployeeService.findDetailsById(100L)).thenReturn(detailsDTO);
+        when(ssResourceService.findRelResource(100L)).thenReturn(List.of());
+        when(templateRuleInfoApplicationService.findMemoryConfigsByResourceIdAndUserId(100L, 1L)).thenReturn(List.of());
+
+        DigitalEmployeeDetailsDTO result = service.findDetailsById(dto);
+
+        assertThat(result.getRelTools()).containsExactly("tool-a", "tool-b");
+    }
+
+    @Test
+    void findDetailsById_prefersStoredRelPromptFromTargetContent() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(100L);
+
+        DigitalEmployeeDetailsDTO detailsDTO = new DigitalEmployeeDetailsDTO();
+        detailsDTO.setResourceId(100L);
+        detailsDTO.setPrologue("{}");
+        detailsDTO.setCorePersonaDefinition("db-core-prompt");
+        detailsDTO.setTargetContent("{\"relPrompt\":\"stored-rel-prompt\"}");
+
+        when(ssResExtDigEmployeeService.findDetailsById(100L)).thenReturn(detailsDTO);
+        when(ssResourceService.findRelResource(100L)).thenReturn(List.of());
+        when(templateRuleInfoApplicationService.findMemoryConfigsByResourceIdAndUserId(100L, 1L)).thenReturn(List.of());
+
+        DigitalEmployeeDetailsDTO result = service.findDetailsById(dto);
+
+        assertThat(result.getRelPrompt()).isEqualTo("stored-rel-prompt");
+    }
+
+    @Test
+    void findDetailsById_fallsBackToCorePersonaDefinitionWhenStoredRelPromptMissing() {
+        EmployeeIdDTO dto = new EmployeeIdDTO();
+        dto.setResourceId(100L);
+
+        DigitalEmployeeDetailsDTO detailsDTO = new DigitalEmployeeDetailsDTO();
+        detailsDTO.setResourceId(100L);
+        detailsDTO.setPrologue("{}");
+        detailsDTO.setCorePersonaDefinition("db-core-prompt");
+        detailsDTO.setTargetContent("{\"relTools\":[\"tool-a\"]}");
+
+        when(ssResExtDigEmployeeService.findDetailsById(100L)).thenReturn(detailsDTO);
+        when(ssResourceService.findRelResource(100L)).thenReturn(List.of());
+        when(templateRuleInfoApplicationService.findMemoryConfigsByResourceIdAndUserId(100L, 1L)).thenReturn(List.of());
+
+        DigitalEmployeeDetailsDTO result = service.findDetailsById(dto);
+
+        assertThat(result.getRelPrompt()).isEqualTo("db-core-prompt");
+    }
+
+    @Test
+    void applyInputRuntimeFieldsForResponse_allowsClearingRelPromptAndOverridingRelTools() {
+        DigitalEmployeeDetailsDTO detailsDTO = new DigitalEmployeeDetailsDTO();
+        detailsDTO.setRelPrompt("old-prompt");
+        detailsDTO.setRelTools(List.of("old-tool"));
+
+        DigitalEmployeeDTO inputDto = new DigitalEmployeeDTO();
+        inputDto.setCorePersonaDefinition("");
+        inputDto.setRelTools(List.of());
+
+        service.applyInputRuntimeFieldsForResponse(detailsDTO, inputDto);
+
+        assertThat(detailsDTO.getRelPrompt()).isEmpty();
+        assertThat(detailsDTO.getRelTools()).isEmpty();
     }
 
     private SsResource buildDigitalEmployee(Long resourceId, String ownerType, Long createBy) {

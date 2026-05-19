@@ -204,7 +204,6 @@ docker compose logs -f opensandbox-server
 ---
 
 **下一步：** 如果需要部署应用服务，请继续阅读：
-- [单体部署](./07-mono-deployment.md)
 - [拆分部署](./08-standalone-deployment.md)
 
 或者查看 [验证和故障排查](./09-verification.md) 了解更多排障技巧。

@@ -114,11 +114,14 @@ cp .env.example .env
 #    REDIS_PASSWORD、MID_FTP_* 等配置。
 #    如果中间件部署在远程机器，请替换为对应 IP。
 
-# 3. 启动中间件（Redis、MinIO、OpenGauss、Sandbox）
-cd deploy/middleware && sh start-all.sh && cd ../..
+# 3. 拉取中间件镜像（首次部署需要）
+(cd deploy/middleware && sh pull.sh)
 
-# 4. 启动应用
-cd deploy/standalone && docker compose up -d
+# 4. 启动中间件（Redis、MinIO、OpenGauss、Sandbox）
+(cd deploy/middleware && sh start-all.sh)
+
+# 5. 启动应用
+(cd deploy/standalone && docker compose up -d)
 ```
 
 访问 **http://localhost:8080** 开始使用。
@@ -134,8 +137,8 @@ cd deploy/standalone && docker compose up -d
 cp .env.example .env
 # 根据中间件实际地址回填 DB_URL、REDIS_HOST 等
 
-# 2. 启动中间件（本地部署时执行，远程部署则跳过此步）
-cd deploy/middleware && sh start-all.sh && cd ../..
+# 2. 拉取并启动中间件（本地部署时执行，远程部署则跳过此步）
+(cd deploy/middleware && sh pull.sh && sh start-all.sh)
 
 # 3. 启动应用（推荐统一脚本）
 scripts/start.sh --all

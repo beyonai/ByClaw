@@ -136,7 +136,12 @@ def _get_planning_phase_title(locale: str) -> str:
 
 
 def _get_received_message_text(locale: str) -> str:
-    return "Message received, processing..." if locale == "en_US" else "已接收到用户消息，开始处理"
+    return (
+        "Message received, processing..."
+        if locale == "en_US"
+        else "已接收到用户消息，开始处理"
+    )
+
 
 _HEARTBEAT_INTERVAL: float = 3.0
 
@@ -315,6 +320,15 @@ def _extract_tool_resource_codes(
     return object_codes, view_codes
 
 
+def _normalize_recall(raw: Any) -> list[str]:
+    """将 recall 值规范化为 list[str]：list 原样返回，str 包装为单元素列表。"""
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str) and raw:
+        return [raw]
+    return []
+
+
 def _dict_to_paradigm_answer(raw: Any) -> Any:
     """将前端 paradigm dict 转为 ParadigmAnswer；str 时原样返回。
 
@@ -339,7 +353,21 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
     options = [
         ParadigmOption(
             choice_keyword=str(item.get("choiceKeyword") or ""),
-            recall=str(item.get("recall") or ""),
+            recall=_normalize_recall(item.get("recall")),
+            filter_field=str(item.get("field") or ""),
+            comparison=str(item.get("comparison") or ""),
+            value=str(item.get("value") or ""),
+            choice_field=str(item.get("choiceField") or ""),
+            choice_comparison=str(item.get("choiceComparison") or ""),
+            field_recall=item.get("fieldRecall")
+            if isinstance(item.get("fieldRecall"), list)
+            else [],
+            comparison_recall=item.get("comparisonRecall")
+            if isinstance(item.get("comparisonRecall"), list)
+            else [],
+            value_recall=item.get("valueRecall")
+            if isinstance(item.get("valueRecall"), list)
+            else [],
         )
         for item in items
         if isinstance(item, dict)
@@ -353,6 +381,39 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
             )
         ]
     )
+
+
+def _paradigm_option_to_dict(opt: Any) -> dict[str, Any]:
+    """将 ParadigmOption 转为前端 paradigmResult 字典，包含查询值和过滤条件字段。"""
+    result: dict[str, Any] = {
+        "keyword": getattr(opt, "keyword", ""),
+        "recall": getattr(opt, "recall", []),
+        "kid": getattr(opt, "kid", 0),
+        "ktype": getattr(opt, "ktype", ""),
+        "choiceKeyword": getattr(opt, "choice_keyword", ""),
+    }
+    # 过滤条件专用字段：仅当有值时输出，避免前端收到大量空字段
+    filter_field = getattr(opt, "filter_field", "")
+    if filter_field:
+        result["field"] = filter_field
+        result["choiceField"] = getattr(opt, "choice_field", "")
+    comparison = getattr(opt, "comparison", "")
+    if comparison:
+        result["comparison"] = comparison
+        result["choiceComparison"] = getattr(opt, "choice_comparison", "")
+    value = getattr(opt, "value", "")
+    if value:
+        result["value"] = value
+    field_recall = getattr(opt, "field_recall", None)
+    if field_recall:
+        result["fieldRecall"] = field_recall
+    comparison_recall = getattr(opt, "comparison_recall", None)
+    if comparison_recall:
+        result["comparisonRecall"] = comparison_recall
+    value_recall = getattr(opt, "value_recall", None)
+    if value_recall:
+        result["valueRecall"] = value_recall
+    return result
 
 
 def _get_gateway_user_code(context: Any) -> str | None:
@@ -451,7 +512,9 @@ async def _consume_agent_events(
         await context.emit_chunk(
             StreamChunkEvent(
                 content="回答完成",
-                metadata={"relatedResources": _related_resources_from_reco_task(reco_task)},
+                metadata={
+                    "relatedResources": _related_resources_from_reco_task(reco_task)
+                },
             ),
             event_type=EventType.APP_STREAM_RESPONSE.value,
             content_type=SseMessageType.text.value,
@@ -475,14 +538,7 @@ async def _consume_agent_events(
                     "paradigmId": group.paradigm_id,
                     "paradigmName": group.paradigm_name,
                     "paradigmResult": [
-                        {
-                            "keyword": opt.keyword,
-                            "recall": opt.recall,
-                            "kid": opt.kid,
-                            "ktype": opt.ktype,
-                            "choiceKeyword": opt.choice_keyword,
-                        }
-                        for opt in group.options
+                        _paradigm_option_to_dict(opt) for opt in group.options
                     ],
                 }
             )
@@ -1035,7 +1091,6 @@ class DataCloudWorker(GatewayWorker):
             getattr(context, "locale", "<not set>"),
         )
 
-
         # 来源 1：extra_payload.call_object_ids / call_view_ids（内部委派）
         # 来源 2：extra_payload.resource_list 中的 OBJECT / VIEW 资源码（前端选择）
         # 来源 3：header_metadata 中由 interrupt 写入的恢复值（ResumeCommand 时）
@@ -1078,11 +1133,13 @@ class DataCloudWorker(GatewayWorker):
 
             _resume_meta = _human_input_meta or header_metadata
             _resume_object_ids: list[str] = [
-                s for s in (_resume_meta.get("call_object_ids") or [])
+                s
+                for s in (_resume_meta.get("call_object_ids") or [])
                 if isinstance(s, str) and s.strip()
             ]
             _resume_view_ids: list[str] = [
-                s for s in (_resume_meta.get("call_view_ids") or [])
+                s
+                for s in (_resume_meta.get("call_view_ids") or [])
                 if isinstance(s, str) and s.strip()
             ]
             if _resume_object_ids or _resume_view_ids:
@@ -1214,7 +1271,9 @@ class DataCloudWorker(GatewayWorker):
         _paradigm_resume_value: Any = None
         _paradigm_human_input_metadata: dict[str, Any] = {}
         _check_human_input = isinstance(ext_params, dict)
-        if _check_human_input and (isinstance(command, AskAgentCommand) or isinstance(command, ResumeCommand)):
+        if _check_human_input and (
+            isinstance(command, AskAgentCommand) or isinstance(command, ResumeCommand)
+        ):
             _human_input = ext_params.get("humanInput")
             if isinstance(_human_input, dict) and isinstance(
                 _human_input.get("paradigmList"), list
@@ -1236,14 +1295,14 @@ class DataCloudWorker(GatewayWorker):
 
         resume_cache_key: str | None = None
         if isinstance(command, ResumeCommand) or _paradigm_resume_value is not None:
-            if _paradigm_resume_value is not None:
-                resume_value_probe = _paradigm_resume_value
-            elif isinstance(command, ResumeCommand):
+            if isinstance(command, ResumeCommand):
                 resume_value_probe = (
                     command.reply_data
                     if command.reply_data is not None
                     else command.content
                 )
+            else:
+                resume_value_probe = _paradigm_resume_value
             # paradigm resume：checkpoint_id 在 humanInput.metadata 而非请求头，需合并后解析
             _probe_metadata = (
                 {**_paradigm_human_input_metadata, **header_metadata}
@@ -1360,13 +1419,6 @@ class DataCloudWorker(GatewayWorker):
                     )
                 )
                 resume_input = _dict_to_paradigm_answer(raw_paradigm)
-                # raw_paradigm 是完整 humanInput dict，直接挂到 resume_input 供
-                # _paradigm_answer_to_resume_value 透传 metadata 给 user_clarify_node
-                if isinstance(raw_paradigm, dict):
-                    try:
-                        resume_input._raw_dict = raw_paradigm  # type: ignore[attr-defined]
-                    except (AttributeError, TypeError):
-                        pass
                 event_iter = self._ontology_agent.resume(
                     dyn_thread_id,
                     resume_input,
@@ -1591,10 +1643,15 @@ class DataCloudWorker(GatewayWorker):
             if isinstance(_prologue_raw, str):
                 try:
                     import json as _json_mod
+
                     _prologue_raw = _json_mod.loads(_prologue_raw)
                 except Exception:
                     _prologue_raw = {}
-            _model_info = (_prologue_raw.get("modelInfo") or {}) if isinstance(_prologue_raw, dict) else {}
+            _model_info = (
+                (_prologue_raw.get("modelInfo") or {})
+                if isinstance(_prologue_raw, dict)
+                else {}
+            )
             _prologue_model_id = str(_model_info.get("modelId") or "").strip()
             if _prologue_model_id and _prologue_model_id not in ("", "0"):
                 try:
@@ -1605,7 +1662,9 @@ class DataCloudWorker(GatewayWorker):
                             "model": _redis_model.get("modelCode") or "",
                             "api_key": _redis_model.get("authToken") or "",
                             "base_url": _redis_model.get("url") or "",
-                            "provider": str(_ip.get("providerName") or "openai").lower(),
+                            "provider": str(
+                                _ip.get("providerName") or "openai"
+                            ).lower(),
                             "temperature": float(_ip.get("temperature") or 0.0),
                         }
                         logger.info(
@@ -1651,10 +1710,7 @@ class DataCloudWorker(GatewayWorker):
         }
         context._langgraph_thread_id = thread_id
 
-        if _paradigm_resume_value is not None:
-            # AskAgentCommand 携带 paradigm 回复：转为图恢复，不重新执行
-            graph_input = Command(resume=_paradigm_resume_value)
-        elif isinstance(command, ResumeCommand):
+        if isinstance(command, ResumeCommand):
             try:
                 resume_payload_json = json.dumps(
                     command.to_dict(),
@@ -1688,16 +1744,7 @@ class DataCloudWorker(GatewayWorker):
                 type(resume_value).__name__,
                 resume_preview,
             )
-            # 静态路径 paradigm resume：_paradigm_resume_value 携带完整 humanInput（含 metadata），
-            # 优先使用，否则 user_clarify_node 收到的是纯字符串，无法做 path_mapping 裁剪。
-            if _paradigm_resume_value is not None:
-                graph_input: Any = Command(resume=_paradigm_resume_value)
-                logger.info(
-                    "ResumeCommand (static): using paradigm humanInput dict as resume_value session=%s",
-                    context.session_id,
-                )
-            else:
-                graph_input = Command(resume=resume_value)
+            graph_input: Any = Command(resume=resume_value)
         elif _paradigm_resume_value is not None:
             # AskAgentCommand 携带 paradigm 回复：转为图恢复，不重新执行
             graph_input = Command(resume=_paradigm_resume_value)
@@ -2019,9 +2066,14 @@ class DataCloudWorker(GatewayWorker):
                     )
                     if (
                         node_name == "planning"
-                        and _get_planning_phase_title(getattr(context, "locale", "zh_CN")) not in phase_emitted
+                        and _get_planning_phase_title(
+                            getattr(context, "locale", "zh_CN")
+                        )
+                        not in phase_emitted
                     ):
-                        _planning_title = _get_planning_phase_title(getattr(context, "locale", "zh_CN"))
+                        _planning_title = _get_planning_phase_title(
+                            getattr(context, "locale", "zh_CN")
+                        )
                         phase_emitted.add(_planning_title)
                         async with context.sub_step(_planning_title):
                             pass
@@ -2099,11 +2151,17 @@ class DataCloudWorker(GatewayWorker):
                         (event.get("metadata") or {}).get("langgraph_node") or ""
                     )
                     if _node == "respond":
-                        _end_title = _get_node_phase_title("end", getattr(context, "locale", "zh_CN"))
+                        _end_title = _get_node_phase_title(
+                            "end", getattr(context, "locale", "zh_CN")
+                        )
                         if _end_title and _end_title not in phase_emitted:
                             phase_emitted.add(_end_title)
                             await context.emit_chunk(
-                                StreamChunkEvent(content=_get_node_thinking_desc("end", getattr(context, "locale", "zh_CN"))),
+                                StreamChunkEvent(
+                                    content=_get_node_thinking_desc(
+                                        "end", getattr(context, "locale", "zh_CN")
+                                    )
+                                ),
                                 event_type=EventType.REASONING_LOG_START.value,
                                 content_type=SseReasonMessageType.think_text.value,
                             )

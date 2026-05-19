@@ -1,9 +1,9 @@
-import type { ExecutorFailure } from "./types.js";
+import type { Dict, ExecutorFailure } from "./types.js";
 
 /** Mirror of `BaiYingExecutor._make_error` in `executor.py`. */
 export function makeError(
   code: string,
-  message: string,
+  message: string | Dict,
   extra: Record<string, unknown> = {},
 ): ExecutorFailure {
   return { success: false, error_code: code, error: message, ...extra };

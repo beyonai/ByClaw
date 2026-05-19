@@ -26,7 +26,7 @@ import type { IExtParams, IMessage } from '@/typescript/message';
 import type { ISession } from '@/typescript/session';
 
 import { IMessageState } from '@/constants/message';
-import { agentTypeMap } from '@/constants/agent';
+import { agentTypeMap, ROOT_AGENT_ID } from '@/constants/agent';
 import { IState } from '@/models/useEmployees';
 import { IMessageListItem } from '@/typescript/message';
 import { RichInputResourceList } from '@/components/QueryInput/RichInput';
@@ -226,7 +226,10 @@ function useChat(props: IProps) {
 
     // 用户在对话首页未显式 @ 任何数字员工，或先 @ 后又删掉了，仍兜底走默认数字员工，避免回退到通用聊天。
     const _defaultDigEmployeeId = userInfo?.defaultDigEmployeeId ? `${userInfo.defaultDigEmployeeId}` : '';
-    const _agentId = (get(restPayload, 'agentId') as string | undefined) || agentId || _defaultDigEmployeeId;
+    let _agentId = (get(restPayload, 'agentId') as string | undefined) || agentId || _defaultDigEmployeeId;
+    if (_agentId === ROOT_AGENT_ID) {
+      _agentId = _defaultDigEmployeeId;
+    }
     let _agentType = (get(restPayload, 'agentType') as IAgentType | undefined) || agentType;
     if (!get(restPayload, 'agentId') && !agentId && _defaultDigEmployeeId) {
       _agentType = agentTypeMap.agent;

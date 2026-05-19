@@ -4,8 +4,11 @@ export default {
 
   // 状态
   'sandboxMgr.status.all': '全部',
+  'sandboxMgr.status.starting': '启动中',
   'sandboxMgr.status.running': '运行中',
+  'sandboxMgr.status.releasing': '释放中',
   'sandboxMgr.status.released': '已释放',
+  'sandboxMgr.status.failed': '失败',
 
   // 表格列
   'sandboxMgr.table.id': 'ID',

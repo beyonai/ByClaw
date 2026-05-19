@@ -128,4 +128,29 @@ public class DigitalEmployeeDTO extends SsResExtDigEmployee {
      */
     private List<RelResourceInfo> relResourceInfoList;
 
+    /**
+     * 关联技能编码列表（前端入参，字符数组）。
+     * 写入时序列化为 JSON 字符串落到 {@link SsResExtDigEmployee#getSkills()} 列；
+     * 编辑回显时由 findDetailsById 反序列化重新填充。
+     */
+    private List<String> relSkills;
+
+    /**
+     * 关联工具编码列表（前端入参，字符数组）。不入库，仅作为运行期字段：
+     * 1. 同步到 MinIO 的标准 JSON 串里会带这个字段；
+     * 2. 编辑回显时由 findDetailsById 从 ss_res_ext_dig_employee.target_content 反序列化拿回，
+     *    保证保存→编辑→保存的循环不丢数据。
+     */
+    private List<String> relTools;
+
+    /**
+     * 提示词文本（运行期字段，不入 DB 独立列）：取自前端入参 corePersonaDefinition，
+     * 在 doSyncOpenClawWorkSpace 阶段被透传到标准 JSON 与 target_content；
+     * findDetailsById 回显时也从 target_content 反序列化拿回，保证保存→编辑→保存的循环不丢数据。
+     *
+     * 注意：corePersonaDefinition 仍按既有逻辑落 ss_res_ext_dig_employee.core_persona_definition 列，
+     *      relPrompt 只是它在 JSON 视角下的别名节点，避免 DB 列与 JSON 节点的命名漂移。
+     */
+    private String relPrompt;
+
 }

@@ -62,3 +62,5 @@ export const ownerTypeMap = {
   personal: 'personal',
   enterprise: 'enterprise',
 } as const;
+
+export const ROOT_AGENT_ID = 'ROOT_AGENT_ID';

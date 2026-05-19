@@ -1,9 +1,9 @@
 // @ts-nocheck
 /* eslint-disable function-paren-newline */
 /* eslint-disable no-nested-ternary */
-import { Input, Spin, Empty, Tree, Tabs } from 'antd';
+import { Input, Spin, Empty, Tree, Tabs, Select } from 'antd';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useDispatch, useSelector, useIntl } from '@umijs/max';
+import { useDispatch, useSelector, useIntl, getLocale } from '@umijs/max';
 import classnames from 'classnames';
 import AntdIcon from '@/pages/manager/components/AntdIcon';
 import Pagination from '@/pages/manager/components/Pagination';
@@ -13,7 +13,11 @@ import ItemCard from './ItemCard';
 import ItemCard2 from './ItemCard2';
 import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import { getDcSystemConfigListByStandType } from '@/service/auth';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 import { DEFAULT_MENU_CONFIG, getVisibleMenuKeysFromConfig } from '@/constants/system';
+
+const EXTERNAL_TOOLS_TAB = 'EXTERNAL';
+const BUILTIN_TOOLS_TAB = 'BUILTIN';
 
 const { DirectoryTree } = Tree;
 const defaultVisibleMenuKeys = getVisibleMenuKeysFromConfig(DEFAULT_MENU_CONFIG);
@@ -59,6 +63,9 @@ function BaseListModal(props) {
   const [catalogId, setCatalogId] = useState(['']);
   const [catalogList, setCatalogList] = useState([]);
   const [visibleMenuKeys, setVisibleMenuKeys] = useState(defaultVisibleMenuKeys);
+  const [bundledTools, setBundledTools] = useState([]);
+  const [bundledToolLoading, setBundledToolLoading] = useState(false);
+  const [toolSubTab, setToolSubTab] = useState(EXTERNAL_TOOLS_TAB);
 
   useEffect(() => {
     getDcSystemConfigListByStandType({
@@ -132,15 +139,15 @@ function BaseListModal(props) {
     }
     return [
       {
-        key: 'AGENT',
-        label: intl.formatMessage({
-          id: 'baseListModal.tabs.agent',
-        }),
-      },
-      {
         key: 'TOOLKIT',
         label: intl.formatMessage({
           id: 'baseListModal.tabs.toolSet',
+        }),
+      },
+      {
+        key: 'AGENT',
+        label: intl.formatMessage({
+          id: 'baseListModal.tabs.agent',
         }),
       },
       {
@@ -175,6 +182,61 @@ function BaseListModal(props) {
     }
     return menuFilteredTabs;
   }, [enableTabs, tabs, visibleMenuKeys]);
+
+  const toolSubOptions = useMemo(() => {
+    return [
+      {
+        value: EXTERNAL_TOOLS_TAB,
+        label: intl.formatMessage({
+          id: 'baseListModal.tabs.external',
+        }),
+      },
+      {
+        value: BUILTIN_TOOLS_TAB,
+        label: intl.formatMessage({
+          id: 'baseListModal.tabs.builtin',
+        }),
+      },
+    ];
+  }, [intl]);
+
+  const local = getLocale();
+  const isEN = React.useMemo(() => {
+    return local.includes('en');
+  }, [local]);
+
+  const fetchBundledTools = useCallback(async () => {
+    if (bundledTools.length > 0) return;
+    setBundledToolLoading(true);
+    try {
+      const res = await getDcSystemConfig({
+        paramCode: 'OPENCLAW_BUNDLED_TOOLS',
+      });
+      const list = JSON.parse(res?.paramValue || '[]');
+      const parsedList = Array.isArray(list) ? list : [];
+      setBundledTools(
+        parsedList.map((item) => ({
+          ...item,
+          id: item.toolCode,
+          resourceId: item.toolCode,
+          resourceName: item.toolName,
+          description: isEN ? item.toolDescEn || '' : item.toolDescZh || '',
+          avatar: item.toolGroupName,
+          toolCode: item.toolCode,
+          toolName: item.toolName,
+          isWildcard: item.isWildcard,
+          toolGroup: item.toolGroup,
+          toolGroupName: item.toolGroupName,
+          grantResourceType: 'TOOLKIT',
+          createUserName: isEN ? item.toolGroup : item.toolGroupName,
+        }))
+      );
+    } catch {
+      setBundledTools([]);
+    } finally {
+      setBundledToolLoading(false);
+    }
+  }, [bundledTools.length]);
 
   const [activeTab, setActiveTab] = useState(displayTabs[0]?.key);
   const [resultData, setResultData] = useState({
@@ -301,7 +363,6 @@ function BaseListModal(props) {
   );
 
   useEffect(() => {
-    // 仅在弹窗打开/类型变更时初始化拉取，避免切换 tab 触发重复请求
     if (!open) return;
     const firstTabKey = displayTabs?.[0]?.key;
     if (!firstTabKey) {
@@ -324,12 +385,27 @@ function BaseListModal(props) {
       setActiveTab(firstTabKey);
     }
 
+    if (currentTabKey === 'TOOLKIT') {
+      fetchBundledTools();
+    }
+
     getCatalog();
     getSourceList({
       resourceBizTypeList: currentTabKey ? [currentTabKey] : undefined,
       pageNum: 1,
     });
   }, [open, digitalType, displayTabs]);
+
+  const filteredBundledTools = useMemo(() => {
+    const keyword = searchKeyword.trim().toLowerCase();
+    if (!keyword) return bundledTools;
+    return bundledTools.filter(
+      (item) =>
+        item.toolName?.toLowerCase().includes(keyword) ||
+        item.toolDescZh?.toLowerCase().includes(keyword) ||
+        item.toolDescEn?.toLowerCase().includes(keyword)
+    );
+  }, [bundledTools, searchKeyword]);
 
   const onSearch = useCallback(
     (values) => {
@@ -354,7 +430,7 @@ function BaseListModal(props) {
   return (
     <ModalDrawer
       type="modal"
-      width={900}
+      width={1000}
       height={640}
       className={styles.toolConfigModal}
       closable={false}
@@ -363,8 +439,6 @@ function BaseListModal(props) {
       open={open}
       onCancel={onCancel}
       paddingSize="padding-none"
-      bodyStyle={{ padding: 0, height: 640 }}
-      styles={{ body: { padding: 0, height: 640 } }}
     >
       <div className={styles.container}>
         <div className={styles.left}>
@@ -386,7 +460,7 @@ function BaseListModal(props) {
           >
             <Spin spinning={catalogLoading}>
               <DirectoryTree
-                style={{ minHeight: 100 }}
+                className={styles.directoryTree}
                 selectedKeys={catalogId}
                 treeData={filteredCatalogList}
                 fieldNames={{
@@ -418,16 +492,32 @@ function BaseListModal(props) {
                 activeKey={activeTab}
                 onChange={(key) => {
                   setActiveTab(key);
-                  // 保留当前目录筛选，支持 tab + 目录的联合筛选
+                  if (key === 'TOOLKIT') {
+                    setToolSubTab(EXTERNAL_TOOLS_TAB);
+                    fetchBundledTools();
+                  }
                   onSearch({ resourceBizTypeList: [key], catalogId: catalogId?.[0] || '' });
                 }}
                 items={displayTabs}
               />
             </div>
             <div className={styles.headerRight}>
+              {activeTab === 'TOOLKIT' && (
+                <Select
+                  className={styles.toolSubSelect}
+                  value={toolSubTab}
+                  onChange={(value) => {
+                    setToolSubTab(value);
+                    if (value === BUILTIN_TOOLS_TAB) {
+                      fetchBundledTools();
+                    }
+                  }}
+                  options={toolSubOptions}
+                />
+              )}
               <div className={styles.searchContainer}>
                 <Input
-                  style={{ width: 150 }}
+                  className={styles.searchInput}
                   suffix={<AntdIcon type="icon-a-Searchsousuo" onClick={() => onSearch()} />}
                   value={searchKeyword}
                   onChange={(e) => setSearchKeyword(e.target.value)}
@@ -437,68 +527,102 @@ function BaseListModal(props) {
                   })}
                 />
               </div>
-              <AntdIcon type="icon-a-Closeguanbi" style={{ fontSize: '16px' }} onClick={onCancel} />
+              <AntdIcon className={styles.closeIcon} type="icon-a-Closeguanbi" onClick={onCancel} />
             </div>
           </div>
-          <Spin spinning={sourceLoading} wrapperClassName={styles.spinningWrapper}>
-            {list.length ? (
-              <div className={styles.cardListWrap}>
-                <div className={styles.cardList}>
-                  {list.map((item) => {
-                    let isSelected = false;
-                    if (isPlugin) {
-                      isSelected = !!skills.find((it) => `${it.resourceId}` === `${item.resourceId}`);
-                    } else {
-                      isSelected = !!knowledgeBases.find(
-                        (it) => !!it.items?.find((i) => `${i.resourceId}` === `${item.resourceId}`)
-                      );
-                    }
+          <Spin
+            spinning={toolSubTab === BUILTIN_TOOLS_TAB ? bundledToolLoading : sourceLoading}
+            wrapperClassName={styles.spinningWrapper}
+          >
+            {(() => {
+              const displayList =
+                activeTab === 'TOOLKIT' && toolSubTab === BUILTIN_TOOLS_TAB ? filteredBundledTools : list;
+              const isBuiltinMode = activeTab === 'TOOLKIT' && toolSubTab === BUILTIN_TOOLS_TAB;
+              if (displayList.length) {
+                return (
+                  <div className={styles.cardListWrap}>
+                    <div className={styles.cardList}>
+                      {displayList.map((item) => {
+                        let isSelected = false;
+                        if (isPlugin) {
+                          isSelected = !!skills.find((it) => `${it.resourceId}` === `${item.resourceId}`);
+                        } else {
+                          isSelected = !!knowledgeBases.find(
+                            (it) => !!it.items?.find((i) => `${i.resourceId}` === `${item.resourceId}`)
+                          );
+                        }
 
-                    if (['VIEW', 'OBJECT'].includes(activeTab)) {
-                      return (
-                        <ItemCard2
-                          key={item.id}
-                          item={item}
-                          isPlugin={isPlugin}
-                          isSelected={isSelected}
-                          isDataset={isDataset}
-                          handleSelect={handleSelect}
-                          handleRemove={handleRemove}
-                          onUpdateItem={onUpdateItem}
-                        />
-                      );
-                    }
-                    return (
-                      <ItemCard
-                        key={item.id}
-                        appId={appId}
-                        item={item}
-                        isPlugin={isPlugin}
-                        isDataset={isDataset}
-                        reload={reload}
-                        handleSelect={handleSelect}
-                        skills={skills}
-                        knowledgeBases={knowledgeBases}
-                        handleRemove={handleRemove}
+                        if (['VIEW', 'OBJECT'].includes(activeTab)) {
+                          return (
+                            <ItemCard2
+                              key={item.id}
+                              item={item}
+                              isPlugin={isPlugin}
+                              isSelected={isSelected}
+                              isDataset={isDataset}
+                              handleSelect={handleSelect}
+                              handleRemove={handleRemove}
+                              onUpdateItem={onUpdateItem}
+                            />
+                          );
+                        }
+                        if (isBuiltinMode) {
+                          return (
+                            <ItemCard
+                              key={item.id}
+                              appId={appId}
+                              item={item}
+                              isPlugin={isPlugin}
+                              isDataset={isDataset}
+                              reload={reload}
+                              handleSelect={(selectedItem) => {
+                                const relToolsItem = {
+                                  ...selectedItem,
+                                  resourceId: selectedItem.toolCode,
+                                  relTools: selectedItem.toolCode,
+                                };
+                                handleSelect(relToolsItem);
+                              }}
+                              skills={skills}
+                              knowledgeBases={knowledgeBases}
+                              handleRemove={handleRemove}
+                            />
+                          );
+                        }
+                        return (
+                          <ItemCard
+                            key={item.id}
+                            appId={appId}
+                            item={item}
+                            isPlugin={isPlugin}
+                            isDataset={isDataset}
+                            reload={reload}
+                            handleSelect={handleSelect}
+                            skills={skills}
+                            knowledgeBases={knowledgeBases}
+                            handleRemove={handleRemove}
+                          />
+                        );
+                      })}
+                    </div>
+                    {!isBuiltinMode && (
+                      <Pagination
+                        showMuit
+                        pageAllCount={displayList.length}
+                        pagination={{
+                          ...pagination,
+                          onChange: (pageNum, pageSize) => {
+                            getSourceList({ pageNum, pageSize, resourceBizTypeList: activeTab && [activeTab] });
+                          },
+                          showSelectInf: false,
+                        }}
                       />
-                    );
-                  })}
-                </div>
-                <Pagination
-                  showMuit
-                  pageAllCount={list.length}
-                  pagination={{
-                    ...pagination,
-                    onChange: (pageNum, pageSize) => {
-                      getSourceList({ pageNum, pageSize, resourceBizTypeList: activeTab && [activeTab] });
-                    },
-                    showSelectInf: false,
-                  }}
-                />
-              </div>
-            ) : (
-              <Empty />
-            )}
+                    )}
+                  </div>
+                );
+              }
+              return <Empty />;
+            })()}
           </Spin>
         </div>
       </div>

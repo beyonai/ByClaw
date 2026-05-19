@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +17,27 @@ import { executeMcp } from "./resource-types/mcp.js";
 import { executeToolkit } from "./resource-types/toolkit.js";
 import { loadJsonSchema, summarizeSchema, validateParameters } from "./schema.js";
 import { listMcpToolsLive } from "./mcp-client.js";
+import { setSharedRedisJsonStore, type BaiyingRedisJsonStore, type RedisJsonPayload } from "../redis-json-store.js";
+
+function redisPayload(key: string, raw: Record<string, unknown>): RedisJsonPayload {
+  const content = JSON.stringify(raw);
+  return { key, content, raw, hash: "test" };
+}
+
+function setRedisFixtures(fixtures: Record<string, Record<string, unknown>>): void {
+  const payloads = new Map(Object.entries(fixtures).map(([key, raw]) => [key, redisPayload(key, raw)]));
+  const store: BaiyingRedisJsonStore = {
+    getJsonByKey: async (key) => payloads.get(key) ?? null,
+    getDigEmployeeJson: async (resourceId) => payloads.get(`DIG_EMPLOYEE_${resourceId}`) ?? null,
+    getResourceJson: async ({ resourceBizType, resourceId }) => payloads.get(`${resourceBizType}_${resourceId}`) ?? null,
+    close: async () => {},
+  };
+  setSharedRedisJsonStore(store);
+}
+
+afterEach(() => {
+  setSharedRedisJsonStore(null);
+});
 
 describe("resource-type helpers", () => {
   it("normalizes resource type aliases", () => {
@@ -157,7 +178,22 @@ describe("capability builder", () => {
     expect(asString(capability?.metadata.resource_code)).toBe("rc1");
   });
 
-  it("resolveCapability hydrates WHALE_AGENT doc domain_url from local snapshot when context has only selected_resource", async () => {
+  it("resolveCapability hydrates WHALE_AGENT doc domain_url from Redis snapshot when context has only selected_resource", async () => {
+    setRedisFixtures({
+      KG_DOC_10000857: {
+        resourceBizType: "KG_DOC",
+        resourceName: "百应操作运维手册",
+        resourceCode: "797960892907077",
+        systemCode: "WHALE_AGENT",
+        resourceService: [
+          {
+            openapiSchema: {
+              servers: [{ url: "http://10.10.186.15/knowledge" }],
+            },
+          },
+        ],
+      },
+    });
     const resourcesDir = path.join(import.meta.dirname, "../../resources");
     const { capability } = await resolveCapability({
       resourcesDir,
@@ -267,7 +303,7 @@ describe("capability builder", () => {
     expect(capability?.tools?.[0]?.url).toBe("https://fixed.example.com/weather");
   });
 
-  it("builds an AGENT capability reading agentSseUrl from metaContent (snapshot JSON shape)", () => {
+  it("builds an AGENT capability reading agent URLs from metaContent (snapshot JSON shape)", () => {
     const capability = buildCapabilityFromDetail({
       resourceId: "10034319",
       detail: {
@@ -279,6 +315,7 @@ describe("capability builder", () => {
         headers: { pid: -1000 },
         metaContent: {
           agentSseUrl: "http://10.10.196.92:19902/pingress/agent/4e1fc33f660650a33a30b9ec",
+          agentHomeUrl: "/agent-home/4e1fc33f660650a33a30b9ec",
           agentType: "001",
           agentWebUrl: "",
         },
@@ -289,8 +326,28 @@ describe("capability builder", () => {
     expect(capability?.agent?.sse_url).toBe(
       "http://10.10.196.92:19902/pingress/agent/4e1fc33f660650a33a30b9ec",
     );
+    expect(capability?.agent?.agent_home_url).toBe(
+      "http://10.10.196.92:19902/pingress/agent-home/4e1fc33f660650a33a30b9ec",
+    );
     expect(capability?.agent?.integration_type).toBe("001");
     expect(capability?.metadata?.impl_type).toBe("STREAMING_AGENT");
+  });
+
+  it("builds a root AGENT capability from resource_context when only agentHomeUrl exists", () => {
+    const capability = buildCapabilityFromResourceContext("10034319", "AGENT", {
+      root_agent: {
+        resourceId: "10034319",
+        resourceName: "Home Agent",
+        integrationType: "PAGE",
+        agentHomeUrl: "https://home.example.com/agent/10034319",
+      },
+      selected_resource: null,
+    });
+
+    expect(capability).not.toBeNull();
+    expect(capability?.resource_type).toBe("AGENT");
+    expect(capability?.agent?.agent_home_url).toBe("https://home.example.com/agent/10034319");
+    expect(capability?.agent?.integration_type).toBe("PAGE");
   });
 
   it("builds an MCP capability reading mcpType from metaContent", () => {
@@ -369,6 +426,15 @@ describe("capability builder", () => {
 
 describe("MCP transport chain", () => {
   it("resolveCapability uses real MCP resource JSON (SSE mcpType)", async () => {
+    setRedisFixtures({
+      MCP_10002679: {
+        resourceBizType: "MCP",
+        resourceName: "12306 MCP",
+        domainURL: "http://mcp.example",
+        agentSseUrl: "/mcp-servers/12306-mcp/sse",
+        mcpType: "sse",
+      },
+    });
     const resourcesDir = path.join(import.meta.dirname, "../../resources");
     const fetchImpl = vi
       .fn()
@@ -396,6 +462,15 @@ describe("MCP transport chain", () => {
   });
 
   it("resolveCapability uses real MCP resource JSON (streamable_http mcpType)", async () => {
+    setRedisFixtures({
+      MCP_10004199: {
+        resourceBizType: "MCP",
+        resourceName: "Datacloud MCP",
+        domainURL: "http://mcp.example",
+        agentSseUrl: "/mcp-servers/datacloud-data/mcp",
+        mcpType: "streamable_http",
+      },
+    });
     const resourcesDir = path.join(import.meta.dirname, "../../resources");
     const fetchImpl = vi
       .fn()
@@ -566,7 +641,7 @@ describe("BaiyingExecutor describe", () => {
     resetExecutorCache();
   });
 
-  it("describes a DOC capability purely from resource context without local snapshot", async () => {
+  it("describes a DOC capability purely from resource context without Redis snapshot", async () => {
     const executor = new BaiyingExecutor({ resourcesDir: path.join(tempDir, "resources") });
     const result = await executor.describe({
       capabilityId: "10863004",
@@ -592,9 +667,8 @@ describe("BaiyingExecutor describe", () => {
     }
   });
 
-  it("describes a TOOLKIT capability using local snapshot JSON", async () => {
+  it("describes a TOOLKIT capability using Redis snapshot JSON", async () => {
     const resourcesDir = path.join(tempDir, "resources");
-    await mkdir(path.join(resourcesDir, "toolkit"), { recursive: true });
     const detail = {
       resourceBizType: "TOOLKIT",
       resourceName: "Weather Toolkit",
@@ -614,11 +688,7 @@ describe("BaiyingExecutor describe", () => {
         ],
       },
     };
-    await writeFile(
-      path.join(resourcesDir, "toolkit", "TOOLKIT_7001.json"),
-      JSON.stringify(detail),
-      "utf8",
-    );
+    setRedisFixtures({ TOOLKIT_7001: detail });
 
     const executor = new BaiyingExecutor({ resourcesDir });
     const result = await executor.describe({ capabilityId: "7001", resourceType: "toolkit" });

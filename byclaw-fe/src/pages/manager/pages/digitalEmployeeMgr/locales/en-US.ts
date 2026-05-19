@@ -144,13 +144,15 @@ export default {
   // BaseListModal
   'baseListModal.createTime': 'Create Time',
   'baseListModal.tabs.agent': 'Agent',
-  'baseListModal.tabs.toolSet': 'Tool Set',
+  'baseListModal.tabs.toolSet': 'Tool',
   'baseListModal.tabs.tool': 'Tool',
   'baseListModal.tabs.mcp': 'MCP',
   'baseListModal.tabs.view': 'View',
   'baseListModal.tabs.object': 'Object',
   'baseListModal.tabs.qa': 'Q&A KB',
   'baseListModal.tabs.document': 'Document KB',
+  'baseListModal.tabs.external': 'External',
+  'baseListModal.tabs.builtin': 'Built-in',
 
   // ItemCard
   'itemCard.remove': 'Remove',

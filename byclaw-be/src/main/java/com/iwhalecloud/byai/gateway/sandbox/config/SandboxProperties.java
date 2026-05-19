@@ -58,6 +58,11 @@ public class SandboxProperties {
         private String endpointScheme = "http";
 
         /**
+         * Base URL for UIAgent proxy endpoints, e.g. https://host:8443/sandboxes.
+         */
+        private String uiAgentProxyBaseUrl;
+
+        /**
          * 创建前是否调用列表接口，按 userCode、serviceKey 与已有沙箱对齐（与创建请求 metadata 中字段一致）。
          */
         private boolean listSandboxesBeforeCreate = true;

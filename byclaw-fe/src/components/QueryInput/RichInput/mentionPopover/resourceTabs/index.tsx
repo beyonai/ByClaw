@@ -1,8 +1,8 @@
-import { Button, Tabs, Input, Spin } from 'antd';
-import { useIntl, useNavigate } from '@umijs/max';
+import { Button, Tabs, Input, Spin, Upload, App } from 'antd';
+import { useIntl, useNavigate, useSelector } from '@umijs/max';
 import classNames from 'classnames';
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
-import { SearchOutlined } from '@ant-design/icons';
+import { SearchOutlined, UploadOutlined } from '@ant-design/icons';
 import { trim } from 'lodash';
 import ResourceCitation from '@/components/Resources/components/ResourceCitation';
 import Empty from '@/components/Empty';
@@ -10,7 +10,12 @@ import { Empty as AntdEmpty } from 'antd';
 import { ResourceType } from '../../utils/constants';
 import { IResourceType } from '../../types';
 import { ResourceTypeMap } from '@/constants/resource';
-import { queryDigEmployeeRelResourceAuth, listUserSpace, previewFile } from '@/pages/manager/service/resources';
+import {
+  queryDigEmployeeRelResourceAuth,
+  listUserSpace,
+  previewFile,
+  uploadSkillZip,
+} from '@/pages/manager/service/resources';
 import { getDcSystemConfigListByStandType } from '@/service/auth';
 import { DEFAULT_MENU_CONFIG, getVisibleMenuKeysFromConfig } from '@/constants/system';
 import styles from './style.module.less';
@@ -63,9 +68,13 @@ const ResourceTabs: React.FC<Props> = ({
   const downloadTimerRef = useRef<NodeJS.Timeout | null>(null);
   const downloadLockRef = useRef(false);
 
-  const { layoutMode, agentInfo } = useGlobal();
+  const { layoutMode, agentInfo, EventEmitter } = useGlobal();
 
   const { agentType } = agentInfo || {};
+
+  const { message } = App.useApp();
+
+  const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
 
   useEffect(() => {
     getDcSystemConfigListByStandType({
@@ -128,7 +137,6 @@ const ResourceTabs: React.FC<Props> = ({
           prefix: path,
           resourceId: agentId,
         });
-        console.log('response111', response);
         setFileList(response || []);
       } catch (error) {
         console.error('Failed to load file list:', error);
@@ -199,6 +207,44 @@ const ResourceTabs: React.FC<Props> = ({
       fetchFileList(currentPath);
     }
   }, [activeTab, currentPath, fetchFileList]);
+
+  const [skillUploading, setSkillUploading] = useState(false);
+
+  const handleSkillUpload = useCallback(
+    async (file: File) => {
+      if (!file.name.endsWith('.zip')) {
+        message.error(intl.formatMessage({ id: 'resourceTabs.skillUpload.onlyZip' }));
+        return false;
+      }
+
+      const userCode = userInfo?.userCode;
+      if (!userCode) {
+        message.error(intl.formatMessage({ id: 'resourceTabs.skillUpload.noUserCode' }));
+        return false;
+      }
+      setSkillUploading(true);
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('userCode', userCode);
+        if (normalizedAgentId) {
+          formData.append('resourceId', normalizedAgentId);
+        }
+
+        const response = await uploadSkillZip(formData);
+
+        message.success(response?.msg || intl.formatMessage({ id: 'resourceTabs.skillUpload.success' }));
+        EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
+        return true;
+      } catch (error: any) {
+        message.error(error?.message || error || intl.formatMessage({ id: 'resourceTabs.skillUpload.failed' }));
+        return false;
+      } finally {
+        setSkillUploading(false);
+      }
+    },
+    [userInfo, normalizedAgentId, intl, message]
+  );
 
   const hasAnyTab = true;
 
@@ -574,6 +620,20 @@ const ResourceTabs: React.FC<Props> = ({
           size={isDebug ? 'small' : 'middle'}
           tabBarExtraContent={
             <div className={styles.searchRow}>
+              {activeTab === 'skill' && (
+                <Upload
+                  accept=".zip"
+                  showUploadList={false}
+                  beforeUpload={(file) => {
+                    handleSkillUpload(file);
+                    return false;
+                  }}
+                >
+                  <Button icon={<UploadOutlined />} loading={skillUploading} disabled={skillUploading}>
+                    {intl.formatMessage({ id: 'resourceTabs.skillUpload.uploadButton' })}
+                  </Button>
+                </Upload>
+              )}
               <Input
                 allowClear
                 disabled={!!keyword}

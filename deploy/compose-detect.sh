@@ -11,7 +11,7 @@ _docker_daemon_ok() {
     docker info >/dev/null 2>&1
 }
 
-if docker compose version >/dev/null 2>&1 && _docker_daemon_ok; then
+if docker help compose >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && _docker_daemon_ok; then
     COMPOSE="docker compose"
     COMPOSE_ENV_FLAG="--env-file ../../.env"
 elif podman compose version >/dev/null 2>&1; then
