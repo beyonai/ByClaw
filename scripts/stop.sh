@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PID_FILE="$ROOT/logs/.pids"
@@ -117,6 +117,27 @@ else
     if [[ -n "$be_pids" ]]; then
       echo "$be_pids" | xargs kill -TERM 2>/dev/null || true
       echo "[stop] be terminated via port 8086 (pids: $(echo $be_pids | tr '\n' ' '))."
+      stopped=$((stopped + 1))
+    fi
+  fi
+
+  if [[ $STOP_QA -eq 1 ]]; then
+    qa_pids="$(pgrep -f 'byclaw-qa' 2>/dev/null || true)"
+    if [[ -n "$qa_pids" ]]; then
+      echo "$qa_pids" | xargs kill -TERM 2>/dev/null || true
+      echo "[stop] qa terminated (pids: $(echo $qa_pids | tr '\n' ' '))."
+      stopped=$((stopped + 1))
+    fi
+  fi
+
+  if [[ $STOP_DATA -eq 1 ]]; then
+    data_pids="$(pgrep -f 'byclaw-data' 2>/dev/null || true)"
+    if [[ -z "$data_pids" ]]; then
+      data_pids="$(lsof -ti :8087 2>/dev/null || true)"
+    fi
+    if [[ -n "$data_pids" ]]; then
+      echo "$data_pids" | xargs kill -TERM 2>/dev/null || true
+      echo "[stop] data terminated (pids: $(echo $data_pids | tr '\n' ' '))."
       stopped=$((stopped + 1))
     fi
   fi

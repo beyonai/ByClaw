@@ -50,12 +50,18 @@ export type AdaptedManagedAgent = {
   allowSpawnFrom: string[];
   listEntry: AgentListEntry;
   provider?: ProviderBundle;
+  /** Agent description from Baiying detail. */
+  resourceDesc?: string;
   /** Agent instructions used for workspace seeding (SOUL.md). */
   systemPrompt?: string;
   /** Absolute path to the source JSON (for workspace seeding). */
   sourceFilePath?: string;
+  /** Parsed source JSON when the authoritative copy came from Redis instead of disk. */
+  sourceJson?: unknown;
   /** SSE endpoint for INTERFACE-type agents. */
   agentSseUrl?: string;
+  /** Home URL for PAGE-type / home-page based backend agents. */
+  agentHomeUrl?: string;
   /** Integration type: "NONE" (proxy LLM) or "INTERFACE" (SSE backend). */
   integrationType?: string;
   /** Associated resources from Baiying detail. */
@@ -95,20 +101,33 @@ function nonEmpty(val: unknown): string {
   return typeof val === "string" && val.trim() ? val.trim() : "";
 }
 
+function normalizeStringList(raw: unknown): string[] {
+  return Array.isArray(raw) ? raw.map((s) => String(s).trim()).filter(Boolean) : [];
+}
+
 /** OpenClaw `agents.list[].skills`: default `[]`; fill from `relSkills` on Baiying detail / agent JSON, else legacy root `skills`. */
 function normalizeAgentListSkills(raw: Record<string, unknown>): string[] {
-  const toStrings = (arr: unknown): string[] =>
-    Array.isArray(arr) ? arr.map((s) => String(s).trim()).filter(Boolean) : [];
-
-  const fromRel = toStrings(raw.relSkills);
+  const fromRel = normalizeStringList(raw.relSkills);
   if (fromRel.length > 0) {
     return fromRel;
   }
-  const fromSkills = toStrings(raw.skills);
+  const fromSkills = normalizeStringList(raw.skills);
   if (fromSkills.length > 0) {
     return fromSkills;
   }
   return [];
+}
+
+/** OpenClaw `agents.list[].tools`: map root `relTools` to `tools.allow` and keep the plugin bridge available. */
+function normalizeAgentListTools(raw: Record<string, unknown>): NonNullable<AgentListEntry["tools"]> {
+  const allow = normalizeStringList(raw.relTools);
+  return allow.length > 0
+    ? {
+        allow: Array.from(new Set([...allow, "baiying_call"])),
+      }
+    : {
+        alsoAllow: ["baiying_call"],
+      };
 }
 
 /** Check if raw is a Baiying platform detail response (has resourceId + resourceName at root). */
@@ -150,9 +169,10 @@ function adaptRawBaiyingDetail(params: {
   ].filter(Boolean);
   const instructions = instructionParts.join("\n\n") || "You are a helpful assistant.";
 
-  // Integration type and SSE URL.
+  // Integration type and backend URLs.
   const integrationType = nonEmpty(detail.integrationType) || undefined;
   const agentSseUrl = nonEmpty(detail.agentSseUrl) || undefined;
+  const agentHomeUrl = nonEmpty(detail.agentHomeUrl) || undefined;
 
   // Associated resources (API may return either relResourceInfoList or relResourceList).
   const relResources = Array.isArray(detail.relResourceInfoList)
@@ -192,38 +212,8 @@ function adaptRawBaiyingDetail(params: {
 
   const agentId = `${MANAGED_AGENT_PREFIX}${sourceKey}`;
 
-  // For INTERFACE/A2A/PAGE agents: they have their own backend (agentSseUrl or agentWebUrl),
-  // no LLM provider needed. They are registered as tool-based agents and work via baiying_call.
-  const isBackendAgent =
-    integrationType === "INTERFACE" || integrationType === "A2A" || integrationType === "PAGE";
-
   const listSkills = normalizeAgentListSkills(detail);
-
-  if (isBackendAgent) {
-    const listEntry: AgentListEntry = {
-      id: agentId,
-      name,
-      identity: { name },
-      skills: listSkills,
-      tools: {
-        alsoAllow: ["baiying_call"],
-      },
-    };
-
-    return {
-      sourceKey,
-      agentId,
-      providerKey: "",
-      modelRef: "",
-      allowSpawnFrom: ["main"],
-      listEntry,
-      systemPrompt: instructions,
-      integrationType,
-      agentSseUrl,
-      associatedResources: associatedResources.length > 0 ? associatedResources : undefined,
-      coreCompetencies: coreCompetencies.length > 0 ? coreCompetencies : undefined,
-    };
-  }
+  const listTools = normalizeAgentListTools(detail);
 
   // For NONE-type agents, do not bind model/provider from agent JSON.
   // Leave model unset so OpenClaw can use its default model configuration.
@@ -232,9 +222,7 @@ function adaptRawBaiyingDetail(params: {
     name,
     identity: { name },
     skills: listSkills,
-    tools: {
-      alsoAllow: ["baiying_call"],
-    },
+    tools: listTools,
   };
 
   return {
@@ -247,6 +235,8 @@ function adaptRawBaiyingDetail(params: {
     systemPrompt: instructions,
     integrationType,
     agentSseUrl,
+    agentHomeUrl,
+    resourceDesc: String(detail.resourceDesc),
     associatedResources: associatedResources.length > 0 ? associatedResources : undefined,
     coreCompetencies: coreCompetencies.length > 0 ? coreCompetencies : undefined,
   };

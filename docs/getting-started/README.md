@@ -33,11 +33,11 @@ cp .env.example .env
 
 ### 3. 启动服务
 
-**单体模式**（推荐快速体验）：
+**拆分模式**（推荐）：
 
 ```bash
 cd deploy/middleware && sh start-all.sh
-cd ../mono && sh start-all.sh
+cd ../standalone && sh start-all.sh
 ```
 
 访问 http://localhost:8080 即可使用。

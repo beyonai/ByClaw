@@ -1,6 +1,9 @@
 package com.iwhalecloud.byai.state.infrastructure.filter;
 
 
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.io.IOException;
@@ -59,6 +62,9 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
     @Autowired
     private SsoTokenFilter ssoTokenFilter;
 
+    @Autowired
+    private LoginApplicationService loginApplicationService;
+
     @PostConstruct
     public void init() {
         try {
@@ -113,9 +119,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
      */
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-
         try {
-
             if (response.isCommitted()) {
                 logger.warn("Response already committed, skip session check.");
                 return false;
@@ -138,7 +142,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             }
 
             // 优先走session共享
-            HttpSession httpSession = request.getSession();
+            HttpSession httpSession = request.getSession(false);
             String userCode = this.getSessionString(httpSession, "USER_CODE");
             if (StringUtils.isNotEmpty(userCode)) {
                 return sessionFilter.doFilter(httpSession);
@@ -148,7 +152,13 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             String systemCode = request.getHeader("system-code");
             String beyondToken = request.getHeader("beyond-token");
             if (StringUtils.isNotEmpty(beyondToken)) {
-                return jwtTokenFilter.doFilter(systemCode, beyondToken);
+                boolean res = jwtTokenFilter.doFilter(systemCode, beyondToken);
+                LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
+                if (res && httpSession != null && loginInfo != null) {
+                    // 防御性措施，上面userCode为空则证明已经是session已经被清空，这里需要补全
+                    loginApplicationService.shareSession(httpSession, loginInfo);
+                }
+                return res;
             }
 
             // 单点登陆token
@@ -177,6 +187,9 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
      * @return String
      */
     private String getSessionString(HttpSession httpSession, String attributeName) {
+        if (httpSession == null) {
+            return null;
+        }
         Object attributeValue = httpSession.getAttribute(attributeName);
         return attributeValue != null ? attributeValue.toString() : null;
     }

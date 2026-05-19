@@ -1,6 +1,5 @@
 package com.iwhalecloud.byai.manager.application.service.openapi;
 
-import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.user.base.BaseUserApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketProvisioningService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrgExternalSystemService;
@@ -26,11 +25,9 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
-import java.util.Map;
 
 /**
  * @author he.duming
@@ -92,6 +89,7 @@ public class OpenUserApiApplicationService extends BaseUserApplicationService {
             users.setPwd(MD5Utils.encrypt(this.getDefaultPwd(), users.getUserCode()));
         }
 
+        users.setState(UserState.ACTIVE);
         users.setIsLocked(IsLocked.NO);
         users.setAssistantId(users.getUserId());
         users.setUserEffDate(new Date());

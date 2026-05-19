@@ -414,8 +414,6 @@ public class DigitalEmployeeApplicationService {
         ssResExtDigEmployee.setAgentSseUrl(ssResExtDigEmployee.getAgentSseUrlOri());
         ssResExtDigEmployee.setAgentWebUrl(ssResExtDigEmployee.getAgentWebUrlOri());
         ssResExtDigEmployee.setAgentAdminUrlList(ssResExtDigEmployee.getAgentAdminUrlOriList());
-        // 前端传 relSkills（List<String>），按既有约定序列化进 skills 列。relTools 不入库，留待 doSyncOpenClawWorkSpace 写入 target_content。
-        applyRelSkillsToEntity(digitalEmployeeDTO, ssResExtDigEmployee);
         ssResExtDigEmployeeService.save(ssResExtDigEmployee);
 
         // 保存关联关系
@@ -667,8 +665,6 @@ public class DigitalEmployeeApplicationService {
         ssResExtDigEmployee.setAgentAdminUrlList(ssResExtDigEmployee.getAgentAdminUrlOriList());
         // tagName 统一由查询接口运行时计算，避免前端回传旧标签又写回扩展表。
         ssResExtDigEmployee.setTagName(null);
-        // 同 save 链路：relSkills 序列化进 skills；relTools 留到 sync 阶段再写入 target_content。
-        applyRelSkillsToEntity(digitalEmployeeDTO, ssResExtDigEmployee);
         ssResExtDigEmployeeService.update(ssResExtDigEmployee);
 
         // 关联资源对比
@@ -1559,6 +1555,10 @@ public class DigitalEmployeeApplicationService {
         if (details == null || inputDto == null) {
             return;
         }
+        if (inputDto.getSkills() != null) {
+            details.setSkills(inputDto.getSkills());
+            details.setRelSkills(parseSkills(inputDto.getSkills()));
+        }
         if (inputDto.getRelTools() != null) {
             details.setRelTools(inputDto.getRelTools());
         }
@@ -1606,20 +1606,6 @@ public class DigitalEmployeeApplicationService {
             return null;
         }
         return JSON.parseArray(skills, String.class);
-    }
-
-    /**
-     * 把入参中的 relSkills（List<String>）序列化到 SsResExtDigEmployee.skills 列。
-     * - 入参为 null：不动 entity，避免覆盖 update 场景下既存的 skills；
-     * - 入参为空 list：序列化为 "[]"，符合"用户清空 skill"的语义；
-     * - 入参非空：序列化为 JSON 数组字符串。
-     */
-    private void applyRelSkillsToEntity(DigitalEmployeeDTO dto, SsResExtDigEmployee entity) {
-        List<String> relSkills = dto.getRelSkills();
-        if (relSkills == null) {
-            return;
-        }
-        entity.setSkills(JSON.toJSONString(relSkills));
     }
 
     /** 反序列化 target_content 里的 relTools 数组；不存在或解析失败返回 null。 */

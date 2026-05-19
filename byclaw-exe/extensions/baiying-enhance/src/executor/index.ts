@@ -23,9 +23,9 @@ export type { ExecutorResponse } from "./types.js";
 export type { DocDeltaCallback } from "./doc-shared.js";
 
 /**
- * Shared in-process executor cache keyed by `resourcesDir`.
- * Each distinct resources directory gets its own instance so local snapshot
- * caches are reused across calls (mirrors Python's on-demand JSON reads).
+ * Shared in-process executor cache keyed by the deprecated `resourcesDir`
+ * argument, retained for API compatibility. Resource snapshots are read from
+ * Redis on demand.
  */
 const executorCache = new Map<string, BaiyingExecutor>();
 
@@ -52,7 +52,7 @@ export function resetExecutorCache(): void {
  * what the Python CLI printed as JSON).
  */
 export async function runBaiyingExecutor(params: {
-  /** Path to `skills/baiying/resources` directory. */
+  /** Deprecated. Retained for the legacy runner argument shape. */
   resourcesDir: string;
   resourceId: string;
   resourceType: string;

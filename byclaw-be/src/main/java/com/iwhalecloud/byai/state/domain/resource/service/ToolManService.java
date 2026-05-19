@@ -97,8 +97,7 @@ public class ToolManService {
     public static final Logger LOGGER = LoggerFactory.getLogger(ToolManService.class);
 
     /**
-     * 知识库/数字员工系统来源配置；配置为 WHALE_AGENT 时表示接入老智能体商业版本，
-     * 知识/工具资源由外部智能体体系发布，本系统不允许编辑基础信息或注销。
+     * 知识库/数字员工系统来源配置；配置为 WHALE_AGENT 时表示接入老智能体商业版本， 知识/工具资源由外部智能体体系发布，本系统不允许编辑基础信息或注销。
      */
     @Value("${dataset.system:}")
     private String datasetSystem;
@@ -182,33 +181,25 @@ public class ToolManService {
     private ResourceCurlService resourceCurlService;
 
     /** 新版工具资源 JSON 导入允许的 resourceBizType */
-    private static final Set<String> IMPORT_TOOL_JSON_NEW_BIZ_TYPES = Set.of(
-        ResourceBizType.TOOLKIT.getCode(),
-        ResourceBizType.MCP.getCode(),
-        ResourceBizType.AGENT.getCode()
-    );
+    private static final Set<String> IMPORT_TOOL_JSON_NEW_BIZ_TYPES = Set.of(ResourceBizType.TOOLKIT.getCode(),
+        ResourceBizType.MCP.getCode(), ResourceBizType.AGENT.getCode());
 
-    private static final Set<String> DELETE_RESOURCE_BIZ_TYPES = Set.of(
-            ResourceBizType.TOOL.getCode(),
-            ResourceBizType.SKILL.getCode(),
-            ResourceBizType.KG_DOC.getCode(),
-            ResourceBizType.KG_DB.getCode(),
-            ResourceBizType.KG_TERM.getCode(),
-            ResourceBizType.KG_QA.getCode(),
-            ResourceBizType.OBJECT.getCode(),
-            ResourceBizType.VIEW.getCode(),
-            ResourceBizType.DIG_EMPLOYEE.getCode(),
-            ResourceBizType.TOOLKIT.getCode(),
-            ResourceBizType.MCP.getCode(),
-            ResourceBizType.AGENT.getCode());
+    private static final Set<String> DELETE_RESOURCE_BIZ_TYPES = Set.of(ResourceBizType.TOOL.getCode(),
+        ResourceBizType.SKILL.getCode(), ResourceBizType.KG_DOC.getCode(), ResourceBizType.KG_DB.getCode(),
+        ResourceBizType.KG_TERM.getCode(), ResourceBizType.KG_QA.getCode(), ResourceBizType.OBJECT.getCode(),
+        ResourceBizType.VIEW.getCode(), ResourceBizType.DIG_EMPLOYEE.getCode(), ResourceBizType.TOOLKIT.getCode(),
+        ResourceBizType.MCP.getCode(), ResourceBizType.AGENT.getCode());
 
     // 视图、对象owl文件存放在zip内的目录路径说明
     private static final String OBJECT_IMPORT_DIR_NAME = "objects";
-    private static final String VIEW_IMPORT_DIR_NAME = "views";
-    private static final int MAX_IMPORT_BUNDLE_RESOURCE_COUNT = 20;
-    private static final String OBJECT_IMPORT_RESOURCE_SUBDIR = "object";
-    private static final String VIEW_IMPORT_RESOURCE_SUBDIR = "view";
 
+    private static final String VIEW_IMPORT_DIR_NAME = "views";
+
+    private static final int MAX_IMPORT_BUNDLE_RESOURCE_COUNT = 20;
+
+    private static final String OBJECT_IMPORT_RESOURCE_SUBDIR = "object";
+
+    private static final String VIEW_IMPORT_RESOURCE_SUBDIR = "view";
 
     // ==================== Curl 调试 ====================
 
@@ -246,25 +237,14 @@ public class ToolManService {
      */
     public void saveTool(ToolSaveRequest request) {
         // 1. 用带描述的参数重新生成 OpenAPI JSON
-        String openApiJson = CurlParser.toOpenApiJsonWithDesc(
-                request.getResourceName(),
-                request.getResourceDesc(),
-                request.getMethod(),
-                request.getUrl(),
-                request.getBodyParams(),
-                request.getQueryParams(),
-                request.getPathParams(),
-                request.getHeaderParams()
-        );
+        String openApiJson = CurlParser.toOpenApiJsonWithDesc(request.getResourceName(), request.getResourceDesc(),
+            request.getMethod(), request.getUrl(), request.getBodyParams(), request.getQueryParams(),
+            request.getPathParams(), request.getHeaderParams());
 
         // 2. 包装为带 tool 元信息的完整格式
         Long resourceId = sequenceService.nextVal();
-        String wrappedJson = CurlParser.wrapOpenApiJson(
-                request.getResourceName(),
-                request.getResourceDesc(),
-                resourceId,
-                openApiJson
-        );
+        String wrappedJson = CurlParser.wrapOpenApiJson(request.getResourceName(), request.getResourceDesc(),
+            resourceId, openApiJson);
 
         // 3. 写入 ss_resource
         SsResource ssResource = new SsResource();
@@ -305,16 +285,16 @@ public class ToolManService {
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> importToolJsonNewFromMultipart(MultipartFile file, Long catalogId, String ownerType) {
         // 1. 先把上传文件读成原始 JSON 字符串，并按保序模式解析，
-        //    这样后面往 target_content 里补 resourceId 时，字段顺序可控。
+        // 这样后面往 target_content 里补 resourceId 时，字段顺序可控。
         String jsonStr = validateAndReadFile(file);
         JSONObject root = JSON.parseObject(jsonStr, Feature.OrderedField);
 
         // 2. 新入口只支持 TOOLKIT / MCP / AGENT 三类资源，
-        //    这里统一校验基础字段和 resourceBizType 的合法性。
+        // 这里统一校验基础字段和 resourceBizType 的合法性。
         validateToolJsonNewFields(root);
 
         // 3. 这条链需要回填主表的创建人、更新人等登录态信息，
-        //    因此在真正写库前先拦一下未登录场景。
+        // 因此在真正写库前先拦一下未登录场景。
         Long userId = CurrentUserHolder.getCurrentUserId();
         if (userId == null || Objects.equals(userId, (long) Integer.MIN_VALUE)) {
             throw new BdpRuntimeException(I18nUtil.get("user.session.invalid"));
@@ -328,7 +308,7 @@ public class ToolManService {
         String systemCode = StringUtils.trimToEmpty(root.getString("systemCode"));
         String version = StringUtils.trimToEmpty(root.getString("version"));
 
-        //如果前端没有传implType，则默认为API （目前智能体调，后续其他传要明确传implType），回头告诉伟斌必传过来
+        // 如果前端没有传implType，则默认为API （目前智能体调，后续其他传要明确传implType），回头告诉伟斌必传过来
         String implType = StringUtils.defaultIfBlank(StringUtils.trimToEmpty(root.getString("implType")),
             ImplType.API.getCode());
         root.put("implType", implType);
@@ -344,32 +324,39 @@ public class ToolManService {
         ResourceImportOwnerTypeValidator.validate(existing, ownerType, resourceCode, resourceName, resourceBizType);
         validateImportUpdatePermission(existing, resourceCode);
         boolean updated = existing != null;
-        String oldTargetContent = updated ? findTargetContentByBizType(resourceBizType, existing.getResourceId()) : null;
+        String oldTargetContent = updated ? findTargetContentByBizType(resourceBizType, existing.getResourceId())
+            : null;
 
         // 6. 主表统一复用 SsResourceService：
-        //    新增走 createResource，更新走 update。
+        // 新增走 createResource，更新走 update。
         SsResource resource = saveOrUpdateToolJsonNewMain(existing, resourceBizType, resourceCode, resourceName,
             resourceDesc, ownerType, systemCode, version, effectiveCatalogId, implType);
 
         // 7. 子表统一保留两份内容：
-        //    source_content 存原始 JSON，
-        //    target_content 存增加 resourceId 首节点后的新 JSON。
+        // source_content 存原始 JSON，
+        // target_content 存增加 resourceId 首节点后的新 JSON。
         String finalJsonStr = resourceTargetJsonBuilder.buildWithResourceIdFirst(root, resource, true);
         saveOrUpdateToolJsonNewExt(resourceBizType, resource.getResourceId(), jsonStr, finalJsonStr);
 
         // 8. 与其他资源导入链保持一致，清空草稿/正式版本号痕迹后，
-        //    再把最终 JSON 同步到开放资源目录。
+        // 再把最终 JSON 同步到开放资源目录。
         ssResourceService.clearResourceDraftAndReleaseVerIds(resource.getResourceId());
-        resourceArtifactStorageService.syncResourceJsonByBizType(finalJsonStr, resourceBizType, resource.getResourceId());
+        resourceArtifactStorageService.syncResourceJsonByBizType(finalJsonStr, resourceBizType,
+            resource.getResourceId());
         ssResourceArtifactService.upsertStandardJsonArtifact(resource.getResourceId(), resourceBizType,
             "tool-json-import");
 
         if (updated) {
-            LOGGER.info("工具JSON导入完成，准备重注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}", resourceBizType, resource.getResourceId(), resourceCode);
-            resourceDiscoveryRegistrationService.reregisterAfterCommit(resourceBizType, resource.getResourceId(), resourceCode, oldTargetContent, finalJsonStr);
-        } else {
-            LOGGER.info("工具JSON导入完成，准备注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}", resourceBizType, resource.getResourceId(), resourceCode);
-            resourceDiscoveryRegistrationService.registerAfterCommit(resourceBizType, resource.getResourceId(), resourceCode, finalJsonStr);
+            LOGGER.info("工具JSON导入完成，准备重注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}", resourceBizType,
+                resource.getResourceId(), resourceCode);
+            resourceDiscoveryRegistrationService.reregisterAfterCommit(resourceBizType, resource.getResourceId(),
+                resourceCode, oldTargetContent, finalJsonStr);
+        }
+        else {
+            LOGGER.info("工具JSON导入完成，准备注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}", resourceBizType,
+                resource.getResourceId(), resourceCode);
+            resourceDiscoveryRegistrationService.registerAfterCommit(resourceBizType, resource.getResourceId(),
+                resourceCode, finalJsonStr);
         }
 
         // 9. 返回 resourceId 和本次是否为更新，方便前端联调时判断导入结果。
@@ -380,10 +367,8 @@ public class ToolManService {
     }
 
     /**
-     * 开放接口工具 JSON 导入。
-     *
-     * 调用方直接传入 JSON 字符串内容，这里统一包装成内存型 MultipartFile，
-     * 然后根据 resourceBizType 分流到工具导入或知识库导入主流程，保证开放接口与页面导入规则完全一致。
+     * 开放接口工具 JSON 导入。 调用方直接传入 JSON 字符串内容，这里统一包装成内存型 MultipartFile， 然后根据 resourceBizType
+     * 分流到工具导入或知识库导入主流程，保证开放接口与页面导入规则完全一致。
      *
      * @author qin.guoquan
      * @date 2026-04-23 16:25:00
@@ -422,10 +407,7 @@ public class ToolManService {
     }
 
     /**
-     * 开放接口导入分流。
-     *
-     * TOOLKIT、MCP、AGENT 复用工具 JSON 导入主流程；
-     * KG_ 开头的资源复用知识库 JSON 导入主流程。
+     * 开放接口导入分流。 TOOLKIT、MCP、AGENT 复用工具 JSON 导入主流程； KG_ 开头的资源复用知识库 JSON 导入主流程。
      *
      * @author qin.guoquan
      * @date 2026-04-23 16:58:00
@@ -451,17 +433,15 @@ public class ToolManService {
             throw new IllegalArgumentException(I18nUtil.get("tool.json.owner.type.invalid"));
         }
 
-
-        if (StringUtils.equalsAny(resourceBizType,
-            ResourceBizType.TOOLKIT.getCode(),
-            ResourceBizType.MCP.getCode(),
+        if (StringUtils.equalsAny(resourceBizType, ResourceBizType.TOOLKIT.getCode(), ResourceBizType.MCP.getCode(),
             ResourceBizType.AGENT.getCode())) {
             return importToolJsonNewFromMultipart(multipartFile, catalogId, ownerType);
         }
 
         if (StringUtils.startsWithIgnoreCase(resourceBizType, "KG_")) {
             String resourceCode = StringUtils.trimToEmpty(root.getString("resourceCode"));
-            SsResource existing = StringUtils.isBlank(resourceCode) ? null : ssResourceService.findByIdOrCode(null, resourceCode);
+            SsResource existing = StringUtils.isBlank(resourceCode) ? null
+                : ssResourceService.findByIdOrCode(null, resourceCode);
             Long resourceId = datasetApplicationService.importDatasetJson(ownerType, catalogId, multipartFile);
             Map<String, Object> data = new HashMap<>(4);
             data.put("resourceId", String.valueOf(resourceId));
@@ -471,7 +451,6 @@ public class ToolManService {
 
         throw new IllegalArgumentException(I18nUtil.get("tool.json.resource.biz.type.invalid.with.kg"));
     }
-
 
     private String parseAndValidateFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
@@ -501,10 +480,10 @@ public class ToolManService {
         Path objectsRoot = extractedRoot;
 
         // 3. 对象 bundle 与视图 bundle 保持一致：
-        //    原始 zip 先放入同名 staging 目录 object/{zipNameWithoutExt}/，
-        //    解压目录完整同步到 object/{zipNameWithoutExt}/，
-        //    每个对象 JSON 直接发布到 object/ 根目录下，
-        //    最后 staging 目录整体切换成 OBJECT_{id1&id2}/OBJECT_{id1&id2}.zip。
+        // 原始 zip 先放入同名 staging 目录 object/{zipNameWithoutExt}/，
+        // 解压目录完整同步到 object/{zipNameWithoutExt}/，
+        // 每个对象 JSON 直接发布到 object/ 根目录下，
+        // 最后 staging 目录整体切换成 OBJECT_{id1&id2}/OBJECT_{id1&id2}.zip。
         String zipUploadSubDirectory = buildZipUploadSubDirectory(OBJECT_IMPORT_RESOURCE_SUBDIR);
         String bundleStagingDirectory = buildJsonUploadSubDirectory(OBJECT_IMPORT_RESOURCE_SUBDIR, extractedRoot);
         String jsonUploadSubDirectory = OBJECT_IMPORT_RESOURCE_SUBDIR;
@@ -527,12 +506,10 @@ public class ToolManService {
 
         try (var objectDirs = Files.list(objectsRoot)) {
             // 5. 解压目录下每个一级子目录代表一个对象，
-            //    优先扫描一级子目录第一层中的 *definition.owl；
-            //    若 zip 直接把对象文件落在根目录，也补充扫描根目录第一层中的 *definition.owl。
-            List<Path> objectDirList = objectDirs
-                .filter(Files::isDirectory)
-                .sorted(Comparator.comparing(path -> path.getFileName().toString()))
-                .collect(Collectors.toList());
+            // 优先扫描一级子目录第一层中的 *definition.owl；
+            // 若 zip 直接把对象文件落在根目录，也补充扫描根目录第一层中的 *definition.owl。
+            List<Path> objectDirList = objectDirs.filter(Files::isDirectory)
+                .sorted(Comparator.comparing(path -> path.getFileName().toString())).collect(Collectors.toList());
             LOGGER.info("对象目录第一层扫描结果, objectsRoot={}, entries={}", objectsRoot,
                 objectDirList.stream().map(path -> path.getFileName().toString()).collect(Collectors.toList()));
             List<Path> definitionOwls = findDefinitionOwlFilesInZipRootOrFirstLevelDirectories(objectsRoot,
@@ -547,10 +524,12 @@ public class ToolManService {
             if (item.isSuccess()) {
                 result.setSuccess(1);
                 importedResourceCodes.add(item.getResourceCode());
-            } else {
+            }
+            else {
                 result.setFailed(1);
             }
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new IllegalArgumentException(I18nUtil.get("tool.object.directory.read.failed"));
         }
 
@@ -590,9 +569,9 @@ public class ToolManService {
         Path viewsRoot = extractedRoot;
 
         // 3. 约定：原始 zip 先放入同名 staging 目录 view/{zipNameWithoutExt}/，
-        //    staging 目录里只保留 zip 与原始解压内容，
-        //    每个视图 JSON 直接发布到 view/ 根目录下，
-        //    全部视图处理完成后再统一把目录收口成 VIEW_{id1&id2}，并把 zip 改成最终 bundle 名放到目录内。
+        // staging 目录里只保留 zip 与原始解压内容，
+        // 每个视图 JSON 直接发布到 view/ 根目录下，
+        // 全部视图处理完成后再统一把目录收口成 VIEW_{id1&id2}，并把 zip 改成最终 bundle 名放到目录内。
         String zipUploadSubDirectory = buildZipUploadSubDirectory(VIEW_IMPORT_RESOURCE_SUBDIR);
         String bundleStagingDirectory = buildJsonUploadSubDirectory(VIEW_IMPORT_RESOURCE_SUBDIR, extractedRoot);
         String jsonUploadSubDirectory = VIEW_IMPORT_RESOURCE_SUBDIR;
@@ -616,12 +595,10 @@ public class ToolManService {
 
         try (var viewDirectories = Files.list(viewsRoot)) {
             // 5. 解压目录下每个一级子目录代表一个视图，
-            //    优先扫描一级子目录第一层中的 *definition.owl；
-            //    若 zip 直接把视图文件落在根目录，也补充扫描根目录第一层中的 *definition.owl。
-            List<Path> viewDirList = viewDirectories
-                .filter(Files::isDirectory)
-                .sorted(Comparator.comparing(path -> path.getFileName().toString()))
-                .collect(Collectors.toList());
+            // 优先扫描一级子目录第一层中的 *definition.owl；
+            // 若 zip 直接把视图文件落在根目录，也补充扫描根目录第一层中的 *definition.owl。
+            List<Path> viewDirList = viewDirectories.filter(Files::isDirectory)
+                .sorted(Comparator.comparing(path -> path.getFileName().toString())).collect(Collectors.toList());
             LOGGER.info("视图目录第一层扫描结果, viewsRoot={}, entries={}", viewsRoot,
                 viewDirList.stream().map(path -> path.getFileName().toString()).collect(Collectors.toList()));
             List<Path> definitionOwls = findDefinitionOwlFilesInZipRootOrFirstLevelDirectories(viewsRoot, viewDirList);
@@ -635,10 +612,12 @@ public class ToolManService {
             if (item.isSuccess()) {
                 result.setSuccess(1);
                 importedResourceCodes.add(item.getResourceCode());
-            } else {
+            }
+            else {
                 result.setFailed(1);
             }
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new IllegalArgumentException(I18nUtil.get("tool.view.directory.read.failed"));
         }
 
@@ -668,8 +647,7 @@ public class ToolManService {
     // ==================== 资源生命周期 ====================
 
     /**
-     * 删除资源。
-     * 删除前先校验是否被数字员工关联；若已关联，则提示先去数字员工管理界面解除关系。
+     * 删除资源。 删除前先校验是否被数字员工关联；若已关联，则提示先去数字员工管理界面解除关系。
      */
     @Transactional(rollbackFor = Exception.class)
     public void deleteManagedResource(Long resourceId) {
@@ -677,6 +655,7 @@ public class ToolManService {
     }
 
     /**
+     * 删除资源。 forceDelete=false 时会校验资源类型和资源引用关系；forceDelete=true 时跳过这些校验，直接清理主表、子表和资源关系。
      * 按 resourceCode + ownerType 删除资源。
      * 删除前仍复用既有删除校验：资源类型校验、被数字员工/视图引用校验、权限校验等。
      */
@@ -717,7 +696,7 @@ public class ToolManService {
         }
 
         // 5. 软删除：仅把 ss_resource.resource_status 置为 REMOVED(3)，保留主表、扩展表与资源关系，
-        //    让前端"已注销"筛选项可以查询到这些记录；运行期副作用（产物/缓存/注册等）继续清理。
+        // 让前端"已注销"筛选项可以查询到这些记录；运行期副作用（产物/缓存/注册等）继续清理。
         resource.setResourceStatus(ResourceStatus.REMOVED.getNum());
         resource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         resource.setUpdateTime(new Date());
@@ -737,8 +716,10 @@ public class ToolManService {
 
         // 8. 删除资源后，同步反注册其对应的服务（前面新增时注册上来的）
         if (shouldRegisterDiscoveryService(resourceBizType)) {
-            LOGGER.info("资源软删除完成，准备反注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}", resourceBizType, resourceId, resource.getResourceCode());
-            resourceDiscoveryRegistrationService.unregisterAfterCommit(resourceBizType, resourceId, resource.getResourceCode(), targetContent);
+            LOGGER.info("资源软删除完成，准备反注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}", resourceBizType,
+                resourceId, resource.getResourceCode());
+            resourceDiscoveryRegistrationService.unregisterAfterCommit(resourceBizType, resourceId,
+                resource.getResourceCode(), targetContent);
         }
 
     }
@@ -811,8 +792,7 @@ public class ToolManService {
     }
 
     /**
-     * 恢复资源。
-     * 将已注销（状态3）的资源恢复为已上架（状态2），并重新生成产物、同步缓存和注册服务。
+     * 恢复资源。 将已注销（状态3）的资源恢复为已上架（状态2），并重新生成产物、同步缓存和注册服务。
      *
      * @author liu.yafei
      * @date 2026-05-14
@@ -866,8 +846,10 @@ public class ToolManService {
 
         // 8. 恢复资源后，同步重新注册其对应的服务。
         if (shouldRegisterDiscoveryService(resourceBizType)) {
-            LOGGER.info("资源恢复完成，准备重新注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}", resourceBizType, resourceId, resource.getResourceCode());
-            resourceDiscoveryRegistrationService.registerAfterCommit(resourceBizType, resourceId, resource.getResourceCode(), targetContent);
+            LOGGER.info("资源恢复完成，准备重新注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}", resourceBizType,
+                resourceId, resource.getResourceCode());
+            resourceDiscoveryRegistrationService.registerAfterCommit(resourceBizType, resourceId,
+                resource.getResourceCode(), targetContent);
         }
     }
 
@@ -889,9 +871,7 @@ public class ToolManService {
     }
 
     /**
-     * 通用更新资源基础信息。
-     * 更新资源名称、资源描述、所属目录、更新人和更新时间；
-     * 若资源存在 targetContent，则同步回写子表并刷新开放资源目录中的 JSON。
+     * 通用更新资源基础信息。 更新资源名称、资源描述、所属目录、更新人和更新时间； 若资源存在 targetContent，则同步回写子表并刷新开放资源目录中的 JSON。
      */
     @Transactional(rollbackFor = Exception.class)
     public void updateResourceBasicInfo(Long resourceId, String resourceName, String resourceDesc, Long catalogId) {
@@ -925,8 +905,7 @@ public class ToolManService {
     // ==================== 权限与业务校验 ====================
 
     /**
-     * 商业版本（dataset.system=WHALE_AGENT）下，知识/工具的编辑/注销需走智能体门户，
-     * 在本系统拦截并提示用户。对象、视图、数字员工和非商业版本不受限。
+     * 商业版本（dataset.system=WHALE_AGENT）下，知识/工具的编辑/注销需走智能体门户， 在本系统拦截并提示用户。对象、视图、数字员工和非商业版本不受限。
      *
      * @author qin.guoquan
      * @date 2026-05-11
@@ -949,11 +928,8 @@ public class ToolManService {
     }
 
     private boolean isToolBizType(String resourceBizType) {
-        return StringUtils.equalsAny(StringUtils.trimToEmpty(resourceBizType),
-            ResourceBizType.AGENT.getCode(),
-            ResourceBizType.MCP.getCode(),
-            ResourceBizType.TOOLKIT.getCode(),
-            ResourceBizType.TOOL.getCode(),
+        return StringUtils.equalsAny(StringUtils.trimToEmpty(resourceBizType), ResourceBizType.AGENT.getCode(),
+            ResourceBizType.MCP.getCode(), ResourceBizType.TOOLKIT.getCode(), ResourceBizType.TOOL.getCode(),
             ResourceBizType.MCP_TOOL.getCode());
     }
 
@@ -974,8 +950,8 @@ public class ToolManService {
             throw new IllegalArgumentException(I18nUtil.get("tool.json.file.upload.required"));
         }
 
-       // if (file.getSize() > IMPORT_TOOL_JSON_MAX_BYTES) {
-       //     throw new IllegalArgumentException("工具JSON文件大小不能超过1M");
+        // if (file.getSize() > IMPORT_TOOL_JSON_MAX_BYTES) {
+        // throw new IllegalArgumentException("工具JSON文件大小不能超过1M");
         // }
 
         try {
@@ -985,9 +961,11 @@ public class ToolManService {
                 throw new IllegalArgumentException(I18nUtil.get("tool.json.file.content.notempty"));
             }
             return jsonStr;
-        } catch (IllegalArgumentException e) {
+        }
+        catch (IllegalArgumentException e) {
             throw e;
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             throw new IllegalArgumentException(I18nUtil.get("tool.json.file.read.failed"));
         }
     }
@@ -1015,14 +993,9 @@ public class ToolManService {
     }
 
     private boolean shouldRegisterDiscoveryService(String resourceBizType) {
-        return StringUtils.equalsAny(resourceBizType,
-            ResourceBizType.TOOLKIT.getCode(),
-            ResourceBizType.MCP.getCode(),
-            ResourceBizType.AGENT.getCode(),
-            ResourceBizType.KG_DOC.getCode(),
-            ResourceBizType.KG_DB.getCode(),
-            ResourceBizType.KG_TERM.getCode(),
-            ResourceBizType.KG_QA.getCode());
+        return StringUtils.equalsAny(resourceBizType, ResourceBizType.TOOLKIT.getCode(), ResourceBizType.MCP.getCode(),
+            ResourceBizType.AGENT.getCode(), ResourceBizType.KG_DOC.getCode(), ResourceBizType.KG_DB.getCode(),
+            ResourceBizType.KG_TERM.getCode(), ResourceBizType.KG_QA.getCode());
     }
 
     private String findTargetContentByBizType(String resourceBizType, Long resourceId) {
@@ -1053,8 +1026,7 @@ public class ToolManService {
     }
 
     /**
-     * 资源基础信息更新后，把名称、描述同步回写到对应子表的 targetContent，
-     * 并刷新开放资源目录中的 JSON 文件，保证下游读取到的是最新元数据。
+     * 资源基础信息更新后，把名称、描述同步回写到对应子表的 targetContent， 并刷新开放资源目录中的 JSON 文件，保证下游读取到的是最新元数据。
      */
     private void updateExtTargetContentAndSync(SsResource resource) {
         String resourceBizType = StringUtils.trimToEmpty(resource.getResourceBizType());
@@ -1072,15 +1044,14 @@ public class ToolManService {
         };
 
         if (StringUtils.isBlank(targetContent)) {
-            LOGGER.info("资源基础信息更新后未命中可同步的targetContent，跳过资源JSON刷新, resourceId={}, resourceBizType={}",
-                resourceId, resourceBizType);
+            LOGGER.info("资源基础信息更新后未命中可同步的targetContent，跳过资源JSON刷新, resourceId={}, resourceBizType={}", resourceId,
+                resourceBizType);
             return;
         }
 
         resourceArtifactStorageService.syncResourceJsonByBizType(targetContent, resourceBizType, resourceId);
         ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, resourceBizType, "resource-basic-info-sync");
-        LOGGER.info("资源基础信息更新后已同步targetContent到开放资源目录, resourceId={}, resourceBizType={}",
-            resourceId, resourceBizType);
+        LOGGER.info("资源基础信息更新后已同步targetContent到开放资源目录, resourceId={}, resourceBizType={}", resourceId, resourceBizType);
     }
 
     private String updateKnowledgeTargetContent(SsResource resource, String resourceBizType) {
@@ -1097,8 +1068,8 @@ public class ToolManService {
         if (extView == null) {
             return null;
         }
-        extView.setTargetContent(buildUpdatedTargetContent(extView.getTargetContent(), resourceId, resourceName,
-            resourceDesc));
+        extView.setTargetContent(
+            buildUpdatedTargetContent(extView.getTargetContent(), resourceId, resourceName, resourceDesc));
         ssResExtViewService.update(extView);
         return extView.getTargetContent();
     }
@@ -1108,8 +1079,8 @@ public class ToolManService {
         if (extObject == null) {
             return null;
         }
-        extObject.setTargetContent(buildUpdatedTargetContent(extObject.getTargetContent(), resourceId, resourceName,
-            resourceDesc));
+        extObject.setTargetContent(
+            buildUpdatedTargetContent(extObject.getTargetContent(), resourceId, resourceName, resourceDesc));
         ssResExtObjectService.update(extObject);
         return extObject.getTargetContent();
     }
@@ -1119,8 +1090,8 @@ public class ToolManService {
         if (extToolKit == null) {
             return null;
         }
-        extToolKit.setTargetContent(buildUpdatedTargetContent(extToolKit.getTargetContent(), resourceId, resourceName,
-            resourceDesc));
+        extToolKit.setTargetContent(
+            buildUpdatedTargetContent(extToolKit.getTargetContent(), resourceId, resourceName, resourceDesc));
         ssResExtToolKitService.update(extToolKit);
         return extToolKit.getTargetContent();
     }
@@ -1130,8 +1101,8 @@ public class ToolManService {
         if (extMcp == null) {
             return null;
         }
-        extMcp.setTargetContent(buildUpdatedTargetContent(extMcp.getTargetContent(), resourceId, resourceName,
-            resourceDesc));
+        extMcp.setTargetContent(
+            buildUpdatedTargetContent(extMcp.getTargetContent(), resourceId, resourceName, resourceDesc));
         ssResExtMcpService.update(extMcp);
         return extMcp.getTargetContent();
     }
@@ -1141,20 +1112,18 @@ public class ToolManService {
         if (extAgent == null) {
             return null;
         }
-        extAgent.setTargetContent(buildUpdatedTargetContent(extAgent.getTargetContent(), resourceId, resourceName,
-            resourceDesc));
+        extAgent.setTargetContent(
+            buildUpdatedTargetContent(extAgent.getTargetContent(), resourceId, resourceName, resourceDesc));
         ssResExtAgentService.update(extAgent);
         return extAgent.getTargetContent();
     }
 
     /**
-     * 在保留原有 targetContent 结构的前提下，仅刷新基础元数据。
-     * 这里统一把 resourceId 放到首节点，避免不同来源内容顺序不一致。
+     * 在保留原有 targetContent 结构的前提下，仅刷新基础元数据。 这里统一把 resourceId 放到首节点，避免不同来源内容顺序不一致。
      */
     private String buildUpdatedTargetContent(String originalTargetContent, Long resourceId, String resourceName,
         String resourceDesc) {
-        JSONObject originalRoot = StringUtils.isBlank(originalTargetContent)
-            ? new JSONObject(true)
+        JSONObject originalRoot = StringUtils.isBlank(originalTargetContent) ? new JSONObject(true)
             : JSON.parseObject(originalTargetContent, Feature.OrderedField);
         if (originalRoot == null) {
             originalRoot = new JSONObject(true);
@@ -1174,32 +1143,25 @@ public class ToolManService {
 
     private void validateNoDigEmployeeRelation(Long resourceId, SsResource resource) {
         // 1. 从关联明细表中反查：哪些资源把当前资源作为 rel_resource_id 关联进来了。
-        List<SsResourceRelDetail> relations = ssResourceRelDetailService.list(
-                new LambdaQueryWrapper<SsResourceRelDetail>().eq(SsResourceRelDetail::getRelResourceId, resourceId));
+        List<SsResourceRelDetail> relations = ssResourceRelDetailService
+            .list(new LambdaQueryWrapper<SsResourceRelDetail>().eq(SsResourceRelDetail::getRelResourceId, resourceId));
         if (CollectionUtils.isEmpty(relations)) {
             return;
         }
 
         // 2. 提取这些主资源的 resourceId，后续用于批量查询资源主表。
-        List<Long> digEmployeeIds = relations.stream()
-                .map(SsResourceRelDetail::getResourceId)
-                .filter(Objects::nonNull)
-                .distinct()
-                .collect(Collectors.toList());
+        List<Long> digEmployeeIds = relations.stream().map(SsResourceRelDetail::getResourceId).filter(Objects::nonNull)
+            .distinct().collect(Collectors.toList());
         if (CollectionUtils.isEmpty(digEmployeeIds)) {
             return;
         }
 
         // 3. 批量查询主资源，并过滤出 resourceBizType = DIG_EMPLOYEE 且未删除的数字员工。
         List<SsResource> relResources = ssResourceService.findByIdList(digEmployeeIds);
-        List<String> digEmployeeNames = relResources.stream()
-                .filter(Objects::nonNull)
-                .filter(item -> !Objects.equals(item.getResourceStatus(), ResourceStatus.REMOVED.getNum()))
-                .filter(item -> StringUtils.equals(item.getResourceBizType(), ResourceBizType.DIG_EMPLOYEE.getCode()))
-                .map(SsResource::getResourceName)
-                .filter(StringUtils::isNotBlank)
-                .distinct()
-                .collect(Collectors.toList());
+        List<String> digEmployeeNames = relResources.stream().filter(Objects::nonNull)
+            .filter(item -> !Objects.equals(item.getResourceStatus(), ResourceStatus.REMOVED.getNum()))
+            .filter(item -> StringUtils.equals(item.getResourceBizType(), ResourceBizType.DIG_EMPLOYEE.getCode()))
+            .map(SsResource::getResourceName).filter(StringUtils::isNotBlank).distinct().collect(Collectors.toList());
         if (CollectionUtils.isEmpty(digEmployeeNames)) {
             return;
         }
@@ -1207,8 +1169,8 @@ public class ToolManService {
         // 4. 若命中数字员工关联，则按约定文案抛出异常，阻止后续删除。
         String employeeNames = String.join("、", digEmployeeNames);
         String resourceName = StringUtils.defaultIfBlank(resource.getResourceName(), String.valueOf(resourceId));
-        throw new BdpRuntimeException(I18nUtil.get("tool.resource.delete.digemployee.relation.exists", resourceName,
-            employeeNames));
+        throw new BdpRuntimeException(
+            I18nUtil.get("tool.resource.delete.digemployee.relation.exists", resourceName, employeeNames));
     }
 
     /**
@@ -1218,36 +1180,29 @@ public class ToolManService {
      * @date 2026-04-26 14:20:00
      */
     private void validateNoViewRelation(Long resourceId, SsResource resource) {
-        List<SsResourceRelDetail> relations = ssResourceRelDetailService.list(
-            new LambdaQueryWrapper<SsResourceRelDetail>().eq(SsResourceRelDetail::getRelResourceId, resourceId));
+        List<SsResourceRelDetail> relations = ssResourceRelDetailService
+            .list(new LambdaQueryWrapper<SsResourceRelDetail>().eq(SsResourceRelDetail::getRelResourceId, resourceId));
         if (CollectionUtils.isEmpty(relations)) {
             return;
         }
 
-        List<Long> viewResourceIds = relations.stream()
-            .map(SsResourceRelDetail::getResourceId)
-            .filter(Objects::nonNull)
-            .distinct()
-            .collect(Collectors.toList());
+        List<Long> viewResourceIds = relations.stream().map(SsResourceRelDetail::getResourceId).filter(Objects::nonNull)
+            .distinct().collect(Collectors.toList());
         if (CollectionUtils.isEmpty(viewResourceIds)) {
             return;
         }
 
         List<SsResource> relResources = ssResourceService.findByIdList(viewResourceIds);
-        List<String> viewNames = relResources.stream()
-            .filter(Objects::nonNull)
+        List<String> viewNames = relResources.stream().filter(Objects::nonNull)
             .filter(item -> StringUtils.equals(item.getResourceBizType(), ResourceBizType.VIEW.getCode()))
-            .map(SsResource::getResourceName)
-            .filter(StringUtils::isNotBlank)
-            .distinct()
-            .collect(Collectors.toList());
+            .map(SsResource::getResourceName).filter(StringUtils::isNotBlank).distinct().collect(Collectors.toList());
         if (CollectionUtils.isEmpty(viewNames)) {
             return;
         }
 
         String objectName = StringUtils.defaultIfBlank(resource.getResourceName(), String.valueOf(resourceId));
-        throw new BdpRuntimeException(I18nUtil.get("tool.resource.delete.view.relation.exists", objectName,
-            String.join("、", viewNames)));
+        throw new BdpRuntimeException(
+            I18nUtil.get("tool.resource.delete.view.relation.exists", objectName, String.join("、", viewNames)));
     }
 
     /**
@@ -1284,7 +1239,7 @@ public class ToolManService {
         // 根据资源类型删除各自的扩展表。
         // 当前删除接口只覆盖几类技能资源，因此这里按业务类型显式分流。
         if (StringUtils.equals(resourceBizType, ResourceBizType.TOOL.getCode())
-                || StringUtils.equals(resourceBizType, ResourceBizType.SKILL.getCode())) {
+            || StringUtils.equals(resourceBizType, ResourceBizType.SKILL.getCode())) {
             ssResExtToolService.removeById(resourceId);
             return;
         }
@@ -1317,13 +1272,12 @@ public class ToolManService {
         }
     }
 
-
-
     private void saveOrUpdateExtObject(SsResExtObject extObject, Long resourceId) {
         SsResExtObject oldExt = ssResExtObjectService.findById(resourceId);
         if (oldExt == null) {
             ssResExtObjectService.save(extObject);
-        } else {
+        }
+        else {
             ssResExtObjectService.update(extObject);
         }
     }
@@ -1332,15 +1286,14 @@ public class ToolManService {
         SsResExtView oldExt = ssResExtViewService.findById(resourceId);
         if (oldExt == null) {
             ssResExtViewService.save(extView);
-        } else {
+        }
+        else {
             ssResExtViewService.update(extView);
         }
     }
 
     /**
-     * 当前线程如果已经有真实登录态，就直接复用；
-     * 否则临时灌入一个开放接口专用上下文，让 createBy/updateBy/manUserId 等审计字段可正常落库。
-     *
+     * 当前线程如果已经有真实登录态，就直接复用； 否则临时灌入一个开放接口专用上下文，让 createBy/updateBy/manUserId 等审计字段可正常落库。
      * 临时免登录，后续再让智能体给token，再补全这块相关的用户信息
      */
     private <T> T executeWithOpenApiImportLoginContext(Supplier<T> supplier) {
@@ -1365,8 +1318,7 @@ public class ToolManService {
     }
 
     private boolean hasEffectiveLogin(LoginInfo loginInfo) {
-        return loginInfo != null
-            && loginInfo.getUserId() != null
+        return loginInfo != null && loginInfo.getUserId() != null
             && !Objects.equals(loginInfo.getUserId(), (long) Integer.MIN_VALUE);
     }
 
@@ -1381,18 +1333,13 @@ public class ToolManService {
     }
 
     /**
-     * 新版 TOOLKIT / MCP / AGENT 导入主表写入逻辑。
-     *
-     * 这里统一做两件事：
-     * 1. 新增时复用 SsResourceService.createResource(...) 创建主表；
-     * 2. 更新时复用 SsResourceService.update(...) 刷新已有主表。
-     *
-     * 之所以在 createResource 之后又补一轮字段，是为了把导入链要求的
-     * resourceCode / catalogId / version / publishTime 等值收口成明确结果。
+     * 新版 TOOLKIT / MCP / AGENT 导入主表写入逻辑。 这里统一做两件事： 1. 新增时复用 SsResourceService.createResource(...) 创建主表； 2. 更新时复用
+     * SsResourceService.update(...) 刷新已有主表。 之所以在 createResource 之后又补一轮字段，是为了把导入链要求的 resourceCode / catalogId / version
+     * / publishTime 等值收口成明确结果。
      */
     private SsResource saveOrUpdateToolJsonNewMain(SsResource existing, String resourceBizType, String resourceCode,
-                                                   String resourceName, String resourceDesc, String ownerType,
-                                                   String systemCode, String version, Long catalogId, String implType) {
+        String resourceName, String resourceDesc, String ownerType, String systemCode, String version, Long catalogId,
+        String implType) {
 
         if (existing == null) {
             SsResource myResource = new SsResource();
@@ -1436,15 +1383,11 @@ public class ToolManService {
     }
 
     /**
-     * 新版 TOOLKIT / MCP / AGENT 导入扩展表写入逻辑。
-     *
-     * 三类资源虽然对应不同子表，但写入规则是完全一致的：
-     * 1. source_content = 上传的原始 JSON
-     * 2. target_content = 增加 resourceId 首节点后的 JSON
-     * 3. 仍按 resourceId 幂等，有则更新，无则新增
+     * 新版 TOOLKIT / MCP / AGENT 导入扩展表写入逻辑。 三类资源虽然对应不同子表，但写入规则是完全一致的： 1. source_content = 上传的原始 JSON 2. target_content =
+     * 增加 resourceId 首节点后的 JSON 3. 仍按 resourceId 幂等，有则更新，无则新增
      */
     private void saveOrUpdateToolJsonNewExt(String resourceBizType, Long resourceId, String sourceContent,
-                                            String targetContent) {
+        String targetContent) {
         if (StringUtils.equals(resourceBizType, ResourceBizType.TOOLKIT.getCode())) {
             SsResExtToolKit ext = new SsResExtToolKit();
             ext.setResourceId(resourceId);
@@ -1453,7 +1396,8 @@ public class ToolManService {
             SsResExtToolKit oldExt = ssResExtToolKitService.findById(resourceId);
             if (oldExt == null) {
                 ssResExtToolKitService.save(ext);
-            } else {
+            }
+            else {
                 ssResExtToolKitService.update(ext);
             }
             return;
@@ -1466,7 +1410,8 @@ public class ToolManService {
             SsResExtMcp oldExt = ssResExtMcpService.findById(resourceId);
             if (oldExt == null) {
                 ssResExtMcpService.save(ext);
-            } else {
+            }
+            else {
                 ssResExtMcpService.update(ext);
             }
             return;
@@ -1479,7 +1424,8 @@ public class ToolManService {
             SsResExtAgent oldExt = ssResExtAgentService.findById(resourceId);
             if (oldExt == null) {
                 ssResExtAgentService.save(ext);
-            } else {
+            }
+            else {
                 ssResExtAgentService.update(ext);
             }
             return;
@@ -1504,9 +1450,9 @@ public class ToolManService {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException(I18nUtil.get("tool.object.zip.upload.required"));
         }
-        //if (file.getSize() > 100L * 1024L * 1024L) {
-        //    throw new IllegalArgumentException("对象zip文件大小不能超过20M");
-        //}
+        // if (file.getSize() > 100L * 1024L * 1024L) {
+        // throw new IllegalArgumentException("对象zip文件大小不能超过20M");
+        // }
         if (StringUtils.isBlank(file.getOriginalFilename())
             || !StringUtils.endsWithIgnoreCase(file.getOriginalFilename(), ".zip")) {
             throw new IllegalArgumentException(I18nUtil.get("tool.zip.file.only.supported"));
@@ -1530,8 +1476,7 @@ public class ToolManService {
     }
 
     /**
-     * 上传文件先落到固定导入工作目录，再在 zip 同级目录解压。
-     * 解压目录会保留，供后续模块继续使用。
+     * 上传文件先落到固定导入工作目录，再在 zip 同级目录解压。 解压目录会保留，供后续模块继续使用。
      */
     private Path saveUploadedZip(MultipartFile file) {
         try {
@@ -1542,7 +1487,8 @@ public class ToolManService {
             Path zipPath = baseDir.resolve(originalFilename);
             Files.copy(file.getInputStream(), zipPath, StandardCopyOption.REPLACE_EXISTING);
             return zipPath;
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new IllegalArgumentException(I18nUtil.get("tool.object.zip.save.failed"));
         }
     }
@@ -1564,7 +1510,8 @@ public class ToolManService {
                     }
                     if (entry.isDirectory()) {
                         Files.createDirectories(normalizedTarget);
-                    } else {
+                    }
+                    else {
                         Files.createDirectories(normalizedTarget.getParent());
                         Files.copy(zipInputStream, normalizedTarget, StandardCopyOption.REPLACE_EXISTING);
                     }
@@ -1572,7 +1519,8 @@ public class ToolManService {
                 }
             }
             return targetDir;
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new IllegalArgumentException(I18nUtil.get("tool.object.zip.unzip.failed"));
         }
     }
@@ -1602,9 +1550,8 @@ public class ToolManService {
         return false;
     }
 
-    private ObjectZipImportItem importSingleObjectDirectory(Path objectDir, Long catalogId, String ownerType, Long userId,
-                                                            Date now, List<Long> importedResourceIds,
-                                                            String uploadSubDirectory) {
+    private ObjectZipImportItem importSingleObjectDirectory(Path objectDir, Long catalogId, String ownerType,
+        Long userId, Date now, List<Long> importedResourceIds, String uploadSubDirectory) {
         ObjectZipImportItem item = new ObjectZipImportItem();
         String objectDirName = objectDir.getFileName().toString();
         item.setResourceCode(objectDirName);
@@ -1628,21 +1575,24 @@ public class ToolManService {
             item.setResourceDesc(parsed.getResourceDesc());
             item.setResourceBizType(parsed.getResourceBizType());
 
-            ObjectImportSaveResult saveResult = saveOrUpdateImportedObjectFromOwl(parsed, catalogId, ownerType, userId, now);
+            ObjectImportSaveResult saveResult = saveOrUpdateImportedObjectFromOwl(parsed, catalogId, ownerType, userId,
+                now);
             item.setResourceId(String.valueOf(saveResult.getResourceId()));
             item.setUpdated(saveResult.isUpdated());
             fillImportCatalogInfo(item, saveResult.getCatalogId());
             item.setDiffSummary(saveResult.getDiffSummary());
             item.setDiffDetails(new ArrayList<>(saveResult.getDiffDetails()));
             item.setSuccess(true);
-            item.setMessage(I18nUtil.get(saveResult.isUpdated() ? "resource.update.success" : "resource.import.success"));
+            item.setMessage(
+                I18nUtil.get(saveResult.isUpdated() ? "resource.update.success" : "resource.import.success"));
             importedResourceIds.add(saveResult.getResourceId());
 
             uploadTargetJson(saveResult.getTargetContent(), saveResult.getResourceId(), "OBJECT", uploadSubDirectory);
             LOGGER.info("对象导入成功, resourceId={}, resourceCode={}, resourceJsonPath={}/OBJECT_{}.json",
                 saveResult.getResourceId(), parsed.getResourceCode(), uploadSubDirectory, saveResult.getResourceId());
             return item;
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             item.setSuccess(false);
             item.setMessage(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.object.import.failed"));
             return item;
@@ -1650,8 +1600,7 @@ public class ToolManService {
     }
 
     private ObjectZipImportItem importSingleViewDirectory(Path viewDir, Long catalogId, String ownerType, Long userId,
-                                                          Date now, List<Long> importedResourceIds,
-                                                          String uploadSubDirectory) {
+        Date now, List<Long> importedResourceIds, String uploadSubDirectory) {
         ObjectZipImportItem item = new ObjectZipImportItem();
         String viewDirName = viewDir.getFileName().toString();
         item.setResourceBizType(ResourceBizType.VIEW.getCode());
@@ -1675,21 +1624,25 @@ public class ToolManService {
             item.setResourceDesc(parsed.getResourceDesc());
             item.setResourceBizType(parsed.getResourceBizType());
 
-            ViewImportSaveResult saveResult = saveOrUpdateImportedViewFromOwl(parsed, catalogId, ownerType, userId, now);
+            ViewImportSaveResult saveResult = saveOrUpdateImportedViewFromOwl(parsed, catalogId, ownerType, userId,
+                now);
             item.setResourceId(String.valueOf(saveResult.getResourceId()));
             item.setUpdated(saveResult.isUpdated());
             fillImportCatalogInfo(item, saveResult.getCatalogId());
             item.setSuccess(true);
-            item.setMessage(I18nUtil.get(saveResult.isUpdated() ? "resource.update.success" : "resource.import.success"));
+            item.setMessage(
+                I18nUtil.get(saveResult.isUpdated() ? "resource.update.success" : "resource.import.success"));
             item.setMissingObjectCodes(saveResult.getMissingObjectCodes());
             importedResourceIds.add(saveResult.getResourceId());
 
             uploadTargetJson(saveResult.getTargetContent(), saveResult.getResourceId(), "VIEW", uploadSubDirectory);
-            LOGGER.info("视图导入成功, resourceId={}, resourceCode={}, resourceJsonPath={}/VIEW_{}.json, missingObjectCodes={}",
+            LOGGER.info(
+                "视图导入成功, resourceId={}, resourceCode={}, resourceJsonPath={}/VIEW_{}.json, missingObjectCodes={}",
                 saveResult.getResourceId(), parsed.getResourceCode(), uploadSubDirectory, saveResult.getResourceId(),
                 saveResult.getMissingObjectCodes());
             return item;
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             item.setSuccess(false);
             item.setMessage(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.view.import.failed"));
             return item;
@@ -1697,8 +1650,7 @@ public class ToolManService {
     }
 
     /**
-     * 只扫描一级目录中的 owl 文件，不递归处理子目录；
-     * 当前对象/视图包都统一按 *definition.owl 作为定义入口。
+     * 只扫描一级目录中的 owl 文件，不递归处理子目录； 当前对象/视图包都统一按 *definition.owl 作为定义入口。
      */
     private Path findDefinitionOwlInFirstLevelDirectory(Path directory) {
         List<Path> definitionOwls = findDefinitionOwlFilesInCurrentDirectory(directory);
@@ -1713,29 +1665,25 @@ public class ToolManService {
      */
     private List<Path> findDefinitionOwlFilesInCurrentDirectory(Path directory) {
         try (var children = Files.list(directory)) {
-            List<Path> definitionOwls = children
-                .filter(Files::isRegularFile)
-                .filter(this::isDefinitionOwlFile)
-                .sorted(Comparator.comparing(path -> path.getFileName().toString()))
-                .collect(Collectors.toList());
+            List<Path> definitionOwls = children.filter(Files::isRegularFile).filter(this::isDefinitionOwlFile)
+                .sorted(Comparator.comparing(path -> path.getFileName().toString())).collect(Collectors.toList());
             LOGGER.info("目录第一层命中的definition.owl文件, directory={}, owlFiles={}", directory,
                 definitionOwls.stream().map(path -> path.getFileName().toString()).collect(Collectors.toList()));
             return definitionOwls;
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new IllegalArgumentException(I18nUtil.get("tool.owl.file.scan.failed"));
         }
     }
 
     /**
-     * 兼容两种对象/视图压缩包结构：
-     * 1. zip 根目录下直接放资源 owl 文件；
-     * 2. zip 根目录下先包一层资源目录，再在该目录第一层放资源 owl 文件。
+     * 兼容两种对象/视图压缩包结构： 1. zip 根目录下直接放资源 owl 文件； 2. zip 根目录下先包一层资源目录，再在该目录第一层放资源 owl 文件。
      *
      * @author qin.guoquan
      * @date 2026-05-06 17:35:00
      */
     private List<Path> findDefinitionOwlFilesInZipRootOrFirstLevelDirectories(Path zipRoot,
-                                                                              List<Path> firstLevelDirectories) {
+        List<Path> firstLevelDirectories) {
         List<Path> definitionOwls = new ArrayList<>();
         for (Path directory : firstLevelDirectories) {
             definitionOwls.addAll(findDefinitionOwlFilesInCurrentDirectory(directory));
@@ -1753,10 +1701,12 @@ public class ToolManService {
     private void validateSingleDefinitionOwl(List<Path> definitionOwls, String resourceLabel) {
         String localizedResourceLabel = localizeResourceLabel(resourceLabel);
         if (CollectionUtils.isEmpty(definitionOwls)) {
-            throw new IllegalArgumentException(I18nUtil.get("tool.zip.definition.owl.notfound", localizedResourceLabel));
+            throw new IllegalArgumentException(
+                I18nUtil.get("tool.zip.definition.owl.notfound", localizedResourceLabel));
         }
         if (definitionOwls.size() > 1) {
-            throw new IllegalArgumentException(I18nUtil.get("tool.zip.definition.owl.multiple", localizedResourceLabel));
+            throw new IllegalArgumentException(
+                I18nUtil.get("tool.zip.definition.owl.multiple", localizedResourceLabel));
         }
     }
 
@@ -1771,11 +1721,10 @@ public class ToolManService {
     }
 
     /**
-     * definition.owl 已经命中但导入仍失败时，应把真实失败原因返回给前端，
-     * 不能再误报成“未找到有效的owl文件”。
+     * definition.owl 已经命中但导入仍失败时，应把真实失败原因返回给前端， 不能再误报成“未找到有效的owl文件”。
      */
     private void validateImportedBundleResult(ObjectZipImportResult result, List<Long> importedResourceIds,
-                                              String resourceLabel) {
+        String resourceLabel) {
         if (!importedResourceIds.isEmpty()) {
             return;
         }
@@ -1792,7 +1741,7 @@ public class ToolManService {
      * 按现有 importObjectJson 的对象主表规则写入主表，其核心差异仅在于对象基础信息来源于 OWL。
      */
     private ObjectImportSaveResult saveOrUpdateImportedObjectFromOwl(ParsedObjectOwl parsed, Long catalogId,
-                                                                     String ownerType, Long userId, Date now) {
+        String ownerType, Long userId, Date now) {
         if (StringUtils.isBlank(parsed.getResourceCode())) {
             throw new IllegalArgumentException(I18nUtil.get("tool.object.entity.code.notempty"));
         }
@@ -1805,7 +1754,7 @@ public class ToolManService {
         ResourceImportOwnerTypeValidator.validate(existing, ownerType, resourceCode, parsed.getResourceName(),
             ResourceBizType.OBJECT.getCode());
 
-        //校验用户是否有对该资源的管理权限（防止不同人导入同样编码的对象或视图）
+        // 校验用户是否有对该资源的管理权限（防止不同人导入同样编码的对象或视图）
         validateImportUpdatePermission(existing, resourceCode);
 
         Long resourceId = existing != null ? existing.getResourceId() : sequenceService.nextVal();
@@ -1833,7 +1782,8 @@ public class ToolManService {
             // 因此更新已有对象时不再回填旧的 createTime。
             ssResourceService.updateResourceEntity(resource);
             saveOrUpdateExtObject(extObject, resourceId);
-        } else {
+        }
+        else {
             ssResourceService.saveResource(resource);
             ssResExtObjectService.save(extObject);
         }
@@ -1857,8 +1807,7 @@ public class ToolManService {
     }
 
     private SsResource buildImportedObjectResource(ParsedObjectOwl parsed, String resourceCode, Long catalogId,
-                                                   Long manOrgId, Long comAcctId, Long userId, Date now,
-                                                   String ownerType) {
+        Long manOrgId, Long comAcctId, Long userId, Date now, String ownerType) {
         SsResource r = new SsResource();
         r.setSystemCode(SystemCode.BYAI.getCode());
         r.setResourceSourcePkId(null);
@@ -1938,8 +1887,8 @@ public class ToolManService {
         return target.toJSONString();
     }
 
-    private ViewImportSaveResult saveOrUpdateImportedViewFromOwl(ParsedViewOwl parsed, Long catalogId,
-                                                                 String ownerType, Long userId, Date now) {
+    private ViewImportSaveResult saveOrUpdateImportedViewFromOwl(ParsedViewOwl parsed, Long catalogId, String ownerType,
+        Long userId, Date now) {
         if (StringUtils.isBlank(parsed.getResourceCode())) {
             throw new IllegalArgumentException(I18nUtil.get("tool.view.code.notempty"));
         }
@@ -1964,13 +1913,15 @@ public class ToolManService {
         if (existing != null) {
             resource.setCreateBy(existing.getCreateBy());
             ssResourceService.updateResourceEntity(resource);
-        } else {
+        }
+        else {
             ssResourceService.saveResource(resource);
         }
 
         // object_codes 会尽量解析并建立视图-对象关系；
         // 查不到的对象编码不会中断导入，而是回到 missingObjectCodes 给前端展示。
-        ViewRelationResult relationResult = saveOrUpdateViewObjectRelations(resourceId, parsed.getObjectCodes(), userId, now);
+        ViewRelationResult relationResult = saveOrUpdateViewObjectRelations(resourceId, parsed.getObjectCodes(), userId,
+            now);
 
         // 视图 targetContent 不只保留视图基础信息，还会补齐每个关联对象的基础信息与 fields。
         String targetContent = buildImportedViewTargetContent(parsed, resourceId, relationResult.getResolvedObjects());
@@ -1984,7 +1935,8 @@ public class ToolManService {
 
         if (existing != null) {
             saveOrUpdateExtView(extView, resourceId);
-        } else {
+        }
+        else {
             ssResExtViewService.save(extView);
         }
         ssResourceService.clearResourceDraftAndReleaseVerIds(resourceId);
@@ -2003,8 +1955,7 @@ public class ToolManService {
     }
 
     private SsResource buildImportedViewResource(ParsedViewOwl parsed, String resourceCode, Long catalogId,
-                                                 Long manOrgId, Long comAcctId, Long userId, Date now,
-                                                 String ownerType) {
+        Long manOrgId, Long comAcctId, Long userId, Date now, String ownerType) {
         SsResource r = new SsResource();
         r.setSystemCode(SystemCode.BYAI.getCode());
         r.setResourceSourcePkId(null);
@@ -2039,16 +1990,15 @@ public class ToolManService {
         r.setPublishType("publish");
         r.setOwnerType(StringUtils.trimToEmpty(ownerType));
 
-
         resourceRuntimeInfoResolver.fillResource(r, resourceRuntimeInfoResolver.resolveObjectView());
         return r;
     }
 
-    private ViewRelationResult saveOrUpdateViewObjectRelations(Long viewResourceId, List<String> objectCodes, Long userId,
-                                                               Date now) {
+    private ViewRelationResult saveOrUpdateViewObjectRelations(Long viewResourceId, List<String> objectCodes,
+        Long userId, Date now) {
         // 视图导入采用“全量覆盖”语义：先删旧关系，再按当前 object_codes 重建。
-        ssResourceRelDetailService.remove(new LambdaQueryWrapper<SsResourceRelDetail>()
-            .eq(SsResourceRelDetail::getResourceId, viewResourceId));
+        ssResourceRelDetailService.remove(
+            new LambdaQueryWrapper<SsResourceRelDetail>().eq(SsResourceRelDetail::getResourceId, viewResourceId));
 
         List<SsResource> resolvedObjects = new ArrayList<>();
         List<String> missingObjectCodes = new ArrayList<>();
@@ -2066,7 +2016,8 @@ public class ToolManService {
             // 只接受已经存在且资源类型为 OBJECT 的资源编码；
             // 查不到时只记 missingObjectCodes，不打断整条视图导入。
             SsResource objectResource = resolveUniqueResourceByCode(trimmedCode, "对象");
-            if (objectResource == null || !StringUtils.equals(objectResource.getResourceBizType(), ResourceBizType.OBJECT.getCode())) {
+            if (objectResource == null
+                || !StringUtils.equals(objectResource.getResourceBizType(), ResourceBizType.OBJECT.getCode())) {
                 missingObjectCodes.add(trimmedCode);
                 continue;
             }
@@ -2092,7 +2043,8 @@ public class ToolManService {
         return new ViewRelationResult(resolvedObjects, missingObjectCodes);
     }
 
-    private String buildImportedViewTargetContent(ParsedViewOwl parsed, Long resourceId, List<SsResource> resolvedObjects) {
+    private String buildImportedViewTargetContent(ParsedViewOwl parsed, Long resourceId,
+        List<SsResource> resolvedObjects) {
         JSONObject target = new JSONObject(true);
         target.put("resourceId", resourceId);
         target.put("resourceCode", StringUtils.trimToEmpty(parsed.getResourceCode()));
@@ -2120,8 +2072,7 @@ public class ToolManService {
     }
 
     /**
-     * 对象/视图 zip 导入依赖 resourceCode 做幂等更新。
-     * 若历史脏数据导致同编码出现多条，则直接给前端可读提示，避免把底层 selectOne 异常暴露出去。
+     * 对象/视图 zip 导入依赖 resourceCode 做幂等更新。 若历史脏数据导致同编码出现多条，则直接给前端可读提示，避免把底层 selectOne 异常暴露出去。
      */
     private SsResource resolveUniqueResourceByCode(String resourceCode, String resourceLabel) {
         String trimmedCode = StringUtils.trimToEmpty(resourceCode);
@@ -2135,8 +2086,8 @@ public class ToolManService {
         if (resources.size() == 1) {
             return resources.get(0);
         }
-        throw new IllegalArgumentException(I18nUtil.get("tool.resource.code.duplicate.too.many",
-            localizeResourceLabel(resourceLabel)));
+        throw new IllegalArgumentException(
+            I18nUtil.get("tool.resource.code.duplicate.too.many", localizeResourceLabel(resourceLabel)));
     }
 
     /**
@@ -2210,11 +2161,8 @@ public class ToolManService {
     private void uploadTargetJson(String targetContent, Long resourceId, String filePrefix, String uploadSubDirectory) {
         // 每个资源都同步一份最终 targetContent，便于下游直接按资源ID消费。
         String fileName = filePrefix + "_" + resourceId + ".json";
-        resourceArtifactStorageService.uploadToSubdirectory(
-            targetContent.getBytes(StandardCharsets.UTF_8),
-            uploadSubDirectory,
-            fileName,
-            "application/json");
+        resourceArtifactStorageService.uploadToSubdirectory(targetContent.getBytes(StandardCharsets.UTF_8),
+            uploadSubDirectory, fileName, "application/json");
     }
 
     private void replaceImportedBundleArtifacts(List<Long> importedResourceIds, String resourceBizType,
@@ -2238,8 +2186,7 @@ public class ToolManService {
     }
 
     private String buildStandardJsonPath(String resourceBizType, Long resourceId) {
-        String directory = StringUtils.startsWithIgnoreCase(resourceBizType, "KG_")
-            ? "doc"
+        String directory = StringUtils.startsWithIgnoreCase(resourceBizType, "KG_") ? "doc"
             : StringUtils.trimToEmpty(resourceBizType).toLowerCase(Locale.ROOT);
         String fileName = StringUtils.trimToEmpty(resourceBizType).toUpperCase(Locale.ROOT) + "_" + resourceId
             + ".json";
@@ -2247,27 +2194,22 @@ public class ToolManService {
     }
 
     /**
-     * 对象/视图 zip 不再按历史的 TYPE_id1&id2 规则命名。
-     * 若一个压缩包只导入出一个资源编码，则优先用该编码作为目录名；
-     * 若导入出多个不同编码，则保留原目录名，避免误把多资源包改成单资源目录名。
+     * 对象/视图 zip 不再按历史的 TYPE_id1&id2 规则命名。 若一个压缩包只导入出一个资源编码，则优先用该编码作为目录名； 若导入出多个不同编码，则保留原目录名，避免误把多资源包改成单资源目录名。
      */
     private String resolveImportedBundleDirectoryName(String originalDirectoryName, List<String> importedResourceCodes,
-                                                      String resourceLabel) {
-        List<String> distinctCodes = importedResourceCodes.stream()
-            .filter(StringUtils::isNotBlank)
-            .map(StringUtils::trim)
-            .distinct()
-            .collect(Collectors.toList());
+        String resourceLabel) {
+        List<String> distinctCodes = importedResourceCodes.stream().filter(StringUtils::isNotBlank)
+            .map(StringUtils::trim).distinct().collect(Collectors.toList());
         if (distinctCodes.size() != 1) {
-            LOGGER.info("{}压缩包包含多个资源编码或未解析到唯一编码，保留原目录名, originalDirectoryName={}, resourceCodes={}",
-                resourceLabel, originalDirectoryName, distinctCodes);
+            LOGGER.info("{}压缩包包含多个资源编码或未解析到唯一编码，保留原目录名, originalDirectoryName={}, resourceCodes={}", resourceLabel,
+                originalDirectoryName, distinctCodes);
             return originalDirectoryName;
         }
         return distinctCodes.get(0);
     }
 
     private Path renameLocalImportedDirectoryIfNecessary(Path extractedRoot, String finalDirectoryName,
-                                                         String resourceLabel) {
+        String resourceLabel) {
         String currentDirectoryName = extractedRoot.getFileName().toString();
         if (StringUtils.equals(currentDirectoryName, finalDirectoryName)) {
             return extractedRoot;
@@ -2275,10 +2217,11 @@ public class ToolManService {
         Path renamedPath = extractedRoot.resolveSibling(finalDirectoryName);
         try {
             Files.move(extractedRoot, renamedPath, StandardCopyOption.REPLACE_EXISTING);
-            LOGGER.info("{}解压目录名称与资源编码不一致，已按资源编码重命名, from={}, to={}",
-                resourceLabel, currentDirectoryName, finalDirectoryName);
+            LOGGER.info("{}解压目录名称与资源编码不一致，已按资源编码重命名, from={}, to={}", resourceLabel, currentDirectoryName,
+                finalDirectoryName);
             return renamedPath;
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new IllegalArgumentException(I18nUtil.get("tool.resource.unzip.directory.rename.failed"));
         }
     }
@@ -2291,11 +2234,10 @@ public class ToolManService {
     }
 
     /**
-     * 先把原始 zip 与本地解压内容同步到同名 staging 目录。
-     * staging 目录后续会整体重命名成最终 bundle 目录，因此这里保留的就是最终要交付的原始解压内容。
+     * 先把原始 zip 与本地解压内容同步到同名 staging 目录。 staging 目录后续会整体重命名成最终 bundle 目录，因此这里保留的就是最终要交付的原始解压内容。
      */
     private void stageImportedBundleDirectory(Path storedZipPath, Path extractedRoot, String stagingDirectory,
-                                              String legacyRootZipPath) {
+        String legacyRootZipPath) {
         Path bundleContentRoot = resolveBundleContentRoot(extractedRoot);
         resourceArtifactStorageService.deleteWithinResourceRoot(stagingDirectory);
         resourceArtifactStorageService.deleteWithinResourceRoot(legacyRootZipPath);
@@ -2304,14 +2246,10 @@ public class ToolManService {
     }
 
     /**
-     * 将 staging 目录整体切换成最终目录。
-     * 最终目录结构固定为：
-     * bundleDir/
-     *   原始zip文件
-     *   ...原始解压内容...
+     * 将 staging 目录整体切换成最终目录。 最终目录结构固定为： bundleDir/ 原始zip文件 ...原始解压内容...
      */
     private void finalizeImportedBundleDirectory(String stagingDirectory, String finalDirectory,
-                                                 String originalZipFileName, String rootDirectory) {
+        String originalZipFileName, String rootDirectory) {
         if (StringUtils.equals(normalizeResourceRelativePath(stagingDirectory),
             normalizeResourceRelativePath(finalDirectory))) {
             LOGGER.info("资源bundle目录无需重命名，跳过切换: directory={}", finalDirectory);
@@ -2337,25 +2275,21 @@ public class ToolManService {
     }
 
     /**
-     * 某些 zip 会把真实内容再包一层同名目录。
-     * 最终开放资源目录中的 bundle 不希望看到这层壳，所以这里优先把“唯一的业务根目录”提出来，
-     * 让 bundle 目录下直接看到 ontology/... 这类真实内容。
+     * 某些 zip 会把真实内容再包一层同名目录。 最终开放资源目录中的 bundle 不希望看到这层壳，所以这里优先把“唯一的业务根目录”提出来， 让 bundle 目录下直接看到 ontology/... 这类真实内容。
      */
     private Path resolveBundleContentRoot(Path extractedRoot) {
         try (var children = Files.list(extractedRoot)) {
-            List<Path> effectiveChildren = children
-                .filter(path -> !containsMacOsMetadata(path))
-                .filter(path -> {
-                    String name = StringUtils.trimToEmpty(path.getFileName().toString());
-                    return !name.startsWith("._");
-                })
-                .collect(Collectors.toList());
+            List<Path> effectiveChildren = children.filter(path -> !containsMacOsMetadata(path)).filter(path -> {
+                String name = StringUtils.trimToEmpty(path.getFileName().toString());
+                return !name.startsWith("._");
+            }).collect(Collectors.toList());
             if (effectiveChildren.size() == 1 && Files.isDirectory(effectiveChildren.get(0))) {
                 Path nestedRoot = effectiveChildren.get(0);
                 LOGGER.info("命中压缩包内容根目录, extractedRoot={}, bundleContentRoot={}", extractedRoot, nestedRoot);
                 return nestedRoot;
             }
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new IllegalArgumentException(I18nUtil.get("tool.zip.content.root.parse.failed"));
         }
         return extractedRoot;
@@ -2365,12 +2299,10 @@ public class ToolManService {
         try {
             // zip 当前统一进入 bundle 目录本身，做到“拿到一个目录就是完整产物”。
             byte[] zipBytes = Files.readAllBytes(storedZipPath.getParent().resolve(zipFileName));
-            resourceArtifactStorageService.uploadToSubdirectory(
-                zipBytes,
-                uploadSubDirectory,
-                zipFileName,
+            resourceArtifactStorageService.uploadToSubdirectory(zipBytes, uploadSubDirectory, zipFileName,
                 "application/zip");
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new IllegalArgumentException(I18nUtil.get("tool.resource.zip.upload.failed"));
         }
     }
@@ -2379,12 +2311,11 @@ public class ToolManService {
      * add by qin.guoquan 2026-03-31
      */
 
-
     // ==================== 导入权限、结果与差异对比 ====================
 
     /**
-     * 对象、视图导入成功后，自动补齐创建人的管理授权，避免导入人无法在授权侧继续维护资源。
-     * 这里按资源 + 用户维度做幂等校验，已有有效授权时直接跳过。
+     * 对象、视图导入成功后，自动补齐创建人的管理授权，避免导入人无法在授权侧继续维护资源。 这里按资源 + 用户维度做幂等校验，已有有效授权时直接跳过。
+     *
      * @author qin.guoquan
      * @date 2026-04-24 17:45:00
      */
@@ -2392,14 +2323,12 @@ public class ToolManService {
         if (resourceId == null || userId == null) {
             return;
         }
-        List<PrivilegeGrant> privilegeGrants = privilegeGrantService.findPrivilegeGrant(
-            GrantType.ALLOW_MANAGE, resourceBizType, resourceId, Color.RED);
-        boolean exists = privilegeGrants.stream()
-            .filter(Objects::nonNull)
-            .anyMatch(privilegeGrant ->
-                StringUtils.equals(privilegeGrant.getStatusCd(), "A")
-                    && StringUtils.equals(privilegeGrant.getGrantToObjType(), GrantToObjType.USER)
-                    && Objects.equals(privilegeGrant.getGrantToObjId(), userId));
+        List<PrivilegeGrant> privilegeGrants = privilegeGrantService.findPrivilegeGrant(GrantType.ALLOW_MANAGE,
+            resourceBizType, resourceId, Color.RED);
+        boolean exists = privilegeGrants.stream().filter(Objects::nonNull)
+            .anyMatch(privilegeGrant -> StringUtils.equals(privilegeGrant.getStatusCd(), "A")
+                && StringUtils.equals(privilegeGrant.getGrantToObjType(), GrantToObjType.USER)
+                && Objects.equals(privilegeGrant.getGrantToObjId(), userId));
         if (exists) {
             return;
         }
@@ -2416,8 +2345,8 @@ public class ToolManService {
     }
 
     /**
-     * 命中同编码资源并准备走更新时，校验当前操作用户是否具备该资源的管理权限。
-     * 无权限时直接阻断导入更新，避免通过导入覆盖他人资源。
+     * 命中同编码资源并准备走更新时，校验当前操作用户是否具备该资源的管理权限。 无权限时直接阻断导入更新，避免通过导入覆盖他人资源。
+     *
      * @author qin.guoquan
      * @date 2026-04-24 18:08:00
      */
@@ -2429,12 +2358,13 @@ public class ToolManService {
             return;
         }
         String resourceName = StringUtils.defaultIfBlank(existing.getResourceName(), resourceCode);
-        throw new IllegalArgumentException(I18nUtil.get("tool.resource.import.update.no.permission", resourceCode,
-            resourceName));
+        throw new IllegalArgumentException(
+            I18nUtil.get("tool.resource.import.update.no.permission", resourceCode, resourceName));
     }
 
     /**
      * 回填导入结果中的目录信息，便于前端直接展示资源所属目录。
+     *
      * @author qin.guoquan
      * @date 2026-04-24 10:24:00
      */
@@ -2450,18 +2380,16 @@ public class ToolManService {
 
     /**
      * 基于导入明细聚合新增/更新统计和范围列表，方便前端直接展示摘要。
+     *
      * @author qin.guoquan
      * @date 2026-04-24 10:24:00
      */
     private void fillImportResultSummary(ObjectZipImportResult result) {
-        List<ObjectZipImportItem> successItems = result.getItems().stream()
-            .filter(ObjectZipImportItem::isSuccess)
+        List<ObjectZipImportItem> successItems = result.getItems().stream().filter(ObjectZipImportItem::isSuccess)
             .collect(Collectors.toList());
-        List<ObjectZipImportItem> createdItems = successItems.stream()
-            .filter(item -> !item.isUpdated())
+        List<ObjectZipImportItem> createdItems = successItems.stream().filter(item -> !item.isUpdated())
             .collect(Collectors.toList());
-        List<ObjectZipImportItem> updatedItems = successItems.stream()
-            .filter(ObjectZipImportItem::isUpdated)
+        List<ObjectZipImportItem> updatedItems = successItems.stream().filter(ObjectZipImportItem::isUpdated)
             .collect(Collectors.toList());
         result.setCreatedCount(createdItems.size());
         result.setUpdatedCount(updatedItems.size());
@@ -2471,6 +2399,7 @@ public class ToolManService {
 
     /**
      * 读取对象更新前的 targetContent，供差异比较使用。
+     *
      * @author qin.guoquan
      * @date 2026-04-24 10:46:00
      */
@@ -2484,22 +2413,23 @@ public class ToolManService {
 
     /**
      * 基于对象 targetContent 的前后 JSON 结构，提取基础信息和字段变更明细。
+     *
      * @author qin.guoquan
      * @date 2026-04-24 10:46:00
      */
     private List<ResourceImportDiffItem> buildObjectImportDiff(String oldTargetContent, String newTargetContent) {
         List<ResourceImportDiffItem> diffItems = new ArrayList<>();
-        JSONObject oldJson = StringUtils.isBlank(oldTargetContent)
-            ? new JSONObject(true) : JSON.parseObject(oldTargetContent, Feature.OrderedField);
-        JSONObject newJson = StringUtils.isBlank(newTargetContent)
-            ? new JSONObject(true) : JSON.parseObject(newTargetContent, Feature.OrderedField);
+        JSONObject oldJson = StringUtils.isBlank(oldTargetContent) ? new JSONObject(true)
+            : JSON.parseObject(oldTargetContent, Feature.OrderedField);
+        JSONObject newJson = StringUtils.isBlank(newTargetContent) ? new JSONObject(true)
+            : JSON.parseObject(newTargetContent, Feature.OrderedField);
 
         String baseSection = I18nUtil.get("tool.import.diff.section.basic");
         String fieldSection = I18nUtil.get("tool.import.diff.section.field");
-        compareSimpleJsonField(diffItems, baseSection, "resourceName", I18nUtil.get("tool.import.diff.field.resource.name"),
-            oldJson, newJson);
-        compareSimpleJsonField(diffItems, baseSection, "resourceDesc", I18nUtil.get("tool.import.diff.field.resource.desc"),
-            oldJson, newJson);
+        compareSimpleJsonField(diffItems, baseSection, "resourceName",
+            I18nUtil.get("tool.import.diff.field.resource.name"), oldJson, newJson);
+        compareSimpleJsonField(diffItems, baseSection, "resourceDesc",
+            I18nUtil.get("tool.import.diff.field.resource.desc"), oldJson, newJson);
         compareSimpleJsonField(diffItems, baseSection, "resourceVersionId",
             I18nUtil.get("tool.import.diff.field.resource.version"), oldJson, newJson);
         compareSimpleJsonField(diffItems, baseSection, "entitySource",
@@ -2515,35 +2445,34 @@ public class ToolManService {
             JSONObject oldField = oldFields.get(fieldCode);
             JSONObject newField = newFields.get(fieldCode);
             if (oldField == null && newField != null) {
-                diffItems.add(buildDiffItem(fieldSection, "ADDED", fieldCode,
-                    newField.getString("propertyName"), "", normalizeJsonText(newField),
-                    I18nUtil.get("tool.import.diff.field.added")));
+                diffItems.add(buildDiffItem(fieldSection, "ADDED", fieldCode, newField.getString("propertyName"), "",
+                    normalizeJsonText(newField), I18nUtil.get("tool.import.diff.field.added")));
                 continue;
             }
             if (oldField != null && newField == null) {
-                diffItems.add(buildDiffItem(fieldSection, "REMOVED", fieldCode,
-                    oldField.getString("propertyName"), normalizeJsonText(oldField), "",
-                    I18nUtil.get("tool.import.diff.field.removed")));
+                diffItems.add(buildDiffItem(fieldSection, "REMOVED", fieldCode, oldField.getString("propertyName"),
+                    normalizeJsonText(oldField), "", I18nUtil.get("tool.import.diff.field.removed")));
                 continue;
             }
             compareObjectFieldDetail(diffItems, fieldCode, "propertyName",
                 I18nUtil.get("tool.import.diff.field.property.name"), oldField, newField, fieldSection);
-            compareObjectFieldDetail(diffItems, fieldCode, "dataType",
-                I18nUtil.get("tool.import.diff.field.data.type"), oldField, newField, fieldSection);
+            compareObjectFieldDetail(diffItems, fieldCode, "dataType", I18nUtil.get("tool.import.diff.field.data.type"),
+                oldField, newField, fieldSection);
             compareObjectFieldDetail(diffItems, fieldCode, "isRequired",
                 I18nUtil.get("tool.import.diff.field.required"), oldField, newField, fieldSection);
             compareObjectFieldDetail(diffItems, fieldCode, "defaultValue",
                 I18nUtil.get("tool.import.diff.field.default.value"), oldField, newField, fieldSection);
             compareObjectFieldDetail(diffItems, fieldCode, "sourceColumn",
                 I18nUtil.get("tool.import.diff.field.source.column"), oldField, newField, fieldSection);
-            compareObjectFieldDetail(diffItems, fieldCode, "synonyms",
-                I18nUtil.get("tool.import.diff.field.synonyms"), oldField, newField, fieldSection);
+            compareObjectFieldDetail(diffItems, fieldCode, "synonyms", I18nUtil.get("tool.import.diff.field.synonyms"),
+                oldField, newField, fieldSection);
         }
         return diffItems;
     }
 
     /**
      * 生成对象更新摘要，供前端列表直接展示。
+     *
      * @author qin.guoquan
      * @date 2026-04-24 10:46:00
      */
@@ -2553,24 +2482,15 @@ public class ToolManService {
         }
         String baseSection = I18nUtil.get("tool.import.diff.section.basic");
         String fieldSection = I18nUtil.get("tool.import.diff.section.field");
-        long baseModifiedCount = diffItems.stream()
-            .filter(item -> StringUtils.equals(item.getSection(), baseSection))
+        long baseModifiedCount = diffItems.stream().filter(item -> StringUtils.equals(item.getSection(), baseSection))
             .count();
-        long addedFieldCount = diffItems.stream()
-            .filter(item -> StringUtils.equals(item.getSection(), fieldSection))
-            .filter(item -> StringUtils.equals(item.getChangeType(), "ADDED"))
-            .count();
-        long removedFieldCount = diffItems.stream()
-            .filter(item -> StringUtils.equals(item.getSection(), fieldSection))
-            .filter(item -> StringUtils.equals(item.getChangeType(), "REMOVED"))
-            .count();
-        long modifiedFieldCount = diffItems.stream()
-            .filter(item -> StringUtils.equals(item.getSection(), fieldSection))
+        long addedFieldCount = diffItems.stream().filter(item -> StringUtils.equals(item.getSection(), fieldSection))
+            .filter(item -> StringUtils.equals(item.getChangeType(), "ADDED")).count();
+        long removedFieldCount = diffItems.stream().filter(item -> StringUtils.equals(item.getSection(), fieldSection))
+            .filter(item -> StringUtils.equals(item.getChangeType(), "REMOVED")).count();
+        long modifiedFieldCount = diffItems.stream().filter(item -> StringUtils.equals(item.getSection(), fieldSection))
             .filter(item -> StringUtils.equals(item.getChangeType(), "MODIFIED"))
-            .map(ResourceImportDiffItem::getFieldCode)
-            .filter(StringUtils::isNotBlank)
-            .distinct()
-            .count();
+            .map(ResourceImportDiffItem::getFieldCode).filter(StringUtils::isNotBlank).distinct().count();
         List<String> parts = new ArrayList<>();
         if (baseModifiedCount > 0) {
             parts.add(I18nUtil.get("tool.import.diff.summary.basic.modified", baseModifiedCount));
@@ -2582,7 +2502,7 @@ public class ToolManService {
     }
 
     private void compareSimpleJsonField(List<ResourceImportDiffItem> diffItems, String section, String fieldCode,
-                                        String fieldName, JSONObject oldJson, JSONObject newJson) {
+        String fieldName, JSONObject oldJson, JSONObject newJson) {
         String beforeValue = normalizeValue(oldJson.get(fieldCode));
         String afterValue = normalizeValue(newJson.get(fieldCode));
         if (StringUtils.equals(beforeValue, afterValue)) {
@@ -2612,7 +2532,7 @@ public class ToolManService {
     }
 
     private void compareObjectFieldDetail(List<ResourceImportDiffItem> diffItems, String fieldCode, String attrCode,
-                                          String attrName, JSONObject oldField, JSONObject newField, String section) {
+        String attrName, JSONObject oldField, JSONObject newField, String section) {
         String beforeValue = normalizeValue(oldField.get(attrCode));
         String afterValue = normalizeValue(newField.get(attrCode));
         if (StringUtils.equals(beforeValue, afterValue)) {
@@ -2624,7 +2544,7 @@ public class ToolManService {
     }
 
     private ResourceImportDiffItem buildDiffItem(String section, String changeType, String fieldCode, String fieldName,
-                                                 String beforeValue, String afterValue, String description) {
+        String beforeValue, String afterValue, String description) {
         ResourceImportDiffItem item = new ResourceImportDiffItem();
         item.setSection(section);
         item.setChangeType(changeType);
@@ -2654,10 +2574,15 @@ public class ToolManService {
 
     private static final class ObjectImportSaveResult {
         private Long resourceId;
+
         private Long catalogId;
+
         private boolean updated;
+
         private String targetContent;
+
         private String diffSummary;
+
         private List<ResourceImportDiffItem> diffDetails = new ArrayList<>();
 
         Long getResourceId() {
@@ -2711,9 +2636,13 @@ public class ToolManService {
 
     private static final class ViewImportSaveResult {
         private Long resourceId;
+
         private Long catalogId;
+
         private boolean updated;
+
         private String targetContent;
+
         private List<String> missingObjectCodes = new ArrayList<>();
 
         Long getResourceId() {
@@ -2759,6 +2688,7 @@ public class ToolManService {
 
     private static final class ViewRelationResult {
         private final List<SsResource> resolvedObjects;
+
         private final List<String> missingObjectCodes;
 
         private ViewRelationResult(List<SsResource> resolvedObjects, List<String> missingObjectCodes) {

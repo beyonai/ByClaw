@@ -221,6 +221,562 @@ INSERT INTO byai_system_config (param_id,param_type,param_code,param_name,param_
 	 (118,'text','IS_CHECK_EMPLOYEE_PUBLISH','数字员工发布稽核重复开关','IS_CHECK_EMPLOYEE_PUBLISH','false','数字员工发布稽核重复开关'),
 	 (117,'text','IS_CHECK_EMPLOYEE_AUDIT','数字员工新增检查开关','IS_CHECK_EMPLOYEE_AUDIT','false','数字员工新增检查开关');
 
+
+INSERT INTO "byai"."byai_system_config" ("param_id", "param_type", "param_code", "param_name", "param_en_name", "param_value", "param_desc") VALUES (11865555, 'text', 'OPENCLAW_BUNDLED_TOOLS', 'OpenClaw内置Tool清单', 'OPENCLAW_BUNDLED_TOOLS', '[
+  {
+    "toolName": "全部工具",
+    "toolCode": "*",
+    "toolDescZh": "relTools 专用通配符，表示允许 OpenClaw 全部工具。",
+    "toolDescEn": "Wildcard for relTools, allowing all OpenClaw tools.",
+    "toolGroup": "wildcard",
+    "toolGroupName": "通配符",
+    "profiles": ["full"],
+    "isWildcard": true
+  },
+  {
+    "toolName": "read",
+    "toolCode": "read",
+    "toolDescZh": "读取文件内容。",
+    "toolDescEn": "Read file contents.",
+    "toolGroup": "fs",
+    "toolGroupName": "文件系统",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": false
+  },
+  {
+    "toolName": "write",
+    "toolCode": "write",
+    "toolDescZh": "创建或覆盖文件。",
+    "toolDescEn": "Create or overwrite files.",
+    "toolGroup": "fs",
+    "toolGroupName": "文件系统",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": false
+  },
+  {
+    "toolName": "edit",
+    "toolCode": "edit",
+    "toolDescZh": "对文件进行精确编辑。",
+    "toolDescEn": "Make precise edits.",
+    "toolGroup": "fs",
+    "toolGroupName": "文件系统",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": false
+  },
+  {
+    "toolName": "apply_patch",
+    "toolCode": "apply_patch",
+    "toolDescZh": "以 patch 方式修改文件。",
+    "toolDescEn": "Patch files.",
+    "toolGroup": "fs",
+    "toolGroupName": "文件系统",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": false
+  },
+  {
+    "toolName": "exec",
+    "toolCode": "exec",
+    "toolDescZh": "运行立即启动的 Shell 命令。",
+    "toolDescEn": "Run shell commands that start now.",
+    "toolGroup": "runtime",
+    "toolGroupName": "运行时",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": false
+  },
+  {
+    "toolName": "process",
+    "toolCode": "process",
+    "toolDescZh": "查看和控制正在运行的 exec 会话。",
+    "toolDescEn": "Inspect and control running exec sessions.",
+    "toolGroup": "runtime",
+    "toolGroupName": "运行时",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": false
+  },
+  {
+    "toolName": "code_execution",
+    "toolCode": "code_execution",
+    "toolDescZh": "运行沙箱化远程分析。",
+    "toolDescEn": "Run sandboxed remote analysis.",
+    "toolGroup": "runtime",
+    "toolGroupName": "运行时",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "web_search",
+    "toolCode": "web_search",
+    "toolDescZh": "搜索 Web 内容。",
+    "toolDescEn": "Search the web.",
+    "toolGroup": "web",
+    "toolGroupName": "Web",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "web_fetch",
+    "toolCode": "web_fetch",
+    "toolDescZh": "抓取 Web 内容。",
+    "toolDescEn": "Fetch web content.",
+    "toolGroup": "web",
+    "toolGroupName": "Web",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "x_search",
+    "toolCode": "x_search",
+    "toolDescZh": "搜索 X 帖子。",
+    "toolDescEn": "Search X posts.",
+    "toolGroup": "web",
+    "toolGroupName": "Web",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "memory_search",
+    "toolCode": "memory_search",
+    "toolDescZh": "进行语义记忆搜索。",
+    "toolDescEn": "Semantic search.",
+    "toolGroup": "memory",
+    "toolGroupName": "记忆",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "memory_get",
+    "toolCode": "memory_get",
+    "toolDescZh": "读取记忆文件。",
+    "toolDescEn": "Read memory files.",
+    "toolGroup": "memory",
+    "toolGroupName": "记忆",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "sessions_list",
+    "toolCode": "sessions_list",
+    "toolDescZh": "列出可见会话及可选的最近消息。",
+    "toolDescEn": "List visible sessions and optional recent messages.",
+    "toolGroup": "sessions",
+    "toolGroupName": "会话",
+    "profiles": ["coding", "messaging"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "sessions_history",
+    "toolCode": "sessions_history",
+    "toolDescZh": "读取可见会话的脱敏消息历史。",
+    "toolDescEn": "Read sanitized message history for a visible session.",
+    "toolGroup": "sessions",
+    "toolGroupName": "会话",
+    "profiles": ["coding", "messaging"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "sessions_send",
+    "toolCode": "sessions_send",
+    "toolDescZh": "向另一个可见会话发送消息。",
+    "toolDescEn": "Send a message to another visible session.",
+    "toolGroup": "sessions",
+    "toolGroupName": "会话",
+    "profiles": ["coding", "messaging"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "sessions_spawn",
+    "toolCode": "sessions_spawn",
+    "toolDescZh": "创建子 Agent 或 ACP 会话。",
+    "toolDescEn": "Spawn sub-agent or ACP sessions.",
+    "toolGroup": "sessions",
+    "toolGroupName": "会话",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "sessions_yield",
+    "toolCode": "sessions_yield",
+    "toolDescZh": "结束当前回合以接收子 Agent 结果。",
+    "toolDescEn": "End turn to receive sub-agent results.",
+    "toolGroup": "sessions",
+    "toolGroupName": "会话",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "subagents",
+    "toolCode": "subagents",
+    "toolDescZh": "管理子 Agent。",
+    "toolDescEn": "Manage sub-agents.",
+    "toolGroup": "sessions",
+    "toolGroupName": "会话",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "session_status",
+    "toolCode": "session_status",
+    "toolDescZh": "查看会话状态、用量和模型状态。",
+    "toolDescEn": "Show session status, usage, and model state.",
+    "toolGroup": "sessions",
+    "toolGroupName": "会话",
+    "profiles": ["minimal", "coding", "messaging"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "browser",
+    "toolCode": "browser",
+    "toolDescZh": "控制 Web 浏览器。",
+    "toolDescEn": "Control web browser.",
+    "toolGroup": "ui",
+    "toolGroupName": "界面",
+    "profiles": [],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "canvas",
+    "toolCode": "canvas",
+    "toolDescZh": "控制画布。",
+    "toolDescEn": "Control canvases.",
+    "toolGroup": "ui",
+    "toolGroupName": "界面",
+    "profiles": [],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "message",
+    "toolCode": "message",
+    "toolDescZh": "发送消息。",
+    "toolDescEn": "Send messages.",
+    "toolGroup": "messaging",
+    "toolGroupName": "消息",
+    "profiles": ["messaging"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "cron",
+    "toolCode": "cron",
+    "toolDescZh": "管理定时任务与自动化。",
+    "toolDescEn": "Manage scheduled jobs and automations.",
+    "toolGroup": "automation",
+    "toolGroupName": "自动化",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "gateway",
+    "toolCode": "gateway",
+    "toolDescZh": "控制 Gateway。",
+    "toolDescEn": "Gateway control.",
+    "toolGroup": "automation",
+    "toolGroupName": "自动化",
+    "profiles": [],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "nodes",
+    "toolCode": "nodes",
+    "toolDescZh": "管理节点与设备。",
+    "toolDescEn": "Nodes and devices.",
+    "toolGroup": "nodes",
+    "toolGroupName": "节点",
+    "profiles": [],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "agents_list",
+    "toolCode": "agents_list",
+    "toolDescZh": "列出 Agent。",
+    "toolDescEn": "List agents.",
+    "toolGroup": "agents",
+    "toolGroupName": "Agent",
+    "profiles": [],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "update_plan",
+    "toolCode": "update_plan",
+    "toolDescZh": "更新任务计划。",
+    "toolDescEn": "Update task plan.",
+    "toolGroup": "agents",
+    "toolGroupName": "Agent",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "image",
+    "toolCode": "image",
+    "toolDescZh": "图片理解。",
+    "toolDescEn": "Image understanding.",
+    "toolGroup": "media",
+    "toolGroupName": "媒体",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "image_generate",
+    "toolCode": "image_generate",
+    "toolDescZh": "图片生成。",
+    "toolDescEn": "Image generation.",
+    "toolGroup": "media",
+    "toolGroupName": "媒体",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "music_generate",
+    "toolCode": "music_generate",
+    "toolDescZh": "音乐生成。",
+    "toolDescEn": "Music generation.",
+    "toolGroup": "media",
+    "toolGroupName": "媒体",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "video_generate",
+    "toolCode": "video_generate",
+    "toolDescZh": "视频生成。",
+    "toolDescEn": "Video generation.",
+    "toolGroup": "media",
+    "toolGroupName": "媒体",
+    "profiles": ["coding"],
+    "includeInOpenClawGroup": true
+  },
+  {
+    "toolName": "tts",
+    "toolCode": "tts",
+    "toolDescZh": "文本转语音。",
+    "toolDescEn": "Text-to-speech conversion.",
+    "toolGroup": "media",
+    "toolGroupName": "媒体",
+    "profiles": [],
+    "includeInOpenClawGroup": true
+  }
+]', 'OpenClaw 内置 Tools 清单，供 baiying-enhance 的 agent.json relTools 配置和角色默认配置引用。');
+
+
+INSERT INTO "byai"."byai_system_config" ("param_id", "param_type", "param_code", "param_name", "param_en_name", "param_value", "param_desc") VALUES (11865556, 'text', 'OPENCLAW_AGENT_ROLE_TEMPLATE_SUPER_ASSISTANT', 'OpenClaw Agent角色模板-超级助手', 'OPENCLAW_AGENT_ROLE_TEMPLATE_SUPER_ASSISTANT', '{
+  "schemaVersion": 1,
+  "templateType": "agentRole",
+  "agentRole": "superAssistant",
+  "roleNameZh": "超级助手",
+  "roleNameEn": "Super Assistant",
+  "roleDescZh": "主控、调度、会话管理、任务拆解、Agent 分派与结果汇总。",
+  "fieldComments": {
+    "agentRole": "Agent 角色标识。超级助手固定为 superAssistant。",
+    "relSkills": "关联 OpenClaw 内置 skills，映射到 openclaw.json 的 agents.list[].skills。字段存在时以缓存或 agent.json 配置为准。",
+    "relTools": "关联 OpenClaw 内置 tools，映射到 openclaw.json 的 agents.list[].tools.allow。超级助手默认只开放主控所需工具。",
+    "relPrompt": "关联 Agent Workspace 下的 Markdown 文件，key 为文件名，value 为该文件的生成配置。",
+    "priorityPrompt": "最高优先级 Prompt，非空时优先用于目标 Markdown 文件。",
+    "sourceFields": "当前 Markdown 文件按现有生成逻辑回退时读取的 agent.json 字段说明。数组元素格式为单字段对象。"
+  },
+  "relPromptMergeOrder": [
+    "如果 relPrompt.<filename>.priorityPrompt 非空，优先使用该内容生成或替换目标 Markdown 文件。",
+    "如果 priorityPrompt 为空，但存在文档插件原有属性，按文档插件原规则生成。",
+    "如果文档插件未生成内容，则按 sourceFields 标注字段回退到当前 workspace-seed.ts 生成逻辑。"
+  ],
+  "relSkills": [],
+  "relTools": [
+    "sessions_list",
+    "sessions_history",
+    "sessions_send",
+    "sessions_spawn",
+    "sessions_yield",
+    "session_status",
+    "agents_list",
+    "update_plan",
+    "read",
+    "exec",
+    "process"
+  ],
+  "relPrompt": {
+    "AGENTS.md": {
+      "priorityPrompt": "",
+      "sourceFields": [
+        { "templates/main-agents.md": "超级助手主 AGENTS.md 默认模板" },
+        { "relPrompt.AGENTS.md.priorityPrompt": "配置后替换主 Prompt 内容" }
+      ]
+    }
+  }
+}', '超级助手 Agent 角色配置模板，默认不绑定 skill，只开放主控、调度、会话、计划、读取、执行和进程相关工具。');
+
+INSERT INTO "byai"."byai_system_config" ("param_id", "param_type", "param_code", "param_name", "param_en_name", "param_value", "param_desc") VALUES (11865557, 'text', 'OPENCLAW_AGENT_ROLE_TEMPLATE_PERSONAL_ASSISTANT', 'OpenClaw Agent角色模板-个人助理', 'OPENCLAW_AGENT_ROLE_TEMPLATE_PERSONAL_ASSISTANT', '{
+  "schemaVersion": 1,
+  "templateType": "agentRole",
+  "agentRole": "personalAssistant",
+  "roleNameZh": "个人助理",
+  "roleNameEn": "Personal Assistant",
+  "roleDescZh": "面向个人知识库、DWS、日常事务与用户个人工作流。",
+  "fieldComments": {
+    "agentRole": "Agent 角色标识。个人助理固定为 personalAssistant。",
+    "relSkills": "关联 OpenClaw 内置 skills，映射到 openclaw.json 的 agents.list[].skills。个人助理默认开启 dws。",
+    "relTools": "关联 OpenClaw 内置 tools，映射到 openclaw.json 的 agents.list[].tools.allow。配置 [\"*\"] 表示允许全部工具。",
+    "relPrompt": "关联 Agent Workspace 下的 Markdown 文件，key 为文件名，value 为该文件的生成配置。",
+    "priorityPrompt": "最高优先级 Prompt，非空时优先用于目标 Markdown 文件。",
+    "sourceFields": "当前 Markdown 文件按现有生成逻辑回退时读取的 agent.json 字段说明。数组元素格式为单字段对象。"
+  },
+  "relPromptMergeOrder": [
+    "如果 relPrompt.<filename>.priorityPrompt 非空，优先使用该内容生成或替换目标 Markdown 文件。",
+    "如果 priorityPrompt 为空，但存在文档插件原有属性，按文档插件原规则生成。",
+    "如果文档插件未生成内容，则按 sourceFields 标注字段回退到当前 workspace-seed.ts 生成逻辑。"
+  ],
+  "relSkills": ["dws"],
+  "relTools": ["*"],
+  "relPrompt": {
+    "AGENTS.md": {
+      "priorityPrompt": "",
+      "sourceFields": [
+        { "prologue.descText": "生成 Greeting" },
+        { "resourceDesc": "生成 Capabilities overview" },
+        { "coreCompetencies": "生成 Core competencies" },
+        { "corePersonaDefinition": "生成百应业务拓展摘要" },
+        { "relResourceInfoList": "生成 Associated resources" },
+        { "relResourceList": "relResourceInfoList 缺失时作为关联资源兜底" }
+      ]
+    },
+    "SOUL.md": {
+      "priorityPrompt": "",
+      "sourceFields": [
+        { "corePersonaDefinition": "优先生成核心人格；JSON 拓展数组时转入业务拓展文件" },
+        { "instructions": "agent_list 格式下的人格或指令兜底" },
+        { "roleAttributes": "详情格式下拼接为 instructions" },
+        { "processingFlow": "详情格式下拼接为 instructions" },
+        { "ability": "详情格式下拼接为 instructions" },
+        { "constraints": "详情格式下拼接为 instructions" },
+        { "personalityDimensions": "详情格式下拼接为 instructions" },
+        { "wordPreferences": "详情格式下拼接为 instructions" },
+        { "sentenceAndTone": "详情格式下拼接为 instructions" },
+        { "faqs": "详情格式下拼接为 instructions" },
+        { "integrationType": "INTERFACE 或 A2A 时追加 baiying_call 工具引导" }
+      ]
+    },
+    "BYAI_BUSINESS_EXTENSIONS.md": {
+      "priorityPrompt": "",
+      "sourceFields": [
+        { "corePersonaDefinition": "解析 JSON 拓展数组，生成 name、value、key 明细" }
+      ]
+    },
+    "IDENTITY.md": {
+      "priorityPrompt": "",
+      "sourceFields": [
+        { "resourceName": "详情格式下生成 Name" },
+        { "name": "agent_list 格式下生成 Name" },
+        { "avatar": "生成 Avatar source system path" }
+      ]
+    },
+    "USER.md": {
+      "priorityPrompt": "",
+      "sourceFields": [
+        { "prologue.openingQuestion": "详情格式下生成 Suggested opening questions" },
+        { "openingQuestion": "agent_list 格式下生成 Suggested opening questions" }
+      ]
+    },
+    "TOOLS.md": {
+      "priorityPrompt": "",
+      "sourceFields": [
+        { "resourceId": "生成 DOC 类资源调用所需 agent_id 兜底" },
+        { "relResourceInfoList": "生成 Available resources" },
+        { "relResourceList": "relResourceInfoList 缺失时作为资源列表兜底" },
+        { "resourceName": "生成资源展示名称" },
+        { "resourceBizType": "生成资源类型，优先于 resourceType" },
+        { "resourceType": "生成资源类型兜底" },
+        { "resourceCode": "生成资源 code" },
+        { "resourceDesc": "生成资源描述" }
+      ]
+    }
+  }
+}', '个人助理 Agent 角色配置模板，默认绑定 dws skill，并通过 relTools 的 [\"*\"] 允许 OpenClaw 全部工具。');
+
+INSERT INTO "byai"."byai_system_config" ("param_id", "param_type", "param_code", "param_name", "param_en_name", "param_value", "param_desc") VALUES (11865558, 'text', 'OPENCLAW_AGENT_ROLE_TEMPLATE_DIGITAL_EMPLOYEE', 'OpenClaw Agent角色模板-数字员工', 'OPENCLAW_AGENT_ROLE_TEMPLATE_DIGITAL_EMPLOYEE', '{
+  "schemaVersion": 1,
+  "templateType": "agentRole",
+  "agentRole": "digitalEmployee",
+  "roleNameZh": "数字员工",
+  "roleNameEn": "Digital Employee",
+  "roleDescZh": "面向具体业务能力、知识库、工具调用和业务流程执行。",
+  "fieldComments": {
+    "agentRole": "Agent 角色标识。数字员工固定为 digitalEmployee。",
+    "relSkills": "关联 OpenClaw 内置 skills，映射到 openclaw.json 的 agents.list[].skills。数字员工默认不绑定 skill。",
+    "relTools": "关联 OpenClaw 内置 tools，映射到 openclaw.json 的 agents.list[].tools.allow。配置 [\"*\"] 表示允许全部工具。",
+    "relPrompt": "关联 Agent Workspace 下的 Markdown 文件，key 为文件名，value 为该文件的生成配置。",
+    "priorityPrompt": "最高优先级 Prompt，非空时优先用于目标 Markdown 文件。",
+    "sourceFields": "当前 Markdown 文件按现有生成逻辑回退时读取的 agent.json 字段说明。数组元素格式为单字段对象。"
+  },
+  "relPromptMergeOrder": [
+    "如果 relPrompt.<filename>.priorityPrompt 非空，优先使用该内容生成或替换目标 Markdown 文件。",
+    "如果 priorityPrompt 为空，但存在文档插件原有属性，按文档插件原规则生成。",
+    "如果文档插件未生成内容，则按 sourceFields 标注字段回退到当前 workspace-seed.ts 生成逻辑。"
+  ],
+  "relSkills": [],
+  "relTools": ["*"],
+  "relPrompt": {
+    "AGENTS.md": {
+      "priorityPrompt": "",
+      "sourceFields": [
+        { "prologue.descText": "生成 Greeting" },
+        { "resourceDesc": "生成 Capabilities overview" },
+        { "coreCompetencies": "生成 Core competencies" },
+        { "corePersonaDefinition": "生成百应业务拓展摘要" },
+        { "relResourceInfoList": "生成 Associated resources" },
+        { "relResourceList": "relResourceInfoList 缺失时作为关联资源兜底" }
+      ]
+    },
+    "SOUL.md": {
+      "priorityPrompt": "",
+      "sourceFields": [
+        { "corePersonaDefinition": "优先生成核心人格；JSON 拓展数组时转入业务拓展文件" },
+        { "instructions": "agent_list 格式下的人格或指令兜底" },
+        { "roleAttributes": "详情格式下拼接为 instructions" },
+        { "processingFlow": "详情格式下拼接为 instructions" },
+        { "ability": "详情格式下拼接为 instructions" },
+        { "constraints": "详情格式下拼接为 instructions" },
+        { "personalityDimensions": "详情格式下拼接为 instructions" },
+        { "wordPreferences": "详情格式下拼接为 instructions" },
+        { "sentenceAndTone": "详情格式下拼接为 instructions" },
+        { "faqs": "详情格式下拼接为 instructions" },
+        { "integrationType": "INTERFACE 或 A2A 时追加 baiying_call 工具引导" }
+      ]
+    },
+    "BYAI_BUSINESS_EXTENSIONS.md": {
+      "priorityPrompt": "",
+      "sourceFields": [
+        { "corePersonaDefinition": "解析 JSON 拓展数组，生成 name、value、key 明细" }
+      ]
+    },
+    "IDENTITY.md": {
+      "priorityPrompt": "",
+      "sourceFields": [
+        { "resourceName": "详情格式下生成 Name" },
+        { "name": "agent_list 格式下生成 Name" },
+        { "avatar": "生成 Avatar source system path" }
+      ]
+    },
+    "USER.md": {
+      "priorityPrompt": "",
+      "sourceFields": [
+        { "prologue.openingQuestion": "详情格式下生成 Suggested opening questions" },
+        { "openingQuestion": "agent_list 格式下生成 Suggested opening questions" }
+      ]
+    },
+    "TOOLS.md": {
+      "priorityPrompt": "",
+      "sourceFields": [
+        { "resourceId": "生成 DOC 类资源调用所需 agent_id 兜底" },
+        { "relResourceInfoList": "生成 Available resources" },
+        { "relResourceList": "relResourceInfoList 缺失时作为资源列表兜底" },
+        { "resourceName": "生成资源展示名称" },
+        { "resourceBizType": "生成资源类型，优先于 resourceType" },
+        { "resourceType": "生成资源类型兜底" },
+        { "resourceCode": "生成资源 code" },
+        { "resourceDesc": "生成资源描述" }
+      ]
+    }
+  }
+}', '数字员工 Agent 角色配置模板，默认不绑定 skill，并通过 relTools 的 [\"*\"] 允许 OpenClaw 全部工具。');
+
+
+
 INSERT INTO "byai"."byai_system_config" ("param_id", "param_type", "param_code", "param_name", "param_en_name", "param_value", "param_desc") VALUES (11865554, 'text', 'OPENCLAW_BUNDLED_SKILLS', 'OpenClaw内置Skill清单', 'OPENCLAW_BUNDLED_SKILLS', '[
   {
     "skillName": "1password",
@@ -608,7 +1164,7 @@ INSERT INTO byai.byai_tag_relation (relation_id,tag_id,obj_id,obj_type,create_ti
 	 (10000284,6,-2000,'AI_MODEL','2026-04-30 16:19:52.235',NULL,NULL);
 
 -- 初始化沙箱服务表
-INSERT INTO "byai"."sandbox_service_spec" ("service_key", "spec_json", "template_json", "updated_at") VALUES ('openclaw', '{"env": {"TZ": "Asia/Shanghai", "MODEL_ID": "${MODEL_ID}", "NODE_ENV": "production", "USER_CODE": "${user_code}", "MODEL_NAME": "${MODEL_NAME}", "REDIS_HOST": "${REDIS_HOST}", "REDIS_PORT": "${REDIS_PORT}", "MODEL_ALIAS": "${MODEL_ALIAS}", "OPENCLAW_TZ": "Asia/Shanghai", "BEYOND_TOKEN": "${BEYOND_TOKEN}", "NODE_OPTIONS": "--max-old-space-size=4096", "MODEL_API_KEY": "${MODEL_API_KEY}", "DWS_CONFIG_DIR": "/by/.openclaw/.dws", "MODEL_BASE_URL": "${MODEL_BASE_URL}", "REDIS_DATABASE": "${REDIS_DATABASE}", "REDIS_PASSWORD": "${REDIS_PASSWORD}", "REDIS_USERNAME": "${REDIS_USERNAME}", "BAIYING_SESSION": "${BAIYING_SESSION}", "BAIYING_AGENT_AUTH": "${BAIYING_AGENT_AUTH}", "OPENCLAW_STATE_DIR": "/by/.openclaw", "OPENCLAW_GATEWAY_TOKEN": "${OPENCLAW_GATEWAY_TOKEN}", "FILE_STORAGE_MINIO_MOUNT_PATH": "${FILE_STORAGE_MINIO_MOUNT_PATH}"}, "image": "ghcr.io/beyonai/byclaw-middleware/byclaw-openclaw:main", "ports": [{"port": 8080, "protocol": "http"}, {"port": 8081, "protocol": "http"}, {"port": 9222, "protocol": "http"}, {"port": 5901, "protocol": "http"}, {"port": 18789, "protocol": "http"}], "startup": {"entrypoint": ["node", "dist/index.js", "gateway", "--bind=lan", "--port=8080", "--allow-unconfigured", "--verbose"]}, "volumes": [{"key": "base", "scope": "PRIVATE", "subPath": "byclaw-${user_code}/by", "hostPath": "${FILE_STORAGE_MINIO_MOUNT_PATH}", "readOnly": false, "mountPath": "/by"}, {"scope": "PUBLIC", "subPath": "byclaw/resource", "hostPath": "${FILE_STORAGE_MINIO_MOUNT_PATH}", "readOnly": false, "mountPath": "/by/.openclaw/byresources"}], "bootstrap": {"copyTemplate": {"copyIfMissing": true, "targetVolumeKey": "base"}}, "resourceLimits": {"cpu": "2", "memory": "4Gi"}}', '{
+INSERT INTO "byai"."sandbox_service_spec" ("service_key", "spec_json", "template_json", "updated_at") VALUES ('openclaw', '{"env": {"TZ": "Asia/Shanghai", "MODEL_ID": "${MODEL_ID}", "NODE_ENV": "production", "USER_CODE": "${user_code}", "MODEL_NAME": "${MODEL_NAME}", "REDIS_HOST": "${REDIS_HOST}", "REDIS_PORT": "${REDIS_PORT}", "MODEL_ALIAS": "${MODEL_ALIAS}", "OPENCLAW_TZ": "Asia/Shanghai", "BEYOND_TOKEN": "${BEYOND_TOKEN}", "NODE_OPTIONS": "--max-old-space-size=4096", "MODEL_API_KEY": "${MODEL_API_KEY}", "DWS_CONFIG_DIR": "/by/.openclaw/.dws", "MODEL_BASE_URL": "${MODEL_BASE_URL}", "REDIS_DATABASE": "${REDIS_DATABASE}", "REDIS_PASSWORD": "${REDIS_PASSWORD}", "REDIS_USERNAME": "${REDIS_USERNAME}", "BAIYING_SESSION": "${BAIYING_SESSION}", "BAIYING_AGENT_AUTH": "${BAIYING_AGENT_AUTH}", "OPENCLAW_STATE_DIR": "/by/.openclaw", "OPENCLAW_GATEWAY_TOKEN": "${OPENCLAW_GATEWAY_TOKEN}", "FILE_STORAGE_MINIO_MOUNT_PATH": "${FILE_STORAGE_MINIO_MOUNT_PATH}"}, "image": "ghcr.io/beyonai/byclaw/byclaw-openclaw:main", "ports": [{"port": 8080, "protocol": "http"}, {"port": 8081, "protocol": "http"}, {"port": 9222, "protocol": "http"}, {"port": 5901, "protocol": "http"}, {"port": 18789, "protocol": "http"}], "startup": {"entrypoint": ["node", "dist/index.js", "gateway", "--bind=lan", "--port=8080", "--allow-unconfigured", "--verbose"]}, "volumes": [{"key": "base", "scope": "PRIVATE", "subPath": "byclaw-${user_code}/by", "hostPath": "${FILE_STORAGE_MINIO_MOUNT_PATH}", "readOnly": false, "mountPath": "/by"}, {"scope": "PUBLIC", "subPath": "byclaw/resource", "hostPath": "${FILE_STORAGE_MINIO_MOUNT_PATH}", "readOnly": false, "mountPath": "/by/.openclaw/byresources"}], "bootstrap": {"copyTemplate": {"copyIfMissing": true, "targetVolumeKey": "base"}}, "resourceLimits": {"cpu": "2", "memory": "4Gi"}}', '{
     "meta": {
         "lastTouchedAt": "2026-03-27T08:46:51.148Z",
         "lastTouchedVersion": "2026.3.28"

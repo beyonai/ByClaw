@@ -15,13 +15,6 @@ if [ "$MIDDLEWARE_MODULES" = "NONE" ]; then
     exit 0
 fi
 
-if [ -z "$GHCR_USER" ] || [ -z "$GHCR_TOKEN" ]; then
-    echo "Error: GHCR_USER and GHCR_TOKEN must be set in .env"
-    exit 1
-fi
-
-echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-
 FAILED=0
 
 pull() {
@@ -33,10 +26,10 @@ pull() {
 }
 
 # 拉取中间件镜像
-pull "${IMAGE_REDIS:-ghcr.io/beyonclaw/byclaw-all/byclaw-redis:main}"
-pull "${IMAGE_MINIO:-ghcr.io/beyonclaw/byclaw-all/byclaw-minio:main}"
-pull "${IMAGE_OPENGAUSS:-ghcr.io/beyonclaw/byclaw-all/byclaw-opengauss:main}"
-pull "${IMAGE_OPENCLAW:-ghcr.io/beyonai/byclaw-middleware/byclaw-openclaw:main}"
+pull "${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}"
+pull "${IMAGE_MINIO:-ghcr.io/beyonai/byclaw/byclaw-minio:main}"
+pull "${IMAGE_OPENGAUSS:-ghcr.io/beyonai/byclaw/byclaw-opengauss:main}"
+pull "${IMAGE_OPENCLAW:-ghcr.io/beyonai/byclaw/byclaw-openclaw:main}"
 
 pull "${IMAGE_SANDBOX_SERVER:-sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server:v0.1.9}"
 pull "${IMAGE_SANDBOX_EXECD:-sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.9}"

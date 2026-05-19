@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from botocore.exceptions import ClientError
 
+from exceptions import ConfigurationError
 from minio_client import MinioResourceClient, _build_endpoint_url
 
 
@@ -11,7 +12,7 @@ from minio_client import MinioResourceClient, _build_endpoint_url
 
 def test_build_endpoint_url_raises_when_missing():
     with patch.dict("os.environ", {}, clear=True):
-        with pytest.raises(RuntimeError, match="MINIO_ENDPOINT"):
+        with pytest.raises(ConfigurationError, match="MINIO_ENDPOINT"):
             _build_endpoint_url()
 
 

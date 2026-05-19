@@ -15,13 +15,6 @@ if [ "$STANDALONE_MODULES" = "NONE" ]; then
     exit 0
 fi
 
-if [ -z "$GHCR_USER" ] || [ -z "$GHCR_TOKEN" ]; then
-    echo "Error: GHCR_USER and GHCR_TOKEN must be set in .env"
-    exit 1
-fi
-
-echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-
 FAILED=0
 
 pull() {
@@ -33,10 +26,10 @@ pull() {
 }
 
 # 拉取独立模块镜像
-pull "${IMAGE_FE:-ghcr.io/beyonclaw/byclaw-all/byclaw-fe:main}"
-pull "${IMAGE_BE:-ghcr.io/beyonclaw/byclaw-all/byclaw-be:main}"
-pull "${IMAGE_QA:-ghcr.io/beyonclaw/byclaw-all/byclaw-qa:main}"
-pull "${IMAGE_DATA:-ghcr.io/beyonclaw/byclaw-all/byclaw-data:main}"
+pull "${IMAGE_FE:-ghcr.io/beyonai/byclaw/byclaw-fe:main}"
+pull "${IMAGE_BE:-ghcr.io/beyonai/byclaw/byclaw-be:main}"
+pull "${IMAGE_QA:-ghcr.io/beyonai/byclaw/byclaw-qa:main}"
+pull "${IMAGE_DATA:-ghcr.io/beyonai/byclaw/byclaw-data:main}"
 
 pull "${IMAGE_DEMO:-ghcr.io/beyonai/byclaw-middleware/byclaw-demo:main}"
 

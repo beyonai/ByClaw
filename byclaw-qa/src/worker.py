@@ -15,17 +15,26 @@ import by_framework.worker as worker_mod
 from by_framework.worker.context import AskAgentCommand
 from by_framework.util.http_client import ByHttpClient
 import dotenv
-from by_qa.qa.instant.nodes.node_enum import NodeNames
-from by_qa.qa.instant.runtime.operation_registry import OPERATION_REGISTRY, OperationType
+from by_qa.qa.engines.instant.types import NodeNames, AgentNames
+from by_qa.qa.common.operation_registry import OPERATION_REGISTRY, OperationType
 from by_qa.core import logger
 from by_qa.qa.common.models import CoreInput, StreamEventType
-from by_qa.qa.instant.engine import InstantSearchEngine
+from by_qa.qa.engines.instant.engine import InstantQAEngine
 from redis_agent_config import convert_agent_config_to_engine_config
-from minio_agent_config import load_agent_config_from_minio
+from minio_agent_config import load_agent_config_from_minio, extract_prologue_model_id
 from minio_client import MinioResourceClient
 from by_framework.core.discovery import DiscoveryClient
 from by_framework.util.discovery_http_client import DiscoveryHttpClient
 from by_framework.util.http_client import RetryConfig
+from i18n import Msg, set_lang, t, translate_fallback
+from middleware import build_agent_overrides
+from exceptions import (
+    ByclawQAError,
+    ConfigurationError,
+    ModelConfigError,
+    ModelNotFoundError,
+    StorageError,
+)
 
 dotenv.load_dotenv()
 
@@ -35,8 +44,42 @@ _minio = MinioResourceClient()
 FINAL_ANSWER_ROLES = {
     "aggregator",
     "subanswer_aggregator",
+    "final_answer",
 }
-SEARCH_TOOL_NAME = OPERATION_REGISTRY[OperationType.SEARCH].tool_name
+SEARCH_TOOL_NAME = OPERATION_REGISTRY[OperationType.KNOWLEDGE_SEARCH].tool_name
+
+
+def _safe_json_dumps(data: Any) -> str:
+    return json.dumps(data, ensure_ascii=False, default=str)
+
+
+def _summarize_agent_config(agent_config: Any) -> dict[str, Any]:
+    if agent_config is None:
+        return {"present": False}
+
+    knowledge_bases = getattr(agent_config, "knowledge_bases", None) or {}
+    kb_counts = {
+        str(group): len(kbs or [])
+        for group, kbs in knowledge_bases.items()
+    }
+    return {
+        "present": True,
+        "agent_id": getattr(agent_config, "agent_id", None),
+        "knowledge_base_groups": list(knowledge_bases.keys()),
+        "knowledge_base_counts": kb_counts,
+    }
+
+
+def _summarize_knowledge_bases(
+    knowledge_bases: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "kb_code": kb.get("kb_code"),
+            "kb_name": kb.get("kb_name"),
+        }
+        for kb in (knowledge_bases or [])
+    ]
 
 
 def parse_dataset_ids(value: str | None) -> list[int]:
@@ -63,10 +106,7 @@ async def generate_report_filename(content: str, llm_service: Any) -> str:
         prompt = [
             {
                 "role": "user",
-                "content": (
-                    "根据以下报告内容，生成一个简短的中文文件名"
-                    "（不超过20字，不含标点和特殊字符）：\n" + content
-                ),
+                "content": t(Msg.PROMPT_GENERATE_FILENAME) + content,
             }
         ]
         name = await llm_service.generate(prompt)
@@ -134,24 +174,24 @@ async def upload_report(content: str, filename: str, session_id: str, user_code:
 
 def convert_node_name_to_title(node_name: str) -> str:
     if node_name == NodeNames.DECOMPOSER.value:
-        return "问题分解"
+        return t(Msg.NODE_DECOMPOSER)
     elif node_name == SEARCH_TOOL_NAME:
-        return "信息检索"
+        return t(Msg.NODE_SEARCH_KNOWLEDGE)
     elif node_name == NodeNames.SINGLE_HOP_WORKER.value:
-        return "单跳问题处理"
+        return t(Msg.NODE_SINGLE_HOP_WORKER)
     elif node_name == NodeNames.MULTI_HOP_WORKER.value:
-        return "多跳问题处理"
+        return t(Msg.NODE_MULTI_HOP_WORKER)
     elif (
         node_name == NodeNames.FINAL_ANSWER.value
         or node_name == NodeNames.SUBANSWER_AGGREGATOR.value
     ):
-        return "答案聚合"
-    elif node_name == NodeNames.MULTI_HOP_AGENT.value:
-        return "多跳问题信息检索"
-    elif node_name == NodeNames.MULTI_HOP_SUMMARY.value:
-        return "多跳问题答案总结"
-    elif node_name == NodeNames.SINGLE_HOP_AGENT.value:
-        return "单跳问题信息检索"
+        return t(Msg.NODE_ANSWER_AGGREGATION)
+    elif node_name == AgentNames.MULTI_HOP.value:
+        return t(Msg.NODE_MULTI_HOP_AGENT)
+    elif node_name == AgentNames.MULTI_HOP_SUMMARY.value:
+        return t(Msg.NODE_MULTI_HOP_SUMMARY)
+    elif node_name == AgentNames.SINGLE_HOP.value:
+        return t(Msg.NODE_SINGLE_HOP_AGENT)
     return None
 
 
@@ -187,9 +227,14 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
     async def process_command(
         self, command: AskAgentCommand, context: worker_mod.AgentContext
     ) -> str:
+        logger.set_session_id(command.header.session_id)
+        logger.set_message_id(command.header.message_id)
+
+        lang = command.header.metadata.get("language", "zh_CN")
+        set_lang(lang)
         agent_id = command.extra_payload.get("agent_id", None)
         if agent_id is None:
-            message = "未指定可用数字员工，无法执行检索。"
+            message = t(Msg.NO_AGENT)
             logger.warning("Instant search request rejected: missing agent_id in extra_payload")
             await context.emit_chunk(
                 message,
@@ -202,10 +247,61 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
         if user_code == "default":
             logger.warning("No valid user_code found for agent_id=%s; using default", agent_id)
         session_id = context.session_id
+        call_kb_ids = command.extra_payload.get("call_kb_ids")
+        query = str(getattr(command, "content", "")).strip()
+        request_headers = command.header.metadata.get("request_headers")
+
+        logger.info(
+            "Instant search request context before config load: %s",
+            _safe_json_dumps(
+                {
+                    "agent_id": agent_id,
+                    "call_kb_ids": call_kb_ids,
+                    "session_id": command.header.session_id,
+                    "context_session_id": session_id,
+                    "parent_message_id": command.header.parent_message_id,
+                    "root_message_id": command.header.message_id,
+                    "user_code": user_code,
+                    "language": lang,
+                    "query": query,
+                    "query_length": len(query),
+                    "extra_payload": command.extra_payload,
+                    "header_metadata": command.header.metadata,
+                }
+            ),
+        )
 
         agent_config = await load_agent_config_from_minio(_minio, str(agent_id))
+        # load_agent_config_from_minio already fetches this internally, but we need
+        # the raw employee config here to extract the prologue modelId without
+        # changing that function's signature.
+        employee_config = await _minio.get_dig_employee_config(str(agent_id))
+        prologue_model_id = extract_prologue_model_id(employee_config)
+        if prologue_model_id:
+            logger.info(
+                "Extracted prologue_model_id=%s for agent_id=%s",
+                prologue_model_id,
+                agent_id,
+            )
+        else:
+            logger.info("No prologue_model_id found for agent_id=%s", agent_id)
+        logger.info(
+            "Loaded agent config summary for agent_id=%s: %s",
+            agent_id,
+            _safe_json_dumps(_summarize_agent_config(agent_config)),
+        )
+        if request_headers and agent_config is not None:
+            for kb_list in (agent_config.knowledge_bases or {}).values():
+                for kb in kb_list or []:
+                    existing = kb.get("headers") or {}
+                    normalized = {
+                        k: v if isinstance(v, str) else str(v)
+                        for k, v in request_headers.items()
+                    }
+                    kb["headers"] = {**existing, **normalized}
+
         if agent_config is None:
-            message = "当前数字员工未配置检索能力，无法执行检索。"
+            message = t(Msg.NO_RETRIEVAL_CAPABILITY)
             logger.warning(
                 "Instant search request rejected: agent_id=%s has no retrieval config",
                 agent_id,
@@ -223,8 +319,21 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
             len(loaded_knowledge_bases),
             agent_id,
         )
+        logger.info(
+            "Knowledge base selection input for agent_id=%s: %s",
+            agent_id,
+            _safe_json_dumps(
+                {
+                    "call_kb_ids": call_kb_ids,
+                    "loaded_knowledge_base_count": len(loaded_knowledge_bases),
+                    "loaded_knowledge_bases": _summarize_knowledge_bases(
+                        loaded_knowledge_bases
+                    ),
+                }
+            ),
+        )
         if not loaded_knowledge_bases:
-            message = "当前未配置可用知识库，无法执行检索。"
+            message = t(Msg.NO_KNOWLEDGE_BASE)
             logger.warning(
                 "Instant search request rejected: agent_id=%s has no available knowledge bases",
                 agent_id,
@@ -242,7 +351,7 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
             call_kb_ids,
         )
         if missing_kb_codes:
-            message = "知识库编码不存在：" + "、".join(missing_kb_codes)
+            message = t(Msg.KB_CODE_NOT_FOUND).format(codes="、".join(missing_kb_codes))
             logger.warning(
                 "Instant search request rejected: requested call_kb_ids are not available for agent_id=%s: %s",
                 agent_id,
@@ -266,12 +375,25 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
                 agent_id,
                 len(selected_knowledge_bases),
             )
+        logger.info(
+            "Knowledge base selection result for agent_id=%s: %s",
+            agent_id,
+            _safe_json_dumps(
+                {
+                    "call_kb_ids": call_kb_ids,
+                    "missing_kb_codes": missing_kb_codes,
+                    "selected_knowledge_base_count": len(selected_knowledge_bases),
+                    "selected_knowledge_bases": _summarize_knowledge_bases(
+                        selected_knowledge_bases
+                    ),
+                }
+            ),
+        )
 
         session_id = command.header.session_id
         parent_message_id = command.header.parent_message_id
         root_message_id = command.header.message_id
 
-        query = str(getattr(command, "content", "")).strip()
         logger.info(
             "Starting instant search for agent_id=%s session_id=%s query_length=%s",
             agent_id,
@@ -283,20 +405,107 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
             query=query,
             session_id=session_id,
             message_id=root_message_id,
-            dataset_ids=None,
         )
 
+        config["agents"] = build_agent_overrides(lang)
+        logger.info(
+            "Instant search _run_search payload for agent_id=%s: %s",
+            agent_id,
+            _safe_json_dumps(
+                {
+                    "agent_id": agent_id,
+                    "call_kb_ids": call_kb_ids,
+                    "user_code": user_code,
+                    "session_id": session_id,
+                    "parent_message_id": parent_message_id,
+                    "root_message_id": root_message_id,
+                    "input_data": input_data.model_dump(mode="json"),
+                    "config": {
+                        "retrieval": {
+                            **config.get("retrieval", {}),
+                            "knowledge_bases": _summarize_knowledge_bases(
+                                config.get("retrieval", {}).get("knowledge_bases", [])
+                            ),
+                        },
+                        "agents": list(config.get("agents", {}).keys()),
+                    },
+                }
+            ),
+        )
+
+        try:
+            from redis_model_config import request_prologue_model_id
+            token = request_prologue_model_id.set(prologue_model_id)
+            try:
+                return await self._run_search(
+                    config, input_data, context,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    user_code=user_code,
+                    parent_message_id=parent_message_id,
+                    root_message_id=root_message_id,
+                )
+            finally:
+                request_prologue_model_id.reset(token)
+        except ConfigurationError as exc:
+            logger.error("Configuration error for agent_id=%s: %s", agent_id, exc)
+            message = t(Msg.ERR_MINIO_ENDPOINT_MISSING)
+            await context.emit_chunk(
+                message,
+                event_type=event_type_mod.EventType.ANSWER_DELTA.value,
+            )
+            return message
+        except StorageError as exc:
+            logger.error("Storage error for agent_id=%s: %s", agent_id, exc)
+            message = t(Msg.ERR_STORAGE_UNAVAILABLE)
+            await context.emit_chunk(
+                message,
+                event_type=event_type_mod.EventType.ANSWER_DELTA.value,
+            )
+            return message
+        except ModelNotFoundError as exc:
+            logger.error("Model not found for agent_id=%s: %s", agent_id, exc)
+            message = t(Msg.ERR_MODEL_NOT_FOUND)
+            await context.emit_chunk(
+                message,
+                event_type=event_type_mod.EventType.ANSWER_DELTA.value,
+            )
+            return message
+        except ModelConfigError as exc:
+            logger.error("Model config error for agent_id=%s: %s", agent_id, exc)
+            message = t(Msg.ERR_MODEL_CONFIG_INVALID)
+            await context.emit_chunk(
+                message,
+                event_type=event_type_mod.EventType.ANSWER_DELTA.value,
+            )
+            return message
+
+    async def _run_search(
+        self,
+        config: dict,
+        input_data: CoreInput,
+        context: worker_mod.AgentContext,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_code: str,
+        parent_message_id: str,
+        root_message_id: str,
+    ) -> str:
         final_answer_parts: list[str] = []
         has_error = False
+        aggregator_instance_ids: set[str] = set()
 
         chunks: list[str] = []
-        async with InstantSearchEngine(config=config) as engine:
+        async with InstantQAEngine(config=config) as engine:
             async with aclosing(engine.stream_search(input_data)) as stream:
                 async for event in stream:
                     parent_message_ids = event.parent_ids if event.parent_ids else [parent_message_id]
                     if event.type.value == StreamEventType.NODE_END.value:
                         continue
                     if event.type.value == StreamEventType.NODE_START.value:
+                        if event.role in FINAL_ANSWER_ROLES:
+                            aggregator_instance_ids.add(event.instance_id)
                         message_id = event.instance_id
                         title = convert_node_name_to_title(event.role)
                         if title:
@@ -328,15 +537,20 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
                         )
                         break
 
+                    is_aggregator_output = (
+                        event.role in FINAL_ANSWER_ROLES
+                        or (
+                            event.parent_ids
+                            and aggregator_instance_ids & set(event.parent_ids)
+                        )
+                    )
+
                     message_id = event.instance_id
                     event_type = event_type_mod.EventType.REASONING_LOG_DELTA.value
-                    content = event.data.get("content", "")
+                    content = translate_fallback(event.data.get("content", ""))
                     if event.type.value == "search_result_chunks":
                         chunks.extend(event.data.get("chunks", []))
-                    elif event.role in [
-                        NodeNames.FINAL_ANSWER.value,
-                        NodeNames.SUBANSWER_AGGREGATOR.value,
-                    ]:
+                    elif is_aggregator_output:
                         final_answer_parts.append(content)
                         parent_message_ids = [parent_message_id]
                         message_id = root_message_id
@@ -354,24 +568,29 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
             from by_qa.qa.services.llm_service import LLMService
             from redis_model_config import RedisModelConfigProvider
 
+            # This provider is used for report filename generation only —
+            # the search engine loads its own model config internally via InstantQAEngine.
             provider = RedisModelConfigProvider(context.redis)
             await provider.load_cache()
             llm_service = LLMService(provider=provider)
             filename = await generate_report_filename(final_answer, llm_service)
             report_uploaded = await upload_report(final_answer, filename, session_id, user_code)
             if report_uploaded:
+                report_saved_msg = t(Msg.REPORT_SAVED).format(
+                    path="/qa/" + filename + ".md"
+                )
                 await context.emit_chunk(
-                    "\n\n报告已保存到：/qa/" + filename + ".md",
+                    report_saved_msg,
                     event_type=event_type_mod.EventType.ANSWER_DELTA.value,
                 )
-                final_answer += "\n\n报告已保存到：/qa/" + filename + ".md"
+                final_answer += report_saved_msg
             else:
                 logger.warning(
                     "Report upload did not complete successfully for agent_id=%s session_id=%s",
                     agent_id,
                     session_id,
                 )
-                upload_failure_message = "\n\n报告保存失败，未写入会话文件。"
+                upload_failure_message = t(Msg.REPORT_SAVE_FAILED)
                 await context.emit_chunk(
                     upload_failure_message,
                     event_type=event_type_mod.EventType.ANSWER_DELTA.value,
@@ -384,7 +603,7 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
                 session_id,
             )
             await context.emit_chunk(
-                "[搜问运行异常] " + final_answer,
+                t(Msg.SEARCH_ERROR).format(answer=final_answer),
                 event_type=event_type_mod.EventType.ANSWER_DELTA.value,
             )
         else:

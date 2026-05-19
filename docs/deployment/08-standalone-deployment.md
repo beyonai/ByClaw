@@ -272,7 +272,7 @@ cd deploy/standalone
 sh stop-xxx.sh
 
 # 拉取新镜像
-docker pull ghcr.io/beyonclaw/byclaw-all/byclaw-xxx:main
+docker pull ghcr.io/beyonai/byclaw/byclaw-xxx:main
 
 # 重新启动
 sh start-xxx.sh

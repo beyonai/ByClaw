@@ -11,31 +11,34 @@ _node_names_mock.FINAL_ANSWER.value = "final_answer"
 _node_names_mock.SUBANSWER_AGGREGATOR.value = "subanswer_aggregator"
 _node_names_mock.SINGLE_HOP_WORKER.value = "single_hop_worker"
 _node_names_mock.MULTI_HOP_WORKER.value = "multi_hop_worker"
-_node_names_mock.MULTI_HOP_AGENT.value = "multi_hop_agent"
-_node_names_mock.MULTI_HOP_SUMMARY.value = "multi_hop_summary"
-_node_names_mock.SINGLE_HOP_AGENT.value = "single_hop_agent"
 
-_node_enum_mock = MagicMock()
-_node_enum_mock.NodeNames = _node_names_mock
+_agent_names_mock = MagicMock()
+_agent_names_mock.MULTI_HOP.value = "multi_hop_agent"
+_agent_names_mock.MULTI_HOP_SUMMARY.value = "multi_hop_summary"
+_agent_names_mock.SINGLE_HOP.value = "single_hop_agent"
+
+_types_mock = MagicMock()
+_types_mock.NodeNames = _node_names_mock
+_types_mock.AgentNames = _agent_names_mock
 
 _stream_event_type_mock = MagicMock()
 _stream_event_type_mock.NODE_END.value = "node_end"
 _stream_event_type_mock.NODE_START.value = "node_start"
 
 _operation_type_mock = MagicMock()
-_operation_type_mock.SEARCH = "search-op"
+_operation_type_mock.KNOWLEDGE_SEARCH = "knowledge-search-op"
 
 _search_spec_mock = MagicMock()
 _search_spec_mock.tool_name = "search_knowledge"
 
-_operation_registry_mock = {_operation_type_mock.SEARCH: _search_spec_mock}
+_operation_registry_mock = {_operation_type_mock.KNOWLEDGE_SEARCH: _search_spec_mock}
 
-_operation_registry_module = ModuleType("by_qa.qa.instant.runtime.operation_registry")
+_operation_registry_module = ModuleType("by_qa.qa.common.operation_registry")
 _operation_registry_module.OperationType = _operation_type_mock
 _operation_registry_module.OPERATION_REGISTRY = _operation_registry_mock
 
-_instant_engine_module = ModuleType("by_qa.qa.instant.engine")
-_instant_engine_module.InstantSearchEngine = MagicMock()
+_instant_engine_module = ModuleType("by_qa.qa.engines.instant.engine")
+_instant_engine_module.InstantQAEngine = MagicMock()
 
 _event_type_mock = MagicMock()
 _event_type_mock.EventType.ANSWER_DELTA.value = "answer_delta"
@@ -85,15 +88,15 @@ _mocks = {
     "by_qa.qa": MagicMock(),
     "by_qa.qa.common": MagicMock(),
     "by_qa.qa.common.models": MagicMock(StreamEventType=_stream_event_type_mock),
-    "by_qa.qa.instant": MagicMock(),
-    "by_qa.qa.instant.engine": _instant_engine_module,
-    "by_qa.qa.instant.nodes": MagicMock(),
-    "by_qa.qa.instant.nodes.node_enum": _node_enum_mock,
-    "by_qa.qa.instant.runtime": MagicMock(),
-    "by_qa.qa.instant.runtime.operation_registry": _operation_registry_module,
+    "by_qa.qa.common.operation_registry": _operation_registry_module,
+    "by_qa.qa.engines": MagicMock(),
+    "by_qa.qa.engines.instant": MagicMock(),
+    "by_qa.qa.engines.instant.engine": _instant_engine_module,
+    "by_qa.qa.engines.instant.types": _types_mock,
     "redis_agent_config": MagicMock(),
     "minio_agent_config": MagicMock(),
     "minio_client": MagicMock(),
+    "middleware": MagicMock(),
     "by_qa.qa.services": MagicMock(),
     "by_qa.qa.services.llm_service": MagicMock(),
     "redis_model_config": MagicMock(),
@@ -218,7 +221,7 @@ async def test_process_command_uses_all_agent_kbs_when_call_kb_ids_empty(call_kb
     }
     command = SimpleNamespace(
         extra_payload={"agent_id": "agent-1", "call_kb_ids": call_kb_ids},
-        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1"),
+        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1", metadata={}),
         content="query",
     )
     context = SimpleNamespace(
@@ -231,10 +234,11 @@ async def test_process_command_uses_all_agent_kbs_when_call_kb_ids_empty(call_kb
     with (
         patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
         patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
-        patch.object(worker_module, "InstantSearchEngine", return_value=_FakeEngine()) as instant_search_engine,
+        patch.object(worker_module, "InstantQAEngine", return_value=_FakeEngine()) as instant_search_engine,
         patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="季度分析")),
         patch.object(worker_module, "upload_report", AsyncMock()),
         patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
+        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
     ):
         result = await worker.process_command(command, context)
 
@@ -260,7 +264,7 @@ async def test_process_command_filters_agent_kbs_by_call_kb_ids_subset():
     }
     command = SimpleNamespace(
         extra_payload={"agent_id": "agent-1", "call_kb_ids": ["kb-2"]},
-        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1"),
+        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1", metadata={}),
         content="query",
     )
     context = SimpleNamespace(
@@ -273,10 +277,11 @@ async def test_process_command_filters_agent_kbs_by_call_kb_ids_subset():
     with (
         patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
         patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
-        patch.object(worker_module, "InstantSearchEngine", return_value=_FakeEngine()) as instant_search_engine,
+        patch.object(worker_module, "InstantQAEngine", return_value=_FakeEngine()) as instant_search_engine,
         patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="季度分析")),
         patch.object(worker_module, "upload_report", AsyncMock()),
         patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
+        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
     ):
         result = await worker.process_command(command, context)
 
@@ -301,7 +306,7 @@ async def test_process_command_returns_answer_when_call_kb_ids_not_belong_to_age
     }
     command = SimpleNamespace(
         extra_payload={"agent_id": "agent-1", "call_kb_ids": ["kb-2", "kb-3"]},
-        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1"),
+        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1", metadata={}),
         content="query",
     )
     context = SimpleNamespace(
@@ -314,7 +319,8 @@ async def test_process_command_returns_answer_when_call_kb_ids_not_belong_to_age
     with (
         patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
         patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
-        patch.object(worker_module, "InstantSearchEngine") as instant_search_engine,
+        patch.object(worker_module, "InstantQAEngine") as instant_search_engine,
+        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
     ):
         result = await worker.process_command(command, context)
 
@@ -331,7 +337,7 @@ async def test_process_command_logs_warning_when_agent_id_missing():
     worker = InstantSearchWorker()
     command = SimpleNamespace(
         extra_payload={},
-        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1"),
+        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1", metadata={}),
         content="query",
     )
     context = SimpleNamespace(
@@ -354,7 +360,7 @@ async def test_process_command_logs_warning_when_agent_has_no_search_config():
     worker = InstantSearchWorker()
     command = SimpleNamespace(
         extra_payload={"agent_id": "agent-1"},
-        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1"),
+        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1", metadata={}),
         content="query",
     )
     context = SimpleNamespace(
@@ -367,6 +373,7 @@ async def test_process_command_logs_warning_when_agent_has_no_search_config():
     with (
         patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=None)),
         patch.object(worker_module, "logger") as mock_logger,
+        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
     ):
         result = await worker.process_command(command, context)
 
@@ -381,7 +388,7 @@ async def test_process_command_logs_warning_when_no_knowledge_bases_loaded():
     agent_config = SimpleNamespace()
     command = SimpleNamespace(
         extra_payload={"agent_id": "agent-1"},
-        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1"),
+        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1", metadata={}),
         content="query",
     )
     context = SimpleNamespace(
@@ -399,6 +406,7 @@ async def test_process_command_logs_warning_when_no_knowledge_bases_loaded():
             return_value={"retrieval": {"knowledge_bases": []}},
         ),
         patch.object(worker_module, "logger") as mock_logger,
+        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
     ):
         result = await worker.process_command(command, context)
 
@@ -413,7 +421,7 @@ async def test_process_command_logs_warning_when_requested_call_kb_ids_are_missi
     agent_config = SimpleNamespace()
     command = SimpleNamespace(
         extra_payload={"agent_id": "agent-1", "call_kb_ids": ["kb-2", "kb-3"]},
-        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1"),
+        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1", metadata={}),
         content="query",
     )
     context = SimpleNamespace(
@@ -438,6 +446,7 @@ async def test_process_command_logs_warning_when_requested_call_kb_ids_are_missi
             },
         ),
         patch.object(worker_module, "logger") as mock_logger,
+        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
     ):
         result = await worker.process_command(command, context)
 
@@ -468,6 +477,7 @@ async def test_process_command_lets_engine_load_model_provider():
             session_id="session-1",
             parent_message_id="parent-1",
             message_id="message-1",
+            metadata={},
         ),
         content="hello",
     )
@@ -499,12 +509,13 @@ async def test_process_command_lets_engine_load_model_provider():
         ) as create_llm_service,
         patch.object(
             worker_module,
-            "InstantSearchEngine",
+            "InstantQAEngine",
             return_value=fake_engine,
         ) as instant_search_engine,
         patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="test_file")),
         patch.object(worker_module, "upload_report", AsyncMock()),
         patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
+        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
     ):
         result = await worker.process_command(command, context)
 
@@ -512,6 +523,84 @@ async def test_process_command_lets_engine_load_model_provider():
     create_llm_service.assert_not_awaited()
     instant_search_engine.assert_called_once_with(config=engine_config)
     assert "llm_service" not in engine_config
+
+
+@pytest.mark.asyncio
+async def test_process_command_logs_run_search_payload_with_agent_id_and_call_kb_ids():
+    worker = InstantSearchWorker()
+    agent_config = SimpleNamespace(knowledge_bases={})
+    engine_config = {
+        "retrieval": {
+            "knowledge_bases": [
+                {
+                    "kb_code": "kb-1",
+                    "kb_name": "知识库1",
+                    "path": "/search-1",
+                    "service_name": "kb-service",
+                },
+                {
+                    "kb_code": "kb-2",
+                    "kb_name": "知识库2",
+                    "path": "/search-2",
+                    "service_name": "kb-service",
+                },
+            ]
+        }
+    }
+    command = SimpleNamespace(
+        extra_payload={"agent_id": "agent-1", "call_kb_ids": ["kb-2"]},
+        header=SimpleNamespace(
+            session_id="session-1",
+            parent_message_id="parent-1",
+            message_id="message-1",
+            metadata={"language": "zh_CN", "request_headers": {"x-trace-id": "trace-1"}},
+        ),
+        content="hello world",
+    )
+    context = SimpleNamespace(
+        redis=AsyncMock(),
+        emit_chunk=AsyncMock(),
+        session_id="session-1",
+        agent_runtime_state=SimpleNamespace(
+            session_manager=SimpleNamespace(user_code="test-user")
+        ),
+    )
+
+    with (
+        patch.object(
+            worker_module,
+            "load_agent_config_from_minio",
+            AsyncMock(return_value=agent_config),
+        ),
+        patch.object(
+            worker_module,
+            "convert_agent_config_to_engine_config",
+            return_value=engine_config,
+        ),
+        patch.object(worker_module, "InstantQAEngine", return_value=_FakeEngine()),
+        patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="test_file")),
+        patch.object(worker_module, "upload_report", AsyncMock()),
+        patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
+        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
+        patch.object(worker_module, "logger") as mock_logger,
+    ):
+        await worker.process_command(command, context)
+
+    info_messages = [call.args[0] for call in mock_logger.info.call_args_list]
+    assert any(
+        "Instant search request context before config load" in message
+        for message in info_messages
+    )
+    assert any(
+        "Instant search _run_search payload" in message
+        for message in info_messages
+    )
+    serialized_payload = "\n".join(str(call.args) for call in mock_logger.info.call_args_list)
+    assert '"agent_id": "agent-1"' in serialized_payload
+    assert '"call_kb_ids": ["kb-2"]' in serialized_payload
+    assert '"kb_code": "kb-2"' in serialized_payload
+    assert '"kb_name": "知识库2"' in serialized_payload
+    assert '"path": "/search-2"' not in serialized_payload
 
 
 @pytest.mark.asyncio
@@ -567,7 +656,7 @@ async def test_process_command_uses_async_context_for_engine_and_stream():
 
     command = SimpleNamespace(
         extra_payload={"agent_id": "agent-1"},
-        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1"),
+        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1", metadata={}),
         content="query",
     )
     context = SimpleNamespace(
@@ -582,10 +671,11 @@ async def test_process_command_uses_async_context_for_engine_and_stream():
     with (
         patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
         patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
-        patch.object(worker_module, "InstantSearchEngine", return_value=fake_engine),
+        patch.object(worker_module, "InstantQAEngine", return_value=fake_engine),
         patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="季度分析")),
         patch.object(worker_module, "upload_report", AsyncMock()),
         patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
+        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
     ):
         result = await worker.process_command(command, context)
 
@@ -593,6 +683,59 @@ async def test_process_command_uses_async_context_for_engine_and_stream():
     assert lifecycle == {"entered": True, "exited": True}
     assert stream.closed is True
     fake_engine.stream_search.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_process_command_passes_prologue_model_id_to_provider():
+    """prologue modelId from employee config is set on request_prologue_model_id ContextVar."""
+    worker = InstantSearchWorker()
+    agent_config = SimpleNamespace()
+    engine_config = {
+        "retrieval": {
+            "knowledge_bases": [
+                {"kb_code": "kb-1", "kb_name": "知识库", "path": "/s", "service_name": "svc"}
+            ]
+        }
+    }
+    employee_config_with_prologue = {"prologue": '{"modelInfo": {"modelId": -2000}}'}
+
+    command = SimpleNamespace(
+        extra_payload={"agent_id": "agent-1"},
+        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1", metadata={}),
+        content="query",
+    )
+    context = SimpleNamespace(
+        redis=AsyncMock(),
+        emit_chunk=AsyncMock(),
+        session_id="s1",
+        agent_runtime_state=SimpleNamespace(
+            session_manager=SimpleNamespace(user_code="u1")
+        ),
+    )
+
+    captured_prologue_id: list[str | None] = []
+
+    mock_provider_instance = AsyncMock()
+    mock_provider_instance.load_cache = AsyncMock()
+
+    def _capture_provider(*args, **kwargs):
+        from redis_model_config import request_prologue_model_id
+        captured_prologue_id.append(request_prologue_model_id.get())
+        return mock_provider_instance
+
+    with (
+        patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
+        patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
+        patch.object(worker_module, "InstantQAEngine", return_value=_FakeEngine()),
+        patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="test_report")),
+        patch.object(worker_module, "upload_report", AsyncMock()),
+        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=employee_config_with_prologue)),
+        patch.object(worker_module, "extract_prologue_model_id", return_value="-2000"),
+        patch("redis_model_config.RedisModelConfigProvider", side_effect=_capture_provider),
+    ):
+        await worker.process_command(command, context)
+
+    assert captured_prologue_id == ["-2000"]
 
 
 # --- generate_report_filename ---
@@ -795,6 +938,7 @@ async def test_process_command_uploads_report_after_final_answer():
             session_id="session-1",
             parent_message_id="parent-1",
             message_id="message-1",
+            metadata={},
         ),
         content="查询问题",
     )
@@ -810,10 +954,11 @@ async def test_process_command_uploads_report_after_final_answer():
     with (
         patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
         patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
-        patch.object(worker_module, "InstantSearchEngine", return_value=fake_engine),
+        patch.object(worker_module, "InstantQAEngine", return_value=fake_engine),
         patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="季度分析")) as mock_gen,
         patch.object(worker_module, "upload_report", AsyncMock()) as mock_upload,
         patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
+        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
     ):
         result = await worker.process_command(command, context)
 
@@ -838,6 +983,7 @@ async def test_process_command_does_not_report_upload_success_when_upload_fails(
             session_id="session-1",
             parent_message_id="parent-1",
             message_id="message-1",
+            metadata={},
         ),
         content="查询问题",
     )
@@ -853,10 +999,11 @@ async def test_process_command_does_not_report_upload_success_when_upload_fails(
     with (
         patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
         patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
-        patch.object(worker_module, "InstantSearchEngine", return_value=fake_engine),
+        patch.object(worker_module, "InstantQAEngine", return_value=fake_engine),
         patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="季度分析")) as mock_gen,
         patch.object(worker_module, "upload_report", AsyncMock(return_value=False)) as mock_upload,
         patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
+        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
     ):
         result = await worker.process_command(command, context)
 
@@ -884,6 +1031,7 @@ async def test_process_command_emits_upload_failure_message_when_upload_fails():
             session_id="session-1",
             parent_message_id="parent-1",
             message_id="message-1",
+            metadata={},
         ),
         content="查询问题",
     )
@@ -899,10 +1047,11 @@ async def test_process_command_emits_upload_failure_message_when_upload_fails():
     with (
         patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
         patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
-        patch.object(worker_module, "InstantSearchEngine", return_value=fake_engine),
+        patch.object(worker_module, "InstantQAEngine", return_value=fake_engine),
         patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="季度分析")),
         patch.object(worker_module, "upload_report", AsyncMock(return_value=False)),
         patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
+        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
     ):
         result = await worker.process_command(command, context)
 
@@ -939,7 +1088,7 @@ async def test_process_command_skips_upload_when_no_final_answer():
 
     command = SimpleNamespace(
         extra_payload={"agent_id": "agent-1"},
-        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1"),
+        header=SimpleNamespace(session_id="s1", parent_message_id="p1", message_id="m1", metadata={}),
         content="query",
     )
     context = SimpleNamespace(
@@ -954,9 +1103,10 @@ async def test_process_command_skips_upload_when_no_final_answer():
     with (
         patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
         patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
-        patch.object(worker_module, "InstantSearchEngine", return_value=fake_engine),
+        patch.object(worker_module, "InstantQAEngine", return_value=fake_engine),
         patch.object(worker_module, "generate_report_filename", AsyncMock()) as mock_gen,
         patch.object(worker_module, "upload_report", AsyncMock()) as mock_upload,
+        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
     ):
         result = await worker.process_command(command, context)
 

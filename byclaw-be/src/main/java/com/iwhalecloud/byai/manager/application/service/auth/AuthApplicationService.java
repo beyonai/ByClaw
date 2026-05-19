@@ -2513,7 +2513,7 @@ public class AuthApplicationService {
 
         boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum());
         boolean canManage = hasResourceManagePermission(ssResource);
-        
+
         // 如果资源已注销，只允许恢复操作，其他操作全部禁用
         if (isResourceRemoved) {
             vo.setCanEdit(false);

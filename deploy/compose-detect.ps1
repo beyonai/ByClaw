@@ -58,7 +58,6 @@ $callerDir = Split-Path -Leaf (Get-Location)
 switch ($callerDir) {
     "middleware"  { $prefix = "byclaw-middleware" }
     "standalone"  { $prefix = "byclaw-standalone" }
-    "mono"        { $prefix = "byclaw-mono" }
     default       { $prefix = "byclaw" }
 }
 $suffix = if ($env:CONTAINER_SUFFIX) { $env:CONTAINER_SUFFIX } else { "default" }

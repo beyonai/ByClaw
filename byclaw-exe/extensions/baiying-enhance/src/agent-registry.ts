@@ -44,7 +44,13 @@ export function mergeManagedAgentsIntoConfig(params: {
   }
 
   const providers = cfg.models.providers;
-  const list = [...(cfg.agents.list ?? [])].filter(
+  const existingList = cfg.agents.list ?? [];
+  const existingWorkspaceById = new Map(
+    existingList
+      .filter((entry) => entry.id && typeof entry.workspace === "string" && entry.workspace.trim())
+      .map((entry) => [entry.id!, entry.workspace!.trim()]),
+  );
+  const list = [...existingList].filter(
     (entry) => !entry.id?.startsWith(MANAGED_AGENT_PREFIX),
   );
 
@@ -55,7 +61,8 @@ export function mergeManagedAgentsIntoConfig(params: {
   }
 
   for (const m of params.managed) {
-    const workspaceDir = resolveDefaultManagedWorkspacePath(m.agentId);
+    const workspaceDir =
+      existingWorkspaceById.get(m.agentId) ?? resolveDefaultManagedWorkspacePath(m.agentId);
     list.push({
       ...m.listEntry,
       workspace: workspaceDir,

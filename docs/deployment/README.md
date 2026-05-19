@@ -28,7 +28,6 @@
 | [配置说明](./03-configuration.md) | 详细的环境变量配置指南（含 `MIDDLEWARE_MODULES`、`STANDALONE_MODULES`） |
 | [部署模式选择](./05-deployment-modes.md) | 三种部署模式的对比和选择建议 |
 | [中间件部署](./06-middleware-deployment.md) | Redis、MinIO、OpenGauss 等中间件的部署 |
-| [单体部署](./07-mono-deployment.md) | 单体应用模式的部署指南 |
 | [拆分部署](./08-standalone-deployment.md) | 各模块独立部署的详细步骤 |
 | [验证和故障排查](./09-verification.md) | 部署验证和常见问题解决 |
 

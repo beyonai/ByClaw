@@ -38,6 +38,25 @@ let lastAgentAssistantEvent: {
 
 const toolStartArgsByCallId = new Map<string, Record<string, any>>();
 
+/**
+ * 通过baiying_call工具调用，返回的结果，如果包含toBeEmittedChunk字段，则缓存起来，等主agent启动->thinking->开始输出内容前，再emit chunk
+ */
+let toBeEmittedChunkAfterBaiyingCallTool: undefined | {
+  data?: string | Record<string, any>;
+  options?: EmitOptions;
+} = undefined;
+
+async function emitChunkGenByBaiyingCallTool(request: ActiveSdkRequest, sdkEmitter?: ReturnType<typeof resolveSdkEmitter>) {
+  if (!toBeEmittedChunkAfterBaiyingCallTool) {
+    return;
+  }
+  if (!sdkEmitter) {
+    sdkEmitter = resolveSdkEmitter(request.accountId);
+  }
+  await emitSdkChunk(request, sdkEmitter, JSON.stringify(toBeEmittedChunkAfterBaiyingCallTool.data), toBeEmittedChunkAfterBaiyingCallTool.options);
+  toBeEmittedChunkAfterBaiyingCallTool = undefined;
+}
+
 async function emitSdkChunk(
   request: ActiveSdkRequest,
   sdkEmitter: ReturnType<typeof resolveSdkEmitter>,
@@ -85,6 +104,7 @@ type ToolEventData = {
 async function handleToolEvent(
   request: ActiveSdkRequest,
   event: AgentEvent,
+  isChildSession: boolean,
 ) {
   const sdkEmitter = resolveSdkEmitter(request.accountId);
   if (!sdkEmitter) {
@@ -143,6 +163,9 @@ async function handleToolEvent(
       eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.json_block,
     });
+    if (data?.name === "baiying_call") {
+      setToBeEmittedChunkViaBaiyingCallTool(data?.result);
+    }
   }
 }
 
@@ -158,6 +181,8 @@ async function handleAssistantEvent(
     return;
   }
   await emitSdkChunk(request, sdkEmitter, delta as string, {
+    messageId: request.sessionKey,
+    parentMessageId: "-1",
     eventType: isChildSession ? EventType.REASONING_LOG_DELTA : EventType.ANSWER_DELTA,
   });
 }
@@ -293,15 +318,20 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
   if (isPreviousThinking && event.stream !== "thinking") {
     await handleReasoningEndTransition(request, Date.now() - lastAgentAssistantEvent.startTime);
   }
+  const previousStream = lastAgentAssistantEvent.stream;
   lastAgentAssistantEvent.seq = seq;
   lastAgentAssistantEvent.runId = runId;
-  if (lastAgentAssistantEvent.stream !== event.stream) {
+  if (previousStream !== event.stream) {
     lastAgentAssistantEvent.startTime = Date.now();
   }
   lastAgentAssistantEvent.stream = event.stream;
   if (event.stream === 'tool') {
-    await handleToolEvent(request, event);
+    await handleToolEvent(request, event, isChildSession);
   } else if (event.stream === 'assistant') {
+    if (previousStream !== "assistant" && toBeEmittedChunkAfterBaiyingCallTool) {
+      // 无论是主agent还是subagent，开始输出正文前，先把baiying_call工具缓存起来的chunk emit出来
+      await emitChunkGenByBaiyingCallTool(request);
+    }
     await handleAssistantEvent(request, event, isChildSession);
   } else if (event.stream === "lifecycle") {
     await handleLifecycleEvent(api, request, event, resolvedSessionKey);
@@ -333,4 +363,25 @@ function extractToolResultText(result: unknown): string {
     return JSON.stringify(result.content, null, 2);
   }
   return JSON.stringify(result, null, 2);
+}
+
+function setToBeEmittedChunkViaBaiyingCallTool(result: unknown) {
+  const checkIsValidToolResultToBeEmitted = () => {
+    if (!result || typeof result !== "object") {
+      return false;
+    }
+    if ("details" in result && typeof result.details === "object" && result.details && Object.keys(result.details).length > 0) {
+      const details = result.details as Record<string, any>;
+      if (details.toBeEmittedChunk) {
+        toBeEmittedChunkAfterBaiyingCallTool = details.toBeEmittedChunk;
+        return true;
+      }
+    }
+    return false;
+  }
+  if (!checkIsValidToolResultToBeEmitted()) {
+    toBeEmittedChunkAfterBaiyingCallTool = undefined;
+    return false;
+  }
+  return true;
 }

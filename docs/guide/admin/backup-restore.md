@@ -214,7 +214,7 @@ sleep 10
 
 6. **启动应用**
 ```bash
-cd ../mono  # 或 standalone
+cd ../standalone
 docker-compose up -d
 ```
 
