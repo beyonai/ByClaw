@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   archiveUnauthorizedManagedAgentWorkspaces,
   deleteManagedAgentWorkspaces,
+  listActiveManagedWorkspaces,
+  reconcileUnauthorizedMountedWorkspacesOnColdStart,
   resolveWorkspaceArchiveRoot,
   restoreManagedAgentWorkspaces,
 } from "./workspace-archive.js";
@@ -37,6 +39,64 @@ describe("workspace archive paths", () => {
     expect(resolveWorkspaceArchiveRoot({ workspaceArchiveDir: ".custom-baiying" })).toBe(
       path.join(path.sep, "by", ".custom-baiying"),
     );
+  });
+});
+
+describe("cold-start workspace reconcile", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("lists workspace-baiying-agent-* directories under OPENCLAW_STATE_DIR", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "baiying-cold-start-list-"));
+    const stateDir = path.join(root, ".openclaw");
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+    const authorizedId = `${MANAGED_AGENT_PREFIX}10000417`;
+    const orphanId = `${MANAGED_AGENT_PREFIX}999`;
+    await mkdir(path.join(stateDir, `workspace-${authorizedId}`), { recursive: true });
+    await mkdir(path.join(stateDir, `workspace-${orphanId}`), { recursive: true });
+
+    const listed = await listActiveManagedWorkspaces(stateDir);
+    expect(listed.map((item) => item.agentId).sort()).toEqual([authorizedId, orphanId].sort());
+    expect(listed.find((item) => item.agentId === orphanId)?.sourceKey).toBe("999");
+  });
+
+  it("archives mounted workspaces missing from the auth set on cold start (remote)", async () => {
+    vi.stubEnv("USER_CODE", "0027024710");
+    const root = await mkdtemp(path.join(tmpdir(), "baiying-cold-start-remote-"));
+    const stateDir = path.join(root, ".openclaw");
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+    const orphanId = `${MANAGED_AGENT_PREFIX}10000999`;
+    const activeWs = path.join(stateDir, `workspace-${orphanId}`);
+    await mkdir(activeWs, { recursive: true });
+    await writeFile(path.join(activeWs, "notes.txt"), "orphan", "utf8");
+    const uploadWorkspace = vi.fn(async () => ({
+      exists: true,
+      objectKey: "/openclaw-workspace-archives/workspace-baiying-agent-10000999/cancel_auth_latest.tar.gz",
+    }));
+    const archiveApi = {
+      uploadWorkspace,
+      status: vi.fn(),
+      downloadWorkspace: vi.fn(),
+    } as unknown as WorkspaceArchiveApi;
+    const log = { info: vi.fn(), warn: vi.fn() };
+
+    const results = await reconcileUnauthorizedMountedWorkspacesOnColdStart({
+      pluginConfig: {},
+      authorizedSourceKeys: new Set(["10000417"]),
+      workspaceArchiveApi: archiveApi,
+      log,
+    });
+
+    expect(uploadWorkspace).toHaveBeenCalledWith({
+      userCode: "0027024710",
+      resourceId: "10000999",
+      archiveKind: "cancel_auth",
+      workspaceDir: activeWs,
+    });
+    expect(results[0]?.archived).toBe(true);
+    expect(await pathExists(activeWs)).toBe(false);
+    expect(log.info).toHaveBeenCalledWith(expect.stringContaining("cold-start"));
   });
 });
 

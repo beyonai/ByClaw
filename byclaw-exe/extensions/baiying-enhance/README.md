@@ -75,6 +75,8 @@
 
 重新授权时，如果 active workspace 不存在，会尝试下载 `cancel_auth` 归档恢复；`delete` 归档只用于审计留存，不参与恢复。
 
+**冷启动**：插件在 dig-employee 授权 Hash 就绪后、首次 agent 同步前，会扫描 `OPENCLAW_STATE_DIR` 下的 `workspace-baiying-agent-*`，与授权集合对比；本地存在但授权中不存在的目录按取消授权处理（`remote` 模式调用归档 API 上传 `cancel_auth_latest.tar.gz` 后删除本地目录）。
+
 如需保留旧本地兼容模式，可显式配置 `workspaceArchiveBackend: "local"`。本地模式下，每次授权视图导致托管数字员工从 `agents.list` 移除后，插件会把该 agent 的 workspace 移出 `.openclaw`：
 
 - 默认 active 路径：`<OPENCLAW_STATE_DIR>/workspace-baiying-agent-<resourceId>`

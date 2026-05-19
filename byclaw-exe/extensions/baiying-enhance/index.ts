@@ -14,6 +14,7 @@ import { resolveBundledBaiyingResourcesDir } from "./src/plugin-paths.js";
 import { createRedisJsonStore, setSharedRedisJsonStore } from "./src/redis-json-store.js";
 import { loadBaiyingRedisEnvDefaults } from "./src/redis-env.js";
 import { createWorkspaceArchiveApi } from "./src/workspace-archive-api.js";
+import { reconcileUnauthorizedMountedWorkspacesOnColdStart } from "./src/workspace-archive.js";
 import {
   loadMainAgentsTemplate,
   resolveEffectiveMainAgentsMdMode,
@@ -185,6 +186,26 @@ const plugin = {
                   warn: (message) => api.logger.warn(message),
                 },
               });
+        let coldStartWorkspaceArchiveDone = false;
+        const runColdStartWorkspaceArchive = async () => {
+          if (coldStartWorkspaceArchiveDone) {
+            return;
+          }
+          const authorizedIds = digEmployeeAuthWatch?.getAuthorizedIds();
+          if (authorizedIds === undefined) {
+            return;
+          }
+          coldStartWorkspaceArchiveDone = true;
+          await reconcileUnauthorizedMountedWorkspacesOnColdStart({
+            pluginConfig: pluginCfg,
+            authorizedSourceKeys: authorizedIds,
+            workspaceArchiveApi,
+            log: {
+              info: (message) => api.logger.info(message),
+              warn: (message) => api.logger.warn(message),
+            },
+          });
+        };
         digEmployeeAuthWatch = createDigEmployeeAuthWatch({
           logger: {
             info: (message) => api.logger.info(message),
@@ -195,6 +216,7 @@ const plugin = {
             api.logger.info(
               `baiying-enhance: dig-employee auth changed (${authorizedIds.size} authorized id(s)); triggering managed agent sync`,
             );
+            await runColdStartWorkspaceArchive();
             await agentWatch?.__flushNow?.({ fullWorkspaceReseed: true });
           },
         });
@@ -233,9 +255,8 @@ const plugin = {
         await agentWatch.start({ deferInitialFlush: true });
         await digEmployeeAuthWatch.start();
         await digEmployeeChangeSubscriber?.start();
-        if (digEmployeeAuthWatch.getAuthorizedIds() === undefined) {
-          await agentWatch.__flushNow?.({ fullWorkspaceReseed: true });
-        }
+        await runColdStartWorkspaceArchive();
+        await agentWatch.__flushNow?.({ fullWorkspaceReseed: true });
       },
       stop: async () => {
         await digEmployeeChangeSubscriber?.stop();

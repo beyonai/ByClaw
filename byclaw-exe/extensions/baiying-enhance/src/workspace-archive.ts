@@ -351,6 +351,63 @@ export async function deleteManagedAgentWorkspaces(params: {
   return results;
 }
 
+export type ActiveManagedWorkspace = {
+  agentId: string;
+  sourceKey: string;
+  workspaceDir: string;
+};
+
+/** Lists `workspace-baiying-agent-*` directories under the OpenClaw state dir. */
+export async function listActiveManagedWorkspaces(stateDir = resolveStateDir()): Promise<ActiveManagedWorkspace[]> {
+  const activeWorkspaces: ActiveManagedWorkspace[] = [];
+  try {
+    const entries = await fs.readdir(stateDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.startsWith(`workspace-${MANAGED_AGENT_PREFIX}`)) {
+        continue;
+      }
+      const agentId = entry.name.slice("workspace-".length);
+      const sourceKey = sourceKeyFromManagedAgentId(agentId);
+      if (!sourceKey) {
+        continue;
+      }
+      activeWorkspaces.push({
+        agentId,
+        sourceKey,
+        workspaceDir: path.join(stateDir, entry.name),
+      });
+    }
+  } catch (err) {
+    const code = err && typeof err === "object" ? (err as { code?: unknown }).code : undefined;
+    if (code !== "ENOENT") {
+      throw err;
+    }
+  }
+  return activeWorkspaces;
+}
+
+/**
+ * Cold start: compare Redis auth dig-employee ids with mounted `workspace-baiying-agent-*` dirs.
+ * Workspaces on disk but absent from the auth set are archived as cancel_auth (remote API or local dir).
+ */
+export async function reconcileUnauthorizedMountedWorkspacesOnColdStart(params: {
+  pluginConfig: BaiyingEnhancePluginConfig;
+  authorizedSourceKeys: Set<string>;
+  workspaceArchiveApi?: WorkspaceArchiveApi;
+  log: LoggerLike;
+}): Promise<ManagedWorkspaceArchiveResult[]> {
+  params.log.info(
+    "baiying-enhance: cold-start workspace archive — comparing auth dig-employee ids with local workspace-baiying-agent-* directories",
+  );
+  return archiveUnauthorizedActiveManagedWorkspaces({
+    pluginConfig: params.pluginConfig,
+    authorizedSourceKeys: params.authorizedSourceKeys,
+    workspaceArchiveApi: params.workspaceArchiveApi,
+    checkLabel: "cold-start",
+    log: params.log,
+  });
+}
+
 export async function archiveUnauthorizedActiveManagedWorkspaces(params: {
   pluginConfig: BaiyingEnhancePluginConfig;
   authorizedSourceKeys: Set<string>;
@@ -372,35 +429,16 @@ export async function archiveUnauthorizedActiveManagedWorkspaces(params: {
   const archiveTarget = params.workspaceArchiveApi && useRemoteArchive(params.pluginConfig) ? "remote backend API" : archiveRoot;
   const authorized = new Set([...params.authorizedSourceKeys].map((id) => id.trim()).filter(Boolean));
   const ignored = new Set([...(params.ignoredSourceKeys ?? [])].map((id) => id.trim()).filter(Boolean));
-  const activeWorkspaces: Array<{ agentId: string; workspaceDir: string; sourceKey: string }> = [];
-
+  let activeWorkspaces: ActiveManagedWorkspace[] = [];
   try {
-    const entries = await fs.readdir(stateDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory() || !entry.name.startsWith(`workspace-${MANAGED_AGENT_PREFIX}`)) {
-        continue;
-      }
-      const agentId = entry.name.slice("workspace-".length);
-      const sourceKey = sourceKeyFromManagedAgentId(agentId);
-      if (!sourceKey) {
-        continue;
-      }
-      activeWorkspaces.push({
-        agentId,
-        sourceKey,
-        workspaceDir: path.join(stateDir, entry.name),
-      });
-    }
+    activeWorkspaces = await listActiveManagedWorkspaces(stateDir);
   } catch (err) {
-    const code = err && typeof err === "object" ? (err as { code?: unknown }).code : undefined;
-    if (code !== "ENOENT") {
-      params.log.warn(
-        `baiying-enhance: ${label} unauthorized workspace archive check failed to scan ${stateDir}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-      return [];
-    }
+    params.log.warn(
+      `baiying-enhance: ${label} unauthorized workspace archive check failed to scan ${stateDir}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return [];
   }
 
   const unauthorized = activeWorkspaces.filter(
