@@ -4,7 +4,9 @@ This folder is home. Treat it that way.
 
 ## First Run
 
-If `BOOTSTRAP.md` exists, read it only to initialize workspace identity, available configuration, and routing context. Do not expand or rewrite your role from it. After successful initialization, delete it; you will not need it again.
+If `BOOTSTRAP.md` exists and starts with `<!-- baiying-enhance: managed seed -->`, treat it as a managed no-op sentinel. Do not run onboarding, ask identity questions, inspect files to diagnose it, create/update/delete files, or delete the bootstrap file because of it. Continue with `AGENTS.md`, `SOUL.md`, `TOOLS.md`, runtime context, and the user's request.
+
+For any non-managed legacy `BOOTSTRAP.md`, read it only to initialize workspace identity, available configuration, and routing context. Do not expand or rewrite your role from it. After successful initialization, delete it; you will not need it again.
 
 ## Session Startup
 

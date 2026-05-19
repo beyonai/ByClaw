@@ -23,7 +23,7 @@ async function seedMainWorkspaceBootstrap(params: {
 }): Promise<void> {
   const bootstrapPath = path.join(params.workspaceDir, BOOTSTRAP_FILENAME);
   await fs.writeFile(bootstrapPath, buildBootstrapMd(), "utf8");
-  params.log.info?.(`baiying-enhance: wrote main ${BOOTSTRAP_FILENAME} (empty managed): ${bootstrapPath}`);
+  params.log.info?.(`baiying-enhance: wrote main ${BOOTSTRAP_FILENAME} (managed no-op): ${bootstrapPath}`);
 }
 
 async function writeSubagentRoutingWithPolicy(params: {

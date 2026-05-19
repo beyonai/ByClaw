@@ -7,9 +7,14 @@ import {
 } from "./workspace-seed.js";
 
 describe("workspace-seed bootstrap", () => {
-  it("buildBootstrapMd is marker-only with no onboarding instructions", () => {
+  it("buildBootstrapMd is an explicit managed no-op", () => {
     const md = buildBootstrapMd();
-    expect(md).toBe("<!-- baiying-enhance: managed seed -->\n");
+    expect(md).toContain("<!-- baiying-enhance: managed seed -->");
+    expect(md).toContain("Managed Bootstrap No-Op");
+    expect(md).toContain("Do not run first-run onboarding.");
+    expect(md).toContain("Do not inspect files to diagnose this bootstrap file.");
+    expect(md).toContain("Do not create, edit, move, delete, or archive any files");
+    expect(md).toContain("Do not delete this file.");
     expect(md).not.toMatch(/woke up|Who am I/i);
   });
 });

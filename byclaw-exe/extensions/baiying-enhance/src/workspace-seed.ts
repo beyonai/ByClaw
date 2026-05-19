@@ -21,9 +21,22 @@ const IDENTITY_FILENAME = "IDENTITY.md";
 const USER_FILENAME = "USER.md";
 const TOOLS_FILENAME = "TOOLS.md";
 
-/** Marker-only BOOTSTRAP: satisfies OpenClaw file presence without onboarding instructions. */
+/** Managed BOOTSTRAP: explicit no-op sentinel to suppress OpenClaw onboarding. */
 export function buildBootstrapMd(): string {
-  return `${MARKER}\n`;
+  return `${MARKER}
+
+# Managed Bootstrap No-Op
+
+This workspace has already been initialized by \`baiying-enhance\`.
+
+Do not run first-run onboarding.
+Do not ask who you are or who the user is.
+Do not inspect files to diagnose this bootstrap file.
+Do not create, edit, move, delete, or archive any files because of this bootstrap file.
+Do not delete this file.
+
+Treat this file as a no-op sentinel. Continue with the active \`AGENTS.md\`, \`SOUL.md\`, \`TOOLS.md\`, runtime context, and the user's current request.
+`;
 }
 
 type BaiyingAgentItem = {

@@ -12,6 +12,7 @@ import {
 } from "./main-workspace-seed.js";
 import { SUBAGENT_ROUTING_FILENAME, SUBAGENT_ROUTING_MARKER } from "./subagent-routing-seed.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
+import { buildBootstrapMd } from "./workspace-seed.js";
 
 function mockApi(mainWorkspace: string) {
   return {
@@ -47,7 +48,7 @@ describe("main-workspace-seed", () => {
     expect(resolveEffectiveMainAgentsMdMode({ mainAgentsMdMode: "off" })).toBe("off");
   });
 
-  it("seedMainAgentAgentsMd writes empty BOOTSTRAP.md even when mainAgentsMdMode is off", async () => {
+  it("seedMainAgentAgentsMd writes managed no-op BOOTSTRAP.md even when mainAgentsMdMode is off", async () => {
     const ws = await mkdtemp(path.join(tmpdir(), "baiying-main-bootstrap-"));
     const api = mockApi(ws) as any;
 
@@ -58,7 +59,7 @@ describe("main-workspace-seed", () => {
     });
 
     const bootstrap = await readFile(path.join(ws, "BOOTSTRAP.md"), "utf8");
-    expect(bootstrap).toBe("<!-- baiying-enhance: managed seed -->\n");
+    expect(bootstrap).toBe(buildBootstrapMd());
   });
 
   it("seedMainAgentAgentsMd if_missing writes once", async () => {
