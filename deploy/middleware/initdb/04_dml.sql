@@ -744,7 +744,8 @@ INSERT INTO "byai"."sandbox_service_spec" ("service_key", "spec_json", "template
         },
         "allow": [
             "byai-channel",
-            "baiying-enhance"
+            "baiying-enhance",
+            "byclaw-sqlite"
         ],
         "enabled": true,
         "entries": {
@@ -752,6 +753,9 @@ INSERT INTO "byai"."sandbox_service_spec" ("service_key", "spec_json", "template
                 "enabled": false
             },
             "byai-channel": {
+                "enabled": true
+            },
+            "byclaw-sqlite": {
                 "enabled": true
             },
             "baiying-enhance": {
