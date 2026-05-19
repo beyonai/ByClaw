@@ -295,6 +295,43 @@ public class ToolManController {
     }
 
     /**
+     * 按 resourceCode + ownerType 删除资源（支持 tool、skill、kg_doc、object、view）。
+     * 删除前同样会校验资源是否被引用；存在引用时不允许删除。
+     */
+    @PostMapping("/deleteResourceByCodeAndOwnerType")
+    public ResponseUtil<Void> deleteResourceByCodeAndOwnerType(@RequestBody(required = false) DeleteResourceQo request,
+        @Parameter(description = "资源编码", required = false) @RequestParam(value = "resourceCode",
+            required = false) String resourceCode,
+        @Parameter(description = "资源归属类型：enterprise-企业，personal-个人", required = false) @RequestParam(
+            value = "ownerType", required = false) String ownerType) {
+        try {
+            String finalResourceCode = request != null && StringUtils.isNotBlank(request.getResourceCode())
+                ? request.getResourceCode()
+                : resourceCode;
+            String finalOwnerType = request != null && StringUtils.isNotBlank(request.getOwnerType())
+                ? request.getOwnerType()
+                : ownerType;
+            toolManService.deleteManagedResource(finalResourceCode, finalOwnerType);
+            return ResponseUtil.success(I18nUtil.get("tool.resource.delete.success"));
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(resolveResourceNotFoundMessage(e));
+        }
+        catch (BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("deleteResourceByCode failed, resourceCode={}, ownerType={}",
+                request != null && StringUtils.isNotBlank(request.getResourceCode()) ? request.getResourceCode()
+                    : resourceCode,
+                request != null && StringUtils.isNotBlank(request.getOwnerType()) ? request.getOwnerType() : ownerType,
+                e);
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.delete.failed"));
+        }
+    }
+
+    /**
      * 删除资源。forceDelete=true 时跳过删除校验，直接删除主表、子表和资源关系。
      *
      * @author qin.guoquan

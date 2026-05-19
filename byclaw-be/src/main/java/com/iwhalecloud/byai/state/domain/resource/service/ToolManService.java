@@ -677,6 +677,16 @@ public class ToolManService {
     }
 
     /**
+     * 按 resourceCode + ownerType 删除资源。
+     * 删除前仍复用既有删除校验：资源类型校验、被数字员工/视图引用校验、权限校验等。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteManagedResource(String resourceCode, String ownerType) {
+        SsResource resource = resolveUniqueResourceByCodeAndOwnerType(resourceCode, ownerType);
+        deleteManagedResource(resource.getResourceId(), false);
+    }
+
+    /**
      * 删除资源。
      *
      * forceDelete=false 时会校验资源类型和资源引用关系；forceDelete=true 时跳过这些校验，直接清理主表、子表和资源关系。
@@ -2118,6 +2128,38 @@ public class ToolManService {
         }
         throw new IllegalArgumentException(I18nUtil.get("tool.resource.code.duplicate.too.many",
             localizeResourceLabel(resourceLabel)));
+    }
+
+    /**
+     * 删除接口按 resourceCode + ownerType 精确定位资源。
+     * 若同编码同归属出现多条脏数据，则直接阻断，避免误删。
+     */
+    private SsResource resolveUniqueResourceByCodeAndOwnerType(String resourceCode, String ownerType) {
+        String trimmedCode = StringUtils.trimToEmpty(resourceCode);
+        if (StringUtils.isBlank(trimmedCode)) {
+            throw new IllegalArgumentException(I18nUtil.get("dataset.import.resource.code.notempty"));
+        }
+        String trimmedOwnerType = StringUtils.trimToEmpty(ownerType);
+        if (StringUtils.isBlank(trimmedOwnerType)) {
+            throw new IllegalArgumentException(I18nUtil.get("owner.type.notempty"));
+        }
+
+        List<SsResource> resources = ssResourceService.getResourceListByCode(Collections.singletonList(trimmedCode));
+        if (CollectionUtils.isEmpty(resources)) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
+        }
+
+        List<SsResource> matched = resources.stream()
+            .filter(item -> StringUtils.equals(StringUtils.trimToEmpty(item.getOwnerType()), trimmedOwnerType))
+            .collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(matched)) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
+        }
+        if (matched.size() > 1) {
+            throw new IllegalArgumentException(I18nUtil.get("tool.resource.code.duplicate.too.many",
+                localizeResourceLabel("资源")));
+        }
+        return matched.get(0);
     }
 
     private JSONArray buildImportedViewFields(List<ParsedViewField> parsedFields) {
