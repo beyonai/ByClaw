@@ -16,9 +16,28 @@ function stripLeadingBom(s: string): string {
 const SOUL_FILENAME = "SOUL.md";
 const AGENTS_FILENAME = "AGENTS.md";
 export const BUSINESS_EXTENSIONS_FILENAME = "BYAI_BUSINESS_EXTENSIONS.md";
+const BOOTSTRAP_FILENAME = "BOOTSTRAP.md";
 const IDENTITY_FILENAME = "IDENTITY.md";
 const USER_FILENAME = "USER.md";
 const TOOLS_FILENAME = "TOOLS.md";
+
+/** Managed BOOTSTRAP: explicit no-op sentinel to suppress OpenClaw onboarding. */
+export function buildBootstrapMd(): string {
+  return `${MARKER}
+
+# Managed Bootstrap No-Op
+
+This workspace has already been initialized by \`baiying-enhance\`.
+
+Do not run first-run onboarding.
+Do not ask who you are or who the user is.
+Do not inspect files to diagnose this bootstrap file.
+Do not create, edit, move, delete, or archive any files because of this bootstrap file.
+Do not delete this file.
+
+Treat this file as a no-op sentinel. Continue with the active \`AGENTS.md\`, \`SOUL.md\`, \`TOOLS.md\`, runtime context, and the user's current request.
+`;
+}
 
 type BaiyingAgentItem = {
   resourceId?: string;
@@ -487,4 +506,7 @@ export async function seedManagedAgentWorkspace(params: {
 
   // Ensure TOOLS.md exists even when source JSON has no Baiying payload.
   await writeIfMissing(path.join(dir, TOOLS_FILENAME), `${MARKER}\n\n# Tools\n\n(none)\n`);
+
+  // Replace OpenClaw's default BOOTSTRAP onboarding doc so the first turn uses SOUL/AGENTS only.
+  await fs.writeFile(path.join(dir, BOOTSTRAP_FILENAME), buildBootstrapMd(), "utf8");
 }
