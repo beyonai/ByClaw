@@ -2,8 +2,6 @@ package com.iwhalecloud.byai.gateway.sandbox.service;
 
 import org.apache.commons.lang3.StringUtils;
 
-import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxImageType;
-
 class SandboxEndpointUrlCustomizer {
 
     private final String sandboxGatewayToken;
@@ -12,15 +10,14 @@ class SandboxEndpointUrlCustomizer {
         this.sandboxGatewayToken = sandboxGatewayToken;
     }
 
-    String toAccessEndpoint(String endpoint, String imageType) {
+    String toAccessEndpoint(String endpoint) {
         if (StringUtils.isBlank(endpoint)) {
             return endpoint;
         }
+        String accessEndpoint = StringUtils.removeEnd(endpoint, "/") + "/chat";
         if (StringUtils.isBlank(sandboxGatewayToken)) {
-            return SandboxImageType.isUiAgent(imageType) ? endpoint : StringUtils.removeEnd(endpoint, "/") + "/chat";
+            return accessEndpoint;
         }
-        String accessEndpoint = SandboxImageType.isUiAgent(imageType)
-            ? endpoint : StringUtils.removeEnd(endpoint, "/") + "/chat";
         return appendToken(accessEndpoint);
     }
 

@@ -9,10 +9,9 @@ class SandboxEndpointRegistryTargetResolverTest {
     private final SandboxEndpointRegistryTargetResolver resolver = new SandboxEndpointRegistryTargetResolver();
 
     @Test
-    void resolve_uiAgentKeepsRootPathPrefix() {
+    void resolve_keepsRootPathPrefixForUiAgentEndpoint() {
         SandboxEndpointRegistryTarget target = resolver.resolve(
-            "https://gateway.example.test:18082/sandboxes/sb-1/proxy/8080/?gatewayUrl=wss://gateway.example.test:18082/sandboxes/sb-1/proxy/8080/",
-            "uiagent", "sb-1", 8080);
+            "https://gateway.example.test:18082/sandboxes/sb-1/proxy/8080/chat?token=ztesoft");
 
         assertThat(target.protocol()).isEqualTo("https");
         assertThat(target.host()).isEqualTo("gateway.example.test");
@@ -21,10 +20,9 @@ class SandboxEndpointRegistryTargetResolverTest {
     }
 
     @Test
-    void resolve_openclawKeepsRootPathPrefix() {
+    void resolve_keepsRootPathPrefixForOpenclawEndpoint() {
         SandboxEndpointRegistryTarget target = resolver.resolve(
-            "https://gateway.example.test:8443/sandboxes/sb-1/proxy/18789/chat?token=ztesoft",
-            "openclaw", "sb-1", 18789);
+            "https://gateway.example.test:8443/sandboxes/sb-1/proxy/18789/chat?token=ztesoft");
 
         assertThat(target.pathPrefix()).isEqualTo("/");
     }

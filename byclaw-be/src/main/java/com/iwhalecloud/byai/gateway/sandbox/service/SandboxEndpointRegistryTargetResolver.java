@@ -6,7 +6,7 @@ import org.apache.commons.lang3.StringUtils;
 
 class SandboxEndpointRegistryTargetResolver {
 
-    SandboxEndpointRegistryTarget resolve(String endpoint, String imageType, String sandboxId, Integer servicePort) {
+    SandboxEndpointRegistryTarget resolve(String endpoint) {
         URI uri = URI.create(StringUtils.trimToEmpty(endpoint));
         String protocol = StringUtils.defaultIfBlank(uri.getScheme(), "http");
         String host = StringUtils.trimToEmpty(uri.getHost());
