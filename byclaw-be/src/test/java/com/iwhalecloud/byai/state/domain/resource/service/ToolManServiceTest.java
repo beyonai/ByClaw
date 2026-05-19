@@ -161,6 +161,45 @@ class ToolManServiceTest {
     }
 
     @Test
+    void deleteResourceAndAllRel_byResourceCode_resolvesResourceThenDeletes() {
+        ToolManService service = new ToolManService();
+        SsResourceService ssResourceService = mock(SsResourceService.class);
+        AuthApplicationService authApplicationService = mock(AuthApplicationService.class);
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        SsResourceRelDetailService ssResourceRelDetailService = mock(SsResourceRelDetailService.class);
+        SsResourceArtifactService ssResourceArtifactService = mock(SsResourceArtifactService.class);
+        ResourceArtifactStorageService resourceArtifactStorageService = mock(ResourceArtifactStorageService.class);
+        SsResExtToolKitService ssResExtToolKitService = mock(SsResExtToolKitService.class);
+        ResourceDiscoveryRegistrationService resourceDiscoveryRegistrationService = mock(ResourceDiscoveryRegistrationService.class);
+
+        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        ReflectionTestUtils.setField(service, "authApplicationService", authApplicationService);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "ssResourceRelDetailService", ssResourceRelDetailService);
+        ReflectionTestUtils.setField(service, "ssResourceArtifactService", ssResourceArtifactService);
+        ReflectionTestUtils.setField(service, "resourceArtifactStorageService", resourceArtifactStorageService);
+        ReflectionTestUtils.setField(service, "ssResExtToolKitService", ssResExtToolKitService);
+        ReflectionTestUtils.setField(service, "resourceDiscoveryRegistrationService", resourceDiscoveryRegistrationService);
+        ReflectionTestUtils.setField(service, "datasetSystem", "");
+        prepareI18nUtil();
+
+        SsResource resource = new SsResource();
+        resource.setResourceId(700L);
+        resource.setResourceBizType(ResourceBizType.TOOLKIT.getCode());
+        resource.setOwnerType("enterprise");
+        resource.setResourceCode("toolkit_by_code");
+        when(ssResourceService.getResourceListByCode(List.of("toolkit_by_code"))).thenReturn(List.of(resource));
+        when(ssResourceService.findById(700L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+        when(ssResourceArtifactService.listActiveArtifactsByResourceId(700L)).thenReturn(List.of());
+
+        service.deleteResourceAndAllRel("toolkit_by_code");
+
+        verify(ssResourceService).removeById(700L);
+        verify(privilegeGrantService).removeAllByGrantObj(ResourceBizType.TOOLKIT.getCode(), 700L);
+    }
+
+    @Test
     void replaceImportedBundleArtifacts_registersStandardJsonZipAndDirectory() {
         ToolManService service = new ToolManService();
         SsResourceArtifactService ssResourceArtifactService = mock(SsResourceArtifactService.class);

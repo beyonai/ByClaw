@@ -69,6 +69,10 @@ public class SandboxLaunchContextFactory {
     @Autowired
     private SsResExtDigEmployeeService ssResExtDigEmployeeService;
 
+    @Lazy
+    @Autowired
+    private SandboxUserInfoFactory sandboxUserInfoFactory;
+
     public SandboxLaunchRouting resolveRouting(Long resourceId) {
         if (resourceId == null || resourceId.equals(SandboxLaunchRouting.DEFAULT_RESOURCE_ID)) {
             return new SandboxLaunchRouting(SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE,
@@ -99,7 +103,7 @@ public class SandboxLaunchContextFactory {
         String gatewayToken = generateGatewayToken();
         Map<String, String> envs = buildSandboxEnvs(userCode, queryDigEmployee(resourceId), resourceId, gatewayToken);
         applySandboxAgentTypeEnv(envs, sandboxType, userCode);
-        return new SandboxLaunchContext(sandboxType, envs, buildUserInfo(), gatewayToken);
+        return new SandboxLaunchContext(sandboxType, envs, sandboxUserInfoFactory.build(userCode), gatewayToken);
     }
 
     private String generateGatewayToken() {
@@ -251,19 +255,4 @@ public class SandboxLaunchContextFactory {
         return prologueDto.getModelId();
     }
 
-    private Map<String, Object> buildUserInfo() {
-        Map<String, Object> userInfo = new HashMap<>(4);
-        try {
-            Long userId = CurrentUserHolder.getCurrentUserId();
-            String userCode = CurrentUserHolder.getCurrentUserCode();
-            userInfo.put("userId", userId != null && userId != Integer.MIN_VALUE ? String.valueOf(userId) : "");
-            userInfo.put("userCode", userCode != null ? userCode : "");
-        }
-        catch (Exception e) {
-            LOGGER.warn("构建用户信息异常，使用空值", e);
-            userInfo.put("userId", "");
-            userInfo.put("userCode", "");
-        }
-        return userInfo;
-    }
 }
