@@ -19,12 +19,15 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceArtifact;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.MessageSource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.Locale;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -187,9 +190,89 @@ class ToolManServiceTest {
             .containsExactly("object/OBJECT_101.json", "object/OBJECT_101", "object/OBJECT_101/demo.zip");
     }
 
+    @Test
+    void deleteManagedResource_byCodeAndOwnerType_deletesMatchedOwnerResourceOnly() {
+        ToolManService service = new ToolManService();
+        SsResourceService ssResourceService = mock(SsResourceService.class);
+        AuthApplicationService authApplicationService = mock(AuthApplicationService.class);
+        ResourceArtifactStorageService resourceArtifactStorageService = mock(ResourceArtifactStorageService.class);
+        SsResExtToolKitService ssResExtToolKitService = mock(SsResExtToolKitService.class);
+        SsResourceRelDetailService ssResourceRelDetailService = mock(SsResourceRelDetailService.class);
+        ResourceDiscoveryRegistrationService resourceDiscoveryRegistrationService = mock(ResourceDiscoveryRegistrationService.class);
+
+        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        ReflectionTestUtils.setField(service, "authApplicationService", authApplicationService);
+        ReflectionTestUtils.setField(service, "resourceArtifactStorageService", resourceArtifactStorageService);
+        ReflectionTestUtils.setField(service, "ssResExtToolKitService", ssResExtToolKitService);
+        ReflectionTestUtils.setField(service, "ssResourceRelDetailService", ssResourceRelDetailService);
+        ReflectionTestUtils.setField(service, "resourceDiscoveryRegistrationService", resourceDiscoveryRegistrationService);
+        ReflectionTestUtils.setField(service, "datasetSystem", "");
+        prepareI18nUtil();
+
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserId(100L);
+        CurrentUserHolder.setLoginInfo(loginInfo);
+
+        SsResource personalResource = new SsResource();
+        personalResource.setResourceId(501L);
+        personalResource.setResourceCode("demo_tool");
+        personalResource.setOwnerType("personal");
+
+        SsResource enterpriseResource = new SsResource();
+        enterpriseResource.setResourceId(502L);
+        enterpriseResource.setResourceCode("demo_tool");
+        enterpriseResource.setOwnerType("enterprise");
+        enterpriseResource.setResourceBizType(ResourceBizType.TOOLKIT.getCode());
+
+        when(ssResourceService.getResourceListByCode(List.of("demo_tool"))).thenReturn(List.of(personalResource,
+            enterpriseResource));
+        when(ssResourceService.findById(502L)).thenReturn(enterpriseResource);
+        when(authApplicationService.hasResourceManagePermission(enterpriseResource)).thenReturn(true);
+        when(ssResourceRelDetailService.list(org.mockito.ArgumentMatchers.any(
+            com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(List.of());
+        when(ssResExtToolKitService.findById(502L)).thenReturn(null);
+
+        service.deleteManagedResource("demo_tool", "enterprise");
+
+        verify(ssResourceService).findById(502L);
+        verify(ssResourceService).updateResourceEntity(enterpriseResource);
+        assertThat(enterpriseResource.getResourceStatus()).isNotNull();
+    }
+
+    @Test
+    void deleteManagedResource_byCodeAndOwnerType_rejectsDuplicateMatchesUnderSameOwner() {
+        ToolManService service = new ToolManService();
+        SsResourceService ssResourceService = mock(SsResourceService.class);
+        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        prepareI18nUtil();
+
+        SsResource first = new SsResource();
+        first.setResourceId(601L);
+        first.setResourceCode("dup_tool");
+        first.setOwnerType("enterprise");
+
+        SsResource second = new SsResource();
+        second.setResourceId(602L);
+        second.setResourceCode("dup_tool");
+        second.setOwnerType("enterprise");
+
+        when(ssResourceService.getResourceListByCode(List.of("dup_tool"))).thenReturn(List.of(first, second));
+
+        assertThatThrownBy(() -> service.deleteManagedResource("dup_tool", "enterprise"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("tool.resource.code.duplicate.too.many");
+    }
+
     private void prepareRedisUtil() {
         RedisUtil redisUtil = new RedisUtil();
         ReflectionTestUtils.setField(redisUtil, "stringRedisTemplate", mock(StringRedisTemplate.class));
         ReflectionTestUtils.setField(RedisUtil.class, "instance", redisUtil);
+    }
+
+    private void prepareI18nUtil() {
+        MessageSource messageSource = mock(MessageSource.class);
+        when(messageSource.getMessage(any(), any(), any(Locale.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        ReflectionTestUtils.setField(com.iwhalecloud.byai.common.i18n.I18nUtil.class, "messageSource", messageSource);
     }
 }

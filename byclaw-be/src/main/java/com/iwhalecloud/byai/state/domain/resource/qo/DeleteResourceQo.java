@@ -15,5 +15,9 @@ public class DeleteResourceQo {
 
     private Long resourceId;
 
+    private String resourceCode;
+
+    private String ownerType;
+
     private Boolean forceDelete;
 }
