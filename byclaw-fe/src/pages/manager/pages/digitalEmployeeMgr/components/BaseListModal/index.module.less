@@ -9,6 +9,11 @@
     .beyond-modal-content {
       padding: 0;
     }
+
+    .beyond-modal-body {
+      padding: 0;
+      height: 640px;
+    }
   }
 }
 
@@ -263,6 +268,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-bottom: 6px;
 }
 
 .desc {
@@ -271,6 +277,14 @@
   font-size: 12px;
   white-space: nowrap;
   text-overflow: ellipsis;
+  margin-bottom: 3px;
+}
+
+.cardContent {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  height: 100%;
 }
 
 .actionButton {
@@ -316,4 +330,20 @@
       flex-direction: column;
     }
   }
+}
+
+.directoryTree {
+  min-height: 100px;
+}
+
+.toolSubSelect {
+  width: 100px;
+}
+
+.searchInput {
+  width: 150px;
+}
+
+.closeIcon {
+  font-size: 16px;
 }

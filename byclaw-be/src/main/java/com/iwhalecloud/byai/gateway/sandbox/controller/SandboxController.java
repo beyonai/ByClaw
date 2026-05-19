@@ -12,13 +12,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
-import com.iwhalecloud.byai.manager.entity.sandbox.LaunchSandboxQo;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
@@ -115,6 +113,7 @@ public class SandboxController {
                 result.put("sandboxType", sandbox.getSandboxType());
                 result.put("sandboxId", sandbox.getSandboxId());
                 result.put("endpoints", sandbox.getEndpoints());
+                result.put("token", sandbox.getGatewayToken());
                 data.add(result);
             }
         }

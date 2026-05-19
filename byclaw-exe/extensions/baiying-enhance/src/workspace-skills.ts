@@ -31,6 +31,50 @@ export function skillSignature(skills: unknown[]): string {
   return mergeSkillNames(skills).join("\u0000");
 }
 
+function unquoteYamlScalar(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length >= 2) {
+    const first = trimmed[0];
+    const last = trimmed[trimmed.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return trimmed.slice(1, -1).trim();
+    }
+  }
+  return trimmed;
+}
+
+function parseSkillFrontmatterName(content: string): string | undefined {
+  const text = content.replace(/^\uFEFF/, "");
+  if (!text.startsWith("---")) {
+    return undefined;
+  }
+
+  const lines = text.split(/\r?\n/);
+  for (let i = 1; i < lines.length; i += 1) {
+    const line = lines[i]?.trim();
+    if (line === "---" || line === "...") {
+      break;
+    }
+    const match = /^name\s*:\s*(.*)$/.exec(lines[i] ?? "");
+    if (!match) {
+      continue;
+    }
+    const value = unquoteYamlScalar(match[1] ?? "");
+    return value || undefined;
+  }
+  return undefined;
+}
+
+async function readSkillName(skillsDir: string, dirName: string): Promise<string> {
+  const skillFilePath = path.join(skillsDir, dirName, SKILL_DOC_FILE_NAME);
+  try {
+    const content = await fs.readFile(skillFilePath, "utf8");
+    return parseSkillFrontmatterName(content) ?? dirName;
+  } catch {
+    return dirName;
+  }
+}
+
 async function isDirectoryEntry(parentDir: string, ent: Awaited<ReturnType<typeof fs.readdir>>[number]): Promise<boolean> {
   if (ent.isDirectory()) {
     return true;
@@ -73,7 +117,7 @@ export async function scanWorkspaceSkillNames(workspaceDir: string): Promise<str
     } catch {
       continue;
     }
-    names.push(skillName);
+    names.push(await readSkillName(skillsDir, skillName));
   }
 
   return mergeSkillNames(names.sort((a, b) => a.localeCompare(b)));

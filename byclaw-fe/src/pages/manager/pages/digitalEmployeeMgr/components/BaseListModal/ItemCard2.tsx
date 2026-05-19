@@ -1,7 +1,7 @@
 // @ts-nocheck
 /* eslint-disable no-nested-ternary */
 import React, { useMemo, useRef, useState } from 'react';
-import { Button, Space, Divider, Tag } from 'antd';
+import { Button, Divider, Tag } from 'antd';
 import { connect, useIntl } from '@umijs/max';
 import { useHover } from 'ahooks';
 import dayjs from 'dayjs';
@@ -212,20 +212,15 @@ const ItemCard = ({
               {item.description || intl.formatMessage({ id: 'itemCard.noDescription' })}
             </Ellipsis>
           </div>
-          {/* {!isPlugin && ( */}
-          <Space>
-            {!isPlugin && (
-              <>
-                <span>@{item.createUserName || '-'}</span>
-                <Divider type="vertical" />
-              </>
+          <div>
+            <span>@{item.createUserName || '-'}</span>
+            {item.createTime && (
+              <span style={{ marginLeft: 12 }}>
+                {intl.formatMessage({ id: 'itemCard.createdAt' })}{' '}
+                {item.createTime ? dayjs(item.createTime).format('YYYY-MM-DD HH:mm') : null}
+              </span>
             )}
-            <span>
-              {intl.formatMessage({ id: 'itemCard.createdAt' })}{' '}
-              {item.createTime ? dayjs(item.createTime).format('YYYY-MM-DD HH:mm') : null}
-            </span>
-          </Space>
-          {/* )} */}
+          </div>
         </div>
         <div style={{ height: '28px', padding: '0 12px' }} className="ub ub-ac gap8">
           <OperBtn

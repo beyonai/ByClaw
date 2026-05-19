@@ -1,7 +1,11 @@
 package com.iwhalecloud.byai.state.interfaces.controller.resource;
 
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtMcpService;
+import com.iwhalecloud.byai.manager.dto.resource.CallMcpParamsDto;
+import com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.UserSpaceDto;
 import com.iwhalecloud.byai.state.domain.chat.vo.UserSpaceVo;
+import io.modelcontextprotocol.spec.McpSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -56,6 +60,9 @@ public class ToolManController {
 
     @Autowired
     private ToolManService toolManService;
+
+    @Autowired
+    private SsResExtMcpService ssResExtMcpService;
 
     @Autowired
     private ResourceApplicationService resourceApplicationService;
@@ -288,6 +295,43 @@ public class ToolManController {
     }
 
     /**
+     * 按 resourceCode + ownerType 删除资源（支持 tool、skill、kg_doc、object、view）。
+     * 删除前同样会校验资源是否被引用；存在引用时不允许删除。
+     */
+    @PostMapping("/deleteResourceByCodeAndOwnerType")
+    public ResponseUtil<Void> deleteResourceByCodeAndOwnerType(@RequestBody(required = false) DeleteResourceQo request,
+        @Parameter(description = "资源编码", required = false) @RequestParam(value = "resourceCode",
+            required = false) String resourceCode,
+        @Parameter(description = "资源归属类型：enterprise-企业，personal-个人", required = false) @RequestParam(
+            value = "ownerType", required = false) String ownerType) {
+        try {
+            String finalResourceCode = request != null && StringUtils.isNotBlank(request.getResourceCode())
+                ? request.getResourceCode()
+                : resourceCode;
+            String finalOwnerType = request != null && StringUtils.isNotBlank(request.getOwnerType())
+                ? request.getOwnerType()
+                : ownerType;
+            toolManService.deleteManagedResource(finalResourceCode, finalOwnerType);
+            return ResponseUtil.success(I18nUtil.get("tool.resource.delete.success"));
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(resolveResourceNotFoundMessage(e));
+        }
+        catch (BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("deleteResourceByCode failed, resourceCode={}, ownerType={}",
+                request != null && StringUtils.isNotBlank(request.getResourceCode()) ? request.getResourceCode()
+                    : resourceCode,
+                request != null && StringUtils.isNotBlank(request.getOwnerType()) ? request.getOwnerType() : ownerType,
+                e);
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.delete.failed"));
+        }
+    }
+
+    /**
      * 删除资源。forceDelete=true 时跳过删除校验，直接删除主表、子表和资源关系。
      *
      * @author qin.guoquan
@@ -321,16 +365,50 @@ public class ToolManController {
     }
 
     /**
+     * 恢复资源。 将已注销（状态3）的资源恢复为已上架（状态2）。
+     *
+     * @author qin.guoquan
+     * @date 2026-05-14
+     */
+    @PostMapping("/restoreResourceById")
+    public ResponseUtil<Void> restoreResourceById(@RequestBody(required = false) DeleteResourceQo request,
+        @Parameter(description = "资源ID", required = false) @RequestParam(value = "resourceId",
+            required = false) Long resourceId,
+        @Parameter(description = "是否强制恢复", required = false) @RequestParam(value = "forceRestore",
+            required = false) Boolean forceRestore) {
+        try {
+            Long finalResourceId = request != null && request.getResourceId() != null ? request.getResourceId()
+                : resourceId;
+            Boolean finalForceRestore = request != null && request.getForceDelete() != null ? request.getForceDelete()
+                : forceRestore;
+            toolManService.restoreManagedResource(finalResourceId, Boolean.TRUE.equals(finalForceRestore));
+            return ResponseUtil.success(I18nUtil.get("tool.resource.restore.success"));
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(resolveResourceNotFoundMessage(e));
+        }
+        catch (BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("restoreResourceById failed", e);
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.restore.failed"));
+        }
+    }
+
+    /**
      * 硬删除资源及其所有关联关系与资源产物。
      */
     @PostMapping("/deleteResourceAndAllRel")
     public ResponseUtil<Void> deleteResourceAndAllRel(@RequestBody(required = false) DeleteResourceQo request,
-        @Parameter(description = "资源ID", required = false) @RequestParam(value = "resourceId",
-            required = false) Long resourceId) {
+        @Parameter(description = "资源编码", required = false) @RequestParam(value = "resourceCode",
+            required = false) String resourceCode) {
         try {
-            Long finalResourceId = request != null && request.getResourceId() != null ? request.getResourceId()
-                : resourceId;
-            toolManService.deleteResourceAndAllRel(finalResourceId);
+            String finalResourceCode = request != null && StringUtils.isNotBlank(request.getResourceCode())
+                ? request.getResourceCode()
+                : resourceCode;
+            toolManService.deleteResourceAndAllRel(finalResourceCode);
             return ResponseUtil.success(I18nUtil.get("tool.resource.delete.success"));
         }
         catch (IllegalArgumentException e) {
@@ -340,7 +418,10 @@ public class ToolManController {
             return ResponseUtil.fail(e.getMessage());
         }
         catch (Exception e) {
-            logger.error("deleteResourceAndAllRel failed", e);
+            logger.error("deleteResourceAndAllRel failed, resourceCode={}",
+                request != null && StringUtils.isNotBlank(request.getResourceCode()) ? request.getResourceCode()
+                    : resourceCode,
+                e);
             return ResponseUtil
                 .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.delete.failed"));
         }
@@ -474,8 +555,8 @@ public class ToolManController {
     @PostMapping("/qrySkillListByUserCode")
     public ResponseUtil<List<ByClawSkillDto>> qrySkillListByUserCode(@RequestBody QrySkillListByUserCodeQo request) {
         try {
-            if (request == null || request.getResourceId() == null) {
-                return ResponseUtil.fail(I18nUtil.get("resource.resourceid.notnull"));
+            if (request == null) {
+                return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
             }
             String requestUserCode = request == null ? null : request.getUserCode();
             String resolvedUserCode = requestUserCode != null && !requestUserCode.trim().isEmpty() ? requestUserCode
@@ -500,21 +581,23 @@ public class ToolManController {
     }
 
     /**
-     * 上传 skill 压缩包到用户工作空间。
-     * - 落盘 bucket: byclaw-{userCode}（与 qrySkillListByUserCode 同口径）
-     * - 落盘前缀: /by/.openclaw/workspace/skills/{skillName}/...
-     * - zip 仅允许包含一个顶层目录，且必须含 SKILL.md；同名 skill 会先清空旧目录再写入。
-     * - userCode 留空时退回当前登录用户。
+     * 上传 skill 压缩包到用户工作空间。 - 落盘 bucket: byclaw-{userCode}（与 qrySkillListByUserCode 同口径） - 落盘前缀：数字员工
+     * /.openclaw/workspace-baiying-agent-{resourceId}/skills/{skillName}/...； 超级助手
+     * /.openclaw/workspace/skills/{skillName}/... - zip 仅允许包含一个顶层目录，且必须含 SKILL.md；同名 skill 会先清空旧目录再写入。 - userCode
+     * 留空时退回当前登录用户。
      */
     @PostMapping(value = "/uploadSkillZip", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseUtil<ByClawSkillDto> uploadSkillZip(
         @Parameter(description = "skill zip 文件", required = true) @RequestParam("file") MultipartFile file,
-        @Parameter(description = "目标用户编码，可选；留空则使用当前登录用户")
-        @RequestParam(value = "userCode", required = false) String userCode) {
+        @Parameter(description = "数字员工资源ID；超级助手可不传") @RequestParam(value = "resourceId",
+            required = false) Long resourceId,
+        @Parameter(description = "目标用户编码，可选；留空则使用当前登录用户") @RequestParam(value = "userCode",
+            required = false) String userCode) {
         try {
             String resolvedUserCode = StringUtils.isNotBlank(userCode) ? userCode
                 : CurrentUserHolder.getCurrentUserCode();
-            ByClawSkillDto data = byClawSkillUploadApplicationService.uploadSkillZip(resolvedUserCode, file);
+            ByClawSkillDto data = byClawSkillUploadApplicationService.uploadSkillZip(resolvedUserCode, resourceId,
+                file);
             return ResponseUtil.successResponse(I18nUtil.get("byclaw.skill.upload.success"), data);
         }
         catch (IllegalArgumentException e) {
@@ -524,32 +607,36 @@ public class ToolManController {
             return ResponseUtil.fail(e.getMessage());
         }
         catch (Exception e) {
-            logger.error("uploadSkillZip failed, userCode={}", userCode, e);
+            logger.error("uploadSkillZip failed, userCode={}, resourceId={}", userCode, resourceId, e);
             return ResponseUtil
                 .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("byclaw.skill.upload.failed"));
         }
     }
 
     /**
-     * 下载 skill 目录为 zip。
-     * - 入参 skillPath 必须落在 /.openclaw/workspace/skills/ 之下，且至少指向某一个具体 skill 目录。
-     * - userCode 留空时退回当前登录用户。
-     * - 入参兼容 application/json body 与 query/form 两种形式：body 优先，缺失时退到 query 参数。
-     * - 出参为 application/zip 流，文件名形如 {skillName}.zip。
-     * - 失败场景（路径非法 / skill 不存在 / 读对象异常）返回纯文本 400，避免中途出 zip 时再插入 JSON 错误体。
+     * 下载 skill 目录为 zip。 - 数字员工：skillPath 必须落在 /.openclaw/workspace-baiying-agent-{resourceId}/skills/ 之下。 -
+     * 超级助手：skillPath 必须落在 /.openclaw/workspace/skills/ 之下。 - userCode 留空时退回当前登录用户。 - 入参兼容 application/json body 与
+     * query/form 两种形式：body 优先，缺失时退到 query 参数。 - 出参为 application/zip 流，文件名形如 {skillName}.zip。 - 失败场景（路径非法 / skill 不存在 /
+     * 读对象异常）返回纯文本 400，避免中途出 zip 时再插入 JSON 错误体。
      */
     @PostMapping("/downloadSkillZip")
     public ResponseEntity<StreamingResponseBody> downloadSkillZip(
         @RequestBody(required = false) DownloadSkillZipQo request,
-        @Parameter(description = "skill 目录路径，例如 /.openclaw/workspace/skills/fol-auto-biztravel")
-        @RequestParam(value = "skillPath", required = false) String skillPath,
-        @Parameter(description = "目标用户编码，可选；留空则使用当前登录用户")
-        @RequestParam(value = "userCode", required = false) String userCode) {
+        @Parameter(
+            description = "skill 目录路径，例如 /.openclaw/workspace-baiying-agent-10000417/skills/fol-auto-biztravel") @RequestParam(
+                value = "skillPath", required = false) String skillPath,
+        @Parameter(description = "数字员工资源ID；超级助手可不传", required = false) @RequestParam(value = "resourceId",
+            required = false) Long resourceId,
+        @Parameter(description = "目标用户编码，可选；留空则使用当前登录用户") @RequestParam(value = "userCode",
+            required = false) String userCode) {
         // body 优先；body 缺失时再退到 query 参数。两种来源都允许，避免前端必须指定其一。
         String finalSkillPath = request != null && StringUtils.isNotBlank(request.getSkillPath())
-            ? request.getSkillPath() : skillPath;
-        String finalUserCode = request != null && StringUtils.isNotBlank(request.getUserCode())
-            ? request.getUserCode() : userCode;
+            ? request.getSkillPath()
+            : skillPath;
+        Long finalResourceId = request != null && request.getResourceId() != null ? request.getResourceId()
+            : resourceId;
+        String finalUserCode = request != null && StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
+            : userCode;
         String resolvedUserCode = StringUtils.isNotBlank(finalUserCode) ? finalUserCode
             : CurrentUserHolder.getCurrentUserCode();
         try {
@@ -557,7 +644,7 @@ public class ToolManController {
                 throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.path.invalid"));
             }
             ByClawSkillDownloadApplicationService.SkillZipDownload download = byClawSkillDownloadApplicationService
-                .prepare(resolvedUserCode, finalSkillPath);
+                .prepare(resolvedUserCode, finalResourceId, finalSkillPath);
             // RFC 5987 风格的 filename*：兼容中文 / 特殊字符 skill 名，避免浏览器侧文件名乱码。
             String encoded = UriUtils.encode(download.getZipFileName(), java.nio.charset.StandardCharsets.UTF_8);
             String contentDisposition = "attachment; filename=\"" + encoded + "\"; filename*=UTF-8''" + encoded;
@@ -569,7 +656,8 @@ public class ToolManController {
                 .body(out -> out.write(e.getMessage().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         }
         catch (Exception e) {
-            logger.error("downloadSkillZip failed, userCode={}, skillPath={}", resolvedUserCode, finalSkillPath, e);
+            logger.error("downloadSkillZip failed, userCode={}, resourceId={}, skillPath={}", resolvedUserCode,
+                finalResourceId, finalSkillPath, e);
             String fallbackMsg = StringUtils.defaultIfBlank(e.getMessage(),
                 I18nUtil.get("byclaw.skill.download.failed"));
             return ResponseEntity.badRequest().contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
@@ -592,5 +680,29 @@ public class ToolManController {
             logger.error(e.getMessage(), e);
             return ResponseUtil.fail(e.getMessage());
         }
+    }
+
+    /**
+     * 获取mcp工具信息
+     *
+     * @param resourceIdDto 请求
+     * @return ResponseUtil
+     */
+    @PostMapping("/mcp/listTools")
+    public ResponseUtil<McpSchema.ListToolsResult> listTools(@RequestBody ResourceIdDto resourceIdDto) {
+        McpSchema.ListToolsResult listToolsResult = ssResExtMcpService.listTools(resourceIdDto);
+        return ResponseUtil.success(listToolsResult);
+    }
+
+    /**
+     * 获取mcp工具信息
+     *
+     * @param callMcpParamsDto 请求
+     * @return ResponseUtil
+     */
+    @PostMapping("/mcp/callToolRequest")
+    public ResponseUtil<McpSchema.CallToolResult> callToolRequest(@RequestBody CallMcpParamsDto callMcpParamsDto) {
+        McpSchema.CallToolResult callToolResult = ssResExtMcpService.callToolRequest(callMcpParamsDto);
+        return ResponseUtil.success(callToolResult);
     }
 }

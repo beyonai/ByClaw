@@ -14,5 +14,7 @@ public class DirAndFileQo {
 
     private Long resourceId;
 
+    private String resourceCode;
+
     private String directoryPath;
 }

@@ -24,6 +24,7 @@ import org.springframework.data.redis.connection.jedis.JedisConnectionFactory;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializer;
+import org.springframework.session.data.redis.RedisSessionRepository;
 import org.springframework.session.data.redis.config.ConfigureRedisAction;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -81,6 +82,9 @@ public class RedisConfiguration {
 
     @Value("${spring.redis.encrypt:false}")
     private boolean encrypt;
+
+    @Value("${server.servlet.session.timeout:30m}")
+    private Duration sessionTimeout;
 
     @Primary
     @Bean
@@ -168,6 +172,11 @@ public class RedisConfiguration {
         // 反序列化会导致整形类型的数值泛型丢失
         return new Jackson2JsonRedisSerializer(Object.class);
         // return new RedisSessionJacksonRedisSerializer(applicationContext);
+    }
+
+    @Bean
+    public org.springframework.session.config.SessionRepositoryCustomizer<RedisSessionRepository> sessionRepositoryCustomizer() {
+        return repository -> repository.setDefaultMaxInactiveInterval(sessionTimeout);
     }
 
     @Bean

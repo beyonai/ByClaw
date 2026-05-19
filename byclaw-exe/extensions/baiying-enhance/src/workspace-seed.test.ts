@@ -1,9 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentsMd,
+  buildBootstrapMd,
   buildByaiBusinessExtensionsMd,
   buildSoul,
 } from "./workspace-seed.js";
+
+describe("workspace-seed bootstrap", () => {
+  it("buildBootstrapMd is an explicit managed no-op", () => {
+    const md = buildBootstrapMd();
+    expect(md).toContain("<!-- baiying-enhance: managed seed -->");
+    expect(md).toContain("Managed Bootstrap No-Op");
+    expect(md).toContain("Do not run first-run onboarding.");
+    expect(md).toContain("Do not inspect files to diagnose this bootstrap file.");
+    expect(md).toContain("Do not create, edit, move, delete, or archive any files");
+    expect(md).toContain("Do not delete this file.");
+    expect(md).not.toMatch(/woke up|Who am I/i);
+  });
+});
 
 describe("workspace-seed corePersonaDefinition", () => {
   it("buildSoul uses instructions and pointer when corePersona is JSON extensions", () => {

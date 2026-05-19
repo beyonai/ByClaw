@@ -32,7 +32,7 @@
 | 默认空数组 | 无可用配置时为 **`[]`**。 |
 | **`relSkills`（优先）** | JSON **根**上为非空字符串数组时（如数字员工详情里的 `["dws","clawhub"]`），**`agents.list[].skills`** 即为该数组（元素 `trim`，去掉空串）。 |
 | **`skills`（兼容）** | 若无有效 **`relSkills`**，则读取根级 **`skills`**（旧版「原生简化」JSON）；仍无则为 **`[]`**。 |
-| **Workspace 上传 skill** | 默认扫描 `skills/<skillName>/SKILL.md`：只把当前 agent workspace 下的 skill 并入该 agent，不读取其它 agent workspace；main workspace (`workspace/skills`) 下的 skill 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 并入托管子 agent。 |
+| **Workspace 上传 skill** | 默认扫描 `skills/<目录>/SKILL.md`，优先使用 `SKILL.md` frontmatter `name` 作为 skill filter 名称：只把当前 agent workspace 下的 skill 并入该 agent，不读取其它 agent workspace；main workspace (`workspace/skills`) 下的 skill 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 并入托管子 agent。 |
 
 适用结构：百应详情根对象、`agent_list` 与首条目同文件根上的字段、以及原生根对象——均从**根对象**读取 `relSkills` / `skills`。Workspace skill 只识别一层目录下的 `SKILL.md`，不会采纳更深层级文件。该配置写回默认走 `agents` hot reload；插件会同步更新禁用的内部 `skills.entries.__baiying_enhance_reload` 标记，促使 OpenClaw 刷新 skills/tools 快照，不需要重启 OpenClaw。对 rclone/FUSE 等网盘挂载，插件不只依赖 `fs.watch`，还会用周期扫描兜底；当目录类型上报为 unknown 时会通过 `stat()` 再确认。
 
@@ -60,6 +60,7 @@
 | `IDENTITY.md` | 名称与头像路径 |
 | `USER.md` | 建议开场问题 |
 | `TOOLS.md` | `baiying_call` 使用说明与可用资源列表 |
+| `BOOTSTRAP.md` | 托管 no-op 引导文件；明确要求不做 onboarding、不检查修复文件、不因该文件创建/修改/删除任何内容 |
 
 ---
 

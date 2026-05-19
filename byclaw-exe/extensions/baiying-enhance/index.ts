@@ -13,6 +13,7 @@ import { resolveDefaultContentIndexPath } from "./src/agent-content-index.js";
 import { resolveBundledBaiyingResourcesDir } from "./src/plugin-paths.js";
 import { createRedisJsonStore, setSharedRedisJsonStore } from "./src/redis-json-store.js";
 import { loadBaiyingRedisEnvDefaults } from "./src/redis-env.js";
+import { createWorkspaceArchiveApi } from "./src/workspace-archive-api.js";
 import {
   loadMainAgentsTemplate,
   resolveEffectiveMainAgentsMdMode,
@@ -94,6 +95,8 @@ export function resolveConfigSyncHotPrefixes(cfg: BaiyingEnhancePluginConfig): s
   return Array.from(out);
 }
 
+const registry = new AgentRegistryState();
+
 console.log("============Baiying Enhance module imported============");
 const plugin = {
   id: "baiying-enhance",
@@ -112,7 +115,6 @@ const plugin = {
     api.registerReload({
       hotPrefixes: resolveConfigSyncHotPrefixes(pluginCfg),
     });
-    const registry = new AgentRegistryState();
     const debounceMs = pluginCfg.watchDebounceMs ?? 500;
     const executorResourcesDir = resolveExecutorResourcesDir(api, pluginCfg);
     const redisJsonStore = createRedisJsonStore({
@@ -174,13 +176,25 @@ const plugin = {
         if (pub.subscribe) {
           api.logger.info(`baiying-enhance: dig-employee Redis Pub/Sub enabled channel=${pub.channel}`);
         }
+        const workspaceArchiveApi =
+          pluginCfg.workspaceArchiveBackend === "local"
+            ? undefined
+            : createWorkspaceArchiveApi({
+                logger: {
+                  info: (message) => api.logger.info(message),
+                  warn: (message) => api.logger.warn(message),
+                },
+              });
         digEmployeeAuthWatch = createDigEmployeeAuthWatch({
           logger: {
             info: (message) => api.logger.info(message),
             warn: (message) => api.logger.warn(message),
             error: (message) => api.logger.error(message),
           },
-          onChange: async () => {
+          onChange: async (authorizedIds) => {
+            api.logger.info(
+              `baiying-enhance: dig-employee auth changed (${authorizedIds.size} authorized id(s)); triggering managed agent sync`,
+            );
             await agentWatch?.__flushNow?.({ fullWorkspaceReseed: true });
           },
         });
@@ -192,8 +206,9 @@ const plugin = {
           executorPath: executorResourcesDir,
           pluginConfig: pluginCfg,
           debounceMs,
+          workspaceArchiveApi,
           authorizationFilter: {
-            // Keep `undefined` to mean "no auth filter yet" (load full directory).
+            // Keep `undefined` to mean "auth not ready"; the watchdog defers managed sync instead of clearing config.
             // Only return a Set when auth data exists and filtering should apply.
             getAuthorizedSourceKeys: () => digEmployeeAuthWatch?.getAuthorizedIds(),
           },
@@ -218,6 +233,7 @@ const plugin = {
         await agentWatch.start({ deferInitialFlush: true });
         await digEmployeeAuthWatch.start();
         await digEmployeeChangeSubscriber?.start();
+        // First flush runs cold-start workspace reconcile (auth ids vs workspace-baiying-agent-*) before restore.
         await agentWatch.__flushNow?.({ fullWorkspaceReseed: true });
       },
       stop: async () => {

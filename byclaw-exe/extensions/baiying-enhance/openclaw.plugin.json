@@ -45,6 +45,24 @@
         "description": "Create ~/.openclaw/workspace-<agentId>/ and seed SOUL.md/AGENTS.md/BYAI_BUSINESS_EXTENSIONS.md/… from JSON after each sync (default true).",
         "default": true
       },
+      "workspaceArchiveOnUnauthorized": {
+        "type": "boolean",
+        "description": "When true (default), archive unauthorized managed digital employee workspaces outside the active OPENCLAW_STATE_DIR. The default remote backend uploads through the backend API and removes local active workspaces only after upload success.",
+        "default": true
+      },
+      "workspaceArchiveBackend": {
+        "type": "string",
+        "enum": [
+          "remote",
+          "local"
+        ],
+        "description": "Workspace archive backend. Default remote uploads archives to the backend API; local keeps the legacy .baiying-workspaces directory behavior.",
+        "default": "remote"
+      },
+      "workspaceArchiveDir": {
+        "type": "string",
+        "description": "Legacy local archive root for unauthorized managed workspaces when workspaceArchiveBackend=local. Absolute paths and ~ are honored; relative paths resolve under the parent of OPENCLAW_STATE_DIR. Default: .baiying-workspaces next to .openclaw."
+      },
       "mainAgentsMdMode": {
         "type": "string",
         "enum": [
@@ -92,7 +110,7 @@
       },
       "workspaceSkillAutoEnable": {
         "type": "boolean",
-        "description": "Merge user-uploaded workspace skills (skills/<name>/SKILL.md) into managed agents.list[].skills alongside JSON relSkills/skills (default true).",
+        "description": "Merge user-uploaded workspace skills (skills/<dir>/SKILL.md, using SKILL.md frontmatter name when present) into managed agents.list[].skills alongside JSON relSkills/skills (default true).",
         "default": true
       },
       "workspaceSkillScanIntervalMs": {

@@ -4,6 +4,7 @@ import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.users.UserType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.login.bean.UsersOrganization;
@@ -35,6 +36,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.context.MessageSource;
+import org.springframework.data.redis.core.SetOperations;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -61,6 +64,16 @@ class AuthApplicationServiceTest {
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();
+    }
+
+    private void mockRedisSetWrite() {
+        RedisUtil redisUtil = new RedisUtil();
+        StringRedisTemplate stringRedisTemplate = mock(StringRedisTemplate.class);
+        @SuppressWarnings("unchecked")
+        SetOperations<String, String> setOperations = mock(SetOperations.class);
+        when(stringRedisTemplate.opsForSet()).thenReturn(setOperations);
+        ReflectionTestUtils.setField(redisUtil, "stringRedisTemplate", stringRedisTemplate);
+        ReflectionTestUtils.setField(RedisUtil.class, "instance", redisUtil);
     }
 
     private void mockI18n() {
@@ -377,6 +390,86 @@ class AuthApplicationServiceTest {
         assertThatThrownBy(() -> service.handleAuth(dto))
             .isInstanceOf(BaseException.class)
             .hasMessageContaining("auth.personal.assistant.manage.auth.not.allowed");
+    }
+
+    /**
+     * 给 USER/ORG/POST/STATION 授予管理权限时，要自动补齐同维度 FORCE_USE，确保“可管理即至少可使用”。
+     */
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+        GrantToObjType.USER, GrantToObjType.ORG, GrantToObjType.POST, GrantToObjType.STATION
+    })
+    void handleAuth_autoAddsForceUseWhenAllowManageGranted(String grantToObjType) {
+        mockRedisSetWrite();
+        AuthApplicationService service = new AuthApplicationService();
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+
+        SsResource resource = new SsResource();
+        resource.setResourceId(601L);
+        resource.setResourceBizType(ResourceBizTypeEnum.KG_DOC.name());
+        resource.setOwnerType(OwnerType.ENTERPRISE);
+        when(ssResourceMapper.selectById(601L)).thenReturn(resource);
+        when(privilegeGrantService.findPrivilegeGrant(anyString(), eq(ResourceBizTypeEnum.KG_DOC.name()), eq(601L), anyString()))
+            .thenReturn(List.of());
+        when(privilegeGrantMapper.selectCount(any())).thenReturn(0L);
+
+        AuthDTO authDTO = new AuthDTO();
+        authDTO.setGrantToObjType(grantToObjType);
+        authDTO.setGrantToObjId(1001L);
+        AuthRedBlackDTO dto = new AuthRedBlackDTO();
+        dto.setGrantType(GrantType.ALLOW_MANAGE);
+        dto.setGrantObjType(ResourceBizTypeEnum.KG_DOC.name());
+        dto.setGrantObjId(601L);
+        dto.setRedList(List.of(authDTO));
+
+        service.handleAuth(dto);
+
+        verify(privilegeGrantService).save(argThat(privilegeGrant -> privilegeGrant != null
+            && GrantType.FORCE_USE.equals(privilegeGrant.getGrantType())
+            && grantToObjType.equals(privilegeGrant.getGrantToObjType())
+            && Long.valueOf(1001L).equals(privilegeGrant.getGrantToObjId())));
+    }
+
+    /**
+     * 同维度存在使用黑名单时，授予管理权限不能自动覆盖“禁止使用”的显式配置。
+     */
+    @Test
+    void handleAuth_doesNotAutoAddForceUseWhenUseBlackExists() {
+        AuthApplicationService service = new AuthApplicationService();
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+
+        SsResource resource = new SsResource();
+        resource.setResourceId(602L);
+        resource.setResourceBizType(ResourceBizTypeEnum.TOOLKIT.name());
+        resource.setOwnerType(OwnerType.ENTERPRISE);
+        when(ssResourceMapper.selectById(602L)).thenReturn(resource);
+        when(privilegeGrantService.findPrivilegeGrant(anyString(), eq(ResourceBizTypeEnum.TOOLKIT.name()), eq(602L), anyString()))
+            .thenReturn(List.of());
+        when(privilegeGrantMapper.selectCount(any())).thenReturn(1L);
+
+        AuthDTO authDTO = new AuthDTO();
+        authDTO.setGrantToObjType(GrantToObjType.USER);
+        authDTO.setGrantToObjId(1002L);
+        AuthRedBlackDTO dto = new AuthRedBlackDTO();
+        dto.setGrantType(GrantType.ALLOW_MANAGE);
+        dto.setGrantObjType(ResourceBizTypeEnum.TOOLKIT.name());
+        dto.setGrantObjId(602L);
+        dto.setRedList(List.of(authDTO));
+
+        service.handleAuth(dto);
+
+        verify(privilegeGrantService, never()).save(argThat(privilegeGrant -> privilegeGrant != null
+            && GrantType.FORCE_USE.equals(privilegeGrant.getGrantType())));
     }
 
     @Test

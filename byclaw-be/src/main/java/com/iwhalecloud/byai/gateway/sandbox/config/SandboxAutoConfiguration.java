@@ -5,6 +5,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import com.iwhalecloud.byai.common.feign.client.FeignWhaleAgentService;
 import com.iwhalecloud.byai.common.storage.constants.StorageType;
@@ -47,7 +48,7 @@ public class SandboxAutoConfiguration {
         if (StorageType.WHALE_AGENT.equalsIgnoreCase(storageType)) {
             provider = new WhaleAgentSandboxRuntimeProvider(feignWhaleAgentService);
         } else {
-            provider = new OpenSandboxRuntimeProvider(openSandboxClient);
+            provider = new OpenSandboxRuntimeProvider(openSandboxClient, properties);
         }
         return new StandardSandboxLifecycleService(properties, stringRedisTemplate,
             sandboxServiceSpecRepository, specProcessor, provider);
@@ -56,6 +57,20 @@ public class SandboxAutoConfiguration {
     @Bean
     public EnvTemplateRenderer envTemplateRenderer() {
         return new EnvTemplateRenderer();
+    }
+
+    @Bean(name = "sandboxWakeupStreamExecutor")
+    public ThreadPoolTaskExecutor sandboxWakeupStreamExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(32);
+        executor.setKeepAliveSeconds(60);
+        executor.setThreadNamePrefix("sandbox-wakeup-stream-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(10);
+        executor.initialize();
+        return executor;
     }
 
 }

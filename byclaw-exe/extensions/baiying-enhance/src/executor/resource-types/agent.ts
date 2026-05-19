@@ -11,6 +11,7 @@ import {
   WorkerRegistry,
   ActionType,
   AskAgentCommand,
+  SseMessageType,
 } from "@byclaw/by-framework";
 import type { Redis } from "ioredis";
 import type { Capability, Dict, ExecutorResponse } from "../types.js";
@@ -371,13 +372,29 @@ You MUST:
     headers,
   });
 
+  const byFrameworkEmitter = generateByFrameworkEmitter();
+  const sendByFrameworkStreamData = createSerializedByFrameworkStreamSender(
+    byFrameworkEmitter,
+    {
+      id: crypto.randomUUID(),
+      sessionId,
+      traceId,
+      parentMessageId: parameters.tool_call_id as string,
+    },
+  );
+
   const sseRes = await readSseEvents({
     url: sseUrl,
     payload,
     headers,
     timeoutMs: params.timeoutMs ?? 60_000,
+    onEventStream: (data) => {
+      sendByFrameworkStreamData.enqueue(data);
+    },
   });
   if ("error" in sseRes) return sseRes.error;
+
+  await sendByFrameworkStreamData.awaitAll();
 
   const contentParts: string[] = [];
   for (const event of sseRes.events) {
@@ -428,6 +445,7 @@ function generateByFrameworkEmitter() {
 }
 
 function createSerializedByFrameworkStreamSender(emitter: GatewayDataEmitter, params: {
+  id: string;
   sessionId: string;
   traceId: string;
   parentMessageId?: string;
@@ -451,6 +469,7 @@ function createSerializedByFrameworkStreamSender(emitter: GatewayDataEmitter, pa
 }
 
 async function sendSseStreamDataViaByFramework(data: Dict, emitter: GatewayDataEmitter, params: {
+  id: string;
   sessionId: string;
   traceId: string;
   parentMessageId?: string;
@@ -459,8 +478,9 @@ async function sendSseStreamDataViaByFramework(data: Dict, emitter: GatewayDataE
     sessionId: params.sessionId,
     traceId: params.traceId,
     data: {
+      contentType: SseMessageType.text,
       ...data,
-      id: crypto.randomUUID(),
+      id: params.id,
       created: Math.floor(Date.now() / 1000),
       model: "",
       object: "",
@@ -469,39 +489,4 @@ async function sendSseStreamDataViaByFramework(data: Dict, emitter: GatewayDataE
     },
     eventType: EventType.REASONING_LOG_DELTA,
   });
-}
-
-async function scheduleDynamicWorker(signal?: AbortSignal) {
-  const workerId = `baiying_call_dynamic_worker_${Math.random().toString(16).slice(2, 6)}`;
-  const agentType = workerId;
-  const registry = new WorkerRegistry(createRedisInst());
-
-  const runner = new WorkerRunner({ workerId, agentTypes: [agentType], registry }, {
-    redisClient: createRedisInst()
-  });
-  await runner.initialize();
-  let _resolve: (value: string) => void;
-  let _reject: (reason: string) => void;
-  const promise = new Promise<string>((resolve, reject) => {
-    _resolve = resolve;
-    _reject = reject;
-  });
-  const subscription = runner.subscribe(async ({ data }) => {
-    if (data.actionType !== ActionType.ASK_AGENT) {
-      return;
-    }
-    const gatewayMessage = data as AskAgentCommand;
-    if (gatewayMessage.content) {
-      _resolve(String(gatewayMessage.content));
-      subscription.stop();
-    }
-  });
-  signal?.addEventListener("abort", () => {
-    subscription.stop();
-    _reject("Request aborted");
-  });
-  return {
-    agentType,
-    promise,
-  }
 }

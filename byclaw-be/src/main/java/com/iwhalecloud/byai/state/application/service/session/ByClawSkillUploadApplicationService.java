@@ -20,6 +20,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.storage.UserFS;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 
 /**
@@ -31,7 +33,7 @@ import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
  *
  * 落盘规则（与 {@link ByClawSkillQueryApplicationService} 完全对齐）：
  * - bucket = byclaw-{userCode}（由 UserFS / UserBucketNameResolver 统一生成）；
- * - 对象前缀 = {@link ByClawSkillPaths#WORKSPACE_SKILL_ROOT_PREFIX}；
+ * - 对象前缀：数字员工走 /.openclaw/workspace-baiying-agent-{resourceId}/skills/，超级助手走 /.openclaw/workspace/skills/；
  * - skillName 取自 zip 中 SKILL.md 所在目录的最后一段；若 SKILL.md 在 zip 根，回退到 zip 文件名去扩展名；
  * - 写入文件名统一规范为 "SKILL.md"，保证 query 的大小写敏感匹配能识别。
  *
@@ -60,6 +62,9 @@ public class ByClawSkillUploadApplicationService {
     @Autowired
     private UserFS userFS;
 
+    @Autowired
+    private SsResourceService ssResourceService;
+
     /**
      * 上传单个 skill zip。仅做大小、SKILL.md 唯一性两道校验，其它结构问题以静默忽略处理。
      *
@@ -67,8 +72,8 @@ public class ByClawSkillUploadApplicationService {
      * @param zipFile   前端上传的 zip MultipartFile
      * @return 与 query 接口同口径的 ByClawSkillDto
      */
-    public ByClawSkillDto uploadSkillZip(String userCode, MultipartFile zipFile) {
-        validateInput(userCode, zipFile);
+    public ByClawSkillDto uploadSkillZip(String userCode, Long resourceId, MultipartFile zipFile) {
+        validateInput(userCode, resourceId, zipFile);
 
         // 切换到目标用户上下文，bucket 解析与读写操作全程在切换后的 LoginInfo 下进行。
         return ByClawSkillPaths.withUserContext(userCode, () -> {
@@ -83,7 +88,8 @@ public class ByClawSkillUploadApplicationService {
             String skillBaseInZip = parentDirOf(skillDocEntry.entryName);
             String skillName = resolveSkillName(skillBaseInZip, zipFile.getOriginalFilename());
 
-            String skillRoot = ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX + skillName;
+            String skillRootPrefix = resolveSkillRootPrefix(resourceId);
+            String skillRoot = skillRootPrefix + skillName;
             // 覆盖语义：清空旧目录再写，避免上一个版本的孤儿文件遗留。
             // 删除前缀本身是幂等的，桶 / 目录不存在时不会抛错。
             userFS.delete(skillRoot + "/");
@@ -119,7 +125,7 @@ public class ByClawSkillUploadApplicationService {
     }
 
     /** 仅做硬性入参校验：userCode 非空、zip 非空、zip ≤ 50MB。 */
-    private void validateInput(String userCode, MultipartFile zipFile) {
+    private void validateInput(String userCode, Long resourceId, MultipartFile zipFile) {
         if (StringUtils.isBlank(userCode)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.user.code.notempty"));
         }
@@ -129,6 +135,17 @@ public class ByClawSkillUploadApplicationService {
         if (zipFile.getSize() > MAX_ZIP_SIZE_BYTES) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.size.exceeded"));
         }
+    }
+
+    private String resolveSkillRootPrefix(Long resourceId) {
+        if (resourceId == null) {
+            return ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX;
+        }
+        SsResource resource = ssResourceService.findById(resourceId);
+        String resourceCode = resource == null ? null : resource.getResourceCode();
+        return ByClawSkillPaths.isSuperAssistantResourceCode(resourceCode)
+            ? ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX
+            : ByClawSkillPaths.buildAgentSkillRootPrefix(resourceId);
     }
 
     /**

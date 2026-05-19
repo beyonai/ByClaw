@@ -68,7 +68,7 @@ const ResourceTabs: React.FC<Props> = ({
   const downloadTimerRef = useRef<NodeJS.Timeout | null>(null);
   const downloadLockRef = useRef(false);
 
-  const { layoutMode, agentInfo } = useGlobal();
+  const { layoutMode, agentInfo, EventEmitter } = useGlobal();
 
   const { agentType } = agentInfo || {};
 
@@ -222,16 +222,19 @@ const ResourceTabs: React.FC<Props> = ({
         message.error(intl.formatMessage({ id: 'resourceTabs.skillUpload.noUserCode' }));
         return false;
       }
-
       setSkillUploading(true);
       try {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('userCode', userCode);
+        if (normalizedAgentId) {
+          formData.append('resourceId', normalizedAgentId);
+        }
 
         const response = await uploadSkillZip(formData);
 
         message.success(response?.msg || intl.formatMessage({ id: 'resourceTabs.skillUpload.success' }));
+        EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
         return true;
       } catch (error: any) {
         message.error(error?.message || error || intl.formatMessage({ id: 'resourceTabs.skillUpload.failed' }));
@@ -240,7 +243,7 @@ const ResourceTabs: React.FC<Props> = ({
         setSkillUploading(false);
       }
     },
-    [userInfo, intl, message]
+    [userInfo, normalizedAgentId, intl, message]
   );
 
   const hasAnyTab = true;

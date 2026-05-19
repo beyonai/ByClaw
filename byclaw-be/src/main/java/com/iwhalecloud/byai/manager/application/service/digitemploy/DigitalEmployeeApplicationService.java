@@ -414,8 +414,6 @@ public class DigitalEmployeeApplicationService {
         ssResExtDigEmployee.setAgentSseUrl(ssResExtDigEmployee.getAgentSseUrlOri());
         ssResExtDigEmployee.setAgentWebUrl(ssResExtDigEmployee.getAgentWebUrlOri());
         ssResExtDigEmployee.setAgentAdminUrlList(ssResExtDigEmployee.getAgentAdminUrlOriList());
-        // 前端传 relSkills（List<String>），按既有约定序列化进 skills 列。relTools 不入库，留待 doSyncOpenClawWorkSpace 写入 target_content。
-        applyRelSkillsToEntity(digitalEmployeeDTO, ssResExtDigEmployee);
         ssResExtDigEmployeeService.save(ssResExtDigEmployee);
 
         // 保存关联关系
@@ -667,8 +665,6 @@ public class DigitalEmployeeApplicationService {
         ssResExtDigEmployee.setAgentAdminUrlList(ssResExtDigEmployee.getAgentAdminUrlOriList());
         // tagName 统一由查询接口运行时计算，避免前端回传旧标签又写回扩展表。
         ssResExtDigEmployee.setTagName(null);
-        // 同 save 链路：relSkills 序列化进 skills；relTools 留到 sync 阶段再写入 target_content。
-        applyRelSkillsToEntity(digitalEmployeeDTO, ssResExtDigEmployee);
         ssResExtDigEmployeeService.update(ssResExtDigEmployee);
 
         // 关联资源对比
@@ -1046,6 +1042,8 @@ public class DigitalEmployeeApplicationService {
             return null;
         }
         fillDigitalEmployeeSyncRuntimeFields(details, resourceId);
+        // target_content 只是上一次同步快照，不能再作为当前标准 JSON 的一个字段递归写回。
+        details.setTargetContent(null);
         return com.alibaba.fastjson.JSON.toJSONString(details);
     }
 
@@ -1058,6 +1056,8 @@ public class DigitalEmployeeApplicationService {
         // - relTools 不入库，必须从入参直接透传，否则首次保存的 JSON 中 relTools 会丢；
         // - relPrompt 与 corePersonaDefinition 同源，入参更"新"则优先用入参，避免编辑场景被旧库值覆盖。
         applyInputRuntimeFields(details, inputDto);
+        // target_content 只是镜像快照，不能参与本次 JSON 序列化，否则会出现 JSON 套 JSON 的递归膨胀。
+        details.setTargetContent(null);
 
         String jsonContent = com.alibaba.fastjson.JSON.toJSONString(details);
         String fileName = buildDigEmployeeJsonFileName(resourceId);
@@ -1528,19 +1528,21 @@ public class DigitalEmployeeApplicationService {
         // relTools 不入库，直接从最近一次 sync 写入的 target_content 镜像里反序列化回填，保证编辑回显不丢数据。
         digitalEmployeeDetailsDTO
             .setRelTools(parseRelToolsFromTargetContent(digitalEmployeeDetailsDTO.getTargetContent()));
-        // relPrompt 与 corePersonaDefinition 同源：以 DB 列 core_persona_definition 为准，
-        // 没有时再从上一次 target_content 中反查（兼容历史保存路径未带 corePersonaDefinition 的情况）。
-        String corePersonaDefinition = digitalEmployeeDetailsDTO.getCorePersonaDefinition();
-        if (StringUtils.isBlank(corePersonaDefinition)) {
-            corePersonaDefinition = parseRelPromptFromTargetContent(digitalEmployeeDetailsDTO.getTargetContent());
+        // relPrompt 优先取保存时写入 target_content 的运行期值；
+        // 历史数据若没有该字段，再兜底到 corePersonaDefinition，兼容旧数据。
+        String relPrompt = parseRelPromptFromTargetContent(digitalEmployeeDetailsDTO.getTargetContent());
+        if (StringUtils.isBlank(relPrompt)) {
+            relPrompt = digitalEmployeeDetailsDTO.getCorePersonaDefinition();
         }
-        digitalEmployeeDetailsDTO.setRelPrompt(corePersonaDefinition);
+        digitalEmployeeDetailsDTO.setRelPrompt(relPrompt);
 
         // 查询记忆配置列表（根据数字员工ID和用户ID查询）
         Long userId = CurrentUserHolder.getCurrentUserId();
         List<MemoryConfigDTO> memoryConfigList = templateRuleInfoApplicationService
             .findMemoryConfigsByResourceIdAndUserId(resourceId, userId);
         digitalEmployeeDetailsDTO.setMemoryConfigList(memoryConfigList);
+        // target_content 仅供后端内部回填运行期字段使用，不对前端详情接口暴露。
+        digitalEmployeeDetailsDTO.setTargetContent(null);
 
         return digitalEmployeeDetailsDTO;
     }
@@ -1553,14 +1555,28 @@ public class DigitalEmployeeApplicationService {
         if (details == null || inputDto == null) {
             return;
         }
+        if (inputDto.getSkills() != null) {
+            details.setSkills(inputDto.getSkills());
+            details.setRelSkills(parseSkills(inputDto.getSkills()));
+        }
         if (inputDto.getRelTools() != null) {
             details.setRelTools(inputDto.getRelTools());
         }
-        // relPrompt 优先取前端入参；fallback 到 corePersonaDefinition（DB 列），最终空值由 findDetailsById 已兜底设置。
-        String inputPrompt = StringUtils.defaultIfBlank(inputDto.getRelPrompt(), inputDto.getCorePersonaDefinition());
-        if (StringUtils.isNotBlank(inputPrompt)) {
-            details.setRelPrompt(inputPrompt);
+        // relPrompt 以本次提交为准：
+        // - 显式传 relPrompt：直接使用，允许空串表达"清空"；
+        // - 否则若传了 corePersonaDefinition：按同源字段同步，允许空串覆盖；
+        // - 两者都未传：保持 findDetailsById 查出的值不变。
+        if (inputDto.getRelPrompt() != null) {
+            details.setRelPrompt(inputDto.getRelPrompt());
         }
+        else if (inputDto.getCorePersonaDefinition() != null) {
+            details.setRelPrompt(inputDto.getCorePersonaDefinition());
+        }
+    }
+
+    /** 更新/保存接口返回详情时，用本次入参兜底覆盖运行期字段，避免响应仍回显旧值。 */
+    public void applyInputRuntimeFieldsForResponse(DigitalEmployeeDetailsDTO details, DigitalEmployeeDTO inputDto) {
+        applyInputRuntimeFields(details, inputDto);
     }
 
     /**
@@ -1590,20 +1606,6 @@ public class DigitalEmployeeApplicationService {
             return null;
         }
         return JSON.parseArray(skills, String.class);
-    }
-
-    /**
-     * 把入参中的 relSkills（List<String>）序列化到 SsResExtDigEmployee.skills 列。
-     * - 入参为 null：不动 entity，避免覆盖 update 场景下既存的 skills；
-     * - 入参为空 list：序列化为 "[]"，符合"用户清空 skill"的语义；
-     * - 入参非空：序列化为 JSON 数组字符串。
-     */
-    private void applyRelSkillsToEntity(DigitalEmployeeDTO dto, SsResExtDigEmployee entity) {
-        List<String> relSkills = dto.getRelSkills();
-        if (relSkills == null) {
-            return;
-        }
-        entity.setSkills(JSON.toJSONString(relSkills));
     }
 
     /** 反序列化 target_content 里的 relTools 数组；不存在或解析失败返回 null。 */

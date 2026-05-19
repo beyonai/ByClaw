@@ -140,6 +140,7 @@ export async function readSseEvents(params: {
   payload: unknown;
   headers: Record<string, string>;
   timeoutMs: number;
+  onEventStream?: (data: Dict) => void;
 }): Promise<{ response: Response; events: Dict[]; bodyPreview: string } | { error: ExecutorFailure }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error("request timed out")), params.timeoutMs);
@@ -185,6 +186,8 @@ export async function readSseEvents(params: {
     return { response, events, bodyPreview: text.slice(0, 500) };
   }
 
+  const { onEventStream } = params;
+
   const reader = response.body.getReader();
   try {
     while (true) {
@@ -201,12 +204,13 @@ export async function readSseEvents(params: {
         buffer = buffer.slice(newlineIndex + 1);
         if (!line) continue;
         if (line.startsWith("data:")) {
-          const data = line.slice(5).trim();
+          const data = line.slice("data:".length).trim();
           if (!data || data === "[DONE]") continue;
           try {
             const parsed = JSON.parse(data);
             if (isRecord(parsed)) {
               events.push(parsed);
+              onEventStream?.(parsed);
             }
           } catch {
             // ignore malformed line
@@ -229,6 +233,7 @@ export async function readSseEvents(params: {
           const parsed = JSON.parse(data);
           if (isRecord(parsed)) {
             events.push(parsed);
+            onEventStream?.(parsed);
           }
         } catch {
           // ignore

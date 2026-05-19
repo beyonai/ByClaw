@@ -55,6 +55,7 @@ import { DEFAULT_PERSONALITY_DEFINITION } from '../personalityDefinitionDefault'
 import RobotModal from './RobotModal';
 import { normalizeCatalogTree } from '@/utils/catalog';
 import { DEFAULT_AGENT_TYPE_OPTIONS, DEFAULT_TEMPLATE_DATA } from '../../constants';
+import Ellipsis from '@/pages/manager/components/Ellipsis';
 
 const { TextArea } = Input;
 
@@ -1111,7 +1112,7 @@ const ConfigForm = (props) => {
 
     // 如果有回调函数，等待图片加载完成后执行
     if (onLoadCallback) {
-      const img = new Image();
+      const img = new window.Image();
       img.onload = () => {
         onLoadCallback();
       };
@@ -2624,7 +2625,15 @@ const ConfigForm = (props) => {
                               {item.label}
                               {/* <Tag>{item.value}</Tag> */}
                             </div>
-                            <div className={styles.bundledSkillModalCardDesc}>{item.description || '-'}</div>
+                            <Ellipsis
+                              lines={1}
+                              tooltip
+                              tooltipProps={{
+                                overlayStyle: { maxWidth: 500, overflowWrap: 'break-word', wordWrap: 'break-word' },
+                              }}
+                            >
+                              {item.description || '-'}
+                            </Ellipsis>
                           </div>
                           <Button
                             className={classnames(styles.actionButton, {

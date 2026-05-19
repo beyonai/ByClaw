@@ -31,7 +31,7 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
 
     private final AtomicBoolean initialized = new AtomicBoolean(false);
 
-    @Value("${INIT_DIG_EMPLOYEE_REDIS_ENABLED:false}")
+    @Value("${INIT_DIG_EMPLOYEE_REDIS_ENABLED:true}")
     private boolean initDigEmployeeRedisEnabled;
 
     @Value("${load.to.redis.batchSize:1000}")

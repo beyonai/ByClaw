@@ -27,6 +27,12 @@ public class SandboxInfo {
      */
     private List<String> endpoints;
 
+    private String gatewayToken;
+
+    private Integer servicePort;
+
+    private String imageType;
+
     private Map<String, String> endpointHeaders;
 
     /**

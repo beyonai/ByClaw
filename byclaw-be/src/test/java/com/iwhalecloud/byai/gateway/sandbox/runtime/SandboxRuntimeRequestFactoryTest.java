@@ -92,6 +92,7 @@ class SandboxRuntimeRequestFactoryTest {
                 .build()))
             .build();
         SandboxServiceSpec spec = new SandboxServiceSpec();
+        spec.setServicePort(18789);
         PortSpec port = new PortSpec();
         port.setPort(8080);
         spec.setPorts(List.of(port));
@@ -101,7 +102,7 @@ class SandboxRuntimeRequestFactoryTest {
         assertThat(payload.get("entrypoint")).isEqualTo(List.of("node", "dist/index.js"));
         assertThat(payload.get("env")).isEqualTo(Map.of("A", "B"));
         assertThat(payload.get("resourceLimits")).isEqualTo(Map.of("cpu", "2"));
-        assertThat(payload.get("servicePort")).isEqualTo(8080);
+        assertThat(payload.get("servicePort")).isEqualTo(18789);
         assertThat(payload.get("sandboxType")).isEqualTo("byclaw");
 
         @SuppressWarnings("unchecked")
