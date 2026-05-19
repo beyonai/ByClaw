@@ -761,6 +761,15 @@ public class ToolManService {
         ssResourceArtifactService.removeArtifactsByResourceId(resourceId);
     }
 
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteResourceAndAllRel(String resourceCode) {
+        SsResource resource = resolveUniqueResourceByCode(resourceCode, "资源");
+        if (resource == null) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
+        }
+        deleteResourceAndAllRel(resource.getResourceId());
+    }
+
     /**
      * 删除资源前的业务校验。
      *

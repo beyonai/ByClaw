@@ -402,12 +402,13 @@ public class ToolManController {
      */
     @PostMapping("/deleteResourceAndAllRel")
     public ResponseUtil<Void> deleteResourceAndAllRel(@RequestBody(required = false) DeleteResourceQo request,
-        @Parameter(description = "资源ID", required = false) @RequestParam(value = "resourceId",
-            required = false) Long resourceId) {
+        @Parameter(description = "资源编码", required = false) @RequestParam(value = "resourceCode",
+            required = false) String resourceCode) {
         try {
-            Long finalResourceId = request != null && request.getResourceId() != null ? request.getResourceId()
-                : resourceId;
-            toolManService.deleteResourceAndAllRel(finalResourceId);
+            String finalResourceCode = request != null && StringUtils.isNotBlank(request.getResourceCode())
+                ? request.getResourceCode()
+                : resourceCode;
+            toolManService.deleteResourceAndAllRel(finalResourceCode);
             return ResponseUtil.success(I18nUtil.get("tool.resource.delete.success"));
         }
         catch (IllegalArgumentException e) {
@@ -417,7 +418,10 @@ public class ToolManController {
             return ResponseUtil.fail(e.getMessage());
         }
         catch (Exception e) {
-            logger.error("deleteResourceAndAllRel failed", e);
+            logger.error("deleteResourceAndAllRel failed, resourceCode={}",
+                request != null && StringUtils.isNotBlank(request.getResourceCode()) ? request.getResourceCode()
+                    : resourceCode,
+                e);
             return ResponseUtil
                 .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.delete.failed"));
         }
