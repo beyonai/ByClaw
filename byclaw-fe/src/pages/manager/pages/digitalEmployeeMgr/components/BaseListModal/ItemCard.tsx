@@ -213,18 +213,15 @@ const ItemCard = ({
               {item.description || intl.formatMessage({ id: 'itemCard.noDescription' })}
             </Ellipsis>
           </div>
-          <Space>
-            {/* {!isPlugin && ( */}
-            <>
-              <span>@{item.createUserName || '-'}</span>
-              <Divider type="vertical" />
-            </>
-            {/* )} */}
-            <span>
-              {intl.formatMessage({ id: 'itemCard.createdAt' })}{' '}
-              {item.createTime ? dayjs(item.createTime).format('YYYY-MM-DD HH:mm') : null}
-            </span>
-          </Space>
+          <div>
+            <span>@{item.createUserName || '-'}</span>
+            {item.createTime && (
+              <span style={{ marginLeft: 12 }}>
+                {intl.formatMessage({ id: 'itemCard.createdAt' })}{' '}
+                {item.createTime ? dayjs(item.createTime).format('YYYY-MM-DD HH:mm') : null}
+              </span>
+            )}
+          </div>
         </div>
         <div style={{ width: '100px', height: '28px' }}>
           <OperBtn isAdd={selectedIds.includes(item.id)} />
