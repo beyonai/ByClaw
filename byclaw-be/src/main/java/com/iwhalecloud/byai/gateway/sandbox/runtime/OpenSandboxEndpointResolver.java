@@ -10,7 +10,6 @@ import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxEndpoint;
 import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
 import com.iwhalecloud.byai.gateway.sandbox.spec.PortSpec;
-import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxImageType;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
 
 class OpenSandboxEndpointResolver {
@@ -27,10 +26,8 @@ class OpenSandboxEndpointResolver {
         if (instance == null) {
             return List.of();
         }
-        String imageType = spec != null ? spec.getImageType() : null;
         List<String> endpoints;
-        if (SandboxImageType.isOpenclaw(imageType)
-            && spec != null && spec.getServicePort() != null) {
+        if (spec != null && spec.getServicePort() != null) {
             endpoints = List.of(resolveEndpointForPort(instance, spec.getServicePort(), protocolForPrimaryPort(spec)));
         }
         else if (instance.getEndpoints() != null) {
@@ -71,37 +68,6 @@ class OpenSandboxEndpointResolver {
         if (headers != null && !headers.isEmpty()) {
             instance.setEndpointHeaders(headers);
         }
-    }
-
-    private String buildUiAgentEndpoint(String sandboxId, int servicePort) {
-        if (StringUtils.isBlank(sandboxId)) {
-            throw new IllegalArgumentException("sandboxId is required for uiagent endpoint");
-        }
-        String baseUrl = properties != null && properties.getOpensandbox() != null
-            ? properties.getOpensandbox().getUiAgentProxyBaseUrl() : null;
-        if (StringUtils.isBlank(baseUrl)) {
-            throw new IllegalArgumentException("byclaw.sandbox.opensandbox.ui-agent-proxy-base-url is required for uiagent");
-        }
-        String proxyEndpoint = StringUtils.removeEnd(baseUrl.trim(), "/")
-            + "/" + sandboxId + "/proxy/" + servicePort + "/";
-        return proxyEndpoint + "?gatewayUrl=" + toWebsocketGatewayUrl(proxyEndpoint);
-    }
-
-    private String toWebsocketGatewayUrl(String proxyEndpoint) {
-        if (StringUtils.startsWith(proxyEndpoint, "https://")) {
-            return "wss://" + StringUtils.removeStart(proxyEndpoint, "https://");
-        }
-        if (StringUtils.startsWith(proxyEndpoint, "http://")) {
-            return "ws://" + StringUtils.removeStart(proxyEndpoint, "http://");
-        }
-        return proxyEndpoint;
-    }
-
-    private int resolveRequiredServicePort(SandboxServiceSpec spec) {
-        if (spec == null || spec.getServicePort() == null || spec.getServicePort() <= 0) {
-            throw new IllegalArgumentException("spec.servicePort is required for uiagent");
-        }
-        return spec.getServicePort();
     }
 
     private String protocolForPort(SandboxServiceSpec spec, Integer servicePort) {
