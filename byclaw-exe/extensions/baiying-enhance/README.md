@@ -66,8 +66,7 @@
 `workspaceArchiveOnUnauthorized` 默认开启。默认 `workspaceArchiveBackend: "remote"`，插件会通过后端内部 API 把 workspace 上传到 MinIO，成功后才删除 `.openclaw` 下的 active workspace；上传失败时保留本地目录并输出 warn 日志，避免丢数据。后端地址来自 Redis 服务发现：
 
 - `BE_DOMAINNAME` 默认 `ByaiService`
-- Redis key：`byai_gateway:sd:instances:${BE_DOMAINNAME}`
-- API token：`BYAI_WORKSPACE_ARCHIVE_API_TOKEN`
+- Redis key：`byai_gateway:sd:instances:${BE_DOMAINNAME}`（`path_prefix` 为空时默认 `/byaiService`）
 
 远端对象位置固定为：
 

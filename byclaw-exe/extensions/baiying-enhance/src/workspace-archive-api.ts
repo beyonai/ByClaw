@@ -144,14 +144,6 @@ export function createWorkspaceArchiveApi(params: { logger?: LoggerLike } = {}):
     return baseUrl;
   };
 
-  const token = (): string => {
-    const value = process.env.BYAI_WORKSPACE_ARCHIVE_API_TOKEN?.trim();
-    if (!value) {
-      throw new Error("BYAI_WORKSPACE_ARCHIVE_API_TOKEN is not configured");
-    }
-    return value;
-  };
-
   const urlFor = async (p: { userCode: string; resourceId: string; archiveKind: WorkspaceArchiveKind; suffix?: string }): Promise<string> => {
     const url = new URL(`${await resolveBaseUrl()}/open/api/inner/v1/workspace-archive/dig-employees/${encodeURIComponent(p.resourceId)}${p.suffix ?? ""}`);
     url.searchParams.set("userCode", p.userCode);
@@ -161,9 +153,7 @@ export function createWorkspaceArchiveApi(params: { logger?: LoggerLike } = {}):
 
   const status = async ({ userCode, resourceId, archiveKind }: { userCode: string; resourceId: string; archiveKind: WorkspaceArchiveKind }) => {
     const normalizedUserCode = normalizeUserCode(userCode);
-    const response = await fetch(await urlFor({ userCode: normalizedUserCode, resourceId, archiveKind, suffix: "/status" }), {
-      headers: { "X-Byai-Archive-Token": token() },
-    });
+    const response = await fetch(await urlFor({ userCode: normalizedUserCode, resourceId, archiveKind, suffix: "/status" }));
     const bodyText = await response.text().catch(() => "");
     if (!response.ok) {
       throw new Error(`workspace archive status failed HTTP ${response.status}: ${bodyText}`);
@@ -185,10 +175,7 @@ export function createWorkspaceArchiveApi(params: { logger?: LoggerLike } = {}):
         const multipart = await buildMultipartBody(archive.filePath, archiveFileName(archiveKind));
         const response = await fetch(url, {
           method: "POST",
-          headers: {
-            ...multipart.headers,
-            "X-Byai-Archive-Token": token(),
-          },
+          headers: multipart.headers,
           body: multipart.body,
           duplex: "half",
         } as RequestInit & { duplex: "half" });
@@ -212,9 +199,7 @@ export function createWorkspaceArchiveApi(params: { logger?: LoggerLike } = {}):
       const scratch = await fs.mkdtemp(path.join(tmpdir(), "baiying-workspace-restore-"));
       const archiveFilePath = path.join(scratch, archiveFileName(archiveKind));
       try {
-        const response = await fetch(await urlFor({ userCode: normalizedUserCode, resourceId, archiveKind }), {
-          headers: { "X-Byai-Archive-Token": token() },
-        });
+        const response = await fetch(await urlFor({ userCode: normalizedUserCode, resourceId, archiveKind }));
         if (!response.ok || !response.body) {
           throw new Error(`workspace archive download failed HTTP ${response.status}: ${await responseTextSafe(response)}`);
         }
