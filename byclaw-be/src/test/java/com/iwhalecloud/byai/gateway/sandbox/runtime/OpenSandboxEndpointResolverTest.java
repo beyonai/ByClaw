@@ -41,22 +41,24 @@ class OpenSandboxEndpointResolverTest {
     }
 
     @Test
-    void resolve_uiAgentBuildsProxyEndpointFromConfiguredBaseUrl() {
+    void resolve_uiAgentUsesConfiguredPortEndpoints() {
         SandboxProperties properties = new SandboxProperties();
         properties.getOpensandbox().setUiAgentProxyBaseUrl("https://uiagent-proxy.example.test/sandboxes/");
 
         SandboxServiceSpec spec = new SandboxServiceSpec();
         spec.setImageType("uiagent");
         spec.setServicePort(3000);
+        spec.setPorts(List.of(port(3000, "https")));
 
         SandboxRuntimeInstance instance = SandboxRuntimeInstance.builder().sandboxId("sb-2").build();
         OpenSandboxClient client = mock(OpenSandboxClient.class);
+        when(client.getSandboxEndpoint("sb-2", 3000))
+            .thenReturn(new SandboxEndpoint("sandbox.example.test:8443/sandboxes/sb-2/proxy/3000", null));
 
         List<String> endpoints = new OpenSandboxEndpointResolver(client, properties).resolve(instance, spec);
 
-        assertThat(endpoints).containsExactly("https://uiagent-proxy.example.test/sandboxes/sb-2/proxy/3000/"
-            + "?gatewayUrl=wss://uiagent-proxy.example.test/sandboxes/sb-2/proxy/3000/");
-        verify(client, never()).getSandboxEndpoint("sb-2", 3000);
+        assertThat(endpoints).containsExactly("https://sandbox.example.test:8443/sandboxes/sb-2/proxy/3000");
+        verify(client).getSandboxEndpoint("sb-2", 3000);
     }
 
     @Test

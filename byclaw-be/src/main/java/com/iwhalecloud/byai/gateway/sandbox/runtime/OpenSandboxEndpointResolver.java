@@ -29,10 +29,7 @@ class OpenSandboxEndpointResolver {
         }
         String imageType = spec != null ? spec.getImageType() : null;
         List<String> endpoints;
-        if (SandboxImageType.isUiAgent(imageType)) {
-            endpoints = List.of(buildUiAgentEndpoint(instance.getSandboxId(), resolveRequiredServicePort(spec)));
-        }
-        else if (SandboxImageType.isOpenclaw(imageType)
+        if (SandboxImageType.isOpenclaw(imageType)
             && spec != null && spec.getServicePort() != null) {
             endpoints = List.of(resolveEndpointForPort(instance, spec.getServicePort(), protocolForPrimaryPort(spec)));
         }
