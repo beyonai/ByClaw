@@ -7,7 +7,9 @@
 - OpenClaw 工具：通过 Gateway 的 `POST /tools/invoke`
 - 直接 HTTP 路由：`POST /plugins/byclaw-sqlite/sqlExecute`
 
-两种入口都会复用同一套 SQLite 执行服务，当前配置目标库为仓库下的 `.openclaw/byclaw.sqlite`。
+两种入口都会复用同一套 SQLite 执行服务。默认数据库路径为
+`$OPENCLAW_STATE_DIR/memory/byclaw.sqlite`；未设置 `OPENCLAW_STATE_DIR` 时使用
+`~/.openclaw/memory/byclaw.sqlite`。显式配置 `dbPath` 时，绝对路径直接使用，相对路径按插件目录解析。
 
 ## 请求体
 

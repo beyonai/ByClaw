@@ -77,7 +77,6 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
             data.setEndpoint(CollectionUtils.isNotEmpty(endpoints) ? endpoints.getFirst() : "");
             data.setEndpoints(endpoints);
             data.setServicePort(info.getServicePort());
-            data.setImageType(info.getImageType());
             data.setEndpointHeaders(info.getEndpointHeaders());
             data.setSandboxId(info.getSandboxId());
             data.setTimeoutSeconds(info.getTimeoutSeconds());
@@ -138,7 +137,6 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
                 .sandboxType(sandboxType)
                 .endpoints(endpoints)
                 .servicePort(spec.getServicePort())
-                .imageType(spec.getImageType())
                 .endpointHeaders(runtimeProvider.resolveEndpointHeaders(instance))
                 .timeoutSeconds(timeoutSeconds)
                 .remoteExpiresAt(resolveRemoteExpiresAt(instance, timeoutSeconds))

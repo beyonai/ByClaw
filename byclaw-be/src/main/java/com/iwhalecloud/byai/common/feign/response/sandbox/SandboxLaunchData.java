@@ -26,9 +26,6 @@ public class SandboxLaunchData {
     /** Primary service port from sandbox spec. */
     private Integer servicePort;
 
-    /** Image endpoint strategy from sandbox spec. */
-    private String imageType;
-
     /** Headers required by endpoint access, if any. */
     private Map<String, String> endpointHeaders;
 
