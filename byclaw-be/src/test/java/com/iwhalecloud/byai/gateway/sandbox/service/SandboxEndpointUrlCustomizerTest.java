@@ -23,4 +23,12 @@ class SandboxEndpointUrlCustomizerTest {
         assertThat(customizer.toAccessEndpoint("https://host:8443/sandboxes/sb-1/proxy/3000/"))
             .isEqualTo("https://host:8443/sandboxes/sb-1/proxy/3000/chat?token=ztesoft");
     }
+
+    @Test
+    void bindToken_replacesExistingTokenOnAccessEndpoint() {
+        SandboxEndpointUrlCustomizer customizer = new SandboxEndpointUrlCustomizer("new-token");
+
+        assertThat(customizer.bindToken("http://host/proxy/18789/chat?token=old-token&foo=bar"))
+            .isEqualTo("http://host/proxy/18789/chat?foo=bar&token=new-token");
+    }
 }

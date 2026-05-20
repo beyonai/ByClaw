@@ -1,4 +1,4 @@
-package com.iwhalecloud.byai.state.application.service.job;
+package com.iwhalecloud.byai.gateway.sandbox.job;
 
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLifecycleJobReport;

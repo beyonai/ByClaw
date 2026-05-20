@@ -8,6 +8,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -81,7 +82,8 @@ class WhaleAgentSandboxRuntimeProviderTest {
         assertThat(payload.get("metadata")).isEqualTo(Map.of(
             "userCode", "user001",
             "serviceKey", "byclaw-code-agent",
-            "idempotencyKey", "idem-1"));
+            "idempotencyKey", "idem-1",
+            "gateway_token", "ztesoft"));
 
         @SuppressWarnings("unchecked")
         Map<String, Object> image = (Map<String, Object>) payload.get("image");
@@ -123,17 +125,23 @@ class WhaleAgentSandboxRuntimeProviderTest {
     void heartbeat_callsRenewWithSandboxIdAndDuration() {
         FeignWhaleAgentService feignWhaleAgentService = mock(FeignWhaleAgentService.class);
         WhaleAgentSandboxRuntimeProvider provider = new WhaleAgentSandboxRuntimeProvider(feignWhaleAgentService);
-        when(feignWhaleAgentService.renewSandboxTimeout(any())).thenReturn(KnowledgeResponse.success(new SandboxRenewResult()));
+        SandboxRenewResult renewResult = new SandboxRenewResult();
+        renewResult.setExpiresAt("2026-05-20T08:20:25.357000Z");
+        when(feignWhaleAgentService.renewSandboxTimeout(any())).thenReturn(KnowledgeResponse.success(renewResult));
 
-        provider.heartbeat("user001", "byclaw-code-agent", SandboxInfo.builder()
+        SandboxInfo sandboxInfo = SandboxInfo.builder()
             .sandboxId("846c09b3-efe2-47ff-bd31-d9a26f6a2f2f")
             .timeoutSeconds(300)
-            .build());
+            .build();
+
+        provider.heartbeat("user001", "byclaw-code-agent", sandboxInfo);
 
         ArgumentCaptor<RenewSandboxTimeoutRequest> requestCaptor = ArgumentCaptor.forClass(RenewSandboxTimeoutRequest.class);
         verify(feignWhaleAgentService).renewSandboxTimeout(requestCaptor.capture());
         assertThat(requestCaptor.getValue().getSandboxId()).isEqualTo("846c09b3-efe2-47ff-bd31-d9a26f6a2f2f");
         assertThat(requestCaptor.getValue().getDuration()).isEqualTo(300);
+        assertThat(sandboxInfo.getRemoteExpiresAt()).isEqualTo(
+            java.util.Date.from(OffsetDateTime.parse("2026-05-20T08:20:25.357000Z").toInstant()));
     }
 
     @Test
@@ -170,10 +178,13 @@ class WhaleAgentSandboxRuntimeProviderTest {
         when(feignWhaleAgentService.listSandboxes(any()))
             .thenReturn(KnowledgeResponse.success(result));
 
+        newer.setMetadata(Map.of("gateway_token", "persisted-token"));
+
         Optional<SandboxRuntimeInstance> reusable = provider.findReusable("user001", "byclaw-code-agent");
 
         assertThat(reusable).isPresent();
         assertThat(reusable.get().getSandboxId()).isEqualTo("sandbox-newer");
+        assertThat(reusable.get().getMetadata()).containsEntry("gateway_token", "persisted-token");
         verify(feignWhaleAgentService).listSandboxes(
             new WhaleAgentListSandboxesRequest(1, 100, Map.of("userCode", "user001", "serviceKey", "byclaw-code-agent")));
     }
