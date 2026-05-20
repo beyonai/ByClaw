@@ -149,6 +149,7 @@ export const getMCPToolsRenderConfig = (
     {
       type: 'table',
       label: intl.formatMessage({ id: 'skillDetail.toolList' }),
+      tableType: 'tools',
       columns: [
         { dataIndex: 'name', title: intl.formatMessage({ id: 'skillDetail.toolName' }) },
         {
