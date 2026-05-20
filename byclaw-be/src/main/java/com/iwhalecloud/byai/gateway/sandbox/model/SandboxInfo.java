@@ -31,8 +31,6 @@ public class SandboxInfo {
 
     private Integer servicePort;
 
-    private String imageType;
-
     private Map<String, String> endpointHeaders;
 
     /**
