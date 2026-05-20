@@ -23,4 +23,5 @@ public interface SsResourceRelDetailService extends IService<SsResourceRelDetail
      */
     List<SsResourceRelDetailDTO> querySkillsForOpenApi(Long resourceId);
 
+        List<SsResourceRelDetail> find(Long resourceId, Long relResourceId);
 }
