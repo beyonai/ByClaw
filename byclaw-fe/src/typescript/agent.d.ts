@@ -86,6 +86,8 @@ export type IAgent = {
 
   // 置顶
   isTop: string;
+  canSetDefault?: boolean;
+  isDefault?: boolean;
 
   // 其他可选属性
   // homeType?: string;
@@ -119,4 +121,5 @@ export type IAgentCache = IAgent & {
   canApplyUse?: boolean;
   canAuditUse?: boolean;
   canSetDefault?: boolean;
+  isDefault?: boolean;
 };

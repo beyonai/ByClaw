@@ -55,6 +55,7 @@ import { DEFAULT_PERSONALITY_DEFINITION } from '../personalityDefinitionDefault'
 import RobotModal from './RobotModal';
 import { normalizeCatalogTree } from '@/utils/catalog';
 import { DEFAULT_AGENT_TYPE_OPTIONS, DEFAULT_TEMPLATE_DATA } from '../../constants';
+import Ellipsis from '@/pages/manager/components/Ellipsis';
 
 const { TextArea } = Input;
 
@@ -443,6 +444,7 @@ const ConfigForm = (props) => {
   const [inputTag, setInputTag] = useState('');
   const [selectedTags, setSelectedTags] = useState([]);
   const [uploadImgs, setUploadImgs] = useState([]);
+  const [avatarUploadLoading, setAvatarUploadLoading] = useState(false);
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
   const [exampleOpen, setExampleOpen] = useState(false);
   const [memoryModalOpen, setMemoryModalOpen] = useState(false);
@@ -806,10 +808,10 @@ const ConfigForm = (props) => {
       roleObj.roleAttributes = current.roleAttributes || current.workStandard || '';
 
       // 将所有配置存成 JSON 放到 corePersonaDefinition 字段（数组格式）
-      const corePersonaDefinition: Array<{ name: string; key: string; value: string }> = [];
+      const corePersonaDefinition: Array<{ name: string; nameEn?: string; key: string; value: string }> = [];
 
       // 获取所有 prompt 字段的名称映射（从模板数据中获取）
-      const fieldNameMap: Record<string, { name: string; key: string }> = {};
+      const fieldNameMap: Record<string, { name: string; nameEn?: string; key: string }> = {};
 
       // 尝试从模板数据中获取字段映射
       if (templateData && Array.isArray(templateData)) {
@@ -817,6 +819,7 @@ const ConfigForm = (props) => {
           if (item.paramEnName && item.paramName) {
             fieldNameMap[item.paramEnName] = {
               name: item.paramName,
+              nameEn: item.paramEnName,
               key: item.paramEnName,
             };
           }
@@ -824,13 +827,16 @@ const ConfigForm = (props) => {
       }
 
       // 从现有的 corePersonaDefinition 中获取 name 信息（用于编辑时保持原有值）
-      const existingNameMap: Record<string, string> = {};
+      const existingMetaMap: Record<string, { name?: string; nameEn?: string }> = {};
       try {
         const existingData = JSON.parse(current.corePersonaDefinition || '[]');
         if (Array.isArray(existingData)) {
           existingData.forEach((item: any) => {
             if (item && item.key) {
-              existingNameMap[item.key] = item.name || item.key;
+              existingMetaMap[item.key] = {
+                name: item.name,
+                nameEn: item.nameEn,
+              };
             }
           });
         }
@@ -841,17 +847,20 @@ const ConfigForm = (props) => {
       // 遍历所有 tab，将值存入 corePersonaDefinition
       allTabs.forEach((tab) => {
         const fieldValue = current[tab.key];
-        if (fieldValue) {
-          const fieldInfo = fieldNameMap[tab.key];
-          const key = fieldInfo?.key || tab.key;
-          const name = existingNameMap[key] || fieldInfo?.name || tab.name || tab.key;
+        const fieldInfo = fieldNameMap[tab.key];
+        const key = fieldInfo?.key || tab.key;
+        const existingMeta = existingMetaMap[key] || {};
+        const item: { name: string; nameEn?: string; key: string; value: string } = {
+          name: existingMeta.name || fieldInfo?.name || tab.name || tab.key,
+          key,
+          value: fieldValue || '',
+        };
 
-          corePersonaDefinition.push({
-            name,
-            key,
-            value: fieldValue,
-          });
+        if (existingMeta.nameEn || fieldInfo?.nameEn) {
+          item.nameEn = existingMeta.nameEn || fieldInfo?.nameEn;
         }
+
+        corePersonaDefinition.push(item);
       });
 
       const corePersonaDefinitionJson = JSON.stringify(corePersonaDefinition);
@@ -1090,7 +1099,7 @@ const ConfigForm = (props) => {
     },
   ];
 
-  const onAvatarClick = (url) => () => {
+  const onAvatarClick = (url, onLoadCallback?) => () => {
     // 如果url是对象，表示还在上传中，不进行处理
     if (typeof url !== 'string') {
       return;
@@ -1100,6 +1109,18 @@ const ConfigForm = (props) => {
       avatar: url,
     };
     setAvatar(url);
+
+    // 如果有回调函数，等待图片加载完成后执行
+    if (onLoadCallback) {
+      const img = new window.Image();
+      img.onload = () => {
+        onLoadCallback();
+      };
+      img.onerror = () => {
+        onLoadCallback();
+      };
+      img.src = getAvatarUrl(url);
+    }
   };
 
   const avatarMenuRender = (menu) => (
@@ -1123,6 +1144,11 @@ const ConfigForm = (props) => {
               height={40}
               defaultSrc={getAvatarUrl()}
             />
+            {it.localUrl && avatarUploadLoading && (
+              <div className={pStyles.avatarLoading}>
+                <Spin size="small" />
+              </div>
+            )}
           </figure>
         ))}
       </div>
@@ -1143,23 +1169,39 @@ const ConfigForm = (props) => {
       // 先显示本地图片
       setUploadImgs((v) => [...v, { localUrl }]);
 
-      const res = await compressImgFileAndUpload({ file: img });
-      if (res?.datasetLogosUrl) {
-        const { datasetLogosUrl } = res;
+      // 开始上传，设置loading状态
+      setAvatarUploadLoading(true);
 
-        setUploadImgs((v) => {
-          const idx = v.findIndex((x) => typeof x !== 'string' && x.localUrl === localUrl);
+      try {
+        const res = await compressImgFileAndUpload({ file: img });
+        if (res && res.datasetLogosUrl) {
+          const { datasetLogosUrl } = res;
 
-          if (idx !== -1) {
-            window.URL.revokeObjectURL(v[idx].localUrl);
-            v[idx] = datasetLogosUrl;
-          }
-          return [...v];
-        });
+          setUploadImgs((v) => {
+            const idx = v.findIndex((x) => typeof x !== 'string' && x.localUrl === localUrl);
 
-        return;
+            if (idx !== -1) {
+              window.URL.revokeObjectURL(v[idx].localUrl);
+              v[idx] = datasetLogosUrl;
+            }
+            return [...v];
+          });
+
+          // 等待新头像图片加载完成后再关闭loading
+          onAvatarClick(datasetLogosUrl, () => {
+            setAvatarUploadLoading(false);
+          })();
+
+          return;
+        }
+        message.error(res?.msg || intl.formatMessage({ id: 'employeeDetail.uploadFail' }));
+        // 上传失败也需要关闭loading
+        setAvatarUploadLoading(false);
+      } catch (error) {
+        message.error(intl.formatMessage({ id: 'employeeDetail.uploadFail' }));
+        // 发生异常也需要关闭loading
+        setAvatarUploadLoading(false);
       }
-      message.error(res?.msg || intl.formatMessage({ id: 'employeeDetail.uploadFail' }));
     }
   };
 
@@ -1236,8 +1278,15 @@ const ConfigForm = (props) => {
                 menu={{ items: avatarMenu, onClick: handleAvatarMenuClick }}
               >
                 <div>
-                  <figure className={pStyles.currentAvatar}>
+                  <figure
+                    className={classnames(pStyles.currentAvatar, { [pStyles.avatarLoadingWrap]: avatarUploadLoading })}
+                  >
                     <Image src={getAvatarUrl(avatar)} width="100%" />
+                    {avatarUploadLoading && (
+                      <div className={pStyles.avatarLoadingOverlay}>
+                        <Spin size="small" />
+                      </div>
+                    )}
                   </figure>
                 </div>
               </Dropdown>
@@ -1719,6 +1768,84 @@ const ConfigForm = (props) => {
             {/* )} */}
             {/* {digitalType === 'FROM_MANUALLY' && ( */}
             <>
+              {/* 配置知识 */}
+              {employeeType !== '005' && (
+                <div className={styles.knowledgeSection}>
+                  <div className={styles.sectionHeader}>
+                    <span className={styles.sectionTitle}>
+                      {intl.formatMessage({
+                        id: 'employeeDetail.configureKnowledge',
+                      })}
+                    </span>
+                    <Button
+                      type="link"
+                      size="small"
+                      onClick={() => {
+                        showBaseList('006');
+                      }}
+                      disabled={isReadOnly}
+                    >
+                      + {intl.formatMessage({ id: 'common.plus' })}
+                    </Button>
+                  </div>
+
+                  {/* 知识库类别列表 */}
+                  {knowledgeBases.map((category, i) => (
+                    <div key={[category.id, i].join()} className={styles.knowledgeCategory}>
+                      <div className={`${styles.knowledgeItems} ${category.expanded ? styles.expanded : ''}`}>
+                        {category.items.length > 0
+                          ? category.items.map((item, i) => (
+                              <Card
+                                key={[item.id, i].join()}
+                                className={classnames(styles.configCard, styles.knowledgeCard)}
+                              >
+                                <div className={styles.knowledgeContent}>
+                                  <AntdIcon type="icon-zhishiku2" className={styles.fontSize36MarginRight12} />
+                                  <div className={styles.knowledgeInfo}>
+                                    <div className={styles.knowledgeDetails}>
+                                      <div className={styles.knowledgeHeader}>
+                                        <div className={styles.knowledgeName} title={item.resourceName}>
+                                          {item.resourceName}
+                                        </div>
+                                        <Tag size="small" className={styles.knowledgeTag}>
+                                          {knowledgeTypeLabelMap[item.grantResourceType] ||
+                                            knowledgeTypeLabelMap[item.resourceBizType] ||
+                                            knowledgeTypeLabelMap[category.id] ||
+                                            category.title}
+                                        </Tag>
+                                      </div>
+                                      <div className={styles.knowledgeDescription}>{item.description}</div>
+                                    </div>
+                                  </div>
+                                  {!isReadOnly && (
+                                    <AntdIcon
+                                      type="icon-a-Deleteshanchu"
+                                      onClick={() => {
+                                        setKnowledgeBases(
+                                          knowledgeBases.map((it) => {
+                                            if (it.id === category.id) {
+                                              return {
+                                                ...it,
+                                                items: it.items.filter((i) => i.resourceId !== item.resourceId),
+                                              };
+                                            }
+                                            return it;
+                                          })
+                                        );
+                                      }}
+                                      disabled={isReadOnly}
+                                    />
+                                  )}
+                                </div>
+                              </Card>
+                            ))
+                          : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* 配置工具 */}
               {employeeType !== '006' && (
                 <div className={styles.skillsSection}>
@@ -1810,84 +1937,6 @@ const ConfigForm = (props) => {
                       );
                     })}
                   </div>
-                </div>
-              )}
-
-              {/* 配置知识 */}
-              {employeeType !== '005' && (
-                <div className={styles.knowledgeSection}>
-                  <div className={styles.sectionHeader}>
-                    <span className={styles.sectionTitle}>
-                      {intl.formatMessage({
-                        id: 'employeeDetail.configureKnowledge',
-                      })}
-                    </span>
-                    <Button
-                      type="link"
-                      size="small"
-                      onClick={() => {
-                        showBaseList('006');
-                      }}
-                      disabled={isReadOnly}
-                    >
-                      + {intl.formatMessage({ id: 'common.plus' })}
-                    </Button>
-                  </div>
-
-                  {/* 知识库类别列表 */}
-                  {knowledgeBases.map((category, i) => (
-                    <div key={[category.id, i].join()} className={styles.knowledgeCategory}>
-                      <div className={`${styles.knowledgeItems} ${category.expanded ? styles.expanded : ''}`}>
-                        {category.items.length > 0
-                          ? category.items.map((item, i) => (
-                              <Card
-                                key={[item.id, i].join()}
-                                className={classnames(styles.configCard, styles.knowledgeCard)}
-                              >
-                                <div className={styles.knowledgeContent}>
-                                  <AntdIcon type="icon-zhishiku2" className={styles.fontSize36MarginRight12} />
-                                  <div className={styles.knowledgeInfo}>
-                                    <div className={styles.knowledgeDetails}>
-                                      <div className={styles.knowledgeHeader}>
-                                        <div className={styles.knowledgeName} title={item.resourceName}>
-                                          {item.resourceName}
-                                        </div>
-                                        <Tag size="small" className={styles.knowledgeTag}>
-                                          {knowledgeTypeLabelMap[item.grantResourceType] ||
-                                            knowledgeTypeLabelMap[item.resourceBizType] ||
-                                            knowledgeTypeLabelMap[category.id] ||
-                                            category.title}
-                                        </Tag>
-                                      </div>
-                                      <div className={styles.knowledgeDescription}>{item.description}</div>
-                                    </div>
-                                  </div>
-                                  {!isReadOnly && (
-                                    <AntdIcon
-                                      type="icon-a-Deleteshanchu"
-                                      onClick={() => {
-                                        setKnowledgeBases(
-                                          knowledgeBases.map((it) => {
-                                            if (it.id === category.id) {
-                                              return {
-                                                ...it,
-                                                items: it.items.filter((i) => i.resourceId !== item.resourceId),
-                                              };
-                                            }
-                                            return it;
-                                          })
-                                        );
-                                      }}
-                                      disabled={isReadOnly}
-                                    />
-                                  )}
-                                </div>
-                              </Card>
-                            ))
-                          : null}
-                      </div>
-                    </div>
-                  ))}
                 </div>
               )}
 
@@ -2576,7 +2625,15 @@ const ConfigForm = (props) => {
                               {item.label}
                               {/* <Tag>{item.value}</Tag> */}
                             </div>
-                            <div className={styles.bundledSkillModalCardDesc}>{item.description || '-'}</div>
+                            <Ellipsis
+                              lines={1}
+                              tooltip
+                              tooltipProps={{
+                                overlayStyle: { maxWidth: 500, overflowWrap: 'break-word', wordWrap: 'break-word' },
+                              }}
+                            >
+                              {item.description || '-'}
+                            </Ellipsis>
                           </div>
                           <Button
                             className={classnames(styles.actionButton, {

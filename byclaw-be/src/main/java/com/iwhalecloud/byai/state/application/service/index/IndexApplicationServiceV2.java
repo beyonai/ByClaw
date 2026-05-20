@@ -3,8 +3,13 @@ package com.iwhalecloud.byai.state.application.service.index;
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.common.cache.ShareBfmUser;
+import com.iwhalecloud.byai.common.constants.resource.DigitalEmployType;
+import com.iwhalecloud.byai.common.constants.resource.OwnerType;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.state.domain.agent.enums.OrgFilterType;
+import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
+import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.qo.index.AuthResourceQo;
 import com.iwhalecloud.byai.manager.qo.index.DiscoverQo;
 import com.iwhalecloud.byai.manager.qo.index.HotQo;
@@ -77,6 +82,11 @@ public class IndexApplicationServiceV2 {
     @Autowired
     private SsResourceCatalogService ssResourceCatalogService;
 
+    @Autowired
+    private SuasSuperassistService suasSuperassistService;
+
+    private static final String SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX = "_main";
+
     /**
      * 查询当前用户创建和订阅的数字员工分页列表。
      *
@@ -95,8 +105,10 @@ public class IndexApplicationServiceV2 {
         List<AuthDigitEmployVo> authDigitEmployVos = indexService.selectAuthDigitEmploy(myAuthEmployQo);
 
         // 为每个数字员工设置是否有记忆（优化：批量查询）
+        Long defaultDigitalEmployeeId = resolveCurrentUserDefaultDigitalEmployeeId();
         for (AuthDigitEmployVo authDigitEmployVo : authDigitEmployVos) {
             this.setIsMyCreate(authDigitEmployVo);
+            this.fillDefaultAndRuntimeTag(authDigitEmployVo, defaultDigitalEmployeeId);
         }
 
         PageInfo<AuthDigitEmployVo> pageInfo = PageHelperUtil.toPageInfo(page);
@@ -125,6 +137,79 @@ public class IndexApplicationServiceV2 {
     }
 
     /**
+     * 左侧“全部列表项”的默认关系来自 suas_superassist.default_dig_employee_id。
+     * 这里在服务层按当前用户查一次并回填列表，避免把超级助手表关联散落到列表 SQL 中。
+     *
+     * @return 当前用户绑定的默认数字员工资源 ID
+     */
+    private Long resolveCurrentUserDefaultDigitalEmployeeId() {
+        Long defaultDigEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
+        if (defaultDigEmployeeId != null) {
+            return defaultDigEmployeeId;
+        }
+        Long assistantId = CurrentUserHolder.getAssistantId();
+        if (assistantId == null || assistantId <= 0) {
+            assistantId = CurrentUserHolder.getCurrentUserId();
+        }
+        if (assistantId == null || assistantId <= 0) {
+            return null;
+        }
+        SuasSuperassist suasSuperassist = suasSuperassistService.findById(assistantId);
+        return suasSuperassist == null ? null : suasSuperassist.getDefaultDigEmployeeId();
+    }
+
+    /**
+     * 回填左侧列表专用的运行时展示字段：
+     * 1. isDefault/canSetDefault 只根据当前用户默认数字员工 ID 判断；
+     * 2. tagName 不再依赖扩展表落库值，按 ownerType/resourceCode/agentType 运行时计算。
+     */
+    private void fillDefaultAndRuntimeTag(AuthDigitEmployVo authDigitEmployVo, Long defaultDigitalEmployeeId) {
+        if (authDigitEmployVo == null) {
+            return;
+        }
+        boolean isDefault = defaultDigitalEmployeeId != null
+            && Objects.equals(authDigitEmployVo.getId(), defaultDigitalEmployeeId);
+        authDigitEmployVo.setIsDefault(isDefault);
+        authDigitEmployVo.setCanSetDefault(!isDefault);
+        authDigitEmployVo.setTagName(buildRuntimeDigitalEmployeeTagName(authDigitEmployVo.getOwnerType(),
+            authDigitEmployVo.getResourceCode(), authDigitEmployVo.getAgentType()));
+    }
+
+    private void fillRuntimeTag(DigitEmployMarketVo digitEmployMarketVo) {
+        if (digitEmployMarketVo == null) {
+            return;
+        }
+        digitEmployMarketVo.setTagName(buildRuntimeDigitalEmployeeTagName(digitEmployMarketVo.getOwnerType(),
+            digitEmployMarketVo.getResourceCode(), digitEmployMarketVo.getAgentType()));
+    }
+
+    /**
+     * 数字员工标签统一运行时生成：个人侧按超级助手/个人助理展示，企业侧按 agentType 展示类型。
+     */
+    private String buildRuntimeDigitalEmployeeTagName(String ownerType, String resourceCode, String agentType) {
+        if (OwnerType.PERSONAL.equals(ownerType) || OwnerType.PERSONAL_DEFAULT.equals(ownerType)) {
+            return StringUtils.endsWith(resourceCode, SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX)
+                ? I18nUtil.get("digemployee.tag.super.assistant")
+                : I18nUtil.get("digemployee.tag.personal.assistant");
+        }
+        if (OwnerType.ENTERPRISE.equals(ownerType)) {
+            DigitalEmployType digitalEmployType = DigitalEmployType.getByCode(agentType);
+            return digitalEmployType == null ? null : I18nUtil.get(getEnterpriseDigitalEmployeeTagNameKey(digitalEmployType));
+        }
+        return null;
+    }
+
+    private String getEnterpriseDigitalEmployeeTagNameKey(DigitalEmployType digitalEmployType) {
+        return switch (digitalEmployType) {
+            case AGENT_TYPE_ASSISTANT -> "digemployee.tag.agent.assistant";
+            case AGENT_TYPE_DATA -> "digemployee.tag.agent.data";
+            case AGENT_TYPE_QA -> "digemployee.tag.agent.qa";
+            case AGENT_TYPE_DEBUG -> "digemployee.tag.agent.debug";
+            case AGENT_TYPE_CODE -> "digemployee.tag.agent.code";
+        };
+    }
+
+    /**
      * 查询我的常用数字员工列表。 包含红名单授权且不在黑名单中的数字员工，（按用户近 90 天使用频次降序排列）
      *
      * @param myUsualQo 查询条件，包含用户ID和组织ID列表
@@ -143,10 +228,11 @@ public class IndexApplicationServiceV2 {
 
         PageInfo<AuthDigitEmployVo> pageInfo = PageHelperUtil.toPageInfo(page);
 
-        // 标记是否我常用的
+        Long defaultDigitalEmployeeId = resolveCurrentUserDefaultDigitalEmployeeId();
         List<AuthDigitEmployVo> authDigitEmployVos = pageInfo.getList();
         for (AuthDigitEmployVo authDigitEmployVo : authDigitEmployVos) {
             this.setIsMyCreate(authDigitEmployVo);
+            this.fillDefaultAndRuntimeTag(authDigitEmployVo, defaultDigitalEmployeeId);
         }
 
         return pageInfo;
@@ -174,8 +260,10 @@ public class IndexApplicationServiceV2 {
         // 为每个数字员工添加知识和技能统计信息
         this.fillResourceStatsForAuthDigitEmployVos(authDigitEmployVos);
 
+        Long defaultDigitalEmployeeId = resolveCurrentUserDefaultDigitalEmployeeId();
         for (AuthDigitEmployVo authDigitEmployVo : authDigitEmployVos) {
             this.setIsMyCreate(authDigitEmployVo);
+            this.fillDefaultAndRuntimeTag(authDigitEmployVo, defaultDigitalEmployeeId);
         }
 
         return pageInfo;
@@ -260,6 +348,7 @@ public class IndexApplicationServiceV2 {
         for (DigitEmployMarketExtVo digitEmployMarketVo : discoverList) {
             // 设置权限状态
             this.buildPermissionStatus(digitEmployMarketVo);
+            this.fillRuntimeTag(digitEmployMarketVo);
 
             digitEmployMarketVoMap.put(digitEmployMarketVo.getId(), digitEmployMarketVo);
         }

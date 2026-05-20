@@ -26,6 +26,7 @@ import type { IExtParams, IMessage } from '@/typescript/message';
 import type { ISession } from '@/typescript/session';
 
 import { IMessageState } from '@/constants/message';
+import { agentTypeMap, ROOT_AGENT_ID } from '@/constants/agent';
 import { IState } from '@/models/useEmployees';
 import { IMessageListItem } from '@/typescript/message';
 import { RichInputResourceList } from '@/components/QueryInput/RichInput';
@@ -147,7 +148,7 @@ function useChat(props: IProps) {
     messageHandler,
     resComIdsHandler,
     textHandler,
-    rewriteQuestionHandler
+    rewriteQuestionHandler,
   } = useHandler({ addSession, setSessionId });
 
   useEffect(() => {
@@ -204,7 +205,10 @@ function useChat(props: IProps) {
     // 追问 RESUME：当前列表末尾常为「助手仍在回答」，需允许继续走与底部输入框一致的发送流程
     if (!isResumeChat) {
       const lastMessage = last(messageList);
-      if (lastMessage?.messageState && [IMessageState.Query, IMessageState.Answer].includes(lastMessage?.messageState)) {
+      if (
+        lastMessage?.messageState &&
+        [IMessageState.Query, IMessageState.Answer].includes(lastMessage?.messageState)
+      ) {
         return false;
       }
     }
@@ -220,8 +224,16 @@ function useChat(props: IProps) {
 
     let _queryQuestion = queryQuestion;
 
-    const _agentId = (get(restPayload, 'agentId') as string | undefined) || agentId;
+    // 用户在对话首页未显式 @ 任何数字员工，或先 @ 后又删掉了，仍兜底走默认数字员工，避免回退到通用聊天。
+    const _defaultDigEmployeeId = userInfo?.defaultDigEmployeeId ? `${userInfo.defaultDigEmployeeId}` : '';
+    let _agentId = (get(restPayload, 'agentId') as string | undefined) || agentId || _defaultDigEmployeeId;
+    if (_agentId === ROOT_AGENT_ID) {
+      _agentId = _defaultDigEmployeeId;
+    }
     let _agentType = (get(restPayload, 'agentType') as IAgentType | undefined) || agentType;
+    if (!get(restPayload, 'agentId') && !agentId && _defaultDigEmployeeId) {
+      _agentType = agentTypeMap.agent;
+    }
     if (inheritQryMsgId) {
       // 如果传了inheritQryMsgId，表示是基于那个发送的消息再次发送，这个时候要取到上一次发送的agentType和resourceList
       const lastTimeQryMsg = messageListRef.current.find((item) => item.msgId === inheritQryMsgId);

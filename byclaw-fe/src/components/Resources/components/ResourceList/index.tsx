@@ -1,5 +1,5 @@
 import React, { useCallback, useState, useEffect, useMemo } from 'react';
-import { Spin } from 'antd';
+import { Spin, message } from 'antd';
 import { useIntl } from '@umijs/max';
 import InfiniteScroll from '@/components/InfiniteScroll';
 import Empty from '@/components/Empty';
@@ -118,16 +118,27 @@ const ResourceList: React.FC<ResourceListProps> = ({
       return deleteResource({ resourceId: params.resourceId });
     },
     onSuccess: () => {
-      import('antd').then(({ message }) => {
-        message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
-        onRefresh();
-      });
+      message.success(intl.formatMessage({ id: 'common.deactivateSuccess' }));
+      onRefresh();
     },
   });
 
   useEffect(() => {
     getList({ pageIndex: 1 });
   }, [baseResourceBizTypeList, activeTab, catalogId, dropdownParam, getList]);
+
+  // 监听资源操作事件，刷新列表
+  useEffect(() => {
+    const handleResourceChanged = () => {
+      onRefresh();
+    };
+    window.addEventListener('resourceRestored', handleResourceChanged);
+    window.addEventListener('resourceDeleted', handleResourceChanged);
+    return () => {
+      window.removeEventListener('resourceRestored', handleResourceChanged);
+      window.removeEventListener('resourceDeleted', handleResourceChanged);
+    };
+  }, [onRefresh]);
 
   const loadMore = useCallback(() => {
     if (loading || !hasMore) return;

@@ -134,6 +134,15 @@ export type DigEmployeeChangeSubscriber = {
   stop: () => Promise<void>;
 };
 
+export function hasDigEmployeePubSubRedisConfig(params: {
+  host?: string;
+  port: number;
+  db: number;
+  channel: string;
+}): boolean {
+  return !!params.host?.trim() && !Number.isNaN(params.port) && !Number.isNaN(params.db) && !!params.channel.trim();
+}
+
 export function createDigEmployeeChangeSubscriber(params: {
   logger: LoggerLike;
   channel: string;
@@ -143,7 +152,6 @@ export function createDigEmployeeChangeSubscriber(params: {
   getAuthorizedIds: () => Set<string> | undefined;
   flushNow: (opts?: AgentFlushNowOptions) => Promise<void>;
 }): DigEmployeeChangeSubscriber {
-  const userCode = process.env.USER_CODE?.trim() || "";
   const host = process.env.REDIS_HOST?.trim();
   const port = Number.parseInt(process.env.REDIS_PORT?.trim() || "", 10);
   const db = Number.parseInt(process.env.REDIS_DATABASE?.trim() || "", 10);
@@ -154,6 +162,7 @@ export function createDigEmployeeChangeSubscriber(params: {
 
   let subscriber: Redis | null = null;
   let stopped = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let strictAuthWarned = false;
   const lastChangedAtByResourceId = new Map<string, number>();
   const pendingQueue: NormalizedDigEmployeeChangeEvent[] = [];
@@ -209,10 +218,15 @@ export function createDigEmployeeChangeSubscriber(params: {
         );
         continue;
       }
-      if (!isAuthorized(ev.resourceIdStr)) {
+      const isDelete = ev.eventType === "DIG_EMPLOYEE_DELETED";
+      const authSet = params.getAuthorizedIds();
+      if (!isDelete && !isAuthorized(ev.resourceIdStr)) {
         params.logger.info(
           `baiying-enhance: dig-employee change skipped (not authorized) resourceId=${ev.resourceIdStr} type=${ev.eventType}`,
         );
+        continue;
+      }
+      if (isDelete && !authSet && params.strictAuth && !isAuthorized(ev.resourceIdStr)) {
         continue;
       }
       if (isStaleChangedAt(ev)) {
@@ -224,13 +238,16 @@ export function createDigEmployeeChangeSubscriber(params: {
       const changedAtPart =
         ev.changedAt !== undefined ? ` changedAt=${ev.changedAt}` : "";
       const sourcePart = ev.source ? ` source=${ev.source}` : "";
-      const authSet = params.getAuthorizedIds();
-      const authNote = authSet ? "in authorized id set" : "no auth set (non-strict pass-through)";
+      const authNote = authSet
+        ? isDelete && !authSet.has(ev.resourceIdStr)
+          ? "delete cleanup; id not in authorized id set"
+          : "in authorized id set"
+        : "no auth set (non-strict pass-through)";
       params.logger.info(
         `baiying-enhance: dig-employee change triggering flush (${authNote}) resourceId=${ev.resourceIdStr} eventType=${ev.eventType}${changedAtPart}${sourcePart}`,
       );
       recordChangedAt(ev);
-      if (ev.eventType === "DIG_EMPLOYEE_DELETED") {
+      if (isDelete) {
         deletes.push(ev.resourceIdStr);
       } else {
         otherIds.push(ev.resourceIdStr);
@@ -262,66 +279,83 @@ export function createDigEmployeeChangeSubscriber(params: {
     }, params.debounceMs);
   };
 
+  const scheduleReconnect = () => {
+    if (stopped || reconnectTimer) {
+      return;
+    }
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      void startSubscriber();
+    }, 2000);
+    reconnectTimer.unref?.();
+  };
+
+  const startSubscriber = async () => {
+    if (subscriber || stopped) {
+      return;
+    }
+    if (!hasDigEmployeePubSubRedisConfig({ host, port, db, channel: params.channel })) {
+      params.logger.warn(
+        "baiying-enhance: dig-employee Pub/Sub subscriber disabled (REDIS_HOST/REDIS_PORT/REDIS_DATABASE/channel missing)",
+      );
+      return;
+    }
+    subscriber = new Redis({
+      host,
+      port,
+      db,
+      username: process.env.REDIS_USERNAME?.trim() || undefined,
+      password: process.env.REDIS_PASSWORD?.trim() || undefined,
+      lazyConnect: true,
+      enableOfflineQueue: false,
+      connectTimeout,
+      retryStrategy: (times) => Math.min(10_000, Math.max(1000, times * 1000)),
+      maxRetriesPerRequest: null,
+    });
+    subscriber.on("message", (_channel, message) => {
+      const parsed = parseDigEmployeeChangeMessage(message);
+      if (!parsed.ok) {
+        params.logger.warn(`baiying-enhance: dig-employee Pub/Sub bad message: ${parsed.error}`);
+        return;
+      }
+      pendingQueue.push(parsed.event);
+      scheduleFlush();
+    });
+    subscriber.on("error", (err) => {
+      params.logger.warn(`baiying-enhance: dig-employee Pub/Sub Redis error: ${err.message}`);
+    });
+    subscriber.on("end", () => {
+      subscriber = null;
+      scheduleReconnect();
+    });
+    try {
+      await subscriber.connect();
+      await subscriber.subscribe(params.channel);
+    } catch (err) {
+      params.logger.warn(
+        `baiying-enhance: dig-employee SUBSCRIBE failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      await subscriber.quit().catch(() => undefined);
+      subscriber = null;
+      scheduleReconnect();
+      return;
+    }
+    params.logger.info(
+      `baiying-enhance: dig-employee Pub/Sub subscribed channel=${params.channel}`,
+    );
+  };
+
   return {
     start: async () => {
-      if (subscriber || stopped) {
-        return;
-      }
-      if (!userCode || !host || Number.isNaN(port) || Number.isNaN(db)) {
-        params.logger.warn(
-          "baiying-enhance: dig-employee Pub/Sub subscriber disabled (USER_CODE/REDIS_* env missing)",
-        );
-        return;
-      }
-      subscriber = new Redis({
-        host,
-        port,
-        db,
-        username: process.env.REDIS_USERNAME?.trim() || undefined,
-        password: process.env.REDIS_PASSWORD?.trim() || undefined,
-        lazyConnect: true,
-        enableOfflineQueue: false,
-        connectTimeout,
-        retryStrategy: () => null,
-        maxRetriesPerRequest: 2,
-      });
-      try {
-        await subscriber.connect();
-      } catch (err) {
-        params.logger.warn(
-          `baiying-enhance: dig-employee Pub/Sub connect failed: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-        await subscriber.quit().catch(() => undefined);
-        subscriber = null;
-        return;
-      }
-      subscriber.on("message", (_channel, message) => {
-        const parsed = parseDigEmployeeChangeMessage(message);
-        if (!parsed.ok) {
-          params.logger.warn(`baiying-enhance: dig-employee Pub/Sub bad message: ${parsed.error}`);
-          return;
-        }
-        pendingQueue.push(parsed.event);
-        scheduleFlush();
-      });
-      try {
-        await subscriber.subscribe(params.channel);
-      } catch (err) {
-        params.logger.warn(
-          `baiying-enhance: dig-employee SUBSCRIBE failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        await subscriber.quit().catch(() => undefined);
-        subscriber = null;
-        return;
-      }
-      params.logger.info(
-        `baiying-enhance: dig-employee Pub/Sub subscribed channel=${params.channel} (USER_CODE=${userCode})`,
-      );
+      stopped = false;
+      await startSubscriber();
     },
     stop: async () => {
       stopped = true;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       if (debounceTimer) {
         clearTimeout(debounceTimer);
         debounceTimer = null;

@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.feign.request.manager.AgentResourceChatInfoDto;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -37,8 +38,8 @@ import okhttp3.ResponseBody;
 import okio.BufferedSource;
 
 /**
- * 处理 createType=FROM_THIRD 且 integrationType=INTERFACE 的外部智能体调用。
- * 直接 POST 到外部智能体的 SSE 地址，逐行解析后通过 PythonSseService 转写到客户端。
+ * 处理 createType=FROM_THIRD 且 integrationType=INTERFACE 的外部智能体调用。 直接 POST 到外部智能体的 SSE 地址，逐行解析后通过 PythonSseService
+ * 转写到客户端。
  */
 @Slf4j
 @Service
@@ -88,17 +89,14 @@ public class InterfaceRouteService {
     private AgentResourceChatInfoDto findExternalAgent(ChatProcessContext ctx) {
         Long agentId = ctx.getAssistantChatDto().getAgentId();
         @SuppressWarnings("unchecked")
-        List<AgentResourceChatInfoDto> agentList =
-                (List<AgentResourceChatInfoDto>) ctx.getParams().get("agent_list");
+        List<AgentResourceChatInfoDto> agentList = (List<AgentResourceChatInfoDto>) ctx.getParams().get("agent_list");
         if (CollectionUtils.isEmpty(agentList) || agentId == null) {
             throw new BdpRuntimeException(I18nUtil.get("route.interface.agent.not.found"));
         }
         return agentList.stream()
-                .filter(a -> agentId.equals(a.getId())
-                        && "FROM_THIRD".equals(a.getCreateType())
-                        && "INTERFACE".equals(a.getIntegrationType()))
-                .findFirst()
-                .orElseThrow(() -> new BdpRuntimeException(I18nUtil.get("route.interface.agent.not.found")));
+            .filter(a -> agentId.equals(a.getId()) && "FROM_THIRD".equals(a.getCreateType())
+                && "INTERFACE".equals(a.getIntegrationType()))
+            .findFirst().orElseThrow(() -> new BdpRuntimeException(I18nUtil.get("route.interface.agent.not.found")));
     }
 
     private Map<String, Object> buildRequestBody(ChatProcessContext ctx, AgentResourceChatInfoDto agent) {
@@ -124,9 +122,8 @@ public class InterfaceRouteService {
         }
         body.put("files", files);
 
-        Map<String, Object> extParam = chatDto.getExtParams() != null
-                ? new HashMap<>(chatDto.getExtParams())
-                : new HashMap<>();
+        Map<String, Object> extParam = chatDto.getExtParams() != null ? new HashMap<>(chatDto.getExtParams())
+            : new HashMap<>();
         body.put("extParam", extParam);
 
         body.put("histories", paramService.getChatHistories(ctx.sessionId, HISTORY_MAX_ROUNDS));
@@ -134,19 +131,15 @@ public class InterfaceRouteService {
         return body;
     }
 
-    private void streamFromExternalAgent(String url, Map<String, Object> body,
-                                         Map<String, Object> headers, ChatProcessContext ctx) throws IOException {
-        OkHttpClient client = new OkHttpClient.Builder()
-                .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .writeTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .build();
+    private void streamFromExternalAgent(String url, Map<String, Object> body, Map<String, Object> headers,
+        ChatProcessContext ctx) throws IOException {
+        OkHttpClient client = new OkHttpClient.Builder().connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS).writeTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .build();
 
         String jsonBody = JSON.toJSONString(body);
-        Request.Builder reqBuilder = new Request.Builder()
-                .url(url)
-                .post(RequestBody.create(jsonBody, JSON_TYPE))
-                .addHeader("Accept", "*/*");
+        Request.Builder reqBuilder = new Request.Builder().url(url).post(RequestBody.create(jsonBody, JSON_TYPE))
+            .addHeader("Accept", "*/*");
         if (headers != null) {
             for (Map.Entry<String, Object> entry : headers.entrySet()) {
                 if (entry.getValue() != null) {
@@ -172,8 +165,8 @@ public class InterfaceRouteService {
     }
 
     /**
-     * 逐行读取上游 SSE 流，将 event:/data: 配对后组装为 {event,data} JSON 行，
-     * 复用 PythonSseService.getContentFromPythonStreamV3 处理（写流 + 累计）。
+     * 逐行读取上游 SSE 流，将 event:/data: 配对后组装为 {event,data} JSON 行， 复用 PythonSseService.getContentFromPythonStreamV3 处理（写流 +
+     * 累计）。
      */
     private void consumeSseStream(BufferedSource source, ChatProcessContext ctx) throws IOException {
         String currentEvent = null;
@@ -195,14 +188,20 @@ public class InterfaceRouteService {
                 // SSE 注释行
                 continue;
             }
+
             if (line.startsWith("event:")) {
                 currentEvent = line.substring("event:".length()).trim();
             }
             else if (line.startsWith("data:")) {
+                String data = line.substring("data:".length()).trim();
+                if ("[DONE]".equals(data)) {
+                    flushDoneEvent(ctx);
+                    return;
+                }
                 if (dataBuf.length() > 0) {
                     dataBuf.append('\n');
                 }
-                dataBuf.append(line.substring("data:".length()).trim());
+                dataBuf.append(data);
             }
         }
         // 流结束时若仍有未刷出的事件
@@ -210,14 +209,86 @@ public class InterfaceRouteService {
     }
 
     private void flushEvent(String event, StringBuilder dataBuf, ChatProcessContext ctx) {
-        if (StringUtils.isBlank(event) || dataBuf.length() == 0) {
+        if (dataBuf.length() == 0) {
             return;
         }
+        String actualEvent = StringUtils.isNotBlank(event) ? event : inferOpenAiEvent(dataBuf.toString());
+        if (StringUtils.isBlank(actualEvent)) {
+            return;
+        }
+        dispatchInternalLine(actualEvent, normalizeOpenAiData(actualEvent, dataBuf.toString()), ctx);
+    }
+
+    private String inferOpenAiEvent(String data) {
+        try {
+            JSONObject json = JSON.parseObject(data);
+            if (json == null) {
+                return null;
+            }
+            if (json.containsKey("error")) {
+                return SseResponseEventEnum.error;
+            }
+            if (hasOpenAiDeltaContent(json)) {
+                return SseResponseEventEnum.answerDelta;
+            }
+        }
+        catch (Exception e) {
+            log.warn("INTERFACE SSE data 非 JSON，跳过: {}", data);
+        }
+        return null;
+    }
+
+    private String normalizeOpenAiData(String event, String data) {
+        try {
+            JSONObject json = JSON.parseObject(data);
+            if (SseResponseEventEnum.answerDelta.equals(event) && json != null && json.containsKey("choices")
+                && !json.containsKey("contentType")) {
+                json.put("contentType", "1002");
+                return json.toJSONString();
+            }
+            if (SseResponseEventEnum.error.equals(event) && json != null && json.containsKey("error")) {
+                JSONObject error = json.getJSONObject("error");
+                JSONObject errPayload = new JSONObject();
+                errPayload.put("message", error != null ? error.getString("message") : json.getString("error"));
+                errPayload.put("traceback", errPayload.getString("message"));
+                errPayload.put("error_code", error != null ? error.getInteger("code") : null);
+                return errPayload.toJSONString();
+            }
+        }
+        catch (Exception e) {
+            log.warn("INTERFACE SSE data 规范化失败，按原样转发: {}", data, e);
+        }
+        return data;
+    }
+
+    private boolean hasOpenAiDeltaContent(JSONObject json) {
+        JSONArray choices = json.getJSONArray("choices");
+        if (choices == null || choices.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < choices.size(); i++) {
+            JSONObject choice = choices.getJSONObject(i);
+            if (choice == null) {
+                continue;
+            }
+            JSONObject delta = choice.getJSONObject("delta");
+            if (delta != null && delta.containsKey("content")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void flushDoneEvent(ChatProcessContext ctx) {
+        dispatchInternalLine(SseResponseEventEnum.answerEnd, "{}", ctx);
+    }
+
+    private void dispatchInternalLine(String event, String data, ChatProcessContext ctx) {
         JSONObject lineJson = new JSONObject();
         lineJson.put("event", event);
-        lineJson.put("data", dataBuf.toString());
-        pythonSseService.getContentFromPythonStreamV3(lineJson.toJSONString(), ctx.res,
-                ctx.messageContext, ctx.getAgentIds(), ctx);
+        lineJson.put("data", data);
+        pythonSseService.getContentFromPythonStreamV3(lineJson.toJSONString(), ctx.res, ctx.messageContext,
+            ctx.getAgentIds(), ctx);
     }
 
     private void writeErrorEvent(ChatProcessContext ctx, String message) {

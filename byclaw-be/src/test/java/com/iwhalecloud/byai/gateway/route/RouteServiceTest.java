@@ -93,11 +93,11 @@ class RouteServiceTest {
         InOrder inOrder = inOrder(gatewayClient, sandboxService);
         inOrder.verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
-        inOrder.verify(sandboxService).ensureSandboxReady("u1", null, "BYCLAW_EXE_u1");
+        inOrder.verify(sandboxService).restartSandboxAfterRemoteExit("u1", null, "BYCLAW_EXE_u1");
         inOrder.verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
 
-        verify(sandboxService, times(1)).ensureSandboxReady("u1", null, "BYCLAW_EXE_u1");
+        verify(sandboxService, times(1)).restartSandboxAfterRemoteExit("u1", null, "BYCLAW_EXE_u1");
         verify(gatewayClient, times(2)).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
 
@@ -120,7 +120,7 @@ class RouteServiceTest {
                 .isInstanceOf(BdpRuntimeException.class)
                 .hasMessage("Gateway SDK 消息发送失败: agent unavailable");
 
-        verify(sandboxService, times(1)).ensureSandboxReady("u1", null, "BYCLAW_EXE_u1");
+        verify(sandboxService, times(1)).restartSandboxAfterRemoteExit("u1", null, "BYCLAW_EXE_u1");
         verify(gatewayClient, times(2)).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
         verify(sessionStreamManager, times(1)).stopSessionListener("3");
@@ -145,7 +145,7 @@ class RouteServiceTest {
 
         org.assertj.core.api.Assertions.assertThat(targetAgentTypeCaptor.getAllValues())
                 .containsExactly("BYCLAW_CODE_u1", "BYCLAW_CODE_u1");
-        verify(sandboxService, times(1)).ensureSandboxReady("u1", 123L, "BYCLAW_CODE_u1");
+        verify(sandboxService, times(1)).restartSandboxAfterRemoteExit("u1", 123L, "BYCLAW_CODE_u1");
     }
 
     private ChatProcessContext buildContext() {

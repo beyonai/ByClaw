@@ -1,0 +1,6 @@
+# Windows override: replace Unix socket with Windows named pipe
+services:
+  opensandbox-server:
+    volumes:
+      - //./pipe/docker_engine://./pipe/docker_engine
+      - ./opensandbox-server.toml:/etc/opensandbox/config.toml:ro

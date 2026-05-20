@@ -122,6 +122,32 @@ public class OpenSandboxClient {
         return execute(httpRequest, SandboxDetail.class);
     }
 
+    public SandboxDetail getSandboxIfExists(String sandboxId) {
+        SandboxDetail detail = getSandboxIfExistsByUrl(baseUrl + "/v1/sandboxes/" + sandboxId);
+        if (detail != null) {
+            return detail;
+        }
+        return getSandboxIfExistsByUrl(baseUrl + "/sandboxes/" + sandboxId);
+    }
+
+    private SandboxDetail getSandboxIfExistsByUrl(String url) {
+        Request httpRequest = newRequestBuilder(url).get().build();
+        try (Response response = httpClient.newCall(httpRequest).execute()) {
+            String responseBody = response.body() != null ? response.body().string() : "";
+            if (response.code() == 404) {
+                return null;
+            }
+            if (!response.isSuccessful()) {
+                throw new OpenSandboxException("HTTP " + response.code() + ": " + responseBody);
+            }
+            return objectMapper.readValue(responseBody, SandboxDetail.class);
+        } catch (OpenSandboxException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new OpenSandboxException("Failed to call OpenSandbox API: " + httpRequest.url(), e);
+        }
+    }
+
     public void deleteSandbox(String sandboxId) {
         String url = baseUrl + "/v1/sandboxes/" + sandboxId;
         Request httpRequest = newRequestBuilder(url).delete().build();

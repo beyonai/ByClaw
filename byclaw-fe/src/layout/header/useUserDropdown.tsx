@@ -1,5 +1,5 @@
 import { get, intersection, isEmpty } from 'lodash';
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { App, Divider, DropdownProps, theme } from 'antd';
 import { useIntl, useNavigate, useSelector } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
@@ -9,8 +9,14 @@ import { getRuntimeActualUrl } from '@/utils';
 import { isAdminVip } from '@/utils/auth';
 import useAppStore from '@/models/common/useAppStore';
 import { getDisplayUserNameInChat } from '@/utils/chat';
-import { getssoToken } from '@/utils/auth';
-import { menuConfig, filterMenusByAdminVip } from '@/pages/manager/layout/sider/menuConfig';
+import { getssoToken, getToken } from '@/utils/auth';
+import {
+  fallbackMenuConfig,
+  filterMenusByAdminVip,
+  filterMenusByMenuDisplay,
+  getManagerMenuConfig,
+  normalizeMenuUrl,
+} from '@/pages/manager/layout/sider/menuConfig';
 import { filterRoutesByBlockedPaths } from '@/pages/manager/utils/menu';
 import styles from './index.module.less';
 
@@ -22,6 +28,31 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
 
   const { ENV, devConfig } = useAppStore();
   const { token } = theme.useToken();
+  const [menuConfig, setMenuConfig] = useState<any[]>(fallbackMenuConfig);
+
+  useEffect(() => {
+    if (!userInfo) {
+      return;
+    }
+
+    let mounted = true;
+
+    getManagerMenuConfig({ refresh: true })
+      .then((menus) => {
+        if (mounted && menus.length > 0) {
+          setMenuConfig(menus);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setMenuConfig(fallbackMenuConfig);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [userInfo?.userId]);
 
   const handleClick = useCallback(
     ({ key }: any) => {
@@ -42,6 +73,17 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
         window.open(devPortalUrl, '_blank');
         return;
       }
+      const matchedMenu = menuConfig.find((item: any) => item.path === key);
+      if (matchedMenu?.menuUrl) {
+        let url = normalizeMenuUrl(matchedMenu.menuUrl);
+        if (url.includes('${Beyond-token}')) {
+          url = url.replace('${Beyond-token}', getToken());
+        }
+        console.log('menuUrl', url);
+        console.log('url', url);
+        window.open(url, '_blank');
+        return;
+      }
       if (key?.startsWith('/manager/')) {
         window.open(`${window.location.origin}${getRuntimeActualUrl(key)}`, '_blank');
         return;
@@ -54,7 +96,7 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
         navigate('/assistantSettings');
       }
     },
-    [devConfig]
+    [devConfig, menuConfig]
   );
 
   const items = useMemo(() => {
@@ -69,18 +111,23 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
       isEmpty(intersection(userTypeList, ['PLAT_MAN', 'DEV_USER'])) ||
       ENV.includes('develop');
     const enterpriseMenuItems = filterRoutesByBlockedPaths(
-      filterMenusByAdminVip(menuConfig, isAdminVip(userInfo as any)),
+      filterMenusByMenuDisplay(filterMenusByAdminVip(menuConfig, isAdminVip(userInfo as any)), userInfo),
       blockedPaths || []
     ).map((item: any) => {
       const IconComponent = item.icon;
+      let label = item.name;
+
+      if (item.localeId) {
+        label = intl.formatMessage({
+          id: item.localeId,
+          defaultMessage: item.name,
+        });
+      }
 
       return {
         key: item.path,
         icon: IconComponent ? <IconComponent className={styles.menuIcon} /> : null,
-        label: intl.formatMessage({
-          id: item.localeId,
-          defaultMessage: item.name,
-        }),
+        label,
       };
     });
 
@@ -136,7 +183,7 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
     ];
 
     return m.filter((i) => !i.hidden);
-  }, [userInfo, ENV, devConfig, blockedPaths]);
+  }, [userInfo, ENV, devConfig, blockedPaths, menuConfig]);
 
   const dropdownRender = useCallback<Required<DropdownProps>['dropdownRender']>(
     (menu) => {

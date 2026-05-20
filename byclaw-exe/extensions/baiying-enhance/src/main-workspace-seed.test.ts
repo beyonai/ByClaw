@@ -12,6 +12,7 @@ import {
 } from "./main-workspace-seed.js";
 import { SUBAGENT_ROUTING_FILENAME, SUBAGENT_ROUTING_MARKER } from "./subagent-routing-seed.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
+import { buildBootstrapMd } from "./workspace-seed.js";
 
 function mockApi(mainWorkspace: string) {
   return {
@@ -45,6 +46,20 @@ describe("main-workspace-seed", () => {
   it("resolveEffectiveMainAgentsMdMode respects explicit mode", () => {
     expect(resolveEffectiveMainAgentsMdMode({ mainAgentsMdMode: "if_missing" })).toBe("if_missing");
     expect(resolveEffectiveMainAgentsMdMode({ mainAgentsMdMode: "off" })).toBe("off");
+  });
+
+  it("seedMainAgentAgentsMd writes managed no-op BOOTSTRAP.md even when mainAgentsMdMode is off", async () => {
+    const ws = await mkdtemp(path.join(tmpdir(), "baiying-main-bootstrap-"));
+    const api = mockApi(ws) as any;
+
+    await seedMainAgentAgentsMd({
+      api,
+      pluginConfig: { mainAgentsMdMode: "off", useBundledMainAgentsMd: false },
+      log: { warn: vi.fn(), info: vi.fn() },
+    });
+
+    const bootstrap = await readFile(path.join(ws, "BOOTSTRAP.md"), "utf8");
+    expect(bootstrap).toBe(buildBootstrapMd());
   });
 
   it("seedMainAgentAgentsMd if_missing writes once", async () => {
@@ -86,6 +101,28 @@ describe("main-workspace-seed", () => {
     expect(routingSecond).toBe(routingFirst);
   });
 
+  it("seedMainAgentAgentsMd if_missing still seeds SUBAGENT_ROUTING when AGENTS.md pre-exists", async () => {
+    const ws = await mkdtemp(path.join(tmpdir(), "baiying-main-"));
+    const dest = path.join(ws, "AGENTS.md");
+    await writeFile(dest, "# stock OpenClaw AGENTS\n", "utf8");
+    const tpl = path.join(ws, "tpl.md");
+    await writeFile(tpl, "# Plugin tpl\n", "utf8");
+    const api = mockApi(ws) as any;
+
+    await seedMainAgentAgentsMd({
+      api,
+      pluginConfig: {
+        mainAgentsMdPath: tpl,
+        mainAgentsMdMode: "if_missing",
+      },
+      log: { warn: vi.fn(), info: vi.fn() },
+    });
+
+    expect(await readFile(dest, "utf8")).toBe("# stock OpenClaw AGENTS\n");
+    const routing = await readFile(path.join(ws, SUBAGENT_ROUTING_FILENAME), "utf8");
+    expect(routing.startsWith(SUBAGENT_ROUTING_MARKER)).toBe(true);
+  });
+
   it("seedMainAgentAgentsMd if_managed_marker skips user file without marker", async () => {
     const ws = await mkdtemp(path.join(tmpdir(), "baiying-main-"));
     const dest = path.join(ws, "AGENTS.md");
@@ -105,6 +142,8 @@ describe("main-workspace-seed", () => {
     });
 
     expect(await readFile(dest, "utf8")).toBe("# user\n");
+    const routing = await readFile(path.join(ws, SUBAGENT_ROUTING_FILENAME), "utf8");
+    expect(routing.startsWith(SUBAGENT_ROUTING_MARKER)).toBe(true);
   });
 
   it("seedMainAgentAgentsMd if_managed_marker overwrites when marker present", async () => {
@@ -227,7 +266,7 @@ describe("main-workspace-seed", () => {
     });
     const out = await readFile(path.join(ws, "AGENTS.md"), "utf8");
     expect(out.startsWith(MAIN_AGENTS_MARKER)).toBe(true);
-    expect(out).toContain("Orchestrator");
+    expect(out).toContain("一呼百应");
 
     const routing = await readFile(path.join(ws, SUBAGENT_ROUTING_FILENAME), "utf8");
     expect(routing.startsWith(SUBAGENT_ROUTING_MARKER)).toBe(true);

@@ -103,8 +103,9 @@ function CreateTemplate(props: IProps) {
       throw new Error(intl.formatMessage({ id: 'createTemplate.missingSessionId' }));
     }
 
-    form.validateFields().then((formValues) => {
+    form.validateFields().then(async (formValues) => {
       const sendPayloadRef = queryInputRef.current?.getSendPayload?.();
+
       if (!sendPayloadRef) {
         form.setFields([
           {

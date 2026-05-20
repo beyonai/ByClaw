@@ -82,6 +82,25 @@ public abstract class ByclawFS {
         }
     }
 
+    /**
+     * 流式写入。filePath 必须包含文件名（不以 '/' 结尾），由调用方组装；
+     * 主要服务于 zip 解压后逐个 entry 落盘的场景，避免把每个 entry 封装为 MultipartFile。
+     */
+    public FileMetadata write(InputStream inputStream, long size, String contentType, String filePath) {
+        if (inputStream == null) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.fs.input.stream.cannot.be.empty"));
+        }
+        if (size < 0) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.fs.write.size.invalid"));
+        }
+        String normalized = normalizeInputPath(filePath);
+        if (normalized.endsWith("/")) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.fs.write.directory.original.filename.cannot.be.empty"));
+        }
+        String resolvedContentType = StringUtils.defaultIfBlank(contentType, "application/octet-stream");
+        return objectStorage.put(buildLocation(normalized), inputStream, size, resolvedContentType);
+    }
+
     public abstract String getBucketOrRoot();
 
     public abstract String getShareType();

@@ -32,6 +32,7 @@ import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceRuntimeInfoResolver;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceTargetJsonBuilder;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDocService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceArtifactService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
@@ -102,6 +103,9 @@ public class DatasetApplicationService {
     private ResourceArtifactStorageService resourceArtifactStorageService;
 
     @Autowired
+    private SsResourceArtifactService ssResourceArtifactService;
+
+    @Autowired
     private ResourceArtifactPathResolver resourceArtifactPathResolver;
 
     @Autowired
@@ -139,9 +143,7 @@ public class DatasetApplicationService {
     }
 
     /**
-     * 查询知识库前端页面能力开关。
-     * 只要 dataset.system 配有值，就表示知识库库级操作由外部知识库体系承接；
-     * 本系统仅开放知识库导入和库内目录/文件操作，屏蔽知识库库级新增、编辑、删除。
+     * 查询知识库前端页面能力开关。 只要 dataset.system 配有值，就表示知识库库级操作由外部知识库体系承接； 本系统仅开放知识库导入和库内目录/文件操作，屏蔽知识库库级新增、编辑、删除。
      *
      * @author qin.guoquan
      * @date 2026-04-22 15:10:00
@@ -331,6 +333,7 @@ public class DatasetApplicationService {
         String scene) {
         try {
             resourceArtifactStorageService.syncResourceJsonByBizType(targetContent, resourceBizType, resourceId);
+            ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, resourceBizType, scene);
             logImportedDatasetArtifactLocation(resourceBizType, resourceId);
         }
         catch (Exception e) {
@@ -389,8 +392,7 @@ public class DatasetApplicationService {
     }
 
     /**
-     * 第三方知识库模式下，知识库库级新增、编辑、注销均需走外部知识库体系。
-     * dataset.system 非空即视为第三方知识库模式，个人/企业知识库都不允许在本系统做库级操作。
+     * 第三方知识库模式下，知识库库级新增、编辑、注销均需走外部知识库体系。 dataset.system 非空即视为第三方知识库模式，个人/企业知识库都不允许在本系统做库级操作。
      *
      * @author qin.guoquan
      * @date 2026-05-11
@@ -403,8 +405,7 @@ public class DatasetApplicationService {
     }
 
     /**
-     * 命中同编码知识库并准备走更新时，校验当前操作用户是否具备该资源的管理权限。
-     * 无权限时直接阻断导入更新，避免通过导入覆盖他人资源。
+     * 命中同编码知识库并准备走更新时，校验当前操作用户是否具备该资源的管理权限。 无权限时直接阻断导入更新，避免通过导入覆盖他人资源。
      *
      * @author qin.guoquan
      * @date 2026-05-06 18:20:00
@@ -417,8 +418,8 @@ public class DatasetApplicationService {
             return;
         }
         String resourceName = StringUtils.defaultIfBlank(existing.getResourceName(), resourceCode);
-        throw new IllegalArgumentException(I18nUtil.get("tool.resource.import.update.no.permission", resourceCode,
-            resourceName));
+        throw new IllegalArgumentException(
+            I18nUtil.get("tool.resource.import.update.no.permission", resourceCode, resourceName));
     }
 
     /**
@@ -628,7 +629,13 @@ public class DatasetApplicationService {
         SsResource ssResource = ssResourceService.findById(dirAndFileQo.getResourceId());
 
         KbListDir kbListDir = new KbListDir();
-        kbListDir.setKnCode(ssResource.getResourceCode());
+        if (StringUtil.isNotEmpty(dirAndFileQo.getResourceCode())) {
+            kbListDir.setKnCode(dirAndFileQo.getResourceCode());
+        }
+        else {
+            kbListDir.setKnCode(ssResource.getResourceCode());
+        }
+
         String listDirectoryPath = dirAndFileQo.getDirectoryPath();
         if (StringUtil.isEmpty(listDirectoryPath)) {
             listDirectoryPath = "/";
@@ -692,8 +699,8 @@ public class DatasetApplicationService {
             return createDatasetFromImport(dto, rawJson, ownerType);
         }
         else {
-            ResourceImportOwnerTypeValidator.validate(existing, ownerType, dto.getResourceCode(),
-                dto.getResourceName(), dto.getResourceBizType());
+            ResourceImportOwnerTypeValidator.validate(existing, ownerType, dto.getResourceCode(), dto.getResourceName(),
+                dto.getResourceBizType());
             validateDatasetImportUpdatePermission(existing, dto.getResourceCode());
             return updateDatasetFromImport(existing, dto, rawJson, ownerType);
         }
@@ -804,6 +811,8 @@ public class DatasetApplicationService {
         // 导入成功后，把最终 target_content JSON 同步到开放资源目录。
         resourceArtifactStorageService.syncResourceJsonByBizType(extDoc.getTargetContent(),
             datasetImportDto.getResourceBizType(), myResource.getResourceId());
+        ssResourceArtifactService.upsertStandardJsonArtifact(myResource.getResourceId(),
+            datasetImportDto.getResourceBizType(), "dataset-import-create");
         logImportedDatasetArtifactLocation(datasetImportDto.getResourceBizType(), myResource.getResourceId());
 
         // 第三方资源注册，给下游openclaw调用
@@ -838,6 +847,8 @@ public class DatasetApplicationService {
         SsResExtDoc extDoc = saveOrUpdateExtDoc(dto, rawJson, resourceId);
         resourceArtifactStorageService.syncResourceJsonByBizType(extDoc.getTargetContent(), dto.getResourceBizType(),
             resourceId);
+        ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, dto.getResourceBizType(),
+            "dataset-import-update");
         logImportedDatasetArtifactLocation(dto.getResourceBizType(), resourceId);
 
         logger.info("知识库JSON导入完成，准备重注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}",

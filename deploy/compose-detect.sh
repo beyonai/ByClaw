@@ -1,19 +1,30 @@
 #!/bin/bash
-# Detect docker compose command (V2 plugin vs V1 standalone).
+# Detect compose command: docker compose, podman compose, docker-compose, podman-compose.
 # Source this file: . "$(dirname "$0")/../compose-detect.sh"
 # Exports:
-#   $COMPOSE           — "docker compose" or "docker-compose"
-#   $COMPOSE_ENV_FLAG  — "--env-file ../../.env" (V2) or "" (V1, relies on sourced env)
+#   $COMPOSE           — the compose command
+#   $COMPOSE_ENV_FLAG  — "--env-file ../../.env" or ""
 #   $COMPOSE_PROJECT_NAME
 
-if docker compose version >/dev/null 2>&1; then
+# Helper: check if Docker daemon is reachable
+_docker_daemon_ok() {
+    docker info >/dev/null 2>&1
+}
+
+if docker help compose >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && _docker_daemon_ok; then
     COMPOSE="docker compose"
     COMPOSE_ENV_FLAG="--env-file ../../.env"
-elif command -v docker-compose >/dev/null 2>&1; then
+elif podman compose version >/dev/null 2>&1; then
+    COMPOSE="podman compose"
+    COMPOSE_ENV_FLAG="--env-file ../../.env"
+elif command -v docker-compose >/dev/null 2>&1 && _docker_daemon_ok; then
     COMPOSE="docker-compose"
     COMPOSE_ENV_FLAG=""
+elif command -v podman-compose >/dev/null 2>&1; then
+    COMPOSE="podman-compose"
+    COMPOSE_ENV_FLAG=""
 else
-    echo "Error: neither 'docker compose' nor 'docker-compose' found."
+    echo "Error: no working compose command found. Install 'docker compose' or 'podman compose'."
     exit 1
 fi
 
@@ -26,12 +37,6 @@ if [ -f "$_DETECT_ENV_FILE" ]; then
     set +a
 fi
 
-# Determine project name prefix from the calling script's directory
+# Determine project name from the calling script's directory
 _CALLER_DIR="$(basename "$(pwd)")"
-case "$_CALLER_DIR" in
-    middleware)  _PREFIX="byclaw-middleware" ;;
-    standalone)  _PREFIX="byclaw-standalone" ;;
-    mono)        _PREFIX="byclaw-mono" ;;
-    *)           _PREFIX="byclaw" ;;
-esac
-export COMPOSE_PROJECT_NAME="${_PREFIX}-${CONTAINER_SUFFIX:-default}"
+export COMPOSE_PROJECT_NAME="${_CALLER_DIR}"

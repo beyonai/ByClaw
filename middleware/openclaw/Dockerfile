@@ -37,7 +37,7 @@ RUN set -eux; \
     echo ">>> built extensions:"; ls -la /build/out/
 
 ## ── stage 2: final image ─────────────────────────────────────────
-FROM ghcr.io/openclaw/openclaw:2026.4.14
+FROM ghcr.io/openclaw/openclaw:2026.4.21
 
 USER root
 
@@ -60,7 +60,9 @@ RUN set -eux; \
         python3 \
         python3-pip \
         python3-venv \
-        ca-certificates; \
+        ca-certificates \
+        unzip \
+        zip; \
     python3 -m pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
     python3 -m pip config --global set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
     rm -rf /var/lib/apt/lists/*

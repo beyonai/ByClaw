@@ -15,19 +15,9 @@ public class SandboxProperties {
     private OpenSandboxConfig opensandbox = new OpenSandboxConfig();
 
     /**
-     * 心跳超时时间，超过该时间未收到心跳则回收沙箱
+     * Redis metadata cache TTL. DB remains the lifecycle source of truth.
      */
-    private Duration heartbeatTimeout = Duration.ofMinutes(5);
-
-    /**
-     * 清理任务执行间隔
-     */
-    private Duration cleanupInterval = Duration.ofMinutes(5);
-
-    /**
-     * 是否永久保留沙箱（不自动回收）
-     */
-    private boolean permanentKeep = false;
+    private Duration metadataCacheTtl = Duration.ofMinutes(10);
 
     /**
      * 创建沙箱时轮询状态的间隔
@@ -66,6 +56,11 @@ public class SandboxProperties {
          * we will prefix it with this scheme when polling.
          */
         private String endpointScheme = "http";
+
+        /**
+         * Base URL for UIAgent proxy endpoints, e.g. https://host:8443/sandboxes.
+         */
+        private String uiAgentProxyBaseUrl;
 
         /**
          * 创建前是否调用列表接口，按 userCode、serviceKey 与已有沙箱对齐（与创建请求 metadata 中字段一致）。

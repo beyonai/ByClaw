@@ -29,6 +29,9 @@ function IframeComp(props: IProps) {
   const { EventEmitter } = useGlobal();
 
   const iframeParam = useMemo<IIFrame>(() => {
+    if (substance && typeof substance === 'object') {
+      return substance;
+    }
     try {
       return JSON.parse(substance);
     } catch (e) {

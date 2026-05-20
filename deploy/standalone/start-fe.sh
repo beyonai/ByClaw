@@ -5,6 +5,6 @@ cd "$(dirname "$0")"
 sh gen-nginx-conf.sh
 
 echo "Starting Frontend..."
-$COMPOSE $COMPOSE_ENV_FLAG up -d fe
+$COMPOSE $COMPOSE_ENV_FLAG up -d --force-recreate fe
 echo ""
 $COMPOSE ps fe

@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.vo.index;
 
 import com.alibaba.fastjson.annotation.JSONField;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Date;
 import lombok.Getter;
 import lombok.Setter;
@@ -31,6 +32,11 @@ public class AuthDigitEmployVo {
      * 资源编码。
      */
     private String resourceCode;
+
+    /**
+     * 资源归属类型：enterprise-企业，personal-个人。
+     */
+    private String ownerType;
 
     /**
      * 智能体类型。
@@ -102,6 +108,17 @@ public class AuthDigitEmployVo {
      * 标签名称
      */
     private String tagName;
+
+    /**
+     * 是否为当前用户默认助理。
+     */
+    @JsonProperty("isDefault")
+    private Boolean isDefault;
+
+    /**
+     * 是否允许当前用户将该数字员工设为默认助理。
+     */
+    private Boolean canSetDefault;
 
     /**
      * 优先返回订阅的授权类型

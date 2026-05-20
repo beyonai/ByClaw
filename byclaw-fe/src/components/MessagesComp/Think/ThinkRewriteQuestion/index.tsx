@@ -3,8 +3,8 @@ import { IMessage } from '@/typescript/message';
 import useGlobal from '@/hooks/useGlobal';
 import { getLocale, useIntl } from '@umijs/max';
 import { Button, Col, Row, Divider } from 'antd';
-import { cloneDeep, get, pick, set } from 'lodash';
-import React, { useCallback, useEffect, useState } from 'react';
+import { cloneDeep, get, pick, set, isNil } from 'lodash';
+import React, { useCallback, useEffect, useState, useMemo } from 'react';
 import ConditionItem from './ConditionItem';
 import FieldItem from './FieldItem';
 import useCountDown from '@/hooks/useCountDown';
@@ -15,10 +15,11 @@ import { ComparisonMap, IConditionItem, IFieldItem, IParadigmItem, IParadigmResu
 import { LayoutMode } from '@/constants/system';
 
 type IProps = {
-  messageListItemContent: { substance: any, metadata?: string };
+  messageListItemContent: { substance: any; metadata?: string; sourceAgentType?: string };
   message: IMessage;
   updateMessageListItemContent: (val: any) => void;
   messageIdx: number;
+  thinkListItem?: any[];
 };
 
 export default function ThinkRewriteQuestion(props: IProps) {
@@ -27,9 +28,11 @@ export default function ThinkRewriteQuestion(props: IProps) {
   const { EventEmitter, layoutMode } = useGlobal();
 
   const metadata = get(messageListItemContent, 'metadata', '');
+  const sourceAgentType = get(messageListItemContent, 'sourceAgentType', '');
   const { paradigmList: defParadigmList, query } = get(messageListItemContent, 'substance', '');
 
   const isPreviewMode = layoutMode === LayoutMode.preview;
+  const isThinkingProcess = !!props.thinkListItem;
 
   const { isHistoryMsg } = message;
 
@@ -41,17 +44,31 @@ export default function ThinkRewriteQuestion(props: IProps) {
 
   const { getMessageList, totalMesageListSize } = React.useContext(ChatLayoutCompContext);
 
+  const list = useMemo(() => {
+    if (isThinkingProcess) {
+      return message.thinkList || [];
+    }
+    return message?.messageList || [];
+  }, [message.messageList, message.thinkList, isThinkingProcess]);
+
+  const curMessageIdx = useMemo(() => {
+    const messageList = getMessageList();
+    return messageList.findIndex((item) => message.msgId === item.msgId);
+  }, [getMessageList, message]);
+
+  // 最后一个问题才显示按钮
   // 最后一个问题才显示按钮
   useEffect(() => {
     if (isHistoryMsg) {
       switchShowSubmitBtn(false);
       return;
     }
-    const lastIndex = message?.messageList?.findLastIndex((item) => {
+
+    let lastIndex = list?.findLastIndex((item) => {
       return `${get(item, 'contentType')}` === `${SSEMessageType.thinkRewriteQuestion}`;
     });
     switchShowSubmitBtn(lastIndex === messageIdx);
-  }, [get(message, 'messageList.length', 0), messageIdx, isHistoryMsg]);
+  }, [list, messageIdx, isHistoryMsg]);
 
   // 同步消息中的paradigmList，用于确定时提交入参
   const updateParadigmListToMessage = useCallback(
@@ -100,7 +117,7 @@ export default function ThinkRewriteQuestion(props: IProps) {
 
       try {
         metadataObj = JSON.parse(metadata);
-      } catch(e) {
+      } catch (e) {
         console.error(e);
       }
 
@@ -110,6 +127,8 @@ export default function ThinkRewriteQuestion(props: IProps) {
           // 用于合并消息记录
           inheritQryMsgId: message.queryMsgId,
           payload: {
+            actionType: 'RESUME',
+            sourceAgentType,
             extParams: {
               humanInput: {
                 paradigmList: newParadigmList,
@@ -132,14 +151,14 @@ export default function ThinkRewriteQuestion(props: IProps) {
       };
       EventEmitter.emit('beyond-chat-on-send-msg', payload);
     },
-    [query, message, metadata]
+    [query, message, metadata, sourceAgentType]
   );
 
   // 确定，中断，屏蔽按钮，重新发送继续该消息下的思考过程
   const handleSubmit = useCallback(() => {
     setHasSubmit(true);
     const newParadigmList =
-      message?.messageList
+      list
         ?.filter((item) => `${item?.contentType}` === `${SSEMessageType.thinkRewriteQuestion}`)
         .map((item) => {
           const substance = get(item, 'content.substance', {});
@@ -174,29 +193,27 @@ export default function ThinkRewriteQuestion(props: IProps) {
         }) || [];
     console.log('newParadigmList', newParadigmList);
     sendRewriteQuestion(newParadigmList);
-  }, [sendRewriteQuestion, message?.messageList]);
+  }, [sendRewriteQuestion, list]);
 
   const { remainingTime, isRunning, start, reset } = useCountDown(15000, handleSubmit);
 
   React.useEffect(() => {
     reset();
-
-    const messageList = getMessageList();
-    const idx = messageList.findIndex((item) => message.msgId === item.msgId);
-
-    if (!defParadigmList || !showSubmitBtn || idx !== totalMesageListSize - 1) return;
+    if (isNil(defParadigmList) || !showSubmitBtn || curMessageIdx !== totalMesageListSize - 1) return;
 
     start();
-  }, [defParadigmList, showSubmitBtn, message, totalMesageListSize]);
+  }, [isNil(defParadigmList), showSubmitBtn, totalMesageListSize, curMessageIdx]);
 
   if (!paradigmList) return null;
 
   return (
     <div className={styles.wrapper} style={{ pointerEvents: isPreviewMode ? 'none' : 'auto' }}>
       <div style={{ marginBottom: '12px' }}>
-        <Row className={styles.paradigmItem} >
+        <Row className={styles.paradigmItem}>
           <Col>原查询</Col>
-          <Col><div style={{ color: 'var(--beyond-color-text-tertiary)' }}>{query}</div></Col>
+          <Col>
+            <div style={{ color: 'var(--beyond-color-text-tertiary)' }}>{query}</div>
+          </Col>
         </Row>
       </div>
       <Divider size="small" />
@@ -238,10 +255,14 @@ export default function ThinkRewriteQuestion(props: IProps) {
       {/* 最后一个问题 且 未提交，显示按钮 */}
       {!isPreviewMode && showSubmitBtn && !hasSubmit && (
         <div className="ub ub-pe">
-          <Button size="small" type="primary" onClick={() => {
-            reset();
-            handleSubmit();
-          }}>
+          <Button
+            size="small"
+            type="primary"
+            onClick={() => {
+              reset();
+              handleSubmit();
+            }}
+          >
             {isRunning &&
               intl.formatMessage(
                 { id: 'common.countdownConfirm' },

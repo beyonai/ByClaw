@@ -32,6 +32,7 @@ describe("adaptAgentJson", () => {
     expect(res.modelRef).toBe("");
     expect(res.systemPrompt).toBe("Be brief.");
     expect(res.listEntry.model).toBeUndefined();
+    expect(res.listEntry.skills).toEqual([]);
   });
 
   it("ignores native provider/model and keeps default-model fallback", () => {
@@ -56,6 +57,7 @@ describe("adaptAgentJson", () => {
     expect(res.provider).toBeUndefined();
     expect(res.listEntry.model).toBeUndefined();
     expect(res.systemPrompt).toBe("Help users.");
+    expect(res.listEntry.skills).toEqual([]);
   });
 
   it("does not embed JSON array corePersonaDefinition in systemPrompt", () => {
@@ -170,6 +172,47 @@ describe("adaptAgentJson", () => {
     expect(res.associatedResources![0].parentResourceId).toBe("-1");
     expect(res.coreCompetencies).toHaveLength(1);
     expect(res.coreCompetencies![0].coreCompetency).toBe("Password Reset");
+    expect(res.listEntry.skills).toEqual([]);
+  });
+
+  it("smoke: DIG_EMPLOYEE_10000115.json maps relSkills to agents.list skills", () => {
+    const raw = {
+      resourceId: "10000115",
+      resourceName: "Skill Demo",
+      relSkills: ["dws", "clawhub"],
+    };
+    const res = adaptAgentJson({
+      raw,
+      fileName: "DIG_EMPLOYEE_10000115.json",
+      embedApiKeysFromJson: false,
+    });
+    expect("error" in res).toBe(false);
+    if ("error" in res) {
+      return;
+    }
+    expect(res.agentId).toBe(`${MANAGED_AGENT_PREFIX}10000115`);
+    expect(res.listEntry.skills).toEqual(["dws", "clawhub"]);
+  });
+
+  it("maps raw Baiying detail relTools to agents.list tools.allow", () => {
+    const raw = {
+      resourceId: "10011257",
+      resourceName: "Tool limited employee",
+      integrationType: "NONE",
+      relTools: ["*", " read ", "", "write"],
+    };
+    const res = adaptAgentJson({
+      raw,
+      fileName: "DIG_EMPLOYEE_10011257.json",
+      embedApiKeysFromJson: false,
+    });
+    expect("error" in res).toBe(false);
+    if ("error" in res) {
+      return;
+    }
+    expect(res.listEntry.tools).toEqual({
+      allow: ["*", "read", "write", "baiying_call"],
+    });
   });
 
   it("maps raw Baiying detail (integrationType INTERFACE)", () => {
@@ -179,6 +222,7 @@ describe("adaptAgentJson", () => {
       resourceDesc: "Query weather",
       integrationType: "INTERFACE",
       agentSseUrl: "https://sse.example.com/agent/20001",
+      agentHomeUrl: "https://home.example.com/agent/20001",
       prologue: JSON.stringify({
         modelInfo: { model: "gpt-4o" },
       }),
@@ -196,6 +240,7 @@ describe("adaptAgentJson", () => {
     expect(res.agentId).toBe(`${MANAGED_AGENT_PREFIX}20001`);
     expect(res.integrationType).toBe("INTERFACE");
     expect(res.agentSseUrl).toBe("https://sse.example.com/agent/20001");
+    expect(res.agentHomeUrl).toBe("https://home.example.com/agent/20001");
   });
 
   it("does not require defaultProxyUrl for raw detail format", () => {

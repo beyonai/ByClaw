@@ -27,7 +27,7 @@ function normalizeAgentId(value: string | undefined | null): string {
 }
 
 /** Minimal resolveStateDir that covers common cases without importing internal modules. */
-function resolveStateDir(): string {
+export function resolveStateDir(): string {
   const override = process.env.OPENCLAW_STATE_DIR?.trim() || process.env.CLAWDBOT_STATE_DIR?.trim();
   if (override) {
     return override.startsWith("~")

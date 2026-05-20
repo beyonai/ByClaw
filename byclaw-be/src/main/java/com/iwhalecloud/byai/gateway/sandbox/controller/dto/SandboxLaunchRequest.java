@@ -14,9 +14,6 @@ public class SandboxLaunchRequest {
     @JsonProperty("user_code")
     private String userCode;
 
-    @JsonProperty("auto_release")
-    private Integer autoRelease;
-
     @JsonProperty("envs")
     private Map<String, String> envs;
 

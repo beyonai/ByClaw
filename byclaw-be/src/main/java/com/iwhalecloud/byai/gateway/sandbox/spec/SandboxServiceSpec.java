@@ -1,10 +1,10 @@
 package com.iwhalecloud.byai.gateway.sandbox.spec;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import lombok.Data;
-
 import java.util.List;
 import java.util.Map;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import lombok.Data;
 
 /**
  * Sandbox service spec (stored as JSONB in DB).
@@ -29,6 +29,16 @@ public class SandboxServiceSpec {
      * Ports to wait for. OpenSandbox will expose one endpoint per port.
      */
     private List<PortSpec> ports;
+
+    /**
+     * Primary service port exposed by the image.
+     */
+    private Integer servicePort;
+
+    /**
+     * Image endpoint strategy, for example openclaw or uiagent.
+     */
+    private String imageType;
 
     /**
      * Resource limits (CreateSandboxRequest.resourceLimits).

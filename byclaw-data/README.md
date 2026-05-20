@@ -1,6 +1,6 @@
 # byclaw-data
 
-`byclaw-data` 负责把已经发布到 PyPI 的 DataCloud 能力接到 `byclaw-all`，并在本仓库里补一层 byclaw 定制的 MCP 启动逻辑。
+`byclaw-data` 负责把已经发布到 PyPI 的 DataCloud 能力接到 ByClaw 平台，并在本仓库里补一层 byclaw 定制的 MCP 启动逻辑。
 
 当前涉及的四个核心模块是：
 
@@ -28,39 +28,6 @@ uv sync
 - `by-datacloud` -> `datacloud_data_sdk`
 - `by-datacloud` -> `datacloud_data_service`
 - `by-datacloud` -> `datacloud_knowledge`
-
-## 环境配置
-
-按启动方式选择对应的样例文件生成本地配置：
-
-```bash
-# 通过 ./scripts/start-data.sh 或 byclaw-data/start.sh 启动
-cp byclaw-data/.env.start.sh.example byclaw-data/.env
-
-# 不通过 start.sh，直接执行 uv run byclaw-data-mcp / uv run byclaw-data-worker
-cp byclaw-data/.env.example byclaw-data/.env
-```
-
-两个样例文件里已经按章节写好了变量说明。一般只需要按样例文件注释修改这几类配置：
-
-- 数据库配置
-- Gateway / Worker / Redis 配置
-- 模型配置
-- 资源路径配置
-
-其他 Agent、Data Service、日志等配置通常保持默认即可。
-
-### 通过 start.sh 启动
-
-使用 `byclaw-data/.env.start.sh.example`。这个样例使用 `DB_*`、`REDIS_*`、`FILE_STORAGE_MINIO_*` 等变量名，`start.sh` 会自动转换为运行时需要的 `DATACLOUD_*` / `DC_*` / `OPENAI_*` 变量。
-
-`start.sh` 启动时会先读取仓库根目录 `.env`，再读取 `byclaw-data/.env`，后读取的值会覆盖先读取的值。因此既可以在根目录统一管理公共配置，也可以在 `byclaw-data/.env` 里覆盖本模块配置。
-
-### 不通过 start.sh 启动
-
-使用 `byclaw-data/.env.example`。这个样例使用运行时直接读取的 `DATACLOUD_*` 变量名，适合直接执行 `uv run byclaw-data-mcp`、`uv run byclaw-data-worker`，或在 IDE / 容器 / 进程管理器里显式注入环境变量。
-
-直接启动时不要只配置 `DB_*`、`REDIS_*`、`LLM_*`、`EMBEDDING_*` 这些脚本兼容变量；请按 `byclaw-data/.env.example` 中的 `DATACLOUD_*` 变量修改。
 
 ## 本地启动
 
@@ -100,6 +67,38 @@ VS Code / Cursor 里可以直接使用调试配置：
 其中结果文件存储会在 loader 初始化时绑定 `byclaw-data` 自己的 `ByclawResultFileStorage` 子类：
 优先走 `DATACLOUD_RESULT_FILE_API_BASE_URL`
 未配置时回退到 `BE_DOMAINNAME` / `DATACLOUD_RESULT_FILE_SERVICE_NAME` 通过 discovery 调后端。
+
+## 关键环境变量
+
+建议在仓库根目录 `.env` 中配置：
+
+```bash
+DATACLOUD_DATA_SERVICE_PORT=8080
+DATACLOUD_DATA_SERVICE_URL=http://127.0.0.1:8080
+DATACLOUD_GATEWAY_WORKER_ID=datacloud
+DATACLOUD_AI_FACTORY_URL=http://127.0.0.1:8569
+DATACLOUD_AI_FACTORY_TOKEN=replace-me
+DATACLOUD_AI_FACTORY_AGENT_IDS=["10000587"]
+```
+
+`start.sh` 会自动做两层归一化：
+
+- 先把旧变量回填到 `DATACLOUD_*`：
+  `DB_*` -> `DATACLOUD_DB_*`
+  `REDIS_*` -> `DATACLOUD_GATEWAY_REDIS_*`
+  `LLM_*` -> `DATACLOUD_LLM_*`
+  `EMBEDDING_*` -> `DATACLOUD_EMBEDDING_*`
+- `BE_DOMAINNAME_URL` 缺省时由 `HOST` + `BE_SERVER_PORT` 拼接
+- `DATACLOUD_API_BASE_URL` 缺省时回退到 `HOST` + `DATACLOUD_DATA_SERVICE_PORT`，再回退到兼容旧变量 `DATACLOUD_PORT` 或 `DATACLOUD_DATA_SERVICE_URL`
+- 结果文件存储支持两种模式：
+  `DATACLOUD_RESULT_FILE_STORAGE_TYPE=local` 时写本地目录
+  `DATACLOUD_RESULT_FILE_STORAGE_TYPE=api` 时通过 HTTP API 写远端文件服务
+- 再从 `DATACLOUD_*` 派生运行时别名：
+  `DC_LLM_*` <- `DATACLOUD_LLM_*`
+  `DC_API_BASE_URL` <- `DATACLOUD_API_BASE_URL`
+  `DC_ONTOLOGY_PATH` <- `DATACLOUD_ONTOLOGY_PATH`，未配置时回退到 `byclaw-data/resource/import_package_owl_onto`
+  `DC_SCENE_PATH` <- `DATACLOUD_SCENE_PATH`
+  `OPENAI_*` <- `DATACLOUD_LLM_REASONING_*`，再回退到 `DATACLOUD_LLM_*`
 
 ## Docker
 

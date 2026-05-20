@@ -1295,14 +1295,14 @@ class DataCloudWorker(GatewayWorker):
 
         resume_cache_key: str | None = None
         if isinstance(command, ResumeCommand) or _paradigm_resume_value is not None:
-            if _paradigm_resume_value is not None:
-                resume_value_probe = _paradigm_resume_value
-            elif isinstance(command, ResumeCommand):
+            if isinstance(command, ResumeCommand):
                 resume_value_probe = (
                     command.reply_data
                     if command.reply_data is not None
                     else command.content
                 )
+            else:
+                resume_value_probe = _paradigm_resume_value
             # paradigm resume：checkpoint_id 在 humanInput.metadata 而非请求头，需合并后解析
             _probe_metadata = (
                 {**_paradigm_human_input_metadata, **header_metadata}
@@ -1419,13 +1419,6 @@ class DataCloudWorker(GatewayWorker):
                     )
                 )
                 resume_input = _dict_to_paradigm_answer(raw_paradigm)
-                # raw_paradigm 是完整 humanInput dict，直接挂到 resume_input 供
-                # _paradigm_answer_to_resume_value 透传 metadata 给 user_clarify_node
-                if isinstance(raw_paradigm, dict):
-                    try:
-                        resume_input._raw_dict = raw_paradigm  # type: ignore[attr-defined]
-                    except (AttributeError, TypeError):
-                        pass
                 event_iter = self._ontology_agent.resume(
                     dyn_thread_id,
                     resume_input,
@@ -1717,10 +1710,7 @@ class DataCloudWorker(GatewayWorker):
         }
         context._langgraph_thread_id = thread_id
 
-        if _paradigm_resume_value is not None:
-            # AskAgentCommand 携带 paradigm 回复：转为图恢复，不重新执行
-            graph_input = Command(resume=_paradigm_resume_value)
-        elif isinstance(command, ResumeCommand):
+        if isinstance(command, ResumeCommand):
             try:
                 resume_payload_json = json.dumps(
                     command.to_dict(),
@@ -1754,16 +1744,7 @@ class DataCloudWorker(GatewayWorker):
                 type(resume_value).__name__,
                 resume_preview,
             )
-            # 静态路径 paradigm resume：_paradigm_resume_value 携带完整 humanInput（含 metadata），
-            # 优先使用，否则 user_clarify_node 收到的是纯字符串，无法做 path_mapping 裁剪。
-            if _paradigm_resume_value is not None:
-                graph_input: Any = Command(resume=_paradigm_resume_value)
-                logger.info(
-                    "ResumeCommand (static): using paradigm humanInput dict as resume_value session=%s",
-                    context.session_id,
-                )
-            else:
-                graph_input = Command(resume=resume_value)
+            graph_input: Any = Command(resume=resume_value)
         elif _paradigm_resume_value is not None:
             # AskAgentCommand 携带 paradigm 回复：转为图恢复，不重新执行
             graph_input = Command(resume=_paradigm_resume_value)

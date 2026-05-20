@@ -16,9 +16,28 @@ function stripLeadingBom(s: string): string {
 const SOUL_FILENAME = "SOUL.md";
 const AGENTS_FILENAME = "AGENTS.md";
 export const BUSINESS_EXTENSIONS_FILENAME = "BYAI_BUSINESS_EXTENSIONS.md";
+const BOOTSTRAP_FILENAME = "BOOTSTRAP.md";
 const IDENTITY_FILENAME = "IDENTITY.md";
 const USER_FILENAME = "USER.md";
 const TOOLS_FILENAME = "TOOLS.md";
+
+/** Managed BOOTSTRAP: explicit no-op sentinel to suppress OpenClaw onboarding. */
+export function buildBootstrapMd(): string {
+  return `${MARKER}
+
+# Managed Bootstrap No-Op
+
+This workspace has already been initialized by \`baiying-enhance\`.
+
+Do not run first-run onboarding.
+Do not ask who you are or who the user is.
+Do not inspect files to diagnose this bootstrap file.
+Do not create, edit, move, delete, or archive any files because of this bootstrap file.
+Do not delete this file.
+
+Treat this file as a no-op sentinel. Continue with the active \`AGENTS.md\`, \`SOUL.md\`, \`TOOLS.md\`, runtime context, and the user's current request.
+`;
+}
 
 type BaiyingAgentItem = {
   resourceId?: string;
@@ -77,7 +96,16 @@ function getFirstAgentItem(raw: unknown): BaiyingAgentItem | null {
     return null;
   }
   const first = list[0];
-  return first && typeof first === "object" ? (first as BaiyingAgentItem) : null;
+  if (!first || typeof first !== "object") {
+    return null;
+  }
+  const o = first as Record<string, unknown>;
+  const relResourceInfoList = Array.isArray(o.relResourceInfoList)
+    ? (o.relResourceInfoList as NonNullable<BaiyingAgentItem["relResourceInfoList"]>)
+    : Array.isArray(o.relResourceList)
+      ? (o.relResourceList as NonNullable<BaiyingAgentItem["relResourceInfoList"]>)
+      : undefined;
+  return { ...(first as BaiyingAgentItem), relResourceInfoList } as BaiyingAgentItem;
 }
 
 /** Parse raw Baiying detail format (resourceId + resourceName at root) into BaiyingAgentItem. */
@@ -336,7 +364,7 @@ function buildToolsMd(item: BaiyingAgentItem, fallbackAgentId?: string): string 
   lines.push(
     "## Notes",
     "",
-    "- `TOOLKIT` and `MCP` resources may expose child actions discovered from local snapshots or remote metadata.",
+    "- `TOOLKIT` and `MCP` resources may expose child actions discovered from Redis snapshots or remote metadata.",
     "- For DOC resources (`KG_DOC`/`KG_DB`/`KG_QA`), executor requires `agent_id`. `baiying_call` will auto-fill it from the current agent.json `resourceId` and send it as top-level payload `agent_id`.",
     "- `OBJECT` and `VIEW` resources are dispatched through SDK `callAgent` to `BYCLAW_DATA`; `baiying_call` fills `call_object_ids` / `call_view_ids` from the selected resource code.",
     "- For large `OBJECT`/`VIEW` results, backend may return `file_url`, and `file_url` is a local file path; treat it as the authoritative full payload and use this local path for downstream business processing.",
@@ -407,14 +435,15 @@ export async function seedManagedAgentWorkspace(params: {
   await fs.mkdir(dir, { recursive: true });
 
   // Read source JSON for content extraction.
-  let raw: unknown;
-  if (params.adapted.sourceFilePath) {
+  let raw: unknown = params.adapted.sourceJson;
+  if (raw === undefined && params.adapted.sourceFilePath) {
     try {
       raw = JSON.parse(await fs.readFile(params.adapted.sourceFilePath, "utf8"));
     } catch {
       raw = {};
     }
-  } else {
+  }
+  if (raw === undefined) {
     raw = {};
   }
 
@@ -477,4 +506,7 @@ export async function seedManagedAgentWorkspace(params: {
 
   // Ensure TOOLS.md exists even when source JSON has no Baiying payload.
   await writeIfMissing(path.join(dir, TOOLS_FILENAME), `${MARKER}\n\n# Tools\n\n(none)\n`);
+
+  // Replace OpenClaw's default BOOTSTRAP onboarding doc so the first turn uses SOUL/AGENTS only.
+  await fs.writeFile(path.join(dir, BOOTSTRAP_FILENAME), buildBootstrapMd(), "utf8");
 }

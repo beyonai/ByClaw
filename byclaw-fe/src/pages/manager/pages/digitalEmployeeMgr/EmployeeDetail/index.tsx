@@ -12,6 +12,7 @@ import useShowModal from '@/pages/manager/hooks/useShowModal';
 import { getAvatarUrl } from '@/pages/manager/utils/agent';
 import { showAuditConfirm } from '@/pages/manager/utils/auditConfirm';
 import { getIframeUrl, getValidValue } from '@/pages/manager/utils/managerUtils';
+import { agentHomeUrlHandler } from '@/pages/manager/utils/agent';
 import { ArrowLeftOutlined, ArrowRightOutlined, EllipsisOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import { Button, Divider, Form, message, Space, Spin, Tooltip } from 'antd';
 import classnames from 'classnames';
@@ -21,6 +22,7 @@ import { connect, history, useDispatch, useIntl, useLocation, getLocale } from '
 import { agentHandler } from '@/pages/manager/utils/agent';
 import useGlobal from '@/pages/manager/hooks/useGlobal';
 import BaseListModal from '../components/BaseListModal';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 import PublishModal from '../components/PublishModal';
 import RefineModal from '../components/RefineModal';
 import LogInfoDrawer from './components/LogInfoDrawer';
@@ -236,7 +238,15 @@ const EmployeeDetail = ({ loading }) => {
     if (agentId && homeType !== undefined) {
       let url;
       if (homeType === 'custom' && agentHomeUrl) {
-        url = getIframeUrl(agentHomeUrl);
+        url = agentHomeUrlHandler(
+          {
+            agentHomeUrl,
+            id: agentId,
+            resourceCode: '',
+          },
+          '',
+          agentHomeUrl
+        );
       } else {
         url = `${PREVIEW_HOST}iframes/employee?canCleanSession=1&agentId=${agentId}`;
       }
@@ -824,6 +834,50 @@ const EmployeeDetail = ({ loading }) => {
     [dispatch, form, resultDataRef, prologueRef, knowledgeBases, agentId]
   );
 
+  const fetchDefaultTemplate = useCallback(async () => {
+    const paramCode =
+      ownerType === 'personal'
+        ? 'OPENCLAW_AGENT_ROLE_TEMPLATE_PERSONAL_ASSISTANT'
+        : 'OPENCLAW_AGENT_ROLE_TEMPLATE_DIGITAL_EMPLOYEE';
+
+    try {
+      const res = await getDcSystemConfig({ paramCode });
+      const templateConfig = JSON.parse(res?.paramValue || '{}');
+      const { relSkills = [], relTools = [] } = templateConfig;
+
+      if (relSkills.length > 0) {
+        form.setFieldsValue({ bundledSkills: relSkills });
+
+        let roleObj = {};
+        const roleStr = form.getFieldValue('role') || '{}';
+        try {
+          roleObj = JSON.parse(roleStr || '{}');
+        } catch {
+          roleObj = {};
+        }
+        roleObj.bundledSkills = relSkills;
+        form.setFieldsValue({ role: JSON.stringify(roleObj) });
+      }
+
+      const defaultSkills = [];
+      relTools.forEach((toolCode) => {
+        defaultSkills.push({
+          resourceId: toolCode,
+          resourceName: toolCode === '*' ? '全部工具' : toolCode,
+          grantResourceType: 'TOOLKIT',
+          description: '',
+          relTools: toolCode,
+        });
+      });
+
+      if (defaultSkills.length > 0) {
+        setSkills((prev) => [...prev, ...defaultSkills]);
+      }
+    } catch (error) {
+      console.error('fetchDefaultTemplate error', error);
+    }
+  }, [ownerType, form]);
+
   useEffect(() => {
     if (agentId) {
       getCompositeAppInfo(undefined, (prologue) => {
@@ -864,8 +918,10 @@ const EmployeeDetail = ({ loading }) => {
           setModelList(res || []);
         },
       });
+
+      fetchDefaultTemplate();
     }
-  }, [agentId]);
+  }, [agentId, fetchDefaultTemplate]);
 
   // 校验核心能力名称必填（依赖 ConfigForm 同步到表单的 coreCompetencies）
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -946,8 +1002,13 @@ const EmployeeDetail = ({ loading }) => {
 
         const relResourceInfoList = [];
         const relIds = [];
+        const relTools = [];
         skills.forEach((it) => {
-          relIds.push(`${it.resourceId}`);
+          if (it.relTools) {
+            relTools.push(it.relTools);
+          } else {
+            relIds.push(`${it.resourceId}`);
+          }
 
           if (['VIEW', 'OBJECT'].includes(it.grantResourceType)) {
             const p = {
@@ -974,6 +1035,9 @@ const EmployeeDetail = ({ loading }) => {
         set(param, 'relResourceInfoList', relResourceInfoList);
         set(param, 'createType', effectiveDigitalType);
         set(param, 'relIds', relIds);
+        if (relTools.length > 0) {
+          set(param, 'relTools', relTools);
+        }
         set(queryData, 'recommendPrompt.prompt', prompt);
         set(queryData, 'integrationType', integrationType || 'NONE');
         set(param, 'agentDevType', agentDevType.current || 'byai');
@@ -1084,9 +1148,9 @@ const EmployeeDetail = ({ loading }) => {
 
             setUpdateTime(dayjs().format('HH:mm:ss'));
 
-            if (!queryData.resourceId && resp) {
-              const url = `${PREVIEW_HOST}iframes/employee?canCleanSession=1&agentId=${resp}`;
-              setAgentId(resp);
+            if (!queryData.resourceId && resp?.resourceId) {
+              const url = `${PREVIEW_HOST}iframes/employee?canCleanSession=1&agentId=${resp.resourceId}`;
+              setAgentId(resp.resourceId);
               setDebugPage(url);
             }
 

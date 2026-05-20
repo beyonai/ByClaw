@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
@@ -26,6 +27,12 @@ public class SandboxInfo {
      */
     private List<String> endpoints;
 
+    private String gatewayToken;
+
+    private Integer servicePort;
+
+    private String imageType;
+
     private Map<String, String> endpointHeaders;
 
     /**
@@ -33,6 +40,8 @@ public class SandboxInfo {
      * Null means this sandbox was not created with OpenSandbox auto expiration.
      */
     private Integer timeoutSeconds;
+
+    private Date remoteExpiresAt;
 
     private LocalDateTime createdTime;
 

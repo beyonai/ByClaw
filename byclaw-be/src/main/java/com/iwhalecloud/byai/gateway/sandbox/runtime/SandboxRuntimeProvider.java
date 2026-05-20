@@ -40,4 +40,8 @@ public interface SandboxRuntimeProvider {
     void remove(String userCode, String sandboxType, SandboxInfo sandboxInfo);
 
     void heartbeat(String userCode, String sandboxType, SandboxInfo sandboxInfo);
+
+    default boolean exists(String userCode, String sandboxType, SandboxInfo sandboxInfo) {
+        return true;
+    }
 }

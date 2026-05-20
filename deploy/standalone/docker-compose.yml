@@ -1,6 +1,6 @@
 services:
   fe:
-    image: ${IMAGE_FE:-ghcr.io/beyonclaw/byclaw-all/byclaw-fe:main}
+    image: ${IMAGE_FE:-ghcr.io/beyonai/byclaw/byclaw-fe:main}
     container_name: byclaw-fe-${CONTAINER_SUFFIX:-standalone}
     ports:
       - "${NGINX_PORT:-8080}:8080"
@@ -10,10 +10,12 @@ services:
       - ./logs/nginx:/var/log/nginx
     networks:
       - byclaw-network
+    depends_on:
+      - be
     restart: unless-stopped
 
   be:
-    image: ${IMAGE_BE:-ghcr.io/beyonclaw/byclaw-all/byclaw-be:main}
+    image: ${IMAGE_BE:-ghcr.io/beyonai/byclaw/byclaw-be:main}
     #image: byclaw-be:local
     container_name: byclaw-be-${CONTAINER_SUFFIX:-standalone}
     user: root
@@ -22,6 +24,8 @@ services:
       - "${BE_WS_PORT:-8082}:${BE_WS_PORT:-8082}"
     env_file:
       - ../../.env
+    environment:
+      - JAVA_OPTS=-Xms512m -Xmx2g -XX:TieredStopAtLevel=1 -XX:+UseParallelGC -Dspring.jmx.enabled=false
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ../config:/app/config
@@ -31,7 +35,7 @@ services:
     restart: unless-stopped
 
   qa-manager:
-    image: ${IMAGE_QA:-ghcr.io/beyonclaw/byclaw-all/byclaw-qa:main}
+    image: ${IMAGE_QA:-ghcr.io/beyonai/byclaw/byclaw-qa:main}
     container_name: byclaw-qa-manager-${CONTAINER_SUFFIX:-standalone}
     user: root
     command: api
@@ -48,7 +52,7 @@ services:
     restart: unless-stopped
 
   qa-worker:
-    image: ${IMAGE_QA:-ghcr.io/beyonclaw/byclaw-all/byclaw-qa:main}
+    image: ${IMAGE_QA:-ghcr.io/beyonai/byclaw/byclaw-qa:main}
     container_name: byclaw-qa-worker-${CONTAINER_SUFFIX:-standalone}
     user: root
     command: worker
@@ -63,13 +67,15 @@ services:
     restart: unless-stopped
 
   data:
-    image: ${IMAGE_DATA:-ghcr.io/beyonclaw/byclaw-all/byclaw-data:main}
+    image: ${IMAGE_DATA:-ghcr.io/beyonai/byclaw/byclaw-data:main}
     container_name: byclaw-data-${CONTAINER_SUFFIX:-standalone}
     user: root
     ports:
       - "${DATACLOUD_PORT:-8087}:${DATACLOUD_PORT:-8087}"
     env_file:
       - ../../.env
+    environment:
+      - JAVA_OPTS=-Xms256m -Xmx1g -XX:TieredStopAtLevel=1 -XX:+UseParallelGC -Dspring.jmx.enabled=false
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ../config:/app/config

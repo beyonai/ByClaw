@@ -8,6 +8,7 @@ Thumbs.db
 *.swo
 
 # Logs & temp
+logs
 *.log
 tmp/
 .cache/
@@ -41,7 +42,6 @@ byclaw-qa/client.py
 .env*
 .env.*
 !.env.example
-!.env.start.sh.example
 upload.sh
 
 # byclaw-data：本体 OWL 包（体积大/环境差异大，由部署或本地生成；仅保留 README 占位）
@@ -63,3 +63,9 @@ byclaw-data/resource/agents/
 byclaw-data/resource/object/
 byclaw-data/resource/view/
 byclaw-data/resource/import_package_owl_onto_bak/
+
+# Claude
+.claude/
+
+# Vscode
+.vscode/

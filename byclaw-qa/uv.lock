@@ -261,7 +261,7 @@ wheels = [
 
 [[package]]
 name = "by-qa"
-version = "0.1.5"
+version = "0.1.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -269,9 +269,9 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/32/f0/23d24d0d399c9aa4415164a605b3686c594ecd258c182272b6f29ee2f4a0/by_qa-0.1.5.tar.gz", hash = "sha256:b3c07f4adb9da8dade917566a6d258b1f603b2d3b249c58ee56dc14da0c8bf13", size = 384647, upload-time = "2026-04-23T06:54:26.702Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/05/8e/89aad7e05dc1a0fb9bdb0f118ba88f308da8a59700542343a6691a11af24/by_qa-0.1.9.tar.gz", hash = "sha256:a48e78cb27957f66fa982a4f2702422c496cc70d914c146d3af334f943f0a7d0", size = 324097, upload-time = "2026-05-15T06:43:55.501Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/67/ef/bfc378e0e41e66401273570ab1a236f44720ebeb075e25f470a42ffcc47e/by_qa-0.1.5-py3-none-any.whl", hash = "sha256:fa00f14bd21a5660bbaf81b3176d75ecbd0ae33298a0df38933101f1bdf065c8", size = 130861, upload-time = "2026-04-23T06:54:25.074Z" },
+    { url = "https://files.pythonhosted.org/packages/15/fe/ac2622f4aed01e4427ce95cb0d1944ed9080429b13a3fb863281edf1446f/by_qa-0.1.9-py3-none-any.whl", hash = "sha256:1581e81778093b0227532c827bdd1df97331f0a43f142fff45dda3226ac2f796", size = 151680, upload-time = "2026-05-15T06:43:53.507Z" },
 ]
 
 [package.optional-dependencies]
@@ -280,6 +280,7 @@ all = [
     { name = "aiosqlite" },
     { name = "by-framework" },
     { name = "fastapi" },
+    { name = "json-repair" },
     { name = "langchain" },
     { name = "langchain-core" },
     { name = "langchain-openai" },
@@ -314,7 +315,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "by-framework", specifier = ">=0.1.13" },
-    { name = "by-qa", extras = ["all"], specifier = "==0.1.5" },
+    { name = "by-qa", extras = ["all"], specifier = "==0.1.9" },
 ]
 
 [package.metadata.requires-dev]
@@ -717,6 +718,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d3/59/322338183ecda247fb5d1763a6cbe46eff7222eaeebafd9fa65d4bf5cb11/jmespath-1.1.0.tar.gz", hash = "sha256:472c87d80f36026ae83c6ddd0f1d05d4e510134ed462851fd5f754c8c3cbb88d", size = 27377, upload-time = "2026-01-22T16:35:26.279Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/14/2f/967ba146e6d58cf6a652da73885f52fc68001525b4197effc174321d70b4/jmespath-1.1.0-py3-none-any.whl", hash = "sha256:a5663118de4908c91729bea0acadca56526eb2698e83de10cd116ae0f4e97c64", size = 20419, upload-time = "2026-01-22T16:35:24.919Z" },
+]
+
+[[package]]
+name = "json-repair"
+version = "0.52.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5a/93/5220c447b9ce20ed14ab33bae9a29772be895a8949bb723eaa30cc42a4e1/json_repair-0.52.2.tar.gz", hash = "sha256:1c83e1811d7e57092ad531b333f083166bdf398b042c95f3cd62b30d74dc7ecd", size = 35584, upload-time = "2025-10-20T07:24:20.221Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/87/20/1935a6082988efea16432cecfdb757111122c32a07acaa595ccd78a55c47/json_repair-0.52.2-py3-none-any.whl", hash = "sha256:c7bb514d3f59d49364653717233eb4466bda0f4fdd511b4dc268aa877d406c81", size = 26512, upload-time = "2025-10-20T07:24:18.893Z" },
 ]
 
 [[package]]

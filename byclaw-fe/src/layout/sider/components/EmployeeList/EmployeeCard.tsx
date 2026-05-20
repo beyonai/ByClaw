@@ -2,10 +2,10 @@ import React, { useCallback, useEffect, useRef, useState, useContext } from 'rea
 import { debounce, noop, isEmpty } from 'lodash';
 
 // @ts-ignore
-import { useNavigate, useIntl } from '@umijs/max';
-import { List, Skeleton, Typography, Dropdown } from 'antd';
+import { useNavigate, useIntl, useDispatch } from '@umijs/max';
+import { List, Skeleton, Typography, Dropdown, Popconfirm, message } from 'antd';
 import classNames from 'classnames';
-import { isTopAgent } from '@/service/digitalEmployees';
+import { isTopAgent, setDefaultDigitalEmployee } from '@/service/digitalEmployees';
 import AntdIcon from '@/components/AntdIcon';
 import useGlobal from '@/hooks/useGlobal';
 import { IAgentCache } from '@/typescript/agent';
@@ -37,6 +37,7 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
 }) => {
   const { trackerEmployeeClick } = useTracker();
   const navigate = useNavigate();
+  const dispatch = useDispatch();
 
   const { chatMode } = useContext(EmployeeListContext);
   const { agentInfo, setAgentId, setSessionId, EventEmitter } = useGlobal();
@@ -46,6 +47,7 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
 
   const [canShow, setCanShow] = useState<boolean>(false);
   const [isUnApplyLoading, setIsUnApplyLoading] = useState<boolean>(false);
+  const [settingDefault, setSettingDefault] = useState<boolean>(false);
   const intl = useIntl();
 
   const isInput = isInputMode(chatMode);
@@ -53,6 +55,79 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
   const menuItems = (item: IAgentCache) => {
     const items = [];
 
+    // 设为默认
+    if (item.canSetDefault && !disabledAction.includes('setDefault')) {
+      items.push({
+        key: 'setDefault',
+        label: (
+          <Popconfirm
+            title={intl.formatMessage({ id: 'resource.setDefaultAssistantConfirm' })}
+            okText={intl.formatMessage({ id: 'common.confirm' })}
+            cancelText={intl.formatMessage({ id: 'common.cancel' })}
+            onConfirm={(e) => {
+              e?.stopPropagation();
+              const resourceId = item.resourceId ?? item.id ?? item.agentId;
+              if (!resourceId) return;
+
+              setSettingDefault(true);
+              setDefaultDigitalEmployee({ resourceId })
+                .then((data) => {
+                  message.success(intl.formatMessage({ id: 'resource.setDefaultAssistantSuccess' }));
+                  const newDefaultId = data?.newResourceId ?? resourceId;
+                  // 同步前端登录态：自动 @ / sendQuery 兜底都读 userInfo.defaultDigEmployeeId，
+                  // 不同步会导致设默认后必须刷新页面才生效。
+                  dispatch({
+                    type: 'user/updateUserInfo',
+                    payload: { defaultDigEmployeeId: newDefaultId },
+                  });
+                  EventEmitter.emit('beyond-update-employee', {
+                    defaultResourceId: newDefaultId,
+                  });
+                })
+                .catch((error: any) => {
+                  message.error(error?.message || error || intl.formatMessage({ id: 'common.operationFailed' }));
+                })
+                .finally(() => {
+                  setSettingDefault(false);
+                });
+            }}
+          >
+            <div className={classNames(styles.dropdownMenuItem, { [styles.dropdownMenuItemDisabled]: settingDefault })}>
+              <AntdIcon type="icon-a-Useryonghu" style={{ marginRight: '10px' }} />
+              {intl.formatMessage({ id: 'resource.setDefaultAssistant' })}
+            </div>
+          </Popconfirm>
+        ),
+      });
+    }
+
+    // 置顶
+    if (`${item.isTop}` === '0' && !disabledAction.includes('pin')) {
+      items.push({
+        key: 'pin',
+        label: (
+          <div className={styles.dropdownMenuItem}>
+            <AntdIcon type="icon-zhiding" style={{ marginRight: '10px' }} />
+            {intl.formatMessage({ id: 'common.pin' })}
+          </div>
+        ),
+      });
+    }
+
+    // 取消置顶
+    if (`${item.isTop}` === '1' && !disabledAction.includes('unpin')) {
+      items.push({
+        key: 'unpin',
+        label: (
+          <div className={styles.dropdownMenuItem}>
+            <AntdIcon type="icon-quxiaozhiding" style={{ marginRight: '10px' }} />
+            {intl.formatMessage({ id: 'common.unpin' })}
+          </div>
+        ),
+      });
+    }
+
+    // 移除
     if (item.grantType === 'AVAILABLE_USE' && !disabledAction.includes('unapply')) {
       items.push({
         key: 'unapply',
@@ -67,36 +142,10 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
       });
     }
 
-    if (`${item.isTop}` === '0' && !disabledAction.includes('pin')) {
-      items.push({
-        key: 'pin',
-        label: (
-          <div className={styles.dropdownMenuItem}>
-            <AntdIcon type="icon-zhiding" style={{ marginRight: '10px' }} />
-            {intl.formatMessage({ id: 'common.pin' })}
-          </div>
-        ),
-      });
-    }
-
-    if (`${item.isTop}` === '1' && !disabledAction.includes('unpin')) {
-      items.push({
-        key: 'unpin',
-        label: (
-          <div className={styles.dropdownMenuItem}>
-            <AntdIcon type="icon-quxiaozhiding" style={{ marginRight: '10px' }} />
-            {intl.formatMessage({ id: 'common.unpin' })}
-          </div>
-        ),
-      });
-    }
-
     return items;
   };
 
-  const items = React.useMemo(() => {
-    return menuItems(employee);
-  }, [employee]);
+  const items = menuItems(employee);
 
   useEffect(() => {
     if (!listItemRef.current || canShow) return noop;
@@ -169,6 +218,10 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
                 domEvent.preventDefault();
                 domEvent.stopPropagation();
 
+                if (key === 'setDefault') {
+                  return;
+                }
+
                 if (key === 'pin' || key === 'unpin') {
                   isTopAgent({
                     agentIds: [employee.id],
@@ -218,7 +271,14 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
                 {`${employee?.isTop}` === '1' && <AntdIcon type="icon-zhiding-fill" className={styles.pinBadge} />}
                 {employee?.tagName && (
                   <span className={styles.tag}>
-                    <span className={styles.tagText}>{employee?.tagName}</span>
+                    <span className={styles.tagText}>
+                      {employee?.tagName}
+                      {employee?.isDefault ? (
+                        <>（{intl.formatMessage({ id: 'resource.currentDefaultAssistant' })}）</>
+                      ) : (
+                        ''
+                      )}
+                    </span>
                   </span>
                 )}
               </span>

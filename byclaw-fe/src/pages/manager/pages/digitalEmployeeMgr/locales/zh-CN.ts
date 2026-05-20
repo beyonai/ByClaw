@@ -152,6 +152,8 @@ export default {
   'baseListModal.tabs.object': '对象',
   'baseListModal.tabs.qa': '问答',
   'baseListModal.tabs.document': '文档',
+  'baseListModal.tabs.external': '外置',
+  'baseListModal.tabs.builtin': '内置',
 
   // ItemCard
   'itemCard.remove': '移除',

@@ -4,26 +4,38 @@ export default {
 
   // Status
   'sandboxMgr.status.all': 'All',
+  'sandboxMgr.status.starting': 'Starting',
   'sandboxMgr.status.running': 'Running',
+  'sandboxMgr.status.releasing': 'Releasing',
   'sandboxMgr.status.released': 'Released',
+  'sandboxMgr.status.failed': 'Failed',
 
   // Table columns
   'sandboxMgr.table.id': 'ID',
   'sandboxMgr.table.resourceId': 'Resource ID',
   'sandboxMgr.table.userCode': 'User Code',
   'sandboxMgr.table.sandboxType': 'Sandbox Type',
+  'sandboxMgr.table.sandboxId': 'Sandbox ID',
   'sandboxMgr.table.endpoint': 'Endpoint',
   'sandboxMgr.table.chatId': 'Chat ID',
   'sandboxMgr.table.status': 'Status',
   'sandboxMgr.table.autoRelease': 'Auto Release',
+  'sandboxMgr.table.leasePolicy': 'Lease Policy',
+  'sandboxMgr.table.timeoutSeconds': 'Timeout (s)',
+  'sandboxMgr.table.remoteExpiresAt': 'Remote Expires At',
+  'sandboxMgr.table.lastRenewAt': 'Last Renew At',
+  'sandboxMgr.table.nextRenewAt': 'Next Renew At',
   'sandboxMgr.table.lastAccessTime': 'Last Access Time',
+  'sandboxMgr.table.releaseTime': 'Release Time',
+  'sandboxMgr.table.releaseReason': 'Release Reason',
+  'sandboxMgr.table.version': 'Version',
   'sandboxMgr.table.createTime': 'Create Time',
   'sandboxMgr.table.updateTime': 'Update Time',
   'sandboxMgr.table.action': 'Action',
 
   // Actions
   'sandboxMgr.action.view': 'View',
-  'sandboxMgr.action.delete': 'Delete',
+  'sandboxMgr.action.delete': 'Release',
   'sandboxMgr.action.refresh': 'Refresh',
 
   // Delete confirm

@@ -257,27 +257,5 @@ export default {
         agentList: [...agentList],
       };
     },
-    setDefaultEmployee(state: IState, action: { payload: { resourceId: string } }) {
-      const { resourceId } = action.payload;
-      const { employeesList } = state;
-
-      const updatedList = employeesList.map((item: IAgentCache) => {
-        // 把所有 ownerType='personal_default' 的改为 'personal'
-        if (item.ownerType === 'personal_default') {
-          return { ...item, ownerType: 'personal' };
-        }
-        // 把当前 resourceId 的数据设置为 'personal_default'
-        const itemResourceId = item.id || item.agentId;
-        if (itemResourceId === resourceId) {
-          return { ...item, ownerType: 'personal_default' };
-        }
-        return item;
-      });
-
-      return {
-        ...state,
-        employeesList: updatedList,
-      };
-    },
   },
 };

@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.application.service.auth;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.Arrays;
+import java.util.Objects;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -53,6 +54,7 @@ import com.iwhalecloud.byai.manager.qo.auth.ResourceUseApplyQo;
 import com.iwhalecloud.byai.manager.qo.resource.PrivListQo;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
+import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.constants.auth.GrantObjType;
@@ -113,6 +115,9 @@ public class AuthApplicationService {
     private static final String USE_APPLY_PENDING_LABEL_KEY = "auth.use.apply.status.pending";
 
     private static final String DEFAULT_SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX = "_main";
+
+    private static final Set<String> MANAGE_USE_INHERIT_TARGET_TYPES = Set.of(GrantToObjType.USER, GrantToObjType.ORG,
+        GrantToObjType.POST, GrantToObjType.STATION);
 
     @Value("${dataset.system:}")
     private String datasetSystem;
@@ -777,6 +782,18 @@ public class AuthApplicationService {
     }
 
     /**
+     * 判断当前登录用户是否被显式授予资源管理权限。
+     * 该方法只看 ALLOW_MANAGE 授权，不叠加平台管理员/组织管理员等管理兜底能力，
+     * 适用于“左侧列表可见即可设为默认”等需要与授权列表保持一致的场景。
+     */
+    public boolean hasCurrentUserAllowManagePrivilege(SsResource ssResource) {
+        if (ssResource == null) {
+            return false;
+        }
+        return hasEffectiveAllowManagePrivilege(ssResource, CurrentUserHolder.getCurrentUserId());
+    }
+
+    /**
      * 判断当前登录用户是否具备资源使用授权维护权限。
      */
     public boolean hasResourceUseSettingPermission(SsResource ssResource) {
@@ -1393,6 +1410,10 @@ public class AuthApplicationService {
             this.writeRedisForShareUse(compareVo, grantObjId);
         }
 
+        if (GrantType.ALLOW_MANAGE.equals(grantType)) {
+            this.ensureUsePrivilegeForAllowManageTargets(authRedBlackDTO);
+        }
+
         // 同步涉及用户的权限到Redis
         // 授权变更后，为所有涉及的用户重新构建权限缓存
         try {
@@ -1405,6 +1426,97 @@ public class AuthApplicationService {
         catch (Exception e) {
             logger.error("同步用户权限到Redis失败：{}", e.getMessage());
         }
+    }
+
+    /**
+     * 管理权限隐含使用能力：当资源管理红名单新增/保留 USER/ORG/POST/STATION 维度对象时，自动补齐同维度 FORCE_USE。
+     * 如果同维度已经在使用黑名单中，说明业务明确禁止其使用，此时只保留管理权限，不自动覆盖黑名单。
+     * 取消管理权限不会触发使用权限删除，避免误删用户已有的直接使用授权。
+     */
+    private void ensureUsePrivilegeForAllowManageTargets(AuthRedBlackDTO authRedBlackDTO) {
+        List<AuthDTO> inheritTargets = extractManageUseInheritTargets(authRedBlackDTO);
+        if (CollectionUtils.isEmpty(inheritTargets)) {
+            return;
+        }
+        List<AuthDTO> forceUseTargets = inheritTargets.stream()
+            .filter(target -> !hasActiveUseBlackSameDimension(authRedBlackDTO.getGrantObjType(),
+                authRedBlackDTO.getGrantObjId(), target.getGrantToObjType(), target.getGrantToObjId()))
+            .collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(forceUseTargets)) {
+            return;
+        }
+        AuthRedBlackDTO useAuthDto = new AuthRedBlackDTO();
+        useAuthDto.setGrantObjId(authRedBlackDTO.getGrantObjId());
+        useAuthDto.setGrantObjType(authRedBlackDTO.getGrantObjType());
+        useAuthDto.setGrantType(GrantType.FORCE_USE);
+        useAuthDto.setSourceSystem(authRedBlackDTO.getSourceSystem());
+        useAuthDto.setAllowUnSubscribe(authRedBlackDTO.isAllowUnSubscribe());
+        useAuthDto.setOrgId(authRedBlackDTO.getOrgId());
+        useAuthDto.setRedList(forceUseTargets);
+        handleAuth(useAuthDto);
+    }
+
+    /**
+     * 提取本次管理红名单中需要继承使用权限的授权对象；若同维度同时出现在管理黑名单中，则不参与补使用权限。
+     */
+    private List<AuthDTO> extractManageUseInheritTargets(AuthRedBlackDTO authRedBlackDTO) {
+        if (authRedBlackDTO == null || CollectionUtils.isEmpty(authRedBlackDTO.getRedList())) {
+            return Collections.emptyList();
+        }
+        Set<String> manageBlackKeys = buildGrantTargetKeys(authRedBlackDTO.getBlackList());
+        Map<String, AuthDTO> targetMap = new LinkedHashMap<>();
+        for (AuthDTO authDTO : authRedBlackDTO.getRedList()) {
+            if (!isManageUseInheritTarget(authDTO)) {
+                continue;
+            }
+            String targetKey = buildGrantTargetKey(authDTO);
+            if (manageBlackKeys.contains(targetKey)) {
+                continue;
+            }
+            targetMap.putIfAbsent(targetKey, authDTO);
+        }
+        return new ArrayList<>(targetMap.values());
+    }
+
+    private Set<String> buildGrantTargetKeys(List<AuthDTO> authList) {
+        if (CollectionUtils.isEmpty(authList)) {
+            return Collections.emptySet();
+        }
+        return authList.stream()
+            .filter(this::isManageUseInheritTarget)
+            .map(this::buildGrantTargetKey)
+            .collect(Collectors.toSet());
+    }
+
+    private boolean isManageUseInheritTarget(AuthDTO authDTO) {
+        return authDTO != null
+            && authDTO.getGrantToObjId() != null
+            && MANAGE_USE_INHERIT_TARGET_TYPES.contains(authDTO.getGrantToObjType());
+    }
+
+    private String buildGrantTargetKey(AuthDTO authDTO) {
+        return authDTO.getGrantToObjType() + "_" + authDTO.getGrantToObjId();
+    }
+
+    /**
+     * 同资源、同授权维度已有使用黑名单时，不自动补 FORCE_USE，保持“显式禁止使用”的优先级。
+     */
+    private boolean hasActiveUseBlackSameDimension(String grantObjType, Long grantObjId, String grantToObjType,
+        Long grantToObjId) {
+        if (StringUtils.isBlank(grantObjType) || grantObjId == null || StringUtils.isBlank(grantToObjType)
+            || grantToObjId == null) {
+            return false;
+        }
+        LambdaQueryWrapper<PrivilegeGrant> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(PrivilegeGrant::getGrantObjType, grantObjType);
+        queryWrapper.eq(PrivilegeGrant::getGrantObjId, grantObjId);
+        queryWrapper.eq(PrivilegeGrant::getGrantToObjType, grantToObjType);
+        queryWrapper.eq(PrivilegeGrant::getGrantToObjId, grantToObjId);
+        queryWrapper.eq(PrivilegeGrant::getGrantToType, Color.BLACK);
+        queryWrapper.eq(PrivilegeGrant::getOperType, OperType.READ);
+        queryWrapper.eq(PrivilegeGrant::getStatusCd, "A");
+        queryWrapper.in(PrivilegeGrant::getGrantType, GrantType.AVAILABLE_USE, GrantType.FORCE_USE);
+        return privilegeGrantMapper.selectCount(queryWrapper) > 0;
     }
 
     /**
@@ -2375,7 +2487,8 @@ public class AuthApplicationService {
     }
 
     /**
-     * 查询当前登录用户对指定资源的 6 项操作权限（数字员工额外返回 canSetDefault）。
+     * 查询当前登录用户对指定资源的 6 项操作权限。
+     * canSetDefault 已统一迁移到左侧“全部列表项”接口计算，这里固定返回 false，避免资源卡片继续出现旧入口。
      * 与列表查询返回的 canEdit/canManageAuth/... 字段语义保持一致。
      *
      * @param resourceId 资源 ID
@@ -2398,7 +2511,23 @@ public class AuthApplicationService {
         vo.setOwnerType(ssResource.getOwnerType());
         vo.setResourceBizType(ssResource.getResourceBizType());
 
+        boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum());
         boolean canManage = hasResourceManagePermission(ssResource);
+
+        // 如果资源已注销，只允许恢复操作，其他操作全部禁用
+        if (isResourceRemoved) {
+            vo.setCanEdit(false);
+            vo.setCanManageAuth(false);
+            vo.setCanUseAuth(false);
+            vo.setCanDelete(false);
+            vo.setCanAuditUse(false);
+            vo.setCanApplyUse(false);
+            vo.setCanSetDefault(false);
+            vo.setCanRestore(canManage);
+            return vo;
+        }
+
+        // 资源未注销时的原有逻辑
         boolean canSetUse = hasResourceUseSettingPermission(ssResource);
         boolean isDefaultResource = isDefaultPersonalResource(ssResource);
         boolean isDefaultSuperAssistantResource = isDefaultSuperAssistantResource(ssResource);
@@ -2413,18 +2542,19 @@ public class AuthApplicationService {
         boolean canEdit = isDigitalEmployee
             ? (canManage || isBoundDefaultDigEmployee)
             : (canManage && !isDefaultResource);
-        vo.setCanEdit(canEdit && !isWhaleAgentExternalKnowledgeOrToolResource);
+        // 默认超级助手是登录初始化的个人底座资源，即使当前用户绑定为默认助理，也不开放编辑入口。
+        vo.setCanEdit(canEdit && !isDefaultSuperAssistantResource && !isWhaleAgentExternalKnowledgeOrToolResource);
         vo.setCanManageAuth(canManage && !isDefaultResource && !isDefaultSuperAssistantResource
             && !isPersonalAssistantResource);
         vo.setCanUseAuth(canSetUse && !isDefaultSuperAssistantResource);
-        vo.setCanDelete(canManage && !isDefaultResource && !isWhaleAgentExternalKnowledgeOrToolResource);
+        vo.setCanDelete(canManage && !isDefaultResource && !isDefaultSuperAssistantResource
+            && !isWhaleAgentExternalKnowledgeOrToolResource);
         vo.setCanAuditUse(canSetUse && !isDefaultSuperAssistantResource && !isPersonalResourceUseApplyUnsupported);
         vo.setCanApplyUse(!isDefaultSuperAssistantResource && !isPersonalResourceUseApplyUnsupported
             && checkCanApplyUse(ssResource));
 
-        if (isDigitalEmployee) {
-            vo.setCanSetDefault(checkCanSetDefaultDigitalEmployee(ssResource));
-        }
+        // “设为默认”入口统一收敛到左侧“全部列表项”，个人/企业资源卡片不再展示该操作。
+        vo.setCanSetDefault(false);
         return vo;
     }
 
@@ -2499,7 +2629,7 @@ public class AuthApplicationService {
      * @return 是否默认超级助手
      */
     private boolean isDefaultSuperAssistantResource(SsResource ssResource) {
-        return isDefaultPersonalResource(ssResource)
+        return ssResource != null
             && ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(ssResource.getResourceBizType())
             && StringUtils.endsWith(ssResource.getResourceCode(), DEFAULT_SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX);
     }
@@ -2555,39 +2685,4 @@ public class AuthApplicationService {
         return true;
     }
 
-    /**
-     * 计算 canSetDefault：仅数字员工，且满足以下全部条件：
-     * 1. resourceBizType = DIG_EMPLOYEE
-     * 2. create_by = 当前用户
-     * 3. ownerType ∈ { personal, personal_default }
-     * 4. resourceId 不等于当前用户已绑定的默认助理 ID（即资源还没成为默认助理）
-     *
-     * 设计意图：
-     * - 我自己创建的个人助理（personal） → 可设为我的默认助理 ✓
-     * - 我的默认超级助手（personal_default 且 resource_code 后缀 _main） → 也可设为我的默认助理 ✓
-     * - 已经是当前默认助理（resource_id 命中 superassist.default_dig_employee_id） → false（不再展示按钮）
-     */
-    private boolean checkCanSetDefaultDigitalEmployee(SsResource ssResource) {
-        if (ssResource == null
-            || !ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(ssResource.getResourceBizType())) {
-            return false;
-        }
-        Long currentUserId = CurrentUserHolder.getCurrentUserId();
-        if (currentUserId == null) {
-            return false;
-        }
-        if (!currentUserId.equals(ssResource.getCreateBy())) {
-            return false;
-        }
-        String ownerType = ssResource.getOwnerType();
-        if (!OwnerType.PERSONAL.equals(ownerType) && !OwnerType.PERSONAL_DEFAULT.equals(ownerType)) {
-            return false;
-        }
-        // 已经是当前用户绑定的默认助理 → 不再展示"设为默认"
-        Long defaultDigEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
-        if (defaultDigEmployeeId != null && defaultDigEmployeeId.equals(ssResource.getResourceId())) {
-            return false;
-        }
-        return true;
-    }
 }

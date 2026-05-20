@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhaleai.byai.framework.client.GatewayClient;
 import com.iwhaleai.byai.framework.core.protocol.ActionType;
@@ -30,6 +31,7 @@ import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
+import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
@@ -401,11 +403,26 @@ public class RouteService {
             metadata.put("channelExtension", channelExtension);
         }
 
+        List<MessageFileDto> files = chatDto.getFiles();
+        JSONArray contentObjects = new JSONArray();
+        Object messageContent = content;
+        if (CollectionUtils.isNotEmpty(files)) {
+            JSONObject contentObject = new JSONObject();
+            contentObject.put("text", content);
+            contentObject.put("files", files);
+
+            JSONObject userMessage = new JSONObject();
+            userMessage.put("role", "user");
+            userMessage.put("content", contentObject);
+            contentObjects.add(userMessage);
+            messageContent = contentObjects;
+        }
+
         while (true) {
             GatewayClient.SendResponse response = gatewayClient.sendMessage(
                 targetAgentType,
                 sessionId,
-                content,
+                messageContent,
                 userCode,
                 currentUserName,
                 chatDto.getActionType() == null ? ActionType.ASK_AGENT : chatDto.getActionType(),
@@ -426,9 +443,9 @@ public class RouteService {
             if (retryAttemptsAfterWorkerReady < maxRetryAttemptsAfterWorkerReady
                     && shouldRetryAfterSandboxReady(targetAgentType, userCode, response)) {
                 retryAttemptsAfterWorkerReady++;
-                log.info("Gateway SDK 消息发送失败，等待用户沙箱就绪后重试一次, sessionId: {}, userCode: {}, agentId: {}, targetAgentType: {}, errorCode: {}",
+                log.info("Gateway SDK 消息发送失败，按远端沙箱退出处理并重拉后重试一次, sessionId: {}, userCode: {}, agentId: {}, targetAgentType: {}, errorCode: {}",
                         sessionId, userCode, agentId, targetAgentType, response.getErrorCode());
-                sandboxService.ensureSandboxReady(userCode, agentId, targetAgentType);
+                sandboxService.restartSandboxAfterRemoteExit(userCode, agentId, targetAgentType);
                 continue;
             }
 

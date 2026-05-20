@@ -142,6 +142,32 @@ export function resolveAgentSseUrl(detail: Dict, param: Dict | undefined): strin
   return base ? `${base}${rel}` : raw;
 }
 
+/** Resolve AGENT home URL; supports relative path + `domainURL`. */
+export function resolveAgentHomeUrl(detail: Dict, param: Dict | undefined): string {
+  const p = param ?? {};
+  const meta = metaContentBlock(detail, p);
+  let raw: string | undefined;
+  for (const candidate of [
+    p.agentHomeUrl,
+    detail.agentHomeUrl,
+    meta.agentHomeUrl,
+    meta.agent_home_url,
+  ]) {
+    const s = nonEmptyString(candidate);
+    if (s) {
+      raw = s;
+      break;
+    }
+  }
+  if (!raw) return "";
+  if (raw.startsWith("http://") || raw.startsWith("https://")) {
+    return raw.replace(/\/+$/, "");
+  }
+  const base = String(detail.domainURL ?? p.domainURL ?? "").replace(/\/+$/, "");
+  const rel = raw.startsWith("/") ? raw : `/${raw.replace(/^\/+/, "")}`;
+  return base ? `${base}${rel}` : raw;
+}
+
 /** Mirror of `_resolve_mcp_transfer_type`. */
 export function resolveMcpTransferType(detail: Dict, param: Dict | undefined): string {
   const p = param ?? {};
@@ -197,6 +223,9 @@ export function mergeResourceContextIntoCapability(
     const agentInfo = (capability.agent ?? ({} as Capability["agent"])) as NonNullable<Capability["agent"]>;
     if (!agentInfo.sse_url && rootAgent.agentSseUrl) {
       agentInfo.sse_url = rootAgent.agentSseUrl;
+    }
+    if (!agentInfo.agent_home_url && rootAgent.agentHomeUrl) {
+      agentInfo.agent_home_url = rootAgent.agentHomeUrl;
     }
     if (!agentInfo.integration_type && rootAgent.integrationType) {
       agentInfo.integration_type = rootAgent.integrationType;
@@ -514,6 +543,7 @@ export function buildCapabilityFromDetail(params: BuildFromDetailParams): Capabi
     }
     capability.agent = {
       sse_url: resolveAgentSseUrl(detail, param),
+      agent_home_url: resolveAgentHomeUrl(detail, param),
       integration_type:
         param.integrationType ??
         detail.integrationType ??
@@ -664,6 +694,7 @@ export function buildCapabilityFromResourceContext(
       const sse = asString(selected.agentSseUrl);
       capability.agent = {
         sse_url: sse,
+        agent_home_url: selected.agentHomeUrl,
         integration_type: selected.integrationType,
       };
       const impl = asString(selected.implType);
@@ -676,7 +707,8 @@ export function buildCapabilityFromResourceContext(
 
   const rootId = String(rootAgent.resourceId ?? "");
   const rootSseUrl = rootAgent.agentSseUrl;
-  if (rootId && resourceId && rootId === resourceId && rootSseUrl) {
+  const rootHomeUrl = rootAgent.agentHomeUrl;
+  if (rootId && resourceId && rootId === resourceId && (rootSseUrl || rootHomeUrl)) {
     const capability = baseCapability({
       resourceId,
       resourceName: String(rootAgent.resourceName ?? resourceId),
@@ -686,6 +718,7 @@ export function buildCapabilityFromResourceContext(
     });
     capability.agent = {
       sse_url: rootSseUrl,
+      agent_home_url: rootHomeUrl,
       integration_type: rootAgent.integrationType,
     };
     return capability;
@@ -720,16 +753,17 @@ export function buildDirectCapabilityStub(params: {
 
   if (normalizedType === "agent") {
     const rootAgent = rootAgentContext(params.resourceContext);
-    if (rootAgent.agentSseUrl) {
+    if (rootAgent.agentSseUrl || rootAgent.agentHomeUrl) {
       const capability = baseCapability({
-        resourceId,
+        resourceId: rootAgent.resourceId ? String(rootAgent.resourceId) : resourceId,
         resourceName: String(rootAgent.resourceName ?? resourceId),
         resourceType: "AGENT",
-        description: String(rootAgent.resourceName ?? resourceId),
+        description: String(rootAgent.resourceDesc ?? rootAgent.resourceName ?? resourceId),
         discoverySource: "direct_stub",
       });
       capability.agent = {
         sse_url: rootAgent.agentSseUrl,
+        agent_home_url: rootAgent.agentHomeUrl,
         integration_type: rootAgent.integrationType,
       };
       return capability;

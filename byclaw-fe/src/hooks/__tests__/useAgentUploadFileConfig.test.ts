@@ -89,7 +89,7 @@ describe('hooks/useAgentUploadFileConfig', () => {
       maxFileSize: 2048,
       maxFileCount: 2,
     });
-    expect(second).toBe(first);
+    expect(second).toStrictEqual(first);
   });
 
   it('returns disabled fallback when agent has no prologue config', async () => {

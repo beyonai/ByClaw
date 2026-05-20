@@ -4,14 +4,14 @@ export const agentTypeMap = {
   chatbi: '002',
   writer: '003',
   dighuman: '004',
-  askAgent: '005',
+  askAgent: '005', // 问数型
   qAndaAgent: '006', // 问答型
   dbAgent: '007',
   mcpAgent: '008',
   uiAgent: '009',
-  botAgent: '010', // 博特智能体类型
-  personalKnowledge: '011', // 个人知识库检索
-  networkSearch: '012', // 联网检索
+  botAgent: '010', // 调试型
+  personalKnowledge: '011', // 编码型
+  networkSearch: '012',
   openclaw: '013',
   searchAndQuery: '014',
   functionCloud: '015',
@@ -62,3 +62,5 @@ export const ownerTypeMap = {
   personal: 'personal',
   enterprise: 'enterprise',
 } as const;
+
+export const ROOT_AGENT_ID = 'ROOT_AGENT_ID';

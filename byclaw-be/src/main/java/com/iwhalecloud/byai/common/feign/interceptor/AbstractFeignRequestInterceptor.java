@@ -62,7 +62,7 @@ public abstract class AbstractFeignRequestInterceptor implements RequestIntercep
 
     /**
      * 子类实现的具体拦截处理逻辑
-     * 
+     *
      * @param template Feign请求模板，包含请求的所有信息
      * @throws RuntimeException 当拦截处理过程中发生错误时抛出
      */
@@ -70,7 +70,7 @@ public abstract class AbstractFeignRequestInterceptor implements RequestIntercep
 
     /**
      * 记录Feign请求的详细日志信息
-     * 
+     *
      * @param template Feign请求模板 包含以下信息： 1. 请求URL 2. 请求头信息（进行脱敏处理） 3. 请求体内容（进行脱敏处理）
      */
     protected void logRequest(RequestTemplate template) {
@@ -95,7 +95,7 @@ public abstract class AbstractFeignRequestInterceptor implements RequestIntercep
 
     /**
      * 验证请求格式是否符合规范
-     * 
+     *
      * @param template Feign请求模板
      * @throws ByAiArgumentException 当请求格式不符合规范时抛出
      */
@@ -146,7 +146,7 @@ public abstract class AbstractFeignRequestInterceptor implements RequestIntercep
 
     /**
      * 获取请求的Content-Type
-     * 
+     *
      * @param template Feign请求模板
      * @return Content-Type头的值，或null
      */
@@ -169,7 +169,7 @@ public abstract class AbstractFeignRequestInterceptor implements RequestIntercep
 
     /***
      * 根据用户信息生成cookie等请求头
-     * 
+     *
      * @param requestTemplate 请求信息
      */
     protected void generateCookie(RequestTemplate requestTemplate) {

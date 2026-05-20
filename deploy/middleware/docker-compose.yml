@@ -1,6 +1,6 @@
 services:
   redis:
-    image: ${IMAGE_REDIS:-ghcr.io/beyonclaw/byclaw-all/byclaw-redis:main}
+    image: ${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}
     container_name: byclaw-redis-${CONTAINER_SUFFIX:-middleware}
     command: redis-server --requirepass ${REDIS_PASSWORD}
     ports:
@@ -10,7 +10,7 @@ services:
     restart: unless-stopped
 
   minio:
-    image: ${IMAGE_MINIO:-ghcr.io/beyonclaw/byclaw-all/byclaw-minio:main}
+    image: ${IMAGE_MINIO:-ghcr.io/beyonai/byclaw/byclaw-minio:main}
     container_name: byclaw-minio-${CONTAINER_SUFFIX:-middleware}
     ports:
       - "${FILE_STORAGE_MINIO_API_PORT:-9000}:9000"
@@ -25,7 +25,7 @@ services:
     restart: unless-stopped
 
   opengauss:
-    image: ${IMAGE_OPENGAUSS:-ghcr.io/beyonclaw/byclaw-all/byclaw-opengauss:main}
+    image: ${IMAGE_OPENGAUSS:-ghcr.io/beyonai/byclaw/byclaw-opengauss:main}
     container_name: byclaw-opengauss-${CONTAINER_SUFFIX:-middleware}
     privileged: true
     user: root

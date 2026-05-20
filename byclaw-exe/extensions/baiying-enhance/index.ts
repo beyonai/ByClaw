@@ -11,6 +11,9 @@ import { createDigEmployeeChangeSubscriber } from "./src/dig-employee-change-sub
 import { registerBaiyingHttpRoutes } from "./src/http-routes.js";
 import { resolveDefaultContentIndexPath } from "./src/agent-content-index.js";
 import { resolveBundledBaiyingResourcesDir } from "./src/plugin-paths.js";
+import { createRedisJsonStore, setSharedRedisJsonStore } from "./src/redis-json-store.js";
+import { loadBaiyingRedisEnvDefaults } from "./src/redis-env.js";
+import { createWorkspaceArchiveApi } from "./src/workspace-archive-api.js";
 import {
   loadMainAgentsTemplate,
   resolveEffectiveMainAgentsMdMode,
@@ -42,7 +45,7 @@ function resolveAgentConfigDir(
   return resolvePluginPath(api, raw);
 }
 
-function resolveDigEmployeePubSub(pluginCfg: BaiyingEnhancePluginConfig): {
+export function resolveDigEmployeePubSub(pluginCfg: BaiyingEnhancePluginConfig): {
   subscribe: boolean;
   strictAuth: boolean;
   channel: string;
@@ -50,7 +53,7 @@ function resolveDigEmployeePubSub(pluginCfg: BaiyingEnhancePluginConfig): {
   const subscribe =
     pluginCfg.digEmployeeChangeSubscribe !== undefined
       ? pluginCfg.digEmployeeChangeSubscribe
-      : process.env.BAIYING_DIG_EMPLOYEE_CHANGE_SUBSCRIBE === "true";
+      : process.env.BAIYING_DIG_EMPLOYEE_CHANGE_SUBSCRIBE !== "false";
   const strictAuth =
     pluginCfg.digEmployeeChangeSubscribeStrictAuth !== undefined
       ? pluginCfg.digEmployeeChangeSubscribeStrictAuth
@@ -58,6 +61,7 @@ function resolveDigEmployeePubSub(pluginCfg: BaiyingEnhancePluginConfig): {
   const channel =
     pluginCfg.digEmployeeChangeChannel?.trim() ||
     process.env.BAIYING_DIG_EMPLOYEE_CHANGE_CHANNEL?.trim() ||
+    process.env.DIG_EMPLOYEE_PUBSUB_CHANNEL?.trim() ||
     "byai:pub:dig_employee_change";
   return { subscribe, strictAuth, channel };
 }
@@ -77,8 +81,8 @@ function resolveExecutorResourcesDir(api: OpenClawPluginApi, cfg: BaiyingEnhance
 }
 
 /** `plugins.entries.*` paths registered as in-process reload when this plugin syncs via `writeConfigFile` (see `configSyncHotPluginEntriesPrefixes` in openclaw.json). */
-function resolveConfigSyncHotPrefixes(cfg: BaiyingEnhancePluginConfig): string[] {
-  const out = new Set<string>(["plugins.entries.baiying-enhance"]);
+export function resolveConfigSyncHotPrefixes(cfg: BaiyingEnhancePluginConfig): string[] {
+  const out = new Set<string>(["plugins.entries.baiying-enhance", "agents"]);
   const extras = cfg.configSyncHotPluginEntriesPrefixes;
   if (Array.isArray(extras)) {
     for (const entry of extras) {
@@ -91,21 +95,36 @@ function resolveConfigSyncHotPrefixes(cfg: BaiyingEnhancePluginConfig): string[]
   return Array.from(out);
 }
 
+const registry = new AgentRegistryState();
+
 console.log("============Baiying Enhance module imported============");
 const plugin = {
   id: "baiying-enhance",
   name: "Baiying Enhance",
   description:
-    "Sync Baiying agent JSON from disk into OpenClaw config (Redis Pub/Sub or explicit flush); sub-agents via sessions_spawn.",
+    "Sync authorized Baiying digital employee JSON from Redis into OpenClaw config; sub-agents via sessions_spawn.",
   register(api: OpenClawPluginApi) {
     console.log("============Baiying Enhance register============");
+    loadBaiyingRedisEnvDefaults({
+      logger: {
+        info: (message) => api.logger.info(message),
+        warn: (message) => api.logger.warn(message),
+      },
+    });
     const pluginCfg = (api.pluginConfig ?? {}) as BaiyingEnhancePluginConfig;
     api.registerReload({
       hotPrefixes: resolveConfigSyncHotPrefixes(pluginCfg),
     });
-    const registry = new AgentRegistryState();
     const debounceMs = pluginCfg.watchDebounceMs ?? 500;
     const executorResourcesDir = resolveExecutorResourcesDir(api, pluginCfg);
+    const redisJsonStore = createRedisJsonStore({
+      logger: {
+        info: (message) => api.logger.info(message),
+        warn: (message) => api.logger.warn(message),
+        error: (message) => api.logger.error(message),
+      },
+    });
+    setSharedRedisJsonStore(redisJsonStore);
 
     registerBaiyingHttpRoutes({ api, registry });
 
@@ -115,7 +134,6 @@ const plugin = {
       createBaiyingCallToolFactory({
         registry,
         executorPath: executorResourcesDir,
-        agentConfigDir: resolveAgentConfigDir(api, undefined, pluginCfg),
         embedApiKeysFromJson: pluginCfg.embedApiKeysFromJson === true,
         envApiKeyTemplate: pluginCfg.envApiKeyTemplate,
         defaultProxyUrl: pluginCfg.defaultProxyUrl,
@@ -133,27 +151,6 @@ const plugin = {
     let digEmployeeAuthWatch: ReturnType<typeof createDigEmployeeAuthWatch> | undefined;
     let digEmployeeChangeSubscriber: ReturnType<typeof createDigEmployeeChangeSubscriber> | undefined;
 
-    if (pluginCfg.mainWorkspaceAgentsAutoSeed !== false) {
-      const mdMode = resolveEffectiveMainAgentsMdMode(pluginCfg);
-      if (mdMode !== "off") {
-        void seedMainAgentAgentsMd({
-          api,
-          pluginConfig: pluginCfg,
-          managedAgents: [],
-          log: {
-            warn: (m) => api.logger.warn(m),
-            info: (m) => api.logger.info(m),
-          },
-        }).catch((err) =>
-          api.logger.warn(
-            `baiying-enhance: main AGENTS.md register-time init failed: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          ),
-        );
-      }
-    }
-
     api.registerService({
       id: "baiying-enhance-watchdogs",
       start: async (ctx) => {
@@ -161,9 +158,9 @@ const plugin = {
         const stateDir = process.env.OPENCLAW_STATE_DIR?.trim() || path.join(homedir(), ".openclaw");
         const contentIndexPath = pluginCfg.agentContentIndexPath?.trim()
           ? resolvePluginPath(api, pluginCfg.agentContentIndexPath.trim())
-          : resolveDefaultContentIndexPath(stateDir, absoluteDir);
-        api.logger.info(`baiying-enhance: agent JSON directory: ${absoluteDir}`);
-        api.logger.info(`baiying-enhance: executor resources dir: ${executorResourcesDir}`);
+          : resolveDefaultContentIndexPath(stateDir, "redis-dig-employee");
+        api.logger.info(`baiying-enhance: Redis digital employee source enabled (deprecated agentConfigDir ignored: ${absoluteDir})`);
+        api.logger.info(`baiying-enhance: executor resources dir deprecated for Baiying resource snapshots: ${executorResourcesDir}`);
         if (pluginCfg.persistAgentContentIndex !== false) {
           api.logger.info(`baiying-enhance: agent content index path: ${contentIndexPath}`);
         }
@@ -179,26 +176,39 @@ const plugin = {
         if (pub.subscribe) {
           api.logger.info(`baiying-enhance: dig-employee Redis Pub/Sub enabled channel=${pub.channel}`);
         }
+        const workspaceArchiveApi =
+          pluginCfg.workspaceArchiveBackend === "local"
+            ? undefined
+            : createWorkspaceArchiveApi({
+                logger: {
+                  info: (message) => api.logger.info(message),
+                  warn: (message) => api.logger.warn(message),
+                },
+              });
         digEmployeeAuthWatch = createDigEmployeeAuthWatch({
           logger: {
             info: (message) => api.logger.info(message),
             warn: (message) => api.logger.warn(message),
             error: (message) => api.logger.error(message),
           },
-          onChange: async () => {
+          onChange: async (authorizedIds) => {
+            api.logger.info(
+              `baiying-enhance: dig-employee auth changed (${authorizedIds.size} authorized id(s)); triggering managed agent sync`,
+            );
             await agentWatch?.__flushNow?.({ fullWorkspaceReseed: true });
           },
         });
         agentWatch = createAgentWatchdog({
           api,
           registry,
-          absoluteDir,
+          redisJsonStore,
           contentIndexPath,
           executorPath: executorResourcesDir,
           pluginConfig: pluginCfg,
           debounceMs,
+          workspaceArchiveApi,
           authorizationFilter: {
-            // Keep `undefined` to mean "no auth filter yet" (load full directory).
+            // Keep `undefined` to mean "auth not ready"; the watchdog defers managed sync instead of clearing config.
             // Only return a Set when auth data exists and filtering should apply.
             getAuthorizedSourceKeys: () => digEmployeeAuthWatch?.getAuthorizedIds(),
           },
@@ -223,6 +233,7 @@ const plugin = {
         await agentWatch.start({ deferInitialFlush: true });
         await digEmployeeAuthWatch.start();
         await digEmployeeChangeSubscriber?.start();
+        // First flush runs cold-start workspace reconcile (auth ids vs workspace-baiying-agent-*) before restore.
         await agentWatch.__flushNow?.({ fullWorkspaceReseed: true });
       },
       stop: async () => {
@@ -232,6 +243,8 @@ const plugin = {
         digEmployeeAuthWatch = undefined;
         await agentWatch?.stop();
         agentWatch = undefined;
+        await redisJsonStore.close();
+        setSharedRedisJsonStore(null);
       },
     });
   },

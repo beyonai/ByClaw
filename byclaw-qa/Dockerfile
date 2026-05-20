@@ -6,10 +6,13 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
+ENV PYTHONPATH=/app/src
+
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-COPY redis_agent_config.py redis_model_config.py minio_client.py minio_agent_config.py api.py start.sh worker.py ./
+COPY start.sh ./
+COPY src/ ./src/
 
 ENTRYPOINT ["bash", "/app/start.sh"]
 CMD ["api"]

@@ -2,6 +2,8 @@ import { DownOutlined, EyeInvisibleOutlined, EyeOutlined, PlusOutlined, RightOut
 import { Button, Form, Input, InputNumber, Select, Slider, Space, Tag } from 'antd';
 import React, { useMemo } from 'react';
 import type { IntlShape } from 'react-intl';
+import { trim } from 'lodash';
+import { useIntl } from '@umijs/max';
 import ModelFormSection from './ModelFormSection';
 import { tokenMarks, normalizeModelType } from './modelFormUtils';
 import styles from './ModelFormModal.module.less';
@@ -30,6 +32,47 @@ type Props = {
   isSectionOpen: (key: string) => boolean;
   toggleSection: (key: string) => void;
   onValuesChange: (changedValues: any, allValues: any) => void;
+};
+
+const ApiTokenComp = (props: {
+  value?: string;
+  onChange?: (value: string) => void;
+  tokenVisible: boolean;
+  setTokenVisible: React.Dispatch<React.SetStateAction<boolean>>;
+}) => {
+  const { value, onChange, tokenVisible, setTokenVisible } = props;
+
+  const intl = useIntl();
+
+  return (
+    <Space.Compact style={{ width: '100%' }}>
+      <Input
+        type={tokenVisible ? 'text' : 'password'}
+        placeholder="输入 API Token"
+        style={{ flex: 1 }}
+        value={value}
+        onChange={(e) => {
+          onChange?.(trim(e.target.value));
+        }}
+        disabled={!tokenVisible}
+      />
+      <Button type="default" onClick={() => setTokenVisible((v) => !v)}>
+        <span style={{ cursor: 'pointer', userSelect: 'none' }}>
+          {tokenVisible ? (
+            <Space size={4}>
+              <EyeInvisibleOutlined />
+              {intl.formatMessage({ id: 'modelMgr.modal.hide' })}
+            </Space>
+          ) : (
+            <Space size={4}>
+              <EyeOutlined />
+              {intl.formatMessage({ id: 'modelMgr.modal.view' })}
+            </Space>
+          )}
+        </span>
+      </Button>
+    </Space.Compact>
+  );
 };
 
 const ModelFormFields: React.FC<Props> = ({
@@ -176,24 +219,7 @@ const ModelFormFields: React.FC<Props> = ({
           </Form.Item>
 
           <Form.Item label="API Token" name="apiToken" rules={[{ required: true, message: '请输入 API Token' }]}>
-            <Space.Compact style={{ width: '100%' }}>
-              <Input type={tokenVisible ? 'text' : 'password'} placeholder="输入 API Token" style={{ flex: 1 }} />
-              <Button type="default" onClick={() => setTokenVisible((v) => !v)}>
-                <span style={{ cursor: 'pointer', userSelect: 'none' }}>
-                  {tokenVisible ? (
-                    <Space size={4}>
-                      <EyeInvisibleOutlined />
-                      {intl.formatMessage({ id: 'modelMgr.modal.hide' })}
-                    </Space>
-                  ) : (
-                    <Space size={4}>
-                      <EyeOutlined />
-                      {intl.formatMessage({ id: 'modelMgr.modal.view' })}
-                    </Space>
-                  )}
-                </span>
-              </Button>
-            </Space.Compact>
+            <ApiTokenComp tokenVisible={tokenVisible} setTokenVisible={setTokenVisible} />
           </Form.Item>
 
           <div className={styles.subsectionTitle}>{intl.formatMessage({ id: 'modelMgr.modal.authGroup' })}</div>

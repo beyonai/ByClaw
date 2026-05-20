@@ -18,6 +18,7 @@ import {
   Popconfirm,
   Select,
   Typography,
+  Tooltip,
   Row,
   Col,
   Switch,
@@ -31,17 +32,28 @@ import ModalDrawer from '@/pages/manager/components/ModalDrawer';
 import styles from './index.module.less';
 
 const { Option } = Select;
+const RELEASABLE_STATUSES = ['STARTING', 'RUNNING'];
 
-const formatTimestamp = (value: string | number) => {
+const formatTimestamp = (value?: string | number | null) => {
   if (!value) return '-';
-  const ts = typeof value === 'string' ? Number(value) : value;
-  if (Number.isNaN(ts)) return String(value);
-  const d = new Date(ts);
+  const d =
+    typeof value === 'number' || /^\d+$/.test(String(value)) ? new Date(Number(value)) : new Date(String(value));
   if (Number.isNaN(d.getTime())) return String(value);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(
     d.getMinutes()
   )}:${pad(d.getSeconds())}`;
+};
+
+const renderEllipsisText = (value?: string | number | null) => {
+  if (value === undefined || value === null || value === '') return '-';
+  return (
+    <Tooltip title={String(value)}>
+      <Typography.Text ellipsis style={{ maxWidth: '100%' }}>
+        {String(value)}
+      </Typography.Text>
+    </Tooltip>
+  );
 };
 
 interface SsSandboxRecord {
@@ -50,12 +62,21 @@ interface SsSandboxRecord {
   userCode: string;
   sandboxType: string;
   endpoint: string;
+  sandboxId?: string;
   chatId: string;
   status: string;
   autoRelease: number;
-  lastAccessTime: string;
-  createTime: string;
-  updateTime: string;
+  leasePolicy?: string;
+  timeoutSeconds?: number;
+  remoteExpiresAt?: string | number;
+  lastRenewAt?: string | number;
+  nextRenewAt?: string | number;
+  lastAccessTime?: string | number;
+  releaseTime?: string | number;
+  releaseReason?: string;
+  version?: number;
+  createTime?: string | number;
+  updateTime?: string | number;
 }
 
 interface ServiceSpecItem {
@@ -203,6 +224,8 @@ const SandboxMgr = () => {
     window.open(endpoint, '_blank');
   }, []);
 
+  const canReleaseSandbox = useCallback((record: SsSandboxRecord) => RELEASABLE_STATUSES.includes(record.status), []);
+
   const handleAutoReleaseChange = useCallback(
     (record: SsSandboxRecord, checked: boolean) => {
       setUpdatingId(record.id);
@@ -316,19 +339,46 @@ const SandboxMgr = () => {
 
   const columns = [
     {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.id' }),
+      dataIndex: 'id',
+      align: 'center' as const,
+      fixed: 'left' as const,
+      width: 90,
+    },
+    {
       title: intl.formatMessage({ id: 'sandboxMgr.table.userCode' }),
       dataIndex: 'userCode',
       align: 'center' as const,
+      fixed: 'left' as const,
+      width: 150,
+      ellipsis: true,
+      render: renderEllipsisText,
     },
     {
       title: intl.formatMessage({ id: 'sandboxMgr.table.sandboxType' }),
       dataIndex: 'sandboxType',
       align: 'center' as const,
+      width: 140,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.resourceId' }),
+      dataIndex: 'resourceId',
+      align: 'center' as const,
+      width: 110,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.sandboxId' }),
+      dataIndex: 'sandboxId',
+      align: 'center' as const,
+      width: 220,
+      ellipsis: true,
+      render: renderEllipsisText,
     },
     {
       title: intl.formatMessage({ id: 'sandboxMgr.table.endpoint' }),
       dataIndex: 'endpoint',
       align: 'center' as const,
+      width: 260,
       ellipsis: true,
       render: (value: string, record: SsSandboxRecord) => {
         if (record.status === 'RUNNING' && value) {
@@ -341,12 +391,22 @@ const SandboxMgr = () => {
       title: intl.formatMessage({ id: 'sandboxMgr.table.status' }),
       dataIndex: 'status',
       align: 'center' as const,
+      width: 110,
       render: (value: string) => {
         if (value === 'RUNNING') {
           return <Tag color="green">{intl.formatMessage({ id: 'sandboxMgr.status.running' })}</Tag>;
         }
+        if (value === 'STARTING') {
+          return <Tag color="blue">{intl.formatMessage({ id: 'sandboxMgr.status.starting' })}</Tag>;
+        }
+        if (value === 'RELEASING') {
+          return <Tag color="orange">{intl.formatMessage({ id: 'sandboxMgr.status.releasing' })}</Tag>;
+        }
         if (value === 'RELEASED') {
           return <Tag color="default">{intl.formatMessage({ id: 'sandboxMgr.status.released' })}</Tag>;
+        }
+        if (value === 'FAILED') {
+          return <Tag color="red">{intl.formatMessage({ id: 'sandboxMgr.status.failed' })}</Tag>;
         }
         return <Tag>{value}</Tag>;
       },
@@ -355,6 +415,7 @@ const SandboxMgr = () => {
       title: intl.formatMessage({ id: 'sandboxMgr.table.autoRelease' }),
       dataIndex: 'autoRelease',
       align: 'center' as const,
+      width: 100,
       render: (value: number, record: SsSandboxRecord) => (
         <Switch
           checked={value === 1}
@@ -366,16 +427,68 @@ const SandboxMgr = () => {
       ),
     },
     {
-      title: intl.formatMessage({ id: 'sandboxMgr.table.lastAccessTime' }),
-      dataIndex: 'lastAccessTime',
-      align: 'center' as const,
-      render: (value: string | number) => formatTimestamp(value),
-    },
-    {
       title: intl.formatMessage({ id: 'sandboxMgr.table.createTime' }),
       dataIndex: 'createTime',
       align: 'center' as const,
+      width: 170,
       render: (value: string | number) => formatTimestamp(value),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.lastAccessTime' }),
+      dataIndex: 'lastAccessTime',
+      align: 'center' as const,
+      width: 170,
+      render: (value: string | number) => formatTimestamp(value),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.lastRenewAt' }),
+      dataIndex: 'lastRenewAt',
+      align: 'center' as const,
+      width: 170,
+      render: (value: string | number) => formatTimestamp(value),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.nextRenewAt' }),
+      dataIndex: 'nextRenewAt',
+      align: 'center' as const,
+      width: 170,
+      render: (value: string | number) => formatTimestamp(value),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.remoteExpiresAt' }),
+      dataIndex: 'remoteExpiresAt',
+      align: 'center' as const,
+      width: 170,
+      render: (value: string | number) => formatTimestamp(value),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.timeoutSeconds' }),
+      dataIndex: 'timeoutSeconds',
+      align: 'center' as const,
+      width: 110,
+      render: (value: number) => value ?? '-',
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.releaseTime' }),
+      dataIndex: 'releaseTime',
+      align: 'center' as const,
+      width: 170,
+      render: (value: string | number) => formatTimestamp(value),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.releaseReason' }),
+      dataIndex: 'releaseReason',
+      align: 'center' as const,
+      width: 180,
+      ellipsis: true,
+      render: renderEllipsisText,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.version' }),
+      dataIndex: 'version',
+      align: 'center' as const,
+      width: 90,
+      render: (value: number) => value ?? '-',
     },
     {
       title: intl.formatMessage({ id: 'sandboxMgr.table.action' }),
@@ -384,19 +497,21 @@ const SandboxMgr = () => {
       fixed: 'right' as const,
       width: 160,
       render: (_: any, record: SsSandboxRecord) => {
-        if (record.status !== 'RUNNING') return null;
+        if (!canReleaseSandbox(record)) return null;
 
         return (
           <Space size="small">
-            <Button
-              size="small"
-              type="link"
-              icon={<EyeOutlined />}
-              onClick={() => handleView(record.endpoint)}
-              disabled={!record.endpoint}
-            >
-              {intl.formatMessage({ id: 'sandboxMgr.action.view' })}
-            </Button>
+            {record.status === 'RUNNING' && (
+              <Button
+                size="small"
+                type="link"
+                icon={<EyeOutlined />}
+                onClick={() => handleView(record.endpoint)}
+                disabled={!record.endpoint}
+              >
+                {intl.formatMessage({ id: 'sandboxMgr.action.view' })}
+              </Button>
+            )}
             <Popconfirm
               title={intl.formatMessage({ id: 'sandboxMgr.delete.confirm' })}
               onConfirm={() => handleDelete(record)}
@@ -435,8 +550,11 @@ const SandboxMgr = () => {
             />
             <Select value={status} onChange={handleStatusChange} style={{ width: 150 }}>
               <Option value="">{intl.formatMessage({ id: 'sandboxMgr.status.all' })}</Option>
+              <Option value="STARTING">{intl.formatMessage({ id: 'sandboxMgr.status.starting' })}</Option>
               <Option value="RUNNING">{intl.formatMessage({ id: 'sandboxMgr.status.running' })}</Option>
+              <Option value="RELEASING">{intl.formatMessage({ id: 'sandboxMgr.status.releasing' })}</Option>
               <Option value="RELEASED">{intl.formatMessage({ id: 'sandboxMgr.status.released' })}</Option>
+              <Option value="FAILED">{intl.formatMessage({ id: 'sandboxMgr.status.failed' })}</Option>
             </Select>
           </Space>
         </Col>
@@ -477,7 +595,7 @@ const SandboxMgr = () => {
             showTotal: (total: number) => intl.formatMessage({ id: 'sandboxMgr.pagination.total' }, { total }),
             onChange: handlePaginationChange,
           }}
-          scroll={{ x: 1200, y: 'calc(100vh - 230px)' }}
+          scroll={{ x: 2400, y: 'calc(100vh - 230px)' }}
           loading={manualLoading}
           className={styles.table}
         />

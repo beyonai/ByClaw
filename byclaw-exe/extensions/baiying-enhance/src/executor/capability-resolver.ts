@@ -64,18 +64,14 @@ async function hydrateWhaleAgentDocFromSnapshotIfNeeded(params: {
 /**
  * Mirror of `_resolve_capability`.
  *
- * Resolution order (OpenClaw baiying-enhance: **snapshot-first** so on-disk JSON
- * is authoritative whenever present):
- *   1. Direct file lookup in `<resourcesDir>/<folder>/<PREFIX>_<id>.json` (hinted
- *      `resourceType` folder first, then other known folders).
- *   2. Retry the file lookup with the `baiying_`-stripped id.
+ * Resolution order (OpenClaw baiying-enhance: **Redis snapshot-first**):
+ *   1. Direct Redis lookup of `<PREFIX>_<id>` (hinted `resourceType` first,
+ *      then other known resource prefixes).
+ *   2. Retry the Redis lookup with the `baiying_`-stripped id.
  *   3. Build from `resource_context.selected_resource` / `root_agent` when no snapshot exists.
  *   3b. AGENT only: if the context-built stub has no gateway headers, load
- *        `agent/AGENT_<id>.json` and replace with the snapshot.
+ *        Redis `AGENT_<id>` and replace with the snapshot.
  *   4. Fall back to a minimal stub from `resource_context`.
- *
- * There is no in-memory index of snapshot files: each resolve reads the exact
- * candidate files on disk for the current request.
  */
 export async function resolveCapability(params: {
   resourcesDir: string;

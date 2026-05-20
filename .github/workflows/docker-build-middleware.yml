@@ -6,11 +6,13 @@ on:
     tags: ["v*"]
     paths:
       - "middleware/**"
+      - "byclaw-exe/extensions/**"
       - ".github/workflows/docker-build-middleware.yml"
   pull_request:
     branches: [main, master]
     paths:
       - "middleware/**"
+      - "byclaw-exe/extensions/**"
       - ".github/workflows/docker-build-middleware.yml"
   workflow_dispatch:
 
@@ -45,6 +47,7 @@ jobs:
               - ".github/workflows/docker-build-middleware.yml"
             openclaw:
               - "middleware/openclaw/**"
+              - "byclaw-exe/extensions/**"
               - ".github/workflows/docker-build-middleware.yml"
 
   build-and-push:
@@ -62,7 +65,7 @@ jobs:
           - service: byclaw-opengauss
             context: middleware/opengauss
             changed: opengauss
-            platforms: linux/amd64
+            platforms: linux/amd64,linux/arm64
           - service: byclaw-minio
             context: middleware/minio
             changed: minio
@@ -72,7 +75,8 @@ jobs:
             changed: redis
             platforms: linux/amd64,linux/arm64
           - service: byclaw-openclaw
-            context: middleware/openclaw
+            context: .
+            dockerfile: middleware/openclaw/Dockerfile
             changed: openclaw
             platforms: linux/amd64,linux/arm64
     # 只构建有变更的服务，或 workflow_dispatch 全部构建
@@ -130,7 +134,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
-          file: ${{ matrix.context }}/Dockerfile
+          file: ${{ matrix.dockerfile || format('{0}/Dockerfile', matrix.context) }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

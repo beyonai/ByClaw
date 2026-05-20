@@ -125,6 +125,9 @@ public class SuasSuperassistApplicationService {
             return defaultDigEmployeeId;
         }
         Long assistantId = CurrentUserHolder.getAssistantId();
+        if (assistantId == null || assistantId <= 0) {
+            assistantId = CurrentUserHolder.getCurrentUserId();
+        }
         if (assistantId == null) {
             return null;
         }
@@ -198,8 +201,8 @@ public class SuasSuperassistApplicationService {
         }
         boolean hasUserSelectedDefaultAssistant = isValidUserSelectedDefaultAssistant(defaultAssistant, userId);
 
-        // 默认超级助手以 resource_code={userCode}_main 作为唯一锚点；
-        // 如果用户已把普通个人助理设为默认，这里只确保 _main 资源存在，不覆盖用户当前选择。
+        // 默认超级助手以 resource_code={userCode}_main 作为唯一锚点。
+        // 如果用户已在左侧列表中选择其它数字员工做默认助理，这里只确保 _main 资源存在，不覆盖用户当前选择。
         SsResource existing = findExistingDefaultSuperAssistant(userCode, userId);
         if (hasUserSelectedDefaultAssistant && isValidDefaultSuperAssistant(existing, userCode, userId)) {
             return defaultAssistant;
@@ -230,8 +233,8 @@ public class SuasSuperassistApplicationService {
     }
 
     /**
-     * 按 resource_code={userCode}_main 反查该用户已存在的默认超级助手。
-     * resource_code 比 createBy 更稳定，能避免历史 personal_default 个人助理被误认为新的默认超级助手。
+     * 按 resource_code={userCode}_main 反查该用户已存在的超级助手。
+     * 超级助手不再依赖 owner_type=personal_default，resource_code 后缀是唯一识别口径。
      *
      * @author qin.guoquan
      * @date 2026-05-09 150800
@@ -243,7 +246,6 @@ public class SuasSuperassistApplicationService {
         }
         LambdaQueryWrapper<SsResource> qw = new LambdaQueryWrapper<>();
         qw.eq(SsResource::getResourceBizType, ResourceBizTypeEnum.DIG_EMPLOYEE.name())
-            .eq(SsResource::getOwnerType, OwnerType.PERSONAL_DEFAULT)
             .eq(SsResource::getResourceCode, resourceCode)
             .orderByAsc(SsResource::getResourceId)
             .last("limit 1");
@@ -260,19 +262,16 @@ public class SuasSuperassistApplicationService {
         String resourceCode = DigitalEmployeeApplicationService.buildDefaultSuperAssistantResourceCode(userCode, userId);
         return defaultAssistant != null
             && StringUtils.equals(defaultAssistant.getResourceBizType(), ResourceBizTypeEnum.DIG_EMPLOYEE.name())
-            && StringUtils.equals(defaultAssistant.getOwnerType(), OwnerType.PERSONAL_DEFAULT)
             && StringUtils.equals(defaultAssistant.getResourceCode(), resourceCode);
     }
 
     /**
-     * 用户手动设置的默认个人助理可能不是 _main 超级助手。登录初始化不能因为它不是 _main，
-     * 就把 default_dig_employee_id 覆盖回默认超级助手。
+     * 用户手动设置的默认助理可能是左侧列表里的任意数字员工。
+     * 登录初始化不能因为它不是 _main 超级助手，就把 default_dig_employee_id 覆盖回超级助手。
      */
     private boolean isValidUserSelectedDefaultAssistant(SsResource defaultAssistant, Long userId) {
         return defaultAssistant != null
-            && StringUtils.equals(defaultAssistant.getResourceBizType(), ResourceBizTypeEnum.DIG_EMPLOYEE.name())
-            && StringUtils.equals(defaultAssistant.getOwnerType(), OwnerType.PERSONAL_DEFAULT)
-            && (defaultAssistant.getCreateBy() == null || defaultAssistant.getCreateBy().equals(userId));
+            && StringUtils.equals(defaultAssistant.getResourceBizType(), ResourceBizTypeEnum.DIG_EMPLOYEE.name());
     }
 
     private SuasSuperassist findOrCreateEmptySuperassist(Long userId, String userName, Long assistantId) {

@@ -1,8 +1,7 @@
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { Type } from "@sinclair/typebox";
+import { isSubagentSessionKey } from "openclaw/plugin-sdk/routing";
 import type { AgentRegistryState } from "./agent-state.js";
-import { adaptAgentJson, type AdaptedManagedAgent } from "./agent-adapter.js";
+import type { AdaptedManagedAgent } from "./agent-adapter.js";
 import { buildExecutorResourceContext, compactText, runBaiyingExecutor } from "./resource-metadata.js";
 import { docAsyncState, type DocAsyncTaskRecord } from "./doc-async-state.js";
 import type { BaiyingAssociatedResource } from "./types.js";
@@ -141,6 +140,7 @@ function formatResourceLine(params: {
   url?: string;
   integrationType?: string;
   agentSseUrl?: string;
+  agentHomeUrl?: string;
   serverUrl?: string;
   transferType?: string;
   unsupportedReason?: string;
@@ -162,6 +162,9 @@ function formatResourceLine(params: {
   }
   if (params.agentSseUrl) {
     attrs.push(`agent_sse_url: ${params.agentSseUrl}`);
+  }
+  if (params.agentHomeUrl) {
+    attrs.push(`agent_home_url: ${params.agentHomeUrl}`);
   }
   if (params.serverUrl) {
     attrs.push(`server_url: ${params.serverUrl}`);
@@ -194,15 +197,26 @@ function formatRootAgentLine(agent: AdaptedManagedAgent): string {
     description: compactText(agent.systemPrompt, 120),
     integrationType: agent.integrationType,
     agentSseUrl: agent.agentSseUrl,
+    agentHomeUrl: agent.agentHomeUrl,
   });
 }
 
 /**
  * Tool description uses only fields present on `agent.associatedResources` (from
  * the latest agent sync). Enriched snapshot details are not cached here; each
- * `baiying_call` execution loads capability from disk via the executor.
+ * `baiying_call` execution loads capability from Redis via the executor.
  */
-export function buildBaiyingCallDescription(params: { agent: AdaptedManagedAgent }): string {
+export function buildBaiyingCallDescription(params: { agent: AdaptedManagedAgent; isFromThirdPartyAgent?: boolean }): string {
+  if (params.isFromThirdPartyAgent) {
+    // 暂时这么定，后续需要考虑：更详细的描述、执行参数等
+    return [
+      "Capabilities:",
+      params.agent.coreCompetencies?.map(capacity => {
+        return `  - ${capacity.coreCompetency}.${capacity.description || ""}`
+      }).join("\n"),
+      `Pass agent_id = ${params.agent.sourceKey}, resource_id = ${params.agent.agentId} to \`baiying_call\``
+    ].filter(Boolean).join("\n");
+  }
   const resources = params.agent.associatedResources ?? [];
   const summaryNames = resources
     .slice(0, 3)
@@ -278,7 +292,6 @@ export function buildBaiyingCallDescription(params: { agent: AdaptedManagedAgent
 export function createBaiyingCallToolFactory(params: {
   registry: AgentRegistryState;
   executorPath: string;
-  agentConfigDir?: string;
   embedApiKeysFromJson?: boolean;
   envApiKeyTemplate?: string;
   defaultProxyUrl?: string;
@@ -308,67 +321,6 @@ export function createBaiyingCallToolFactory(params: {
     }
   }
 
-  function collectAgentJsonFilesSync(rootDir: string): string[] {
-    const out: string[] = [];
-    let entries: ReturnType<typeof readdirSync>;
-    try {
-      entries = readdirSync(rootDir, { withFileTypes: true });
-    } catch {
-      return out;
-    }
-    for (const ent of entries) {
-      if (ent.name.startsWith(".")) {
-        continue;
-      }
-      const p = path.join(rootDir, ent.name);
-      if (ent.isFile() && ent.name.toLowerCase().endsWith(".json")) {
-        out.push(p);
-      }
-      if (ent.isDirectory()) {
-        const cfgPath = path.join(p, "config.json");
-        try {
-          readFileSync(cfgPath, "utf8");
-          out.push(cfgPath);
-        } catch {
-          // ignore missing config.json
-        }
-      }
-    }
-    return out;
-  }
-
-  /** Registry miss: scan agent config dir on each resolution (no in-memory agent cache). */
-  function findAdaptedAgentOnDisk(agentId: string): AdaptedManagedAgent | undefined {
-    const rootDir = params.agentConfigDir?.trim();
-    if (!rootDir) {
-      return undefined;
-    }
-    const files = collectAgentJsonFilesSync(rootDir);
-    for (const filePath of files) {
-      let raw: unknown;
-      try {
-        raw = JSON.parse(readFileSync(filePath, "utf8"));
-      } catch {
-        continue;
-      }
-      const adapted = adaptAgentJson({
-        raw,
-        fileName: path.basename(filePath),
-        embedApiKeysFromJson: params.embedApiKeysFromJson === true,
-        envApiKeyTemplate: params.envApiKeyTemplate,
-        defaultProxyUrl: params.defaultProxyUrl,
-        defaultApiKey: params.defaultApiKey,
-      });
-      if ("error" in adapted) {
-        continue;
-      }
-      if (adapted.agentId === agentId) {
-        return adapted;
-      }
-    }
-    return undefined;
-  }
-
   return (ctx: any) => {
     const agentId = ctx.agentId;
     if (!agentId || !agentId.startsWith(MANAGED_AGENT_PREFIX)) {
@@ -376,28 +328,33 @@ export function createBaiyingCallToolFactory(params: {
       return null;
     }
 
-    const registryHit = params.registry.get(agentId);
-    const fallbackHit = registryHit ? undefined : findAdaptedAgentOnDisk(agentId);
-    const agent = registryHit ?? fallbackHit;
+    const agent = params.registry.get(agentId);
     debugLog(
-      `resolve: agentId=${agentId} registryHit=${registryHit ? "yes" : "no"} diskFallback=${
-        fallbackHit ? "yes" : "no"
-      } registrySize=${params.registry.list().length}`,
+      `resolve: agentId=${agentId} registryHit=${agent ? "yes" : "no"} redisOnly=yes registrySize=${params.registry.list().length}`,
     );
     if (!agent) {
       return null;
     }
 
+    const isSubagent = isSubagentSessionKey(ctx.sessionKey);
+
     const hasResources = !!agent.associatedResources?.length;
     const hasSseUrl = !!agent.agentSseUrl;
-    if (!hasResources && !hasSseUrl) {
+    const hasHomeUrl = !!agent.agentHomeUrl;
+    const { integrationType } = agent;
+
+    // 第三方创建的数字员工，单独处理tool
+    const isFromThirdPartyAgent =
+      integrationType === "INTERFACE" || integrationType === "A2A" || integrationType === "PAGE";
+
+    if (!hasResources && !hasSseUrl && !hasHomeUrl && !isFromThirdPartyAgent) {
       return null;
     }
 
     const tool: any = {
       name: "baiying_call",
       label: "Baiying Call",
-      description: buildBaiyingCallDescription({ agent }),
+      description: buildBaiyingCallDescription({ agent, isFromThirdPartyAgent }),
       parameters: Type.Object({
         query: Type.Optional(
           Type.String({
@@ -624,20 +581,25 @@ export function createBaiyingCallToolFactory(params: {
 
         const resources = agent.associatedResources ?? [];
         const requestedResourceId = normalizeText(toolParams.resource_id);
-        let selectedResource =
-          (requestedResourceId
+        const hasRootAgentResource = !!(agent.agentSseUrl || agent.agentHomeUrl);
+        const isRootAgentRequest = hasRootAgentResource && requestedResourceId === agent.sourceKey;
+        let selectedResource: BaiyingAssociatedResource | undefined =
+          (requestedResourceId && !isRootAgentRequest
             ? resources.find((resource) => resource.resourceId === requestedResourceId)
             : undefined) ?? resources[0];
+        if (isRootAgentRequest) {
+          selectedResource = undefined;
+        }
 
         let resourceId = requestedResourceId || selectedResource?.resourceId || agent.sourceKey;
         const selectedResourceType = selectedResource ? normalizeResourceType(selectedResource) : "";
         let resourceType =
           normalizeText(toolParams.resource_type) ||
           selectedResourceType ||
-          (agent.agentSseUrl ? "AGENT" : "UNKNOWN");
+          (hasRootAgentResource ? "AGENT" : "UNKNOWN");
 
-        if (!selectedResource && resourceId === agent.sourceKey && agent.agentSseUrl) {
-          resourceType = resourceType || "AGENT";
+        if (!selectedResource && resourceId === agent.sourceKey && hasRootAgentResource) {
+          resourceType = "AGENT";
         }
 
         /** No metadataOnly prefetch: executor `resolveCapability` reads snapshot files by `resourceId` on each execute. */
@@ -658,6 +620,7 @@ export function createBaiyingCallToolFactory(params: {
         });
         const payload: Record<string, unknown> = {
           query,
+          is_subagent: isSubagent,
           tool_call_id: _toolCallId,
           resource_context: resourceContext,
         };

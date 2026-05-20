@@ -36,7 +36,19 @@ jest.mock('@/components/AntdIcon', () => ({
 
 import React from 'react';
 import { render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ResourceCard from '..';
+
+const renderWithQueryClient = (ui: React.ReactElement) => {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+};
 
 describe('ResourceCard', () => {
   beforeEach(() => {
@@ -59,7 +71,7 @@ describe('ResourceCard', () => {
   });
 
   it('shows edit action for tool resources when canEdit is true', () => {
-    render(
+    renderWithQueryClient(
       <ResourceCard
         resourceType="TOOL"
         resource={{
