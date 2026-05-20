@@ -37,7 +37,7 @@ public class AuthRedisSyncService {
      *
      * @param userIds 用户标识集合
      */
-    @Async
+    @Async(AuthRedisSyncAsyncConfig.AUTH_REDIS_SYNC_EXECUTOR)
     public void asyncSyncUsersAuthToRedis(Collection<Long> userIds) {
         if (userIds == null || userIds.isEmpty()) {
             return;
@@ -71,7 +71,7 @@ public class AuthRedisSyncService {
      *
      * @param userId 用户标识
      */
-    @Async
+    @Async(AuthRedisSyncAsyncConfig.AUTH_REDIS_SYNC_EXECUTOR)
     public void asyncSyncUserAuthToRedis(Long userId) {
         if (userId == null) {
             return;
@@ -96,7 +96,7 @@ public class AuthRedisSyncService {
      * @param userIds 用户ID集合
      * @param hint 变更提示信息
      */
-    @Async
+    @Async(AuthRedisSyncAsyncConfig.AUTH_REDIS_SYNC_EXECUTOR)
     public void asyncSyncAuthChangedUsers(Set<Long> userIds, String hint) {
         if (userIds == null || userIds.isEmpty()) {
             return;

@@ -187,6 +187,7 @@ public class AuthApplicationService {
      * @return 资源权限映射，key为resourceId（String），value为resourceType
      */
     public Map<String, String> buildUserAuthResources(Long userId) {
+        long startTime = System.currentTimeMillis();
         if (userId == null) {
             return new HashMap<>();
         }
@@ -225,6 +226,11 @@ public class AuthApplicationService {
                 }
             }
         }
+
+
+        long endTime = System.currentTimeMillis();
+
+        logger.info("AuthApplicationService buildUserAuthResources cost time:" + (endTime - startTime));
 
         return result;
     }
@@ -1106,6 +1112,33 @@ public class AuthApplicationService {
         // 黑名单删除的也需要处理（因为可能影响权限）
         extractGrantToInfo(compareVo.getBlackDelMap(), userIds, orgIds, postIds, stationIds);
 
+        expandTargetUserIds(userIds, orgIds, postIds, stationIds);
+
+        return userIds;
+    }
+
+    /**
+     * 从本次请求名单中提取需要刷新用户维度Redis的用户ID。
+     * 即使本次数据库写入因为已有同维度授权而被幂等跳过，也要刷新这些用户的 USER:RESOURCES:AUTH 缓存。
+     */
+    private Set<Long> extractInvolvedUserIds(AuthRedBlackDTO authRedBlackDTO) {
+        Set<Long> userIds = new HashSet<>();
+        if (authRedBlackDTO == null) {
+            return userIds;
+        }
+
+        Set<Long> orgIds = new HashSet<>();
+        Set<Long> postIds = new HashSet<>();
+        Set<Long> stationIds = new HashSet<>();
+
+        extractGrantToInfo(authRedBlackDTO.getRedList(), userIds, orgIds, postIds, stationIds);
+        extractGrantToInfo(authRedBlackDTO.getBlackList(), userIds, orgIds, postIds, stationIds);
+        expandTargetUserIds(userIds, orgIds, postIds, stationIds);
+
+        return userIds;
+    }
+
+    private void expandTargetUserIds(Set<Long> userIds, Set<Long> orgIds, Set<Long> postIds, Set<Long> stationIds) {
         // 如果有授权给组织，查询组织下的所有用户
         if (CollectionUtils.isNotEmpty(orgIds)) {
             try {
@@ -1150,8 +1183,6 @@ public class AuthApplicationService {
                 logger.error("查询驻地下用户失败：{}", e.getMessage());
             }
         }
-
-        return userIds;
     }
 
     /**
@@ -1170,6 +1201,42 @@ public class AuthApplicationService {
 
             String grantToObjType = grant.getGrantToObjType();
             Long grantToObjId = grant.getGrantToObjId();
+
+            if (grantToObjId == null) {
+                continue;
+            }
+
+            if (GrantToObjType.USER.equalsIgnoreCase(grantToObjType)) {
+                userIds.add(grantToObjId);
+            }
+            else if (GrantToObjType.ORG.equalsIgnoreCase(grantToObjType)) {
+                orgIds.add(grantToObjId);
+            }
+            else if (GrantToObjType.POST.equalsIgnoreCase(grantToObjType)) {
+                postIds.add(grantToObjId);
+            }
+            else if (GrantToObjType.STATION.equalsIgnoreCase(grantToObjType)) {
+                stationIds.add(grantToObjId);
+            }
+        }
+    }
+
+    /**
+     * 从AuthDTO中提取授权对象信息
+     */
+    private void extractGrantToInfo(List<AuthDTO> authList, Set<Long> userIds, Set<Long> orgIds, Set<Long> postIds,
+        Set<Long> stationIds) {
+        if (CollectionUtils.isEmpty(authList)) {
+            return;
+        }
+
+        for (AuthDTO authDTO : authList) {
+            if (authDTO == null) {
+                continue;
+            }
+
+            String grantToObjType = authDTO.getGrantToObjType();
+            Long grantToObjId = authDTO.getGrantToObjId();
 
             if (grantToObjId == null) {
                 continue;
@@ -1418,6 +1485,7 @@ public class AuthApplicationService {
         // 授权变更后，为所有涉及的用户重新构建权限缓存
         try {
             Set<Long> involvedUserIds = this.extractInvolvedUserIds(compareVo, grantObjType, grantObjId);
+            involvedUserIds.addAll(this.extractInvolvedUserIds(authRedBlackDTO));
             if (CollectionUtils.isNotEmpty(involvedUserIds)) {
                 logger.info("授权变更涉及用户数：{}，开始同步权限到Redis", involvedUserIds.size());
                 this.authRedisSyncService.asyncSyncAuthChangedUsers(involvedUserIds, grantType);
