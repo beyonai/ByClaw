@@ -319,7 +319,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         }}
       />
 
-      {brandVersion !== 'commercial' && resourceType === 'KG_DOC' && (activeTab === 'personal' || isAdmin) && (
+      {brandVersion === 'openSource' && resourceType === 'KG_DOC' && (activeTab === 'personal' || isAdmin) && (
         <Tooltip title={!knowledgeCapability?.allowKnowledgeBaseCreate ? knowledgeCapabilityDisabledTip : undefined}>
           <span>
             <Button
@@ -340,7 +340,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         </Tooltip>
       )}
 
-      {brandVersion !== 'commercial' && (
+      {brandVersion === 'openSource' && (
         <Tooltip
           title={
             !canImportCurrentEnterpriseResource

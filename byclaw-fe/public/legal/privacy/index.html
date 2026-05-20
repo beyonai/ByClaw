@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="../../favicon.svg" type="image/svg+xml" />
+    <link rel="alternate icon" href="../../favicon.png" type="image/png" />
+    <title>隐私政策 - 鲸智百应</title>
+    <meta name="keywords" content="鲸智百应, 隐私政策, 个人信息保护" />
+    <meta name="description" content="鲸智百应隐私政策，详细说明我们如何收集、使用、存储和保护您的个人信息。" />
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+        font-family: 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+        color: #222;
+        line-height: 1.6;
+        background-color: #f7f8fa;
+      }
+
+      .container {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 40px 20px;
+        background-color: #fff;
+        min-height: 100vh;
+      }
+
+      .header {
+        text-align: center;
+        margin-bottom: 40px;
+        padding-bottom: 30px;
+        border-bottom: 2px solid #e8e8e8;
+      }
+
+      .header h1 {
+        font-size: 32px;
+        font-weight: 600;
+        color: #1a1a1a;
+        margin-bottom: 20px;
+      }
+
+      .header .meta {
+        font-size: 14px;
+        color: #666;
+        display: flex;
+        justify-content: center;
+        gap: 30px;
+        flex-wrap: wrap;
+      }
+
+      .content {
+        font-size: 15px;
+        line-height: 1.8;
+        color: #333;
+      }
+
+      .section {
+        margin-bottom: 35px;
+      }
+
+      .section-title {
+        font-size: 20px;
+        font-weight: 600;
+        color: #1a1a1a;
+        margin-bottom: 20px;
+        padding-left: 0;
+      }
+
+      .section-content {
+        margin-bottom: 15px;
+        color: #333;
+      }
+
+      .subsection {
+        margin-bottom: 25px;
+        margin-left: 0;
+      }
+
+      .subsection-title {
+        font-size: 17px;
+        font-weight: 600;
+        color: #1a1a1a;
+        margin-bottom: 12px;
+        margin-top: 20px;
+      }
+
+      .subsubsection {
+        margin-bottom: 20px;
+        margin-left: 0;
+      }
+
+      .subsubsection-title {
+        font-size: 16px;
+        font-weight: 500;
+        color: #1a1a1a;
+        margin-bottom: 10px;
+        margin-top: 15px;
+      }
+
+      .content-item {
+        margin-bottom: 12px;
+        color: #333;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+      }
+
+      .content-item.numbered {
+        padding-left: 24px;
+        position: relative;
+      }
+
+      .content-item.numbered::before {
+        content: counter(item-counter);
+        counter-increment: item-counter;
+        position: absolute;
+        left: 0;
+        color: #666;
+        font-weight: 500;
+      }
+
+      .section {
+        counter-reset: item-counter;
+      }
+
+      .content-item:not(.numbered) {
+        padding-left: 0;
+      }
+
+      .content-item strong {
+        font-weight: 600;
+        color: #1a1a1a;
+      }
+
+      @media (max-width: 768px) {
+        .container {
+          padding: 20px 15px;
+        }
+
+        .header h1 {
+          font-size: 24px;
+        }
+
+        .section-title {
+          font-size: 18px;
+        }
+
+        .subsection-title {
+          font-size: 16px;
+        }
+
+        .content {
+          font-size: 14px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      // 隐私政策内容数据结构
+      const privacyContent = [
+        // 开头说明
+        {
+          title: '尊敬的用户：',
+          showNumber: false,
+          children: [
+            {
+              content:
+                '【鲸智百应】是由【浩鲸云计算科技股份有限公司】（以下简称"我们"）向您提供智能对话、智能问答、智能办公等服务。我们十分尊重您的个人信息和数据，将会按照业界成熟的安全标准，采取相应的安全保护措施来保护您的个人信息。',
+              showNumber: false,
+            },
+            {
+              content:
+                '本《隐私政策》将帮助您了解我们在向您提供服务的过程中将如何收集、使用、披露、处理、保护您的个人信息，请您在使用我们的产品或服务前，仔细阅读并了解本《隐私政策》。',
+              showNumber: false,
+            },
+            {
+              content:
+                '如您是未满14周岁的未成年人，请在您的父母或其他监护人陪同下仔细阅读并充分理解本《隐私政策》，并在征得您父母或其他监护人的同意后使用我们的产品或服务。',
+              showNumber: false,
+            },
+            {
+              content: '本隐私政策概览：',
+              showNumber: false,
+            },
+            {
+              content: '• 我们如何收集和使用您的个人信息',
+              showNumber: false,
+            },
+            {
+              content: '• 权限调用说明',
+              showNumber: false,
+            },
+            {
+              content: '• 我们如何使用Cookie及其他同类技术',
+              showNumber: false,
+            },
+            {
+              content: '• 我们如何共享您的个人信息',
+              showNumber: false,
+            },
+            {
+              content: '• 我们如何保护您的个人信息',
+              showNumber: false,
+            },
+            {
+              content: '• 我们如何存储您的个人信息',
+              showNumber: false,
+            },
+            {
+              content: '• 您的权利',
+              showNumber: false,
+            },
+            {
+              content: '• 我们如何处理未成年人的个人信息',
+              showNumber: false,
+            },
+            {
+              content: '• 隐私政策更新说明',
+              showNumber: false,
+            },
+            {
+              content: '• 如何联系我们',
+              showNumber: false,
+            },
+          ],
+        },
+        // 我们如何收集和使用您的个人信息
+        {
+          title: '我们如何收集和使用您的个人信息',
+          content:
+            '我们收集的您的个人信息途径主要为：您主动提交给我们的信息、我们直接获取的您在使用我们的产品或服务时产生的信息、我们从第三方合法获取的您的信息。我们仅会基于本《隐私政策》声明的目的处理您的个人信息。但请您注意，由于软件版本存在差别，服务功能配置可能存在差异，我们收集的信息取决于您实际使用产品时的情况。',
+          children: [
+            {
+              title: '登录',
+              children: [
+                {
+                  content:
+                    '当你登录鲸智百应及相关服务时，你可以通过账号或手机号进行登录。手机号码是履行国家法律法规关于网络实名制要求的必要信息，如果你不提供账号或手机号码用于登录，我们可能无法为你提供AI对话等功能。',
+                  showNumber: false,
+                },
+              ],
+            },
+            {
+              title: '智能对话',
+              children: [
+                {
+                  content:
+                    '我们基于生成式人工智能模型技术向您提供对话及互动服务。您可以通过对话框向我们发送文字、语音、图片、文件等内容或点击操作栏按键直接发送操作指令请求，我们自动接收上述信息以便于向您提供文字、语音（包括实时通话）形式的智能对话以及图片、音乐生成服务。您可以通过算法备案公示说明查看和详细了解鲸智百应使用的模型技术的基本原理、目的意图和主要运行机制等。',
+                },
+                {
+                  content:
+                    '您主动拍摄或输入图片、语音时，根据功能需要，我们会根据您输入的信息类型分别请求您授权相机、相册（存储）、麦克风权限。如您拒绝授权，将无法拍摄或无法输入图片信息和语音信息，但不影响您使用鲸智百应的其他功能。',
+                },
+                {
+                  content:
+                    '当您输入的聊天信息、提交的信息等内容包含他人的个人信息时，特别是您在使用录音纪要功能中录音内容涉及其他说话人的，请您务必在提供该信息前获得他人的合法授权，避免造成他人信息的不当泄露。',
+                },
+                {
+                  content:
+                    '当您使用健康咨询相关功能时，我们可能需要您输入病史、过敏史、检查结果等信息并根据您输入内容，生成对您的回复、解答内容并生成咨询小结或报告（不构成医疗建议）供您参考。',
+                },
+                {
+                  content:
+                    '记忆功能，为了在对话中提供更加智能、更贴合你需求的回复，鲸智百应可以记住并总结你与鲸智百应聊天中提及（或主动要求鲸智百应记住）的个人兴趣、偏好等内容，作为回复生成时的背景信息进行参考。',
+                },
+              ],
+            },
+            {
+              title: '用户反馈与服务',
+              children: [
+                {
+                  content:
+                    '客服及问题：为便于与您联系、尽快帮助您解决问题或记录相关问题的处理方案及结果，我们可能会保存您与我们的通信/通话记录及相关内容（包括账号信息、反馈信息、您为了证明相关事实提供的其他信息，或您留下的联系方式）。为向您提供问题咨询、异常诊断等服务，以及时解决您的问题，我们可能需要收集、使用您的操作、使用、服务日志信息或能够证明相关事实情况的其他必要信息（这取决于您与我们沟通的问题类型）。',
+                },
+                {
+                  content:
+                    '当您投诉他人或被他人投诉时，为了保护您及他人的合法权益，我们可能会将您的账号/身份信息、联系方式、投诉相关内容提供给消费者权益保护部门及监管机关，以便及时解决投诉纠纷，但法律法规明确禁止提供的除外。',
+                },
+                {
+                  content:
+                    '问卷调查：为了提供服务及改进服务质量的合理需要，我们可能在鲸智百应或合作平台向您发送问卷。在分析问卷时，我们会使用您的问卷答复信息，以及您与客服联系时您提供的其他信息；如您不愿意，您也可以拒绝参与问卷调查。',
+                },
+              ],
+            },
+            {
+              title: '个性化推荐',
+              children: [
+                {
+                  content:
+                    '为了向你推荐相关性更高的输入指令、聊天机器人，提供更契合你要求的服务，我们会为你提供个性化推荐服务。若您不需要使用此服务，可以通过相关设置关闭此功能。',
+                  showNumber: false,
+                },
+              ],
+            },
+            {
+              title: '服务/体验的优化与改进',
+              children: [
+                {
+                  content:
+                    '您可以对我们所输出的内容进行点赞、点踩、复制等反馈，或向我们反馈您使用过程中的遇到问题和体验，我们将结合您对产品的反馈，不断改进我们的服务。',
+                },
+                {
+                  content:
+                    '在经安全加密技术处理、严格去标识化且无法重新识别特定个人的前提下，我们可能会将您向鲸智百应输入的数据、发出的指令以及鲸智百应相应生成的回复（合称"内容数据"）、您对产品的访问和使用情况进行分析和用于模型训练，以不断调整优化模型效果和产品体验。',
+                },
+              ],
+            },
+            {
+              title: '征得授权同意的例外',
+              children: [
+                {
+                  content:
+                    '请您理解，在下列情形中，根据法律法规及相关国家标准，我们收集和使用您的个人信息不必事先征得您的授权同意：',
+                  showNumber: false,
+                },
+                {
+                  content:
+                    'a.与我们履行法律法规规定的义务相关的；\nb.与国家安全、国防安全直接相关的；\nc.与公共安全、公共卫生、重大公共利益直接相关的；\nd.与刑事侦查、起诉、审判和判决执行等直接相关的；\ne.出于维护您或他人的生命、财产等重大合法权益但又很难得到本人授权同意的；\nf.您自行向社会公众公开的个人信息；\ng.根据个人信息主体要求签订和履行合同所必需的；\nh.从合法公开披露的信息中收集的您的个人信息的，如合法的新闻报道、政府信息公开等渠道；\ni.用于维护软件及相关服务的安全稳定运行所必需的，例如发现、处置软件及相关服务的故障；\nj.为开展合法的新闻报道所必需的；\nk.为学术研究机构，基于公共利益开展统计或学术研究所必要，且对外提供学术研究或描述的结果时，对结果中所包含的个人信息进行去标识化处理的；\nl.法律法规规定的其他情形。',
+                  showNumber: false,
+                },
+                {
+                  content:
+                    '特别提示您注意，如信息无法单独或结合其他信息识别到您的个人身份，其不属于法律意义上您的个人信息；当您的信息可以单独或结合其他信息识别到您的个人身份时或我们将无法与任何特定个人信息建立联系的数据与其他您的个人信息结合使用时，这些信息在结合使用期间，将作为您的个人信息按照本隐私政策处理与保护。',
+                  showNumber: false,
+                },
+              ],
+            },
+          ],
+        },
+        // 权限调用说明
+        {
+          title: '权限调用说明',
+          content:
+            '在提供服务过程中，可能会调用您的一些设备权限。以下是我们可能调用的权限以及其所对应的功能说明和目的。',
+          children: [
+            {
+              title: '安卓操作系统应用权限列表',
+              children: [
+                {
+                  content: 'CAMERA 摄像头：在您使用拍照功能时，需要调用摄像头权限以便拍摄照片和视频。',
+                },
+                {
+                  content: 'RECORD_AUDIO 录音：在您使用语音输入、语音搜索等功能时，需要调用录音权限以便录制音频。',
+                },
+                {
+                  content:
+                    'MODIFY_AUDIO_SETTINGS 修改音频设置：在语音输入和录音过程中，需要调用此权限以便调整音频参数，以提供更好的音频体验。',
+                },
+                {
+                  content:
+                    'FOREGROUND_SERVICE 前台服务：在录音等场景下，需要调用此权限以便保持服务运行，确保功能正常使用。',
+                },
+                {
+                  content:
+                    'FOREGROUND_SERVICE_MICROPHONE 前台服务麦克风：在录音过程中，需要调用此权限以便保持麦克风访问，确保录音功能正常。',
+                },
+                {
+                  content:
+                    'WAKE_LOCK 唤醒锁：在录音等场景下，需要调用此权限以便防止设备进入休眠状态，确保功能正常使用。',
+                },
+                {
+                  content:
+                    'READ_EXTERNAL_STORAGE 读取外置存储器（Android 11及以下）：在您上传/发送图片、文件等功能时，需要调用此权限以便读取存储中的图片、文件等内容。',
+                },
+                {
+                  content:
+                    'WRITE_EXTERNAL_STORAGE 写入外置存储器（Android 11及以下）：在您下载/保存图片、文件等功能时，需要调用此权限以便写入外部储存。',
+                },
+                {
+                  content:
+                    'READ_MEDIA_IMAGES 读取图片（Android 13+）：在您创建智能体选择头像、发送图片等功能时，需要调用此权限以便从外部存储读取图片数据。',
+                },
+                {
+                  content:
+                    'READ_MEDIA_VIDEO 读取视频（Android 13+）：在您进行视频理解等功能时，需要调用此权限以便从外部存储读取视频数据。',
+                },
+                {
+                  content:
+                    'READ_MEDIA_AUDIO 读取音频（Android 13+）：在您上传和发送音频文件等功能时，需要调用此权限以便从外部存储读取音频数据。',
+                },
+                {
+                  content:
+                    'READ_MEDIA_FILES 读取文件（Android 13+）：在您选择和上传文件等功能时，需要调用此权限以便从外部存储读取文件数据。',
+                },
+                {
+                  content:
+                    'ACCESS_NETWORK_STATE 访问网络状态：需要调用此权限以便检测网络连接状态，优化网络请求和用户体验。',
+                },
+                {
+                  content:
+                    'ACCESS_WIFI_STATE 访问WiFi状态：需要调用此权限以便检测WiFi连接状态，优化网络请求和用户体验。',
+                },
+                {
+                  content:
+                    'POST_NOTIFICATIONS 通知权限（Android 13+）：在用户消息告知、身份验证等场景时，需要调用此权限以便向用户发送推送通知。',
+                },
+                {
+                  content:
+                    'QUERY_ALL_PACKAGES 查询所有包：在钉钉登录等功能时，需要调用此权限以便查询设备上已安装的应用包信息。',
+                },
+              ],
+            },
+            {
+              title: 'iOS 操作系统应用权限列表',
+              children: [
+                {
+                  content:
+                    'NSCameraUsageDescription 使用摄像头：在您使用拍照或扫码功能时，需要调用摄像头权限以便拍摄照片并发送给智能助手，或扫描二维码进行快速操作。我们仅在您主动使用拍照或扫码功能时才会请求此权限，不会在后台访问您的相机。',
+                },
+                {
+                  content:
+                    'NSPhotoLibraryUsageDescription 读取相册：在您从相册中选择照片并发送给智能助手进行识别、分析或对话时，需要调用此权限以便访问您的相册。我们仅在您主动选择照片时才会访问相册，不会查看或上传您未选择的照片。',
+                },
+                {
+                  content:
+                    'NSMicrophoneUsageDescription 使用麦克风：在您使用语音输入功能与智能助手进行对话，将语音转换为文字，或进行语音录音时，需要调用此权限以便访问您的麦克风。我们仅在您主动使用语音功能时才会访问麦克风，不会在后台录音或监听您的对话。',
+                },
+                {
+                  content:
+                    'NSSpeechRecognitionUsageDescription 语音识别：在您使用语音输入功能时，需要调用此权限以便将您说出的语音内容实时转换为文字，让您可以通过语音与智能助手进行更便捷的交流。我们仅在您使用语音输入功能时才会使用此权限，转换后的文字仅用于与智能助手的交互，不会用于其他目的。',
+                },
+                {
+                  content:
+                    'NSLocationWhenInUseUsageDescription 位置信息：在相关功能中为您提供基于位置的服务和更精准的智能助手服务时，需要调用此权限以便访问您的位置信息。我们仅在您使用相关功能时才会获取位置信息，不会在后台持续追踪您的位置。',
+                },
+                {
+                  content:
+                    'NSDocumentDirectoryUsageDescription 文档目录：在您选择并上传文件（包括PDF、Word、Excel、PPT、图片、音频等格式）与智能助手进行交互时，需要调用此权限以便访问您的文档目录。我们仅在您主动选择文件时才会访问，不会读取您设备上的其他文件。',
+                },
+                {
+                  content:
+                    'NSLocalNetworkUsageDescription 本地网络：在连接到本地服务器加载数据，确保应用功能的正常运行时，需要调用此权限以便访问本地网络。此权限仅用于应用内部数据传输，不会访问您的个人网络信息。',
+                },
+              ],
+            },
+          ],
+        },
+        // 我们如何使用Cookie及其他同类技术
+        {
+          title: '我们如何使用Cookie及其他同类技术',
+          content:
+            'Cookie是从网络服务器发送到您的移动设备浏览器，存储在您移动设备上的纯文本文件，Cookie 通常包含标识符、站点名称以及一些号码和字符。Cookie内容仅由创建它的服务器检索或读取，我们使用该类Cookie存储相关的用户设置、访问等偏好数据，并追踪营销推广活动的效果，使得用户无需在每次访问时都重新配置设置内容。我们不会将 Cookie 用于超范围使用用途，并将定期进行清除处理。如果您禁用Cookie，您仍可以使用数据网络，但某些网站特色和功能可能无法正常运行，甚至可能完全停止运行。',
+        },
+        // 我们如何委托处理、共享、转让、公开披露您的个人信息
+        {
+          title: '我们如何委托处理、共享、转让、公开披露您的个人信息',
+          children: [
+            {
+              title: '委托处理',
+              children: [
+                {
+                  content:
+                    '我们产品或服务功能中某些具体的模块或功能由第三方提供，为了保证产品或服务的正常运行，我们需要将您的部分个人信息委托第三方进行处理。但我们会与其签署严格的保密协议，并要求他们按照我们的要求及本隐私政策以及其他任何相关保密和安全措施来处理个人信息。',
+                  showNumber: false,
+                },
+                {
+                  content:
+                    '对于委托处理个人信息的场景，我们会与受托合作方根据法律规定签署相关处理协议，并对其个人信息使用活动进行监督。',
+                  showNumber: false,
+                },
+              ],
+            },
+            {
+              title: '共享',
+              content:
+                '共享是指我们向其他个人信息控制者提供您的个人信息，且双方分别对个人信息拥有独立的控制权。在符合法律法规要求的前提下，我们可能会在以下情形中共享您的个人信息：',
+              children: [
+                {
+                  content:
+                    '（1）服务中部分服务内容由第三方服务商提供。为了向您提供您选择的产品或服务，我们可能需要向第三方服务商共享必要的个人信息，您在使用三方服务时，应当详细阅读第三方服务商的隐私政策，以便判断是否继续使用该第三方服务。我们可能会接入第三方提供的软件开发包（SDK）实现相关目的，我们会对合作方获取信息的软件工具开发包（SDK）进行严格的安全监测，以保护数据安全。请注意，第三方SDK可能因为其版本升级、策略调整等原因导致数据处理类型存在一定变化，请以其公示的官方说明为准。',
+                  showNumber: false,
+                },
+                {
+                  content: '（2）基于法律法规规定或按照行政机关、司法机关的强制性要求，共享您的个人信息。',
+                  showNumber: false,
+                },
+                {
+                  content: '（3）经您明确同意后，向指定第三方共享您所授权的部分信息。',
+                  showNumber: false,
+                },
+                {
+                  content:
+                    '（4）除此之外，我们不会将您的个人信息向其他公司、组织或个人进行共享。如您发现个人信息以违法、违规、违反本协议约定的方式被共享或披露，您可以要求我们对信息进行删除，我们将立即进行排查、确认、及时删除，并停止共享、转让的行为，同时通知第三方及时删除。',
+                  showNumber: false,
+                },
+              ],
+            },
+            {
+              title: '转让',
+              children: [
+                {
+                  content: '我们不会将您的个人信息转让给任何公司、组织和个人，但以下情形除外：',
+                  showNumber: false,
+                },
+                {
+                  content: '（1）在获取您明确同意的情况下，我们会向其他方转让您的个人信息；',
+                  showNumber: false,
+                },
+                {
+                  content:
+                    '（2）在涉及合并、收购或破产清算时，如涉及到个人信息转让，我们会在要求新的持有您个人信息的公司、组织继续受此个人信息保护政策的约束，否则我们将要求该公司、组织重新向您征求授权同意。',
+                  showNumber: false,
+                },
+              ],
+            },
+            {
+              title: '公开披露',
+              children: [
+                {
+                  content: '个人信息原则上不应公开披露，我们仅会在以下情形中公开披露您的个人信息：',
+                  showNumber: false,
+                },
+                {
+                  content: '（1）经过您明示授权同意；',
+                  showNumber: false,
+                },
+                {
+                  content: '（2）依照法律法规及诉讼、公共和政府主管部门有要求的情况下，我们可能会披露您的个人数据。',
+                  showNumber: false,
+                },
+              ],
+            },
+          ],
+        },
+        // 我们如何保护您的个人信息
+        {
+          title: '我们如何保护您的个人信息',
+          children: [
+            {
+              content:
+                '我们采取了符合业界标准的安全防护措施以保护您提供的个人信息，防止数据遭到未经授权的访问、使用、修改、公开披露等。这些措施包括但不限于：',
+              showNumber: false,
+            },
+            {
+              content: '（1）进行安全检查、使用加密工具和软件、以及其他合理的安全措施和程序；',
+              showNumber: false,
+            },
+            {
+              content:
+                '（2）采取加密技术确保信息传输与存储过程的安全性和保密性，并建立安全事件响应团队，及时进行问题的定位、分析、处理；',
+              showNumber: false,
+            },
+            {
+              content:
+                '（3）限定授权访问人员，并采取分级权限管理措施，仅网络管理员和基于业务必要需了解资料的人员才能从内部访问用户的非公开个人信息。',
+              showNumber: false,
+            },
+            {
+              content:
+                '如果我们知悉IT数据网络安全受到危害或由于外部行为（包括但不限于外部安全攻击）使用户的非公开信息披露给不相关第三方，尽管本隐私政策中有其他规定，我们仍将采取其认为适当的合理措施，包括但不限于内部调查、上报并通知执法机构、以及配合执法机构工作等；如果我们发现用户提供给IT数据网络的个人信息以非本隐私声明允许的方式进行了非法披露，我们将尽快采取合法合理措施通知相关用户，告知被披露的信息以及IT数据网络对该信息的知悉程度，最大程度采取补救措施。',
+              showNumber: false,
+            },
+          ],
+        },
+        // 我们如何存储您的个人信息
+        {
+          title: '我们如何存储您的个人信息',
+          children: [
+            {
+              title: '存储地点',
+              children: [
+                {
+                  content: '我们在中华人民共和国境内收集和产生的个人信息将存储在中华人民共和国境内。',
+                  showNumber: false,
+                },
+              ],
+            },
+            {
+              title: '存储时间',
+              children: [
+                {
+                  content:
+                    '我们仅在实现本《隐私政策》所述目的所必需的时间内（并考虑网络日志留存时间要求、诉讼时效等因素）保留您的个人信息，并在超出保留时间后删除或匿名化处理您的个人信息，除非法律法规另有要求。当我们停止运营或您停止使用服务时，我们将不再收集和使用您的任何信息，并对所存储的信息进行匿名化或删除处理。',
+                  showNumber: false,
+                },
+                {
+                  content:
+                    '手机号码：当你使用手机号码注册登录时，我们需要持续保留你的手机号码，以便于向你提供正常的服务、应对你可能的查询和客诉并保障你的账号和系统安全。',
+                  showNumber: false,
+                },
+                {
+                  content:
+                    '你输入的信息、反馈的信息、点赞、点踩及相关信息，在你未撤回、删除或未注销账号期间，我们会保留相关信息用于向你提供持续的业务功能。',
+                  showNumber: false,
+                },
+                {
+                  content:
+                    '如果你注销帐户、主动删除个人信息或超出必要的期限后，我们将对你的个人信息进行删除或匿名化处理，但以下情况除外：',
+                  showNumber: false,
+                },
+                {
+                  content: '（1）遵从法律法规有关信息留存的要求。',
+                  showNumber: false,
+                },
+                {
+                  content: '（2）出于财务、审计、争议解决等目的需要合理延长期限的。',
+                  showNumber: false,
+                },
+              ],
+            },
+          ],
+        },
+        // 您的权利
+        {
+          title: '您的权利',
+          children: [
+            {
+              title: '查询、更正、补充个人信息的权利',
+              children: [
+                {
+                  content: '您可以通过以下方式向我们提出查询、更正、补充您个人信息的请求：',
+                  showNumber: false,
+                },
+                {
+                  content: '（1）查阅/更正/补充账号信息：点击我的--个人资料，进行操作',
+                  showNumber: false,
+                },
+                {
+                  content: '（2）查阅/复制/删除历史对话：点击对话框--点击单个对话--删除',
+                  showNumber: false,
+                },
+                {
+                  content:
+                    '如果你通过上述方式无法完成操作的，可以通过Branding_Public@iwhalecloud.com与我们联系。为了更好地保护用户个人信息安全，我们可能在受理前会先验证您的身份，确保是个人信息主体或其授权人发起的请求，同时请您提供的请求内容具体可执行。',
+                  showNumber: false,
+                },
+              ],
+            },
+            {
+              title: '撤回同意',
+              children: [
+                {
+                  content:
+                    '当我们基于您的同意处理您的个人信息时，您有权随时撤回您的同意，但撤回同意不会影响撤回前我们基于您的同意处理您个人信息。您可以通过删除信息、停止使用服务、在应用中进行隐私设置等方式改变您授权我们继续收集您个人信息的范围或撤回您的授权。',
+                  showNumber: false,
+                },
+                {
+                  content:
+                    '请您理解，每个业务功能需要一些基本的个人信息才能得以完成，当您撤回同意或授权后，我们无法继续为您提供撤回同意或授权所对应的服务，也不再处理您相应的个人信息。但您撤回同意或授权的决定，不会影响此前基于您的授权开展的个人信息处理活动。',
+                  showNumber: false,
+                },
+                {
+                  content:
+                    '你可以在你的设备的设置中操作关闭或开启麦克风、相机、相册、地理位置、剪切板等权限，改变授权范围或撤回您的授权。撤回授权后我们将不再收集与这些权限相关的信息，但不会影响我们此前基于你的授权而开展的个人信息处理。',
+                  showNumber: false,
+                },
+              ],
+            },
+            {
+              title: '删除个人信息的权利',
+              children: [
+                {
+                  content: '有下列情形之一的，我们将主动删除个人信息；若您发现我们未删除的，您有权请求删除：',
+                  showNumber: false,
+                },
+                {
+                  content: '（1）处理目的已实现、无法实现或者为实现处理目的不再必要；',
+                  showNumber: false,
+                },
+                {
+                  content: '（2）我们停止提供产品或者服务，或者保存期限已届满；',
+                  showNumber: false,
+                },
+                {
+                  content: '（3）您撤回同意；',
+                  showNumber: false,
+                },
+                {
+                  content: '（4）我们违反法律、行政法规或者违反约定处理个人信息；',
+                  showNumber: false,
+                },
+                {
+                  content: '（5）法律、行政法规规定的其他情形。',
+                  showNumber: false,
+                },
+              ],
+            },
+            {
+              title: '注销账号',
+              children: [
+                {
+                  content:
+                    '你可以在"我的--系统化设置--注销账号"注销账号。在你注销账号前，我们将验证你的个人身份、安全状态、设备信息等。你知悉并理解，注销账号是不可逆的行为，当你注销账号后，我们将停止为你提供任何服务，并删除有关你账号的一切信息或对相关信息进行匿名化处理，因法律法规规定需要留存个人信息的，我们承诺将其单独存储，并不会将该等信息用于日常业务活动中。',
+                  showNumber: false,
+                },
+              ],
+            },
+            {
+              content:
+                '请您理解，在符合法律法规的前提下，基于现有技术能力、安全管控措施的限制，您所发起的权利请求可能无法得到立即、迅速的响应和处理，若您的请求被受理，我们会在15个工作日或法律法规所要求的时限内回复您的请求。',
+              showNumber: false,
+            },
+            {
+              content:
+                '为了更好地保护用户个人信息安全，我们可能在受理前会先验证您的身份，确保是个人信息主体或其授权人发起的请求，同时请您提供的请求内容具体可执行。若前述披露的方式无法实现您的权利，或您需要实现法律赋予您的其他权利，您可以通过发送电子邮件至Branding_Public@iwhalecloud.com与我们联系。',
+              showNumber: false,
+            },
+          ],
+        },
+        // 我们如何处理未成年人的个人信息
+        {
+          title: '我们如何处理未成年人的个人信息',
+          children: [
+            {
+              content:
+                '我们特别注意保护未成年人的隐私（未成年人年龄按您所在国法律以及各国家和地区的文化惯例确定），并敦请家长/监护人主动参与关注未成年人的活动和兴趣爱好。我们不以未成年人为目标，不会刻意收集未成年人的资料。如果家长/监护人发现未成年人的个人资料在未事先获得监护人同意的情况下被收集，请联系我们进行删除，并保证未成年人取消订阅或使用相关的服务。',
+              showNumber: false,
+            },
+          ],
+        },
+        // 算法备案公示说明
+        {
+          title: '算法备案公示说明',
+          children: [
+            {
+              content: '算法名称：鲸智大模型算法',
+              showNumber: false,
+            },
+            {
+              content:
+                '算法基本原理：鲸智大模型算法基于深度学习技术，利用大规模文本数据集训练，基于 Transformer 模型的编码- 解码架构，训练时通过反向传播算法优化参数，生成文本时运用贪婪搜索或最大后验概率等策略。应用场景：可应用于智能问答、智能问数、智能办公等领域。主要功能：能够学习生成自然、连贯的文本，自动生成高质量文本内容，提升工作效率与准确性，还能作为辅助工具助力人们理解和处理文本数据。输入输出数据模态：输入为文本数据，输出也为新生成的文本数据。',
+              showNumber: false,
+            },
+            {
+              content:
+                '算法运行机制：输入：该算法接收一个输入文本作为起始点，通常是一个句子或一段文本。编码：使用 Transformer 模型，将输入文本进行编码。编码过程中，模型惠学习输入文本的语义和语法结构，并将其转化为一个固定长度的向量表示。解码：基于编码后的向量表示，使用解码器生成生成新的文本。解码器采用贪婪搜索或最大后验概率等策略，解码出新的单词或短语，直到生成完整的文本。输出：输出生成的文本，作为算法的输出结果。',
+              showNumber: false,
+            },
+            {
+              content:
+                '算法应用场景：知识问答，面向各行各业，基于插电可用的大模型软硬件一体机，为职员和客户提供安全可靠的私域知识问答服务，满足职员业务知识问答，客户售前/售后问题咨询等场景的需；智能用数，面向中大型企业，为企业的经营管理者提供智能问数服务，满足企业经营中快速找数和智能分析的需求；智能研发，面向软件开发行业，为开发人员提供智能编程助手工具，以及一起结对开发的 AI 程序员，满足软件开发提质增效的需求；智能办公，面向中大型企业，为企业的职员提供流程智能自动化 RPA 服务，满足日常业务操作自动、化智能化的需求。',
+              showNumber: false,
+            },
+            {
+              content:
+                '算法目的意图：鲸智大模型算法帮助用户快速生成需要的文本内容，满足企业需求，提高员工工作效率，帮助企业降本增效。',
+              showNumber: false,
+            },
+            {
+              content: '备案编号：网信算备320115474241001250011号',
+              showNumber: false,
+            },
+          ],
+        },
+        // 隐私政策更新说明
+        {
+          title: '隐私政策更新说明',
+          children: [
+            {
+              content:
+                '我们保留不时更新或修改本政策的权利。一旦隐私政策条款发生修改，我们将在相关页面进行更新展示；如条款的更改涉及到对您权益的实质性影响，则将以显著的方式提示您或重新获取您的授权。',
+              showNumber: false,
+            },
+          ],
+        },
+        // 如何联系我们
+        {
+          title: '如何联系我们',
+          children: [
+            {
+              content:
+                '如果您有任何疑问、意见或建议，请发送电子邮件至Branding_Public@iwhalecloud.com与我们联系，我们会在15个工作日或法律法规要求的时限内予以回复。',
+              showNumber: false,
+            },
+            {
+              content:
+                '如果您对我们的答复或处理方式不满意，您可以通过以下外部途径寻求解决方式：将投诉移交给相关法院进行司法管辖，或通过行业自律协会、政府相关管理机构等寻求帮助。',
+              showNumber: false,
+            },
+          ],
+        },
+      ];
+      // 转义 HTML 特殊字符
+      function escapeHtml(text) {
+        if (!text) return '';
+        return String(text)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      // 处理内容，保持换行符
+      function formatContent(content) {
+        if (!content) return '';
+        return escapeHtml(content);
+      }
+
+      // 递归生成内容项 HTML
+      function renderContentItem(item, numberPrefix) {
+        let html = '';
+
+        if (item.content !== undefined) {
+          // 如果 showNumber 明确设置为 false，则不显示编号
+          const shouldNumber = item.showNumber !== false; // 默认显示编号，除非明确设置为 false
+          let contentText = formatContent(item.content);
+          let useNumberedClass = false;
+
+          // 如果有序号前缀且需要显示编号，在内容前添加序号
+          if (shouldNumber && numberPrefix) {
+            contentText = numberPrefix + ' ' + contentText;
+            // 当 JavaScript 已添加序号时，不使用 numbered 类（避免 CSS counter 重复显示）
+            useNumberedClass = false;
+          } else if (shouldNumber && !numberPrefix) {
+            // 没有 numberPrefix 但需要显示编号时，使用 numbered 类让 CSS counter 显示
+            useNumberedClass = true;
+          }
+          // 如果 shouldNumber 为 false，则不添加任何序号
+
+          const className = useNumberedClass ? 'content-item numbered' : 'content-item';
+          html += `            <div class="${className}">${contentText}</div>\n`;
+        }
+
+        if (item.children && item.children.length > 0) {
+          let childIndex = 0; // 从 0 开始，遇到需要显示序号的子项时递增
+          for (const child of item.children) {
+            let childNumberPrefix = null;
+            // 只有当父项需要显示编号且子项也需要显示编号时，才为子项生成序号
+            if (numberPrefix && item.showNumber !== false && child.showNumber !== false) {
+              childIndex++;
+              childNumberPrefix = numberPrefix + '.' + childIndex;
+            }
+            html += renderContentItem(child, childNumberPrefix);
+          }
+        }
+
+        return html;
+      }
+
+      // 生成子部分 HTML（subsection）
+      function renderSubsection(item, sectionIndex, subsectionIndex) {
+        let html = '';
+
+        if (item.title) {
+          // 如果 sectionIndex 为空字符串，说明父 section 的 showNumber 为 false，不显示序号
+          const number = sectionIndex ? sectionIndex + '.' + subsectionIndex : '';
+          const titleText = number ? `${number} ${escapeHtml(item.title)}` : escapeHtml(item.title);
+          html += `          <div class="subsection">\n`;
+          html += `            <h3 class="subsection-title">${titleText}</h3>\n`;
+
+          if (item.content) {
+            // 如果 subsection 的 showNumber 为 false，内容不显示编号
+            if (item.showNumber === false) {
+              html += `            <div class="content-item">${formatContent(item.content)}</div>\n`;
+            } else {
+              html += `            <div class="content-item">${formatContent(item.content)}</div>\n`;
+            }
+          }
+
+          if (item.children && item.children.length > 0) {
+            let subsubsectionIndex = 0; // 从 0 开始，遇到需要显示序号的 subsubsection 时递增
+            let contentItemIndex = 0; // 从 0 开始，遇到需要显示序号的内容项时递增
+            for (const child of item.children) {
+              // 如果 child 有 title，可能是 subsubsection
+              if (child.title && child.children) {
+                // 如果 subsubsection 需要显示序号，递增计数器
+                if (number && child.showNumber !== false) {
+                  subsubsectionIndex++;
+                }
+                const subNumber = number && subsubsectionIndex > 0 ? number + '.' + subsubsectionIndex : '';
+                const subTitleText = subNumber ? `${subNumber} ${escapeHtml(child.title)}` : escapeHtml(child.title);
+                html += `            <div class="subsubsection">\n`;
+                html += `              <h4 class="subsubsection-title">${subTitleText}</h4>\n`;
+
+                if (child.content) {
+                  html += `              <div class="content-item">${formatContent(child.content)}</div>\n`;
+                }
+
+                if (child.children && child.children.length > 0) {
+                  if (child.showNumber === false || !subNumber) {
+                    // 如果 child 的 showNumber 为 false 或没有 number，子内容不显示序号
+                    for (const subChild of child.children) {
+                      html += renderContentItem(subChild, null);
+                    }
+                  } else {
+                    let subContentIndex = 0; // 从 0 开始，遇到需要显示序号的子内容时递增
+                    for (const subChild of child.children) {
+                      if (subChild.showNumber !== false) {
+                        subContentIndex++;
+                        const subContentNumber = subNumber + '.' + subContentIndex;
+                        html += renderContentItem(subChild, subContentNumber);
+                      } else {
+                        html += renderContentItem(subChild, null);
+                      }
+                    }
+                  }
+                }
+
+                html += `            </div>\n`;
+              } else {
+                // 普通内容项
+                if (item.showNumber === false || child.showNumber === false || !number) {
+                  // 如果 subsection 或 child 的 showNumber 为 false，或没有 number，不显示序号
+                  html += renderContentItem(child, null);
+                } else {
+                  // 需要显示序号，递增计数器
+                  contentItemIndex++;
+                  // 显示三级序号
+                  const contentNumber = number + '.' + contentItemIndex;
+                  html += renderContentItem(child, contentNumber);
+                }
+              }
+            }
+          }
+
+          html += `          </div>\n`;
+        } else if (item.content) {
+          html += `          <div class="content-item">${formatContent(item.content)}</div>\n`;
+        }
+
+        return html;
+      }
+
+      // 生成主部分 HTML（section）
+      function renderSection(item, sectionIndex) {
+        let html = '';
+
+        if (item.title) {
+          html += `        <!-- ${escapeHtml(item.title)} -->\n`;
+          html += `        <div class="section">\n`;
+
+          // 如果 showNumber 为 false 或 sectionIndex 为 0，则不显示 section 标题的序号
+          const sectionTitle =
+            item.showNumber === false || sectionIndex === 0
+              ? escapeHtml(item.title)
+              : `${sectionIndex} ${escapeHtml(item.title)}`;
+          html += `          <h2 class="section-title">${sectionTitle}</h2>\n`;
+
+          if (item.content) {
+            // 如果 section 的 showNumber 为 false，内容也不显示编号
+            if (item.showNumber === false) {
+              html += `          <div class="content-item">${formatContent(item.content)}</div>\n`;
+            } else {
+              html += `          <div class="content-item">${formatContent(item.content)}</div>\n`;
+            }
+          }
+
+          if (item.children && item.children.length > 0) {
+            let subsectionIndex = 0; // 从 0 开始，遇到需要显示序号的 subsection 时递增
+            let directContentIndex = 0; // 从 0 开始，遇到需要显示序号的内容项时递增
+            for (const child of item.children) {
+              if (child.title) {
+                // 如果 section 和 subsection 都需要显示序号，递增计数器
+                if (item.showNumber !== false && sectionIndex > 0 && child.showNumber !== false) {
+                  subsectionIndex++;
+                }
+                // 如果 section 的 showNumber 为 false 或 sectionIndex 为 0，subsection 也不显示序号
+                if (item.showNumber === false || sectionIndex === 0) {
+                  html += renderSubsection(child, '', subsectionIndex);
+                } else {
+                  html += renderSubsection(child, sectionIndex, subsectionIndex);
+                }
+              } else if (child.content) {
+                // section 下的直接内容项
+                if (item.showNumber === false || sectionIndex === 0 || child.showNumber === false) {
+                  // 如果 section 或 child 的 showNumber 为 false，或 sectionIndex 为 0，不显示序号
+                  html += renderContentItem(child, null);
+                } else {
+                  // 需要显示序号，递增计数器
+                  directContentIndex++;
+                  // 显示二级序号
+                  const contentNumber = sectionIndex + '.' + directContentIndex;
+                  html += renderContentItem(child, contentNumber);
+                }
+              } else if (child.children) {
+                // 如果 section 的 showNumber 为 false 或 sectionIndex 为 0，子内容也不显示序号
+                if (item.showNumber === false || sectionIndex === 0) {
+                  for (const subChild of child.children) {
+                    html += renderContentItem(subChild, null);
+                  }
+                } else {
+                  let subContentIndex = 0; // 从 0 开始，遇到需要显示序号的子内容时递增
+                  for (const subChild of child.children) {
+                    if (subChild.showNumber !== false) {
+                      subContentIndex++;
+                      const subContentNumber = sectionIndex + '.' + subContentIndex;
+                      html += renderContentItem(subChild, subContentNumber);
+                    } else {
+                      html += renderContentItem(subChild, null);
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          html += `        </div>\n`;
+        }
+
+        return html;
+      }
+
+      // 生成完整的 HTML 内容
+      function generateContent() {
+        let html = '';
+        let sectionIndex = 0; // 从 0 开始，遇到需要显示序号的 section 时递增
+        for (const item of privacyContent) {
+          // 如果 section 需要显示序号，递增计数器；否则保持当前值（下一个需要显示序号的会从 1 开始）
+          if (item.showNumber !== false) {
+            sectionIndex++;
+          }
+          html += renderSection(item, sectionIndex);
+        }
+        return html;
+      }
+
+      // 页面加载完成后生成内容
+      document.addEventListener('DOMContentLoaded', function () {
+        const contentDiv = document.querySelector('.content');
+        if (contentDiv) {
+          contentDiv.innerHTML = generateContent();
+        }
+      });
+    </script>
+    <div class="container">
+      <div class="header">
+        <h1>【鲸智百应】隐私政策</h1>
+        <div class="meta">
+          <span>更新日期：2026年01月28日</span>
+          <span>生效日期：2026年01月01日</span>
+        </div>
+      </div>
+      <div class="content">
+        <!-- 内容将通过 JavaScript 动态生成 -->
+      </div>
+    </div>
+  </body>
+</html>
