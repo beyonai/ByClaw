@@ -6,7 +6,8 @@ import type { CorePersonaExtension } from "./core-persona-definition.js";
 import { parseCorePersonaDefinition } from "./core-persona-definition.js";
 import { resolveDefaultManagedWorkspacePath } from "./workspace-paths.js";
 
-const MARKER = "<!-- baiying-enhance: managed seed -->";
+export const MANAGED_SEED_MARKER = "<!-- baiying-enhance: managed seed -->";
+const MARKER = MANAGED_SEED_MARKER;
 
 function stripLeadingBom(s: string): string {
   return s.replace(/^\uFEFF/, "");
@@ -20,24 +21,6 @@ const BOOTSTRAP_FILENAME = "BOOTSTRAP.md";
 const IDENTITY_FILENAME = "IDENTITY.md";
 const USER_FILENAME = "USER.md";
 const TOOLS_FILENAME = "TOOLS.md";
-
-/** Managed BOOTSTRAP: explicit no-op sentinel to suppress OpenClaw onboarding. */
-export function buildBootstrapMd(): string {
-  return `${MARKER}
-
-# Managed Bootstrap No-Op
-
-This workspace has already been initialized by \`baiying-enhance\`.
-
-Do not run first-run onboarding.
-Do not ask who you are or who the user is.
-Do not inspect files to diagnose this bootstrap file.
-Do not create, edit, move, delete, or archive any files because of this bootstrap file.
-Do not delete this file.
-
-Treat this file as a no-op sentinel. Continue with the active \`AGENTS.md\`, \`SOUL.md\`, \`TOOLS.md\`, runtime context, and the user's current request.
-`;
-}
 
 type BaiyingAgentItem = {
   resourceId?: string;
@@ -390,13 +373,33 @@ async function writeIfMissing(filePath: string, content: string): Promise<boolea
 }
 
 /** Check if file content starts with the managed seed marker (leading UTF-8 BOM ignored). */
+export function isManagedSeedContent(content: string): boolean {
+  return stripLeadingBom(content).startsWith(MANAGED_SEED_MARKER);
+}
+
 async function isManagedFile(filePath: string): Promise<boolean> {
   try {
     const content = await fs.readFile(filePath, "utf8");
-    return stripLeadingBom(content).startsWith(MARKER);
+    return isManagedSeedContent(content);
   } catch {
     return false;
   }
+}
+
+/** Delete a legacy plugin-managed BOOTSTRAP.md from a workspace, leaving user files untouched. */
+export async function removeManagedBootstrapIfPresent(workspaceDir: string): Promise<boolean> {
+  const bootstrapPath = path.join(workspaceDir, BOOTSTRAP_FILENAME);
+  let content: string;
+  try {
+    content = await fs.readFile(bootstrapPath, "utf8");
+  } catch {
+    return false;
+  }
+  if (!isManagedSeedContent(content)) {
+    return false;
+  }
+  await fs.unlink(bootstrapPath);
+  return true;
 }
 
 /**
@@ -506,7 +509,4 @@ export async function seedManagedAgentWorkspace(params: {
 
   // Ensure TOOLS.md exists even when source JSON has no Baiying payload.
   await writeIfMissing(path.join(dir, TOOLS_FILENAME), `${MARKER}\n\n# Tools\n\n(none)\n`);
-
-  // Replace OpenClaw's default BOOTSTRAP onboarding doc so the first turn uses SOUL/AGENTS only.
-  await fs.writeFile(path.join(dir, BOOTSTRAP_FILENAME), buildBootstrapMd(), "utf8");
 }

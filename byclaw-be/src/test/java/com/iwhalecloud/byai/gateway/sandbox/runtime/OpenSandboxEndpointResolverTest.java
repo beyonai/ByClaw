@@ -20,7 +20,7 @@ import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
 class OpenSandboxEndpointResolverTest {
 
     @Test
-    void resolve_openclawUsesServicePortOnly() {
+    void resolve_usesServicePortOnlyForOpenclaw() {
         OpenSandboxClient client = mock(OpenSandboxClient.class);
         when(client.getSandboxEndpoint("sb-1", 18789))
             .thenReturn(new SandboxEndpoint("sandbox.example.test:8443/sandboxes/sb-1/proxy/18789", Map.of("X", "Y")));
@@ -41,22 +41,22 @@ class OpenSandboxEndpointResolverTest {
     }
 
     @Test
-    void resolve_uiAgentBuildsProxyEndpointFromConfiguredBaseUrl() {
-        SandboxProperties properties = new SandboxProperties();
-        properties.getOpensandbox().setUiAgentProxyBaseUrl("https://uiagent-proxy.example.test/sandboxes/");
-
+    void resolve_usesServicePortOnlyForUiAgent() {
         SandboxServiceSpec spec = new SandboxServiceSpec();
         spec.setImageType("uiagent");
         spec.setServicePort(3000);
+        spec.setPorts(List.of(port(3000, "https"), port(9222, "http")));
 
         SandboxRuntimeInstance instance = SandboxRuntimeInstance.builder().sandboxId("sb-2").build();
         OpenSandboxClient client = mock(OpenSandboxClient.class);
+        when(client.getSandboxEndpoint("sb-2", 3000))
+            .thenReturn(new SandboxEndpoint("sandbox.example.test:8443/sandboxes/sb-2/proxy/3000", null));
 
-        List<String> endpoints = new OpenSandboxEndpointResolver(client, properties).resolve(instance, spec);
+        List<String> endpoints = new OpenSandboxEndpointResolver(client, new SandboxProperties()).resolve(instance, spec);
 
-        assertThat(endpoints).containsExactly("https://uiagent-proxy.example.test/sandboxes/sb-2/proxy/3000/"
-            + "?gatewayUrl=wss://uiagent-proxy.example.test/sandboxes/sb-2/proxy/3000/");
-        verify(client, never()).getSandboxEndpoint("sb-2", 3000);
+        assertThat(endpoints).containsExactly("https://sandbox.example.test:8443/sandboxes/sb-2/proxy/3000");
+        verify(client).getSandboxEndpoint("sb-2", 3000);
+        verify(client, never()).getSandboxEndpoint("sb-2", 9222);
     }
 
     @Test

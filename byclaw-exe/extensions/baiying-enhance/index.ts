@@ -150,10 +150,12 @@ const plugin = {
     let agentWatch: Awaited<ReturnType<typeof createAgentWatchdog>> | undefined;
     let digEmployeeAuthWatch: ReturnType<typeof createDigEmployeeAuthWatch> | undefined;
     let digEmployeeChangeSubscriber: ReturnType<typeof createDigEmployeeChangeSubscriber> | undefined;
+    let serviceStopped = false;
 
     api.registerService({
       id: "baiying-enhance-watchdogs",
       start: async (ctx) => {
+        serviceStopped = false;
         const absoluteDir = resolveAgentConfigDir(api, ctx.workspaceDir, pluginCfg);
         const stateDir = process.env.OPENCLAW_STATE_DIR?.trim() || path.join(homedir(), ".openclaw");
         const contentIndexPath = pluginCfg.agentContentIndexPath?.trim()
@@ -192,6 +194,9 @@ const plugin = {
             error: (message) => api.logger.error(message),
           },
           onChange: async (authorizedIds) => {
+            if (serviceStopped) {
+              return;
+            }
             api.logger.info(
               `baiying-enhance: dig-employee auth changed (${authorizedIds.size} authorized id(s)); triggering managed agent sync`,
             );
@@ -225,18 +230,34 @@ const plugin = {
             debounceMs,
             getAuthorizedIds: () => digEmployeeAuthWatch?.getAuthorizedIds(),
             flushNow: async (opts) => {
+              if (serviceStopped) {
+                return;
+              }
               await agentWatch?.__flushNow?.(opts);
             },
           });
         }
         // Start sync engine before Redis auth so `onChange` always has `agentWatch`; defer first scan until dig auth has run once.
         await agentWatch.start({ deferInitialFlush: true });
-        await digEmployeeAuthWatch.start();
-        await digEmployeeChangeSubscriber?.start();
-        // First flush runs cold-start workspace reconcile (auth ids vs workspace-baiying-agent-*) before restore.
-        await agentWatch.__flushNow?.({ fullWorkspaceReseed: true });
+        void (async () => {
+          api.logger.info(
+            "baiying-enhance: startup Redis auth sync scheduled in background; gateway ready will not wait for managed agent reseed",
+          );
+          await digEmployeeAuthWatch?.start();
+          if (serviceStopped) {
+            return;
+          }
+          await digEmployeeChangeSubscriber?.start();
+        })().catch((err) => {
+          api.logger.warn(
+            `baiying-enhance: background startup sync failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        });
       },
       stop: async () => {
+        serviceStopped = true;
         await digEmployeeChangeSubscriber?.stop();
         digEmployeeChangeSubscriber = undefined;
         await digEmployeeAuthWatch?.stop();

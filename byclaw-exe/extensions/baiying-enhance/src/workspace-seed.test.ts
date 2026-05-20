@@ -1,21 +1,36 @@
+import { access, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildAgentsMd,
-  buildBootstrapMd,
   buildByaiBusinessExtensionsMd,
   buildSoul,
+  MANAGED_SEED_MARKER,
+  removeManagedBootstrapIfPresent,
 } from "./workspace-seed.js";
 
-describe("workspace-seed bootstrap", () => {
-  it("buildBootstrapMd is an explicit managed no-op", () => {
-    const md = buildBootstrapMd();
-    expect(md).toContain("<!-- baiying-enhance: managed seed -->");
-    expect(md).toContain("Managed Bootstrap No-Op");
-    expect(md).toContain("Do not run first-run onboarding.");
-    expect(md).toContain("Do not inspect files to diagnose this bootstrap file.");
-    expect(md).toContain("Do not create, edit, move, delete, or archive any files");
-    expect(md).toContain("Do not delete this file.");
-    expect(md).not.toMatch(/woke up|Who am I/i);
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await access(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+describe("workspace-seed legacy bootstrap cleanup", () => {
+  it("removeManagedBootstrapIfPresent deletes only plugin-managed BOOTSTRAP.md", async () => {
+    const ws = await mkdtemp(path.join(tmpdir(), "baiying-bootstrap-cleanup-"));
+    const managedBootstrap = path.join(ws, "BOOTSTRAP.md");
+    await writeFile(managedBootstrap, `${MANAGED_SEED_MARKER}\n\nlegacy bootstrap`, "utf8");
+
+    expect(await removeManagedBootstrapIfPresent(ws)).toBe(true);
+    expect(await pathExists(managedBootstrap)).toBe(false);
+
+    await writeFile(managedBootstrap, "# User bootstrap\n", "utf8");
+    expect(await removeManagedBootstrapIfPresent(ws)).toBe(false);
+    expect(await readFile(managedBootstrap, "utf8")).toBe("# User bootstrap\n");
   });
 });
 

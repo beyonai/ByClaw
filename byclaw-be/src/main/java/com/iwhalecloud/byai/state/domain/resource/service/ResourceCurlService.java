@@ -6,6 +6,8 @@ import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.parser.Feature;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.jwt.JwtService;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.util.CurlParser;
 import com.iwhalecloud.byai.common.util.CurlParser.ParsedCurl;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
@@ -37,17 +39,21 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
 /**
  * 资源curl操作业务类
+ *
  * @author qin.guoquan
  * @date 2026-05-18 14:12:18
  */
@@ -62,16 +68,11 @@ public class ResourceCurlService {
 
     private static final Pattern URL_PATTERN = Pattern.compile("https?://[^\\s\"'<>]+", Pattern.CASE_INSENSITIVE);
 
-    private static final Set<String> TOOL_CURL_BIZ_TYPES = Set.of(
-        ResourceBizType.TOOL.getCode(),
-        ResourceBizType.TOOLKIT.getCode(),
-        ResourceBizType.MCP.getCode(),
-        ResourceBizType.AGENT.getCode());
+    private static final Set<String> TOOL_CURL_BIZ_TYPES = Set.of(ResourceBizType.TOOL.getCode(),
+        ResourceBizType.TOOLKIT.getCode(), ResourceBizType.MCP.getCode(), ResourceBizType.AGENT.getCode());
 
     private static final OkHttpClient RESOURCE_CURL_HTTP_CLIENT = new OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).writeTimeout(10, TimeUnit.SECONDS)
         .build();
 
     @Autowired
@@ -88,6 +89,9 @@ public class ResourceCurlService {
 
     @Autowired
     private AIService aiService;
+
+    @Autowired
+    private JwtService jwtService;
 
     public CurlParseResult parseCurl(String curlCommand) {
         ParsedCurl parsed = CurlParser.parse(curlCommand);
@@ -107,13 +111,20 @@ public class ResourceCurlService {
     }
 
     public ResourceCurlGenerateResult generateResourceCurl(ResourceCurlGenerateRequest request) {
-        Long resourceId = request == null ? null : request.getResourceId();
-        ResourceCurlContent content = loadResourceCurlContent(resourceId);
+        Long resourceId = request.getResourceId();
+        ResourceCurlContent content = this.loadResourceCurlContent(resourceId);
         if (StringUtils.isBlank(content.getSourceContent())) {
             throw new IllegalArgumentException("资源sourceContent为空，无法生成curl脚本");
         }
 
         ResourceCurlGenerateResult result = new ResourceCurlGenerateResult();
+        if (ResourceBizType.AGENT.getCode().equalsIgnoreCase(content.getResourceBizType())) {
+            result.setCurl(this.tryBuildAgentCurl(content.getSourceContent()));
+            result.setSource(CURL_GENERATE_SOURCE_RULE);
+            result.setMessage("规则生成成功");
+            return result;
+        }
+
         String curl = tryBuildCurlByRule(content.getSourceContent());
         if (StringUtils.isNotBlank(curl)) {
             result.setCurl(curl);
@@ -128,6 +139,34 @@ public class ResourceCurlService {
         result.setSource(CURL_GENERATE_SOURCE_LLM);
         result.setMessage("大模型生成成功");
         return result;
+    }
+
+    /**
+     * @param sourceContent 来源
+     * @return String
+     */
+    private String tryBuildAgentCurl(String sourceContent) {
+
+        JSONObject jsonObject = JSON.parseObject(sourceContent);
+
+        // 请求头，要添加beyond-Token
+        JSONObject headers = jsonObject.getJSONObject("headers");
+        if (headers == null) {
+            headers = new JSONObject();
+        }
+        headers.put("Beyond-Token", jwtService.createJwt(CurrentUserHolder.getLoginInfo()));
+
+        // 请求地址
+        String domainURL = jsonObject.getString("domainURL");
+        JSONObject metaContent = jsonObject.getJSONObject("metaContent");
+        String agentSseUrl = metaContent.getString("agentSseUrl");
+
+        // 智能体请求参数
+        Map<String, Object> body = new HashMap<>();
+        body.put("chatContent", "Hello");
+        body.put("chatId", UUID.randomUUID().toString().replace("-", ""));
+
+        return this.buildCurlScript("POST", joinUrl(domainURL, agentSseUrl), headers, JSON.toJSONString(body));
     }
 
     public ResourceCurlRunResult runResourceCurl(ResourceCurlRunRequest request) {
@@ -147,10 +186,12 @@ public class ResourceCurlService {
             result.setHeaders(flattenHeaders(response));
             ResponseBody responseBody = response.body();
             result.setBody(responseBody == null ? "" : responseBody.string());
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             result.setSuccess(false);
             result.setErrorMessage(e.getMessage());
-        } finally {
+        }
+        finally {
             result.setDurationMs(System.currentTimeMillis() - start);
         }
         return result;
@@ -161,14 +202,17 @@ public class ResourceCurlService {
             throw new IllegalArgumentException(I18nUtil.get("resource.resourceid.notnull"));
         }
         SsResource resource = ssResourceService.findById(resourceId);
+
         if (resource == null) {
             throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
         }
         String resourceBizType = StringUtils.trimToEmpty(resource.getResourceBizType());
+
         if (!TOOL_CURL_BIZ_TYPES.contains(resourceBizType)) {
             throw new IllegalArgumentException("仅工具类资源支持生成和运行curl脚本");
         }
         ResourceCurlContent content = new ResourceCurlContent();
+        content.setResourceBizType(resourceBizType);
         if (ResourceBizType.TOOLKIT.getCode().equals(resourceBizType)) {
             SsResExtToolKit ext = ssResExtToolKitService.findById(resourceId);
             content.setSourceContent(ext == null ? null : ext.getSourceContent());
@@ -181,6 +225,7 @@ public class ResourceCurlService {
             content.setTargetContent(ext == null ? null : ext.getTargetContent());
             return content;
         }
+
         SsResExtAgent ext = ssResExtAgentService.findById(resourceId);
         content.setSourceContent(ext == null ? null : ext.getSourceContent());
         content.setTargetContent(ext == null ? null : ext.getTargetContent());
@@ -212,8 +257,12 @@ public class ResourceCurlService {
             }
             JSONObject operation = pathItem.getJSONObject(method);
             String requestBody = buildCurlRequestBody(operation);
-            return buildCurlScript(method, joinUrl(baseUrl, path), requestBody);
-        } catch (Exception e) {
+
+            Map<String, Object> headers = new HashMap<>();
+            headers.put("Content-Type", "application/json");
+            return this.buildCurlScript(method, joinUrl(baseUrl, path), headers, requestBody);
+        }
+        catch (Exception e) {
             LOGGER.info("规则生成curl失败，将尝试大模型兜底, reason={}", e.getMessage());
             return null;
         }
@@ -310,10 +359,14 @@ public class ResourceCurlService {
         };
     }
 
-    private String buildCurlScript(String method, String url, String requestBody) {
+    private String buildCurlScript(String method, String url, Map<String, Object> headers, String requestBody) {
         StringBuilder curl = new StringBuilder();
         curl.append("curl -X ").append(method).append(" ").append(shellQuote(url));
-        curl.append(" \\\n  -H ").append(shellQuote("Content-Type: application/json"));
+
+        for (Map.Entry<String, Object> entrySet : headers.entrySet()) {
+            curl.append(" \\\n  -H ").append(shellQuote(entrySet.getKey() + ": " + entrySet.getValue()));
+        }
+
         if (StringUtils.isNotBlank(requestBody) && !"GET".equalsIgnoreCase(method)) {
             curl.append(" \\\n  -d ").append(shellQuote(requestBody));
         }
@@ -354,8 +407,7 @@ public class ResourceCurlService {
                 if (StringUtils.isBlank(nextLine)) {
                     continue;
                 }
-                if (StringUtils.endsWith(command.toString(), "\\")
-                    || StringUtils.startsWith(nextLine, "-")
+                if (StringUtils.endsWith(command.toString(), "\\") || StringUtils.startsWith(nextLine, "-")
                     || StringUtils.startsWith(nextLine, "--")) {
                     command.append('\n').append(nextLine);
                     continue;
@@ -368,10 +420,7 @@ public class ResourceCurlService {
     }
 
     private String normalizeCurlLineContinuation(String curl) {
-        return StringUtils.trimToEmpty(curl)
-            .replace("\\\r\n", " ")
-            .replace("\\\n", " ")
-            .replace("\\\r", " ");
+        return StringUtils.trimToEmpty(curl).replace("\\\r\n", " ").replace("\\\n", " ").replace("\\\r", " ");
     }
 
     private void validateSafeCurlCommand(String curl) {
@@ -448,7 +497,8 @@ public class ResourceCurlService {
         try {
             URI uri = URI.create(url);
             return StringUtils.lowerCase(uri.getHost());
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             return null;
         }
     }
@@ -487,8 +537,20 @@ public class ResourceCurlService {
     }
 
     private static final class ResourceCurlContent {
+
+        private String resourceBizType;
+
         private String sourceContent;
+
         private String targetContent;
+
+        String getResourceBizType() {
+            return resourceBizType;
+        }
+
+        void setResourceBizType(String resourceBizType) {
+            this.resourceBizType = resourceBizType;
+        }
 
         String getSourceContent() {
             return sourceContent;

@@ -6,7 +6,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_INDEX_FILENAME, INDEX_VERSION, loadAgentContentIndex } from "./agent-content-index.js";
-import { createAgentWatchdog as createAgentWatchdogBase } from "./agent-watchdog.js";
+import {
+  createAgentWatchdog as createAgentWatchdogBase,
+  loadManagedAgentsFromRedis,
+} from "./agent-watchdog.js";
 import { AgentRegistryState } from "./agent-state.js";
 import { SUBAGENT_ROUTING_FILENAME, SUBAGENT_ROUTING_MARKER } from "./subagent-routing-seed.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
@@ -125,6 +128,45 @@ function createAgentWatchdog(params: any) {
 describe("createAgentWatchdog", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  it("loads Redis digital employee JSON concurrently with a stable output order", async () => {
+    const entries = new Map<string, RedisJsonPayload>();
+    for (const id of ["10863047", "10863048", "10863049", "10863050"]) {
+      const content = STABLE_AGENT_JSON.replace("10863047", id).replace("Demo", `Demo ${id}`);
+      entries.set(id, payloadFromContent(`DIG_EMPLOYEE_${id}`, content));
+    }
+
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const store: BaiyingRedisJsonStore = {
+      getJsonByKey: async () => null,
+      getDigEmployeeJson: async (resourceId) => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        inFlight -= 1;
+        return entries.get(resourceId) ?? null;
+      },
+      getResourceJson: async () => null,
+      close: async () => {},
+    };
+
+    const loaded = await loadManagedAgentsFromRedis({
+      redisJsonStore: store,
+      authorizedSourceKeys: new Set(["10863047", "10863048", "10863049", "10863050"]),
+      embedApiKeysFromJson: true,
+      concurrency: 2,
+      log: { warn: vi.fn() },
+    });
+
+    expect(maxInFlight).toBe(2);
+    expect(loaded.map((agent) => agent.sourceKey)).toEqual([
+      "10863047",
+      "10863048",
+      "10863049",
+      "10863050",
+    ]);
   });
 
   it("does not call writeConfigFile when index matches Redis content", async () => {

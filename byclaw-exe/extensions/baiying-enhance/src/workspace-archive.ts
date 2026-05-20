@@ -5,7 +5,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 import type { WorkspaceArchiveApi, WorkspaceArchiveKind } from "./workspace-archive-api.js";
-import { resolveAgentWorkspaceDir } from "./workspace-seed.js";
+import { removeManagedBootstrapIfPresent, resolveAgentWorkspaceDir } from "./workspace-seed.js";
 import { resolveStateDir } from "./workspace-paths.js";
 
 const DEFAULT_WORKSPACE_ARCHIVE_DIR = ".baiying-workspaces";
@@ -357,6 +357,12 @@ export type ActiveManagedWorkspace = {
   workspaceDir: string;
 };
 
+export type ManagedBootstrapCleanupResult = {
+  workspaceDir: string;
+  removed: boolean;
+  error?: string;
+};
+
 function registerActiveWorkspace(
   out: Map<string, ActiveManagedWorkspace>,
   agentId: string,
@@ -419,6 +425,93 @@ export async function listActiveManagedWorkspaces(
   return [...activeByAgentId.values()];
 }
 
+function registerWorkspaceDir(out: Set<string>, workspaceDir: string | undefined): void {
+  const trimmed = workspaceDir?.trim();
+  if (!trimmed) {
+    return;
+  }
+  out.add(path.resolve(trimmed));
+}
+
+async function listWorkspaceDirsForManagedBootstrapCleanup(
+  stateDir = resolveStateDir(),
+  api?: OpenClawPluginApi,
+): Promise<string[]> {
+  const workspaceDirs = new Set<string>();
+  try {
+    const entries = await fs.readdir(stateDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory() || (entry.name !== "workspace" && !entry.name.startsWith("workspace-"))) {
+        continue;
+      }
+      registerWorkspaceDir(workspaceDirs, path.join(stateDir, entry.name));
+    }
+  } catch (err) {
+    const code = err && typeof err === "object" ? (err as { code?: unknown }).code : undefined;
+    if (code !== "ENOENT") {
+      throw err;
+    }
+  }
+
+  if (api) {
+    try {
+      const cfg = api.runtime.config.loadConfig() as { agents?: { list?: Array<{ id?: string; workspace?: string }> } };
+      for (const entry of cfg?.agents?.list ?? []) {
+        const agentId = typeof entry?.id === "string" ? entry.id.trim() : "";
+        if (!agentId) {
+          continue;
+        }
+        const configuredWorkspace = typeof entry?.workspace === "string" ? entry.workspace : undefined;
+        registerWorkspaceDir(workspaceDirs, configuredWorkspace ?? resolveAgentWorkspaceDir(api, agentId));
+      }
+    } catch {
+      // ignore config read errors
+    }
+  }
+
+  return [...workspaceDirs.values()];
+}
+
+export async function cleanupManagedBootstrapFilesOnColdStart(params: {
+  api?: OpenClawPluginApi;
+  log: LoggerLike;
+  stateDir?: string;
+}): Promise<ManagedBootstrapCleanupResult[]> {
+  const stateDir = params.stateDir ?? resolveStateDir();
+  let workspaceDirs: string[] = [];
+  try {
+    workspaceDirs = await listWorkspaceDirsForManagedBootstrapCleanup(stateDir, params.api);
+  } catch (err) {
+    params.log.warn(
+      `baiying-enhance: cold-start managed BOOTSTRAP.md cleanup failed to scan ${stateDir}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return [];
+  }
+
+  const results: ManagedBootstrapCleanupResult[] = [];
+  for (const workspaceDir of workspaceDirs) {
+    try {
+      const removed = await removeManagedBootstrapIfPresent(workspaceDir);
+      if (removed) {
+        params.log.info(`baiying-enhance: cold-start removed legacy managed BOOTSTRAP.md from ${workspaceDir}`);
+        results.push({ workspaceDir, removed: true });
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      params.log.warn(
+        `baiying-enhance: cold-start managed BOOTSTRAP.md cleanup failed for ${workspaceDir}: ${error}`,
+      );
+      results.push({ workspaceDir, removed: false, error });
+    }
+  }
+  if (results.length === 0) {
+    params.log.info("baiying-enhance: cold-start managed BOOTSTRAP.md cleanup — no legacy files found");
+  }
+  return results;
+}
+
 /**
  * Cold start: compare Redis auth dig-employee ids with mounted `workspace-baiying-agent-*` dirs.
  * Workspaces on disk but absent from the auth set are archived as cancel_auth (remote API or local dir).
@@ -433,6 +526,10 @@ export async function reconcileUnauthorizedMountedWorkspacesOnColdStart(params: 
   params.log.info(
     "baiying-enhance: cold-start workspace archive — comparing auth dig-employee ids with local workspace-baiying-agent-* directories",
   );
+  await cleanupManagedBootstrapFilesOnColdStart({
+    api: params.api,
+    log: params.log,
+  });
   return archiveUnauthorizedActiveManagedWorkspaces({
     pluginConfig: params.pluginConfig,
     authorizedSourceKeys: params.authorizedSourceKeys,
