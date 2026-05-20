@@ -699,7 +699,7 @@ export default {
   'articleDetail.author': 'Author',
 
   // Employees Page
-  'employees.title': 'Employees',
+  'employees.title': 'Employee',
   'employees.abilityMap': 'Skills',
   'employees.listTitle': 'You have not added any digital employees yet',
   'employees.listDesc':
