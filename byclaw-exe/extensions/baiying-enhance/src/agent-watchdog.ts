@@ -106,20 +106,32 @@ export async function loadManagedAgentsFromRedis(params: {
   envApiKeyTemplate?: string;
   defaultProxyUrl?: string;
   defaultApiKey?: string;
+  concurrency?: number;
   log: { warn: (m: string) => void };
 }): Promise<LoadedManagedAgent[]> {
   const authorizedIds = params.authorizedSourceKeys
     ? [...params.authorizedSourceKeys].map((id) => id.trim()).filter((id) => /^\d+$/.test(id))
     : [];
-  const out: LoadedManagedAgent[] = [];
   if (authorizedIds.length === 0) {
-    return out;
+    return [];
   }
-  for (const sourceKey of authorizedIds) {
+
+  const concurrency = Math.max(
+    1,
+    Math.min(
+      authorizedIds.length,
+      Number.isFinite(params.concurrency ?? NaN) ? Math.floor(params.concurrency!) : 8,
+    ),
+  );
+  const out: Array<LoadedManagedAgent | null> = new Array(authorizedIds.length).fill(null);
+  let nextIndex = 0;
+
+  const loadOne = async (index: number): Promise<void> => {
+    const sourceKey = authorizedIds[index]!;
     const result = await params.redisJsonStore.getDigEmployeeJson(sourceKey);
     if (!result) {
       params.log.warn(`baiying-enhance: Redis digital employee JSON missing/unreadable key=DIG_EMPLOYEE_${sourceKey}`);
-      continue;
+      return;
     }
     const res = adaptAgentJson({
       raw: result.raw,
@@ -131,17 +143,31 @@ export async function loadManagedAgentsFromRedis(params: {
     });
     if ("error" in res) {
       params.log.warn(`baiying-enhance: skip Redis key ${result.key}: ${res.error}`);
-      continue;
+      return;
     }
     if (res.sourceKey !== sourceKey) {
       params.log.warn(
         `baiying-enhance: skip Redis key ${result.key}: JSON resourceId/sourceKey=${res.sourceKey} does not match authorized id=${sourceKey}`,
       );
-      continue;
+      return;
     }
-    out.push({ ...res, sourceJson: result.raw, sourceRedisKey: result.key, contentHash: result.hash });
-  }
-  return out;
+    out[index] = { ...res, sourceJson: result.raw, sourceRedisKey: result.key, contentHash: result.hash };
+  };
+
+  await Promise.all(
+    Array.from({ length: concurrency }, async () => {
+      for (;;) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= authorizedIds.length) {
+          return;
+        }
+        await loadOne(index);
+      }
+    }),
+  );
+
+  return out.filter((item): item is LoadedManagedAgent => item !== null);
 }
 
 export type AgentFlushNowOptions = {
@@ -438,6 +464,7 @@ export function createAgentWatchdog(params: {
         envApiKeyTemplate: params.pluginConfig.envApiKeyTemplate,
         defaultProxyUrl: params.pluginConfig.defaultProxyUrl,
         defaultApiKey: params.pluginConfig.defaultApiKey,
+        concurrency: params.pluginConfig.redisLoadConcurrency,
         log: { warn: (m) => params.api.logger.warn(m) },
       });
       if (deleteBatchSet.size > 0) {

@@ -70,6 +70,11 @@ export type BaiyingEnhancePluginConfig = {
    */
   persistAgentContentIndex?: boolean;
   /**
+   * Maximum number of DIG_EMPLOYEE Redis JSON reads to issue concurrently during a sync.
+   * Default: 8. Set lower if the Redis/backend side needs gentler cold-start pressure.
+   */
+  redisLoadConcurrency?: number;
+  /**
    * Override path for the content index JSON file. Relative paths resolve under ~/.openclaw/ (see plugin path rules).
    * Default: `~/.openclaw/baiying-enhance/agent-content-index-<sha16>.json`.
    */

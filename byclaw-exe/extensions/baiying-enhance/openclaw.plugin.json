@@ -104,6 +104,11 @@
         "description": "Persist per-agent source JSON SHA-256 hashes to avoid full re-sync after gateway restart (default true).",
         "default": true
       },
+      "redisLoadConcurrency": {
+        "type": "number",
+        "description": "Maximum number of DIG_EMPLOYEE Redis JSON reads to issue concurrently during agent sync. Default 8; lower it to reduce Redis/backend pressure.",
+        "default": 8
+      },
       "agentContentIndexPath": {
         "type": "string",
         "description": "Optional path to the content index file; default is ~/.openclaw/baiying-enhance/agent-content-index-<id>.json."
