@@ -440,3 +440,13 @@ export const downloadSkillZip = (params: { skillPath: string; resourceId?: strin
     responseType: 'blob',
   });
 };
+
+/**
+ * 删除技能目录
+ * 删除指定路径下的技能目录
+ * @param params 参数（包含skillPath技能路径、resourceId资源ID和可选的userCode用户编码）
+ * @returns Promise 删除结果
+ */
+export const deleteSkill = (params: { skillPath: string; resourceId?: string | number; userCode?: string }) => {
+  return POST<any>('/byaiService/tool/deleteSkill', params);
+};
