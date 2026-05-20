@@ -13,7 +13,7 @@
 
 1. 从 Redis 按授权读取百应数字员工 JSON：`USER:RESOURCES:AUTH:{userId}` 决定当前可见数字员工，插件只读取对应 `DIG_EMPLOYEE_{resourceId}`；授权不存在或为空时不注册任何数字员工。
 2. 将条目合并进**当前网关配置文件**中的托管 Agent（`baiying-agent-*`）与 OpenAI 兼容的 `models.providers`（`baiying-m-*`），并保留已有 **`agents.list[].workspace`**；新建托管 Agent 才使用状态目录下的默认路径（托管体为 `<stateDir>/workspace-<agentId>/`；与 OpenClaw 默认一致时，`main` 对应 `<stateDir>/workspace/` 而非 `workspace-main`，见 `src/workspace-paths.ts`）。
-3. 可选地在每次同步后初始化工作区（`workspaceAutoSeed`，默认开启）：由 `seedManagedAgentWorkspace`（`src/workspace-seed.ts`）创建目录并按 JSON 写入或更新带托管标记的 `SOUL.md` / `AGENTS.md` / `IDENTITY.md` / `USER.md` / `TOOLS.md`（以及可选的 `BYAI_BUSINESS_EXTENSIONS.md`）；同时将 `BOOTSTRAP.md` 置为明确的托管 no-op 引导文件，要求 agent 不做 onboarding、不检查修复文件、不因该文件创建/修改/删除任何内容，避免 OpenClaw 默认首次引导流程。
+3. 可选地在每次同步后初始化工作区（`workspaceAutoSeed`，默认开启）：由 `seedManagedAgentWorkspace`（`src/workspace-seed.ts`）创建目录并按 JSON 写入或更新带托管标记的 `SOUL.md` / `AGENTS.md` / `IDENTITY.md` / `USER.md` / `TOOLS.md`（以及可选的 `BYAI_BUSINESS_EXTENSIONS.md`）；插件不再初始化 `BOOTSTRAP.md`，首次引导由 OpenClaw 的 `agents.defaults.skipBootstrap` 配置控制。冷启动时会清理历史版本生成的、带 `baiying-enhance` 托管标记的 `BOOTSTRAP.md` 残留。
 4. 授权移除时默认把对应托管 workspace 从 `<stateDir>/workspace-baiying-agent-*` 移到状态目录上级的隐藏归档目录（默认 `<dirname(stateDir)>/.baiying-workspaces/`，例如 `/by/.baiying-workspaces/`），避免未授权数字员工数据继续留在 `.openclaw` 下；重新授权时会先恢复目录，再用最新 JSON 更新插件托管的 Markdown。
 5. 为每个托管 Agent 动态挂载工具 **`baiying_call`**，把百应关联的知识库、toolkit、MCP、下游 agent 等资源暴露给大模型。
 

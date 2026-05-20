@@ -11,6 +11,7 @@ import { resolveAgentWorkspaceDir, seedManagedAgentWorkspace } from "./workspace
 import {
   archiveUnauthorizedActiveManagedWorkspaces,
   archiveUnauthorizedManagedAgentWorkspaces,
+  cleanupManagedBootstrapFilesOnColdStart,
   deleteManagedAgentWorkspaces,
   restoreManagedAgentWorkspaces,
 } from "./workspace-archive.js";
@@ -394,12 +395,22 @@ export function createAgentWatchdog(params: {
 
       const shouldRunMountedWorkspaceCheck =
         !unauthorizedMountedWorkspaceCheckDone || forceAuthReseed || deleteBatchSet.size > 0;
+      const isColdStartMountedWorkspaceCheck = !unauthorizedMountedWorkspaceCheckDone;
       let mountedWorkspaceCheckDoneThisFlush = false;
       const runMountedWorkspaceCheck = async (stage: string) => {
         if (!shouldRunMountedWorkspaceCheck || mountedWorkspaceCheckDoneThisFlush) {
           return;
         }
         mountedWorkspaceCheckDoneThisFlush = true;
+        if (isColdStartMountedWorkspaceCheck) {
+          await cleanupManagedBootstrapFilesOnColdStart({
+            api: params.api,
+            log: {
+              info: (m) => params.api.logger.info(m),
+              warn: (m) => params.api.logger.warn(m),
+            },
+          });
+        }
         await archiveUnauthorizedActiveManagedWorkspaces({
           pluginConfig: params.pluginConfig,
           authorizedSourceKeys: authorizedForMountedWorkspaceCheck,
@@ -443,6 +454,15 @@ export function createAgentWatchdog(params: {
           warn: (m) => params.api.logger.warn(m),
         },
       });
+      if (isColdStartMountedWorkspaceCheck) {
+        await cleanupManagedBootstrapFilesOnColdStart({
+          api: params.api,
+          log: {
+            info: (m) => params.api.logger.info(m),
+            warn: (m) => params.api.logger.warn(m),
+          },
+        });
+      }
       lastBaseManaged = filteredManaged;
       const effectiveManaged = workspaceSkillAutoEnable
         ? await mergeWorkspaceSkillsIntoManagedAgents({

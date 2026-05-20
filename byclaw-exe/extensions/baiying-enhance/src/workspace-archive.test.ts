@@ -4,6 +4,7 @@ import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   archiveUnauthorizedManagedAgentWorkspaces,
+  cleanupManagedBootstrapFilesOnColdStart,
   deleteManagedAgentWorkspaces,
   listActiveManagedWorkspaces,
   reconcileUnauthorizedMountedWorkspacesOnColdStart,
@@ -12,6 +13,7 @@ import {
 } from "./workspace-archive.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 import type { WorkspaceArchiveApi } from "./workspace-archive-api.js";
+import { MANAGED_SEED_MARKER } from "./workspace-seed.js";
 
 async function pathExists(target: string): Promise<boolean> {
   try {
@@ -59,6 +61,44 @@ describe("cold-start workspace reconcile", () => {
     const listed = await listActiveManagedWorkspaces(stateDir);
     expect(listed.map((item) => item.agentId).sort()).toEqual([authorizedId, orphanId].sort());
     expect(listed.find((item) => item.agentId === orphanId)?.sourceKey).toBe("999");
+  });
+
+  it("removes legacy plugin-managed BOOTSTRAP.md files on cold start only when marked", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "baiying-cold-start-bootstrap-"));
+    const stateDir = path.join(root, ".openclaw");
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+    const mainWs = path.join(stateDir, "workspace");
+    const managedWs = path.join(stateDir, `workspace-${MANAGED_AGENT_PREFIX}10000417`);
+    const customWs = path.join(root, "custom-agent-workspace");
+    const userWs = path.join(stateDir, "workspace-user-owned");
+    await mkdir(mainWs, { recursive: true });
+    await mkdir(managedWs, { recursive: true });
+    await mkdir(customWs, { recursive: true });
+    await mkdir(userWs, { recursive: true });
+    await writeFile(path.join(mainWs, "BOOTSTRAP.md"), `${MANAGED_SEED_MARKER}\n\nlegacy main`, "utf8");
+    await writeFile(path.join(managedWs, "BOOTSTRAP.md"), `${MANAGED_SEED_MARKER}\n\nlegacy managed`, "utf8");
+    await writeFile(path.join(customWs, "BOOTSTRAP.md"), `${MANAGED_SEED_MARKER}\n\nlegacy custom`, "utf8");
+    await writeFile(path.join(userWs, "BOOTSTRAP.md"), "# User bootstrap\n", "utf8");
+    const api = {
+      runtime: {
+        config: {
+          loadConfig: vi.fn(() => ({
+            agents: {
+              list: [{ id: "custom-agent", workspace: customWs }],
+            },
+          })),
+        },
+      },
+    };
+    const log = { info: vi.fn(), warn: vi.fn() };
+
+    const results = await cleanupManagedBootstrapFilesOnColdStart({ api: api as any, log });
+
+    expect(results.filter((result) => result.removed)).toHaveLength(3);
+    expect(await pathExists(path.join(mainWs, "BOOTSTRAP.md"))).toBe(false);
+    expect(await pathExists(path.join(managedWs, "BOOTSTRAP.md"))).toBe(false);
+    expect(await pathExists(path.join(customWs, "BOOTSTRAP.md"))).toBe(false);
+    expect(await readFile(path.join(userWs, "BOOTSTRAP.md"), "utf8")).toBe("# User bootstrap\n");
   });
 
   it("archives mounted workspaces missing from the auth set on cold start (remote)", async () => {
