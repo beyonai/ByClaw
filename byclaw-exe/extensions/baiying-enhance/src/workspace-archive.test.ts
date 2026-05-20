@@ -12,7 +12,7 @@ import {
   restoreManagedAgentWorkspaces,
 } from "./workspace-archive.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
-import type { WorkspaceArchiveApi } from "./workspace-archive-api.js";
+import { createWorkspaceArchiveApi, type WorkspaceArchiveApi } from "./workspace-archive-api.js";
 import { MANAGED_SEED_MARKER } from "./workspace-seed.js";
 
 async function pathExists(target: string): Promise<boolean> {
@@ -142,7 +142,29 @@ describe("cold-start workspace reconcile", () => {
 
 describe("remote workspace archive", () => {
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+  });
+
+  it("applies an abort signal to remote archive API requests", async () => {
+    vi.stubEnv("BAIYING_WORKSPACE_ARCHIVE_BASE_URL", "https://archive.example.test/byaiService");
+    const fetchMock = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+      return new Response(JSON.stringify({ code: 0, data: { exists: false } }), {
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createWorkspaceArchiveApi();
+    const status = await api.status({
+      userCode: "0027024710",
+      resourceId: "10000417",
+      archiveKind: "cancel_auth",
+    });
+
+    expect(status.exists).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("uploads cancel_auth archives and removes active workspace after success", async () => {
