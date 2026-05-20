@@ -2595,7 +2595,7 @@ INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_grou
 INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'MENU_ICON_SHOW_TAB', '菜单图标显示', '员工', 'Employees', 'true', '员工', 2);
 
 delete from byai.byai_system_config where param_code in('BYAI_BRAND_VERSION');
-INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc) VALUES (10001781, null, 'BYAI_BRAND_VERSION', '百应商标版信息', 'BYAI_BRAND_VERSION', 'openSource', '百应商标版本，商用:commercial,开源:openSource');
+INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc) VALUES (nextval('byai.seq_any_table'), null, 'BYAI_BRAND_VERSION', '百应商标版信息', 'BYAI_BRAND_VERSION', 'openSource', '百应商标版本，商用:commercial,开源:openSource');
 
 delete from byai.byai_system_config_list where param_group_code in('DIG_EMPLOYEE_FILE_UPLOAD_TYPE');
 INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'DIG_EMPLOYEE_FILE_UPLOAD_TYPE', '数字员工文件上传类型配置', 'doc', 'doc', '.doc', 'doc', 2);
