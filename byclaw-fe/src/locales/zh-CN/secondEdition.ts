@@ -84,8 +84,8 @@ export default {
   'settings.systemMode': '跟随系统',
   'settings.language': '语言设置',
   'settings.chinese': '中文',
-  'settings.userAgreement': '用户协议',
-  'settings.privacyPolicy': '隐私协议',
+  'settings.userAgreement': '使用协议',
+  'settings.privacyPolicy': '隐私政策',
   'settings.changePassword': '修改密码',
 
   // PasswordModal 组件

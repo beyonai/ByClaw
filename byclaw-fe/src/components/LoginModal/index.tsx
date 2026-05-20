@@ -53,6 +53,12 @@ const LoginModal: React.FC<LoginModalProps> = ({ open, onClose, className, defau
 
   const isSSOLogin = ['dingtalk', 'iwhale'].includes(loginChannel);
   const canRegister = (ENV || []).includes('yunqi');
+  const termsUrl = React.useMemo(() => `${getPublicPath()}legal/terms/index.html`, []);
+  const privacyUrl = React.useMemo(() => `${getPublicPath()}legal/privacy/index.html`, []);
+
+  const handleLegalLinkClick = React.useCallback((e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.stopPropagation();
+  }, []);
 
   const setUserInfo = useCallback(
     (res: any) => {
@@ -87,11 +93,11 @@ const LoginModal: React.FC<LoginModalProps> = ({ open, onClose, className, defau
         content: (
           <div className={styles.agreement}>
             {intl.formatMessage({ id: 'login.agreementPrefix' })}
-            <a href="#" onClick={(e) => e.preventDefault()}>
+            <a href={termsUrl} target="_blank" rel="noreferrer" onClick={handleLegalLinkClick}>
               {intl.formatMessage({ id: 'login.termsOfService' })}
             </a>
             {intl.formatMessage({ id: 'login.and' })}
-            <a href="#" onClick={(e) => e.preventDefault()}>
+            <a href={privacyUrl} target="_blank" rel="noreferrer" onClick={handleLegalLinkClick}>
               {intl.formatMessage({ id: 'login.privacyPolicy' })}
             </a>
           </div>
@@ -103,7 +109,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ open, onClose, className, defau
       return false;
     }
     return true;
-  }, [intl, isAgreed]);
+  }, [intl, isAgreed, termsUrl, privacyUrl, handleLegalLinkClick]);
 
   const handleResponse = React.useCallback(
     (res: any) => {
@@ -285,11 +291,11 @@ const LoginModal: React.FC<LoginModalProps> = ({ open, onClose, className, defau
           <div className={styles.agreement}>
             <Checkbox checked={isAgreed} onChange={(e) => handleAgreementCheck(e.target.checked)}>
               {intl.formatMessage({ id: 'login.agreementPrefix' })}
-              <a href="#" onClick={(e) => e.preventDefault()}>
+              <a href={termsUrl} target="_blank" rel="noreferrer" onClick={handleLegalLinkClick}>
                 {intl.formatMessage({ id: 'login.termsOfService' })}
               </a>
               {intl.formatMessage({ id: 'login.and' })}
-              <a href="#" onClick={(e) => e.preventDefault()}>
+              <a href={privacyUrl} target="_blank" rel="noreferrer" onClick={handleLegalLinkClick}>
                 {intl.formatMessage({ id: 'login.privacyPolicy' })}
               </a>
             </Checkbox>
@@ -358,7 +364,20 @@ const LoginModal: React.FC<LoginModalProps> = ({ open, onClose, className, defau
         )}
       </>
     );
-  }, [intl, loginChannel, isSSOLogin, form, onLogin, onPhoneLogin, canRegister]);
+  }, [
+    intl,
+    loginChannel,
+    isSSOLogin,
+    form,
+    onLogin,
+    onPhoneLogin,
+    canRegister,
+    isAgreed,
+    termsUrl,
+    privacyUrl,
+    handleLegalLinkClick,
+    handleAgreementCheck,
+  ]);
 
   const RegisteredRenderer = React.useCallback(() => {
     return (
@@ -367,11 +386,11 @@ const LoginModal: React.FC<LoginModalProps> = ({ open, onClose, className, defau
         <div className={styles.agreement}>
           <Checkbox checked={isAgreed} onChange={(e) => handleAgreementCheck(e.target.checked)}>
             {intl.formatMessage({ id: 'login.agreementPrefix' })}
-            <a href="#" onClick={(e) => e.preventDefault()}>
+            <a href={termsUrl} target="_blank" rel="noreferrer" onClick={handleLegalLinkClick}>
               {intl.formatMessage({ id: 'login.termsOfService' })}
             </a>
             {intl.formatMessage({ id: 'login.and' })}
-            <a href="#" onClick={(e) => e.preventDefault()}>
+            <a href={privacyUrl} target="_blank" rel="noreferrer" onClick={handleLegalLinkClick}>
               {intl.formatMessage({ id: 'login.privacyPolicy' })}
             </a>
           </Checkbox>
@@ -397,7 +416,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ open, onClose, className, defau
         </p>
       </>
     );
-  }, [intl, form, isAgreed, handleAgreementCheck, handleReg]);
+  }, [intl, form, isAgreed, handleAgreementCheck, handleReg, termsUrl, privacyUrl, handleLegalLinkClick]);
 
   useEffect(() => {
     if (open) return;
