@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Spin, Modal, Checkbox, Button, List, Tabs, Input, message, Empty } from 'antd';
+import { Spin, Modal, Checkbox, Button, List, Tabs, Input, message, Empty, Popconfirm } from 'antd';
 import { useIntl, useSelector } from '@umijs/max';
 import { debounce, trim } from 'lodash';
 import classnames from 'classnames';
@@ -17,6 +17,7 @@ import {
   qrySkillListByUserCode,
   readFile,
   downloadSkillZip,
+  deleteSkill,
 } from '@/pages/manager/service/resources';
 import useGlobal from '@/hooks/useGlobal';
 
@@ -95,6 +96,7 @@ const ResourceList = (props: Props) => {
   const [relatedObjectDetailMap, setRelatedObjectDetailMap] = useState<Record<string, any>>({});
   const [relatedObjectLoading, setRelatedObjectLoading] = useState(false);
   const [downloadingSkill, setDownloadingSkill] = useState<string | null>(null);
+  const [deletingSkill, setDeletingSkill] = useState<string | null>(null);
 
   const intl = useIntl();
   const { userInfo } = useSelector((state: any) => state.user);
@@ -471,6 +473,35 @@ const ResourceList = (props: Props) => {
     }
   };
 
+  const handleDeleteSkill = async (item: IResourceItem) => {
+    const skillPath = item.skillPath || item.resourceId || item.objectKey;
+    if (!skillPath) {
+      message.error(intl.formatMessage({ id: 'common.deleteFail' }));
+      return;
+    }
+    setDeletingSkill(skillPath);
+    try {
+      const params: { skillPath: string; resourceId?: string | number; userCode?: string } = { skillPath };
+      if (normalizedAgentId) {
+        params.resourceId = normalizedAgentId;
+      }
+      if (userInfo?.userCode) {
+        params.userCode = userInfo.userCode;
+      }
+      await deleteSkill(params);
+      setResourceList((prev) =>
+        prev.filter((resource) => (resource.skillPath || resource.resourceId || resource.objectKey) !== skillPath)
+      );
+      message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
+      EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
+    } catch (error) {
+      console.error('技能删除失败：', error);
+      message.error(intl.formatMessage({ id: 'common.deleteFailed' }));
+    } finally {
+      setDeletingSkill(null);
+    }
+  };
+
   // 处理更多按钮点击
   const handleMoreClick = async (e: React.MouseEvent, item: IResourceItem) => {
     e.stopPropagation(); // 阻止冒泡，避免触发卡片点击
@@ -778,19 +809,33 @@ const ResourceList = (props: Props) => {
                   </div>
                 )}
                 {resourceType === 'SKILL' && hoveredCard === item.resourceId && (
-                  <div
-                    className={styles.moreButton}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDownloadSkill(item);
-                    }}
-                  >
+                  <div className={styles.moreButton} onClick={(e) => e.stopPropagation()}>
                     <Button
                       size="small"
                       loading={downloadingSkill === (item.skillPath || item.resourceId || item.objectKey)}
+                      disabled={!!deletingSkill}
+                      onClick={() => {
+                        handleDownloadSkill(item);
+                      }}
                     >
                       {intl.formatMessage({ id: 'common.download' })}
                     </Button>
+                    <Popconfirm
+                      title={intl.formatMessage({ id: 'common.deleteTips' })}
+                      description={intl.formatMessage({ id: 'common.deleteConfirm2' }, { content: item.resourceName })}
+                      okText={intl.formatMessage({ id: 'common.confirm' })}
+                      cancelText={intl.formatMessage({ id: 'common.cancel' })}
+                      onConfirm={() => handleDeleteSkill(item)}
+                    >
+                      <Button
+                        size="small"
+                        danger
+                        loading={deletingSkill === (item.skillPath || item.resourceId || item.objectKey)}
+                        disabled={!!downloadingSkill}
+                      >
+                        {intl.formatMessage({ id: 'common.delete' })}
+                      </Button>
+                    </Popconfirm>
                   </div>
                 )}
               </div>
