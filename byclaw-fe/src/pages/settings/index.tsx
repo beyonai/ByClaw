@@ -15,6 +15,7 @@ import { Avatar, Card, Modal, Select, Space, Typography } from 'antd';
 
 import AntdIcon from '@/components/AntdIcon';
 import { globalLogout } from '@/service/common/request';
+import { getPublicPath } from '@/utils';
 import classNames from 'classnames';
 import PasswordModal from './components/PasswordModal';
 import styles from './index.module.less';
@@ -29,6 +30,12 @@ const Settings: React.FC = () => {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [theme, setTheme] = useState<string>('light');
   const [showPassword, setShowPassword] = useState<boolean>(false);
+  const termsUrl = `${getPublicPath()}legal/terms/index.html`;
+  const privacyUrl = `${getPublicPath()}legal/privacy/index.html`;
+
+  const openLegalPage = (url: string) => {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
 
   // 获取用户信息
   const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
@@ -77,7 +84,7 @@ const Settings: React.FC = () => {
             </div>
             <Select
               // 因为现在还有很多国际化都没做，先注释掉
-              disabled
+              // disabled
               value={language}
               onChange={(value) => {
                 setLocale(value);
@@ -86,15 +93,15 @@ const Settings: React.FC = () => {
               variant="filled"
               suffixIcon={<DownOutlined />}
             >
-              <Option value="zh-CN">{intl.formatMessage({ id: 'settings.chinese' })}</Option>
+              <Option value="zh-CN">简体中文</Option>
               <Option value="en-US">English</Option>
             </Select>
           </div>
         </div>
 
-        <div className={classNames(styles.settingBox, styles.canClick, 'ub ub-ver disabled')}>
-          {/* 用户协议 */}
-          <div className={styles.settingItem}>
+        <div className={classNames(styles.settingBox, styles.canClick, 'ub ub-ver')}>
+          {/* 使用协议 */}
+          <div className={styles.settingItem} onClick={() => openLegalPage(termsUrl)}>
             <div className={styles.settingLabel}>
               <FileTextOutlined className={styles.settingIcon} />
               <span>{intl.formatMessage({ id: 'settings.userAgreement' })}</span>
@@ -102,8 +109,8 @@ const Settings: React.FC = () => {
             <RightOutlined className={styles.arrowIcon} />
           </div>
 
-          {/* 隐私协议 */}
-          <div className={styles.settingItem}>
+          {/* 隐私政策 */}
+          <div className={styles.settingItem} onClick={() => openLegalPage(privacyUrl)}>
             <div className={styles.settingLabel}>
               <FileTextOutlined className={styles.settingIcon} />
               <span>{intl.formatMessage({ id: 'settings.privacyPolicy' })}</span>
@@ -150,7 +157,9 @@ const Settings: React.FC = () => {
         </div>
       </div>
 
-      {showPassword && <PasswordModal visible={showPassword} onClose={() => setShowPassword(false)} />}
+      {showPassword && (
+        <PasswordModal visible={showPassword} onClose={() => setShowPassword(false)} logoutOnSuccess={false} />
+      )}
 
       {contextHolder}
     </div>

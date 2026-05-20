@@ -84,8 +84,8 @@ export default {
   'settings.systemMode': '跟随系统',
   'settings.language': '语言设置',
   'settings.chinese': '中文',
-  'settings.userAgreement': '用户协议',
-  'settings.privacyPolicy': '隐私协议',
+  'settings.userAgreement': '使用协议',
+  'settings.privacyPolicy': '隐私政策',
   'settings.changePassword': '修改密码',
 
   // PasswordModal 组件
@@ -97,6 +97,7 @@ export default {
   'settings.pleaseConfirmPassword': '请输入确认新密码',
   'settings.passwordsMustMatch': '两次输入的密码不一致',
   'settings.passwordComplexityError': '密码必须满足所有复杂度要求',
+  'settings.initialPasswordNotAllowed': '初始密码为系统默认，不允许使用初始密码，修改后才能提交',
   'settings.passwordChangedSuccess': '密码修改成功',
   'settings.passwordComplexityRequirement':
     '目前系统要求密码复杂度为：高。必须含有数字+大写字母+小写字母+符号。例如：AB@20391byai',
