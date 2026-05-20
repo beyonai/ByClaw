@@ -158,4 +158,39 @@ class SandboxServiceTest {
         assertThat(record.getGatewayToken()).isEqualTo("persisted-token");
         assertThat(record.getEndpoint()).isEqualTo("http://host/proxy/18789/chat?token=persisted-token");
     }
+
+    @Test
+    void reconcileRecordWithRemote_recoversReleasingRecordToRunning() {
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(2L);
+        record.setStatus("RELEASING");
+        record.setUserCode("user001");
+        record.setSandboxType("openclaw");
+        record.setResourceId(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        record.setEndpoint("http://host/proxy/18789/chat?token=persisted-token");
+        record.setGatewayToken("persisted-token");
+        record.setTimeoutSeconds(600);
+        record.setLockVersion(7);
+        record.setVersion(3);
+
+        SandboxRuntimeInstance remoteInstance = SandboxRuntimeInstance.builder()
+            .sandboxId("sandbox-2")
+            .state("running")
+            .createdAt(OffsetDateTime.parse("2026-05-20T08:00:00Z"))
+            .expiresAt(OffsetDateTime.parse("2026-05-20T08:10:00Z"))
+            .metadata(Map.of("gateway_token", "persisted-token"))
+            .build();
+
+        when(sandboxRecordMapper.updateReconcileSuccess(eq(2L), eq("RUNNING"),
+            eq("http://host/proxy/18789/chat?token=persisted-token"), eq("persisted-token"),
+            any(Date.class), any(Date.class), eq(600), any(Date.class), any(Date.class), eq(7))).thenReturn(1);
+
+        ReflectionTestUtils.invokeMethod(sandboxService, "reconcileRecordWithRemote", record, remoteInstance);
+
+        assertThat(record.getStatus()).isEqualTo("RUNNING");
+    }
 }

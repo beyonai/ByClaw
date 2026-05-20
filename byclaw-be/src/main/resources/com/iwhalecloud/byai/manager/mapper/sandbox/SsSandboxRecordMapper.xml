@@ -322,7 +322,7 @@
             </if>
         </set>
         WHERE id = #{id,jdbcType=BIGINT}
-          AND status IN ('STARTING', 'RUNNING')
+          AND status IN ('STARTING', 'RUNNING', 'RELEASING')
           AND lock_version = #{lockVersion,jdbcType=INTEGER}
     </update>
 
