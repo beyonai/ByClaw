@@ -56,6 +56,9 @@ public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
                 .sandboxId(d.getId())
                 .createdAt(d.getCreatedAt())
                 .expiresAt(d.getExpiresAt())
+                .state(d.getStatus() != null ? d.getStatus().getState() : null)
+                .reusable(Boolean.TRUE)
+                .metadata(d.getMetadata())
                 .build())
             .findFirst();
         log.info("OpenSandbox 可复用沙箱查询完成，userCode={}，sandboxType={}，selectedSandboxId={}",
@@ -70,7 +73,7 @@ public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
                                          String sandboxType,
                                          String idempotencyKey) {
         log.info("OpenSandbox 创建沙箱，userCode={}，sandboxType={}，idempotencyKey={}", userCode, sandboxType, idempotencyKey);
-        SandboxRuntimeRequestFactory.applyIdempotencyMetadata(request, idempotencyKey);
+        SandboxRuntimeRequestFactory.applyRuntimeMetadata(request, idempotencyKey);
         CreateSandboxResponse response = openSandboxClient.createSandbox(request, idempotencyKey);
         log.info("OpenSandbox 创建沙箱成功，userCode={}，sandboxType={}，sandboxId={}，expiresAt={}",
             userCode, sandboxType, response.getId(), response.getExpiresAt());
@@ -78,6 +81,9 @@ public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
             .sandboxId(response.getId())
             .createdAt(response.getCreatedAt())
             .expiresAt(response.getExpiresAt())
+            .state(response.getStatus() != null ? response.getStatus().getState() : null)
+            .reusable(SandboxRuntimeRequestFactory.isReusableSandboxState(response.getStatus()))
+            .metadata(request.getMetadata())
             .build();
     }
 
@@ -119,15 +125,32 @@ public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
 
     @Override
     public boolean exists(String userCode, String sandboxType, SandboxInfo sandboxInfo) {
+        return getSandbox(userCode, sandboxType, sandboxInfo)
+            .map(SandboxRuntimeInstance::getReusable)
+            .orElse(false);
+    }
+
+    @Override
+    public Optional<SandboxRuntimeInstance> getSandbox(String userCode, String sandboxType, SandboxInfo sandboxInfo) {
         if (sandboxInfo == null || sandboxInfo.getSandboxId() == null || sandboxInfo.getSandboxId().isBlank()) {
-            return false;
+            return Optional.empty();
         }
         SandboxDetail detail = openSandboxClient.getSandboxIfExists(sandboxInfo.getSandboxId());
-        boolean exists = detail != null && SandboxRuntimeRequestFactory.isReusableSandboxState(detail.getStatus());
+        boolean reusable = detail != null && SandboxRuntimeRequestFactory.isReusableSandboxState(detail.getStatus());
         log.info("OpenSandbox 查询远端状态，userCode={}，sandboxType={}，sandboxId={}，exists={}，remoteState={}",
-            userCode, sandboxType, sandboxInfo.getSandboxId(), exists,
+            userCode, sandboxType, sandboxInfo.getSandboxId(), reusable,
             detail != null && detail.getStatus() != null ? detail.getStatus().getState() : null);
-        return exists;
+        if (detail == null) {
+            return Optional.empty();
+        }
+        return Optional.of(SandboxRuntimeInstance.builder()
+            .sandboxId(detail.getId())
+            .createdAt(detail.getCreatedAt())
+            .expiresAt(detail.getExpiresAt())
+            .state(detail.getStatus() != null ? detail.getStatus().getState() : null)
+            .reusable(reusable)
+            .metadata(detail.getMetadata())
+            .build());
     }
 
     private static boolean matchesSandboxMetadata(SandboxDetail detail, String userCode, String sandboxType) {
