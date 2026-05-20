@@ -1,6 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.resource.service.impl;
 
-
+import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -59,7 +59,6 @@ public class SsResourceRelDetailServiceImpl extends ServiceImpl<SsResourceRelDet
 
     private static final Logger logger = LoggerFactory.getLogger(SsResourceRelDetailServiceImpl.class);
 
-
     @Autowired
     private SsResourceRelDetailMapper ssResourceRelDetailMapper;
 
@@ -116,9 +115,8 @@ public class SsResourceRelDetailServiceImpl extends ServiceImpl<SsResourceRelDet
             return;
         }
         LambdaQueryWrapper<SsResourceRelDetail> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(SsResourceRelDetail::getResourceId, resourceId)
-            .or()
-            .eq(SsResourceRelDetail::getRelResourceId, resourceId);
+        queryWrapper.eq(SsResourceRelDetail::getResourceId, resourceId).or().eq(SsResourceRelDetail::getRelResourceId,
+            resourceId);
         ssResourceRelDetailMapper.delete(queryWrapper);
     }
 
@@ -505,6 +503,13 @@ public class SsResourceRelDetailServiceImpl extends ServiceImpl<SsResourceRelDet
                 }
             }
         }
+    }
+
+    public List<SsResourceRelDetail> find(Long resourceId, Long relResourceId) {
+        LambdaQueryWrapper<SsResourceRelDetail> lambdaQueryWrapper = new LambdaQueryWrapper<>();
+        lambdaQueryWrapper.eq(SsResourceRelDetail::getResourceId, resourceId);
+        lambdaQueryWrapper.eq(SsResourceRelDetail::getRelResourceId, relResourceId);
+        return ssResourceRelDetailMapper.selectList(lambdaQueryWrapper);
     }
 
 }

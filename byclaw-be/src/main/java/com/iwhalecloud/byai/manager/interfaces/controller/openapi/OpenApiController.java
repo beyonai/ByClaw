@@ -6,6 +6,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceCatalogSer
 import com.iwhalecloud.byai.manager.dto.men.Notices;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyActionSaveRequest;
 import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
+import com.iwhalecloud.byai.manager.dto.openapi.MountResourceDto;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceCatalog;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.organization.CatalogQo;
@@ -75,6 +76,18 @@ public class OpenApiController {
         catalogQo.setCatalogType(6);
         List<SsResourceCatalog> catalogs = ssResourceCatalogService.queryCatalogTree(catalogQo);
         return ResponseUtil.successResponse(catalogs);
+    }
+
+    /**
+     * 挂载数字员工资源
+     *
+     * @return ResponseUtil
+     */
+    @ManageLogAnnotation(name = "API调用", description = "挂载数字员工资源")
+    @PostMapping("/v1/mountDigEmployeeResource")
+    public ResponseUtil<String> mountDigEmployeeResource(@RequestBody MountResourceDto mountResourceDto) {
+        openApiApplicationService.mountDigEmployeeResource(mountResourceDto);
+        return ResponseUtil.successResponse();
     }
 
 }
