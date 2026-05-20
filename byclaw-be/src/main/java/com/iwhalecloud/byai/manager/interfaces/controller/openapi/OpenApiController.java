@@ -1,11 +1,15 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.openapi;
 
+import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.application.service.openapi.OpenApiApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.OntologyOpenService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceCatalogService;
+import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeIdDTO;
 import com.iwhalecloud.byai.manager.dto.men.Notices;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyActionSaveRequest;
 import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
+import com.iwhalecloud.byai.manager.dto.openapi.MountResourceDto;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceCatalog;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.organization.CatalogQo;
@@ -37,6 +41,9 @@ public class OpenApiController {
 
     @Autowired
     private SsResourceCatalogService ssResourceCatalogService;
+
+    @Autowired
+    private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
 
     /**
      * 保存对象的动作相关内容 包括：动作和动作属性
@@ -75,6 +82,29 @@ public class OpenApiController {
         catalogQo.setCatalogType(6);
         List<SsResourceCatalog> catalogs = ssResourceCatalogService.queryCatalogTree(catalogQo);
         return ResponseUtil.successResponse(catalogs);
+    }
+
+    /**
+     * 挂载数字员工资源
+     *
+     * @return ResponseUtil
+     */
+    @ManageLogAnnotation(name = "API调用", description = "挂载数字员工资源")
+    @PostMapping("/v1/mountDigEmployeeResource")
+    public ResponseUtil<String> mountDigEmployeeResource(@RequestBody MountResourceDto mountResourceDto) {
+
+        openApiApplicationService.mountDigEmployeeResource(mountResourceDto);
+
+        Long agentId = mountResourceDto.getAgentId();
+
+        EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
+        employeeIdDTO.setResourceId(agentId);
+        DigitalEmployeeDetailsDTO digitalEmployeeDTO = digitalEmployeeApplicationService.findDetailsById(employeeIdDTO);
+
+        // 同步openClaw工作空间：透传原始入参，relTools / relPrompt 等不入 DB 的运行期字段需要从入参直接进 JSON。
+        digitalEmployeeApplicationService.synOpenClawWorkSpace(agentId, digitalEmployeeDTO);
+
+        return ResponseUtil.successResponse();
     }
 
 }
