@@ -1,5 +1,6 @@
 /* eslint-disable max-len,@typescript-eslint/no-non-null-assertion */
 import React, { Fragment, useMemo, useCallback, useState, useEffect } from 'react';
+import classNames from 'classnames';
 import {
   Button,
   Collapse,
@@ -16,21 +17,24 @@ import {
 } from 'antd';
 import { createPortal } from 'react-dom';
 import { LinkOutlined } from '@ant-design/icons';
+import { compact } from 'lodash';
 import Image from '@/components/Image';
 import {
   generateResourceCurl,
   queryResourceDetail,
   queryResourceMembers,
   runResourceCurl,
+  queryMCPToolsList,
 } from '@/pages/manager/service/resources';
 import { copyWithMessage } from '@/utils/copy';
-import { RenderItem, getSchemaRenderConfig } from './SkillDetailDrawer.utils';
+import { RenderItem, getMCPToolsRenderConfig, getSchemaRenderConfig } from './SkillDetailDrawer.utils';
 import styles from './SkillDetailDrawer.module.less';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import { useIntl, getIntl } from '@umijs/max';
 import { getRuntimeActualUrl } from '@/utils';
 import useAppStore from '@/models/common/useAppStore';
 import { getssoToken } from '@/utils/auth';
+import MCPTestPanel from './components/MCPTestPanel';
 
 const { Paragraph } = Typography;
 
@@ -38,7 +42,7 @@ interface SkillDetailDrawerProps extends DrawerProps {
   resourceId?: string;
 }
 
-type ISkillDetail = {
+export type ISkillDetail = {
   name?: string;
   avatar?: string;
   description?: string;
@@ -121,11 +125,13 @@ const SchemaTable: React.FC<SchemaTableProps> = ({ columns, dataSource, size = '
 
   return (
     <Table
+      rootClassName={styles.schemaTable}
       size={size}
       columns={columns}
       dataSource={dataSource}
       pagination={false}
       rowKey="key"
+      tableLayout="fixed"
       expandable={
         hasTreeStructure
           ? {
@@ -138,8 +144,8 @@ const SchemaTable: React.FC<SchemaTableProps> = ({ columns, dataSource, size = '
   );
 };
 
-const ItemRenderer = (props: { item: RenderItem; index: number; skillDetail: ISkillDetail }) => {
-  const { item, index, skillDetail } = props;
+const ItemRenderer = (props: { item: RenderItem; index: number }) => {
+  const { item, index } = props;
   const intl = getIntl();
   const { devConfig } = useAppStore();
 
@@ -226,28 +232,24 @@ const ItemRenderer = (props: { item: RenderItem; index: number; skillDetail: ISk
               width: 90,
               render: (text: React.ReactNode) => text ?? '-',
             },
-            ...(skillDetail?.resourceBizType === resourceBizTypeMap.MCP
-              ? []
-              : [
-                {
-                  title: intl.formatMessage({ id: 'common.operation' }),
-                  width: 90,
-                  render: (_: any, record: any) => (
-                    <a
-                      onClick={() => {
-                        onToolDetail?.(record);
-                      }}
-                    >
-                      {intl.formatMessage({ id: 'common.detail' })}
-                    </a>
-                  ),
-                },
-              ]),
+            {
+              title: intl.formatMessage({ id: 'common.operation' }),
+              width: 90,
+              render: (_: any, record: any) => (
+                <a
+                  onClick={() => {
+                    onToolDetail?.(record);
+                  }}
+                >
+                  {intl.formatMessage({ id: 'common.detail' })}
+                </a>
+              ),
+            },
           ]
           : item.columns;
 
       return (
-        <Fragment key={index}>
+        <div key={index}>
           <div className={styles.itemLabel}>
             {item.label && <span className={styles.itemLabelBar} />}
             {item.label}
@@ -255,7 +257,7 @@ const ItemRenderer = (props: { item: RenderItem; index: number; skillDetail: ISk
           <div className={styles.itemTable}>
             <SchemaTable columns={columns} dataSource={item.dataSource} size="small" />
           </div>
-        </Fragment>
+        </div>
       );
     }
 
@@ -338,11 +340,45 @@ const ItemRenderer = (props: { item: RenderItem; index: number; skillDetail: ISk
   );
 };
 
+const RenderDetailPanel = (props: { skillDetail: ISkillDetail }) => {
+  const { skillDetail } = props;
+
+  return (
+    <div className="ub ub-ver full-height">
+      <div className={styles.header}>
+        <figure className={styles.avatar}>
+          <Image
+            src={skillDetail?.avatar || undefined}
+            defaultSrc={getRuntimeActualUrl('/favicon.svg')}
+            width={48}
+            height={48}
+          />
+        </figure>
+        <div className={styles.headerContent}>
+          <div className={styles.headerTitleRow}>
+            <h1 className={styles.title}>{skillDetail?.name}</h1>
+            {skillDetail?.resourceStatus !== undefined && getStatusText(skillDetail?.resourceStatus) && (
+              <span className={styles.status}>{getStatusText(skillDetail?.resourceStatus)}</span>
+            )}
+          </div>
+          {skillDetail?.description && <p className={styles.description}>{skillDetail?.description}</p>}
+        </div>
+      </div>
+      <div className={classNames(styles.content, 'ub-f1 overflow-auto')}>
+        {skillDetail?.items?.map((item, index) => (
+          <ItemRenderer key={index} item={item} index={index} />
+        ))}
+      </div>
+    </div>
+  );
+};
+
 export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
   const { open, loading = false, onClose, resourceId, title = '', ...restProps } = props;
 
   const intl = useIntl();
 
+  const [record, setRecord] = useState<RenderItem | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [skillDetail, setSkillDetail] = useState<ISkillDetail>({});
   const [activeDebugTab, setActiveDebugTab] = useState('detail');
@@ -365,17 +401,34 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
       intl.formatMessage({ id: 'common.copyFail' })
     );
 
-  const myQueryResourceDetail = useCallback((resourceId: string) => {
+  const setMCPTestItem = (record: RenderItem) => {
+    setRecord(record);
+    setActiveDebugTab('test');
+  };
+
+  const myQueryMCPToolsList = useCallback((resourceId: string) => {
     setIsLoading(true);
-    Promise.all([queryResourceDetail({ resourceId }), queryResourceMembers({ resourceId }).catch(() => null)])
+    queryMCPToolsList({ resourceId })
+      .then((resp) => {
+        const items = getMCPToolsRenderConfig(resp, resourceId, setMCPTestItem);
+        setSkillDetail((v) => ({
+          ...v,
+          items,
+        }));
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
+  }, []);
+
+  const myQueryResourceDetail = useCallback((resourceId: string): Promise<ISkillDetail | void> => {
+    setIsLoading(true);
+    return Promise.all([queryResourceDetail({ resourceId }), queryResourceMembers({ resourceId }).catch(() => null)])
       .then(([resp, memberResp]) => {
-        console.log(resp);
         if (resp) {
           const items: RenderItem[] = getSchemaRenderConfig(resp);
           // 根据不同参数渲染
-
-          setSkillDetail((v) => ({
-            ...(v ?? {}),
+          const item = {
             items,
             avatar: getResourceIconUrl(resp),
             name: resp?.resourceName,
@@ -388,8 +441,14 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
             resourceBizType: resp?.resourceBizType,
             resourceId: resp?.resourceId,
             extInfo: memberResp?.extInfo || resp?.extInfo,
-          }));
+          };
+
+          setSkillDetail((v) => ({ ...v, ...item }));
+
+          return item;
         }
+
+        return undefined;
       })
       .catch((e) => {
         message.error(e);
@@ -400,10 +459,16 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
   }, []);
 
   useEffect(() => {
-    if (resourceId && open) {
-      myQueryResourceDetail(resourceId);
+    if (!resourceId || !open) {
+      return;
     }
-  }, [resourceId, open, myQueryResourceDetail]);
+
+    myQueryResourceDetail(resourceId).then((res) => {
+      if (res?.resourceBizType === resourceBizTypeMap.MCP) {
+        myQueryMCPToolsList(resourceId);
+      }
+    });
+  }, [resourceId, open]);
 
   useEffect(() => {
     if (!open || resourceId) {
@@ -415,7 +480,14 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
 
   useEffect(() => {
     const generateCurlScript = async () => {
-      if (!open || !resourceId || !showToolDebugTabs || activeDebugTab !== 'test' || curlScript) {
+      if (
+        !open ||
+        !resourceId ||
+        !showToolDebugTabs ||
+        activeDebugTab !== 'test' ||
+        curlScript ||
+        skillDetail?.resourceBizType === resourceBizTypeMap.MCP
+      ) {
         return;
       }
       setCurlGenerating(true);
@@ -508,67 +580,23 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
     </div>
   );
 
-  const renderDetailPanel = () => (
-    <>
-      <div className={styles.header}>
-        <figure className={styles.avatar}>
-          <Image
-            src={skillDetail?.avatar || undefined}
-            defaultSrc={getRuntimeActualUrl('/favicon.svg')}
-            width={48}
-            height={48}
-          />
-        </figure>
-        <div className={styles.headerContent}>
-          <div className={styles.headerTitleRow}>
-            <h1 className={styles.title}>{skillDetail?.name}</h1>
-            {skillDetail?.resourceStatus !== undefined && getStatusText(skillDetail?.resourceStatus) && (
-              <span className={styles.status}>{getStatusText(skillDetail?.resourceStatus)}</span>
-            )}
-          </div>
-          {skillDetail?.description && <p className={styles.description}>{skillDetail?.description}</p>}
-          {/* <div className={styles.headerMeta}>
-            <span className={styles.metaItem}>
-              <span>{intl.formatMessage({ id: 'skillDetail.version' })}：</span>
-              <span>{skillDetail?.version ?? '-'}</span>
-            </span>
-            <span className={styles.metaItem}>
-              <span>{intl.formatMessage({ id: 'skillDetail.organization' })}：</span>
-              <span>{skillDetail?.organization ?? '-'}</span>
-            </span>
-            <span className={styles.metaItem}>
-              <span>{intl.formatMessage({ id: 'skillDetail.creator' })}：</span>
-              <span>{skillDetail?.createUserName ?? '-'}</span>
-            </span>
-            <span className={styles.metaItem}>
-              <span>{intl.formatMessage({ id: 'skillDetail.manager' })}：</span>
-              <span>{skillDetail?.manager ?? '-'}</span>
-            </span>
-          </div> */}
-        </div>
-      </div>
-      <div className={styles.content}>
-        {skillDetail?.items?.map((item, index) => (
-          <ItemRenderer key={index} item={item} index={index} skillDetail={skillDetail} />
-        ))}
-      </div>
-    </>
-  );
-
   const renderDrawerContent = () => {
     if (!showToolDebugTabs) {
-      return renderDetailPanel();
+      return <RenderDetailPanel skillDetail={skillDetail} />;
     }
+
+    const isMCP = skillDetail?.resourceBizType === resourceBizTypeMap.MCP;
+
     return (
       <Tabs
-        className={styles.detailTabs}
+        className={classNames(styles.detailTabs, 'full-height')}
         activeKey={activeDebugTab}
         onChange={setActiveDebugTab}
-        items={[
+        items={compact([
           {
             key: 'detail',
             label: intl.formatMessage({ id: 'common.detail' }),
-            children: renderDetailPanel(),
+            children: <RenderDetailPanel skillDetail={skillDetail} />,
           },
           {
             key: 'sourceJson',
@@ -583,9 +611,9 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
           {
             key: 'test',
             label: intl.formatMessage({ id: 'skillDetail.test' }),
-            children: renderTestPanel(),
+            children: isMCP ? <MCPTestPanel record={record} skillDetail={skillDetail} /> : renderTestPanel(),
           },
-        ]}
+        ])}
       />
     );
   };
@@ -602,8 +630,8 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
         mask={false}
         {...restProps}
       >
-        <Spin spinning={loading}>
-          <div className={styles.skillDetailDrawer}>{renderDrawerContent()}</div>
+        <Spin spinning={loading} wrapperClassName="full-height-spin">
+          <div className={classNames(styles.skillDetailDrawer, 'full-height')}>{renderDrawerContent()}</div>
         </Spin>
       </Drawer>
     </>

@@ -3,13 +3,21 @@
   "name": "Byclaw SQLite",
   "description": "Expose the local byclaw SQLite database through a single sqlExecute capability for tools and Gateway HTTP callers.",
   "version": "2026.4.23",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "sqlExecute"
+    ]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
       "dbPath": {
         "type": "string",
-        "description": "SQLite database file path. Relative paths resolve from this plugin directory."
+        "description": "SQLite database file path. Relative paths resolve from this plugin directory. Defaults to OPENCLAW_STATE_DIR/memory/byclaw.sqlite."
       },
       "toolName": {
         "type": "string",

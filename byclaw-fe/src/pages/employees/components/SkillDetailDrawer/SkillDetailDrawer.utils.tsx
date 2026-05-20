@@ -65,6 +65,16 @@ export type RenderItem = {
   | RenderItemEmpty
 );
 
+const getResourceStatusText = (status?: number) => {
+  const intl = getIntl();
+  if (status === 2) return intl.formatMessage({ id: 'resourceStatus.published' });
+  if (status === 3) return intl.formatMessage({ id: 'resourceStatus.unpublished' });
+  if (status === 0) return intl.formatMessage({ id: 'resourceStatus.draft' });
+  if (status === 1 || status === 4) return intl.formatMessage({ id: 'resourceStatus.reviewing' });
+  if (status === 5) return intl.formatMessage({ id: 'resourceStatus.notPassed' });
+  return '';
+};
+
 /**
  * 递归解析 schema 中的 properties，生成树形结构
  * @param properties - schema 的 properties 对象
@@ -121,6 +131,74 @@ export const parseSchema = (schema: string) => {
     key,
     ...(typeof val === 'object' ? val : { val }),
   }));
+};
+
+export const getMCPToolsRenderConfig = (
+  resp: any,
+  resourceId?: string,
+  setMCPTestItem?: (record: any) => void
+): RenderItem[] => {
+  const intl = getIntl();
+  const tools = Array.isArray(resp) ? resp : resp?.tools;
+
+  if (!Array.isArray(tools) || !tools.length) {
+    return [];
+  }
+
+  return [
+    {
+      type: 'table',
+      label: intl.formatMessage({ id: 'skillDetail.toolList' }),
+      tableType: 'tools',
+      columns: [
+        { dataIndex: 'name', title: intl.formatMessage({ id: 'skillDetail.toolName' }) },
+        {
+          dataIndex: 'description',
+          title: intl.formatMessage({ id: 'skillDetail.toolDescription' }),
+          width: '50%',
+          render: (text: React.ReactNode) => {
+            return (
+              <Typography.Paragraph ellipsis={{ rows: 2, tooltip: text ?? '-' }}>{text ?? '-'}</Typography.Paragraph>
+            );
+          },
+        },
+        {
+          dataIndex: 'statusText',
+          title: intl.formatMessage({ id: 'common.status' }),
+          width: 90,
+          align: 'center',
+          render: (text: React.ReactNode) => text ?? '-',
+        },
+        {
+          title: intl.formatMessage({ id: 'common.operation' }),
+          width: 90,
+          align: 'center',
+          render: (_: any, record: any) => (
+            <a
+              onClick={() => {
+                setMCPTestItem?.(record);
+              }}
+            >
+              {intl.formatMessage({ id: 'skillDetail.test' })}
+            </a>
+          ),
+        },
+      ],
+      dataSource: tools.map((tool: any, index: number) => ({
+        ...tool,
+        key: tool.name ?? tool.resourceId ?? index,
+        resourceId: resourceId ?? tool.resourceId,
+        resourceBizType: tool.resourceBizType,
+        resourceSourcePkId: tool.resourceSourcePkId,
+        createTime: tool.createTime,
+        createUserName: tool.createUserName,
+        name: tool.resourceName ?? tool.toolName ?? tool.name ?? '-',
+        description: tool.resourceDesc ?? tool.desc ?? tool.description ?? '-',
+        status: tool.resourceStatus,
+        statusText: getResourceStatusText(tool.resourceStatus) || '-',
+      })),
+    },
+  ];
 };
 
 export const getSchemaRenderConfig = (config: any) => {
@@ -326,14 +404,6 @@ export const getSchemaRenderConfig = (config: any) => {
     }
 
     if (Array.isArray(config.param.tools) && config.param.tools.length) {
-      const getStatusText = (status?: number) => {
-        if (status === 2) return intl.formatMessage({ id: 'resourceStatus.published' });
-        if (status === 3) return intl.formatMessage({ id: 'resourceStatus.unpublished' });
-        if (status === 0) return intl.formatMessage({ id: 'resourceStatus.draft' });
-        if (status === 1 || status === 4) return intl.formatMessage({ id: 'resourceStatus.reviewing' });
-        if (status === 5) return intl.formatMessage({ id: 'resourceStatus.notPassed' });
-        return '';
-      };
       const tools = config.param.tools.map((tool: any, index: number) => ({
         key: tool.resourceId ?? index,
         resourceId: tool.resourceId,
@@ -344,7 +414,7 @@ export const getSchemaRenderConfig = (config: any) => {
         name: tool.resourceName ?? tool.toolName ?? '-',
         description: tool.resourceDesc ?? tool.desc ?? '-',
         status: tool.resourceStatus,
-        statusText: getStatusText(tool.resourceStatus),
+        statusText: getResourceStatusText(tool.resourceStatus),
       }));
 
       items.push({
