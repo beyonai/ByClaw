@@ -244,7 +244,6 @@
         WHERE status = 'RUNNING'
           AND (lease_policy IN ('REMOTE_AUTO_EXPIRE', 'MANUAL') OR auto_release = 0)
           AND sandbox_id IS NOT NULL
-          AND sandbox_id != ''
           AND timeout_seconds IS NOT NULL
           AND timeout_seconds > 0
           AND next_renew_at IS NOT NULL
@@ -257,7 +256,6 @@
         WHERE status = 'RUNNING'
           AND (lease_policy IN ('REMOTE_AUTO_EXPIRE', 'MANUAL') OR auto_release = 0)
           AND sandbox_id IS NOT NULL
-          AND sandbox_id != ''
           AND timeout_seconds IS NOT NULL
           AND timeout_seconds > 0
           AND next_renew_at IS NOT NULL
@@ -277,7 +275,6 @@
         FROM ss_sandbox_record
         WHERE status != 'RELEASED'
           AND sandbox_id IS NOT NULL
-          AND sandbox_id != ''
     </select>
 
     <select id="selectReconcileSandboxesPage" resultMap="BaseResultMap">
@@ -285,7 +282,6 @@
         FROM ss_sandbox_record
         WHERE status != 'RELEASED'
           AND sandbox_id IS NOT NULL
-          AND sandbox_id != ''
         <if test="cursorTime != null and cursorId != null">
           <![CDATA[
           AND (update_time > #{cursorTime,jdbcType=TIMESTAMP}
