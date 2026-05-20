@@ -129,14 +129,14 @@ public class RouteService {
      * storeMessage / afterProcess，最终由 cleanupResources 关闭流。
      */
     public void route(ChatProcessContext ctx) throws Exception {
-        if (isIntegrationTypeInterface(ctx)) {
-            interfaceRouteService.route(ctx);
-            return;
-        }
-        if (isIntegrationTypeA2A(ctx)) {
-            a2aRouteService.route(ctx);
-            return;
-        }
+        // if (isIntegrationTypeInterface(ctx)) {
+        //     interfaceRouteService.route(ctx);
+        //     return;
+        // }
+        // if (isIntegrationTypeA2A(ctx)) {
+        //     a2aRouteService.route(ctx);
+        //     return;
+        // }
 
         ctx.loginInfo = CurrentUserHolder.getLoginInfo();
 

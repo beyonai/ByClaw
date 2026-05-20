@@ -34,6 +34,7 @@ export function buildExecutorResourceContext(params: {
   channelTraceId?: string;
   language?: string;
   beyondToken?: string;
+  parentSessionKey?: string;
 }): Record<string, unknown> {
   const rootAgent: Record<string, unknown> = {
     resourceId: params.agent.sourceKey,
@@ -81,6 +82,7 @@ export function buildExecutorResourceContext(params: {
     selected_resource: resource,
     session_key: sessionKey,
     requester_session_key: sessionKey,
+    parent_session_key: params.parentSessionKey,
     language: params.language,
     beyondToken: params.beyondToken,
   };

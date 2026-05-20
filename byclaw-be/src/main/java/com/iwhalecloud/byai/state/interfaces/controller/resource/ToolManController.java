@@ -6,6 +6,7 @@ import com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.UserSpaceDto;
 import com.iwhalecloud.byai.state.domain.chat.vo.UserSpaceVo;
 import io.modelcontextprotocol.spec.McpSchema;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -295,15 +296,14 @@ public class ToolManController {
     }
 
     /**
-     * 按 resourceCode + ownerType 删除资源（支持 tool、skill、kg_doc、object、view）。
-     * 删除前同样会校验资源是否被引用；存在引用时不允许删除。
+     * 按 resourceCode + ownerType 删除资源（支持 tool、skill、kg_doc、object、view）。 删除前同样会校验资源是否被引用；存在引用时不允许删除。
      */
     @PostMapping("/deleteResourceByCodeAndOwnerType")
     public ResponseUtil<Void> deleteResourceByCodeAndOwnerType(@RequestBody(required = false) DeleteResourceQo request,
         @Parameter(description = "资源编码", required = false) @RequestParam(value = "resourceCode",
             required = false) String resourceCode,
-        @Parameter(description = "资源归属类型：enterprise-企业，personal-个人", required = false) @RequestParam(
-            value = "ownerType", required = false) String ownerType) {
+        @Parameter(description = "资源归属类型：enterprise-企业，personal-个人",
+            required = false) @RequestParam(value = "ownerType", required = false) String ownerType) {
         try {
             String finalResourceCode = request != null && StringUtils.isNotBlank(request.getResourceCode())
                 ? request.getResourceCode()
