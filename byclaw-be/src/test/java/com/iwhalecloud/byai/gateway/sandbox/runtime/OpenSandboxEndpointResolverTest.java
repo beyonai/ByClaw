@@ -26,7 +26,6 @@ class OpenSandboxEndpointResolverTest {
             .thenReturn(new SandboxEndpoint("sandbox.example.test:8443/sandboxes/sb-1/proxy/18789", Map.of("X", "Y")));
 
         SandboxServiceSpec spec = new SandboxServiceSpec();
-        spec.setImageType("openclaw");
         spec.setServicePort(18789);
         spec.setPorts(List.of(port(18789, "https"), port(3000, "http")));
 
@@ -43,7 +42,6 @@ class OpenSandboxEndpointResolverTest {
     @Test
     void resolve_usesServicePortOnlyForUiAgent() {
         SandboxServiceSpec spec = new SandboxServiceSpec();
-        spec.setImageType("uiagent");
         spec.setServicePort(3000);
         spec.setPorts(List.of(port(3000, "https"), port(9222, "http")));
 

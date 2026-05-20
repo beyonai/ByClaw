@@ -36,11 +36,6 @@ public class SandboxServiceSpec {
     private Integer servicePort;
 
     /**
-     * Image endpoint strategy, for example openclaw or uiagent.
-     */
-    private String imageType;
-
-    /**
      * Resource limits (CreateSandboxRequest.resourceLimits).
      */
     private Map<String, String> resourceLimits;

@@ -13,6 +13,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.application.service.session.ByClawFileQueryApplicationService;
+import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDeleteApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDownloadApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillQueryApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillUploadApplicationService;
@@ -30,6 +31,7 @@ import com.iwhalecloud.byai.state.domain.resource.dto.ResourceCurlRunRequest;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceCurlRunResult;
 import com.iwhalecloud.byai.state.domain.resource.dto.ToolSaveRequest;
 import com.iwhalecloud.byai.state.domain.resource.qo.DeleteResourceQo;
+import com.iwhalecloud.byai.state.domain.resource.qo.DeleteSkillQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.DownloadSkillZipQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.ResourceDetailQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.UpdateResourceBasicInfoQo;
@@ -79,6 +81,9 @@ public class ToolManController {
 
     @Autowired
     private ByClawSkillDownloadApplicationService byClawSkillDownloadApplicationService;
+
+    @Autowired
+    private ByClawSkillDeleteApplicationService byClawSkillDeleteApplicationService;
 
     /**
      * 阶段一：解析 curl，返回结构化预览（不入库）
@@ -662,6 +667,39 @@ public class ToolManController {
                 I18nUtil.get("byclaw.skill.download.failed"));
             return ResponseEntity.badRequest().contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
                 .body(out -> out.write(fallbackMsg.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        }
+    }
+
+    /**
+     * 删除用户工作空间下的单个 skill 目录。
+     * - 数字员工：skillPath 必须落在 /.openclaw/workspace-baiying-agent-{resourceId}/skills/ 之下
+     * - 超级助手：skillPath 必须落在 /.openclaw/workspace/skills/ 之下
+     * - userCode 留空时退回当前登录用户
+     */
+    @PostMapping("/deleteSkill")
+    public ResponseUtil<ByClawSkillDto> deleteSkill(@RequestBody DeleteSkillQo request) {
+        try {
+            if (request == null) {
+                return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
+            }
+            String resolvedUserCode = StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
+                : CurrentUserHolder.getCurrentUserCode();
+            ByClawSkillDto data = byClawSkillDeleteApplicationService.deleteSkill(resolvedUserCode,
+                request.getResourceId(), request.getSkillPath());
+            return ResponseUtil.successResponse(I18nUtil.get("byclaw.skill.delete.success"), data);
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("deleteSkill failed, userCode={}, resourceId={}, skillPath={}",
+                request == null ? null : request.getUserCode(), request == null ? null : request.getResourceId(),
+                request == null ? null : request.getSkillPath(), e);
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("byclaw.skill.delete.failed"));
         }
     }
 

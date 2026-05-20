@@ -223,6 +223,21 @@ export const queryResourceDetail = (params: any) => {
   return POST<any>('/byaiService/tool/queryResourceDetail', params);
 };
 
+export const queryMCPToolsList = (params: { resourceId: string }) => {
+  return POST<any>('/byaiService/tool/mcp/listTools', params);
+};
+
+export const queryCallMCPToolRequest = (params: {
+  resourceId: string;
+  name: string;
+  arguments: {
+    origin: string;
+    destination: string;
+  };
+}) => {
+  return POST<any>('/byaiService//tool/mcp/callToolRequest', params);
+};
+
 /**
  * 根据资源sourceContent生成测试curl命令
  * 用于在沙箱环境中测试资源调用
@@ -238,7 +253,11 @@ export const generateResourceCurl = (params: { resourceId: string | number }) =>
  * @param params 参数（包含resourceId资源ID、curl curl命令字符串）
  * @returns Promise 测试执行结果
  */
-export const runResourceCurl = (params: { resourceId: string | number; curl: string }) =>
+export const runResourceCurl = (params: {
+  resourceId: string | number;
+  name: string;
+  arguments: Record<string, string>;
+}) =>
   POST<any>('/byaiService/tool/runResourceCurl', params, {
     timeout: 60000,
   });
@@ -420,4 +439,14 @@ export const downloadSkillZip = (params: { skillPath: string; resourceId?: strin
     timeout: 480000,
     responseType: 'blob',
   });
+};
+
+/**
+ * 删除技能目录
+ * 删除指定路径下的技能目录
+ * @param params 参数（包含skillPath技能路径、resourceId资源ID和可选的userCode用户编码）
+ * @returns Promise 删除结果
+ */
+export const deleteSkill = (params: { skillPath: string; resourceId?: string | number; userCode?: string }) => {
+  return POST<any>('/byaiService/tool/deleteSkill', params);
 };

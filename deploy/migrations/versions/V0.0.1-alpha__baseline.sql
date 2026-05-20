@@ -3087,6 +3087,11 @@ INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_grou
 INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'MENU_ICON_SHOW_TAB', '菜单图标显示', '会话', 'Session', 'true', '会话', 1);
 INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'MENU_ICON_SHOW_TAB', '菜单图标显示', '员工', 'Employees', 'true', '员工', 2);
 
+delete from byai.byai_system_config_list where param_group_code in('SYSTEM_MODEL_TYPE');
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_TYPE', '模型类型', '大语言模型（LLM）', 'LLM', 'LLM', '大语言模型（LLM）', 1);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_TYPE', '模型类型', '重排模型（RERANK）', 'RERANK', 'RERANK', '重排模型（RERANK）', 2);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'SYSTEM_MODEL_TYPE', '模型类型', '向量模型（EMBEDDING）', 'EMBEDDING', 'EMBEDDING', '向量模型（EMBEDDING）', 3);
+
 delete from byai.byai_system_config where param_code in('BYAI_BRAND_VERSION');
 INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc) VALUES (10001781, null, 'BYAI_BRAND_VERSION', '百应商标版信息', 'BYAI_BRAND_VERSION', 'openSource', '百应商标版本，商用:commercial,开源:openSource');
 
