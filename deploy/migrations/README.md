@@ -7,6 +7,7 @@
 ```
 deploy/migrations/
 ├── README.md              # 本文件
+├── merge_migrations.py    # 增量脚本合并工具
 └── versions/
     ├── V0.0.1-alpha__baseline.sql   # 基线（等同于 initdb/ 完整内容）
     ├── V0.0.2__xxx.sql              # 后续增量变更
@@ -95,3 +96,45 @@ CREATE INDEX IF NOT EXISTS idx_resource_tags ON ss_resource USING gin(tags);
 **Q: initdb 和 baseline 内容不一致怎么办？**
 
 以 `initdb/` 为准（它是实际执行的）。如果 initdb 有变更，同步更新 baseline 或写新的增量脚本。
+
+## 合并工具 (merge_migrations.py)
+
+将 `versions/` 下的增量脚本自动区分 DDL/DML，追加合并到 `initdb/02_ddl.sql` 和 `initdb/04_dml.sql`，确保新部署环境包含所有历史变更。
+
+### 用法
+
+```bash
+# 预览（不写入文件）
+python deploy/migrations/merge_migrations.py --dry-run
+
+# 执行合并
+python deploy/migrations/merge_migrations.py
+
+# 完整稽核（需要数据库连接 + psycopg2）
+python deploy/migrations/merge_migrations.py --audit-db "host=localhost port=5432 dbname=postgres user=gaussdb password=xxx"
+```
+
+### 工作原理
+
+1. 读取 `initdb/.applied` 文件，获取已合并的版本列表
+2. 扫描 `versions/` 目录，按文件名排序，跳过 baseline 和已合并的版本
+3. 对每个待合并文件，按 `;` 分割 SQL 语句（正确处理引号、`$$` 块、注释中的分号）
+4. 根据首个关键字分类：`CREATE/ALTER/DROP/COMMENT ON/GRANT` → DDL，`INSERT/UPDATE/DELETE` → DML
+5. 追加到对应的 initdb 文件，并记录到 `.applied`
+
+### 防重复机制
+
+`deploy/middleware/initdb/.applied` 记录已合并的版本文件名。重复运行自动跳过。
+
+### 稽核检查
+
+脚本执行后自动进行以下检查：
+
+| # | 检查项 | 是否需要数据库 |
+|---|--------|---------------|
+| 1 | 版本覆盖完整性（所有 versions 是否都已合并） | 否 |
+| 2 | SQL 语法检查（BEGIN + ROLLBACK 模拟执行） | 是 |
+| 3 | 表结构一致性（DDL 定义 vs 实际 schema） | 是 |
+| 4 | 种子数据完整性（DML 涉及的表是否有数据） | 是 |
+
+检查 2-4 需要通过 `--audit-db` 传入数据库连接串。
