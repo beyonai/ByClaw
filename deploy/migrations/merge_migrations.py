@@ -21,7 +21,7 @@ VERSIONS_DIR = SCRIPT_DIR / "versions"
 INITDB_DIR = SCRIPT_DIR.parent / "middleware" / "initdb"
 DDL_FILE = INITDB_DIR / "02_ddl.sql"
 DML_FILE = INITDB_DIR / "04_dml.sql"
-APPLIED_FILE = INITDB_DIR / ".applied"
+APPLIED_FILE = SCRIPT_DIR / ".applied"
 
 BASELINE_PATTERN = re.compile(r".*__baseline\.sql$", re.IGNORECASE)
 
@@ -231,6 +231,15 @@ def format_merge_block(version_name: str, statements: list[str]) -> str:
     header = f"\n-- ========== {version_name} (merged at {now}) ==========\n"
     body = "\n".join(s if s.endswith(";") else s + ";" for s in statements)
     return header + body + "\n"
+
+
+def version_already_in_file(filepath: Path, version_name: str) -> bool:
+    """Check if a version's merge marker already exists in the target file."""
+    if not filepath.exists():
+        return False
+    marker = f"-- ========== {version_name} ("
+    content = filepath.read_text(encoding="utf-8")
+    return marker in content
 
 
 def append_to_file(filepath: Path, content: str, dry_run: bool = False) -> None:
@@ -443,6 +452,16 @@ def main():
                 if len(dml_stmts) > 3:
                     print(f"          ... and {len(dml_stmts) - 3} more")
         else:
+            # Check if already present in target files (guards against .applied being deleted)
+            already_in_ddl = version_already_in_file(DDL_FILE, version_file.stem)
+            already_in_dml = version_already_in_file(DML_FILE, version_file.stem)
+
+            if already_in_ddl or already_in_dml:
+                print(f"[SKIP] {version_file.name}: already present in target file(s), recovering .applied")
+                applied.add(version_file.name)
+                write_applied(applied)
+                continue
+
             if ddl_stmts:
                 block = format_merge_block(version_file.stem, ddl_stmts)
                 append_to_file(DDL_FILE, block)
