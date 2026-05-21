@@ -4,6 +4,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.toolkit.CollectionUtils;
+import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelStatusEnum;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.ByaiAimodelDomainService;
 import com.iwhalecloud.byai.manager.domain.tag.service.ByaiTagRelationService;
@@ -33,18 +34,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 模型管理应用服务
- * 编排列表、upsert、删除、setStatus、详情、调试等用例；调用 domain.aimodel，编排事务与审计
+ * 模型管理应用服务 编排列表、upsert、删除、setStatus、详情、调试等用例；调用 domain.aimodel，编排事务与审计
  *
  * @author system
  */
 @Service
 @Slf4j
-public class
-ModelManagementApplicationService {
-
+public class ModelManagementApplicationService {
 
     private static final int MASK_PREFIX_LEN = 3;
+
     private static final int MASK_SUFFIX_LEN = 4;
 
     @Autowired
@@ -59,9 +58,7 @@ ModelManagementApplicationService {
     public ModelListResponse getModelListByPage(ModelListRequest request) {
         PageInfo<ByaiAimodel> page = byaiAimodelDomainService.listByCondition(request);
         List<ModelVO> rows = page.getList() == null ? List.of()
-            : page.getList().stream()
-                .map(e -> entityToModelVO(e, true))
-                .collect(Collectors.toList());
+            : page.getList().stream().map(e -> entityToModelVO(e, true)).collect(Collectors.toList());
         ModelListResponse response = new ModelListResponse();
         response.setRows(rows);
         response.setPageIndex(page.getPageNum());
@@ -95,7 +92,8 @@ ModelManagementApplicationService {
                 if (byaiAimodelDomainService.existsByModelNameExcludeId(displayName, null)) {
                     throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40002, "aimodel.name.duplicate");
                 }
-            } else {
+            }
+            else {
                 Long modelId = parseModelId(request.getId());
                 if (byaiAimodelDomainService.existsByModelNameExcludeId(displayName, modelId)) {
                     throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40002, "aimodel.name.duplicate");
@@ -114,7 +112,8 @@ ModelManagementApplicationService {
             entity.setModelId(modelId);
             entity.setCreateBy(existing.getCreateBy());
             entity.setCreateTime(existing.getCreateTime());
-        } else {
+        }
+        else {
             entity = requestToEntity(request, currentUserId);
         }
         Long modelId = byaiAimodelDomainService.upsert(entity);
@@ -188,14 +187,14 @@ ModelManagementApplicationService {
         try {
             long v = Long.parseLong(idStr.trim());
             return v > 0 ? v : null;
-        } catch (NumberFormatException e) {
+        }
+        catch (NumberFormatException e) {
             return null;
         }
     }
 
     /**
-     * 按调试结果更新模型状态（Story：调试成功 OOA+Redis，调试失败 OOD 并从 Redis 移除）。
-     * 仅作副作用调用，失败仅打日志，不改变调试接口响应。
+     * 按调试结果更新模型状态（Story：调试成功 OOA+Redis，调试失败 OOD 并从 Redis 移除）。 仅作副作用调用，失败仅打日志，不改变调试接口响应。
      *
      * @param modelId 模型主键，为 null 时不更新
      * @param success 调试是否成功
@@ -207,17 +206,11 @@ ModelManagementApplicationService {
         try {
             String apiStatus = success ? ModelStatusEnum.ENABLED.name() : ModelStatusEnum.TESTING.name();
             byaiAimodelDomainService.setStatus(modelId, apiStatus);
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             log.warn("aimodel debug status update fail, modelId={}, success={}", modelId, success, e);
         }
     }
-
-
-
-
-
-
-
 
     private Long parseModelId(String id) {
         if (StringUtil.isEmpty(id)) {
@@ -244,8 +237,8 @@ ModelManagementApplicationService {
     }
 
     /**
-     * Entity 转 ModelVO；forList=true 仅返回 apiTokenMasked，不返回 apiToken。
-     * 规范要求：详情与列表接口均须从实体 in_params 解析并组装扩展字段（providerName、abilities、systems、headers、超时/重试/高级参数、updatedAt）到响应，供前端编辑回显与展示。
+     * Entity 转 ModelVO；forList=true 仅返回 apiTokenMasked，不返回 apiToken。 规范要求：详情与列表接口均须从实体 in_params
+     * 解析并组装扩展字段（providerName、abilities、systems、headers、超时/重试/高级参数、updatedAt）到响应，供前端编辑回显与展示。
      */
     private ModelVO entityToModelVO(ByaiAimodel entity, boolean forList) {
         ModelVO vo = new ModelVO();
@@ -284,7 +277,8 @@ ModelManagementApplicationService {
             setVoInParamsStrings(vo, inParams);
             setVoInParamsNumbers(vo, inParams);
             setVoInParamsUpdatedAt(vo, inParams);
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             log.error("inParams to ModelVO fail, inParams={}", inParamsJson, e);
         }
     }
@@ -302,6 +296,9 @@ ModelManagementApplicationService {
         }
         if (inParams.get("headers") != null) {
             vo.setHeaders(parseHeaders(inParams.get("headers")));
+        }
+        if (inParams.get("extendParam") != null) {
+            vo.setExtendParam(MapParamUtil.getStringValue(inParams, "extendParam"));
         }
     }
 
@@ -386,8 +383,7 @@ ModelManagementApplicationService {
         if (token == null || token.length() <= MASK_PREFIX_LEN + MASK_SUFFIX_LEN) {
             return token != null && token.length() > 0 ? "****" : null;
         }
-        return token.substring(0, Math.min(MASK_PREFIX_LEN, token.length()))
-            + "****"
+        return token.substring(0, Math.min(MASK_PREFIX_LEN, token.length())) + "****"
             + token.substring(token.length() - Math.min(MASK_SUFFIX_LEN, token.length()));
     }
 
@@ -400,7 +396,8 @@ ModelManagementApplicationService {
         }
         try {
             return Sm4Util.decrypt(encrypted);
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             log.debug("aimodel token decrypt fail, use original");
             return encrypted;
         }
@@ -430,7 +427,8 @@ ModelManagementApplicationService {
         }
         try {
             return Long.parseLong(id);
-        } catch (NumberFormatException ignored) {
+        }
+        catch (NumberFormatException ignored) {
             return null;
         }
     }
@@ -441,7 +439,8 @@ ModelManagementApplicationService {
         entity.setModelName(request.getDisplayName());
         entity.setModelNo(request.getModelCode());
         entity.setModelType(request.getModelType() != null ? request.getModelType() : "LLM");
-        entity.setStatus(ModelStatusEnum.toDbCode(request.getStatus() != null ? request.getStatus() : ModelStatusEnum.DISABLED.name()));
+        entity.setStatus(ModelStatusEnum
+            .toDbCode(request.getStatus() != null ? request.getStatus() : ModelStatusEnum.DISABLED.name()));
         entity.setUrl(request.getApiEndpoint());
         entity.setAuthToken(Sm4Util.encrypt(request.getApiToken()));
         entity.setMaxContentToken(request.getContextTokens());
@@ -464,6 +463,7 @@ ModelManagementApplicationService {
         putIfNonNull(inParams, "maxTokens", request.getMaxTokens());
         putIfNonNull(inParams, "frequencyPenalty", request.getFrequencyPenalty());
         putIfNonNull(inParams, "presencePenalty", request.getPresencePenalty());
+        putIfNonNull(inParams, "extendParam", request.getExtendParam());
         if (modelId != null) {
             inParams.put("updatedAt", formatUpdatedAt(new Date()));
         }
@@ -511,16 +511,12 @@ ModelManagementApplicationService {
         if (CollectionUtils.isEmpty(byaiAimodels)) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.chat_model.not.configured");
         }
-        for(ByaiAimodel byaiAimodel : byaiAimodels) {
-            if(byaiAimodel.getIsDefault() == 1) {
+        for (ByaiAimodel byaiAimodel : byaiAimodels) {
+            if (byaiAimodel.getIsDefault() == 1) {
                 return byaiAimodel.getModelId().toString();
             }
         }
         return byaiAimodels.getFirst().getModelId().toString();
     }
-
-
-
-
 
 }
