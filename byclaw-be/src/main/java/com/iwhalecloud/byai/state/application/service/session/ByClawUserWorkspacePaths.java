@@ -6,13 +6,17 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 
 /**
- * skill 路径与上下文切换的内部工具。
- * 同一份口径供 {@link ByClawSkillQueryApplicationService} 与 {@link ByClawSkillUploadApplicationService} 复用，
- * 避免常量与 LoginInfo 切换逻辑各写一遍导致 query / upload 路径漂移。
+ * byclaw 用户桶工作空间路径工具。
+ *
+ * UserFS 统一落在 bucket byclaw-{userCode} 的 /by 根目录下，本类只维护 /by 之后的业务路径。
+ *
  * @author qin.guoquan
- * @date 2026-05-15 18:37:18
+ * @date 2026-05-21
  */
-final class ByClawSkillPaths {
+final class ByClawUserWorkspacePaths {
+
+    /** UserFS 对外 objectKey 的根前缀。 */
+    static final String USER_FS_OBJECT_KEY_ROOT_PREFIX = "/by";
 
     /** 超级助手 skills 根目录前缀。 */
     static final String WORKSPACE_SKILL_ROOT_PREFIX = "/.openclaw/workspace/skills/";
@@ -20,10 +24,13 @@ final class ByClawSkillPaths {
     /** 数字员工 agent skills 根目录模板。 */
     static final String AGENT_SKILL_ROOT_PREFIX_TEMPLATE = "/.openclaw/workspace-baiying-agent-%s/skills/";
 
+    /** 个人 agent tar.gz 根目录模板。 */
+    static final String PERSONAL_AGENT_ARCHIVE_ROOT_PREFIX_TEMPLATE = "/.personal-agents/%s/";
+
     /** skill 元信息文件名；query 仅识别此文件作为 skill 的标志。 */
     static final String SKILL_DOC_FILE_NAME = "SKILL.md";
 
-    private ByClawSkillPaths() {
+    private ByClawUserWorkspacePaths() {
     }
 
     static String buildAgentSkillRootPrefix(Long resourceId) {
@@ -33,8 +40,27 @@ final class ByClawSkillPaths {
         return String.format(AGENT_SKILL_ROOT_PREFIX_TEMPLATE, resourceId);
     }
 
-    static String resolveSkillRootPrefix(Long resourceId) {
-        return resourceId == null ? WORKSPACE_SKILL_ROOT_PREFIX : buildAgentSkillRootPrefix(resourceId);
+    static String resolveSkillRootPrefix(Long resourceId, String resourceCode) {
+        if (resourceId == null || isSuperAssistantResourceCode(resourceCode)) {
+            return WORKSPACE_SKILL_ROOT_PREFIX;
+        }
+        return buildAgentSkillRootPrefix(resourceId);
+    }
+
+    static String buildPersonalAgentArchiveRootPrefix(Long resourceId) {
+        if (resourceId == null) {
+            throw new IllegalArgumentException("resourceId must not be null");
+        }
+        return String.format(PERSONAL_AGENT_ARCHIVE_ROOT_PREFIX_TEMPLATE, resourceId);
+    }
+
+    static String buildPersonalAgentArchivePath(Long resourceId, String fileName) {
+        return buildPersonalAgentArchiveRootPrefix(resourceId) + fileName;
+    }
+
+    static String toUserFsObjectKey(String workspacePath) {
+        String normalized = workspacePath.startsWith("/") ? workspacePath : "/" + workspacePath;
+        return USER_FS_OBJECT_KEY_ROOT_PREFIX + normalized;
     }
 
     static boolean isSuperAssistantResourceCode(String resourceCode) {

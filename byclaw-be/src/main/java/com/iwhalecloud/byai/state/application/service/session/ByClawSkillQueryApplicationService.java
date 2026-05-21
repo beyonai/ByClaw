@@ -50,7 +50,7 @@ public class ByClawSkillQueryApplicationService {
         String skillRootPrefix = resolveSkillRootPrefix(resourceId);
         Map<String, SkillDocInfo> skillDocMap = new LinkedHashMap<>();
         collectSkillDocs(skillDocMap,
-            safeObjectKeys(ByClawSkillPaths.withUserContext(userCode, () -> userFS.list(skillRootPrefix, null))),
+            safeObjectKeys(ByClawUserWorkspacePaths.withUserContext(userCode, () -> userFS.list(skillRootPrefix, null))),
             skillRootPrefix);
 
         return skillDocMap.entrySet().stream().filter(entry -> matchKeyword(entry.getKey(), normalizedKeyword))
@@ -64,13 +64,11 @@ public class ByClawSkillQueryApplicationService {
 
     private String resolveSkillRootPrefix(Long resourceId) {
         if (resourceId == null) {
-            return ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX;
+            return ByClawUserWorkspacePaths.WORKSPACE_SKILL_ROOT_PREFIX;
         }
         SsResource resource = ssResourceService.findById(resourceId);
         String resourceCode = resource == null ? null : resource.getResourceCode();
-        return ByClawSkillPaths.isSuperAssistantResourceCode(resourceCode)
-            ? ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX
-            : ByClawSkillPaths.buildAgentSkillRootPrefix(resourceId);
+        return ByClawUserWorkspacePaths.resolveSkillRootPrefix(resourceId, resourceCode);
     }
 
     private void collectSkillDocs(Map<String, SkillDocInfo> skillDocMap, List<String> objectKeys,
@@ -86,7 +84,7 @@ public class ByClawSkillQueryApplicationService {
         String relativePath = objectKey.substring(skillRootPrefix.length());
         String[] segments = StringUtils.split(relativePath, '/');
         if (segments == null || segments.length != 2 || StringUtils.isBlank(segments[0])
-            || !StringUtils.equals(segments[1], ByClawSkillPaths.SKILL_DOC_FILE_NAME)) {
+            || !StringUtils.equals(segments[1], ByClawUserWorkspacePaths.SKILL_DOC_FILE_NAME)) {
             return;
         }
         skillDocMap.putIfAbsent(segments[0], new SkillDocInfo(skillRootPrefix + segments[0], objectKey));
