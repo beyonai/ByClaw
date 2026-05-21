@@ -52,6 +52,46 @@ function toJsonSafe(value: unknown): unknown {
   return value;
 }
 
+function stringifyForLog(value: unknown): string {
+  const seen = new WeakSet<object>();
+  const json = JSON.stringify(value, (_key, entry) => {
+    if (typeof entry === "bigint") {
+      return entry.toString();
+    }
+    if (entry instanceof Uint8Array) {
+      return {
+        type: "bytes",
+        encoding: "base64",
+        data: Buffer.from(entry).toString("base64"),
+        byteLength: entry.byteLength,
+      };
+    }
+    if (typeof entry === "function") {
+      return "[Function]";
+    }
+    if (typeof entry === "symbol") {
+      return entry.toString();
+    }
+    if (entry && typeof entry === "object") {
+      if (seen.has(entry)) {
+        return "[Circular]";
+      }
+      seen.add(entry);
+    }
+    return entry;
+  });
+  return json ?? String(value);
+}
+
+function describeRequest(input: Record<string, unknown>): string {
+  return stringifyForLog({
+    sql: typeof input.sql === "string" ? input.sql.trim() : input.sql,
+    params: input.params,
+    mode: input.mode,
+    maxRows: input.maxRows,
+  });
+}
+
 function normalizeRows(rows: unknown[]): Array<Record<string, unknown>> {
   return rows.map((row) => (isPlainRecord(row) ? (toJsonSafe(row) as Record<string, unknown>) : {}));
 }
@@ -173,6 +213,9 @@ export class SqliteExecutor {
       return createFailure("invalid_request", "Request body must be an object.");
     }
 
+    const requestLog = describeRequest(input);
+    this.params.logger.info(`byclaw-sqlite: request received ${requestLog}`);
+
     const sql = typeof input.sql === "string" ? input.sql.trim() : "";
     if (!sql) {
       return createFailure("invalid_request", "sql is required.");
@@ -260,6 +303,7 @@ export class SqliteExecutor {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.params.logger.warn(`byclaw-sqlite: execution failed for ${statementType}: ${message}`);
+      this.params.logger.error(`byclaw-sqlite: request failed ${requestLog}: ${message}`);
       return createFailure("sqlite_error", message);
     }
   }
