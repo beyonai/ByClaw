@@ -5,7 +5,7 @@ jest.mock('@umijs/max', () => ({
 
 jest.mock('../usePersistFn', () => ({
   __esModule: true,
-  default: (fn: Function) => fn,
+  default: (fn: (...args: any[]) => any) => fn,
 }));
 
 jest.mock('../useSseSender/useSend', () => ({
@@ -66,7 +66,7 @@ jest.mock('@/service/message', () => ({
   stopChat: jest.fn(),
 }));
 
-import { renderHook, act } from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
 import { useDispatch, useSelector } from '@umijs/max';
 import useAppStore from '@/models/common/useAppStore';
 import { sseRequestManager } from '@/utils/sseRequestManager';
@@ -92,6 +92,10 @@ describe('hooks/useChat/index', () => {
         session: {
           extParamsBySessionId: {},
         },
+        employees: {
+          defaultDigEmployeeId: '',
+          employeesList: [],
+        },
       })
     );
     mockUseAppStore.mockReturnValue({
@@ -110,6 +114,10 @@ describe('hooks/useChat/index', () => {
         },
         session: {
           extParamsBySessionId: {},
+        },
+        employees: {
+          defaultDigEmployeeId: '',
+          employeesList: [],
         },
       })
     );
@@ -141,6 +149,10 @@ describe('hooks/useChat/index', () => {
         },
         session: {
           extParamsBySessionId: {},
+        },
+        employees: {
+          defaultDigEmployeeId: '',
+          employeesList: [],
         },
       })
     );

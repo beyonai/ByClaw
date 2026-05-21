@@ -12,7 +12,7 @@ import React, {
 import { useIntl } from '@umijs/max';
 import { Divider, List, Skeleton, Spin } from 'antd';
 import classNames from 'classnames';
-import { noop, pullAllBy, isEmpty, size } from 'lodash';
+import { noop, pullAllBy, isEmpty, size, isNil } from 'lodash';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { queryMyCreatedAndSubscribedAgentsV2 } from '@/service/digitalEmployees';
@@ -27,7 +27,7 @@ import EmptyTips from '@/components/EmptyTips';
 import { EmployeeListProps, EmployeeListContext, isInputMode } from '@/layout/sider/components/EmployeeList';
 import { Platform } from '@/layout/components/provider/global';
 import { agentTypeMap } from '@/constants/agent';
-import { sortBySuperHelperFirst, updateDefaultEmployee } from '@/layout/sider/components/EmployeeList/util';
+import { sortBySuperHelperFirst } from '@/layout/sider/components/EmployeeList/util';
 
 import pStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 
@@ -158,16 +158,8 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
       pinList?: string[];
       unpinList?: string[];
       updateList?: Partial<IAgentCache>[];
-      defaultResourceId?: string | number;
     }) => {
-      const {
-        delIdList = [],
-        unApplyList = [],
-        pinList = [],
-        unpinList = [],
-        updateList = [],
-        defaultResourceId,
-      } = param || {};
+      const { delIdList = [], unApplyList = [], pinList = [], unpinList = [], updateList = [] } = param || {};
 
       setEmployeesList((prevList) => {
         // 处理删除和取消关注
@@ -219,18 +211,31 @@ const AllEmployees = (props: IProps, ref: ForwardedRef<IRef>) => {
           });
         }
 
-        if (defaultResourceId !== undefined && defaultResourceId !== null) {
-          return updateDefaultEmployee(prevList, defaultResourceId);
-        }
-
         return [...prevList];
       });
     };
+
     EventEmitter.on('beyond-update-employee', handler);
     return () => {
       EventEmitter.off('beyond-update-employee', handler);
     };
   }, [EventEmitter, getSearch, searchName]);
+
+  useEffect(() => {
+    const handler = (param: { defaultResourceId?: string | number }) => {
+      const { defaultResourceId } = param || {};
+      if (isNil(defaultResourceId)) {
+        return;
+      }
+
+      getSearch(searchName);
+    };
+
+    EventEmitter.on('beyond-update-employee', handler);
+    return () => {
+      EventEmitter.off('beyond-update-employee', handler);
+    };
+  }, [EventEmitter, searchName, getSearch]);
 
   useImperativeHandle(
     ref,
