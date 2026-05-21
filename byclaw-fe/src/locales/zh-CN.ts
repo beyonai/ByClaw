@@ -1121,6 +1121,8 @@ export default {
   'skillDetail.noCurlScript': '暂无curl脚本',
   'skillDetail.generatingCurlScript': '正在生成curl脚本...',
 
+  'newChat.alreadyLatestSession': '已经是最新会话',
+
   'sandbox.waitTips': '正在初始化安全沙箱环境，请稍候...',
   'ThinkRewriteQuestion.originalQuestion': '原查询',
 

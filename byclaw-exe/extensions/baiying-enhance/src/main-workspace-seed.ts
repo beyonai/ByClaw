@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
-import { BUILTIN_MAIN_AGENTS_MD } from "./built-in-main-agents-md.js";
+import { loadBuiltinMainAgentsMd } from "./built-in-main-agents-md.js";
 import {
   isMainAgentsForeignTakeoverDone,
   markMainAgentsForeignTakeoverDone,
@@ -148,6 +148,7 @@ export async function loadMainAgentsTemplate(cfg: BaiyingEnhancePluginConfig): P
   if (!hasBuiltinMainAgentsTemplateSource(cfg)) {
     return null;
   }
+  const BUILTIN_MAIN_AGENTS_MD = await loadBuiltinMainAgentsMd();
   if (!BUILTIN_MAIN_AGENTS_MD || BUILTIN_MAIN_AGENTS_MD.trim().length === 0) {
     return null;
   }
