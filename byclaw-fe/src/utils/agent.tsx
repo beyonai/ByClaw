@@ -128,6 +128,7 @@ export function agentHandler(item: IAgent) {
     chatAvatar: myAvatar,
     category: 'all',
     isDefault: normalizedIsDefault,
+    canSetDefault: item.canSetDefault ?? !normalizedIsDefault,
 
     ...get(agentMap, myAgentType, {}),
   };
