@@ -1,17 +1,19 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import {
   createRedis,
   WorkerRegistry,
   WorkerRunner,
   GatewayDataEmitter,
   EventType,
-  type AskAgentCommand, WorkerHeartbeat,
+  type AskAgentCommand,
+  WorkerHeartbeat,
   ActionType,
 } from "@byclaw/by-framework";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import type { ResolvedByaiAccount, ByaiSdkInboundMessage, SdkInboundFile } from "./types.js";
+import { resolveInboundLanguage } from "./i18n.js";
 import { getByaiRuntime } from "./runtime.js";
-import path from "node:path";
-import fs from "node:fs/promises";
+import { deliverReplyToAgentViaSdk } from "./sdk-message-processor.js";
 import {
   resolveActiveSdkRequestByTraceId,
   clearActiveSdkRequestByTarget,
@@ -21,8 +23,7 @@ import {
   clearActiveSdkRequestRecord,
   resolveSdkLocalFilePath,
 } from "./session-context.js";
-import { deliverReplyToAgentViaSdk } from "./sdk-message-processor.js";
-import { resolveInboundLanguage } from "./i18n.js";
+import type { ResolvedByaiAccount, ByaiSdkInboundMessage, SdkInboundFile } from "./types.js";
 
 export interface ByaiSdkAppOptions {
   account: ResolvedByaiAccount;
@@ -38,13 +39,7 @@ export interface ByaiSdkAppOptions {
 type ByaiSdkLogger = NonNullable<ByaiSdkAppOptions["log"]>;
 
 function getRedisInfo() {
-  const {
-    REDIS_USERNAME,
-    REDIS_PASSWORD,
-    REDIS_HOST,
-    REDIS_PORT,
-    REDIS_DATABASE,
-  } = process.env;
+  const { REDIS_USERNAME, REDIS_PASSWORD, REDIS_HOST, REDIS_PORT, REDIS_DATABASE } = process.env;
   if (!REDIS_HOST || !REDIS_PORT) {
     return null;
   }
@@ -53,7 +48,7 @@ function getRedisInfo() {
     password: REDIS_PASSWORD,
     host: REDIS_HOST,
     port: parseInt(REDIS_PORT, 10),
-    db: parseInt(REDIS_DATABASE || '0', 10),
+    db: parseInt(REDIS_DATABASE || "0", 10),
   };
 }
 
@@ -69,7 +64,7 @@ function getInboundMessageFromByFramework(data: AskAgentCommand) {
     questionText = data.content;
   } else if (Array.isArray(data.content)) {
     const questionTextArr: string[] = [];
-    data.content.forEach(item => {
+    data.content.forEach((item) => {
       if (typeof item.content === "string") {
         questionTextArr.push(item.content);
       } else if (item.content && typeof item.content === "object") {
@@ -104,20 +99,27 @@ function getInboundMessageFromByFramework(data: AskAgentCommand) {
       resourceName: string;
     }[] = data.extraPayload?.resource_list || [];
     const { sessionId } = data.header;
-    resourceList.forEach(item => {
+    resourceList.forEach((item) => {
       if (item.resourceType !== "DIG_EMPLOYEE") {
         if (item.resourceType === "KG_DOC_FILE") {
           remindTextArr.push(`- file: ${resolveSdkLocalFilePath(item.resourceId, sessionId)}`);
         } else {
-          remindTextArr.push(`- resource: resource_id=${item.resourceId}, resource_type=${item.resourceType}, resource_name=${item.resourceName}`);
+          remindTextArr.push(
+            `- resource: resource_id=${item.resourceId}, resource_type=${item.resourceType}, resource_name=${item.resourceName}`,
+          );
         }
       }
     });
     if (remindTextArr.length) {
       let handleResourceTips = "";
-      if (resourceList.some(item => item.resourceType !== "KG_DOC_FILE" && item.resourceType !== "DIG_EMPLOYEE")) {
+      if (
+        resourceList.some(
+          (item) => item.resourceType !== "KG_DOC_FILE" && item.resourceType !== "DIG_EMPLOYEE",
+        )
+      ) {
         if (data.extraPayload?.agent_id || data.extraPayload?.agent_code) {
-          handleResourceTips = "For the resources, you can use \`baiying_call\` tool to handle them.";
+          handleResourceTips =
+            "For the resources, you can use \`baiying_call\` tool to handle them.";
         } else {
           handleResourceTips = "For the resources, you can find a subagent to handle them.";
         }
@@ -125,16 +127,18 @@ function getInboundMessageFromByFramework(data: AskAgentCommand) {
       const remindPrefix = [
         "<!-- remind_context:start -->",
         `The user mentions:\n${remindTextArr.join("\n")}`,
-         handleResourceTips,
+        handleResourceTips,
         "<!-- remind_context:end -->",
-      ].filter(Boolean).join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
       questionText = `${remindPrefix}\n${questionText}`;
     }
   }
   return {
     files,
     text: questionText,
-  }
+  };
 }
 
 function getErrorMessage(err: unknown): string {
@@ -206,7 +210,6 @@ function installNoGroupRecovery(params: {
 
 export class ByaiSdkApp {
   private readonly account: ResolvedByaiAccount;
-  private readonly cfg: OpenClawConfig;
   private readonly log?: ByaiSdkAppOptions["log"];
 
   private runner: WorkerRunner | null = null;
@@ -216,12 +219,15 @@ export class ByaiSdkApp {
 
   constructor(opts: ByaiSdkAppOptions) {
     this.account = opts.account;
-    this.cfg = opts.cfg;
     this.log = opts.log;
   }
 
   private logger() {
     return this.log ?? {};
+  }
+
+  private currentConfig(): OpenClawConfig {
+    return getByaiRuntime().config.current() as OpenClawConfig;
   }
 
   async start(): Promise<void> {
@@ -255,9 +261,12 @@ export class ByaiSdkApp {
 
     // 为 Runner 提供独立的 Redis 连接，避免轮询时的 BLOCK 指令阻塞其他操作（如 emitChunk）
     // 关键：轮询必须拥有自己的独占连接
-    const runner = new WorkerRunner({ workerId, agentTypes, registry }, {
-        redisClient: createRedis(redisInfo)
-    });
+    const runner = new WorkerRunner(
+      { workerId, agentTypes, registry },
+      {
+        redisClient: createRedis(redisInfo),
+      },
+    );
     installNoGroupRecovery({
       runner,
       registry,
@@ -294,12 +303,7 @@ export class ByaiSdkApp {
         return;
       }
       const gatewayMsg = data as AskAgentCommand;
-      const {
-        sessionId,
-        messageId,
-        traceId,
-        metadata,
-      } = gatewayMsg.header;
+      const { sessionId, messageId, traceId, metadata } = gatewayMsg.header;
       if (!gatewayMsg.content || !sessionId || !messageId) {
         await runner.ack(streamName, msgId);
         return;
@@ -311,9 +315,9 @@ export class ByaiSdkApp {
         message_id: messageId,
         session_id: sessionId,
         worker_id: workerId,
-        status: 'RUNNING',
+        status: "RUNNING",
         created_at: Date.now(),
-        updated_at: Date.now()
+        updated_at: Date.now(),
       });
       const { text, files } = getInboundMessageFromByFramework(gatewayMsg);
       info?.(`处理问题: ${text}`);
@@ -337,7 +341,8 @@ export class ByaiSdkApp {
           | Record<string, unknown>
           | string
           | undefined,
-        beyondToken: metadata?.["Beyond-Token"] ?? metadata?.request_headers?.["Beyond-Token"] ?? "",
+        beyondToken:
+          metadata?.["Beyond-Token"] ?? metadata?.request_headers?.["Beyond-Token"] ?? "",
       };
 
       // 写 sessionId 到文件，供 executor.py 读取并注入 X-Session-Id header
@@ -346,7 +351,9 @@ export class ByaiSdkApp {
         const stateDir = runtime.state.resolveStateDir();
         const sessionStorePath = path.join(stateDir, "identity", "byai_session_id.txt");
         await fs.writeFile(sessionStorePath, sessionId, "utf8");
-        debug?.(`[${this.account.accountId}] wrote session id to ${sessionStorePath}: ${sessionId}`);
+        debug?.(
+          `[${this.account.accountId}] wrote session id to ${sessionStorePath}: ${sessionId}`,
+        );
       } catch (err) {
         debug?.(`[${this.account.accountId}] failed to write session id file: ${String(err)}`);
       }
@@ -358,7 +365,7 @@ export class ByaiSdkApp {
         await deliverReplyToAgentViaSdk({
           message: inbound,
           account: this.account,
-          cfg: this.cfg,
+          cfg: this.currentConfig(),
           abortController,
           log: this.log,
           onReply: async (text, type, options) => {
@@ -390,15 +397,12 @@ export class ByaiSdkApp {
                 });
                 return;
               }
-              info?.(`[${this.account.accountId}] byai-channel SDK emitState, eventType: ${EventType.APP_STREAM_RESPONSE}`);
-              await emitter.emitState(
-                sessionId,
-                traceId || "",
-                "",
-                {
-                  eventType: EventType.APP_STREAM_RESPONSE,
-                },
+              info?.(
+                `[${this.account.accountId}] byai-channel SDK emitState, eventType: ${EventType.APP_STREAM_RESPONSE}`,
               );
+              await emitter.emitState(sessionId, traceId || "", "", {
+                eventType: EventType.APP_STREAM_RESPONSE,
+              });
               clearActiveSdkRequestByTarget(this.account.accountId, sdkTarget);
             } else {
               hasDeltaChunk = true;
@@ -423,15 +427,10 @@ export class ByaiSdkApp {
         );
         clearActiveSdkRequestByTarget(this.account.accountId, sdkTarget);
         try {
-          await emitter.emitState(
-            sessionId,
-            traceId || "",
-            "",
-            {
-              eventType: 'error',
-              metadata: { error: String(err) },
-            },
-          );
+          await emitter.emitState(sessionId, traceId || "", "", {
+            eventType: "error",
+            metadata: { error: String(err) },
+          });
         } catch {
           // ignore
         }
@@ -454,7 +453,9 @@ export class ByaiSdkApp {
         clearActiveSdkRequestRecord(activeRequest);
         return;
       }
-      activeRequest.abortController.abort(new Error(`[${this.account.accountId}] task canceled, reason: ${reason}`));
+      activeRequest.abortController.abort(
+        new Error(`[${this.account.accountId}] task canceled, reason: ${reason}`),
+      );
       clearActiveSdkRequestRecord(activeRequest);
     });
 

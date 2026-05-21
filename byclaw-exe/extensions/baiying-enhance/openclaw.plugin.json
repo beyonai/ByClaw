@@ -52,10 +52,7 @@
       },
       "workspaceArchiveBackend": {
         "type": "string",
-        "enum": [
-          "remote",
-          "local"
-        ],
+        "enum": ["remote", "local"],
         "description": "Workspace archive backend. Default remote uploads archives to the backend API; local keeps the legacy .baiying-workspaces directory behavior.",
         "default": "remote"
       },
@@ -65,12 +62,7 @@
       },
       "mainAgentsMdMode": {
         "type": "string",
-        "enum": [
-          "off",
-          "if_missing",
-          "if_managed_marker",
-          "always"
-        ],
+        "enum": ["off", "if_missing", "if_managed_marker", "always"],
         "description": "How to write main agent AGENTS.md. Default always (overwrite on each seed). Set if_managed_marker or if_missing to avoid clobbering unmarked files; foreign takeover applies only when if_managed_marker."
       },
       "mainAgentsMdPath": {
@@ -99,6 +91,16 @@
         "type": "string",
         "description": "Default API key for the proxy endpoint."
       },
+      "aimodelConfigRedisKey": {
+        "type": "string",
+        "description": "Redis Hash key for Baiying AI model config. Digital employees read prologue.modelId and resolve details from this hash.",
+        "default": "byai:aimodel:config"
+      },
+      "aimodelSecretProviderName": {
+        "type": "string",
+        "description": "Exec SecretRef provider name used for runtime authToken lookup. The token is not written into openclaw.json.",
+        "default": "baiying-aimodel-redis"
+      },
       "persistAgentContentIndex": {
         "type": "boolean",
         "description": "Persist per-agent source JSON SHA-256 hashes to avoid full re-sync after gateway restart (default true).",
@@ -108,6 +110,11 @@
         "type": "number",
         "description": "Maximum number of DIG_EMPLOYEE Redis JSON reads to issue concurrently during agent sync. Default 8; lower it to reduce Redis/backend pressure.",
         "default": 8
+      },
+      "agentContentScanIntervalMs": {
+        "type": "number",
+        "description": "Deprecated and ignored. Digital employee sync is driven only by Redis Pub/Sub, dig-employee auth changes, and explicit __flushNow.",
+        "default": 0
       },
       "agentContentIndexPath": {
         "type": "string",
