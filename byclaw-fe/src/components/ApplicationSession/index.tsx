@@ -62,7 +62,7 @@ function ApplicationSession(props: IProps) {
   const { substance: agentInfo } = messageListItemContent || {};
 
   const { args } = get(messageListItemContent, 'substance') || {};
-  const { input: chatInput, files } = args;
+  const { input: chatInput, files, ...restArgs } = args;
 
   const { sessionId, isSubagent } = agentInfo;
   const mySessionId = `${sessionId || ''}`;
@@ -277,6 +277,7 @@ function ApplicationSession(props: IProps) {
     const payload = {
       sendProps: {
         queryQuestion: mySummaryText,
+        waitLastMessageDone: true,
         payload: {
           files,
           agentId: getSendPayloadAgentId(),
@@ -344,7 +345,7 @@ function ApplicationSession(props: IProps) {
 
         if (!isDone) {
           if (chatInput) {
-            url.searchParams.append('chatInputValue', chatInput);
+            url.searchParams.append('chatInputValue', encodeURIComponent(chatInput));
           }
           if (files) {
             try {
@@ -352,6 +353,12 @@ function ApplicationSession(props: IProps) {
             } catch (e) {
               console.error(e);
             }
+          }
+          Object.keys(restArgs).forEach((key) => {
+            url.searchParams.append(key, encodeURIComponent(restArgs[key]));
+          });
+          if (mySessionId) {
+            url.searchParams.append('sessionId', mySessionId);
           }
         }
 
@@ -362,7 +369,7 @@ function ApplicationSession(props: IProps) {
     }
 
     return agentHomeUrl;
-  }, [isPage, agentHomeUrl, chatInput, currentMessage.messageId, files, isDone]);
+  }, [isPage, agentHomeUrl, args, currentMessage.messageId, files, isDone, mySessionId]);
 
   const toSummary = () => {
     if (!canSummary || isDone) return;
