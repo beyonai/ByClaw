@@ -56,7 +56,7 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
     const items = [];
 
     // 设为默认
-    if (!item.isDefault && !disabledAction.includes('setDefault')) {
+    if (item.canSetDefault && !disabledAction.includes('setDefault')) {
       items.push({
         key: 'setDefault',
         label: (

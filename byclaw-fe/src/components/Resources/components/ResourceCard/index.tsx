@@ -39,7 +39,7 @@ export interface IResourceCardItem {
   canApplyUse?: boolean;
   canAuditUse?: boolean;
   canDelete?: boolean;
-  isDefault?: boolean;
+  canSetDefault?: boolean;
   canRestore?: boolean;
   ownerType?: string;
   openSuperHelper?: string;
@@ -210,7 +210,7 @@ const RenderContent = (props: ResourceCardProps) => {
     const items: NonNullable<MenuProps['items']> = [];
 
     // 设为默认
-    // if (!isDefault) {
+    // if (!canSetDefault) {
     //   items.push({
     //     key: 'setDefaultAssistant',
     //     label: (
@@ -375,7 +375,7 @@ const RenderContent = (props: ResourceCardProps) => {
   }, [
     actionConfig,
     intl,
-    resource?.isDefault,
+    resource?.canSetDefault,
     resource?.canEdit,
     resource?.canManageAuth,
     resource?.canUseAuth,
@@ -533,7 +533,7 @@ function ResourceCard(props: ResourceCardProps) {
                   canDelete,
                   canApplyUse,
                   canAuditUse,
-                  isDefault: !canSetDefault,
+                  canSetDefault,
                   canRestore,
                 });
               }

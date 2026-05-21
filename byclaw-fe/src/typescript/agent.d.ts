@@ -98,6 +98,7 @@ export type IAgent = {
 
   // 是否默认数字员工
   isDefault?: boolean | string;
+  canSetDefault?: boolean;
 };
 
 export type IAgentCache = IAgent & {
@@ -122,5 +123,6 @@ export type IAgentCache = IAgent & {
   canApplyUse?: boolean;
   canAuditUse?: boolean;
 
-  isDefault?: boolean;
+  isDefault: boolean;
+  canSetDefault: boolean;
 };
