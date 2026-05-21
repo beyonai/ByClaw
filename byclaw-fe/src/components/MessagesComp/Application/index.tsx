@@ -1,17 +1,20 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useIntl, useSelector } from '@umijs/max';
 import classnames from 'classnames';
 import { Typography, Button } from 'antd';
-import { get, isNil, size } from 'lodash';
+import { get, isNil, last, size } from 'lodash';
 import useDefaultAgentInfo from './useDefaultAgentInfo';
 import { getAgentChatAvatar } from '@/utils/agent';
 import type { IMessage, IMessageListItem } from '@/typescript/message';
+import { MessageListContext } from '@/components/MessageList/index';
 
 import styles from './index.module.less';
 import useGlobal from '@/hooks/useGlobal';
 import { IAgentCache, IAgentType } from '@/typescript/agent';
 import ApplicationSession from '@/components/ApplicationSession';
 import useAppStore from '@/models/common/useAppStore';
+import { IMessageState } from '@/constants/message';
+import type { ISendConf, ISendProps } from '@/hooks/useChat';
 
 const { Paragraph } = Typography;
 
@@ -47,6 +50,13 @@ export type IProps = {
   thinkListItem?: IMessageListItem;
 };
 
+const latestSendSummaryPayloadRef: React.RefObject<{
+  sendProps: ISendProps;
+  sendConf?: ISendConf;
+} | null> = {
+  current: null,
+};
+
 function Application(props: IProps) {
   const { messageListItemContent, message, updateMessageListItemContent, messageIdx, thinkListItem } = props;
   const intl = useIntl();
@@ -79,6 +89,35 @@ function Application(props: IProps) {
   if (isHistoryMsg) {
     isDone = true;
   }
+  const { messageList: sessionMessageList } = React.useContext(MessageListContext);
+  const { messageState: sessionLastMsgState } = last(sessionMessageList) || {};
+
+  const canSendSummary = React.useMemo(() => {
+    return !sessionLastMsgState || ![IMessageState.Query, IMessageState.Answer].includes(sessionLastMsgState);
+  }, [sessionLastMsgState]);
+
+  const onSendSummary = React.useCallback(
+    (payload: { sendProps: ISendProps; sendConf?: ISendConf }) => {
+      if (canSendSummary) {
+        EventEmitter.emit('beyond-chat-on-send-msg', payload);
+        latestSendSummaryPayloadRef.current = null;
+        return;
+      }
+
+      latestSendSummaryPayloadRef.current = payload;
+    },
+    [EventEmitter, canSendSummary]
+  );
+
+  useEffect(() => {
+    if (!canSendSummary) return;
+
+    const pendingPayload = latestSendSummaryPayloadRef.current;
+    if (!pendingPayload) return;
+
+    latestSendSummaryPayloadRef.current = null;
+    EventEmitter.emit('beyond-chat-on-send-msg', pendingPayload);
+  }, [canSendSummary]);
 
   React.useEffect(() => {
     let isPage = integrationType === 'PAGE';
@@ -86,7 +125,6 @@ function Application(props: IProps) {
     setSiderCollapsed(true);
     EventEmitter.emit('beyond-main-driver-open-type', {
       width: '50vw',
-      canFullScreen: true,
       drawerType: (
         <ApplicationSession
           isDone={isDone}
@@ -97,6 +135,7 @@ function Application(props: IProps) {
           }}
           currentMessage={{ ...message }}
           messageListItemContent={{ ...messageListItemContent }}
+          onSendSummary={onSendSummary}
           onUpdateMessage={(
             payload: Partial<IMessage> & {
               messageId: string;

@@ -29,6 +29,7 @@ import type { IDrawerMessage } from '@/components/FullAbsoluteDrawer';
 import styles from './index.module.less';
 import useGlobal from '@/hooks/useGlobal';
 import { getResponseAgentInfo } from '../MessageList/utils';
+import type { ISendConf, ISendProps } from '@/hooks/useChat';
 
 const { Content } = Layout;
 
@@ -41,6 +42,7 @@ type IProps = {
   autoAsk?: boolean;
   toRecover?: boolean;
   isDone?: boolean;
+  onSendSummary?: (payload: { sendProps: ISendProps; sendConf?: ISendConf }) => void;
 };
 
 const myEventEmitter = new EventEmitter$Cls();
@@ -58,6 +60,7 @@ function ApplicationSession(props: IProps) {
     autoAsk = true,
     toRecover = false,
     isDone,
+    onSendSummary,
   } = props;
   const { substance: agentInfo } = messageListItemContent || {};
 
@@ -276,7 +279,7 @@ function ApplicationSession(props: IProps) {
 
     const payload = {
       sendProps: {
-        queryQuestion: mySummaryText,
+        queryQuestion: mySummaryText as string,
         waitLastMessageDone: true,
         payload: {
           files,
@@ -321,7 +324,11 @@ function ApplicationSession(props: IProps) {
       });
     }
 
-    EventEmitter.emit('beyond-chat-on-send-msg', payload);
+    if (typeof onSendSummary === 'function') {
+      onSendSummary(payload);
+    } else {
+      EventEmitter.emit('beyond-chat-on-send-msg', payload);
+    }
 
     const newMessage = cloneDeep(currentMessage);
     const messageListItem = [...(get(newMessage, 'messageList') || []), ...(get(newMessage, 'thinkList') || [])].find(

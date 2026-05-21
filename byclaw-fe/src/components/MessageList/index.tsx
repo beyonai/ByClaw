@@ -41,10 +41,12 @@ const emptyArr: Array<unknown> = [];
 
 export interface IMessageListContext {
   messageListId: string;
+  messageList: Array<IMessage>;
 }
 
 export const MessageListContext = React.createContext<IMessageListContext>({
   messageListId: '',
+  messageList: emptyArr as IMessage[],
 });
 
 const scrollThreshold = 50;
@@ -102,7 +104,7 @@ function MessageList(props: IProps, ref: any) {
 
   return (
     <div className="full-height full-width" style={{ position: 'relative' }}>
-      <MessageListContext.Provider value={{ messageListId: scrollMessageDomId.current }}>
+      <MessageListContext.Provider value={{ messageList, messageListId: scrollMessageDomId.current }}>
         <div
           className={classnames(styles.messageContent, 'full-height full-width hideThumb')}
           id={scrollMessageDomId.current}
