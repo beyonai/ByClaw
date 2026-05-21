@@ -2,6 +2,8 @@ package com.iwhalecloud.byai.manager.security.handle;
 
 import com.alibaba.fastjson.JSON;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.constants.login.LoginAuthKey;
+import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthRedisSyncService;
 import com.iwhalecloud.byai.manager.application.service.log.LoginLogApplicationService;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
@@ -40,9 +42,12 @@ import jakarta.servlet.http.HttpSession;
 import java.io.IOException;
 import java.util.Date;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
@@ -58,6 +63,9 @@ import org.springframework.stereotype.Component;
 public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHandler {
 
     private final Logger logger = LoggerFactory.getLogger(MultAuthenticationSuccessHandler.class);
+
+    @Value("${jwt.token.expired.hour:24}")
+    private int tokenExpiredHour;
 
     @Autowired
     private JwtService jwtService;
@@ -181,8 +189,37 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
         });
 
         // 放置用户授权信息
+        this.putLoginAuth(loginResponse);
 
         this.writeResponse(response, loginResponse);
+    }
+
+    /**
+     * 放置登陆信息
+     *
+     * @param loginResponse 登陆响应
+     */
+    private void putLoginAuth(LoginResponse loginResponse) {
+
+        LoginInfo loginInfo = loginResponse.getData();
+
+        // replace key
+        String key = LoginAuthKey.USER_LOGIN_AUTH.replace("{userId}", String.valueOf(loginInfo.getUserId()));
+
+        RedisUtil.hmPut(key, LoginAuthKey.HM_KEY_USER_ID, String.valueOf(loginInfo.getUserId()));
+        RedisUtil.hmPut(key, LoginAuthKey.HM_KEY_USER_CODE, loginInfo.getUserCode());
+        RedisUtil.hmPut(key, LoginAuthKey.HM_KEY_USERNAME, loginInfo.getUserName());
+        RedisUtil.hmPut(key, LoginAuthKey.HM_KEY_SSO_TOKEN, loginResponse.getSsoToken());
+        RedisUtil.hmPut(key, LoginAuthKey.HM_KEY_BEYOND_TOKEN, loginResponse.getToken());
+
+        // put bear token
+        String authorizationBearer = systemConfigService.getStringParamValueByCode("AUTHORIZATION_BEARER");
+        if (StringUtil.isNotEmpty(authorizationBearer)) {
+            RedisUtil.hmPut(key, LoginAuthKey.HM_KEY_WHALE_AGENT_AUTHORIZATION, authorizationBearer);
+        }
+
+        // 超时时间
+        RedisUtil.expire(key, tokenExpiredHour, TimeUnit.HOURS);
     }
 
     private void mountUserBucket(String userCode) {
