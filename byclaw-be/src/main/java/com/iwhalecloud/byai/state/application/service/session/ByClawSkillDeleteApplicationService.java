@@ -44,12 +44,12 @@ public class ByClawSkillDeleteApplicationService {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.user.code.notempty"));
         }
         String normalizedSkillPath = normalizeSkillPath(skillPath, resourceId);
-        List<String> objectKeys = ByClawSkillPaths.withUserContext(userCode, () -> userFS.list(normalizedSkillPath + "/", null));
+        List<String> objectKeys = ByClawUserWorkspacePaths.withUserContext(userCode, () -> userFS.list(normalizedSkillPath + "/", null));
         if (objectKeys == null || objectKeys.isEmpty()) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.delete.notfound"));
         }
 
-        ByClawSkillPaths.withUserContext(userCode, () -> {
+        ByClawUserWorkspacePaths.withUserContext(userCode, () -> {
             userFS.init();
             userFS.delete(normalizedSkillPath + "/");
             return null;
@@ -86,13 +86,11 @@ public class ByClawSkillDeleteApplicationService {
 
     private String resolveSkillRootPrefix(Long resourceId) {
         if (resourceId == null) {
-            return ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX;
+            return ByClawUserWorkspacePaths.WORKSPACE_SKILL_ROOT_PREFIX;
         }
         SsResource resource = ssResourceService.findById(resourceId);
         String resourceCode = resource == null ? null : resource.getResourceCode();
-        return ByClawSkillPaths.isSuperAssistantResourceCode(resourceCode)
-            ? ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX
-            : ByClawSkillPaths.buildAgentSkillRootPrefix(resourceId);
+        return ByClawUserWorkspacePaths.resolveSkillRootPrefix(resourceId, resourceCode);
     }
 
     private String extractSkillName(String normalizedSkillPath) {

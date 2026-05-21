@@ -13,12 +13,14 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.application.service.session.ByClawFileQueryApplicationService;
+import com.iwhalecloud.byai.state.application.service.session.ByClawPersonalAgentArchivApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDeleteApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDownloadApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillQueryApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillUploadApplicationService;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawFileDto;
+import com.iwhalecloud.byai.state.domain.session.dto.ByClawPersonalAgentArchiveDto;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 import com.iwhalecloud.byai.state.domain.session.qo.QryByClawFileByUserCodeQo;
 import com.iwhalecloud.byai.state.domain.session.qo.QrySkillListByUserCodeQo;
@@ -33,6 +35,7 @@ import com.iwhalecloud.byai.state.domain.resource.dto.ToolSaveRequest;
 import com.iwhalecloud.byai.state.domain.resource.qo.DeleteResourceQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.DeleteSkillQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.DownloadSkillZipQo;
+import com.iwhalecloud.byai.state.domain.resource.qo.PersonalAgentArchiveQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.ResourceDetailQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.UpdateResourceBasicInfoQo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceApplicationService;
@@ -84,6 +87,9 @@ public class ToolManController {
 
     @Autowired
     private ByClawSkillDeleteApplicationService byClawSkillDeleteApplicationService;
+
+    @Autowired
+    private ByClawPersonalAgentArchivApplicationService byClawPersonalAgentArchivApplicationService;
 
     /**
      * 阶段一：解析 curl，返回结构化预览（不入库）
@@ -700,6 +706,143 @@ public class ToolManController {
                 request == null ? null : request.getSkillPath(), e);
             return ResponseUtil
                 .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("byclaw.skill.delete.failed"));
+        }
+    }
+
+    /**
+     * 查询个人 agent tar.gz 档案列表。
+     */
+    @PostMapping("/qryPersonalAgentArchiveList")
+    public ResponseUtil<List<ByClawPersonalAgentArchiveDto>> qryPersonalAgentArchiveList(
+        @RequestBody PersonalAgentArchiveQo request) {
+        try {
+            if (request == null) {
+                return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
+            }
+            String resolvedUserCode = StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
+                : CurrentUserHolder.getCurrentUserCode();
+            List<ByClawPersonalAgentArchiveDto> data = byClawPersonalAgentArchivApplicationService.queryTarGzList(
+                resolvedUserCode, request.getResourceId(), request.getKeyword());
+            return ResponseUtil.successResponse(I18nUtil.get("byclaw.personal.agent.archive.list.query.success"),
+                data);
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("qryPersonalAgentArchiveList failed, userCode={}, resourceId={}, keyword={}",
+                request == null ? null : request.getUserCode(), request == null ? null : request.getResourceId(),
+                request == null ? null : request.getKeyword(), e);
+            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
+                : I18nUtil.get("byclaw.personal.agent.archive.list.query.failed"));
+        }
+    }
+
+    /**
+     * 上传个人 agent tar.gz 档案到 byclaw-{userCode}/by/.personal-agents/{resourceId}/。
+     */
+    @PostMapping(value = "/uploadPersonalAgentTarGz", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseUtil<ByClawPersonalAgentArchiveDto> uploadPersonalAgentTarGz(
+        @Parameter(description = "tar.gz 文件", required = true) @RequestParam("file") MultipartFile file,
+        @Parameter(description = "资源ID", required = true) @RequestParam("resourceId") Long resourceId,
+        @Parameter(description = "目标用户编码，可选；留空则使用当前登录用户") @RequestParam(value = "userCode",
+            required = false) String userCode) {
+        try {
+            String resolvedUserCode = StringUtils.isNotBlank(userCode) ? userCode
+                : CurrentUserHolder.getCurrentUserCode();
+            ByClawPersonalAgentArchiveDto data = byClawPersonalAgentArchivApplicationService.uploadTarGz(
+                resolvedUserCode, resourceId, file);
+            return ResponseUtil.successResponse(I18nUtil.get("byclaw.personal.agent.archive.upload.success"), data);
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("uploadPersonalAgentTarGz failed, userCode={}, resourceId={}", userCode, resourceId, e);
+            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
+                : I18nUtil.get("byclaw.personal.agent.archive.upload.failed"));
+        }
+    }
+
+    /**
+     * 下载个人 agent tar.gz 档案。
+     */
+    @PostMapping("/downloadPersonalAgentTarGz")
+    public ResponseEntity<StreamingResponseBody> downloadPersonalAgentTarGz(
+        @RequestBody(required = false) PersonalAgentArchiveQo request,
+        @Parameter(description = "tar.gz 文件路径，例如 /.personal-agents/10000417/demo.tar.gz") @RequestParam(
+            value = "archivePath", required = false) String archivePath,
+        @Parameter(description = "资源ID", required = false) @RequestParam(value = "resourceId",
+            required = false) Long resourceId,
+        @Parameter(description = "目标用户编码，可选；留空则使用当前登录用户") @RequestParam(value = "userCode",
+            required = false) String userCode) {
+        String finalArchivePath = request != null && StringUtils.isNotBlank(request.getArchivePath())
+            ? request.getArchivePath()
+            : archivePath;
+        Long finalResourceId = request != null && request.getResourceId() != null ? request.getResourceId()
+            : resourceId;
+        String finalUserCode = request != null && StringUtils.isNotBlank(request.getUserCode())
+            ? request.getUserCode()
+            : userCode;
+        String resolvedUserCode = StringUtils.isNotBlank(finalUserCode) ? finalUserCode
+            : CurrentUserHolder.getCurrentUserCode();
+        try {
+            ByClawPersonalAgentArchivApplicationService.PersonalAgentTarGzDownload download =
+                byClawPersonalAgentArchivApplicationService.prepareDownload(resolvedUserCode, finalResourceId,
+                    finalArchivePath);
+            String encoded = UriUtils.encode(download.getFileName(), java.nio.charset.StandardCharsets.UTF_8);
+            String contentDisposition = "attachment; filename=\"" + encoded + "\"; filename*=UTF-8''" + encoded;
+            return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/gzip"))
+                .header("Content-Disposition", contentDisposition).body(download.getBody());
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
+                .body(out -> out.write(e.getMessage().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        }
+        catch (Exception e) {
+            logger.error("downloadPersonalAgentTarGz failed, userCode={}, resourceId={}, archivePath={}",
+                resolvedUserCode, finalResourceId, finalArchivePath, e);
+            String fallbackMsg = StringUtils.defaultIfBlank(e.getMessage(),
+                I18nUtil.get("byclaw.personal.agent.archive.download.failed"));
+            return ResponseEntity.badRequest().contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
+                .body(out -> out.write(fallbackMsg.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        }
+    }
+
+    /**
+     * 删除个人 agent tar.gz 档案。
+     */
+    @PostMapping("/deletePersonalAgentTarGz")
+    public ResponseUtil<ByClawPersonalAgentArchiveDto> deletePersonalAgentTarGz(
+        @RequestBody PersonalAgentArchiveQo request) {
+        try {
+            if (request == null) {
+                return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
+            }
+            String resolvedUserCode = StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
+                : CurrentUserHolder.getCurrentUserCode();
+            ByClawPersonalAgentArchiveDto data = byClawPersonalAgentArchivApplicationService.deleteTarGz(
+                resolvedUserCode, request.getResourceId(), request.getArchivePath());
+            return ResponseUtil.successResponse(I18nUtil.get("byclaw.personal.agent.archive.delete.success"), data);
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("deletePersonalAgentTarGz failed, userCode={}, resourceId={}, archivePath={}",
+                request == null ? null : request.getUserCode(), request == null ? null : request.getResourceId(),
+                request == null ? null : request.getArchivePath(), e);
+            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
+                : I18nUtil.get("byclaw.personal.agent.archive.delete.failed"));
         }
     }
 
