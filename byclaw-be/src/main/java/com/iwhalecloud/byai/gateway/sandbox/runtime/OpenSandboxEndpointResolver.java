@@ -75,7 +75,7 @@ class OpenSandboxEndpointResolver {
         if (StringUtils.equalsIgnoreCase(instanceName, SandboxEndpointRecordSupport.OPENCLAW_INSTANCE)) {
             return applyProtocol(rawEndpoint, portSpec.getProtocol());
         }
-        return buildIngressEndpoint(instanceName, port);
+        return buildIngressEndpoint(instanceName, instance != null ? instance.getSandboxId() : null, port);
     }
 
     private void captureEndpointHeaders(SandboxRuntimeInstance instance, SandboxEndpoint endpoint) {
@@ -161,8 +161,12 @@ class OpenSandboxEndpointResolver {
         return SandboxEndpointRecordSupport.resolvePrimaryEndpoint(instanceEndpoints);
     }
 
-    private String buildIngressEndpoint(String instanceName, int port) {
+    private String buildIngressEndpoint(String instanceName, String sandboxId, int port) {
+        if (StringUtils.isBlank(instanceName) || StringUtils.isBlank(sandboxId)) {
+            return null;
+        }
         String encodedInstance = URLEncoder.encode(instanceName, StandardCharsets.UTF_8).replace("+", "%20");
-        return "/sandboxes/ingress/" + encodedInstance + "/proxy/" + port;
+        String encodedSandboxId = URLEncoder.encode(sandboxId, StandardCharsets.UTF_8).replace("+", "%20");
+        return "/sandboxes/ingress/" + encodedInstance + "/" + encodedSandboxId + "/proxy/" + port;
     }
 }
