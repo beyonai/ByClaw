@@ -74,10 +74,9 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
                 .then((data) => {
                   message.success(intl.formatMessage({ id: 'resource.setDefaultAssistantSuccess' }));
                   const newDefaultId = data?.newResourceId ?? resourceId;
-                  // 同步前端登录态：自动 @ / sendQuery 兜底都读 userInfo.defaultDigEmployeeId，
-                  // 不同步会导致设默认后必须刷新页面才生效。
+
                   dispatch({
-                    type: 'user/updateUserInfo',
+                    type: 'employees/save',
                     payload: { defaultDigEmployeeId: newDefaultId },
                   });
                   EventEmitter.emit('beyond-update-employee', {

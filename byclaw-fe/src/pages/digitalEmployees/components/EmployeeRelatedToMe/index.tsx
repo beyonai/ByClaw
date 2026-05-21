@@ -86,16 +86,6 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
     return [allCategory, ...categoryList];
   }, [employeesTypeList, intl]);
 
-  // const sortBySuperHelperFirst = React.useCallback((items: IAgentCache[] = []) => {
-  //   return [...items].sort((a, b) => {
-  //     const aIsPersonalDefault = a?.ownerType === 'personal_default' ? 2 : 0;
-  //     const bIsPersonalDefault = b?.ownerType === 'personal_default' ? 2 : 0;
-  //     const aIsSuper = a?.ownerType === 'personal' ? 1 : 0;
-  //     const bIsSuper = b?.ownerType === 'personal' ? 1 : 0;
-  //     return bIsPersonalDefault + bIsSuper - (aIsPersonalDefault + aIsSuper);
-  //   });
-  // }, []);
-
   const myQueryMyCreated = React.useCallback(
     (keyword: string | undefined, pageNum: number, catalogId?: string | number, filterParam?: IOnOkParams) => {
       if (abortControllerRef.current && !abortControllerRef.current?.signal?.aborted) {

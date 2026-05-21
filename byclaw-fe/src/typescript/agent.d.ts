@@ -86,8 +86,6 @@ export type IAgent = {
 
   // 置顶
   isTop: string;
-  canSetDefault?: boolean;
-  isDefault?: boolean;
 
   // 其他可选属性
   // homeType?: string;
@@ -97,6 +95,10 @@ export type IAgent = {
   integrationType: string; // 集成方式
   createType: string; // FROM_MANUALLY: 手动创建, FROM_THIRD: 第三方创建
   agentDevType: string;
+
+  // 是否默认数字员工
+  isDefault?: boolean | string;
+  canSetDefault?: boolean;
 };
 
 export type IAgentCache = IAgent & {
@@ -120,6 +122,7 @@ export type IAgentCache = IAgent & {
   canDelete?: boolean;
   canApplyUse?: boolean;
   canAuditUse?: boolean;
-  canSetDefault?: boolean;
-  isDefault?: boolean;
+
+  isDefault: boolean;
+  canSetDefault: boolean;
 };

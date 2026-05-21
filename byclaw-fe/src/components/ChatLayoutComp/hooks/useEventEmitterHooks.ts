@@ -1,5 +1,5 @@
 import { get, head, isBoolean, isEmpty, uniq } from 'lodash';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 import { createMessage, multiChoicesHandler } from '@/utils/messgae';
 
@@ -165,11 +165,42 @@ function useEventEmitterHooks(props: IProps) {
     };
   }, [messageList, openDrawerSourceFromInfo]);
 
-  useEffect(() => {
-    const onSendMsg = (param: { sendProps: ISendProps; sendConf?: ISendConf }) => {
-      const { sendProps, sendConf } = param;
+  const waitLastQueryPromise = useRef<Promise<unknown> | null>(null);
+  const waitLastQueryTaskId = useRef(0);
 
-      sendQuery(sendProps, sendConf);
+  useEffect(() => {
+    const sendAfterLastQuery = (promise: Promise<unknown>, sendProps: ISendProps, sendConf?: ISendConf) => {
+      const taskId = ++waitLastQueryTaskId.current;
+      waitLastQueryPromise.current = promise;
+
+      promise
+        .then(() => {
+          if (taskId !== waitLastQueryTaskId.current) return;
+
+          return sendQuery(sendProps, sendConf);
+        })
+        .finally(() => {
+          if (taskId === waitLastQueryTaskId.current && waitLastQueryPromise.current === promise) {
+            waitLastQueryPromise.current = null;
+          }
+        });
+    };
+
+    const onSendMsg = async (param: { sendProps: ISendProps; sendConf?: ISendConf }) => {
+      const { sendProps, sendConf } = param;
+      if (waitLastQueryPromise.current) {
+        sendAfterLastQuery(waitLastQueryPromise.current, sendProps, sendConf);
+        return;
+      }
+
+      try {
+        await sendQuery(sendProps, sendConf);
+      } catch (error) {
+        // 等待上一次请求完成，再发送当前请求
+        if (error instanceof Promise) {
+          sendAfterLastQuery(error, sendProps, sendConf);
+        }
+      }
     };
 
     EventEmitter.on('beyond-chat-on-send-msg', onSendMsg);

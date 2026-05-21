@@ -195,6 +195,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
           });
         }
       } catch (e) {
+        // 等待promise执行完成，再重试发送
         if (e instanceof Promise) {
           e.finally(() => {
             onSendRef.current?.(param, true);

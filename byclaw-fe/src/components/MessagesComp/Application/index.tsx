@@ -2,14 +2,16 @@ import React from 'react';
 import { useIntl, useSelector } from '@umijs/max';
 import classnames from 'classnames';
 import { Typography, Button } from 'antd';
-import { get, size } from 'lodash';
+import { get, isNil, size } from 'lodash';
 import useDefaultAgentInfo from './useDefaultAgentInfo';
 import { getAgentChatAvatar } from '@/utils/agent';
 import type { IMessage, IMessageListItem } from '@/typescript/message';
 
 import styles from './index.module.less';
 import useGlobal from '@/hooks/useGlobal';
-import { IAgentType } from '@/typescript/agent';
+import { IAgentCache, IAgentType } from '@/typescript/agent';
+import ApplicationSession from '@/components/ApplicationSession';
+import useAppStore from '@/models/common/useAppStore';
 
 const { Paragraph } = Typography;
 
@@ -18,6 +20,7 @@ export type IMessageListItemContent = {
     args: {
       input: string;
       files?: any[];
+      [key: string]: any;
     };
     agentId: string;
     dynamic_agent_card_func: boolean;
@@ -48,12 +51,13 @@ function Application(props: IProps) {
   const { messageListItemContent, message, updateMessageListItemContent, messageIdx, thinkListItem } = props;
   const intl = useIntl();
   const { substance } = messageListItemContent || {};
-  const { messageList, thinkList } = message || {};
+  const { messageList, thinkList, isHistoryMsg } = message || {};
 
   const { agentId, agentType, agentDescription, recover = false, status } = substance || {};
   const input = get(substance, 'args.input');
 
   const { EventEmitter } = useGlobal();
+  const { setSiderCollapsed } = useAppStore();
 
   const agentInfo = useDefaultAgentInfo({
     agentType,
@@ -61,7 +65,7 @@ function Application(props: IProps) {
   });
   const userInfo = useSelector(({ user }) => user.userInfo);
 
-  const { name, chatAvatar } = agentInfo;
+  const { name, chatAvatar, integrationType } = agentInfo as IAgentCache;
   const canClick = !!userInfo;
 
   const isLastMessageItem = React.useMemo(() => {
@@ -70,6 +74,44 @@ function Application(props: IProps) {
     }
     return size(messageList) === messageIdx + 1;
   }, [thinkListItem, thinkList, messageList, messageIdx]);
+
+  let isDone = (!isLastMessageItem || `${status}` === '1') && !isNil(status);
+  if (isHistoryMsg) {
+    isDone = true;
+  }
+
+  React.useEffect(() => {
+    let isPage = integrationType === 'PAGE';
+    if (!isPage || isDone) return;
+    setSiderCollapsed(true);
+    EventEmitter.emit('beyond-main-driver-open-type', {
+      width: '50vw',
+      canFullScreen: true,
+      drawerType: (
+        <ApplicationSession
+          isDone={isDone}
+          onClose={() => {
+            setSiderCollapsed(false);
+            EventEmitter.emit('beyond-driver-close');
+            EventEmitter.emit('beyond-fullscreen-modal-open-type', '');
+          }}
+          currentMessage={{ ...message }}
+          messageListItemContent={{ ...messageListItemContent }}
+          onUpdateMessage={(
+            payload: Partial<IMessage> & {
+              messageId: string;
+            }
+          ) => {
+            if (!payload.messageId) return;
+            EventEmitter.emit('beyond-update-message', {
+              message: payload,
+              opt: {},
+            });
+          }}
+        />
+      ),
+    });
+  }, []);
 
   return (
     <div
@@ -90,7 +132,7 @@ function Application(props: IProps) {
           currentUpdateMessageListItemContent: updateMessageListItemContent,
           autoAsk: isLastMessageItem,
           toRecover: recover,
-          isDone: (!isLastMessageItem || `${status}` === '1') && !!status,
+          isDone,
         });
       }}
     >

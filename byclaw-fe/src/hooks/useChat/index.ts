@@ -5,35 +5,38 @@
  * 集成了消息存储、会话管理和SSE通信
  * 处理不同类型的消息内容和响应状态
  */
-import { useCallback, useRef, useEffect } from 'react';
+import { useCallback, useRef, useEffect, useMemo } from 'react';
 
 // @ts-ignore
 import { useSelector, useDispatch } from '@umijs/max';
-import { cloneDeep, flow, get, isEmpty, last, noop, set, unset, isNil, pick, debounce } from 'lodash';
+import { cloneDeep, flow, get, isEmpty, last, noop, set, unset, isNil, pick, debounce, omit } from 'lodash';
 
 import usePersistFn from '@/hooks/usePersistFn';
 import useSend from '@/hooks/useSseSender/useSend';
+
 import { UserState } from '@/models/common/user';
 import { ISessionState } from '@/models/session';
+import useAppStore from '@/models/common/useAppStore';
+
 import { createMessage } from '@/utils/messgae';
+import { getFileTypeByName } from '@/utils/file';
+import { sseRequestManager } from '@/utils/sseRequestManager';
+
 import useHandler from './useHandler';
 import useMessage from './useMessage';
 import useGlobal from '@/hooks/useGlobal';
 import { stopChat } from '@/service/message';
 
-import type { IAgentType } from '@/typescript/agent';
-import type { IExtParams, IMessage } from '@/typescript/message';
-import type { ISession } from '@/typescript/session';
-
 import { IMessageState } from '@/constants/message';
 import { agentTypeMap, ROOT_AGENT_ID } from '@/constants/agent';
-import { IState } from '@/models/useEmployees';
-import { IMessageListItem } from '@/typescript/message';
-import { RichInputResourceList } from '@/components/QueryInput/RichInput';
-import useAppStore from '@/models/common/useAppStore';
-import { getFileTypeByName } from '@/utils/file';
-import { IMessageInfo } from '@/models/useMessageStore';
-import { sseRequestManager } from '@/utils/sseRequestManager';
+
+import type { IAgentCache, IAgentType } from '@/typescript/agent';
+import type { IExtParams, IMessage, IMessageListItem } from '@/typescript/message';
+import type { ISession } from '@/typescript/session';
+import type { IState as IEmployeesState } from '@/models/useEmployees';
+import type { IState } from '@/models/useEmployees';
+import type { RichInputResourceList } from '@/components/QueryInput/RichInput';
+import type { IMessageInfo } from '@/models/useMessageStore';
 
 type ISseRes = {
   message: IMessageListItem;
@@ -92,6 +95,7 @@ export type ISendProps = {
     answerMsg?: Record<string, unknown>;
   };
   resourceList?: RichInputResourceList;
+  waitLastMessageDone?: boolean;
 };
 
 export type ISendConf = {
@@ -114,6 +118,10 @@ function useChat(props: IProps) {
     userInfo: state.user.userInfo,
     extParamsBySessionId: state.session.extParamsBySessionId,
   }));
+  const { defaultDigEmployeeId, employeesList } = useSelector((state: { employees: IEmployeesState }) => ({
+    defaultDigEmployeeId: state.employees.defaultDigEmployeeId,
+    employeesList: state.employees.employeesList,
+  }));
   const dispatch = useDispatch();
 
   const { agentId } = useGlobal();
@@ -126,6 +134,18 @@ function useChat(props: IProps) {
 
   // 获取消息发送方法
   const { send } = useSend({ sessionId, agentType, chatUrl });
+
+  const waitLastQueryPromiseResolver = useMemo(
+    () =>
+      ({
+        resolve: undefined,
+        reject: undefined,
+      } as {
+        resolve?: (value?: unknown) => void;
+        reject?: (reason?: unknown) => void;
+      }),
+    []
+  );
 
   // 获取消息相关方法和状态
   const {
@@ -154,6 +174,15 @@ function useChat(props: IProps) {
   useEffect(() => {
     messageListRef.current = messageList;
   }, [messageList]);
+
+  const defaultEmployee = useMemo(() => {
+    if (!defaultDigEmployeeId) {
+      return undefined;
+    }
+    return employeesList.find((item: IAgentCache) =>
+      [`${item.agentId}`, `${item.id}`, `${item.resourceId}`].includes(`${defaultDigEmployeeId}`)
+    );
+  }, [employeesList, defaultDigEmployeeId]);
 
   const checkSessionStateBeforeSendQuery = usePersistFn(async () => {
     if (!sessionId) {
@@ -209,31 +238,37 @@ function useChat(props: IProps) {
         lastMessage?.messageState &&
         [IMessageState.Query, IMessageState.Answer].includes(lastMessage?.messageState)
       ) {
+        if (sendProps.waitLastMessageDone) {
+          const promise = new Promise((_resolve, _reject) => {
+            waitLastQueryPromiseResolver.resolve = _resolve;
+            waitLastQueryPromiseResolver.reject = _reject;
+          });
+          throw promise;
+        }
         return false;
       }
     }
 
     await checkSessionStateBeforeSendQuery();
+
+    const { onlyQuery = false } = conf;
     const { inheritQryMsgId } = sendProps;
     let { resourceList } = sendProps;
-    const { onlyQuery = false } = conf;
 
-    const { extParams: myExtParams, ...restPayload } = payload;
+    const myExtParams = get(payload, 'extParams');
+    const restPayload = omit(payload, ['extParams']);
 
     await onBeforeSend?.();
 
     let _queryQuestion = queryQuestion;
+    let _agentId = (get(restPayload, 'agentId') || agentId) as string | undefined;
+    let _agentType = (get(restPayload, 'agentType') || agentType) as IAgentType | undefined;
 
-    // 用户在对话首页未显式 @ 任何数字员工，或先 @ 后又删掉了，仍兜底走默认数字员工，避免回退到通用聊天。
-    const _defaultDigEmployeeId = userInfo?.defaultDigEmployeeId ? `${userInfo.defaultDigEmployeeId}` : '';
-    let _agentId = (get(restPayload, 'agentId') as string | undefined) || agentId || _defaultDigEmployeeId;
-    if (_agentId === ROOT_AGENT_ID) {
-      _agentId = _defaultDigEmployeeId;
+    if (_agentId === ROOT_AGENT_ID || !_agentId) {
+      _agentId = defaultEmployee?.agentId || '';
+      _agentType = defaultEmployee?.agentType || agentTypeMap.agent;
     }
-    let _agentType = (get(restPayload, 'agentType') as IAgentType | undefined) || agentType;
-    if (!get(restPayload, 'agentId') && !agentId && _defaultDigEmployeeId) {
-      _agentType = agentTypeMap.agent;
-    }
+
     if (inheritQryMsgId) {
       // 如果传了inheritQryMsgId，表示是基于那个发送的消息再次发送，这个时候要取到上一次发送的agentType和resourceList
       const lastTimeQryMsg = messageListRef.current.find((item) => item.msgId === inheritQryMsgId);
@@ -253,7 +288,7 @@ function useChat(props: IProps) {
             if (item.queryFile) {
               return {
                 ...pick(item.queryFile, ['fileId', 'fileName', 'fileUrl']),
-                fileType: getFileTypeByName(item.queryFile.fileName),
+                fileType: getFileTypeByName(item?.queryFile?.fileName || ''),
                 fileSize: item.queryFile.length,
               };
             }
@@ -375,8 +410,9 @@ function useChat(props: IProps) {
         unset(newAnswerMsg, 'cancelSSE');
 
         updateMessage(newAnswerMsg);
+        waitLastQueryPromiseResolver.resolve?.();
       })
-      .catch((e) => {
+      .catch((e: Error) => {
         // 注销SSE请求
         sseRequestManager.unregister(newAnswerMsg.sessionId || sessionId || '', newAnswerMsg.msgId);
 
@@ -390,6 +426,11 @@ function useChat(props: IProps) {
         unset(newAnswerMsg, 'cancelSSE');
 
         updateMessage(newAnswerMsg);
+        waitLastQueryPromiseResolver.reject?.();
+      })
+      .finally(() => {
+        waitLastQueryPromiseResolver.resolve = undefined;
+        waitLastQueryPromiseResolver.reject = undefined;
       });
 
     // 添加取消功能到回答消息
@@ -403,6 +444,9 @@ function useChat(props: IProps) {
       updateMessage(newAnswerMsg);
 
       cancel();
+
+      waitLastQueryPromiseResolver.resolve = undefined;
+      waitLastQueryPromiseResolver.reject = undefined;
 
       return stopChat({
         ...pick(newAnswerMsg, ['agentId', 'sessionId', 'messageId', 'agentType']),
