@@ -124,7 +124,7 @@ python deploy/migrations/merge_migrations.py --audit-db "host=localhost port=543
 
 ### 防重复机制
 
-`deploy/middleware/initdb/.applied` 记录已合并的版本文件名。重复运行自动跳过。
+`deploy/migrations/.applied` 记录已合并的版本文件名，重复运行自动跳过。
 
 ### 稽核检查
 
