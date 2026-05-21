@@ -45,4 +45,30 @@ class SandboxControllerTest {
             .containsEntry("token", "0123456789abcdef0123456789abcdef")
             .doesNotContainKey("gatewayToken");
     }
+
+    @Test
+    void renewSandbox_returnsRenewedSandboxInfo() {
+        SandboxService sandboxService = mock(SandboxService.class);
+        SandboxController controller = new SandboxController();
+        ReflectionTestUtils.setField(controller, "sandboxService", sandboxService);
+        when(sandboxService.renewSandbox("user001", 123L)).thenReturn(SandboxInfo.builder()
+            .sandboxId("sandbox-1")
+            .userCode("user001")
+            .sandboxType("openclaw")
+            .endpoints(List.of("http://host/proxy/18789/chat?token=0123456789abcdef0123456789abcdef"))
+            .gatewayToken("0123456789abcdef0123456789abcdef")
+            .build());
+
+        ResponseUtil response = controller.renewSandbox(Map.of("userCode", "user001", "resourceId", 123L));
+
+        assertThat(response.getCode()).isEqualTo(ResponseUtil.SUCCESS);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) response.getData();
+        assertThat(data)
+            .containsEntry("userCode", "user001")
+            .containsEntry("sandboxType", "openclaw")
+            .containsEntry("sandboxId", "sandbox-1")
+            .containsEntry("token", "0123456789abcdef0123456789abcdef")
+            .doesNotContainKey("gatewayToken");
+    }
 }

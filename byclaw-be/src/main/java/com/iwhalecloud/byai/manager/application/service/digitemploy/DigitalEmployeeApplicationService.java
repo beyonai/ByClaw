@@ -1146,7 +1146,7 @@ public class DigitalEmployeeApplicationService {
      * 将数字员工关联资源的标准 JSON 同步至 Redis（与 MinIO 产物同内容，键名为 {@code {BIZTYPE}_{resourceId}}）。
      * 每次数字员工开放目录同步后执行，不依赖 MinIO 是否缺失。
      */
-    private void syncRelatedResourceConfigJsonsToRedisQuietly(Long digEmployeeResourceId) {
+    public void syncRelatedResourceConfigJsonsToRedisQuietly(Long digEmployeeResourceId) {
         if (digEmployeeResourceId == null) {
             return;
         }

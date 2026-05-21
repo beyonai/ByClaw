@@ -27,4 +27,10 @@ public class SandboxRuntimeInstance {
     private OffsetDateTime createdAt;
 
     private OffsetDateTime expiresAt;
+
+    private String state;
+
+    private Boolean reusable;
+
+    private Map<String, String> metadata;
 }

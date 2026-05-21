@@ -18,16 +18,18 @@ import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
 class SandboxRuntimeRequestFactoryTest {
 
     @Test
-    void applyIdempotencyMetadata_mergesExistingMetadata() {
+    void applyRuntimeMetadata_mergesExistingMetadataAndGatewayToken() {
         CreateSandboxRequest request = CreateSandboxRequest.builder()
+            .env(Map.of("OPENCLAW_GATEWAY_TOKEN", "token-1"))
             .metadata(Map.of("userCode", "u1"))
             .build();
 
-        SandboxRuntimeRequestFactory.applyIdempotencyMetadata(request, "idem-1");
+        SandboxRuntimeRequestFactory.applyRuntimeMetadata(request, "idem-1");
 
         assertThat(request.getMetadata())
             .containsEntry("userCode", "u1")
-            .containsEntry("idempotencyKey", "idem-1");
+            .containsEntry("idempotencyKey", "idem-1")
+            .containsEntry("gateway_token", "token-1");
     }
 
     @Test
@@ -127,5 +129,19 @@ class SandboxRuntimeRequestFactoryTest {
         assertThat(request.getPage()).isEqualTo(1);
         assertThat(request.getPageSize()).isEqualTo(100);
         assertThat(request.getMetadata()).isEqualTo(Map.of("userCode", "u1", "serviceKey", "openclaw"));
+    }
+
+    @Test
+    void resolveGatewayToken_prefersRuntimeMetadataOverCurrentEnv() {
+        SandboxRuntimeInstance instance = SandboxRuntimeInstance.builder()
+            .metadata(Map.of("gateway_token", "persisted-token"))
+            .build();
+        CreateSandboxRequest request = CreateSandboxRequest.builder()
+            .env(Map.of("OPENCLAW_GATEWAY_TOKEN", "fresh-token"))
+            .build();
+
+        String gatewayToken = SandboxRuntimeRequestFactory.resolveGatewayToken(instance, request);
+
+        assertThat(gatewayToken).isEqualTo("persisted-token");
     }
 }

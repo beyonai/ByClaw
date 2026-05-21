@@ -107,17 +107,6 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
         Authentication authentication) throws IOException, ServletException {
 
-        long size = RedisUtil.countSet(Constants.ONLINE_USERS_SET_KEY);
-
-        // 系统最大访问用户量设置
-        Long maxSize = systemConfigService.getLongParamValueByCode("SYSTEM_MAX_ONLINE_USERS");
-        if (maxSize != null && size >= maxSize) {
-            String msg = String.format("当前访问用户量:%d,访问设置上限%d", size, maxSize);
-            LoginResponse loginResponse = LoginResponse.fail(LoginResponse.OVER_LIMIT, msg);
-            this.writeResponse(response, loginResponse);
-            return;
-        }
-
         // 非正常用户访问
         Object principal = authentication.getPrincipal();
         if (!(principal instanceof Users users)) {
@@ -190,6 +179,8 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
                 logger.warn("登录后异步启动沙箱失败，用户编码：{}", sandboxUserCode, e);
             }
         });
+
+        // 放置用户授权信息
 
         this.writeResponse(response, loginResponse);
     }

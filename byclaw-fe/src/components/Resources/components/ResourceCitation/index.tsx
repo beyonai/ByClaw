@@ -186,8 +186,10 @@ const ResourceList = (props: Props) => {
         // 将返回的数据映射为组件需要的格式
         rows = dataList.map((item: any, index: number) => ({
           ...item,
-          resourceId: item.objectKey || index,
+          resourceId: item.skillPath || index,
           resourceName: item.skillName,
+          resourceBizType: 'SKILL',
+          id: item.skillPath || index,
         }));
       } else {
         const currentPage = reset ? 1 : pageIndex;
@@ -739,7 +741,7 @@ const ResourceList = (props: Props) => {
     <div className={styles.container} style={style}>
       <div className={styles.cardGrid} id={`${resourceType}ListScroller`}>
         {resourceList.map((item) => (
-          <Draggable key={item.resourceId} data={item}>
+          <Draggable key={item.resourceId} data={item} disabled={disableClick}>
             <div
               className={classnames(styles.card, { [styles.disabledCard]: disableClick })}
               onClick={disableClick ? undefined : () => onSelect?.({ ...item, isFromResourceModule: true })}
@@ -822,7 +824,7 @@ const ResourceList = (props: Props) => {
                     </Button>
                     <Popconfirm
                       title={intl.formatMessage({ id: 'common.deleteTips' })}
-                      description={intl.formatMessage({ id: 'common.deleteConfirm2' }, { content: item.resourceName })}
+                      // description={intl.formatMessage({ id: 'common.deleteConfirm2' }, { content: item.resourceName })}
                       okText={intl.formatMessage({ id: 'common.confirm' })}
                       cancelText={intl.formatMessage({ id: 'common.cancel' })}
                       onConfirm={() => handleDeleteSkill(item)}

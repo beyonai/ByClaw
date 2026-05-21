@@ -4,10 +4,13 @@ import java.time.Duration;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -34,6 +37,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxLeasePolicy;
+import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import com.iwhalecloud.byai.manager.vo.index.AuthDigitEmployVo;
@@ -51,6 +55,8 @@ import redis.clients.jedis.Jedis;
  */
 @Service
 public class SandboxService {
+
+    private static final String GATEWAY_TOKEN_METADATA_KEY = "gateway_token";
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SandboxService.class);
 
@@ -197,8 +203,9 @@ public class SandboxService {
             if (existingRecord != null) {
                 LOGGER.info("重拉前命中旧活跃记录：{}", sandboxRef(existingRecord));
                 int marked = sandboxRecordMapper.markReleased(existingRecord.getId(),
-                    RELEASE_REASON_REMOTE_SANDBOX_EXIT, new Date());
+                    RELEASE_REASON_REMOTE_SANDBOX_EXIT, new Date(), existingRecord.getLockVersion());
                 if (marked > 0) {
+                    incrementVersions(existingRecord, true);
                     sandboxMetadataCache.evict(existingRecord.getUserCode(), existingRecord.getSandboxType());
                     LOGGER.warn("远端沙箱退出，已终结旧沙箱记录：{}", sandboxRef(existingRecord));
                 }
@@ -287,7 +294,7 @@ public class SandboxService {
 
         if (existingRecord != null && StringUtils.isNotBlank(existingRecord.getEndpoint())) {
             // 已有记录，直接拿到endpoint
-            endpoint = existingRecord.getEndpoint();
+            endpoint = normalizeRecordEndpoint(existingRecord);
             LOGGER.info("等待模式-发现已有沙箱记录：{}", sandboxRef(existingRecord));
         }
         else {
@@ -415,12 +422,14 @@ public class SandboxService {
         record.setUserCode(userCode);
         record.setSandboxType(launchContext.getSandboxType());
         record.setStatus(STATUS_STARTING);
+        record.setGatewayToken(gatewayToken);
         record.setAutoRelease(autoRelease);
         record.setLeasePolicy(leasePolicy.name());
         record.setLastAccessTime(now);
         record.setCreateTime(now);
         record.setUpdateTime(now);
         record.setVersion(0);
+        record.setLockVersion(0);
         try {
             sandboxRecordMapper.insert(record);
             LOGGER.info("已插入沙箱启动记录：{}", sandboxRef(record));
@@ -447,12 +456,19 @@ public class SandboxService {
         if (response == null || !response.isSuccess() || response.getData() == null) {
             String errorMsg = response != null ? response.getMessage() : "响应为空";
             LOGGER.error("启动沙箱失败，记录：{}，原因：{}", sandboxRef(record), errorMsg);
-            sandboxRecordMapper.updateStatusToFailed(record.getId(), errorMsg, new Date());
+            int failed = sandboxRecordMapper.updateStatusToFailed(record.getId(), errorMsg, new Date(),
+                record.getLockVersion());
+            if (failed > 0) {
+                incrementVersions(record, true);
+            }
             return null;
         }
 
         SandboxLaunchData launchData = response.getData();
-        String endpoint = new SandboxEndpointUrlCustomizer(gatewayToken)
+        String boundGatewayToken = StringUtils.defaultIfBlank(launchData.getGatewayToken(),
+            resolveLaunchGatewayToken(userCode, launchContext.getSandboxType(), launchData.getSandboxId(),
+                gatewayToken));
+        String endpoint = new SandboxEndpointUrlCustomizer(boundGatewayToken)
             .toAccessEndpoint(launchData.getEndpoint());
         launchData.setEndpoint(endpoint);
         launchData.setEndpoints(StringUtils.isNotBlank(endpoint) ? List.of(endpoint) : List.of());
@@ -462,11 +478,13 @@ public class SandboxService {
         Date lastRenewAt = remoteExpiresAt != null ? lastAccessTime : null;
         Date nextRenewAt = computeNextRenewAt(remoteExpiresAt);
         int updated = sandboxRecordMapper.updateLaunchSuccess(record.getId(), launchData.getSandboxId(), endpoint,
-            launchData.getTimeoutSeconds(), remoteExpiresAt, lastRenewAt, nextRenewAt, lastAccessTime);
+            boundGatewayToken, launchData.getTimeoutSeconds(), remoteExpiresAt, lastRenewAt, nextRenewAt,
+            lastAccessTime, record.getLockVersion());
 
         record.setStatus(STATUS_RUNNING);
         record.setEndpoint(endpoint);
         record.setSandboxId(launchData.getSandboxId());
+        record.setGatewayToken(boundGatewayToken);
         record.setTimeoutSeconds(launchData.getTimeoutSeconds());
         record.setRemoteExpiresAt(remoteExpiresAt);
         record.setLastRenewAt(lastRenewAt);
@@ -477,9 +495,10 @@ public class SandboxService {
             cleanupLaunchedSandboxAfterRecordReleased(record);
             return null;
         }
+        incrementVersions(record, true);
         sandboxMetadataCache.put(toSandboxInfo(record));
 
-        registerSandboxEndpoint(userCode, routing, endpoint, gatewayToken);
+        registerSandboxEndpoint(userCode, routing, endpoint, boundGatewayToken);
         LOGGER.info("沙箱启动成功，记录：{}，endpoint：{}，timeoutSeconds：{}，remoteExpiresAt：{}，nextRenewAt：{}",
             sandboxRef(record), endpoint, launchData.getTimeoutSeconds(), remoteExpiresAt, nextRenewAt);
         return launchData;
@@ -487,11 +506,14 @@ public class SandboxService {
 
     private SandboxLaunchData buildLaunchData(SsSandboxRecord record) {
         SandboxLaunchData launchData = new SandboxLaunchData();
-        launchData.setEndpoint(record.getEndpoint());
+        String endpoint = normalizeRecordEndpoint(record);
+        String gatewayToken = resolveRecordGatewayToken(record);
+        launchData.setEndpoint(endpoint);
         launchData.setSandboxId(record.getSandboxId());
+        launchData.setGatewayToken(gatewayToken);
         launchData.setTimeoutSeconds(record.getTimeoutSeconds());
         launchData.setRemoteExpiresAt(record.getRemoteExpiresAt());
-        launchData.setEndpoints(StringUtils.isNotBlank(record.getEndpoint()) ? List.of(record.getEndpoint()) : List.of());
+        launchData.setEndpoints(StringUtils.isNotBlank(endpoint) ? List.of(endpoint) : List.of());
         return launchData;
     }
 
@@ -550,8 +572,14 @@ public class SandboxService {
             return false;
         }
         Date now = new Date();
-        sandboxRecordMapper.updateLastAccessTime(record.getId(), now);
+        int updated = sandboxRecordMapper.updateLastAccessTime(record.getId(), now, record.getLockVersion());
+        if (updated == 0) {
+            LOGGER.warn("心跳跳过：沙箱记录已被并发更新，记录：{}", sandboxRef(record));
+            return false;
+        }
         record.setLastAccessTime(now);
+        record.setUpdateTime(now);
+        incrementVersions(record, false);
         sandboxMetadataCache.put(toSandboxInfo(record));
         LOGGER.debug("沙箱心跳成功：{}，lastAccessTime：{}", sandboxRef(record), now);
         return true;
@@ -578,11 +606,69 @@ public class SandboxService {
             return false;
         }
         Date now = new Date();
-        sandboxRecordMapper.updateLastAccessTime(record.getId(), now);
+        int updated = sandboxRecordMapper.updateLastAccessTime(record.getId(), now, record.getLockVersion());
+        if (updated == 0) {
+            LOGGER.warn("心跳跳过：沙箱记录已被并发更新，记录：{}", sandboxRef(record));
+            return false;
+        }
         record.setLastAccessTime(now);
+        record.setUpdateTime(now);
+        incrementVersions(record, false);
         sandboxMetadataCache.put(toSandboxInfo(record));
         LOGGER.debug("沙箱心跳成功：{}，lastAccessTime：{}", sandboxRef(record), now);
         return true;
+    }
+
+    /**
+     * 手动续约当前运行中的沙箱，同时刷新本地访问时间，避免被本地空闲清理任务回收。
+     *
+     * @param userCode 用户编码
+     * @param resourceId 资源ID，允许为null
+     * @return 最新沙箱信息；未命中运行中沙箱时返回 null
+     */
+    public SandboxInfo renewSandbox(String userCode, Long resourceId) {
+        if (StringUtils.isBlank(userCode)) {
+            LOGGER.warn("沙箱续约失败：无法获取用户编码，资源ID：{}", resourceId);
+            return null;
+        }
+        SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId);
+        SsSandboxRecord record = sandboxRecordMapper.selectRunningByUserAndResource(userCode,
+            routing.getSandboxType(), routing.getEffectiveResourceId());
+        if (record == null) {
+            LOGGER.warn("沙箱续约失败：未找到运行中的沙箱记录，用户编码：{}，沙箱类型：{}，资源ID：{}", userCode,
+                routing.getSandboxType(), routing.getEffectiveResourceId());
+            return null;
+        }
+
+        Date now = new Date();
+        SsSandboxRecord touchedRecord = refreshLastAccessTime(record, now);
+        if (touchedRecord == null) {
+            LOGGER.warn("沙箱续约失败：刷新本地访问时间失败，记录：{}", sandboxRef(record));
+            return null;
+        }
+
+        Date remoteExpiresAt = resolveManualRenewExpiresAt(touchedRecord, now);
+        SandboxInfo info = toSandboxInfo(touchedRecord);
+        info.setRemoteExpiresAt(remoteExpiresAt);
+        info.setLastHeartbeatTime(toLocalDateTime(now));
+
+        LOGGER.info("开始手动续约沙箱：{}，remoteExpiresAt：{}，timeoutSeconds：{}", sandboxRef(touchedRecord),
+            remoteExpiresAt, touchedRecord.getTimeoutSeconds());
+        SandboxResponse<Void> response = sandboxLifecycleFacade.renewSandbox(info);
+        if (response == null || !response.isSuccess()) {
+            String errorMsg = response != null ? response.getMessage() : "响应为空";
+            LOGGER.warn("沙箱手动续约失败：{}，原因：{}", sandboxRef(touchedRecord), errorMsg);
+            throw new BdpRuntimeException(StringUtils.defaultIfBlank(errorMsg, "sandbox renew failed"));
+        }
+
+        remoteExpiresAt = info.getRemoteExpiresAt() != null ? info.getRemoteExpiresAt() : remoteExpiresAt;
+
+        SsSandboxRecord renewedRecord = persistRenewState(touchedRecord, remoteExpiresAt, now);
+        SandboxInfo result = renewedRecord != null ? toSandboxInfo(renewedRecord) : info;
+        hydrateGatewayToken(result);
+        sandboxMetadataCache.put(result);
+        LOGGER.info("沙箱手动续约成功：{}，新的remoteExpiresAt：{}", sandboxRef(touchedRecord), remoteExpiresAt);
+        return result;
     }
 
     /**
@@ -660,7 +746,10 @@ public class SandboxService {
         if (record == null) {
             throw new BdpRuntimeException("sandbox record not found");
         }
-        sandboxRecordMapper.updateAutoRelease(id, autoRelease);
+        int updated = sandboxRecordMapper.updateAutoRelease(id, autoRelease, record.getLockVersion());
+        if (updated == 0) {
+            throw new BdpRuntimeException("sandbox record has been changed, please retry");
+        }
     }
 
     /**
@@ -689,8 +778,9 @@ public class SandboxService {
 
             if (existingRecord != null && StringUtils.isNotBlank(existingRecord.getEndpoint())) {
                 // 已有运行中的沙箱，替换agentHomeUrl（访问时间由前端心跳接口更新）
-                param.put("agentHomeUrl", existingRecord.getEndpoint());
-                LOGGER.info("使用已有沙箱，用户编码：{}，资源ID：{}，endpoint：{}", userCode, resourceId, existingRecord.getEndpoint());
+                String endpoint = normalizeRecordEndpoint(existingRecord);
+                param.put("agentHomeUrl", endpoint);
+                LOGGER.info("使用已有沙箱，用户编码：{}，资源ID：{}，endpoint：{}", userCode, resourceId, endpoint);
             }
             else {
                 // 没有运行中的沙箱，启动新沙箱
@@ -767,9 +857,10 @@ public class SandboxService {
                     buildSandboxRecordKey(routing.getSandboxType(), routing.getEffectiveResourceId()));
                 if (existingRecord != null && StringUtils.isNotBlank(existingRecord.getEndpoint())) {
                     // 已有运行中的沙箱，替换agentHomeUrl（访问时间由前端心跳接口更新）
-                    vo.setAgentHomeUrl(existingRecord.getEndpoint());
+                    String endpoint = normalizeRecordEndpoint(existingRecord);
+                    vo.setAgentHomeUrl(endpoint);
                     LOGGER.info("AuthDigitEmployVo-使用已有沙箱，用户编码：{}，资源ID：{}，endpoint：{}", userCode, resourceId,
-                        existingRecord.getEndpoint());
+                        endpoint);
                 }
                 else {
                     // 没有运行中的沙箱，启动新沙箱
@@ -885,6 +976,7 @@ public class SandboxService {
                         sandboxRef(record), record.getRemoteExpiresAt(), record.getTimeoutSeconds(), record.getNextRenewAt());
                     Date remoteExpiresAt = new Date(now.getTime() + TimeUnit.SECONDS.toMillis(record.getTimeoutSeconds()));
                     SandboxInfo info = toSandboxInfo(record);
+                    info.setRemoteExpiresAt(remoteExpiresAt);
                     info.setLastHeartbeatTime(java.time.LocalDateTime.now());
                     SandboxResponse<Void> response = sandboxLifecycleFacade.renewSandbox(info);
                     if (response == null || !response.isSuccess()) {
@@ -893,11 +985,20 @@ public class SandboxService {
                             response != null ? response.getMessage() : "响应为空");
                         continue;
                     }
+                    remoteExpiresAt = info.getRemoteExpiresAt() != null ? info.getRemoteExpiresAt() : remoteExpiresAt;
                     Date nextRenewAt = computeNextRenewAt(remoteExpiresAt);
-                    sandboxRecordMapper.updateRenewSuccess(record.getId(), remoteExpiresAt, now, nextRenewAt);
+                    int updated = sandboxRecordMapper.updateRenewSuccess(record.getId(), remoteExpiresAt, now,
+                        nextRenewAt, record.getLockVersion());
+                    if (updated == 0) {
+                        report.addSkippedSandbox(sandboxRef(record));
+                        LOGGER.warn("沙箱远端续约后本地记录已被并发更新，跳过写入：{}", sandboxRef(record));
+                        continue;
+                    }
                     record.setRemoteExpiresAt(remoteExpiresAt);
                     record.setLastRenewAt(now);
                     record.setNextRenewAt(nextRenewAt);
+                    record.setUpdateTime(now);
+                    incrementVersions(record, true);
                     sandboxMetadataCache.put(toSandboxInfo(record));
                     renewedCount++;
                     report.addAffectedSandbox(sandboxRef(record));
@@ -953,27 +1054,43 @@ public class SandboxService {
             for (SsSandboxRecord record : records) {
                 try {
                     LOGGER.info("开始检查远端沙箱状态：{}", sandboxRef(record));
-                    SandboxResponse<Boolean> response = sandboxLifecycleFacade.sandboxExists(toSandboxInfo(record));
+                    SandboxResponse<SandboxRuntimeInstance> response = sandboxLifecycleFacade.getSandbox(toSandboxInfo(record));
                     if (response == null || !response.isSuccess()) {
                         report.addFailedSandbox(sandboxRef(record));
                         LOGGER.warn("沙箱一致性检测失败，保留当前状态：{}，原因：{}",
                             sandboxRef(record), response != null ? response.getMessage() : "响应为空");
                         continue;
                     }
-                    if (Boolean.TRUE.equals(response.getData())) {
+                    SandboxRuntimeInstance remoteInstance = response.getData();
+                    if (remoteInstance != null && !StringUtils.equals(record.getSandboxId(), remoteInstance.getSandboxId())) {
+                        report.addFailedSandbox(sandboxRef(record));
+                        LOGGER.warn("沙箱一致性检测发现sandboxId不一致，保留当前状态：{}，remoteSandboxId={}，remoteState={}",
+                            sandboxRef(record), remoteInstance.getSandboxId(), remoteInstance.getState());
+                        continue;
+                    }
+                    if (remoteInstance != null && Boolean.TRUE.equals(remoteInstance.getReusable())) {
+                        String originalEndpoint = record.getEndpoint();
+                        String originalGatewayToken = record.getGatewayToken();
+                        reconcileRecordWithRemote(record, remoteInstance);
                         sandboxMetadataCache.put(toSandboxInfo(record));
+                        refreshRegisteredEndpointIfBindingChanged(record, originalEndpoint, originalGatewayToken);
                         report.addSkippedSandbox(sandboxRef(record));
-                        LOGGER.info("远端沙箱状态正常：{}", sandboxRef(record));
+                        LOGGER.info("远端沙箱状态已同步：{}，remoteState={}，remoteExpiresAt={}，remoteCreatedAt={}",
+                            sandboxRef(record), remoteInstance.getState(), remoteInstance.getExpiresAt(),
+                            remoteInstance.getCreatedAt());
                         continue;
                     }
 
-                    LOGGER.warn("沙箱一致性检测发现远端沙箱不存在，准备重新拉起：{}", sandboxRef(record));
-                    int marked = sandboxRecordMapper.markReleased(record.getId(), RELEASE_REASON_REMOTE_SANDBOX_EXIT, new Date());
+                    LOGGER.warn("沙箱一致性检测发现远端沙箱不存在或不可复用，准备重新拉起：{}，remoteState={}",
+                        sandboxRef(record), remoteInstance != null ? remoteInstance.getState() : null);
+                    int marked = sandboxRecordMapper.markReleased(record.getId(), RELEASE_REASON_REMOTE_SANDBOX_EXIT,
+                        new Date(), record.getLockVersion());
                     if (marked == 0) {
                         report.addSkippedSandbox(sandboxRef(record));
                         LOGGER.warn("沙箱一致性检测跳过重拉，记录状态已变化：{}", sandboxRef(record));
                         continue;
                     }
+                    incrementVersions(record, true);
                     sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
                     SandboxLaunchData launchData = launchSandbox(record.getUserCode(), record.getResourceId());
                     if (launchData != null && StringUtils.isNotBlank(launchData.getEndpoint())) {
@@ -999,6 +1116,96 @@ public class SandboxService {
         return report;
     }
 
+    private void reconcileRecordWithRemote(SsSandboxRecord record, SandboxRuntimeInstance remoteInstance) {
+        Date remoteExpiresAt = toDate(remoteInstance.getExpiresAt());
+        Date remoteCreatedAt = toDate(remoteInstance.getCreatedAt());
+        Integer timeoutSeconds = resolveRemoteTimeoutSeconds(remoteInstance, record.getTimeoutSeconds());
+        Date nextRenewAt = computeNextRenewAt(remoteExpiresAt);
+        String status = mapRemoteStateToRecordStatus(remoteInstance.getState());
+        String gatewayToken = resolveReconciledGatewayToken(record, remoteInstance);
+        String endpoint = normalizeRecordEndpoint(record.getEndpoint(), gatewayToken);
+        if (!hasReconcileChange(record, status, endpoint, gatewayToken, remoteExpiresAt, remoteCreatedAt,
+            timeoutSeconds, nextRenewAt)) {
+            return;
+        }
+        Date updateTime = new Date();
+        int updated = sandboxRecordMapper.updateReconcileSuccess(record.getId(), status, endpoint, gatewayToken,
+            remoteExpiresAt, remoteCreatedAt, timeoutSeconds, nextRenewAt, updateTime, record.getLockVersion());
+        if (updated == 0) {
+            LOGGER.warn("沙箱一致性检测写入跳过，记录已被并发更新或处于不可同步状态：{}", sandboxRef(record));
+            return;
+        }
+        record.setStatus(status);
+        record.setEndpoint(endpoint);
+        record.setGatewayToken(gatewayToken);
+        record.setRemoteExpiresAt(remoteExpiresAt);
+        record.setCreateTime(remoteCreatedAt != null ? remoteCreatedAt : record.getCreateTime());
+        record.setTimeoutSeconds(timeoutSeconds);
+        record.setNextRenewAt(nextRenewAt);
+        record.setUpdateTime(updateTime);
+        incrementVersions(record, true);
+    }
+
+    private boolean hasReconcileChange(SsSandboxRecord record, String status, String endpoint, String gatewayToken,
+        Date remoteExpiresAt, Date remoteCreatedAt, Integer timeoutSeconds, Date nextRenewAt) {
+        return !Objects.equals(record.getStatus(), status)
+            || !Objects.equals(record.getEndpoint(), endpoint)
+            || !Objects.equals(record.getGatewayToken(), gatewayToken)
+            || !Objects.equals(record.getRemoteExpiresAt(), remoteExpiresAt)
+            || (remoteCreatedAt != null && !Objects.equals(record.getCreateTime(), remoteCreatedAt))
+            || !Objects.equals(record.getTimeoutSeconds(), timeoutSeconds)
+            || !Objects.equals(record.getNextRenewAt(), nextRenewAt);
+    }
+
+    private String resolveReconciledGatewayToken(SsSandboxRecord record, SandboxRuntimeInstance remoteInstance) {
+        String remoteGatewayToken = null;
+        if (remoteInstance != null && remoteInstance.getMetadata() != null) {
+            remoteGatewayToken = StringUtils.trimToNull(remoteInstance.getMetadata().get(GATEWAY_TOKEN_METADATA_KEY));
+        }
+        return StringUtils.defaultIfBlank(remoteGatewayToken, resolveRecordGatewayToken(record));
+    }
+
+    private void refreshRegisteredEndpointIfBindingChanged(SsSandboxRecord record, String originalEndpoint,
+        String originalGatewayToken) {
+        if (record == null) {
+            return;
+        }
+        if (Objects.equals(originalEndpoint, record.getEndpoint())
+            && Objects.equals(originalGatewayToken, record.getGatewayToken())) {
+            return;
+        }
+        registerSandboxEndpoint(record.getUserCode(),
+            new SandboxLaunchRouting(record.getSandboxType(), record.getResourceId()),
+            record.getEndpoint(), record.getGatewayToken());
+    }
+
+    private Integer resolveRemoteTimeoutSeconds(SandboxRuntimeInstance remoteInstance, Integer fallbackTimeoutSeconds) {
+        if (remoteInstance != null && remoteInstance.getCreatedAt() != null && remoteInstance.getExpiresAt() != null) {
+            long seconds = java.time.temporal.ChronoUnit.SECONDS.between(
+                remoteInstance.getCreatedAt(), remoteInstance.getExpiresAt());
+            if (seconds > 0 && seconds <= Integer.MAX_VALUE) {
+                return (int) seconds;
+            }
+        }
+        return fallbackTimeoutSeconds;
+    }
+
+    private Date toDate(OffsetDateTime dateTime) {
+        return dateTime != null ? Date.from(dateTime.toInstant()) : null;
+    }
+
+    private String mapRemoteStateToRecordStatus(String remoteState) {
+        if (StringUtils.isBlank(remoteState)) {
+            return STATUS_RUNNING;
+        }
+        String normalized = remoteState.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "pending", "creating", "starting" -> STATUS_STARTING;
+            case "running", "ready" -> STATUS_RUNNING;
+            default -> STATUS_RUNNING;
+        };
+    }
+
     /**
      * 执行沙箱释放操作（远程调用+更新本地记录）
      *
@@ -1006,12 +1213,16 @@ public class SandboxService {
      */
     private void doRemoveSandbox(SsSandboxRecord record, String releaseReason) {
         Date now = new Date();
-        int marked = sandboxRecordMapper.markReleasing(record.getId(), releaseReason, now);
+        int marked = sandboxRecordMapper.markReleasing(record.getId(), releaseReason, now, record.getLockVersion());
         if (marked == 0 && STATUS_RUNNING.equals(record.getStatus())) {
             LOGGER.warn("沙箱释放跳过，记录状态已变化：{}", sandboxRef(record));
             return;
         }
         record.setStatus(STATUS_RELEASING);
+        record.setUpdateTime(now);
+        if (marked > 0) {
+            incrementVersions(record, true);
+        }
         try {
             LOGGER.info("开始释放沙箱：{}，releaseReason：{}", sandboxRef(record), releaseReason);
             String lockKey = SANDBOX_LAUNCH_LOCK_PREFIX + record.getUserCode() + ":" + record.getSandboxType() + ":" + record.getResourceId();
@@ -1026,7 +1237,18 @@ public class SandboxService {
             LOGGER.error("远程释放沙箱失败：{}", sandboxRef(record), e);
         }
         // 无论远程调用是否成功，都更新本地记录状态
-        sandboxRecordMapper.updateStatusToReleased(record.getId(), releaseReason, new Date());
+        Date releaseTime = new Date();
+        int released = sandboxRecordMapper.updateStatusToReleased(record.getId(), releaseReason, releaseTime,
+            record.getLockVersion());
+        if (released == 0) {
+            LOGGER.warn("沙箱释放完成后本地记录已被并发更新，跳过标记已释放：{}", sandboxRef(record));
+            return;
+        }
+        record.setStatus(STATUS_RELEASED);
+        record.setReleaseReason(releaseReason);
+        record.setReleaseTime(releaseTime);
+        record.setUpdateTime(releaseTime);
+        incrementVersions(record, true);
         sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
         unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType());
         LOGGER.info("沙箱释放完成：{}，releaseReason：{}", sandboxRef(record), releaseReason);
@@ -1034,7 +1256,8 @@ public class SandboxService {
 
     private void markStartingSandboxReleased(SsSandboxRecord record, String releaseReason) {
         Date now = new Date();
-        int marked = sandboxRecordMapper.markStartingReleased(record.getId(), releaseReason, now);
+        int marked = sandboxRecordMapper.markStartingReleased(record.getId(), releaseReason, now,
+            record.getLockVersion());
         if (marked == 0) {
             SsSandboxRecord latestRecord = sandboxRecordMapper.selectById(record.getId());
             if (latestRecord != null && STATUS_RUNNING.equals(latestRecord.getStatus())) {
@@ -1045,6 +1268,11 @@ public class SandboxService {
             LOGGER.warn("启动中沙箱释放跳过，记录状态已变化：{}", sandboxRef(latestRecord));
             return;
         }
+        record.setStatus(STATUS_RELEASED);
+        record.setReleaseReason(releaseReason);
+        record.setReleaseTime(now);
+        record.setUpdateTime(now);
+        incrementVersions(record, true);
         String lockKey = SANDBOX_LAUNCH_LOCK_PREFIX + record.getUserCode() + ":" + record.getSandboxType() + ":"
             + record.getResourceId();
         RedisUtil.del(lockKey);
@@ -1161,23 +1389,123 @@ public class SandboxService {
         return new Date(Math.max(System.currentTimeMillis(), nextRenewMillis));
     }
 
+    private SsSandboxRecord refreshLastAccessTime(SsSandboxRecord record, Date now) {
+        if (record == null || now == null) {
+            return null;
+        }
+        int updated = sandboxRecordMapper.updateLastAccessTime(record.getId(), now, record.getLockVersion());
+        if (updated > 0) {
+            record.setLastAccessTime(now);
+            record.setUpdateTime(now);
+            incrementVersions(record, false);
+            return record;
+        }
+
+        SsSandboxRecord latestRecord = sandboxRecordMapper.selectById(record.getId());
+        if (latestRecord == null || !STATUS_RUNNING.equals(latestRecord.getStatus())) {
+            return null;
+        }
+        updated = sandboxRecordMapper.updateLastAccessTime(latestRecord.getId(), now, latestRecord.getLockVersion());
+        if (updated == 0) {
+            return null;
+        }
+        latestRecord.setLastAccessTime(now);
+        latestRecord.setUpdateTime(now);
+        incrementVersions(latestRecord, false);
+        return latestRecord;
+    }
+
+    private Date resolveManualRenewExpiresAt(SsSandboxRecord record, Date now) {
+        if (record == null || now == null || record.getTimeoutSeconds() == null || record.getTimeoutSeconds() <= 0) {
+            return record != null ? record.getRemoteExpiresAt() : null;
+        }
+        return new Date(now.getTime() + TimeUnit.SECONDS.toMillis(record.getTimeoutSeconds()));
+    }
+
+    private SsSandboxRecord persistRenewState(SsSandboxRecord record, Date remoteExpiresAt, Date renewTime) {
+        if (record == null || renewTime == null) {
+            return null;
+        }
+        Date nextRenewAt = computeNextRenewAt(remoteExpiresAt);
+        int updated = sandboxRecordMapper.updateRenewSuccess(record.getId(), remoteExpiresAt, renewTime, nextRenewAt,
+            record.getLockVersion());
+        if (updated > 0) {
+            record.setRemoteExpiresAt(remoteExpiresAt);
+            record.setLastRenewAt(renewTime);
+            record.setNextRenewAt(nextRenewAt);
+            record.setUpdateTime(renewTime);
+            incrementVersions(record, true);
+            return record;
+        }
+
+        SsSandboxRecord latestRecord = sandboxRecordMapper.selectById(record.getId());
+        if (latestRecord == null || !STATUS_RUNNING.equals(latestRecord.getStatus())) {
+            LOGGER.warn("沙箱手动续约后本地记录已变化，跳过续约元数据写入：{}", sandboxRef(record));
+            return null;
+        }
+        updated = sandboxRecordMapper.updateRenewSuccess(latestRecord.getId(), remoteExpiresAt, renewTime,
+            nextRenewAt, latestRecord.getLockVersion());
+        if (updated == 0) {
+            LOGGER.warn("沙箱手动续约后本地记录并发更新，跳过续约元数据写入：{}", sandboxRef(latestRecord));
+            return null;
+        }
+        latestRecord.setRemoteExpiresAt(remoteExpiresAt);
+        latestRecord.setLastRenewAt(renewTime);
+        latestRecord.setNextRenewAt(nextRenewAt);
+        latestRecord.setUpdateTime(renewTime);
+        incrementVersions(latestRecord, true);
+        return latestRecord;
+    }
+
     private SandboxInfo toSandboxInfo(SsSandboxRecord record) {
         if (record == null) {
             return null;
         }
-        List<String> endpoints = StringUtils.isNotBlank(record.getEndpoint())
-            ? List.of(record.getEndpoint()) : List.of();
+        String gatewayToken = resolveRecordGatewayToken(record);
+        String endpoint = normalizeRecordEndpoint(record);
+        List<String> endpoints = StringUtils.isNotBlank(endpoint) ? List.of(endpoint) : List.of();
         return SandboxInfo.builder()
             .sandboxId(record.getSandboxId())
             .userCode(record.getUserCode())
             .sandboxType(record.getSandboxType())
             .endpoints(endpoints)
-            .gatewayToken(extractGatewayToken(endpoints))
+            .gatewayToken(gatewayToken)
             .timeoutSeconds(record.getTimeoutSeconds())
             .remoteExpiresAt(record.getRemoteExpiresAt())
             .createdTime(toLocalDateTime(record.getCreateTime()))
             .lastHeartbeatTime(toLocalDateTime(record.getLastAccessTime()))
             .build();
+    }
+
+    private String resolveLaunchGatewayToken(String userCode, String sandboxType, String sandboxId,
+        String fallbackGatewayToken) {
+        if (StringUtils.isBlank(userCode) || StringUtils.isBlank(sandboxType) || StringUtils.isBlank(sandboxId)) {
+            return fallbackGatewayToken;
+        }
+        SsSandboxRecord existingRecord = sandboxRecordMapper.selectLatestBySandboxId(userCode, sandboxType, sandboxId);
+        String existingGatewayToken = resolveRecordGatewayToken(existingRecord);
+        return StringUtils.defaultIfBlank(existingGatewayToken, fallbackGatewayToken);
+    }
+
+    private String resolveRecordGatewayToken(SsSandboxRecord record) {
+        if (record == null) {
+            return null;
+        }
+        return StringUtils.defaultIfBlank(record.getGatewayToken(), extractGatewayToken(record.getEndpoint()));
+    }
+
+    private String normalizeRecordEndpoint(SsSandboxRecord record) {
+        if (record == null || StringUtils.isBlank(record.getEndpoint())) {
+            return record != null ? record.getEndpoint() : null;
+        }
+        return normalizeRecordEndpoint(record.getEndpoint(), resolveRecordGatewayToken(record));
+    }
+
+    private String normalizeRecordEndpoint(String endpoint, String gatewayToken) {
+        if (StringUtils.isBlank(endpoint) || StringUtils.isBlank(gatewayToken)) {
+            return endpoint;
+        }
+        return new SandboxEndpointUrlCustomizer(gatewayToken).bindToken(endpoint);
     }
 
     private void hydrateGatewayToken(SandboxInfo info) {
@@ -1229,6 +1557,16 @@ public class SandboxService {
         return java.time.LocalDateTime.ofInstant(date.toInstant(), java.time.ZoneId.systemDefault());
     }
 
+    private void incrementVersions(SsSandboxRecord record, boolean lifecycleChanged) {
+        if (record == null) {
+            return;
+        }
+        record.setLockVersion(record.getLockVersion() == null ? 1 : record.getLockVersion() + 1);
+        if (lifecycleChanged) {
+            record.setVersion(record.getVersion() == null ? 1 : record.getVersion() + 1);
+        }
+    }
+
     private String sandboxRef(SsSandboxRecord record) {
         if (record == null) {
             return "record=null";
@@ -1238,6 +1576,8 @@ public class SandboxService {
             + ", userCode=" + record.getUserCode()
             + ", sandboxType=" + record.getSandboxType()
             + ", resourceId=" + record.getResourceId()
-            + ", status=" + record.getStatus();
+            + ", status=" + record.getStatus()
+            + ", version=" + record.getVersion()
+            + ", lockVersion=" + record.getLockVersion();
     }
 }

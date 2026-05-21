@@ -56,28 +56,34 @@ public interface SsSandboxRecordMapper {
      */
     int updateStatusToReleased(@Param("id") Long id,
                                @Param("reason") String reason,
-                               @Param("releaseTime") Date releaseTime);
+                               @Param("releaseTime") Date releaseTime,
+                               @Param("lockVersion") Integer lockVersion);
 
     int markReleased(@Param("id") Long id,
                      @Param("reason") String reason,
-                     @Param("releaseTime") Date releaseTime);
+                     @Param("releaseTime") Date releaseTime,
+                     @Param("lockVersion") Integer lockVersion);
 
     int markStartingReleased(@Param("id") Long id,
                              @Param("reason") String reason,
-                             @Param("releaseTime") Date releaseTime);
+                             @Param("releaseTime") Date releaseTime,
+                             @Param("lockVersion") Integer lockVersion);
 
     int updateLaunchSuccess(@Param("id") Long id,
                             @Param("sandboxId") String sandboxId,
                             @Param("endpoint") String endpoint,
+                            @Param("gatewayToken") String gatewayToken,
                             @Param("timeoutSeconds") Integer timeoutSeconds,
                             @Param("remoteExpiresAt") Date remoteExpiresAt,
                             @Param("lastRenewAt") Date lastRenewAt,
                             @Param("nextRenewAt") Date nextRenewAt,
-                            @Param("lastAccessTime") Date lastAccessTime);
+                            @Param("lastAccessTime") Date lastAccessTime,
+                            @Param("lockVersion") Integer lockVersion);
 
     int updateStatusToFailed(@Param("id") Long id,
                              @Param("reason") String reason,
-                             @Param("updateTime") Date updateTime);
+                             @Param("updateTime") Date updateTime,
+                             @Param("lockVersion") Integer lockVersion);
 
     /**
      * 更新最近一次访问时间
@@ -86,7 +92,9 @@ public interface SsSandboxRecordMapper {
      * @param lastAccessTime 最近访问时间（使用应用系统当前时间，避免数据库时间不准确）
      * @return 影响行数
      */
-    int updateLastAccessTime(@Param("id") Long id, @Param("lastAccessTime") Date lastAccessTime);
+    int updateLastAccessTime(@Param("id") Long id,
+                             @Param("lastAccessTime") Date lastAccessTime,
+                             @Param("lockVersion") Integer lockVersion);
 
     /**
      * 查询超时的自动释放沙箱记录
@@ -117,11 +125,24 @@ public interface SsSandboxRecordMapper {
     int updateRenewSuccess(@Param("id") Long id,
                            @Param("remoteExpiresAt") Date remoteExpiresAt,
                            @Param("lastRenewAt") Date lastRenewAt,
-                           @Param("nextRenewAt") Date nextRenewAt);
+                           @Param("nextRenewAt") Date nextRenewAt,
+                           @Param("lockVersion") Integer lockVersion);
+
+    int updateReconcileSuccess(@Param("id") Long id,
+                               @Param("status") String status,
+                               @Param("endpoint") String endpoint,
+                               @Param("gatewayToken") String gatewayToken,
+                               @Param("remoteExpiresAt") Date remoteExpiresAt,
+                               @Param("createTime") Date createTime,
+                               @Param("timeoutSeconds") Integer timeoutSeconds,
+                               @Param("nextRenewAt") Date nextRenewAt,
+                               @Param("updateTime") Date updateTime,
+                               @Param("lockVersion") Integer lockVersion);
 
     int markReleasing(@Param("id") Long id,
                       @Param("reason") String reason,
-                      @Param("updateTime") Date updateTime);
+                      @Param("updateTime") Date updateTime,
+                      @Param("lockVersion") Integer lockVersion);
 
     /**
      * 统计当前运行中的沙箱数量
@@ -162,5 +183,11 @@ public interface SsSandboxRecordMapper {
      */
     SsSandboxRecord selectById(@Param("id") Long id);
 
-    int updateAutoRelease(@Param("id") Long id, @Param("autoRelease") Integer autoRelease);
+    SsSandboxRecord selectLatestBySandboxId(@Param("userCode") String userCode,
+                                            @Param("sandboxType") String sandboxType,
+                                            @Param("sandboxId") String sandboxId);
+
+    int updateAutoRelease(@Param("id") Long id,
+                          @Param("autoRelease") Integer autoRelease,
+                          @Param("lockVersion") Integer lockVersion);
 }

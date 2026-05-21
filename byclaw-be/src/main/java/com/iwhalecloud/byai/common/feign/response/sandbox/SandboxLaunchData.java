@@ -20,6 +20,9 @@ public class SandboxLaunchData {
     /** Runtime returned sandbox id. */
     private String sandboxId;
 
+    /** Gateway token bound to the sandbox instance. */
+    private String gatewayToken;
+
     /** All exposed endpoints, one per configured service port. */
     private List<String> endpoints;
 
