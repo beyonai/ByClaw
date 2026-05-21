@@ -1,7 +1,6 @@
 import React, { forwardRef, useImperativeHandle, useState, useEffect, useCallback, useContext } from 'react';
-import dayjs from 'dayjs';
 import { debounce } from 'lodash';
-import { Pagination, Badge, Button } from 'antd';
+import { Pagination, Button } from 'antd';
 import { useDispatch, useSelector, useIntl } from '@umijs/max';
 import ResizeTable from '@/pages/manager/components/ResizeTable';
 import Ellipsis from '@/pages/manager/components/Ellipsis';
@@ -10,8 +9,9 @@ import styles from './index.module.less';
 import toolIcon from '@/pages/manager/assets/defResourceIcon.png';
 import employeeIcon from '@/pages/manager/assets/Avatar.png';
 import knowledgeIcon from '@/pages/manager/assets/knowledge.png';
-import { resourceStatus, ownerTypeMap } from '@/pages/manager/constants/digitalResource';
+import { ownerTypeMap, resourceStatus } from '@/pages/manager/constants/digitalResource';
 import { OrgMgrContext } from '@/pages/manager/pages/OrgMgr';
+import { buildResourceCommonColumns } from '@/pages/manager/utils/resourceColumns';
 
 const getRowKey = (record) =>
   record?.resourceIdNewStr || record?.resourceIdStr || record?.resourceId || record?.objId || record?.id;
@@ -156,116 +156,27 @@ const NewResource = (props, ref) => {
   useImperativeHandle(ref, () => ({ getListOwnResource }), [getListOwnResource]);
 
   const columns = [
-    {
-      title: intl.formatMessage({ id: 'form.name' }),
-      dataIndex: 'resourceName',
-      width: '200px',
-      render: (v, record) => {
-        let iconSrc = employeeIcon;
-
-        if (record?.resourceLogoUrl) {
-          iconSrc = `/aiFactoryServer${record.resourceLogoUrl}`;
-        } else {
-          // 根据activeTab显示不同的默认图标
-          switch (activeTab) {
-            case 'employee':
-              iconSrc = employeeIcon;
-              break;
-            case 'knowledge':
-              iconSrc = knowledgeIcon;
-              break;
-            default:
-              iconSrc = toolIcon;
-          }
+    ...buildResourceCommonColumns({
+      intl,
+      activeTab,
+      ownerTypeMap,
+      resourceStatus,
+      showAuthStatus: selectValue === 2,
+      getIconSrc: (row, tab) => {
+        if (row?.resourceLogoUrl) {
+          return `/aiFactoryServer${row.resourceLogoUrl}`;
         }
-        return (
-          <div className={styles.userName}>
-            <img src={iconSrc} style={{ width: 20, height: 20, marginRight: 4 }} alt="logo" />
-            <Ellipsis tooltip lines={1}>
-              {v}
-            </Ellipsis>
-          </div>
-        );
+
+        switch (tab) {
+          case 'employee':
+            return employeeIcon;
+          case 'knowledge':
+            return knowledgeIcon;
+          default:
+            return toolIcon;
+        }
       },
-    },
-    {
-      title: intl.formatMessage({ id: 'form.desc' }),
-      dataIndex: 'description',
-      width: 150,
-    },
-    {
-      title: intl.formatMessage({ id: 'orgMgr.digital.ownerType' }),
-      dataIndex: 'ownerType',
-      width: 80,
-      render: (text) => {
-        const ownerTypeItem = ownerTypeMap.find((ele) => {
-          return ele.value === text;
-        });
-        if (!ownerTypeItem) return null;
-        return ownerTypeItem.text;
-      },
-    },
-    // {
-    //   title: intl.formatMessage({ id: 'orgMgr.table.type' }),
-    //   dataIndex: 'resourceBizType',
-    //   width: 80,
-    // },
-    {
-      title: intl.formatMessage({ id: 'orgMgr.digital.status' }),
-      dataIndex: 'resourceStatus',
-      width: 80,
-      // filters: [
-      //   {
-      //     text: intl.formatMessage({ id: 'orgMgr.digital.draft' }),
-      //     value: 0,
-      //   },
-      //   {
-      //     text: intl.formatMessage({ id: 'orgMgr.digital.reviewing' }),
-      //     value: 1,
-      //   },
-      //   {
-      //     text: intl.formatMessage({ id: 'orgMgr.digital.published' }),
-      //     value: 2,
-      //   },
-      //   {
-      //     text: intl.formatMessage({ id: 'orgMgr.digital.unpublished' }),
-      //     value: 3,
-      //   },
-      // ],
-      // onFilter: (value, record) => record.resourceStatus === value,
-      render: (text) => {
-        const statusItem = resourceStatus.find((ele) => {
-          return ele.value === text;
-        });
-        if (!statusItem) return null;
-        return <Badge color={statusItem.color} text={statusItem.text} />;
-      },
-    },
-    ...(selectValue === 2
-      ? [
-        {
-          title: intl.formatMessage({ id: 'orgMgr.table.authStatus' }),
-          dataIndex: 'hasPermission',
-          width: 80,
-          render: (val) => (
-            <Badge
-              color={val ? '#00b42a' : '#7a8799'}
-              text={
-                val
-                  ? intl.formatMessage({ id: 'orgMgr.table.hasPermission' })
-                  : intl.formatMessage({ id: 'orgMgr.table.noPermission' })
-              }
-            />
-          ),
-        },
-      ]
-      : []),
-    {
-      title: intl.formatMessage({ id: 'orgMgr.digital.createTime' }),
-      dataIndex: 'createTime',
-      width: '120px',
-      render: (text) => (text ? dayjs(Number(text) || text).format('YYYY-MM-DD HH:mm') : '-'),
-    },
+    }),
     ...(canEdit && selectValue === 1
       ? [
         {
@@ -298,17 +209,7 @@ const NewResource = (props, ref) => {
                     {intl.formatMessage({ id: 'resourceAction.useAuth' })}
                   </Button>
                 </>
-              ) : // <Button
-                //   type="link"
-                //   onClick={() => {
-                //     // 显示详情的逻辑
-                //     console.log('查看详情', record);
-                //   }}
-                //   size="small"
-                // >
-                //   {intl.formatMessage({ id: 'common.detail' })}
-                // </Button>
-                null}
+              ) : null}
             </div>
           ),
         },

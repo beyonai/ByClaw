@@ -1,7 +1,7 @@
 import React, { forwardRef, useImperativeHandle, useState, useEffect, useCallback } from 'react';
-import { Button, Pagination, Badge, Tag } from 'antd';
+import { Button, Pagination, Tag } from 'antd';
 import { get } from 'lodash';
-import { useDispatch, useSelector, useIntl, useNavigate } from '@umijs/max';
+import { useDispatch, useSelector, useIntl } from '@umijs/max';
 import ResizeTable from '@/pages/manager/components/ResizeTable';
 import { KeepAlive } from 'react-activation';
 import Ellipsis from '@/pages/manager/components/Ellipsis';
@@ -10,15 +10,16 @@ import styles from './index.module.less';
 import skillIcon from '@/pages/manager/assets/defResourceIcon.png';
 import employeeIcon from '@/pages/manager/assets/Avatar.png';
 import knowledgeIcon from '@/pages/manager/assets/knowledge.png';
-import { resourceBizTypeMap } from '@/pages/manager/constants/digitalResource';
+import { ownerTypeMap, resourceStatus } from '@/pages/manager/constants/digitalResource';
 import { useSkillDetailDrawer } from '@/pages/manager/components/SkillDetailDrawer/useSkillDetailDrawer';
+import { buildResourceCommonColumns } from '@/pages/manager/utils/resourceColumns';
 
 const PostResource = (props, ref) => {
   const { selectedPost, searchValue, activeTab, record } = props;
 
   const dispatch = useDispatch();
   const intl = useIntl();
-  const navigate = useNavigate();
+  // const navigate = useNavigate();
 
   const isLoading = useSelector(({ loading }) => loading.effects['orgMgr/listResource']);
 
@@ -34,9 +35,29 @@ const PostResource = (props, ref) => {
   // 技能详情抽屉（复用 asset/skills 的详情能力）
   const { placeholder: SkillDetailDrawerHolder, show: showSkillDetailDrawer } = useSkillDetailDrawer();
 
+  const getResourceBizTypeList = useCallback(() => {
+    if (activeTab === 'employee') {
+      return ['DIG_EMPLOYEE'];
+    }
+    if (activeTab === 'knowledge') {
+      return ['KG_DOC', 'KG_QA', 'KG_TERM'];
+    }
+    if (activeTab === 'tool') {
+      return ['AGENT', 'MCP', 'TOOLKIT'];
+    }
+    if (activeTab === 'view') {
+      return ['VIEW'];
+    }
+    if (activeTab === 'object') {
+      return ['OBJECT'];
+    }
+    return [];
+  }, [activeTab]);
+
   const getListOwnResource = useCallback(
     (params) => {
       const userType = get(record, 'positionUserType', '');
+      const resourceBizTypeList = getResourceBizTypeList();
       dispatch({
         type: 'orgMgr/listResource',
         payload: {
@@ -46,12 +67,7 @@ const PostResource = (props, ref) => {
           keyword: searchValue,
           grantToObjType: 'POST',
           authType: 2,
-          resourceBizTypeList:
-            activeTab === 'employee'
-              ? ['DIG_EMPLOYEE']
-              : activeTab === 'knowledge'
-                ? ['KG_DOC', 'KG_QA', 'KG_TERM']
-                : ['AGENT', 'MCP', 'TOOL', 'TOOLKIT'],
+          resourceBizTypeList,
           ...params,
         },
         success: (res) => {
@@ -81,7 +97,7 @@ const PostResource = (props, ref) => {
         },
       });
     },
-    [selectedPost, pageInfo, searchValue, activeTab]
+    [record, selectedPost, pageInfo, searchValue, getResourceBizTypeList]
   );
 
   useEffect(() => {
@@ -93,152 +109,73 @@ const PostResource = (props, ref) => {
   useImperativeHandle(ref, () => ({ getListOwnResource }), [getListOwnResource]);
 
   const columns = [
-    {
-      title: intl.formatMessage({ id: 'form.name' }),
-      dataIndex: 'resourceName',
-      width: '200px',
-      render: (v, record) => {
-        let iconSrc = employeeIcon;
-
-        if (record?.resourceLogoUrl) {
-          iconSrc = `/aiFactoryServer${record.resourceLogoUrl}`;
-        } else {
-          // 根据activeTab显示不同的默认图标
-          switch (activeTab) {
-            case 'employee':
-              iconSrc = employeeIcon;
-              break;
-            case 'knowledge':
-              iconSrc = knowledgeIcon;
-              break;
-            case 'skill':
-              iconSrc = skillIcon;
-              break;
-            default:
-              iconSrc = employeeIcon;
-          }
+    ...buildResourceCommonColumns({
+      intl,
+      activeTab,
+      ownerTypeMap,
+      resourceStatus,
+      showTypeColumn:
+        activeTab === 'knowledge' || activeTab === 'tool' || activeTab === 'view' || activeTab === 'object',
+      showAuthStatus: true,
+      getIconSrc: (row, tab) => {
+        if (row?.resourceLogoUrl) {
+          return `/aiFactoryServer${row.resourceLogoUrl}`;
         }
 
-        return (
-          <div className={styles.userName}>
-            <img src={iconSrc} style={{ width: 20, height: 20, marginRight: 4 }} alt="logo" />
-            <Ellipsis tooltip lines={1}>
-              {v}
-            </Ellipsis>
-          </div>
-        );
-      },
-    },
-    {
-      title: intl.formatMessage({ id: 'form.desc' }),
-      dataIndex: 'description',
-      width: 150,
-    },
-    ...(activeTab === 'knowledge' || activeTab === 'skill'
-      ? [
-        {
-          title: intl.formatMessage({ id: 'orgMgr.table.type' }),
-          dataIndex: 'resourceBizType',
-          width: 80,
-        },
-      ]
-      : []),
-    {
-      title: intl.formatMessage({ id: 'orgMgr.table.tags' }),
-      dataIndex: 'tags',
-      width: 200,
-      render: (v) => {
-        if (!v) return null;
-        try {
-          const tags = JSON.parse(v);
-          const tagText = tags.join(', ');
-          return (
-            <div
-              title={tagText}
-              style={{
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {tags.map((tag, index) => (
-                <Tag key={index}>{tag}</Tag>
-              ))}
-            </div>
-          );
-        } catch (error) {
-          return null;
+        switch (tab) {
+          case 'employee':
+            return employeeIcon;
+          case 'knowledge':
+            return knowledgeIcon;
+          default:
+            return skillIcon;
         }
       },
-    },
-    {
-      title: intl.formatMessage({ id: 'orgMgr.table.domain' }),
-      dataIndex: 'catalogName',
-      width: 90,
-    },
-    {
-      title: intl.formatMessage({ id: 'orgMgr.digital.status' }),
-      dataIndex: 'resourceStatus',
-      width: 80,
-      filters: [
-        {
-          text: intl.formatMessage({ id: 'orgMgr.digital.draft' }),
-          value: 0,
-        },
-        {
-          text: intl.formatMessage({ id: 'orgMgr.digital.reviewing' }),
-          value: 1,
-        },
-        {
-          text: intl.formatMessage({ id: 'orgMgr.digital.published' }),
-          value: 2,
-        },
-        {
-          text: intl.formatMessage({ id: 'orgMgr.digital.unpublished' }),
-          value: 3,
-        },
-      ],
-      onFilter: (value, record) => record.resourceStatus === value,
-      render: (val) => (
-        <div>
-          {val === 0 && <Badge color="#7a8799" text={intl.formatMessage({ id: 'orgMgr.digital.draft' })} />}
-          {val === 1 && <Badge color="#ff7d00" text={intl.formatMessage({ id: 'orgMgr.digital.reviewing' })} />}
-          {val === 2 && <Badge color="#00b42a" text={intl.formatMessage({ id: 'orgMgr.digital.published' })} />}
-          {val === 3 && <Badge color="#00000080" text={intl.formatMessage({ id: 'orgMgr.digital.unpublished' })} />}
-        </div>
-      ),
-    },
-    {
-      title: intl.formatMessage({ id: 'orgMgr.table.organizationExtra' }),
-      dataIndex: 'manOrgName',
-      width: '110px',
-    },
-    {
-      title: intl.formatMessage({ id: 'orgMgr.table.authStatus' }),
-      dataIndex: 'hasPermission',
-      width: 80,
-      render: (val) => (
-        <Badge
-          color={val ? '#00b42a' : '#7a8799'}
-          text={
-            val
-              ? intl.formatMessage({ id: 'orgMgr.table.hasPermission' })
-              : intl.formatMessage({ id: 'orgMgr.table.noPermission' })
-          }
-        />
-      ),
-    },
-    {
-      title: intl.formatMessage({ id: 'orgMgr.digital.createTime' }),
-      dataIndex: 'createTime',
-      width: '110px',
-    },
-    {
-      title: intl.formatMessage({ id: 'orgMgr.table.lastShelfTime' }),
-      dataIndex: 'shelfTime',
-      width: '110px',
-      sorter: (a, b) => new Date(a.shelfTime) - new Date(b.shelfTime),
-    },
+    }),
+    // {
+    //   title: intl.formatMessage({ id: 'orgMgr.table.tags' }),
+    //   dataIndex: 'tags',
+    //   width: 200,
+    //   render: (v) => {
+    //     if (!v) return null;
+    //     try {
+    //       const tags = JSON.parse(v);
+    //       const tagText = tags.join(', ');
+    //       return (
+    //         <div
+    //           title={tagText}
+    //           style={{
+    //             overflow: 'hidden',
+    //             textOverflow: 'ellipsis',
+    //             whiteSpace: 'nowrap',
+    //           }}
+    //         >
+    //           {tags.map((tag, index) => (
+    //             <Tag key={index}>{tag}</Tag>
+    //           ))}
+    //         </div>
+    //       );
+    //     } catch (error) {
+    //       return null;
+    //     }
+    //   },
+    // },
+    // {
+    //   title: intl.formatMessage({ id: 'orgMgr.table.domain' }),
+    //   dataIndex: 'catalogName',
+    //   width: 90,
+    // },
+    // {
+    //   title: intl.formatMessage({ id: 'orgMgr.table.organizationExtra' }),
+    //   dataIndex: 'manOrgName',
+    //   width: '110px',
+    // },
+    // {
+    //   title: intl.formatMessage({ id: 'orgMgr.table.lastShelfTime' }),
+    //   dataIndex: 'shelfTime',
+    //   width: '110px',
+    //   sorter: (a, b) => new Date(a.shelfTime) - new Date(b.shelfTime),
+    // },
   ];
 
   const onChange = (_, newFilter) => {
