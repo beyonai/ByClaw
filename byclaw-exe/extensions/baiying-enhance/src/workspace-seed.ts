@@ -309,10 +309,33 @@ function isDocResourceType(resourceType: string | undefined): boolean {
 }
 
 function buildToolsMd(item: BaiyingAgentItem, fallbackAgentId?: string): string {
+  const resolvedAgentId =
+    (typeof item.resourceId === "string" && item.resourceId.trim() ? item.resourceId.trim() : "") ||
+    (typeof fallbackAgentId === "string" && fallbackAgentId.trim() ? fallbackAgentId.trim() : "");
+
   const lines = [MARKER, "", "# Tools", "", "## baiying_call", ""];
   lines.push(
     "Use `baiying_call` to access Baiying backend resources associated with this agent.",
     "",
+  );
+  if (item.integrationType && ["PAGE", "INTERFACE", "A2A"].includes(item.integrationType)) {
+    // 暂时这么定，后续需要考虑：更详细的描述、执行参数等
+    lines.push(
+      "## Capabilities",
+      item.coreCompetencies?.map(capacity => {
+        return `  - ${capacity.coreCompetency}.${capacity.description || ""}`
+      }).join("\n") ?? "",
+      "Suggested parameters:",
+      "- `query`: natural-language task summary",
+      "- `agent_id`: always pass " + resolvedAgentId,
+      "- `resource_id`: always pass " + resolvedAgentId,
+      "- `arguments`: structured backend parameters",
+      "",
+    )
+    return `${lines.join("\n")}\n`;
+  }
+
+  lines.push(
     "Suggested parameters:",
     "- `query`: natural-language task summary",
     "- `agent_id`: required by executor for DOC resources; if omitted, plugin can auto-fill it from agent.json `resourceId`",
@@ -324,9 +347,6 @@ function buildToolsMd(item: BaiyingAgentItem, fallbackAgentId?: string): string 
   );
 
   const res = item.relResourceInfoList;
-  const resolvedAgentId =
-    (typeof item.resourceId === "string" && item.resourceId.trim() ? item.resourceId.trim() : "") ||
-    (typeof fallbackAgentId === "string" && fallbackAgentId.trim() ? fallbackAgentId.trim() : "");
   if (Array.isArray(res) && res.length > 0) {
     lines.push("## Available resources", "");
     for (const r of res) {
