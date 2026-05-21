@@ -301,6 +301,7 @@ public class ToolManService {
         }
 
         // 4. 把主流程真正需要的核心字段先取出来，避免后面多次从 JSON 里散落读取。
+        Long resourceSourcePkId = root.getLong("resourceSourcePkId");
         String resourceCode = StringUtils.trimToEmpty(root.getString("resourceCode"));
         String resourceBizType = StringUtils.trimToEmpty(root.getString("resourceBizType"));
         String resourceName = StringUtils.trimToEmpty(root.getString("resourceName"));
@@ -329,8 +330,8 @@ public class ToolManService {
 
         // 6. 主表统一复用 SsResourceService：
         // 新增走 createResource，更新走 update。
-        SsResource resource = saveOrUpdateToolJsonNewMain(existing, resourceBizType, resourceCode, resourceName,
-            resourceDesc, ownerType, systemCode, version, effectiveCatalogId, implType);
+        SsResource resource = saveOrUpdateToolJsonNewMain(existing, resourceSourcePkId, resourceBizType, resourceCode,
+            resourceName, resourceDesc, ownerType, systemCode, version, effectiveCatalogId, implType);
 
         // 7. 子表统一保留两份内容：
         // source_content 存原始 JSON，
@@ -655,8 +656,7 @@ public class ToolManService {
     }
 
     /**
-     * 删除资源。 forceDelete=false 时会校验资源类型和资源引用关系；forceDelete=true 时跳过这些校验，直接清理主表、子表和资源关系。
-     * 按 resourceCode + ownerType 删除资源。
+     * 删除资源。 forceDelete=false 时会校验资源类型和资源引用关系；forceDelete=true 时跳过这些校验，直接清理主表、子表和资源关系。 按 resourceCode + ownerType 删除资源。
      * 删除前仍复用既有删除校验：资源类型校验、被数字员工/视图引用校验、权限校验等。
      */
     @Transactional(rollbackFor = Exception.class)
@@ -666,9 +666,7 @@ public class ToolManService {
     }
 
     /**
-     * 删除资源。
-     *
-     * forceDelete=false 时会校验资源类型和资源引用关系；forceDelete=true 时跳过这些校验，直接清理主表、子表和资源关系。
+     * 删除资源。 forceDelete=false 时会校验资源类型和资源引用关系；forceDelete=true 时跳过这些校验，直接清理主表、子表和资源关系。
      *
      * @author qin.guoquan
      * @date 2026-04-26 13:45:00
@@ -1337,12 +1335,13 @@ public class ToolManService {
      * SsResourceService.update(...) 刷新已有主表。 之所以在 createResource 之后又补一轮字段，是为了把导入链要求的 resourceCode / catalogId / version
      * / publishTime 等值收口成明确结果。
      */
-    private SsResource saveOrUpdateToolJsonNewMain(SsResource existing, String resourceBizType, String resourceCode,
-        String resourceName, String resourceDesc, String ownerType, String systemCode, String version, Long catalogId,
-        String implType) {
+    private SsResource saveOrUpdateToolJsonNewMain(SsResource existing, Long resourceSourcePkId, String resourceBizType,
+        String resourceCode, String resourceName, String resourceDesc, String ownerType, String systemCode,
+        String version, Long catalogId, String implType) {
 
         if (existing == null) {
             SsResource myResource = new SsResource();
+            myResource.setResourceSourcePkId(resourceSourcePkId);
             myResource.setResourceBizType(resourceBizType);
             myResource.setResourceCode(resourceCode);
             myResource.setResourceName(resourceName);
@@ -1367,6 +1366,7 @@ public class ToolManService {
         Long effectiveCatalogId = catalogId != null ? catalogId : 0L;
 
         existing.setResourceBizType(resourceBizType);
+        existing.setResourceSourcePkId(resourceSourcePkId);
         existing.setResourceCode(resourceCode);
         existing.setResourceName(resourceName);
         existing.setResourceDesc(resourceDesc);
@@ -2091,8 +2091,7 @@ public class ToolManService {
     }
 
     /**
-     * 删除接口按 resourceCode + ownerType 精确定位资源。
-     * 若同编码同归属出现多条脏数据，则直接阻断，避免误删。
+     * 删除接口按 resourceCode + ownerType 精确定位资源。 若同编码同归属出现多条脏数据，则直接阻断，避免误删。
      */
     private SsResource resolveUniqueResourceByCodeAndOwnerType(String resourceCode, String ownerType) {
         String trimmedCode = StringUtils.trimToEmpty(resourceCode);
@@ -2116,8 +2115,8 @@ public class ToolManService {
             throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
         }
         if (matched.size() > 1) {
-            throw new IllegalArgumentException(I18nUtil.get("tool.resource.code.duplicate.too.many",
-                localizeResourceLabel("资源")));
+            throw new IllegalArgumentException(
+                I18nUtil.get("tool.resource.code.duplicate.too.many", localizeResourceLabel("资源")));
         }
         return matched.get(0);
     }

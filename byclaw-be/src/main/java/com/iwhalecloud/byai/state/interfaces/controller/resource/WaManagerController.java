@@ -1,8 +1,6 @@
 package com.iwhalecloud.byai.state.interfaces.controller.resource;
 
-import com.iwhalecloud.byai.state.domain.resource.service.ResourceApplicationService;
 import io.swagger.v3.oas.annotations.Operation;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;

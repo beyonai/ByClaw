@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.interfaces.controller.resource;
 
+import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtMcpService;
 import com.iwhalecloud.byai.manager.dto.resource.CallMcpParamsDto;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto;
@@ -191,6 +192,7 @@ public class ToolManController {
      * @date 2026-04-23 18:17:00
      */
     @PostMapping(value = "/addToolFromThird", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @ManageLogAnnotation(name = "智能体接口", description = "智能体资源同步")
     public ResponseUtil<Map<String, Object>> addToolFromThird(@RequestBody String jsonContent) {
         try {
             Map<String, Object> data = toolManService.addToolFromThird(jsonContent);
@@ -671,10 +673,8 @@ public class ToolManController {
     }
 
     /**
-     * 删除用户工作空间下的单个 skill 目录。
-     * - 数字员工：skillPath 必须落在 /.openclaw/workspace-baiying-agent-{resourceId}/skills/ 之下
-     * - 超级助手：skillPath 必须落在 /.openclaw/workspace/skills/ 之下
-     * - userCode 留空时退回当前登录用户
+     * 删除用户工作空间下的单个 skill 目录。 - 数字员工：skillPath 必须落在 /.openclaw/workspace-baiying-agent-{resourceId}/skills/ 之下 -
+     * 超级助手：skillPath 必须落在 /.openclaw/workspace/skills/ 之下 - userCode 留空时退回当前登录用户
      */
     @PostMapping("/deleteSkill")
     public ResponseUtil<ByClawSkillDto> deleteSkill(@RequestBody DeleteSkillQo request) {
