@@ -17,7 +17,7 @@
 4. 授权移除时默认把对应托管 workspace 从 `<stateDir>/workspace-baiying-agent-*` 移到状态目录上级的隐藏归档目录（默认 `<dirname(stateDir)>/.baiying-workspaces/`，例如 `/by/.baiying-workspaces/`），避免未授权数字员工数据继续留在 `.openclaw` 下；重新授权时会先恢复目录，再用最新 JSON 更新插件托管的 Markdown。
 5. 为每个托管 Agent 动态挂载工具 **`baiying_call`**，把百应关联的知识库、toolkit、MCP、下游 agent 等资源暴露给大模型。
 
-> **说明**：当前代码主链路已经切到 **`baiying_call + 插件内置 TypeScript 执行器（`src/executor/`）**`，历史上的 `~/.openclaw/skills/baiying/executor.py` 仍可保留作参考，但已不再被调用。`USER_GUIDE.zh-CN.md` 中仍保留一些 `baiying_dispatch` 的历史说明，可作为旧方案参考，但不再代表当前推荐实现。
+> **说明**：当前代码主链路已经切到 **`baiying_call + 插件内置 TypeScript 执行器（`src/executor/`）**`，历史上的 `~/.openclaw/skills/baiying/executor.py` 仍可保留作参考，但已不再被调用。`USER_GUIDE.zh-CN.md`中仍保留一些`baiying_dispatch` 的历史说明，可作为旧方案参考，但不再代表当前推荐实现。
 
 > **配置格式**：OpenClaw 网关从 **`~/.openclaw/openclaw.json`** 读取配置（内容为 **JSON**，亦支持 **JSON5**：注释与尾随逗号）。接入本插件时，请在同一文件中配置 `plugins.entries`，见下文示例。插件同步托管 Agent 时也会通过 `writeConfigFile` 写回**当前生效的配置文件路径**（通常为上述 `openclaw.json`）。
 
@@ -39,27 +39,27 @@
 
 ```json
 {
-  "plugins": {
-    "entries": {
-      "baiying-enhance": {
-        "enabled": true,
-        "config": {
-          "watchDebounceMs": 500,
-          "mainParentAgentId": "main",
-          "mergeAllowSpawnForMain": true,
-          "embedApiKeysFromJson": false,
-          "workspaceAutoSeed": true,
-          "workspaceArchiveOnUnauthorized": true,
-          "workspaceArchiveBackend": "remote",
-          "workspaceArchiveDir": ".baiying-workspaces"
+    "plugins": {
+        "entries": {
+            "baiying-enhance": {
+                "enabled": true,
+                "config": {
+                    "watchDebounceMs": 500,
+                    "mainParentAgentId": "main",
+                    "mergeAllowSpawnForMain": true,
+                    "embedApiKeysFromJson": false,
+                    "workspaceAutoSeed": true,
+                    "workspaceArchiveOnUnauthorized": true,
+                    "workspaceArchiveBackend": "remote",
+                    "workspaceArchiveDir": ".baiying-workspaces"
+                }
+            }
         }
-      }
     }
-  }
 }
 ```
 
-字段含义与默认值以插件清单中的 `configSchema`（`openclaw.plugin.json`）为准。历史上的 `agentConfigDir` / `executorResourcesDir` 仍被配置校验接受，但当前运行时不再用它们读取数字员工或关联资源 JSON；权威来源是 Redis。**`config` 允许额外键**（例如历史遗留的 `watchAgentDir`、`skillDirs`、`pollIntervalMs`），不会因「未知字段」导致插件校验失败；已声明的字段仍会按类型校验，建议仍以文档列出的键为主以免笔误。
+字段含义与默认值以插件清单中的 `configSchema`（`openclaw.plugin.json`）为准。历史上的 `agentConfigDir` / `executorResourcesDir` 仍被配置校验接受，但当前运行时不再用它们读取数字员工或关联资源 JSON；权威来源是 Redis。数字员工内容同步仅由 Redis Pub/Sub、`USER:RESOURCES:AUTH` 授权变更与显式 `__flushNow` 触发；`agentContentScanIntervalMs` / `pollIntervalMs` 已废弃且不再轮询。**`config` 允许额外键**（例如历史遗留的 `watchAgentDir`、`skillDirs`），不会因「未知字段」导致插件校验失败；已声明的字段仍会按类型校验，建议仍以文档列出的键为主以免笔误。
 
 ### 取消授权 Workspace 归档
 
@@ -86,9 +86,42 @@
 
 Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscribe: false` 或环境变量 `BAIYING_DIG_EMPLOYEE_CHANGE_SUBSCRIBE=false`。插件会读取现有环境变量，也会尝试从 `BAIYING_ENV_FILE`、当前工作目录向上的 `.env`、以及 OpenClaw 状态目录 `.env` 加载 Redis 默认值（不覆盖已存在环境变量），与 `scripts/listen_dig_employee_redis_pubsub.py` 的本地调试体验保持一致。
 
+### 数字员工模型热切换
+
+数字员工同步会 `writeConfigFile`；本插件默认把 `plugins.entries.baiying-enhance`、`agents` 与 `models` 注册为热重载前缀，因此托管 Agent 条目、`models.providers.baiying-m-*`、`agents.list[].skills`、`main.subagents.allowAgents` 等变化会走**进程内热加载**（日志通常为 `config change detected` / `config hot reload applied`），**不会**整进程退出重启。若 diff 里出现其它插件的 `plugins.entries.*`，OpenClaw 仍可能判定需要**进程级重启**；这种情况下请在 **`plugins.entries.baiying-enhance.config`** 里增加 **`configSyncHotPluginEntriesPrefixes`**（仅当你需要时配置，可省略）：
+
+完整链路如下：
+
+1. **监听层**：百应侧修改数字员工模型后，Redis Pub/Sub `digEmployeeChangeChannel` 或授权视图变化触发 `AgentWatchdog.__flushNow`；插件重新读取 `DIG_EMPLOYEE_{resourceId}`，用其中的 `prologue.modelId` 解析最新模型绑定。
+2. **配置层**：`mergeManagedAgentsIntoConfig` 写入 `agents.list[].model.primary`、`models.providers.baiying-m-*`，并登记 `agents.defaults.models`；网关热重载会刷新内存配置与 model catalog（`resetModelCatalogCache`）。**API Key 不在 `auth-profiles.json`**：`authToken` 通过 `models.providers.*.apiKey` 的 exec SecretRef + `secrets.providers.baiying-aimodel-redis` 解析；每次成功 `writeConfigFile` 后 OpenClaw 会 `prepareSecretsRuntimeSnapshot` 刷新**运行时 secrets 快照**（内存中的 `getRuntimeConfig()`）。插件 sync 后若日志出现 `runtime secrets snapshot did not materialize apiKey`，说明快照未解析成功，请查 `SECRETS_RELOADER_DEGRADED` 或 aimodel resolver CLI/Redis。若 Redis 员工 JSON 未变但 `agents.list` 与托管 `modelRef` 不一致，插件也会强制 `writeConfigFile` 以触发刷新。
+3. **会话层**：OpenClaw auto-reply 实际读取 `providerOverride` / `modelOverride`；插件在每次成功 `writeConfigFile` 后会对当时已存在的 session 做 reconcile（日志 `reconciled session model for …`），同步 `providerOverride` / `modelOverride` 与 `modelProvider` / `model`，并在模型变化时写入 `liveModelSwitchPending`。**新建的 SDK/byai 会话**（例如 `byai-channel:direct:10006251`）可能在 reconcile 之后才创建，因此插件还会在每条入站消息的 `before_dispatch` 钩子里把当前 session 对齐到 `agents.list[].model.primary`。
+4. **运行层**：`before_model_resolve` 在每轮 embedded run 再次强制 provider/model，避免内存 session 快照滞后；`before_prompt_build` 还会追加当前运行模型事实，减少模型自我介绍沿用旧上下文。上述 conversation hooks 从 `~/.openclaw/extensions/` 等非 bundled 路径加载时需 `plugins.entries.baiying-enhance.hooks.allowConversationAccess=true`，见下。
+5. **Channel 层**：`byai-channel` 的 SDK worker 在每次投递消息时读取 `getByaiRuntime().config.current()`，不再使用插件启动时捕获的旧配置，因此配置热重载后新的入站消息会走最新 agent/model 定义。
+
+从 `~/.openclaw/extensions/` 等非 bundled 路径加载时，OpenClaw 默认**屏蔽** `before_model_resolve` 等 conversation hooks，除非显式开启：
+
+```json
+"plugins": {
+  "entries": {
+    "baiying-enhance": {
+      "enabled": true,
+      "hooks": {
+        "allowConversationAccess": true
+      }
+    }
+  }
+}
+```
+
+仅看到配置热重载而对话仍用旧模型时，请在同 channel **再发一条新消息** 验证；正在进行的 turn 不会中途换模型。
+
+若日志出现 `Unknown model: baiying-m-…/…` 且此前已有 `[hooks] provider overridden`：说明 `agents.list[].model.primary` 已更新，但 `models.providers` 里尚未注册该 provider/model（aimodel 解析失败、写盘未完成，或热重载尚未把 `models.providers.*` 应用到运行时 catalog）。插件现在会**跳过**未注册的强制 override，并在 sync 后打 `models.providers entry not ready yet` 警告；请确认 `openclaw.json` 含对应 `models.providers.baiying-m-*` 与 model `id`，并等待 `config hot reload applied` 后再提问。
+
+若始终看不到 `config hot reload applied`，请检查 `gateway.reload.mode` 是否为 `off` 或 `restart`（默认 `hybrid` 即可）。
+
 ### 同步写盘后避免整网关重启（可选）
 
-数字员工同步会 `writeConfigFile`；本插件默认把 `plugins.entries.baiying-enhance` 与 `agents` 注册为热重载前缀，因此托管 Agent 条目、`agents.list[].skills`、`main.subagents.allowAgents` 等变化会走热加载，不需要整网关重启。若 diff 里出现其它插件的 `plugins.entries.*`，OpenClaw 仍可能判定需要**进程级重启**；这种情况下请在 **`plugins.entries.baiying-enhance.config`** 里增加 **`configSyncHotPluginEntriesPrefixes`**（仅当你需要时配置，可省略）：
+多数场景无需额外配置。仅当数字员工同步会连带修改其它插件的 `plugins.entries.*`，且 OpenClaw 因这些路径判定需要整进程重启时，再增加 `configSyncHotPluginEntriesPrefixes`：
 
 ```json
 "config": {
@@ -106,11 +139,32 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 
 `openclaw config set plugins.entries.baiying-enhance.enabled true`
 
-### API Key
+### 模型配置与 API Key
 
-默认情况下，提供方的 `apiKey` 会写成**环境变量引用**：`OPENCLAW_BAIYING_<sourceKey>`，其中 `sourceKey` 为百应数字 id 或 slug。
+生产注册路径不会从 `DIG_EMPLOYEE_{resourceId}` 读取或写出模型密钥。插件只解析数字员工 JSON 中的 `prologue.modelId`，再从 Redis Hash `byai:aimodel:config`（可用 `aimodelConfigRedisKey` 覆盖）按 field `<modelId>` 读取模型详情。
 
-可通过插件配置项 **`envApiKeyTemplate`** 自定义环境变量名（使用 `{sourceKey}` 占位符）。
+模型详情映射到托管 `models.providers.baiying-m-*`：
+
+- `url` → `baseUrl`
+- `modelCode` → model id
+- 固定 `api: "openai-completions"`
+- `maxContentToken` → `contextWindow`
+- `instanceParam.maxTokens` → `maxTokens`
+- `authToken` 只作为运行时 SecretRef 来源，不写入 `openclaw.json`
+
+写入配置时，`apiKey` 是 exec SecretRef，例如：
+
+```json
+{
+    "source": "exec",
+    "provider": "baiying-aimodel-redis",
+    "id": "model:-2000"
+}
+```
+
+`id` 使用 `model:<modelId>` 形式是为了满足 OpenClaw exec SecretRef id 的合法字符约束；resolver 会还原为 Redis field `-2000`。SecretRef provider 由插件自动写入 `secrets.providers.baiying-aimodel-redis`，执行随插件构建产物一起发布的 `dist/aimodel-secret-resolver-cli.js`，并复用 `REDIS_HOST` / `REDIS_PORT` / `REDIS_DATABASE` / `REDIS_USERNAME` / `REDIS_PASSWORD` 以及当前 `.env` 加载规则。
+
+如果 `prologue.modelId` 缺失，或 `byai:aimodel:config` 中找不到可用模型配置，插件仍会注册该数字员工，但不写托管 provider/model，让 OpenClaw 使用默认模型配置。
 
 ### 运行态说明
 

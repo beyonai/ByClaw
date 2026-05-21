@@ -475,7 +475,6 @@ const ResourceTabs: React.FC<Props> = ({
             <ResourceCitation
               resourceType="SKILL"
               onSelect={onSelectSkill}
-              disableClick={true}
               keyword={queryKeyword}
               agentId={agentId}
               agentIds={agentIds}
