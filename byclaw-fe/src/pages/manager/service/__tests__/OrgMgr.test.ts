@@ -37,7 +37,7 @@ describe('manager/service/OrgMgr', () => {
   it('listResource posts params with customHandle config', () => {
     const payload = { pageNum: 1 };
     listResource(payload);
-    expect(mockPOST).toHaveBeenCalledWith('/byaiService/auth/privilegeGrant/listResource', payload, {
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/auth/privilegeGrant/listResourceUseAuth', payload, {
       responseCfg: {
         customHandle: true,
       },

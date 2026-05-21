@@ -46,7 +46,7 @@ const PostResource = (props, ref) => {
           keyword: searchValue,
           grantToObjType: 'POST',
           authType: 2,
-          grantResourceTypeList:
+          resourceBizTypeList:
             activeTab === 'employee'
               ? ['DIG_EMPLOYEE']
               : activeTab === 'knowledge'

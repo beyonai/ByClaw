@@ -51,6 +51,11 @@ public class DigitalEmployeePageVo {
     private String resourceDesc;
 
     /**
+     * 资源归属类型
+     */
+    private String ownerType;
+
+    /**
      * 目录ID
      */
     private Long catalogId;
