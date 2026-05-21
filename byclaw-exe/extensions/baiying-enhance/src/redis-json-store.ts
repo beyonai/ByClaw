@@ -143,7 +143,7 @@ export function createRedisJsonStore(params: { logger?: LoggerLike } = {}): Baiy
                         `baiying-enhance: Redis JSON store connect failed: ${err instanceof Error ? err.message : String(err)}`,
                     );
                 }
-                await redis?.quit().catch(() => undefined);
+                redis?.disconnect(false);
                 redis = null;
                 connectPromise = null;
                 return null;
@@ -225,7 +225,7 @@ export function createRedisJsonStore(params: { logger?: LoggerLike } = {}): Baiy
             getJsonByKey(resourceRedisKey(resourceBizType, resourceId)),
         close: async () => {
             connectPromise = null;
-            await redis?.quit().catch(() => undefined);
+            redis?.disconnect(false);
             redis = null;
         },
     };

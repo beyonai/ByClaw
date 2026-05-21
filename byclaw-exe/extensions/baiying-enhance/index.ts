@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -100,6 +101,14 @@ export function resolveConfigSyncHotPrefixes(cfg: BaiyingEnhancePluginConfig): s
 
 const registry = new AgentRegistryState();
 const pluginRuntimeDir = path.dirname(fileURLToPath(import.meta.url));
+
+function resolveAimodelSecretResolverScriptPath(runtimeDir: string): string {
+    const candidates = [
+        path.join(runtimeDir, "aimodel-secret-resolver-cli.js"),
+        path.join(runtimeDir, "dist", "aimodel-secret-resolver-cli.js"),
+    ];
+    return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+}
 
 console.log("============Baiying Enhance module imported============");
 const plugin = {
@@ -225,10 +234,8 @@ const plugin = {
                     contentIndexPath,
                     executorPath: executorResourcesDir,
                     pluginConfig: pluginCfg,
-                    aimodelSecretResolverScriptPath: path.join(
-                        pluginRuntimeDir,
-                        "aimodel-secret-resolver-cli.js",
-                    ),
+                    aimodelSecretResolverScriptPath:
+                        resolveAimodelSecretResolverScriptPath(pluginRuntimeDir),
                     debounceMs,
                     workspaceArchiveApi,
                     authorizationFilter: {
