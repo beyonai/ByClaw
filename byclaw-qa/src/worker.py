@@ -95,6 +95,57 @@ def parse_dataset_ids(value: str | None) -> list[int]:
     return dataset_ids
 
 
+_PLACEHOLDER_RE = re.compile(r"\$\{([^}]+)\}")
+
+
+async def _resolve_header_placeholders(
+    headers: dict[str, Any],
+    redis_client: Any,
+    user_code: str,
+) -> dict[str, str]:
+    """Resolve ${KEY} placeholders in header values from Redis hash ``user:{user_code}:login:auth``."""
+    resolved: dict[str, str] = {}
+    redis_key = f"user:{user_code}:login:auth"
+    for key, value in headers.items():
+        value_str = str(value)
+        matches = _PLACEHOLDER_RE.findall(value_str)
+        if not matches:
+            resolved[key] = value_str
+            continue
+        result = value_str
+        for field in matches:
+            try:
+                redis_value = await redis_client.hget(redis_key, field)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to read Redis hash %s field %s for header placeholder: %s",
+                    redis_key,
+                    field,
+                    exc,
+                )
+                continue
+            if redis_value is None:
+                logger.warning(
+                    "Placeholder ${%s} not found in Redis key %s for user_code=%s",
+                    field,
+                    redis_key,
+                    user_code,
+                )
+                continue
+            decoded = redis_value.decode("utf-8") if isinstance(redis_value, bytes) else str(redis_value)
+            if not decoded:
+                logger.warning(
+                    "Placeholder ${%s} resolved to empty value in Redis key %s for user_code=%s",
+                    field,
+                    redis_key,
+                    user_code,
+                )
+                continue
+            result = result.replace(f"${{{field}}}", decoded)
+        resolved[key] = result
+    return resolved
+
+
 def _sanitize_filename(name: str) -> str:
     name = re.sub(r'[/\\:*?"<>|\s]', "_", name)
     name = re.sub(r"_+", "_", name).strip("_")
@@ -291,6 +342,9 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
             _safe_json_dumps(_summarize_agent_config(agent_config)),
         )
         if request_headers and agent_config is not None:
+            request_headers = await _resolve_header_placeholders(
+                request_headers, context.redis, user_code
+            )
             for kb_list in (agent_config.knowledge_bases or {}).values():
                 for kb in kb_list or []:
                     existing = kb.get("headers") or {}
