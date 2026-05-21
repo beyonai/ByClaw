@@ -1122,6 +1122,8 @@ export default {
   'skillDetail.noCurlScript': 'No curl script',
   'skillDetail.generatingCurlScript': 'Generating curl script...',
 
+  'newChat.alreadyLatestSession': 'Already in the latest session',
+
   'sandbox.waitTips': 'Initializing sandbox environment, please wait...',
   'ThinkRewriteQuestion.originalQuestion': 'Original Question',
 
