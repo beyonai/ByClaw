@@ -6,7 +6,7 @@ import dayjs from 'dayjs';
 import weekday from 'dayjs/plugin/weekday';
 import localeData from 'dayjs/plugin/localeData';
 import weekOfYear from 'dayjs/plugin/weekOfYear';
-import * as echarts from 'echarts';
+import echarts from '@/utils/echarts';
 import Ellipsis from '@/pages/manager/components/Ellipsis';
 import { getAvatarUrl, getAgentChatAvatar } from '@/pages/manager/utils/agent';
 import star from '@/pages/manager/assets/star.svg';
