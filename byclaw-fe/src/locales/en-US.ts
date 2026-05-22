@@ -455,7 +455,7 @@ export default {
   'multiChoices.saveToKnowledge.confirmTitle': 'Save to knowledge base',
   'multiChoices.saveToKnowledge.fileName': 'File name',
   'multiChoices.saveToKnowledge.autoSaveCountdown': 'Auto save in {countdown} seconds',
-  'multiChoices.saveToKnowledge.defaultFileName': "{userName}'s conversation record_{timestamp}",
+  'multiChoices.saveToKnowledge.defaultFileName': "{userName}'s conversation with {agentName}_{timestamp}",
   'multiChoices.saveToWorkspace': 'Save to workspace',
   'multiChoices.saveToWorkspace.success': 'Saved to workspace successfully',
   'multiChoices.saveToWorkspace.failed': 'Failed to save to workspace',

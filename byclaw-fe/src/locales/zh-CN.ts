@@ -466,7 +466,7 @@ export default {
   'multiChoices.saveToKnowledge.confirmTitle': '保存到知识库',
   'multiChoices.saveToKnowledge.fileName': '文件名称',
   'multiChoices.saveToKnowledge.autoSaveCountdown': '{countdown} 秒后自动保存',
-  'multiChoices.saveToKnowledge.defaultFileName': '{userName}的会话记录_{timestamp}',
+  'multiChoices.saveToKnowledge.defaultFileName': '{userName}和{agentName}的会话记录_{timestamp}',
   'multiChoices.saveToWorkspace': '保存到会话空间',
   'multiChoices.saveToWorkspace.success': '保存到会话空间成功',
   'multiChoices.saveToWorkspace.failed': '保存到会话空间失败',

@@ -19,6 +19,7 @@ export interface SaveToKnowledgeModalProps {
   multiChoicesMsgId: string[];
   messageList: IMessage[];
   onSuccess?: () => void;
+  agentName?: string;
 }
 
 const tabCatalog: { key: ResourceCatalogMain; labelId: string }[] = [
@@ -27,7 +28,7 @@ const tabCatalog: { key: ResourceCatalogMain; labelId: string }[] = [
 ];
 
 function SaveToKnowledgeModal(props: SaveToKnowledgeModalProps) {
-  const { open, onClose, multiChoicesMsgId, messageList, onSuccess } = props;
+  const { open, onClose, multiChoicesMsgId, messageList, onSuccess, agentName = '数字员工' } = props;
   const intl = useIntl();
   const { userInfo } = useSelector((state: any) => state.user);
   const [activeCatalog, setActiveCatalog] = useState<ResourceCatalogMain>('personal');
@@ -38,7 +39,7 @@ function SaveToKnowledgeModal(props: SaveToKnowledgeModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [fileName, setFileName] = useState('');
-  const [countdown, setCountdown] = useState(15);
+  const [countdown, setCountdown] = useState(30);
   const [countdownTimer, setCountdownTimer] = useState<NodeJS.Timeout | null>(null);
 
   const textFile = useMemo(() => {
@@ -145,11 +146,11 @@ function SaveToKnowledgeModal(props: SaveToKnowledgeModalProps) {
       String(now.getSeconds()).padStart(2, '0');
     const defaultFileName = intl.formatMessage(
       { id: 'multiChoices.saveToKnowledge.defaultFileName' },
-      { userName, timestamp }
+      { userName, agentName, timestamp }
     );
 
     setFileName(defaultFileName);
-    setCountdown(15);
+    setCountdown(30);
     setConfirmModalOpen(true);
 
     // 启动倒计时
@@ -257,6 +258,7 @@ function SaveToKnowledgeModal(props: SaveToKnowledgeModalProps) {
       <Modal
         title={intl.formatMessage({ id: 'multiChoices.saveToKnowledge.confirmTitle' })}
         open={confirmModalOpen}
+        width={600}
         zIndex={1000}
         onCancel={() => {
           setConfirmModalOpen(false);
@@ -282,7 +284,7 @@ function SaveToKnowledgeModal(props: SaveToKnowledgeModalProps) {
             value={fileName}
             onChange={(e) => {
               setFileName(e.target.value);
-              setCountdown(15);
+              setCountdown(30);
               if (countdownTimer) {
                 clearInterval(countdownTimer);
                 setCountdownTimer(null);

@@ -73,7 +73,7 @@ function MultiChoices(props: IProps) {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false);
   const [workspaceFileName, setWorkspaceFileName] = useState('');
-  const [countdown, setCountdown] = useState(15);
+  const [countdown, setCountdown] = useState(30);
   const [countdownTimer, setCountdownTimer] = useState<NodeJS.Timeout | null>(null);
   const [workspaceSaveData, setWorkspaceSaveData] = useState<{
     userCode: string;
@@ -252,6 +252,12 @@ function MultiChoices(props: IProps) {
                         return;
                       }
 
+                      // 根据数字员工ID查询数字员工名称
+                      const agent = [...agentList, ...employeesList].find(
+                        (item) => `${item.agentId}` === `${currentSession.objectId}`
+                      );
+                      const agentName = agent?.name || '数字员工';
+
                       // 生成默认文件名
                       const now = new Date();
                       const timestamp =
@@ -264,7 +270,7 @@ function MultiChoices(props: IProps) {
                         String(now.getSeconds()).padStart(2, '0');
                       const defaultFileName = intl.formatMessage(
                         { id: 'multiChoices.saveToKnowledge.defaultFileName' },
-                        { userName, timestamp }
+                        { userName, agentName, timestamp }
                       );
 
                       const selectedMessages = multiChoicesMsgId
@@ -301,7 +307,7 @@ function MultiChoices(props: IProps) {
                       });
 
                       setWorkspaceFileName(defaultFileName);
-                      setCountdown(15);
+                      setCountdown(30);
                       setWorkspaceSaveData({
                         userCode,
                         sessionId,
@@ -489,6 +495,10 @@ function MultiChoices(props: IProps) {
         onClose={() => setSaveToKnowledgeOpen(false)}
         multiChoicesMsgId={multiChoicesMsgId}
         messageList={messageList}
+        agentName={
+          [...agentList, ...employeesList].find((item) => `${item.agentId}` === `${currentSession.objectId}`)?.name ||
+          '数字员工'
+        }
         onSuccess={() => {
           setMultiChoicesMsgId([]);
           setMultiChoicesList([]);
@@ -497,6 +507,7 @@ function MultiChoices(props: IProps) {
       <Modal
         title={intl.formatMessage({ id: 'multiChoices.saveToWorkspace' })}
         open={workspaceModalOpen}
+        width={600}
         onCancel={() => {
           setWorkspaceModalOpen(false);
           if (countdownTimer) {
@@ -528,7 +539,7 @@ function MultiChoices(props: IProps) {
             value={workspaceFileName}
             onChange={(e) => {
               setWorkspaceFileName(e.target.value);
-              setCountdown(15);
+              setCountdown(30);
               if (countdownTimer) {
                 clearInterval(countdownTimer);
                 setCountdownTimer(null);
