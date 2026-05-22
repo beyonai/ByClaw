@@ -2,7 +2,6 @@
 /* eslint-disable indent,quotes,comma-dangle,semi,quotes,@typescript-eslint/no-unused-vars,key-spacing,comma-spacing,no-trailing-spaces,max-len */
 import React, { useMemo } from 'react';
 import { Empty, Tabs, TabsProps } from 'antd';
-import { chain } from 'lodash';
 import { getToken, getssoToken } from '@/pages/manager/utils/auth';
 import ss from './Manage.module.less';
 
@@ -11,10 +10,9 @@ const emptyArr: any[] = [];
 const Manage = ({ pages = emptyArr }: { pages: any[] }) => {
   const items = useMemo<TabsProps['items']>(() => {
     return pages.map((page) => {
-      const myUrl = chain(decodeURIComponent(page.url || ''))
+      const myUrl = decodeURIComponent(page.url || '')
         .replace('{beyond-token}', getToken())
-        .replace('{sso-token}', getssoToken())
-        .value();
+        .replace('{sso-token}', getssoToken());
       return {
         key: page.key,
         label: page.name,

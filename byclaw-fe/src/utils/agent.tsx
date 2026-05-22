@@ -4,7 +4,7 @@ import { agentMap, agentTypeMap, specialAgentCode } from '@/constants/agent';
 import { IAgent, IAgentCache } from '@/typescript/agent';
 import { getPublicPath } from '@/utils';
 import { isBase64, spliceOrigin, getFileUrl } from '@/utils/file';
-import { get, trimStart, chain, concat, pick } from 'lodash';
+import { get, trimStart, concat, pick } from 'lodash';
 import { getToken, getssoToken } from '@/utils/auth';
 import { generateUniqueId } from '@/utils/math';
 import type { IFile } from '@/typescript/file';
@@ -234,10 +234,7 @@ export const agentHomeUrlHandler = (
   if (!agentHomeUrl) return '';
 
   try {
-    const myUrl = chain(agentHomeUrl)
-      .replace('{beyond-token}', getToken())
-      .replace('{sso-token}', getssoToken())
-      .value();
+    const myUrl = agentHomeUrl.replace('{beyond-token}', getToken()).replace('{sso-token}', getssoToken());
 
     const protocolRegex = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
     let urlWithProtocol = myUrl;
