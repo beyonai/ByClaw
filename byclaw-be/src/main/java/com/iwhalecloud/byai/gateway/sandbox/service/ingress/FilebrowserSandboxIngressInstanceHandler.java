@@ -27,8 +27,11 @@ public class FilebrowserSandboxIngressInstanceHandler implements SandboxIngressI
     @Override
     public String resolveTargetPath(String requestPath) {
         String resolvedPath;
-        if (requestPath == null || requestPath.isBlank() || "/".equals(requestPath)) {
+        if (requestPath == null || requestPath.isBlank()) {
             resolvedPath = "/filebrowser";
+        }
+        else if ("/".equals(requestPath)) {
+            resolvedPath = "/filebrowser/";
         }
         else if (requestPath.startsWith("/filebrowser")) {
             resolvedPath = requestPath;
