@@ -63,26 +63,8 @@ server {
         gzip off;
     }
 
-    location = /filebrowser {
+    location /filebrowser {
         proxy_pass {{PROXY_HTTP}}/byaiService/filebrowser;
-
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $host;
-        proxy_set_header X-Forwarded-Port $server_port;
-        proxy_set_header Cookie $http_cookie;
-        proxy_cookie_path /byaiService/filebrowser /filebrowser;
-        proxy_cookie_flags ~ samesite=lax;
-
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-
-    location /filebrowser/ {
-        proxy_pass {{PROXY_HTTP}}/byaiService/filebrowser/;
 
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
