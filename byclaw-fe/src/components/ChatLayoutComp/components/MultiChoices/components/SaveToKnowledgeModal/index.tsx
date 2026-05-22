@@ -28,8 +28,9 @@ const tabCatalog: { key: ResourceCatalogMain; labelId: string }[] = [
 ];
 
 function SaveToKnowledgeModal(props: SaveToKnowledgeModalProps) {
-  const { open, onClose, multiChoicesMsgId, messageList, onSuccess, agentName = '数字员工' } = props;
+  const { open, onClose, multiChoicesMsgId, messageList, onSuccess, agentName } = props;
   const intl = useIntl();
+  const resolvedAgentName = agentName || intl.formatMessage({ id: 'common.digitalEmployee' });
   const { userInfo } = useSelector((state: any) => state.user);
   const [activeCatalog, setActiveCatalog] = useState<ResourceCatalogMain>('personal');
   const [keyword, setKeyword] = useState('');
@@ -146,7 +147,7 @@ function SaveToKnowledgeModal(props: SaveToKnowledgeModalProps) {
       String(now.getSeconds()).padStart(2, '0');
     const defaultFileName = intl.formatMessage(
       { id: 'multiChoices.saveToKnowledge.defaultFileName' },
-      { userName, agentName, timestamp }
+      { userName, agentName: resolvedAgentName, timestamp }
     );
 
     setFileName(defaultFileName);

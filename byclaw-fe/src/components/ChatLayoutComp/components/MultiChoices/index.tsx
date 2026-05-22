@@ -256,7 +256,7 @@ function MultiChoices(props: IProps) {
                       const agent = [...agentList, ...employeesList].find(
                         (item) => `${item.agentId}` === `${currentSession.objectId}`
                       );
-                      const agentName = agent?.name || '数字员工';
+                      const agentName = agent?.name || intl.formatMessage({ id: 'common.digitalEmployee' });
 
                       // 生成默认文件名
                       const now = new Date();
@@ -497,7 +497,7 @@ function MultiChoices(props: IProps) {
         messageList={messageList}
         agentName={
           [...agentList, ...employeesList].find((item) => `${item.agentId}` === `${currentSession.objectId}`)?.name ||
-          '数字员工'
+          intl.formatMessage({ id: 'common.digitalEmployee' })
         }
         onSuccess={() => {
           setMultiChoicesMsgId([]);
