@@ -83,7 +83,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   const [myAgentType, setMyAgentType] = useState<IAgentType>(agentType);
   const [sessionSelectOpen, setSessionSelectOpen] = useState<boolean>(false);
 
-  const { EventEmitter, setAgentId, platform, agentId, uploadFileConfig } = useGlobal();
+  const { EventEmitter, setAgentId, platform, agentId } = useGlobal();
   const isPC = platform === Platform.pc;
 
   /** 对话的额外参数 */
@@ -347,7 +347,6 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                     isBottom={isBottom}
                     cannotAt={cannotAt}
                     sessionId={sessionId}
-                    uploadFileConfig={uploadFileConfig}
                     {...queryInputProps}
                   />
                 </div>

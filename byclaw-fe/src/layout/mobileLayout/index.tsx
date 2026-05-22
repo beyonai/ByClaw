@@ -10,6 +10,7 @@ import { useSelector, Outlet } from '@umijs/max';
 import { getHistoryState } from '@/utils/browser';
 
 import { EventEmitter$Cls } from '@/utils/eventEmitter';
+import useAgentUploadFileConfig from '@/hooks/useAgentUploadFileConfig';
 
 import AntdProvider from '@/layout/components/provider/antd';
 import antdMobileTheme from '@/styles/antdMobileTheme';
@@ -60,6 +61,11 @@ function MobileLayout() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
+  const getAgentUploadFileConfig = useAgentUploadFileConfig(employeesList);
+  const uploadFileConfig = React.useMemo(() => {
+    return getAgentUploadFileConfig(agentId);
+  }, [agentId, getAgentUploadFileConfig]);
+
   return (
     <>
       <AntdProvider theme={antdMobileTheme}>
@@ -70,6 +76,7 @@ function MobileLayout() {
             setSessionId,
             agentId,
             agentInfo: curAgentInfo,
+            uploadFileConfig,
             setAgentId,
             EventEmitter: myEventEmitter,
           }}
