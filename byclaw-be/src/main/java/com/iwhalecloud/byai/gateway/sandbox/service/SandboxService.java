@@ -183,6 +183,20 @@ public class SandboxService {
      * <p>调用方已确认当前 worker 不可用时使用：先终结旧活跃记录，释放 DB 唯一键，再重新走标准启动流程。</p>
      */
     public SandboxLaunchData restartSandboxAfterRemoteExit(String userCode, Long resourceId, String targetAgentType) {
+        return restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType, true);
+    }
+
+    /**
+     * 远端沙箱退出后的重拉流程，但不等待 worker 就绪。
+     * 由调用方自行控制等待节奏时使用，避免长时间阻塞在单次等待里。
+     */
+    public SandboxLaunchData restartSandboxAfterRemoteExitWithoutWait(String userCode, Long resourceId,
+        String targetAgentType) {
+        return restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType, false);
+    }
+
+    private SandboxLaunchData restartSandboxAfterRemoteExit(String userCode, Long resourceId, String targetAgentType,
+        boolean waitForWorkerReady) {
         SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId);
         String lockKey = buildLaunchLockKey(userCode, routing);
         String lockValue = UUID.randomUUID().toString();
@@ -213,7 +227,7 @@ public class SandboxService {
             }
 
             SandboxLaunchData launchData = doLaunchSandbox(userCode, resourceId, routing);
-            if (launchData != null && StringUtils.isNotBlank(targetAgentType)) {
+            if (waitForWorkerReady && launchData != null && StringUtils.isNotBlank(targetAgentType)) {
                 waitWorkerReadySync(targetAgentType);
             }
             LOGGER.info("重拉远端已退出沙箱完成，用户编码：{}，资源ID：{}，新sandboxId：{}，endpoint：{}",
@@ -364,9 +378,11 @@ public class SandboxService {
         }
     }
 
-    private void waitWorkerReadySync(String targetAgentType) {
-        LOGGER.debug("开始等待 Gateway worker 就绪，targetAgentType：{}", targetAgentType);
-        int maxAttempts = (int) (WORKER_READY_TIMEOUT_MS / WORKER_READY_POLL_INTERVAL_MS);
+    public boolean waitWorkerReadySync(String targetAgentType, long timeoutMs) {
+        LOGGER.debug("开始等待 Gateway worker 就绪，targetAgentType：{}，timeoutMs：{}", targetAgentType, timeoutMs);
+        long safeTimeoutMs = Math.max(1L, timeoutMs);
+        int maxAttempts = (int) Math.max(1L,
+            (safeTimeoutMs + WORKER_READY_POLL_INTERVAL_MS - 1) / WORKER_READY_POLL_INTERVAL_MS);
         RetryConfig config = RetryConfig.custom()
             .maxAttempts(maxAttempts)
             .waitDuration(Duration.ofMillis(WORKER_READY_POLL_INTERVAL_MS))
@@ -381,14 +397,23 @@ public class SandboxService {
                 () -> gatewayWorkerRegistry.hasOnlineAgentType(targetAgentType, true)).get();
             if (result != null && result.exists) {
                 LOGGER.info("Gateway worker 已就绪，targetAgentType：{}", targetAgentType);
-                return;
+                return true;
             }
         }
         catch (Throwable e) {
-            throw new BdpRuntimeException("等待 Gateway worker 就绪超时: " + targetAgentType, e);
+            LOGGER.warn("等待 Gateway worker 就绪超时，targetAgentType：{}，timeoutMs：{}，原因：{}", targetAgentType,
+                timeoutMs, e.getMessage());
+            return false;
         }
 
-        throw new BdpRuntimeException("等待 Gateway worker 就绪超时: " + targetAgentType);
+        LOGGER.warn("等待 Gateway worker 就绪超时，targetAgentType：{}，timeoutMs：{}", targetAgentType, timeoutMs);
+        return false;
+    }
+
+    private void waitWorkerReadySync(String targetAgentType) {
+        if (!waitWorkerReadySync(targetAgentType, WORKER_READY_TIMEOUT_MS)) {
+            throw new BdpRuntimeException("等待 Gateway worker 就绪超时: " + targetAgentType);
+        }
     }
 
     /**
