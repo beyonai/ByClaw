@@ -71,6 +71,10 @@ export default defineConfig({
       target,
       changeOrigin: true,
     },
+    [`/filebrowser`]: {
+      target: 'http://127.0.0.1:8086/byaiService/filebrowser',
+      changeOrigin: true,
+    },
   },
   chainWebpack(config: any) {
     // 关键修复：强制设置模块解析条件顺序
