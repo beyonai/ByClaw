@@ -10,7 +10,7 @@ import lombok.Setter;
 @Setter
 public class DatasetImportDto {
 
-    private String resourceSourcePkId;
+    private Long resourceSourcePkId;
 
     private String resourceName;
 

@@ -38,6 +38,7 @@ import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxLeasePolicy;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance;
+import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import com.iwhalecloud.byai.manager.vo.index.AuthDigitEmployVo;
@@ -468,21 +469,23 @@ public class SandboxService {
         String boundGatewayToken = StringUtils.defaultIfBlank(launchData.getGatewayToken(),
             resolveLaunchGatewayToken(userCode, launchContext.getSandboxType(), launchData.getSandboxId(),
                 gatewayToken));
-        String endpoint = new SandboxEndpointUrlCustomizer(boundGatewayToken)
-            .toAccessEndpoint(launchData.getEndpoint());
+        Map<String, String> instanceEndpoints = customizeLaunchInstanceEndpoints(launchData, boundGatewayToken);
+        String endpoint = SandboxEndpointRecordSupport.resolvePrimaryEndpoint(instanceEndpoints);
+        String storedEndpoint = SandboxEndpointRecordSupport.toStorageValue(instanceEndpoints, endpoint);
         launchData.setEndpoint(endpoint);
         launchData.setEndpoints(StringUtils.isNotBlank(endpoint) ? List.of(endpoint) : List.of());
+        launchData.setInstanceEndpoints(instanceEndpoints);
 
         Date lastAccessTime = new Date();
         Date remoteExpiresAt = launchData.getRemoteExpiresAt();
         Date lastRenewAt = remoteExpiresAt != null ? lastAccessTime : null;
         Date nextRenewAt = computeNextRenewAt(remoteExpiresAt);
-        int updated = sandboxRecordMapper.updateLaunchSuccess(record.getId(), launchData.getSandboxId(), endpoint,
+        int updated = sandboxRecordMapper.updateLaunchSuccess(record.getId(), launchData.getSandboxId(), storedEndpoint,
             boundGatewayToken, launchData.getTimeoutSeconds(), remoteExpiresAt, lastRenewAt, nextRenewAt,
             lastAccessTime, record.getLockVersion());
 
         record.setStatus(STATUS_RUNNING);
-        record.setEndpoint(endpoint);
+        record.setEndpoint(storedEndpoint);
         record.setSandboxId(launchData.getSandboxId());
         record.setGatewayToken(boundGatewayToken);
         record.setTimeoutSeconds(launchData.getTimeoutSeconds());
@@ -498,7 +501,7 @@ public class SandboxService {
         incrementVersions(record, true);
         sandboxMetadataCache.put(toSandboxInfo(record));
 
-        registerSandboxEndpoint(userCode, routing, endpoint, boundGatewayToken);
+        registerSandboxEndpoint(userCode, routing, storedEndpoint, boundGatewayToken);
         LOGGER.info("沙箱启动成功，记录：{}，endpoint：{}，timeoutSeconds：{}，remoteExpiresAt：{}，nextRenewAt：{}",
             sandboxRef(record), endpoint, launchData.getTimeoutSeconds(), remoteExpiresAt, nextRenewAt);
         return launchData;
@@ -506,6 +509,7 @@ public class SandboxService {
 
     private SandboxLaunchData buildLaunchData(SsSandboxRecord record) {
         SandboxLaunchData launchData = new SandboxLaunchData();
+        Map<String, String> instanceEndpoints = normalizeRecordInstanceEndpoints(record);
         String endpoint = normalizeRecordEndpoint(record);
         String gatewayToken = resolveRecordGatewayToken(record);
         launchData.setEndpoint(endpoint);
@@ -514,6 +518,7 @@ public class SandboxService {
         launchData.setTimeoutSeconds(record.getTimeoutSeconds());
         launchData.setRemoteExpiresAt(record.getRemoteExpiresAt());
         launchData.setEndpoints(StringUtils.isNotBlank(endpoint) ? List.of(endpoint) : List.of());
+        launchData.setInstanceEndpoints(instanceEndpoints);
         return launchData;
     }
 
@@ -1123,20 +1128,22 @@ public class SandboxService {
         Date nextRenewAt = computeNextRenewAt(remoteExpiresAt);
         String status = mapRemoteStateToRecordStatus(remoteInstance.getState());
         String gatewayToken = resolveReconciledGatewayToken(record, remoteInstance);
-        String endpoint = normalizeRecordEndpoint(record.getEndpoint(), gatewayToken);
-        if (!hasReconcileChange(record, status, endpoint, gatewayToken, remoteExpiresAt, remoteCreatedAt,
+        Map<String, String> instanceEndpoints = normalizeRecordInstanceEndpoints(record.getEndpoint(), gatewayToken);
+        String endpoint = SandboxEndpointRecordSupport.resolvePrimaryEndpoint(instanceEndpoints);
+        String storedEndpoint = SandboxEndpointRecordSupport.toStorageValue(instanceEndpoints, endpoint);
+        if (!hasReconcileChange(record, status, storedEndpoint, gatewayToken, remoteExpiresAt, remoteCreatedAt,
             timeoutSeconds, nextRenewAt)) {
             return;
         }
         Date updateTime = new Date();
-        int updated = sandboxRecordMapper.updateReconcileSuccess(record.getId(), status, endpoint, gatewayToken,
+        int updated = sandboxRecordMapper.updateReconcileSuccess(record.getId(), status, storedEndpoint, gatewayToken,
             remoteExpiresAt, remoteCreatedAt, timeoutSeconds, nextRenewAt, updateTime, record.getLockVersion());
         if (updated == 0) {
             LOGGER.warn("沙箱一致性检测写入跳过，记录已被并发更新或处于不可同步状态：{}", sandboxRef(record));
             return;
         }
         record.setStatus(status);
-        record.setEndpoint(endpoint);
+        record.setEndpoint(storedEndpoint);
         record.setGatewayToken(gatewayToken);
         record.setRemoteExpiresAt(remoteExpiresAt);
         record.setCreateTime(remoteCreatedAt != null ? remoteCreatedAt : record.getCreateTime());
@@ -1146,10 +1153,10 @@ public class SandboxService {
         incrementVersions(record, true);
     }
 
-    private boolean hasReconcileChange(SsSandboxRecord record, String status, String endpoint, String gatewayToken,
+    private boolean hasReconcileChange(SsSandboxRecord record, String status, String endpointStorage, String gatewayToken,
         Date remoteExpiresAt, Date remoteCreatedAt, Integer timeoutSeconds, Date nextRenewAt) {
         return !Objects.equals(record.getStatus(), status)
-            || !Objects.equals(record.getEndpoint(), endpoint)
+            || !Objects.equals(record.getEndpoint(), endpointStorage)
             || !Objects.equals(record.getGatewayToken(), gatewayToken)
             || !Objects.equals(record.getRemoteExpiresAt(), remoteExpiresAt)
             || (remoteCreatedAt != null && !Objects.equals(record.getCreateTime(), remoteCreatedAt))
@@ -1298,7 +1305,9 @@ public class SandboxService {
 
     private void registerSandboxEndpoint(String userCode, SandboxLaunchRouting routing, String endpoint,
         String gatewayToken) {
-        if (StringUtils.isBlank(endpoint)) {
+        String openclawEndpoint = SandboxEndpointRecordSupport.resolveInstanceEndpoint(
+            normalizeRecordInstanceEndpoints(endpoint, gatewayToken), SandboxEndpointRecordSupport.OPENCLAW_INSTANCE);
+        if (StringUtils.isBlank(openclawEndpoint)) {
             LOGGER.warn("沙箱endpoint为空，跳过服务注册，用户编码：{}，沙箱类型：{}", userCode,
                 routing != null ? routing.getSandboxType() : null);
             return;
@@ -1312,7 +1321,7 @@ public class SandboxService {
 
         try {
             SandboxEndpointRegistryTarget target = new SandboxEndpointRegistryTargetResolver()
-                .resolve(endpoint);
+                .resolve(openclawEndpoint);
             Map<String, Object> metadata = new SandboxEndpointRegistryMetadataFactory(gatewayToken)
                 .build();
             cleanupSandboxRegistryKeys(serviceName);
@@ -1320,11 +1329,11 @@ public class SandboxService {
             ServiceRegistry registry = new ServiceRegistry(redisClient);
             registry.registerOnly(serviceName, target.protocol(), target.host(), target.port(), target.pathPrefix(), 1, metadata);
             LOGGER.info("沙箱endpoint注册成功，serviceName={}，endpoint={}，protocol={}，host={}，port={}，pathPrefix={}",
-                serviceName, endpoint, target.protocol(), target.host(), target.port(), target.pathPrefix());
+                serviceName, openclawEndpoint, target.protocol(), target.host(), target.port(), target.pathPrefix());
         }
         catch (Exception e) {
             LOGGER.error("沙箱endpoint注册失败，不影响启动返回，serviceName={}，endpoint={}，reason={}",
-                serviceName, endpoint, e.getMessage(), e);
+                serviceName, openclawEndpoint, e.getMessage(), e);
         }
     }
 
@@ -1462,6 +1471,7 @@ public class SandboxService {
             return null;
         }
         String gatewayToken = resolveRecordGatewayToken(record);
+        Map<String, String> instanceEndpoints = normalizeRecordInstanceEndpoints(record);
         String endpoint = normalizeRecordEndpoint(record);
         List<String> endpoints = StringUtils.isNotBlank(endpoint) ? List.of(endpoint) : List.of();
         return SandboxInfo.builder()
@@ -1469,6 +1479,7 @@ public class SandboxService {
             .userCode(record.getUserCode())
             .sandboxType(record.getSandboxType())
             .endpoints(endpoints)
+            .instanceEndpoints(instanceEndpoints)
             .gatewayToken(gatewayToken)
             .timeoutSeconds(record.getTimeoutSeconds())
             .remoteExpiresAt(record.getRemoteExpiresAt())
@@ -1498,7 +1509,8 @@ public class SandboxService {
         if (record == null || StringUtils.isBlank(record.getEndpoint())) {
             return record != null ? record.getEndpoint() : null;
         }
-        return normalizeRecordEndpoint(record.getEndpoint(), resolveRecordGatewayToken(record));
+        return SandboxEndpointRecordSupport.resolvePrimaryEndpoint(
+            normalizeRecordInstanceEndpoints(record.getEndpoint(), resolveRecordGatewayToken(record)));
     }
 
     private String normalizeRecordEndpoint(String endpoint, String gatewayToken) {
@@ -1533,7 +1545,8 @@ public class SandboxService {
             return null;
         }
         try {
-            String rawQuery = URI.create(endpoint).getRawQuery();
+            String rawQuery = URI.create(StringUtils.defaultIfBlank(
+                SandboxEndpointRecordSupport.resolvePrimaryEndpoint(endpoint), endpoint)).getRawQuery();
             if (StringUtils.isBlank(rawQuery)) {
                 return null;
             }
@@ -1548,6 +1561,62 @@ public class SandboxService {
             LOGGER.warn("解析沙箱endpoint token失败，endpoint：{}，原因：{}", endpoint, e.getMessage());
         }
         return null;
+    }
+
+    private Map<String, String> customizeLaunchInstanceEndpoints(SandboxLaunchData launchData, String gatewayToken) {
+        Map<String, String> existing = launchData != null ? launchData.getInstanceEndpoints() : null;
+        java.util.LinkedHashMap<String, String> source = SandboxEndpointRecordSupport.normalizeInstanceEndpoints(existing);
+        if (source.isEmpty()) {
+            String endpoint = launchData != null ? StringUtils.trimToNull(launchData.getEndpoint()) : null;
+            if (endpoint == null && launchData != null && launchData.getEndpoints() != null && !launchData.getEndpoints().isEmpty()) {
+                endpoint = StringUtils.trimToNull(launchData.getEndpoints().getFirst());
+            }
+            if (endpoint != null) {
+                source.put(SandboxEndpointRecordSupport.OPENCLAW_INSTANCE, endpoint);
+            }
+        }
+        java.util.LinkedHashMap<String, String> customized = new java.util.LinkedHashMap<>();
+        source.forEach((instance, endpoint) -> {
+            String endpointValue = customizeInstanceEndpoint(instance, endpoint, gatewayToken);
+            if (StringUtils.isNotBlank(endpointValue)) {
+                customized.put(instance, endpointValue);
+            }
+        });
+        return SandboxEndpointRecordSupport.normalizeInstanceEndpoints(customized);
+    }
+
+    private Map<String, String> normalizeRecordInstanceEndpoints(SsSandboxRecord record) {
+        return normalizeRecordInstanceEndpoints(record != null ? record.getEndpoint() : null,
+            resolveRecordGatewayToken(record));
+    }
+
+    private Map<String, String> normalizeRecordInstanceEndpoints(String endpointField, String gatewayToken) {
+        Map<String, String> parsed = SandboxEndpointRecordSupport.parseInstanceEndpoints(endpointField);
+        java.util.LinkedHashMap<String, String> normalized = new java.util.LinkedHashMap<>();
+        parsed.forEach((instance, endpoint) -> {
+            String endpointValue = bindGatewayToken(endpoint, gatewayToken);
+            if (StringUtils.isNotBlank(endpointValue)) {
+                normalized.put(instance, endpointValue);
+            }
+        });
+        return SandboxEndpointRecordSupport.normalizeInstanceEndpoints(normalized);
+    }
+
+    private String customizeInstanceEndpoint(String instance, String endpoint, String gatewayToken) {
+        if (StringUtils.isBlank(endpoint)) {
+            return endpoint;
+        }
+        if (StringUtils.equalsIgnoreCase(instance, SandboxEndpointRecordSupport.OPENCLAW_INSTANCE)) {
+            return new SandboxEndpointUrlCustomizer(gatewayToken).toAccessEndpoint(endpoint);
+        }
+        return bindGatewayToken(endpoint, gatewayToken);
+    }
+
+    private String bindGatewayToken(String endpoint, String gatewayToken) {
+        if (StringUtils.isBlank(endpoint) || StringUtils.isBlank(gatewayToken)) {
+            return endpoint;
+        }
+        return new SandboxEndpointUrlCustomizer(gatewayToken).bindToken(endpoint);
     }
 
     private java.time.LocalDateTime toLocalDateTime(Date date) {

@@ -17,6 +17,7 @@ import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMappe
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
@@ -123,6 +124,7 @@ public class SandboxController {
         result.put("sandboxType", sandboxInfo.getSandboxType());
         result.put("sandboxId", sandboxInfo.getSandboxId());
         result.put("endpoints", sandboxInfo.getEndpoints());
+        result.put("instanceEndpoints", sandboxInfo.getInstanceEndpoints());
         result.put("token", sandboxInfo.getGatewayToken());
         result.put("remoteExpiresAt", sandboxInfo.getRemoteExpiresAt());
         result.put("lastHeartbeatTime", sandboxInfo.getLastHeartbeatTime());
@@ -164,6 +166,7 @@ public class SandboxController {
                 result.put("sandboxType", sandbox.getSandboxType());
                 result.put("sandboxId", sandbox.getSandboxId());
                 result.put("endpoints", sandbox.getEndpoints());
+                result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
                 result.put("token", sandbox.getGatewayToken());
                 data.add(result);
             }
@@ -243,6 +246,9 @@ public class SandboxController {
 
         int offset = (pageIndex - 1) * pageSize;
         List<SsSandboxRecord> list = sandboxRecordMapper.selectByPage(keyword, status, offset, pageSize);
+        list.forEach(record -> record.setEndpoint(
+            SandboxEndpointRecordSupport.resolveInstanceEndpoint(record.getEndpoint(),
+                SandboxEndpointRecordSupport.OPENCLAW_INSTANCE)));
         int total = sandboxRecordMapper.countByCondition(keyword, status);
         int totalPage = (total + pageSize - 1) / pageSize;
 

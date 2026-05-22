@@ -1,0 +1,51 @@
+package com.iwhalecloud.byai.gateway.sandbox.controller;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import com.iwhalecloud.byai.gateway.sandbox.service.ingress.SandboxIngressFacade;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+class OpensandboxIngressControllerTest {
+
+    @Test
+    void proxyFilebrowser_extractsRequestPathFromIngressRoute() throws Exception {
+        SandboxIngressFacade facade = org.mockito.Mockito.mock(SandboxIngressFacade.class);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new OpensandboxIngressController(facade)).build();
+
+        mockMvc.perform(get("/filebrowser/files/list").queryParam("foo", "bar"))
+            .andExpect(status().isOk());
+
+        verify(facade).forward(eq("filebrowser"), eq("/files/list"), any(), any());
+    }
+
+    @Test
+    void prefixedFilebrowserRouteIsNotSupported() throws Exception {
+        SandboxIngressFacade facade = org.mockito.Mockito.mock(SandboxIngressFacade.class);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new OpensandboxIngressController(facade)).build();
+
+        mockMvc.perform(get("/sandboxes/ingress/filebrowser/files/list").queryParam("foo", "bar"))
+            .andExpect(status().isNotFound());
+
+        verify(facade, never()).forward(any(), any(), any(), any());
+    }
+
+    @Test
+    void nonIngressRootRouteIsNotIntercepted() throws Exception {
+        SandboxIngressFacade facade = org.mockito.Mockito.mock(SandboxIngressFacade.class);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new OpensandboxIngressController(facade)).build();
+
+        mockMvc.perform(get("/chat/superAgentChat"))
+            .andExpect(status().isNotFound());
+
+        verify(facade, never()).forward(any(), any(), any(), any());
+    }
+}
