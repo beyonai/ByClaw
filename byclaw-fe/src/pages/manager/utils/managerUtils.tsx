@@ -2,7 +2,6 @@
 import React, { Children } from 'react';
 import { Tooltip } from 'antd';
 import { getToken, getssoToken } from '@/pages/manager/utils/auth';
-import { chain } from 'lodash';
 import Ellipsis from '@/pages/manager/components/Ellipsis';
 
 const defaultValueFormatter = (values: any[]) => values.join(',');
@@ -32,10 +31,7 @@ export function getFilterParams(keyMapOrKeys: any, filter: any, rawValuesFormate
 }
 
 export const getIframeUrl = (url: string) => {
-  const res = chain(url || '')
-    .replace('{beyond-token}', getToken())
-    .replace('{sso-token}', getssoToken())
-    .value();
+  const res = (url || '').replace('{beyond-token}', getToken()).replace('{sso-token}', getssoToken());
   return res;
 };
 
