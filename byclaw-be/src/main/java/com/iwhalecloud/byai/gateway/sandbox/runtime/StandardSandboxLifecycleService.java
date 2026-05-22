@@ -76,6 +76,7 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
             List<String> endpoints = info.getEndpoints();
             data.setEndpoint(CollectionUtils.isNotEmpty(endpoints) ? endpoints.getFirst() : "");
             data.setEndpoints(endpoints);
+            data.setInstanceEndpoints(info.getInstanceEndpoints());
             data.setServicePort(info.getServicePort());
             data.setEndpointHeaders(info.getEndpointHeaders());
             data.setSandboxId(info.getSandboxId());
@@ -137,6 +138,7 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
                 .userCode(userCode)
                 .sandboxType(sandboxType)
                 .endpoints(endpoints)
+                .instanceEndpoints(instance.getInstanceEndpoints())
                 .gatewayToken(SandboxRuntimeRequestFactory.resolveGatewayToken(instance, request))
                 .servicePort(spec.getServicePort())
                 .endpointHeaders(runtimeProvider.resolveEndpointHeaders(instance))

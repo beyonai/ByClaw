@@ -22,6 +22,8 @@ public class SandboxRuntimeInstance {
 
     private List<String> endpoints;
 
+    private Map<String, String> instanceEndpoints;
+
     private Map<String, String> endpointHeaders;
 
     private OffsetDateTime createdAt;
