@@ -5,6 +5,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import java.net.URI;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -25,6 +27,51 @@ class OpensandboxIngressControllerTest {
             .andExpect(status().isOk());
 
         verify(facade).forward(eq("filebrowser"), eq("/files/list"), any(), any());
+    }
+
+    @Test
+    void proxyFilebrowser_preservesTrailingSlashInRequestPath() throws Exception {
+        SandboxIngressFacade facade = org.mockito.Mockito.mock(SandboxIngressFacade.class);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new OpensandboxIngressController(facade)).build();
+
+        mockMvc.perform(get("/filebrowser/api/usage/"))
+            .andExpect(status().isOk());
+
+        verify(facade).forward(eq("filebrowser"), eq("/api/usage/"), any(), any());
+    }
+
+    @Test
+    void proxyFilebrowser_preservesRequestPathBehindContextPath() throws Exception {
+        SandboxIngressFacade facade = org.mockito.Mockito.mock(SandboxIngressFacade.class);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new OpensandboxIngressController(facade)).build();
+
+        mockMvc.perform(get("/byaiService/filebrowser/api/usage/")
+                .contextPath("/byaiService"))
+            .andExpect(status().isOk());
+
+        verify(facade).forward(eq("filebrowser"), eq("/api/usage/"), any(), any());
+    }
+
+    @Test
+    void proxyFilebrowser_preservesEncodedRequestPath() throws Exception {
+        SandboxIngressFacade facade = org.mockito.Mockito.mock(SandboxIngressFacade.class);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new OpensandboxIngressController(facade)).build();
+
+        mockMvc.perform(get(URI.create("/filebrowser/files/a%2Fb.txt")))
+            .andExpect(status().isOk());
+
+        verify(facade).forward(eq("filebrowser"), eq("/files/a%2Fb.txt"), any(), any());
+    }
+
+    @Test
+    void proxyFilebrowser_preservesRootTrailingSlash() throws Exception {
+        SandboxIngressFacade facade = org.mockito.Mockito.mock(SandboxIngressFacade.class);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new OpensandboxIngressController(facade)).build();
+
+        mockMvc.perform(get("/filebrowser/"))
+            .andExpect(status().isOk());
+
+        verify(facade).forward(eq("filebrowser"), eq("/"), any(), any());
     }
 
     @Test

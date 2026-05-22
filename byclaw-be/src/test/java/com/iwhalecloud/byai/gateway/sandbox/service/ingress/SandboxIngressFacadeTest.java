@@ -64,6 +64,46 @@ class SandboxIngressFacadeTest {
     }
 
     @Test
+    void forward_filebrowserRequest_preservesTrailingSlashAfterPrefix() throws Exception {
+        try (TestHttpServer server = new TestHttpServer()) {
+            SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");
+
+            MockHttpServletRequest request = new MockHttpServletRequest("GET",
+                "/filebrowser/api/usage/");
+            request.setScheme("http");
+            request.setServerName("gateway.example.test");
+            request.setRemoteAddr("127.0.0.1");
+            request.addHeader("Beyond-Token", "header-token");
+
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            facade.forward("filebrowser", "/api/usage/", request, response);
+
+            assertThat(response.getStatus()).isEqualTo(200);
+            assertThat(server.lastPath()).isEqualTo("/v1/sandboxes/sb-1/proxy/8081/filebrowser/api/usage/");
+        }
+    }
+
+    @Test
+    void forward_filebrowserRootRequest_preservesRootTrailingSlash() throws Exception {
+        try (TestHttpServer server = new TestHttpServer()) {
+            SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");
+
+            MockHttpServletRequest request = new MockHttpServletRequest("GET",
+                "/filebrowser/");
+            request.setScheme("http");
+            request.setServerName("gateway.example.test");
+            request.setRemoteAddr("127.0.0.1");
+            request.addHeader("Beyond-Token", "header-token");
+
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            facade.forward("filebrowser", "/", request, response);
+
+            assertThat(response.getStatus()).isEqualTo(200);
+            assertThat(server.lastPath()).isEqualTo("/v1/sandboxes/sb-1/proxy/8081/filebrowser/");
+        }
+    }
+
+    @Test
     void forward_unknownInstance_passthroughsOriginalProxyPath() throws Exception {
         try (TestHttpServer server = new TestHttpServer()) {
             SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");
