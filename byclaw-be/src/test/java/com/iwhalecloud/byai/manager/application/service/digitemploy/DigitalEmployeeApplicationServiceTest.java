@@ -30,6 +30,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
 import com.iwhalecloud.byai.manager.vo.digitemploy.SetDefaultDigitalEmployeeResultVo;
+import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeePageVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceAuthContextService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -334,6 +335,22 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(result).isSameAs(pageInfo);
         assertThat(qoCaptor.getValue().getDefaultDigEmployeeId()).isEqualTo(100L);
         assertThat(qoCaptor.getValue().getDefaultSuperAssistantResourceCode()).isEqualTo("zhangsan_main");
+    }
+
+    @Test
+    void selectDigitalEmployeeByQo_returnsOwnerTypeInPageVo() {
+        DigitalEmployeeQo qo = new DigitalEmployeeQo();
+        PageInfo<DigitalEmployeePageVo> pageInfo = new PageInfo<>();
+        DigitalEmployeePageVo pageVo = new DigitalEmployeePageVo();
+        pageVo.setOwnerType(OwnerType.ENTERPRISE);
+        pageInfo.setList(List.of(pageVo));
+        when(ssResExtDigEmployeeService.selectDigitalEmployeeByQo(any(DigitalEmployeeQo.class)))
+            .thenReturn(pageInfo);
+
+        PageInfo<DigitalEmployeePageVo> result = service.selectDigitalEmployeeByQo(qo);
+
+        assertThat(result.getList()).hasSize(1);
+        assertThat(result.getList().get(0).getOwnerType()).isEqualTo(OwnerType.ENTERPRISE);
     }
 
     @Test
