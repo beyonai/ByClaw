@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -12,7 +12,15 @@ import {
 } from "./main-workspace-seed.js";
 import { SUBAGENT_ROUTING_FILENAME, SUBAGENT_ROUTING_MARKER } from "./subagent-routing-seed.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
-import { buildBootstrapMd } from "./workspace-seed.js";
+
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await access(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function mockApi(mainWorkspace: string) {
   return {
@@ -48,7 +56,7 @@ describe("main-workspace-seed", () => {
     expect(resolveEffectiveMainAgentsMdMode({ mainAgentsMdMode: "off" })).toBe("off");
   });
 
-  it("seedMainAgentAgentsMd writes managed no-op BOOTSTRAP.md even when mainAgentsMdMode is off", async () => {
+  it("seedMainAgentAgentsMd does not write BOOTSTRAP.md", async () => {
     const ws = await mkdtemp(path.join(tmpdir(), "baiying-main-bootstrap-"));
     const api = mockApi(ws) as any;
 
@@ -58,8 +66,7 @@ describe("main-workspace-seed", () => {
       log: { warn: vi.fn(), info: vi.fn() },
     });
 
-    const bootstrap = await readFile(path.join(ws, "BOOTSTRAP.md"), "utf8");
-    expect(bootstrap).toBe(buildBootstrapMd());
+    expect(await pathExists(path.join(ws, "BOOTSTRAP.md"))).toBe(false);
   });
 
   it("seedMainAgentAgentsMd if_missing writes once", async () => {

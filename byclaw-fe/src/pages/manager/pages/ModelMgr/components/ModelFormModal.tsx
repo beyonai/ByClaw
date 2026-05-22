@@ -29,7 +29,8 @@ const ModelFormModal: React.FC<Props> = (props) => {
   const intl = useIntl();
   const dispatch = useDispatch();
   const [form] = Form.useForm();
-  const [tokenVisible, setTokenVisible] = useState(false);
+
+  const [tokenVisible, setTokenVisible] = useState(type === 'add');
   const [abilityOptions, setAbilityOptions] = useState<Array<{ label: string; value: string }>>([]);
   const [systemOptions, setSystemOptions] = useState<Array<{ label: string; value: string }>>([]);
   const [modelTypeOptions, setModelTypeOptions] = useState<Array<{ label: string; value: string }>>(() => [
@@ -159,7 +160,7 @@ const ModelFormModal: React.FC<Props> = (props) => {
 
   useEffect(() => {
     if (!open) return;
-    setTokenVisible(false);
+    setTokenVisible(type === 'add');
     resetDebugState();
     // 每次打开弹窗先清空；会根据详情模板/自动生成策略再写入
     setDebugInputMode('auto');

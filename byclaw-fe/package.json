@@ -111,6 +111,7 @@
     "@types/request-ip": "^0.0.37",
     "@umijs/fabric": "^4.0.1",
     "babel-loader": "^9.2.1",
+    "babel-plugin-lodash": "^3.3.4",
     "chalk": "^4.1.2",
     "check-prettier": "^1.0.3",
     "cross-env": "^7",

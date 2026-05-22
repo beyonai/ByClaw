@@ -71,4 +71,9 @@ public class ModelUpsertRequest implements Serializable {
 
     /** 入参模板 */
     private String inparamTemplate;
+
+    /**
+     * 扩展json参数
+     */
+    private String extendParam;
 }

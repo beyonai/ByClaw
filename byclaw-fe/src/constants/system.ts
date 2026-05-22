@@ -20,7 +20,7 @@ export const DEFAULT_MENU_CONFIG = [
     paramId: 10001666,
     paramGroupCode: 'MENU_ICON_SHOW_TAB',
     paramName: '员工',
-    paramEnName: 'Employees',
+    paramEnName: 'Employee',
     paramValue: 'true',
     paramDesc: '员工',
     paramSeq: 2,

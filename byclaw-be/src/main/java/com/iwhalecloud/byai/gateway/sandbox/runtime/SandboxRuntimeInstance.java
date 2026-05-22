@@ -22,9 +22,17 @@ public class SandboxRuntimeInstance {
 
     private List<String> endpoints;
 
+    private Map<String, String> instanceEndpoints;
+
     private Map<String, String> endpointHeaders;
 
     private OffsetDateTime createdAt;
 
     private OffsetDateTime expiresAt;
+
+    private String state;
+
+    private Boolean reusable;
+
+    private Map<String, String> metadata;
 }

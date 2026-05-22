@@ -4,11 +4,9 @@ import java.net.URI;
 
 import org.apache.commons.lang3.StringUtils;
 
-import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxImageType;
-
 class SandboxEndpointRegistryTargetResolver {
 
-    SandboxEndpointRegistryTarget resolve(String endpoint, String imageType, String sandboxId, Integer servicePort) {
+    SandboxEndpointRegistryTarget resolve(String endpoint) {
         URI uri = URI.create(StringUtils.trimToEmpty(endpoint));
         String protocol = StringUtils.defaultIfBlank(uri.getScheme(), "http");
         String host = StringUtils.trimToEmpty(uri.getHost());
@@ -19,22 +17,7 @@ class SandboxEndpointRegistryTargetResolver {
         if (port <= 0) {
             throw new IllegalArgumentException("endpoint port is invalid: " + endpoint);
         }
-        return new SandboxEndpointRegistryTarget(protocol, host, port,
-            resolvePathPrefix(uri, imageType, sandboxId, servicePort));
-    }
-
-    private String resolvePathPrefix(URI uri, String imageType, String sandboxId, Integer servicePort) {
-        if (!SandboxImageType.isUiAgent(imageType)) {
-            return "/";
-        }
-        if (StringUtils.isNotBlank(sandboxId) && servicePort != null && servicePort > 0) {
-            return "sandboxes/" + sandboxId + "/proxy/" + servicePort + "/";
-        }
-        String path = StringUtils.removeStart(StringUtils.defaultString(uri.getPath()), "/");
-        if (StringUtils.isBlank(path)) {
-            throw new IllegalArgumentException("uiagent registry pathPrefix is blank");
-        }
-        return StringUtils.appendIfMissing(path, "/");
+        return new SandboxEndpointRegistryTarget(protocol, host, port, "/");
     }
 
     private int resolveEndpointPort(URI uri) {

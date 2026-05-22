@@ -76,7 +76,7 @@ public class ByClawSkillUploadApplicationService {
         validateInput(userCode, resourceId, zipFile);
 
         // 切换到目标用户上下文，bucket 解析与读写操作全程在切换后的 LoginInfo 下进行。
-        return ByClawSkillPaths.withUserContext(userCode, () -> {
+        return ByClawUserWorkspacePaths.withUserContext(userCode, () -> {
             // 桶不存在则创建；createBucketIfAbsent 是幂等操作，反复调用安全。
             userFS.init();
 
@@ -139,13 +139,11 @@ public class ByClawSkillUploadApplicationService {
 
     private String resolveSkillRootPrefix(Long resourceId) {
         if (resourceId == null) {
-            return ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX;
+            return ByClawUserWorkspacePaths.WORKSPACE_SKILL_ROOT_PREFIX;
         }
         SsResource resource = ssResourceService.findById(resourceId);
         String resourceCode = resource == null ? null : resource.getResourceCode();
-        return ByClawSkillPaths.isSuperAssistantResourceCode(resourceCode)
-            ? ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX
-            : ByClawSkillPaths.buildAgentSkillRootPrefix(resourceId);
+        return ByClawUserWorkspacePaths.resolveSkillRootPrefix(resourceId, resourceCode);
     }
 
     /**

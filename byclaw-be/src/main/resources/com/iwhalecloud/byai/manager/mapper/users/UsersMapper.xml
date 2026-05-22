@@ -256,6 +256,29 @@
         group by a.user_id
     </select>
 
+    <select id="findUserIdsByOrgIdListIncludingChildren" resultType="java.lang.Long">
+        select a.user_id
+        from po_users a
+                 join po_users_organization b on a.user_id = b.user_id
+                 join po_organization c on b.org_id = c.org_id
+        where a.state != 'X'
+        <if test="orgIdList != null and orgIdList.size() > 0">
+            and (
+            <foreach collection="orgIdList" item="orgId" separator=" or ">
+                <choose>
+                    <when test="_databaseId == 'postgresql'">
+                        STRPOS(concat('.', c.path_code, '.'), concat('.', #{orgId}, '.')) > 0
+                    </when>
+                    <otherwise>
+                        INSTR(concat('.', c.path_code, '.'), concat('.', #{orgId}, '.')) > 0
+                    </otherwise>
+                </choose>
+            </foreach>
+            )
+        </if>
+        group by a.user_id
+    </select>
+
     <select id="findUserIdsByStationIdList" resultType="java.lang.Long">
         select a.user_id
         from po_users a
@@ -265,6 +288,28 @@
             <foreach collection="stationIdList" item="stationId" open="(" separator="," close=")">
                 #{stationId}
             </foreach>
+        </if>
+        group by a.user_id
+    </select>
+
+    <select id="findUserIdsByStationIdListIncludingChildren" resultType="java.lang.Long">
+        select a.user_id
+        from po_users a
+                 join po_station b on a.station_id = b.station_id
+        where a.state != 'X'
+        <if test="stationIdList != null and stationIdList.size() > 0">
+            and (
+            <foreach collection="stationIdList" item="stationId" separator=" or ">
+                <choose>
+                    <when test="_databaseId == 'postgresql'">
+                        STRPOS(concat('.', b.station_id_path, '.'), concat('.', #{stationId}, '.')) > 0
+                    </when>
+                    <otherwise>
+                        INSTR(concat('.', b.station_id_path, '.'), concat('.', #{stationId}, '.')) > 0
+                    </otherwise>
+                </choose>
+            </foreach>
+            )
         </if>
         group by a.user_id
     </select>

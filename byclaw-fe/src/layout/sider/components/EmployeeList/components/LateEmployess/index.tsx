@@ -11,7 +11,7 @@ import React, {
 import { useIntl } from '@umijs/max';
 import { Divider, List, Skeleton, Spin } from 'antd';
 import classNames from 'classnames';
-import { noop, pullAllBy, isEmpty, size } from 'lodash';
+import { noop, pullAllBy, isEmpty, size, isNil } from 'lodash';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { queryRecentlyAdded } from '@/service/digitalEmployees';
@@ -215,7 +215,7 @@ const LateEmployees = (props: IProps, ref: any) => {
           });
         }
 
-        if (defaultResourceId !== undefined && defaultResourceId !== null) {
+        if (!isNil(defaultResourceId)) {
           return updateDefaultEmployee(prevList, defaultResourceId);
         }
 

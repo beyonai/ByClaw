@@ -612,6 +612,7 @@ export async function markActiveSdkRequestSubagentSpawned(
     createdAt: request.createdAt,
     fields: {
       ...(channelRequestContextsBySessionKey.get(request.sessionKey)?.fields ?? {}),
+      requesterSessionKey,
     },
   });
 

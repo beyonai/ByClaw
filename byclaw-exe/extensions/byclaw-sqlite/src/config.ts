@@ -1,5 +1,5 @@
 import type { ByclawSqlitePluginConfig, ResolvedByclawSqliteConfig } from "./types.js";
-import { resolvePluginPath } from "./paths.js";
+import { resolveDefaultDbPath, resolvePluginPath } from "./paths.js";
 
 export const byclawSqliteConfigSchema = {
   type: "object",
@@ -7,7 +7,8 @@ export const byclawSqliteConfigSchema = {
   properties: {
     dbPath: {
       type: "string",
-      description: "SQLite database file path. Relative paths resolve from the plugin directory.",
+      description:
+        "SQLite database file path. Relative paths resolve from the plugin directory. Defaults to OPENCLAW_STATE_DIR/memory/byclaw.sqlite.",
     },
     toolName: {
       type: "string",
@@ -58,10 +59,17 @@ function readPositiveInteger(value: unknown, fallback: number): number {
   return fallback;
 }
 
+function resolveDbPath(value: unknown): string {
+  if (typeof value === "string" && value.trim()) {
+    return resolvePluginPath(value.trim());
+  }
+  return resolveDefaultDbPath();
+}
+
 export function resolveByclawSqliteConfig(raw: unknown): ResolvedByclawSqliteConfig {
   const config = isPlainRecord(raw) ? (raw as ByclawSqlitePluginConfig) : {};
   return {
-    dbPath: resolvePluginPath(readString(config.dbPath, "../../byclaw.sqlite")),
+    dbPath: resolveDbPath(config.dbPath),
     toolName: readString(config.toolName, "sqlExecute"),
     httpPath: readString(config.httpPath, "/plugins/byclaw-sqlite/sqlExecute"),
     busyTimeoutMs: readPositiveInteger(config.busyTimeoutMs, 5000),

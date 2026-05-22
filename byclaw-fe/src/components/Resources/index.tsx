@@ -86,7 +86,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     if (tabFromUrl === 'enterprise' || tabFromUrl === 'personal') {
       return tabFromUrl;
     }
-    return resourceType === 'VIEW' ? 'enterprise' : 'personal';
+    return 'personal';
   };
 
   const [activeTab, setActiveTab] = useState<'personal' | 'enterprise'>(defaultTab());
@@ -319,7 +319,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         }}
       />
 
-      {brandVersion !== 'commercial' && resourceType === 'KG_DOC' && (activeTab === 'personal' || isAdmin) && (
+      {brandVersion === 'openSource' && resourceType === 'KG_DOC' && (activeTab === 'personal' || isAdmin) && (
         <Tooltip title={!knowledgeCapability?.allowKnowledgeBaseCreate ? knowledgeCapabilityDisabledTip : undefined}>
           <span>
             <Button
@@ -340,7 +340,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         </Tooltip>
       )}
 
-      {brandVersion !== 'commercial' && (
+      {brandVersion === 'openSource' && (
         <Tooltip
           title={
             !canImportCurrentEnterpriseResource
@@ -369,14 +369,10 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   );
 
   const items: TabsProps['items'] = [
-    ...(resourceType !== 'VIEW'
-      ? [
-        {
-          key: 'personal',
-          label: `${intl.formatMessage({ id: 'resource.personal' })}${resourceName}`,
-        },
-      ]
-      : []),
+    {
+      key: 'personal',
+      label: `${intl.formatMessage({ id: 'resource.personal' })}${resourceName}`,
+    },
     {
       key: 'enterprise',
       label: `${intl.formatMessage({ id: 'resource.enterprise' })}${resourceName}`,

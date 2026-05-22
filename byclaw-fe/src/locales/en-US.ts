@@ -578,6 +578,12 @@ export default {
   'directoryManage.rename': 'Rename',
   'directoryManage.folderName': 'Foldername',
   'directoryManage.folderDesc': 'Folder Description',
+  'directoryManage.build': 'Build',
+  'directoryManage.buildFile': 'Build File',
+  'directoryManage.buildConfirm': 'Are you sure to build file "{fileName}"?',
+  'directoryManage.buildProgress': 'Build Progress',
+  'directoryManage.deleteFile': 'Delete File',
+  'directoryManage.downloadFile': 'Download File',
   'permissionManage.member': 'Member',
   'permissionManage.addedBy': 'Added By',
   'permissionManage.permission': 'Permission',
@@ -693,7 +699,7 @@ export default {
   'articleDetail.author': 'Author',
 
   // Employees Page
-  'employees.title': 'Employees',
+  'employees.title': 'Employee',
   'employees.abilityMap': 'Skills',
   'employees.listTitle': 'You have not added any digital employees yet',
   'employees.listDesc':
@@ -1115,6 +1121,8 @@ export default {
   'skillDetail.noContent': 'No content',
   'skillDetail.noCurlScript': 'No curl script',
   'skillDetail.generatingCurlScript': 'Generating curl script...',
+
+  'newChat.alreadyLatestSession': 'Already in the latest session',
 
   'sandbox.waitTips': 'Initializing sandbox environment, please wait...',
   'ThinkRewriteQuestion.originalQuestion': 'Original Question',

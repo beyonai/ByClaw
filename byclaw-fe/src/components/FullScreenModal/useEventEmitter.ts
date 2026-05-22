@@ -1,6 +1,6 @@
 import useGlobal from '@/hooks/useGlobal';
 import { isString, isPlainObject } from 'lodash';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, isValidElement } from 'react';
 
 export type IModalMessage = {
   sessionId: string; // 会话id
@@ -54,7 +54,7 @@ function useActionEffect() {
     const drawerTypeHandler = (data: any) => {
       let myDrawerType = data;
 
-      if (isPlainObject(data)) {
+      if (isPlainObject(data) && !isValidElement(data)) {
         const { drawerType, ...rest } = data;
         setDrawerCfg(Object.assign({}, INIT_DRAWER_CFG, { ...rest }));
         myDrawerType = drawerType;

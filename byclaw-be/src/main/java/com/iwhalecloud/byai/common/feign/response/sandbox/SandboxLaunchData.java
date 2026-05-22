@@ -20,14 +20,17 @@ public class SandboxLaunchData {
     /** Runtime returned sandbox id. */
     private String sandboxId;
 
+    /** Gateway token bound to the sandbox instance. */
+    private String gatewayToken;
+
     /** All exposed endpoints, one per configured service port. */
     private List<String> endpoints;
 
+    /** Exposed endpoints keyed by logical instance name in the sandbox image. */
+    private Map<String, String> instanceEndpoints;
+
     /** Primary service port from sandbox spec. */
     private Integer servicePort;
-
-    /** Image endpoint strategy from sandbox spec. */
-    private String imageType;
 
     /** Headers required by endpoint access, if any. */
     private Map<String, String> endpointHeaders;

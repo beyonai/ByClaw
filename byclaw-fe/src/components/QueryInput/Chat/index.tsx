@@ -100,10 +100,6 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
     const { inputValue, fileList, deepThink, chatSettings, connectNet } = this.state;
     const { userInfo, chatMode, myAgentType } = this.props;
     const { agentId } = this.props.globalContext;
-    // 未显式选择数字员工时，使用登录态中的默认超级助手资源，避免再通过 "-1" 表达隐式超级助手。
-    // const defaultSuperAssistantId = get(userInfo, 'defaultDigEmployeeId');
-    // const targetAgentId = agentId || defaultSuperAssistantId;
-    // const targetAgentType = targetAgentId ? agentTypeMap.agent : myAgentType;
 
     const sendVal = trim(inputValue);
     if (!sendVal) return null;

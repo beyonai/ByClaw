@@ -4,6 +4,7 @@ import com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest;
 import com.iwhalecloud.byai.common.feign.response.SandboxResponse;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
+import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance;
 
 /**
  * Internal sandbox lifecycle facade.
@@ -18,6 +19,8 @@ public interface SandboxLifecycleFacade {
     SandboxResponse<Void> removeSandbox(SandboxInfo sandboxInfo);
 
     SandboxResponse<Void> renewSandbox(SandboxInfo sandboxInfo);
+
+    SandboxResponse<SandboxRuntimeInstance> getSandbox(SandboxInfo sandboxInfo);
 
     SandboxResponse<Boolean> sandboxExists(SandboxInfo sandboxInfo);
 }

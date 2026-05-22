@@ -139,11 +139,15 @@ export async function readSseEvents(params: {
   url: string;
   payload: unknown;
   headers: Record<string, string>;
-  timeoutMs: number;
+  timeoutMs?: number;
   onEventStream?: (data: Dict) => void;
 }): Promise<{ response: Response; events: Dict[]; bodyPreview: string } | { error: ExecutorFailure }> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error("request timed out")), params.timeoutMs);
+  const timer = setTimeout(() => {
+    if (params.timeoutMs) {
+      controller.abort(new Error("request timed out"));
+    }
+  }, params.timeoutMs ?? 0);
   let response: Response;
   try {
     response = await fetch(params.url, {

@@ -10,6 +10,7 @@ import { agentHandler } from '@/utils/agent';
 
 export type IState = {
   agentId: string;
+  defaultDigEmployeeId: string;
   employeesTypeList: any[];
   employeesList: IAgentCache[];
   agentList: IAgentCache[];
@@ -21,6 +22,7 @@ export default {
 
   state: {
     agentId: '',
+    defaultDigEmployeeId: '',
     employeesTypeList: [], // 数字员工目录分类
     employeesList: [], // 所有数字员工列表
     agentList: [], // 默认智能体，问数、慧笔、鲸灵

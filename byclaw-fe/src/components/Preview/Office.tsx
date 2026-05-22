@@ -1,15 +1,14 @@
 import React, { useRef, useState, useLayoutEffect, useEffect } from 'react';
 import { Spin } from 'antd';
-import jsPreviewPdf from '@js-preview/pdf';
-import jsPreviewDocx from '@js-preview/docx';
-import { init } from 'pptx-preview';
 import type jsPreviewExcel from '@js-preview/excel';
 import type { JsPdfPreview } from '@js-preview/pdf';
 import type { JsDocxPreview } from '@js-preview/docx';
 import type { JsExcelPreview } from '@js-preview/excel';
 import ss from './Office.module.less';
 
-type PPTXPreviewer = ReturnType<typeof init>;
+type PdfInit = (el: HTMLElement, opts?: any) => JsPdfPreview;
+type DocxInit = (el: HTMLElement, opts?: any) => JsDocxPreview;
+type PptxInit = (el: HTMLElement, opts?: any) => any;
 
 const clamp = (val: number, min = 0, max = 1) => Math.max(min, Math.min(val, max));
 
@@ -32,9 +31,10 @@ interface Offices {
 
 const libs: {
   pdfCss?: boolean;
-  jsPreviewPdf?: typeof jsPreviewPdf;
+  jsPreviewPdf?: PdfInit;
   docxCss?: boolean;
-  jsPreviewDocx?: typeof jsPreviewDocx;
+  jsPreviewDocx?: DocxInit;
+  pptxInit?: PptxInit;
   excelCss?: boolean;
   jsPreviewExcel?: typeof jsPreviewExcel;
 } = {};
@@ -161,17 +161,26 @@ function OfficePdf({ data, loading: spinning }: DocxProps) {
 
     let temp: any;
     if (ref.current?.parentElement) obs.observe(ref.current.parentElement);
-    if (ref.current) {
-      temp = jsPreviewPdf.init(ref.current, {
-        onRendered: () => {
-          if (scp.current.total) return;
 
-          scp.current.count = temp.visibleItems;
-          scp.current.total = temp.totalItems;
-        },
+    const loadLib = libs.jsPreviewPdf
+      ? Promise.resolve(libs.jsPreviewPdf)
+      : import('@js-preview/pdf').then((mod) => {
+        libs.jsPreviewPdf = mod.default.init;
+        return libs.jsPreviewPdf!;
       });
-      initPreviewer(temp);
-    }
+
+    loadLib.then((pdfInit) => {
+      if (ref.current) {
+        temp = pdfInit(ref.current, {
+          onRendered: () => {
+            if (scp.current.total) return;
+            scp.current.count = temp.visibleItems;
+            scp.current.total = temp.totalItems;
+          },
+        });
+        initPreviewer(temp);
+      }
+    });
 
     const scroll = (e: Event) => {
       if (scp.current.count === scp.current.total) return;
@@ -239,10 +248,21 @@ function OfficeDocx({ data, loading: spinning }: DocxProps) {
 
     let temp: any;
     if (ref.current?.parentElement) obs.observe(ref.current.parentElement);
-    if (ref.current) {
-      temp = jsPreviewDocx.init(ref.current, {});
-      initPreviewer(temp);
-    }
+
+    const loadLib = libs.jsPreviewDocx
+      ? Promise.resolve(libs.jsPreviewDocx)
+      : import('@js-preview/docx').then((mod) => {
+        libs.jsPreviewDocx = mod.default.init;
+        return libs.jsPreviewDocx!;
+      });
+
+    loadLib.then((docxInit) => {
+      if (ref.current) {
+        temp = docxInit(ref.current, {});
+        initPreviewer(temp);
+      }
+    });
+
     return () => {
       obs.disconnect();
       temp?.destroy();
@@ -271,7 +291,7 @@ function OfficeDocx({ data, loading: spinning }: DocxProps) {
 function OfficePptx({ data, loading: spinning }: DocxProps) {
   const ref = useRef<HTMLDivElement>(null);
 
-  const [previewer, initPreviewer] = useState<PPTXPreviewer>();
+  const [previewer, initPreviewer] = useState<{ preview: (data: ArrayBuffer) => Promise<void>; destroy: () => void }>();
   const [loading, setLoading] = useState<boolean>(false);
   const [buffer, setBuffer] = useState<ArrayBuffer>();
 
@@ -288,14 +308,24 @@ function OfficePptx({ data, loading: spinning }: DocxProps) {
   }, [data]);
 
   useLayoutEffect(() => {
-    let temp: PPTXPreviewer | undefined;
-    if (ref.current) {
-      temp = init(ref.current, {
-        width: ref.current.parentElement?.clientWidth || 310,
-        height: ref.current.parentElement?.clientHeight || 310,
+    let temp: { preview: (data: ArrayBuffer) => Promise<void>; destroy: () => void } | undefined;
+
+    const loadLib = libs.pptxInit
+      ? Promise.resolve(libs.pptxInit)
+      : import('pptx-preview').then((mod) => {
+        libs.pptxInit = mod.init;
+        return libs.pptxInit!;
       });
-      initPreviewer(temp);
-    }
+
+    loadLib.then((pptxInit) => {
+      if (ref.current) {
+        temp = pptxInit(ref.current, {
+          width: ref.current.parentElement?.clientWidth || 310,
+          height: ref.current.parentElement?.clientHeight || 310,
+        });
+        initPreviewer(temp);
+      }
+    });
 
     return () => {
       temp?.destroy();

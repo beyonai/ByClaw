@@ -29,6 +29,7 @@ import type { IDrawerMessage } from '@/components/FullAbsoluteDrawer';
 import styles from './index.module.less';
 import useGlobal from '@/hooks/useGlobal';
 import { getResponseAgentInfo } from '../MessageList/utils';
+import type { ISendConf, ISendProps } from '@/hooks/useChat';
 
 const { Content } = Layout;
 
@@ -41,6 +42,7 @@ type IProps = {
   autoAsk?: boolean;
   toRecover?: boolean;
   isDone?: boolean;
+  onSendSummary?: (payload: { sendProps: ISendProps; sendConf?: ISendConf }) => void;
 };
 
 const myEventEmitter = new EventEmitter$Cls();
@@ -58,11 +60,12 @@ function ApplicationSession(props: IProps) {
     autoAsk = true,
     toRecover = false,
     isDone,
+    onSendSummary,
   } = props;
   const { substance: agentInfo } = messageListItemContent || {};
 
   const { args } = get(messageListItemContent, 'substance') || {};
-  const { input: chatInput, files } = args;
+  const { input: chatInput, files, ...restArgs } = args;
 
   const { sessionId, isSubagent } = agentInfo;
   const mySessionId = `${sessionId || ''}`;
@@ -276,7 +279,8 @@ function ApplicationSession(props: IProps) {
 
     const payload = {
       sendProps: {
-        queryQuestion: mySummaryText,
+        queryQuestion: mySummaryText as string,
+        waitLastMessageDone: true,
         payload: {
           files,
           agentId: getSendPayloadAgentId(),
@@ -320,7 +324,11 @@ function ApplicationSession(props: IProps) {
       });
     }
 
-    EventEmitter.emit('beyond-chat-on-send-msg', payload);
+    if (typeof onSendSummary === 'function') {
+      onSendSummary(payload);
+    } else {
+      EventEmitter.emit('beyond-chat-on-send-msg', payload);
+    }
 
     const newMessage = cloneDeep(currentMessage);
     const messageListItem = [...(get(newMessage, 'messageList') || []), ...(get(newMessage, 'thinkList') || [])].find(
@@ -344,7 +352,7 @@ function ApplicationSession(props: IProps) {
 
         if (!isDone) {
           if (chatInput) {
-            url.searchParams.append('chatInputValue', chatInput);
+            url.searchParams.append('chatInputValue', encodeURIComponent(chatInput));
           }
           if (files) {
             try {
@@ -352,6 +360,12 @@ function ApplicationSession(props: IProps) {
             } catch (e) {
               console.error(e);
             }
+          }
+          Object.keys(restArgs).forEach((key) => {
+            url.searchParams.append(key, encodeURIComponent(restArgs[key]));
+          });
+          if (mySessionId) {
+            url.searchParams.append('sessionId', mySessionId);
           }
         }
 
@@ -362,7 +376,7 @@ function ApplicationSession(props: IProps) {
     }
 
     return agentHomeUrl;
-  }, [isPage, agentHomeUrl, chatInput, currentMessage.messageId, files, isDone]);
+  }, [isPage, agentHomeUrl, args, currentMessage.messageId, files, isDone, mySessionId]);
 
   const toSummary = () => {
     if (!canSummary || isDone) return;

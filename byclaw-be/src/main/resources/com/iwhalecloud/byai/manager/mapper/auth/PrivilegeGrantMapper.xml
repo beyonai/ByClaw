@@ -429,7 +429,8 @@
         grant_obj_id,
         grant_to_obj_type,
         grant_to_obj_id,
-        grant_to_type
+        grant_to_type,
+        allow_unsubscribe
         from au_privilege_grant
         <where>
             and status_cd ='A'

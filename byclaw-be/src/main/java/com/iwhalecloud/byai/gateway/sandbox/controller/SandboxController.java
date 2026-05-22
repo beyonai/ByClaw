@@ -17,6 +17,7 @@ import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMappe
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
@@ -79,6 +80,58 @@ public class SandboxController {
     }
 
     /**
+     * 沙箱续约接口
+     * 同时刷新本地访问时间并调用远端沙箱续约，避免本地空闲回收和远端自动过期
+     *
+     * @param params 请求参数，resourceId非必填，userCode在未登录上下文下必填
+     * @return ResponseUtil
+     */
+    @PostMapping("/renewSandbox")
+    @Operation(summary = "沙箱续约", description = "手动续约当前沙箱，同时刷新本地访问时间并延长远端租约")
+    @ApiResponses({
+        @ApiResponse(responseCode = "0", description = "续约成功"),
+        @ApiResponse(responseCode = "-1", description = "续约失败，用户缺失或沙箱不存在")
+    })
+    public ResponseUtil renewSandbox(@RequestBody Map<String, Object> params) {
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        if (userCode == null) {
+            Object userCodeObj = params.get("userCode");
+            if (userCodeObj == null || userCodeObj.toString().trim().isEmpty()) {
+                return ResponseUtil.fail("userCode is required");
+            }
+            userCode = userCodeObj.toString().trim();
+        }
+
+        Object resourceIdObj = params.get("resourceId");
+        Long resourceId = null;
+        if (resourceIdObj != null && resourceIdObj instanceof Number) {
+            resourceId = ((Number) resourceIdObj).longValue();
+        } else if (resourceIdObj != null) {
+            try {
+                resourceId = Long.parseLong(resourceIdObj.toString());
+            } catch (NumberFormatException e) {
+                return ResponseUtil.fail("resourceId must be a valid number");
+            }
+        }
+
+        SandboxInfo sandboxInfo = sandboxService.renewSandbox(userCode, resourceId);
+        if (sandboxInfo == null) {
+            return ResponseUtil.fail("No running sandbox found for this resource");
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("userCode", sandboxInfo.getUserCode());
+        result.put("sandboxType", sandboxInfo.getSandboxType());
+        result.put("sandboxId", sandboxInfo.getSandboxId());
+        result.put("endpoints", sandboxInfo.getEndpoints());
+        result.put("instanceEndpoints", sandboxInfo.getInstanceEndpoints());
+        result.put("token", sandboxInfo.getGatewayToken());
+        result.put("remoteExpiresAt", sandboxInfo.getRemoteExpiresAt());
+        result.put("lastHeartbeatTime", sandboxInfo.getLastHeartbeatTime());
+        return ResponseUtil.successResponse(result);
+    }
+
+    /**
      * 查询当前用户的沙箱信息
      *
      * @return ResponseUtil
@@ -113,6 +166,7 @@ public class SandboxController {
                 result.put("sandboxType", sandbox.getSandboxType());
                 result.put("sandboxId", sandbox.getSandboxId());
                 result.put("endpoints", sandbox.getEndpoints());
+                result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
                 result.put("token", sandbox.getGatewayToken());
                 data.add(result);
             }
@@ -192,6 +246,9 @@ public class SandboxController {
 
         int offset = (pageIndex - 1) * pageSize;
         List<SsSandboxRecord> list = sandboxRecordMapper.selectByPage(keyword, status, offset, pageSize);
+        list.forEach(record -> record.setEndpoint(
+            SandboxEndpointRecordSupport.resolveInstanceEndpoint(record.getEndpoint(),
+                SandboxEndpointRecordSupport.OPENCLAW_INSTANCE)));
         int total = sandboxRecordMapper.countByCondition(keyword, status);
         int totalPage = (total + pageSize - 1) / pageSize;
 

@@ -587,6 +587,12 @@ export default {
   'directoryManage.rename': '重命名',
   'directoryManage.folderName': '文件夹名称',
   'directoryManage.folderDesc': '文件夹描述',
+  'directoryManage.build': '构建',
+  'directoryManage.buildFile': '构建文件',
+  'directoryManage.buildConfirm': '确定要构建文件 "{fileName}" 吗？',
+  'directoryManage.buildProgress': '构建进度',
+  'directoryManage.deleteFile': '删除文件',
+  'directoryManage.downloadFile': '下载文件',
   'permissionManage.member': '成员',
   'permissionManage.addedBy': '添加人',
   'permissionManage.permission': '权限',
@@ -1114,6 +1120,8 @@ export default {
   'skillDetail.noContent': '暂无内容',
   'skillDetail.noCurlScript': '暂无curl脚本',
   'skillDetail.generatingCurlScript': '正在生成curl脚本...',
+
+  'newChat.alreadyLatestSession': '已经是最新会话',
 
   'sandbox.waitTips': '正在初始化安全沙箱环境，请稍候...',
   'ThinkRewriteQuestion.originalQuestion': '原查询',

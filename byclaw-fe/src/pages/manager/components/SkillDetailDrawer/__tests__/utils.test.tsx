@@ -13,6 +13,7 @@ jest.mock('@umijs/max', () => ({
 }));
 
 import {
+  getMCPToolsRenderConfig,
   parsePropertiesRecursive,
   parseSchema,
 } from '@/pages/employees/components/SkillDetailDrawer/SkillDetailDrawer.utils';
@@ -132,6 +133,47 @@ describe('manager/components/SkillDetailDrawer/SkillDetailDrawer.utils', () => {
 
       expect(parseSchema('{invalid json')).toEqual([]);
       expect(warnSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('getMCPToolsRenderConfig', () => {
+    it('wraps MCP tool list response as a table RenderItem', () => {
+      expect(
+        getMCPToolsRenderConfig(
+          {
+            tools: [
+              {
+                name: 'get-current-date',
+                description: '获取当前日期',
+                inputSchema: {
+                  type: 'object',
+                  properties: {},
+                },
+              },
+            ],
+          },
+          'mcp-resource-id'
+        )
+      ).toMatchObject([
+        {
+          type: 'table',
+          label: 'skillDetail.toolList',
+          tableType: 'tools',
+          dataSource: [
+            {
+              key: 'get-current-date',
+              resourceId: 'mcp-resource-id',
+              name: 'get-current-date',
+              description: '获取当前日期',
+              inputSchema: {
+                type: 'object',
+                properties: {},
+              },
+              statusText: '-',
+            },
+          ],
+        },
+      ]);
     });
   });
 });

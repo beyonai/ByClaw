@@ -41,7 +41,13 @@ public interface SandboxRuntimeProvider {
 
     void heartbeat(String userCode, String sandboxType, SandboxInfo sandboxInfo);
 
+    default Optional<SandboxRuntimeInstance> getSandbox(String userCode, String sandboxType, SandboxInfo sandboxInfo) {
+        return Optional.empty();
+    }
+
     default boolean exists(String userCode, String sandboxType, SandboxInfo sandboxInfo) {
-        return true;
+        return getSandbox(userCode, sandboxType, sandboxInfo)
+            .map(SandboxRuntimeInstance::getReusable)
+            .orElse(Boolean.TRUE);
     }
 }

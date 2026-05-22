@@ -1,7 +1,6 @@
 import { DownOutlined, EyeInvisibleOutlined, EyeOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
 import { Button, Form, Input, InputNumber, Select, Slider, Space, Tag } from 'antd';
 import React, { useMemo } from 'react';
-import type { IntlShape } from 'react-intl';
 import { trim } from 'lodash';
 import { useIntl } from '@umijs/max';
 import ModelFormSection from './ModelFormSection';
@@ -13,7 +12,6 @@ const { TextArea } = Input;
 type Option = { label: string; value: string };
 
 type Props = {
-  intl: IntlShape;
   form: any;
   modalTitle: string;
   currentDisplayName?: string;
@@ -76,7 +74,6 @@ const ApiTokenComp = (props: {
 };
 
 const ModelFormFields: React.FC<Props> = ({
-  intl,
   form,
   modalTitle,
   currentDisplayName,
@@ -96,6 +93,7 @@ const ModelFormFields: React.FC<Props> = ({
   toggleSection,
   onValuesChange,
 }) => {
+  const intl = useIntl();
   const sectionGuideItems = useMemo(
     () => [
       { key: 'basic', icon: <RightOutlined />, label: intl.formatMessage({ id: 'modelMgr.modal.basicConfig' }) },
@@ -351,7 +349,7 @@ const ModelFormFields: React.FC<Props> = ({
               />
             </Form.Item>
 
-            <Form.Item label="更多参数" name="extends" style={{ gridColumn: 'span 3' }}>
+            <Form.Item label="更多参数" name="extendParam" style={{ gridColumn: 'span 3' }}>
               <TextArea placeholder="JSON格式的更多参数" rows={4} style={{ width: '100%' }} />
             </Form.Item>
           </div>

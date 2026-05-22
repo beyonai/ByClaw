@@ -41,6 +41,8 @@ class PerformanceMonitor {
 
   private isMonitoring = false;
 
+  private memoryIntervalId: ReturnType<typeof setInterval> | null = null;
+
   /**
    * 开始性能监控
    */
@@ -61,6 +63,10 @@ class PerformanceMonitor {
     this.isMonitoring = false;
     this.observers.forEach((observer) => observer.disconnect());
     this.observers = [];
+    if (this.memoryIntervalId !== null) {
+      clearInterval(this.memoryIntervalId);
+      this.memoryIntervalId = null;
+    }
   }
 
   /**
@@ -176,7 +182,7 @@ class PerformanceMonitor {
     };
 
     updateMemoryInfo();
-    setInterval(updateMemoryInfo, 5000); // 每5秒更新一次
+    this.memoryIntervalId = setInterval(updateMemoryInfo, 5000);
   }
 
   /**

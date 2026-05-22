@@ -19,7 +19,7 @@ class SandboxEndpointRegistryMetadataFactory {
         this.sandboxGatewayToken = sandboxGatewayToken;
     }
 
-    Map<String, Object> build(String imageType) {
+    Map<String, Object> build() {
         if (StringUtils.isBlank(sandboxGatewayToken)) {
             return null;
         }

@@ -56,7 +56,7 @@ public class ByClawSkillDownloadApplicationService {
 
         // 提前列对象一次：让"路径不存在 / skill 为空"在 controller 进入流式输出前就能转成可读错误。
         // 流式输出阶段已经写入了 HTTP 响应头，再抛错的体验比较差。
-        List<String> objectKeys = ByClawSkillPaths.withUserContext(userCode,
+        List<String> objectKeys = ByClawUserWorkspacePaths.withUserContext(userCode,
             () -> userFS.list(normalizedSkillPath + "/", null));
         if (objectKeys == null || objectKeys.isEmpty()) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.empty"));
@@ -81,7 +81,7 @@ public class ByClawSkillDownloadApplicationService {
                 }
                 zos.putNextEntry(new ZipEntry(relative));
                 // 每个对象单独切上下文读取，确保 bucket 解析正确；read 不预加载内容，按 8KB 流式拷贝。
-                try (InputStream in = ByClawSkillPaths.withUserContext(userCode, () -> userFS.read(objectKey))) {
+                try (InputStream in = ByClawUserWorkspacePaths.withUserContext(userCode, () -> userFS.read(objectKey))) {
                     if (in != null) {
                         copy(in, zos);
                     }
@@ -138,13 +138,11 @@ public class ByClawSkillDownloadApplicationService {
 
     private String resolveSkillRootPrefix(Long resourceId) {
         if (resourceId == null) {
-            return ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX;
+            return ByClawUserWorkspacePaths.WORKSPACE_SKILL_ROOT_PREFIX;
         }
         SsResource resource = ssResourceService.findById(resourceId);
         String resourceCode = resource == null ? null : resource.getResourceCode();
-        return ByClawSkillPaths.isSuperAssistantResourceCode(resourceCode)
-            ? ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX
-            : ByClawSkillPaths.buildAgentSkillRootPrefix(resourceId);
+        return ByClawUserWorkspacePaths.resolveSkillRootPrefix(resourceId, resourceCode);
     }
 
     private String extractSkillName(String normalizedSkillPath) {

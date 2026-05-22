@@ -3,16 +3,27 @@ package com.iwhalecloud.byai.manager.application.service.openapi;
 import com.iwhalecloud.byai.common.cache.ShareBfmUser;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.log.exception.BaseRuntimeException;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.util.ListUtil;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotRegistryService;
+import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
+import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventType;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.men.NoticeDetail;
 import com.iwhalecloud.byai.manager.dto.men.Notices;
+import com.iwhalecloud.byai.manager.dto.openapi.MountResourceDto;
 import com.iwhalecloud.byai.manager.entity.notification.ByaiNotification;
+import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.infrastructure.cache.ShareCacheUtil;
 import com.iwhalecloud.byai.state.domain.notification.service.NotificationService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.apache.poi.util.StringUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
 import java.util.Date;
 import java.util.List;
 
@@ -24,11 +35,25 @@ import java.util.List;
 @Service
 public class OpenApiApplicationService {
 
+    private static final Logger logger = LoggerFactory.getLogger(OpenApiApplicationService.class);
+
     @Autowired
     private SequenceService sequenceService;
 
     @Autowired
     private NotificationService notificationService;
+
+    @Autowired
+    private SsResourceService ssResourceService;
+
+    @Autowired
+    private SsResourceRelDetailService ssResourceRelDetailService;
+
+    @Autowired
+    private DingtalkRobotRegistryService dingtalkRobotRegistryService;
+
+    @Autowired
+    private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
 
     /**
      * 开放通知
@@ -74,5 +99,45 @@ public class OpenApiApplicationService {
         }
 
         throw new BaseRuntimeException(I18nUtil.get("openapi.application.service.user.not.found", userId, userCode));
+    }
+
+    /**
+     * 挂载数字员工资源
+     *
+     * @param mountResourceDto 资源信息
+     */
+    public void mountDigEmployeeResource(MountResourceDto mountResourceDto) {
+        Long agentId = mountResourceDto.getAgentId();
+        String relResourceCode = mountResourceDto.getRelResourceCode();
+
+        SsResource relSsResource = ssResourceService.findByIdOrCode(null, relResourceCode);
+
+        Long relResourceId = relSsResource.getResourceId();
+        List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.find(agentId, relResourceId);
+        // 是否已经挂载过
+        if (ListUtil.isNotEmpty(resourceRelDetails)) {
+            return;
+        }
+
+        SsResourceRelDetail ssResourceRelDetail = new SsResourceRelDetail();
+        ssResourceRelDetail.setResourceRelDetailId(sequenceService.nextVal());
+        ssResourceRelDetail.setResourceId(agentId);
+        ssResourceRelDetail.setRelResourceId(relResourceId);
+        ssResourceRelDetail.setRelStatus(1);
+        ssResourceRelDetail.setCreateTime(new Date());
+        ssResourceRelDetail.setCreateBy(CurrentUserHolder.getCurrentUserId());
+        ssResourceRelDetail.setComAcctId(CurrentUserHolder.getEnterpriseId());
+        ssResourceRelDetailService.save(ssResourceRelDetail);
+
+        try {
+            dingtalkRobotRegistryService.refreshRobotClientsForResource(agentId);
+        }
+        catch (Exception e) {
+            logger.warn("Refresh DingTalk robot clients after update failed. resourceId={}", agentId, e);
+        }
+
+        digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED,
+            agentId);
+
     }
 }

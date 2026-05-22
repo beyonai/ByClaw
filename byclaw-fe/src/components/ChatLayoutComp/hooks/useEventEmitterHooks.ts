@@ -166,9 +166,8 @@ function useEventEmitterHooks(props: IProps) {
   }, [messageList, openDrawerSourceFromInfo]);
 
   useEffect(() => {
-    const onSendMsg = (param: { sendProps: ISendProps; sendConf?: ISendConf }) => {
+    const onSendMsg = async (param: { sendProps: ISendProps; sendConf?: ISendConf }) => {
       const { sendProps, sendConf } = param;
-
       sendQuery(sendProps, sendConf);
     };
 

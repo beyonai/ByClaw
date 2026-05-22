@@ -491,8 +491,11 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       case 'build':
         if (buildingFileIds.includes(getFileRowKey(record))) return;
         Modal.confirm({
-          title: '构建文件',
-          content: `确定要构建文件 "${record?.collectionName ?? record?.name}" 吗？`,
+          title: intl.formatMessage({ id: 'directoryManage.buildFile' }),
+          content: intl.formatMessage(
+            { id: 'directoryManage.buildConfirm' },
+            { fileName: record?.collectionName ?? record?.name }
+          ),
           onOk: () => {
             submitBuildTask(record);
           },
@@ -589,7 +592,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
           label: intl.formatMessage({ id: 'common.download' }),
           key: 'download',
           icon: (
-            <Tooltip title="下载文件">
+            <Tooltip title={intl.formatMessage({ id: 'directoryManage.downloadFile' })}>
               <span className="iconfont icon-a-Downloadxiazai" />
             </Tooltip>
           ),
@@ -727,7 +730,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       // },
 
       {
-        title: '构建进度',
+        title: intl.formatMessage({ id: 'directoryManage.buildProgress' }),
         dataIndex: 'buildProgress',
         align: 'center',
         width: 150,

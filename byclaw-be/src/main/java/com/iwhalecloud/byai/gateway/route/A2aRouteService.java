@@ -79,8 +79,8 @@ public class A2aRouteService {
                 return;
             }
 
-            // 透传 cardUrl 中的 x-api-key 到 rpcUrl（rpcUrl 已携带则跳过）
-            rpcUrl = inheritApiKeyFromCardUrl(cardUrl, rpcUrl);
+            // 透传 cardUrl 中的全部请求参数到 rpcUrl
+            rpcUrl = inheritQueryParamsFromCardUrl(cardUrl, rpcUrl);
 
             JSONObject jsonRpc = buildJsonRpcRequest(ctx);
             streamFromA2aAgent(rpcUrl, jsonRpc, headers, ctx);
@@ -132,24 +132,25 @@ public class A2aRouteService {
     }
 
     /**
-     * 若 cardUrl 携带 x-api-key 且 rpcUrl 未携带，则把 x-api-key 拼接到 rpcUrl。
+     * 若 cardUrl 携带请求参数，则全部拼接到 rpcUrl。
      */
-    private String inheritApiKeyFromCardUrl(String cardUrl, String rpcUrl) {
-        String apiKey = extractQueryParam(cardUrl, "x-api-key");
-        if (StringUtils.isBlank(apiKey)) {
+    private String inheritQueryParamsFromCardUrl(String cardUrl, String rpcUrl) {
+        String query = extractQueryString(cardUrl);
+        if (StringUtils.isBlank(query)) {
             return rpcUrl;
         }
-        if (StringUtils.isNotBlank(extractQueryParam(rpcUrl, "x-api-key"))) {
-            return rpcUrl;
-        }
-        String separator = rpcUrl.contains("?") ? "&" : "?";
-        return rpcUrl + separator + "x-api-key=" + apiKey;
+
+        int hashIdx = rpcUrl.indexOf('#');
+        String fragment = hashIdx >= 0 ? rpcUrl.substring(hashIdx) : "";
+        String urlWithoutFragment = hashIdx >= 0 ? rpcUrl.substring(0, hashIdx) : rpcUrl;
+        String separator = urlWithoutFragment.contains("?") ? "&" : "?";
+        return urlWithoutFragment + separator + query + fragment;
     }
 
     /**
-     * 从 URL 的 query string 中取出指定参数（不解码，原样返回）。
+     * 从 URL 中取出 query string（不解码，原样返回）。
      */
-    private String extractQueryParam(String url, String key) {
+    private String extractQueryString(String url) {
         if (StringUtils.isBlank(url)) {
             return null;
         }
@@ -157,19 +158,12 @@ public class A2aRouteService {
         if (qIdx < 0 || qIdx == url.length() - 1) {
             return null;
         }
-        String query = url.substring(qIdx + 1);
-        int hashIdx = query.indexOf('#');
-        if (hashIdx >= 0) {
-            query = query.substring(0, hashIdx);
+        int hashIdx = url.indexOf('#', qIdx + 1);
+        String query = hashIdx >= 0 ? url.substring(qIdx + 1, hashIdx) : url.substring(qIdx + 1);
+        if (StringUtils.isBlank(query)) {
+            return null;
         }
-        for (String pair : query.split("&")) {
-            int eq = pair.indexOf('=');
-            String name = eq >= 0 ? pair.substring(0, eq) : pair;
-            if (key.equals(name)) {
-                return eq >= 0 ? pair.substring(eq + 1) : "";
-            }
-        }
-        return null;
+        return query;
     }
 
     private JSONObject fetchAgentCard(String cardUrl, Map<String, Object> headers) throws IOException {
