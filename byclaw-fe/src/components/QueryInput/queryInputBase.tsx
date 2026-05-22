@@ -390,7 +390,8 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   };
 
   checkCanUploadFile = () => {
-    const { uploadFileConfig } = this.props;
+    const { uploadFileConfig } = this.props.globalContext;
+
     if (
       !uploadFileConfig ||
       !uploadFileConfig.enabled ||
