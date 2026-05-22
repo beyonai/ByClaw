@@ -113,6 +113,10 @@ public class SandboxService {
 
     @Lazy
     @Autowired
+    private SandboxUserContextRunner sandboxUserContextRunner;
+
+    @Lazy
+    @Autowired
     private RedisClient redisClient;
 
     /** 系统参数：允许同时使用的沙箱数量上限，paramCode=ENABLE_USE_SANDBOX_NUM */
@@ -1122,7 +1126,8 @@ public class SandboxService {
                     }
                     incrementVersions(record, true);
                     sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
-                    SandboxLaunchData launchData = launchSandbox(record.getUserCode(), record.getResourceId());
+                    SandboxLaunchData launchData = sandboxUserContextRunner.callAsUser(record.getUserCode(),
+                        () -> launchSandbox(record.getUserCode(), record.getResourceId()));
                     if (launchData != null && StringUtils.isNotBlank(launchData.getEndpoint())) {
                         restartedCount++;
                         report.addAffectedSandbox(sandboxRef(record) + " -> newSandboxId=" + launchData.getSandboxId());
