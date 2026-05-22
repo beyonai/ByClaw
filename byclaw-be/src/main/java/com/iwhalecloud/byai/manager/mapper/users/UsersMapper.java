@@ -78,12 +78,28 @@ public interface UsersMapper extends BaseMapper<Users> {
     List<Long> findUserIdsByOrgIdList(@Param("orgIdList") List<Long> orgIdList);
 
     /**
+     * 根据组织ID列表查询用户，包含下级组织成员。
+     *
+     * @param orgIdList 组织ID列表
+     * @return List<Long> 用户ID列表
+     */
+    List<Long> findUserIdsByOrgIdListIncludingChildren(@Param("orgIdList") List<Long> orgIdList);
+
+    /**
      * 根据驻地ID列表查询用户（支持批量驻地查询）
      *
      * @param stationIdList 驻地ID列表
      * @return List<Long> 用户ID列表
      */
     List<Long> findUserIdsByStationIdList(@Param("stationIdList") List<Long> stationIdList);
+
+    /**
+     * 根据驻地ID列表查询用户，包含下级驻地成员。
+     *
+     * @param stationIdList 驻地ID列表
+     * @return List<Long> 用户ID列表
+     */
+    List<Long> findUserIdsByStationIdListIncludingChildren(@Param("stationIdList") List<Long> stationIdList);
 
     List<String> queryEmailByOrgAndName(TempQo tempQo);
 
