@@ -1,7 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.service.ingress;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -23,7 +23,6 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
-import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -39,6 +38,7 @@ class SandboxIngressFacadeTest {
     void forward_filebrowserRequest_injectsBeyondTokenAndPrefixesFilebrowserPath() throws Exception {
         try (TestHttpServer server = new TestHttpServer()) {
             SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");
+            bindCurrentUser("alice");
 
             MockHttpServletRequest request = new MockHttpServletRequest("GET",
                 "/sandboxes/ingress/filebrowser/sb-1/proxy/8081/files/list");
@@ -56,10 +56,10 @@ class SandboxIngressFacadeTest {
             assertThat(response.getStatus()).isEqualTo(200);
             assertThat(response.getContentAsString()).isEqualTo("ok");
             assertThat(server.lastPath()).isEqualTo("/v1/sandboxes/sb-1/proxy/8081/filebrowser/files/list?beyondToken=token-123&foo=bar");
-            assertThat(server.lastHeader("Beyond-Token")).isEqualTo("token-123");
+            assertThat(server.lastHeader("Beyond-Token")).isEqualTo("generated-token");
             assertThat(server.lastHeader("OPEN-SANDBOX-API-KEY")).isEqualTo("sandbox-api-key");
             assertThat(server.lastHeader("X-Custom")).isEqualTo("value-1");
-            assertThat(CurrentUserHolder.getLoginInfo()).isNull();
+            assertThat(CurrentUserHolder.getLoginInfo().getUserCode()).isEqualTo("alice");
         }
     }
 
@@ -67,6 +67,7 @@ class SandboxIngressFacadeTest {
     void forward_filebrowserRequest_preservesTrailingSlashAfterPrefix() throws Exception {
         try (TestHttpServer server = new TestHttpServer()) {
             SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");
+            bindCurrentUser("alice");
 
             MockHttpServletRequest request = new MockHttpServletRequest("GET",
                 "/filebrowser/api/usage/");
@@ -80,6 +81,7 @@ class SandboxIngressFacadeTest {
 
             assertThat(response.getStatus()).isEqualTo(200);
             assertThat(server.lastPath()).isEqualTo("/v1/sandboxes/sb-1/proxy/8081/filebrowser/api/usage/");
+            assertThat(server.lastHeader("Beyond-Token")).isEqualTo("header-token");
         }
     }
 
@@ -87,6 +89,7 @@ class SandboxIngressFacadeTest {
     void forward_filebrowserRootRequest_preservesRootTrailingSlash() throws Exception {
         try (TestHttpServer server = new TestHttpServer()) {
             SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");
+            bindCurrentUser("alice");
 
             MockHttpServletRequest request = new MockHttpServletRequest("GET",
                 "/filebrowser/");
@@ -104,12 +107,82 @@ class SandboxIngressFacadeTest {
     }
 
     @Test
+    void forward_novncRequest_passthroughsPath() throws Exception {
+        try (TestHttpServer server = new TestHttpServer()) {
+            SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");
+            bindCurrentUser("alice");
+
+            MockHttpServletRequest request = new MockHttpServletRequest("GET",
+                "/novnc/vnc.html");
+            request.setScheme("http");
+            request.setServerName("gateway.example.test");
+            request.setRemoteAddr("127.0.0.1");
+            request.setQueryString("autoconnect=true");
+            request.addParameter("autoconnect", "true");
+
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            facade.forward("novnc", "/vnc.html", request, response);
+
+            assertThat(response.getStatus()).isEqualTo(200);
+            assertThat(server.lastPath()).isEqualTo("/v1/sandboxes/sb-1/proxy/6080/vnc.html?autoconnect=true");
+            assertThat(server.lastHeader("Beyond-Token")).isEqualTo("generated-token");
+        }
+    }
+
+    @Test
+    void forward_openDesignRequest_prefixesOpenDesignPath() throws Exception {
+        try (TestHttpServer server = new TestHttpServer()) {
+            SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");
+            bindCurrentUser("alice");
+
+            MockHttpServletRequest request = new MockHttpServletRequest("GET",
+                "/openDesign/projects/1001");
+            request.setScheme("http");
+            request.setServerName("gateway.example.test");
+            request.setRemoteAddr("127.0.0.1");
+
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            facade.forward("openDesign", "/projects/1001", request, response);
+
+            assertThat(response.getStatus()).isEqualTo(200);
+            assertThat(server.lastPath()).isEqualTo("/v1/sandboxes/sb-1/proxy/18090/openDesign/projects/1001");
+            assertThat(server.lastHeader("Beyond-Token")).isEqualTo("generated-token");
+        }
+    }
+
+    @Test
+    void forwardOpenSandboxPath_preservesFullSandboxProxyPath() throws Exception {
+        try (TestHttpServer server = new TestHttpServer()) {
+            SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");
+            bindCurrentUser("alice");
+
+            MockHttpServletRequest request = new MockHttpServletRequest("GET",
+                "/v1/sandboxes/sb-1/proxy/6080/vnc.html");
+            request.setScheme("http");
+            request.setServerName("gateway.example.test");
+            request.setRemoteAddr("127.0.0.1");
+            request.setQueryString("beyondToken=query-token&foo=bar");
+            request.addParameter("beyondToken", "query-token");
+            request.addParameter("foo", "bar");
+
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            facade.forwardOpenSandboxPath("/v1/sandboxes/sb-1/proxy/6080/vnc.html", request, response);
+
+            assertThat(response.getStatus()).isEqualTo(200);
+            assertThat(server.lastPath())
+                .isEqualTo("/v1/sandboxes/sb-1/proxy/6080/vnc.html?beyondToken=query-token&foo=bar");
+            assertThat(server.lastHeader("Beyond-Token")).isEqualTo("generated-token");
+            assertThat(server.lastHeader("OPEN-SANDBOX-API-KEY")).isEqualTo("sandbox-api-key");
+        }
+    }
+
+    @Test
     void forward_unknownInstance_passthroughsOriginalProxyPath() throws Exception {
         try (TestHttpServer server = new TestHttpServer()) {
             SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");
 
             LoginInfo originalLoginInfo = new LoginInfo();
-            originalLoginInfo.setUserCode("original-user");
+            originalLoginInfo.setUserCode("alice");
             CurrentUserHolder.setLoginInfo(originalLoginInfo);
 
             MockHttpServletRequest request = new MockHttpServletRequest("GET",
@@ -133,24 +206,16 @@ class SandboxIngressFacadeTest {
 
     private SandboxIngressFacade buildFacade(String baseUrl, String storageType, String apiKey) {
         JwtService jwtService = mock(JwtService.class);
-        LoginApplicationService loginApplicationService = mock(LoginApplicationService.class);
+        when(jwtService.createJwt(any())).thenReturn("generated-token");
         SandboxService sandboxService = mock(SandboxService.class);
-
-        LoginInfo tokenLoginInfo = new LoginInfo();
-        tokenLoginInfo.setUserCode("alice");
-        LoginInfo dbLoginInfo = new LoginInfo();
-        dbLoginInfo.setUserCode("alice");
-        dbLoginInfo.setUserId(1001L);
-
-        when(jwtService.verifyJwt(eq("token-123"), eq(LoginInfo.class))).thenReturn(tokenLoginInfo);
-        when(jwtService.verifyJwt(eq("header-token"), eq(LoginInfo.class))).thenReturn(tokenLoginInfo);
-        when(loginApplicationService.getLoginInfo("alice")).thenReturn(dbLoginInfo);
         when(sandboxService.sandboxInfo("alice")).thenReturn(List.of(
             SandboxInfo.builder()
                 .userCode("alice")
                 .sandboxId("sb-1")
                 .instanceEndpoints(java.util.Map.of(
                     "filebrowser", "/v1/sandboxes/sb-1/proxy/8081",
+                    "novnc", "/v1/sandboxes/sb-1/proxy/6080",
+                    "openDesign", "/v1/sandboxes/sb-1/proxy/18090",
                     "debug", "/v1/sandboxes/sb-2/proxy/9222"))
                 .build()));
 
@@ -163,15 +228,23 @@ class SandboxIngressFacadeTest {
         SandboxIngressRuntimeResolver runtimeResolver =
             new SandboxIngressRuntimeResolver(List.of(openSandboxSupport, whaleAgentSupport), storageType);
         SandboxIngressEndpointResolver endpointResolver = new SandboxIngressEndpointResolver(sandboxService);
-        SandboxIngressUserResolver userResolver = new SandboxIngressUserResolver(jwtService, loginApplicationService);
         SandboxIngressRequestContextResolver requestContextResolver =
-            new SandboxIngressRequestContextResolver(endpointResolver, userResolver, runtimeResolver);
+            new SandboxIngressRequestContextResolver(endpointResolver, runtimeResolver, jwtService);
         SandboxIngressInstanceHandlerRegistry handlerRegistry =
             new SandboxIngressInstanceHandlerRegistry(List.of(
                 new FilebrowserSandboxIngressInstanceHandler(),
+                new OpenDesignSandboxIngressInstanceHandler(),
+                new PassThroughNamedSandboxIngressInstanceHandler(),
                 new PassThroughSandboxIngressInstanceHandler()));
         SandboxIngressTransportService transportService = new SandboxIngressTransportService(runtimeResolver);
         return new SandboxIngressFacade(requestContextResolver, handlerRegistry, runtimeResolver, transportService);
+    }
+
+    private void bindCurrentUser(String userCode) {
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserCode(userCode);
+        loginInfo.setUserId(1001L);
+        CurrentUserHolder.setLoginInfo(loginInfo);
     }
 
     private static final class TestHttpServer implements AutoCloseable {

@@ -9,7 +9,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 
 import okhttp3.HttpUrl;
 
@@ -19,15 +21,15 @@ public class SandboxIngressRequestContextResolver {
     private static final Logger log = LoggerFactory.getLogger(SandboxIngressRequestContextResolver.class);
 
     private final SandboxIngressEndpointResolver endpointResolver;
-    private final SandboxIngressUserResolver userResolver;
     private final SandboxIngressRuntimeResolver runtimeResolver;
+    private final JwtService jwtService;
 
     public SandboxIngressRequestContextResolver(SandboxIngressEndpointResolver endpointResolver,
-                                                SandboxIngressUserResolver userResolver,
-                                                SandboxIngressRuntimeResolver runtimeResolver) {
+                                                SandboxIngressRuntimeResolver runtimeResolver,
+                                                JwtService jwtService) {
         this.endpointResolver = endpointResolver;
-        this.userResolver = userResolver;
         this.runtimeResolver = runtimeResolver;
+        this.jwtService = jwtService;
     }
 
     public SandboxIngressRequestContext resolve(HttpServletRequest request,
@@ -35,28 +37,49 @@ public class SandboxIngressRequestContextResolver {
                                                 String requestPath) {
         SandboxIngressInstanceType instanceType = SandboxIngressInstanceType.from(instance);
         String queryString = request.getQueryString();
-        String beyondToken = resolveBeyondToken(request);
+        String incomingBeyondToken = resolveIncomingBeyondToken(request);
         log.debug("Resolving ingress context: instance={}, requestPath={}, query={}, beyondToken={}",
-            instance, requestPath, queryString, maskToken(beyondToken));
-        SandboxIngressUserContext userContext = userResolver.resolve(beyondToken);
-        String userCode = resolveUserCode(userContext);
-        log.debug("Ingress user resolved: instance={}, userCode={}, loginInfoPresent={}",
-            instance, userCode, userContext != null && userContext.loginInfo() != null);
+            instance, requestPath, queryString, maskToken(incomingBeyondToken));
+        LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
+        String userCode = resolveUserCode(loginInfo);
+        log.debug("Ingress user resolved from CurrentUserHolder: instance={}, userCode={}, loginInfoPresent={}",
+            instance, userCode, loginInfo != null);
         String upstreamEndpoint = endpointResolver.resolveRequiredEndpoint(userCode, instance);
         HttpUrl targetUrl = runtimeResolver.resolve().buildTargetUrl(upstreamEndpoint, requestPath, queryString);
         log.debug("Ingress target resolved: instance={}, userCode={}, upstreamEndpoint={}, targetUrl={}",
             instance, userCode, upstreamEndpoint, targetUrl);
         Map<String, String> extraHeaders = new LinkedHashMap<>(2);
-        if (StringUtils.isBlank(request.getHeader("Beyond-Token")) && StringUtils.isNotBlank(userContext.beyondToken())) {
-            extraHeaders.put("Beyond-Token", userContext.beyondToken());
+        String forwardBeyondToken = resolveForwardBeyondToken(request, loginInfo, incomingBeyondToken);
+        if (StringUtils.isBlank(request.getHeader("Beyond-Token")) && StringUtils.isNotBlank(forwardBeyondToken)) {
+            extraHeaders.put("Beyond-Token", forwardBeyondToken);
             log.debug("Injecting Beyond-Token header for ingress request: instance={}, userCode={}, token={}",
-                instance, userCode, maskToken(userContext.beyondToken()));
+                instance, userCode, maskToken(forwardBeyondToken));
         }
         return new SandboxIngressRequestContext(instanceType, instance, userCode, upstreamEndpoint, request.getMethod(),
-            requestPath, queryString, targetUrl, userContext.beyondToken(), userContext.loginInfo(), extraHeaders);
+            requestPath, queryString, targetUrl, forwardBeyondToken, loginInfo, extraHeaders);
     }
 
-    private String resolveBeyondToken(HttpServletRequest request) {
+    public SandboxIngressRequestContext resolveOpenSandboxPath(HttpServletRequest request,
+                                                               String requestPath) {
+        String queryString = request.getQueryString();
+        String incomingBeyondToken = resolveIncomingBeyondToken(request);
+        log.debug("Resolving direct OpenSandbox ingress context: requestPath={}, query={}, beyondToken={}",
+            requestPath, queryString, maskToken(incomingBeyondToken));
+        LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
+        String userCode = resolveUserCode(loginInfo);
+        HttpUrl targetUrl = runtimeResolver.resolve().buildTargetUrl(requestPath, "", queryString);
+        Map<String, String> extraHeaders = new LinkedHashMap<>(2);
+        String forwardBeyondToken = resolveForwardBeyondToken(request, loginInfo, incomingBeyondToken);
+        if (StringUtils.isBlank(request.getHeader("Beyond-Token")) && StringUtils.isNotBlank(forwardBeyondToken)) {
+            extraHeaders.put("Beyond-Token", forwardBeyondToken);
+            log.debug("Injecting Beyond-Token header for direct OpenSandbox request: userCode={}, token={}",
+                userCode, maskToken(forwardBeyondToken));
+        }
+        return new SandboxIngressRequestContext(SandboxIngressInstanceType.UNKNOWN, "opensandbox", userCode,
+            requestPath, request.getMethod(), "", queryString, targetUrl, forwardBeyondToken, loginInfo, extraHeaders);
+    }
+
+    private String resolveIncomingBeyondToken(HttpServletRequest request) {
         String headerToken = request.getHeader("Beyond-Token");
         if (StringUtils.isNotBlank(headerToken)) {
             return headerToken.trim();
@@ -68,9 +91,23 @@ public class SandboxIngressRequestContextResolver {
         return null;
     }
 
-    private String resolveUserCode(SandboxIngressUserContext userContext) {
-        if (userContext != null && userContext.loginInfo() != null && StringUtils.isNotBlank(userContext.loginInfo().getUserCode())) {
-            return userContext.loginInfo().getUserCode();
+    private String resolveForwardBeyondToken(HttpServletRequest request, LoginInfo loginInfo, String incomingBeyondToken) {
+        String headerToken = request.getHeader("Beyond-Token");
+        if (StringUtils.isNotBlank(headerToken)) {
+            return headerToken.trim();
+        }
+        if (loginInfo != null) {
+            String generatedToken = jwtService.createJwt(loginInfo);
+            if (StringUtils.isNotBlank(generatedToken)) {
+                return generatedToken.trim();
+            }
+        }
+        return incomingBeyondToken;
+    }
+
+    private String resolveUserCode(LoginInfo loginInfo) {
+        if (loginInfo != null && StringUtils.isNotBlank(loginInfo.getUserCode())) {
+            return loginInfo.getUserCode();
         }
         return CurrentUserHolder.getCurrentUserCode();
     }

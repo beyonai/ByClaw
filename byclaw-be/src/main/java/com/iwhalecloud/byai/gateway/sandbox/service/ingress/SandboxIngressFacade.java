@@ -74,4 +74,15 @@ public class SandboxIngressFacade {
             }
         }
     }
+
+    public void forwardOpenSandboxPath(String requestPath,
+                                       HttpServletRequest request,
+                                       HttpServletResponse response) {
+        log.debug("Start direct OpenSandbox ingress forward: method={}, requestUri={}, requestPath={}",
+            request.getMethod(), request.getRequestURI(), requestPath);
+        SandboxIngressRequestContext requestContext = requestContextResolver.resolveOpenSandboxPath(request, requestPath);
+        transportService.forward(request, response, requestContext);
+        log.debug("Direct OpenSandbox ingress forward completed: userCode={}, targetUrl={}, responseStatus={}",
+            requestContext.userCode(), requestContext.targetUrl(), response.getStatus());
+    }
 }
