@@ -211,6 +211,7 @@ function installNoGroupRecovery(params: {
 export class ByaiSdkApp {
   private readonly account: ResolvedByaiAccount;
   private readonly log?: ByaiSdkAppOptions["log"];
+  private readonly cfg: OpenClawConfig;
 
   private runner: WorkerRunner | null = null;
   private stopSubscription: (() => void) | null = null;
@@ -219,6 +220,7 @@ export class ByaiSdkApp {
 
   constructor(opts: ByaiSdkAppOptions) {
     this.account = opts.account;
+    this.cfg = opts.cfg;
     this.log = opts.log;
   }
 
@@ -365,7 +367,8 @@ export class ByaiSdkApp {
         await deliverReplyToAgentViaSdk({
           message: inbound,
           account: this.account,
-          cfg: this.currentConfig(),
+          // cfg: this.currentConfig(),
+          cfg: this.cfg,
           abortController,
           log: this.log,
           onReply: async (text, type, options) => {
