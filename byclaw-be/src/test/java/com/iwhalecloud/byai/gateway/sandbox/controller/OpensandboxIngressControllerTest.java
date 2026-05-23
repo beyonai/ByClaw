@@ -75,6 +75,53 @@ class OpensandboxIngressControllerTest {
     }
 
     @Test
+    void proxyNovnc_extractsRequestPathFromRoute() throws Exception {
+        SandboxIngressFacade facade = org.mockito.Mockito.mock(SandboxIngressFacade.class);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new OpensandboxIngressController(facade)).build();
+
+        mockMvc.perform(get("/novnc/vnc.html").queryParam("autoconnect", "true"))
+            .andExpect(status().isOk());
+
+        verify(facade).forward(eq("novnc"), eq("/vnc.html"), any(), any());
+    }
+
+    @Test
+    void proxyOpenDesign_extractsRequestPathFromRoute() throws Exception {
+        SandboxIngressFacade facade = org.mockito.Mockito.mock(SandboxIngressFacade.class);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new OpensandboxIngressController(facade)).build();
+
+        mockMvc.perform(get("/openDesign/projects/1001"))
+            .andExpect(status().isOk());
+
+        verify(facade).forward(eq("openDesign"), eq("/projects/1001"), any(), any());
+    }
+
+    @Test
+    void proxyOpenDesign_preservesRequestPathBehindContextPath() throws Exception {
+        SandboxIngressFacade facade = org.mockito.Mockito.mock(SandboxIngressFacade.class);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new OpensandboxIngressController(facade)).build();
+
+        mockMvc.perform(get("/byaiService/openDesign/projects/1001")
+                .contextPath("/byaiService"))
+            .andExpect(status().isOk());
+
+        verify(facade).forward(eq("openDesign"), eq("/projects/1001"), any(), any());
+    }
+
+    @Test
+    void proxyOpenSandboxApi_preservesPathBehindContextPath() throws Exception {
+        SandboxIngressFacade facade = org.mockito.Mockito.mock(SandboxIngressFacade.class);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new OpensandboxIngressController(facade)).build();
+
+        mockMvc.perform(get("/byaiService/v1/sandboxes/sb-1/proxy/6080/vnc.html")
+                .contextPath("/byaiService")
+                .queryParam("foo", "bar"))
+            .andExpect(status().isOk());
+
+        verify(facade).forwardOpenSandboxPath(eq("/v1/sandboxes/sb-1/proxy/6080/vnc.html"), any(), any());
+    }
+
+    @Test
     void prefixedFilebrowserRouteIsNotSupported() throws Exception {
         SandboxIngressFacade facade = org.mockito.Mockito.mock(SandboxIngressFacade.class);
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new OpensandboxIngressController(facade)).build();
