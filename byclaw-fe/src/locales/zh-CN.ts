@@ -1132,6 +1132,7 @@ export default {
 
   'sandbox.waitTips': '正在初始化安全沙箱环境，请稍候...',
   'ThinkRewriteQuestion.originalQuestion': '原查询',
+  'thinkStatus.errorDetail': '错误详情',
 
   ...secondEdition,
 };

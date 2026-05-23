@@ -587,7 +587,20 @@ You MUST:
         if (out.isAnswer && out.text) answerParts.push(out.text);
       },
     });
-    if ("error" in a2aRes) return a2aRes.error;
+    if ("error" in a2aRes) {
+      const errorDetail = {
+        url: rpcUrl,
+        headers,
+        request_params: jsonRpcPayload,
+        error_code: a2aRes.error.error_code,
+        error_message: a2aRes.error.error,
+      };
+      return makeError(
+        a2aRes.error.error_code,
+        `A2A agent request failed: ${a2aRes.error.error}`,
+        { errorDetail },
+      );
+    }
 
     await sendByFrameworkStreamData.awaitAll();
 
@@ -623,7 +636,20 @@ You MUST:
       sendByFrameworkStreamData.enqueue(data);
     },
   });
-  if ("error" in sseRes) return sseRes.error;
+  if ("error" in sseRes) {
+    const errorDetail = {
+      url: sseUrl,
+      headers,
+      request_params: payload,
+      error_code: sseRes.error.error_code,
+      error_message: sseRes.error.error,
+    };
+    return makeError(
+      sseRes.error.error_code,
+      `Agent SSE request failed: ${sseRes.error.error}`,
+      { errorDetail },
+    );
+  }
 
   await sendByFrameworkStreamData.awaitAll();
 

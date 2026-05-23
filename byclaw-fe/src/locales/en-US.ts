@@ -1133,6 +1133,7 @@ export default {
 
   'sandbox.waitTips': 'Initializing sandbox environment, please wait...',
   'ThinkRewriteQuestion.originalQuestion': 'Original Question',
+  'thinkStatus.errorDetail': 'Error Detail',
 
   ...secondEdition,
 };
