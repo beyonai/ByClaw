@@ -4,22 +4,23 @@ import org.springframework.stereotype.Component;
 
 import com.iwhalecloud.byai.common.storage.validation.ResourceJsonConnectivityValidationService;
 import com.iwhalecloud.byai.common.storage.validation.ResourceJsonValidationContext;
-
 /**
- * `doc` 目录下知识资源 JSON 校验器。
+ * Agent 资源校验器
+ * @author qin.guoquan
+ * @date 2026-05-23 14:12:18
  */
 @Component
-public class DocResourceJsonTypeValidator extends AbstractLoggingResourceJsonTypeValidator {
+public class AgentResouceJsonTypeValidator extends AbstractLoggingResourceJsonTypeValidator {
 
     private final ResourceJsonConnectivityValidationService connectivityValidationService;
 
-    public DocResourceJsonTypeValidator(ResourceJsonConnectivityValidationService connectivityValidationService) {
+    public AgentResouceJsonTypeValidator(ResourceJsonConnectivityValidationService connectivityValidationService) {
         this.connectivityValidationService = connectivityValidationService;
     }
 
     @Override
     public boolean supports(String resourceBizType) {
-        return resourceBizType != null && resourceBizType.toUpperCase().startsWith("KG_");
+        return "AGENT".equalsIgnoreCase(resourceBizType);
     }
 
     @Override

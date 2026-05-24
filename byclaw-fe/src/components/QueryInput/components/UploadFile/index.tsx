@@ -1,6 +1,6 @@
 import React, { forwardRef, useImperativeHandle } from 'react';
 
-import { Upload, UploadProps, App } from 'antd';
+import { Upload, UploadProps, App, Tooltip } from 'antd';
 import classnames from 'classnames';
 import { head, isEmpty } from 'lodash';
 import { customAlphabet } from 'nanoid';
@@ -37,6 +37,7 @@ const UploadFile = forwardRef<UploadFileRef, IProps>((props, ref) => {
   const { message } = App.useApp();
   const intl = useIntl();
   const getNanoid = React.useRef<(size?: number) => string>(customAlphabet('abcdefghijklmnopqrstuvwxyz1234567890', 10));
+  const uploadFileTip = intl.formatMessage({ id: 'queryInput.tooltip.uploadFile' });
 
   const onUpload = async (file: File) => {
     if (!validateAccept(file, accept)) {
@@ -112,7 +113,23 @@ const UploadFile = forwardRef<UploadFileRef, IProps>((props, ref) => {
         onUpload(file as File);
       }}
     >
-      {children || <AntdIcon type="icon-shouye-icon-wrapper" className={classnames(styles.attachment, { disabled })} />}
+      {children || (
+        <Tooltip title={uploadFileTip}>
+          <span
+            aria-label={uploadFileTip}
+            className={classnames(styles.attachment, { disabled })}
+            role="button"
+            tabIndex={disabled ? -1 : 0}
+            onKeyDown={(event) => {
+              if (disabled || (event.key !== 'Enter' && event.key !== ' ')) return;
+              event.preventDefault();
+              event.currentTarget.click();
+            }}
+          >
+            <AntdIcon type="icon-shouye-icon-wrapper" />
+          </span>
+        </Tooltip>
+      )}
     </Upload>
   );
 });
