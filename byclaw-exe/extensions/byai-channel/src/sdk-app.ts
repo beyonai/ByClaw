@@ -229,7 +229,12 @@ export class ByaiSdkApp {
   }
 
   private currentConfig(): OpenClawConfig {
-    return getByaiRuntime().config.current() as OpenClawConfig;
+    const runtime = getByaiRuntime();
+    const cfg = runtime.config;
+    if (typeof cfg.current === "function") {
+      return cfg.current() as OpenClawConfig;
+    }
+    return cfg.loadConfig() as OpenClawConfig;
   }
 
   async start(): Promise<void> {
