@@ -27,7 +27,9 @@ export function loadMonorepoEnvForUmi(): void {
         continue;
       }
       const key = line.slice(0, eq).trim();
-      if (!key || process.env[key] !== undefined) {
+      // HOST is reserved by Webpack Dev Server / Umi for binding address and HMR WebSocket;
+      // use BE_HOST for backend proxy target instead
+      if (!key || key === 'HOST' || process.env[key] !== undefined) {
         continue;
       }
       let val = line.slice(eq + 1).trim();

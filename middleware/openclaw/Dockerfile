@@ -72,6 +72,10 @@ COPY --from=ext-builder /build/out/ /app/extensions/
 # add openclaw skills (overwrite same-name files with project content)
 COPY middleware/openclaw/skills/ /app/skills/
 
+# add filebrowser
+COPY middleware/openclaw/linux-amd64-filebrowser/filebrowser /usr/local/bin/filebrowser
+RUN chmod a+x /usr/local/bin/filebrowser
+
 # add dingTalk cli dws
 RUN curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh
 

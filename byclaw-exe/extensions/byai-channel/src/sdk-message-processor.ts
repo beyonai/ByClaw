@@ -16,6 +16,7 @@ import type { SdkInboundFile, SdkProcessorDeps } from "./types.js";
 import {
   bindActiveSdkRequestRunId,
   registerActiveSdkRequest,
+  resolveActiveSdkRequestBySessionKey,
   resolveSdkLocalFilePath,
 } from "./session-context.js";
 import { ensureSessionReasoningStream, shouldForceReasoningStream } from "./reasoning-stream.js";
@@ -329,7 +330,14 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
       dispatcher,
       replyOptions,
     } = rt.channel.reply.createReplyDispatcherWithTyping({
-      deliver: () => {},
+      deliver: async (payload: { text?: string; isError?: boolean }, info: { kind: string }) => {
+        if (info.kind === "final" && payload.text) {
+          const activeReq = resolveActiveSdkRequestBySessionKey(sessionKey);
+          if (activeReq && !activeReq.hasEmittedContent && activeReq.boundRunIds.size === 0) {
+            await onReply(payload.text, "final");
+          }
+        }
+      },
     });
 
     // finalize 上下文

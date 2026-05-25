@@ -169,6 +169,30 @@ async function handleToolEvent(
   }
 }
 
+const SILENT_REPLY_TOKEN = "NO_REPLY";
+const pendingSilentByRun = new Map<string, string>();
+
+function isSilentLeadFragment(text: string) {
+  const normalized = text.trim().toUpperCase();
+  if (!normalized || /[^A-Z_]/.test(normalized)) return false;
+  if (normalized === SILENT_REPLY_TOKEN) return true;
+  if (!SILENT_REPLY_TOKEN.startsWith(normalized)) return false;
+  return normalized === "NO";
+}
+
+function consumeAssistantDelta(runId: string, delta: string): string | null {
+  const previous = pendingSilentByRun.get(runId) ?? "";
+  const merged = previous + delta;
+
+  if (isSilentLeadFragment(merged)) {
+    pendingSilentByRun.set(runId, merged);
+    return null;
+  }
+
+  pendingSilentByRun.delete(runId);
+  return previous ? previous + delta : delta;
+}
+
 async function handleAssistantEvent(
   request: ActiveSdkRequest,
   event: AgentEvent,
@@ -180,7 +204,10 @@ async function handleAssistantEvent(
   if (!delta) {
     return;
   }
-  await emitSdkChunk(request, sdkEmitter, delta as string, {
+  const visibleDelta = consumeAssistantDelta(event.runId, delta as string);
+  if (!visibleDelta) return;
+  request.hasEmittedContent = true;
+  await emitSdkChunk(request, sdkEmitter, visibleDelta, {
     messageId: request.sessionKey,
     parentMessageId: "-1",
     eventType: isChildSession ? EventType.REASONING_LOG_DELTA : EventType.ANSWER_DELTA,
@@ -252,6 +279,13 @@ async function handleLifecycleEvent(
     return;
   }
   const activeRequest = markActiveSdkRootLifecycleFinished(sessionKey, phase) ?? request;
+  if (phase === "error" && !activeRequest.hasEmittedContent) {
+    const errorText = typeof data?.error === "string" ? data.error : "Agent run failed";
+    await emitSdkChunk(activeRequest, sdkEmitter, errorText, {
+      eventType: EventType.ANSWER_DELTA,
+    });
+    activeRequest.hasEmittedContent = true;
+  }
   if (phase === "end" && activeRequest.pendingChildSessionKeys.size > 0) {
     // root run 先结束，但仍有子 agent 未收尾；先用空行隔开后续恢复输出。
     await emitSdkChunk(activeRequest, sdkEmitter, "\n\n", {

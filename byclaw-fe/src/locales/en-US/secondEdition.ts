@@ -2,6 +2,9 @@ export default {
   // QueryInput Chat组件
   'queryInput.onlineSearch': 'Online Search',
   'queryInput.superAgent': 'Super Agent',
+  'queryInput.tooltip.fileManagement': 'File Management',
+  'queryInput.tooltip.mentionDigitalEmployee': 'Mention Digital Employee',
+  'queryInput.tooltip.uploadFile': 'Upload File',
   'chatBI.selectKnowledgeBase': 'Select Knowledge Base',
 
   // useEmployees

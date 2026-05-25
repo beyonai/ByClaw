@@ -56,6 +56,7 @@
         <result column="resource_type" property="resourceType" />
         <result column="resource_name" property="resourceName" />
         <result column="resource_desc" property="resourceDesc" />
+        <result column="owner_type" property="ownerType" />
         <result column="catalog_id" property="catalogId" />
         <result column="man_org_id" property="manOrgId" />
         <result column="man_user_id" property="manUserId" />
@@ -125,6 +126,7 @@
                a.resource_type,
                a.resource_name,
                a.resource_desc,
+               a.owner_type,
                a.catalog_id,
                a.man_org_id,
                a.man_user_id,

@@ -8,6 +8,7 @@ import {
   queryResourceDetail,
   queryResourceMembers,
   deleteResource,
+  uploadSkillZip,
 } from '../resources';
 import { GET, POST } from '@/service/common/request';
 
@@ -57,6 +58,17 @@ describe('manager resources service', () => {
     const payload = { resourceId: '10042909' };
     deleteResource(payload);
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/tool/deleteResourceById', payload);
+  });
+
+  it('should call uploadSkillZip with multipart config', () => {
+    const payload = new FormData();
+    uploadSkillZip(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/tool/uploadSkillZip', payload, {
+      timeout: 480000,
+      headers: {
+        'Content-Type': 'multipart/form-data; charset=utf-8',
+      },
+    });
   });
 
   it('should call applyResourceUse with the apply use endpoint', () => {

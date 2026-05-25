@@ -342,14 +342,46 @@ async function executeDocViaKnowledgeApi(
     timeoutMs: 30_000,
     signal: input.signal,
   });
-  if ("error" in result) return result.error;
-  const parsed = tryParseJson(result.bodyText);
+
+  if ("error" in result) {
+    const errorDetail = {
+      url,
+      headers,
+      request_params: payload,
+      error_code: result.error.error_code,
+      error_message: result.error.error,
+    };
+    return makeError(
+      result.error.error_code,
+      `Doc knowledge search failed: ${result.error.error}`,
+      { errorDetail },
+    );
+  }
+
+  const { response, bodyText } = result;
+
+  if (!response.ok) {
+    const errorDetail = {
+      url,
+      headers,
+      request_params: payload,
+      status: response.status,
+      status_text: response.statusText,
+      response_body: bodyText.slice(0, 4096),
+    };
+    if (response.status === 401 || response.status === 403) {
+      return makeError("AUTH_EXPIRED", "Authentication expired or invalid, please re-login", { errorDetail });
+    }
+    return makeError("DOC_SEARCH_FAILED", `HTTP ${response.status}: ${response.statusText}`, { errorDetail });
+  }
+
+  const parsed = tryParseJson(bodyText);
   return {
     success: true,
     type: "doc_search",
     status: "completed",
     backend: "knowledge_api",
-    data: parsed ?? result.bodyText,
+    data: parsed ?? bodyText,
     target: {
       resource_id: input.capability.metadata?.resource_id,
       dataset_id: input.datasetId,

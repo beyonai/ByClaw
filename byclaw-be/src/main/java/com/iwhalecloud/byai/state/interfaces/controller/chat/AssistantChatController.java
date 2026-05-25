@@ -2,6 +2,10 @@ package com.iwhalecloud.byai.state.interfaces.controller.chat;
 
 import java.io.IOException;
 import com.iwhalecloud.byai.common.constants.superassist.SessionType;
+import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
+import com.iwhalecloud.byai.common.feign.request.datacloud.TermsOptionsReq;
+import com.iwhalecloud.byai.common.feign.response.DataCloudResponse;
+import com.iwhalecloud.byai.common.feign.response.datacloud.TermsOptionsResp;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
@@ -75,6 +79,9 @@ public class AssistantChatController {
 
     @Autowired
     private ByaiMessageHotService byaiMessageHotService;
+
+    @Autowired
+    private FeignDataCloudService feignDataCloudService;
 
     @Operation(summary = "获取消息详情(提供给问数，慧笔，鲸灵)", description = "根据消息ID获取消息详情，副驾调用主驾", responses = {
         @ApiResponse(responseCode = "0", description = "获取成功",
@@ -230,6 +237,24 @@ public class AssistantChatController {
             UploadResult uploadResult = assistantChatApplicationService.uploadFiles(files, sessionId, sessionType,
                 agentId);
             return ResponseUtil.success(uploadResult);
+        }
+        catch (Exception e) {
+            logger.error(e.getMessage(), e);
+            return ResponseUtil.fail(e.getMessage());
+        }
+    }
+
+    /**
+     * 获取术语选项
+     *
+     * @param termsOptionsReq 入参
+     * @return ResponseUtil
+     */
+    @PostMapping("/getTermsOptions")
+    public ResponseUtil<TermsOptionsResp> getTermsOptions(@RequestBody TermsOptionsReq termsOptionsReq) {
+        try {
+            DataCloudResponse<TermsOptionsResp> dataCloudResponse = feignDataCloudService.termsOptions(termsOptionsReq);
+            return ResponseUtil.success(dataCloudResponse.getData());
         }
         catch (Exception e) {
             logger.error(e.getMessage(), e);

@@ -6,8 +6,7 @@ import java.util.Map;
 import lombok.Data;
 
 /**
- * 模型详情对象（与接口文档 Model 一致）
- * 用于列表行与详情/编辑回显
+ * 模型详情对象（与接口文档 Model 一致） 用于列表行与详情/编辑回显
  *
  * @author system
  */
@@ -83,4 +82,9 @@ public class ModelVO implements Serializable {
 
     /** 入参模板（详情/列表返回） */
     private String inparamTemplate;
+
+    /**
+     * 扩展json参数
+     */
+    private String extendParam;
 }

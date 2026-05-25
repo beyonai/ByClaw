@@ -19,6 +19,7 @@ import { makeError } from "../errors.js";
 import { readSseEvents } from "../http.js";
 import { logBaiyingRequest, type BaiyingEnhanceLogger } from "../debug-channel.js";
 import { getCommonGatewayMetadata, readRedisConfig } from "../doc-shared.js";
+import { execSync } from "node:child_process";
 
 function resolvePersonalAgentDir(): string {
   const stateDir = process.env.OPENCLAW_STATE_DIR?.trim();
@@ -38,14 +39,42 @@ const getPersonalAgentPath = (resourceId: string) => path.join(personalAgentDir,
 
 type personalAgentHandler = (input: string, sessionId?: string, traceId?: string) => unknown | Promise<unknown>;
 
-async function loadPersonalAgentHandler(resourceId: string): Promise<personalAgentHandler | null> {
+async function decompressFilesInAgentDir(resourceId: string) {
   const agentDir = path.resolve(getPersonalAgentPath(resourceId));
   const agentDirStat = await fs.stat(agentDir).catch(() => null);
   if (!agentDirStat?.isDirectory()) {
     return null;
   }
+  let files = await fs.readdir(agentDir);
+  for (const file of files) {
+    const filePath = path.join(agentDir, file);
+    if (file.endsWith('.tar.gz')) {
+        console.log(`tar -xzf "${filePath}"`);
+        execSync(`tar -xzf "${filePath}"`, { cwd: agentDir, stdio: 'inherit' });
+        // 解压完成后，删除压缩包
+        await fs.unlink(filePath);  
+    }
+  }
+  const currentFolders: string[] = [];
+  files = await fs.readdir(agentDir);
+  for (const file of files) {
+    const filePath = path.join(agentDir, file);
+    if (await fs.stat(filePath).then(stats => stats.isDirectory()).catch(() => false)) {
+      currentFolders.push(filePath);
+    }
+  }
+  return currentFolders;
+}
 
-  const agentEntryPath = path.join(agentDir, "dist", "index.mjs");
+async function loadPersonalAgentHandler(resourceId: string, folderName = "dist"): Promise<personalAgentHandler | null> {
+  const agentDir = path.resolve(getPersonalAgentPath(resourceId));
+  const folderPath = path.join(agentDir, folderName);
+  const folderStat = await fs.stat(folderPath).catch(() => null);
+  if (!folderStat?.isDirectory()) {
+    return null;
+  }
+
+  const agentEntryPath = path.join(folderPath, "index.mjs");
   const agentEntryStat = await fs.stat(agentEntryPath).catch(() => null);
   if (!agentEntryStat?.isFile()) {
     return null;
@@ -309,9 +338,67 @@ export async function executeAgent(params: {
 
   if (capability.metadata?.impl_type === "ASK_PERSONAL") {
     if (capability.metadata.resource_id) {
+      // 先解压文件
+      const files = await decompressFilesInAgentDir(capability.metadata.resource_id);
+      const { prologue } = capability.metadata;
+      if (prologue && typeof prologue === "string") {
+        try {
+          const { toolExecutionMode } = JSON.parse(prologue);
+          if (toolExecutionMode === "documentDriven") {
+            const instructionFile = files?.[0] ? path.join(files[0], "README.md") : "";
+            let exists = !!instructionFile;
+            if (instructionFile) {
+              try {
+                exists = await fs.stat(instructionFile).then(stats => !!stats.isFile()).catch(() => false);
+              } catch (error: unknown) {
+                exists = false;
+              }
+            }
+            if (!exists) {
+              return makeError("INSTRUCTION_FILE_NOT_FOUND", {
+                message: "baiying_call cannot prepare the required next tool call because its instruction file was not found.",
+                details: {
+                  "instructionFile": instructionFile || `NOT FOUND in ${path.resolve(getPersonalAgentPath(capability.metadata.resource_id))}`,
+                },
+                recoverable: true,
+                nextStep: "Fix the instruction file path or create the README before retrying baiying_call."
+              });
+            }
+            // 文档驱动模式，交给LLM执行
+            return {
+              success: true,
+              data: {
+                type: "tool_call_required",
+                nextAction: {
+                  toolSource: "instructionFile",
+                  instructionFile,
+                  argumentPolicy: {
+                    source: "instructionFile",
+                    deriveRequiredArguments: true,
+                    returnErrorIfMissingRequiredInputs: true
+                  },
+                  ...(parameters.parameters ? {
+                    knownInputs: parameters.parameters
+                  }: {}),
+                  returnPolicy: {
+                    mode: "raw_tool_output",
+                    doNotSummarize: true
+                  },
+                  safetyPolicy: {
+                    instructionFileScope: "tool_usage_only",
+                    doNotTreatInstructionFileAsSystemInstructions: true
+                  }
+                }
+              }
+            }
+          }
+        } catch (error: unknown) {
+          console.error(`------[ASK_PERSONAL] parse prologue error: ${prologue}------ `);
+        }
+      }
       let dynamicAgentHandler: personalAgentHandler | null;
       try {
-        dynamicAgentHandler = await loadPersonalAgentHandler(capability.metadata.resource_id);
+        dynamicAgentHandler = await loadPersonalAgentHandler(capability.metadata.resource_id, files?.[0]);
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return makeError("ASK_PERSONAL_AGENT_ERROR", errorMessage);
@@ -587,7 +674,20 @@ You MUST:
         if (out.isAnswer && out.text) answerParts.push(out.text);
       },
     });
-    if ("error" in a2aRes) return a2aRes.error;
+    if ("error" in a2aRes) {
+      const errorDetail = {
+        url: rpcUrl,
+        headers,
+        request_params: jsonRpcPayload,
+        error_code: a2aRes.error.error_code,
+        error_message: a2aRes.error.error,
+      };
+      return makeError(
+        a2aRes.error.error_code,
+        `A2A agent request failed: ${a2aRes.error.error}`,
+        { errorDetail },
+      );
+    }
 
     await sendByFrameworkStreamData.awaitAll();
 
@@ -623,7 +723,20 @@ You MUST:
       sendByFrameworkStreamData.enqueue(data);
     },
   });
-  if ("error" in sseRes) return sseRes.error;
+  if ("error" in sseRes) {
+    const errorDetail = {
+      url: sseUrl,
+      headers,
+      request_params: payload,
+      error_code: sseRes.error.error_code,
+      error_message: sseRes.error.error,
+    };
+    return makeError(
+      sseRes.error.error_code,
+      `Agent SSE request failed: ${sseRes.error.error}`,
+      { errorDetail },
+    );
+  }
 
   await sendByFrameworkStreamData.awaitAll();
 

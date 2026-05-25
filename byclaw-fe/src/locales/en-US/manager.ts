@@ -190,8 +190,10 @@ export default {
 
   // Tabs
   'orgMgr.tabs.employee': 'Digital Employee',
-  'orgMgr.tabs.skill': 'Skill Assets',
   'orgMgr.tabs.knowledge': 'Knowledge Assets',
+  'orgMgr.tabs.tool': 'Tool Assets',
+  'orgMgr.tabs.view': 'View Assets',
+  'orgMgr.tabs.object': 'Object Assets',
 
   // Table Columns (Extra)
   'orgMgr.table.type': 'Type',
@@ -291,10 +293,21 @@ export default {
   'resourceStatus.unpublished': 'Unpublished',
 
   // Resource Type
+  'resourceAction.push': 'Publish',
   'resourceAction.unPush': 'Unpublish',
+  'resourceAction.unPushTip': 'Confirm unpublish?',
   'resourceAction.useAuth': 'Use Authorization',
+  'resourceAction.manageAuth': 'Manage Authorization',
   'resourceAction.rollback': 'Rollback',
+  'resourceAction.rollbackTip': 'Confirm rollback?',
+  'resourceAction.rollbackSuccess': 'Rollback succeeded',
+  'resourceAction.operationSuccess': 'Operation succeeded',
   'resourceAction.publishSuccess': 'Publish succeeded',
+  'resourceAction.pushSuccess': 'Publish succeeded',
+  'resourceAction.unPushSuccess': 'Unpublish succeeded',
+  'resourceAction.operationFrequent': 'Operation too frequent. Please try again later',
+  'resourceAction.databaseNotExist': 'Database does not exist',
+
   'digitalEmployeeMgr.manual':
     "The system's default creation method supports skill and knowledge configuration and can create comprehensive, Q&A, and operational digital employees.",
   'digitalEmployeeMgr.thirdParty':

@@ -2,6 +2,17 @@ import type { Dict, ExecutorFailure } from "./types.js";
 import { isRecord } from "./types.js";
 import { makeError, authError } from "./errors.js";
 
+function formatFetchError(err: unknown, url: string): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause = (err as { cause?: unknown }).cause;
+  const causeMsg = cause instanceof Error
+    ? `${cause.message}${(cause as { code?: string }).code ? ` (${(cause as { code?: string }).code})` : ""}`
+    : cause ? String(cause) : "";
+  const parts = [`${err.message} [url: ${url}]`];
+  if (causeMsg) parts.push(`cause: ${causeMsg}`);
+  return parts.join(" | ");
+}
+
 export type HttpResult = {
   response: Response;
   status: number;
@@ -38,7 +49,8 @@ export async function postJson(params: {
     });
   } catch (err) {
     clearTimeout(cleanupTimer);
-    return { error: makeError("REQUEST_FAILED", err instanceof Error ? err.message : String(err)) };
+    const message = formatFetchError(err, params.url);
+    return { error: makeError("REQUEST_FAILED", message) };
   }
   const bodyText = await response.text().catch(() => "");
   clearTimeout(cleanupTimer);
@@ -81,7 +93,8 @@ export async function postMultipartForm(params: {
     });
   } catch (err) {
     clearTimeout(cleanupTimer);
-    return { error: makeError("REQUEST_FAILED", err instanceof Error ? err.message : String(err)) };
+    const message = formatFetchError(err, params.url);
+    return { error: makeError("REQUEST_FAILED", message) };
   }
   const bodyText = await response.text().catch(() => "");
   clearTimeout(cleanupTimer);

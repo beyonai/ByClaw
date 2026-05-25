@@ -95,7 +95,6 @@ export type ISendProps = {
     answerMsg?: Record<string, unknown>;
   };
   resourceList?: RichInputResourceList;
-  waitLastMessageDone?: boolean;
 };
 
 export type ISendConf = {
@@ -134,18 +133,6 @@ function useChat(props: IProps) {
 
   // 获取消息发送方法
   const { send } = useSend({ sessionId, agentType, chatUrl });
-
-  const waitLastQueryPromiseResolver = useMemo(
-    () =>
-      ({
-        resolve: undefined,
-        reject: undefined,
-      } as {
-        resolve?: (value?: unknown) => void;
-        reject?: (reason?: unknown) => void;
-      }),
-    []
-  );
 
   // 获取消息相关方法和状态
   const {
@@ -238,13 +225,6 @@ function useChat(props: IProps) {
         lastMessage?.messageState &&
         [IMessageState.Query, IMessageState.Answer].includes(lastMessage?.messageState)
       ) {
-        if (sendProps.waitLastMessageDone) {
-          const promise = new Promise((_resolve, _reject) => {
-            waitLastQueryPromiseResolver.resolve = _resolve;
-            waitLastQueryPromiseResolver.reject = _reject;
-          });
-          throw promise;
-        }
         return false;
       }
     }
@@ -410,7 +390,6 @@ function useChat(props: IProps) {
         unset(newAnswerMsg, 'cancelSSE');
 
         updateMessage(newAnswerMsg);
-        waitLastQueryPromiseResolver.resolve?.();
       })
       .catch((e: Error) => {
         // 注销SSE请求
@@ -426,11 +405,6 @@ function useChat(props: IProps) {
         unset(newAnswerMsg, 'cancelSSE');
 
         updateMessage(newAnswerMsg);
-        waitLastQueryPromiseResolver.reject?.();
-      })
-      .finally(() => {
-        waitLastQueryPromiseResolver.resolve = undefined;
-        waitLastQueryPromiseResolver.reject = undefined;
       });
 
     // 添加取消功能到回答消息
@@ -444,9 +418,6 @@ function useChat(props: IProps) {
       updateMessage(newAnswerMsg);
 
       cancel();
-
-      waitLastQueryPromiseResolver.resolve = undefined;
-      waitLastQueryPromiseResolver.reject = undefined;
 
       return stopChat({
         ...pick(newAnswerMsg, ['agentId', 'sessionId', 'messageId', 'agentType']),

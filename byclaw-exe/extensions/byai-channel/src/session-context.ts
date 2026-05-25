@@ -72,6 +72,7 @@ export interface ActiveSdkRequest {
   deferredForFollowup: boolean;
   followupRunStarted: boolean;
   rootLifecyclePhase?: "end" | "error";
+  hasEmittedContent: boolean;
   lastReasoningText: string;
   lastReasoningMessageId: string;
   language: Language;
@@ -344,6 +345,7 @@ export function registerActiveSdkRequest(params: {
     deferredForFollowup: false,
     followupRunStarted: false,
     rootLifecyclePhase: undefined,
+    hasEmittedContent: false,
     lastReasoningText: "",
     lastReasoningMessageId: "",
     language: params.language,

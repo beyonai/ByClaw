@@ -1,0 +1,462 @@
+.fileBrowserEntry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 3px;
+  border-radius: 6px;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--beyond-color-fill-tertiary);
+  }
+}
+
+.fileBrowserIcon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  display: block;
+}
+
+.fileBrowserOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1000;
+  background: #fff;
+  border-radius: inherit;
+  overflow: hidden;
+}
+
+.workspaceShell {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+}
+
+.workspaceTabBar {
+  display: flex;
+  align-items: stretch;
+  height: 52px;
+  padding: 0 56px 0 20px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.workspaceTab {
+  position: relative;
+  padding: 0 22px;
+  color: var(--beyond-color-text-secondary);
+  font-size: 16px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--beyond-color-text);
+  }
+}
+
+.workspaceTabActive {
+  color: var(--beyond-color-text);
+  font-weight: 600;
+
+  &::after {
+    position: absolute;
+    right: 16px;
+    bottom: 0;
+    left: 16px;
+    height: 2px;
+    background: var(--beyond-color-text);
+    border-radius: 2px;
+    content: '';
+  }
+}
+
+.workspaceContent {
+  position: absolute;
+  top: 52px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  min-height: 0;
+  overflow: hidden;
+
+  :global {
+    .ant-spin-nested-loading,
+    .ant-spin-container {
+      height: 100%;
+      min-height: 0;
+    }
+  }
+}
+
+.filePane {
+  display: flex;
+  flex: 1;
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.fileBrowserFrame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.closeBtn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--beyond-color-text-secondary);
+  cursor: pointer;
+  line-height: 24px;
+  font-size: 18px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+
+  &:hover {
+    color: var(--beyond-color-text);
+    background: #fff;
+  }
+}
+
+.logsPane {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 280px minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: #f6f8fb;
+}
+
+.sessionPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  padding: 16px;
+  overflow: hidden;
+  background: #fff;
+  border-right: 1px solid rgba(15, 23, 42, 0.08);
+
+  :global {
+    .ant-spin-nested-loading {
+      flex: 1;
+      height: auto;
+      min-height: 0;
+      overflow: auto;
+    }
+
+    .ant-spin-container {
+      height: auto;
+      min-height: 100%;
+    }
+  }
+}
+
+.sessionCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 10px;
+  text-align: left;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.18s ease;
+
+  &:hover {
+    border-color: rgba(37, 99, 235, 0.28);
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  }
+}
+
+.sessionCardActive {
+  border-color: rgba(37, 99, 235, 0.46);
+  background: linear-gradient(135deg, #eef6ff 0%, #ffffff 100%);
+}
+
+.sessionName {
+  color: var(--beyond-color-text);
+  font-weight: 600;
+  line-height: 20px;
+  word-break: break-all;
+}
+
+.sessionTime {
+  color: var(--beyond-color-text-tertiary);
+  font-size: 12px;
+}
+
+.messagePanel {
+  height: 100%;
+  min-height: 0;
+  padding: 24px;
+  overflow: auto;
+}
+
+.messageBubbleRow {
+  display: flex;
+  margin-bottom: 16px;
+}
+
+.messageBubbleAssistant {
+  justify-content: flex-start;
+
+  .messageBubble {
+    background: #fff;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+  }
+}
+
+.messageBubbleUser {
+  justify-content: flex-end;
+
+  .messageBubble {
+    color: #fff;
+    background: #2563eb;
+  }
+
+  .messageMeta {
+    color: rgba(255, 255, 255, 0.78);
+  }
+}
+
+.messageBubble {
+  max-width: min(680px, 78%);
+  padding: 12px 14px;
+  border-radius: 16px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+}
+
+.messageMeta {
+  margin-bottom: 6px;
+  color: var(--beyond-color-text-tertiary);
+  font-size: 12px;
+}
+
+.messageText {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 22px;
+}
+
+.modelScrollPane {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  background: radial-gradient(circle at 12% 8%, rgba(59, 130, 246, 0.12), transparent 30%),
+    linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+
+  :global {
+    .ant-spin-nested-loading,
+    .ant-spin-container {
+      min-height: 100%;
+      height: auto;
+    }
+  }
+}
+
+.modelPane {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 24px;
+}
+
+.modelInfoCard {
+  flex: none;
+  max-width: 920px;
+  width: 100%;
+  margin: 0 auto;
+  border-radius: 18px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.modelChatCard {
+  flex: none;
+  min-height: 0;
+  max-width: 920px;
+  width: 100%;
+  margin: 0 auto 24px;
+  border-radius: 18px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.modelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.modelName {
+  color: var(--beyond-color-text);
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.modelSubTitle {
+  margin-top: 4px;
+  color: var(--beyond-color-text-tertiary);
+  font-size: 12px;
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 12px;
+  color: #1d2129;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sectionBar {
+  width: 3px;
+  height: 14px;
+  background: #165dff;
+  border-radius: 2px;
+}
+
+.sectionDesc {
+  margin: -4px 0 14px 11px;
+  color: #86909c;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.debugHero {
+  padding: 16px;
+  margin-bottom: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  border: 1px solid rgba(22, 93, 255, 0.08);
+  border-radius: 16px;
+}
+
+.debugModeBadge {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  margin-left: 11px;
+  color: #165dff;
+  font-size: 12px;
+  font-weight: 600;
+  background: #edf3ff;
+  border-radius: 999px;
+}
+
+.debugTips {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.debugTip {
+  padding: 10px 12px;
+  color: #4e5969;
+  font-size: 12px;
+  line-height: 18px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(22, 93, 255, 0.08);
+  border-radius: 12px;
+}
+
+.debugPanelStack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.codePanel {
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 14px;
+  box-shadow: 0 12px 28px -24px rgba(13, 27, 42, 0.45);
+}
+
+.codePanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  color: #1d2129;
+  font-size: 13px;
+  font-weight: 600;
+  background: #f4f7fb;
+}
+
+.codePanelActions {
+  display: flex;
+  gap: 8px;
+}
+
+.codeArea {
+  min-height: 150px;
+  padding: 0;
+  overflow: auto;
+
+  :global {
+    textarea.ant-input {
+      display: block;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 18px;
+      min-height: 180px !important;
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
+      resize: vertical;
+    }
+  }
+}
+
+.outputLoading {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.resourcePane {
+  height: 100%;
+  padding: 18px;
+  overflow: auto;
+  background: #fff;
+}
+
+.resourceTable {
+  min-height: 100%;
+}
+
+.resourceNameBtn {
+  height: auto;
+  padding: 0;
+  white-space: normal;
+}

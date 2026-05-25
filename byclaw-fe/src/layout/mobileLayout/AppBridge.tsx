@@ -22,7 +22,7 @@ export default function AppBridge() {
     window?.addEventListener?.('message', fn);
 
     return () => {
-      document?.addEventListener?.('message', fn);
+      document?.removeEventListener?.('message', fn);
       window?.removeEventListener?.('message', fn);
     };
   }, []);

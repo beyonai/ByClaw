@@ -77,6 +77,15 @@ public class TransactionAdviceConfig {
         txMap.put("search*", readOnlyTx);
         txMap.put("createDatasetIfNotExists", notSurpportedTx);
         txMap.put("createDefaultResourcesIfNotExists", notSurpportedTx);
+        // 记忆引擎同步属于数字员工保存的可选旁路能力。若调用失败会被业务层捕获并继续，
+        // 因此不能加入主事务，否则会把主事务标记为 rollback-only，最终导致 UnexpectedRollbackException。
+        txMap.put("createOrGetMemoryLibraryForDigitalEmployee", notSurpportedTx);
+        txMap.put("saveMemoryScene", notSurpportedTx);
+        // 开放资源目录/Redis 同步在业务层已声明为失败不阻断主流程；这里必须挂起事务，
+        // 否则内部同步异常即使被捕获，也会在方法返回时触发 rollback-only 提交异常。
+        txMap.put("synOpenClawWorkSpace", notSurpportedTx);
+        txMap.put("syncResourceJsonByBizType", notSurpportedTx);
+        txMap.put("upsertStandardJsonArtifact", notSurpportedTx);
         txMap.put("*", requiredTx);
 
         /* 事务管理规则，声明具备事务管理的方法名 **/
