@@ -127,6 +127,17 @@ public class ByClawSkillUploadApplicationService {
         });
     }
 
+    public List<ByClawSkillDto> uploadSkillZips(String userCode, Long resourceId, List<MultipartFile> zipFiles) {
+        if (zipFiles == null || zipFiles.isEmpty()) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.empty"));
+        }
+        List<ByClawSkillDto> result = new ArrayList<>();
+        for (MultipartFile zipFile : zipFiles) {
+            result.add(uploadSkillZip(userCode, resourceId, zipFile));
+        }
+        return result;
+    }
+
     /** 仅做硬性入参校验：userCode 非空、zip 非空、zip ≤ 50MB。 */
     private void validateInput(String userCode, Long resourceId, MultipartFile zipFile) {
         if (StringUtils.isBlank(userCode)) {
