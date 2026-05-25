@@ -3,6 +3,9 @@
 # Generate nginx-standalone.conf from .tpl template + .env variables.
 # Only replaces {{VAR}} placeholders — no heredoc duplication.
 #
+# Supports per-env override: if nginx-standalone.conf.tpl exists alongside
+# the .env file, it takes precedence over the default template.
+#
 cd "$(dirname "$0")"
 
 ENV_FILE="../../.env"
@@ -14,6 +17,14 @@ SSL_CERT="${SSL_DIR}/localhost.crt"
 OPENSSL_CONF="${SSL_DIR}/localhost-openssl.cnf"
 SSL_KEY_PATH="/etc/nginx/ssl/localhost.key"
 SSL_CERT_PATH="/etc/nginx/ssl/localhost.crt"
+
+# Check for per-env nginx template override (same dir as .env)
+ENV_DIR="$(cd "$(dirname "$ENV_FILE")" && pwd)"
+ENV_TEMPLATE="$ENV_DIR/nginx-standalone.conf.tpl"
+if [ -f "$ENV_TEMPLATE" ]; then
+    TEMPLATE="$ENV_TEMPLATE"
+    echo "Using env-specific nginx template: $ENV_TEMPLATE"
+fi
 
 if [ ! -f "$ENV_FILE" ]; then
     echo "Error: $ENV_FILE not found!"
