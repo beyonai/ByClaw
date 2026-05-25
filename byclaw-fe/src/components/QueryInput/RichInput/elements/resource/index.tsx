@@ -14,6 +14,10 @@ export type ResourceElementType = {
   agentName?: string;
   resourceName: string;
   resourceCode?: string;
+  field_code?: string;
+  field_name?: string;
+  field_id?: string;
+  field_desc?: string;
   resourceType: IResourceType;
   isAgentTool?: boolean;
   isFromResourceModule?: boolean;

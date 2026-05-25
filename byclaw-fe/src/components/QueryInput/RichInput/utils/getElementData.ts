@@ -86,6 +86,10 @@ export default function getElementData(type: IResourceType, data: any) {
         resourceType: data.resourceBizType,
         resourceName: data.resourceName,
         resourceCode: data.resourceCode,
+        field_code: data.field_code,
+        field_name: data.field_name,
+        field_id: data.field_id,
+        field_desc: data.field_desc,
         children: [{ text: getElementDisplayText({ resourceType: type, data: { name, agentName: data.agentName } }) }],
       };
     }
