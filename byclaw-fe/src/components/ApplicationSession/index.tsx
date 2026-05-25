@@ -362,7 +362,13 @@ function ApplicationSession(props: IProps) {
             }
           }
           Object.keys(restArgs).forEach((key) => {
-            url.searchParams.append(key, encodeURIComponent(restArgs[key]));
+            let val = restArgs[key];
+            if (isString(val)) {
+              val = encodeURIComponent(val);
+            } else if (typeof val === 'object') {
+              val = encodeURIComponent(JSON.stringify(val));
+            }
+            url.searchParams.append(key, val);
           });
           if (mySessionId) {
             url.searchParams.append('sessionId', mySessionId);
