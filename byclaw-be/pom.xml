@@ -86,7 +86,7 @@
         <log4j.version>2.20.0</log4j.version>
         <log4j-to-slf4j.version>2.20.0</log4j-to-slf4j.version>
         <log4j-api.version>2.20.0</log4j-api.version>
-        <logback.version>1.5.18</logback.version>
+        <logback.version>1.5.32</logback.version>
 
         <!-- Testing -->
         <junit.version>5.10.0</junit.version>
