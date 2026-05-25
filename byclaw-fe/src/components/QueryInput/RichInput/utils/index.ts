@@ -43,6 +43,10 @@ export function getNodeResourceData(node: MentionElementType | ResourceElementTy
     resourceId: `${resourceId}`,
     resourceName: node.name,
     resourceCode: node.resourceCode,
+    field_code: node.field_code,
+    field_name: node.field_name,
+    field_id: node.field_id,
+    field_desc: node.field_desc,
     // 冗余chatAvatar
     chatAvatar: node.chatAvatar,
   };
