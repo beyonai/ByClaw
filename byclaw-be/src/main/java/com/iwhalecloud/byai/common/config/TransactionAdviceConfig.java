@@ -84,6 +84,8 @@ public class TransactionAdviceConfig {
         // 开放资源目录/Redis 同步在业务层已声明为失败不阻断主流程；这里必须挂起事务，
         // 否则内部同步异常即使被捕获，也会在方法返回时触发 rollback-only 提交异常。
         txMap.put("synOpenClawWorkSpace", notSurpportedTx);
+        txMap.put("syncResourceJsonByBizType", notSurpportedTx);
+        txMap.put("upsertStandardJsonArtifact", notSurpportedTx);
         txMap.put("*", requiredTx);
 
         /* 事务管理规则，声明具备事务管理的方法名 **/

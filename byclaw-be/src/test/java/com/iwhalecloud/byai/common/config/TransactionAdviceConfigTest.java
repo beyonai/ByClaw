@@ -27,6 +27,10 @@ class TransactionAdviceConfigTest {
             .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
         assertThat(resolvePropagation(source, "createDefaultResourcesIfNotExists"))
             .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        assertThat(resolvePropagation(source, "syncResourceJsonByBizType"))
+            .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        assertThat(resolvePropagation(source, "upsertStandardJsonArtifact"))
+            .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
         assertThat(resolvePropagation(source, "createSomethingElse"))
             .isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
     }
@@ -44,6 +48,12 @@ class TransactionAdviceConfigTest {
         }
 
         public void createDefaultResourcesIfNotExists() {
+        }
+
+        public void syncResourceJsonByBizType() {
+        }
+
+        public void upsertStandardJsonArtifact() {
         }
 
         public void createSomethingElse() {

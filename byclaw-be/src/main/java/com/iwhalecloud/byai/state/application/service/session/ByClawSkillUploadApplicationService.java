@@ -8,10 +8,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.compress.archivers.ArchiveEntry;
+import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -58,6 +58,9 @@ public class ByClawSkillUploadApplicationService {
     private static final Set<String> IGNORED_TOP_LEVEL_NAMES = Set.of("__MACOSX");
 
     private static final String IGNORED_FILE_DS_STORE = ".DS_Store";
+
+    /** 兼容 Windows / 常见压缩工具未设置 UTF-8 标记时的中文 entry 名。 */
+    private static final String ZIP_ENTRY_NAME_FALLBACK_ENCODING = "GBK";
 
     @Autowired
     private UserFS userFS;
@@ -152,8 +155,9 @@ public class ByClawSkillUploadApplicationService {
      */
     private List<ParsedEntry> parseZipEntries(MultipartFile zipFile) {
         List<ParsedEntry> result = new ArrayList<>();
-        try (ZipInputStream zin = new ZipInputStream(zipFile.getInputStream())) {
-            ZipEntry zipEntry;
+        try (ZipArchiveInputStream zin = new ZipArchiveInputStream(zipFile.getInputStream(),
+            ZIP_ENTRY_NAME_FALLBACK_ENCODING, true, true)) {
+            ArchiveEntry zipEntry;
             while ((zipEntry = zin.getNextEntry()) != null) {
                 if (zipEntry.isDirectory()) {
                     continue;
