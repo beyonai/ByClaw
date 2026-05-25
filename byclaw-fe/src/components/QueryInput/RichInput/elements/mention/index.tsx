@@ -23,6 +23,10 @@ export type MentionElementType = {
   isDefaultAgent?: boolean; // 是否为最左侧的技能，例如慧笔、问数
   resourceType: IResourceType;
   resourceCode?: string;
+  field_code?: string;
+  field_name?: string;
+  field_id?: string;
+  field_desc?: string;
   children: { text: string }[];
 };
 
