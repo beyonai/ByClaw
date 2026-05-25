@@ -70,12 +70,11 @@ class ByclawResultFileStorage(ResultFileStorage):
             "filePath": str(self._normalize_logical_file_path(file_path)),
             "content": content,
         }
-        data = self._post_json("/byaiService/open/api/v1/conversation/writeTxt", payload)
-
-        stored_path = self._extract_string(data, "objectKey") or self._extract_string(
-            data, "filePath"
-        )
-        return stored_path or file_path
+        self._post_json("/byaiService/open/api/v1/conversation/writeTxt", payload)
+        # 返回原始逻辑路径，不使用 Java 返回的 objectKey。
+        # objectKey 已含 /.sessions/{sessionId}/ 前缀，若被上层（save_export / result_formatter）
+        # 存入 file_url 后再传给 read 接口，Java 会再次拼接 session 前缀，导致路径双重嵌套。
+        return file_path
 
     def append_text(self, file_path: str, content: str) -> str:
         payload = {
@@ -83,17 +82,16 @@ class ByclawResultFileStorage(ResultFileStorage):
             "filePath": str(self._normalize_logical_file_path(file_path)),
             "content": content,
         }
-        data = self._post_json("/byaiService/open/api/v1/conversation/appendTxt", payload)
-        stored_path = self._extract_string(data, "objectKey") or self._extract_string(
-            data, "filePath"
-        )
-        return stored_path or file_path
+        self._post_json("/byaiService/open/api/v1/conversation/appendTxt", payload)
+        # 同 write_text，返回原始逻辑路径避免 session 前缀被重复拼接
+        return file_path
 
     def read_text(self, file_path: str, begin_line: int = 0, end_line: int = -1) -> str | None:
+        file_path = str(self._normalize_logical_file_path(file_path))
+        file_path = self._strip_session_prefix(file_path)
         payload = {
             **self._build_context_payload(),
-            "filePath": str(self._normalize_logical_file_path(file_path)),
-            # "fileType": "txt",
+            "filePath": file_path,
             "begin_line": begin_line,
             "end_line": end_line,
         }
@@ -101,6 +99,16 @@ class ByclawResultFileStorage(ResultFileStorage):
         if isinstance(data, str):
             return data
         return self._extract_string(data, "content")
+
+    @staticmethod
+    def _strip_session_prefix(file_path: str) -> str:
+        for prefix in ("/.sessions/", "/.session/"):
+            if not file_path.startswith(prefix):
+                continue
+            path_parts = file_path.split("/", 3)
+            if len(path_parts) >= 4:
+                return f"/{path_parts[3]}"
+        return file_path
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> Any:
         headers = self._build_headers()
