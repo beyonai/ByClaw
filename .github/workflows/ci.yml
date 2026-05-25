@@ -100,7 +100,7 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
             echo "Skip byclaw-exe job: byclaw-exe/pyproject.toml not found."
           fi
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         if: steps.exe_project.outputs.exists == 'true'
         with:
           python-version: "3.12"
