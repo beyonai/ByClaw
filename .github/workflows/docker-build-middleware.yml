@@ -112,7 +112,7 @@ jobs:
 
       - name: Log in to Container Registry
         if: steps.should-build.outputs.build == 'true' && github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
