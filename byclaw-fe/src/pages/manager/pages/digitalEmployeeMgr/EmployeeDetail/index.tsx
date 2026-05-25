@@ -1056,6 +1056,7 @@ const EmployeeDetail = ({ loading }) => {
 
         // 从表单中读取核心能力列表（结构化）
         const coreCompetencies = form.getFieldValue('coreCompetencies') || [];
+        const currentResourceId = queryData.resourceId || agentId;
 
         // 创建/更新使用新接口：扁平化参数 + 新增字段
         const flattened = {
@@ -1111,12 +1112,12 @@ const EmployeeDetail = ({ loading }) => {
         };
 
         dispatch({
-          type: queryData.resourceId ? 'employeeMgr/updateResource' : 'employeeMgr/createDigitalEmployee',
-          payload: queryData.resourceId
+          type: currentResourceId ? 'employeeMgr/updateResource' : 'employeeMgr/createDigitalEmployee',
+          payload: currentResourceId
             ? {
                 // 编辑：新版接口，参数扁平化并包含新增字段
                 ...flattened,
-                resourceId: queryData.resourceId,
+                resourceId: currentResourceId,
                 systemCode: effectiveDigitalType === 'FROM_MANUALLY' ? 'BYAI' : systemCode,
                 resourceBizType: 'DIG_EMPLOYEE',
                 isFrontAccess: _isFrontAccess,
@@ -1129,12 +1130,25 @@ const EmployeeDetail = ({ loading }) => {
                 isFrontAccess: _isFrontAccess,
               },
           success: (resp) => {
+            const savedResourceId = resp?.resourceId || resp?.id || currentResourceId || resp;
+            const savedData = resp && typeof resp === 'object' ? resp : {};
+
+            if (savedResourceId) {
+              resultDataRef.current = {
+                ...queryData,
+                ...savedData,
+                appId: savedResourceId,
+                resourceId: savedResourceId,
+              };
+            }
+
             dispatch({
               type: 'employees/updateEmployee',
               payload: {
                 employee: agentHandler({
-                  ...(resp || {}),
-                  id: `${resp.resourceId || ''}`,
+                  ...savedData,
+                  resourceId: savedResourceId,
+                  id: `${savedResourceId || ''}`,
                 }),
               },
             });
@@ -1148,9 +1162,9 @@ const EmployeeDetail = ({ loading }) => {
 
             setUpdateTime(dayjs().format('HH:mm:ss'));
 
-            if (!queryData.resourceId && resp?.resourceId) {
-              const url = `${PREVIEW_HOST}iframes/employee?canCleanSession=1&agentId=${resp.resourceId}`;
-              setAgentId(resp.resourceId);
+            if (!currentResourceId && savedResourceId) {
+              const url = `${PREVIEW_HOST}iframes/employee?canCleanSession=1&agentId=${savedResourceId}`;
+              setAgentId(savedResourceId);
               setDebugPage(url);
             }
 
@@ -1208,8 +1222,15 @@ const EmployeeDetail = ({ loading }) => {
       managementAddresses,
       memoryRules,
       robotConfigs,
+      agentId,
       uuid,
+      effectiveDigitalType,
       effectiveAgentType,
+      systemCode,
+      ownerType,
+      EventEmitter,
+      intl,
+      isFrontAccess,
       auditErrors,
     ]
   );
