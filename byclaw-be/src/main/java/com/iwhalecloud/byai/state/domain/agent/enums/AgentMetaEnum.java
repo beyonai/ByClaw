@@ -121,7 +121,12 @@ public enum AgentMetaEnum {
     /**
      * 对象
      */
-    OBJECT("OBJECT", "对象");
+    OBJECT("OBJECT", "对象"),
+
+    /**
+     * 用户工作空间技能
+     */
+    SKILL("SKILL", "技能");
 
     /**
      * 枚举代码

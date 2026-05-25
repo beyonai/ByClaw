@@ -1,0 +1,29 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: anc95/ChatGPT-CodeReview@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.LLM_API_KEY }}
+          OPENAI_API_ENDPOINT: ${{ vars.LLM_API_ENDPOINT }}
+          MODEL: ${{ vars.LLM_MODEL }}
+          PROMPT: ${{ vars.LLM_REVIEW_PROMPT }}
+          top_p: 1
+          temperature: 0
+          max_tokens: 4096
+          MAX_PATCH_LENGTH: 5000
+          LANGUAGE: Chinese
+          exclude: "**/*.lock, **/pnpm-lock.yaml, **/package-lock.json, **/*.min.js, **/*.min.css, **/dist/**, **/build/**, **/*.svg, **/*.png, **/*.jpg, **/*.ico, **/*.woff, **/*.woff2, **/*.ttf"

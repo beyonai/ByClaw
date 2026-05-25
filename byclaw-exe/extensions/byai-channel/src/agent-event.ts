@@ -206,6 +206,7 @@ async function handleAssistantEvent(
   }
   const visibleDelta = consumeAssistantDelta(event.runId, delta as string);
   if (!visibleDelta) return;
+  request.hasEmittedContent = true;
   await emitSdkChunk(request, sdkEmitter, visibleDelta, {
     messageId: request.sessionKey,
     parentMessageId: "-1",
@@ -278,6 +279,13 @@ async function handleLifecycleEvent(
     return;
   }
   const activeRequest = markActiveSdkRootLifecycleFinished(sessionKey, phase) ?? request;
+  if (phase === "error" && !activeRequest.hasEmittedContent) {
+    const errorText = typeof data?.error === "string" ? data.error : "Agent run failed";
+    await emitSdkChunk(activeRequest, sdkEmitter, errorText, {
+      eventType: EventType.ANSWER_DELTA,
+    });
+    activeRequest.hasEmittedContent = true;
+  }
   if (phase === "end" && activeRequest.pendingChildSessionKeys.size > 0) {
     // root run 先结束，但仍有子 agent 未收尾；先用空行隔开后续恢复输出。
     await emitSdkChunk(activeRequest, sdkEmitter, "\n\n", {

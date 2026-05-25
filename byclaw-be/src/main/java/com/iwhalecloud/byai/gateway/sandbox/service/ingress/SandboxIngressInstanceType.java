@@ -5,6 +5,8 @@ import org.springframework.util.StringUtils;
 public enum SandboxIngressInstanceType {
 
     FILEBROWSER,
+    NOVNC,
+    OPENDESIGN,
     UNKNOWN;
 
     public static SandboxIngressInstanceType from(String value) {

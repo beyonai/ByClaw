@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { Typography, Dropdown, Button, Popconfirm, Tooltip, message } from 'antd';
+import { Typography, Dropdown, Button, Popconfirm, Tooltip, message, Modal } from 'antd';
 import type { MenuProps } from 'antd';
 import { useIntl } from '@umijs/max';
 import classnames from 'classnames';
@@ -145,6 +145,8 @@ const RenderContent = (props: ResourceCardProps) => {
     onAuditUse = noop,
     onRestore = noop,
     onDelete = noop,
+    deleteConfirmTitle,
+    deleteConfirmDescription,
   } = actionConfig || {};
 
   const intl = useIntl();
@@ -317,24 +319,21 @@ const RenderContent = (props: ResourceCardProps) => {
 
     // 注销数据
     if (canDelete) {
-      const deleteContent = (
-        <BuildMenuLabel icon="icon-a-Deleteshanchu" text={intl.formatMessage({ id: 'common.deleteResource' })} />
-      );
       items.push({
         key: 'delete',
         label: (
-          <Popconfirm
-            title={intl.formatMessage({ id: 'common.deactivateConfirm' })}
-            onConfirm={(e) => {
-              e?.stopPropagation();
-              onDelete();
-            }}
-            okText={intl.formatMessage({ id: 'common.confirm' })}
-            cancelText={intl.formatMessage({ id: 'common.cancel' })}
-          >
-            {deleteContent}
-          </Popconfirm>
+          <BuildMenuLabel icon="icon-a-Deleteshanchu" text={intl.formatMessage({ id: 'common.deleteResource' })} />
         ),
+        onClick: ({ domEvent }) => {
+          domEvent.stopPropagation();
+          Modal.confirm({
+            title: deleteConfirmTitle || intl.formatMessage({ id: 'common.deactivateConfirm' }),
+            content: deleteConfirmDescription,
+            okText: intl.formatMessage({ id: 'common.confirm' }),
+            cancelText: intl.formatMessage({ id: 'common.cancel' }),
+            onOk: () => onDelete(),
+          });
+        },
       });
     }
 

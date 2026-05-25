@@ -87,3 +87,19 @@ export const resourceBizTypeMap = {
 
   TOOLKIT: 'TOOLKIT',
 };
+
+// 类型：个人、企业、默认
+export const ownerTypeMap = [
+  {
+    text: getIntl().formatMessage({ id: 'orgMgr.digital.ownerType.personal' }),
+    value: 'personal',
+  },
+  {
+    text: getIntl().formatMessage({ id: 'orgMgr.digital.ownerType.enterprise' }),
+    value: 'enterprise',
+  },
+  {
+    text: getIntl().formatMessage({ id: 'orgMgr.digital.ownerType.default' }),
+    value: 'personal_default',
+  },
+];

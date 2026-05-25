@@ -322,6 +322,23 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
         if (!activeRequest) {
           return;
         }
+        if (!activeRequest.hasEmittedContent && event?.content) {
+          const sdkEmitter = resolveSdkEmitter(activeRequest.accountId);
+          if (sdkEmitter) {
+            await emitSdkChunkTracked({
+              emitter: sdkEmitter,
+              sessionId: activeRequest.sessionId,
+              traceId: activeRequest.traceId,
+              text: event.content,
+              options: {
+                messageId: activeRequest.sessionKey,
+                parentMessageId: "-1",
+                eventType: EventType.ANSWER_DELTA,
+              },
+            });
+            activeRequest.hasEmittedContent = true;
+          }
+        }
         cancelActiveSdkCompletionCheck(activeRequest.sessionKey);
       },
     );
@@ -342,6 +359,9 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
         const activeRequest = markActiveSdkOutboundSent(ctx?.accountId, event?.to);
         if (!activeRequest) {
           return;
+        }
+        if (!activeRequest.rootLifecyclePhase) {
+          activeRequest.rootLifecyclePhase = event?.success === false ? "error" : "end";
         }
         scheduleActiveSdkCompletionCheck(
           api,

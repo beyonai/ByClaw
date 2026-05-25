@@ -34,6 +34,10 @@ export type Resource = {
   resourceId: string;
   resourceName: string;
   resourceCode?: string;
+  field_code?: string;
+  field_name?: string;
+  field_id?: string;
+  field_desc?: string;
   chatAvatar?: string;
 };
 

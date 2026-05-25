@@ -158,7 +158,7 @@ describe('manager/components/SkillDetailDrawer/SkillDetailDrawer.utils', () => {
         {
           type: 'table',
           label: 'skillDetail.toolList',
-          tableType: 'tools',
+          tableType: 'mcp',
           dataSource: [
             {
               key: 'get-current-date',

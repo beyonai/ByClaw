@@ -113,6 +113,10 @@ public class SandboxService {
 
     @Lazy
     @Autowired
+    private SandboxUserContextRunner sandboxUserContextRunner;
+
+    @Lazy
+    @Autowired
     private RedisClient redisClient;
 
     /** 系统参数：允许同时使用的沙箱数量上限，paramCode=ENABLE_USE_SANDBOX_NUM */
@@ -1122,7 +1126,8 @@ public class SandboxService {
                     }
                     incrementVersions(record, true);
                     sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
-                    SandboxLaunchData launchData = launchSandbox(record.getUserCode(), record.getResourceId());
+                    SandboxLaunchData launchData = sandboxUserContextRunner.callAsUser(record.getUserCode(),
+                        () -> launchSandbox(record.getUserCode(), record.getResourceId()));
                     if (launchData != null && StringUtils.isNotBlank(launchData.getEndpoint())) {
                         restartedCount++;
                         report.addAffectedSandbox(sandboxRef(record) + " -> newSandboxId=" + launchData.getSandboxId());
@@ -1153,9 +1158,15 @@ public class SandboxService {
         Date nextRenewAt = computeNextRenewAt(remoteExpiresAt);
         String status = mapRemoteStateToRecordStatus(remoteInstance.getState());
         String gatewayToken = resolveReconciledGatewayToken(record, remoteInstance);
-        Map<String, String> instanceEndpoints = normalizeRecordInstanceEndpoints(record.getEndpoint(), gatewayToken);
+        SandboxEndpointRecordSupport.EndpointRecordParseResult endpointParseResult =
+            SandboxEndpointRecordSupport.parseEndpointRecord(record.getEndpoint());
+        Map<String, String> instanceEndpoints = endpointParseResult.malformedJson()
+            ? endpointParseResult.instanceEndpoints()
+            : normalizeInstanceEndpoints(endpointParseResult.instanceEndpoints(), gatewayToken);
         String endpoint = SandboxEndpointRecordSupport.resolvePrimaryEndpoint(instanceEndpoints);
-        String storedEndpoint = SandboxEndpointRecordSupport.toStorageValue(instanceEndpoints, endpoint);
+        String storedEndpoint = endpointParseResult.malformedJson()
+            ? record.getEndpoint()
+            : SandboxEndpointRecordSupport.toStorageValue(instanceEndpoints, endpoint);
         if (!hasReconcileChange(record, status, storedEndpoint, gatewayToken, remoteExpiresAt, remoteCreatedAt,
             timeoutSeconds, nextRenewAt)) {
             return;
@@ -1527,7 +1538,11 @@ public class SandboxService {
         if (record == null) {
             return null;
         }
-        return StringUtils.defaultIfBlank(record.getGatewayToken(), extractGatewayToken(record.getEndpoint()));
+        String gatewayToken = StringUtils.trimToNull(record.getGatewayToken());
+        if (gatewayToken != null) {
+            return gatewayToken;
+        }
+        return extractGatewayToken(record.getEndpoint());
     }
 
     private String normalizeRecordEndpoint(SsSandboxRecord record) {
@@ -1570,8 +1585,14 @@ public class SandboxService {
             return null;
         }
         try {
+            SandboxEndpointRecordSupport.EndpointRecordParseResult endpointParseResult =
+                SandboxEndpointRecordSupport.parseEndpointRecord(endpoint);
+            if (endpointParseResult.malformedJson()) {
+                return null;
+            }
             String rawQuery = URI.create(StringUtils.defaultIfBlank(
-                SandboxEndpointRecordSupport.resolvePrimaryEndpoint(endpoint), endpoint)).getRawQuery();
+                SandboxEndpointRecordSupport.resolvePrimaryEndpoint(endpointParseResult.instanceEndpoints()),
+                endpoint)).getRawQuery();
             if (StringUtils.isBlank(rawQuery)) {
                 return null;
             }
@@ -1616,7 +1637,15 @@ public class SandboxService {
     }
 
     private Map<String, String> normalizeRecordInstanceEndpoints(String endpointField, String gatewayToken) {
-        Map<String, String> parsed = SandboxEndpointRecordSupport.parseInstanceEndpoints(endpointField);
+        SandboxEndpointRecordSupport.EndpointRecordParseResult endpointParseResult =
+            SandboxEndpointRecordSupport.parseEndpointRecord(endpointField);
+        if (endpointParseResult.malformedJson()) {
+            return endpointParseResult.instanceEndpoints();
+        }
+        return normalizeInstanceEndpoints(endpointParseResult.instanceEndpoints(), gatewayToken);
+    }
+
+    private Map<String, String> normalizeInstanceEndpoints(Map<String, String> parsed, String gatewayToken) {
         java.util.LinkedHashMap<String, String> normalized = new java.util.LinkedHashMap<>();
         parsed.forEach((instance, endpoint) -> {
             String endpointValue = bindGatewayToken(endpoint, gatewayToken);

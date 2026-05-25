@@ -150,29 +150,25 @@ const OrganizationMembers = ({ selectedOrg, setEmployeeVisible, setBaseVisible, 
                 key: 'orgMember',
                 label: intl.formatMessage({ id: 'orgMgr.members.title' }),
               },
-              // {
-              //   key: 'digitalEmpolyee',
-              //   label: intl.formatMessage({
-              //     id: 'orgMgr.members.digitalEmployee',
-              //   }),
-              // },
-              // {
-              //   key: 'digitalResource',
-              //   label: intl.formatMessage({
-              //     id: 'orgMgr.members.digitalResource',
-              //   }),
-              // },
               {
                 key: 'employee',
                 label: intl.formatMessage({ id: 'orgMgr.tabs.employee' }),
               },
               {
-                key: 'skill',
-                label: intl.formatMessage({ id: 'orgMgr.tabs.skill' }),
-              },
-              {
                 key: 'knowledge',
                 label: intl.formatMessage({ id: 'orgMgr.tabs.knowledge' }),
+              },
+              {
+                key: 'tool',
+                label: intl.formatMessage({ id: 'orgMgr.tabs.tool' }),
+              },
+              {
+                key: 'view',
+                label: intl.formatMessage({ id: 'orgMgr.tabs.view' }),
+              },
+              {
+                key: 'object',
+                label: intl.formatMessage({ id: 'orgMgr.tabs.object' }),
               },
             ]}
             onChange={(key) => {
@@ -229,33 +225,29 @@ const OrganizationMembers = ({ selectedOrg, setEmployeeVisible, setBaseVisible, 
           />
         </div>
       </div>
-      {['employee', 'skill', 'knowledge'].includes(activeTab) && (
+      {activeTab !== 'orgMember' && (
         <div className={styles.filter}>
-          {['employee', 'knowledge', 'skill'].includes(activeTab) && (
-            <>
-              <TreeFilter
-                title={intl.formatMessage({ id: 'orgMgr.filter.type' })}
-                treeData={typeOptions}
-                selectedList={selectValue}
-                onOk={(v) => setSelectValue(v)}
-                mode="radio"
-              />
-              <FieldFilter
-                selectedList={fieldSelect}
-                onOk={(v) => {
-                  setSourceSelect([]);
-                  setFieldSelect(v);
-                }}
-              />
-              {/* <SourceFilter
-                selectedList={sourceSelect}
-                onOk={(v) => setSourceSelect(v)}
-                sourceTypes={sourceTypes}
-                catalogIds={fieldValue}
-                orgId={selectedOrg?.orgId}
-              /> */}
-            </>
-          )}
+          <TreeFilter
+            title={intl.formatMessage({ id: 'orgMgr.filter.type' })}
+            treeData={typeOptions}
+            selectedList={selectValue}
+            onOk={(v) => setSelectValue(v)}
+            mode="radio"
+          />
+          <FieldFilter
+            selectedList={fieldSelect}
+            onOk={(v) => {
+              setSourceSelect([]);
+              setFieldSelect(v);
+            }}
+          />
+          {/* <SourceFilter
+              selectedList={sourceSelect}
+              onOk={(v) => setSourceSelect(v)}
+              sourceTypes={sourceTypes}
+              catalogIds={fieldValue}
+              orgId={selectedOrg?.orgId}
+            /> */}
         </div>
       )}
       {activeTab === 'orgMember' && (
@@ -276,7 +268,7 @@ const OrganizationMembers = ({ selectedOrg, setEmployeeVisible, setBaseVisible, 
           userInfo={userInfo}
         />
       )}
-      {(activeTab === 'employee' || activeTab === 'knowledge' || activeTab === 'skill') && (
+      {activeTab !== 'orgMember' && (
         <NewResource
           ref={digitalResourceRef}
           selectedOrg={selectedOrg}

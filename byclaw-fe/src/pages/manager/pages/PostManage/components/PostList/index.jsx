@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { get } from 'lodash';
 import classNames from 'classnames';
-import { Input, Pagination, Tabs, Select, Table } from 'antd';
+import { Input, Pagination, Tabs, Table } from 'antd';
 import { useDispatch, useSelector, useIntl } from '@umijs/max';
 import Ellipsis from '@/pages/manager/components/Ellipsis';
 import Layout from '@/pages/manager/components/ausong/Layout';
@@ -46,7 +46,6 @@ const PostList = ({ selectedPost, record }) => {
   const [employeeVisible, setEmployeeVisible] = useState(false);
   const [searchValue, setSearchValue] = useState('');
   const [activeTab, setActiveTab] = useState('postMember');
-  const [selectValue, setSelectValue] = useState(2);
   const tableWrapRef = useRef(null);
   const [tableScrollY, setTableScrollY] = useState(240);
 
@@ -237,15 +236,23 @@ const PostList = ({ selectedPost, record }) => {
               },
               {
                 key: 'employee',
-                label: intl.formatMessage({ id: 'postList.tabs.employee' }),
-              },
-              {
-                key: 'skill',
-                label: intl.formatMessage({ id: 'postList.tabs.skill' }),
+                label: intl.formatMessage({ id: 'orgMgr.tabs.employee' }),
               },
               {
                 key: 'knowledge',
-                label: intl.formatMessage({ id: 'postList.tabs.knowledge' }),
+                label: intl.formatMessage({ id: 'orgMgr.tabs.knowledge' }),
+              },
+              {
+                key: 'tool',
+                label: intl.formatMessage({ id: 'orgMgr.tabs.tool' }),
+              },
+              {
+                key: 'view',
+                label: intl.formatMessage({ id: 'orgMgr.tabs.view' }),
+              },
+              {
+                key: 'object',
+                label: intl.formatMessage({ id: 'orgMgr.tabs.object' }),
               },
             ]}
             onChange={(key) => {
@@ -265,14 +272,6 @@ const PostList = ({ selectedPost, record }) => {
           >
             新增成员
           </Button> */}
-          {/* {(activeTab === 'employee' || activeTab === 'knowledge' || activeTab === 'skill') && (
-            <Select
-              style={{ width: 120 }}
-              onChange={(v) => setSelectValue(v)}
-              value={selectValue}
-              options={[{ value: 2, label: intl.formatMessage({ id: 'postList.typeOptions.postUsage' }) }]}
-            />
-          )} */}
           <Input
             suffix={
               <AntdIcon
@@ -348,7 +347,7 @@ const PostList = ({ selectedPost, record }) => {
           </div>
         </>
       )}
-      {(activeTab === 'employee' || activeTab === 'knowledge' || activeTab === 'skill') && (
+      {activeTab !== 'postMember' && (
         <PostResource selectedPost={selectedPost} searchValue={searchValue} activeTab={activeTab} record={record} />
       )}
       {baseVisible && (

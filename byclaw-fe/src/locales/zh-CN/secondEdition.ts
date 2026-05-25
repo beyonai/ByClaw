@@ -2,6 +2,9 @@ export default {
   // QueryInput Chat组件
   'queryInput.onlineSearch': '联网搜索',
   'queryInput.superAgent': '超级助手',
+  'queryInput.tooltip.fileManagement': '文件管理',
+  'queryInput.tooltip.mentionDigitalEmployee': '@数字员工',
+  'queryInput.tooltip.uploadFile': '文件上传',
   'chatBI.dragFileHere': '在此处拖放文件，支持常见表格和文档格式，不超过 100 MB',
   // 'chatBI.fileFormatTip': '支持常见表格和文档格式，不超过 100 MB',
   'chatBI.selectKnowledgeBase': '选取知识库',

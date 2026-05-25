@@ -1,8 +1,22 @@
 {{RESOLVER_BLOCK}}
 
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
 server {
     listen       8080;
-    server_name  localhost;
+    listen       8443 ssl;
+    http2 on;
+    server_name  localhost 127.0.0.1;
+
+    ssl_certificate {{SSL_CERT_PATH}};
+    ssl_certificate_key {{SSL_KEY_PATH}};
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
 
     large_client_header_buffers 4 16k;
     client_max_body_size 300m;
@@ -29,8 +43,38 @@ server {
         absolute_redirect off;
     }
 
+    location /v1/sandboxes {
+        proxy_pass {{PROXY_SANDBOXES}};
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+    }
+
+    location /byaiService/ws {
+        proxy_pass {{PROXY_WS}};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade websocket;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        # Supports SSE streaming.
+        chunked_transfer_encoding off;
+        proxy_buffering off;
+        gzip off;
+    }
+
     location /byaiService {
-        proxy_pass {{PROXY_HTTP}}/byaiService;
+        proxy_pass {{PROXY_HTTP}};
 
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -45,27 +89,16 @@ server {
         # WebSocket
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection $connection_upgrade;
     }
 
-    location /byaiService/ws {
-        proxy_pass {{PROXY_WS}}/byaiService/ws;
+    location /filebrowser {
+        rewrite ^/filebrowser(.*)$ /byaiService/filebrowser$1 break;
+        proxy_pass {{PROXY_HTTP}};
+
         proxy_http_version 1.1;
-        proxy_set_header Upgrade websocket;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-
-        # 支持sse流式输出配置
-        chunked_transfer_encoding off;
-        proxy_buffering off;
-        gzip off;
-    }
-
-    location = /filebrowser {
-        proxy_pass {{PROXY_HTTP}}/byaiService/filebrowser;
-
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -75,28 +108,30 @@ server {
         proxy_set_header Cookie $http_cookie;
         proxy_cookie_path /byaiService/filebrowser /filebrowser;
         proxy_cookie_flags ~ samesite=lax;
+    }
+
+    location /websockify {
+        set $novnc_url "";
+
+        if ($http_cookie ~* "(^|;\s*)novncUrl=(https?://[^;]+)") {
+            set $novnc_url $2;
+        }
+
+        if ($novnc_url = "") {
+            return 400 "Missing novncUrl cookie";
+        }
+
+        proxy_pass $novnc_url/websockify;
 
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-
-    location /filebrowser/ {
-        proxy_pass {{PROXY_HTTP}}/byaiService/filebrowser/;
-
+        proxy_set_header Connection $connection_upgrade;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $host;
-        proxy_set_header X-Forwarded-Port $server_port;
-        proxy_set_header Cookie $http_cookie;
-        proxy_cookie_path /byaiService/filebrowser /filebrowser;
-        proxy_cookie_flags ~ samesite=lax;
-
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_send_timeout 1800s;
+        proxy_read_timeout 1800s;
+        proxy_ssl_server_name on;
     }
 
     error_page 500 502 503 504 /50x.html;

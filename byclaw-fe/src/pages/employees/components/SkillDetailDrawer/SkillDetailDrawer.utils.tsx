@@ -34,7 +34,7 @@ export type RenderItemTable = {
   type: 'table';
   columns: TableColumnType<any>[];
   dataSource: any[];
-  tableType?: 'tools';
+  tableType?: 'tools' | 'mcp';
 };
 
 export type RenderItemButton = {
@@ -149,7 +149,7 @@ export const getMCPToolsRenderConfig = (
     {
       type: 'table',
       label: intl.formatMessage({ id: 'skillDetail.toolList' }),
-      tableType: 'tools',
+      tableType: 'mcp',
       columns: [
         { dataIndex: 'name', title: intl.formatMessage({ id: 'skillDetail.toolName' }) },
         {
