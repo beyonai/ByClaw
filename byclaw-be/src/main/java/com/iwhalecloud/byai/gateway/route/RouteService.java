@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.route;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Collections;
 import java.util.List;
@@ -365,15 +366,9 @@ public class RouteService {
         StringBuffer result = new StringBuffer();
         while (matcher.find()) {
             String placeholder = matcher.group(1); // 获取占位符内部的内容，如 DIG_EMPLOYEE_10812779
-            ResourceVo resource = resourceMap.get(placeholder);
+            String replacement = resolveResourcePlaceholder(placeholder, resourceMap);
 
-            if (resource != null && StringUtils.isNotBlank(resource.getResourceName())) {
-                String replacement = resource.getResourceName();
-                // 如果资源类型为 DIG_EMPLOYEE，则在名称前添加 @ 符号
-                if (AgentMetaEnum.DIG_EMPLOYEE.equals(resource.getResourceType())) {
-                    replacement = "@" + replacement;
-                }
-                // 转义特殊字符以用于替换
+            if (replacement != null) {
                 matcher.appendReplacement(result, java.util.regex.Matcher.quoteReplacement(replacement));
             }
             // 如果找不到对应的资源，保留原占位符
@@ -381,6 +376,38 @@ public class RouteService {
         matcher.appendTail(result);
 
         return result.toString();
+    }
+
+    private String resolveResourcePlaceholder(String placeholder, Map<String, ResourceVo> resourceMap) {
+        if (StringUtils.isBlank(placeholder)) {
+            return null;
+        }
+        if (placeholder.contains("#")) {
+            String[] parts = placeholder.split("#");
+            List<String> replacements = new ArrayList<>();
+            for (String part : parts) {
+                String replacement = resolveSingleResourcePlaceholder(part, resourceMap);
+                if (replacement == null) {
+                    return null;
+                }
+                replacements.add(replacement);
+            }
+            return String.join("#", replacements);
+        }
+        return resolveSingleResourcePlaceholder(placeholder, resourceMap);
+    }
+
+    private String resolveSingleResourcePlaceholder(String placeholder, Map<String, ResourceVo> resourceMap) {
+        ResourceVo resource = resourceMap.get(placeholder);
+        if (resource == null || StringUtils.isBlank(resource.getResourceName())) {
+            return null;
+        }
+        String replacement = resource.getResourceName();
+        // 如果资源类型为 DIG_EMPLOYEE，则在名称前添加 @ 符号
+        if (AgentMetaEnum.DIG_EMPLOYEE.equals(resource.getResourceType())) {
+            replacement = "@" + replacement;
+        }
+        return replacement;
     }
 
     private GatewayClient.SendResponse sendMessageWithWorkerRetry(String userCode,
