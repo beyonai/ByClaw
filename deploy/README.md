@@ -109,7 +109,7 @@ STANDALONE_MODULES=fe,be
 
 | 服务 | 服务名 | 默认端口 | 环境变量 |
 |------|--------|---------|---------|
-| 前端 (fe) | `fe` | 8080 | `NGINX_PORT` |
+| 前端 (fe) | `fe` | 8080 / 8443 | `NGINX_PORT` / `NGINX_HTTPS_PORT` |
 | 后端 (be) | `be` | 8086 / 8082 | `BE_SERVER_PORT` / `BE_WS_PORT` |
 | QA Manager | `qa-manager` | 8090 | `BYCLAW_QA_PORT` |
 | QA Worker | `qa-worker` | 无（后台进程） | - |
@@ -122,4 +122,4 @@ STANDALONE_MODULES=fe,be
 - 生成脚本：`standalone/gen-nginx-conf.sh`
 - 输出文件：`config/nginx-standalone.conf`
 
-`start-fe.sh` 和 `start-all.sh` 会自动调用生成脚本，从 `.env` 读取 `BE_SERVER_PORT` 和 `BE_WS_PORT` 替换模板中的占位符。修改 nginx 配置只需编辑 `.tpl` 模板文件。
+`start-fe.sh` 和 `start-all.sh` 会自动调用生成脚本，从 `.env` 读取 `BE_SERVER_PORT`、`BE_WS_PORT` 和 `BYCLAW_SANDBOX_PORT` 替换模板中的占位符，并初始化开发环境 `localhost` HTTPS 证书。修改 nginx 配置只需编辑 `.tpl` 模板文件。
