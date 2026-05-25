@@ -16,6 +16,10 @@ on:
       - ".github/workflows/docker-build-middleware.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+  packages: write
+
 env:
   REGISTRY: ghcr.io
 
