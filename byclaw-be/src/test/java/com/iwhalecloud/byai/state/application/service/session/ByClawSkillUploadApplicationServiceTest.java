@@ -3,6 +3,8 @@ package com.iwhalecloud.byai.state.application.service.session;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.Charset;
+import java.util.Arrays;
 import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -115,6 +117,24 @@ class ByClawSkillUploadApplicationServiceTest {
     }
 
     @Test
+    void shouldAcceptChineseSkillDirectoryFromGbkEncodedZip() {
+        MultipartFile zip = buildZip("铁算盘财务健康分析.zip", Charset.forName("GBK"),
+            "铁算盘财务健康分析/SKILL.md", "# 铁算盘",
+            "铁算盘财务健康分析/references/persona-guide.md", "guide");
+        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
+
+        assertEquals("铁算盘财务健康分析", dto.getSkillName());
+        assertEquals(AGENT_PREFIX + "铁算盘财务健康分析", dto.getSkillPath());
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "铁算盘财务健康分析/SKILL.md"));
+        assertTrue(pathCaptor.getAllValues()
+            .contains(AGENT_PREFIX + "铁算盘财务健康分析/references/persona-guide.md"));
+    }
+
+    @Test
     void shouldRejectZipWithMultipleSkillDocs() {
         // 两个 SKILL.md（即便分布在不同子目录），按"必须有且仅有一个"判定违规。
         MultipartFile zip = buildZip("skill.zip",
@@ -124,6 +144,21 @@ class ByClawSkillUploadApplicationServiceTest {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
             () -> service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip));
         assertTrue(ex.getMessage().contains("SKILL.md"));
+    }
+
+    @Test
+    void shouldUploadMultipleSkillZips() {
+        MultipartFile alpha = buildZip("alpha.zip", "alpha/SKILL.md", "# alpha");
+        MultipartFile beta = buildZip("beta.zip", "beta/SKILL.md", "# beta");
+        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+
+        var result = service.uploadSkillZips(USER_CODE, RESOURCE_ID, Arrays.asList(alpha, beta));
+
+        assertEquals(2, result.size());
+        assertEquals("alpha", result.get(0).getSkillName());
+        assertEquals("beta", result.get(1).getSkillName());
+        verify(userFS).delete(AGENT_PREFIX + "alpha/");
+        verify(userFS).delete(AGENT_PREFIX + "beta/");
     }
 
     @Test
@@ -210,11 +245,15 @@ class ByClawSkillUploadApplicationServiceTest {
 
     /** 构造一个 zip MultipartFile，参数按 (entryName, content) 成对传入；filename 决定 originalFilename。 */
     private MultipartFile buildZip(String filename, String... entries) {
+        return buildZip(filename, null, entries);
+    }
+
+    private MultipartFile buildZip(String filename, Charset charset, String... entries) {
         if (entries.length % 2 != 0) {
             throw new IllegalArgumentException("entries 必须成对");
         }
         ByteArrayOutputStream buf = new ByteArrayOutputStream();
-        try (ZipOutputStream zos = new ZipOutputStream(buf)) {
+        try (ZipOutputStream zos = charset == null ? new ZipOutputStream(buf) : new ZipOutputStream(buf, charset)) {
             for (int i = 0; i < entries.length; i += 2) {
                 zos.putNextEntry(new ZipEntry(entries[i]));
                 zos.write(entries[i + 1].getBytes());
