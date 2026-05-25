@@ -19,7 +19,6 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.feign.request.knowledge.OpenFileTagDTO;
-import com.iwhalecloud.byai.common.feign.request.knowledge.RebuildData;
 import com.iwhalecloud.byai.common.storage.FileIngressService;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import com.iwhalecloud.byai.common.storage.model.FileStorageContext;
@@ -34,7 +33,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.util.UriComponentsBuilder;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URLEncoder;
