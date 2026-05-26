@@ -29,7 +29,7 @@ function useHandler(props: IProps) {
 
   const dispatch = useDispatch();
 
-  const { sandboxesInfo } = useAppStore();
+  const { sandboxesInfo, setSiderCollapsed } = useAppStore();
   const globalContext = useGlobal();
   const { agentInfo, sessionId: curSessionId, EventEmitter } = globalContext;
 
@@ -339,10 +339,11 @@ function useHandler(props: IProps) {
 
       const { sandboxId } = sandboxesInfo;
 
+      setSiderCollapsed(true);
       EventEmitter.emit('beyond-main-driver-open-type', {
         drawerType: 'iframe',
         canClose: true,
-        canFullScreen: true,
+        width: '50vw',
       });
 
       let url = `/v1/sandboxes/${sandboxId}/proxy/8081/`;
