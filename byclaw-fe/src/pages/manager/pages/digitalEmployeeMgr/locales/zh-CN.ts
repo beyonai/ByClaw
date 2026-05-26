@@ -283,6 +283,7 @@ export default {
   'employeeDetail.openSuperHelper': '是否个人助理',
   'employeeDetail.openSuperHelperTooltip': '是否把当前数字员工设置为您的个人助理',
   'employeeDetail.personalAssistant': '个人助理',
+  'employeeDetail.thirdParty': '第三方',
   'employeeDetail.employeeType': '数字员工类型',
   'employeeDetail.advancedSettings.title': '高级配置',
   'employeeDetail.advancedSettings.settingNamePlaceholder': '请输入设置名称',
