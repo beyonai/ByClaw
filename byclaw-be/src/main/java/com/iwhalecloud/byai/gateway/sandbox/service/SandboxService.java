@@ -1223,6 +1223,9 @@ public class SandboxService {
     }
 
     private Integer resolveRemoteTimeoutSeconds(SandboxRuntimeInstance remoteInstance, Integer fallbackTimeoutSeconds) {
+        if (fallbackTimeoutSeconds != null && fallbackTimeoutSeconds > 0) {
+            return fallbackTimeoutSeconds;
+        }
         if (remoteInstance != null && remoteInstance.getCreatedAt() != null && remoteInstance.getExpiresAt() != null) {
             long seconds = java.time.temporal.ChronoUnit.SECONDS.between(
                 remoteInstance.getCreatedAt(), remoteInstance.getExpiresAt());
