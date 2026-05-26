@@ -74,3 +74,7 @@ export const SSEEventStatus = {
   query: '_QUERY_',
   done: '_DONE_',
 };
+
+export const IObjectType = {
+  toolCall: 'tool_call',
+};

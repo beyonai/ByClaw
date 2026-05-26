@@ -41,7 +41,6 @@
     "@js-preview/docx": "^1.6.4",
     "@js-preview/excel": "^1.7.14",
     "@js-preview/pdf": "^2.0.10",
-    "@lingxiteam/security": "1.3.4",
     "@tanstack/react-query": "^4.24.10",
     "@umijs/max": "4.4.2",
     "ahooks": "^3.7.8",

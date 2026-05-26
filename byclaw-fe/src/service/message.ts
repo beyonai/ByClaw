@@ -67,6 +67,11 @@ export const getMessageByIds = (payload: any) =>
     ...payload,
   });
 
+export const getSandboxInfo = (payload: any) =>
+  POST<any>('/byaiService/sandbox/getSandboxInfo', {
+    ...payload,
+  });
+
 export const getTermsOptions = (payload: {
   termSet: string;
   termTypeCode: string;
