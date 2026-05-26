@@ -328,8 +328,12 @@ function useHandler(props: IProps) {
       if (!sandboxesInfo?.sandboxId) return onionsProps;
       if (![`${SSEMessageType.thinkStatusTitle}`].includes(`${sseRes?.message?.contentType}`)) return onionsProps;
 
-      const toolTitle = get(sseRes, 'message.content.substance.title');
-      if (sseRes.objectType !== IObjectType.toolCall || !['jarvis_run_flow', 'browser'].includes(toolTitle || '')) {
+      const toolTitle = get(sseRes, 'message.content.substance.title') || '';
+
+      if (
+        sseRes?.message?.objectType !== IObjectType.toolCall ||
+        (!toolTitle.includes('jarvis_run_flow') && !toolTitle.includes('browser'))
+      ) {
         return onionsProps;
       }
 
