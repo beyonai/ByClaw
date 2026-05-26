@@ -217,8 +217,13 @@ function AllDigitalEmployees(
   }, []);
 
   useEffect(() => {
-    const handler = (param: { unApplyList?: string[]; ApplyList?: string[]; delIdList?: string[] }) => {
-      const { unApplyList = [], ApplyList = [], delIdList = [] } = param || {};
+    const handler = (param: {
+      unApplyList?: string[];
+      ApplyList?: string[];
+      delIdList?: string[];
+      updateList?: Partial<IAgentCache>[];
+    }) => {
+      const { unApplyList = [], ApplyList = [], delIdList = [], updateList = [] } = param || {};
 
       setList((prevList) => {
         return compact([
@@ -239,6 +244,13 @@ function AllDigitalEmployees(
             }
             if (delIdList.includes(`${item.agentId}`)) {
               return null;
+            }
+            const matchedUpdate = updateList.find((updateItem) => `${updateItem.agentId}` === `${item.agentId}`);
+            if (matchedUpdate) {
+              return {
+                ...item,
+                ...matchedUpdate,
+              };
             }
             return item;
           }),
@@ -303,14 +315,20 @@ function AllDigitalEmployees(
         .then(() => {
           message.success(intl.formatMessage({ id: 'digitalEmployees.deleteSuccess' }));
           EventEmitter.emit('beyond-update-employee', {
-            delIdList: [employee.agentId],
+            updateList: [
+              {
+                ...employee,
+                resourceStatus: 3,
+              },
+            ],
           });
+          getSearch(searchName || '', dropdownParam, 1, curActiveLink);
         })
         .catch((error: any) => {
           message.error(error?.message || error || intl.formatMessage({ id: 'common.deleteFailed' }));
         });
     },
-    [EventEmitter, intl]
+    [EventEmitter, curActiveLink, dropdownParam, getSearch, intl, searchName]
   );
 
   const onAuthEmployee = React.useCallback((employee: IAgentCache, type: 'useAuth' | 'mgrAuth') => {
