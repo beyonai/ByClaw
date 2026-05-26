@@ -7,7 +7,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.4.5</version>
+        <version>3.5.14</version>
         <relativePath/>
     </parent>
 
@@ -52,10 +52,9 @@
         <java.version>21</java.version>
 
         <!-- Spring Framework -->
-        <spring-boot.version>3.4.5</spring-boot.version>
-        <spring-cloud.version>2024.0.1</spring-cloud.version>
+        <spring-boot.version>3.5.14</spring-boot.version>
+        <spring-cloud.version>2025.0.2</spring-cloud.version>
         <spring-security.version>6.5.9</spring-security.version>
-        <spring-framework.version>6.2.11</spring-framework.version>
 
         <!-- Build Tools -->
         <maven-compiler-plugin>3.11.0</maven-compiler-plugin>
@@ -99,6 +98,7 @@
 
         <!-- JSON Processing -->
         <fastjson.version>2.0.53</fastjson.version>
+        <jackson3.version>3.1.1</jackson3.version>
         <guava.version>33.4.8-jre</guava.version>
 
         <!-- Apache Commons -->
@@ -128,7 +128,7 @@
         <reflections.version>0.10.2</reflections.version>
         <protobuf-java.version>3.24.4</protobuf-java.version>
         <transmittable-thread-local.version>2.14.2</transmittable-thread-local.version>
-        <jedis.version>5.0.2</jedis.version>
+        <jedis.version>6.0.0</jedis.version>
         <okhttp.version>4.12.0</okhttp.version>
         <pinyin.version>2.5.1</pinyin.version>
         <tomcat.version>10.1.55</tomcat.version>
@@ -778,6 +778,21 @@
                 <groupId>io.swagger</groupId>
                 <artifactId>swagger-annotations</artifactId>
                 <version>1.5.24</version>
+            </dependency>
+            <dependency>
+                <groupId>tools.jackson.core</groupId>
+                <artifactId>jackson-core</artifactId>
+                <version>${jackson3.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>tools.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+                <version>${jackson3.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>tools.jackson.dataformat</groupId>
+                <artifactId>jackson-dataformat-yaml</artifactId>
+                <version>${jackson3.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
