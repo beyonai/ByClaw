@@ -137,7 +137,7 @@ const OrganizationMembersModal = (props) => {
             type: url,
             payload,
             success: () => {
-              message.success(intl.formatMessage({ id: 'common.success' }));
+              message.success(intl.formatMessage({ id: 'orgMgr.modal.saveSuccess' }));
               onOk();
             },
             fail: (res) => {

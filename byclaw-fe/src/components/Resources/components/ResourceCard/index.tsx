@@ -58,9 +58,6 @@ type ResourceCardActionConfig = {
   deleteDisabledTip?: React.ReactNode;
   restoreDisabledTip?: React.ReactNode;
   applyDisabledTip?: React.ReactNode;
-  deleteConfirmTitle?: React.ReactNode;
-  deleteConfirmDescription?: React.ReactNode;
-  restoreConfirmTitle?: React.ReactNode;
   extraMenuItems?: MenuProps['items'];
   onApplyUse?: () => void;
   onAuditUse?: () => void;
@@ -137,27 +134,21 @@ const BuildMenuLabel = ({
 
 const ConfirmMenuLabel = ({
   title,
-  description,
-  okText,
-  cancelText,
   disabled,
   children,
   onConfirm,
 }: {
   title: React.ReactNode;
-  description?: React.ReactNode;
-  okText: React.ReactNode;
-  cancelText: React.ReactNode;
   disabled?: boolean;
   children: React.ReactNode;
   onConfirm: () => void;
 }) => {
+  const intl = useIntl();
   return (
     <Popconfirm
       title={title}
-      description={description}
-      okText={okText}
-      cancelText={cancelText}
+      okText={intl.formatMessage({ id: 'common.confirm' })}
+      cancelText={intl.formatMessage({ id: 'common.cancel' })}
       disabled={disabled}
       onConfirm={(event) => {
         event?.stopPropagation();
@@ -189,9 +180,6 @@ const RenderContent = (props: ResourceCardProps) => {
     onAuditUse = noop,
     onRestore = noop,
     onDelete = noop,
-    deleteConfirmTitle,
-    deleteConfirmDescription,
-    restoreConfirmTitle,
   } = actionConfig || {};
 
   const intl = useIntl();
@@ -338,8 +326,6 @@ const RenderContent = (props: ResourceCardProps) => {
         label: (
           <ConfirmMenuLabel
             title={intl.formatMessage({ id: 'digitalEmployees.applyConfirm' })}
-            okText={intl.formatMessage({ id: 'common.confirm' })}
-            cancelText={intl.formatMessage({ id: 'common.cancel' })}
             onConfirm={() => onApplyUse?.()}
           >
             <BuildMenuLabel icon="icon-a-Editorbianji" text={intl.formatMessage({ id: 'resource.applyUse' })} />
@@ -364,13 +350,7 @@ const RenderContent = (props: ResourceCardProps) => {
       items.push({
         key: 'delete',
         label: (
-          <ConfirmMenuLabel
-            title={deleteConfirmTitle || intl.formatMessage({ id: 'common.deactivateConfirm' })}
-            description={deleteConfirmDescription}
-            okText={intl.formatMessage({ id: 'common.confirm' })}
-            cancelText={intl.formatMessage({ id: 'common.cancel' })}
-            onConfirm={() => onDelete()}
-          >
+          <ConfirmMenuLabel title={intl.formatMessage({ id: 'common.deactivateConfirm' })} onConfirm={() => onDelete()}>
             <BuildMenuLabel icon="icon-a-Deleteshanchu" text={intl.formatMessage({ id: 'common.deleteResource' })} />
           </ConfirmMenuLabel>
         ),
@@ -383,9 +363,7 @@ const RenderContent = (props: ResourceCardProps) => {
         key: 'restore',
         label: (
           <ConfirmMenuLabel
-            title={restoreConfirmTitle || intl.formatMessage({ id: 'common.restoreConfirm' })}
-            okText={intl.formatMessage({ id: 'common.confirm' })}
-            cancelText={intl.formatMessage({ id: 'common.cancel' })}
+            title={intl.formatMessage({ id: 'common.restoreConfirm' })}
             disabled={restoring}
             onConfirm={() => handleRestore({ resourceId: resource?.resourceId })}
           >

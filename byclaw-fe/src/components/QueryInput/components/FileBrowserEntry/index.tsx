@@ -4,7 +4,7 @@ import { CopyOutlined, DeleteOutlined } from '@ant-design/icons';
 import { Button, Card, Descriptions, Empty, Input, Pagination, Spin, Table, Tag, Tooltip, message } from 'antd';
 import dayjs from 'dayjs';
 // @ts-ignore
-import { useIntl, useSelector } from '@umijs/max';
+import { useIntl, useLocation, useSelector } from '@umijs/max';
 
 import fileBrowserIcon from '@/assets/filebrowser/file.png';
 import SkillDetailDrawer from '@/pages/employees/components/SkillDetailDrawer/SkillDetailDrawer';
@@ -147,6 +147,7 @@ export default function FileBrowserEntry() {
   const entryRef = useRef<HTMLSpanElement>(null);
   const modelDebugInputKeyRef = useRef('');
   const intl = useIntl();
+  const { pathname } = useLocation();
   const { agentId } = useGlobal();
   const { defaultDigEmployeeId, userInfo, employeesList, agentList } = useSelector(({ employees, user }: any) => ({
     defaultDigEmployeeId: employees?.defaultDigEmployeeId,
@@ -383,6 +384,12 @@ export default function FileBrowserEntry() {
 
   const container = portalContainer || resolvePortalContainer();
   const fileManagementTip = intl.formatMessage({ id: 'queryInput.tooltip.fileManagement' });
+  const isMobileRoute = pathname === '/mobile' || pathname.startsWith('/mobile/');
+
+  if (isMobileRoute) {
+    return null;
+  }
+
   const resourceColumns = [
     {
       title: '资源名称',
