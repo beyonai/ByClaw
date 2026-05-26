@@ -356,6 +356,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
           {this.checkCanUploadFile() && (
             <UploadFile
               ref={this.uploadFileRef}
+              beforeUpload={this.checkIsFilesValid}
               extendsPayload={{
                 agentId,
                 sessionType: 'AGENT',
@@ -379,7 +380,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
                   },
                 });
               }}
-              accept={this.props.uploadFileConfig?.allowedFileTypes?.join(',')}
+              accept={this.getUploadFileAccept()}
             />
           )}
           {this.STTRender()}
