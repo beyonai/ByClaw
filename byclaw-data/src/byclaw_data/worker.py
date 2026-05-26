@@ -1534,6 +1534,30 @@ class DataCloudWorker(GatewayWorker):
             if isinstance(dynamic_result, dict):
                 _dyn_status = dynamic_result.get("status")
                 if _dyn_status == "done":
+                    _is_resume_cmd = (
+                        isinstance(command, ResumeCommand)
+                        or _paradigm_resume_value is not None
+                    )
+                    if _is_resume_cmd:
+                        _diag_content = str(dynamic_result.get("content") or "")
+                        logger.info(
+                            "[DIAG] dynamic resume done → finalAnswer will be emitted: "
+                            "session=%s thread=%s content_len=%d",
+                            context.session_id,
+                            dyn_thread_id,
+                            len(_diag_content),
+                        )
+                        await context.emit_chunk(
+                            StreamChunkEvent(
+                                content=(
+                                    f"已收到您的回复，正在整理分析结果，即将推送 finalAnswer 事件"
+                                    f"（内容长度={len(_diag_content)}，"
+                                    f"内容预览={_diag_content[:50]!r}）\n\n"
+                                )
+                            ),
+                            event_type=EventType.REASONING_LOG_START.value,
+                            content_type=SseReasonMessageType.think_text.value,
+                        )
                     dynamic_result = {**dynamic_result, "status": "COMPLETED"}
                 elif _dyn_status == "waiting":
                     dynamic_result = {**dynamic_result, "status": "WAITING_USER"}
