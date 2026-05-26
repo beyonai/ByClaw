@@ -135,9 +135,9 @@ def build_llm_config(model: dict[str, Any] | None) -> dict[str, Any] | None:
     }
     config["DATACLOUD_LLM_MODEL_PROVIDER"] = str(instance_param.get("providerName", "openai")).lower()
     config["DATACLOUD_LLM_TEMPERATURE"] = str(instance_param.get("temperature", "0.0"))
-    if instance_param.get("extends") is not None:
+    if instance_param.get("extendParam") is not None:
         config["DATACLOUD_LLM_MODEL_KWARGS"] = json.dumps(
-            instance_param.get("extends"), ensure_ascii=False
+            instance_param.get("extendParam"), ensure_ascii=False
         )
     return _apply_config_to_environment(config)
 
