@@ -1,12 +1,16 @@
 package com.iwhalecloud.byai.state.application.service.chat;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 import com.iwhaleai.byai.framework.client.GatewayClient;
 import com.iwhalecloud.byai.common.constants.chat.ConversationObjectType;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
+import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.common.storage.impl.MinioStorageService;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.util.DateUtils;
@@ -21,7 +25,9 @@ import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
+import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.resource.DigEmployeeExtQo;
+import com.iwhalecloud.byai.state.common.dto.MessageStructDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.FileUploadDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.PrologueDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
@@ -74,7 +80,8 @@ public class AssistantChatApplicationService {
     @Autowired
     private SsResExtDigEmployeeService ssResExtDigEmployeeService;
 
-
+    @Autowired
+    private ByaiMessageHotService byaiMessageHotService;
 
     AssistantChatApplicationService(GatewayClient<?> gatewayClient) {
         this.gatewayClient = gatewayClient;
@@ -240,5 +247,41 @@ public class AssistantChatApplicationService {
         return null;
     }
 
+    /**
+     * 更新消息结构
+     *
+     * @param messageStructDto 消息结构
+     * @return ByaiMessage
+     */
+    public ByaiMessage updateMessageStructById(MessageStructDto messageStructDto) {
 
+        ByaiMessage byaiMessage = byaiMessageHotService.find(messageStructDto.getMessageId());
+
+        String messageStruct = byaiMessage.getMessageStruct();
+        if (StringUtil.isEmpty(messageStruct)) {
+            return byaiMessage;
+        }
+
+        JSONArray jsonArray = JSON.parseArray(messageStruct);
+
+        for (int i = 0; i < jsonArray.size(); i++) {
+            JSONObject jsonObject = jsonArray.getJSONObject(i);
+
+            String id = jsonObject.getString("id");
+
+            if (StringUtil.isNotEmpty(id) && id.equals(messageStructDto.getId())) {
+                JSONArray choices = jsonObject.getJSONArray("choices");
+                for (int j = 0; j < choices.size(); j++) {
+                    JSONObject choice = choices.getJSONObject(j);
+                    JSONObject delta = choice.getJSONObject("delta");
+                    delta.put("content", messageStructDto.getContent());
+                }
+            }
+        }
+
+        byaiMessage.setMessageStruct(jsonArray.toJSONString());
+        byaiMessageHotService.update(byaiMessage);
+
+        return byaiMessage;
+    }
 }

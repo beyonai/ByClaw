@@ -1,17 +1,24 @@
 package com.iwhalecloud.byai.state.interfaces.controller.chat;
 
 import java.io.IOException;
+
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.constants.superassist.SessionType;
 import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
 import com.iwhalecloud.byai.common.feign.request.datacloud.TermsOptionsReq;
 import com.iwhalecloud.byai.common.feign.response.DataCloudResponse;
 import com.iwhalecloud.byai.common.feign.response.datacloud.TermsOptionsResp;
+import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
+import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.manager.dto.resource.UploadResult;
 import com.iwhalecloud.byai.state.application.service.callback.CallbackApplicationService;
 import com.iwhalecloud.byai.state.application.service.chat.AssistantChatApplicationService;
+import com.iwhalecloud.byai.state.common.dto.MessageStructDto;
 import com.iwhalecloud.byai.state.domain.callback.dto.CallbackRequest;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
 import jakarta.servlet.http.HttpServletRequest;
@@ -260,6 +267,18 @@ public class AssistantChatController {
             logger.error(e.getMessage(), e);
             return ResponseUtil.fail(e.getMessage());
         }
+    }
+
+    /**
+     * 更新消息结构
+     *
+     * @param messageStructDto 消息结构
+     * @return ResponseUtil
+     */
+    @PostMapping("/updateMessageStructById")
+    public ResponseUtil<ByaiMessage> updateMessageStructById(@RequestBody MessageStructDto messageStructDto) {
+        ByaiMessage byaiMessage = assistantChatApplicationService.updateMessageStructById(messageStructDto);
+        return ResponseUtil.successResponse(byaiMessage);
     }
 
 }

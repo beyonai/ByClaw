@@ -18,10 +18,10 @@ import java.util.Date;
 @TableName("byai_message")
 public class ByaiMessage {
 
-    /**
-     * 主键
-     */
-    @TableId(value = "id", type = IdType.INPUT)
+    @TableId(value = "message_id", type = IdType.INPUT)
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long messageId;
+
     @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
@@ -93,10 +93,6 @@ public class ByaiMessage {
 
     @TableField("message_content")
     private String messageContent;
-
-    @TableField("message_id")
-    @JsonSerialize(using = ToStringSerializer.class)
-    private Long messageId;
 
     @TableField("message_ref")
     @JsonSerialize(using = ToStringSerializer.class)
