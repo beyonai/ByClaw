@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { Typography, Dropdown, Button, Popconfirm, Tooltip, message, Modal } from 'antd';
+import { Typography, Dropdown, Button, Tooltip, message, Modal } from 'antd';
 import type { MenuProps } from 'antd';
 import { useIntl } from '@umijs/max';
 import classnames from 'classnames';
@@ -147,6 +147,7 @@ const RenderContent = (props: ResourceCardProps) => {
     onDelete = noop,
     deleteConfirmTitle,
     deleteConfirmDescription,
+    restoreConfirmTitle,
   } = actionConfig || {};
 
   const intl = useIntl();
@@ -285,24 +286,18 @@ const RenderContent = (props: ResourceCardProps) => {
 
     // 使用申请
     if (canApplyUse) {
-      const applyUseContent = (
-        <BuildMenuLabel icon="icon-a-Editorbianji" text={intl.formatMessage({ id: 'resource.applyUse' })} />
-      );
       items.push({
         key: 'applyUse',
-        label: (
-          <Popconfirm
-            title={intl.formatMessage({ id: 'digitalEmployees.applyConfirm' })}
-            onConfirm={(e) => {
-              e?.stopPropagation();
-              onApplyUse?.();
-            }}
-            okText={intl.formatMessage({ id: 'common.confirm' })}
-            cancelText={intl.formatMessage({ id: 'common.cancel' })}
-          >
-            {applyUseContent}
-          </Popconfirm>
-        ),
+        label: <BuildMenuLabel icon="icon-a-Editorbianji" text={intl.formatMessage({ id: 'resource.applyUse' })} />,
+        onClick: ({ domEvent }) => {
+          domEvent.stopPropagation();
+          Modal.confirm({
+            title: intl.formatMessage({ id: 'digitalEmployees.applyConfirm' }),
+            okText: intl.formatMessage({ id: 'common.confirm' }),
+            cancelText: intl.formatMessage({ id: 'common.cancel' }),
+            onOk: () => onApplyUse?.(),
+          });
+        },
       });
     }
 
@@ -339,29 +334,25 @@ const RenderContent = (props: ResourceCardProps) => {
 
     // 恢复数据
     if (canRestore) {
-      const restoreContent = (
-        <BuildMenuLabel
-          icon="icon-a-Returnfanhui"
-          text={intl.formatMessage({ id: 'common.restoreResource' })}
-          loading={restoring}
-        />
-      );
       items.push({
         key: 'restore',
         label: (
-          <Popconfirm
-            title={intl.formatMessage({ id: 'common.restoreConfirm' })}
-            onConfirm={(e) => {
-              e?.stopPropagation();
-              handleRestore({ resourceId: resource?.resourceId });
-            }}
-            okText={intl.formatMessage({ id: 'common.confirm' })}
-            cancelText={intl.formatMessage({ id: 'common.cancel' })}
-            disabled={restoring}
-          >
-            {restoreContent}
-          </Popconfirm>
+          <BuildMenuLabel
+            icon="icon-a-Returnfanhui"
+            text={intl.formatMessage({ id: 'common.restoreResource' })}
+            loading={restoring}
+          />
         ),
+        onClick: ({ domEvent }) => {
+          domEvent.stopPropagation();
+          if (restoring) return;
+          Modal.confirm({
+            title: restoreConfirmTitle || intl.formatMessage({ id: 'common.restoreConfirm' }),
+            okText: intl.formatMessage({ id: 'common.confirm' }),
+            cancelText: intl.formatMessage({ id: 'common.cancel' }),
+            onOk: () => handleRestore({ resourceId: resource?.resourceId }),
+          });
+        },
       });
     }
 
