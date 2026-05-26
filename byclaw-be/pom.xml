@@ -52,9 +52,10 @@
         <java.version>21</java.version>
 
         <!-- Spring Framework -->
-        <spring-boot.version>3.4.13</spring-boot.version>
+        <spring-boot.version>3.4.5</spring-boot.version>
         <spring-cloud.version>2024.0.1</spring-cloud.version>
         <spring-security.version>6.5.9</spring-security.version>
+        <spring-framework.version>6.2.11</spring-framework.version>
 
         <!-- Build Tools -->
         <maven-compiler-plugin>3.11.0</maven-compiler-plugin>
@@ -97,7 +98,6 @@
         <resilience4j.version>2.0.2</resilience4j.version>
 
         <!-- JSON Processing -->
-        <jackson.version>3.1.1</jackson.version>
         <fastjson.version>2.0.53</fastjson.version>
         <guava.version>33.4.8-jre</guava.version>
 
@@ -252,7 +252,7 @@
             <dependency>
                 <groupId>org.bouncycastle</groupId>
                 <artifactId>bcprov-jdk18on</artifactId>
-                <version>1.80</version>
+                <version>1.84</version>
             </dependency>
 
             <dependency>
@@ -328,22 +328,6 @@
                 <groupId>org.mybatis</groupId>
                 <artifactId>mybatis-spring</artifactId>
                 <version>${mybatis-spring.version}</version>
-            </dependency>
-
-            <dependency>
-                <groupId>tools.jackson.core</groupId>
-                <artifactId>jackson-databind</artifactId>
-                <version>${jackson.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>tools.jackson.core</groupId>
-                <artifactId>jackson-core</artifactId>
-                <version>${jackson.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.fasterxml.jackson.core</groupId>
-                <artifactId>jackson-annotations</artifactId>
-                <version>3.0-rc5</version>
             </dependency>
 
             <dependency>
@@ -628,7 +612,7 @@
             <dependency>
                 <groupId>io.minio</groupId>
                 <artifactId>minio</artifactId>
-                <version>8.5.17</version>
+                <version>8.6.0</version>
             </dependency>
 
          <dependency>
@@ -1043,6 +1027,12 @@
             <groupId>com.aliyun.oss</groupId>
             <artifactId>aliyun-sdk-oss</artifactId>
             <version>${aliyun-sdk-oss.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.ini4j</groupId>
+                    <artifactId>ini4j</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
@@ -1267,12 +1257,7 @@
             <version>1.1.0</version>
         </dependency>
 
-        <!-- captcha -->
-        <dependency>
-            <groupId>com.github.penggle</groupId>
-            <artifactId>kaptcha</artifactId>
-            <version>2.3.2</version>
-        </dependency>
+
 
         <!-- Aliyun SMS -->
         <dependency>
@@ -1402,12 +1387,6 @@
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-configuration-processor</artifactId>
-            <optional>true</optional>
         </dependency>
 
         <!-- ==================== Test Dependencies ==================== -->
@@ -1560,11 +1539,6 @@
                                 <groupId>org.projectlombok</groupId>
                                 <artifactId>lombok</artifactId>
                                 <version>${lombok.version}</version>
-                            </path>
-                            <path>
-                                <groupId>org.springframework.boot</groupId>
-                                <artifactId>spring-boot-configuration-processor</artifactId>
-                                <version>${spring-boot.version}</version>
                             </path>
                         </annotationProcessorPaths>
                     </configuration>
