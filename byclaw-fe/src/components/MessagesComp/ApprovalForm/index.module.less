@@ -3,14 +3,99 @@
   border-radius: var(--beyond-border-radius);
   padding: 12px;
 
-  .myFormHeader {
+  max-width: max(600px, 100%);
+
+  .myFormTitle {
     color: var(--beyond-color-text);
     font-size: var(--beyond-font-size-heading-4);
     font-weight: 500;
+  }
+  .myFormDescription {
+    color: var(--beyond-color-text-quaternary);
+    font-size: 14px;
   }
   .myFormContent {
     margin: 12px 0;
   }
   .myFormFooter {
   }
+}
+
+.formRow {
+  &:not(:last-child) {
+    border-bottom: 1px solid var(--beyond-color-fill);
+    margin-bottom: 12px;
+  }
+}
+
+.dropdownContent {
+  max-height: 80vh;
+  background-color: #fff;
+  // border: 1px solid var(--beyond-color-fill);
+  padding: var(--beyond-border-radius-sm) var(--beyond-border-radius-sm) 0 var(--beyond-border-radius-sm);
+  border-radius: var(--beyond-border-radius-sm);
+  overflow: hidden auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.arrayFieldPreview {
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--beyond-color-border);
+  border-radius: var(--beyond-border-radius-sm);
+  background-color: #fff;
+  cursor: pointer;
+}
+
+.arrayFieldTag {
+  margin: 2px 4px 2px 0;
+}
+
+.arrayFieldPlaceholder {
+  color: var(--beyond-color-text-quaternary);
+}
+
+.termSelectDropdown {
+  // width: 280px;
+  padding: 8px;
+  border-radius: var(--beyond-border-radius-sm);
+  background-color: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.termSelectList {
+  max-height: 240px;
+  margin-top: 8px;
+  overflow: hidden auto;
+}
+
+.termSelectOption {
+  padding: 6px 8px;
+  border-radius: var(--beyond-border-radius-sm);
+  color: var(--beyond-color-text);
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--beyond-color-fill);
+  }
+}
+
+.termSelectOptionActive {
+  .termSelectOption();
+
+  color: var(--beyond-color-primary);
+  background-color: var(--beyond-color-fill);
+}
+
+.termSelectOptionText {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.termSelectLoading {
+  display: flex;
+  justify-content: center;
+  padding: 8px;
 }

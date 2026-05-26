@@ -95,12 +95,19 @@ const thinkTaskUserInputHandler = (sseDataObj: any) => {
 };
 
 const approvalFormHandler = (sseDataObj: any) => {
+  const sourceAgentType = get(sseDataObj, 'agentId');
+  const metadata = get(sseDataObj, 'metadata');
+
   const content = get(sseDataObj, 'choices.0.delta.content', '');
 
   return {
     message: {
       contentType: SSEMessageType.approvalForm,
-      content: formatAgentSSEDate(content),
+      content: {
+        sourceAgentType,
+        metadata,
+        ...formatAgentSSEDate(content),
+      },
       status: SSEEventStatus.done,
     },
   };

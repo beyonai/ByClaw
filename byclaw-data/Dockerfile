@@ -12,6 +12,9 @@ COPY byclaw-data /workspace/byclaw-data
 WORKDIR /workspace/byclaw-data
 RUN uv sync --frozen --no-dev
 
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /workspace
+USER appuser
+
 EXPOSE 8080
 
 ENTRYPOINT ["bash", "/workspace/byclaw-data/start.sh"]
