@@ -330,16 +330,26 @@ def _normalize_recall(raw: Any) -> list[str]:
 
 
 def _dict_to_paradigm_answer(raw: Any) -> Any:
-    """将前端 paradigm dict 转为 ParadigmAnswer；str 时原样返回。
+    """将前端 paradigm dict 转为 user_clarify_node 能解析的 dict；str 时原样返回。
 
-    期望输入：{"paradigmList": [{"paradigmList": [{"choiceKeyword": ..., "recall": ...}]}]}
+    前端回传格式（实际结构）：
+    humanInput = {
+        "metadata": {...},
+        "paradigmList": [  ← 外层只有 1 个包装元素
+            {
+                "query": "...",
+                "paradigmList": [  ← 每个元素是范式组
+                    {"paradigmId": "1", "paradigmName": "查询值",
+                     "paradigmResult": [{"choiceKeyword": ..., "recall": ...}]},
+                    ...
+                ]
+            }
+        ]
+    }
+
+    user_clarify_node 期望格式：
+    {"paradigmList": [{"paradigmList": [{...所有选项平铺...}]}]}
     """
-    from datacloud_analysis.ontology_agent import (  # noqa: PLC0415
-        ParadigmAnswer,
-        ParadigmGroupSelection,
-        ParadigmOption,
-    )
-
     if isinstance(raw, str):
         return raw
     if not isinstance(raw, dict):
@@ -347,42 +357,51 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
     if _is_operation_form_resume(raw):
         return raw
 
-    outer = list(raw.get("paradigmList") or [])
-    items: list[dict[str, Any]] = []
-    if outer and isinstance(outer[0], dict):
-        items = list(outer[0].get("paradigmList") or [])
+    all_options: list[dict[str, Any]] = []
 
-    options = [
-        ParadigmOption(
-            choice_keyword=str(item.get("choiceKeyword") or ""),
-            recall=_normalize_recall(item.get("recall")),
-            filter_field=str(item.get("field") or ""),
-            comparison=str(item.get("comparison") or ""),
-            value=str(item.get("value") or ""),
-            choice_field=str(item.get("choiceField") or ""),
-            choice_comparison=str(item.get("choiceComparison") or ""),
-            field_recall=item.get("fieldRecall")
-            if isinstance(item.get("fieldRecall"), list)
-            else [],
-            comparison_recall=item.get("comparisonRecall")
-            if isinstance(item.get("comparisonRecall"), list)
-            else [],
-            value_recall=item.get("valueRecall")
-            if isinstance(item.get("valueRecall"), list)
-            else [],
-        )
-        for item in items
-        if isinstance(item, dict)
-    ]
-    return ParadigmAnswer(
-        selections=[
-            ParadigmGroupSelection(
-                paradigm_id="",
-                paradigm_name="",
-                chosen_options=options,
-            )
+    # 外层 paradigmList → 包装元素 → 内层 paradigmList → 范式组
+    outer_list = list(raw.get("paradigmList") or [])
+    for wrapper in outer_list:
+        if not isinstance(wrapper, dict):
+            continue
+        groups = list(wrapper.get("paradigmList") or [])
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            # 每个范式组下的 paradigmResult 才是真正的选项列表
+            items = list(group.get("paradigmResult") or [])
+            for item in items:
+                if isinstance(item, dict):
+                    all_options.append({
+                        "choiceKeyword": str(item.get("choiceKeyword") or ""),
+                        "recall": _normalize_recall(item.get("recall")),
+                        "keyword": str(item.get("keyword") or ""),
+                        "kid": item.get("kid", 0),
+                        "ktype": str(item.get("ktype") or ""),
+                        "field": str(item.get("field") or ""),
+                        "comparison": str(item.get("comparison") or ""),
+                        "value": str(item.get("value") or ""),
+                        "choiceField": str(item.get("choiceField") or ""),
+                        "choiceComparison": str(item.get("choiceComparison") or ""),
+                        "fieldRecall": item.get("fieldRecall")
+                        if isinstance(item.get("fieldRecall"), list)
+                        else [],
+                        "comparisonRecall": item.get("comparisonRecall")
+                        if isinstance(item.get("comparisonRecall"), list)
+                        else [],
+                        "valueRecall": item.get("valueRecall")
+                        if isinstance(item.get("valueRecall"), list)
+                        else [],
+                    })
+
+    # 返回 user_clarify_node 期望的纯 dict 结构
+    return {
+        "paradigmList": [
+            {
+                "paradigmList": all_options,
+            }
         ]
-    )
+    }
 
 
 def _is_operation_form_resume(raw: dict[str, Any]) -> bool:
