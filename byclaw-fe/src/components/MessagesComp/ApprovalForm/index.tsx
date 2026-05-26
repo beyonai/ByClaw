@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import classnames from 'classnames';
 
-import { get, keys, set } from 'lodash';
+import { get, keys, set, cloneDeep } from 'lodash';
 import { Form, Button, Input, Select, Col, Row, Space, Dropdown, Tag } from 'antd';
 import { InfoCircleOutlined } from '@ant-design/icons';
 // @ts-ignore
@@ -65,6 +65,8 @@ export type IMessageListItemContent = {
   extParam?: {
     state: 'PENDING' | 'APPROVED' | 'REJECTED';
   } & Record<string, unknown>;
+
+  orginContent: Record<string, unknown>;
 };
 
 export type IProps = {
@@ -230,7 +232,15 @@ function ApprovalForm(props: IProps) {
   const { messageListItemContent, message, messageIdx } = props;
 
   const { messageId } = message;
-  const { substance = [], title, description, formId, sourceAgentType, metadata = '' } = messageListItemContent || {};
+  const {
+    substance = [],
+    title,
+    description,
+    formId,
+    sourceAgentType,
+    metadata = '',
+    orginContent,
+  } = messageListItemContent || {};
 
   const { EventEmitter } = useGlobal();
 
@@ -255,9 +265,17 @@ function ApprovalForm(props: IProps) {
       console.error(e);
     }
 
+    const myOrginContent = cloneDeep(orginContent || {});
+    orginContent.rule = substance;
+
+    let queryQuestion = intl.formatMessage({ id: 'common.cancel' });
+    if (confirmed) {
+      queryQuestion = intl.formatMessage({ id: 'common.submit' });
+    }
+
     const payload = {
       sendProps: {
-        queryQuestion: '',
+        queryQuestion,
         // 用于合并消息记录
         inheritQryMsgId: message.queryMsgId,
         payload: {
@@ -266,10 +284,13 @@ function ApprovalForm(props: IProps) {
           confirmed,
           extParams: {
             humanInput: {
-              operationForm: substance,
+              operationForm: {
+                ...myOrginContent,
+                confirmed,
+              },
               metadata: metadataObj,
             },
-            query: '',
+            query: queryQuestion,
             language: getLocale(),
           },
         },

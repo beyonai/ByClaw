@@ -30,7 +30,7 @@ export const formatSSEDate = (objStr: string, stepId?: string) => {
     ...res,
   });
 
-  console.log('contentafterformat', content);
+  set(content, 'orginContent', resp);
 
   return content;
 };
