@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any
 
@@ -8,6 +9,8 @@ try:
     import redis
 except ImportError:  # pragma: no cover - only used when dependency is missing locally
     redis = None
+
+logger = logging.getLogger(__name__)
 
 KEY = "byai:aimodel:typelist"
 
@@ -72,13 +75,37 @@ def get_default_llm(client) -> dict[str, Any] | None:
 
     dc_models = get_models_by_ability(client, "LLM", ABILITY_DATA_CLOUD)
     if dc_models:
+        logger.debug(
+            "[model_env] get_default_llm: found %d DATA_CLOUD LLM(s), using first: instanceId=%s modelCode=%s",
+            len(dc_models),
+            dc_models[0].get("instanceId"),
+            dc_models[0].get("modelCode"),
+        )
         return dc_models[0]
 
     llm_models = get_models_by_type(client, "LLM")
+    logger.debug(
+        "[model_env] get_default_llm: no DATA_CLOUD LLM found, scanning %d LLM(s) for default",
+        len(llm_models),
+    )
     for model in llm_models:
         if model.get("isDefault") == 1:
+            logger.debug(
+                "[model_env] get_default_llm: using isDefault model instanceId=%s modelCode=%s",
+                model.get("instanceId"),
+                model.get("modelCode"),
+            )
             return model
-    return llm_models[0] if llm_models else None
+    result = llm_models[0] if llm_models else None
+    if result:
+        logger.debug(
+            "[model_env] get_default_llm: fallback to first LLM instanceId=%s modelCode=%s",
+            result.get("instanceId"),
+            result.get("modelCode"),
+        )
+    else:
+        logger.warning("[model_env] get_default_llm: no LLM model found in Redis")
+    return result
 
 
 def get_default_embedding(client) -> dict[str, Any] | None:
@@ -126,12 +153,30 @@ def build_llm_config(model: dict[str, Any] | None) -> dict[str, Any] | None:
     if not model:
         model = get_default_llm(None)
     if not model:
+        logger.warning("[model_env] build_llm_config: no LLM model available, returning empty config")
         return {}
     instance_param = model.get("instanceParam") or {}
+    auth_token = model.get("authToken")
+    api_base = model.get("url")
+    model_code = model.get("modelCode")
+    logger.info(
+        "[model_env] build_llm_config: instanceId=%s modelCode=%s url=%s authToken=%s",
+        model.get("instanceId"),
+        model_code,
+        api_base,
+        "***" if auth_token else "<EMPTY>",
+    )
+    if not auth_token:
+        logger.warning(
+            "[model_env] build_llm_config: authToken is empty for instanceId=%s modelCode=%s — "
+            "LLM calls will fail with 401",
+            model.get("instanceId"),
+            model_code,
+        )
     config: dict[str, Any] = {
-        "DATACLOUD_LLM_MODEL": model.get("modelCode"),
-        "DATACLOUD_LLM_API_BASE": model.get("url"),
-        "DATACLOUD_LLM_API_KEY": model.get("authToken"),
+        "DATACLOUD_LLM_MODEL": model_code,
+        "DATACLOUD_LLM_API_BASE": api_base,
+        "DATACLOUD_LLM_API_KEY": auth_token,
     }
     config["DATACLOUD_LLM_MODEL_PROVIDER"] = str(instance_param.get("providerName", "openai")).lower()
     config["DATACLOUD_LLM_TEMPERATURE"] = str(instance_param.get("temperature", "0.0"))
@@ -139,7 +184,9 @@ def build_llm_config(model: dict[str, Any] | None) -> dict[str, Any] | None:
         config["DATACLOUD_LLM_MODEL_KWARGS"] = json.dumps(
             instance_param.get("extendParam"), ensure_ascii=False
         )
-    return _apply_config_to_environment(config)
+    applied = _apply_config_to_environment(config)
+    logger.debug("[model_env] build_llm_config: applied env keys=%s", sorted(applied.keys()))
+    return applied
 
 
 def build_embedding_config(model: dict[str, Any] | None) -> dict[str, Any] | None:

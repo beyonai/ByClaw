@@ -541,6 +541,12 @@ async def _consume_agent_events(
     dyn_view_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """消费 OntologyAgent 事件流，翻译为 Gateway SSE。"""
+    logger.info(
+        "_consume_agent_events: session=%s message_id=%s parent_message_id=%s",
+        getattr(context, "session_id", ""),
+        getattr(context, "message_id", ""),
+        getattr(context, "parent_message_id", ""),
+    )
     from datacloud_analysis.ontology_agent import (  # noqa: PLC0415
         AnswerEvent,
         ErrorEvent,
@@ -554,11 +560,9 @@ async def _consume_agent_events(
 
     async for event in event_iter:
         if isinstance(event, ThinkingEvent):
-            await context.emit_chunk(
-                StreamChunkEvent(content=event.content),
-                event_type=EventType.REASONING_LOG_START.value,
-                content_type=SseReasonMessageType.think_text.value,
-            )
+            # ThinkingEvent comes from on_chat_model_stream; react_loop already dispatches
+            # the same token via dc_stream_chunk → StepEvent, so skip to avoid duplicates.
+            pass
         elif isinstance(event, StepEvent):
             await context.emit_chunk(
                 StreamChunkEvent(content=event.title),
@@ -793,7 +797,7 @@ class DataCloudWorker(GatewayWorker):
             ensure_ascii=False,
             sort_keys=True,
         )
-        return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def _cache_resume_result(self, key: str, result: dict[str, Any]) -> None:
         self._resume_result_cache[key] = dict(result)
@@ -1116,9 +1120,32 @@ class DataCloudWorker(GatewayWorker):
             {"status": "waiting"} graph interrupted, ask_user emitted, no flush.
         """
         logger.info(
-            "DataCloudWorker.process_command: session=%s command=%s",
+            ">>> process_command ENTRY: session=%s command_type=%s",
             context.session_id,
             type(command).__name__,
+        )
+        from datacloud_analysis.logging_setup import request_log_context  # noqa: PLC0415
+
+        _trace_id = str(
+            getattr(getattr(command, "header", None), "trace_id", "") or ""
+        ).strip()
+        _req_hint = _trace_id or context.session_id or None
+
+        async with request_log_context(
+            _req_hint,
+            extra_namespaces=("by-framework", "byclaw_data"),
+        ) as _rid:
+            return await self._process_command_inner(command, context, _rid)
+
+    async def _process_command_inner(
+        self, command: GatewayCommand, context: ByclawDataClarification, request_id: str
+    ) -> dict:
+        """实际处理逻辑，所有日志自动写入 logs/requests/{request_id}.log。"""
+        logger.info(
+            "DataCloudWorker.process_command: session=%s command=%s request_id=%s",
+            context.session_id,
+            type(command).__name__,
+            request_id,
         )
         # 处理模型环境变量，从redis获取
         from byclaw_data.model_environment import (
@@ -1135,6 +1162,13 @@ class DataCloudWorker(GatewayWorker):
         _new_api_key = str(_new_llm_cfg.get("DATACLOUD_LLM_API_KEY") or "")
         _new_model = str(_new_llm_cfg.get("DATACLOUD_LLM_MODEL") or "")
         _new_base_url = str(_new_llm_cfg.get("DATACLOUD_LLM_API_BASE") or "")
+        logger.info(
+            "[model_env] process_command: llm_cfg_from_redis model=%s base_url=%s api_key=%s session=%s",
+            _new_model or "<EMPTY>",
+            _new_base_url or "<EMPTY>",
+            "***" if _new_api_key else "<EMPTY>",
+            context.session_id,
+        )
         _model_sig: str = self._model_config_sig
 
         if _new_llm_cfg:
@@ -1547,11 +1581,40 @@ class DataCloudWorker(GatewayWorker):
                 or header_metadata.get("thread_id")
                 or ""
             ).strip()
+            # paradigm resume：thread_id 在 humanInput.metadata.thread_id，需单独读取
+            if not dyn_thread_id and _paradigm_resume_value is not None:
+                dyn_thread_id = str(
+                    _paradigm_human_input_metadata.get("thread_id") or ""
+                ).strip()
+                if dyn_thread_id:
+                    logger.info(
+                        "dynamic agent thread_id restored from humanInput.metadata: "
+                        "session=%s thread_id=%s",
+                        context.session_id,
+                        dyn_thread_id,
+                    )
             if not dyn_thread_id:
-                dyn_thread_id = self._build_thread_id(
-                    session_id=context.session_id,
-                    agent_key=runtime_agent_key,
-                )
+                # 并行子任务场景：同一 session 内多个子任务并发调用 BYCLAW_DATA，
+                # 若只用 session_id+agent_key 构建 thread_id 会导致所有子任务共享
+                # 同一个 LangGraph checkpoint，并发写入触发 InvalidUpdateError。
+                # 用 parent_message_id（即上游的 tool_call_id）区分不同子任务调用，
+                # 确保每个子任务有独立的 thread_id 和 checkpoint。
+                _tool_call_id = str(
+                    getattr(getattr(command, "header", None), "parent_message_id", "") or ""
+                ).strip()
+                if _tool_call_id and not isinstance(command, ResumeCommand):
+                    dyn_thread_id = f"{runtime_agent_key}:{context.session_id}:{_tool_call_id}"
+                    logger.info(
+                        "dynamic agent thread_id uses tool_call_id: session=%s tool_call_id=%s thread_id=%s",
+                        context.session_id,
+                        _tool_call_id,
+                        dyn_thread_id,
+                    )
+                else:
+                    dyn_thread_id = self._build_thread_id(
+                        session_id=context.session_id,
+                        agent_key=runtime_agent_key,
+                    )
 
             assert self._ontology_agent is not None, (  # noqa: S101
                 "OntologyAgent not initialized; ensure start_heartbeat() completed"
@@ -1591,6 +1654,11 @@ class DataCloudWorker(GatewayWorker):
                     session_id=context.session_id,
                 )
 
+            logger.info(
+                "DataCloudWorker: _consume_agent_events START session=%s thread=%s",
+                context.session_id,
+                dyn_thread_id,
+            )
             dynamic_result = await _consume_agent_events(
                 event_iter,
                 context,
@@ -1600,15 +1668,56 @@ class DataCloudWorker(GatewayWorker):
                 dyn_object_ids=_dyn_object_ids,
                 dyn_view_ids=_dyn_view_ids,
             )
+            logger.info(
+                "DataCloudWorker: _consume_agent_events DONE session=%s thread=%s result_status=%s",
+                context.session_id,
+                dyn_thread_id,
+                dynamic_result.get("status")
+                if isinstance(dynamic_result, dict)
+                else type(dynamic_result).__name__,
+            )
             if resume_cache_key is not None:
                 self._cache_resume_result(resume_cache_key, dynamic_result)
-            # "done" 不是框架的 terminal state（COMPLETED/FAILED/CANCELLED），
-            # 必须转换才能触发 framework worker.py 的 should_emit_stream_end → line 609
-            if (
-                isinstance(dynamic_result, dict)
-                and dynamic_result.get("status") == "done"
-            ):
-                dynamic_result = {**dynamic_result, "status": "COMPLETED"}
+            # 将内部状态映射为框架识别的 AgentState：
+            #   "done"    → "COMPLETED"  触发 should_emit_stream_end
+            #   "waiting" → "WAITING_USER" 触发框架挂起逻辑，使 resume 能正确路由回来
+            if isinstance(dynamic_result, dict):
+                _dyn_status = dynamic_result.get("status")
+                if _dyn_status == "done":
+                    _is_resume_cmd = (
+                        isinstance(command, ResumeCommand)
+                        or _paradigm_resume_value is not None
+                    )
+                    if _is_resume_cmd:
+                        _diag_content = str(dynamic_result.get("content") or "")
+                        logger.info(
+                            "[DIAG] dynamic resume done → finalAnswer will be emitted: "
+                            "session=%s thread=%s content_len=%d",
+                            context.session_id,
+                            dyn_thread_id,
+                            len(_diag_content),
+                        )
+                        await context.emit_chunk(
+                            StreamChunkEvent(
+                                content=(
+                                    f"已收到您的回复，正在整理分析结果，即将推送 finalAnswer 事件"
+                                    f"（内容长度={len(_diag_content)}，"
+                                    f"内容预览={_diag_content[:50]!r}）\n\n"
+                                )
+                            ),
+                            event_type=EventType.REASONING_LOG_START.value,
+                            content_type=SseReasonMessageType.think_text.value,
+                        )
+                    dynamic_result = {**dynamic_result, "status": "COMPLETED"}
+                elif _dyn_status == "waiting":
+                    dynamic_result = {**dynamic_result, "status": "WAITING_USER"}
+            logger.info(
+                "DataCloudWorker: line1480 returning session=%s status=%s",
+                context.session_id,
+                dynamic_result.get("status")
+                if isinstance(dynamic_result, dict)
+                else type(dynamic_result).__name__,
+            )
             return dynamic_result
 
         else:
