@@ -667,7 +667,7 @@ class DataCloudWorker(GatewayWorker):
             ensure_ascii=False,
             sort_keys=True,
         )
-        return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def _cache_resume_result(self, key: str, result: dict[str, Any]) -> None:
         self._resume_result_cache[key] = dict(result)
