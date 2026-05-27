@@ -1713,22 +1713,25 @@ class DataCloudWorker(GatewayWorker):
                             or (command.content if isinstance(command, ResumeCommand) else "")
                             or ""
                         ).strip()[:80]
+                        _final_content = str(dynamic_result.get("content") or "").strip()
+                        _has_final_answer = bool(_final_content)
                         logger.info(
                             "[DIAG] dynamic resume done → finalAnswer will be emitted: "
-                            "session=%s thread=%s query=%r",
+                            "session=%s thread=%s query=%r has_content=%s",
                             context.session_id,
                             dyn_thread_id,
                             _resume_query,
+                            _has_final_answer,
                         )
+                        _diag_lines = ["已收到您的回复，正在整理分析结果..."]
+                        if _resume_query:
+                            _diag_lines.append(f"当前问题：{_resume_query}")
+                        if _has_final_answer:
+                            _diag_lines.append("✓ finalAnswer 已就绪，即将推送")
+                        else:
+                            _diag_lines.append("⚠ finalAnswer 内容为空，不会推送")
                         await context.emit_chunk(
-                            StreamChunkEvent(
-                                content=(
-                                    f"已收到您的回复，正在整理分析结果...\n\n"
-                                    f"（当前问题：{_resume_query}）"
-                                    if _resume_query
-                                    else "已收到您的回复，正在整理分析结果...\n\n"
-                                )
-                            ),
+                            StreamChunkEvent(content="\n".join(_diag_lines) + "\n\n"),
                             event_type=EventType.REASONING_LOG_START.value,
                             content_type=SseReasonMessageType.think_text.value,
                         )
