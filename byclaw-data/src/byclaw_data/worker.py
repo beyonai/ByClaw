@@ -1708,20 +1708,25 @@ class DataCloudWorker(GatewayWorker):
                         or _paradigm_resume_value is not None
                     )
                     if _is_resume_cmd:
-                        _diag_content = str(dynamic_result.get("content") or "")
+                        _resume_query = str(
+                            _paradigm_human_input_metadata.get("query")
+                            or (command.content if isinstance(command, ResumeCommand) else "")
+                            or ""
+                        ).strip()[:80]
                         logger.info(
                             "[DIAG] dynamic resume done → finalAnswer will be emitted: "
-                            "session=%s thread=%s content_len=%d",
+                            "session=%s thread=%s query=%r",
                             context.session_id,
                             dyn_thread_id,
-                            len(_diag_content),
+                            _resume_query,
                         )
                         await context.emit_chunk(
                             StreamChunkEvent(
                                 content=(
-                                    f"已收到您的回复，正在整理分析结果，即将推送 finalAnswer 事件"
-                                    f"（内容长度={len(_diag_content)}，"
-                                    f"内容预览={_diag_content[:50]!r}）\n\n"
+                                    f"已收到您的回复，正在整理分析结果...\n\n"
+                                    f"（当前问题：{_resume_query}）"
+                                    if _resume_query
+                                    else "已收到您的回复，正在整理分析结果...\n\n"
                                 )
                             ),
                             event_type=EventType.REASONING_LOG_START.value,
