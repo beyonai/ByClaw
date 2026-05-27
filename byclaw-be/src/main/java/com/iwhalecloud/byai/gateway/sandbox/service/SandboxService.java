@@ -135,7 +135,7 @@ public class SandboxService {
     private static final long SANDBOX_AWAIT_POLL_INTERVAL_MS = 2_000L;
 
     /** 等待 Gateway worker 注册完成的超时时间（毫秒） */
-    private static final long WORKER_READY_TIMEOUT_MS = TimeUnit.MINUTES.toMillis(1);
+    public static final long WORKER_READY_TIMEOUT_MS = TimeUnit.MINUTES.toMillis(1);
 
     /** 等待 Gateway worker 注册完成的轮询间隔（毫秒） */
     private static final long WORKER_READY_POLL_INTERVAL_MS = 100L;
@@ -1223,6 +1223,9 @@ public class SandboxService {
     }
 
     private Integer resolveRemoteTimeoutSeconds(SandboxRuntimeInstance remoteInstance, Integer fallbackTimeoutSeconds) {
+        if (fallbackTimeoutSeconds != null && fallbackTimeoutSeconds > 0) {
+            return fallbackTimeoutSeconds;
+        }
         if (remoteInstance != null && remoteInstance.getCreatedAt() != null && remoteInstance.getExpiresAt() != null) {
             long seconds = java.time.temporal.ChronoUnit.SECONDS.between(
                 remoteInstance.getCreatedAt(), remoteInstance.getExpiresAt());
