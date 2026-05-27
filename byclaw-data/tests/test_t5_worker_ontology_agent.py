@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -118,6 +119,20 @@ def _import_dict_to_paradigm_answer() -> Any:
     return _dict_to_paradigm_answer
 
 
+def _import_operation_form_resume_from_human_input() -> Any:
+    from byclaw_data.worker import (  # type: ignore[attr-defined]
+        _operation_form_resume_from_human_input,
+    )
+
+    return _operation_form_resume_from_human_input
+
+
+def _import_human_input_from_payload() -> Any:
+    from byclaw_data.worker import _human_input_from_payload  # type: ignore[attr-defined]
+
+    return _human_input_from_payload
+
+
 def test_t5_dict_to_paradigm_answer_str_passthrough() -> None:
     """`_dict_to_paradigm_answer` 收到 str 时原样返回。"""
     fn = _import_dict_to_paradigm_answer()
@@ -170,6 +185,75 @@ def test_t5_dict_to_paradigm_answer_empty_paradigm_list() -> None:
     fn = _import_dict_to_paradigm_answer()
     result = fn({"paradigmList": []})
     assert isinstance(result, ParadigmAnswer)
+
+
+def test_t5_dict_to_paradigm_answer_keeps_operation_form_resume_dict() -> None:
+    """operation_form 恢复值必须原样传给 OntologyAgent.resume。"""
+    fn = _import_dict_to_paradigm_answer()
+    raw = {
+        "interrupt_type": "operation_form",
+        "formId": "op_form_1",
+        "confirmed": True,
+        "rule": [[{"fieldCode": "taskName", "fieldValue": "研发任务"}]],
+    }
+
+    result = fn(raw)
+
+    assert result is raw
+
+
+def test_t5_operation_form_resume_from_human_input_submit() -> None:
+    """前端 humanInput.operationForm + query=提交 转为 operation_form resume payload。"""
+    fn = _import_operation_form_resume_from_human_input()
+    human_input = {
+        "operationForm": {
+            "formId": "op_form_1",
+            "rule": [[{"fieldCode": "taskName", "fieldValue": "研发任务"}]],
+        },
+        "query": "提交",
+        "metadata": {"checkpoint_id": "ckpt-1"},
+    }
+
+    result = fn(human_input)
+
+    assert result == {
+        "interrupt_type": "operation_form",
+        "formId": "op_form_1",
+        "confirmed": True,
+        "rule": [[{"fieldCode": "taskName", "fieldValue": "研发任务"}]],
+    }
+
+
+def test_t5_operation_form_resume_from_human_input_cancel() -> None:
+    """前端 humanInput.operationForm + query=取消 转为取消恢复 payload。"""
+    fn = _import_operation_form_resume_from_human_input()
+    human_input = {
+        "operationForm": {
+            "formId": "op_form_1",
+            "rule": [[{"fieldCode": "taskName", "fieldValue": "研发任务"}]],
+        },
+        "query": "取消",
+    }
+
+    result = fn(human_input)
+
+    assert result == {
+        "interrupt_type": "operation_form",
+        "formId": "op_form_1",
+        "confirmed": False,
+        "rule": [[{"fieldCode": "taskName", "fieldValue": "研发任务"}]],
+        "reason": "取消",
+    }
+
+
+def test_t5_human_input_from_payload_supports_top_level_human_input() -> None:
+    """兼容前端直接在 extra_payload 顶层传 humanInput。"""
+    fn = _import_human_input_from_payload()
+    human_input = {"operationForm": {"formId": "op_form_1"}, "query": "提交"}
+
+    result = fn(ext_params=None, extra_payload={"humanInput": human_input})
+
+    assert result is human_input
 
 
 # ===========================================================================
@@ -296,6 +380,67 @@ async def test_t5_consume_paradigm_interrupt_returns_waiting() -> None:
 
     assert result.get("status") == "waiting"
     ctx.complex_ask_user.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_t5_consume_operation_form_interrupt_returns_waiting() -> None:
+    """InterruptEvent(operation_form) → complex_ask_user + operation_form metadata。"""
+    from datacloud_analysis.ontology_agent import InterruptEvent  # noqa: PLC0415
+
+    fn = _import_consume_agent_events()
+    ctx = _make_ctx()
+    operation_form = SimpleNamespace(
+        schema_version="1.0",
+        form_id="op_form_1",
+        action_code="create_by_rd_task",
+        action_name="",
+        title="确认执行：新增研发任务",
+        description="",
+        raw={},
+        rule=[
+            [
+                SimpleNamespace(
+                    form_type="input",
+                    field_code="taskName",
+                    field_name="任务名称",
+                    field_type="string",
+                    field_path="requestBody.taskName",
+                    field_value="研发任务",
+                    children=None,
+                    item_id="item-1",
+                    description="",
+                    required=True,
+                    readonly=False,
+                    disabled=False,
+                    is_hidden=False,
+                    default_files=[],
+                    term=None,
+                )
+            ]
+        ],
+    )
+
+    async def _gen():  # type: ignore[no-untyped-def]
+        event = InterruptEvent(
+            thread_id="tid_001",
+            reason="OPERATION_FORM_CONFIRMATION",
+            prompt="请确认操作表单",
+            paradigm_list=None,
+        )
+        event.interrupt_type = "operation_form"
+        event.operation_form = operation_form
+        yield event
+
+    result = await fn(_gen(), ctx, reco_task=None)
+
+    assert result.get("status") == "waiting"
+    ctx.complex_ask_user.assert_awaited_once()
+    event_arg = ctx.complex_ask_user.call_args[0][0]
+    metadata = event_arg.metadata
+    assert metadata["interrupt_type"] == "operation_form"
+    assert metadata["operation_form"]["formId"] == "op_form_1"
+    assert metadata["operation_form"]["rule"][0][0]["fieldCode"] == "taskName"
+    ctx.ask_user.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -483,9 +628,9 @@ async def test_t5_dynamic_path_no_reco_task() -> None:
     gen_fn = AsyncMock(return_value=["推荐问题1"])
     reco_plugin.generate_recommended_questions = gen_fn
     worker.plugin_registry.get_plugin = MagicMock(
-        side_effect=lambda pid: reco_plugin
-        if pid == "datacloud_recommended_questions"
-        else None
+        side_effect=lambda pid: (
+            reco_plugin if pid == "datacloud_recommended_questions" else None
+        )
     )
 
     cmd = _make_ask_command_t5(call_object_ids=["by_order"])
@@ -804,7 +949,11 @@ class TestDictToParadigmAnswerFilterFields:
 async def test_consume_filter_paradigm_metadata_has_filter_fields() -> None:
     """InterruptEvent 含过滤 paradigm 时，complex_ask_user metadata.paradigmList
     应包含 field/comparison/value/choiceField 等过滤字段。"""
-    from datacloud_analysis.ontology_agent import InterruptEvent, ParadigmGroup, ParadigmOption  # noqa: PLC0415
+    from datacloud_analysis.ontology_agent import (
+        InterruptEvent,
+        ParadigmGroup,
+        ParadigmOption,
+    )  # noqa: PLC0415
 
     fn = _import_consume_agent_events()
     ctx = _make_ctx()
@@ -898,18 +1047,18 @@ async def test_consume_mixed_paradigm_metadata_preserves_both_types() -> None:
                     paradigm_id="3",
                     paradigm_name="过滤条件",
                     options=[
-                ParadigmOption(
-                    choice_keyword="",
-                    recall=[],
-                    filter_field="code",
-                    comparison="eq",
-                    value="test",
-                    choice_field="编码",
-                    choice_comparison="eq",
-                    field_recall=["编码"],
-                    comparison_recall=["eq"],
-                    value_recall=["test"],
-                )
+                        ParadigmOption(
+                            choice_keyword="",
+                            recall=[],
+                            filter_field="code",
+                            comparison="eq",
+                            value="test",
+                            choice_field="编码",
+                            choice_comparison="eq",
+                            field_recall=["编码"],
+                            comparison_recall=["eq"],
+                            value_recall=["test"],
+                        )
                     ],
                 ),
             ],
