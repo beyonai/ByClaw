@@ -261,6 +261,8 @@ export const answerDeltaHandler = (sseDataObj: any, msgEvent?: string): { messag
   Object.assign(res.message, {
     objectType: get(sseDataObj, 'objectType'),
     agentId: get(sseDataObj, 'agentId'),
+    uuid: get(sseDataObj, 'id'),
+    orginContent: get(sseDataObj, 'choices.0.delta.content', ''),
   });
 
   return res;

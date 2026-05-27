@@ -844,7 +844,7 @@ public class ResourceCurlService {
 
     private String normalizeCurlFromLargeModel(String modelOutput) {
         String curl = StringUtils.trimToEmpty(modelOutput);
-        curl = curl.replaceAll("(?is)<think>.*?</think>", "");
+        curl = curl.replaceAll("(?is)<think>[^<]*+(?:<(?!/think>)[^<]*+)*+</think>", "");
         curl = curl.replace("```bash", "").replace("```shell", "").replace("```", "").trim();
         String[] lines = curl.split("\\R");
         int commandStartLine = -1;

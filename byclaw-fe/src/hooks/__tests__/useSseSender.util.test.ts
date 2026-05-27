@@ -27,6 +27,8 @@ describe('hooks/useSseSender/util', () => {
         status: SSEEventStatus.query,
         objectType: 'AGENT',
         agentId: 'agent-1',
+        orginContent: 'hello',
+        uuid: undefined,
       },
     });
   });
@@ -52,6 +54,8 @@ describe('hooks/useSseSender/util', () => {
         status: SSEEventStatus.done,
         objectType: undefined,
         agentId: undefined,
+        orginContent: JSON.stringify({ taskStepId: 'task-step-1', foo: 'bar' }),
+        uuid: undefined,
       },
     });
   });

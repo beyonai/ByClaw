@@ -514,7 +514,7 @@ public class AssistantChatService {
         sessionMembersDto.setObjectId(assistantChatDto.getAgentId());
 
         String chatContent = assistantChatDto.getChatContent();
-        sessionMembersDto.setSessionName(ChatUtils.truncateString(chatContent.replaceAll("\\{\\{.*?\\}\\}", ""), 10));
+        sessionMembersDto.setSessionName(ChatUtils.truncateString(chatContent.replaceAll("\\{\\{[^}]*+\\}\\}", ""), 10));
         sessionMembersDto.setCreatorId(CurrentUserHolder.getCurrentUserId());
         sessionMembersDto.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
         sessionMembersDto.setSessionType(SessionType.H_AS.getCode());
