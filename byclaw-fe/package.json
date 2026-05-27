@@ -117,7 +117,7 @@
     "eslint-config-next": "13.1.6",
     "eslint-config-prettier": "^10.1.8",
     "fs-extra": "^11.2.0",
-    "glob": "^10.3.10",
+    "glob": "^13.0.6",
     "husky": "^8.0.3",
     "identity-obj-proxy": "^3.0.0",
     "lint-staged": "^13.3.0",
