@@ -735,7 +735,6 @@ public class ToolManService {
             throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
         }
         validateResourceManagePermission(resource);
-        validateCommercialEditionKnowledgeOrToolWritable(resource);
 
         String resourceBizType = StringUtils.trimToEmpty(resource.getResourceBizType());
         String targetContent = findTargetContentByBizType(resourceBizType, resourceId);
