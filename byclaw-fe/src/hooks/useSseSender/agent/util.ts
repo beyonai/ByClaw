@@ -16,19 +16,20 @@ export const formatSSEDate = (objStr: string, stepId?: string) => {
     return resp;
   }
 
-  const { pluginAppId, pluginMachineId, rule, rules, title, ...res } = resp;
+  const { pluginAppId, pluginMachineId, rule, title, description, formId, confirmed, ...res } = resp;
 
   set(content, 'pluginAppId', pluginAppId);
   set(content, 'pluginMachineId', pluginMachineId);
+  set(content, 'formId', formId);
   set(content, 'title', title);
-  set(content, 'substance', rule || rules || []);
+  set(content, 'description', description);
+  set(content, 'substance', rule || []);
   set(content, 'formStatus', IFormStatus.INIT);
   set(content, 'stepId', stepId);
+  set(content, 'confirmed', confirmed);
   set(content, 'extParam', {
     ...res,
   });
-
-  console.log('contentafterformat', content);
 
   return content;
 };

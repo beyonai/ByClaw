@@ -12,8 +12,17 @@ FROM nginx:1.29.4-alpine
 # 复制本地构建好的前端文件到 nginx 目录
 COPY ./dist /usr/share/nginx/html
 
-# 注意：nginx.conf 通过 -v 参数外挂，不打包进镜像
-# 这样可以在宿主机修改配置后，直接重启容器生效
+# 构建信息
+ARG BUILD_VERSION=unknown
+ARG BUILD_BRANCH=unknown
+ARG BUILD_COMMIT=unknown
+ARG BUILD_COMMIT_FULL=unknown
+ARG BUILD_TIME=unknown
+ARG BUILD_MODULE=byclaw-fe
+
+RUN printf '{"version":"%s","branch":"%s","commit":"%s","commitFull":"%s","buildTime":"%s","module":"%s"}\n' \
+    "$BUILD_VERSION" "$BUILD_BRANCH" "$BUILD_COMMIT" "$BUILD_COMMIT_FULL" "$BUILD_TIME" "$BUILD_MODULE" \
+    > /usr/share/nginx/html/build-info.json
 
 EXPOSE 8080
 

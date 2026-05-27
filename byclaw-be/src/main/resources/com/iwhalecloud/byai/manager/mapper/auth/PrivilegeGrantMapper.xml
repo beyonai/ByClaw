@@ -418,7 +418,9 @@
                     or a.resource_desc like concat('%', #{keyword}, '%'))
             </if>
         </where>
-        order by COALESCE(a.update_time, '1970-01-01 00:00:00') desc, a.create_time desc
+        order by case when a.resource_status = 3 then 1 else 0 end asc,
+                 COALESCE(a.update_time, '1970-01-01 00:00:00') desc,
+                 a.create_time desc
     </select>
 
     <select id="findPrivilegeGrant" resultMap="privilegeGrantResultMap">

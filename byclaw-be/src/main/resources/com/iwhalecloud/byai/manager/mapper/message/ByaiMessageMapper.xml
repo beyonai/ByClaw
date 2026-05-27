@@ -4,7 +4,6 @@
 
     <!-- 通用字段映射 -->
     <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.common.message.entity.ByaiMessage">
-        <id column="id" property="id" />
         <result column="access_terminal" property="accessTerminal" />
         <result column="append_index" property="appendIndex" />
         <result column="archived_at" property="archivedAt" />

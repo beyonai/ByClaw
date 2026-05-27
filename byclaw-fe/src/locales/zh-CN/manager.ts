@@ -180,6 +180,7 @@ export default {
   'orgMgr.modal.phoneRule': '请输入有效的手机号',
   'orgMgr.modal.role': '角色',
   'orgMgr.modal.rolePlaceholder': '请选择角色',
+  'orgMgr.modal.saveSuccess': '保存成功',
 
   // 数据权限弹窗
   'orgMgr.dataPermission.search': '请输入关键字',

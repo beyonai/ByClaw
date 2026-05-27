@@ -619,7 +619,7 @@ export default {
   'digitalEmployees.applyReason': '申请原因',
   'digitalEmployees.inApprover': '审核中',
   'digitalEmployees.applySuccess': '申请成功',
-  'digitalEmployees.applyConfirm': '确认申请使用？',
+  'digitalEmployees.applyConfirm': '确认申请使用吗？',
   'digitalEmployees.employeeMarket': '数字员工',
   'digitalEmployees.skillSquare.allCategory': '全部分类',
   'digitalEmployees.subscribers': '人订阅',

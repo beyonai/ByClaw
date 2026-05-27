@@ -17,15 +17,26 @@ public final class UserBucketNameResolver {
         if (StringUtils.isBlank(userCode)) {
             throw new IllegalArgumentException("用户编码不能为空，无法生成默认桶名称");
         }
-        String normalizedUserCode = userCode.trim().toLowerCase(Locale.ROOT)
-            .replaceAll("[^a-z0-9-]", "-")
-            .replaceAll("-{2,}", "-")
-            .replaceAll("^-+", "")
-            .replaceAll("-+$", "");
+        String trimmed = userCode.trim().toLowerCase(Locale.ROOT);
+        if (trimmed.length() > MAX_BUCKET_NAME_LENGTH) {
+            trimmed = trimmed.substring(0, MAX_BUCKET_NAME_LENGTH);
+        }
+        StringBuilder sb = new StringBuilder(trimmed.length());
+        boolean lastWasDash = false;
+        for (int i = 0; i < trimmed.length(); i++) {
+            char c = trimmed.charAt(i);
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+                sb.append(c);
+                lastWasDash = false;
+            } else if (!lastWasDash) {
+                sb.append('-');
+                lastWasDash = true;
+            }
+        }
+        String normalizedUserCode = StringUtils.strip(sb.toString(), "-");
         String bucketName = USER_BUCKET_PREFIX + normalizedUserCode;
-        bucketName = bucketName.replaceAll("-{2,}", "-");
         if (bucketName.length() > MAX_BUCKET_NAME_LENGTH) {
-            bucketName = bucketName.substring(0, MAX_BUCKET_NAME_LENGTH).replaceAll("-+$", "");
+            bucketName = StringUtils.stripEnd(bucketName.substring(0, MAX_BUCKET_NAME_LENGTH), "-");
         }
         if (bucketName.length() < MIN_BUCKET_NAME_LENGTH
             || !bucketName.matches("^[a-z0-9][a-z0-9-]*[a-z0-9]$")) {

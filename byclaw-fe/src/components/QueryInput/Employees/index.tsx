@@ -232,7 +232,8 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
           {this.checkCanUploadFile() && (
             <UploadFile
               ref={this.uploadFileRef}
-              accept={this.props.uploadFileConfig?.allowedFileTypes?.join(',')}
+              accept={this.getUploadFileAccept()}
+              beforeUpload={this.checkIsFilesValid}
               extendsPayload={{
                 agentId,
                 sessionType: 'AGENT',
@@ -299,9 +300,10 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
             items={items}
             onClose={(fileItem) => {
               this.setState((prevState) => {
+                const fileToRemove = 'fileItem' in fileItem ? fileItem.fileItem : undefined;
                 return {
                   ...prevState,
-                  fileList: pullAllBy(prevState.fileList || [], [fileItem?.fileItem], 'uid'),
+                  fileList: pullAllBy(prevState.fileList || [], fileToRemove ? [fileToRemove] : [], 'uid'),
                 };
               });
             }}

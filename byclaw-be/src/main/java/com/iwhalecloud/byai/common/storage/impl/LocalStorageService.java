@@ -181,6 +181,10 @@ public class LocalStorageService extends AbstractFileIngressStorageService<Void>
         if (!root.isAbsolute()) {
             root = Path.of(basePath).resolve(root);
         }
-        return root.resolve(location.getPath()).normalize();
+        Path resolved = root.resolve(location.getPath()).normalize();
+        if (!resolved.startsWith(root.normalize())) {
+            throw new IllegalArgumentException("Path traversal detected: " + location.getPath());
+        }
+        return resolved;
     }
 }

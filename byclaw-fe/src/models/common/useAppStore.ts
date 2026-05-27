@@ -1,9 +1,10 @@
 import { getContentFeedbackType } from '@/service/message';
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
-import { isEmpty, get } from 'lodash';
+import { isEmpty, get as lodashGet } from 'lodash';
 
 import { bathQryPropertyKey } from '@/service/system';
+import { getSandboxInfo } from '@/service/message';
 
 import type {
   SettingItemKey,
@@ -17,7 +18,7 @@ import type {
 const transformData = (obj?: Record<SettingItemKey, IParamValueConfig>) => {
   if (!obj) return [];
   return Object.keys(obj).map((key) => {
-    const item = get(obj, key) || {};
+    const item = lodashGet(obj, key) || {};
     return {
       ...item,
       key,
@@ -69,6 +70,19 @@ type IState = {
 
   suggestQuestions: Array<ISuggestQuestionItem>;
   setSuggestQuestions: (questions: ISuggestQuestionItem[]) => void;
+
+  sandboxesInfo: Partial<{
+    endpoints: string[];
+    instanceEndpoints: {
+      openclaw: string;
+      filebrowser: string;
+    };
+    sandboxId: string;
+    sandboxType: string;
+    userCode: string;
+    token: string;
+  }>;
+  getSandboxesInfoUrl: () => Promise<void>;
 };
 
 const useAppStore = create<IState>()(
@@ -173,6 +187,17 @@ const useAppStore = create<IState>()(
 
           suggestQuestions: [],
           setSuggestQuestions: (questions: ISuggestQuestionItem[]) => set({ suggestQuestions: questions }),
+
+          sandboxesInfo: {},
+          async getSandboxesInfoUrl() {
+            try {
+              const res = await getSandboxInfo({});
+
+              set({ sandboxesInfo: lodashGet(res, '0') || {} });
+            } catch {
+              set({ sandboxesInfo: {} });
+            }
+          },
         };
       },
       {
