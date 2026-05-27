@@ -141,50 +141,59 @@ def test_t5_dict_to_paradigm_answer_str_passthrough() -> None:
 
 
 def test_t5_dict_to_paradigm_answer_dict_returns_paradigm_answer() -> None:
-    """`_dict_to_paradigm_answer` 收到 paradigm dict 时返回 ParadigmAnswer。"""
-    from datacloud_analysis.ontology_agent import ParadigmAnswer  # noqa: PLC0415
-
+    """`_dict_to_paradigm_answer` 收到 paradigm dict 时返回 dict（供 user_clarify_node 消费）。"""
     fn = _import_dict_to_paradigm_answer()
     raw = {
         "paradigmList": [
             {
                 "paradigmList": [
-                    {"choiceKeyword": "华东", "recall": "east_china"},
+                    {
+                        "paradigmId": "1",
+                        "paradigmName": "查询值",
+                        "paradigmResult": [
+                            {"choiceKeyword": "华东", "recall": ["east_china"]},
+                        ],
+                    }
                 ]
             }
         ]
     }
     result = fn(raw)
-    assert isinstance(result, ParadigmAnswer)
+    assert isinstance(result, dict)
 
 
 def test_t5_dict_to_paradigm_answer_options_mapped() -> None:
-    """ParadigmAnswer 中的 chosen_options 与输入 choiceKeyword/recall 一致。"""
+    """选项列表与输入 choiceKeyword/recall 一致。"""
     fn = _import_dict_to_paradigm_answer()
     raw = {
         "paradigmList": [
             {
                 "paradigmList": [
-                    {"choiceKeyword": "华东", "recall": "east_china"},
-                    {"choiceKeyword": "华南", "recall": "south_china"},
+                    {
+                        "paradigmId": "1",
+                        "paradigmName": "查询值",
+                        "paradigmResult": [
+                            {"choiceKeyword": "华东", "recall": ["east_china"]},
+                            {"choiceKeyword": "华南", "recall": ["south_china"]},
+                        ],
+                    }
                 ]
             }
         ]
     }
     result = fn(raw)
-    options = result.selections[0].chosen_options  # type: ignore[union-attr]
+    options = result["paradigmList"][0]["paradigmList"]
     assert len(options) == 2
-    assert options[0].choice_keyword == "华东"
-    assert options[0].recall == ["east_china"]
+    assert options[0]["choiceKeyword"] == "华东"
+    assert options[0]["recall"] == ["east_china"]
 
 
 def test_t5_dict_to_paradigm_answer_empty_paradigm_list() -> None:
-    """空 paradigmList 不抛异常，返回空 ParadigmAnswer。"""
-    from datacloud_analysis.ontology_agent import ParadigmAnswer  # noqa: PLC0415
-
+    """空 paradigmList 不抛异常，返回空选项 dict。"""
     fn = _import_dict_to_paradigm_answer()
     result = fn({"paradigmList": []})
-    assert isinstance(result, ParadigmAnswer)
+    assert isinstance(result, dict)
+    assert result["paradigmList"][0]["paradigmList"] == []
 
 
 def test_t5_dict_to_paradigm_answer_keeps_operation_form_resume_dict() -> None:
@@ -809,36 +818,42 @@ class TestDictToParadigmAnswerFilterFields:
     """T-BUGFIX: _dict_to_paradigm_answer 从用户回复中提取过滤条件字段。"""
 
     def test_filter_fields_extracted_from_input(self) -> None:
-        """用户回复含 field/comparison/value 时，ParadigmOption 对应字段正确。"""
+        """用户回复含 field/comparison/value 时，过滤字段正确。"""
         fn = _import_dict_to_paradigm_answer()
         raw: dict[str, Any] = {
             "paradigmList": [
                 {
                     "paradigmList": [
                         {
-                            "field": "sales_user_id",
-                            "comparison": "eq",
-                            "value": "韦小二",
-                            "choiceField": "所属销售用户编码",
-                            "choiceComparison": "eq",
-                            "fieldRecall": ["所属销售用户编码"],
-                            "comparisonRecall": ["eq", "gt"],
-                            "valueRecall": ["韦小宝", "韦小二"],
+                            "paradigmId": "3",
+                            "paradigmName": "过滤条件",
+                            "paradigmResult": [
+                                {
+                                    "field": "sales_user_id",
+                                    "comparison": "eq",
+                                    "value": "韦小二",
+                                    "choiceField": "所属销售用户编码",
+                                    "choiceComparison": "eq",
+                                    "fieldRecall": ["所属销售用户编码"],
+                                    "comparisonRecall": ["eq", "gt"],
+                                    "valueRecall": ["韦小宝", "韦小二"],
+                                }
+                            ],
                         }
                     ]
                 }
             ]
         }
         result = fn(raw)
-        opt = result.selections[0].chosen_options[0]  # type: ignore[union-attr]
-        assert opt.filter_field == "sales_user_id"
-        assert opt.comparison == "eq"
-        assert opt.value == "韦小二"
-        assert opt.choice_field == "所属销售用户编码"
-        assert opt.choice_comparison == "eq"
-        assert opt.field_recall == ["所属销售用户编码"]
-        assert opt.comparison_recall == ["eq", "gt"]
-        assert opt.value_recall == ["韦小宝", "韦小二"]
+        opt = result["paradigmList"][0]["paradigmList"][0]
+        assert opt["field"] == "sales_user_id"
+        assert opt["comparison"] == "eq"
+        assert opt["value"] == "韦小二"
+        assert opt["choiceField"] == "所属销售用户编码"
+        assert opt["choiceComparison"] == "eq"
+        assert opt["fieldRecall"] == ["所属销售用户编码"]
+        assert opt["comparisonRecall"] == ["eq", "gt"]
+        assert opt["valueRecall"] == ["韦小宝", "韦小二"]
 
     def test_filter_recall_list_not_string(self) -> None:
         """recall 列表输入为 list 时保持 list，不转为字符串。"""
@@ -848,23 +863,29 @@ class TestDictToParadigmAnswerFilterFields:
                 {
                     "paradigmList": [
                         {
-                            "field": "code",
-                            "comparison": "eq",
-                            "value": "test",
-                            "fieldRecall": ["编码A", "编码B"],
-                            "comparisonRecall": ["eq"],
-                            "valueRecall": ["值1", "值2"],
+                            "paradigmId": "3",
+                            "paradigmName": "过滤条件",
+                            "paradigmResult": [
+                                {
+                                    "field": "code",
+                                    "comparison": "eq",
+                                    "value": "test",
+                                    "fieldRecall": ["编码A", "编码B"],
+                                    "comparisonRecall": ["eq"],
+                                    "valueRecall": ["值1", "值2"],
+                                }
+                            ],
                         }
                     ]
                 }
             ]
         }
         result = fn(raw)
-        opt = result.selections[0].chosen_options[0]  # type: ignore[union-attr]
-        assert isinstance(opt.field_recall, list)
-        assert opt.field_recall == ["编码A", "编码B"]
-        assert isinstance(opt.comparison_recall, list)
-        assert isinstance(opt.value_recall, list)
+        opt = result["paradigmList"][0]["paradigmList"][0]
+        assert isinstance(opt["fieldRecall"], list)
+        assert opt["fieldRecall"] == ["编码A", "编码B"]
+        assert isinstance(opt["comparisonRecall"], list)
+        assert isinstance(opt["valueRecall"], list)
 
     def test_recall_string_fallback(self) -> None:
         """recall 为字符串时（旧格式），filter 字段回退为空列表。"""
@@ -874,21 +895,27 @@ class TestDictToParadigmAnswerFilterFields:
                 {
                     "paradigmList": [
                         {
-                            "field": "code",
-                            "comparison": "eq",
-                            "fieldRecall": "not-a-list",
-                            "comparisonRecall": "not-a-list",
-                            "valueRecall": "not-a-list",
+                            "paradigmId": "3",
+                            "paradigmName": "过滤条件",
+                            "paradigmResult": [
+                                {
+                                    "field": "code",
+                                    "comparison": "eq",
+                                    "fieldRecall": "not-a-list",
+                                    "comparisonRecall": "not-a-list",
+                                    "valueRecall": "not-a-list",
+                                }
+                            ],
                         }
                     ]
                 }
             ]
         }
         result = fn(raw)
-        opt = result.selections[0].chosen_options[0]  # type: ignore[union-attr]
-        assert opt.field_recall == []
-        assert opt.comparison_recall == []
-        assert opt.value_recall == []
+        opt = result["paradigmList"][0]["paradigmList"][0]
+        assert opt["fieldRecall"] == []
+        assert opt["comparisonRecall"] == []
+        assert opt["valueRecall"] == []
 
     def test_mixed_query_and_filter_items(self) -> None:
         """同一回复中同时有查询值和过滤条件 items，各自字段不串。"""
@@ -897,47 +924,65 @@ class TestDictToParadigmAnswerFilterFields:
             "paradigmList": [
                 {
                     "paradigmList": [
-                        {"choiceKeyword": "商机名称", "recall": ["商机名称"]},
                         {
-                            "field": "code",
-                            "comparison": "gt",
-                            "value": "100",
-                            "choiceField": "编码",
+                            "paradigmId": "1",
+                            "paradigmName": "查询值",
+                            "paradigmResult": [
+                                {"choiceKeyword": "商机名称", "recall": ["商机名称"]},
+                            ],
+                        },
+                        {
+                            "paradigmId": "3",
+                            "paradigmName": "过滤条件",
+                            "paradigmResult": [
+                                {
+                                    "field": "code",
+                                    "comparison": "gt",
+                                    "value": "100",
+                                    "choiceField": "编码",
+                                }
+                            ],
                         },
                     ]
                 }
             ]
         }
         result = fn(raw)
-        opts = result.selections[0].chosen_options  # type: ignore[union-attr]
+        opts = result["paradigmList"][0]["paradigmList"]
         assert len(opts) == 2
         # 查询值 item
-        assert opts[0].choice_keyword == "商机名称"
-        assert opts[0].recall == ["商机名称"]
-        assert opts[0].filter_field == ""  # 无过滤字段
+        assert opts[0]["choiceKeyword"] == "商机名称"
+        assert opts[0]["recall"] == ["商机名称"]
+        assert opts[0]["field"] == ""
         # 过滤 item
-        assert opts[1].filter_field == "code"
-        assert opts[1].comparison == "gt"
-        assert opts[1].value == "100"
+        assert opts[1]["field"] == "code"
+        assert opts[1]["comparison"] == "gt"
+        assert opts[1]["value"] == "100"
 
     def test_old_format_no_filter_fields_still_works(self) -> None:
-        """旧格式（仅有 choiceKeyword/recall）不受影响。"""
+        """仅有 choiceKeyword/recall 不受影响。"""
         fn = _import_dict_to_paradigm_answer()
         raw: dict[str, Any] = {
             "paradigmList": [
                 {
                     "paradigmList": [
-                        {"choiceKeyword": "华东", "recall": "east_china"},
+                        {
+                            "paradigmId": "1",
+                            "paradigmName": "查询值",
+                            "paradigmResult": [
+                                {"choiceKeyword": "华东", "recall": ["east_china"]},
+                            ],
+                        }
                     ]
                 }
             ]
         }
         result = fn(raw)
-        opt = result.selections[0].chosen_options[0]  # type: ignore[union-attr]
-        assert opt.choice_keyword == "华东"
-        assert opt.recall == ["east_china"]
-        assert opt.filter_field == ""
-        assert opt.comparison == ""
+        opt = result["paradigmList"][0]["paradigmList"][0]
+        assert opt["choiceKeyword"] == "华东"
+        assert opt["recall"] == ["east_china"]
+        assert opt["field"] == ""
+        assert opt["comparison"] == ""
 
 
 # ===========================================================================
@@ -1132,3 +1177,386 @@ async def test_consume_query_only_paradigm_no_filter_keys_in_metadata() -> None:
     assert "field" not in r0
     assert "comparison" not in r0
     assert "value" not in r0
+
+
+# ===========================================================================
+# PART 2-D — _dict_to_paradigm_answer 真实前端格式测试（TDD: 锁死解析路径）
+# ===========================================================================
+#
+# 前端实际回传格式（三层嵌套）：
+#   humanInput.paradigmList[0]           → 包装元素 {query, paradigmList}
+#   wrapper.paradigmList[N]              → 范式组 {paradigmId, paradigmName, paradigmResult}
+#   group.paradigmResult[M]              → 选项 {choiceKeyword, recall, keyword, ...}
+#
+# 输出格式（供 user_clarify_node 消费）：
+#   {"paradigmList": [{"paradigmList": [{flat_option}, ...]}]}
+#
+
+
+def _real_world_human_input() -> dict[str, Any]:
+    """从 params.json 提取的真实 humanInput 结构（session=10015766）。"""
+    return {
+        "metadata": {
+            "thread_id": "BYCLAW_DATA:10015766:call_function_test",
+            "paradigmList": [
+                {
+                    "paradigmId": "1",
+                    "paradigmName": "查询值",
+                    "paradigmResult": [
+                        {
+                            "choiceKeyword": "研发任务主键",
+                            "recall": ["研发任务主键"],
+                            "kid": 1,
+                            "keyword": "id",
+                            "ktype": "select",
+                        }
+                    ],
+                },
+                {
+                    "paradigmId": "2",
+                    "paradigmName": "分组条件",
+                    "paradigmResult": [
+                        {
+                            "choiceKeyword": "研发任务类型",
+                            "recall": ["研发任务类型"],
+                            "kid": 1,
+                            "keyword": "task_type",
+                            "ktype": "groupBy",
+                        },
+                        {
+                            "choiceKeyword": "处理人用户ID",
+                            "recall": ["处理人用户ID"],
+                            "kid": 2,
+                            "keyword": "handler_user_user_name",
+                            "ktype": "groupBy",
+                        },
+                    ],
+                },
+                {
+                    "paradigmId": "3",
+                    "paradigmName": "过滤条件",
+                    "paradigmResult": [
+                        {
+                            "comparison": "eq",
+                            "choiceField": "任务状态",
+                            "valueRecall": ["项目状态"],
+                            "kid": 0,
+                            "choiceKeyword": "",
+                            "field": "task_status",
+                            "choiceComparison": "eq",
+                            "recall": [],
+                            "comparisonRecall": ["eq", "gt", "lt"],
+                            "keyword": "",
+                            "fieldRecall": ["任务状态"],
+                            "value": "处理中",
+                            "ktype": "",
+                        }
+                    ],
+                },
+                {
+                    "paradigmId": "4",
+                    "paradigmName": "排序目标",
+                    "paradigmResult": [
+                        {
+                            "choiceKeyword": "任务数量",
+                            "recall": ["任务数量"],
+                            "kid": 1,
+                            "keyword": "任务数量",
+                            "ktype": "orderBy",
+                        }
+                    ],
+                },
+                {
+                    "paradigmId": "5",
+                    "paradigmName": "统计函数",
+                    "paradigmResult": [],
+                },
+            ],
+        },
+        "paradigmList": [
+            {
+                "query": "统计处于处理中状态的研发任务，按任务类型分组统计数量，包含处理人分布",
+                "paradigmList": [
+                    {
+                        "paradigmId": "1",
+                        "paradigmName": "查询值",
+                        "paradigmResult": [
+                            {
+                                "keyword": "id",
+                                "recall": ["研发任务主键"],
+                                "choiceKeyword": "研发任务主键",
+                            }
+                        ],
+                    },
+                    {
+                        "paradigmId": "2",
+                        "paradigmName": "分组条件",
+                        "paradigmResult": [
+                            {
+                                "keyword": "task_type",
+                                "recall": ["研发任务类型"],
+                                "choiceKeyword": "研发任务类型",
+                            },
+                            {
+                                "keyword": "handler_user_user_name",
+                                "recall": ["处理人用户ID"],
+                                "choiceKeyword": "处理人用户ID",
+                            },
+                        ],
+                    },
+                    {
+                        "paradigmId": "3",
+                        "paradigmName": "过滤条件",
+                        "paradigmResult": [
+                            {
+                                "field": "task_status",
+                                "value": "处理中",
+                                "fieldRecall": ["任务状态"],
+                                "valueRecall": ["项目状态"],
+                                "comparison": "eq",
+                                "choiceComparison": "eq",
+                                "choiceField": "任务状态",
+                            }
+                        ],
+                    },
+                    {
+                        "paradigmId": "4",
+                        "paradigmName": "排序目标",
+                        "paradigmResult": [
+                            {
+                                "keyword": "任务数量",
+                                "recall": ["任务数量"],
+                                "choiceKeyword": "任务数量",
+                            }
+                        ],
+                    },
+                    {
+                        "paradigmId": "5",
+                        "paradigmName": "统计函数",
+                        "paradigmResult": [],
+                    },
+                ],
+            }
+        ],
+    }
+
+
+class TestDictToParadigmAnswerRealFormat:
+    """TDD: 用真实前端格式锁死 _dict_to_paradigm_answer 解析路径。
+
+    If a test fails:
+    - 前端改了 humanInput 格式 → 后端解析需同步更新
+    - 后端改了 _dict_to_paradigm_answer 逻辑 → 确认意图后更新断言
+    - NEVER 只改测试让变绿 — 测试是本模块与前端的数据契约。
+    """
+
+    # ── 输出形状契约 ──
+
+    def test_output_is_dict_not_paradigm_answer(self) -> None:
+        """输出必须是纯 dict（user_clarify_node 用 isinstance(dict) 判断）。"""
+        fn = _import_dict_to_paradigm_answer()
+        raw = _real_world_human_input()
+        result = fn(raw)
+        assert isinstance(result, dict), (
+            f"Expected dict for user_clarify_node compatibility, got {type(result).__name__}"
+        )
+
+    def test_output_passes_through_metadata(self) -> None:
+        """metadata 必须透传，供 user_clarify_node 读取 metadata.paradigmList。
+
+        metadata.paradigmList 包含 kid/ktype 字段，用户回传的选项中没有，
+        user_clarify_node 第 316-317 行需要从这里取 meta_paradigm_list。
+        """
+        fn = _import_dict_to_paradigm_answer()
+        raw = _real_world_human_input()
+        result = fn(raw)
+        assert "metadata" in result, "metadata must be passed through"
+        meta_pl = result["metadata"].get("paradigmList")
+        assert isinstance(meta_pl, list), "metadata.paradigmList must be a list"
+        assert len(meta_pl) >= 1, "metadata.paradigmList must not be empty"
+        # 验证 kid 存在（user_clarify_node 用 kid 构建 path_mapping 键）
+        first_group = meta_pl[0]
+        assert first_group["paradigmId"] == "1"
+        first_result = first_group["paradigmResult"][0]
+        assert first_result["kid"] == 1, "kid is required for path_mapping"
+        assert first_result["ktype"] == "select", "ktype is required for _make_pm_key"
+
+    def test_output_has_outer_paradigm_list_key(self) -> None:
+        """顶层 dict 的 key 为 'paradigmList'。"""
+        fn = _import_dict_to_paradigm_answer()
+        raw = _real_world_human_input()
+        result = fn(raw)
+        assert "paradigmList" in result
+
+    def test_outer_paradigm_list_has_one_element(self) -> None:
+        """外层 paradigmList 只有一个包装元素（user_clarify_node 读 outer[0]）。"""
+        fn = _import_dict_to_paradigm_answer()
+        raw = _real_world_human_input()
+        result = fn(raw)
+        outer = result["paradigmList"]
+        assert len(outer) == 1, f"Expected 1 wrapper, got {len(outer)}"
+
+    def test_inner_paradigm_list_is_flat_options(self) -> None:
+        """内层 paradigmList 包含平铺选项列表（user_clarify_node 读 outer[0].paradigmList）。"""
+        fn = _import_dict_to_paradigm_answer()
+        raw = _real_world_human_input()
+        result = fn(raw)
+        items = result["paradigmList"][0]["paradigmList"]
+        # 5 个范式组，共 1+2+1+1+0 = 5 个选项
+        assert len(items) == 5, f"Expected 5 flat options, got {len(items)}"
+
+    # ── 值正确性：查询值选项 ──
+
+    def test_query_value_option_has_correct_choice_keyword(self) -> None:
+        """查询值选项的 choiceKeyword 正确解析。"""
+        fn = _import_dict_to_paradigm_answer()
+        raw = _real_world_human_input()
+        result = fn(raw)
+        items = result["paradigmList"][0]["paradigmList"]
+        assert items[0]["choiceKeyword"] == "研发任务主键"
+
+    def test_query_value_option_has_correct_keyword_and_recall(self) -> None:
+        """查询值选项保留 keyword 和 recall。"""
+        fn = _import_dict_to_paradigm_answer()
+        raw = _real_world_human_input()
+        result = fn(raw)
+        items = result["paradigmList"][0]["paradigmList"]
+        assert items[0]["keyword"] == "id"
+        assert items[0]["recall"] == ["研发任务主键"]
+
+    # ── 值正确性：分组条件选项 ──
+
+    def test_group_by_first_option_is_task_type(self) -> None:
+        """分组条件第一个选项（研发任务类型）正确。"""
+        fn = _import_dict_to_paradigm_answer()
+        raw = _real_world_human_input()
+        result = fn(raw)
+        items = result["paradigmList"][0]["paradigmList"]
+        assert items[1]["choiceKeyword"] == "研发任务类型"
+        assert items[1]["keyword"] == "task_type"
+        assert items[1]["recall"] == ["研发任务类型"]
+
+    def test_group_by_second_option_is_handler(self) -> None:
+        """分组条件第二个选项（处理人用户ID）正确。"""
+        fn = _import_dict_to_paradigm_answer()
+        raw = _real_world_human_input()
+        result = fn(raw)
+        items = result["paradigmList"][0]["paradigmList"]
+        assert items[2]["choiceKeyword"] == "处理人用户ID"
+        assert items[2]["keyword"] == "handler_user_user_name"
+
+    # ── 值正确性：过滤条件选项 ──
+
+    def test_filter_option_preserves_all_filter_fields(self) -> None:
+        """过滤条件选项保留 field/comparison/value 及对应 choice 字段。"""
+        fn = _import_dict_to_paradigm_answer()
+        raw = _real_world_human_input()
+        result = fn(raw)
+        items = result["paradigmList"][0]["paradigmList"]
+        opt = items[3]
+        assert opt["field"] == "task_status"
+        assert opt["comparison"] == "eq"
+        assert opt["value"] == "处理中"
+        assert opt["choiceField"] == "任务状态"
+        assert opt["choiceComparison"] == "eq"
+        assert opt["fieldRecall"] == ["任务状态"]
+        assert opt["valueRecall"] == ["项目状态"]
+
+    # ── 值正确性：排序条件选项 ──
+
+    def test_order_by_option_is_correct(self) -> None:
+        """排序条件选项正确。"""
+        fn = _import_dict_to_paradigm_answer()
+        raw = _real_world_human_input()
+        result = fn(raw)
+        items = result["paradigmList"][0]["paradigmList"]
+        opt = items[4]
+        assert opt["choiceKeyword"] == "任务数量"
+        assert opt["keyword"] == "任务数量"
+        assert opt["recall"] == ["任务数量"]
+
+    # ── 边缘情况 ──
+
+    def test_empty_paradigm_list_returns_empty_options(self) -> None:
+        """空的 paradigmList 返回空选项列表，不抛异常。"""
+        fn = _import_dict_to_paradigm_answer()
+        result = fn({"paradigmList": []})
+        assert isinstance(result, dict)
+        items = result["paradigmList"][0]["paradigmList"]
+        assert items == []
+
+    def test_sparse_input_missing_fields_default_to_empty(self) -> None:
+        """选项缺少字段时，使用空默认值，不抛异常。"""
+        fn = _import_dict_to_paradigm_answer()
+        raw = {
+            "paradigmList": [
+                {
+                    "paradigmList": [
+                        {
+                            "paradigmId": "1",
+                            "paradigmName": "查询值",
+                            "paradigmResult": [{}],  # 空选项
+                        }
+                    ]
+                }
+            ]
+        }
+        result = fn(raw)
+        opt = result["paradigmList"][0]["paradigmList"][0]
+        assert opt["choiceKeyword"] == ""
+        assert opt["recall"] == []
+        assert opt["keyword"] == ""
+
+    def test_str_input_passthrough(self) -> None:
+        """字符串输入直接返回，不走解析。"""
+        fn = _import_dict_to_paradigm_answer()
+        assert fn("直接文本回复") == "直接文本回复"
+
+    # ── 契约测试：与 user_clarify_node 读取路径一致 ──
+
+    def test_contract_user_clarify_node_read_path(self) -> None:
+        """模拟 user_clarify_node 的完整读取路径。
+
+        这是本模块与 datacloud_analysis 的集成契约：
+        - outer[0].paradigmList → 用户选项列表
+        - metadata.paradigmList → 含 kid/ktype 的范式元数据
+
+        user_clarify_node (L312-L317):
+          1. resume_value["paradigmList"][0]["paradigmList"] → 用户选项
+          2. resume_value["metadata"]["paradigmList"] → 元数据（kid/ktype）
+          3. _remaining_kw 从 (1) 收集 keyword
+          4. _kept_pm_keys 从 (2) 用 kid/ktype 构建 path_mapping 键
+        """
+        fn = _import_dict_to_paradigm_answer()
+        raw = _real_world_human_input()
+        resume_value = fn(raw)
+
+        # user_clarify_node 的读取路径（L312-L315）
+        outer = resume_value["paradigmList"]
+        assert len(outer) == 1 and isinstance(outer[0], dict)
+
+        paradigm_list_from_resume = outer[0]["paradigmList"]
+        assert isinstance(paradigm_list_from_resume, list)
+        assert len(paradigm_list_from_resume) == 5
+
+        # user_clarify_node 的 metadata 读取（L316-L317）
+        meta_paradigm_list = resume_value["metadata"]["paradigmList"]
+        assert isinstance(meta_paradigm_list, list)
+        assert len(meta_paradigm_list) >= 2
+
+        # 验证 metadata 里每个组的 paradigmResult 有 kid 和 ktype
+        for group in meta_paradigm_list:
+            for opt in group.get("paradigmResult") or []:
+                assert "kid" in opt, f"metadata paradigmResult missing kid: {opt}"
+                assert "ktype" in opt, f"metadata paradigmResult missing ktype: {opt}"
+
+        # _remaining_kw 收集 keyword（user_clarify_node L338-341）
+        _remaining_kw = {
+            str(item.get("keyword"))
+            for item in paradigm_list_from_resume
+            if isinstance(item, dict) and item.get("keyword")
+        }
+        assert "id" in _remaining_kw
+        assert "task_type" in _remaining_kw
+        assert "handler_user_user_name" in _remaining_kw
+        assert len(_remaining_kw) == 4, f"Expected 4 keywords, got {_remaining_kw}"
