@@ -72,6 +72,11 @@ export const getSandboxInfo = (payload: any) =>
     ...payload,
   });
 
+export const updateMessageStructById = (payload: any) =>
+  POST<any>('/byaiService/chat/updateMessageStructById', {
+    ...payload,
+  });
+
 export const getTermsOptions = (payload: {
   termSet: string;
   termTypeCode: string;
