@@ -112,6 +112,10 @@ public class DefaultResourceJsonConnectivityValidationService implements Resourc
              *   不递归校验关联工具、知识库、MCP
              */
             if (StringUtils.equalsIgnoreCase(ResourceBizType.AGENT.getCode(), resourceBizType)) {
+                // BYCLAW_CODE 来源的 Agent 是内部编码类资源，不依赖外部 Agent 服务可用性，写 MinIO 前跳过连通性校验。
+                if (isByclawCodeAgent(context)) {
+                    return;
+                }
                 assertCurlSuccess(I18nUtil.get("resource.json.connectivity.validation.agent.interface"),
                     resourceCurlService.runAgentHealth(context.json()));
             }
@@ -145,6 +149,13 @@ public class DefaultResourceJsonConnectivityValidationService implements Resourc
             return message;
         }
         return prefix + message;
+    }
+
+    private boolean isByclawCodeAgent(ResourceJsonValidationContext context) {
+        if (context == null || context.root() == null) {
+            return false;
+        }
+        return StringUtils.equalsIgnoreCase("BYCLAW_CODE", context.root().path("systemCode").asText());
     }
 
     private void validateKnowledgeCreateThenDelete(ResourceJsonValidationContext context) {

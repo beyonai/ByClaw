@@ -15,6 +15,7 @@ import com.iwhalecloud.byai.common.storage.validation.ResourceJsonPath;
 import com.iwhalecloud.byai.common.storage.validation.ResourceJsonValidationContext;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtMcpService;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceCurlRunResult;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +37,8 @@ class DefaultResourceJsonConnectivityValidationServiceTest {
     private DefaultResourceJsonConnectivityValidationService service;
 
     private MessageSource originalMessageSource;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
@@ -108,13 +111,34 @@ class DefaultResourceJsonConnectivityValidationServiceTest {
             .get("knCode"));
     }
 
+    @Test
+    void validate_whenByclawCodeAgent_skipsAgentHealthValidation() throws Exception {
+        ReflectionTestUtils.setField(service, "failFast", true);
+        String json = """
+            {
+              "resourceBizType": "AGENT",
+              "systemCode": "BYCLAW_CODE"
+            }
+            """;
+
+        assertThatCode(() -> service.validate(context("AGENT", "/resource/agent/AGENT_1.json", json)))
+            .doesNotThrowAnyException();
+
+        verify(resourceCurlService, org.mockito.Mockito.never()).runAgentHealth(org.mockito.ArgumentMatchers.anyString());
+    }
+
     private ResourceJsonValidationContext context(String resourceBizType, String targetPath) {
         return context(resourceBizType, targetPath, "{}");
     }
 
     private ResourceJsonValidationContext context(String resourceBizType, String targetPath, String json) {
         ResourceJsonPath path = new ResourceJsonPath(targetPath, resourceBizType.toLowerCase(), resourceBizType, 1L);
-        return new ResourceJsonValidationContext(path, json, null);
+        try {
+            return new ResourceJsonValidationContext(path, json, objectMapper.readTree(json));
+        }
+        catch (Exception e) {
+            throw new IllegalArgumentException(e);
+        }
     }
 
     private void addMessage(StaticMessageSource messageSource, String key, String message) {
