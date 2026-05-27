@@ -84,7 +84,7 @@ export type IProps = {
 const { TextArea } = Input;
 
 function getArrayFieldValues(children: Array<IForm[]>) {
-  return children.flat().map((child) => `${child.fieldName}：${child.fieldValue}`);
+  return children.flat().map((child) => `${child.fieldName}：${child.fieldValue ?? ''}`);
 }
 
 type FormFieldsRenderProps = {
@@ -116,7 +116,7 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
     fieldType,
   } = item;
 
-  const isMultiple = fieldType.includes('multiple');
+  const isMultiple = fieldType.includes('array');
 
   const [, forceUpdate] = useState(0);
 
@@ -156,7 +156,7 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
         <div className={styles.arrayFieldPreview}>
           {childValues.length > 0 ? (
             childValues.map((value, valueIdx) => (
-              <Tag className={styles.arrayFieldTag} key={`${value}_${valueIdx}`}>
+              <Tag className={classnames(styles.arrayFieldTag, 'textEllipsis')} key={`${value}_${valueIdx}`}>
                 {value}
               </Tag>
             ))
@@ -317,6 +317,8 @@ function ApprovalForm(props: IProps) {
       confirmed,
     };
 
+    set(messageListItemContent, 'confirmed', confirmed);
+
     const payload = {
       sendProps: {
         queryQuestion,
@@ -347,7 +349,6 @@ function ApprovalForm(props: IProps) {
       },
     };
 
-    console.log(payload);
     setIsDisableBtn(true);
     EventEmitter.emit('beyond-chat-on-send-msg', payload);
 
