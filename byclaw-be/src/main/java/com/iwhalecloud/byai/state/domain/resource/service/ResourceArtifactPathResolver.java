@@ -96,6 +96,13 @@ public class ResourceArtifactPathResolver {
         while (normalized.endsWith("/") && normalized.length() > 1) {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
+        if (normalized.contains("..")) {
+            java.nio.file.Path p = java.nio.file.Path.of(normalized).normalize();
+            if (p.startsWith("..") || p.isAbsolute()) {
+                throw new IllegalArgumentException("Path traversal detected: " + path);
+            }
+            normalized = p.toString().replace('\\', '/');
+        }
         return normalized;
     }
 

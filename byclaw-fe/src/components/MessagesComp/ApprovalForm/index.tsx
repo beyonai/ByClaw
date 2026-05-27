@@ -1,8 +1,8 @@
 // tslint:disable:ordered-imports
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useState, useCallback } from 'react';
 import classnames from 'classnames';
 
-import { get, keys, set, cloneDeep } from 'lodash';
+import { get, keys, set, isString, isNil, concat } from 'lodash';
 import { Form, Button, Input, Select, Col, Row, Space, Dropdown, Tag } from 'antd';
 import { InfoCircleOutlined } from '@ant-design/icons';
 // @ts-ignore
@@ -11,7 +11,9 @@ import { useIntl, getLocale } from '@umijs/max';
 import TermSelectDropdown from './TermSelectDropdown';
 import { buildFormFieldName, buildFormItemPath, splitKey } from './utils';
 
-import { SSEMessageType, IMessageState } from '@/constants/message';
+import { IMessageState } from '@/constants/message';
+import { IMessageListItem } from '@/typescript/message';
+import { updateMessageStructById } from '@/service/message';
 import useGlobal from '@/hooks/useGlobal';
 
 import type { IMessage } from '@/typescript/message';
@@ -25,7 +27,7 @@ export type IForm = {
   defaultValue: string;
   description: string;
   optional: string;
-  fieldValue?: string | number;
+  fieldValue?: string | number | Array<string | number>;
 
   requestType: number;
   fieldType: string;
@@ -65,12 +67,14 @@ export type IMessageListItemContent = {
   extParam?: {
     state: 'PENDING' | 'APPROVED' | 'REJECTED';
   } & Record<string, unknown>;
+  confirmed?: boolean;
 
   orginContent: Record<string, unknown>;
 };
 
 export type IProps = {
   message: IMessage;
+  messageListItem: IMessageListItem;
   updateMessageListItemContent: (messageListItemContent: IMessageListItemContent) => void;
   messageListItemContent: IMessageListItemContent;
   thinkListItem?: any[];
@@ -80,7 +84,20 @@ export type IProps = {
 const { TextArea } = Input;
 
 function getArrayFieldValues(children: Array<IForm[]>) {
-  return children.flat().map((child) => `${child.fieldName}：${child.fieldValue}`);
+  return children.flat().map((child) => {
+    let selectName = child.fieldValue ?? child.defaultValue;
+
+    if (Array.isArray(child?.options)) {
+      selectName = concat([], child?.fieldValue)
+        .map((item) => {
+          const target = child.options?.find((option) => option.value === item);
+          return target?.label ?? item;
+        })
+        .join('、');
+    }
+
+    return `${child.fieldName}：${selectName ?? ''}`;
+  });
 }
 
 type FormFieldsRenderProps = {
@@ -109,7 +126,10 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
     readonly,
     isHidden,
     required,
+    fieldType,
   } = item;
+
+  const isMultiple = fieldType.includes('array');
 
   const [, forceUpdate] = useState(0);
 
@@ -122,10 +142,10 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
 
   let name: string | undefined = key;
   let rules: { required: boolean | undefined }[] | undefined = [{ required }];
-  let initialValue: string | number | undefined = fieldValue ?? defaultValue;
+  let initialValue: string | number | (string | number)[] | undefined = fieldValue ?? defaultValue;
   let comp = <Input disabled={myDisabled} />;
 
-  if (formType === 'array' && Array.isArray(children)) {
+  if (['array', 'object'].includes(formType) && Array.isArray(children)) {
     name = undefined;
     rules = undefined;
     initialValue = undefined;
@@ -149,7 +169,7 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
         <div className={styles.arrayFieldPreview}>
           {childValues.length > 0 ? (
             childValues.map((value, valueIdx) => (
-              <Tag className={styles.arrayFieldTag} key={`${value}_${valueIdx}`}>
+              <Tag className={classnames(styles.arrayFieldTag, 'textEllipsis')} key={`${value}_${valueIdx}`}>
                 {value}
               </Tag>
             ))
@@ -164,8 +184,15 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
   if (formType === 'select') {
     let options = [];
     try {
-      const changed = optional.replace(/'/g, '"');
-      const optionalArr = JSON.parse(changed);
+      let optionalArr = [];
+
+      if (isString(optional)) {
+        const changed = optional.replace(/'/g, '"');
+        optionalArr = JSON.parse(changed);
+      } else {
+        optionalArr = optional;
+      }
+
       options = optionalArr.map((o: string) => ({
         label: o,
         value: o,
@@ -174,15 +201,19 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
       console.error(e);
     }
 
-    comp = <Select options={options} disabled={myDisabled} />;
+    comp = <Select options={options} disabled={myDisabled} mode={isMultiple ? 'multiple' : undefined} />;
   }
 
   if (formType === 'term_select') {
-    comp = <TermSelectDropdown item={item} disabled={myDisabled} />;
+    comp = <TermSelectDropdown item={item} disabled={myDisabled} isMultiple={isMultiple} />;
   }
 
   if (formType === 'textarea') {
     comp = <TextArea style={{ resize: 'none', overflow: 'auto' }} rows={4} disabled={myDisabled} />;
+  }
+
+  if (formType === 'input' && isMultiple) {
+    comp = <Select mode="tags" />;
   }
 
   return (
@@ -229,8 +260,9 @@ function FormFieldsRender(props: FormFieldsRenderProps) {
 }
 
 function ApprovalForm(props: IProps) {
-  const { messageListItemContent, message, messageIdx } = props;
+  const { messageListItemContent, message, messageListItem } = props;
 
+  const { uuid, orginContent } = messageListItem || {};
   const { messageId } = message;
   const {
     substance = [],
@@ -239,7 +271,7 @@ function ApprovalForm(props: IProps) {
     formId,
     sourceAgentType,
     metadata = '',
-    orginContent,
+    confirmed,
   } = messageListItemContent || {};
 
   const { EventEmitter } = useGlobal();
@@ -247,11 +279,26 @@ function ApprovalForm(props: IProps) {
   const intl = useIntl();
   const [form] = Form.useForm();
 
-  const { isHistoryMsg } = message;
-  const isThinkingProcess = !!props.thinkListItem;
-
   // 是否显示按钮
-  const [isDisable, setIsDisableBtn] = useState<boolean>(!isHistoryMsg);
+  const [isDisable, setIsDisableBtn] = useState<boolean>(!isNil(confirmed));
+
+  const myUpdateMessageStructById = useCallback(
+    (newOrginContent: Record<string, unknown>) => {
+      let contentStr;
+      try {
+        contentStr = JSON.stringify(newOrginContent);
+      } catch (e) {
+        console.error(e);
+      }
+
+      updateMessageStructById({
+        id: uuid,
+        messageId,
+        content: contentStr,
+      });
+    },
+    [uuid, messageId]
+  );
 
   const myToApproveForm = async (confirmed: boolean) => {
     await form.validateFields();
@@ -265,13 +312,25 @@ function ApprovalForm(props: IProps) {
       console.error(e);
     }
 
-    const myOrginContent = cloneDeep(orginContent || {});
-    orginContent.rule = substance;
+    let myOrginContent = {};
+    try {
+      myOrginContent = JSON.parse(orginContent);
+      set(myOrginContent, 'rule', substance);
+    } catch (e) {
+      console.error(e);
+    }
 
     let queryQuestion = intl.formatMessage({ id: 'common.cancel' });
     if (confirmed) {
       queryQuestion = intl.formatMessage({ id: 'common.submit' });
     }
+
+    const operationForm = {
+      ...myOrginContent,
+      confirmed,
+    };
+
+    set(messageListItemContent, 'confirmed', confirmed);
 
     const payload = {
       sendProps: {
@@ -284,10 +343,7 @@ function ApprovalForm(props: IProps) {
           confirmed,
           extParams: {
             humanInput: {
-              operationForm: {
-                ...myOrginContent,
-                confirmed,
-              },
+              operationForm,
               metadata: metadataObj,
             },
             query: queryQuestion,
@@ -306,31 +362,11 @@ function ApprovalForm(props: IProps) {
       },
     };
 
-    console.log(payload);
     setIsDisableBtn(true);
     EventEmitter.emit('beyond-chat-on-send-msg', payload);
+
+    myUpdateMessageStructById(operationForm);
   };
-
-  const list = useMemo(() => {
-    if (isThinkingProcess) {
-      return message.thinkList || [];
-    }
-    return message?.messageList || [];
-  }, [message.messageList, message.thinkList, isThinkingProcess]);
-
-  // 最后一个问题才显示按钮
-  useEffect(() => {
-    if (isHistoryMsg) {
-      setIsDisableBtn(false);
-      return;
-    }
-
-    let lastIndex = list?.findLastIndex((item) => {
-      return `${get(item, 'contentType')}` === `${SSEMessageType.thinkRewriteQuestion}`;
-    });
-    console.log('lastIndex', lastIndex, messageIdx);
-    setIsDisableBtn(lastIndex === messageIdx);
-  }, [list, messageIdx, isHistoryMsg]);
 
   return (
     <div className={classnames(styles.myForm)} key={`${messageId}_approveForm`}>
