@@ -12,6 +12,11 @@ import lombok.Setter;
 @Setter
 public class MessageStructDto {
 
+    /**
+     * messageStruct:结构,inferLog:思考过程
+     */
+    private String updateField;
+
     private Long messageId;
 
     private String id;

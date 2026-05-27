@@ -255,9 +255,32 @@ public class AssistantChatApplicationService {
 
         ByaiMessage byaiMessage = byaiMessageHotService.find(messageStructDto.getMessageId());
 
-        String messageStruct = byaiMessage.getMessageStruct();
+        // 判断是更新消息结构还是更新思考过程
+        if ("inferLog".equalsIgnoreCase(messageStructDto.getUpdateField())) {
+            String inferLog = byaiMessage.getInferLog();
+            byaiMessage.setInferLog(this.replaceContent(inferLog, messageStructDto));
+        }
+        else {
+            String messageStruct = byaiMessage.getMessageStruct();
+            byaiMessage.setMessageStruct(this.replaceContent(messageStruct, messageStructDto));
+        }
+
+        byaiMessageHotService.update(byaiMessage);
+
+        return byaiMessage;
+    }
+
+    /**
+     * 替换数组结构
+     *
+     * @param messageStruct 消息结构
+     * @param messageStructDto 消息更新入参
+     * @return String
+     */
+    private String replaceContent(String messageStruct, MessageStructDto messageStructDto) {
+
         if (StringUtil.isEmpty(messageStruct)) {
-            return byaiMessage;
+            return messageStruct;
         }
 
         JSONArray jsonArray = JSON.parseArray(messageStruct);
@@ -276,10 +299,6 @@ public class AssistantChatApplicationService {
                 }
             }
         }
-
-        byaiMessage.setMessageStruct(jsonArray.toJSONString());
-        byaiMessageHotService.update(byaiMessage);
-
-        return byaiMessage;
+        return jsonArray.toJSONString();
     }
 }
