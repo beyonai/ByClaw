@@ -1,7 +1,7 @@
 package com.iwhalecloud.byai.gateway.route;
 
-import java.util.HashMap;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -19,22 +19,21 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhaleai.byai.framework.client.GatewayClient;
 import com.iwhaleai.byai.framework.core.protocol.ActionType;
 import com.iwhaleai.byai.framework.core.protocol.ExecutionStatus;
-import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
-import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.feign.request.manager.AgentResourceChatInfoDto;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
-import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
-import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.common.dto.ChoiceDto;
 import com.iwhalecloud.byai.state.common.dto.DeltaDto;
+import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
 import com.iwhalecloud.byai.state.common.enums.MessageContentTypeEnum;
+import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
@@ -51,15 +50,14 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
 import com.iwhalecloud.byai.state.infrastructure.utils.ChatUtils;
 import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
+import static com.iwhalecloud.byai.gateway.sandbox.service.SandboxService.WORKER_READY_TIMEOUT_MS;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Service
 public class RouteService {
 
-    private static final int SANDBOX_STARTUP_WAIT_ROUNDS = 3;
-
-    private static final long SANDBOX_STARTUP_WAIT_ROUND_TIMEOUT_MS = TimeUnit.SECONDS.toMillis(20);
+    private static final int SANDBOX_STARTUP_WAIT_ROUNDS = 5;
 
     @Autowired
     private GatewayClient gatewayClient;
@@ -488,7 +486,7 @@ public class RouteService {
         }
 
         for (int round = 1; round <= SANDBOX_STARTUP_WAIT_ROUNDS; round++) {
-            if (sandboxService.waitWorkerReadySync(targetAgentType, SANDBOX_STARTUP_WAIT_ROUND_TIMEOUT_MS)) {
+            if (sandboxService.waitWorkerReadySync(targetAgentType, WORKER_READY_TIMEOUT_MS)) {
                 return;
             }
             if (round < SANDBOX_STARTUP_WAIT_ROUNDS) {
@@ -512,7 +510,7 @@ public class RouteService {
         answerDelta.setOrderId(String.valueOf(sequenceService.nextVal()));
 
         ChoiceDto choiceDto = new ChoiceDto();
-        choiceDto.setDelta(new DeltaDto(message));
+        choiceDto.setDelta(new DeltaDto(message + "\n"));
         answerDelta.setChoices(Collections.singletonList(choiceDto));
 
         CompletionsUtils.responseWrite(ctx.res, event, JSON.toJSONString(answerDelta), ctx.sessionId);

@@ -117,7 +117,7 @@ class RouteServiceTest {
         inOrder.verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
         inOrder.verify(sandboxService).restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1");
-        inOrder.verify(sandboxService).waitWorkerReadySync("BYCLAW_EXE_u1", 20000L);
+        inOrder.verify(sandboxService).waitWorkerReadySync("BYCLAW_EXE_u1", SandboxService.WORKER_READY_TIMEOUT_MS);
         inOrder.verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
 
