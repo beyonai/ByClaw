@@ -359,6 +359,24 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
 
     all_options: list[dict[str, Any]] = []
 
+    # 从 metadata.paradigmList 构建 (paradigmId, keyword) → {kid, ktype} 索引
+    # 用户回传的选项里没有 kid/ktype，后端需从 metadata 补全。
+    # metadata 是前端从 SSE emit 透传回来的，结构可信。
+    _meta_kid_map: dict[str, dict[str, Any]] = {}
+    _meta_raw = raw.get("metadata") or {}
+    _meta_pl = _meta_raw.get("paradigmList")
+    if isinstance(_meta_pl, list):
+        for _mg in _meta_pl:
+            if not isinstance(_mg, dict):
+                continue
+            _pid = str(_mg.get("paradigmId", ""))
+            for _mr in _mg.get("paradigmResult") or []:
+                if isinstance(_mr, dict) and _mr.get("keyword"):
+                    _meta_kid_map[_mr["keyword"]] = {
+                        "kid": _mr.get("kid", 0),
+                        "ktype": str(_mr.get("ktype") or ""),
+                    }
+
     # 外层 paradigmList → 包装元素 → 内层 paradigmList → 范式组
     outer_list = list(raw.get("paradigmList") or [])
     for wrapper in outer_list:
@@ -372,12 +390,15 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
             items = list(group.get("paradigmResult") or [])
             for item in items:
                 if isinstance(item, dict):
+                    kw = str(item.get("keyword") or "")
+                    # 从 metadata 索引补全 kid/ktype
+                    _meta_info = _meta_kid_map.get(kw) or {}
                     all_options.append({
                         "choiceKeyword": str(item.get("choiceKeyword") or ""),
                         "recall": _normalize_recall(item.get("recall")),
-                        "keyword": str(item.get("keyword") or ""),
-                        "kid": item.get("kid", 0),
-                        "ktype": str(item.get("ktype") or ""),
+                        "keyword": kw,
+                        "kid": item.get("kid") or _meta_info.get("kid", 0),
+                        "ktype": str(item.get("ktype") or _meta_info.get("ktype", "")),
                         "field": str(item.get("field") or ""),
                         "comparison": str(item.get("comparison") or ""),
                         "value": str(item.get("value") or ""),
@@ -395,12 +416,14 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
                     })
 
     # 返回 user_clarify_node 期望的纯 dict 结构
+    # metadata 透传仍保留供 user_clarify_node L316-317 兜底读取 meta_paradigm_list
     return {
         "paradigmList": [
             {
                 "paradigmList": all_options,
             }
-        ]
+        ],
+        "metadata": raw.get("metadata", {}),
     }
 
 
