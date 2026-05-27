@@ -206,7 +206,7 @@ export default {
   'employeeDetail.minValue': '最小值',
   'employeeDetail.maxValue': '最大值',
   'common.reset': '重置',
-  'employeeDetail.auditLoading': '为了提高AI应用质量，正为您数字员工规范性检测，预计耗时5-10s，请耐心等待～',
+  'employeeDetail.auditLoading': '为了提高AI应用质量，正为您数字员工规范性检测，预计耗时3-10s，请耐心等待～',
   'employeeDetail.basicSettings': '基础设置',
   'employeeDetail.digitalEmployeeDesc': '数字员工描述',
   'employeeDetail.digitalEmployeeDescRequired': '请输入数字员工描述',
