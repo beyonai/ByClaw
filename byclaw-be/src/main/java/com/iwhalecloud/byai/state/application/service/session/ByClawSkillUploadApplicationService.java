@@ -212,15 +212,14 @@ public class ByClawSkillUploadApplicationService {
         if (IGNORED_TOP_LEVEL_NAMES.contains(segments[0])) {
             return null;
         }
-        for (String seg : segments) {
-            if ("..".equals(seg)) {
-                return null;
-            }
+        java.nio.file.Path entryPath = java.nio.file.Path.of(normalized).normalize();
+        if (entryPath.startsWith("..") || entryPath.isAbsolute()) {
+            return null;
         }
         if (IGNORED_FILE_DS_STORE.equals(segments[segments.length - 1])) {
             return null;
         }
-        return normalized;
+        return entryPath.toString();
     }
 
     /** 找出有且仅有一个 SKILL.md（文件名忽略大小写）。0 个或 ≥2 个都视为非法 zip。 */

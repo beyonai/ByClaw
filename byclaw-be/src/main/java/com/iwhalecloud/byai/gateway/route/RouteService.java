@@ -348,7 +348,7 @@ public class RouteService {
         }
 
         // 检查是否包含占位符格式 {{}}
-        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\{\\{([^}]+)\\}\\}");
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\{\\{([^}]++)\\}\\}");
         java.util.regex.Matcher matcher = pattern.matcher(content);
 
         // 构建资源ID到资源信息的映射，resourceId的格式为：resourceType_resourceId

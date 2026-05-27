@@ -46,7 +46,7 @@ public class WeiXinController {
 
         logger.info("timestamp=" + timestamp + ", nonce=" + nonce + ", echostr=" + echostr);
 
-        response.setContentType("text/html");
+        response.setContentType("text/plain");
         response.getWriter().print(echostr);
 
     }
