@@ -70,6 +70,7 @@ public class OpenSandboxClient {
     public CreateSandboxResponse createSandbox(CreateSandboxRequest request, String idempotencyKey) {
         String url = baseUrl + "/v1/sandboxes";
         String body = toJson(request);
+        log.debug("createSandbox：{}\t{}", url, body);
         Request.Builder rb = newRequestBuilder(url)
                 .post(RequestBody.create(body, JSON_MEDIA_TYPE));
         if (idempotencyKey != null
