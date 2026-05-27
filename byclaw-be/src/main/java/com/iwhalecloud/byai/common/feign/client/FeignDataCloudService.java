@@ -40,7 +40,7 @@ public class FeignDataCloudService {
     private RetryConfig RETRY_CONFIG = RetryConfig.builder().maxAttempts(3).retryOnStatusCodes(Set.of(502, 503, 504))
         .build();
 
-    @Value("${spring.application.datacloudName:byclaw-datacloud-zht}")
+    @Value("${spring.application.datacloudName:byclaw-datacloud}")
     private String serviceName;
 
     @Value("${gateway.second.timeout:300}")
