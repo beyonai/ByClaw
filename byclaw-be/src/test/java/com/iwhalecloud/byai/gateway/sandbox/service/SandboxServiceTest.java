@@ -215,6 +215,42 @@ class SandboxServiceTest {
     }
 
     @Test
+    void reconcileRecordWithRemote_preservesConfiguredTimeoutWhenRemoteExpirationExpands() {
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(1L);
+        record.setStatus("RUNNING");
+        record.setUserCode("user001");
+        record.setSandboxType("openclaw");
+        record.setResourceId(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        record.setEndpoint("http://host/proxy/18789/chat?token=token");
+        record.setGatewayToken("token");
+        record.setTimeoutSeconds(600);
+        record.setLockVersion(3);
+        record.setVersion(1);
+        record.setCreateTime(new Date());
+
+        SandboxRuntimeInstance remoteInstance = SandboxRuntimeInstance.builder()
+            .sandboxId("sandbox-1")
+            .state("running")
+            .createdAt(OffsetDateTime.parse("2026-05-20T08:00:00Z"))
+            .expiresAt(OffsetDateTime.parse("2026-05-20T09:00:00Z"))
+            .metadata(Map.of("gateway_token", "token"))
+            .build();
+
+        when(sandboxRecordMapper.updateReconcileSuccess(eq(1L), eq("RUNNING"),
+            eq("{\"openclaw\":\"http://host/proxy/18789/chat?token=token\"}"), eq("token"),
+            any(Date.class), any(Date.class), eq(600), any(Date.class), any(Date.class), eq(3))).thenReturn(1);
+
+        ReflectionTestUtils.invokeMethod(sandboxService, "reconcileRecordWithRemote", record, remoteInstance);
+
+        assertThat(record.getTimeoutSeconds()).isEqualTo(600);
+    }
+
+    @Test
     void reconcileSandboxes_restartsMissingRemoteSandboxWithUserContext() {
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
         SandboxLifecycleFacade sandboxLifecycleFacade = mock(SandboxLifecycleFacade.class);
