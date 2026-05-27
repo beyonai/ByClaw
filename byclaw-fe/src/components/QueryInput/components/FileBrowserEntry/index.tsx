@@ -4,7 +4,7 @@ import { CopyOutlined, DeleteOutlined } from '@ant-design/icons';
 import { Button, Card, Descriptions, Empty, Input, Pagination, Spin, Table, Tag, Tooltip, message } from 'antd';
 import dayjs from 'dayjs';
 // @ts-ignore
-import { useIntl, useSelector } from '@umijs/max';
+import { useIntl, useLocation, useSelector } from '@umijs/max';
 
 import fileBrowserIcon from '@/assets/filebrowser/file.png';
 import SkillDetailDrawer from '@/pages/employees/components/SkillDetailDrawer/SkillDetailDrawer';
@@ -125,6 +125,7 @@ function buildFileBrowserUrl(resourceId: string, beyondToken: string, ownerType?
 
 export default function FileBrowserEntry() {
   const [open, setOpen] = useState(false);
+  const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
   const [activeTab, setActiveTab] = useState('files');
   const [detailLoading, setDetailLoading] = useState(false);
   const [agentDetail, setAgentDetail] = useState<any>(null);
@@ -143,8 +144,10 @@ export default function FileBrowserEntry() {
   const [resourceLoading, setResourceLoading] = useState(false);
   const [relatedResources, setRelatedResources] = useState<any[]>([]);
   const [detailResourceId, setDetailResourceId] = useState<string>();
+  const entryRef = useRef<HTMLSpanElement>(null);
   const modelDebugInputKeyRef = useRef('');
   const intl = useIntl();
+  const { pathname } = useLocation();
   const { agentId } = useGlobal();
   const { defaultDigEmployeeId, userInfo, employeesList, agentList } = useSelector(({ employees, user }: any) => ({
     defaultDigEmployeeId: employees?.defaultDigEmployeeId,
@@ -264,6 +267,17 @@ export default function FileBrowserEntry() {
     }
   }, [relResourceList?.length, resourceId]);
 
+  const resolvePortalContainer = useCallback(() => {
+    if (typeof document === 'undefined') return null;
+    return (
+      (entryRef.current?.closest('#chat_wrapper, #employees_wrapper, #employees_wrapper2') as HTMLElement | null) ||
+      document.getElementById('chat_wrapper') ||
+      document.getElementById('employees_wrapper') ||
+      document.getElementById('employees_wrapper2') ||
+      document.body
+    );
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     loadAgentDetail();
@@ -314,6 +328,7 @@ export default function FileBrowserEntry() {
       message.warning('Missing resourceId');
       return;
     }
+    setPortalContainer(resolvePortalContainer());
     setActiveTab('files');
     setOpen(true);
   };
@@ -367,8 +382,14 @@ export default function FileBrowserEntry() {
     openFileBrowser();
   };
 
-  const container = typeof document !== 'undefined' ? document.getElementById('chat_wrapper') : null;
+  const container = portalContainer || resolvePortalContainer();
   const fileManagementTip = intl.formatMessage({ id: 'queryInput.tooltip.fileManagement' });
+  const isMobileRoute = pathname === '/mobile' || pathname.startsWith('/mobile/');
+
+  if (isMobileRoute) {
+    return null;
+  }
+
   const resourceColumns = [
     {
       title: '资源名称',
@@ -611,6 +632,7 @@ export default function FileBrowserEntry() {
           className={styles.fileBrowserEntry}
           onClick={openFileBrowser}
           onKeyDown={handleOpenKeyDown}
+          ref={entryRef}
           role="button"
           tabIndex={0}
         >

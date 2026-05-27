@@ -140,6 +140,7 @@ public class MinioBucketMountSupport {
             + " --poll-interval 2s"
             + " --dir-cache-time 2s"
             + " --attr-timeout 2s"
+            + " --allow-other --umask 0022"
 //            + " --vfs-refresh"
             + " --daemon";
     }

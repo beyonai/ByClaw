@@ -309,14 +309,20 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
         .then(() => {
           message.success(intl.formatMessage({ id: 'digitalEmployees.deleteSuccess' }));
           EventEmitter.emit('beyond-update-employee', {
-            delIdList: [employee.agentId],
+            updateList: [
+              {
+                ...employee,
+                resourceStatus: 3,
+              },
+            ],
           });
+          getSearch(searchName || '', dropdownParam, 1, curActiveLink);
         })
         .catch((error: any) => {
           message.error(error?.message || error || intl.formatMessage({ id: 'common.deleteFailed' }));
         });
     },
-    [EventEmitter, intl]
+    [EventEmitter, curActiveLink, dropdownParam, getSearch, intl, searchName]
   );
 
   const onAuthEmployee = React.useCallback((employee: IAgentCache, type: 'useAuth' | 'mgrAuth') => {

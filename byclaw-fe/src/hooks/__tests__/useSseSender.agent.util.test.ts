@@ -28,13 +28,22 @@ describe('hooks/useSseSender/agent/util', () => {
     );
 
     expect(result).toEqual({
+      description: undefined,
       pluginAppId: 'app-1',
       pluginMachineId: 'machine-1',
+      formId: undefined,
       title: 'Form title',
       substance: [{ key: 'name' }],
       formStatus: IFormStatus.INIT,
       stepId: 'step-1',
       extParam: {
+        foo: 'bar',
+      },
+      orginContent: {
+        pluginAppId: 'app-1',
+        pluginMachineId: 'machine-1',
+        title: 'Form title',
+        rule: [{ key: 'name' }],
         foo: 'bar',
       },
     });

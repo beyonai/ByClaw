@@ -281,6 +281,7 @@ export default {
   'employeeDetail.openSuperHelper': 'Enable Personal Assistant',
   'employeeDetail.openSuperHelperTooltip': 'Set the current digital employee as your personal assistant',
   'employeeDetail.personalAssistant': 'Personal Assistant',
+  'employeeDetail.thirdParty': 'Third Party',
   'employeeDetail.employeeType': 'Digital Employee Type',
   'employeeDetail.advancedSettings.title': 'Advanced Settings',
   'employeeDetail.advancedSettings.settingNamePlaceholder': 'Please enter setting name',

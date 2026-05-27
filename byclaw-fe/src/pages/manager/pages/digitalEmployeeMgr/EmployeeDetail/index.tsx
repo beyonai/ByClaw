@@ -304,7 +304,7 @@ const EmployeeDetail = ({ loading }) => {
 
     if (effectiveDigitalType === 'FROM_MANUALLY') return agentType;
 
-    return '001';
+    return null;
   }, [agentId, effectiveDigitalType, detailAgentType, routeAgentType, agentType]);
 
   const prevRoutePath = useMemo(() => {

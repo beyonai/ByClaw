@@ -125,13 +125,15 @@ async def import_by_resource_id(
     try:
         service = await resolve_knowledge_item_ingestion_service()
         await service.upload_file(request)
-    except KnowledgeBaseConfigurationError as exc:
-        return _error(str(exc))
-    except KnowledgeBaseValidationError as exc:
-        return _error(str(exc))
-    except Exception as exc:
-        logger.exception("importByResourceId error: resourceId=%s, error=%s", resource_id, exc)
-        return _error(str(exc) or "internal error")
+    except KnowledgeBaseConfigurationError:
+        logger.exception("importByResourceId configuration error: resourceId=%s", resource_id)
+        return _error("knowledge base configuration error")
+    except KnowledgeBaseValidationError:
+        logger.exception("importByResourceId validation error: resourceId=%s", resource_id)
+        return _error("knowledge base validation failed")
+    except Exception:
+        logger.exception("importByResourceId unexpected error: resourceId=%s", resource_id)
+        return _error("internal error")
 
     return _success()
 
@@ -172,10 +174,12 @@ async def file_to_markdown_index_by_resource_id(
             )
 
         background_tasks.add_task(_run_task)
-    except KnowledgeBaseConfigurationError as exc:
-        return _error(str(exc))
-    except KnowledgeBaseValidationError as exc:
-        return _error(str(exc))
+    except KnowledgeBaseConfigurationError:
+        logger.exception("fileToMarkdownIndexByResourceId configuration error: resourceId=%s", resource_id)
+        return _error("knowledge base configuration error")
+    except KnowledgeBaseValidationError:
+        logger.exception("fileToMarkdownIndexByResourceId validation error: resourceId=%s", resource_id)
+        return _error("knowledge base validation failed")
 
     return _success()
 
@@ -210,10 +214,12 @@ async def search_by_resource_id(body: dict[str, Any] = Body(...)):
     try:
         service = await resolve_knowledge_item_search_service()
         items = await service.search_v2(request)
-    except KnowledgeBaseConfigurationError as exc:
-        return _error(str(exc))
-    except KnowledgeBaseValidationError as exc:
-        return _error(str(exc))
+    except KnowledgeBaseConfigurationError:
+        logger.exception("searchByResourceIdList configuration error")
+        return _error("knowledge base configuration error")
+    except KnowledgeBaseValidationError:
+        logger.exception("searchByResourceIdList validation error")
+        return _error("knowledge base validation failed")
 
     data = []
     for item in items:

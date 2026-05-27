@@ -19,6 +19,9 @@ RUN set -- packages/by_datacloud-*.whl; \
       uv sync --frozen --no-dev; \
     fi
 
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /workspace
+USER appuser
+
 EXPOSE 8080
 
 ENTRYPOINT ["bash", "/workspace/byclaw-data/start.sh"]
