@@ -4,6 +4,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhaleai.byai.framework.client.GatewayClient;
 import com.iwhaleai.byai.framework.core.protocol.ExecutionStatus;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
@@ -22,10 +23,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
+import org.springframework.context.support.StaticMessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.context.i18n.LocaleContextHolder;
 
 import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.Locale;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
@@ -42,6 +47,7 @@ class RouteServiceTest {
     private JwtService jwtService;
     private TargetAgentTypeResolver targetAgentTypeResolver;
     private RouteService routeService;
+    private StaticMessageSource messageSource;
 
     @BeforeEach
     void setUp() {
@@ -53,6 +59,15 @@ class RouteServiceTest {
         sequenceService = mock(SequenceService.class);
         jwtService = mock(JwtService.class);
         targetAgentTypeResolver = new TargetAgentTypeResolver();
+        messageSource = new StaticMessageSource();
+        messageSource.addMessage("sandbox.launch.progress.start", Locale.SIMPLIFIED_CHINESE, "个人助理正在启动中，请等待");
+        messageSource.addMessage("sandbox.launch.progress.waiting", Locale.SIMPLIFIED_CHINESE, "个人助理仍在启动中，请稍等");
+        messageSource.addMessage("sandbox.launch.progress.failed", Locale.SIMPLIFIED_CHINESE, "沙箱启动失败，请联系管理员");
+        messageSource.addMessage("sandbox.launch.progress.start", Locale.US, "Your personal assistant is starting up, please wait.");
+        messageSource.addMessage("sandbox.launch.progress.waiting", Locale.US,
+                "Your personal assistant is still starting up, please wait a moment.");
+        messageSource.addMessage("sandbox.launch.progress.failed", Locale.US,
+                "Sandbox startup failed, please contact the administrator.");
         when(jwtService.createJwt(any())).thenReturn("test-beyond-token");
 
         routeService = new RouteService();
@@ -64,6 +79,8 @@ class RouteServiceTest {
         ReflectionTestUtils.setField(routeService, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(routeService, "jwtService", jwtService);
         ReflectionTestUtils.setField(routeService, "targetAgentTypeResolver", targetAgentTypeResolver);
+        ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
+        LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserCode("u1");
@@ -75,11 +92,17 @@ class RouteServiceTest {
     @AfterEach
     void tearDown() {
         CurrentUserHolder.setLoginInfo(null);
+        LocaleContextHolder.resetLocaleContext();
+        ReflectionTestUtils.setField(I18nUtil.class, "messageSource", null);
     }
 
     @Test
     void route_retriesOnceAfterSandboxReady_whenGatewaySendFailsWithRetriableError() throws Exception {
         ChatProcessContext ctx = buildContext();
+        when(sequenceService.nextVal()).thenReturn(100L);
+        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+                .thenReturn(new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData());
+        when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(true);
 
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any()))
@@ -93,11 +116,12 @@ class RouteServiceTest {
         InOrder inOrder = inOrder(gatewayClient, sandboxService);
         inOrder.verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
-        inOrder.verify(sandboxService).restartSandboxAfterRemoteExit("u1", null, "BYCLAW_EXE_u1");
+        inOrder.verify(sandboxService).restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1");
+        inOrder.verify(sandboxService).waitWorkerReadySync("BYCLAW_EXE_u1", SandboxService.WORKER_READY_TIMEOUT_MS);
         inOrder.verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
 
-        verify(sandboxService, times(1)).restartSandboxAfterRemoteExit("u1", null, "BYCLAW_EXE_u1");
+        verify(sandboxService, times(1)).restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1");
         verify(gatewayClient, times(2)).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
 
@@ -106,11 +130,18 @@ class RouteServiceTest {
                 anyString(), anyString(), anyString(), anyString(), any(), metadataCaptor.capture());
         org.assertj.core.api.Assertions.assertThat(metadataCaptor.getValue())
                 .containsEntry("Beyond-Token", "test-beyond-token");
+        org.assertj.core.api.Assertions.assertThat(output(ctx))
+                .contains("reasoningLogStart")
+                .contains("个人助理正在启动中，请等待");
     }
 
     @Test
     void route_throwsAfterSingleRetry_whenGatewaySendStillFails() {
         ChatProcessContext ctx = buildContext();
+        when(sequenceService.nextVal()).thenReturn(100L);
+        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+                .thenReturn(new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData());
+        when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(true);
 
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any()))
@@ -120,15 +151,45 @@ class RouteServiceTest {
                 .isInstanceOf(BdpRuntimeException.class)
                 .hasMessage("Gateway SDK 消息发送失败: agent unavailable");
 
-        verify(sandboxService, times(1)).restartSandboxAfterRemoteExit("u1", null, "BYCLAW_EXE_u1");
+        verify(sandboxService, times(1)).restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1");
         verify(gatewayClient, times(2)).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
         verify(sessionStreamManager, times(1)).stopSessionListener("3");
     }
 
     @Test
+    void route_emitsFailureThought_whenSandboxNeverBecomesReady() {
+        ChatProcessContext ctx = buildContext();
+        when(sequenceService.nextVal()).thenReturn(100L, 101L, 102L, 103L);
+        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+                .thenReturn(new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData());
+        when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(false, false, false);
+
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenReturn(failedResponse(ExecutionStatus.ERR_WORKER_NOT_ONLINE, "worker offline"));
+
+        assertThatThrownBy(() -> routeService.route(ctx))
+                .isInstanceOf(BdpRuntimeException.class)
+                .hasMessage("沙箱启动失败，请联系管理员");
+
+        org.assertj.core.api.Assertions.assertThat(output(ctx))
+                .contains("reasoningLogStart")
+                .contains("reasoningLogDelta")
+                .contains("reasoningLogEnd")
+                .contains("个人助理仍在启动中，请稍等")
+                .contains("沙箱启动失败，请联系管理员");
+        verify(gatewayClient, times(1)).sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any());
+    }
+
+    @Test
     void route_retriesByclawCodeSandboxWithUserScopedTargetAgentType() throws Exception {
         ChatProcessContext ctx = buildContext(WorkerAgentType.BYCLAW_CODE.getCode(), 123L);
+        when(sequenceService.nextVal()).thenReturn(100L);
+        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", 123L, "BYCLAW_CODE_u1"))
+                .thenReturn(new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData());
+        when(sandboxService.waitWorkerReadySync(anyString(), anyLong())).thenReturn(true);
 
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any()))
@@ -145,7 +206,7 @@ class RouteServiceTest {
 
         org.assertj.core.api.Assertions.assertThat(targetAgentTypeCaptor.getAllValues())
                 .containsExactly("BYCLAW_CODE_u1", "BYCLAW_CODE_u1");
-        verify(sandboxService, times(1)).restartSandboxAfterRemoteExit("u1", 123L, "BYCLAW_CODE_u1");
+        verify(sandboxService, times(1)).restartSandboxAfterRemoteExitWithoutWait("u1", 123L, "BYCLAW_CODE_u1");
     }
 
     private ChatProcessContext buildContext() {
@@ -188,5 +249,9 @@ class RouteServiceTest {
                 .errorCode(errorCode)
                 .error(error)
                 .build();
+    }
+
+    private String output(ChatProcessContext ctx) {
+        return new String(((ByteArrayOutputStream) ctx.res).toByteArray(), StandardCharsets.UTF_8);
     }
 }
