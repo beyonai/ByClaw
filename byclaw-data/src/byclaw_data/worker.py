@@ -330,57 +330,146 @@ def _normalize_recall(raw: Any) -> list[str]:
 
 
 def _dict_to_paradigm_answer(raw: Any) -> Any:
-    """将前端 paradigm dict 转为 ParadigmAnswer；str 时原样返回。
+    """将前端 paradigm dict 转为 user_clarify_node 能解析的 dict；str 时原样返回。
 
-    期望输入：{"paradigmList": [{"paradigmList": [{"choiceKeyword": ..., "recall": ...}]}]}
+    前端回传格式（实际结构）：
+    humanInput = {
+        "metadata": {...},
+        "paradigmList": [  ← 外层只有 1 个包装元素
+            {
+                "query": "...",
+                "paradigmList": [  ← 每个元素是范式组
+                    {"paradigmId": "1", "paradigmName": "查询值",
+                     "paradigmResult": [{"choiceKeyword": ..., "recall": ...}]},
+                    ...
+                ]
+            }
+        ]
+    }
+
+    user_clarify_node 期望格式：
+    {"paradigmList": [{"paradigmList": [{...所有选项平铺...}]}]}
     """
-    from datacloud_analysis.ontology_agent import (  # noqa: PLC0415
-        ParadigmAnswer,
-        ParadigmGroupSelection,
-        ParadigmOption,
-    )
-
     if isinstance(raw, str):
         return raw
     if not isinstance(raw, dict):
         return str(raw) if raw is not None else ""
+    if _is_operation_form_resume(raw):
+        return raw
 
-    outer = list(raw.get("paradigmList") or [])
-    items: list[dict[str, Any]] = []
-    if outer and isinstance(outer[0], dict):
-        items = list(outer[0].get("paradigmList") or [])
+    all_options: list[dict[str, Any]] = []
 
-    options = [
-        ParadigmOption(
-            choice_keyword=str(item.get("choiceKeyword") or ""),
-            recall=_normalize_recall(item.get("recall")),
-            filter_field=str(item.get("field") or ""),
-            comparison=str(item.get("comparison") or ""),
-            value=str(item.get("value") or ""),
-            choice_field=str(item.get("choiceField") or ""),
-            choice_comparison=str(item.get("choiceComparison") or ""),
-            field_recall=item.get("fieldRecall")
-            if isinstance(item.get("fieldRecall"), list)
-            else [],
-            comparison_recall=item.get("comparisonRecall")
-            if isinstance(item.get("comparisonRecall"), list)
-            else [],
-            value_recall=item.get("valueRecall")
-            if isinstance(item.get("valueRecall"), list)
-            else [],
-        )
-        for item in items
-        if isinstance(item, dict)
-    ]
-    return ParadigmAnswer(
-        selections=[
-            ParadigmGroupSelection(
-                paradigm_id="",
-                paradigm_name="",
-                chosen_options=options,
-            )
-        ]
+    # 从 metadata.paradigmList 构建 (paradigmId, keyword) → {kid, ktype} 索引
+    # 用户回传的选项里没有 kid/ktype，后端需从 metadata 补全。
+    # metadata 是前端从 SSE emit 透传回来的，结构可信。
+    _meta_kid_map: dict[str, dict[str, Any]] = {}
+    _meta_raw = raw.get("metadata") or {}
+    _meta_pl = _meta_raw.get("paradigmList")
+    if isinstance(_meta_pl, list):
+        for _mg in _meta_pl:
+            if not isinstance(_mg, dict):
+                continue
+            _pid = str(_mg.get("paradigmId", ""))
+            for _mr in _mg.get("paradigmResult") or []:
+                if isinstance(_mr, dict) and _mr.get("keyword"):
+                    _meta_kid_map[_mr["keyword"]] = {
+                        "kid": _mr.get("kid", 0),
+                        "ktype": str(_mr.get("ktype") or ""),
+                    }
+
+    # 外层 paradigmList → 包装元素 → 内层 paradigmList → 范式组
+    outer_list = list(raw.get("paradigmList") or [])
+    for wrapper in outer_list:
+        if not isinstance(wrapper, dict):
+            continue
+        groups = list(wrapper.get("paradigmList") or [])
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            # 每个范式组下的 paradigmResult 才是真正的选项列表
+            items = list(group.get("paradigmResult") or [])
+            for item in items:
+                if isinstance(item, dict):
+                    kw = str(item.get("keyword") or "")
+                    # 从 metadata 索引补全 kid/ktype
+                    _meta_info = _meta_kid_map.get(kw) or {}
+                    all_options.append({
+                        "choiceKeyword": str(item.get("choiceKeyword") or ""),
+                        "recall": _normalize_recall(item.get("recall")),
+                        "keyword": kw,
+                        "kid": item.get("kid") or _meta_info.get("kid", 0),
+                        "ktype": str(item.get("ktype") or _meta_info.get("ktype", "")),
+                        "field": str(item.get("field") or ""),
+                        "comparison": str(item.get("comparison") or ""),
+                        "value": str(item.get("value") or ""),
+                        "choiceField": str(item.get("choiceField") or ""),
+                        "choiceComparison": str(item.get("choiceComparison") or ""),
+                        "fieldRecall": item.get("fieldRecall")
+                        if isinstance(item.get("fieldRecall"), list)
+                        else [],
+                        "comparisonRecall": item.get("comparisonRecall")
+                        if isinstance(item.get("comparisonRecall"), list)
+                        else [],
+                        "valueRecall": item.get("valueRecall")
+                        if isinstance(item.get("valueRecall"), list)
+                        else [],
+                    })
+
+    # 返回 user_clarify_node 期望的纯 dict 结构
+    # metadata 透传仍保留供 user_clarify_node L316-317 兜底读取 meta_paradigm_list
+    return {
+        "paradigmList": [
+            {
+                "paradigmList": all_options,
+            }
+        ],
+        "metadata": raw.get("metadata", {}),
+    }
+
+
+def _is_operation_form_resume(raw: dict[str, Any]) -> bool:
+    """判断前端恢复值是否为操作确认表单，而不是查询澄清 paradigm。"""
+    return str(raw.get("interrupt_type") or "") == "operation_form" or (
+        "formId" in raw and "confirmed" in raw and isinstance(raw.get("rule"), list)
     )
+
+
+def _operation_form_resume_from_human_input(
+    human_input: dict[str, Any],
+) -> dict[str, Any] | None:
+    """从前端 humanInput.operationForm 恢复值组装 LangGraph resume payload。"""
+    operation_form = human_input.get("operationForm") or human_input.get(
+        "operation_form"
+    )
+    if not isinstance(operation_form, dict):
+        return None
+    query_text = str(human_input.get("query") or "").strip()
+    confirmed = query_text not in {"取消", "cancel", "Cancel", "CANCEL"}
+    resume_value: dict[str, Any] = {
+        "interrupt_type": "operation_form",
+        "formId": str(operation_form.get("formId") or ""),
+        "confirmed": confirmed,
+        "rule": operation_form.get("rule")
+        if isinstance(operation_form.get("rule"), list)
+        else [],
+    }
+    if not confirmed:
+        resume_value["reason"] = query_text or "用户取消操作"
+    return resume_value
+
+
+def _human_input_from_payload(
+    *,
+    ext_params: Any,
+    extra_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """兼容 ext_params.humanInput 与前端直接透传 humanInput 两种位置。"""
+    if isinstance(ext_params, dict):
+        human_input = ext_params.get("humanInput")
+        if isinstance(human_input, dict):
+            return human_input
+    human_input = extra_payload.get("humanInput")
+    return human_input if isinstance(human_input, dict) else {}
 
 
 def _paradigm_option_to_dict(opt: Any) -> dict[str, Any]:
@@ -416,6 +505,62 @@ def _paradigm_option_to_dict(opt: Any) -> dict[str, Any]:
     return result
 
 
+def _operation_form_field_to_dict(field: Any) -> dict[str, Any]:
+    """将 OperationFormField 转为前端表单协议字段 dict。"""
+    result: dict[str, Any] = {
+        "formType": getattr(field, "form_type", ""),
+        "fieldCode": getattr(field, "field_code", ""),
+        "fieldName": getattr(field, "field_name", ""),
+        "fieldType": getattr(field, "field_type", ""),
+        "fieldPath": getattr(field, "field_path", ""),
+        "required": bool(getattr(field, "required", False)),
+        "readonly": bool(getattr(field, "readonly", False)),
+        "disabled": bool(getattr(field, "disabled", False)),
+        "isHidden": bool(getattr(field, "is_hidden", False)),
+        "defaultFiles": list(getattr(field, "default_files", []) or []),
+    }
+    item_id = str(getattr(field, "item_id", "") or "")
+    if item_id:
+        result["itemId"] = item_id
+    description = str(getattr(field, "description", "") or "")
+    if description:
+        result["description"] = description
+    term = getattr(field, "term", None)
+    if isinstance(term, dict):
+        result["term"] = dict(term)
+    children = getattr(field, "children", None)
+    if children is not None:
+        result["children"] = [
+            [_operation_form_field_to_dict(item) for item in row] for row in children
+        ]
+    else:
+        result["fieldValue"] = getattr(field, "field_value", None)
+    return result
+
+
+def _operation_form_to_dict(operation_form: Any) -> dict[str, Any]:
+    """将 OntologyAgent OperationForm 转为前端表单协议 dict。"""
+    if operation_form is None:
+        return {}
+    if isinstance(operation_form, dict):
+        return dict(operation_form)
+    raw = getattr(operation_form, "raw", None)
+    if isinstance(raw, dict) and raw:
+        return dict(raw)
+    rule = getattr(operation_form, "rule", []) or []
+    return {
+        "schemaVersion": getattr(operation_form, "schema_version", ""),
+        "formId": getattr(operation_form, "form_id", ""),
+        "actionCode": getattr(operation_form, "action_code", ""),
+        "actionName": getattr(operation_form, "action_name", ""),
+        "title": getattr(operation_form, "title", ""),
+        "description": getattr(operation_form, "description", ""),
+        "rule": [
+            [_operation_form_field_to_dict(field) for field in row] for row in rule
+        ],
+    }
+
+
 def _get_gateway_user_code(context: Any) -> str | None:
     """从 Gateway context 提取用户标识，失败时返回 None。"""
     try:
@@ -438,6 +583,12 @@ async def _consume_agent_events(
     dyn_view_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """消费 OntologyAgent 事件流，翻译为 Gateway SSE。"""
+    logger.info(
+        "_consume_agent_events: session=%s message_id=%s parent_message_id=%s",
+        getattr(context, "session_id", ""),
+        getattr(context, "message_id", ""),
+        getattr(context, "parent_message_id", ""),
+    )
     from datacloud_analysis.ontology_agent import (  # noqa: PLC0415
         AnswerEvent,
         ErrorEvent,
@@ -451,11 +602,9 @@ async def _consume_agent_events(
 
     async for event in event_iter:
         if isinstance(event, ThinkingEvent):
-            await context.emit_chunk(
-                StreamChunkEvent(content=event.content),
-                event_type=EventType.REASONING_LOG_START.value,
-                content_type=SseReasonMessageType.think_text.value,
-            )
+            # ThinkingEvent comes from on_chat_model_stream; react_loop already dispatches
+            # the same token via dc_stream_chunk → StepEvent, so skip to avoid duplicates.
+            pass
         elif isinstance(event, StepEvent):
             await context.emit_chunk(
                 StreamChunkEvent(content=event.title),
@@ -530,7 +679,30 @@ async def _consume_agent_events(
         content_type=SseMessageType.text.value,
     )
 
-    if interrupt_ev.reason == "PARADIGM_CLARIFICATION":
+    operation_form = _operation_form_to_dict(
+        getattr(interrupt_ev, "operation_form", None)
+    )
+    if (
+        operation_form
+        or getattr(interrupt_ev, "interrupt_type", "") == "operation_form"
+        or interrupt_ev.reason == "OPERATION_FORM_CONFIRMATION"
+    ):
+        await context.complex_ask_user(
+            AskUserEvent(
+                prompt=interrupt_ev.prompt,
+                metadata={
+                    "thread_id": interrupt_ev.thread_id,
+                    "interrupt_reason": interrupt_ev.reason,
+                    "interrupt_type": "operation_form",
+                    "operation_form": operation_form,
+                    "agent_id": agent_id or "",
+                    "is_dynamic_agent": True,
+                    "call_object_ids": dyn_object_ids or [],
+                    "call_view_ids": dyn_view_ids or [],
+                },
+            )
+        )
+    elif interrupt_ev.reason == "PARADIGM_CLARIFICATION":
         paradigm_list: list[dict[str, Any]] = []
         for group in interrupt_ev.paradigm_list or []:
             paradigm_list.append(
@@ -667,7 +839,7 @@ class DataCloudWorker(GatewayWorker):
             ensure_ascii=False,
             sort_keys=True,
         )
-        return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def _cache_resume_result(self, key: str, result: dict[str, Any]) -> None:
         self._resume_result_cache[key] = dict(result)
@@ -990,9 +1162,32 @@ class DataCloudWorker(GatewayWorker):
             {"status": "waiting"} graph interrupted, ask_user emitted, no flush.
         """
         logger.info(
-            "DataCloudWorker.process_command: session=%s command=%s",
+            ">>> process_command ENTRY: session=%s command_type=%s",
             context.session_id,
             type(command).__name__,
+        )
+        from datacloud_analysis.logging_setup import request_log_context  # noqa: PLC0415
+
+        _trace_id = str(
+            getattr(getattr(command, "header", None), "trace_id", "") or ""
+        ).strip()
+        _req_hint = _trace_id or context.session_id or None
+
+        async with request_log_context(
+            _req_hint,
+            extra_namespaces=("by-framework", "byclaw_data"),
+        ) as _rid:
+            return await self._process_command_inner(command, context, _rid)
+
+    async def _process_command_inner(
+        self, command: GatewayCommand, context: ByclawDataClarification, request_id: str
+    ) -> dict:
+        """实际处理逻辑，所有日志自动写入 logs/requests/{request_id}.log。"""
+        logger.info(
+            "DataCloudWorker.process_command: session=%s command=%s request_id=%s",
+            context.session_id,
+            type(command).__name__,
+            request_id,
         )
         # 处理模型环境变量，从redis获取
         from byclaw_data.model_environment import (
@@ -1009,6 +1204,13 @@ class DataCloudWorker(GatewayWorker):
         _new_api_key = str(_new_llm_cfg.get("DATACLOUD_LLM_API_KEY") or "")
         _new_model = str(_new_llm_cfg.get("DATACLOUD_LLM_MODEL") or "")
         _new_base_url = str(_new_llm_cfg.get("DATACLOUD_LLM_API_BASE") or "")
+        logger.info(
+            "[model_env] process_command: llm_cfg_from_redis model=%s base_url=%s api_key=%s session=%s",
+            _new_model or "<EMPTY>",
+            _new_base_url or "<EMPTY>",
+            "***" if _new_api_key else "<EMPTY>",
+            context.session_id,
+        )
         _model_sig: str = self._model_config_sig
 
         if _new_llm_cfg:
@@ -1125,11 +1327,12 @@ class DataCloudWorker(GatewayWorker):
             # ResumeCommand：从 header_metadata 取
             # AskAgentCommand + humanInput（paradigm 回复）：从 extra_payload.ext_params.humanInput.metadata 取
             _human_input_meta: dict[str, Any] = {}
-            _ext = extra_payload.get("ext_params")
-            if isinstance(_ext, dict):
-                _hi = _ext.get("humanInput")
-                if isinstance(_hi, dict) and isinstance(_hi.get("metadata"), dict):
-                    _human_input_meta = _hi["metadata"]
+            _hi = _human_input_from_payload(
+                ext_params=extra_payload.get("ext_params"),
+                extra_payload=extra_payload,
+            )
+            if isinstance(_hi.get("metadata"), dict):
+                _human_input_meta = _hi["metadata"]
 
             _resume_meta = _human_input_meta or header_metadata
             _resume_object_ids: list[str] = [
@@ -1274,7 +1477,10 @@ class DataCloudWorker(GatewayWorker):
         if _check_human_input and (
             isinstance(command, AskAgentCommand) or isinstance(command, ResumeCommand)
         ):
-            _human_input = ext_params.get("humanInput")
+            _human_input = _human_input_from_payload(
+                ext_params=ext_params,
+                extra_payload=extra_payload,
+            )
             if isinstance(_human_input, dict) and isinstance(
                 _human_input.get("paradigmList"), list
             ):
@@ -1292,17 +1498,37 @@ class DataCloudWorker(GatewayWorker):
                     len(_human_input["paradigmList"]),
                     _paradigm_human_input_metadata.get("checkpoint_id", ""),
                 )
+            elif isinstance(_human_input, dict):
+                _operation_resume_value = _operation_form_resume_from_human_input(
+                    _human_input
+                )
+                if _operation_resume_value is not None:
+                    _paradigm_resume_value = _operation_resume_value
+                    _paradigm_human_input_metadata = (
+                        _human_input.get("metadata")
+                        if isinstance(_human_input.get("metadata"), dict)
+                        else {}
+                    )
+                    logger.info(
+                        "%s carries operation form reply via humanInput, converting to graph "
+                        "resume: session=%s form_id=%s confirmed=%s checkpoint_id=%s",
+                        type(command).__name__,
+                        context.session_id,
+                        _operation_resume_value.get("formId", ""),
+                        _operation_resume_value.get("confirmed"),
+                        _paradigm_human_input_metadata.get("checkpoint_id", ""),
+                    )
 
         resume_cache_key: str | None = None
         if isinstance(command, ResumeCommand) or _paradigm_resume_value is not None:
-            if isinstance(command, ResumeCommand):
+            if _paradigm_resume_value is not None:
+                resume_value_probe = _paradigm_resume_value
+            else:
                 resume_value_probe = (
                     command.reply_data
                     if command.reply_data is not None
                     else command.content
                 )
-            else:
-                resume_value_probe = _paradigm_resume_value
             # paradigm resume：checkpoint_id 在 humanInput.metadata 而非请求头，需合并后解析
             _probe_metadata = (
                 {**_paradigm_human_input_metadata, **header_metadata}
@@ -1397,11 +1623,40 @@ class DataCloudWorker(GatewayWorker):
                 or header_metadata.get("thread_id")
                 or ""
             ).strip()
+            # paradigm resume：thread_id 在 humanInput.metadata.thread_id，需单独读取
+            if not dyn_thread_id and _paradigm_resume_value is not None:
+                dyn_thread_id = str(
+                    _paradigm_human_input_metadata.get("thread_id") or ""
+                ).strip()
+                if dyn_thread_id:
+                    logger.info(
+                        "dynamic agent thread_id restored from humanInput.metadata: "
+                        "session=%s thread_id=%s",
+                        context.session_id,
+                        dyn_thread_id,
+                    )
             if not dyn_thread_id:
-                dyn_thread_id = self._build_thread_id(
-                    session_id=context.session_id,
-                    agent_key=runtime_agent_key,
-                )
+                # 并行子任务场景：同一 session 内多个子任务并发调用 BYCLAW_DATA，
+                # 若只用 session_id+agent_key 构建 thread_id 会导致所有子任务共享
+                # 同一个 LangGraph checkpoint，并发写入触发 InvalidUpdateError。
+                # 用 parent_message_id（即上游的 tool_call_id）区分不同子任务调用，
+                # 确保每个子任务有独立的 thread_id 和 checkpoint。
+                _tool_call_id = str(
+                    getattr(getattr(command, "header", None), "parent_message_id", "") or ""
+                ).strip()
+                if _tool_call_id and not isinstance(command, ResumeCommand):
+                    dyn_thread_id = f"{runtime_agent_key}:{context.session_id}:{_tool_call_id}"
+                    logger.info(
+                        "dynamic agent thread_id uses tool_call_id: session=%s tool_call_id=%s thread_id=%s",
+                        context.session_id,
+                        _tool_call_id,
+                        dyn_thread_id,
+                    )
+                else:
+                    dyn_thread_id = self._build_thread_id(
+                        session_id=context.session_id,
+                        agent_key=runtime_agent_key,
+                    )
 
             assert self._ontology_agent is not None, (  # noqa: S101
                 "OntologyAgent not initialized; ensure start_heartbeat() completed"
@@ -1441,6 +1696,11 @@ class DataCloudWorker(GatewayWorker):
                     session_id=context.session_id,
                 )
 
+            logger.info(
+                "DataCloudWorker: _consume_agent_events START session=%s thread=%s",
+                context.session_id,
+                dyn_thread_id,
+            )
             dynamic_result = await _consume_agent_events(
                 event_iter,
                 context,
@@ -1450,15 +1710,61 @@ class DataCloudWorker(GatewayWorker):
                 dyn_object_ids=_dyn_object_ids,
                 dyn_view_ids=_dyn_view_ids,
             )
+            logger.info(
+                "DataCloudWorker: _consume_agent_events DONE session=%s thread=%s result_status=%s",
+                context.session_id,
+                dyn_thread_id,
+                dynamic_result.get("status")
+                if isinstance(dynamic_result, dict)
+                else type(dynamic_result).__name__,
+            )
             if resume_cache_key is not None:
                 self._cache_resume_result(resume_cache_key, dynamic_result)
-            # "done" 不是框架的 terminal state（COMPLETED/FAILED/CANCELLED），
-            # 必须转换才能触发 framework worker.py 的 should_emit_stream_end → line 609
-            if (
-                isinstance(dynamic_result, dict)
-                and dynamic_result.get("status") == "done"
-            ):
-                dynamic_result = {**dynamic_result, "status": "COMPLETED"}
+            # 将内部状态映射为框架识别的 AgentState：
+            #   "done"    → "COMPLETED"  触发 should_emit_stream_end
+            #   "waiting" → "WAITING_USER" 触发框架挂起逻辑，使 resume 能正确路由回来
+            if isinstance(dynamic_result, dict):
+                _dyn_status = dynamic_result.get("status")
+                if _dyn_status == "done":
+                    _is_resume_cmd = (
+                        isinstance(command, ResumeCommand)
+                        or _paradigm_resume_value is not None
+                    )
+                    if _is_resume_cmd:
+                        _resume_query = str(
+                            _paradigm_human_input_metadata.get("query")
+                            or (command.content if isinstance(command, ResumeCommand) else "")
+                            or ""
+                        ).strip()[:80]
+                        logger.info(
+                            "[DIAG] dynamic resume done → finalAnswer will be emitted: "
+                            "session=%s thread=%s query=%r",
+                            context.session_id,
+                            dyn_thread_id,
+                            _resume_query,
+                        )
+                        await context.emit_chunk(
+                            StreamChunkEvent(
+                                content=(
+                                    f"已收到您的回复，正在整理分析结果...\n\n"
+                                    f"（当前问题：{_resume_query}）"
+                                    if _resume_query
+                                    else "已收到您的回复，正在整理分析结果...\n\n"
+                                )
+                            ),
+                            event_type=EventType.REASONING_LOG_START.value,
+                            content_type=SseReasonMessageType.think_text.value,
+                        )
+                    dynamic_result = {**dynamic_result, "status": "COMPLETED"}
+                elif _dyn_status == "waiting":
+                    dynamic_result = {**dynamic_result, "status": "WAITING_USER"}
+            logger.info(
+                "DataCloudWorker: line1480 returning session=%s status=%s",
+                context.session_id,
+                dynamic_result.get("status")
+                if isinstance(dynamic_result, dict)
+                else type(dynamic_result).__name__,
+            )
             return dynamic_result
 
         else:
@@ -1842,149 +2148,6 @@ class DataCloudWorker(GatewayWorker):
                     if rq:
                         reco_task = asyncio.create_task(gen_fn(rq))
 
-        # if _is_dynamic_agent:
-        #     # 动态路径：抑制 ANSWER_DELTA 推送（由调用方接收 return 值），
-        #     # 思考过程（REASONING_LOG_DELTA）照常 emit 供前端展示。
-        #     _answer_parts: list[str] = []
-        #     _orig_emit = context.emit_chunk
-
-        #     async def _suppress_answer_emit(
-        #         chunk: Any, *, event_type: str | None = None, **kw: Any
-        #     ) -> None:
-        #         if event_type == EventType.ANSWER_DELTA.value:
-        #             _c = getattr(chunk, "content", "") or ""
-        #             if isinstance(_c, str):
-        #                 _answer_parts.append(_c)
-        #             return
-        #         await _orig_emit(chunk, event_type=event_type, **kw)
-
-        #     context.emit_chunk = _suppress_answer_emit  # type: ignore[method-assign]
-        #     try:
-        #         async for _ in target_graph.astream_events(
-        #             graph_input, config=config, version="v2"
-        #         ):
-        #             pass
-        #     finally:
-        #         context.emit_chunk = _orig_emit
-
-        #     # 始终获取 snapshot，用于中断检测和 fallback answer 提取
-        #     _snap_cfg: dict[str, Any] = {
-        #         "configurable": {**config.get("configurable", {})}
-        #     }
-        #     _snap_cfg["configurable"].pop("checkpoint_id", None)
-        #     _snapshot = await target_graph.aget_state(_snap_cfg)
-
-        #     # 中断处理：与 _stream_graph 保持一致
-        #     if _snapshot is not None and _snapshot.interrupts:
-        #         _first = _snapshot.interrupts[0]
-        #         _interrupt_value = _first.value
-        #         _interrupt_reason = "unknown_interrupt"
-        #         if isinstance(_interrupt_value, dict):
-        #             _prompt = _interrupt_value.get("prompt", str(_interrupt_value))
-        #             _interrupt_reason = str(
-        #                 _interrupt_value.get("reason_code")
-        #                 or _interrupt_value.get("interrupt_reason")
-        #                 or "interrupt"
-        #             )
-        #         else:
-        #             _prompt = str(_interrupt_value) if _interrupt_value else "请补充您的回答。"
-        #             if _prompt:
-        #                 _interrupt_reason = "prompt_interrupt"
-
-        #         _ckpt_id = _snapshot.config.get("configurable", {}).get("checkpoint_id", "")
-        #         _ckpt_ns = _snapshot.config.get("configurable", {}).get("checkpoint_ns", "")
-        #         _snap_vals: dict[str, Any] = (
-        #             _snapshot.values if isinstance(_snapshot.values, dict) else {}
-        #         )
-        #         _todo_active_id = str(_snap_vals.get("todo_active_id") or "")
-        #         _active_tools = _snap_vals.get("active_tools")
-        #         _pending_cap = ""
-        #         if isinstance(_active_tools, list) and _active_tools:
-        #             _pending_cap = str(_active_tools[0] or "")
-        #         if not _pending_cap:
-        #             _pending_cap = str(_snap_vals.get("target_tool") or "")
-
-        #         logger.info(
-        #             "DataCloudWorker: dynamic agent interrupted session=%s "
-        #             "checkpoint_id=%s prompt=%r",
-        #             context.session_id,
-        #             _ckpt_id,
-        #             _prompt,
-        #         )
-        #         if _interrupt_reason == "AGENT_DELEGATE_WAIT":
-        #             return {"status": "waiting"}
-
-        #         _paradigm_list: list[Any] = []
-        #         _clarify_knowledge = ""
-        #         _clarify_query = ""
-        #         if isinstance(_interrupt_value, dict):
-        #             if isinstance(_interrupt_value.get("ask_user_payload"), dict):
-        #                 _aup: dict[str, Any] = _interrupt_value["ask_user_payload"]
-        #                 _paradigm_list = _aup.get("paradigmList", [])
-        #                 _clarify_query = str(_aup.get("query") or "")
-        #             _clarify_knowledge = str(
-        #                 _interrupt_value.get("_clarify_knowledge") or ""
-        #             )
-
-        #         _int_meta: dict[str, Any] = {
-        #             "thread_id": config["configurable"]["thread_id"],
-        #             "checkpoint_id": _ckpt_id,
-        #             "checkpoint_ns": _ckpt_ns,
-        #             "agent_id": by_agent_id or "",
-        #             "conf_hash": conf_hash,
-        #             "todo_active_id": _todo_active_id,
-        #             "react_step_id": _todo_active_id,
-        #             "pending_capability": _pending_cap,
-        #             "interrupt_reason": _interrupt_reason,
-        #         }
-        #         if _paradigm_list:
-        #             await context.complex_ask_user(
-        #                 AskUserEvent(
-        #                     prompt=_prompt,
-        #                     metadata={
-        #                         **_int_meta,
-        #                         "paradigmList": _paradigm_list,
-        #                         "query": _clarify_query,
-        #                         "clarify_knowledge": _clarify_knowledge,
-        #                     },
-        #                 )
-        #             )
-        #         else:
-        #             if isinstance(_interrupt_value, dict) and isinstance(
-        #                 _interrupt_value.get("ask_user_payload"), dict
-        #             ):
-        #                 _int_meta["ask_user_payload"] = _interrupt_value["ask_user_payload"]
-        #             await context.ask_user(
-        #                 AskUserEvent(prompt=_prompt, metadata=_int_meta)
-        #             )
-        #         await context.emit_chunk(
-        #             StreamChunkEvent(
-        #                 content="回答完成",
-        #                 metadata={
-        #                     "relatedResources": _related_resources_from_reco_task(reco_task),
-        #                 },
-        #             ),
-        #             event_type=EventType.APP_STREAM_RESPONSE.value,
-        #             content_type=SseMessageType.text.value,
-        #         )
-        #         return {"status": "waiting"}
-
-        #     # 优先用流式收集的完整内容（包含 formatter 生成的表格等附加部分）；
-        #     # react_final["answer"] 仅含 finish_react 工具参数，不含后续格式化追加内容。
-        #     if _answer_parts:
-        #         _final_answer = "".join(_answer_parts).strip()
-        #     else:
-        #         _final_answer = ""
-        #         if _snapshot and _snapshot.values:
-        #             _rf: dict[str, Any] = _snapshot.values.get("react_final") or {}
-        #             _final_answer = str(_rf.get("answer") or "").strip()
-        #     logger.info(
-        #         "DataCloudWorker: dynamic agent done session=%s answer_len=%d",
-        #         context.session_id,
-        #         len(_final_answer),
-        #     )
-        #     return _final_answer
-
         try:
             logger.info(
                 "_stream_graph invoke session=%s input_is_command_resume=%s",
@@ -2263,6 +2426,7 @@ class DataCloudWorker(GatewayWorker):
                     return {"status": "waiting"}
 
                 paradigm_list = []
+                operation_form = {}
                 clarify_knowledge = ""
                 clarify_query = ""
                 if isinstance(interrupt_value, dict):
@@ -2273,6 +2437,8 @@ class DataCloudWorker(GatewayWorker):
                     clarify_knowledge = str(
                         interrupt_value.get("_clarify_knowledge") or ""
                     )
+                    if interrupt_value.get("interrupt_type") == "operation_form":
+                        operation_form = interrupt_value.get("operation_form")
 
                 if paradigm_list:
                     await context.complex_ask_user(
@@ -2291,6 +2457,24 @@ class DataCloudWorker(GatewayWorker):
                                 "paradigmList": paradigm_list,
                                 "query": clarify_query,
                                 "clarify_knowledge": clarify_knowledge,
+                            },
+                        )
+                    )
+                elif operation_form:
+                    await context.complex_ask_user(
+                        AskUserEvent(
+                            prompt=prompt,
+                            metadata={
+                                "thread_id": config["configurable"]["thread_id"],
+                                "checkpoint_id": checkpoint_id,
+                                "checkpoint_ns": checkpoint_ns,
+                                "agent_id": by_agent_id,
+                                "conf_hash": conf_hash,
+                                "todo_active_id": todo_active_id,
+                                "react_step_id": todo_active_id,
+                                "pending_capability": pending_capability,
+                                "interrupt_reason": interrupt_reason,
+                                "operation_form": operation_form,
                             },
                         )
                     )

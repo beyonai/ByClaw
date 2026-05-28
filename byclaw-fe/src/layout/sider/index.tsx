@@ -233,15 +233,17 @@ const Sidebar = () => {
           )}
         </div>
       </SiderContentContext.Provider>
-      <div className={styles.collapseLine}>
-        <div
-          className={classnames(styles.collapesBtn, 'pointer ub ub-ac ub-pc')}
-          onClick={() => setSiderCollapsed(!isSiderCollapsed)}
-        >
-          {!isSiderCollapsed && <CaretLeftOutlined />}
-          {isSiderCollapsed && <CaretRightOutlined />}
+      {!shouldHideSiderContent && (
+        <div className={styles.collapseLine}>
+          <div
+            className={classnames(styles.collapesBtn, 'pointer ub ub-ac ub-pc')}
+            onClick={() => setSiderCollapsed(!isSiderCollapsed)}
+          >
+            {!isSiderCollapsed && <CaretLeftOutlined />}
+            {isSiderCollapsed && <CaretRightOutlined />}
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 };

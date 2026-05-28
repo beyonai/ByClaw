@@ -180,6 +180,7 @@ export default {
   'orgMgr.modal.phoneRule': 'Please enter a valid mobile number',
   'orgMgr.modal.role': 'Role',
   'orgMgr.modal.rolePlaceholder': 'Select role',
+  'orgMgr.modal.saveSuccess': 'Saved successfully',
 
   // Data Permission Modal
   'orgMgr.dataPermission.search': 'Enter keyword to search',

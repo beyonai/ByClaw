@@ -5,7 +5,10 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    groups:
+      all-npm:
+        patterns: ["*"]
     labels:
       - dependencies
       - frontend
@@ -15,7 +18,10 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    groups:
+      all-maven:
+        patterns: ["*"]
     labels:
       - dependencies
       - backend
@@ -25,7 +31,10 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    groups:
+      all-pip:
+        patterns: ["*"]
     labels:
       - dependencies
       - python
@@ -35,7 +44,10 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    groups:
+      all-actions:
+        patterns: ["*"]
     labels:
       - dependencies
       - ci

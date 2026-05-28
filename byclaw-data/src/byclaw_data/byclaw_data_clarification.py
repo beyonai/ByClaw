@@ -37,6 +37,39 @@ except ImportError:
 
 
 class ByclawDataClarification(AgentContext):
+    def _build_ask_user_data(
+        self,
+        event: AskUserEvent,
+        message_id: Optional[str] = None,
+        parent_message_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        if event.metadata.get("operation_form"):
+            return _sse_layout_builder.build(
+                content=json.dumps(
+                    event.metadata.get("operation_form"),
+                    ensure_ascii=False,
+                ),
+                role="assistant",
+                content_type="2007",
+                source_agent_type=self.current_agent_id,
+                order_id=message_id,
+                parent_order_id=parent_message_id,
+            )
+        else:
+            return _sse_layout_builder.build(
+                content=json.dumps(
+                    {
+                        "paradigmList": event.metadata.get("paradigmList", []),
+                        "query": event.metadata.get("query", ""),
+                    },
+                    ensure_ascii=False,
+                ),
+                role="assistant",
+                content_type="3012",
+                source_agent_type=self.current_agent_id,
+                order_id=message_id,
+                parent_order_id=parent_message_id,
+            )
 
     async def complex_ask_user(
         self,
@@ -59,19 +92,10 @@ class ByclawDataClarification(AgentContext):
             message_id,
             parent_message_id,
         )
-        _diag_data = _sse_layout_builder.build(
-            content=json.dumps(
-                {
-                    "paradigmList": event.metadata.get("paradigmList", []),
-                    "query": event.metadata.get("query", ""),
-                },
-                ensure_ascii=False,
-            ),
-            role="assistant",
-            content_type="3012",
-            source_agent_type=self.current_agent_id,
-            order_id=message_id,
-            parent_order_id=parent_message_id,
+        _diag_data = self._build_ask_user_data(
+            event=event,
+            message_id=message_id,
+            parent_message_id=parent_message_id,
         )
         _logger.info(
             "[DIAG][complex_ask_user] full redis payload: event_type=%r session_id=%r "

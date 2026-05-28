@@ -1554,38 +1554,45 @@ const ConfigForm = (props) => {
             </div>
 
             {/* 数字员工类型 */}
-            {digitalType !== 'FROM_THIRD' && (
-              <div className={styles.rowFlexBetween}>
-                <div>
-                  <span>{intl.formatMessage({ id: 'employeeDetail.employeeType' })}</span>
-                </div>
-                <Form.Item
-                  noStyle
-                  shouldUpdate={(prevValues, currentValues) => prevValues.ownerType !== currentValues.ownerType}
-                >
-                  {({ getFieldValue }) => {
-                    const isPersonal =
-                      getFieldValue('ownerType') !== 'enterprise' && effectiveOwnerType !== 'enterprise';
-                    if (isPersonal) {
-                      return (
-                        <span className={styles.typeTag}>
-                          <span className={styles.tagText}>
-                            {intl.formatMessage({ id: 'employeeDetail.personalAssistant' })}
-                          </span>
-                        </span>
-                      );
-                    }
+            <div className={styles.rowFlexBetween}>
+              <div>
+                <span>{intl.formatMessage({ id: 'employeeDetail.employeeType' })}</span>
+              </div>
+              <Form.Item
+                noStyle
+                shouldUpdate={(prevValues, currentValues) => prevValues.ownerType !== currentValues.ownerType}
+              >
+                {({ getFieldValue }) => {
+                  if (digitalType === 'FROM_THIRD') {
                     return (
                       <span className={styles.typeTag}>
                         <span className={styles.tagText}>
-                          {agentTypeOptions.find((item) => item.value === agentType)?.label}
+                          {intl.formatMessage({ id: 'employeeDetail.thirdParty' })}
                         </span>
                       </span>
                     );
-                  }}
-                </Form.Item>
-              </div>
-            )}
+                  }
+
+                  const isPersonal = getFieldValue('ownerType') !== 'enterprise' && effectiveOwnerType !== 'enterprise';
+                  if (isPersonal) {
+                    return (
+                      <span className={styles.typeTag}>
+                        <span className={styles.tagText}>
+                          {intl.formatMessage({ id: 'employeeDetail.personalAssistant' })}
+                        </span>
+                      </span>
+                    );
+                  }
+                  return (
+                    <span className={styles.typeTag}>
+                      <span className={styles.tagText}>
+                        {agentTypeOptions.find((item) => item.value === agentType)?.label}
+                      </span>
+                    </span>
+                  );
+                }}
+              </Form.Item>
+            </div>
 
             {/* 目录管理 */}
             <Form.Item label={intl.formatMessage({ id: 'employeeDetail.catalogManage' })} name="catalogId">

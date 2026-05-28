@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.dto.openapi;
 
+import com.alibaba.fastjson.annotation.JSONField;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.iwhalecloud.byai.common.annotation.Add;
 import com.iwhalecloud.byai.common.annotation.Del;
 import com.iwhalecloud.byai.common.annotation.Mod;
@@ -34,6 +36,7 @@ public class OpenStationDTO {
     private String stationIdPath;
 
     @NotNull(groups = Add.class, message = "{openstationdto.parentid.notnull}")
+    @JsonProperty("pStationId")
     private Long pStationId;
 
     @NotNull(groups = Add.class, message = "{openstationdto.isabroad.notnull}")
@@ -42,7 +45,7 @@ public class OpenStationDTO {
     private Long comAcctId;
 
     /**
-     * 是否生成新的主键映射外系统数�?
+     * 是否生成新的主键映射外系统数
      */
     private boolean newPrimaryKey;
 }

@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.Charset;
+import java.util.Arrays;
 import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -143,6 +144,21 @@ class ByClawSkillUploadApplicationServiceTest {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
             () -> service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip));
         assertTrue(ex.getMessage().contains("SKILL.md"));
+    }
+
+    @Test
+    void shouldUploadMultipleSkillZips() {
+        MultipartFile alpha = buildZip("alpha.zip", "alpha/SKILL.md", "# alpha");
+        MultipartFile beta = buildZip("beta.zip", "beta/SKILL.md", "# beta");
+        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+
+        var result = service.uploadSkillZips(USER_CODE, RESOURCE_ID, Arrays.asList(alpha, beta));
+
+        assertEquals(2, result.size());
+        assertEquals("alpha", result.get(0).getSkillName());
+        assertEquals("beta", result.get(1).getSkillName());
+        verify(userFS).delete(AGENT_PREFIX + "alpha/");
+        verify(userFS).delete(AGENT_PREFIX + "beta/");
     }
 
     @Test

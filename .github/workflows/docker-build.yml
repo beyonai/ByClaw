@@ -121,6 +121,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Capture build metadata
+        id: build-meta
+        run: |
+          echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
       - name: Setup pnpm (byclaw-fe only)
         if: matrix.service == 'byclaw-fe'
         uses: pnpm/action-setup@v4
@@ -202,6 +208,14 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
           platforms: ${{ matrix.platforms }}
+          build-args: |
+            BUILD_VERSION=${{ github.ref_name }}
+            BUILD_BRANCH=${{ github.ref_name }}
+            BUILD_COMMIT=${{ steps.build-meta.outputs.short_sha }}
+            BUILD_COMMIT_FULL=${{ github.sha }}
+            BUILD_TIME=${{ steps.build-meta.outputs.timestamp }}
+            BUILD_MODULE=${{ matrix.service }}
+            BRANCH=${{ github.ref_name }}
 
       - name: Output image digest
         run: |

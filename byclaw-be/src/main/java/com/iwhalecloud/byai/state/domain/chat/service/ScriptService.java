@@ -436,7 +436,7 @@ public class ScriptService extends AbstractChatProcess {
         String chatContent = dto.getChatContent();
         String sessionNameSource = chatContent == null ? "" : chatContent;
         sessionMembersDto
-            .setSessionName(ChatUtils.truncateString(sessionNameSource.replaceAll("\\{\\{.*?\\}\\}", ""), 10));
+            .setSessionName(ChatUtils.truncateString(sessionNameSource.replaceAll("\\{\\{[^}]*+\\}\\}", ""), 10));
 
         sessionMembersDto.setCreatorId(CurrentUserHolder.getCurrentUserId());
         sessionMembersDto.setEnterpriseId(CurrentUserHolder.getEnterpriseId());

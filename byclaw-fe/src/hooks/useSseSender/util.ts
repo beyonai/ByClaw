@@ -95,12 +95,19 @@ const thinkTaskUserInputHandler = (sseDataObj: any) => {
 };
 
 const approvalFormHandler = (sseDataObj: any) => {
+  const sourceAgentType = get(sseDataObj, 'agentId');
+  const metadata = get(sseDataObj, 'metadata');
+
   const content = get(sseDataObj, 'choices.0.delta.content', '');
 
   return {
     message: {
       contentType: SSEMessageType.approvalForm,
-      content: formatAgentSSEDate(content),
+      content: {
+        sourceAgentType,
+        metadata,
+        ...formatAgentSSEDate(content),
+      },
       status: SSEEventStatus.done,
     },
   };
@@ -254,6 +261,8 @@ export const answerDeltaHandler = (sseDataObj: any, msgEvent?: string): { messag
   Object.assign(res.message, {
     objectType: get(sseDataObj, 'objectType'),
     agentId: get(sseDataObj, 'agentId'),
+    uuid: get(sseDataObj, 'id'),
+    orginContent: get(sseDataObj, 'choices.0.delta.content', ''),
   });
 
   return res;

@@ -87,6 +87,8 @@ public class IndexApplicationServiceV2 {
 
     private static final String SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX = "_main";
 
+    private static final String CREATE_TYPE_FROM_THIRD = "FROM_THIRD";
+
     /**
      * 查询当前用户创建和订阅的数字员工分页列表。
      *
@@ -172,7 +174,7 @@ public class IndexApplicationServiceV2 {
         authDigitEmployVo.setIsDefault(isDefault);
         authDigitEmployVo.setCanSetDefault(!isDefault);
         authDigitEmployVo.setTagName(buildRuntimeDigitalEmployeeTagName(authDigitEmployVo.getOwnerType(),
-            authDigitEmployVo.getResourceCode(), authDigitEmployVo.getAgentType()));
+            authDigitEmployVo.getResourceCode(), authDigitEmployVo.getAgentType(), authDigitEmployVo.getCreateType()));
     }
 
     private void fillRuntimeTag(DigitEmployMarketVo digitEmployMarketVo) {
@@ -180,13 +182,18 @@ public class IndexApplicationServiceV2 {
             return;
         }
         digitEmployMarketVo.setTagName(buildRuntimeDigitalEmployeeTagName(digitEmployMarketVo.getOwnerType(),
-            digitEmployMarketVo.getResourceCode(), digitEmployMarketVo.getAgentType()));
+            digitEmployMarketVo.getResourceCode(), digitEmployMarketVo.getAgentType(),
+            digitEmployMarketVo.getCreateType()));
     }
 
     /**
-     * 数字员工标签统一运行时生成：个人侧按超级助手/个人助理展示，企业侧按 agentType 展示类型。
+     * 数字员工标签统一运行时生成：第三方优先展示第三方；个人侧按超级助手/个人助理展示，企业侧按 agentType 展示类型。
      */
-    private String buildRuntimeDigitalEmployeeTagName(String ownerType, String resourceCode, String agentType) {
+    private String buildRuntimeDigitalEmployeeTagName(String ownerType, String resourceCode, String agentType,
+        String createType) {
+        if (CREATE_TYPE_FROM_THIRD.equals(createType)) {
+            return I18nUtil.get("digemployee.tag.third.party");
+        }
         if (OwnerType.PERSONAL.equals(ownerType) || OwnerType.PERSONAL_DEFAULT.equals(ownerType)) {
             return StringUtils.endsWith(resourceCode, SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX)
                 ? I18nUtil.get("digemployee.tag.super.assistant")

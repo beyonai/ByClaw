@@ -72,7 +72,10 @@ class IndexApplicationServiceV2Test {
         DigitEmployMarketExtVo superAssistant = buildDigitEmployee(100L, OwnerType.PERSONAL, "zhangsan_main", null);
         DigitEmployMarketExtVo dataAgent = buildDigitEmployee(101L, OwnerType.ENTERPRISE, "data-agent",
             DigitalEmployType.AGENT_TYPE_DATA.getCode());
-        List<DigitEmployMarketExtVo> discoverList = List.of(superAssistant, dataAgent);
+        DigitEmployMarketExtVo thirdPartyAgent = buildDigitEmployee(102L, OwnerType.ENTERPRISE, "third-party-agent",
+            DigitalEmployType.AGENT_TYPE_QA.getCode());
+        thirdPartyAgent.setCreateType("FROM_THIRD");
+        List<DigitEmployMarketExtVo> discoverList = List.of(superAssistant, dataAgent, thirdPartyAgent);
 
         when(indexService.discover(any(DiscoverQo.class))).thenReturn(discoverList);
         when(indexService.findManPrivVo(any())).thenReturn(Collections.emptyMap());
@@ -81,6 +84,7 @@ class IndexApplicationServiceV2Test {
 
         assertThat(superAssistant.getTagName()).isEqualTo("digemployee.tag.super.assistant");
         assertThat(dataAgent.getTagName()).isEqualTo("digemployee.tag.agent.data");
+        assertThat(thirdPartyAgent.getTagName()).isEqualTo("digemployee.tag.third.party");
     }
 
     @Test
@@ -96,8 +100,16 @@ class IndexApplicationServiceV2Test {
         qaAgent.setResourceCode("qa-agent");
         qaAgent.setAgentType(DigitalEmployType.AGENT_TYPE_QA.getCode());
 
+        AuthDigitEmployVo thirdPartyPersonalAssistant = new AuthDigitEmployVo();
+        thirdPartyPersonalAssistant.setId(102L);
+        thirdPartyPersonalAssistant.setOwnerType(OwnerType.PERSONAL);
+        thirdPartyPersonalAssistant.setResourceCode("lisi_main");
+        thirdPartyPersonalAssistant.setAgentType(DigitalEmployType.AGENT_TYPE_ASSISTANT.getCode());
+        thirdPartyPersonalAssistant.setCreateType("FROM_THIRD");
+
         ReflectionTestUtils.invokeMethod(service, "fillDefaultAndRuntimeTag", personalAssistant, 100L);
         ReflectionTestUtils.invokeMethod(service, "fillDefaultAndRuntimeTag", qaAgent, 100L);
+        ReflectionTestUtils.invokeMethod(service, "fillDefaultAndRuntimeTag", thirdPartyPersonalAssistant, 100L);
 
         assertThat(personalAssistant.getTagName()).isEqualTo("digemployee.tag.personal.assistant");
         assertThat(personalAssistant.getIsDefault()).isTrue();
@@ -105,6 +117,7 @@ class IndexApplicationServiceV2Test {
         assertThat(qaAgent.getTagName()).isEqualTo("digemployee.tag.agent.qa");
         assertThat(qaAgent.getIsDefault()).isFalse();
         assertThat(qaAgent.getCanSetDefault()).isTrue();
+        assertThat(thirdPartyPersonalAssistant.getTagName()).isEqualTo("digemployee.tag.third.party");
     }
 
     private DigitEmployMarketExtVo buildDigitEmployee(Long id, String ownerType, String resourceCode, String agentType) {
