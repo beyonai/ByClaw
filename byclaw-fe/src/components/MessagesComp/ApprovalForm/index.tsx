@@ -74,10 +74,12 @@ export type IMessageListItemContent = {
 
 export type IProps = {
   message: IMessage;
-  messageListItem: IMessageListItem;
   updateMessageListItemContent: (messageListItemContent: IMessageListItemContent) => void;
   messageListItemContent: IMessageListItemContent;
-  thinkListItem?: any[];
+
+  messageListItem?: IMessageListItem;
+  thinkListItem?: IMessageListItem;
+
   messageIdx: number;
 };
 
@@ -260,9 +262,10 @@ function FormFieldsRender(props: FormFieldsRenderProps) {
 }
 
 function ApprovalForm(props: IProps) {
-  const { messageListItemContent, message, messageListItem } = props;
+  const { messageListItemContent, message, messageListItem, thinkListItem } = props;
 
-  const { uuid, orginContent } = messageListItem || {};
+  const { uuid, orginContent } = messageListItem || thinkListItem || {};
+
   const { messageId } = message;
   const {
     substance = [],
@@ -282,6 +285,9 @@ function ApprovalForm(props: IProps) {
   // 是否显示按钮
   const [isDisable, setIsDisableBtn] = useState<boolean>(!isNil(confirmed));
 
+  const isThinkingProcess = !!props.thinkListItem;
+  const updateField = isThinkingProcess ? 'inferLog' : 'messageStruct';
+
   const myUpdateMessageStructById = useCallback(
     (newOrginContent: Record<string, unknown>) => {
       let contentStr;
@@ -295,9 +301,10 @@ function ApprovalForm(props: IProps) {
         id: uuid,
         messageId,
         content: contentStr,
+        updateField,
       });
     },
-    [uuid, messageId]
+    [uuid, messageId, updateField]
   );
 
   const myToApproveForm = async (confirmed: boolean) => {
@@ -314,7 +321,7 @@ function ApprovalForm(props: IProps) {
 
     let myOrginContent = {};
     try {
-      myOrginContent = JSON.parse(orginContent);
+      myOrginContent = JSON.parse(orginContent || '');
       set(myOrginContent, 'rule', substance);
     } catch (e) {
       console.error(e);

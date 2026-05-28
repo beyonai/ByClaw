@@ -7,3 +7,7 @@ name: "ByClaw CodeQL Configuration"
 query-filters:
   - exclude:
       id: java/unsafe-deserialization
+
+paths-ignore:
+  - "byclaw-fe/public/preview/**"
+  - "byclaw-fe/public/html/**"
