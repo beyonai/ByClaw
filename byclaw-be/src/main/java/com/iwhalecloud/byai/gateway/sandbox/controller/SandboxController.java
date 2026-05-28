@@ -152,7 +152,7 @@ public class SandboxController {
         Object sandboxTypeObj = params.get("sandboxType");
         String sandboxType = null;
         if (sandboxTypeObj != null) {
-            sandboxType =  sandboxTypeObj.toString().trim();
+            sandboxType = sandboxTypeObj.toString().trim();
         }
 
         List<Map<String, Object>> data = new ArrayList<>();

@@ -9,6 +9,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import com.iwhalecloud.byai.common.feign.client.FeignWhaleAgentService;
 import com.iwhalecloud.byai.common.storage.constants.StorageType;
+import com.iwhalecloud.byai.gateway.sandbox.client.OpenDesignClient;
 import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.OpenSandboxRuntimeProvider;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeProvider;
@@ -27,6 +28,11 @@ public class SandboxAutoConfiguration {
     @Bean
     public OpenSandboxClient openSandboxClient(SandboxProperties properties) {
         return new OpenSandboxClient(properties);
+    }
+
+    @Bean
+    public OpenDesignClient openDesignClient() {
+        return new OpenDesignClient();
     }
 
     @Bean

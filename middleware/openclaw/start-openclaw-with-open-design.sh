@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+OPEN_DESIGN_ROOT="${OPEN_DESIGN_ROOT:-/opt/open-design}"
+
+export OD_BASE_PATH="${OD_BASE_PATH:-/openDesign}"
+export OD_BIND_HOST="${OD_BIND_HOST:-127.0.0.1}"
+export OD_PORT="${OD_PORT:-17456}"
+export OD_DATA_DIR="${OD_DATA_DIR:-/by/.od}"
+export OD_MEDIA_CONFIG_DIR="${OD_MEDIA_CONFIG_DIR:-$OD_DATA_DIR}"
+export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$OD_DATA_DIR/claude}"
+export CLAUDE_BIN="${CLAUDE_BIN:-/usr/local/bin/claude}"
+export OPEN_DESIGN_USER="${OPEN_DESIGN_USER:-open-design}"
+export OPEN_DESIGN_HOME="${OPEN_DESIGN_HOME:-$OD_DATA_DIR/home}"
+export OPEN_DESIGN_AGENT_ID="${OPEN_DESIGN_AGENT_ID:-claude}"
+export OPEN_DESIGN_CLAUDE_MODEL="${OPEN_DESIGN_CLAUDE_MODEL:-sonnet}"
+
+mkdir -p "$OD_DATA_DIR" "$OD_MEDIA_CONFIG_DIR" "$CLAUDE_CONFIG_DIR" "$OPEN_DESIGN_HOME"
+if [ "$(id -u)" = "0" ]; then
+    chown -R "$OPEN_DESIGN_USER:$OPEN_DESIGN_USER" "$OD_DATA_DIR" "$OD_MEDIA_CONFIG_DIR" "$CLAUDE_CONFIG_DIR" "$OPEN_DESIGN_HOME"
+fi
+
+app_config_file="$OD_DATA_DIR/app-config.json"
+if command -v codex >/dev/null 2>&1; then
+    export OPEN_DESIGN_CODEX_AVAILABLE=1
+else
+    export OPEN_DESIGN_CODEX_AVAILABLE=0
+fi
+
+APP_CONFIG_FILE="$app_config_file" node <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+
+const file = process.env.APP_CONFIG_FILE;
+const agentId = process.env.OPEN_DESIGN_AGENT_ID || 'claude';
+const claudeModel = process.env.OPEN_DESIGN_CLAUDE_MODEL || 'sonnet';
+let config = {};
+
+if (file && fs.existsSync(file)) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      config = parsed;
+    }
+  } catch {
+    config = {};
+  }
+}
+
+const selectedAgent = typeof config.agentId === 'string' ? config.agentId.trim() : '';
+const codexUnavailable = selectedAgent === 'codex' && process.env.OPEN_DESIGN_CODEX_AVAILABLE !== '1';
+const forceAgent = process.env.OPEN_DESIGN_FORCE_AGENT === '1';
+if (forceAgent || !selectedAgent || codexUnavailable) {
+  config.agentId = agentId;
+}
+
+config.agentCliEnv = config.agentCliEnv && typeof config.agentCliEnv === 'object' && !Array.isArray(config.agentCliEnv)
+  ? config.agentCliEnv
+  : {};
+config.agentCliEnv.claude = {
+  ...(config.agentCliEnv.claude && typeof config.agentCliEnv.claude === 'object' ? config.agentCliEnv.claude : {}),
+  CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR || '/by/.od/claude',
+  CLAUDE_BIN: process.env.CLAUDE_BIN || '/usr/local/bin/claude',
+};
+
+config.agentModels = config.agentModels && typeof config.agentModels === 'object' && !Array.isArray(config.agentModels)
+  ? config.agentModels
+  : {};
+config.agentModels.claude = {
+  ...(config.agentModels.claude && typeof config.agentModels.claude === 'object' ? config.agentModels.claude : {}),
+  model: claudeModel,
+};
+
+fs.mkdirSync(path.dirname(file), { recursive: true });
+fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+NODE
+
+claude_api_key="${ZHIPU_API_KEY:-${ANTHROPIC_AUTH_TOKEN:-${ANTHROPIC_API_KEY:-}}}"
+
+if [ -n "$claude_api_key" ]; then
+    cat > "$CLAUDE_CONFIG_DIR/settings.json" <<EOF
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "$claude_api_key",
+    "ANTHROPIC_BASE_URL": "${ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}",
+    "API_TIMEOUT_MS": "${API_TIMEOUT_MS:-3000000}",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": 1,
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "${ANTHROPIC_DEFAULT_HAIKU_MODEL:-GLM-4.5-air}",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "${ANTHROPIC_DEFAULT_SONNET_MODEL:-GLM-5.1}",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "${ANTHROPIC_DEFAULT_OPUS_MODEL:-GLM-5.1}"
+  }
+}
+EOF
+else
+    echo "[claude] ZHIPU_API_KEY/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_API_KEY is not set; Claude Code may require existing auth under $CLAUDE_CONFIG_DIR" >&2
+fi
+
+if [ "$(id -u)" = "0" ]; then
+    chown -R "$OPEN_DESIGN_USER:$OPEN_DESIGN_USER" "$OD_DATA_DIR" "$OD_MEDIA_CONFIG_DIR" "$CLAUDE_CONFIG_DIR" "$OPEN_DESIGN_HOME"
+fi
+
+if [ "$#" -eq 0 ]; then
+    echo "[combined] missing OpenClaw command" >&2
+    exit 64
+fi
+
+echo "[open-design] root: $OPEN_DESIGN_ROOT"
+echo "[open-design] url: http://${OD_BIND_HOST}:${OD_PORT}${OD_BASE_PATH}"
+
+cd "$OPEN_DESIGN_ROOT"
+
+if [ "$(id -u)" = "0" ]; then
+    runuser -u "$OPEN_DESIGN_USER" -- \
+        env NODE_ENV=production \
+        NODE_OPTIONS="${OD_NODE_OPTIONS:---max-old-space-size=192}" \
+        OD_BASE_PATH="$OD_BASE_PATH" \
+        OD_BIND_HOST="$OD_BIND_HOST" \
+        OD_PORT="$OD_PORT" \
+        OD_DATA_DIR="$OD_DATA_DIR" \
+        OD_MEDIA_CONFIG_DIR="$OD_MEDIA_CONFIG_DIR" \
+        HOME="$OPEN_DESIGN_HOME" \
+        USER="$OPEN_DESIGN_USER" \
+        LOGNAME="$OPEN_DESIGN_USER" \
+        CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" \
+        CLAUDE_BIN="$CLAUDE_BIN" \
+        ZHIPU_API_KEY="${ZHIPU_API_KEY:-}" \
+        ANTHROPIC_AUTH_TOKEN="${ANTHROPIC_AUTH_TOKEN:-}" \
+        ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+        ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}" \
+        API_TIMEOUT_MS="${API_TIMEOUT_MS:-3000000}" \
+        ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-GLM-4.5-air}" \
+        ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-GLM-5.1}" \
+        ANTHROPIC_DEFAULT_OPUS_MODEL="${ANTHROPIC_DEFAULT_OPUS_MODEL:-GLM-5.1}" \
+        node apps/daemon/dist/cli.js --no-open &
+else
+    env NODE_ENV=production \
+        NODE_OPTIONS="${OD_NODE_OPTIONS:---max-old-space-size=192}" \
+        HOME="$OPEN_DESIGN_HOME" \
+        node apps/daemon/dist/cli.js --no-open &
+fi
+open_design_pid=$!
+
+health_url="http://127.0.0.1:${OD_PORT}${OD_BASE_PATH}/api/health"
+open_design_ready=0
+
+for _ in $(seq 1 60); do
+    if node -e "fetch(process.argv[1]).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" "$health_url"; then
+        open_design_ready=1
+        break
+    fi
+    sleep 1
+done
+
+if [ "$open_design_ready" != "1" ]; then
+    echo "[open-design] health check failed: $health_url" >&2
+    kill "$open_design_pid" 2>/dev/null || true
+    exit 1
+fi
+
+echo "[open-design] ready: $health_url"
+echo "[openclaw] starting: $*"
+
+cd /app
+
+"$@" &
+openclaw_pid=$!
+
+shutdown() {
+    echo "[combined] shutting down"
+    kill "$openclaw_pid" "$open_design_pid" 2>/dev/null || true
+}
+
+trap shutdown TERM INT
+
+wait -n "$openclaw_pid" "$open_design_pid"
+status=$?
+
+shutdown
+wait "$openclaw_pid" 2>/dev/null || true
+wait "$open_design_pid" 2>/dev/null || true
+
+exit "$status"

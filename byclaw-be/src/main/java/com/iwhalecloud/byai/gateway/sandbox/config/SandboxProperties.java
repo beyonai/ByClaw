@@ -46,6 +46,36 @@ public class SandboxProperties {
      */
     private String basePath;
 
+    /**
+     * Open Design daemon 默认地址，允许请求级参数覆盖。
+     */
+    // Open Design daemon 默认地址，可被 `/sandbox/open-design-adapter` 的请求参数覆盖。
+    private String openDesignDaemonBaseUrl;
+
+    /**
+     * Open Design Web 默认地址，允许请求级参数覆盖。
+     */
+    // Open Design Web 默认地址，用于最终 302 跳转地址拼装。
+    private String openDesignWebBaseUrl;
+
+    /**
+     * Open Design 默认 agentId，仅在创建 run 时使用。
+     */
+    // Open Design run 默认 agentId，仅在真正创建 run 时读取。
+    private String openDesignAgentId;
+
+    /**
+     * Open Design 默认 skillId，允许请求级参数覆盖。
+     */
+    // Open Design 默认 skillId，请求未显式指定 skillId 时回落到这里。
+    private String openDesignDefaultSkillId;
+
+    /**
+     * Open Design 默认 designSystemId，允许请求级参数覆盖。
+     */
+    // Open Design 默认 designSystemId，请求未显式指定时回落到这里。
+    private String openDesignDefaultDesignSystemId;
+
     @Data
     public static class OpenSandboxConfig {
         private String baseUrl;
