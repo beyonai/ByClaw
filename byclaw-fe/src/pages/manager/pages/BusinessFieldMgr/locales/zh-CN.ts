@@ -1,7 +1,7 @@
 export default {
-  // 业务领域管理
-
-  'businessField.title': '业务领域管理',
+  // 资产目录管理
+  'businessField.title': '资产目录管理',
+  'businessField.allCategory': '全部分类',
   'businessField.filter.title': '领域',
   'businessField.getListFail': '获取业务领域列表失败',
   'filter.source': '来源',
@@ -28,10 +28,11 @@ export default {
   'businessField.assets.digitalEmployee': '数字员工',
   'businessField.assets.knowledge': '知识资产',
   'businessField.assets.skill': '技能资产',
+  'businessField.assets.tool': '工具资产',
   'businessField.assets.toolset': '工具集',
   'businessField.assets.mcp': 'MCP服务',
-  'businessField.assets.view': '视图',
-  'businessField.assets.object': '对象',
+  'businessField.assets.view': '视图资产',
+  'businessField.assets.object': '对象资产',
   'businessField.assets.getListFail': '获取资产列表失败',
   'businessField.assets.knowledgeDetailNotSupported': '暂不支持该类型的知识详情',
   'businessField.assets.detailNotSupported': '暂不支持该类型的详情查看',

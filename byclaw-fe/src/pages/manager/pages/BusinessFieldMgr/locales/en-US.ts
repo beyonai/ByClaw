@@ -1,6 +1,7 @@
 export default {
   // Business Field Management
   'businessField.title': 'Business Field Management',
+  'businessField.allCategory': 'All Categories',
   'businessField.filter.title': 'Field',
   'businessField.getListFail': 'Failed to get business field list',
   'filter.source': 'Source',
@@ -27,10 +28,11 @@ export default {
   'businessField.assets.digitalEmployee': 'Digital Employee',
   'businessField.assets.knowledge': 'Knowledge Assets',
   'businessField.assets.skill': 'Skill Assets',
+  'businessField.assets.tool': 'Tool Assets',
   'businessField.assets.toolset': 'Toolset',
   'businessField.assets.mcp': 'MCP Service',
-  'businessField.assets.view': 'View',
-  'businessField.assets.object': 'Object',
+  'businessField.assets.view': 'View Assets',
+  'businessField.assets.object': 'Object Assets',
   'businessField.assets.getListFail': 'Failed to get assets list',
   'businessField.assets.knowledgeDetailNotSupported': 'Knowledge detail of this type is not supported',
   'businessField.assets.detailNotSupported': 'Detail view of this type is not supported',

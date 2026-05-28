@@ -8,6 +8,7 @@ import { arrayToTree } from '@/pages/manager/utils/managerUtils';
 import styles from './index.module.less';
 
 const { confirm, error } = Modal;
+export const ALL_FIELD_KEY = '__ALL_BUSINESS_FIELD__';
 
 const BusinessFieldTree = ({
   onSelect,
@@ -45,8 +46,14 @@ const BusinessFieldTree = ({
 
   // 将扁平数组转换为树形结构
   const treeDataForTree = useMemo(() => {
+    const allFieldNode = {
+      fieldId: ALL_FIELD_KEY,
+      fieldName: intl.formatMessage({ id: 'businessField.allCategory' }),
+      isAllCategory: true,
+    };
+
     if (!dataSource || dataSource.length === 0) {
-      return [];
+      return [allFieldNode];
     }
 
     // 先使用 arrayToTree 转换结构
@@ -74,15 +81,15 @@ const BusinessFieldTree = ({
     result.forEach((node) => enrichNode(node, dataSource));
 
     setExpandedKeys((p) => (p?.length === 0 && result?.length > 0 ? result.map((item) => item.fieldId) : [...p]));
-    return result;
-  }, [dataSource]);
+    return [allFieldNode, ...result];
+  }, [dataSource, intl]);
 
   // 当树形结构准备好且没有选中节点时，自动选中第一个节点
   useEffect(() => {
-    if (treeDataForTree?.length > 0 && !selectedField?.fieldId) {
+    if (treeDataForTree?.length > 0 && selectedField?.fieldId === undefined) {
       // 树节点已经包含了所有原始数据（通过 enrichNode 合并）
       const firstNode = treeDataForTree[0];
-      if (firstNode && firstNode.fieldId) {
+      if (firstNode && firstNode.fieldId !== undefined) {
         setSelectedField(firstNode);
       }
     }
@@ -142,7 +149,7 @@ const BusinessFieldTree = ({
   const titleRender = (nodeData) => (
     <div className={styles.treeNode}>
       <div style={{ flex: 1, display: 'flex', columnGap: 2, alignItems: 'center' }}>
-        <AntdIcon type="icon-a-changjing-line" />
+        {/* <AntdIcon type="icon-a-changjing-line" /> */}
         <div style={{ flex: 1, width: 0, height: 24 }}>
           <Tooltip title={nodeData.fieldName}>
             <span
@@ -160,7 +167,7 @@ const BusinessFieldTree = ({
             </span>
           </Tooltip>
         </div>
-        {nodeData.fieldId === selectedField?.fieldId && isPlatformAdmin && (
+        {!nodeData.isAllCategory && nodeData.fieldId === selectedField?.fieldId && isPlatformAdmin && (
           <Dropdown
             menu={{
               items: dropdownItems,

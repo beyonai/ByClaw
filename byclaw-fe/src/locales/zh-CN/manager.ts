@@ -317,7 +317,7 @@ export default {
     '适配A2A协议，Bot、Dify、Hiagent等第三方平台智能体及页面型应用，支持页面集成与接口集成两种模式。',
   'digitalEmployeeMgr.sandbox': '通过沙箱服务创建数字员工，支持选择已部署的沙箱服务实例， 如OpenClaw等。',
 
-  // 业务领域管理
+  // 资产目录管理
   'businessField.filter.title': '领域',
   'filter.source': '来源',
   'modelMgr.title': '模型管理',
