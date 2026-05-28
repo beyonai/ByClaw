@@ -82,6 +82,8 @@ class ByclawDataClarification(AgentContext):
             event = AskUserEvent(prompt=event)
 
         _diag_event_type = EventType.ANSWER_DELTA.value
+        if event.metadata.get("operation_form"):
+            _diag_event_type = EventType.REASONING_LOG_DELTA.value
         from by_framework.common.logger import logger as _logger
         _logger.info(
             "[DIAG][complex_ask_user] emit_event called: event_type=%r session_id=%r "
@@ -118,6 +120,24 @@ class ByclawDataClarification(AgentContext):
             message_id=message_id,
             parent_message_id=parent_message_id,
             data=_diag_data,
+            metadata=event.metadata,
+        )
+
+        await self.emitter.emit_event(
+            session_id=self.session_id,
+            trace_id=self.trace_id,
+            event_type=EventType.REASONING_LOG_END.value,
+            source_agent_type=self.current_agent_id,
+            message_id=message_id,
+            parent_message_id=parent_message_id,
+            data=_sse_layout_builder.build(
+                content="",
+                role="assistant",
+                content_type="1002",
+                source_agent_type=self.current_agent_id,
+                order_id=message_id,
+                parent_order_id=parent_message_id,
+            ),
             metadata=event.metadata,
         )
 
