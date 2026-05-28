@@ -356,6 +356,8 @@ function ApprovalForm(props: IProps) {
             query: queryQuestion,
             language: getLocale(),
           },
+          llmMessageId: messageId,
+          traceId: message.traceId,
         },
         msgOpt: {
           answerMsg: {

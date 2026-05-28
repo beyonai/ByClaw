@@ -50,13 +50,9 @@ async function decompressFilesInAgentDir(resourceId: string) {
     const filePath = path.join(agentDir, file);
     if (file.endsWith('.tar.gz')) {
       console.log(`tar -xzf "${filePath}"`);
-      try {
-        execSync(`tar -xzf "${filePath}"`, { cwd: agentDir, stdio: 'inherit' });
-        // 解压完成后，删除压缩包
-        await fs.unlink(filePath);
-      } catch (e) {
-        console.error(`[ASK_PERSONAL] tar -xzf "${filePath}" failed: ${e}`);
-      }
+      execSync(`tar -xzf "${filePath}"`, { cwd: agentDir, stdio: 'inherit' });
+      // 解压完成后，删除压缩包
+      await fs.unlink(filePath);
     }
   }
   files = await fs.readdir(agentDir);
