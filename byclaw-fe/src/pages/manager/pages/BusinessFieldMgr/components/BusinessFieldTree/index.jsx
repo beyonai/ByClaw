@@ -1,14 +1,25 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { connect } from 'dva';
-import { Tree, Input, Tooltip, Modal, message, Dropdown } from 'antd';
+import { Tree, Input, Tooltip, Modal, message, Dropdown, Popconfirm } from 'antd';
 import { SearchOutlined, DeleteOutlined, EditOutlined, EllipsisOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import AntdIcon from '@/pages/manager/components/AntdIcon';
 import { arrayToTree } from '@/pages/manager/utils/managerUtils';
 import styles from './index.module.less';
 
-const { confirm, error } = Modal;
+const { error } = Modal;
 export const ALL_FIELD_KEY = '__ALL_BUSINESS_FIELD__';
+const RESOURCE_BIZ_TYPE_LIST = [
+  'DIG_EMPLOYEE',
+  'KG_DOC',
+  'KG_QA',
+  'KG_TERM',
+  'AGENT',
+  'MCP',
+  'TOOLKIT',
+  'VIEW',
+  'OBJECT',
+];
 
 const BusinessFieldTree = ({
   onSelect,
@@ -27,6 +38,8 @@ const BusinessFieldTree = ({
   const intl = useIntl();
   const [expandedKeys, setExpandedKeys] = useState([]);
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
+  const [hasRelatedAssets, setHasRelatedAssets] = useState(false);
+  const [assetCheckLoading, setAssetCheckLoading] = useState(false);
 
   // 获取用户权限信息
   useEffect(() => {
@@ -95,12 +108,49 @@ const BusinessFieldTree = ({
     }
   }, [treeDataForTree, selectedField?.fieldId, setSelectedField]);
 
+  useEffect(() => {
+    const catalogId = selectedField?.fieldId ?? selectedField?.catalogId;
+    if (selectedField?.isAllCategory || catalogId === undefined) {
+      setHasRelatedAssets(false);
+      setAssetCheckLoading(false);
+      return;
+    }
+
+    let canceled = false;
+    setAssetCheckLoading(true);
+    dispatch({
+      type: 'businessFieldMgr/getFieldAssets',
+      payload: {
+        catalogId,
+        resourceBizTypeList: RESOURCE_BIZ_TYPE_LIST,
+        pageIndex: 1,
+        pageSize: 1,
+      },
+      success: (res) => {
+        if (canceled) return;
+        const { data } = res || {};
+        const total = data?.total ?? data?.rows?.length ?? 0;
+        setHasRelatedAssets(total > 0);
+        setAssetCheckLoading(false);
+      },
+      fail: () => {
+        if (canceled) return;
+        setHasRelatedAssets(false);
+        setAssetCheckLoading(false);
+      },
+    });
+
+    return () => {
+      canceled = true;
+    };
+  }, [dispatch, selectedField?.fieldId, selectedField?.catalogId, selectedField?.isAllCategory]);
+
   // 处理删除操作
   const handleDelete = () => {
     dispatch({
       type: 'businessFieldMgr/deleteField',
       payload: {
-        catalogId: selectedField?.fieldId || selectedField?.catalogId,
+        catalogId: selectedField?.fieldId ?? selectedField?.catalogId,
       },
       success: () => {
         message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
@@ -137,12 +187,32 @@ const BusinessFieldTree = ({
     {
       key: 'delete',
       label: (
-        <div className={styles.deleteBtn}>
-          <DeleteOutlined />
-          <span style={{ marginLeft: 5 }}>{intl.formatMessage({ id: 'common.delete' })}</span>
-        </div>
+        <Tooltip title={hasRelatedAssets ? intl.formatMessage({ id: 'businessField.deleteDisabledTip' }) : ''}>
+          <Popconfirm
+            title={intl.formatMessage({ id: 'businessField.deleteConfirm' })}
+            disabled={hasRelatedAssets || assetCheckLoading}
+            onConfirm={(e) => {
+              e?.domEvent?.stopPropagation?.();
+              handleDelete();
+            }}
+            onCancel={(e) => {
+              e?.domEvent?.stopPropagation?.();
+            }}
+          >
+            <div
+              className={styles.deleteBtn}
+              onClick={(e) => {
+                e.stopPropagation();
+              }}
+            >
+              <DeleteOutlined />
+              <span style={{ marginLeft: 5 }}>{intl.formatMessage({ id: 'common.delete' })}</span>
+            </div>
+          </Popconfirm>
+        </Tooltip>
       ),
       danger: true,
+      disabled: hasRelatedAssets || assetCheckLoading,
     },
   ];
 
@@ -172,15 +242,7 @@ const BusinessFieldTree = ({
             menu={{
               items: dropdownItems,
               onClick: ({ key }) => {
-                if (key === 'delete') {
-                  confirm({
-                    title: intl.formatMessage({ id: 'businessField.deleteTitle' }),
-                    content: intl.formatMessage({ id: 'businessField.deleteConfirm' }),
-                    onOk: () => {
-                      handleDelete();
-                    },
-                  });
-                } else if (key === 'edit') {
+                if (key === 'edit') {
                   handleEdit();
                 }
               },
