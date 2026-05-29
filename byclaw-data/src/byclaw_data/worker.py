@@ -1782,39 +1782,6 @@ class DataCloudWorker(GatewayWorker):
                 "OntologyAgent not initialized; ensure start_heartbeat() completed"
             )
 
-            # ── 动态路径 Skill 加载：resource_list 里有 SKILL 条目时注入 task_prompt ──
-            _dyn_user_code = str(
-                getattr(getattr(command, "header", None), "user_code", "") or ""
-            ).strip()
-            _dyn_beyond_token = header_metadata.get("Beyond-Token", "")
-            _dyn_skill_task_prompt = _load_skills(
-                resource_list=_resource_list_for_extract,
-                user_code=_dyn_user_code,
-                tools_dict={},  # 动态路径无 AgentConfig，占位符替换跳过
-            )
-            _dyn_minio_root = os.environ.get(
-                "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
-            )
-            _dyn_skill_ws = str(Path(_dyn_minio_root) / f"byclaw-{_dyn_user_code}" / "by")
-            _dyn_extras: dict[str, Any] = {
-                "user_code": _dyn_user_code,
-                "beyond_token": _dyn_beyond_token,
-                "skill_workspace_dir": _dyn_skill_ws,
-            }
-            if _dyn_skill_task_prompt:
-                _dyn_extras["task_prompt"] = _dyn_skill_task_prompt
-                logger.info(
-                    "Skill loaded (dynamic path): session=%s skill_workspace_dir=%s",
-                    context.session_id,
-                    _dyn_skill_ws,
-                )
-            else:
-                logger.info(
-                    "No skill found (dynamic path): session=%s resource_list_len=%d",
-                    context.session_id,
-                    len(_resource_list_for_extract),
-                )
-
             if isinstance(command, ResumeCommand) or _paradigm_resume_value is not None:
                 raw_paradigm = (
                     _paradigm_resume_value
@@ -1834,7 +1801,6 @@ class DataCloudWorker(GatewayWorker):
                     object_codes=_dyn_object_ids,
                     user_code=_get_gateway_user_code(context),
                     session_id=context.session_id,
-                    extras=_dyn_extras,
                 )
             else:
                 latest_user_text_dyn = _latest_user_text_from_content(
@@ -1851,7 +1817,6 @@ class DataCloudWorker(GatewayWorker):
                     thread_id=dyn_thread_id,
                     user_code=_get_gateway_user_code(context),
                     session_id=context.session_id,
-                    extras=_dyn_extras,
                 )
 
             logger.info(
@@ -2259,6 +2224,27 @@ class DataCloudWorker(GatewayWorker):
                     getattr(getattr(command, "header", None), "user_code", "") or ""
                 ).strip()
                 _beyond_token_for_skill = header_metadata.get("Beyond-Token", "")
+                _minio_root = os.environ.get(
+                    "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
+                )
+                _skill_ids_diag = _extract_skill_resource_ids(_resource_list_for_extract)
+                _skill_paths_diag = [
+                    str(
+                        Path(_minio_root)
+                        / f"byclaw-{_user_code_for_skill}"
+                        / "by"
+                        / rid.lstrip("/")
+                        / "SKILL.md"
+                    )
+                    for rid in _skill_ids_diag
+                ]
+                logger.info(
+                    "[skill-diag] session=%s user_code=%s skill_ids=%s skill_paths=%s",
+                    context.session_id,
+                    _user_code_for_skill,
+                    _skill_ids_diag,
+                    _skill_paths_diag,
+                )
                 _skill_task_prompt = _load_skills(
                     resource_list=_resource_list_for_extract,
                     user_code=_user_code_for_skill,
@@ -2266,9 +2252,6 @@ class DataCloudWorker(GatewayWorker):
                 )
                 if _skill_task_prompt:
                     graph_input["prompts_overwrite"]["task_prompt"] = _skill_task_prompt
-                    _minio_root = os.environ.get(
-                        "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
-                    )
                     _skill_ws = str(
                         Path(_minio_root) / f"byclaw-{_user_code_for_skill}" / "by"
                     )
@@ -2276,11 +2259,18 @@ class DataCloudWorker(GatewayWorker):
                         "user_code": _user_code_for_skill,
                         "beyond_token": _beyond_token_for_skill,
                         "skill_workspace_dir": _skill_ws,
+                        "task_prompt": _skill_task_prompt,
                     }
                     logger.info(
                         "Skill loaded: session=%s skill_workspace_dir=%s",
                         context.session_id,
                         _skill_ws,
+                    )
+                else:
+                    logger.warning(
+                        "[skill-diag] skill load returned None: session=%s skill_ids=%s",
+                        context.session_id,
+                        _skill_ids_diag,
                     )
             logger.debug(
                 "[i18n-diag] graph_input.prompts_overwrite set: locale=%r",
