@@ -257,6 +257,17 @@ const sseTypeHandlerMap = new Map<string, (sseDataObj: any, msgEvent?: string) =
   [`${SSEMessageType.thinkStatusTitle}`, thinkStatusTitleHandler],
 ]);
 
+const isResumeContentType = (contentType: SSEMessageType) => {
+  const resumeContentTypes = [SSEMessageType.approvalForm];
+  return contentType && resumeContentTypes.includes(contentType);
+};
+
+const setResumeMessageId = (sseDataObj: any, message: IMessageListItem) => {
+  if (message && isResumeContentType(get(sseDataObj, 'contentType'))) {
+    set(message, 'resumeMessageId', get(sseDataObj, 'orderId'));
+  }
+};
+
 export const answerDeltaHandler = (sseDataObj: any, msgEvent?: string): { message?: Partial<IMessageListItem> } => {
   const contentType = get(sseDataObj, 'contentType');
   if (!contentType) {
@@ -273,7 +284,7 @@ export const answerDeltaHandler = (sseDataObj: any, msgEvent?: string): { messag
     uuid: get(sseDataObj, 'id'),
     orginContent: get(sseDataObj, 'choices.0.delta.content', ''),
   });
-
+  setResumeMessageId(sseDataObj, res.message);
   return res;
 };
 
@@ -316,6 +327,8 @@ export const reasoningLogHandler = (sseDataObj: any, msgEvent?: string) => {
   if (isDone) {
     set(payload, 'message.status', SSEEventStatus.done);
   }
+
+  setResumeMessageId(mySseDataObj, payload.message as IMessageListItem);
 
   return payload;
 };

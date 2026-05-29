@@ -29,6 +29,7 @@ export type IMessageListItem = {
   agentId?: string;
   uuid: string;
   orginContent: string;
+  resumeMessageId?: string;
 };
 
 export type IResComIdsListItem = {

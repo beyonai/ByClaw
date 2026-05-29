@@ -83,7 +83,7 @@ export async function executeViaCallAgent(
     const metadata = {
       ...(input.metadata || {}),
       toolCallId: input.toolCallId,
-    }
+    };
 
     logBaiyingRequest(input.logger, "call_agent.dispatch", {
       resource_id: input.capability.metadata?.resource_id,
@@ -125,7 +125,7 @@ export async function executeViaCallAgent(
     });
 
     const commandPayload = {
-      action_type: "ASK_AGENT",
+      action_type: "CALL_AGENT",
       header: {
         message_id: result.messageId,
         session_id: input.sessionId,

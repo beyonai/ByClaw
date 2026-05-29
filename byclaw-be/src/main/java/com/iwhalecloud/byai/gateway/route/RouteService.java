@@ -189,7 +189,9 @@ public class RouteService {
             runningOutputStreamRegistry.markRunning(ctx);
         }
 
-        String answerMessageId = String.valueOf(ctx.modelAnswerMessageId);
+        String answerMessageId = StringUtils.isNotEmpty(ctx.assistantChatDto.getResumeMessageId())
+            ? ctx.assistantChatDto.getResumeMessageId()
+            : String.valueOf(ctx.modelAnswerMessageId);
         String traceId = ctx.traceId;
 
         String reqMetadata = ctx.assistantChatDto.getMetadata();
