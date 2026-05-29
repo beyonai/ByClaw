@@ -17,8 +17,6 @@ import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
-
-import pytest
 from byclaw_data.worker import (
     _extract_skill_resource_ids,
     _load_skills,
