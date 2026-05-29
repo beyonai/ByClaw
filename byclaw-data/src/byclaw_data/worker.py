@@ -2262,16 +2262,25 @@ class DataCloudWorker(GatewayWorker):
                     _skill_ws = str(
                         Path(_minio_root) / f"byclaw-{_user_code_for_skill}" / "by"
                     )
+                    # skill_dir：skill 目录的绝对路径，供 execute 工具注入 SKILL_DIR 环境变量
+                    _skill_dir = (
+                        str(Path(_skill_ws) / _skill_ids_diag[0].lstrip("/"))
+                        if _skill_ids_diag
+                        else _skill_ws
+                    )
                     config["configurable"]["extras"] = {
                         "user_code": _user_code_for_skill,
                         "beyond_token": _beyond_token_for_skill,
                         "skill_workspace_dir": _skill_ws,
+                        "skill_dir": _skill_dir,
                         "task_prompt": _skill_task_prompt,
+                        "agent_id": str(by_agent_id or ""),
                     }
                     logger.info(
-                        "Skill loaded: session=%s skill_workspace_dir=%s",
+                        "Skill loaded: session=%s skill_workspace_dir=%s skill_dir=%s",
                         context.session_id,
                         _skill_ws,
+                        _skill_dir,
                     )
                 else:
                     logger.warning(
