@@ -72,3 +72,7 @@ byclaw-data/resource/import_package_owl_onto_bak/
 
 # Vscode
 .vscode/
+
+# Docker build artifacts
+**/build-info.json
+.trivyignore

@@ -2,7 +2,7 @@
 import React, { useState, useCallback } from 'react';
 import classnames from 'classnames';
 
-import { get, keys, set, isString, isNil } from 'lodash';
+import { get, keys, set, isString, isNil, concat } from 'lodash';
 import { Form, Button, Input, Select, Col, Row, Space, Dropdown, Tag } from 'antd';
 import { InfoCircleOutlined } from '@ant-design/icons';
 // @ts-ignore
@@ -27,7 +27,7 @@ export type IForm = {
   defaultValue: string;
   description: string;
   optional: string;
-  fieldValue?: string | number;
+  fieldValue?: string | number | Array<string | number>;
 
   requestType: number;
   fieldType: string;
@@ -74,17 +74,32 @@ export type IMessageListItemContent = {
 
 export type IProps = {
   message: IMessage;
-  messageListItem: IMessageListItem;
   updateMessageListItemContent: (messageListItemContent: IMessageListItemContent) => void;
   messageListItemContent: IMessageListItemContent;
-  thinkListItem?: any[];
+
+  messageListItem?: IMessageListItem;
+  thinkListItem?: IMessageListItem;
+
   messageIdx: number;
 };
 
 const { TextArea } = Input;
 
 function getArrayFieldValues(children: Array<IForm[]>) {
-  return children.flat().map((child) => `${child.fieldName}：${child.fieldValue ?? ''}`);
+  return children.flat().map((child) => {
+    let selectName = child.fieldValue ?? child.defaultValue;
+
+    if (Array.isArray(child?.options)) {
+      selectName = concat([], child?.fieldValue)
+        .map((item) => {
+          const target = child.options?.find((option) => option.value === item);
+          return target?.label ?? item;
+        })
+        .join('、');
+    }
+
+    return `${child.fieldName}：${selectName ?? ''}`;
+  });
 }
 
 type FormFieldsRenderProps = {
@@ -129,7 +144,7 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
 
   let name: string | undefined = key;
   let rules: { required: boolean | undefined }[] | undefined = [{ required }];
-  let initialValue: string | number | undefined = fieldValue ?? defaultValue;
+  let initialValue: string | number | (string | number)[] | undefined = fieldValue ?? defaultValue;
   let comp = <Input disabled={myDisabled} />;
 
   if (['array', 'object'].includes(formType) && Array.isArray(children)) {
@@ -192,7 +207,7 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
   }
 
   if (formType === 'term_select') {
-    comp = <TermSelectDropdown item={item} disabled={myDisabled} />;
+    comp = <TermSelectDropdown item={item} disabled={myDisabled} isMultiple={isMultiple} />;
   }
 
   if (formType === 'textarea') {
@@ -247,9 +262,10 @@ function FormFieldsRender(props: FormFieldsRenderProps) {
 }
 
 function ApprovalForm(props: IProps) {
-  const { messageListItemContent, message, messageListItem } = props;
+  const { messageListItemContent, message, messageListItem, thinkListItem } = props;
 
-  const { uuid, orginContent } = messageListItem;
+  const { uuid, orginContent } = messageListItem || thinkListItem || {};
+
   const { messageId } = message;
   const {
     substance = [],
@@ -269,6 +285,9 @@ function ApprovalForm(props: IProps) {
   // 是否显示按钮
   const [isDisable, setIsDisableBtn] = useState<boolean>(!isNil(confirmed));
 
+  const isThinkingProcess = !!props.thinkListItem;
+  const updateField = isThinkingProcess ? 'inferLog' : 'messageStruct';
+
   const myUpdateMessageStructById = useCallback(
     (newOrginContent: Record<string, unknown>) => {
       let contentStr;
@@ -282,9 +301,10 @@ function ApprovalForm(props: IProps) {
         id: uuid,
         messageId,
         content: contentStr,
+        updateField,
       });
     },
-    [uuid, messageId]
+    [uuid, messageId, updateField]
   );
 
   const myToApproveForm = async (confirmed: boolean) => {
@@ -301,7 +321,7 @@ function ApprovalForm(props: IProps) {
 
     let myOrginContent = {};
     try {
-      myOrginContent = JSON.parse(orginContent);
+      myOrginContent = JSON.parse(orginContent || '');
       set(myOrginContent, 'rule', substance);
     } catch (e) {
       console.error(e);
@@ -336,6 +356,8 @@ function ApprovalForm(props: IProps) {
             query: queryQuestion,
             language: getLocale(),
           },
+          llmMessageId: messageId,
+          traceId: message.traceId,
         },
         msgOpt: {
           answerMsg: {

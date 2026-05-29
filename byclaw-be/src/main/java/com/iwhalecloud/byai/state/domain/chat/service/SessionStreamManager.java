@@ -141,7 +141,10 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
 
         // 清理 OutputStreamManager 中的上下文（确保不残留）
         OutputStreamManager outputStreamManager = applicationContext.getBean(OutputStreamManager.class);
-        outputStreamManager.removeContext(sessionId);
+        ChatProcessContext ctx = outputStreamManager.removeContext(sessionId);
+        RunningOutputStreamRegistry runningOutputStreamRegistry =
+            applicationContext.getBean(RunningOutputStreamRegistry.class);
+        runningOutputStreamRegistry.releaseIfOwner(ctx);
     }
 
     /**

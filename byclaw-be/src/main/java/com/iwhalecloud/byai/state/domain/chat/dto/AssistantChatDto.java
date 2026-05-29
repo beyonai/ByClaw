@@ -194,4 +194,9 @@ public class AssistantChatDto {
      */
     private String sourceAgentType;
 
+    /**
+     * 响应流跟踪ID
+     */
+    private String traceId;
+
 }

@@ -178,6 +178,10 @@ function useHandler(props: IProps) {
     (onionsProps: IOnionsProps) => {
       const { sseRes, sseMsg, newAnswerMsg } = onionsProps;
 
+      if (sseRes.traceId) {
+        newAnswerMsg.traceId = sseRes.traceId;
+      }
+
       if (!sseRes.message) return onionsProps;
 
       const { message } = sseRes;

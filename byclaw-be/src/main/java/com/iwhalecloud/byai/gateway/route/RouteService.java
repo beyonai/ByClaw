@@ -42,6 +42,7 @@ import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
+import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
 import com.iwhalecloud.byai.state.domain.chat.service.ScriptService;
 import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentTypeResolver;
@@ -74,6 +75,9 @@ public class RouteService {
 
     @Autowired
     private OutputStreamManager outputStreamManager;
+
+    @Autowired
+    private RunningOutputStreamRegistry runningOutputStreamRegistry;
 
     @Autowired
     private SequenceService sequenceService;
@@ -171,18 +175,22 @@ public class RouteService {
         // 处理 content 中的资源占位符替换，如 {{DIG_EMPLOYEE_10812779}} 替换为 @xxxxx
         content = replaceResourcePlaceholders(content, resourceList);
 
-        // 初始化事件队列，Redis 监听器投入，请求线程消费
-        ctx.gatewayEventQueue = new LinkedBlockingQueue<>();
+        if (!ctx.sendByFrameworkMsgOnly) {
+            // 初始化事件队列，Redis 监听器投入，请求线程消费
+            ctx.gatewayEventQueue = new LinkedBlockingQueue<>();
 
-        // 缓存上下文，供 Redis 监听器查找
-        outputStreamManager.putContext(sessionId, ctx);
+            // 缓存上下文，供 Redis 监听器查找
+            outputStreamManager.putContext(sessionId, ctx);
 
-        // 先启动监听器：使用 XREAD 轮询，从锚点（Stream 当前最新消息 ID）之后读取，避免消费旧消息
-        sessionStreamManager.startSessionListener(sessionId, ctx);
+            // 先启动监听器：使用 XREAD 轮询，从锚点（Stream 当前最新消息 ID）之后读取，避免消费旧消息
+            sessionStreamManager.startSessionListener(sessionId, ctx);
 
-        String userMessageId = String.valueOf(ctx.userMessageId);
+            // 记录运行中的 OutputStream，用于分布式场景下判断 RESUME 是否可复用旧监听任务
+            runningOutputStreamRegistry.markRunning(ctx);
+        }
+
         String answerMessageId = String.valueOf(ctx.modelAnswerMessageId);
-        String traceId = userMessageId + "_" + answerMessageId;
+        String traceId = ctx.traceId;
 
         String reqMetadata = ctx.assistantChatDto.getMetadata();
 
@@ -202,8 +210,13 @@ public class RouteService {
                     ctx
             );
         } catch (Exception e) {
-            sessionStreamManager.stopSessionListener(sessionId);
+            if (!ctx.sendByFrameworkMsgOnly) {
+                sessionStreamManager.stopSessionListener(sessionId);
+            }
             throw e;
+        }
+        if (ctx.sendByFrameworkMsgOnly) {
+            return;
         }
 
         log.info("Gateway SDK 消息发送成功, messageId: {}, targetWorker: {}, sessionId: {}, content: {}",
@@ -562,6 +575,7 @@ public class RouteService {
     private String buildEventData(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata) {
         String eventData = dataJson.getString("data");
         String sourceAgentType = dataJson.getString("source_agent_type");
+        String traceId = dataJson.getString("trace_id");
         String sessionId = String.valueOf(ctx.sessionId);
         String userMessageId = String.valueOf(ctx.userMessageId);
         if (eventData == null) {
@@ -579,6 +593,7 @@ public class RouteService {
             if (dataObj != null) {
                 dataObj.put("sourceAgentType", sourceAgentType);
                 dataObj.put("sessionId", sessionId);
+                dataObj.put("traceId", traceId);
                 if (metadata != null && !metadata.isEmpty()) {
                     dataObj.put("metadata", metadata.toJSONString());
                 }

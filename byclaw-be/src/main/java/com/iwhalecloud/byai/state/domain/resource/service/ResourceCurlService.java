@@ -34,8 +34,12 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -70,6 +74,8 @@ public class ResourceCurlService {
     private static final String CURL_GENERATE_SOURCE_LLM = "LLM";
 
     private static final Pattern URL_PATTERN = Pattern.compile("https?://[^\\s\"'<>]+", Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern TEMPLATE_PLACEHOLDER_PATTERN = Pattern.compile("\\$\\{[^}]+}");
 
     private static final Set<String> TOOL_CURL_BIZ_TYPES = Set.of(ResourceBizType.TOOL.getCode(),
         ResourceBizType.TOOLKIT.getCode(), ResourceBizType.MCP.getCode(), ResourceBizType.AGENT.getCode());
@@ -106,6 +112,9 @@ public class ResourceCurlService {
 
     @Autowired
     private JwtService jwtService;
+
+    @Value("${HOST:}")
+    private String host;
 
     public CurlParseResult parseCurl(String curlCommand) {
         ParsedCurl parsed = CurlParser.parse(curlCommand);
@@ -196,8 +205,13 @@ public class ResourceCurlService {
     public ResourceCurlRunResult runValidationToolkitTool(String sourceContent) {
         String curl = tryBuildConnectivityValidationCurlByRule(sourceContent);
         if (StringUtils.isBlank(curl)) {
-            throw new IllegalArgumentException(I18nUtil.get(
-                "resource.json.connectivity.validation.toolkit.curl.build.failed"));
+            return skippedValidationResult(I18nUtil.get(
+                "resource.json.connectivity.validation.toolkit.readonly.notfound"));
+        }
+        curl = resolveTemplatePlaceholders(curl);
+        if (containsTemplatePlaceholder(curl)) {
+            return skippedValidationResult(I18nUtil.get(
+                "resource.json.connectivity.validation.toolkit.placeholder.url"));
         }
         return runRawResourceCurl(ResourceBizType.TOOLKIT.getCode(), sourceContent, curl);
     }
@@ -241,6 +255,15 @@ public class ResourceCurlService {
         content.setSourceContent(sourceContent);
         content.setTargetContent(sourceContent);
         return runCurl(content, curl, RESOURCE_JSON_VALIDATION_HTTP_CLIENT);
+    }
+
+    private ResourceCurlRunResult skippedValidationResult(String reason) {
+        ResourceCurlRunResult result = new ResourceCurlRunResult();
+        result.setSuccess(true);
+        result.setStatusCode(0);
+        result.setBody(StringUtils.defaultString(reason));
+        result.setDurationMs(0L);
+        return result;
     }
 
     private ResourceCurlRunResult runCurl(ResourceCurlContent content, String curl, OkHttpClient httpClient) {
@@ -359,7 +382,14 @@ public class ResourceCurlService {
         }
         JSONObject openApi = root.getJSONObject("openAPI");
         if (openApi != null) {
+            if (preferReadOnlyOperation && !hasReadOnlyOperation(openApi)) {
+                return null;
+            }
             return openApi;
+        }
+        JSONObject pluginMachineOpenApi = resolveOpenApiFromPluginMachineInfo(root, preferReadOnlyOperation);
+        if (pluginMachineOpenApi != null) {
+            return pluginMachineOpenApi;
         }
         JSONArray tools = root.getJSONArray("tools");
         if (tools != null && !tools.isEmpty()) {
@@ -377,9 +407,31 @@ public class ResourceCurlService {
                     return toolOpenApi;
                 }
             }
-            return fallback;
+            return preferReadOnlyOperation ? null : fallback;
         }
         return null;
+    }
+
+    private JSONObject resolveOpenApiFromPluginMachineInfo(JSONObject root, boolean preferReadOnlyOperation) {
+        JSONArray pluginMachineInfo = root == null ? null : root.getJSONArray("pluginMachineInfo");
+        if (pluginMachineInfo == null || pluginMachineInfo.isEmpty()) {
+            return null;
+        }
+        JSONObject fallback = null;
+        for (int i = 0; i < pluginMachineInfo.size(); i++) {
+            JSONObject machineInfo = pluginMachineInfo.getJSONObject(i);
+            JSONObject openApi = machineInfo == null ? null : machineInfo.getJSONObject("pluginMachineOpenAPI");
+            if (openApi == null || openApi.isEmpty()) {
+                continue;
+            }
+            if (fallback == null) {
+                fallback = openApi;
+            }
+            if (preferReadOnlyOperation && hasReadOnlyOperation(openApi)) {
+                return openApi;
+            }
+        }
+        return preferReadOnlyOperation ? null : fallback;
     }
 
     private String tryBuildSimpleResourceServiceCurl(JSONObject root, boolean preferReadOnlyOperation) {
@@ -418,7 +470,7 @@ public class ResourceCurlService {
                 return service;
             }
         }
-        return fallback;
+        return preferReadOnlyOperation ? null : fallback;
     }
 
     private boolean isReadOnlySimpleService(JSONObject service) {
@@ -601,7 +653,78 @@ public class ResourceCurlService {
                 }
             }
         }
-        return fallback;
+        return preferReadOnlyOperation ? null : fallback;
+    }
+
+    private boolean containsTemplatePlaceholder(String value) {
+        return TEMPLATE_PLACEHOLDER_PATTERN.matcher(StringUtils.defaultString(value)).find();
+    }
+
+    private String resolveTemplatePlaceholders(String value) {
+        String resolved = StringUtils.defaultString(value);
+        if (!resolved.contains("${HOST}")) {
+            return resolved;
+        }
+        String host = resolveConnectivityValidationHost();
+        if (StringUtils.isBlank(host)) {
+            return resolved;
+        }
+        return resolved.replace("${HOST}", host);
+    }
+
+    private String resolveConnectivityValidationHost() {
+        String configuredHost = normalizeHost(host);
+        if (StringUtils.isNotBlank(configuredHost)) {
+            return configuredHost;
+        }
+        HttpServletRequest request = currentHttpServletRequest();
+        if (request == null) {
+            return "";
+        }
+        String forwardedHost = firstHeaderValue(request.getHeader("X-Forwarded-Host"));
+        String host = normalizeHost(forwardedHost);
+        if (StringUtils.isNotBlank(host)) {
+            return host;
+        }
+        host = normalizeHost(request.getHeader("Host"));
+        if (StringUtils.isNotBlank(host)) {
+            return host;
+        }
+        return normalizeHost(request.getServerName());
+    }
+
+    private HttpServletRequest currentHttpServletRequest() {
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
+            return attributes.getRequest();
+        }
+        return null;
+    }
+
+    private String firstHeaderValue(String value) {
+        String trimmed = StringUtils.trimToEmpty(value);
+        int commaIndex = trimmed.indexOf(',');
+        return commaIndex < 0 ? trimmed : StringUtils.trimToEmpty(trimmed.substring(0, commaIndex));
+    }
+
+    private String normalizeHost(String host) {
+        String normalized = StringUtils.trimToEmpty(host);
+        if (StringUtils.isBlank(normalized)) {
+            return "";
+        }
+        if (normalized.startsWith("http://") || normalized.startsWith("https://")) {
+            try {
+                return StringUtils.defaultString(URI.create(normalized).getHost());
+            }
+            catch (Exception e) {
+                return "";
+            }
+        }
+        if (normalized.startsWith("[")) {
+            int endBracketIndex = normalized.indexOf(']');
+            return endBracketIndex > 0 ? normalized.substring(1, endBracketIndex) : normalized;
+        }
+        int colonIndex = normalized.indexOf(':');
+        return colonIndex < 0 ? normalized : normalized.substring(0, colonIndex);
     }
 
     private boolean hasReadOnlyOperation(JSONObject openApi) {

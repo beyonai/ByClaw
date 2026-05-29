@@ -11,7 +11,6 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
-import com.iwhalecloud.byai.common.storage.impl.MinioStorageService;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.util.DateUtils;
 import com.iwhalecloud.byai.common.util.StringUtil;
@@ -25,7 +24,6 @@ import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
-import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.resource.DigEmployeeExtQo;
 import com.iwhalecloud.byai.state.common.dto.MessageStructDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.FileUploadDto;
@@ -257,9 +255,32 @@ public class AssistantChatApplicationService {
 
         ByaiMessage byaiMessage = byaiMessageHotService.find(messageStructDto.getMessageId());
 
-        String messageStruct = byaiMessage.getMessageStruct();
+        // 判断是更新消息结构还是更新思考过程
+        if ("inferLog".equalsIgnoreCase(messageStructDto.getUpdateField())) {
+            String inferLog = byaiMessage.getInferLog();
+            byaiMessage.setInferLog(this.replaceContent(inferLog, messageStructDto));
+        }
+        else {
+            String messageStruct = byaiMessage.getMessageStruct();
+            byaiMessage.setMessageStruct(this.replaceContent(messageStruct, messageStructDto));
+        }
+
+        byaiMessageHotService.update(byaiMessage);
+
+        return byaiMessage;
+    }
+
+    /**
+     * 替换数组结构
+     *
+     * @param messageStruct 消息结构
+     * @param messageStructDto 消息更新入参
+     * @return String
+     */
+    private String replaceContent(String messageStruct, MessageStructDto messageStructDto) {
+
         if (StringUtil.isEmpty(messageStruct)) {
-            return byaiMessage;
+            return messageStruct;
         }
 
         JSONArray jsonArray = JSON.parseArray(messageStruct);
@@ -278,10 +299,6 @@ public class AssistantChatApplicationService {
                 }
             }
         }
-
-        byaiMessage.setMessageStruct(jsonArray.toJSONString());
-        byaiMessageHotService.update(byaiMessage);
-
-        return byaiMessage;
+        return jsonArray.toJSONString();
     }
 }

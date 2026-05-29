@@ -11,26 +11,54 @@ import type { IForm } from './index';
 
 type IProps = {
   item: IForm;
-  value?: string | number;
+  value?: TermValue | TermValue[];
   disabled?: boolean;
-  onChange?: (value?: string | number) => void;
+  isMultiple?: boolean;
+  onChange?: (value?: TermValue | TermValue[]) => void;
 };
+
+type TermValue = string | number;
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 10;
 
 function TermSelectDropdown(props: IProps) {
-  const { item, value, disabled, onChange } = props;
+  const { item, value, disabled, isMultiple = false, onChange } = props;
 
   const [open, setOpen] = useState(false);
   const [keyword, setKeyword] = useState(item.keyword || '');
   const [, forceUpdate] = useState(0);
 
   const options = item.options || [];
-  const selectedOption = useMemo(() => {
-    return options.find((option) => option.value === value);
-  }, [options, value]);
-  const displayValue = selectedOption?.label || value || '';
+  const selectedValues = useMemo<TermValue[]>(() => {
+    if (isMultiple) {
+      if (Array.isArray(value)) {
+        return value;
+      }
+
+      return value === undefined || value === null || value === '' ? [] : [value];
+    }
+
+    if (Array.isArray(value)) {
+      return [];
+    }
+
+    return value === undefined || value === null || value === '' ? [] : [value];
+  }, [isMultiple, value]);
+  const selectedOptions = useMemo(() => {
+    return options.filter((option) => selectedValues.includes(option.value));
+  }, [options, selectedValues]);
+  const displayValue = useMemo<string>(() => {
+    if (isMultiple) {
+      return selectedOptions.map((option) => `${option.label}(${option.value})`).join('、');
+    }
+
+    if (selectedOptions[0]) {
+      return `${selectedOptions[0].label}(${selectedOptions[0].value})`;
+    }
+
+    return Array.isArray(value) ? '' : `${value || ''}`;
+  }, [isMultiple, selectedOptions, value]);
   const hasMore = !!item.hasMore;
 
   const refresh = () => {
@@ -105,9 +133,19 @@ function TermSelectDropdown(props: IProps) {
       <div className={styles.termSelectList} onScroll={handlePopupScroll}>
         {options.map((option) => (
           <div
-            className={option.value === value ? styles.termSelectOptionActive : styles.termSelectOption}
+            className={selectedValues.includes(option.value) ? styles.termSelectOptionActive : styles.termSelectOption}
             key={option.value}
             onClick={() => {
+              if (isMultiple) {
+                const nextValue = selectedValues.includes(option.value)
+                  ? selectedValues.filter((selectedValue) => selectedValue !== option.value)
+                  : [...selectedValues, option.value];
+
+                item.fieldValue = nextValue;
+                onChange?.(nextValue);
+                return;
+              }
+
               item.fieldValue = option.value;
               onChange?.(option.value);
               setOpen(false);

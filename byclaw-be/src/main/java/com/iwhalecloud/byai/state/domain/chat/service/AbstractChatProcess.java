@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.io.OutputStream;
 
+import com.iwhaleai.byai.framework.core.protocol.ActionType;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 
 /**
@@ -39,6 +40,10 @@ public abstract class AbstractChatProcess {
 
             // 使用gateway sdk模式
             handleGatewayMode(context);
+
+            if (context.sendByFrameworkMsgOnly) {
+                return;
+            }
 
             long time03 = System.currentTimeMillis();
             storeMessage(context);
