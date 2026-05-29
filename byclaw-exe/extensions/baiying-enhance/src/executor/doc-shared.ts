@@ -439,17 +439,8 @@ export async function pollDocResult(params: {
         if (asString(msg.session_id) !== params.sessionId) continue;
         const msgTraceId = asString(msg.trace_id);
         if (params.traceId && msgTraceId && msgTraceId !== params.traceId) continue;
-        if (params.toolCallId) {
-          let { metadata } = msg as { metadata: Dict };
-          if (typeof metadata === "string") {
-            try {
-              metadata = JSON.parse(metadata) as Dict;
-            } catch {
-              continue;
-            }
-          }
-          if (metadata.toolCallId !== params.toolCallId) continue;
-        }
+        const msgMessageId = asString(msg.message_id);
+        if (params.messageId && msgMessageId && msgMessageId !== params.messageId) continue;
 
         const eventType = asString(msg.event_type);
         const stateMsg = asString(msg.state_msg);
@@ -509,7 +500,7 @@ export async function pollDocResult(params: {
     event_type: terminalEventType,
     text: aggregatedText,
     terminal_text: terminalText,
-    delta_text: delta,
+    // delta_text: delta,
     raw_message: terminalMsg,
     matched_stream_id: terminalStreamId,
     stream_name: streamName,

@@ -36,7 +36,7 @@ type StepStatus = 'wait' | 'process' | 'finish' | 'error';
 
 function ApprovalForm(props: IProps) {
   const { messageListItemContent, message, messageListItem, thinkListItem } = props;
-  const { uuid, orginContent } = messageListItem || thinkListItem || {};
+  const { uuid, orginContent, resumeMessageId } = messageListItem || thinkListItem || {};
 
   const { messageId } = message;
   const {
@@ -180,6 +180,7 @@ function ApprovalForm(props: IProps) {
         payload: {
           actionType: 'RESUME',
           sourceAgentType,
+          resumeMessageId,
           extParams: {
             humanInput: {
               operationForm,
