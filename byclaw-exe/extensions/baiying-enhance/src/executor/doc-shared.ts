@@ -365,6 +365,7 @@ export async function pollDocResult(params: {
    * Defaults to 1500ms.
    */
   postTerminalDrainMs?: number;
+  toolCallId?: string;
 }): Promise<DocPollResult> {
   const start = Date.now();
   const streamName = params.streamName ?? `byai_gateway:session:${params.sessionId}:data_stream`;
@@ -438,6 +439,17 @@ export async function pollDocResult(params: {
         if (asString(msg.session_id) !== params.sessionId) continue;
         const msgTraceId = asString(msg.trace_id);
         if (params.traceId && msgTraceId && msgTraceId !== params.traceId) continue;
+        if (params.toolCallId) {
+          let { metadata } = msg as { metadata: Dict };
+          if (typeof metadata === "string") {
+            try {
+              metadata = JSON.parse(metadata) as Dict;
+            } catch {
+              continue;
+            }
+          }
+          if (metadata.toolCallId !== params.toolCallId) continue;
+        }
 
         const eventType = asString(msg.event_type);
         const stateMsg = asString(msg.state_msg);

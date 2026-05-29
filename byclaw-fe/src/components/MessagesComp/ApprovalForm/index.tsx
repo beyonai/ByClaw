@@ -180,10 +180,10 @@ function ApprovalForm(props: IProps) {
         payload: {
           actionType: 'RESUME',
           sourceAgentType,
+          metadata: metadataObj,
           extParams: {
             humanInput: {
               operationForm,
-              metadata: metadataObj,
             },
             query: queryQuestion,
             language: getLocale(),
