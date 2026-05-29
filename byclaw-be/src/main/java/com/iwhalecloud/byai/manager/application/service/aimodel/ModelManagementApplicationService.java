@@ -17,10 +17,12 @@ import com.iwhalecloud.byai.manager.entity.aimodel.ByaiAimodel;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.common.exception.BaseException;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.util.JsonUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.manager.mapper.resource.SsResExtDigEmployeeMapper;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.HashMap;
@@ -51,6 +53,9 @@ public class ModelManagementApplicationService {
 
     @Autowired
     private ByaiTagRelationService byaiTagRelationService;
+
+    @Autowired
+    private SsResExtDigEmployeeMapper ssResExtDigEmployeeMapper;
 
     /**
      * 分页列表（列表仅返回 apiTokenMasked，不返回明文 apiToken）
@@ -138,9 +143,7 @@ public class ModelManagementApplicationService {
         if (entity == null) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40004, "aimodel.not.found");
         }
-        if (ModelStatusEnum.isEnabledDb(entity.getStatus())) {
-            throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.delete.enabled.forbidden");
-        }
+        validateModelNotUsedByActiveDigitalEmployee(modelId, "aimodel.delete.digital.employee.in.use");
         byaiAimodelDomainService.deleteById(modelId);
         return Boolean.TRUE;
     }
@@ -158,8 +161,24 @@ public class ModelManagementApplicationService {
         if (!ModelStatusEnum.ENABLED.name().equals(status) && !ModelStatusEnum.DISABLED.name().equals(status)) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.status.invalid");
         }
+        if (ModelStatusEnum.DISABLED.name().equals(status)) {
+            validateModelNotUsedByActiveDigitalEmployee(modelId, "aimodel.disable.digital.employee.in.use");
+        }
         byaiAimodelDomainService.setStatus(modelId, status);
         return Boolean.TRUE;
+    }
+
+    private void validateModelNotUsedByActiveDigitalEmployee(Long modelId, String messageKey) {
+        List<String> employeeNames = ssResExtDigEmployeeMapper.selectDigitalEmployeeNamesByModelId(modelId);
+        if (CollectionUtils.isEmpty(employeeNames)) {
+            return;
+        }
+        String employeeNameText = employeeNames.stream()
+            .filter(StringUtil::isNotEmpty)
+            .distinct()
+            .collect(Collectors.joining("、"));
+        throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001,
+            I18nUtil.get(messageKey, employeeNameText));
     }
 
     /**

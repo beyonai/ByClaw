@@ -883,7 +883,7 @@ const EmployeeDetail = ({ loading }) => {
         // 获取模型下拉列表、设置配置默认值
         dispatch({
           type: 'employeeMgr/getModelList',
-          payload: { tagId: '1' },
+          payload: { tagId: '3' },
           success: (res) => {
             if (!prologue?.modelInfo) {
               setModelName(res?.[0]?.modelName ?? '');
@@ -902,7 +902,7 @@ const EmployeeDetail = ({ loading }) => {
     } else {
       dispatch({
         type: 'employeeMgr/getModelList',
-        payload: { tagId: '1' },
+        payload: { tagId: '3' },
         success: (res) => {
           setModelName(res?.[0]?.modelName ?? '');
           prologueRef.current = {

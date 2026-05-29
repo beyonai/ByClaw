@@ -345,6 +345,15 @@ export default {
   'modelMgr.emptyTitle': 'No models to display yet',
   'modelMgr.emptyDesc': 'Create a model first, or reset the filters to review existing records.',
 
+  // Model Management Error Messages
+  'modelMgr.error.requestFail': 'Request failed',
+  'modelMgr.error.getModelListFail': 'Failed to fetch model list',
+  'modelMgr.error.getModelDetailFail': 'Failed to fetch model detail',
+  'modelMgr.error.saveModelFail': 'Failed to save model',
+  'modelMgr.error.updateModelStatusFail': 'Failed to update model status',
+  'modelMgr.error.deleteModelFail': 'Failed to delete model',
+  'modelMgr.error.debugModelFail': 'Model debug failed',
+
   // Model Management - Edit/Debug Modal
   'modelMgr.modal.editTitle': 'Edit model',
   'modelMgr.modal.debugTitle': 'Model debug',
