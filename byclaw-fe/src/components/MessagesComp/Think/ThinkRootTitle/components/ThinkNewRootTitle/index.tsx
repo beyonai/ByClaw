@@ -166,7 +166,7 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
 
     return (
       <div
-        className={classnames({
+        className={classnames('ub-f1', {
           [styles.childItemBigSmartOffice]: isBigSmartOffice,
         })}
         style={{ maxWidth: '100%' }}
@@ -269,15 +269,18 @@ function ThinkNewRootTitle(props: IProps) {
           updateMessageListItemNewContent={updateMessageListItemContent}
         >
           {treeNode?.children?.map?.((item: NewIMessageListItem, index: number) => {
-            if ([
-              `${SSEMessageType.thinkTaskExecute}`,
-              `${SSEMessageType.thinkTaskPrepare}`,
-              `${SSEMessageType.thinkTaskResult}`
-            ].includes(`${item.contentType}`)) {
+            if (
+              [
+                `${SSEMessageType.thinkTaskExecute}`,
+                `${SSEMessageType.thinkTaskPrepare}`,
+                `${SSEMessageType.thinkTaskResult}`,
+              ].includes(`${item.contentType}`)
+            ) {
               return (
                 <div
                   key={`${msgId}_item_${index}`}
-                  className={classnames(styles.childItem, styles.childItemILF, 'overflow-hidden')}>
+                  className={classnames(styles.childItem, styles.childItemILF, 'overflow-hidden')}
+                >
                   <CollapsibleItem
                     item={item}
                     message={message}
@@ -289,7 +292,10 @@ function ThinkNewRootTitle(props: IProps) {
             }
 
             return (
-              <div key={`${msgId}_item_${index}`} className={classnames(styles.childItem, 'overflow-hidden full-width')}>
+              <div
+                key={`${msgId}_item_${index}`}
+                className={classnames(styles.childItem, 'overflow-hidden full-width')}
+              >
                 <CollapsibleItem
                   item={item}
                   message={message}
