@@ -9,6 +9,10 @@ import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
+import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
+
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.storage.UserFS;
@@ -188,6 +192,36 @@ class ByClawSkillUploadApplicationServiceTest {
     }
 
     @Test
+    void shouldAcceptTarGzSkillArchive() {
+        MultipartFile tarGz = buildTarGz("content-factory.tar.gz",
+            "content-factory/SKILL.md", "# content factory",
+            "content-factory/scripts/main.py", "print('hi')");
+        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, tarGz);
+
+        assertEquals("content-factory", dto.getSkillName());
+        assertEquals(AGENT_PREFIX + "content-factory", dto.getSkillPath());
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "content-factory/SKILL.md"));
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "content-factory/scripts/main.py"));
+    }
+
+    @Test
+    void shouldFallbackSkillNameToTarGzNameWhenSkillDocAtRoot() {
+        MultipartFile tarGz = buildTarGz("root-skill.tar.gz",
+            "SKILL.md", "# root",
+            "scripts/run.py", "print('hi')");
+        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, tarGz);
+
+        assertEquals("root-skill", dto.getSkillName());
+        verify(userFS).delete(AGENT_PREFIX + "root-skill/");
+    }
+
+    @Test
     void shouldSilentlySkipPathTraversalEntry() {
         // 路径穿越静默忽略而不是抛错；只要 SKILL.md 唯一即可上传成功。
         MultipartFile zip = buildZip("skill.zip",
@@ -264,5 +298,29 @@ class ByClawSkillUploadApplicationServiceTest {
             throw new IllegalStateException(e);
         }
         return new MockMultipartFile("file", filename, "application/zip", buf.toByteArray());
+    }
+
+    private MultipartFile buildTarGz(String filename, String... entries) {
+        if (entries.length % 2 != 0) {
+            throw new IllegalArgumentException("entries 必须成对");
+        }
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        try (GzipCompressorOutputStream gzipOut = new GzipCompressorOutputStream(buf);
+            TarArchiveOutputStream tos = new TarArchiveOutputStream(gzipOut)) {
+            tos.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX);
+            for (int i = 0; i < entries.length; i += 2) {
+                byte[] content = entries[i + 1].getBytes();
+                TarArchiveEntry entry = new TarArchiveEntry(entries[i]);
+                entry.setSize(content.length);
+                tos.putArchiveEntry(entry);
+                tos.write(content);
+                tos.closeArchiveEntry();
+            }
+            tos.finish();
+        }
+        catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        return new MockMultipartFile("file", filename, "application/gzip", buf.toByteArray());
     }
 }

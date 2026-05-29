@@ -15,6 +15,7 @@ import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
+import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
 import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentTypeResolver;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
@@ -46,6 +47,7 @@ class RouteServiceTest {
     private SessionStreamManager sessionStreamManager;
     private SandboxService sandboxService;
     private OutputStreamManager outputStreamManager;
+    private RunningOutputStreamRegistry runningOutputStreamRegistry;
     private SequenceService sequenceService;
     private JwtService jwtService;
     private TargetAgentTypeResolver targetAgentTypeResolver;
@@ -59,6 +61,7 @@ class RouteServiceTest {
         sessionStreamManager = mock(SessionStreamManager.class);
         sandboxService = mock(SandboxService.class);
         outputStreamManager = mock(OutputStreamManager.class);
+        runningOutputStreamRegistry = mock(RunningOutputStreamRegistry.class);
         sequenceService = mock(SequenceService.class);
         jwtService = mock(JwtService.class);
         targetAgentTypeResolver = new TargetAgentTypeResolver();
@@ -79,6 +82,7 @@ class RouteServiceTest {
         ReflectionTestUtils.setField(routeService, "sessionStreamManager", sessionStreamManager);
         ReflectionTestUtils.setField(routeService, "sandboxService", sandboxService);
         ReflectionTestUtils.setField(routeService, "outputStreamManager", outputStreamManager);
+        ReflectionTestUtils.setField(routeService, "runningOutputStreamRegistry", runningOutputStreamRegistry);
         ReflectionTestUtils.setField(routeService, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(routeService, "jwtService", jwtService);
         ReflectionTestUtils.setField(routeService, "targetAgentTypeResolver", targetAgentTypeResolver);
@@ -257,6 +261,7 @@ class RouteServiceTest {
         ctx.setSessionId(3L);
         ctx.setUserMessageId(1L);
         ctx.setModelAnswerMessageId(2L);
+        ctx.setTraceId("1_2");
         ctx.setParams(new HashMap<>());
         ctx.getParams().put("worker_agent_type", workerAgentType);
         return ctx;

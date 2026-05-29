@@ -438,8 +438,6 @@ export async function pollDocResult(params: {
         if (asString(msg.session_id) !== params.sessionId) continue;
         const msgTraceId = asString(msg.trace_id);
         if (params.traceId && msgTraceId && msgTraceId !== params.traceId) continue;
-        const msgMessageId = asString(msg.message_id);
-        if (params.messageId && msgMessageId && msgMessageId !== params.messageId) continue;
 
         const eventType = asString(msg.event_type);
         const stateMsg = asString(msg.state_msg);

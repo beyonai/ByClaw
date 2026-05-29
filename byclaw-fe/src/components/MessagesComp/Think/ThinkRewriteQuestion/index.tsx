@@ -137,6 +137,7 @@ export default function ThinkRewriteQuestion(props: IProps) {
               query,
               language: getLocale(),
             },
+            traceId: message.traceId,
           },
           msgOpt: {
             answerMsg: {

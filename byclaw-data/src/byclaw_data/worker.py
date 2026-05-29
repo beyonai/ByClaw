@@ -5,10 +5,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
+import re
+import subprocess
 import sys
 from collections import OrderedDict
 from collections.abc import AsyncGenerator, Mapping
+from pathlib import Path
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -318,6 +322,119 @@ def _extract_tool_resource_codes(
             seen_view.add(code)
 
     return object_codes, view_codes
+
+
+_SKILL_PLACEHOLDER_RE = re.compile(r"\{\{(query|compute|action):([^}]+)\}\}")
+
+
+def _extract_skill_resource_ids(resource_list: list[Any]) -> list[str]:
+    """从 resource_list 中提取 SKILL 类型条目的 resourceId。
+
+    SKILL 条目的 resourceCode 为 null，路径取 resourceId。
+    示例 resourceId：/.openclaw/workspace-baiying-agent-10000289/skills/老鹰-战略全局分析
+    """
+    result: list[str] = []
+    for item in resource_list:
+        if not isinstance(item, dict):
+            continue
+        rtype = str(item.get("resourceType") or "").strip().upper()
+        if rtype != "SKILL":
+            continue
+        rid = str(item.get("resourceId") or "").strip()
+        if rid:
+            result.append(rid)
+    return result
+
+
+def _replace_skill_placeholders(
+    content: str,
+    tools_dict: dict[str, Any],
+) -> tuple[str, list[str]]:
+    """替换 SKILL.md 中的 {{type:code}} 占位符为真实 tool 名。
+
+    Returns:
+        (替换后的内容, warning 列表)
+    """
+    warnings: list[str] = []
+
+    def replacer(m: re.Match) -> str:  # type: ignore[type-arg]
+        kind = m.group(1)
+        code = m.group(2)
+
+        if kind == "action":
+            parts = code.split(":", 1)
+            obj_code = parts[0]
+            act_name = parts[1] if len(parts) > 1 else ""
+            candidates = [k for k in tools_dict if obj_code in k and act_name in k]
+            if candidates:
+                return candidates[0]
+            tool_name = f"{act_name}_{obj_code}" if act_name else obj_code
+        else:
+            tool_name = f"{kind}_{code}"
+
+        if tool_name not in tools_dict:
+            warnings.append(f"⚠️ 工具 {tool_name} 未挂载到当前 agent，无法调用")
+            return m.group(0)
+        return tool_name
+
+    replaced = _SKILL_PLACEHOLDER_RE.sub(replacer, content)
+    return replaced, warnings
+
+
+def _load_skills(
+    resource_list: list[Any],
+    user_code: str,
+    tools_dict: dict[str, Any],
+) -> str | None:
+    """加载 skill 内容，返回替换占位符后的 task_prompt；无 skill 时返回 None。
+
+    Args:
+        resource_list: extra_payload["resource_list"]
+        user_code:     command.header.user_code
+        tools_dict:    AgentConfig.extra["redirect_tools"]，key 为真实 tool 名
+
+    Returns:
+        task_prompt 字符串，或 None（无 SKILL 条目时）
+    """
+    skill_ids = _extract_skill_resource_ids(resource_list)
+    if not skill_ids:
+        return None
+
+    minio_root = os.environ.get(
+        "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
+    )
+    parts: list[str] = []
+    all_warnings: list[str] = []
+
+    for resource_id in skill_ids:
+        skill_path = (
+            Path(minio_root) / f"byclaw-{user_code}" / "by" / resource_id.lstrip("/")
+        )
+        skill_md = skill_path / "SKILL.md"
+        if not skill_md.exists():
+            logging.getLogger(__name__).warning(
+                "_load_skills: SKILL.md not found at %s, skipping", skill_md
+            )
+            continue
+        try:
+            content = skill_md.read_text(encoding="utf-8")
+        except OSError as exc:
+            logging.getLogger(__name__).warning(
+                "_load_skills: failed to read %s: %s, skipping", skill_md, exc
+            )
+            continue
+
+        content, w = _replace_skill_placeholders(content, tools_dict)
+        all_warnings.extend(w)
+        parts.append(content)
+
+    if not parts:
+        return None
+
+    task_prompt = "\n\n---\n\n".join(parts)
+    if all_warnings:
+        task_prompt += "\n\n" + "\n".join(all_warnings)
+    return task_prompt
 
 
 def _normalize_recall(raw: Any) -> list[str]:
@@ -2103,6 +2220,61 @@ class DataCloudWorker(GatewayWorker):
                     "locale": str(getattr(context, "locale", "") or "zh_CN"),
                 },
             }
+
+            # ── Skill 加载：从 resource_list 提取 SKILL 条目，注入 task_prompt ──
+            if not _is_dynamic_agent:
+                _user_code_for_skill = str(
+                    getattr(getattr(command, "header", None), "user_code", "") or ""
+                ).strip()
+                _beyond_token_for_skill = header_metadata.get("Beyond-Token", "")
+                _minio_root = os.environ.get(
+                    "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
+                )
+                _skill_ids_diag = _extract_skill_resource_ids(_resource_list_for_extract)
+                _skill_paths_diag = [
+                    str(
+                        Path(_minio_root)
+                        / f"byclaw-{_user_code_for_skill}"
+                        / "by"
+                        / rid.lstrip("/")
+                        / "SKILL.md"
+                    )
+                    for rid in _skill_ids_diag
+                ]
+                logger.info(
+                    "[skill-diag] session=%s user_code=%s skill_ids=%s skill_paths=%s",
+                    context.session_id,
+                    _user_code_for_skill,
+                    _skill_ids_diag,
+                    _skill_paths_diag,
+                )
+                _skill_task_prompt = _load_skills(
+                    resource_list=_resource_list_for_extract,
+                    user_code=_user_code_for_skill,
+                    tools_dict=tools_dict,
+                )
+                if _skill_task_prompt:
+                    graph_input["prompts_overwrite"]["task_prompt"] = _skill_task_prompt
+                    _skill_ws = str(
+                        Path(_minio_root) / f"byclaw-{_user_code_for_skill}" / "by"
+                    )
+                    config["configurable"]["extras"] = {
+                        "user_code": _user_code_for_skill,
+                        "beyond_token": _beyond_token_for_skill,
+                        "skill_workspace_dir": _skill_ws,
+                        "task_prompt": _skill_task_prompt,
+                    }
+                    logger.info(
+                        "Skill loaded: session=%s skill_workspace_dir=%s",
+                        context.session_id,
+                        _skill_ws,
+                    )
+                else:
+                    logger.warning(
+                        "[skill-diag] skill load returned None: session=%s skill_ids=%s",
+                        context.session_id,
+                        _skill_ids_diag,
+                    )
             logger.debug(
                 "[i18n-diag] graph_input.prompts_overwrite set: locale=%r",
                 str(getattr(context, "locale", "") or "zh_CN"),
