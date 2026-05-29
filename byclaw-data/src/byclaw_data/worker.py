@@ -2231,7 +2231,7 @@ class DataCloudWorker(GatewayWorker):
                 _minio_root = os.environ.get(
                     "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
                 )
-                _skill_ids_diag = _extract_skill_resource_ids(_resource_list_for_extract)
+                _skill_ids = _extract_skill_resource_ids(_resource_list_for_extract)
                 _skill_paths_diag = [
                     str(
                         Path(_minio_root)
@@ -2240,13 +2240,13 @@ class DataCloudWorker(GatewayWorker):
                         / rid.lstrip("/")
                         / "SKILL.md"
                     )
-                    for rid in _skill_ids_diag
+                    for rid in _skill_ids
                 ]
                 logger.info(
                     "[skill-diag] session=%s user_code=%s skill_ids=%s skill_paths=%s",
                     context.session_id,
                     _user_code_for_skill,
-                    _skill_ids_diag,
+                    _skill_ids,
                     _skill_paths_diag,
                 )
                 _skill_task_prompt = _load_skills(
@@ -2259,22 +2259,32 @@ class DataCloudWorker(GatewayWorker):
                     _skill_ws = str(
                         Path(_minio_root) / f"byclaw-{_user_code_for_skill}" / "by"
                     )
+                    # skill_dir：首个 skill 的绝对路径，与 _load_skills 内 skill_path 计算逻辑一致
+                    _skill_dir = (
+                        str(Path(_skill_ws) / _skill_ids[0].lstrip("/"))
+                        if _skill_ids
+                        else _skill_ws
+                    )
                     config["configurable"]["extras"] = {
                         "user_code": _user_code_for_skill,
                         "beyond_token": _beyond_token_for_skill,
                         "skill_workspace_dir": _skill_ws,
+                        "skill_dir": _skill_dir,
                         "task_prompt": _skill_task_prompt,
+                        "agent_id": str(by_agent_id or ""),
+                        "be_domainname": os.environ.get("BE_DOMAINNAME", ""),
                     }
                     logger.info(
-                        "Skill loaded: session=%s skill_workspace_dir=%s",
+                        "Skill loaded: session=%s skill_workspace_dir=%s skill_dir=%s",
                         context.session_id,
                         _skill_ws,
+                        _skill_dir,
                     )
                 else:
                     logger.warning(
                         "[skill-diag] skill load returned None: session=%s skill_ids=%s",
                         context.session_id,
-                        _skill_ids_diag,
+                        _skill_ids,
                     )
             logger.debug(
                 "[i18n-diag] graph_input.prompts_overwrite set: locale=%r",
