@@ -71,6 +71,7 @@ export interface ActiveSdkRequest {
   awaitingFollowup: boolean;
   deferredForFollowup: boolean;
   followupRunStarted: boolean;
+  compactionRetryPending: boolean;
   rootLifecyclePhase?: "end" | "error";
   hasEmittedContent: boolean;
   lastReasoningText: string;
@@ -344,6 +345,7 @@ export function registerActiveSdkRequest(params: {
     awaitingFollowup: false,
     deferredForFollowup: false,
     followupRunStarted: false,
+    compactionRetryPending: false,
     rootLifecyclePhase: undefined,
     hasEmittedContent: false,
     lastReasoningText: "",
@@ -492,6 +494,7 @@ export function markActiveSdkRootLifecycleStarted(
     return undefined;
   }
   request.rootLifecyclePhase = undefined;
+  request.compactionRetryPending = false;
   if (request.awaitingFollowup) {
     request.awaitingFollowup = false;
     request.deferredForFollowup = true;
@@ -514,6 +517,25 @@ export function markActiveSdkRootLifecycleFinished(
   request.rootLifecyclePhase = phase;
   request.awaitingFollowup = false;
   request.followupRunStarted = false;
+  return request;
+}
+
+export function markActiveSdkCompactionRetryPending(
+  sessionKey: string | undefined,
+  pending: boolean,
+): ActiveSdkRequest | undefined {
+  if (!sessionKey) {
+    return undefined;
+  }
+  const request = resolveActiveSdkRequestBySessionKey(sessionKey);
+  if (!request) {
+    return undefined;
+  }
+  request.compactionRetryPending = pending;
+  if (pending) {
+    request.awaitingFollowup = false;
+    request.followupRunStarted = false;
+  }
   return request;
 }
 
@@ -553,7 +575,8 @@ export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boole
       request.pendingChildSessionKeys.size === 0 &&
       request.pendingOutboundCount === 0 &&
       !request.awaitingFollowup &&
-      !request.followupRunStarted,
+      !request.followupRunStarted &&
+      !request.compactionRetryPending,
   );
 }
 
@@ -604,6 +627,7 @@ export async function markActiveSdkRequestSubagentSpawned(
   request.awaitingFollowup = false;
   request.deferredForFollowup = false;
   request.followupRunStarted = false;
+  request.compactionRetryPending = false;
   request.lastReasoningText = "";
   request.lastReasoningMessageId = "";
   activeSdkRequestsByChild.set(childSessionKey, request);
