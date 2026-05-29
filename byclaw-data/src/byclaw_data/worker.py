@@ -5,10 +5,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
+import re
+import subprocess
 import sys
 from collections import OrderedDict
 from collections.abc import AsyncGenerator, Mapping
+from pathlib import Path
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -320,6 +324,119 @@ def _extract_tool_resource_codes(
     return object_codes, view_codes
 
 
+_SKILL_PLACEHOLDER_RE = re.compile(r"\{\{(query|compute|action):([^}]+)\}\}")
+
+
+def _extract_skill_resource_ids(resource_list: list[Any]) -> list[str]:
+    """从 resource_list 中提取 SKILL 类型条目的 resourceId。
+
+    SKILL 条目的 resourceCode 为 null，路径取 resourceId。
+    示例 resourceId：/.openclaw/workspace-baiying-agent-10000289/skills/老鹰-战略全局分析
+    """
+    result: list[str] = []
+    for item in resource_list:
+        if not isinstance(item, dict):
+            continue
+        rtype = str(item.get("resourceType") or "").strip().upper()
+        if rtype != "SKILL":
+            continue
+        rid = str(item.get("resourceId") or "").strip()
+        if rid:
+            result.append(rid)
+    return result
+
+
+def _replace_skill_placeholders(
+    content: str,
+    tools_dict: dict[str, Any],
+) -> tuple[str, list[str]]:
+    """替换 SKILL.md 中的 {{type:code}} 占位符为真实 tool 名。
+
+    Returns:
+        (替换后的内容, warning 列表)
+    """
+    warnings: list[str] = []
+
+    def replacer(m: re.Match) -> str:  # type: ignore[type-arg]
+        kind = m.group(1)
+        code = m.group(2)
+
+        if kind == "action":
+            parts = code.split(":", 1)
+            obj_code = parts[0]
+            act_name = parts[1] if len(parts) > 1 else ""
+            candidates = [k for k in tools_dict if obj_code in k and act_name in k]
+            if candidates:
+                return candidates[0]
+            tool_name = f"{act_name}_{obj_code}" if act_name else obj_code
+        else:
+            tool_name = f"{kind}_{code}"
+
+        if tool_name not in tools_dict:
+            warnings.append(f"⚠️ 工具 {tool_name} 未挂载到当前 agent，无法调用")
+            return m.group(0)
+        return tool_name
+
+    replaced = _SKILL_PLACEHOLDER_RE.sub(replacer, content)
+    return replaced, warnings
+
+
+def _load_skills(
+    resource_list: list[Any],
+    user_code: str,
+    tools_dict: dict[str, Any],
+) -> str | None:
+    """加载 skill 内容，返回替换占位符后的 task_prompt；无 skill 时返回 None。
+
+    Args:
+        resource_list: extra_payload["resource_list"]
+        user_code:     command.header.user_code
+        tools_dict:    AgentConfig.extra["redirect_tools"]，key 为真实 tool 名
+
+    Returns:
+        task_prompt 字符串，或 None（无 SKILL 条目时）
+    """
+    skill_ids = _extract_skill_resource_ids(resource_list)
+    if not skill_ids:
+        return None
+
+    minio_root = os.environ.get(
+        "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
+    )
+    parts: list[str] = []
+    all_warnings: list[str] = []
+
+    for resource_id in skill_ids:
+        skill_path = (
+            Path(minio_root) / f"byclaw-{user_code}" / "by" / resource_id.lstrip("/")
+        )
+        skill_md = skill_path / "SKILL.md"
+        if not skill_md.exists():
+            logging.getLogger(__name__).warning(
+                "_load_skills: SKILL.md not found at %s, skipping", skill_md
+            )
+            continue
+        try:
+            content = skill_md.read_text(encoding="utf-8")
+        except OSError as exc:
+            logging.getLogger(__name__).warning(
+                "_load_skills: failed to read %s: %s, skipping", skill_md, exc
+            )
+            continue
+
+        content, w = _replace_skill_placeholders(content, tools_dict)
+        all_warnings.extend(w)
+        parts.append(content)
+
+    if not parts:
+        return None
+
+    task_prompt = "\n\n---\n\n".join(parts)
+    if all_warnings:
+        task_prompt += "\n\n" + "\n".join(all_warnings)
+    return task_prompt
+
+
 def _normalize_recall(raw: Any) -> list[str]:
     """将 recall 值规范化为 list[str]：list 原样返回，str 包装为单元素列表。"""
     if isinstance(raw, list):
@@ -359,6 +476,24 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
 
     all_options: list[dict[str, Any]] = []
 
+    # 从 metadata.paradigmList 构建 (paradigmId, keyword) → {kid, ktype} 索引
+    # 用户回传的选项里没有 kid/ktype，后端需从 metadata 补全。
+    # metadata 是前端从 SSE emit 透传回来的，结构可信。
+    _meta_kid_map: dict[str, dict[str, Any]] = {}
+    _meta_raw = raw.get("metadata") or {}
+    _meta_pl = _meta_raw.get("paradigmList")
+    if isinstance(_meta_pl, list):
+        for _mg in _meta_pl:
+            if not isinstance(_mg, dict):
+                continue
+            _pid = str(_mg.get("paradigmId", ""))
+            for _mr in _mg.get("paradigmResult") or []:
+                if isinstance(_mr, dict) and _mr.get("keyword"):
+                    _meta_kid_map[_mr["keyword"]] = {
+                        "kid": _mr.get("kid", 0),
+                        "ktype": str(_mr.get("ktype") or ""),
+                    }
+
     # 外层 paradigmList → 包装元素 → 内层 paradigmList → 范式组
     outer_list = list(raw.get("paradigmList") or [])
     for wrapper in outer_list:
@@ -372,12 +507,15 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
             items = list(group.get("paradigmResult") or [])
             for item in items:
                 if isinstance(item, dict):
+                    kw = str(item.get("keyword") or "")
+                    # 从 metadata 索引补全 kid/ktype
+                    _meta_info = _meta_kid_map.get(kw) or {}
                     all_options.append({
                         "choiceKeyword": str(item.get("choiceKeyword") or ""),
                         "recall": _normalize_recall(item.get("recall")),
-                        "keyword": str(item.get("keyword") or ""),
-                        "kid": item.get("kid", 0),
-                        "ktype": str(item.get("ktype") or ""),
+                        "keyword": kw,
+                        "kid": item.get("kid") or _meta_info.get("kid", 0),
+                        "ktype": str(item.get("ktype") or _meta_info.get("ktype", "")),
                         "field": str(item.get("field") or ""),
                         "comparison": str(item.get("comparison") or ""),
                         "value": str(item.get("value") or ""),
@@ -395,12 +533,14 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
                     })
 
     # 返回 user_clarify_node 期望的纯 dict 结构
+    # metadata 透传仍保留供 user_clarify_node L316-317 兜底读取 meta_paradigm_list
     return {
         "paradigmList": [
             {
                 "paradigmList": all_options,
             }
-        ]
+        ],
+        "metadata": raw.get("metadata", {}),
     }
 
 
@@ -1572,7 +1712,10 @@ class DataCloudWorker(GatewayWorker):
                 message_id=_init_msg_id,
             )
             context._knowledge_enhance_node_id = _init_msg_id
-            user_text = _latest_user_text_from_content(command.content)
+            user_text = _latest_user_text_from_content(
+                command.content,
+                locale=_locale_for_msg,
+            )
             if _is_light_chitchat(user_text) and not attached_file_path:
                 await context.emit_chunk(
                     StreamChunkEvent(
@@ -1660,7 +1803,10 @@ class DataCloudWorker(GatewayWorker):
                     session_id=context.session_id,
                 )
             else:
-                latest_user_text_dyn = _latest_user_text_from_content(command.content)
+                latest_user_text_dyn = _latest_user_text_from_content(
+                    command.content,
+                    locale=getattr(context, "locale", _FALLBACK_LOCALE),
+                )
                 latest_user_text_dyn = latest_user_text_dyn + _build_attachment_hint(
                     attached_file_path
                 )
@@ -2032,7 +2178,10 @@ class DataCloudWorker(GatewayWorker):
             )
             graph_input: Any = Command(resume=resume_value)
         else:
-            latest_user_text = _latest_user_text_from_content(command.content)
+            latest_user_text = _latest_user_text_from_content(
+                command.content,
+                locale=getattr(context, "locale", _FALLBACK_LOCALE),
+            )
             _attachment_hint = _build_attachment_hint(attached_file_path)
             # 历史去重用未拼接版本匹配，避免提示文本干扰
             history_messages = await _load_recent_history_messages(
@@ -2040,7 +2189,10 @@ class DataCloudWorker(GatewayWorker):
                 limit=_history_inject_limit(),
                 current_user_text=latest_user_text,
             )
-            input_messages = _normalize_messages(command.content)
+            input_messages = _normalize_messages(
+                command.content,
+                locale=getattr(context, "locale", _FALLBACK_LOCALE),
+            )
             # content 为 [] 或无法解析时，避免只有历史且最后一条为 assistant → intend 误用 AIMessage
             if not input_messages and latest_user_text:
                 input_messages = [
@@ -2065,6 +2217,36 @@ class DataCloudWorker(GatewayWorker):
                     "locale": str(getattr(context, "locale", "") or "zh_CN"),
                 },
             }
+
+            # ── Skill 加载：从 resource_list 提取 SKILL 条目，注入 task_prompt ──
+            if not _is_dynamic_agent:
+                _user_code_for_skill = str(
+                    getattr(getattr(command, "header", None), "user_code", "") or ""
+                ).strip()
+                _beyond_token_for_skill = header_metadata.get("Beyond-Token", "")
+                _skill_task_prompt = _load_skills(
+                    resource_list=_resource_list_for_extract,
+                    user_code=_user_code_for_skill,
+                    tools_dict=tools_dict,
+                )
+                if _skill_task_prompt:
+                    graph_input["prompts_overwrite"]["task_prompt"] = _skill_task_prompt
+                    _minio_root = os.environ.get(
+                        "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
+                    )
+                    _skill_ws = str(
+                        Path(_minio_root) / f"byclaw-{_user_code_for_skill}" / "by"
+                    )
+                    config["configurable"]["extras"] = {
+                        "user_code": _user_code_for_skill,
+                        "beyond_token": _beyond_token_for_skill,
+                        "skill_workspace_dir": _skill_ws,
+                    }
+                    logger.info(
+                        "Skill loaded: session=%s skill_workspace_dir=%s",
+                        context.session_id,
+                        _skill_ws,
+                    )
             logger.debug(
                 "[i18n-diag] graph_input.prompts_overwrite set: locale=%r",
                 str(getattr(context, "locale", "") or "zh_CN"),
@@ -2121,7 +2303,10 @@ class DataCloudWorker(GatewayWorker):
             ):
                 gen_fn = getattr(reco_plugin, "generate_recommended_questions", None)
                 if callable(gen_fn):
-                    rq = _latest_user_text_from_content(command.content).strip()
+                    rq = _latest_user_text_from_content(
+                        command.content,
+                        locale=getattr(context, "locale", _FALLBACK_LOCALE),
+                    ).strip()
                     if rq:
                         reco_task = asyncio.create_task(gen_fn(rq))
 
@@ -2560,8 +2745,51 @@ class DataCloudWorker(GatewayWorker):
 # ------------------------------------------------------------------
 
 
+def _format_uploaded_files_for_message(
+    files: Any,
+    *,
+    locale: str = _FALLBACK_LOCALE,
+) -> str:
+    """Format frontend uploaded-file metadata as markdown for LLM context."""
+    if not files:
+        return ""
+
+    if isinstance(files, Mapping):
+        file_items = [files]
+    elif isinstance(files, list):
+        file_items = files
+    else:
+        return ""
+
+    lines: list[str] = []
+    for index, file_item in enumerate(file_items, start=1):
+        if not isinstance(file_item, Mapping):
+            continue
+
+        file_path = str(file_item.get("filePath") or "").strip()
+        if not file_path:
+            continue
+
+        file_name = str(file_item.get("fileName") or "").strip()
+        if not file_name:
+            default_prefix = "File" if locale == "en_US" else "文件"
+            file_name = (
+                os.path.basename(file_path.rstrip("/")) or f"{default_prefix}{index}"
+            )
+
+        lines.append(f"{index}. [{file_name}]({file_path})")
+
+    if not lines:
+        return ""
+
+    title = "User uploaded file(s):" if locale == "en_US" else "用户上传了文件："
+    return f"{title}\n" + "\n".join(lines)
+
+
 def _normalize_messages(
     content: Any,
+    *,
+    locale: str = _FALLBACK_LOCALE,
 ) -> list[HumanMessage | AIMessage | SystemMessage]:
     """Convert gateway command content to a list of LangChain BaseMessage.
 
@@ -2581,6 +2809,17 @@ def _normalize_messages(
             # 前端多模态格式：content 是 {"files": [...], "text": "..."} 结构
             if isinstance(raw_content, dict):
                 text = str(raw_content.get("text") or "")
+                files = raw_content.get("files", [])
+                uploaded_files_text = _format_uploaded_files_for_message(
+                    files,
+                    locale=locale,
+                )
+                if uploaded_files_text:
+                    text = (
+                        f"{text}\n\n{uploaded_files_text}"
+                        if text
+                        else uploaded_files_text
+                    )
             else:
                 text = str(raw_content) if raw_content is not None else ""
             if role == "assistant":
@@ -2687,7 +2926,11 @@ def _build_attachment_hint(attached_file_path: str) -> str:
     )
 
 
-def _latest_user_text_from_content(content: Any) -> str:
+def _latest_user_text_from_content(
+    content: Any,
+    *,
+    locale: str = _FALLBACK_LOCALE,
+) -> str:
     if isinstance(content, str):
         return content.strip()
     if not isinstance(content, list) or not content:
@@ -2697,7 +2940,18 @@ def _latest_user_text_from_content(content: Any) -> str:
         raw = last.get("content", "")
         # 前端多模态格式：content 是 {"files": [...], "text": "..."} 结构
         if isinstance(raw, dict):
-            return str(raw.get("text") or "").strip()
+            text = str(raw.get("text") or "").strip()
+            uploaded_files_text = _format_uploaded_files_for_message(
+                raw.get("files", []),
+                locale=locale,
+            )
+            if uploaded_files_text:
+                return (
+                    f"{text}\n\n{uploaded_files_text}"
+                    if text
+                    else uploaded_files_text
+                )
+            return text
         return raw.strip() if isinstance(raw, str) else str(raw).strip()
     return str(last).strip()
 
