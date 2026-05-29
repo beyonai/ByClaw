@@ -2262,13 +2262,16 @@ class DataCloudWorker(GatewayWorker):
                     _skill_ws = str(
                         Path(_minio_root) / f"byclaw-{_user_code_for_skill}" / "by"
                     )
-                    # skill_dir：首个 skill 的绝对路径，与 _load_skills 内 skill_path 计算逻辑一致
-                    _skill_dir = (
-                        str(Path(_skill_ws) / _skill_ids[0].lstrip("/"))
-                        if _skill_ids
-                        else _skill_ws
-                    )
-                    config["configurable"]["extras"] = {
+                    # skill_dir：优先用容器内挂载路径（SKILL_BASE_DIR/<skill_name>），
+                    # 回退到 minio 路径（与 _load_skills 内 skill_path 计算逻辑一致）
+                    _skill_base_dir = os.environ.get("SKILL_BASE_DIR", "").strip()
+                    if _skill_base_dir and _skill_ids:
+                        _skill_dir = str(Path(_skill_base_dir) / Path(_skill_ids[0]).name)
+                    elif _skill_ids:
+                        _skill_dir = str(Path(_skill_ws) / _skill_ids[0].lstrip("/"))
+                    else:
+                        _skill_dir = _skill_ws
+                    _extras = {
                         "user_code": _user_code_for_skill,
                         "beyond_token": _beyond_token_for_skill,
                         "skill_workspace_dir": _skill_ws,
@@ -2277,6 +2280,9 @@ class DataCloudWorker(GatewayWorker):
                         "agent_id": str(by_agent_id or ""),
                         "be_domainname": os.environ.get("BE_DOMAINNAME", ""),
                     }
+                    config["configurable"]["extras"] = _extras
+                    # hook_aware_tool_node 从 gateway_context.extras 读取，需同步设置
+                    context.extras = _extras  # type: ignore[attr-defined]
                     logger.info(
                         "Skill loaded: session=%s skill_workspace_dir=%s skill_dir=%s",
                         context.session_id,
