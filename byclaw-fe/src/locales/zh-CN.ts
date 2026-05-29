@@ -1092,7 +1092,7 @@ export default {
   'resourceTabs.viewCenter': '视图中心',
   'resourceTabs.toolCenter': '工具中心',
   'resourceTabs.skillUpload.uploadButton': '上传',
-  'resourceTabs.skillUpload.onlyZip': '仅支持上传.zip格式的文件',
+  'resourceTabs.skillUpload.onlyZip': '仅支持上传.zip或.tar.gz格式的文件',
   'resourceTabs.skillUpload.noUserCode': '无法获取用户编码，请重新登录',
   'resourceTabs.skillUpload.success': '技能上传成功',
   'resourceTabs.skillUpload.failed': '技能上传失败',
