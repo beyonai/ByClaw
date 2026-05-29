@@ -1712,7 +1712,10 @@ class DataCloudWorker(GatewayWorker):
                 message_id=_init_msg_id,
             )
             context._knowledge_enhance_node_id = _init_msg_id
-            user_text = _latest_user_text_from_content(command.content)
+            user_text = _latest_user_text_from_content(
+                command.content,
+                locale=_locale_for_msg,
+            )
             if _is_light_chitchat(user_text) and not attached_file_path:
                 await context.emit_chunk(
                     StreamChunkEvent(
@@ -1800,7 +1803,10 @@ class DataCloudWorker(GatewayWorker):
                     session_id=context.session_id,
                 )
             else:
-                latest_user_text_dyn = _latest_user_text_from_content(command.content)
+                latest_user_text_dyn = _latest_user_text_from_content(
+                    command.content,
+                    locale=getattr(context, "locale", _FALLBACK_LOCALE),
+                )
                 latest_user_text_dyn = latest_user_text_dyn + _build_attachment_hint(
                     attached_file_path
                 )
@@ -2172,7 +2178,10 @@ class DataCloudWorker(GatewayWorker):
             )
             graph_input: Any = Command(resume=resume_value)
         else:
-            latest_user_text = _latest_user_text_from_content(command.content)
+            latest_user_text = _latest_user_text_from_content(
+                command.content,
+                locale=getattr(context, "locale", _FALLBACK_LOCALE),
+            )
             _attachment_hint = _build_attachment_hint(attached_file_path)
             # 历史去重用未拼接版本匹配，避免提示文本干扰
             history_messages = await _load_recent_history_messages(
@@ -2180,7 +2189,10 @@ class DataCloudWorker(GatewayWorker):
                 limit=_history_inject_limit(),
                 current_user_text=latest_user_text,
             )
-            input_messages = _normalize_messages(command.content)
+            input_messages = _normalize_messages(
+                command.content,
+                locale=getattr(context, "locale", _FALLBACK_LOCALE),
+            )
             # content 为 [] 或无法解析时，避免只有历史且最后一条为 assistant → intend 误用 AIMessage
             if not input_messages and latest_user_text:
                 input_messages = [
@@ -2291,7 +2303,10 @@ class DataCloudWorker(GatewayWorker):
             ):
                 gen_fn = getattr(reco_plugin, "generate_recommended_questions", None)
                 if callable(gen_fn):
-                    rq = _latest_user_text_from_content(command.content).strip()
+                    rq = _latest_user_text_from_content(
+                        command.content,
+                        locale=getattr(context, "locale", _FALLBACK_LOCALE),
+                    ).strip()
                     if rq:
                         reco_task = asyncio.create_task(gen_fn(rq))
 
@@ -2730,8 +2745,51 @@ class DataCloudWorker(GatewayWorker):
 # ------------------------------------------------------------------
 
 
+def _format_uploaded_files_for_message(
+    files: Any,
+    *,
+    locale: str = _FALLBACK_LOCALE,
+) -> str:
+    """Format frontend uploaded-file metadata as markdown for LLM context."""
+    if not files:
+        return ""
+
+    if isinstance(files, Mapping):
+        file_items = [files]
+    elif isinstance(files, list):
+        file_items = files
+    else:
+        return ""
+
+    lines: list[str] = []
+    for index, file_item in enumerate(file_items, start=1):
+        if not isinstance(file_item, Mapping):
+            continue
+
+        file_path = str(file_item.get("filePath") or "").strip()
+        if not file_path:
+            continue
+
+        file_name = str(file_item.get("fileName") or "").strip()
+        if not file_name:
+            default_prefix = "File" if locale == "en_US" else "文件"
+            file_name = (
+                os.path.basename(file_path.rstrip("/")) or f"{default_prefix}{index}"
+            )
+
+        lines.append(f"{index}. [{file_name}]({file_path})")
+
+    if not lines:
+        return ""
+
+    title = "User uploaded file(s):" if locale == "en_US" else "用户上传了文件："
+    return f"{title}\n" + "\n".join(lines)
+
+
 def _normalize_messages(
     content: Any,
+    *,
+    locale: str = _FALLBACK_LOCALE,
 ) -> list[HumanMessage | AIMessage | SystemMessage]:
     """Convert gateway command content to a list of LangChain BaseMessage.
 
@@ -2751,6 +2809,17 @@ def _normalize_messages(
             # 前端多模态格式：content 是 {"files": [...], "text": "..."} 结构
             if isinstance(raw_content, dict):
                 text = str(raw_content.get("text") or "")
+                files = raw_content.get("files", [])
+                uploaded_files_text = _format_uploaded_files_for_message(
+                    files,
+                    locale=locale,
+                )
+                if uploaded_files_text:
+                    text = (
+                        f"{text}\n\n{uploaded_files_text}"
+                        if text
+                        else uploaded_files_text
+                    )
             else:
                 text = str(raw_content) if raw_content is not None else ""
             if role == "assistant":
@@ -2857,7 +2926,11 @@ def _build_attachment_hint(attached_file_path: str) -> str:
     )
 
 
-def _latest_user_text_from_content(content: Any) -> str:
+def _latest_user_text_from_content(
+    content: Any,
+    *,
+    locale: str = _FALLBACK_LOCALE,
+) -> str:
     if isinstance(content, str):
         return content.strip()
     if not isinstance(content, list) or not content:
@@ -2867,7 +2940,18 @@ def _latest_user_text_from_content(content: Any) -> str:
         raw = last.get("content", "")
         # 前端多模态格式：content 是 {"files": [...], "text": "..."} 结构
         if isinstance(raw, dict):
-            return str(raw.get("text") or "").strip()
+            text = str(raw.get("text") or "").strip()
+            uploaded_files_text = _format_uploaded_files_for_message(
+                raw.get("files", []),
+                locale=locale,
+            )
+            if uploaded_files_text:
+                return (
+                    f"{text}\n\n{uploaded_files_text}"
+                    if text
+                    else uploaded_files_text
+                )
+            return text
         return raw.strip() if isinstance(raw, str) else str(raw).strip()
     return str(last).strip()
 
