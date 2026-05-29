@@ -238,7 +238,8 @@ ENV OPEN_DESIGN_ROOT=/opt/open-design \
     CLAUDE_BIN=/usr/local/bin/claude
 
 RUN mkdir -p /by/.od/claude && \
-    chown -R open-design:open-design /by/.od /opt/open-design
+    chown -R open-design:open-design /by /opt/open-design && \
+    chmod -R u+rwX /by /opt/open-design
 
 COPY --from=ext-builder /build/out/ /app/extensions/
 
@@ -251,7 +252,9 @@ RUN chmod a+x /usr/local/bin/filebrowser
 
 # add open-design starter
 COPY middleware/openclaw/start-openclaw-with-open-design.sh /usr/local/bin/start-openclaw-with-open-design
-RUN chmod a+x /usr/local/bin/start-openclaw-with-open-design
+COPY middleware/openclaw/start-openclaw-with-open-design-and-filebrowser.sh /usr/local/bin/start-openclaw-with-open-design-and-filebrowser
+RUN chmod a+x /usr/local/bin/start-openclaw-with-open-design \
+    /usr/local/bin/start-openclaw-with-open-design-and-filebrowser
 
 # add dingTalk cli dws
 # RUN curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh

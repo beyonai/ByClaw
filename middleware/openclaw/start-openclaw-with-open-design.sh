@@ -15,10 +15,32 @@ export OPEN_DESIGN_HOME="${OPEN_DESIGN_HOME:-$OD_DATA_DIR/home}"
 export OPEN_DESIGN_AGENT_ID="${OPEN_DESIGN_AGENT_ID:-claude}"
 export OPEN_DESIGN_CLAUDE_MODEL="${OPEN_DESIGN_CLAUDE_MODEL:-sonnet}"
 
-mkdir -p "$OD_DATA_DIR" "$OD_MEDIA_CONFIG_DIR" "$CLAUDE_CONFIG_DIR" "$OPEN_DESIGN_HOME"
-if [ "$(id -u)" = "0" ]; then
-    chown -R "$OPEN_DESIGN_USER:$OPEN_DESIGN_USER" "$OD_DATA_DIR" "$OD_MEDIA_CONFIG_DIR" "$CLAUDE_CONFIG_DIR" "$OPEN_DESIGN_HOME"
-fi
+prepare_open_design_dir() {
+    local dir="$1"
+    local parent
+
+    if [ "$dir" = "/" ]; then
+        echo "[open-design] refusing to use / as a writable data directory" >&2
+        exit 64
+    fi
+
+    parent="$(dirname "$dir")"
+    mkdir -p "$parent" "$dir"
+
+    if [ "$(id -u)" = "0" ]; then
+        if [ "$parent" != "/" ] && [ "$parent" != "." ]; then
+            chown "$OPEN_DESIGN_USER:$OPEN_DESIGN_USER" "$parent" 2>/dev/null || true
+            chmod u+rwx,go+rx "$parent" 2>/dev/null || true
+        fi
+        chown -R "$OPEN_DESIGN_USER:$OPEN_DESIGN_USER" "$dir"
+        chmod -R u+rwX "$dir"
+    fi
+}
+
+prepare_open_design_dir "$OD_DATA_DIR"
+prepare_open_design_dir "$OD_MEDIA_CONFIG_DIR"
+prepare_open_design_dir "$CLAUDE_CONFIG_DIR"
+prepare_open_design_dir "$OPEN_DESIGN_HOME"
 
 app_config_file="$OD_DATA_DIR/app-config.json"
 if command -v codex >/dev/null 2>&1; then
