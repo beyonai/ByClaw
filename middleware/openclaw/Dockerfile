@@ -229,7 +229,9 @@ RUN chmod a+x /usr/local/bin/patch-open-design-web && \
 
 ENV OPEN_DESIGN_ROOT=/opt/open-design \
     OD_BASE_PATH=${OPEN_DESIGN_BASE_PATH} \
-    OD_BIND_HOST=127.0.0.1 \
+    OD_HOST=0.0.0.0 \
+    OD_BIND_HOST=0.0.0.0 \
+    OD_ALLOW_PUBLIC_BIND_WITHOUT_TOKEN=1 \
     OD_PORT=${OPEN_DESIGN_PORT} \
     OD_DATA_DIR=/by/.od \
     OD_MEDIA_CONFIG_DIR=/by/.od \

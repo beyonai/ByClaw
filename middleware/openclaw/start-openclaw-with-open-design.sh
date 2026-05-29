@@ -4,7 +4,9 @@ set -Eeuo pipefail
 OPEN_DESIGN_ROOT="${OPEN_DESIGN_ROOT:-/opt/open-design}"
 
 export OD_BASE_PATH="${OD_BASE_PATH:-/openDesign}"
-export OD_BIND_HOST="${OD_BIND_HOST:-127.0.0.1}"
+export OD_HOST="${OD_HOST:-0.0.0.0}"
+export OD_BIND_HOST="${OD_BIND_HOST:-0.0.0.0}"
+export OD_ALLOW_PUBLIC_BIND_WITHOUT_TOKEN="${OD_ALLOW_PUBLIC_BIND_WITHOUT_TOKEN:-1}"
 export OD_PORT="${OD_PORT:-17456}"
 export OD_DATA_DIR="${OD_DATA_DIR:-/by/.od}"
 export OD_MEDIA_CONFIG_DIR="${OD_MEDIA_CONFIG_DIR:-$OD_DATA_DIR}"
@@ -158,7 +160,9 @@ if [ "$(id -u)" = "0" ] && [ "$OPEN_DESIGN_RUN_AS_ROOT" != "1" ]; then
         env NODE_ENV=production \
         NODE_OPTIONS="${OD_NODE_OPTIONS:---max-old-space-size=192}" \
         OD_BASE_PATH="$OD_BASE_PATH" \
+        OD_HOST="$OD_HOST" \
         OD_BIND_HOST="$OD_BIND_HOST" \
+        OD_ALLOW_PUBLIC_BIND_WITHOUT_TOKEN="$OD_ALLOW_PUBLIC_BIND_WITHOUT_TOKEN" \
         OD_PORT="$OD_PORT" \
         OD_DATA_DIR="$OD_DATA_DIR" \
         OD_MEDIA_CONFIG_DIR="$OD_MEDIA_CONFIG_DIR" \
@@ -180,7 +184,9 @@ else
     env NODE_ENV=production \
         NODE_OPTIONS="${OD_NODE_OPTIONS:---max-old-space-size=192}" \
         OD_BASE_PATH="$OD_BASE_PATH" \
+        OD_HOST="$OD_HOST" \
         OD_BIND_HOST="$OD_BIND_HOST" \
+        OD_ALLOW_PUBLIC_BIND_WITHOUT_TOKEN="$OD_ALLOW_PUBLIC_BIND_WITHOUT_TOKEN" \
         OD_PORT="$OD_PORT" \
         OD_DATA_DIR="$OD_DATA_DIR" \
         OD_MEDIA_CONFIG_DIR="$OD_MEDIA_CONFIG_DIR" \
