@@ -39,7 +39,7 @@ RUN set -eux; \
 FROM node:24-slim AS open-design-builder
 
 ARG OPEN_DESIGN_REPO=https://github.com/evanzmz/open-design.git
-ARG OPEN_DESIGN_REF=codex/base-path-env-toggle
+ARG OPEN_DESIGN_REF=tmp/base-path-env-toggle
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG http_proxy
