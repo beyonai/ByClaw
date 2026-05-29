@@ -373,6 +373,10 @@ def _replace_skill_placeholders(
             tool_name = f"{kind}_{code}"
 
         if tool_name not in tools_dict:
+            # 兼容 tools_dict key 带 data_ 前缀的情况（如 data_query_scene_xxx）
+            prefixed = f"data_{tool_name}"
+            if prefixed in tools_dict:
+                return prefixed
             warnings.append(f"⚠️ 工具 {tool_name} 未挂载到当前 agent，无法调用")
             return m.group(0)
         return tool_name
