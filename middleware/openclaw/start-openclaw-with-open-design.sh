@@ -15,12 +15,24 @@ export OPEN_DESIGN_HOME="${OPEN_DESIGN_HOME:-$OD_DATA_DIR/home}"
 export OPEN_DESIGN_AGENT_ID="${OPEN_DESIGN_AGENT_ID:-claude}"
 export OPEN_DESIGN_CLAUDE_MODEL="${OPEN_DESIGN_CLAUDE_MODEL:-sonnet}"
 
+OPEN_DESIGN_RUN_AS_ROOT=0
+
+is_writable_as_open_design() {
+    local dir="$1"
+
+    if [ "$(id -u)" = "0" ]; then
+        runuser -u "$OPEN_DESIGN_USER" -- test -w "$dir" -a -x "$dir"
+    else
+        test -w "$dir" -a -x "$dir"
+    fi
+}
+
 prepare_open_design_dir() {
     local dir="$1"
     local parent
 
-    if [ "$dir" = "/" ]; then
-        echo "[open-design] refusing to use / as a writable data directory" >&2
+    if [ -z "$dir" ] || [ "$dir" = "/" ]; then
+        echo "[open-design] refusing to use '$dir' as a writable data directory" >&2
         exit 64
     fi
 
@@ -28,12 +40,22 @@ prepare_open_design_dir() {
     mkdir -p "$parent" "$dir"
 
     if [ "$(id -u)" = "0" ]; then
-        if [ "$parent" != "/" ] && [ "$parent" != "." ]; then
-            chown "$OPEN_DESIGN_USER:$OPEN_DESIGN_USER" "$parent" 2>/dev/null || true
-            chmod u+rwx,go+rx "$parent" 2>/dev/null || true
+        chown "$OPEN_DESIGN_USER:$OPEN_DESIGN_USER" "$parent" 2>/dev/null || true
+        chmod u+rwx,go+rx "$parent" 2>/dev/null || true
+        chown -R "$OPEN_DESIGN_USER:$OPEN_DESIGN_USER" "$dir" 2>/dev/null || true
+        chmod -R u+rwX "$dir" 2>/dev/null || true
+    fi
+
+    if ! is_writable_as_open_design "$dir"; then
+        echo "[open-design] $dir is not writable as $OPEN_DESIGN_USER" >&2
+        ls -ld "$parent" "$dir" >&2 || true
+
+        if [ "$(id -u)" = "0" ] && [ -w "$dir" ] && [ -x "$dir" ]; then
+            echo "[open-design] falling back to run daemon as root because root can write $dir" >&2
+            OPEN_DESIGN_RUN_AS_ROOT=1
+        else
+            exit 1
         fi
-        chown -R "$OPEN_DESIGN_USER:$OPEN_DESIGN_USER" "$dir"
-        chmod -R u+rwX "$dir"
     fi
 }
 
@@ -117,8 +139,8 @@ else
     echo "[claude] ZHIPU_API_KEY/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_API_KEY is not set; Claude Code may require existing auth under $CLAUDE_CONFIG_DIR" >&2
 fi
 
-if [ "$(id -u)" = "0" ]; then
-    chown -R "$OPEN_DESIGN_USER:$OPEN_DESIGN_USER" "$OD_DATA_DIR" "$OD_MEDIA_CONFIG_DIR" "$CLAUDE_CONFIG_DIR" "$OPEN_DESIGN_HOME"
+if [ "$(id -u)" = "0" ] && [ "$OPEN_DESIGN_RUN_AS_ROOT" != "1" ]; then
+    chown -R "$OPEN_DESIGN_USER:$OPEN_DESIGN_USER" "$OD_DATA_DIR" "$OD_MEDIA_CONFIG_DIR" "$CLAUDE_CONFIG_DIR" "$OPEN_DESIGN_HOME" 2>/dev/null || true
 fi
 
 if [ "$#" -eq 0 ]; then
@@ -131,7 +153,7 @@ echo "[open-design] url: http://${OD_BIND_HOST}:${OD_PORT}${OD_BASE_PATH}"
 
 cd "$OPEN_DESIGN_ROOT"
 
-if [ "$(id -u)" = "0" ]; then
+if [ "$(id -u)" = "0" ] && [ "$OPEN_DESIGN_RUN_AS_ROOT" != "1" ]; then
     runuser -u "$OPEN_DESIGN_USER" -- \
         env NODE_ENV=production \
         NODE_OPTIONS="${OD_NODE_OPTIONS:---max-old-space-size=192}" \
@@ -157,7 +179,14 @@ if [ "$(id -u)" = "0" ]; then
 else
     env NODE_ENV=production \
         NODE_OPTIONS="${OD_NODE_OPTIONS:---max-old-space-size=192}" \
+        OD_BASE_PATH="$OD_BASE_PATH" \
+        OD_BIND_HOST="$OD_BIND_HOST" \
+        OD_PORT="$OD_PORT" \
+        OD_DATA_DIR="$OD_DATA_DIR" \
+        OD_MEDIA_CONFIG_DIR="$OD_MEDIA_CONFIG_DIR" \
         HOME="$OPEN_DESIGN_HOME" \
+        CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" \
+        CLAUDE_BIN="$CLAUDE_BIN" \
         node apps/daemon/dist/cli.js --no-open &
 fi
 open_design_pid=$!
