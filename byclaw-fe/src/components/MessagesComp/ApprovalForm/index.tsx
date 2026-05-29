@@ -1,81 +1,30 @@
 // tslint:disable:ordered-imports
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import classnames from 'classnames';
 
-import { get, keys, set, isString, isNil, concat } from 'lodash';
-import { Form, Button, Input, Select, Col, Row, Space, Dropdown, Tag } from 'antd';
-import { InfoCircleOutlined } from '@ant-design/icons';
+import { get, keys, set, isBoolean, size } from 'lodash';
+import { Form, Button, Steps } from 'antd';
 // @ts-ignore
 import { useIntl, getLocale } from '@umijs/max';
 
-import TermSelectDropdown from './TermSelectDropdown';
-import { buildFormFieldName, buildFormItemPath, splitKey } from './utils';
+import { splitKey } from './utils';
+import FormFieldsRender from './components/FormFieldsRender';
 
 import { IMessageState } from '@/constants/message';
 import { IMessageListItem } from '@/typescript/message';
 import { updateMessageStructById } from '@/service/message';
 import useGlobal from '@/hooks/useGlobal';
+import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
 
 import type { IMessage } from '@/typescript/message';
+import type { OperationFormConfirmation } from './index.d';
 
 import styles from './index.module.less';
 
-export type IForm = {
-  formType: 'input' | 'select' | 'textarea' | 'array' | 'term_select';
-  fieldName: string;
-  fieldCode: string;
-  defaultValue: string;
-  description: string;
-  optional: string;
-  fieldValue?: string | number | Array<string | number>;
-
-  requestType: number;
-  fieldType: string;
-
-  readonly?: boolean;
-  isHidden?: boolean;
-  required?: boolean;
-
-  children?: Array<IForm[]>;
-
-  term?: {
-    termSet: string;
-    termTypeCode: string;
-    termField: string;
-    datasetId: number;
-  };
-  options?: Array<{
-    label: string;
-    value: string | number;
-  }>;
-  page?: number;
-  pageSize?: number;
-  total?: number;
-  hasMore?: boolean;
-  keyword?: string;
-  termOptionsData?: unknown;
-  termOptionsLoading?: boolean;
-};
-
-export type IMessageListItemContent = {
-  formId: string;
-  substance: Array<IForm[]>;
-  title?: string;
-  description?: string;
-  sourceAgentType?: string;
-  metadata?: string;
-  extParam?: {
-    state: 'PENDING' | 'APPROVED' | 'REJECTED';
-  } & Record<string, unknown>;
-  confirmed?: boolean;
-
-  orginContent: Record<string, unknown>;
-};
-
 export type IProps = {
   message: IMessage;
-  updateMessageListItemContent: (messageListItemContent: IMessageListItemContent) => void;
-  messageListItemContent: IMessageListItemContent;
+  updateMessageListItemContent: (messageListItemContent: OperationFormConfirmation) => void;
+  messageListItemContent: OperationFormConfirmation;
 
   messageListItem?: IMessageListItem;
   thinkListItem?: IMessageListItem;
@@ -83,187 +32,10 @@ export type IProps = {
   messageIdx: number;
 };
 
-const { TextArea } = Input;
-
-function getArrayFieldValues(children: Array<IForm[]>) {
-  return children.flat().map((child) => {
-    let selectName = child.fieldValue ?? child.defaultValue;
-
-    if (Array.isArray(child?.options)) {
-      selectName = concat([], child?.fieldValue)
-        .map((item) => {
-          const target = child.options?.find((option) => option.value === item);
-          return target?.label ?? item;
-        })
-        .join('、');
-    }
-
-    return `${child.fieldName}：${selectName ?? ''}`;
-  });
-}
-
-type FormFieldsRenderProps = {
-  isDisable: boolean;
-  substance: Array<IForm[]>;
-  parentPath?: string;
-};
-
-type FormItemsRenderProps = {
-  idx: string;
-  item: IForm;
-  isDisable: boolean;
-  renderNestedForm: (props: FormFieldsRenderProps) => React.ReactNode;
-};
-
-const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRenderProps) => {
-  const {
-    formType,
-    fieldCode,
-    fieldName,
-    defaultValue,
-    optional,
-    description,
-    fieldValue,
-    children,
-    readonly,
-    isHidden,
-    required,
-    fieldType,
-  } = item;
-
-  const isMultiple = fieldType.includes('array');
-
-  const [, forceUpdate] = useState(0);
-
-  let myDisabled = readonly || isDisable;
-  let key = buildFormFieldName(fieldCode, idx);
-  let span = ['textarea'].includes(formType) ? 24 : 12;
-  if (isHidden) {
-    span = 0;
-  }
-
-  let name: string | undefined = key;
-  let rules: { required: boolean | undefined }[] | undefined = [{ required }];
-  let initialValue: string | number | (string | number)[] | undefined = fieldValue ?? defaultValue;
-  let comp = <Input disabled={myDisabled} />;
-
-  if (['array', 'object'].includes(formType) && Array.isArray(children)) {
-    name = undefined;
-    rules = undefined;
-    initialValue = undefined;
-
-    const childValues = getArrayFieldValues(children);
-
-    comp = (
-      <Dropdown
-        trigger={['click']}
-        popupRender={() => (
-          <div className={styles.dropdownContent}>
-            {renderNestedForm({ isDisable, substance: children, parentPath: idx })}
-          </div>
-        )}
-        onOpenChange={(open) => {
-          if (!open) {
-            forceUpdate(Date.now());
-          }
-        }}
-      >
-        <div className={styles.arrayFieldPreview}>
-          {childValues.length > 0 ? (
-            childValues.map((value, valueIdx) => (
-              <Tag className={classnames(styles.arrayFieldTag, 'textEllipsis')} key={`${value}_${valueIdx}`}>
-                {value}
-              </Tag>
-            ))
-          ) : (
-            <span className={styles.arrayFieldPlaceholder}>{fieldName}</span>
-          )}
-        </div>
-      </Dropdown>
-    );
-  }
-
-  if (formType === 'select') {
-    let options = [];
-    try {
-      let optionalArr = [];
-
-      if (isString(optional)) {
-        const changed = optional.replace(/'/g, '"');
-        optionalArr = JSON.parse(changed);
-      } else {
-        optionalArr = optional;
-      }
-
-      options = optionalArr.map((o: string) => ({
-        label: o,
-        value: o,
-      }));
-    } catch (e) {
-      console.error(e);
-    }
-
-    comp = <Select options={options} disabled={myDisabled} mode={isMultiple ? 'multiple' : undefined} />;
-  }
-
-  if (formType === 'term_select') {
-    comp = <TermSelectDropdown item={item} disabled={myDisabled} isMultiple={isMultiple} />;
-  }
-
-  if (formType === 'textarea') {
-    comp = <TextArea style={{ resize: 'none', overflow: 'auto' }} rows={4} disabled={myDisabled} />;
-  }
-
-  if (formType === 'input' && isMultiple) {
-    comp = <Select mode="tags" />;
-  }
-
-  return (
-    <Col span={span} key={key}>
-      <Form.Item
-        name={name}
-        label={fieldName}
-        rules={rules}
-        tooltip={description ? { title: description, icon: <InfoCircleOutlined /> } : undefined}
-        initialValue={initialValue}
-      >
-        {comp}
-      </Form.Item>
-    </Col>
-  );
-};
-
-function FormFieldsRender(props: FormFieldsRenderProps) {
-  const { isDisable, substance, parentPath } = props;
-
-  return (
-    <>
-      {substance?.map?.((list, lidx) => {
-        return (
-          <Row gutter={24} key={lidx} className={styles.formRow}>
-            {list.map((item, idx) => {
-              const key = buildFormItemPath(lidx, idx, parentPath);
-
-              return (
-                <FormItemsRender
-                  key={key}
-                  idx={key}
-                  item={item}
-                  isDisable={isDisable}
-                  renderNestedForm={(formFieldsRenderProps) => <FormFieldsRender {...formFieldsRenderProps} />}
-                />
-              );
-            })}
-          </Row>
-        );
-      })}
-    </>
-  );
-}
+type StepStatus = 'wait' | 'process' | 'finish' | 'error';
 
 function ApprovalForm(props: IProps) {
   const { messageListItemContent, message, messageListItem, thinkListItem } = props;
-
   const { uuid, orginContent } = messageListItem || thinkListItem || {};
 
   const { messageId } = message;
@@ -274,19 +46,89 @@ function ApprovalForm(props: IProps) {
     formId,
     sourceAgentType,
     metadata = '',
-    confirmed,
+    formStatus,
   } = messageListItemContent || {};
-
   const { EventEmitter } = useGlobal();
+
+  const stepDescriptionRef = useRef<HTMLDivElement>(null);
 
   const intl = useIntl();
   const [form] = Form.useForm();
 
   // 是否显示按钮
-  const [isDisable, setIsDisableBtn] = useState<boolean>(!isNil(confirmed));
+  const [isDisable, setIsDisableBtn] = useState<boolean>(formStatus === IFormStatus.FINISH);
+  const [currentStep, setCurrentStep] = useState<number>(0);
+  const [confirmedVersion, setConfirmedVersion] = useState<number>(0);
 
   const isThinkingProcess = !!props.thinkListItem;
   const updateField = isThinkingProcess ? 'inferLog' : 'messageStruct';
+  const totalSteps = substance.length;
+  const currentStepIndex = Math.min(currentStep, Math.max(totalSteps - 1, 0));
+  const currentStepItem = substance[currentStepIndex];
+  const isFirstStep = currentStepIndex <= 0;
+  const isLastStep = currentStepIndex >= totalSteps - 1;
+  const allStepsConfirmed = useMemo(
+    () => substance.length > 0 && substance.every((item) => typeof item.confirmed === 'boolean'),
+    [confirmedVersion, substance]
+  );
+
+  const stepItems = useMemo(
+    () =>
+      substance.map((item, idx) => {
+        let status: StepStatus = 'wait';
+
+        if (isBoolean(item.confirmed)) {
+          status = item.confirmed ? 'finish' : 'error';
+        } else if (idx === currentStepIndex) {
+          status = 'process';
+        }
+
+        return {
+          key: item.toolCallId || item.actionCode || `${idx}`,
+          status,
+          title: item.title || item.actionName || item.toolName || `${idx + 1}`,
+        };
+      }),
+    [confirmedVersion, currentStepIndex, substance]
+  );
+
+  const scrollToStepDescription = useCallback(() => {
+    const scroll = () => {
+      stepDescriptionRef.current?.scrollIntoView?.({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    };
+
+    if (typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(scroll);
+      return;
+    }
+
+    window.setTimeout(scroll, 0);
+  }, []);
+
+  const handlePrevStep = () => {
+    setCurrentStep((prevStep) => Math.max(prevStep - 1, 0));
+  };
+
+  const handleNextStep = async () => {
+    try {
+      await form.validateFields();
+      setCurrentStep((prevStep) => Math.min(prevStep + 1, Math.max(totalSteps - 1, 0)));
+    } catch (e) {
+      // 保持当前页，让 antd Form 展示字段校验错误。
+    }
+  };
+
+  const handleConfirmCurrentStep = (nextConfirmed: boolean) => {
+    if (!currentStepItem) return;
+
+    set(currentStepItem, 'confirmed', nextConfirmed);
+    setConfirmedVersion(Date.now());
+
+    handleNextStep();
+  };
 
   const myUpdateMessageStructById = useCallback(
     (newOrginContent: Record<string, unknown>) => {
@@ -307,7 +149,7 @@ function ApprovalForm(props: IProps) {
     [uuid, messageId, updateField]
   );
 
-  const myToApproveForm = async (confirmed: boolean) => {
+  const myToApproveForm = async () => {
     await form.validateFields();
     // const values = form.getFieldsValue();
 
@@ -319,25 +161,16 @@ function ApprovalForm(props: IProps) {
       console.error(e);
     }
 
-    let myOrginContent = {};
+    let operationForm = {};
     try {
-      myOrginContent = JSON.parse(orginContent || '');
-      set(myOrginContent, 'rule', substance);
+      operationForm = JSON.parse(orginContent || '');
+      set(operationForm, 'actions', substance);
+      set(operationForm, 'formStatus', IFormStatus.FINISH);
     } catch (e) {
       console.error(e);
     }
 
-    let queryQuestion = intl.formatMessage({ id: 'common.cancel' });
-    if (confirmed) {
-      queryQuestion = intl.formatMessage({ id: 'common.submit' });
-    }
-
-    const operationForm = {
-      ...myOrginContent,
-      confirmed,
-    };
-
-    set(messageListItemContent, 'confirmed', confirmed);
+    const queryQuestion = intl.formatMessage({ id: 'common.submit' });
 
     const payload = {
       sendProps: {
@@ -347,7 +180,6 @@ function ApprovalForm(props: IProps) {
         payload: {
           actionType: 'RESUME',
           sourceAgentType,
-          confirmed,
           extParams: {
             humanInput: {
               operationForm,
@@ -372,6 +204,7 @@ function ApprovalForm(props: IProps) {
     };
 
     setIsDisableBtn(true);
+    console.log(payload, operationForm);
     EventEmitter.emit('beyond-chat-on-send-msg', payload);
 
     myUpdateMessageStructById(operationForm);
@@ -389,7 +222,7 @@ function ApprovalForm(props: IProps) {
           {description || ''}
         </div>
       </div>
-      <div className={styles.myFormContent}>
+      <div className={styles.myFormContent} ref={stepDescriptionRef}>
         <Form
           form={form}
           name={formId}
@@ -406,32 +239,97 @@ function ApprovalForm(props: IProps) {
             });
           }}
         >
-          <FormFieldsRender isDisable={isDisable} substance={substance} />
+          {size(stepItems) > 1 && (
+            <Steps
+              className={styles.approvalSteps}
+              current={currentStepIndex}
+              direction="horizontal"
+              labelPlacement="vertical"
+              items={stepItems}
+            />
+          )}
+          {currentStepItem ? (
+            <div className={styles.stepDescription}>
+              {/* {currentStepItem.description ? (
+                <div className={styles.stepIntro}>{currentStepItem.description}</div>
+              ) : null} */}
+              <div className={styles.stepFormContent}>
+                <FormFieldsRender
+                  isDisable={isDisable}
+                  substance={currentStepItem.rule || []}
+                  pathPrefix={`${currentStepIndex}.rule`}
+                />
+              </div>
+            </div>
+          ) : null}
         </Form>
       </div>
-      <div className={classnames(styles.myFormFooter, 'ub ub-pe ub-ac')}>
-        <Space>
-          <Button
-            key={`${messageId}_reject_btn`}
-            // type="primary"
-            onClick={() => {
-              myToApproveForm(false);
-            }}
-            disabled={isDisable}
-          >
-            {intl.formatMessage({ id: 'common.cancel' })}
-          </Button>
-          <Button
-            key={`${messageId}_approve_btn`}
-            type="primary"
-            onClick={() => {
-              myToApproveForm(true);
-            }}
-            disabled={isDisable}
-          >
-            {intl.formatMessage({ id: 'common.submit' })}
-          </Button>
-        </Space>
+      <div className={classnames(styles.myFormFooter, 'ub ub-ver gap8')}>
+        <div className={'ub ub-pe ub-ac gap8'}>
+          {size(stepItems) > 1 && (
+            <Button
+              key={`${messageId}_prev_btn`}
+              onClick={() => {
+                handlePrevStep();
+                scrollToStepDescription();
+              }}
+              disabled={isFirstStep}
+            >
+              上一步
+            </Button>
+          )}
+          {isDisable && (
+            <Button
+              key={`${messageId}_next_btn`}
+              onClick={async () => {
+                await handleNextStep();
+                scrollToStepDescription();
+              }}
+              disabled={isLastStep}
+            >
+              下一步
+            </Button>
+          )}
+          {!isDisable && (
+            <>
+              <Button
+                key={`${messageId}_skip_btn`}
+                onClick={() => {
+                  handleConfirmCurrentStep(false);
+                  handleNextStep();
+                }}
+                disabled={isDisable}
+                style={{ marginLeft: 'auto' }}
+              >
+                跳过
+              </Button>
+              <Button
+                key={`${messageId}_confirm_btn`}
+                type="primary"
+                onClick={() => {
+                  handleConfirmCurrentStep(true);
+                  handleNextStep();
+                }}
+                disabled={isDisable}
+              >
+                确定
+              </Button>
+            </>
+          )}
+        </div>
+        {!isDisable && isLastStep && allStepsConfirmed ? (
+          <div className={'ub ub-pe ub-ac gap8'} style={{ borderTop: '1px solid #e5e5e5', paddingTop: '8px' }}>
+            <Button
+              key={`${messageId}_approve_btn`}
+              type="primary"
+              onClick={() => {
+                myToApproveForm();
+              }}
+            >
+              {intl.formatMessage({ id: 'common.submit' })}
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

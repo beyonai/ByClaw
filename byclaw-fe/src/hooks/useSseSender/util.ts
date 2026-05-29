@@ -1,4 +1,4 @@
-import { get, isPlainObject, set, isString } from 'lodash';
+import { get, isPlainObject, set, isString, omit } from 'lodash';
 
 import { formatSSEDate as formatAgentSSEDate } from './agent/util';
 import { isTextContentType } from '@/utils/messgae';
@@ -100,13 +100,22 @@ const approvalFormHandler = (sseDataObj: any) => {
 
   const content = get(sseDataObj, 'choices.0.delta.content', '');
 
+  let resp: Record<string, any> = {};
+
+  try {
+    resp = JSON.parse(content) || {};
+  } catch (e) {
+    console.error(e, content);
+  }
+
   return {
     message: {
       contentType: SSEMessageType.approvalForm,
       content: {
         sourceAgentType,
         metadata,
-        ...formatAgentSSEDate(content),
+        ...omit(resp, ['actions']),
+        substance: resp.actions || [],
       },
       status: SSEEventStatus.done,
     },

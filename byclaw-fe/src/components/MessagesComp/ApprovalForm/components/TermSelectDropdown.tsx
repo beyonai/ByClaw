@@ -4,13 +4,13 @@ import { Dropdown, Empty, Input, Spin, Tooltip } from 'antd';
 
 import { getTermsOptions } from '@/service/message';
 
-import styles from './index.module.less';
-import { mergeTermOptions, normalizeTermOptions } from './utils';
+import styles from '../index.module.less';
+import { mergeTermOptions, normalizeTermOptions } from '../utils';
 
-import type { IForm } from './index';
+import type { TermSelectFormField } from '../index.d';
 
 type IProps = {
-  item: IForm;
+  item: TermSelectFormField;
   value?: TermValue | TermValue[];
   disabled?: boolean;
   isMultiple?: boolean;
