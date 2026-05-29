@@ -83,3 +83,11 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
         "path": ""
     }
 ]', '企业后台菜单管理');
+
+delete from byai.byai_system_config where param_code in('DIG_EMPLOYEE_FILE_UPLOAD_CONFIG');
+INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc) VALUES (10863540, 'text', 'DIG_EMPLOYEE_FILE_UPLOAD_CONFIG', '数字员工文件上传全局配置', 'DIG_EMPLOYEE_FILE_UPLOAD_CONFIG', '{
+    "enabled": true,
+    "allowedFileTypes": [".docx", ".doc", ".pdf", ".txt", ".md", ".xlsx", ".xls", ".csv", ".pptx", ".ppt", ".png", ".jpeg", ".jpg",".mp4", ".mov",".html", ".zip", ".gz"],
+    "maxFileSize": 100,
+    "maxFileCount": 5
+}', '数字员工文件上传全局配置');
