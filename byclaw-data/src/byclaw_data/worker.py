@@ -878,12 +878,14 @@ async def _consume_agent_events(
                     "call_view_ids": dyn_view_ids or [],
                 }
         await context.complex_ask_user(
-            AskUserEvent(
+            event=AskUserEvent(
                 prompt=interrupt_ev.prompt,
                 metadata={
                     **custom_metadata, **header_metadata
                 },
-            )
+            ),
+            message_id=getattr(context, "message_id", None),
+            parent_message_id=getattr(context, "parent_message_id", None),
         )
     elif interrupt_ev.reason == "PARADIGM_CLARIFICATION":
         paradigm_list: list[dict[str, Any]] = []
@@ -908,12 +910,14 @@ async def _consume_agent_events(
                 "call_view_ids": dyn_view_ids or [],
             }
         await context.complex_ask_user(
-            AskUserEvent(
+            event=AskUserEvent(
                 prompt=interrupt_ev.prompt,
                 metadata={
                     **custom_metadata, **header_metadata
                 },
-            )
+            ),
+            message_id = getattr(context, "message_id", None),
+            parent_message_id = getattr(context, "parent_message_id", None),
         )
     else:
         await context.ask_user(
@@ -2774,11 +2778,13 @@ class DataCloudWorker(GatewayWorker):
                                 "clarify_knowledge": clarify_knowledge,
                             }
                     await context.complex_ask_user(
-                        AskUserEvent(
+                        event=AskUserEvent(
                             prompt=prompt,
                             metadata={
                                 **user_metadata, **header_metadata},
-                        )
+                        ),
+                        message_id=getattr(context, "message_id", None),
+                        parent_message_id=getattr(context, "parent_message_id", None),
                     )
                 elif operation_form:
                     user_metadata = {
@@ -2794,11 +2800,13 @@ class DataCloudWorker(GatewayWorker):
                                 "operation_form": operation_form,
                             }
                     await context.complex_ask_user(
-                        AskUserEvent(
+                        event=AskUserEvent(
                             prompt=prompt,
                             metadata={
                                 **user_metadata, **header_metadata},
-                        )
+                        ),
+                        message_id=getattr(context, "message_id", None),
+                        parent_message_id=getattr(context, "parent_message_id", None),
                     )
                 else:
                     await context.ask_user(
