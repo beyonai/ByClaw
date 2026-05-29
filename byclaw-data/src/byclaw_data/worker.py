@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import sys
@@ -50,7 +51,6 @@ from datacloud_analysis.logging_setup import setup_logging
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.types import Command
-import logging
 
 from byclaw_data.byclaw_data_clarification import ByclawDataClarification
 
@@ -1858,6 +1858,39 @@ class DataCloudWorker(GatewayWorker):
                 "OntologyAgent not initialized; ensure start_heartbeat() completed"
             )
 
+            # ── 动态路径 Skill 加载：resource_list 里有 SKILL 条目时注入 task_prompt ──
+            _dyn_user_code = str(
+                getattr(getattr(command, "header", None), "user_code", "") or ""
+            ).strip()
+            _dyn_beyond_token = header_metadata.get("Beyond-Token", "")
+            _dyn_skill_task_prompt = _load_skills(
+                resource_list=_resource_list_for_extract,
+                user_code=_dyn_user_code,
+                tools_dict={},  # 动态路径无 AgentConfig，占位符替换跳过
+            )
+            _dyn_minio_root = os.environ.get(
+                "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
+            )
+            _dyn_skill_ws = str(Path(_dyn_minio_root) / f"byclaw-{_dyn_user_code}" / "by")
+            _dyn_extras: dict[str, Any] = {
+                "user_code": _dyn_user_code,
+                "beyond_token": _dyn_beyond_token,
+                "skill_workspace_dir": _dyn_skill_ws,
+            }
+            if _dyn_skill_task_prompt:
+                _dyn_extras["task_prompt"] = _dyn_skill_task_prompt
+                logger.info(
+                    "Skill loaded (dynamic path): session=%s skill_workspace_dir=%s",
+                    context.session_id,
+                    _dyn_skill_ws,
+                )
+            else:
+                logger.info(
+                    "No skill found (dynamic path): session=%s resource_list_len=%d",
+                    context.session_id,
+                    len(_resource_list_for_extract),
+                )
+
             if isinstance(command, ResumeCommand) or _paradigm_resume_value is not None:
                 raw_paradigm = (
                     _paradigm_resume_value
@@ -1877,6 +1910,7 @@ class DataCloudWorker(GatewayWorker):
                     object_codes=_dyn_object_ids,
                     user_code=_get_gateway_user_code(context),
                     session_id=context.session_id,
+                    extras=_dyn_extras,
                 )
             else:
                 latest_user_text_dyn = _latest_user_text_from_content(
@@ -1893,6 +1927,7 @@ class DataCloudWorker(GatewayWorker):
                     thread_id=dyn_thread_id,
                     user_code=_get_gateway_user_code(context),
                     session_id=context.session_id,
+                    extras=_dyn_extras,
                 )
 
             logger.info(
