@@ -252,9 +252,7 @@ RUN chmod a+x /usr/local/bin/filebrowser
 
 # add open-design starter
 COPY middleware/openclaw/start-openclaw-with-open-design.sh /usr/local/bin/start-openclaw-with-open-design
-COPY middleware/openclaw/start-openclaw-with-open-design-and-filebrowser.sh /usr/local/bin/start-openclaw-with-open-design-and-filebrowser
-RUN chmod a+x /usr/local/bin/start-openclaw-with-open-design \
-    /usr/local/bin/start-openclaw-with-open-design-and-filebrowser
+RUN chmod a+x /usr/local/bin/start-openclaw-with-open-design
 
 # add dingTalk cli dws
 # RUN curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh
