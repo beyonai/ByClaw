@@ -1,6 +1,6 @@
 import MessageForm, { IFormItem } from '@/components/MessageForm';
 import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
-import type { IMessage } from '@/typescript/message';
+import type { IMessage, IMessageListItem } from '@/typescript/message';
 import useGlobal from '@/hooks/useGlobal';
 import classnames from 'classnames';
 import { get, isEmpty } from 'lodash';
@@ -32,6 +32,8 @@ export type IProps = {
   message: IMessage;
   updateMessageListItemContent: (messageListItemContent: IMessageListItemContent) => void;
   messageListItemContent: IMessageListItemContent;
+  messageListItem?: IMessageListItem;
+  thinkListItem?: IMessageListItem;
 };
 
 const emptyArr: IFormItem[] = [];
@@ -107,6 +109,7 @@ function ThinkTaskUserInput(props: IProps) {
   const assistantLlmMessageId = messageInfo?.messageId ?? messageInfo?.msgId;
   const { sourceAgentType } = messageListItemContent || {};
   const { pluginMachineFields = emptyArr, formStatus, humanTool } = get(messageListItemContent, 'substance') || {};
+  const { resumeMessageId } = props.messageListItem || props.thinkListItem || {};
 
   /** content 级（SSE）或表单 JSON 内嵌 */
   const stepIdRaw =
@@ -212,6 +215,7 @@ function ThinkTaskUserInput(props: IProps) {
                   },
                   humanTool,
                   sourceAgentType,
+                  resumeMessageId,
                 };
                 if (stepId) {
                   payload.taskStepId = stepId;
