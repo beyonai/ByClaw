@@ -286,7 +286,8 @@ class SandboxServiceTest {
         when(sandboxRecordMapper.selectReconcileSandboxesPage(isNull(), isNull(), eq(1)))
             .thenReturn(List.of(record));
         when(sandboxLifecycleFacade.getSandbox(any(SandboxInfo.class))).thenReturn(SandboxResponse.success(null));
-        when(sandboxRecordMapper.markReleased(eq(1L), eq("idle-timeout"), any(Date.class), eq(0))).thenReturn(1);
+        when(sandboxRecordMapper.markReleased(eq(1L), eq("release.remote.missing"), any(Date.class), eq(0)))
+            .thenReturn(1);
 
         SandboxLaunchData launchData = new SandboxLaunchData();
         launchData.setSandboxId("sandbox-new");
