@@ -53,7 +53,7 @@ public class SandboxController {
      * @return ResponseUtil
      */
     @PostMapping("/heartbeat")
-    @Operation(summary = "沙箱心跳", description = "前端定期调用此接口，传入resourceId以保持沙箱活跃，防止空闲超时自动回收")
+    @Operation(summary = "沙箱心跳", description = "前端定期调用此接口，刷新当前用户所有运行中沙箱的活跃时间，防止空闲超时自动回收")
     @ApiResponses({
         @ApiResponse(responseCode = "0", description = "心跳成功"),
         @ApiResponse(responseCode = "-1", description = "心跳失败，参数缺失或沙箱不存在")
