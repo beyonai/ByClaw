@@ -73,11 +73,20 @@ public class SandboxService {
     /** 沙箱状态：已释放 */
     private static final String STATUS_RELEASED = "RELEASED";
 
-    private static final String RELEASE_REASON_IDLE_TIMEOUT = "idle-timeout";
+    /** 手动释放终止原因。 */
+    private static final String RELEASE_REASON_MANUAL = "release.manual";
 
-    private static final String RELEASE_REASON_MANUAL = "manual-release";
+    /** 自动空闲超时释放终止原因。 */
+    private static final String RELEASE_REASON_AUTO_IDLE_TIMEOUT = "release.auto.idle-timeout";
 
-    private static final String RELEASE_REASON_REMOTE_SANDBOX_EXIT = RELEASE_REASON_IDLE_TIMEOUT;
+    /** 远端沙箱退出后终止旧记录的原因。 */
+    private static final String RELEASE_REASON_REMOTE_EXIT = "release.remote.exit";
+
+    /** reconcile 发现远端不存在或不可复用时终止旧记录的原因。 */
+    private static final String RELEASE_REASON_REMOTE_MISSING = "release.remote.missing";
+
+    /** 启动失败的终止原因。 */
+    private static final String FAIL_REASON_LAUNCH = "fail.launch";
 
     /** 集成类型：沙箱 */
     private static final String INTEGRATION_TYPE_SANDBOX = "FROM_SANDBOX";
@@ -222,7 +231,7 @@ public class SandboxService {
             if (existingRecord != null) {
                 LOGGER.info("重拉前命中旧活跃记录：{}", sandboxRef(existingRecord));
                 int marked = sandboxRecordMapper.markReleased(existingRecord.getId(),
-                    RELEASE_REASON_REMOTE_SANDBOX_EXIT, new Date(), existingRecord.getLockVersion());
+                    RELEASE_REASON_REMOTE_EXIT, new Date(), existingRecord.getLockVersion());
                 if (marked > 0) {
                     incrementVersions(existingRecord, true);
                     sandboxMetadataCache.evict(existingRecord.getUserCode(), existingRecord.getSandboxType());
@@ -486,7 +495,7 @@ public class SandboxService {
         if (response == null || !response.isSuccess() || response.getData() == null) {
             String errorMsg = response != null ? response.getMessage() : "响应为空";
             LOGGER.error("启动沙箱失败，记录：{}，原因：{}", sandboxRef(record), errorMsg);
-            int failed = sandboxRecordMapper.updateStatusToFailed(record.getId(), errorMsg, new Date(),
+            int failed = sandboxRecordMapper.updateStatusToFailed(record.getId(), FAIL_REASON_LAUNCH, new Date(),
                 record.getLockVersion());
             if (failed > 0) {
                 incrementVersions(record, true);
@@ -946,7 +955,7 @@ public class SandboxService {
                 try {
                     LOGGER.info("命中超时释放候选：{}，lastAccessTime：{}，autoRelease：{}",
                         sandboxRef(record), record.getLastAccessTime(), record.getAutoRelease());
-                    doRemoveSandbox(record, RELEASE_REASON_IDLE_TIMEOUT);
+                    doRemoveSandbox(record, RELEASE_REASON_AUTO_IDLE_TIMEOUT);
                     cleanedCount++;
                     report.addAffectedSandbox(sandboxRef(record));
                 }
@@ -1117,7 +1126,7 @@ public class SandboxService {
 
                     LOGGER.warn("沙箱一致性检测发现远端沙箱不存在或不可复用，准备重新拉起：{}，remoteState={}",
                         sandboxRef(record), remoteInstance != null ? remoteInstance.getState() : null);
-                    int marked = sandboxRecordMapper.markReleased(record.getId(), RELEASE_REASON_REMOTE_SANDBOX_EXIT,
+                    int marked = sandboxRecordMapper.markReleased(record.getId(), RELEASE_REASON_REMOTE_MISSING,
                         new Date(), record.getLockVersion());
                     if (marked == 0) {
                         report.addSkippedSandbox(sandboxRef(record));
