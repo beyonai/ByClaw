@@ -2,7 +2,8 @@
 FROM eclipse-temurin:21-jre-alpine
 
 # 安装必要的工具
-RUN apk add --no-cache curl
+RUN apk add --no-cache curl nodejs npm && \
+    node -e "const major = Number(process.versions.node.split('.')[0]); if (major < 20) { throw new Error('OpenCLI requires Node.js >= 20'); }"
 
 # 创建应用目录
 WORKDIR /app
@@ -23,6 +24,14 @@ ARG BUILD_COMMIT_MSG=unknown
 RUN printf '{"version":"%s","branch":"%s","commit":"%s","commitFull":"%s","buildTime":"%s","module":"%s","commitMsg":"%s"}\n' \
     "$BUILD_VERSION" "$BUILD_BRANCH" "$BUILD_COMMIT" "$BUILD_COMMIT_FULL" "$BUILD_TIME" "$BUILD_MODULE" "$BUILD_COMMIT_MSG" \
     > /app/build-info.json && chown appuser:appgroup /app/build-info.json
+
+# 安装 ByKC 生态采集所需的 OpenCLI 运行时
+COPY runtime/opencli/package.json runtime/opencli/pnpm-lock.yaml /opt/byclaw/opencli/
+RUN npm config set registry https://registry.npmmirror.com --global && \
+    npm install -g pnpm@9.0.0 && \
+    cd /opt/byclaw/opencli && \
+    pnpm install --prod --frozen-lockfile && \
+    chown -R appuser:appgroup /opt/byclaw/opencli
 
 # 复制构建好的 JAR 文件
 COPY --chown=appuser:appgroup target/*.jar app.jar

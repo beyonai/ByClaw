@@ -12,6 +12,7 @@ import useResourceDetail from '@/hooks/useResourceDetail';
 import { useSelector } from '@umijs/max';
 import type { IState as UseEmployeesIState } from '@/models/useEmployees.ts';
 import { get } from 'lodash';
+import { request } from '@/service/common/request';
 
 function sleep(time = 0) {
   return new Promise((resolve) => {
@@ -120,32 +121,46 @@ export function useCardAction({ setPortalContainer }: { setPortalContainer: (con
     }
 
     try {
-      // 构建请求配置
-      const requestOptions: RequestInit = {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          ...headers,
-        },
-      };
+      const payload = body || params || {};
+      const isInternalByClawApi = url.startsWith('/byaiService/');
+      let result: any;
 
-      // 处理请求参数
-      let requestUrl = url;
-      if (method === 'GET' && params) {
-        const queryParams = new URLSearchParams(params as Record<string, string>).toString();
-        requestUrl = `${url}${queryParams ? `?${queryParams}` : ''}`;
-      } else if (body) {
-        requestOptions.body = typeof body === 'string' ? body : JSON.stringify(body);
-      } else if (params) {
-        requestOptions.body = JSON.stringify(params);
+      if (isInternalByClawApi) {
+        result = await request(
+          url,
+          payload,
+          {
+            headers: {
+              ...headers,
+            },
+            responseCfg: {
+              customHandle: true,
+            },
+          },
+          method
+        );
+      } else {
+        const requestUrl =
+          method === 'GET' && params
+            ? `${url}${url.includes('?') ? '&' : '?'}${new URLSearchParams(params as Record<string, string>)}`
+            : url;
+        const response = await fetch(requestUrl, {
+          method,
+          headers: {
+            ...(method === 'GET' ? {} : { 'Content-Type': 'application/json' }),
+            ...headers,
+          },
+          body: method === 'GET' ? undefined : JSON.stringify(payload),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        result = contentType.includes('application/json') ? await response.json() : await response.text();
+        if (!response.ok) {
+          throw new Error(typeof result === 'string' ? result : result?.message || response.statusText);
+        }
       }
 
-      // 发送请求
-      const response = await fetch(requestUrl, requestOptions);
-      const result = await response.json();
-
       // 计算接口是否成功
-      let isSuccess = response.ok;
+      let isSuccess = get(result, 'code') === undefined || `${get(result, 'code')}` === '0';
       if (successExpression) {
         const expr = successExpression.trim();
 
