@@ -64,7 +64,15 @@ public class ModelManagementApplicationService {
      * 分页列表（列表仅返回 apiTokenMasked，不返回明文 apiToken）
      */
     public ModelListResponse getModelListByPage(ModelListRequest request) {
-        return null;
+        PageInfo<ByaiAimodel> page = byaiAimodelDomainService.listByCondition(request);
+        List<ModelVO> rows = page.getList() == null ? List.of()
+            : page.getList().stream().map(e -> entityToModelVO(e, true)).collect(Collectors.toList());
+        ModelListResponse response = new ModelListResponse();
+        response.setRows(rows);
+        response.setPageIndex(page.getPageNum());
+        response.setPageSize(page.getPageSize());
+        response.setTotal(page.getTotal());
+        return response;
     }
 
     /**
