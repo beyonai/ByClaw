@@ -63,12 +63,12 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
         }
 
         CompletableFuture.runAsync(this::doFullInit);
-        logger.info("数字员工及其关联资源Redis全量初始化已提交异步执行");
+        logger.debug("数字员工及其关联资源Redis全量初始化已提交异步执行");
     }
 
     private void doFullInit() {
         long startTime = System.currentTimeMillis();
-        logger.info("开始异步全量初始化数字员工及其关联资源配置到Redis...");
+        logger.debug("开始异步全量初始化数字员工及其关联资源配置到Redis...");
 
         int totalEmployees = 0;
         int pageIndex = 1;
@@ -95,7 +95,7 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
                     }
                 }
 
-                logger.info("数字员工Redis全量初始化进度：已处理{}个数字员工", totalEmployees);
+                logger.debug("数字员工Redis全量初始化进度：已处理{}个数字员工", totalEmployees);
 
                 if (resources.size() < batchSize) {
                     break;

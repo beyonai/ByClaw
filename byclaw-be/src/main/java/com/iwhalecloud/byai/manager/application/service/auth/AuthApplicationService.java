@@ -233,7 +233,7 @@ public class AuthApplicationService {
 
         long endTime = System.currentTimeMillis();
 
-        logger.info("AuthApplicationService buildUserAuthResources cost time:" + (endTime - startTime));
+        logger.debug("AuthApplicationService buildUserAuthResources cost time:{}", endTime - startTime);
 
         return result;
     }
@@ -323,7 +323,7 @@ public class AuthApplicationService {
         try {
             Map<String, String> resourceAuthMap = buildUserAuthResources(userId);
             authRedisApplicationService.writeUserAuth(userId, resourceAuthMap);
-            logger.info("同步用户{}权限到Redis完成，资源数量：{}", userId, resourceAuthMap.size());
+            logger.debug("同步用户{}权限到Redis完成，资源数量：{}", userId, resourceAuthMap.size());
         }
         catch (Exception e) {
             logger.error("同步用户{}权限到Redis失败：{}", userId, e.getMessage());
@@ -1081,7 +1081,7 @@ public class AuthApplicationService {
                     logger.error("同步用户{}权限到Redis失败：{}", userId, e.getMessage());
                 }
             }
-            logger.info("批量同步用户权限到Redis进度：{}/{}", Math.min(i + batchSize, total), total);
+            logger.debug("批量同步用户权限到Redis进度：{}/{}", Math.min(i + batchSize, total), total);
         }
 
         logger.info("批量同步用户权限到Redis完成，总数：{}，成功：{}，失败：{}", total, successCount, failCount);
@@ -1461,7 +1461,7 @@ public class AuthApplicationService {
 
         }
 
-        logger.info("当前权限对比结果：{}", JSON.toJSONString(compareVo));
+        logger.debug("当前权限对比结果：{}", JSON.toJSONString(compareVo));
 
         // 处理红名单
         this.handleAdd(grantType, compareVo.getRedAddMap());
@@ -1900,7 +1900,7 @@ public class AuthApplicationService {
             String key = entry.getKey();
 
             // 当前权限信息key=DATASET:AUTHORITY:1_RED_READ_PERSON_1000901|AGENT_418202897625
-            logger.info("当前权限信息grantType={},key={}", grantType, key);
+            logger.debug("当前权限信息grantType={},key={}", grantType, key);
 
             PrivilegeGrant privilegeGrant = entry.getValue();
 

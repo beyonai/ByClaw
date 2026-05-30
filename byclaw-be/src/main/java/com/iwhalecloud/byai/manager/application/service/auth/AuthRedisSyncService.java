@@ -60,7 +60,7 @@ public class AuthRedisSyncService {
                     logger.error("异步同步用户{}权限到Redis失败：{}", userId, e.getMessage());
                 }
             }
-            logger.info("异步批量同步用户权限到Redis进度：{}/{}", Math.min(i + batchSize, total), total);
+            logger.debug("异步批量同步用户权限到Redis进度：{}/{}", Math.min(i + batchSize, total), total);
         }
 
         logger.info("异步批量同步用户权限到Redis完成，总数：{}，成功：{}，失败：{}", total, successCount, failCount);
@@ -80,7 +80,7 @@ public class AuthRedisSyncService {
         try {
             Map<String, String> resourceAuthMap = authApplicationService.buildUserAuthResources(userId);
             authRedisApplicationService.writeUserAuth(userId, resourceAuthMap);
-            logger.info("同步用户{}权限到Redis完成，资源数量：{}", userId, resourceAuthMap.size());
+            logger.debug("同步用户{}权限到Redis完成，资源数量：{}", userId, resourceAuthMap.size());
         } catch (Exception e) {
             logger.error("同步用户{}权限到Redis失败：{}", userId, e.getMessage());
         }
