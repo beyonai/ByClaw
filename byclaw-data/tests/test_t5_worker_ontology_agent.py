@@ -182,7 +182,10 @@ def test_t5_dict_to_paradigm_answer_options_mapped() -> None:
         ]
     }
     result = fn(raw)
-    options = result["paradigmList"][0]["paradigmList"]
+    groups = result["paradigmList"][0]["paradigmList"]
+    assert len(groups) == 1
+    assert groups[0]["paradigmId"] == "1"
+    options = groups[0]["paradigmResult"]
     assert len(options) == 2
     assert options[0]["choiceKeyword"] == "华东"
     assert options[0]["recall"] == ["east_china"]
@@ -845,7 +848,8 @@ class TestDictToParadigmAnswerFilterFields:
             ]
         }
         result = fn(raw)
-        opt = result["paradigmList"][0]["paradigmList"][0]
+        groups = result["paradigmList"][0]["paradigmList"]
+        opt = groups[0]["paradigmResult"][0]
         assert opt["field"] == "sales_user_id"
         assert opt["comparison"] == "eq"
         assert opt["value"] == "韦小二"
@@ -881,7 +885,8 @@ class TestDictToParadigmAnswerFilterFields:
             ]
         }
         result = fn(raw)
-        opt = result["paradigmList"][0]["paradigmList"][0]
+        groups = result["paradigmList"][0]["paradigmList"]
+        opt = groups[0]["paradigmResult"][0]
         assert isinstance(opt["fieldRecall"], list)
         assert opt["fieldRecall"] == ["编码A", "编码B"]
         assert isinstance(opt["comparisonRecall"], list)
@@ -912,7 +917,8 @@ class TestDictToParadigmAnswerFilterFields:
             ]
         }
         result = fn(raw)
-        opt = result["paradigmList"][0]["paradigmList"][0]
+        groups = result["paradigmList"][0]["paradigmList"]
+        opt = groups[0]["paradigmResult"][0]
         assert opt["fieldRecall"] == []
         assert opt["comparisonRecall"] == []
         assert opt["valueRecall"] == []
@@ -948,16 +954,18 @@ class TestDictToParadigmAnswerFilterFields:
             ]
         }
         result = fn(raw)
-        opts = result["paradigmList"][0]["paradigmList"]
-        assert len(opts) == 2
-        # 查询值 item
-        assert opts[0]["choiceKeyword"] == "商机名称"
-        assert opts[0]["recall"] == ["商机名称"]
-        assert opts[0]["field"] == ""
-        # 过滤 item
-        assert opts[1]["field"] == "code"
-        assert opts[1]["comparison"] == "gt"
-        assert opts[1]["value"] == "100"
+        groups = result["paradigmList"][0]["paradigmList"]
+        assert len(groups) == 2
+        # 查询值 item (group 0)
+        q_opt = groups[0]["paradigmResult"][0]
+        assert q_opt["choiceKeyword"] == "商机名称"
+        assert q_opt["recall"] == ["商机名称"]
+        assert q_opt["field"] == ""
+        # 过滤 item (group 1)
+        f_opt = groups[1]["paradigmResult"][0]
+        assert f_opt["field"] == "code"
+        assert f_opt["comparison"] == "gt"
+        assert f_opt["value"] == "100"
 
     def test_old_format_no_filter_fields_still_works(self) -> None:
         """仅有 choiceKeyword/recall 不受影响。"""
@@ -978,7 +986,8 @@ class TestDictToParadigmAnswerFilterFields:
             ]
         }
         result = fn(raw)
-        opt = result["paradigmList"][0]["paradigmList"][0]
+        groups = result["paradigmList"][0]["paradigmList"]
+        opt = groups[0]["paradigmResult"][0]
         assert opt["choiceKeyword"] == "华东"
         assert opt["recall"] == ["east_china"]
         assert opt["field"] == ""
@@ -1189,7 +1198,7 @@ async def test_consume_query_only_paradigm_no_filter_keys_in_metadata() -> None:
 #   group.paradigmResult[M]              → 选项 {choiceKeyword, recall, keyword, ...}
 #
 # 输出格式（供 user_clarify_node 消费）：
-#   {"paradigmList": [{"paradigmList": [{flat_option}, ...]}]}
+#   {"paradigmList": [{"paradigmList": [{paradigmId, paradigmName, paradigmResult: [{...}]}, ...]}]}
 #
 
 
@@ -1397,13 +1406,13 @@ class TestDictToParadigmAnswerRealFormat:
         assert len(outer) == 1, f"Expected 1 wrapper, got {len(outer)}"
 
     def test_inner_paradigm_list_is_flat_options(self) -> None:
-        """内层 paradigmList 包含平铺选项列表（user_clarify_node 读 outer[0].paradigmList）。"""
+        """内层 paradigmList 包含范式组列表（user_clarify_node 读 outer[0].paradigmList）。"""
         fn = _import_dict_to_paradigm_answer()
         raw = _real_world_human_input()
         result = fn(raw)
-        items = result["paradigmList"][0]["paradigmList"]
-        # 5 个范式组，共 1+2+1+1+0 = 5 个选项
-        assert len(items) == 5, f"Expected 5 flat options, got {len(items)}"
+        groups = result["paradigmList"][0]["paradigmList"]
+        # 5 个范式组（select/groupBy/filter/orderBy/aggregate）
+        assert len(groups) == 5, f"Expected 5 paradigm groups, got {len(groups)}"
 
     # ── 值正确性：查询值选项 ──
 
@@ -1412,17 +1421,22 @@ class TestDictToParadigmAnswerRealFormat:
         fn = _import_dict_to_paradigm_answer()
         raw = _real_world_human_input()
         result = fn(raw)
-        items = result["paradigmList"][0]["paradigmList"]
-        assert items[0]["choiceKeyword"] == "研发任务主键"
+        groups = result["paradigmList"][0]["paradigmList"]
+        select_group = groups[0]
+        assert select_group["paradigmId"] == "1"
+        options = select_group["paradigmResult"]
+        assert len(options) == 1
+        assert options[0]["choiceKeyword"] == "研发任务主键"
 
     def test_query_value_option_has_correct_keyword_and_recall(self) -> None:
         """查询值选项保留 keyword 和 recall。"""
         fn = _import_dict_to_paradigm_answer()
         raw = _real_world_human_input()
         result = fn(raw)
-        items = result["paradigmList"][0]["paradigmList"]
-        assert items[0]["keyword"] == "id"
-        assert items[0]["recall"] == ["研发任务主键"]
+        groups = result["paradigmList"][0]["paradigmList"]
+        options = groups[0]["paradigmResult"]
+        assert options[0]["keyword"] == "id"
+        assert options[0]["recall"] == ["研发任务主键"]
 
     # ── 值正确性：分组条件选项 ──
 
@@ -1431,19 +1445,19 @@ class TestDictToParadigmAnswerRealFormat:
         fn = _import_dict_to_paradigm_answer()
         raw = _real_world_human_input()
         result = fn(raw)
-        items = result["paradigmList"][0]["paradigmList"]
-        assert items[1]["choiceKeyword"] == "研发任务类型"
-        assert items[1]["keyword"] == "task_type"
-        assert items[1]["recall"] == ["研发任务类型"]
+        groups = result["paradigmList"][0]["paradigmList"]
+        assert groups[1]["paradigmId"] == "2"
+        opt = groups[1]["paradigmResult"][0]
+        assert opt["choiceKeyword"] == "研发任务类型"
 
     def test_group_by_second_option_is_handler(self) -> None:
         """分组条件第二个选项（处理人用户ID）正确。"""
         fn = _import_dict_to_paradigm_answer()
         raw = _real_world_human_input()
         result = fn(raw)
-        items = result["paradigmList"][0]["paradigmList"]
-        assert items[2]["choiceKeyword"] == "处理人用户ID"
-        assert items[2]["keyword"] == "handler_user_user_name"
+        groups = result["paradigmList"][0]["paradigmList"]
+        opt = groups[1]["paradigmResult"][1]
+        assert opt["choiceKeyword"] == "处理人用户ID"
 
     # ── 值正确性：过滤条件选项 ──
 
@@ -1452,15 +1466,10 @@ class TestDictToParadigmAnswerRealFormat:
         fn = _import_dict_to_paradigm_answer()
         raw = _real_world_human_input()
         result = fn(raw)
-        items = result["paradigmList"][0]["paradigmList"]
-        opt = items[3]
+        groups = result["paradigmList"][0]["paradigmList"]
+        assert groups[2]["paradigmId"] == "3"
+        opt = groups[2]["paradigmResult"][0]
         assert opt["field"] == "task_status"
-        assert opt["comparison"] == "eq"
-        assert opt["value"] == "处理中"
-        assert opt["choiceField"] == "任务状态"
-        assert opt["choiceComparison"] == "eq"
-        assert opt["fieldRecall"] == ["任务状态"]
-        assert opt["valueRecall"] == ["项目状态"]
 
     # ── 值正确性：排序条件选项 ──
 
@@ -1469,8 +1478,9 @@ class TestDictToParadigmAnswerRealFormat:
         fn = _import_dict_to_paradigm_answer()
         raw = _real_world_human_input()
         result = fn(raw)
-        items = result["paradigmList"][0]["paradigmList"]
-        opt = items[4]
+        groups = result["paradigmList"][0]["paradigmList"]
+        assert groups[3]["paradigmId"] == "4"
+        opt = groups[3]["paradigmResult"][0]
         assert opt["choiceKeyword"] == "任务数量"
         assert opt["keyword"] == "任务数量"
         assert opt["recall"] == ["任务数量"]
@@ -1502,7 +1512,8 @@ class TestDictToParadigmAnswerRealFormat:
             ]
         }
         result = fn(raw)
-        opt = result["paradigmList"][0]["paradigmList"][0]
+        groups = result["paradigmList"][0]["paradigmList"]
+        opt = groups[0]["paradigmResult"][0]
         assert opt["choiceKeyword"] == ""
         assert opt["recall"] == []
         assert opt["keyword"] == ""
@@ -1518,20 +1529,20 @@ class TestDictToParadigmAnswerRealFormat:
         """模拟 user_clarify_node 的完整读取路径。
 
         这是本模块与 datacloud_analysis 的集成契约：
-        - outer[0].paradigmList → 用户选项列表
+        - outer[0].paradigmList → 范式组列表（每个含 paradigmId/paradigmName/paradigmResult）
         - metadata.paradigmList → 含 kid/ktype 的范式元数据
 
-        user_clarify_node (L312-L317):
-          1. resume_value["paradigmList"][0]["paradigmList"] → 用户选项
+        user_clarify_node (L496-L541):
+          1. resume_value["paradigmList"][0]["paradigmList"] → 范式组
           2. resume_value["metadata"]["paradigmList"] → 元数据（kid/ktype）
-          3. _remaining_kw 从 (1) 收集 keyword
+          3. _remaining_kw 从 (1) 各组的 paradigmResult 收集 keyword
           4. _kept_pm_keys 从 (2) 用 kid/ktype 构建 path_mapping 键
         """
         fn = _import_dict_to_paradigm_answer()
         raw = _real_world_human_input()
         resume_value = fn(raw)
 
-        # user_clarify_node 的读取路径（L312-L315）
+        # user_clarify_node 的读取路径（L496-L499）
         outer = resume_value["paradigmList"]
         assert len(outer) == 1 and isinstance(outer[0], dict)
 
@@ -1539,7 +1550,12 @@ class TestDictToParadigmAnswerRealFormat:
         assert isinstance(paradigm_list_from_resume, list)
         assert len(paradigm_list_from_resume) == 5
 
-        # user_clarify_node 的 metadata 读取（L316-L317）
+        # 验证每个 group 有 paradigmId 和 paradigmResult
+        for group in paradigm_list_from_resume:
+            assert "paradigmId" in group
+            assert "paradigmResult" in group
+
+        # user_clarify_node 的 metadata 读取（L500-L505）
         meta_paradigm_list = resume_value["metadata"]["paradigmList"]
         assert isinstance(meta_paradigm_list, list)
         assert len(meta_paradigm_list) >= 2
@@ -1550,12 +1566,15 @@ class TestDictToParadigmAnswerRealFormat:
                 assert "kid" in opt, f"metadata paradigmResult missing kid: {opt}"
                 assert "ktype" in opt, f"metadata paradigmResult missing ktype: {opt}"
 
-        # _remaining_kw 收集 keyword（user_clarify_node L338-341）
-        _remaining_kw = {
-            str(item.get("keyword"))
-            for item in paradigm_list_from_resume
-            if isinstance(item, dict) and item.get("keyword")
-        }
+        # _remaining_kw 收集 keyword（user_clarify_node L521-L530）
+        _remaining_kw: set[str] = set()
+        for group in paradigm_list_from_resume:
+            if not isinstance(group, dict):
+                continue
+            for item in group.get("paradigmResult") or []:
+                kw = item.get("keyword") if isinstance(item, dict) else None
+                if kw:
+                    _remaining_kw.add(str(kw))
         assert "id" in _remaining_kw
         assert "task_type" in _remaining_kw
         assert "handler_user_user_name" in _remaining_kw

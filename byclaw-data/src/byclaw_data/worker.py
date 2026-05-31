@@ -500,8 +500,8 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
         ]
     }
 
-    user_clarify_node 期望格式：
-    {"paradigmList": [{"paradigmList": [{...所有选项平铺...}]}]}
+    user_clarify_node 期望格式（保留 group 结构）：
+    {"paradigmList": [{"paradigmList": [{paradigmId, paradigmName, paradigmResult: [...]}, ...]}]}
     """
     if isinstance(raw, str):
         return raw
@@ -509,8 +509,6 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
         return str(raw) if raw is not None else ""
     if _is_operation_form_resume(raw):
         return raw
-
-    all_options: list[dict[str, Any]] = []
 
     # 从 metadata.paradigmList 构建 (paradigmId, keyword) → {kid, ktype} 索引
     # 用户回传的选项里没有 kid/ktype，后端需从 metadata 补全。
@@ -531,6 +529,7 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
                     }
 
     # 外层 paradigmList → 包装元素 → 内层 paradigmList → 范式组
+    result_groups: list[dict[str, Any]] = []
     outer_list = list(raw.get("paradigmList") or [])
     for wrapper in outer_list:
         if not isinstance(wrapper, dict):
@@ -541,12 +540,13 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
                 continue
             # 每个范式组下的 paradigmResult 才是真正的选项列表
             items = list(group.get("paradigmResult") or [])
+            group_result_items: list[dict[str, Any]] = []
             for item in items:
                 if isinstance(item, dict):
                     kw = str(item.get("keyword") or "")
                     # 从 metadata 索引补全 kid/ktype
                     _meta_info = _meta_kid_map.get(kw) or {}
-                    all_options.append(
+                    group_result_items.append(
                         {
                             "choiceKeyword": str(item.get("choiceKeyword") or ""),
                             "recall": _normalize_recall(item.get("recall")),
@@ -572,12 +572,20 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
                         }
                     )
 
+            result_groups.append(
+                {
+                    "paradigmId": str(group.get("paradigmId") or ""),
+                    "paradigmName": str(group.get("paradigmName") or ""),
+                    "paradigmResult": group_result_items,
+                }
+            )
+
     # 返回 user_clarify_node 期望的纯 dict 结构
     # metadata 透传仍保留供 user_clarify_node L316-317 兜底读取 meta_paradigm_list
     return {
         "paradigmList": [
             {
-                "paradigmList": all_options,
+                "paradigmList": result_groups,
             }
         ],
         "metadata": raw.get("metadata", {}),
