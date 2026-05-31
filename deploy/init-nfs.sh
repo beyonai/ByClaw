@@ -90,11 +90,11 @@ else
   exit 1
 fi
 
-\$SUDO mkdir -p '$EXPORT_PATH'
-\$SUDO chown -R root:root '$EXPORT_PATH'
-\$SUDO chmod -R 755 '$EXPORT_PATH'
+\$SUDO mkdir -p "$EXPORT_PATH"
+\$SUDO chown -R root:root "$EXPORT_PATH"
+\$SUDO chmod -R 755 "$EXPORT_PATH"
 
-line="'$EXPORT_PATH'  '$EXPORT_CLIENTS'(rw,sync,no_subtree_check,no_root_squash)"
+line="$EXPORT_PATH  $EXPORT_CLIENTS(rw,sync,no_subtree_check,no_root_squash)"
 tmp_file="/tmp/byclaw-exports.\$\$"
 if [ -f /etc/exports ]; then
   grep -v "^[[:space:]]*$EXPORT_PATH[[:space:]]" /etc/exports > "\$tmp_file" || true
@@ -133,22 +133,33 @@ else
   exit 1
 fi
 
-\$SUDO mkdir -p '$MOUNT_POINT'
-if findmnt '$MOUNT_POINT' >/dev/null 2>&1; then
-  echo "'$MOUNT_POINT' already mounted"
+\$SUDO mkdir -p "$MOUNT_POINT"
+expected_source="$SERVER_HOST:$EXPORT_PATH"
+if findmnt "$MOUNT_POINT" >/dev/null 2>&1; then
+  current_source="\$(findmnt -n -o SOURCE --target "$MOUNT_POINT" || true)"
+  if [ "\$current_source" = "\$expected_source" ]; then
+    echo "$MOUNT_POINT already mounted from \$current_source"
+  else
+    echo "Error: $MOUNT_POINT is already mounted from '\$current_source', expected '\$expected_source'." >&2
+    exit 1
+  fi
 else
-  \$SUDO mount -t nfs4 '$SERVER_HOST:$EXPORT_PATH' '$MOUNT_POINT' -o '$MOUNT_OPTIONS'
+  \$SUDO mount -t nfs4 "\$expected_source" "$MOUNT_POINT" -o "$MOUNT_OPTIONS"
 fi
 
-fstab_line="'$SERVER_HOST:$EXPORT_PATH' '$MOUNT_POINT' nfs4 '$MOUNT_OPTIONS' 0 0"
+fstab_line="$SERVER_HOST:$EXPORT_PATH $MOUNT_POINT nfs4 $MOUNT_OPTIONS 0 0"
 tmp_file="/tmp/byclaw-fstab.\$\$"
-grep -v "[[:space:]]$MOUNT_POINT[[:space:]]" /etc/fstab > "\$tmp_file" || true
+if [ -f /etc/fstab ]; then
+  grep -v "[[:space:]]$MOUNT_POINT[[:space:]]" /etc/fstab > "\$tmp_file" || true
+else
+  : > "\$tmp_file"
+fi
 printf "%s\\n" "\$fstab_line" >> "\$tmp_file"
 \$SUDO cp "\$tmp_file" /etc/fstab
 rm -f "\$tmp_file"
 
-findmnt '$MOUNT_POINT'
-touch '$MOUNT_POINT/.byclaw-nfs-probe-\$(hostname)'
+findmnt "$MOUNT_POINT"
+\$SUDO touch "$MOUNT_POINT/.byclaw-nfs-probe-\$(hostname)"
 EOF
 }
 
