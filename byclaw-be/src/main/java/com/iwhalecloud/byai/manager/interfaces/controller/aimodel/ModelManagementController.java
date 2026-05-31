@@ -4,6 +4,7 @@ import com.iwhalecloud.byai.manager.application.service.aimodel.GptProxyChatComp
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelDebugRerankApplicationService;
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelManagementApplicationService;
 import com.iwhalecloud.byai.manager.application.service.aimodel.RerankDebugResult;
+import com.iwhalecloud.byai.manager.dto.aimodel.ModelDefault;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelIdRequest;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelListRequest;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelListResponse;
@@ -17,6 +18,7 @@ import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
+import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -164,6 +166,19 @@ public class ModelManagementController {
     @GetMapping(value = "/getDefaultModelId", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseUtil<String> getDefaultModelId() {
         return ResponseUtil.successResponse(modelManagementApplicationService.getDefaultModelId());
+    }
+
+    /**
+     * 设置模型默认圣诞
+     *
+     * @param modelDefault 默认模型
+     * @return ResponseUtil
+     */
+    @ManageLogAnnotation(name = "模型管理", description = "设置默认对话模型")
+    @PostMapping(value = "/setDefaultModel", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseUtil<String> setDefaultModel(@RequestBody @Valid ModelDefault modelDefault) {
+        modelManagementApplicationService.setDefaultModel(modelDefault);
+        return ResponseUtil.successResponse();
     }
 
 }

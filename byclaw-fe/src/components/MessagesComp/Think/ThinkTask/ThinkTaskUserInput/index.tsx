@@ -1,6 +1,6 @@
 import MessageForm, { IFormItem } from '@/components/MessageForm';
 import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
-import type { IMessage } from '@/typescript/message';
+import type { IMessage, IMessageListItem } from '@/typescript/message';
 import useGlobal from '@/hooks/useGlobal';
 import classnames from 'classnames';
 import { get, isEmpty } from 'lodash';
@@ -32,6 +32,8 @@ export type IProps = {
   message: IMessage;
   updateMessageListItemContent: (messageListItemContent: IMessageListItemContent) => void;
   messageListItemContent: IMessageListItemContent;
+  messageListItem?: IMessageListItem;
+  thinkListItem?: IMessageListItem;
 };
 
 const emptyArr: IFormItem[] = [];
@@ -89,9 +91,7 @@ function buildResumeQueryQuestion(values: Record<string, unknown>, fields: IForm
     const { fieldCode } = item;
     if (Object.prototype.hasOwnProperty.call(values, fieldCode)) {
       if (item.formType === 'select') {
-        const option = item.optional?.find(
-          (opt: { label?: string; value: string }) => opt.value === values[fieldCode]
-        );
+        const option = item.optional?.find((opt: { label?: string; value: string }) => opt.value === values[fieldCode]);
         handerFormData[item.fieldName] = option ? option.label : values[fieldCode];
       } else if (item.formType === 'file') {
         handerFormData[item.fieldName] = values[fieldCode];
@@ -109,6 +109,7 @@ function ThinkTaskUserInput(props: IProps) {
   const assistantLlmMessageId = messageInfo?.messageId ?? messageInfo?.msgId;
   const { sourceAgentType } = messageListItemContent || {};
   const { pluginMachineFields = emptyArr, formStatus, humanTool } = get(messageListItemContent, 'substance') || {};
+  const { resumeMessageId } = props.messageListItem || props.thinkListItem || {};
 
   /** content 级（SSE）或表单 JSON 内嵌 */
   const stepIdRaw =
@@ -207,12 +208,14 @@ function ThinkTaskUserInput(props: IProps) {
                 const payload: Record<string, unknown> = {
                   actionType: 'RESUME',
                   llmMessageId: assistantLlmMessageId,
+                  traceId: messageInfo.traceId,
                   files: filesList,
                   extParams: {
                     files: extParamsFiles,
                   },
                   humanTool,
                   sourceAgentType,
+                  resumeMessageId,
                 };
                 if (stepId) {
                   payload.taskStepId = stepId;

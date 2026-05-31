@@ -347,6 +347,15 @@ export default {
   'modelMgr.emptyTitle': '还没有可展示的模型',
   'modelMgr.emptyDesc': '可以先新建一个模型，或者重置筛选条件查看已有数据。',
 
+  // 模型管理错误提示
+  'modelMgr.error.requestFail': '请求失败',
+  'modelMgr.error.getModelListFail': '获取模型列表失败',
+  'modelMgr.error.getModelDetailFail': '获取模型详情失败',
+  'modelMgr.error.saveModelFail': '保存模型失败',
+  'modelMgr.error.updateModelStatusFail': '更新模型状态失败',
+  'modelMgr.error.deleteModelFail': '删除模型失败',
+  'modelMgr.error.debugModelFail': '模型调试失败',
+
   // 模型管理-编辑/调试弹窗
   'modelMgr.modal.editTitle': '编辑模型',
   'modelMgr.modal.debugTitle': '模型调试',

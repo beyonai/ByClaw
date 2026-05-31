@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelStatusEnum;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.ByaiAimodelDomainService;
 import com.iwhalecloud.byai.manager.domain.tag.service.ByaiTagRelationService;
+import com.iwhalecloud.byai.manager.dto.aimodel.ModelDefault;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelListRequest;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelListResponse;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelRequest;
@@ -17,16 +18,20 @@ import com.iwhalecloud.byai.manager.entity.aimodel.ByaiAimodel;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.common.exception.BaseException;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.util.JsonUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.manager.mapper.resource.SsResExtDigEmployeeMapper;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import com.iwhalecloud.byai.manager.entity.tag.ByaiTagRelation;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.MapUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -51,6 +56,9 @@ public class ModelManagementApplicationService {
 
     @Autowired
     private ByaiTagRelationService byaiTagRelationService;
+
+    @Autowired
+    private SsResExtDigEmployeeMapper ssResExtDigEmployeeMapper;
 
     /**
      * 分页列表（列表仅返回 apiTokenMasked，不返回明文 apiToken）
@@ -138,9 +146,7 @@ public class ModelManagementApplicationService {
         if (entity == null) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40004, "aimodel.not.found");
         }
-        if (ModelStatusEnum.isEnabledDb(entity.getStatus())) {
-            throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.delete.enabled.forbidden");
-        }
+        validateModelNotUsedByActiveDigitalEmployee(modelId, "aimodel.delete.digital.employee.in.use");
         byaiAimodelDomainService.deleteById(modelId);
         return Boolean.TRUE;
     }
@@ -158,8 +164,24 @@ public class ModelManagementApplicationService {
         if (!ModelStatusEnum.ENABLED.name().equals(status) && !ModelStatusEnum.DISABLED.name().equals(status)) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.status.invalid");
         }
+        if (ModelStatusEnum.DISABLED.name().equals(status)) {
+            validateModelNotUsedByActiveDigitalEmployee(modelId, "aimodel.disable.digital.employee.in.use");
+        }
         byaiAimodelDomainService.setStatus(modelId, status);
         return Boolean.TRUE;
+    }
+
+    private void validateModelNotUsedByActiveDigitalEmployee(Long modelId, String messageKey) {
+        List<String> employeeNames = ssResExtDigEmployeeMapper.selectDigitalEmployeeNamesByModelId(modelId);
+        if (CollectionUtils.isEmpty(employeeNames)) {
+            return;
+        }
+        String employeeNameText = employeeNames.stream()
+            .filter(StringUtil::isNotEmpty)
+            .distinct()
+            .collect(Collectors.joining("、"));
+        throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001,
+            I18nUtil.get(messageKey, employeeNameText));
     }
 
     /**
@@ -519,4 +541,33 @@ public class ModelManagementApplicationService {
         return byaiAimodels.getFirst().getModelId().toString();
     }
 
+    /**
+     * 设置默认模型
+     *
+     * @param modelDefault 默认模型
+     */
+    public void setDefaultModel(ModelDefault modelDefault) {
+        Long modelId = modelDefault.getModelId();
+        Long tagId = modelDefault.getTagId();
+
+        List<ByaiTagRelation> aiModels = byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL, tagId);
+
+        Map<Long, ByaiTagRelation> byaiTagRelationMap = new HashMap<>(aiModels.size());
+        for (ByaiTagRelation byaiTagRelation : aiModels) {
+            byaiTagRelationMap.put(modelId, byaiTagRelation);
+        }
+
+        // 如果不存在,则新增
+        ByaiTagRelation byaiTagRelation = byaiTagRelationMap.remove(modelId);
+        if (byaiTagRelation == null) {
+            byaiTagRelationService.save(Constants.OBJ_TYPE_AIMODEL, modelId, tagId);
+        }
+
+        // 删除其他模型的默认对话标签
+        for (ByaiTagRelation tempTagRelation : byaiTagRelationMap.values()) {
+            Long relationId = tempTagRelation.getRelationId();
+            byaiTagRelationService.removeById(relationId);
+        }
+
+    }
 }

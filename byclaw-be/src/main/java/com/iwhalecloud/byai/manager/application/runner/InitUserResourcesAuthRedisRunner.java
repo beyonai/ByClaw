@@ -78,7 +78,7 @@ public class InitUserResourcesAuthRedisRunner implements ApplicationRunner {
 
         // 异步执行，不阻塞服务启动
         CompletableFuture.runAsync(this::doFullInit);
-        logger.info("用户权限Redis全量初始化已提交异步执行");
+        logger.debug("用户权限Redis全量初始化已提交异步执行");
     }
 
     /**
@@ -89,7 +89,7 @@ public class InitUserResourcesAuthRedisRunner implements ApplicationRunner {
      */
     private void doFullInit() {
         long startTime = System.currentTimeMillis();
-        logger.info("开始异步全量初始化用户权限到Redis缓存...");
+        logger.debug("开始异步全量初始化用户权限到Redis缓存...");
 
         int totalUsers = 0;
         int pageIndex = 1;
@@ -138,7 +138,7 @@ public class InitUserResourcesAuthRedisRunner implements ApplicationRunner {
                     } catch (Exception e) {
                         logger.error("批量处理第{}页用户权限失败：{}", pageIndex, e.getMessage(), e);
                     }
-                    logger.info("全量初始化用户权限到Redis，进度：已处理{}个用户", totalUsers);
+                    logger.debug("全量初始化用户权限到Redis，进度：已处理{}个用户", totalUsers);
                 }
 
                 // 如果返回的记录数不等于批次大小，说明已经是最后一页

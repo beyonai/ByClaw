@@ -50,7 +50,8 @@ fi
 BRANCH=$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 COMMIT=$(git -C "$REPO_ROOT" rev-parse --short=7 HEAD 2>/dev/null || echo "unknown")
 COMMIT_FULL=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo "unknown")
-BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+COMMIT_MSG=$(git -C "$REPO_ROOT" log -1 --pretty=format:%s 2>/dev/null | head -c 100 || echo "unknown")
+BUILD_TIME=$(TZ=Asia/Shanghai date +%Y-%m-%dT%H:%M:%S+08:00)
 
 if [[ -z "$TAG" ]]; then
     TAG=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g')
@@ -101,6 +102,7 @@ build_module() {
         --build-arg BUILD_COMMIT_FULL="$COMMIT_FULL" \
         --build-arg BUILD_TIME="$BUILD_TIME" \
         --build-arg BUILD_MODULE="$module" \
+        --build-arg BUILD_COMMIT_MSG="$COMMIT_MSG" \
         --build-arg BRANCH="$BRANCH" \
         --label "org.opencontainers.image.source=https://github.com/beyonai/ByClaw" \
         --label "org.opencontainers.image.revision=$COMMIT_FULL" \

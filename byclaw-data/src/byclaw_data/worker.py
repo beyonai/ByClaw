@@ -5,15 +5,23 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
+import re
 import sys
+import traceback
+import uuid
 from collections import OrderedDict
 from collections.abc import AsyncGenerator, Mapping
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-from typing import Any
+if TYPE_CHECKING:
+    from by_framework.worker._execution_tracking import RunningExecution
 
 from by_framework import (
     AskUserEvent,
@@ -23,10 +31,20 @@ from by_framework import (
     ResumeCommand,
     StreamChunkEvent,
 )
+from by_framework.common.constants import (
+    RedisKeys,
+    TASK_GROUP_FIELD_COMPLETED,
+    TASK_GROUP_FIELD_TOTAL,
+    TASK_GROUP_TTL_SECONDS,
+)
 from by_framework.common.logger import logger
 from by_framework.core.extensions import PluginRegistry
+from by_framework.core.protocol.agent_state import AgentState
 from by_framework.core.protocol.commands import AskAgentCommand
 from by_framework.core.protocol.content_type import SseMessageType, SseReasonMessageType
+from by_framework.core.protocol.results import AgentTaskResult, normalize_process_result
+from by_framework.worker.sandbox.hook_sandbox import active_workspace
+
 from datacloud_analysis.agent import create_agent
 from datacloud_analysis.command_plugins import CommandPluginManager
 from datacloud_analysis.logging_setup import setup_logging
@@ -35,6 +53,21 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.types import Command
 
 from byclaw_data.byclaw_data_clarification import ByclawDataClarification
+
+
+try:
+    from datacloud_analysis.logging_setup import request_log_context
+except ImportError:
+
+    @asynccontextmanager
+    async def request_log_context(
+        request_id: str | None = None,
+        *,
+        extra_namespaces: tuple[str, ...] = (),
+    ) -> AsyncGenerator[str, None]:
+        del extra_namespaces
+        yield request_id or uuid.uuid4().hex
+
 
 _CHITCHAT_DIRECT_REPLY = "你好，我在。需要我帮你查询或分析什么数据？"
 _CHITCHAT_TOKENS = {
@@ -320,6 +353,126 @@ def _extract_tool_resource_codes(
     return object_codes, view_codes
 
 
+_SKILL_PLACEHOLDER_RE = re.compile(r"\{\{(query|compute|action):([^}]+)\}\}")
+
+
+def _extract_skill_resource_ids(resource_list: list[Any]) -> list[str]:
+    """从 resource_list 中提取 SKILL 类型条目的 resourceId。
+
+    SKILL 条目的 resourceCode 为 null，路径取 resourceId。
+    示例 resourceId：/.openclaw/workspace-baiying-agent-10000289/skills/老鹰-战略全局分析
+    """
+    result: list[str] = []
+    for item in resource_list:
+        if not isinstance(item, dict):
+            continue
+        rtype = str(item.get("resourceType") or "").strip().upper()
+        if rtype != "SKILL":
+            continue
+        rid = str(item.get("resourceId") or "").strip()
+        if rid:
+            result.append(rid)
+    return result
+
+
+def _replace_skill_placeholders(
+    content: str,
+    tools_dict: dict[str, Any],
+) -> tuple[str, list[str]]:
+    """替换 SKILL.md 中的 {{type:code}} 占位符为真实 tool 名。
+
+    Returns:
+        (替换后的内容, warning 列表)
+    """
+    warnings: list[str] = []
+
+    def replacer(m: re.Match) -> str:  # type: ignore[type-arg]
+        kind = m.group(1)
+        code = m.group(2)
+
+        if kind == "action":
+            parts = code.split(":", 1)
+            obj_code = parts[0]
+            act_name = parts[1] if len(parts) > 1 else ""
+            candidates = [k for k in tools_dict if obj_code in k and act_name in k]
+            if candidates:
+                return candidates[0]
+            tool_name = f"{act_name}_{obj_code}" if act_name else obj_code
+        else:
+            tool_name = f"{kind}_{code}"
+
+        if tool_name not in tools_dict:
+            # 兼容 tools_dict key 带 data_ 前缀的情况（如 data_query_scene_xxx）
+            prefixed = f"data_{tool_name}"
+            if prefixed in tools_dict:
+                return prefixed
+            warnings.append(f"⚠️ 工具 {tool_name} 未挂载到当前 agent，无法调用")
+            return m.group(0)
+        return tool_name
+
+    replaced = _SKILL_PLACEHOLDER_RE.sub(replacer, content)
+    return replaced, warnings
+
+
+def _load_skills(
+    resource_list: list[Any],
+    user_code: str,
+    tools_dict: dict[str, Any],
+) -> tuple[str, str] | None:
+    """加载 skill 内容，返回替换占位符后的 task_prompt 与首个 skill 目录；无 skill 时返回 None。
+
+    Args:
+        resource_list: extra_payload["resource_list"]
+        user_code:     command.header.user_code
+        tools_dict:    AgentConfig.extra["redirect_tools"]，key 为真实 tool 名
+
+    Returns:
+        task_prompt 字符串，或 None（无 SKILL 条目时）
+    """
+    skill_ids = _extract_skill_resource_ids(resource_list)
+    if not skill_ids:
+        return None
+
+    minio_root = os.environ.get(
+        "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
+    )
+    parts: list[str] = []
+    all_warnings: list[str] = []
+    first_skill_path = ""
+
+    for resource_id in skill_ids:
+        skill_path = (
+            Path(minio_root) / f"byclaw-{user_code}" / "by" / resource_id.lstrip("/")
+        )
+        if not first_skill_path:
+            first_skill_path = str(skill_path)
+        skill_md = skill_path / "SKILL.md"
+        if not skill_md.exists():
+            logging.getLogger(__name__).warning(
+                "_load_skills: SKILL.md not found at %s, skipping", skill_md
+            )
+            continue
+        try:
+            content = skill_md.read_text(encoding="utf-8")
+        except OSError as exc:
+            logging.getLogger(__name__).warning(
+                "_load_skills: failed to read %s: %s, skipping", skill_md, exc
+            )
+            continue
+
+        content, w = _replace_skill_placeholders(content, tools_dict)
+        all_warnings.extend(w)
+        parts.append(content)
+
+    if not parts:
+        return None
+
+    task_prompt = "\n\n---\n\n".join(parts)
+    if all_warnings:
+        task_prompt += "\n\n" + "\n".join(all_warnings)
+    return task_prompt, first_skill_path
+
+
 def _normalize_recall(raw: Any) -> list[str]:
     """将 recall 值规范化为 list[str]：list 原样返回，str 包装为单元素列表。"""
     if isinstance(raw, list):
@@ -347,8 +500,8 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
         ]
     }
 
-    user_clarify_node 期望格式：
-    {"paradigmList": [{"paradigmList": [{...所有选项平铺...}]}]}
+    user_clarify_node 期望格式（保留 group 结构）：
+    {"paradigmList": [{"paradigmList": [{paradigmId, paradigmName, paradigmResult: [...]}, ...]}]}
     """
     if isinstance(raw, str):
         return raw
@@ -356,8 +509,6 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
         return str(raw) if raw is not None else ""
     if _is_operation_form_resume(raw):
         return raw
-
-    all_options: list[dict[str, Any]] = []
 
     # 从 metadata.paradigmList 构建 (paradigmId, keyword) → {kid, ktype} 索引
     # 用户回传的选项里没有 kid/ktype，后端需从 metadata 补全。
@@ -378,6 +529,7 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
                     }
 
     # 外层 paradigmList → 包装元素 → 内层 paradigmList → 范式组
+    result_groups: list[dict[str, Any]] = []
     outer_list = list(raw.get("paradigmList") or [])
     for wrapper in outer_list:
         if not isinstance(wrapper, dict):
@@ -388,39 +540,52 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
                 continue
             # 每个范式组下的 paradigmResult 才是真正的选项列表
             items = list(group.get("paradigmResult") or [])
+            group_result_items: list[dict[str, Any]] = []
             for item in items:
                 if isinstance(item, dict):
                     kw = str(item.get("keyword") or "")
                     # 从 metadata 索引补全 kid/ktype
                     _meta_info = _meta_kid_map.get(kw) or {}
-                    all_options.append({
-                        "choiceKeyword": str(item.get("choiceKeyword") or ""),
-                        "recall": _normalize_recall(item.get("recall")),
-                        "keyword": kw,
-                        "kid": item.get("kid") or _meta_info.get("kid", 0),
-                        "ktype": str(item.get("ktype") or _meta_info.get("ktype", "")),
-                        "field": str(item.get("field") or ""),
-                        "comparison": str(item.get("comparison") or ""),
-                        "value": str(item.get("value") or ""),
-                        "choiceField": str(item.get("choiceField") or ""),
-                        "choiceComparison": str(item.get("choiceComparison") or ""),
-                        "fieldRecall": item.get("fieldRecall")
-                        if isinstance(item.get("fieldRecall"), list)
-                        else [],
-                        "comparisonRecall": item.get("comparisonRecall")
-                        if isinstance(item.get("comparisonRecall"), list)
-                        else [],
-                        "valueRecall": item.get("valueRecall")
-                        if isinstance(item.get("valueRecall"), list)
-                        else [],
-                    })
+                    group_result_items.append(
+                        {
+                            "choiceKeyword": str(item.get("choiceKeyword") or ""),
+                            "recall": _normalize_recall(item.get("recall")),
+                            "keyword": kw,
+                            "kid": item.get("kid") or _meta_info.get("kid", 0),
+                            "ktype": str(
+                                item.get("ktype") or _meta_info.get("ktype", "")
+                            ),
+                            "field": str(item.get("field") or ""),
+                            "comparison": str(item.get("comparison") or ""),
+                            "value": str(item.get("value") or ""),
+                            "choiceField": str(item.get("choiceField") or ""),
+                            "choiceComparison": str(item.get("choiceComparison") or ""),
+                            "fieldRecall": item.get("fieldRecall")
+                            if isinstance(item.get("fieldRecall"), list)
+                            else [],
+                            "comparisonRecall": item.get("comparisonRecall")
+                            if isinstance(item.get("comparisonRecall"), list)
+                            else [],
+                            "valueRecall": item.get("valueRecall")
+                            if isinstance(item.get("valueRecall"), list)
+                            else [],
+                        }
+                    )
+
+            result_groups.append(
+                {
+                    "paradigmId": str(group.get("paradigmId") or ""),
+                    "paradigmName": str(group.get("paradigmName") or ""),
+                    "paradigmResult": group_result_items,
+                }
+            )
 
     # 返回 user_clarify_node 期望的纯 dict 结构
     # metadata 透传仍保留供 user_clarify_node L316-317 兜底读取 meta_paradigm_list
     return {
         "paradigmList": [
             {
-                "paradigmList": all_options,
+                "paradigmList": result_groups,
             }
         ],
         "metadata": raw.get("metadata", {}),
@@ -429,8 +594,12 @@ def _dict_to_paradigm_answer(raw: Any) -> Any:
 
 def _is_operation_form_resume(raw: dict[str, Any]) -> bool:
     """判断前端恢复值是否为操作确认表单，而不是查询澄清 paradigm。"""
-    return str(raw.get("interrupt_type") or "") == "operation_form" or (
-        "formId" in raw and "confirmed" in raw and isinstance(raw.get("rule"), list)
+    return (
+        str(raw.get("interrupt_type") or "") == "operation_form"
+        or ("formId" in raw and isinstance(raw.get("actions"), list))
+        or (
+            "formId" in raw and "confirmed" in raw and isinstance(raw.get("rule"), list)
+        )
     )
 
 
@@ -445,6 +614,22 @@ def _operation_form_resume_from_human_input(
         return None
     query_text = str(human_input.get("query") or "").strip()
     confirmed = query_text not in {"取消", "cancel", "Cancel", "CANCEL"}
+    actions = operation_form.get("actions")
+    if isinstance(actions, list):
+        resume_value = dict(operation_form)
+        resume_value["interrupt_type"] = "operation_form"
+        normalized_actions: list[dict[str, Any]] = []
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            normalized_action = dict(action)
+            if not confirmed:
+                normalized_action["confirmed"] = False
+                normalized_action.setdefault("reason", query_text or "用户取消操作")
+            normalized_actions.append(normalized_action)
+        resume_value["actions"] = normalized_actions
+        return resume_value
+
     resume_value: dict[str, Any] = {
         "interrupt_type": "operation_form",
         "formId": str(operation_form.get("formId") or ""),
@@ -581,6 +766,7 @@ async def _consume_agent_events(
     agent_id: str | None = None,
     dyn_object_ids: list[str] | None = None,
     dyn_view_ids: list[str] | None = None,
+    header_metadata: dict = {}
 ) -> dict[str, Any]:
     """消费 OntologyAgent 事件流，翻译为 Gateway SSE。"""
     logger.info(
@@ -602,9 +788,11 @@ async def _consume_agent_events(
 
     async for event in event_iter:
         if isinstance(event, ThinkingEvent):
-            # ThinkingEvent comes from on_chat_model_stream; react_loop already dispatches
-            # the same token via dc_stream_chunk → StepEvent, so skip to avoid duplicates.
-            pass
+            await context.emit_chunk(
+                StreamChunkEvent(content=event.content),
+                event_type=EventType.REASONING_LOG_START.value,
+                content_type=SseReasonMessageType.think_text.value,
+            )
         elif isinstance(event, StepEvent):
             await context.emit_chunk(
                 StreamChunkEvent(content=event.title),
@@ -687,10 +875,7 @@ async def _consume_agent_events(
         or getattr(interrupt_ev, "interrupt_type", "") == "operation_form"
         or interrupt_ev.reason == "OPERATION_FORM_CONFIRMATION"
     ):
-        await context.complex_ask_user(
-            AskUserEvent(
-                prompt=interrupt_ev.prompt,
-                metadata={
+        custom_metadata = {
                     "thread_id": interrupt_ev.thread_id,
                     "interrupt_reason": interrupt_ev.reason,
                     "interrupt_type": "operation_form",
@@ -699,8 +884,16 @@ async def _consume_agent_events(
                     "is_dynamic_agent": True,
                     "call_object_ids": dyn_object_ids or [],
                     "call_view_ids": dyn_view_ids or [],
+                }
+        await context.complex_ask_user(
+            event=AskUserEvent(
+                prompt=interrupt_ev.prompt,
+                metadata={
+                    **custom_metadata, **header_metadata
                 },
-            )
+            ),
+            message_id=getattr(context, "message_id", None),
+            parent_message_id=getattr(context, "parent_message_id", None),
         )
     elif interrupt_ev.reason == "PARADIGM_CLARIFICATION":
         paradigm_list: list[dict[str, Any]] = []
@@ -714,20 +907,25 @@ async def _consume_agent_events(
                     ],
                 }
             )
+        custom_metadata = {
+                "thread_id": interrupt_ev.thread_id,
+                "interrupt_reason": interrupt_ev.reason,
+                "paradigmList": paradigm_list,
+                "query": interrupt_ev.query,
+                "agent_id": agent_id or "",
+                "is_dynamic_agent": True,
+                "call_object_ids": dyn_object_ids or [],
+                "call_view_ids": dyn_view_ids or [],
+            }
         await context.complex_ask_user(
-            AskUserEvent(
+            event=AskUserEvent(
                 prompt=interrupt_ev.prompt,
                 metadata={
-                    "thread_id": interrupt_ev.thread_id,
-                    "interrupt_reason": interrupt_ev.reason,
-                    "paradigmList": paradigm_list,
-                    "query": interrupt_ev.query,
-                    "agent_id": agent_id or "",
-                    "is_dynamic_agent": True,
-                    "call_object_ids": dyn_object_ids or [],
-                    "call_view_ids": dyn_view_ids or [],
+                    **custom_metadata, **header_metadata
                 },
-            )
+            ),
+            message_id = getattr(context, "message_id", None),
+            parent_message_id = getattr(context, "parent_message_id", None),
         )
     else:
         await context.ask_user(
@@ -1166,7 +1364,6 @@ class DataCloudWorker(GatewayWorker):
             context.session_id,
             type(command).__name__,
         )
-        from datacloud_analysis.logging_setup import request_log_context  # noqa: PLC0415
 
         _trace_id = str(
             getattr(getattr(command, "header", None), "trace_id", "") or ""
@@ -1277,6 +1474,7 @@ class DataCloudWorker(GatewayWorker):
         header_metadata = (
             getattr(getattr(command, "header", None), "metadata", None) or {}
         )
+        all_metadata = header_metadata
 
         # ── locale 设置（从 header_metadata.language 读取，规范化后写入 context）──
         _raw_language = str(header_metadata.get("language") or "").strip()
@@ -1511,10 +1709,11 @@ class DataCloudWorker(GatewayWorker):
                     )
                     logger.info(
                         "%s carries operation form reply via humanInput, converting to graph "
-                        "resume: session=%s form_id=%s confirmed=%s checkpoint_id=%s",
+                        "resume: session=%s form_id=%s actions=%d confirmed=%s checkpoint_id=%s",
                         type(command).__name__,
                         context.session_id,
                         _operation_resume_value.get("formId", ""),
+                        len(_operation_resume_value.get("actions") or []),
                         _operation_resume_value.get("confirmed"),
                         _paradigm_human_input_metadata.get("checkpoint_id", ""),
                     )
@@ -1535,6 +1734,7 @@ class DataCloudWorker(GatewayWorker):
                 if _paradigm_resume_value is not None
                 else header_metadata
             )
+            all_metadata = _probe_metadata
             checkpoint_id_probe, checkpoint_ns_probe = (
                 self._resolve_resume_checkpoint_target(header_metadata=_probe_metadata)
             )
@@ -1553,7 +1753,9 @@ class DataCloudWorker(GatewayWorker):
                     checkpoint_ns_probe,
                 )
                 self._resume_result_cache.move_to_end(resume_cache_key)
-                return dict(cached)
+                cached_data = dict(cached)
+                cached_data["metadata"] = all_metadata
+                return cached_data
 
         from by_framework.worker.sandbox.hook_sandbox import active_workspace  # noqa: PLC0415
 
@@ -1577,7 +1779,7 @@ class DataCloudWorker(GatewayWorker):
                         content_type=SseMessageType.text.value,
                     )
                     await context.flush_to_history()
-                return {"status": "done"}
+                return {"status": "done", "metadata": all_metadata}
 
         if isinstance(command, AskAgentCommand) and _paradigm_resume_value is None:
             # 推送初始思考内容（不再包裹"问题理解"标题）
@@ -1595,7 +1797,10 @@ class DataCloudWorker(GatewayWorker):
                 message_id=_init_msg_id,
             )
             context._knowledge_enhance_node_id = _init_msg_id
-            user_text = _latest_user_text_from_content(command.content)
+            user_text = _latest_user_text_from_content(
+                command.content,
+                locale=_locale_for_msg,
+            )
             if _is_light_chitchat(user_text) and not attached_file_path:
                 await context.emit_chunk(
                     StreamChunkEvent(
@@ -1611,7 +1816,7 @@ class DataCloudWorker(GatewayWorker):
                     content_type=SseMessageType.text.value,
                 )
                 await context.flush_to_history()
-                return {"status": "done"}
+                return {"status": "done", "metadata": all_metadata}
         else:
             # ResumeCommand 或 paradigm resume：清空残留，避免旧 node_id 被带入下一轮图运行
             context._knowledge_enhance_node_id = ""
@@ -1642,10 +1847,13 @@ class DataCloudWorker(GatewayWorker):
                 # 用 parent_message_id（即上游的 tool_call_id）区分不同子任务调用，
                 # 确保每个子任务有独立的 thread_id 和 checkpoint。
                 _tool_call_id = str(
-                    getattr(getattr(command, "header", None), "parent_message_id", "") or ""
+                    getattr(getattr(command, "header", None), "parent_message_id", "")
+                    or ""
                 ).strip()
                 if _tool_call_id and not isinstance(command, ResumeCommand):
-                    dyn_thread_id = f"{runtime_agent_key}:{context.session_id}:{_tool_call_id}"
+                    dyn_thread_id = (
+                        f"{runtime_agent_key}:{context.session_id}:{_tool_call_id}"
+                    )
                     logger.info(
                         "dynamic agent thread_id uses tool_call_id: session=%s tool_call_id=%s thread_id=%s",
                         context.session_id,
@@ -1661,6 +1869,39 @@ class DataCloudWorker(GatewayWorker):
             assert self._ontology_agent is not None, (  # noqa: S101
                 "OntologyAgent not initialized; ensure start_heartbeat() completed"
             )
+
+            # ── 动态路径 Skill 加载：resource_list 里有 SKILL 条目时注入 task_prompt ──
+            _dyn_user_code = str(
+                getattr(getattr(command, "header", None), "user_code", "") or ""
+            ).strip()
+            _dyn_beyond_token = header_metadata.get("Beyond-Token", "")
+            _dyn_skill_task_prompt = _load_skills(
+                resource_list=_resource_list_for_extract,
+                user_code=_dyn_user_code,
+                tools_dict={},  # 动态路径无 AgentConfig，占位符替换跳过
+            )
+            _dyn_minio_root = os.environ.get(
+                "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
+            )
+            _dyn_skill_ws = str(Path(_dyn_minio_root) / f"byclaw-{_dyn_user_code}" / "by")
+            _dyn_extras: dict[str, Any] = {
+                "user_code": _dyn_user_code,
+                "beyond_token": _dyn_beyond_token,
+                "skill_workspace_dir": _dyn_skill_ws,
+            }
+            if _dyn_skill_task_prompt:
+                _dyn_extras["task_prompt"] = _dyn_skill_task_prompt
+                logger.info(
+                    "Skill loaded (dynamic path): session=%s skill_workspace_dir=%s",
+                    context.session_id,
+                    _dyn_skill_ws,
+                )
+            else:
+                logger.info(
+                    "No skill found (dynamic path): session=%s resource_list_len=%d",
+                    context.session_id,
+                    len(_resource_list_for_extract),
+                )
 
             if isinstance(command, ResumeCommand) or _paradigm_resume_value is not None:
                 raw_paradigm = (
@@ -1681,9 +1922,13 @@ class DataCloudWorker(GatewayWorker):
                     object_codes=_dyn_object_ids,
                     user_code=_get_gateway_user_code(context),
                     session_id=context.session_id,
+                    extras=_dyn_extras,
                 )
             else:
-                latest_user_text_dyn = _latest_user_text_from_content(command.content)
+                latest_user_text_dyn = _latest_user_text_from_content(
+                    command.content,
+                    locale=getattr(context, "locale", _FALLBACK_LOCALE),
+                )
                 latest_user_text_dyn = latest_user_text_dyn + _build_attachment_hint(
                     attached_file_path
                 )
@@ -1694,6 +1939,7 @@ class DataCloudWorker(GatewayWorker):
                     thread_id=dyn_thread_id,
                     user_code=_get_gateway_user_code(context),
                     session_id=context.session_id,
+                    extras=_dyn_extras,
                 )
 
             logger.info(
@@ -1709,6 +1955,7 @@ class DataCloudWorker(GatewayWorker):
                 agent_id=str(by_agent_id or ""),
                 dyn_object_ids=_dyn_object_ids,
                 dyn_view_ids=_dyn_view_ids,
+                header_metadata=header_metadata,
             )
             logger.info(
                 "DataCloudWorker: _consume_agent_events DONE session=%s thread=%s result_status=%s",
@@ -1733,7 +1980,11 @@ class DataCloudWorker(GatewayWorker):
                     if _is_resume_cmd:
                         _resume_query = str(
                             _paradigm_human_input_metadata.get("query")
-                            or (command.content if isinstance(command, ResumeCommand) else "")
+                            or (
+                                command.content
+                                if isinstance(command, ResumeCommand)
+                                else ""
+                            )
                             or ""
                         ).strip()[:80]
                         logger.info(
@@ -1765,6 +2016,8 @@ class DataCloudWorker(GatewayWorker):
                 if isinstance(dynamic_result, dict)
                 else type(dynamic_result).__name__,
             )
+            if isinstance(dynamic_result, dict):
+                dynamic_result["metadata"] = all_metadata
             return dynamic_result
 
         else:
@@ -2055,7 +2308,10 @@ class DataCloudWorker(GatewayWorker):
             )
             graph_input: Any = Command(resume=resume_value)
         else:
-            latest_user_text = _latest_user_text_from_content(command.content)
+            latest_user_text = _latest_user_text_from_content(
+                command.content,
+                locale=getattr(context, "locale", _FALLBACK_LOCALE),
+            )
             _attachment_hint = _build_attachment_hint(attached_file_path)
             # 历史去重用未拼接版本匹配，避免提示文本干扰
             history_messages = await _load_recent_history_messages(
@@ -2063,7 +2319,10 @@ class DataCloudWorker(GatewayWorker):
                 limit=_history_inject_limit(),
                 current_user_text=latest_user_text,
             )
-            input_messages = _normalize_messages(command.content)
+            input_messages = _normalize_messages(
+                command.content,
+                locale=getattr(context, "locale", _FALLBACK_LOCALE),
+            )
             # content 为 [] 或无法解析时，避免只有历史且最后一条为 assistant → intend 误用 AIMessage
             if not input_messages and latest_user_text:
                 input_messages = [
@@ -2088,6 +2347,67 @@ class DataCloudWorker(GatewayWorker):
                     "locale": str(getattr(context, "locale", "") or "zh_CN"),
                 },
             }
+
+            # ── Skill 加载：从 resource_list 提取 SKILL 条目，注入 task_prompt ──
+            if not _is_dynamic_agent:
+                _user_code_for_skill = str(
+                    getattr(getattr(command, "header", None), "user_code", "") or ""
+                ).strip()
+                _beyond_token_for_skill = header_metadata.get("Beyond-Token", "")
+                _minio_root = os.environ.get(
+                    "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
+                )
+                _skill_ids = _extract_skill_resource_ids(_resource_list_for_extract)
+                _skill_paths_diag = [
+                    str(
+                        Path(_minio_root)
+                        / f"byclaw-{_user_code_for_skill}"
+                        / "by"
+                        / rid.lstrip("/")
+                        / "SKILL.md"
+                    )
+                    for rid in _skill_ids
+                ]
+                logger.info(
+                    "[skill-diag] session=%s user_code=%s skill_ids=%s skill_paths=%s",
+                    context.session_id,
+                    _user_code_for_skill,
+                    _skill_ids,
+                    _skill_paths_diag,
+                )
+                _skill_task_prompt = _load_skills(
+                    resource_list=_resource_list_for_extract,
+                    user_code=_user_code_for_skill,
+                    tools_dict=tools_dict,
+                )
+                if _skill_task_prompt:
+                    _task_prompt, _first_skill_dir = _skill_task_prompt
+                    graph_input["prompts_overwrite"]["task_prompt"] = _task_prompt
+                    _skill_ws = str(
+                        Path(_minio_root) / f"byclaw-{_user_code_for_skill}" / "by"
+                    )
+                    _skill_dir = _first_skill_dir or _skill_ws
+                    config["configurable"]["extras"] = {
+                        "user_code": _user_code_for_skill,
+                        "beyond_token": _beyond_token_for_skill,
+                        "skill_workspace_dir": _skill_ws,
+                        "skill_dir": _skill_dir,
+                        "task_prompt": _task_prompt,
+                        "agent_id": str(by_agent_id or ""),
+                        "be_domainname": os.environ.get("BE_DOMAINNAME", ""),
+                    }
+                    logger.info(
+                        "Skill loaded: session=%s skill_workspace_dir=%s skill_dir=%s",
+                        context.session_id,
+                        _skill_ws,
+                        _skill_dir,
+                    )
+                else:
+                    logger.warning(
+                        "[skill-diag] skill load returned None: session=%s skill_ids=%s",
+                        context.session_id,
+                        _skill_ids,
+                    )
             logger.debug(
                 "[i18n-diag] graph_input.prompts_overwrite set: locale=%r",
                 str(getattr(context, "locale", "") or "zh_CN"),
@@ -2100,6 +2420,7 @@ class DataCloudWorker(GatewayWorker):
                 if _paradigm_resume_value is not None
                 else header_metadata
             )
+            all_metadata = md
             ckpt_id, ckpt_ns = self._resolve_resume_checkpoint_target(
                 header_metadata=md
             )
@@ -2126,7 +2447,9 @@ class DataCloudWorker(GatewayWorker):
                     str(header_metadata.get("checkpoint_ns") or ""),
                 )
                 inflight_result = await asyncio.shield(inflight)
-                return dict(inflight_result)
+                dict_inflight_result = dict(inflight_result)
+                dict_inflight_result["metadata"] = all_metadata
+                return dict_inflight_result
             resume_inflight_owner = True
             resume_inflight_future = asyncio.get_running_loop().create_future()
             resume_inflight_future.add_done_callback(self._consume_future_exception)
@@ -2144,7 +2467,10 @@ class DataCloudWorker(GatewayWorker):
             ):
                 gen_fn = getattr(reco_plugin, "generate_recommended_questions", None)
                 if callable(gen_fn):
-                    rq = _latest_user_text_from_content(command.content).strip()
+                    rq = _latest_user_text_from_content(
+                        command.content,
+                        locale=getattr(context, "locale", _FALLBACK_LOCALE),
+                    ).strip()
                     if rq:
                         reco_task = asyncio.create_task(gen_fn(rq))
 
@@ -2155,6 +2481,7 @@ class DataCloudWorker(GatewayWorker):
                 isinstance(graph_input, Command),
             )
             stream_result = await self._stream_graph(
+                header_metadata = header_metadata,
                 target_graph=target_graph,
                 graph_input=graph_input,
                 config=config,
@@ -2172,6 +2499,8 @@ class DataCloudWorker(GatewayWorker):
                 and not resume_inflight_future.done()
             ):
                 resume_inflight_future.set_result(dict(stream_result))
+            if isinstance(stream_result, dict):
+                stream_result["metadata"] = all_metadata
             return stream_result
         except Exception as exc:
             if (
@@ -2196,6 +2525,7 @@ class DataCloudWorker(GatewayWorker):
         conf_hash: str,
         reco_task: asyncio.Task[list[str]] | None = None,
         is_paradigm_resume: bool = False,
+        header_metadata: dict = {}
     ) -> dict:
         """Drive the graph stream and handle interrupt/done branches."""
         is_agent_delegate = False
@@ -2441,10 +2771,7 @@ class DataCloudWorker(GatewayWorker):
                         operation_form = interrupt_value.get("operation_form")
 
                 if paradigm_list:
-                    await context.complex_ask_user(
-                        AskUserEvent(
-                            prompt=prompt,
-                            metadata={
+                    user_metadata = {
                                 "thread_id": config["configurable"]["thread_id"],
                                 "checkpoint_id": checkpoint_id,
                                 "checkpoint_ns": checkpoint_ns,
@@ -2457,14 +2784,18 @@ class DataCloudWorker(GatewayWorker):
                                 "paradigmList": paradigm_list,
                                 "query": clarify_query,
                                 "clarify_knowledge": clarify_knowledge,
-                            },
-                        )
-                    )
-                elif operation_form:
+                            }
                     await context.complex_ask_user(
-                        AskUserEvent(
+                        event=AskUserEvent(
                             prompt=prompt,
                             metadata={
+                                **user_metadata, **header_metadata},
+                        ),
+                        message_id=getattr(context, "message_id", None),
+                        parent_message_id=getattr(context, "parent_message_id", None),
+                    )
+                elif operation_form:
+                    user_metadata = {
                                 "thread_id": config["configurable"]["thread_id"],
                                 "checkpoint_id": checkpoint_id,
                                 "checkpoint_ns": checkpoint_ns,
@@ -2475,8 +2806,15 @@ class DataCloudWorker(GatewayWorker):
                                 "pending_capability": pending_capability,
                                 "interrupt_reason": interrupt_reason,
                                 "operation_form": operation_form,
-                            },
-                        )
+                            }
+                    await context.complex_ask_user(
+                        event=AskUserEvent(
+                            prompt=prompt,
+                            metadata={
+                                **user_metadata, **header_metadata},
+                        ),
+                        message_id=getattr(context, "message_id", None),
+                        parent_message_id=getattr(context, "parent_message_id", None),
                     )
                 else:
                     await context.ask_user(
@@ -2578,13 +2916,472 @@ class DataCloudWorker(GatewayWorker):
                     pass
 
 
+
+    async def _handle_message(
+        self,
+        command: GatewayCommand,
+        cancel_event: Optional[asyncio.Event] = None,
+        cancel_reason: str = "",
+        execution: Optional["RunningExecution"] = None,
+    ) -> AgentTaskResult:
+        """Handle incoming gateway command message."""
+        trace_id = uuid.uuid4().hex
+        raw_command = command
+        command = self.prepare_command_for_processing(command)
+        header = raw_command.header
+
+        # Whether it's a return from calling another Agent or a return from waiting for
+        # user input, RESUME is uniformly used to indicate the resumption of a suspended
+        # task. Essentially, both are “resuming execution of the current workflow from a
+        # suspended/waiting state”, so they are uniformly handled in lifecycle and state
+        # recovery logic (like reloading workspace, persisting state, etc.).
+        is_agent_return = isinstance(raw_command, ResumeCommand)
+        source_agent_type = header.source_agent_type
+        has_source_agent = bool(source_agent_type) and not is_agent_return
+
+        # Get workspace dir from workspace_manager if available
+        # Note: We don't use hasattr check because it doesn't work well with mocks
+        workspace_dir = None
+
+        # Determine context parent message id
+        message_id = header.message_id
+        parent_message_id = header.parent_message_id
+        if execution and execution.is_resumed:
+            parent_message_id = execution.parent_message_id
+            logger.info(
+                "[%s] Task Resumed: Successfully restored parent_message_id=%s "
+                "from execution snapshot.",
+                self.worker_id,
+                parent_message_id,
+            )
+        else:
+            logger.info(
+                "[%s] New Task: message_id=%s, parent_message_id=%s",
+                self.worker_id,
+                message_id,
+                parent_message_id,
+            )
+
+        agent_config_snapshot = await self._resolve_agent_configs_snapshot(
+            execution,
+            header.session_id,
+        )
+
+        context = self.get_context_class()(
+            session_id=header.session_id,
+            trace_id=header.trace_id if header.trace_id else trace_id,
+            redis_client=self.redis,
+            current_agent_id=header.target_agent_type
+            if header.target_agent_type
+            else "",
+            message_id=message_id,
+            parent_message_id=parent_message_id,
+            current_command=command,
+            cancel_event=cancel_event,
+            cancel_reason=cancel_reason,
+            plugin_registry=self.plugin_registry,
+            user_code=header.user_code,
+            user_name=header.user_name,
+            workspace_dir=workspace_dir,
+            agent_configs=list(agent_config_snapshot.configs),
+            agent_configs_version=agent_config_snapshot.version,
+            storage=self.storage,
+            permission_policy=self.permission_policy,
+            content_codec=self.get_content_codec(),
+            layout_builder=self.get_data_layout_builder(),
+            is_sub_agent=has_source_agent,
+        )
+        if execution:
+            execution.context = context
+        process_result: Any = None
+
+        logger.info(
+            "[%s] Received message: %s (Trace: %s)",
+            self.worker_id,
+            header.message_id,
+            trace_id,
+        )
+        logger.info(
+            "[%s] Target Agent Type: %s", self.worker_id, header.target_agent_type
+        )
+        logger.info("[%s] Session ID: %s", self.worker_id, header.session_id)
+
+        token = None
+        try:
+            # Call plugin hooks at task start
+            await self.plugin_registry.on_task_start(context)
+
+            # 0. Automatically save user message to history
+            if not is_agent_return and hasattr(raw_command, "content"):
+                await context.agent_runtime_state.session_manager.history.save_message(
+                    role="user",
+                    content=raw_command.content,
+                    metadata={
+                        "message_id": header.message_id,
+                        "trace_id": header.trace_id,
+                    },
+                )
+
+            # 1. Setup workspace
+            logger.info(
+                "[%s] Setting up workspace for session: %s",
+                self.worker_id,
+                header.session_id,
+            )
+            paths = await self.workspace_manager.setup_workspace(
+                header.session_id,
+                header.message_id,
+                user_code=header.user_code or "default",
+                agent_id=header.target_agent_type or self.worker_id,
+            )
+            logger.debug("[%s] Workspace paths: %s", self.worker_id, paths)
+
+            # 2. Setup Sandbox
+            if self.sandbox:
+                logger.info("[%s] Installing sandbox", self.worker_id)
+                self.sandbox.install()
+
+            token = active_workspace.set(paths["private"])
+
+            # 3. Process
+            logger.info("[%s] Starting task processing", self.worker_id)
+            if cancel_event and cancel_event.is_set():
+                raise asyncio.CancelledError(
+                    f"Task cancelled before processing (reason: {cancel_reason})"
+                )
+
+            if is_agent_return:
+                await self._persist_agent_return_state(paths, raw_command)
+
+                # Check for scatter-gather join
+                if header.task_group_id:
+                    group_key = RedisKeys.task_group(header.task_group_id)
+                    results_key = RedisKeys.task_group_results(header.task_group_id)
+                    total_str = await self.redis.hget(group_key, TASK_GROUP_FIELD_TOTAL)
+                    if total_str is not None:
+                        # Store result in Redis Hash for distributed access
+                        if isinstance(raw_command, ResumeCommand):
+                            result_data = {
+                                "status": raw_command.status,
+                                "reply_data": raw_command.reply_data,
+                                "content": raw_command.content,
+                                "metadata": raw_command.header.metadata,
+                                "extra_payload": raw_command.extra_payload,
+                            }
+                            await self.redis.hset(
+                                results_key,
+                                header.message_id,
+                                json.dumps(result_data),
+                            )
+                            await self.redis.expire(results_key, TASK_GROUP_TTL_SECONDS)
+
+                        completed = await self.redis.hincrby(
+                            group_key, TASK_GROUP_FIELD_COMPLETED, 1
+                        )
+                        if completed < int(total_str):
+                            logger.info(
+                                "[%s] TaskGroup %s completed %d/%s, waiting...",
+                                self.worker_id,
+                                header.task_group_id,
+                                completed,
+                                total_str,
+                            )
+                            return AgentTaskResult(
+                                status=f"{AgentState.QUEUED.value}: waiting_for_group"
+                            )
+                        logger.info(
+                            "[%s] TaskGroup %s ALL COMPLETED (%s)!",
+                            self.worker_id,
+                            header.task_group_id,
+                            total_str,
+                        )
+
+                # await context.emit_state(
+                #     StateChangeEvent(state=AgentState.RESUMED.value)
+                # )
+            process_result = await self.process_command(command, context)
+            task_result = normalize_process_result(process_result)
+
+            # Determine the execution status to return
+            # Prefer extracting status from business return results
+            # (e.g., QUEUED, WAITING_USER, etc.)
+            final_status = task_result.status
+
+            if has_source_agent:
+                await self._enqueue_agent_return(
+                    raw_command,
+                    status=task_result.status,
+                    content=task_result.content,
+                    reply_data=task_result.reply_data,
+                    metadata=task_result.metadata,
+                    extra_payload=task_result.extra_payload,
+                )
+            logger.info(
+                "[%s] Task completed successfully with status: %s",
+                self.worker_id,
+                final_status,
+            )
+            # Call plugin hook on task completion
+            await self.plugin_registry.on_task_complete(context, process_result)
+
+            from by_framework.core.protocol.agent_state import is_terminal_state
+
+            should_emit_stream_end = (
+                not has_source_agent
+                and is_terminal_state(final_status)
+                and not getattr(context, "_permission_transferred", False)
+                and not getattr(context, "_is_suspended", False)
+            )
+
+            final_message = None
+            if isinstance(task_result.content, str) and task_result.content:
+                final_message = task_result.content
+            elif isinstance(task_result.reply_data, str) and task_result.reply_data:
+                final_message = task_result.reply_data
+            elif task_result.reply_data is not None:
+                final_message = json.dumps(task_result.reply_data, ensure_ascii=False)
+
+            if final_message is not None:
+                await context.emit_chunk(
+                    StreamChunkEvent(content=final_message, metadata=task_result.metadata), event_type=EventType.FINAL_ANSWER.value,
+                )
+
+            # Apply APP_STREAM_RESPONSE sending logic at the framework level
+            if should_emit_stream_end:
+                # If having permission and business hasn't closed the stream itself,
+                # automatically send stream end event here
+                if not getattr(context, "_is_stream_finished", False):
+                    await context.emit_chunk(
+                        "", event_type=EventType.APP_STREAM_RESPONSE.value
+                    )
+                    context._is_stream_finished = True
+            else:
+                # Fallback: if no permission to send stream end (or suspended),
+                # force flush to history on completion
+                await context.flush_to_history()
+
+            return task_result
+
+        except asyncio.CancelledError as e:
+            reason = str(e)
+            if not reason:
+                reason = execution.cancel_reason if execution else cancel_reason
+            logger.info("[%s] Task cancellation requested: %s", self.worker_id, reason)
+
+            if has_source_agent:
+                # Cascade cancellation scenario: check if parent Agent is also marked
+                # for cancellation, skip callback if so
+                # Note: parent Agent may be in COMPLETED state but marked
+                # with cancel_requested
+                should_callback = True
+                parent_msg_id = header.parent_message_id
+                if parent_msg_id and hasattr(self, "registry") and self.registry:
+                    try:
+                        parent_exec = await self.registry.get_execution_by_message_id(
+                            parent_msg_id, session_id=header.session_id
+                        )
+                        if parent_exec and parent_exec.get("cancel_requested"):
+                            should_callback = False
+                            logger.info(
+                                "[%s] Skipping cancel callback to parent "
+                                "(parent cancel_requested): %s",
+                                self.worker_id,
+                                parent_msg_id,
+                            )
+                    except Exception:  # pylint: disable=broad-exception-caught
+                        pass  # Conservatively send callback when query fails
+                if should_callback:
+                    await self._enqueue_agent_return(
+                        command,
+                        status=AgentState.CANCELLED.value,
+                        reply_data={"reason": reason},
+                    )
+
+            should_emit_stream_end = not has_source_agent and not getattr(
+                context, "_permission_transferred", False
+            )
+            if should_emit_stream_end and not getattr(
+                context, "_is_stream_finished", False
+            ):
+                await context.emit_chunk(
+                    "", event_type=EventType.APP_STREAM_RESPONSE.value
+                )
+            else:
+                await context.flush_to_history()
+
+            return AgentTaskResult(status=AgentState.CANCELLED.value)
+
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            error_msg = f"[{self.worker_id}] Task failed: {str(e)}"
+            logger.error(error_msg)
+            if has_source_agent:
+                await self._enqueue_agent_return(
+                    command,
+                    status=AgentState.FAILED.value,
+                    reply_data={"error": str(e)},
+                )
+            logger.error(traceback.format_exc())
+            # Call plugin hook on task error
+            await self.plugin_registry.on_task_error(context, e)
+
+            should_emit_stream_end = not has_source_agent and not getattr(
+                context, "_permission_transferred", False
+            )
+            if should_emit_stream_end and not getattr(
+                context, "_is_stream_finished", False
+            ):
+                await context.emit_chunk(
+                    "", event_type=EventType.APP_STREAM_RESPONSE.value
+                )
+            else:
+                await context.flush_to_history()
+
+            return AgentTaskResult(status=AgentState.FAILED.value)
+        finally:
+            # 4. Cleanup
+            if token is not None:
+                active_workspace.reset(token)
+            if self.sandbox:
+                logger.info("[%s] Uninstalling sandbox", self.worker_id)
+                self.sandbox.uninstall()
+            logger.info("[%s] Cleaning up task: %s", self.worker_id, header.message_id)
+            await self.workspace_manager.cleanup_task(
+                header.session_id,
+                header.message_id,
+                user_code=header.user_code or "default",
+                agent_id=header.target_agent_type or self.worker_id,
+            )
 # ------------------------------------------------------------------
 
 # ------------------------------------------------------------------
+
+
+def _format_uploaded_files_for_message(
+    files: Any,
+    *,
+    locale: str = _FALLBACK_LOCALE,
+) -> str:
+    """Format frontend uploaded-file metadata as markdown for LLM context."""
+    locale = _normalize_locale(locale)
+    if not files:
+        return ""
+
+    if isinstance(files, Mapping):
+        file_items = [files]
+    elif isinstance(files, list):
+        file_items = files
+    else:
+        return ""
+
+    lines: list[str] = []
+    for index, file_item in enumerate(file_items, start=1):
+        if not isinstance(file_item, Mapping):
+            continue
+
+        file_path = str(file_item.get("filePath") or "").strip()
+        if not file_path:
+            continue
+
+        file_name = str(file_item.get("fileName") or "").strip()
+        if not file_name:
+            default_prefix = "File" if locale == "en_US" else "文件"
+            file_name = (
+                os.path.basename(file_path.rstrip("/")) or f"{default_prefix}{index}"
+            )
+
+        lines.append(f"{index}. [{file_name}]({file_path})")
+
+    if not lines:
+        return ""
+
+    title = "User uploaded file(s):" if locale == "en_US" else "用户上传了文件："
+    return f"{title}\n" + "\n".join(lines)
+
+
+def _join_text_with_uploaded_files(text: str, uploaded_files_text: str) -> str:
+    if not uploaded_files_text:
+        return text
+    return f"{text}\n\n{uploaded_files_text}" if text else uploaded_files_text
+
+
+def _collect_content_part(
+    part: Any,
+    *,
+    text_parts: list[str],
+    file_items: list[Any],
+) -> None:
+    if not isinstance(part, Mapping):
+        if part is not None:
+            text = str(part).strip()
+            if text:
+                text_parts.append(text)
+        return
+
+    text_value = part.get("text")
+    if text_value is not None:
+        text = str(text_value).strip()
+        if text:
+            text_parts.append(text)
+
+    file_value = part.get("file")
+    if isinstance(file_value, Mapping):
+        file_items.append(file_value)
+
+    files_value = part.get("files")
+    if isinstance(files_value, Mapping):
+        file_items.append(files_value)
+    elif isinstance(files_value, list):
+        file_items.extend(files_value)
+
+    if "filePath" in part:
+        file_items.append(part)
+
+
+def _format_content_for_message(
+    raw_content: Any,
+    *,
+    locale: str = _FALLBACK_LOCALE,
+) -> str:
+    """Convert gateway/history content shapes to text plus markdown file links."""
+    if raw_content is None:
+        return ""
+    if isinstance(raw_content, str):
+        return raw_content
+
+    text_parts: list[str] = []
+    file_items: list[Any] = []
+
+    if isinstance(raw_content, list):
+        for part in raw_content:
+            _collect_content_part(
+                part,
+                text_parts=text_parts,
+                file_items=file_items,
+            )
+    elif isinstance(raw_content, Mapping):
+        _collect_content_part(
+            raw_content,
+            text_parts=text_parts,
+            file_items=file_items,
+        )
+    else:
+        return str(raw_content)
+
+    if not text_parts and not file_items:
+        return str(raw_content)
+
+    text = "\n".join(text_parts)
+    uploaded_files_text = _format_uploaded_files_for_message(
+        file_items,
+        locale=locale,
+    )
+    return _join_text_with_uploaded_files(text, uploaded_files_text)
 
 
 def _normalize_messages(
     content: Any,
+    *,
+    locale: str = _FALLBACK_LOCALE,
 ) -> list[HumanMessage | AIMessage | SystemMessage]:
     """Convert gateway command content to a list of LangChain BaseMessage.
 
@@ -2596,16 +3393,17 @@ def _normalize_messages(
     if not isinstance(content, list):
         return [HumanMessage(content=str(content))]
 
+    if not any(isinstance(item, Mapping) and "role" in item for item in content):
+        return [
+            HumanMessage(content=_format_content_for_message(content, locale=locale))
+        ]
+
     messages: list[HumanMessage | AIMessage | SystemMessage] = []
     for item in content:
         if isinstance(item, dict) and "role" in item:
             role = item["role"]
             raw_content = item.get("content", "")
-            # 前端多模态格式：content 是 {"files": [...], "text": "..."} 结构
-            if isinstance(raw_content, dict):
-                text = str(raw_content.get("text") or "")
-            else:
-                text = str(raw_content) if raw_content is not None else ""
+            text = _format_content_for_message(raw_content, locale=locale)
             if role == "assistant":
                 messages.append(AIMessage(content=text))
             elif role == "system":
@@ -2650,12 +3448,16 @@ async def _load_recent_history_messages(
 
     raw_history = list(reversed(raw_history))
 
+    locale = getattr(context, "locale", _FALLBACK_LOCALE)
     history_messages: list[HumanMessage | AIMessage | SystemMessage] = []
     for item in raw_history:
         if not isinstance(item, dict):
             continue
         role = str(item.get("role") or "").strip().lower()
-        content = str(item.get("content") or "").strip()
+        content = _format_content_for_message(
+            item.get("content"),
+            locale=locale,
+        ).strip()
         if not content:
             continue
         if role == "user":
@@ -2710,18 +3512,21 @@ def _build_attachment_hint(attached_file_path: str) -> str:
     )
 
 
-def _latest_user_text_from_content(content: Any) -> str:
+def _latest_user_text_from_content(
+    content: Any,
+    *,
+    locale: str = _FALLBACK_LOCALE,
+) -> str:
     if isinstance(content, str):
         return content.strip()
     if not isinstance(content, list) or not content:
         return str(content).strip() if content is not None else ""
+    if not any(isinstance(item, Mapping) and "role" in item for item in content):
+        return _format_content_for_message(content, locale=locale).strip()
     last = content[-1]
     if isinstance(last, dict):
         raw = last.get("content", "")
-        # 前端多模态格式：content 是 {"files": [...], "text": "..."} 结构
-        if isinstance(raw, dict):
-            return str(raw.get("text") or "").strip()
-        return raw.strip() if isinstance(raw, str) else str(raw).strip()
+        return _format_content_for_message(raw, locale=locale).strip()
     return str(last).strip()
 
 

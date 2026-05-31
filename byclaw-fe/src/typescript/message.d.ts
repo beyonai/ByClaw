@@ -29,6 +29,7 @@ export type IMessageListItem = {
   agentId?: string;
   uuid: string;
   orginContent: string;
+  resumeMessageId?: string;
 };
 
 export type IResComIdsListItem = {
@@ -79,6 +80,7 @@ export type ICollectInfo = {
 }
 
 export type IMessage = {
+  traceId?: string;
   creatorId: string,
   creatorName?: string,
   fromBeyond: boolean;

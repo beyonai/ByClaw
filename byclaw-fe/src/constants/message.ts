@@ -52,6 +52,7 @@ export enum SSEMessageType {
   noticeApproval,
   noticeWelfare,
   noticeTask,
+  compaction,
 }
 
 export enum IMessageState {

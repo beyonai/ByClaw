@@ -45,6 +45,7 @@ type ISseRes = {
   queryMessageId: string;
   resComIds?: [];
   metadata?: string;
+  traceId?: string;
   sessionExts?: Array<{ extParamName?: string; extParamCode: string; extParamValue: string }>;
 };
 

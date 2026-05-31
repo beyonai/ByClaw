@@ -4,6 +4,17 @@ jest.mock('antd', () => ({
   },
 }));
 
+jest.mock('@umijs/max', () => ({
+  getIntl: () => ({
+    formatMessage: ({ id }: { id: string }) => {
+      const messages: Record<string, string> = {
+        'modelMgr.error.requestFail': '请求失败',
+      };
+      return messages[id] || id;
+    },
+  }),
+}));
+
 jest.mock('@/pages/manager/service/ModelMgr', () => ({
   debugModelStream: jest.fn(),
   deleteModel: jest.fn(),

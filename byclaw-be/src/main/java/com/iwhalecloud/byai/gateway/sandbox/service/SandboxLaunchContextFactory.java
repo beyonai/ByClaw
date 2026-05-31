@@ -175,6 +175,7 @@ public class SandboxLaunchContextFactory {
         loadEnvFile(envs);
         envs.put("gateway_token", gatewayToken);
         envs.put("OPENCLAW_GATEWAY_TOKEN", gatewayToken);
+        applyCurrentUserAuthEnv(envs, userCode);
 
         if (digEmployee == null || StringUtils.isBlank(digEmployee.getPrologue())) {
             LOGGER.warn("资源ID：{} 的prologue为空，无法构建模型环境变量", resourceId);
@@ -216,9 +217,6 @@ public class SandboxLaunchContextFactory {
             }
             envs.put("MODEL_PROVIDER_NAME", modelProviderName);
             envs.put("NODE_OPTIONS", "--max-old-space-size=4096");
-            envs.put("BAIYING_SESSION", CurrentUserHolder.getSessionId());
-            String beyondToken = jwtService.createJwt(loginApplicationService.getLoginInfo(userCode));
-            envs.put("BEYOND_TOKEN", beyondToken);
 
             LOGGER.info("沙箱环境变量构建完成，资源ID：{}，modelId：{}，model_name：{}", resourceId, modelId, modelDto.getModelCode());
         }
@@ -227,6 +225,31 @@ public class SandboxLaunchContextFactory {
         }
 
         return envs;
+    }
+
+    private void applyCurrentUserAuthEnv(Map<String, String> envs, String userCode) {
+        if (StringUtils.isBlank(userCode)) {
+            return;
+        }
+
+        envs.put("USER_CODE", userCode);
+
+        String sessionId = CurrentUserHolder.getSessionId();
+        if (StringUtils.isNotBlank(sessionId)) {
+            envs.put("BAIYING_SESSION", sessionId);
+        }
+
+        try {
+            if (jwtService != null && loginApplicationService != null) {
+                String beyondToken = jwtService.createJwt(loginApplicationService.getLoginInfo(userCode));
+                if (StringUtils.isNotBlank(beyondToken)) {
+                    envs.put("BEYOND_TOKEN", beyondToken);
+                }
+            }
+        }
+        catch (Exception e) {
+            LOGGER.warn("构建沙箱 Beyond-Token 异常，userCode：{}，原因：{}", userCode, e.getMessage());
+        }
     }
 
     private void loadEnvFile(Map<String, String> envs) {

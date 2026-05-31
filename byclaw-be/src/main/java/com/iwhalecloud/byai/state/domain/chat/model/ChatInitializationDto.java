@@ -14,6 +14,11 @@ public class ChatInitializationDto {
     private Long queryMessageId;
 
     /**
+     * 响应流跟踪ID
+     */
+    private String traceId;
+
+    /**
      * 放置matadate信息
      */
     private String metadata;

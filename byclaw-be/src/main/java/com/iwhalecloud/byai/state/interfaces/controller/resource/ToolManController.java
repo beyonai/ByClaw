@@ -596,16 +596,16 @@ public class ToolManController {
     }
 
     /**
-     * 上传 skill 压缩包到用户工作空间。 - 落盘 bucket: byclaw-{userCode}（与 qrySkillListByUserCode 同口径） - 落盘前缀：数字员工
+     * 上传 skill 压缩包到用户工作空间，支持 zip 与 tar.gz。 - 落盘 bucket: byclaw-{userCode}（与 qrySkillListByUserCode 同口径） - 落盘前缀：数字员工
      * /.openclaw/workspace-baiying-agent-{resourceId}/skills/{skillName}/...； 超级助手
-     * /.openclaw/workspace/skills/{skillName}/... - zip 仅允许包含一个顶层目录，且必须含 SKILL.md；同名 skill 会先清空旧目录再写入。 - userCode
-     * 留空时退回当前登录用户。
+     * /.openclaw/workspace/skills/{skillName}/... - 压缩包必须有且仅有一个 SKILL.md；同名 skill 会先清空旧目录再写入。 -
+     * userCode 留空时退回当前登录用户。
      */
     @PostMapping(value = "/uploadSkillZip", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseUtil<List<ByClawSkillDto>> uploadSkillZip(
-        @Parameter(description = "skill zip 文件，兼容旧版单文件字段", required = false) @RequestParam(value = "file",
+        @Parameter(description = "skill zip/tar.gz 文件，兼容旧版单文件字段", required = false) @RequestParam(value = "file",
             required = false) MultipartFile file,
-        @Parameter(description = "skill zip 文件列表", required = false) @RequestParam(value = "files",
+        @Parameter(description = "skill zip/tar.gz 文件列表", required = false) @RequestParam(value = "files",
             required = false) MultipartFile[] files,
         @Parameter(description = "数字员工资源ID；超级助手可不传") @RequestParam(value = "resourceId",
             required = false) Long resourceId,
