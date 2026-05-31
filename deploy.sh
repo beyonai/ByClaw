@@ -3,6 +3,7 @@
 # ByClaw 统一部署入口。
 # 用法：
 #   sh deploy.sh init    # 初始化部署：可按 .env 初始化 NFS、拉镜像、启动服务
+#   sh deploy.sh nfs-init # 仅初始化 NFS：不拉镜像，不启动或重建服务
 #   sh deploy.sh update  # 增量更新：按 .env 重新生成配置并重建服务，不重复初始化 NFS
 #   sh deploy.sh stop    # 停止服务
 #
@@ -15,7 +16,7 @@ DEPLOY_DIR="$ROOT_DIR/deploy"
 ACTION="${1:-}"
 
 usage() {
-    echo "Usage: sh deploy.sh init|update|stop"
+    echo "Usage: sh deploy.sh init|nfs-init|update|stop"
 }
 
 if [ -z "$ACTION" ]; then
@@ -60,6 +61,11 @@ case "$ACTION" in
         fi
         pull_images
         start_services
+        ;;
+    nfs-init)
+        load_env
+        echo "========== Initializing NFS Only =========="
+        (cd "$DEPLOY_DIR" && sh init-nfs.sh)
         ;;
     update)
         load_env

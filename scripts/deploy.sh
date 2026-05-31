@@ -3,6 +3,7 @@
 # Deploy a named envs/<name> environment to its remote HOST/DEPLOY_DIR.
 # Usage:
 #   sh scripts/deploy.sh 204 init
+#   sh scripts/deploy.sh 204 nfs-init
 #   sh scripts/deploy.sh 204 update
 #   sh scripts/deploy.sh 204 stop
 #
@@ -17,8 +18,8 @@ ENV_NAME="${1:-}"
 ACTION="${2:-}"
 
 usage() {
-    echo "Usage: sh scripts/deploy.sh <env-name> init|update|stop"
-    echo "Example: sh scripts/deploy.sh 204 init"
+    echo "Usage: sh scripts/deploy.sh <env-name> init|nfs-init|update|stop"
+    echo "Example: sh scripts/deploy.sh 204 nfs-init"
 }
 
 if [ -z "$ENV_NAME" ] || [ -z "$ACTION" ]; then
@@ -27,9 +28,9 @@ if [ -z "$ENV_NAME" ] || [ -z "$ACTION" ]; then
 fi
 
 case "$ACTION" in
-    init|update|stop) ;;
+    init|nfs-init|update|stop) ;;
     *)
-        echo "Error: unsupported action '$ACTION'. Use init, update, or stop." >&2
+        echo "Error: unsupported action '$ACTION'. Use init, nfs-init, update, or stop." >&2
         exit 1
         ;;
 esac

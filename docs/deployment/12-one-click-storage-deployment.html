@@ -305,6 +305,7 @@
         </table>
         <div class="box">
           不再推荐通过命令参数切换存储方案。标准入口是：首次部署执行 <code>sh deploy.sh init</code>，
+          仅初始化 NFS 执行 <code>sh deploy.sh nfs-init</code>，
           增量更新执行 <code>sh deploy.sh update</code>，所有细节都写在 <code>.env</code>。
         </div>
       </section>
@@ -362,7 +363,7 @@ BYCLAW_NFS_MOUNT_OPTIONS=rw,hard,noatime,nconnect=4,_netdev</code></pre>
 BYCLAW_DEPLOY_STORAGE=nfs
 BYCLAW_DEPLOY_INIT_NFS=true
 
-sh deploy.sh init
+sh deploy.sh nfs-init
 
 # 也可以只执行 NFS 初始化脚本，适合先单独验证挂载
 cd deploy

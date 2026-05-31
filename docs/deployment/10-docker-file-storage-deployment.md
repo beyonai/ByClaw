@@ -196,16 +196,16 @@ sh deploy.sh update
 BYCLAW_DEPLOY_START_MINIO=true
 ```
 
-如果部署机可以 SSH 到 NFS Server 和 Docker/openSandbox 宿主机，可以让脚本先初始化 NFS：
+如果部署机可以 SSH 到 NFS Server 和 Docker/openSandbox 宿主机，可以只初始化 NFS，不重建中间件：
 
 ```bash
 BYCLAW_NFS_SERVER_HOST=10.0.0.10
 BYCLAW_NFS_CLIENT_HOSTS=10.0.0.20,10.0.0.21
 BYCLAW_DEPLOY_INIT_NFS=true
-sh deploy.sh init
+sh deploy.sh nfs-init
 ```
 
-`BYCLAW_DEPLOY_INIT_NFS=true` 只在 `sh deploy.sh init` 阶段生效：脚本会在 NFS Server 上安装并配置 NFS export，在每台 client 上安装 NFS client、挂载到 `${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}`、写入 `/etc/fstab`，并执行 `findmnt` 和 `touch` 探针。
+`sh deploy.sh nfs-init` 会在 NFS Server 上安装并配置 NFS export，在每台 client 上安装 NFS client、挂载到 `${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}`、写入 `/etc/fstab`，并执行 `findmnt` 和 `touch` 探针；它不会拉镜像，也不会启动或重建 middleware/standalone。
 
 对应 `.env` 参数：
 

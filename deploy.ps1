@@ -1,11 +1,12 @@
 param(
-    [ValidateSet("init", "update", "stop", "help")]
+    [ValidateSet("init", "nfs-init", "update", "stop", "help")]
     [string]$Action = "help"
 )
 
 # ByClaw 统一部署入口。
 # 用法：
 #   .\deploy.ps1 init    # 初始化部署：可按 .env 初始化 NFS、拉镜像、启动服务
+#   .\deploy.ps1 nfs-init # 仅初始化 NFS：不拉镜像，不启动或重建服务
 #   .\deploy.ps1 update  # 增量更新：按 .env 重新生成配置并重建服务
 #   .\deploy.ps1 stop    # 停止服务
 # 存储方案、是否初始化 NFS、是否启动 MinIO 等细节全部由 .env 驱动。
@@ -71,6 +72,13 @@ switch ($Action) {
         Pull-ByClawImages
         Start-ByClawServices
     }
+    "nfs-init" {
+        Import-ByClawEnv
+        Write-Host "========== Initializing NFS Only =========="
+        Push-Location $DeployDir
+        & ".\init-nfs.ps1"
+        Pop-Location
+    }
     "update" {
         Import-ByClawEnv
         Pull-ByClawImages
@@ -89,6 +97,6 @@ switch ($Action) {
         Pop-Location
     }
     default {
-        Write-Host "Usage: .\deploy.ps1 init|update|stop"
+        Write-Host "Usage: .\deploy.ps1 init|nfs-init|update|stop"
     }
 }

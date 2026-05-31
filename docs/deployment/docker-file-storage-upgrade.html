@@ -647,8 +647,8 @@ PIP_CACHE_DIR=/tmp/pip-cache pip install -r requirements.txt</code></pre>
       <section id="ssh-init">
         <h2>4. SSH 自动初始化 NFS</h2>
         <p>
-          如果部署机可以 SSH 到 NFS Server 和 Docker/openSandbox/BE 宿主机，可以把 NFS 初始化固化到
-          <code>deploy.sh init</code> 阶段。脚本会安装 NFS Server、写入 <code>/etc/exports</code>、安装客户端、
+          如果部署机可以 SSH 到 NFS Server 和 Docker/openSandbox/BE 宿主机，可以单独执行
+          <code>deploy.sh nfs-init</code>，只初始化 NFS，不拉镜像、不启动或重建中间件。脚本会安装 NFS Server、写入 <code>/etc/exports</code>、安装客户端、
           挂载到 <code>/mnt/byclaw-file</code>、写入 <code>/etc/fstab</code>，并执行 <code>findmnt</code> 和写入探针。
         </p>
         <pre><code># .env
@@ -670,11 +670,12 @@ BYCLAW_NFS_CLIENT_USER=root
 BYCLAW_NFS_CLIENT_PASSWORD=
 BYCLAW_NFS_MOUNT_OPTIONS=rw,hard,noatime,nconnect=4,_netdev
 
-sh deploy.sh init</code></pre>
+sh deploy.sh nfs-init</code></pre>
 
         <div class="box">
           <span class="warn">说明：</span>
-          <code>BYCLAW_DEPLOY_INIT_NFS=true</code> 只在首次部署 <code>sh deploy.sh init</code> 阶段生效。
+          <code>sh deploy.sh nfs-init</code> 是显式动作，会直接执行 NFS 初始化，不会触碰 Docker 服务。
+          <code>BYCLAW_DEPLOY_INIT_NFS=true</code> 只在完整首次部署 <code>sh deploy.sh init</code> 阶段生效。
           后续增量更新使用 <code>sh deploy.sh update</code>，不会重复初始化 NFS。密码为空时使用 SSH key；
           Shell 版本如果配置密码登录，需要部署机安装 <code>sshpass</code>。
         </div>
@@ -747,6 +748,9 @@ BYCLAW_DEPLOY_STORAGE=nfs-hybrid
 
 # 首次部署
 sh deploy.sh init
+
+# 仅初始化 NFS，不动中间件和应用
+sh deploy.sh nfs-init
 
 # 增量更新
 sh deploy.sh update</code></pre>
