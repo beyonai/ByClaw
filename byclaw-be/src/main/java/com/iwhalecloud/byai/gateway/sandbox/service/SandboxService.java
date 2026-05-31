@@ -175,6 +175,23 @@ public class SandboxService {
     }
 
     /**
+     * 按工号启动沙箱，支持通过 serviceKey 覆盖沙箱类型。
+     * 如果 serviceKey 为空则走默认 openclaw 逻辑。
+     *
+     * @param userCode   用户工号
+     * @param serviceKey sandbox_service_spec 表的 service_key，可选
+     * @return 沙箱启动响应数据
+     */
+    public SandboxLaunchData launchSandboxWithServiceKey(String userCode, String serviceKey) {
+        if (StringUtils.isBlank(serviceKey)) {
+            return launchSandbox(userCode, null);
+        }
+        SandboxLaunchRouting routing = new SandboxLaunchRouting(serviceKey,
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        return launchSandboxInternal(userCode, null, routing);
+    }
+
+    /**
      * 统一的“确保沙箱可用”入口。
      * 登录预启动和会话重试都应通过这里进入，避免在调用侧各自拼接等待逻辑。
      */

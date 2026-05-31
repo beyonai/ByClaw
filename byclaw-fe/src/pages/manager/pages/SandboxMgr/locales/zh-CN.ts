@@ -69,4 +69,14 @@ export default {
 
   // 分页
   'sandboxMgr.pagination.total': '共 {total} 条',
+
+  // 指定用户启动沙箱
+  'sandboxMgr.launch.button': '指定用户沙箱',
+  'sandboxMgr.launch.title': '指定用户启动沙箱',
+  'sandboxMgr.launch.userCode': '工号',
+  'sandboxMgr.launch.userCodePlaceholder': '请输入用户工号',
+  'sandboxMgr.launch.userCodeRequired': '请输入工号',
+  'sandboxMgr.launch.serviceKey': '沙箱规格',
+  'sandboxMgr.launch.serviceKeyPlaceholder': '不选则使用默认规格',
+  'sandboxMgr.launch.success': '沙箱启动成功，sandboxId: {sandboxId}',
 };
