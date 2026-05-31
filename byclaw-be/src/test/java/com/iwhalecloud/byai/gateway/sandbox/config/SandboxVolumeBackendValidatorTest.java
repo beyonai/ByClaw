@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.mock.env.MockEnvironment;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class SandboxVolumeBackendValidatorTest {
 
@@ -17,7 +18,7 @@ class SandboxVolumeBackendValidatorTest {
         properties.getVolume().setBackend("file");
         properties.getVolume().setFileRoot("relative/path");
 
-        SandboxVolumeBackendValidator validator = new SandboxVolumeBackendValidator(properties);
+        SandboxVolumeBackendValidator validator = validator(properties);
 
         assertThatThrownBy(validator::validate)
             .isInstanceOf(IllegalStateException.class)
@@ -31,7 +32,7 @@ class SandboxVolumeBackendValidatorTest {
         properties.getVolume().setFileRoot("/mnt/byclaw-file");
         properties.getVolume().setFileType("cephfs");
 
-        SandboxVolumeBackendValidator validator = new SandboxVolumeBackendValidator(properties);
+        SandboxVolumeBackendValidator validator = validator(properties);
 
         assertThatCode(validator::validate).doesNotThrowAnyException();
     }
@@ -41,7 +42,7 @@ class SandboxVolumeBackendValidatorTest {
         SandboxProperties properties = new SandboxProperties();
         properties.getVolume().setBackend("minio-mount");
 
-        SandboxVolumeBackendValidator validator = new SandboxVolumeBackendValidator(properties);
+        SandboxVolumeBackendValidator validator = validator(properties);
 
         assertThatCode(validator::validate).doesNotThrowAnyException();
     }
@@ -51,7 +52,7 @@ class SandboxVolumeBackendValidatorTest {
         SandboxProperties properties = new SandboxProperties();
         properties.getVolume().setBackend("unknown");
 
-        SandboxVolumeBackendValidator validator = new SandboxVolumeBackendValidator(properties);
+        SandboxVolumeBackendValidator validator = validator(properties);
 
         assertThatThrownBy(validator::validate)
             .isInstanceOf(IllegalStateException.class)
@@ -65,7 +66,7 @@ class SandboxVolumeBackendValidatorTest {
         properties.getVolume().setFileRoot("/mnt/byclaw-file");
         properties.getVolume().setFileType("object-store");
 
-        SandboxVolumeBackendValidator validator = new SandboxVolumeBackendValidator(properties);
+        SandboxVolumeBackendValidator validator = validator(properties);
 
         assertThatThrownBy(validator::validate)
             .isInstanceOf(IllegalStateException.class)
@@ -83,13 +84,19 @@ class SandboxVolumeBackendValidatorTest {
 
         SandboxProperties properties = Binder.get(environment)
             .bind("byclaw.sandbox", Bindable.of(SandboxProperties.class))
-            .orElseThrow();
+            .orElseThrow(() -> new IllegalStateException("Failed to bind sandbox properties"));
 
-        assertThatCode(() -> new SandboxVolumeBackendValidator(properties).validate()).doesNotThrowAnyException();
+        assertThatCode(() -> validator(properties).validate()).doesNotThrowAnyException();
         assertThat(properties.getVolume().getBackend()).isEqualTo("file");
         assertThat(properties.getVolume().getFileRoot()).isEqualTo("/mnt/byclaw-file");
         assertThat(properties.getVolume().getFileType()).isEqualTo("cephfs");
         assertThat(properties.getVolume().getSnapshotProvider()).isEqualTo("ceph");
         assertThat(properties.getVolume().isFileBrowserEnabled()).isTrue();
+    }
+
+    private SandboxVolumeBackendValidator validator(SandboxProperties properties) {
+        SandboxVolumeBackendValidator validator = new SandboxVolumeBackendValidator(properties);
+        ReflectionTestUtils.setField(validator, "sandboxEnabled", true);
+        return validator;
     }
 }
