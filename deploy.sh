@@ -12,7 +12,7 @@
 set -eu
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEPLOY_DIR="$ROOT_DIR/deploy"
+DEPLOY_SCRIPT_DIR="$ROOT_DIR/deploy"
 ACTION="${1:-}"
 
 usage() {
@@ -30,25 +30,25 @@ load_env() {
         . "$ROOT_DIR/.env" 2>/dev/null
         set +a
     fi
-    . "$DEPLOY_DIR/storage-profile.sh"
+    . "$DEPLOY_SCRIPT_DIR/storage-profile.sh"
 }
 
 start_services() {
     echo "========== Starting Middleware =========="
-    (cd "$DEPLOY_DIR/middleware" && sh start-all.sh)
+    (cd "$DEPLOY_SCRIPT_DIR/middleware" && sh start-all.sh)
 
     echo ""
     echo "========== Starting Standalone =========="
-    (cd "$DEPLOY_DIR/standalone" && sh start-all.sh)
+    (cd "$DEPLOY_SCRIPT_DIR/standalone" && sh start-all.sh)
 }
 
 pull_images() {
     echo "========== Pulling Middleware Images =========="
-    (cd "$DEPLOY_DIR/middleware" && sh pull.sh)
+    (cd "$DEPLOY_SCRIPT_DIR/middleware" && sh pull.sh)
 
     echo ""
     echo "========== Pulling Standalone Images =========="
-    (cd "$DEPLOY_DIR/standalone" && sh pull.sh)
+    (cd "$DEPLOY_SCRIPT_DIR/standalone" && sh pull.sh)
 }
 
 case "$ACTION" in
@@ -56,7 +56,7 @@ case "$ACTION" in
         load_env
         if [ "${BYCLAW_DEPLOY_INIT_NFS:-false}" = "true" ]; then
             echo "========== Initializing NFS =========="
-            (cd "$DEPLOY_DIR" && sh init-nfs.sh)
+            (cd "$DEPLOY_SCRIPT_DIR" && sh init-nfs.sh)
             echo ""
         fi
         pull_images
@@ -65,7 +65,7 @@ case "$ACTION" in
     nfs-init)
         load_env
         echo "========== Initializing NFS Only =========="
-        (cd "$DEPLOY_DIR" && sh init-nfs.sh)
+        (cd "$DEPLOY_SCRIPT_DIR" && sh init-nfs.sh)
         ;;
     update)
         load_env
@@ -74,10 +74,10 @@ case "$ACTION" in
         ;;
     stop)
         echo "========== Stopping Standalone =========="
-        (cd "$DEPLOY_DIR/standalone" && sh stop-all.sh)
+        (cd "$DEPLOY_SCRIPT_DIR/standalone" && sh stop-all.sh)
         echo ""
         echo "========== Stopping Middleware =========="
-        (cd "$DEPLOY_DIR/middleware" && sh stop-all.sh)
+        (cd "$DEPLOY_SCRIPT_DIR/middleware" && sh stop-all.sh)
         ;;
     -h|--help|help)
         usage
