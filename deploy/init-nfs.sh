@@ -56,17 +56,16 @@ ssh_run() {
     _password="$4"
     _script="$5"
 
-    _ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p $_port"
     if [ -n "$_password" ]; then
         if ! command -v sshpass >/dev/null 2>&1; then
             echo "Error: sshpass is required when password is configured. Install sshpass or use SSH keys."
             exit 1
         fi
-        sshpass -p "$_password" ssh $_ssh_opts "$_user@$_host" "sh -s" <<EOF
+        sshpass -p "$_password" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p "$_port" "$_user@$_host" "sh -s" <<EOF
 $_script
 EOF
     else
-        ssh $_ssh_opts "$_user@$_host" "sh -s" <<EOF
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p "$_port" "$_user@$_host" "sh -s" <<EOF
 $_script
 EOF
     fi
