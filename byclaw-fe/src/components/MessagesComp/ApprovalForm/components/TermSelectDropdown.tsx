@@ -15,6 +15,7 @@ type IProps = {
   disabled?: boolean;
   isMultiple?: boolean;
   onChange?: (value?: TermValue | TermValue[]) => void;
+  name?: string;
 };
 
 type TermValue = string | number;

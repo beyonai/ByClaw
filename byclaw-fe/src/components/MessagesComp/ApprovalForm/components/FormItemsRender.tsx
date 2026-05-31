@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Form, Input, Select, Col, Dropdown, Tag } from 'antd';
 import { isString, concat } from 'lodash';
 import { InfoCircleOutlined } from '@ant-design/icons';
@@ -45,6 +45,16 @@ function getArrayFieldValues(children: Array<FormField[]>) {
   });
 }
 
+function getFormValueFromEvent(...args: unknown[]) {
+  const event = args[0] as { target?: { checked?: unknown; type?: string; value?: unknown } } | undefined;
+
+  if (event?.target) {
+    return event.target.type === 'checkbox' ? event.target.checked : event.target.value;
+  }
+
+  return args[0];
+}
+
 const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRenderProps) => {
   const {
     formType,
@@ -65,15 +75,24 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
 
   const [, forceUpdate] = useState(0);
 
+  const termResolveNotice = 'termResolveNotice' in item ? item.termResolveNotice : undefined;
+  const errorTips = termResolveNotice?.status === 'recommended' && termResolveNotice?.message;
+
   let myDisabled = readonly || isDisable;
   let key = buildFormFieldName(fieldCode, idx);
+  const [isInitialErrorVisible, setIsInitialErrorVisible] = useState(Boolean(errorTips));
+
+  useEffect(() => {
+    setIsInitialErrorVisible(Boolean(errorTips));
+  }, [errorTips, key]);
+
   let span = ['textarea'].includes(formType) ? 24 : 12;
   if (isHidden) {
     span = 0;
   }
 
   let name: string | undefined = key;
-  let rules: { required: boolean | undefined }[] | undefined = [{ required }];
+  let rules: any[] | undefined = [{ required }];
   let initialValue: string | number | (string | number)[] | undefined = fieldValue ?? defaultValue;
   let comp = <Input disabled={myDisabled} />;
 
@@ -137,7 +156,7 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
   }
 
   if (formType === 'term_select') {
-    comp = <TermSelectDropdown item={item} disabled={myDisabled} isMultiple={isMultiple} />;
+    comp = <TermSelectDropdown item={item} disabled={myDisabled} isMultiple={isMultiple} name={name} />;
   }
 
   if (formType === 'textarea') {
@@ -148,6 +167,8 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
     comp = <Select mode="tags" />;
   }
 
+  const visibleErrorTips = isInitialErrorVisible ? errorTips : undefined;
+
   return (
     <Col span={span} key={key}>
       <Form.Item
@@ -156,6 +177,12 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
         rules={rules}
         tooltip={description ? { title: description, icon: <InfoCircleOutlined /> } : undefined}
         initialValue={initialValue}
+        validateStatus={visibleErrorTips ? 'error' : undefined}
+        help={visibleErrorTips}
+        getValueFromEvent={(...args) => {
+          setIsInitialErrorVisible(false);
+          return getFormValueFromEvent(...args);
+        }}
       >
         {comp}
       </Form.Item>

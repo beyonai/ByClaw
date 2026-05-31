@@ -279,7 +279,7 @@ function ApprovalForm(props: IProps) {
               上一步
             </Button>
           )}
-          {isDisable && (
+          {size(stepItems) > 1 && isDisable && (
             <Button
               key={`${messageId}_next_btn`}
               onClick={async () => {
