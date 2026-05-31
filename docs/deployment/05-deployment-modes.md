@@ -96,8 +96,9 @@ ByClaw 支持两种部署模式，您可以根据实际需求选择最适合的�
 
 ```bash
 # 一键启动中间件 + 拆分模式
-cd deploy
-sh start-standalone.sh
+cp .env.example .env
+# 在 .env 中设置 BYCLAW_DEPLOY_STORAGE=nfs|minio|nfs-hybrid
+sh deploy.sh init
 ```
 
 ---

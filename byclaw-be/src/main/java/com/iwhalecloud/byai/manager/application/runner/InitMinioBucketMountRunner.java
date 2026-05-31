@@ -32,6 +32,9 @@ public class InitMinioBucketMountRunner implements ApplicationRunner {
     @Value("${file.storage.type:minio}")
     private String storageType;
 
+    @Value("${byclaw.sandbox.volume.backend:minio-mount}")
+    private String volumeBackend;
+
     @Autowired
     private ResourceFS resourceFS;
 
@@ -45,10 +48,14 @@ public class InitMinioBucketMountRunner implements ApplicationRunner {
             return;
         }
 
-        LOGGER.info("准备执行MinIO公共bucket初始化, storageType={}, mountEnabled={}, mountPath={}",
+        LOGGER.info("准备执行MinIO公共bucket初始化, storageType={}, volumeBackend={}, mountEnabled={}, mountPath={}",
             storageType,
+            volumeBackend,
             minioConfig.getMount() == null ? null : minioConfig.getMount().getEnabled(),
             minioConfig.getMount() == null ? null : minioConfig.getMount().getPath());
+        if ("file".equalsIgnoreCase(volumeBackend)) {
+            LOGGER.info("Sandbox运行态卷后端为file，MinIO仅初始化对象存储bucket，不执行rclone运行态挂载");
+        }
         try {
             resourceFS.init();
         } catch (Exception e) {

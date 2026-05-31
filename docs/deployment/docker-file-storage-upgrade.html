@@ -1,0 +1,1304 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ByClaw Docker 文件型运行态存储升级手册</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #5e687a;
+      --line: #d8deea;
+      --panel: #f7f9fc;
+      --panel-strong: #eef3fa;
+      --accent: #1765d6;
+      --accent-soft: #eaf2ff;
+      --ok: #126b47;
+      --warn: #925400;
+      --bad: #a62d2d;
+      --code: #101828;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: #fff;
+      line-height: 1.65;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1120px);
+      gap: 28px;
+      max-width: 1460px;
+      margin: 0 auto;
+      padding: 30px 24px 56px;
+      align-items: start;
+    }
+
+    main {
+      min-width: 0;
+    }
+
+    h1, h2, h3 {
+      line-height: 1.25;
+      margin: 0 0 14px;
+    }
+
+    h1 {
+      font-size: 34px;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: 24px;
+      margin-top: 36px;
+      padding-top: 24px;
+      border-top: 1px solid var(--line);
+    }
+
+    h3 {
+      font-size: 18px;
+      margin-top: 24px;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--code);
+      background: #f1f4f8;
+      border: 1px solid #e1e6ef;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-size: 0.94em;
+    }
+
+    pre {
+      overflow: auto;
+      background: #0f172a;
+      color: #e5e7eb;
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    pre code {
+      background: transparent;
+      border: 0;
+      color: inherit;
+      padding: 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      font-size: 14px;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--panel-strong);
+      text-align: left;
+    }
+
+    .hero {
+      padding: 18px 0 8px;
+    }
+
+    .lede {
+      font-size: 18px;
+      color: var(--muted);
+      max-width: 920px;
+      margin-top: 12px;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 16px;
+    }
+
+    .toc {
+      position: sticky;
+      top: 20px;
+      max-height: calc(100vh - 40px);
+      overflow: auto;
+      margin: 0;
+      padding: 18px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+    }
+
+    .toc-title {
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .toc ul {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .toc li {
+      margin: 3px 0;
+    }
+
+    .toc a {
+      display: block;
+      padding: 7px 9px;
+      border-radius: 6px;
+      color: var(--ink);
+      font-size: 14px;
+    }
+
+    .toc a:hover {
+      background: var(--accent-soft);
+      text-decoration: none;
+    }
+
+    .toc .sub {
+      border-left: 1px solid var(--line);
+      margin: 4px 0 8px 10px;
+      padding-left: 8px;
+    }
+
+    .box {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin: 16px 0;
+    }
+
+    .ok {
+      color: var(--ok);
+      font-weight: 700;
+    }
+
+    .warn {
+      color: var(--warn);
+      font-weight: 700;
+    }
+
+    .bad {
+      color: var(--bad);
+      font-weight: 700;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin: 16px 0;
+    }
+
+    .step-list {
+      counter-reset: step;
+      display: grid;
+      gap: 10px;
+      margin: 16px 0;
+    }
+
+    .step {
+      counter-increment: step;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px 14px 12px 46px;
+      background: #fff;
+      position: relative;
+    }
+
+    .step::before {
+      content: counter(step);
+      position: absolute;
+      left: 14px;
+      top: 14px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      text-align: center;
+      line-height: 22px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .diagram {
+      margin: 18px 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      overflow: auto;
+    }
+
+    .diagram svg {
+      display: block;
+      min-width: 920px;
+      width: 100%;
+      height: auto;
+    }
+
+    .svg-title {
+      font: 700 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      fill: var(--ink);
+    }
+
+    .svg-label {
+      font: 700 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      fill: var(--ink);
+    }
+
+    .svg-small {
+      font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      fill: var(--muted);
+    }
+
+    .pill {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 8px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    @media (max-width: 980px) {
+      .layout {
+        grid-template-columns: 1fr;
+        padding: 20px 16px 40px;
+      }
+
+      .toc {
+        position: static;
+        max-height: none;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <nav class="toc" aria-label="目录">
+      <div class="toc-title">固定目录</div>
+      <ul>
+        <li><a href="#goal">0. 升级目标</a></li>
+        <li><a href="#topology">1. Docker 技术栈</a></li>
+        <li><a href="#decision">2. 选型建议</a></li>
+        <li><a href="#install-nfs">3. 安装 NFSv4</a></li>
+        <li><a href="#nfs-command">3.3 mount 命令解释</a></li>
+        <li><a href="#runtime-sync">3.4 /by 同步与性能</a></li>
+        <li><a href="#ssh-init">4. SSH 自动初始化 NFS</a></li>
+        <li><a href="#configure">5. 配置 ByClaw</a></li>
+        <li><a href="#upload-api">5.5 上传接口切换</a></li>
+        <li><a href="#be-startup">5.6 BE 启动参数</a></li>
+        <li><a href="#private-dir">5.7 private 目录创建</a></li>
+        <li><a href="#crud-compat">5.8 CRUD 接口兼容</a></li>
+        <li><a href="#code">6. 代码接入点</a></li>
+        <li><a href="#migrate">7. 数据迁移</a></li>
+        <li><a href="#test">8. 全流程测试</a></li>
+        <li><a href="#rollback">9. 回滚</a></li>
+        <li><a href="#checklist">10. 上线清单</a></li>
+      </ul>
+    </nav>
+
+    <main>
+      <section class="hero" id="goal">
+        <h1>ByClaw Docker 文件型运行态存储升级手册</h1>
+        <p class="lede">
+          本手册面向没有 Kubernetes/K3s 的纯 Docker 环境。目标是把 OpenClaw 容器内的 <code>/by</code>
+          从 MinIO/rclone FUSE 挂载切换到 NFSv4 真实文件系统。
+          MinIO 继续保留为对象存储、归档、共享和备份层。
+        </p>
+        <div class="meta">推荐路线：Docker + OpenSandbox + NFSv4 + .env 驱动 deploy.sh init/update。</div>
+      </section>
+
+      <section id="topology">
+        <h2>1. Docker 技术栈与总流程</h2>
+        <p>
+          不使用 Rook-Ceph。Rook 是 Kubernetes Operator，在纯 Docker 环境中不成立。本方案将文件型存储作为
+          Docker 宿主机的统一挂载点，再由 openSandbox 把用户目录 bind mount 给 OpenClaw 容器。当前主线不部署 CephFS、Rook-Ceph、K3s、SMB。
+        </p>
+
+        <div class="diagram" role="img" aria-label="Docker 文件型运行态存储拓扑图">
+          <svg viewBox="0 0 1040 460">
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#1765d6"></path>
+              </marker>
+            </defs>
+            <rect x="22" y="20" width="996" height="420" rx="10" fill="#f7f9fc" stroke="#d8deea"></rect>
+            <text x="42" y="52" class="svg-title">Docker-only 推荐拓扑</text>
+
+            <rect x="58" y="96" width="240" height="112" rx="8" fill="#fff" stroke="#b8c2d6"></rect>
+            <text x="78" y="126" class="svg-label">文件存储服务器</text>
+            <text x="78" y="152" class="svg-small">NFSv4</text>
+            <text x="78" y="176" class="svg-small">export: /exports/byclaw</text>
+
+            <rect x="400" y="84" width="260" height="136" rx="8" fill="#fff" stroke="#b8c2d6"></rect>
+            <text x="420" y="116" class="svg-label">OpenSandbox Docker Host</text>
+            <text x="420" y="144" class="svg-small">mount: /mnt/byclaw-file</text>
+            <text x="420" y="168" class="svg-small">byclaw-${USER_CODE}/by</text>
+            <text x="420" y="192" class="svg-small">统一路径，多节点一致</text>
+
+            <rect x="770" y="96" width="200" height="112" rx="8" fill="#fff" stroke="#b8c2d6"></rect>
+            <text x="790" y="126" class="svg-label">OpenClaw 容器</text>
+            <text x="790" y="152" class="svg-small">mountPath: /by</text>
+            <text x="790" y="176" class="svg-small">真实文件系统语义</text>
+
+            <path d="M 298 152 L 398 152" stroke="#1765d6" stroke-width="2.5" marker-end="url(#arrow)"></path>
+            <text x="318" y="137" class="svg-small">NFSv4</text>
+            <path d="M 660 152 L 768 152" stroke="#1765d6" stroke-width="2.5" marker-end="url(#arrow)"></path>
+            <text x="688" y="137" class="svg-small">bind mount</text>
+
+            <rect x="58" y="286" width="240" height="96" rx="8" fill="#fff" stroke="#b8c2d6"></rect>
+            <text x="78" y="316" class="svg-label">MinIO</text>
+            <text x="78" y="342" class="svg-small">对象存储、归档、共享</text>
+            <text x="78" y="366" class="svg-small">不再作为 /by 运行态卷</text>
+
+            <rect x="400" y="278" width="260" height="112" rx="8" fill="#fff" stroke="#b8c2d6"></rect>
+            <text x="420" y="310" class="svg-label">ByClaw BE</text>
+            <text x="420" y="336" class="svg-small">OpenSandboxClient.createSandbox()</text>
+            <text x="420" y="360" class="svg-small">传 scope/subPath/mountPath</text>
+
+            <path d="M 530 278 L 530 224" stroke="#1765d6" stroke-width="2.5" marker-end="url(#arrow)"></path>
+            <text x="546" y="254" class="svg-small">创建沙箱</text>
+
+            <path d="M 298 334 L 398 334" stroke="#1765d6" stroke-width="2.5" marker-end="url(#arrow)"></path>
+            <text x="318" y="319" class="svg-small">S3 SDK</text>
+          </svg>
+        </div>
+
+        <div class="step-list">
+          <div class="step">准备一台文件存储服务器，安装 NFS Server 并导出 <code>/exports/byclaw</code>。</div>
+          <div class="step">在每台 openSandbox Docker 宿主机把共享目录挂载为 <code>/mnt/byclaw-file</code>。</div>
+          <div class="step">配置 ByClaw：<code>BYCLAW_SANDBOX_VOLUME_BACKEND=file</code>。</div>
+          <div class="step">迁移旧 MinIO/rclone 数据到 <code>/mnt/byclaw-file/byclaw-${USER_CODE}/by</code>。</div>
+          <div class="step">启动沙箱并验证容器内 <code>/by</code> 不再是 FUSE/rclone。</div>
+        </div>
+      </section>
+
+      <section id="decision">
+        <h2>2. 选型建议</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>方案</th>
+              <th>适合场景</th>
+              <th>推荐级别</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>NFSv4</td>
+              <td>最快从 0 到 1 测通</td>
+              <td><span class="ok">首选</span></td>
+              <td>Linux 原生，部署简单，适合当前 Docker-only 测试。</td>
+            </tr>
+            <tr>
+              <td>OpenMediaVault + NFS</td>
+              <td>需要 Web 管理面、共享目录、容量和快照管理</td>
+              <td><span class="ok">推荐</span></td>
+              <td>底层仍建议通过 NFSv4 挂到 Docker 宿主机。</td>
+            </tr>
+            <tr>
+              <td>SMB3 / CephFS / K3s PVC</td>
+              <td>历史备选或未来扩展</td>
+              <td><span class="warn">本轮不落地</span></td>
+              <td>当前没有 K8s 环境，且 NFS 已能覆盖本轮 Docker 全流程测试。</td>
+            </tr>
+            <tr>
+              <td>MinIO/rclone</td>
+              <td>旧部署兼容</td>
+              <td><span class="bad">不推荐新用</span></td>
+              <td>对象存储不适合作为 SQLite、WAL、rename、锁等运行态文件系统。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="install-nfs">
+        <h2>3. 从 0 安装 NFSv4</h2>
+        <h3>3.1 文件存储服务器</h3>
+        <p>选择一台独立 Linux 服务器作为文件存储服务器。不要把它和 openSandbox 运行态强绑定在同一个本地目录语义里。</p>
+        <pre><code># Ubuntu / Debian
+sudo apt-get update
+sudo apt-get install -y nfs-kernel-server
+
+sudo mkdir -p /exports/byclaw
+sudo chown -R root:root /exports/byclaw
+sudo chmod -R 755 /exports/byclaw</code></pre>
+
+        <p>编辑 <code>/etc/exports</code>。为了先适配不固定的宿主机或 Docker 网段，测试环境可以全网段开放。</p>
+        <pre><code>/exports/byclaw  *(rw,sync,no_subtree_check,no_root_squash)</code></pre>
+
+        <div class="box">
+          <span class="warn">安全边界：</span>
+          <code>*</code> 表示允许任意客户端尝试挂载该 NFS export，适合内网测试或快速验证。
+          生产环境建议改成 openSandbox Docker 宿主机的固定 IP 或网段，例如
+          <code>10.0.0.0/24(rw,sync,no_subtree_check,no_root_squash)</code>。
+          NFS 服务端看到的通常是执行 <code>mount</code> 的宿主机 IP，不是 OpenClaw 容器内部随机 IP。
+        </div>
+
+        <pre><code>sudo exportfs -rav
+sudo systemctl enable --now nfs-server
+sudo exportfs -v</code></pre>
+
+        <h3>3.2 OpenSandbox Docker 宿主机</h3>
+        <p>每台会运行 openSandbox Docker 的宿主机都执行同样挂载，路径必须一致。</p>
+        <pre><code>sudo apt-get update
+sudo apt-get install -y nfs-common
+
+sudo mkdir -p /mnt/byclaw-file
+sudo mount -t nfs4 STORAGE_SERVER:/exports/byclaw /mnt/byclaw-file \
+  -o rw,hard,noatime,nconnect=4,_netdev</code></pre>
+
+        <h3 id="nfs-command">3.3 mount 命令解释</h3>
+        <p>这条命令是在 openSandbox Docker 宿主机上执行的，作用是把文件存储服务器导出的 NFS 目录接到本机统一路径。</p>
+        <pre><code>sudo mount -t nfs4 A_SERVER:/exports/byclaw /mnt/byclaw-file \
+  -o rw,hard,noatime,nconnect=4,_netdev</code></pre>
+
+        <table>
+          <thead>
+            <tr>
+              <th>片段</th>
+              <th>含义</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>sudo</code></td>
+              <td>挂载文件系统需要管理员权限。</td>
+            </tr>
+            <tr>
+              <td><code>mount</code></td>
+              <td>把一个文件系统挂载到本机目录树中。</td>
+            </tr>
+            <tr>
+              <td><code>-t nfs4</code></td>
+              <td>指定文件系统类型为 NFSv4。NFSv4 的锁语义和一致性通常比 NFSv3 更适合运行态文件目录。</td>
+            </tr>
+            <tr>
+              <td><code>A_SERVER:/exports/byclaw</code></td>
+              <td>A 服务器，也就是 NFS 服务端导出的共享目录。可以写 IP、域名或主机名。</td>
+            </tr>
+            <tr>
+              <td><code>/mnt/byclaw-file</code></td>
+              <td>B 服务器，也就是 Docker/openSandbox 宿主机上的本地挂载点。挂载后访问这里，实际读写 A 服务器目录。</td>
+            </tr>
+            <tr>
+              <td><code>rw</code></td>
+              <td>读写挂载。OpenClaw 需要在 <code>/by</code> 中创建、修改、删除文件。</td>
+            </tr>
+            <tr>
+              <td><code>hard</code></td>
+              <td>NFS 服务端短暂不可用时，客户端 I/O 会等待恢复，而不是快速返回错误。运行态数据目录建议使用 hard，避免应用误以为写入成功或直接丢错。</td>
+            </tr>
+            <tr>
+              <td><code>noatime</code></td>
+              <td>读取文件时不更新访问时间，减少 metadata 写入压力。</td>
+            </tr>
+            <tr>
+              <td><code>nconnect=4</code></td>
+              <td>对同一个 NFS 服务端建立 4 条 TCP 连接，提高并发吞吐。需客户端内核支持，不支持时可去掉。</td>
+            </tr>
+            <tr>
+              <td><code>_netdev</code></td>
+              <td>标记这是网络文件系统。写入 <code>/etc/fstab</code> 后，系统会在网络就绪后再尝试挂载。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="diagram" role="img" aria-label="NFS mount mapping">
+          <svg viewBox="0 0 980 260">
+            <defs>
+              <marker id="arrow-nfs" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#1765d6"></path>
+              </marker>
+            </defs>
+            <rect x="40" y="58" width="250" height="120" rx="8" class="svg-node-warn"></rect>
+            <text x="84" y="96" class="svg-label">A 服务器：NFS Server</text>
+            <text x="82" y="126" class="svg-small">/exports/byclaw</text>
+            <text x="82" y="150" class="svg-small">集中存储真实文件</text>
+
+            <rect x="390" y="58" width="250" height="120" rx="8" class="svg-node-green"></rect>
+            <text x="428" y="96" class="svg-label">B 服务器：Docker 宿主机</text>
+            <text x="432" y="126" class="svg-small">/mnt/byclaw-file</text>
+            <text x="432" y="150" class="svg-small">NFS 挂载点</text>
+
+            <rect x="730" y="58" width="205" height="120" rx="8" class="svg-node"></rect>
+            <text x="768" y="96" class="svg-label">OpenClaw 容器</text>
+            <text x="792" y="126" class="svg-small">/by</text>
+            <text x="758" y="150" class="svg-small">Docker bind mount</text>
+
+            <path d="M 290 118 L 388 118" class="svg-line" marker-end="url(#arrow-nfs)"></path>
+            <path d="M 640 118 L 728 118" class="svg-line" marker-end="url(#arrow-nfs)"></path>
+            <text x="318" y="100" class="svg-small">NFSv4</text>
+            <text x="660" y="100" class="svg-small">bind</text>
+          </svg>
+        </div>
+
+        <p>写入 <code>/etc/fstab</code>，避免重启丢失挂载。</p>
+        <pre><code>A_SERVER:/exports/byclaw /mnt/byclaw-file nfs4 rw,hard,noatime,nconnect=4,_netdev 0 0</code></pre>
+
+        <p>验证挂载和写入。</p>
+        <pre><code>findmnt /mnt/byclaw-file
+touch /mnt/byclaw-file/.probe-$(hostname)
+ls -la /mnt/byclaw-file</code></pre>
+
+        <h3 id="runtime-sync">3.4 OpenClaw 写入同步与性能边界</h3>
+        <p>
+          当 openSandbox 把宿主机 <code>/mnt/byclaw-file/byclaw-${USER_CODE}/by</code> bind 到 OpenClaw 容器 <code>/by</code> 后，
+          容器内凡是写到 <code>/by</code> 下的文件，都会通过 NFS 同步到 A 服务器的 <code>/exports/byclaw</code>。
+        </p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>容器内操作</th>
+              <th>是否写到 A 服务器</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>/by/project/app.js</code>、<code>/by/output/video.mp4</code></td>
+              <td><span class="ok">是</span></td>
+              <td>属于 bind 到 NFS 的 <code>/by</code> 目录。</td>
+            </tr>
+            <tr>
+              <td><code>npm install</code> 在 <code>/by/project</code> 执行</td>
+              <td><span class="ok">是</span></td>
+              <td><code>node_modules</code> 会写到 NFS，但大量小文件会比本地盘慢。</td>
+            </tr>
+            <tr>
+              <td><code>python -m venv /by/project/.venv</code></td>
+              <td><span class="ok">是</span></td>
+              <td>虚拟环境会持久化，但安装依赖会产生大量 metadata 操作。</td>
+            </tr>
+            <tr>
+              <td><code>/tmp</code>、<code>/root/.cache/pip</code>、<code>/root/.npm</code></td>
+              <td><span class="warn">否</span></td>
+              <td>这些路径在容器本地层，除非额外挂载，不会自动同步到 A 服务器。</td>
+            </tr>
+            <tr>
+              <td><code>pip install</code> 到系统 site-packages</td>
+              <td><span class="warn">否</span></td>
+              <td>写入容器镜像层或运行层，不属于 <code>/by</code>。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>性能上，NFS 比 MinIO/rclone 更适合运行态文件系统，但它仍然是网络文件系统。大文件顺序读写、视频输入输出通常可接受；<code>node_modules</code>、pip 依赖、批量小文件、<code>find</code>、<code>rm -rf</code> 这类 metadata 密集场景会明显慢于本地 SSD。</p>
+
+        <div class="box">
+          <strong>建议的容器内目录策略：</strong>
+          <ul>
+            <li><code>/by</code>：用户项目、需要持久化的数据、最终产物。</li>
+            <li><code>/tmp</code>：ffmpeg 中间文件、临时缓存、可重建 scratch 数据。</li>
+            <li><code>/root/.cache</code>：pip/npm 缓存，默认不持久化，减少 NFS 小文件压力。</li>
+          </ul>
+        </div>
+
+        <pre><code>mkdir -p /tmp/byclaw-work /by/output
+
+ffmpeg -i /by/input/source.mp4 \
+  -preset veryfast \
+  /tmp/byclaw-work/result.mp4
+
+mv /tmp/byclaw-work/result.mp4 /by/output/result.mp4
+
+npm install --cache /tmp/npm-cache
+PIP_CACHE_DIR=/tmp/pip-cache pip install -r requirements.txt</code></pre>
+      </section>
+
+      <section id="ssh-init">
+        <h2>4. SSH 自动初始化 NFS</h2>
+        <p>
+          如果部署机可以 SSH 到 NFS Server 和 Docker/openSandbox/BE 宿主机，可以把 NFS 初始化固化到
+          <code>deploy.sh init</code> 阶段。脚本会安装 NFS Server、写入 <code>/etc/exports</code>、安装客户端、
+          挂载到 <code>/mnt/byclaw-file</code>、写入 <code>/etc/fstab</code>，并执行 <code>findmnt</code> 和写入探针。
+        </p>
+        <pre><code># .env
+BYCLAW_DEPLOY_STORAGE=nfs
+BYCLAW_DEPLOY_INIT_NFS=true
+
+# A 服务器：NFS Server
+BYCLAW_NFS_SERVER_HOST=10.0.0.10
+BYCLAW_NFS_SERVER_PORT=22
+BYCLAW_NFS_SERVER_USER=root
+BYCLAW_NFS_SERVER_PASSWORD=
+BYCLAW_NFS_EXPORT_PATH=/exports/byclaw
+BYCLAW_NFS_EXPORT_CLIENTS=*
+
+# B/C 服务器：Docker/openSandbox/BE 宿主机，多个用英文逗号分隔
+BYCLAW_NFS_CLIENT_HOSTS=10.0.0.20,10.0.0.21
+BYCLAW_NFS_CLIENT_PORT=22
+BYCLAW_NFS_CLIENT_USER=root
+BYCLAW_NFS_CLIENT_PASSWORD=
+BYCLAW_NFS_MOUNT_OPTIONS=rw,hard,noatime,nconnect=4,_netdev
+
+sh deploy.sh init</code></pre>
+
+        <div class="box">
+          <span class="warn">说明：</span>
+          <code>BYCLAW_DEPLOY_INIT_NFS=true</code> 只在首次部署 <code>sh deploy.sh init</code> 阶段生效。
+          后续增量更新使用 <code>sh deploy.sh update</code>，不会重复初始化 NFS。密码为空时使用 SSH key；
+          Shell 版本如果配置密码登录，需要部署机安装 <code>sshpass</code>。
+        </div>
+      </section>
+
+      <section id="configure">
+        <h2>5. 配置 ByClaw 与 openSandbox</h2>
+        <h3>5.1 .env 推荐配置</h3>
+        <p>
+          推荐只在 <code>.env</code> 中选择部署 profile，具体派生变量由 <code>deploy/storage-profile.sh</code>
+          在 <code>deploy.sh init/update</code> 阶段统一设置。
+        </p>
+        <pre><code># .env
+BYCLAW_DEPLOY_STORAGE=nfs
+BYCLAW_DEPLOY_START_MINIO=false
+BYCLAW_DEPLOY_INIT_NFS=false
+
+FILE_STORAGE_TYPE=file
+FILE_STORAGE_LOCAL_PATH=/mnt/byclaw-file
+FILE_STORAGE_MINIO_MOUNT_ENABLED=false
+
+BYCLAW_SANDBOX_VOLUME_BACKEND=file
+BYCLAW_SANDBOX_FILE_VOLUME_ROOT=/mnt/byclaw-file
+BYCLAW_SANDBOX_FILE_VOLUME_TYPE=nfs
+BYCLAW_SANDBOX_FILE_VOLUME_SNAPSHOT_PROVIDER=nas
+BYCLAW_SANDBOX_FILE_BROWSER_ENABLED=false</code></pre>
+
+        <h3>5.2 生成 openSandbox 配置</h3>
+        <p>
+          正常情况下不需要手工进入 <code>deploy/middleware</code> 生成配置，<code>sh deploy.sh init</code>
+          和 <code>sh deploy.sh update</code> 会按 <code>.env</code> 自动完成。需要单独调试时可执行：
+        </p>
+        <pre><code>cd deploy/middleware
+sh gen-opensandbox-config.sh
+cat opensandbox-server.toml</code></pre>
+
+        <p>应看到：</p>
+        <pre><code>[docker.private_volume]
+backend = "file"
+file_root = "/mnt/byclaw-file"
+file_type = "nfs"
+snapshot_provider = "nas"
+file_browser_enabled = false</code></pre>
+
+        <h3>5.3 启动或更新服务</h3>
+        <pre><code># 首次部署
+sh deploy.sh init
+
+# 修改 .env 或镜像后增量更新
+sh deploy.sh update</code></pre>
+
+        <div class="box">
+          <span class="warn">注意：</span>
+          当前 ByClaw 后端会把 <code>scope</code>、<code>subPath</code>、<code>mountPath</code> 传给 openSandbox。
+          最终是否把 <code>/mnt/byclaw-file/byclaw-${USER_CODE}/by</code> bind 到容器 <code>/by</code>，
+          取决于 openSandbox server 镜像是否支持 <code>[docker.private_volume]</code> 配置。
+        </div>
+
+        <h3>5.4 一键部署脚本切换</h3>
+        <p>一键部署入口通过 <code>.env</code> 选择 MinIO 或 NFS，<code>deploy.sh</code> 只负责 <code>init</code> 和 <code>update</code> 阶段。</p>
+        <pre><code># .env
+# NFS 全文件型模式：OpenClaw /by 和 BE 文件 CRUD 都走 /mnt/byclaw-file
+BYCLAW_DEPLOY_STORAGE=nfs
+
+# legacy MinIO 模式：保持旧 MinIO/rclone 运行态方案
+BYCLAW_DEPLOY_STORAGE=minio
+
+# 混合模式：OpenClaw /by 走 NFS，上传/下载 API 继续走 MinIO
+BYCLAW_DEPLOY_STORAGE=nfs-hybrid
+
+# 首次部署
+sh deploy.sh init
+
+# 增量更新
+sh deploy.sh update</code></pre>
+
+        <p><code>BYCLAW_DEPLOY_STORAGE=nfs</code> 会自动应用：</p>
+        <pre><code>FILE_STORAGE_TYPE=file
+BYCLAW_SANDBOX_VOLUME_BACKEND=file
+BYCLAW_SANDBOX_FILE_VOLUME_ROOT=/mnt/byclaw-file
+BYCLAW_SANDBOX_FILE_VOLUME_TYPE=nfs
+FILE_STORAGE_MINIO_MOUNT_ENABLED=false</code></pre>
+
+        <p>NFS 模式默认跳过 MinIO 中间件；如果仍需要同时启动 MinIO：</p>
+        <pre><code># .env
+BYCLAW_DEPLOY_STORAGE=nfs
+BYCLAW_DEPLOY_START_MINIO=true</code></pre>
+
+        <h3 id="upload-api">5.5 上传接口兼容策略</h3>
+        <p>
+          <code>BYCLAW_SANDBOX_VOLUME_BACKEND=file</code> 只控制 OpenClaw 容器运行态 <code>/by</code>。
+          现有上传、下载、预览接口通过 <code>FileIngressService</code> 和 <code>ObjectStorageRouter</code> 统一接入，
+          因此可以单独选择继续走 MinIO，或切到服务器文件型存储。
+        </p>
+
+        <div class="grid">
+          <div class="card">
+            <h3>推荐混合模式</h3>
+            <pre><code>FILE_STORAGE_TYPE=minio
+BYCLAW_SANDBOX_VOLUME_BACKEND=file</code></pre>
+            <p>上传接口继续使用 MinIO；OpenClaw <code>/by</code> 使用 NFS。适合第一阶段升级，风险最低。</p>
+          </div>
+          <div class="card">
+            <h3>全文件型模式</h3>
+            <pre><code>FILE_STORAGE_TYPE=file
+FILE_STORAGE_LOCAL_PATH=/mnt/byclaw-file
+BYCLAW_SANDBOX_VOLUME_BACKEND=file</code></pre>
+            <p>上传接口也写入服务器挂载文件系统。后端把 <code>file</code> 作为 <code>local</code> 文件系统实现的配置别名。</p>
+          </div>
+        </div>
+
+        <div class="box">
+          <span class="warn">切换边界：</span>
+          <code>FILE_STORAGE_TYPE</code> 会同时影响上传和后续下载/预览读取。
+          切到 <code>file</code> 前，请先把仍需访问的 MinIO 对象迁移到 <code>FILE_STORAGE_LOCAL_PATH</code> 对应目录；
+          灰度期建议保持 <code>FILE_STORAGE_TYPE=minio</code>，只先切 OpenClaw <code>/by</code>。
+        </div>
+
+        <svg viewBox="0 0 920 260" role="img" aria-label="Upload API storage switch">
+          <defs>
+            <marker id="arrow-upload" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L9,3 z" fill="#111827"></path>
+            </marker>
+          </defs>
+          <rect x="35" y="74" width="160" height="76" rx="8" class="svg-node"></rect>
+          <text x="74" y="106" class="svg-label">上传接口</text>
+          <text x="64" y="130" class="svg-small">Controller/API</text>
+
+          <rect x="270" y="58" width="188" height="108" rx="8" class="svg-node-green"></rect>
+          <text x="304" y="98" class="svg-label">FileIngressService</text>
+          <text x="300" y="124" class="svg-small">统一上传/下载入口</text>
+
+          <rect x="530" y="34" width="165" height="78" rx="8" class="svg-node-warn"></rect>
+          <text x="574" y="67" class="svg-label">MinIO</text>
+          <text x="558" y="91" class="svg-small">FILE_STORAGE_TYPE=minio</text>
+
+          <rect x="530" y="148" width="220" height="78" rx="8" class="svg-node"></rect>
+          <text x="582" y="181" class="svg-label">挂载文件系统</text>
+          <text x="558" y="205" class="svg-small">FILE_STORAGE_TYPE=file</text>
+
+          <path d="M195 112 H270" class="svg-line" marker-end="url(#arrow-upload)"></path>
+          <path d="M458 100 C490 84 500 74 530 74" class="svg-line" marker-end="url(#arrow-upload)"></path>
+          <path d="M458 124 C492 148 500 187 530 187" class="svg-line" marker-end="url(#arrow-upload)"></path>
+        </svg>
+
+        <h3 id="be-startup">5.6 BE 配置与启动参数说明</h3>
+        <p>
+          ByClaw BE 不负责执行 <code>mount -t nfs4</code>。NFS 必须先由操作系统挂载到宿主机
+          <code>/mnt/byclaw-file</code>，BE 只通过配置判断运行态卷和文件 CRUD 应该走哪一种后端。
+        </p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>参数</th>
+              <th>推荐值</th>
+              <th>决定什么</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>BYCLAW_SANDBOX_VOLUME_BACKEND</code></td>
+              <td><code>file</code></td>
+              <td>OpenClaw 容器 <code>/by</code> 使用文件型运行态卷，不再使用 MinIO/rclone。</td>
+            </tr>
+            <tr>
+              <td><code>BYCLAW_SANDBOX_FILE_VOLUME_ROOT</code></td>
+              <td><code>/mnt/byclaw-file</code></td>
+              <td>openSandbox 解释 PRIVATE volume 的宿主机根路径。这个路径必须已经是 NFS 挂载点。</td>
+            </tr>
+            <tr>
+              <td><code>BYCLAW_SANDBOX_FILE_VOLUME_TYPE</code></td>
+              <td><code>nfs</code></td>
+              <td>声明文件型卷类型，用于配置收口、诊断日志和 openSandbox TOML，不会自动执行 NFS mount。</td>
+            </tr>
+            <tr>
+              <td><code>FILE_STORAGE_MINIO_MOUNT_ENABLED</code></td>
+              <td><code>false</code></td>
+              <td>关闭 legacy rclone mount。只有 <code>backend=minio-mount</code> 且这里为 <code>true</code> 才会执行 rclone。</td>
+            </tr>
+            <tr>
+              <td><code>FILE_STORAGE_TYPE</code></td>
+              <td><code>file</code> 或 <code>minio</code></td>
+              <td>控制 BE 上传接口、UserFS/ResourceFS CRUD、文件列表读写使用哪个存储后端。</td>
+            </tr>
+            <tr>
+              <td><code>FILE_STORAGE_LOCAL_PATH</code></td>
+              <td><code>/mnt/byclaw-file</code></td>
+              <td><code>FILE_STORAGE_TYPE=file</code> 时，BE 文件 CRUD 写入的服务器文件根目录。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>如果使用环境变量启动 BE，完整 NFS 文件型模式示例：</p>
+        <pre><code>export BYCLAW_SANDBOX_VOLUME_BACKEND=file
+export BYCLAW_SANDBOX_FILE_VOLUME_ROOT=/mnt/byclaw-file
+export BYCLAW_SANDBOX_FILE_VOLUME_TYPE=nfs
+export BYCLAW_SANDBOX_FILE_VOLUME_SNAPSHOT_PROVIDER=nas
+export FILE_STORAGE_MINIO_MOUNT_ENABLED=false
+export FILE_STORAGE_TYPE=file
+export FILE_STORAGE_LOCAL_PATH=/mnt/byclaw-file
+
+java -jar byclaw-be.jar</code></pre>
+
+        <p>如果使用命令行参数启动 BE，等价写法：</p>
+        <pre><code>java -jar byclaw-be.jar \
+  --byclaw.sandbox.volume.backend=file \
+  --byclaw.sandbox.volume.file-root=/mnt/byclaw-file \
+  --byclaw.sandbox.volume.file-type=nfs \
+  --byclaw.sandbox.volume.snapshot-provider=nas \
+  --file.storage.minio.mount.enabled=false \
+  --file.storage.type=file \
+  --file.storage.local.path=/mnt/byclaw-file</code></pre>
+
+        <div class="box">
+          <strong>什么时候才算“使用 NFS”：</strong>
+          <ul>
+            <li>宿主机上 <code>findmnt /mnt/byclaw-file</code> 能看到 NFS 挂载。</li>
+            <li><code>BYCLAW_SANDBOX_VOLUME_BACKEND=file</code>，且 <code>BYCLAW_SANDBOX_FILE_VOLUME_ROOT=/mnt/byclaw-file</code>。</li>
+            <li>openSandbox TOML 中 <code>[docker.private_volume]</code> 的 <code>backend="file"</code>、<code>file_root="/mnt/byclaw-file"</code>。</li>
+            <li>如果 BE 文件 CRUD 也要读写 NFS，必须再设置 <code>FILE_STORAGE_TYPE=file</code> 和 <code>FILE_STORAGE_LOCAL_PATH=/mnt/byclaw-file</code>。</li>
+            <li>如果 BE 运行在 Docker 容器中，BE 容器也必须挂载同一个宿主机路径 <code>/mnt/byclaw-file:/mnt/byclaw-file</code>。</li>
+          </ul>
+        </div>
+
+        <p>standalone Docker Compose 中 BE 服务需要包含这个 volume：</p>
+        <pre><code>services:
+  be:
+    volumes:
+      - ${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}:${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}</code></pre>
+
+        <h3 id="private-dir">5.7 用户 private 目录是否会自动创建</h3>
+        <p>
+          BE 进程启动时不会为所有历史用户批量创建 NFS private 目录。新增或注册用户时，
+          <code>UserBucketProvisioningService</code> 会沿用 MinIO 时代的用户空间初始化链路：
+          <code>FILE_STORAGE_TYPE=minio</code> 时创建用户 bucket，
+          <code>FILE_STORAGE_TYPE=file</code> 或 <code>local</code> 时创建
+          <code>/mnt/byclaw-file/byclaw-${USER_CODE}/by</code>。
+        </p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>时机</th>
+              <th>当前行为</th>
+              <th>建议</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>BE 进程启动</td>
+              <td>只做配置校验和日志提示，不批量创建所有历史用户目录。</td>
+              <td>启动前确认 <code>/mnt/byclaw-file</code> 已挂载且可写；历史用户通过迁移脚本补齐。</td>
+            </tr>
+            <tr>
+              <td>新增或注册用户</td>
+              <td><code>FILE_STORAGE_TYPE=file/local</code> 时创建 <code>byclaw-${USER_CODE}/by</code>；<code>minio</code> 时创建用户 bucket。</td>
+              <td>新增用户可以直接获得独立 private 目录。</td>
+            </tr>
+            <tr>
+              <td>迁移旧数据</td>
+              <td>迁移步骤会显式创建 <code>/mnt/byclaw-file/byclaw-${USER_CODE}/by</code>。</td>
+              <td>这是最稳的灰度迁移方式。</td>
+            </tr>
+            <tr>
+              <td>启动 OpenClaw 沙箱</td>
+              <td>最终 bind 源路径由 openSandbox 服务端按 <code>file_root + subPath</code> 解释。是否自动 <code>mkdir -p</code> 取决于 openSandbox 镜像实现。</td>
+              <td>为避免镜像差异，建议启动前显式创建目录。</td>
+            </tr>
+            <tr>
+              <td>BE UserFS 写文件，且 <code>FILE_STORAGE_TYPE=file</code></td>
+              <td><code>LocalStorageService.put</code> 会创建目标文件父目录。</td>
+              <td>适合 CRUD 写入时自动补齐 <code>.openclaw</code>、<code>.sessions</code> 等子目录。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>历史用户迁移或手工补偿时，可以显式准备用户 private 目录：</p>
+        <pre><code>export USER_CODE=user001
+sudo mkdir -p "/mnt/byclaw-file/byclaw-${USER_CODE}/by"
+sudo chown -R root:root "/mnt/byclaw-file/byclaw-${USER_CODE}"
+sudo chmod -R 755 "/mnt/byclaw-file/byclaw-${USER_CODE}"</code></pre>
+
+        <h3 id="crud-compat">5.8 既有文件系统 CRUD 接口兼容性</h3>
+        <p>
+          既有文件系统 CRUD 主要通过 <code>UserFS</code>、<code>ResourceFS</code>、<code>ObjectStorageRouter</code>
+          进入底层存储。代码已经支持 <code>FILE_STORAGE_TYPE=file</code>，并把它路由到服务器挂载文件系统实现。
+        </p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>接口/能力</th>
+              <th><code>FILE_STORAGE_TYPE=minio</code></th>
+              <th><code>FILE_STORAGE_TYPE=file</code></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>上传/下载/预览接口</td>
+              <td>继续读写 MinIO。</td>
+              <td>读写 <code>FILE_STORAGE_LOCAL_PATH</code> 下的文件。</td>
+            </tr>
+            <tr>
+              <td><code>UserFS.write/read/list/delete</code></td>
+              <td>读写用户 MinIO bucket。</td>
+              <td>读写 NFS 目录，例如 <code>/mnt/byclaw-file/byclaw-user001/by/.sessions/...</code>。</td>
+            </tr>
+            <tr>
+              <td><code>ResourceFS.write/read/list/delete</code></td>
+              <td>读写 MinIO 公共资源 bucket。</td>
+              <td>读写本地挂载文件根下的公共资源目录。</td>
+            </tr>
+            <tr>
+              <td>OpenClaw 容器生成文件</td>
+              <td>如果 <code>BYCLAW_SANDBOX_VOLUME_BACKEND=file</code>，仍写入 NFS <code>/by</code>。</td>
+              <td>同样写入 NFS <code>/by</code>。</td>
+            </tr>
+            <tr>
+              <td>BE 文件列表接口，如 <code>qryByClawFileByUserCode</code></td>
+              <td>通过 <code>UserFS.list</code> 看 MinIO，不会自动看到 NFS 里的新产物。</td>
+              <td>通过 <code>UserFS.list</code> 看 NFS，可以看到 OpenClaw 写入 <code>/by</code> 的文件。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="box">
+          <strong>配置选择建议：</strong>
+          <ul>
+            <li>只想先解决 OpenClaw 运行态稳定性：<code>BYCLAW_SANDBOX_VOLUME_BACKEND=file</code>，<code>FILE_STORAGE_TYPE=minio</code>。</li>
+            <li>希望 BE 文件 CRUD、文件列表和 OpenClaw <code>/by</code> 看到同一份 NFS 文件：同时设置 <code>BYCLAW_SANDBOX_VOLUME_BACKEND=file</code> 和 <code>FILE_STORAGE_TYPE=file</code>。</li>
+            <li>BE 如果以 Docker 方式运行，需要把 NFS 挂载点也 bind 到 BE 容器，否则用户目录 provisioning 和 CRUD 访问不到宿主机 NFS。</li>
+            <li>切到 <code>FILE_STORAGE_TYPE=file</code> 前，需要把旧 MinIO 中仍需访问的对象迁移到 <code>FILE_STORAGE_LOCAL_PATH</code> 对应目录。</li>
+          </ul>
+        </div>
+
+        <p>路径映射示例：</p>
+        <pre><code># UserFS 外部路径
+/.sessions/10014538/result.txt
+
+# UserFS 内部路径
+/by/.sessions/10014538/result.txt
+
+# NFS 物理路径
+/mnt/byclaw-file/byclaw-user001/by/.sessions/10014538/result.txt
+
+# A 服务器实际目录
+/exports/byclaw/byclaw-user001/by/.sessions/10014538/result.txt</code></pre>
+      </section>
+
+      <section id="code">
+        <h2>6. 代码接入点</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>位置</th>
+              <th>职责</th>
+              <th>升级后行为</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>SandboxProperties.VolumeConfig</code></td>
+              <td>运行态卷配置模型</td>
+              <td>读取 <code>backend/fileRoot/fileType/snapshotProvider/fileBrowserEnabled</code>。</td>
+            </tr>
+            <tr>
+              <td><code>SandboxVolumeBackendValidator</code></td>
+              <td>启动校验</td>
+              <td><code>backend=file</code> 时校验 <code>fileRoot</code> 是绝对路径；当前部署文档按 <code>fileType=nfs</code> 落地。</td>
+            </tr>
+            <tr>
+              <td><code>InitMinioBucketMountRunner</code></td>
+              <td>MinIO bucket 初始化</td>
+              <td><code>backend=file</code> 时仍初始化 MinIO 对象桶，但不把 MinIO 当运行态卷。</td>
+            </tr>
+            <tr>
+              <td><code>MinioBucketMountSupport</code></td>
+              <td>legacy rclone mount</td>
+              <td>仅 <code>backend=minio-mount</code> 且 <code>FILE_STORAGE_MINIO_MOUNT_ENABLED=true</code> 时执行。</td>
+            </tr>
+            <tr>
+              <td><code>GenericSandboxSpecProcessor</code></td>
+              <td>构造沙箱 volume</td>
+              <td>保持 <code>subPath=byclaw-${user_code}/by</code> 和 <code>mountPath=/by</code> 不变。</td>
+            </tr>
+            <tr>
+              <td><code>SandboxRuntimeRequestFactory</code></td>
+              <td>构造 openSandbox payload</td>
+              <td>不扩展 <code>hostPath</code> API，仍由 openSandbox 服务端解释 PRIVATE volume 根。</td>
+            </tr>
+            <tr>
+              <td><code>UserBucketProvisioningService</code></td>
+              <td>新增/注册用户后的用户空间初始化</td>
+              <td><code>minio</code> 创建用户 bucket；<code>file/local</code> 创建 <code>byclaw-${USER_CODE}/by</code>。</td>
+            </tr>
+            <tr>
+              <td><code>FileStorageUserSpaceProvisioner</code></td>
+              <td>文件型用户 private 目录创建</td>
+              <td>在 <code>FILE_STORAGE_LOCAL_PATH</code> 下创建隔离目录，并校验绝对路径和路径穿越。</td>
+            </tr>
+            <tr>
+              <td><code>LocalStorageService</code></td>
+              <td>上传接口的本地/挂载文件系统实现</td>
+              <td><code>FILE_STORAGE_TYPE=file</code> 时写入 <code>FILE_STORAGE_LOCAL_PATH</code>。</td>
+            </tr>
+            <tr>
+              <td><code>StorageType</code> / <code>FileIngressBackendRegistry</code></td>
+              <td>文件型上传后端路由</td>
+              <td>把部署配置 <code>file</code> 兼容为本地文件系统实现，业务上传接口无需改代码。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>关键不变量</h3>
+        <ul>
+          <li>OpenClaw 容器内路径永远是 <code>/by</code>。</li>
+          <li>用户目录结构保持 <code>byclaw-${USER_CODE}/by</code>。</li>
+          <li>MinIO 继续通过 SDK/对象接口承载上传、下载、归档、共享。</li>
+          <li>如果上传接口也要落到文件型存储，切换 <code>FILE_STORAGE_TYPE=file</code> 和 <code>FILE_STORAGE_LOCAL_PATH</code>。</li>
+          <li>新运行态文件系统不再走 rclone、s3fs、goofys 或 FUSE 对象存储模拟。</li>
+        </ul>
+      </section>
+
+      <section id="migrate">
+        <h2>7. 从 MinIO/rclone 迁移数据</h2>
+        <p>迁移按用户分批进行。每个用户迁移前先停止该用户 OpenClaw 沙箱，避免旧目录继续写。</p>
+
+        <div class="diagram" role="img" aria-label="数据迁移流程图">
+          <svg viewBox="0 0 1040 300">
+            <defs>
+              <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#1765d6"></path>
+              </marker>
+            </defs>
+            <rect x="26" y="26" width="988" height="248" rx="10" fill="#f7f9fc" stroke="#d8deea"></rect>
+            <text x="48" y="58" class="svg-title">迁移路径：旧 MinIO/rclone -> 文件型运行态卷</text>
+
+            <rect x="70" y="104" width="210" height="96" rx="8" fill="#fff" stroke="#b8c2d6"></rect>
+            <text x="92" y="136" class="svg-label">旧 MinIO bucket</text>
+            <text x="92" y="162" class="svg-small">byclaw-${USER_CODE}/by</text>
+
+            <rect x="416" y="104" width="210" height="96" rx="8" fill="#fff" stroke="#b8c2d6"></rect>
+            <text x="438" y="136" class="svg-label">mc mirror</text>
+            <text x="438" y="162" class="svg-small">按用户冻结后同步</text>
+
+            <rect x="760" y="104" width="220" height="96" rx="8" fill="#fff" stroke="#b8c2d6"></rect>
+            <text x="782" y="136" class="svg-label">新文件型根目录</text>
+            <text x="782" y="162" class="svg-small">/mnt/byclaw-file/byclaw-${USER_CODE}/by</text>
+
+            <path d="M 280 152 L 414 152" stroke="#1765d6" stroke-width="2.5" marker-end="url(#arrow2)"></path>
+            <path d="M 626 152 L 758 152" stroke="#1765d6" stroke-width="2.5" marker-end="url(#arrow2)"></path>
+
+            <text x="90" y="234" class="svg-small">灰度期保留旧 MinIO 数据；若新卷异常，可临时切回 legacy minio-mount。</text>
+          </svg>
+        </div>
+
+        <h3>7.1 准备变量</h3>
+        <pre><code>export USER_CODE=user001
+export BYCLAW_SANDBOX_FILE_VOLUME_ROOT=/mnt/byclaw-file</code></pre>
+
+        <h3>7.2 创建目标目录</h3>
+        <pre><code>sudo mkdir -p "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}/byclaw-${USER_CODE}/by"
+sudo chown -R root:root "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}/byclaw-${USER_CODE}"
+sudo chmod -R 755 "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}/byclaw-${USER_CODE}"</code></pre>
+
+        <h3>7.3 用 mc mirror 同步</h3>
+        <pre><code>mc alias set oldminio http://MINIO_HOST:MINIO_PORT ACCESS_KEY SECRET_KEY
+
+mc mirror --overwrite \
+  "oldminio/byclaw-${USER_CODE}/by" \
+  "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}/byclaw-${USER_CODE}/by"</code></pre>
+
+        <h3>7.4 可选 rsync</h3>
+        <p>如果旧 rclone 挂载仍健康，也可以从旧挂载目录同步。</p>
+        <pre><code>export FILE_STORAGE_MINIO_MOUNT_PATH=/data/8080
+
+rsync -aH --info=progress2 \
+  "${FILE_STORAGE_MINIO_MOUNT_PATH}/byclaw-${USER_CODE}/by/" \
+  "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}/byclaw-${USER_CODE}/by/"</code></pre>
+
+        <h3>7.5 校验</h3>
+        <pre><code>mc find "oldminio/byclaw-${USER_CODE}/by" --type f | wc -l
+find "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}/byclaw-${USER_CODE}/by" -type f | wc -l
+
+ls -la "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}/byclaw-${USER_CODE}/by/.openclaw" || true
+ls -la "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}/byclaw-${USER_CODE}/by/.sessions" || true
+ls -la "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}/byclaw-${USER_CODE}/by/output" || true</code></pre>
+      </section>
+
+      <section id="test">
+        <h2>8. 全流程测试</h2>
+        <h3>8.1 宿主机测试</h3>
+        <pre><code>findmnt /mnt/byclaw-file
+touch /mnt/byclaw-file/.host-probe
+rm -f /mnt/byclaw-file/.host-probe</code></pre>
+
+        <h3>8.2 openSandbox 配置测试</h3>
+        <pre><code>cd deploy/middleware
+sh gen-opensandbox-config.sh
+grep -A6 "\\[docker.private_volume\\]" opensandbox-server.toml</code></pre>
+
+        <h3>8.3 后端启动测试</h3>
+        <p>后端启动时应看到 <code>Sandbox runtime volume backend=file</code> 相关日志。若 <code>file-root</code> 不是绝对路径，后端会 fail fast。</p>
+
+        <h3>8.4 OpenClaw 容器内测试</h3>
+        <pre><code>mount | grep ' /by '
+df -h /by</code></pre>
+
+        <p>输出中不应包含：</p>
+        <pre><code>rclone
+s3fs
+goofys
+fuse</code></pre>
+
+        <h3>8.5 文件系统语义测试</h3>
+        <pre><code>mkdir -p /by/.openclaw/fs-probe /by/tmp /by/output
+python3 - <<'PY'
+from pathlib import Path
+root = Path('/by/.openclaw/fs-probe')
+for i in range(100):
+    p = root / f'f-{i}.txt'
+    p.write_text('hello')
+    p.rename(root / f'f-{i}.renamed')
+(root / 'wal-test.db').write_bytes(b'probe')
+print('ok')
+PY</code></pre>
+
+        <h3>8.6 MinIO 对象存储测试</h3>
+        <pre><code>mc alias set byclaw http://MINIO_HOST:MINIO_PORT ACCESS_KEY SECRET_KEY
+mc ls byclaw
+mc mb --ignore-existing byclaw/byclaw-smoke
+echo ok > /tmp/byclaw-minio-smoke.txt
+mc cp /tmp/byclaw-minio-smoke.txt byclaw/byclaw-smoke/
+mc cat byclaw/byclaw-smoke/byclaw-minio-smoke.txt</code></pre>
+
+        <h3>8.7 删除重建沙箱测试</h3>
+        <p>删除测试用户沙箱后重新拉起，确认 <code>/by/.openclaw/fs-probe</code> 仍存在，说明用户运行态数据已经落到文件型存储。</p>
+      </section>
+
+      <section id="rollback">
+        <h2>9. 回滚方案</h2>
+        <p>灰度期不要删除旧 MinIO 数据。如果新文件型卷异常，可以临时切回 legacy rclone。</p>
+        <pre><code>BYCLAW_SANDBOX_VOLUME_BACKEND=minio-mount
+FILE_STORAGE_MINIO_MOUNT_ENABLED=true
+FILE_STORAGE_MINIO_MOUNT_PATH=/data/8080</code></pre>
+
+        <p>如果新文件型卷已有增量文件，先反向归档到 MinIO。</p>
+        <pre><code>mc mirror --overwrite \
+  "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}/byclaw-${USER_CODE}/by" \
+  "oldminio/byclaw-${USER_CODE}/by"</code></pre>
+
+        <p>重生成 openSandbox 配置并重启：</p>
+        <pre><code>cd deploy/middleware
+sh gen-opensandbox-config.sh
+docker compose up -d opensandbox-server</code></pre>
+      </section>
+
+      <section id="checklist">
+        <h2>10. 上线清单</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>检查项</th>
+              <th>命令或证据</th>
+              <th>期望</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>文件型存储已挂载</td>
+              <td><code>findmnt /mnt/byclaw-file</code></td>
+              <td><span class="ok">有挂载记录</span></td>
+            </tr>
+            <tr>
+              <td>宿主机可写</td>
+              <td><code>touch /mnt/byclaw-file/.probe</code></td>
+              <td><span class="ok">创建成功</span></td>
+            </tr>
+            <tr>
+              <td>ByClaw 配置</td>
+              <td><code>BYCLAW_SANDBOX_VOLUME_BACKEND=file</code></td>
+              <td><span class="ok">文件型运行态卷启用</span></td>
+            </tr>
+            <tr>
+              <td>MinIO legacy mount</td>
+              <td><code>FILE_STORAGE_MINIO_MOUNT_ENABLED=false</code></td>
+              <td><span class="ok">不再执行 rclone mount</span></td>
+            </tr>
+            <tr>
+              <td>openSandbox TOML</td>
+              <td><code>[docker.private_volume]</code></td>
+              <td><span class="ok">file_root 指向 /mnt/byclaw-file</span></td>
+            </tr>
+            <tr>
+              <td>容器内 /by</td>
+              <td><code>mount | grep ' /by '</code></td>
+              <td><span class="ok">不是 rclone/s3fs/goofys/fuse</span></td>
+            </tr>
+            <tr>
+              <td>迁移数据</td>
+              <td><code>find /mnt/byclaw-file/byclaw-${USER_CODE}/by</code></td>
+              <td><span class="ok">旧数据可见</span></td>
+            </tr>
+            <tr>
+              <td>MinIO 对象能力</td>
+              <td><code>mc cp / mc cat</code></td>
+              <td><span class="ok">上传下载正常</span></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="box">
+          <strong>最终推荐配置：</strong>
+          <pre><code>FILE_STORAGE_TYPE=minio
+FILE_STORAGE_MINIO_MOUNT_ENABLED=false
+BYCLAW_SANDBOX_VOLUME_BACKEND=file
+BYCLAW_SANDBOX_FILE_VOLUME_ROOT=/mnt/byclaw-file
+BYCLAW_SANDBOX_FILE_VOLUME_TYPE=nfs
+BYCLAW_SANDBOX_FILE_VOLUME_SNAPSHOT_PROVIDER=nas</code></pre>
+          <p>若上传接口也切到文件型存储，把第一行改为 <code>FILE_STORAGE_TYPE=file</code>，并设置 <code>FILE_STORAGE_LOCAL_PATH=/mnt/byclaw-file</code>。</p>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
