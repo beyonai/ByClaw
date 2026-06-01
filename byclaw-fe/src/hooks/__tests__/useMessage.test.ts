@@ -35,6 +35,7 @@ const mockGetSessionObjectTypeMap = getSessionObjectTypeMap as jest.MockedFuncti
 describe('hooks/useChat/useMessage', () => {
   let dispatch: jest.Mock;
   let eventEmitter: { on: jest.Mock; off: jest.Mock; emit: jest.Mock };
+  let sessionListMap: Map<string, any>;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -43,28 +44,75 @@ describe('hooks/useChat/useMessage', () => {
       off: jest.fn(),
       emit: jest.fn(),
     };
+    sessionListMap = new Map([
+      [
+        's2',
+        {
+          list: [{ msgId: 'm1', text: 'old' }],
+          pageNum: 1,
+          pageSize: 20,
+          total: 1,
+          pageRange: [1, 1],
+        },
+      ],
+    ]);
     dispatch = jest.fn((action: any) => {
+      if (action.type === 'messageStore/updateSessionMessageList') {
+        const { sessionId, messageList } = action.payload;
+        const prevInfo = sessionListMap.get(sessionId);
+        const nextList = typeof messageList === 'function' ? messageList(prevInfo?.list || []) : messageList;
+        sessionListMap.set(sessionId, {
+          ...(prevInfo || {
+            pageNum: 1,
+            pageSize: 20,
+            total: nextList.length,
+            pageRange: [1, 1],
+          }),
+          list: nextList,
+        });
+        return Promise.resolve(undefined);
+      }
+      if (action.type === 'messageStore/cleanSessionMessage') {
+        sessionListMap.delete(action.payload.sessionId);
+        return Promise.resolve(undefined);
+      }
       if (action.type === 'messageStore/getSessionMessage') {
-        return Promise.resolve({
+        const info = {
           list: [
             { msgId: 'm1', messageId: 'm1', fromBeyond: true, metadata: '{"a":1}' },
             { msgId: 'm2', messageId: 'm2', fromBeyond: false },
           ],
           pageSize: 20,
           targetMessageId: 'm2',
-        });
+          pageNum: 1,
+          total: 2,
+          pageRange: [1, 1],
+        };
+        sessionListMap.set(action.payload.sessionId, info);
+        return Promise.resolve(info);
       }
       if (action.type === 'messageStore/getMoreSessionMessage') {
-        return Promise.resolve({
+        const info = {
           list: [{ msgId: 'm3', messageId: 'm3' }],
           hasMore: true,
-        });
+          pageNum: 2,
+          pageSize: 20,
+          total: 21,
+          pageRange: [1, 2],
+        };
+        sessionListMap.set(action.payload.sessionId, info);
+        return Promise.resolve(info);
       }
       if (action.type === 'messageStore/getLatestSessionMessage') {
-        return Promise.resolve({
+        const info = {
           list: [{ msgId: 'm4', messageId: 'm4' }],
           pageSize: 20,
-        });
+          pageNum: 1,
+          total: 1,
+          pageRange: [1, 1],
+        };
+        sessionListMap.set(action.payload.sessionId, info);
+        return Promise.resolve(info);
       }
       return Promise.resolve(undefined);
     });
@@ -72,14 +120,7 @@ describe('hooks/useChat/useMessage', () => {
     mockUseSelector.mockImplementation((selector: any) =>
       selector({
         messageStore: {
-          sessionListMap: new Map([
-            [
-              's2',
-              {
-                list: [{ msgId: 'm1', text: 'old' }],
-              },
-            ],
-          ]),
+          sessionListMap,
         },
       })
     );
@@ -94,13 +135,14 @@ describe('hooks/useChat/useMessage', () => {
   });
 
   it('loads session messages on session change and emits metadata/scroll events', async () => {
-    const { result } = renderHook(({ sessionId }) => useMessage({ sessionId }), {
+    const { result, rerender } = renderHook(({ sessionId }) => useMessage({ sessionId }), {
       initialProps: { sessionId: 's1' },
     });
 
     await act(async () => {
       await Promise.resolve();
     });
+    rerender({ sessionId: 's1' });
 
     expect(dispatch).toHaveBeenCalledWith({
       type: 'messageStore/getSessionMessage',
@@ -123,17 +165,19 @@ describe('hooks/useChat/useMessage', () => {
   });
 
   it('updateMessage merges current session messages and adds updateKey', async () => {
-    const { result } = renderHook(({ sessionId }) => useMessage({ sessionId }), {
+    const { result, rerender } = renderHook(({ sessionId }) => useMessage({ sessionId }), {
       initialProps: { sessionId: 's1' },
     });
 
     await act(async () => {
       await Promise.resolve();
     });
+    rerender({ sessionId: 's1' });
 
     act(() => {
       result.current.updateMessage({ msgId: 'm1', text: 'updated' } as any);
     });
+    rerender({ sessionId: 's1' });
 
     expect(result.current.messageList[0]).toMatchObject({
       msgId: 'm1',
@@ -149,27 +193,53 @@ describe('hooks/useChat/useMessage', () => {
       result.current.updateMessage({ msgId: 'm1', sessionId: 's2', text: 'updated' } as any);
     });
 
-    expect(dispatch).toHaveBeenCalledWith({
-      type: 'messageStore/updateSessionMessageList',
-      payload: {
-        sessionId: 's2',
-        messageList: [{ msgId: 'm1', sessionId: 's2', text: 'updated' }],
-      },
-    });
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'messageStore/updateSessionMessageList',
+        payload: {
+          sessionId: 's2',
+          messageList: expect.any(Function),
+        },
+      })
+    );
+    expect(sessionListMap.get('s2').list).toEqual([
+      { msgId: 'm1', text: 'updated', sessionId: 's2', updateKey: 'new-msg-id' },
+    ]);
   });
 
-  it('deleteMessage removes local message and calls delMessage for persisted ids', async () => {
-    const { result } = renderHook(({ sessionId }) => useMessage({ sessionId }), {
+  it('updateMessage bases consecutive updates on the latest reducer list', async () => {
+    const { result, rerender } = renderHook(({ sessionId }) => useMessage({ sessionId }), {
       initialProps: { sessionId: 's1' },
     });
 
     await act(async () => {
       await Promise.resolve();
     });
+    rerender({ sessionId: 's1' });
+
+    act(() => {
+      result.current.updateMessage({ msgId: 'm3', text: 'query', fromBeyond: false } as any);
+      result.current.updateMessage({ msgId: 'm4', text: 'answer', fromBeyond: true } as any);
+    });
+    rerender({ sessionId: 's1' });
+
+    expect(result.current.messageList.map((item) => item.msgId)).toEqual(['m1', 'm2', 'm3', 'm4']);
+  });
+
+  it('deleteMessage removes local message and calls delMessage for persisted ids', async () => {
+    const { result, rerender } = renderHook(({ sessionId }) => useMessage({ sessionId }), {
+      initialProps: { sessionId: 's1' },
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    rerender({ sessionId: 's1' });
 
     act(() => {
       result.current.deleteMessage({ msgId: 'm2', messageId: 'm2' } as any);
     });
+    rerender({ sessionId: 's1' });
 
     expect(result.current.messageList.map((item) => item.msgId)).toEqual(['m1']);
     expect(delMessage).toHaveBeenCalledWith({ messageId: 'm2' });
@@ -199,7 +269,7 @@ describe('hooks/useChat/useMessage', () => {
   });
 
   it('getMoreSessionMessage updates list and hasMore on forward paging', async () => {
-    const { result } = renderHook(({ sessionId }) => useMessage({ sessionId }), {
+    const { result, rerender } = renderHook(({ sessionId }) => useMessage({ sessionId }), {
       initialProps: { sessionId: 's1' },
     });
 
@@ -207,6 +277,7 @@ describe('hooks/useChat/useMessage', () => {
       await Promise.resolve();
       await result.current.getMoreSessionMessage('s1');
     });
+    rerender({ sessionId: 's1' });
 
     expect(dispatch).toHaveBeenCalledWith({
       type: 'messageStore/getMoreSessionMessage',
@@ -220,7 +291,7 @@ describe('hooks/useChat/useMessage', () => {
   });
 
   it('reloadLatestMessageList fetches latest list and updates state', async () => {
-    const { result } = renderHook(({ sessionId }) => useMessage({ sessionId }), {
+    const { result, rerender } = renderHook(({ sessionId }) => useMessage({ sessionId }), {
       initialProps: { sessionId: 's1' },
     });
 
@@ -228,6 +299,7 @@ describe('hooks/useChat/useMessage', () => {
       await Promise.resolve();
       await result.current.reloadLatestMessageList();
     });
+    rerender({ sessionId: 's1' });
 
     expect(dispatch).toHaveBeenCalledWith({
       type: 'messageStore/getLatestSessionMessage',

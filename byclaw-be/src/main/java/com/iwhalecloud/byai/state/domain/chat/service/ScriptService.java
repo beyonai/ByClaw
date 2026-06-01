@@ -42,6 +42,7 @@ import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
 import com.iwhalecloud.byai.state.common.enums.MessageContentTypeEnum;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
+import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.model.ChatResponse;
@@ -113,7 +114,7 @@ public class ScriptService extends AbstractChatProcess {
     private RouteService routeService;
 
     @Autowired
-    private RunningOutputStreamRegistry runningOutputStreamRegistry;
+    private SessionStreamManager sessionStreamManager;
 
     /**
      * 参数准备：生成消息ID、组装请求参数、初始化上下文等。
@@ -126,6 +127,10 @@ public class ScriptService extends AbstractChatProcess {
         // 设置多端广播所需的用户标识和发送端 Channel
         ctx.userId = CurrentUserHolder.getCurrentUserId();
         ctx.senderChannel = ctx.assistantChatDto.getSenderChannel();
+        ctx.requestId = ctx.assistantChatDto.getRequestId();
+        if (ctx.senderChannel != null || StringUtils.isNotBlank(ctx.requestId)) {
+            ctx.transport = ChatTransport.WEBSOCKET;
+        }
 
         if (StringUtils.isNotEmpty(ctx.assistantChatDto.getTraceId()) && ctx.assistantChatDto.getLlmMessageId() == null) {
             ctx.assistantChatDto.setLlmMessageId(getModelAnswerMessageIdByTraceId(ctx.assistantChatDto.getTraceId()));
@@ -133,9 +138,6 @@ public class ScriptService extends AbstractChatProcess {
 
         if (ActionType.RESUME.equalsIgnoreCase(ctx.assistantChatDto.getActionType()) && StringUtils.isEmpty(ctx.assistantChatDto.getTraceId())) {
             throw new BdpRuntimeException("[" + ActionType.RESUME + "] traceId is required!");
-        }
-        if (ActionType.RESUME.equalsIgnoreCase(ctx.assistantChatDto.getActionType())) {
-            resolveResumeSendMode(ctx);
         }
 
         // 判断是否更新任务
@@ -212,23 +214,6 @@ public class ScriptService extends AbstractChatProcess {
 
         // 请求python参数
         ctx.params = paramService.getParams(ctx);
-    }
-
-    private void resolveResumeSendMode(ChatProcessContext ctx) {
-        Long llmMessageId = ctx.assistantChatDto.getLlmMessageId();
-        if (llmMessageId == null) {
-            throw new BdpRuntimeException("[" + ActionType.RESUME + "] llmMessageId is required!");
-        }
-
-        if (messageFactory.existsMessageIndexByResMsgId(llmMessageId)) {
-            return;
-        }
-
-        if (!runningOutputStreamRegistry.isRunning(ctx.sessionId, llmMessageId)) {
-            return;
-        }
-
-        ctx.sendByFrameworkMsgOnly = true;
     }
 
     private String getTraceId(Long userMessageId, Long modelAnswerMessageId) {
@@ -413,6 +398,28 @@ public class ScriptService extends AbstractChatProcess {
         }
         catch (Exception e) {
             log.warn("多端广播 appStreamResponse 事件异常, sessionId: {}", ctx.sessionId, e);
+        }
+    }
+
+    /**
+     * WebSocket Gateway 异步模式在 Redis 流结束后由事件路由服务回调完成落库和收尾。
+     */
+    public void completeAsyncGatewayContext(ChatProcessContext ctx) {
+        try {
+            if (ctx.loginInfo != null) {
+                CurrentUserHolder.setLoginInfo(ctx.loginInfo);
+            }
+            storeMessage(ctx);
+            afterProcess(ctx);
+        }
+        catch (Exception e) {
+            log.error("WebSocket 异步会话收尾失败, sessionId: {}, traceId: {}", ctx.sessionId, ctx.traceId, e);
+        }
+        finally {
+            CurrentUserHolder.clearLoginInfo();
+            if (ctx.sessionId != null) {
+                sessionStreamManager.stopSessionListener(String.valueOf(ctx.sessionId));
+            }
         }
     }
 

@@ -29,6 +29,8 @@ import com.iwhalecloud.byai.state.common.dto.MessageStructDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.FileUploadDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.PrologueDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
+import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
+import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
 import com.iwhalecloud.byai.state.domain.file.service.ConversationFileStorage;
 import com.iwhalecloud.byai.state.domain.file.service.ConversationStoragePathResolver;
 import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
@@ -81,6 +83,12 @@ public class AssistantChatApplicationService {
     @Autowired
     private ByaiMessageHotService byaiMessageHotService;
 
+    @Autowired
+    private RunningOutputStreamRegistry runningOutputStreamRegistry;
+
+    @Autowired
+    private RunningChatSnapshotService runningChatSnapshotService;
+
     AssistantChatApplicationService(GatewayClient<?> gatewayClient) {
         this.gatewayClient = gatewayClient;
     }
@@ -105,6 +113,8 @@ public class AssistantChatApplicationService {
 
         gatewayClient.cancelTask(String.valueOf(stopChatDto.getMessageId()), String.valueOf(stopChatDto.getSessionId()),
             "user cancel task", targetAgentType, CurrentUserHolder.getCurrentUserCode(), "force");
+        runningOutputStreamRegistry.release(stopChatDto.getSessionId(), stopChatDto.getMessageId());
+        runningChatSnapshotService.delete(stopChatDto.getSessionId(), stopChatDto.getMessageId());
     }
 
     /**

@@ -9,7 +9,12 @@ import type { ISession } from '@/typescript/session';
 
 interface WebSocketMessage {
   type: string;
+  requestId?: string;
+  sessionId?: string;
+  event?: string;
+  data?: any;
   session?: ISession;
+  [key: string]: any;
 }
 
 type MessageHandler = (message: WebSocketMessage) => void;
@@ -34,6 +39,10 @@ class WebSocketManager {
   private onAddNotificationSessionCb: (newSession: ISession) => void = noop;
 
   private reconnectCount: number = 0;
+
+  private connectResolvers: Array<() => void> = [];
+
+  private connectRejecters: Array<(error: Error) => void> = [];
 
   private constructor() {}
 
@@ -88,6 +97,7 @@ class WebSocketManager {
 
         this.startHeartbeat();
         this.reconnectCount = 0;
+        this.resolveConnectWaiters();
       };
 
       this.ws.onmessage = (event) => {
@@ -111,10 +121,12 @@ class WebSocketManager {
         console.error('WebSocket 连接错误:', error);
         this.isConnecting = false;
         this.stopHeartbeat();
+        this.rejectConnectWaiters(new Error('WebSocket connection error'));
       };
     } catch (error) {
       console.error('WebSocket 初始化失败:', error);
       this.isConnecting = false;
+      this.rejectConnectWaiters(error instanceof Error ? error : new Error('WebSocket init failed'));
       this.scheduleReconnect();
     }
   }
@@ -133,7 +145,8 @@ class WebSocketManager {
 
     // 调用注册的消息处理器
     const handlers = this.messageHandlers.get(message.type) || [];
-    handlers.forEach((handler) => {
+    const wildcardHandlers = this.messageHandlers.get('*') || [];
+    [...handlers, ...wildcardHandlers].forEach((handler) => {
       try {
         handler(message);
       } catch (error) {
@@ -178,6 +191,37 @@ class WebSocketManager {
         console.error('WebSocket 消息发送失败:', error);
       }
     }
+  }
+
+  public waitUntilConnected(timeout = 10000): Promise<void> {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      return Promise.resolve();
+    }
+    this.init();
+    return new Promise((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout>;
+      const onResolve = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const onReject = (error: Error) => {
+        clearTimeout(timer);
+        reject(error);
+      };
+      timer = setTimeout(() => {
+        this.connectResolvers = this.connectResolvers.filter((item) => item !== onResolve);
+        this.connectRejecters = this.connectRejecters.filter((item) => item !== onReject);
+        reject(new Error('WebSocket connection timeout'));
+      }, timeout);
+
+      this.connectResolvers.push(onResolve);
+      this.connectRejecters.push(onReject);
+    });
+  }
+
+  public async sendMessageWhenReady(message: WebSocketMessage): Promise<void> {
+    await this.waitUntilConnected();
+    this.sendMessage(message);
   }
 
   /**
@@ -274,6 +318,20 @@ class WebSocketManager {
     this.reconnectTimer = setTimeout(() => {
       this.init();
     }, 5000); // 5秒后重连
+  }
+
+  private resolveConnectWaiters(): void {
+    const resolvers = [...this.connectResolvers];
+    this.connectResolvers = [];
+    this.connectRejecters = [];
+    resolvers.forEach((resolve) => resolve());
+  }
+
+  private rejectConnectWaiters(error: Error): void {
+    const rejecters = [...this.connectRejecters];
+    this.connectResolvers = [];
+    this.connectRejecters = [];
+    rejecters.forEach((reject) => reject(error));
   }
 
   /**

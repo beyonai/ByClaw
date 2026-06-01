@@ -18,6 +18,7 @@ import useGlobal from '@/hooks/useGlobal';
 import { IMessageListItem } from '@/typescript/message';
 import type { ISession } from '@/typescript/session';
 import type { IOnionsProps } from '@/hooks/useChat';
+import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 
 type IProps = {
   addSession: (newSession: ISession) => void;
@@ -62,6 +63,15 @@ function useHandler(props: IProps) {
               return acc;
             }, {}),
           },
+        });
+      }
+
+      if (sseMsg.event === 'createSession') {
+        chatSessionRuntimeManager.register({
+          requestId: newAnswerMsg.msgId,
+          msgId: newAnswerMsg.msgId,
+          sessionId: newSessionId,
+          cancel: () => newAnswerMsg.cancelSSE?.(),
         });
       }
 

@@ -150,21 +150,34 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     [agentList, employeesList]
   );
 
-  const { sendQuery, messageList, hasMore, getMessageList, setMessageList, onNext, updateMessage, deleteMessage } =
-    useChat({
-      chatUrl,
-      sessionId,
-      agentType: myAgentType,
-      addSession,
-      onBeforeSend,
-    });
+  const {
+    sendQuery,
+    messageList,
+    hasMore,
+    getMessageList,
+    setMessageList,
+    onNext,
+    updateMessage,
+    deleteMessage,
+    isSessionRunning,
+    cancelCurrentSession,
+  } = useChat({
+    chatUrl,
+    sessionId,
+    agentType: myAgentType,
+    addSession,
+    onBeforeSend,
+  });
   const lastMsg = last(messageList);
 
   const onCancel = useCallback(() => {
-    if ([IMessageState.Query, IMessageState.Answer].includes(lastMsg?.messageState as IMessageState)) {
-      lastMsg?.cancelSSE?.();
+    if (
+      isSessionRunning ||
+      [IMessageState.Query, IMessageState.Answer].includes(lastMsg?.messageState as IMessageState)
+    ) {
+      cancelCurrentSession();
     }
-  }, [lastMsg?.cancelSSE, lastMsg?.messageState]);
+  }, [cancelCurrentSession, isSessionRunning, lastMsg?.messageState]);
 
   const { disabledInput, multiChoicesList, setMultiChoicesList, multiChoicesMsgId, setMultiChoicesMsgId } =
     useEventEmitterHooks({
@@ -288,6 +301,13 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     scrollToBottom: messageListCompRef.current?.toBottom,
   }));
 
+  const messageState = React.useMemo(() => {
+    if (isSessionRunning) {
+      return IMessageState.Answer;
+    }
+    return lastMsg?.messageState;
+  }, [isSessionRunning, lastMsg?.messageState]);
+
   return (
     <ChatLayoutCompContext.Provider
       value={{
@@ -339,7 +359,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                   data-isbottom={isBottom}
                 >
                   <QueryInput
-                    messageState={lastMsg?.messageState}
+                    messageState={messageState}
                     onSend={onSend}
                     onCancel={onCancel}
                     myAgentType={myAgentType}

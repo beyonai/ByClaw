@@ -10,9 +10,7 @@ import org.springframework.stereotype.Component;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
-import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
-import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
-import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
+import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamEventRouter;
 
 /**
  * Redis Stream 数据流消息监听器。
@@ -44,10 +42,7 @@ public class RedisStreamMessageListener implements StreamListener<String, MapRec
     private static final Logger logger = LoggerFactory.getLogger(RedisStreamMessageListener.class);
 
     @Autowired
-    private OutputStreamManager outputStreamManager;
-
-    @Autowired
-    private MultiDeviceBroadcastService multiDeviceBroadcastService;
+    private SessionStreamEventRouter sessionStreamEventRouter;
 
     @Override
     public void onMessage(MapRecord<String, String, String> message) {
@@ -71,24 +66,6 @@ public class RedisStreamMessageListener implements StreamListener<String, MapRec
             return;
         }
 
-        ChatProcessContext ctx = outputStreamManager.getContext(sessionId);
-        if (ctx == null || ctx.gatewayEventQueue == null) {
-            return;
-        }
-
-        // 将事件投入队列，由请求线程消费并写入 OutputStream，保证 SSE 实时推流
-        ctx.gatewayEventQueue.offer(dataJson);
-
-        // 多端广播：将事件推送到同一用户的其他 WebSocket 设备
-        try {
-            multiDeviceBroadcastService.broadcastRawEvent(
-                ctx.getUserId(),
-                ctx.getSessionId(),
-                dataJson,
-                ctx.getSenderChannel()
-            );
-        } catch (Exception e) {
-            logger.warn("多端广播异常, sessionId: {}", sessionId, e);
-        }
+        sessionStreamEventRouter.dispatch(dataJson);
     }
 }
