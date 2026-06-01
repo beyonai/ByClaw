@@ -13,26 +13,14 @@
  *     { "path": "src/foo.ts", "line": 42, "body": "Issue here" }
  *   ]
  * }
- *
- * Env: GITHUB_TOKEN (required)
  */
 
-const token = process.env.GITHUB_TOKEN;
+import { requireGitHubToken } from "./gh-token.mjs";
+
+const token = await requireGitHubToken();
 
 function fail(message) {
   console.log(JSON.stringify({ ok: false, error: message }));
-  process.exit(1);
-}
-
-if (!token) {
-  const authUrl = "https://github.com/settings/tokens/new?scopes=repo&description=ByClaw+PR+Review+Skill";
-  console.log(JSON.stringify({
-    ok: false,
-    error: "GITHUB_TOKEN not configured",
-    auth_required: true,
-    auth_url: authUrl,
-    message: `GitHub 授权未配置。请点击以下链接创建 Personal Access Token，然后将其设置为环境变量 GITHUB_TOKEN：\n\n${authUrl}\n\n创建时请确保勾选 repo 权限。创建后运行：export GITHUB_TOKEN=<your_token>`,
-  }));
   process.exit(1);
 }
 
