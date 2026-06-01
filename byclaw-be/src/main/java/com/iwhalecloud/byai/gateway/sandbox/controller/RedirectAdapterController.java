@@ -4,12 +4,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import com.iwhalecloud.byai.common.log.util.RequestContextUtil;
 import com.iwhalecloud.byai.gateway.sandbox.model.opendesign.OpenDesignRedirectResult;
@@ -26,6 +21,11 @@ public class RedirectAdapterController {
 
     public RedirectAdapterController(OpenDesignRedirectService openDesignRedirectService) {
         this.openDesignRedirectService = openDesignRedirectService;
+    }
+
+    @PatchMapping("")
+    public ResponseEntity<?> test() {
+        return ResponseEntity.ok("ok");
     }
 
     @GetMapping("/openDesignAdapter")

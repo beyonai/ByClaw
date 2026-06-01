@@ -193,7 +193,10 @@ RUN set -eux; \
 
 RUN set -eux; \
     groupadd --system --gid 1001 open-design; \
-    useradd --system --uid 1001 --gid open-design --home-dir /nonexistent --no-create-home open-design
+    mkdir -p /by/.od/home /by/.od/claude; \
+    useradd --system --uid 1001 --gid open-design --home-dir /by/.od/home open-design; \
+    chown -R open-design:open-design /by/.od; \
+    chmod -R u+rwX /by/.od
 
 # Use Node 24 in the final OpenClaw image.
 COPY --from=open-design-builder /usr/local/bin/node /usr/local/bin/node
@@ -239,7 +242,7 @@ ENV OPEN_DESIGN_ROOT=/opt/open-design \
     CLAUDE_CONFIG_DIR=/by/.od/claude \
     CLAUDE_BIN=/usr/local/bin/claude
 
-RUN mkdir -p /by/.od/claude && \
+RUN mkdir -p /by/.od/home /by/.od/claude && \
     chown -R open-design:open-design /by /opt/open-design && \
     chmod -R u+rwX /by /opt/open-design
 
