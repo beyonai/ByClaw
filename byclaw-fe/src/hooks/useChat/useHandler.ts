@@ -4,14 +4,20 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useDispatch } from '@umijs/max';
 import { assign, get, isPlainObject, isString, last, set, isNil, pick } from 'lodash';
 
-import { IMessageState, SSEEventStatus, SSEMessageType } from '@/constants/message';
-import type { IOnionsProps } from '@/hooks/useChat';
+import useAppStore from '@/models/common/useAppStore';
+import { IMessageState, SSEEventStatus, SSEMessageType, IObjectType } from '@/constants/message';
+
+import { initAnswerMessage, initQueryMessage } from '@/utils/messgae';
+import CookieUtil from '@/utils/cookie';
+import { isTextContentType } from '@/utils/messgae';
+import { isDevelopment } from '@/utils/common';
+
+import { substanceHandler } from '@/hooks/useChat/util';
 import useGlobal from '@/hooks/useGlobal';
+
 import { IMessageListItem } from '@/typescript/message';
 import type { ISession } from '@/typescript/session';
-import { initAnswerMessage, initQueryMessage } from '@/utils/messgae';
-import { substanceHandler } from '@/hooks/useChat/util';
-import { isTextContentType } from '@/utils/messgae';
+import type { IOnionsProps } from '@/hooks/useChat';
 
 type IProps = {
   addSession: (newSession: ISession) => void;
@@ -23,8 +29,9 @@ function useHandler(props: IProps) {
 
   const dispatch = useDispatch();
 
+  const { sandboxesInfo, setSiderCollapsed } = useAppStore();
   const globalContext = useGlobal();
-  const { agentInfo, sessionId: curSessionId } = globalContext;
+  const { agentInfo, sessionId: curSessionId, EventEmitter } = globalContext;
 
   const curAgentCodeRef = useRef<string | undefined>('');
   const curSessioneRef = useRef<string | undefined>('');
@@ -153,7 +160,7 @@ function useHandler(props: IProps) {
     const newMessageItem = substanceHandler(message, targetMessageItem, newAnswerMsg?.metadata);
 
     if (newMessageItem) {
-      list.push(newMessageItem);    
+      list.push(newMessageItem);
     }
 
     // 思考过程结束
@@ -171,6 +178,10 @@ function useHandler(props: IProps) {
     (onionsProps: IOnionsProps) => {
       const { sseRes, sseMsg, newAnswerMsg } = onionsProps;
 
+      if (sseRes.traceId) {
+        newAnswerMsg.traceId = sseRes.traceId;
+      }
+
       if (!sseRes.message) return onionsProps;
 
       const { message } = sseRes;
@@ -187,7 +198,7 @@ function useHandler(props: IProps) {
       // 根据消息类型分别处理内容
       switch (`${contentType}`) {
         case `${SSEMessageType.appStreamResponse}`: {
-          const { relatedResources, relatedQuestions } = substance as any || {
+          const { relatedResources, relatedQuestions } = (substance as any) || {
             relatedResources: [],
             relatedQuestions: [],
           };
@@ -206,7 +217,7 @@ function useHandler(props: IProps) {
         }
         default: {
           // 配合 textHandler 使用
-          if (isTextContentType(contentType))  return onionsProps;
+          if (isTextContentType(contentType)) return onionsProps;
 
           let listName = 'messageList';
           if (isThinkMsg) {
@@ -313,6 +324,49 @@ function useHandler(props: IProps) {
     return onionsProps;
   }, []);
 
+  const browserHandler = useCallback(
+    (onionsProps: IOnionsProps) => {
+      const { sseRes } = onionsProps;
+
+      if (!sseRes) return onionsProps;
+      if (!sandboxesInfo?.sandboxId) return onionsProps;
+      if (![`${SSEMessageType.thinkStatusTitle}`].includes(`${sseRes?.message?.contentType}`)) return onionsProps;
+
+      const toolTitle = get(sseRes, 'message.content.substance.title') || '';
+
+      if (
+        sseRes?.message?.objectType !== IObjectType.toolCall ||
+        (!toolTitle.includes('jarvis_run_flow') && !toolTitle.includes('browser'))
+      ) {
+        return onionsProps;
+      }
+
+      const { sandboxId } = sandboxesInfo;
+
+      setSiderCollapsed(true);
+      EventEmitter.emit('beyond-main-driver-open-type', {
+        drawerType: 'iframe',
+        canClose: true,
+        width: '50vw',
+      });
+
+      let url = `/v1/sandboxes/${sandboxId}/proxy/8081/`;
+      if (isDevelopment()) {
+        url = `${URI_TARGET}${url}`;
+      } else {
+        url = `${window.location.origin}${url}`;
+      }
+
+      CookieUtil.set('novncUrl', url);
+      EventEmitter.emit('beyond-main-driver-message', {
+        url,
+      });
+
+      return onionsProps;
+    },
+    [sandboxesInfo]
+  );
+
   return {
     sessionInfoHandler,
     messageIdHandler,
@@ -320,7 +374,8 @@ function useHandler(props: IProps) {
     messageHandler,
     resComIdsHandler,
     textHandler,
-    rewriteQuestionHandler
+    rewriteQuestionHandler,
+    browserHandler,
   };
 }
 

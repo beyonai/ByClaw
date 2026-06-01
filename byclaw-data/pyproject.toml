@@ -9,7 +9,7 @@ dependencies = [
     "by-datacloud>=0.1.39",
     "langchain-openai>=1.1.11",
     "by-framework>=0.2.0",
-    "by-framework-history-byclaw>=0.0.1",
+    "by-framework-history-byclaw>=0.0.3",
 ]
 
 [project.scripts]

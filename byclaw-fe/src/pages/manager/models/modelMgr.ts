@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { message } from 'antd';
+import { getIntl } from '@umijs/max';
 import {
   debugModelEmbedding,
   debugModelNonStream,
@@ -7,9 +8,11 @@ import {
   deleteModel,
   getModelDetail,
   getModelListByPage,
+  setDefaultModel,
   setModelStatus,
   upsertModel,
 } from '@/pages/manager/service/ModelMgr';
+import { showRequestErrorModal } from '@/utils/antdAppModal';
 
 export const unwrapResponse = (response) => {
   if (response && typeof response === 'object' && 'code' in response) {
@@ -19,9 +22,9 @@ export const unwrapResponse = (response) => {
 };
 
 export const getErrorText = (error) => {
-  if (!error) return '请求失败';
+  if (!error) return getIntl().formatMessage({ id: 'modelMgr.error.requestFail' });
   if (typeof error === 'string') return error;
-  return error?.msg || error?.message || '请求失败';
+  return error?.msg || error?.message || getIntl().formatMessage({ id: 'modelMgr.error.requestFail' });
 };
 
 export default {
@@ -34,7 +37,7 @@ export default {
         if (response.code === 0) {
           success?.(response.data || {});
         } else {
-          message.error(response?.msg || '获取模型列表失败');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.getModelListFail' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -49,7 +52,7 @@ export default {
         if (response.code === 0) {
           success?.(response.data || {});
         } else {
-          message.error(response?.msg || '获取模型详情失败');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.getModelDetailFail' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -64,7 +67,7 @@ export default {
         if (response.code === 0) {
           success?.(response.data || response);
         } else {
-          message.error(response?.msg || '保存模型失败');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.saveModelFail' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -79,7 +82,24 @@ export default {
         if (response.code === 0) {
           success?.(response.data);
         } else {
-          message.error(response?.msg || '更新模型状态失败');
+          showRequestErrorModal(
+            response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.updateModelStatusFail' })
+          );
+          fail?.(response || {});
+        }
+      } catch (error) {
+        const err = { msg: getErrorText(error) };
+        message.error(err.msg);
+        fail?.(err);
+      }
+    },
+    *setDefaultModel({ payload, success, fail }, { call }) {
+      try {
+        const response = unwrapResponse(yield call(setDefaultModel, payload));
+        if (response.code === 0) {
+          success?.(response.data || response);
+        } else {
+          showRequestErrorModal(response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.setDefaultModelFail' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -94,7 +114,7 @@ export default {
         if (response.code === 0) {
           success?.(response.data);
         } else {
-          message.error(response?.msg || '删除模型失败');
+          showRequestErrorModal(response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.deleteModelFail' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -112,7 +132,7 @@ export default {
             fail?.(response || {});
           }
         } else {
-          message.error(response?.msg || '模型调试失败');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.debugModelFail' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -130,7 +150,7 @@ export default {
             fail?.(response || {});
           }
         } else {
-          message.error(response?.msg || '模型调试失败');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.debugModelFail' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -148,7 +168,7 @@ export default {
             fail?.(response || {});
           }
         } else {
-          message.error(response?.msg || '模型调试失败');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.debugModelFail' }));
           fail?.(response || {});
         }
       } catch (error) {
@@ -166,7 +186,7 @@ export default {
             fail?.(response || {});
           }
         } else {
-          message.error(response?.msg || '模型调试失败');
+          message.error(response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.debugModelFail' }));
           fail?.(response || {});
         }
       } catch (error) {

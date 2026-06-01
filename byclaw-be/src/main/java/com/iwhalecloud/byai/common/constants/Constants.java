@@ -249,6 +249,9 @@ public final class Constants {
      */
     public static final String BUCKET_NAME_FEEDBACK = "byai-feedback";
 
+    /** 能力-模型关联在 byai_tag_relation 中的 obj_type（Story 一体化保存） */
+    public static final String OBJ_TYPE_AIMODEL = "AI_MODEL";
+
     /**
      * 图标桶名称
      */

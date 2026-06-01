@@ -43,32 +43,42 @@ async function decompressFilesInAgentDir(resourceId: string) {
   const agentDir = path.resolve(getPersonalAgentPath(resourceId));
   const agentDirStat = await fs.stat(agentDir).catch(() => null);
   if (!agentDirStat?.isDirectory()) {
-    return null;
+    return {};
   }
   let files = await fs.readdir(agentDir);
   for (const file of files) {
     const filePath = path.join(agentDir, file);
     if (file.endsWith('.tar.gz')) {
-        console.log(`tar -xzf "${filePath}"`);
-        execSync(`tar -xzf "${filePath}"`, { cwd: agentDir, stdio: 'inherit' });
-        // 解压完成后，删除压缩包
-        await fs.unlink(filePath);  
+      console.log(`tar -xzf "${filePath}"`);
+      execSync(`tar -xzf "${filePath}"`, { cwd: agentDir, stdio: 'inherit' });
+      // 解压完成后，删除压缩包
+      await fs.unlink(filePath);
     }
   }
-  const currentFolders: string[] = [];
   files = await fs.readdir(agentDir);
+  let distFolder = "";
+  let readmeFile = "";
   for (const file of files) {
     const filePath = path.join(agentDir, file);
+    if (file === "README.md" || /^readme/i.test(file)) {
+      readmeFile = filePath;
+      continue;
+    }
     if (await fs.stat(filePath).then(stats => stats.isDirectory()).catch(() => false)) {
-      currentFolders.push(filePath);
+      if (file === "dist") {
+        distFolder = filePath;
+      }
     }
   }
-  return currentFolders;
+  return {
+    distFolder,
+    readmeFile,
+  }
 }
 
-async function loadPersonalAgentHandler(resourceId: string, folderName = "dist"): Promise<personalAgentHandler | null> {
+async function loadPersonalAgentHandler(resourceId: string, folderName?: string): Promise<personalAgentHandler | null> {
   const agentDir = path.resolve(getPersonalAgentPath(resourceId));
-  const folderPath = path.join(agentDir, folderName);
+  const folderPath = path.join(agentDir, folderName || "dist");
   const folderStat = await fs.stat(folderPath).catch(() => null);
   if (!folderStat?.isDirectory()) {
     return null;
@@ -339,26 +349,18 @@ export async function executeAgent(params: {
   if (capability.metadata?.impl_type === "ASK_PERSONAL") {
     if (capability.metadata.resource_id) {
       // 先解压文件
-      const files = await decompressFilesInAgentDir(capability.metadata.resource_id);
+      const { distFolder, readmeFile } = await decompressFilesInAgentDir(capability.metadata.resource_id);
       const { prologue } = capability.metadata;
       if (prologue && typeof prologue === "string") {
         try {
           const { toolExecutionMode } = JSON.parse(prologue);
           if (toolExecutionMode === "documentDriven") {
-            const instructionFile = files?.[0] ? path.join(files[0], "README.md") : "";
-            let exists = !!instructionFile;
-            if (instructionFile) {
-              try {
-                exists = await fs.stat(instructionFile).then(stats => !!stats.isFile()).catch(() => false);
-              } catch (error: unknown) {
-                exists = false;
-              }
-            }
-            if (!exists) {
+            const instructionFile = readmeFile || "";
+            if (!instructionFile) {
               return makeError("INSTRUCTION_FILE_NOT_FOUND", {
                 message: "baiying_call cannot prepare the required next tool call because its instruction file was not found.",
                 details: {
-                  "instructionFile": instructionFile || `NOT FOUND in ${path.resolve(getPersonalAgentPath(capability.metadata.resource_id))}`,
+                  "instructionFile": `NOT FOUND in ${path.resolve(getPersonalAgentPath(capability.metadata.resource_id))}`,
                 },
                 recoverable: true,
                 nextStep: "Fix the instruction file path or create the README before retrying baiying_call."
@@ -398,7 +400,7 @@ export async function executeAgent(params: {
       }
       let dynamicAgentHandler: personalAgentHandler | null;
       try {
-        dynamicAgentHandler = await loadPersonalAgentHandler(capability.metadata.resource_id, files?.[0]);
+        dynamicAgentHandler = await loadPersonalAgentHandler(capability.metadata.resource_id, distFolder);
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return makeError("ASK_PERSONAL_AGENT_ERROR", errorMessage);

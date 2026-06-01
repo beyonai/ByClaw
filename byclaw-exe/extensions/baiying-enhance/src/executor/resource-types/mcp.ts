@@ -297,6 +297,7 @@ async function executeOntologyResourceViaCallAgent(input: {
   if (metadata["channel-trace-id"]) {
     payload["channel-trace-id"] = metadata["channel-trace-id"];
   }
+  const toolCallId = input.parameters.tool_call_id as string;
 
   return executeViaCallAgent({
     capability: input.capability,
@@ -305,6 +306,7 @@ async function executeOntologyResourceViaCallAgent(input: {
     sessionId,
     traceId,
     targetAgentType,
+    toolCallId,
     callMode: docCallMode(input.parameters),
     syncTimeoutSec: docSyncTimeoutSec(input.parameters),
     syncIntervalSec: docSyncIntervalSec(input.parameters),
@@ -318,7 +320,7 @@ async function executeOntologyResourceViaCallAgent(input: {
     },
     metadata,
     logger: input.logger,
-    parentMessageId: input.parameters.tool_call_id as string,
+    parentMessageId: toolCallId,
   });
 }
 

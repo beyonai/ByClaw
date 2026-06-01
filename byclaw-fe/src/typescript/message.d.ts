@@ -27,6 +27,9 @@ export type IMessageListItem = {
   status: SSEEventStatus;
   objectType?: 'function_response' | 'tool_call'; // 'function_response'-工具类回答
   agentId?: string;
+  uuid: string;
+  orginContent: string;
+  resumeMessageId?: string;
 };
 
 export type IResComIdsListItem = {
@@ -77,6 +80,7 @@ export type ICollectInfo = {
 }
 
 export type IMessage = {
+  traceId?: string;
   creatorId: string,
   creatorName?: string,
   fromBeyond: boolean;

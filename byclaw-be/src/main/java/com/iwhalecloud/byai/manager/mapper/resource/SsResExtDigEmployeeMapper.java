@@ -49,6 +49,14 @@ public interface SsResExtDigEmployeeMapper extends BaseMapper<SsResExtDigEmploye
     DigitalEmployeeDetailsDTO findDetailsById(@Param("resourceId") Long resourceId);
 
     /**
+     * 查询使用指定模型的数字员工名称。
+     *
+     * @param modelId 模型ID
+     * @return 数字员工名称列表
+     */
+    List<String> selectDigitalEmployeeNamesByModelId(@Param("modelId") Long modelId);
+
+    /**
      * 根据资源标识查询数字员工信息
      *
      * @param resourceIds 资源标识集合

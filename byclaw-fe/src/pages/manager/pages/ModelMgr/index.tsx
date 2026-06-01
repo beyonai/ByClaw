@@ -42,6 +42,7 @@ const ModelMgr: React.FC = () => {
       loading.effects['modelMgr/upsertModel'] ||
       loading.effects['modelMgr/getModelDetail'] ||
       loading.effects['modelMgr/setModelStatus'] ||
+      loading.effects['modelMgr/setDefaultModel'] ||
       loading.effects['modelMgr/deleteModel'] ||
       loading.effects['modelMgr/debugModel'] ||
       loading.effects['modelMgr/debugModelRerank'] ||
@@ -247,61 +248,62 @@ const ModelMgr: React.FC = () => {
     });
   }, [fetchList, pagination.pageSize]);
 
-  const filterChips = useMemo(
-    () =>
-      [
-        status
-          ? {
-            key: 'status',
-            label: `${intl.formatMessage({ id: 'modelMgr.filterStatus' })} · ${
-              statusTreeData.find((item) => item.key === status)?.label || status
-            }`,
-            onClose: () => {
-              setStatus(undefined);
-              setStatusSelectedList([]);
-              resetAndFetch({ status: undefined });
-            },
-          }
-          : null,
-        ability
-          ? {
-            key: 'ability',
-            label: `${intl.formatMessage({ id: 'modelMgr.filterAbility' })} · ${
-              abilityLabelMap?.[ability] || ability
-            }`,
-            onClose: () => {
-              setAbility(undefined);
-              setAbilitySelectedList([]);
-              resetAndFetch({ ability: undefined });
-            },
-          }
-          : null,
-        system
-          ? {
-            key: 'system',
-            label: `${intl.formatMessage({ id: 'modelMgr.filterSystem' })} · ${
-              systemLabelMap?.[system] || systemNameMap[system] || system
-            }`,
-            onClose: () => {
-              setSystem(undefined);
-              setSystemSelectedList([]);
-              resetAndFetch({ system: undefined });
-            },
-          }
-          : null,
-        keyword.trim()
-          ? {
-            key: 'keyword',
-            label: `${intl.formatMessage({ id: 'modelMgr.searchLabel' })} · ${keyword.trim()}`,
-            onClose: () => {
-              setKeyword('');
-              resetAndFetch({ keyword: '' });
-            },
-          }
-          : null,
-      ].filter(Boolean) as FilterChip[],
-    [ability, abilityLabelMap, intl, keyword, resetAndFetch, status, statusTreeData, system, systemLabelMap]
-  );
+  const filterChips = useMemo(() => {
+    const chips: FilterChip[] = [];
+
+    if (status) {
+      chips.push({
+        key: 'status',
+        label: `${intl.formatMessage({ id: 'modelMgr.filterStatus' })} · ${
+          statusTreeData.find((item) => item.key === status)?.label || status
+        }`,
+        onClose: () => {
+          setStatus(undefined);
+          setStatusSelectedList([]);
+          resetAndFetch({ status: undefined });
+        },
+      });
+    }
+
+    if (ability) {
+      chips.push({
+        key: 'ability',
+        label: `${intl.formatMessage({ id: 'modelMgr.filterAbility' })} · ${abilityLabelMap?.[ability] || ability}`,
+        onClose: () => {
+          setAbility(undefined);
+          setAbilitySelectedList([]);
+          resetAndFetch({ ability: undefined });
+        },
+      });
+    }
+
+    if (system) {
+      chips.push({
+        key: 'system',
+        label: `${intl.formatMessage({ id: 'modelMgr.filterSystem' })} · ${
+          systemLabelMap?.[system] || systemNameMap[system] || system
+        }`,
+        onClose: () => {
+          setSystem(undefined);
+          setSystemSelectedList([]);
+          resetAndFetch({ system: undefined });
+        },
+      });
+    }
+
+    if (keyword.trim()) {
+      chips.push({
+        key: 'keyword',
+        label: `${intl.formatMessage({ id: 'modelMgr.searchLabel' })} · ${keyword.trim()}`,
+        onClose: () => {
+          setKeyword('');
+          resetAndFetch({ keyword: '' });
+        },
+      });
+    }
+
+    return chips;
+  }, [ability, abilityLabelMap, intl, keyword, resetAndFetch, status, statusTreeData, system, systemLabelMap]);
 
   const setStatusAction = (record: any, nextStatus: ModelStatus) => {
     dispatch({
@@ -317,6 +319,23 @@ const ModelMgr: React.FC = () => {
       },
     });
   };
+
+  const setDefaultAction = useCallback(
+    (record: any) => {
+      dispatch({
+        type: 'modelMgr/setDefaultModel',
+        payload: {
+          modelId: record.id,
+          tagId: '1',
+        },
+        success: () => {
+          message.success(intl.formatMessage({ id: 'modelMgr.operationSuccess' }));
+          fetchList();
+        },
+      });
+    },
+    [dispatch, fetchList, intl]
+  );
 
   const deleteAction = (record: any) => {
     dispatch({
@@ -344,13 +363,14 @@ const ModelMgr: React.FC = () => {
           abilityLabelMap={abilityLabelMap}
           systemLabelMap={systemLabelMap}
           onSetStatus={setStatusAction}
+          onSetDefault={setDefaultAction}
           onEdit={(item) => formAction.handleShow('edit', item)}
           onDebug={(item) => formAction.handleShow('debug', item)}
           onDelete={deleteAction}
         />
       );
     },
-    [abilityLabelMap, formAction, intl, systemLabelMap]
+    [abilityLabelMap, formAction, intl, setDefaultAction, systemLabelMap]
   );
 
   return (

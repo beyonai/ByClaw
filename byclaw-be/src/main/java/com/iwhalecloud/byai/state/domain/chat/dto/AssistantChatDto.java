@@ -194,4 +194,14 @@ public class AssistantChatDto {
      */
     private String sourceAgentType;
 
+    /**
+     * 响应流跟踪ID
+     */
+    private String traceId;
+
+    /**
+     * 从暂停->用户操作->恢复，消息ID
+     */
+    private String resumeMessageId;
+
 }

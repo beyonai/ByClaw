@@ -21,6 +21,27 @@
   }
 }
 
+.approvalSteps {
+  :global {
+    .ant-steps-item-description {
+      max-width: none;
+    }
+  }
+}
+
+.stepDescription {
+  color: var(--beyond-color-text);
+}
+
+.stepIntro {
+  margin-bottom: 8px;
+  color: var(--beyond-color-text-quaternary);
+}
+
+.stepFormContent {
+  padding-top: 12px;
+}
+
 .formRow {
   &:not(:last-child) {
     border-bottom: 1px solid var(--beyond-color-fill);
@@ -30,6 +51,7 @@
 
 .dropdownContent {
   max-height: 80vh;
+  width: min(60vw, 800vw);
   background-color: #fff;
   // border: 1px solid var(--beyond-color-fill);
   padding: var(--beyond-border-radius-sm) var(--beyond-border-radius-sm) 0 var(--beyond-border-radius-sm);
@@ -49,6 +71,7 @@
 
 .arrayFieldTag {
   margin: 2px 4px 2px 0;
+  max-width: 100%;
 }
 
 .arrayFieldPlaceholder {

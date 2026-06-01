@@ -180,6 +180,7 @@ export default {
   'orgMgr.modal.phoneRule': '请输入有效的手机号',
   'orgMgr.modal.role': '角色',
   'orgMgr.modal.rolePlaceholder': '请选择角色',
+  'orgMgr.modal.saveSuccess': '保存成功',
 
   // 数据权限弹窗
   'orgMgr.dataPermission.search': '请输入关键字',
@@ -335,6 +336,8 @@ export default {
   'modelMgr.confirmDisable': '确认停用该模型？',
   'modelMgr.confirmEnable': '确认启用该模型？',
   'modelMgr.confirmDelete': '确认删除该模型？',
+  'modelMgr.confirmSetDefault': '确定将该模型设置为默认对话模型吗，设置后其他默认对话模型将设置为非默认。',
+  'modelMgr.setDefault': '设为默认',
   'modelMgr.operationSuccess': '操作成功',
   'modelMgr.debug': '调试',
   'modelMgr.heroDesc': '统一查看模型状态、能力标签与系统归属，支持快速筛选、调试和启停。',
@@ -345,6 +348,16 @@ export default {
   'modelMgr.resultEmpty': '暂无模型数据',
   'modelMgr.emptyTitle': '还没有可展示的模型',
   'modelMgr.emptyDesc': '可以先新建一个模型，或者重置筛选条件查看已有数据。',
+
+  // 模型管理错误提示
+  'modelMgr.error.requestFail': '请求失败',
+  'modelMgr.error.getModelListFail': '获取模型列表失败',
+  'modelMgr.error.getModelDetailFail': '获取模型详情失败',
+  'modelMgr.error.saveModelFail': '保存模型失败',
+  'modelMgr.error.updateModelStatusFail': '更新模型状态失败',
+  'modelMgr.error.deleteModelFail': '删除模型失败',
+  'modelMgr.error.setDefaultModelFail': '设置默认对话模型失败',
+  'modelMgr.error.debugModelFail': '模型调试失败',
 
   // 模型管理-编辑/调试弹窗
   'modelMgr.modal.editTitle': '编辑模型',

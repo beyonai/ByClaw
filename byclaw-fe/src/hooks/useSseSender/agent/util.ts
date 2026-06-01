@@ -16,7 +16,7 @@ export const formatSSEDate = (objStr: string, stepId?: string) => {
     return resp;
   }
 
-  const { pluginAppId, pluginMachineId, rule, title, description, formId, ...res } = resp;
+  const { pluginAppId, pluginMachineId, rule, title, description, formId, confirmed, ...res } = resp;
 
   set(content, 'pluginAppId', pluginAppId);
   set(content, 'pluginMachineId', pluginMachineId);
@@ -26,11 +26,10 @@ export const formatSSEDate = (objStr: string, stepId?: string) => {
   set(content, 'substance', rule || []);
   set(content, 'formStatus', IFormStatus.INIT);
   set(content, 'stepId', stepId);
+  set(content, 'confirmed', confirmed);
   set(content, 'extParam', {
     ...res,
   });
-
-  console.log('contentafterformat', content);
 
   return content;
 };

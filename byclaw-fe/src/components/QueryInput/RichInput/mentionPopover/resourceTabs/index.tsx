@@ -235,7 +235,12 @@ const ResourceTabs: React.FC<Props> = ({
       if (!uploadFiles.length) {
         return false;
       }
-      if (uploadFiles.some((file) => !file.name.toLowerCase().endsWith('.zip'))) {
+      if (
+        uploadFiles.some((file) => {
+          const fileName = file.name.toLowerCase();
+          return !fileName.endsWith('.zip') && !fileName.endsWith('.tar.gz');
+        })
+      ) {
         message.error(intl.formatMessage({ id: 'resourceTabs.skillUpload.onlyZip' }));
         return false;
       }
@@ -666,7 +671,7 @@ const ResourceTabs: React.FC<Props> = ({
             <div className={styles.searchRow}>
               {activeTab === 'skill' && (
                 <Upload
-                  accept=".zip"
+                  accept=".zip,.gz"
                   multiple
                   showUploadList={false}
                   beforeUpload={(_, fileList) => {

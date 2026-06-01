@@ -45,6 +45,7 @@ type ISseRes = {
   queryMessageId: string;
   resComIds?: [];
   metadata?: string;
+  traceId?: string;
   sessionExts?: Array<{ extParamName?: string; extParamCode: string; extParamValue: string }>;
 };
 
@@ -156,6 +157,7 @@ function useChat(props: IProps) {
     resComIdsHandler,
     textHandler,
     rewriteQuestionHandler,
+    browserHandler,
   } = useHandler({ addSession, setSessionId });
 
   useEffect(() => {
@@ -327,6 +329,7 @@ function useChat(props: IProps) {
       textHandler,
       messageHandler,
       resComIdsHandler,
+      browserHandler,
     ]); // 暂不支持异步方法!!!
 
     // 发送请求并处理SSE响应

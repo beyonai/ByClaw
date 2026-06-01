@@ -1484,7 +1484,10 @@ public class ToolManService {
             Path baseDir = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "byai-object-import",
                 String.valueOf(System.currentTimeMillis())));
             String originalFilename = StringUtils.defaultIfBlank(file.getOriginalFilename(), "object-import.zip");
-            Path zipPath = baseDir.resolve(originalFilename);
+            Path zipPath = baseDir.resolve(originalFilename).normalize();
+            if (!zipPath.startsWith(baseDir)) {
+                throw new IllegalArgumentException(I18nUtil.get("tool.zip.file.illegal.path"));
+            }
             Files.copy(file.getInputStream(), zipPath, StandardCopyOption.REPLACE_EXISTING);
             return zipPath;
         }
@@ -2213,7 +2216,10 @@ public class ToolManService {
         if (StringUtils.equals(currentDirectoryName, finalDirectoryName)) {
             return extractedRoot;
         }
-        Path renamedPath = extractedRoot.resolveSibling(finalDirectoryName);
+        Path renamedPath = extractedRoot.resolveSibling(finalDirectoryName).normalize();
+        if (!renamedPath.startsWith(extractedRoot.getParent())) {
+            throw new IllegalArgumentException(I18nUtil.get("tool.zip.file.illegal.path"));
+        }
         try {
             Files.move(extractedRoot, renamedPath, StandardCopyOption.REPLACE_EXISTING);
             LOGGER.info("{}解压目录名称与资源编码不一致，已按资源编码重命名, from={}, to={}", resourceLabel, currentDirectoryName,

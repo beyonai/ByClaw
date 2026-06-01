@@ -82,6 +82,13 @@ public class MessageFactory {
         return list.get(0);
     }
 
+    public boolean existsMessageIndexByResMsgId(Long resMsgId) {
+        MessageRelObjQo messageRelObjQo = new MessageRelObjQo();
+        messageRelObjQo.setResMsgIds(ImmutableList.of(resMsgId.toString()));
+        List<ByaiMessageRelObjDto> list = byaiMessageRelObjService.findByQo(messageRelObjQo);
+        return CollectionUtils.isNotEmpty(list);
+    }
+
     /**
      * 任务修改需要给到历史消息给python 原任务json、原用户问题
      *

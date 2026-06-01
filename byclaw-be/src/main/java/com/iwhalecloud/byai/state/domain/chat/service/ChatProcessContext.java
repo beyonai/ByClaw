@@ -43,6 +43,8 @@ public class ChatProcessContext {
     /** LLM回复消息ID */
     public Long modelAnswerMessageId;
 
+    public String traceId;
+
     /** 会话ID */
     public Long sessionId;
 
@@ -115,6 +117,16 @@ public class ChatProcessContext {
      * storeMessage 应跳过写流只做 DB 持久化，避免重复写出错误响应。
      */
     public boolean gatewayError = false;
+
+    /**
+     * 是否仅发送worker消息，不需要获取redis中响应的消息
+     */
+    public boolean sendByFrameworkMsgOnly = false;
+
+    /**
+     * 当前请求写入 Redis 运行态标记时使用的所有者 token，用于结束时只清理自己创建的标记。
+     */
+    public String runningOutputStreamToken;
 
     /**
      * 当前请求的登录用户信息，用于在 handleGatewayMode() 中获取 userCode

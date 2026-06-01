@@ -57,8 +57,8 @@ public final class PageHelperUtil {
         PageInfo<T> result = new PageInfo<>();
         result.setTotal(0);
         result.setTotalPages(0);
-        result.setPageNum((int) pageNum);
-        result.setPageSize((int) pageSize);
+        result.setPageNum((int) Math.max(1, Math.min(pageNum, Integer.MAX_VALUE)));
+        result.setPageSize((int) Math.max(1, Math.min(pageSize, 10000)));
         result.setList(Collections.emptyList());
         return result;
     }

@@ -35,3 +35,7 @@ export async function saveServiceSpec(params: any) {
 export async function deleteServiceSpec(params: { serviceKey: string }) {
   return POST('/byaiService/sandbox/deleteServiceSpec', { ...params }, withCustomHandle);
 }
+
+export async function launchByUserCode(params: { userCode: string; serviceKey?: string }) {
+  return POST('/byaiService/sandbox/launchByUserCode', { ...params }, withCustomHandle);
+}

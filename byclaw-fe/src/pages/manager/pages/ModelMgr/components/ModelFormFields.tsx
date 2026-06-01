@@ -378,7 +378,7 @@ const ModelFormFields: React.FC<Props> = ({
                   mode="multiple"
                   allowClear
                   placeholder={intl.formatMessage({ id: 'modelMgr.modal.abilityPlaceholder' })}
-                  options={abilityOptions}
+                  options={abilityOptions.filter((item) => item.value !== '1')}
                 />
               </Form.Item>
               <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.status' })} name="status">

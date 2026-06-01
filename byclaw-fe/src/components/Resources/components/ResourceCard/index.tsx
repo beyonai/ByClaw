@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { Typography, Dropdown, Button, Tooltip, message, Modal } from 'antd';
+import { Typography, Dropdown, Button, Popconfirm, Tooltip, message } from 'antd';
 import type { MenuProps } from 'antd';
 import { useIntl } from '@umijs/max';
 import classnames from 'classnames';
@@ -41,6 +41,7 @@ export interface IResourceCardItem {
   canDelete?: boolean;
   canSetDefault?: boolean;
   canRestore?: boolean;
+  resourceStatus?: number | string;
   ownerType?: string;
   openSuperHelper?: string;
   tagName?: string;
@@ -57,9 +58,6 @@ type ResourceCardActionConfig = {
   deleteDisabledTip?: React.ReactNode;
   restoreDisabledTip?: React.ReactNode;
   applyDisabledTip?: React.ReactNode;
-  deleteConfirmTitle?: React.ReactNode;
-  deleteConfirmDescription?: React.ReactNode;
-  restoreConfirmTitle?: React.ReactNode;
   extraMenuItems?: MenuProps['items'];
   onApplyUse?: () => void;
   onAuditUse?: () => void;
@@ -134,6 +132,43 @@ const BuildMenuLabel = ({
   return <Tooltip title={disabledTip || intl.formatMessage({ id: 'common.noPermissionOperation' })}>{content}</Tooltip>;
 };
 
+const ConfirmMenuLabel = ({
+  title,
+  disabled,
+  children,
+  onConfirm,
+}: {
+  title: React.ReactNode;
+  disabled?: boolean;
+  children: React.ReactNode;
+  onConfirm: () => void;
+}) => {
+  const intl = useIntl();
+  return (
+    <Popconfirm
+      title={title}
+      okText={intl.formatMessage({ id: 'common.confirm' })}
+      cancelText={intl.formatMessage({ id: 'common.cancel' })}
+      disabled={disabled}
+      onConfirm={(event) => {
+        event?.stopPropagation();
+        onConfirm();
+      }}
+      onCancel={(event) => event?.stopPropagation()}
+    >
+      <div
+        className={styles.confirmMenuTrigger}
+        onClick={(event) => {
+          event.stopPropagation();
+          event.preventDefault();
+        }}
+      >
+        {children}
+      </div>
+    </Popconfirm>
+  );
+};
+
 const RenderContent = (props: ResourceCardProps) => {
   const { resource, onCardClick, actionConfig, avatarNode, description, headerExtra, hoverExtra, resourceType } = props;
   const { ownerType } = resource || {};
@@ -145,9 +180,6 @@ const RenderContent = (props: ResourceCardProps) => {
     onAuditUse = noop,
     onRestore = noop,
     onDelete = noop,
-    deleteConfirmTitle,
-    deleteConfirmDescription,
-    restoreConfirmTitle,
   } = actionConfig || {};
 
   const intl = useIntl();
@@ -163,7 +195,8 @@ const RenderContent = (props: ResourceCardProps) => {
       window.dispatchEvent(new CustomEvent('resourceRestored', { detail: { resourceId: resource?.resourceId } }));
     },
     onError: () => {
-      message.error(intl.formatMessage({ id: 'common.operationFailed' }));
+      // 提示重复所以注销掉了
+      // message.error(intl.formatMessage({ id: 'common.operationFailed' }));
     },
   });
 
@@ -207,6 +240,8 @@ const RenderContent = (props: ResourceCardProps) => {
     return undefined;
   };
   const displayTopRightTag = getDisplayTopRightTag();
+  const isCancelledResource = `${resource?.resourceStatus ?? ''}` === '3';
+  const topRightTag = isCancelledResource ? intl.formatMessage({ id: 'resource.statusCancelled' }) : displayTopRightTag;
 
   const menuItems = useMemo<MenuProps['items']>(() => {
     const { canEdit, canManageAuth, canUseAuth, canApplyUse, canAuditUse, canDelete, canRestore } = resource || {};
@@ -288,16 +323,14 @@ const RenderContent = (props: ResourceCardProps) => {
     if (canApplyUse) {
       items.push({
         key: 'applyUse',
-        label: <BuildMenuLabel icon="icon-a-Editorbianji" text={intl.formatMessage({ id: 'resource.applyUse' })} />,
-        onClick: ({ domEvent }) => {
-          domEvent.stopPropagation();
-          Modal.confirm({
-            title: intl.formatMessage({ id: 'digitalEmployees.applyConfirm' }),
-            okText: intl.formatMessage({ id: 'common.confirm' }),
-            cancelText: intl.formatMessage({ id: 'common.cancel' }),
-            onOk: () => onApplyUse?.(),
-          });
-        },
+        label: (
+          <ConfirmMenuLabel
+            title={intl.formatMessage({ id: 'digitalEmployees.applyConfirm' })}
+            onConfirm={() => onApplyUse?.()}
+          >
+            <BuildMenuLabel icon="icon-a-Editorbianji" text={intl.formatMessage({ id: 'resource.applyUse' })} />
+          </ConfirmMenuLabel>
+        ),
       });
     }
 
@@ -317,18 +350,10 @@ const RenderContent = (props: ResourceCardProps) => {
       items.push({
         key: 'delete',
         label: (
-          <BuildMenuLabel icon="icon-a-Deleteshanchu" text={intl.formatMessage({ id: 'common.deleteResource' })} />
+          <ConfirmMenuLabel title={intl.formatMessage({ id: 'common.deactivateConfirm' })} onConfirm={() => onDelete()}>
+            <BuildMenuLabel icon="icon-a-Deleteshanchu" text={intl.formatMessage({ id: 'common.deleteResource' })} />
+          </ConfirmMenuLabel>
         ),
-        onClick: ({ domEvent }) => {
-          domEvent.stopPropagation();
-          Modal.confirm({
-            title: deleteConfirmTitle || intl.formatMessage({ id: 'common.deactivateConfirm' }),
-            content: deleteConfirmDescription,
-            okText: intl.formatMessage({ id: 'common.confirm' }),
-            cancelText: intl.formatMessage({ id: 'common.cancel' }),
-            onOk: () => onDelete(),
-          });
-        },
       });
     }
 
@@ -337,22 +362,18 @@ const RenderContent = (props: ResourceCardProps) => {
       items.push({
         key: 'restore',
         label: (
-          <BuildMenuLabel
-            icon="icon-a-Returnfanhui"
-            text={intl.formatMessage({ id: 'common.restoreResource' })}
-            loading={restoring}
-          />
+          <ConfirmMenuLabel
+            title={intl.formatMessage({ id: 'common.restoreConfirm' })}
+            disabled={restoring}
+            onConfirm={() => handleRestore({ resourceId: resource?.resourceId })}
+          >
+            <BuildMenuLabel
+              icon="icon-a-Returnfanhui"
+              text={intl.formatMessage({ id: 'common.restoreResource' })}
+              loading={restoring}
+            />
+          </ConfirmMenuLabel>
         ),
-        onClick: ({ domEvent }) => {
-          domEvent.stopPropagation();
-          if (restoring) return;
-          Modal.confirm({
-            title: restoreConfirmTitle || intl.formatMessage({ id: 'common.restoreConfirm' }),
-            okText: intl.formatMessage({ id: 'common.confirm' }),
-            cancelText: intl.formatMessage({ id: 'common.cancel' }),
-            onOk: () => handleRestore({ resourceId: resource?.resourceId }),
-          });
-        },
       });
     }
 
@@ -393,9 +414,13 @@ const RenderContent = (props: ResourceCardProps) => {
   return (
     <div
       className={classnames(styles.renderContent, 'full-width full-height', {
-        pointer: !!onCardClick,
+        pointer: !!onCardClick && !isCancelledResource,
+        [styles.cancelledContent]: isCancelledResource,
       })}
-      onClick={() => onCardClick?.()}
+      onClick={() => {
+        if (isCancelledResource) return;
+        onCardClick?.();
+      }}
     >
       <div className={classnames('ub ub-ver full-width full-height')}>
         <div className="ub gap12 full-height">
@@ -418,9 +443,9 @@ const RenderContent = (props: ResourceCardProps) => {
               >
                 {displayTitle}
               </Paragraph>
-              {displayTopRightTag ? (
-                <span className={styles.tag}>
-                  <span className={styles.tagText}>{displayTopRightTag}</span>
+              {topRightTag ? (
+                <span className={classnames(styles.tag, { [styles.cancelledTag]: isCancelledResource })}>
+                  <span className={styles.tagText}>{topRightTag}</span>
                 </span>
               ) : null}
               {headerExtra}
@@ -545,12 +570,13 @@ function ResourceCard(props: ResourceCardProps) {
   }, [resource]);
 
   const displayResource = resourceWithPermissions || resource;
+  const isCancelledResource = `${displayResource?.resourceStatus ?? ''}` === '3';
 
   return (
     <div
       key={resource.resourceId}
       className={classnames(styles.resourceCard, props.className, {
-        pointer: !!props.onCardClick,
+        pointer: !!props.onCardClick && !isCancelledResource,
       })}
       ref={resourceCardRef}
     >

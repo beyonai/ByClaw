@@ -24,6 +24,8 @@ const TOOLS_FILENAME = "TOOLS.md";
 
 type BaiyingAgentItem = {
   resourceId?: string;
+  resourceCode?: string;
+  resourceDesc?: string;
   name?: string;
   /** 平台「核心人格」长文，应对 OpenClaw `SOUL.md` 与 LLM 人设（优于散装 instructions 字段）。 */
   corePersonaDefinition?: string;
@@ -142,6 +144,8 @@ function getRawDetailItem(raw: unknown): BaiyingAgentItem | null {
 
   return {
     resourceId: str(d.resourceId),
+    resourceCode: str(d.resourceCode),
+    resourceDesc: str(d.resourceDesc),
     name: str(d.resourceName),
     corePersonaDefinition: corePersona,
     instructions: instructionParts.join("\n\n") || undefined,
@@ -285,6 +289,12 @@ function buildIdentityMd(item: BaiyingAgentItem): string {
   const lines = [MARKER, "", `## Name`, "", name, ""];
   if (typeof item.avatar === "string" && item.avatar.trim()) {
     lines.push("## Avatar (source system path)", "", item.avatar.trim(), "");
+  }
+  if (item.resourceId) {
+    lines.push(`## Digital Employee`, `- digital employee id: \`${item.resourceId}\``);
+    if (item.resourceCode) {
+      lines.push(`- digital employee code: \`${item.resourceCode}\``);
+    }
   }
   return `${lines.join("\n")}\n`;
 }

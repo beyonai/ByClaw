@@ -180,6 +180,7 @@ export default {
   'orgMgr.modal.phoneRule': 'Please enter a valid mobile number',
   'orgMgr.modal.role': 'Role',
   'orgMgr.modal.rolePlaceholder': 'Select role',
+  'orgMgr.modal.saveSuccess': 'Saved successfully',
 
   // Data Permission Modal
   'orgMgr.dataPermission.search': 'Enter keyword to search',
@@ -332,6 +333,9 @@ export default {
   'modelMgr.confirmDisable': 'Confirm to disable this model?',
   'modelMgr.confirmEnable': 'Confirm to enable this model?',
   'modelMgr.confirmDelete': 'Confirm to delete this model?',
+  'modelMgr.confirmSetDefault':
+    'Set this model as the default conversation model? After that, other default conversation models will be set to non-default.',
+  'modelMgr.setDefault': 'Set as default',
   'modelMgr.operationSuccess': 'Operation succeeded',
   'modelMgr.debug': 'Debug',
   'modelMgr.heroDesc':
@@ -343,6 +347,16 @@ export default {
   'modelMgr.resultEmpty': 'No model data',
   'modelMgr.emptyTitle': 'No models to display yet',
   'modelMgr.emptyDesc': 'Create a model first, or reset the filters to review existing records.',
+
+  // Model Management Error Messages
+  'modelMgr.error.requestFail': 'Request failed',
+  'modelMgr.error.getModelListFail': 'Failed to fetch model list',
+  'modelMgr.error.getModelDetailFail': 'Failed to fetch model detail',
+  'modelMgr.error.saveModelFail': 'Failed to save model',
+  'modelMgr.error.updateModelStatusFail': 'Failed to update model status',
+  'modelMgr.error.deleteModelFail': 'Failed to delete model',
+  'modelMgr.error.setDefaultModelFail': 'Failed to set default conversation model',
+  'modelMgr.error.debugModelFail': 'Model debug failed',
 
   // Model Management - Edit/Debug Modal
   'modelMgr.modal.editTitle': 'Edit model',

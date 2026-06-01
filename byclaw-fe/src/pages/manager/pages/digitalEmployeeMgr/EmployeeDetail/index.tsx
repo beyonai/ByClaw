@@ -310,7 +310,6 @@ const EmployeeDetail = ({ loading }) => {
   const prevRoutePath = useMemo(() => {
     let prevRoute = sessionStorage.getItem('EmployeeDetail_prevRoute');
     if (prevRoute) {
-      sessionStorage.removeItem('EmployeeDetail_prevRoute');
       try {
         const base = (window.routerBase || '/').replace(/\/$/, '');
         // 支持传入完整 URL 的情况
@@ -884,7 +883,7 @@ const EmployeeDetail = ({ loading }) => {
         // 获取模型下拉列表、设置配置默认值
         dispatch({
           type: 'employeeMgr/getModelList',
-          payload: { tagId: '1' },
+          payload: { tagId: '3' },
           success: (res) => {
             if (!prologue?.modelInfo) {
               setModelName(res?.[0]?.modelName ?? '');
@@ -903,7 +902,7 @@ const EmployeeDetail = ({ loading }) => {
     } else {
       dispatch({
         type: 'employeeMgr/getModelList',
-        payload: { tagId: '1' },
+        payload: { tagId: '3' },
         success: (res) => {
           setModelName(res?.[0]?.modelName ?? '');
           prologueRef.current = {
@@ -1258,11 +1257,12 @@ const EmployeeDetail = ({ loading }) => {
           onClick={() => {
             // 规范化：去掉 routerBase（如 /manager）前缀，保证是应用内相对路径
             if (prevRoutePath) {
+              sessionStorage.removeItem('EmployeeDetail_prevRoute');
               history.replace(prevRoutePath);
               return;
             }
 
-            history.back();
+            history.replace('/digitalEmployees');
           }}
           className={styles.backButton}
         />

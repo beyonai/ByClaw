@@ -31,5 +31,18 @@ RUN if [ "${BRANCH}" = "develop" ] || [ "${BRANCH}" = "qa" ]; then \
 COPY start.sh ./
 COPY src/ ./src/
 
+# 构建信息
+ARG BUILD_VERSION=unknown
+ARG BUILD_BRANCH=unknown
+ARG BUILD_COMMIT=unknown
+ARG BUILD_COMMIT_FULL=unknown
+ARG BUILD_TIME=unknown
+ARG BUILD_MODULE=byclaw-qa
+ARG BUILD_COMMIT_MSG=unknown
+
+RUN printf '{"version":"%s","branch":"%s","commit":"%s","commitFull":"%s","buildTime":"%s","module":"%s","commitMsg":"%s"}\n' \
+    "$BUILD_VERSION" "$BUILD_BRANCH" "$BUILD_COMMIT" "$BUILD_COMMIT_FULL" "$BUILD_TIME" "$BUILD_MODULE" "$BUILD_COMMIT_MSG" \
+    > /app/build-info.json
+
 ENTRYPOINT ["bash", "/app/start.sh"]
 CMD ["api"]
