@@ -17,8 +17,6 @@ export OPEN_DESIGN_HOME="${OPEN_DESIGN_HOME:-$OD_DATA_DIR/home}"
 export OPEN_DESIGN_AGENT_ID="${OPEN_DESIGN_AGENT_ID:-claude}"
 export OPEN_DESIGN_CLAUDE_MODEL="${OPEN_DESIGN_CLAUDE_MODEL:-sonnet}"
 
-OPEN_DESIGN_RUN_AS_ROOT=0
-
 is_writable_as_open_design() {
     local dir="$1"
 
@@ -51,13 +49,8 @@ prepare_open_design_dir() {
     if ! is_writable_as_open_design "$dir"; then
         echo "[open-design] $dir is not writable as $OPEN_DESIGN_USER" >&2
         ls -ld "$parent" "$dir" >&2 || true
-
-        if [ "$(id -u)" = "0" ] && [ -w "$dir" ] && [ -x "$dir" ]; then
-            echo "[open-design] falling back to run daemon as root because root can write $dir" >&2
-            OPEN_DESIGN_RUN_AS_ROOT=1
-        else
-            exit 1
-        fi
+        echo "[open-design] refusing to run Open Design as root because Claude Code rejects root/sudo privileges" >&2
+        exit 1
     fi
 }
 
@@ -141,7 +134,7 @@ else
     echo "[claude] ZHIPU_API_KEY/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_API_KEY is not set; Claude Code may require existing auth under $CLAUDE_CONFIG_DIR" >&2
 fi
 
-if [ "$(id -u)" = "0" ] && [ "$OPEN_DESIGN_RUN_AS_ROOT" != "1" ]; then
+if [ "$(id -u)" = "0" ]; then
     chown -R "$OPEN_DESIGN_USER:$OPEN_DESIGN_USER" "$OD_DATA_DIR" "$OD_MEDIA_CONFIG_DIR" "$CLAUDE_CONFIG_DIR" "$OPEN_DESIGN_HOME" 2>/dev/null || true
 fi
 
@@ -155,7 +148,7 @@ echo "[open-design] url: http://${OD_BIND_HOST}:${OD_PORT}${OD_BASE_PATH}"
 
 cd "$OPEN_DESIGN_ROOT"
 
-if [ "$(id -u)" = "0" ] && [ "$OPEN_DESIGN_RUN_AS_ROOT" != "1" ]; then
+if [ "$(id -u)" = "0" ]; then
     runuser -u "$OPEN_DESIGN_USER" -- \
         env NODE_ENV=production \
         NODE_OPTIONS="${OD_NODE_OPTIONS:---max-old-space-size=192}" \
@@ -167,6 +160,9 @@ if [ "$(id -u)" = "0" ] && [ "$OPEN_DESIGN_RUN_AS_ROOT" != "1" ]; then
         OD_DATA_DIR="$OD_DATA_DIR" \
         OD_MEDIA_CONFIG_DIR="$OD_MEDIA_CONFIG_DIR" \
         HOME="$OPEN_DESIGN_HOME" \
+        XDG_CONFIG_HOME="$OPEN_DESIGN_HOME/.config" \
+        XDG_CACHE_HOME="$OPEN_DESIGN_HOME/.cache" \
+        XDG_DATA_HOME="$OPEN_DESIGN_HOME/.local/share" \
         USER="$OPEN_DESIGN_USER" \
         LOGNAME="$OPEN_DESIGN_USER" \
         CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" \
@@ -191,6 +187,11 @@ else
         OD_DATA_DIR="$OD_DATA_DIR" \
         OD_MEDIA_CONFIG_DIR="$OD_MEDIA_CONFIG_DIR" \
         HOME="$OPEN_DESIGN_HOME" \
+        XDG_CONFIG_HOME="$OPEN_DESIGN_HOME/.config" \
+        XDG_CACHE_HOME="$OPEN_DESIGN_HOME/.cache" \
+        XDG_DATA_HOME="$OPEN_DESIGN_HOME/.local/share" \
+        USER="$OPEN_DESIGN_USER" \
+        LOGNAME="$OPEN_DESIGN_USER" \
         CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" \
         CLAUDE_BIN="$CLAUDE_BIN" \
         node apps/daemon/dist/cli.js --no-open &
