@@ -23,8 +23,6 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.storage.UserFS;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
-import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 
 /**
@@ -69,7 +67,7 @@ public class ByClawSkillUploadApplicationService {
     private UserFS userFS;
 
     @Autowired
-    private SsResourceService ssResourceService;
+    private ByClawSkillPathResolver skillPathResolver;
 
     /**
      * 上传单个 skill 压缩包。仅做大小、SKILL.md 唯一性两道校验，其它结构问题以静默忽略处理。
@@ -94,7 +92,7 @@ public class ByClawSkillUploadApplicationService {
             String skillBaseInZip = parentDirOf(skillDocEntry.entryName);
             String skillName = resolveSkillName(skillBaseInZip, zipFile.getOriginalFilename());
 
-            String skillRootPrefix = resolveSkillRootPrefix(resourceId);
+            String skillRootPrefix = skillPathResolver.resolveSkillRootPrefix(userCode, resourceId);
             String skillRoot = skillRootPrefix + skillName;
             // 覆盖语义：清空旧目录再写，避免上一个版本的孤儿文件遗留。
             // 删除前缀本身是幂等的，桶 / 目录不存在时不会抛错。
@@ -152,15 +150,6 @@ public class ByClawSkillUploadApplicationService {
         if (zipFile.getSize() > MAX_ZIP_SIZE_BYTES) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.size.exceeded"));
         }
-    }
-
-    private String resolveSkillRootPrefix(Long resourceId) {
-        if (resourceId == null) {
-            return ByClawUserWorkspacePaths.WORKSPACE_SKILL_ROOT_PREFIX;
-        }
-        SsResource resource = ssResourceService.findById(resourceId);
-        String resourceCode = resource == null ? null : resource.getResourceCode();
-        return ByClawUserWorkspacePaths.resolveSkillRootPrefix(resourceId, resourceCode);
     }
 
     /**

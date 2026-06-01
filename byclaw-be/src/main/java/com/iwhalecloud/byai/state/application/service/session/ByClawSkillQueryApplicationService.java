@@ -14,8 +14,6 @@ import org.springframework.stereotype.Service;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.storage.UserFS;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
-import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 
 /**
@@ -31,7 +29,7 @@ public class ByClawSkillQueryApplicationService {
     private UserFS userFS;
 
     @Autowired
-    private SsResourceService ssResourceService;
+    private ByClawSkillPathResolver skillPathResolver;
 
     /**
      * 查询指定用户在其工作空间下的 skill 列表。
@@ -47,7 +45,7 @@ public class ByClawSkillQueryApplicationService {
 
         String normalizedKeyword = StringUtils.trimToEmpty(keyword).toLowerCase(Locale.ROOT);
 
-        String skillRootPrefix = resolveSkillRootPrefix(resourceId);
+        String skillRootPrefix = skillPathResolver.resolveSkillRootPrefix(userCode, resourceId);
         Map<String, SkillDocInfo> skillDocMap = new LinkedHashMap<>();
         collectSkillDocs(skillDocMap,
             safeObjectKeys(ByClawUserWorkspacePaths.withUserContext(userCode, () -> userFS.list(skillRootPrefix, null))),
@@ -60,15 +58,6 @@ public class ByClawSkillQueryApplicationService {
 
     private List<String> safeObjectKeys(List<String> objectKeys) {
         return objectKeys == null ? Collections.emptyList() : objectKeys;
-    }
-
-    private String resolveSkillRootPrefix(Long resourceId) {
-        if (resourceId == null) {
-            return ByClawUserWorkspacePaths.WORKSPACE_SKILL_ROOT_PREFIX;
-        }
-        SsResource resource = ssResourceService.findById(resourceId);
-        String resourceCode = resource == null ? null : resource.getResourceCode();
-        return ByClawUserWorkspacePaths.resolveSkillRootPrefix(resourceId, resourceCode);
     }
 
     private void collectSkillDocs(Map<String, SkillDocInfo> skillDocMap, List<String> objectKeys,

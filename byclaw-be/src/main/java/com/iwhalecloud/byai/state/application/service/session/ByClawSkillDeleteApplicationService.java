@@ -8,8 +8,6 @@ import org.springframework.stereotype.Service;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.storage.UserFS;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
-import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 
 /**
@@ -29,7 +27,7 @@ public class ByClawSkillDeleteApplicationService {
     private UserFS userFS;
 
     @Autowired
-    private SsResourceService ssResourceService;
+    private ByClawSkillPathResolver skillPathResolver;
 
     /**
      * 删除一个 skill 目录。
@@ -43,7 +41,7 @@ public class ByClawSkillDeleteApplicationService {
         if (StringUtils.isBlank(userCode)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.user.code.notempty"));
         }
-        String normalizedSkillPath = normalizeSkillPath(skillPath, resourceId);
+        String normalizedSkillPath = normalizeSkillPath(userCode, skillPath, resourceId);
         List<String> objectKeys = ByClawUserWorkspacePaths.withUserContext(userCode, () -> userFS.list(normalizedSkillPath + "/", null));
         if (objectKeys == null || objectKeys.isEmpty()) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.delete.notfound"));
@@ -57,11 +55,11 @@ public class ByClawSkillDeleteApplicationService {
         return new ByClawSkillDto(extractSkillName(normalizedSkillPath), normalizedSkillPath, null);
     }
 
-    private String normalizeSkillPath(String skillPath, Long resourceId) {
+    private String normalizeSkillPath(String userCode, String skillPath, Long resourceId) {
         if (StringUtils.isBlank(skillPath)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.path.invalid"));
         }
-        String skillRootPrefix = resolveSkillRootPrefix(resourceId);
+        String skillRootPrefix = skillPathResolver.resolveSkillRootPrefix(userCode, resourceId);
         String normalized = skillPath.replace('\\', '/').replaceAll("/+", "/");
         if (!normalized.startsWith("/")) {
             normalized = "/" + normalized;
@@ -82,15 +80,6 @@ public class ByClawSkillDeleteApplicationService {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.path.invalid"));
         }
         return normalized;
-    }
-
-    private String resolveSkillRootPrefix(Long resourceId) {
-        if (resourceId == null) {
-            return ByClawUserWorkspacePaths.WORKSPACE_SKILL_ROOT_PREFIX;
-        }
-        SsResource resource = ssResourceService.findById(resourceId);
-        String resourceCode = resource == null ? null : resource.getResourceCode();
-        return ByClawUserWorkspacePaths.resolveSkillRootPrefix(resourceId, resourceCode);
     }
 
     private String extractSkillName(String normalizedSkillPath) {

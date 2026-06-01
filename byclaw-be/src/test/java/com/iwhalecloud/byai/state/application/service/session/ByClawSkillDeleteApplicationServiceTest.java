@@ -7,8 +7,6 @@ import java.util.Locale;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.storage.UserFS;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
-import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,7 +41,7 @@ class ByClawSkillDeleteApplicationServiceTest {
     private UserFS userFS;
 
     @Mock
-    private SsResourceService ssResourceService;
+    private ByClawSkillPathResolver skillPathResolver;
 
     private ByClawSkillDeleteApplicationService service;
 
@@ -58,7 +56,7 @@ class ByClawSkillDeleteApplicationServiceTest {
 
         service = new ByClawSkillDeleteApplicationService();
         ReflectionTestUtils.setField(service, "userFS", userFS);
-        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        ReflectionTestUtils.setField(service, "skillPathResolver", skillPathResolver);
     }
 
     @AfterEach
@@ -68,7 +66,8 @@ class ByClawSkillDeleteApplicationServiceTest {
 
     @Test
     void shouldDeleteSkillFromAgentWorkspace() {
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID))
+            .thenReturn("/.openclaw/workspace-baiying-agent-10000417/skills/");
         when(userFS.list(eq(AGENT_SKILL_PATH + "/"), isNull()))
             .thenReturn(List.of(AGENT_SKILL_PATH + "/SKILL.md", AGENT_SKILL_PATH + "/scripts/run.py"));
 
@@ -82,7 +81,7 @@ class ByClawSkillDeleteApplicationServiceTest {
 
     @Test
     void shouldDeleteSkillFromSuperAssistantWorkspace() {
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("adminvip_main"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn("/.openclaw/workspace/skills/");
         when(userFS.list(eq(SUPER_SKILL_PATH + "/"), isNull()))
             .thenReturn(Collections.singletonList(SUPER_SKILL_PATH + "/SKILL.md"));
 
@@ -95,7 +94,8 @@ class ByClawSkillDeleteApplicationServiceTest {
 
     @Test
     void shouldRejectInvalidPath() {
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID))
+            .thenReturn("/.openclaw/workspace-baiying-agent-10000417/skills/");
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
             () -> service.deleteSkill(USER_CODE, RESOURCE_ID, "/.openclaw/workspace/skills/abc"));
@@ -105,7 +105,8 @@ class ByClawSkillDeleteApplicationServiceTest {
 
     @Test
     void shouldRejectNonConcreteSkillPath() {
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID))
+            .thenReturn("/.openclaw/workspace-baiying-agent-10000417/skills/");
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
             () -> service.deleteSkill(USER_CODE, RESOURCE_ID, "/.openclaw/workspace-baiying-agent-10000417/skills"));
@@ -115,7 +116,8 @@ class ByClawSkillDeleteApplicationServiceTest {
 
     @Test
     void shouldRejectMissingSkillDirectory() {
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID))
+            .thenReturn("/.openclaw/workspace-baiying-agent-10000417/skills/");
         when(userFS.list(eq(AGENT_SKILL_PATH + "/"), isNull())).thenReturn(Collections.emptyList());
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
@@ -124,9 +126,4 @@ class ByClawSkillDeleteApplicationServiceTest {
         assertEquals("Skill 目录不存在或已被删除", ex.getMessage());
     }
 
-    private SsResource resource(String resourceCode) {
-        SsResource resource = new SsResource();
-        resource.setResourceCode(resourceCode);
-        return resource;
-    }
 }
