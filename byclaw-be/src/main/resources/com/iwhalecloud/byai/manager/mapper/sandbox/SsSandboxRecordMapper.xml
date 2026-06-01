@@ -125,6 +125,15 @@
         ORDER BY create_time DESC
     </select>
 
+    <select id="selectRunningByUserAndSandboxType" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE user_code = #{userCode,jdbcType=VARCHAR}
+          AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
+          AND status = 'RUNNING'
+        ORDER BY create_time DESC
+    </select>
+
     <!-- 更新沙箱状态为已释放 -->
     <update id="updateStatusToReleased">
         UPDATE ss_sandbox_record

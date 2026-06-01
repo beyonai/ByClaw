@@ -6,6 +6,7 @@ import { enqueueAfterAgentEvents, replaceAgentEventSubscription } from "./src/ag
 import { byaiChannelPlugin } from "./src/channel.js";
 import { registerByaiHooks } from "./src/hooks.js";
 import { setByaiRuntime } from "./src/runtime.js";
+import { registerTelemetry } from "./src/telemetry/index.js";
 import {
   markActiveSdkRequestSubagentEnded,
   markActiveSdkRequestSubagentSpawned,
@@ -72,13 +73,32 @@ const plugin = {
           enabled: { type: "boolean", description: "Enable SDK mode (default: true)" },
         },
       },
+      telemetry: {
+        type: "object",
+        description: "Runtime telemetry snapshot configuration",
+        properties: {
+          enabled: { type: "boolean" },
+          consoleEnabled: { type: "boolean" },
+          redisEnabled: { type: "boolean" },
+          logIntervalMs: { type: "number" },
+          activeRunMaxAgeMs: { type: "number" },
+          activeToolCallMaxAgeMs: { type: "number" },
+          activeSubagentMaxAgeMs: { type: "number" },
+          activeLeaseMs: { type: "number" },
+          cautiousLeaseMs: { type: "number" },
+          idleGraceMs: { type: "number" },
+          maxAgeMs: { type: "number" },
+        },
+      },
     },
   },
   register(api: OpenClawPluginApi) {
     logInfoOnce(api, "registering-channel-plugin", "[byai-channel] registering channel plugin");
     setByaiRuntime(api.runtime);
+    const telemetry = registerTelemetry(api);
     api.registerChannel({ plugin: byaiChannelPlugin });
     replaceAgentEventSubscription(api, () => api.runtime.events.onAgentEvent(async (event) => {
+      telemetry.recordAgentEvent(event);
       await enqueueAgentEvent(api, event);
     }));
     registerByaiHooks(api);
