@@ -48,6 +48,9 @@ public interface SsSandboxRecordMapper {
 
     List<SsSandboxRecord> selectRunningByUser(@Param("userCode") String userCode);
 
+    List<SsSandboxRecord> selectRunningByUserAndSandboxType(@Param("userCode") String userCode,
+                                                            @Param("sandboxType") String sandboxType);
+
     /**
      * 更新沙箱状态为已释放
      *

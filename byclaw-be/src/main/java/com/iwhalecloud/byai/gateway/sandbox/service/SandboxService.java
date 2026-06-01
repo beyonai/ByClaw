@@ -620,6 +620,44 @@ public class SandboxService {
         return heartbeatRunningSandboxesByUser(userCode, resourceId);
     }
 
+    /**
+     * running-state 心跳：只刷新当前用户 openclaw 类型运行中沙箱的最后访问时间。
+     */
+    public boolean heartbeatOpenclawSandbox(String userCode) {
+        if (StringUtils.isBlank(userCode)) {
+            LOGGER.warn("running-state 心跳失败：无法获取用户编码");
+            return false;
+        }
+        List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUserAndSandboxType(userCode,
+            SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
+        if (records == null || records.isEmpty()) {
+            LOGGER.warn("running-state 心跳失败：未找到运行中的 openclaw 沙箱记录，用户编码：{}", userCode);
+            return false;
+        }
+        Date now = new Date();
+        int updatedCount = 0;
+        List<String> skippedRecords = new ArrayList<>();
+        for (SsSandboxRecord record : records) {
+            SsSandboxRecord updatedRecord = refreshLastAccessTime(record, now);
+            if (updatedRecord == null) {
+                skippedRecords.add(sandboxRef(record));
+                continue;
+            }
+            sandboxMetadataCache.put(toSandboxInfo(updatedRecord));
+            updatedCount++;
+        }
+        if (!skippedRecords.isEmpty()) {
+            LOGGER.warn("running-state 心跳部分记录跳过，用户编码：{}，跳过记录：{}", userCode, skippedRecords);
+        }
+        if (updatedCount == 0) {
+            LOGGER.warn("running-state 心跳失败：openclaw 运行中记录均未更新，用户编码：{}", userCode);
+            return false;
+        }
+        LOGGER.debug("running-state 心跳成功，用户编码：{}，命中记录数：{}，更新记录数：{}，lastAccessTime：{}",
+            userCode, records.size(), updatedCount, now);
+        return true;
+    }
+
     private boolean heartbeatRunningSandboxesByUser(String userCode, Long resourceId) {
         List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUser(userCode);
         if (records == null || records.isEmpty()) {

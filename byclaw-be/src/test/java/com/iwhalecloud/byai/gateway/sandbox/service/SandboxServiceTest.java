@@ -24,6 +24,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -183,6 +184,38 @@ class SandboxServiceTest {
         verify(sandboxRecordMapper).updateLastAccessTime(eq(1L), any(Date.class), eq(3));
         verify(sandboxRecordMapper).updateLastAccessTime(eq(2L), any(Date.class), eq(7));
         verify(sandboxMetadataCache, times(2)).put(any(SandboxInfo.class));
+    }
+
+    @Test
+    void heartbeatOpenclawSandbox_refreshesOnlyOpenclawRunningSandboxes() {
+        SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
+
+        SsSandboxRecord openclawRecord = new SsSandboxRecord();
+        openclawRecord.setId(1L);
+        openclawRecord.setUserCode("user001");
+        openclawRecord.setSandboxType("openclaw");
+        openclawRecord.setResourceId(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        openclawRecord.setStatus("RUNNING");
+        openclawRecord.setSandboxId("sandbox-openclaw");
+        openclawRecord.setLockVersion(3);
+        openclawRecord.setVersion(1);
+
+        when(sandboxRecordMapper.selectRunningByUserAndSandboxType("user001", "openclaw"))
+            .thenReturn(List.of(openclawRecord));
+        when(sandboxRecordMapper.updateLastAccessTime(eq(1L), any(Date.class), eq(3))).thenReturn(1);
+
+        boolean result = sandboxService.heartbeatOpenclawSandbox("user001");
+
+        assertThat(result).isTrue();
+        assertThat(openclawRecord.getLastAccessTime()).isNotNull();
+        verify(sandboxRecordMapper).selectRunningByUserAndSandboxType("user001", "openclaw");
+        verify(sandboxRecordMapper).updateLastAccessTime(eq(1L), any(Date.class), eq(3));
+        verify(sandboxRecordMapper, never()).selectRunningByUser("user001");
+        verify(sandboxMetadataCache).put(any(SandboxInfo.class));
     }
 
     @Test
