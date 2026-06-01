@@ -7,6 +7,7 @@ import java.util.Map;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.storage.util.MultipartFileUtil;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
+import com.iwhalecloud.byai.manager.dto.resource.UploadItem;
 import com.iwhalecloud.byai.manager.dto.resource.UploadResult;
 import com.iwhalecloud.byai.manager.vo.ecosystem.EcosystemTaskVo;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
@@ -50,17 +51,20 @@ public class EcosystemKnowledgeImportService {
             throw new IllegalArgumentException(i18n("ecosystem.import.error.markdown.empty"));
         }
 
-        String directoryPath = normalizeDirectoryPath(null, task.getSourceName(), task.getTaskId());
+        String directoryPath = normalizeDirectoryPath(null, task.getSourceName(), String.valueOf(task.getTaskId()));
         MultipartFile[] files = markdownFiles.stream()
             .map(file -> new MultipartFileUtil("files", file.getFileName(), "text/markdown", file.getBytes()))
             .toArray(MultipartFile[]::new);
         try {
             UploadResult uploadResult = datasetApplicationService.uploadFiles(files, resourceId, directoryPath,
                 i18n("ecosystem.import.upload.remark", task.getTaskName()));
-            DatasetBuild datasetBuild = new DatasetBuild();
-            datasetBuild.setResourceId(resourceId);
-            datasetBuild.setDirectoryPath(directoryPath);
-            datasetApplicationService.build(datasetBuild);
+            // 知识库构建接口按文件路径查找对象，不能只传目录；用 uploadFiles 返回的真实路径逐个触发索引。
+            for (UploadItem uploadItem : uploadResult.getUploadItems()) {
+                DatasetBuild datasetBuild = new DatasetBuild();
+                datasetBuild.setResourceId(resourceId);
+                datasetBuild.setDirectoryPath(uploadItem.getFilePath());
+                datasetApplicationService.build(datasetBuild);
+            }
 
             ImportResult result = new ImportResult();
             result.setResourceId(resourceId);
@@ -96,7 +100,7 @@ public class EcosystemKnowledgeImportService {
     /**
      * 规范化导入目录，确保 DatasetApplicationService 使用以 / 开头且不以 / 结尾的路径。
      */
-    private String normalizeDirectoryPath(String directoryPath, String sourceName, Long taskId) {
+    private String normalizeDirectoryPath(String directoryPath, String sourceName, String taskId) {
         String value = directoryPath;
         if (value == null || value.trim().isEmpty()) {
             value = i18n("ecosystem.import.directory", sourceName, taskId);

@@ -1,0 +1,11 @@
+{
+  "name": "ByClaw Browser Bridge",
+  "version": "0.3.0",
+  "protocolVersion": "1.1",
+  "fileName": "byclaw-browser-bridge-v0.3.0.zip",
+  "path": "/download/browser-extension/byclaw-browser-bridge-v0.3.0.zip",
+  "sha256": "975926ee0788b59bef404bb29b4bb1b350b27d960e59e64b9a1697015d4740e9",
+  "size": 20914,
+  "generatedAt": "2026-06-01T09:19:09.632Z",
+  "installGuide": "Open chrome://extensions, enable Developer mode, then unzip this package and load the unpacked directory."
+}

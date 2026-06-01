@@ -52,8 +52,6 @@ interface Props {
   resourceType: string; // 对应资源类型
 }
 
-type EcosystemSourceKey = 'zhihu' | 'github' | 'web' | 'mail' | 'dingtalk';
-
 const Resources: React.FC<Props> = ({ resourceType }) => {
   const intl = useIntl();
 
@@ -74,9 +72,10 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
 
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [collectorOpen, setCollectorOpen] = useState(false);
-  const [collectorInitialSource, setCollectorInitialSource] = useState<EcosystemSourceKey>();
+  const [collectorInitialSource, setCollectorInitialSource] = useState<string>();
   const [collectorInitialSourceUrl, setCollectorInitialSourceUrl] = useState('');
   const [collectorInitialScope, setCollectorInitialScope] = useState('');
+  const [collectorInitialCollectMode, setCollectorInitialCollectMode] = useState('');
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [resourceDetailOpen, setResourceDetailOpen] = useState(false);
@@ -177,13 +176,10 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     if (resourceType !== 'KG_DOC' || searchParams.get('ecosystem') !== '1') {
       return;
     }
-    const source = searchParams.get('source') || undefined;
-    const supportedSources: EcosystemSourceKey[] = ['zhihu', 'github', 'web', 'mail', 'dingtalk'];
-    setCollectorInitialSource(
-      supportedSources.includes(source as EcosystemSourceKey) ? (source as EcosystemSourceKey) : undefined
-    );
+    setCollectorInitialSource(searchParams.get('source') || undefined);
     setCollectorInitialSourceUrl(searchParams.get('sourceUrl') || '');
     setCollectorInitialScope(searchParams.get('scope') || '');
+    setCollectorInitialCollectMode(searchParams.get('collectMode') || '');
     setActiveTab('personal');
     setCollectorOpen(true);
   }, [resourceType, searchParams]);
@@ -520,6 +516,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         initialSource={collectorInitialSource}
         initialSourceUrl={collectorInitialSourceUrl}
         initialScope={collectorInitialScope}
+        initialCollectMode={collectorInitialCollectMode}
         onCancel={() => {
           setCollectorOpen(false);
         }}

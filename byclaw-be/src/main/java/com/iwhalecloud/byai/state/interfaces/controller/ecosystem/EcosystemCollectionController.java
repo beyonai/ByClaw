@@ -5,7 +5,6 @@ import java.util.Map;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.manager.application.service.ecosystem.EcosystemCollectionApplicationService;
-import com.iwhalecloud.byai.manager.dto.ecosystem.EcosystemAgentHeartbeatRequest;
 import com.iwhalecloud.byai.manager.dto.ecosystem.EcosystemRunStartRequest;
 import com.iwhalecloud.byai.manager.dto.ecosystem.EcosystemTaskCreateRequest;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
@@ -48,13 +47,13 @@ public class EcosystemCollectionController {
     }
 
     /**
-     * 查询当前用户最近一次本机采集端状态。
+     * 查询当前用户最近一次 Browser Bridge 状态。
      *
-     * @return 本机采集端状态
+     * @return Browser Bridge 状态
      */
-    @GetMapping("/localAgent/status")
-    public ResponseUtil<EcosystemAgentStatusVo> getLocalAgentStatus() {
-        return ResponseUtil.successResponse(I18nUtil.get("ecosystem.local.agent.status.query.success"),
+    @GetMapping("/browserBridge/status")
+    public ResponseUtil<EcosystemAgentStatusVo> getBrowserBridgeStatus() {
+        return ResponseUtil.successResponse(I18nUtil.get("ecosystem.browser.bridge.status.query.success"),
             ecosystemCollectionApplicationService.getLocalAgentStatus());
     }
 
@@ -81,29 +80,6 @@ public class EcosystemCollectionController {
     public ResponseUtil<Map<String, Object>> saveConnection(@RequestBody Map<String, Object> request) {
         return ResponseUtil.successResponse(I18nUtil.get("ecosystem.connection.save.success"),
             ecosystemCollectionApplicationService.saveConnection(request));
-    }
-
-    /**
-     * 接收本机采集端心跳，更新 OpenCLI、Browser Bridge 和站点登录态状态。
-     *
-     * @param request 心跳请求
-     * @return 最新采集端状态
-     */
-    @PostMapping("/localAgent/heartbeat")
-    public ResponseUtil<EcosystemAgentStatusVo> heartbeat(@RequestBody EcosystemAgentHeartbeatRequest request) {
-        return ResponseUtil.successResponse(I18nUtil.get("ecosystem.local.agent.heartbeat.success"),
-            ecosystemCollectionApplicationService.heartbeat(request));
-    }
-
-    /**
-     * 由后端主动检测本机 OpenCLI 运行时状态。
-     *
-     * @return 检测后的采集端状态
-     */
-    @PostMapping("/localAgent/detect")
-    public ResponseUtil<EcosystemAgentStatusVo> detectLocalAgent() {
-        return ResponseUtil.successResponse(I18nUtil.get("ecosystem.local.agent.detect.success"),
-            ecosystemCollectionApplicationService.detectLocalAgent());
     }
 
     /**
@@ -166,7 +142,7 @@ public class EcosystemCollectionController {
     }
 
     /**
-     * 处理运行中的用户动作，例如重试、重新检测本机采集端、跳过或确认。
+     * 处理运行中的用户动作，例如重试、重新检测 Browser Bridge、跳过或确认。
      *
      * @param request 包含 runId 和 action
      * @return 处理后的运行详情

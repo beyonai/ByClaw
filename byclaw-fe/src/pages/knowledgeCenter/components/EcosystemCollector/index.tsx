@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ApiOutlined,
   CheckCircleOutlined,
   ChromeOutlined,
   CloudSyncOutlined,
+  CopyOutlined,
   FileMarkdownOutlined,
   GithubOutlined,
   GlobalOutlined,
@@ -12,12 +13,13 @@ import {
   PlayCircleOutlined,
   TagsOutlined,
 } from '@ant-design/icons';
-import { useIntl } from '@umijs/max';
+import { getLocale, useIntl } from '@umijs/max';
 import {
   Alert,
   Button,
   DatePicker,
   Drawer,
+  Empty,
   Form,
   Input,
   Segmented,
@@ -31,14 +33,12 @@ import {
 import classNames from 'classnames';
 import {
   createEcosystemTask,
-  detectEcosystemLocalAgent,
   handleEcosystemRunAction,
+  queryEcosystemBrowserBridgeStatus,
   queryEcosystemConnections,
   queryEcosystemConnectors,
-  queryEcosystemLocalAgentStatus,
   queryEcosystemTasks,
   queryEcosystemRun,
-  queryAuthDoc,
   saveEcosystemConnection,
   startEcosystemRun,
   updateEcosystemTaskStatus,
@@ -50,11 +50,15 @@ import {
   type EcosystemTask,
   type EcosystemTaskCreatePayload,
 } from '@/service/knowledgeCenter';
+import { listResourceUseAuth } from '@/pages/manager/service/resources';
+import { getSessionKey, getssoToken, getToken, ssotokenKey, tokenKey } from '@/utils/auth';
 import styles from './index.module.less';
 
 type OwnerType = 'personal' | 'enterprise';
-type SourceKey = 'zhihu' | 'github' | 'web' | 'mail' | 'dingtalk';
+type SourceKey = string;
 type TaskStatus = 'idle' | 'ready' | 'running' | 'completed' | 'failed';
+type BrowserExtensionBindStatus = 'idle' | 'checking' | 'binding' | 'bound' | 'missing' | 'upgrade' | 'expired';
+type CollectMode = 'SERVER_OPENCLI' | 'USER_BROWSER_BRIDGE';
 
 interface EcosystemCollectorProps {
   open: boolean;
@@ -64,6 +68,7 @@ interface EcosystemCollectorProps {
   initialSource?: SourceKey;
   initialSourceUrl?: string;
   initialScope?: string;
+  initialCollectMode?: string;
   onCancel: () => void;
 }
 
@@ -78,6 +83,30 @@ interface SourceOption {
 interface KnowledgeBaseOption {
   value: string;
   label: string;
+  catalogId?: string;
+}
+
+interface BrowserExtensionStatus {
+  installed?: boolean;
+  checking?: boolean;
+  version?: string;
+  protocolVersion?: string;
+  binding?: {
+    bound?: boolean;
+    targetName?: string;
+    tokenStatus?: string;
+    tokenStatusName?: string;
+    expiresAt?: string;
+    warning?: {
+      code?: string;
+      message?: string;
+      occurredAt?: string;
+    } | null;
+  };
+  bridgeStatus?: {
+    connected?: boolean;
+    message?: string;
+  };
 }
 
 const { RangePicker } = DatePicker;
@@ -94,6 +123,45 @@ const taskStatusMap: Record<TaskStatus, { color: string; messageId: string }> = 
 const runLocationNameIdMap: Record<string, string> = {
   LOCAL: 'knowledgeCenter.ecosystem.runLocation.local',
   SERVER: 'knowledgeCenter.ecosystem.runLocation.server',
+};
+
+const collectModeNameIdMap: Record<CollectMode, string> = {
+  SERVER_OPENCLI: 'knowledgeCenter.ecosystem.collectMode.serverOpencli',
+  USER_BROWSER_BRIDGE: 'knowledgeCenter.ecosystem.collectMode.userBrowserBridge',
+};
+
+const collectModeDescIdMap: Record<CollectMode, string> = {
+  SERVER_OPENCLI: 'knowledgeCenter.ecosystem.collectMode.serverOpencliDesc',
+  USER_BROWSER_BRIDGE: 'knowledgeCenter.ecosystem.collectMode.userBrowserBridgeDesc',
+};
+
+const browserLoginCollectModes: CollectMode[] = ['USER_BROWSER_BRIDGE'];
+const collectModeValues: CollectMode[] = ['SERVER_OPENCLI', 'USER_BROWSER_BRIDGE'];
+
+const plannedCollectModes: CollectMode[] = [];
+
+const browserExtensionProtocolVersion = '1.1';
+const browserExtensionMinVersion = '0.3.0';
+const browserExtensionInstallPath = 'byclaw-fe/public/browser-extension/byclaw-browser-bridge';
+const browserExtensionPackageCommand = 'pnpm --dir byclaw-fe package:browser-extension';
+
+const browserExtensionBindStatusNameIdMap: Record<BrowserExtensionBindStatus, string> = {
+  idle: 'knowledgeCenter.ecosystem.browserExtension.waitingStatus',
+  checking: 'knowledgeCenter.ecosystem.browserExtension.checkingStatus',
+  binding: 'knowledgeCenter.ecosystem.browserExtension.bindingStatus',
+  bound: 'knowledgeCenter.ecosystem.browserExtension.boundStatus',
+  missing: 'knowledgeCenter.ecosystem.browserExtension.missingStatus',
+  upgrade: 'knowledgeCenter.ecosystem.browserExtension.upgradeStatus',
+  expired: 'knowledgeCenter.ecosystem.browserExtension.expiredStatus',
+};
+
+const browserExtensionTokenStatusNameIdMap: Record<string, string> = {
+  UNBOUND: 'knowledgeCenter.ecosystem.browserExtension.token.unbound',
+  MISSING: 'knowledgeCenter.ecosystem.browserExtension.token.missing',
+  UNKNOWN: 'knowledgeCenter.ecosystem.browserExtension.token.unknown',
+  VALID: 'knowledgeCenter.ecosystem.browserExtension.token.valid',
+  EXPIRING_SOON: 'knowledgeCenter.ecosystem.browserExtension.token.expiringSoon',
+  EXPIRED: 'knowledgeCenter.ecosystem.browserExtension.token.expired',
 };
 
 const authTypeNameIdMap: Record<string, string> = {
@@ -156,60 +224,160 @@ const formatTaskStatusName = (task: EcosystemTask, intl: ReturnType<typeof useIn
   );
 };
 
-const sourceOptions: SourceOption[] = [
-  {
-    key: 'zhihu',
-    icon: <GlobalOutlined />,
-    requiresBridge: true,
-    outputCount: 12,
-    accent: '#165dff',
-  },
-  {
-    key: 'github',
-    icon: <GithubOutlined />,
-    requiresBridge: false,
-    outputCount: 18,
-    accent: '#14161a',
-  },
-  {
-    key: 'web',
-    icon: <LinkOutlined />,
-    requiresBridge: false,
-    outputCount: 8,
-    accent: '#13a8a8',
-  },
-  {
-    key: 'mail',
-    icon: <MailOutlined />,
-    requiresBridge: false,
-    outputCount: 24,
-    accent: '#389e0d',
-  },
-  {
-    key: 'dingtalk',
-    icon: <ApiOutlined />,
-    requiresBridge: true,
-    outputCount: 16,
-    accent: '#d46b08',
-  },
-];
+const sourcePresentationOverrides: Record<string, Partial<SourceOption>> = {
+  github: { icon: <GithubOutlined />, accent: '#14161a' },
+  web: { icon: <LinkOutlined />, accent: '#13a8a8' },
+  mail: { icon: <MailOutlined />, accent: '#389e0d' },
+  dingtalk: { icon: <ApiOutlined />, accent: '#d46b08' },
+};
+
+const sourceIconFor = (key: string) => {
+  if (key === 'github') {
+    return <GithubOutlined />;
+  }
+  if (key === 'web') {
+    return <LinkOutlined />;
+  }
+  if (key === 'mail' || key.includes('mail')) {
+    return <MailOutlined />;
+  }
+  if (key === 'dingtalk') {
+    return <ApiOutlined />;
+  }
+  return <GlobalOutlined />;
+};
+
+const sourceAccentFor = (key: string, index: number) => {
+  const override = sourcePresentationOverrides[key];
+  if (override?.accent) {
+    return override.accent;
+  }
+  const accents = ['#165dff', '#13a8a8', '#722ed1', '#d46b08', '#389e0d', '#eb2f96'];
+  return accents[index % accents.length];
+};
+
+const hasServerCredentialAuth = (authTypes?: string[]) =>
+  !!authTypes?.some((authType) => ['PUBLIC_URL', 'TOKEN', 'OAUTH', 'IMAP'].includes(authType));
+
+const isCollectModeValue = (value?: string): value is CollectMode => collectModeValues.includes(value as CollectMode);
+
+const deriveCollectModes = (connector?: EcosystemConnector, source?: SourceOption): CollectMode[] => {
+  if (!connector && !source) {
+    return [];
+  }
+  const appendMode = (modes: CollectMode[], mode: CollectMode) => {
+    if (!modes.includes(mode)) {
+      modes.push(mode);
+    }
+  };
+  if (connector?.collectModes?.length) {
+    const modes = connector.collectModes.filter(isCollectModeValue) as CollectMode[];
+    const needsBrowserAuth = connector.authTypes?.includes('BROWSER') ?? source?.requiresBridge;
+    if (needsBrowserAuth || source?.requiresBridge || source?.key === 'mail') {
+      appendMode(modes, 'USER_BROWSER_BRIDGE');
+    }
+    if (modes.length) {
+      return modes;
+    }
+  }
+  const modes: CollectMode[] = [];
+  if (connector?.runLocations?.includes('SERVER') && hasServerCredentialAuth(connector.authTypes)) {
+    modes.push('SERVER_OPENCLI');
+  }
+  const needsBrowserAuth = connector?.authTypes?.includes('BROWSER') ?? source?.requiresBridge;
+  if (needsBrowserAuth) {
+    appendMode(modes, 'USER_BROWSER_BRIDGE');
+  }
+  if (source?.key === 'mail') {
+    appendMode(modes, 'USER_BROWSER_BRIDGE');
+  }
+  if (!modes.length) {
+    modes.push(source?.requiresBridge ? 'USER_BROWSER_BRIDGE' : 'SERVER_OPENCLI');
+  }
+  return modes;
+};
+
+const defaultCollectModeFor = (connector?: EcosystemConnector, source?: SourceOption): CollectMode => {
+  const modes = deriveCollectModes(connector, source);
+  if (!modes.length) {
+    return 'SERVER_OPENCLI';
+  }
+  if (connector?.defaultCollectMode && modes.includes(connector.defaultCollectMode as CollectMode)) {
+    return connector.defaultCollectMode as CollectMode;
+  }
+  if (source?.key === 'mail' && modes.includes('USER_BROWSER_BRIDGE')) {
+    return 'USER_BROWSER_BRIDGE';
+  }
+  if (modes.includes('SERVER_OPENCLI')) {
+    return 'SERVER_OPENCLI';
+  }
+  return modes[0];
+};
+
+const authTypeForCollectMode = (collectMode: CollectMode, connector?: EcosystemConnector) => {
+  if (browserLoginCollectModes.includes(collectMode)) {
+    return 'BROWSER';
+  }
+  return connector?.authTypes?.find((authType) => authType !== 'BROWSER') || 'PUBLIC_URL';
+};
+
+const runLocationForCollectMode = (collectMode: CollectMode) =>
+  collectMode === 'USER_BROWSER_BRIDGE' ? 'LOCAL' : 'SERVER';
 
 const signalFields = ['project', 'product', 'customer', 'domain'] as const;
+const ALL_CATALOG_VALUE = '__ALL__';
+
+const isAllCatalogValue = (value?: string | number) => !value || `${value}` === ALL_CATALOG_VALUE;
+
+const normalizeCatalogValue = (value?: string | number) => (isAllCatalogValue(value) ? undefined : value);
+
+const extractKnowledgeBaseRows = (response: any): any[] => {
+  const responseData = response?.data;
+  const candidates = [
+    response?.list,
+    response?.rows,
+    response?.records,
+    responseData?.list,
+    responseData?.rows,
+    responseData?.records,
+    responseData?.data?.list,
+    responseData?.data?.rows,
+  ];
+  return candidates.find((candidate) => Array.isArray(candidate)) || [];
+};
+
+const compareSemver = (left?: string, right?: string) => {
+  const leftParts = String(left || '0.0.0')
+    .split('.')
+    .map((item) => Number.parseInt(item, 10) || 0);
+  const rightParts = String(right || '0.0.0')
+    .split('.')
+    .map((item) => Number.parseInt(item, 10) || 0);
+  for (let index = 0; index < 3; index += 1) {
+    if ((leftParts[index] || 0) > (rightParts[index] || 0)) {
+      return 1;
+    }
+    if ((leftParts[index] || 0) < (rightParts[index] || 0)) {
+      return -1;
+    }
+  }
+  return 0;
+};
 
 const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
   open,
   ownerType,
-  catalogId,
   catalogList,
   initialSource,
   initialSourceUrl,
   initialScope,
+  initialCollectMode,
   onCancel,
 }) => {
   const intl = useIntl();
   const [form] = Form.useForm();
   const formValues = Form.useWatch([], form) || {};
-  const [activeSource, setActiveSource] = useState<SourceKey>('zhihu');
+  const [activeSource, setActiveSource] = useState<SourceKey>('');
   const [taskStatus, setTaskStatus] = useState<TaskStatus>('idle');
   const [connectorList, setConnectorList] = useState<EcosystemConnector[]>([]);
   const [agentStatus, setAgentStatus] = useState<EcosystemAgentStatus | null>(null);
@@ -226,6 +394,38 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
   const [runActionLoading, setRunActionLoading] = useState<string | null>(null);
+  const [browserExtensionBindStatus, setBrowserExtensionBindStatus] = useState<BrowserExtensionBindStatus>('idle');
+  const [browserExtensionStatus, setBrowserExtensionStatus] = useState<BrowserExtensionStatus>({
+    installed: false,
+  });
+  const browserExtensionPingTimerRef = useRef<number | null>(null);
+  const browserExtensionAutoRefreshRef = useRef(false);
+  const initialFormAppliedRef = useRef(false);
+  const allCategoryName = intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' });
+  const sourceOptions = useMemo(() => {
+    return connectorList
+      .filter((connector) => connector.connectorCode)
+      .map((connector, index) => {
+        const key = connector.connectorCode;
+        const override = sourcePresentationOverrides[key];
+        return {
+          key,
+          icon: override?.icon || sourceIconFor(key),
+          requiresBridge: connector.requiresBrowserAuth ?? false,
+          outputCount: override?.outputCount || 6,
+          accent: override?.accent || sourceAccentFor(key, index),
+        };
+      });
+  }, [connectorList]);
+  const formatSourceName = (sourceKey: string, connector?: EcosystemConnector) => {
+    if (connector?.connectorName) {
+      return connector.connectorName;
+    }
+    return intl.formatMessage({
+      id: `knowledgeCenter.ecosystem.source.${sourceKey}`,
+      defaultMessage: sourceKey || intl.formatMessage({ id: 'common.none' }),
+    });
+  };
   const scheduleWeekdayOptions = useMemo(
     () =>
       scheduleWeekdayValues.map((value) => ({
@@ -234,13 +434,32 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
       })),
     [intl]
   );
+  const catalogTreeData = useMemo(
+    () => [
+      {
+        catalogId: ALL_CATALOG_VALUE,
+        catalogName: allCategoryName,
+        pcatalogId: -1,
+      },
+      ...catalogList,
+    ],
+    [allCategoryName, catalogList]
+  );
 
   useEffect(() => {
     if (!open) {
+      initialFormAppliedRef.current = false;
       return;
     }
-    const nextSource =
-      initialSource && sourceOptions.some((source) => source.key === initialSource) ? initialSource : 'zhihu';
+    if (initialFormAppliedRef.current) {
+      return;
+    }
+    initialFormAppliedRef.current = true;
+    const nextSource = initialSource || '';
+    const nextSourceOption = sourceOptions.find((source) => source.key === nextSource) || sourceOptions[0];
+    const nextCollectMode = isCollectModeValue(initialCollectMode)
+      ? initialCollectMode
+      : defaultCollectModeFor(undefined, nextSourceOption);
     setActiveSource(nextSource);
     setTaskStatus('idle');
     form.setFieldsValue({
@@ -251,8 +470,8 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
       scheduleDayOfWeek: 'MONDAY',
       sourceUrl: initialSourceUrl || '',
       scope: initialScope || '',
-      signalTags: ['ByKC', 'OpenCLI'],
-      catalogId: catalogId || undefined,
+      signalTags: ['ByKC', '生态采集'],
+      catalogId: ALL_CATALOG_VALUE,
       project: '',
       product: '',
       customer: '',
@@ -260,12 +479,39 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
       connectionId: undefined,
       connectionName: '',
       connectionToken: '',
+      account: '',
+      imapHost: '',
+      imapPort: 993,
+      imapSsl: 'true',
+      imapFolder: 'INBOX',
       chromeProfile: '',
+      collectMode: nextCollectMode,
     });
-  }, [catalogId, form, initialScope, initialSource, initialSourceUrl, open]);
+  }, [form, initialCollectMode, initialScope, initialSource, initialSourceUrl, open, sourceOptions]);
 
   useEffect(() => {
-    if (!open) {
+    if (!open || !sourceOptions.length) {
+      return;
+    }
+    const preferredSource = sourceOptions.find((source) => source.key === initialSource)?.key;
+    const nextSource =
+      activeSource && sourceOptions.some((source) => source.key === activeSource)
+        ? activeSource
+        : preferredSource || sourceOptions[0].key;
+    if (nextSource !== activeSource) {
+      const nextSourceOption = sourceOptions.find((source) => source.key === nextSource);
+      const nextConnector = connectorList.find((connector) => connector.connectorCode === nextSource);
+      setActiveSource(nextSource);
+      form.setFieldsValue({
+        collectMode: defaultCollectModeFor(nextConnector, nextSourceOption),
+      });
+    }
+  }, [activeSource, connectorList, form, initialSource, open, sourceOptions]);
+
+  useEffect(() => {
+    if (!open || !activeSource) {
+      setConnectionList([]);
+      setConnectionLoading(false);
       return;
     }
 
@@ -276,8 +522,13 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
     setRunResult(null);
     Promise.all([
       queryEcosystemConnectors(),
-      queryEcosystemLocalAgentStatus(),
-      queryAuthDoc({ pageNum: 1, pageSize: 100, type: 'owner', resourceBizTypes: ['KG_DOC'] }),
+      queryEcosystemBrowserBridgeStatus(),
+      listResourceUseAuth({
+        pageNum: 1,
+        pageSize: 200,
+        ownerType,
+        resourceBizTypeList: ['KG_DOC'],
+      }),
       queryEcosystemTasks(),
     ])
       .then(([connectors, status, knowledgeBaseResponse, tasks]) => {
@@ -287,17 +538,13 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
         setConnectorList(connectors || []);
         setAgentStatus(status || null);
         setTaskList(tasks || []);
-        let rows: any[] = [];
-        if (Array.isArray(knowledgeBaseResponse?.rows)) {
-          rows = knowledgeBaseResponse.rows;
-        } else if (Array.isArray(knowledgeBaseResponse?.list)) {
-          rows = knowledgeBaseResponse.list;
-        }
+        const rows = extractKnowledgeBaseRows(knowledgeBaseResponse);
         const options = rows
           .filter((item: any) => item?.resourceId)
           .map((item: any) => ({
             value: `${item.resourceId}`,
             label: item.resourceName || item.resourceCode || `${item.resourceId}`,
+            catalogId: item.catalogId === undefined || item.catalogId === null ? undefined : `${item.catalogId}`,
           }));
         setKnowledgeBaseOptions(options);
         if (!form.getFieldValue('knowledgeBaseId') && options.length) {
@@ -319,7 +566,7 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
     return () => {
       canceled = true;
     };
-  }, [open]);
+  }, [form, intl, open, ownerType]);
 
   useEffect(() => {
     if (!open) {
@@ -338,7 +585,7 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
         form.setFieldsValue({
           connectionId: firstConnection?.connectionId,
           connectionName: firstConnection?.connectionName || '',
-          chromeProfile: firstConnection?.runtimeConfig?.chromeProfile || agentStatus?.chromeProfile || 'bykc-local',
+          chromeProfile: firstConnection?.runtimeConfig?.chromeProfile || '',
           connectionToken: '',
         });
       })
@@ -366,36 +613,84 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
     () => connectorList.find((item) => item.connectorCode === activeSource),
     [activeSource, connectorList]
   );
-  const runtimeSupported = activeSource === 'zhihu' || activeSource === 'web';
+  const runtimeSupported = Boolean(currentSource);
 
-  const activeSourceName = intl.formatMessage({ id: `knowledgeCenter.ecosystem.source.${activeSource}` });
+  const activeSourceName = formatSourceName(activeSource, currentConnector);
   const ownerName = intl.formatMessage({ id: `knowledgeCenter.ecosystem.owner.${ownerType}` });
-  const requiresLocalAgent = currentConnector?.requiresLocalAgent ?? currentSource.requiresBridge;
-  const primaryAuthType = currentConnector?.authTypes?.[0] || (requiresLocalAgent ? 'BROWSER' : 'PUBLIC_URL');
-  const primaryRunLocation = currentConnector?.runLocations?.[0] || (requiresLocalAgent ? 'LOCAL' : 'SERVER');
-  const formatByIdMap = (map: Record<string, string>, value?: string) =>
+  const collectModes = useMemo(
+    () => deriveCollectModes(currentConnector, currentSource),
+    [currentConnector, currentSource]
+  );
+  const defaultCollectMode = useMemo(
+    () => defaultCollectModeFor(currentConnector, currentSource),
+    [currentConnector, currentSource]
+  );
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const currentCollectMode = form.getFieldValue('collectMode');
+    if (!currentCollectMode || !collectModes.includes(currentCollectMode)) {
+      form.setFieldsValue({ collectMode: defaultCollectMode });
+    }
+  }, [collectModes, defaultCollectMode, form, open]);
+  const selectedCollectMode = (
+    collectModes.includes(formValues.collectMode) ? formValues.collectMode : defaultCollectMode
+  ) as CollectMode;
+  const isUserBrowserBridgeMode = selectedCollectMode === 'USER_BROWSER_BRIDGE';
+  const isBrowserExtensionMode = isUserBrowserBridgeMode;
+  const usesLocalBrowserAuth = isUserBrowserBridgeMode;
+  const requiresBrowserAuth = browserLoginCollectModes.includes(selectedCollectMode);
+  const collectModeExecutable = !plannedCollectModes.includes(selectedCollectMode);
+  const primaryAuthType = authTypeForCollectMode(selectedCollectMode, currentConnector);
+  const primaryRunLocation = runLocationForCollectMode(selectedCollectMode);
+  const formatByIdMap = (map: Partial<Record<string, string>>, value?: string) =>
     value && map[value] ? intl.formatMessage({ id: map[value] }) : value || intl.formatMessage({ id: 'common.none' });
+  const selectedCollectModeName = formatByIdMap(collectModeNameIdMap, selectedCollectMode);
   const primaryAuthTypeName = formatByIdMap(authTypeNameIdMap, primaryAuthType);
   const primaryRunLocationName = formatByIdMap(runLocationNameIdMap, primaryRunLocation);
   const selectedConnection = connectionList.find((item) => item.connectionId === formValues.connectionId);
+  const isMailImapMode = activeSource === 'mail' && primaryAuthType === 'IMAP';
   const needsCredentialInput = ['TOKEN', 'OAUTH', 'IMAP'].includes(primaryAuthType);
-  const needsConnectionConfig = primaryAuthType !== 'PUBLIC_URL';
-  const connectionDescText = needsConnectionConfig
-    ? intl.formatMessage(
-      { id: 'knowledgeCenter.ecosystem.connectionDescWithAuth' },
-      { authType: primaryAuthTypeName, runLocation: primaryRunLocationName }
-    )
-    : intl.formatMessage({ id: 'knowledgeCenter.ecosystem.connectionDescPublic' });
-  const activeCollectorName = requiresLocalAgent
-    ? intl.formatMessage({ id: 'knowledgeCenter.ecosystem.localCollector' })
-    : intl.formatMessage({ id: 'knowledgeCenter.ecosystem.serverCollector' });
+  const needsConnectionConfig = primaryAuthType !== 'PUBLIC_URL' && !usesLocalBrowserAuth;
+  const connectionDescText = isBrowserExtensionMode
+    ? intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.connectionDesc' })
+    : needsConnectionConfig
+      ? intl.formatMessage(
+        { id: 'knowledgeCenter.ecosystem.connectionDescWithAuth' },
+        { authType: primaryAuthTypeName, runLocation: primaryRunLocationName }
+      )
+      : intl.formatMessage({ id: 'knowledgeCenter.ecosystem.connectionDescPublic' });
+  const activeCollectorName = selectedCollectModeName;
   const scheduleTypeName =
     formatByIdMap(scheduleTypeNameIdMap, formValues.scheduleType) ||
     intl.formatMessage({ id: 'knowledgeCenter.ecosystem.once' });
   const showScheduleConfig = formValues.scheduleType === 'daily' || formValues.scheduleType === 'weekly';
-  const selectedCatalogName =
-    catalogList.find((item) => `${item.catalogId}` === `${formValues.catalogId}`)?.catalogName ||
-    intl.formatMessage({ id: 'knowledgeCenter.ecosystem.targetDefault' });
+  const selectedCatalogIdForFilter = normalizeCatalogValue(formValues.catalogId);
+  const selectedCatalogIdsForFilter = useMemo(() => {
+    if (!selectedCatalogIdForFilter) {
+      return undefined;
+    }
+    const ids = new Set<string>();
+    const appendCatalogAndChildren = (currentCatalogId: string | number) => {
+      const currentId = `${currentCatalogId}`;
+      ids.add(currentId);
+      catalogList
+        .filter((item) => `${item.pcatalogId}` === currentId)
+        .forEach((item) => appendCatalogAndChildren(item.catalogId));
+    };
+    appendCatalogAndChildren(selectedCatalogIdForFilter);
+    return ids;
+  }, [catalogList, selectedCatalogIdForFilter]);
+  const filteredKnowledgeBaseOptions = useMemo(() => {
+    if (!selectedCatalogIdsForFilter || knowledgeBaseOptions.every((item) => !item.catalogId)) {
+      return knowledgeBaseOptions;
+    }
+    return knowledgeBaseOptions.filter((item) => item.catalogId && selectedCatalogIdsForFilter.has(item.catalogId));
+  }, [knowledgeBaseOptions, selectedCatalogIdsForFilter]);
+  const selectedCatalogName = isAllCatalogValue(formValues.catalogId)
+    ? allCategoryName
+    : catalogList.find((item) => `${item.catalogId}` === `${formValues.catalogId}`)?.catalogName || allCategoryName;
   const selectedKnowledgeBaseName =
     knowledgeBaseOptions.find((item) => item.value === formValues.knowledgeBaseId)?.label ||
     intl.formatMessage({ id: 'knowledgeCenter.ecosystem.defaultPersonalKnowledge' });
@@ -405,12 +700,31 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
   const dateRangeStart = formValues.dateRange?.[0]?.format?.('YYYY-MM-DD') || '';
   const dateRangeEnd = formValues.dateRange?.[1]?.format?.('YYYY-MM-DD') || '';
 
+  useEffect(() => {
+    if (!open || knowledgeBaseLoading) {
+      return;
+    }
+    const currentKnowledgeBaseId = form.getFieldValue('knowledgeBaseId');
+    const hasCurrentKnowledgeBase =
+      currentKnowledgeBaseId && filteredKnowledgeBaseOptions.some((item) => item.value === `${currentKnowledgeBaseId}`);
+    if (filteredKnowledgeBaseOptions.length && !hasCurrentKnowledgeBase) {
+      form.setFieldsValue({ knowledgeBaseId: filteredKnowledgeBaseOptions[0].value });
+      return;
+    }
+    if (!filteredKnowledgeBaseOptions.length && currentKnowledgeBaseId) {
+      form.setFieldsValue({ knowledgeBaseId: undefined });
+    }
+  }, [filteredKnowledgeBaseOptions, form, knowledgeBaseLoading, open]);
+
   const dateRangeText = formValues.dateRange?.length
     ? `${dateRangeStart} ${toText} ${dateRangeEnd}`
     : intl.formatMessage({ id: 'knowledgeCenter.ecosystem.rangeRecent' });
 
   const sourceUrlRules = useMemo(() => {
-    if (activeSource !== 'zhihu' && activeSource !== 'web') {
+    if (isBrowserExtensionMode) {
+      return [];
+    }
+    if (activeSource !== 'web') {
       return [];
     }
     return [
@@ -419,7 +733,7 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
         message: intl.formatMessage({ id: 'knowledgeCenter.ecosystem.sourceUrlRequired' }),
       },
     ];
-  }, [activeSource, intl]);
+  }, [activeSource, intl, isBrowserExtensionMode]);
 
   const signalSummary = signalFields
     .map((field) => formValues[field])
@@ -428,15 +742,11 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
 
   const formatRunLocations = (locations?: string[]) =>
     locations?.map((item) => formatByIdMap(runLocationNameIdMap, item)).join(' / ') ||
-    (requiresLocalAgent
-      ? intl.formatMessage({ id: 'knowledgeCenter.ecosystem.runLocation.local' })
-      : intl.formatMessage({ id: 'knowledgeCenter.ecosystem.runLocation.server' }));
+    intl.formatMessage({ id: runLocationNameIdMap[primaryRunLocation] });
 
   const formatAuthTypes = (authTypes?: string[]) =>
     authTypes?.map((item) => formatByIdMap(authTypeNameIdMap, item)).join(' / ') ||
-    (requiresLocalAgent
-      ? intl.formatMessage({ id: 'knowledgeCenter.ecosystem.auth.browser' })
-      : intl.formatMessage({ id: 'knowledgeCenter.ecosystem.auth.publicUrl' }));
+    intl.formatMessage({ id: authTypeNameIdMap[primaryAuthType] || 'common.none' });
 
   const signalGroups = useMemo(() => {
     const signals = (runResult?.signals || createdTask?.signals || []) as EcosystemSignal[];
@@ -482,11 +792,12 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
       sourceUrl: values.sourceUrl,
       scope: values.scope || dateRangeText,
       ownerType,
-      runLocation: requiresLocalAgent ? 'LOCAL' : 'SERVER',
+      runLocation: primaryRunLocation,
+      collectMode: selectedCollectMode,
       scheduleType: values.scheduleType || 'once',
       scheduleConfig,
       importTarget: 'knowledgeBase',
-      catalogId: values.catalogId,
+      catalogId: normalizeCatalogValue(values.catalogId),
       knowledgeBaseId: values.knowledgeBaseId ? `${values.knowledgeBaseId}` : undefined,
       knowledgeBaseResourceId: values.knowledgeBaseId,
       knowledgeBaseName: selectedKnowledgeBase?.label,
@@ -496,6 +807,181 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
       domain: values.domain,
       signalTags: values.signalTags || [],
     };
+  };
+
+  const buildBrowserExtensionBinding = (values: Record<string, any>) => {
+    const captureDefaults = buildTaskPayload(values);
+    return {
+      protocolVersion: browserExtensionProtocolVersion,
+      minPluginVersion: browserExtensionMinVersion,
+      portalOrigin: window.location.origin,
+      apiBase: '/byaiService',
+      websocketPath: '/byaiService/ws',
+      language: getLocale(),
+      auth: {
+        userCode: localStorage.getItem('uc') || '',
+        headers: {
+          [tokenKey]: getToken(),
+          [ssotokenKey]: getssoToken(),
+          'x-session-id': getSessionKey(),
+        },
+      },
+      captureDefaults: {
+        ...captureDefaults,
+        collectMode: 'USER_BROWSER_BRIDGE',
+        runLocation: 'LOCAL',
+        scheduleType: 'manual',
+        sourceUrl: undefined,
+      },
+    };
+  };
+
+  const publishBrowserExtensionBinding = async (providedValues?: Record<string, any>, silent = false) => {
+    const values = providedValues || (await form.validateFields());
+    setBrowserExtensionBindStatus('binding');
+    window.postMessage(
+      {
+        source: 'BYCLAW_PORTAL',
+        type: 'BYCLAW_CAPTURE_BIND',
+        payload: buildBrowserExtensionBinding(values),
+      },
+      window.location.origin
+    );
+    setTaskStatus('ready');
+    window.setTimeout(() => {
+      setBrowserExtensionBindStatus((status) => (status === 'binding' ? 'idle' : status));
+    }, 3000);
+    if (!silent) {
+      message.info(intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.bindingSent' }));
+    }
+  };
+
+  const deriveBrowserExtensionBindStatus = (status: BrowserExtensionStatus): BrowserExtensionBindStatus => {
+    if (status.checking) {
+      return 'checking';
+    }
+    if (!status.installed) {
+      return 'missing';
+    }
+    if (status.version && compareSemver(status.version, browserExtensionMinVersion) < 0) {
+      return 'upgrade';
+    }
+    if (!status.binding?.bound) {
+      return 'idle';
+    }
+    if (status.binding?.tokenStatus === 'EXPIRED' || status.binding?.tokenStatus === 'MISSING') {
+      return 'expired';
+    }
+    return 'bound';
+  };
+
+  const syncBrowserExtensionStatus = (status: BrowserExtensionStatus, successTip = false) => {
+    const nextStatus = { ...status, checking: false };
+    const nextBindStatus = deriveBrowserExtensionBindStatus(nextStatus);
+    setBrowserExtensionStatus(nextStatus);
+    setBrowserExtensionBindStatus(nextBindStatus);
+    if (successTip && nextBindStatus === 'bound') {
+      message.success(intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.bound' }));
+    }
+    const shouldRefreshToken =
+      isBrowserExtensionMode &&
+      status.binding?.bound &&
+      ['EXPIRED', 'EXPIRING_SOON'].includes(status.binding?.tokenStatus || '') &&
+      !browserExtensionAutoRefreshRef.current;
+    if (shouldRefreshToken) {
+      browserExtensionAutoRefreshRef.current = true;
+      form
+        .validateFields()
+        .then((values) => publishBrowserExtensionBinding(values, true))
+        .catch(() => undefined);
+    }
+  };
+
+  const refreshBrowserExtensionStatus = () => {
+    if (browserExtensionPingTimerRef.current) {
+      window.clearTimeout(browserExtensionPingTimerRef.current);
+    }
+    setBrowserExtensionStatus((status) => ({ ...status, checking: true }));
+    setBrowserExtensionBindStatus('checking');
+    window.postMessage(
+      {
+        source: 'BYCLAW_PORTAL',
+        type: 'BYCLAW_CAPTURE_PING',
+        payload: {
+          expectedProtocolVersion: browserExtensionProtocolVersion,
+          minPluginVersion: browserExtensionMinVersion,
+        },
+      },
+      window.location.origin
+    );
+    browserExtensionPingTimerRef.current = window.setTimeout(() => {
+      setBrowserExtensionStatus({ installed: false, checking: false });
+      setBrowserExtensionBindStatus('missing');
+    }, 1800);
+  };
+
+  useEffect(() => {
+    if (!open || !isBrowserExtensionMode) {
+      return undefined;
+    }
+    const handleBrowserExtensionMessage = (event: MessageEvent) => {
+      if (event.source !== window || event.data?.source !== 'BYCLAW_EXTENSION') {
+        return;
+      }
+      if (browserExtensionPingTimerRef.current) {
+        window.clearTimeout(browserExtensionPingTimerRef.current);
+        browserExtensionPingTimerRef.current = null;
+      }
+      if (event.data?.type === 'BYCLAW_CAPTURE_PONG') {
+        syncBrowserExtensionStatus(event.data.payload || {});
+      }
+      if (event.data?.type === 'BYCLAW_CAPTURE_BIND_ACK') {
+        syncBrowserExtensionStatus(event.data.payload || {}, true);
+      }
+      if (event.data?.type === 'BYCLAW_CAPTURE_UNBIND_ACK') {
+        syncBrowserExtensionStatus(event.data.payload || {});
+        message.success(intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.unbound' }));
+      }
+    };
+    window.addEventListener('message', handleBrowserExtensionMessage);
+    return () => window.removeEventListener('message', handleBrowserExtensionMessage);
+  }, [form, intl, isBrowserExtensionMode, open]);
+
+  useEffect(() => {
+    if (!open || !isBrowserExtensionMode) {
+      return undefined;
+    }
+    browserExtensionAutoRefreshRef.current = false;
+    refreshBrowserExtensionStatus();
+    const timer = window.setInterval(refreshBrowserExtensionStatus, 15000);
+    return () => {
+      window.clearInterval(timer);
+      if (browserExtensionPingTimerRef.current) {
+        window.clearTimeout(browserExtensionPingTimerRef.current);
+        browserExtensionPingTimerRef.current = null;
+      }
+    };
+  }, [isBrowserExtensionMode, open]);
+
+  const handleCopyBrowserExtensionPath = async () => {
+    await navigator.clipboard?.writeText(browserExtensionInstallPath);
+    message.success(intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.pathCopied' }));
+  };
+
+  const handleCopyBrowserExtensionPackageCommand = async () => {
+    await navigator.clipboard?.writeText(browserExtensionPackageCommand);
+    message.success(intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.packageCommandCopied' }));
+  };
+
+  const handleUnbindBrowserExtension = () => {
+    setBrowserExtensionBindStatus('binding');
+    window.postMessage(
+      {
+        source: 'BYCLAW_PORTAL',
+        type: 'BYCLAW_CAPTURE_UNBIND',
+      },
+      window.location.origin
+    );
   };
 
   const previewMarkdown = useMemo(
@@ -540,7 +1026,12 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
     form.setFieldsValue({
       connectionId,
       connectionName: connection?.connectionName || '',
-      chromeProfile: connection?.runtimeConfig?.chromeProfile || agentStatus?.chromeProfile || 'bykc-local',
+      chromeProfile: connection?.runtimeConfig?.chromeProfile || '',
+      account: connection?.credentialConfig?.account || '',
+      imapHost: connection?.credentialConfig?.imapHost || '',
+      imapPort: connection?.credentialConfig?.imapPort || 993,
+      imapSsl: `${connection?.credentialConfig?.imapSsl ?? 'true'}`,
+      imapFolder: connection?.credentialConfig?.imapFolder || 'INBOX',
       connectionToken: '',
     });
   };
@@ -551,6 +1042,10 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
       message.warning(intl.formatMessage({ id: 'knowledgeCenter.ecosystem.credentialRequired' }));
       return;
     }
+    if (isMailImapMode && (!values.account || !values.imapHost)) {
+      message.warning(intl.formatMessage({ id: 'knowledgeCenter.ecosystem.mailImapRequired' }));
+      return;
+    }
     try {
       setConnectionSaving(true);
       const connection = await saveEcosystemConnection({
@@ -558,11 +1053,17 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
         connectorCode: activeSource,
         authType: primaryAuthType,
         runLocation: primaryRunLocation,
+        collectMode: selectedCollectMode,
         connectionName:
           values.connectionName ||
           intl.formatMessage({ id: 'knowledgeCenter.ecosystem.connectionName' }, { source: activeSourceName }),
         token: values.connectionToken,
-        chromeProfile: values.chromeProfile || agentStatus?.chromeProfile || 'bykc-local',
+        account: values.account,
+        imapHost: values.imapHost,
+        imapPort: values.imapPort,
+        imapSsl: values.imapSsl,
+        imapFolder: values.imapFolder,
+        chromeProfile: values.chromeProfile || selectedConnection?.runtimeConfig?.chromeProfile,
       });
       const connections = await reloadConnectionList();
       const nextConnection = connections.find((item) => item.connectionId === connection.connectionId) || connection;
@@ -572,7 +1073,12 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
       form.setFieldsValue({
         connectionId: nextConnection.connectionId,
         connectionName: nextConnection.connectionName,
-        chromeProfile: nextConnection.runtimeConfig?.chromeProfile || values.chromeProfile || 'bykc-local',
+        chromeProfile: nextConnection.runtimeConfig?.chromeProfile || values.chromeProfile || '',
+        account: nextConnection.credentialConfig?.account || values.account || '',
+        imapHost: nextConnection.credentialConfig?.imapHost || values.imapHost || '',
+        imapPort: nextConnection.credentialConfig?.imapPort || values.imapPort || 993,
+        imapSsl: `${nextConnection.credentialConfig?.imapSsl ?? values.imapSsl ?? 'true'}`,
+        imapFolder: nextConnection.credentialConfig?.imapFolder || values.imapFolder || 'INBOX',
         connectionToken: '',
       });
       message.success(intl.formatMessage({ id: 'knowledgeCenter.ecosystem.connectionSaved' }));
@@ -594,6 +1100,14 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
         message.warning(intl.formatMessage({ id: 'knowledgeCenter.ecosystem.unsupportedRuntimeWarning' }));
         return;
       }
+      if (!collectModeExecutable) {
+        message.warning(intl.formatMessage({ id: 'knowledgeCenter.ecosystem.collectModePlannedWarning' }));
+        return;
+      }
+      if (isBrowserExtensionMode) {
+        await publishBrowserExtensionBinding(values);
+        return;
+      }
       if (needsConnectionConfig && !values.connectionId) {
         message.warning(intl.formatMessage({ id: 'knowledgeCenter.ecosystem.connectionRequired' }));
         return;
@@ -607,9 +1121,16 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
         triggerType: 'MANUAL',
       });
       setRunResult(run);
-      setTaskStatus(run.status === 'SUCCESS' ? 'completed' : 'failed');
+      setTaskStatus(run.status === 'SUCCESS' ? 'completed' : run.status === 'RUNNING' ? 'running' : 'failed');
       await reloadTaskList();
-      message.success(intl.formatMessage({ id: 'knowledgeCenter.ecosystem.taskCompleted' }));
+      message.success(
+        intl.formatMessage({
+          id:
+            run.status === 'RUNNING'
+              ? 'knowledgeCenter.ecosystem.bridgeTaskDispatched'
+              : 'knowledgeCenter.ecosystem.taskCompleted',
+        })
+      );
     } catch (error) {
       if (error) {
         setTaskStatus('failed');
@@ -629,9 +1150,16 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
         triggerType: 'RETRY',
       });
       setRunResult(run);
-      setTaskStatus(run.status === 'SUCCESS' ? 'completed' : 'failed');
+      setTaskStatus(run.status === 'SUCCESS' ? 'completed' : run.status === 'RUNNING' ? 'running' : 'failed');
       await reloadTaskList();
-      message.success(intl.formatMessage({ id: 'knowledgeCenter.ecosystem.taskRerun' }));
+      message.success(
+        intl.formatMessage({
+          id:
+            run.status === 'RUNNING'
+              ? 'knowledgeCenter.ecosystem.bridgeTaskDispatched'
+              : 'knowledgeCenter.ecosystem.taskRerun',
+        })
+      );
     } catch (error) {
       if (error) {
         setTaskStatus('failed');
@@ -648,7 +1176,7 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
     const run = await queryEcosystemRun({ runId: task.lastRunId });
     setCreatedTask(task);
     setRunResult(run);
-    setTaskStatus(run.status === 'SUCCESS' ? 'completed' : 'failed');
+    setTaskStatus(run.status === 'SUCCESS' ? 'completed' : run.status === 'RUNNING' ? 'running' : 'failed');
   };
 
   const handleToggleTaskStatus = async (task: EcosystemTask) => {
@@ -684,11 +1212,24 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
         action,
       });
       setRunResult(run);
-      setTaskStatus(run.status === 'SUCCESS' ? 'completed' : run.status === 'SKIPPED' ? 'ready' : 'failed');
+      setTaskStatus(
+        run.status === 'SUCCESS'
+          ? 'completed'
+          : run.status === 'RUNNING'
+            ? 'running'
+            : run.status === 'SKIPPED'
+              ? 'ready'
+              : 'failed'
+      );
       await reloadTaskList();
       message.success(
         intl.formatMessage({
-          id: action === 'SKIP' ? 'knowledgeCenter.ecosystem.runActionSkipped' : 'knowledgeCenter.ecosystem.runUpdated',
+          id:
+            action === 'CANCEL'
+              ? 'knowledgeCenter.ecosystem.runActionCancelled'
+              : action === 'SKIP'
+                ? 'knowledgeCenter.ecosystem.runActionSkipped'
+                : 'knowledgeCenter.ecosystem.runUpdated',
         })
       );
     } finally {
@@ -696,16 +1237,52 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
     }
   };
 
-  const handleDetectLocalAgent = async () => {
+  const handleRefreshLocalAgentStatus = async () => {
     try {
       setInitializing(true);
-      const status = await detectEcosystemLocalAgent();
+      const status = await queryEcosystemBrowserBridgeStatus();
       setAgentStatus(status || null);
-      message.success(intl.formatMessage({ id: 'knowledgeCenter.ecosystem.localAgentDetected' }));
+      message.success(intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.statusRefreshed' }));
     } finally {
       setInitializing(false);
     }
   };
+
+  const browserExtensionTokenStatus = browserExtensionStatus.binding?.tokenStatus || 'UNBOUND';
+  const browserExtensionTokenStatusName = browserExtensionTokenStatusNameIdMap[browserExtensionTokenStatus]
+    ? intl.formatMessage({ id: browserExtensionTokenStatusNameIdMap[browserExtensionTokenStatus] })
+    : browserExtensionStatus.binding?.tokenStatusName || browserExtensionTokenStatus;
+  const browserExtensionStatusName = intl.formatMessage({
+    id: browserExtensionBindStatusNameIdMap[browserExtensionBindStatus],
+  });
+  const browserExtensionStatusTagColor =
+    browserExtensionBindStatus === 'bound'
+      ? 'success'
+      : browserExtensionBindStatus === 'expired'
+        ? 'error'
+        : browserExtensionBindStatus === 'upgrade'
+          ? 'warning'
+          : browserExtensionBindStatus === 'missing'
+            ? 'default'
+            : 'processing';
+  const browserExtensionAlertType =
+    browserExtensionBindStatus === 'expired'
+      ? 'error'
+      : browserExtensionBindStatus === 'upgrade'
+        ? 'warning'
+        : browserExtensionBindStatus === 'missing' || browserExtensionBindStatus === 'idle'
+          ? 'info'
+          : 'success';
+  const browserExtensionAlertId =
+    browserExtensionBindStatus === 'expired'
+      ? 'knowledgeCenter.ecosystem.browserExtension.expiredTip'
+      : browserExtensionBindStatus === 'upgrade'
+        ? 'knowledgeCenter.ecosystem.browserExtension.upgradeTip'
+        : browserExtensionBindStatus === 'missing'
+          ? 'knowledgeCenter.ecosystem.browserExtension.installTip'
+          : browserExtensionBindStatus === 'idle'
+            ? 'knowledgeCenter.ecosystem.browserExtension.bindTip'
+            : 'knowledgeCenter.ecosystem.browserExtension.readyTip';
 
   return (
     <Drawer
@@ -722,8 +1299,17 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
             <Button icon={<FileMarkdownOutlined />} onClick={handleGeneratePreview}>
               {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.generatePreview' })}
             </Button>
-            <Button type="primary" icon={<PlayCircleOutlined />} loading={submitting} onClick={handleCreateTrialTask}>
-              {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.createAndStart' })}
+            <Button
+              type="primary"
+              icon={usesLocalBrowserAuth ? <ChromeOutlined /> : <PlayCircleOutlined />}
+              loading={submitting || (isBrowserExtensionMode && browserExtensionBindStatus === 'binding')}
+              onClick={handleCreateTrialTask}
+            >
+              {intl.formatMessage({
+                id: isBrowserExtensionMode
+                  ? 'knowledgeCenter.ecosystem.browserExtension.bindAndCapture'
+                  : 'knowledgeCenter.ecosystem.createAndStart',
+              })}
             </Button>
           </Space>
         </div>
@@ -738,10 +1324,16 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
             </div>
           </div>
           <div className={styles.sourceList}>
+            {!sourceOptions.length ? (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={intl.formatMessage({ id: 'knowledgeCenter.ecosystem.noDynamicSources' })}
+              />
+            ) : null}
             {sourceOptions.map((source) => {
               const selected = source.key === activeSource;
               const connector = connectorList.find((item) => item.connectorCode === source.key);
-              const sourceRequiresLocalAgent = connector?.requiresLocalAgent ?? source.requiresBridge;
+              const sourceRequiresBrowserAuth = connector?.requiresBrowserAuth ?? source.requiresBridge;
               return (
                 <button
                   key={source.key}
@@ -755,18 +1347,22 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
                       connectionId: undefined,
                       connectionName: '',
                       connectionToken: '',
-                      chromeProfile: agentStatus?.chromeProfile || 'bykc-local',
+                      account: '',
+                      imapHost: '',
+                      imapPort: 993,
+                      imapSsl: 'true',
+                      imapFolder: 'INBOX',
+                      chromeProfile: '',
+                      collectMode: defaultCollectModeFor(connector, source),
                     });
                   }}
                 >
                   <span className={styles.sourceIcon}>{source.icon}</span>
                   <span className={styles.sourceInfo}>
-                    <span className={styles.sourceName}>
-                      {intl.formatMessage({ id: `knowledgeCenter.ecosystem.source.${source.key}` })}
-                    </span>
+                    <span className={styles.sourceName}>{formatSourceName(source.key, connector)}</span>
                     <span className={styles.sourceMeta}>
-                      {sourceRequiresLocalAgent
-                        ? intl.formatMessage({ id: 'knowledgeCenter.ecosystem.needBridge' })
+                      {sourceRequiresBrowserAuth
+                        ? intl.formatMessage({ id: 'knowledgeCenter.ecosystem.needBrowserLogin' })
                         : intl.formatMessage({ id: 'knowledgeCenter.ecosystem.serverReady' })}
                     </span>
                     {connector ? (
@@ -782,13 +1378,13 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
           </div>
           <Alert
             className={styles.bridgeAlert}
-            type={!runtimeSupported ? 'warning' : requiresLocalAgent ? 'warning' : 'info'}
+            type={!runtimeSupported ? 'warning' : requiresBrowserAuth ? 'warning' : 'info'}
             showIcon
             message={
               !runtimeSupported
                 ? intl.formatMessage({ id: 'knowledgeCenter.ecosystem.unsupportedRuntimeTitle' })
-                : requiresLocalAgent
-                  ? intl.formatMessage({ id: 'knowledgeCenter.ecosystem.bridgeRequired' })
+                : requiresBrowserAuth
+                  ? intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserAuthRequired' })
                   : intl.formatMessage({ id: 'knowledgeCenter.ecosystem.bridgeOptional' })
             }
             description={
@@ -799,7 +1395,7 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
           />
           <div className={styles.agentSnapshot}>
             <div className={styles.agentHeader}>
-              <span>{intl.formatMessage({ id: 'knowledgeCenter.ecosystem.localCollector' })}</span>
+              <span>{intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserLoginCapability' })}</span>
               <Space size={8}>
                 <Tag color={agentStatus?.connected ? 'success' : 'default'}>
                   {initializing
@@ -808,7 +1404,7 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
                       ? intl.formatMessage({ id: 'knowledgeCenter.ecosystem.agent.online' })
                       : intl.formatMessage({ id: 'knowledgeCenter.ecosystem.agent.offline' })}
                 </Tag>
-                <Button size="small" onClick={handleDetectLocalAgent} loading={initializing}>
+                <Button size="small" onClick={handleRefreshLocalAgentStatus} loading={initializing}>
                   {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.agent.refresh' })}
                 </Button>
               </Space>
@@ -819,11 +1415,12 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
               </div>
               <div>
                 {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.agent.runtime' })}：
-                {agentStatus?.runtimeName || 'OpenCLI'}
+                {agentStatus?.runtimeName ||
+                  intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.title' })}
                 {agentStatus?.runtimeVersion ? ` ${agentStatus.runtimeVersion}` : ''}
               </div>
               <div>
-                Browser Bridge：
+                {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.channelStatus' })}：
                 {agentStatus?.browserBridgeStatus ||
                   intl.formatMessage({ id: 'knowledgeCenter.ecosystem.agent.offline' })}
               </div>
@@ -887,65 +1484,52 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
                 </div>
               </div>
 
-              <div className={styles.collectorStatusGrid}>
-                <div
-                  className={classNames(styles.collectorStatusItem, {
-                    [styles.activeCollectorStatus]: requiresLocalAgent,
-                  })}
-                >
-                  <div className={styles.collectorStatusTop}>
-                    <span className={styles.collectorStatusIcon}>
-                      <ChromeOutlined />
-                    </span>
-                    <span className={styles.collectorStatusName}>
-                      {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.localCollector' })}
-                    </span>
-                    <Tag color={requiresLocalAgent ? 'warning' : 'default'}>
-                      {intl.formatMessage({
-                        id: requiresLocalAgent
-                          ? 'knowledgeCenter.ecosystem.localRequired'
-                          : 'knowledgeCenter.ecosystem.localOptional',
-                      })}
-                    </Tag>
-                  </div>
-                  <div className={styles.collectorStatusDesc}>
-                    {intl.formatMessage({
-                      id: requiresLocalAgent
-                        ? 'knowledgeCenter.ecosystem.localRequiredDesc'
-                        : 'knowledgeCenter.ecosystem.localOptionalDesc',
-                    })}
-                  </div>
-                </div>
+              <Form.Item name="collectMode" className={styles.collectModeSelector}>
+                <Segmented
+                  block
+                  options={collectModes.map((mode) => ({
+                    value: mode,
+                    label: intl.formatMessage({ id: collectModeNameIdMap[mode] }),
+                    disabled: plannedCollectModes.includes(mode),
+                  }))}
+                />
+              </Form.Item>
 
-                <div
-                  className={classNames(styles.collectorStatusItem, {
-                    [styles.activeCollectorStatus]: !requiresLocalAgent,
-                    [styles.disabledCollectorStatus]: requiresLocalAgent,
-                  })}
-                >
-                  <div className={styles.collectorStatusTop}>
-                    <span className={styles.collectorStatusIcon}>
-                      <CloudSyncOutlined />
-                    </span>
-                    <span className={styles.collectorStatusName}>
-                      {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.serverCollector' })}
-                    </span>
-                    <Tag color={requiresLocalAgent ? 'default' : 'success'}>
-                      {intl.formatMessage({
-                        id: requiresLocalAgent
-                          ? 'knowledgeCenter.ecosystem.serverUnavailable'
-                          : 'knowledgeCenter.ecosystem.serverAvailable',
+              <div className={styles.collectorStatusGrid}>
+                {collectModes.map((mode) => {
+                  const selected = mode === selectedCollectMode;
+                  const planned = plannedCollectModes.includes(mode);
+                  return (
+                    <div
+                      key={mode}
+                      className={classNames(styles.collectorStatusItem, {
+                        [styles.activeCollectorStatus]: selected,
+                        [styles.disabledCollectorStatus]: planned,
                       })}
-                    </Tag>
-                  </div>
-                  <div className={styles.collectorStatusDesc}>
-                    {intl.formatMessage({
-                      id: requiresLocalAgent
-                        ? 'knowledgeCenter.ecosystem.serverUnavailableDesc'
-                        : 'knowledgeCenter.ecosystem.serverAvailableDesc',
-                    })}
-                  </div>
-                </div>
+                    >
+                      <div className={styles.collectorStatusTop}>
+                        <span className={styles.collectorStatusIcon}>
+                          {mode === 'SERVER_OPENCLI' ? <CloudSyncOutlined /> : <ChromeOutlined />}
+                        </span>
+                        <span className={styles.collectorStatusName}>
+                          {intl.formatMessage({ id: collectModeNameIdMap[mode] })}
+                        </span>
+                        <Tag color={selected ? 'success' : planned ? 'default' : 'processing'}>
+                          {intl.formatMessage({
+                            id: planned
+                              ? 'knowledgeCenter.ecosystem.collectMode.planned'
+                              : selected
+                                ? 'knowledgeCenter.ecosystem.collectMode.current'
+                                : 'knowledgeCenter.ecosystem.collectMode.available',
+                          })}
+                        </Tag>
+                      </div>
+                      <div className={styles.collectorStatusDesc}>
+                        {intl.formatMessage({ id: collectModeDescIdMap[mode] })}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
               <div className={styles.connectionConfigBlock}>
@@ -965,6 +1549,100 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
                       })}
                   </Tag>
                 </div>
+
+                {isUserBrowserBridgeMode ? (
+                  <div className={styles.browserExtensionBlock}>
+                    <div className={styles.browserExtensionHeader}>
+                      <div>
+                        <div className={styles.browserExtensionTitle}>
+                          {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.title' })}
+                        </div>
+                        <div className={styles.browserExtensionDesc}>
+                          {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.desc' })}
+                        </div>
+                      </div>
+                      <Tag color={browserExtensionStatusTagColor}>{browserExtensionStatusName}</Tag>
+                    </div>
+                    <Alert
+                      className={styles.browserExtensionAlert}
+                      showIcon
+                      type={browserExtensionAlertType}
+                      message={intl.formatMessage(
+                        { id: browserExtensionAlertId },
+                        {
+                          version: browserExtensionStatus.version || '-',
+                          minVersion: browserExtensionMinVersion,
+                          tokenStatus: browserExtensionTokenStatusName,
+                        }
+                      )}
+                    />
+                    <div className={styles.browserExtensionProtocol}>
+                      <span>{intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.protocol' })}</span>
+                      <code>{browserExtensionProtocolVersion}</code>
+                      <span>{intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.version' })}</span>
+                      <code>
+                        {browserExtensionStatus.installed
+                          ? browserExtensionStatus.version || '-'
+                          : intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.notDetected' })}
+                      </code>
+                      <span>{intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.minVersion' })}</span>
+                      <code>{browserExtensionMinVersion}</code>
+                      <span>
+                        {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.tokenStatus' })}
+                      </span>
+                      <code>{browserExtensionTokenStatusName}</code>
+                      <span>
+                        {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.tokenExpiresAt' })}
+                      </span>
+                      <code>
+                        {browserExtensionStatus.binding?.expiresAt ||
+                          intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.tokenUnknown' })}
+                      </code>
+                      <span>
+                        {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.installPath' })}
+                      </span>
+                      <code>{browserExtensionInstallPath}</code>
+                      <span>
+                        {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.packageCommand' })}
+                      </span>
+                      <code>{browserExtensionPackageCommand}</code>
+                    </div>
+                    {browserExtensionStatus.binding?.warning?.message ? (
+                      <div className={styles.browserExtensionWarning}>
+                        {browserExtensionStatus.binding.warning.message}
+                      </div>
+                    ) : null}
+                    <div className={styles.browserExtensionActions}>
+                      <Button
+                        type="primary"
+                        icon={<ChromeOutlined />}
+                        loading={browserExtensionBindStatus === 'binding'}
+                        onClick={() => publishBrowserExtensionBinding()}
+                      >
+                        {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.bind' })}
+                      </Button>
+                      <Button
+                        loading={browserExtensionBindStatus === 'checking'}
+                        onClick={refreshBrowserExtensionStatus}
+                      >
+                        {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.checkInstall' })}
+                      </Button>
+                      <Button icon={<CopyOutlined />} onClick={handleCopyBrowserExtensionPath}>
+                        {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.copyPath' })}
+                      </Button>
+                      <Button icon={<CopyOutlined />} onClick={handleCopyBrowserExtensionPackageCommand}>
+                        {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.copyPackageCommand' })}
+                      </Button>
+                      <Button
+                        danger
+                        disabled={!browserExtensionStatus.binding?.bound}
+                        onClick={handleUnbindBrowserExtension}
+                      >
+                        {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.unbind' })}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
 
                 {needsConnectionConfig ? (
                   <>
@@ -997,6 +1675,57 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
                           )}
                         />
                       </Form.Item>
+                      {isMailImapMode ? (
+                        <>
+                          <Form.Item
+                            label={intl.formatMessage({ id: 'knowledgeCenter.ecosystem.mailAccount' })}
+                            name="account"
+                          >
+                            <Input
+                              placeholder={intl.formatMessage({
+                                id: 'knowledgeCenter.ecosystem.mailAccountPlaceholder',
+                              })}
+                            />
+                          </Form.Item>
+                          <Form.Item
+                            label={intl.formatMessage({ id: 'knowledgeCenter.ecosystem.imapHost' })}
+                            name="imapHost"
+                          >
+                            <Input
+                              placeholder={intl.formatMessage({ id: 'knowledgeCenter.ecosystem.imapHostPlaceholder' })}
+                            />
+                          </Form.Item>
+                          <Form.Item
+                            label={intl.formatMessage({ id: 'knowledgeCenter.ecosystem.imapPort' })}
+                            name="imapPort"
+                          >
+                            <Input placeholder="993" />
+                          </Form.Item>
+                          <Form.Item
+                            label={intl.formatMessage({ id: 'knowledgeCenter.ecosystem.imapSsl' })}
+                            name="imapSsl"
+                          >
+                            <Select
+                              options={[
+                                {
+                                  value: 'true',
+                                  label: intl.formatMessage({ id: 'knowledgeCenter.ecosystem.enabled' }),
+                                },
+                                {
+                                  value: 'false',
+                                  label: intl.formatMessage({ id: 'knowledgeCenter.ecosystem.disabled' }),
+                                },
+                              ]}
+                            />
+                          </Form.Item>
+                          <Form.Item
+                            label={intl.formatMessage({ id: 'knowledgeCenter.ecosystem.imapFolder' })}
+                            name="imapFolder"
+                          >
+                            <Input placeholder="INBOX" />
+                          </Form.Item>
+                        </>
+                      ) : null}
                       {needsCredentialInput ? (
                         <Form.Item
                           label={intl.formatMessage(
@@ -1017,11 +1746,7 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
                             }
                           />
                         </Form.Item>
-                      ) : (
-                        <Form.Item label="Chrome Profile" name="chromeProfile">
-                          <Input placeholder={agentStatus?.chromeProfile || 'bykc-local'} />
-                        </Form.Item>
-                      )}
+                      ) : null}
                     </div>
                     <div className={styles.connectionActionBar}>
                       <span>
@@ -1106,7 +1831,10 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
                 rules={sourceUrlRules}
               >
                 <Input
-                  placeholder={intl.formatMessage({ id: `knowledgeCenter.ecosystem.placeholder.${activeSource}` })}
+                  placeholder={intl.formatMessage({
+                    id: `knowledgeCenter.ecosystem.placeholder.${activeSource}`,
+                    defaultMessage: intl.formatMessage({ id: 'knowledgeCenter.ecosystem.placeholder.web' }),
+                  })}
                 />
               </Form.Item>
 
@@ -1171,17 +1899,11 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
                 <Form.Item
                   label={intl.formatMessage({ id: 'knowledgeCenter.ecosystem.targetCatalog' })}
                   name="catalogId"
-                  rules={[
-                    {
-                      required: true,
-                      message: intl.formatMessage({ id: 'knowledgeCenter.ecosystem.targetCatalogRequired' }),
-                    },
-                  ]}
                 >
                   <TreeSelect
                     allowClear
-                    treeData={catalogList}
-                    placeholder={intl.formatMessage({ id: 'knowledgeCenter.ecosystem.targetCatalogRequired' })}
+                    treeData={catalogTreeData}
+                    placeholder={allCategoryName}
                     treeDataSimpleMode={{
                       id: 'catalogId',
                       pId: 'pcatalogId',
@@ -1206,9 +1928,8 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
                   ]}
                 >
                   <Select
-                    disabled={!formValues.catalogId}
                     loading={knowledgeBaseLoading}
-                    options={knowledgeBaseOptions}
+                    options={filteredKnowledgeBaseOptions}
                     placeholder={intl.formatMessage({ id: 'knowledgeCenter.ecosystem.targetKnowledgeBasePlaceholder' })}
                     notFoundContent={
                       knowledgeBaseLoading
@@ -1281,7 +2002,7 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
                     <div className={styles.taskHistoryTop}>
                       <span>{task.taskName}</span>
                       <Tag color={runStatusColor(task.status === 'DISABLED' ? task.status : task.lastRunStatus)}>
-                        {formatTaskStatusName(task)}
+                        {formatTaskStatusName(task, intl)}
                       </Tag>
                     </div>
                     <div className={styles.taskHistoryMeta}>
@@ -1330,16 +2051,26 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
           {runResult?.needActionMessage && runResult.needActionStatus !== 'SKIPPED' ? (
             <Alert
               className={styles.runAlert}
-              type={runResult.status === 'SUCCESS' ? 'info' : 'error'}
+              type={runResult.status === 'SUCCESS' || runResult.status === 'RUNNING' ? 'info' : 'error'}
               showIcon
               message={runResult.needActionType || intl.formatMessage({ id: 'knowledgeCenter.ecosystem.runNotice' })}
               description={runResult.needActionMessage}
               action={
                 <Space direction="vertical" size={6}>
+                  {runResult.status === 'RUNNING' ? (
+                    <Button
+                      danger
+                      size="small"
+                      loading={runActionLoading === 'CANCEL'}
+                      onClick={() => handleRunAction('CANCEL')}
+                    >
+                      {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.cancelRun' })}
+                    </Button>
+                  ) : null}
                   <Button
                     size="small"
-                    loading={runActionLoading === 'RECHECK_LOCAL_AGENT'}
-                    onClick={() => handleRunAction('RECHECK_LOCAL_AGENT')}
+                    loading={runActionLoading === 'RECHECK_BROWSER_BRIDGE'}
+                    onClick={() => handleRunAction('RECHECK_BROWSER_BRIDGE')}
                   >
                     {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.recheck' })}
                   </Button>

@@ -536,11 +536,6 @@ function resolveAuthValues(auth) {
       auth.uc,
       process.env.BYCLAW_ECOSYSTEM_USER_CODE,
     ),
-    signatureSalt: firstNonEmpty(
-      process.env.BYCLAW_ECOSYSTEM_SIGNATURE_SALT,
-      process.env.BYCLAW_SIGNATURE_SALT,
-      DEFAULT_SIGNATURE_SALT,
-    ),
   };
 }
 
@@ -550,10 +545,9 @@ function buildSignatureHeaders(userCode, body) {
   }
   const nonce = crypto.randomUUID();
   const timestamp = Date.now().toString();
-  const salt = firstNonEmpty(process.env.BYCLAW_ECOSYSTEM_SIGNATURE_SALT, process.env.BYCLAW_SIGNATURE_SALT, DEFAULT_SIGNATURE_SALT);
   const signature = crypto
     .createHash("md5")
-    .update(`${userCode}${nonce}${timestamp}${body || ""}${salt}`, "utf8")
+    .update(`${userCode}${nonce}${timestamp}${body || ""}${DEFAULT_SIGNATURE_SALT}`, "utf8")
     .digest("hex");
   return {
     "x-signature-nonce": nonce,
@@ -685,6 +679,9 @@ function buildPlanPayload(args, stdinJson) {
     connectorCode: pick(args, "connector-code", stdinJson?.connectorCode),
     sourceUrl: pick(args, "source-url", stdinJson?.sourceUrl),
     scope: pick(args, "scope", stdinJson?.scope),
+    collectMode: pick(args, "collect-mode", stdinJson?.collectMode),
+    authType: pick(args, "auth-type", stdinJson?.authType),
+    scheduleType: pick(args, "schedule-type", stdinJson?.scheduleType),
     knowledgeBaseId: pick(args, "knowledge-base-id", stdinJson?.knowledgeBaseId),
     knowledgeBaseResourceId: toNumber(
       pick(args, "knowledge-base-resource-id", stdinJson?.knowledgeBaseResourceId),
@@ -714,6 +711,10 @@ function render(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
+function backendEndpoint(backend, pathname) {
+  return `${backend.baseUrl}/${pathname.replace(/^\/+/, "")}`;
+}
+
 async function printHelp() {
   const backend = await resolveBackendBaseUrl();
   render({
@@ -725,6 +726,7 @@ async function printHelp() {
     },
     examples: [
       "node bykc-ecosystem-collect.mjs plan --text \"采集这个知乎链接\" --source-url \"https://www.zhihu.com/question/...\"",
+      "node bykc-ecosystem-collect.mjs plan --text \"同步最近一周客户 A 的邮件\" --connector-code mail --scope \"最近 7 天，客户 A\"",
       "node bykc-ecosystem-collect.mjs start --plan-json '{\"connectorCode\":\"web\",\"sourceUrl\":\"https://example.com\"}'",
       "node bykc-ecosystem-collect.mjs run --run-id 10001",
     ],
@@ -745,7 +747,6 @@ async function printHelp() {
       USER_CODE: "运行时自动注入当前门户用户编码，用于生成 x-signature-*",
       BYCLAW_ECOSYSTEM_SESSION: "仅本地调试兜底，不要写入共用 .env",
       BYCLAW_ECOSYSTEM_USER_CODE: "仅本地调试兜底，不要写入共用 .env",
-      BYCLAW_ECOSYSTEM_SIGNATURE_SALT: "可选，默认使用前端同款签名盐",
     },
     backend,
     auth: authSummary(),
@@ -765,16 +766,19 @@ async function main() {
 
   if (command === "plan") {
     const payload = buildPlanPayload(args, stdinJson);
+    const backend = await resolveBackendBaseUrl();
     if (args["dry-run"]) {
-      render({ ok: true, action: "plan", dryRun: true, backend: await resolveBackendBaseUrl(), auth: authSummary(), payload });
+      render({ ok: true, action: "plan", dryRun: true, backend, auth: authSummary(), payload });
       return;
     }
-    const plan = await requestJson("POST", await endpoint("/ecosystemCollection/skill/plan"), payload);
+    const plan = await requestJson("POST", backendEndpoint(backend, "/ecosystemCollection/skill/plan"), payload);
     render({
       ok: true,
       action: "plan",
       ready: Boolean(plan?.ready),
       missingActions: plan?.missingActions || [],
+      backend,
+      auth: authSummary(),
       plan,
       card: plan?.card,
       message: plan?.summary || plan?.message || "已生成生态采集计划",
@@ -784,11 +788,12 @@ async function main() {
 
   if (command === "start") {
     const payload = resolveStartPayload(args, stdinJson);
+    const backend = await resolveBackendBaseUrl();
     if (args["dry-run"]) {
-      render({ ok: true, action: "start", dryRun: true, backend: await resolveBackendBaseUrl(), auth: authSummary(), payload });
+      render({ ok: true, action: "start", dryRun: true, backend, auth: authSummary(), payload });
       return;
     }
-    const result = await requestJson("POST", await endpoint("/ecosystemCollection/skill/start"), payload);
+    const result = await requestJson("POST", backendEndpoint(backend, "/ecosystemCollection/skill/start"), payload);
     render({
       ok: true,
       action: "start",
@@ -796,6 +801,8 @@ async function main() {
       runId: result?.runId,
       status: result?.status,
       targetName: result?.targetName,
+      backend,
+      auth: authSummary(),
       message: result?.message || "生态采集任务已启动",
       raw: result,
     });
@@ -807,11 +814,12 @@ async function main() {
     if (!runId) {
       throw new Error("缺少 run-id");
     }
+    const backend = await resolveBackendBaseUrl();
     if (args["dry-run"]) {
-      render({ ok: true, action: "run", dryRun: true, backend: await resolveBackendBaseUrl(), auth: authSummary(), runId });
+      render({ ok: true, action: "run", dryRun: true, backend, auth: authSummary(), runId });
       return;
     }
-    const url = new URL(await endpoint("/ecosystemCollection/runs/detail"));
+    const url = new URL(backendEndpoint(backend, "/ecosystemCollection/runs/detail"));
     url.searchParams.set("runId", runId);
     const result = await requestJson("GET", url.toString());
     render({
@@ -819,6 +827,8 @@ async function main() {
       action: "run",
       runId,
       status: result?.run?.status || result?.status,
+      backend,
+      auth: authSummary(),
       raw: result,
     });
     return;
