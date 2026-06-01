@@ -297,7 +297,6 @@ function ApprovalForm(props: IProps) {
                 key={`${messageId}_skip_btn`}
                 onClick={() => {
                   handleConfirmCurrentStep(false);
-                  handleNextStep();
                 }}
                 disabled={isDisable}
                 style={{ marginLeft: 'auto' }}
@@ -309,7 +308,6 @@ function ApprovalForm(props: IProps) {
                 type="primary"
                 onClick={() => {
                   handleConfirmCurrentStep(true);
-                  handleNextStep();
                 }}
                 disabled={isDisable}
               >

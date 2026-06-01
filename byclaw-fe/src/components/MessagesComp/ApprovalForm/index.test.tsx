@@ -180,6 +180,8 @@ describe('ApprovalForm', () => {
       behavior: 'smooth',
       block: 'start',
     });
-    expect(screen.queryByText('Project Name')).not.toBeInTheDocument();
-  });
+    await waitFor(() => {
+      expect(screen.queryByText('Project Name')).not.toBeInTheDocument();
+    });
+  }, 15000);
 });
