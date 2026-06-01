@@ -56,6 +56,7 @@ import RobotModal from './RobotModal';
 import { normalizeCatalogTree } from '@/utils/catalog';
 import { DEFAULT_AGENT_TYPE_OPTIONS, DEFAULT_TEMPLATE_DATA } from '../../constants';
 import Ellipsis from '@/pages/manager/components/Ellipsis';
+import { DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES } from '@/pages/manager/constants/digitalResource';
 
 const { TextArea } = Input;
 
@@ -129,6 +130,43 @@ const parseJsonRecursively = (str: string, maxDepth: number = 5): any => {
     return str;
   }
 };
+
+const parseDigitalEmployeeTemplates = (value: any) => {
+  if (!value) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+      return [];
+    }
+  }
+  return [value];
+};
+
+const getDigitalEmployeeTemplate = (templates: any[] = [], ownerType?: string, agentType?: string) => {
+  const effectiveOwnerType = ownerType === 'personal' ? 'personal' : 'enterprise';
+  const findTemplate = (list: any[] = []) =>
+    list.find((item) => item?.ownerType === effectiveOwnerType && item?.agentType === agentType) ||
+    list.find((item) => item?.ownerType === effectiveOwnerType);
+
+  return findTemplate(templates) || findTemplate(DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES) || {};
+};
+
+const mapTemplatePromptsToConfigList = (prompts: any[] = [], templateKey?: string) =>
+  prompts.map((item, index) => ({
+    paramGroupCode: templateKey || 'TEMPLATE_DIGITAL_EMPLOYEE',
+    paramName: item?.name || item?.key || '',
+    paramEnName: item?.enName || item?.key || '',
+    paramValue: item?.defaultValue || '',
+    paramSeq: index + 1,
+    promptKey: item?.key || '',
+  }));
 
 const parseCorePersonaDefinition = (value: string, isEN?: boolean) => {
   const tabs: Array<{ key: string; name: string; isSystem: boolean }> = [];
@@ -563,37 +601,17 @@ const ConfigForm = (props) => {
     if (!agentType) return;
     let cancelled = false;
 
-    const getStandType = () => {
-      switch (agentType) {
-        case '001':
-          return 'TEMPLATE_PERSONAL_ASSISTANT';
-        case '006':
-          return 'TEMPLATE_GENERAL_QUESTIONS_ANSWERS';
-        default:
-          return 'TEMPLATE_DEFAULT_OTHER';
-      }
-    };
-
     const fetchTemplateData = async () => {
-      try {
-        const response = await getDcSystemConfigListByStandType({
-          standType: getStandType(),
-        });
-        if (cancelled) return;
+      const applyTemplateData = (templates: any[] = []) => {
+        const template = getDigitalEmployeeTemplate(templates, effectiveOwnerType, agentType);
+        const promptList = mapTemplatePromptsToConfigList(template?.prompts || [], template?.key);
+        const nextTemplateData =
+          Array.isArray(promptList) && promptList.length > 0 ? promptList : DEFAULT_TEMPLATE_DATA;
 
-        let templateData = response?.data;
-        if (!Array.isArray(templateData) || templateData.length === 0) {
-          templateData = DEFAULT_TEMPLATE_DATA;
-        } else {
-          templateData = [...response.data].sort((a, b) => (a.paramSeq || 0) - (b.paramSeq || 0));
-        }
+        setTemplateData(nextTemplateData);
 
-        setTemplateData(templateData);
+        const { tabs, fieldValues, corePersonaDefinitionJson } = buildTemplatePromptConfig(nextTemplateData, isEN);
 
-        const { tabs, fieldValues, corePersonaDefinitionJson } = buildTemplatePromptConfig(templateData, isEN);
-
-        // 新建时使用模板，编辑时使用已有数据
-        // 通过 agentId 判断是否为新建：没有 agentId 表示新建
         if (!agentId) {
           setConfigurableTabs(tabs);
           setActivePromptTabKey((current) => current || tabs[0]?.key);
@@ -617,9 +635,19 @@ const ConfigForm = (props) => {
           });
           internalSyncRef.current = false;
         }
+      };
+
+      try {
+        const response = await getDcSystemConfig({
+          paramCode: 'TEMPLATE_DIGITAL_EMPLOYEE',
+        });
+        if (cancelled) return;
+        const templates = parseDigitalEmployeeTemplates(response?.paramValue || response);
+        applyTemplateData(templates);
       } catch (error) {
         if (cancelled) return;
         console.error('获取自定义配置模板失败', error);
+        applyTemplateData();
       }
     };
 
@@ -627,7 +655,7 @@ const ConfigForm = (props) => {
     return () => {
       cancelled = true;
     };
-  }, [agentType, agentId, form]);
+  }, [agentType, agentId, effectiveOwnerType, form, isEN]);
 
   const corePersonaDefinitionValue = Form.useWatch('corePersonaDefinition', { form, preserve: true });
 

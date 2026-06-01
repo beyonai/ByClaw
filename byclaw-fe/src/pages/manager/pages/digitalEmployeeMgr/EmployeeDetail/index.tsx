@@ -32,6 +32,7 @@ import styles from './index.module.less';
 import Log from './Log';
 import Manage from './Manage';
 import Operation from './Operation';
+import { DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES } from '@/pages/manager/constants/digitalResource';
 
 const PREVIEW_HOST = `${window.location.origin}${window.routerBase === '/' ? '/' : window.routerBase}`;
 
@@ -77,6 +78,33 @@ const parseBundledSkills = (value) => {
       .map((item) => item.trim())
       .filter(Boolean);
   }
+};
+
+const parseDigitalEmployeeTemplates = (value) => {
+  if (!value) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+      return [];
+    }
+  }
+  return [value];
+};
+
+const getDigitalEmployeeTemplate = (templates, fallbackTemplates, ownerType, agentType) => {
+  const effectiveOwnerType = ownerType === 'personal' ? 'personal' : 'enterprise';
+  const findTemplate = (list) =>
+    list.find((item) => item?.ownerType === effectiveOwnerType && item?.agentType === agentType) ||
+    list.find((item) => item?.ownerType === effectiveOwnerType);
+
+  return findTemplate(templates) || findTemplate(fallbackTemplates) || {};
 };
 
 const EmployeeDetail = ({ loading }) => {
@@ -835,14 +863,13 @@ const EmployeeDetail = ({ loading }) => {
   );
 
   const fetchDefaultTemplate = useCallback(async () => {
-    const paramCode =
-      ownerType === 'personal'
-        ? 'OPENCLAW_AGENT_ROLE_TEMPLATE_PERSONAL_ASSISTANT'
-        : 'OPENCLAW_AGENT_ROLE_TEMPLATE_DIGITAL_EMPLOYEE';
-
-    try {
-      const res = await getDcSystemConfig({ paramCode });
-      const templateConfig = JSON.parse(res?.paramValue || '{}');
+    const applyTemplate = (templates = []) => {
+      const templateConfig = getDigitalEmployeeTemplate(
+        templates,
+        DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES,
+        ownerType,
+        effectiveAgentType || agentType
+      );
       const { relSkills = [], relTools = [] } = templateConfig;
 
       if (relSkills.length > 0) {
@@ -873,10 +900,17 @@ const EmployeeDetail = ({ loading }) => {
       if (defaultSkills.length > 0) {
         setSkills((prev) => [...prev, ...defaultSkills]);
       }
+    };
+
+    try {
+      const res = await getDcSystemConfig({ paramCode: 'TEMPLATE_DIGITAL_EMPLOYEE1' });
+      const templates = parseDigitalEmployeeTemplates(res?.paramValue || res);
+      applyTemplate(templates);
     } catch (error) {
       console.error('fetchDefaultTemplate error', error);
+      applyTemplate();
     }
-  }, [ownerType, form]);
+  }, [agentType, effectiveAgentType, ownerType, form]);
 
   useEffect(() => {
     if (agentId) {
