@@ -622,8 +622,9 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
 
   const currentSource = useMemo(
     () => sourceOptions.find((item) => item.key === activeSource) || sourceOptions[0],
-    [activeSource]
+    [activeSource, sourceOptions]
   );
+  const currentSourceOutputCount = currentSource?.outputCount || 0;
   const currentConnector = useMemo(
     () => connectorList.find((item) => item.connectorCode === activeSource),
     [activeSource, connectorList]
@@ -2026,11 +2027,11 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
           <div className={styles.metricGrid}>
             <div className={styles.metricItem}>
               <span>{intl.formatMessage({ id: 'knowledgeCenter.ecosystem.metricMarkdown' })}</span>
-              <strong>{runResult?.markdownCount ?? currentSource.outputCount}</strong>
+              <strong>{runResult?.markdownCount ?? currentSourceOutputCount}</strong>
             </div>
             <div className={styles.metricItem}>
               <span>{intl.formatMessage({ id: 'knowledgeCenter.ecosystem.metricAssets' })}</span>
-              <strong>{runResult?.assetCount ?? Math.max(2, Math.floor(currentSource.outputCount / 3))}</strong>
+              <strong>{runResult?.assetCount ?? Math.max(0, Math.floor(currentSourceOutputCount / 3))}</strong>
             </div>
             <div className={styles.metricItem}>
               <span>{intl.formatMessage({ id: 'knowledgeCenter.ecosystem.metricManifest' })}</span>
