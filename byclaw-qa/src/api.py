@@ -213,7 +213,7 @@ async def search_by_resource_id(body: dict[str, Any] = Body(...)):
 
     try:
         service = await resolve_knowledge_item_search_service()
-        items = await service.search_v2(request)
+        items = await service.search(request)
     except KnowledgeBaseConfigurationError:
         logger.exception("searchByResourceIdList configuration error")
         return _error("knowledge base configuration error")
