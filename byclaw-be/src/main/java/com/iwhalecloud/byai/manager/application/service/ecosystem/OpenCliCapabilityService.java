@@ -230,7 +230,13 @@ public class OpenCliCapabilityService extends EcosystemCollectionSupport {
             return List.of();
         }
         try {
-            JsonNode root = objectMapper.readTree(result.output());
+            String jsonPayload = extractJsonArrayPayload(result.output());
+            if (isBlank(jsonPayload)) {
+                log.warn("OpenCLI capability list returned no JSON array, output={}",
+                    abbreviate(result.output(), 240));
+                return List.of();
+            }
+            JsonNode root = objectMapper.readTree(jsonPayload);
             if (!root.isArray()) {
                 log.warn("OpenCLI capability list returned non-array JSON");
                 return List.of();
@@ -248,6 +254,43 @@ public class OpenCliCapabilityService extends EcosystemCollectionSupport {
             log.warn("OpenCLI capability list JSON parse failed", e);
             return List.of();
         }
+    }
+
+    static String extractJsonArrayPayload(String output) {
+        if (output == null || output.trim().isEmpty()) {
+            return "";
+        }
+        int start = output.indexOf('[');
+        if (start < 0) {
+            return "";
+        }
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = start; i < output.length(); i++) {
+            char ch = output.charAt(i);
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (ch == '\\') {
+                    escaped = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (ch == '"') {
+                inString = true;
+            } else if (ch == '[') {
+                depth++;
+            } else if (ch == ']') {
+                depth--;
+                if (depth == 0) {
+                    return output.substring(start, i + 1);
+                }
+            }
+        }
+        return "";
     }
 
     private CommandCapability toCommandCapability(JsonNode node) {

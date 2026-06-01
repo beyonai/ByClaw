@@ -5,6 +5,7 @@ import {
   ChromeOutlined,
   CloudSyncOutlined,
   CopyOutlined,
+  DownloadOutlined,
   FileMarkdownOutlined,
   GithubOutlined,
   GlobalOutlined,
@@ -109,6 +110,15 @@ interface BrowserExtensionStatus {
   };
 }
 
+interface BrowserExtensionPackageManifest {
+  version?: string;
+  fileName?: string;
+  path?: string;
+  sha256?: string;
+  size?: number;
+  installGuide?: string;
+}
+
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
 
@@ -144,6 +154,8 @@ const browserExtensionProtocolVersion = '1.1';
 const browserExtensionMinVersion = '0.3.0';
 const browserExtensionInstallPath = 'byclaw-fe/public/browser-extension/byclaw-browser-bridge';
 const browserExtensionPackageCommand = 'pnpm --dir byclaw-fe package:browser-extension';
+const browserExtensionLatestManifestPath = '/download/browser-extension/latest.json';
+const browserExtensionFallbackPackagePath = `/download/browser-extension/byclaw-browser-bridge-v${browserExtensionMinVersion}.zip`;
 
 const browserExtensionBindStatusNameIdMap: Record<BrowserExtensionBindStatus, string> = {
   idle: 'knowledgeCenter.ecosystem.browserExtension.waitingStatus',
@@ -398,6 +410,9 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
   const [browserExtensionStatus, setBrowserExtensionStatus] = useState<BrowserExtensionStatus>({
     installed: false,
   });
+  const [browserExtensionPackageManifest, setBrowserExtensionPackageManifest] =
+    useState<BrowserExtensionPackageManifest | null>(null);
+  const [browserExtensionPackageLoading, setBrowserExtensionPackageLoading] = useState(false);
   const browserExtensionPingTimerRef = useRef<number | null>(null);
   const browserExtensionAutoRefreshRef = useRef(false);
   const initialFormAppliedRef = useRef(false);
@@ -962,6 +977,44 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
       }
     };
   }, [isBrowserExtensionMode, open]);
+
+  useEffect(() => {
+    if (!open || !isBrowserExtensionMode) {
+      return;
+    }
+    fetch(browserExtensionLatestManifestPath, { cache: 'no-store' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((manifest) => {
+        if (manifest?.path) {
+          setBrowserExtensionPackageManifest(manifest);
+        }
+      })
+      .catch(() => undefined);
+  }, [isBrowserExtensionMode, open]);
+
+  const resolveBrowserExtensionPackageUrl = (path?: string) => {
+    const packagePath = path || browserExtensionFallbackPackagePath;
+    return new URL(packagePath, window.location.origin).toString();
+  };
+
+  const handleDownloadBrowserExtensionPackage = async () => {
+    setBrowserExtensionPackageLoading(true);
+    try {
+      let manifest = browserExtensionPackageManifest;
+      if (!manifest?.path) {
+        const response = await fetch(browserExtensionLatestManifestPath, { cache: 'no-store' });
+        if (response.ok) {
+          manifest = await response.json();
+          setBrowserExtensionPackageManifest(manifest || null);
+        }
+      }
+      window.location.href = resolveBrowserExtensionPackageUrl(manifest?.path);
+    } catch (error) {
+      window.location.href = resolveBrowserExtensionPackageUrl();
+    } finally {
+      setBrowserExtensionPackageLoading(false);
+    }
+  };
 
   const handleCopyBrowserExtensionPath = async () => {
     await navigator.clipboard?.writeText(browserExtensionInstallPath);
@@ -1606,6 +1659,10 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
                         {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.packageCommand' })}
                       </span>
                       <code>{browserExtensionPackageCommand}</code>
+                      <span>
+                        {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.downloadPath' })}
+                      </span>
+                      <code>{browserExtensionPackageManifest?.path || browserExtensionFallbackPackagePath}</code>
                     </div>
                     {browserExtensionStatus.binding?.warning?.message ? (
                       <div className={styles.browserExtensionWarning}>
@@ -1626,6 +1683,13 @@ const EcosystemCollector: React.FC<EcosystemCollectorProps> = ({
                         onClick={refreshBrowserExtensionStatus}
                       >
                         {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.checkInstall' })}
+                      </Button>
+                      <Button
+                        icon={<DownloadOutlined />}
+                        loading={browserExtensionPackageLoading}
+                        onClick={handleDownloadBrowserExtensionPackage}
+                      >
+                        {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.downloadPackage' })}
                       </Button>
                       <Button icon={<CopyOutlined />} onClick={handleCopyBrowserExtensionPath}>
                         {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.browserExtension.copyPath' })}
