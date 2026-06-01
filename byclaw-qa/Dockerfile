@@ -23,7 +23,8 @@ ADD https://api.github.com/repos/beyonai/ByKC/commits/main /tmp/bykc_version.jso
 RUN if [ "${BRANCH}" = "develop" ] || [ "${BRANCH}" = "qa" ]; then \
         echo "BRANCH=${BRANCH}: reinstalling by-qa from ByKC main branch"; \
         uv pip install --python .venv/bin/python --force-reinstall \
-            "by-qa[all] @ https://github.com/beyonai/ByKC/archive/refs/heads/main.tar.gz"; \
+            "by-qa[all] @ https://github.com/beyonai/ByKC/archive/refs/heads/main.tar.gz" \
+            "langgraph==1.1.6"; \
     else \
         rm -f /tmp/bykc_version.json; \
     fi
