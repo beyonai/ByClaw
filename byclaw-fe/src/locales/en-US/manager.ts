@@ -333,6 +333,9 @@ export default {
   'modelMgr.confirmDisable': 'Confirm to disable this model?',
   'modelMgr.confirmEnable': 'Confirm to enable this model?',
   'modelMgr.confirmDelete': 'Confirm to delete this model?',
+  'modelMgr.confirmSetDefault':
+    'Set this model as the default conversation model? After that, other default conversation models will be set to non-default.',
+  'modelMgr.setDefault': 'Set as default',
   'modelMgr.operationSuccess': 'Operation succeeded',
   'modelMgr.debug': 'Debug',
   'modelMgr.heroDesc':
@@ -352,6 +355,7 @@ export default {
   'modelMgr.error.saveModelFail': 'Failed to save model',
   'modelMgr.error.updateModelStatusFail': 'Failed to update model status',
   'modelMgr.error.deleteModelFail': 'Failed to delete model',
+  'modelMgr.error.setDefaultModelFail': 'Failed to set default conversation model',
   'modelMgr.error.debugModelFail': 'Model debug failed',
 
   // Model Management - Edit/Debug Modal

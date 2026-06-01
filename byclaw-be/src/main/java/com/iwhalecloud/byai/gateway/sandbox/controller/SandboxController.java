@@ -12,11 +12,13 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
@@ -44,6 +46,9 @@ public class SandboxController {
 
     @Autowired
     private SandboxServiceSpecEntityMapper sandboxServiceSpecEntityMapper;
+
+    @Autowired
+    private SandboxUserContextRunner sandboxUserContextRunner;
 
     /**
      * 沙箱心跳接口
@@ -209,6 +214,50 @@ public class SandboxController {
 
         sandboxService.removeSandbox(userCode, resourceId);
         return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 按工号启动沙箱，支持通过 serviceKey 覆盖沙箱规格
+     *
+     * @param params 请求参数，userCode 必填，serviceKey 可选
+     * @return ResponseUtil
+     */
+    @PostMapping("/launchByUserCode")
+    @Operation(summary = "按工号启动沙箱", description = "按工号为指定用户启动沙箱，可选传入 serviceKey 覆盖默认沙箱规格")
+    @ApiResponses({
+        @ApiResponse(responseCode = "0", description = "启动成功"),
+        @ApiResponse(responseCode = "-1", description = "启动失败，参数缺失或规格不存在")
+    })
+    public ResponseUtil launchByUserCode(@RequestBody Map<String, Object> params) {
+        Object userCodeObj = params.get("userCode");
+        if (userCodeObj == null || userCodeObj.toString().trim().isEmpty()) {
+            return ResponseUtil.fail("userCode is required");
+        }
+        String userCode = userCodeObj.toString().trim();
+
+        Object serviceKeyObj = params.get("serviceKey");
+        String serviceKey = serviceKeyObj != null ? serviceKeyObj.toString().trim() : null;
+        if (serviceKey != null && serviceKey.isEmpty()) {
+            serviceKey = null;
+        }
+
+        try {
+            String finalServiceKey = serviceKey;
+            SandboxLaunchData data = sandboxUserContextRunner.callAsUser(userCode,
+                () -> sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey));
+
+            if (data == null) {
+                return ResponseUtil.fail("沙箱启动失败");
+            }
+            Map<String, Object> result = new HashMap<>();
+            result.put("endpoint", data.getEndpoint());
+            result.put("sandboxId", data.getSandboxId());
+            result.put("endpoints", data.getEndpoints());
+            result.put("instanceEndpoints", data.getInstanceEndpoints());
+            return ResponseUtil.successResponse(result);
+        } catch (Exception e) {
+            return ResponseUtil.fail("沙箱启动失败: " + e.getMessage());
+        }
     }
 
     /**
