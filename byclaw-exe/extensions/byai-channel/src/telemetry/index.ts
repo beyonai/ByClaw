@@ -11,12 +11,21 @@ export type TelemetryController = {
   recordAgentEvent(event: AgentEventLike): void;
 };
 
+type TelemetryRuntimeRegistry = {
+  current?: TelemetryRuntimeController;
+  interval?: ReturnType<typeof setInterval>;
+};
+
+const TELEMETRY_RUNTIME_REGISTRY = Symbol.for("byai-channel.telemetry.runtime");
+
 export function registerTelemetry(api: OpenClawPluginApi): TelemetryController {
   const config = resolveTelemetryConfig({
     cfg: readCurrentConfig(api),
     pluginConfig: (api as OpenClawPluginApi & { pluginConfig?: unknown }).pluginConfig,
   });
+
   if (!config.enabled) {
+    replaceTelemetryRuntime(undefined);
     api.logger.info("[byai-channel] telemetry disabled");
     return {
       recordAgentEvent: () => undefined,
@@ -34,36 +43,38 @@ export function registerTelemetry(api: OpenClawPluginApi): TelemetryController {
   if (redisSink) {
     sinks.push(redisSink);
   }
-  const reporter = new TelemetryReporter(state, sinks);
 
-  registerTelemetryHooks(api, state);
-  registerTelemetryReporterService(api, reporter, config.logIntervalMs);
+  const reporter = new TelemetryReporter(state, sinks);
+  const runtime = new TelemetryRuntimeController(state, reporter);
+  replaceTelemetryRuntime(runtime);
+
+  registerTelemetryHooks(api);
+  registerTelemetryReporterService(api, config.logIntervalMs);
 
   return {
     recordAgentEvent: (event) => {
-      state.recordAgentEvent(event);
+      getCurrentTelemetryRuntime()?.recordAgentEvent(event);
     },
   };
 }
 
-function registerTelemetryHooks(
-  api: OpenClawPluginApi,
-  state: TelemetryRuntimeState,
-): void {
+function registerTelemetryHooks(api: OpenClawPluginApi): void {
   api.on("before_agent_start", (_event, ctx) => {
-    state.markRunStarted(ctx.runId ?? ctx.sessionKey ?? ctx.sessionId, "hook", {
+    getCurrentTelemetryRuntime()?.markRunStarted(ctx.runId ?? ctx.sessionKey ?? ctx.sessionId, {
       label: firstStringField(ctx, "agentName", "agentId", "sessionId", "sessionKey"),
     });
   });
 
   api.on("agent_end", (event, ctx) => {
-    state.markRunEnded(ctx.runId ?? ctx.sessionKey ?? ctx.sessionId, event.success === false);
+    getCurrentTelemetryRuntime()?.markRunEnded(
+      ctx.runId ?? ctx.sessionKey ?? ctx.sessionId,
+      event.success === false,
+    );
   });
 
   api.on("before_tool_call", (event, ctx) => {
-    state.markToolCallStarted(
+    getCurrentTelemetryRuntime()?.markToolCallStarted(
       buildScopedWorkKey(ctx.runId ?? event.runId, event.toolCallId ?? ctx.toolCallId),
-      "hook",
       {
         label: firstStringField(event, "toolName", "name"),
         kind: "tool",
@@ -72,14 +83,14 @@ function registerTelemetryHooks(
   });
 
   api.on("after_tool_call", (event, ctx) => {
-    state.markToolCallEnded(
+    getCurrentTelemetryRuntime()?.markToolCallEnded(
       buildScopedWorkKey(ctx.runId ?? event.runId, event.toolCallId ?? ctx.toolCallId),
       Boolean(event.error),
     );
   });
 
   api.on("subagent_spawned", (event) => {
-    state.markSubagentStarted(event.runId ?? event.childSessionKey, "hook", {
+    getCurrentTelemetryRuntime()?.markSubagentStarted(event.runId ?? event.childSessionKey, {
       label: firstStringField(
         event,
         "agentName",
@@ -92,7 +103,7 @@ function registerTelemetryHooks(
   });
 
   api.on("subagent_ended", (event) => {
-    state.markSubagentEnded(
+    getCurrentTelemetryRuntime()?.markSubagentEnded(
       event.runId ?? event.targetSessionKey,
       event.outcome === "error" || event.outcome === "timeout" || event.outcome === "killed",
     );
@@ -101,27 +112,157 @@ function registerTelemetryHooks(
 
 function registerTelemetryReporterService(
   api: OpenClawPluginApi,
-  reporter: TelemetryReporter,
   logIntervalMs: number,
 ): void {
-  let interval: ReturnType<typeof setInterval> | undefined;
   api.registerService({
     id: "byai-channel-telemetry-reporter",
     start: async () => {
-      interval = setInterval(() => {
-        reporter.emit("snapshot");
-      }, logIntervalMs);
-      interval.unref?.();
+      startTelemetryReporterLoop(api, logIntervalMs);
       api.logger.info(`[byai-channel] telemetry snapshot interval=${logIntervalMs}ms`);
     },
     stop: async () => {
-      if (interval) {
-        clearInterval(interval);
-        interval = undefined;
-      }
-      await reporter.close();
+      await stopTelemetryReporterLoop();
+      await replaceTelemetryRuntime(undefined);
+      api.logger.info("[byai-channel] telemetry stopped");
     },
   });
+}
+
+function replaceTelemetryRuntime(next: TelemetryRuntimeController | undefined): void {
+  const registry = getTelemetryRuntimeRegistry();
+  const previous = registry.current;
+  registry.current = next;
+  if (previous && previous !== next) {
+    void previous.close().catch(() => undefined);
+  }
+}
+
+function getTelemetryRuntimeRegistry(): TelemetryRuntimeRegistry {
+  const globalState = globalThis as typeof globalThis & {
+    [TELEMETRY_RUNTIME_REGISTRY]?: TelemetryRuntimeRegistry;
+  };
+  return globalState[TELEMETRY_RUNTIME_REGISTRY] ?? (
+    globalState[TELEMETRY_RUNTIME_REGISTRY] = {}
+  );
+}
+
+function getCurrentTelemetryRuntime(): TelemetryRuntimeController | undefined {
+  return getTelemetryRuntimeRegistry().current;
+}
+
+function startTelemetryReporterLoop(api: OpenClawPluginApi, logIntervalMs: number): void {
+  const registry = getTelemetryRuntimeRegistry();
+  if (registry.interval) {
+    clearInterval(registry.interval);
+  }
+  registry.interval = setInterval(() => {
+    getCurrentTelemetryRuntime()?.emitSnapshot();
+  }, logIntervalMs);
+  registry.interval.unref?.();
+}
+
+async function stopTelemetryReporterLoop(): Promise<void> {
+  const registry = getTelemetryRuntimeRegistry();
+  if (!registry.interval) {
+    return;
+  }
+  clearInterval(registry.interval);
+  registry.interval = undefined;
+}
+
+class TelemetryRuntimeController {
+  private closed = false;
+
+  constructor(
+    private readonly state: TelemetryRuntimeState,
+    private readonly reporter: TelemetryReporter,
+  ) {}
+
+  recordAgentEvent(event: AgentEventLike): void {
+    if (this.closed) {
+      return;
+    }
+    this.state.recordAgentEvent(event);
+  }
+
+  markRunStarted(
+    runKey: string | undefined,
+    details: {
+      label?: string;
+    },
+  ): void {
+    if (this.closed) {
+      return;
+    }
+    this.state.markRunStarted(runKey, "hook", {
+      ...(details.label ? { label: details.label } : {}),
+    });
+  }
+
+  markRunEnded(
+    runKey: string | undefined,
+    failed: boolean,
+  ): void {
+    if (this.closed) {
+      return;
+    }
+    this.state.markRunEnded(runKey, failed);
+  }
+
+  markToolCallStarted(
+    toolKey: string | undefined,
+    metadata: { label?: string; kind?: string },
+  ): void {
+    if (this.closed) {
+      return;
+    }
+    this.state.markToolCallStarted(toolKey, "hook", metadata);
+  }
+
+  markToolCallEnded(
+    toolKey: string | undefined,
+    failed: boolean,
+  ): void {
+    if (this.closed) {
+      return;
+    }
+    this.state.markToolCallEnded(toolKey, failed);
+  }
+
+  markSubagentStarted(
+    subagentKey: string | undefined,
+    metadata: { label?: string },
+  ): void {
+    if (this.closed) {
+      return;
+    }
+    this.state.markSubagentStarted(subagentKey, "hook", metadata);
+  }
+
+  markSubagentEnded(
+    subagentKey: string | undefined,
+    failed: boolean,
+  ): void {
+    if (this.closed) {
+      return;
+    }
+    this.state.markSubagentEnded(subagentKey, failed);
+  }
+
+  emitSnapshot(): void {
+    if (this.closed) {
+      return;
+    }
+    this.reporter.emit("snapshot");
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    await this.reporter.close();
+  }
 }
 
 function readCurrentConfig(api: OpenClawPluginApi): OpenClawConfig | null {
