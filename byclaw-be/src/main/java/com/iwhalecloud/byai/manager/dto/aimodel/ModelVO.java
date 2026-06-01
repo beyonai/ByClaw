@@ -39,6 +39,9 @@ public class ModelVO implements Serializable {
     /** 能力列表 */
     private List<String> abilities;
 
+    /** 是否默认对话模型：1 是，0 否 */
+    private Integer isDefault;
+
     /** 系统标签列表 */
     private List<String> systems;
 

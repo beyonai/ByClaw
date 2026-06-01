@@ -553,10 +553,16 @@ const ConfigForm = (props) => {
 
     const getStandType = () => {
       switch (agentType) {
+        // 助手
         case '001':
           return 'TEMPLATE_PERSONAL_ASSISTANT';
+        // 问答
         case '006':
           return 'TEMPLATE_GENERAL_QUESTIONS_ANSWERS';
+        // 问数
+        case '005':
+          return 'TEMPLATE_BYCLAW_DATA';
+        // 其他
         default:
           return 'TEMPLATE_DEFAULT_OTHER';
       }

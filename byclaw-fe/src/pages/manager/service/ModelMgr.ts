@@ -30,6 +30,10 @@ export async function setModelStatus(params: any) {
   return POST('/byaiService/new/model/setModelStatus', { ...params }, withCustomHandle);
 }
 
+export async function setDefaultModel(params: any) {
+  return POST('/byaiService/new/model/setDefaultModel', { ...params }, withCustomHandle);
+}
+
 const getDeltaText = (payload: any) => {
   if (!payload) return '';
   if (typeof payload === 'string') return payload;
