@@ -1,5 +1,5 @@
 // tslint:disable:ordered-imports
-import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import classnames from 'classnames';
 
 import { get, keys, set, isBoolean, size } from 'lodash';
@@ -349,15 +349,15 @@ function ApprovalForm(props: IProps) {
   );
 }
 
-const ApprovalFormWarpper = (props: IProps) => {
-  const { EventEmitter } = useGlobal();
+// const ApprovalFormWarpper = (props: IProps) => {
+//   const { EventEmitter } = useGlobal();
 
-  useEffect(() => {
-    EventEmitter.emit('beyond-easyconfirm-set-approvalform-item', props);
-  }, []);
+//   useEffect(() => {
+//     EventEmitter.emit('beyond-easyconfirm-set-approvalform-item', props);
+//   }, []);
 
-  return <ApprovalForm {...props} />;
-};
+//   return <ApprovalForm {...props} />;
+// };
 
-// export default ApprovalForm;
-export default ApprovalFormWarpper;
+export default ApprovalForm;
+// export default ApprovalFormWarpper;
