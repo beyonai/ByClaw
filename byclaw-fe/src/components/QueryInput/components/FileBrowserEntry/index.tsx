@@ -28,23 +28,35 @@ import styles from './index.module.less';
 
 const FILE_BROWSER_PATH = '/filebrowser/files';
 const DEFAULT_PAGE_SIZE = 10;
-const DEFAULT_MODEL_DEBUG_INPUT = JSON.stringify(
-  {
-    url: 'https://api.example.com/v1/chat/completions',
-    headers: {},
-    model: '',
-    messages: [
-      {
-        role: 'user',
-        content: '今天天气如何',
-      },
-    ],
-    temperature: 0.1,
-    stream: true,
-  },
-  null,
-  2
-);
+const MODEL_DEBUG_INPUT_TEMPLATE = {
+  url: 'https://api.example.com/v1/chat/completions',
+  headers: {},
+  model: '',
+  messages: [
+    {
+      role: 'user',
+      content: '',
+    },
+  ],
+  temperature: 0.1,
+  stream: true,
+};
+
+function buildDefaultModelDebugInput(intl: any) {
+  return JSON.stringify(
+    {
+      ...MODEL_DEBUG_INPUT_TEMPLATE,
+      messages: [
+        {
+          role: 'user',
+          content: intl.formatMessage({ id: 'fileBrowserEntry.defaultDebugMessage' }),
+        },
+      ],
+    },
+    null,
+    2
+  );
+}
 
 function unwrapData(res: any) {
   if (!res) return res;
@@ -124,6 +136,9 @@ function buildFileBrowserUrl(resourceId: string, beyondToken: string, ownerType?
 }
 
 export default function FileBrowserEntry() {
+  const intl = useIntl();
+  const t = useCallback((id: string, values?: Record<string, any>) => intl.formatMessage({ id }, values), [intl]);
+  const defaultModelDebugInput = useMemo(() => buildDefaultModelDebugInput(intl), [intl]);
   const [open, setOpen] = useState(false);
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
   const [activeTab, setActiveTab] = useState('files');
@@ -137,7 +152,7 @@ export default function FileBrowserEntry() {
   const [messageLoading, setMessageLoading] = useState(false);
   const [modelDetail, setModelDetail] = useState<any>(null);
   const [modelDetailLoading, setModelDetailLoading] = useState(false);
-  const [modelTestInput, setModelTestInput] = useState(DEFAULT_MODEL_DEBUG_INPUT);
+  const [modelTestInput, setModelTestInput] = useState(defaultModelDebugInput);
   const [modelTestOutput, setModelTestOutput] = useState('');
   const [modelTesting, setModelTesting] = useState(false);
   const [modelOutputLoading, setModelOutputLoading] = useState(false);
@@ -146,7 +161,6 @@ export default function FileBrowserEntry() {
   const [detailResourceId, setDetailResourceId] = useState<string>();
   const entryRef = useRef<HTMLSpanElement>(null);
   const modelDebugInputKeyRef = useRef('');
-  const intl = useIntl();
   const { pathname } = useLocation();
   const { agentId } = useGlobal();
   const { defaultDigEmployeeId, userInfo, employeesList, agentList } = useSelector(({ employees, user }: any) => ({
@@ -172,10 +186,11 @@ export default function FileBrowserEntry() {
   const debugDefaults = useMemo(() => buildDebugDefaults(intl), [intl]);
   const relResourceList = agentDetail?.relResourceList || relatedResources || [];
   const assistantName = agentDetail?.resourceName || cachedAgentInfo?.name || cachedAgentInfo?.resourceName || 'AI';
+  const beyondToken = getToken();
 
   const iframeUrl = useMemo(() => {
-    return buildFileBrowserUrl(resourceId, getToken(), ownerType, resourceCode);
-  }, [ownerType, resourceCode, resourceId]);
+    return buildFileBrowserUrl(resourceId, beyondToken, ownerType, resourceCode);
+  }, [beyondToken, ownerType, resourceCode, resourceId]);
 
   const loadAgentDetail = useCallback(async () => {
     if (!resourceId) return;
@@ -184,30 +199,33 @@ export default function FileBrowserEntry() {
       const res = await getCompositeAppInfo({ resourceId });
       setAgentDetail(unwrapData(res));
     } catch (error: any) {
-      message.error(error?.message || '加载资源信息失败');
+      message.error(error?.message || t('fileBrowserEntry.error.loadResourceInfoFailed'));
     } finally {
       setDetailLoading(false);
     }
-  }, [resourceId]);
+  }, [resourceId, t]);
 
-  const loadMessages = useCallback(async (session: any) => {
-    const sessionId = session?.sessionId;
-    if (!sessionId) {
-      setMessages([]);
-      return;
-    }
-    setMessageLoading(true);
-    try {
-      const res = await getMessages({ sessionId: `${sessionId}`, pageNum: 1, pageSize: 50 });
-      const list = (unwrapData(res)?.list || res?.list || []).map((item: any) => fetchMessageHandler(item));
-      setMessages(list);
-    } catch (error: any) {
-      message.error(error?.message || '加载会话消息失败');
-      setMessages([]);
-    } finally {
-      setMessageLoading(false);
-    }
-  }, []);
+  const loadMessages = useCallback(
+    async (session: any) => {
+      const sessionId = session?.sessionId;
+      if (!sessionId) {
+        setMessages([]);
+        return;
+      }
+      setMessageLoading(true);
+      try {
+        const res = await getMessages({ sessionId: `${sessionId}`, pageNum: 1, pageSize: 50 });
+        const list = (unwrapData(res)?.list || res?.list || []).map((item: any) => fetchMessageHandler(item));
+        setMessages(list);
+      } catch (error: any) {
+        message.error(error?.message || t('fileBrowserEntry.error.loadSessionMessagesFailed'));
+        setMessages([]);
+      } finally {
+        setMessageLoading(false);
+      }
+    },
+    [t]
+  );
 
   const loadSessions = useCallback(
     async (pageNum = 1) => {
@@ -232,12 +250,12 @@ export default function FileBrowserEntry() {
         setSelectedSession(nextSelected);
         loadMessages(nextSelected);
       } catch (error: any) {
-        message.error(error?.message || '加载会话列表失败');
+        message.error(error?.message || t('fileBrowserEntry.error.loadSessionListFailed'));
       } finally {
         setSessionLoading(false);
       }
     },
-    [loadMessages, resourceId, sessionPagination.pageSize]
+    [loadMessages, resourceId, sessionPagination.pageSize, t]
   );
 
   const loadModelDetail = useCallback(async () => {
@@ -261,11 +279,11 @@ export default function FileBrowserEntry() {
       const res = await queryRelResourceInfo({ resourceId });
       setRelatedResources(unwrapData(res) || []);
     } catch (error: any) {
-      message.error(error?.message || '加载关联资源失败');
+      message.error(error?.message || t('fileBrowserEntry.error.loadRelatedResourcesFailed'));
     } finally {
       setResourceLoading(false);
     }
-  }, [relResourceList?.length, resourceId]);
+  }, [relResourceList?.length, resourceId, t]);
 
   const resolvePortalContainer = useCallback(() => {
     if (typeof document === 'undefined') return null;
@@ -289,13 +307,13 @@ export default function FileBrowserEntry() {
     setSelectedSession(null);
     setMessages([]);
     setModelDetail(null);
-    setModelTestInput(DEFAULT_MODEL_DEBUG_INPUT);
+    setModelTestInput(defaultModelDebugInput);
     setModelTestOutput('');
     setModelOutputLoading(false);
     setRelatedResources([]);
     setDetailResourceId(undefined);
     modelDebugInputKeyRef.current = '';
-  }, [resourceId]);
+  }, [defaultModelDebugInput, resourceId]);
 
   useEffect(() => {
     if (!open || activeTab !== 'logs' || sessions.length) return;
@@ -325,7 +343,7 @@ export default function FileBrowserEntry() {
 
   const openFileBrowser = () => {
     if (!resourceId) {
-      message.warning('Missing resourceId');
+      message.warning(t('fileBrowserEntry.warning.missingResourceId'));
       return;
     }
     setPortalContainer(resolvePortalContainer());
@@ -336,11 +354,11 @@ export default function FileBrowserEntry() {
   const runModelTest = async () => {
     const modelId = modelInfo?.modelId;
     if (!modelId) {
-      message.warning('当前资源未配置大模型');
+      message.warning(t('fileBrowserEntry.warning.modelNotConfigured'));
       return;
     }
     if (!modelTestInput.trim()) {
-      message.warning('请输入测试内容');
+      message.warning(t('fileBrowserEntry.warning.enterTestContent'));
       return;
     }
     setModelTesting(true);
@@ -360,8 +378,8 @@ export default function FileBrowserEntry() {
       const output = unwrapData(res)?.output || res?.output || streamedText || JSON.stringify(unwrapData(res) || res);
       setModelTestOutput(output);
     } catch (error: any) {
-      setModelTestOutput(error?.message || '模型测试失败');
-      message.error(error?.message || '模型测试失败');
+      setModelTestOutput(error?.message || t('fileBrowserEntry.error.modelTestFailed'));
+      message.error(error?.message || t('fileBrowserEntry.error.modelTestFailed'));
     } finally {
       setModelTesting(false);
       setModelOutputLoading(false);
@@ -370,7 +388,7 @@ export default function FileBrowserEntry() {
 
   const copyText = async (text: string) => {
     if (!text) {
-      message.warning('暂无可复制内容');
+      message.warning(t('fileBrowserEntry.warning.noCopyContent'));
       return;
     }
     await copyWithMessage(text);
@@ -383,16 +401,16 @@ export default function FileBrowserEntry() {
   };
 
   const container = portalContainer || resolvePortalContainer();
-  const fileManagementTip = intl.formatMessage({ id: 'queryInput.tooltip.fileManagement' });
+  const fileManagementTip = t('queryInput.tooltip.fileManagement');
   const isMobileRoute = pathname === '/mobile' || pathname.startsWith('/mobile/');
 
-  if (isMobileRoute) {
+  if (isMobileRoute || !beyondToken) {
     return null;
   }
 
   const resourceColumns = [
     {
-      title: '资源名称',
+      title: t('fileBrowserEntry.resource.name'),
       dataIndex: 'resourceName',
       key: 'resourceName',
       render: (text: string, record: any) => {
@@ -409,17 +427,17 @@ export default function FileBrowserEntry() {
         );
       },
     },
-    { title: '资源编码', dataIndex: 'resourceCode', key: 'resourceCode' },
-    { title: '资源类型', dataIndex: 'resourceBizType', key: 'resourceBizType' },
+    { title: t('fileBrowserEntry.resource.code'), dataIndex: 'resourceCode', key: 'resourceCode' },
+    { title: t('fileBrowserEntry.resource.type'), dataIndex: 'resourceBizType', key: 'resourceBizType' },
     {
-      title: '资源来源',
+      title: t('fileBrowserEntry.resource.source'),
       dataIndex: 'systemCode',
       key: 'systemCode',
       render: (text: string, record: any) =>
         record?.resourceSource || record?.sourceSystemName || record?.sourceSystem || text || '-',
     },
     {
-      title: '资源更新时间',
+      title: t('fileBrowserEntry.resource.updateTime'),
       dataIndex: 'updateTime',
       key: 'updateTime',
       render: (text: string, record: any) => formatDate(text || record?.modifyTime || record?.gmtModified),
@@ -429,16 +447,16 @@ export default function FileBrowserEntry() {
   const tabItems = [
     {
       key: 'files',
-      label: '文件管理',
+      label: t('fileBrowserEntry.tab.files'),
       children: (
         <div className={styles.filePane}>
-          <iframe className={styles.fileBrowserFrame} title="filebrowser" src={iframeUrl} />
+          <iframe className={styles.fileBrowserFrame} title={t('fileBrowserEntry.iframeTitle')} src={iframeUrl} />
         </div>
       ),
     },
     {
       key: 'logs',
-      label: '会话日志',
+      label: t('fileBrowserEntry.tab.logs'),
       children: (
         <div className={styles.logsPane}>
           <div className={styles.sessionPanel}>
@@ -456,12 +474,14 @@ export default function FileBrowserEntry() {
                     }}
                     type="button"
                   >
-                    <span className={styles.sessionName}>{item.sessionName || '未命名会话'}</span>
+                    <span className={styles.sessionName}>
+                      {item.sessionName || t('fileBrowserEntry.session.unnamed')}
+                    </span>
                     <span className={styles.sessionTime}>{item.updateTime || item.createTime || '-'}</span>
                   </button>
                 ))
               ) : (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无会话记录" />
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('fileBrowserEntry.session.empty')} />
               )}
             </Spin>
             <Pagination
@@ -476,7 +496,7 @@ export default function FileBrowserEntry() {
             <Spin spinning={messageLoading}>
               {messages.length ? (
                 messages.map((item) => {
-                  const text = getMessageText(item) || '[非文本消息]';
+                  const text = getMessageText(item) || t('fileBrowserEntry.message.nonText');
                   return (
                     <div
                       className={`${styles.messageBubbleRow} ${
@@ -486,7 +506,7 @@ export default function FileBrowserEntry() {
                     >
                       <div className={styles.messageBubble}>
                         <div className={styles.messageMeta}>
-                          {item.fromBeyond ? assistantName : item.creatorName || '我'}
+                          {item.fromBeyond ? assistantName : item.creatorName || t('fileBrowserEntry.message.me')}
                         </div>
                         <div className={styles.messageText}>{text}</div>
                       </div>
@@ -494,7 +514,7 @@ export default function FileBrowserEntry() {
                   );
                 })
               ) : (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请选择左侧会话" />
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('fileBrowserEntry.message.selectSession')} />
               )}
             </Spin>
           </div>
@@ -503,7 +523,7 @@ export default function FileBrowserEntry() {
     },
     {
       key: 'model',
-      label: '当前模型',
+      label: t('fileBrowserEntry.tab.model'),
       children: (
         <div className={styles.modelScrollPane}>
           <Spin spinning={modelDetailLoading || detailLoading}>
@@ -511,46 +531,60 @@ export default function FileBrowserEntry() {
               <Card className={styles.modelInfoCard}>
                 <div className={styles.modelHeader}>
                   <div>
-                    <div className={styles.modelName}>{modelInfo?.model || modelDetail?.modelName || '未配置模型'}</div>
-                    <div className={styles.modelSubTitle}>Model ID: {modelInfo?.modelId || '-'}</div>
+                    <div className={styles.modelName}>
+                      {modelInfo?.model || modelDetail?.modelName || t('fileBrowserEntry.model.notConfigured')}
+                    </div>
+                    <div className={styles.modelSubTitle}>
+                      {t('fileBrowserEntry.model.id')}: {modelInfo?.modelId || '-'}
+                    </div>
                   </div>
-                  <Tag color={modelInfo?.modelId ? 'green' : 'default'}>{modelInfo?.modelId ? '已配置' : '未配置'}</Tag>
+                  <Tag color={modelInfo?.modelId ? 'green' : 'default'}>
+                    {modelInfo?.modelId
+                      ? t('fileBrowserEntry.model.configured')
+                      : t('fileBrowserEntry.model.notConfiguredShort')}
+                  </Tag>
                 </div>
                 <Descriptions column={2} size="small">
-                  <Descriptions.Item label="模型编码">
+                  <Descriptions.Item label={t('fileBrowserEntry.model.code')}>
                     {modelDetail?.modelCode || modelInfo?.model || '-'}
                   </Descriptions.Item>
-                  <Descriptions.Item label="模型类型">
+                  <Descriptions.Item label={t('fileBrowserEntry.model.type')}>
                     {modelDetail?.modelType || modelDetail?.type || '-'}
                   </Descriptions.Item>
-                  <Descriptions.Item label="温度">{modelInfo?.temperature ?? '-'}</Descriptions.Item>
-                  <Descriptions.Item label="上下文轮数">{modelInfo?.history ?? '-'}</Descriptions.Item>
-                  <Descriptions.Item label="最大 Token">
+                  <Descriptions.Item label={t('fileBrowserEntry.model.temperature')}>
+                    {modelInfo?.temperature ?? '-'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label={t('fileBrowserEntry.model.history')}>
+                    {modelInfo?.history ?? '-'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label={t('fileBrowserEntry.model.maxToken')}>
                     {modelInfo?.maxToken ?? modelDetail?.maxContentToken ?? '-'}
                   </Descriptions.Item>
-                  <Descriptions.Item label="更新时间">{modelDetail?.updateTime || '-'}</Descriptions.Item>
+                  <Descriptions.Item label={t('fileBrowserEntry.model.updateTime')}>
+                    {modelDetail?.updateTime || '-'}
+                  </Descriptions.Item>
                 </Descriptions>
               </Card>
               <Card className={styles.modelChatCard}>
                 <div className={styles.debugHero}>
                   <div className={styles.sectionTitle}>
                     <span className={styles.sectionBar} />
-                    模型调试
+                    {t('fileBrowserEntry.debug.title')}
                   </div>
-                  <div className={styles.sectionDesc}>输入测试内容，直接调用当前资源配置的大模型并查看返回结果。</div>
-                  <div className={styles.debugModeBadge}>当前模型</div>
+                  <div className={styles.sectionDesc}>{t('fileBrowserEntry.debug.desc')}</div>
+                  <div className={styles.debugModeBadge}>{t('fileBrowserEntry.debug.currentModel')}</div>
                 </div>
                 <div className={styles.debugTips}>
-                  <div className={styles.debugTip}>调试请求使用当前数字员工配置的模型 ID，不会修改模型配置。</div>
-                  <div className={styles.debugTip}>输出支持流式展示；若请求失败，会在输出区展示失败原因。</div>
+                  <div className={styles.debugTip}>{t('fileBrowserEntry.debug.tipModelId')}</div>
+                  <div className={styles.debugTip}>{t('fileBrowserEntry.debug.tipStreaming')}</div>
                 </div>
                 <div className={styles.debugPanelStack}>
                   <div className={styles.codePanel}>
                     <div className={styles.codePanelHeader}>
-                      <span>输入</span>
+                      <span>{t('fileBrowserEntry.debug.input')}</span>
                       <div className={styles.codePanelActions}>
                         <Button size="small" icon={<CopyOutlined />} onClick={() => copyText(modelTestInput)}>
-                          复制
+                          {t('common.copy')}
                         </Button>
                         <Button
                           type="primary"
@@ -559,7 +593,7 @@ export default function FileBrowserEntry() {
                           disabled={modelTesting}
                           onClick={runModelTest}
                         >
-                          运行
+                          {t('fileBrowserEntry.debug.run')}
                         </Button>
                       </div>
                     </div>
@@ -568,33 +602,33 @@ export default function FileBrowserEntry() {
                         value={modelTestInput}
                         onChange={(event) => setModelTestInput(event.target.value)}
                         autoSize={{ minRows: 8, maxRows: 8 }}
-                        placeholder="请输入发送给当前模型的测试消息"
+                        placeholder={t('fileBrowserEntry.debug.inputPlaceholder')}
                       />
                     </div>
                   </div>
                   <div className={styles.codePanel}>
                     <div className={styles.codePanelHeader}>
-                      <span>输出</span>
+                      <span>{t('fileBrowserEntry.debug.output')}</span>
                       <div className={styles.codePanelActions}>
                         <Button size="small" icon={<CopyOutlined />} onClick={() => copyText(modelTestOutput)}>
-                          复制
+                          {t('common.copy')}
                         </Button>
                         <Button size="small" icon={<DeleteOutlined />} onClick={() => setModelTestOutput('')}>
-                          清空
+                          {t('fileBrowserEntry.debug.clear')}
                         </Button>
                       </div>
                     </div>
                     <div className={styles.codeArea} style={{ position: 'relative' }}>
                       {modelOutputLoading ? (
                         <div className={styles.outputLoading}>
-                          <Spin tip="请求中..." />
+                          <Spin tip={t('fileBrowserEntry.debug.requesting')} />
                         </div>
                       ) : null}
                       <Input.TextArea
                         value={modelTestOutput}
                         onChange={(event) => setModelTestOutput(event.target.value)}
                         autoSize={{ minRows: 8, maxRows: 8 }}
-                        placeholder="运行后，当前模型的回复会显示在这里"
+                        placeholder={t('fileBrowserEntry.debug.outputPlaceholder')}
                       />
                     </div>
                   </div>
@@ -607,7 +641,7 @@ export default function FileBrowserEntry() {
     },
     {
       key: 'resources',
-      label: '关联资源',
+      label: t('fileBrowserEntry.tab.resources'),
       children: (
         <div className={styles.resourcePane}>
           <Table
@@ -636,14 +670,19 @@ export default function FileBrowserEntry() {
           role="button"
           tabIndex={0}
         >
-          <img className={styles.fileBrowserIcon} src={fileBrowserIcon} alt="file browser" />
+          <img className={styles.fileBrowserIcon} src={fileBrowserIcon} alt={fileManagementTip} />
         </span>
       </Tooltip>
       {open &&
         container &&
         createPortal(
           <div className={styles.fileBrowserOverlay}>
-            <button className={styles.closeBtn} type="button" aria-label="close" onClick={() => setOpen(false)}>
+            <button
+              className={styles.closeBtn}
+              type="button"
+              aria-label={t('fileBrowserEntry.close')}
+              onClick={() => setOpen(false)}
+            >
               x
             </button>
             <div className={styles.workspaceShell}>
