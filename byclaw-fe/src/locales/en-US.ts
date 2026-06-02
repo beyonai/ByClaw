@@ -30,6 +30,7 @@ export default {
   'common.search': 'Search',
   'common.searchKeyword': 'Enter keyword',
   'common.confirm': 'Confirm',
+  'common.skip': 'Skip',
   'common.save': 'Save',
   'common.collect': 'Favorite',
   'common.collecting': 'Collecting...',
@@ -74,6 +75,9 @@ export default {
   'common.enterCurlCommand': 'Please enter Curl command',
   'common.yes': 'Yes',
   'common.no': 'No',
+  'common.prev': 'Previous',
+  'common.next': 'Next',
+
   'resource.belongField': 'Business Field',
   'resource.belongFieldPlaceholder': 'Please select a business field',
   'resource.knowledge': 'Knowledge',
@@ -1422,6 +1426,9 @@ export default {
   'ThinkRewriteQuestion.originalQuestion': 'Original Question',
   'thinkStatus.errorDetail': 'Error Detail',
   compaction: 'Context Compression',
+
+  'ApprovalForm.cancelAndSubmit': '取消并提交',
+  'ApprovalForm.confirmAndSubmit': '确认并提交',
 
   ...secondEdition,
 };

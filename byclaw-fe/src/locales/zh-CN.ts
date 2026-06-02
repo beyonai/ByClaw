@@ -30,6 +30,7 @@ export default {
   'common.search': '搜索',
   'common.searchKeyword': '请输入关键字',
   'common.confirm': '确定',
+  'common.skip': '跳过',
   'common.save': '保存',
   'common.collect': '收藏',
   'common.collecting': '正在收藏中',
@@ -73,6 +74,9 @@ export default {
   'common.enterCurlCommand': '请输入 Curl 命令',
   'common.yes': '是',
   'common.no': '否',
+  'common.prev': '上一步',
+  'common.next': '下一步',
+
   'resource.belongField': '所属领域',
   'resource.belongFieldPlaceholder': '请选择',
   'resource.knowledge': '知识',
