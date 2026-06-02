@@ -9,7 +9,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * 本机采集端状态视图。
+ * 浏览器登录态能力状态视图。
  * @author qin.guoquan
  * @date 2026-05-29 21:12:18
  */
@@ -17,12 +17,12 @@ import lombok.NoArgsConstructor;
 public class EcosystemAgentStatusVo {
 
     /**
-     * 本机采集端是否在线。
+     * 浏览器登录态能力是否在线。
      */
     private Boolean connected;
 
     /**
-     * 本机采集端名称，通常展示用户设备名。
+     * 浏览器登录态能力名称，通常展示用户设备名或平台 Profile。
      */
     private String agentName;
 

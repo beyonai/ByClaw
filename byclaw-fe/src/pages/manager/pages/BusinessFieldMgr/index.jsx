@@ -3,7 +3,7 @@ import { debounce } from 'lodash';
 import { message } from 'antd';
 import { useDispatch, useIntl } from '@umijs/max';
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
-import BusinessFieldTree from './components/BusinessFieldTree';
+import BusinessFieldTree, { ALL_FIELD_KEY } from './components/BusinessFieldTree';
 import BusinessFieldInfo from './BusinessFieldInfo';
 import BusinessFieldAssets from './BusinessFieldAssets';
 import BusinessFieldInfoModal from './components/BusinessFieldInfoModal';
@@ -37,14 +37,14 @@ const BusinessFieldMgr = () => {
           fieldId: item.catalogId,
           fieldName: item.catalogName,
           fieldDesc: item.catalogDesc || item.remark,
-          parentFieldId: item.pCatalogId || item.parentCatalogId || item.pcatalogId,
+          parentFieldId: item.pCatalogId ?? item.parentCatalogId ?? item.pcatalogId,
           // 排序字段统一使用后端的 orderIndex
           fieldIndex: item.orderIndex,
         }));
         setTreeData(mappedData);
 
         // 如果当前已经选中了某个领域，则在最新的树数据中同步这条记录
-        if (selectedField?.fieldId) {
+        if (selectedField?.fieldId !== undefined && selectedField?.fieldId !== ALL_FIELD_KEY) {
           const current = mappedData.find(
             (item) => item.fieldId === selectedField.fieldId || item.catalogId === selectedField.catalogId
           );
@@ -84,7 +84,15 @@ const BusinessFieldMgr = () => {
             selectedField={selectedField}
             setSelectedField={setSelectedField}
             onSelect={(val) => {
-              const node = treeData.find((item) => item.catalogId === val);
+              if (val === ALL_FIELD_KEY) {
+                setSelectedField({
+                  fieldId: ALL_FIELD_KEY,
+                  fieldName: intl.formatMessage({ id: 'businessField.allCategory' }),
+                  isAllCategory: true,
+                });
+                return;
+              }
+              const node = treeData.find((item) => item.catalogId === val || item.fieldId === val);
               setSelectedField(node);
             }}
             setVisible={setVisible}

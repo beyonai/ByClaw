@@ -172,6 +172,7 @@ async function stopTelemetryReporterLoop(): Promise<void> {
 
 class TelemetryRuntimeController {
   private closed = false;
+  private lastBusy = false;
 
   constructor(
     private readonly state: TelemetryRuntimeState,
@@ -183,6 +184,7 @@ class TelemetryRuntimeController {
       return;
     }
     this.state.recordAgentEvent(event);
+    this.emitIfBusyRose();
   }
 
   markRunStarted(
@@ -197,6 +199,7 @@ class TelemetryRuntimeController {
     this.state.markRunStarted(runKey, "hook", {
       ...(details.label ? { label: details.label } : {}),
     });
+    this.emitIfBusyRose();
   }
 
   markRunEnded(
@@ -207,6 +210,7 @@ class TelemetryRuntimeController {
       return;
     }
     this.state.markRunEnded(runKey, failed);
+    this.emitIfBusyRose();
   }
 
   markToolCallStarted(
@@ -217,6 +221,7 @@ class TelemetryRuntimeController {
       return;
     }
     this.state.markToolCallStarted(toolKey, "hook", metadata);
+    this.emitIfBusyRose();
   }
 
   markToolCallEnded(
@@ -227,6 +232,7 @@ class TelemetryRuntimeController {
       return;
     }
     this.state.markToolCallEnded(toolKey, failed);
+    this.emitIfBusyRose();
   }
 
   markSubagentStarted(
@@ -237,6 +243,7 @@ class TelemetryRuntimeController {
       return;
     }
     this.state.markSubagentStarted(subagentKey, "hook", metadata);
+    this.emitIfBusyRose();
   }
 
   markSubagentEnded(
@@ -247,13 +254,15 @@ class TelemetryRuntimeController {
       return;
     }
     this.state.markSubagentEnded(subagentKey, failed);
+    this.emitIfBusyRose();
   }
 
   emitSnapshot(): void {
     if (this.closed) {
       return;
     }
-    this.reporter.emit("snapshot");
+    const line = this.reporter.emit("snapshot");
+    this.lastBusy = line.busy;
   }
 
   async close(): Promise<void> {
@@ -262,6 +271,16 @@ class TelemetryRuntimeController {
     }
     this.closed = true;
     await this.reporter.close();
+  }
+
+  private emitIfBusyRose(): void {
+    const busy = this.state.isBusy();
+    if (!this.lastBusy && busy) {
+      const line = this.reporter.emit("snapshot");
+      this.lastBusy = line.busy;
+      return;
+    }
+    this.lastBusy = busy;
   }
 }
 

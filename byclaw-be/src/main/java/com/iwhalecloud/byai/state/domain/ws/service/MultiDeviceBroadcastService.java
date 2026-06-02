@@ -126,4 +126,40 @@ public class MultiDeviceBroadcastService {
             }
         }
     }
+
+    /**
+     * 向指定用户的所有在线 WebSocket 通道推送原始 JSON 消息。
+     * 用于生态采集 Browser Bridge 任务下发，普通聊天端收到未知 type 后会自然忽略。
+     *
+     * @param userId 用户ID
+     * @param message 原始消息
+     * @return 成功写入的通道数量
+     */
+    public int broadcastRawToUser(Long userId, JSONObject message) {
+        if (userId == null || message == null) {
+            return 0;
+        }
+
+        Set<Channel> channels = channelManager.getChannels(userId);
+        if (channels.isEmpty()) {
+            return 0;
+        }
+
+        String frameText = message.toJSONString();
+        int sentCount = 0;
+        for (Channel channel : channels) {
+            if (!channel.isActive()) {
+                continue;
+            }
+            try {
+                channel.writeAndFlush(new TextWebSocketFrame(frameText));
+                sentCount++;
+            }
+            catch (Exception e) {
+                log.warn("原始 WebSocket 消息推送失败, userId: {}, messageType: {}",
+                    userId, message.getString("type"), e);
+            }
+        }
+        return sentCount;
+    }
 }

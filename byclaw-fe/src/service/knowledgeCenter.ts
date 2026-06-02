@@ -20,8 +20,11 @@ export interface EcosystemConnector {
   category: string;
   available: boolean;
   requiresLocalAgent: boolean;
+  requiresBrowserAuth?: boolean;
   runLocations: string[];
   authTypes: string[];
+  collectModes?: string[];
+  defaultCollectMode?: string;
   capabilities: string[];
   runtimeType: string;
   status: string;
@@ -67,6 +70,9 @@ export interface EcosystemConnection {
     tokenLast4?: string;
     account?: string;
     imapHost?: string;
+    imapPort?: string | number;
+    imapSsl?: boolean | string;
+    imapFolder?: string;
     oauthProvider?: string;
   };
   runtimeConfig?: Record<string, any>;
@@ -91,6 +97,7 @@ export interface EcosystemTask {
   scope: string;
   ownerType: string;
   runLocation: string;
+  collectMode?: string;
   scheduleType: string;
   scheduleTypeName?: string;
   scheduleConfig?: Record<string, any>;
@@ -154,6 +161,7 @@ export interface EcosystemTaskCreatePayload {
   scope?: string;
   ownerType: string;
   runLocation: string;
+  collectMode?: string;
   scheduleType: string;
   scheduleConfig?: Record<string, any>;
   importTarget: string;
@@ -166,6 +174,15 @@ export interface EcosystemTaskCreatePayload {
   customer?: string;
   domain?: string;
   signalTags?: string[];
+  assets?: Array<{
+    assetType?: string;
+    fileName?: string;
+    contentType?: string;
+    dataUrl?: string;
+    sourceUrl?: string;
+    alt?: string;
+  }>;
+  options?: Record<string, any>;
 }
 
 export interface EcosystemConnectionSavePayload {
@@ -173,10 +190,14 @@ export interface EcosystemConnectionSavePayload {
   connectorCode: string;
   authType: string;
   runLocation: string;
+  collectMode?: string;
   connectionName?: string;
   token?: string;
   account?: string;
   imapHost?: string;
+  imapPort?: string | number;
+  imapSsl?: boolean | string;
+  imapFolder?: string;
   oauthProvider?: string;
   chromeProfile?: string;
   openCliProfile?: string;
@@ -228,13 +249,9 @@ export const queryKnowledgeCapability = () =>
 // 生态采集：连接器清单
 export const queryEcosystemConnectors = () => GET<EcosystemConnector[]>('/byaiService/ecosystemCollection/connectors');
 
-// 生态采集：本机采集端状态
-export const queryEcosystemLocalAgentStatus = () =>
-  GET<EcosystemAgentStatus>('/byaiService/ecosystemCollection/localAgent/status');
-
-// 生态采集：检测本机采集端与 Browser Bridge
-export const detectEcosystemLocalAgent = () =>
-  POST<EcosystemAgentStatus>('/byaiService/ecosystemCollection/localAgent/detect', {});
+// 生态采集：Browser Bridge 状态
+export const queryEcosystemBrowserBridgeStatus = () =>
+  GET<EcosystemAgentStatus>('/byaiService/ecosystemCollection/browserBridge/status');
 
 // 生态采集：用户连接列表
 export const queryEcosystemConnections = (data?: { connectorCode?: string }) =>

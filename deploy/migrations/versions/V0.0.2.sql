@@ -71,16 +71,6 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
         "menuDisplayName": ["平台管理", "组织管理", "业务管理", "平台运维"],
         "menuOrder": 7,
         "path": "/manager/systemParams/sandbox"
-    },
-    {
-        "menuCode": "menu_ui_agent",
-        "menuNameEn": "UI Agent Skills",
-        "menuNameCn": "界面技能管理",
-        "menuUrl": "https://10.10.24.95:18082/skill-studio?uuid=a5wuyo&objectId=10000376&resourceCode=BYAI_DIG_EMPLOYEE_10000376&sessionId=&files=JTVCJTVE&language=zh-CN&session=main&token=${Beyond-token}",
-        "menuDisplay": ["PLAT_MAN", "ORG_MAN", "BUSINESS_MAN", "PLAT_DEVOPS"],
-        "menuDisplayName": ["平台管理", "组织管理", "业务管理", "平台运维"],
-        "menuOrder": 8,
-        "path": ""
     }
 ]', '企业后台菜单管理');
 
@@ -257,3 +247,4 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
     ]
   }
 ]', '数字员工提示词模版');
+

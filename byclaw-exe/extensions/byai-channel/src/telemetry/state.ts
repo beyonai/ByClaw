@@ -171,6 +171,10 @@ export class TelemetryRuntimeState {
     };
   }
 
+  isBusy(): boolean {
+    return this.activeRuns.size + this.activeToolCalls.size + this.activeSubagents.size > 0;
+  }
+
   private recordItemEvent(
     runId: string | undefined,
     data: Record<string, unknown>,

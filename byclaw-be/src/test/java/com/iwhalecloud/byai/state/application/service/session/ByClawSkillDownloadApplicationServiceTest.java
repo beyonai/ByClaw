@@ -16,8 +16,6 @@ import java.util.zip.ZipInputStream;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.storage.UserFS;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
-import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,7 +49,7 @@ class ByClawSkillDownloadApplicationServiceTest {
     private UserFS userFS;
 
     @Mock
-    private SsResourceService ssResourceService;
+    private ByClawSkillPathResolver skillPathResolver;
 
     private ByClawSkillDownloadApplicationService service;
 
@@ -66,7 +64,7 @@ class ByClawSkillDownloadApplicationServiceTest {
 
         service = new ByClawSkillDownloadApplicationService();
         ReflectionTestUtils.setField(service, "userFS", userFS);
-        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        ReflectionTestUtils.setField(service, "skillPathResolver", skillPathResolver);
     }
 
     @AfterEach
@@ -80,7 +78,8 @@ class ByClawSkillDownloadApplicationServiceTest {
         Map<String, byte[]> objectContents = new LinkedHashMap<>();
         objectContents.put(SKILL_PATH + "/SKILL.md", "# skill".getBytes());
         objectContents.put(SKILL_PATH + "/scripts/run.py", "print('hi')".getBytes());
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID))
+            .thenReturn("/.openclaw/workspace-baiying-agent-10000417/skills/");
 
         when(userFS.list(eq(SKILL_PATH + "/"), isNull()))
             .thenReturn(new java.util.ArrayList<>(objectContents.keySet()));
@@ -103,7 +102,8 @@ class ByClawSkillDownloadApplicationServiceTest {
     void shouldTrimTrailingSlashAndAcceptValidPath() throws IOException {
         when(userFS.list(eq(SKILL_PATH + "/"), isNull())).thenReturn(Collections.singletonList(SKILL_PATH + "/SKILL.md"));
         when(userFS.read(eq(SKILL_PATH + "/SKILL.md"))).thenReturn(new ByteArrayInputStream("doc".getBytes()));
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID))
+            .thenReturn("/.openclaw/workspace-baiying-agent-10000417/skills/");
 
         ByClawSkillDownloadApplicationService.SkillZipDownload download = service
             .prepare(USER_CODE, RESOURCE_ID, SKILL_PATH + "/");
@@ -116,6 +116,8 @@ class ByClawSkillDownloadApplicationServiceTest {
 
     @Test
     void shouldRejectPathOutsideSkillsRoot() {
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID))
+            .thenReturn("/.openclaw/workspace-baiying-agent-10000417/skills/");
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
             () -> service.prepare(USER_CODE, RESOURCE_ID, "/.sessions/secret"));
         assertTrue(ex.getMessage().contains("workspace/skills"));
@@ -124,6 +126,8 @@ class ByClawSkillDownloadApplicationServiceTest {
     @Test
     void shouldRejectPathHittingSkillsPrefixWithoutConcreteSkill() {
         // 不允许直接拉走整个 skills/ 目录。
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID))
+            .thenReturn("/.openclaw/workspace-baiying-agent-10000417/skills/");
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
             () -> service.prepare(USER_CODE, RESOURCE_ID, "/.openclaw/workspace-baiying-agent-10000417/skills"));
         assertTrue(ex.getMessage().contains("workspace/skills"));
@@ -131,6 +135,8 @@ class ByClawSkillDownloadApplicationServiceTest {
 
     @Test
     void shouldRejectPathTraversal() {
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID))
+            .thenReturn("/.openclaw/workspace-baiying-agent-10000417/skills/");
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
             () -> service.prepare(USER_CODE, RESOURCE_ID,
                 "/.openclaw/workspace-baiying-agent-10000417/skills/../../etc"));
@@ -147,7 +153,8 @@ class ByClawSkillDownloadApplicationServiceTest {
     @Test
     void shouldRejectMissingSkillDirectory() {
         when(userFS.list(eq(SKILL_PATH + "/"), isNull())).thenReturn(Collections.emptyList());
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID))
+            .thenReturn("/.openclaw/workspace-baiying-agent-10000417/skills/");
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
             () -> service.prepare(USER_CODE, RESOURCE_ID, SKILL_PATH));
@@ -161,7 +168,8 @@ class ByClawSkillDownloadApplicationServiceTest {
             SKILL_PATH + "/SKILL.md",
             "/.openclaw/somewhere/else.txt"));
         when(userFS.read(eq(SKILL_PATH + "/SKILL.md"))).thenReturn(new ByteArrayInputStream("ok".getBytes()));
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID))
+            .thenReturn("/.openclaw/workspace-baiying-agent-10000417/skills/");
 
         ByClawSkillDownloadApplicationService.SkillZipDownload download =
             service.prepare(USER_CODE, RESOURCE_ID, SKILL_PATH);
@@ -175,7 +183,8 @@ class ByClawSkillDownloadApplicationServiceTest {
         when(userFS.list(eq(SUPER_SKILL_PATH + "/"), isNull()))
             .thenReturn(Collections.singletonList(SUPER_SKILL_PATH + "/SKILL.md"));
         when(userFS.read(eq(SUPER_SKILL_PATH + "/SKILL.md"))).thenReturn(new ByteArrayInputStream("doc".getBytes()));
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("adminvip_main"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID))
+            .thenReturn("/.openclaw/workspace/skills/");
 
         ByClawSkillDownloadApplicationService.SkillZipDownload download =
             service.prepare(USER_CODE, RESOURCE_ID, SUPER_SKILL_PATH);
@@ -184,12 +193,6 @@ class ByClawSkillDownloadApplicationServiceTest {
         Map<String, byte[]> zipEntries = readZip(download.getBody());
         assertEquals(1, zipEntries.size());
         assertTrue(zipEntries.containsKey("SKILL.md"));
-    }
-
-    private SsResource resource(String resourceCode) {
-        SsResource resource = new SsResource();
-        resource.setResourceCode(resourceCode);
-        return resource;
     }
 
     private Map<String, byte[]> readZip(StreamingResponseBody body) throws IOException {

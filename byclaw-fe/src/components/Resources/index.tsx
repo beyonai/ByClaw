@@ -14,6 +14,7 @@ import { queryKnowledgeCapability, type KnowledgeCapability } from '@/service/kn
 import {
   applyResourceUse,
   queryFixedEntryOperationCapability,
+  queryResourceOperationPermissions,
   type FixedEntryOperationCapability,
 } from '@/pages/manager/service/resources';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
@@ -44,6 +45,12 @@ interface IResourceItem {
   resourceBizType?: string;
   resourceSourcePkId?: string;
   catalogId?: string | number;
+  hasManagePermission?: boolean;
+  hasUsePermission?: boolean;
+  canViewDetail?: boolean;
+  canEdit?: boolean;
+  canManageAuth?: boolean;
+  canDelete?: boolean;
   canApplyUse?: boolean;
   canAuditUse?: boolean;
 }
@@ -51,8 +58,6 @@ interface IResourceItem {
 interface Props {
   resourceType: string; // 对应资源类型
 }
-
-type EcosystemSourceKey = 'zhihu' | 'github' | 'web' | 'mail' | 'dingtalk';
 
 const Resources: React.FC<Props> = ({ resourceType }) => {
   const intl = useIntl();
@@ -74,9 +79,10 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
 
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [collectorOpen, setCollectorOpen] = useState(false);
-  const [collectorInitialSource, setCollectorInitialSource] = useState<EcosystemSourceKey>();
+  const [collectorInitialSource, setCollectorInitialSource] = useState<string>();
   const [collectorInitialSourceUrl, setCollectorInitialSourceUrl] = useState('');
   const [collectorInitialScope, setCollectorInitialScope] = useState('');
+  const [collectorInitialCollectMode, setCollectorInitialCollectMode] = useState('');
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [resourceDetailOpen, setResourceDetailOpen] = useState(false);
@@ -177,13 +183,10 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     if (resourceType !== 'KG_DOC' || searchParams.get('ecosystem') !== '1') {
       return;
     }
-    const source = searchParams.get('source') || undefined;
-    const supportedSources: EcosystemSourceKey[] = ['zhihu', 'github', 'web', 'mail', 'dingtalk'];
-    setCollectorInitialSource(
-      supportedSources.includes(source as EcosystemSourceKey) ? (source as EcosystemSourceKey) : undefined
-    );
+    setCollectorInitialSource(searchParams.get('source') || undefined);
     setCollectorInitialSourceUrl(searchParams.get('sourceUrl') || '');
     setCollectorInitialScope(searchParams.get('scope') || '');
+    setCollectorInitialCollectMode(searchParams.get('collectMode') || '');
     setActiveTab('personal');
     setCollectorOpen(true);
   }, [resourceType, searchParams]);
@@ -225,7 +228,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   }, [activeTab, fixedEntryCapability, resourceType]);
 
   const handleDetail = useCallback(
-    (item: IResourceItem) => {
+    async (item: IResourceItem) => {
       const { resourceBizType, resourceId, resourceSourcePkId } = item;
 
       if (
@@ -257,6 +260,29 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         resourceBizType &&
         [resourceBizTypeMap.KG_DOC, resourceBizTypeMap.KG_QA, resourceBizTypeMap.KG_TERM].includes(resourceBizType)
       ) {
+        if (!resourceId) {
+          message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
+          return;
+        }
+        try {
+          const res: any = await queryResourceOperationPermissions({ resourceId });
+          const permissions = res?.data || res || {};
+          const canViewDetail =
+            permissions?.canViewDetail ??
+            permissions?.hasManagePermission ??
+            permissions?.hasUsePermission ??
+            permissions?.canEdit ??
+            permissions?.canManageAuth ??
+            permissions?.canDelete ??
+            false;
+          if (!canViewDetail) {
+            message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
+            return;
+          }
+        } catch (error: any) {
+          message.error(error?.msg || error?.message || intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
+          return;
+        }
         const params = new URLSearchParams();
         if (resourceId) {
           params.set('resourceId', resourceId);
@@ -520,6 +546,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         initialSource={collectorInitialSource}
         initialSourceUrl={collectorInitialSourceUrl}
         initialScope={collectorInitialScope}
+        initialCollectMode={collectorInitialCollectMode}
         onCancel={() => {
           setCollectorOpen(false);
         }}

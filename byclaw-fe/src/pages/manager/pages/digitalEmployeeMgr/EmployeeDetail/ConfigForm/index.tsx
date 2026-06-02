@@ -256,8 +256,8 @@ const ConfigForm = (props) => {
     showBaseList,
     updateResource,
     updateCompositeAppInfo,
-    skills,
-    setSkills,
+    selectedTools,
+    setSelectedTools,
     knowledgeBases,
     setKnowledgeBases,
     tagOptions,
@@ -305,7 +305,7 @@ const ConfigForm = (props) => {
   const [bundledSkillSearchName, setBundledSkillSearchName] = useState('');
   const formOwnerType = Form.useWatch('ownerType', form, { form, preserve: true });
   const effectiveOwnerType = formOwnerType || ownerType;
-  const selectedBundledSkills = Form.useWatch('bundledSkills', { form, preserve: true }) || [];
+  const selectedSkills = Form.useWatch('bundledSkills', { form, preserve: true }) || [];
 
   useEffect(() => {
     let mounted = true;
@@ -460,6 +460,18 @@ const ConfigForm = (props) => {
     };
   }, []);
 
+  useEffect(() => {
+    if (agentId || !Array.isArray(catalogList) || catalogList.length === 0) return;
+
+    const currentCatalogId = form.getFieldValue('catalogId');
+    if (currentCatalogId !== undefined && currentCatalogId !== null && `${currentCatalogId}` !== '') return;
+
+    const firstCatalogId = catalogList[0]?.catalogId;
+    if (firstCatalogId === undefined || firstCatalogId === null || `${firstCatalogId}` === '') return;
+
+    form.setFieldsValue({ catalogId: firstCatalogId });
+  }, [agentId, catalogList, form]);
+
   const robotChannelLabelMap = useMemo(
     () =>
       robotChannelOptions.reduce((map, item) => {
@@ -489,7 +501,7 @@ const ConfigForm = (props) => {
   const internalSyncRef = useRef(false);
 
   const [relResourceInfoModalOpen, setRelResourceInfoModalOpen] = useState(false);
-  const [skillItem, setSkillItem] = useState(null);
+  const [selectedToolItem, setSelectedToolItem] = useState(null);
   const [boundaryModalOpen, setBoundaryModalOpen] = useState(false);
   const [editingBoundaryAbilityId, setEditingBoundaryAbilityId] = useState(null);
   const [exampleModalOpen, setExampleModalOpen] = useState(false);
@@ -526,7 +538,7 @@ const ConfigForm = (props) => {
 
   const handleToolSelectorConfirm = useCallback(
     (selectedRows) => {
-      setSkills((prev) => {
+      setSelectedTools((prev) => {
         const existMap = new Map(prev.map((it) => [`${it.resourceId}`, it]));
         selectedRows.forEach((item) => {
           const resourceId = `${item.resourceId || item.id}`;
@@ -543,7 +555,7 @@ const ConfigForm = (props) => {
         return Array.from(existMap.values());
       });
     },
-    [setSkills, normalizeSkillType]
+    [setSelectedTools, normalizeSkillType]
   );
 
   // 记录上一次的初始岗位职责，用于判断是否需要根据外部变更重新回显
@@ -1622,7 +1634,7 @@ const ConfigForm = (props) => {
               </Form.Item>
             </div>
 
-            {/* 目录管理 */}
+            {/* 所属领域 */}
             <Form.Item label={intl.formatMessage({ id: 'employeeDetail.catalogManage' })} name="catalogId">
               <TreeSelect
                 allowClear
@@ -1902,19 +1914,16 @@ const ConfigForm = (props) => {
                       + {intl.formatMessage({ id: 'common.plus' })}
                     </Button>
                   </div>
-                  {/* <UploadFileConfig prologueRef={prologueRef} isReadOnly={isReadOnly} setSkills={setSkills} /> */}
+                  {/* <UploadFileConfig prologueRef={prologueRef} isReadOnly={isReadOnly} /> */}
                   <div className={styles.skillsList}>
-                    {skills.map((skill, index) => {
+                    {selectedTools.map((tool, index) => {
                       return (
-                        <Card
-                          key={[skill.id, index].join()}
-                          className={classnames(styles.configCard, styles.skillCard)}
-                        >
+                        <Card key={[tool.id, index].join()} className={classnames(styles.configCard, styles.skillCard)}>
                           <div className={styles.skillContent}>
                             <AntdIcon type="icon-chajiantubiao" className={styles.fontSize36MarginRight12} />
                             <div className={styles.skillInfo}>
                               <div className={styles.skillHeader}>
-                                <span className={styles.skillName}>{skill.resourceName}</span>
+                                <span className={styles.skillName}>{tool.resourceName}</span>
                                 <Tag size="small" className={styles.skillTag}>
                                   {
                                     {
@@ -1930,19 +1939,19 @@ const ConfigForm = (props) => {
                                       MCP: 'MCP',
                                       VIEW: intl.formatMessage({ id: 'employeeDetail.view' }),
                                       OBJECT: intl.formatMessage({ id: 'employeeDetail.object' }),
-                                    }[skill.grantResourceType]
+                                    }[tool.grantResourceType]
                                   }
                                 </Tag>
                               </div>
-                              <div className={styles.skillDescription}>{skill.description}</div>
+                              <div className={styles.skillDescription}>{tool.description}</div>
                             </div>
                             <div className={styles.skillActions}>
                               {isReadOnly ? (
                                 <Space>
-                                  {['VIEW', 'OBJECT'].includes(skill.grantResourceType) && (
+                                  {['VIEW', 'OBJECT'].includes(tool.grantResourceType) && (
                                     <EyeOutlined
                                       onClick={() => {
-                                        setSkillItem(skill);
+                                        setSelectedToolItem(tool);
                                         setRelResourceInfoModalOpen(true);
                                       }}
                                     />
@@ -1950,10 +1959,10 @@ const ConfigForm = (props) => {
                                 </Space>
                               ) : (
                                 <Space>
-                                  {['VIEW', 'OBJECT'].includes(skill.grantResourceType) && (
+                                  {['VIEW', 'OBJECT'].includes(tool.grantResourceType) && (
                                     <FormOutlined
                                       onClick={() => {
-                                        setSkillItem(skill);
+                                        setSelectedToolItem(tool);
                                         setRelResourceInfoModalOpen(true);
                                       }}
                                     />
@@ -1961,7 +1970,7 @@ const ConfigForm = (props) => {
                                   <AntdIcon
                                     type="icon-a-Deleteshanchu"
                                     onClick={() => {
-                                      setSkills(skills.filter((it) => it.resourceId !== skill.resourceId));
+                                      setSelectedTools(selectedTools.filter((it) => it.resourceId !== tool.resourceId));
                                     }}
                                   />
                                 </Space>
@@ -1994,9 +2003,9 @@ const ConfigForm = (props) => {
                       + {intl.formatMessage({ id: 'common.plus' })}
                     </Button>
                   </div>
-                  {selectedBundledSkills.length > 0 && (
+                  {selectedSkills.length > 0 && (
                     <div className={styles.skillsList}>
-                      {selectedBundledSkills
+                      {selectedSkills
                         .map((code) => bundledSkillOptions.find((item) => item.value === code))
                         .filter(Boolean)
                         .map((item) => (
@@ -2015,9 +2024,7 @@ const ConfigForm = (props) => {
                                     <AntdIcon
                                       type="icon-a-Deleteshanchu"
                                       onClick={() => {
-                                        updateBundledSkills(
-                                          selectedBundledSkills.filter((code) => code !== item.value)
-                                        );
+                                        updateBundledSkills(selectedSkills.filter((code) => code !== item.value));
                                       }}
                                     />
                                   </Space>
@@ -2602,7 +2609,7 @@ const ConfigForm = (props) => {
         open={relResourceInfoModalOpen}
         onClose={() => setRelResourceInfoModalOpen(false)}
         onOk={(item) => {
-          setSkills((prev) => {
+          setSelectedTools((prev) => {
             const target = prev.find((it) => it.resourceId === item.resourceId);
             if (target) {
               Object.assign(target, item);
@@ -2611,7 +2618,7 @@ const ConfigForm = (props) => {
             return prev;
           });
         }}
-        item={skillItem}
+        item={selectedToolItem}
         isReadOnly={isReadOnly}
       />
       <Modal
@@ -2649,7 +2656,7 @@ const ConfigForm = (props) => {
               {filteredBundledSkillOptions.length > 0 ? (
                 <div className={styles.bundledSkillCardList}>
                   {filteredBundledSkillOptions.map((item) => {
-                    const isSelected = selectedBundledSkills.includes(item.value);
+                    const isSelected = selectedSkills.includes(item.value);
 
                     return (
                       <div key={item.value} className={styles.bundledSkillModalCard}>
@@ -2679,10 +2686,10 @@ const ConfigForm = (props) => {
                             size="small"
                             onClick={() => {
                               if (isSelected) {
-                                updateBundledSkills(selectedBundledSkills.filter((code) => code !== item.value));
+                                updateBundledSkills(selectedSkills.filter((code) => code !== item.value));
                                 return;
                               }
-                              updateBundledSkills([...selectedBundledSkills, item.value]);
+                              updateBundledSkills([...selectedSkills, item.value]);
                             }}
                           >
                             {isSelected

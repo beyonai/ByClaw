@@ -8,14 +8,13 @@
  *
  * Clones to: skills/github-code-analysis/.cache/<repo-name>/
  * If already cloned, does `git pull` to update. Use --force to re-clone.
- *
- * Env: GITHUB_TOKEN (optional, for private repos)
  */
 
 import { execSync } from "node:child_process";
 import { existsSync, rmSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { requireGitHubToken } from "./gh-token.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CACHE_DIR = path.join(__dirname, "..", ".cache");
@@ -34,22 +33,10 @@ function hasFlag(name) {
 const repo = getArg("repo") || process.env.GITHUB_PR_REVIEW_REPO || "beyonai/ByClaw";
 const branch = getArg("branch") || "main";
 const force = hasFlag("force");
-const token = process.env.GITHUB_TOKEN;
+const token = await requireGitHubToken();
 
 function fail(message) {
   console.log(JSON.stringify({ ok: false, error: message }));
-  process.exit(1);
-}
-
-if (!token) {
-  const authUrl = "https://github.com/settings/tokens/new?scopes=repo&description=ByClaw+PR+Review+Skill";
-  console.log(JSON.stringify({
-    ok: false,
-    error: "GITHUB_TOKEN not configured",
-    auth_required: true,
-    auth_url: authUrl,
-    message: `GitHub 授权未配置。请点击以下链接创建 Personal Access Token，然后将其设置为环境变量 GITHUB_TOKEN：\n\n${authUrl}\n\n创建时请确保勾选 repo 权限。创建后运行：export GITHUB_TOKEN=<your_token>`,
-  }));
   process.exit(1);
 }
 
