@@ -40,6 +40,7 @@ export interface DirectoryManageRef {
 interface IProps {
   searchValue?: string;
   baseInfo: any;
+  canManage?: boolean;
   setShowAddFolder: (show: boolean) => void;
   uploadLoading: boolean;
   setUploadLoading: (loading: boolean) => void;
@@ -69,7 +70,7 @@ type IFileBuildStatus = {
 };
 
 const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) => {
-  const { searchValue = '', baseInfo, setShowAddFolder, uploadLoading, setUploadLoading } = props;
+  const { searchValue = '', baseInfo, canManage = false, setShowAddFolder, uploadLoading, setUploadLoading } = props;
 
   const { folderPath, setFolderPath } = props;
 
@@ -646,8 +647,10 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
 
   const getActions = useCallback(
     (record: any) => {
-      let actionList: ActionItem[] = [
-        {
+      let actionList: ActionItem[] = [];
+
+      if (canManage) {
+        actionList.push({
           label: intl.formatMessage({ id: 'common.delete' }),
           key: 'delete',
           icon: (
@@ -655,10 +658,10 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
               <span className="iconfont icon-a-Deleteshanchu" />
             </Tooltip>
           ),
-        },
-      ];
+        });
+      }
 
-      if (record?.type === 'directory') {
+      if (record?.type === 'directory' && canManage) {
         // 目录显示重命名按钮
         actionList.unshift({
           label: intl.formatMessage({ id: 'directoryManage.rename' }),
@@ -677,21 +680,23 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
             </Tooltip>
           ),
         });
-        actionList.unshift({
-          label: intl.formatMessage({ id: 'directoryManage.build' }),
-          key: 'build',
-          disabled: isBuilding,
-          icon: (
-            <Tooltip title={intl.formatMessage({ id: 'directoryManage.buildFile' })}>
-              {isBuilding ? <Spin size="small" /> : <span className="iconfont icon-goujian" />}
-            </Tooltip>
-          ),
-        });
+        if (canManage) {
+          actionList.unshift({
+            label: intl.formatMessage({ id: 'directoryManage.build' }),
+            key: 'build',
+            disabled: isBuilding,
+            icon: (
+              <Tooltip title={intl.formatMessage({ id: 'directoryManage.buildFile' })}>
+                {isBuilding ? <Spin size="small" /> : <span className="iconfont icon-goujian" />}
+              </Tooltip>
+            ),
+          });
+        }
       }
 
       return actionList;
     },
-    [buildingFileIds, getFileRowKey, intl]
+    [buildingFileIds, canManage, getFileRowKey, intl]
   );
 
   const columns = useMemo(
@@ -824,6 +829,9 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         align: 'center',
         render: (v: string, record: any) => {
           const actions = getActions(record);
+          if (!actions.length) {
+            return null;
+          }
           return <ButtonsWithMore actions={actions} maximun={4} handleAction={(key) => handleAction(key, record)} />;
         },
       },
@@ -850,6 +858,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
             emptyText: (
               <DirectoryEmpty
                 baseInfo={baseInfo}
+                canManage={canManage}
                 setShowAddFolder={setShowAddFolder}
                 uploadLoading={uploadLoading}
                 setUploadLoading={setUploadLoading}

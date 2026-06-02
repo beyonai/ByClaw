@@ -333,9 +333,12 @@ export interface ResourceOperationPermissions {
   resourceId: string; // 资源ID
   ownerType: string; // 所有者类型
   resourceBizType: string; // 资源业务类型
+  hasManagePermission?: boolean; // 是否具备资源管理权限
+  hasUsePermission?: boolean; // 是否具备资源使用权限
+  canViewDetail?: boolean; // 是否允许进入资源详情
   canEdit: boolean; // 是否有编辑权限
   canManageAuth: boolean; // 是否有管理权限权限
-  canUseAuth: boolean; // 是否有使用权限
+  canUseAuth: boolean; // 是否可设置使用授权
   canDelete: boolean; // 是否有删除权限
   canApplyUse: boolean; // 是否可以申请使用
   canAuditUse: boolean; // 是否有审核权限

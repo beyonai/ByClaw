@@ -33,6 +33,9 @@ export interface IResourceCardItem {
   creatorId?: string;
   createBy?: string;
   resourceType?: string;
+  hasManagePermission?: boolean;
+  hasUsePermission?: boolean;
+  canViewDetail?: boolean;
   canEdit?: boolean;
   canManageAuth?: boolean;
   canUseAuth?: boolean;
@@ -561,9 +564,15 @@ function ResourceCard(props: ResourceCardProps) {
                   canAuditUse,
                   canSetDefault,
                   canRestore,
+                  hasManagePermission,
+                  hasUsePermission,
+                  canViewDetail,
                 } = permissions;
                 setResourceWithPermissions({
                   ...resource,
+                  hasManagePermission,
+                  hasUsePermission,
+                  canViewDetail,
                   canEdit,
                   canManageAuth,
                   canUseAuth,
