@@ -16,6 +16,8 @@ export type RedisJsonPayload = {
 
 export type BaiyingRedisJsonStore = {
     getJsonByKey: (key: string) => Promise<RedisJsonPayload | null>;
+    getStringByKey?: (key: string) => Promise<string | null>;
+    getHashByKey?: (key: string) => Promise<Record<string, string> | null>;
     getHashJson?: (params: { key: string; field: string }) => Promise<RedisJsonPayload | null>;
     getDigEmployeeJson: (resourceId: string) => Promise<RedisJsonPayload | null>;
     getResourceJson: (params: {
@@ -180,6 +182,47 @@ export function createRedisJsonStore(params: { logger?: LoggerLike } = {}): Baiy
         return parsed;
     };
 
+    const getStringByKey = async (key: string): Promise<string | null> => {
+        const trimmed = key.trim();
+        if (!trimmed) {
+            return null;
+        }
+        const client = await connect();
+        if (!client) {
+            return null;
+        }
+        try {
+            return await client.get(trimmed);
+        } catch (err) {
+            params.logger?.warn?.(
+                `baiying-enhance: Redis GET failed key=${trimmed}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            return null;
+        }
+    };
+
+    const getHashByKey = async (key: string): Promise<Record<string, string> | null> => {
+        const trimmed = key.trim();
+        if (!trimmed) {
+            return null;
+        }
+        const client = await connect();
+        if (!client) {
+            return null;
+        }
+        try {
+            const values = await client.hgetall(trimmed);
+            return Object.keys(values).length > 0 ? values : null;
+        } catch (err) {
+            params.logger?.warn?.(
+                `baiying-enhance: Redis HGETALL failed key=${trimmed}: ${
+                    err instanceof Error ? err.message : String(err)
+                }`,
+            );
+            return null;
+        }
+    };
+
     const getHashJson = async (paramsIn: {
         key: string;
         field: string;
@@ -219,6 +262,8 @@ export function createRedisJsonStore(params: { logger?: LoggerLike } = {}): Baiy
 
     return {
         getJsonByKey,
+        getStringByKey,
+        getHashByKey,
         getHashJson,
         getDigEmployeeJson: (resourceId) => getJsonByKey(digEmployeeRedisKey(resourceId)),
         getResourceJson: ({ resourceBizType, resourceId }) =>

@@ -14,8 +14,8 @@
 
 | 能力                         | 说明                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Agent 同步**               | 按授权 id 读取 Redis `DIG_EMPLOYEE_{resourceId}`，解析并适配为 OpenClaw `agents.list` 条目；若存在 `prologue.modelId`，再从 `byai:aimodel:config` 读取模型详情并写入托管 `models.providers`，写回当前生效配置文件（通常为 `openclaw.json`）。`aimodel` 临时不可用时保留上次成功同步的模型绑定。 |
-| **模型密钥**                 | `byai:aimodel:config` 中的 `authToken` 不落盘到 `openclaw.json`；托管 provider 写入 exec SecretRef（默认 provider `baiying-aimodel-redis`），运行时再从 Redis 取 token。                                                                                                                                                                                                                                                     |
+| **Agent 同步**               | 按授权 id 读取 Redis `DIG_EMPLOYEE_{resourceId}`，解析并适配为 OpenClaw `agents.list` 条目；若存在 `prologue.modelId`，再从 `byai:aimodel:config` 读取模型详情；否则从 `byai:aimodel:typelist` 的 `LLM` field 读取默认 LLM。模型会写入托管 `models.providers`，默认 LLM 同时写入 `agents.defaults.model.primary` 供 main 使用。`aimodel` 临时不可用时保留上次成功同步的模型绑定。 |
+| **模型密钥**                 | `byai:aimodel:config` / `byai:aimodel:typelist` 中的 `authToken` 不落盘到 `openclaw.json`；托管 provider 写入 exec SecretRef（默认 provider `baiying-aimodel-redis`），运行时再从 Redis 取 token。                                                                                                                                                                                                                                                     |
 | **模型热切换**               | Redis Pub/Sub 或授权变更触发同步后，插件会热写 `agents` / `models`，并对已有 session 同步 `providerOverride` / `modelOverride` 与 `modelProvider` / `model`；模型变化时设置 `liveModelSwitchPending`，入站消息和每轮 `before_model_resolve` 再次按最新配置兜底对齐。                                                                                                                                                   |
 | **授权过滤**                 | 通过 Redis 中 `USER_CODE` 关联的 dig-employee 授权集合，仅同步当前用户可见的数字员工；授权集合变化会触发全量工作区再种子化（`fullWorkspaceReseed`）。                                                                                                                                                                                                                                                                        |
 | **Redis Pub/Sub**            | 订阅 `digEmployeeChangeChannel`（默认 `byai:pub:dig_employee_change`），合并去抖后触发与目录扫描一致的 flush（含 `DIG_EMPLOYEE_DELETED` 等）。                                                                                                                                                                                                                                                                               |
@@ -217,7 +217,8 @@ sequenceDiagram
 
 - `prologue.modelId` 是百应侧数字员工到模型服务的唯一输入；模型 URL、`modelCode`、上下文窗口、`authToken` 等来自 Redis Hash `byai:aimodel:config`。
 - `authToken` 只作为 exec SecretRef 的运行时来源，不写入数字员工提示词、`auth-profiles.json` 或 `openclaw.json` 明文。
-- 已存在 session 由 `reconcileAgentSessionModelsAfterSync` 更新；新建或刚进入的 byai 会话由 `before_dispatch` 钩子补齐；每轮实际模型解析再由 `before_model_resolve` 兜底。
+- 已存在 session 由 `reconcileAgentSessionModelsAfterSync` 更新；新建或刚进入的 byai 会话由 `before_dispatch` 钩子补齐；`before_model_resolve` 只做模型 override，不再写 session store（避免与 embedded transcript 锁竞态）。
+- `before_prompt_build` 对 main 默认 LLM 使用 **只读** run-check（`allowConfigMutation: false`），不在工具轮次触发 `writeConfigFile` / flush，防止 `session file changed while embedded prompt lock was released`。
 - `byai-channel` SDK worker 每次处理消息都读取 runtime current config，避免热重载后仍使用启动时捕获的旧 `OpenClawConfig`。
 - 当前正在生成的 turn 不会中途换模型；模型变更通常从下一条入站消息或下一轮 embedded run 生效。
 
@@ -278,6 +279,7 @@ flowchart TD
 | [SUBAGENT_ROUTING_SCHEME.md](./SUBAGENT_ROUTING_SCHEME.md)                           | 主会话子 agent 路由与 `SUBAGENT_ROUTING.md` |
 | [AGENT_JSON_WORKSPACE_MD_MAPPING.md](./AGENT_JSON_WORKSPACE_MD_MAPPING.md)           | Agent JSON 与各工作区 Markdown 字段映射     |
 | [dig-employee-pubsub-client-migration.md](./dig-employee-pubsub-client-migration.md) | Pub/Sub 客户端迁移说明                      |
+| [STARTUP_LAZY_IMPORT_PLAN.md](./STARTUP_LAZY_IMPORT_PLAN.md)                       | 启动 trace、lazy import 清单与目标耗时      |
 
 ---
 

@@ -15,6 +15,12 @@ import {
   cancelActiveSdkCompletionCheck,
   scheduleActiveSdkCompletionCheck,
 } from "./sdk-session-completion.js";
+import {
+  resolveAssistantDisplayStream,
+  resolveAssistantEventKind,
+  resolveAssistantEventText,
+  resolveReasoningEventText,
+} from "./agent-event-kind.js";
 import { AgentEvent } from "./types";
 import type { OpenClawPluginApi } from "@openclaw/plugin-sdk/core";
 import { emitIncrementalText, getAgentNameById, normalizeReasoningPreviewText } from "./utils";
@@ -24,17 +30,27 @@ import {
   buildToolStartTitle as buildLocalizedToolStartTitle,
 } from "./i18n.js";
 
-let lastAgentAssistantEvent: {
+type AgentStreamState = {
   seq: number;
   stream: string;
   runId: string;
   startTime: number;
-} = {
-  seq: 0,
-  stream: "",
-  runId: "",
-  startTime: 0,
 };
+
+const lastAgentAssistantEventBySession = new Map<string, AgentStreamState>();
+
+function emptyAgentStreamState(): AgentStreamState {
+  return { seq: 0, stream: "", runId: "", startTime: 0 };
+}
+
+function resolveAgentStreamState(sessionKey: string): AgentStreamState {
+  let state = lastAgentAssistantEventBySession.get(sessionKey);
+  if (!state) {
+    state = emptyAgentStreamState();
+    lastAgentAssistantEventBySession.set(sessionKey, state);
+  }
+  return state;
+}
 
 const toolStartArgsByCallId = new Map<string, Record<string, any>>();
 
@@ -99,6 +115,10 @@ type ToolEventData = {
   result?: {
     details: Record<string, any>;
   };
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 async function handleToolEvent(
@@ -169,21 +189,50 @@ async function handleToolEvent(
   }
 }
 
+type AssistantStreamContext = {
+  isContinuingThinking: boolean;
+  isContinuingAnswer: boolean;
+};
+
 async function handleAssistantEvent(
   request: ActiveSdkRequest,
   event: AgentEvent,
   isChildSession: boolean,
+  streamContext: AssistantStreamContext,
 ) {
   const sdkEmitter = resolveSdkEmitter(request.accountId);
-  const { data } = event;
-  const { delta } = data || {};
-  if (!delta) {
+  const kind = resolveAssistantEventKind(event, isChildSession);
+  if (kind === "ignore") {
     return;
   }
-  await emitSdkChunk(request, sdkEmitter, delta as string, {
-    messageId: request.sessionKey,
+  const text = resolveAssistantEventText(event, kind);
+  if (!text) {
+    return;
+  }
+  if (kind === "reasoning") {
+    await emitReasoningText(
+      request,
+      event.runId,
+      "assistant",
+      text,
+      streamContext.isContinuingThinking,
+    );
+    return;
+  }
+  const previousEmit = getLastSdkEmitChunk(request.accountId);
+  const answerOptions: EmitOptions = {
     parentMessageId: "-1",
-    eventType: isChildSession ? EventType.REASONING_LOG_DELTA : EventType.ANSWER_DELTA,
+    eventType: EventType.ANSWER_DELTA,
+    messageId: streamContext.isContinuingAnswer && previousEmit?.messageId
+      ? previousEmit.messageId
+      : request.sessionKey,
+  };
+  await emitIncrementalText({
+    key: `${event.runId}:assistant:answer`,
+    rawText: stringValue(event.data?.text) || text,
+    emit: async (answerDelta) => {
+      await emitSdkChunk(request, sdkEmitter, answerDelta, answerOptions);
+    },
   });
 }
 
@@ -270,8 +319,18 @@ async function handleThinkingEvent(
   event: AgentEvent,
   isPreviousThinking: boolean,
 ) {
+  const text = resolveReasoningEventText(event);
+  await emitReasoningText(request, event.runId, "thinking", text, isPreviousThinking);
+}
+
+async function emitReasoningText(
+  request: ActiveSdkRequest,
+  runId: string,
+  source: string,
+  text: string,
+  isPreviousThinking: boolean,
+) {
   const sdkEmitter = resolveSdkEmitter(request.accountId);
-  const text = event.data?.text as string ?? "";
   const previousEmit = getLastSdkEmitChunk(request.accountId);
   const options: EmitOptions = {
     eventType: EventType.REASONING_LOG_DELTA,
@@ -284,7 +343,7 @@ async function handleThinkingEvent(
     options.parentMessageId = "-1";
   }
   await emitIncrementalText({
-    key: `${event.runId}:thinking`,
+    key: `${runId}:${source}:thinking`,
     rawText: text,
     normalize: normalizeReasoningPreviewText,
     emit: async (reasoningDelta) => {
@@ -301,6 +360,8 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
   if (!correlationKey) {
     return;
   }
+  const streamStateKey = resolvedSessionKey || runId;
+  const lastAgentAssistantEvent = resolveAgentStreamState(streamStateKey);
   if (lastAgentAssistantEvent.runId === runId && lastAgentAssistantEvent.seq >= seq) {
     return;
   }
@@ -314,28 +375,32 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
     `[byai-channel] onAgentEvent: ${JSON.stringify(event)}`,
   );
   const isChildSession = isChildSessionKey(resolvedSessionKey);
-  const isPreviousThinking = lastAgentAssistantEvent.stream === "thinking";
-  if (isPreviousThinking && event.stream !== "thinking") {
+  const currentStream = resolveAssistantDisplayStream(event, isChildSession);
+  const previousStream = lastAgentAssistantEvent.stream;
+  const isPreviousThinking = previousStream === "thinking";
+  if (isPreviousThinking && currentStream !== "thinking") {
     await handleReasoningEndTransition(request, Date.now() - lastAgentAssistantEvent.startTime);
   }
-  const previousStream = lastAgentAssistantEvent.stream;
   lastAgentAssistantEvent.seq = seq;
   lastAgentAssistantEvent.runId = runId;
-  if (previousStream !== event.stream) {
+  if (previousStream !== currentStream) {
     lastAgentAssistantEvent.startTime = Date.now();
   }
-  lastAgentAssistantEvent.stream = event.stream;
+  lastAgentAssistantEvent.stream = currentStream;
   if (event.stream === 'tool') {
     await handleToolEvent(request, event, isChildSession);
   } else if (event.stream === 'assistant') {
-    if (previousStream !== "assistant" && toBeEmittedChunkAfterBaiyingCallTool) {
+    if (currentStream === "assistant" && previousStream !== "assistant" && toBeEmittedChunkAfterBaiyingCallTool) {
       // 无论是主agent还是subagent，开始输出正文前，先把baiying_call工具缓存起来的chunk emit出来
       await emitChunkGenByBaiyingCallTool(request);
     }
-    await handleAssistantEvent(request, event, isChildSession);
+    await handleAssistantEvent(request, event, isChildSession, {
+      isContinuingThinking: isPreviousThinking && currentStream === "thinking",
+      isContinuingAnswer: previousStream === "assistant" && currentStream === "assistant",
+    });
   } else if (event.stream === "lifecycle") {
     await handleLifecycleEvent(api, request, event, resolvedSessionKey);
-  } else if (event.stream === "thinking") {
+  } else if (currentStream === "thinking") {
     await handleThinkingEvent(request, event, isPreviousThinking);
   }
 }

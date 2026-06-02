@@ -1,5 +1,9 @@
 {
   "id": "byai-channel",
+  "enabledByDefault": true,
+  "activation": {
+    "onStartup": true
+  },
   "channels": ["byai-channel"],
   "configSchema": {
     "type": "object",

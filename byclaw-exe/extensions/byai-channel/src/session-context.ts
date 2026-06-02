@@ -1,6 +1,7 @@
 import path from "node:path";
 import { EmitOptions, EventType, type GatewayDataEmitter } from "@byclaw/by-framework";
 import type { ByaiInboundMessage, Language } from "./types.js";
+import { isSessionDispatchBusy } from "./session-dispatch-gate.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 const DEFAULT_ACCOUNT_KEY = "default";
@@ -324,6 +325,11 @@ export function registerActiveSdkRequest(params: {
   }
   const existingBySession = activeSdkRequestsBySession.get(params.sessionKey);
   if (existingBySession) {
+    if (isSessionDispatchBusy(params.sessionKey)) {
+      throw new Error(
+        `byai-channel: refused to replace in-flight SDK request while session dispatch gate is held: ${params.sessionKey}`,
+      );
+    }
     clearActiveSdkRequestRecord(existingBySession);
   }
   const existingRequestByTraceId = activeSdkRequestsByTraceId.get(params.traceId);
