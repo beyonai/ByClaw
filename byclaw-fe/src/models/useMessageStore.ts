@@ -272,7 +272,7 @@ export default {
 
       const oldSessionListMap = new Map(state.sessionListMap);
 
-      oldSessionListMap.set(sessionId, messageListInfo);
+      oldSessionListMap.set(`${sessionId}`, messageListInfo);
 
       return {
         ...state,
@@ -299,7 +299,7 @@ export default {
       let newSessionListMap = action.silent ? oldSessionListMap : new Map(oldSessionListMap);
 
       if (oldMessageInfo) {
-        newSessionListMap.set(sessionId, {
+        newSessionListMap.set(`${sessionId}`, {
           list: messageList,
           pageSize: oldMessageInfo.pageSize,
           pageNum: oldMessageInfo.pageNum,
@@ -307,7 +307,7 @@ export default {
           pageRange: oldMessageInfo.pageRange,
         });
       } else {
-        newSessionListMap.set(sessionId, {
+        newSessionListMap.set(`${sessionId}`, {
           list: messageList,
           pageNum: Math.floor(size(messageList) / _INIT_PAGESIZE_) || 1,
           pageSize: _INIT_PAGESIZE_,
@@ -344,7 +344,7 @@ export default {
       const pageSize = _INIT_PAGESIZE_;
       const pageNum = Math.ceil(Number(index) / pageSize);
       const sessionListMap = new Map(state.sessionListMap);
-      sessionListMap.set(sessionId, {
+      sessionListMap.set(`${sessionId}`, {
         pageNum,
         pageSize,
         total: Number(total),

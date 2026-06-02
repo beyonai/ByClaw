@@ -8,7 +8,7 @@
 import { delMessage } from '@/service/message';
 import { useDispatch, useSelector } from '@umijs/max';
 import { assign, merge, size } from 'lodash';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SetStateAction } from 'react';
 
 import type { IMessageInfo } from '@/models/useMessageStore';
@@ -35,7 +35,10 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
   const { sessionListMap } = useSelector((state: any) => state.messageStore);
   const { EventEmitter } = useGlobal();
 
-  const activeSessionId = sessionId || DRAFT_SESSION_ID;
+  const [optimisticSessionId, setOptimisticSessionId] = useState('');
+  const pendingDraftCleanupRef = useRef(false);
+
+  const activeSessionId = String(sessionId || optimisticSessionId || DRAFT_SESSION_ID);
   const messageInfo = sessionListMap.get(activeSessionId) as (IMessageInfo & { hasMore?: boolean }) | undefined;
   const messageList = useMemo(() => messageInfo?.list || [], [messageInfo]);
   const hasMore = useMemo(() => {
@@ -92,7 +95,7 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
               list = [...list, newMessage];
             }
 
-            if (targetSessionId === curSessionId.current || targetSessionId === activeSessionId) {
+            if (`${targetSessionId}` === `${curSessionId.current}` || `${targetSessionId}` === `${activeSessionId}`) {
               messageListRef.current = list;
             }
 
@@ -168,12 +171,8 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
         });
 
         if (curSessionId.current === DRAFT_SESSION_ID) {
-          dispatch({
-            type: 'messageStore/cleanSessionMessage',
-            payload: {
-              sessionId: DRAFT_SESSION_ID,
-            },
-          });
+          pendingDraftCleanupRef.current = true;
+          setOptimisticSessionId(newSessionId);
         }
 
         // todo： 临时代码，待优化
@@ -227,13 +226,15 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
     curSessionId.current = activeSessionId;
 
     if (!sessionId) {
-      dispatch({
-        type: 'messageStore/updateSessionMessageList',
-        payload: {
-          sessionId: DRAFT_SESSION_ID,
-          messageList: [],
-        },
-      });
+      if (!optimisticSessionId) {
+        dispatch({
+          type: 'messageStore/updateSessionMessageList',
+          payload: {
+            sessionId: DRAFT_SESSION_ID,
+            messageList: [],
+          },
+        });
+      }
       return;
     }
 
@@ -278,7 +279,24 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
         targetMessageId,
       });
     });
-  }, [activeSessionId, dispatch, EventEmitter, sessionId]);
+  }, [activeSessionId, dispatch, EventEmitter, optimisticSessionId, sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    setOptimisticSessionId('');
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!pendingDraftCleanupRef.current || activeSessionId === DRAFT_SESSION_ID) return;
+
+    pendingDraftCleanupRef.current = false;
+    dispatch({
+      type: 'messageStore/cleanSessionMessage',
+      payload: {
+        sessionId: DRAFT_SESSION_ID,
+      },
+    });
+  }, [activeSessionId, dispatch]);
 
   /**
    * 消息列表变化时的副作用

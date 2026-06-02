@@ -319,6 +319,9 @@ function useChat(props: IProps) {
 
   const createRestoredAnswerMessageFromSnapshot = usePersistFn((snapshot: any, runningInfo: RunningChatInfo) => {
     const answerMsg = createMessage(fetchMessageHandler(snapshot));
+    if (runningInfo.clientRequestId) {
+      set(answerMsg, 'msgId', runningInfo.clientRequestId);
+    }
     const queryMsgId = runningInfo.traceId?.split('_')?.[0];
     set(answerMsg, 'messageState', IMessageState.Answer);
     set(answerMsg, 'traceId', snapshot?.traceId || runningInfo.traceId);
@@ -557,7 +560,7 @@ function useChat(props: IProps) {
 
         const messageId = runningInfo.modelAnswerMessageId ? `${runningInfo.modelAnswerMessageId}` : '';
         let answerMsg = messageListRef.current.find((item) => {
-          return item.fromBeyond && [`${item.messageId}`, `${item.msgId}`].includes(messageId);
+          return `${item.messageId}` === messageId || `${item.msgId}` === `${runningInfo.clientRequestId}`;
         });
 
         if (!answerMsg) {
@@ -750,7 +753,7 @@ function useChat(props: IProps) {
       cloneDeep(get(extParamsBySessionId, `${sessionId}`) || {}),
       {
         ...(myExtParams || {}),
-        clientRequestId: newAnswerMsg.msgId,
+        clientId: newAnswerMsg.msgId,
       }
     );
     set(newQueryMsg, 'extParams', extParams);
@@ -778,6 +781,7 @@ function useChat(props: IProps) {
       sessionId,
       resourceList,
       extParams,
+      clientRequestId,
       ...restPayload,
       agentId: Number(_agentId) ? _agentId : null,
       agentCode: Number(_agentId) ? null : _agentId,

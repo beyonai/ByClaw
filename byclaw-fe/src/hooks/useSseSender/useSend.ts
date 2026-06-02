@@ -12,8 +12,6 @@ import DOMPurify from 'dompurify'; // HTML 净化器
 import { getLocale, useDispatch } from '@umijs/max';
 import { ISession } from '@/typescript/session';
 import webSocketManager from '@/utils/websocket';
-import { getMsgId } from '@/utils/messgae';
-import { get } from 'lodash';
 
 export { formatStreamPayload } from './chatStream';
 
@@ -75,7 +73,7 @@ export default function useSend(params: IParam) {
       // 从选项中提取callback回调函数
       // const { callback, ...optsRest } = opts;
 
-      const clientRequestId = get(payload, 'extParams.clientRequestId') || getMsgId();
+      const { clientRequestId } = payload;
       let closed = false;
 
       const closeConsoleGroup = () => {

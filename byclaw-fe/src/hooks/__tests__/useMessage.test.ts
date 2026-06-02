@@ -266,6 +266,9 @@ describe('hooks/useChat/useMessage', () => {
         sessionId: 'new-session',
       },
     });
+    expect(result.current.messageList).toEqual([{ msgId: 'draft-1' }]);
+    expect(sessionListMap.get('new-session').list).toEqual([{ msgId: 'draft-1' }]);
+    expect(sessionListMap.has('__message_store_draft_session__')).toBe(false);
   });
 
   it('getMoreSessionMessage updates list and hasMore on forward paging', async () => {
