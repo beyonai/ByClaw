@@ -13,7 +13,7 @@ public class RunningChatInfo {
 
     private String traceId;
 
-    private String requestId;
+    private String clientRequestId;
 
     private Long modelAnswerMessageId;
 

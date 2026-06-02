@@ -200,9 +200,9 @@ public class AssistantChatDto {
     private String traceId;
 
     /**
-     * WebSocket 请求标识，用于前端将无 sessionId 的首次会话请求与后续流式事件关联。
+     * 前端生成的本轮回答关联标识，通常等于 answerMsg.msgId，用于将 WebSocket 流式事件关联回本地消息。
      */
-    private String requestId;
+    private String clientRequestId;
 
     /**
      * 从暂停->用户操作->恢复，消息ID

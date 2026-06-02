@@ -15,7 +15,7 @@ import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 public class NettyArrayOutputStream extends ByteArrayOutputStream {
     private final ChannelHandlerContext ctx;
 
-    private final String requestId;
+    private final String clientRequestId;
 
     private final String wrapperType;
 
@@ -23,9 +23,9 @@ public class NettyArrayOutputStream extends ByteArrayOutputStream {
         this(ctx, null, null);
     }
 
-    public NettyArrayOutputStream(ChannelHandlerContext ctx, String requestId, String wrapperType) {
+    public NettyArrayOutputStream(ChannelHandlerContext ctx, String clientRequestId, String wrapperType) {
         this.ctx = ctx;
-        this.requestId = requestId;
+        this.clientRequestId = clientRequestId;
         this.wrapperType = wrapperType;
     }
 
@@ -51,12 +51,12 @@ public class NettyArrayOutputStream extends ByteArrayOutputStream {
     }
 
     private String wrapContent(String content) {
-        if (StringUtils.isBlank(requestId) || StringUtils.isBlank(wrapperType)) {
+        if (StringUtils.isBlank(clientRequestId) || StringUtils.isBlank(wrapperType)) {
             return content;
         }
         JSONObject wrapper = new JSONObject();
         wrapper.put("type", wrapperType);
-        wrapper.put("requestId", requestId);
+        wrapper.put("clientRequestId", clientRequestId);
 
         try {
             JSONObject payload = JSON.parseObject(content);

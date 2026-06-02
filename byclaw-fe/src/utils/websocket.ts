@@ -9,7 +9,7 @@ import type { ISession } from '@/typescript/session';
 
 interface WebSocketMessage {
   type: string;
-  requestId?: string;
+  clientRequestId?: string;
   sessionId?: string;
   event?: string;
   data?: any;

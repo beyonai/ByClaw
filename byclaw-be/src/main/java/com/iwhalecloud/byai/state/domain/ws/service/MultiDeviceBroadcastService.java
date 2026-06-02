@@ -82,7 +82,7 @@ public class MultiDeviceBroadcastService {
     }
 
     public void broadcastRawEvent(Long userId, Long sessionId, JSONObject dataJson,
-                                  Channel senderChannel, String requestId) {
+                                  Channel senderChannel, String clientRequestId) {
         if (userId == null) {
             return;
         }
@@ -97,11 +97,12 @@ public class MultiDeviceBroadcastService {
 
         JSONObject message = new JSONObject();
         message.put("type", "CHAT_STREAM");
-        message.put("requestId", requestId);
+        message.put("clientRequestId", clientRequestId);
         message.put("sessionId", String.valueOf(sessionId));
         message.put("event", eventType);
         message.put("data", eventData);
         message.put("traceId", dataJson.getString("trace_id"));
+        message.put("streamId", dataJson.getString("stream_id"));
 
         JSONObject metadata = dataJson.getJSONObject("metadata");
         if (metadata != null) {

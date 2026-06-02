@@ -66,6 +66,8 @@ public class RedisStreamMessageListener implements StreamListener<String, MapRec
             return;
         }
 
+        dataJson.put("stream_id", message.getId().getValue());
+
         sessionStreamEventRouter.dispatch(dataJson);
     }
 }

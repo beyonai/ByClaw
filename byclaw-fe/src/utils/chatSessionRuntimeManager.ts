@@ -1,13 +1,14 @@
 type RuntimeInfo = {
-  requestId: string;
-  msgId: string;
+  clientRequestId: string;
+  answerClientMsgId: string;
   sessionId?: string;
   traceId?: string;
-  messageId?: string;
+  answerMessageId?: string;
   agentId?: string | number | null;
   agentCode?: string | null;
   agentType?: string;
   restored?: boolean;
+  lastAppliedStreamId?: string;
   cancel?: () => void;
 };
 
@@ -15,7 +16,7 @@ export type RunningChatInfo = {
   sessionId?: string;
   running?: boolean;
   traceId?: string;
-  requestId?: string;
+  clientRequestId?: string;
   modelAnswerMessageId?: string | number;
   agentId?: string | number | null;
   agentCode?: string | null;
@@ -25,20 +26,20 @@ export type RunningChatInfo = {
 type Listener = () => void;
 
 class ChatSessionRuntimeManager {
-  private activeByRequestId = new Map<string, RuntimeInfo>();
+  private activeByClientRequestId = new Map<string, RuntimeInfo>();
 
-  private activeRequestIdBySessionId = new Map<string, string>();
+  private activeClientRequestIdBySessionId = new Map<string, string>();
 
   private listeners = new Set<Listener>();
 
   register(info: RuntimeInfo): void {
-    const oldInfo = this.activeByRequestId.get(info.requestId);
-    this.activeByRequestId.set(info.requestId, {
+    const oldInfo = this.activeByClientRequestId.get(info.clientRequestId);
+    this.activeByClientRequestId.set(info.clientRequestId, {
       ...(oldInfo || {}),
       ...info,
     });
     if (info.sessionId) {
-      this.activeRequestIdBySessionId.set(`${info.sessionId}`, info.requestId);
+      this.activeClientRequestIdBySessionId.set(`${info.sessionId}`, info.clientRequestId);
     }
     this.emitChange();
   }
@@ -50,36 +51,37 @@ class ChatSessionRuntimeManager {
       return;
     }
 
-    const requestId = `${info.requestId || info.traceId || info.modelAnswerMessageId || info.sessionId}`;
-    const messageId = info.modelAnswerMessageId ? `${info.modelAnswerMessageId}` : undefined;
+    const clientRequestId = `${info.clientRequestId || info.traceId || info.modelAnswerMessageId || info.sessionId}`;
+    const answerMessageId = info.modelAnswerMessageId ? `${info.modelAnswerMessageId}` : undefined;
     const sessionId = `${info.sessionId}`;
-    const activeRequestId = this.activeRequestIdBySessionId.get(sessionId);
-    const activeInfo = activeRequestId
-      ? this.activeByRequestId.get(activeRequestId)
-      : this.activeByRequestId.get(requestId);
+    const activeClientRequestId = this.activeClientRequestIdBySessionId.get(sessionId);
+    const activeInfo = activeClientRequestId
+      ? this.activeByClientRequestId.get(activeClientRequestId)
+      : this.activeByClientRequestId.get(clientRequestId);
 
     if (activeInfo && !activeInfo.restored) {
       this.register({
-        requestId: activeInfo.requestId,
-        msgId: activeInfo.msgId,
+        clientRequestId: activeInfo.clientRequestId,
+        answerClientMsgId: activeInfo.answerClientMsgId,
         sessionId,
         traceId: info.traceId || activeInfo.traceId,
-        messageId: messageId || activeInfo.messageId,
+        answerMessageId: answerMessageId || activeInfo.answerMessageId,
         agentId: info.agentId ?? activeInfo.agentId,
         agentCode: info.agentCode ?? activeInfo.agentCode,
         agentType: info.agentType || activeInfo.agentType,
         restored: false,
+        lastAppliedStreamId: activeInfo.lastAppliedStreamId,
         cancel: activeInfo.cancel || cancel,
       });
       return;
     }
 
     this.register({
-      requestId,
-      msgId: messageId || requestId,
+      clientRequestId,
+      answerClientMsgId: answerMessageId || clientRequestId,
       sessionId,
       traceId: info.traceId,
-      messageId,
+      answerMessageId,
       agentId: info.agentId,
       agentCode: info.agentCode,
       agentType: info.agentType,
@@ -88,51 +90,59 @@ class ChatSessionRuntimeManager {
     });
   }
 
-  bindSession(requestId: string, sessionId?: string): void {
-    if (!sessionId) return;
-    const info = this.activeByRequestId.get(requestId);
+  updateLastAppliedStreamId(clientRequestId?: string, streamId?: string): void {
+    if (!clientRequestId || !streamId) return;
+    const info = this.activeByClientRequestId.get(`${clientRequestId}`);
     if (!info) return;
-    if (info.sessionId) {
-      this.activeRequestIdBySessionId.delete(`${info.sessionId}`);
-    }
-    info.sessionId = `${sessionId}`;
-    this.activeRequestIdBySessionId.set(`${sessionId}`, requestId);
+    info.lastAppliedStreamId = `${streamId}`;
     this.emitChange();
   }
 
-  complete(requestId: string): void {
-    const info = this.activeByRequestId.get(requestId);
+  bindSession(clientRequestId: string, sessionId?: string): void {
+    if (!sessionId) return;
+    const info = this.activeByClientRequestId.get(clientRequestId);
     if (!info) return;
-    this.activeByRequestId.delete(requestId);
     if (info.sessionId) {
-      this.activeRequestIdBySessionId.delete(`${info.sessionId}`);
+      this.activeClientRequestIdBySessionId.delete(`${info.sessionId}`);
+    }
+    info.sessionId = `${sessionId}`;
+    this.activeClientRequestIdBySessionId.set(`${sessionId}`, clientRequestId);
+    this.emitChange();
+  }
+
+  complete(clientRequestId: string): void {
+    const info = this.activeByClientRequestId.get(clientRequestId);
+    if (!info) return;
+    this.activeByClientRequestId.delete(clientRequestId);
+    if (info.sessionId) {
+      this.activeClientRequestIdBySessionId.delete(`${info.sessionId}`);
     }
     this.emitChange();
   }
 
   completeBySession(sessionId?: string | number): void {
     if (!sessionId) return;
-    const requestId = this.activeRequestIdBySessionId.get(`${sessionId}`);
-    if (requestId) {
-      this.complete(requestId);
+    const clientRequestId = this.activeClientRequestIdBySessionId.get(`${sessionId}`);
+    if (clientRequestId) {
+      this.complete(clientRequestId);
     }
   }
 
   isSessionRunning(sessionId?: string): boolean {
     if (!sessionId) return false;
-    return this.activeRequestIdBySessionId.has(`${sessionId}`);
+    return this.activeClientRequestIdBySessionId.has(`${sessionId}`);
   }
 
   getBySession(sessionId?: string): RuntimeInfo | undefined {
     if (!sessionId) return undefined;
-    const requestId = this.activeRequestIdBySessionId.get(`${sessionId}`);
-    if (!requestId) return undefined;
-    return this.activeByRequestId.get(requestId);
+    const clientRequestId = this.activeClientRequestIdBySessionId.get(`${sessionId}`);
+    if (!clientRequestId) return undefined;
+    return this.activeByClientRequestId.get(clientRequestId);
   }
 
-  getByRequest(requestId?: string): RuntimeInfo | undefined {
-    if (!requestId) return undefined;
-    return this.activeByRequestId.get(`${requestId}`);
+  getByClientRequest(clientRequestId?: string): RuntimeInfo | undefined {
+    if (!clientRequestId) return undefined;
+    return this.activeByClientRequestId.get(`${clientRequestId}`);
   }
 
   getByTrace(sessionId?: string | number, traceId?: string): RuntimeInfo | undefined {
@@ -143,8 +153,8 @@ class ChatSessionRuntimeManager {
   }
 
   clear(): void {
-    this.activeByRequestId.clear();
-    this.activeRequestIdBySessionId.clear();
+    this.activeByClientRequestId.clear();
+    this.activeClientRequestIdBySessionId.clear();
     this.emitChange();
   }
 

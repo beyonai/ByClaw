@@ -85,7 +85,7 @@ describe('hooks/useSseSender/useSend', () => {
       const { promise } = result.current.send('hello', {
         agentType: '013',
         extParams: {
-          clientId: 'client-1',
+          clientRequestId: 'client-1',
         },
       });
       await expect(promise).resolves.toEqual({});
@@ -94,13 +94,13 @@ describe('hooks/useSseSender/useSend', () => {
     expect(mockWebSocketManager.sendMessageWhenReady).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'LLM_MESSAGE',
-        requestId: 'client-1',
+        clientRequestId: 'client-1',
         chatContent: 'safe:hello',
         sessionId: 'session-2',
         chatId: 'session-2',
         agentType: '013',
         extParams: {
-          clientId: 'client-1',
+          clientRequestId: 'client-1',
         },
       })
     );

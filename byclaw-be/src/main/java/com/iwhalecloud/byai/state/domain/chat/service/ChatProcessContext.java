@@ -141,9 +141,14 @@ public class ChatProcessContext {
     public ChatTransport transport = ChatTransport.HTTP_SSE;
 
     /**
-     * WebSocket 请求标识。
+     * 前端生成的本轮回答关联标识，通常等于 answerMsg.msgId。
      */
-    public String requestId;
+    public String clientRequestId;
+
+    /**
+     * 当前正在处理的 Redis Stream 事件 ID，用于前端恢复运行中会话时按版本合并快照和实时流。
+     */
+    public String currentStreamId;
 
     /**
      * 当前请求写入 Redis 运行态标记时使用的所有者 token，用于结束时只清理自己创建的标记。
@@ -172,7 +177,7 @@ public class ChatProcessContext {
         this.assistantChatDto = assistantChatDto;
         this.tokenStatsMap = new HashMap<>();
         this.suggestionQuestion = new SuggestionQuestionVo();
-        this.requestId = assistantChatDto == null ? null : assistantChatDto.getRequestId();
+        this.clientRequestId = assistantChatDto == null ? null : assistantChatDto.getClientRequestId();
     }
 
     public boolean isWebSocketTransport() {

@@ -63,7 +63,7 @@ public class ChatService {
         LoginInfo currentUser = ctx.channel().attr(Constant.ATT_USER_INFO).get();
         // 设置发送端 Channel，用于多端广播时排除发送端避免重复推送
         message.setSenderChannel(ctx.channel());
-        try (NettyArrayOutputStream outputStream = new NettyArrayOutputStream(ctx, message.getRequestId(),
+        try (NettyArrayOutputStream outputStream = new NettyArrayOutputStream(ctx, message.getClientRequestId(),
             "CHAT_STREAM")) {
             assistantChatService.chat(message, outputStream, currentUser);
         }
@@ -123,13 +123,13 @@ public class ChatService {
             stopChatDto.setAgentCode(message.getAgentCode());
             stopChatDto.setSessionId(message.getSessionId());
             stopChatDto.setMessageId(message.getMessageId());
-            stopChatDto.setClientId(message.getRequestId());
+            stopChatDto.setClientRequestId(message.getClientRequestId());
             fillStopChatFromRunningInfo(stopChatDto);
             assistantChatApplicationService.stopChat(stopChatDto);
 
             JSONObject ack = new JSONObject();
             ack.put("type", "STOP_CHAT_ACK");
-            ack.put("requestId", message.getRequestId());
+            ack.put("clientRequestId", message.getClientRequestId());
             ack.put("sessionId", message.getSessionId() == null ? null : String.valueOf(message.getSessionId()));
             ack.put("messageId", message.getMessageId());
             ctx.writeAndFlush(new io.netty.handler.codec.http.websocketx.TextWebSocketFrame(ack.toJSONString()));
@@ -160,8 +160,8 @@ public class ChatService {
         if (stopChatDto.getAgentCode() == null) {
             stopChatDto.setAgentCode(runningInfo.getAgentCode());
         }
-        if (stopChatDto.getClientId() == null) {
-            stopChatDto.setClientId(runningInfo.getRequestId());
+        if (stopChatDto.getClientRequestId() == null) {
+            stopChatDto.setClientRequestId(runningInfo.getClientRequestId());
         }
     }
 }

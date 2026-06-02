@@ -47,27 +47,29 @@ public class SessionStreamEventRouter {
         if (ctx == null) {
             return;
         }
-
-        broadcastToOtherDevices(ctx, dataJson);
+        ctx.currentStreamId = dataJson.getString("stream_id");
 
         if (!ChatTransport.WEBSOCKET.equals(ctx.transport)) {
+            broadcastToOtherDevices(ctx, dataJson);
             if (ctx.gatewayEventQueue != null) {
                 ctx.gatewayEventQueue.offer(dataJson);
             }
             return;
         }
 
-        routeWebSocketEvent(ctx, dataJson);
+        if (routeWebSocketEvent(ctx, dataJson)) {
+            broadcastToOtherDevices(ctx, dataJson);
+        }
     }
 
-    private void routeWebSocketEvent(ChatProcessContext ctx, JSONObject dataJson) {
+    private boolean routeWebSocketEvent(ChatProcessContext ctx, JSONObject dataJson) {
         if (gatewayStreamEventProcessor.handleHistoryEventIfNecessary(ctx, dataJson)) {
-            return;
+            return false;
         }
 
         String eventType = gatewayStreamEventProcessor.normalizeEventType(ctx, dataJson);
         if (gatewayStreamEventProcessor.shouldIgnoreEvent(ctx, eventType, dataJson)) {
-            return;
+            return false;
         }
         JSONObject metadata = dataJson.getJSONObject("metadata");
         if (metadata == null) {
@@ -76,7 +78,7 @@ public class SessionStreamEventRouter {
 
         if (SseResponseEventEnum.error.equals(eventType)) {
             handleWebSocketError(ctx, metadata);
-            return;
+            return true;
         }
 
         String eventData = gatewayStreamEventProcessor.buildEventData(ctx, dataJson, metadata);
@@ -95,6 +97,7 @@ public class SessionStreamEventRouter {
             scriptService.completeAsyncGatewayContext(ctx);
             runningChatSnapshotService.delete(ctx);
         }
+        return true;
     }
 
     private void handleWebSocketError(ChatProcessContext ctx, JSONObject metadata) {
@@ -113,7 +116,7 @@ public class SessionStreamEventRouter {
     private void broadcastToOtherDevices(ChatProcessContext ctx, JSONObject dataJson) {
         try {
             multiDeviceBroadcastService.broadcastRawEvent(ctx.getUserId(), ctx.getSessionId(), dataJson,
-                ctx.getSenderChannel(), ctx.getRequestId());
+                ctx.getSenderChannel(), ctx.getClientRequestId());
         }
         catch (Exception e) {
             log.warn("多端广播异常, sessionId: {}", ctx.sessionId, e);

@@ -66,14 +66,7 @@ function useHandler(props: IProps) {
         });
       }
 
-      if (sseMsg.event === 'createSession') {
-        chatSessionRuntimeManager.register({
-          requestId: newAnswerMsg.msgId,
-          msgId: newAnswerMsg.msgId,
-          sessionId: newSessionId,
-          cancel: () => newAnswerMsg.cancelSSE?.(),
-        });
-      }
+      chatSessionRuntimeManager.bindSession(sseMsg.clientRequestId, newSessionId);
 
       addSession({
         ...(sseRes as ISession),

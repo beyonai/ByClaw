@@ -127,8 +127,8 @@ public class ScriptService extends AbstractChatProcess {
         // 设置多端广播所需的用户标识和发送端 Channel
         ctx.userId = CurrentUserHolder.getCurrentUserId();
         ctx.senderChannel = ctx.assistantChatDto.getSenderChannel();
-        ctx.requestId = ctx.assistantChatDto.getRequestId();
-        if (ctx.senderChannel != null || StringUtils.isNotBlank(ctx.requestId)) {
+        ctx.clientRequestId = ctx.assistantChatDto.getClientRequestId();
+        if (ctx.senderChannel != null || StringUtils.isNotBlank(ctx.clientRequestId)) {
             ctx.transport = ChatTransport.WEBSOCKET;
         }
 

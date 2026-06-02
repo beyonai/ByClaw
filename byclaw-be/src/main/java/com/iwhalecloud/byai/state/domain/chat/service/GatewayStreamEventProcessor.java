@@ -90,13 +90,16 @@ public class GatewayStreamEventProcessor {
         String eventData = dataJson.getString("data");
         String sourceAgentType = dataJson.getString("source_agent_type");
         String traceId = dataJson.getString("trace_id");
+        String streamId = dataJson.getString("stream_id");
         String sessionId = String.valueOf(ctx.sessionId);
         String userMessageId = String.valueOf(ctx.userMessageId);
         if (eventData == null) {
             JSONObject eventPayload = new JSONObject(dataJson);
             eventPayload.remove("event_type");
             eventPayload.remove("session_id");
+            eventPayload.remove("stream_id");
             eventPayload.put("sessionId", sessionId);
+            eventPayload.put("streamId", streamId);
             if (metadata != null && !metadata.isEmpty()) {
                 eventPayload.put("metadata", metadata.toJSONString());
             }
@@ -108,6 +111,7 @@ public class GatewayStreamEventProcessor {
                 dataObj.put("sourceAgentType", sourceAgentType);
                 dataObj.put("sessionId", sessionId);
                 dataObj.put("traceId", traceId);
+                dataObj.put("streamId", streamId);
                 if (metadata != null && !metadata.isEmpty()) {
                     dataObj.put("metadata", metadata.toJSONString());
                 }

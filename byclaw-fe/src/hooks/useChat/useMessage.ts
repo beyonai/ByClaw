@@ -68,6 +68,7 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
         type: 'messageStore/updateSessionMessageList',
         payload: {
           sessionId: targetSessionId,
+          // callback的形式，拿到reducer里面最新的messageList，以防连续调用updateMessage时，后者覆盖前者
           messageList: (messageList: IMessage[]) => {
             let list = [...(messageList || [])];
 

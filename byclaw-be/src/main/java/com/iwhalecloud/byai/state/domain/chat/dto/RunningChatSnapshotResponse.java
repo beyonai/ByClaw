@@ -13,7 +13,9 @@ public class RunningChatSnapshotResponse extends ByaiMessageHotDtoDto {
 
     private String traceId;
 
-    private String requestId;
+    private String clientRequestId;
 
     private Long modelAnswerMessageId;
+
+    private String snapshotStreamId;
 }

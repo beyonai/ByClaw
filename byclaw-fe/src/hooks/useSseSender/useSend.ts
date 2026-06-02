@@ -75,7 +75,7 @@ export default function useSend(params: IParam) {
       // 从选项中提取callback回调函数
       // const { callback, ...optsRest } = opts;
 
-      const requestId = get(payload, 'extParams.clientId') || getMsgId();
+      const clientRequestId = get(payload, 'extParams.clientRequestId') || getMsgId();
       let closed = false;
 
       const closeConsoleGroup = () => {
@@ -86,7 +86,7 @@ export default function useSend(params: IParam) {
       const promise = webSocketManager
         .sendMessageWhenReady({
           type: 'LLM_MESSAGE',
-          requestId,
+          clientRequestId,
           language: getLocale(),
           chatContent: DOMPurify.sanitize(text),
           relModelId: -1,

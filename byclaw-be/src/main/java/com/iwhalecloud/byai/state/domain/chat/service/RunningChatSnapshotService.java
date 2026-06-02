@@ -99,8 +99,9 @@ public class RunningChatSnapshotService {
         RunningChatSnapshotResponse snapshot = new RunningChatSnapshotResponse();
         snapshot.setRunning(true);
         snapshot.setTraceId(ctx.traceId);
-        snapshot.setRequestId(ctx.requestId);
+        snapshot.setClientRequestId(ctx.clientRequestId);
         snapshot.setModelAnswerMessageId(ctx.modelAnswerMessageId);
+        snapshot.setSnapshotStreamId(ctx.currentStreamId);
         snapshot.setMessageId(ctx.modelAnswerMessageId);
         snapshot.setSessionId(ctx.sessionId);
         snapshot.setTaskId(ctx.taskId);
