@@ -10,7 +10,6 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.feign.request.knowledge.FolderDelete;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetIdDto;
@@ -57,9 +56,6 @@ import jakarta.validation.Valid;
 public class DatasetController {
 
     private final Logger logger = LoggerFactory.getLogger(DatasetController.class);
-
-    @Autowired
-    private SsResourceService ssResourceService;
 
     @Autowired
     private DatasetApplicationService datasetApplicationService;
@@ -121,7 +117,7 @@ public class DatasetController {
      */
     @GetMapping("/detail")
     public ResponseUtil<DatasetDetailVo> detail(@RequestParam("resourceId") Long resourceId) {
-        DatasetDetailVo datasetDetailVo = ssResourceService.findDatasetDetailById(resourceId);
+        DatasetDetailVo datasetDetailVo = datasetApplicationService.detail(resourceId);
         return ResponseUtil.successResponse(I18nUtil.get("dataset.detail.query.success"), datasetDetailVo);
     }
 

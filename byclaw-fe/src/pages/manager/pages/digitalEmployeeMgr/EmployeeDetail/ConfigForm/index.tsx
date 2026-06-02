@@ -460,6 +460,18 @@ const ConfigForm = (props) => {
     };
   }, []);
 
+  useEffect(() => {
+    if (agentId || !Array.isArray(catalogList) || catalogList.length === 0) return;
+
+    const currentCatalogId = form.getFieldValue('catalogId');
+    if (currentCatalogId !== undefined && currentCatalogId !== null && `${currentCatalogId}` !== '') return;
+
+    const firstCatalogId = catalogList[0]?.catalogId;
+    if (firstCatalogId === undefined || firstCatalogId === null || `${firstCatalogId}` === '') return;
+
+    form.setFieldsValue({ catalogId: firstCatalogId });
+  }, [agentId, catalogList, form]);
+
   const robotChannelLabelMap = useMemo(
     () =>
       robotChannelOptions.reduce((map, item) => {
@@ -1622,7 +1634,7 @@ const ConfigForm = (props) => {
               </Form.Item>
             </div>
 
-            {/* 目录管理 */}
+            {/* 所属领域 */}
             <Form.Item label={intl.formatMessage({ id: 'employeeDetail.catalogManage' })} name="catalogId">
               <TreeSelect
                 allowClear

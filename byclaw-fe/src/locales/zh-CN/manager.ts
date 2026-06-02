@@ -118,6 +118,8 @@ export default {
   'orgMgr.members.relatedEmployee': '相关数字员工',
   'orgMgr.members.relatedResource': '相关数字资源',
   'orgMgr.members.resetPassword': '重置密码',
+  'orgMgr.members.resetPasswordTitle': '重置密码',
+  'orgMgr.members.resetPasswordContent': '确认要重置该成员的密码吗？',
   'orgMgr.members.selected': '已选中{count}项',
   'orgMgr.members.exitOrganization': '退出组织',
   'orgMgr.members.exitOrganizationTitle': '退出组织',
@@ -166,6 +168,10 @@ export default {
   'orgMgr.modal.userCodePlaceholder': '请输入用户编码',
   'orgMgr.modal.userCodeRule1': '用户编码长度不能小于3',
   'orgMgr.modal.userCodeRule2': '用户编码长度不能大于255',
+  'orgMgr.modal.password': '用户密码',
+  'orgMgr.modal.passwordPlaceholder': '请输入用户密码',
+  'orgMgr.modal.confirmPassword': '确认密码',
+  'orgMgr.modal.confirmPasswordPlaceholder': '请再次输入用户密码',
   'orgMgr.modal.belongOrgId': '归属组织id',
   'orgMgr.modal.belongOrg': '归属组织',
   'orgMgr.modal.userNumber': '工号',
@@ -318,7 +324,7 @@ export default {
     '适配A2A协议，Bot、Dify、Hiagent等第三方平台智能体及页面型应用，支持页面集成与接口集成两种模式。',
   'digitalEmployeeMgr.sandbox': '通过沙箱服务创建数字员工，支持选择已部署的沙箱服务实例， 如OpenClaw等。',
 
-  // 业务领域管理
+  // 资产目录管理
   'businessField.filter.title': '领域',
   'filter.source': '来源',
   'modelMgr.title': '模型管理',
