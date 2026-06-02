@@ -667,6 +667,7 @@ export default {
   'knowledgeCenter.import.uploadFirst': '请先上传文件',
   'knowledgeCenter.import.success': '导入成功',
   'knowledgeCenter.import.confirm': '导入',
+  'knowledgeCenter.import.importing': '正在导入中...',
   'knowledgeCenter.import.dragHint': '点击或拖拽文件到此区域上传',
   'knowledgeCenter.import.formatHint': '支持上传使用OpenAPI 3.0集合协议的JSON或YAML文件',
   'knowledgeCenter.name': '知识',

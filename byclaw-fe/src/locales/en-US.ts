@@ -672,6 +672,7 @@ export default {
   'knowledgeCenter.import.uploadFirst': 'Please upload a file first',
   'knowledgeCenter.import.success': 'Imported successfully',
   'knowledgeCenter.import.confirm': 'Import',
+  'knowledgeCenter.import.importing': 'Importing...',
   'knowledgeCenter.import.dragHint': 'Click or drag a file to this area to upload',
   'knowledgeCenter.import.formatHint': 'Local file import only. JSON or YAML files are supported',
   'knowledgeCenter.name': 'Knowledge',
