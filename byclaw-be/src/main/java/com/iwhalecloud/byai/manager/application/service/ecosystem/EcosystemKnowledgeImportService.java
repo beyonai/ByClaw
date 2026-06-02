@@ -51,7 +51,7 @@ public class EcosystemKnowledgeImportService {
             throw new IllegalArgumentException(i18n("ecosystem.import.error.markdown.empty"));
         }
 
-        String directoryPath = normalizeDirectoryPath(null, task.getSourceName(), String.valueOf(task.getTaskId()));
+        String directoryPath = normalizeDirectoryPath(null, task.getSourceName(), stringValue(task.getTaskId()));
         MultipartFile[] files = markdownFiles.stream()
             .map(file -> new MultipartFileUtil("files", file.getFileName(), "text/markdown", file.getBytes()))
             .toArray(MultipartFile[]::new);
@@ -103,7 +103,8 @@ public class EcosystemKnowledgeImportService {
     private String normalizeDirectoryPath(String directoryPath, String sourceName, String taskId) {
         String value = directoryPath;
         if (value == null || value.trim().isEmpty()) {
-            value = i18n("ecosystem.import.directory", sourceName, taskId);
+            String taskSegment = taskId == null ? String.valueOf(System.currentTimeMillis()) : String.valueOf(taskId);
+            value = i18n("ecosystem.import.directory", sourceName, taskSegment);
         }
         value = value.trim().replace('\\', '/');
         while (value.startsWith("/")) {
