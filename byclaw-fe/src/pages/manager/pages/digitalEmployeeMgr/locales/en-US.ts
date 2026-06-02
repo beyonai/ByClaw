@@ -95,7 +95,7 @@ export default {
   'employeeDetail.configureKnowledge': 'Configure Knowledge',
   'employeeDetail.qaKnowledge': 'Q&A Knowledge Base',
   'employeeDetail.documentKnowledge': 'Document Knowledge Base',
-  'employeeDetail.tagSearchPlaceholder': 'Search or add tags, press Enter to complete',
+  'employeeDetail.tagSearchPlaceholder': 'Add tags, press Enter to complete',
   'employeeDetail.skillType.agent': 'Agent',
   'employeeDetail.skillType.toolkit': 'Toolkit',
   'employeeDetail.skillType.tool': 'Tool',
