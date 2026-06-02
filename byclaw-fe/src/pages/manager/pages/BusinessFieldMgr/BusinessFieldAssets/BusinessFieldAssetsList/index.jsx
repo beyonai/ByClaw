@@ -386,14 +386,6 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
         dataIndex: 'status',
         key: 'status',
         width: 110,
-        filters: [
-          { text: intl.formatMessage({ id: 'resourceStatus.draft' }), value: 0 },
-          // { text: '待上架', value: 1 },
-          { text: intl.formatMessage({ id: 'resourceStatus.published' }), value: 2 },
-          { text: intl.formatMessage({ id: 'resourceStatus.unpublished' }), value: 3 },
-          { text: intl.formatMessage({ id: 'orgMgr.digital.reviewing' }), value: 4 },
-          { text: intl.formatMessage({ id: 'resourceStatus.notPassed' }), value: 5 },
-        ],
         render: (status) => {
           // 状态映射：0-草稿 1-待上架 2-已上架 3-已下架 4-审批中 5-审批不通过
           const statusMap = {
