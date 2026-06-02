@@ -98,7 +98,47 @@ fi
 # Platform-specific nginx config strategy:
 # - Docker (Linux): use resolver 127.0.0.11 + variable proxy_pass for lazy DNS
 # - Podman (macOS): use direct proxy_pass (depends_on ensures BE is ready)
-if [ "$(uname)" = "Darwin" ] && command -v podman >/dev/null 2>&1; then
+#
+# Cluster mode: set BE_CLUSTER (comma-separated host:port list) to enable upstream load balancing.
+# Example: BE_CLUSTER="byclaw-be-1:8086,byclaw-be-2:8086"
+# WS cluster: set BE_WS_CLUSTER similarly. Defaults to BE_CLUSTER with WS_PORT if not set.
+
+UPSTREAM_BLOCK=""
+
+if [ -n "${BE_CLUSTER:-}" ]; then
+    # Build upstream blocks for cluster deployment
+    UPSTREAM_HTTP="upstream backend_http {\n"
+    UPSTREAM_WS="upstream backend_ws {\n    ip_hash;\n"
+
+    IFS=',' read -ra HTTP_NODES <<< "$BE_CLUSTER"
+    for node in "${HTTP_NODES[@]}"; do
+        node=$(echo "$node" | xargs)
+        UPSTREAM_HTTP="${UPSTREAM_HTTP}    server ${node};\n"
+    done
+    UPSTREAM_HTTP="${UPSTREAM_HTTP}}"
+
+    if [ -n "${BE_WS_CLUSTER:-}" ]; then
+        IFS=',' read -ra WS_NODES <<< "$BE_WS_CLUSTER"
+    else
+        WS_NODES=()
+        for node in "${HTTP_NODES[@]}"; do
+            host=$(echo "$node" | cut -d: -f1 | xargs)
+            WS_NODES+=("${host}:${WS_PORT}")
+        done
+    fi
+    for node in "${WS_NODES[@]}"; do
+        node=$(echo "$node" | xargs)
+        UPSTREAM_WS="${UPSTREAM_WS}    server ${node};\n"
+    done
+    UPSTREAM_WS="${UPSTREAM_WS}}"
+
+    UPSTREAM_BLOCK=$(printf "${UPSTREAM_HTTP}\n\n${UPSTREAM_WS}")
+    RESOLVER_BLOCK=""
+    BACKEND_VARS=""
+    PROXY_HTTP="http://backend_http"
+    PROXY_WS="http://backend_ws"
+    PROXY_SANDBOXES="${SANDBOX_URL}"
+elif [ "$(uname)" = "Darwin" ] && command -v podman >/dev/null 2>&1; then
     RESOLVER_BLOCK=""
     BACKEND_VARS=""
     PROXY_HTTP="http://${BACKEND}:${BE_PORT}"
@@ -120,6 +160,7 @@ sed -e "s|{{BE_SERVER_PORT}}|$(escape_sed_replacement "$BE_PORT")|g" \
     -e "s|{{BE_WS_PORT}}|$(escape_sed_replacement "$WS_PORT")|g" \
     -e "s|{{CONTAINER_SUFFIX}}|$(escape_sed_replacement "$SUFFIX")|g" \
     -e "s|{{RESOLVER_BLOCK}}|$(escape_sed_replacement "$RESOLVER_BLOCK")|g" \
+    -e "s|{{UPSTREAM_BLOCK}}|$(escape_sed_replacement "$UPSTREAM_BLOCK")|g" \
     -e "s|{{BACKEND_VARS}}|$(escape_sed_replacement "$BACKEND_VARS")|g" \
     -e "s|{{PROXY_HTTP}}|$(escape_sed_replacement "$PROXY_HTTP")|g" \
     -e "s|{{PROXY_WS}}|$(escape_sed_replacement "$PROXY_WS")|g" \
@@ -129,4 +170,7 @@ sed -e "s|{{BE_SERVER_PORT}}|$(escape_sed_replacement "$BE_PORT")|g" \
     "$TEMPLATE" > "$OUTPUT"
 
 echo "Generated $OUTPUT (BE_PORT=${BE_PORT}, WS_PORT=${WS_PORT}, SUFFIX=${SUFFIX}, SANDBOX_URL=${SANDBOX_URL})"
+if [ -n "${BE_CLUSTER:-}" ]; then
+    echo "Cluster mode: BE_CLUSTER=${BE_CLUSTER}"
+fi
 echo "Initialized HTTPS certificate: $SSL_CERT"
