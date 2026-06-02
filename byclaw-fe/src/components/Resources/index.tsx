@@ -14,6 +14,7 @@ import { queryKnowledgeCapability, type KnowledgeCapability } from '@/service/kn
 import {
   applyResourceUse,
   queryFixedEntryOperationCapability,
+  queryResourceOperationPermissions,
   type FixedEntryOperationCapability,
 } from '@/pages/manager/service/resources';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
@@ -43,6 +44,12 @@ interface IResourceItem {
   resourceBizType?: string;
   resourceSourcePkId?: string;
   catalogId?: string | number;
+  hasManagePermission?: boolean;
+  hasUsePermission?: boolean;
+  canViewDetail?: boolean;
+  canEdit?: boolean;
+  canManageAuth?: boolean;
+  canDelete?: boolean;
   canApplyUse?: boolean;
   canAuditUse?: boolean;
 }
@@ -203,7 +210,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   }, [activeTab, fixedEntryCapability, resourceType]);
 
   const handleDetail = useCallback(
-    (item: IResourceItem) => {
+    async (item: IResourceItem) => {
       const { resourceBizType, resourceId, resourceSourcePkId } = item;
 
       if (
@@ -235,6 +242,29 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         resourceBizType &&
         [resourceBizTypeMap.KG_DOC, resourceBizTypeMap.KG_QA, resourceBizTypeMap.KG_TERM].includes(resourceBizType)
       ) {
+        if (!resourceId) {
+          message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
+          return;
+        }
+        try {
+          const res: any = await queryResourceOperationPermissions({ resourceId });
+          const permissions = res?.data || res || {};
+          const canViewDetail =
+            permissions?.canViewDetail ??
+            permissions?.hasManagePermission ??
+            permissions?.hasUsePermission ??
+            permissions?.canEdit ??
+            permissions?.canManageAuth ??
+            permissions?.canDelete ??
+            false;
+          if (!canViewDetail) {
+            message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
+            return;
+          }
+        } catch (error: any) {
+          message.error(error?.msg || error?.message || intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
+          return;
+        }
         const params = new URLSearchParams();
         if (resourceId) {
           params.set('resourceId', resourceId);

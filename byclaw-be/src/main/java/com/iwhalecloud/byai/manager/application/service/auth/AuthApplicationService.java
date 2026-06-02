@@ -788,6 +788,40 @@ public class AuthApplicationService {
     }
 
     /**
+     * 判断当前登录用户是否具备指定资源的使用权限。
+     * 管理权限不在这里隐式算作使用权限，调用方如果允许“管理或使用”访问，请使用
+     * {@link #hasResourceAccessPermission(SsResource)}。
+     */
+    public boolean hasResourceUsePermission(SsResource ssResource) {
+        if (ssResource == null || ssResource.getResourceId() == null
+            || StringUtils.isBlank(ssResource.getResourceBizType())
+            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum())) {
+            return false;
+        }
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (currentUserId == null) {
+            return false;
+        }
+        if (currentUserId.equals(ssResource.getCreateBy()) || isCurrentUserBoundDefaultPersonalResource(ssResource)) {
+            return true;
+        }
+
+        List<Long> resourceIds = List.of(ssResource.getResourceId());
+        List<String> resourceBizTypes = List.of(ssResource.getResourceBizType());
+        if (queryCurrentUserUseBlacklistedResourceIds(resourceIds, resourceBizTypes).contains(ssResource.getResourceId())) {
+            return false;
+        }
+        return queryCurrentUserUsePermittedResourceIds(resourceIds, resourceBizTypes).contains(ssResource.getResourceId());
+    }
+
+    /**
+     * 判断当前登录用户是否可访问资源详情：管理权限或使用权限任一满足即可。
+     */
+    public boolean hasResourceAccessPermission(SsResource ssResource) {
+        return hasResourceManagePermission(ssResource) || hasResourceUsePermission(ssResource);
+    }
+
+    /**
      * 判断当前登录用户是否被显式授予资源管理权限。
      * 该方法只看 ALLOW_MANAGE 授权，不叠加平台管理员/组织管理员等管理兜底能力，
      * 适用于“左侧列表可见即可设为默认”等需要与授权列表保持一致的场景。
@@ -2581,6 +2615,10 @@ public class AuthApplicationService {
 
         boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum());
         boolean canManage = hasResourceManagePermission(ssResource);
+        boolean hasUsePermission = hasResourceUsePermission(ssResource);
+        vo.setHasManagePermission(canManage);
+        vo.setHasUsePermission(hasUsePermission);
+        vo.setCanViewDetail(!isResourceRemoved && (canManage || hasUsePermission));
 
         // 如果资源已注销，只允许恢复操作，其他操作全部禁用
         if (isResourceRemoved) {

@@ -16,11 +16,13 @@ const BaseInfo = ({
   data,
   resourceId,
   allowKnowledgeBaseDelete,
+  canManage = false,
   backPath = '/knowledgeCenter',
 }: {
   data: any;
   resourceId: string;
   allowKnowledgeBaseDelete?: boolean;
+  canManage?: boolean;
   backPath?: string;
 }) => {
   const [showVisibleRange, setShowVisibleRange] = useState(false);
@@ -29,6 +31,8 @@ const BaseInfo = ({
   const intl = useIntl();
   const navigate = useNavigate();
   const disabledTip = intl.formatMessage({ id: 'resource.thirdPartyKnowledgeBaseMode' });
+  const noPermissionDisabledTip = intl.formatMessage({ id: 'common.noPermissionOperation' });
+  const canDeleteKnowledge = Boolean(allowKnowledgeBaseDelete && canManage);
 
   const renderIcon = useMemo(() => {
     try {
@@ -52,7 +56,7 @@ const BaseInfo = ({
   }, [data]);
 
   const onDeleteFolder = () => {
-    if (!allowKnowledgeBaseDelete) {
+    if (!canDeleteKnowledge) {
       return;
     }
     Modal.confirm({
@@ -95,10 +99,10 @@ const BaseInfo = ({
           </>
         )}
 
-        <Tooltip title={!allowKnowledgeBaseDelete ? disabledTip : undefined}>
+        <Tooltip title={!allowKnowledgeBaseDelete ? disabledTip : !canManage ? noPermissionDisabledTip : undefined}>
           <div
             className={classNames(styles.baseInfoActionItem, {
-              disabled: !allowKnowledgeBaseDelete,
+              disabled: !canDeleteKnowledge,
             })}
             onClick={onDeleteFolder}
           >
