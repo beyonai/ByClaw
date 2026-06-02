@@ -1,14 +1,3 @@
-# syntax=docker/dockerfile:1
-## Build from the repository root, not from middleware/openclaw:
-##
-##   podman build --platform linux/amd64 \
-##     -f middleware/openclaw/Dockerfile \
-##     -t 10.10.165.101:8080/byclaw/byclaw-openclaw:2026.5.26 \
-##     .
-##
-## The COPY paths below are intentionally relative to the repository root.
-## Enable BuildKit cache mounts: DOCKER_BUILDKIT=1 or podman build --layers.
-
 ## ── stage 1: build byclaw extensions ──────────────────────────────
 FROM node:22-slim AS ext-builder
 
@@ -195,10 +184,6 @@ RUN ln -s /app /app/node_modules/openclaw
 COPY middleware/openclaw/skills/ /app/skills/
 RUN rm -rf /app/skills/gbrain
 
-# Fallback runtime config template for direct container starts. The platform
-# bootstrap still owns normal workspace template writes.
-COPY openclaw.json /usr/local/share/openclaw/openclaw.json
-
 # add filebrowser
 COPY middleware/openclaw/linux-amd64-filebrowser/filebrowser /usr/local/bin/filebrowser
 RUN chmod a+x /usr/local/bin/filebrowser
@@ -206,6 +191,7 @@ RUN chmod a+x /usr/local/bin/filebrowser
 # Runtime bootstrap is sourced by Spec.json before OpenClaw starts. It keeps
 # OpenClaw state on the mounted /by volume without persisting system packages.
 COPY middleware/openclaw/runtime-bootstrap.sh /usr/local/bin/openclaw-runtime-bootstrap
+COPY middleware/openclaw/novnc-index.html /usr/local/share/openclaw/novnc-index.html
 COPY middleware/openclaw/startAll.sh \
      middleware/openclaw/start-filebrowser.sh \
      middleware/openclaw/start-display.sh \
