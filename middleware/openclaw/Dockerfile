@@ -1,5 +1,4 @@
-## ── stage 1: build byclaw extensions ──────────────────────────────
-FROM node:22-slim AS ext-builder
+FROM hub-nj.iwhalecloud.com/dmcit2024/node:22-slim AS ext-builder
 
 WORKDIR /build
 
@@ -8,13 +7,11 @@ RUN npm config set registry https://registry.npmmirror.com --global \
     && npm config set audit false --global \
     && npm config set prefer-offline true --global
 
-# Shared esbuild for all extensions (build only; not copied to runtime).
 RUN --mount=type=cache,target=/root/.npm \
     npm install --prefix /build/toolchain --no-package-lock --omit=dev esbuild@0.25.12
 
 ENV PATH="/build/toolchain/node_modules/.bin:${PATH}"
 
-# Layer cache: dependency install only re-runs when package.json / lock changes.
 COPY byclaw-exe/extensions/baiying-enhance/package.json \
      byclaw-exe/extensions/baiying-enhance/package-lock.json \
      ./src/baiying-enhance/
@@ -25,8 +22,7 @@ COPY byclaw-exe/extensions/byclaw-sqlite/package.json \
      byclaw-exe/extensions/byclaw-sqlite/package-lock.json \
      ./src/byclaw-sqlite/
 
-# --omit=dev: runtime deps only; esbuild comes from /build/toolchain (see PATH).
-# Parallel ci + npm cache mount speeds up repeated builds significantly.
+
 RUN --mount=type=cache,target=/root/.npm \
     set -eux; \
     pids=""; \
@@ -43,7 +39,6 @@ COPY byclaw-exe/extensions/baiying-enhance/ ./src/baiying-enhance/
 COPY byclaw-exe/extensions/byai-channel/ ./src/byai-channel/
 COPY byclaw-exe/extensions/byclaw-sqlite/ ./src/byclaw-sqlite/
 
-# build, prune, then assemble clean output into /build/out/
 RUN set -eux; \
     mkdir -p /build/out; \
     for dir in src/*/; do \
@@ -70,7 +65,8 @@ RUN set -eux; \
     done; \
     echo ">>> built extensions:"; ls -la /build/out/
 
-## ── stage 2: final image ─────────────────────────────────────────
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS python312
+
 FROM ghcr.io/openclaw/openclaw:2026.5.28-beta.4
 
 USER root
@@ -99,9 +95,6 @@ RUN set -eux; \
     printf 'Acquire::Retries "5";\n' > /etc/apt/apt.conf.d/80-retries; \
     apt-get update; \
     base_packages=" \
-        python3 \
-        python3-pip \
-        python3-venv \
         ca-certificates \
         curl \
         git \
@@ -170,26 +163,33 @@ RUN set -eux; \
         test -f /opt/opencli/extension/manifest.json; \
         ;; \
     esac; \
-    python3 -m pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
-    python3 -m pip config --global set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
-    python3 -m pip install --no-cache-dir redis; \
     rm -rf /var/lib/apt/lists/*
 
-# Overlay ByClaw-built extensions (byai-channel, baiying-enhance, byclaw-sqlite).
+COPY --from=python312 /usr/local/bin/python3.12 /usr/local/bin/pip3.12 /usr/local/bin/
+COPY --from=python312 /usr/local/lib/libpython3.12.so* /usr/local/lib/
+COPY --from=python312 /usr/local/lib/python3.12 /usr/local/lib/python3.12
+
+RUN set -eux; \
+    ln -sf /usr/local/bin/python3.12 /usr/local/bin/python3; \
+    ln -sf /usr/local/bin/python3.12 /usr/bin/python3; \
+    python3 --version | grep -q 'Python 3.12'; \
+    python3 -m pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
+    python3 -m pip config --global set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
+    python3 -m pip install --no-cache-dir redis
+
 COPY --from=ext-builder /build/out/ /app/dist-runtime/extensions/
 
 RUN ln -s /app /app/node_modules/openclaw
 
-# add openclaw skills (overwrite same-name files with project content)
+
 COPY middleware/openclaw/skills/ /app/skills/
 RUN rm -rf /app/skills/gbrain
 
-# add filebrowser
+
 COPY middleware/openclaw/linux-amd64-filebrowser/filebrowser /usr/local/bin/filebrowser
 RUN chmod a+x /usr/local/bin/filebrowser
 
-# Runtime bootstrap is sourced by Spec.json before OpenClaw starts. It keeps
-# OpenClaw state on the mounted /by volume without persisting system packages.
+
 COPY middleware/openclaw/runtime-bootstrap.sh /usr/local/bin/openclaw-runtime-bootstrap
 COPY middleware/openclaw/novnc-index.html /usr/local/share/openclaw/novnc-index.html
 COPY middleware/openclaw/startAll.sh \
@@ -210,7 +210,6 @@ RUN chmod +x \
     /usr/local/bin/start-opencli.sh \
     /usr/local/bin/start-openclaw.sh
 
-# add dingTalk cli dws
 RUN curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh
 
 # rm
