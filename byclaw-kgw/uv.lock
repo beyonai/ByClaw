@@ -337,7 +337,7 @@ wheels = [
 [[package]]
 name = "byclaw-kgw"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "aioboto3" },
     { name = "fastapi" },
@@ -389,7 +389,7 @@ dev = [
     { name = "pyink", specifier = "==25.12.0" },
     { name = "pylint", specifier = ">=3.3.1" },
     { name = "pytest", specifier = ">=8.3.0" },
-    { name = "pytest-asyncio", specifier = ">=0.24.0" },
+    { name = "pytest-asyncio", specifier = ">=1.0.0" },
     { name = "respx", specifier = ">=0.21.0" },
     { name = "ruff", specifier = ">=0.9.4" },
     { name = "testcontainers", extras = ["postgres", "redis", "minio"], specifier = ">=4.8.0" },
