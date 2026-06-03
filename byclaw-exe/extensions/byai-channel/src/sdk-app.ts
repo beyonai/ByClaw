@@ -372,8 +372,7 @@ export class ByaiSdkApp {
         await deliverReplyToAgentViaSdk({
           message: inbound,
           account: this.account,
-          // cfg: this.currentConfig(),
-          cfg: this.cfg,
+          cfg: this.currentConfig(),
           abortController,
           log: this.log,
           onReply: async (text, type, options) => {

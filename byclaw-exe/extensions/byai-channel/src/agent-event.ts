@@ -5,6 +5,8 @@ import {
   getLastSdkEmitChunk,
   isRootSessionKey,
   isChildSessionKey,
+  markActiveSdkModelFallbackStep,
+  markActiveSdkCompactionRetryPending,
   markActiveSdkRootLifecycleFinished,
   markActiveSdkRootLifecycleStarted,
   resolveActiveSdkRequestBySessionKey,
@@ -117,6 +119,12 @@ type ToolEventData = {
   };
 }
 
+function isActiveSdkModelFallbackOutcome(
+  value: unknown,
+): value is "next_fallback" | "succeeded" | "chain_exhausted" {
+  return value === "next_fallback" || value === "succeeded" || value === "chain_exhausted";
+}
+
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
@@ -145,7 +153,7 @@ async function handleToolEvent(
       // 必须以toolCallId作为messageId，这个toolCallId可能会作为parentMessageId发送到其他worker(在baiying-enhance的实现)
       messageId: toolCallId,
       parentMessageId: "-1",
-      eventType: EventType.REASONING_LOG_DELTA,
+      eventType: EventType.REASONING_LOG_START,
       contentType: SseReasonMessageType.think_status_title,
       objectType: "tool_call",
       status: "_START_",
@@ -182,6 +190,14 @@ async function handleToolEvent(
       parentMessageId: toolCallId,
       eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.json_block,
+    });
+    await emitSdkChunk(request, sdkEmitter, "", {
+      messageId: toolCallId,
+      parentMessageId: "-1",
+      eventType: EventType.REASONING_LOG_END,
+      contentType: SseReasonMessageType.think_status_title,
+      objectType: "tool_call",
+      status: data.isError ? "_ERROR_" : "_DONE_",
     });
     if (data?.name === "baiying_call") {
       setToBeEmittedChunkViaBaiyingCallTool(data?.result);
@@ -251,20 +267,12 @@ async function handleReasoningEndTransition(
     traceId: request.traceId,
     text: buildThinkingEndText(request.language, duration),
     options: {
-      eventType: EventType.REASONING_LOG_DELTA,
+      eventType: EventType.REASONING_LOG_END,
       messageId: previousEmit?.messageId,
       parentMessageId: previousEmit?.parentMessageId,
+      contentType: SseReasonMessageType.think_text,
     },
   });
-  // await emitSdkChunkTracked({
-  //   emitter: sdkEmitter,
-  //   sessionId: request.sessionId,
-  //   traceId: request.traceId,
-  //   text: "",
-  //   options: {
-  //     eventType: EventType.REASONING_LOG_END,
-  //   },
-  // });
 }
 
 /**
@@ -292,6 +300,25 @@ async function handleLifecycleEvent(
   if (!isRootSessionKey(sessionKey) || !phase) {
     return;
   }
+  if (phase === "fallback_step") {
+    if (!isActiveSdkModelFallbackOutcome(data?.fallbackStepFinalOutcome)) {
+      return;
+    }
+    const activeRequest = markActiveSdkModelFallbackStep(
+      sessionKey,
+      data.fallbackStepFinalOutcome,
+    ) ?? request;
+    if (data.fallbackStepFinalOutcome === "next_fallback") {
+      cancelActiveSdkCompletionCheck(activeRequest.sessionKey);
+      return;
+    }
+    scheduleActiveSdkCompletionCheck(
+      api,
+      activeRequest.sessionKey,
+      `model_fallback_${data.fallbackStepFinalOutcome}`,
+    );
+    return;
+  }
   if (phase === "start") {
     const activeRequest = markActiveSdkRootLifecycleStarted(sessionKey) ?? request;
     cancelActiveSdkCompletionCheck(activeRequest.sessionKey);
@@ -314,6 +341,27 @@ async function handleLifecycleEvent(
   );
 }
 
+function handleCompactionEvent(
+  request: ActiveSdkRequest,
+  event: AgentEvent,
+  sessionKey?: string,
+) {
+  const phase = typeof event.data?.phase === "string" ? event.data.phase : undefined;
+  if (!phase) {
+    return;
+  }
+  if (phase === "start") {
+    markActiveSdkCompactionRetryPending(sessionKey ?? request.sessionKey, true);
+    return;
+  }
+  if (phase === "end") {
+    markActiveSdkCompactionRetryPending(
+      sessionKey ?? request.sessionKey,
+      Boolean(event.data?.willRetry),
+    );
+  }
+}
+
 async function handleThinkingEvent(
   request: ActiveSdkRequest,
   event: AgentEvent,
@@ -334,13 +382,18 @@ async function emitReasoningText(
   const previousEmit = getLastSdkEmitChunk(request.accountId);
   const options: EmitOptions = {
     eventType: EventType.REASONING_LOG_DELTA,
+    contentType: SseReasonMessageType.think_text,
   };
   if (isPreviousThinking) {
     options.messageId = previousEmit?.messageId;
     options.parentMessageId = previousEmit?.parentMessageId;
   } else {
-    options.messageId = Math.random().toString(16).slice(2),
+    options.messageId = Math.random().toString(16).slice(2);
     options.parentMessageId = "-1";
+    await emitSdkChunk(request, sdkEmitter, "", {
+      ...options,
+      eventType: EventType.REASONING_LOG_START,
+    });
   }
   await emitIncrementalText({
     key: `${runId}:${source}:thinking`,
@@ -400,6 +453,8 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
     });
   } else if (event.stream === "lifecycle") {
     await handleLifecycleEvent(api, request, event, resolvedSessionKey);
+  } else if (event.stream === "compaction") {
+    handleCompactionEvent(request, event, resolvedSessionKey);
   } else if (currentStream === "thinking") {
     await handleThinkingEvent(request, event, isPreviousThinking);
   }
