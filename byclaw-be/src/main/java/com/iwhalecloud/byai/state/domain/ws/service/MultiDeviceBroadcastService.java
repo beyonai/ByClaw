@@ -11,7 +11,6 @@ import com.iwhalecloud.byai.state.domain.ws.manager.ChannelManager;
 import io.netty.channel.Channel;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import lombok.extern.slf4j.Slf4j;
-import com.iwhalecloud.byai.state.domain.chat.enums.MessageType;
 
 /**
  * 多端广播服务：将消息事件推送到同一用户的所有 WebSocket Channel（排除发送端）。
@@ -79,6 +78,11 @@ public class MultiDeviceBroadcastService {
      */
     public void broadcastRawEvent(Long userId, Long sessionId, JSONObject dataJson,
                                   Channel senderChannel) {
+        broadcastRawEvent(userId, sessionId, dataJson, senderChannel, null);
+    }
+
+    public void broadcastRawEvent(Long userId, Long sessionId, JSONObject dataJson,
+                                  Channel senderChannel, String clientRequestId) {
         if (userId == null) {
             return;
         }
@@ -92,10 +96,13 @@ public class MultiDeviceBroadcastService {
         String eventData = dataJson.getString("data");
 
         JSONObject message = new JSONObject();
-        message.put("type", MessageType.LLM_MESSAGE.name());
+        message.put("type", "CHAT_STREAM");
+        message.put("clientRequestId", clientRequestId);
         message.put("sessionId", String.valueOf(sessionId));
         message.put("event", eventType);
         message.put("data", eventData);
+        message.put("traceId", dataJson.getString("trace_id"));
+        message.put("streamId", dataJson.getString("stream_id"));
 
         JSONObject metadata = dataJson.getJSONObject("metadata");
         if (metadata != null) {

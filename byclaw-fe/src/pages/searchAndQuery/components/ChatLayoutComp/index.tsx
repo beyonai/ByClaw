@@ -89,13 +89,23 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     return EventEmitter.invoke('beyond-chat-beforesend-hook', param);
   }, []);
 
-  const { sendQuery, messageList, hasMore, getMessageList, setMessageList, onNext, updateMessage, deleteMessage } =
-    useChat({
-      sessionId,
-      agentType: myAgentType,
-      addSession,
-      onBeforeSend,
-    });
+  const {
+    sendQuery,
+    messageList,
+    hasMore,
+    getMessageList,
+    setMessageList,
+    onNext,
+    updateMessage,
+    deleteMessage,
+    isSessionRunning,
+    cancelCurrentSession,
+  } = useChat({
+    sessionId,
+    agentType: myAgentType,
+    addSession,
+    onBeforeSend,
+  });
   const lastMsg = last(messageList);
 
   const onSend = useCallback(
@@ -119,10 +129,13 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   );
 
   const onCancel = useCallback(() => {
-    if ([IMessageState.Query, IMessageState.Answer].includes(lastMsg?.messageState as IMessageState)) {
-      lastMsg?.cancelSSE?.();
+    if (
+      isSessionRunning ||
+      [IMessageState.Query, IMessageState.Answer].includes(lastMsg?.messageState as IMessageState)
+    ) {
+      cancelCurrentSession();
     }
-  }, [lastMsg?.cancelSSE, lastMsg?.messageState]);
+  }, [cancelCurrentSession, isSessionRunning, lastMsg?.messageState]);
 
   useEventEmitterHooks({
     sendQuery,
@@ -174,7 +187,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
             <div className={classnames(styles.queryInputWrapper)} id="queryInputWrapper">
               <div className={classnames(styles.queryInput)} data-isbottom={isBottom}>
                 <QueryInput
-                  messageState={lastMsg?.messageState}
+                  messageState={isSessionRunning ? IMessageState.Answer : lastMsg?.messageState}
                   onSend={onSend}
                   onCancel={onCancel}
                   myAgentType={myAgentType}

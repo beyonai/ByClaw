@@ -2,6 +2,7 @@ import { compact, get as getSafe, isEmpty, merge, size, get, set, findLast, max,
 import type { Effect, Reducer } from '@umijs/max';
 
 import { getSearchList, qryConversations, removeConversation, updateConversation } from '@/service/layout';
+import { getChatRunningStatus } from '@/service/message';
 import type { ISession } from '@/typescript/session';
 import { getDefaultPagination, type IPagination } from '@/utils/pageInfo';
 import { batchReadMessages } from '@/service/session';
@@ -11,6 +12,7 @@ import { IMessageState, SSEMessageType } from '@/constants/message';
 import { addSessionHandler, updateSessionHandler, formatByUpdateTime, sessionHandler } from '@/utils/session';
 import { IMessage } from '@/typescript/message';
 import type { IFile } from '@/typescript/file';
+import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 
 export interface ISessionState {
   sessionLoading: boolean;
@@ -258,6 +260,19 @@ const sessionModel: SessionModelType = {
         const mySessionList: ISession[] = (list || []).map((item: ISession) => {
           return sessionHandler(item, targetList);
         });
+
+        if (!isEmpty(mySessionList)) {
+          try {
+            const runningStatusList = yield call(getChatRunningStatus, {
+              sessionIds: mySessionList.map((item) => item.sessionId).filter(Boolean),
+            });
+            (runningStatusList || []).forEach((item: any) => {
+              chatSessionRuntimeManager.hydrateRunning(item);
+            });
+          } catch (error) {
+            console.error(error);
+          }
+        }
 
         // 构建更新的缓存数据
         let updatedList = compact(mySessionList);

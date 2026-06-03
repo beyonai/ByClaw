@@ -12,11 +12,10 @@ import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatStreamRuntimeCoordinator;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
-import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
+import com.iwhalecloud.byai.state.domain.chat.service.GatewayStreamEventProcessor;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
-import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
-import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentTypeResolver;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -35,6 +34,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Locale;
+import java.util.concurrent.LinkedBlockingQueue;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
@@ -44,10 +44,9 @@ class RouteServiceTest {
 
     private GatewayClient gatewayClient;
     private PythonSseService pythonSseService;
-    private SessionStreamManager sessionStreamManager;
+    private GatewayStreamEventProcessor gatewayStreamEventProcessor;
+    private ChatStreamRuntimeCoordinator chatStreamRuntimeCoordinator;
     private SandboxService sandboxService;
-    private OutputStreamManager outputStreamManager;
-    private RunningOutputStreamRegistry runningOutputStreamRegistry;
     private SequenceService sequenceService;
     private JwtService jwtService;
     private TargetAgentTypeResolver targetAgentTypeResolver;
@@ -58,10 +57,9 @@ class RouteServiceTest {
     void setUp() {
         gatewayClient = mock(GatewayClient.class);
         pythonSseService = mock(PythonSseService.class);
-        sessionStreamManager = mock(SessionStreamManager.class);
+        gatewayStreamEventProcessor = new GatewayStreamEventProcessor();
+        chatStreamRuntimeCoordinator = mock(ChatStreamRuntimeCoordinator.class);
         sandboxService = mock(SandboxService.class);
-        outputStreamManager = mock(OutputStreamManager.class);
-        runningOutputStreamRegistry = mock(RunningOutputStreamRegistry.class);
         sequenceService = mock(SequenceService.class);
         jwtService = mock(JwtService.class);
         targetAgentTypeResolver = new TargetAgentTypeResolver();
@@ -79,10 +77,9 @@ class RouteServiceTest {
         routeService = new RouteService();
         ReflectionTestUtils.setField(routeService, "gatewayClient", gatewayClient);
         ReflectionTestUtils.setField(routeService, "pythonSseService", pythonSseService);
-        ReflectionTestUtils.setField(routeService, "sessionStreamManager", sessionStreamManager);
+        ReflectionTestUtils.setField(routeService, "gatewayStreamEventProcessor", gatewayStreamEventProcessor);
+        ReflectionTestUtils.setField(routeService, "chatStreamRuntimeCoordinator", chatStreamRuntimeCoordinator);
         ReflectionTestUtils.setField(routeService, "sandboxService", sandboxService);
-        ReflectionTestUtils.setField(routeService, "outputStreamManager", outputStreamManager);
-        ReflectionTestUtils.setField(routeService, "runningOutputStreamRegistry", runningOutputStreamRegistry);
         ReflectionTestUtils.setField(routeService, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(routeService, "jwtService", jwtService);
         ReflectionTestUtils.setField(routeService, "targetAgentTypeResolver", targetAgentTypeResolver);
@@ -161,7 +158,7 @@ class RouteServiceTest {
         verify(sandboxService, times(1)).restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1");
         verify(gatewayClient, times(2)).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
-        verify(sessionStreamManager, times(1)).stopSessionListener("3");
+        verify(chatStreamRuntimeCoordinator, times(1)).stopIfStarted("3", true);
     }
 
     @Test
@@ -264,6 +261,8 @@ class RouteServiceTest {
         ctx.setTraceId("1_2");
         ctx.setParams(new HashMap<>());
         ctx.getParams().put("worker_agent_type", workerAgentType);
+        ctx.gatewayEventQueue = new LinkedBlockingQueue<>();
+        when(chatStreamRuntimeCoordinator.startIfNecessary(ctx)).thenReturn(true);
         return ctx;
     }
 

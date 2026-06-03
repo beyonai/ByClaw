@@ -3,6 +3,10 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,6 +71,15 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     private final Map<String, StreamMessageListenerContainer<String, MapRecord<String, String, String>>> containers =
         new ConcurrentHashMap<>();
 
+    /** sessionId -> running 标记续租任务 */
+    private final Map<String, ScheduledFuture<?>> keepAliveTasks = new ConcurrentHashMap<>();
+
+    private final ScheduledExecutorService keepAliveExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "chat-running-lease-keepalive");
+        thread.setDaemon(true);
+        return thread;
+    });
+
     /**
      * 启动指定 session 的 Redis Stream 监听器。
      * <p>
@@ -114,6 +127,8 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
                 log.warn("停止旧的 session 监听容器时发生异常, sessionId: {}", sessionId, e);
             }
         }
+        cancelKeepAlive(sessionId);
+        startKeepAlive(sessionId, ctx);
 
         log.info("Session Stream 监听已启动, stream: {}, consumer: {}", streamKey, consumerName);
     }
@@ -138,6 +153,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
                 log.warn("停止 session 监听容器时发生异常, sessionId: {}", sessionId, e);
             }
         }
+        cancelKeepAlive(sessionId);
 
         // 清理 OutputStreamManager 中的上下文（确保不残留）
         OutputStreamManager outputStreamManager = applicationContext.getBean(OutputStreamManager.class);
@@ -163,7 +179,37 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
             }
         }
         containers.clear();
+        keepAliveTasks.values().forEach(task -> task.cancel(false));
+        keepAliveTasks.clear();
+        keepAliveExecutor.shutdownNow();
         log.info("所有 Session Stream 监听器已清理完成");
+    }
+
+    private void startKeepAlive(String sessionId, ChatProcessContext ctx) {
+        if (ctx == null) {
+            return;
+        }
+        RunningOutputStreamRegistry runningOutputStreamRegistry =
+            applicationContext.getBean(RunningOutputStreamRegistry.class);
+        RunningChatSnapshotService runningChatSnapshotService =
+            applicationContext.getBean(RunningChatSnapshotService.class);
+        ScheduledFuture<?> future = keepAliveExecutor.scheduleAtFixedRate(() -> {
+            try {
+                runningOutputStreamRegistry.touchRunning(ctx);
+                runningChatSnapshotService.touch(ctx);
+            }
+            catch (Exception e) {
+                log.warn("刷新 running 标记续租失败, sessionId: {}", sessionId, e);
+            }
+        }, 60, 60, TimeUnit.SECONDS);
+        keepAliveTasks.put(sessionId, future);
+    }
+
+    private void cancelKeepAlive(String sessionId) {
+        ScheduledFuture<?> future = keepAliveTasks.remove(sessionId);
+        if (future != null) {
+            future.cancel(false);
+        }
     }
 
     /**

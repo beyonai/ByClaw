@@ -5,12 +5,10 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -27,26 +25,21 @@ import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
-import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.common.dto.ChoiceDto;
 import com.iwhalecloud.byai.state.common.dto.DeltaDto;
-import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
 import com.iwhalecloud.byai.state.common.enums.MessageContentTypeEnum;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
+import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
-import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
-import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatStreamRuntimeCoordinator;
+import com.iwhalecloud.byai.state.domain.chat.service.GatewayStreamEventProcessor;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
-import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
-import com.iwhalecloud.byai.state.domain.chat.service.ScriptService;
-import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentTypeResolver;
-import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
@@ -68,16 +61,13 @@ public class RouteService {
     private PythonSseService pythonSseService;
 
     @Autowired
-    private SessionStreamManager sessionStreamManager;
+    private GatewayStreamEventProcessor gatewayStreamEventProcessor;
+
+    @Autowired
+    private ChatStreamRuntimeCoordinator chatStreamRuntimeCoordinator;
 
     @Autowired
     private SandboxService sandboxService;
-
-    @Autowired
-    private OutputStreamManager outputStreamManager;
-
-    @Autowired
-    private RunningOutputStreamRegistry runningOutputStreamRegistry;
 
     @Autowired
     private SequenceService sequenceService;
@@ -171,23 +161,12 @@ public class RouteService {
 
         targetAgentType = targetAgentTypeResolver.resolve(targetAgentType, agentId, chatDto.getSourceAgentType(),
                 userCode);
+        ctx.targetAgentType = targetAgentType;
 
         // 处理 content 中的资源占位符替换，如 {{DIG_EMPLOYEE_10812779}} 替换为 @xxxxx
         content = replaceResourcePlaceholders(content, resourceList);
 
-        if (!ctx.sendByFrameworkMsgOnly) {
-            // 初始化事件队列，Redis 监听器投入，请求线程消费
-            ctx.gatewayEventQueue = new LinkedBlockingQueue<>();
-
-            // 缓存上下文，供 Redis 监听器查找
-            outputStreamManager.putContext(sessionId, ctx);
-
-            // 先启动监听器：使用 XREAD 轮询，从锚点（Stream 当前最新消息 ID）之后读取，避免消费旧消息
-            sessionStreamManager.startSessionListener(sessionId, ctx);
-
-            // 记录运行中的 OutputStream，用于分布式场景下判断 RESUME 是否可复用旧监听任务
-            runningOutputStreamRegistry.markRunning(ctx);
-        }
+        boolean runtimeStarted = chatStreamRuntimeCoordinator.startIfNecessary(ctx);
 
         String answerMessageId = StringUtils.isNotEmpty(ctx.assistantChatDto.getResumeMessageId())
             ? ctx.assistantChatDto.getResumeMessageId()
@@ -212,22 +191,25 @@ public class RouteService {
                     ctx
             );
         } catch (Exception e) {
-            if (!ctx.sendByFrameworkMsgOnly) {
-                sessionStreamManager.stopSessionListener(sessionId);
-            }
+            chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
             throw e;
-        }
-        if (ctx.sendByFrameworkMsgOnly) {
-            return;
         }
 
         log.info("Gateway SDK 消息发送成功, messageId: {}, targetWorker: {}, sessionId: {}, content: {}",
                 response.getMessageId(), response.getTargetWorkerId(), sessionId, content);
 
-        // 历史批次上下文：key = 历史traceId, value = 该批次的 MessageContext
-        Map<String, MessageContext> historyBatchMap = new HashMap<>();
-        // 记录每个历史traceId对应的 userMessageId（从traceId拆分得到）
-        Map<String, Long> historyUserMessageIdMap = new HashMap<>();
+        if (ctx.sendByFrameworkMsgOnly) {
+            log.info("会话复用已有 Redis Stream 监听，本次仅发送 Gateway 消息完成, sessionId: {}, traceId: {}",
+                sessionId, traceId);
+            return;
+        }
+
+        if (ChatTransport.WEBSOCKET.equals(ctx.transport)) {
+            ctx.asyncResponse = true;
+            log.info("WebSocket 会话已发送 Gateway，后续由 Redis Stream 路由异步推送, sessionId: {}, traceId: {}",
+                sessionId, traceId);
+            return;
+        }
 
         try {
             // 请求线程循环消费事件队列，依次写入 OutputStream，保证逐包实时推流
@@ -241,66 +223,13 @@ public class RouteService {
                 String eventType = dataJson.getString("event_type");
 
                 JSONObject metadata = dataJson.getJSONObject("metadata");
-                String receivedTraceId = dataJson.getString("trace_id");
-                // 跳过不符合 traceId 格式（userMessageId_modelAnswerMessageId）的旧版消息
-                if (receivedTraceId == null || !receivedTraceId.contains("_")) {
+                if (gatewayStreamEventProcessor.handleHistoryEventIfNecessary(ctx, dataJson)) {
                     continue;
                 }
 
-                boolean isCurrentTrace = traceId.equals(receivedTraceId);
-
-                // ========== 非当前 traceId：只积累数据，不推送客户端 ==========
-                if (!isCurrentTrace) {
-                    // 获取或创建该历史 traceId 的 MessageContext
-                    if (!historyBatchMap.containsKey(receivedTraceId)) {
-                        String[] parts = receivedTraceId.split("_", 2);
-                        Long historyUserMessageId = Long.parseLong(parts[0]);
-                        Long historyModelAnswerMessageId = Long.parseLong(parts[1]);
-                        MessageContext historyMsgCtx = new MessageContext(
-                                AgentTypeEnum.getNameCode(ctx.assistantChatDto.getAgentType()),
-                                historyModelAnswerMessageId,
-                                sequenceService.nextVal());
-                        historyBatchMap.put(receivedTraceId, historyMsgCtx);
-                        historyUserMessageIdMap.put(receivedTraceId, historyUserMessageId);
-                        log.info("发现历史 traceId: {}, 创建历史批次上下文, sessionId: {}", receivedTraceId, sessionId);
-                    }
-
-                    MessageContext historyMsgCtx = historyBatchMap.get(receivedTraceId);
-
-                    // 构造与 Python SSE 格式一致的 JSON 行，仅用于积累
-                    String eventData = buildEventData(ctx, dataJson, metadata);
-                    JSONObject lineJson = new JSONObject();
-                    lineJson.put("event", eventType);
-                    lineJson.put("data", eventData);
-                    pythonSseService.accumulateEvent(lineJson.toJSONString(), historyMsgCtx);
-
-                    // 遇到终止事件（error / appStreamResponse）：该历史批次入库，然后继续循环
-                    if (SseResponseEventEnum.error.equals(eventType)
-                            || SseResponseEventEnum.appStreamResponse.equals(eventType)) {
-                        historyMsgCtx.setComplete(true);
-                        Long historyUserMsgId = historyUserMessageIdMap.get(receivedTraceId);
-                        try {
-                            storeHistoryBatch(ctx, historyMsgCtx, historyUserMsgId);
-                            log.info("历史批次入库完成, traceId: {}, sessionId: {}", receivedTraceId, sessionId);
-                        } catch (Exception e) {
-                            log.error("历史批次入库失败, traceId: {}, sessionId: {}", receivedTraceId, sessionId, e);
-                        }
-                        historyBatchMap.remove(receivedTraceId);
-                        historyUserMessageIdMap.remove(receivedTraceId);
-                    }
+                eventType = gatewayStreamEventProcessor.normalizeEventType(ctx, dataJson);
+                if (gatewayStreamEventProcessor.shouldIgnoreEvent(ctx, eventType, dataJson)) {
                     continue;
-                }
-
-                String sourceAgentType = dataJson.getString("source_agent_type");
-                if (StringUtils.isNotBlank(sourceAgentType) && !sourceAgentType.equals(targetAgentType)) {
-                    // targetAgentType 在内部 call agent 其他worker，这种情况下，其他worker发送的appStreamResponse事件 需要忽略
-                    if (SseResponseEventEnum.appStreamResponse.equals(eventType)) {
-                        continue;
-                    }
-                    if (SseResponseEventEnum.answerDelta.equals(eventType)) {
-                        // 并且，其他worker发送的answerDelta事件，理应转为思考过程事件
-                        eventType = SseResponseEventEnum.reasoningLogDelta;
-                    }
                 }
 
                 // ========== 当前 traceId：原有逻辑，积累 + 推送客户端 ==========
@@ -317,13 +246,13 @@ public class RouteService {
                     CompletionsUtils.responseWrite(ctx.res, SseResponseEventEnum.error, errorPayload.toJSONString());
                     ctx.gatewayError = true;
                     log.error("收到 Gateway error 事件，退出事件循环, sessionId: {}", sessionId);
-                    sessionStreamManager.stopSessionListener(sessionId);
+                    chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
                     break;
                 }
 
                 // 其他事件（answerDelta / answerStart / answerEnd 等）：
                 // 构造与 Python SSE 格式一致的 JSON 行，写入 OutputStream
-                String eventData = buildEventData(ctx, dataJson, metadata);
+                String eventData = gatewayStreamEventProcessor.buildEventData(ctx, dataJson, metadata);
                 JSONObject lineJson = new JSONObject();
                 lineJson.put("event", eventType);
                 lineJson.put("data", eventData);
@@ -337,14 +266,13 @@ public class RouteService {
                         ctx.messageContext.setComplete(true);
                     }
                     log.info("收到 appStreamResponse，退出事件循环, sessionId: {}", sessionId);
-                    sessionStreamManager.stopSessionListener(sessionId);
+                    chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
                     break;
                 }
             }
         } finally {
-            // 无论正常/超时/异常，通过 SessionStreamManager 停止监听并清理上下文
-            // stopSessionListener 内部会同时清理 outputStreamManager 中的 ctx
-            sessionStreamManager.stopSessionListener(sessionId);
+            // 无论正常/超时/异常，当前请求如果启动了监听，则负责停止并清理上下文。
+            chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
         }
     }
 
@@ -570,64 +498,4 @@ public class RouteService {
         return targetAgentTypeResolver.isUserSandboxAgentType(targetAgentType, userCode);
     }
 
-    /**
-     * 将 Redis 事件的 data 字段统一构造为包含 sessionId 和 metadata 的 JSON 字符串。
-     * 抽取自 while 循环中的 eventData 构建逻辑，供当前 traceId 和历史 traceId 路径共用。
-     */
-    private String buildEventData(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata) {
-        String eventData = dataJson.getString("data");
-        String sourceAgentType = dataJson.getString("source_agent_type");
-        String traceId = dataJson.getString("trace_id");
-        String sessionId = String.valueOf(ctx.sessionId);
-        String userMessageId = String.valueOf(ctx.userMessageId);
-        if (eventData == null) {
-            JSONObject eventPayload = new JSONObject(dataJson);
-            eventPayload.remove("event_type");
-            eventPayload.remove("session_id");
-            eventPayload.put("sessionId", sessionId);
-            if (metadata != null && !metadata.isEmpty()) {
-                eventPayload.put("metadata", metadata.toJSONString());
-            }
-            return eventPayload.toJSONString();
-        }
-        try {
-            JSONObject dataObj = JSON.parseObject(eventData);
-            if (dataObj != null) {
-                dataObj.put("sourceAgentType", sourceAgentType);
-                dataObj.put("sessionId", sessionId);
-                dataObj.put("traceId", traceId);
-                if (metadata != null && !metadata.isEmpty()) {
-                    dataObj.put("metadata", metadata.toJSONString());
-                }
-                // orderId & parentOrderId，这两个字段用于给前端构建消息树。当parentOrderId=用户消息id时，表示是第一层级的消息，改为-1更好理解。
-                if (StringUtils.isNotBlank(dataObj.getString("parentOrderId")) && dataObj.getString("parentOrderId").equals(userMessageId)) {
-                    dataObj.put("parentOrderId", "-1");
-                }
-                return dataObj.toJSONString();
-            }
-            return eventData;
-        } catch (Exception e) {
-            return eventData;
-        }
-    }
-
-    /**
-     * 将历史批次的消息通过 resolveMemory 入库。
-     * 构造独立的 ChatProcessContext 和 AssistantChatDto，避免污染当前请求上下文。
-     */
-    private void storeHistoryBatch(ChatProcessContext currentCtx, MessageContext historyMsgCtx,
-                                   Long historyUserMessageId) {
-        AssistantChatDto historyDto = new AssistantChatDto();
-        BeanUtils.copyProperties(currentCtx.assistantChatDto, historyDto);
-        historyDto.setTaskOperateType(null);
-
-        ChatProcessContext tempCtx = new ChatProcessContext(null, historyDto);
-        tempCtx.sessionId = currentCtx.sessionId;
-        tempCtx.userMessageId = historyUserMessageId;
-        tempCtx.taskId = historyMsgCtx.getTaskId();
-
-        ByaiMessageHotDtoDto tempResMsg = new ByaiMessageHotDtoDto();
-        ScriptService scriptService = ApplicationContextUtil.getBean(ScriptService.class);
-        scriptService.resolveMemory(tempCtx, historyDto, currentCtx.sessionId, historyMsgCtx, tempResMsg);
-    }
 }

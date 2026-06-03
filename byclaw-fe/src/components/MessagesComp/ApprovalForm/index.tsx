@@ -38,7 +38,7 @@ function ApprovalForm(props: IProps) {
   const { messageListItemContent, message, messageListItem, thinkListItem } = props;
   const { uuid, orginContent, resumeMessageId } = messageListItem || thinkListItem || {};
 
-  const { messageId } = message;
+  const { messageId, traceId, sessionId } = message;
   const {
     substance = [],
     title,
@@ -147,9 +147,11 @@ function ApprovalForm(props: IProps) {
         messageId,
         content: contentStr,
         updateField,
+        sessionId,
+        traceId,
       });
     },
-    [uuid, messageId, updateField]
+    [uuid, messageId, updateField, sessionId, traceId]
   );
 
   const myToApproveForm = async () => {

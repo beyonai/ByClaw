@@ -1,5 +1,21 @@
+jest.mock('@umijs/max', () => ({
+  getDvaApp: jest.fn(),
+  getIntl: jest.fn(() => ({
+    formatMessage: jest.fn(({ defaultMessage, id }: any) => defaultMessage || id),
+  })),
+  getLocale: jest.fn(() => 'zh-CN'),
+  history: {
+    replace: jest.fn(),
+    push: jest.fn(),
+  },
+}));
+
 jest.mock('@/service/session', () => ({
   batchReadMessages: jest.fn(),
+}));
+
+jest.mock('@/service/message', () => ({
+  getChatRunningStatus: jest.fn(),
 }));
 
 jest.mock('@/service/layout', () => ({

@@ -17,6 +17,7 @@ import useGlobal from '@/hooks/useGlobal';
 import { IMessageListItem } from '@/typescript/message';
 import type { ISession } from '@/typescript/session';
 import type { IOnionsProps } from '@/hooks/useChat';
+import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 
 type IProps = {
   addSession: (newSession: ISession) => void;
@@ -63,6 +64,8 @@ function useHandler(props: IProps) {
           },
         });
       }
+
+      chatSessionRuntimeManager.bindSession(sseMsg.clientRequestId, newSessionId);
 
       addSession({
         ...(sseRes as ISession),
@@ -179,6 +182,12 @@ function useHandler(props: IProps) {
 
       if (sseRes.traceId) {
         newAnswerMsg.traceId = sseRes.traceId;
+        if (sseMsg.clientRequestId) {
+          const runtimeInfo = chatSessionRuntimeManager.getByClientRequest(sseMsg.clientRequestId);
+          if (runtimeInfo) {
+            runtimeInfo.traceId = sseRes.traceId;
+          }
+        }
       }
 
       if (!sseRes.message) return onionsProps;

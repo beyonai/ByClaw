@@ -93,13 +93,15 @@ export type IMessageInfo = {
   pageRange: [number, number];
 };
 
+export type MessageListUpdater = IMessage[] | ((messageList: IMessage[]) => IMessage[]);
+
 export type IState = {
   sessionListMap: Map<string, IMessageInfo>;
 };
 
 export type IEffect = {
   setSessionMessage: (sessionId: string, messageListInfo: IMessageInfo) => void;
-  updateSessionMessageList: (sessionId: string, messageList: IMessage[]) => void;
+  updateSessionMessageList: (sessionId: string, messageList: MessageListUpdater) => void;
   getSessionMessage: (sessionId: string) => Promise<IMessageInfo>;
   getMoreSessionMessage: (sessionId: string) => Promise<IMessageInfo>;
   getSessionMessageByCache: (sessionId: string) => IMessageInfo;
@@ -124,9 +126,11 @@ export default {
   },
 
   effects: {
-    *getSessionMessage(action: { payload: { sessionId: string } }, { put, select }): any {
+    *getSessionMessage(action: { payload: { sessionId: string } }, { put, select }: any): any {
       const sessionId = getSessionId(action);
-      const mySessionListMap: IState['sessionListMap'] = yield select((state) => state.messageStore.sessionListMap);
+      const mySessionListMap: IState['sessionListMap'] = yield select(
+        (state: any) => state.messageStore.sessionListMap
+      );
 
       let cache = mySessionListMap.get(sessionId);
 
@@ -161,12 +165,12 @@ export default {
 
       return cache;
     },
-    *getMoreSessionMessage(action: { payload: { sessionId: string; isPrev?: boolean } }, { put, select }): any {
+    *getMoreSessionMessage(action: { payload: { sessionId: string; isPrev?: boolean } }, { put, select }: any): any {
       // isPrev ==== 往下翻页，即，pageNum减少
       const { isPrev } = action.payload;
       const sessionId = getSessionId(action);
 
-      const mySessionListMap = yield select((state) => state.messageStore.sessionListMap);
+      const mySessionListMap = yield select((state: any) => state.messageStore.sessionListMap);
       let cache = mySessionListMap.get(sessionId) || getInitMessageInfo();
 
       if (isPrev && cache.pageNum <= 1) {
@@ -222,7 +226,7 @@ export default {
 
       return cache;
     },
-    *getLatestSessionMessage(action: { payload: { sessionId: string } }, { put }): any {
+    *getLatestSessionMessage(action: { payload: { sessionId: string } }, { put }: any): any {
       const sessionId = getSessionId(action);
 
       let cache: IMessageInfo | undefined;
@@ -249,9 +253,9 @@ export default {
 
       return cache;
     },
-    *getSessionInfo(action: { payload: { sessionId: string } }, { select }): any {
+    *getSessionInfo(action: { payload: { sessionId: string } }, { select }: any): any {
       const sessionId = getSessionId(action);
-      const mySessionListMap = yield select((state) => state.messageStore.sessionListMap);
+      const mySessionListMap = yield select((state: any) => state.messageStore.sessionListMap);
       return mySessionListMap.get(sessionId);
     },
   },
@@ -266,25 +270,36 @@ export default {
       const sessionId = getSessionId(action);
       const { messageListInfo } = action.payload;
 
-      const oldSessionListMap = state.sessionListMap;
+      const oldSessionListMap = new Map(state.sessionListMap);
 
-      oldSessionListMap.set(sessionId, messageListInfo);
+      oldSessionListMap.set(`${sessionId}`, messageListInfo);
 
       return {
         ...state,
         sessionListMap: oldSessionListMap,
       };
     },
-    updateSessionMessageList(state: IState, action: { payload: { sessionId: string; messageList: IMessage[] } }) {
+    updateSessionMessageList(
+      state: IState,
+      action: {
+        silent?: boolean;
+        payload: { sessionId: string; messageList: MessageListUpdater };
+      }
+    ) {
       const sessionId = getSessionId(action);
-      const { messageList } = action.payload;
+      const { messageList: messageListUpdater } = action.payload;
 
-      const oldSessionListMap = state.sessionListMap;
+      const oldSessionListMap = new Map(state.sessionListMap);
 
       const oldMessageInfo = oldSessionListMap.get(sessionId);
+      const oldMessageList = oldMessageInfo?.list || [];
+      const messageList =
+        typeof messageListUpdater === 'function' ? messageListUpdater(oldMessageList) : messageListUpdater;
+      // 复制一个新的 sessionListMap，避免React不更新的问题
+      let newSessionListMap = action.silent ? oldSessionListMap : new Map(oldSessionListMap);
 
       if (oldMessageInfo) {
-        oldSessionListMap.set(sessionId, {
+        newSessionListMap.set(`${sessionId}`, {
           list: messageList,
           pageSize: oldMessageInfo.pageSize,
           pageNum: oldMessageInfo.pageNum,
@@ -292,7 +307,7 @@ export default {
           pageRange: oldMessageInfo.pageRange,
         });
       } else {
-        oldSessionListMap.set(sessionId, {
+        newSessionListMap.set(`${sessionId}`, {
           list: messageList,
           pageNum: Math.floor(size(messageList) / _INIT_PAGESIZE_) || 1,
           pageSize: _INIT_PAGESIZE_,
@@ -303,7 +318,7 @@ export default {
 
       return {
         ...state,
-        sessionListMap: oldSessionListMap,
+        sessionListMap: newSessionListMap,
       };
     },
     getSessionMessageByCache(state: IState, action: { payload: { sessionId: string } }) {
@@ -328,8 +343,8 @@ export default {
 
       const pageSize = _INIT_PAGESIZE_;
       const pageNum = Math.ceil(Number(index) / pageSize);
-      const { sessionListMap } = state;
-      sessionListMap.set(sessionId, {
+      const sessionListMap = new Map(state.sessionListMap);
+      sessionListMap.set(`${sessionId}`, {
         pageNum,
         pageSize,
         total: Number(total),
@@ -337,12 +352,15 @@ export default {
         pageRange: [pageNum, pageNum],
         // 故意的，把list设为undefined
       } as unknown as IMessageInfo);
-      return state;
+      return {
+        ...state,
+        sessionListMap,
+      };
     },
     cleanSessionMessage(state: IState, action: { payload: { sessionId: string } }) {
       const sessionId = getSessionId(action);
 
-      const oldSessionListMap = state.sessionListMap;
+      const oldSessionListMap = new Map(state.sessionListMap);
 
       oldSessionListMap.delete(sessionId);
 

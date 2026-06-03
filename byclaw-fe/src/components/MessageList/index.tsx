@@ -3,8 +3,6 @@ import { Button, Checkbox, Spin } from 'antd';
 import classnames from 'classnames';
 import { head, last, pullAll, size, uniq, isEmpty, get } from 'lodash';
 import React, { forwardRef, useCallback, useImperativeHandle } from 'react';
-// @ts-ignore
-import InfiniteScroll from '../InfiniteScroll';
 
 import { IMessageState } from '@/constants/message';
 import { multiChoicesHandler, checkAnswerMessageCanMemory } from '@/utils/messgae';
@@ -12,6 +10,7 @@ import useToBottomBtn from './hooks/useToBottomBtn';
 import useRender from './useRender';
 import DividerTips from './components/DividerTips';
 import SystemTips from './components/SystemTips';
+import MessageInfiniteScroll from './components/MessageInfiniteScroll';
 
 import { generateUniqueId } from '@/utils/math';
 
@@ -65,7 +64,7 @@ function MessageList(props: IProps, ref: any) {
   } = props;
   const { multiChoicesList = emptyArr, setMultiChoicesMsgId, multiChoicesMsgId } = props;
 
-  const infiniteScrollRef = React.useRef<InfiniteScroll>(null);
+  const infiniteScrollRef = React.useRef<MessageInfiniteScroll>(null);
   const scrollMessageDomId = React.useRef<string>(`scrollMessage_${generateUniqueId()}`);
 
   const { renderMessage, extendsRender } = useRender({
@@ -109,7 +108,7 @@ function MessageList(props: IProps, ref: any) {
           className={classnames(styles.messageContent, 'full-height full-width hideThumb')}
           id={scrollMessageDomId.current}
         >
-          <InfiniteScroll
+          <MessageInfiniteScroll
             ref={infiniteScrollRef}
             next={(isPrev?: boolean) => {
               onNext?.(isPrev);
@@ -217,7 +216,7 @@ function MessageList(props: IProps, ref: any) {
                 </div>
               );
             })}
-          </InfiniteScroll>
+          </MessageInfiniteScroll>
         </div>
       </MessageListContext.Provider>
       {toBottomBtnVisable && showToBottomBtn && (

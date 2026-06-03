@@ -98,7 +98,8 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
                     case SSE_STREAM -> chatService.sseStream(ctx, chatMessage);
                     case NOTIFICATION -> notificationService.getRealTimeNotification(ctx, message);
                     case ECOSYSTEM_BRIDGE -> handleEcosystemBridge(ctx, chatMessage, userInfo);
-                    default -> throw new RuntimeException(I18nUtil.get("ws.handler.unsupported.message.type", chatMessage.getType()));
+                    case STOP_CHAT -> chatService.stopChat(ctx, chatMessage);
+                default -> throw new RuntimeException(I18nUtil.get("ws.handler.unsupported.message.type", chatMessage.getType()));
                 }
             }
             finally {

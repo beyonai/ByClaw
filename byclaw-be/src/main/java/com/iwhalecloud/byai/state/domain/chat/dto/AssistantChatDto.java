@@ -200,6 +200,11 @@ public class AssistantChatDto {
     private String traceId;
 
     /**
+     * 前端生成的本轮回答关联标识，通常等于 answerMsg.msgId，用于将 WebSocket 流式事件关联回本地消息。
+     */
+    private String clientRequestId;
+
+    /**
      * 从暂停->用户操作->恢复，消息ID
      */
     private String resumeMessageId;

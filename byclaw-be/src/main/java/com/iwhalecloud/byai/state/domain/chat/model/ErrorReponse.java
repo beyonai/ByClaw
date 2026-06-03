@@ -6,7 +6,6 @@ public class ErrorReponse {
     private String errorCode;
     private String details;
     private String timestamp;
-    private String requestId;
     private String path;
     private String traceback;
 
@@ -56,14 +55,6 @@ public class ErrorReponse {
         this.timestamp = timestamp;
     }
 
-    public String getRequestId() {
-        return requestId;
-    }
-
-    public void setRequestId(String requestId) {
-        this.requestId = requestId;
-    }
-
     public String getPath() {
         return path;
     }
@@ -88,7 +79,6 @@ public class ErrorReponse {
                 ", errorCode='" + errorCode + '\'' +
                 ", details='" + details + '\'' +
                 ", timestamp='" + timestamp + '\'' +
-                ", requestId='" + requestId + '\'' +
                 ", path='" + path + '\'' +
                 ", traceback='" + traceback + '\'' +
                 '}';
