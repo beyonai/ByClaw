@@ -14,7 +14,7 @@ export function getDisplayUserNameInChat(name: string): string {
 export function getVNCUrl(sandboxesInfo: IState['sandboxesInfo']) {
   const { sandboxId } = sandboxesInfo;
 
-  let url = `/v1/sandboxes/${sandboxId}/proxy/8081/`;
+  let url = `/v1/sandboxes/${sandboxId}/proxy/8081/?autoconnect=true&resize=scale`;
   if (isDevelopment()) {
     url = `${URI_TARGET}${url}`;
   } else {
