@@ -14,8 +14,10 @@ import com.iwhalecloud.byai.manager.domain.auth.enums.Color;
 import com.iwhalecloud.byai.manager.domain.auth.enums.OperType;
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
+import com.iwhalecloud.byai.manager.domain.position.service.PositionService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.domain.station.service.StationService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.auth.AuthDTO;
 import com.iwhalecloud.byai.manager.dto.auth.AuthRedBlackDTO;
@@ -45,6 +47,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.ArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -83,6 +86,21 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
     }
 
+    private void mockEmptyUsePermissionDependencies(AuthApplicationService service) {
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        OrganizationService organizationService = mock(OrganizationService.class);
+        PositionService positionService = mock(PositionService.class);
+        StationService stationService = mock(StationService.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "organizationService", organizationService);
+        ReflectionTestUtils.setField(service, "positionService", positionService);
+        ReflectionTestUtils.setField(service, "stationService", stationService);
+        when(privilegeGrantService.findPrivilegeByQo(any())).thenReturn(new ArrayList<>());
+        when(organizationService.findOrganizationByUserId(any())).thenReturn(List.of());
+        when(positionService.findPositionByUserId(any())).thenReturn(List.of());
+        when(stationService.getStationByUserId(any())).thenReturn(null);
+    }
+
     /**
      * 默认超级助手禁止被设置使用授权，后端需要兜底拦截，不能只依赖前端隐藏按钮。
      *
@@ -118,6 +136,7 @@ class AuthApplicationServiceTest {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceService ssResourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        mockEmptyUsePermissionDependencies(service);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(2L);
@@ -149,6 +168,7 @@ class AuthApplicationServiceTest {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceService ssResourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        mockEmptyUsePermissionDependencies(service);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(2L);
@@ -178,6 +198,7 @@ class AuthApplicationServiceTest {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceService ssResourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        mockEmptyUsePermissionDependencies(service);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(2L);

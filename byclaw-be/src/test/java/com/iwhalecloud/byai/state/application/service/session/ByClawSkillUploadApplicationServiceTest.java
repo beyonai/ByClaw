@@ -16,8 +16,6 @@ import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.storage.UserFS;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
-import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,7 +56,7 @@ class ByClawSkillUploadApplicationServiceTest {
     private UserFS userFS;
 
     @Mock
-    private SsResourceService ssResourceService;
+    private ByClawSkillPathResolver skillPathResolver;
 
     private ByClawSkillUploadApplicationService service;
 
@@ -75,7 +73,7 @@ class ByClawSkillUploadApplicationServiceTest {
 
         service = new ByClawSkillUploadApplicationService();
         ReflectionTestUtils.setField(service, "userFS", userFS);
-        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        ReflectionTestUtils.setField(service, "skillPathResolver", skillPathResolver);
     }
 
     @AfterEach
@@ -88,7 +86,7 @@ class ByClawSkillUploadApplicationServiceTest {
         MultipartFile zip = buildZip("skill.zip",
             "fol-auto-biztravel/SKILL.md", "# Skill",
             "fol-auto-biztravel/scripts/run.py", "print('hi')");
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
 
         ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
 
@@ -110,7 +108,7 @@ class ByClawSkillUploadApplicationServiceTest {
         // skill.md（小写）也被识别，但写入时统一规范化为 SKILL.md。
         MultipartFile zip = buildZip("skill.zip",
             "alpha/skill.md", "# alpha");
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
 
         ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
 
@@ -125,7 +123,7 @@ class ByClawSkillUploadApplicationServiceTest {
         MultipartFile zip = buildZip("铁算盘财务健康分析.zip", Charset.forName("GBK"),
             "铁算盘财务健康分析/SKILL.md", "# 铁算盘",
             "铁算盘财务健康分析/references/persona-guide.md", "guide");
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
 
         ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
 
@@ -154,7 +152,7 @@ class ByClawSkillUploadApplicationServiceTest {
     void shouldUploadMultipleSkillZips() {
         MultipartFile alpha = buildZip("alpha.zip", "alpha/SKILL.md", "# alpha");
         MultipartFile beta = buildZip("beta.zip", "beta/SKILL.md", "# beta");
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
 
         var result = service.uploadSkillZips(USER_CODE, RESOURCE_ID, Arrays.asList(alpha, beta));
 
@@ -179,7 +177,7 @@ class ByClawSkillUploadApplicationServiceTest {
         MultipartFile zip = buildZip("fol-auto-biztravel.zip",
             "SKILL.md", "# root",
             "scripts/run.py", "print('hi')");
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
 
         ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
 
@@ -196,7 +194,7 @@ class ByClawSkillUploadApplicationServiceTest {
         MultipartFile tarGz = buildTarGz("content-factory.tar.gz",
             "content-factory/SKILL.md", "# content factory",
             "content-factory/scripts/main.py", "print('hi')");
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
 
         ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, tarGz);
 
@@ -213,7 +211,7 @@ class ByClawSkillUploadApplicationServiceTest {
         MultipartFile tarGz = buildTarGz("root-skill.tar.gz",
             "SKILL.md", "# root",
             "scripts/run.py", "print('hi')");
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
 
         ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, tarGz);
 
@@ -227,7 +225,7 @@ class ByClawSkillUploadApplicationServiceTest {
         MultipartFile zip = buildZip("skill.zip",
             "alpha/SKILL.md", "ok",
             "alpha/../../etc/passwd", "hack");
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
 
         ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
 
@@ -259,7 +257,7 @@ class ByClawSkillUploadApplicationServiceTest {
         MultipartFile zip = buildZip("assistant-core.zip",
             "assistant-core/SKILL.md", "# Skill",
             "assistant-core/scripts/run.py", "print('hi')");
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("adminvip_main"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(SUPER_PREFIX);
 
         ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
 
@@ -269,12 +267,6 @@ class ByClawSkillUploadApplicationServiceTest {
         assertTrue(pathCaptor.getAllValues().contains(SUPER_PREFIX + "assistant-core/SKILL.md"));
         assertTrue(pathCaptor.getAllValues().contains(SUPER_PREFIX + "assistant-core/scripts/run.py"));
         assertEquals(SUPER_PREFIX + "assistant-core", dto.getSkillPath());
-    }
-
-    private SsResource resource(String resourceCode) {
-        SsResource resource = new SsResource();
-        resource.setResourceCode(resourceCode);
-        return resource;
     }
 
     /** 构造一个 zip MultipartFile，参数按 (entryName, content) 成对传入；filename 决定 originalFilename。 */

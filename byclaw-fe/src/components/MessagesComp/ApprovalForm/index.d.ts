@@ -76,6 +76,13 @@ interface TermSelectFormField extends BaseFormField {
     termTypeCode: string;
     datasetId: number;
   };
+  termResolveNotice?: {
+    "status": "recommended",
+    "originalValue": string,
+    "recommendedValue": string,
+    "recommendedLabel": string,
+    "message": string,
+  },
 
   page?: number;
   pageSize?: number;

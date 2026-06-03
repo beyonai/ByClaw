@@ -5,9 +5,9 @@
  *
  * Usage:
  *   node gh-pr-fetch.mjs --repo owner/repo --pr 123 [--format diff|files|metadata|all]
- *
- * Env: GITHUB_TOKEN (required)
  */
+
+import { requireGitHubToken } from "./gh-token.mjs";
 
 const args = process.argv.slice(2);
 
@@ -19,24 +19,13 @@ function getArg(name) {
 const repo = getArg("repo") || process.env.GITHUB_PR_REVIEW_REPO || "beyonai/ByClaw";
 const prNumber = getArg("pr");
 const format = getArg("format") || "all";
-const token = process.env.GITHUB_TOKEN;
+const token = await requireGitHubToken();
 
 function fail(message) {
   console.log(JSON.stringify({ ok: false, error: message }));
   process.exit(1);
 }
 
-if (!token) {
-  const authUrl = "https://github.com/settings/tokens/new?scopes=repo&description=ByClaw+PR+Review+Skill";
-  console.log(JSON.stringify({
-    ok: false,
-    error: "GITHUB_TOKEN not configured",
-    auth_required: true,
-    auth_url: authUrl,
-    message: `GitHub 授权未配置。请点击以下链接创建 Personal Access Token，然后将其设置为环境变量 GITHUB_TOKEN：\n\n${authUrl}\n\n创建时请确保勾选 repo 权限。创建后运行：export GITHUB_TOKEN=<your_token>`,
-  }));
-  process.exit(1);
-}
 if (!repo) fail("--repo owner/repo is required");
 if (!prNumber) fail("--pr <number> is required");
 

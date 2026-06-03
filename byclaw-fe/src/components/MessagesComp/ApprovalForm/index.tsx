@@ -62,11 +62,13 @@ function ApprovalForm(props: IProps) {
 
   const isThinkingProcess = !!props.thinkListItem;
   const updateField = isThinkingProcess ? 'inferLog' : 'messageStruct';
+
   const totalSteps = substance.length;
   const currentStepIndex = Math.min(currentStep, Math.max(totalSteps - 1, 0));
   const currentStepItem = substance[currentStepIndex];
   const isFirstStep = currentStepIndex <= 0;
   const isLastStep = currentStepIndex >= totalSteps - 1;
+
   const allStepsConfirmed = useMemo(
     () => substance.length > 0 && substance.every((item) => typeof item.confirmed === 'boolean'),
     [confirmedVersion, substance]
@@ -91,6 +93,7 @@ function ApprovalForm(props: IProps) {
       }),
     [confirmedVersion, currentStepIndex, substance]
   );
+  const hasMoreSteps = size(stepItems) > 1;
 
   const scrollToStepDescription = useCallback(() => {
     const scroll = () => {
@@ -121,13 +124,13 @@ function ApprovalForm(props: IProps) {
     }
   };
 
-  const handleConfirmCurrentStep = (nextConfirmed: boolean) => {
+  const handleConfirmCurrentStep = async (nextConfirmed: boolean) => {
     if (!currentStepItem) return;
 
     set(currentStepItem, 'confirmed', nextConfirmed);
     setConfirmedVersion(Date.now());
 
-    handleNextStep();
+    await handleNextStep();
   };
 
   const myUpdateMessageStructById = useCallback(
@@ -170,6 +173,7 @@ function ApprovalForm(props: IProps) {
       console.error(e);
     }
 
+    set(messageListItemContent, 'formStatus', IFormStatus.FINISH);
     const queryQuestion = intl.formatMessage({ id: 'common.submit' });
 
     const payload = {
@@ -207,12 +211,13 @@ function ApprovalForm(props: IProps) {
     setIsDisableBtn(true);
     console.log(payload, operationForm);
     EventEmitter.emit('beyond-chat-on-send-msg', payload);
+    EventEmitter.emit('beyond-easyconfirm-set-approvalform-item', props);
 
     myUpdateMessageStructById(operationForm);
   };
 
   return (
-    <div className={classnames(styles.myForm)} key={`${messageId}_approveForm`}>
+    <div className={classnames(styles.myForm, 'ub ub-ver overflow-hidden')} key={`${messageId}_approveForm`}>
       <div className={'ub ub-ver gap2'}>
         <div className={classnames(styles.myFormTitle, 'ub ub-ac')}>
           {/* 表单 */}
@@ -223,7 +228,7 @@ function ApprovalForm(props: IProps) {
           {description || ''}
         </div>
       </div>
-      <div className={styles.myFormContent} ref={stepDescriptionRef}>
+      <div className={classnames(styles.myFormContent)} ref={stepDescriptionRef}>
         <Form
           form={form}
           name={formId}
@@ -240,7 +245,7 @@ function ApprovalForm(props: IProps) {
             });
           }}
         >
-          {size(stepItems) > 1 && (
+          {hasMoreSteps && (
             <Steps
               className={styles.approvalSteps}
               current={currentStepIndex}
@@ -267,7 +272,7 @@ function ApprovalForm(props: IProps) {
       </div>
       <div className={classnames(styles.myFormFooter, 'ub ub-ver gap8')}>
         <div className={'ub ub-pe ub-ac gap8'}>
-          {size(stepItems) > 1 && (
+          {hasMoreSteps && (
             <Button
               key={`${messageId}_prev_btn`}
               onClick={() => {
@@ -276,10 +281,10 @@ function ApprovalForm(props: IProps) {
               }}
               disabled={isFirstStep}
             >
-              上一步
+              {intl.formatMessage({ id: 'common.prev' })}
             </Button>
           )}
-          {isDisable && (
+          {hasMoreSteps && isDisable && (
             <Button
               key={`${messageId}_next_btn`}
               onClick={async () => {
@@ -288,7 +293,7 @@ function ApprovalForm(props: IProps) {
               }}
               disabled={isLastStep}
             >
-              下一步
+              {intl.formatMessage({ id: 'common.next' })}
             </Button>
           )}
           {!isDisable && (
@@ -296,29 +301,37 @@ function ApprovalForm(props: IProps) {
               <Button
                 key={`${messageId}_skip_btn`}
                 onClick={() => {
-                  handleConfirmCurrentStep(false);
-                  handleNextStep();
+                  handleConfirmCurrentStep(false).then(() => {
+                    if (!hasMoreSteps) {
+                      myToApproveForm();
+                    }
+                  });
                 }}
                 disabled={isDisable}
                 style={{ marginLeft: 'auto' }}
               >
-                跳过
+                {hasMoreSteps ? intl.formatMessage({ id: 'common.skip' }) : intl.formatMessage({ id: 'common.cancel' })}
               </Button>
               <Button
                 key={`${messageId}_confirm_btn`}
                 type="primary"
                 onClick={() => {
-                  handleConfirmCurrentStep(true);
-                  handleNextStep();
+                  handleConfirmCurrentStep(true).then(() => {
+                    if (!hasMoreSteps) {
+                      myToApproveForm();
+                    }
+                  });
                 }}
                 disabled={isDisable}
               >
-                确定
+                {hasMoreSteps
+                  ? intl.formatMessage({ id: 'common.confirm' })
+                  : intl.formatMessage({ id: 'common.submit' })}
               </Button>
             </>
           )}
         </div>
-        {!isDisable && isLastStep && allStepsConfirmed ? (
+        {hasMoreSteps && !isDisable && isLastStep && allStepsConfirmed ? (
           <div className={'ub ub-pe ub-ac gap8'} style={{ borderTop: '1px solid #e5e5e5', paddingTop: '8px' }}>
             <Button
               key={`${messageId}_approve_btn`}
@@ -336,4 +349,15 @@ function ApprovalForm(props: IProps) {
   );
 }
 
+// const ApprovalFormWarpper = (props: IProps) => {
+//   const { EventEmitter } = useGlobal();
+
+//   useEffect(() => {
+//     EventEmitter.emit('beyond-easyconfirm-set-approvalform-item', props);
+//   }, []);
+
+//   return <ApprovalForm {...props} />;
+// };
+
 export default ApprovalForm;
+// export default ApprovalFormWarpper;

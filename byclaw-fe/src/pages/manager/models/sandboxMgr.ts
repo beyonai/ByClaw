@@ -9,6 +9,7 @@ import {
   getServiceSpec,
   saveServiceSpec,
   deleteServiceSpec,
+  launchByUserCode,
 } from '@/pages/manager/service/SandboxMgr';
 import { unwrapResponse, getErrorText } from '@/pages/manager/models/modelMgr';
 
@@ -116,6 +117,21 @@ export default {
           success?.(response.data);
         } else {
           message.error(response?.msg || 'Failed to delete service spec');
+          fail?.(response || {});
+        }
+      } catch (error) {
+        const err = { msg: getErrorText(error) };
+        message.error(err.msg);
+        fail?.(err);
+      }
+    },
+    *launchByUserCode({ payload, success, fail }, { call }) {
+      try {
+        const response = unwrapResponse(yield call(launchByUserCode, payload));
+        if (response.code === 0) {
+          success?.(response.data);
+        } else {
+          message.error(response?.msg || 'Failed to launch sandbox');
           fail?.(response || {});
         }
       } catch (error) {

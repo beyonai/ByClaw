@@ -69,4 +69,14 @@ export default {
 
   // Pagination
   'sandboxMgr.pagination.total': 'Total {total} items',
+
+  // Launch sandbox by user code
+  'sandboxMgr.launch.button': 'Launch by User',
+  'sandboxMgr.launch.title': 'Launch Sandbox by User Code',
+  'sandboxMgr.launch.userCode': 'User Code',
+  'sandboxMgr.launch.userCodePlaceholder': 'Enter user code',
+  'sandboxMgr.launch.userCodeRequired': 'Please enter user code',
+  'sandboxMgr.launch.serviceKey': 'Service Spec',
+  'sandboxMgr.launch.serviceKeyPlaceholder': 'Use default spec if not selected',
+  'sandboxMgr.launch.success': 'Sandbox launched, sandboxId: {sandboxId}',
 };

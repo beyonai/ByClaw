@@ -20,6 +20,7 @@ jest.mock('@/pages/manager/service/ModelMgr', () => ({
   deleteModel: jest.fn(),
   getModelDetail: jest.fn(),
   getModelListByPage: jest.fn(),
+  setDefaultModel: jest.fn(),
   setModelStatus: jest.fn(),
   upsertModel: jest.fn(),
 }));

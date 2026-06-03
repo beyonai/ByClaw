@@ -49,7 +49,13 @@
                     OR (a.in_params IS NOT NULL AND a.in_params LIKE #{keywordPattern}))
             </if>
             <if test="ability != null and ability != ''">
-                AND d.tag_id = #{ability}
+                AND EXISTS (
+                    SELECT 1
+                    FROM byai_tag_relation ability_rel
+                    WHERE ability_rel.obj_type = 'AI_MODEL'
+                      AND ability_rel.obj_id = a.model_id
+                      AND ability_rel.tag_id = #{ability}
+                )
             </if>
             <if test="system != null and system != ''">
                 <bind name="systemPattern" value="'%' + system + '%'"/>
@@ -69,6 +75,7 @@
         LEFT JOIN  byai_tag_relation d
            ON a.model_id = d.obj_id
             AND d.obj_type = 'AI_MODEL'
+            AND d.tag_id = 1
         <include refid="Condition_Where_WithTag"/>
         ORDER BY a.create_time DESC
     </select>

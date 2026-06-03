@@ -98,7 +98,7 @@ export default {
   'employeeDetail.configureKnowledge': '配置知识',
   'employeeDetail.qaKnowledge': '问答对知识库',
   'employeeDetail.documentKnowledge': '文档知识库',
-  'employeeDetail.tagSearchPlaceholder': '搜索或新增标签,按回车完成',
+  'employeeDetail.tagSearchPlaceholder': '新增标签,按回车完成',
   'employeeDetail.skillType.agent': '智能体',
   'employeeDetail.skillType.toolkit': '工具集',
   'employeeDetail.skillType.tool': '工具',

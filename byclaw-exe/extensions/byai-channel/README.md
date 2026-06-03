@@ -26,7 +26,13 @@ npm run build
       "streamEnabled": true,
       "sessionKeyPerSessionId": false,
       "dmPolicy": "open",
-      "allowFrom": ["*"]
+      "allowFrom": ["*"],
+      "telemetry": {
+        "enabled": true,
+        "consoleEnabled": false,
+        "redisEnabled": true,
+        "logIntervalMs": 30000
+      }
     }
   },
   "plugins": {
@@ -49,6 +55,14 @@ npm run build
 | `sessionKeyPerSessionId` | boolean | false | SDK 入站时是否按 `agent + sessionId` 生成独立 `sessionKey` |
 | `dmPolicy`      | string  | "open"                  | 消息策略: open/allowlist/pairing          |
 | `allowFrom`     | array   | []                      | 允许发送消息的用户列表，\* 表示允许所有人 |
+| `telemetry`     | object  | Redis 开启，console 关闭 | 输出运行态 busy snapshot，供外部 controller 判断是否续期容器 |
+
+### Telemetry 运行态输出
+
+`telemetry` 会监听 agent run、tool call、subagent 和 agent event stream，默认通过 Redis 发布到
+`byai_gateway:registry:worker:stats:openclaw`。如需本地日志调试，可显式设置
+`consoleEnabled: true` 输出 `[openclaw-busy-state]` JSON 行。该输出只包含运行态计数、原因和 lease 建议，
+不会包含 transcript、用户消息正文、工具参数或凭据。
 
 ### 与配置热重载协作
 

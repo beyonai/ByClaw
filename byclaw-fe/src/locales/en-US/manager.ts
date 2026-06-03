@@ -118,6 +118,8 @@ export default {
   'orgMgr.members.relatedEmployee': 'Related Digital Employees',
   'orgMgr.members.relatedResource': 'Related Digital Resources',
   'orgMgr.members.resetPassword': 'Reset Password',
+  'orgMgr.members.resetPasswordTitle': 'Reset Password',
+  'orgMgr.members.resetPasswordContent': 'Are you sure you want to reset this member password?',
   'orgMgr.members.selected': '{count} items selected',
   'orgMgr.members.exitOrganization': 'Exit Organization',
   'orgMgr.members.exitOrganizationTitle': 'Exit Organization',
@@ -166,6 +168,10 @@ export default {
   'orgMgr.modal.userCodePlaceholder': 'Please enter user code',
   'orgMgr.modal.userCodeRule1': 'User code must be at least 3 characters',
   'orgMgr.modal.userCodeRule2': 'User code cannot exceed 255 characters',
+  'orgMgr.modal.password': 'Password',
+  'orgMgr.modal.passwordPlaceholder': 'Please enter password',
+  'orgMgr.modal.confirmPassword': 'Confirm Password',
+  'orgMgr.modal.confirmPasswordPlaceholder': 'Please enter password again',
   'orgMgr.modal.belongOrgId': 'Organization ID',
   'orgMgr.modal.belongOrg': 'Organization',
   'orgMgr.modal.userNumber': 'ID',
@@ -333,6 +339,9 @@ export default {
   'modelMgr.confirmDisable': 'Confirm to disable this model?',
   'modelMgr.confirmEnable': 'Confirm to enable this model?',
   'modelMgr.confirmDelete': 'Confirm to delete this model?',
+  'modelMgr.confirmSetDefault':
+    'Set this model as the default conversation model? After that, other default conversation models will be set to non-default.',
+  'modelMgr.setDefault': 'Set as default',
   'modelMgr.operationSuccess': 'Operation succeeded',
   'modelMgr.debug': 'Debug',
   'modelMgr.heroDesc':
@@ -352,6 +361,7 @@ export default {
   'modelMgr.error.saveModelFail': 'Failed to save model',
   'modelMgr.error.updateModelStatusFail': 'Failed to update model status',
   'modelMgr.error.deleteModelFail': 'Failed to delete model',
+  'modelMgr.error.setDefaultModelFail': 'Failed to set default conversation model',
   'modelMgr.error.debugModelFail': 'Model debug failed',
 
   // Model Management - Edit/Debug Modal

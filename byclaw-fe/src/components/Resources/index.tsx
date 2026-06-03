@@ -1,5 +1,5 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { UploadOutlined, SearchOutlined, PlusOutlined } from '@ant-design/icons';
+import { CloudSyncOutlined, UploadOutlined, SearchOutlined, PlusOutlined } from '@ant-design/icons';
 import { useIntl, getLocale, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
 import { Button, Input, Space, Tooltip, message, Tabs } from 'antd';
@@ -14,6 +14,7 @@ import { queryKnowledgeCapability, type KnowledgeCapability } from '@/service/kn
 import {
   applyResourceUse,
   queryFixedEntryOperationCapability,
+  queryResourceOperationPermissions,
   type FixedEntryOperationCapability,
 } from '@/pages/manager/service/resources';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
@@ -23,6 +24,7 @@ import ResourceDetail from './components/ResourceDetail';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
 import DetailPanel from '@/pages/knowledgeCenter/components/DetailPanel';
+import EcosystemCollector from '@/pages/knowledgeCenter/components/EcosystemCollector';
 import { useSkillDetailDrawer } from '@/pages/manager/components/SkillDetailDrawer/useSkillDetailDrawer';
 import ResourceFilter from './components/ResourceFilter';
 import { getDefaultParams } from './components/ResourceFilter';
@@ -43,6 +45,12 @@ interface IResourceItem {
   resourceBizType?: string;
   resourceSourcePkId?: string;
   catalogId?: string | number;
+  hasManagePermission?: boolean;
+  hasUsePermission?: boolean;
+  canViewDetail?: boolean;
+  canEdit?: boolean;
+  canManageAuth?: boolean;
+  canDelete?: boolean;
   canApplyUse?: boolean;
   canAuditUse?: boolean;
 }
@@ -70,6 +78,11 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [collectorOpen, setCollectorOpen] = useState(false);
+  const [collectorInitialSource, setCollectorInitialSource] = useState<string>();
+  const [collectorInitialSourceUrl, setCollectorInitialSourceUrl] = useState('');
+  const [collectorInitialScope, setCollectorInitialScope] = useState('');
+  const [collectorInitialCollectMode, setCollectorInitialCollectMode] = useState('');
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [resourceDetailOpen, setResourceDetailOpen] = useState(false);
@@ -167,6 +180,18 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   }, [resourceType]);
 
   useEffect(() => {
+    if (resourceType !== 'KG_DOC' || searchParams.get('ecosystem') !== '1') {
+      return;
+    }
+    setCollectorInitialSource(searchParams.get('source') || undefined);
+    setCollectorInitialSourceUrl(searchParams.get('sourceUrl') || '');
+    setCollectorInitialScope(searchParams.get('scope') || '');
+    setCollectorInitialCollectMode(searchParams.get('collectMode') || '');
+    setActiveTab('personal');
+    setCollectorOpen(true);
+  }, [resourceType, searchParams]);
+
+  useEffect(() => {
     try {
       queryFixedEntryOperationCapability()
         .then((res: any) => {
@@ -203,7 +228,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   }, [activeTab, fixedEntryCapability, resourceType]);
 
   const handleDetail = useCallback(
-    (item: IResourceItem) => {
+    async (item: IResourceItem) => {
       const { resourceBizType, resourceId, resourceSourcePkId } = item;
 
       if (
@@ -235,6 +260,29 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         resourceBizType &&
         [resourceBizTypeMap.KG_DOC, resourceBizTypeMap.KG_QA, resourceBizTypeMap.KG_TERM].includes(resourceBizType)
       ) {
+        if (!resourceId) {
+          message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
+          return;
+        }
+        try {
+          const res: any = await queryResourceOperationPermissions({ resourceId });
+          const permissions = res?.data || res || {};
+          const canViewDetail =
+            permissions?.canViewDetail ??
+            permissions?.hasManagePermission ??
+            permissions?.hasUsePermission ??
+            permissions?.canEdit ??
+            permissions?.canManageAuth ??
+            permissions?.canDelete ??
+            false;
+          if (!canViewDetail) {
+            message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
+            return;
+          }
+        } catch (error: any) {
+          message.error(error?.msg || error?.message || intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
+          return;
+        }
         const params = new URLSearchParams();
         if (resourceId) {
           params.set('resourceId', resourceId);
@@ -318,6 +366,32 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
           setDebouncedSearchValue(searchValue);
         }}
       />
+
+      {resourceType === 'KG_DOC' && (
+        <Tooltip
+          title={
+            activeTab === 'enterprise' && !canImportCurrentEnterpriseResource ? noPermissionDisabledTip : undefined
+          }
+        >
+          <span>
+            <Button
+              icon={<CloudSyncOutlined />}
+              disabled={activeTab === 'enterprise' && !canImportCurrentEnterpriseResource}
+              onClick={() => {
+                if (activeTab === 'enterprise' && !canImportCurrentEnterpriseResource) {
+                  return;
+                }
+                setCollectorInitialSource(undefined);
+                setCollectorInitialSourceUrl('');
+                setCollectorInitialScope('');
+                setCollectorOpen(true);
+              }}
+            >
+              {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.entry' })}
+            </Button>
+          </span>
+        </Tooltip>
+      )}
 
       {brandVersion === 'openSource' && resourceType === 'KG_DOC' && (activeTab === 'personal' || isAdmin) && (
         <Tooltip title={!knowledgeCapability?.allowKnowledgeBaseCreate ? knowledgeCapabilityDisabledTip : undefined}>
@@ -462,6 +536,19 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         onSuccess={() => {
           setImportModalOpen(false);
           refreshList();
+        }}
+      />
+      <EcosystemCollector
+        open={collectorOpen}
+        ownerType={activeTab}
+        catalogId={catalogId}
+        catalogList={catalogList}
+        initialSource={collectorInitialSource}
+        initialSourceUrl={collectorInitialSourceUrl}
+        initialScope={collectorInitialScope}
+        initialCollectMode={collectorInitialCollectMode}
+        onCancel={() => {
+          setCollectorOpen(false);
         }}
       />
       <ResourceEdit

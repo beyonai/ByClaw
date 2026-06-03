@@ -4,7 +4,7 @@ import { isEmpty, last, size } from 'lodash';
 import { notification } from 'antd';
 
 import MessageList from '@/components/MessageList';
-import QueryInput from '@/components/QueryInput';
+
 import ReferenceSource from '@/components/ReferenceSource';
 import ForwardMessages from './components/ForwardMessages';
 
@@ -24,6 +24,7 @@ import classnames from 'classnames';
 import useEventEmitterHooks from './hooks/useEventEmitterHooks';
 import ChatTitle from './ChatTitle';
 import MultiChoices from './components/MultiChoices';
+import EasyConfirm from './components/EasyConfirm';
 
 import type { IState as UseEmployeesIState } from '@/models/useEmployees.ts';
 
@@ -331,25 +332,19 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 })}
                 id="queryInputWrapper"
               >
+                <EasyConfirm
+                  disabledInput={disabledInput}
+                  isBottom={isBottom}
+                  cannotAt={cannotAt}
+                  queryInputProps={queryInputProps}
+                  lastMsg={lastMsg}
+                  sessionId={sessionId}
+                  onSend={onSend}
+                  onCancel={onCancel}
+                  myAgentType={myAgentType}
+                  setMyAgentType={setMyAgentType}
+                />
                 {/* {isBottom && TopButtons} */}
-                <div
-                  className={classnames(styles.queryInput, {
-                    [styles.queryInputDisabled]: disabledInput,
-                  })}
-                  data-isbottom={isBottom}
-                >
-                  <QueryInput
-                    messageState={lastMsg?.messageState}
-                    onSend={onSend}
-                    onCancel={onCancel}
-                    myAgentType={myAgentType}
-                    setMyAgentType={setMyAgentType}
-                    isBottom={isBottom}
-                    cannotAt={cannotAt}
-                    sessionId={sessionId}
-                    {...queryInputProps}
-                  />
-                </div>
               </div>
             )}
             {isMultiChoices && (

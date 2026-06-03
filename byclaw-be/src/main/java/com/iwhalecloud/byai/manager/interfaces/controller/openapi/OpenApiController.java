@@ -107,4 +107,27 @@ public class OpenApiController {
         return ResponseUtil.successResponse();
     }
 
+    /**
+     * 取消挂载数字员工资源
+     *
+     * @return ResponseUtil
+     */
+    @ManageLogAnnotation(name = "API调用", description = "取消挂载数字员工资源")
+    @PostMapping("/v1/unMountDigEmployeeResource")
+    public ResponseUtil<String> unMountDigEmployeeResource(@RequestBody MountResourceDto mountResourceDto) {
+
+        openApiApplicationService.unMountDigEmployeeResource(mountResourceDto);
+
+        Long agentId = mountResourceDto.getAgentId();
+
+        EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
+        employeeIdDTO.setResourceId(agentId);
+        DigitalEmployeeDetailsDTO digitalEmployeeDTO = digitalEmployeeApplicationService.findDetailsById(employeeIdDTO);
+
+        // 同步openClaw工作空间：透传原始入参，relTools / relPrompt 等不入 DB 的运行期字段需要从入参直接进 JSON。
+        digitalEmployeeApplicationService.synOpenClawWorkSpace(agentId, digitalEmployeeDTO);
+
+        return ResponseUtil.successResponse();
+    }
+
 }

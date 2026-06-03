@@ -1,13 +1,25 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { connect } from 'dva';
-import { Tree, Input, Tooltip, Modal, message, Dropdown } from 'antd';
+import { Tree, Input, Tooltip, Modal, message, Dropdown, Popconfirm } from 'antd';
 import { SearchOutlined, DeleteOutlined, EditOutlined, EllipsisOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import AntdIcon from '@/pages/manager/components/AntdIcon';
 import { arrayToTree } from '@/pages/manager/utils/managerUtils';
 import styles from './index.module.less';
 
-const { confirm, error } = Modal;
+const { error } = Modal;
+export const ALL_FIELD_KEY = '__ALL_BUSINESS_FIELD__';
+const RESOURCE_BIZ_TYPE_LIST = [
+  'DIG_EMPLOYEE',
+  'KG_DOC',
+  'KG_QA',
+  'KG_TERM',
+  'AGENT',
+  'MCP',
+  'TOOLKIT',
+  'VIEW',
+  'OBJECT',
+];
 
 const BusinessFieldTree = ({
   onSelect,
@@ -26,6 +38,8 @@ const BusinessFieldTree = ({
   const intl = useIntl();
   const [expandedKeys, setExpandedKeys] = useState([]);
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
+  const [hasRelatedAssets, setHasRelatedAssets] = useState(false);
+  const [assetCheckLoading, setAssetCheckLoading] = useState(false);
 
   // 获取用户权限信息
   useEffect(() => {
@@ -45,8 +59,14 @@ const BusinessFieldTree = ({
 
   // 将扁平数组转换为树形结构
   const treeDataForTree = useMemo(() => {
+    const allFieldNode = {
+      fieldId: ALL_FIELD_KEY,
+      fieldName: intl.formatMessage({ id: 'businessField.allCategory' }),
+      isAllCategory: true,
+    };
+
     if (!dataSource || dataSource.length === 0) {
-      return [];
+      return [allFieldNode];
     }
 
     // 先使用 arrayToTree 转换结构
@@ -74,26 +94,63 @@ const BusinessFieldTree = ({
     result.forEach((node) => enrichNode(node, dataSource));
 
     setExpandedKeys((p) => (p?.length === 0 && result?.length > 0 ? result.map((item) => item.fieldId) : [...p]));
-    return result;
-  }, [dataSource]);
+    return [allFieldNode, ...result];
+  }, [dataSource, intl]);
 
   // 当树形结构准备好且没有选中节点时，自动选中第一个节点
   useEffect(() => {
-    if (treeDataForTree?.length > 0 && !selectedField?.fieldId) {
+    if (treeDataForTree?.length > 0 && selectedField?.fieldId === undefined) {
       // 树节点已经包含了所有原始数据（通过 enrichNode 合并）
       const firstNode = treeDataForTree[0];
-      if (firstNode && firstNode.fieldId) {
+      if (firstNode && firstNode.fieldId !== undefined) {
         setSelectedField(firstNode);
       }
     }
   }, [treeDataForTree, selectedField?.fieldId, setSelectedField]);
+
+  useEffect(() => {
+    const catalogId = selectedField?.fieldId ?? selectedField?.catalogId;
+    if (selectedField?.isAllCategory || catalogId === undefined) {
+      setHasRelatedAssets(false);
+      setAssetCheckLoading(false);
+      return;
+    }
+
+    let canceled = false;
+    setAssetCheckLoading(true);
+    dispatch({
+      type: 'businessFieldMgr/getFieldAssets',
+      payload: {
+        catalogId,
+        resourceBizTypeList: RESOURCE_BIZ_TYPE_LIST,
+        pageIndex: 1,
+        pageSize: 1,
+      },
+      success: (res) => {
+        if (canceled) return;
+        const { data } = res || {};
+        const total = data?.total ?? data?.rows?.length ?? 0;
+        setHasRelatedAssets(total > 0);
+        setAssetCheckLoading(false);
+      },
+      fail: () => {
+        if (canceled) return;
+        setHasRelatedAssets(false);
+        setAssetCheckLoading(false);
+      },
+    });
+
+    return () => {
+      canceled = true;
+    };
+  }, [dispatch, selectedField?.fieldId, selectedField?.catalogId, selectedField?.isAllCategory]);
 
   // 处理删除操作
   const handleDelete = () => {
     dispatch({
       type: 'businessFieldMgr/deleteField',
       payload: {
-        catalogId: selectedField?.fieldId || selectedField?.catalogId,
+        catalogId: selectedField?.fieldId ?? selectedField?.catalogId,
       },
       success: () => {
         message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
@@ -130,19 +187,39 @@ const BusinessFieldTree = ({
     {
       key: 'delete',
       label: (
-        <div className={styles.deleteBtn}>
-          <DeleteOutlined />
-          <span style={{ marginLeft: 5 }}>{intl.formatMessage({ id: 'common.delete' })}</span>
-        </div>
+        <Tooltip title={hasRelatedAssets ? intl.formatMessage({ id: 'businessField.deleteDisabledTip' }) : ''}>
+          <Popconfirm
+            title={intl.formatMessage({ id: 'businessField.deleteConfirm' })}
+            disabled={hasRelatedAssets || assetCheckLoading}
+            onConfirm={(e) => {
+              e?.domEvent?.stopPropagation?.();
+              handleDelete();
+            }}
+            onCancel={(e) => {
+              e?.domEvent?.stopPropagation?.();
+            }}
+          >
+            <div
+              className={styles.deleteBtn}
+              onClick={(e) => {
+                e.stopPropagation();
+              }}
+            >
+              <DeleteOutlined />
+              <span style={{ marginLeft: 5 }}>{intl.formatMessage({ id: 'common.delete' })}</span>
+            </div>
+          </Popconfirm>
+        </Tooltip>
       ),
       danger: true,
+      disabled: hasRelatedAssets || assetCheckLoading,
     },
   ];
 
   const titleRender = (nodeData) => (
     <div className={styles.treeNode}>
       <div style={{ flex: 1, display: 'flex', columnGap: 2, alignItems: 'center' }}>
-        <AntdIcon type="icon-a-changjing-line" />
+        {/* <AntdIcon type="icon-a-changjing-line" /> */}
         <div style={{ flex: 1, width: 0, height: 24 }}>
           <Tooltip title={nodeData.fieldName}>
             <span
@@ -160,20 +237,12 @@ const BusinessFieldTree = ({
             </span>
           </Tooltip>
         </div>
-        {nodeData.fieldId === selectedField?.fieldId && isPlatformAdmin && (
+        {!nodeData.isAllCategory && nodeData.fieldId === selectedField?.fieldId && isPlatformAdmin && (
           <Dropdown
             menu={{
               items: dropdownItems,
               onClick: ({ key }) => {
-                if (key === 'delete') {
-                  confirm({
-                    title: intl.formatMessage({ id: 'businessField.deleteTitle' }),
-                    content: intl.formatMessage({ id: 'businessField.deleteConfirm' }),
-                    onOk: () => {
-                      handleDelete();
-                    },
-                  });
-                } else if (key === 'edit') {
+                if (key === 'edit') {
                   handleEdit();
                 }
               },

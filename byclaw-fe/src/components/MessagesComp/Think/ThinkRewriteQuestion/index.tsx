@@ -1,5 +1,5 @@
 import { IMessageState, SSEMessageType } from '@/constants/message';
-import { IMessage } from '@/typescript/message';
+import { IMessage, IMessageListItem } from '@/typescript/message';
 import useGlobal from '@/hooks/useGlobal';
 import { getLocale, useIntl } from '@umijs/max';
 import { Button, Col, Row, Divider } from 'antd';
@@ -19,7 +19,8 @@ type IProps = {
   message: IMessage;
   updateMessageListItemContent: (val: any) => void;
   messageIdx: number;
-  thinkListItem?: any[];
+  messageListItem?: IMessageListItem;
+  thinkListItem?: IMessageListItem;
 };
 
 export default function ThinkRewriteQuestion(props: IProps) {
@@ -33,6 +34,7 @@ export default function ThinkRewriteQuestion(props: IProps) {
 
   const isPreviewMode = layoutMode === LayoutMode.preview;
   const isThinkingProcess = !!props.thinkListItem;
+  const { resumeMessageId } = props.messageListItem || props.thinkListItem || {};
 
   const { isHistoryMsg } = message;
 
@@ -129,6 +131,7 @@ export default function ThinkRewriteQuestion(props: IProps) {
           payload: {
             actionType: 'RESUME',
             sourceAgentType,
+            resumeMessageId,
             extParams: {
               humanInput: {
                 paradigmList: newParadigmList,

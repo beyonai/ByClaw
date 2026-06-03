@@ -1117,25 +1117,25 @@ public class DigitalEmployeeApplicationService {
         }
         List<SsResourceRelDetail> relDetails = ssResourceRelDetailService.findByResourceId(digEmployeeResourceId);
         if (CollectionUtils.isEmpty(relDetails)) {
-            logger.info("数字员工无关联资源，无需补齐资源JSON, digEmployeeResourceId={}", digEmployeeResourceId);
+            logger.debug("数字员工无关联资源，无需补齐资源JSON, digEmployeeResourceId={}", digEmployeeResourceId);
             return;
         }
 
         List<Long> relResourceIds = relDetails.stream().map(SsResourceRelDetail::getRelResourceId)
             .filter(java.util.Objects::nonNull).distinct().collect(Collectors.toList());
         if (CollectionUtils.isEmpty(relResourceIds)) {
-            logger.info("数字员工关联资源ID为空，无需补齐资源JSON, digEmployeeResourceId={}", digEmployeeResourceId);
+            logger.debug("数字员工关联资源ID为空，无需补齐资源JSON, digEmployeeResourceId={}", digEmployeeResourceId);
             return;
         }
 
         List<SsResource> relResources = ssResourceService.findByIdList(relResourceIds);
         if (CollectionUtils.isEmpty(relResources)) {
-            logger.info("数字员工关联资源不存在，无需补齐资源JSON, digEmployeeResourceId={}, relResourceIds={}", digEmployeeResourceId,
+            logger.debug("数字员工关联资源不存在，无需补齐资源JSON, digEmployeeResourceId={}, relResourceIds={}", digEmployeeResourceId,
                 relResourceIds);
             return;
         }
 
-        logger.info("数字员工关联资源JSON补齐开始, digEmployeeResourceId={}, relResourceIds={}", digEmployeeResourceId,
+        logger.debug("数字员工关联资源JSON补齐开始, digEmployeeResourceId={}, relResourceIds={}", digEmployeeResourceId,
             relResourceIds);
         for (SsResource relResource : relResources) {
             syncSingleRelatedResourceJsonIfMissing(digEmployeeResourceId, relResource);
@@ -1163,7 +1163,7 @@ public class DigitalEmployeeApplicationService {
         if (CollectionUtils.isEmpty(relResources)) {
             return;
         }
-        logger.info("数字员工关联资源Redis同步开始, digEmployeeResourceId={}, relResourceIds={}", digEmployeeResourceId,
+        logger.debug("数字员工关联资源Redis同步开始, digEmployeeResourceId={}, relResourceIds={}", digEmployeeResourceId,
             relResourceIds);
         for (SsResource relResource : relResources) {
             syncSingleRelatedResourceConfigJsonToRedisQuietly(digEmployeeResourceId, relResource);
@@ -1199,7 +1199,7 @@ public class DigitalEmployeeApplicationService {
             return;
         }
         syncResourceConfigJsonToRedis(resourceBizType, relResourceId, targetContent);
-        logger.info(
+        logger.debug(
             "数字员工关联资源配置已同步至Redis, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}, redisKey={}",
             digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType,
             DigEmployeeRedisKeys.resourceConfigJsonKey(resourceBizType, relResourceId));
@@ -1211,18 +1211,18 @@ public class DigitalEmployeeApplicationService {
         }
         String resourceBizType = StringUtils.trimToEmpty(relResource.getResourceBizType());
         if (!isSupportedRelatedResourceBizType(resourceBizType)) {
-            logger.info("数字员工关联资源类型不在补齐范围内，跳过, digEmployeeResourceId={}, relResourceId={}, resourceBizType={}",
+            logger.debug("数字员工关联资源类型不在补齐范围内，跳过, digEmployeeResourceId={}, relResourceId={}, resourceBizType={}",
                 digEmployeeResourceId, relResource.getResourceId(), resourceBizType);
             return;
         }
 
         Long relResourceId = relResource.getResourceId();
         boolean exists = resourceArtifactStorageService.existsResourceJsonByBizType(resourceBizType, relResourceId);
-        logger.info(
+        logger.debug(
             "数字员工关联资源JSON存在性检查完成, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}, exists={}",
             digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType, exists);
         if (exists) {
-            logger.info(
+            logger.debug(
                 "数字员工关联资源JSON已存在，跳过补发, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
                 digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType);
             return;
@@ -1237,13 +1237,13 @@ public class DigitalEmployeeApplicationService {
         }
 
         try {
-            logger.info(
+            logger.debug(
                 "数字员工关联资源JSON缺失，开始补发, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
                 digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType);
             resourceArtifactStorageService.syncResourceJsonByBizType(targetContent, resourceBizType, relResourceId);
             ssResourceArtifactService.upsertStandardJsonArtifact(relResourceId, resourceBizType,
                 "dig-employee-related-sync");
-            logger.info(
+            logger.debug(
                 "数字员工关联资源JSON补发成功, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
                 digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType);
         }
@@ -1332,7 +1332,7 @@ public class DigitalEmployeeApplicationService {
         }
         String redisKey = DigEmployeeRedisKeys.resourceConfigJsonKey(resourceBizType, resourceId);
         RedisUtil.setString(redisKey, jsonContent);
-        logger.info("资源完整配置已同步至Redis, resourceBizType={}, resourceId={}, redisKey={}", resourceBizType,
+        logger.debug("资源完整配置已同步至Redis, resourceBizType={}, resourceId={}, redisKey={}", resourceBizType,
             resourceId, redisKey);
     }
 

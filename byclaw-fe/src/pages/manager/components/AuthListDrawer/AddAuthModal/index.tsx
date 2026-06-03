@@ -18,7 +18,7 @@ import useSearch from './useSearch';
 
 import styles from './index.module.less';
 
-const defaultPagination = { pageIndex: 1, pageSize: 15, total: 0 };
+const defaultPagination = { pageNum: 1, pageSize: 15, total: 0 };
 
 const AddAuthModal = (props) => {
   const { onCancel, onOk, value, title, onlyUser = false, showPost = true, showStation = false } = props;
@@ -37,7 +37,7 @@ const AddAuthModal = (props) => {
   const isSearch = leftType === leftTypeMap.searchList;
   // 滚动分页
   const [pagination, setPagination] = useState(defaultPagination);
-  const { pageIndex, pageSize, total } = pagination;
+  const { pageNum, pageSize, total } = pagination;
   const [isLoading, setIsLoading] = useState(false);
 
   const {
@@ -58,7 +58,7 @@ const AddAuthModal = (props) => {
     isStation,
     defaultPagination,
     setPagination,
-    pageIndex,
+    pageNum,
     pageSize,
     setIsLoading,
   });
@@ -77,7 +77,7 @@ const AddAuthModal = (props) => {
     onlyUser,
     defaultPagination,
     setPagination,
-    pageIndex,
+    pageNum,
     pageSize,
     setIsLoading,
   });

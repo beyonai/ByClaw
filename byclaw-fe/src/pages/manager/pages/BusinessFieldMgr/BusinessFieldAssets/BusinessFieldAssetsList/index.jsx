@@ -9,6 +9,10 @@ import Ellipsis from '@/pages/manager/components/Ellipsis';
 import ResizeTable from '@/pages/manager/components/ResizeTable';
 import { useSkillDetailDrawer } from '@/pages/manager/components/SkillDetailDrawer/useSkillDetailDrawer';
 import { resourceBizTypeMap } from '@/pages/manager/constants/digitalResource';
+import defResourceIcon from '@/pages/manager/assets/defResourceIcon.png';
+import employeeIcon from '@/pages/manager/assets/Avatar.png';
+import knowledgeIcon from '@/pages/manager/assets/knowledge.png';
+import { ALL_FIELD_KEY } from '../../components/BusinessFieldTree';
 import styles from './index.module.less';
 
 const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, dispatch }) => {
@@ -31,10 +35,10 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
   const getResourceBizTypeList = (type) => {
     const typeMap = {
       toolset: ['TOOLKIT', 'TOOL'], // 工具集
-      digitalEmployee: ['DIG_EMPLOYEE'], // 数字员工
+      employee: ['DIG_EMPLOYEE'], // 数字员工
       businessOntology: [], // 业务本体（待确认）
       knowledge: ['KG_DOC', 'KG_QA', 'KG_TERM'], // 知识资产
-      skill: ['AGENT'], // 技能资产
+      tool: ['AGENT', 'MCP', 'TOOLKIT'], // 工具资产
       MCP: ['MCP'], // MCP服务
       dataset: [], // 数据集（待确认）
       view: ['VIEW'], // 视图
@@ -69,8 +73,16 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
         }
       }
 
+      const getResourceLogoUrl = (item) => {
+        const logoUrl = item.resourceLogoUrl || item.avatar || item.logoUrl || item.pluginUrl;
+        return logoUrl;
+      };
+
+      const isAllCategory = selectedField?.fieldId === ALL_FIELD_KEY;
+      const catalogId = selectedField?.fieldId ?? selectedField?.catalogId;
+
       const payload = {
-        catalogId: selectedField?.fieldId || selectedField?.catalogId,
+        ...(isAllCategory ? {} : { catalogId }),
         keyword: searchKeyword || '',
         resourceStatusList: params.resourceStatusList ?? [],
         resourceBizTypeList,
@@ -93,6 +105,9 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
               resourceName,
               resourceDesc,
               avatar,
+              resourceLogoUrl,
+              logoUrl,
+              pluginUrl,
               tags: tagsRaw,
               catalogName,
               resourceStatus,
@@ -130,6 +145,7 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
               description: resourceDesc || '',
               // 头像（可能为null）
               avatar: avatar || null,
+              resourceLogoUrl: getResourceLogoUrl({ ...item, resourceLogoUrl, avatar, logoUrl, pluginUrl }),
               // 标签（已解析为数组）
               tags,
               // 所属领域名称
@@ -205,7 +221,7 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
 
   // 当选中领域、资产类型变化时，获取数据
   useEffect(() => {
-    if (selectedField?.fieldId >= 0) {
+    if (selectedField?.fieldId === ALL_FIELD_KEY || selectedField?.fieldId >= 0) {
       getList();
     } else {
       setDataSource([]);
@@ -215,7 +231,7 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
 
   // 搜索防抖处理：搜索关键词变化时，重置分页到第1页
   useEffect(() => {
-    if (!selectedField?.fieldId && !selectedField?.catalogId) {
+    if (selectedField?.fieldId === undefined && selectedField?.catalogId === undefined) {
       return;
     }
 
@@ -291,22 +307,36 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
         dataIndex: 'name',
         key: 'name',
         width: 150,
-        render: (text, record) => (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {assetType === 'digitalEmployee' && (
+        render: (text, record) => {
+          const iconSrc = (() => {
+            if (record.resourceLogoUrl) {
+              const logoUrl = `${record.resourceLogoUrl}`;
+              return logoUrl.startsWith('/') ? `/aiFactoryServer${logoUrl}` : logoUrl;
+            }
+            if (assetType === 'employee') {
+              return record.avatar ? getAvatarUrl(record.avatar) : employeeIcon;
+            }
+            if (assetType === 'knowledge') {
+              return knowledgeIcon;
+            }
+            return defResourceIcon;
+          })();
+
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
               <img
                 width={24}
                 height={24}
-                style={{ borderRadius: '24px' }}
-                src={getAvatarUrl(record.avatar)}
+                style={{ borderRadius: assetType === 'employee' ? '24px' : 4, flexShrink: 0 }}
+                src={iconSrc}
                 alt="logo"
               />
-            )}
-            <Ellipsis tooltip lines={1}>
-              {text || '-'}
-            </Ellipsis>
-          </div>
-        ),
+              <Ellipsis tooltip lines={1}>
+                {text || '-'}
+              </Ellipsis>
+            </div>
+          );
+        },
       },
       {
         title: intl.formatMessage({ id: 'businessField.assets.table.description' }),

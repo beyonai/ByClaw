@@ -25,6 +25,7 @@ import {
   deleteModel,
   getModelDetail,
   getModelListByPage,
+  setDefaultModel,
   setModelStatus,
   upsertModel,
 } from '../ModelMgr';
@@ -82,6 +83,16 @@ describe('manager/service/ModelMgr', () => {
     const payload = { id: 'model-1', status: 'ENABLED' };
     setModelStatus(payload);
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/new/model/setModelStatus', payload, {
+      responseCfg: {
+        customHandle: true,
+      },
+    });
+  });
+
+  it('setDefaultModel calls POST with customHandle config', () => {
+    const payload = { modelId: 10013114, tagId: '1' };
+    setDefaultModel(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/new/model/setDefaultModel', payload, {
       responseCfg: {
         customHandle: true,
       },

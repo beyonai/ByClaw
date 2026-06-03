@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.openapi;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.cache.ShareBfmUser;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.log.exception.BaseRuntimeException;
@@ -16,6 +17,7 @@ import com.iwhalecloud.byai.manager.dto.openapi.MountResourceDto;
 import com.iwhalecloud.byai.manager.entity.notification.ByaiNotification;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
+import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassistSubAgent;
 import com.iwhalecloud.byai.manager.infrastructure.cache.ShareCacheUtil;
 import com.iwhalecloud.byai.state.domain.notification.service.NotificationService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -139,5 +141,39 @@ public class OpenApiApplicationService {
         digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED,
             agentId);
 
+    }
+
+    /**
+     * 取消挂载数字员工资源
+     *
+     * @param mountResourceDto 资源信息
+     */
+    public void unMountDigEmployeeResource(MountResourceDto mountResourceDto) {
+
+        Long agentId = mountResourceDto.getAgentId();
+        String relResourceCode = mountResourceDto.getRelResourceCode();
+
+        SsResource relSsResource = ssResourceService.findByIdOrCode(null, relResourceCode);
+
+        // 如果没有资源信息，返回
+        if (relSsResource == null) {
+            return;
+        }
+
+        // 删除挂载的资源
+        LambdaQueryWrapper<SsResourceRelDetail> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(SsResourceRelDetail::getResourceId, agentId);
+        queryWrapper.eq(SsResourceRelDetail::getRelResourceId, relSsResource.getResourceId());
+        ssResourceRelDetailService.remove(queryWrapper);
+
+        try {
+            dingtalkRobotRegistryService.refreshRobotClientsForResource(agentId);
+        }
+        catch (Exception e) {
+            logger.warn("Refresh DingTalk robot clients after update failed. resourceId={}", agentId, e);
+        }
+
+        digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED,
+            agentId);
     }
 }

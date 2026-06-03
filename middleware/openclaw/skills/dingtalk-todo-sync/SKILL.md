@@ -16,31 +16,22 @@ metadata:
 ## Default Configuration
 
 - **Default repository**: `beyonai/ByClaw`
-- **Environment variables**:
-  - `GITHUB_TOKEN` — GitHub PAT with `repo` scope
-  - `DINGTALK_WEBHOOK_URL` — 钉钉自定义机器人 Webhook URL
-  - `DINGTALK_WEBHOOK_SECRET` — 加签密钥（可选，如果机器人启用了加签）
+- **GitHub 授权**: OAuth Device Flow（自动）
+- **钉钉**: 需要 `DINGTALK_WEBHOOK_URL` 环境变量（Webhook 机器人地址）
+- **可选**: `DINGTALK_WEBHOOK_SECRET`（加签密钥）
 
 ## Workflow
 
-**IMPORTANT**: Always start by executing Step 0.
+**IMPORTANT**: Always start by executing Step 0. Do NOT mention GITHUB_TOKEN or PAT.
 
 ### Step 0: Check Configuration (MANDATORY FIRST STEP)
 
-先检查 GitHub token：
+先检查 GitHub 授权：
 ```bash
 node skills/github-issues-mgmt/scripts/gh-issues-list.mjs --limit 1
 ```
 
-If `"auth_required": true`:
-
----
-
-GitHub 授权未配置，请先创建 Personal Access Token：
-
-👉 [点击这里创建 GitHub Token](https://github.com/settings/tokens/new?scopes=repo&description=ByClaw+Issues+Mgmt+Skill)
-
-创建时确保勾选 **repo** 权限。创建完成后设置环境变量 `GITHUB_TOKEN`。
+If `"auth_required": true` → output 的 `message` 字段已包含授权链接和 code，直接展示给用户。用户确认后执行 `node skills/github-code-analysis/scripts/gh-auth-login.mjs --poll`。
 
 ---
 

@@ -26,6 +26,22 @@
         "properties": {
           "enabled": { "type": "boolean" }
         }
+      },
+      "telemetry": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "consoleEnabled": { "type": "boolean" },
+          "redisEnabled": { "type": "boolean" },
+          "logIntervalMs": { "type": "number" },
+          "activeRunMaxAgeMs": { "type": "number" },
+          "activeToolCallMaxAgeMs": { "type": "number" },
+          "activeSubagentMaxAgeMs": { "type": "number" },
+          "activeLeaseMs": { "type": "number" },
+          "cautiousLeaseMs": { "type": "number" },
+          "idleGraceMs": { "type": "number" },
+          "maxAgeMs": { "type": "number" }
+        }
       }
     }
   }

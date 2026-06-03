@@ -461,7 +461,7 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
             message_id=root_message_id,
         )
 
-        config["agents"] = build_agent_overrides(lang)
+        config["agents"] = build_agent_overrides(lang, employee_config)
         logger.info(
             "Instant search _run_search payload for agent_id=%s: %s",
             agent_id,

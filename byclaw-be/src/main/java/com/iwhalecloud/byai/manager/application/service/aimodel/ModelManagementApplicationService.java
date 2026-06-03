@@ -25,6 +25,7 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtDigEmployeeMapper;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -47,6 +48,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 public class ModelManagementApplicationService {
 
+    private static final String DEFAULT_CHAT_MODEL_TAG_ID = "1";
+
     private static final int MASK_PREFIX_LEN = 3;
 
     private static final int MASK_SUFFIX_LEN = 4;
@@ -64,7 +67,15 @@ public class ModelManagementApplicationService {
      * 分页列表（列表仅返回 apiTokenMasked，不返回明文 apiToken）
      */
     public ModelListResponse getModelListByPage(ModelListRequest request) {
-        return null;
+        PageInfo<ByaiAimodel> page = byaiAimodelDomainService.listByCondition(request);
+        List<ModelVO> rows = page.getList() == null ? List.of()
+            : page.getList().stream().map(e -> entityToModelVO(e, true)).collect(Collectors.toList());
+        ModelListResponse response = new ModelListResponse();
+        response.setRows(rows);
+        response.setPageIndex(page.getPageNum());
+        response.setPageSize(page.getPageSize());
+        response.setTotal(page.getTotal());
+        return response;
     }
 
     /**
@@ -274,6 +285,7 @@ public class ModelManagementApplicationService {
         vo.setContextTokens(entity.getMaxContentToken());
         vo.setApiEndpoint(entity.getUrl());
         vo.setApiTokenMasked(maskToken(entity.getAuthToken()));
+        vo.setIsDefault(entity.getIsDefault() != null ? entity.getIsDefault() : 0);
         if (!forList && entity.getAuthToken() != null) {
             vo.setApiToken(decryptTokenSafely(entity.getAuthToken()));
         }
@@ -303,7 +315,7 @@ public class ModelManagementApplicationService {
             vo.setProviderName(String.valueOf(inParams.get("providerName")));
         }
         if (inParams.get("abilities") != null) {
-            vo.setAbilities(JSON.parseArray(JSON.toJSONString(inParams.get("abilities")), String.class));
+            vo.setAbilities(buildResponseAbilities(vo, inParams.get("abilities")));
         }
         if (inParams.get("systems") != null) {
             vo.setSystems(JSON.parseArray(JSON.toJSONString(inParams.get("systems")), String.class));
@@ -314,6 +326,19 @@ public class ModelManagementApplicationService {
         if (inParams.get("extendParam") != null) {
             vo.setExtendParam(MapParamUtil.getStringValue(inParams, "extendParam"));
         }
+    }
+
+    /**
+     * abilities 来源仍是 in_params；默认对话模型标签来源于 byai_tag_relation，列表返回时动态合成，避免静态 JSON 与关系表状态不一致。
+     */
+    private List<String> buildResponseAbilities(ModelVO vo, Object abilitiesValue) {
+        List<String> abilities = JSON.parseArray(JSON.toJSONString(abilitiesValue), String.class);
+        List<String> responseAbilities = abilities == null ? new ArrayList<>() : new ArrayList<>(abilities);
+        responseAbilities.removeIf(DEFAULT_CHAT_MODEL_TAG_ID::equals);
+        if (vo.getIsDefault() != null && vo.getIsDefault() == 1) {
+            responseAbilities.add(DEFAULT_CHAT_MODEL_TAG_ID);
+        }
+        return responseAbilities;
     }
 
     /** 从 inParams 填充数值类字段：超时、重试、采样参数等 */
@@ -546,7 +571,7 @@ public class ModelManagementApplicationService {
 
         Map<Long, ByaiTagRelation> byaiTagRelationMap = new HashMap<>(aiModels.size());
         for (ByaiTagRelation byaiTagRelation : aiModels) {
-            byaiTagRelationMap.put(modelId, byaiTagRelation);
+            byaiTagRelationMap.put(byaiTagRelation.getObjId(), byaiTagRelation);
         }
 
         // 如果不存在,则新增

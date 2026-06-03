@@ -233,7 +233,7 @@ public class AuthApplicationService {
 
         long endTime = System.currentTimeMillis();
 
-        logger.info("AuthApplicationService buildUserAuthResources cost time:" + (endTime - startTime));
+        logger.debug("AuthApplicationService buildUserAuthResources cost time:{}", endTime - startTime);
 
         return result;
     }
@@ -323,7 +323,7 @@ public class AuthApplicationService {
         try {
             Map<String, String> resourceAuthMap = buildUserAuthResources(userId);
             authRedisApplicationService.writeUserAuth(userId, resourceAuthMap);
-            logger.info("同步用户{}权限到Redis完成，资源数量：{}", userId, resourceAuthMap.size());
+            logger.debug("同步用户{}权限到Redis完成，资源数量：{}", userId, resourceAuthMap.size());
         }
         catch (Exception e) {
             logger.error("同步用户{}权限到Redis失败：{}", userId, e.getMessage());
@@ -791,6 +791,40 @@ public class AuthApplicationService {
     }
 
     /**
+     * 判断当前登录用户是否具备指定资源的使用权限。
+     * 管理权限不在这里隐式算作使用权限，调用方如果允许“管理或使用”访问，请使用
+     * {@link #hasResourceAccessPermission(SsResource)}。
+     */
+    public boolean hasResourceUsePermission(SsResource ssResource) {
+        if (ssResource == null || ssResource.getResourceId() == null
+            || StringUtils.isBlank(ssResource.getResourceBizType())
+            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum())) {
+            return false;
+        }
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (currentUserId == null) {
+            return false;
+        }
+        if (currentUserId.equals(ssResource.getCreateBy()) || isCurrentUserBoundDefaultPersonalResource(ssResource)) {
+            return true;
+        }
+
+        List<Long> resourceIds = List.of(ssResource.getResourceId());
+        List<String> resourceBizTypes = List.of(ssResource.getResourceBizType());
+        if (queryCurrentUserUseBlacklistedResourceIds(resourceIds, resourceBizTypes).contains(ssResource.getResourceId())) {
+            return false;
+        }
+        return queryCurrentUserUsePermittedResourceIds(resourceIds, resourceBizTypes).contains(ssResource.getResourceId());
+    }
+
+    /**
+     * 判断当前登录用户是否可访问资源详情：管理权限或使用权限任一满足即可。
+     */
+    public boolean hasResourceAccessPermission(SsResource ssResource) {
+        return hasResourceManagePermission(ssResource) || hasResourceUsePermission(ssResource);
+    }
+
+    /**
      * 判断当前登录用户是否被显式授予资源管理权限。
      * 该方法只看 ALLOW_MANAGE 授权，不叠加平台管理员/组织管理员等管理兜底能力，
      * 适用于“左侧列表可见即可设为默认”等需要与授权列表保持一致的场景。
@@ -1081,7 +1115,7 @@ public class AuthApplicationService {
                     logger.error("同步用户{}权限到Redis失败：{}", userId, e.getMessage());
                 }
             }
-            logger.info("批量同步用户权限到Redis进度：{}/{}", Math.min(i + batchSize, total), total);
+            logger.debug("批量同步用户权限到Redis进度：{}/{}", Math.min(i + batchSize, total), total);
         }
 
         logger.info("批量同步用户权限到Redis完成，总数：{}，成功：{}，失败：{}", total, successCount, failCount);
@@ -1461,7 +1495,7 @@ public class AuthApplicationService {
 
         }
 
-        logger.info("当前权限对比结果：{}", JSON.toJSONString(compareVo));
+        logger.debug("当前权限对比结果：{}", JSON.toJSONString(compareVo));
 
         // 处理红名单
         this.handleAdd(grantType, compareVo.getRedAddMap());
@@ -1900,7 +1934,7 @@ public class AuthApplicationService {
             String key = entry.getKey();
 
             // 当前权限信息key=DATASET:AUTHORITY:1_RED_READ_PERSON_1000901|AGENT_418202897625
-            logger.info("当前权限信息grantType={},key={}", grantType, key);
+            logger.debug("当前权限信息grantType={},key={}", grantType, key);
 
             PrivilegeGrant privilegeGrant = entry.getValue();
 
@@ -2617,6 +2651,10 @@ public class AuthApplicationService {
 
         boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum());
         boolean canManage = hasResourceManagePermission(ssResource);
+        boolean hasUsePermission = hasResourceUsePermission(ssResource);
+        vo.setHasManagePermission(canManage);
+        vo.setHasUsePermission(hasUsePermission);
+        vo.setCanViewDetail(!isResourceRemoved && (canManage || hasUsePermission));
 
         // 如果资源已注销，只允许恢复操作，其他操作全部禁用
         if (isResourceRemoved) {

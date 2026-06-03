@@ -3,7 +3,9 @@
   border-radius: var(--beyond-border-radius);
   padding: 12px;
 
+  max-height: 100%;
   max-width: max(600px, 100%);
+  // overflow: auto;
 
   .myFormTitle {
     color: var(--beyond-color-text);
@@ -16,6 +18,8 @@
   }
   .myFormContent {
     margin: 12px 0;
+    overflow: hidden auto;
+    flex: 1;
   }
   .myFormFooter {
   }

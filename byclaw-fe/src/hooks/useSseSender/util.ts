@@ -258,8 +258,12 @@ const sseTypeHandlerMap = new Map<string, (sseDataObj: any, msgEvent?: string) =
 ]);
 
 const isResumeContentType = (contentType: SSEMessageType) => {
-  const resumeContentTypes = [`${SSEMessageType.approvalForm}`];
-  return contentType && resumeContentTypes.includes(`${contentType}`);
+  const resumeContentTypes = [
+    SSEMessageType.approvalForm,
+    SSEMessageType.thinkRewriteQuestion,
+    SSEMessageType.thinkTaskUserInput,
+  ];
+  return contentType && resumeContentTypes.some((item) => `${item}` === `${contentType}`);
 };
 
 const setResumeMessageId = (sseDataObj: any, message: IMessageListItem) => {

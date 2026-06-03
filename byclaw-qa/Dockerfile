@@ -19,7 +19,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 # become frequent, switch to a raw URL instead:
 #   ADD https://raw.githubusercontent.com/beyonai/ByKC/main/pyproject.toml /tmp/bykc_version.txt
 ARG BRANCH=""
-ADD https://api.github.com/repos/beyonai/ByKC/commits/main /tmp/bykc_version.json
+# ADD https://api.github.com/repos/beyonai/ByKC/commits/main /tmp/bykc_version.json
 RUN if [ "${BRANCH}" = "develop" ] || [ "${BRANCH}" = "qa" ]; then \
         echo "BRANCH=${BRANCH}: reinstalling by-qa from ByKC main branch"; \
         uv pip install --python .venv/bin/python --force-reinstall \
@@ -38,9 +38,10 @@ ARG BUILD_COMMIT=unknown
 ARG BUILD_COMMIT_FULL=unknown
 ARG BUILD_TIME=unknown
 ARG BUILD_MODULE=byclaw-qa
+ARG BUILD_COMMIT_MSG=unknown
 
-RUN printf '{"version":"%s","branch":"%s","commit":"%s","commitFull":"%s","buildTime":"%s","module":"%s"}\n' \
-    "$BUILD_VERSION" "$BUILD_BRANCH" "$BUILD_COMMIT" "$BUILD_COMMIT_FULL" "$BUILD_TIME" "$BUILD_MODULE" \
+RUN printf '{"version":"%s","branch":"%s","commit":"%s","commitFull":"%s","buildTime":"%s","module":"%s","commitMsg":"%s"}\n' \
+    "$BUILD_VERSION" "$BUILD_BRANCH" "$BUILD_COMMIT" "$BUILD_COMMIT_FULL" "$BUILD_TIME" "$BUILD_MODULE" "$BUILD_COMMIT_MSG" \
     > /app/build-info.json
 
 ENTRYPOINT ["bash", "/app/start.sh"]

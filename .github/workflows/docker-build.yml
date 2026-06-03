@@ -124,8 +124,10 @@ jobs:
       - name: Capture build metadata
         id: build-meta
         run: |
-          echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "timestamp=$(TZ=Asia/Shanghai date +%Y-%m-%dT%H:%M:%S+08:00)" >> "$GITHUB_OUTPUT"
           echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          MSG=$(git log -1 --pretty=format:%s | head -c 100)
+          echo "commit_msg=${MSG}" >> "$GITHUB_OUTPUT"
 
       - name: Setup pnpm (byclaw-fe only)
         if: matrix.service == 'byclaw-fe'
@@ -215,6 +217,7 @@ jobs:
             BUILD_COMMIT_FULL=${{ github.sha }}
             BUILD_TIME=${{ steps.build-meta.outputs.timestamp }}
             BUILD_MODULE=${{ matrix.service }}
+            BUILD_COMMIT_MSG=${{ steps.build-meta.outputs.commit_msg }}
             BRANCH=${{ github.ref_name }}
 
       - name: Output image digest

@@ -73,11 +73,17 @@ public class SandboxService {
     /** 沙箱状态：已释放 */
     private static final String STATUS_RELEASED = "RELEASED";
 
-    private static final String RELEASE_REASON_IDLE_TIMEOUT = "idle-timeout";
+    /** 手动释放终止原因。 */
+    private static final String RELEASE_REASON_MANUAL = "release.manual";
 
-    private static final String RELEASE_REASON_MANUAL = "manual-release";
+    /** 自动空闲超时释放终止原因。 */
+    private static final String RELEASE_REASON_AUTO_IDLE_TIMEOUT = "release.auto.idle-timeout";
 
-    private static final String RELEASE_REASON_REMOTE_SANDBOX_EXIT = RELEASE_REASON_IDLE_TIMEOUT;
+    /** 远端沙箱退出后终止旧记录的原因。 */
+    private static final String RELEASE_REASON_REMOTE_EXIT = "release.remote.exit";
+
+    /** reconcile 发现远端不存在或不可复用时终止旧记录的原因。 */
+    private static final String RELEASE_REASON_REMOTE_MISSING = "release.remote.missing";
 
     /** 集成类型：沙箱 */
     private static final String INTEGRATION_TYPE_SANDBOX = "FROM_SANDBOX";
@@ -169,6 +175,23 @@ public class SandboxService {
     }
 
     /**
+     * 按工号启动沙箱，支持通过 serviceKey 覆盖沙箱类型。
+     * 如果 serviceKey 为空则走默认 openclaw 逻辑。
+     *
+     * @param userCode   用户工号
+     * @param serviceKey sandbox_service_spec 表的 service_key，可选
+     * @return 沙箱启动响应数据
+     */
+    public SandboxLaunchData launchSandboxWithServiceKey(String userCode, String serviceKey) {
+        if (StringUtils.isBlank(serviceKey)) {
+            return launchSandbox(userCode, null);
+        }
+        SandboxLaunchRouting routing = new SandboxLaunchRouting(serviceKey,
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        return launchSandboxInternal(userCode, null, routing);
+    }
+
+    /**
      * 统一的“确保沙箱可用”入口。
      * 登录预启动和会话重试都应通过这里进入，避免在调用侧各自拼接等待逻辑。
      */
@@ -222,7 +245,7 @@ public class SandboxService {
             if (existingRecord != null) {
                 LOGGER.info("重拉前命中旧活跃记录：{}", sandboxRef(existingRecord));
                 int marked = sandboxRecordMapper.markReleased(existingRecord.getId(),
-                    RELEASE_REASON_REMOTE_SANDBOX_EXIT, new Date(), existingRecord.getLockVersion());
+                    RELEASE_REASON_REMOTE_EXIT, new Date(), existingRecord.getLockVersion());
                 if (marked > 0) {
                     incrementVersions(existingRecord, true);
                     sandboxMetadataCache.evict(existingRecord.getUserCode(), existingRecord.getSandboxType());
@@ -484,7 +507,7 @@ public class SandboxService {
         SandboxResponse<SandboxLaunchData> response = sandboxLifecycleFacade.launchSandbox(request);
 
         if (response == null || !response.isSuccess() || response.getData() == null) {
-            String errorMsg = response != null ? response.getMessage() : "响应为空";
+            String errorMsg = response != null ? StringUtils.defaultIfBlank(response.getMessage(), "启动失败") : "响应为空";
             LOGGER.error("启动沙箱失败，记录：{}，原因：{}", sandboxRef(record), errorMsg);
             int failed = sandboxRecordMapper.updateStatusToFailed(record.getId(), errorMsg, new Date(),
                 record.getLockVersion());
@@ -585,7 +608,8 @@ public class SandboxService {
     }
 
     /**
-     * 沙箱心跳：更新当前用户指定资源的沙箱最后访问时间 由前端定期轮询调用，防止沙箱因空闲超时被自动回收
+     * 沙箱心跳：更新当前用户所有运行中沙箱的最后访问时间。
+     * 页面心跳不区分沙箱类型，因此按用户维度刷新，避免同一用户的其他沙箱类型被空闲回收。
      *
      * @param resourceId 资源ID
      * @return true-心跳成功，false-未找到运行中的沙箱
@@ -596,31 +620,11 @@ public class SandboxService {
             LOGGER.warn("心跳失败：无法获取当前用户编码，资源ID：{}", resourceId);
             return false;
         }
-        SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId);
-
-        SsSandboxRecord record = sandboxRecordMapper.selectRunningByUserAndResource(userCode,
-            routing.getSandboxType(), routing.getEffectiveResourceId());
-        if (record == null) {
-            LOGGER.warn("心跳失败：未找到运行中的沙箱记录，用户编码：{}，沙箱类型：{}，资源ID：{}", userCode,
-                routing.getSandboxType(), routing.getEffectiveResourceId());
-            return false;
-        }
-        Date now = new Date();
-        int updated = sandboxRecordMapper.updateLastAccessTime(record.getId(), now, record.getLockVersion());
-        if (updated == 0) {
-            LOGGER.warn("心跳跳过：沙箱记录已被并发更新，记录：{}", sandboxRef(record));
-            return false;
-        }
-        record.setLastAccessTime(now);
-        record.setUpdateTime(now);
-        incrementVersions(record, false);
-        sandboxMetadataCache.put(toSandboxInfo(record));
-        LOGGER.debug("沙箱心跳成功：{}，lastAccessTime：{}", sandboxRef(record), now);
-        return true;
+        return heartbeatRunningSandboxesByUser(userCode, resourceId);
     }
 
     /**
-     * 沙箱心跳：更新当前用户指定资源的沙箱最后访问时间 由前端定期轮询调用，防止沙箱因空闲超时被自动回收
+     * 沙箱心跳：更新指定用户所有运行中沙箱的最后访问时间。
      *
      * @param resourceId 资源ID
      * @return true-心跳成功，false-未找到运行中的沙箱
@@ -630,26 +634,74 @@ public class SandboxService {
             LOGGER.warn("心跳失败：无法获取当前用户编码，资源ID：{}", resourceId);
             return false;
         }
-        SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId);
+        return heartbeatRunningSandboxesByUser(userCode, resourceId);
+    }
 
-        SsSandboxRecord record = sandboxRecordMapper.selectRunningByUserAndResource(userCode,
-            routing.getSandboxType(), routing.getEffectiveResourceId());
-        if (record == null) {
-            LOGGER.warn("心跳失败：未找到运行中的沙箱记录，用户编码：{}，沙箱类型：{}，资源ID：{}", userCode,
-                routing.getSandboxType(), routing.getEffectiveResourceId());
+    /**
+     * running-state 心跳：只刷新当前用户 openclaw 类型运行中沙箱的最后访问时间。
+     */
+    public boolean heartbeatOpenclawSandbox(String userCode) {
+        if (StringUtils.isBlank(userCode)) {
+            LOGGER.warn("running-state 心跳失败：无法获取用户编码");
+            return false;
+        }
+        List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUserAndSandboxType(userCode,
+            SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
+        if (records == null || records.isEmpty()) {
+            LOGGER.warn("running-state 心跳失败：未找到运行中的 openclaw 沙箱记录，用户编码：{}", userCode);
             return false;
         }
         Date now = new Date();
-        int updated = sandboxRecordMapper.updateLastAccessTime(record.getId(), now, record.getLockVersion());
-        if (updated == 0) {
-            LOGGER.warn("心跳跳过：沙箱记录已被并发更新，记录：{}", sandboxRef(record));
+        int updatedCount = 0;
+        List<String> skippedRecords = new ArrayList<>();
+        for (SsSandboxRecord record : records) {
+            SsSandboxRecord updatedRecord = refreshLastAccessTime(record, now);
+            if (updatedRecord == null) {
+                skippedRecords.add(sandboxRef(record));
+                continue;
+            }
+            sandboxMetadataCache.put(toSandboxInfo(updatedRecord));
+            updatedCount++;
+        }
+        if (!skippedRecords.isEmpty()) {
+            LOGGER.warn("running-state 心跳部分记录跳过，用户编码：{}，跳过记录：{}", userCode, skippedRecords);
+        }
+        if (updatedCount == 0) {
+            LOGGER.warn("running-state 心跳失败：openclaw 运行中记录均未更新，用户编码：{}", userCode);
             return false;
         }
-        record.setLastAccessTime(now);
-        record.setUpdateTime(now);
-        incrementVersions(record, false);
-        sandboxMetadataCache.put(toSandboxInfo(record));
-        LOGGER.debug("沙箱心跳成功：{}，lastAccessTime：{}", sandboxRef(record), now);
+        LOGGER.debug("running-state 心跳成功，用户编码：{}，命中记录数：{}，更新记录数：{}，lastAccessTime：{}",
+            userCode, records.size(), updatedCount, now);
+        return true;
+    }
+
+    private boolean heartbeatRunningSandboxesByUser(String userCode, Long resourceId) {
+        List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUser(userCode);
+        if (records == null || records.isEmpty()) {
+            LOGGER.warn("心跳失败：未找到运行中的沙箱记录，用户编码：{}，资源ID：{}", userCode, resourceId);
+            return false;
+        }
+        Date now = new Date();
+        int updatedCount = 0;
+        List<String> skippedRecords = new ArrayList<>();
+        for (SsSandboxRecord record : records) {
+            SsSandboxRecord updatedRecord = refreshLastAccessTime(record, now);
+            if (updatedRecord == null) {
+                skippedRecords.add(sandboxRef(record));
+                continue;
+            }
+            sandboxMetadataCache.put(toSandboxInfo(updatedRecord));
+            updatedCount++;
+        }
+        if (!skippedRecords.isEmpty()) {
+            LOGGER.warn("沙箱心跳部分记录跳过，用户编码：{}，资源ID：{}，跳过记录：{}", userCode, resourceId, skippedRecords);
+        }
+        if (updatedCount == 0) {
+            LOGGER.warn("沙箱心跳失败：运行中记录均未更新，用户编码：{}，资源ID：{}", userCode, resourceId);
+            return false;
+        }
+        LOGGER.debug("沙箱心跳成功，用户编码：{}，资源ID：{}，命中记录数：{}，更新记录数：{}，lastAccessTime：{}",
+            userCode, resourceId, records.size(), updatedCount, now);
         return true;
     }
 
@@ -946,7 +998,7 @@ public class SandboxService {
                 try {
                     LOGGER.info("命中超时释放候选：{}，lastAccessTime：{}，autoRelease：{}",
                         sandboxRef(record), record.getLastAccessTime(), record.getAutoRelease());
-                    doRemoveSandbox(record, RELEASE_REASON_IDLE_TIMEOUT);
+                    doRemoveSandbox(record, RELEASE_REASON_AUTO_IDLE_TIMEOUT);
                     cleanedCount++;
                     report.addAffectedSandbox(sandboxRef(record));
                 }
@@ -1117,7 +1169,7 @@ public class SandboxService {
 
                     LOGGER.warn("沙箱一致性检测发现远端沙箱不存在或不可复用，准备重新拉起：{}，remoteState={}",
                         sandboxRef(record), remoteInstance != null ? remoteInstance.getState() : null);
-                    int marked = sandboxRecordMapper.markReleased(record.getId(), RELEASE_REASON_REMOTE_SANDBOX_EXIT,
+                    int marked = sandboxRecordMapper.markReleased(record.getId(), RELEASE_REASON_REMOTE_MISSING,
                         new Date(), record.getLockVersion());
                     if (marked == 0) {
                         report.addSkippedSandbox(sandboxRef(record));

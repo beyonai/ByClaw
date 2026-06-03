@@ -34,6 +34,8 @@ class SandboxLaunchContextFactoryTest {
         assertThat(first.getGatewayToken()).isNotEqualTo(second.getGatewayToken());
         assertThat(first.getEnvs())
             .containsEntry("gateway_token", first.getGatewayToken())
-            .containsEntry("OPENCLAW_GATEWAY_TOKEN", first.getGatewayToken());
+            .containsEntry("OPENCLAW_GATEWAY_TOKEN", first.getGatewayToken())
+            .containsEntry("USER_CODE", "user001")
+            .doesNotContainKey("BYCLAW_USER_CODE");
     }
 }

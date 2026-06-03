@@ -24,7 +24,9 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -134,6 +136,86 @@ class SandboxServiceTest {
             "user001", "openclaw", "sandbox-1", "fresh-token");
 
         assertThat(result).isEqualTo("persisted-token");
+    }
+
+    @Test
+    void heartbeat_refreshesAllRunningSandboxesForCurrentUser() {
+        SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
+
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserCode("user001");
+        CurrentUserHolder.setLoginInfo(loginInfo);
+
+        SsSandboxRecord openclawRecord = new SsSandboxRecord();
+        openclawRecord.setId(1L);
+        openclawRecord.setUserCode("user001");
+        openclawRecord.setSandboxType("openclaw");
+        openclawRecord.setResourceId(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        openclawRecord.setStatus("RUNNING");
+        openclawRecord.setSandboxId("sandbox-openclaw");
+        openclawRecord.setLockVersion(3);
+        openclawRecord.setVersion(1);
+
+        SsSandboxRecord codeAgentRecord = new SsSandboxRecord();
+        codeAgentRecord.setId(2L);
+        codeAgentRecord.setUserCode("user001");
+        codeAgentRecord.setSandboxType("byclaw-code-agent");
+        codeAgentRecord.setResourceId(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        codeAgentRecord.setStatus("RUNNING");
+        codeAgentRecord.setSandboxId("sandbox-code-agent");
+        codeAgentRecord.setLockVersion(7);
+        codeAgentRecord.setVersion(2);
+
+        when(sandboxRecordMapper.selectRunningByUser("user001"))
+            .thenReturn(List.of(openclawRecord, codeAgentRecord));
+        when(sandboxRecordMapper.updateLastAccessTime(eq(1L), any(Date.class), eq(3))).thenReturn(1);
+        when(sandboxRecordMapper.updateLastAccessTime(eq(2L), any(Date.class), eq(7))).thenReturn(1);
+
+        boolean result = sandboxService.heartbeat(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+
+        assertThat(result).isTrue();
+        assertThat(openclawRecord.getLastAccessTime()).isNotNull();
+        assertThat(codeAgentRecord.getLastAccessTime()).isNotNull();
+        verify(sandboxRecordMapper).selectRunningByUser("user001");
+        verify(sandboxRecordMapper).updateLastAccessTime(eq(1L), any(Date.class), eq(3));
+        verify(sandboxRecordMapper).updateLastAccessTime(eq(2L), any(Date.class), eq(7));
+        verify(sandboxMetadataCache, times(2)).put(any(SandboxInfo.class));
+    }
+
+    @Test
+    void heartbeatOpenclawSandbox_refreshesOnlyOpenclawRunningSandboxes() {
+        SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
+
+        SsSandboxRecord openclawRecord = new SsSandboxRecord();
+        openclawRecord.setId(1L);
+        openclawRecord.setUserCode("user001");
+        openclawRecord.setSandboxType("openclaw");
+        openclawRecord.setResourceId(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        openclawRecord.setStatus("RUNNING");
+        openclawRecord.setSandboxId("sandbox-openclaw");
+        openclawRecord.setLockVersion(3);
+        openclawRecord.setVersion(1);
+
+        when(sandboxRecordMapper.selectRunningByUserAndSandboxType("user001", "openclaw"))
+            .thenReturn(List.of(openclawRecord));
+        when(sandboxRecordMapper.updateLastAccessTime(eq(1L), any(Date.class), eq(3))).thenReturn(1);
+
+        boolean result = sandboxService.heartbeatOpenclawSandbox("user001");
+
+        assertThat(result).isTrue();
+        assertThat(openclawRecord.getLastAccessTime()).isNotNull();
+        verify(sandboxRecordMapper).selectRunningByUserAndSandboxType("user001", "openclaw");
+        verify(sandboxRecordMapper).updateLastAccessTime(eq(1L), any(Date.class), eq(3));
+        verify(sandboxRecordMapper, never()).selectRunningByUser("user001");
+        verify(sandboxMetadataCache).put(any(SandboxInfo.class));
     }
 
     @Test
@@ -286,7 +368,8 @@ class SandboxServiceTest {
         when(sandboxRecordMapper.selectReconcileSandboxesPage(isNull(), isNull(), eq(1)))
             .thenReturn(List.of(record));
         when(sandboxLifecycleFacade.getSandbox(any(SandboxInfo.class))).thenReturn(SandboxResponse.success(null));
-        when(sandboxRecordMapper.markReleased(eq(1L), eq("idle-timeout"), any(Date.class), eq(0))).thenReturn(1);
+        when(sandboxRecordMapper.markReleased(eq(1L), eq("release.remote.missing"), any(Date.class), eq(0)))
+            .thenReturn(1);
 
         SandboxLaunchData launchData = new SandboxLaunchData();
         launchData.setSandboxId("sandbox-new");
