@@ -127,20 +127,10 @@ if [ "$HAS_KGW" = true ]; then
   echo "🔍 [pre-commit] Running byclaw-kgw checks..."
 
   if command -v pre-commit >/dev/null 2>&1; then
-    # Pass 1: auto-fix
     pre-commit run --config byclaw-kgw/.pre-commit-config.yaml
     if [ $? -ne 0 ]; then
-      # Re-stage auto-fixed files, then pass 2: check non-fixable issues
-      cd "$REPO_ROOT/byclaw-kgw"
-      git add -u .
-      cd "$REPO_ROOT"
-      pre-commit run --config byclaw-kgw/.pre-commit-config.yaml
-      if [ $? -ne 0 ]; then
-        echo "❌ [pre-commit] byclaw-kgw checks failed"
-        EXIT_CODE=1
-      else
-        echo "✅ [pre-commit] byclaw-kgw checks passed"
-      fi
+      echo "❌ [pre-commit] byclaw-kgw checks failed"
+      EXIT_CODE=1
     else
       echo "✅ [pre-commit] byclaw-kgw checks passed"
     fi
@@ -156,20 +146,10 @@ if [ "$HAS_SUPPER" = true ]; then
   echo "🔍 [pre-commit] Running byclaw-supper checks..."
 
   if command -v pre-commit >/dev/null 2>&1; then
-    # Pass 1: auto-fix
     pre-commit run --config byclaw-supper/.pre-commit-config.yaml
     if [ $? -ne 0 ]; then
-      # Re-stage auto-fixed files, then pass 2: check non-fixable issues
-      cd "$REPO_ROOT/byclaw-supper"
-      git add -u .
-      cd "$REPO_ROOT"
-      pre-commit run --config byclaw-supper/.pre-commit-config.yaml
-      if [ $? -ne 0 ]; then
-        echo "❌ [pre-commit] byclaw-supper checks failed"
-        EXIT_CODE=1
-      else
-        echo "✅ [pre-commit] byclaw-supper checks passed"
-      fi
+      echo "❌ [pre-commit] byclaw-supper checks failed"
+      EXIT_CODE=1
     else
       echo "✅ [pre-commit] byclaw-supper checks passed"
     fi
