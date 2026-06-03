@@ -45,6 +45,12 @@ public interface SandboxRuntimeProvider {
         return Optional.empty();
     }
 
+    default SandboxRuntimePage<SandboxRuntimeInstance> listSandboxesByMetadata(Map<String, String> metadata,
+                                                                              int pageNo,
+                                                                              int pageSize) {
+        return SandboxRuntimePage.empty(pageNo, pageSize);
+    }
+
     default boolean exists(String userCode, String sandboxType, SandboxInfo sandboxInfo) {
         return getSandbox(userCode, sandboxType, sandboxInfo)
             .map(SandboxRuntimeInstance::getReusable)

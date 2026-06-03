@@ -67,6 +67,31 @@ public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
     }
 
     @Override
+    public SandboxRuntimePage<SandboxRuntimeInstance> listSandboxesByMetadata(Map<String, String> metadata,
+                                                                              int pageNo,
+                                                                              int pageSize) {
+        List<SandboxDetail> sandboxes = openSandboxClient.listSandboxesByMetadata(metadata, pageNo, pageSize);
+        List<SandboxRuntimeInstance> instances = sandboxes == null ? List.of() : sandboxes.stream()
+            .filter(Objects::nonNull)
+            .filter(d -> d.getId() != null && !d.getId().isBlank())
+            .map(d -> SandboxRuntimeInstance.builder()
+                .sandboxId(d.getId())
+                .createdAt(d.getCreatedAt())
+                .expiresAt(d.getExpiresAt())
+                .state(d.getStatus() != null ? d.getStatus().getState() : null)
+                .reusable(SandboxRuntimeRequestFactory.isReusableSandboxState(d.getStatus()))
+                .metadata(d.getMetadata())
+                .build())
+            .toList();
+        return SandboxRuntimePage.<SandboxRuntimeInstance>builder()
+            .items(instances)
+            .pageNo(Math.max(1, pageNo))
+            .pageSize(Math.max(1, pageSize))
+            .hasNext(instances.size() >= Math.max(1, pageSize))
+            .build();
+    }
+
+    @Override
     public SandboxRuntimeInstance create(CreateSandboxRequest request,
                                          SandboxServiceSpec spec,
                                          String userCode,
