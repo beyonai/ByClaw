@@ -11,8 +11,6 @@ import org.springframework.stereotype.Service;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
-import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
-import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 
 /**
  * Handles control-plane wakeup messages that should bring user-scoped sandboxes back online.
@@ -25,9 +23,12 @@ public class SandboxWakeupMessageHandler {
     static final String WAKE_AND_WAIT_POLICY = "WAKE_AND_WAIT";
 
     private final SandboxService sandboxService;
+    private final SandboxUserContextRunner sandboxUserContextRunner;
 
-    public SandboxWakeupMessageHandler(@Lazy SandboxService sandboxService) {
+    public SandboxWakeupMessageHandler(@Lazy SandboxService sandboxService,
+        @Lazy SandboxUserContextRunner sandboxUserContextRunner) {
         this.sandboxService = sandboxService;
+        this.sandboxUserContextRunner = sandboxUserContextRunner;
     }
 
     boolean handle(Map<String, String> recordValues) {
@@ -53,39 +54,17 @@ public class SandboxWakeupMessageHandler {
         LOGGER.info("收到默认沙箱唤醒消息，userCode={}，targetAgentType={}，executionId={}，sessionId={}，messageId={}",
             userCode, targetAgentType, message.getString("execution_id"), message.getString("session_id"),
             message.getString("message_id"));
-        runWithWakeupUserContext(message, userCode,
+        sandboxUserContextRunner.runAsUser(userCode,
             () -> sandboxService.restartSandboxAfterRemoteExit(userCode, SandboxLaunchRouting.DEFAULT_RESOURCE_ID,
                 targetAgentType));
         return true;
-    }
-
-    private void runWithWakeupUserContext(JSONObject message, String userCode, Runnable runnable) {
-        LoginInfo originalLoginInfo = CurrentUserHolder.getLoginInfo();
-        CurrentUserHolder.setLoginInfo(buildWakeupLoginInfo(message, userCode));
-        try {
-            runnable.run();
-        }
-        finally {
-            if (originalLoginInfo != null) {
-                CurrentUserHolder.setLoginInfo(originalLoginInfo);
-            }
-            else {
-                CurrentUserHolder.clearLoginInfo();
-            }
-        }
-    }
-
-    private LoginInfo buildWakeupLoginInfo(JSONObject message, String userCode) {
-        LoginInfo loginInfo = new LoginInfo();
-        loginInfo.setUserCode(userCode);
-        return loginInfo;
     }
 
     private JSONObject parseMessage(Map<String, String> recordValues) {
         if (recordValues == null || recordValues.isEmpty()) {
             return null;
         }
-        for (String payloadField : new String[] {"data", "payload", "message"}) {
+        for (String payloadField : new String[]{"data", "payload", "message"}) {
             String rawPayload = recordValues.get(payloadField);
             if (StringUtils.isNotBlank(rawPayload)) {
                 return parseObject(rawPayload);
@@ -107,8 +86,7 @@ public class SandboxWakeupMessageHandler {
         }
         try {
             return JSON.parse(value);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             return value;
         }
     }
@@ -116,8 +94,7 @@ public class SandboxWakeupMessageHandler {
     private JSONObject parseObject(String rawPayload) {
         try {
             return JSON.parseObject(rawPayload);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             LOGGER.warn("解析沙箱唤醒消息 JSON 失败，rawPayload={}", rawPayload, e);
             return null;
         }

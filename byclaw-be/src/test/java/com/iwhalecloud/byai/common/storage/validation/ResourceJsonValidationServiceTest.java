@@ -5,9 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.storage.util.MultipartFileUtil;
+import com.iwhalecloud.byai.common.storage.validation.validator.AgentResouceJsonTypeValidator;
 import com.iwhalecloud.byai.common.storage.validation.validator.DocResourceJsonTypeValidator;
 import com.iwhalecloud.byai.common.storage.validation.validator.DefaultResourceJsonTypeValidator;
 import com.iwhalecloud.byai.common.storage.validation.validator.DigEmployeeResourceJsonTypeValidator;
+import com.iwhalecloud.byai.common.storage.validation.validator.McpResourceJsonTypeValidator;
 import com.iwhalecloud.byai.common.storage.validation.validator.ObjectResourceJsonTypeValidator;
 import com.iwhalecloud.byai.common.storage.validation.validator.ToolkitResourceJsonTypeValidator;
 import com.iwhalecloud.byai.common.storage.validation.validator.ViewResourceJsonTypeValidator;
@@ -25,14 +27,19 @@ class ResourceJsonValidationServiceTest {
 
     private final DefaultResourceJsonTypeValidator defaultValidator = new DefaultResourceJsonTypeValidator();
 
+    private final ResourceJsonConnectivityValidationService noopConnectivityValidationService = context -> {
+    };
+
     private final ResourceJsonValidationService service = new ResourceJsonValidationService(
         new ResourceJsonPathParser(),
         new ResourceJsonContentExtractor(messages),
         new ResourceJsonValidatorRouter(List.of(
             new DigEmployeeResourceJsonTypeValidator(),
-            new DocResourceJsonTypeValidator(),
+            new DocResourceJsonTypeValidator(noopConnectivityValidationService),
             new ObjectResourceJsonTypeValidator(),
-            new ToolkitResourceJsonTypeValidator(),
+            new ToolkitResourceJsonTypeValidator(noopConnectivityValidationService),
+            new McpResourceJsonTypeValidator(noopConnectivityValidationService),
+            new AgentResouceJsonTypeValidator(noopConnectivityValidationService),
             new ViewResourceJsonTypeValidator(),
             defaultValidator), defaultValidator),
         new ObjectMapper(),
@@ -85,10 +92,30 @@ class ResourceJsonValidationServiceTest {
 
     @Test
     void validateIfResourceJson_whenNoSpecificValidator_usesDefaultValidator() {
+        MultipartFileUtil file = file("SKILL_1.json", "{\"resourceId\":1}");
+
+        assertThatCode(() -> service.validateIfResourceJson(file, "/resource/skill/"))
+            .doesNotThrowAnyException();
+    }
+
+    @Test
+    void validateIfResourceJson_whenMcpResourceJsonPath_routesToMcpValidator() {
+        ResourceJsonValidationService mcpService = serviceWithFailingConnectivityValidator("mcp validator invoked");
+        MultipartFileUtil file = file("MCP_1.json", "{\"resourceId\":1}");
+
+        assertThatThrownBy(() -> mcpService.validateIfResourceJson(file, "/resource/mcp/"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("mcp validator invoked");
+    }
+
+    @Test
+    void validateIfResourceJson_whenAgentResourceJsonPath_routesToAgentValidator() {
+        ResourceJsonValidationService agentService = serviceWithFailingConnectivityValidator("agent validator invoked");
         MultipartFileUtil file = file("AGENT_1.json", "{\"resourceId\":1}");
 
-        assertThatCode(() -> service.validateIfResourceJson(file, "/resource/agent/"))
-            .doesNotThrowAnyException();
+        assertThatThrownBy(() -> agentService.validateIfResourceJson(file, "/resource/agent/"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("agent validator invoked");
     }
 
     @Test
@@ -118,6 +145,21 @@ class ResourceJsonValidationServiceTest {
 
     private MultipartFileUtil file(String name, String content) {
         return new MultipartFileUtil(name, name, "application/json", content.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private ResourceJsonValidationService serviceWithFailingConnectivityValidator(String message) {
+        ResourceJsonConnectivityValidationService failingConnectivityValidationService = context -> {
+            throw new IllegalArgumentException(message);
+        };
+        return new ResourceJsonValidationService(
+            new ResourceJsonPathParser(),
+            new ResourceJsonContentExtractor(messages),
+            new ResourceJsonValidatorRouter(List.of(
+                new McpResourceJsonTypeValidator(failingConnectivityValidationService),
+                new AgentResouceJsonTypeValidator(failingConnectivityValidationService),
+                defaultValidator), defaultValidator),
+            new ObjectMapper(),
+            messages);
     }
 
     private StaticMessageSource messageSource() {

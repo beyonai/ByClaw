@@ -28,6 +28,67 @@ deploy/
 
 ## 1. 中间件部署
 
+### 一键部署存储模式
+
+项目根目录的 `deploy.sh` 只区分阶段，存储方案全部写在 `.env` 中：
+
+```bash
+cd ..
+cp .env.example .env
+
+# .env
+BYCLAW_DEPLOY_STORAGE=nfs
+
+# 首次部署：拉镜像、可选初始化 NFS、启动服务
+sh deploy.sh init
+
+# 增量更新：重建服务，不重复初始化 NFS
+sh deploy.sh update
+```
+
+可选存储模式写入 `.env`：
+
+```bash
+BYCLAW_DEPLOY_STORAGE=nfs        # OpenClaw /by 和 BE 文件 CRUD 都走 /mnt/byclaw-file
+BYCLAW_DEPLOY_STORAGE=minio      # 兼容旧 MinIO/rclone 运行态方案
+BYCLAW_DEPLOY_STORAGE=nfs-hybrid # OpenClaw /by 走 NFS，上传/下载 API 继续走 MinIO
+```
+
+`nfs` 模式会自动设置：
+
+```bash
+FILE_STORAGE_TYPE=file
+BYCLAW_SANDBOX_VOLUME_BACKEND=file
+BYCLAW_SANDBOX_FILE_VOLUME_ROOT=/mnt/byclaw-file
+BYCLAW_SANDBOX_FILE_VOLUME_TYPE=nfs
+FILE_STORAGE_MINIO_MOUNT_ENABLED=false
+```
+
+并在未显式设置 `MIDDLEWARE_MODULES` 时只启动 `redis,opengauss,opensandbox-server`，跳过 MinIO。若 NFS 模式下仍想启动 MinIO，可使用：
+
+```bash
+# .env
+BYCLAW_DEPLOY_STORAGE=nfs
+BYCLAW_DEPLOY_START_MINIO=true
+```
+
+若部署机可以 SSH 到 NFS Server 和 Docker/openSandbox 宿主机，可在首次部署阶段自动初始化 NFS：
+
+```bash
+# .env
+BYCLAW_DEPLOY_INIT_NFS=true
+BYCLAW_NFS_SERVER_HOST=10.0.0.10
+BYCLAW_NFS_CLIENT_HOSTS=10.0.0.20,10.0.0.21
+
+sh deploy.sh init
+```
+
+也可以单独执行：
+
+```bash
+sh init-nfs.sh
+```
+
 ```bash
 cd middleware
 
@@ -109,7 +170,7 @@ STANDALONE_MODULES=fe,be
 
 | 服务 | 服务名 | 默认端口 | 环境变量 |
 |------|--------|---------|---------|
-| 前端 (fe) | `fe` | 8080 | `NGINX_PORT` |
+| 前端 (fe) | `fe` | 8080 / 8443 | `NGINX_PORT` / `NGINX_HTTPS_PORT` |
 | 后端 (be) | `be` | 8086 / 8082 | `BE_SERVER_PORT` / `BE_WS_PORT` |
 | QA Manager | `qa-manager` | 8090 | `BYCLAW_QA_PORT` |
 | QA Worker | `qa-worker` | 无（后台进程） | - |
@@ -122,4 +183,4 @@ STANDALONE_MODULES=fe,be
 - 生成脚本：`standalone/gen-nginx-conf.sh`
 - 输出文件：`config/nginx-standalone.conf`
 
-`start-fe.sh` 和 `start-all.sh` 会自动调用生成脚本，从 `.env` 读取 `BE_SERVER_PORT` 和 `BE_WS_PORT` 替换模板中的占位符。修改 nginx 配置只需编辑 `.tpl` 模板文件。
+`start-fe.sh` 和 `start-all.sh` 会自动调用生成脚本，从 `.env` 读取 `BE_SERVER_PORT`、`BE_WS_PORT` 和 `BYCLAW_SANDBOX_PORT` 替换模板中的占位符，并初始化开发环境 `localhost` HTTPS 证书。修改 nginx 配置只需编辑 `.tpl` 模板文件。

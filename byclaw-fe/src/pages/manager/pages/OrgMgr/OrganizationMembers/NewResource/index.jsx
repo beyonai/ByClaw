@@ -1,17 +1,17 @@
 import React, { forwardRef, useImperativeHandle, useState, useEffect, useCallback, useContext } from 'react';
-import dayjs from 'dayjs';
 import { debounce } from 'lodash';
-import { Pagination, Badge } from 'antd';
+import { Pagination, Button } from 'antd';
 import { useDispatch, useSelector, useIntl } from '@umijs/max';
 import ResizeTable from '@/pages/manager/components/ResizeTable';
 import Ellipsis from '@/pages/manager/components/Ellipsis';
 import Layout from '@/pages/manager/components/ausong/Layout';
 import styles from './index.module.less';
-import skillIcon from '@/pages/manager/assets/defResourceIcon.png';
+import toolIcon from '@/pages/manager/assets/defResourceIcon.png';
 import employeeIcon from '@/pages/manager/assets/Avatar.png';
 import knowledgeIcon from '@/pages/manager/assets/knowledge.png';
-import { resourceStatus } from '@/pages/manager/constants/digitalResource';
+import { ownerTypeMap, resourceStatus } from '@/pages/manager/constants/digitalResource';
 import { OrgMgrContext } from '@/pages/manager/pages/OrgMgr';
+import { buildResourceCommonColumns } from '@/pages/manager/utils/resourceColumns';
 
 const getRowKey = (record) =>
   record?.resourceIdNewStr || record?.resourceIdStr || record?.resourceId || record?.objId || record?.id;
@@ -56,6 +56,8 @@ const NewResource = (props, ref) => {
     dataSource: [],
     total: 0,
   });
+  console.log(data);
+
   const [pageInfo, setPageInfo] = useState({
     pageNum: 1,
     pageSize: 10,
@@ -94,9 +96,15 @@ const NewResource = (props, ref) => {
         return;
       }
 
-      let grantResourceTypeList = ['AGENT', 'MCP', 'TOOL', 'TOOLKIT'];
+      let resourceBizTypeList = [];
       if (activeTab === 'knowledge') {
-        grantResourceTypeList = ['KG_DOC', 'KG_QA', 'KG_TERM'];
+        resourceBizTypeList = ['KG_DOC', 'KG_QA', 'KG_TERM'];
+      } else if (activeTab === 'tool') {
+        resourceBizTypeList = ['AGENT', 'MCP', 'TOOLKIT'];
+      } else if (activeTab === 'view') {
+        resourceBizTypeList = ['VIEW'];
+      } else if (activeTab === 'object') {
+        resourceBizTypeList = ['OBJECT'];
       }
 
       dispatch({
@@ -108,7 +116,7 @@ const NewResource = (props, ref) => {
           keyword: searchValue,
           grantToObjType: 'ORG',
           authType: selectValue,
-          grantResourceTypeList,
+          resourceBizTypeList,
           systemCodes: sourceValue,
           catalogIds: fieldValue,
           ...params,
@@ -148,158 +156,65 @@ const NewResource = (props, ref) => {
   useImperativeHandle(ref, () => ({ getListOwnResource }), [getListOwnResource]);
 
   const columns = [
-    {
-      title: intl.formatMessage({ id: 'form.name' }),
-      dataIndex: 'resourceName',
-      width: '200px',
-      render: (v, record) => {
-        let iconSrc = employeeIcon;
-
-        if (record?.resourceLogoUrl) {
-          iconSrc = `/aiFactoryServer${record.resourceLogoUrl}`;
-        } else {
-          // 根据activeTab显示不同的默认图标
-          switch (activeTab) {
-            case 'employee':
-              iconSrc = employeeIcon;
-              break;
-            case 'knowledge':
-              iconSrc = knowledgeIcon;
-              break;
-            case 'skill':
-              iconSrc = skillIcon;
-              break;
-            default:
-              iconSrc = employeeIcon;
-          }
+    ...buildResourceCommonColumns({
+      intl,
+      activeTab,
+      ownerTypeMap,
+      resourceStatus,
+      showAuthStatus: selectValue === 2,
+      getIconSrc: (row, tab) => {
+        if (row?.resourceLogoUrl) {
+          return `/aiFactoryServer${row.resourceLogoUrl}`;
         }
 
-        return (
-          <div className={styles.userName}>
-            <img src={iconSrc} style={{ width: 20, height: 20, marginRight: 4 }} alt="logo" />
-            <Ellipsis tooltip lines={1}>
-              {v}
-            </Ellipsis>
-          </div>
-        );
+        switch (tab) {
+          case 'employee':
+            return employeeIcon;
+          case 'knowledge':
+            return knowledgeIcon;
+          default:
+            return toolIcon;
+        }
       },
-    },
-    {
-      title: intl.formatMessage({ id: 'form.desc' }),
-      dataIndex: 'description',
-      width: 150,
-    },
-    ...(activeTab === 'knowledge' || activeTab === 'skill'
+    }),
+    ...(canEdit && selectValue === 1
       ? [
         {
-          title: intl.formatMessage({ id: 'orgMgr.table.type' }),
-          dataIndex: 'resourceType',
-          width: 80,
-        },
-      ]
-      : []),
-    {
-      title: intl.formatMessage({ id: 'orgMgr.digital.status' }),
-      dataIndex: 'resourceStatus',
-      width: 80,
-      // filters: [
-      //   {
-      //     text: intl.formatMessage({ id: 'orgMgr.digital.draft' }),
-      //     value: 0,
-      //   },
-      //   {
-      //     text: intl.formatMessage({ id: 'orgMgr.digital.reviewing' }),
-      //     value: 1,
-      //   },
-      //   {
-      //     text: intl.formatMessage({ id: 'orgMgr.digital.published' }),
-      //     value: 2,
-      //   },
-      //   {
-      //     text: intl.formatMessage({ id: 'orgMgr.digital.unpublished' }),
-      //     value: 3,
-      //   },
-      // ],
-      // onFilter: (value, record) => record.resourceStatus === value,
-      render: (text) => {
-        const statusItem = resourceStatus.find((ele) => {
-          return ele.value === text;
-        });
-        if (!statusItem) return null;
-        return <Badge color={statusItem.color} text={statusItem.text} />;
-      },
-    },
-    {
-      title: intl.formatMessage({ id: 'orgMgr.table.organizationExtra' }),
-      dataIndex: 'manOrgName',
-      width: '110px',
-      // filterDropdown: (FilterDropdownProps) => {
-      //   const { setSelectedKeys, selectedKeys, confirm, clearFilters, onclose } = FilterDropdownProps;
-      //   console.log(FilterDropdownProps)
-      //   return (
-      //     <div style={{ padding: 12, height: 300 }} className="ub ub-ver">
-      //       <div className="ub-f1" style={{ overflow: 'auto', marginBottom: 12 }}>
-      //         <Tree
-      //           treeData={flatOrgTree}
-      //           onCheck={(e) => {
-      //             console.log(e)
-      //           }}
-      //           fieldNames={{
-      //             title: 'orgName',
-      //             key: 'orgId',
-      //             children: 'children',
-      //           }}
-      //           selectable={false}
-      //           defaultExpandAll
-      //           blockNode
-      //           checkable
-      //           // selectedKeys={selectedOrg?.orgId ? [selectedOrg.orgId] : []}
-      //         />
-      //       </div>
-      //       <div className="ub ub-ac ub-pe gap8">
-      //         <Button onClick={() => {
-      //           clearFilters();
-      //         }}>
-      //           {intl.formatMessage({ id: 'common.clear' })}
-      //         </Button>
-      //         <Button
-      //           type="primary"
-      //           onClick={() => {
-      //           confirm();
-      //         }}>
-      //           {intl.formatMessage({ id: 'common.confirm' })}
-      //         </Button>
-      //       </div>
-      //     </div>
-      //   )
-      // },
-      // onFilter: (value, record) => record.resourceStatus === value,
-    },
-    ...(selectValue === 2
-      ? [
-        {
-          title: intl.formatMessage({ id: 'orgMgr.table.authStatus' }),
-          dataIndex: 'hasPermission',
-          width: 80,
-          render: (val) => (
-            <Badge
-              color={val ? '#00b42a' : '#7a8799'}
-              text={
-                val
-                  ? intl.formatMessage({ id: 'orgMgr.table.hasPermission' })
-                  : intl.formatMessage({ id: 'orgMgr.table.noPermission' })
-              }
-            />
+          title: intl.formatMessage({ id: 'common.operation' }),
+          dataIndex: 'action',
+          fixed: 'right',
+          width: '160px',
+          render: (_, record) => (
+            <div>
+              {selectValue === 1 ? (
+                <>
+                  <Button
+                    type="link"
+                    onClick={() => {
+                      setAuthInfo(record);
+                      setAuthType('mgrAuth');
+                    }}
+                    size="small"
+                  >
+                    {intl.formatMessage({ id: 'resourceAction.manageAuth' })}
+                  </Button>
+                  <Button
+                    type="link"
+                    onClick={() => {
+                      setAuthInfo(record);
+                      setAuthType('useAuth');
+                    }}
+                    size="small"
+                  >
+                    {intl.formatMessage({ id: 'resourceAction.useAuth' })}
+                  </Button>
+                </>
+              ) : null}
+            </div>
           ),
         },
       ]
       : []),
-    {
-      title: intl.formatMessage({ id: 'orgMgr.digital.createTime' }),
-      dataIndex: 'createTime',
-      width: '110px',
-      render: (text) => (text ? dayjs(Number(text) || text).format('YYYY-MM-DD HH:mm:ss') : '-'),
-    },
   ];
 
   const onChange = (_, newFilter) => {

@@ -38,6 +38,7 @@
         <result column="owner_type" property="ownerType" />
         <result column="catalog_id" property="catalogId" />
         <result column="create_time" property="createTime" />
+        <result column="resource_status" property="resourceStatus" />
         <result column="man_user_id" property="manUserId" />
         <result column="agent_type" property="agentType" />
         <result column="agent_home_url" property="agentHomeUrl" />
@@ -448,6 +449,7 @@
                a.owner_type,
                a.catalog_id,
                a.create_time,
+               a.resource_status,
                a.man_user_id,
                a.create_by,
                b.agent_type,
@@ -526,6 +528,7 @@
                a.owner_type,
                a.catalog_id,
                a.create_time,
+               a.resource_status,
                a.man_user_id,
                a.create_by,
                b.agent_type,
@@ -729,37 +732,49 @@
         <!-- 排序规则 -->
         <choose>
             <when test="orderField == 'use' and orderBy == 'asc'">
-                order by COALESCE(d.total, 0) asc
+                order by case when a.resource_status = 3 then 1 else 0 end asc,
+                         COALESCE(d.total, 0) asc
             </when>
             <when test="orderField == 'use' and orderBy == 'desc'">
-                order by COALESCE(d.total, 0) desc
+                order by case when a.resource_status = 3 then 1 else 0 end asc,
+                         COALESCE(d.total, 0) desc
             </when>
             <when test="orderField == 'focus' and orderBy == 'asc'">
-                order by  COALESCE(e.total, 0) asc
+                order by case when a.resource_status = 3 then 1 else 0 end asc,
+                         COALESCE(e.total, 0) asc
             </when>
             <when test="orderField == 'focus' and orderBy == 'desc'">
-                order by COALESCE(e.total, 0) desc
+                order by case when a.resource_status = 3 then 1 else 0 end asc,
+                         COALESCE(e.total, 0) desc
             </when>
             <when test="orderField == 'createTime' and orderBy == 'asc'">
-                order by a.create_time asc
+                order by case when a.resource_status = 3 then 1 else 0 end asc,
+                         a.create_time asc
             </when>
             <when test="orderField == 'createTime' and orderBy == 'desc'">
-                order by a.create_time desc
+                order by case when a.resource_status = 3 then 1 else 0 end asc,
+                         a.create_time desc
             </when>
             <when test="orderField == 'updateTime' and orderBy == 'asc'">
-                order by COALESCE(a.update_time, '9999-12-31 23:59:59') asc
+                order by case when a.resource_status = 3 then 1 else 0 end asc,
+                         COALESCE(a.update_time, '9999-12-31 23:59:59') asc
             </when>
             <when test="orderField == 'updateTime' and orderBy == 'desc'">
-                order by COALESCE(a.update_time, '1970-01-01 00:00:00') desc
+                order by case when a.resource_status = 3 then 1 else 0 end asc,
+                         COALESCE(a.update_time, '1970-01-01 00:00:00') desc
             </when>
             <when test="orderField == 'publishTime' and orderBy == 'asc'">
-                order by COALESCE(a.publish_time, '9999-12-31 23:59:59') asc
+                order by case when a.resource_status = 3 then 1 else 0 end asc,
+                         COALESCE(a.publish_time, '9999-12-31 23:59:59') asc
             </when>
             <when test="orderField == 'publishTime' and orderBy == 'desc'">
-                order by COALESCE(a.publish_time, '1970-01-01 00:00:00') desc
+                order by case when a.resource_status = 3 then 1 else 0 end asc,
+                         COALESCE(a.publish_time, '1970-01-01 00:00:00') desc
             </when>
             <otherwise>
-                order by COALESCE(a.update_time, '1970-01-01 00:00:00') desc, a.create_time desc
+                order by case when a.resource_status = 3 then 1 else 0 end asc,
+                         COALESCE(a.update_time, '1970-01-01 00:00:00') desc,
+                         a.create_time desc
             </otherwise>
         </choose>
     </select>

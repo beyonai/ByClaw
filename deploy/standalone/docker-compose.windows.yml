@@ -3,12 +3,14 @@ services:
   fe:
     volumes:
       - ../config/nginx-standalone.conf:/etc/nginx/conf.d/default.conf
+      - ../config/ssl:/etc/nginx/ssl:ro
       - ./logs/nginx:/var/log/nginx
 
   be:
     volumes:
       - ../config:/app/config
       - ./logs/be:/app/logs
+      - ${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-C:/ProgramData/byclaw/file}:${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-C:/ProgramData/byclaw/file}
 
   qa-manager:
     volumes:

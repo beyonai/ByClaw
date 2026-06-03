@@ -1,0 +1,69 @@
+name: Trivy Security Scan
+
+on:
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  security-events: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  scan:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run Trivy filesystem scan (SARIF)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-results.sarif
+          scanners: vuln,secret,misconfig
+
+      - name: Upload to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy
+
+      - name: Run Trivy filesystem scan (table for comment)
+        uses: aquasecurity/trivy-action@master
+        id: trivy-table
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          format: table
+          output: trivy-table.txt
+          scanners: vuln,secret,misconfig
+
+      - name: Prepare comment body
+        if: always()
+        run: |
+          {
+            echo "## 🔒 Trivy Security Scan"
+            echo ""
+            echo "Severity: **CRITICAL + HIGH** | Scanners: vuln, secret, misconfig"
+            echo ""
+            echo '<details><summary>Scan results</summary>'
+            echo ""
+            echo '```'
+            cat trivy-table.txt 2>/dev/null || echo "No issues found"
+            echo '```'
+            echo ""
+            echo '</details>'
+          } > trivy-comment.md
+
+      - name: Post PR comment
+        if: always()
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: trivy-scan
+          path: trivy-comment.md

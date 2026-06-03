@@ -14,10 +14,7 @@
 
 ---
 
-> ⚠️ **重要提示：** 部署前请务必提前准备好 MinIO 挂载目录：
-> - `FILE_STORAGE_MINIO_MOUNT_PATH` (例如: `/data/8080`)
-> 
-> 详细步骤请参考 [前置条件 - 数据目录准备](./01-prerequisites.md#5-⚠️-重要数据目录准备必须)。
+> ⚠️ **重要提示：** 纯 Docker 部署推荐使用 NFS/SMB/OpenMediaVault 这类文件型运行态卷承载 OpenClaw `/by`，MinIO 保留为对象存储。旧的 `FILE_STORAGE_MINIO_MOUNT_PATH` rclone 挂载仅作为 legacy 模式保留。
 
 ## 📚 文档目录
 
@@ -30,6 +27,10 @@
 | [中间件部署](./06-middleware-deployment.md) | Redis、MinIO、OpenGauss 等中间件的部署 |
 | [拆分部署](./08-standalone-deployment.md) | 各模块独立部署的详细步骤 |
 | [验证和故障排查](./09-verification.md) | 部署验证和常见问题解决 |
+| [Docker 文件型存储升级 HTML 手册](./docker-file-storage-upgrade.html) | 从 0 到 1 的完整 HTML 操作手册，含固定导航和 SVG 流程图 |
+| [Docker 文件型运行态存储部署](./10-docker-file-storage-deployment.md) | 使用 NFS/SMB/OpenMediaVault/CephFS 承载 OpenClaw `/by` |
+| [MinIO 到文件型存储迁移](./11-minio-to-file-storage-migration.md) | 从旧 MinIO/rclone 数据卷迁移到 Docker 文件型运行态卷 |
+| [一键部署存储模式切换 HTML](./12-one-click-storage-deployment.html) | 通过 `.env` + `deploy.sh init/update` 切换 MinIO/NFS 一键部署方案 |
 
 ## 📦 项目架构
 

@@ -264,7 +264,7 @@ public class ParamService {
 
         // 使用正则表达式匹配所有{{}}格式的数据
         // 匹配模式：{{任意内容}}
-        Pattern pattern = Pattern.compile("\\{\\{([^}]+)\\}\\}");
+        Pattern pattern = Pattern.compile("\\{\\{([^}]++)\\}\\}");
         Matcher matcher = pattern.matcher(chatContent);
 
         while (matcher.find()) {

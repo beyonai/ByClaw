@@ -95,16 +95,32 @@
     <!-- 会话基础信息映射，字段转为驼峰命名 -->
     <resultMap id="SessionBaseInfoResultMap" type="java.util.Map">
         <result column="session_id" property="sessionId"/>
+        <result column="parent_session_id" property="parentSessionId"/>
         <result column="session_name" property="sessionName"/>
+        <result column="session_content" property="sessionContent"/>
         <result column="session_type" property="sessionType"/>
+        <result column="create_time" property="createTime"/>
+        <result column="creator_id" property="creatorId"/>
+        <result column="object_type" property="objectType"/>
+        <result column="object_id" property="objectId"/>
+        <result column="enterprise_id" property="enterpriseId"/>
+        <result column="update_time" property="updateTime"/>
     </resultMap>
 
     <!-- 根据用户和Agent查询会话：创建人为公共条件，会话ID要么来自成员表中该Agent所属会话，要么等于objectId本身 -->
     <select id="querySessionByAgent" resultMap="SessionBaseInfoResultMap">
         select
             a.session_id,
+            a.parent_session_id,
             a.session_name,
-            a.session_type
+            a.session_content,
+            a.session_type,
+            a.create_time,
+            a.creator_id,
+            a.object_type,
+            a.object_id,
+            a.enterprise_id,
+            a.update_time
         from byai_session a
         where a.creator_id = #{userId}
           and (
@@ -116,6 +132,11 @@
             )
             or a.object_id = #{objectId}
           )
+        <if test="keyword != null and keyword != ''">
+          and (a.session_name like concat('%', #{keyword}, '%')
+            or a.session_content like concat('%', #{keyword}, '%'))
+        </if>
+        order by a.update_time desc, a.create_time desc
     </select>
 
 

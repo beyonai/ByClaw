@@ -52,6 +52,7 @@ export enum SSEMessageType {
   noticeApproval,
   noticeWelfare,
   noticeTask,
+  compaction,
 }
 
 export enum IMessageState {
@@ -73,4 +74,8 @@ export const SSEEventStatus = {
   start: '_START_',
   query: '_QUERY_',
   done: '_DONE_',
+};
+
+export const IObjectType = {
+  toolCall: 'tool_call',
 };

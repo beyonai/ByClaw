@@ -68,6 +68,7 @@ const ResourceTabs: React.FC<Props> = ({
   const [pathHistory, setPathHistory] = useState<string[]>([]);
   const [downloadingFile, setDownloadingFile] = useState<string | null>(null);
   const downloadTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const skillUploadTimerRef = useRef<NodeJS.Timeout | null>(null);
   const downloadLockRef = useRef(false);
 
   const { layoutMode, agentInfo, EventEmitter } = useGlobal();
@@ -229,8 +230,17 @@ const ResourceTabs: React.FC<Props> = ({
   const [skillUploading, setSkillUploading] = useState(false);
 
   const handleSkillUpload = useCallback(
-    async (file: File) => {
-      if (!file.name.endsWith('.zip')) {
+    async (files: File[]) => {
+      const uploadFiles = files.filter(Boolean);
+      if (!uploadFiles.length) {
+        return false;
+      }
+      if (
+        uploadFiles.some((file) => {
+          const fileName = file.name.toLowerCase();
+          return !fileName.endsWith('.zip') && !fileName.endsWith('.tar.gz');
+        })
+      ) {
         message.error(intl.formatMessage({ id: 'resourceTabs.skillUpload.onlyZip' }));
         return false;
       }
@@ -243,7 +253,9 @@ const ResourceTabs: React.FC<Props> = ({
       setSkillUploading(true);
       try {
         const formData = new FormData();
-        formData.append('file', file);
+        uploadFiles.forEach((file) => {
+          formData.append('files', file);
+        });
         formData.append('userCode', userCode);
         if (normalizedAgentId) {
           formData.append('resourceId', normalizedAgentId);
@@ -261,7 +273,20 @@ const ResourceTabs: React.FC<Props> = ({
         setSkillUploading(false);
       }
     },
-    [userInfo, normalizedAgentId, intl, message]
+    [userInfo, normalizedAgentId, intl, message, EventEmitter]
+  );
+
+  const scheduleSkillUpload = useCallback(
+    (files: File[]) => {
+      if (skillUploadTimerRef.current) {
+        clearTimeout(skillUploadTimerRef.current);
+      }
+      skillUploadTimerRef.current = setTimeout(() => {
+        handleSkillUpload(files);
+        skillUploadTimerRef.current = null;
+      }, 0);
+    },
+    [handleSkillUpload]
   );
 
   const hasAnyTab = true;
@@ -296,6 +321,9 @@ const ResourceTabs: React.FC<Props> = ({
     return () => {
       if (downloadTimerRef.current) {
         clearTimeout(downloadTimerRef.current);
+      }
+      if (skillUploadTimerRef.current) {
+        clearTimeout(skillUploadTimerRef.current);
       }
     };
   }, []);
@@ -643,10 +671,11 @@ const ResourceTabs: React.FC<Props> = ({
             <div className={styles.searchRow}>
               {activeTab === 'skill' && (
                 <Upload
-                  accept=".zip"
+                  accept=".zip,.gz"
+                  multiple
                   showUploadList={false}
-                  beforeUpload={(file) => {
-                    handleSkillUpload(file);
+                  beforeUpload={(_, fileList) => {
+                    scheduleSkillUpload(fileList as File[]);
                     return false;
                   }}
                 >

@@ -38,6 +38,14 @@ public class ByaiMessageHotService {
     @Autowired
     private ByaiMessageMapper byaiMessageMapper;
 
+    public ByaiMessage find(Long messageId) {
+        return byaiMessageMapper.selectById(messageId);
+    }
+
+    public void update(ByaiMessage byaiMessage) {
+        byaiMessageMapper.updateById(byaiMessage);
+    }
+
     /**
      * 新增消息热度到 ES 索引，支持单个或批量
      *
@@ -50,6 +58,7 @@ public class ByaiMessageHotService {
             ByaiMessage byaiMessage = new ByaiMessage();
             BeanUtils.copyProperties(byaiMessageHotDto, byaiMessage);
             byaiMessage.setId(sequenceService.nextVal());
+            byaiMessage.setMessageId(sequenceService.nextVal());
             byaiMessage.setCreateTime(new Date());
             messages.add(byaiMessage);
         }

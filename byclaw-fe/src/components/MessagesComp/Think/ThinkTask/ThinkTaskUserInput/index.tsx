@@ -89,9 +89,7 @@ function buildResumeQueryQuestion(values: Record<string, unknown>, fields: IForm
     const { fieldCode } = item;
     if (Object.prototype.hasOwnProperty.call(values, fieldCode)) {
       if (item.formType === 'select') {
-        const option = item.optional?.find(
-          (opt: { label?: string; value: string }) => opt.value === values[fieldCode]
-        );
+        const option = item.optional?.find((opt: { label?: string; value: string }) => opt.value === values[fieldCode]);
         handerFormData[item.fieldName] = option ? option.label : values[fieldCode];
       } else if (item.formType === 'file') {
         handerFormData[item.fieldName] = values[fieldCode];
@@ -207,6 +205,7 @@ function ThinkTaskUserInput(props: IProps) {
                 const payload: Record<string, unknown> = {
                   actionType: 'RESUME',
                   llmMessageId: assistantLlmMessageId,
+                  traceId: messageInfo.traceId,
                   files: filesList,
                   extParams: {
                     files: extParamsFiles,

@@ -27,6 +27,11 @@ public class SandboxInfo {
      */
     private List<String> endpoints;
 
+    /**
+     * Endpoint mapping keyed by logical instance name in the sandbox image.
+     */
+    private Map<String, String> instanceEndpoints;
+
     private String gatewayToken;
 
     private Integer servicePort;

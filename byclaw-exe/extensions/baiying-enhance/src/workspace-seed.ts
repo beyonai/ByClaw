@@ -24,6 +24,8 @@ const TOOLS_FILENAME = "TOOLS.md";
 
 type BaiyingAgentItem = {
   resourceId?: string;
+  resourceCode?: string;
+  resourceDesc?: string;
   name?: string;
   /** 平台「核心人格」长文，应对 OpenClaw `SOUL.md` 与 LLM 人设（优于散装 instructions 字段）。 */
   corePersonaDefinition?: string;
@@ -142,6 +144,8 @@ function getRawDetailItem(raw: unknown): BaiyingAgentItem | null {
 
   return {
     resourceId: str(d.resourceId),
+    resourceCode: str(d.resourceCode),
+    resourceDesc: str(d.resourceDesc),
     name: str(d.resourceName),
     corePersonaDefinition: corePersona,
     instructions: instructionParts.join("\n\n") || undefined,
@@ -286,6 +290,12 @@ function buildIdentityMd(item: BaiyingAgentItem): string {
   if (typeof item.avatar === "string" && item.avatar.trim()) {
     lines.push("## Avatar (source system path)", "", item.avatar.trim(), "");
   }
+  if (item.resourceId) {
+    lines.push(`## Digital Employee`, `- digital employee id: \`${item.resourceId}\``);
+    if (item.resourceCode) {
+      lines.push(`- digital employee code: \`${item.resourceCode}\``);
+    }
+  }
   return `${lines.join("\n")}\n`;
 }
 
@@ -309,10 +319,33 @@ function isDocResourceType(resourceType: string | undefined): boolean {
 }
 
 function buildToolsMd(item: BaiyingAgentItem, fallbackAgentId?: string): string {
+  const resolvedAgentId =
+    (typeof item.resourceId === "string" && item.resourceId.trim() ? item.resourceId.trim() : "") ||
+    (typeof fallbackAgentId === "string" && fallbackAgentId.trim() ? fallbackAgentId.trim() : "");
+
   const lines = [MARKER, "", "# Tools", "", "## baiying_call", ""];
   lines.push(
     "Use `baiying_call` to access Baiying backend resources associated with this agent.",
     "",
+  );
+  if (item.integrationType && ["PAGE", "INTERFACE", "A2A"].includes(item.integrationType)) {
+    // 暂时这么定，后续需要考虑：更详细的描述、执行参数等
+    lines.push(
+      "## Capabilities",
+      item.coreCompetencies?.map(capacity => {
+        return `  - ${capacity.coreCompetency}.${capacity.description || ""}`
+      }).join("\n") ?? "",
+      "Suggested parameters:",
+      "- `query`: natural-language task summary",
+      "- `agent_id`: always pass " + resolvedAgentId,
+      "- `resource_id`: always pass " + resolvedAgentId,
+      "- `arguments`: structured backend parameters",
+      "",
+    )
+    return `${lines.join("\n")}\n`;
+  }
+
+  lines.push(
     "Suggested parameters:",
     "- `query`: natural-language task summary",
     "- `agent_id`: required by executor for DOC resources; if omitted, plugin can auto-fill it from agent.json `resourceId`",
@@ -324,9 +357,6 @@ function buildToolsMd(item: BaiyingAgentItem, fallbackAgentId?: string): string 
   );
 
   const res = item.relResourceInfoList;
-  const resolvedAgentId =
-    (typeof item.resourceId === "string" && item.resourceId.trim() ? item.resourceId.trim() : "") ||
-    (typeof fallbackAgentId === "string" && fallbackAgentId.trim() ? fallbackAgentId.trim() : "");
   if (Array.isArray(res) && res.length > 0) {
     lines.push("## Available resources", "");
     for (const r of res) {

@@ -416,7 +416,7 @@ export interface UploadSkillZipResponse {
  * @returns Promise<UploadSkillZipResponse> 上传结果
  */
 export const uploadSkillZip = (data: FormData) => {
-  return POST<{ code: number; msg: string; data: UploadSkillZipResponse; success: boolean }>(
+  return POST<{ code: number; msg: string; data: UploadSkillZipResponse | UploadSkillZipResponse[]; success: boolean }>(
     '/byaiService/tool/uploadSkillZip',
     data,
     {

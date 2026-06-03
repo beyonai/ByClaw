@@ -4,7 +4,7 @@ import { agentMap, agentTypeMap, specialAgentCode } from '@/constants/agent';
 import { IAgent, IAgentCache } from '@/typescript/agent';
 import { getPublicPath } from '@/utils';
 import { isBase64, spliceOrigin, getFileUrl } from '@/utils/file';
-import { get, trimStart, chain, concat, pick } from 'lodash';
+import { get, trimStart, concat, pick } from 'lodash';
 import { getToken, getssoToken } from '@/utils/auth';
 import { generateUniqueId } from '@/utils/math';
 import type { IFile } from '@/typescript/file';
@@ -116,11 +116,8 @@ export function agentHandler(item: IAgent) {
     myAgentType = agentTypeMap.openclaw;
   }
 
-  const rawIsDefault = item.isDefault ?? (item as Record<string, unknown>).default;
-  const normalizedIsDefault =
-    rawIsDefault === undefined
-      ? undefined
-      : rawIsDefault === true || String(rawIsDefault) === 'true' || String(rawIsDefault) === '1';
+  // 没明白为什么会这样返回
+  const normalizedIsDefault = [true, '1', 'true'].includes(item.isDefault || '');
 
   return {
     ...item,
@@ -130,12 +127,8 @@ export function agentHandler(item: IAgent) {
 
     chatAvatar: myAvatar,
     category: 'all',
-    ...(normalizedIsDefault === undefined
-      ? {}
-      : {
-        isDefault: normalizedIsDefault,
-        canSetDefault: item.canSetDefault ?? !normalizedIsDefault,
-      }),
+    isDefault: normalizedIsDefault,
+    canSetDefault: item.canSetDefault ?? !normalizedIsDefault,
 
     ...get(agentMap, myAgentType, {}),
   };
@@ -241,10 +234,7 @@ export const agentHomeUrlHandler = (
   if (!agentHomeUrl) return '';
 
   try {
-    const myUrl = chain(agentHomeUrl)
-      .replace('{beyond-token}', getToken())
-      .replace('{sso-token}', getssoToken())
-      .value();
+    const myUrl = agentHomeUrl.replace('{beyond-token}', getToken()).replace('{sso-token}', getssoToken());
 
     const protocolRegex = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
     let urlWithProtocol = myUrl;

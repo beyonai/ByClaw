@@ -116,6 +116,10 @@ const MentionPopover = ({
             agentName: currentAgent.name,
             agentType: currentAgent.agentType,
             chatAvatar: currentAgent.chatAvatar,
+            field_id: item.resourceId,
+            field_name: item.resourceName,
+            field_code: item.resourceCode,
+            field_desc: item.resourceDesc,
           },
           ResourceType.agentTool
         );

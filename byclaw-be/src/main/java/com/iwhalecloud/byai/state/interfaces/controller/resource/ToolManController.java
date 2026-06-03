@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.interfaces.controller.resource;
 
+import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtMcpService;
 import com.iwhalecloud.byai.manager.dto.resource.CallMcpParamsDto;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto;
@@ -55,6 +56,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.util.UriUtils;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -197,6 +200,7 @@ public class ToolManController {
      * @date 2026-04-23 18:17:00
      */
     @PostMapping(value = "/addToolFromThird", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @ManageLogAnnotation(name = "智能体接口", description = "智能体资源同步")
     public ResponseUtil<Map<String, Object>> addToolFromThird(@RequestBody String jsonContent) {
         try {
             Map<String, Object> data = toolManService.addToolFromThird(jsonContent);
@@ -592,14 +596,17 @@ public class ToolManController {
     }
 
     /**
-     * 上传 skill 压缩包到用户工作空间。 - 落盘 bucket: byclaw-{userCode}（与 qrySkillListByUserCode 同口径） - 落盘前缀：数字员工
+     * 上传 skill 压缩包到用户工作空间，支持 zip 与 tar.gz。 - 落盘 bucket: byclaw-{userCode}（与 qrySkillListByUserCode 同口径） - 落盘前缀：数字员工
      * /.openclaw/workspace-baiying-agent-{resourceId}/skills/{skillName}/...； 超级助手
-     * /.openclaw/workspace/skills/{skillName}/... - zip 仅允许包含一个顶层目录，且必须含 SKILL.md；同名 skill 会先清空旧目录再写入。 - userCode
-     * 留空时退回当前登录用户。
+     * /.openclaw/workspace/skills/{skillName}/... - 压缩包必须有且仅有一个 SKILL.md；同名 skill 会先清空旧目录再写入。 -
+     * userCode 留空时退回当前登录用户。
      */
     @PostMapping(value = "/uploadSkillZip", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseUtil<ByClawSkillDto> uploadSkillZip(
-        @Parameter(description = "skill zip 文件", required = true) @RequestParam("file") MultipartFile file,
+    public ResponseUtil<List<ByClawSkillDto>> uploadSkillZip(
+        @Parameter(description = "skill zip/tar.gz 文件，兼容旧版单文件字段", required = false) @RequestParam(value = "file",
+            required = false) MultipartFile file,
+        @Parameter(description = "skill zip/tar.gz 文件列表", required = false) @RequestParam(value = "files",
+            required = false) MultipartFile[] files,
         @Parameter(description = "数字员工资源ID；超级助手可不传") @RequestParam(value = "resourceId",
             required = false) Long resourceId,
         @Parameter(description = "目标用户编码，可选；留空则使用当前登录用户") @RequestParam(value = "userCode",
@@ -607,8 +614,9 @@ public class ToolManController {
         try {
             String resolvedUserCode = StringUtils.isNotBlank(userCode) ? userCode
                 : CurrentUserHolder.getCurrentUserCode();
-            ByClawSkillDto data = byClawSkillUploadApplicationService.uploadSkillZip(resolvedUserCode, resourceId,
-                file);
+            List<MultipartFile> uploadFiles = resolveSkillUploadFiles(file, files);
+            List<ByClawSkillDto> data = byClawSkillUploadApplicationService.uploadSkillZips(resolvedUserCode,
+                resourceId, uploadFiles);
             return ResponseUtil.successResponse(I18nUtil.get("byclaw.skill.upload.success"), data);
         }
         catch (IllegalArgumentException e) {
@@ -622,6 +630,17 @@ public class ToolManController {
             return ResponseUtil
                 .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("byclaw.skill.upload.failed"));
         }
+    }
+
+    private List<MultipartFile> resolveSkillUploadFiles(MultipartFile file, MultipartFile[] files) {
+        List<MultipartFile> uploadFiles = new ArrayList<>();
+        if (files != null) {
+            uploadFiles.addAll(Arrays.asList(files));
+        }
+        if (file != null) {
+            uploadFiles.add(file);
+        }
+        return uploadFiles;
     }
 
     /**
@@ -677,10 +696,8 @@ public class ToolManController {
     }
 
     /**
-     * 删除用户工作空间下的单个 skill 目录。
-     * - 数字员工：skillPath 必须落在 /.openclaw/workspace-baiying-agent-{resourceId}/skills/ 之下
-     * - 超级助手：skillPath 必须落在 /.openclaw/workspace/skills/ 之下
-     * - userCode 留空时退回当前登录用户
+     * 删除用户工作空间下的单个 skill 目录。 - 数字员工：skillPath 必须落在 /.openclaw/workspace-baiying-agent-{resourceId}/skills/ 之下 -
+     * 超级助手：skillPath 必须落在 /.openclaw/workspace/skills/ 之下 - userCode 留空时退回当前登录用户
      */
     @PostMapping("/deleteSkill")
     public ResponseUtil<ByClawSkillDto> deleteSkill(@RequestBody DeleteSkillQo request) {

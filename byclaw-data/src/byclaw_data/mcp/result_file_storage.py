@@ -90,10 +90,11 @@ class ByclawResultFileStorage(ResultFileStorage):
         return stored_path or file_path
 
     def read_text(self, file_path: str, begin_line: int = 0, end_line: int = -1) -> str | None:
+        file_path = str(self._normalize_logical_file_path(file_path))
+        file_path = self._strip_session_prefix(file_path)
         payload = {
             **self._build_context_payload(),
-            "filePath": str(self._normalize_logical_file_path(file_path)),
-            # "fileType": "txt",
+            "filePath": file_path,
             "begin_line": begin_line,
             "end_line": end_line,
         }
@@ -101,6 +102,16 @@ class ByclawResultFileStorage(ResultFileStorage):
         if isinstance(data, str):
             return data
         return self._extract_string(data, "content")
+
+    @staticmethod
+    def _strip_session_prefix(file_path: str) -> str:
+        for prefix in ("/.sessions/", "/.session/"):
+            if not file_path.startswith(prefix):
+                continue
+            path_parts = file_path.split("/", 3)
+            if len(path_parts) >= 4:
+                return f"/{path_parts[3]}"
+        return file_path
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> Any:
         headers = self._build_headers()

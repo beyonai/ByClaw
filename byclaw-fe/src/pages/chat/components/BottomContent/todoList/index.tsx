@@ -5,7 +5,7 @@ import { useDispatch, useIntl, useSelector } from '@umijs/max';
 import { ITaskState } from '@/models/task';
 import type { ITask } from '@/typescript/task';
 import InfiniteScroll from 'react-infinite-scroll-component';
-import { debounce, get, compact, head, chain, set } from 'lodash';
+import { debounce, get, compact, head, set } from 'lodash';
 import { Button, ConfigProvider, Input, List, Spin } from 'antd';
 import styles from './style.less';
 import { getControlBtns } from '@/components/MessagesComp/MyBot/Renderer/util';
@@ -217,7 +217,7 @@ function ListItem({ task }: { task: ITask }) {
                   try {
                     const templateFunc = new Function(
                       'pageParams',
-                      ` return ${chain(value).trimStart('${').trimEnd('}').value()}; `
+                      ` return ${value.replace(/^\$\{/, '').replace(/\}$/, '')}; `
                     );
                     val = templateFunc(task.resPageObj || {});
                   } catch (e) {

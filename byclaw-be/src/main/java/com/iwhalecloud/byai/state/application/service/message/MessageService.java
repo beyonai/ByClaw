@@ -3,7 +3,11 @@ package com.iwhalecloud.byai.state.application.service.message;
 import static com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum.FORWARD_TYPE;
 import static com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum.SYSTEM_RESPONSE;
 import static com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum.USER_INPUT;
+
+import com.alibaba.fastjson.JSONArray;
 import com.iwhalecloud.byai.common.util.DateUtils;
+import com.iwhalecloud.byai.common.util.StringUtil;
+import com.iwhalecloud.byai.state.common.dto.MessageStructDto;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
@@ -221,8 +225,7 @@ public class MessageService {
         messageHotPageQo.setPageNum(messageQo.getPageNum().intValue());
         messageHotPageQo.setPageSize(messageQo.getPageSize().intValue());
         messageHotPageQo.setSessionId(messageQo.getSessionId());
-        PageInfo<ByaiMessage> byaiMessagePageInfo = byaiMessageHotService
-            .selectByPageQo(messageHotPageQo);
+        PageInfo<ByaiMessage> byaiMessagePageInfo = byaiMessageHotService.selectByPageQo(messageHotPageQo);
 
         PageInfo<ByaiMessageHotDtoDto> pageInfo = new PageInfo<>();
         pageInfo.setPageNum(byaiMessagePageInfo.getPageNum());
@@ -399,8 +402,7 @@ public class MessageService {
     }
 
     /**
-     * 获取待更新反馈的消息索引。
-     * 优先使用当前反馈消息 ID 精确定位问答关系，避免同一 taskId 下多条关系记录时误写到其他问答。
+     * 获取待更新反馈的消息索引。 优先使用当前反馈消息 ID 精确定位问答关系，避免同一 taskId 下多条关系记录时误写到其他问答。
      *
      * @param byaiMessageHotDto 消息数据
      * @return 消息索引信息，如果不存在则返回 null
@@ -966,4 +968,6 @@ public class MessageService {
         }
         return getChatHistory(messageQo.getMessageIds());
     }
+
+
 }

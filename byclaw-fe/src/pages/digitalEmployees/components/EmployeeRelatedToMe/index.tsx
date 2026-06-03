@@ -86,16 +86,6 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
     return [allCategory, ...categoryList];
   }, [employeesTypeList, intl]);
 
-  // const sortBySuperHelperFirst = React.useCallback((items: IAgentCache[] = []) => {
-  //   return [...items].sort((a, b) => {
-  //     const aIsPersonalDefault = a?.ownerType === 'personal_default' ? 2 : 0;
-  //     const bIsPersonalDefault = b?.ownerType === 'personal_default' ? 2 : 0;
-  //     const aIsSuper = a?.ownerType === 'personal' ? 1 : 0;
-  //     const bIsSuper = b?.ownerType === 'personal' ? 1 : 0;
-  //     return bIsPersonalDefault + bIsSuper - (aIsPersonalDefault + aIsSuper);
-  //   });
-  // }, []);
-
   const myQueryMyCreated = React.useCallback(
     (keyword: string | undefined, pageNum: number, catalogId?: string | number, filterParam?: IOnOkParams) => {
       if (abortControllerRef.current && !abortControllerRef.current?.signal?.aborted) {
@@ -319,14 +309,20 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
         .then(() => {
           message.success(intl.formatMessage({ id: 'digitalEmployees.deleteSuccess' }));
           EventEmitter.emit('beyond-update-employee', {
-            delIdList: [employee.agentId],
+            updateList: [
+              {
+                ...employee,
+                resourceStatus: 3,
+              },
+            ],
           });
+          getSearch(searchName || '', dropdownParam, 1, curActiveLink);
         })
         .catch((error: any) => {
           message.error(error?.message || error || intl.formatMessage({ id: 'common.deleteFailed' }));
         });
     },
-    [EventEmitter, intl]
+    [EventEmitter, curActiveLink, dropdownParam, getSearch, intl, searchName]
   );
 
   const onAuthEmployee = React.useCallback((employee: IAgentCache, type: 'useAuth' | 'mgrAuth') => {

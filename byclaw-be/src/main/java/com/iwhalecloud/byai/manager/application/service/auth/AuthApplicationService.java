@@ -101,6 +101,9 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * 认证应用服务
@@ -1142,15 +1145,13 @@ public class AuthApplicationService {
         // 如果有授权给组织，查询组织下的所有用户
         if (CollectionUtils.isNotEmpty(orgIds)) {
             try {
-                for (Long orgId : orgIds) {
-                    List<Long> orgUserIds = userService.findUserIdsByOrgId(orgId);
-                    if (CollectionUtils.isNotEmpty(orgUserIds)) {
-                        userIds.addAll(orgUserIds);
-                    }
+                List<Long> orgUserIds = usersMapper.findUserIdsByOrgIdListIncludingChildren(new ArrayList<>(orgIds));
+                if (CollectionUtils.isNotEmpty(orgUserIds)) {
+                    userIds.addAll(orgUserIds);
                 }
             }
             catch (Exception e) {
-                logger.error("查询组织下用户失败：{}", e.getMessage());
+                logger.error("查询组织及下级组织用户失败", e);
             }
         }
 
@@ -1165,22 +1166,21 @@ public class AuthApplicationService {
                 }
             }
             catch (Exception e) {
-                logger.error("查询岗位下用户失败：{}", e.getMessage());
+                logger.error("查询岗位下用户失败", e);
             }
         }
 
         // 如果有授权给驻地，查询驻地下的所有用户
         if (CollectionUtils.isNotEmpty(stationIds)) {
             try {
-                for (Long stationId : stationIds) {
-                    List<Long> stationUserIds = usersMapper.findUserIdsByStationId(stationId);
-                    if (CollectionUtils.isNotEmpty(stationUserIds)) {
-                        userIds.addAll(stationUserIds);
-                    }
+                List<Long> stationUserIds =
+                    usersMapper.findUserIdsByStationIdListIncludingChildren(new ArrayList<>(stationIds));
+                if (CollectionUtils.isNotEmpty(stationUserIds)) {
+                    userIds.addAll(stationUserIds);
                 }
             }
             catch (Exception e) {
-                logger.error("查询驻地下用户失败：{}", e.getMessage());
+                logger.error("查询驻地及下级驻地用户失败", e);
             }
         }
     }
@@ -1397,6 +1397,7 @@ public class AuthApplicationService {
      *
      * @param authRedBlackDTO 授权对象
      */
+    @Transactional(rollbackFor = Exception.class)
     public void handleAuth(AuthRedBlackDTO authRedBlackDTO) {
 
         String grantType = authRedBlackDTO.getGrantType();
@@ -1487,12 +1488,31 @@ public class AuthApplicationService {
             Set<Long> involvedUserIds = this.extractInvolvedUserIds(compareVo, grantObjType, grantObjId);
             involvedUserIds.addAll(this.extractInvolvedUserIds(authRedBlackDTO));
             if (CollectionUtils.isNotEmpty(involvedUserIds)) {
-                logger.info("授权变更涉及用户数：{}，开始同步权限到Redis", involvedUserIds.size());
-                this.authRedisSyncService.asyncSyncAuthChangedUsers(involvedUserIds, grantType);
+                logger.info("授权变更涉及用户数：{}，准备同步权限到Redis", involvedUserIds.size());
+                this.syncAuthChangedUsersAfterCommit(involvedUserIds, grantType);
             }
         }
         catch (Exception e) {
-            logger.error("同步用户权限到Redis失败：{}", e.getMessage());
+            logger.error("同步用户权限到Redis失败", e);
+        }
+    }
+
+    private void syncAuthChangedUsersAfterCommit(Set<Long> involvedUserIds, String grantType) {
+        Set<Long> syncUserIds = new HashSet<>(involvedUserIds);
+        Runnable task = () -> {
+            logger.info("授权变更涉及用户数：{}，开始同步权限到Redis", syncUserIds.size());
+            this.authRedisSyncService.asyncSyncAuthChangedUsers(syncUserIds, grantType);
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+        }
+        else {
+            task.run();
         }
     }
 
@@ -1886,6 +1906,10 @@ public class AuthApplicationService {
 
             PrivilegeGrant historyPrivilegeGrant = historyRedMap.remove(key);
             if (historyPrivilegeGrant != null) {
+                if (!isPrivilegeGrantChanged(privilegeGrant, historyPrivilegeGrant)) {
+                    continue;
+                }
+                copyChangedPrivilegeGrantFields(privilegeGrant, historyPrivilegeGrant);
                 if (Color.RED.equalsIgnoreCase(color)) {
                     compareVo.getRedUpdateMap().put(key, historyPrivilegeGrant);
                 }
@@ -1915,6 +1939,18 @@ public class AuthApplicationService {
                 compareVo.getBlackDelMap().put(entry.getKey(), entry.getValue());
             }
         }
+    }
+
+    private boolean isPrivilegeGrantChanged(PrivilegeGrant currentPrivilegeGrant, PrivilegeGrant historyPrivilegeGrant) {
+        if (currentPrivilegeGrant == null || historyPrivilegeGrant == null) {
+            return false;
+        }
+        return !Objects.equals(currentPrivilegeGrant.getAllowUnsubscribe(), historyPrivilegeGrant.getAllowUnsubscribe());
+    }
+
+    private void copyChangedPrivilegeGrantFields(PrivilegeGrant currentPrivilegeGrant,
+        PrivilegeGrant historyPrivilegeGrant) {
+        historyPrivilegeGrant.setAllowUnsubscribe(currentPrivilegeGrant.getAllowUnsubscribe());
     }
 
     /**

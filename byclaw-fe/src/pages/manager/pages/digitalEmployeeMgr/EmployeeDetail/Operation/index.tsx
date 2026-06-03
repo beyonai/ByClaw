@@ -9,7 +9,7 @@ import localeData from 'dayjs/plugin/localeData';
 import weekOfYear from 'dayjs/plugin/weekOfYear';
 import { useIntl } from '@umijs/max';
 import Ellipsis from '@/pages/manager/components/Ellipsis';
-import * as echarts from 'echarts';
+import echarts from '@/utils/echarts';
 import AntdIcon from '@/pages/manager/components/AntdIcon';
 import {
   getOperationsInfo,

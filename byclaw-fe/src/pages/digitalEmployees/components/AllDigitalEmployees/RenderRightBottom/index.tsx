@@ -1,5 +1,5 @@
 import React, { FC, useState } from 'react';
-import { Button, Popconfirm, Space } from 'antd';
+import { Button, Popconfirm } from 'antd';
 // @ts-ignore
 import { useDispatch, useIntl } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
@@ -173,16 +173,16 @@ const RenderRightBottom: FC<IProps> = (
 
   return (
     <>
-      <Space size="small">
-        {/* {canEdit && <EditButton employee={employee} />} */}
-        {/* {canDelete && <DelButton employee={employee} isLoading={isLoading} setIsLoading={() => {}} />} */}
-        {/* {!canDelete && canUnApply && (
+      {/* <Space size="small">
+        {canEdit && <EditButton employee={employee} />}
+        {canDelete && <DelButton employee={employee} isLoading={isLoading} setIsLoading={() => {}} />}
+        {!canDelete && canUnApply && (
           <UnApplyButton employee={employee} isLoading={isLoading} setIsLoading={() => {}} />
         )}
         {canApply && (
           <ApplyButton employee={employee} setCurId={setCurId} setShowApply={setShowApply} isLoading={isLoading} />
-        )} */}
-      </Space>
+        )}
+      </Space> */}
       <ApplyForModal
         id={curId}
         visible={showApply}

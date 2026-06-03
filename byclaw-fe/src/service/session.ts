@@ -32,3 +32,11 @@ export const queryRecentlySearchAsk = (payload: {
   keyword?: string;
   objectId: string;
 }) => POST<any>('/byaiService/searchAsk/queryRecentlySearchAsk', { ...payload });
+
+// 按数字员工查询会话日志
+export const querySessionByAgent = (payload: {
+  pageNum: number;
+  pageSize: number;
+  keyword?: string;
+  objectId: string;
+}) => POST<any>('/byaiService/assiman/querySessionByAgent', { ...payload });

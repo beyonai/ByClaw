@@ -1,27 +1,38 @@
 package com.iwhalecloud.byai.state.interfaces.controller.openapi;
 
 import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
+import com.iwhalecloud.byai.common.constants.superassist.SessionType;
 import com.iwhalecloud.byai.common.feign.request.manager.ResourceOperQo;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
+import com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService;
 import com.iwhalecloud.byai.manager.application.service.openapi.OpenResourceApplicationService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
 import com.iwhalecloud.byai.manager.dto.resource.SsResourceRelDetailDTO;
+import com.iwhalecloud.byai.manager.dto.resource.UploadResult;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.resource.DirAndFileQo;
 import com.iwhalecloud.byai.manager.qo.resource.ResourceQo;
 import com.iwhalecloud.byai.manager.vo.resource.DirAndFileVo;
+import com.iwhalecloud.byai.state.application.service.chat.AssistantChatApplicationService;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
 import com.iwhalecloud.byai.state.domain.resource.qo.OpenApiDigEmployeeQueryQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.OpenApiDigEmployeeSkillQo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceApplicationService;
+import io.swagger.v3.oas.annotations.Parameter;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -35,6 +46,8 @@ import java.util.List;
 @Slf4j
 public class OpenApiResourceController {
 
+    private static final Logger logger = LoggerFactory.getLogger(OpenApiResourceController.class);
+
     @Autowired
     private DatasetApplicationService datasetApplicationService;
 
@@ -43,6 +56,12 @@ public class OpenApiResourceController {
 
     @Autowired
     private OpenResourceApplicationService openResourceApplicationService;
+
+    @Autowired
+    private AssistantChatApplicationService assistantChatApplicationService;
+
+    @Autowired
+    private FilesApplicationService filesApplicationService;
 
     @PostMapping("/v1/getResourceListByPage")
     @ManageLogAnnotation(name = "会话API调用", description = "分页查询资源列表")
@@ -136,4 +155,43 @@ public class OpenApiResourceController {
         List<DirAndFileVo> dirAndFileVos = datasetApplicationService.queryDirAndFileByLevel(dirAndFileQo);
         return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"), dirAndFileVos);
     }
+
+    /**
+     * 上传文件到工作空间
+     *
+     * @param files 文件名
+     * @param sessionId 会话标识
+     * @param sessionType 会话类型
+     * @param agentId 智能体标识
+     * @return ResponseUtil
+     */
+    @PostMapping("/v1/uploadFileToWorkSpace")
+    public ResponseUtil<UploadResult> uploadFiles(
+        @Parameter(description = "要上传的文件列表", required = true) @RequestParam("files") MultipartFile[] files,
+        @Parameter(description = "会话ID，可选") @RequestParam(value = "sessionId", required = false) Long sessionId,
+        @Parameter(description = "会话类型，可选") @RequestParam(value = "sessionType", required = false,
+            defaultValue = SessionType.SUPER_AGENT) String sessionType,
+        @Parameter(description = "数字员工，可选") @RequestParam(value = "agentId", required = false) Long agentId) {
+        try {
+            UploadResult uploadResult = assistantChatApplicationService.uploadFiles(files, sessionId, sessionType,
+                agentId);
+            return ResponseUtil.success(uploadResult);
+        }
+        catch (Exception e) {
+            logger.error(e.getMessage(), e);
+            return ResponseUtil.fail(e.getMessage());
+        }
+    }
+
+    /**
+     * 工作空间文件下载
+     *
+     * @param response 响应流
+     * @param fileId 文件标识
+     */
+    @GetMapping(path = "/v1/downloadFromWorkSpace")
+    public void downloadFromWorkSpace(HttpServletResponse response, @RequestParam("fileId") Long fileId) {
+        filesApplicationService.download(response, fileId);
+    }
+
 }

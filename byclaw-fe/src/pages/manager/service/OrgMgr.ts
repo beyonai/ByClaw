@@ -22,7 +22,7 @@ export async function getOrgTree(params: any) {
 }
 
 export async function listResource(params: any) {
-  return POST('/byaiService/auth/privilegeGrant/listResource', params, {
+  return POST('/byaiService/auth/privilegeGrant/listResourceUseAuth', params, {
     responseCfg: {
       customHandle: true,
     },

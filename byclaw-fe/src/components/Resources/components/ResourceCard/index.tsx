@@ -41,6 +41,7 @@ export interface IResourceCardItem {
   canDelete?: boolean;
   canSetDefault?: boolean;
   canRestore?: boolean;
+  resourceStatus?: number | string;
   ownerType?: string;
   openSuperHelper?: string;
   tagName?: string;
@@ -57,9 +58,6 @@ type ResourceCardActionConfig = {
   deleteDisabledTip?: React.ReactNode;
   restoreDisabledTip?: React.ReactNode;
   applyDisabledTip?: React.ReactNode;
-  deleteConfirmTitle?: React.ReactNode;
-  deleteConfirmDescription?: React.ReactNode;
-  restoreConfirmTitle?: React.ReactNode;
   extraMenuItems?: MenuProps['items'];
   onApplyUse?: () => void;
   onAuditUse?: () => void;
@@ -101,6 +99,76 @@ const ResourceInfo = (props: { resource: IResourceCardItem; className?: string }
   );
 };
 
+const BuildMenuLabel = ({
+  icon,
+  text,
+  disabled,
+  disabledTip,
+  loading,
+}: {
+  icon: string;
+  text: string;
+  disabled?: boolean;
+  disabledTip?: React.ReactNode;
+  loading?: boolean;
+}) => {
+  const intl = useIntl();
+
+  const content = (
+    <div
+      className={classnames(styles.menuItem, {
+        [styles.menuItemDisabled]: disabled || loading,
+      })}
+    >
+      {loading ? <AntdIcon type="icon-a-loading" className={styles.menuItemLoading} /> : <AntdIcon type={icon} />}
+      <span>{loading ? intl.formatMessage({ id: 'common.processing' }) : text}</span>
+    </div>
+  );
+
+  if (!disabled && !loading) {
+    return content;
+  }
+
+  return <Tooltip title={disabledTip || intl.formatMessage({ id: 'common.noPermissionOperation' })}>{content}</Tooltip>;
+};
+
+const ConfirmMenuLabel = ({
+  title,
+  disabled,
+  children,
+  onConfirm,
+}: {
+  title: React.ReactNode;
+  disabled?: boolean;
+  children: React.ReactNode;
+  onConfirm: () => void;
+}) => {
+  const intl = useIntl();
+  return (
+    <Popconfirm
+      title={title}
+      okText={intl.formatMessage({ id: 'common.confirm' })}
+      cancelText={intl.formatMessage({ id: 'common.cancel' })}
+      disabled={disabled}
+      onConfirm={(event) => {
+        event?.stopPropagation();
+        onConfirm();
+      }}
+      onCancel={(event) => event?.stopPropagation()}
+    >
+      <div
+        className={styles.confirmMenuTrigger}
+        onClick={(event) => {
+          event.stopPropagation();
+          event.preventDefault();
+        }}
+      >
+        {children}
+      </div>
+    </Popconfirm>
+  );
+};
+
 const RenderContent = (props: ResourceCardProps) => {
   const { resource, onCardClick, actionConfig, avatarNode, description, headerExtra, hoverExtra, resourceType } = props;
   const { ownerType } = resource || {};
@@ -115,8 +183,6 @@ const RenderContent = (props: ResourceCardProps) => {
   } = actionConfig || {};
 
   const intl = useIntl();
-  const [settingDefault] = useState(false);
-  const defaultDisabledTip = intl.formatMessage({ id: 'common.noPermissionOperation' });
 
   const { mutate: handleRestore, isLoading: restoring } = useRequest({
     mutationFn: (params: any) => {
@@ -129,7 +195,8 @@ const RenderContent = (props: ResourceCardProps) => {
       window.dispatchEvent(new CustomEvent('resourceRestored', { detail: { resourceId: resource?.resourceId } }));
     },
     onError: () => {
-      message.error(intl.formatMessage({ id: 'common.operationFailed' }));
+      // 提示重复所以注销掉了
+      // message.error(intl.formatMessage({ id: 'common.operationFailed' }));
     },
   });
 
@@ -173,43 +240,15 @@ const RenderContent = (props: ResourceCardProps) => {
     return undefined;
   };
   const displayTopRightTag = getDisplayTopRightTag();
+  const isCancelledResource = `${resource?.resourceStatus ?? ''}` === '3';
+  const topRightTag = isCancelledResource ? intl.formatMessage({ id: 'resource.statusCancelled' }) : displayTopRightTag;
 
   const menuItems = useMemo<MenuProps['items']>(() => {
     const { canEdit, canManageAuth, canUseAuth, canApplyUse, canAuditUse, canDelete, canRestore } = resource || {};
     const items: NonNullable<MenuProps['items']> = [];
-    const buildMenuLabel = ({
-      icon,
-      text,
-      disabled,
-      disabledTip,
-      loading,
-    }: {
-      icon: string;
-      text: string;
-      disabled?: boolean;
-      disabledTip?: React.ReactNode;
-      loading?: boolean;
-    }) => {
-      const content = (
-        <div
-          className={classnames(styles.menuItem, {
-            [styles.menuItemDisabled]: disabled || loading,
-          })}
-        >
-          {loading ? <AntdIcon type="icon-a-loading" className={styles.menuItemLoading} /> : <AntdIcon type={icon} />}
-          <span>{loading ? intl.formatMessage({ id: 'common.processing' }) : text}</span>
-        </div>
-      );
-
-      if (!disabled && !loading) {
-        return content;
-      }
-
-      return <Tooltip title={disabledTip || defaultDisabledTip}>{content}</Tooltip>;
-    };
 
     // 设为默认
-    // if (canSetDefault) {
+    // if (!canSetDefault) {
     //   items.push({
     //     key: 'setDefaultAssistant',
     //     label: (
@@ -227,11 +266,11 @@ const RenderContent = (props: ResourceCardProps) => {
     //         okText={intl.formatMessage({ id: 'common.confirm' })}
     //         cancelText={intl.formatMessage({ id: 'common.cancel' })}
     //       >
-    //         {buildMenuLabel({
-    //           icon: 'icon-a-Useryonghu',
-    //           text: intl.formatMessage({ id: 'resource.setDefaultAssistant' }),
-    //           loading: settingDefault,
-    //         })}
+    //         <BuildMenuLabel
+    //           icon="icon-a-Useryonghu"
+    //           text={intl.formatMessage({ id: 'resource.setDefaultAssistant' })}
+    //           loading={settingDefault}
+    //         />
     //       </Popconfirm>
     //     ),
     //   });
@@ -241,10 +280,7 @@ const RenderContent = (props: ResourceCardProps) => {
     if (canEdit) {
       items.push({
         key: 'edit',
-        label: buildMenuLabel({
-          icon: 'icon-a-Editorbianji',
-          text: intl.formatMessage({ id: 'common.editInfo' }),
-        }),
+        label: <BuildMenuLabel icon="icon-a-Editorbianji" text={intl.formatMessage({ id: 'common.editInfo' })} />,
         onClick: () => {
           onEdit?.();
         },
@@ -255,10 +291,12 @@ const RenderContent = (props: ResourceCardProps) => {
     if (canManageAuth) {
       items.push({
         key: 'authorize',
-        label: buildMenuLabel({
-          icon: 'icon-a-Branch-onefenzhi',
-          text: intl.formatMessage({ id: 'common.manageAuthorization' }),
-        }),
+        label: (
+          <BuildMenuLabel
+            icon="icon-a-Branch-onefenzhi"
+            text={intl.formatMessage({ id: 'common.manageAuthorization' })}
+          />
+        ),
         onClick: () => {
           onAuth?.('mgrAuth');
         },
@@ -269,10 +307,12 @@ const RenderContent = (props: ResourceCardProps) => {
     if (canUseAuth) {
       items.push({
         key: 'use',
-        label: buildMenuLabel({
-          icon: 'icon-a-Peoples-tworenqun',
-          text: intl.formatMessage({ id: 'common.useAuthorization' }),
-        }),
+        label: (
+          <BuildMenuLabel
+            icon="icon-a-Peoples-tworenqun"
+            text={intl.formatMessage({ id: 'common.useAuthorization' })}
+          />
+        ),
         onClick: () => {
           onAuth?.('useAuth');
         },
@@ -281,24 +321,15 @@ const RenderContent = (props: ResourceCardProps) => {
 
     // 使用申请
     if (canApplyUse) {
-      const applyUseContent = buildMenuLabel({
-        icon: 'icon-a-Editorbianji',
-        text: intl.formatMessage({ id: 'resource.applyUse' }),
-      });
       items.push({
         key: 'applyUse',
         label: (
-          <Popconfirm
+          <ConfirmMenuLabel
             title={intl.formatMessage({ id: 'digitalEmployees.applyConfirm' })}
-            onConfirm={(e) => {
-              e?.stopPropagation();
-              onApplyUse?.();
-            }}
-            okText={intl.formatMessage({ id: 'common.confirm' })}
-            cancelText={intl.formatMessage({ id: 'common.cancel' })}
+            onConfirm={() => onApplyUse?.()}
           >
-            {applyUseContent}
-          </Popconfirm>
+            <BuildMenuLabel icon="icon-a-Editorbianji" text={intl.formatMessage({ id: 'resource.applyUse' })} />
+          </ConfirmMenuLabel>
         ),
       });
     }
@@ -307,10 +338,7 @@ const RenderContent = (props: ResourceCardProps) => {
     if (canAuditUse) {
       items.push({
         key: 'auditUse',
-        label: buildMenuLabel({
-          icon: 'icon-a-Listliebiao',
-          text: intl.formatMessage({ id: 'resource.auditUse' }),
-        }),
+        label: <BuildMenuLabel icon="icon-a-Listliebiao" text={intl.formatMessage({ id: 'resource.auditUse' })} />,
         onClick: () => {
           onAuditUse?.();
         },
@@ -319,50 +347,32 @@ const RenderContent = (props: ResourceCardProps) => {
 
     // 注销数据
     if (canDelete) {
-      const deleteContent = buildMenuLabel({
-        icon: 'icon-a-Deleteshanchu',
-        text: intl.formatMessage({ id: 'common.deleteResource' }),
-      });
       items.push({
         key: 'delete',
         label: (
-          <Popconfirm
-            title={intl.formatMessage({ id: 'common.deactivateConfirm' })}
-            onConfirm={(e) => {
-              e?.stopPropagation();
-              onDelete();
-            }}
-            okText={intl.formatMessage({ id: 'common.confirm' })}
-            cancelText={intl.formatMessage({ id: 'common.cancel' })}
-          >
-            {deleteContent}
-          </Popconfirm>
+          <ConfirmMenuLabel title={intl.formatMessage({ id: 'common.deactivateConfirm' })} onConfirm={() => onDelete()}>
+            <BuildMenuLabel icon="icon-a-Deleteshanchu" text={intl.formatMessage({ id: 'common.deleteResource' })} />
+          </ConfirmMenuLabel>
         ),
       });
     }
 
     // 恢复数据
     if (canRestore) {
-      const restoreContent = buildMenuLabel({
-        icon: 'icon-a-Returnfanhui',
-        text: intl.formatMessage({ id: 'common.restoreResource' }),
-        loading: restoring,
-      });
       items.push({
         key: 'restore',
         label: (
-          <Popconfirm
+          <ConfirmMenuLabel
             title={intl.formatMessage({ id: 'common.restoreConfirm' })}
-            onConfirm={(e) => {
-              e?.stopPropagation();
-              handleRestore({ resourceId: resource?.resourceId });
-            }}
-            okText={intl.formatMessage({ id: 'common.confirm' })}
-            cancelText={intl.formatMessage({ id: 'common.cancel' })}
             disabled={restoring}
+            onConfirm={() => handleRestore({ resourceId: resource?.resourceId })}
           >
-            {restoreContent}
-          </Popconfirm>
+            <BuildMenuLabel
+              icon="icon-a-Returnfanhui"
+              text={intl.formatMessage({ id: 'common.restoreResource' })}
+              loading={restoring}
+            />
+          </ConfirmMenuLabel>
         ),
       });
     }
@@ -387,7 +397,6 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.ownerType,
     resource?.resourceBizType,
     restoring,
-    settingDefault,
   ]);
 
   const getDefaultIcon = () => {
@@ -405,9 +414,13 @@ const RenderContent = (props: ResourceCardProps) => {
   return (
     <div
       className={classnames(styles.renderContent, 'full-width full-height', {
-        pointer: !!onCardClick,
+        pointer: !!onCardClick && !isCancelledResource,
+        [styles.cancelledContent]: isCancelledResource,
       })}
-      onClick={() => onCardClick?.()}
+      onClick={() => {
+        if (isCancelledResource) return;
+        onCardClick?.();
+      }}
     >
       <div className={classnames('ub ub-ver full-width full-height')}>
         <div className="ub gap12 full-height">
@@ -430,9 +443,9 @@ const RenderContent = (props: ResourceCardProps) => {
               >
                 {displayTitle}
               </Paragraph>
-              {displayTopRightTag ? (
-                <span className={styles.tag}>
-                  <span className={styles.tagText}>{displayTopRightTag}</span>
+              {topRightTag ? (
+                <span className={classnames(styles.tag, { [styles.cancelledTag]: isCancelledResource })}>
+                  <span className={styles.tagText}>{topRightTag}</span>
                 </span>
               ) : null}
               {headerExtra}
@@ -557,12 +570,13 @@ function ResourceCard(props: ResourceCardProps) {
   }, [resource]);
 
   const displayResource = resourceWithPermissions || resource;
+  const isCancelledResource = `${displayResource?.resourceStatus ?? ''}` === '3';
 
   return (
     <div
       key={resource.resourceId}
       className={classnames(styles.resourceCard, props.className, {
-        pointer: !!props.onCardClick,
+        pointer: !!props.onCardClick && !isCancelledResource,
       })}
       ref={resourceCardRef}
     >

@@ -9,6 +9,7 @@ import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationServ
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.qo.resource.DirAndFileQo;
 import com.iwhalecloud.byai.manager.qo.resource.ResourceQo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -100,4 +101,7 @@ public class OpenResourceApplicationService {
         return grantObjTypes;
     }
 
+    public void uploadFileToWorkSpace(DirAndFileQo dirAndFileQo) {
+
+    }
 }
