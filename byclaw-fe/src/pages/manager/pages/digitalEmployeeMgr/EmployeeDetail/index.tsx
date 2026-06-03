@@ -32,7 +32,6 @@ import styles from './index.module.less';
 import Log from './Log';
 import Manage from './Manage';
 import Operation from './Operation';
-import { DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES } from '@/pages/manager/constants/digitalResource';
 
 const PREVIEW_HOST = `${window.location.origin}${window.routerBase === '/' ? '/' : window.routerBase}`;
 
@@ -98,13 +97,13 @@ const parseDigitalEmployeeTemplates = (value) => {
   return [value];
 };
 
-const getDigitalEmployeeTemplate = (templates, fallbackTemplates, ownerType, agentType) => {
+const getDigitalEmployeeTemplate = (templates, ownerType, agentType) => {
   const effectiveOwnerType = ownerType === 'personal' ? 'personal' : 'enterprise';
   const findTemplate = (list) =>
     list.find((item) => item?.ownerType === effectiveOwnerType && item?.agentType === agentType) ||
     list.find((item) => item?.ownerType === effectiveOwnerType);
 
-  return findTemplate(templates) || findTemplate(fallbackTemplates) || {};
+  return findTemplate(templates) || {};
 };
 
 const EmployeeDetail = ({ loading }) => {
@@ -864,13 +863,9 @@ const EmployeeDetail = ({ loading }) => {
 
   const fetchDefaultTemplate = useCallback(async () => {
     const applyTemplate = (templates = []) => {
-      const templateConfig = getDigitalEmployeeTemplate(
-        templates,
-        DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES,
-        ownerType,
-        effectiveAgentType || agentType
-      );
-      const { relSkills = [], relTools = [] } = templateConfig;
+      const templateConfig = getDigitalEmployeeTemplate(templates, ownerType, effectiveAgentType || agentType);
+      const relSkills = Array.isArray(templateConfig?.relSkills) ? templateConfig.relSkills : [];
+      const relTools = Array.isArray(templateConfig?.relTools) ? templateConfig.relTools : [];
 
       if (relSkills.length > 0) {
         form.setFieldsValue({ bundledSkills: relSkills });
@@ -903,7 +898,7 @@ const EmployeeDetail = ({ loading }) => {
     };
 
     try {
-      const res = await getDcSystemConfig({ paramCode: 'TEMPLATE_DIGITAL_EMPLOYEE1' });
+      const res = await getDcSystemConfig({ paramCode: 'TEMPLATE_DIGITAL_EMPLOYEE' });
       const templates = parseDigitalEmployeeTemplates(res?.paramValue || res);
       applyTemplate(templates);
     } catch (error) {
