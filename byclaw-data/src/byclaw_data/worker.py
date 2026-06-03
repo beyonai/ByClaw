@@ -1012,6 +1012,17 @@ class DataCloudWorker(GatewayWorker):
         self._ontology_agent: Any | None = None
         self._model_config_sig: str = ""
         self._ontology_agent_lock: asyncio.Lock = asyncio.Lock()
+        logger.info(
+            "[DIAG_INIT] DataCloudWorker.__init__: model_name=%s base_url=%s api_key=%s "
+            "env_OPENAI_API_KEY=%s env_OPENAI_BASE_URL=%s env_DATACLOUD_LLM_MODEL=%s env_LOAD_MODE=%s",
+            self.model_name,
+            self.base_url,
+            "***" if self.api_key else "<EMPTY>",
+            "***" if os.environ.get("OPENAI_API_KEY") else "<EMPTY>",
+            os.environ.get("OPENAI_BASE_URL", "<EMPTY>"),
+            os.environ.get("DATACLOUD_LLM_MODEL", "<EMPTY>"),
+            os.environ.get("DATACLOUD_LLM_MODEL_LOAD_MODE", "<EMPTY>"),
+        )
 
     def _build_resume_dedup_key(
         self,
@@ -1207,6 +1218,12 @@ class DataCloudWorker(GatewayWorker):
         agent_id: str | None = None,
     ) -> Any:
         """Instantiate the datacloud-analysis compiled graph with dynamic context."""
+        logger.info(
+            "[DIAG_BUILD_GRAPH] model=%s base_url=%s api_key=%s",
+            self.model_name,
+            self.base_url,
+            "***" if self.api_key else "<EMPTY>",
+        )
         return create_agent(
             model=self.model_name,
             api_key=self.api_key,
