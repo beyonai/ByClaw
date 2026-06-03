@@ -1,0 +1,4 @@
+httpx>=0.27
+datacloud-knowledge>=0.1.0
+datacloud-data>=0.1.0
+redis>=5.0.0
