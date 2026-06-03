@@ -131,16 +131,8 @@
                     #{item}
                 </foreach>
             </if>
-            <if test="catalogDto.catalogId != null and catalogDto.catalogId != ''">
-                AND EXISTS (
-                SELECT 1
-                FROM ss_resource_catalog target_sc
-                WHERE target_sc.catalog_id = #{catalogDto.catalogId}
-                AND (
-                b.catalog_id = target_sc.catalog_id
-                OR b.catalog_path LIKE CONCAT(target_sc.catalog_path, '.%')
-                )
-                )
+            <if test="catalogDto.catalogId != null">
+                and a.catalog_id = #{catalogDto.catalogId}
             </if>
             <if test="catalogDto.keyword != null and catalogDto.keyword != ''">
                 and a.resource_name like concat('%', concat(#{catalogDto.keyword},'%'))
