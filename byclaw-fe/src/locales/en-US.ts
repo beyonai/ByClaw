@@ -68,6 +68,7 @@ export default {
   'common.upload': 'Upload',
   'common.import': 'Import',
   'common.localFile': 'Local File',
+  'common.remoteComputer': 'Remote Computer',
   'common.curlImport': 'Curl Import',
   'common.pasteCurlCommand': 'Please paste Curl command',
   'common.curlImportHint':

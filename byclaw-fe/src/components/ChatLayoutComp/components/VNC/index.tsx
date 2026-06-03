@@ -1,11 +1,14 @@
 import React from 'react';
 import { Button } from 'antd';
+import { useIntl } from '@umijs/max';
 import { isPlainObject } from 'lodash';
+import DesktopOutlined from '@ant-design/icons/DesktopOutlined';
 import useAppStore from '@/models/common/useAppStore';
 import useGlobal from '@/hooks/useGlobal';
 import { getVNCUrl } from '@/utils/chat';
 
 export default function VNC() {
+  const intl = useIntl();
   const { sandboxesInfo, setSiderCollapsed } = useAppStore();
 
   const { EventEmitter, sessionId } = useGlobal();
@@ -50,8 +53,9 @@ export default function VNC() {
           url,
         });
       }}
+      title={intl.formatMessage({ id: 'common.remoteComputer' })}
     >
-      VNC
+      <DesktopOutlined />
     </Button>
   );
 }
