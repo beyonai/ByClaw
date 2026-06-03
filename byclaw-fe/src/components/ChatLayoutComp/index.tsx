@@ -12,6 +12,7 @@ import ChatLayoutCompContext from './hooks/useContext';
 
 import { agentTypeMap } from '@/constants/agent';
 import { Platform } from '@/layout/components/provider/global';
+// import useAppStore from '@/models/common/useAppStore';
 
 import useChat, { ISendProps } from '@/hooks/useChat';
 import type { IAgentType } from '@/typescript/agent';
@@ -86,6 +87,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
 
   const { EventEmitter, setAgentId, platform, agentId } = useGlobal();
   const isPC = platform === Platform.pc;
+  // const { sandboxesInfo, setSiderCollapsed } = useAppStore();
 
   /** 对话的额外参数 */
   const tempParamsRef = useRef(sendExtraParams);
@@ -131,6 +133,8 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   }, []);
 
   const onBeforeSend = useCallback((param = {}) => {
+    // getSandboxesInfoUrl();
+
     return EventEmitter.invoke('beyond-chat-beforesend-hook', param);
   }, []);
 
