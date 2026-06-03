@@ -22,7 +22,7 @@ export function buildResourceCommonColumns({
         const iconSrc = getIconSrc ? getIconSrc(record, activeTab) : '';
         return (
           <div style={{ display: 'flex', alignItems: 'center', columnGap: 4, minWidth: 0 }}>
-            {iconSrc ? <img src={iconSrc} style={{ width: 20, height: 20, marginRight: 4 }} alt="logo" /> : null}
+            {/* {iconSrc ? <img src={iconSrc} style={{ width: 20, height: 20, marginRight: 4 }} alt="logo" /> : null} */}
             <span
               style={{
                 overflow: 'hidden',

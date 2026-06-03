@@ -324,13 +324,13 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
 
           return (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-              <img
+              {/* <img
                 width={24}
                 height={24}
                 style={{ borderRadius: assetType === 'employee' ? '24px' : 4, flexShrink: 0 }}
                 src={iconSrc}
                 alt="logo"
-              />
+              /> */}
               <Ellipsis tooltip lines={1}>
                 {text || '-'}
               </Ellipsis>
@@ -349,27 +349,27 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
           </Ellipsis>
         ),
       },
-      {
-        title: intl.formatMessage({ id: 'businessField.assets.table.tags' }),
-        dataIndex: 'tags',
-        key: 'tags',
-        width: 120,
-        render: (tags) => {
-          if (!tags || !Array.isArray(tags) || tags.length === 0) return '-';
-          return (
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <Ellipsis tooltip lines={1}>
-                {tags.slice(0, 2).map((tag, index) => (
-                  <Tag key={tag || index} style={{ marginBottom: 4 }}>
-                    {tag}
-                  </Tag>
-                ))}
-                {tags.length > 2 && <Tag>+{tags.length - 2}</Tag>}
-              </Ellipsis>
-            </div>
-          );
-        },
-      },
+      // {
+      //   title: intl.formatMessage({ id: 'businessField.assets.table.tags' }),
+      //   dataIndex: 'tags',
+      //   key: 'tags',
+      //   width: 120,
+      //   render: (tags) => {
+      //     if (!tags || !Array.isArray(tags) || tags.length === 0) return '-';
+      //     return (
+      //       <div style={{ display: 'flex', alignItems: 'center' }}>
+      //         <Ellipsis tooltip lines={1}>
+      //           {tags.slice(0, 2).map((tag, index) => (
+      //             <Tag key={tag || index} style={{ marginBottom: 4 }}>
+      //               {tag}
+      //             </Tag>
+      //           ))}
+      //           {tags.length > 2 && <Tag>+{tags.length - 2}</Tag>}
+      //         </Ellipsis>
+      //       </div>
+      //     );
+      //   },
+      // },
       {
         title: intl.formatMessage({ id: 'businessField.assets.table.domain' }),
         dataIndex: 'domain',
@@ -426,17 +426,17 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
           );
         },
       },
-      {
-        title: intl.formatMessage({ id: 'businessField.assets.table.organization' }),
-        dataIndex: 'organization',
-        key: 'organization',
-        width: 120,
-        render: (text) => (
-          <Ellipsis tooltip lines={1}>
-            {text || '-'}
-          </Ellipsis>
-        ),
-      },
+      // {
+      //   title: intl.formatMessage({ id: 'businessField.assets.table.organization' }),
+      //   dataIndex: 'organization',
+      //   key: 'organization',
+      //   width: 120,
+      //   render: (text) => (
+      //     <Ellipsis tooltip lines={1}>
+      //       {text || '-'}
+      //     </Ellipsis>
+      //   ),
+      // },
       {
         title: intl.formatMessage({ id: 'businessField.assets.table.releaseTime' }),
         dataIndex: 'releaseTime',
@@ -448,17 +448,17 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
           return dayjs(text).format('YYYY-MM-DD');
         },
       },
-      {
-        title: intl.formatMessage({ id: 'businessField.assets.table.latestListTime' }),
-        dataIndex: 'latestListTime',
-        key: 'latestListTime',
-        width: 115,
-        sorter: true,
-        render: (text) => {
-          if (!text) return '-';
-          return dayjs(text).format('YYYY-MM-DD');
-        },
-      },
+      // {
+      //   title: intl.formatMessage({ id: 'businessField.assets.table.latestListTime' }),
+      //   dataIndex: 'latestListTime',
+      //   key: 'latestListTime',
+      //   width: 115,
+      //   sorter: true,
+      //   render: (text) => {
+      //     if (!text) return '-';
+      //     return dayjs(text).format('YYYY-MM-DD');
+      //   },
+      // },
       // {
       //   title: intl.formatMessage({ id: 'businessField.assets.table.action' }),
       //   key: 'action',
