@@ -126,6 +126,12 @@ public class ChatProcessContext {
     public boolean sendByFrameworkMsgOnly = false;
 
     /**
+     * 是否继续当前正在运行的 trace。
+     * 命中时本次输入只转发给 worker，不作为新的用户消息广播或入库。
+     */
+    public boolean continueRunningTrace = false;
+
+    /**
      * 是否异步完成响应。WebSocket 场景只负责发送 Gateway 消息，后续 Redis 流由事件路由服务推送和落库。
      */
     public boolean asyncResponse = false;

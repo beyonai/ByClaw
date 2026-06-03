@@ -25,10 +25,14 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.qo.resource.DigEmployeeExtQo;
+import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.common.dto.MessageStructDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.FileUploadDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.PrologueDto;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
+import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
 import com.iwhalecloud.byai.state.domain.file.service.ConversationFileStorage;
@@ -38,6 +42,7 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.template.enums.DebugModeEnum;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentTypeResolver;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -88,6 +93,9 @@ public class AssistantChatApplicationService {
 
     @Autowired
     private RunningChatSnapshotService runningChatSnapshotService;
+
+    @Autowired
+    private OutputStreamManager outputStreamManager;
 
     AssistantChatApplicationService(GatewayClient<?> gatewayClient) {
         this.gatewayClient = gatewayClient;
@@ -265,6 +273,11 @@ public class AssistantChatApplicationService {
 
         ByaiMessage byaiMessage = byaiMessageHotService.find(messageStructDto.getMessageId());
 
+        // 消息尚未入库，仅有运行中的快照
+        if (byaiMessage == null) {
+            return updateRunningSnapshotMessageStruct(messageStructDto);
+        }
+
         // 判断是更新消息结构还是更新思考过程
         if ("inferLog".equalsIgnoreCase(messageStructDto.getUpdateField())) {
             String inferLog = byaiMessage.getInferLog();
@@ -277,7 +290,106 @@ public class AssistantChatApplicationService {
 
         byaiMessageHotService.update(byaiMessage);
 
+        // 同步刷新运行中的快照与 messageContext，避免 storeMessage 用 messageContext 把改动覆盖回去
+        syncRunningStateAfterUpdate(messageStructDto);
+
         return byaiMessage;
+    }
+
+    /**
+     * 更新运行中的会话快照中的消息结构 / 思考过程，并同步更新 messageContext，使后续 storeMessage 持久化时使用更新后的内容。
+     *
+     * @param messageStructDto 消息更新入参
+     * @return 与数据库更新一致的消息实体（仅设置 messageId / messageStruct / inferLog）
+     */
+    private ByaiMessage updateRunningSnapshotMessageStruct(MessageStructDto messageStructDto) {
+        RunningChatSnapshotResponse snapshot = locateSnapshot(messageStructDto);
+        if (snapshot == null) {
+            return null;
+        }
+
+        if ("inferLog".equalsIgnoreCase(messageStructDto.getUpdateField())) {
+            snapshot.setInferLog(this.replaceContent(snapshot.getInferLog(), messageStructDto));
+        }
+        else {
+            snapshot.setMessageStruct(this.replaceContent(snapshot.getMessageStruct(), messageStructDto));
+        }
+
+        runningChatSnapshotService.updateSnapshot(snapshot);
+        replaceMessageContextContent(snapshot.getSessionId(), messageStructDto);
+
+        ByaiMessage byaiMessage = new ByaiMessage();
+        byaiMessage.setMessageId(snapshot.getMessageId());
+        byaiMessage.setMessageStruct(snapshot.getMessageStruct());
+        byaiMessage.setInferLog(snapshot.getInferLog());
+        return byaiMessage;
+    }
+
+    /**
+     * 命中 DB 时，仍需同步更新运行中的快照与 messageContext：消息可能仍处于追加（APPEND）状态， 后续 storeMessage 会基于 messageContext
+     * 重写 messageStruct / inferLog，否则刚刚的改动会被覆盖。
+     */
+    private void syncRunningStateAfterUpdate(MessageStructDto messageStructDto) {
+        RunningChatSnapshotResponse snapshot = locateSnapshot(messageStructDto);
+        if (snapshot == null) {
+            return;
+        }
+        if ("inferLog".equalsIgnoreCase(messageStructDto.getUpdateField())) {
+            snapshot.setInferLog(this.replaceContent(snapshot.getInferLog(), messageStructDto));
+        }
+        else {
+            snapshot.setMessageStruct(this.replaceContent(snapshot.getMessageStruct(), messageStructDto));
+        }
+        runningChatSnapshotService.updateSnapshot(snapshot);
+        replaceMessageContextContent(snapshot.getSessionId(), messageStructDto);
+    }
+
+    /**
+     * 优先用 sessionId + traceId / messageId 精确命中快照，拿不到时退回到按 messageId 全量扫描。
+     */
+    private RunningChatSnapshotResponse locateSnapshot(MessageStructDto messageStructDto) {
+        if (messageStructDto.getSessionId() != null) {
+            RunningChatSnapshotResponse snapshot = runningChatSnapshotService.get(messageStructDto.getSessionId(),
+                messageStructDto.getTraceId(), messageStructDto.getMessageId());
+            if (snapshot != null) {
+                return snapshot;
+            }
+        }
+        return runningChatSnapshotService.findByMessageId(messageStructDto.getMessageId());
+    }
+
+    /**
+     * 在运行中的 ChatProcessContext.messageContext 中，按 id 替换 answerMessageList 或 reasonMessageList 内的 content， 以保证最终
+     * storeMessage → resolveMemory 持久化时与快照保持一致。
+     */
+    private void replaceMessageContextContent(Long sessionId, MessageStructDto messageStructDto) {
+        if (sessionId == null) {
+            return;
+        }
+        ChatProcessContext ctx = outputStreamManager.getContext(String.valueOf(sessionId));
+        if (ctx == null || ctx.messageContext == null) {
+            return;
+        }
+        List<AnswerDelta> target = "inferLog".equalsIgnoreCase(messageStructDto.getUpdateField())
+            ? ctx.messageContext.getReasonMessageList()
+            : ctx.messageContext.getAnswerMessageList();
+        if (target == null || target.isEmpty()) {
+            return;
+        }
+        for (AnswerDelta delta : target) {
+            if (delta == null || !StringUtil.isNotEmpty(delta.getId())
+                || !delta.getId().equals(messageStructDto.getId())) {
+                continue;
+            }
+            if (CollectionUtils.isEmpty(delta.getChoices())) {
+                continue;
+            }
+            delta.getChoices().forEach(choice -> {
+                if (choice != null && choice.getDelta() != null) {
+                    choice.getDelta().setContent(messageStructDto.getContent());
+                }
+            });
+        }
     }
 
     /**

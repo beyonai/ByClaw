@@ -451,6 +451,7 @@ function useChat(props: IProps) {
       sseMsg: {
         ...sseMsg,
         id: context.clientRequestId,
+        clientRequestId: context.clientRequestId,
         sessionExts: rawMessage.sessionExts,
         data: typeof rawMessage.data === 'string' ? rawMessage.data : JSON.stringify(rawMessage.data || {}),
       },
@@ -662,10 +663,19 @@ function useChat(props: IProps) {
 
     const { queryQuestion, payload = {}, msgOpt = {} } = sendProps;
     const isResumeChat = get(payload, 'actionType') === 'RESUME';
-    // 追问 RESUME：当前列表末尾常为「助手仍在回答」，需允许继续走与底部输入框一致的发送流程
-    if (!isResumeChat) {
-      if (isSessionRunning) {
+    let isContinuingRunningTrace = false;
+    if (isSessionRunning) {
+      if (!isResumeChat) {
         return false;
+      }
+      const runningInfo = chatSessionRuntimeManager.getBySession(sessionId);
+      const traceId = payload.traceId ?? runningInfo?.traceId;
+      if (!traceId) {
+        return false;
+      }
+      isContinuingRunningTrace = true;
+      if (!payload.traceId) {
+        set(payload, 'traceId', traceId);
       }
     }
 
@@ -761,20 +771,22 @@ function useChat(props: IProps) {
 
     const clientRequestId = newAnswerMsg.msgId;
 
-    pendingChatStreamRef.current.set(clientRequestId, {
-      clientRequestId,
-      queryMsg: newQueryMsg,
-      answerMsg: newAnswerMsg,
-      onlyQuery,
-    });
+    if (!isContinuingRunningTrace) {
+      pendingChatStreamRef.current.set(clientRequestId, {
+        clientRequestId,
+        queryMsg: newQueryMsg,
+        answerMsg: newAnswerMsg,
+        onlyQuery,
+      });
 
-    chatSessionRuntimeManager.register({
-      clientRequestId,
-      answerClientMsgId: clientRequestId,
-      sessionId: newAnswerMsg.sessionId,
-      restored: false,
-      cancel: () => newAnswerMsg.cancelSSE?.(),
-    });
+      chatSessionRuntimeManager.register({
+        clientRequestId,
+        answerClientMsgId: clientRequestId,
+        sessionId: newAnswerMsg.sessionId,
+        restored: false,
+        cancel: () => newAnswerMsg.cancelSSE?.(),
+      });
+    }
 
     // 发送请求并处理SSE响应
     const sendResult = send(_queryQuestion, {
@@ -788,9 +800,15 @@ function useChat(props: IProps) {
       agentType: _agentType,
     });
     const cancel = () => {
-      pendingChatStreamRef.current.delete(clientRequestId);
+      if (!isContinuingRunningTrace) {
+        pendingChatStreamRef.current.delete(clientRequestId);
+      }
       sendResult.cancel();
     };
+
+    if (isContinuingRunningTrace) {
+      return { cancel };
+    }
 
     // 添加取消功能到回答消息
     newAnswerMsg.cancelSSE = debounce(() => {

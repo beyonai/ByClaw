@@ -183,6 +183,12 @@ function useHandler(props: IProps) {
 
       if (sseRes.traceId) {
         newAnswerMsg.traceId = sseRes.traceId;
+        if (sseMsg.clientRequestId) {
+          const runtimeInfo = chatSessionRuntimeManager.getByClientRequest(sseMsg.clientRequestId);
+          if (runtimeInfo) {
+            runtimeInfo.traceId = sseRes.traceId;
+          }
+        }
       }
 
       if (!sseRes.message) return onionsProps;

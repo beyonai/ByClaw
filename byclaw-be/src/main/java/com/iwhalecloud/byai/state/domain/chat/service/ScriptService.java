@@ -29,7 +29,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
-import com.iwhaleai.byai.framework.core.protocol.ActionType;
 import com.iwhalecloud.byai.manager.entity.men.MenTask;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.common.constants.Constants;
@@ -45,6 +44,7 @@ import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
 import com.iwhalecloud.byai.state.domain.chat.model.ChatResponse;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.men.enums.SystemCodeEnum;
@@ -116,6 +116,9 @@ public class ScriptService extends AbstractChatProcess {
     @Autowired
     private SessionStreamManager sessionStreamManager;
 
+    @Autowired
+    private RunningOutputStreamRegistry runningOutputStreamRegistry;
+
     /**
      * 参数准备：生成消息ID、组装请求参数、初始化上下文等。
      */
@@ -132,16 +135,19 @@ public class ScriptService extends AbstractChatProcess {
             ctx.transport = ChatTransport.WEBSOCKET;
         }
 
+        resolveRunningTraceState(ctx);
+
         if (StringUtils.isNotEmpty(ctx.assistantChatDto.getTraceId()) && ctx.assistantChatDto.getLlmMessageId() == null) {
             ctx.assistantChatDto.setLlmMessageId(getModelAnswerMessageIdByTraceId(ctx.assistantChatDto.getTraceId()));
         }
 
-        if (ActionType.RESUME.equalsIgnoreCase(ctx.assistantChatDto.getActionType()) && StringUtils.isEmpty(ctx.assistantChatDto.getTraceId())) {
-            throw new BdpRuntimeException("[" + ActionType.RESUME + "] traceId is required!");
-        }
-
         // 判断是否更新任务
-        if (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
+        if (ctx.continueRunningTrace) {
+            ctx.taskId = Optional.ofNullable(ctx.assistantChatDto).map(AssistantChatDto::getExtParams)
+                .filter(params -> params.containsKey("beyondTaskId"))
+                .map(params -> MapParamUtil.getLongValue(params, "beyondTaskId")).orElseGet(sequenceService::nextVal);
+        }
+        else if (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.RERUN.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.FEEDBACK.equals(ctx.assistantChatDto.getTaskOperateType())) {
             // 获取到生成任务的问题
@@ -171,7 +177,10 @@ public class ScriptService extends AbstractChatProcess {
             // ctx.taskId = sequenceService.nextVal();
         }
         // 只有Netty中才会提前生成消息
-        if (TaskOperateTypeEnum.EXECUTE.equals(ctx.assistantChatDto.getTaskOperateType())) {
+        if (ctx.continueRunningTrace) {
+            // 已在 resolveRunningTraceState 中复用当前 running trace 的模型回答消息 ID。
+        }
+        else if (TaskOperateTypeEnum.EXECUTE.equals(ctx.assistantChatDto.getTaskOperateType())) {
             ctx.modelAnswerMessageId = sequenceService.nextVal();
         }
         else {
@@ -183,11 +192,13 @@ public class ScriptService extends AbstractChatProcess {
                 ctx.modelAnswerMessageId = sequenceService.nextVal();
             }
         }
-        ctx.traceId = getTraceId(ctx.userMessageId, ctx.modelAnswerMessageId);
+        if (!ctx.continueRunningTrace) {
+            ctx.traceId = getTraceId(ctx.userMessageId, ctx.modelAnswerMessageId);
+        }
 
-        if (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
+        if (!ctx.continueRunningTrace && (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.RERUN.equals(ctx.assistantChatDto.getTaskOperateType())
-            || TaskOperateTypeEnum.FEEDBACK.equals(ctx.assistantChatDto.getTaskOperateType())) {
+            || TaskOperateTypeEnum.FEEDBACK.equals(ctx.assistantChatDto.getTaskOperateType()))) {
             ByaiMessageHotDtoDto askMsg = new ByaiMessageHotDtoDto();
             BeanUtils.copyProperties(ctx.taskHistoryMessages.get(0), askMsg);
             ctx.setAskMsg(askMsg);
@@ -198,22 +209,56 @@ public class ScriptService extends AbstractChatProcess {
         }
 
         // 多端广播：将用户发送的消息推送到用户的其他设备
-        broadcastUserMessage(ctx);
+        if (!ctx.continueRunningTrace) {
+            broadcastUserMessage(ctx);
+        }
 
         // 初始化一条前端的信息
-        initEvent(ctx);
+        if (!ctx.continueRunningTrace) {
+            initEvent(ctx);
+        }
 
         // 多端广播：将 initialization 事件推送到用户的其他设备
-        broadcastInitEvent(ctx);
+        if (!ctx.continueRunningTrace) {
+            broadcastInitEvent(ctx);
+        }
 
         // 将用户聊天内容存储到message表中
-        saveUserContent(ctx);
+        if (!ctx.continueRunningTrace) {
+            saveUserContent(ctx);
+        }
 
         ctx.messageContext = new MessageContext(AgentTypeEnum.getNameCode(ctx.assistantChatDto.getAgentType()),
             ctx.modelAnswerMessageId, ctx.taskId);
 
         // 请求python参数
         ctx.params = paramService.getParams(ctx);
+    }
+
+    private void resolveRunningTraceState(ChatProcessContext ctx) {
+        if (ctx == null || ctx.sessionId == null) {
+            return;
+        }
+
+        RunningChatInfo runningInfo = runningOutputStreamRegistry.getRunning(ctx.sessionId);
+        if (!Boolean.TRUE.equals(runningInfo.getRunning())) {
+            return;
+        }
+
+        String requestTraceId = ctx.assistantChatDto.getTraceId();
+        String runningTraceId = runningInfo.getTraceId();
+        if (StringUtils.isBlank(requestTraceId) || !requestTraceId.equals(runningTraceId)) {
+            throw new BdpRuntimeException("当前会话仍在运行中，请等待完成或停止后再发送");
+        }
+
+        ctx.sendByFrameworkMsgOnly = true;
+        ctx.continueRunningTrace = true;
+        ctx.userMessageId = getUserMessageIdByTraceId(runningTraceId);
+        ctx.modelAnswerMessageId = runningInfo.getModelAnswerMessageId();
+        if (ctx.modelAnswerMessageId == null) {
+            ctx.modelAnswerMessageId = getModelAnswerMessageIdByTraceId(runningTraceId);
+        }
+        ctx.traceId = runningTraceId;
     }
 
     private String getTraceId(Long userMessageId, Long modelAnswerMessageId) {

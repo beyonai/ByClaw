@@ -94,6 +94,92 @@ public class RunningChatSnapshotService {
         deleteBySession(sessionId, modelAnswerMessageId);
     }
 
+    /**
+     * 根据 messageId 在所有运行中的快照里定位匹配的快照。
+     *
+     * @param messageId 消息ID（即 modelAnswerMessageId）
+     * @return 命中的快照，未命中返回 null
+     */
+    public RunningChatSnapshotResponse findByMessageId(Long messageId) {
+        if (messageId == null) {
+            return null;
+        }
+        String key = findKeyByMessageId(messageId);
+        if (key == null) {
+            return null;
+        }
+        String value = (String) redisTemplate.opsForValue().get(key);
+        if (StringUtils.isBlank(value)) {
+            return null;
+        }
+        try {
+            return JSON.parseObject(value, RunningChatSnapshotResponse.class);
+        }
+        catch (Exception e) {
+            log.warn("解析运行中会话快照失败, key: {}", key, e);
+            return null;
+        }
+    }
+
+    /**
+     * 将更新后的快照写回 Redis 并保留 TTL。 优先使用 (sessionId, traceId / modelAnswerMessageId) 直接拼 key（O(1)）； 拿不到时回退到全量扫描。
+     *
+     * @param snapshot 待写回的快照
+     * @return 是否写回成功
+     */
+    public boolean updateSnapshot(RunningChatSnapshotResponse snapshot) {
+        if (snapshot == null || snapshot.getSessionId() == null || snapshot.getModelAnswerMessageId() == null) {
+            return false;
+        }
+        String key = resolveKey(snapshot.getSessionId(), snapshot.getTraceId(), snapshot.getModelAnswerMessageId());
+        if (key == null) {
+            return false;
+        }
+        try {
+            Long ttl = redisTemplate.getExpire(key, TimeUnit.SECONDS);
+            long expire = (ttl != null && ttl > 0) ? ttl : SNAPSHOT_TTL_SECONDS;
+            redisTemplate.opsForValue().set(key, JSON.toJSONString(snapshot), expire, TimeUnit.SECONDS);
+            return true;
+        }
+        catch (Exception e) {
+            log.warn("更新运行中会话快照失败, sessionId: {}, messageId: {}", snapshot.getSessionId(),
+                snapshot.getModelAnswerMessageId(), e);
+            return false;
+        }
+    }
+
+    /**
+     * 优先按精确 key 命中，回退到按 messageId 全量扫描。
+     */
+    private String resolveKey(Long sessionId, String traceId, Long messageId) {
+        if (sessionId != null && (StringUtils.isNotBlank(traceId) || messageId != null)) {
+            String preciseKey = buildKey(sessionId, traceId, messageId);
+            Boolean exists = redisTemplate.hasKey(preciseKey);
+            if (Boolean.TRUE.equals(exists)) {
+                return preciseKey;
+            }
+        }
+        return findKeyByMessageId(messageId);
+    }
+
+    private String findKeyByMessageId(Long messageId) {
+        if (messageId == null) {
+            return null;
+        }
+        String pattern = KEY_PREFIX + "*";
+        try {
+            Set<String> keys = redisTemplate.keys(pattern);
+            if (keys == null || keys.isEmpty()) {
+                return null;
+            }
+            return keys.stream().filter(key -> isSameMessage(key, messageId)).findFirst().orElse(null);
+        }
+        catch (Exception e) {
+            log.warn("按 messageId 查询运行中会话快照失败, messageId: {}", messageId, e);
+            return null;
+        }
+    }
+
     private RunningChatSnapshotResponse buildSnapshot(ChatProcessContext ctx) {
         MessageContext messageContext = ctx.messageContext;
         RunningChatSnapshotResponse snapshot = new RunningChatSnapshotResponse();
