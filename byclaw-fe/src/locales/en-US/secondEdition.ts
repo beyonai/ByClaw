@@ -92,7 +92,8 @@ export default {
   'settings.pleaseEnterNewPassword': 'Please enter new password',
   'settings.pleaseConfirmPassword': 'Please enter confirm password',
   'settings.passwordsMustMatch': 'The two passwords do not match',
-  'settings.passwordComplexityError': 'Password must meet all complexity requirements',
+  'settings.passwordComplexityError':
+    'Password must comply with complexity rules: minimum 8 characters, containing numbers, uppercase letters, lowercase letters and special symbols.',
   'settings.initialPasswordNotAllowed':
     'The initial password is the system default. You cannot use it as the new password.',
   'settings.passwordChangedSuccess': 'Password changed successfully',

@@ -96,7 +96,7 @@ export default {
   'settings.pleaseEnterNewPassword': '请输入新密码',
   'settings.pleaseConfirmPassword': '请输入确认新密码',
   'settings.passwordsMustMatch': '两次输入的密码不一致',
-  'settings.passwordComplexityError': '密码必须满足所有复杂度要求',
+  'settings.passwordComplexityError': '密码须符合复杂度规则：包含数字+大写字母+小写字母+符号，长度至少 8 位',
   'settings.initialPasswordNotAllowed': '初始密码为系统默认，不允许使用初始密码，修改后才能提交',
   'settings.passwordChangedSuccess': '密码修改成功',
   'settings.passwordComplexityRequirement':
