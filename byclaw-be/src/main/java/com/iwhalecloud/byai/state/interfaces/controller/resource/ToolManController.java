@@ -1,17 +1,32 @@
 package com.iwhalecloud.byai.state.interfaces.controller.resource;
 
-import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import org.springframework.web.util.UriUtils;
+
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtMcpService;
 import com.iwhalecloud.byai.manager.dto.resource.CallMcpParamsDto;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto;
-import com.iwhalecloud.byai.state.domain.chat.dto.UserSpaceDto;
-import com.iwhalecloud.byai.state.domain.chat.vo.UserSpaceVo;
-import io.modelcontextprotocol.spec.McpSchema;
-import jakarta.servlet.http.HttpServletRequest;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import com.iwhalecloud.byai.common.i18n.I18nUtil;
-import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.application.service.session.ByClawFileQueryApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawPersonalAgentArchivApplicationService;
@@ -20,11 +35,8 @@ import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDownloa
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillQueryApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillUploadApplicationService;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
-import com.iwhalecloud.byai.state.domain.session.dto.ByClawFileDto;
-import com.iwhalecloud.byai.state.domain.session.dto.ByClawPersonalAgentArchiveDto;
-import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
-import com.iwhalecloud.byai.state.domain.session.qo.QryByClawFileByUserCodeQo;
-import com.iwhalecloud.byai.state.domain.session.qo.QrySkillListByUserCodeQo;
+import com.iwhalecloud.byai.state.domain.chat.dto.UserSpaceDto;
+import com.iwhalecloud.byai.state.domain.chat.vo.UserSpaceVo;
 import com.iwhalecloud.byai.state.domain.resource.dto.CurlImportRequest;
 import com.iwhalecloud.byai.state.domain.resource.dto.CurlParseResult;
 import com.iwhalecloud.byai.state.domain.resource.dto.ObjectZipImportItem;
@@ -43,25 +55,13 @@ import com.iwhalecloud.byai.state.domain.resource.qo.UpdateResourceBasicInfoQo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceApplicationService;
 import com.iwhalecloud.byai.state.domain.resource.service.ToolManService;
 import com.iwhalecloud.byai.state.domain.resource.vo.ResourceDetailVo;
+import com.iwhalecloud.byai.state.domain.session.dto.ByClawFileDto;
+import com.iwhalecloud.byai.state.domain.session.dto.ByClawPersonalAgentArchiveDto;
+import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
+import com.iwhalecloud.byai.state.domain.session.qo.QryByClawFileByUserCodeQo;
+import com.iwhalecloud.byai.state.domain.session.qo.QrySkillListByUserCodeQo;
+import io.modelcontextprotocol.spec.McpSchema;
 import io.swagger.v3.oas.annotations.Parameter;
-import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestMethod;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
-import org.springframework.web.util.UriUtils;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/tool")
@@ -207,7 +207,6 @@ public class ToolManController {
      * @date 2026-04-23 18:17:00
      */
     @PostMapping(value = "/addToolFromThird", consumes = MediaType.APPLICATION_JSON_VALUE)
-    @ManageLogAnnotation(name = "智能体接口", description = "智能体资源同步")
     public ResponseUtil<Map<String, Object>> addToolFromThird(@RequestBody String jsonContent) {
         try {
             Map<String, Object> data = toolManService.addToolFromThird(jsonContent);
@@ -805,8 +804,10 @@ public class ToolManController {
     }
 
     /**
-     * 删除用户工作空间下的单个 skill 目录。 - 数字员工：skillPath 必须落在 /.openclaw/workspace-baiying-agent-{resourceId}/skills/ 之下 -
-     * 超级助手：skillPath 必须落在 /.openclaw/workspace/skills/ 之下 - userCode 留空时退回当前登录用户
+     * 删除用户工作空间下的单个 skill 目录。
+     * - 数字员工：skillPath 必须落在 /.openclaw/workspace-baiying-agent-{resourceId}/skills/ 之下
+     * - 超级助手：skillPath 必须落在 /.openclaw/workspace/skills/ 之下
+     * - userCode 留空时退回当前登录用户
      */
     @PostMapping("/deleteSkill")
     public ResponseUtil<ByClawSkillDto> deleteSkill(@RequestBody DeleteSkillQo request) {

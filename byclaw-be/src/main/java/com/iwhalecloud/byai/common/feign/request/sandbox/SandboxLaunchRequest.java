@@ -28,6 +28,10 @@ public class SandboxLaunchRequest {
     @JsonProperty("envs")
     private Map<String, String> envs;
 
+    /** 运行时元数据，用于远端列表过滤和一致性对账。 */
+    @JsonProperty("metadata")
+    private Map<String, String> metadata;
+
     @JsonProperty("user_info")
     private Map<String, Object> userInfo;
 }

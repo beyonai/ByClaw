@@ -78,6 +78,41 @@ public class WhaleAgentSandboxRuntimeProvider implements SandboxRuntimeProvider 
     }
 
     @Override
+    public SandboxRuntimePage<SandboxRuntimeInstance> listSandboxesByMetadata(Map<String, String> metadata,
+                                                                              int pageNo,
+                                                                              int pageSize) {
+        Map<String, String> effectiveMetadata = metadata != null ? metadata : Map.of();
+        var request = SandboxRuntimeRequestFactory.buildWhaleAgentListSandboxesRequest(
+            Math.max(1, pageNo), Math.max(1, pageSize), effectiveMetadata);
+        KnowledgeResponse<WhaleAgentSandboxPageResult> response = withUserCode(
+            effectiveMetadata.get("userCode"), () -> feignWhaleAgentService.listSandboxes(request));
+        validateOperationResponse(response, "WhaleAgent sandbox list failed");
+        WhaleAgentSandboxPageResult pageResult = response.getResultObject();
+        List<SandboxRuntimeInstance> instances = pageResult == null || pageResult.getItems() == null
+            ? List.of()
+            : pageResult.getItems().stream()
+                .filter(detail -> detail != null && StringUtils.isNotBlank(detail.getId()))
+                .map(detail -> SandboxRuntimeInstance.builder()
+                    .sandboxId(detail.getId())
+                    .createdAt(detail.getCreatedAt())
+                    .expiresAt(detail.getExpiresAt())
+                    .state(detail.getStatus() != null ? detail.getStatus().getState() : null)
+                    .reusable(SandboxRuntimeRequestFactory.isReusableSandboxState(detail.getStatus()))
+                    .metadata(detail.getMetadata())
+                    .build())
+                .toList();
+        boolean hasNext = pageResult != null
+            && pageResult.getPagination() != null
+            && Boolean.TRUE.equals(pageResult.getPagination().getHasNextPage());
+        return SandboxRuntimePage.<SandboxRuntimeInstance>builder()
+            .items(instances)
+            .pageNo(Math.max(1, pageNo))
+            .pageSize(Math.max(1, pageSize))
+            .hasNext(hasNext)
+            .build();
+    }
+
+    @Override
     public SandboxRuntimeInstance create(CreateSandboxRequest request,
                                          SandboxServiceSpec spec,
                                          String userCode,
