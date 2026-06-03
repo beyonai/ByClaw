@@ -71,7 +71,7 @@ fi
 novnc_index_src="/usr/local/share/openclaw/novnc-index.html"
 if [ -f "${novnc_index_src}" ]; then
   cp "${novnc_index_src}" "${novnc_dir}/index.html"
-  log "installed noVNC proxy index at ${novnc_dir}/index.html"
+  log "installed minimal noVNC UI at ${novnc_dir}/index.html"
 fi
 
 if pgrep -f "websockify .*${OPENCLAW_VNC_WEB_PORT}.*127.0.0.1:${OPENCLAW_VNC_PORT}" >/dev/null 2>&1; then
