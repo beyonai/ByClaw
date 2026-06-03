@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.zip.GZIPInputStream;
 
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -141,6 +142,7 @@ public class SandboxIngressTransportService {
                 }
             }
         }
+        injectFilebrowserXAuthHeader(request, requestContext, builder);
 
         String forwardedFor = appendForwardedFor(request);
         if (StringUtils.hasText(forwardedFor)) {
@@ -158,6 +160,47 @@ public class SandboxIngressTransportService {
             || HttpHeaders.ACCEPT_ENCODING.equalsIgnoreCase(headerName)
             || HttpHeaders.HOST.equalsIgnoreCase(headerName)
             || HttpHeaders.CONTENT_LENGTH.equalsIgnoreCase(headerName);
+    }
+
+    private void injectFilebrowserXAuthHeader(HttpServletRequest request,
+                                              SandboxIngressRequestContext requestContext,
+                                              Headers.Builder builder) {
+        if (!SandboxIngressInstanceType.FILEBROWSER.equals(requestContext.instanceType())) {
+            return;
+        }
+        if (StringUtils.hasText(request.getHeader("X-Auth"))) {
+            return;
+        }
+        String authToken = resolveCookieValue(request, "auth");
+        if (!StringUtils.hasText(authToken)) {
+            return;
+        }
+        builder.set("X-Auth", authToken);
+        log.debug("Injected filebrowser X-Auth header from auth cookie: instance={}, userCode={}, targetUrl={}, token={}",
+            requestContext.instance(), requestContext.userCode(), requestContext.targetUrl(), maskToken(authToken));
+    }
+
+    private String resolveCookieValue(HttpServletRequest request, String cookieName) {
+        Cookie[] cookies = request.getCookies();
+        if (cookies != null) {
+            for (Cookie cookie : cookies) {
+                if (cookieName.equals(cookie.getName()) && StringUtils.hasText(cookie.getValue())) {
+                    return cookie.getValue().trim();
+                }
+            }
+        }
+        String cookieHeader = request.getHeader(HttpHeaders.COOKIE);
+        if (!StringUtils.hasText(cookieHeader)) {
+            return null;
+        }
+        String[] parts = cookieHeader.split(";");
+        for (String part : parts) {
+            String[] pair = part.trim().split("=", 2);
+            if (pair.length == 2 && cookieName.equals(pair[0]) && StringUtils.hasText(pair[1])) {
+                return pair[1].trim();
+            }
+        }
+        return null;
     }
 
     private void copyResponseHeaders(Response proxyResponse, HttpServletResponse response) {
@@ -211,5 +254,16 @@ public class SandboxIngressTransportService {
 
     private boolean requiresRequestBody(String method) {
         return !("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method));
+    }
+
+    private String maskToken(String token) {
+        if (!StringUtils.hasText(token)) {
+            return "<empty>";
+        }
+        String normalized = token.trim();
+        if (normalized.length() <= 8) {
+            return normalized;
+        }
+        return normalized.substring(0, 4) + "..." + normalized.substring(normalized.length() - 4);
     }
 }
