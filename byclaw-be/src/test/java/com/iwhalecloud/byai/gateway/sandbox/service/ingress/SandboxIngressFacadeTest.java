@@ -108,6 +108,97 @@ class SandboxIngressFacadeTest {
     }
 
     @Test
+    void forward_filebrowserDeleteWithoutBody_forwardsWithoutRequestBody() throws Exception {
+        try (TestHttpServer server = new TestHttpServer()) {
+            SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");
+            bindCurrentUser("alice");
+
+            MockHttpServletRequest request = new MockHttpServletRequest("DELETE",
+                "/filebrowser/api/resources/.openclaw/openclaw.json.clobbered");
+            request.setScheme("http");
+            request.setServerName("gateway.example.test");
+            request.setRemoteAddr("127.0.0.1");
+
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            facade.forward("filebrowser", "/api/resources/.openclaw/openclaw.json.clobbered", request, response);
+
+            assertThat(response.getStatus()).isEqualTo(200);
+            assertThat(server.lastMethod()).isEqualTo("DELETE");
+            assertThat(server.lastPath()).isEqualTo(
+                "/v1/sandboxes/sb-1/proxy/8081/filebrowser/api/resources/.openclaw/openclaw.json.clobbered");
+            assertThat(server.lastBody()).isEmpty();
+            assertThat(server.lastHeader("Transfer-Encoding")).isNull();
+        }
+    }
+
+    @Test
+    void forward_filebrowserOptionsWithoutBody_forwardsWithoutRequestBody() throws Exception {
+        try (TestHttpServer server = new TestHttpServer()) {
+            SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");
+            bindCurrentUser("alice");
+
+            MockHttpServletRequest request = new MockHttpServletRequest("OPTIONS",
+                "/filebrowser/api/resources/");
+            request.setScheme("http");
+            request.setServerName("gateway.example.test");
+            request.setRemoteAddr("127.0.0.1");
+
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            facade.forward("filebrowser", "/api/resources/", request, response);
+
+            assertThat(response.getStatus()).isEqualTo(200);
+            assertThat(server.lastMethod()).isEqualTo("OPTIONS");
+            assertThat(server.lastBody()).isEmpty();
+            assertThat(server.lastHeader("Transfer-Encoding")).isNull();
+        }
+    }
+
+    @Test
+    void forward_filebrowserPostWithoutBody_forwardsEmptyRequestBody() throws Exception {
+        try (TestHttpServer server = new TestHttpServer()) {
+            SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");
+            bindCurrentUser("alice");
+
+            MockHttpServletRequest request = new MockHttpServletRequest("POST",
+                "/filebrowser/api/resources/");
+            request.setScheme("http");
+            request.setServerName("gateway.example.test");
+            request.setRemoteAddr("127.0.0.1");
+
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            facade.forward("filebrowser", "/api/resources/", request, response);
+
+            assertThat(response.getStatus()).isEqualTo(200);
+            assertThat(server.lastMethod()).isEqualTo("POST");
+            assertThat(server.lastBody()).isEmpty();
+            assertThat(server.lastHeader("Transfer-Encoding")).isNull();
+        }
+    }
+
+    @Test
+    void forward_filebrowserDeleteWithBody_preservesRequestBody() throws Exception {
+        try (TestHttpServer server = new TestHttpServer()) {
+            SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");
+            bindCurrentUser("alice");
+
+            MockHttpServletRequest request = new MockHttpServletRequest("DELETE",
+                "/filebrowser/api/resources/.openclaw/openclaw.json.clobbered");
+            request.setScheme("http");
+            request.setServerName("gateway.example.test");
+            request.setRemoteAddr("127.0.0.1");
+            request.setContentType("application/json");
+            request.setContent("{\"force\":true}".getBytes(StandardCharsets.UTF_8));
+
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            facade.forward("filebrowser", "/api/resources/.openclaw/openclaw.json.clobbered", request, response);
+
+            assertThat(response.getStatus()).isEqualTo(200);
+            assertThat(server.lastMethod()).isEqualTo("DELETE");
+            assertThat(new String(server.lastBody(), StandardCharsets.UTF_8)).isEqualTo("{\"force\":true}");
+        }
+    }
+
+    @Test
     void forward_filebrowserRootRequest_preservesRootTrailingSlash() throws Exception {
         try (TestHttpServer server = new TestHttpServer()) {
             SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");
@@ -272,17 +363,23 @@ class SandboxIngressFacadeTest {
     private static final class TestHttpServer implements AutoCloseable {
 
         private final HttpServer server;
+        private final AtomicReference<String> method = new AtomicReference<>();
         private final AtomicReference<String> path = new AtomicReference<>();
         private final AtomicReference<com.sun.net.httpserver.Headers> headers = new AtomicReference<>();
+        private final AtomicReference<byte[]> body = new AtomicReference<>();
 
         private TestHttpServer() throws IOException {
             server = HttpServer.create(new InetSocketAddress(0), 0);
-            server.createContext("/", new CaptureHandler(path, headers));
+            server.createContext("/", new CaptureHandler(method, path, headers, body));
             server.start();
         }
 
         private String baseUrl() {
             return "http://127.0.0.1:" + server.getAddress().getPort();
+        }
+
+        private String lastMethod() {
+            return method.get();
         }
 
         private String lastPath() {
@@ -294,6 +391,11 @@ class SandboxIngressFacadeTest {
             return lastHeaders != null ? lastHeaders.getFirst(name) : null;
         }
 
+        private byte[] lastBody() {
+            byte[] lastBody = body.get();
+            return lastBody != null ? lastBody : new byte[0];
+        }
+
         @Override
         public void close() {
             server.stop(0);
@@ -302,19 +404,27 @@ class SandboxIngressFacadeTest {
 
     private static final class CaptureHandler implements HttpHandler {
 
+        private final AtomicReference<String> method;
         private final AtomicReference<String> path;
         private final AtomicReference<com.sun.net.httpserver.Headers> headers;
+        private final AtomicReference<byte[]> requestBody;
 
-        private CaptureHandler(AtomicReference<String> path,
-                               AtomicReference<com.sun.net.httpserver.Headers> headers) {
+        private CaptureHandler(AtomicReference<String> method,
+                               AtomicReference<String> path,
+                               AtomicReference<com.sun.net.httpserver.Headers> headers,
+                               AtomicReference<byte[]> requestBody) {
+            this.method = method;
             this.path = path;
             this.headers = headers;
+            this.requestBody = requestBody;
         }
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            method.set(exchange.getRequestMethod());
             path.set(exchange.getRequestURI().toString());
             headers.set(exchange.getRequestHeaders());
+            requestBody.set(exchange.getRequestBody().readAllBytes());
             byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/plain;charset=UTF-8");
             exchange.sendResponseHeaders(200, body.length);
