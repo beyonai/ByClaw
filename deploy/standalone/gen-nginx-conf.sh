@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 #
 # Generate nginx-standalone.conf from .tpl template + .env variables.
 # Only replaces {{VAR}} placeholders — no heredoc duplication.
@@ -27,18 +27,17 @@ if [ -f "$ENV_TEMPLATE" ]; then
 fi
 
 if [ ! -f "$ENV_FILE" ]; then
-    echo "Error: $ENV_FILE not found!"
-    exit 1
+    echo "Warning: $ENV_FILE not found, using defaults."
+else
+    set -a
+    . "$ENV_FILE"
+    set +a
 fi
 
 if [ ! -f "$TEMPLATE" ]; then
     echo "Error: $TEMPLATE not found!"
     exit 1
 fi
-
-set -a
-. "$ENV_FILE"
-set +a
 
 BE_PORT="${BE_SERVER_PORT:-8086}"
 WS_PORT="${BE_WS_PORT:-8082}"
@@ -106,33 +105,52 @@ fi
 UPSTREAM_BLOCK=""
 
 if [ -n "${BE_CLUSTER:-}" ]; then
-    # Build upstream blocks for cluster deployment
-    UPSTREAM_HTTP="upstream backend_http {\n"
-    UPSTREAM_WS="upstream backend_ws {\n    ip_hash;\n"
+    # Build upstream blocks for cluster deployment (POSIX sh compatible)
+    UPSTREAM_HTTP="upstream backend_http {"
+    UPSTREAM_WS="upstream backend_ws {
+    ip_hash;"
 
-    IFS=',' read -ra HTTP_NODES <<< "$BE_CLUSTER"
-    for node in "${HTTP_NODES[@]}"; do
-        node=$(echo "$node" | xargs)
-        UPSTREAM_HTTP="${UPSTREAM_HTTP}    server ${node};\n"
+    OLD_IFS="$IFS"
+    IFS=','
+    for node in $BE_CLUSTER; do
+        node=$(echo "$node" | tr -d ' ')
+        UPSTREAM_HTTP="${UPSTREAM_HTTP}
+    server ${node};"
     done
-    UPSTREAM_HTTP="${UPSTREAM_HTTP}}"
+    IFS="$OLD_IFS"
+    UPSTREAM_HTTP="${UPSTREAM_HTTP}
+}"
 
-    if [ -n "${BE_WS_CLUSTER:-}" ]; then
-        IFS=',' read -ra WS_NODES <<< "$BE_WS_CLUSTER"
-    else
-        WS_NODES=()
-        for node in "${HTTP_NODES[@]}"; do
-            host=$(echo "$node" | cut -d: -f1 | xargs)
-            WS_NODES+=("${host}:${WS_PORT}")
+    WS_CLUSTER="${BE_WS_CLUSTER:-}"
+    if [ -z "$WS_CLUSTER" ]; then
+        OLD_IFS="$IFS"
+        IFS=','
+        for node in $BE_CLUSTER; do
+            host=$(echo "$node" | tr -d ' ' | cut -d: -f1)
+            ws_node="${host}:${WS_PORT}"
+            if [ -z "$WS_CLUSTER" ]; then
+                WS_CLUSTER="$ws_node"
+            else
+                WS_CLUSTER="${WS_CLUSTER},${ws_node}"
+            fi
         done
+        IFS="$OLD_IFS"
     fi
-    for node in "${WS_NODES[@]}"; do
-        node=$(echo "$node" | xargs)
-        UPSTREAM_WS="${UPSTREAM_WS}    server ${node};\n"
-    done
-    UPSTREAM_WS="${UPSTREAM_WS}}"
 
-    UPSTREAM_BLOCK=$(printf "${UPSTREAM_HTTP}\n\n${UPSTREAM_WS}")
+    OLD_IFS="$IFS"
+    IFS=','
+    for node in $WS_CLUSTER; do
+        node=$(echo "$node" | tr -d ' ')
+        UPSTREAM_WS="${UPSTREAM_WS}
+    server ${node};"
+    done
+    IFS="$OLD_IFS"
+    UPSTREAM_WS="${UPSTREAM_WS}
+}"
+
+    UPSTREAM_BLOCK="${UPSTREAM_HTTP}
+
+${UPSTREAM_WS}"
     RESOLVER_BLOCK=""
     BACKEND_VARS=""
     PROXY_HTTP="http://backend_http"
@@ -156,18 +174,31 @@ escape_sed_replacement() {
     printf '%s' "$1" | sed 's/[&|]/\\&/g'
 }
 
+# Single-line replacements via sed
 sed -e "s|{{BE_SERVER_PORT}}|$(escape_sed_replacement "$BE_PORT")|g" \
     -e "s|{{BE_WS_PORT}}|$(escape_sed_replacement "$WS_PORT")|g" \
     -e "s|{{CONTAINER_SUFFIX}}|$(escape_sed_replacement "$SUFFIX")|g" \
     -e "s|{{RESOLVER_BLOCK}}|$(escape_sed_replacement "$RESOLVER_BLOCK")|g" \
-    -e "s|{{UPSTREAM_BLOCK}}|$(escape_sed_replacement "$UPSTREAM_BLOCK")|g" \
     -e "s|{{BACKEND_VARS}}|$(escape_sed_replacement "$BACKEND_VARS")|g" \
     -e "s|{{PROXY_HTTP}}|$(escape_sed_replacement "$PROXY_HTTP")|g" \
     -e "s|{{PROXY_WS}}|$(escape_sed_replacement "$PROXY_WS")|g" \
     -e "s|{{PROXY_SANDBOXES}}|$(escape_sed_replacement "$PROXY_SANDBOXES")|g" \
     -e "s|{{SSL_CERT_PATH}}|$(escape_sed_replacement "$SSL_CERT_PATH")|g" \
     -e "s|{{SSL_KEY_PATH}}|$(escape_sed_replacement "$SSL_KEY_PATH")|g" \
-    "$TEMPLATE" > "$OUTPUT"
+    "$TEMPLATE" > "${OUTPUT}.tmp"
+
+# Multi-line replacement for UPSTREAM_BLOCK via awk
+UPSTREAM_FILE=$(mktemp)
+printf '%s' "$UPSTREAM_BLOCK" > "$UPSTREAM_FILE"
+awk -v rfile="$UPSTREAM_FILE" '{
+    if (index($0, "{{UPSTREAM_BLOCK}}")) {
+        while ((getline line < rfile) > 0) print line
+        close(rfile)
+    } else {
+        print
+    }
+}' "${OUTPUT}.tmp" > "$OUTPUT"
+rm -f "${OUTPUT}.tmp" "$UPSTREAM_FILE"
 
 echo "Generated $OUTPUT (BE_PORT=${BE_PORT}, WS_PORT=${WS_PORT}, SUFFIX=${SUFFIX}, SANDBOX_URL=${SANDBOX_URL})"
 if [ -n "${BE_CLUSTER:-}" ]; then
