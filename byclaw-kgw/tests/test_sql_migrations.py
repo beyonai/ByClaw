@@ -25,13 +25,17 @@ async def test_s1_migrations_create_expected_tables(pg_dsn: str):
                 """
                 SELECT
                     (SELECT COUNT(*) FROM information_schema.tables
-                     WHERE table_name = 'kgw_audit_log') AS audit,
+                     WHERE table_name = 'kgw_audit_log'
+                       AND table_schema = current_schema()) AS audit,
                     (SELECT COUNT(*) FROM information_schema.tables
-                     WHERE table_name = 'kgw_kb_write_history') AS history,
+                     WHERE table_name = 'kgw_kb_write_history'
+                       AND table_schema = current_schema()) AS history,
                     (SELECT COUNT(*) FROM information_schema.tables
-                     WHERE table_name = 'kgw_kb_source_lock') AS lock,
+                     WHERE table_name = 'kgw_kb_source_lock'
+                       AND table_schema = current_schema()) AS lock,
                     (SELECT COUNT(*) FROM information_schema.tables
-                     WHERE table_name = 'kgw_kb_conflict_log') AS conflict
+                     WHERE table_name = 'kgw_kb_conflict_log'
+                       AND table_schema = current_schema()) AS conflict
                 """
             )
             row = await cur.fetchone()
@@ -66,6 +70,7 @@ async def test_audit_log_columns_present(pg_dsn: str):
                 SELECT column_name
                 FROM information_schema.columns
                 WHERE table_name = 'kgw_audit_log'
+                  AND table_schema = current_schema()
                 """
             )
             cols = {row["column_name"] for row in await cur.fetchall()}
