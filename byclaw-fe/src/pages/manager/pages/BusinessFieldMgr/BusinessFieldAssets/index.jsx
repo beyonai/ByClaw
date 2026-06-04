@@ -1,14 +1,17 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Tabs, Input } from 'antd';
 import { useIntl } from '@umijs/max';
 import AntdIcon from '@/pages/manager/components/AntdIcon';
 import styles from './index.module.less';
 import BusinessFieldAssetsList from './BusinessFieldAssetsList';
+import { getDcSystemConfigListByStandType } from '@/service/auth';
+import { getVisibleMenuKeysFromConfig } from '@/constants/system';
 
 const BusinessFieldAssets = ({ selectedField }) => {
   const intl = useIntl();
   const [activeTab, setActiveTab] = useState('employee');
   const [searchKeyword, setSearchKeyword] = useState('');
+  const [visibleKeys, setVisibleKeys] = useState([]);
 
   const tabItems = React.useMemo(() => {
     const list = [
@@ -34,8 +37,27 @@ const BusinessFieldAssets = ({ selectedField }) => {
       },
     ];
 
-    return list;
+    return list.filter((item) => !['view', 'object'].includes(item.key) || visibleKeys.includes(item.key));
+  }, [intl, visibleKeys]);
+
+  useEffect(() => {
+    getDcSystemConfigListByStandType({
+      standType: 'MENU_ICON_SHOW_TAB',
+    })
+      .then((res) => {
+        const configData = res?.data || res;
+        if (Array.isArray(configData) && configData.length > 0) {
+          setVisibleKeys(getVisibleMenuKeysFromConfig(configData));
+        }
+      })
+      .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (tabItems.length && !tabItems.some((item) => item.key === activeTab)) {
+      setActiveTab(tabItems[0].key);
+    }
+  }, [activeTab, tabItems]);
 
   return (
     <div className={styles.container}>

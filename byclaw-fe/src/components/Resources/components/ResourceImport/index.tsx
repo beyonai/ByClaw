@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { CloseOutlined, DownloadOutlined, LoadingOutlined } from '@ant-design/icons';
 import { Modal, Upload, Tabs, Button, message, Form, TreeSelect, Alert, Table } from 'antd';
 import { useIntl } from '@umijs/max';
@@ -56,6 +56,7 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   const [currentStep, setCurrentStep] = useState('import'); // 'import' or 'curlConfig'
   const [importResult, setImportResult] = useState<ResourceImportResult | null>(null);
   const [activeDiffItem, setActiveDiffItem] = useState<ResourceImportItem | null>(null);
+  const invalidFileMessageShownRef = useRef(false);
 
   const accept = resourceType === 'VIEW' || resourceType === 'OBJECT' ? '.zip' : '.json';
   const templateConfig = resourceImportTemplateMap[resourceType];
@@ -122,6 +123,59 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
 
   const removeLocalFile = (fileIndex: number) => {
     setLocalFiles((prevFiles) => prevFiles.filter((_, index) => index !== fileIndex));
+  };
+
+  const supportedFileTypesText = intl.formatMessage({ id: 'common.supportedFileTypes' });
+
+  const showUnsupportedFileTypeMessage = () => {
+    if (invalidFileMessageShownRef.current) {
+      return;
+    }
+
+    invalidFileMessageShownRef.current = true;
+    message.error(`${supportedFileTypesText}${accept.slice(1)}`);
+    setTimeout(() => {
+      invalidFileMessageShownRef.current = false;
+    }, 300);
+  };
+
+  const isAcceptedFile = (file: File) => {
+    const fileName = file.name || '';
+    const fileExtension = fileName.includes('.') ? `.${fileName.split('.').pop()?.toLowerCase()}` : '';
+    const acceptedTypes = accept
+      .split(',')
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
+
+    return acceptedTypes.includes(fileExtension);
+  };
+
+  const addLocalFiles = (fileList: File[]) => {
+    const acceptedFiles = fileList.filter(isAcceptedFile);
+
+    if (acceptedFiles.length !== fileList.length) {
+      showUnsupportedFileTypeMessage();
+    }
+
+    if (!acceptedFiles.length) {
+      return;
+    }
+
+    setLocalFiles((prevFiles) => {
+      const mergedFiles = [...prevFiles];
+      acceptedFiles.forEach((nextFile) => {
+        const duplicated = mergedFiles.some(
+          (prevFile) =>
+            prevFile.name === nextFile.name &&
+            prevFile.size === nextFile.size &&
+            prevFile.lastModified === nextFile.lastModified
+        );
+        if (!duplicated) {
+          mergedFiles.push(nextFile);
+        }
+      });
+      return mergedFiles;
+    });
   };
 
   const isZipSummaryMode =
@@ -229,7 +283,6 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
 
   const finishText = intl.formatMessage({ id: 'resource.import.finish' });
   const confirmText = intl.formatMessage({ id: 'knowledgeCenter.import.confirm' });
-  const supportedFileTypesText = intl.formatMessage({ id: 'common.supportedFileTypes' });
   const uploadHintText = importLoading
     ? intl.formatMessage({ id: 'knowledgeCenter.import.importing' })
     : `${intl.formatMessage({ id: 'knowledgeCenter.import.dragHint' })}，${supportedFileTypesText}${accept.slice(1)}`;
@@ -455,23 +508,20 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
                         if (importLoading) {
                           return false;
                         }
-                        setLocalFiles((prevFiles) => {
-                          const nextFiles = fileList as File[];
-                          const mergedFiles = [...prevFiles];
-                          nextFiles.forEach((nextFile) => {
-                            const duplicated = mergedFiles.some(
-                              (prevFile) =>
-                                prevFile.name === nextFile.name &&
-                                prevFile.size === nextFile.size &&
-                                prevFile.lastModified === nextFile.lastModified
-                            );
-                            if (!duplicated) {
-                              mergedFiles.push(nextFile);
-                            }
-                          });
-                          return mergedFiles;
-                        });
+                        if ((file as any).uid === (fileList[0] as any)?.uid) {
+                          addLocalFiles(fileList as File[]);
+                        }
                         return false;
+                      }}
+                      onDrop={(event) => {
+                        if (importLoading) {
+                          return;
+                        }
+
+                        const droppedFiles = Array.from(event.dataTransfer?.files || []);
+                        if (droppedFiles.some((file) => !isAcceptedFile(file))) {
+                          showUnsupportedFileTypeMessage();
+                        }
                       }}
                     >
                       <p>

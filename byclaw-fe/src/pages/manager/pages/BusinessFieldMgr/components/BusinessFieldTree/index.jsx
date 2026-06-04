@@ -129,7 +129,7 @@ const BusinessFieldTree = ({
       success: (res) => {
         if (canceled) return;
         const { data } = res || {};
-        const total = data?.total ?? data?.rows?.length ?? 0;
+        const total = data?.total ?? data?.list?.length ?? 0;
         setHasRelatedAssets(total > 0);
         setAssetCheckLoading(false);
       },

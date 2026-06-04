@@ -1,6 +1,6 @@
 import { get, intersection, isEmpty } from 'lodash';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { App, Divider, DropdownProps, theme } from 'antd';
+import { App, Divider, DropdownProps, theme, Tooltip } from 'antd';
 import { useIntl, useNavigate, useSelector } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
 import { globalLogout } from '@/service/common/request';
@@ -10,6 +10,7 @@ import { isAdminVip } from '@/utils/auth';
 import useAppStore from '@/models/common/useAppStore';
 import { getDisplayUserNameInChat } from '@/utils/chat';
 import { getssoToken, getToken } from '@/utils/auth';
+import { getDcSystemConfigListByStandType } from '@/service/auth';
 import {
   fallbackMenuConfig,
   filterMenusByAdminVip,
@@ -29,6 +30,7 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
   const { ENV, devConfig } = useAppStore();
   const { token } = theme.useToken();
   const [menuConfig, setMenuConfig] = useState<any[]>(fallbackMenuConfig);
+  const [userTypeConfigList, setUserTypeConfigList] = useState<any[]>([]);
 
   useEffect(() => {
     if (!userInfo) {
@@ -48,6 +50,39 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
           setMenuConfig(fallbackMenuConfig);
         }
       });
+
+    return () => {
+      mounted = false;
+    };
+  }, [userInfo?.userId]);
+
+  useEffect(() => {
+    if (!userInfo) {
+      return;
+    }
+
+    let mounted = true;
+
+    getDcSystemConfigListByStandType({
+      standType: 'USER_TYPE',
+    })
+      .then((res: any) => {
+        if (!mounted) {
+          return;
+        }
+
+        const resData = Array.isArray(res) ? res : res?.data;
+        if (Array.isArray(resData)) {
+          setUserTypeConfigList(
+            resData.map((item) => ({
+              ...item,
+              standCode: item.standCode || item.paramValue || item.paramEnName,
+              standDisplayValue: item.standDisplayValue || item.paramName || item.paramDesc,
+            }))
+          );
+        }
+      })
+      .catch(() => {});
 
     return () => {
       mounted = false;
@@ -199,9 +234,14 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
         borderRadius: 0,
         background: 'transparent',
       };
-      const positionName = Array.from(
-        new Set(userInfo?.usersOrganizations?.map((item: { positionName: string }) => item.positionName))
-      ).join(', ');
+      const roleName = Array.from(
+        new Set(userInfo?.usersOrganizations?.map((item: { userType: string }) => item.userType).filter(Boolean))
+      )
+        .map(
+          (userType) =>
+            userTypeConfigList?.find((item) => `${item.standCode}` === `${userType}`)?.standDisplayValue || userType
+        )
+        .join('、');
       return (
         <div style={contentStyle}>
           <div className={styles.userDropdownTopInfo}>
@@ -210,13 +250,14 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
             </div>
             <div style={{ marginLeft: 8, flex: 1, overflow: 'hidden' }}>
               <div style={{ fontWeight: token.fontWeightStrong }}>{userInfo?.userName ?? ''}</div>
-              <div
-                className="textEllipsis"
-                title={positionName}
-                style={{ fontSize: 12, lineHeight: '20px', color: token.colorTextTertiary, maxWidth: 180 }}
-              >
-                {positionName}
-              </div>
+              <Tooltip title={roleName}>
+                <div
+                  className="textEllipsis"
+                  style={{ fontSize: 12, lineHeight: '20px', color: token.colorTextTertiary, maxWidth: 180 }}
+                >
+                  {roleName}
+                </div>
+              </Tooltip>
             </div>
           </div>
           <Divider style={{ margin: 0 }} />
@@ -230,7 +271,7 @@ export default function useUserDropdown(userInfo: UserState['userInfo']) {
         </div>
       );
     },
-    [userInfo]
+    [userInfo, userTypeConfigList]
   );
 
   return {

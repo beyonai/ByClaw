@@ -130,6 +130,15 @@ function ApprovalForm(props: IProps) {
     set(currentStepItem, 'confirmed', nextConfirmed);
     setConfirmedVersion(Date.now());
 
+    if (isLastStep) {
+      try {
+        await form.validateFields();
+      } catch (e) {
+        // 保持当前页，让 antd Form 展示字段校验错误。
+      }
+      return;
+    }
+
     await handleNextStep();
   };
 
