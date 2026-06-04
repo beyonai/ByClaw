@@ -47,7 +47,7 @@ async def build_pool(
 async def run_migrations(pool: AsyncConnectionPool, sql_dir: Path) -> list[str]:
     """Apply each ``NNN_*.sql`` in ``sql_dir`` once; return newly applied names.
 
-    Files not matching ``*.sql`` (case-insensitive) are ignored. Files are
+    Files not matching ``*.sql`` (case-insensitive suffix) are ignored, regardless of name prefix. Files are
     applied in lexical order of filename. Each migration is a single
     transaction; failure aborts startup.
     """
@@ -59,9 +59,10 @@ async def run_migrations(pool: AsyncConnectionPool, sql_dir: Path) -> list[str]:
 
     async with pool.connection() as conn:
         await conn.execute(_MIGRATION_TABLE_DDL)
-        await conn.commit()
+        # Read already-applied files in the same transaction as DDL creation.
         cur = await conn.execute("SELECT filename FROM kgw_migration")
         already = {row["filename"] for row in await cur.fetchall()}
+        # conn.__aexit__ commits both the DDL and the read.
 
     newly_applied: list[str] = []
     for path in files:
