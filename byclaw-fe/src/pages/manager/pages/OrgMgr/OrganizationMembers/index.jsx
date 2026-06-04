@@ -13,6 +13,8 @@ import FieldFilter from '@/pages/manager/pages/OrgMgr/components/TreeFilter/Fiel
 import SourceFilter from '@/pages/manager/pages/OrgMgr/components/TreeFilter/SourceFilter';
 import NewResource from './NewResource';
 import defResourceIcon from '@/pages/manager/assets/defResourceIcon.png';
+import { getDcSystemConfigListByStandType } from '@/service/auth';
+import { getVisibleMenuKeysFromConfig } from '@/constants/system';
 
 const OrganizationMembers = ({ selectedOrg, setEmployeeVisible, setBaseVisible, setInitParams, canEdit, userInfo }) => {
   const dispatch = useDispatch();
@@ -49,6 +51,7 @@ const OrganizationMembers = ({ selectedOrg, setEmployeeVisible, setBaseVisible, 
   const [activeTab, setActiveTab] = useState('orgMember');
   const [authInfo, setAuthInfo] = useState({});
   const [authType, setAuthType] = useState();
+  const [visibleKeys, setVisibleKeys] = useState([]);
 
   const [fieldSelect, setFieldSelect] = useState([]);
   const [sourceSelect, setSourceSelect] = useState([]);
@@ -69,6 +72,54 @@ const OrganizationMembers = ({ selectedOrg, setEmployeeVisible, setBaseVisible, 
   const mySelectValue = React.useMemo(() => {
     return get(head(selectValue), 'key');
   }, [selectValue]);
+
+  const tabItems = React.useMemo(() => {
+    return [
+      {
+        key: 'orgMember',
+        label: intl.formatMessage({ id: 'orgMgr.members.title' }),
+      },
+      {
+        key: 'employee',
+        label: intl.formatMessage({ id: 'orgMgr.tabs.employee' }),
+      },
+      {
+        key: 'knowledge',
+        label: intl.formatMessage({ id: 'orgMgr.tabs.knowledge' }),
+      },
+      {
+        key: 'tool',
+        label: intl.formatMessage({ id: 'orgMgr.tabs.tool' }),
+      },
+      {
+        key: 'view',
+        label: intl.formatMessage({ id: 'orgMgr.tabs.view' }),
+      },
+      {
+        key: 'object',
+        label: intl.formatMessage({ id: 'orgMgr.tabs.object' }),
+      },
+    ].filter((item) => !['view', 'object'].includes(item.key) || visibleKeys.includes(item.key));
+  }, [intl, visibleKeys]);
+
+  useEffect(() => {
+    getDcSystemConfigListByStandType({
+      standType: 'MENU_ICON_SHOW_TAB',
+    })
+      .then((res) => {
+        const configData = res?.data || res;
+        if (Array.isArray(configData) && configData.length > 0) {
+          setVisibleKeys(getVisibleMenuKeysFromConfig(configData));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (tabItems.length && !tabItems.some((item) => item.key === activeTab)) {
+      setActiveTab(tabItems[0].key);
+    }
+  }, [activeTab, tabItems]);
 
   useEffect(() => {
     // 岗位
@@ -145,32 +196,8 @@ const OrganizationMembers = ({ selectedOrg, setEmployeeVisible, setBaseVisible, 
       <div className={styles.header}>
         <div className={styles.title}>
           <Tabs
-            items={[
-              {
-                key: 'orgMember',
-                label: intl.formatMessage({ id: 'orgMgr.members.title' }),
-              },
-              {
-                key: 'employee',
-                label: intl.formatMessage({ id: 'orgMgr.tabs.employee' }),
-              },
-              {
-                key: 'knowledge',
-                label: intl.formatMessage({ id: 'orgMgr.tabs.knowledge' }),
-              },
-              {
-                key: 'tool',
-                label: intl.formatMessage({ id: 'orgMgr.tabs.tool' }),
-              },
-              {
-                key: 'view',
-                label: intl.formatMessage({ id: 'orgMgr.tabs.view' }),
-              },
-              {
-                key: 'object',
-                label: intl.formatMessage({ id: 'orgMgr.tabs.object' }),
-              },
-            ]}
+            activeKey={activeTab}
+            items={tabItems}
             onChange={(key) => {
               setActiveTab(key);
               setSearchValue('');

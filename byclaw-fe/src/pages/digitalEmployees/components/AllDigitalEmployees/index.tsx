@@ -112,6 +112,8 @@ function AllDigitalEmployees(
         keyword,
         ...(buildFilterParam?.('enterprise', filterParam) || {}),
         ownerType: 'enterprise',
+        orderField: 'updateTime',
+        orderBy: 'desc',
       };
 
       if (catalogId !== undefined && catalogId !== null && `${catalogId}` !== '' && catalogId !== ALL_CATEGORY_KEY) {

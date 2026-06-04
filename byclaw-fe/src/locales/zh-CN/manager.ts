@@ -233,6 +233,7 @@ export default {
   // 数字员工和数字资源
   'orgMgr.digital.status': '状态',
   'orgMgr.digital.createTime': '创建时间',
+  'orgMgr.digital.createUserName': '创建人',
   'orgMgr.digital.draft': '草稿',
   'orgMgr.digital.reviewing': '审核中',
   'orgMgr.digital.published': '已上架',

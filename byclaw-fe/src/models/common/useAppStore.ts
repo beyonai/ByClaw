@@ -38,6 +38,20 @@ export interface ISuggestQuestionItem {
   icon?: string;
 }
 
+export type ISandboxesInfo = Partial<{
+  endpoints: string[];
+  instanceEndpoints: {
+    openclaw: string;
+    filebrowser: string;
+  };
+  sandboxId: string;
+  sandboxType: string;
+  userCode: string;
+  token: string;
+}>;
+
+export type ISandboxesInfoState = ISandboxesInfo | Promise<ISandboxesInfo>;
+
 export type IState = {
   isSiderCollapsed: boolean;
   setSiderCollapsed: (isCollapsed: boolean) => void;
@@ -71,18 +85,8 @@ export type IState = {
   suggestQuestions: Array<ISuggestQuestionItem>;
   setSuggestQuestions: (questions: ISuggestQuestionItem[]) => void;
 
-  sandboxesInfo: Partial<{
-    endpoints: string[];
-    instanceEndpoints: {
-      openclaw: string;
-      filebrowser: string;
-    };
-    sandboxId: string;
-    sandboxType: string;
-    userCode: string;
-    token: string;
-  }>;
-  getSandboxesInfoUrl: () => Promise<void>;
+  sandboxesInfo: ISandboxesInfoState;
+  getSandboxesInfoUrl: () => Promise<ISandboxesInfo>;
 };
 
 const useAppStore = create<IState>()(
@@ -189,14 +193,25 @@ const useAppStore = create<IState>()(
           setSuggestQuestions: (questions: ISuggestQuestionItem[]) => set({ suggestQuestions: questions }),
 
           sandboxesInfo: {},
-          async getSandboxesInfoUrl() {
-            try {
-              const res = await getSandboxInfo({});
-
-              set({ sandboxesInfo: lodashGet(res, '0') || {} });
-            } catch {
-              set({ sandboxesInfo: {} });
+          getSandboxesInfoUrl() {
+            const sandboxesInfo = get().sandboxesInfo;
+            if (sandboxesInfo instanceof Promise) {
+              return sandboxesInfo;
             }
+
+            const sandboxesInfoPromise = getSandboxInfo({})
+              .then((res) => lodashGet(res, '0') || {})
+              .catch(() => ({}));
+
+            set({ sandboxesInfo: sandboxesInfoPromise });
+
+            sandboxesInfoPromise.then((nextSandboxesInfo) => {
+              if (get().sandboxesInfo === sandboxesInfoPromise) {
+                set({ sandboxesInfo: nextSandboxesInfo });
+              }
+            });
+
+            return sandboxesInfoPromise;
           },
         };
       },

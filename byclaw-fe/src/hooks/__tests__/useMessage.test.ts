@@ -58,18 +58,28 @@ describe('hooks/useChat/useMessage', () => {
     ]);
     dispatch = jest.fn((action: any) => {
       if (action.type === 'messageStore/updateSessionMessageList') {
-        const { sessionId, messageList } = action.payload;
+        const { sessionId, messageList, allowCreateSession } = action.payload;
         const prevInfo = sessionListMap.get(sessionId);
         const nextList = typeof messageList === 'function' ? messageList(prevInfo?.list || []) : messageList;
-        sessionListMap.set(sessionId, {
-          ...(prevInfo || {
-            pageNum: 1,
-            pageSize: 20,
-            total: nextList.length,
-            pageRange: [1, 1],
-          }),
-          list: nextList,
-        });
+        if (prevInfo || allowCreateSession || sessionId === '__message_store_draft_session__') {
+          sessionListMap.set(sessionId, {
+            ...(prevInfo || {
+              pageNum: 1,
+              pageSize: 20,
+              total: nextList.length,
+              pageRange: [1, 1],
+            }),
+            list: nextList,
+          });
+        }
+        return Promise.resolve(undefined);
+      }
+      if (action.type === 'messageStore/copyFromSession') {
+        const { fromSessionId, targetSessionId } = action.payload;
+        const messageInfo = sessionListMap.get(fromSessionId);
+        if (messageInfo) {
+          sessionListMap.set(targetSessionId, messageInfo);
+        }
         return Promise.resolve(undefined);
       }
       if (action.type === 'messageStore/cleanSessionMessage') {
@@ -196,10 +206,11 @@ describe('hooks/useChat/useMessage', () => {
     expect(dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'messageStore/updateSessionMessageList',
-        payload: {
+        payload: expect.objectContaining({
           sessionId: 's2',
+          allowCreateSession: false,
           messageList: expect.any(Function),
-        },
+        }),
       })
     );
     expect(sessionListMap.get('s2').list).toEqual([
@@ -246,18 +257,19 @@ describe('hooks/useChat/useMessage', () => {
   });
 
   it('setSessionId stores current draft message list when there is no active session', async () => {
-    const { result } = renderHook(() => useMessage({}));
+    const { result, rerender } = renderHook(() => useMessage({}));
 
     act(() => {
       result.current.setMessageList([{ msgId: 'draft-1' } as any]);
       result.current.setSessionId('new-session');
     });
+    rerender();
 
     expect(dispatch).toHaveBeenCalledWith({
-      type: 'messageStore/updateSessionMessageList',
+      type: 'messageStore/copyFromSession',
       payload: {
-        sessionId: 'new-session',
-        messageList: [{ msgId: 'draft-1' }],
+        fromSessionId: '__message_store_draft_session__',
+        targetSessionId: 'new-session',
       },
     });
     expect(dispatch).toHaveBeenCalledWith({

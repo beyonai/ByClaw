@@ -8,7 +8,7 @@ import useAppStore from '@/models/common/useAppStore';
 import { IMessageState, SSEEventStatus, SSEMessageType, IObjectType } from '@/constants/message';
 
 import { initAnswerMessage, initQueryMessage } from '@/utils/messgae';
-import { getVNCUrl } from '@/utils/chat';
+import { getVNCUrl, resolveSandboxesInfo } from '@/utils/chat';
 import { isTextContentType } from '@/utils/messgae';
 
 import { substanceHandler } from '@/hooks/useChat/util';
@@ -337,7 +337,6 @@ function useHandler(props: IProps) {
       const { sseRes } = onionsProps;
 
       if (!sseRes) return onionsProps;
-      if (!sandboxesInfo?.sandboxId) return onionsProps;
 
       if ([`${SSEMessageType.jsonBlock}`].includes(`${sseRes?.message?.contentType}`)) {
         const jsonStr = get(sseRes, 'message.content.substance.json', '');
@@ -360,16 +359,19 @@ function useHandler(props: IProps) {
         return onionsProps;
       }
 
-      const url = getVNCUrl(sandboxesInfo);
+      void resolveSandboxesInfo(useAppStore.getState().sandboxesInfo).then((resolvedSandboxesInfo) => {
+        if (!resolvedSandboxesInfo?.sandboxId) return;
+        const url = getVNCUrl(resolvedSandboxesInfo);
 
-      setSiderCollapsed(true);
-      EventEmitter.emit('beyond-main-driver-open-type', {
-        drawerType: 'vnc',
-        canClose: true,
-        width: '50vw',
-      });
-      EventEmitter.emit('beyond-main-driver-message', {
-        url,
+        setSiderCollapsed(true);
+        EventEmitter.emit('beyond-main-driver-open-type', {
+          drawerType: 'vnc',
+          canClose: true,
+          width: '50vw',
+        });
+        EventEmitter.emit('beyond-main-driver-message', {
+          url,
+        });
       });
 
       return onionsProps;

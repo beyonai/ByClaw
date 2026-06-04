@@ -6,6 +6,8 @@ import type {
   TelemetryBusySnapshot,
   TelemetryConfig,
   TelemetryEntrySource,
+  TelemetryReasonState,
+  TelemetryStructuredReason,
 } from "./types.js";
 
 type NowFn = () => number;
@@ -18,8 +20,11 @@ export class TelemetryRuntimeState {
   private readonly activeRuns = new Map<string, TelemetryActiveEntry>();
   private readonly activeToolCalls = new Map<string, TelemetryActiveEntry>();
   private readonly activeSubagents = new Map<string, TelemetryActiveEntry>();
+  private readonly activeHolds = new Map<string, TelemetryActiveEntry>();
+  private readonly activeOutboundDeliveries = new Map<string, TelemetryActiveEntry>();
   private failures = 0;
   private lastEventAt?: number;
+  private lastPrunedAt?: number;
   private staleEntriesPruned = 0;
 
   constructor(
@@ -72,6 +77,36 @@ export class TelemetryRuntimeState {
     }
   }
 
+  markHoldStarted(
+    id: string | undefined,
+    source: TelemetryEntrySource,
+    metadata: ActiveEntryMetadata = {},
+  ): void {
+    this.upsert(this.activeHolds, stableKey("hold", id), source, metadata);
+  }
+
+  markHoldEnded(id: string | undefined, failed = false): void {
+    this.remove(this.activeHolds, stableKey("hold", id));
+    if (failed) {
+      this.failures += 1;
+    }
+  }
+
+  markOutboundDeliveryStarted(
+    id: string | undefined,
+    source: TelemetryEntrySource,
+    metadata: ActiveEntryMetadata = {},
+  ): void {
+    this.upsert(this.activeOutboundDeliveries, stableKey("delivery", id), source, metadata);
+  }
+
+  markOutboundDeliveryEnded(id: string | undefined, failed = false): void {
+    this.remove(this.activeOutboundDeliveries, stableKey("delivery", id));
+    if (failed) {
+      this.failures += 1;
+    }
+  }
+
   recordAgentEvent(event: AgentEventLike): void {
     const eventTime = typeof event.ts === "number" && Number.isFinite(event.ts)
       ? event.ts
@@ -108,6 +143,11 @@ export class TelemetryRuntimeState {
       return;
     }
 
+    if (event.stream === "approval") {
+      this.recordApprovalEvent(runId, data, phase);
+      return;
+    }
+
     this.touchRun(runId);
   }
 
@@ -118,34 +158,94 @@ export class TelemetryRuntimeState {
     const activeAgentRuns = this.activeRuns.size;
     const activeToolCalls = this.activeToolCalls.size;
     const activeSubagents = this.activeSubagents.size;
-    const active = activeAgentRuns + activeToolCalls + activeSubagents;
-    const busy = active > 0;
-    const stopSafeAfter = busy
-      ? undefined
-      : new Date(generatedAtMs + this.config.idleGraceMs).toISOString();
+    const activeHolds = this.activeHolds.size;
+    const activeOutboundDeliveries = this.activeOutboundDeliveries.size;
+    const activeWork = activeAgentRuns + activeToolCalls + activeSubagents;
+    const hold = activeHolds > 0;
+    const draining = activeOutboundDeliveries > 0;
+    const wakeRequired = false;
+    const stale = this.isRecentlyStale(generatedAtMs);
+    const releaseable = activeWork === 0 && !hold && !draining && !wakeRequired && !stale;
+    const active = activeWork + activeHolds + activeOutboundDeliveries;
+    const stopSafeAfter = releaseable
+      ? new Date(generatedAtMs + this.config.idleGraceMs).toISOString()
+      : undefined;
+    const recommendedAction = activeWork > 0 ? "extend" : releaseable ? "release_after_grace" : "hold";
+    const extendForMs = activeWork > 0
+      ? this.config.activeLeaseMs
+      : releaseable
+        ? 0
+        : this.config.cautiousLeaseMs;
 
     return {
-      busy,
+      busy: !releaseable,
       confidence: "best_effort",
       generatedAt: new Date(generatedAtMs).toISOString(),
-      stale: false,
-      reason: buildReasons({ activeAgentRuns, activeToolCalls, activeSubagents }),
+      stale,
+      reason: buildReasons({
+        activeAgentRuns,
+        activeToolCalls,
+        activeSubagents,
+        activeHolds,
+        activeOutboundDeliveries,
+        stale,
+      }),
       reasonDetails: buildReasonDetails({
         activeRuns: this.activeRuns,
         activeToolCalls: this.activeToolCalls,
         activeSubagents: this.activeSubagents,
+        activeHolds: this.activeHolds,
+        activeOutboundDeliveries: this.activeOutboundDeliveries,
+      }),
+      state: {
+        busy: activeWork > 0,
+        hold,
+        draining,
+        wakeRequired,
+        releaseable,
+        stale,
+      },
+      authority: {
+        scope: "plugin_observed_with_ttl",
+        confidence: "best_effort",
+        sources: ["plugin_hooks", "agent_event_subscription", "outbound_delivery_hooks"],
+        missingSignals: [
+          "session_lane_snapshot",
+          "global_lane_snapshot",
+          "delivery_queue_snapshot",
+          "heartbeat_wake_snapshot",
+        ],
+      },
+      reasons: buildStructuredReasons({
+        activeRuns: this.activeRuns,
+        activeToolCalls: this.activeToolCalls,
+        activeSubagents: this.activeSubagents,
+        activeHolds: this.activeHolds,
+        activeOutboundDeliveries: this.activeOutboundDeliveries,
+        config: this.config,
       }),
       lease: {
-        recommendedAction: busy ? "extend" : "release_after_grace",
-        extendForMs: busy ? this.config.activeLeaseMs : 0,
+        recommendedAction,
+        extendForMs,
         idleGraceMs: this.config.idleGraceMs,
         ...(stopSafeAfter ? { stopSafeAfter } : {}),
-        wakeRequired: false,
+        wakeRequired,
+        reason: resolveLeaseReason({
+          busy: activeWork > 0,
+          hold,
+          draining,
+          wakeRequired,
+          stale,
+        }),
       },
       totals: {
         active,
         queued: 0,
-        running: active,
+        running: activeWork,
+        hold: activeHolds,
+        draining: activeOutboundDeliveries,
+        wakeRequired: 0,
+        stale: stale ? this.staleEntriesPruned : 0,
         failures: this.failures,
         recentSessions: 0,
         presenceEntries: 0,
@@ -156,6 +256,8 @@ export class TelemetryRuntimeState {
           activeAgentRuns,
           activeToolCalls,
           activeSubagents,
+          activeHolds,
+          activeOutboundDeliveries,
           ...(this.lastEventAt ? { lastEventAt: new Date(this.lastEventAt).toISOString() } : {}),
           staleEntriesPruned: this.staleEntriesPruned,
         },
@@ -166,13 +268,27 @@ export class TelemetryRuntimeState {
         includesInteractiveRuns: true,
         includesHeartbeatRuns: true,
         includesGlobalTaskRegistry: false,
+        includesQueueDepth: false,
+        includesDeliveryQueue: false,
+        includesOutboundDeliveryDraining: true,
         containerLifecycleAware: false,
       },
     };
   }
 
   isBusy(): boolean {
-    return this.activeRuns.size + this.activeToolCalls.size + this.activeSubagents.size > 0;
+    return (
+      this.activeRuns.size +
+      this.activeToolCalls.size +
+      this.activeSubagents.size +
+      this.activeHolds.size +
+      this.activeOutboundDeliveries.size > 0 ||
+      this.isRecentlyStale(this.now())
+    );
+  }
+
+  private isRecentlyStale(now: number): boolean {
+    return this.lastPrunedAt !== undefined && now - this.lastPrunedAt <= this.config.cautiousLeaseMs;
   }
 
   private recordItemEvent(
@@ -228,6 +344,35 @@ export class TelemetryRuntimeState {
     this.touchRun(runId);
   }
 
+  private recordApprovalEvent(
+    runId: string | undefined,
+    data: Record<string, unknown>,
+    phase: string | undefined,
+  ): void {
+    const status = normalizeId(data.status);
+    const kind = normalizeId(data.kind);
+    const approvalId =
+      normalizeId(data.approvalId) ??
+      normalizeId(data.id) ??
+      normalizeId(data.approvalSlug);
+    const itemKey = buildScopedWorkKey(runId, approvalId);
+    if (isApprovalPending(phase, status, kind)) {
+      this.markHoldStarted(itemKey, "agent_event", {
+        label: firstNormalizedId(data.approvalKind, kind, approvalId, runId),
+        kind: "approval",
+      });
+      return;
+    }
+    if (isApprovalTerminal(phase, status, kind)) {
+      this.markHoldEnded(
+        itemKey,
+        status === "failed" || status === "expired" || status === "denied",
+      );
+      return;
+    }
+    this.touchRun(runId);
+  }
+
   private upsert(
     entries: Map<string, TelemetryActiveEntry>,
     id: string,
@@ -273,13 +418,17 @@ export class TelemetryRuntimeState {
   }
 
   private pruneStaleEntries(): void {
+    const now = this.now();
     const pruned =
-      pruneMap(this.activeRuns, this.config.activeRunMaxAgeMs, this.now()) +
-      pruneMap(this.activeToolCalls, this.config.activeToolCallMaxAgeMs, this.now()) +
-      pruneMap(this.activeSubagents, this.config.activeSubagentMaxAgeMs, this.now());
+      pruneMap(this.activeRuns, this.config.activeRunMaxAgeMs, now) +
+      pruneMap(this.activeToolCalls, this.config.activeToolCallMaxAgeMs, now) +
+      pruneMap(this.activeSubagents, this.config.activeSubagentMaxAgeMs, now) +
+      pruneMap(this.activeHolds, this.config.maxAgeMs, now) +
+      pruneMap(this.activeOutboundDeliveries, this.config.idleGraceMs, now);
     if (pruned > 0) {
       this.staleEntriesPruned += pruned;
-      this.lastEventAt = this.now();
+      this.lastPrunedAt = now;
+      this.lastEventAt = now;
     }
   }
 }
@@ -314,6 +463,9 @@ function buildReasons(params: {
   activeAgentRuns: number;
   activeToolCalls: number;
   activeSubagents: number;
+  activeHolds: number;
+  activeOutboundDeliveries: number;
+  stale: boolean;
 }): string[] {
   const reason: string[] = [];
   if (params.activeAgentRuns > 0) {
@@ -325,6 +477,15 @@ function buildReasons(params: {
   if (params.activeSubagents > 0) {
     reason.push("active_subagents");
   }
+  if (params.activeHolds > 0) {
+    reason.push("active_holds");
+  }
+  if (params.activeOutboundDeliveries > 0) {
+    reason.push("outbound_delivery_draining");
+  }
+  if (params.stale) {
+    reason.push("recent_stale_prune");
+  }
   if (reason.length === 0) {
     reason.push("idle");
   }
@@ -335,12 +496,106 @@ function buildReasonDetails(params: {
   activeRuns: Map<string, TelemetryActiveEntry>;
   activeToolCalls: Map<string, TelemetryActiveEntry>;
   activeSubagents: Map<string, TelemetryActiveEntry>;
+  activeHolds: Map<string, TelemetryActiveEntry>;
+  activeOutboundDeliveries: Map<string, TelemetryActiveEntry>;
 }): TelemetryBusyReasonDetails {
   return {
     activeAgentRuns: summarizeEntries(params.activeRuns),
     activeToolCalls: summarizeEntries(params.activeToolCalls),
     activeSubagents: summarizeEntries(params.activeSubagents),
+    activeHolds: summarizeEntries(params.activeHolds),
+    activeOutboundDeliveries: summarizeEntries(params.activeOutboundDeliveries),
   };
+}
+
+function buildStructuredReasons(params: {
+  activeRuns: Map<string, TelemetryActiveEntry>;
+  activeToolCalls: Map<string, TelemetryActiveEntry>;
+  activeSubagents: Map<string, TelemetryActiveEntry>;
+  activeHolds: Map<string, TelemetryActiveEntry>;
+  activeOutboundDeliveries: Map<string, TelemetryActiveEntry>;
+  config: TelemetryConfig;
+}): TelemetryStructuredReason[] {
+  return [
+    ...summarizeStructuredReasons(params.activeRuns, {
+      kind: "agent_run",
+      status: "running",
+      state: "busy",
+      ttlMs: params.config.activeRunMaxAgeMs,
+    }),
+    ...summarizeStructuredReasons(params.activeToolCalls, {
+      kind: "tool_call",
+      status: "running",
+      state: "busy",
+      ttlMs: params.config.activeToolCallMaxAgeMs,
+    }),
+    ...summarizeStructuredReasons(params.activeSubagents, {
+      kind: "subagent_run",
+      status: "running",
+      state: "busy",
+      ttlMs: params.config.activeSubagentMaxAgeMs,
+    }),
+    ...summarizeStructuredReasons(params.activeHolds, {
+      kind: "approval_hold",
+      status: "waiting",
+      state: "hold",
+      ttlMs: params.config.maxAgeMs,
+    }),
+    ...summarizeStructuredReasons(params.activeOutboundDeliveries, {
+      kind: "outbound_delivery",
+      status: "draining",
+      state: "draining",
+      ttlMs: params.config.idleGraceMs,
+    }),
+  ].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function summarizeStructuredReasons(
+  entries: Map<string, TelemetryActiveEntry>,
+  metadata: {
+    kind: string;
+    status: string;
+    state: TelemetryReasonState;
+    ttlMs: number;
+  },
+): TelemetryStructuredReason[] {
+  return Array.from(entries.values()).map((entry) => ({
+    id: entry.id,
+    kind: metadata.kind,
+    status: metadata.status,
+    state: metadata.state,
+    source: entry.source,
+    ...(entry.label ? { label: entry.label } : {}),
+    firstSeenAt: new Date(entry.startedAt).toISOString(),
+    lastSeenAt: new Date(entry.lastSeenAt).toISOString(),
+    expiresAt: new Date(entry.lastSeenAt + metadata.ttlMs).toISOString(),
+    confidence: "best_effort",
+  }));
+}
+
+function resolveLeaseReason(params: {
+  busy: boolean;
+  hold: boolean;
+  draining: boolean;
+  wakeRequired: boolean;
+  stale: boolean;
+}): string {
+  if (params.busy) {
+    return "active_work";
+  }
+  if (params.hold) {
+    return "hold";
+  }
+  if (params.draining) {
+    return "draining";
+  }
+  if (params.wakeRequired) {
+    return "wake_required";
+  }
+  if (params.stale) {
+    return "recent_stale_prune";
+  }
+  return "idle";
 }
 
 function summarizeEntries(entries: Map<string, TelemetryActiveEntry>): TelemetryBusyActiveEntry[] {
@@ -376,6 +631,41 @@ function firstNormalizedId(...values: unknown[]): string | undefined {
     }
   }
   return undefined;
+}
+
+function isApprovalPending(
+  phase: string | undefined,
+  status: string | undefined,
+  kind: string | undefined,
+): boolean {
+  return (
+    phase === "start" ||
+    phase === "pending" ||
+    status === "pending" ||
+    status === "requested" ||
+    status === "waiting" ||
+    kind === "approval-pending"
+  );
+}
+
+function isApprovalTerminal(
+  phase: string | undefined,
+  status: string | undefined,
+  kind: string | undefined,
+): boolean {
+  return (
+    phase === "end" ||
+    phase === "result" ||
+    status === "resolved" ||
+    status === "approved" ||
+    status === "allowed" ||
+    status === "denied" ||
+    status === "expired" ||
+    status === "failed" ||
+    status === "cancelled" ||
+    kind === "approval-resolved" ||
+    kind === "approval-expired"
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

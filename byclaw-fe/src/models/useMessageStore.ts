@@ -104,7 +104,6 @@ export type IEffect = {
   updateSessionMessageList: (sessionId: string, messageList: MessageListUpdater) => void;
   getSessionMessage: (sessionId: string) => Promise<IMessageInfo>;
   getMoreSessionMessage: (sessionId: string) => Promise<IMessageInfo>;
-  getSessionMessageByCache: (sessionId: string) => IMessageInfo;
   getLatestSessionMessage: (sessionId: string) => Promise<IMessageInfo | undefined>;
   cleanSessionMessage: (sessionId: string) => void;
 };
@@ -266,6 +265,20 @@ export default {
         ...action.payload,
       };
     },
+    copyFromSession(state: IState, action: { payload: { fromSessionId: string; targetSessionId: string } }) {
+      const { fromSessionId, targetSessionId } = action.payload;
+      const oldSessionListMap = new Map(state.sessionListMap);
+      const oldMessageInfo = oldSessionListMap.get(fromSessionId);
+      if (!oldMessageInfo) {
+        return state;
+      }
+      const newSessionListMap = new Map(oldSessionListMap);
+      newSessionListMap.set(`${targetSessionId}`, oldMessageInfo);
+      return {
+        ...state,
+        sessionListMap: newSessionListMap,
+      };
+    },
     setSessionMessage(state: IState, action: { payload: { sessionId: string; messageListInfo: IMessageInfo } }) {
       const sessionId = getSessionId(action);
       const { messageListInfo } = action.payload;
@@ -283,11 +296,15 @@ export default {
       state: IState,
       action: {
         silent?: boolean;
-        payload: { sessionId: string; messageList: MessageListUpdater };
+        payload: {
+          sessionId: string;
+          messageList: MessageListUpdater;
+          allowCreateSession?: boolean;
+        };
       }
     ) {
       const sessionId = getSessionId(action);
-      const { messageList: messageListUpdater } = action.payload;
+      const { messageList: messageListUpdater, allowCreateSession } = action.payload;
 
       const oldSessionListMap = new Map(state.sessionListMap);
 
@@ -306,7 +323,7 @@ export default {
           total: oldMessageInfo.total + (size(messageList) - size(oldMessageInfo.list)),
           pageRange: oldMessageInfo.pageRange,
         });
-      } else {
+      } else if (allowCreateSession) {
         newSessionListMap.set(`${sessionId}`, {
           list: messageList,
           pageNum: Math.floor(size(messageList) / _INIT_PAGESIZE_) || 1,
@@ -320,17 +337,6 @@ export default {
         ...state,
         sessionListMap: newSessionListMap,
       };
-    },
-    getSessionMessageByCache(state: IState, action: { payload: { sessionId: string } }) {
-      const sessionId = getSessionId(action);
-
-      const mySessionListMap = state.sessionListMap;
-      let cache = mySessionListMap.get(sessionId);
-
-      if (!cache) {
-        cache = getInitMessageInfo();
-      }
-      return cache;
     },
     setInitialSessionDataToLocateMsg(
       state: IState,

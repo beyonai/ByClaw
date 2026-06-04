@@ -130,6 +130,15 @@ function ApprovalForm(props: IProps) {
     set(currentStepItem, 'confirmed', nextConfirmed);
     setConfirmedVersion(Date.now());
 
+    if (isLastStep) {
+      try {
+        await form.validateFields();
+      } catch (e) {
+        // 保持当前页，让 antd Form 展示字段校验错误。
+      }
+      return;
+    }
+
     await handleNextStep();
   };
 
@@ -355,17 +364,17 @@ function ApprovalForm(props: IProps) {
   );
 }
 
-// const ApprovalFormWarpper = (props: IProps) => {
-//   const { EventEmitter } = useGlobal();
+const ApprovalFormWarpper = (props: IProps) => {
+  const { EventEmitter } = useGlobal();
 
-//   useEffect(() => {
-//     if (props.message.messageState === IMessageState.Answer) {
-//       EventEmitter.emit('beyond-easyconfirm-set-approvalform-item', props);
-//     }
-//   }, []);
+  useEffect(() => {
+    if (props.message.messageState === IMessageState.Answer) {
+      EventEmitter.emit('beyond-easyconfirm-set-approvalform-item', props);
+    }
+  }, []);
 
-//   return <ApprovalForm {...props} />;
-// };
+  return <ApprovalForm {...props} />;
+};
 
-export default ApprovalForm;
-// export default ApprovalFormWarpper;
+// export default ApprovalForm;
+export default ApprovalFormWarpper;

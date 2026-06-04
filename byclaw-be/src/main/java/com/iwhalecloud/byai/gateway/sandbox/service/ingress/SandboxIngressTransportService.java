@@ -6,6 +6,7 @@ import java.io.PushbackInputStream;
 import java.time.Duration;
 import java.util.Enumeration;
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.zip.GZIPInputStream;
@@ -37,6 +38,8 @@ public class SandboxIngressTransportService {
     private static final Set<String> HOP_BY_HOP_HEADERS = Set.of(
         "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
         "te", "trailer", "transfer-encoding", "upgrade");
+    private static final Set<String> REQUEST_BODY_REQUIRED_METHODS = Set.of(
+        "POST", "PUT", "PATCH", "PROPPATCH", "REPORT");
 
     private final OkHttpClient httpClient;
     private final SandboxIngressRuntimeResolver runtimeResolver;
@@ -89,18 +92,26 @@ public class SandboxIngressTransportService {
         Request.Builder builder = new Request.Builder()
             .url(requestContext.targetUrl())
             .headers(headers)
-            .method(request.getMethod(), requiresRequestBody(request.getMethod()) ? requestBody : null);
+            .method(request.getMethod(), requestBody);
         runtimeResolver.resolve().customizeRequest(builder, requestContext);
         return builder.build();
     }
 
     private RequestBody buildRequestBody(HttpServletRequest request) {
-        if (!requiresRequestBody(request.getMethod())) {
+        String method = request.getMethod();
+        if (!permitsRequestBody(method)) {
             return null;
         }
         String contentType = request.getContentType();
         MediaType mediaType = StringUtils.hasText(contentType) ? MediaType.parse(contentType) : null;
         long contentLength = request.getContentLengthLong();
+        boolean hasRequestBody = hasRequestBody(request);
+        if (!requiresRequestBody(method) && !hasRequestBody) {
+            return null;
+        }
+        if (!hasRequestBody) {
+            return RequestBody.create(new byte[0], mediaType);
+        }
         return new RequestBody() {
             @Override
             public MediaType contentType() {
@@ -117,6 +128,11 @@ public class SandboxIngressTransportService {
                 try (InputStream inputStream = request.getInputStream()) {
                     StreamUtils.copy(inputStream, sink.outputStream());
                 }
+            }
+
+            @Override
+            public boolean isOneShot() {
+                return true;
             }
         };
     }
@@ -252,8 +268,20 @@ public class SandboxIngressTransportService {
         return existing + ", " + remoteAddr;
     }
 
-    private boolean requiresRequestBody(String method) {
+    private boolean permitsRequestBody(String method) {
         return !("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method));
+    }
+
+    private boolean requiresRequestBody(String method) {
+        return method != null && REQUEST_BODY_REQUIRED_METHODS.contains(method.toUpperCase(Locale.ROOT));
+    }
+
+    private boolean hasRequestBody(HttpServletRequest request) {
+        if (request.getContentLengthLong() > 0) {
+            return true;
+        }
+        String transferEncoding = request.getHeader(HttpHeaders.TRANSFER_ENCODING);
+        return StringUtils.hasText(transferEncoding) && transferEncoding.toLowerCase(Locale.ROOT).contains("chunked");
     }
 
     private String maskToken(String token) {

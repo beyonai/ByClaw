@@ -133,7 +133,7 @@ export default {
           keyword: '',
           metaStatus: 'ALL',
           orgFilters: [{ type: 'ALL' }],
-          orderField: 'focus',
+          orderField: 'updateTime',
           orderBy: 'desc',
         });
         const { list } = resp || {};

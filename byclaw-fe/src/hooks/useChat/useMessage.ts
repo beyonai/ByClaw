@@ -22,7 +22,8 @@ const curSessionId = {
   current: '',
 };
 
-const DRAFT_SESSION_ID = '__message_store_draft_session__';
+export const DRAFT_SESSION_ID = '__message_store_draft_session__';
+export const EMPTY_ARRAY = [];
 
 /**
  * 消息管理Hook
@@ -40,7 +41,7 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
 
   const activeSessionId = String(sessionId || optimisticSessionId || DRAFT_SESSION_ID);
   const messageInfo = sessionListMap.get(activeSessionId) as (IMessageInfo & { hasMore?: boolean }) | undefined;
-  const messageList = useMemo(() => messageInfo?.list || [], [messageInfo]);
+  const messageList = useMemo(() => messageInfo?.list || EMPTY_ARRAY, [messageInfo]);
   const hasMore = useMemo(() => {
     if (!messageInfo?.list) return false;
     if (typeof messageInfo.hasMore === 'boolean') return messageInfo.hasMore;
@@ -71,6 +72,7 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
         type: 'messageStore/updateSessionMessageList',
         payload: {
           sessionId: targetSessionId,
+          allowCreateSession: targetSessionId === DRAFT_SESSION_ID,
           // callback的形式，拿到reducer里面最新的messageList，以防连续调用updateMessage时，后者覆盖前者
           messageList: (messageList: IMessage[]) => {
             let list = [...(messageList || [])];
@@ -163,10 +165,10 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
     (newSessionId: string) => {
       if (!curSessionId.current || curSessionId.current === DRAFT_SESSION_ID) {
         dispatch({
-          type: 'messageStore/updateSessionMessageList',
+          type: 'messageStore/copyFromSession',
           payload: {
-            sessionId: newSessionId,
-            messageList: [...messageListRef.current],
+            fromSessionId: curSessionId.current || DRAFT_SESSION_ID,
+            targetSessionId: newSessionId,
           },
         });
 
@@ -218,13 +220,15 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
     });
   }, [dispatch]);
 
+  useEffect(() => {
+    curSessionId.current = activeSessionId;
+  }, [activeSessionId]);
+
   /**
    * 会话ID变化时的副作用
    * 当会话ID变化时，加载对应会话的消息列表
    */
   useEffect(() => {
-    curSessionId.current = activeSessionId;
-
     if (!sessionId) {
       if (!optimisticSessionId) {
         dispatch({
@@ -279,7 +283,7 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
         targetMessageId,
       });
     });
-  }, [activeSessionId, dispatch, EventEmitter, optimisticSessionId, sessionId]);
+  }, [optimisticSessionId, sessionId, dispatch, EventEmitter]);
 
   useEffect(() => {
     if (!sessionId) return;
