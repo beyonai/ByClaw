@@ -122,6 +122,10 @@ def build_app() -> FastAPI:
         data = generate_latest(REGISTRY)
         return Response(content=data, media_type=CONTENT_TYPE_LATEST)
 
+    from kgw.api.internal import router as internal_router  # noqa: PLC0415
+
+    app.include_router(internal_router)
+
     return app
 
 
