@@ -89,6 +89,23 @@ function registerTelemetryHooks(api: OpenClawPluginApi): void {
     );
   });
 
+  api.on("message_sending", (event, ctx) => {
+    getCurrentTelemetryRuntime()?.markOutboundDeliveryStarted(
+      resolveOutboundDeliveryKey(event, ctx),
+      {
+        label: firstStringField(ctx, "channelId", "accountId"),
+        kind: "outbound_delivery",
+      },
+    );
+  });
+
+  api.on("message_sent", (event, ctx) => {
+    getCurrentTelemetryRuntime()?.markOutboundDeliveryEnded(
+      resolveOutboundDeliveryKey(event, ctx),
+      Boolean(event.success === false || event.error),
+    );
+  });
+
   api.on("subagent_spawned", (event) => {
     getCurrentTelemetryRuntime()?.markSubagentStarted(event.runId ?? event.childSessionKey, {
       label: firstStringField(
@@ -257,6 +274,28 @@ class TelemetryRuntimeController {
     this.emitIfBusyRose();
   }
 
+  markOutboundDeliveryStarted(
+    deliveryKey: string | undefined,
+    metadata: { label?: string; kind?: string },
+  ): void {
+    if (this.closed) {
+      return;
+    }
+    this.state.markOutboundDeliveryStarted(deliveryKey, "hook", metadata);
+    this.emitIfBusyRose();
+  }
+
+  markOutboundDeliveryEnded(
+    deliveryKey: string | undefined,
+    failed: boolean,
+  ): void {
+    if (this.closed) {
+      return;
+    }
+    this.state.markOutboundDeliveryEnded(deliveryKey, failed);
+    this.emitIfBusyRose();
+  }
+
   emitSnapshot(): void {
     if (this.closed) {
       return;
@@ -311,4 +350,32 @@ function firstStringField(value: unknown, ...keys: string[]): string | undefined
     }
   }
   return undefined;
+}
+
+function resolveOutboundDeliveryKey(event: unknown, ctx: unknown): string {
+  const explicitId = firstStringField(
+    event,
+    "deliveryId",
+    "messageId",
+    "replyToId",
+    "id",
+  );
+  if (explicitId) {
+    return explicitId;
+  }
+
+  const channelId = firstStringField(ctx, "channelId") ?? "channel";
+  const accountId = firstStringField(ctx, "accountId") ?? "default";
+  const conversationId = firstStringField(ctx, "conversationId");
+  const to = firstStringField(event, "to");
+  const targetHash = hashStableId([conversationId, to, channelId, accountId].filter(Boolean).join(":"));
+  return `${channelId}:${accountId}:${targetHash}`;
+}
+
+function hashStableId(value: string): string {
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) + hash + value.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
 }
