@@ -1,5 +1,5 @@
 // tslint:disable:ordered-imports
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import classnames from 'classnames';
 
 import { get, keys, set, isBoolean, size } from 'lodash';
@@ -38,7 +38,7 @@ function ApprovalForm(props: IProps) {
   const { messageListItemContent, message, messageListItem, thinkListItem } = props;
   const { uuid, orginContent, resumeMessageId } = messageListItem || thinkListItem || {};
 
-  const { messageId } = message;
+  const { messageId, traceId, sessionId } = message;
   const {
     substance = [],
     title,
@@ -147,9 +147,11 @@ function ApprovalForm(props: IProps) {
         messageId,
         content: contentStr,
         updateField,
+        sessionId,
+        traceId,
       });
     },
-    [uuid, messageId, updateField]
+    [uuid, messageId, updateField, sessionId, traceId]
   );
 
   const myToApproveForm = async () => {
@@ -209,12 +211,16 @@ function ApprovalForm(props: IProps) {
     };
 
     setIsDisableBtn(true);
-    console.log(payload, operationForm);
+
     EventEmitter.emit('beyond-chat-on-send-msg', payload);
     EventEmitter.emit('beyond-easyconfirm-set-approvalform-item', props);
 
     myUpdateMessageStructById(operationForm);
   };
+
+  useEffect(() => {
+    setIsDisableBtn(formStatus === IFormStatus.FINISH);
+  }, [formStatus]);
 
   return (
     <div className={classnames(styles.myForm, 'ub ub-ver overflow-hidden')} key={`${messageId}_approveForm`}>
@@ -353,7 +359,9 @@ function ApprovalForm(props: IProps) {
 //   const { EventEmitter } = useGlobal();
 
 //   useEffect(() => {
-//     EventEmitter.emit('beyond-easyconfirm-set-approvalform-item', props);
+//     if (props.message.messageState === IMessageState.Answer) {
+//       EventEmitter.emit('beyond-easyconfirm-set-approvalform-item', props);
+//     }
 //   }, []);
 
 //   return <ApprovalForm {...props} />;

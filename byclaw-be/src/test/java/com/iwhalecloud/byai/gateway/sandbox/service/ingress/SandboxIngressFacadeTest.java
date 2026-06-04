@@ -86,6 +86,28 @@ class SandboxIngressFacadeTest {
     }
 
     @Test
+    void forward_filebrowserRequest_injectsXAuthFromAuthCookie() throws Exception {
+        try (TestHttpServer server = new TestHttpServer()) {
+            SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");
+            bindCurrentUser("alice");
+
+            MockHttpServletRequest request = new MockHttpServletRequest("GET",
+                "/filebrowser/api/raw/workspace/AGENTS.md");
+            request.setScheme("http");
+            request.setServerName("gateway.example.test");
+            request.setRemoteAddr("127.0.0.1");
+            request.addHeader("Cookie", "SESSION=session-1; auth=filebrowser-jwt-token; uc=alice");
+
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            facade.forward("filebrowser", "/api/raw/workspace/AGENTS.md", request, response);
+
+            assertThat(response.getStatus()).isEqualTo(200);
+            assertThat(server.lastPath()).isEqualTo("/v1/sandboxes/sb-1/proxy/8081/filebrowser/api/raw/workspace/AGENTS.md");
+            assertThat(server.lastHeader("X-Auth")).isEqualTo("filebrowser-jwt-token");
+        }
+    }
+
+    @Test
     void forward_filebrowserRootRequest_preservesRootTrailingSlash() throws Exception {
         try (TestHttpServer server = new TestHttpServer()) {
             SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");

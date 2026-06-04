@@ -1,0 +1,3 @@
+httpx>=0.27
+redis>=5.0.0
+by-framework

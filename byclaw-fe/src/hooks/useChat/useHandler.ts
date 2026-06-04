@@ -8,9 +8,8 @@ import useAppStore from '@/models/common/useAppStore';
 import { IMessageState, SSEEventStatus, SSEMessageType, IObjectType } from '@/constants/message';
 
 import { initAnswerMessage, initQueryMessage } from '@/utils/messgae';
-import CookieUtil from '@/utils/cookie';
+import { getVNCUrl } from '@/utils/chat';
 import { isTextContentType } from '@/utils/messgae';
-import { isDevelopment } from '@/utils/common';
 
 import { substanceHandler } from '@/hooks/useChat/util';
 import useGlobal from '@/hooks/useGlobal';
@@ -18,6 +17,7 @@ import useGlobal from '@/hooks/useGlobal';
 import { IMessageListItem } from '@/typescript/message';
 import type { ISession } from '@/typescript/session';
 import type { IOnionsProps } from '@/hooks/useChat';
+import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 
 type IProps = {
   addSession: (newSession: ISession) => void;
@@ -64,6 +64,8 @@ function useHandler(props: IProps) {
           },
         });
       }
+
+      chatSessionRuntimeManager.bindSession(sseMsg.clientRequestId, newSessionId);
 
       addSession({
         ...(sseRes as ISession),
@@ -180,6 +182,12 @@ function useHandler(props: IProps) {
 
       if (sseRes.traceId) {
         newAnswerMsg.traceId = sseRes.traceId;
+        if (sseMsg.clientRequestId) {
+          const runtimeInfo = chatSessionRuntimeManager.getByClientRequest(sseMsg.clientRequestId);
+          if (runtimeInfo) {
+            runtimeInfo.traceId = sseRes.traceId;
+          }
+        }
       }
 
       if (!sseRes.message) return onionsProps;
@@ -330,34 +338,36 @@ function useHandler(props: IProps) {
 
       if (!sseRes) return onionsProps;
       if (!sandboxesInfo?.sandboxId) return onionsProps;
-      if (![`${SSEMessageType.thinkStatusTitle}`].includes(`${sseRes?.message?.contentType}`)) return onionsProps;
 
-      const toolTitle = get(sseRes, 'message.content.substance.title') || '';
+      if ([`${SSEMessageType.jsonBlock}`].includes(`${sseRes?.message?.contentType}`)) {
+        const jsonStr = get(sseRes, 'message.content.substance.json', '');
 
-      if (
-        sseRes?.message?.objectType !== IObjectType.toolCall ||
-        (!toolTitle.includes('jarvis_run_flow') && !toolTitle.includes('browser'))
-      ) {
+        try {
+          const jsonObj = JSON.parse(jsonStr);
+          if (!jsonObj?.command?.startsWith('opencli ')) return onionsProps;
+        } catch (error) {
+          return onionsProps;
+        }
+      } else if ([`${SSEMessageType.thinkStatusTitle}`].includes(`${sseRes?.message?.contentType}`)) {
+        const toolTitle = get(sseRes, 'message.content.substance.title') || '';
+        if (
+          sseRes?.message?.objectType !== IObjectType.toolCall ||
+          (!toolTitle.includes('jarvis_run_flow') && !toolTitle.includes('browser'))
+        ) {
+          return onionsProps;
+        }
+      } else {
         return onionsProps;
       }
 
-      const { sandboxId } = sandboxesInfo;
+      const url = getVNCUrl(sandboxesInfo);
 
       setSiderCollapsed(true);
       EventEmitter.emit('beyond-main-driver-open-type', {
-        drawerType: 'iframe',
+        drawerType: 'vnc',
         canClose: true,
         width: '50vw',
       });
-
-      let url = `/v1/sandboxes/${sandboxId}/proxy/8081/`;
-      if (isDevelopment()) {
-        url = `${URI_TARGET}${url}`;
-      } else {
-        url = `${window.location.origin}${url}`;
-      }
-
-      CookieUtil.set('novncUrl', url);
       EventEmitter.emit('beyond-main-driver-message', {
         url,
       });

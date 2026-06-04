@@ -1,0 +1,15 @@
+{
+    "view_code": "v_my_view",
+    "view_name": "我的视图",
+    "view_desc": "视图描述",
+    "object_codes": ["by_task", "by_user"],
+    "object_relations": [
+        {
+            "source_object_code": "by_task",
+            "source_object_field_code": "user_id",
+            "target_object_code": "by_user",
+            "target_object_field_code": "id",
+            "relation_type": "MANY_TO_ONE"
+        }
+    ]
+}

@@ -16,6 +16,7 @@ import type { ISendProps } from '@/hooks/useChat';
 
 import styles from './index.module.less';
 import inputStyle from '@/components/ChatLayoutComp/index.module.less';
+import { IMessageState } from '@/constants/message';
 
 type IProps = {
   disabledInput: boolean;
@@ -30,6 +31,7 @@ type IProps = {
 
   myAgentType: IAgentType;
   setMyAgentType: React.Dispatch<React.SetStateAction<IAgentType>>;
+  messageState?: IMessageState;
 };
 
 const EasyConfirm = (props: IProps) => {
@@ -44,6 +46,7 @@ const EasyConfirm = (props: IProps) => {
     onCancel,
     myAgentType,
     setMyAgentType,
+    messageState,
   } = props;
 
   const { EventEmitter } = useGlobal();
@@ -116,7 +119,7 @@ const EasyConfirm = (props: IProps) => {
         data-isbottom={isBottom}
       >
         <QueryInput
-          messageState={lastMsg?.messageState}
+          messageState={messageState}
           onSend={onSend}
           onCancel={onCancel}
           myAgentType={myAgentType}

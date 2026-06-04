@@ -38,7 +38,7 @@ export interface ISuggestQuestionItem {
   icon?: string;
 }
 
-type IState = {
+export type IState = {
   isSiderCollapsed: boolean;
   setSiderCollapsed: (isCollapsed: boolean) => void;
 

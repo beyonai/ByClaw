@@ -98,7 +98,17 @@ export default function Mobile(props: { hideHeader?: boolean }) {
     [agentList, employeesList]
   );
 
-  const { sendQuery, messageList, hasMore, getMessageList, onNext, updateMessage, deleteMessage } = useChat({
+  const {
+    sendQuery,
+    messageList,
+    hasMore,
+    getMessageList,
+    onNext,
+    updateMessage,
+    deleteMessage,
+    isSessionRunning,
+    cancelCurrentSession,
+  } = useChat({
     sessionId,
     agentType: myAgentType,
     addSession,
@@ -107,10 +117,13 @@ export default function Mobile(props: { hideHeader?: boolean }) {
   const lastMsg = last(messageList);
 
   const onCancel = useCallback(() => {
-    if ([IMessageState.Query, IMessageState.Answer].includes(lastMsg?.messageState as IMessageState)) {
-      lastMsg?.cancelSSE?.();
+    if (
+      isSessionRunning ||
+      [IMessageState.Query, IMessageState.Answer].includes(lastMsg?.messageState as IMessageState)
+    ) {
+      cancelCurrentSession();
     }
-  }, [lastMsg?.cancelSSE, lastMsg?.messageState]);
+  }, [cancelCurrentSession, isSessionRunning, lastMsg?.messageState]);
 
   const { disabledInput, multiChoicesList, setMultiChoicesList, multiChoicesMsgId, setMultiChoicesMsgId } =
     useEventEmitterHooks({
@@ -278,7 +291,7 @@ export default function Mobile(props: { hideHeader?: boolean }) {
                 })}
               >
                 <QueryInput
-                  messageState={lastMsg?.messageState}
+                  messageState={isSessionRunning ? IMessageState.Answer : lastMsg?.messageState}
                   onSend={onSend}
                   onCancel={onCancel}
                   myAgentType={myAgentType}

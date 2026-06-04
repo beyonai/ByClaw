@@ -97,10 +97,17 @@ final class SandboxRuntimeRequestFactory {
         Map<String, String> metadata = new LinkedHashMap<>();
         metadata.put("userCode", userCode);
         metadata.put("serviceKey", sandboxType);
+        return buildWhaleAgentListSandboxesRequest(DEFAULT_WHALE_AGENT_LIST_PAGE,
+            DEFAULT_WHALE_AGENT_LIST_PAGE_SIZE, metadata);
+    }
+
+    static WhaleAgentListSandboxesRequest buildWhaleAgentListSandboxesRequest(int page,
+                                                                              int pageSize,
+                                                                              Map<String, String> metadata) {
         return new WhaleAgentListSandboxesRequest(
-            DEFAULT_WHALE_AGENT_LIST_PAGE,
-            DEFAULT_WHALE_AGENT_LIST_PAGE_SIZE,
-            metadata);
+            page,
+            pageSize,
+            metadata != null ? metadata : Map.of());
     }
 
     static String extractGatewayToken(CreateSandboxRequest request) {

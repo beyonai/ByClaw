@@ -2,8 +2,17 @@ jest.mock('@/utils/messgae', () => ({
   isTextContentType: jest.fn((contentType?: number | string) => ['1001', '1002'].includes(`${contentType}`)),
 }));
 
+jest.mock('@/utils/websocket', () => ({
+  __esModule: true,
+  default: {
+    onMessage: jest.fn(),
+    offMessage: jest.fn(),
+  },
+}));
+
 import { SSEEventStatus, SSEMessageType } from '@/constants/message';
 
+import { compareStreamId, parseChatStreamMessage } from '../useSseSender/chatStream';
 import { answerDeltaHandler, reasoningLogHandler, resComIdsHandler } from '../useSseSender/util';
 
 describe('hooks/useSseSender/util', () => {
@@ -85,5 +94,23 @@ describe('hooks/useSseSender/util', () => {
       status: SSEEventStatus.done,
     });
     expect(resComIdsHandler('', SSEMessageType.text)).toBeNull();
+  });
+
+  it('parses and compares redis stream ids for chat stream messages', () => {
+    const parsed = parseChatStreamMessage({
+      event: 'answerDelta',
+      clientRequestId: 'answer-client-1',
+      streamId: '1710000000000-2',
+      data: JSON.stringify({
+        contentType: SSEMessageType.text,
+        choices: [{ delta: { content: 'hello' } }],
+      }),
+    });
+
+    expect(parsed?.clientRequestId).toBe('answer-client-1');
+    expect(parsed?.streamId).toBe('1710000000000-2');
+    expect(compareStreamId('1710000000000-2', '1710000000000-1')).toBe(1);
+    expect(compareStreamId('1710000000000-1', '1710000000000-2')).toBe(-1);
+    expect(compareStreamId('1710000000000-2', '1710000000000-2')).toBe(0);
   });
 });

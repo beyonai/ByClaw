@@ -13,6 +13,7 @@ jest.mock('../useSseSender/useSend', () => ({
   default: jest.fn(() => ({
     send: jest.fn(),
   })),
+  formatStreamPayload: jest.fn(() => ({})),
 }));
 
 jest.mock('../useChat/useMessage', () => ({
@@ -54,22 +55,15 @@ jest.mock('@/models/common/useAppStore', () => ({
   default: jest.fn(),
 }));
 
-jest.mock('@/utils/sseRequestManager', () => ({
-  sseRequestManager: {
-    canStartNewRequest: jest.fn(),
-    register: jest.fn(),
-    unregister: jest.fn(),
-  },
-}));
-
 jest.mock('@/service/message', () => ({
   stopChat: jest.fn(),
+  getChatRunningStatus: jest.fn(() => Promise.resolve([])),
+  getChatRunningSnapshot: jest.fn(() => Promise.resolve(null)),
 }));
 
 import { renderHook } from '@testing-library/react';
 import { useDispatch, useSelector } from '@umijs/max';
 import useAppStore from '@/models/common/useAppStore';
-import { sseRequestManager } from '@/utils/sseRequestManager';
 
 import useChat from '../useChat';
 
@@ -102,7 +96,6 @@ describe('hooks/useChat/index', () => {
       setUserCollectModalOpen: jest.fn(),
       setLoginModalOpen: jest.fn(),
     });
-    (sseRequestManager.canStartNewRequest as jest.Mock).mockReturnValue(true);
   });
 
   it('opens the login modal and aborts when user is not logged in', async () => {
@@ -170,18 +163,5 @@ describe('hooks/useChat/index', () => {
 
     await expect(result.current.sendQuery({ queryQuestion: 'hello' })).resolves.toBe(false);
     expect(setUserCollectModalOpen).toHaveBeenCalledWith(true);
-  });
-
-  it('blocks new sends when SSE concurrency is exhausted', async () => {
-    (sseRequestManager.canStartNewRequest as jest.Mock).mockReturnValue(false);
-
-    const { result } = renderHook(() =>
-      useChat({
-        sessionId: 's1',
-        addSession: jest.fn(),
-      } as any)
-    );
-
-    await expect(result.current.sendQuery({ queryQuestion: 'hello' })).resolves.toBe(false);
   });
 });

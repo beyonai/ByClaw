@@ -282,7 +282,7 @@
     <select id="countReconcileSandboxes" resultType="int">
         SELECT COUNT(*)
         FROM ss_sandbox_record
-        WHERE status != 'RELEASED'
+        WHERE status IN ('STARTING', 'RUNNING', 'RELEASING')
           AND sandbox_id IS NOT NULL
     </select>
 
@@ -290,6 +290,35 @@
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
         WHERE status != 'RELEASED'
+          AND sandbox_id IS NOT NULL
+        <if test="cursorTime != null and cursorId != null">
+          <![CDATA[
+          AND (update_time > #{cursorTime,jdbcType=TIMESTAMP}
+               OR (update_time = #{cursorTime,jdbcType=TIMESTAMP} AND id > #{cursorId,jdbcType=BIGINT}))
+          ]]>
+        </if>
+        ORDER BY update_time ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectReconcileGroups" resultType="com.iwhalecloud.byai.manager.entity.sandbox.SandboxReconcileGroup">
+        SELECT user_code AS "userCode",
+               sandbox_type AS "sandboxType",
+               COUNT(*) AS "recordCount"
+        FROM ss_sandbox_record
+        WHERE status IN ('STARTING', 'RUNNING', 'RELEASING')
+          AND sandbox_id IS NOT NULL
+        GROUP BY user_code, sandbox_type
+        ORDER BY MIN(update_time) ASC, user_code ASC, sandbox_type ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectReconcileSandboxesByGroup" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE user_code = #{userCode,jdbcType=VARCHAR}
+          AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
+          AND status IN ('STARTING', 'RUNNING', 'RELEASING')
           AND sandbox_id IS NOT NULL
         <if test="cursorTime != null and cursorId != null">
           <![CDATA[

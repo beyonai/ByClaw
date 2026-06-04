@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 // @ts-ignore
 import { useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
 import { Badge, Dropdown, Input, Popconfirm } from 'antd';
@@ -14,6 +14,7 @@ import ChatAvatar from '@/components/ChatAvatar';
 import { processSessionContent, formatTime } from './util';
 import { getAgentPath } from '@/utils/agent';
 import webSocketManager from '@/utils/websocket';
+import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 import useTracker from '@/hooks/useTracker';
 
 import { ISession } from '@/typescript/session';
@@ -29,6 +30,25 @@ interface ConnectState {
 const MyBadge = (props: { item: ISession }) => {
   const { item } = props;
   const { unreadCount = 0, mentionCount } = item;
+  const [isRunning, setIsRunning] = useState(() => chatSessionRuntimeManager.isSessionRunning(item.sessionId));
+
+  useEffect(() => {
+    const updateRunningState = () => {
+      setIsRunning(chatSessionRuntimeManager.isSessionRunning(item.sessionId));
+    };
+
+    updateRunningState();
+    return chatSessionRuntimeManager.subscribe(updateRunningState);
+  }, [item.sessionId]);
+
+  // 如果会话的状态是running，那么展示状态
+  if (isRunning) {
+    return (
+      <Badge dot status="processing" size="small" style={{ padding: '0 3px' }}>
+        <ChatAvatar session={item} size={32} />
+      </Badge>
+    );
+  }
 
   if (Number(mentionCount) > 0) {
     return (

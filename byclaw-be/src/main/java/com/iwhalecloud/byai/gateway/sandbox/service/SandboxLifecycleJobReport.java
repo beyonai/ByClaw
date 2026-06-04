@@ -9,6 +9,8 @@ import java.util.List;
  */
 public class SandboxLifecycleJobReport {
 
+    private static final int MAX_SANDBOX_SAMPLES = 20;
+
     private final String jobName;
     private int totalCandidates;
     private int scannedCount;
@@ -69,16 +71,36 @@ public class SandboxLifecycleJobReport {
 
     public void addAffectedSandbox(String sandboxRef) {
         affectedCount++;
-        affectedSandboxes.add(sandboxRef);
+        addSample(affectedSandboxes, sandboxRef);
     }
 
     public void addSkippedSandbox(String sandboxRef) {
         skippedCount++;
-        skippedSandboxes.add(sandboxRef);
+        addSample(skippedSandboxes, sandboxRef);
     }
 
     public void addFailedSandbox(String sandboxRef) {
         failedCount++;
-        failedSandboxes.add(sandboxRef);
+        addSample(failedSandboxes, sandboxRef);
+    }
+
+    public void merge(SandboxLifecycleJobReport other) {
+        if (other == null) {
+            return;
+        }
+        totalCandidates += other.totalCandidates;
+        scannedCount += other.scannedCount;
+        affectedCount += other.affectedCount;
+        skippedCount += other.skippedCount;
+        failedCount += other.failedCount;
+        other.affectedSandboxes.forEach(item -> addSample(affectedSandboxes, item));
+        other.skippedSandboxes.forEach(item -> addSample(skippedSandboxes, item));
+        other.failedSandboxes.forEach(item -> addSample(failedSandboxes, item));
+    }
+
+    private void addSample(List<String> samples, String sandboxRef) {
+        if (sandboxRef != null && samples.size() < MAX_SANDBOX_SAMPLES) {
+            samples.add(sandboxRef);
+        }
     }
 }
