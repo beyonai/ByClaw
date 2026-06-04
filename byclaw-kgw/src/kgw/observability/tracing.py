@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextvars
 import uuid
+from collections.abc import Callable
 
 import structlog
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -30,7 +31,7 @@ def current_trace_id() -> str | None:
 class TraceIdMiddleware(BaseHTTPMiddleware):
     """Inject/forward the trace id and bind it into the structlog context."""
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
         incoming = request.headers.get(TRACE_HEADER)
         trace_id = incoming or uuid.uuid4().hex
         token = _trace_id_var.set(trace_id)

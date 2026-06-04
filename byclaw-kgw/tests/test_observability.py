@@ -10,19 +10,21 @@ def test_logger_returns_structlog_bound_logger():
 
 
 def test_metrics_registry_singleton():
-    from kgw.observability.metrics import get_registry
+    from kgw.observability.metrics import REGISTRY, get_registry
 
-    r1 = get_registry()
-    r2 = get_registry()
-    assert r1 is r2
+    assert get_registry() is REGISTRY
 
 
-def test_metrics_registry_emits_default_metrics():
-    from kgw.observability.metrics import get_registry
-    from prometheus_client import generate_latest
+def test_metrics_registry_emits_output_with_registered_metric():
+    from prometheus_client import CollectorRegistry, Counter, generate_latest
 
-    output = generate_latest(get_registry()).decode("utf-8")
-    assert isinstance(output, str)
+    # Use a fresh registry per test to avoid cross-test pollution
+    test_registry = CollectorRegistry()
+    c = Counter("kgw_test_hits_total", "test counter", registry=test_registry)
+    c.inc()
+    output = generate_latest(test_registry).decode("utf-8")
+    assert "kgw_test_hits_total" in output
+    assert "1.0" in output
 
 
 async def test_trace_id_middleware_generates_when_missing():
