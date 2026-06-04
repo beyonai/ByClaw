@@ -15,6 +15,7 @@ dependencies = [
     "prometheus-client>=0.21.0",
     "structlog>=24.4.0",
     "opentelemetry-api>=1.28.0",
+    "by-framework>=0.1.13",
 ]
 
 [dependency-groups]

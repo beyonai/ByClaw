@@ -3,9 +3,10 @@
 Handles:
 - KB config resolution (MinIO via ConfigProvider)
 - Operation name mapping (gateway name → KB config name)
+- knCode translation: portal kn_code → backend resource_code
 - Circuit breaker enforcement
 - Auth header resolution (Redis via AuthProvider)
-- Upstream HTTP call (shared httpx client)
+- Upstream HTTP call: direct (domainURL) or by-framework discovery (domainName)
 - Prometheus metrics (dispatch_total, dispatch_latency, circuit_state)
 - Audit log + write history persistence (fire-and-forget)
 """
@@ -104,8 +105,9 @@ async def dispatch_json(
             operation=operation,
         )
 
-    # 3. Circuit breaker gate (keyed by endpoint URL)
-    cb = state.circuit_breakers.get(config.domain_url)
+    # 3. Circuit breaker gate (keyed by endpoint URL or service-discovery name)
+    cb_key = config.domain_url or config.domain_name
+    cb = state.circuit_breakers.get(cb_key)
     _set_circuit_metric(kn_code, cb)
     if not cb.before_call():
         raise CircuitOpen(f"circuit OPEN for {kn_code}", kn_code=kn_code)
@@ -115,42 +117,51 @@ async def dispatch_json(
         config.headers, user_code=user_id
     )
 
-    # 5. Build upstream URL
+    # 5. Build upstream URL and translate portal knCode → backend resource_code
     op_path = config.operation_path(kb_op) or _DEFAULT_KB_PATHS.get(kb_op, f"/{kb_op}")
-    url = f"{config.domain_url.rstrip('/')}{op_path}"
 
-    # 5b. Ensure knCode is present in body (KB backends require it)
-    if "knCode" not in body:
-        body = {**body, "knCode": kn_code}
+    # Replace portal kn_code with backend resource_code in the request body.
+    # KB backends use their own resourceCode as knCode, not the portal's ID.
+    backend_body = dict(body)
+    if "knCode" in backend_body or "knCodeList" not in backend_body:
+        backend_body["knCode"] = config.resource_code
+    if "knCodeList" in backend_body:
+        backend_body["knCodeList"] = [config.resource_code]
 
-    # 6. Call KB backend
+    # 6. Call KB backend (direct mode or by-framework service discovery)
     result_code = "-1"
     resp_body: dict[str, Any] = {}
     try:
-        http: httpx.AsyncClient = state.http
-        response = await http.post(url, json=body, headers=headers)
-        if response.status_code in (401, 403):
-            cb.record_failure()
-            _set_circuit_metric(kn_code, cb)
-            raise BackendAuthFailed(
-                f"backend auth failed (HTTP {response.status_code})", kn_code=kn_code
-            )
+        resp_body = await _call_backend(
+            config=config,
+            op_path=op_path,
+            body=backend_body,
+            headers=headers,
+            http=state.http,
+        )
         cb.record_success()
         _set_circuit_metric(kn_code, cb)
-        resp_body = response.json()
         result_code = str(resp_body.get("resultCode", "0"))
     except (KBNotFound, OperationNotSupported, CircuitOpen, BackendAuthFailed):
         raise
     except httpx.TimeoutException as exc:
         cb.record_failure()
         _set_circuit_metric(kn_code, cb)
-        raise UpstreamTimeout(f"timeout calling {url}", kn_code=kn_code) from exc
+        raise UpstreamTimeout(
+            f"timeout calling {config.domain_url or config.domain_name}{op_path}",
+            kn_code=kn_code,
+        ) from exc
     except (httpx.ConnectError, httpx.NetworkError) as exc:
         cb.record_failure()
         _set_circuit_metric(kn_code, cb)
         raise UpstreamConnectError(
-            f"connect error calling {url}", kn_code=kn_code
+            f"connect error calling {config.domain_url or config.domain_name}{op_path}",
+            kn_code=kn_code,
         ) from exc
+    except _BackendAuthError as exc:
+        cb.record_failure()
+        _set_circuit_metric(kn_code, cb)
+        raise BackendAuthFailed(str(exc), kn_code=kn_code) from exc
 
     latency_ms = int((time.perf_counter() - started) * 1000)
 
@@ -213,3 +224,94 @@ async def _write_history(pool: Any, *, kn_code: str, file_path: str) -> None:
 
 def _set_circuit_metric(kn_code: str, cb: Any) -> None:
     CIRCUIT_STATE.labels(kn_code=kn_code).set(cb.state.value)
+
+
+class _BackendAuthError(Exception):
+    """Internal sentinel: KB returned 401/403."""
+
+
+async def _call_backend(
+    *,
+    config: Any,  # KbConfig
+    op_path: str,
+    body: dict[str, Any],
+    headers: dict[str, str],
+    http: httpx.AsyncClient,
+) -> dict[str, Any]:
+    """Execute the upstream POST in direct or service-discovery mode.
+
+    Direct mode:  config.domain_url is set → POST to domain_url + op_path.
+    Discovery mode: config.domain_name is set and domain_url is empty →
+                    use by-framework DiscoveryHttpClient.
+    """
+    if config.domain_url:
+        url = config.domain_url.rstrip("/") + "/" + op_path.lstrip("/")
+        response = await http.post(url, json=body, headers=headers)
+        if response.status_code in (401, 403):
+            raise _BackendAuthError(
+                f"backend auth failed (HTTP {response.status_code}) for {url}"
+            )
+        return response.json()
+
+    # Service-discovery mode via by-framework
+    if not config.domain_name:
+        raise UpstreamConnectError(
+            "KB config has neither domainURL nor domainName",
+            kn_code=config.kn_code,
+        )
+    return await _call_via_discovery(
+        domain_name=config.domain_name,
+        op_path=op_path,
+        body=body,
+        headers=headers,
+    )
+
+
+async def _call_via_discovery(
+    *,
+    domain_name: str,
+    op_path: str,
+    body: dict[str, Any],
+    headers: dict[str, str],
+) -> dict[str, Any]:
+    """POST to a KB backend via by-framework service discovery.
+
+    Uses DiscoveryClient (Redis-backed) to resolve the service name to a
+    physical host:port, then POSTs JSON. The discovery client is created
+    and closed per-call (no persistent state needed — gateway is stateless
+    for service discovery).
+    """
+    from by_framework.common.redis_client import init_redis
+    from by_framework.core.discovery import DiscoveryClient
+    from by_framework.util.discovery_http_client import DiscoveryHttpClient
+    from kgw.settings import get_settings
+
+    settings = get_settings()
+    redis_client = init_redis(
+        host=settings.redis_host,
+        port=settings.redis_port,
+        db=settings.redis_database,
+        password=settings.redis_password or None,
+        username=settings.redis_username or None,
+        decode_responses=True,
+    )
+    discovery_client = DiscoveryClient(redis_client=redis_client, cache_interval=5)
+    try:
+        async with DiscoveryHttpClient(discovery_client) as client:
+            resp = await client.post(
+                domain_name,
+                op_path,
+                json=body,
+                headers=headers or None,
+            )
+        if not resp.is_success:
+            raise _BackendAuthError(
+                f"backend returned HTTP {resp.status_code} via discovery for {domain_name}{op_path}"
+            )
+        if not isinstance(resp.data, dict):
+            raise ValueError(
+                f"discovery response body is not a JSON object: {type(resp.data)}"
+            )
+        return resp.data
+    finally:
+        await discovery_client.close()

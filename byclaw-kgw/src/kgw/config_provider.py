@@ -22,10 +22,23 @@ _log = get_logger(__name__)
 
 @dataclass(frozen=True)
 class KbConfig:
-    """Parsed KB configuration record."""
+    """Parsed KB configuration record.
+
+    ``kn_code``      — portal-assigned unique KB identifier (used for routing,
+                       audit, and circuit-breaker keying).
+    ``resource_code``— backend KB identifier embedded in KG_DOC (the value the
+                       KB service itself recognises as its own knCode).  When
+                       dispatching requests the body's knCode/knCodeList must
+                       use this value, NOT the portal kn_code.
+    ``domain_url``   — full HTTP base URL for direct mode (may be empty).
+    ``domain_name``  — by-framework service-discovery name for discovery mode.
+                       Exactly one of domain_url / domain_name must be set.
+    """
 
     kn_code: str
+    resource_code: str
     domain_url: str
+    domain_name: str
     headers: dict[str, str]
     operations: frozenset[str]
     operation_paths: dict[str, str]
@@ -98,8 +111,20 @@ class KbConfigProvider:
 
 
 def _parse_kb_config(kn_code: str, payload: dict[str, Any]) -> KbConfig:
-    """Translate the portal's KG_DOC JSON shape into a KbConfig record."""
+    """Translate the portal's KG_DOC JSON shape into a KbConfig record.
+
+    The portal stores two different identifiers in KG_DOC:
+    - ``resourceId``  (the MinIO object key suffix, used as kn_code here)
+    - ``resourceCode``(the identifier the KB backend recognises — used in
+                       the knCode/knCodeList body field when calling the KB)
+
+    Routing mode depends on which URL field is populated:
+    - ``domainURL``  set → direct HTTP mode (use domain_url)
+    - ``domainName`` set → by-framework service-discovery mode (use domain_name)
+    """
+    resource_code = str(payload.get("resourceCode") or kn_code)
     domain_url = str(payload.get("domainURL") or payload.get("endpointUrl") or "")
+    domain_name = str(payload.get("domainName") or "")
     raw_headers = payload.get("headers") or {}
     headers: dict[str, str] = {str(k): str(v) for k, v in raw_headers.items()}
 
@@ -120,7 +145,9 @@ def _parse_kb_config(kn_code: str, payload: dict[str, Any]) -> KbConfig:
 
     return KbConfig(
         kn_code=kn_code,
+        resource_code=resource_code,
         domain_url=domain_url,
+        domain_name=domain_name,
         headers=headers,
         operations=frozenset(operation_paths.keys()),
         operation_paths=operation_paths,

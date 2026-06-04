@@ -22,7 +22,9 @@ from kgw.resilience.circuit_breaker import CircuitBreakerRegistry
 
 _KB_CONFIG = KbConfig(
     kn_code="test_kb",
+    resource_code="backend_kb_1",
     domain_url="http://kb.test",
+    domain_name="",
     headers={"Authorization": "${token}"},
     operations=frozenset(
         {
@@ -265,3 +267,108 @@ async def test_dispatch_build_status_no_write_history():
     await asyncio.sleep(0)
     # pool.connection should NOT be called for buildStatus (not a write-history op)
     state.pool.connection.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_translates_kn_code_to_resource_code():
+    """Portal kn_code must be replaced with backend resource_code in the request body."""
+    state = _make_state()
+    req = _make_request(state)
+    captured_body = {}
+    with respx.mock:
+
+        def _capture(request):
+            import json
+
+            captured_body.update(json.loads(request.content))
+            return httpx.Response(
+                200, json={"resultCode": "0", "resultMsg": "ok", "resultObject": {}}
+            )
+
+        respx.post("http://kb.test/api/v1/directories/create").mock(
+            side_effect=_capture
+        )
+        state.http = httpx.AsyncClient()
+        await dispatch_json(
+            req,
+            operation="directoryCreate",
+            kn_code="test_kb",  # portal ID
+            user_id="u1",
+            body={"knCode": "test_kb", "directoryPath": "/docs"},
+        )
+    # The backend should receive resource_code ("backend_kb_1"), not portal kn_code
+    assert captured_body.get("knCode") == "backend_kb_1"
+
+
+# ---- by-framework service-discovery mode ----
+
+_KB_CONFIG_DISCOVERY = KbConfig(
+    kn_code="svc_kb",
+    resource_code="svc_backend_1",
+    domain_url="",  # no direct URL → discovery mode
+    domain_name="kb-service-a",
+    headers={},
+    operations=frozenset({"directoryCreate"}),
+    operation_paths={"directoryCreate": "/api/v1/directories/create"},
+    raw={},
+)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_discovery_mode_success():
+    """When domain_url is empty and domain_name is set, use DiscoveryHttpClient."""
+    from unittest.mock import patch
+
+    state = _make_state(kb_config=_KB_CONFIG_DISCOVERY)
+    req = _make_request(state)
+    state.http = httpx.AsyncClient()
+
+    captured: dict = {}
+
+    async def _fake_discovery(*, domain_name, op_path, body, headers):  # pylint: disable=unused-argument
+        captured["domain_name"] = domain_name
+        captured["op_path"] = op_path
+        captured["body"] = body
+        return {"resultCode": "0", "resultMsg": "ok", "resultObject": {}}
+
+    with patch("kgw.dispatcher._call_via_discovery", side_effect=_fake_discovery):
+        result = await dispatch_json(
+            req,
+            operation="directoryCreate",
+            kn_code="svc_kb",
+            user_id="u1",
+            body={"knCode": "svc_kb"},
+        )
+
+    assert result["resultCode"] == "0"
+    assert captured["domain_name"] == "kb-service-a"
+    assert captured["op_path"] == "/api/v1/directories/create"
+    # Verify resource_code was substituted in the body (not portal kn_code)
+    assert captured["body"]["knCode"] == "svc_backend_1"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_discovery_mode_no_domain_raises():
+    """If both domain_url and domain_name are empty, raise UpstreamConnectError."""
+    empty_cfg = KbConfig(
+        kn_code="empty_kb",
+        resource_code="empty_1",
+        domain_url="",
+        domain_name="",
+        headers={},
+        operations=frozenset({"directoryCreate"}),
+        operation_paths={"directoryCreate": "/api/v1/directories/create"},
+        raw={},
+    )
+    state = _make_state(kb_config=empty_cfg)
+    req = _make_request(state)
+    state.http = httpx.AsyncClient()
+
+    with pytest.raises(UpstreamConnectError):
+        await dispatch_json(
+            req,
+            operation="directoryCreate",
+            kn_code="empty_kb",
+            user_id="u1",
+            body={},
+        )

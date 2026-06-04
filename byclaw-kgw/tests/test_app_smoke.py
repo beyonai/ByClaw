@@ -77,7 +77,9 @@ def _make_kb_config(kn_code: str, domain_url: str, headers: dict):
 
     return KbConfig(
         kn_code=kn_code,
+        resource_code=kn_code,
         domain_url=domain_url,
+        domain_name="",
         headers=headers,
         operations=frozenset(["knowledgeSearch"]),
         operation_paths={"knowledgeSearch": "/api/v1/knowledgeItems/search"},

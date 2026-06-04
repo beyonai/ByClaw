@@ -77,7 +77,9 @@ async def test_get_kb_config_returns_parsed_payload():
 
     assert config is not None
     assert config.kn_code == "hr_policy"
+    assert config.resource_code == "hr_policy"  # matches resourceCode in payload
     assert config.domain_url == "http://kb-hr.internal:8080"
+    assert config.domain_name == "HR 政策制度库"
     assert config.headers == {"Authorization": "${Authorization}"}
     assert config.operations == {"knowledgeSearch", "fileImport"}
     assert config.operation_path("knowledgeSearch") == "/api/v1/knowledgeItems/search"
