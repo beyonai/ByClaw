@@ -5,12 +5,11 @@
  * 封装了SendHelper实例，提供统一的消息发送接口
  * 主要用于聊天功能，支持会话管理和回调处理
  */
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import DOMPurify from 'dompurify'; // HTML 净化器
 
 // @ts-ignore
-import { getLocale, useDispatch } from '@umijs/max';
-import { ISession } from '@/typescript/session';
+import { getLocale } from '@umijs/max';
 import webSocketManager from '@/utils/websocket';
 
 export { formatStreamPayload } from './chatStream';
@@ -43,19 +42,6 @@ type IParam = {
 export default function useSend(params: IParam) {
   // 解构参数，设置默认值
   const { language = 'cn', sessionId } = params;
-
-  const dispatch = useDispatch();
-  const updateSession = useCallback(
-    (session: Partial<ISession>) => {
-      dispatch({
-        type: 'session/updateSession',
-        payload: session,
-      });
-    },
-    [dispatch]
-  );
-  const updateSessionRef = useRef(updateSession);
-  updateSessionRef.current = updateSession;
 
   /**
    * 发送消息函数

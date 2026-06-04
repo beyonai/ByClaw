@@ -104,7 +104,6 @@ export type IEffect = {
   updateSessionMessageList: (sessionId: string, messageList: MessageListUpdater) => void;
   getSessionMessage: (sessionId: string) => Promise<IMessageInfo>;
   getMoreSessionMessage: (sessionId: string) => Promise<IMessageInfo>;
-  getSessionMessageByCache: (sessionId: string) => IMessageInfo;
   getLatestSessionMessage: (sessionId: string) => Promise<IMessageInfo | undefined>;
   cleanSessionMessage: (sessionId: string) => void;
 };
@@ -320,17 +319,6 @@ export default {
         ...state,
         sessionListMap: newSessionListMap,
       };
-    },
-    getSessionMessageByCache(state: IState, action: { payload: { sessionId: string } }) {
-      const sessionId = getSessionId(action);
-
-      const mySessionListMap = state.sessionListMap;
-      let cache = mySessionListMap.get(sessionId);
-
-      if (!cache) {
-        cache = getInitMessageInfo();
-      }
-      return cache;
     },
     setInitialSessionDataToLocateMsg(
       state: IState,

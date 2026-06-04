@@ -97,20 +97,6 @@ describe('models/useMessageStore', () => {
     expect(second.sessionListMap.get('s1').total).toBe(3);
   });
 
-  it('getSessionMessageByCache returns default when missing', () => {
-    const result = reducers.getSessionMessageByCache({ sessionListMap: new Map() } as any, {
-      payload: { sessionId: 'missing' },
-    });
-
-    expect(result).toEqual({
-      list: [],
-      pageNum: 1,
-      pageSize: 20,
-      total: 1,
-      pageRange: [1, 1],
-    });
-  });
-
   it('setInitialSessionDataToLocateMsg stores target message paging info', () => {
     const map = new Map();
     const next = reducers.setInitialSessionDataToLocateMsg({ sessionListMap: map } as any, {
