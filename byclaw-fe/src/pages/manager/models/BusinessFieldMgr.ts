@@ -1,10 +1,5 @@
-import {
-  getFieldTree,
-  createCatalog,
-  updateCatalog,
-  deleteCatalog,
-  queryResourceListByCatalogId,
-} from '@/pages/manager/service/BusinessFieldMgr';
+import { getFieldTree, createCatalog, updateCatalog, deleteCatalog } from '@/pages/manager/service/BusinessFieldMgr';
+import { listResourceUseAuth } from '@/pages/manager/service/resources';
 
 type EffectCallback = (response: any) => void;
 
@@ -90,7 +85,7 @@ export default {
     },
     *getFieldAssets({ payload, success, fail }: EffectAction, { call }: EffectHelpers): EffectGenerator {
       try {
-        const response = normalizeResponse(yield call(queryResourceListByCatalogId, payload));
+        const response = normalizeResponse(yield call(listResourceUseAuth, payload));
         if (response.code === 0) {
           success?.(response);
         } else {

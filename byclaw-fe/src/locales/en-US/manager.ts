@@ -232,6 +232,7 @@ export default {
   // Digital Employee and Digital Resource
   'orgMgr.digital.status': 'Status',
   'orgMgr.digital.createTime': 'Creation Time',
+  'orgMgr.digital.createUserName': 'Creation User',
   'orgMgr.digital.draft': 'Draft',
   'orgMgr.digital.reviewing': 'Under Review',
   'orgMgr.digital.published': 'Published',
