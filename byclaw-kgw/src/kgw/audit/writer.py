@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from kgw.observability.logger import get_logger
-from psycopg.types.json import Json
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 _log = get_logger(__name__)
@@ -150,7 +150,7 @@ class AuditWriter:
     async def _write_one(self, entry: AuditEntry) -> None:
         params = asdict(entry)
         payload = params.get("payload_redacted")
-        params["payload_redacted"] = Json(payload) if payload is not None else None
+        params["payload_redacted"] = Jsonb(payload) if payload is not None else None
         async with self._pool.connection() as conn:
             try:
                 await conn.execute(_INSERT_SQL, params)

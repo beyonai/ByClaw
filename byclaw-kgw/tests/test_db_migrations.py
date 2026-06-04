@@ -28,14 +28,19 @@ async def test_migration_runner_applies_files_once(pg_dsn: str, tmp_path: Path):
 
         async with pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT to_regclass('kgw_test_users') AS t1, "
-                "to_regclass('kgw_test_orders') AS t2"
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM information_schema.tables
+                     WHERE table_name = 'kgw_test_users'
+                       AND table_schema = current_schema()) AS t1,
+                    (SELECT COUNT(*) FROM information_schema.tables
+                     WHERE table_name = 'kgw_test_orders'
+                       AND table_schema = current_schema()) AS t2
+                """
             )
             row = await cur.fetchone()
-            assert (
-                row["t1"] is not None
-            )  # table exists (to_regclass returns NULL if missing)
-            assert row["t2"] is not None
+            assert row["t1"] >= 1, "kgw_test_users table not found"
+            assert row["t2"] >= 1, "kgw_test_orders table not found"
     finally:
         async with pool.connection() as conn:
             await conn.execute("DROP TABLE IF EXISTS kgw_test_users")
