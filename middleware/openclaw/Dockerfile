@@ -1,4 +1,4 @@
-FROM hub-nj.iwhalecloud.com/dmcit2024/node:22-slim AS ext-builder
+FROM node:22-slim AS ext-builder
 
 WORKDIR /build
 
@@ -110,7 +110,6 @@ RUN set -eux; \
         fonts-wqy-microhei \
         fonts-wqy-zenhei \
         novnc \
-        websockify \
         xauth \
         x11vnc \
         xvfb \
@@ -158,7 +157,6 @@ RUN set -eux; \
         rm -f /tmp/opencli-extension.zip; \
         chromium --version; \
         x11vnc -version; \
-        command -v websockify; \
         opencli --version; \
         test -f /opt/opencli/extension/manifest.json; \
         ;; \
@@ -175,7 +173,10 @@ RUN set -eux; \
     python3 --version | grep -q 'Python 3.12'; \
     python3 -m pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
     python3 -m pip config --global set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
-    python3 -m pip install --no-cache-dir redis
+    python3 -m pip install --no-cache-dir redis websockify; \
+    rm -f /usr/bin/websockify; \
+    ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
+    websockify --help >/dev/null
 
 COPY --from=ext-builder /build/out/ /app/dist-runtime/extensions/
 
