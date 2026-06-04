@@ -184,7 +184,6 @@ RUN ln -s /app /app/node_modules/openclaw
 
 
 COPY middleware/openclaw/skills/ /app/skills/
-RUN rm -rf /app/skills/gbrain
 
 
 COPY middleware/openclaw/linux-amd64-filebrowser/filebrowser /usr/local/bin/filebrowser
