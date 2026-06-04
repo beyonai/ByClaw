@@ -355,17 +355,17 @@ function ApprovalForm(props: IProps) {
   );
 }
 
-// const ApprovalFormWarpper = (props: IProps) => {
-//   const { EventEmitter } = useGlobal();
+const ApprovalFormWarpper = (props: IProps) => {
+  const { EventEmitter } = useGlobal();
 
-//   useEffect(() => {
-//     if (props.message.messageState === IMessageState.Answer) {
-//       EventEmitter.emit('beyond-easyconfirm-set-approvalform-item', props);
-//     }
-//   }, []);
+  useEffect(() => {
+    if (props.message.messageState === IMessageState.Answer) {
+      EventEmitter.emit('beyond-easyconfirm-set-approvalform-item', props);
+    }
+  }, []);
 
-//   return <ApprovalForm {...props} />;
-// };
+  return <ApprovalForm {...props} />;
+};
 
-export default ApprovalForm;
-// export default ApprovalFormWarpper;
+// export default ApprovalForm;
+export default ApprovalFormWarpper;
