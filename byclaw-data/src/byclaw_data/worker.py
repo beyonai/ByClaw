@@ -2282,8 +2282,36 @@ class DataCloudWorker(GatewayWorker):
                 ),
                 # per-agent LLM 配置（非 None 时覆盖环境变量）
                 **({"llm_config": _agent_llm_config} if _agent_llm_config else {}),
-            }
+            },
+            "recursion_limit": 100,
         }
+
+        try:
+            from datacloud_analysis.langfuse_handler import get_langfuse_callback  # noqa: PLC0415
+
+            _lf_handler = get_langfuse_callback()
+            if _lf_handler is not None:
+                config["callbacks"] = [_lf_handler]
+                config["metadata"] = {
+                    "langfuse_user_id": str(
+                        getattr(command.header, "user_code", "") or ""
+                    ),
+                    "langfuse_session_id": str(context.session_id or thread_id),
+                    "langfuse_trace_name": "datacloud-agent",
+                    "langfuse_tags": [
+                        f"agent_id:{by_agent_id}",
+                        f"agent_name:{by_agent_name or ''}",
+                    ],
+                    "thread_id": thread_id,
+                    "agent_id": str(by_agent_id or ""),
+                }
+                # 注入请求级工具调用收集列表，react_loop.py 往里追加
+                from datacloud_analysis.langfuse_handler import current_tool_spans  # noqa: PLC0415
+                _lf_spans_list: list[dict[str, Any]] = []
+                current_tool_spans.set(_lf_spans_list)
+        except Exception:
+            logger.warning("langfuse callback inject failed", exc_info=True)
+
         context._langgraph_thread_id = thread_id
 
         if _paradigm_resume_value is not None:
@@ -2508,6 +2536,87 @@ class DataCloudWorker(GatewayWorker):
                 reco_task=reco_task,
                 is_paradigm_resume=(_paradigm_resume_value is not None),
             )
+            # ── Langfuse：补写 trace input / output ──────────────────────────
+            try:
+                _lf_callbacks = config.get("callbacks") or []
+                _lf_handler = next(
+                    (
+                        cb
+                        for cb in _lf_callbacks
+                        if type(cb).__name__ == "LangchainCallbackHandler"
+                    ),
+                    None,
+                )
+                if _lf_handler is not None and getattr(_lf_handler, "last_trace_id", None):
+                    _user_q = _latest_user_text_from_content(
+                        command.content,
+                        locale=getattr(context, "locale", _FALLBACK_LOCALE),
+                    ).strip()
+                    _answer = (
+                        str(stream_result.get("conclusion") or "").strip()
+                        if isinstance(stream_result, dict)
+                        else ""
+                    )
+                    from langfuse import get_client as _lf_get_client  # noqa: PLC0415
+                    import datetime as _dt  # noqa: PLC0415
+                    import uuid as _uuid  # noqa: PLC0415
+                    from langfuse.api.ingestion import (  # noqa: PLC0415
+                        IngestionEvent_TraceCreate,
+                        IngestionEvent_SpanCreate,
+                        CreateSpanBody,
+                        TraceBody,
+                    )
+
+                    _batch: list[Any] = [
+                        IngestionEvent_TraceCreate(
+                            id=str(_uuid.uuid4()),
+                            timestamp=_dt.datetime.now(_dt.timezone.utc).isoformat(),
+                            body=TraceBody(
+                                id=_lf_handler.last_trace_id,
+                                input=_user_q,
+                                output=_answer,
+                            ),
+                        )
+                    ]
+                    _lf_tool_spans = (
+                        stream_result.get("lf_tool_spans") or []
+                        if isinstance(stream_result, dict)
+                        else []
+                    )
+                    # 合并 react_loop.py 收集的业务工具调用（挂在最近 LLM obs 下）
+                    try:
+                        from datacloud_analysis.langfuse_handler import current_tool_spans as _cts  # noqa: PLC0415
+                        _react_spans = _cts.get() or []
+                        for _rs in _react_spans:
+                            _lf_tool_spans.append({
+                                **_rs,
+                                "parent_obs_id": _lf_last_llm_obs_id,
+                            })
+                    except Exception:
+                        pass
+                    for _span in _lf_tool_spans:
+                        _batch.append(
+                            IngestionEvent_SpanCreate(
+                                id=str(_uuid.uuid4()),
+                                timestamp=_span.get("start_time") or _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                                body=CreateSpanBody(
+                                    id=str(_uuid.uuid4()),
+                                    trace_id=_lf_handler.last_trace_id,
+                                    parent_observation_id=_span.get("parent_obs_id") or None,
+                                    name=str(_span.get("name") or "tool"),
+                                    input=_span.get("input"),
+                                    output=str(_span.get("output") or "") if _span.get("output") is not None else None,
+                                    start_time=_span.get("start_time") or _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                                    end_time=_span.get("end_time"),
+                                ),
+                            )
+                        )
+                    _lf_get_client().api.ingestion.batch(batch=_batch)
+            except Exception:
+                logger.debug("langfuse trace io update failed", exc_info=True)
+            # lf_tool_spans 仅供 Langfuse 内部使用，不应序列化进框架返回值
+            if isinstance(stream_result, dict):
+                stream_result.pop("lf_tool_spans", None)
             if isinstance(command, ResumeCommand) and resume_cache_key:
                 self._cache_resume_result(resume_cache_key, stream_result)
             if (
@@ -2549,6 +2658,7 @@ class DataCloudWorker(GatewayWorker):
         stream_event_count = 0
         phase_emitted: set[str] = set()
         last_emit_time_ref: list[float] = [_now_monotonic()]
+        _respond_final_answer: str = ""  # respond 节点写入的格式化最终回答
         heartbeat_stop = asyncio.Event()
         heartbeat_task = asyncio.create_task(
             _heartbeat_loop(context, heartbeat_stop, last_emit_time_ref)
@@ -2556,6 +2666,10 @@ class DataCloudWorker(GatewayWorker):
         # paradigm resume 时，把标志注入 config，供 execution_node 读取
         if is_paradigm_resume:
             config.setdefault("configurable", {})["_is_paradigm_resume"] = True
+
+        # Langfuse 工具调用收集：on_tool_start/end 事件 → 图执行后批量写 span
+        _lf_tool_spans: list[dict[str, Any]] = []
+        _lf_last_llm_obs_id: str | None = None  # 最近一次 LLM 调用的 Langfuse observation id
 
         try:
             logger.info(
@@ -2569,6 +2683,79 @@ class DataCloudWorker(GatewayWorker):
                 stream_event_count += 1
                 await context.check_cancelled()
                 kind: str = str(event["event"])
+
+                if kind == "on_chat_model_start":
+                    # _runs 在此时刚写入，记录 LLM 调用的 Langfuse observation id
+                    _lf_cbs_llm = config.get("callbacks") or []
+                    _lf_h_llm = next(
+                        (cb for cb in _lf_cbs_llm if type(cb).__name__ == "LangchainCallbackHandler"),
+                        None,
+                    )
+                    if _lf_h_llm is not None:
+                        _llm_run_id_str = str(event.get("run_id") or "")
+                        if _llm_run_id_str:
+                            try:
+                                _llm_runs = getattr(_lf_h_llm, "_runs", {})
+                                _llm_obs = _llm_runs.get(__import__("uuid").UUID(_llm_run_id_str))
+                                if _llm_obs is not None:
+                                    _lf_last_llm_obs_id = str(getattr(_llm_obs, "id", "") or "")
+                            except Exception:
+                                pass
+
+                if kind == "on_tool_start":
+                    _parent_run_id_str = str(event.get("parent_run_id") or "")
+                    _parent_obs_id: str | None = None
+                    if _parent_run_id_str:
+                        _lf_cbs = config.get("callbacks") or []
+                        _lf_h = next(
+                            (cb for cb in _lf_cbs if type(cb).__name__ == "LangchainCallbackHandler"),
+                            None,
+                        )
+                        if _lf_h is not None:
+                            try:
+                                _runs = getattr(_lf_h, "_runs", {})
+                                _parent_obs = _runs.get(__import__("uuid").UUID(_parent_run_id_str))
+                                if _parent_obs is not None:
+                                    _parent_obs_id = str(getattr(_parent_obs, "id", "") or "")
+                            except Exception:
+                                pass
+                    # parent_run_id 为空时回退到最近一次 LLM 调用的 observation id
+                    if not _parent_obs_id:
+                        _parent_obs_id = _lf_last_llm_obs_id
+                    _lf_tool_spans.append({
+                        "name": str(event.get("name") or ""),
+                        "run_id": str(event.get("run_id") or ""),
+                        "parent_run_id": _parent_run_id_str,
+                        "parent_obs_id": _parent_obs_id,
+                        "input": (event.get("data") or {}).get("input"),
+                        "start_time": __import__("datetime").datetime.now(
+                            __import__("datetime").timezone.utc
+                        ).isoformat(),
+                    })
+                elif kind == "on_tool_end":
+                    _run_id = str(event.get("run_id") or "")
+                    for _span in reversed(_lf_tool_spans):
+                        if _span.get("run_id") == _run_id and "output" not in _span:
+                            _raw_out = (event.get("data") or {}).get("output")
+                            if _raw_out is None:
+                                _span["output"] = None
+                            elif isinstance(_raw_out, str):
+                                _span["output"] = _raw_out
+                            else:
+                                try:
+                                    import json as _json_mod
+                                    _span["output"] = _json_mod.dumps(
+                                        _raw_out if isinstance(_raw_out, (dict, list))
+                                        else str(_raw_out),
+                                        ensure_ascii=False,
+                                        default=str,
+                                    )
+                                except Exception:
+                                    _span["output"] = str(_raw_out)
+                            _span["end_time"] = __import__("datetime").datetime.now(
+                                __import__("datetime").timezone.utc
+                            ).isoformat()
+                            break
 
                 if kind == "on_chat_model_end":
                     node_name = str(
@@ -2634,6 +2821,13 @@ class DataCloudWorker(GatewayWorker):
                                             event_type=EventType.REASONING_LOG_START.value,
                                             content_type=SseReasonMessageType.think_text.value,
                                         )
+
+                        if _node == "respond":
+                            _resp_output = (event.get("data") or {}).get("output") or {}
+                            if isinstance(_resp_output, dict):
+                                _fa = str(_resp_output.get("final_answer") or "").strip()
+                                if _fa:
+                                    _respond_final_answer = _fa
 
                 elif kind == "on_custom_event":
                     _ce_name = event.get("name", "")
@@ -2888,7 +3082,9 @@ class DataCloudWorker(GatewayWorker):
             #   1. emit_chunk 把旧回复推送给用户（当前轮末尾多出上一轮内容）
             #   2. conclusion 携带旧回复，被 GatewayWorker 在下一轮二次推送
             final_message = None
-            if snapshot and snapshot.values:
+            if _respond_final_answer:
+                final_message = _respond_final_answer
+            elif snapshot and snapshot.values:
                 _ans = str(snapshot.values.get("final_answer") or "").strip()
                 if not _ans:
                     react_final_snap = snapshot.values.get("react_final") or {}
@@ -2917,7 +3113,7 @@ class DataCloudWorker(GatewayWorker):
                 len(final_message) if final_message else 0,
             )
             # conclusion 始终携带，父 Agent 恢复时可以从 reply_data 里取到结论文本
-            return {"status": "done", "conclusion": final_message or ""}
+            return {"status": "done", "conclusion": final_message or "", "lf_tool_spans": _lf_tool_spans}
         finally:
             heartbeat_stop.set()
             heartbeat_task.cancel()

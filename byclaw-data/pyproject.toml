@@ -10,6 +10,7 @@ dependencies = [
     "langchain-openai>=1.1.11",
     "by-framework>=0.2.0",
     "by-framework-history-byclaw>=0.0.3",
+    "langfuse>=2.0.0",
 ]
 
 [project.scripts]
