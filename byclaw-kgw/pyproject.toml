@@ -27,6 +27,5 @@ dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=1.0.0",
     "respx>=0.21.0",
-    "testcontainers[postgres,redis,minio]>=4.8.0",
     "fakeredis>=2.26.0",
 ]
