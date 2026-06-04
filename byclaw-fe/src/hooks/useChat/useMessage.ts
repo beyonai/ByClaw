@@ -72,6 +72,7 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
         type: 'messageStore/updateSessionMessageList',
         payload: {
           sessionId: targetSessionId,
+          allowCreateSession: targetSessionId === DRAFT_SESSION_ID,
           // callback的形式，拿到reducer里面最新的messageList，以防连续调用updateMessage时，后者覆盖前者
           messageList: (messageList: IMessage[]) => {
             let list = [...(messageList || [])];
@@ -164,10 +165,10 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
     (newSessionId: string) => {
       if (!curSessionId.current || curSessionId.current === DRAFT_SESSION_ID) {
         dispatch({
-          type: 'messageStore/updateSessionMessageList',
+          type: 'messageStore/copyFromSession',
           payload: {
-            sessionId: newSessionId,
-            messageList: [...messageListRef.current],
+            fromSessionId: curSessionId.current || DRAFT_SESSION_ID,
+            targetSessionId: newSessionId,
           },
         });
 
