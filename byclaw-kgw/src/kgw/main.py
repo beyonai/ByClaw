@@ -1,0 +1,128 @@
+"""FastAPI application factory + lifespan.
+
+The app holds long-lived resources in ``app.state``:
+
+  * pool   — psycopg AsyncConnectionPool
+  * redis  — redis.asyncio.Redis
+  * http   — shared httpx AsyncClient
+  * config_provider — KbConfigProvider
+  * auth_provider   — AuthProvider
+  * audit  — AuditWriter
+"""
+
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+import redis.asyncio as redis_async
+from fastapi import FastAPI
+from fastapi.requests import Request
+from fastapi.responses import JSONResponse, Response
+from kgw.audit import AuditWriter
+from kgw.auth_provider import AuthProvider
+from kgw.config_provider import KbConfigProvider
+from kgw.db import build_pool, run_migrations
+from kgw.envelope import KgwError
+from kgw.http_client import build_http_client
+from kgw.observability.logger import configure_logging, get_logger
+from kgw.observability.metrics import REGISTRY
+from kgw.observability.tracing import TraceIdMiddleware
+from kgw.settings import Settings, get_settings
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+_log = get_logger(__name__)
+
+
+def _sql_dir() -> Path:
+    """Locate the bundled sql/ directory relative to this file."""
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidate = parent / "sql"
+        if candidate.is_dir():
+            return candidate
+    raise FileNotFoundError("sql/ directory not found")
+
+
+def _build_minio_endpoint(settings: Settings) -> str:
+    scheme = "https" if settings.file_storage_minio_secure else "http"
+    return f"{scheme}://{settings.file_storage_minio_host}:{settings.file_storage_minio_api_port}"
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):  # pylint: disable=redefined-outer-name
+    settings: Settings = get_settings()
+    configure_logging(json_logs=True)
+
+    pool = await build_pool(
+        settings.db_dsn,
+        min_size=settings.db_pool_min_size,
+        max_size=settings.db_pool_max_size,
+    )
+    await run_migrations(pool, _sql_dir())
+
+    redis_client = redis_async.from_url(settings.redis_url, decode_responses=False)
+
+    http_client = build_http_client(
+        timeout_seconds=settings.http_default_timeout_seconds,
+        max_connections=settings.http_pool_max_connections,
+        max_keepalive=settings.http_pool_max_keepalive,
+    )
+
+    config_provider = KbConfigProvider(
+        endpoint_url=_build_minio_endpoint(settings),
+        access_key=settings.minio_access_key,
+        secret_key=settings.minio_secret_key,
+        bucket=settings.minio_bucket,
+        prefix=settings.minio_kg_doc_prefix,
+    )
+    auth_provider = AuthProvider(
+        redis_client, key_template=settings.redis_auth_key_template
+    )
+    audit_writer = AuditWriter(pool, queue_max_size=settings.audit_queue_max_size)
+    await audit_writer.start()
+
+    app.state.settings = settings
+    app.state.pool = pool
+    app.state.redis = redis_client
+    app.state.http = http_client
+    app.state.config_provider = config_provider
+    app.state.auth_provider = auth_provider
+    app.state.audit = audit_writer
+
+    _log.info("kgw.startup_complete")
+    try:
+        yield
+    finally:
+        _log.info("kgw.shutdown_begin")
+        await audit_writer.stop()
+        await http_client.aclose()
+        await redis_client.aclose()
+        await pool.close()
+        _log.info("kgw.shutdown_complete")
+
+
+def build_app() -> FastAPI:
+    """Construct the FastAPI app. Used by uvicorn entry point and tests."""
+    app = FastAPI(  # pylint: disable=redefined-outer-name
+        title="byclaw-kgw", version="0.1.0", lifespan=_lifespan
+    )
+    app.add_middleware(TraceIdMiddleware)
+
+    @app.exception_handler(KgwError)
+    async def _kgw_error_handler(request: Request, exc: KgwError):
+        return JSONResponse(status_code=200, content=exc.to_envelope())
+
+    @app.get("/healthz")
+    async def _healthz():
+        return {"status": "ok"}
+
+    @app.get("/metrics")
+    async def _metrics() -> Response:
+        data = generate_latest(REGISTRY)
+        return Response(content=data, media_type=CONTENT_TYPE_LATEST)
+
+    return app
+
+
+app = build_app()
