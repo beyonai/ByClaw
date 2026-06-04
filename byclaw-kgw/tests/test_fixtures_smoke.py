@@ -32,7 +32,9 @@ async def test_redis_fixture_alive(redis_url: str):
 
 @pytest.mark.integration
 async def test_minio_fixture_alive(minio_settings: dict):
+    """MinIO fixture: verify object-level access works (no bucket-level ops)."""
     import aioboto3
+    from botocore.exceptions import ClientError
 
     session = aioboto3.Session()
     async with session.client(
@@ -41,5 +43,13 @@ async def test_minio_fixture_alive(minio_settings: dict):
         aws_access_key_id=minio_settings["access_key"],
         aws_secret_access_key=minio_settings["secret_key"],
     ) as s3:
-        result = await s3.list_buckets()
-        assert "Buckets" in result
+        # Use get_object on a known-nonexistent key to confirm connectivity.
+        # NoSuchKey = MinIO reachable; any other code = real problem.
+        try:
+            await s3.get_object(
+                Bucket=minio_settings["bucket"],
+                Key="__kgw_connectivity_probe__",
+            )
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code")
+            assert code == "NoSuchKey", f"unexpected MinIO error: {code} — {exc}"

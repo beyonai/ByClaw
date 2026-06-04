@@ -120,9 +120,21 @@ def test_settings_missing_required_field_raises(monkeypatch: pytest.MonkeyPatch)
     ):
         monkeypatch.delenv(var, raising=False)
 
-    from kgw.settings import get_settings
+    from kgw.settings import Settings, get_settings
     from pydantic import ValidationError
+    from pydantic_settings import SettingsConfigDict
 
+    # Patch env_file to a nonexistent path so .env on disk is not loaded.
+    monkeypatch.setattr(
+        Settings,
+        "model_config",
+        SettingsConfigDict(
+            env_file="/nonexistent/.env",
+            env_file_encoding="utf-8",
+            extra="ignore",
+            case_sensitive=False,
+        ),
+    )
     get_settings.cache_clear()
     with pytest.raises(ValidationError):
         get_settings()

@@ -162,23 +162,14 @@ def minio_settings() -> dict[str, str]:
 
 @pytest.fixture
 async def minio_bucket(minio_settings: dict[str, str]) -> AsyncIterator[str]:
-    """Ensure the configured bucket exists. Yields bucket name."""
-    import aioboto3
-    from botocore.exceptions import ClientError
+    """Return the configured bucket name.
 
-    bucket = minio_settings["bucket"]
-    session = aioboto3.Session()
-    async with session.client(
-        "s3",
-        endpoint_url=minio_settings["endpoint_url"],
-        aws_access_key_id=minio_settings["access_key"],
-        aws_secret_access_key=minio_settings["secret_key"],
-    ) as s3:
-        try:
-            await s3.head_bucket(Bucket=bucket)
-        except ClientError:
-            await s3.create_bucket(Bucket=bucket)
-    yield bucket
+    Assumes the bucket already exists (created by the MinIO deployment).
+    Object-level operations (GetObject/PutObject) work correctly with
+    aiobotocore; bucket-level operations (HeadBucket/CreateBucket) trigger
+    botocore endpoint ruleset issues and are intentionally avoided here.
+    """
+    yield minio_settings["bucket"]
 
 
 # ---------------------------------------------------------------------------
