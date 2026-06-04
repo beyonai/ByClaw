@@ -11,40 +11,85 @@ gbrain 是本 OpenClaw 镜像内置的长期记忆/第二大脑后端。使用�
 
 ## 固定目录与环境
 
-OpenClaw 镜像中 gbrain 按以下约定安装和运行：
+OpenClaw 镜像（`middleware/openclaw/Dockerfile`）在构建阶段已全局安装 Bun 与 gbrain：
+
+- **Bun**：`/root/.bun/bin/bun`（`PATH` 已包含）
+- **gbrain CLI**：`bun install -g github:garrytan/gbrain`（全局可执行，通常已在 `PATH` 中）
+
+运行时数据与配置写入持久化 state 目录：
 
 ```bash
 export OPENCLAW_STATE_DIR="${OPENCLAW_STATE_DIR:-${HOME}/.openclaw}"
-export GBRAIN_BIN_DIR="${OPENCLAW_STATE_DIR}/gbrain/bin"
-export BUN_INSTALL_GLOBAL_DIR="${OPENCLAW_STATE_DIR}/gbrain/install/global"
-export BUN_INSTALL_BIN="${GBRAIN_BIN_DIR}"
-export GBRAIN_HOME="${OPENCLAW_STATE_DIR}/gbrain/data"
-export PATH="${GBRAIN_BIN_DIR}:${PATH}"
+export GBRAIN_HOME="${GBRAIN_HOME:-${OPENCLAW_STATE_DIR}/gbrain/data}"
+mkdir -p "${GBRAIN_HOME}"
 ```
 
-- 全局可执行文件：`${OPENCLAW_STATE_DIR}/gbrain/bin/gbrain`
-- 数据/配置目录：`${OPENCLAW_STATE_DIR}/gbrain/data`（通过 `GBRAIN_HOME` 控制）
-- 兜底全局入口：`/usr/local/bin/gbrain`，会在运行时按当前 `OPENCLAW_STATE_DIR` 补齐安装。
+| 项 | 路径 / 说明 |
+|----|-------------|
+| CLI | `command -v gbrain`（镜像全局安装；缺失时见下方兜底） |
+| 数据/配置 | `${GBRAIN_HOME}`，默认 `${OPENCLAW_STATE_DIR}/gbrain/data` |
+| 沙箱 state 根 | `runtime-bootstrap.sh` 通常为 `/by/.openclaw` |
+| CLI 兜底安装 | `${OPENCLAW_SKILL_GBRAIN_DIR:-/app/skills/gbrain}/install/install.sh` |
 
 所有 `init`、配置、PGLite 数据、索引与后续维护状态都必须写入 `GBRAIN_HOME`，禁止落到默认 `~/.gbrain`。
 
 ## 每次使用前的准备流程
 
-在执行任何 gbrain 业务命令前，先在同一 shell 会话执行：
+**每个 shell 会话只判定一次。** 已安装且已初始化时，直接进入业务命令。
 
 ```bash
 export OPENCLAW_STATE_DIR="${OPENCLAW_STATE_DIR:-${HOME}/.openclaw}"
-export GBRAIN_BIN_DIR="${OPENCLAW_STATE_DIR}/gbrain/bin"
-export BUN_INSTALL_GLOBAL_DIR="${OPENCLAW_STATE_DIR}/gbrain/install/global"
-export BUN_INSTALL_BIN="${GBRAIN_BIN_DIR}"
-export GBRAIN_HOME="${OPENCLAW_STATE_DIR}/gbrain/data"
-export PATH="${GBRAIN_BIN_DIR}:${PATH}"
-mkdir -p "${GBRAIN_BIN_DIR}" "${BUN_INSTALL_GLOBAL_DIR}" "${GBRAIN_HOME}"
-command -v gbrain >/dev/null 2>&1 || bun install -g github:garrytan/gbrain
-gbrain --version
+export GBRAIN_HOME="${GBRAIN_HOME:-${OPENCLAW_STATE_DIR}/gbrain/data}"
+mkdir -p "${GBRAIN_HOME}"
+
+# Step A：CLI 是否可用
+GBRAIN_INSTALLED=false
+if command -v gbrain >/dev/null 2>&1 && gbrain --version >/dev/null 2>&1; then
+  GBRAIN_INSTALLED=true
+fi
+
+# Step B：是否已初始化（doctor 通过即视为已 init）
+GBRAIN_INITIALIZED=false
+if [ "${GBRAIN_INSTALLED}" = true ]; then
+  if gbrain doctor --json >/dev/null 2>&1; then
+    GBRAIN_INITIALIZED=true
+  elif [ -s "${GBRAIN_HOME}/config.json" ]; then
+    gbrain apply-migrations --yes >/dev/null 2>&1 || true
+    gbrain doctor --json >/dev/null 2>&1 && GBRAIN_INITIALIZED=true
+  fi
+fi
+
+# Step C：按状态分支
+if [ "${GBRAIN_INITIALIZED}" = true ]; then
+  echo "gbrain ready, skip install & init"
+elif [ "${GBRAIN_INSTALLED}" = true ]; then
+  export GBRAIN_INIT_MODE="${GBRAIN_INIT_MODE:-balanced}"
+  if gbrain init --help 2>/dev/null | grep -q -- '--mode'; then
+    gbrain init --mode "${GBRAIN_INIT_MODE}"
+  else
+    gbrain init
+  fi
+  gbrain config set search.mode "${GBRAIN_INIT_MODE}" >/dev/null 2>&1 || true
+  gbrain apply-migrations --yes >/dev/null 2>&1 || true
+  gbrain doctor --json
+else
+  sh "${OPENCLAW_SKILL_GBRAIN_DIR:-/app/skills/gbrain}/install/install.sh"
+  export GBRAIN_INIT_MODE="${GBRAIN_INIT_MODE:-balanced}"
+  if gbrain init --help 2>/dev/null | grep -q -- '--mode'; then
+    gbrain init --mode "${GBRAIN_INIT_MODE}"
+  else
+    gbrain init
+  fi
+  gbrain config set search.mode "${GBRAIN_INIT_MODE}" >/dev/null 2>&1 || true
+  gbrain doctor --json
+fi
 ```
 
-如果 `gbrain --version` 失败，先运行 `/usr/local/bin/gbrain --version` 触发兜底安装；仍失败时报告完整错误。
+| 状态 | 做什么 | 禁止 |
+|------|--------|------|
+| 已安装 + 已初始化 | 直接 `query` / `get` / `list` / `import` 等 | `install.sh`、`bun install -g`、`gbrain init` |
+| 已安装 + 未初始化 | 仅 `gbrain init` + `doctor` | `install.sh`、`bun install -g` |
+| 未安装 | 跑 `install/install.sh` + init（仅首次） | — |
 
 ## EMBEDDING 与模型密钥
 
@@ -63,58 +108,19 @@ PowerShell：
 python "$env:OPENCLAW_SKILL_GBRAIN_DIR\scripts\load_embedding.py" --export-powershell | Invoke-Expression
 ```
 
-`load_embedding.py` 默认读取 Redis HASH `byai:aimodel:typelist` 的 `EMBEDDING` / `LLM` 字段，并映射为 gbrain 识别的变量。Redis 连接使用 `REDIS_URL`，或 `REDIS_HOST` / `REDIS_PORT` / `REDIS_USERNAME` / `REDIS_PASSWORD` / `REDIS_DATABASE` / `REDIS_SSL`。加载失败时说明原因并请用户配置密钥，禁止伪造密钥。
+`load_embedding.py` 默认读取 Redis HASH `byai:aimodel:typelist` 的 `EMBEDDING` / `LLM` 字段，并映射为 gbrain 识别的变量。加载失败时说明原因并请用户配置密钥，禁止伪造密钥。
 
-## init 指导流程
+## init 与检索模式（仅首次或未初始化时）
 
-首次接管记忆或发现尚未初始化时，必须执行这个流程。
+Step C 已包含 init 逻辑；**已初始化会话跳过本节**。
 
-### 1. 检查是否已经 init
+默认 `GBRAIN_INIT_MODE=balanced`。若用户尚未明确选择检索模式，说明三档含义并确认：
 
-先确认 `GBRAIN_HOME` 下是否已有配置/数据库，再用 doctor 验证：
+- `conservative`：更省 token
+- `balanced`：默认，质量与成本折中
+- `tokenmax`：最大上下文，成本最高
 
-```bash
-export GBRAIN_HOME="${OPENCLAW_STATE_DIR}/gbrain/data"
-if [ -s "${GBRAIN_HOME}/config.json" ] || find "${GBRAIN_HOME}" -mindepth 1 -maxdepth 2 -type f 2>/dev/null | grep -q .; then
-  gbrain doctor --json
-else
-  echo "GBRAIN_NEEDS_INIT"
-fi
-```
-
-若 `doctor` 显示 schema 未初始化、连接失败、`schema_version: 0`，视为需要 init 或迁移；优先按 CLI 提示执行 `gbrain apply-migrations --yes`，仍不通再进入 init。
-
-### 2. 按 `GBRAIN_INIT_MODE` 初始化
-
-init 模式读取环境变量，默认 `balanced`：
-
-```bash
-export GBRAIN_HOME="${OPENCLAW_STATE_DIR}/gbrain/data"
-export GBRAIN_INIT_MODE="${GBRAIN_INIT_MODE:-balanced}"
-case "${GBRAIN_INIT_MODE}" in
-  conservative|balanced|tokenmax) ;;
-  *) echo "Invalid GBRAIN_INIT_MODE=${GBRAIN_INIT_MODE}; fallback to balanced"; GBRAIN_INIT_MODE=balanced ;;
-esac
-if gbrain init --help | grep -q -- '--mode'; then
-  gbrain init --mode "${GBRAIN_INIT_MODE}"
-else
-  gbrain init
-fi
-gbrain config set search.mode "${GBRAIN_INIT_MODE}"
-gbrain doctor --json
-```
-
-若当前版本 `gbrain init --help` 不支持 `--mode`，就使用普通 `gbrain init`，随后必须执行 `gbrain config set search.mode "${GBRAIN_INIT_MODE}"`。
-
-### 3. init 后确认成本模式
-
-默认 `GBRAIN_INIT_MODE=balanced`。如果用户没有明确选择过检索模式，向用户说明三档含义并确认：
-
-- `conservative`：更省 token，适合高频/低成本场景。
-- `balanced`：默认；检索质量与成本折中。
-- `tokenmax`：最大上下文，成本最高，适合少量高价值深查。
-
-用户选择后执行：
+用户选择后：
 
 ```bash
 gbrain config set search.mode <conservative|balanced|tokenmax>
@@ -123,25 +129,17 @@ gbrain search modes
 
 ## 记忆接管规则
 
-使用本 skill 后，agent 应把 gbrain 当作长期记忆的唯一事实源：
+- 回答涉及用户、项目背景、历史决策、长期偏好时，先用 `gbrain query` / `gbrain search` / `gbrain get` 查脑。
+- 值得长期保存的信息用 gbrain 写入/导入；命令不确定先 `gbrain --help`。
+- 外部 Markdown 知识库：确认路径后 `gbrain import <path>`，必要时 `gbrain embed --stale`。
+- 定期维护：`gbrain onboard --check --json`、`gbrain embed --stale`、`gbrain dream`、`gbrain doctor --json`。
+- 不把临时推理、敏感密钥、一次性命令输出写入 gbrain，除非用户明确要求。
 
-- 回答涉及用户、项目背景、历史决策、长期偏好、会议/文档沉淀时，先用 `gbrain query` / `gbrain search` / `gbrain get` 查脑。
-- 用户给出值得长期保存的信息、决策、纠错、偏好或经验时，用 gbrain 的写入/导入命令沉淀；命令不确定先 `gbrain --help`。
-- 处理外部 Markdown 知识库时，先确认路径和意图，再 `gbrain import <path>`，必要时 `gbrain embed --stale`。
-- 定期维护使用 `gbrain onboard --check --json`、`gbrain embed --stale`、`gbrain dream`、`gbrain doctor --json`。
-- 不把临时推理、敏感密钥、一次性命令输出写入 gbrain，除非用户明确要求保存。
+## 何时使用 / 不用
 
-## 何时使用
+**使用**：长期记忆、brain-first 查询、知识库维护、导入/索引/巡检 gbrain。
 
-- 用户要求“记住/以后记得/长期记忆/查我的知识库/第二大脑/brain-first/同步或维护 gbrain”。
-- 需要基于已索引 Markdown、历史页面、实体关系、时间线回答。
-- 需要导入、索引、修复、升级或巡检 gbrain。
-
-## 何时不用
-
-- 实时新闻、股票、天气、法规、网页最新信息：用联网搜索或专门工具。
-- 企业内部业务系统已有专用 skill，例如钉钉 `dws`：用对应 skill。
-- 用户尚未确认要导入的大批量本地路径：先问清路径和范围。
+**不用**：实时网页信息（用搜索工具）；已有专用 skill 的业务系统（如钉钉 `dws`）；未确认路径的大批量导入。
 
 ## 常用命令
 
