@@ -1,4 +1,4 @@
-import { IState } from '@/models/common/useAppStore';
+import type { ISandboxesInfo, ISandboxesInfoState } from '@/models/common/useAppStore';
 
 import { isDevelopment } from '@/utils/common';
 import CookieUtil from '@/utils/cookie';
@@ -11,7 +11,11 @@ export function getDisplayUserNameInChat(name: string): string {
   return name.substring(Math.max(0, name.length - 2)).toLocaleUpperCase();
 }
 
-export function getVNCUrl(sandboxesInfo: IState['sandboxesInfo']) {
+export function resolveSandboxesInfo(sandboxesInfo: ISandboxesInfoState) {
+  return Promise.resolve(sandboxesInfo);
+}
+
+export function getVNCUrl(sandboxesInfo: ISandboxesInfo) {
   const { sandboxId } = sandboxesInfo;
 
   let url = `/v1/sandboxes/${sandboxId}/proxy/8081/?autoconnect=true&resize=scale`;
