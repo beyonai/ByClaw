@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     # ---- Audit ----
     audit_queue_max_size: int = 10_000
 
+    # ---- Circuit breaker ----
+    circuit_failure_threshold: int = 5
+    circuit_open_duration: float = 30.0
+
     # ---- Computed views ----
     @computed_field
     @property

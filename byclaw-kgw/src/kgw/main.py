@@ -82,6 +82,14 @@ async def _lifespan(app: FastAPI):  # pylint: disable=redefined-outer-name
     audit_writer = AuditWriter(pool, queue_max_size=settings.audit_queue_max_size)
     await audit_writer.start()
 
+    from kgw.resilience.circuit_breaker import CircuitBreakerRegistry
+
+    circuit_breakers = CircuitBreakerRegistry(
+        failure_threshold=settings.circuit_failure_threshold,
+        open_duration=settings.circuit_open_duration,
+        half_open_max_requests=1,
+    )
+
     app.state.settings = settings
     app.state.pool = pool
     app.state.redis = redis_client
@@ -89,6 +97,7 @@ async def _lifespan(app: FastAPI):  # pylint: disable=redefined-outer-name
     app.state.config_provider = config_provider
     app.state.auth_provider = auth_provider
     app.state.audit = audit_writer
+    app.state.circuit_breakers = circuit_breakers
 
     _log.info("kgw.startup_complete")
     try:
@@ -125,6 +134,14 @@ def build_app() -> FastAPI:
     from kgw.api.internal import router as internal_router  # noqa: PLC0415
 
     app.include_router(internal_router)
+
+    from kgw.api.directories import router as directories_router
+    from kgw.api.files import router as files_router
+    from kgw.api.knowledge_items import router as knowledge_items_router
+
+    app.include_router(directories_router)
+    app.include_router(knowledge_items_router)
+    app.include_router(files_router)
 
     return app
 
