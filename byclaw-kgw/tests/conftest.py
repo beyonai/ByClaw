@@ -63,6 +63,7 @@ def _load_dotenv_once() -> None:
     _ENV_LOADED = True
     env_path = _find_repo_env()
     if env_path is None:
+        _ensure_no_proxy_for_backends()
         return
     for line in env_path.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
@@ -74,6 +75,26 @@ def _load_dotenv_once() -> None:
         key = key.strip()
         value = value.strip().strip('"').strip("'")
         os.environ.setdefault(key, value)
+    _ensure_no_proxy_for_backends()
+
+
+def _ensure_no_proxy_for_backends() -> None:
+    """Add local backend hosts to NO_PROXY so aioboto3/httpx bypass any proxy.
+
+    Integration tests hit MinIO/Redis/OpenGauss on localhost. If the shell has
+    HTTP(S)_PROXY set (common with a local proxy like clash on :7890), aioboto3
+    and httpx route those requests through the proxy, which black-holes them and
+    hangs the event loop in select(). Merging the backend hosts into NO_PROXY
+    forces a direct connection. Existing NO_PROXY entries are preserved.
+    """
+    hosts = {"127.0.0.1", "localhost"}
+    for var in ("DB_HOST", "REDIS_HOST", "FILE_STORAGE_MINIO_HOST"):
+        host = os.environ.get(var)
+        if host:
+            hosts.add(host)
+    for var in ("NO_PROXY", "no_proxy"):
+        existing = {h.strip() for h in os.environ.get(var, "").split(",") if h.strip()}
+        os.environ[var] = ",".join(sorted(existing | hosts))
 
 
 def _require_env(name: str) -> str:

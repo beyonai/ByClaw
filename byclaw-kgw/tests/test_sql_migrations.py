@@ -14,11 +14,15 @@ async def test_s1_migrations_create_expected_tables(pg_dsn: str):
 
     pool = await build_pool(pg_dsn, min_size=1, max_size=2)
     try:
-        applied = await run_migrations(pool, SQL_DIR)
-        assert "001_kgw_audit_log.sql" in applied
-        assert "002_kgw_kb_write_history.sql" in applied
-        assert "003_kgw_kb_source_lock.sql" in applied
-        assert "004_kgw_kb_conflict_log.sql" in applied
+        await run_migrations(pool, SQL_DIR)
+
+        async with pool.connection() as conn:
+            cur = await conn.execute("SELECT filename FROM kgw_migration")
+            recorded = {row["filename"] for row in await cur.fetchall()}
+        assert "001_kgw_audit_log.sql" in recorded
+        assert "002_kgw_kb_write_history.sql" in recorded
+        assert "003_kgw_kb_source_lock.sql" in recorded
+        assert "004_kgw_kb_conflict_log.sql" in recorded
 
         async with pool.connection() as conn:
             cur = await conn.execute(

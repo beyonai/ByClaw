@@ -308,10 +308,16 @@ async def _call_via_discovery(
             raise _BackendAuthError(
                 f"backend returned HTTP {resp.status_code} via discovery for {domain_name}{op_path}"
             )
-        if not isinstance(resp.data, dict):
-            raise ValueError(
-                f"discovery response body is not a JSON object: {type(resp.data)}"
-            )
-        return resp.data
+        # HttpResponse.data is a dict when content-type is application/json,
+        # or a string otherwise. Normalise to dict in both cases.
+        if isinstance(resp.data, dict):
+            return resp.data
+        if isinstance(resp.data, str):
+            import json as _json
+
+            return _json.loads(resp.data)
+        raise ValueError(
+            f"discovery response body is not JSON-parseable: {type(resp.data)}"
+        )
     finally:
         await discovery_client.close()
