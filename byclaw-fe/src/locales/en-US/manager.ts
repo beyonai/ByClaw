@@ -166,8 +166,8 @@ export default {
   'orgMgr.modal.userNameRule': 'Username must be 2-20 characters',
   'orgMgr.modal.userCode': 'Code',
   'orgMgr.modal.userCodePlaceholder': 'Please enter user code',
-  'orgMgr.modal.userCodeRule1': 'User code must be at least 3 characters',
-  'orgMgr.modal.userCodeRule2': 'User code cannot exceed 255 characters',
+  'orgMgr.modal.userCodeRule':
+    'User code must be 3-50 characters and can contain only letters, numbers, and underscores',
   'orgMgr.modal.password': 'Password',
   'orgMgr.modal.passwordPlaceholder': 'Please enter password',
   'orgMgr.modal.confirmPassword': 'Confirm Password',
