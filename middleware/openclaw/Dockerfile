@@ -199,6 +199,7 @@ COPY middleware/openclaw/startAll.sh \
      middleware/openclaw/start-chrome.sh \
      middleware/openclaw/start-opencli.sh \
      middleware/openclaw/start-openclaw.sh \
+     middleware/openclaw/start-gbrain.sh \
      /usr/local/bin/
 RUN chmod +x \
     /usr/local/bin/openclaw-runtime-bootstrap \
@@ -208,7 +209,8 @@ RUN chmod +x \
     /usr/local/bin/start-vnc.sh \
     /usr/local/bin/start-chrome.sh \
     /usr/local/bin/start-opencli.sh \
-    /usr/local/bin/start-openclaw.sh
+    /usr/local/bin/start-openclaw.sh \
+    /usr/local/bin/start-gbrain.sh
 
 RUN curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh
 

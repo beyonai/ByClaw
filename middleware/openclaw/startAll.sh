@@ -35,4 +35,8 @@ if command -v start-opencli.sh >/dev/null 2>&1; then
   start-opencli.sh >/tmp/openclaw-opencli-profile.log 2>&1 &
 fi
 
+if command -v start-gbrain.sh >/dev/null 2>&1; then
+  start-gbrain.sh
+fi
+
 exec start-openclaw.sh
