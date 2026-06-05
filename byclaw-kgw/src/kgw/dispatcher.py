@@ -202,7 +202,12 @@ async def dispatch_json(
 
     latency_ms = int((time.perf_counter() - started) * 1000)
 
-    # 7. Prometheus metrics
+    # 7. Reverse-map resource_code → portal kn_code in the response body
+    _remap_kn_code(
+        resp_body, resource_code=config.resource_code, portal_kn_code=kn_code
+    )
+
+    # 8. Prometheus metrics
     DISPATCH_TOTAL.labels(
         operation=operation, kn_code=kn_code, result=result_code
     ).inc()
@@ -210,7 +215,7 @@ async def dispatch_json(
         latency_ms / 1000.0
     )
 
-    # 8. Audit log — writes only (v5 spec §7.1). Read ops must NOT audit.
+    # 9. Audit log — writes only (v5 spec §7.1). Read ops must NOT audit.
     if operation not in _READ_OPS:
         await state.audit.record(
             AuditEntry(
@@ -230,7 +235,7 @@ async def dispatch_json(
             )
         )
 
-    # 9. Write history — state-changing writes only (background, fire-and-forget)
+    # 10. Write history — state-changing writes only (background, fire-and-forget)
     if operation in _WRITE_HISTORY_OPS:
         asyncio.create_task(
             _write_history(state.pool, kn_code=kn_code, file_path=file_path or ""),
@@ -256,6 +261,27 @@ async def _write_history(pool: Any, *, kn_code: str, file_path: str) -> None:
             await conn.commit()
     except Exception as exc:  # noqa: BLE001
         _log.warning("write_history.failed", kn_code=kn_code, error=str(exc))
+
+
+def _remap_kn_code(
+    resp_body: dict[str, Any], *, resource_code: str, portal_kn_code: str
+) -> None:
+    """Replace resource_code with portal kn_code in-place inside resp_body.
+
+    Covers two shapes:
+    - resultObject.knCode (single-object responses like readFile)
+    - resultObject.data[].knCode (list responses like listDir, knowledgeSearch)
+    """
+    ro = resp_body.get("resultObject")
+    if not isinstance(ro, dict):
+        return
+    if ro.get("knCode") == resource_code:
+        ro["knCode"] = portal_kn_code
+    data = ro.get("data")
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict) and item.get("knCode") == resource_code:
+                item["knCode"] = portal_kn_code
 
 
 def _set_circuit_metric(kn_code: str, cb: Any) -> None:
@@ -367,60 +393,185 @@ async def dispatch_fanout_json(
     user_id: str,
     body: dict[str, Any],
 ) -> dict[str, Any]:
-    """Fan out a read request across multiple KBs in parallel.
+    """Fan out a read request across multiple KBs, grouping by backend URL.
 
-    Calls dispatch_json once per kn_code via ``asyncio.gather`` with
-    ``return_exceptions=True``. Successful responses' ``resultObject.data``
-    arrays are concatenated; any failure (KgwError or unexpected exception)
-    is surfaced as ``{knCode, reason}`` in ``degraded_kbs`` — never aborts
-    the overall response (v5 spec §3.1).
+    KBs that share the same (domain_url/domain_name, op_path) are batched into a
+    single upstream call with a merged ``knCodeList``.  This halves backend traffic
+    for installations where many portal knCodes share a single KB service.
 
-    The body is forwarded verbatim per call; ``dispatch_json`` substitutes
-    each KB's resource_code into ``knCode``/``knCodeList`` for the upstream
-    payload.
+    Successful responses' ``resultObject.data`` arrays are concatenated; any
+    failure (KgwError or unexpected exception) is surfaced as
+    ``{knCode, reason}`` in ``degraded_kbs`` — never aborts the overall response
+    (v5 spec §3.1).
+
+    ``knCode`` values in the upstream response are back-mapped from
+    ``resource_code`` to the portal ``kn_code`` before merging.
     """
     from kgw.envelope import KgwError  # noqa: PLC0415
 
-    async def _one(kn_code: str) -> dict[str, Any]:
-        return await dispatch_json(
-            request,
-            operation=operation,
-            kn_code=kn_code,
-            user_id=user_id,
-            body=dict(body),
+    state = request.app.state
+
+    # 1. Resolve all KB configs concurrently, collect failures immediately.
+    configs_or_err: list[Any] = await asyncio.gather(
+        *[state.config_provider.get_kb_config(kc) for kc in kn_code_list],
+        return_exceptions=True,
+    )
+
+    degraded: list[dict[str, str]] = []
+    # kn_code → KbConfig (only successfully resolved)
+    resolved: dict[str, Any] = {}
+    for kn_code, cfg in zip(kn_code_list, configs_or_err):
+        if isinstance(cfg, asyncio.CancelledError):
+            raise cfg
+        if isinstance(cfg, Exception):
+            _log.error(
+                "fanout.config_fetch_error",
+                kn_code=kn_code,
+                error=str(cfg),
+            )
+            degraded.append({"knCode": kn_code, "reason": "UnknownError"})
+        elif cfg is None:
+            degraded.append({"knCode": kn_code, "reason": KBNotFound.error_type})
+        else:
+            resolved[kn_code] = cfg
+
+    if not resolved:
+        return {
+            "resultCode": "0",
+            "resultMsg": "success",
+            "resultObject": {"data": [], "degraded_kbs": degraded},
+        }
+
+    # 2. Map gateway operation → KB operation name (same for all KBs)
+    kb_op = _GATEWAY_TO_KB_OP.get(operation)
+
+    # 3. Group resolved KBs by (endpoint_key, op_path).
+    #    endpoint_key = domain_url if set, else domain_name.
+    #    KBs in the same group share a backend and can be batched.
+    groups: dict[
+        tuple[str, str], list[str]
+    ] = {}  # (endpoint_key, op_path) → [kn_code, ...]
+    for kn_code, cfg in resolved.items():
+        if kb_op is None or kb_op not in cfg.operations:
+            degraded.append(
+                {"knCode": kn_code, "reason": OperationNotSupported.error_type}
+            )
+            continue
+        endpoint_key = cfg.domain_url or cfg.domain_name
+        op_path = cfg.operation_path(kb_op) or _DEFAULT_KB_PATHS.get(kb_op, f"/{kb_op}")
+        groups.setdefault((endpoint_key, op_path), []).append(kn_code)
+
+    if not groups:
+        return {
+            "resultCode": "0",
+            "resultMsg": "success",
+            "resultObject": {"data": [], "degraded_kbs": degraded},
+        }
+
+    # 4. Dispatch one request per group concurrently.
+    async def _call_group(
+        group_kn_codes: list[str], endpoint_key: str, op_path: str
+    ) -> dict[str, Any]:
+        """Send one aggregated request for all KBs in the group."""
+        # All KBs in a group share the same endpoint; use the first config.
+        first_cfg = resolved[group_kn_codes[0]]
+        resource_codes = [resolved[kc].resource_code for kc in group_kn_codes]
+
+        cb = state.circuit_breakers.get(endpoint_key)
+        _set_circuit_metric(group_kn_codes[0], cb)
+        if not cb.before_call():
+            raise CircuitOpen(
+                f"circuit OPEN for {endpoint_key}", kn_code=group_kn_codes[0]
+            )
+
+        headers = await state.auth_provider.resolve_headers(
+            first_cfg.headers, user_code=user_id
         )
 
-    tasks = [_one(kc) for kc in kn_code_list]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+        group_body = dict(body)
+        group_body["knCodeList"] = resource_codes
+        group_body.pop("knCode", None)
 
+        try:
+            resp = await _call_backend(
+                config=first_cfg,
+                op_path=op_path,
+                body=group_body,
+                headers=headers,
+                http=state.http,
+            )
+        except httpx.TimeoutException as exc:
+            cb.record_failure()
+            _set_circuit_metric(group_kn_codes[0], cb)
+            raise UpstreamTimeout(
+                f"timeout calling {endpoint_key}{op_path}",
+                kn_code=group_kn_codes[0],
+            ) from exc
+        except (httpx.ConnectError, httpx.NetworkError) as exc:
+            cb.record_failure()
+            _set_circuit_metric(group_kn_codes[0], cb)
+            raise UpstreamConnectError(
+                f"connect error calling {endpoint_key}{op_path}",
+                kn_code=group_kn_codes[0],
+            ) from exc
+        except _BackendAuthError as exc:
+            cb.record_failure()
+            _set_circuit_metric(group_kn_codes[0], cb)
+            raise BackendAuthFailed(str(exc), kn_code=group_kn_codes[0]) from exc
+        cb.record_success()
+        _set_circuit_metric(group_kn_codes[0], cb)
+        return resp
+
+    group_items = list(groups.items())
+    group_tasks = [
+        _call_group(kc_list, ep, path) for (ep, path), kc_list in group_items
+    ]
+    group_results = await asyncio.gather(*group_tasks, return_exceptions=True)
+
+    # 5. Merge results; reverse-map resource_code → portal kn_code.
     merged: list[Any] = []
-    degraded: list[dict[str, str]] = []
-    for kn_code, res in zip(kn_code_list, results):
-        if isinstance(res, KgwError):
-            degraded.append({"knCode": kn_code, "reason": res.error_type})
-            continue
+    for ((endpoint_key, op_path), group_kn_codes), res in zip(
+        group_items, group_results
+    ):
+        # Build resource_code → portal kn_code map for this group
+        rc_to_portal: dict[str, str] = {
+            resolved[kc].resource_code: kc for kc in group_kn_codes
+        }
+
         if isinstance(res, asyncio.CancelledError):
-            # Propagate cancellation — the gateway request is being torn down,
-            # we must not mask that as a degraded KB.
             raise res
+        if isinstance(res, KgwError):
+            for kn_code in group_kn_codes:
+                degraded.append({"knCode": kn_code, "reason": res.error_type})
+            continue
         if isinstance(res, Exception):
             _log.error(
-                "fanout.unexpected_error",
-                kn_code=kn_code,
+                "fanout.group_error",
+                endpoint=endpoint_key,
                 operation=operation,
                 error=str(res),
             )
-            degraded.append({"knCode": kn_code, "reason": "UnknownError"})
+            for kn_code in group_kn_codes:
+                degraded.append({"knCode": kn_code, "reason": "UnknownError"})
             continue
-        # Success — extract data list from resultObject if present
+
         result_object = res.get("resultObject") or {}
         data = result_object.get("data")
         if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict) and "knCode" in item:
+                    item["knCode"] = rc_to_portal.get(item["knCode"], item["knCode"])
             merged.extend(data)
         else:
-            # Non-list payload (e.g. metadataFieldsList returns a dict);
-            # keep the entire resultObject under {knCode: ...} so caller can dispatch.
-            merged.append({**result_object, "knCode": kn_code})
+            # Non-list payload: wrap under portal kn_code (use first in group).
+            ro_copy = dict(result_object)
+            if "knCode" in ro_copy:
+                ro_copy["knCode"] = rc_to_portal.get(
+                    ro_copy["knCode"], group_kn_codes[0]
+                )
+            else:
+                ro_copy["knCode"] = group_kn_codes[0]
+            merged.append(ro_copy)
 
     return {
         "resultCode": "0",

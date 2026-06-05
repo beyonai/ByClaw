@@ -62,7 +62,15 @@ async def test_fanout_all_success_merges_data():
                 json={
                     "resultCode": "0",
                     "resultMsg": "ok",
-                    "resultObject": {"data": [{"id": "a1"}]},
+                    "resultObject": {
+                        "data": [
+                            {
+                                "knCode": "backend_kb_a",
+                                "filePath": "/a.pdf",
+                                "score": 92,
+                            }
+                        ]
+                    },
                 },
             )
         )
@@ -72,7 +80,20 @@ async def test_fanout_all_success_merges_data():
                 json={
                     "resultCode": "0",
                     "resultMsg": "ok",
-                    "resultObject": {"data": [{"id": "b1"}, {"id": "b2"}]},
+                    "resultObject": {
+                        "data": [
+                            {
+                                "knCode": "backend_kb_b",
+                                "filePath": "/b1.pdf",
+                                "score": 88,
+                            },
+                            {
+                                "knCode": "backend_kb_b",
+                                "filePath": "/b2.pdf",
+                                "score": 75,
+                            },
+                        ]
+                    },
                 },
             )
         )
@@ -81,11 +102,14 @@ async def test_fanout_all_success_merges_data():
             operation="knowledgeSearch",
             kn_code_list=["kb_a", "kb_b"],
             user_id="u1",
-            body={"query": "x"},
+            body={"query": "请假流程", "topK": 5, "searchMode": "mixedRecall"},
         )
     assert result["resultCode"] == "0"
-    ids = sorted(item["id"] for item in result["resultObject"]["data"])
-    assert ids == ["a1", "b1", "b2"]
+    data = result["resultObject"]["data"]
+    assert len(data) == 3
+    # resource_codes must be replaced with portal kn_codes
+    kn_codes = {item["knCode"] for item in data}
+    assert kn_codes == {"kb_a", "kb_b"}
     assert result["resultObject"]["degraded_kbs"] == []
 
 
@@ -103,7 +127,9 @@ async def test_fanout_one_kb_timeout_others_succeed():
                 json={
                     "resultCode": "0",
                     "resultMsg": "ok",
-                    "resultObject": {"data": [{"id": "a1"}]},
+                    "resultObject": {
+                        "data": [{"knCode": "backend_kb_a", "filePath": "/a.pdf"}]
+                    },
                 },
             )
         )
@@ -115,10 +141,12 @@ async def test_fanout_one_kb_timeout_others_succeed():
             operation="knowledgeSearch",
             kn_code_list=["kb_a", "kb_b"],
             user_id="u1",
-            body={"query": "x"},
+            body={"query": "请假流程", "topK": 5, "searchMode": "mixedRecall"},
         )
     assert result["resultCode"] == "0"
-    assert [item["id"] for item in result["resultObject"]["data"]] == ["a1"]
+    data = result["resultObject"]["data"]
+    assert len(data) == 1
+    assert data[0]["knCode"] == "kb_a"
     degraded = result["resultObject"]["degraded_kbs"]
     assert len(degraded) == 1
     assert degraded[0]["knCode"] == "kb_b"
@@ -148,7 +176,7 @@ async def test_fanout_unknown_kb_marked_degraded():
             operation="knowledgeSearch",
             kn_code_list=["kb_a", "kb_b"],
             user_id="u1",
-            body={},
+            body={"query": "x", "topK": 5, "searchMode": "embedding"},
         )
     assert any(
         d["knCode"] == "kb_b" and d["reason"] == "KBNotFound"
@@ -184,74 +212,163 @@ async def test_fanout_circuit_open_kb_marked_degraded():
             operation="knowledgeSearch",
             kn_code_list=["kb_a", "kb_b"],
             user_id="u1",
-            body={},
+            body={"query": "x", "topK": 5, "searchMode": "fullTextRecall"},
         )
     deg = result["resultObject"]["degraded_kbs"]
     assert any(d["knCode"] == "kb_b" and d["reason"] == "CircuitOpen" for d in deg)
 
 
 @pytest.mark.asyncio
-async def test_fanout_cancelled_error_propagates():
-    """A CancelledError from one KB must not be swallowed as 'UnknownError'.
+async def test_fanout_url_grouping_sends_one_request():
+    """Two KBs on the same URL are batched into a single backend request."""
+    # Both kb_a and kb_b share the same domain_url but differ in resource_code
+    configs = {
+        "kb_a": KbConfig(
+            kn_code="kb_a",
+            resource_code="backend_kb_a",
+            domain_url="http://shared.test",
+            domain_name="",
+            headers={},
+            operations=frozenset({"knowledgeSearch"}),
+            operation_paths={"knowledgeSearch": "/api/v1/knowledgeItems/search"},
+            raw={},
+        ),
+        "kb_b": KbConfig(
+            kn_code="kb_b",
+            resource_code="backend_kb_b",
+            domain_url="http://shared.test",
+            domain_name="",
+            headers={},
+            operations=frozenset({"knowledgeSearch"}),
+            operation_paths={"knowledgeSearch": "/api/v1/knowledgeItems/search"},
+            raw={},
+        ),
+    }
+    state = _make_state(configs)
+    state.http = httpx.AsyncClient()
+    req = _make_request(state)
 
-    asyncio.gather(return_exceptions=True) returns CancelledError as a value;
-    we must re-raise it so the request teardown surfaces correctly.
-    """
+    captured_bodies: list[dict] = []
+    with respx.mock:
+
+        def _capture(request):
+            import json
+
+            captured_bodies.append(json.loads(request.content))
+            return httpx.Response(
+                200,
+                json={
+                    "resultCode": "0",
+                    "resultMsg": "ok",
+                    "resultObject": {
+                        "data": [
+                            {"knCode": "backend_kb_a", "filePath": "/a.pdf"},
+                            {"knCode": "backend_kb_b", "filePath": "/b.pdf"},
+                        ]
+                    },
+                },
+            )
+
+        respx.post("http://shared.test/api/v1/knowledgeItems/search").mock(
+            side_effect=_capture
+        )
+        result = await dispatch_fanout_json(
+            req,
+            operation="knowledgeSearch",
+            kn_code_list=["kb_a", "kb_b"],
+            user_id="u1",
+            body={"query": "x", "topK": 3, "searchMode": "embedding"},
+        )
+
+    # Only ONE backend request was made (URL grouping)
+    assert len(captured_bodies) == 1
+    sent = captured_bodies[0]
+    # Both resource_codes in the merged knCodeList
+    assert set(sent["knCodeList"]) == {"backend_kb_a", "backend_kb_b"}
+    assert "knCode" not in sent  # single knCode should be absent
+
+    # Response knCodes back-mapped to portal codes
+    data = result["resultObject"]["data"]
+    assert len(data) == 2
+    portal_codes = {item["knCode"] for item in data}
+    assert portal_codes == {"kb_a", "kb_b"}
+
+
+@pytest.mark.asyncio
+async def test_fanout_cancelled_error_propagates():
+    """A CancelledError from config fetch must not be swallowed as 'UnknownError'."""
     import asyncio
-    from unittest.mock import patch
 
     configs = {"kb_a": _kb("kb_a", 1), "kb_b": _kb("kb_b", 2)}
     state = _make_state(configs)
     state.http = httpx.AsyncClient()
     req = _make_request(state)
 
-    async def _fake_dispatch(*_args, **kwargs):
-        if kwargs.get("kn_code") == "kb_b":
-            raise asyncio.CancelledError("client gone")
-        return {"resultCode": "0", "resultMsg": "ok", "resultObject": {"data": []}}
+    call_count = 0
 
-    with patch("kgw.dispatcher.dispatch_json", side_effect=_fake_dispatch):
-        with pytest.raises(asyncio.CancelledError):
-            await dispatch_fanout_json(
-                req,
-                operation="knowledgeSearch",
-                kn_code_list=["kb_a", "kb_b"],
-                user_id="u1",
-                body={},
-            )
+    async def _fake_get(kn_code):
+        nonlocal call_count
+        call_count += 1
+        if kn_code == "kb_b":
+            raise asyncio.CancelledError("client gone")
+        return configs.get(kn_code)
+
+    state.config_provider.get_kb_config.side_effect = _fake_get
+
+    with pytest.raises(asyncio.CancelledError):
+        await dispatch_fanout_json(
+            req,
+            operation="knowledgeSearch",
+            kn_code_list=["kb_a", "kb_b"],
+            user_id="u1",
+            body={"query": "x", "topK": 5, "searchMode": "embedding"},
+        )
 
 
 @pytest.mark.asyncio
 async def test_fanout_non_list_data_kn_code_wins_over_backend():
-    """Non-list `data` fallback: portal kn_code must override any backend-leaked knCode."""
-    from unittest.mock import patch
-
-    configs = {"kb_a": _kb("kb_a", 1)}
+    """Non-list resultObject: portal kn_code overrides backend-leaked resource_code."""
+    configs = {
+        "kb_a": KbConfig(
+            kn_code="kb_a",
+            resource_code="backend_kb_a",
+            domain_url="http://kb-1.test",
+            domain_name="",
+            headers={},
+            operations=frozenset({"metadataFieldsList"}),
+            operation_paths={
+                "metadataFieldsList": "/api/v1/knowledgeItems/metadataFields/list"
+            },
+            raw={},
+        )
+    }
     state = _make_state(configs)
     state.http = httpx.AsyncClient()
     req = _make_request(state)
 
-    async def _fake_dispatch(*_args, **_kwargs):
-        # Backend leaked its own resource_code into the resultObject.
-        return {
-            "resultCode": "0",
-            "resultMsg": "ok",
-            "resultObject": {
-                "knCode": "backend_leaked_code",
-                "fields": ["a", "b"],
-            },
-        }
-
-    with patch("kgw.dispatcher.dispatch_json", side_effect=_fake_dispatch):
+    with respx.mock:
+        respx.post("http://kb-1.test/api/v1/knowledgeItems/metadataFields/list").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "resultCode": "0",
+                    "resultMsg": "ok",
+                    "resultObject": {
+                        "knCode": "backend_kb_a",
+                        "fields": ["status", "tags"],
+                    },
+                },
+            )
+        )
         result = await dispatch_fanout_json(
             req,
             operation="metadataFieldsList",
             kn_code_list=["kb_a"],
             user_id="u1",
-            body={},
+            body={"knCodeList": ["kb_a"]},
         )
     entries = result["resultObject"]["data"]
     assert len(entries) == 1
-    # Portal kn_code must win, not the backend's leak.
+    # Portal kn_code must win, not the backend's resource_code.
     assert entries[0]["knCode"] == "kb_a"
-    assert entries[0]["fields"] == ["a", "b"]
+    assert entries[0]["fields"] == ["status", "tags"]

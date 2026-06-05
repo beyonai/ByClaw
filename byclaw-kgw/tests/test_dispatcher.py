@@ -439,3 +439,101 @@ async def test_dispatch_read_op_no_write_history():
         )
     await asyncio.sleep(0)
     state.pool.connection.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_response_remaps_kn_code_in_object():
+    """resultObject.knCode (resource_code) is replaced with portal kn_code in response."""
+    state = _make_state()
+    state.config_provider.get_kb_config.return_value = KbConfig(
+        kn_code="test_kb",
+        resource_code="backend_kb_1",
+        domain_url="http://kb.test",
+        domain_name="",
+        headers={},
+        operations=frozenset({"readFile"}),
+        operation_paths={"readFile": "/api/v1/readFile"},
+        raw={},
+    )
+    req = _make_request(state)
+    with respx.mock:
+        respx.post("http://kb.test/api/v1/readFile").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "resultCode": "0",
+                    "resultMsg": "ok",
+                    "resultObject": {
+                        "knCode": "backend_kb_1",
+                        "filePath": "/a.md",
+                        "data": "# Title",
+                        "startLine": 1,
+                        "endLine": 10,
+                        "reachedEof": False,
+                    },
+                },
+            )
+        )
+        state.http = httpx.AsyncClient()
+        result = await dispatch_json(
+            req,
+            operation="readFile",
+            kn_code="test_kb",
+            user_id="u1",
+            body={"knCode": "test_kb", "filePath": "/a.md"},
+        )
+    # resource_code in resultObject.knCode must be replaced by portal kn_code
+    assert result["resultObject"]["knCode"] == "test_kb"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_response_remaps_kn_code_in_data_list():
+    """resultObject.data[].knCode (resource_code) is replaced with portal kn_code."""
+    state = _make_state()
+    state.config_provider.get_kb_config.return_value = KbConfig(
+        kn_code="test_kb",
+        resource_code="backend_kb_1",
+        domain_url="http://kb.test",
+        domain_name="",
+        headers={},
+        operations=frozenset({"listDir"}),
+        operation_paths={"listDir": "/api/v1/listDir"},
+        raw={},
+    )
+    req = _make_request(state)
+    with respx.mock:
+        respx.post("http://kb.test/api/v1/listDir").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "resultCode": "0",
+                    "resultMsg": "ok",
+                    "resultObject": {
+                        "data": [
+                            {
+                                "knCode": "backend_kb_1",
+                                "name": "/docs/a.pdf",
+                                "type": "file",
+                                "size": 1024,
+                            },
+                            {
+                                "knCode": "backend_kb_1",
+                                "name": "/docs/sub",
+                                "type": "directory",
+                                "size": 0,
+                            },
+                        ]
+                    },
+                },
+            )
+        )
+        state.http = httpx.AsyncClient()
+        result = await dispatch_json(
+            req,
+            operation="listDir",
+            kn_code="test_kb",
+            user_id="u1",
+            body={"knCode": "test_kb", "directoryPath": "/docs"},
+        )
+    for item in result["resultObject"]["data"]:
+        assert item["knCode"] == "test_kb"
