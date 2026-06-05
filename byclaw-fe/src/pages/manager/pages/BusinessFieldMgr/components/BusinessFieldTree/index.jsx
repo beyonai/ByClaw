@@ -123,7 +123,7 @@ const BusinessFieldTree = ({
       payload: {
         catalogId,
         resourceBizTypeList: RESOURCE_BIZ_TYPE_LIST,
-        pageIndex: 1,
+        pageNum: 1,
         pageSize: 1,
       },
       success: (res) => {

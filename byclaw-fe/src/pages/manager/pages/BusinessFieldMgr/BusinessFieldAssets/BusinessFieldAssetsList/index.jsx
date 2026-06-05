@@ -216,7 +216,7 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
   // 当选中领域、资产类型变化时，获取数据
   useEffect(() => {
     if (selectedField?.fieldId === ALL_FIELD_KEY || selectedField?.fieldId >= 0) {
-      getList();
+      getList({ pageNum: 1 });
     } else {
       setDataSource([]);
       setPageInfo((prev) => ({ ...prev, total: 0 }));
