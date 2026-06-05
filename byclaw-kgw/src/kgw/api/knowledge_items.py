@@ -122,3 +122,54 @@ async def knowledge_search(
         user_id=x_user_id,
         body=body,
     )
+
+
+@router.post("/knowledgeItems/metadataSearch")
+async def metadata_search(
+    request: Request,
+    x_user_id: Annotated[str, Header(alias="X-User-Id")],
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """Multi-KB parallel metadata-only search."""
+    kn_code_list = list(body.get("knCodeList") or [])
+    return await dispatch_fanout_json(
+        request,
+        operation="metadataSearch",
+        kn_code_list=kn_code_list,
+        user_id=x_user_id,
+        body=body,
+    )
+
+
+@router.post("/knowledgeItems/searchFile")
+async def search_file(
+    request: Request,
+    x_user_id: Annotated[str, Header(alias="X-User-Id")],
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """Multi-KB parallel file-level search."""
+    kn_code_list = list(body.get("knCodeList") or [])
+    return await dispatch_fanout_json(
+        request,
+        operation="searchFile",
+        kn_code_list=kn_code_list,
+        user_id=x_user_id,
+        body=body,
+    )
+
+
+@router.post("/knowledgeItems/metadataFields/list")
+async def metadata_fields_list(
+    request: Request,
+    x_user_id: Annotated[str, Header(alias="X-User-Id")],
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """Multi-KB parallel: list metadata fields actually used in each KB."""
+    kn_code_list = list(body.get("knCodeList") or [])
+    return await dispatch_fanout_json(
+        request,
+        operation="metadataFieldsList",
+        kn_code_list=kn_code_list,
+        user_id=x_user_id,
+        body=body,
+    )

@@ -36,3 +36,58 @@ def test_knowledge_search_calls_fanout():
     assert m.call_args.kwargs["operation"] == "knowledgeSearch"
     assert m.call_args.kwargs["kn_code_list"] == ["kb_a", "kb_b"]
     assert m.call_args.kwargs["user_id"] == "u1"
+
+
+def test_metadata_search_calls_fanout():
+    with patch(
+        "kgw.api.knowledge_items.dispatch_fanout_json", new_callable=AsyncMock
+    ) as m:
+        m.return_value = {
+            "resultCode": "0",
+            "resultMsg": "ok",
+            "resultObject": {"data": [], "degraded_kbs": []},
+        }
+        client = TestClient(_build_ki_app())
+        client.post(
+            "/kgw/api/v1/knowledgeItems/metadataSearch",
+            json={"knCodeList": ["kb_a"], "where": {}},
+            headers={"X-User-Id": "u1"},
+        )
+    assert m.call_args.kwargs["operation"] == "metadataSearch"
+    assert m.call_args.kwargs["kn_code_list"] == ["kb_a"]
+
+
+def test_search_file_calls_fanout():
+    with patch(
+        "kgw.api.knowledge_items.dispatch_fanout_json", new_callable=AsyncMock
+    ) as m:
+        m.return_value = {
+            "resultCode": "0",
+            "resultMsg": "ok",
+            "resultObject": {"data": [], "degraded_kbs": []},
+        }
+        client = TestClient(_build_ki_app())
+        client.post(
+            "/kgw/api/v1/knowledgeItems/searchFile",
+            json={"knCodeList": ["kb_a"], "fileName": "x.pdf"},
+            headers={"X-User-Id": "u1"},
+        )
+    assert m.call_args.kwargs["operation"] == "searchFile"
+
+
+def test_metadata_fields_list_calls_fanout():
+    with patch(
+        "kgw.api.knowledge_items.dispatch_fanout_json", new_callable=AsyncMock
+    ) as m:
+        m.return_value = {
+            "resultCode": "0",
+            "resultMsg": "ok",
+            "resultObject": {"data": [], "degraded_kbs": []},
+        }
+        client = TestClient(_build_ki_app())
+        client.post(
+            "/kgw/api/v1/knowledgeItems/metadataFields/list",
+            json={"knCodeList": ["kb_a"]},
+            headers={"X-User-Id": "u1"},
+        )
+    assert m.call_args.kwargs["operation"] == "metadataFieldsList"
