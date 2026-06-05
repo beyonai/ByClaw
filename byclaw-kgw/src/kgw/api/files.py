@@ -6,6 +6,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import StreamingResponse
 from kgw.dispatcher import dispatch_json
+from kgw.dsl_guide import DSL_GUIDE_CONTENT
 from kgw.envelope import CircuitOpen, KBNotFound, OperationNotSupported
 from kgw.stream_proxy import proxy_download
 
@@ -97,19 +98,13 @@ async def read_file(
 
 
 @router.post("/dslGuide")
-async def dsl_guide(
-    request: Request,
-    x_user_id: Annotated[str, Header(alias="X-User-Id")],
-    body: dict[str, Any],
-) -> dict[str, Any]:
-    kn_code = str(body.get("knCode", ""))
-    return await dispatch_json(
-        request,
-        operation="dslGuide",
-        kn_code=kn_code,
-        user_id=x_user_id,
-        body=body,
-    )
+async def dsl_guide() -> dict[str, Any]:
+    """Return the static Agent DSL syntax reference guide."""
+    return {
+        "resultCode": "0",
+        "resultMsg": "success",
+        "resultObject": {"content": DSL_GUIDE_CONTENT},
+    }
 
 
 @router.post("/downloadFile")

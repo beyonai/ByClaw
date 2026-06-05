@@ -177,13 +177,17 @@ def test_read_file_calls_dispatch():
     assert m.call_args.kwargs["file_path"] == "/制度/人事/请假制度.pdf"
 
 
-def test_dsl_guide_calls_dispatch():
-    with patch("kgw.api.files.dispatch_json", new_callable=AsyncMock) as m:
-        m.return_value = {"resultCode": "0", "resultMsg": "ok", "resultObject": {}}
-        client = TestClient(_build_files_app())
-        client.post(
-            "/kgw/api/v1/dslGuide",
-            json={"knCode": "kb1"},
-            headers={"X-User-Id": "u1"},
-        )
-    assert m.call_args.kwargs["operation"] == "dslGuide"
+def test_dsl_guide_returns_static_content():
+    """POST /dslGuide returns the static DSL guide without calling any backend."""
+    from kgw.dsl_guide import DSL_GUIDE_CONTENT
+
+    client = TestClient(_build_files_app())
+    resp = client.post(
+        "/kgw/api/v1/dslGuide",
+        json={"knCode": "kb1"},
+        headers={"X-User-Id": "u1"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["resultCode"] == "0"
+    assert body["resultObject"]["content"] == DSL_GUIDE_CONTENT

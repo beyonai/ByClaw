@@ -51,7 +51,6 @@ _GATEWAY_TO_KB_OP: dict[str, str] = {
     "glob": "glob",
     "readFile": "readFile",
     "downloadFile": "downloadFile",
-    "dslGuide": "dslGuide",
 }
 
 # Default backend path by KB operation name (fallback when portal config omits paths)
@@ -71,7 +70,6 @@ _DEFAULT_KB_PATHS: dict[str, str] = {
     "glob": "/api/v1/glob",
     "readFile": "/api/v1/readFile",
     "downloadFile": "/api/v1/downloadFile",
-    "dslGuide": "/api/v1/dslGuide",
 }
 
 # Operations that write to kgw_kb_write_history (state-changing writes only)
@@ -99,7 +97,6 @@ _READ_OPS = frozenset(
         "readFile",
         "downloadFile",
         "fileBuildStatus",  # status query: read-shaped, no audit, no history
-        "dslGuide",
     }
 )
 
