@@ -354,3 +354,69 @@ async def _call_via_discovery(
         )
     finally:
         await discovery_client.close()
+
+
+async def dispatch_fanout_json(
+    request: Any,  # FastAPI Request
+    *,
+    operation: str,
+    kn_code_list: list[str],
+    user_id: str,
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """Fan out a read request across multiple KBs in parallel.
+
+    Calls dispatch_json once per kn_code via ``asyncio.gather`` with
+    ``return_exceptions=True``. Successful responses' ``resultObject.data``
+    arrays are concatenated; any failure (KgwError or unexpected exception)
+    is surfaced as ``{knCode, reason}`` in ``degraded_kbs`` — never aborts
+    the overall response (v5 spec §3.1).
+
+    The body is forwarded verbatim per call; ``dispatch_json`` substitutes
+    each KB's resource_code into ``knCode``/``knCodeList`` for the upstream
+    payload.
+    """
+    from kgw.envelope import KgwError  # noqa: PLC0415
+
+    async def _one(kn_code: str) -> dict[str, Any]:
+        return await dispatch_json(
+            request,
+            operation=operation,
+            kn_code=kn_code,
+            user_id=user_id,
+            body=dict(body),
+        )
+
+    tasks = [_one(kc) for kc in kn_code_list]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    merged: list[Any] = []
+    degraded: list[dict[str, str]] = []
+    for kn_code, res in zip(kn_code_list, results):
+        if isinstance(res, KgwError):
+            degraded.append({"knCode": kn_code, "reason": res.error_type})
+            continue
+        if isinstance(res, BaseException):
+            _log.error(
+                "fanout.unexpected_error",
+                kn_code=kn_code,
+                operation=operation,
+                error=str(res),
+            )
+            degraded.append({"knCode": kn_code, "reason": "UnknownError"})
+            continue
+        # Success — extract data list from resultObject if present
+        result_object = res.get("resultObject") or {}
+        data = result_object.get("data")
+        if isinstance(data, list):
+            merged.extend(data)
+        else:
+            # Non-list payload (e.g. metadataFieldsList returns a dict);
+            # keep the entire resultObject under {knCode: ...} so caller can dispatch.
+            merged.append({"knCode": kn_code, **result_object})
+
+    return {
+        "resultCode": "0",
+        "resultMsg": "success",
+        "resultObject": {"data": merged, "degraded_kbs": degraded},
+    }
