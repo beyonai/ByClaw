@@ -396,7 +396,11 @@ async def dispatch_fanout_json(
         if isinstance(res, KgwError):
             degraded.append({"knCode": kn_code, "reason": res.error_type})
             continue
-        if isinstance(res, BaseException):
+        if isinstance(res, asyncio.CancelledError):
+            # Propagate cancellation — the gateway request is being torn down,
+            # we must not mask that as a degraded KB.
+            raise res
+        if isinstance(res, Exception):
             _log.error(
                 "fanout.unexpected_error",
                 kn_code=kn_code,
@@ -413,7 +417,7 @@ async def dispatch_fanout_json(
         else:
             # Non-list payload (e.g. metadataFieldsList returns a dict);
             # keep the entire resultObject under {knCode: ...} so caller can dispatch.
-            merged.append({"knCode": kn_code, **result_object})
+            merged.append({**result_object, "knCode": kn_code})
 
     return {
         "resultCode": "0",

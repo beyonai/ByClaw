@@ -188,3 +188,70 @@ async def test_fanout_circuit_open_kb_marked_degraded():
         )
     deg = result["resultObject"]["degraded_kbs"]
     assert any(d["knCode"] == "kb_b" and d["reason"] == "CircuitOpen" for d in deg)
+
+
+@pytest.mark.asyncio
+async def test_fanout_cancelled_error_propagates():
+    """A CancelledError from one KB must not be swallowed as 'UnknownError'.
+
+    asyncio.gather(return_exceptions=True) returns CancelledError as a value;
+    we must re-raise it so the request teardown surfaces correctly.
+    """
+    import asyncio
+    from unittest.mock import patch
+
+    configs = {"kb_a": _kb("kb_a", 1), "kb_b": _kb("kb_b", 2)}
+    state = _make_state(configs)
+    state.http = httpx.AsyncClient()
+    req = _make_request(state)
+
+    async def _fake_dispatch(*_args, **kwargs):
+        if kwargs.get("kn_code") == "kb_b":
+            raise asyncio.CancelledError("client gone")
+        return {"resultCode": "0", "resultMsg": "ok", "resultObject": {"data": []}}
+
+    with patch("kgw.dispatcher.dispatch_json", side_effect=_fake_dispatch):
+        with pytest.raises(asyncio.CancelledError):
+            await dispatch_fanout_json(
+                req,
+                operation="knowledgeSearch",
+                kn_code_list=["kb_a", "kb_b"],
+                user_id="u1",
+                body={},
+            )
+
+
+@pytest.mark.asyncio
+async def test_fanout_non_list_data_kn_code_wins_over_backend():
+    """Non-list `data` fallback: portal kn_code must override any backend-leaked knCode."""
+    from unittest.mock import patch
+
+    configs = {"kb_a": _kb("kb_a", 1)}
+    state = _make_state(configs)
+    state.http = httpx.AsyncClient()
+    req = _make_request(state)
+
+    async def _fake_dispatch(*_args, **_kwargs):
+        # Backend leaked its own resource_code into the resultObject.
+        return {
+            "resultCode": "0",
+            "resultMsg": "ok",
+            "resultObject": {
+                "knCode": "backend_leaked_code",
+                "fields": ["a", "b"],
+            },
+        }
+
+    with patch("kgw.dispatcher.dispatch_json", side_effect=_fake_dispatch):
+        result = await dispatch_fanout_json(
+            req,
+            operation="metadataFieldsList",
+            kn_code_list=["kb_a"],
+            user_id="u1",
+            body={},
+        )
+    entries = result["resultObject"]["data"]
+    assert len(entries) == 1
+    # Portal kn_code must win, not the backend's leak.
+    assert entries[0]["knCode"] == "kb_a"
+    assert entries[0]["fields"] == ["a", "b"]
