@@ -370,7 +370,7 @@ const ResourceTabs: React.FC<Props> = ({
     if (visibleKeys.includes('tool')) visible.push('tool');
     if (visibleKeys.includes('view')) visible.push('view');
     if (visibleKeys.includes('object')) visible.push('object');
-    if (visibleKeys.includes('file')) visible.push('file');
+    visible.push('file');
     if (isOpenSource) visible.push('skill');
     if (!visible.length) return;
     const newActiveTabValue = activeTab && visible.includes(activeTab) ? activeTab : visible[0];
