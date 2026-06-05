@@ -119,6 +119,25 @@ class ByClawSkillUploadApplicationServiceTest {
     }
 
     @Test
+    void shouldIgnoreNestedSkillDocsWhenTopLevelSkillDocExists() {
+        MultipartFile zip = buildZip("zmp-leave-complex.zip",
+            "zmp-leave-complex/SKILL.md", "# root",
+            "zmp-leave-complex/create-leave-request/SKILL.md", "# nano",
+            "zmp-leave-complex/create-leave-request/flow.yaml", "name: create");
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
+
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
+
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
+        assertEquals("zmp-leave-complex", dto.getSkillName());
+        assertEquals(AGENT_PREFIX + "zmp-leave-complex/SKILL.md", dto.getSkillDocObjectKey());
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "zmp-leave-complex/SKILL.md"));
+        assertTrue(pathCaptor.getAllValues()
+            .contains(AGENT_PREFIX + "zmp-leave-complex/create-leave-request/SKILL.md"));
+    }
+
+    @Test
     void shouldAcceptChineseSkillDirectoryFromGbkEncodedZip() {
         MultipartFile zip = buildZip("铁算盘财务健康分析.zip", Charset.forName("GBK"),
             "铁算盘财务健康分析/SKILL.md", "# 铁算盘",
@@ -138,7 +157,7 @@ class ByClawSkillUploadApplicationServiceTest {
 
     @Test
     void shouldRejectZipWithMultipleSkillDocs() {
-        // 两个 SKILL.md（即便分布在不同子目录），按"必须有且仅有一个"判定违规。
+        // 两个顶层 skill 目录都存在 SKILL.md，仍按单 skill zip 判定违规。
         MultipartFile zip = buildZip("skill.zip",
             "a/SKILL.md", "x",
             "b/SKILL.md", "y");
