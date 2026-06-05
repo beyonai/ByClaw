@@ -120,7 +120,6 @@ async def download_file(
 ) -> StreamingResponse:
     """Stream-proxy an octet-stream download from the KB backend."""
     kn_code = str(body.get("knCode", ""))
-    file_path = str(body.get("filePath") or "")
     state = request.app.state
 
     config = await state.config_provider.get_kb_config(kn_code)
@@ -162,6 +161,9 @@ async def download_file(
         first_chunk, fwd_headers = await gen.__anext__()
     except StopAsyncIteration:
         first_chunk, fwd_headers = b"", {}
+    except Exception:
+        cb.record_failure()
+        raise
 
     async def _streamer():
         if first_chunk:
@@ -177,7 +179,6 @@ async def download_file(
         response_headers["Content-Length"] = fwd_headers["content-length"]
 
     cb.record_success()
-    _ = file_path  # already forwarded in backend_body
 
     return StreamingResponse(
         _streamer(), media_type=media_type, headers=response_headers

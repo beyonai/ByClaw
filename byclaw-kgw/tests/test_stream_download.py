@@ -151,3 +151,26 @@ async def test_download_file_resource_code_substituted():
             )
     assert captured.get("knCode") == "backend_dl_1"
     await state.http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_download_file_backend_auth_failure_records_breaker():
+    """BackendAuthFailed (401) must call cb.record_failure() so the breaker can trip."""
+    app, state = _build_app()
+    with respx.mock:
+        respx.post("http://kb-dl.test/api/v1/downloadFile").mock(
+            return_value=httpx.Response(401)
+        )
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/kgw/api/v1/downloadFile",
+                json={"knCode": "kb_dl", "filePath": "/x"},
+                headers={"X-User-Id": "u1"},
+            )
+    assert resp.status_code == 200
+    assert resp.json()["resultObject"]["errorCode"] == "BackendAuthFailed"
+    cb = state.circuit_breakers.get("http://kb-dl.test")
+    assert cb._failure_count > 0
+    await state.http.aclose()
