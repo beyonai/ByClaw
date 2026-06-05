@@ -4,21 +4,21 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * 文件重命名请求DTO
+ * 文件搜索请求DTO
  *
  * @author liweto
  * @date 2026-06-04
  */
 @Getter
 @Setter
-public class FileBrowserRenameRequest {
+public class FileBrowserSearchRequest {
 
     /** 资源ID */
     private Long resourceId;
 
-    /** 源文件相对路径 */
-    private String sourcePath;
+    /** 搜索起始目录相对路径 */
+    private String path;
 
-    /** 新名称 */
-    private String newName;
+    /** 搜索关键词 */
+    private String keyword;
 }

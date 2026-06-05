@@ -82,3 +82,21 @@ export function moveFiles(params: FileBrowserMoveParams) {
 export function createFolder(params: FileBrowserCreateFolderParams) {
   return POST('/byaiService/fileBrowser/createFolder', params);
 }
+
+export interface FileBrowserSearchParams {
+  resourceId: string | number;
+  path: string;
+  keyword: string;
+}
+
+export function searchFiles(params: FileBrowserSearchParams) {
+  return POST<FileBrowserItem[]>('/byaiService/fileBrowser/search', params);
+}
+
+export function downloadFolder(resourceId: string | number, path: string) {
+  return GET<{ fileName: string; file: Blob }>(
+    `/byaiService/fileBrowser/downloadFolder`,
+    { resourceId, path },
+    { responseType: 'blob' }
+  );
+}

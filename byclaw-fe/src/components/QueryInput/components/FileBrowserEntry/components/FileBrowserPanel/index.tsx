@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Empty, message, Modal, Spin, Tooltip, Upload } from 'antd';
+import { Button, Empty, Input, message, Modal, Spin, Tooltip, Upload } from 'antd';
 import { CaretUpOutlined, CaretDownOutlined, ReloadOutlined } from '@ant-design/icons';
 // @ts-ignore
 import { useIntl } from '@umijs/max';
@@ -11,11 +11,13 @@ import {
   listFiles,
   uploadFiles,
   downloadFile,
+  downloadFolder,
   deleteFiles,
   renameFile,
   moveFiles,
   createFolder,
   getDefaultPath,
+  searchFiles,
   type FileBrowserItem,
 } from '@/service/fileBrowser';
 import { formatFileSize, isPreviewable, getMimeType } from './constants';
@@ -89,8 +91,12 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
   });
 
   const [createFolderLoading, setCreateFolderLoading] = useState(false);
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [createFolderName, setCreateFolderName] = useState('');
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('none');
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
 
   const fetchList = useCallback(
     async (path: string) => {
@@ -215,12 +221,40 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
   }, [folderPath]);
 
   const handleEnterDir = useCallback((item: FileBrowserItem) => {
+    setSearchKeyword('');
+    setIsSearching(false);
     setCurrentPath(item.path.endsWith('/') ? item.path : item.path + '/');
   }, []);
 
   const handleRefresh = useCallback(() => {
+    setSearchKeyword('');
+    setIsSearching(false);
     fetchList(currentPath);
   }, [currentPath, fetchList]);
+
+  const handleSearch = useCallback(
+    async (keyword: string) => {
+      if (!keyword.trim()) {
+        setIsSearching(false);
+        setSearchKeyword('');
+        fetchList(currentPath);
+        return;
+      }
+      setSearchKeyword(keyword);
+      setIsSearching(true);
+      setLoading(true);
+      try {
+        const res: any = await searchFiles({ resourceId, path: currentPath, keyword: keyword.trim() });
+        const data = res?.data ?? res ?? [];
+        setItems(Array.isArray(data) ? data : []);
+      } catch (e: any) {
+        message.error(e?.message || t('fileBrowser.error.loadFailed'));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [resourceId, currentPath, t, fetchList]
+  );
 
   const handleUpload = useCallback(
     async (fileList: File[]) => {
@@ -250,6 +284,29 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       } catch (e: any) {
+        message.error(e?.message || t('fileBrowser.download.failed'));
+      }
+    },
+    [resourceId, t]
+  );
+
+  const handleDownloadFolder = useCallback(
+    async (item: FileBrowserItem) => {
+      try {
+        message.loading({ content: t('fileBrowser.download.folderDownloading'), key: 'folderDownload', duration: 0 });
+        const res: any = await downloadFolder(resourceId, item.path);
+        const blob = res?.file instanceof Blob ? res.file : new Blob([res?.file || res]);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${item.name}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        message.destroy('folderDownload');
+      } catch (e: any) {
+        message.destroy('folderDownload');
         message.error(e?.message || t('fileBrowser.download.failed'));
       }
     },
@@ -324,31 +381,37 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
   );
 
   const handleCreateFolder = useCallback(async () => {
-    const folderName = window.prompt(t('fileBrowser.createFolder.prompt'));
-    if (!folderName?.trim()) return;
+    if (!createFolderName.trim()) return;
     setCreateFolderLoading(true);
     try {
       const path = currentPath.endsWith('/')
-        ? `${currentPath}${folderName.trim()}/`
-        : `${currentPath}/${folderName.trim()}/`;
+        ? `${currentPath}${createFolderName.trim()}/`
+        : `${currentPath}/${createFolderName.trim()}/`;
       await createFolder({ resourceId, path });
       message.success(t('fileBrowser.createFolder.success'));
+      setCreateFolderOpen(false);
+      setCreateFolderName('');
       handleRefresh();
     } catch (e: any) {
       message.error(e?.message || t('fileBrowser.createFolder.failed'));
     } finally {
       setCreateFolderLoading(false);
     }
-  }, [currentPath, resourceId, t, handleRefresh]);
+  }, [currentPath, createFolderName, resourceId, t, handleRefresh]);
 
   const handleAction = useCallback(
     (key: string, record: FileBrowserItem) => {
+      const isDir = record.isDir || (record as any).dir;
       switch (key) {
         case 'preview':
           handlePreview(record);
           break;
         case 'download':
-          handleDownload(record);
+          if (isDir) {
+            handleDownloadFolder(record);
+          } else {
+            handleDownload(record);
+          }
           break;
         case 'rename':
           setRenameTarget(record);
@@ -365,15 +428,59 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
             onOk: () => handleDelete([record.path]),
           });
           break;
+        case 'info':
+          Modal.info({
+            title: t('fileBrowser.action.info'),
+            content: (
+              <div>
+                <p>
+                  <b>{t('fileBrowser.column.name')}:</b> {record.name}
+                </p>
+                <p>
+                  <b>{t('fileBrowser.info.path')}:</b> {record.path}
+                </p>
+                <p>
+                  <b>{t('fileBrowser.column.size')}:</b>{' '}
+                  {record.isDir || (record as any).dir ? '-' : formatFileSize(record.size)}
+                </p>
+                <p>
+                  <b>{t('fileBrowser.column.lastModified')}:</b>{' '}
+                  {record.lastModified ? new Date(record.lastModified).toLocaleString() : '-'}
+                </p>
+              </div>
+            ),
+            okText: t('fileBrowser.info.ok'),
+          });
+          break;
+        case 'locate': {
+          const path = record.path;
+          const parentPath = isDir ? path.replace(/[^/]+\/?$/, '') : path.replace(/[^/]+$/, '');
+          setSearchKeyword('');
+          setIsSearching(false);
+          setCurrentPath(parentPath || '/');
+          break;
+        }
       }
     },
-    [handlePreview, handleDownload, handleDelete, t]
+    [handlePreview, handleDownload, handleDownloadFolder, handleDelete, t]
   );
 
   const getActions = useCallback(
     (record: FileBrowserItem) => {
       const isDir = record.isDir || (record as any).dir;
       const actions: any[] = [];
+
+      if (isSearching) {
+        actions.push({
+          label: t('fileBrowser.action.locate'),
+          key: 'locate',
+          icon: (
+            <Tooltip title={t('fileBrowser.action.locate')}>
+              <span className="iconfont icon-a-Localyidingwei" />
+            </Tooltip>
+          ),
+        });
+      }
 
       if (!isDir && isPreviewable(record.name)) {
         actions.push({
@@ -387,17 +494,25 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
         });
       }
 
-      if (!isDir) {
-        actions.push({
-          label: t('fileBrowser.action.download'),
-          key: 'download',
-          icon: (
-            <Tooltip title={t('fileBrowser.action.download')}>
-              <span className="iconfont icon-a-Downloadxiazai" />
-            </Tooltip>
-          ),
-        });
-      }
+      actions.push({
+        label: t('fileBrowser.action.download'),
+        key: 'download',
+        icon: (
+          <Tooltip title={t('fileBrowser.action.download')}>
+            <span className="iconfont icon-a-Downloadxiazai" />
+          </Tooltip>
+        ),
+      });
+
+      actions.push({
+        label: t('fileBrowser.action.info'),
+        key: 'info',
+        icon: (
+          <Tooltip title={t('fileBrowser.action.info')}>
+            <span className="iconfont icon-a-Infoxinxi" />
+          </Tooltip>
+        ),
+      });
 
       actions.push({
         label: t('fileBrowser.action.rename'),
@@ -421,7 +536,7 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
 
       return actions;
     },
-    [t]
+    [t, isSearching]
   );
 
   const columns = useMemo(
@@ -441,9 +556,12 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
           const onClick = isDir ? () => handleEnterDir(record) : undefined;
 
           return (
-            <div onClick={onClick} style={{ display: 'flex', alignItems: 'center', ...style }} title={v}>
-              <AntdIcon type={`icon-${iconType}`} style={{ fontSize: 24, marginRight: 14 }} />
-              <div className="textEllipsis">{v}</div>
+            <div onClick={onClick} style={{ display: 'flex', alignItems: 'center', ...style }} title={record.path}>
+              <AntdIcon type={`icon-${iconType}`} style={{ fontSize: 24, marginRight: 14, flexShrink: 0 }} />
+              <div style={{ overflow: 'hidden' }}>
+                <div className="textEllipsis">{v}</div>
+                {isSearching && <div className={styles.searchPath}>{record.path}</div>}
+              </div>
             </div>
           );
         },
@@ -489,7 +607,7 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
         },
       },
     ],
-    [t, getActions, handleAction, handleEnterDir, toggleSort, getSortIcon]
+    [t, getActions, handleAction, handleEnterDir, toggleSort, getSortIcon, isSearching]
   );
 
   return (
@@ -510,32 +628,51 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
         <Button
           icon={<AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" style={{ fontSize: 18 }} />}
           size="small"
-          onClick={handleCreateFolder}
-          loading={createFolderLoading}
+          onClick={() => {
+            setCreateFolderName('');
+            setCreateFolderOpen(true);
+          }}
         >
           {t('fileBrowser.toolbar.newFolder')}
         </Button>
         <div className={styles.toolbarRight}>
+          <Input.Search
+            allowClear
+            placeholder={t('fileBrowser.toolbar.search')}
+            onSearch={handleSearch}
+            style={{ width: 200 }}
+            size="small"
+          />
           <Button icon={<ReloadOutlined />} size="small" onClick={handleRefresh} />
         </div>
       </div>
 
-      <div className={styles.breadcrumbBar}>
-        <Tooltip title={t('fileBrowser.toolbar.back')}>
-          <span
-            className={styles.backBtn}
-            onClick={handleGoBack}
-            style={{
-              opacity: folderPath.length <= 1 ? 0.3 : 1,
-              cursor: folderPath.length <= 1 ? 'not-allowed' : 'pointer',
-            }}
-          >
-            <AntdIcon type="icon-a-Returnfanhui" style={{ fontSize: 16 }} />
+      {isSearching ? (
+        <div className={styles.breadcrumbBar}>
+          <span className={styles.searchResult}>
+            {sortedItems.length > 0
+              ? t('fileBrowser.search.result', { keyword: searchKeyword, count: sortedItems.length })
+              : t('fileBrowser.search.noResult')}
           </span>
-        </Tooltip>
-        <AntdIcon type="icon-a-Homeshouye" style={{ fontSize: 16 }} />
-        <KnowledgeBreadcrumb folderPath={folderPath} handleBreadcrumbClick={handleBreadcrumbClick} />
-      </div>
+        </div>
+      ) : (
+        <div className={styles.breadcrumbBar}>
+          <Tooltip title={t('fileBrowser.toolbar.back')}>
+            <span
+              className={styles.backBtn}
+              onClick={handleGoBack}
+              style={{
+                opacity: folderPath.length <= 1 ? 0.3 : 1,
+                cursor: folderPath.length <= 1 ? 'not-allowed' : 'pointer',
+              }}
+            >
+              <AntdIcon type="icon-a-Returnfanhui" style={{ fontSize: 16 }} />
+            </span>
+          </Tooltip>
+          <AntdIcon type="icon-a-Homeshouye" style={{ fontSize: 16 }} />
+          <KnowledgeBreadcrumb folderPath={folderPath} handleBreadcrumbClick={handleBreadcrumbClick} />
+        </div>
+      )}
 
       <div className={styles.content}>
         <InfiniteScrollTable
@@ -567,6 +704,22 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
         onCancel={() => setMoveOpen(false)}
         loading={moveLoading}
       />
+      <Modal
+        title={t('fileBrowser.toolbar.newFolder')}
+        open={createFolderOpen}
+        onOk={handleCreateFolder}
+        onCancel={() => setCreateFolderOpen(false)}
+        confirmLoading={createFolderLoading}
+        destroyOnHidden
+      >
+        <Input
+          value={createFolderName}
+          onChange={(e) => setCreateFolderName(e.target.value)}
+          placeholder={t('fileBrowser.createFolder.prompt')}
+          onPressEnter={handleCreateFolder}
+          autoFocus
+        />
+      </Modal>
 
       <Modal
         centered
