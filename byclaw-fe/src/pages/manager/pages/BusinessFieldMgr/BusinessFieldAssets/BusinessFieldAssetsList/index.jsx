@@ -333,7 +333,7 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
           className={styles.tableWrap}
         />
       </div>
-      <div className="text-align-right">
+      <div className={styles.footer}>
         <Pagination
           showQuickJumper
           showSizeChanger
