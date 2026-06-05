@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, File, Form, Header, Request, UploadFile
-from kgw.dispatcher import _write_history, dispatch_json
+from kgw.dispatcher import _write_history, dispatch_fanout_json, dispatch_json
 from kgw.envelope import CircuitOpen, KBNotFound, OperationNotSupported
 from kgw.observability.logger import get_logger
 from kgw.stream_proxy import proxy_upload
@@ -105,3 +105,20 @@ async def knowledge_item_import(
     )
 
     return result
+
+
+@router.post("/knowledgeItems/search")
+async def knowledge_search(
+    request: Request,
+    x_user_id: Annotated[str, Header(alias="X-User-Id")],
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """Multi-KB parallel semantic search."""
+    kn_code_list = list(body.get("knCodeList") or [])
+    return await dispatch_fanout_json(
+        request,
+        operation="knowledgeSearch",
+        kn_code_list=kn_code_list,
+        user_id=x_user_id,
+        body=body,
+    )
