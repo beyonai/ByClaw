@@ -27,7 +27,12 @@ import {
   queryMCPToolsList,
 } from '@/pages/manager/service/resources';
 import { copyWithMessage } from '@/utils/copy';
-import { RenderItem, getMCPToolsRenderConfig, getSchemaRenderConfig } from './SkillDetailDrawer.utils';
+import {
+  RenderItem,
+  getMCPToolsRenderConfig,
+  getSchemaRenderConfig,
+  isByclawCodeAgentResource,
+} from './SkillDetailDrawer.utils';
 import styles from './SkillDetailDrawer.module.less';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import { useIntl, getIntl } from '@umijs/max';
@@ -55,6 +60,7 @@ export type ISkillDetail = {
   devConfig?: any;
   resourceStatus?: number;
   resourceBizType?: string;
+  systemCode?: string;
   resourceId?: string;
   resourceSourcePkId?: string;
   extInfo?: any;
@@ -392,6 +398,8 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
     resourceBizTypeMap.MCP,
     resourceBizTypeMap.AGENT,
   ].includes(skillDetail?.resourceBizType || '');
+  const disableTestTab = isByclawCodeAgentResource(skillDetail);
+  const showTestTab = showToolDebugTabs && !disableTestTab;
   const sourceContent = skillDetail?.extInfo?.sourceContent || '';
   const targetContent = skillDetail?.extInfo?.targetContent || '';
   const copyDebugContent = (content: string) =>
@@ -439,6 +447,7 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
             createUserName: resp?.createUserName,
             resourceStatus: resp?.resourceStatus,
             resourceBizType: resp?.resourceBizType,
+            systemCode: resp?.systemCode || resp?.param?.systemCode,
             resourceId: resp?.resourceId,
             extInfo: memberResp?.extInfo || resp?.extInfo,
           };
@@ -479,11 +488,17 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
   }, [open, resourceId]);
 
   useEffect(() => {
+    if (activeDebugTab === 'test' && !showTestTab) {
+      setActiveDebugTab('detail');
+    }
+  }, [activeDebugTab, showTestTab]);
+
+  useEffect(() => {
     const generateCurlScript = async () => {
       if (
         !open ||
         !resourceId ||
-        !showToolDebugTabs ||
+        !showTestTab ||
         activeDebugTab !== 'test' ||
         curlScript ||
         skillDetail?.resourceBizType === resourceBizTypeMap.MCP
@@ -502,7 +517,7 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
     };
 
     generateCurlScript();
-  }, [open, resourceId, showToolDebugTabs, activeDebugTab, curlScript]);
+  }, [open, resourceId, showTestTab, activeDebugTab, curlScript]);
 
   const formatContent = (content: string) => {
     if (!content) {
@@ -608,7 +623,7 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
             label: intl.formatMessage({ id: 'skillDetail.targetJson' }),
             children: renderCodePanel(targetContent),
           },
-          {
+          showTestTab && {
             key: 'test',
             label: intl.formatMessage({ id: 'skillDetail.test' }),
             children: isMCP ? <MCPTestPanel record={record} skillDetail={skillDetail} /> : renderTestPanel(),

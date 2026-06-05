@@ -55,6 +55,7 @@ export type RenderItem = {
   resourceSourcePkId?: string;
   resourceBizType?: string;
   resourceId?: string;
+  systemCode?: string;
 } & (
   | RenderItemText
   | RenderItemTags
@@ -74,6 +75,9 @@ const getResourceStatusText = (status?: number) => {
   if (status === 5) return intl.formatMessage({ id: 'resourceStatus.notPassed' });
   return '';
 };
+
+export const isByclawCodeAgentResource = (resource?: { resourceBizType?: string; systemCode?: string }) =>
+  resource?.resourceBizType === 'AGENT' && resource?.systemCode?.toUpperCase() === 'BYCLAW_CODE';
 
 /**
  * 递归解析 schema 中的 properties，生成树形结构
@@ -173,15 +177,18 @@ export const getMCPToolsRenderConfig = (
           title: intl.formatMessage({ id: 'common.operation' }),
           width: 90,
           align: 'center',
-          render: (_: any, record: any) => (
-            <a
-              onClick={() => {
-                setMCPTestItem?.(record);
-              }}
-            >
-              {intl.formatMessage({ id: 'skillDetail.test' })}
-            </a>
-          ),
+          render: (_: any, record: any) =>
+            isByclawCodeAgentResource(record) ? (
+              '-'
+            ) : (
+              <a
+                onClick={() => {
+                  setMCPTestItem?.(record);
+                }}
+              >
+                {intl.formatMessage({ id: 'skillDetail.test' })}
+              </a>
+            ),
         },
       ],
       dataSource: tools.map((tool: any, index: number) => ({
@@ -189,6 +196,7 @@ export const getMCPToolsRenderConfig = (
         key: tool.name ?? tool.resourceId ?? index,
         resourceId: resourceId ?? tool.resourceId,
         resourceBizType: tool.resourceBizType,
+        systemCode: tool.systemCode,
         resourceSourcePkId: tool.resourceSourcePkId,
         createTime: tool.createTime,
         createUserName: tool.createUserName,
@@ -408,6 +416,7 @@ export const getSchemaRenderConfig = (config: any) => {
         key: tool.resourceId ?? index,
         resourceId: tool.resourceId,
         resourceBizType: tool.resourceBizType,
+        systemCode: tool.systemCode,
         resourceSourcePkId: tool.resourceSourcePkId,
         createTime: tool.createTime,
         createUserName: tool.createUserName,
