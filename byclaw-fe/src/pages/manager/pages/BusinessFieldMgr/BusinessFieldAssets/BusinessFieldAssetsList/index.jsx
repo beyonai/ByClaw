@@ -20,7 +20,7 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
 
   const temp = useRef({}); // 保存当前的筛选和排序状态
   const [pageInfo, setPageInfo] = useState({
-    pageIndex: 1,
+    pageNum: 1,
     pageSize: 10,
     total: 0,
   });
@@ -82,7 +82,7 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
         resourceBizTypeList,
         shelfTime,
         publishTime,
-        pageIndex: params.pageIndex ?? pageInfo.pageIndex,
+        pageNum: params.pageNum ?? pageInfo.pageNum,
         pageSize: params.pageSize ?? pageInfo.pageSize,
         ...params,
       };
@@ -157,7 +157,7 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
           setDataSource(mappedData);
           setPageInfo((prev) => ({
             ...prev,
-            pageIndex: payload.pageIndex || prev.pageIndex,
+            pageNum: payload.pageNum || prev.pageNum,
             pageSize: payload.pageSize || prev.pageSize,
             total: data?.total || 0,
           }));
@@ -175,7 +175,7 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
 
   const onSearch = useCallback(
     (values = {}, filters, sorter) => {
-      const params = { pageIndex: 1, ...values };
+      const params = { pageNum: 1, ...values };
 
       // 处理状态筛选
       if (filters?.status) {
@@ -234,7 +234,7 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
       prevSearchKeywordRef.current = searchKeyword;
 
       const debouncedFn = debounce(() => {
-        onSearch({ pageIndex: 1 });
+        onSearch({ pageNum: 1 });
       }, 300);
 
       debouncedFn();
@@ -339,14 +339,14 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
           showSizeChanger
           size="small"
           showTotal={(tot) => {
-            const start = (pageInfo.pageIndex - 1) * pageInfo.pageSize + 1;
-            const end = Math.min(pageInfo.pageIndex * pageInfo.pageSize, tot);
+            const start = (pageInfo.pageNum - 1) * pageInfo.pageSize + 1;
+            const end = Math.min(pageInfo.pageNum * pageInfo.pageSize, tot);
             return intl.formatMessage({ id: 'businessField.assets.pagination.total' }, { start, end, total: tot });
           }}
-          current={pageInfo.pageIndex}
+          current={pageInfo.pageNum}
           pageSize={pageInfo.pageSize}
-          onChange={(pageIndex, pageSize) => {
-            onSearch({ pageIndex, pageSize });
+          onChange={(pageNum, pageSize) => {
+            onSearch({ pageNum, pageSize });
           }}
           total={pageInfo.total}
           className={`${styles.pagination} mb-8`}
