@@ -113,3 +113,40 @@ def test_list_dir_calls_dispatch():
     assert resp.status_code == 200
     assert m.call_args.kwargs["operation"] == "listDir"
     assert m.call_args.kwargs["kn_code"] == "kb1"
+
+
+def test_glob_calls_dispatch():
+    with patch("kgw.api.files.dispatch_json", new_callable=AsyncMock) as m:
+        m.return_value = {"resultCode": "0", "resultMsg": "ok", "resultObject": {}}
+        client = TestClient(_build_files_app())
+        client.post(
+            "/kgw/api/v1/glob",
+            json={"knCode": "kb1", "pattern": "*.pdf"},
+            headers={"X-User-Id": "u1"},
+        )
+    assert m.call_args.kwargs["operation"] == "glob"
+
+
+def test_read_file_calls_dispatch():
+    with patch("kgw.api.files.dispatch_json", new_callable=AsyncMock) as m:
+        m.return_value = {"resultCode": "0", "resultMsg": "ok", "resultObject": {}}
+        client = TestClient(_build_files_app())
+        client.post(
+            "/kgw/api/v1/readFile",
+            json={"knCode": "kb1", "filePath": "/a.md"},
+            headers={"X-User-Id": "u1"},
+        )
+    assert m.call_args.kwargs["operation"] == "readFile"
+    assert m.call_args.kwargs["file_path"] == "/a.md"
+
+
+def test_dsl_guide_calls_dispatch():
+    with patch("kgw.api.files.dispatch_json", new_callable=AsyncMock) as m:
+        m.return_value = {"resultCode": "0", "resultMsg": "ok", "resultObject": {}}
+        client = TestClient(_build_files_app())
+        client.post(
+            "/kgw/api/v1/dslGuide",
+            json={"knCode": "kb1"},
+            headers={"X-User-Id": "u1"},
+        )
+    assert m.call_args.kwargs["operation"] == "dslGuide"
