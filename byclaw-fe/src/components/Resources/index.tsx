@@ -58,6 +58,28 @@ interface Props {
   resourceType: string; // 对应资源类型
 }
 
+const getBannerUrl = (bannerList: any[], label: string) => {
+  const banner = bannerList.find((item) => item?.label === label);
+  return `${banner?.url ?? ''}`.trim().replace(/^`|`$/g, '').trim();
+};
+
+const parseBannerList = (value: any) => {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value !== 'string' || !value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
 const Resources: React.FC<Props> = ({ resourceType }) => {
   const intl = useIntl();
 
@@ -123,6 +145,8 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const [knowledgeCapability, setKnowledgeCapability] = useState<KnowledgeCapability | null>(null);
   const [fixedEntryCapability, setFixedEntryCapability] = useState<FixedEntryOperationCapability | null>(null);
   const [brandVersion, setBrandVersion] = useState<'commercial' | 'openSource' | null>(null);
+  const [bannerList, setBannerList] = useState<any[]>([]);
+  const [bannerLoaded, setBannerLoaded] = useState(false);
 
   const topLevelCatalogList = React.useMemo(() => getTopLevelCatalogs(catalogList), [catalogList]);
   const refreshList = useCallback(() => {
@@ -417,6 +441,37 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const isEN = React.useMemo(() => {
     return local.includes('en');
   }, [local]);
+  const defaultBannerUrl = getRuntimeActualUrl(isEN ? '/beyond/market-en.png' : '/beyond/market.png');
+  const bannerLabel = React.useMemo(() => {
+    if (resourceType === 'KG_DOC') {
+      return activeTab === 'personal' ? '个人知识' : '企业知识';
+    }
+    if (resourceType === 'TOOL') {
+      return activeTab === 'personal' ? '个人工具' : '企业工具';
+    }
+    if (resourceType === 'VIEW') {
+      return activeTab === 'personal' ? '个人视图' : '企业视图';
+    }
+    if (resourceType === 'OBJECT') {
+      return activeTab === 'personal' ? '个人对象' : '企业对象';
+    }
+    return '';
+  }, [activeTab, resourceType]);
+  const customBannerUrl = getBannerUrl(bannerList, bannerLabel);
+  const bannerUrl = customBannerUrl ? getRuntimeActualUrl(customBannerUrl) : defaultBannerUrl;
+
+  useEffect(() => {
+    getDcSystemConfig({ paramCode: 'BYAI_BANNER' })
+      .then((res: any) => {
+        setBannerList(parseBannerList(res?.paramValue));
+      })
+      .catch(() => {
+        setBannerList([]);
+      })
+      .finally(() => {
+        setBannerLoaded(true);
+      });
+  }, []);
 
   return (
     <div className={styles.fileManagerContainer}>
@@ -437,13 +492,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         }}
       />
       <div className={classnames('full-width ub ub-ver ub-f1', styles.wrapper)}>
-        <div className="mb-16">
-          <img
-            className={styles.marketBg}
-            src={getRuntimeActualUrl(isEN ? '/beyond/market-en.png' : '/beyond/market.png')}
-            alt="poster"
-          />
-        </div>
+        <div className="mb-16">{bannerLoaded && <img className={styles.marketBg} src={bannerUrl} alt="poster" />}</div>
         <div className={classnames('ub ub-ac gap8', styles.filterBar)}>
           <Tabs
             className={classnames('ub-f1', styles.tabs)}
