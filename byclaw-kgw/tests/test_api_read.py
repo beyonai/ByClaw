@@ -91,3 +91,25 @@ def test_metadata_fields_list_calls_fanout():
             headers={"X-User-Id": "u1"},
         )
     assert m.call_args.kwargs["operation"] == "metadataFieldsList"
+
+
+def _build_files_app():
+    from kgw.api.files import router
+
+    app = FastAPI()
+    app.include_router(router)
+    return app
+
+
+def test_list_dir_calls_dispatch():
+    with patch("kgw.api.files.dispatch_json", new_callable=AsyncMock) as m:
+        m.return_value = {"resultCode": "0", "resultMsg": "ok", "resultObject": {}}
+        client = TestClient(_build_files_app())
+        resp = client.post(
+            "/kgw/api/v1/listDir",
+            json={"knCode": "kb1", "directoryPath": "/docs"},
+            headers={"X-User-Id": "u1"},
+        )
+    assert resp.status_code == 200
+    assert m.call_args.kwargs["operation"] == "listDir"
+    assert m.call_args.kwargs["kn_code"] == "kb1"

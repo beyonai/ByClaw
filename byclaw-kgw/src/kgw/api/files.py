@@ -40,3 +40,19 @@ async def file_build_status(
         user_id=x_user_id,
         body=body,
     )
+
+
+@router.post("/listDir")
+async def list_dir(
+    request: Request,
+    x_user_id: Annotated[str, Header(alias="X-User-Id")],
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    kn_code = str(body.get("knCode", ""))
+    return await dispatch_json(
+        request,
+        operation="listDir",
+        kn_code=kn_code,
+        user_id=x_user_id,
+        body=body,
+    )
