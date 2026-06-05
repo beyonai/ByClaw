@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Spin, Modal, Checkbox, Button, List, Tabs, Input, message, Empty, Popconfirm } from 'antd';
+import { Spin, Modal, Checkbox, Button, List, Tabs, Input, message, Empty, Popconfirm, Tooltip } from 'antd';
 import { useIntl, useSelector } from '@umijs/max';
 import { debounce, trim } from 'lodash';
 import classnames from 'classnames';
@@ -174,6 +174,7 @@ const ResourceList = (props: Props) => {
             ...item,
             resourceId: item.objectKey || index,
             resourceName: item.fileName,
+            resourceDesc: item.objectKey,
           }));
         }
       } else if (myResourceType === 'SKILL') {
@@ -752,12 +753,9 @@ const ResourceList = (props: Props) => {
                 <div className={styles.defaultLogo}>
                   <AntdIcon type={getResourceIcon(item.resourceName)} className={styles.defaultLogoIcon} />
                 </div>
-                <div
-                  className={classnames(styles.title, { [styles.spaceTitle]: resourceType === 'SPACE' })}
-                  title={item.resourceName}
-                >
-                  <div className="ub ub-ac">{item.resourceName}</div>
-                </div>
+                <Tooltip title={item.resourceName}>
+                  <div className={styles.title}>{item.resourceName}</div>
+                </Tooltip>
                 {/* 标签 */}
                 {renderResourceBizTypeTag(item.resourceBizType)}
                 {(resourceType === 'OBJECT' || resourceType === 'VIEW') && hoveredCard === item.resourceId && (
@@ -841,9 +839,9 @@ const ResourceList = (props: Props) => {
                   </div>
                 )}
               </div>
-              <div className={styles.desc} title={item.resourceDesc}>
-                {item.resourceDesc}
-              </div>
+              <Tooltip title={item.resourceDesc}>
+                <div className={styles.desc}>{item.resourceDesc}</div>
+              </Tooltip>
             </div>
           </Draggable>
         ))}
