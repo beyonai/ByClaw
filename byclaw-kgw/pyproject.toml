@@ -31,4 +31,5 @@ dev = [
     "respx>=0.21.0",
     "fakeredis>=2.26.0",
     "aiohttp>=3.14.0",
+    "pytest-cov>=7.1.0",
 ]

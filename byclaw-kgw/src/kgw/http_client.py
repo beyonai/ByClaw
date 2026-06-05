@@ -29,10 +29,12 @@ class _KgwClient(httpx.AsyncClient):
         request: httpx.Request,
         *,
         stream: bool = False,
-        auth: httpx._types.AuthTypes
-        | httpx._client.UseClientDefault = httpx.USE_CLIENT_DEFAULT,  # pylint: disable=protected-access
-        follow_redirects: bool
-        | httpx._client.UseClientDefault = httpx.USE_CLIENT_DEFAULT,  # pylint: disable=protected-access
+        auth: (
+            httpx._types.AuthTypes | httpx._client.UseClientDefault
+        ) = httpx.USE_CLIENT_DEFAULT,  # pylint: disable=protected-access
+        follow_redirects: (
+            bool | httpx._client.UseClientDefault
+        ) = httpx.USE_CLIENT_DEFAULT,  # pylint: disable=protected-access
     ) -> httpx.Response:
         if TRACE_HEADER not in request.headers:
             tid = current_trace_id()
