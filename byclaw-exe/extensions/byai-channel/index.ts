@@ -17,6 +17,7 @@ import {
 } from "./src/sdk-session-completion.js";
 import { AgentEvent } from "./src/types.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
+import { handleCronChangedEvent } from "./src/cron.js";
 
 const LOG_ONCE_STATE = Symbol.for("openclaw.byaiChannel.logOnce");
 
@@ -84,6 +85,10 @@ function registerFull(api: OpenClawPluginApi) {
       `[byai-channel] native subagent ended: requester=${request.sessionKey} child=${event?.targetSessionKey ?? ""} rootLifecyclePhase=${request.rootLifecyclePhase ?? ""} awaitingFollowup=${String(request.awaitingFollowup)}`,
     );
     scheduleActiveSdkCompletionCheck(api, request.sessionKey, "subagent_ended");
+  });
+  api.on("cron_changed", (event) => {
+    api.logger.info(`[byai-channel] cron_changed: ${JSON.stringify(event)}`);
+    handleCronChangedEvent(event);
   });
   logInfoOnce(api, "channel-registered-successfully", "[byai-channel] channel registered successfully");
 }
