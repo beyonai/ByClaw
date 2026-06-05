@@ -736,24 +736,26 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
         }}
       >
         <Spin spinning={previewInfo.loading} wrapperClassName="full-height-spin" style={{ flex: 1, minHeight: 0 }}>
-          {previewInfo.blob && (
-            <React.Suspense fallback={null}>
-              <PreViewFile
-                data={previewInfo.blob}
-                type={previewInfo.fileType}
-                title={previewInfo.fileName}
-                className={styles.preview}
-                extra={
-                  <span
-                    className={styles.previewClose}
-                    onClick={() => setPreviewInfo((prev) => ({ ...prev, open: false, blob: null }))}
-                  >
-                    <AntdIcon type="icon-a-Closeguanbi1" />
-                  </span>
-                }
-              />
-            </React.Suspense>
-          )}
+          <div className="ub full-height">
+            {previewInfo.blob && (
+              <React.Suspense fallback={null}>
+                <PreViewFile
+                  data={previewInfo.blob}
+                  type={previewInfo.fileType}
+                  title={previewInfo.fileName}
+                  className={styles.preview}
+                  extra={
+                    <span
+                      className={styles.previewClose}
+                      onClick={() => setPreviewInfo((prev) => ({ ...prev, open: false, blob: null }))}
+                    >
+                      <AntdIcon type="icon-a-Closeguanbi1" />
+                    </span>
+                  }
+                />
+              </React.Suspense>
+            )}
+          </div>
         </Spin>
       </Modal>
     </div>
