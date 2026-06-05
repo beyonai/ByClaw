@@ -242,7 +242,7 @@ async def test_dispatch_write_history_called_for_write_ops():
 
 @pytest.mark.asyncio
 async def test_dispatch_build_status_no_write_history():
-    """fileBuildStatus is audited but does NOT write to kgw_kb_write_history."""
+    """fileBuildStatus is read-shaped: no audit, no kgw_kb_write_history."""
     state = _make_state()
     req = _make_request(state)
     with respx.mock:
@@ -267,6 +267,7 @@ async def test_dispatch_build_status_no_write_history():
     await asyncio.sleep(0)
     # pool.connection should NOT be called for buildStatus (not a write-history op)
     state.pool.connection.assert_not_called()
+    state.audit.record.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -372,3 +373,69 @@ async def test_dispatch_discovery_mode_no_domain_raises():
             user_id="u1",
             body={},
         )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_read_op_does_not_audit():
+    """Read ops (knowledgeSearch/listDir/...) MUST NOT write audit log."""
+    state = _make_state()
+    # extend operations to include knowledgeSearch
+    state.config_provider.get_kb_config.return_value = KbConfig(
+        kn_code="test_kb",
+        resource_code="backend_kb_1",
+        domain_url="http://kb.test",
+        domain_name="",
+        headers={},
+        operations=frozenset({"knowledgeSearch"}),
+        operation_paths={"knowledgeSearch": "/api/v1/knowledgeItems/search"},
+        raw={},
+    )
+    req = _make_request(state)
+    with respx.mock:
+        respx.post("http://kb.test/api/v1/knowledgeItems/search").mock(
+            return_value=httpx.Response(
+                200, json={"resultCode": "0", "resultMsg": "ok", "resultObject": {}}
+            )
+        )
+        state.http = httpx.AsyncClient()
+        await dispatch_json(
+            req,
+            operation="knowledgeSearch",
+            kn_code="test_kb",
+            user_id="u1",
+            body={"knCodeList": ["test_kb"]},
+        )
+    state.audit.record.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_read_op_no_write_history():
+    """Read ops must not insert kgw_kb_write_history."""
+    state = _make_state()
+    state.config_provider.get_kb_config.return_value = KbConfig(
+        kn_code="test_kb",
+        resource_code="backend_kb_1",
+        domain_url="http://kb.test",
+        domain_name="",
+        headers={},
+        operations=frozenset({"listDir"}),
+        operation_paths={"listDir": "/api/v1/listDir"},
+        raw={},
+    )
+    req = _make_request(state)
+    with respx.mock:
+        respx.post("http://kb.test/api/v1/listDir").mock(
+            return_value=httpx.Response(
+                200, json={"resultCode": "0", "resultMsg": "ok", "resultObject": {}}
+            )
+        )
+        state.http = httpx.AsyncClient()
+        await dispatch_json(
+            req,
+            operation="listDir",
+            kn_code="test_kb",
+            user_id="u1",
+            body={"knCode": "test_kb"},
+        )
+    await asyncio.sleep(0)
+    state.pool.connection.assert_not_called()

@@ -34,6 +34,7 @@ _log = get_logger(__name__)
 
 # Map gateway-facing operation name → KB config operation name
 _GATEWAY_TO_KB_OP: dict[str, str] = {
+    # writes (S2)
     "directoryCreate": "directoryCreate",
     "directoryUpdate": "directoryUpdate",
     "directoryDelete": "directoryDelete",
@@ -41,6 +42,15 @@ _GATEWAY_TO_KB_OP: dict[str, str] = {
     "fileDelete": "fileDelete",
     "fileToMarkdownIndex": "buildTrigger",
     "fileBuildStatus": "buildStatus",
+    # reads (S3) — gateway op name == KB op name for the read surface
+    "knowledgeSearch": "knowledgeSearch",
+    "metadataSearch": "metadataSearch",
+    "searchFile": "searchFile",
+    "metadataFieldsList": "metadataFieldsList",
+    "listDir": "listDir",
+    "glob": "glob",
+    "readFile": "readFile",
+    "downloadFile": "downloadFile",
 }
 
 # Default backend path by KB operation name (fallback when portal config omits paths)
@@ -52,6 +62,14 @@ _DEFAULT_KB_PATHS: dict[str, str] = {
     "fileDelete": "/api/v1/knowledgeItems/delete",
     "buildTrigger": "/api/v1/fileToMarkdownIndex",
     "buildStatus": "/api/v1/fileBuildStatus",
+    "knowledgeSearch": "/api/v1/knowledgeItems/search",
+    "metadataSearch": "/api/v1/knowledgeItems/metadataSearch",
+    "searchFile": "/api/v1/knowledgeItems/searchFile",
+    "metadataFieldsList": "/api/v1/knowledgeItems/metadataFields/list",
+    "listDir": "/api/v1/listDir",
+    "glob": "/api/v1/glob",
+    "readFile": "/api/v1/readFile",
+    "downloadFile": "/api/v1/downloadFile",
 }
 
 # Operations that write to kgw_kb_write_history (state-changing writes only)
@@ -63,6 +81,22 @@ _WRITE_HISTORY_OPS = frozenset(
         "fileImport",
         "fileDelete",
         "fileToMarkdownIndex",
+    }
+)
+
+# Read operations — do NOT write audit log and do NOT write kgw_kb_write_history
+# (v5 spec §7.1: only high-risk writes are audited)
+_READ_OPS = frozenset(
+    {
+        "knowledgeSearch",
+        "metadataSearch",
+        "searchFile",
+        "metadataFieldsList",
+        "listDir",
+        "glob",
+        "readFile",
+        "downloadFile",
+        "fileBuildStatus",  # status query: read-shaped, no audit, no history
     }
 )
 
@@ -173,28 +207,27 @@ async def dispatch_json(
         latency_ms / 1000.0
     )
 
-    # 8. Audit log (fire-and-forget — AuditWriter.record enqueues synchronously,
-    #    never raises, and actual I/O happens in a background drain task)
-    await state.audit.record(
-        AuditEntry(
-            source="serve",
-            trace_id=trace_id,
-            actor_user_id=user_id,
-            actor_kind="user",
-            operation_type=operation,
-            kn_code=kn_code,
-            file_path=file_path,
-            payload_size_bytes=None,
-            row_count=None,
-            payload_redacted={"knCode": kn_code, "filePath": file_path},
-            result_code=result_code,
-            result_msg=resp_body.get("resultMsg"),
-            latency_ms=latency_ms,
+    # 8. Audit log — writes only (v5 spec §7.1). Read ops must NOT audit.
+    if operation not in _READ_OPS:
+        await state.audit.record(
+            AuditEntry(
+                source="serve",
+                trace_id=trace_id,
+                actor_user_id=user_id,
+                actor_kind="user",
+                operation_type=operation,
+                kn_code=kn_code,
+                file_path=file_path,
+                payload_size_bytes=None,
+                row_count=None,
+                payload_redacted={"knCode": kn_code, "filePath": file_path},
+                result_code=result_code,
+                result_msg=resp_body.get("resultMsg"),
+                latency_ms=latency_ms,
+            )
         )
-    )
 
-    # 9. Write history for state-changing writes (fire-and-forget background task;
-    #    failures are logged and swallowed — never blocks the response path)
+    # 9. Write history — state-changing writes only (background, fire-and-forget)
     if operation in _WRITE_HISTORY_OPS:
         asyncio.create_task(
             _write_history(state.pool, kn_code=kn_code, file_path=file_path or ""),
