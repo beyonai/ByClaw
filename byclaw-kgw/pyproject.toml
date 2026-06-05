@@ -30,4 +30,5 @@ dev = [
     "pytest-asyncio>=1.0.0",
     "respx>=0.21.0",
     "fakeredis>=2.26.0",
+    "aiohttp>=3.14.0",
 ]
