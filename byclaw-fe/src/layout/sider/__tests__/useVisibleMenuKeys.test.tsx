@@ -27,7 +27,7 @@ describe('useVisibleMenuKeys', () => {
     });
 
     expect(mockGetDcSystemConfigListByStandType).not.toHaveBeenCalled();
-    expect(result.current).toEqual(getVisibleMenuKeysFromConfig(DEFAULT_MENU_CONFIG));
+    expect(result.current).toEqual([]);
 
     rerender({ userInfo: { userId: 1 } });
 
@@ -39,6 +39,30 @@ describe('useVisibleMenuKeys', () => {
 
     await waitFor(() => {
       expect(result.current).toEqual(['sessions']);
+    });
+  });
+
+  it('falls back to default visible keys when menu config is empty', async () => {
+    mockGetDcSystemConfigListByStandType.mockResolvedValue({ data: [] });
+
+    const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
+
+    expect(result.current).toEqual([]);
+
+    await waitFor(() => {
+      expect(result.current).toEqual(getVisibleMenuKeysFromConfig(DEFAULT_MENU_CONFIG));
+    });
+  });
+
+  it('falls back to default visible keys when menu config request fails', async () => {
+    mockGetDcSystemConfigListByStandType.mockRejectedValue(new Error('request failed'));
+
+    const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
+
+    expect(result.current).toEqual([]);
+
+    await waitFor(() => {
+      expect(result.current).toEqual(getVisibleMenuKeysFromConfig(DEFAULT_MENU_CONFIG));
     });
   });
 });

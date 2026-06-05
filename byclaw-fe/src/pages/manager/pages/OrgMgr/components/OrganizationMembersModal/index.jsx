@@ -9,6 +9,7 @@ import styles from './index.module.less';
 import { encryptBySM } from '@/pages/manager/utils/encrypt/sm';
 
 const phoneRegex = /^1\d{10}$/;
+const userCodeRegex = /^[A-Za-z0-9_]{3,50}$/;
 const INITIAL_PASSWORD = 'Byai@13579';
 const passwordRegex = /^[A-Za-z0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]*$/;
 
@@ -115,7 +116,7 @@ const OrganizationMembersModal = (props) => {
         .join('');
 
       form.setFieldsValue({
-        userCode: pinyinResult,
+        userCode: pinyinResult.slice(0, 50),
       });
     }
   };
@@ -173,6 +174,7 @@ const OrganizationMembersModal = (props) => {
       }
       width={500}
       open={visible}
+      maskClosable={false}
       onCancel={onCancel}
       confirmLoading={confirmLoading}
       onOk={() => {
@@ -241,6 +243,12 @@ const OrganizationMembersModal = (props) => {
           name="userName"
           rules={[
             {
+              required: true,
+              message: intl.formatMessage({
+                id: 'orgMgr.modal.userNamePlaceholder',
+              }),
+            },
+            {
               validator: (_, value) => {
                 if (value) {
                   if (value.length < 2 || value.length > 20) {
@@ -280,12 +288,8 @@ const OrganizationMembersModal = (props) => {
               }),
             },
             {
-              min: 3,
-              message: intl.formatMessage({ id: 'orgMgr.modal.userCodeRule1' }),
-            },
-            {
-              max: 255,
-              message: intl.formatMessage({ id: 'orgMgr.modal.userCodeRule2' }),
+              pattern: userCodeRegex,
+              message: intl.formatMessage({ id: 'orgMgr.modal.userCodeRule' }),
             },
           ]}
         >
@@ -294,7 +298,7 @@ const OrganizationMembersModal = (props) => {
               id: 'orgMgr.modal.userCodePlaceholder',
             })}
             showCount
-            maxLength={255}
+            maxLength={50}
             onChange={() => setIsCodeModified(true)}
             disabled={type !== 'add'}
             autoComplete="off"
@@ -306,6 +310,7 @@ const OrganizationMembersModal = (props) => {
             <Form.Item
               label={intl.formatMessage({ id: 'orgMgr.modal.password' })}
               name="password"
+              required
               rules={[{ validator: validatePasswordComplexity }]}
             >
               <Input.Password
@@ -318,6 +323,7 @@ const OrganizationMembersModal = (props) => {
             <Form.Item
               label={intl.formatMessage({ id: 'orgMgr.modal.confirmPassword' })}
               name="confirmPassword"
+              required
               rules={[{ validator: validateConfirmPassword }]}
             >
               <Input.Password

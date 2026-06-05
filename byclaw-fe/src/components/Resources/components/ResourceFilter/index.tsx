@@ -431,13 +431,20 @@ interface ResourceFilterWithDropdownProps {
   defaultParam: IOnOkParams;
   activeTab?: string;
   resourceType?: string;
+  alwaysShowStatusFilter?: boolean;
 }
 
-const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({ onOk, defaultParam, activeTab, resourceType }) => {
+const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
+  onOk,
+  defaultParam,
+  activeTab,
+  resourceType,
+  alwaysShowStatusFilter,
+}) => {
   const intl = useIntl();
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
-  const [brandVersion, setBrandVersion] = React.useState<'commercial' | 'openSource' | null>(null);
-  const showStatusFilter = brandVersion !== 'commercial';
+  const [brandVersion, setBrandVersion] = React.useState<'commercial' | 'openSource' | null>();
+  const showStatusFilter = alwaysShowStatusFilter || brandVersion === 'openSource' || brandVersion === null;
 
   React.useEffect(() => {
     getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })

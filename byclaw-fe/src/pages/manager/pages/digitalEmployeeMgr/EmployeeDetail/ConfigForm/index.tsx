@@ -405,7 +405,7 @@ const ConfigForm = (props) => {
         });
         if (!mounted) return;
 
-        const list = parseConfigList(res?.paramValue || res?.data?.paramValue || res?.data || res);
+        const list = parseConfigList(res?.paramValue);
         setBundledSkillOptions(
           list
             .map((item) => ({

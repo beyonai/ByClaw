@@ -17,23 +17,23 @@ const BusinessFieldAssets = ({ selectedField }) => {
     const list = [
       {
         key: 'employee',
-        label: intl.formatMessage({ id: 'businessField.assets.digitalEmployee' }),
+        label: intl.formatMessage({ id: 'orgMgr.tabs.employee' }),
       },
       {
         key: 'knowledge',
-        label: intl.formatMessage({ id: 'businessField.assets.knowledge' }),
+        label: intl.formatMessage({ id: 'orgMgr.tabs.knowledge' }),
       },
       {
         key: 'tool',
-        label: intl.formatMessage({ id: 'businessField.assets.tool' }),
+        label: intl.formatMessage({ id: 'orgMgr.tabs.tool' }),
       },
       {
         key: 'view',
-        label: intl.formatMessage({ id: 'businessField.assets.view' }),
+        label: intl.formatMessage({ id: 'orgMgr.tabs.view' }),
       },
       {
         key: 'object',
-        label: intl.formatMessage({ id: 'businessField.assets.object' }),
+        label: intl.formatMessage({ id: 'orgMgr.tabs.object' }),
       },
     ];
 
