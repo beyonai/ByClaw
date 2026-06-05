@@ -1,0 +1,81 @@
+{
+  "skill_name": "content-to-outline",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我想把「AI Agent 架构设计」这个主题做成一个播客视频，请帮我生成幻灯片大纲，大概10分钟的播客，输出 slide-outline.json",
+      "expected_output": "slide-outline.json 包含 meta 字段（topic, suggested_title, total_slides, estimated_duration_min）和 slides 数组（8-12张），每张幻灯片有 slide编号、type、title、key_points（幻灯片视觉内容）、speaker_notes（对话要点，具体可操作）、depth 字段。cover 和 summary 类型各一张，中间是 content 类型。key_points 简洁可视化，speaker_notes 具体深入不是 key_points 的复述。",
+      "files": [],
+      "assertions": [
+        {
+          "name": "输出合法 JSON",
+          "description": "slide-outline.json 是合法的 JSON 文件，可被解析"
+        },
+        {
+          "name": "slides 数量合理",
+          "description": "slides 数组长度在 8-12 之间，meta.total_slides 与数组长度一致"
+        },
+        {
+          "name": "必填字段完整",
+          "description": "每张幻灯片都有 slide（整数）、type、title、key_points（数组）、speaker_notes（非空字符串）、depth 字段"
+        },
+        {
+          "name": "speaker_notes 不是 key_points 的复述",
+          "description": "speaker_notes 提供了超越 key_points 的对话角度（案例、争议、原因、对比），而非直接重复"
+        },
+        {
+          "name": "depth 分配合理",
+          "description": "cover 和 summary 类型为 short，内容幻灯片至少有一张 long 或 medium"
+        },
+        {
+          "name": "有 cover 和 summary",
+          "description": "slides 中包含 type=cover 的第一张和 type=summary 的最后一张"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "我刚用 wechat-tech-article 生成了一篇关于 MarkItDown 的微信文章，内容如下，请帮我把它转成播客视频大纲：\n\n# 基准测试第一！MarkItDown：微软开源的「万能文档解析器」\n\n> 核心亮点：支持 PDF/Word/Excel/PPT/图片等20+格式，纯Python，MIT开源\n\n---\n\n两句话引入：企业内部文档散落在各种格式里，每次要喂给大模型都要手动转换。MarkItDown 用一行代码解决这个问题。\n\n## 🏆 成绩单\n\n| 格式 | 支持 | 备注 |\n|---|---|---|\n| PDF | ✅ | 含扫描件（需pdfminer）|\n| Word/DOCX | ✅ | 保留标题层级 |\n| Excel/XLSX | ✅ | 多Sheet |\n| PPT/PPTX | ✅ | 含备注 |\n| 图片 | ✅ | OCR + GPT-4V |\n\n## 🤔 它到底干了什么？\n\nMarkItDown 把任意文档转成 Markdown，让大模型能直接读。核心价值：不是最强的格式转换器，而是最适合 LLM pipeline 的那个。\n\n## 🏗️ 怎么做到的？\n\n- 针对每种格式有专门的 parser\n- 输出统一的 Markdown 结构\n- 可插拔设计，支持自定义 converter\n\n## 🧪 实战演练\n\n安装：pip install markitdown\n转换PDF：markitdown report.pdf > output.md  耗时：1.2s\n转换PPTX：markitdown slides.pptx > output.md  耗时：0.8s\n\n## 🎯 谁该用？\n\n- RAG 系统构建者：文档入库前的预处理\n- 大模型应用开发者：统一文档读取接口\n- 数据工程师：批量文档转换流水线",
+      "expected_output": "将微信文章的各章节结构化为幻灯片大纲。成绩单表格 → 核心数据幻灯片，技术架构 → 技术原理幻灯片，实战演练 → 演示幻灯片，应用场景 → 受众幻灯片。speaker_notes 围绕'为什么这个数据重要'、'背后有什么设计取舍'等角度展开，而非照搬文章内容。",
+      "files": [],
+      "assertions": [
+        {
+          "name": "正确识别内容来源",
+          "description": "meta.topic 正确描述了 MarkItDown 是什么"
+        },
+        {
+          "name": "文章结构被正确映射",
+          "description": "微信文章的主要章节（成绩单、工作原理、实战、受众）都体现在对应的幻灯片中"
+        },
+        {
+          "name": "key_points 来自文章数据",
+          "description": "实测数据（如格式支持列表、耗时数字）被提取到 key_points 中"
+        },
+        {
+          "name": "speaker_notes 延伸了文章",
+          "description": "speaker_notes 提供了文章没有展开的对话角度，不是文章内容的直接复制"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "帮我做一个播客视频大纲，主题是「为什么越来越多的初创公司选择放弃微服务，回归单体架构」，目标听众是有3-5年经验的后端工程师，要求对话有争议性和深度",
+      "expected_output": "大纲围绕微服务 vs 单体架构的争议展开，speaker_notes 体现争议性（为什么微服务流行、哪些公司回归单体、回归的代价、什么时候微服务才合适），幻灯片 key_points 是清晰的结论/数据点，对话提示引导主持人和嘉宾形成观点碰撞。",
+      "files": [],
+      "assertions": [
+        {
+          "name": "有争议性角度",
+          "description": "speaker_notes 中包含'争议'、'反驳'、'不同观点'或类似引导对话张力的内容"
+        },
+        {
+          "name": "内容深度匹配目标受众",
+          "description": "key_points 包含技术细节（如具体的复杂度问题、运维成本等），而非纯科普"
+        },
+        {
+          "name": "depth 分配体现重点",
+          "description": "核心争议幻灯片（回归原因、权衡分析）depth 为 long，背景介绍为 short"
+        }
+      ]
+    }
+  ]
+}
