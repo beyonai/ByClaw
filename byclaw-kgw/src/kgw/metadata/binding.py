@@ -157,19 +157,23 @@ async def delete_by_directory(
     kn_code: str,
     directory_path: str,
 ) -> int:
-    """Delete all binding rows whose file_path starts with directory_path + '/'.
+    """按目录前缀删除该目录下所有文件的 binding。``directory_path`` 不含尾斜杠。
 
-    Trailing slashes on directory_path are stripped before the prefix is
-    constructed, so ``/dir`` and ``/dir/`` both match ``/dir/a.md``.
-
-    Returns the number of rows deleted.
+    ``directory_path`` 中的 LIKE 元字符(``\\`` / ``%`` / ``_``)按字面值处理,
+    避免越界匹配。
     """
-    prefix = directory_path.rstrip("/") + "/"
+    escaped = (
+        directory_path.rstrip("/")
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    prefix = escaped + "/"
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
                 "DELETE FROM kgw_metadata_property_binding "
-                "WHERE kn_code=%s AND file_path LIKE %s",
+                "WHERE kn_code=%s AND file_path LIKE %s ESCAPE '\\'",
                 (kn_code, prefix + "%"),
             )
             n = cur.rowcount

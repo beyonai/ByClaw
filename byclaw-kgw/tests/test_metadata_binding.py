@@ -62,9 +62,12 @@ async def binding_pool(pg_dsn: str):
 
 
 def test_new_attempt_id_monotonic():
-    first = new_attempt_id()
-    second = new_attempt_id()
-    assert second > first
+    import time
+
+    a = new_attempt_id()
+    time.sleep(1e-6)
+    b = new_attempt_id()
+    assert b > a
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +201,39 @@ async def test_delete_by_directory_prefix_match(binding_pool):
     assert ("hr", "/dir/a.md") not in paths
     assert ("hr", "/dir/sub/b.md") not in paths
     assert c_hr >= 1  # at least the /other/c.md row
+
+
+@pytest.mark.integration
+async def test_delete_by_directory_escapes_like_metachars(binding_pool):
+    prop = await create_property(
+        binding_pool, property_name="t_bind4b", value_type="string"
+    )
+
+    async with binding_pool.connection() as conn:
+        for path in ("/dir_2025/a.md", "/dirX2025/a.md", "/dir_2025/sub/b.md"):
+            await upsert_pending(
+                conn,
+                property_id=prop.property_id,
+                kn_code="hr",
+                file_path=path,
+                attempt_id=new_attempt_id(),
+            )
+        await conn.commit()
+
+    n = await delete_by_directory(
+        binding_pool, kn_code="hr", directory_path="/dir_2025"
+    )
+    assert n == 2
+
+    # /dirX2025/a.md must survive — the underscore is literal, not a wildcard
+    async with binding_pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT COUNT(*) AS c FROM kgw_metadata_property_binding "
+                "WHERE kn_code='hr' AND file_path='/dirX2025/a.md'",
+            )
+            row = await cur.fetchone()
+    assert row["c"] == 1
 
 
 @pytest.mark.integration
