@@ -104,3 +104,52 @@ async def test_audit_log_columns_present(pg_dsn: str):
                 await conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
             await conn.commit()
         await pool.close()
+
+
+@pytest.mark.integration
+async def test_s4_migrations_create_expected_tables(pg_dsn: str):
+    from kgw.db import build_pool, run_migrations
+
+    pool = await build_pool(pg_dsn, min_size=1, max_size=2)
+    try:
+        await run_migrations(pool, SQL_DIR)
+
+        async with pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM information_schema.tables
+                     WHERE table_name = 'kgw_metadata_property'
+                       AND table_schema = current_schema()) AS prop,
+                    (SELECT COUNT(*) FROM information_schema.tables
+                     WHERE table_name = 'kgw_metadata_property_binding'
+                       AND table_schema = current_schema()) AS binding,
+                    (SELECT COUNT(*) FROM information_schema.tables
+                     WHERE table_name = 'kgw_metadata_binding_outbox'
+                       AND table_schema = current_schema()) AS outbox,
+                    (SELECT COUNT(*) FROM information_schema.tables
+                     WHERE table_name = 'kgw_metadata_property_sync'
+                       AND table_schema = current_schema()) AS sync
+                """
+            )
+            row = await cur.fetchone()
+            assert row["prop"] >= 1
+            assert row["binding"] >= 1
+            assert row["outbox"] >= 1
+            assert row["sync"] >= 1
+    finally:
+        async with pool.connection() as conn:
+            for table in (
+                "kgw_metadata_property_sync",
+                "kgw_metadata_property_binding",
+                "kgw_metadata_binding_outbox",
+                "kgw_metadata_property",
+                "kgw_audit_log",
+                "kgw_kb_write_history",
+                "kgw_kb_source_lock",
+                "kgw_kb_conflict_log",
+                "kgw_migration",
+            ):
+                await conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+            await conn.commit()
+        await pool.close()
