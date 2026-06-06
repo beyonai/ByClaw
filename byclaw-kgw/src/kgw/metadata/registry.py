@@ -19,6 +19,12 @@ BACKEND_PREFIX = "__byclaw_kgw__"
 
 
 def derive_backend_name(property_name: str, property_id: int) -> str:
+    """Compose the per-property column name materialized in KB backends.
+
+    The version suffix ``__v{property_id}`` ensures recreated properties
+    with the same logical name never collide with their predecessors at
+    the backend schema layer.
+    """
     return f"{BACKEND_PREFIX}{property_name}__v{property_id}"
 
 
