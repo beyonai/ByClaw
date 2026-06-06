@@ -147,3 +147,7 @@ class INVALID_FIELD_VALUE_TYPE(KgwError):  # noqa: N801
 
 class INVALID_BATCH_DUPLICATE_NAME(KgwError):  # noqa: N801
     error_type = "INVALID_BATCH_DUPLICATE_NAME"
+
+
+class INVALID_PROPERTY_NAME(KgwError):  # noqa: N801
+    error_type = "INVALID_PROPERTY_NAME"

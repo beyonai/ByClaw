@@ -138,10 +138,12 @@ def build_app() -> FastAPI:
     from kgw.api.directories import router as directories_router
     from kgw.api.files import router as files_router
     from kgw.api.knowledge_items import router as knowledge_items_router
+    from kgw.api.metadata_properties import router as metadata_properties_router
 
     app.include_router(directories_router)
     app.include_router(knowledge_items_router)
     app.include_router(files_router)
+    app.include_router(metadata_properties_router)
 
     return app
 
