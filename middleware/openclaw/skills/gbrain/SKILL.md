@@ -415,7 +415,7 @@ MCP 仅认 `GBRAIN_SOURCE` 环境变量作 source；CLI 还有 `--source`、`.gb
 ## 12. 冷启动（新会话）
 
 ```bash
-export GBRAIN_HOME="${GBRAIN_HOME:-/by/.openclaw/gbrain/data}"
+export GBRAIN_HOME="${GBRAIN_HOME:-/by/.openclaw/gbrain}"
 GBRAIN_REF="${OPENCLAW_SKILL_GBRAIN_DIR:-/app/skills/gbrain}/references"
 gbrain stats --json
 gbrain sources current --json
