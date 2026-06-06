@@ -150,7 +150,7 @@ def _remap_node(node: Any, backend_to_name: dict[str, str]) -> Any:
             node["metadata"] = {
                 backend_to_name.get(k, k): v for k, v in node["metadata"].items()
             }
-        # recurse into all values (the metadata key itself is already rewritten above)
+        # skip recursing into metadata values — keys rewritten above, values are opaque
         for k, v in list(node.items()):
             if k != "metadata":
                 node[k] = _remap_node(v, backend_to_name)

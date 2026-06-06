@@ -92,10 +92,11 @@ def test_translate_response_metadata_typed_form():
         }
     }
     out = translate_response_metadata(payload, B2N)
-    assert "status" in out["metadata"]
-    assert "tags" in out["metadata"]
-    assert "native_field" in out["metadata"]
+    assert out["metadata"]["status"] == {"valueType": "string", "value": "active"}
+    assert out["metadata"]["tags"] == {"valueType": "stringList", "value": ["a"]}
+    assert out["metadata"]["native_field"] == {"valueType": "string", "value": "z"}
     assert "__byclaw_kgw__status__v7" not in out["metadata"]
+    assert "__byclaw_kgw__tags__v8" not in out["metadata"]
 
 
 # ---------------------------------------------------------------------------
