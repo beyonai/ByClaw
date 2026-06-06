@@ -208,3 +208,16 @@ async def fake_redis() -> AsyncIterator:
         yield client
     finally:
         await client.aclose()
+
+
+@pytest.fixture
+def kb_config_resolver_factory():
+    """Build an async kn_code -> endpoint URL resolver from a dict."""
+
+    def _factory(mapping):
+        async def _resolve(kn_code: str) -> str:
+            return mapping[kn_code]
+
+        return _resolve
+
+    return _factory
