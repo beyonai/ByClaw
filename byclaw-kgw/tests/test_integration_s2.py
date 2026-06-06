@@ -259,7 +259,7 @@ async def test_dispatch_via_discovery_mode(redis_url):
     await r.sadd(svc_index_key, service_name)
 
     try:
-        from kgw.dispatcher import _call_via_discovery
+        from kgw.upstream import call_via_discovery
 
         # Mock httpx.AsyncClient.request — ByHttpClient uses it internally.
         # We capture the URL and body, and return a valid JSON response.
@@ -279,7 +279,7 @@ async def test_dispatch_via_discovery_mode(redis_url):
             return mock_resp
 
         with patch("httpx.AsyncClient.request", new=_mock_request):
-            result = await _call_via_discovery(
+            result = await call_via_discovery(
                 domain_name=service_name,
                 op_path="/api/v1/directories/create",
                 body={"knCode": "backend_kb_x", "directoryPath": "/discovery-test"},

@@ -29,6 +29,7 @@ from kgw.envelope import (
 )
 from kgw.observability.logger import get_logger
 from kgw.observability.metrics import CIRCUIT_STATE, DISPATCH_LATENCY, DISPATCH_TOTAL
+from kgw.upstream import BackendAuthError, call_backend_json
 
 _log = get_logger(__name__)
 
@@ -70,6 +71,8 @@ _DEFAULT_KB_PATHS: dict[str, str] = {
     "glob": "/api/v1/glob",
     "readFile": "/api/v1/readFile",
     "downloadFile": "/api/v1/downloadFile",
+    # S4 metadata sync
+    "metadataPropertiesBatchCreate": "/api/v1/metadataProperties/batchCreate",
 }
 
 # Operations that write to kgw_kb_write_history (state-changing writes only)
@@ -166,7 +169,7 @@ async def dispatch_json(
     result_code = "-1"
     resp_body: dict[str, Any] = {}
     try:
-        resp_body = await _call_backend(
+        resp_body = await call_backend_json(
             config=config,
             op_path=op_path,
             body=backend_body,
@@ -176,7 +179,7 @@ async def dispatch_json(
         cb.record_success()
         _set_circuit_metric(kn_code, cb)
         result_code = str(resp_body.get("resultCode", "0"))
-    except (KBNotFound, OperationNotSupported, CircuitOpen, BackendAuthFailed):
+    except (KBNotFound, OperationNotSupported, CircuitOpen, BackendAuthFailed):  # pylint: disable=try-except-raise
         raise
     except httpx.TimeoutException as exc:
         cb.record_failure()
@@ -192,7 +195,7 @@ async def dispatch_json(
             f"connect error calling {config.domain_url or config.domain_name}{op_path}",
             kn_code=kn_code,
         ) from exc
-    except _BackendAuthError as exc:
+    except BackendAuthError as exc:
         cb.record_failure()
         _set_circuit_metric(kn_code, cb)
         raise BackendAuthFailed(str(exc), kn_code=kn_code) from exc
@@ -283,103 +286,6 @@ def _remap_kn_code(
 
 def _set_circuit_metric(kn_code: str, cb: Any) -> None:
     CIRCUIT_STATE.labels(kn_code=kn_code).set(cb.state.value)
-
-
-class _BackendAuthError(Exception):
-    """Internal sentinel: KB returned 401/403."""
-
-
-async def _call_backend(
-    *,
-    config: Any,  # KbConfig
-    op_path: str,
-    body: dict[str, Any],
-    headers: dict[str, str],
-    http: httpx.AsyncClient,
-) -> dict[str, Any]:
-    """Execute the upstream POST in direct or service-discovery mode.
-
-    Direct mode:  config.domain_url is set → POST to domain_url + op_path.
-    Discovery mode: config.domain_name is set and domain_url is empty →
-                    use by-framework DiscoveryHttpClient.
-    """
-    if config.domain_url:
-        url = config.domain_url.rstrip("/") + "/" + op_path.lstrip("/")
-        response = await http.post(url, json=body, headers=headers)
-        if response.status_code in (401, 403):
-            raise _BackendAuthError(
-                f"backend auth failed (HTTP {response.status_code}) for {url}"
-            )
-        return response.json()
-
-    # Service-discovery mode via by-framework
-    if not config.domain_name:
-        raise UpstreamConnectError(
-            "KB config has neither domainURL nor domainName",
-            kn_code=config.kn_code,
-        )
-    return await _call_via_discovery(
-        domain_name=config.domain_name,
-        op_path=op_path,
-        body=body,
-        headers=headers,
-    )
-
-
-async def _call_via_discovery(
-    *,
-    domain_name: str,
-    op_path: str,
-    body: dict[str, Any],
-    headers: dict[str, str],
-) -> dict[str, Any]:
-    """POST to a KB backend via by-framework service discovery.
-
-    Uses DiscoveryClient (Redis-backed) to resolve the service name to a
-    physical host:port, then POSTs JSON. The discovery client is created
-    and closed per-call (no persistent state needed — gateway is stateless
-    for service discovery).
-    """
-    from by_framework.common.redis_client import init_redis
-    from by_framework.core.discovery import DiscoveryClient
-    from by_framework.util.discovery_http_client import DiscoveryHttpClient
-    from kgw.settings import get_settings
-
-    settings = get_settings()
-    redis_client = init_redis(
-        host=settings.redis_host,
-        port=settings.redis_port,
-        db=settings.redis_database,
-        password=settings.redis_password or None,
-        username=settings.redis_username or None,
-        decode_responses=True,
-    )
-    discovery_client = DiscoveryClient(redis_client=redis_client, cache_interval=5)
-    try:
-        async with DiscoveryHttpClient(discovery_client) as client:
-            resp = await client.post(
-                domain_name,
-                op_path,
-                json=body,
-                headers=headers or None,
-            )
-        if not resp.is_success:
-            raise _BackendAuthError(
-                f"backend returned HTTP {resp.status_code} via discovery for {domain_name}{op_path}"
-            )
-        # HttpResponse.data is a dict when content-type is application/json,
-        # or a string otherwise. Normalise to dict in both cases.
-        if isinstance(resp.data, dict):
-            return resp.data
-        if isinstance(resp.data, str):
-            import json as _json
-
-            return _json.loads(resp.data)
-        raise ValueError(
-            f"discovery response body is not JSON-parseable: {type(resp.data)}"
-        )
-    finally:
-        await discovery_client.close()
 
 
 async def dispatch_fanout_json(
@@ -490,7 +396,7 @@ async def dispatch_fanout_json(
         group_body.pop("knCode", None)
 
         try:
-            resp = await _call_backend(
+            resp = await call_backend_json(
                 config=first_cfg,
                 op_path=op_path,
                 body=group_body,
@@ -511,7 +417,7 @@ async def dispatch_fanout_json(
                 f"connect error calling {endpoint_key}{op_path}",
                 kn_code=group_kn_codes[0],
             ) from exc
-        except _BackendAuthError as exc:
+        except BackendAuthError as exc:
             cb.record_failure()
             _set_circuit_metric(group_kn_codes[0], cb)
             raise BackendAuthFailed(str(exc), kn_code=group_kn_codes[0]) from exc

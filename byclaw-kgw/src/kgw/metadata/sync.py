@@ -9,15 +9,19 @@ from __future__ import annotations
 
 import enum
 import hashlib
-from typing import Awaitable, Callable
+from typing import Any
 
 import httpx
-from kgw.envelope import MetadataPropertySyncFailed
+from kgw.dispatcher import _DEFAULT_KB_PATHS
+from kgw.envelope import CircuitOpen, KBNotFound, MetadataPropertySyncFailed
 from kgw.metadata.registry import get_property_by_id
 from kgw.observability.logger import get_logger
+from kgw.upstream import BackendAuthError, call_backend_json
 from psycopg_pool import AsyncConnectionPool
 
 _log = get_logger(__name__)
+
+_OP_ID = "metadataPropertiesBatchCreate"
 
 
 class SyncStatus(str, enum.Enum):
@@ -27,10 +31,6 @@ class SyncStatus(str, enum.Enum):
     PURGING = "PURGING"
     PURGED = "PURGED"
     PURGE_FAILED = "PURGE_FAILED"
-
-
-# Resolver: maps kn_code -> backend endpoint URL.
-KbEndpointResolver = Callable[[str], Awaitable[str]]
 
 
 def _advisory_lock_key(property_id: int, kn_code: str) -> int:
@@ -90,15 +90,15 @@ async def upsert_purging_for_synced(conn, property_id: int) -> None:
 
 
 async def ensure_synced(
-    pool: AsyncConnectionPool,
-    http: httpx.AsyncClient,
-    resolve_endpoint: KbEndpointResolver,
+    state: Any,  # FastAPI app.state — has config_provider, auth_provider, circuit_breakers, http, pool
     *,
     property_id: int,
     kn_code: str,
-    timeout_seconds: float = 15.0,
+    user_code: str,  # for resolve_headers (X-User-Id from request, or kgw_service_user_code for workers)
 ) -> None:
     """Lazy-sync 入口。失败抛 ``MetadataPropertySyncFailed``,业务自上层兜底。"""
+    pool: AsyncConnectionPool = state.pool
+
     # 1. 快路径
     current = await get_sync_status(pool, property_id, kn_code)
     if current == SyncStatus.SYNCED:
@@ -135,41 +135,93 @@ async def ensure_synced(
                         (property_id, kn_code),
                     )
 
-    # 3. T2:调后端 batchCreate + UPDATE SYNCED/FAILED。
+    # 3. T2: resolve config → circuit breaker → auth → backend batchCreate
+    config = await state.config_provider.get_kb_config(kn_code)
+    if config is None:
+        await _mark_failed(pool, property_id, kn_code, "KBNotFound")
+        raise KBNotFound(f"unknown knCode: {kn_code}", kn_code=kn_code)
+
+    op_path = config.operation_path(_OP_ID) or _DEFAULT_KB_PATHS.get(
+        _OP_ID, f"/{_OP_ID}"
+    )
+
+    cb_key = config.domain_url or config.domain_name
+    cb = state.circuit_breakers.get(cb_key)
+    if not cb.before_call():
+        # Circuit open — leave row as SYNCING so next call can retry
+        raise CircuitOpen(f"circuit OPEN for {kn_code}", kn_code=kn_code)
+
+    headers = await state.auth_provider.resolve_headers(
+        config.headers, user_code=user_code
+    )
+
     prop = await get_property_by_id(pool, property_id)
     assert prop is not None, "property must exist when ensure_synced called"
-    endpoint = await resolve_endpoint(kn_code)
+
+    body = {
+        "propertyList": [
+            {
+                "propertyName": prop.backend_name,
+                "valueType": prop.value_type,
+            }
+        ]
+    }
+
     try:
-        resp = await http.post(
-            f"{endpoint}/api/v1/metadataProperties/batchCreate",
-            json={
-                "propertyList": [
-                    {
-                        "propertyName": prop.backend_name,
-                        "valueType": prop.value_type,
-                    }
-                ]
-            },
-            timeout=timeout_seconds,
+        resp = await call_backend_json(
+            config=config,
+            op_path=op_path,
+            body=body,
+            headers=headers,
+            http=state.http,
         )
-        ok = resp.status_code == 200 and resp.json().get("resultCode") == "0"
-    except (httpx.HTTPError, ValueError) as exc:
-        await _mark_failed(pool, property_id, kn_code, repr(exc))
+        cb.record_success()
+    except httpx.TimeoutException as exc:
+        cb.record_failure()
+        reason = "timeout"
+        await _mark_failed(pool, property_id, kn_code, reason)
         raise MetadataPropertySyncFailed(
-            f"backend sync failed: {exc!r}",
+            f"backend sync timed out: {exc!r}",
+            property_name=prop.property_name,
+            kn_code=kn_code,
+        ) from exc
+    except (httpx.ConnectError, httpx.NetworkError) as exc:
+        cb.record_failure()
+        reason = "connect"
+        await _mark_failed(pool, property_id, kn_code, reason)
+        raise MetadataPropertySyncFailed(
+            f"backend sync connect error: {exc!r}",
+            property_name=prop.property_name,
+            kn_code=kn_code,
+        ) from exc
+    except BackendAuthError as exc:
+        cb.record_failure()
+        reason = "auth"
+        await _mark_failed(pool, property_id, kn_code, reason)
+        raise MetadataPropertySyncFailed(
+            f"backend auth error: {exc!r}",
+            property_name=prop.property_name,
+            kn_code=kn_code,
+        ) from exc
+    except ValueError as exc:
+        cb.record_failure()
+        reason = "decode"
+        await _mark_failed(pool, property_id, kn_code, reason)
+        raise MetadataPropertySyncFailed(
+            f"backend response decode error: {exc!r}",
             property_name=prop.property_name,
             kn_code=kn_code,
         ) from exc
 
-    if not ok:
-        await _mark_failed(
-            pool, property_id, kn_code, f"upstream resultCode != 0: {resp.text[:200]}"
-        )
+    if resp.get("resultCode") != "0":
+        error_msg = f"upstream resultCode != 0: {str(resp)[:200]}"
+        await _mark_failed(pool, property_id, kn_code, error_msg)
         raise MetadataPropertySyncFailed(
             "backend batchCreate did not return success",
             property_name=prop.property_name,
             kn_code=kn_code,
         )
+
     await _mark_synced(pool, property_id, kn_code)
 
 

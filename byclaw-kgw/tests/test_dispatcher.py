@@ -332,7 +332,7 @@ async def test_dispatch_discovery_mode_success():
         captured["body"] = body
         return {"resultCode": "0", "resultMsg": "ok", "resultObject": {}}
 
-    with patch("kgw.dispatcher._call_via_discovery", side_effect=_fake_discovery):
+    with patch("kgw.upstream.call_via_discovery", side_effect=_fake_discovery):
         result = await dispatch_json(
             req,
             operation="directoryCreate",
