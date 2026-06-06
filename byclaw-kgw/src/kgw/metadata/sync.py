@@ -189,6 +189,12 @@ async def _mark_synced(
 async def _mark_failed(
     pool: AsyncConnectionPool, property_id: int, kn_code: str, error: str
 ) -> None:
+    _log.warning(
+        "metadata.sync.failed",
+        property_id=property_id,
+        kn_code=kn_code,
+        error=error,
+    )
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
