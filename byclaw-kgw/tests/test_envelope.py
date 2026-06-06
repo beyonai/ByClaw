@@ -100,3 +100,57 @@ def test_all_error_classes_present(cls_name, error_type):
     cls = getattr(envelope_module, cls_name)
     instance = cls("msg")
     assert instance.error_type == error_type
+
+
+def test_metadata_property_not_found_envelope():
+    from kgw.envelope import MetadataPropertyNotFound
+
+    err = MetadataPropertyNotFound(
+        "metadata property not found: status", property_name="status"
+    )
+    env = err.to_envelope()
+    assert env["resultCode"] == "-1"
+    assert env["resultObject"]["errorCode"] == "MetadataPropertyNotFound"
+    assert env["resultObject"]["propertyName"] == "status"
+
+
+def test_metadata_property_in_use_envelope():
+    from kgw.envelope import MetadataPropertyInUse
+
+    err = MetadataPropertyInUse(
+        "metadata property is still referenced: status",
+        property_name="status",
+        in_use_samples=[{"knCode": "2", "filePath": "/a.md"}],
+        total_references=1,
+    )
+    env = err.to_envelope()
+    assert env["resultObject"]["errorCode"] == "MetadataPropertyInUse"
+    assert env["resultObject"]["totalReferences"] == 1
+
+
+def test_all_metadata_error_types_have_correct_string():
+    from kgw.envelope import (
+        INVALID_BATCH_DUPLICATE_NAME,
+        INVALID_FIELD_VALUE_TYPE,
+        INVALID_OPERATION_FOR_TYPE,
+        INVALID_VALUE_TYPE,
+        MetadataPropertyAlreadyExists,
+        MetadataPropertyConflict,
+        MetadataPropertyInUse,
+        MetadataPropertyNotFound,
+        MetadataPropertySyncFailed,
+    )
+
+    cases = [
+        (MetadataPropertyNotFound, "MetadataPropertyNotFound"),
+        (MetadataPropertyAlreadyExists, "MetadataPropertyAlreadyExists"),
+        (MetadataPropertyInUse, "MetadataPropertyInUse"),
+        (MetadataPropertySyncFailed, "MetadataPropertySyncFailed"),
+        (MetadataPropertyConflict, "MetadataPropertyConflict"),
+        (INVALID_VALUE_TYPE, "INVALID_VALUE_TYPE"),
+        (INVALID_OPERATION_FOR_TYPE, "INVALID_OPERATION_FOR_TYPE"),
+        (INVALID_FIELD_VALUE_TYPE, "INVALID_FIELD_VALUE_TYPE"),
+        (INVALID_BATCH_DUPLICATE_NAME, "INVALID_BATCH_DUPLICATE_NAME"),
+    ]
+    for cls, expected in cases:
+        assert cls.error_type == expected

@@ -120,3 +120,30 @@ class MetadataPropertyConflict(KgwError):
 
 class MetadataPropertySyncFailed(KgwError):
     error_type = "MetadataPropertySyncFailed"
+
+
+class MetadataPropertyAlreadyExists(KgwError):
+    error_type = "MetadataPropertyAlreadyExists"
+
+
+class MetadataPropertyInUse(KgwError):
+    error_type = "MetadataPropertyInUse"
+
+
+# Validation errors keep the metadata_api.md uppercase-snake style for
+# easier alignment with portal-side validation messages.
+# pylint: disable=invalid-name
+class INVALID_VALUE_TYPE(KgwError):  # noqa: N801 (intentional: matches API spec string)
+    error_type = "INVALID_VALUE_TYPE"
+
+
+class INVALID_OPERATION_FOR_TYPE(KgwError):  # noqa: N801
+    error_type = "INVALID_OPERATION_FOR_TYPE"
+
+
+class INVALID_FIELD_VALUE_TYPE(KgwError):  # noqa: N801
+    error_type = "INVALID_FIELD_VALUE_TYPE"
+
+
+class INVALID_BATCH_DUPLICATE_NAME(KgwError):  # noqa: N801
+    error_type = "INVALID_BATCH_DUPLICATE_NAME"
