@@ -6,12 +6,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+import yaml
 from kgw import idempotency
-from kgw.api.knowledge_items import (
-    _is_markdown,
-    _parse_front_matter,
-    _rewrite_front_matter,
-)
 from kgw.audit import AuditEntry
 from kgw.dispatcher import _DEFAULT_KB_PATHS, KbOp
 from kgw.envelope import METADATA_PROPERTY_NOT_REGISTERED, KBNotFound
@@ -28,6 +24,53 @@ from kgw.schemas.standard_item import (
 from kgw.upstream import call_backend_json, resolve_base_url
 
 _log = get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Markdown front-matter helpers (pure functions, no IO)
+# ---------------------------------------------------------------------------
+
+
+def _is_markdown(file_path: str) -> bool:
+    lower = file_path.lower()
+    return lower.endswith(".md") or lower.endswith(".markdown")
+
+
+def _parse_front_matter(content: bytes) -> dict[str, Any]:
+    """Return parsed YAML front-matter dict, or {} if none / invalid."""
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return {}
+    if not text.startswith("---"):
+        return {}
+    end_idx = text.find("---", 3)
+    if end_idx == -1:
+        return {}
+    yaml_block = text[3:end_idx].strip()
+    if not yaml_block:
+        return {}
+    try:
+        parsed = yaml.safe_load(yaml_block)
+    except yaml.YAMLError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _rewrite_front_matter(content: bytes, name_to_backend: dict[str, str]) -> bytes:
+    """Replace propertyName keys in YAML front-matter with backend_name keys."""
+    text = content.decode("utf-8")
+    end_idx = text.find("---", 3)
+    if end_idx == -1:
+        return content
+    body_start = end_idx + 3
+    yaml_block = text[3:end_idx].strip()
+    original = yaml.safe_load(yaml_block) or {}
+    rewritten = {name_to_backend.get(k, k): v for k, v in original.items()}
+    new_yaml = yaml.dump(
+        rewritten, allow_unicode=True, default_flow_style=False
+    ).rstrip()
+    return f"---\n{new_yaml}\n---{text[body_start:]}".encode("utf-8")
 
 
 @dataclass
@@ -677,8 +720,6 @@ async def _process_delete(
 
 def _inject_extra_front_matter(content: bytes, extra: dict) -> bytes:
     """Add extra key/value pairs into an existing YAML front matter block."""
-    import yaml  # noqa: PLC0415
-
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError:
@@ -702,8 +743,6 @@ def _inject_extra_front_matter(content: bytes, extra: dict) -> bytes:
 
 def _prepend_front_matter(content: bytes, front_matter: dict) -> bytes:
     """Prepend a YAML front matter block to content that has none."""
-    import yaml  # noqa: PLC0415
-
     if not front_matter:
         return content
     new_yaml = yaml.dump(
