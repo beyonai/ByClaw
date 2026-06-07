@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 import httpx
+import yaml
 from fastapi import APIRouter, File, Form, Header, Request, UploadFile
 from kgw.dispatcher import (
     _DEFAULT_KB_PATHS,
@@ -79,6 +80,50 @@ _DEFAULT_OPS: frozenset[MetadataOperation] = frozenset(
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+
+def _is_markdown(file_path: str) -> bool:
+    """Return True if the file path looks like a Markdown file."""
+    lower = file_path.lower()
+    return lower.endswith(".md") or lower.endswith(".markdown")
+
+
+def _parse_front_matter(content: bytes) -> dict[str, Any]:
+    """Parse YAML front matter from markdown content. Returns {} if none."""
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return {}
+    if not text.startswith("---"):
+        return {}
+    end_idx = text.find("---", 3)
+    if end_idx == -1:
+        return {}
+    yaml_block = text[3:end_idx].strip()
+    if not yaml_block:
+        return {}
+    try:
+        parsed = yaml.safe_load(yaml_block)
+    except yaml.YAMLError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return parsed
+
+
+def _rewrite_front_matter(content: bytes, name_to_backend: dict[str, str]) -> bytes:
+    """Replace propertyName keys in YAML front matter with backend_name keys."""
+    text = content.decode("utf-8")
+    end_idx = text.find("---", 3)
+    body_start = end_idx + 3
+    yaml_block = text[3:end_idx].strip()
+    original = yaml.safe_load(yaml_block)
+    rewritten = {name_to_backend.get(k, k): v for k, v in original.items()}
+    new_yaml = yaml.dump(
+        rewritten, allow_unicode=True, default_flow_style=False
+    ).rstrip()
+    new_text = f"---\n{new_yaml}\n---{text[body_start:]}"
+    return new_text.encode("utf-8")
 
 
 async def _resolve_property_map(
@@ -262,12 +307,18 @@ async def knowledge_item_import(
     file_path: Annotated[str, Form(alias="filePath")],
     file_content: Annotated[UploadFile, File(alias="fileContent")],
 ) -> dict[str, Any]:
-    """Stream multipart upload to the KB backend without buffering full file in RAM."""
+    """Stream multipart upload to the KB backend without buffering full file in RAM.
+
+    For markdown files, parses YAML front matter and rewrites property names to
+    backend_name keys before uploading. Non-markdown files use the original
+    proxy_upload streaming path unchanged.
+    """
     import asyncio
 
     from kgw.audit import AuditEntry
 
     state = request.app.state
+    pool = state.pool
 
     config = await state.config_provider.get_kb_config(kn_code)
     if config is None:
@@ -291,22 +342,110 @@ async def knowledge_item_import(
     )
     url = f"{config.domain_url.rstrip('/')}{op_path}"
 
-    try:
-        # Replace portal kn_code with backend resource_code in form fields
-        form = {"knCode": config.resource_code, "filePath": file_path}
-        result = await proxy_upload(
-            url=url,
-            upstream_headers=headers,
-            http=state.http,
-            form_fields=form,
-            upload_file=file_content,
-            kn_code=kn_code,
-            operation=GatewayOp.FILE_IMPORT,
-        )
-        cb.record_success()
-    except Exception:
-        cb.record_failure()
-        raise
+    if _is_markdown(file_path):
+        # Buffer the full file — required for front-matter parsing and rewriting
+        raw_content: bytes = await file_content.read()
+        front_matter = _parse_front_matter(raw_content)
+
+        modified_content = raw_content
+        attempt_id: int | None = None
+        pending_keys: list[tuple[int, str, str]] = []
+
+        if front_matter:
+            # Q1=A: reject unregistered field names
+            n2b, _, props_by_name = await _resolve_property_map(
+                pool, list(front_matter.keys())
+            )
+            # Lazy sync: ensure each property is synced to the backend endpoint
+            for prop in props_by_name.values():
+                await sync_mod.ensure_synced(
+                    state,
+                    property_id=prop.property_id,
+                    kn_code=kn_code,
+                    user_code=x_user_id,
+                )
+            # Write PENDING bindings atomically
+            attempt_id = binding_mod.new_attempt_id()
+            pending_keys = [
+                (p.property_id, kn_code, file_path) for p in props_by_name.values()
+            ]
+            async with pool.connection() as conn:
+                async with conn.transaction():
+                    for prop in props_by_name.values():
+                        await binding_mod.upsert_pending(
+                            conn,
+                            property_id=prop.property_id,
+                            kn_code=kn_code,
+                            file_path=file_path,
+                            attempt_id=attempt_id,
+                        )
+            # Rewrite front-matter keys to backend names
+            modified_content = _rewrite_front_matter(raw_content, n2b)
+
+        # Upload buffered bytes via httpx directly (stream already consumed)
+        try:
+            resp = await state.http.post(
+                url,
+                headers=headers,
+                files={
+                    "fileContent": (
+                        file_content.filename or "file",
+                        modified_content,
+                        "text/markdown",
+                    )
+                },
+                data={"knCode": config.resource_code, "filePath": file_path},
+                timeout=60.0,
+            )
+            if resp.status_code in (401, 403):
+                raise BackendAuthFailed(
+                    f"backend auth failed uploading to {url}", kn_code=kn_code
+                )
+            result = resp.json()
+            cb.record_success()
+        except (httpx.TimeoutException, httpx.StreamError, httpx.ReadError) as exc:
+            cb.record_failure()
+            if attempt_id is not None:
+                await _rollback_binding(
+                    pool, attempt_id=attempt_id, pending_keys=pending_keys
+                )
+            from kgw.envelope import UploadStreamBroken
+
+            raise UploadStreamBroken(
+                f"upload stream broken: {url}", kn_code=kn_code
+            ) from exc
+        except BackendAuthFailed:
+            if attempt_id is not None:
+                await _rollback_binding(
+                    pool, attempt_id=attempt_id, pending_keys=pending_keys
+                )
+            cb.record_failure()
+            raise
+
+        if attempt_id is not None:
+            result_ok = result.get("resultCode") == "0"
+            if result_ok:
+                await binding_mod.mark_synced_by_attempt(pool, attempt_id=attempt_id)
+            else:
+                await _rollback_binding(
+                    pool, attempt_id=attempt_id, pending_keys=pending_keys
+                )
+    else:
+        # Non-markdown: original streaming proxy_upload path (no buffering)
+        try:
+            result = await proxy_upload(
+                url=url,
+                upstream_headers=headers,
+                http=state.http,
+                form_fields={"knCode": config.resource_code, "filePath": file_path},
+                upload_file=file_content,
+                kn_code=kn_code,
+                operation=GatewayOp.FILE_IMPORT,
+            )
+            cb.record_success()
+        except Exception:
+            cb.record_failure()
+            raise
 
     await state.audit.record(
         AuditEntry(
