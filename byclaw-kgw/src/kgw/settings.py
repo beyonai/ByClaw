@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     circuit_failure_threshold: int = 5
     circuit_open_duration: float = 30.0
 
+    # ---- Ingest ----
+    ingest_concurrency_limit: int = 100
+
     # ---- Computed views ----
     @computed_field
     @property

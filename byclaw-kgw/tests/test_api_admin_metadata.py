@@ -123,7 +123,6 @@ async def _adm_resources(
     app.state.auth_provider = auth_provider
     app.state.audit = audit_writer
     app.state.circuit_breakers = circuit_breakers
-    app.state.kgw_service_user_code = settings.kgw_service_user_code
 
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"

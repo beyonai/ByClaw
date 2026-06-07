@@ -151,3 +151,15 @@ class INVALID_BATCH_DUPLICATE_NAME(KgwError):  # noqa: N801
 
 class INVALID_PROPERTY_NAME(KgwError):  # noqa: N801
     error_type = "INVALID_PROPERTY_NAME"
+
+
+class MetadataPropertyNotRegistered(KgwError):
+    error_type = "METADATA_PROPERTY_NOT_REGISTERED"
+
+
+class PayloadTooLarge(KgwError):
+    error_type = "PAYLOAD_TOO_LARGE"
+
+
+class EventNotFound(KgwError):
+    error_type = "EVENT_NOT_FOUND"

@@ -99,7 +99,6 @@ async def _lifespan(app: FastAPI):  # pylint: disable=redefined-outer-name
     app.state.auth_provider = auth_provider
     app.state.audit = audit_writer
     app.state.circuit_breakers = circuit_breakers
-    app.state.kgw_service_user_code = settings.kgw_service_user_code
 
     from kgw.workers.binding_reconcile import run_reconcile_loop  # noqa: PLC0415
     from kgw.workers.cleanup import run_cleanup_loop  # noqa: PLC0415

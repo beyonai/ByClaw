@@ -76,3 +76,16 @@ kgw_metadata_reconcile_total: Counter = Counter(
     ["action", "result"],  # action: outbox_drain / stale_pending / stale_syncing
     registry=REGISTRY,
 )
+
+kgw_ingest_events_total: Counter = Counter(
+    "kgw_ingest_events_total",
+    "Ingest events processed",
+    ["op", "result"],
+    registry=REGISTRY,
+)
+
+kgw_ingest_semaphore_rejected_total: Counter = Counter(
+    "kgw_ingest_semaphore_rejected_total",
+    "Ingest requests rejected due to concurrency limit (503)",
+    registry=REGISTRY,
+)
