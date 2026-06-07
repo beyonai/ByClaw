@@ -12,6 +12,7 @@ The app holds long-lived resources in ``app.state``:
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -99,11 +100,22 @@ async def _lifespan(app: FastAPI):  # pylint: disable=redefined-outer-name
     app.state.audit = audit_writer
     app.state.circuit_breakers = circuit_breakers
 
+    from kgw.workers.cleanup import run_cleanup_loop  # noqa: PLC0415
+
+    stop_event = asyncio.Event()
+    app.state.worker_stop = stop_event
+    app.state.cleanup_task = asyncio.create_task(
+        run_cleanup_loop(app.state, stop_event=stop_event),
+        name="cleanup_worker",
+    )
+
     _log.info("kgw.startup_complete")
     try:
         yield
     finally:
         _log.info("kgw.shutdown_begin")
+        app.state.worker_stop.set()
+        await asyncio.gather(app.state.cleanup_task, return_exceptions=True)
         await audit_writer.stop()
         await http_client.aclose()
         await redis_client.aclose()

@@ -79,6 +79,7 @@ class KbOp(str, enum.Enum):
     METADATA_PROPERTIES_BATCH_CREATE = "metadataPropertiesBatchCreate"
     KNOWLEDGE_ITEMS_METADATA_UPDATE = "knowledgeItemsMetadataUpdate"
     KNOWLEDGE_ITEMS_METADATA_GET = "knowledgeItemsMetadataGet"
+    METADATA_PROPERTIES_DELETE = "metadataPropertiesDelete"
 
 
 # Map gateway-facing operation name → KB config operation name
@@ -121,6 +122,7 @@ _DEFAULT_KB_PATHS: dict[KbOp, str] = {
     KbOp.METADATA_PROPERTIES_BATCH_CREATE: "/api/v1/metadataProperties/batchCreate",
     KbOp.KNOWLEDGE_ITEMS_METADATA_UPDATE: "/api/v1/knowledgeItems/metadata/update",
     KbOp.KNOWLEDGE_ITEMS_METADATA_GET: "/api/v1/knowledgeItems/metadata/get",
+    KbOp.METADATA_PROPERTIES_DELETE: "/api/v1/metadataProperties/delete",
 }
 
 # Operations that write to kgw_kb_write_history (state-changing writes only)
