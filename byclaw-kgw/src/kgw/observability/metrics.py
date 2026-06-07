@@ -80,7 +80,7 @@ kgw_metadata_reconcile_total: Counter = Counter(
 kgw_ingest_events_total: Counter = Counter(
     "kgw_ingest_events_total",
     "Ingest events processed",
-    ["op", "result"],
+    ["operation", "result"],
     registry=REGISTRY,
 )
 

@@ -153,13 +153,13 @@ class INVALID_PROPERTY_NAME(KgwError):  # noqa: N801
     error_type = "INVALID_PROPERTY_NAME"
 
 
-class MetadataPropertyNotRegistered(KgwError):
+class METADATA_PROPERTY_NOT_REGISTERED(KgwError):  # noqa: N801
     error_type = "METADATA_PROPERTY_NOT_REGISTERED"
 
 
-class PayloadTooLarge(KgwError):
+class PAYLOAD_TOO_LARGE(KgwError):  # noqa: N801
     error_type = "PAYLOAD_TOO_LARGE"
 
 
-class EventNotFound(KgwError):
+class EVENT_NOT_FOUND(KgwError):  # noqa: N801
     error_type = "EVENT_NOT_FOUND"

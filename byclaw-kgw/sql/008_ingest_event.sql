@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS kgw_ingest_event (
   error_message      TEXT,
   retry_count        INT           NOT NULL DEFAULT 0,
   payload_size_bytes INT,
-  received_at        TIMESTAMPTZ   DEFAULT NOW(),
+  received_at        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   done_at            TIMESTAMPTZ,
   CONSTRAINT uq_ingest_idempotency UNIQUE (source_id, item_id, version)
 );

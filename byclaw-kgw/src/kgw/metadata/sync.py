@@ -100,7 +100,7 @@ async def ensure_synced(
     *,
     property_id: int,
     kn_code: str,
-    user_code: str,  # for resolve_headers (X-User-Id from request, or kgw_service_user_code for workers)
+    user_code: str,  # for resolve_headers — X-User-Id from request; workers pass a fixed service identity string
 ) -> None:
     """Lazy-sync 入口。失败抛 ``MetadataPropertySyncFailed``,业务自上层兜底。
 
