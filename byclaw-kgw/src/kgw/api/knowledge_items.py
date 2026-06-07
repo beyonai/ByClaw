@@ -26,6 +26,8 @@ from kgw.metadata import binding as binding_mod
 from kgw.metadata import registry
 from kgw.metadata import sync as sync_mod
 from kgw.metadata.translator import (
+    _DSL_BOOL_OPS,
+    _DSL_LEAF_OPS,
     translate_request_dsl_where,
     translate_request_metadata,
     translate_response_metadata,
@@ -81,10 +83,11 @@ async def _resolve_property_map(
     return name_to_backend, backend_to_name, props_by_name
 
 
-async def _collect_dsl_field_names(where: Any) -> list[str]:
+def _collect_dsl_field_names(where: Any) -> list[str]:
     """Walk DSL ``where`` AST and return all leaf ``fieldName`` values.
 
-    Mirrors the recursion shape of translate_request_dsl_where.
+    Uses the same operator sets as ``translate_request_dsl_where`` so the
+    collector and translator never disagree on which nodes are leaves.
     """
     out: list[str] = []
 
@@ -92,13 +95,13 @@ async def _collect_dsl_field_names(where: Any) -> list[str]:
         if not isinstance(node, dict) or len(node) != 1:
             return
         op, body = next(iter(node.items()))
-        if op in {"and", "or"}:
-            if isinstance(body, list):
+        if op in _DSL_BOOL_OPS:
+            if op == "not":
+                _walk(body)
+            elif isinstance(body, list):
                 for child in body:
                     _walk(child)
-        elif op == "not":
-            _walk(body)
-        elif isinstance(body, dict) and "fieldName" in body:
+        elif op in _DSL_LEAF_OPS and isinstance(body, dict) and "fieldName" in body:
             field = body["fieldName"]
             if isinstance(field, str):
                 out.append(field)
@@ -137,7 +140,7 @@ async def _prepare_search_body(
     field_list = list(body.get("metadataFieldList") or ())
     declared: list[str] = []
     if isinstance(where, dict):
-        declared.extend(await _collect_dsl_field_names(where))
+        declared.extend(_collect_dsl_field_names(where))
     declared.extend(field_list)
     n2b, b2n = await _resolve_known_property_map(pool, list(dict.fromkeys(declared)))
     if not n2b:
@@ -222,6 +225,8 @@ async def knowledge_item_delete(
         file_path=file_path,
     )
     if resp.get("resultCode") == "0" and file_path:
+        # Cleanup may raise — fail loud is intentional: an orphaned binding
+        # is harder to recover from than a client retry.
         await binding_mod.delete_by_file(
             request.app.state.pool, kn_code=kn_code, file_path=file_path
         )

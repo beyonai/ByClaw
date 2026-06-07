@@ -58,6 +58,8 @@ async def directory_delete(
     if resp.get("resultCode") == "0" and directory_path:
         from kgw.metadata import binding as binding_mod  # noqa: PLC0415
 
+        # Cleanup may raise — fail loud is intentional: an orphaned binding
+        # is harder to recover from than a client retry.
         await binding_mod.delete_by_directory(
             request.app.state.pool, kn_code=kn_code, directory_path=directory_path
         )
