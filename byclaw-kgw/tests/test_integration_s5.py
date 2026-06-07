@@ -274,30 +274,39 @@ async def test_idempotent_resend(s5_client):
     assert body["resultMsg"] == "already-processed"
 
 
-async def test_stale_version(s5_client):
+async def test_stale_version(s5_client, s5_pool):
     """Sending an older version for the same filePath returns STALE_VERSION."""
-    # Different sourceId/itemId to avoid idempotency conflict with test_upsert_event_done.
-    # The done event from test 1 (version=2026-06-07T00:00:00Z) is already in the DB.
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(f"{_KB_BASE_URL}/api/v1/knowledgeItems/import").mock(
-            return_value=httpx.Response(200, json=_ok_import_resp())
-        )
-        mock.post(f"{_KB_BASE_URL}/api/v1/fileToMarkdownIndex").mock(
-            return_value=httpx.Response(200, json=_ok_build_resp())
-        )
-        resp = await s5_client.post(
-            f"{_INGEST_BASE}/events",
-            headers=_INGEST_HEADERS,
-            json={
-                "sourceId": "connector_s5_stale",
-                "itemId": "policy_a_md_stale",
-                "version": "2026-06-06T00:00:00Z",  # older than the done version
-                "op": "upsert",
-                "knCode": _KN_CODE,
-                "filePath": "/policy/a.md",
-                "content": "# Old Hello",
-            },
-        )
+    # Insert a done event directly so this test is independent of test order.
+    async with s5_pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO kgw_ingest_event "
+                "(source_id, item_id, version, op, kn_code, file_path, status, done_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, 'done', NOW())",
+                (
+                    "stale_seed_src",
+                    "stale_seed_item",
+                    "2026-06-07T12:00:00Z",
+                    "upsert",
+                    _KN_CODE,
+                    "/policy/stale_test.md",
+                ),
+            )
+        await conn.commit()
+
+    resp = await s5_client.post(
+        f"{_INGEST_BASE}/events",
+        headers=_INGEST_HEADERS,
+        json={
+            "sourceId": "connector_s5_stale",
+            "itemId": "policy_stale_md_v1",
+            "version": "2026-06-06T00:00:00Z",  # older than seed version
+            "op": "upsert",
+            "knCode": _KN_CODE,
+            "filePath": "/policy/stale_test.md",
+            "content": "# Old Hello",
+        },
+    )
 
     body = resp.json()
     assert body["resultObject"]["status"] == "failed", body
@@ -455,8 +464,11 @@ async def test_batch_partial(s5_client):
     assert body["resultObject"]["failed"] == 1, body
 
 
-async def test_audit_contains_ingest_entries(s5_client):
+async def test_audit_contains_ingest_entries(s5_client, s5_app):
     """After previous ingest operations, the audit log contains entries with source=ingest."""
+    # Flush the async audit queue so all entries are in the DB before querying.
+    await s5_app.state.audit.flush()
+
     resp = await s5_client.get(
         f"{_ADMIN_BASE}/audit",
         headers=_ADMIN_HEADERS,
