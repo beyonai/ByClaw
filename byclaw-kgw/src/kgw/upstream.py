@@ -16,6 +16,55 @@ class BackendAuthError(Exception):
     """Sentinel: KB backend returned HTTP 401 or 403."""
 
 
+async def resolve_base_url(config: Any) -> str:
+    """Resolve KbConfig to a concrete ``http(s)://host:port`` base URL.
+
+    Direct mode:    config.domain_url is set → return it as-is.
+    Discovery mode: config.domain_name is set → use by-framework Redis-backed
+                    DiscoveryClient to resolve the service name to a live
+                    instance, then build the URL from host/port/protocol.
+
+    Returns the base URL without a trailing slash.  Callers append op_path.
+    This is safe for all transport types including multipart file uploads
+    (unlike DiscoveryHttpClient which only supports JSON/form payloads).
+    """
+    if config.domain_url:
+        return config.domain_url.rstrip("/")
+
+    if not config.domain_name:
+        raise UpstreamConnectError(
+            "KB config has neither domainURL nor domainName",
+            kn_code=config.kn_code,
+        )
+
+    # Discovery mode: resolve service name → host:port via Redis
+    from by_framework.common.redis_client import init_redis  # noqa: PLC0415
+    from by_framework.core.discovery import DiscoveryClient  # noqa: PLC0415
+    from kgw.settings import get_settings  # noqa: PLC0415
+
+    settings = get_settings()
+    redis_client = init_redis(
+        host=settings.redis_host,
+        port=settings.redis_port,
+        db=settings.redis_database,
+        password=settings.redis_password or None,
+        username=settings.redis_username or None,
+        decode_responses=True,
+    )
+    discovery_client = DiscoveryClient(redis_client=redis_client, cache_interval=5)
+    try:
+        instance = await discovery_client.discover(config.domain_name)
+        if not instance:
+            raise UpstreamConnectError(
+                f"no available instances for service: {config.domain_name}",
+                kn_code=config.kn_code,
+            )
+        protocol = instance.protocol or "http"
+        return f"{protocol}://{instance.host}:{instance.port}"
+    finally:
+        await discovery_client.close()
+
+
 async def call_backend_json(
     *,
     config: Any,  # KbConfig

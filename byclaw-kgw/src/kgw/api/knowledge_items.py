@@ -343,7 +343,13 @@ async def knowledge_item_import(
     op_path = config.operation_path(KbOp.FILE_IMPORT) or _DEFAULT_KB_PATHS.get(
         KbOp.FILE_IMPORT, "/api/v1/knowledgeItems/import"
     )
-    url = f"{config.domain_url.rstrip('/')}{op_path}"
+    # resolve_base_url handles both direct (domain_url) and by-framework
+    # service-discovery (domain_name) modes, making multipart upload work
+    # correctly in both topologies.
+    from kgw.upstream import resolve_base_url  # noqa: PLC0415
+
+    base_url = await resolve_base_url(config)
+    url = base_url + op_path
 
     if _is_markdown(file_path):
         # Buffer the full file — required for front-matter parsing and rewriting
