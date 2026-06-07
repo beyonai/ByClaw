@@ -26,6 +26,7 @@ from kgw.metadata import binding as binding_mod
 from kgw.metadata import registry
 from kgw.metadata import sync as sync_mod
 from kgw.metadata.translator import (
+    translate_request_dsl_where,
     translate_request_metadata,
     translate_response_metadata,
 )
@@ -78,6 +79,75 @@ async def _resolve_property_map(
     backend_to_name = {p.backend_name: p.property_name for p in props}
     props_by_name = {p.property_name: p for p in props}
     return name_to_backend, backend_to_name, props_by_name
+
+
+async def _collect_dsl_field_names(where: Any) -> list[str]:
+    """Walk DSL ``where`` AST and return all leaf ``fieldName`` values.
+
+    Mirrors the recursion shape of translate_request_dsl_where.
+    """
+    out: list[str] = []
+
+    def _walk(node: Any) -> None:
+        if not isinstance(node, dict) or len(node) != 1:
+            return
+        op, body = next(iter(node.items()))
+        if op in {"and", "or"}:
+            if isinstance(body, list):
+                for child in body:
+                    _walk(child)
+        elif op == "not":
+            _walk(body)
+        elif isinstance(body, dict) and "fieldName" in body:
+            field = body["fieldName"]
+            if isinstance(field, str):
+                out.append(field)
+
+    _walk(where)
+    return out
+
+
+async def _resolve_known_property_map(
+    pool: Any, names: list[str]
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Resolve only the names that ARE active in the registry.
+
+    Unlike ``_resolve_property_map``, this never raises for unknown names — they
+    are silently dropped from the maps so callers (read path) pass them through
+    untranslated. Returns (name_to_backend, backend_to_name).
+    """
+    if not names:
+        return {}, {}
+    props = await registry.list_active_properties(pool, names)
+    n2b = {p.property_name: p.backend_name for p in props}
+    b2n = {b: n for n, b in n2b.items()}
+    return n2b, b2n
+
+
+async def _prepare_search_body(
+    pool: Any, body: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Resolve declared field names from body, return (rewritten_body, b2n).
+
+    The rewritten body has DSL `where` fieldNames and `metadataFieldList` entries
+    rewritten to backend names. Unknown names pass through unchanged (read-path
+    semantics — no MetadataPropertyNotFound).
+    """
+    where = body.get("where")
+    field_list = list(body.get("metadataFieldList") or ())
+    declared: list[str] = []
+    if isinstance(where, dict):
+        declared.extend(await _collect_dsl_field_names(where))
+    declared.extend(field_list)
+    n2b, b2n = await _resolve_known_property_map(pool, list(dict.fromkeys(declared)))
+    if not n2b:
+        return body, b2n
+    backend_body = dict(body)
+    if isinstance(where, dict) and where:
+        backend_body["where"] = translate_request_dsl_where(where, n2b)
+    if field_list:
+        backend_body = translate_request_metadata(backend_body, n2b)
+    return backend_body, b2n
 
 
 def _validate_op(op: dict[str, Any], value_type: str) -> None:
@@ -143,7 +213,7 @@ async def knowledge_item_delete(
 ) -> dict[str, Any]:
     kn_code = str(body.get("knCode", ""))
     file_path = str(body.get("filePath") or "")
-    return await dispatch_json(
+    resp = await dispatch_json(
         request,
         operation="fileDelete",
         kn_code=kn_code,
@@ -151,6 +221,11 @@ async def knowledge_item_delete(
         body=body,
         file_path=file_path,
     )
+    if resp.get("resultCode") == "0" and file_path:
+        await binding_mod.delete_by_file(
+            request.app.state.pool, kn_code=kn_code, file_path=file_path
+        )
+    return resp
 
 
 @router.post("/knowledgeItems/import")
@@ -238,13 +313,15 @@ async def knowledge_search(
 ) -> dict[str, Any]:
     """Multi-KB parallel semantic search."""
     kn_code_list = list(body.get("knCodeList") or [])
-    return await dispatch_fanout_json(
+    backend_body, b2n = await _prepare_search_body(request.app.state.pool, body)
+    resp = await dispatch_fanout_json(
         request,
         operation="knowledgeSearch",
         kn_code_list=kn_code_list,
         user_id=x_user_id,
-        body=body,
+        body=backend_body,
     )
+    return translate_response_metadata(resp, b2n) if b2n else resp
 
 
 @router.post("/knowledgeItems/metadataSearch")
@@ -255,13 +332,15 @@ async def metadata_search(
 ) -> dict[str, Any]:
     """Multi-KB parallel metadata-only search."""
     kn_code_list = list(body.get("knCodeList") or [])
-    return await dispatch_fanout_json(
+    backend_body, b2n = await _prepare_search_body(request.app.state.pool, body)
+    resp = await dispatch_fanout_json(
         request,
         operation="metadataSearch",
         kn_code_list=kn_code_list,
         user_id=x_user_id,
-        body=body,
+        body=backend_body,
     )
+    return translate_response_metadata(resp, b2n) if b2n else resp
 
 
 @router.post("/knowledgeItems/searchFile")
@@ -272,13 +351,15 @@ async def search_file(
 ) -> dict[str, Any]:
     """Multi-KB parallel file-level search."""
     kn_code_list = list(body.get("knCodeList") or [])
-    return await dispatch_fanout_json(
+    backend_body, b2n = await _prepare_search_body(request.app.state.pool, body)
+    resp = await dispatch_fanout_json(
         request,
         operation="searchFile",
         kn_code_list=kn_code_list,
         user_id=x_user_id,
-        body=body,
+        body=backend_body,
     )
+    return translate_response_metadata(resp, b2n) if b2n else resp
 
 
 # ---------------------------------------------------------------------------

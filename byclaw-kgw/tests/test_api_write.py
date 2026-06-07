@@ -8,7 +8,7 @@ Each router's dispatch_json call is mocked so tests only verify:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -72,18 +72,24 @@ def _build_ki_app():
 
     app = FastAPI()
     app.include_router(router)
+    app.state.pool = MagicMock()  # avoids AttributeError in binding cleanup path
     return app
 
 
 def test_knowledge_item_delete():
     with patch("kgw.api.knowledge_items.dispatch_json", new_callable=AsyncMock) as m:
         m.return_value = {"resultCode": "0", "resultMsg": "ok", "resultObject": {}}
-        client = TestClient(_build_ki_app())
-        client.post(
-            "/kgw/api/v1/knowledgeItems/delete",
-            json={"knCode": "kb1", "filePath": "/docs/file.pdf"},
-            headers={"X-User-Id": "u1"},
-        )
+        with patch(
+            "kgw.api.knowledge_items.binding_mod.delete_by_file",
+            new_callable=AsyncMock,
+        ) as del_mock:
+            del_mock.return_value = 1
+            client = TestClient(_build_ki_app())
+            client.post(
+                "/kgw/api/v1/knowledgeItems/delete",
+                json={"knCode": "kb1", "filePath": "/docs/file.pdf"},
+                headers={"X-User-Id": "u1"},
+            )
     assert m.call_args.kwargs["operation"] == "fileDelete"
     assert m.call_args.kwargs["file_path"] == "/docs/file.pdf"
 

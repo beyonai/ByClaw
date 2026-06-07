@@ -47,10 +47,18 @@ async def directory_delete(
     body: dict[str, Any],
 ) -> dict[str, Any]:
     kn_code = str(body.get("knCode", ""))
-    return await dispatch_json(
+    directory_path = str(body.get("directoryPath") or "")
+    resp = await dispatch_json(
         request,
         operation="directoryDelete",
         kn_code=kn_code,
         user_id=x_user_id,
         body=body,
     )
+    if resp.get("resultCode") == "0" and directory_path:
+        from kgw.metadata import binding as binding_mod  # noqa: PLC0415
+
+        await binding_mod.delete_by_directory(
+            request.app.state.pool, kn_code=kn_code, directory_path=directory_path
+        )
+    return resp

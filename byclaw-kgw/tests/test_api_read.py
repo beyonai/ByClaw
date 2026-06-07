@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -13,6 +13,7 @@ def _build_ki_app():
 
     app = FastAPI()
     app.include_router(router)
+    app.state.pool = MagicMock()  # avoids AttributeError in _prepare_search_body
     return app
 
 
@@ -26,17 +27,22 @@ def test_knowledge_search_calls_fanout():
             "resultMsg": "ok",
             "resultObject": {"data": [], "degraded_kbs": []},
         }
-        client = TestClient(_build_ki_app())
-        resp = client.post(
-            "/kgw/api/v1/knowledgeItems/search",
-            json={
-                "knCodeList": ["kb_a", "kb_b"],
-                "query": "员工请假流程是什么",
-                "topK": 5,
-                "searchMode": "mixedRecall",
-            },
-            headers={"X-User-Id": "u1"},
-        )
+        with patch(
+            "kgw.api.knowledge_items._resolve_known_property_map",
+            new_callable=AsyncMock,
+            return_value=({}, {}),
+        ):
+            client = TestClient(_build_ki_app())
+            resp = client.post(
+                "/kgw/api/v1/knowledgeItems/search",
+                json={
+                    "knCodeList": ["kb_a", "kb_b"],
+                    "query": "员工请假流程是什么",
+                    "topK": 5,
+                    "searchMode": "mixedRecall",
+                },
+                headers={"X-User-Id": "u1"},
+            )
     assert resp.status_code == 200
     assert m.call_args.kwargs["operation"] == "knowledgeSearch"
     assert m.call_args.kwargs["kn_code_list"] == ["kb_a", "kb_b"]
@@ -57,16 +63,21 @@ def test_metadata_search_calls_fanout():
             "resultMsg": "ok",
             "resultObject": {"data": [], "degraded_kbs": []},
         }
-        client = TestClient(_build_ki_app())
-        client.post(
-            "/kgw/api/v1/knowledgeItems/metadataSearch",
-            json={
-                "knCodeList": ["kb_a"],
-                "where": {"eq": {"fieldName": "status", "value": "active"}},
-                "topK": 20,
-            },
-            headers={"X-User-Id": "u1"},
-        )
+        with patch(
+            "kgw.api.knowledge_items._resolve_known_property_map",
+            new_callable=AsyncMock,
+            return_value=({}, {}),
+        ):
+            client = TestClient(_build_ki_app())
+            client.post(
+                "/kgw/api/v1/knowledgeItems/metadataSearch",
+                json={
+                    "knCodeList": ["kb_a"],
+                    "where": {"eq": {"fieldName": "status", "value": "active"}},
+                    "topK": 20,
+                },
+                headers={"X-User-Id": "u1"},
+            )
     assert m.call_args.kwargs["operation"] == "metadataSearch"
     assert m.call_args.kwargs["kn_code_list"] == ["kb_a"]
     forwarded = m.call_args.kwargs["body"]
@@ -83,17 +94,22 @@ def test_search_file_calls_fanout():
             "resultMsg": "ok",
             "resultObject": {"data": [], "degraded_kbs": []},
         }
-        client = TestClient(_build_ki_app())
-        client.post(
-            "/kgw/api/v1/knowledgeItems/searchFile",
-            json={
-                "knCodeList": ["kb_a"],
-                "query": "续签流程",
-                "searchMode": "mixedRecall",
-                "topK": 10,
-            },
-            headers={"X-User-Id": "u1"},
-        )
+        with patch(
+            "kgw.api.knowledge_items._resolve_known_property_map",
+            new_callable=AsyncMock,
+            return_value=({}, {}),
+        ):
+            client = TestClient(_build_ki_app())
+            client.post(
+                "/kgw/api/v1/knowledgeItems/searchFile",
+                json={
+                    "knCodeList": ["kb_a"],
+                    "query": "续签流程",
+                    "searchMode": "mixedRecall",
+                    "topK": 10,
+                },
+                headers={"X-User-Id": "u1"},
+            )
     assert m.call_args.kwargs["operation"] == "searchFile"
     forwarded = m.call_args.kwargs["body"]
     assert forwarded["query"] == "续签流程"
