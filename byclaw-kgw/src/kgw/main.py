@@ -100,6 +100,7 @@ async def _lifespan(app: FastAPI):  # pylint: disable=redefined-outer-name
     app.state.audit = audit_writer
     app.state.circuit_breakers = circuit_breakers
 
+    from kgw.workers.binding_reconcile import run_reconcile_loop  # noqa: PLC0415
     from kgw.workers.cleanup import run_cleanup_loop  # noqa: PLC0415
 
     stop_event = asyncio.Event()
@@ -108,6 +109,10 @@ async def _lifespan(app: FastAPI):  # pylint: disable=redefined-outer-name
         run_cleanup_loop(app.state, stop_event=stop_event),
         name="cleanup_worker",
     )
+    app.state.reconcile_task = asyncio.create_task(
+        run_reconcile_loop(app.state, stop_event=stop_event),
+        name="reconcile_worker",
+    )
 
     _log.info("kgw.startup_complete")
     try:
@@ -115,7 +120,11 @@ async def _lifespan(app: FastAPI):  # pylint: disable=redefined-outer-name
     finally:
         _log.info("kgw.shutdown_begin")
         app.state.worker_stop.set()
-        await asyncio.gather(app.state.cleanup_task, return_exceptions=True)
+        await asyncio.gather(
+            app.state.cleanup_task,
+            app.state.reconcile_task,
+            return_exceptions=True,
+        )
         await audit_writer.stop()
         await http_client.aclose()
         await redis_client.aclose()
