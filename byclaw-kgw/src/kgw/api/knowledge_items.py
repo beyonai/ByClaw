@@ -93,31 +93,41 @@ def _validate_op(op: dict[str, Any], value_type: str) -> None:
 
 
 async def _rollback_binding(
-    pool: Any, attempt_id: int, property_id: int, kn_code: str, file_path: str
+    pool: Any,
+    *,
+    attempt_id: int,
+    pending_keys: list[tuple[int, str, str]],  # (property_id, kn_code, file_path)
 ) -> None:
-    """Try to delete PENDING binding; on failure write outbox row."""
+    """Roll back PENDING bindings for an attempt_id.
+
+    Tries delete_by_attempt first. On DB failure, writes an outbox row per
+    affected (property_id, kn_code, file_path) so the reconcile worker can
+    finish the cleanup later.
+    """
     try:
         await binding_mod.delete_by_attempt(pool, attempt_id)
-    except Exception as rb_exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         _log.warning(
-            "metadata_update.rollback_failed",
+            "metadata.update.rollback_failed",
             attempt_id=attempt_id,
-            error=str(rb_exc),
+            error=str(exc),
         )
-        try:
-            await binding_mod.write_outbox(
-                pool,
-                property_id=property_id,
-                kn_code=kn_code,
-                file_path=file_path,
-                attempt_id=attempt_id,
-            )
-        except Exception as ob_exc:  # noqa: BLE001
-            _log.error(
-                "metadata_update.outbox_write_failed",
-                attempt_id=attempt_id,
-                error=str(ob_exc),
-            )
+        for property_id, kn_code, file_path in pending_keys:
+            try:
+                await binding_mod.write_outbox(
+                    pool,
+                    property_id=property_id,
+                    kn_code=kn_code,
+                    file_path=file_path,
+                    attempt_id=attempt_id,
+                )
+            except Exception as outbox_exc:  # noqa: BLE001
+                _log.error(
+                    "metadata.update.outbox_failed",
+                    attempt_id=attempt_id,
+                    property_id=property_id,
+                    error=str(outbox_exc),
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -335,11 +345,10 @@ async def metadata_update(
         op["propertyName"] for op in op_list if op.get("operation") in {"set", "append"}
     ]
 
-    # Use the first set/append property for rollback tracking (if multiple, they share attempt_id)
-    # We'll track the first for outbox fallback; all share the same attempt_id
-    first_set_prop = (
-        props_by_name[set_or_append_names[0]] if set_or_append_names else None
-    )
+    pending_keys: list[tuple[int, str, str]] = [
+        (props_by_name[name].property_id, kn_code, file_path)
+        for name in set_or_append_names
+    ]
 
     if set_or_append_names:
         async with pool.connection() as conn:
@@ -366,9 +375,9 @@ async def metadata_update(
     cb_key = cfg.domain_url or cfg.domain_name
     cb = state.circuit_breakers.get(cb_key)
     if not cb.before_call():
-        if first_set_prop is not None:
+        if pending_keys:
             await _rollback_binding(
-                pool, attempt_id, first_set_prop.property_id, kn_code, file_path
+                pool, attempt_id=attempt_id, pending_keys=pending_keys
             )
         raise CircuitOpen(f"circuit OPEN for {kn_code}", kn_code=kn_code)
 
@@ -384,9 +393,9 @@ async def metadata_update(
         cb.record_success()
     except httpx.TimeoutException as exc:
         cb.record_failure()
-        if first_set_prop is not None:
+        if pending_keys:
             await _rollback_binding(
-                pool, attempt_id, first_set_prop.property_id, kn_code, file_path
+                pool, attempt_id=attempt_id, pending_keys=pending_keys
             )
         raise UpstreamTimeout(
             f"timeout calling {cfg.domain_url or cfg.domain_name}{op_path}",
@@ -394,9 +403,9 @@ async def metadata_update(
         ) from exc
     except (httpx.ConnectError, httpx.NetworkError) as exc:
         cb.record_failure()
-        if first_set_prop is not None:
+        if pending_keys:
             await _rollback_binding(
-                pool, attempt_id, first_set_prop.property_id, kn_code, file_path
+                pool, attempt_id=attempt_id, pending_keys=pending_keys
             )
         raise UpstreamConnectError(
             f"connect error calling {cfg.domain_url or cfg.domain_name}{op_path}",
@@ -404,28 +413,19 @@ async def metadata_update(
         ) from exc
     except BackendAuthError as exc:
         cb.record_failure()
-        if first_set_prop is not None:
+        if pending_keys:
             await _rollback_binding(
-                pool, attempt_id, first_set_prop.property_id, kn_code, file_path
+                pool, attempt_id=attempt_id, pending_keys=pending_keys
             )
         raise BackendAuthFailed(str(exc), kn_code=kn_code) from exc
-    except ValueError as exc:
-        cb.record_failure()
-        if first_set_prop is not None:
-            await _rollback_binding(
-                pool, attempt_id, first_set_prop.property_id, kn_code, file_path
-            )
-        raise UpstreamConnectError(
-            f"decode error calling {cfg.domain_url or cfg.domain_name}{op_path}",
-            kn_code=kn_code,
-        ) from exc
 
     # 10. Backend resultCode check — passthrough on failure
     if resp.get("resultCode") != "0":
-        if first_set_prop is not None:
+        if pending_keys:
             await _rollback_binding(
-                pool, attempt_id, first_set_prop.property_id, kn_code, file_path
+                pool, attempt_id=attempt_id, pending_keys=pending_keys
             )
+        _remap_kn_code(resp, resource_code=cfg.resource_code, portal_kn_code=kn_code)
         return resp
 
     # 11. Mark SYNCED
@@ -522,12 +522,6 @@ async def metadata_get(
     except BackendAuthError as exc:
         cb.record_failure()
         raise BackendAuthFailed(str(exc), kn_code=kn_code) from exc
-    except ValueError as exc:
-        cb.record_failure()
-        raise UpstreamConnectError(
-            f"decode error calling {cfg.domain_url or cfg.domain_name}{op_path}",
-            kn_code=kn_code,
-        ) from exc
 
     # Reverse-translate response
     _remap_kn_code(resp, resource_code=cfg.resource_code, portal_kn_code=kn_code)

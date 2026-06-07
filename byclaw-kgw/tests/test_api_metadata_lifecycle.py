@@ -220,10 +220,8 @@ async def _query_property_id(pool, property_name: str) -> int | None:
     return row["property_id"] if row else None
 
 
-async def _count_pending_bindings(
-    pool, property_id: int, kn_code: str, file_path: str
-) -> int:
-    """Count PENDING binding rows for a specific (property_id, kn_code, file_path)."""
+async def _count_bindings(pool, property_id: int, kn_code: str, file_path: str) -> int:
+    """Count binding rows of any status for a specific (property_id, kn_code, file_path)."""
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -340,7 +338,7 @@ async def test_unset_releases_binding_then_delete_passes(lc_client, lc_pool):
     assert r_unset.json()["resultCode"] == "0", r_unset.json()
 
     # Binding should be gone
-    count = await _count_pending_bindings(lc_pool, pid, _KN_CODE, file_path)
+    count = await _count_bindings(lc_pool, pid, _KN_CODE, file_path)
     assert count == 0
 
     # Delete should now succeed (no binding)
@@ -433,7 +431,7 @@ async def test_metadata_update_backend_error_rolls_back_pending(lc_client, lc_po
     assert body["resultCode"] == "-1", body
 
     # No PENDING binding should survive
-    count = await _count_pending_bindings(lc_pool, pid, _KN_CODE, file_path)
+    count = await _count_bindings(lc_pool, pid, _KN_CODE, file_path)
     assert count == 0, f"Expected 0 pending bindings, got {count}"
 
 
