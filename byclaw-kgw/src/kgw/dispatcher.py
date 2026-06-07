@@ -176,6 +176,10 @@ async def dispatch_json(
     trace_id: str | None = request.headers.get("X-Trace-Id")
     started = time.perf_counter()
 
+    # Operation may arrive as a GatewayOp member or a raw string.
+    # Normalize to plain str for stringly-typed sinks (Prometheus, audit, logs).
+    op_str = operation.value if isinstance(operation, enum.Enum) else str(operation)
+
     # 1. Fetch KB config from MinIO
     config = await state.config_provider.get_kb_config(kn_code)
     if config is None:
@@ -258,10 +262,8 @@ async def dispatch_json(
     )
 
     # 8. Prometheus metrics
-    DISPATCH_TOTAL.labels(
-        operation=operation, kn_code=kn_code, result=result_code
-    ).inc()
-    DISPATCH_LATENCY.labels(operation=operation, kn_code=kn_code).observe(
+    DISPATCH_TOTAL.labels(operation=op_str, kn_code=kn_code, result=result_code).inc()
+    DISPATCH_LATENCY.labels(operation=op_str, kn_code=kn_code).observe(
         latency_ms / 1000.0
     )
 
@@ -273,7 +275,7 @@ async def dispatch_json(
                 trace_id=trace_id,
                 actor_user_id=user_id,
                 actor_kind="user",
-                operation_type=operation,
+                operation_type=op_str,
                 kn_code=kn_code,
                 file_path=file_path,
                 payload_size_bytes=None,
@@ -289,7 +291,7 @@ async def dispatch_json(
     if operation in _WRITE_HISTORY_OPS:
         asyncio.create_task(
             _write_history(state.pool, kn_code=kn_code, file_path=file_path or ""),
-            name=f"write_history:{kn_code}:{operation}",
+            name=f"write_history:{kn_code}:{op_str}",
         )
 
     return resp_body
@@ -363,6 +365,10 @@ async def dispatch_fanout_json(
     from kgw.envelope import KgwError  # noqa: PLC0415
 
     state = request.app.state
+
+    # Operation may arrive as a GatewayOp member or a raw string.
+    # Normalize to plain str for stringly-typed sinks (Prometheus, audit, logs).
+    op_str = operation.value if isinstance(operation, enum.Enum) else str(operation)
 
     # 1. Resolve all KB configs concurrently, collect failures immediately.
     configs_or_err: list[Any] = await asyncio.gather(
@@ -503,7 +509,7 @@ async def dispatch_fanout_json(
             _log.error(
                 "fanout.group_error",
                 endpoint=endpoint_key,
-                operation=operation,
+                operation=op_str,
                 error=str(res),
             )
             for kn_code in group_kn_codes:

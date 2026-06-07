@@ -286,7 +286,9 @@ async def knowledge_item_import(
     headers = await state.auth_provider.resolve_headers(
         config.headers, user_code=x_user_id
     )
-    op_path = config.operation_path(KbOp.FILE_IMPORT) or "/api/v1/knowledgeItems/import"
+    op_path = config.operation_path(KbOp.FILE_IMPORT) or _DEFAULT_KB_PATHS.get(
+        KbOp.FILE_IMPORT, "/api/v1/knowledgeItems/import"
+    )
     url = f"{config.domain_url.rstrip('/')}{op_path}"
 
     try:
@@ -312,7 +314,7 @@ async def knowledge_item_import(
             trace_id=request.headers.get("X-Trace-Id"),
             actor_user_id=x_user_id,
             actor_kind="user",
-            operation_type=GatewayOp.FILE_IMPORT,
+            operation_type=GatewayOp.FILE_IMPORT.value,
             kn_code=kn_code,
             file_path=file_path,
             payload_size_bytes=None,

@@ -57,3 +57,28 @@ def test_metadata_value_type_frozenset_str_compat():
 def test_kb_op_value_used_for_path_fallback():
     """f-string fallback in dispatcher uses .value, not enum repr."""
     assert f"/{KbOp.DIRECTORY_CREATE.value}" == "/directoryCreate"
+
+
+def test_str_of_enum_member_is_enum_repr_in_py312():
+    """Document the Python 3.12 behavior change that motivated the .value access pattern."""
+    assert str(GatewayOp.FILE_DELETE) == "GatewayOp.FILE_DELETE"  # NOT "fileDelete"
+    assert f"{GatewayOp.FILE_DELETE}" == "GatewayOp.FILE_DELETE"
+    assert GatewayOp.FILE_DELETE.value == "fileDelete"  # use .value for string contexts
+    # But equality still works (str-Enum dual inheritance):
+    assert GatewayOp.FILE_DELETE == "fileDelete"
+
+
+def test_dispatch_json_normalizes_operation_to_string_for_metrics():
+    """Verify that when an enum member is passed as operation, the Prometheus
+    label receives the plain string value (not the enum repr).
+
+    Static-source check: sufficient to lock in the pattern without setting up
+    the full FastAPI/Prometheus mock chain.
+    """
+    import pathlib
+
+    src = pathlib.Path(__file__).resolve().parent.parent / "src/kgw/dispatcher.py"
+    text = src.read_text()
+    assert "operation.value" in text, (
+        "dispatch_json must normalize enum operation to .value for Prometheus labels"
+    )

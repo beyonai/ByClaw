@@ -28,9 +28,9 @@ _VALID_VALUE_TYPES: frozenset[MetadataValueType] = frozenset(MetadataValueType)
 
 def _validate_value_type(value_type: str) -> None:
     if value_type not in _VALID_VALUE_TYPES:
+        sorted_values = sorted(v.value for v in _VALID_VALUE_TYPES)
         raise INVALID_VALUE_TYPE(
-            f"invalid valueType: {value_type!r}; "
-            f"must be one of {sorted(_VALID_VALUE_TYPES)}",
+            f"invalid valueType: {value_type!r}; must be one of {sorted_values}",
             value_type=value_type,
         )
 
