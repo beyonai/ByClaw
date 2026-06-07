@@ -59,6 +59,123 @@ async def admin_list_all(request: Request) -> dict[str, Any]:
     return success({"data": list(props.values())})
 
 
+# /orphans must be registered before any /{property_name} GET routes to prevent
+# FastAPI matching "orphans" as a property_name path segment.
+@router.get("/orphans")
+async def admin_orphans(
+    request: Request,
+    kn_code: str | None = Query(default=None, alias="knCode"),
+) -> dict[str, Any]:
+    """Return stuck orphan rows visible in the gateway's own tables.
+
+    No backend HTTP calls. Purely local DB queries.
+
+    purgeFailed  — sync rows with sync_status='PURGE_FAILED'
+    stalePending — binding rows with status='PENDING' older than 5 minutes
+    """
+    pool = request.app.state.pool
+
+    # Optionally resolve endpoint_key for purgeFailed filter
+    endpoint_key: str | None = None
+    if kn_code is not None:
+        cfg = await request.app.state.config_provider.get_kb_config(kn_code)
+        if cfg is not None:
+            endpoint_key = cfg.domain_url or cfg.domain_name
+        # If config not found, skip the endpoint_key filter (per spec)
+
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            # --- purgeFailed ---
+            if endpoint_key is not None:
+                await cur.execute(
+                    """
+                    SELECT
+                        p.property_name,
+                        p.backend_name,
+                        s.endpoint_key,
+                        s.last_error
+                    FROM kgw_metadata_property_sync s
+                    JOIN kgw_metadata_property p ON p.property_id = s.property_id
+                    WHERE s.sync_status = 'PURGE_FAILED'
+                      AND s.endpoint_key = %s
+                    ORDER BY p.property_name, s.endpoint_key
+                    """,
+                    (endpoint_key,),
+                )
+            else:
+                await cur.execute(
+                    """
+                    SELECT
+                        p.property_name,
+                        p.backend_name,
+                        s.endpoint_key,
+                        s.last_error
+                    FROM kgw_metadata_property_sync s
+                    JOIN kgw_metadata_property p ON p.property_id = s.property_id
+                    WHERE s.sync_status = 'PURGE_FAILED'
+                    ORDER BY p.property_name, s.endpoint_key
+                    """
+                )
+            pf_rows = await cur.fetchall()
+
+            # --- stalePending ---
+            if kn_code is not None:
+                await cur.execute(
+                    """
+                    SELECT
+                        p.property_name,
+                        b.kn_code,
+                        b.file_path,
+                        b.bound_at
+                    FROM kgw_metadata_property_binding b
+                    JOIN kgw_metadata_property p ON p.property_id = b.property_id
+                    WHERE b.status = 'PENDING'
+                      AND b.bound_at < NOW() - (5 * INTERVAL '1 minute')
+                      AND b.kn_code = %s
+                    ORDER BY b.bound_at
+                    """,
+                    (kn_code,),
+                )
+            else:
+                await cur.execute(
+                    """
+                    SELECT
+                        p.property_name,
+                        b.kn_code,
+                        b.file_path,
+                        b.bound_at
+                    FROM kgw_metadata_property_binding b
+                    JOIN kgw_metadata_property p ON p.property_id = b.property_id
+                    WHERE b.status = 'PENDING'
+                      AND b.bound_at < NOW() - (5 * INTERVAL '1 minute')
+                    ORDER BY b.bound_at
+                    """
+                )
+            sp_rows = await cur.fetchall()
+
+    purge_failed = [
+        {
+            "propertyName": row["property_name"],
+            "backendName": row["backend_name"],
+            "endpointKey": row["endpoint_key"],
+            "lastError": row["last_error"],
+        }
+        for row in pf_rows
+    ]
+
+    stale_pending = [
+        {
+            "propertyName": row["property_name"],
+            "knCode": row["kn_code"],
+            "filePath": row["file_path"],
+            "boundAt": row["bound_at"].isoformat() if row["bound_at"] else None,
+        }
+        for row in sp_rows
+    ]
+
+    return success({"purgeFailed": purge_failed, "stalePending": stale_pending})
+
+
 @router.post("/{property_name}/sync-retry")
 async def admin_sync_retry(
     request: Request,
@@ -195,118 +312,3 @@ async def admin_purge_retry(
         await conn.commit()
 
     return success({"updated": rowcount})
-
-
-@router.get("/orphans")
-async def admin_orphans(
-    request: Request,
-    kn_code: str | None = Query(default=None, alias="knCode"),
-) -> dict[str, Any]:
-    """Return stuck orphan rows visible in the gateway's own tables.
-
-    No backend HTTP calls. Purely local DB queries.
-
-    purgeFailed  — sync rows with sync_status='PURGE_FAILED'
-    stalePending — binding rows with status='PENDING' older than 5 minutes
-    """
-    pool = request.app.state.pool
-
-    # Optionally resolve endpoint_key for purgeFailed filter
-    endpoint_key: str | None = None
-    if kn_code is not None:
-        cfg = await request.app.state.config_provider.get_kb_config(kn_code)
-        if cfg is not None:
-            endpoint_key = cfg.domain_url or cfg.domain_name
-        # If config not found, skip the endpoint_key filter (per spec)
-
-    async with pool.connection() as conn:
-        async with conn.cursor() as cur:
-            # --- purgeFailed ---
-            if endpoint_key is not None:
-                await cur.execute(
-                    """
-                    SELECT
-                        p.property_name,
-                        p.backend_name,
-                        s.endpoint_key,
-                        s.last_error
-                    FROM kgw_metadata_property_sync s
-                    JOIN kgw_metadata_property p ON p.property_id = s.property_id
-                    WHERE s.sync_status = 'PURGE_FAILED'
-                      AND s.endpoint_key = %s
-                    ORDER BY p.property_name, s.endpoint_key
-                    """,
-                    (endpoint_key,),
-                )
-            else:
-                await cur.execute(
-                    """
-                    SELECT
-                        p.property_name,
-                        p.backend_name,
-                        s.endpoint_key,
-                        s.last_error
-                    FROM kgw_metadata_property_sync s
-                    JOIN kgw_metadata_property p ON p.property_id = s.property_id
-                    WHERE s.sync_status = 'PURGE_FAILED'
-                    ORDER BY p.property_name, s.endpoint_key
-                    """
-                )
-            pf_rows = await cur.fetchall()
-
-            # --- stalePending ---
-            if kn_code is not None:
-                await cur.execute(
-                    """
-                    SELECT
-                        p.property_name,
-                        b.kn_code,
-                        b.file_path,
-                        b.bound_at
-                    FROM kgw_metadata_property_binding b
-                    JOIN kgw_metadata_property p ON p.property_id = b.property_id
-                    WHERE b.status = 'PENDING'
-                      AND b.bound_at < NOW() - (5 * INTERVAL '1 minute')
-                      AND b.kn_code = %s
-                    ORDER BY b.bound_at
-                    """,
-                    (kn_code,),
-                )
-            else:
-                await cur.execute(
-                    """
-                    SELECT
-                        p.property_name,
-                        b.kn_code,
-                        b.file_path,
-                        b.bound_at
-                    FROM kgw_metadata_property_binding b
-                    JOIN kgw_metadata_property p ON p.property_id = b.property_id
-                    WHERE b.status = 'PENDING'
-                      AND b.bound_at < NOW() - (5 * INTERVAL '1 minute')
-                    ORDER BY b.bound_at
-                    """
-                )
-            sp_rows = await cur.fetchall()
-
-    purge_failed = [
-        {
-            "propertyName": row["property_name"],
-            "backendName": row["backend_name"],
-            "endpointKey": row["endpoint_key"],
-            "lastError": row["last_error"],
-        }
-        for row in pf_rows
-    ]
-
-    stale_pending = [
-        {
-            "propertyName": row["property_name"],
-            "knCode": row["kn_code"],
-            "filePath": row["file_path"],
-            "boundAt": row["bound_at"].isoformat() if row["bound_at"] else None,
-        }
-        for row in sp_rows
-    ]
-
-    return success({"purgeFailed": purge_failed, "stalePending": stale_pending})
