@@ -16,7 +16,7 @@ from kgw.metadata.sync import (
     SyncStatus,
     ensure_synced,
     get_sync_status,
-    list_synced_property_ids_for_kn,
+    list_synced_property_ids_for_endpoint,
     upsert_purging_for_synced,
 )
 from kgw.resilience.circuit_breaker import CircuitBreakerRegistry
@@ -37,6 +37,8 @@ _TABLES_TO_DROP = (
     "kgw_kb_conflict_log",
     "kgw_migration",
 )
+
+_ENDPOINT = "http://kb-hr.test"
 
 
 async def _cleanup(pool) -> None:
@@ -78,7 +80,7 @@ async def test_first_use_creates_synced_row(pg_dsn: str):
         await run_migrations(pool, SQL_DIR)
         p = await create_property(pool, property_name="t_sync1", value_type="string")
         state = _make_state(http, pool)
-        with respx.mock(base_url="http://kb-hr.test") as mock:
+        with respx.mock(base_url=_ENDPOINT) as mock:
             mock.post("/api/v1/metadataProperties/batchCreate").mock(
                 return_value=Response(
                     200,
@@ -92,7 +94,7 @@ async def test_first_use_creates_synced_row(pg_dsn: str):
             await ensure_synced(
                 state, property_id=p.property_id, kn_code="hr", user_code="u1"
             )
-        status = await get_sync_status(pool, p.property_id, "hr")
+        status = await get_sync_status(pool, p.property_id, _ENDPOINT)
         assert status == SyncStatus.SYNCED
     finally:
         await http.aclose()
@@ -106,7 +108,7 @@ async def test_backend_failure_marks_failed(pg_dsn: str):
         await run_migrations(pool, SQL_DIR)
         p = await create_property(pool, property_name="t_sync2", value_type="string")
         state = _make_state(http, pool)
-        with respx.mock(base_url="http://kb-hr.test") as mock:
+        with respx.mock(base_url=_ENDPOINT) as mock:
             mock.post("/api/v1/metadataProperties/batchCreate").mock(
                 return_value=Response(500, json={})
             )
@@ -114,7 +116,7 @@ async def test_backend_failure_marks_failed(pg_dsn: str):
                 await ensure_synced(
                     state, property_id=p.property_id, kn_code="hr", user_code="u1"
                 )
-        status = await get_sync_status(pool, p.property_id, "hr")
+        status = await get_sync_status(pool, p.property_id, _ENDPOINT)
         assert status == SyncStatus.FAILED
     finally:
         await http.aclose()
@@ -127,23 +129,23 @@ async def test_idempotent_when_already_synced(pg_dsn: str):
     try:
         await run_migrations(pool, SQL_DIR)
         p = await create_property(pool, property_name="t_sync3", value_type="string")
-        # Manually insert a SYNCED row
+        # Manually insert a SYNCED row using endpoint_key
         async with pool.connection() as conn:
             await conn.execute(
                 "INSERT INTO kgw_metadata_property_sync "
-                "(property_id, kn_code, sync_status, last_sync_at, last_error) "
-                "VALUES (%s, 'hr', 'SYNCED', NOW(), NULL)",
-                (p.property_id,),
+                "(property_id, endpoint_key, sync_status, last_sync_at, last_error) "
+                "VALUES (%s, %s, 'SYNCED', NOW(), NULL)",
+                (p.property_id, _ENDPOINT),
             )
             await conn.commit()
         state = _make_state(http, pool)
-        with respx.mock(base_url="http://kb-hr.test") as mock:
+        with respx.mock(base_url=_ENDPOINT) as mock:
             # No expected calls — backend must NOT be hit
             await ensure_synced(
                 state, property_id=p.property_id, kn_code="hr", user_code="u1"
             )
             assert mock.calls.call_count == 0
-        status = await get_sync_status(pool, p.property_id, "hr")
+        status = await get_sync_status(pool, p.property_id, _ENDPOINT)
         assert status == SyncStatus.SYNCED
     finally:
         await http.aclose()
@@ -155,18 +157,18 @@ async def test_upsert_purging_for_synced_flips_and_deletes(pg_dsn: str):
     try:
         await run_migrations(pool, SQL_DIR)
         p = await create_property(pool, property_name="t_sync4", value_type="string")
-        # Insert three sync rows
+        # Insert three sync rows with distinct endpoint_keys
         async with pool.connection() as conn:
-            for kn_code, sync_status in [
-                ("hr", "SYNCED"),
-                ("eng", "FAILED"),
-                ("legal", "SYNCING"),
+            for endpoint_key, sync_status in [
+                ("http://kb-hr.test", "SYNCED"),
+                ("http://kb-eng.test", "FAILED"),
+                ("http://kb-legal.test", "SYNCING"),
             ]:
                 await conn.execute(
                     "INSERT INTO kgw_metadata_property_sync "
-                    "(property_id, kn_code, sync_status, last_sync_at, last_error) "
+                    "(property_id, endpoint_key, sync_status, last_sync_at, last_error) "
                     "VALUES (%s, %s, %s, NOW(), NULL)",
-                    (p.property_id, kn_code, sync_status),
+                    (p.property_id, endpoint_key, sync_status),
                 )
             await conn.commit()
         # Call upsert_purging_for_synced inside a transaction
@@ -174,14 +176,18 @@ async def test_upsert_purging_for_synced_flips_and_deletes(pg_dsn: str):
             async with conn.transaction():
                 await upsert_purging_for_synced(conn, p.property_id)
         # Verify: hr → PURGING, eng + legal deleted
-        hr_status = await get_sync_status(pool, p.property_id, "hr")
+        hr_status = await get_sync_status(pool, p.property_id, "http://kb-hr.test")
         assert hr_status == SyncStatus.PURGING
-        eng_status = await get_sync_status(pool, p.property_id, "eng")
+        eng_status = await get_sync_status(pool, p.property_id, "http://kb-eng.test")
         assert eng_status is None
-        legal_status = await get_sync_status(pool, p.property_id, "legal")
+        legal_status = await get_sync_status(
+            pool, p.property_id, "http://kb-legal.test"
+        )
         assert legal_status is None
-        # list_synced_property_ids_for_kn should not return this property
-        synced_ids = await list_synced_property_ids_for_kn(pool, "hr")
+        # list_synced_property_ids_for_endpoint should not return this property
+        synced_ids = await list_synced_property_ids_for_endpoint(
+            pool, "http://kb-hr.test"
+        )
         assert p.property_id not in synced_ids
     finally:
         await _cleanup(pool)
@@ -195,12 +201,12 @@ async def test_circuit_open_short_circuits(pg_dsn: str):
         p = await create_property(pool, property_name="t_sync5", value_type="string")
         state = _make_state(http, pool)
         # Force the circuit breaker open by recording failures up to threshold
-        cb = state.circuit_breakers.get("http://kb-hr.test")
+        cb = state.circuit_breakers.get(_ENDPOINT)
         for _ in range(cb.failure_threshold):
             cb.record_failure()
         assert not cb.before_call(), "CB should be OPEN"
 
-        with respx.mock(base_url="http://kb-hr.test") as mock:
+        with respx.mock(base_url=_ENDPOINT) as mock:
             with pytest.raises(CircuitOpen):
                 await ensure_synced(
                     state, property_id=p.property_id, kn_code="hr", user_code="u1"
@@ -225,9 +231,19 @@ async def test_kb_not_found_raises(pg_dsn: str):
             await ensure_synced(
                 state, property_id=p.property_id, kn_code="hr", user_code="u1"
             )
-        # Row should be marked FAILED
-        status = await get_sync_status(pool, p.property_id, "hr")
-        assert status == SyncStatus.FAILED
+        # Config not found → no endpoint_key → no DB row written (None, not FAILED)
+        # We can't query by endpoint_key without knowing it; verify no row exists at all
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT COUNT(*) AS c FROM kgw_metadata_property_sync "
+                    "WHERE property_id=%s",
+                    (p.property_id,),
+                )
+                row = await cur.fetchone()
+        assert row["c"] == 0, (
+            f"Expected no sync rows for unknown kn_code, got {row['c']}"
+        )
     finally:
         await http.aclose()
         await _cleanup(pool)
@@ -244,7 +260,7 @@ async def test_uses_operation_path_from_config_when_present(pg_dsn: str):
             pool,
             operation_paths={"metadataPropertiesBatchCreate": "/custom/path"},
         )
-        with respx.mock(base_url="http://kb-hr.test") as mock:
+        with respx.mock(base_url=_ENDPOINT) as mock:
             custom_route = mock.post("/custom/path").mock(
                 return_value=Response(
                     200,
@@ -261,7 +277,7 @@ async def test_uses_operation_path_from_config_when_present(pg_dsn: str):
             assert custom_route.called, "custom path must have been called"
             # Verify the default path was NOT called (only one route registered = only custom)
             assert mock.calls.call_count == 1
-        status = await get_sync_status(pool, p.property_id, "hr")
+        status = await get_sync_status(pool, p.property_id, _ENDPOINT)
         assert status == SyncStatus.SYNCED
     finally:
         await http.aclose()
@@ -292,7 +308,7 @@ async def test_discovery_mode_works(pg_dsn: str, monkeypatch):
         assert call_kwargs["domain_name"] == "kb-hr-svc"
         assert call_kwargs["op_path"] == "/api/v1/metadataProperties/batchCreate"
 
-        status = await get_sync_status(pool, p.property_id, "hr")
+        status = await get_sync_status(pool, p.property_id, "kb-hr-svc")
         assert status == SyncStatus.SYNCED
     finally:
         await http.aclose()

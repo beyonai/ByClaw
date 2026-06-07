@@ -625,13 +625,25 @@ async def metadata_fields_list(
     Returns only fields written through the gateway (system fields and natively-written
     fields are not exposed by this endpoint after S4).
     """
-    pool = request.app.state.pool
+    state = request.app.state
+    pool = state.pool
     kn_codes = list(body.get("knCodeList") or ())
     if not kn_codes:
         return success({"data": []})
-    pids: set[int] = set()
+
+    # knCode → endpoint_key; dedupe so N knCodes sharing one backend hit the DB once
+    endpoint_keys: set[str] = set()
     for kc in kn_codes:
-        ids = await sync_mod.list_synced_property_ids_for_kn(pool, kc)
+        cfg = await state.config_provider.get_kb_config(kc)
+        if cfg is None:
+            continue
+        endpoint_keys.add(cfg.domain_url or cfg.domain_name)
+    if not endpoint_keys:
+        return success({"data": []})
+
+    pids: set[int] = set()
+    for ep in endpoint_keys:
+        ids = await sync_mod.list_synced_property_ids_for_endpoint(pool, ep)
         pids.update(ids)
     if not pids:
         return success({"data": []})

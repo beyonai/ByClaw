@@ -556,14 +556,14 @@ async def test_metadata_fields_list_local_only(lc_client, lc_pool):
     pid_f3 = await _query_property_id(lc_pool, prop_f3)
     assert pid_f3 is not None
 
-    # Manually INSERT a SYNCED row for lc_f3
+    # Manually INSERT a SYNCED row for lc_f3 using endpoint_key
     async with lc_pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
                 "INSERT INTO kgw_metadata_property_sync "
-                "(property_id, kn_code, sync_status, last_sync_at) "
+                "(property_id, endpoint_key, sync_status, last_sync_at) "
                 "VALUES (%s, %s, 'SYNCED', NOW())",
-                (pid_f3, _KN_CODE),
+                (pid_f3, _KB_BASE_URL),
             )
         await conn.commit()
 
