@@ -605,6 +605,16 @@ async def _process_upsert(
                     error_type="UPSTREAM_ERROR",
                     error_message=str(exc)[:500],
                 )
+                await _audit(
+                    state,
+                    item=item,
+                    op_type="ingest.upsert",
+                    result_code="-1",
+                    result_msg=str(exc)[:200],
+                    size=len(content_bytes),
+                    trace_id=trace_id,
+                    user_code=user_code,
+                )
                 return
 
             if meta_resp.get("resultCode") != "0":
@@ -617,6 +627,16 @@ async def _process_upsert(
                     event_id,
                     error_type="UPSTREAM_ERROR",
                     error_message=meta_resp.get("resultMsg", "")[:500],
+                )
+                await _audit(
+                    state,
+                    item=item,
+                    op_type="ingest.upsert",
+                    result_code="-1",
+                    result_msg=meta_resp.get("resultMsg", ""),
+                    size=len(content_bytes),
+                    trace_id=trace_id,
+                    user_code=user_code,
                 )
                 return
 
