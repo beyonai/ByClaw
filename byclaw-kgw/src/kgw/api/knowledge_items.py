@@ -21,6 +21,7 @@ from kgw.envelope import (
     KBNotFound,
     MetadataPropertyNotFound,
     OperationNotSupported,
+    UploadStreamBroken,
     UpstreamConnectError,
     UpstreamTimeout,
     success,
@@ -411,17 +412,15 @@ async def knowledge_item_import(
                 await _rollback_binding(
                     pool, attempt_id=attempt_id, pending_keys=pending_keys
                 )
-            from kgw.envelope import UploadStreamBroken
-
             raise UploadStreamBroken(
                 f"upload stream broken: {url}", kn_code=kn_code
             ) from exc
         except BackendAuthFailed:
+            cb.record_failure()
             if attempt_id is not None:
                 await _rollback_binding(
                     pool, attempt_id=attempt_id, pending_keys=pending_keys
                 )
-            cb.record_failure()
             raise
 
         if attempt_id is not None:

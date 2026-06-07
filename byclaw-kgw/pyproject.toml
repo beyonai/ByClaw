@@ -17,6 +17,7 @@ dependencies = [
     "opentelemetry-api>=1.28.0",
     "by-framework>=0.1.13",
     "python-multipart>=0.0.20",
+    "pyyaml>=6.0",
 ]
 
 [dependency-groups]
