@@ -15,7 +15,7 @@ import hashlib
 from typing import Any
 
 import httpx
-from kgw.dispatcher import _DEFAULT_KB_PATHS
+from kgw.dispatcher import _DEFAULT_KB_PATHS, KbOp
 from kgw.envelope import CircuitOpen, KBNotFound, MetadataPropertySyncFailed
 from kgw.metadata.registry import get_property_by_id
 from kgw.observability.logger import get_logger
@@ -24,7 +24,7 @@ from psycopg_pool import AsyncConnectionPool
 
 _log = get_logger(__name__)
 
-_OP_ID = "metadataPropertiesBatchCreate"
+_OP_ID = KbOp.METADATA_PROPERTIES_BATCH_CREATE
 
 
 class SyncStatus(str, enum.Enum):
@@ -152,7 +152,7 @@ async def ensure_synced(
 
     # 3. T2: circuit breaker → auth → backend batchCreate
     op_path = config.operation_path(_OP_ID) or _DEFAULT_KB_PATHS.get(
-        _OP_ID, f"/{_OP_ID}"
+        _OP_ID, f"/{_OP_ID.value}"
     )
 
     cb_key = endpoint_key

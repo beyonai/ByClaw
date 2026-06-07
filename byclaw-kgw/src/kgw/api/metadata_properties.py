@@ -19,10 +19,11 @@ from kgw.metadata import binding as binding_mod
 from kgw.metadata import registry
 from kgw.metadata import sync as sync_mod
 from kgw.metadata.registry import derive_backend_name
+from kgw.metadata.types import MetadataValueType
 
 router = APIRouter(prefix="/kgw/api/v1/metadataProperties")
 
-_VALID_VALUE_TYPES = {"string", "stringList", "number", "boolean", "datetime"}
+_VALID_VALUE_TYPES: frozenset[MetadataValueType] = frozenset(MetadataValueType)
 
 
 def _validate_value_type(value_type: str) -> None:

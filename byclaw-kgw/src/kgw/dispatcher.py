@@ -14,6 +14,7 @@ Handles:
 from __future__ import annotations
 
 import asyncio
+import enum
 import time
 from typing import Any
 
@@ -33,75 +34,120 @@ from kgw.upstream import BackendAuthError, call_backend_json
 
 _log = get_logger(__name__)
 
-# Map gateway-facing operation name → KB config operation name
-_GATEWAY_TO_KB_OP: dict[str, str] = {
+
+class GatewayOp(str, enum.Enum):
+    """Gateway-facing operation identifiers (the ``operation`` arg of dispatch_json)."""
+
     # writes (S2)
-    "directoryCreate": "directoryCreate",
-    "directoryUpdate": "directoryUpdate",
-    "directoryDelete": "directoryDelete",
-    "fileImport": "fileImport",
-    "fileDelete": "fileDelete",
-    "fileToMarkdownIndex": "buildTrigger",
-    "fileBuildStatus": "buildStatus",
-    # reads (S3) — gateway op name == KB op name for the read surface
-    "knowledgeSearch": "knowledgeSearch",
-    "metadataSearch": "metadataSearch",
-    "searchFile": "searchFile",
-    "metadataFieldsList": "metadataFieldsList",
-    "listDir": "listDir",
-    "glob": "glob",
-    "readFile": "readFile",
-    "downloadFile": "downloadFile",
+    DIRECTORY_CREATE = "directoryCreate"
+    DIRECTORY_UPDATE = "directoryUpdate"
+    DIRECTORY_DELETE = "directoryDelete"
+    FILE_IMPORT = "fileImport"
+    FILE_DELETE = "fileDelete"
+    FILE_TO_MARKDOWN_INDEX = "fileToMarkdownIndex"
+    FILE_BUILD_STATUS = "fileBuildStatus"
+    # reads (S3)
+    KNOWLEDGE_SEARCH = "knowledgeSearch"
+    METADATA_SEARCH = "metadataSearch"
+    SEARCH_FILE = "searchFile"
+    METADATA_FIELDS_LIST = "metadataFieldsList"
+    LIST_DIR = "listDir"
+    GLOB = "glob"
+    READ_FILE = "readFile"
+    DOWNLOAD_FILE = "downloadFile"
+
+
+class KbOp(str, enum.Enum):
+    """KB-config operation identifiers (matches the ``name`` field in resourceService entries)."""
+
+    DIRECTORY_CREATE = "directoryCreate"
+    DIRECTORY_UPDATE = "directoryUpdate"
+    DIRECTORY_DELETE = "directoryDelete"
+    FILE_IMPORT = "fileImport"
+    FILE_DELETE = "fileDelete"
+    BUILD_TRIGGER = "buildTrigger"
+    BUILD_STATUS = "buildStatus"
+    KNOWLEDGE_SEARCH = "knowledgeSearch"
+    METADATA_SEARCH = "metadataSearch"
+    SEARCH_FILE = "searchFile"
+    METADATA_FIELDS_LIST = "metadataFieldsList"
+    LIST_DIR = "listDir"
+    GLOB = "glob"
+    READ_FILE = "readFile"
+    DOWNLOAD_FILE = "downloadFile"
+    # S4 metadata sync
+    METADATA_PROPERTIES_BATCH_CREATE = "metadataPropertiesBatchCreate"
+    KNOWLEDGE_ITEMS_METADATA_UPDATE = "knowledgeItemsMetadataUpdate"
+    KNOWLEDGE_ITEMS_METADATA_GET = "knowledgeItemsMetadataGet"
+
+
+# Map gateway-facing operation name → KB config operation name
+_GATEWAY_TO_KB_OP: dict[GatewayOp, KbOp] = {
+    GatewayOp.DIRECTORY_CREATE: KbOp.DIRECTORY_CREATE,
+    GatewayOp.DIRECTORY_UPDATE: KbOp.DIRECTORY_UPDATE,
+    GatewayOp.DIRECTORY_DELETE: KbOp.DIRECTORY_DELETE,
+    GatewayOp.FILE_IMPORT: KbOp.FILE_IMPORT,
+    GatewayOp.FILE_DELETE: KbOp.FILE_DELETE,
+    GatewayOp.FILE_TO_MARKDOWN_INDEX: KbOp.BUILD_TRIGGER,
+    GatewayOp.FILE_BUILD_STATUS: KbOp.BUILD_STATUS,
+    GatewayOp.KNOWLEDGE_SEARCH: KbOp.KNOWLEDGE_SEARCH,
+    GatewayOp.METADATA_SEARCH: KbOp.METADATA_SEARCH,
+    GatewayOp.SEARCH_FILE: KbOp.SEARCH_FILE,
+    GatewayOp.METADATA_FIELDS_LIST: KbOp.METADATA_FIELDS_LIST,
+    GatewayOp.LIST_DIR: KbOp.LIST_DIR,
+    GatewayOp.GLOB: KbOp.GLOB,
+    GatewayOp.READ_FILE: KbOp.READ_FILE,
+    GatewayOp.DOWNLOAD_FILE: KbOp.DOWNLOAD_FILE,
 }
 
 # Default backend path by KB operation name (fallback when portal config omits paths)
-_DEFAULT_KB_PATHS: dict[str, str] = {
-    "directoryCreate": "/api/v1/directories/create",
-    "directoryUpdate": "/api/v1/directories/update",
-    "directoryDelete": "/api/v1/directories/delete",
-    "fileImport": "/api/v1/knowledgeItems/import",
-    "fileDelete": "/api/v1/knowledgeItems/delete",
-    "buildTrigger": "/api/v1/fileToMarkdownIndex",
-    "buildStatus": "/api/v1/fileBuildStatus",
-    "knowledgeSearch": "/api/v1/knowledgeItems/search",
-    "metadataSearch": "/api/v1/knowledgeItems/metadataSearch",
-    "searchFile": "/api/v1/knowledgeItems/searchFile",
-    "metadataFieldsList": "/api/v1/knowledgeItems/metadataFields/list",
-    "listDir": "/api/v1/listDir",
-    "glob": "/api/v1/glob",
-    "readFile": "/api/v1/readFile",
-    "downloadFile": "/api/v1/downloadFile",
+_DEFAULT_KB_PATHS: dict[KbOp, str] = {
+    KbOp.DIRECTORY_CREATE: "/api/v1/directories/create",
+    KbOp.DIRECTORY_UPDATE: "/api/v1/directories/update",
+    KbOp.DIRECTORY_DELETE: "/api/v1/directories/delete",
+    KbOp.FILE_IMPORT: "/api/v1/knowledgeItems/import",
+    KbOp.FILE_DELETE: "/api/v1/knowledgeItems/delete",
+    KbOp.BUILD_TRIGGER: "/api/v1/fileToMarkdownIndex",
+    KbOp.BUILD_STATUS: "/api/v1/fileBuildStatus",
+    KbOp.KNOWLEDGE_SEARCH: "/api/v1/knowledgeItems/search",
+    KbOp.METADATA_SEARCH: "/api/v1/knowledgeItems/metadataSearch",
+    KbOp.SEARCH_FILE: "/api/v1/knowledgeItems/searchFile",
+    KbOp.METADATA_FIELDS_LIST: "/api/v1/knowledgeItems/metadataFields/list",
+    KbOp.LIST_DIR: "/api/v1/listDir",
+    KbOp.GLOB: "/api/v1/glob",
+    KbOp.READ_FILE: "/api/v1/readFile",
+    KbOp.DOWNLOAD_FILE: "/api/v1/downloadFile",
     # S4 metadata sync
-    "metadataPropertiesBatchCreate": "/api/v1/metadataProperties/batchCreate",
-    "knowledgeItemsMetadataUpdate": "/api/v1/knowledgeItems/metadata/update",
-    "knowledgeItemsMetadataGet": "/api/v1/knowledgeItems/metadata/get",
+    KbOp.METADATA_PROPERTIES_BATCH_CREATE: "/api/v1/metadataProperties/batchCreate",
+    KbOp.KNOWLEDGE_ITEMS_METADATA_UPDATE: "/api/v1/knowledgeItems/metadata/update",
+    KbOp.KNOWLEDGE_ITEMS_METADATA_GET: "/api/v1/knowledgeItems/metadata/get",
 }
 
 # Operations that write to kgw_kb_write_history (state-changing writes only)
-_WRITE_HISTORY_OPS = frozenset(
+_WRITE_HISTORY_OPS: frozenset[GatewayOp] = frozenset(
     {
-        "directoryCreate",
-        "directoryUpdate",
-        "directoryDelete",
-        "fileImport",
-        "fileDelete",
-        "fileToMarkdownIndex",
+        GatewayOp.DIRECTORY_CREATE,
+        GatewayOp.DIRECTORY_UPDATE,
+        GatewayOp.DIRECTORY_DELETE,
+        GatewayOp.FILE_IMPORT,
+        GatewayOp.FILE_DELETE,
+        GatewayOp.FILE_TO_MARKDOWN_INDEX,
     }
 )
 
 # Read operations — do NOT write audit log and do NOT write kgw_kb_write_history
 # (v5 spec §7.1: only high-risk writes are audited)
-_READ_OPS = frozenset(
+_READ_OPS: frozenset[GatewayOp] = frozenset(
     {
-        "knowledgeSearch",
-        "metadataSearch",
-        "searchFile",
-        "metadataFieldsList",
-        "listDir",
-        "glob",
-        "readFile",
-        "downloadFile",
-        "fileBuildStatus",  # status query: read-shaped, no audit, no history
+        GatewayOp.KNOWLEDGE_SEARCH,
+        GatewayOp.METADATA_SEARCH,
+        GatewayOp.SEARCH_FILE,
+        GatewayOp.METADATA_FIELDS_LIST,
+        GatewayOp.LIST_DIR,
+        GatewayOp.GLOB,
+        GatewayOp.READ_FILE,
+        GatewayOp.DOWNLOAD_FILE,
+        GatewayOp.FILE_BUILD_STATUS,  # status query: read-shaped, no audit, no history
     }
 )
 
@@ -157,7 +203,9 @@ async def dispatch_json(
     )
 
     # 5. Build upstream URL and translate portal knCode → backend resource_code
-    op_path = config.operation_path(kb_op) or _DEFAULT_KB_PATHS.get(kb_op, f"/{kb_op}")
+    op_path = config.operation_path(kb_op) or _DEFAULT_KB_PATHS.get(
+        kb_op, f"/{kb_op.value}"
+    )
 
     # Replace portal kn_code with backend resource_code in the request body.
     # KB backends use their own resourceCode as knCode, not the portal's ID.
@@ -363,7 +411,9 @@ async def dispatch_fanout_json(
             )
             continue
         endpoint_key = cfg.domain_url or cfg.domain_name
-        op_path = cfg.operation_path(kb_op) or _DEFAULT_KB_PATHS.get(kb_op, f"/{kb_op}")
+        op_path = cfg.operation_path(kb_op) or _DEFAULT_KB_PATHS.get(
+            kb_op, f"/{kb_op.value}"
+        )
         groups.setdefault((endpoint_key, op_path), []).append(kn_code)
 
     if not groups:

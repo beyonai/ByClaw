@@ -6,6 +6,8 @@ import httpx
 from fastapi import APIRouter, File, Form, Header, Request, UploadFile
 from kgw.dispatcher import (
     _DEFAULT_KB_PATHS,
+    GatewayOp,
+    KbOp,
     _remap_kn_code,
     _write_history,
     dispatch_fanout_json,
@@ -32,6 +34,7 @@ from kgw.metadata.translator import (
     translate_request_metadata,
     translate_response_metadata,
 )
+from kgw.metadata.types import MetadataOperation, MetadataValueType
 from kgw.observability.logger import get_logger
 from kgw.stream_proxy import proxy_upload
 from kgw.upstream import BackendAuthError, call_backend_json
@@ -44,15 +47,33 @@ router = APIRouter(prefix="/kgw/api/v1")
 # ---------------------------------------------------------------------------
 # Operations allowed per value_type.
 # "set" and "unset" are universally allowed; type-specific ops are listed here.
-_OPS_FOR_TYPE: dict[str, set[str]] = {
-    "string": {"set", "unset"},
-    "number": {"set", "unset"},
-    "boolean": {"set", "unset"},
-    "array": {"set", "unset", "append", "clear"},
-    "object": {"set", "unset"},
+_OPS_FOR_TYPE: dict[MetadataValueType, frozenset[MetadataOperation]] = {
+    MetadataValueType.STRING: frozenset(
+        {MetadataOperation.SET, MetadataOperation.UNSET}
+    ),
+    MetadataValueType.NUMBER: frozenset(
+        {MetadataOperation.SET, MetadataOperation.UNSET}
+    ),
+    MetadataValueType.BOOLEAN: frozenset(
+        {MetadataOperation.SET, MetadataOperation.UNSET}
+    ),
+    MetadataValueType.DATETIME: frozenset(
+        {MetadataOperation.SET, MetadataOperation.UNSET}
+    ),
+    MetadataValueType.STRING_LIST: frozenset(
+        {
+            MetadataOperation.SET,
+            MetadataOperation.UNSET,
+            MetadataOperation.APPEND,
+            MetadataOperation.REMOVE,
+            MetadataOperation.CLEAR,
+        }
+    ),
 }
 # Fallback for unknown value_types — only set/unset allowed
-_DEFAULT_OPS: set[str] = {"set", "unset"}
+_DEFAULT_OPS: frozenset[MetadataOperation] = frozenset(
+    {MetadataOperation.SET, MetadataOperation.UNSET}
+)
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +239,7 @@ async def knowledge_item_delete(
     file_path = str(body.get("filePath") or "")
     resp = await dispatch_json(
         request,
-        operation="fileDelete",
+        operation=GatewayOp.FILE_DELETE,
         kn_code=kn_code,
         user_id=x_user_id,
         body=body,
@@ -251,11 +272,11 @@ async def knowledge_item_import(
     config = await state.config_provider.get_kb_config(kn_code)
     if config is None:
         raise KBNotFound(f"unknown knCode: {kn_code}", kn_code=kn_code)
-    if "fileImport" not in config.operations:
+    if KbOp.FILE_IMPORT not in config.operations:
         raise OperationNotSupported(
             f"fileImport not supported by {kn_code}",
             kn_code=kn_code,
-            operation="fileImport",
+            operation=GatewayOp.FILE_IMPORT,
         )
 
     cb = state.circuit_breakers.get(config.domain_url or config.domain_name)
@@ -265,7 +286,7 @@ async def knowledge_item_import(
     headers = await state.auth_provider.resolve_headers(
         config.headers, user_code=x_user_id
     )
-    op_path = config.operation_path("fileImport") or "/api/v1/knowledgeItems/import"
+    op_path = config.operation_path(KbOp.FILE_IMPORT) or "/api/v1/knowledgeItems/import"
     url = f"{config.domain_url.rstrip('/')}{op_path}"
 
     try:
@@ -278,7 +299,7 @@ async def knowledge_item_import(
             form_fields=form,
             upload_file=file_content,
             kn_code=kn_code,
-            operation="fileImport",
+            operation=GatewayOp.FILE_IMPORT,
         )
         cb.record_success()
     except Exception:
@@ -291,7 +312,7 @@ async def knowledge_item_import(
             trace_id=request.headers.get("X-Trace-Id"),
             actor_user_id=x_user_id,
             actor_kind="user",
-            operation_type="fileImport",
+            operation_type=GatewayOp.FILE_IMPORT,
             kn_code=kn_code,
             file_path=file_path,
             payload_size_bytes=None,
@@ -304,7 +325,7 @@ async def knowledge_item_import(
     )
     asyncio.create_task(
         _write_history(state.pool, kn_code=kn_code, file_path=file_path),
-        name=f"write_history:{kn_code}:fileImport",
+        name=f"write_history:{kn_code}:{GatewayOp.FILE_IMPORT.value}",
     )
 
     return result
@@ -321,7 +342,7 @@ async def knowledge_search(
     backend_body, b2n = await _prepare_search_body(request.app.state.pool, body)
     resp = await dispatch_fanout_json(
         request,
-        operation="knowledgeSearch",
+        operation=GatewayOp.KNOWLEDGE_SEARCH,
         kn_code_list=kn_code_list,
         user_id=x_user_id,
         body=backend_body,
@@ -340,7 +361,7 @@ async def metadata_search(
     backend_body, b2n = await _prepare_search_body(request.app.state.pool, body)
     resp = await dispatch_fanout_json(
         request,
-        operation="metadataSearch",
+        operation=GatewayOp.METADATA_SEARCH,
         kn_code_list=kn_code_list,
         user_id=x_user_id,
         body=backend_body,
@@ -359,7 +380,7 @@ async def search_file(
     backend_body, b2n = await _prepare_search_body(request.app.state.pool, body)
     resp = await dispatch_fanout_json(
         request,
-        operation="searchFile",
+        operation=GatewayOp.SEARCH_FILE,
         kn_code_list=kn_code_list,
         user_id=x_user_id,
         body=backend_body,
@@ -415,8 +436,10 @@ async def metadata_update(
     if cfg is None:
         raise KBNotFound(f"unknown knCode: {kn_code}", kn_code=kn_code)
 
-    op_id = "knowledgeItemsMetadataUpdate"
-    op_path = cfg.operation_path(op_id) or _DEFAULT_KB_PATHS.get(op_id, f"/{op_id}")
+    op_id = KbOp.KNOWLEDGE_ITEMS_METADATA_UPDATE
+    op_path = cfg.operation_path(op_id) or _DEFAULT_KB_PATHS.get(
+        op_id, f"/{op_id.value}"
+    )
 
     # 4. Lazy sync for each unique property_id
     unique_props = {p.property_id: p for p in props_by_name.values()}
@@ -428,7 +451,9 @@ async def metadata_update(
     # 5. Generate attempt_id and write PENDING bindings for set/append ops
     attempt_id = binding_mod.new_attempt_id()
     set_or_append_names = [
-        op["propertyName"] for op in op_list if op.get("operation") in {"set", "append"}
+        op["propertyName"]
+        for op in op_list
+        if op.get("operation") in {MetadataOperation.SET, MetadataOperation.APPEND}
     ]
 
     pending_keys: list[tuple[int, str, str]] = [
@@ -520,7 +545,9 @@ async def metadata_update(
 
     # 12. Process unset/clear — delete binding rows
     unset_or_clear_ops = [
-        op for op in op_list if op.get("operation") in {"unset", "clear"}
+        op
+        for op in op_list
+        if op.get("operation") in {MetadataOperation.UNSET, MetadataOperation.CLEAR}
     ]
     if unset_or_clear_ops:
         async with pool.connection() as conn:
@@ -565,8 +592,10 @@ async def metadata_get(
     if cfg is None:
         raise KBNotFound(f"unknown knCode: {kn_code}", kn_code=kn_code)
 
-    op_id = "knowledgeItemsMetadataGet"
-    op_path = cfg.operation_path(op_id) or _DEFAULT_KB_PATHS.get(op_id, f"/{op_id}")
+    op_id = KbOp.KNOWLEDGE_ITEMS_METADATA_GET
+    op_path = cfg.operation_path(op_id) or _DEFAULT_KB_PATHS.get(
+        op_id, f"/{op_id.value}"
+    )
 
     # Translate request body
     backend_payload = translate_request_metadata(body, name_to_backend)
