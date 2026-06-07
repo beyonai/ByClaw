@@ -99,6 +99,7 @@ async def _lifespan(app: FastAPI):  # pylint: disable=redefined-outer-name
     app.state.auth_provider = auth_provider
     app.state.audit = audit_writer
     app.state.circuit_breakers = circuit_breakers
+    app.state.ingest_semaphore = asyncio.Semaphore(settings.ingest_concurrency_limit)
 
     from kgw.workers.binding_reconcile import run_reconcile_loop  # noqa: PLC0415
     from kgw.workers.cleanup import run_cleanup_loop  # noqa: PLC0415
@@ -167,6 +168,12 @@ def build_app() -> FastAPI:
     app.include_router(knowledge_items_router)
     app.include_router(files_router)
     app.include_router(metadata_properties_router)
+
+    from kgw.api.admin import router as admin_router  # noqa: PLC0415
+    from kgw.api.events import router as events_router  # noqa: PLC0415
+
+    app.include_router(events_router)
+    app.include_router(admin_router)
 
     return app
 

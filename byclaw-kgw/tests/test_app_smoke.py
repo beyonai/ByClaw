@@ -36,6 +36,9 @@ def _mock_settings(monkeypatch):
     mock_s.minio_kg_doc_prefix = "resource/doc/KG_DOC_"
     mock_s.redis_auth_key_template = "user:{user_code}:login:auth"
     mock_s.audit_queue_max_size = 100
+    mock_s.circuit_failure_threshold = 5
+    mock_s.circuit_open_duration = 60
+    mock_s.ingest_concurrency_limit = 10
     get_settings.cache_clear()
     monkeypatch.setattr("kgw.main.get_settings", lambda: mock_s)
     return mock_s
