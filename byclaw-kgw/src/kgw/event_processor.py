@@ -269,7 +269,7 @@ async def _process_upsert(
             error_type="CIRCUIT_OPEN",
             error_message="circuit breaker OPEN",
         )
-        _audit(
+        await _audit(
             state,
             item=item,
             op_type="ingest.upsert",
@@ -287,7 +287,9 @@ async def _process_upsert(
 
         # Merge: front matter keys + item.metadata keys (item.metadata wins on conflict)
         all_meta_keys = list(
-            dict.fromkeys(list(front_matter.keys()) + list(item.metadata or {}).keys())
+            dict.fromkeys(
+                list(front_matter.keys()) + list((item.metadata or {}).keys())
+            )
         )
 
         upload_bytes = content_bytes
@@ -386,7 +388,7 @@ async def _process_upsert(
                     error_type="BACKEND_AUTH_FAILED",
                     error_message=f"backend auth {resp.status_code}",
                 )
-                _audit(
+                await _audit(
                     state,
                     item=item,
                     op_type="ingest.upsert",
@@ -411,7 +413,7 @@ async def _process_upsert(
                 error_type="UPSTREAM_ERROR",
                 error_message=str(exc)[:500],
             )
-            _audit(
+            await _audit(
                 state,
                 item=item,
                 op_type="ingest.upsert",
@@ -435,7 +437,7 @@ async def _process_upsert(
                 error_type="UPSTREAM_ERROR",
                 error_message=result.get("resultMsg", "")[:500],
             )
-            _audit(
+            await _audit(
                 state,
                 item=item,
                 op_type="ingest.upsert",
@@ -477,7 +479,7 @@ async def _process_upsert(
                     error_type="BACKEND_AUTH_FAILED",
                     error_message=f"backend auth {resp.status_code}",
                 )
-                _audit(
+                await _audit(
                     state,
                     item=item,
                     op_type="ingest.upsert",
@@ -498,7 +500,7 @@ async def _process_upsert(
                 error_type="UPSTREAM_ERROR",
                 error_message=str(exc)[:500],
             )
-            _audit(
+            await _audit(
                 state,
                 item=item,
                 op_type="ingest.upsert",
@@ -518,7 +520,7 @@ async def _process_upsert(
                 error_type="UPSTREAM_ERROR",
                 error_message=result.get("resultMsg", "")[:500],
             )
-            _audit(
+            await _audit(
                 state,
                 item=item,
                 op_type="ingest.upsert",
@@ -641,7 +643,7 @@ async def _process_upsert(
         )
 
     await idempotency.mark_done(pool, event_id)
-    _audit(
+    await _audit(
         state,
         item=item,
         op_type="ingest.upsert",
@@ -679,7 +681,7 @@ async def _process_delete(
             error_type="CIRCUIT_OPEN",
             error_message="circuit breaker OPEN",
         )
-        _audit(
+        await _audit(
             state,
             item=item,
             op_type="ingest.delete",
@@ -709,7 +711,7 @@ async def _process_delete(
             error_type="UPSTREAM_ERROR",
             error_message=str(exc)[:500],
         )
-        _audit(
+        await _audit(
             state,
             item=item,
             op_type="ingest.delete",
@@ -728,7 +730,7 @@ async def _process_delete(
             error_type="UPSTREAM_ERROR",
             error_message=resp.get("resultMsg", "")[:500],
         )
-        _audit(
+        await _audit(
             state,
             item=item,
             op_type="ingest.delete",
@@ -744,7 +746,7 @@ async def _process_delete(
         pool, kn_code=item.kn_code, file_path=item.file_path
     )
     await idempotency.mark_done(pool, event_id)
-    _audit(
+    await _audit(
         state,
         item=item,
         op_type="ingest.delete",
@@ -902,7 +904,7 @@ async def _rollback_binding(
                 pass
 
 
-def _audit(
+async def _audit(
     state: Any,
     *,
     item: StandardItem,
@@ -913,7 +915,7 @@ def _audit(
     trace_id: str | None,
     user_code: str,
 ) -> None:
-    state.audit.record(
+    await state.audit.record(
         AuditEntry(
             source="ingest",
             trace_id=trace_id,
