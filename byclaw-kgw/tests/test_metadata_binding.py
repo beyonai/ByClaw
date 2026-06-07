@@ -19,6 +19,7 @@ from kgw.metadata.binding import (
     delete_by_file,
     mark_synced_by_attempt,
     new_attempt_id,
+    rename_directory_prefix,
     sample_in_use,
     upsert_pending,
     write_outbox,
@@ -345,3 +346,85 @@ async def test_write_outbox_inserts_row(binding_pool):
     assert row["file_path"] == "/docs/g.md"
     assert row["attempt_id"] == aid
     assert row["reason"] == "ROLLBACK_FAILED"
+
+
+@pytest.mark.integration
+async def test_rename_directory_prefix_rewrites_only_matching_paths(binding_pool):
+    prop = await create_property(
+        binding_pool, property_name="t_bind_rn1", value_type="string"
+    )
+    paths = [
+        ("hr", "/docs/old/a.md"),
+        ("hr", "/docs/old/sub/b.md"),
+        ("hr", "/docs/older/c.md"),  # sibling — must NOT match
+        ("hr", "/elsewhere/d.md"),  # outside — must NOT match
+        ("legal", "/docs/old/x.md"),  # different kn_code — must NOT match
+    ]
+    async with binding_pool.connection() as conn:
+        for kn_code, fp in paths:
+            await upsert_pending(
+                conn,
+                property_id=prop.property_id,
+                kn_code=kn_code,
+                file_path=fp,
+                attempt_id=new_attempt_id(),
+            )
+        await conn.commit()
+
+    n = await rename_directory_prefix(
+        binding_pool,
+        kn_code="hr",
+        old_directory_path="/docs/old",
+        new_directory_path="/docs/new",
+    )
+    assert n == 2
+
+    async with binding_pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT kn_code, file_path FROM kgw_metadata_property_binding "
+                "ORDER BY kn_code, file_path"
+            )
+            rows = [(r["kn_code"], r["file_path"]) for r in await cur.fetchall()]
+
+    assert rows == [
+        ("hr", "/docs/new/a.md"),
+        ("hr", "/docs/new/sub/b.md"),
+        ("hr", "/docs/older/c.md"),
+        ("hr", "/elsewhere/d.md"),
+        ("legal", "/docs/old/x.md"),
+    ]
+
+
+@pytest.mark.integration
+async def test_rename_directory_prefix_escapes_like_metachars(binding_pool):
+    prop = await create_property(
+        binding_pool, property_name="t_bind_rn2", value_type="string"
+    )
+    async with binding_pool.connection() as conn:
+        for fp in ("/dir_2025/a.md", "/dir_2025/sub/b.md", "/dirX2025/a.md"):
+            await upsert_pending(
+                conn,
+                property_id=prop.property_id,
+                kn_code="hr",
+                file_path=fp,
+                attempt_id=new_attempt_id(),
+            )
+        await conn.commit()
+
+    n = await rename_directory_prefix(
+        binding_pool,
+        kn_code="hr",
+        old_directory_path="/dir_2025",
+        new_directory_path="/dir_2026",
+    )
+    assert n == 2
+
+    async with binding_pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT file_path FROM kgw_metadata_property_binding "
+                "WHERE kn_code='hr' ORDER BY file_path"
+            )
+            rows = [r["file_path"] for r in await cur.fetchall()]
+    assert rows == ["/dir_2026/a.md", "/dir_2026/sub/b.md", "/dirX2025/a.md"]

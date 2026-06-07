@@ -49,6 +49,10 @@ _KB_CONFIG = {
             "name": "directoryDelete",
             "path": "/api/v1/directories/delete",
         },
+        {
+            "name": "directoryUpdate",
+            "path": "/api/v1/directories/update",
+        },
     ],
 }
 
@@ -478,3 +482,83 @@ async def test_file_delete_with_empty_file_path_does_not_crash(bc_client):
     # Just verify a valid JSON response is returned
     body = r.json()
     assert "resultCode" in body, f"Expected resultCode in response: {body}"
+
+
+# ---------------------------------------------------------------------------
+# Tests: /directories/update
+# ---------------------------------------------------------------------------
+
+
+async def test_directory_update_renames_binding_paths_when_backend_succeeds(
+    bc_client, bc_pool
+):
+    """On directory rename success, bindings under the old prefix are rewritten."""
+    await _create_property(bc_client, "bc_rn", "string")
+    pid = await _pid(bc_pool, "bc_rn")
+
+    await _insert_synced_binding(
+        bc_pool, property_id=pid, kn_code=_KN_CODE, file_path="/docs/old/a.md"
+    )
+    await _insert_synced_binding(
+        bc_pool, property_id=pid, kn_code=_KN_CODE, file_path="/docs/old/sub/b.md"
+    )
+    await _insert_synced_binding(
+        bc_pool, property_id=pid, kn_code=_KN_CODE, file_path="/docs/older/c.md"
+    )
+
+    with respx.mock(base_url=_KB_BASE_URL, assert_all_called=False) as mock:
+        mock.post("/api/v1/directories/update").mock(
+            return_value=httpx.Response(200, json=_ok_resp())
+        )
+
+        r = await bc_client.post(
+            f"{_DIRS_BASE}/update",
+            json={
+                "knCode": _KN_CODE,
+                "directoryPath": "/docs/old",
+                "directoryName": "new",
+            },
+            headers={"X-User-Id": "user_bc_1"},
+        )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["resultCode"] == "0"
+
+    assert await _count_by_file(bc_pool, pid, _KN_CODE, "/docs/new/a.md") == 1
+    assert await _count_by_file(bc_pool, pid, _KN_CODE, "/docs/new/sub/b.md") == 1
+    assert await _count_by_file(bc_pool, pid, _KN_CODE, "/docs/old/a.md") == 0
+    assert await _count_by_file(bc_pool, pid, _KN_CODE, "/docs/older/c.md") == 1, (
+        "Sibling /docs/older/* must NOT be touched"
+    )
+
+
+async def test_directory_update_keeps_bindings_when_backend_fails(bc_client, bc_pool):
+    """On directory rename failure, bindings are NOT rewritten."""
+    await _create_property(bc_client, "bc_rn_fail", "string")
+    pid = await _pid(bc_pool, "bc_rn_fail")
+
+    await _insert_synced_binding(
+        bc_pool, property_id=pid, kn_code=_KN_CODE, file_path="/r_fail/x.md"
+    )
+
+    with respx.mock(base_url=_KB_BASE_URL, assert_all_called=False) as mock:
+        mock.post("/api/v1/directories/update").mock(
+            return_value=httpx.Response(200, json=_err_resp())
+        )
+
+        r = await bc_client.post(
+            f"{_DIRS_BASE}/update",
+            json={
+                "knCode": _KN_CODE,
+                "directoryPath": "/r_fail",
+                "directoryName": "r_done",
+            },
+            headers={"X-User-Id": "user_bc_1"},
+        )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["resultCode"] == "-1"
+
+    assert await _count_by_file(bc_pool, pid, _KN_CODE, "/r_fail/x.md") == 1, (
+        "Binding should be intact when backend fails"
+    )

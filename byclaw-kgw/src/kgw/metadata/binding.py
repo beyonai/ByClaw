@@ -181,6 +181,48 @@ async def delete_by_directory(
     return n
 
 
+async def rename_directory_prefix(
+    pool: AsyncConnectionPool,
+    *,
+    kn_code: str,
+    old_directory_path: str,
+    new_directory_path: str,
+) -> int:
+    """Rewrite ``file_path`` prefixes after a directory rename.
+
+    Every binding under ``old_directory_path + "/"`` becomes
+    ``new_directory_path + "/" + suffix``. LIKE metachars in
+    ``old_directory_path`` are escaped before matching, so names containing
+    ``%`` / ``_`` / ``\\`` are handled literally. Returns the row count.
+    """
+    old_escaped = (
+        old_directory_path.rstrip("/")
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    old_prefix_for_like = old_escaped + "/"
+    old_prefix_literal = old_directory_path.rstrip("/") + "/"
+    new_prefix_literal = new_directory_path.rstrip("/") + "/"
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            # PG SUBSTRING is 1-indexed; +1 keeps the suffix after the old prefix.
+            await cur.execute(
+                "UPDATE kgw_metadata_property_binding "
+                "SET file_path = %s || substring(file_path FROM %s) "
+                "WHERE kn_code=%s AND file_path LIKE %s ESCAPE '\\'",
+                (
+                    new_prefix_literal,
+                    len(old_prefix_literal) + 1,
+                    kn_code,
+                    old_prefix_for_like + "%",
+                ),
+            )
+            n = cur.rowcount
+        await conn.commit()
+    return n
+
+
 async def delete_by_property_op(
     conn,
     *,
