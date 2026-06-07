@@ -19,6 +19,7 @@ import time
 from typing import Any
 
 import httpx
+from by_framework.errors.http import DiscoveryHttpClientError
 from kgw.audit import AuditEntry
 from kgw.envelope import (
     BackendAuthFailed,
@@ -249,6 +250,13 @@ async def dispatch_json(
         _set_circuit_metric(kn_code, cb)
         raise UpstreamConnectError(
             f"connect error calling {config.domain_url or config.domain_name}{op_path}",
+            kn_code=kn_code,
+        ) from exc
+    except DiscoveryHttpClientError as exc:
+        cb.record_failure()
+        _set_circuit_metric(kn_code, cb)
+        raise UpstreamConnectError(
+            f"service-discovery error for {config.domain_name}{op_path}: {exc}",
             kn_code=kn_code,
         ) from exc
     except BackendAuthError as exc:
