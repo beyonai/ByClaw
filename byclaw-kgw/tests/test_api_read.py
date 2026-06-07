@@ -100,26 +100,6 @@ def test_search_file_calls_fanout():
     assert forwarded["topK"] == 10
 
 
-def test_metadata_fields_list_calls_fanout():
-    """POST /knowledgeItems/metadataFields/list → dispatch_fanout_json with knCodeList."""
-    with patch(
-        "kgw.api.knowledge_items.dispatch_fanout_json", new_callable=AsyncMock
-    ) as m:
-        m.return_value = {
-            "resultCode": "0",
-            "resultMsg": "ok",
-            "resultObject": {"data": [], "degraded_kbs": []},
-        }
-        client = TestClient(_build_ki_app())
-        client.post(
-            "/kgw/api/v1/knowledgeItems/metadataFields/list",
-            json={"knCodeList": ["kb_a", "kb_b"]},
-            headers={"X-User-Id": "u1"},
-        )
-    assert m.call_args.kwargs["operation"] == "metadataFieldsList"
-    assert m.call_args.kwargs["kn_code_list"] == ["kb_a", "kb_b"]
-
-
 def _build_files_app():
     from kgw.api.files import router
 

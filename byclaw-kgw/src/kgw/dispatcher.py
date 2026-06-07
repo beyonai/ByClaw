@@ -73,6 +73,8 @@ _DEFAULT_KB_PATHS: dict[str, str] = {
     "downloadFile": "/api/v1/downloadFile",
     # S4 metadata sync
     "metadataPropertiesBatchCreate": "/api/v1/metadataProperties/batchCreate",
+    "knowledgeItemsMetadataUpdate": "/api/v1/knowledgeItems/metadata/update",
+    "knowledgeItemsMetadataGet": "/api/v1/knowledgeItems/metadata/get",
 }
 
 # Operations that write to kgw_kb_write_history (state-changing writes only)
