@@ -18,6 +18,7 @@ import contextlib
 from typing import Any
 
 from kgw.observability.logger import get_logger
+from kgw.observability.metrics import kgw_metadata_reconcile_total
 from psycopg_pool import AsyncConnectionPool
 
 _log = get_logger(__name__)
@@ -27,15 +28,17 @@ async def reconcile_iteration(
     pool: AsyncConnectionPool,
     *,
     pending_threshold_minutes: int = 5,
+    stale_syncing_threshold_minutes: int = 10,
     batch_size: int = 50,
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     """Run one reconcile pass.
 
-    Returns (outbox_drained, stale_deleted).
+    Returns (outbox_drained, stale_pending_deleted, stale_syncing_cleared).
     """
     outbox_n = await _drain_outbox(pool, batch_size)
     stale_n = await _delete_stale_pending(pool, pending_threshold_minutes)
-    return outbox_n, stale_n
+    syncing_n = await _clear_stale_syncing(pool, stale_syncing_threshold_minutes)
+    return outbox_n, stale_n, syncing_n
 
 
 async def _drain_outbox(pool: AsyncConnectionPool, batch_size: int) -> int:
@@ -71,6 +74,9 @@ async def _drain_outbox(pool: AsyncConnectionPool, batch_size: int) -> int:
                         (row["id"],),
                     )
                     drained += 1
+                    kgw_metadata_reconcile_total.labels(
+                        action="outbox_drain", result="success"
+                    ).inc()
     return drained
 
 
@@ -88,6 +94,37 @@ async def _delete_stale_pending(
             )
             n = cur.rowcount
         await conn.commit()
+    if n:
+        kgw_metadata_reconcile_total.labels(
+            action="stale_pending", result="deleted"
+        ).inc(n)
+    return n
+
+
+async def _clear_stale_syncing(
+    pool: AsyncConnectionPool, threshold_minutes: int
+) -> int:
+    """Flip SYNCING rows older than threshold to FAILED.
+
+    Avoids multi-Pod race: a Pod's T2 phase (backend call after T1 commit)
+    takes at most ~15 s; 10-minute threshold means only truly orphaned rows
+    (where T2 crashed) are cleared.
+    """
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE kgw_metadata_property_sync "
+                "SET sync_status='FAILED', last_error='stale: SYNCING timeout' "
+                "WHERE sync_status='SYNCING' "
+                "  AND last_sync_at < NOW() - (%s * INTERVAL '1 minute')",
+                (threshold_minutes,),
+            )
+            n = cur.rowcount
+        await conn.commit()
+    if n:
+        kgw_metadata_reconcile_total.labels(
+            action="stale_syncing", result="cleared"
+        ).inc(n)
     return n
 
 
@@ -103,12 +140,13 @@ async def run_reconcile_loop(
         if stop_event is not None and stop_event.is_set():
             return
         try:
-            outbox_n, stale_n = await reconcile_iteration(pool)
-            if outbox_n or stale_n:
+            outbox_n, stale_n, syncing_n = await reconcile_iteration(pool)
+            if outbox_n or stale_n or syncing_n:
                 _log.info(
                     "reconcile.iteration.done",
                     outbox_drained=outbox_n,
                     stale_deleted=stale_n,
+                    stale_syncing_cleared=syncing_n,
                 )
         except Exception:  # noqa: BLE001
             _log.exception("reconcile.iteration.error")

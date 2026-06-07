@@ -47,3 +47,32 @@ CIRCUIT_STATE: Gauge = Gauge(
     ["kn_code"],
     registry=REGISTRY,
 )
+
+# S4 metadata property lifecycle counters
+kgw_metadata_property_operations_total: Counter = Counter(
+    "kgw_metadata_property_operations_total",
+    "metadataProperty create/delete operations",
+    ["operation", "result"],
+    registry=REGISTRY,
+)
+
+kgw_metadata_sync_total: Counter = Counter(
+    "kgw_metadata_sync_total",
+    "Lazy sync attempts (ensure_synced T2 phase)",
+    ["result"],  # success / failed / circuit_open
+    registry=REGISTRY,
+)
+
+kgw_metadata_purge_total: Counter = Counter(
+    "kgw_metadata_purge_total",
+    "Cleanup worker purge attempts per sync row",
+    ["result"],  # success / failed / circuit_open
+    registry=REGISTRY,
+)
+
+kgw_metadata_reconcile_total: Counter = Counter(
+    "kgw_metadata_reconcile_total",
+    "Reconcile worker actions",
+    ["action", "result"],  # action: outbox_drain / stale_pending / stale_syncing
+    registry=REGISTRY,
+)

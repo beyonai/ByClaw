@@ -19,6 +19,7 @@ from kgw.dispatcher import _DEFAULT_KB_PATHS, KbOp
 from kgw.envelope import CircuitOpen, KBNotFound, MetadataPropertySyncFailed
 from kgw.metadata.registry import get_property_by_id
 from kgw.observability.logger import get_logger
+from kgw.observability.metrics import kgw_metadata_sync_total
 from kgw.upstream import BackendAuthError, call_backend_json
 from psycopg_pool import AsyncConnectionPool
 
@@ -159,6 +160,7 @@ async def ensure_synced(
     cb = state.circuit_breakers.get(cb_key)
     if not cb.before_call():
         # Circuit open — leave row as SYNCING so next call can retry
+        kgw_metadata_sync_total.labels(result="circuit_open").inc()
         raise CircuitOpen(f"circuit OPEN for {kn_code}", kn_code=kn_code)
 
     headers = await state.auth_provider.resolve_headers(
@@ -190,6 +192,7 @@ async def ensure_synced(
         cb.record_failure()
         reason = "timeout"
         await _mark_failed(pool, property_id, endpoint_key, reason)
+        kgw_metadata_sync_total.labels(result="failed").inc()
         raise MetadataPropertySyncFailed(
             f"backend sync timed out: {exc!r}",
             property_name=prop.property_name,
@@ -199,6 +202,7 @@ async def ensure_synced(
         cb.record_failure()
         reason = "connect"
         await _mark_failed(pool, property_id, endpoint_key, reason)
+        kgw_metadata_sync_total.labels(result="failed").inc()
         raise MetadataPropertySyncFailed(
             f"backend sync connect error: {exc!r}",
             property_name=prop.property_name,
@@ -208,6 +212,7 @@ async def ensure_synced(
         cb.record_failure()
         reason = "auth"
         await _mark_failed(pool, property_id, endpoint_key, reason)
+        kgw_metadata_sync_total.labels(result="failed").inc()
         raise MetadataPropertySyncFailed(
             f"backend auth error: {exc!r}",
             property_name=prop.property_name,
@@ -217,6 +222,7 @@ async def ensure_synced(
         cb.record_failure()
         reason = "decode"
         await _mark_failed(pool, property_id, endpoint_key, reason)
+        kgw_metadata_sync_total.labels(result="failed").inc()
         raise MetadataPropertySyncFailed(
             f"backend response decode error: {exc!r}",
             property_name=prop.property_name,
@@ -226,6 +232,7 @@ async def ensure_synced(
     if resp.get("resultCode") != "0":
         error_msg = f"upstream resultCode != 0: {str(resp)[:200]}"
         await _mark_failed(pool, property_id, endpoint_key, error_msg)
+        kgw_metadata_sync_total.labels(result="failed").inc()
         raise MetadataPropertySyncFailed(
             "backend batchCreate did not return success",
             property_name=prop.property_name,
@@ -233,6 +240,7 @@ async def ensure_synced(
         )
 
     await _mark_synced(pool, property_id, endpoint_key)
+    kgw_metadata_sync_total.labels(result="success").inc()
 
 
 async def _mark_synced(

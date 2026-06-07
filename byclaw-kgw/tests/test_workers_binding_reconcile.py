@@ -80,7 +80,7 @@ async def test_outbox_drained_removes_binding(rc_pool):
         )
         await conn.commit()
 
-    outbox_n, _ = await reconcile_iteration(rc_pool)
+    outbox_n, _, _ = await reconcile_iteration(rc_pool)
 
     async with rc_pool.connection() as conn:
         async with conn.cursor() as cur:
@@ -120,7 +120,7 @@ async def test_outbox_drained_no_crash_when_binding_missing(rc_pool):
         await conn.commit()
 
     # Should not raise
-    outbox_n, _ = await reconcile_iteration(rc_pool)
+    outbox_n, _, _ = await reconcile_iteration(rc_pool)
 
     async with rc_pool.connection() as conn:
         async with conn.cursor() as cur:
@@ -154,7 +154,7 @@ async def test_stale_pending_deleted(rc_pool):
         )
         await conn.commit()
 
-    _, stale_n = await reconcile_iteration(rc_pool, pending_threshold_minutes=5)
+    _, stale_n, _ = await reconcile_iteration(rc_pool, pending_threshold_minutes=5)
 
     async with rc_pool.connection() as conn:
         async with conn.cursor() as cur:
@@ -227,7 +227,9 @@ async def test_reconcile_returns_counts(rc_pool):
         )
         await conn.commit()
 
-    outbox_n, stale_n = await reconcile_iteration(rc_pool, pending_threshold_minutes=5)
+    outbox_n, stale_n, _ = await reconcile_iteration(
+        rc_pool, pending_threshold_minutes=5
+    )
 
     assert outbox_n >= 1
     assert stale_n >= 1
@@ -259,7 +261,7 @@ async def test_multiple_outbox_rows_all_drained(rc_pool):
             )
         await conn.commit()
 
-    outbox_n, _ = await reconcile_iteration(rc_pool)
+    outbox_n, _, _ = await reconcile_iteration(rc_pool)
 
     assert outbox_n == 3
 

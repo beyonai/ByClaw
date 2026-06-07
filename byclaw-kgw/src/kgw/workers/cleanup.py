@@ -17,6 +17,7 @@ import httpx
 from kgw.config_provider import KbConfig
 from kgw.dispatcher import _DEFAULT_KB_PATHS, KbOp
 from kgw.observability.logger import get_logger
+from kgw.observability.metrics import kgw_metadata_purge_total
 from kgw.upstream import BackendAuthError, call_backend_json
 from psycopg_pool import AsyncConnectionPool
 
@@ -97,6 +98,7 @@ async def _purge_one(
     if not cb.before_call():
         # Circuit OPEN — leave as PURGING for next iteration
         _log.warning("cleanup.circuit_open", endpoint_key=endpoint_key)
+        kgw_metadata_purge_total.labels(result="circuit_open").inc()
         return
 
     headers = await state.auth_provider.resolve_headers({}, user_code="kgw_worker")
@@ -121,6 +123,7 @@ async def _purge_one(
                     "WHERE property_id=%s AND endpoint_key=%s",
                     (property_id, endpoint_key),
                 )
+            kgw_metadata_purge_total.labels(result="success").inc()
             return
         msg = resp.get("resultMsg") or str(resp)[:200]
     except httpx.TimeoutException as exc:
@@ -149,6 +152,7 @@ async def _purge_one(
             "WHERE property_id=%s AND endpoint_key=%s",
             (msg, property_id, endpoint_key),
         )
+    kgw_metadata_purge_total.labels(result="failed").inc()
 
 
 async def _physical_delete_when_all_purged(pool: AsyncConnectionPool) -> None:

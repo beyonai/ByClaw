@@ -20,6 +20,7 @@ from kgw.metadata import registry
 from kgw.metadata import sync as sync_mod
 from kgw.metadata.registry import derive_backend_name
 from kgw.metadata.types import MetadataValueType
+from kgw.observability.metrics import kgw_metadata_property_operations_total
 
 router = APIRouter(prefix="/kgw/api/v1/metadataProperties")
 
@@ -69,6 +70,9 @@ async def metadata_property_create(
         description=description,
         ext_params=ext_params,
     )
+    kgw_metadata_property_operations_total.labels(
+        operation="create", result="success"
+    ).inc()
     return success(_property_to_dict(prop))
 
 
@@ -205,6 +209,9 @@ async def metadata_property_delete(
                 count = int(count_row["c"])
                 if count > 0:
                     samples = await binding_mod.sample_in_use(pool, pid, limit=5)
+                    kgw_metadata_property_operations_total.labels(
+                        operation="delete", result="rejected"
+                    ).inc()
                     raise MetadataPropertyInUse(
                         f"metadata property {property_name!r} is in use "
                         f"({count} references)",
@@ -224,4 +231,7 @@ async def metadata_property_delete(
                 # d. Flip SYNCED→PURGING; remove FAILED/SYNCING rows
                 await sync_mod.upsert_purging_for_synced(conn, pid)
 
+    kgw_metadata_property_operations_total.labels(
+        operation="delete", result="success"
+    ).inc()
     return success({})
