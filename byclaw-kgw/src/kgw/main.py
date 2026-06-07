@@ -99,6 +99,7 @@ async def _lifespan(app: FastAPI):  # pylint: disable=redefined-outer-name
     app.state.auth_provider = auth_provider
     app.state.audit = audit_writer
     app.state.circuit_breakers = circuit_breakers
+    app.state.kgw_service_user_code = settings.kgw_service_user_code
 
     from kgw.workers.binding_reconcile import run_reconcile_loop  # noqa: PLC0415
     from kgw.workers.cleanup import run_cleanup_loop  # noqa: PLC0415
@@ -156,11 +157,13 @@ def build_app() -> FastAPI:
 
     app.include_router(internal_router)
 
+    from kgw.api.admin_metadata import router as admin_metadata_router
     from kgw.api.directories import router as directories_router
     from kgw.api.files import router as files_router
     from kgw.api.knowledge_items import router as knowledge_items_router
     from kgw.api.metadata_properties import router as metadata_properties_router
 
+    app.include_router(admin_metadata_router)
     app.include_router(directories_router)
     app.include_router(knowledge_items_router)
     app.include_router(files_router)
