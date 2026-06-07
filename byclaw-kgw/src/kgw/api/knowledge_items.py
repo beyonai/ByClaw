@@ -115,6 +115,8 @@ def _rewrite_front_matter(content: bytes, name_to_backend: dict[str, str]) -> by
     """Replace propertyName keys in YAML front matter with backend_name keys."""
     text = content.decode("utf-8")
     end_idx = text.find("---", 3)
+    if end_idx == -1:
+        return content  # no closing delimiter; nothing to rewrite
     body_start = end_idx + 3
     yaml_block = text[3:end_idx].strip()
     original = yaml.safe_load(yaml_block)
