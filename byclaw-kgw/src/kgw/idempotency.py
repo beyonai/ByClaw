@@ -40,9 +40,9 @@ async def insert_received(
     Raises DuplicateEvent on UNIQUE (source_id, item_id, version) conflict.
     version=NULL rows do NOT conflict with each other (PG NULL semantics).
     """
-    try:
-        async with pool.connection() as conn:
-            async with conn.cursor() as cur:
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            try:
                 await cur.execute(
                     "INSERT INTO kgw_ingest_event "
                     "(source_id, item_id, version, op, kn_code, file_path, "
@@ -59,14 +59,14 @@ async def insert_received(
                         payload_size_bytes,
                     ),
                 )
-                row = await cur.fetchone()
-            await conn.commit()
-        return row["event_id"]
-    except psycopg.errors.UniqueViolation as exc:
-        raise DuplicateEvent(
-            f"duplicate event: source_id={item.source_id} "
-            f"item_id={item.item_id} version={item.version}"
-        ) from exc
+            except psycopg.errors.UniqueViolation as exc:
+                raise DuplicateEvent(
+                    f"duplicate event: source_id={item.source_id} "
+                    f"item_id={item.item_id} version={item.version}"
+                ) from exc
+            row = await cur.fetchone()
+        await conn.commit()
+    return row["event_id"]
 
 
 async def get_by_id(
@@ -94,6 +94,11 @@ async def get_by_idempotency_key(
     item_id: str,
     version: str | None,
 ) -> IngestEventRow | None:
+    """Look up an event by its idempotency key (source_id, item_id, version).
+
+    Returns None if no matching row exists, OR if version is None (NULL-version
+    rows are not uniquely addressable by key — PG UNIQUE does not deduplicate NULLs).
+    """
     if version is None:
         return None
     async with pool.connection() as conn:
@@ -119,6 +124,8 @@ async def mark_done(pool: AsyncConnectionPool, event_id: int) -> None:
                 "WHERE event_id=%s",
                 (event_id,),
             )
+            if cur.rowcount == 0:
+                raise ValueError(f"event_id {event_id} not found")
         await conn.commit()
 
 
@@ -137,6 +144,8 @@ async def mark_failed(
                 "WHERE event_id=%s",
                 (error_type, error_message[:2000], event_id),
             )
+            if cur.rowcount == 0:
+                raise ValueError(f"event_id {event_id} not found")
         await conn.commit()
 
 
@@ -166,6 +175,10 @@ async def list_events(
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[IngestEventRow], int]:
+    if page < 1:
+        page = 1
+    if page_size < 1:
+        page_size = 1
     conditions: list[str] = []
     params: list[Any] = []
     if source_id:
