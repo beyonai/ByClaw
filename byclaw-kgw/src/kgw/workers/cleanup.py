@@ -10,6 +10,7 @@ for multi-Pod safety.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 
 import httpx
@@ -58,7 +59,7 @@ async def cleanup_iteration(
                     "JOIN kgw_metadata_property p USING (property_id) "
                     "WHERE s.sync_status IN ('PURGING','PURGE_FAILED') "
                     "  AND (s.last_sync_at IS NULL OR "
-                    "       s.last_sync_at < NOW() - INTERVAL '%s minutes') "
+                    "       s.last_sync_at < NOW() - (%s * INTERVAL '1 minute')) "
                     "ORDER BY s.last_sync_at NULLS FIRST "
                     "LIMIT %s "
                     "FOR UPDATE SKIP LOCKED",
@@ -181,6 +182,10 @@ async def run_cleanup_loop(
                 _log.info("cleanup.iteration.done", processed=n)
         except Exception:  # noqa: BLE001
             _log.exception("cleanup.iteration.error")
-        await asyncio.sleep(interval_seconds)
+        if stop_event is not None:
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+        else:
+            await asyncio.sleep(interval_seconds)
         if stop_event is not None and stop_event.is_set():
             return
