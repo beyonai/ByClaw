@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import base64
 from dataclasses import dataclass
+from datetime import datetime as _dt
+from datetime import timezone as _tz
 from typing import Any
 
 import httpx
@@ -266,6 +268,16 @@ async def _process_upsert(
             event_id,
             error_type="CIRCUIT_OPEN",
             error_message="circuit breaker OPEN",
+        )
+        _audit(
+            state,
+            item=item,
+            op_type="ingest.upsert",
+            result_code="-1",
+            result_msg="circuit breaker OPEN",
+            size=0,
+            trace_id=trace_id,
+            user_code=user_code,
         )
         return
 
@@ -594,6 +606,7 @@ async def _process_upsert(
                 return
 
             if meta_resp.get("resultCode") != "0":
+                cb.record_failure()
                 await _rollback_binding(
                     pool, attempt_id=attempt_id, pending_keys=pending_keys
                 )
@@ -666,6 +679,16 @@ async def _process_delete(
             error_type="CIRCUIT_OPEN",
             error_message="circuit breaker OPEN",
         )
+        _audit(
+            state,
+            item=item,
+            op_type="ingest.delete",
+            result_code="-1",
+            result_msg="circuit breaker OPEN",
+            size=0,
+            trace_id=trace_id,
+            user_code=user_code,
+        )
         return
 
     body = {"knCode": config.resource_code, "filePath": item.file_path}
@@ -686,6 +709,16 @@ async def _process_delete(
             error_type="UPSTREAM_ERROR",
             error_message=str(exc)[:500],
         )
+        _audit(
+            state,
+            item=item,
+            op_type="ingest.delete",
+            result_code="-1",
+            result_msg=str(exc)[:200],
+            size=0,
+            trace_id=trace_id,
+            user_code=user_code,
+        )
         return
 
     if resp.get("resultCode") != "0":
@@ -694,6 +727,16 @@ async def _process_delete(
             event_id,
             error_type="UPSTREAM_ERROR",
             error_message=resp.get("resultMsg", "")[:500],
+        )
+        _audit(
+            state,
+            item=item,
+            op_type="ingest.delete",
+            result_code="-1",
+            result_msg=resp.get("resultMsg", ""),
+            size=0,
+            trace_id=trace_id,
+            user_code=user_code,
         )
         return
 
@@ -791,10 +834,7 @@ async def _get_source_lock(pool: Any, *, kn_code: str, file_path: str) -> dict |
 def _is_lock_expired(lock_row: dict) -> bool:
     if lock_row["expires_at"] is None:
         return False
-    from datetime import datetime as dt
-    from datetime import timezone
-
-    return dt.now(timezone.utc) > lock_row["expires_at"]
+    return _dt.now(_tz.utc) > lock_row["expires_at"]
 
 
 async def _get_latest_done_version(
