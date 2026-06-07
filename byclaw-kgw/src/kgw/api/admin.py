@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime as _dt
+from datetime import timezone as _tz
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
@@ -149,9 +151,6 @@ async def lock_file(
             )
             existing = await cur.fetchone()
         if existing:
-            from datetime import datetime as _dt  # noqa: PLC0415
-            from datetime import timezone as _tz
-
             expired = (
                 existing["expires_at"] is not None
                 and _dt.now(_tz.utc) > existing["expires_at"]

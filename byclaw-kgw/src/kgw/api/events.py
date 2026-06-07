@@ -71,6 +71,10 @@ async def ingest_event(
 
     state = request.app.state
     sem = state.ingest_semaphore
+
+    trace_id = request.headers.get("X-Trace-Id")
+    # sem._value is the internal slot counter; no public non-blocking API exists in asyncio.
+    # Reading it before acquire is a best-effort check — a brief over-admission is acceptable.
     if sem._value == 0:  # noqa: SLF001
         kgw_ingest_semaphore_rejected_total.inc()
         return JSONResponse(
@@ -82,8 +86,6 @@ async def ingest_event(
                 "resultObject": {},
             },
         )
-
-    trace_id = request.headers.get("X-Trace-Id")
     async with sem:
         result = await process_event(
             state, item, user_code=x_user_id, trace_id=trace_id
