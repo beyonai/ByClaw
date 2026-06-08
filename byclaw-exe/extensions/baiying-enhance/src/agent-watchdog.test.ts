@@ -1194,6 +1194,184 @@ describe("createAgentWatchdog", () => {
         expect(routingMd).toContain(agentId);
     });
 
+    it("seeds main context from Redis when bundled AGENTS.md source is disabled", async () => {
+        const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-context-"));
+        const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-context-"));
+        await writeFile(path.join(mainWs, "SOUL.md"), "# Base Watchdog SOUL\n", "utf8");
+        const contextTemplate = {
+            schemaVersion: 1,
+            templateType: "agentContext",
+            scope: "mainWorkspace",
+            agentRole: "superAssistant",
+            files: {
+                "SOUL.md": { enabled: true, priorityPrompt: "# Redis Watchdog SOUL\n\n主控上下文。" },
+            },
+        };
+        const hashEntries = new Map<string, RedisJsonPayload>([
+            [
+                "byai:SystemConfig:paramCode:OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+                payloadFromContent(
+                    "byai:SystemConfig:paramCode:OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+                    JSON.stringify({
+                        paramCode: "OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+                        paramValue: JSON.stringify(contextTemplate),
+                    }),
+                ),
+            ],
+        ]);
+
+        const writeConfigFile = vi.fn(async () => {});
+        const api = createMockApi(writeConfigFile, [
+            { id: "main", name: "Main", workspace: mainWs, identity: { name: "Main" } },
+        ]) as any;
+
+        const wd = createAgentWatchdogBase({
+            api,
+            registry: new AgentRegistryState(),
+            redisJsonStore: createMemoryRedisJsonStore(new Map(), hashEntries),
+            authorizationFilter: { getAuthorizedSourceKeys: () => new Set() },
+            absoluteDir: dir,
+            contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+            executorPath: path.join(dir, "executor.py"),
+            pluginConfig: {
+                embedApiKeysFromJson: true,
+                workspaceAutoSeed: false,
+                persistAgentContentIndex: false,
+                workspaceSkillScanIntervalMs: 0,
+                useBundledMainAgentsMd: false,
+            },
+            debounceMs: 60_000,
+        });
+
+        await wd.start();
+        await wd.__flushNow!();
+        await wd.stop();
+
+        const soulMd = await readFile(path.join(mainWs, "SOUL.md"), "utf8");
+        expect(soulMd).toContain("# Base Watchdog SOUL");
+        expect(soulMd).toContain("<!-- baiying-enhance: main context SOUL.md:start -->");
+        expect(soulMd).toContain("# Redis Watchdog SOUL");
+        expect(await pathExists(path.join(mainWs, "AGENTS.md"))).toBe(false);
+    });
+
+    it("does not refresh main context files on auth reseed when Redis context is unchanged", async () => {
+        const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-context-unchanged-"));
+        const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-context-unchanged-"));
+        const agentId = `${MANAGED_AGENT_PREFIX}10863047`;
+        await writeFile(path.join(mainWs, "SOUL.md"), "# Base Watchdog SOUL\n", "utf8");
+
+        const contextTemplate = {
+            schemaVersion: 1,
+            templateType: "agentContext",
+            scope: "mainWorkspace",
+            agentRole: "superAssistant",
+            files: {
+                "AGENTS.md": {
+                    enabled: true,
+                    priorityPrompt: "# Redis Watchdog AGENTS\n\n主控提示词。",
+                },
+                "SOUL.md": {
+                    enabled: true,
+                    priorityPrompt: "# Redis Watchdog SOUL\n\n主控上下文。",
+                },
+            },
+        };
+        const hashEntries = new Map<string, RedisJsonPayload>([
+            [
+                "byai:SystemConfig:paramCode:OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+                payloadFromContent(
+                    "byai:SystemConfig:paramCode:OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+                    JSON.stringify({
+                        paramCode: "OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+                        paramValue: JSON.stringify(contextTemplate),
+                    }),
+                ),
+            ],
+        ]);
+        const entries = new Map<string, RedisJsonPayload>([
+            ["10863047", payloadFromContent("DIG_EMPLOYEE_10863047", STABLE_AGENT_JSON)],
+        ]);
+
+        const writeConfigFile = vi.fn(async () => {});
+        const api = createMockApi(writeConfigFile, [
+            { id: "main", name: "Main", workspace: mainWs, identity: { name: "Main" } },
+            { id: agentId, name: "Demo", identity: { name: "Demo" } },
+        ]) as any;
+
+        const wd = createAgentWatchdogBase({
+            api,
+            registry: new AgentRegistryState(),
+            redisJsonStore: createMemoryRedisJsonStore(entries, hashEntries),
+            authorizationFilter: { getAuthorizedSourceKeys: () => new Set(["10863047"]) },
+            absoluteDir: dir,
+            contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+            executorPath: path.join(dir, "executor.py"),
+            pluginConfig: {
+                embedApiKeysFromJson: true,
+                workspaceAutoSeed: false,
+                persistAgentContentIndex: false,
+                workspaceSkillScanIntervalMs: 0,
+                useBundledMainAgentsMd: false,
+            },
+            debounceMs: 60_000,
+        });
+
+        await wd.start();
+        await wd.__flushNow!();
+
+        expect(await readFile(path.join(mainWs, "AGENTS.md"), "utf8")).toContain(
+            "# Redis Watchdog AGENTS",
+        );
+        expect(await readFile(path.join(mainWs, "SOUL.md"), "utf8")).toContain(
+            "# Redis Watchdog SOUL",
+        );
+
+        await writeFile(path.join(mainWs, "AGENTS.md"), `${MAIN_AGENTS_MARKER}\n\n# Manual AGENTS\n`, "utf8");
+        await writeFile(path.join(mainWs, "SOUL.md"), "# Manual SOUL\n", "utf8");
+
+        await wd.__flushNow!({ fullWorkspaceReseed: true });
+
+        expect(await readFile(path.join(mainWs, "AGENTS.md"), "utf8")).toContain("# Manual AGENTS");
+        expect(await readFile(path.join(mainWs, "SOUL.md"), "utf8")).toBe("# Manual SOUL\n");
+        const routingMd = await readFile(path.join(mainWs, SUBAGENT_ROUTING_FILENAME), "utf8");
+        expect(routingMd.startsWith(SUBAGENT_ROUTING_MARKER)).toBe(true);
+        expect(routingMd).toContain(agentId);
+
+        const updatedContextTemplate = {
+            ...contextTemplate,
+            files: {
+                "AGENTS.md": {
+                    enabled: true,
+                    priorityPrompt: "# Redis Watchdog AGENTS v2\n\n主控提示词更新。",
+                },
+                "SOUL.md": {
+                    enabled: true,
+                    priorityPrompt: "# Redis Watchdog SOUL v2\n\n主控上下文更新。",
+                },
+            },
+        };
+        hashEntries.set(
+            "byai:SystemConfig:paramCode:OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+            payloadFromContent(
+                "byai:SystemConfig:paramCode:OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+                JSON.stringify({
+                    paramCode: "OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+                    paramValue: JSON.stringify(updatedContextTemplate),
+                }),
+            ),
+        );
+
+        await wd.__flushNow!({ fullWorkspaceReseed: true });
+        await wd.stop();
+
+        expect(await readFile(path.join(mainWs, "AGENTS.md"), "utf8")).toContain(
+            "# Redis Watchdog AGENTS v2",
+        );
+        const updatedSoul = await readFile(path.join(mainWs, "SOUL.md"), "utf8");
+        expect(updatedSoul).toContain("# Manual SOUL");
+        expect(updatedSoul).toContain("# Redis Watchdog SOUL v2");
+    });
+
     it("calls writeConfigFile when only workspace skills changed", async () => {
         const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-skill-"));
         const agentWs = await mkdtemp(path.join(tmpdir(), "baiying-agentws-"));

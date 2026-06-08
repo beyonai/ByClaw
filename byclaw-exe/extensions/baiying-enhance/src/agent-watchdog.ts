@@ -21,7 +21,11 @@ import {
     resolveBaiyingAimodelProviderBundle,
 } from "./aimodel-config.js";
 import type { WorkspaceArchiveApi } from "./workspace-archive-api.js";
-import { resolveEffectiveMainAgentsMdMode, seedMainAgentAgentsMd } from "./main-workspace-seed.js";
+import { seedMainAgentAgentsMd, seedMainSubagentRouting } from "./main-workspace-seed.js";
+import {
+    resolveMainContextTemplateParamCode,
+    resolveMainContextTemplateRedisKey,
+} from "./main-context-template.js";
 import { resolveAgentWorkspaceDir, seedManagedAgentWorkspace } from "./workspace-seed.js";
 import {
     archiveUnauthorizedActiveManagedWorkspaces,
@@ -319,6 +323,8 @@ export function createAgentWatchdog(params: {
     const prevToolSignatures = new Map<string, string>();
     /** Last successful JSON/auth-filtered baseline, before workspace-uploaded skills are merged. */
     let lastBaseManaged: LoadedManagedAgent[] = [];
+    let mainContextTemplateSignatureReady = false;
+    let lastMainContextTemplateSignature = "";
     let skillRefreshInFlight = false;
     let lastSkillSyncFailureSignature = "";
     let skillScanTimer: ReturnType<typeof setInterval> | undefined;
@@ -802,17 +808,50 @@ export function createAgentWatchdog(params: {
             params.registry.replaceAll(effectiveManaged);
 
             const runMainAgentsSeed =
-                params.pluginConfig.mainWorkspaceAgentsAutoSeed !== false &&
-                resolveEffectiveMainAgentsMdMode(params.pluginConfig) !== "off";
+                params.pluginConfig.mainWorkspaceAgentsAutoSeed !== false;
+
+            const readMainContextTemplateSyncState = async (): Promise<{
+                payloadPresent: boolean;
+                changed: boolean;
+                label: string;
+            }> => {
+                const redisKey = resolveMainContextTemplateRedisKey(
+                    params.pluginConfig.mainContextTemplateRedisKey,
+                );
+                const paramCode = resolveMainContextTemplateParamCode(
+                    params.pluginConfig.mainContextTemplateParamCode,
+                );
+                const label = `${redisKey}:${paramCode}`;
+                if (!params.redisJsonStore.getHashJson) {
+                    return { payloadPresent: false, changed: false, label };
+                }
+                try {
+                    const payload = await params.redisJsonStore.getHashJson({
+                        key: redisKey,
+                        field: paramCode,
+                    });
+                    const signature = payload ? `${payload.key}:${payload.hash}` : "(missing)";
+                    const changed =
+                        !mainContextTemplateSignatureReady ||
+                        signature !== lastMainContextTemplateSignature;
+                    mainContextTemplateSignatureReady = true;
+                    lastMainContextTemplateSignature = signature;
+                    return { payloadPresent: payload !== null, changed, label };
+                } catch (err) {
+                    params.api.logger.warn(
+                        `baiying-enhance: main context template signature read failed key=${label}: ${
+                            err instanceof Error ? err.message : String(err)
+                        }`,
+                    );
+                    return { payloadPresent: false, changed: false, label };
+                }
+            };
 
             const trySeedMainAgentsMd = async () => {
                 if (!runMainAgentsSeed) {
                     const reasons: string[] = [];
                     if (params.pluginConfig.mainWorkspaceAgentsAutoSeed === false) {
                         reasons.push("mainWorkspaceAgentsAutoSeed=false");
-                    }
-                    if (resolveEffectiveMainAgentsMdMode(params.pluginConfig) === "off") {
-                        reasons.push("mainAgentsMdMode=off");
                     }
                     if (reasons.length > 0) {
                         params.api.logger.info(
@@ -822,9 +861,31 @@ export function createAgentWatchdog(params: {
                     return;
                 }
                 try {
+                    const contextState = await readMainContextTemplateSyncState();
+                    if (contextState.payloadPresent && !contextState.changed) {
+                        params.api.logger.info(
+                            `baiying-enhance: main context template unchanged (${contextState.label}); seeding SUBAGENT_ROUTING.md only`,
+                        );
+                        await seedMainSubagentRouting({
+                            api: params.api,
+                            pluginConfig: params.pluginConfig,
+                            managedAgents: effectiveManaged,
+                            log: {
+                                warn: (m) => params.api.logger.warn(m),
+                                info: (m) => params.api.logger.info(m),
+                            },
+                        });
+                        return;
+                    }
+                    if (contextState.payloadPresent && contextState.changed) {
+                        params.api.logger.info(
+                            `baiying-enhance: main context template changed (${contextState.label}); refreshing main context files`,
+                        );
+                    }
                     await seedMainAgentAgentsMd({
                         api: params.api,
                         pluginConfig: params.pluginConfig,
+                        redisJsonStore: params.redisJsonStore,
                         managedAgents: effectiveManaged,
                         log: {
                             warn: (m) => params.api.logger.warn(m),

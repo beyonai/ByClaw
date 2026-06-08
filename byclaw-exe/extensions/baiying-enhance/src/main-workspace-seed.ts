@@ -11,10 +11,26 @@ import type { AdaptedManagedAgent } from "./agent-adapter.js";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
 import { SUBAGENT_ROUTING_FILENAME, buildSubagentRoutingMarkdown, SUBAGENT_ROUTING_MARKER } from "./subagent-routing-seed.js";
 import { resolveAgentWorkspaceDir } from "./workspace-seed.js";
+import type { BaiyingRedisJsonStore } from "./redis-json-store.js";
+import {
+  loadMainWorkspaceContextTemplate,
+  resolveMainContextTemplateParamCode,
+  type MainWorkspaceContextFileName,
+  type MainWorkspaceContextTemplate,
+  type MainWorkspaceContextWritePolicy,
+} from "./main-context-template.js";
 
 export const MAIN_AGENTS_MARKER = "<!-- baiying-enhance: main agents template -->";
+export const MAIN_CONTEXT_MARKER = "<!-- baiying-enhance: main context template -->";
 
 const AGENTS_FILENAME = "AGENTS.md";
+const BOOTSTRAP_FILENAME = "BOOTSTRAP.md";
+const MAIN_CONTEXT_FILENAMES = ["SOUL.md", "IDENTITY.md", "USER.md", "TOOLS.md"] as const;
+const MAIN_CONTEXT_APPEND_FILENAMES = new Set<MainWorkspaceContextFileName>([
+  "SOUL.md",
+  "IDENTITY.md",
+  "USER.md",
+]);
 
 async function writeSubagentRoutingWithPolicy(params: {
   workspaceDir: string;
@@ -85,12 +101,206 @@ function resolvePluginPath(raw: string): string {
   return path.join(stateDir, raw);
 }
 
-function ensureMainAgentsMarkerPrefix(body: string): string {
+function ensureMarkerPrefix(marker: string, body: string): string {
   const t = body.replace(/^\uFEFF/, "");
-  if (t.startsWith(MAIN_AGENTS_MARKER)) {
+  if (t.startsWith(marker)) {
     return t.endsWith("\n") ? t : `${t}\n`;
   }
-  return `${MAIN_AGENTS_MARKER}\n\n${t}`;
+  return `${marker}\n\n${t}`;
+}
+
+function ensureMainAgentsMarkerPrefix(body: string): string {
+  return ensureMarkerPrefix(MAIN_AGENTS_MARKER, body);
+}
+
+function hasMarker(content: string, marker: string): boolean {
+  return content.replace(/^\uFEFF/, "").startsWith(marker);
+}
+
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await fs.access(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readExistingFile(filePath: string): Promise<{
+  filePresent: boolean;
+  size: number;
+  content: string;
+}> {
+  try {
+    const stat = await fs.stat(filePath);
+    return {
+      filePresent: true,
+      size: stat.size,
+      content: await fs.readFile(filePath, "utf8"),
+    };
+  } catch {
+    return { filePresent: false, size: 0, content: "" };
+  }
+}
+
+async function writeMainContextFileWithPolicy(params: {
+  workspaceDir: string;
+  filename: string;
+  content: string;
+  mode: MainWorkspaceContextWritePolicy;
+  log: { warn: (m: string) => void; info?: (m: string) => void };
+}): Promise<void> {
+  if (params.mode === "off") {
+    return;
+  }
+  const dest = path.join(params.workspaceDir, params.filename);
+  const existing = await readExistingFile(dest);
+  const writeContent = async (reason: string) => {
+    await fs.writeFile(dest, params.content, "utf8");
+    params.log.info?.(`baiying-enhance: wrote main ${params.filename} (${reason}): ${dest}`);
+  };
+
+  if (params.mode === "if_missing") {
+    if (existing.filePresent && existing.size > 0) {
+      params.log.info?.(`baiying-enhance: main ${params.filename} skip (if_missing, file exists): ${dest}`);
+      return;
+    }
+    await writeContent("if_missing");
+    return;
+  }
+
+  if (params.mode === "if_managed_marker") {
+    if (!existing.filePresent || existing.size === 0 || existing.content.length === 0) {
+      await writeContent("if_managed_marker, new");
+      return;
+    }
+    if (hasMarker(existing.content, MAIN_CONTEXT_MARKER)) {
+      await writeContent("if_managed_marker");
+      return;
+    }
+    params.log.warn(
+      `baiying-enhance: main ${params.filename} not updated — file exists without main context marker: ${dest}`,
+    );
+    return;
+  }
+
+  await writeContent("always");
+}
+
+function mainContextBlockMarkers(filename: string): { start: string; end: string } {
+  return {
+    start: `<!-- baiying-enhance: main context ${filename}:start -->`,
+    end: `<!-- baiying-enhance: main context ${filename}:end -->`,
+  };
+}
+
+function upsertMainContextBlock(params: {
+  existing: string;
+  filename: string;
+  content: string;
+}): string {
+  const { start, end } = mainContextBlockMarkers(params.filename);
+  const block = `${start}\n\n${params.content.trim()}\n\n${end}`;
+  const startIndex = params.existing.indexOf(start);
+  if (startIndex >= 0) {
+    const endIndex = params.existing.indexOf(end, startIndex + start.length);
+    if (endIndex >= 0) {
+      const before = params.existing.slice(0, startIndex).replace(/\s+$/, "");
+      const after = params.existing.slice(endIndex + end.length).replace(/^\s+/, "");
+      return `${before ? `${before}\n\n` : ""}${block}${after ? `\n\n${after}` : ""}\n`;
+    }
+  }
+  const base = params.existing.replace(/\s+$/, "");
+  return `${base ? `${base}\n\n` : ""}${block}\n`;
+}
+
+async function appendMainContextFileBlock(params: {
+  workspaceDir: string;
+  filename: string;
+  content: string;
+  mode: MainWorkspaceContextWritePolicy;
+  log: { warn: (m: string) => void; info?: (m: string) => void };
+}): Promise<void> {
+  if (params.mode === "off") {
+    return;
+  }
+  const bootstrapPath = path.join(params.workspaceDir, BOOTSTRAP_FILENAME);
+  if (await pathExists(bootstrapPath)) {
+    params.log.info?.(
+      `baiying-enhance: main ${params.filename} append skipped (bootstrap still present): ${bootstrapPath}`,
+    );
+    return;
+  }
+  const dest = path.join(params.workspaceDir, params.filename);
+  const existing = await readExistingFile(dest);
+  if (!existing.filePresent || existing.size === 0 || existing.content.length === 0) {
+    params.log.info?.(
+      `baiying-enhance: main ${params.filename} append skipped (waiting for OpenClaw bootstrap output): ${dest}`,
+    );
+    return;
+  }
+  // 追加策略只维护插件自己的托管块，避免覆盖 OpenClaw 原生生成内容或用户手写内容。
+  const next = upsertMainContextBlock({
+    existing: existing.content,
+    filename: params.filename,
+    content: params.content,
+  });
+  if (next === existing.content) {
+    params.log.info?.(`baiying-enhance: main ${params.filename} append block unchanged: ${dest}`);
+    return;
+  }
+  await fs.writeFile(dest, next, "utf8");
+  params.log.info?.(`baiying-enhance: updated main ${params.filename} append block: ${dest}`);
+}
+
+function resolveMainContextMergeStrategy(params: {
+  filename: MainWorkspaceContextFileName;
+  configured?: "append" | "replace";
+}): "append" | "replace" {
+  if (!MAIN_CONTEXT_APPEND_FILENAMES.has(params.filename)) {
+    return "replace";
+  }
+  return params.configured ?? "append";
+}
+
+async function writeMainContextFilesWithPolicy(params: {
+  workspaceDir: string;
+  template: MainWorkspaceContextTemplate | null;
+  mode: MainWorkspaceContextWritePolicy;
+  log: { warn: (m: string) => void; info?: (m: string) => void };
+}): Promise<void> {
+  if (!params.template || params.mode === "off") {
+    return;
+  }
+  for (const filename of MAIN_CONTEXT_FILENAMES) {
+    const fileConfig = params.template.files[filename];
+    const prompt = fileConfig?.priorityPrompt?.trim();
+    if (!prompt) {
+      continue;
+    }
+    // 只处理主 workspace 的上下文文件；AGENTS.md 仍走原有 main AGENTS 逻辑，便于保留旧模板回退。
+    const mergeStrategy = resolveMainContextMergeStrategy({
+      filename,
+      configured: fileConfig?.mergeStrategy,
+    });
+    if (mergeStrategy === "append") {
+      await appendMainContextFileBlock({
+        workspaceDir: params.workspaceDir,
+        filename,
+        content: prompt,
+        mode: params.mode,
+        log: params.log,
+      });
+      continue;
+    }
+    await writeMainContextFileWithPolicy({
+      workspaceDir: params.workspaceDir,
+      filename,
+      content: ensureMarkerPrefix(MAIN_CONTEXT_MARKER, prompt),
+      mode: params.mode,
+      log: params.log,
+    });
+  }
 }
 
 /** When false, do not use the built-in template bundled in `dist/index.js`. */
@@ -109,6 +319,19 @@ export function resolveEffectiveMainAgentsMdMode(cfg: BaiyingEnhancePluginConfig
     return "off";
   }
   return "always";
+}
+
+function resolveMainContextFallbackWritePolicy(cfg: BaiyingEnhancePluginConfig): MainWorkspaceContextWritePolicy {
+  const explicit = cfg.mainAgentsMdMode;
+  if (explicit === "off" || explicit === "if_missing" || explicit === "if_managed_marker" || explicit === "always") {
+    return explicit;
+  }
+  // Redis context 本身就是模板来源；如果旧 AGENTS.md 模板源不存在，不应把主 context 也推导成 off。
+  return "always";
+}
+
+function hasMainContextFilePrompts(template: MainWorkspaceContextTemplate | null): boolean {
+  return Boolean(template && Object.keys(template.files).length > 0);
 }
 
 async function readTemplateFile(templatePath: string): Promise<string | null> {
@@ -164,23 +387,62 @@ export async function seedMainAgentAgentsMd(params: {
   log: { warn: (m: string) => void; info?: (m: string) => void };
   /** Current managed baiying agents; used to generate `SUBAGENT_ROUTING.md`. */
   managedAgents?: AdaptedManagedAgent[];
+  /** Optional Redis-backed system config store for main workspace context templates. */
+  redisJsonStore?: BaiyingRedisJsonStore;
 }): Promise<void> {
   const mainId = params.pluginConfig.mainParentAgentId?.trim() || "main";
   const workspaceDir = resolveAgentWorkspaceDir(params.api, mainId);
   await fs.mkdir(workspaceDir, { recursive: true });
+  const managedAgents = params.managedAgents ?? [];
 
   const mode = resolveEffectiveMainAgentsMdMode(params.pluginConfig);
-  if (mode === "off") {
-    params.log.info?.("baiying-enhance: main AGENTS.md seed skipped (mainAgentsMdMode=off)");
+  const contextTemplate = await loadMainWorkspaceContextTemplate({
+    redisJsonStore: params.redisJsonStore,
+    redisKey: params.pluginConfig.mainContextTemplateRedisKey,
+    paramCode: params.pluginConfig.mainContextTemplateParamCode,
+    log: params.log,
+  });
+  const contextMode = contextTemplate?.writePolicy ?? resolveMainContextFallbackWritePolicy(params.pluginConfig);
+  const contextAgentsPrompt =
+    contextMode !== "off" ? contextTemplate?.files[AGENTS_FILENAME]?.priorityPrompt?.trim() : "";
+  const hasContextPrompts = contextMode !== "off" && hasMainContextFilePrompts(contextTemplate);
+  const writeContextFiles = () =>
+    writeMainContextFilesWithPolicy({
+      workspaceDir,
+      template: contextTemplate,
+      mode: contextMode,
+      log: params.log,
+    });
+  const writeSubagentRouting = (routingMode: "if_missing" | "if_managed_marker" | "always") =>
+    writeSubagentRoutingWithPolicy({
+      workspaceDir,
+      mode: routingMode,
+      managedAgents,
+      log: params.log,
+    });
+
+  if (mode === "off" && !contextAgentsPrompt) {
+    if (hasContextPrompts) {
+      params.log.info?.(
+        `baiying-enhance: main context seed only: mode=${contextMode} agentId=${mainId} template=redis:${resolveMainContextTemplateParamCode(params.pluginConfig.mainContextTemplateParamCode)}`,
+      );
+      await writeContextFiles();
+      return;
+    }
+    params.log.info?.("baiying-enhance: main workspace seed skipped (mainAgentsMdMode=off and no Redis context template)");
     return;
   }
 
-  const loaded = await loadMainAgentsTemplate(params.pluginConfig);
-  const templateLabel = loaded?.kind === "file" ? loaded.path : "(bundled in dist/index.js)";
+  const loaded = contextAgentsPrompt ? null : await loadMainAgentsTemplate(params.pluginConfig);
+  const templateLabel = contextAgentsPrompt
+    ? `redis:${resolveMainContextTemplateParamCode(params.pluginConfig.mainContextTemplateParamCode)}`
+    : loaded?.kind === "file"
+      ? loaded.path
+      : "(bundled in dist/index.js)";
   params.log.info?.(
-    `baiying-enhance: main AGENTS.md seed: mode=${mode} agentId=${mainId} template=${templateLabel}`,
+    `baiying-enhance: main AGENTS.md seed: mode=${contextAgentsPrompt ? contextMode : mode} agentId=${mainId} template=${templateLabel}`,
   );
-  if (!loaded) {
+  if (!contextAgentsPrompt && !loaded) {
     const p = params.pluginConfig.mainAgentsMdPath?.trim();
     if (p) {
       params.log.warn(`baiying-enhance: main AGENTS.md template not readable: ${resolvePluginPath(p)}`);
@@ -189,12 +451,11 @@ export async function seedMainAgentAgentsMd(params: {
         "baiying-enhance: main AGENTS.md built-in template is empty (rebuild extension with templates/main-agents.md present).",
       );
     }
+    await writeContextFiles();
     return;
   }
 
-  const managedAgents = params.managedAgents ?? [];
-
-  const rawTemplate = loaded.body;
+  const rawTemplate = contextAgentsPrompt || loaded!.body;
   const content = ensureMainAgentsMarkerPrefix(rawTemplate);
   params.log.info?.(`baiying-enhance: main workspace dir resolved: ${workspaceDir}`);
   const dest = path.join(workspaceDir, AGENTS_FILENAME);
@@ -212,51 +473,37 @@ export async function seedMainAgentAgentsMd(params: {
   const filePresent = destStat !== null;
   const hasMarker = existing.replace(/^\uFEFF/, "").startsWith(MAIN_AGENTS_MARKER);
 
-  if (mode === "if_missing") {
+  const agentsMode = contextAgentsPrompt ? contextMode : mode;
+
+  if (agentsMode === "if_missing") {
     if (filePresent && destStat && destStat.size > 0) {
       params.log.info?.(`baiying-enhance: main ${AGENTS_FILENAME} skip (if_missing, file exists): ${dest}`);
+      await writeContextFiles();
       // Still seed `SUBAGENT_ROUTING.md` under the same policy (e.g. AGENTS.md pre-exists from OpenClaw
       // stock while routing is missing — register-time init must not skip routing only).
-      await writeSubagentRoutingWithPolicy({
-        workspaceDir,
-        mode,
-        managedAgents,
-        log: params.log,
-      });
+      await writeSubagentRouting(agentsMode);
       return;
     }
     await fs.writeFile(dest, content, "utf8");
     params.log.info?.(`baiying-enhance: wrote main ${AGENTS_FILENAME} (if_missing): ${dest}`);
-    await writeSubagentRoutingWithPolicy({
-      workspaceDir,
-      mode,
-      managedAgents,
-      log: params.log,
-    });
+    await writeContextFiles();
+    await writeSubagentRouting(agentsMode);
     return;
   }
 
-  if (mode === "if_managed_marker") {
+  if (agentsMode === "if_managed_marker") {
     if (!filePresent || destStat?.size === 0 || existing.length === 0) {
       await fs.writeFile(dest, content, "utf8");
       params.log.info?.(`baiying-enhance: wrote main ${AGENTS_FILENAME} (if_managed_marker, new): ${dest}`);
-      await writeSubagentRoutingWithPolicy({
-        workspaceDir,
-        mode,
-        managedAgents,
-        log: params.log,
-      });
+      await writeContextFiles();
+      await writeSubagentRouting(agentsMode);
       return;
     }
     if (hasMarker) {
       await fs.writeFile(dest, content, "utf8");
       params.log.info?.(`baiying-enhance: updated main ${AGENTS_FILENAME} (if_managed_marker): ${dest}`);
-      await writeSubagentRoutingWithPolicy({
-        workspaceDir,
-        mode,
-        managedAgents,
-        log: params.log,
-      });
+      await writeContextFiles();
+      await writeSubagentRouting(agentsMode);
       return;
     }
     const takeover = params.pluginConfig.mainAgentsMdForeignTakeover !== false;
@@ -269,12 +516,8 @@ export async function seedMainAgentAgentsMd(params: {
         params.log.info?.(
           `baiying-enhance: replaced existing main ${AGENTS_FILENAME} once (foreign takeover; OpenClaw default had no plugin marker): ${dest}`,
         );
-        await writeSubagentRoutingWithPolicy({
-          workspaceDir,
-          mode,
-          managedAgents,
-          log: params.log,
-        });
+        await writeContextFiles();
+        await writeSubagentRouting(agentsMode);
         return;
       }
     }
@@ -284,23 +527,33 @@ export async function seedMainAgentAgentsMd(params: {
           ? "Foreign takeover already recorded for this workspace; delete AGENTS.md, set mainAgentsMdMode to \"always\", or remove this path from baiying-enhance/main-agents-foreign-takeover.json under OPENCLAW_STATE_DIR."
           : "Enable mainAgentsMdForeignTakeover (default true) for one-time replace of OpenClaw stock files, or set mainAgentsMdMode to \"always\"."),
     );
-    await writeSubagentRoutingWithPolicy({
-      workspaceDir,
-      mode,
-      managedAgents,
-      log: params.log,
-    });
+    await writeContextFiles();
+    await writeSubagentRouting(agentsMode);
     return;
   }
 
-  if (mode === "always") {
+  if (agentsMode === "always") {
     await fs.writeFile(dest, content, "utf8");
     params.log.info?.(`baiying-enhance: wrote main ${AGENTS_FILENAME} (always): ${dest}`);
-    await writeSubagentRoutingWithPolicy({
-      workspaceDir,
-      mode,
-      managedAgents,
-      log: params.log,
-    });
+    await writeContextFiles();
+    await writeSubagentRouting(agentsMode);
   }
+}
+
+export async function seedMainSubagentRouting(params: {
+  api: OpenClawPluginApi;
+  pluginConfig: BaiyingEnhancePluginConfig;
+  log: { warn: (m: string) => void; info?: (m: string) => void };
+  managedAgents?: AdaptedManagedAgent[];
+}): Promise<void> {
+  const mainId = params.pluginConfig.mainParentAgentId?.trim() || "main";
+  const workspaceDir = resolveAgentWorkspaceDir(params.api, mainId);
+  await fs.mkdir(workspaceDir, { recursive: true });
+  const mode = resolveEffectiveMainAgentsMdMode(params.pluginConfig);
+  await writeSubagentRoutingWithPolicy({
+    workspaceDir,
+    mode: mode === "off" ? "if_managed_marker" : mode,
+    managedAgents: params.managedAgents ?? [],
+    log: params.log,
+  });
 }
