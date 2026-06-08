@@ -415,6 +415,8 @@ export default {
   'modelMgr.modal.modelTypeRERANK': 'RERANK',
   'modelMgr.modal.modelTypeEMBEDDING': 'EMBEDDING',
   'modelMgr.modal.provider': 'Provider',
+  'modelMgr.modal.modelProtocol': 'Model protocol',
+  'modelMgr.modal.modelProtocolPlaceholder': 'Select model protocol',
   'modelMgr.modal.input': 'Input',
   'modelMgr.modal.output': 'Output',
   'modelMgr.modal.run': 'Run',

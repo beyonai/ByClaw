@@ -34,12 +34,30 @@ export function buildDebugDefaults(intl: any) {
   };
 }
 
+export const MODEL_PROTOCOL_OPTIONS = [
+  { label: 'OpenAI', value: 'OpenAI' },
+  { label: 'Anthropic', value: 'Anthropic' },
+] as const;
+
+export function getDefaultLlmDebugSuffix(modelProtocol?: any) {
+  const protocol = `${modelProtocol ?? 'OpenAI'}`.trim().toLowerCase();
+  if (protocol === 'anthropic') return '/v1/messages';
+  return '/chat/completions';
+}
+
+export function getApiEndpointPlaceholder(modelProtocol?: any) {
+  const protocol = `${modelProtocol ?? 'OpenAI'}`.trim().toLowerCase();
+  if (protocol === 'anthropic') return 'https://api.example.com/anthropic';
+  return 'https://api.example.com/v1';
+}
+
 export function getDefaultFormValues() {
   return {
     status: 'ENABLED',
     abilities: [],
     systems: [],
     modelType: 'LLM',
+    modelProtocol: 'OpenAI',
     apiEndpoint: 'https://api.example.com/v1',
     headers: [{ key: '', value: '' }],
     connectTimeoutSec: 32,
@@ -177,14 +195,21 @@ export function buildAutoDebugRequestText(options: {
   const prevObj = prevText ? safeParseJsonObject(prevText) : null;
   const modelType = normalizeModelType(formValues?.modelType);
   const isTypeSwitch = Array.isArray(changedKeys) && changedKeys.includes('modelType');
-  console.log(formValues);
   if (modelType === 'LLM') {
     const apiEndpoint = `${formValues?.apiEndpoint ?? ''}`.trim();
     const prevUrl = typeof prevObj?.url === 'string' ? prevObj.url.trim() : '';
-    let suffix = '/chat/completions';
+    const isProtocolSwitch = Array.isArray(changedKeys) && changedKeys.includes('modelProtocol');
+    let suffix = getDefaultLlmDebugSuffix(formValues?.modelProtocol);
     const endpointNotShortened = !previousApiEndpoint || apiEndpoint.length >= previousApiEndpoint.length;
-    if (!isTypeSwitch && endpointNotShortened && prevUrl && apiEndpoint && prevUrl.startsWith(apiEndpoint)) {
-      suffix = prevUrl.slice(apiEndpoint.length) || '';
+    if (
+      !isTypeSwitch &&
+      !isProtocolSwitch &&
+      endpointNotShortened &&
+      prevUrl &&
+      apiEndpoint &&
+      prevUrl.startsWith(apiEndpoint)
+    ) {
+      suffix = prevUrl.slice(apiEndpoint.length) || suffix;
     }
     const url = joinUrl(apiEndpoint, suffix);
 
