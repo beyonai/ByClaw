@@ -223,7 +223,7 @@ async def test_build_status(client: httpx.AsyncClient) -> None:
             headers=_hdrs(),
         )
     except httpx.RemoteProtocolError:
-        pytest.skip("Proxy interference -- run with NO_PROXY=*")
+        pytest.skip("Proxy interference — set NO_PROXY=127.0.0.1,localhost")
     body = resp.json()
     assert body["resultCode"] == "0", f"GB3 build status: {body}"
     assert "status" in body.get("resultObject", {}), (
@@ -262,7 +262,7 @@ async def test_listdir_root(client: httpx.AsyncClient) -> None:
             headers=_hdrs(),
         )
     except httpx.RemoteProtocolError:
-        pytest.skip("Proxy interference -- run with NO_PROXY=*")
+        pytest.skip("Proxy interference — set NO_PROXY=127.0.0.1,localhost")
     body = resp.json()
     assert body["resultCode"] == "0", f"GR1 listDir: {body}"
     data = body.get("resultObject", {}).get("data", [])
@@ -307,8 +307,10 @@ async def test_readfile(client: httpx.AsyncClient) -> None:
         if status == "success":
             break
         if status == "failed":
-            # Build requires real embedding API -- skip if not available
-            pytest.skip("Build requires real embedding API (not available in test env)")
+            _step = sbody.get("resultObject", {}).get("currentStep", "?")
+            pytest.skip(
+                f"Build failed at step={_step} — embedding API may be unreachable"
+            )
         await asyncio.sleep(1)
     else:
         pytest.fail("GR6 build did not complete within 90 s")

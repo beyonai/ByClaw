@@ -64,9 +64,9 @@ async def test_search_setup(client: httpx.AsyncClient) -> None:
     try:
         success = await _setup_search_files(client)
     except httpx.RemoteProtocolError:
-        pytest.skip("Proxy interference -- run with NO_PROXY=*")
+        pytest.skip("Proxy interference — set NO_PROXY=127.0.0.1,localhost")
     if not success:
-        pytest.skip("Build requires embedding API")
+        pytest.skip("Import failed — files may already exist from previous run")
 
 
 # ---------------------------------------------------------------------------

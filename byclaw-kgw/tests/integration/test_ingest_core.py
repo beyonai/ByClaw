@@ -24,7 +24,6 @@ _SESSION = uuid.uuid4().hex[:8]
 
 # Module-level shared state across dependent tests
 _failed_event_id: int | None = None
-_BACKEND_DOWN = False
 
 # ---------------------------------------------------------------------------
 # Inter-test delay to let the backend finish async processing (build index,
@@ -38,7 +37,7 @@ def _inter_test_delay() -> None:
     """Pause 1.2 s between tests so the byclaw-qa backend can drain."""
     import time
 
-    time.sleep(1.2)
+    time.sleep(2.0)
 
 
 # ---------------------------------------------------------------------------
@@ -75,17 +74,12 @@ def _event(**overrides: Any) -> dict[str, Any]:
 
 async def test_00_cleanup_stale_dirs(client) -> None:
     """Delete stale session directory from previous test runs."""
-    import httpx as _httpx
-
-    try:
-        resp = await client.post(
-            "/kgw/api/v1/directories/delete",
-            json={"knCode": _KN_DIRECT, "directoryPath": f"/ingest-core/{_SESSION}"},
-            headers=_hdrs(),
-        )
-        _ = resp.json()  # ignore failures
-    except _httpx.RemoteProtocolError:
-        pass  # backend may be temporarily unavailable
+    resp = await client.post(
+        "/kgw/api/v1/directories/delete",
+        json={"knCode": _KN_DIRECT, "directoryPath": f"/ingest-core/{_SESSION}"},
+        headers=_hdrs(),
+    )
+    _ = resp.json()  # ignore failures
 
 
 # ---------------------------------------------------------------------------
@@ -144,8 +138,6 @@ async def test_upsert_with_different_item(client) -> None:
 
 async def test_delete_event(client) -> None:
     """Delete the file imported by test_upsert_single_event via the ingest pipeline."""
-    global _BACKEND_DOWN  # noqa: PLW0603
-
     resp = await client.post(
         "/kgw/ingest/v1/events",
         json=_event(
@@ -159,14 +151,8 @@ async def test_delete_event(client) -> None:
         headers=_hdrs(),
     )
     body = resp.json()
-    if body["resultCode"] == "0":
-        assert body["resultObject"]["status"] == "done"
-    else:
-        # Backend may be overloaded or temporarily unavailable
-        _BACKEND_DOWN = True
-        assert body["resultObject"].get("eventId") is not None, (
-            f"missing eventId in DLQ-style response: {body}"
-        )
+    assert body["resultCode"] == "0", f"delete event failed: {body}"
+    assert body["resultObject"]["status"] == "done"
 
 
 async def test_delete_event_failed_dlq(client) -> None:
@@ -200,9 +186,6 @@ async def test_delete_replay(client) -> None:
     """
     if _failed_event_id is None:
         pytest.skip("no failed event to replay")
-    if _BACKEND_DOWN:
-        pytest.skip("backend is down")
-
     resp = await client.post(
         f"/kgw/ingest/v1/events/{_failed_event_id}/replay",
         headers=_hdrs(),
@@ -219,8 +202,6 @@ async def test_delete_replay(client) -> None:
 
 async def test_upsert_replay_rejected(client) -> None:
     """Replaying an upsert event should be rejected regardless of event status."""
-    global _BACKEND_DOWN  # noqa: PLW0603
-
     resp = await client.post(
         "/kgw/ingest/v1/events",
         json=_event(
@@ -231,10 +212,6 @@ async def test_upsert_replay_rejected(client) -> None:
         ),
         headers=_hdrs(),
     )
-    if resp.status_code != 200:
-        _BACKEND_DOWN = True
-        pytest.skip("backend is down, cannot create upsert event for replay test")
-
     body = resp.json()
     assert body["resultCode"] == "0", f"setup upsert failed: {body}"
     event_id = body["resultObject"]["eventId"]
@@ -262,12 +239,7 @@ async def test_upsert_replay_rejected(client) -> None:
 
 async def test_batch_two_events_success(client) -> None:
     """Batch with two valid events should succeed."""
-    global _BACKEND_DOWN  # noqa: PLW0603
-
-    if _BACKEND_DOWN:
-        pytest.skip("backend is down")
-
-    import httpx as _httpx
+    import httpx as _hx
 
     try:
         resp = await client.post(
@@ -292,16 +264,8 @@ async def test_batch_two_events_success(client) -> None:
             },
             headers=_hdrs(),
         )
-    except _httpx.RemoteProtocolError:
-        _BACKEND_DOWN = True
-        pytest.skip("backend disconnected during batch event processing")
-
-    if resp.status_code != 200:  # type: ignore[possibly-undefined]
-        _BACKEND_DOWN = True
-        pytest.skip(
-            f"backend is down, batch request failed with HTTP {resp.status_code}"
-        )
-
+    except _hx.RemoteProtocolError:
+        pytest.skip("Backend connection closed — may be overloaded, retry")
     body = resp.json()
     assert "resultObject" in body, f"missing resultObject in batch response: {body}"
     assert body["resultObject"]["total"] == 2
@@ -423,21 +387,10 @@ async def test_query_nonexistent_event(client) -> None:
 
 
 async def test_cleanup_ingest_files(client) -> None:
-    """Delete the session directory and all files created during tests.
-
-    Best-effort: the backend may be unavailable or the directory already gone.
-    """
-    if _BACKEND_DOWN:
-        pytest.skip("backend is down, skipping directory cleanup")
-
-    import httpx as _httpx
-
-    try:
-        resp = await client.post(
-            "/kgw/api/v1/directories/delete",
-            json={"knCode": _KN_DIRECT, "directoryPath": f"/ingest-core/{_SESSION}"},
-            headers=_hdrs(),
-        )
-        _ = resp.json()  # non-fatal
-    except _httpx.RemoteProtocolError:
-        pass
+    """Delete the session directory and all files created during tests."""
+    resp = await client.post(
+        "/kgw/api/v1/directories/delete",
+        json={"knCode": _KN_DIRECT, "directoryPath": f"/ingest-core/{_SESSION}"},
+        headers=_hdrs(),
+    )
+    _ = resp.json()  # non-fatal (may already be deleted)
