@@ -38,34 +38,137 @@ _QA_SVC_NAME = os.environ.get("QA_DOMAINNAME", "byclaw-qa-manager")
 _QA_PORT = int(os.environ.get("BYCLAW_QA_PORT", "8000"))
 _QA_URL = f"http://127.0.0.1:{_QA_PORT}"
 
-_ALL_SERVICES: list[dict[str, str]] = [
-    {"name": "directoryCreate", "path": "/api/v1/directories/create"},
-    {"name": "directoryUpdate", "path": "/api/v1/directories/update"},
-    {"name": "directoryDelete", "path": "/api/v1/directories/delete"},
-    {"name": "fileImport", "path": "/api/v1/knowledgeItems/import"},
-    {"name": "fileDelete", "path": "/api/v1/knowledgeItems/delete"},
-    {"name": "buildTrigger", "path": "/api/v1/fileToMarkdownIndex"},
-    {"name": "buildStatus", "path": "/api/v1/fileBuildStatus"},
-    {"name": "knowledgeSearch", "path": "/api/v1/knowledgeItems/search"},
-    {"name": "metadataSearch", "path": "/api/v1/knowledgeItems/metadataSearch"},
-    {"name": "searchFile", "path": "/api/v1/knowledgeItems/searchFile"},
-    {"name": "listDir", "path": "/api/v1/listDir"},
-    {"name": "glob", "path": "/api/v1/glob"},
-    {"name": "readFile", "path": "/api/v1/readFile"},
-    {"name": "downloadFile", "path": "/api/v1/downloadFile"},
-    {
-        "name": "metadataPropertiesBatchCreate",
-        "path": "/api/v1/metadataProperties/batchCreate",
-    },
-    {"name": "metadataPropertiesDelete", "path": "/api/v1/metadataProperties/delete"},
-    {
-        "name": "knowledgeItemsMetadataUpdate",
-        "path": "/api/v1/knowledgeItems/metadata/update",
-    },
-    {
-        "name": "knowledgeItemsMetadataGet",
-        "path": "/api/v1/knowledgeItems/metadata/get",
-    },
+
+def _make_openapi(op_id: str, path: str, title: str, desc: str) -> dict:
+    """Build a single OpenAPI-schema resourceService entry (KG_DOC format)."""
+    return {
+        "openapiSchema": {
+            "openapi": "3.0.1",
+            "info": {"title": title, "description": desc, "version": "1.0.0"},
+            "servers": [{}],
+            "paths": {
+                path: {
+                    "post": {
+                        "operationId": op_id,
+                        "summary": title,
+                        "description": desc,
+                        "responses": {"200": {"description": "操作成功"}},
+                    }
+                }
+            },
+        }
+    }
+
+
+_ALL_SERVICES: list[dict] = [
+    _make_openapi(
+        "createDir",
+        "/api/v1/directories/create",
+        "创建目录",
+        "在指定的知识库下面创建目录",
+    ),
+    _make_openapi(
+        "editDir", "/api/v1/directories/update", "修改目录", "修改指定知识库的目录"
+    ),
+    _make_openapi(
+        "deleteDir", "/api/v1/directories/delete", "删除目录", "删除指定知识库的目录"
+    ),
+    _make_openapi(
+        "uploadFile",
+        "/api/v1/knowledgeItems/import",
+        "上传文档",
+        "将文档上传到指定的知识库下面",
+    ),
+    _make_openapi(
+        "deleteFile",
+        "/api/v1/knowledgeItems/delete",
+        "删除文档",
+        "删除指定知识库下面的文档",
+    ),
+    _make_openapi(
+        "knowledgeBuild",
+        "/api/v1/fileToMarkdownIndex",
+        "知识构建",
+        "根据文件路径异步构建指定知识库下面的文件",
+    ),
+    _make_openapi(
+        "buildStatusQuery",
+        "/api/v1/fileBuildStatus",
+        "构建状态查询",
+        "查询文档的构建状态",
+    ),
+    _make_openapi(
+        "knowledgeSearch",
+        "/api/v1/knowledgeItems/search",
+        "知识检索",
+        "根据用户提问召回对应的知识chunk",
+    ),
+    _make_openapi(
+        "listDir",
+        "/api/v1/listDir",
+        "获取目录内容",
+        "获取指定知识库目录下的所有文件和文件夹",
+    ),
+    _make_openapi(
+        "glob",
+        "/api/v1/glob",
+        "按路径模式匹配",
+        "基于路径模式匹配查找指定知识库下面的文件或目录",
+    ),
+    _make_openapi(
+        "readFile",
+        "/api/v1/readFile",
+        "读取文件内容",
+        "根据文件路径读取指定知识库下的原始文件内容",
+    ),
+    _make_openapi(
+        "downloadFile",
+        "/api/v1/downloadFile",
+        "下载原始文件",
+        "根据文件路径下载指定知识库下的原始文件",
+    ),
+    _make_openapi(
+        "metadataPropertiesBatchCreate",
+        "/api/v1/metadataProperties/batchCreate",
+        "批量创建元数据属性",
+        "批量声明元数据属性",
+    ),
+    _make_openapi(
+        "metadataPropertiesDelete",
+        "/api/v1/metadataProperties/delete",
+        "删除元数据属性",
+        "删除元数据属性",
+    ),
+    _make_openapi(
+        "knowledgeItemsMetadataUpdate",
+        "/api/v1/knowledgeItems/metadata/update",
+        "更新文件元数据",
+        "更新文件元数据",
+    ),
+    _make_openapi(
+        "knowledgeItemsMetadataGet",
+        "/api/v1/knowledgeItems/metadata/get",
+        "获取文件元数据",
+        "获取文件元数据",
+    ),
+    _make_openapi(
+        "metadataSearch",
+        "/api/v1/knowledgeItems/metadataSearch",
+        "元数据检索",
+        "多知识库并行纯元数据检索",
+    ),
+    _make_openapi(
+        "searchFile",
+        "/api/v1/knowledgeItems/searchFile",
+        "文件级检索",
+        "多知识库并行文件级检索",
+    ),
+    _make_openapi(
+        "metadataFieldsList",
+        "/api/v1/knowledgeItems/metadataFields/list",
+        "列出元数据字段",
+        "列出已同步的元数据属性",
+    ),
 ]
 
 _DIRECT_MINIO_KEY = f"resource/doc/KG_DOC_{_KN_DIRECT}.json"
@@ -142,6 +245,9 @@ async def _app_resources(
     4. Yield (client, pool, app)
     5. Teardown: drop kgw tables, cleanup MinIO
     """
+    # ---- 1. Start byclaw-qa as independent subprocess ----
+    import subprocess
+
     import aioboto3
     from kgw.audit import AuditWriter
     from kgw.auth_provider import AuthProvider
@@ -151,9 +257,6 @@ async def _app_resources(
     from kgw.main import build_app
     from kgw.resilience.circuit_breaker import CircuitBreakerRegistry
     from kgw.settings import get_settings
-
-    # ---- 1. Start byclaw-qa as independent subprocess ----
-    import subprocess
 
     qa_port = _QA_PORT
     qa_dir = Path(__file__).resolve().parent.parent.parent.parent / "byclaw-qa"
@@ -207,7 +310,7 @@ async def _app_resources(
         "resourceCode": _resource_codes.get("direct", _RESOURCE_CODE_DIRECT),
         "domainURL": _QA_URL,
         "domainName": "",
-        "headers": {},
+        "headers": {"Beyond-Token": "${Beyond-Token}", "Sso-Token": "${Sso-Token}"},
         "resourceService": _ALL_SERVICES,
     }
     discov_config = {
@@ -215,7 +318,7 @@ async def _app_resources(
         "resourceCode": _resource_codes.get("disc", _RESOURCE_CODE_DISCOV),
         "domainURL": "",
         "domainName": _QA_SVC_NAME,
-        "headers": {},
+        "headers": {"Beyond-Token": "${Beyond-Token}", "Sso-Token": "${Sso-Token}"},
         "resourceService": _ALL_SERVICES,
     }
     bucket = minio_settings["bucket"]
@@ -246,6 +349,20 @@ async def _app_resources(
     redis_client = await _retry_on_loop_error(
         lambda: redis_async.from_url(redis_url, decode_responses=False)
     )
+
+    # Seed auth for test user so the gateway can resolve ${Beyond-Token} etc.
+    await redis_client.hset(
+        f"user:{_USER_ID}:login:auth",
+        mapping={
+            "userId": _USER_ID,
+            "userCode": _USER_ID,
+            "userName": "TestUser",
+            "sessionId": "1",
+            "Beyond-Token": "test-beyond-token",
+            "Sso-Token": "test-sso-token",
+        },
+    )
+
     http_client = build_http_client(
         timeout_seconds=30.0, max_connections=20, max_keepalive=5
     )
