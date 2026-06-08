@@ -295,6 +295,7 @@ async def test_glob(client: httpx.AsyncClient) -> None:
 async def test_readfile(client: httpx.AsyncClient) -> None:
     """GR6: readFile for a built markdown file — self-contained import+build+read."""
     import uuid
+
     path = f"/fileops/readfile-{uuid.uuid4().hex[:8]}.md"
 
     # 1. Import a fresh file (use unique path to avoid reimport rejection)
@@ -331,16 +332,16 @@ async def test_readfile(client: httpx.AsyncClient) -> None:
         )
         sbody = status_resp.json()
         status = sbody.get("resultObject", {}).get("status")
-        if status == "success":
+        if status in ("success", "complete"):
             break
-        if status == "failed":
+        if status in ("failed",):
             _step = sbody.get("resultObject", {}).get("currentStep", "?")
             pytest.skip(
                 f"Build failed at step={_step} — embedding API may be unreachable"
             )
         await asyncio.sleep(2)
     else:
-        pytest.skip("GR6 build did not complete within 120 s — check embedding API connectivity")
+        pytest.fail("GR6 build did not complete within 120 s")
 
     # 4. readFile
     resp = await client.post(
