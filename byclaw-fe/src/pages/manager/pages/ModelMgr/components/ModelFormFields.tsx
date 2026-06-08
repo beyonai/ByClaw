@@ -1,10 +1,10 @@
-import { DownOutlined, EyeInvisibleOutlined, EyeOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
-import { Button, Form, Input, InputNumber, Select, Slider, Space, Tag } from 'antd';
-import React, { useMemo } from 'react';
+import { EyeInvisibleOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
+import { Button, Form, Input, InputNumber, Select, Slider, Space } from 'antd';
+import React from 'react';
 import { trim } from 'lodash';
 import { useIntl } from '@umijs/max';
 import ModelFormSection from './ModelFormSection';
-import { tokenMarks, normalizeModelType } from './modelFormUtils';
+import { tokenMarks, DEFAULT_CONTEXT_TOKENS, MAX_CONTEXT_TOKENS } from './modelFormUtils';
 import styles from './ModelFormModal.module.less';
 
 const { TextArea } = Input;
@@ -46,7 +46,7 @@ const ApiTokenComp = (props: {
     <Space.Compact style={{ width: '100%' }}>
       <Input
         type={tokenVisible ? 'text' : 'password'}
-        placeholder="输入 API Token"
+        placeholder={intl.formatMessage({ id: 'modelMgr.modal.apiTokenPlaceholder' })}
         style={{ flex: 1 }}
         value={value}
         onChange={(e) => {
@@ -75,13 +75,13 @@ const ApiTokenComp = (props: {
 
 const ModelFormFields: React.FC<Props> = ({
   form,
-  modalTitle,
-  currentDisplayName,
-  currentModelType,
-  currentProviderName,
-  currentContextTokens,
-  currentSystems,
-  currentAbilities,
+  // modalTitle,
+  // currentDisplayName,
+  // currentModelType,
+  // currentProviderName,
+  // currentContextTokens,
+  // currentSystems,
+  // currentAbilities,
   systemOptions,
   abilityOptions,
   modelTypeOptions,
@@ -94,23 +94,23 @@ const ModelFormFields: React.FC<Props> = ({
   onValuesChange,
 }) => {
   const intl = useIntl();
-  const sectionGuideItems = useMemo(
-    () => [
-      { key: 'basic', icon: <RightOutlined />, label: intl.formatMessage({ id: 'modelMgr.modal.basicConfig' }) },
-      {
-        key: 'connection',
-        icon: <RightOutlined />,
-        label: intl.formatMessage({ id: 'modelMgr.modal.connectionSecurity' }),
-      },
-      { key: 'params', icon: <RightOutlined />, label: intl.formatMessage({ id: 'modelMgr.modal.paramConfig' }) },
-      { key: 'tags', icon: <RightOutlined />, label: intl.formatMessage({ id: 'modelMgr.modal.tagConfig' }) },
-    ],
-    [intl]
-  );
+  // const sectionGuideItems = useMemo(
+  //   () => [
+  //     { key: 'basic', icon: <RightOutlined />, label: intl.formatMessage({ id: 'modelMgr.modal.basicConfig' }) },
+  //     {
+  //       key: 'connection',
+  //       icon: <RightOutlined />,
+  //       label: intl.formatMessage({ id: 'modelMgr.modal.connectionSecurity' }),
+  //     },
+  //     { key: 'params', icon: <RightOutlined />, label: intl.formatMessage({ id: 'modelMgr.modal.paramConfig' }) },
+  //     { key: 'tags', icon: <RightOutlined />, label: intl.formatMessage({ id: 'modelMgr.modal.tagConfig' }) },
+  //   ],
+  //   [intl]
+  // );
 
   return (
     <div className={styles.left}>
-      <div className={styles.modalHero}>
+      {/* <div className={styles.modalHero}>
         <div className={styles.modalHeroMain}>
           <div className={styles.modalHeroTitle}>{currentDisplayName || modalTitle}</div>
           <div className={styles.modalHeroDesc}>{intl.formatMessage({ id: 'modelMgr.modal.heroDesc' })}</div>
@@ -141,9 +141,9 @@ const ModelFormFields: React.FC<Props> = ({
             </Tag>
           ))}
         </div>
-      </div>
+      </div> */}
 
-      <div className={styles.sectionGuide}>
+      {/* <div className={styles.sectionGuide}>
         {sectionGuideItems.map((item, index) => (
           <button
             key={item.key}
@@ -159,7 +159,7 @@ const ModelFormFields: React.FC<Props> = ({
             </span>
           </button>
         ))}
-      </div>
+      </div> */}
 
       <Form form={form} layout="vertical" onValuesChange={onValuesChange}>
         <ModelFormSection
@@ -209,14 +209,18 @@ const ModelFormFields: React.FC<Props> = ({
         >
           <div className={styles.subsectionTitle}>{intl.formatMessage({ id: 'modelMgr.modal.endpointGroup' })}</div>
           <Form.Item
-            label="API Endpoint"
+            label={intl.formatMessage({ id: 'modelMgr.modal.apiEndpoint' })}
             name="apiEndpoint"
-            rules={[{ required: true, message: '请输入 API Endpoint' }]}
+            rules={[{ required: true, message: intl.formatMessage({ id: 'modelMgr.modal.apiEndpointRequired' }) }]}
           >
             <Input placeholder="https://api.example.com/v1" />
           </Form.Item>
 
-          <Form.Item label="API Token" name="apiToken" rules={[{ required: true, message: '请输入 API Token' }]}>
+          <Form.Item
+            label={intl.formatMessage({ id: 'modelMgr.modal.apiToken' })}
+            name="apiToken"
+            rules={[{ required: true, message: intl.formatMessage({ id: 'modelMgr.modal.apiTokenRequired' }) }]}
+          >
             <ApiTokenComp tokenVisible={tokenVisible} setTokenVisible={setTokenVisible} />
           </Form.Item>
 
@@ -225,7 +229,7 @@ const ModelFormFields: React.FC<Props> = ({
             {(fields, { add, remove }) => (
               <>
                 <div className={styles.hintBlock}>
-                  <div className={styles.hintTitle}>Headers</div>
+                  <div className={styles.hintTitle}>{intl.formatMessage({ id: 'modelMgr.modal.headers' })}</div>
                   <div className={styles.hint}>{intl.formatMessage({ id: 'modelMgr.modal.headersDesc' })}</div>
                 </div>
                 {fields.map((field) => (
@@ -280,7 +284,7 @@ const ModelFormFields: React.FC<Props> = ({
           <Form.Item
             label={intl.formatMessage({ id: 'modelMgr.modal.contextTokens' })}
             required
-            tooltip="与列表中的上下文 tokens 一致"
+            tooltip={intl.formatMessage({ id: 'modelMgr.modal.contextTokensTooltip' })}
           >
             <div className={styles.tokenRow}>
               <Form.Item
@@ -290,18 +294,18 @@ const ModelFormFields: React.FC<Props> = ({
                   { required: true, message: intl.formatMessage({ id: 'modelMgr.modal.contextTokensPlaceholder' }) },
                 ]}
               >
-                <InputNumber min={1000} max={200000} step={1000} style={{ width: 140 }} />
+                <InputNumber min={1000} max={MAX_CONTEXT_TOKENS} step={1000} style={{ width: 140 }} />
               </Form.Item>
               <span className={styles.hint}>tokens</span>
               <div className={styles.sliderWrap}>
                 <Form.Item shouldUpdate noStyle>
                   {() => {
-                    const v = form.getFieldValue('contextTokens') || 128000;
+                    const v = form.getFieldValue('contextTokens') || DEFAULT_CONTEXT_TOKENS;
                     return (
                       <Slider
                         min={1000}
-                        max={200000}
-                        step={1000}
+                        max={MAX_CONTEXT_TOKENS}
+                        step={1}
                         marks={tokenMarks as any}
                         value={v}
                         onChange={(val) => form.setFieldsValue({ contextTokens: val })}
@@ -317,40 +321,44 @@ const ModelFormFields: React.FC<Props> = ({
             <div className={styles.hint}>{intl.formatMessage({ id: 'modelMgr.modal.advancedParamDesc' })}</div>
           </div>
           <div className={styles.grid3}>
-            <Form.Item label="Temperature" name="temperature">
+            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.temperature' })} name="temperature">
               <InputNumber style={{ width: '100%' }} min={0} max={2} step={0.1} />
             </Form.Item>
-            <Form.Item label="Top P" name="topP">
+            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.topP' })} name="topP">
               <InputNumber style={{ width: '100%' }} min={0} max={1} step={0.05} />
             </Form.Item>
-            <Form.Item label="Max Tokens" name="maxTokens">
+            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.maxTokens' })} name="maxTokens">
               <InputNumber style={{ width: '100%' }} min={1} />
             </Form.Item>
-            <Form.Item label="Frequency Penalty" name="frequencyPenalty">
+            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.frequencyPenalty' })} name="frequencyPenalty">
               <InputNumber style={{ width: '100%' }} min={-2} max={2} step={0.1} />
             </Form.Item>
-            <Form.Item label="Presence Penalty" name="presencePenalty">
+            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.presencePenalty' })} name="presencePenalty">
               <InputNumber style={{ width: '100%' }} min={-2} max={2} step={0.1} />
             </Form.Item>
-            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.provider' })} name="providerName">
+            <Form.Item
+              label={intl.formatMessage({ id: 'modelMgr.modal.provider' })}
+              name="providerName"
+              rules={[{ required: true, message: intl.formatMessage({ id: 'modelMgr.modal.providerRequired' }) }]}
+            >
               <Select
-                placeholder="选择模型提供商"
+                placeholder={intl.formatMessage({ id: 'modelMgr.modal.providerPlaceholder' })}
                 options={[
                   { label: 'OpenAI', value: 'OpenAI' },
                   { label: 'Anthropic', value: 'Anthropic' },
-                  { label: 'Google', value: 'Google' },
-                  { label: 'Meta', value: 'Meta' },
-                  { label: 'Microsoft', value: 'Microsoft' },
-                  { label: 'NVIDIA', value: 'NVIDIA' },
-                  { label: 'Cohere', value: 'Cohere' },
-                  { label: 'Mistral AI', value: 'Mistral AI' },
-                  { label: '其他', value: '其他' },
                 ]}
               />
             </Form.Item>
-
-            <Form.Item label="更多参数" name="extendParam" style={{ gridColumn: 'span 3' }}>
-              <TextArea placeholder="JSON格式的更多参数" rows={4} style={{ width: '100%' }} />
+            <Form.Item
+              label={intl.formatMessage({ id: 'modelMgr.modal.extendParam' })}
+              name="extendParam"
+              style={{ gridColumn: 'span 3' }}
+            >
+              <TextArea
+                placeholder={intl.formatMessage({ id: 'modelMgr.modal.extendParamPlaceholder' })}
+                rows={4}
+                style={{ width: '100%' }}
+              />
             </Form.Item>
           </div>
         </ModelFormSection>

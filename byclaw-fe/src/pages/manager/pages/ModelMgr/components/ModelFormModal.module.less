@@ -253,7 +253,12 @@
 
 .sliderWrap {
   flex: 1;
+  min-width: 0;
   padding: 0 4px;
+
+  :global(.@{antPrefix}-slider) {
+    max-width: 100%;
+  }
 }
 
 .codePanel {
