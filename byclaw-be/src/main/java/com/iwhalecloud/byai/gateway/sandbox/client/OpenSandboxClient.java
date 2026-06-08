@@ -93,6 +93,15 @@ public class OpenSandboxClient {
     }
 
     public List<SandboxDetail> listSandboxesByMetadata(Map<String, String> metadata, int pageNo, int pageSize) {
+        try {
+            return listSandboxesByMetadataStrict(metadata, pageNo, pageSize);
+        } catch (OpenSandboxException e) {
+            log.debug("listSandboxes failed (will create new if needed): {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    public List<SandboxDetail> listSandboxesByMetadataStrict(Map<String, String> metadata, int pageNo, int pageSize) {
         SandboxProperties.OpenSandboxConfig cfg = properties.getOpensandbox();
         if (!cfg.isListSandboxesBeforeCreate()) {
             return List.of();
@@ -109,8 +118,7 @@ public class OpenSandboxClient {
         }
         HttpUrl base = HttpUrl.parse(baseUrl + path);
         if (base == null) {
-            log.warn("listSandboxes: invalid URL baseUrl={} path={}", baseUrl, path);
-            return List.of();
+            throw new OpenSandboxException("Invalid OpenSandbox list URL: baseUrl=" + baseUrl + " path=" + path);
         }
         HttpUrl.Builder urlBuilder = base.newBuilder()
                 .addQueryParameter("page", String.valueOf(Math.max(1, pageNo)))
@@ -128,12 +136,7 @@ public class OpenSandboxClient {
             urlBuilder.addQueryParameter(queryName, entry.getValue());
         }
         Request httpRequest = newRequestBuilder(urlBuilder.build().toString()).get().build();
-        try {
-            return executeSandboxesList(httpRequest);
-        } catch (OpenSandboxException e) {
-            log.debug("listSandboxes failed (will create new if needed): {}", e.getMessage());
-            return List.of();
-        }
+        return executeSandboxesList(httpRequest);
     }
 
     public SandboxDetail getSandbox(String sandboxId) {
