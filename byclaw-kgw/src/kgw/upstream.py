@@ -63,6 +63,7 @@ async def resolve_base_url(config: Any) -> str:
         return f"{protocol}://{instance.host}:{instance.port}"
     finally:
         await discovery_client.close()
+        await redis_client.aclose()
 
 
 async def call_backend_json(
@@ -156,3 +157,4 @@ async def call_via_discovery(
         )
     finally:
         await discovery_client.close()
+        await redis_client.aclose()

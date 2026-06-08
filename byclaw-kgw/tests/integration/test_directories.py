@@ -67,9 +67,6 @@ def _dir_names(list_body: dict) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason="Event loop conflict in multi-module runs — dirs are ephemeral"
-)
 async def test_00_cleanup_stale_dirs(client: httpx.AsyncClient) -> None:
     """Delete every known test directory, ignoring failures."""
     for path in [
@@ -272,9 +269,6 @@ async def test_delete_nonempty_directory_recursive(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason="resolve_base_url creates Redis client internally — event loop conflict"
-)
 async def test_discovery_mode_directory(client: httpx.AsyncClient) -> None:
     body = await _create_dir(client, _KN_DISCOV, "/gd10-disc")
     assert body["resultCode"] == "0", f"create discovery-mode dir failed: {body}"

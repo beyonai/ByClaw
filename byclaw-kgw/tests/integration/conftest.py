@@ -21,7 +21,6 @@ import httpx
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis_async
-import uvicorn
 from httpx import ASGITransport
 
 _SQL_DIR = Path(__file__).resolve().parent.parent.parent / "sql"
@@ -153,48 +152,25 @@ async def _app_resources(
     from kgw.resilience.circuit_breaker import CircuitBreakerRegistry
     from kgw.settings import get_settings
 
-    # ---- 1. Start byclaw-qa automatically ----
+    # ---- 1. Start byclaw-qa as independent subprocess ----
+    import subprocess
+
     qa_port = _QA_PORT
+    qa_dir = Path(__file__).resolve().parent.parent.parent.parent / "byclaw-qa"
 
-    # Map kgw-style env vars to by_qa.config.Settings
-    minio_host = minio_settings["endpoint_url"].split("://")[1].split(":")[0]
-    minio_api_port = minio_settings["endpoint_url"].split(":")[-1]
-    os.environ.setdefault("MINIO_ENDPOINT", f"{minio_host}:{minio_api_port}")
-    os.environ.setdefault("MINIO_ACCESS_KEY", minio_settings["access_key"])
-    os.environ.setdefault("MINIO_SECRET_KEY", minio_settings["secret_key"])
-    os.environ.setdefault("MINIO_SECURE", "false")
-    os.environ.setdefault("KB_MINIO_BUCKET", minio_settings["bucket"])
-    os.environ.setdefault("KB_MINIO_MARKDOWN_BUCKET", minio_settings["bucket"])
-    os.environ.setdefault("HOST", "127.0.0.1")
-    os.environ.setdefault("PORT", str(qa_port))
-    os.environ.setdefault("SERVICE_NAME", _QA_SVC_NAME)
-    os.environ.setdefault("AGENT_DATA_PATH", "/tmp/kgw_test_agent_data")
-    os.environ.setdefault("BY_QA_MODEL_CONFIG_PROVIDER", "redis_model_config:RedisModelConfigProvider")
-    os.environ.setdefault("EMBEDDING_MODEL_NAME", "text-embedding-v4")
-    os.environ.setdefault("EMBEDDING_DIMENSION", "1024")
-    os.environ.setdefault("LLM_BASE_URL", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")
-    os.environ.setdefault("LLM_API_KEY", "sk-placeholder")
+    # Inherit the current env so byclaw-qa reads the same DB/Redis/MinIO config
+    qa_env = os.environ.copy()
+    qa_env.setdefault("BYCLAW_QA_PORT", str(qa_port))
+    qa_env.setdefault("QA_DOMAINNAME", _QA_SVC_NAME)
+    qa_env.setdefault("HOST", "127.0.0.1")
 
-    # Make byclaw-qa's redis_model_config importable
-    import sys
-    _qa_src = Path(__file__).resolve().parent.parent.parent.parent / "byclaw-qa" / "src"
-    sys.path.insert(0, str(_qa_src))
-
-    # Monkeypatch byclaw-qa's lifespan Redis registration to no-ops
-    import by_qa.main as qa_main  # noqa: PLC0415
-
-    qa_main._register_service = lambda app: asyncio.sleep(0)  # noqa: ARG005
-    qa_main._unregister_service = lambda app: asyncio.sleep(0)  # noqa: ARG005
-    from by_qa.config import get_settings as qa_get_settings  # noqa: PLC0415
-
-    qa_get_settings.cache_clear()
-
-    qa_app = qa_main.create_app()
-    qa_config = uvicorn.Config(
-        qa_app, host="127.0.0.1", port=qa_port, log_level="warning"
+    qa_proc = subprocess.Popen(
+        ["bash", "start.sh", "api"],
+        cwd=str(qa_dir),
+        env=qa_env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
-    qa_server = uvicorn.Server(qa_config)
-    qa_task = asyncio.create_task(qa_server.serve(), name="byclaw-qa-server")
 
     # Wait healthy
     deadline = asyncio.get_event_loop().time() + 30.0
@@ -207,7 +183,7 @@ async def _app_resources(
             except Exception:  # noqa: BLE001
                 pass
             if asyncio.get_event_loop().time() > deadline:
-                qa_server.should_exit = True
+                qa_proc.kill()
                 pytest.fail(f"byclaw-qa unhealthy after 30s at {_QA_URL}")
             await asyncio.sleep(0.5)
 
@@ -311,16 +287,12 @@ async def _app_resources(
         yield client, pool, app
 
     # ---- 5. Teardown ----
-    qa_server.should_exit = True
+    qa_proc.terminate()
     try:
-        await asyncio.wait_for(qa_task, timeout=5.0)
-    except (asyncio.TimeoutError, RuntimeError):
-        pass
-    qa_task.cancel()
-    try:
-        await qa_task
-    except asyncio.CancelledError:
-        pass
+        qa_proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        qa_proc.kill()
+        qa_proc.wait()
 
     await audit_writer.stop()
     try:

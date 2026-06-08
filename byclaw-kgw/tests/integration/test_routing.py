@@ -99,9 +99,6 @@ async def test_create_directory_direct(client: httpx.AsyncClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason="Discovery mode requires Redis service registration to be active"
-)
 async def test_create_directory_discovery(client: httpx.AsyncClient) -> None:
     """Create a directory on the discovery KB."""
     resp = await client.post(
