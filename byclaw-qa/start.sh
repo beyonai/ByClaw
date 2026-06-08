@@ -69,6 +69,17 @@ default_env_if_unset() {
 
 load_env_file "$SCRIPT_DIR/.env"
 
+# Ensure local backends bypass any shell proxy (clash etc.)
+for _no_proxy_var in NO_PROXY no_proxy; do
+    _existing="${!_no_proxy_var-}"
+    _merged="127.0.0.1,localhost"
+    if [[ -n "$_existing" ]]; then
+        _merged="$_existing,$_merged"
+    fi
+    export "$_no_proxy_var=$_merged"
+done
+unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy
+
 usage() {
     cat <<'EOF'
 Usage:

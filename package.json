@@ -1,0 +1,10 @@
+{
+  "name": "byclaw",
+  "private": true,
+  "scripts": {
+    "prepare": "husky && git config core.hooksPath \"$PWD/.husky/_\" "
+  },
+  "devDependencies": {
+    "husky": "^9.0.0"
+  }
+}

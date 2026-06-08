@@ -5,7 +5,24 @@
       "Bash(mvn:*)",
       "Bash(npx tsc *)",
       "WebSearch",
-      "Bash(gh api *)"
+      "Bash(gh api *)",
+      "Bash(uv run *)",
+      "Bash(git -C /Users/jialangli/code/workspace/ByClaw status --short)",
+      "Bash(git worktree *)",
+      "Bash(git -C /Users/jialangli/code/workspace/ByClaw branch --show-current)",
+      "Bash(git -C /Users/jialangli/code/workspace/ByClaw show b3e19592f3599d5ce6afd92c7bcf8fc3c40a405c:byclaw-kgw/tests/test_sql_migrations.py)",
+      "Bash(git -C /Users/jialangli/code/workspace/ByClaw show --stat d1dc3bb5)",
+      "Bash(git -C /Users/jialangli/code/workspace/ByClaw diff byclaw-kgw/src/kgw/metadata/registry.py)",
+      "Bash(python3 *)",
+      "Bash(python *)",
+      "Bash(uv pip *)",
+      "Bash(python -c \"import yaml; print\\(yaml.__version__\\)\")",
+      "Bash(tee /tmp/test_output.txt)",
+      "Bash(ping -c 1 -t 1 kb-direct.test)",
+      "Bash(curl -s -m 2 http://kb-direct.test/api/v1/directories/create -X POST -H \"Content-Type: application/json\" -d '{\"knCode\":\"200001\"}')",
+      "Bash(cd *)",
+      "Bash(git *)",
+      "Bash(pip list *)"
     ]
   }
 }

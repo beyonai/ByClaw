@@ -112,6 +112,23 @@ def fail_resp(msg: str = "error") -> dict[str, Any]:
     return {"resultCode": "-1", "resultMsg": msg, "resultObject": {}}
 
 
+async def _retry_on_loop_error(factory, max_retries=3):
+    """Retry *factory* if RuntimeError("Event loop is closed") is raised.
+
+    pytest-asyncio module-scoped fixtures may reuse an event loop that the
+    previous module left in a partially-closed state.  A brief pause and
+    retry lets the new loop fully initialise.
+    """
+    for attempt in range(max_retries):
+        try:
+            return factory()
+        except RuntimeError:
+            if attempt < max_retries - 1:
+                await asyncio.sleep(0.1 * (attempt + 1))
+            else:
+                raise
+
+
 # ---------------------------------------------------------------------------
 # Fixture: app with real byclaw-qa backend
 # ---------------------------------------------------------------------------
@@ -197,7 +214,9 @@ async def _app_resources(
     pool = await build_pool(pg_dsn, min_size=1, max_size=5)
     await run_migrations(pool, _SQL_DIR)
 
-    redis_client = redis_async.from_url(redis_url, decode_responses=False)
+    redis_client = await _retry_on_loop_error(
+        lambda: redis_async.from_url(redis_url, decode_responses=False)
+    )
     http_client = build_http_client(
         timeout_seconds=30.0, max_connections=20, max_keepalive=5
     )
@@ -272,15 +291,24 @@ async def _app_resources(
 
     # ---- 5. Teardown ----
     await audit_writer.stop()
-    await http_client.aclose()
-    await redis_client.aclose()
+    try:
+        await http_client.aclose()
+    except RuntimeError:
+        pass  # event loop may already be closing
+    try:
+        await redis_client.aclose()
+    except RuntimeError:
+        pass
 
     async with pool.connection() as conn:
         for table in _TABLES_TO_DROP:
             await conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
         await conn.commit()
 
-    await pool.close()
+    try:
+        await pool.close()
+    except RuntimeError:
+        pass
 
     # Cleanup MinIO KB configs
     try:
