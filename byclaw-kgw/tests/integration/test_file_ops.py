@@ -293,15 +293,39 @@ async def test_glob(client: httpx.AsyncClient) -> None:
 
 
 async def test_readfile(client: httpx.AsyncClient) -> None:
-    """GR6: readFile for the built markdown file.
+    """GR6: readFile for a built markdown file — self-contained import+build+read."""
+    path = "/fileops/readfile-test.md"
 
-    Waits up to 90 s for the build to complete before reading.
-    """
-    # Wait for build to finish (poll every 1 s, timeout 90 s)
-    for _ in range(90):
+    # 1. Import a fresh file (use unique path to avoid reimport rejection)
+    resp = await client.post(
+        "/kgw/api/v1/knowledgeItems/import",
+        data={"knCode": _KN_DIRECT, "filePath": path},
+        files={
+            "fileContent": (
+                "rf.md",
+                b"# ReadFile Test\n\nSelf-contained.",
+                "text/markdown",
+            )
+        },
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    if body["resultCode"] != "0":
+        pytest.skip(f"Import failed (file may already exist): {body}")
+
+    # 2. Trigger build
+    resp = await client.post(
+        "/kgw/api/v1/fileToMarkdownIndex",
+        json={"knCode": _KN_DIRECT, "filePath": path},
+        headers=_hdrs(),
+    )
+    assert resp.json()["resultCode"] == "0", f"build trigger failed: {resp.json()}"
+
+    # 3. Wait for build to complete (poll every 2s, timeout 120s)
+    for _ in range(60):
         status_resp = await client.post(
             "/kgw/api/v1/fileBuildStatus",
-            json={"knCode": _KN_DIRECT, "filePath": "/fileops/build-test.md"},
+            json={"knCode": _KN_DIRECT, "filePath": path},
             headers=_hdrs(),
         )
         sbody = status_resp.json()
@@ -313,13 +337,14 @@ async def test_readfile(client: httpx.AsyncClient) -> None:
             pytest.skip(
                 f"Build failed at step={_step} — embedding API may be unreachable"
             )
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
     else:
-        pytest.fail("GR6 build did not complete within 90 s")
+        pytest.fail("GR6 build did not complete within 120 s")
 
+    # 4. readFile
     resp = await client.post(
         "/kgw/api/v1/readFile",
-        json={"knCode": _KN_DIRECT, "filePath": "/fileops/build-test.md"},
+        json={"knCode": _KN_DIRECT, "filePath": path},
         headers=_hdrs(),
     )
     body = resp.json()

@@ -207,10 +207,24 @@ async def _app_resources(
                 pytest.fail(f"byclaw-qa unhealthy after 30s at {_QA_URL}")
             await asyncio.sleep(0.5)
 
-    # ---- 2. Seed KB configs in MinIO ----
+    # ---- 2. Create KBs dynamically via byclaw-qa API ----
+    _resource_codes: dict[str, str] = {}
+    async with httpx.AsyncClient() as direct:
+        for label, kb_name in [("direct", "kgw-it-direct"), ("disc", "kgw-it-disc")]:
+            resp = await direct.post(
+                f"{_QA_URL}/api/v1/knowledgeBases/create",
+                json={"knName": kb_name},
+                timeout=30.0,
+            )
+            body = resp.json()
+            if body.get("resultCode") == "0":
+                _rc = body["resultObject"]["knCode"]
+                _resource_codes[label] = str(_rc)
+
+    # ---- 3. Seed KB configs in MinIO (with dynamic resourceCode) ----
     direct_config = {
         "resourceId": int(_KN_DIRECT),
-        "resourceCode": _RESOURCE_CODE_DIRECT,
+        "resourceCode": _resource_codes.get("direct", _RESOURCE_CODE_DIRECT),
         "domainURL": _QA_URL,
         "domainName": "",
         "headers": {},
@@ -218,7 +232,7 @@ async def _app_resources(
     }
     discov_config = {
         "resourceId": int(_KN_DISCOV),
-        "resourceCode": _RESOURCE_CODE_DISCOV,
+        "resourceCode": _resource_codes.get("disc", _RESOURCE_CODE_DISCOV),
         "domainURL": "",
         "domainName": _QA_SVC_NAME,
         "headers": {},
@@ -242,7 +256,7 @@ async def _app_resources(
                 ContentType="application/json",
             )
 
-    # ---- 3. Build byclaw-kgw gateway ----
+    # ---- 4. Build byclaw-kgw gateway ----
     get_settings.cache_clear()
     settings = get_settings()
 
@@ -285,38 +299,6 @@ async def _app_resources(
     app.state.audit = audit_writer
     app.state.circuit_breakers = circuit_breakers
     app.state.ingest_semaphore = asyncio.Semaphore(100)
-
-    # ---- 4. Seed KB records in byclaw-qa's knowledge_base table ----
-    # The gateway translates portal knCode -> resource_code (e.g. "200001" -> "2").
-    # byclaw-qa stores KB configs in a `knowledge_base` table; a row must exist
-    # with kid = resource_code so the gateway's real-http tests can resolve the KB.
-    # We trigger byclaw-qa's lazy schema init with a health-adjacent call, then
-    # insert/upsert using the same database pool.
-    async with httpx.AsyncClient() as direct:
-        for _rc in [_RESOURCE_CODE_DIRECT, _RESOURCE_CODE_DISCOV]:
-            try:
-                # Trigger lazy schema init
-                await direct.post(
-                    f"{_QA_URL}/api/v1/knowledgeBases/create",
-                    json={"knCode": _rc, "knName": f"kgw-it-{_rc}"},
-                    timeout=30.0,
-                )
-            except Exception:
-                pass
-
-    # Upsert KB rows with the correct kid matching resource_code
-    for _rc in [_RESOURCE_CODE_DIRECT, _RESOURCE_CODE_DISCOV]:
-        try:
-            async with pool.connection() as conn:
-                await conn.execute(
-                    "INSERT INTO knowledge_base (kid, kb_name, is_deleted, created_at, updated_at) "
-                    "VALUES (%s::bigint, %s, FALSE, NOW(), NOW()) "
-                    "ON CONFLICT (kid) DO NOTHING",
-                    (_rc, f"kgw-it-{_rc}"),
-                )
-                await conn.commit()
-        except Exception:
-            pass
 
     # ---- 5. Yield ----
     async with httpx.AsyncClient(
