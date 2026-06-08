@@ -1,5 +1,5 @@
 
-DELETE FROM "byai"."byai_system_config" WHERE "param_code" = 'OPENCLAW_BUNDLED_SKILLS'；
+DELETE FROM "byai"."byai_system_config" WHERE "param_code" = 'OPENCLAW_BUNDLED_SKILLS';
 INSERT INTO "byai"."byai_system_config" ("param_id", "param_type", "param_code", "param_name", "param_en_name", "param_value", "param_desc") VALUES (11865554, 'text', 'OPENCLAW_BUNDLED_SKILLS', 'OpenClaw内置Skill清单', 'OPENCLAW_BUNDLED_SKILLS', '[
   {
     "skillName": "1password",
