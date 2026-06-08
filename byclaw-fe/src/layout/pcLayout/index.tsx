@@ -27,8 +27,6 @@ import useAgentUploadFileConfig from '@/hooks/useAgentUploadFileConfig';
 
 import GlobalContext, { Platform } from '../components/provider/global';
 
-import useNotification from './hooks/useNotification';
-
 import { getSsoLoginByIframe } from '@/utils/system';
 import { getHistoryState } from '@/utils/browser';
 
@@ -104,8 +102,6 @@ const PCLayout = () => {
       (item) => `${item.id}` === `${agentId}` || `${item.resourceCode}` === `${agentId}`
     );
   }, [agentList, employeesList, agentId]);
-
-  useNotification();
 
   useEffect(() => {
     const onCloseContent = (isClose: boolean) => {

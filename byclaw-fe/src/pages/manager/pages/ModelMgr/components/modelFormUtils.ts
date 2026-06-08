@@ -1,5 +1,3 @@
-import type { IntlShape } from 'react-intl';
-
 export type DebugInputMode = 'template' | 'auto';
 
 export type ModelTagItem = {
@@ -11,15 +9,19 @@ export type ModelTagItem = {
 };
 
 export const SYSTEM_SOURCE_TYPES = ['DIG_EMPLOYEE'];
+export const DEFAULT_CONTEXT_TOKENS = 1024 * 198;
+export const MAX_CONTEXT_TOKENS = 2000 * 1000;
+export const DEFAULT_MAX_TOKENS = 1024 * 64;
 
-export const tokenMarks = {
-  1000: '1K',
-  50000: '50K',
-  100000: '100K',
-  200000: '200K',
-};
+export const tokenMarks = Array.from({ length: 4 }, (_, index) => {
+  const value = (index + 1) * 500 * 1000;
+  return [value, `${value / 1000}K`];
+}).reduce<Record<number, string>>((marks, [value, label]) => {
+  marks[value as number] = label as string;
+  return marks;
+}, {});
 
-export function buildDebugDefaults(intl: IntlShape) {
+export function buildDebugDefaults(intl: any) {
   return {
     defaultUserMessage: intl.formatMessage({ id: 'modelMgr.modal.debugDefaultUserMessage' }),
     defaultRerankQuery: intl.formatMessage({ id: 'modelMgr.modal.debugRerankQuery' }),
@@ -44,10 +46,10 @@ export function getDefaultFormValues() {
     readTimeoutSec: 60,
     maxRetries: 3,
     retryIntervalSec: 1,
-    contextTokens: 128000,
+    contextTokens: DEFAULT_CONTEXT_TOKENS,
     temperature: 0.7,
     topP: 0.9,
-    maxTokens: 1024,
+    maxTokens: DEFAULT_MAX_TOKENS,
     frequencyPenalty: 0,
     presencePenalty: 0,
   };

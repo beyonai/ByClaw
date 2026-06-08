@@ -3,9 +3,6 @@
  */
 
 import { getToken } from './auth';
-import { noop } from 'lodash';
-
-import type { ISession } from '@/typescript/session';
 
 interface WebSocketMessage {
   type: string;
@@ -13,14 +10,13 @@ interface WebSocketMessage {
   sessionId?: string;
   event?: string;
   data?: any;
-  session?: ISession;
   [key: string]: any;
 }
 
 type MessageHandler = (message: WebSocketMessage) => void;
 
 class WebSocketManager {
-  private static instance: WebSocketManager;
+  private static instance?: WebSocketManager;
 
   private ws: WebSocket | null = null;
 
@@ -32,25 +28,61 @@ class WebSocketManager {
 
   private messageHandlers: Map<string, MessageHandler[]> = new Map();
 
-  private hasNotification = false;
-
-  private onNotificationChange: (hasNotification: boolean) => void = noop;
-
-  private onAddNotificationSessionCb: (newSession: ISession) => void = noop;
-
   private reconnectCount: number = 0;
+
+  private manuallyDisconnected = false;
 
   private connectResolvers: Array<() => void> = [];
 
   private connectRejecters: Array<(error: Error) => void> = [];
 
-  private constructor() {}
+  private connectionSeq = 0;
+
+  private activeConnectionId = 0;
+
+  private handleVisibilityChange = (): void => {
+    if (document.visibilityState === 'visible') {
+      this.ensureConnected();
+    }
+  };
+
+  private constructor() {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', this.ensureConnected);
+      document.addEventListener('visibilitychange', this.handleVisibilityChange);
+    }
+  }
 
   public static getInstance(): WebSocketManager {
+    const globalKey = '__BYCLAW_WEBSOCKET_MANAGER__';
+    const globalScope = globalThis as typeof globalThis & {
+      [globalKey]?: WebSocketManager;
+    };
+
+    if (globalScope[globalKey]) {
+      WebSocketManager.instance = globalScope[globalKey]!;
+      return WebSocketManager.instance!;
+    }
+
     if (!WebSocketManager.instance) {
       WebSocketManager.instance = new WebSocketManager();
+      globalScope[globalKey] = WebSocketManager.instance;
     }
-    return WebSocketManager.instance;
+    return WebSocketManager.instance!;
+  }
+
+  public static disposeInstance(instance: WebSocketManager): void {
+    const globalKey = '__BYCLAW_WEBSOCKET_MANAGER__';
+    const globalScope = globalThis as typeof globalThis & {
+      [globalKey]?: WebSocketManager;
+    };
+
+    if (globalScope[globalKey] === instance) {
+      delete globalScope[globalKey];
+    }
+    if (WebSocketManager.instance === instance) {
+      WebSocketManager.instance = undefined;
+    }
   }
 
   /**
@@ -73,6 +105,7 @@ class WebSocketManager {
    * 初始化 WebSocket 连接
    */
   public init(): void {
+    this.manuallyDisconnected = false;
     if (this.ws || this.isConnecting) {
       return;
     }
@@ -88,10 +121,18 @@ class WebSocketManager {
     try {
       // 创建 WebSocket 连接
       const wsUrl = this.getWebSocketUrl(`byaiService/ws?beyond-token=${token}`);
-      this.ws = new WebSocket(wsUrl);
+      const connectionId = this.connectionSeq + 1;
+      this.connectionSeq = connectionId;
+      this.activeConnectionId = connectionId;
+      const ws = new WebSocket(wsUrl);
+      this.ws = ws;
 
       // 设置请求头 - 在连接建立后发送认证信息
-      this.ws.onopen = () => {
+      ws.onopen = () => {
+        if (!this.isCurrentConnection(connectionId, ws)) {
+          ws.close();
+          return;
+        }
         console.log('WebSocket 连接成功');
         this.isConnecting = false;
 
@@ -100,7 +141,10 @@ class WebSocketManager {
         this.resolveConnectWaiters();
       };
 
-      this.ws.onmessage = (event) => {
+      ws.onmessage = (event) => {
+        if (!this.isCurrentConnection(connectionId, ws)) {
+          return;
+        }
         try {
           const message: WebSocketMessage = JSON.parse(event.data);
           this.handleMessage(message);
@@ -109,7 +153,10 @@ class WebSocketManager {
         }
       };
 
-      this.ws.onclose = (event) => {
+      ws.onclose = (event) => {
+        if (!this.isCurrentConnection(connectionId, ws)) {
+          return;
+        }
         console.log('WebSocket 连接关闭:', event.code, event.reason);
         this.ws = null;
         this.isConnecting = false;
@@ -117,7 +164,10 @@ class WebSocketManager {
         this.scheduleReconnect();
       };
 
-      this.ws.onerror = (error) => {
+      ws.onerror = (error) => {
+        if (!this.isCurrentConnection(connectionId, ws)) {
+          return;
+        }
         console.error('WebSocket 连接错误:', error);
         this.isConnecting = false;
         this.stopHeartbeat();
@@ -131,18 +181,14 @@ class WebSocketManager {
     }
   }
 
+  private isCurrentConnection(connectionId: number, ws: WebSocket): boolean {
+    return this.ws === ws && this.activeConnectionId === connectionId;
+  }
+
   /**
    * 处理接收到的消息
    */
   private handleMessage(message: WebSocketMessage): void {
-    // 如果有消息返回，设置红点标识
-    if (message.session) {
-      this.setHasNotification(true);
-
-      // 通知其他组件处理会话逻辑：如果会话不存在则添加，存在则更新
-      this.onAddNotificationSessionCb(message.session);
-    }
-
     // 调用注册的消息处理器
     const handlers = this.messageHandlers.get(message.type) || [];
     const wildcardHandlers = this.messageHandlers.get('*') || [];
@@ -248,46 +294,11 @@ class WebSocketManager {
   }
 
   /**
-   * 设置红点状态变化回调
-   */
-  public setOnNotificationChange(callback: (hasNotification: boolean) => void): void {
-    this.onNotificationChange = callback;
-  }
-
-  public setOnAddNotificationSessionCb(callback: (newSession: ISession) => void): void {
-    this.onAddNotificationSessionCb = callback;
-  }
-
-  /**
-   * 设置是否有通知
-   */
-  private setHasNotification(hasNotification: boolean): void {
-    if (this.hasNotification !== hasNotification) {
-      this.hasNotification = hasNotification;
-      if (this.onNotificationChange) {
-        this.onNotificationChange(hasNotification);
-      }
-    }
-  }
-
-  /**
-   * 获取当前是否有通知
-   */
-  public getHasNotification(): boolean {
-    return this.hasNotification;
-  }
-
-  /**
-   * 清除通知状态
-   */
-  public clearNotification(): void {
-    this.setHasNotification(false);
-  }
-
-  /**
    * 断开连接
    */
   public disconnect(): void {
+    this.manuallyDisconnected = true;
+    this.activeConnectionId = 0;
     this.stopHeartbeat();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -302,22 +313,44 @@ class WebSocketManager {
     this.isConnecting = false;
   }
 
+  public dispose(): void {
+    this.disconnect();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('online', this.ensureConnected);
+      document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+    }
+  }
+
+  private ensureConnected = (): void => {
+    if (this.manuallyDisconnected) {
+      return;
+    }
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.init();
+  };
+
   /**
    * 重连调度
    */
   private scheduleReconnect(): void {
+    if (this.manuallyDisconnected) {
+      return;
+    }
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
     }
 
-    if (this.reconnectCount > 5) {
-      return;
-    }
-
     this.reconnectCount += 1;
+    const delay = Math.min(30000, 1000 * 2 ** Math.min(this.reconnectCount, 5));
     this.reconnectTimer = setTimeout(() => {
       this.init();
-    }, 5000); // 5秒后重连
+    }, delay);
   }
 
   private resolveConnectWaiters(): void {
@@ -349,4 +382,18 @@ class WebSocketManager {
 }
 
 // 导出单例实例
-export default WebSocketManager.getInstance();
+const webSocketManager = WebSocketManager.getInstance();
+
+const hotModule =
+  typeof module !== 'undefined'
+    ? (module as unknown as { hot?: { dispose(callback: () => void): void } }).hot
+    : undefined;
+
+if (hotModule) {
+  hotModule.dispose(() => {
+    webSocketManager.dispose();
+    WebSocketManager.disposeInstance(webSocketManager);
+  });
+}
+
+export default webSocketManager;
