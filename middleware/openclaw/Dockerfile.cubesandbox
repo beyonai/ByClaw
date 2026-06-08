@@ -54,6 +54,8 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
     ENVD_LOG_FILE=/var/log/envd.log \
     OPENCLAW_GATEWAY_PORT=18789 \
     FILEBROWSER_PORT=8082 \
+    FILEBROWSER_ROOT=/by \
+    FILEBROWSER_BASEURL=/filebrowser \
     OPENCLAW_STATE_DIR=/by/.openclaw \
     DWS_CONFIG_DIR=/by/.openclaw/.dws
 
@@ -102,45 +104,53 @@ RUN chmod 0755 /usr/local/bin/filebrowser
 COPY middleware/openclaw/cli/dws /usr/local/bin/dws
 RUN chmod 0755 /usr/local/bin/dws
 
-# CubeSandbox runtime command used by scripts/start-byclaw.sh.
+# CubeSandbox runtime commands. cube-entrypoint.sh owns envd; these scripts
+# only manage foreground/background business processes.
 RUN set -eux; \
     printf '%s\n' \
       '#!/bin/sh' \
       'set -eu' \
       '' \
-      'ENVD_PORT="${ENVD_PORT:-49983}"' \
-      'OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"' \
       'FILEBROWSER_PORT="${FILEBROWSER_PORT:-8082}"' \
+      'FILEBROWSER_ROOT="${FILEBROWSER_ROOT:-/by}"' \
+      'FILEBROWSER_BASEURL="${FILEBROWSER_BASEURL:-/filebrowser}"' \
+      '' \
+      'mkdir -p "${FILEBROWSER_ROOT}"' \
+      'exec filebrowser \' \
+      '  --root "${FILEBROWSER_ROOT}" \' \
+      '  --port "${FILEBROWSER_PORT}" \' \
+      '  --address 0.0.0.0 \' \
+      '  --noauth \' \
+      '  --baseurl "${FILEBROWSER_BASEURL}"' \
+      >/usr/local/bin/startFilebrowser.sh; \
+    printf '%s\n' \
+      '#!/bin/sh' \
+      'set -eu' \
+      '' \
+      'OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"' \
       'OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-dev}"' \
       'OPENCLAW_STATE_DIR="${OPENCLAW_STATE_DIR:-/by/.openclaw}"' \
+      'DWS_CONFIG_DIR="${DWS_CONFIG_DIR:-${OPENCLAW_STATE_DIR}/.dws}"' \
       '' \
-      'mkdir -p "${OPENCLAW_STATE_DIR}" /by/node-diagnostics' \
-      'chmod 1777 /by/node-diagnostics 2>/dev/null || true' \
-      '' \
-      'if [ -x /usr/bin/envd ]; then' \
-      '  /usr/bin/envd -port "${ENVD_PORT}" ${ENVD_EXTRA_ARGS:-} >>"${ENVD_LOG_FILE:-/var/log/envd.log}" 2>&1 &' \
-      'fi' \
-      '' \
-      'if command -v filebrowser >/dev/null 2>&1; then' \
-      '  filebrowser \' \
-      '    --root "${OPENCLAW_STATE_DIR}" \' \
-      '    --port "${FILEBROWSER_PORT}" \' \
-      '    --address 0.0.0.0 \' \
-      '    --noauth \' \
-      '    --baseurl /filebrowser &' \
-      'fi' \
-      '' \
+      'mkdir -p "${OPENCLAW_STATE_DIR}" "${DWS_CONFIG_DIR}"' \
       'exec node dist/index.js gateway \' \
       '  --bind=lan \' \
       '  --port="${OPENCLAW_GATEWAY_PORT}" \' \
       '  --allow-unconfigured \' \
       '  --verbose \' \
       '  --token="${OPENCLAW_GATEWAY_TOKEN}"' \
+      >/usr/local/bin/startOpenclaw.sh; \
+    printf '%s\n' \
+      '#!/bin/sh' \
+      'set -eu' \
+      '' \
+      '/usr/local/bin/startFilebrowser.sh &' \
+      'exec /usr/local/bin/startOpenclaw.sh' \
       >/usr/local/bin/startAll.sh; \
-    chmod 0755 /usr/local/bin/startAll.sh
+    chmod 0755 /usr/local/bin/startFilebrowser.sh /usr/local/bin/startOpenclaw.sh /usr/local/bin/startAll.sh
 
 # Keep the default image command template-friendly: cube-entrypoint starts envd
-# for CubeSandbox's 49983 /health probe, then the shell starts OpenClaw.
+# for CubeSandbox's 49983 /health probe, then starts OpenClaw and filebrowser.
 EXPOSE 49983 18789 8082
 ENTRYPOINT ["/usr/local/bin/cube-entrypoint.sh"]
-CMD ["/bin/sh", "-lc", "exec node dist/index.js gateway --bind=lan --port=${OPENCLAW_GATEWAY_PORT:-18789} --allow-unconfigured --verbose --token=${OPENCLAW_GATEWAY_TOKEN:-dev}"]
+CMD ["/usr/local/bin/startAll.sh"]

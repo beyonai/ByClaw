@@ -8,7 +8,7 @@ USER root
 ENV ENVD_PORT=49983 \
     ENVD_LOG_FILE=/var/log/envd.log \
     FILEBROWSER_PORT=8082 \
-    FILEBROWSER_ROOT=/tmp/filebrowser-root \
+    FILEBROWSER_ROOT=/by \
     FILEBROWSER_BASEURL=/filebrowser
 
 RUN set -eux; \
@@ -33,7 +33,7 @@ RUN set -eux; \
       'set -eu' \
       '' \
       'FILEBROWSER_PORT="${FILEBROWSER_PORT:-8082}"' \
-      'FILEBROWSER_ROOT="${FILEBROWSER_ROOT:-/tmp/filebrowser-root}"' \
+      'FILEBROWSER_ROOT="${FILEBROWSER_ROOT:-/by}"' \
       'FILEBROWSER_BASEURL="${FILEBROWSER_BASEURL:-/filebrowser}"' \
       '' \
       'mkdir -p "${FILEBROWSER_ROOT}"' \
