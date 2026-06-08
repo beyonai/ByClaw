@@ -1,24 +1,15 @@
 """Shared test fixtures for byclaw-kgw integration tests.
 
-Two KB backends:
+Prerequisites (run once before ``pytest -m integration``):
 
-* **200001** — direct mode (domainURL = ``http://kb-direct.test``)
-* **300001** — discovery mode (domainName = ``kgw-int-kb-svc``)
+    cd byclaw-qa && cp .env.docker .env && bash start.sh api
 
-Both use numeric knCodes matching the production ``resourceId`` pattern.
-The gateway maps portal ``knCode`` → MinIO config → backend ``resourceCode``
-(``"2"`` and ``"3"`` respectively).
+This starts a **real byclaw-qa backend** on ``http://127.0.0.1:{BYCLAW_QA_PORT}``.
+The fixture seeds two KB configs in MinIO so the gateway can exercise both
+direct-mode (domainURL) and discovery-mode (domainName) routing against the
+same QA instance.
 
-Usage in test files::
-
-    pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="module")]
-
-    async def test_something(client_200001):
-        resp = await client_200001.post("/kgw/api/v1/listDir", json={...})
-        assert resp.json()["resultCode"] == "0"
-
-Requires real OpenGauss + Redis + MinIO from repo-level ``.env``.
-Run with:  uv run pytest -m integration tests/integration/ -v
+Requires: OpenGauss :15432, Redis :6379, MinIO :19000.
 """
 
 # pylint: disable=redefined-outer-name,invalid-name
@@ -27,11 +18,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
 import pytest_asyncio
 import redis.asyncio as redis_async
 from httpx import ASGITransport
@@ -46,10 +39,11 @@ _KN_DIRECT = "200001"
 _KN_DISCOV = "300001"
 _RESOURCE_CODE_DIRECT = "2"
 _RESOURCE_CODE_DISCOV = "3"
-_KB_DIRECT_URL = "http://kb-direct.test"
-_KB_DISCOV_DOMAIN = "kgw-int-kb-svc"
+# Service name used by byclaw-qa lifespan to register in Redis
+_QA_SVC_NAME = os.environ.get("QA_DOMAINNAME", "byclaw-qa-manager")
+_QA_PORT = int(os.environ.get("BYCLAW_QA_PORT", "8000"))
+_QA_URL = f"http://127.0.0.1:{_QA_PORT}"
 
-# All 18 KB operations (the full set a byclaw-qa backend exposes)
 _ALL_SERVICES: list[dict[str, str]] = [
     {"name": "directoryCreate", "path": "/api/v1/directories/create"},
     {"name": "directoryUpdate", "path": "/api/v1/directories/update"},
@@ -80,24 +74,6 @@ _ALL_SERVICES: list[dict[str, str]] = [
     },
 ]
 
-_DIRECT_CONFIG = {
-    "resourceId": int(_KN_DIRECT),
-    "resourceCode": _RESOURCE_CODE_DIRECT,
-    "domainURL": _KB_DIRECT_URL,
-    "domainName": "",
-    "headers": {},
-    "resourceService": _ALL_SERVICES,
-}
-
-_DISCOV_CONFIG = {
-    "resourceId": int(_KN_DISCOV),
-    "resourceCode": _RESOURCE_CODE_DISCOV,
-    "domainURL": "",
-    "domainName": _KB_DISCOV_DOMAIN,
-    "headers": {},
-    "resourceService": _ALL_SERVICES,
-}
-
 _DIRECT_MINIO_KEY = f"resource/doc/KG_DOC_{_KN_DIRECT}.json"
 _DISCOV_MINIO_KEY = f"resource/doc/KG_DOC_{_KN_DISCOV}.json"
 
@@ -114,9 +90,30 @@ _TABLES_TO_DROP = (
     "kgw_migration",
 )
 
+# ---------------------------------------------------------------------------
+# Helpers (importable by test modules)
+# ---------------------------------------------------------------------------
+
+_USER_ID = "test_user"
+
+
+def hdrs(extra: dict | None = None) -> dict[str, str]:
+    h = {"X-User-Id": _USER_ID}
+    if extra:
+        h.update(extra)
+    return h
+
+
+def ok_resp(obj: dict | None = None) -> dict[str, Any]:
+    return {"resultCode": "0", "resultMsg": "success", "resultObject": obj or {}}
+
+
+def fail_resp(msg: str = "error") -> dict[str, Any]:
+    return {"resultCode": "-1", "resultMsg": msg, "resultObject": {}}
+
 
 # ---------------------------------------------------------------------------
-# Module-scoped fixture: full app with both KB configs seeded
+# Fixture: app with real byclaw-qa backend
 # ---------------------------------------------------------------------------
 
 
@@ -126,10 +123,13 @@ async def _app_resources(
     redis_url: str,
     minio_settings: dict[str, str],
 ) -> AsyncIterator[tuple[httpx.AsyncClient, Any, Any]]:
-    """Build the gateway app wired to real DB/Redis/MinIO.
+    """Build the gateway app wired to the running byclaw-qa backend.
 
-    Seeds TWO KB configs: 200001 (direct) and 300001 (discovery).
-    Yields (client, pool, app).  Drops all kgw tables on teardown.
+    1. Verify byclaw-qa is reachable
+    2. Seed KB configs in MinIO
+    3. Build byclaw-kgw app
+    4. Yield (client, pool, app)
+    5. Teardown: drop kgw tables, cleanup MinIO
     """
     import aioboto3
     from kgw.audit import AuditWriter
@@ -141,11 +141,38 @@ async def _app_resources(
     from kgw.resilience.circuit_breaker import CircuitBreakerRegistry
     from kgw.settings import get_settings
 
-    get_settings.cache_clear()
-    settings = get_settings()
-    bucket = minio_settings["bucket"]
+    # ---- 1. Verify byclaw-qa is reachable ----
+    async with httpx.AsyncClient() as check:
+        try:
+            resp = await check.get(f"{_QA_URL}/health", timeout=5.0)
+        except Exception:
+            pytest.fail(
+                f"byclaw-qa not reachable at {_QA_URL}/health.\n"
+                f"Start it first: cd byclaw-qa && cp .env.docker .env && bash start.sh api"
+            )
+        if resp.status_code != 200:
+            pytest.fail(
+                f"byclaw-qa unhealthy at {_QA_URL}/health (HTTP {resp.status_code})"
+            )
 
-    # Seed both KB configs in MinIO
+    # ---- 2. Seed KB configs in MinIO ----
+    direct_config = {
+        "resourceId": int(_KN_DIRECT),
+        "resourceCode": _RESOURCE_CODE_DIRECT,
+        "domainURL": _QA_URL,
+        "domainName": "",
+        "headers": {},
+        "resourceService": _ALL_SERVICES,
+    }
+    discov_config = {
+        "resourceId": int(_KN_DISCOV),
+        "resourceCode": _RESOURCE_CODE_DISCOV,
+        "domainURL": "",
+        "domainName": _QA_SVC_NAME,
+        "headers": {},
+        "resourceService": _ALL_SERVICES,
+    }
+    bucket = minio_settings["bucket"]
     async with aioboto3.Session().client(
         "s3",
         endpoint_url=minio_settings["endpoint_url"],
@@ -153,8 +180,8 @@ async def _app_resources(
         aws_secret_access_key=minio_settings["secret_key"],
     ) as s3:
         for key, config in [
-            (_DIRECT_MINIO_KEY, _DIRECT_CONFIG),
-            (_DISCOV_MINIO_KEY, _DISCOV_CONFIG),
+            (_DIRECT_MINIO_KEY, direct_config),
+            (_DISCOV_MINIO_KEY, discov_config),
         ]:
             await s3.put_object(
                 Bucket=bucket,
@@ -163,12 +190,16 @@ async def _app_resources(
                 ContentType="application/json",
             )
 
+    # ---- 3. Build byclaw-kgw gateway ----
+    get_settings.cache_clear()
+    settings = get_settings()
+
     pool = await build_pool(pg_dsn, min_size=1, max_size=5)
     await run_migrations(pool, _SQL_DIR)
 
     redis_client = redis_async.from_url(redis_url, decode_responses=False)
     http_client = build_http_client(
-        timeout_seconds=10.0, max_connections=20, max_keepalive=5
+        timeout_seconds=30.0, max_connections=20, max_keepalive=5
     )
 
     scheme = "https" if settings.file_storage_minio_secure else "http"
@@ -201,11 +232,45 @@ async def _app_resources(
     app.state.circuit_breakers = circuit_breakers
     app.state.ingest_semaphore = asyncio.Semaphore(100)
 
+    # ---- 4. Seed KB records in byclaw-qa's knowledge_base table ----
+    # The gateway translates portal knCode -> resource_code (e.g. "200001" -> "2").
+    # byclaw-qa stores KB configs in a `knowledge_base` table; a row must exist
+    # with kid = resource_code so the gateway's real-http tests can resolve the KB.
+    # We trigger byclaw-qa's lazy schema init with a health-adjacent call, then
+    # insert/upsert using the same database pool.
+    async with httpx.AsyncClient() as direct:
+        for _rc in [_RESOURCE_CODE_DIRECT, _RESOURCE_CODE_DISCOV]:
+            try:
+                # Trigger lazy schema init
+                await direct.post(
+                    f"{_QA_URL}/api/v1/knowledgeBases/create",
+                    json={"knCode": _rc, "knName": f"kgw-it-{_rc}"},
+                    timeout=30.0,
+                )
+            except Exception:
+                pass
+
+    # Upsert KB rows with the correct kid matching resource_code
+    for _rc in [_RESOURCE_CODE_DIRECT, _RESOURCE_CODE_DISCOV]:
+        try:
+            async with pool.connection() as conn:
+                await conn.execute(
+                    "INSERT INTO knowledge_base (kid, kb_name, is_deleted, created_at, updated_at) "
+                    "VALUES (%s::bigint, %s, FALSE, NOW(), NOW()) "
+                    "ON CONFLICT (kid) DO NOTHING",
+                    (_rc, f"kgw-it-{_rc}"),
+                )
+                await conn.commit()
+        except Exception:
+            pass
+
+    # ---- 5. Yield ----
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         yield client, pool, app
 
+    # ---- 5. Teardown ----
     await audit_writer.stop()
     await http_client.aclose()
     await redis_client.aclose()
@@ -217,7 +282,7 @@ async def _app_resources(
 
     await pool.close()
 
-    # Cleanup MinIO
+    # Cleanup MinIO KB configs
     try:
         async with aioboto3.Session().client(
             "s3",
@@ -229,6 +294,9 @@ async def _app_resources(
                 await s3.delete_object(Bucket=bucket, Key=key)
     except Exception:  # noqa: BLE001
         pass
+
+
+# ---- Convenience fixtures ----
 
 
 @pytest_asyncio.fixture(loop_scope="module", scope="module")
@@ -244,25 +312,3 @@ async def pool(_app_resources: tuple) -> Any:
 @pytest_asyncio.fixture(loop_scope="module", scope="module")
 async def app(_app_resources: tuple) -> Any:
     return _app_resources[2]
-
-
-# ---------------------------------------------------------------------------
-# Auth header helpers
-# ---------------------------------------------------------------------------
-
-_USER_ID = "test_user"
-
-
-def _hdrs(extra: dict | None = None) -> dict[str, str]:
-    h = {"X-User-Id": _USER_ID}
-    if extra:
-        h.update(extra)
-    return h
-
-
-def _ok_resp(obj: dict | None = None) -> dict[str, Any]:
-    return {"resultCode": "0", "resultMsg": "success", "resultObject": obj or {}}
-
-
-def _fail_resp(msg: str = "error") -> dict[str, Any]:
-    return {"resultCode": "-1", "resultMsg": msg, "resultObject": {}}
