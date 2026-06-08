@@ -70,6 +70,14 @@ byclaw-data/resource/import_package_owl_onto_bak/
 # Claude
 .claude/
 
+# Soft-deleted (git rm --cached)
+DIG_EMPLOYEE_*.json
+KG_DOC_*.json
+prompt.py
+startup.sh
+超级助手需求说明.txt
+docs/superpowers/
+
 # Vscode
 .vscode/
 
