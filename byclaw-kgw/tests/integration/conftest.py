@@ -169,12 +169,16 @@ async def _app_resources(
     os.environ.setdefault("PORT", str(qa_port))
     os.environ.setdefault("SERVICE_NAME", _QA_SVC_NAME)
     os.environ.setdefault("AGENT_DATA_PATH", "/tmp/kgw_test_agent_data")
-    os.environ.setdefault("EMBEDDING_MODEL_NAME", "text-embedding-3-small")
+    os.environ.setdefault("BY_QA_MODEL_CONFIG_PROVIDER", "redis_model_config:RedisModelConfigProvider")
+    os.environ.setdefault("EMBEDDING_MODEL_NAME", "text-embedding-v4")
     os.environ.setdefault("EMBEDDING_DIMENSION", "1024")
-    os.environ.setdefault("EMBEDDING_BASE_URL", "http://localhost:9999/v1")
-    os.environ.setdefault("EMBEDDING_API_KEY", "sk-placeholder")
-    os.environ.setdefault("LLM_BASE_URL", "http://localhost:9999/v1")
+    os.environ.setdefault("LLM_BASE_URL", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")
     os.environ.setdefault("LLM_API_KEY", "sk-placeholder")
+
+    # Make byclaw-qa's redis_model_config importable
+    import sys
+    _qa_src = Path(__file__).resolve().parent.parent.parent.parent / "byclaw-qa" / "src"
+    sys.path.insert(0, str(_qa_src))
 
     # Monkeypatch byclaw-qa's lifespan Redis registration to no-ops
     import by_qa.main as qa_main  # noqa: PLC0415
@@ -311,7 +315,12 @@ async def _app_resources(
     try:
         await asyncio.wait_for(qa_task, timeout=5.0)
     except (asyncio.TimeoutError, RuntimeError):
-        qa_task.cancel()
+        pass
+    qa_task.cancel()
+    try:
+        await qa_task
+    except asyncio.CancelledError:
+        pass
 
     await audit_writer.stop()
     try:
