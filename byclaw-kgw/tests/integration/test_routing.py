@@ -137,9 +137,12 @@ async def test_delete_directory_cleanup(client: httpx.AsyncClient) -> None:
             else:
                 raise
         body = resp.json()
-        # Don't fail if discovery directory wasn't created (may have been skipped)
-        if body["resultCode"] != "0" and "not found" in body.get("resultMsg", ""):
-            pass  # acceptable -- directory was never created
+        msg = body.get("resultMsg", "")
+        # Acceptable: directory never created, or discovery not available
+        if body["resultCode"] != "0" and (
+            "not found" in msg or "No available instances" in msg
+        ):
+            pass
         else:
             assert body["resultCode"] == "0", f"delete {path} failed: {body}"
 

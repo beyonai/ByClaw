@@ -37,7 +37,7 @@ def _inter_test_delay() -> None:
     """Pause 1.2 s between tests so the byclaw-qa backend can drain."""
     import time
 
-    time.sleep(2.0)
+    time.sleep(3.0)
 
 
 # ---------------------------------------------------------------------------

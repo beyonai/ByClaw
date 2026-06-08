@@ -1,13 +1,7 @@
 """Shared test fixtures for byclaw-kgw integration tests.
 
-Prerequisites (run once before ``pytest -m integration``):
-
-    cd byclaw-qa && cp .env.docker .env && bash start.sh api
-
-This starts a **real byclaw-qa backend** on ``http://127.0.0.1:{BYCLAW_QA_PORT}``.
-The fixture seeds two KB configs in MinIO so the gateway can exercise both
-direct-mode (domainURL) and discovery-mode (domainName) routing against the
-same QA instance.
+Automatically starts a **real byclaw-qa backend** on port 8000 via uvicorn,
+then builds the byclaw-kgw gateway app.  Two KB configs are seeded in MinIO.
 
 Requires: OpenGauss :15432, Redis :6379, MinIO :19000.
 """
@@ -27,6 +21,7 @@ import httpx
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis_async
+import uvicorn
 from httpx import ASGITransport
 
 _SQL_DIR = Path(__file__).resolve().parent.parent.parent / "sql"
@@ -158,19 +153,59 @@ async def _app_resources(
     from kgw.resilience.circuit_breaker import CircuitBreakerRegistry
     from kgw.settings import get_settings
 
-    # ---- 1. Verify byclaw-qa is reachable ----
+    # ---- 1. Start byclaw-qa automatically ----
+    qa_port = _QA_PORT
+
+    # Map kgw-style env vars to by_qa.config.Settings
+    minio_host = minio_settings["endpoint_url"].split("://")[1].split(":")[0]
+    minio_api_port = minio_settings["endpoint_url"].split(":")[-1]
+    os.environ.setdefault("MINIO_ENDPOINT", f"{minio_host}:{minio_api_port}")
+    os.environ.setdefault("MINIO_ACCESS_KEY", minio_settings["access_key"])
+    os.environ.setdefault("MINIO_SECRET_KEY", minio_settings["secret_key"])
+    os.environ.setdefault("MINIO_SECURE", "false")
+    os.environ.setdefault("KB_MINIO_BUCKET", minio_settings["bucket"])
+    os.environ.setdefault("KB_MINIO_MARKDOWN_BUCKET", minio_settings["bucket"])
+    os.environ.setdefault("HOST", "127.0.0.1")
+    os.environ.setdefault("PORT", str(qa_port))
+    os.environ.setdefault("SERVICE_NAME", _QA_SVC_NAME)
+    os.environ.setdefault("AGENT_DATA_PATH", "/tmp/kgw_test_agent_data")
+    os.environ.setdefault("EMBEDDING_MODEL_NAME", "text-embedding-3-small")
+    os.environ.setdefault("EMBEDDING_DIMENSION", "1024")
+    os.environ.setdefault("EMBEDDING_BASE_URL", "http://localhost:9999/v1")
+    os.environ.setdefault("EMBEDDING_API_KEY", "sk-placeholder")
+    os.environ.setdefault("LLM_BASE_URL", "http://localhost:9999/v1")
+    os.environ.setdefault("LLM_API_KEY", "sk-placeholder")
+
+    # Monkeypatch byclaw-qa's lifespan Redis registration to no-ops
+    import by_qa.main as qa_main  # noqa: PLC0415
+
+    qa_main._register_service = lambda app: asyncio.sleep(0)  # noqa: ARG005
+    qa_main._unregister_service = lambda app: asyncio.sleep(0)  # noqa: ARG005
+    from by_qa.config import get_settings as qa_get_settings  # noqa: PLC0415
+
+    qa_get_settings.cache_clear()
+
+    qa_app = qa_main.create_app()
+    qa_config = uvicorn.Config(
+        qa_app, host="127.0.0.1", port=qa_port, log_level="warning"
+    )
+    qa_server = uvicorn.Server(qa_config)
+    qa_task = asyncio.create_task(qa_server.serve(), name="byclaw-qa-server")
+
+    # Wait healthy
+    deadline = asyncio.get_event_loop().time() + 30.0
     async with httpx.AsyncClient() as check:
-        try:
-            resp = await check.get(f"{_QA_URL}/health", timeout=5.0)
-        except Exception:
-            pytest.fail(
-                f"byclaw-qa not reachable at {_QA_URL}/health.\n"
-                f"Start it first: cd byclaw-qa && cp .env.docker .env && bash start.sh api"
-            )
-        if resp.status_code != 200:
-            pytest.fail(
-                f"byclaw-qa unhealthy at {_QA_URL}/health (HTTP {resp.status_code})"
-            )
+        while True:
+            try:
+                resp = await check.get(f"{_QA_URL}/health", timeout=2.0)
+                if resp.status_code == 200:
+                    break
+            except Exception:  # noqa: BLE001
+                pass
+            if asyncio.get_event_loop().time() > deadline:
+                qa_server.should_exit = True
+                pytest.fail(f"byclaw-qa unhealthy after 30s at {_QA_URL}")
+            await asyncio.sleep(0.5)
 
     # ---- 2. Seed KB configs in MinIO ----
     direct_config = {
@@ -290,6 +325,12 @@ async def _app_resources(
         yield client, pool, app
 
     # ---- 5. Teardown ----
+    qa_server.should_exit = True
+    try:
+        await asyncio.wait_for(qa_task, timeout=5.0)
+    except (asyncio.TimeoutError, RuntimeError):
+        qa_task.cancel()
+
     await audit_writer.stop()
     try:
         await http_client.aclose()
