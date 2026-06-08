@@ -33,4 +33,5 @@ dev = [
     "fakeredis>=2.26.0",
     "aiohttp>=3.14.0",
     "pytest-cov>=7.1.0",
+    "by-qa[knowledge]>=0.1.12",
 ]

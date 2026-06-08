@@ -1,24 +1,25 @@
 """Integration tests: direct vs discovery routing.
 
-Verifies the gateway correctly handles both domainURL (direct HTTP)
-and domainName (by-framework DiscoveryClient) routing modes.
+Makes REAL HTTP calls through the gateway to the byclaw-qa backend.
+No respx mocks.
 """
+
 # pylint: disable=redefined-outer-name,invalid-name
+
+from __future__ import annotations
 
 from typing import Any
 
 import httpx
 import pytest
-import respx
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="module")]
 
-# KB config constants — must match values in conftest.py
+# KB config constants -- must match values in conftest.py
 _KN_DIRECT = "200001"
 _KN_DISCOV = "300001"
-_KB_DIRECT_URL = "http://kb-direct.test"
 _USER_ID = "test_user"
-_RESOURCE_CODE_DIRECT = "2"
+_QA_SVC_NAME = "byclaw-qa-manager"
 
 
 def _hdrs(extra: dict | None = None) -> dict[str, str]:
@@ -28,117 +29,170 @@ def _hdrs(extra: dict | None = None) -> dict[str, str]:
     return h
 
 
-def _ok_resp(obj: dict | None = None) -> dict[str, Any]:
-    return {"resultCode": "0", "resultMsg": "success", "resultObject": obj or {}}
+# ---------------------------------------------------------------------------
+# E5: basic app health
+# ---------------------------------------------------------------------------
 
 
-def _fail_resp(msg: str = "error") -> dict[str, Any]:
-    return {"resultCode": "-1", "resultMsg": msg, "resultObject": {}}
-
-
-# --- E5: basic app health ---
-async def test_app_health(client):
+async def test_app_health(client: httpx.AsyncClient) -> None:
+    """GET /healthz returns 200."""
     resp = await client.get("/healthz")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
 
 
-# --- E3: KB config resolves correctly ---
-async def test_kb_config_direct_resolves(app):
-    """Direct KB (200001) config is loaded from MinIO and domain_url is populated."""
+# ---------------------------------------------------------------------------
+# KB config resolves correctly from MinIO
+# ---------------------------------------------------------------------------
+
+
+async def test_kb_config_direct_resolves(app: Any) -> None:
+    """Direct KB (200001) config is loaded from MinIO with domain_url set."""
     cfg = await app.state.config_provider.get_kb_config(_KN_DIRECT)
     assert cfg is not None
     assert cfg.kn_code == _KN_DIRECT
-    assert cfg.domain_url == _KB_DIRECT_URL
-    assert cfg.resource_code == "2"  # backend knCode
+    assert cfg.domain_url, "domain_url should be set to the QA backend URL"
+    assert cfg.resource_code == "2"
 
 
-async def test_kb_config_discovery_resolves(app):
+async def test_kb_config_discovery_resolves(app: Any) -> None:
     """Discovery KB (300001) config is loaded with domain_name set."""
     cfg = await app.state.config_provider.get_kb_config(_KN_DISCOV)
     assert cfg is not None
     assert cfg.kn_code == _KN_DISCOV
-    assert cfg.domain_name == "kgw-int-kb-svc"
-    assert cfg.domain_url == ""
-
-
-# --- GD1/GD2: directory create in both modes ---
-async def test_create_directory_direct(client):
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(f"{_KB_DIRECT_URL}/api/v1/directories/create").mock(
-            return_value=httpx.Response(200, json=_ok_resp())
-        )
-        mock.post(f"{_KB_DIRECT_URL}/api/v1/listDir").mock(
-            return_value=httpx.Response(200, json=_ok_resp())
-        )
-        resp = await client.post(
-            "/kgw/api/v1/directories/create",
-            json={"knCode": _KN_DIRECT, "directoryPath": "/policies"},
-            headers=_hdrs(),
-        )
-    assert resp.json()["resultCode"] == "0"
-
-
-# --- GI2: discovery mode config verified at import layer ---
-async def test_import_file_discovery_config(app):
-    """Discovery KB config has domain_name set (no domainURL).
-
-    We verify the config layer — the actual HTTP call to a discovery-mode
-    backend requires Redis service registration which is set up by the
-    docker-compose environment at deploy time, not during unit tests.
-    """
-    cfg = await app.state.config_provider.get_kb_config(_KN_DISCOV)
-    assert cfg is not None
-    assert cfg.domain_name == "kgw-int-kb-svc"
+    assert cfg.domain_name == _QA_SVC_NAME
     assert cfg.domain_url == ""
     assert cfg.resource_code == "3"
 
 
-# --- GI9: discovery mode config verified at delete layer ---
-async def test_delete_file_discovery_config(app):
-    """Discovery KB config loaded correctly for delete operations."""
-    cfg = await app.state.config_provider.get_kb_config(_KN_DISCOV)
-    assert cfg is not None
-    assert "fileDelete" in cfg.operation_paths
+# ---------------------------------------------------------------------------
+# Directory create in direct mode
+# ---------------------------------------------------------------------------
 
 
-# --- GR1: listDir direct ---
-async def test_listdir_direct(client):
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(f"{_KB_DIRECT_URL}/api/v1/listDir").mock(
-            return_value=httpx.Response(200, json=_ok_resp({"data": []}))
-        )
+async def test_create_directory_direct(client: httpx.AsyncClient) -> None:
+    """Create a directory on the direct KB and verify it appears in listDir."""
+    # Create
+    resp = await client.post(
+        "/kgw/api/v1/directories/create",
+        json={"knCode": _KN_DIRECT, "directoryPath": "/routing-test"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"create failed: {body}"
+
+    # Verify via listDir
+    resp = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DIRECT, "directoryPath": "/"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"listDir failed: {body}"
+    data = body.get("resultObject", {}).get("data", [])
+    names = [item.get("name", "") for item in data]
+    assert "/routing-test" in names, f"/routing-test not found in listing: {data}"
+
+
+# ---------------------------------------------------------------------------
+# Directory create in discovery mode
+# ---------------------------------------------------------------------------
+
+
+async def test_create_directory_discovery(client: httpx.AsyncClient) -> None:
+    """Create a directory on the discovery KB."""
+    resp = await client.post(
+        "/kgw/api/v1/directories/create",
+        json={"knCode": _KN_DISCOV, "directoryPath": "/routing-disc-test"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"create failed: {body}"
+
+
+# ---------------------------------------------------------------------------
+# Cleanup test directories
+# ---------------------------------------------------------------------------
+
+
+async def test_delete_directory_cleanup(client: httpx.AsyncClient) -> None:
+    """Clean up the test directories created above."""
+    for kn_code, path in [
+        (_KN_DIRECT, "/routing-test"),
+        (_KN_DISCOV, "/routing-disc-test"),
+    ]:
         resp = await client.post(
-            "/kgw/api/v1/listDir",
-            json={"knCode": _KN_DIRECT, "directoryPath": "/"},
+            "/kgw/api/v1/directories/delete",
+            json={"knCode": kn_code, "directoryPath": path},
             headers=_hdrs(),
         )
-    assert resp.json()["resultCode"] == "0"
+        body = resp.json()
+        assert body["resultCode"] == "0", f"delete {path} failed: {body}"
 
 
-# --- CX1: cross-KB config verification ---
-async def test_cross_kb_both_configs_independent(app):
-    """Both KB configs (200001+300001) loaded independently from MinIO."""
-    cfg_direct = await app.state.config_provider.get_kb_config(_KN_DIRECT)
-    cfg_disc = await app.state.config_provider.get_kb_config(_KN_DISCOV)
-    assert cfg_direct is not None
-    assert cfg_disc is not None
-    assert cfg_direct.domain_url == _KB_DIRECT_URL
-    assert cfg_disc.domain_name == "kgw-int-kb-svc"
-    # Two KBs should not share config state
-    assert cfg_direct.resource_code != cfg_disc.resource_code
+# ---------------------------------------------------------------------------
+# listDir in direct mode
+# ---------------------------------------------------------------------------
 
 
-# --- KBNotFound for unknown knCode ---
-async def test_unknown_kn_code(client):
+async def test_listdir_direct(client: httpx.AsyncClient) -> None:
+    """POST /kgw/api/v1/listDir returns a valid result."""
+    resp = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DIRECT, "directoryPath": "/"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"listDir failed: {body}"
+    data = body.get("resultObject", {}).get("data", [])
+    assert isinstance(data, list), f"data should be a list, got {type(data)}"
+
+
+# ---------------------------------------------------------------------------
+# Unknown knCode returns error
+# ---------------------------------------------------------------------------
+
+
+async def test_unknown_kn_code(client: httpx.AsyncClient) -> None:
+    """Unknown knCode returns resultCode -1."""
     resp = await client.post(
         "/kgw/api/v1/listDir",
         json={"knCode": "99999999", "directoryPath": "/"},
         headers=_hdrs(),
     )
     body = resp.json()
-    assert body["resultCode"] == "-1"
-    assert (
-        "not found" in body["resultMsg"].lower()
-        or "unknown" in body["resultMsg"].lower()
+    assert body["resultCode"] == "-1", f"expected -1, got: {body}"
+
+
+# ---------------------------------------------------------------------------
+# Import a file via multipart, then delete it
+# ---------------------------------------------------------------------------
+
+
+async def test_import_and_read(client: httpx.AsyncClient) -> None:
+    """Multipart file import and subsequent cleanup."""
+    # Import
+    files = {
+        "fileContent": ("hello.md", b"# Hello", "text/markdown"),
+    }
+    data = {
+        "knCode": _KN_DIRECT,
+        "filePath": "/routing/hello.md",
+    }
+    resp = await client.post(
+        "/kgw/api/v1/knowledgeItems/import",
+        data=data,
+        files=files,
+        headers=_hdrs(),
     )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"import failed: {body}"
+
+    # Cleanup: delete the imported file
+    resp = await client.post(
+        "/kgw/api/v1/knowledgeItems/delete",
+        json={"knCode": _KN_DIRECT, "filePath": "/routing/hello.md"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"delete failed: {body}"

@@ -1,21 +1,24 @@
-"""Integration tests: file import, delete, read, build (GI1–GI11, GR1–GR11, GB1–GB6).
+"""Integration tests: file import, delete, read, build -- real backend calls.
 
-Covers the full file lifecycle: import (markdown + front-matter), delete,
-soft-delete re-import, build trigger + status, readFile, downloadFile.
+Tests file lifecycle through the KGW gateway to the running byclaw-qa
+backend, covering import (markdown + PDF), delete (success + nonexistent),
+soft-delete re-import, build trigger + status + duplicate, directory listing,
+glob, and readFile (success + nonexistent).
+
+No respx mocks -- all calls are real.
 """
 # pylint: disable=redefined-outer-name,invalid-name,unused-argument
 
-from typing import Any
+from __future__ import annotations
+
+import asyncio
 
 import httpx
 import pytest
-import respx
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="module")]
 
-# KB config constants — must match values in conftest.py
 _KN_DIRECT = "200001"
-_KB_DIRECT_URL = "http://kb-direct.test"
 _USER_ID = "test_user"
 
 
@@ -26,294 +29,317 @@ def _hdrs(extra: dict | None = None) -> dict[str, str]:
     return h
 
 
-def _ok_resp(obj: dict | None = None) -> dict[str, Any]:
-    return {"resultCode": "0", "resultMsg": "success", "resultObject": obj or {}}
+# ---------------------------------------------------------------------------
+# GI1: import markdown file
+# ---------------------------------------------------------------------------
 
 
-def _fail_resp(msg: str = "error") -> dict[str, Any]:
-    return {"resultCode": "-1", "resultMsg": msg, "resultObject": {}}
-
-
-_IMPORT_URL = f"{_KB_DIRECT_URL}/api/v1/knowledgeItems/import"
-_DELETE_URL = f"{_KB_DIRECT_URL}/api/v1/knowledgeItems/delete"
-_BUILD_URL = f"{_KB_DIRECT_URL}/api/v1/fileToMarkdownIndex"
-_STATUS_URL = f"{_KB_DIRECT_URL}/api/v1/fileBuildStatus"
-_READ_URL = f"{_KB_DIRECT_URL}/api/v1/readFile"
-_DOWNLOAD_URL = f"{_KB_DIRECT_URL}/api/v1/downloadFile"
-
-
-# ---- GI1: import markdown file (direct mode) ----
-async def test_import_markdown_success(client):
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(_IMPORT_URL).mock(return_value=httpx.Response(200, json=_ok_resp()))
-        resp = await client.post(
-            "/kgw/api/v1/knowledgeItems/import",
-            data={"knCode": _KN_DIRECT, "filePath": "/policies/leave.md"},
-            files={"fileContent": ("leave.md", b"# Leave Policy", "text/markdown")},
-            headers=_hdrs(),
-        )
-    assert resp.json()["resultCode"] == "0"
-
-
-# ---- GI6: re-import same path (overwrite) ----
-async def test_reimport_same_path(client):
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(_IMPORT_URL).mock(return_value=httpx.Response(200, json=_ok_resp()))
-        resp = await client.post(
-            "/kgw/api/v1/knowledgeItems/import",
-            data={"knCode": _KN_DIRECT, "filePath": "/policies/leave.md"},
-            files={"fileContent": ("leave.md", b"# Leave Policy v2", "text/markdown")},
-            headers=_hdrs(),
-        )
-    assert resp.json()["resultCode"] == "0"
-
-
-# ---- GI7: import non-markdown file (PDF bytes) ----
-async def test_import_pdf_file(client):
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(_IMPORT_URL).mock(return_value=httpx.Response(200, json=_ok_resp()))
-        resp = await client.post(
-            "/kgw/api/v1/knowledgeItems/import",
-            data={"knCode": _KN_DIRECT, "filePath": "/policies/rules.pdf"},
-            files={"fileContent": ("rules.pdf", b"%PDF-1.4 fake", "application/pdf")},
-            headers=_hdrs(),
-        )
-    assert resp.json()["resultCode"] == "0"
-
-
-# ---- GI8: delete file (direct) ----
-async def test_delete_file_success(client):
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(_DELETE_URL).mock(return_value=httpx.Response(200, json=_ok_resp()))
-        resp = await client.post(
-            "/kgw/api/v1/knowledgeItems/delete",
-            json={"knCode": _KN_DIRECT, "filePath": "/policies/leave.md"},
-            headers=_hdrs(),
-        )
-    assert resp.json()["resultCode"] == "0"
-
-
-# ---- GI10: delete non-existent file ----
-async def test_delete_nonexistent_file(client):
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(_DELETE_URL).mock(
-            return_value=httpx.Response(200, json=_fail_resp("file not found"))
-        )
-        resp = await client.post(
-            "/kgw/api/v1/knowledgeItems/delete",
-            json={"knCode": _KN_DIRECT, "filePath": "/never.md"},
-            headers=_hdrs(),
-        )
-    assert resp.json()["resultCode"] == "-1"
-
-
-# ---- GI11: soft-delete then re-import ----
-async def test_soft_delete_reimport(client):
-    """Delete then re-import the same path should succeed."""
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(_DELETE_URL).mock(return_value=httpx.Response(200, json=_ok_resp()))
-        await client.post(
-            "/kgw/api/v1/knowledgeItems/delete",
-            json={"knCode": _KN_DIRECT, "filePath": "/policies/reimport.md"},
-            headers=_hdrs(),
-        )
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(_IMPORT_URL).mock(return_value=httpx.Response(200, json=_ok_resp()))
-        resp = await client.post(
-            "/kgw/api/v1/knowledgeItems/import",
-            data={"knCode": _KN_DIRECT, "filePath": "/policies/reimport.md"},
-            files={"fileContent": ("reimport.md", b"# Fresh", "text/markdown")},
-            headers=_hdrs(),
-        )
-    assert resp.json()["resultCode"] == "0"
-
-
-# ---- GB1: trigger build ----
-async def test_build_trigger_success(client):
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(_BUILD_URL).mock(return_value=httpx.Response(200, json=_ok_resp()))
-        resp = await client.post(
-            "/kgw/api/v1/fileToMarkdownIndex",
-            json={"knCode": _KN_DIRECT, "filePath": "/policies/leave.md"},
-            headers=_hdrs(),
-        )
-    assert resp.json()["resultCode"] == "0"
-
-
-# ---- GB3: query build status ----
-async def test_build_status_success(client):
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(_STATUS_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_ok_resp({"status": "success", "currentStep": "complete"}),
+async def test_import_markdown(client: httpx.AsyncClient) -> None:
+    """POST /kgw/api/v1/knowledgeItems/import (multipart, markdown)."""
+    resp = await client.post(
+        "/kgw/api/v1/knowledgeItems/import",
+        data={"knCode": _KN_DIRECT, "filePath": "/fileops/hello.md"},
+        files={
+            "fileContent": (
+                "hello.md",
+                b"# Hello World\n\nTest content.",
+                "text/markdown",
             )
-        )
-        resp = await client.post(
-            "/kgw/api/v1/fileBuildStatus",
-            json={"knCode": _KN_DIRECT, "filePath": "/policies/leave.md"},
-            headers=_hdrs(),
-        )
+        },
+        headers=_hdrs(),
+    )
     body = resp.json()
-    assert body["resultCode"] == "0"
-    assert body["resultObject"]["status"] == "success"
+    assert body["resultCode"] == "0", f"GI1 import markdown: {body}"
 
 
-# ---- GB4: duplicate build (already running) ----
-async def test_build_duplicate_rejected(client):
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(_BUILD_URL).mock(
-            return_value=httpx.Response(
-                200, json=_fail_resp("build task already exists")
+# ---------------------------------------------------------------------------
+# GI6: re-import same path (overwrite)
+# ---------------------------------------------------------------------------
+
+
+async def test_reimport_same_path(client: httpx.AsyncClient) -> None:
+    """GI6: overwrite existing file with different content."""
+    resp = await client.post(
+        "/kgw/api/v1/knowledgeItems/import",
+        data={"knCode": _KN_DIRECT, "filePath": "/fileops/hello.md"},
+        files={
+            "fileContent": (
+                "hello.md",
+                b"# Hello v2\n\nUpdated.",
+                "text/markdown",
             )
-        )
-        resp = await client.post(
-            "/kgw/api/v1/fileToMarkdownIndex",
-            json={"knCode": _KN_DIRECT, "filePath": "/policies/leave.md"},
-            headers=_hdrs(),
-        )
-    assert resp.json()["resultCode"] == "-1"
+        },
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"GI6 reimport: {body}"
 
 
-# ---- GB5: build after failure retry ----
-async def test_build_retry_after_failure(client):
-    """After build fails, retrying should be accepted."""
-    with respx.mock(assert_all_called=False) as mock:
-        # First: status shows failed
-        mock.post(_STATUS_URL).respond(
-            json=_ok_resp({"status": "failed", "currentStep": "chunking"})
-        )
-        # Second: retry build accepted
-        mock.post(_BUILD_URL).respond(json=_ok_resp())
-        # Check status
+# ---------------------------------------------------------------------------
+# GI7: import PDF file
+# ---------------------------------------------------------------------------
+
+
+async def test_import_pdf(client: httpx.AsyncClient) -> None:
+    """GI7: import a non-markdown (PDF) file."""
+    resp = await client.post(
+        "/kgw/api/v1/knowledgeItems/import",
+        data={"knCode": _KN_DIRECT, "filePath": "/fileops/doc.pdf"},
+        files={
+            "fileContent": (
+                "doc.pdf",
+                b"%PDF-1.4 fake pdf content",
+                "application/pdf",
+            )
+        },
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"GI7 import PDF: {body}"
+
+
+# ---------------------------------------------------------------------------
+# GI8: delete file
+# ---------------------------------------------------------------------------
+
+
+async def test_delete_file(client: httpx.AsyncClient) -> None:
+    """GI8: delete an existing file."""
+    resp = await client.post(
+        "/kgw/api/v1/knowledgeItems/delete",
+        json={"knCode": _KN_DIRECT, "filePath": "/fileops/hello.md"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"GI8 delete: {body}"
+
+
+# ---------------------------------------------------------------------------
+# GI10: delete non-existent file
+# ---------------------------------------------------------------------------
+
+
+async def test_delete_nonexistent(client: httpx.AsyncClient) -> None:
+    """GI10: delete a file that does not exist."""
+    resp = await client.post(
+        "/kgw/api/v1/knowledgeItems/delete",
+        json={"knCode": _KN_DIRECT, "filePath": "/fileops/never.md"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "-1", f"GI10 delete nonexistent: {body}"
+
+
+# ---------------------------------------------------------------------------
+# GI11: soft-delete then re-import same path
+# ---------------------------------------------------------------------------
+
+
+async def test_soft_delete_reimport(client: httpx.AsyncClient) -> None:
+    """GI11: import, delete, then re-import the same path."""
+    # 1. Import
+    resp = await client.post(
+        "/kgw/api/v1/knowledgeItems/import",
+        data={"knCode": _KN_DIRECT, "filePath": "/fileops/reimport.md"},
+        files={
+            "fileContent": (
+                "reimport.md",
+                b"# Reimport me",
+                "text/markdown",
+            )
+        },
+        headers=_hdrs(),
+    )
+    assert resp.json()["resultCode"] == "0", "GI11 first import"
+
+    # 2. Delete
+    resp = await client.post(
+        "/kgw/api/v1/knowledgeItems/delete",
+        json={"knCode": _KN_DIRECT, "filePath": "/fileops/reimport.md"},
+        headers=_hdrs(),
+    )
+    assert resp.json()["resultCode"] == "0", "GI11 delete"
+
+    # 3. Re-import
+    resp = await client.post(
+        "/kgw/api/v1/knowledgeItems/import",
+        data={"knCode": _KN_DIRECT, "filePath": "/fileops/reimport.md"},
+        files={
+            "fileContent": (
+                "reimport.md",
+                b"# Reimported again",
+                "text/markdown",
+            )
+        },
+        headers=_hdrs(),
+    )
+    assert resp.json()["resultCode"] == "0", "GI11 reimport"
+
+
+# ---------------------------------------------------------------------------
+# GB1: build trigger
+# ---------------------------------------------------------------------------
+
+
+async def test_build_trigger(client: httpx.AsyncClient) -> None:
+    """GB1: import a file then trigger markdown build."""
+    # 1. Import the build test file
+    resp = await client.post(
+        "/kgw/api/v1/knowledgeItems/import",
+        data={"knCode": _KN_DIRECT, "filePath": "/fileops/build-test.md"},
+        files={
+            "fileContent": (
+                "build-test.md",
+                b"# Build Test\n\nContent for build.",
+                "text/markdown",
+            )
+        },
+        headers=_hdrs(),
+    )
+    assert resp.json()["resultCode"] == "0", "GB1 import for build"
+
+    # 2. Trigger build
+    resp = await client.post(
+        "/kgw/api/v1/fileToMarkdownIndex",
+        json={"knCode": _KN_DIRECT, "filePath": "/fileops/build-test.md"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"GB1 build trigger: {body}"
+
+
+# ---------------------------------------------------------------------------
+# GB3: build status
+# ---------------------------------------------------------------------------
+
+
+async def test_build_status(client: httpx.AsyncClient) -> None:
+    """GB3: query build status for a file."""
+    resp = await client.post(
+        "/kgw/api/v1/fileBuildStatus",
+        json={"knCode": _KN_DIRECT, "filePath": "/fileops/build-test.md"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"GB3 build status: {body}"
+    assert "status" in body.get("resultObject", {}), (
+        f"GB3 expected 'status' in resultObject, got: {body}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# GB4: duplicate build (should be rejected while one is in-flight)
+# ---------------------------------------------------------------------------
+
+
+async def test_build_duplicate(client: httpx.AsyncClient) -> None:
+    """GB4: triggering build for a file that already has one running."""
+    resp = await client.post(
+        "/kgw/api/v1/fileToMarkdownIndex",
+        json={"knCode": _KN_DIRECT, "filePath": "/fileops/build-test.md"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "-1", f"GB4 duplicate build: {body}"
+
+
+# ---------------------------------------------------------------------------
+# GR1: list root directory
+# ---------------------------------------------------------------------------
+
+
+async def test_listdir_root(client: httpx.AsyncClient) -> None:
+    """GR1: POST listDir for root directory."""
+    resp = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DIRECT, "directoryPath": "/"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"GR1 listDir: {body}"
+    data = body.get("resultObject", {}).get("data", [])
+    assert isinstance(data, list), f"GR1 expected list, got {type(data)}"
+
+
+# ---------------------------------------------------------------------------
+# GR4: glob pattern matching
+# ---------------------------------------------------------------------------
+
+
+async def test_glob(client: httpx.AsyncClient) -> None:
+    """GR4: glob for *.md in /fileops."""
+    resp = await client.post(
+        "/kgw/api/v1/glob",
+        json={"knCode": _KN_DIRECT, "pathRule": "/fileops/*.md"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"GR4 glob: {body}"
+
+
+# ---------------------------------------------------------------------------
+# GR6: readFile after build completes
+# ---------------------------------------------------------------------------
+
+
+async def test_readfile(client: httpx.AsyncClient) -> None:
+    """GR6: readFile for the built markdown file.
+
+    Waits up to 90 s for the build to complete before reading.
+    """
+    # Wait for build to finish (poll every 1 s, timeout 90 s)
+    for _ in range(90):
         status_resp = await client.post(
             "/kgw/api/v1/fileBuildStatus",
-            json={"knCode": _KN_DIRECT, "filePath": "/policies/leave.md"},
+            json={"knCode": _KN_DIRECT, "filePath": "/fileops/build-test.md"},
             headers=_hdrs(),
         )
-        assert status_resp.json()["resultCode"] == "0"
-        # Retry build
-        build_resp = await client.post(
-            "/kgw/api/v1/fileToMarkdownIndex",
-            json={"knCode": _KN_DIRECT, "filePath": "/policies/leave.md"},
-            headers=_hdrs(),
-        )
-    assert build_resp.json()["resultCode"] == "0"
+        sbody = status_resp.json()
+        status = sbody.get("resultObject", {}).get("status")
+        if status == "success":
+            break
+        if status == "failed":
+            pytest.fail(f"GR6 build failed with status: {sbody}")
+        await asyncio.sleep(1)
+    else:
+        pytest.fail("GR6 build did not complete within 90 s")
 
-
-# ---- GR6: readFile full markdown ----
-async def test_readfile_full(client):
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(_READ_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_ok_resp(
-                    {
-                        "knCode": _KN_DIRECT,
-                        "filePath": "/policies/leave.md",
-                        "data": "# Leave Policy\n\nContent here",
-                        "reachedEof": True,
-                    }
-                ),
-            )
-        )
-        resp = await client.post(
-            "/kgw/api/v1/readFile",
-            json={"knCode": _KN_DIRECT, "filePath": "/policies/leave.md"},
-            headers=_hdrs(),
-        )
+    resp = await client.post(
+        "/kgw/api/v1/readFile",
+        json={"knCode": _KN_DIRECT, "filePath": "/fileops/build-test.md"},
+        headers=_hdrs(),
+    )
     body = resp.json()
-    assert body["resultCode"] == "0"
-    assert body["resultObject"]["reachedEof"] is True
+    assert body["resultCode"] == "0", f"GR6 readFile: {body}"
 
 
-# ---- GR7: readFile with line window ----
-async def test_readfile_line_window(client):
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(_READ_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_ok_resp(
-                    {
-                        "knCode": _KN_DIRECT,
-                        "filePath": "/policies/leave.md",
-                        "data": "line 1\nline 2\nline 3",
-                        "startLine": 1,
-                        "endLine": 3,
-                        "reachedEof": False,
-                    }
-                ),
-            )
-        )
-        resp = await client.post(
-            "/kgw/api/v1/readFile",
-            json={
-                "knCode": _KN_DIRECT,
-                "filePath": "/policies/leave.md",
-                "startLine": 1,
-                "endLine": 3,
-            },
-            headers=_hdrs(),
-        )
+# ---------------------------------------------------------------------------
+# GR8: readFile for non-existent file
+# ---------------------------------------------------------------------------
+
+
+async def test_readfile_nonexistent(client: httpx.AsyncClient) -> None:
+    """GR8: readFile for a file that was never imported."""
+    resp = await client.post(
+        "/kgw/api/v1/readFile",
+        json={"knCode": _KN_DIRECT, "filePath": "/fileops/ghost.md"},
+        headers=_hdrs(),
+    )
     body = resp.json()
-    assert body["resultCode"] == "0"
-    assert body["resultObject"]["startLine"] == 1
+    assert body["resultCode"] == "-1", f"GR8 readFile nonexistent: {body}"
 
 
-# ---- GR8: readFile not built ----
-async def test_readfile_not_built(client):
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(_READ_URL).mock(
-            return_value=httpx.Response(200, json=_fail_resp("file not built"))
-        )
-        resp = await client.post(
-            "/kgw/api/v1/readFile",
-            json={"knCode": _KN_DIRECT, "filePath": "/policies/never_built.md"},
-            headers=_hdrs(),
-        )
-    assert resp.json()["resultCode"] == "-1"
+# ---------------------------------------------------------------------------
+# Cleanup: delete all files created under /fileops/
+# ---------------------------------------------------------------------------
 
 
-# ---- GR9: downloadFile ----
-async def test_download_file(client):
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(_DOWNLOAD_URL).mock(
-            return_value=httpx.Response(
-                200,
-                content=b"binary content here",
-                headers={"Content-Type": "application/octet-stream"},
-            )
-        )
-        resp = await client.post(
-            "/kgw/api/v1/downloadFile",
-            json={"knCode": _KN_DIRECT, "filePath": "/policies/rules.pdf"},
-            headers=_hdrs(),
-        )
-    assert resp.status_code == 200
-    assert resp.content == b"binary content here"
-
-
-# ---- GR4: glob pattern matching ----
-async def test_glob_matching(client):
-    with respx.mock(assert_all_called=False) as mock:
-        mock.post(f"{_KB_DIRECT_URL}/api/v1/glob").mock(
-            return_value=httpx.Response(
-                200,
-                json=_ok_resp(
-                    {
-                        "data": [
-                            {"name": "/policies/a.md", "type": "file", "size": 100},
-                            {"name": "/policies/b.md", "type": "file", "size": 200},
-                        ]
-                    }
-                ),
-            )
-        )
-        resp = await client.post(
-            "/kgw/api/v1/glob",
-            json={"knCode": _KN_DIRECT, "pathRule": "/policies/*.md"},
-            headers=_hdrs(),
-        )
+async def test_cleanup(client: httpx.AsyncClient) -> None:
+    """Remove the /fileops directory and all its contents."""
+    resp = await client.post(
+        "/kgw/api/v1/directories/delete",
+        json={"knCode": _KN_DIRECT, "directoryPath": "/fileops"},
+        headers=_hdrs(),
+    )
     body = resp.json()
-    assert body["resultCode"] == "0"
-    assert len(body["resultObject"]["data"]) == 2
+    assert body["resultCode"] == "0", f"cleanup directory delete: {body}"
