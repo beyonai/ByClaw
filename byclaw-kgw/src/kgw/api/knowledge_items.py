@@ -482,8 +482,8 @@ async def knowledge_item_import(
 @router.post("/knowledgeItems/search")
 async def knowledge_search(
     request: Request,
-    x_user_id: Annotated[str, Header(alias="X-User-Id")],
     body: dict[str, Any],
+    x_user_id: Annotated[str, Header(alias="X-User-Id")] = "",
 ) -> dict[str, Any]:
     """Multi-KB parallel semantic search."""
     kn_code_list = list(body.get("knCodeList") or [])

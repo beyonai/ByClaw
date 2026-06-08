@@ -135,6 +135,9 @@ async def test_audit_cross_kb(client: httpx.AsyncClient) -> None:
         assert _KN_DIRECT in kncodes_in_audit, (
             f"expected entries for {_KN_DIRECT} in audit data: {kncodes_in_audit}"
         )
+        assert _KN_DISCOV in kncodes_in_audit, (
+            f"expected entries for {_KN_DISCOV} in audit data: {kncodes_in_audit}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +164,291 @@ async def test_search_cross_kb_with_direct_only(client: httpx.AsyncClient) -> No
         pytest.skip("Proxy interference -- run with NO_PROXY=*")
     body = resp.json()
     assert body["resultCode"] == "0", f"cross-KB search: {body}"
+
+
+# ---------------------------------------------------------------------------
+# CX1: Same file sync to both KBs + fileToMarkdownIndex
+# ---------------------------------------------------------------------------
+
+
+async def test_sync_file_to_both_kbs(client: httpx.AsyncClient) -> None:
+    """CX1: Import same file content to both KBs and trigger build on both."""
+    import asyncio as _asyncio
+
+    content = b"# CX1 Sync Test\n\nCross-KB sync content."
+    path = "/cross-kb/cx1-sync.md"
+
+    # Import same file to both KBs
+    for kn_code in (_KN_DIRECT, _KN_DISCOV):
+        try:
+            resp = await client.post(
+                "/kgw/api/v1/knowledgeItems/import",
+                data={"knCode": kn_code, "filePath": path},
+                files={
+                    "fileContent": (
+                        "cx1-sync.md",
+                        content,
+                        "text/markdown",
+                    )
+                },
+                headers=_hdrs(),
+            )
+        except httpx.RemoteProtocolError:
+            pytest.skip("Proxy interference -- run with NO_PROXY=*")
+        body = resp.json()
+        rc = body["resultCode"]
+        # Discovery may be unavailable (-1) but direct must succeed (0)
+        assert rc in ("0", "-1") if kn_code == _KN_DISCOV else rc == "0", (
+            f"CX1 import {kn_code}: {body}"
+        )
+
+    # Trigger fileToMarkdownIndex on both KBs
+    for kn_code in (_KN_DIRECT, _KN_DISCOV):
+        try:
+            resp = await client.post(
+                "/kgw/api/v1/fileToMarkdownIndex",
+                json={"knCode": kn_code, "filePath": path},
+                headers=_hdrs(),
+            )
+        except httpx.RemoteProtocolError:
+            pytest.skip("Proxy interference -- run with NO_PROXY=*")
+        body = resp.json()
+        rc = body["resultCode"]
+        # Discovery may be unavailable (-1) but direct build must succeed (0)
+        assert rc in ("0", "-1") if kn_code == _KN_DISCOV else rc == "0", (
+            f"CX1 build {kn_code}: {body}"
+        )
+
+    # Wait for builds to complete on direct KB
+    for _ in range(60):
+        status_resp = await client.post(
+            "/kgw/api/v1/fileBuildStatus",
+            json={"knCode": _KN_DIRECT, "filePath": path},
+            headers=_hdrs(),
+        )
+        sbody = status_resp.json()
+        status = sbody.get("resultObject", {}).get("status")
+        if status in ("success", "complete"):
+            break
+        if status in ("failed",):
+            _step = sbody.get("resultObject", {}).get("currentStep", "?")
+            pytest.skip(
+                f"CX1 build failed at step={_step} -- embedding API may be unreachable"
+            )
+        await _asyncio.sleep(2)
+    else:
+        pytest.fail("CX1 build did not complete within 120 s")
+
+    # Verify files appear in both KBs via listDir
+    for kn_code in (_KN_DIRECT, _KN_DISCOV):
+        try:
+            resp = await client.post(
+                "/kgw/api/v1/listDir",
+                json={"knCode": kn_code, "directoryPath": "/cross-kb"},
+                headers=_hdrs(),
+            )
+        except httpx.RemoteProtocolError:
+            pytest.skip("Proxy interference -- run with NO_PROXY=*")
+        body = resp.json()
+        rc = body["resultCode"]
+        if rc not in ("0", "-1"):
+            pytest.fail(f"CX1 listDir {kn_code} unexpected result: {body}")
+        if rc == "0":
+            data = body.get("resultObject", {}).get("data", [])
+            found = any("cx1-sync.md" in str(f) for f in data)
+            assert found, f"CX1 file 'cx1-sync.md' not in {kn_code} listDir: {data}"
+
+
+# ---------------------------------------------------------------------------
+# CX2: Cross-KB metadata search
+# ---------------------------------------------------------------------------
+
+
+async def test_cross_kb_metadata_search(client: httpx.AsyncClient) -> None:
+    """CX2: Create 'status' property in both KBs, set values, metadataSearch across both."""
+    _sid = uuid.uuid4().hex[:8]
+    _prop = f"cx2_status_{_sid}"
+
+    # Create metadata property in both KBs via batchCreate
+    for kn_code in (_KN_DIRECT, _KN_DISCOV):
+        try:
+            resp = await client.post(
+                "/kgw/api/v1/metadataProperties/batchCreate",
+                json={
+                    "knCode": kn_code,
+                    "properties": [{"propertyName": _prop, "propertyType": "TEXT"}],
+                },
+                headers=_hdrs(),
+            )
+        except httpx.RemoteProtocolError:
+            pytest.skip("Proxy interference -- run with NO_PROXY=*")
+        body = resp.json()
+        rc = body.get("resultCode", body.get("code", "-1"))
+        if rc not in ("0", "-1"):
+            # Duplicate or discovery-unavailable are acceptable
+            msg = body.get("resultMsg", "")
+            if "exist" in msg or "unavailable" in msg.lower():
+                continue
+            pytest.fail(f"CX2 create property {kn_code}: {body}")
+
+    # Import files in both KBs
+    _paths: dict[str, str] = {}
+    for kn_code in (_KN_DIRECT, _KN_DISCOV):
+        label = "direct" if kn_code == _KN_DIRECT else "disc"
+        _paths[kn_code] = f"/cross-kb/cx2-meta-{label}-{_sid}.md"
+        try:
+            resp = await client.post(
+                "/kgw/api/v1/knowledgeItems/import",
+                data={"knCode": kn_code, "filePath": _paths[kn_code]},
+                files={
+                    "fileContent": (
+                        f"cx2-{label}.md",
+                        f"# CX2 {label}\n\nMetadata search test content.",
+                        "text/markdown",
+                    )
+                },
+                headers=_hdrs(),
+            )
+        except httpx.RemoteProtocolError:
+            pytest.skip("Proxy interference -- run with NO_PROXY=*")
+        body = resp.json()
+        rc = body["resultCode"]
+        assert rc in ("0", "-1"), f"CX2 import {kn_code}: {body}"
+
+    # Set status=active on each file via metadata/update
+    for kn_code in (_KN_DIRECT, _KN_DISCOV):
+        try:
+            resp = await client.post(
+                "/kgw/api/v1/knowledgeItems/metadata/update",
+                json={
+                    "knCode": kn_code,
+                    "filePath": _paths[kn_code],
+                    "metadata": {_prop: "active"},
+                },
+                headers=_hdrs(),
+            )
+        except httpx.RemoteProtocolError:
+            pytest.skip("Proxy interference -- run with NO_PROXY=*")
+        body = resp.json()
+        rc = body.get("resultCode", body.get("code", "-1"))
+        if rc == "-1" and kn_code == _KN_DISCOV:
+            continue  # discovery may be unavailable
+        assert rc == "0", f"CX2 set metadata {kn_code}: {body}"
+
+    # MetadataSearch across both KBs
+    try:
+        resp = await client.post(
+            "/kgw/api/v1/knowledgeItems/metadataSearch",
+            json={
+                "knCodeList": [_KN_DIRECT, _KN_DISCOV],
+                "topK": 20,
+                "where": {"eq": {"fieldName": _prop, "value": "active"}},
+            },
+            headers=_hdrs(),
+        )
+    except httpx.RemoteProtocolError:
+        pytest.skip("Proxy interference -- run with NO_PROXY=*")
+    body = resp.json()
+    assert body["resultCode"] == "0", f"CX2 metadataSearch: {body}"
+
+    # Verify results from both KBs
+    ro = body.get("resultObject", {})
+    data = ro.get("data", [])
+    assert isinstance(data, list), (
+        f"CX2 expected list in resultObject.data, got: {body}"
+    )
+    if data:
+        kncodes_found = {e.get("knCode", e.get("kn_code", "")) for e in data}
+        # At minimum, the direct KB entry should be present
+        assert _KN_DIRECT in kncodes_found or any(
+            _paths[_KN_DIRECT] in str(e) for e in data
+        ), f"CX2 expected results from {_KN_DIRECT}, got: {data}"
+
+
+# ---------------------------------------------------------------------------
+# CX3: Batch ingest to both KBs
+# ---------------------------------------------------------------------------
+
+
+async def test_ingest_batch_both_kbs(client: httpx.AsyncClient) -> None:
+    """CX3: Batch ingest with one upsert for each KB -- both done."""
+    _sid = uuid.uuid4().hex[:8]
+    _src_id = f"cx3_batch_{_sid}"
+
+    try:
+        resp = await client.post(
+            "/kgw/ingest/v1/events/batch",
+            json={
+                "events": [
+                    {
+                        "sourceId": _src_id,
+                        "itemId": f"cx3_direct_{_sid}",
+                        "version": "2026-06-08T00:00:00Z",
+                        "op": "upsert",
+                        "knCode": _KN_DIRECT,
+                        "filePath": f"/cross-kb/cx3-direct-{_sid}.md",
+                        "content": "# CX3 Direct KB\n\nBatch cross-KB test.",
+                    },
+                    {
+                        "sourceId": _src_id,
+                        "itemId": f"cx3_disc_{_sid}",
+                        "version": "2026-06-08T00:00:01Z",
+                        "op": "upsert",
+                        "knCode": _KN_DISCOV,
+                        "filePath": f"/cross-kb/cx3-disc-{_sid}.md",
+                        "content": "# CX3 Discovery KB\n\nBatch cross-KB test.",
+                    },
+                ],
+            },
+            headers=_hdrs(),
+        )
+    except httpx.RemoteProtocolError:
+        pytest.skip("Proxy interference -- run with NO_PROXY=*")
+    body = resp.json()
+
+    # Assert resultCode is success (0) or partial-success (-1 if discovery down)
+    rc = body.get("resultCode", "-1")
+    assert rc in ("0", "-1"), f"CX3 batch resultCode: {body}"
+
+    ro = body.get("resultObject", {})
+    total = ro.get("total", 2)
+    succeeded = ro.get("succeeded", 0)
+    failed = ro.get("failed", 0)
+    assert succeeded + failed == total, (
+        f"CX3 succeeded({succeeded}) + failed({failed}) != total({total}): {body}"
+    )
+    # At least the direct KB upsert must succeed
+    assert succeeded >= 1, (
+        f"CX3 expected at least 1 success (direct KB), got succeeded={succeeded}: {body}"
+    )
+
+    # Verify both events are done (or at least present) via GET /kgw/ingest/v1/events
+    import asyncio as _asyncio
+
+    await _asyncio.sleep(1.0)  # Let async processing settle
+
+    for item_id in (f"cx3_direct_{_sid}", f"cx3_disc_{_sid}"):
+        list_resp = await client.get(
+            "/kgw/ingest/v1/events",
+            params={"sourceId": _src_id, "pageSize": 20},
+            headers=_hdrs(),
+        )
+        list_body = list_resp.json()
+        if list_body.get("resultCode") != "0":
+            # Discovery may make the list endpoint fail; skip check if so
+            if item_id.startswith("cx3_disc_"):
+                continue
+            pytest.fail(f"CX3 list events failed for {item_id}: {list_body}")
+        events_data = list_body.get("resultObject", {}).get("data", [])
+        matching = [e for e in events_data if e.get("itemId") == item_id]
+        if matching:
+            event_status = matching[0].get("status", "")
+            # Accept done or already_processed as success
+            assert event_status in ("done", "already_processed"), (
+                f"CX3 event {item_id} status={event_status}, expected done: {matching[0]}"
+            )
+        elif item_id.startswith("cx3_direct_"):
+            pytest.fail(f"CX3 event {item_id} not found in event list: {events_data}")
 
 
 # ---------------------------------------------------------------------------

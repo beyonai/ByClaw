@@ -107,11 +107,11 @@ async def test_create_directory_success(client: httpx.AsyncClient) -> None:
 
 
 async def test_create_nested_directory(client: httpx.AsyncClient) -> None:
-    body = await _create_dir(client, _KN_DIRECT, "/gd2/parent/child")
+    body = await _create_dir(client, _KN_DISCOV, "/gd2/parent/child")
     assert body["resultCode"] == "0", f"create nested failed: {body}"
 
     # List the parent to verify child exists (byclaw-qa returns full paths)
-    list_body = await _list_dir(client, _KN_DIRECT, "/gd2/parent")
+    list_body = await _list_dir(client, _KN_DISCOV, "/gd2/parent")
     names = _dir_names(list_body)
     assert "/gd2/parent/child" in names, (
         f"expected /gd2/parent/child in listing, got {names}"
@@ -141,6 +141,24 @@ async def test_create_missing_kncode(client: httpx.AsyncClient) -> None:
     )
     body = resp.json()
     assert body["resultCode"] == "-1", f"expected -1 for missing knCode, got {body}"
+
+
+# ---------------------------------------------------------------------------
+# GD4b: missing directoryPath
+# ---------------------------------------------------------------------------
+
+
+async def test_create_missing_directory_path(client: httpx.AsyncClient) -> None:
+    """GD4: Create directory without directoryPath field returns validation error."""
+    resp = await client.post(
+        "/kgw/api/v1/directories/create",
+        json={"knCode": _KN_DIRECT},  # directoryPath deliberately omitted
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "-1", (
+        f"expected -1 for missing directoryPath, got {body}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -263,19 +281,66 @@ async def test_delete_nonempty_directory_recursive(
     names = _dir_names(list_body)
     assert "/gd9-full" not in names, f"expected /gd9-full to be gone, got {names}"
 
+    # Verify the file is also gone
+    resp = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DIRECT, "directoryPath": "/gd9-full"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    # Directory should not exist or be empty
+    assert (
+        body["resultCode"] == "-1" or body.get("resultObject", {}).get("data") == []
+    ), f"expected /gd9-full to be gone or empty after recursive delete, got {body}"
+
 
 # ---------------------------------------------------------------------------
-# GD10: discovery mode directory operations
+# GD10: discovery mode recursive delete — directory + file both gone
 # ---------------------------------------------------------------------------
 
 
-async def test_discovery_mode_directory(client: httpx.AsyncClient) -> None:
+async def test_discovery_mode_directory_recursive(
+    client: httpx.AsyncClient,
+) -> None:
+    """GD10: Recursive delete with service discovery mode — dir + file both gone."""
+    # Create directory with knCode=300001 (discovery mode)
     body = await _create_dir(client, _KN_DISCOV, "/gd10-disc")
     assert body["resultCode"] == "0", f"create discovery-mode dir failed: {body}"
 
-    # Cleanup
+    # Import a file into it
+    import_resp = await client.post(
+        "/kgw/api/v1/knowledgeItems/import",
+        data={
+            "knCode": _KN_DISCOV,
+            "filePath": "/gd10-disc/file.md",
+        },
+        files={
+            "fileContent": ("file.md", b"# hi", "text/markdown"),
+        },
+        headers=_hdrs(),
+    )
+    import_body = import_resp.json()
+    assert import_body["resultCode"] == "0", f"import file failed: {import_body}"
+
+    # Delete the directory recursively
     body = await _delete_dir(client, _KN_DISCOV, "/gd10-disc")
     assert body["resultCode"] == "0", f"delete discovery-mode dir failed: {body}"
+
+    # Verify the directory is gone from listing
+    list_body = await _list_dir(client, _KN_DISCOV, "/")
+    names = _dir_names(list_body)
+    assert "/gd10-disc" not in names, f"expected /gd10-disc to be gone, got {names}"
+
+    # Verify the file is also unreachable
+    resp = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DISCOV, "directoryPath": "/gd10-disc"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert (
+        body["resultCode"] == "-1" or body.get("resultObject", {}).get("data") == []
+    ), f"expected /gd10-disc to be gone or empty after recursive delete, got {body}"
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +352,6 @@ async def test_cleanup_all_test_dirs(client: httpx.AsyncClient) -> None:
     """Delete every test directory created above to leave clean state."""
     for path in [
         "/gd1-test",
-        "/gd2",
         "/gd6-old",
         "/gd6-new",
         "/gd7-a",
@@ -295,11 +359,11 @@ async def test_cleanup_all_test_dirs(client: httpx.AsyncClient) -> None:
         "/gd9-full",
     ]:
         body = await _delete_dir(client, _KN_DIRECT, path)
-        # Ignore failures — some may already have been deleted
         if body["resultCode"] != "0":
-            # The path may not exist; that's fine
-            pass
+            pass  # may already have been deleted
 
-    # Also clean up any orphan from a failed GD6 rename
-    for path in ["/gd6-old", "/gd6-new"]:
-        await _delete_dir(client, _KN_DIRECT, path)
+    # GD2 uses discovery mode
+    for path in ["/gd2", "/gd10-disc"]:
+        body = await _delete_dir(client, _KN_DISCOV, path)
+        if body["resultCode"] != "0":
+            pass

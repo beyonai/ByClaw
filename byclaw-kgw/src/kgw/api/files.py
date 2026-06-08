@@ -135,7 +135,13 @@ async def download_file(
         config.headers, user_code=x_user_id
     )
     op_path = config.operation_path("downloadFile") or "/api/v1/downloadFile"
-    url = f"{config.domain_url.rstrip('/')}{op_path}"
+
+    # resolve_base_url handles both direct (domain_url) and
+    # discovery (domain_name → Redis DiscoveryClient) modes.
+    from kgw.upstream import resolve_base_url  # noqa: PLC0415
+
+    base_url = await resolve_base_url(config)
+    url = f"{base_url}{op_path}"
 
     backend_body = dict(body)
     backend_body["knCode"] = config.resource_code

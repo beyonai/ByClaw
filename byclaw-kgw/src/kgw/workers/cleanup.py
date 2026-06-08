@@ -123,6 +123,8 @@ async def _purge_one(
                     "WHERE property_id=%s AND endpoint_key=%s",
                     (property_id, endpoint_key),
                 )
+                # backend_name is NOT NULL; keep the original value.
+                # The sync_status='PURGED' row is the authoritative purge record.
             kgw_metadata_purge_total.labels(result="success").inc()
             return
         msg = resp.get("resultMsg") or str(resp)[:200]
