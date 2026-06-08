@@ -79,4 +79,8 @@ export default {
   'sandboxMgr.launch.serviceKey': 'Service Spec',
   'sandboxMgr.launch.serviceKeyPlaceholder': 'Use default spec if not selected',
   'sandboxMgr.launch.success': 'Sandbox launched, sandboxId: {sandboxId}',
+  'sandboxMgr.launch.preferredServiceKey': 'Cached Service Spec',
+  'sandboxMgr.launch.clearPreferred': 'Clear',
+  'sandboxMgr.launch.preferredCleared': 'Cached service spec cleared',
+  'sandboxMgr.launch.preferredClearFailed': 'Failed to clear cached spec',
 };

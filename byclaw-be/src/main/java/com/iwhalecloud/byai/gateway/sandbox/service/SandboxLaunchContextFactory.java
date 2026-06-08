@@ -73,6 +73,31 @@ public class SandboxLaunchContextFactory {
     @Autowired
     private SandboxUserInfoFactory sandboxUserInfoFactory;
 
+    @Lazy
+    @Autowired
+    private SandboxService sandboxService;
+
+    /**
+     * 根据 resourceId 解析沙箱路由。
+     * 优先使用用户缓存的 serviceKey（当路由结果为默认类型时）。
+     *
+     * @param resourceId 资源ID
+     * @param userCode   用户工号，用于查找缓存的首选 serviceKey
+     * @return 沙箱启动路由
+     */
+    public SandboxLaunchRouting resolveRouting(Long resourceId, String userCode) {
+        SandboxLaunchRouting routing = resolveRouting(resourceId);
+        if (SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(routing.getSandboxType())
+            && StringUtils.isNotBlank(userCode)) {
+            String preferred = sandboxService.getPreferredServiceKey(userCode);
+            if (StringUtils.isNotBlank(preferred)) {
+                LOGGER.info("使用用户缓存的 serviceKey: userCode={}, serviceKey={}", userCode, preferred);
+                return new SandboxLaunchRouting(preferred, SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+            }
+        }
+        return routing;
+    }
+
     public SandboxLaunchRouting resolveRouting(Long resourceId) {
         if (resourceId == null || resourceId.equals(SandboxLaunchRouting.DEFAULT_RESOURCE_ID)) {
             return new SandboxLaunchRouting(SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE,
