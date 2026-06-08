@@ -110,6 +110,36 @@ class KbConfigProvider:
         return _parse_kb_config(kn_code, payload)
 
 
+# Map portal KG_DOC operationId → gateway KbOp name (from dispatcher.py)
+from kgw.dispatcher import KbOp  # noqa: PLC0415
+
+_OPERATION_ID_MAP: dict[str, str] = {
+    "createDir": KbOp.DIRECTORY_CREATE.value,
+    "editDir": KbOp.DIRECTORY_UPDATE.value,
+    "deleteDir": KbOp.DIRECTORY_DELETE.value,
+    "uploadFile": KbOp.FILE_IMPORT.value,
+    "deleteFile": KbOp.FILE_DELETE.value,
+    "knowledgeBuild": KbOp.BUILD_TRIGGER.value,
+    "buildStatusQuery": KbOp.BUILD_STATUS.value,
+    "knowledgeSearch": KbOp.KNOWLEDGE_SEARCH.value,
+    "metadataSearch": KbOp.METADATA_SEARCH.value,
+    "searchFile": KbOp.SEARCH_FILE.value,
+    "metadataFieldsList": KbOp.METADATA_FIELDS_LIST.value,
+    "listDir": KbOp.LIST_DIR.value,
+    "glob": KbOp.GLOB.value,
+    "readFile": KbOp.READ_FILE.value,
+    "downloadFile": KbOp.DOWNLOAD_FILE.value,
+    "metadataPropertiesBatchCreate": KbOp.METADATA_PROPERTIES_BATCH_CREATE.value,
+    "metadataPropertiesDelete": KbOp.METADATA_PROPERTIES_DELETE.value,
+    "knowledgeItemsMetadataUpdate": KbOp.KNOWLEDGE_ITEMS_METADATA_UPDATE.value,
+    "knowledgeItemsMetadataGet": KbOp.KNOWLEDGE_ITEMS_METADATA_GET.value,
+}
+
+
+def _map_operation_id(op_id: str) -> str:
+    return _OPERATION_ID_MAP.get(op_id, op_id)
+
+
 def _parse_kb_config(kn_code: str, payload: dict[str, Any]) -> KbConfig:
     """Translate the portal's KG_DOC JSON shape into a KbConfig record.
 
@@ -132,10 +162,26 @@ def _parse_kb_config(kn_code: str, payload: dict[str, Any]) -> KbConfig:
     for entry in payload.get("resourceService") or ():
         if not isinstance(entry, dict):
             continue
+        # Simplified format: {"name": "directoryCreate", "path": "/api/v1/..."}
         name = entry.get("name") or entry.get("operation")
         path = entry.get("path") or entry.get("url")
         if name and path:
             operation_paths[str(name)] = str(path)
+            continue
+        # OpenAPI schema format (KG_DOC_10000001.json style):
+        # {"openapiSchema": {"paths": {"/api/v1/...": {"post": {"operationId": "createDir"}}}}}
+        schema = entry.get("openapiSchema")
+        if isinstance(schema, dict):
+            for api_path, methods in (schema.get("paths") or {}).items():
+                if not isinstance(methods, dict):
+                    continue
+                for _method, spec in methods.items():
+                    if not isinstance(spec, dict):
+                        continue
+                    op_id = spec.get("operationId")
+                    if op_id:
+                        operation_paths[_map_operation_id(str(op_id))] = str(api_path)
+                        break  # first method wins
 
     # The portal sometimes only lists operation names rather than full paths.
     if not operation_paths:
