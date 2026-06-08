@@ -77,6 +77,9 @@ public class TransactionAdviceConfig {
         txMap.put("search*", readOnlyTx);
         txMap.put("createDatasetIfNotExists", notSurpportedTx);
         txMap.put("createDefaultResourcesIfNotExists", notSurpportedTx);
+        txMap.put("prewarmDueCronSandboxes", notSurpportedTx);
+        txMap.put("callAsUser", notSurpportedTx);
+        txMap.put("runAsUser", notSurpportedTx);
         txMap.put("*", requiredTx);
 
         /* 事务管理规则，声明具备事务管理的方法名 **/
