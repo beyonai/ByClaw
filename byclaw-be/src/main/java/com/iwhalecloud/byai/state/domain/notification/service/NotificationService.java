@@ -14,6 +14,7 @@ import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.state.application.service.message.MessageService;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.ContentVo;
+import com.iwhalecloud.byai.state.domain.chat.enums.MessageType;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.manager.vo.men.MenTaskVo;
 import com.iwhalecloud.byai.manager.dto.men.NotifyResultDto;
@@ -266,6 +267,7 @@ public class NotificationService {
             return;
         }
         Map data = new HashMap();
+        data.put("type", MessageType.NOTIFICATION.name());
         data.put("session", complexNotifSession);
         try (NettyArrayOutputStream outputStream = new NettyArrayOutputStream(ctx)) {
             CompletionsUtils.responseWrite(outputStream, JsonUtil.toJSONString(data));

@@ -60,13 +60,6 @@ jest.mock('@/hooks/useTracker', () => ({
   }),
 }));
 
-jest.mock('@/utils/websocket', () => ({
-  __esModule: true,
-  default: {
-    clearNotification: jest.fn(),
-  },
-}));
-
 const session = {
   sessionId: 'session-1',
   sessionName: '会话 1',

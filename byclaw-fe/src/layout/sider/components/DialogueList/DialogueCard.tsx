@@ -13,7 +13,6 @@ import ChatAvatar from '@/components/ChatAvatar';
 
 import { processSessionContent, formatTime } from './util';
 import { getAgentPath } from '@/utils/agent';
-import webSocketManager from '@/utils/websocket';
 import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 import useTracker from '@/hooks/useTracker';
 
@@ -250,8 +249,12 @@ const DialogueCard = ({
               },
             });
 
-            // 清除websocket产生的红点
-            webSocketManager.clearNotification();
+            dispatch({
+              type: 'session/updateUnreadInfo',
+              payload: {
+                totalUnread: 0,
+              },
+            });
           }
 
           navigate('/notice');
