@@ -55,6 +55,16 @@ export type BaiyingEnhancePluginConfig = {
      */
     mainWorkspaceAgentsAutoSeed?: boolean;
     /**
+     * Redis Hash key for main workspace context templates. Default `byai:SystemConfig:paramCode`.
+     * The field value should be a SystemConfig JSON whose `paramValue` contains the template JSON.
+     */
+    mainContextTemplateRedisKey?: string;
+    /**
+     * SystemConfig paramCode for the super-assistant main workspace context template.
+     * Default `OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT`.
+     */
+    mainContextTemplateParamCode?: string;
+    /**
      * When true (default) and `mainAgentsMdMode` is `if_managed_marker`, replace an **existing** main `AGENTS.md`
      * that lacks the plugin marker **once per workspace** (e.g. OpenClaw stock file), then record the path under
      * `OPENCLAW_STATE_DIR/baiying-enhance/main-agents-foreign-takeover.json`.
