@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.domain.notification.service;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.iwhalecloud.byai.manager.dto.notification.NotificationReadDto;
 import com.iwhalecloud.byai.manager.entity.notification.ByaiNotification;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.mapper.notification.ByaiNotificationMapper;
@@ -276,6 +277,46 @@ public class NotificationService {
 
     private String getUserNotifKey(Long userId) {
         return USER_NOTIFICATION_PREFIX + userId;
+    }
+
+    /**
+     * 批量设置通知已读
+     *
+     * @param notificationReadDto 已读参数
+     * @return ResultUtil
+     */
+    public int batchSetNotificationRead(NotificationReadDto notificationReadDto) {
+
+        try {
+
+            log.info("批量设置通知已读，参数：{}", notificationReadDto);
+
+            int updateCount = 0;
+
+            // 判断read参数
+            if ("ALL".equalsIgnoreCase(notificationReadDto.getRead())) {
+                // 设置当前用户所有通知为已读
+                updateCount = byaiNotificationMapper.setAllNotificationRead(notificationReadDto.getTargetId());
+                log.info("设置所有通知已读完成，更新了{}条记录", updateCount);
+            }
+            else {
+                // 批量设置指定ID的通知为已读
+                updateCount = byaiNotificationMapper.batchSetNotificationRead(notificationReadDto.getIdList(),
+                    notificationReadDto.getTargetId());
+            }
+
+            // 清除给标识ws，防止一直给用户推送消息
+            String userNotifKey = this.getUserNotifKey(notificationReadDto.getTargetId());
+            RedisUtil.removeKey(userNotifKey);
+
+            log.info("批量设置指定通知已读完成，更新了{}条记录", updateCount);
+
+            return updateCount;
+        }
+        catch (Exception e) {
+            log.error("批量设置通知已读异常", e);
+            throw e;
+        }
     }
 
 }
