@@ -746,6 +746,69 @@ def _operation_form_to_dict(operation_form: Any) -> dict[str, Any]:
     }
 
 
+def _create_early_langfuse_trace(
+    *,
+    trace_id: str,
+    session_id: str,
+    user_id: str,
+    message_id: str,
+    agent_id: str,
+) -> Any | None:
+    """在 LLM 调用之前立即建 Langfuse trace，保持跨服务链路完整。
+
+    用 command.header.trace_id 作为 trace id，与其他 agent 服务写的同一 trace_id 对齐，
+    确保 Langfuse 里整条调用链路可追溯，即使后续 agent config 查找失败也不断链。
+    """
+    if not trace_id:
+        return None
+    try:
+        from langfuse import Langfuse  # noqa: PLC0415
+
+        lf = Langfuse(
+            secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+            public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+            host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+        )
+        trace = lf.trace(
+            id=trace_id,
+            name="datacloud-agent",
+            session_id=session_id or None,
+            user_id=user_id or None,
+            input={"message_id": message_id},
+            tags=[
+                f"agent_id:{agent_id}",
+                f"env:{os.getenv('HOST', '')}",
+                f"worker:{os.getenv('DATACLOUD_GATEWAY_WORKER_ID', '')}",
+            ],
+            metadata={"message_id": message_id, "agent_id": agent_id},
+        )
+        lf.flush()
+        return (lf, trace)
+    except Exception:
+        logger.debug("early langfuse trace creation skipped", exc_info=True)
+        return None
+
+
+def _update_early_langfuse_trace(
+    handle: Any,
+    *,
+    status: str,
+    error: str = "",
+) -> None:
+    """更新 early trace 的最终状态（成功 / 失败）。"""
+    if handle is None:
+        return
+    try:
+        lf, trace = handle
+        if status == "error":
+            trace.update(output={"error": error}, level="ERROR")
+        else:
+            trace.update(output={"status": "ok"})
+        lf.flush()
+    except Exception:
+        pass
+
+
 def _get_gateway_user_code(context: Any) -> str | None:
     """从 Gateway context 提取用户标识，失败时返回 None。"""
     try:
@@ -766,7 +829,7 @@ async def _consume_agent_events(
     agent_id: str | None = None,
     dyn_object_ids: list[str] | None = None,
     dyn_view_ids: list[str] | None = None,
-    header_metadata: dict = {}
+    header_metadata: dict = {},
 ) -> dict[str, Any]:
     """消费 OntologyAgent 事件流，翻译为 Gateway SSE。"""
     logger.info(
@@ -876,21 +939,19 @@ async def _consume_agent_events(
         or interrupt_ev.reason == "OPERATION_FORM_CONFIRMATION"
     ):
         custom_metadata = {
-                    "thread_id": interrupt_ev.thread_id,
-                    "interrupt_reason": interrupt_ev.reason,
-                    "interrupt_type": "operation_form",
-                    "operation_form": operation_form,
-                    "agent_id": agent_id or "",
-                    "is_dynamic_agent": True,
-                    "call_object_ids": dyn_object_ids or [],
-                    "call_view_ids": dyn_view_ids or [],
-                }
+            "thread_id": interrupt_ev.thread_id,
+            "interrupt_reason": interrupt_ev.reason,
+            "interrupt_type": "operation_form",
+            "operation_form": operation_form,
+            "agent_id": agent_id or "",
+            "is_dynamic_agent": True,
+            "call_object_ids": dyn_object_ids or [],
+            "call_view_ids": dyn_view_ids or [],
+        }
         await context.complex_ask_user(
             event=AskUserEvent(
                 prompt=interrupt_ev.prompt,
-                metadata={
-                    **custom_metadata, **header_metadata
-                },
+                metadata={**custom_metadata, **header_metadata},
             ),
             message_id=getattr(context, "message_id", None),
             parent_message_id=getattr(context, "parent_message_id", None),
@@ -908,24 +969,22 @@ async def _consume_agent_events(
                 }
             )
         custom_metadata = {
-                "thread_id": interrupt_ev.thread_id,
-                "interrupt_reason": interrupt_ev.reason,
-                "paradigmList": paradigm_list,
-                "query": interrupt_ev.query,
-                "agent_id": agent_id or "",
-                "is_dynamic_agent": True,
-                "call_object_ids": dyn_object_ids or [],
-                "call_view_ids": dyn_view_ids or [],
-            }
+            "thread_id": interrupt_ev.thread_id,
+            "interrupt_reason": interrupt_ev.reason,
+            "paradigmList": paradigm_list,
+            "query": interrupt_ev.query,
+            "agent_id": agent_id or "",
+            "is_dynamic_agent": True,
+            "call_object_ids": dyn_object_ids or [],
+            "call_view_ids": dyn_view_ids or [],
+        }
         await context.complex_ask_user(
             event=AskUserEvent(
                 prompt=interrupt_ev.prompt,
-                metadata={
-                    **custom_metadata, **header_metadata
-                },
+                metadata={**custom_metadata, **header_metadata},
             ),
-            message_id = getattr(context, "message_id", None),
-            parent_message_id = getattr(context, "parent_message_id", None),
+            message_id=getattr(context, "message_id", None),
+            parent_message_id=getattr(context, "parent_message_id", None),
         )
     else:
         await context.ask_user(
@@ -1397,11 +1456,34 @@ class DataCloudWorker(GatewayWorker):
         self, command: GatewayCommand, context: ByclawDataClarification, request_id: str
     ) -> dict:
         """实际处理逻辑，所有日志自动写入 logs/requests/{request_id}.log。"""
+        # ── Early Langfuse trace：立即建链，确保跨服务 trace_id 不断链 ─────────
+        _cmd_header = getattr(command, "header", None)
+        _cmd_trace_id = str(getattr(_cmd_header, "trace_id", "") or "").strip()
+        _cmd_session_id = str(
+            getattr(_cmd_header, "session_id", "") or context.session_id or ""
+        )
+        _cmd_user_code = str(getattr(_cmd_header, "user_code", "") or "")
+        _cmd_message_id = str(getattr(_cmd_header, "message_id", "") or "")
+        _cmd_agent_id = str(
+            (getattr(_cmd_header, "metadata", None) or {}).get("agentId", "") or ""
+        )
+        _early_lf_trace = _create_early_langfuse_trace(
+            trace_id=_cmd_trace_id,
+            session_id=_cmd_session_id,
+            user_id=_cmd_user_code,
+            message_id=_cmd_message_id,
+            agent_id=_cmd_agent_id,
+        )
         logger.info(
-            "DataCloudWorker.process_command: session=%s command=%s request_id=%s",
+            "DataCloudWorker.process_command: session=%s command=%s request_id=%s "
+            "trace_id=%s message_id=%s user_code=%s agent_id=%s",
             context.session_id,
             type(command).__name__,
             request_id,
+            _cmd_trace_id,
+            _cmd_message_id,
+            _cmd_user_code,
+            _cmd_agent_id,
         )
         # 处理模型环境变量，从redis获取
         from byclaw_data.model_environment import (
@@ -1900,7 +1982,9 @@ class DataCloudWorker(GatewayWorker):
             _dyn_minio_root = os.environ.get(
                 "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
             )
-            _dyn_skill_ws = str(Path(_dyn_minio_root) / f"byclaw-{_dyn_user_code}" / "by")
+            _dyn_skill_ws = str(
+                Path(_dyn_minio_root) / f"byclaw-{_dyn_user_code}" / "by"
+            )
             _dyn_extras: dict[str, Any] = {
                 "user_code": _dyn_user_code,
                 "beyond_token": _dyn_beyond_token,
@@ -2064,11 +2148,15 @@ class DataCloudWorker(GatewayWorker):
                 )
             if config_for_this_call is None:
                 available_ids = [str(cfg.agent_id) for cfg in agent_configs]
-                raise RuntimeError(
+                _err_msg = (
                     "Agent config not found for request: "
                     f"agent_id={by_agent_id or ''} runtime_agent_key={runtime_agent_key or ''} "
                     f"available_agent_ids={available_ids}"
                 )
+                _update_early_langfuse_trace(
+                    _early_lf_trace, status="error", error=_err_msg
+                )
+                raise RuntimeError(_err_msg)
             logger.info(
                 "Agent config match result: by_agent_id=%s matched=%s agent_id=%s",
                 by_agent_id,
@@ -2307,6 +2395,7 @@ class DataCloudWorker(GatewayWorker):
                 }
                 # 注入请求级工具调用收集列表，react_loop.py 往里追加
                 from datacloud_analysis.langfuse_handler import current_tool_spans  # noqa: PLC0415
+
                 _lf_spans_list: list[dict[str, Any]] = []
                 current_tool_spans.set(_lf_spans_list)
         except Exception:
@@ -2526,7 +2615,7 @@ class DataCloudWorker(GatewayWorker):
                 isinstance(graph_input, Command),
             )
             stream_result = await self._stream_graph(
-                header_metadata = header_metadata,
+                header_metadata=header_metadata,
                 target_graph=target_graph,
                 graph_input=graph_input,
                 config=config,
@@ -2547,7 +2636,9 @@ class DataCloudWorker(GatewayWorker):
                     ),
                     None,
                 )
-                if _lf_handler is not None and getattr(_lf_handler, "last_trace_id", None):
+                if _lf_handler is not None and getattr(
+                    _lf_handler, "last_trace_id", None
+                ):
                     _user_q = _latest_user_text_from_content(
                         command.content,
                         locale=getattr(context, "locale", _FALLBACK_LOCALE),
@@ -2585,28 +2676,38 @@ class DataCloudWorker(GatewayWorker):
                     )
                     # 合并 react_loop.py 收集的业务工具调用（挂在最近 LLM obs 下）
                     try:
-                        from datacloud_analysis.langfuse_handler import current_tool_spans as _cts  # noqa: PLC0415
+                        from datacloud_analysis.langfuse_handler import (
+                            current_tool_spans as _cts,
+                        )  # noqa: PLC0415
+
                         _react_spans = _cts.get() or []
                         for _rs in _react_spans:
-                            _lf_tool_spans.append({
-                                **_rs,
-                                "parent_obs_id": _lf_last_llm_obs_id,
-                            })
+                            _lf_tool_spans.append(
+                                {
+                                    **_rs,
+                                    "parent_obs_id": _lf_last_llm_obs_id,  # noqa: F821
+                                }
+                            )
                     except Exception:
                         pass
                     for _span in _lf_tool_spans:
                         _batch.append(
                             IngestionEvent_SpanCreate(
                                 id=str(_uuid.uuid4()),
-                                timestamp=_span.get("start_time") or _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                                timestamp=_span.get("start_time")
+                                or _dt.datetime.now(_dt.timezone.utc).isoformat(),
                                 body=CreateSpanBody(
                                     id=str(_uuid.uuid4()),
                                     trace_id=_lf_handler.last_trace_id,
-                                    parent_observation_id=_span.get("parent_obs_id") or None,
+                                    parent_observation_id=_span.get("parent_obs_id")
+                                    or None,
                                     name=str(_span.get("name") or "tool"),
                                     input=_span.get("input"),
-                                    output=str(_span.get("output") or "") if _span.get("output") is not None else None,
-                                    start_time=_span.get("start_time") or _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                                    output=str(_span.get("output") or "")
+                                    if _span.get("output") is not None
+                                    else None,
+                                    start_time=_span.get("start_time")
+                                    or _dt.datetime.now(_dt.timezone.utc).isoformat(),
                                     end_time=_span.get("end_time"),
                                 ),
                             )
@@ -2651,7 +2752,7 @@ class DataCloudWorker(GatewayWorker):
         conf_hash: str,
         reco_task: asyncio.Task[list[str]] | None = None,
         is_paradigm_resume: bool = False,
-        header_metadata: dict = {}
+        header_metadata: dict = {},
     ) -> dict:
         """Drive the graph stream and handle interrupt/done branches."""
         is_agent_delegate = False
@@ -2669,7 +2770,9 @@ class DataCloudWorker(GatewayWorker):
 
         # Langfuse 工具调用收集：on_tool_start/end 事件 → 图执行后批量写 span
         _lf_tool_spans: list[dict[str, Any]] = []
-        _lf_last_llm_obs_id: str | None = None  # 最近一次 LLM 调用的 Langfuse observation id
+        _lf_last_llm_obs_id: str | None = (
+            None  # 最近一次 LLM 调用的 Langfuse observation id
+        )
 
         try:
             logger.info(
@@ -2688,7 +2791,11 @@ class DataCloudWorker(GatewayWorker):
                     # _runs 在此时刚写入，记录 LLM 调用的 Langfuse observation id
                     _lf_cbs_llm = config.get("callbacks") or []
                     _lf_h_llm = next(
-                        (cb for cb in _lf_cbs_llm if type(cb).__name__ == "LangchainCallbackHandler"),
+                        (
+                            cb
+                            for cb in _lf_cbs_llm
+                            if type(cb).__name__ == "LangchainCallbackHandler"
+                        ),
                         None,
                     )
                     if _lf_h_llm is not None:
@@ -2696,9 +2803,13 @@ class DataCloudWorker(GatewayWorker):
                         if _llm_run_id_str:
                             try:
                                 _llm_runs = getattr(_lf_h_llm, "_runs", {})
-                                _llm_obs = _llm_runs.get(__import__("uuid").UUID(_llm_run_id_str))
+                                _llm_obs = _llm_runs.get(
+                                    __import__("uuid").UUID(_llm_run_id_str)
+                                )
                                 if _llm_obs is not None:
-                                    _lf_last_llm_obs_id = str(getattr(_llm_obs, "id", "") or "")
+                                    _lf_last_llm_obs_id = str(
+                                        getattr(_llm_obs, "id", "") or ""
+                                    )
                             except Exception:
                                 pass
 
@@ -2708,30 +2819,40 @@ class DataCloudWorker(GatewayWorker):
                     if _parent_run_id_str:
                         _lf_cbs = config.get("callbacks") or []
                         _lf_h = next(
-                            (cb for cb in _lf_cbs if type(cb).__name__ == "LangchainCallbackHandler"),
+                            (
+                                cb
+                                for cb in _lf_cbs
+                                if type(cb).__name__ == "LangchainCallbackHandler"
+                            ),
                             None,
                         )
                         if _lf_h is not None:
                             try:
                                 _runs = getattr(_lf_h, "_runs", {})
-                                _parent_obs = _runs.get(__import__("uuid").UUID(_parent_run_id_str))
+                                _parent_obs = _runs.get(
+                                    __import__("uuid").UUID(_parent_run_id_str)
+                                )
                                 if _parent_obs is not None:
-                                    _parent_obs_id = str(getattr(_parent_obs, "id", "") or "")
+                                    _parent_obs_id = str(
+                                        getattr(_parent_obs, "id", "") or ""
+                                    )
                             except Exception:
                                 pass
                     # parent_run_id 为空时回退到最近一次 LLM 调用的 observation id
                     if not _parent_obs_id:
                         _parent_obs_id = _lf_last_llm_obs_id
-                    _lf_tool_spans.append({
-                        "name": str(event.get("name") or ""),
-                        "run_id": str(event.get("run_id") or ""),
-                        "parent_run_id": _parent_run_id_str,
-                        "parent_obs_id": _parent_obs_id,
-                        "input": (event.get("data") or {}).get("input"),
-                        "start_time": __import__("datetime").datetime.now(
-                            __import__("datetime").timezone.utc
-                        ).isoformat(),
-                    })
+                    _lf_tool_spans.append(
+                        {
+                            "name": str(event.get("name") or ""),
+                            "run_id": str(event.get("run_id") or ""),
+                            "parent_run_id": _parent_run_id_str,
+                            "parent_obs_id": _parent_obs_id,
+                            "input": (event.get("data") or {}).get("input"),
+                            "start_time": __import__("datetime")
+                            .datetime.now(__import__("datetime").timezone.utc)
+                            .isoformat(),
+                        }
+                    )
                 elif kind == "on_tool_end":
                     _run_id = str(event.get("run_id") or "")
                     for _span in reversed(_lf_tool_spans):
@@ -2744,17 +2865,21 @@ class DataCloudWorker(GatewayWorker):
                             else:
                                 try:
                                     import json as _json_mod
+
                                     _span["output"] = _json_mod.dumps(
-                                        _raw_out if isinstance(_raw_out, (dict, list))
+                                        _raw_out
+                                        if isinstance(_raw_out, (dict, list))
                                         else str(_raw_out),
                                         ensure_ascii=False,
                                         default=str,
                                     )
                                 except Exception:
                                     _span["output"] = str(_raw_out)
-                            _span["end_time"] = __import__("datetime").datetime.now(
-                                __import__("datetime").timezone.utc
-                            ).isoformat()
+                            _span["end_time"] = (
+                                __import__("datetime")
+                                .datetime.now(__import__("datetime").timezone.utc)
+                                .isoformat()
+                            )
                             break
 
                 if kind == "on_chat_model_end":
@@ -2825,7 +2950,9 @@ class DataCloudWorker(GatewayWorker):
                         if _node == "respond":
                             _resp_output = (event.get("data") or {}).get("output") or {}
                             if isinstance(_resp_output, dict):
-                                _fa = str(_resp_output.get("final_answer") or "").strip()
+                                _fa = str(
+                                    _resp_output.get("final_answer") or ""
+                                ).strip()
                                 if _fa:
                                     _respond_final_answer = _fa
 
@@ -2983,46 +3110,44 @@ class DataCloudWorker(GatewayWorker):
 
                 if paradigm_list:
                     user_metadata = {
-                                "thread_id": config["configurable"]["thread_id"],
-                                "checkpoint_id": checkpoint_id,
-                                "checkpoint_ns": checkpoint_ns,
-                                "agent_id": by_agent_id,
-                                "conf_hash": conf_hash,
-                                "todo_active_id": todo_active_id,
-                                "react_step_id": todo_active_id,
-                                "pending_capability": pending_capability,
-                                "interrupt_reason": interrupt_reason,
-                                "paradigmList": paradigm_list,
-                                "query": clarify_query,
-                                "clarify_knowledge": clarify_knowledge,
-                            }
+                        "thread_id": config["configurable"]["thread_id"],
+                        "checkpoint_id": checkpoint_id,
+                        "checkpoint_ns": checkpoint_ns,
+                        "agent_id": by_agent_id,
+                        "conf_hash": conf_hash,
+                        "todo_active_id": todo_active_id,
+                        "react_step_id": todo_active_id,
+                        "pending_capability": pending_capability,
+                        "interrupt_reason": interrupt_reason,
+                        "paradigmList": paradigm_list,
+                        "query": clarify_query,
+                        "clarify_knowledge": clarify_knowledge,
+                    }
                     await context.complex_ask_user(
                         event=AskUserEvent(
                             prompt=prompt,
-                            metadata={
-                                **user_metadata, **header_metadata},
+                            metadata={**user_metadata, **header_metadata},
                         ),
                         message_id=getattr(context, "message_id", None),
                         parent_message_id=getattr(context, "parent_message_id", None),
                     )
                 elif operation_form:
                     user_metadata = {
-                                "thread_id": config["configurable"]["thread_id"],
-                                "checkpoint_id": checkpoint_id,
-                                "checkpoint_ns": checkpoint_ns,
-                                "agent_id": by_agent_id,
-                                "conf_hash": conf_hash,
-                                "todo_active_id": todo_active_id,
-                                "react_step_id": todo_active_id,
-                                "pending_capability": pending_capability,
-                                "interrupt_reason": interrupt_reason,
-                                "operation_form": operation_form,
-                            }
+                        "thread_id": config["configurable"]["thread_id"],
+                        "checkpoint_id": checkpoint_id,
+                        "checkpoint_ns": checkpoint_ns,
+                        "agent_id": by_agent_id,
+                        "conf_hash": conf_hash,
+                        "todo_active_id": todo_active_id,
+                        "react_step_id": todo_active_id,
+                        "pending_capability": pending_capability,
+                        "interrupt_reason": interrupt_reason,
+                        "operation_form": operation_form,
+                    }
                     await context.complex_ask_user(
                         event=AskUserEvent(
                             prompt=prompt,
-                            metadata={
-                                **user_metadata, **header_metadata},
+                            metadata={**user_metadata, **header_metadata},
                         ),
                         message_id=getattr(context, "message_id", None),
                         parent_message_id=getattr(context, "parent_message_id", None),
@@ -3113,7 +3238,11 @@ class DataCloudWorker(GatewayWorker):
                 len(final_message) if final_message else 0,
             )
             # conclusion 始终携带，父 Agent 恢复时可以从 reply_data 里取到结论文本
-            return {"status": "done", "conclusion": final_message or "", "lf_tool_spans": _lf_tool_spans}
+            return {
+                "status": "done",
+                "conclusion": final_message or "",
+                "lf_tool_spans": _lf_tool_spans,
+            }
         finally:
             heartbeat_stop.set()
             heartbeat_task.cancel()
@@ -3127,8 +3256,6 @@ class DataCloudWorker(GatewayWorker):
                     await reco_task
                 except asyncio.CancelledError:
                     pass
-
-
 
     async def _handle_message(
         self,
@@ -3356,7 +3483,10 @@ class DataCloudWorker(GatewayWorker):
 
             if final_message is not None:
                 await context.emit_chunk(
-                    StreamChunkEvent(content=final_message, metadata=task_result.metadata), event_type=EventType.FINAL_ANSWER.value,
+                    StreamChunkEvent(
+                        content=final_message, metadata=task_result.metadata
+                    ),
+                    event_type=EventType.FINAL_ANSWER.value,
                 )
 
             # Apply APP_STREAM_RESPONSE sending logic at the framework level
@@ -3464,6 +3594,8 @@ class DataCloudWorker(GatewayWorker):
                 user_code=header.user_code or "default",
                 agent_id=header.target_agent_type or self.worker_id,
             )
+
+
 # ------------------------------------------------------------------
 
 # ------------------------------------------------------------------
