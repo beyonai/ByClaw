@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1.7
+
+ARG CUBE_BASE_IMAGE=ghcr.io/tencentcloud/cubesandbox-base:2026.16
+FROM ${CUBE_BASE_IMAGE}
+
+USER root
+
+ENV ENVD_PORT=49983 \
+    ENVD_LOG_FILE=/var/log/envd.log \
+    FILEBROWSER_PORT=8082 \
+    FILEBROWSER_ROOT=/tmp/filebrowser-root \
+    FILEBROWSER_BASEURL=/filebrowser
+
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources; \
+        sed -i 's|http://deb.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources; \
+    elif [ -f /etc/apt/sources.list ]; then \
+        sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list; \
+        sed -i 's|http://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list; \
+    fi; \
+    printf 'Acquire::Retries "5";\n' > /etc/apt/apt.conf.d/80-retries; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl; \
+    rm -rf /var/lib/apt/lists/*
+
+COPY middleware/openclaw/linux-amd64-filebrowser/filebrowser /usr/local/bin/filebrowser
+RUN chmod 0755 /usr/local/bin/filebrowser
+
+RUN set -eux; \
+    printf '%s\n' \
+      '#!/bin/sh' \
+      'set -eu' \
+      '' \
+      'FILEBROWSER_PORT="${FILEBROWSER_PORT:-8082}"' \
+      'FILEBROWSER_ROOT="${FILEBROWSER_ROOT:-/tmp/filebrowser-root}"' \
+      'FILEBROWSER_BASEURL="${FILEBROWSER_BASEURL:-/filebrowser}"' \
+      '' \
+      'mkdir -p "${FILEBROWSER_ROOT}"' \
+      'exec filebrowser \' \
+      '  --root "${FILEBROWSER_ROOT}" \' \
+      '  --port "${FILEBROWSER_PORT}" \' \
+      '  --address 0.0.0.0 \' \
+      '  --noauth \' \
+      '  --baseurl "${FILEBROWSER_BASEURL}"' \
+      >/usr/local/bin/startFilebrowser.sh; \
+    chmod 0755 /usr/local/bin/startFilebrowser.sh
+
+EXPOSE 49983 8082
+ENTRYPOINT ["/usr/local/bin/cube-entrypoint.sh"]
+CMD ["/usr/local/bin/startFilebrowser.sh"]
