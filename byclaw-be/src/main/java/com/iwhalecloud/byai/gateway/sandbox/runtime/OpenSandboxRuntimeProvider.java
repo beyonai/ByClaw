@@ -70,7 +70,7 @@ public class OpenSandboxRuntimeProvider implements SandboxRuntimeProvider {
     public SandboxRuntimePage<SandboxRuntimeInstance> listSandboxesByMetadata(Map<String, String> metadata,
                                                                               int pageNo,
                                                                               int pageSize) {
-        List<SandboxDetail> sandboxes = openSandboxClient.listSandboxesByMetadata(metadata, pageNo, pageSize);
+        List<SandboxDetail> sandboxes = openSandboxClient.listSandboxesByMetadataStrict(metadata, pageNo, pageSize);
         List<SandboxRuntimeInstance> instances = sandboxes == null ? List.of() : sandboxes.stream()
             .filter(Objects::nonNull)
             .filter(d -> d.getId() != null && !d.getId().isBlank())

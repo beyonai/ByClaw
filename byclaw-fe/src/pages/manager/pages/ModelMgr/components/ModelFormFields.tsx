@@ -1,10 +1,16 @@
 import { EyeInvisibleOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import { Button, Form, Input, InputNumber, Select, Slider, Space } from 'antd';
-import React from 'react';
+import React, { useMemo } from 'react';
 import { trim } from 'lodash';
 import { useIntl } from '@umijs/max';
 import ModelFormSection from './ModelFormSection';
-import { tokenMarks, DEFAULT_CONTEXT_TOKENS, MAX_CONTEXT_TOKENS } from './modelFormUtils';
+import {
+  tokenMarks,
+  DEFAULT_CONTEXT_TOKENS,
+  MAX_CONTEXT_TOKENS,
+  MODEL_PROTOCOL_OPTIONS,
+  getApiEndpointPlaceholder,
+} from './modelFormUtils';
 import styles from './ModelFormModal.module.less';
 
 const { TextArea } = Input;
@@ -94,6 +100,8 @@ const ModelFormFields: React.FC<Props> = ({
   onValuesChange,
 }) => {
   const intl = useIntl();
+  const currentModelProtocol = Form.useWatch('modelProtocol', form);
+  const apiEndpointPlaceholder = useMemo(() => getApiEndpointPlaceholder(currentModelProtocol), [currentModelProtocol]);
   // const sectionGuideItems = useMemo(
   //   () => [
   //     { key: 'basic', icon: <RightOutlined />, label: intl.formatMessage({ id: 'modelMgr.modal.basicConfig' }) },
@@ -208,12 +216,19 @@ const ModelFormFields: React.FC<Props> = ({
           onToggle={() => toggleSection('connection')}
         >
           <div className={styles.subsectionTitle}>{intl.formatMessage({ id: 'modelMgr.modal.endpointGroup' })}</div>
+          <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.modelProtocol' })} name="modelProtocol">
+            <Select
+              allowClear
+              placeholder={intl.formatMessage({ id: 'modelMgr.modal.modelProtocolPlaceholder' })}
+              options={[...MODEL_PROTOCOL_OPTIONS]}
+            />
+          </Form.Item>
           <Form.Item
             label={intl.formatMessage({ id: 'modelMgr.modal.apiEndpoint' })}
             name="apiEndpoint"
             rules={[{ required: true, message: intl.formatMessage({ id: 'modelMgr.modal.apiEndpointRequired' }) }]}
           >
-            <Input placeholder="https://api.example.com/v1" />
+            <Input placeholder={apiEndpointPlaceholder} />
           </Form.Item>
 
           <Form.Item
