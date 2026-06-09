@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { CopyOutlined, DeleteOutlined } from '@ant-design/icons';
-import { Button, Card, Descriptions, Input, Spin, Table, Tag, Tooltip, message } from 'antd';
+import { Button, Card, Descriptions, Spin, Table, Tag, Tooltip, message } from 'antd';
 import dayjs from 'dayjs';
 // @ts-ignore
 import { useIntl, useLocation, useSelector } from '@umijs/max';
@@ -9,49 +8,13 @@ import { useIntl, useLocation, useSelector } from '@umijs/max';
 import fileBrowserIcon from '@/assets/filebrowser/file.png';
 import SkillDetailDrawer from '@/pages/employees/components/SkillDetailDrawer/SkillDetailDrawer';
 import FileBrowserPanel from './components/FileBrowserPanel';
-import {
-  buildAutoDebugRequestText,
-  buildDebugDefaults,
-  normalizeModelType,
-} from '@/pages/manager/pages/ModelMgr/components/modelFormUtils';
 import { queryRelResourceInfo } from '@/pages/manager/service/DigitalEmployeeMgr';
-import { debugModelStream, getModelDetail } from '@/pages/manager/service/ModelMgr';
+import { getModelDetail } from '@/pages/manager/service/ModelMgr';
 import { getCompositeAppInfo } from '@/service/digitalEmployees';
 import useGlobal from '@/hooks/useGlobal';
 import { getToken } from '@/utils/auth';
-import { copyWithMessage } from '@/utils/copy';
 
 import styles from './index.module.less';
-
-const MODEL_DEBUG_INPUT_TEMPLATE = {
-  url: 'https://api.example.com/v1/chat/completions',
-  headers: {},
-  model: '',
-  messages: [
-    {
-      role: 'user',
-      content: '',
-    },
-  ],
-  temperature: 0.1,
-  stream: true,
-};
-
-function buildDefaultModelDebugInput(intl: any) {
-  return JSON.stringify(
-    {
-      ...MODEL_DEBUG_INPUT_TEMPLATE,
-      messages: [
-        {
-          role: 'user',
-          content: intl.formatMessage({ id: 'fileBrowserEntry.defaultDebugMessage' }),
-        },
-      ],
-    },
-    null,
-    2
-  );
-}
 
 function unwrapData(res: any) {
   if (!res) return res;
@@ -75,42 +38,9 @@ function formatDate(value: any) {
   return date.isValid() ? date.format('YYYY-MM-DD') : '-';
 }
 
-function buildModelDebugInput(modelDetail: any, modelInfo: any, debugDefaults: any) {
-  const inparamTemplateStr =
-    modelDetail?.inparamTemplate === null || modelDetail?.inparamTemplate === undefined
-      ? ''
-      : `${modelDetail.inparamTemplate}`;
-  if (inparamTemplateStr.trim()) {
-    return inparamTemplateStr;
-  }
-
-  const formValues = {
-    modelCode: modelDetail?.modelCode || modelDetail?.modelNo || modelInfo?.modelCode || modelInfo?.model || '',
-    model_no: modelDetail?.model_no || modelDetail?.modelNo,
-    modelType: normalizeModelType(modelDetail?.modelType || modelDetail?.type || 'LLM'),
-    apiEndpoint: modelDetail?.apiEndpoint || 'https://api.example.com/v1',
-    apiToken: modelDetail?.apiToken || '',
-    headers:
-      Array.isArray(modelDetail?.headers) && modelDetail.headers.length
-        ? modelDetail.headers
-        : [{ key: '', value: '' }],
-    temperature: modelDetail?.temperature ?? modelInfo?.temperature ?? 0.7,
-    topP: modelDetail?.topP ?? 0.9,
-    maxTokens: modelDetail?.maxTokens ?? 1024,
-  };
-
-  return buildAutoDebugRequestText({
-    formValues,
-    id: `${modelDetail?.id || modelInfo?.modelId || ''}`,
-    prevText: '',
-    ...debugDefaults,
-  });
-}
-
 export default function FileBrowserEntry() {
   const intl = useIntl();
   const t = useCallback((id: string, values?: Record<string, any>) => intl.formatMessage({ id }, values), [intl]);
-  const defaultModelDebugInput = useMemo(() => buildDefaultModelDebugInput(intl), [intl]);
   const [open, setOpen] = useState(false);
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
   const [activeTab, setActiveTab] = useState('files');
@@ -118,15 +48,10 @@ export default function FileBrowserEntry() {
   const [agentDetail, setAgentDetail] = useState<any>(null);
   const [modelDetail, setModelDetail] = useState<any>(null);
   const [modelDetailLoading, setModelDetailLoading] = useState(false);
-  const [modelTestInput, setModelTestInput] = useState(defaultModelDebugInput);
-  const [modelTestOutput, setModelTestOutput] = useState('');
-  const [modelTesting, setModelTesting] = useState(false);
-  const [modelOutputLoading, setModelOutputLoading] = useState(false);
   const [resourceLoading, setResourceLoading] = useState(false);
   const [relatedResources, setRelatedResources] = useState<any[]>([]);
   const [detailResourceId, setDetailResourceId] = useState<string>();
   const entryRef = useRef<HTMLSpanElement>(null);
-  const modelDebugInputKeyRef = useRef('');
   const { pathname } = useLocation();
   const { agentId } = useGlobal();
   const { defaultDigEmployeeId, userInfo } = useSelector(({ employees, user }: any) => ({
@@ -140,7 +65,6 @@ export default function FileBrowserEntry() {
 
   const prologue = useMemo(() => safeJsonParse(agentDetail?.prologue), [agentDetail?.prologue]);
   const modelInfo = prologue?.modelInfo || {};
-  const debugDefaults = useMemo(() => buildDebugDefaults(intl), [intl]);
   const relResourceList = agentDetail?.relResourceList || relatedResources || [];
   const beyondToken = getToken();
 
@@ -203,29 +127,14 @@ export default function FileBrowserEntry() {
   useEffect(() => {
     setAgentDetail(null);
     setModelDetail(null);
-    setModelTestInput(defaultModelDebugInput);
-    setModelTestOutput('');
-    setModelOutputLoading(false);
     setRelatedResources([]);
     setDetailResourceId(undefined);
-    modelDebugInputKeyRef.current = '';
-  }, [defaultModelDebugInput, resourceId]);
+  }, [resourceId]);
 
   useEffect(() => {
     if (!open || activeTab !== 'model') return;
     loadModelDetail();
   }, [activeTab, loadModelDetail, open]);
-
-  useEffect(() => {
-    if (!open || activeTab !== 'model' || !modelInfo?.modelId) return;
-    if (!modelDetail && modelDetailLoading) return;
-    const nextKey = `${resourceId}-${modelInfo?.modelId || ''}-${modelDetail?.id || ''}-${
-      modelDetail?.updateTime || ''
-    }`;
-    if (modelDebugInputKeyRef.current === nextKey) return;
-    modelDebugInputKeyRef.current = nextKey;
-    setModelTestInput(buildModelDebugInput(modelDetail, modelInfo, debugDefaults));
-  }, [activeTab, debugDefaults, modelDetail, modelDetailLoading, modelInfo, open, resourceId]);
 
   useEffect(() => {
     if (!open || activeTab !== 'resources') return;
@@ -240,49 +149,6 @@ export default function FileBrowserEntry() {
     setPortalContainer(resolvePortalContainer());
     setActiveTab('files');
     setOpen(true);
-  };
-
-  const runModelTest = async () => {
-    const modelId = modelInfo?.modelId;
-    if (!modelId) {
-      message.warning(t('fileBrowserEntry.warning.modelNotConfigured'));
-      return;
-    }
-    if (!modelTestInput.trim()) {
-      message.warning(t('fileBrowserEntry.warning.enterTestContent'));
-      return;
-    }
-    setModelTesting(true);
-    setModelOutputLoading(true);
-    setModelTestOutput('');
-    try {
-      let streamedText = '';
-      const res = await debugModelStream({
-        id: `${modelId}`,
-        input: modelTestInput,
-        onDelta: (delta: string) => {
-          streamedText += delta || '';
-          setModelOutputLoading(false);
-          setModelTestOutput(streamedText);
-        },
-      });
-      const output = unwrapData(res)?.output || res?.output || streamedText || JSON.stringify(unwrapData(res) || res);
-      setModelTestOutput(output);
-    } catch (error: any) {
-      setModelTestOutput(error?.message || t('fileBrowserEntry.error.modelTestFailed'));
-      message.error(error?.message || t('fileBrowserEntry.error.modelTestFailed'));
-    } finally {
-      setModelTesting(false);
-      setModelOutputLoading(false);
-    }
-  };
-
-  const copyText = async (text: string) => {
-    if (!text) {
-      message.warning(t('fileBrowserEntry.warning.noCopyContent'));
-      return;
-    }
-    await copyWithMessage(text);
   };
 
   const handleOpenKeyDown = (event: React.KeyboardEvent<HTMLSpanElement>) => {
@@ -388,75 +254,6 @@ export default function FileBrowserEntry() {
                     {modelDetail?.updateTime || '-'}
                   </Descriptions.Item>
                 </Descriptions>
-              </Card>
-              <Card className={styles.modelChatCard}>
-                <div className={styles.debugHero}>
-                  <div className={styles.sectionTitle}>
-                    <span className={styles.sectionBar} />
-                    {t('fileBrowserEntry.debug.title')}
-                  </div>
-                  <div className={styles.sectionDesc}>{t('fileBrowserEntry.debug.desc')}</div>
-                  <div className={styles.debugModeBadge}>{t('fileBrowserEntry.debug.currentModel')}</div>
-                </div>
-                <div className={styles.debugTips}>
-                  <div className={styles.debugTip}>{t('fileBrowserEntry.debug.tipModelId')}</div>
-                  <div className={styles.debugTip}>{t('fileBrowserEntry.debug.tipStreaming')}</div>
-                </div>
-                <div className={styles.debugPanelStack}>
-                  <div className={styles.codePanel}>
-                    <div className={styles.codePanelHeader}>
-                      <span>{t('fileBrowserEntry.debug.input')}</span>
-                      <div className={styles.codePanelActions}>
-                        <Button size="small" icon={<CopyOutlined />} onClick={() => copyText(modelTestInput)}>
-                          {t('common.copy')}
-                        </Button>
-                        <Button
-                          type="primary"
-                          size="small"
-                          loading={modelTesting}
-                          disabled={modelTesting}
-                          onClick={runModelTest}
-                        >
-                          {t('fileBrowserEntry.debug.run')}
-                        </Button>
-                      </div>
-                    </div>
-                    <div className={styles.codeArea}>
-                      <Input.TextArea
-                        value={modelTestInput}
-                        onChange={(event) => setModelTestInput(event.target.value)}
-                        autoSize={{ minRows: 8, maxRows: 8 }}
-                        placeholder={t('fileBrowserEntry.debug.inputPlaceholder')}
-                      />
-                    </div>
-                  </div>
-                  <div className={styles.codePanel}>
-                    <div className={styles.codePanelHeader}>
-                      <span>{t('fileBrowserEntry.debug.output')}</span>
-                      <div className={styles.codePanelActions}>
-                        <Button size="small" icon={<CopyOutlined />} onClick={() => copyText(modelTestOutput)}>
-                          {t('common.copy')}
-                        </Button>
-                        <Button size="small" icon={<DeleteOutlined />} onClick={() => setModelTestOutput('')}>
-                          {t('fileBrowserEntry.debug.clear')}
-                        </Button>
-                      </div>
-                    </div>
-                    <div className={styles.codeArea} style={{ position: 'relative' }}>
-                      {modelOutputLoading ? (
-                        <div className={styles.outputLoading}>
-                          <Spin tip={t('fileBrowserEntry.debug.requesting')} />
-                        </div>
-                      ) : null}
-                      <Input.TextArea
-                        value={modelTestOutput}
-                        onChange={(event) => setModelTestOutput(event.target.value)}
-                        autoSize={{ minRows: 8, maxRows: 8 }}
-                        placeholder={t('fileBrowserEntry.debug.outputPlaceholder')}
-                      />
-                    </div>
-                  </div>
-                </div>
               </Card>
             </div>
           </Spin>
