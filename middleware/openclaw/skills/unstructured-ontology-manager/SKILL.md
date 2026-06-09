@@ -1,5 +1,5 @@
 ---
-name: 个人非结构化本体管理
+name: unstructured-ontology-manager
 description: "对话式非结构化个人本体管理：通过自然语言创建、删除个人非结构化本体对象，数据来源绑定知识库目录"
 allowed-tools: execute, read_file
 ---
