@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CopyOutlined, DeleteOutlined } from '@ant-design/icons';
-import { Button, Card, Descriptions, Empty, Input, Pagination, Spin, Table, Tag, Tooltip, message } from 'antd';
+import { Button, Card, Descriptions, Input, Spin, Table, Tag, Tooltip, message } from 'antd';
 import dayjs from 'dayjs';
 // @ts-ignore
 import { useIntl, useLocation, useSelector } from '@umijs/max';
 
 import fileBrowserIcon from '@/assets/filebrowser/file.png';
 import SkillDetailDrawer from '@/pages/employees/components/SkillDetailDrawer/SkillDetailDrawer';
+import FileBrowserPanel from './components/FileBrowserPanel';
 import {
   buildAutoDebugRequestText,
   buildDebugDefaults,
@@ -16,18 +17,12 @@ import {
 import { queryRelResourceInfo } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { debugModelStream, getModelDetail } from '@/pages/manager/service/ModelMgr';
 import { getCompositeAppInfo } from '@/service/digitalEmployees';
-import { getMessages } from '@/service/message';
-import { querySessionByAgent } from '@/service/session';
 import useGlobal from '@/hooks/useGlobal';
 import { getToken } from '@/utils/auth';
 import { copyWithMessage } from '@/utils/copy';
-import { fetchMessageHandler, getMessageText } from '@/utils/messgae';
-import { sessionHandler } from '@/utils/session';
 
 import styles from './index.module.less';
 
-const FILE_BROWSER_PATH = '/filebrowser/files';
-const DEFAULT_PAGE_SIZE = 10;
 const MODEL_DEBUG_INPUT_TEMPLATE = {
   url: 'https://api.example.com/v1/chat/completions',
   headers: {},
@@ -112,29 +107,6 @@ function buildModelDebugInput(modelDetail: any, modelInfo: any, debugDefaults: a
   });
 }
 
-function buildFileBrowserUrl(resourceId: string, beyondToken: string, ownerType?: string, resourceCode?: string) {
-  const encodedResourceId = encodeURIComponent(resourceId);
-  const workspacePath = `${FILE_BROWSER_PATH}/.openclaw/workspace-baiying-agent-${encodedResourceId}/`;
-  const url = new URL(workspacePath, window.location.origin);
-
-  // The /filebrowser ingress reads either the Beyond-Token header or the beyondToken query.
-  // iframe navigation cannot set custom headers, so the token must be passed by query.
-  if (beyondToken) {
-    url.searchParams.set('beyondToken', beyondToken);
-  }
-  if (resourceId) {
-    url.searchParams.set('resourceId', resourceId);
-  }
-  if (ownerType) {
-    url.searchParams.set('ownerType', ownerType);
-  }
-  if (resourceCode) {
-    url.searchParams.set('resourceCode', resourceCode);
-  }
-
-  return url.toString();
-}
-
 export default function FileBrowserEntry() {
   const intl = useIntl();
   const t = useCallback((id: string, values?: Record<string, any>) => intl.formatMessage({ id }, values), [intl]);
@@ -144,12 +116,6 @@ export default function FileBrowserEntry() {
   const [activeTab, setActiveTab] = useState('files');
   const [detailLoading, setDetailLoading] = useState(false);
   const [agentDetail, setAgentDetail] = useState<any>(null);
-  const [sessions, setSessions] = useState<any[]>([]);
-  const [sessionPagination, setSessionPagination] = useState({ current: 1, pageSize: DEFAULT_PAGE_SIZE, total: 0 });
-  const [sessionLoading, setSessionLoading] = useState(false);
-  const [selectedSession, setSelectedSession] = useState<any>(null);
-  const [messages, setMessages] = useState<any[]>([]);
-  const [messageLoading, setMessageLoading] = useState(false);
   const [modelDetail, setModelDetail] = useState<any>(null);
   const [modelDetailLoading, setModelDetailLoading] = useState(false);
   const [modelTestInput, setModelTestInput] = useState(defaultModelDebugInput);
@@ -163,10 +129,8 @@ export default function FileBrowserEntry() {
   const modelDebugInputKeyRef = useRef('');
   const { pathname } = useLocation();
   const { agentId } = useGlobal();
-  const { defaultDigEmployeeId, userInfo, employeesList, agentList } = useSelector(({ employees, user }: any) => ({
+  const { defaultDigEmployeeId, userInfo } = useSelector(({ employees, user }: any) => ({
     defaultDigEmployeeId: employees?.defaultDigEmployeeId,
-    employeesList: employees?.employeesList || [],
-    agentList: employees?.agentList || [],
     userInfo: user?.userInfo,
   }));
 
@@ -174,23 +138,11 @@ export default function FileBrowserEntry() {
     return `${agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId || ''}`;
   }, [agentId, defaultDigEmployeeId, userInfo?.defaultDigEmployeeId]);
 
-  const cachedAgentInfo = useMemo(() => {
-    const allAgents = [...(employeesList || []), ...(agentList || [])];
-    return allAgents.find((item: any) => `${item?.agentId || item?.id || item?.resourceId || ''}` === resourceId);
-  }, [agentList, employeesList, resourceId]);
-
-  const ownerType = agentDetail?.ownerType || cachedAgentInfo?.ownerType || '';
-  const resourceCode = agentDetail?.resourceCode || cachedAgentInfo?.resourceCode || '';
   const prologue = useMemo(() => safeJsonParse(agentDetail?.prologue), [agentDetail?.prologue]);
   const modelInfo = prologue?.modelInfo || {};
   const debugDefaults = useMemo(() => buildDebugDefaults(intl), [intl]);
   const relResourceList = agentDetail?.relResourceList || relatedResources || [];
-  const assistantName = agentDetail?.resourceName || cachedAgentInfo?.name || cachedAgentInfo?.resourceName || 'AI';
   const beyondToken = getToken();
-
-  const iframeUrl = useMemo(() => {
-    return buildFileBrowserUrl(resourceId, beyondToken, ownerType, resourceCode);
-  }, [beyondToken, ownerType, resourceCode, resourceId]);
 
   const loadAgentDetail = useCallback(async () => {
     if (!resourceId) return;
@@ -204,59 +156,6 @@ export default function FileBrowserEntry() {
       setDetailLoading(false);
     }
   }, [resourceId, t]);
-
-  const loadMessages = useCallback(
-    async (session: any) => {
-      const sessionId = session?.sessionId;
-      if (!sessionId) {
-        setMessages([]);
-        return;
-      }
-      setMessageLoading(true);
-      try {
-        const res = await getMessages({ sessionId: `${sessionId}`, pageNum: 1, pageSize: 50 });
-        const list = (unwrapData(res)?.list || res?.list || []).map((item: any) => fetchMessageHandler(item));
-        setMessages(list);
-      } catch (error: any) {
-        message.error(error?.message || t('fileBrowserEntry.error.loadSessionMessagesFailed'));
-        setMessages([]);
-      } finally {
-        setMessageLoading(false);
-      }
-    },
-    [t]
-  );
-
-  const loadSessions = useCallback(
-    async (pageNum = 1) => {
-      if (!resourceId) return;
-      setSessionLoading(true);
-      try {
-        const res = await querySessionByAgent({
-          pageNum,
-          pageSize: sessionPagination.pageSize,
-          keyword: '',
-          objectId: resourceId,
-        });
-        const data = unwrapData(res) || {};
-        const list = (data.list || []).map((item: any) => sessionHandler(item));
-        setSessions(list);
-        setSessionPagination({
-          current: Number(data.pageNum || pageNum),
-          pageSize: Number(data.pageSize || sessionPagination.pageSize),
-          total: Number(data.total || 0),
-        });
-        const nextSelected = list[0] || null;
-        setSelectedSession(nextSelected);
-        loadMessages(nextSelected);
-      } catch (error: any) {
-        message.error(error?.message || t('fileBrowserEntry.error.loadSessionListFailed'));
-      } finally {
-        setSessionLoading(false);
-      }
-    },
-    [loadMessages, resourceId, sessionPagination.pageSize, t]
-  );
 
   const loadModelDetail = useCallback(async () => {
     const modelId = modelInfo?.modelId;
@@ -303,9 +202,6 @@ export default function FileBrowserEntry() {
 
   useEffect(() => {
     setAgentDetail(null);
-    setSessions([]);
-    setSelectedSession(null);
-    setMessages([]);
     setModelDetail(null);
     setModelTestInput(defaultModelDebugInput);
     setModelTestOutput('');
@@ -314,11 +210,6 @@ export default function FileBrowserEntry() {
     setDetailResourceId(undefined);
     modelDebugInputKeyRef.current = '';
   }, [defaultModelDebugInput, resourceId]);
-
-  useEffect(() => {
-    if (!open || activeTab !== 'logs' || sessions.length) return;
-    loadSessions(1);
-  }, [activeTab, loadSessions, open, sessions.length]);
 
   useEffect(() => {
     if (!open || activeTab !== 'model') return;
@@ -450,74 +341,7 @@ export default function FileBrowserEntry() {
       label: t('fileBrowserEntry.tab.files'),
       children: (
         <div className={styles.filePane}>
-          <iframe className={styles.fileBrowserFrame} title={t('fileBrowserEntry.iframeTitle')} src={iframeUrl} />
-        </div>
-      ),
-    },
-    {
-      key: 'logs',
-      label: t('fileBrowserEntry.tab.logs'),
-      children: (
-        <div className={styles.logsPane}>
-          <div className={styles.sessionPanel}>
-            <Spin spinning={sessionLoading}>
-              {sessions.length ? (
-                sessions.map((item) => (
-                  <button
-                    className={`${styles.sessionCard} ${
-                      `${selectedSession?.sessionId}` === `${item.sessionId}` ? styles.sessionCardActive : ''
-                    }`}
-                    key={item.sessionId}
-                    onClick={() => {
-                      setSelectedSession(item);
-                      loadMessages(item);
-                    }}
-                    type="button"
-                  >
-                    <span className={styles.sessionName}>
-                      {item.sessionName || t('fileBrowserEntry.session.unnamed')}
-                    </span>
-                    <span className={styles.sessionTime}>{item.updateTime || item.createTime || '-'}</span>
-                  </button>
-                ))
-              ) : (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('fileBrowserEntry.session.empty')} />
-              )}
-            </Spin>
-            <Pagination
-              simple
-              current={sessionPagination.current}
-              pageSize={sessionPagination.pageSize}
-              total={sessionPagination.total}
-              onChange={(page) => loadSessions(page)}
-            />
-          </div>
-          <div className={styles.messagePanel}>
-            <Spin spinning={messageLoading}>
-              {messages.length ? (
-                messages.map((item) => {
-                  const text = getMessageText(item) || t('fileBrowserEntry.message.nonText');
-                  return (
-                    <div
-                      className={`${styles.messageBubbleRow} ${
-                        item.fromBeyond ? styles.messageBubbleAssistant : styles.messageBubbleUser
-                      }`}
-                      key={item.msgId || item.messageId}
-                    >
-                      <div className={styles.messageBubble}>
-                        <div className={styles.messageMeta}>
-                          {item.fromBeyond ? assistantName : item.creatorName || t('fileBrowserEntry.message.me')}
-                        </div>
-                        <div className={styles.messageText}>{text}</div>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('fileBrowserEntry.message.selectSession')} />
-              )}
-            </Spin>
-          </div>
+          <FileBrowserPanel resourceId={resourceId} />
         </div>
       ),
     },
