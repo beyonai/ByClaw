@@ -230,6 +230,13 @@ async def ensure_synced(
         ) from exc
 
     if resp.get("resultCode") != "0":
+        # "already exists" = idempotent success (property sync is a no-op)
+        ok = resp.get("resultObject", {}).get("errorCode", "") or ""
+        msg = (resp.get("resultMsg") or "").lower()
+        if ok == "MetadataPropertyAlreadyExists" or "already exist" in msg:
+            await _mark_synced(pool, property_id, endpoint_key)
+            kgw_metadata_sync_total.labels(result="success").inc()
+            return
         error_msg = f"upstream resultCode != 0: {str(resp)[:200]}"
         await _mark_failed(pool, property_id, endpoint_key, error_msg)
         kgw_metadata_sync_total.labels(result="failed").inc()
