@@ -94,8 +94,6 @@ _mocks = {
     "by_qa.qa.engines.instant.engine": _instant_engine_module,
     "by_qa.qa.engines.instant.types": _types_mock,
     "redis_agent_config": MagicMock(),
-    "minio_agent_config": MagicMock(),
-    "minio_client": MagicMock(),
     "middleware": MagicMock(),
     "by_qa.qa.services": MagicMock(),
     "by_qa.qa.services.llm_service": MagicMock(),
@@ -232,13 +230,13 @@ async def test_process_command_uses_all_agent_kbs_when_call_kb_ids_empty(call_kb
     )
 
     with (
-        patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
+        patch.object(worker_module, "load_agent_config_from_redis", AsyncMock(return_value=(agent_config, None))),
         patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
         patch.object(worker_module, "InstantQAEngine", return_value=_FakeEngine()) as instant_search_engine,
         patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="季度分析")),
         patch.object(worker_module, "upload_report", AsyncMock()),
         patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
-        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
+
     ):
         result = await worker.process_command(command, context)
 
@@ -275,13 +273,13 @@ async def test_process_command_filters_agent_kbs_by_call_kb_ids_subset():
     )
 
     with (
-        patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
+        patch.object(worker_module, "load_agent_config_from_redis", AsyncMock(return_value=(agent_config, None))),
         patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
         patch.object(worker_module, "InstantQAEngine", return_value=_FakeEngine()) as instant_search_engine,
         patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="季度分析")),
         patch.object(worker_module, "upload_report", AsyncMock()),
         patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
-        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
+
     ):
         result = await worker.process_command(command, context)
 
@@ -317,10 +315,10 @@ async def test_process_command_returns_answer_when_call_kb_ids_not_belong_to_age
     )
 
     with (
-        patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
+        patch.object(worker_module, "load_agent_config_from_redis", AsyncMock(return_value=(agent_config, None))),
         patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
         patch.object(worker_module, "InstantQAEngine") as instant_search_engine,
-        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
+
     ):
         result = await worker.process_command(command, context)
 
@@ -371,9 +369,9 @@ async def test_process_command_logs_warning_when_agent_has_no_search_config():
     )
 
     with (
-        patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=None)),
+        patch.object(worker_module, "load_agent_config_from_redis", AsyncMock(return_value=(None, None))),
         patch.object(worker_module, "logger") as mock_logger,
-        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
+
     ):
         result = await worker.process_command(command, context)
 
@@ -399,14 +397,14 @@ async def test_process_command_logs_warning_when_no_knowledge_bases_loaded():
     )
 
     with (
-        patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
+        patch.object(worker_module, "load_agent_config_from_redis", AsyncMock(return_value=(agent_config, None))),
         patch.object(
             worker_module,
             "convert_agent_config_to_engine_config",
             return_value={"retrieval": {"knowledge_bases": []}},
         ),
         patch.object(worker_module, "logger") as mock_logger,
-        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
+
     ):
         result = await worker.process_command(command, context)
 
@@ -432,7 +430,7 @@ async def test_process_command_logs_warning_when_requested_call_kb_ids_are_missi
     )
 
     with (
-        patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
+        patch.object(worker_module, "load_agent_config_from_redis", AsyncMock(return_value=(agent_config, None))),
         patch.object(
             worker_module,
             "convert_agent_config_to_engine_config",
@@ -446,7 +444,7 @@ async def test_process_command_logs_warning_when_requested_call_kb_ids_are_missi
             },
         ),
         patch.object(worker_module, "logger") as mock_logger,
-        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
+
     ):
         result = await worker.process_command(command, context)
 
@@ -493,8 +491,8 @@ async def test_process_command_lets_engine_load_model_provider():
     with (
         patch.object(
             worker_module,
-            "load_agent_config_from_minio",
-            AsyncMock(return_value=agent_config),
+            "load_agent_config_from_redis",
+            AsyncMock(return_value=(agent_config, None)),
         ),
         patch.object(
             worker_module,
@@ -515,7 +513,7 @@ async def test_process_command_lets_engine_load_model_provider():
         patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="test_file")),
         patch.object(worker_module, "upload_report", AsyncMock()),
         patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
-        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
+
     ):
         result = await worker.process_command(command, context)
 
@@ -569,8 +567,8 @@ async def test_process_command_logs_run_search_payload_with_agent_id_and_call_kb
     with (
         patch.object(
             worker_module,
-            "load_agent_config_from_minio",
-            AsyncMock(return_value=agent_config),
+            "load_agent_config_from_redis",
+            AsyncMock(return_value=(agent_config, None)),
         ),
         patch.object(
             worker_module,
@@ -581,7 +579,7 @@ async def test_process_command_logs_run_search_payload_with_agent_id_and_call_kb
         patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="test_file")),
         patch.object(worker_module, "upload_report", AsyncMock()),
         patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
-        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
+
         patch.object(worker_module, "logger") as mock_logger,
     ):
         await worker.process_command(command, context)
@@ -669,13 +667,13 @@ async def test_process_command_uses_async_context_for_engine_and_stream():
     )
 
     with (
-        patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
+        patch.object(worker_module, "load_agent_config_from_redis", AsyncMock(return_value=(agent_config, None))),
         patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
         patch.object(worker_module, "InstantQAEngine", return_value=fake_engine),
         patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="季度分析")),
         patch.object(worker_module, "upload_report", AsyncMock()),
         patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
-        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
+
     ):
         result = await worker.process_command(command, context)
 
@@ -724,12 +722,11 @@ async def test_process_command_passes_prologue_model_id_to_provider():
         return mock_provider_instance
 
     with (
-        patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
+        patch.object(worker_module, "load_agent_config_from_redis", AsyncMock(return_value=(agent_config, employee_config_with_prologue))),
         patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
         patch.object(worker_module, "InstantQAEngine", return_value=_FakeEngine()),
         patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="test_report")),
         patch.object(worker_module, "upload_report", AsyncMock()),
-        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=employee_config_with_prologue)),
         patch.object(worker_module, "extract_prologue_model_id", return_value="-2000"),
         patch("redis_model_config.RedisModelConfigProvider", side_effect=_capture_provider),
     ):
@@ -952,13 +949,13 @@ async def test_process_command_uploads_report_after_final_answer():
     )
 
     with (
-        patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
+        patch.object(worker_module, "load_agent_config_from_redis", AsyncMock(return_value=(agent_config, None))),
         patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
         patch.object(worker_module, "InstantQAEngine", return_value=fake_engine),
         patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="季度分析")) as mock_gen,
         patch.object(worker_module, "upload_report", AsyncMock()) as mock_upload,
         patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
-        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
+
     ):
         result = await worker.process_command(command, context)
 
@@ -997,13 +994,13 @@ async def test_process_command_does_not_report_upload_success_when_upload_fails(
     )
 
     with (
-        patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
+        patch.object(worker_module, "load_agent_config_from_redis", AsyncMock(return_value=(agent_config, None))),
         patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
         patch.object(worker_module, "InstantQAEngine", return_value=fake_engine),
         patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="季度分析")) as mock_gen,
         patch.object(worker_module, "upload_report", AsyncMock(return_value=False)) as mock_upload,
         patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
-        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
+
     ):
         result = await worker.process_command(command, context)
 
@@ -1045,13 +1042,13 @@ async def test_process_command_emits_upload_failure_message_when_upload_fails():
     )
 
     with (
-        patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
+        patch.object(worker_module, "load_agent_config_from_redis", AsyncMock(return_value=(agent_config, None))),
         patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
         patch.object(worker_module, "InstantQAEngine", return_value=fake_engine),
         patch.object(worker_module, "generate_report_filename", AsyncMock(return_value="季度分析")),
         patch.object(worker_module, "upload_report", AsyncMock(return_value=False)),
         patch("redis_model_config.RedisModelConfigProvider", return_value=AsyncMock()),
-        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
+
     ):
         result = await worker.process_command(command, context)
 
@@ -1101,12 +1098,12 @@ async def test_process_command_skips_upload_when_no_final_answer():
     )
 
     with (
-        patch.object(worker_module, "load_agent_config_from_minio", AsyncMock(return_value=agent_config)),
+        patch.object(worker_module, "load_agent_config_from_redis", AsyncMock(return_value=(agent_config, None))),
         patch.object(worker_module, "convert_agent_config_to_engine_config", return_value=engine_config),
         patch.object(worker_module, "InstantQAEngine", return_value=fake_engine),
         patch.object(worker_module, "generate_report_filename", AsyncMock()) as mock_gen,
         patch.object(worker_module, "upload_report", AsyncMock()) as mock_upload,
-        patch.object(worker_module._minio, "get_dig_employee_config", AsyncMock(return_value=None)),
+
     ):
         result = await worker.process_command(command, context)
 
