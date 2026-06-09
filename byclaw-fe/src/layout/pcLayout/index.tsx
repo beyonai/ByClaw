@@ -180,10 +180,8 @@ const PCLayout = () => {
     myEventEmitter.emit('beyond-driver-close');
   }, [sessionId]);
 
-  const getAgentUploadFileConfig = useAgentUploadFileConfig(employeesList);
-  const uploadFileConfig = React.useMemo(() => {
-    return getAgentUploadFileConfig(agentId);
-  }, [agentId, getAgentUploadFileConfig]);
+  const { globalConfig } = useAgentUploadFileConfig(employeesList);
+  const uploadFileConfig = React.useMemo(() => globalConfig, [globalConfig]);
 
   useEffect(() => {
     if (containChatLayout) {
