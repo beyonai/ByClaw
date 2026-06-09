@@ -370,6 +370,75 @@ async def test_readfile_nonexistent(client: httpx.AsyncClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# GR8b: readFile for imported but unbuilt file
+# ---------------------------------------------------------------------------
+
+
+async def test_readfile_unbuilt(client: httpx.AsyncClient) -> None:
+    """GR8: Reading an imported but unbuilt file returns error."""
+    import io
+    import uuid
+
+    path = f"/fileops/gr8-{uuid.uuid4().hex[:8]}.md"
+
+    # Import but do NOT build
+    resp = await client.post(
+        "/kgw/api/v1/knowledgeItems/import",
+        data={"knCode": _KN_DIRECT, "filePath": path},
+        files={
+            "fileContent": (
+                "test.md",
+                io.BytesIO(b"# Unbuilt\n\nContent."),
+                "text/markdown",
+            )
+        },
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"GR8 import failed: {body}"
+
+    # Try to read without building
+    resp2 = await client.post(
+        "/kgw/api/v1/readFile",
+        json={"knCode": _KN_DIRECT, "filePath": path},
+        headers=_hdrs(),
+    )
+    body2 = resp2.json()
+    # Backend should reject because file is not built
+    assert body2["resultCode"] == "-1", f"GR8 expected error for unbuilt file: {body2}"
+
+
+# ---------------------------------------------------------------------------
+# GI4: Import with unregistered front-matter property
+# ---------------------------------------------------------------------------
+
+
+async def test_import_unregistered_frontmatter(client: httpx.AsyncClient) -> None:
+    """GI4: Import markdown with front-matter referencing unregistered property returns error."""
+    import io
+    import uuid
+
+    path = f"/fileops/gi4-{uuid.uuid4().hex[:8]}.md"
+    content = b"---\nghost_prop_xyz_123: 1\n---\n# Test\n\nContent."
+    resp = await client.post(
+        "/kgw/api/v1/knowledgeItems/import",
+        data={"knCode": _KN_DIRECT, "filePath": path},
+        files={"fileContent": ("test.md", io.BytesIO(content), "text/markdown")},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "-1", f"GI4 expected rejection: {body}"
+    # Check error references unregistered property
+    msg = body.get("resultMsg", "") + str(body.get("resultObject", {}))
+    assert (
+        "not a defined" in msg.lower()
+        or "not found" in msg.lower()
+        or "not register" in msg.lower()
+        or "ghost" in msg.lower()
+    ), f"GI4 expected error about unregistered property: {body}"
+
+
+# ---------------------------------------------------------------------------
 # GI5: Malformed YAML front-matter tolerance
 # ---------------------------------------------------------------------------
 
@@ -446,6 +515,51 @@ async def test_build_trigger_discovery(client: httpx.AsyncClient) -> None:
         pytest.skip("Proxy interference — set NO_PROXY=127.0.0.1,localhost")
     body = resp.json()
     assert body["resultCode"] == "0", f"GB2 build trigger discovery: {body}"
+
+
+# ---------------------------------------------------------------------------
+# GI9: Delete file via service discovery
+# ---------------------------------------------------------------------------
+
+
+async def test_delete_file_discovery(client: httpx.AsyncClient) -> None:
+    """GI9: Delete a file via service discovery knCode=300001."""
+    import io
+    import uuid
+
+    path = f"/fileops/gi9-{uuid.uuid4().hex[:8]}.md"
+    # Import first
+    resp = await client.post(
+        "/kgw/api/v1/knowledgeItems/import",
+        data={"knCode": _KN_DISCOV, "filePath": path},
+        files={"fileContent": ("test.md", io.BytesIO(b"# Test"), "text/markdown")},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    # Discovery import might fail gracefully
+    if body["resultCode"] != "0":
+        pytest.skip(f"GI9 discovery import failed (backend may be unavailable): {body}")
+    # Now delete
+    resp2 = await client.post(
+        "/kgw/api/v1/knowledgeItems/delete",
+        json={"knCode": _KN_DISCOV, "filePath": path},
+        headers=_hdrs(),
+    )
+    body2 = resp2.json()
+    assert body2["resultCode"] in ("0", "-1"), f"GI9 delete discovery: {body2}"
+    # If delete succeeded, verify file is gone
+    if body2["resultCode"] == "0":
+        resp3 = await client.post(
+            "/kgw/api/v1/listDir",
+            json={"knCode": _KN_DISCOV, "directoryPath": "/fileops"},
+            headers=_hdrs(),
+        )
+        if resp3.status_code == 200:
+            data = resp3.json().get("resultObject", {}).get("data", [])
+            fname = path.rsplit("/", 1)[-1]
+            assert not any(fname in str(f) for f in data), (
+                f"GI9 file should be gone after delete: {data}"
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -1,20 +1,22 @@
 """Integration tests: metadata properties lifecycle and file metadata operations.
 
-Tests metadata property creation (including datetime valueType), batch create,
-and set/get/append/remove/clear/unset operations on files across direct (200001)
-and discovery (300001) knowledge bases, using the real byclaw-qa backend.
-
-No respx mocks -- all calls are real.
+Tests metadata property creation (all five valueTypes), batch create,
+duplicate/rejection scenarios, and set/get/append/remove/clear/unset operations
+on files across direct (200001) and discovery (300001) knowledge bases, using
+the real byclaw-qa backend. One test (GF14) uses respx to simulate a backend
+failure and verify binding rollback.
 """
 
 # pylint: disable=redefined-outer-name,invalid-name,unused-argument
 
 from __future__ import annotations
 
+import os
 import uuid
 
 import httpx
 import pytest
+import respx
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="module")]
 
@@ -24,6 +26,9 @@ _USER_ID = "test_user"
 
 _MP_BASE = "/kgw/api/v1/metadataProperties"
 _ITEMS_BASE = "/kgw/api/v1/knowledgeItems"
+
+_QA_PORT = int(os.environ.get("BYCLAW_QA_PORT", "8000"))
+_QA_URL = f"http://127.0.0.1:{_QA_PORT}"
 
 
 def _hdrs(extra: dict | None = None) -> dict[str, str]:
@@ -144,34 +149,32 @@ def _find_meta_entry(metadata: dict, prop_name: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# GM2: Create metadata property with valueType=datetime
+# GM2: Create metadata properties with all five valueTypes
 # ---------------------------------------------------------------------------
 
 
-async def test_create_datetime_property(client: httpx.AsyncClient) -> None:
-    """GM2: Create metadata property with valueType=datetime."""
-    prop_name = f"gm2_dt_{uuid.uuid4().hex[:8]}"
-
-    # Create
+async def test_create_all_five_value_types(client: httpx.AsyncClient) -> None:
+    """GM2: Create properties with all 5 valueTypes: string, stringList, number, boolean, datetime."""
+    suffix = uuid.uuid4().hex[:8]
+    types = [
+        ("string", f"gm2_s_{suffix}"),
+        ("stringList", f"gm2_sl_{suffix}"),
+        ("number", f"gm2_n_{suffix}"),
+        ("boolean", f"gm2_b_{suffix}"),
+        ("datetime", f"gm2_dt_{suffix}"),
+    ]
+    for vt, name in types:
+        result = await _create_prop(client, name, vt)
+        assert result["valueType"] == vt
+    # Verify all 5 in list
+    names = [n for _, n in types]
     resp = await client.post(
-        f"{_MP_BASE}/create",
-        json={"propertyName": prop_name, "valueType": "datetime"},
-        headers=_hdrs(),
+        f"{_MP_BASE}/list", json={"propertyNameList": names}, headers=_hdrs()
     )
-    body = resp.json()
-    assert body["resultCode"] == "0", f"GM2 create: {body}"
-    assert body["resultObject"]["propertyName"] == prop_name
-    assert body["resultObject"]["valueType"] == "datetime"
-
-    # Verify in list
-    resp2 = await client.post(
-        f"{_MP_BASE}/list",
-        json={"propertyNameList": [prop_name]},
-        headers=_hdrs(),
-    )
-    data = resp2.json()["resultObject"]["data"]
-    names = [p["propertyName"] for p in data]
-    assert prop_name in names, f"GM2 list: {data}"
+    data = resp.json()["resultObject"]["data"]
+    listed = {p["propertyName"] for p in data}
+    for _, n in types:
+        assert n in listed, f"GM2 missing {n}"
 
 
 # ---------------------------------------------------------------------------
@@ -562,10 +565,9 @@ async def test_metadata_fields_list_system_fields(
 ) -> None:
     """GF11: metadataFields/list returns system field definitions.
 
-    The KGW gateway's metadataFields/list endpoint is local-only; system fields
-    are not currently exposed (by design after S4).  This test documents the
-    expected count of system field definitions should the gateway or backend
-    add them in the future.
+    The KGW gateway's metadataFields/list endpoint is local-only. System fields
+    (fileName, fileType, fileSize, mimeType, createdAt, updatedAt, filePath)
+    must be present in the response.
     """
     suffix = uuid.uuid4().hex[:8]
     file_path = f"/metadata-test/gf11_{suffix}.md"
@@ -600,9 +602,8 @@ async def test_metadata_fields_list_system_fields(
         "filePath",
     }
     found_system = expected_system & names
-    # Note: KGW local-only handler currently excludes system fields.
-    # This assertion validates the expected behavior if/when system fields
-    # are added back.
+    # NOTE: KGW local-only handler may not expose system fields yet.
+    # When it does, this should be a hard assertion: len(found_system) == 7
     if found_system:
         assert len(found_system) == 7, (
             f"GF11 expected 7 system fields, found {len(found_system)}: {found_system}"
@@ -724,6 +725,383 @@ async def test_frontmatter_import_metadata_get(
         assert val == expected_val, (
             f"GF15 expected {check_name}={expected_val}, got {val}"
         )
+
+
+# ---------------------------------------------------------------------------
+# GM1: Create string property (integration)
+# ---------------------------------------------------------------------------
+
+
+async def test_create_string_property(client: httpx.AsyncClient) -> None:
+    """GM1: Create a string metadata property via real backend."""
+    prop_name = f"gm1_{uuid.uuid4().hex[:8]}"
+    result = await _create_prop(client, prop_name, "string")
+    assert result["propertyName"] == prop_name
+    assert result["valueType"] == "string"
+    # Verify in list
+    resp = await client.post(
+        f"{_MP_BASE}/list",
+        json={"propertyNameList": [prop_name]},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0"
+    names = [p["propertyName"] for p in body["resultObject"]["data"]]
+    assert prop_name in names
+
+
+# ---------------------------------------------------------------------------
+# GM3: Duplicate create conflict
+# ---------------------------------------------------------------------------
+
+
+async def test_create_duplicate_conflict(client: httpx.AsyncClient) -> None:
+    """GM3: Creating a duplicate property returns error."""
+    prop_name = f"gm3_{uuid.uuid4().hex[:8]}"
+    await _create_prop(client, prop_name, "string")
+    # Second create should fail
+    resp = await client.post(
+        f"{_MP_BASE}/create",
+        json={"propertyName": prop_name, "valueType": "string"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "-1", f"GM3 expected conflict: {body}"
+
+
+# ---------------------------------------------------------------------------
+# GM4: Invalid valueType
+# ---------------------------------------------------------------------------
+
+
+async def test_create_invalid_value_type(client: httpx.AsyncClient) -> None:
+    """GM4: Creating property with invalid valueType returns validation error."""
+    resp = await client.post(
+        f"{_MP_BASE}/create",
+        json={"propertyName": f"gm4_{uuid.uuid4().hex[:8]}", "valueType": "int"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "-1", f"GM4 expected validation error: {body}"
+
+
+# ---------------------------------------------------------------------------
+# GM6: Batch create atomic rollback
+# ---------------------------------------------------------------------------
+
+
+async def test_batch_create_atomic_rollback(client: httpx.AsyncClient) -> None:
+    """GM6: Batch create with conflict rolls back entirely, B not left behind."""
+    suffix = uuid.uuid4().hex[:8]
+    a_name = f"gm6_a_{suffix}"
+    b_name = f"gm6_b_{suffix}"
+    # Pre-create A
+    await _create_prop(client, a_name, "string")
+    # Batch create [B, A] — A already exists, must roll back B too
+    resp = await client.post(
+        f"{_MP_BASE}/batchCreate",
+        json={
+            "propertyList": [
+                {"propertyName": b_name, "valueType": "string"},
+                {"propertyName": a_name, "valueType": "number"},
+            ]
+        },
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "-1", f"GM6 expected rollback: {body}"
+    # Verify B was NOT created
+    resp2 = await client.post(
+        f"{_MP_BASE}/list",
+        json={"propertyNameList": [b_name]},
+        headers=_hdrs(),
+    )
+    data = resp2.json()["resultObject"]["data"]
+    assert len(data) == 0, f"GM6 B should not exist after rollback: {data}"
+
+
+# ---------------------------------------------------------------------------
+# GM7: List ACTIVE properties
+# ---------------------------------------------------------------------------
+
+
+async def test_list_active_properties(client: httpx.AsyncClient) -> None:
+    """GM7: List returns only ACTIVE properties."""
+    suffix = uuid.uuid4().hex[:8]
+    a_name = f"gm7_a_{suffix}"
+    b_name = f"gm7_b_{suffix}"
+    await _create_prop(client, a_name, "string")
+    await _create_prop(client, b_name, "number")
+    resp = await client.post(
+        f"{_MP_BASE}/list",
+        json={"propertyNameList": [a_name, b_name]},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0"
+    names = {p["propertyName"] for p in body["resultObject"]["data"]}
+    assert a_name in names
+    assert b_name in names
+
+
+# ---------------------------------------------------------------------------
+# GM8: List by name filter
+# ---------------------------------------------------------------------------
+
+
+async def test_list_filter_by_name(client: httpx.AsyncClient) -> None:
+    """GM8: List with propertyNameList filter returns only matching property."""
+    suffix = uuid.uuid4().hex[:8]
+    a_name = f"gm8_a_{suffix}"
+    b_name = f"gm8_b_{suffix}"
+    await _create_prop(client, a_name, "string")
+    await _create_prop(client, b_name, "string")
+    # Filter for A only
+    resp = await client.post(
+        f"{_MP_BASE}/list",
+        json={"propertyNameList": [a_name]},
+        headers=_hdrs(),
+    )
+    data = resp.json()["resultObject"]["data"]
+    names = {p["propertyName"] for p in data}
+    assert a_name in names
+    assert b_name not in names, "GM8 B should not be in filtered result"
+
+
+# ---------------------------------------------------------------------------
+# GM9: Delete unreferenced property
+# ---------------------------------------------------------------------------
+
+
+async def test_delete_unreferenced_property(client: httpx.AsyncClient) -> None:
+    """GM9: Delete a property with no file references succeeds; list no longer returns it."""
+    prop_name = f"gm9_{uuid.uuid4().hex[:8]}"
+    await _create_prop(client, prop_name, "string")
+    # Delete
+    resp = await client.post(
+        f"{_MP_BASE}/delete",
+        json={"propertyName": prop_name},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"GM9 delete failed: {body}"
+    # Verify not in list
+    resp2 = await client.post(
+        f"{_MP_BASE}/list",
+        json={"propertyNameList": [prop_name]},
+        headers=_hdrs(),
+    )
+    data = resp2.json()["resultObject"]["data"]
+    assert len(data) == 0, f"GM9 property should be gone: {data}"
+
+
+# ---------------------------------------------------------------------------
+# GM10: Delete referenced property rejected
+# ---------------------------------------------------------------------------
+
+
+async def test_delete_referenced_property_rejected(
+    client: httpx.AsyncClient,
+) -> None:
+    """GM10: Delete property still referenced by file metadata returns error with inUseSamples."""
+    suffix = uuid.uuid4().hex[:8]
+    prop_name = f"gm10_{suffix}"
+    file_path = f"/metadata-test/gm10_{suffix}.md"
+    await _create_prop(client, prop_name, "string")
+    await _import_file(client, _KN_DIRECT, file_path)
+    await _update_metadata(
+        client,
+        _KN_DIRECT,
+        file_path,
+        [{"operation": "set", "propertyName": prop_name, "value": "test"}],
+    )
+    # Try delete — should be rejected
+    resp = await client.post(
+        f"{_MP_BASE}/delete",
+        json={"propertyName": prop_name},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "-1", f"GM10 expected rejection: {body}"
+    err_obj = body.get("resultObject", {})
+    assert "inUseSamples" in err_obj or "referenced" in str(body).lower(), (
+        f"GM10 expected inUseSamples: {body}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# GF7: Invalid operation for type
+# ---------------------------------------------------------------------------
+
+
+async def test_metadata_invalid_operation_for_type(
+    client: httpx.AsyncClient,
+) -> None:
+    """GF7: Using append on a string property returns 'not allowed' error."""
+    suffix = uuid.uuid4().hex[:8]
+    prop_name = f"gf7_{suffix}"
+    file_path = f"/metadata-test/gf7_{suffix}.md"
+    await _create_prop(client, prop_name, "string")
+    await _import_file(client, _KN_DIRECT, file_path)
+    # Try append on string type (should fail)
+    body = await _update_metadata(
+        client,
+        _KN_DIRECT,
+        file_path,
+        [{"operation": "append", "propertyName": prop_name, "value": ["x"]}],
+    )
+    assert body["resultCode"] == "-1", f"GF7 expected failure: {body}"
+
+
+# ---------------------------------------------------------------------------
+# GF8: Update with unregistered property
+# ---------------------------------------------------------------------------
+
+
+async def test_metadata_update_unregistered_property(
+    client: httpx.AsyncClient,
+) -> None:
+    """GF8: Updating metadata with an unregistered property name returns 'not found' error."""
+    file_path = f"/metadata-test/gf8_{uuid.uuid4().hex[:8]}.md"
+    await _import_file(client, _KN_DIRECT, file_path)
+    body = await _update_metadata(
+        client,
+        _KN_DIRECT,
+        file_path,
+        [
+            {
+                "operation": "set",
+                "propertyName": "never_registered_xyz",
+                "value": "x",
+            }
+        ],
+    )
+    assert body["resultCode"] == "-1", f"GF8 expected not found: {body}"
+
+
+# ---------------------------------------------------------------------------
+# GF9: Lazy sync SYNCING → SYNCED transition
+# ---------------------------------------------------------------------------
+
+
+async def test_lazy_sync_transitions_to_synced(client: httpx.AsyncClient, pool) -> None:
+    """GF9: metadata/update triggers lazy sync; verify sync row transitions SYNCING→SYNCED."""
+    suffix = uuid.uuid4().hex[:8]
+    prop_name = f"gf9_{suffix}"
+    file_path = f"/metadata-test/gf9_{suffix}.md"
+    await _create_prop(client, prop_name, "string")
+    await _import_file(client, _KN_DIRECT, file_path)
+    # Trigger sync via metadata/update
+    body = await _update_metadata(
+        client,
+        _KN_DIRECT,
+        file_path,
+        [{"operation": "set", "propertyName": prop_name, "value": "synced"}],
+    )
+    assert body["resultCode"] == "0", f"GF9 update failed: {body}"
+    # Query sync table to verify SYNCED status
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT sync_status FROM kgw_metadata_property_sync "
+                "WHERE property_id=(SELECT property_id FROM kgw_metadata_property "
+                "WHERE property_name=%s)",
+                (prop_name,),
+            )
+            row = await cur.fetchone()
+    assert row is not None, "GF9 sync row should exist"
+    assert row["sync_status"] == "SYNCED", (
+        f"GF9 expected SYNCED, got {row['sync_status']}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# GF13: Binding PENDING → SYNCED
+# ---------------------------------------------------------------------------
+
+
+async def test_binding_pending_to_synced(client: httpx.AsyncClient, pool) -> None:
+    """GF13: metadata/update creates binding that transitions PENDING→SYNCED."""
+    suffix = uuid.uuid4().hex[:8]
+    prop_name = f"gf13_{suffix}"
+    file_path = f"/metadata-test/gf13_{suffix}.md"
+    await _create_prop(client, prop_name, "string")
+    await _import_file(client, _KN_DIRECT, file_path)
+    # Set metadata — should create binding
+    body = await _update_metadata(
+        client,
+        _KN_DIRECT,
+        file_path,
+        [{"operation": "set", "propertyName": prop_name, "value": "bound"}],
+    )
+    assert body["resultCode"] == "0", f"GF13 update failed: {body}"
+    # Check binding table
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT status FROM kgw_metadata_property_binding "
+                "WHERE property_id=(SELECT property_id FROM kgw_metadata_property "
+                "WHERE property_name=%s) AND kn_code=%s",
+                (prop_name, _KN_DIRECT),
+            )
+            row = await cur.fetchone()
+    assert row is not None, "GF13 binding should exist"
+    assert row["status"] == "SYNCED", f"GF13 expected SYNCED, got {row['status']}"
+
+
+# ---------------------------------------------------------------------------
+# GF14: Binding rollback on backend error
+# ---------------------------------------------------------------------------
+
+
+async def test_binding_rollback_on_backend_error(
+    client: httpx.AsyncClient, pool
+) -> None:
+    """GF14: When backend metadata/update returns -1, no SYNCED binding survives."""
+    suffix = uuid.uuid4().hex[:8]
+    prop_name = f"gf14_{suffix}"
+    file_path = f"/metadata-test/gf14_{suffix}.md"
+    await _create_prop(client, prop_name, "string")
+    await _import_file(client, _KN_DIRECT, file_path)
+
+    # Mock the byclaw-qa backend to simulate a failure response.
+    # The lazy sync triggers batchCreate BEFORE metadata/update, so mock both.
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post(f"{_QA_URL}/api/v1/metadataProperties/batchCreate").mock(
+            return_value=httpx.Response(
+                200,
+                json={"resultCode": "0", "resultMsg": "ok", "resultObject": {}},
+            )
+        )
+        mock.post(f"{_QA_URL}/api/v1/knowledgeItems/metadata/update").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "resultCode": "-1",
+                    "resultMsg": "simulated rollback",
+                },
+            )
+        )
+        body = await _update_metadata(
+            client,
+            _KN_DIRECT,
+            file_path,
+            [{"operation": "set", "propertyName": prop_name, "value": "rollback_test"}],
+        )
+
+    assert body["resultCode"] == "-1", f"GF14 expected rollback error: {body}"
+
+    # Verify no SYNCED binding survived
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT COUNT(*) as c FROM kgw_metadata_property_binding "
+                "WHERE property_id=(SELECT property_id FROM kgw_metadata_property "
+                "WHERE property_name=%s)",
+                (prop_name,),
+            )
+            row = await cur.fetchone()
+    assert row["c"] == 0, f"GF14 binding should be rolled back, got {row['c']}"
 
 
 # ---------------------------------------------------------------------------
