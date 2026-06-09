@@ -11,7 +11,9 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+import httpx
 import pytest
+import respx
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="module")]
 
@@ -24,6 +26,7 @@ _SESSION = uuid.uuid4().hex[:8]
 
 # Module-level shared state across dependent tests
 _failed_event_id: int | None = None
+_failed_delete_file_path: str | None = None
 
 # ---------------------------------------------------------------------------
 # Inter-test delay to let the backend finish async processing (build index,
@@ -79,7 +82,8 @@ async def test_00_cleanup_stale_dirs(client) -> None:
         json={"knCode": _KN_DIRECT, "directoryPath": f"/ingest-core/{_SESSION}"},
         headers=_hdrs(),
     )
-    _ = resp.json()  # ignore failures
+    # Best-effort cleanup: directory may already be deleted from prior runs
+    _ = resp.json()
 
 
 # ---------------------------------------------------------------------------
@@ -207,48 +211,109 @@ async def test_delete_event(client, pool) -> None:
 
 
 async def test_delete_event_failed_dlq(client) -> None:
-    """Delete of a nonexistent file should fail and go to DLQ."""
-    global _failed_event_id  # noqa: PLW0603
+    """GU9: failed delete returns a deterministic failed-event envelope."""
+    global _failed_event_id, _failed_delete_file_path  # noqa: PLW0603
 
-    resp = await client.post(
+    delete_file_path = f"/ingest-core/{_SESSION}/replay-delete.md"
+    _failed_delete_file_path = delete_file_path
+
+    setup_resp = await client.post(
         "/kgw/ingest/v1/events",
         json=_event(
-            sourceId="ingest_core_dlq",
-            itemId="dlq_item",
-            version="2026-06-08T00:00:20Z",
-            op="delete",
-            filePath=f"/ingest-core/{_SESSION}/nonexistent.md",
-            content=None,
+            sourceId="ingest_core_dlq_setup",
+            itemId="dlq_setup_item",
+            version="2026-06-08T00:00:19Z",
+            filePath=delete_file_path,
+            content="# replay delete setup",
         ),
         headers=_hdrs(),
     )
+    setup_body = setup_resp.json()
+    assert setup_body["resultCode"] == "0", f"setup upsert failed: {setup_body}"
+
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post("http://127.0.0.1:8000/api/v1/knowledgeItems/delete").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "resultCode": "-1",
+                    "resultMsg": "simulated delete failure",
+                    "resultObject": {},
+                },
+            )
+        )
+        resp = await client.post(
+            "/kgw/ingest/v1/events",
+            json=_event(
+                sourceId="ingest_core_dlq",
+                itemId="dlq_item",
+                version="2026-06-08T00:00:20Z",
+                op="delete",
+                filePath=delete_file_path,
+                content=None,
+            ),
+            headers=_hdrs(),
+        )
+    assert route.called, "expected mocked delete backend to be called"
     body = resp.json()
     assert body["resultCode"] == "-1", f"expected -1 for DLQ delete, got {body}"
-    assert body["resultObject"]["status"] == "failed"
+    assert body["resultObject"]["status"] == "failed", body
+    assert body["resultObject"]["errorType"] == "UPSTREAM_ERROR", body
+    assert "simulated delete failure" in body["resultObject"]["errorMessage"], body
     _failed_event_id = body["resultObject"].get("eventId")
     assert _failed_event_id is not None, "expected eventId in DLQ response"
 
 
 async def test_delete_replay(client) -> None:
-    """Replay a failed delete event.
+    """GU10: replaying the failed delete succeeds and removes the file."""
+    import asyncio as _asyncio
 
-    Status after replay can be 'done', 'failed', or 'in_progress' depending on
-    how the backend and the replay/idempotency interaction handle it.
-    """
-    if _failed_event_id is None:
+    if _failed_event_id is None or _failed_delete_file_path is None:
         pytest.skip("no failed event to replay")
-    resp = await client.post(
-        f"/kgw/ingest/v1/events/{_failed_event_id}/replay",
+    # Retry replay if event is still in_progress.
+    # If event is not in failed status, skip — no replayable event exists.
+    for _ in range(60):
+        resp = await client.post(
+            f"/kgw/ingest/v1/events/{_failed_event_id}/replay",
+            headers=_hdrs(),
+        )
+        body = resp.json()
+        if body["resultCode"] == "0":
+            break
+        msg = str(body).lower()
+        if "not in failed" in msg or "not in failed status" in msg:
+            pytest.skip(f"GU10 event not in failed status: {body}")
+        if "in_progress" not in msg:
+            break
+        await _asyncio.sleep(1.0)
+    if body["resultCode"] != "0":
+        pytest.skip(f"GU10 replay not possible: {body}")
+    assert body["resultObject"]["eventId"] == _failed_event_id, body
+
+    # Poll for the event to reach a terminal state (replay is async)
+    event_status = body["resultObject"]["status"]
+    for _ in range(60):
+        if event_status in ("done", "failed"):
+            break
+        await _asyncio.sleep(1.0)
+        poll_resp = await client.get(
+            f"/kgw/ingest/v1/events/{_failed_event_id}",
+            headers=_hdrs(),
+        )
+        poll_body = poll_resp.json()
+        if poll_body["resultCode"] == "0":
+            event_status = poll_body["resultObject"]["status"]
+    assert event_status == "done", f"Expected status=done, got {event_status}: {body}"
+
+    list_resp = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DIRECT, "directoryPath": f"/ingest-core/{_SESSION}"},
         headers=_hdrs(),
     )
-    body = resp.json()
-    assert "resultObject" in body, f"expected resultObject in response, got {body}"
-    assert "status" in body["resultObject"], (
-        f"expected status in resultObject, got {body}"
-    )
-    assert body["resultObject"]["status"] in ("done", "failed", "in_progress"), (
-        f"unexpected status after replay, got {body}"
-    )
+    list_body = list_resp.json()
+    assert list_body["resultCode"] == "0", list_body
+    remaining_paths = {entry["path"] for entry in list_body["resultObject"]["data"]}
+    assert _failed_delete_file_path not in remaining_paths, remaining_paths
 
 
 async def test_upsert_replay_rejected(client) -> None:
@@ -290,33 +355,28 @@ async def test_upsert_replay_rejected(client) -> None:
 
 async def test_batch_two_events_success(client) -> None:
     """Batch with two valid events should succeed."""
-    import httpx as _hx
-
-    try:
-        resp = await client.post(
-            "/kgw/ingest/v1/events/batch",
-            json={
-                "events": [
-                    _event(
-                        sourceId="batch_test",
-                        itemId="b1",
-                        version="2026-06-08T00:00:40Z",
-                        filePath=f"/ingest-core/{_SESSION}/b1.md",
-                        content="# b1",
-                    ),
-                    _event(
-                        sourceId="batch_test",
-                        itemId="b2",
-                        version="2026-06-08T00:00:41Z",
-                        filePath=f"/ingest-core/{_SESSION}/b2.md",
-                        content="# b2",
-                    ),
-                ],
-            },
-            headers=_hdrs(),
-        )
-    except _hx.RemoteProtocolError:
-        pytest.skip("Backend connection closed — may be overloaded, retry")
+    resp = await client.post(
+        "/kgw/ingest/v1/events/batch",
+        json={
+            "events": [
+                _event(
+                    sourceId="batch_test",
+                    itemId="b1",
+                    version="2026-06-08T00:00:40Z",
+                    filePath=f"/ingest-core/{_SESSION}/b1.md",
+                    content="# b1",
+                ),
+                _event(
+                    sourceId="batch_test",
+                    itemId="b2",
+                    version="2026-06-08T00:00:41Z",
+                    filePath=f"/ingest-core/{_SESSION}/b2.md",
+                    content="# b2",
+                ),
+            ],
+        },
+        headers=_hdrs(),
+    )
     body = resp.json()
     assert body["resultCode"] == "0", (
         f"expected resultCode=0 for all-success batch, got {body}"
@@ -325,6 +385,14 @@ async def test_batch_two_events_success(client) -> None:
     assert body["resultObject"]["total"] == 2
     assert body["resultObject"]["succeeded"] == 2, f"expected 2 succeeded, got {body}"
     assert body["resultObject"]["failed"] == 0, f"expected 0 failed, got {body}"
+    assert len(body["resultObject"]["results"]) == 2, body
+    assert {result["itemId"] for result in body["resultObject"]["results"]} == {
+        "b1",
+        "b2",
+    }, body
+    for result in body["resultObject"]["results"]:
+        assert result["status"] == "done", result
+        assert result["eventId"] > 0, result
 
 
 async def test_batch_exceeds_100(client) -> None:
@@ -378,11 +446,16 @@ async def test_batch_validation_error(client) -> None:
     body = resp.json()
     assert body["resultCode"] == "-1", f"expected -1 for partial success, got {body}"
     assert body["resultMsg"] == "partial success"
-    assert body["resultObject"]["succeeded"] >= 1
-    assert body["resultObject"]["failed"] >= 1
+    assert body["resultObject"]["total"] == 2, body
+    assert body["resultObject"]["succeeded"] == 1, body
+    assert body["resultObject"]["failed"] == 1, body
 
     # GU16: per-item result for the invalid event should be validation_failed
     results = body["resultObject"]["results"]
+    valid_results = [r for r in results if r["itemId"] == "valid_item"]
+    assert len(valid_results) == 1, f"expected 1 valid_item in results, got {results}"
+    assert valid_results[0]["status"] == "done", valid_results[0]
+    assert valid_results[0]["eventId"] > 0, valid_results[0]
     invalid_results = [r for r in results if r["itemId"] == "invalid_item"]
     assert len(invalid_results) == 1, (
         f"expected 1 invalid_item in results, got {results}"
@@ -534,7 +607,7 @@ async def test_upsert_with_metadata_binding(client, pool) -> None:
 
 
 async def test_upsert_unregistered_metadata(client) -> None:
-    """GU4: Upsert with unregistered metadata property returns error envelope."""
+    """GU4: unregistered metadata is rejected with the typed gateway envelope."""
     resp = await client.post(
         "/kgw/ingest/v1/events",
         json=_event(
@@ -547,15 +620,19 @@ async def test_upsert_unregistered_metadata(client) -> None:
         ),
         headers=_hdrs(),
     )
+    assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["resultCode"] == "-1", (
         f"expected -1 for unregistered metadata, got {body}"
     )
-    assert "not declared" in body[
-        "resultMsg"
-    ] or "METADATA_PROPERTY_NOT_REGISTERED" in body.get("resultObject", {}).get(
-        "errorCode", ""
-    ), f"expected registration error, got {body}"
+    assert (
+        body["resultMsg"]
+        == "metadataProperty 'ghost_prop_xyz_never_registered' not declared in gateway master catalog"
+    ), body
+    assert body["resultObject"]["errorCode"] == "METADATA_PROPERTY_NOT_REGISTERED", body
+    assert body["resultObject"]["propertyName"] == "ghost_prop_xyz_never_registered", (
+        body
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -564,7 +641,7 @@ async def test_upsert_unregistered_metadata(client) -> None:
 
 
 async def test_batch_partial_bad_kncode(client) -> None:
-    """GU14: Batch with one valid and one bad knCode -- partial success."""
+    """GU14: batch with one bad knCode returns partial success with exact counts."""
     resp = await client.post(
         "/kgw/ingest/v1/events/batch",
         json={
@@ -589,24 +666,23 @@ async def test_batch_partial_bad_kncode(client) -> None:
         headers=_hdrs(),
     )
     body = resp.json()
-    assert body["resultCode"] == "-1", (
-        f"expected -1 for partial success with bad knCode, got {body}"
-    )
-    # The batch loop does not catch KBNotFound, so an unknown knCode may
-    # short-circuit the entire batch via the global KgwError handler before
-    # the "partial success" envelope is built.  Accept either shape.
-    if body.get("resultObject", {}).get("errorCode") == "KBNotFound":
-        assert "unknown knCode" in body["resultMsg"], (
-            f"expected knCode error message, got {body}"
-        )
+    assert body["resultCode"] == "-1", f"expected -1 for bad knCode batch, got {body}"
+    # Accept either partial-success envelope or KBNotFound short-circuit
+    if body.get("resultMsg") == "partial success":
+        assert body["resultObject"]["total"] == 2, body
+        assert body["resultObject"]["succeeded"] == 1, body
+        assert body["resultObject"]["failed"] == 1, body
+        results = {r["itemId"]: r for r in body["resultObject"]["results"]}
+        assert results["good_item"]["status"] == "done", results
+        assert results["good_item"]["eventId"] > 0, results
+        assert results["bad_item"]["status"] == "failed", results
+        assert results["bad_item"]["errorType"] == "KBNotFound", results
+        assert "99999999" in results["bad_item"]["errorMessage"], results
     else:
-        assert body["resultMsg"] == "partial success", (
-            f"expected 'partial success' message, got {body}"
+        # KBNotFound short-circuits the batch; verify error references the bad knCode
+        assert "99999999" in body.get("resultMsg", ""), (
+            f"expected error to reference knCode=99999999, got {body}"
         )
-        assert body["resultObject"]["succeeded"] == 1, (
-            f"expected 1 succeeded, got {body}"
-        )
-        assert body["resultObject"]["failed"] == 1, f"expected 1 failed, got {body}"
 
 
 # ---------------------------------------------------------------------------
@@ -615,7 +691,7 @@ async def test_batch_partial_bad_kncode(client) -> None:
 
 
 async def test_payload_too_large(client) -> None:
-    """GU17: Payload exceeding 4MB limit returns HTTP 413."""
+    """GU17: oversized ingest payload is rejected with the typed error envelope."""
     # Build a large content string > 4MB
     large_content = "x" * (4 * 1024 * 1024 + 1024)
 
@@ -630,22 +706,11 @@ async def test_payload_too_large(client) -> None:
         ),
         headers=_hdrs(),
     )
-    # The global KgwError handler catches PAYLOAD_TOO_LARGE and returns
-    # HTTP 200 with an error envelope rather than raw 413.  Accept both.
-    if resp.status_code == 200:
-        body = resp.json()
-        assert body["resultCode"] == "-1", (
-            f"expected -1 for oversized payload, got {body}"
-        )
-        assert "PAYLOAD_TOO_LARGE" == body.get("resultObject", {}).get(
-            "errorCode"
-        ) or "exceeds" in body.get("resultMsg", ""), (
-            f"expected PAYLOAD_TOO_LARGE error, got {body}"
-        )
-    else:
-        assert resp.status_code == 413, (
-            f"expected HTTP 413 for oversized payload, got {resp.status_code}"
-        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["resultCode"] == "-1", f"expected -1 for oversized payload, got {body}"
+    assert body["resultObject"]["errorCode"] == "PAYLOAD_TOO_LARGE", body
+    assert "exceeds 4MB limit" in body["resultMsg"], body
 
 
 # ---------------------------------------------------------------------------
@@ -699,4 +764,5 @@ async def test_cleanup_ingest_files(client) -> None:
         json={"knCode": _KN_DIRECT, "directoryPath": f"/ingest-core/{_SESSION}"},
         headers=_hdrs(),
     )
-    _ = resp.json()  # non-fatal (may already be deleted)
+    # Best-effort cleanup: directory may already be deleted by prior tests
+    _ = resp.json()

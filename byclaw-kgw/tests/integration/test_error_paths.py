@@ -91,7 +91,7 @@ async def test_unknown_kn_code_build(client):
 
 
 async def test_unknown_kn_code_search(client):
-    """Search with unknown knCode returns -1 with KBNotFound or 0 with degraded_kbs."""
+    """ER3: fanout search with only unknown KBs degrades deterministically."""
     resp = await client.post(
         "/kgw/api/v1/knowledgeItems/search",
         json={
@@ -103,14 +103,12 @@ async def test_unknown_kn_code_search(client):
         headers=_hdrs(),
     )
     body = resp.json()
-    assert body["resultCode"] in ("-1", "0")
-    if body["resultCode"] == "0":
-        assert body["resultObject"]["degraded_kbs"] == [
-            {"knCode": "99999999", "reason": "KBNotFound"}
-        ]
-    else:
-        # When the fanout has no resolved KBs it returns degraded info
-        assert "degraded_kbs" in body.get("resultObject", {})
+    assert body["resultCode"] == "0", body
+    assert body["resultMsg"] == "success", body
+    assert body["resultObject"]["data"] == [], body
+    assert body["resultObject"]["degraded_kbs"] == [
+        {"knCode": "99999999", "reason": "KBNotFound"}
+    ], body
 
 
 # ---- ER1: upstream connection error ----
@@ -165,9 +163,9 @@ async def test_upstream_timeout(client, app):
 
 
 async def test_validation_missing_required_fields(client):
-    """ER5: Missing required fields returns validation error resultCode=-1."""
+    """ER5: request validation returns KGW error envelopes (200 with resultCode=-1)."""
     # directories/create without directoryPath -- forwarded to backend,
-    # which returns its own validation error
+    # which returns its own validation error envelope
     resp = await client.post(
         "/kgw/api/v1/directories/create",
         json={"knCode": _KN_DIRECT},
@@ -177,28 +175,8 @@ async def test_validation_missing_required_fields(client):
     assert body["resultCode"] == "-1", (
         f"expected -1 for missing directoryPath, got {body}"
     )
-
-    # knowledgeItems/import without filePath -- filePath is a required Form
-    # field so FastAPI returns 422 before the handler runs, not a JSON body
-    # with resultCode.
-    resp = await client.post(
-        "/kgw/api/v1/knowledgeItems/import",
-        data={"knCode": _KN_DIRECT},
-        files={"fileContent": ("x.md", b"# hi", "text/markdown")},
-        headers=_hdrs(),
-    )
-    if resp.status_code == 422:
-        # FastAPI validation error — expected when required Form field is missing
-        body = resp.json()
-        detail = body.get("detail", [])
-        assert any("filePath" in str(err.get("loc", [])) for err in detail), (
-            f"expected filePath validation error, got {body}"
-        )
-    else:
-        body = resp.json()
-        assert body["resultCode"] == "-1", (
-            f"expected -1 for missing filePath, got {body}"
-        )
+    errors = body.get("resultObject", {}).get("errors", [])
+    assert any(err.get("loc") == ["directoryPath"] for err in errors), body
 
 
 # ---- Auth header errors ----

@@ -72,15 +72,18 @@ def _reset_circuit_breaker(app) -> None:
 
 
 async def test_payload_too_large(client):
-    """Request body > 4 MB should be rejected with resultCode=-1."""
+    """GU17: oversized requests return the typed payload-too-large envelope."""
     huge = _event(content="x" * (4 * 1024 * 1024 + 100))
     resp = await client.post(
         _INGEST_URL,
         json=huge,
         headers=_hdrs(),
     )
+    assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["resultCode"] == "-1"
+    assert body["resultCode"] == "-1", body
+    assert body["resultObject"]["errorCode"] == "PAYLOAD_TOO_LARGE", body
+    assert "exceeds 4MB limit" in body["resultMsg"], body
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +102,9 @@ async def test_circuit_breaker_open(client, app):
     # Force the circuit OPEN by recording threshold+1 failures
     for _ in range(6):  # failure_threshold=5 in conftest fixture
         cb.record_failure()
+    assert cb._state == CircuitState.OPEN, (  # noqa: SLF001
+        f"expected OPEN, got {cb._state}"
+    )
 
     # Now try an upsert -- should be rejected by CB before calling backend
     resp = await client.post(
@@ -112,8 +118,8 @@ async def test_circuit_breaker_open(client, app):
         headers=_hdrs(),
     )
     body = resp.json()
-    assert body["resultCode"] == "-1"
-    assert body["resultObject"]["errorType"] == "CIRCUIT_OPEN"
+    assert body["resultCode"] == "-1", body
+    assert body["resultObject"]["errorType"] == "CIRCUIT_OPEN", body
 
     # Reset CB for subsequent tests
     _reset_circuit_breaker(app)

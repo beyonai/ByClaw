@@ -100,14 +100,42 @@ async def test_create_directory_direct(client: httpx.AsyncClient) -> None:
 
 
 async def test_create_directory_discovery(client: httpx.AsyncClient) -> None:
-    """Create a directory on the discovery KB."""
+    """GD2: Create a multi-level directory on the discovery KB and verify path structure."""
     resp = await client.post(
         "/kgw/api/v1/directories/create",
-        json={"knCode": _KN_DISCOV, "directoryPath": "/routing-disc-test"},
+        json={"knCode": _KN_DISCOV, "directoryPath": "/routing-disc-test/subdir"},
         headers=_hdrs(),
     )
     body = resp.json()
     assert body["resultCode"] == "0", f"create failed: {body}"
+
+    # Verify parent listing contains the intermediate path
+    resp = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DISCOV, "directoryPath": "/"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"listDir / failed: {body}"
+    parent_data = body.get("resultObject", {}).get("data", [])
+    parent_names = [item.get("name", "") for item in parent_data]
+    assert "/routing-disc-test" in parent_names, (
+        f"/routing-disc-test not found in root listing: {parent_data}"
+    )
+
+    # Verify target listing contains the leaf subdirectory
+    resp = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DISCOV, "directoryPath": "/routing-disc-test"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"listDir /routing-disc-test failed: {body}"
+    target_data = body.get("resultObject", {}).get("data", [])
+    target_names = [item.get("name", "") for item in target_data]
+    assert "/routing-disc-test/subdir" in target_names, (
+        f"/routing-disc-test/subdir not found in listing: {target_data}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -119,29 +147,22 @@ async def test_delete_directory_cleanup(client: httpx.AsyncClient) -> None:
     """Clean up the test directories created above."""
     for kn_code, path in [
         (_KN_DIRECT, "/routing-test"),
+        (_KN_DISCOV, "/routing-disc-test/subdir"),
         (_KN_DISCOV, "/routing-disc-test"),
     ]:
-        try:
-            resp = await client.post(
-                "/kgw/api/v1/directories/delete",
-                json={"knCode": kn_code, "directoryPath": path},
-                headers=_hdrs(),
-            )
-        except (httpx.RemoteProtocolError, httpx.HTTPError, RuntimeError):
-            # Discovery directory may not exist or discovery client unavailable
-            if kn_code == _KN_DISCOV:
-                pass
-            else:
-                raise
+        resp = await client.post(
+            "/kgw/api/v1/directories/delete",
+            json={"knCode": kn_code, "directoryPath": path},
+            headers=_hdrs(),
+        )
         body = resp.json()
         msg = body.get("resultMsg", "")
-        # Acceptable: directory never created, or discovery not available
-        if body["resultCode"] != "0" and (
-            "not found" in msg or "No available instances" in msg
-        ):
-            pass
-        else:
-            assert body["resultCode"] == "0", f"delete {path} failed: {body}"
+        # Best-effort cleanup: directories may already be gone
+        if body.get("resultCode") == "0":
+            continue
+        if "not found" in msg.lower() or "no available" in msg.lower():
+            continue
+        pytest.fail(f"cleanup delete {path} for knCode={kn_code}: {body}")
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +189,7 @@ async def test_listdir_direct(client: httpx.AsyncClient) -> None:
 
 
 async def test_unknown_kn_code(client: httpx.AsyncClient) -> None:
-    """Unknown knCode returns resultCode -1."""
+    """GD5: Unknown knCode returns resultCode -1 with KBNotFound error."""
     resp = await client.post(
         "/kgw/api/v1/listDir",
         json={"knCode": "99999999", "directoryPath": "/"},
@@ -176,6 +197,9 @@ async def test_unknown_kn_code(client: httpx.AsyncClient) -> None:
     )
     body = resp.json()
     assert body["resultCode"] == "-1", f"expected -1, got: {body}"
+    assert body["resultObject"]["errorCode"] == "KBNotFound", (
+        f"expected KBNotFound, got: {body}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +208,7 @@ async def test_unknown_kn_code(client: httpx.AsyncClient) -> None:
 
 
 async def test_import_and_read(client: httpx.AsyncClient) -> None:
-    """Multipart file import and subsequent cleanup."""
+    """GI1/GI8: Multipart file import, verify via listDir, then delete and verify removal."""
     # Import
     files = {
         "fileContent": ("hello.md", b"# Hello", "text/markdown"),
@@ -202,7 +226,22 @@ async def test_import_and_read(client: httpx.AsyncClient) -> None:
     body = resp.json()
     assert body["resultCode"] == "0", f"import failed: {body}"
 
-    # Cleanup: delete the imported file
+    # Verify file appears in directory listing
+    resp = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DIRECT, "directoryPath": "/routing"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"listDir after import failed: {body}"
+    import_files = [
+        item.get("name", "") for item in body.get("resultObject", {}).get("data", [])
+    ]
+    assert "/routing/hello.md" in import_files, (
+        f"/routing/hello.md not found after import: {body}"
+    )
+
+    # Delete the imported file
     resp = await client.post(
         "/kgw/api/v1/knowledgeItems/delete",
         json={"knCode": _KN_DIRECT, "filePath": "/routing/hello.md"},
@@ -210,3 +249,18 @@ async def test_import_and_read(client: httpx.AsyncClient) -> None:
     )
     body = resp.json()
     assert body["resultCode"] == "0", f"delete failed: {body}"
+
+    # Verify file is gone from directory listing
+    resp = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DIRECT, "directoryPath": "/routing"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"listDir after delete failed: {body}"
+    after_delete_files = [
+        item.get("name", "") for item in body.get("resultObject", {}).get("data", [])
+    ]
+    assert "/routing/hello.md" not in after_delete_files, (
+        f"/routing/hello.md still present after delete: {body}"
+    )

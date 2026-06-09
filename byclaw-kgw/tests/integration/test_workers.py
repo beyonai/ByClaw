@@ -56,49 +56,66 @@ async def _delete_by_property_ids(pool, property_ids: list[int]) -> None:
 
 # ---- GW1: cleanup worker processes PURGING rows ----
 async def test_cleanup_purging_to_purged(client, pool, app):
-    """cleanup_iteration deletes backend columns and marks PURGED."""
+    """GW1: cleanup_iteration purges sync rows and physically deletes DELETED properties."""
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
                 "INSERT INTO kgw_metadata_property "
-                "(property_name, value_type, status, backend_name, property_id) "
-                "VALUES ('gw1_prop', 'string', 'ACTIVE', '__byclaw_kgw__gw1_prop__v99', 99)"
+                "(property_name, value_type, status, backend_name) "
+                "VALUES ('gw1_prop', 'string', 'ACTIVE', '__byclaw_kgw__gw1_prop__v99') "
+                "RETURNING property_id"
             )
+            pid = (await cur.fetchone())["property_id"]
             await cur.execute(
                 "INSERT INTO kgw_metadata_property_sync "
                 "(property_id, endpoint_key, sync_status) "
-                "VALUES (99, %s, 'PURGING')",
-                (_KB_DIRECT_URL,),
+                "VALUES (%s, %s, 'PURGING')",
+                (pid, _KB_DIRECT_URL),
             )
         await conn.commit()
 
     with respx.mock(assert_all_called=False) as mock:
-        mock.post(f"{_KB_DIRECT_URL}/api/v1/metadataProperties/delete").mock(
+        route = mock.post(f"{_KB_DIRECT_URL}/api/v1/metadataProperties/delete").mock(
             return_value=httpx.Response(200, json=_ok_resp())
         )
-        await cleanup_iteration(app.state, batch_size=10, backoff_minutes=0)
+        processed = await cleanup_iteration(app.state, batch_size=10, backoff_minutes=0)
+    assert processed == 1, processed
+    assert route.called, "expected metadataProperties/delete to be called"
 
+    # Phase 1: sync row was set to PURGED
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
                 "SELECT sync_status FROM kgw_metadata_property_sync "
-                "WHERE property_id=99 AND endpoint_key=%s",
-                (_KB_DIRECT_URL,),
+                "WHERE property_id=%s AND endpoint_key=%s",
+                (pid, _KB_DIRECT_URL),
             )
             row = await cur.fetchone()
     assert row is not None and row["sync_status"] == "PURGED", (
-        f"Expected PURGED, got {row}"
+        f"Expected sync_status PURGED, got {row}"
     )
-    # GW1: Verify property row still exists after purge (backend_name NOT NULL retained)
+
+    # Phase 2: mark property DELETED and trigger physical delete
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT backend_name, status FROM kgw_metadata_property WHERE property_id=99"
+                "UPDATE kgw_metadata_property SET status='DELETED' WHERE property_id=%s",
+                (pid,),
+            )
+        await conn.commit()
+
+    await cleanup_iteration(app.state, batch_size=10, backoff_minutes=0)
+
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT backend_name, status FROM kgw_metadata_property WHERE property_id=%s",
+                (pid,),
             )
             prop_row = await cur.fetchone()
-    assert prop_row is not None, "Property row should still exist after purge"
-    assert prop_row["status"] == "ACTIVE", f"Expected ACTIVE status, got {prop_row}"
-    await _delete_by_property_ids(pool, [99])
+    assert prop_row is None, (
+        f"Expected property row to be physically deleted, got {prop_row}"
+    )
 
 
 # ---- GW2: cleanup worker handles PURGE_FAILED ----

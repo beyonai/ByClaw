@@ -80,10 +80,9 @@ async def test_00_cleanup_stale_dirs(client: httpx.AsyncClient) -> None:
         "/gd9-full",
         "/gd10-disc",
     ]:
-        body = await _delete_dir(client, _KN_DIRECT, path)
-        # Also try discovery-mode cleanup
-        disc_body = await _delete_dir(client, _KN_DISCOV, path)
-        _ = body, disc_body  # ignore failures
+        # Best-effort cleanup: directories may already be deleted from prior runs
+        await _delete_dir(client, _KN_DIRECT, path)
+        await _delete_dir(client, _KN_DISCOV, path)
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +349,7 @@ async def test_discovery_mode_directory_recursive(
 
 async def test_cleanup_all_test_dirs(client: httpx.AsyncClient) -> None:
     """Delete every test directory created above to leave clean state."""
+    # Best-effort cleanup: directories may already be deleted
     for path in [
         "/gd1-test",
         "/gd6-old",
@@ -358,12 +358,8 @@ async def test_cleanup_all_test_dirs(client: httpx.AsyncClient) -> None:
         "/gd7-b",
         "/gd9-full",
     ]:
-        body = await _delete_dir(client, _KN_DIRECT, path)
-        if body["resultCode"] != "0":
-            pass  # may already have been deleted
+        await _delete_dir(client, _KN_DIRECT, path)
 
     # GD2 uses discovery mode
     for path in ["/gd2", "/gd10-disc"]:
-        body = await _delete_dir(client, _KN_DISCOV, path)
-        if body["resultCode"] != "0":
-            pass
+        await _delete_dir(client, _KN_DISCOV, path)

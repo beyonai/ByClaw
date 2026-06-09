@@ -43,8 +43,30 @@ _INGEST_LOCK_PATH = "/admin-lock/ingest-test.md"
 # ---------------------------------------------------------------------------
 
 
-async def test_audit_query_all(client):
-    """GET /kgw/admin/v1/audit?pageSize=5 => resultCode=0, has data list."""
+async def test_audit_query_all(client, app):
+    """GET /kgw/admin/v1/audit?pageSize=5 => resultCode=0, bind to this test's operations."""
+    # Trigger an ingest with a unique sourceId to bind results to this test
+    item_id = f"cx5_{uuid.uuid4().hex[:8]}"
+    source_id = f"cx5_audit_bind_{uuid.uuid4().hex[:8]}"
+    resp_ingest = await client.post(
+        "/kgw/ingest/v1/events",
+        json={
+            "sourceId": source_id,
+            "itemId": item_id,
+            "op": "upsert",
+            "knCode": _KN_DIRECT,
+            "filePath": f"/cx5-audit/{item_id}.md",
+            "content": "# CX5 audit test",
+        },
+        headers=_hdrs(),
+    )
+    assert resp_ingest.json()["resultCode"] == "0", (
+        f"Ingest failed: {resp_ingest.json()}"
+    )
+
+    # Flush the async audit writer so the entry is persisted to DB
+    await app.state.audit.flush()
+
     resp = await client.get(
         "/kgw/admin/v1/audit",
         params={"pageSize": 5},
@@ -54,10 +76,38 @@ async def test_audit_query_all(client):
     assert body["resultCode"] == "0", body
     data = body["resultObject"].get("data")
     assert isinstance(data, list)
+    # Our specific operation must appear in results
+    our_sources = [e.get("sourceId") for e in data]
+    assert source_id in our_sources, (
+        f"Expected sourceId={source_id} in results, got: {our_sources}"
+    )
 
 
-async def test_audit_query_by_source(client):
-    """GA1: GET /kgw/admin/v1/audit?source=ingest&pageSize=20 => resultCode=0."""
+async def test_audit_query_by_source(client, app):
+    """GA1: Query audit by source, bind results to this test's operations."""
+    # Trigger an ingest with a unique sourceId to bind results to this test
+    item_id = f"ga1_{uuid.uuid4().hex[:8]}"
+    source_id = f"ga1_source_bind_{uuid.uuid4().hex[:8]}"
+    resp_ingest = await client.post(
+        "/kgw/ingest/v1/events",
+        json={
+            "sourceId": source_id,
+            "itemId": item_id,
+            "op": "upsert",
+            "knCode": _KN_DIRECT,
+            "filePath": f"/ga1-audit/{item_id}.md",
+            "content": "# GA1 audit source test",
+        },
+        headers=_hdrs(),
+    )
+    assert resp_ingest.json()["resultCode"] == "0", (
+        f"Ingest failed: {resp_ingest.json()}"
+    )
+
+    # Flush the async audit writer so the entry is persisted to DB
+    await app.state.audit.flush()
+
+    # Query audit filtered by source
     resp = await client.get(
         "/kgw/admin/v1/audit",
         params={"source": "ingest", "pageSize": 20},
@@ -65,6 +115,18 @@ async def test_audit_query_by_source(client):
     )
     body = resp.json()
     assert body["resultCode"] == "0", body
+    data = body["resultObject"].get("data")
+    assert isinstance(data, list)
+    # Every returned entry must have source=ingest
+    for entry in data:
+        assert entry["source"] == "ingest", (
+            f"Expected source=ingest, got: {entry['source']}"
+        )
+    # Our specific operation must appear in results
+    our_sources = [e.get("sourceId") for e in data]
+    assert source_id in our_sources, (
+        f"Expected sourceId={source_id} in results, got: {our_sources}"
+    )
 
 
 async def test_audit_query_by_kncode(client):
@@ -97,7 +159,7 @@ async def test_conflicts_query(client):
 
 
 async def test_conflicts_query_filtered(client):
-    """GA4: GET /kgw/admin/v1/conflicts?knCode=200001&reason=STALE_VERSION => resultCode=0."""
+    """GA4: Query conflicts filtered by knCode and reason, verify filtering works."""
     resp = await client.get(
         "/kgw/admin/v1/conflicts",
         params={"knCode": _KN_DIRECT, "reason": "STALE_VERSION"},
@@ -107,6 +169,14 @@ async def test_conflicts_query_filtered(client):
     assert body["resultCode"] == "0", body
     data = body["resultObject"].get("data")
     assert isinstance(data, list)
+    # Verify filtering: every returned row must match both knCode and reason
+    for entry in data:
+        assert entry["knCode"] == _KN_DIRECT, (
+            f"Expected knCode={_KN_DIRECT}, got: {entry['knCode']}"
+        )
+        assert entry["reason"] == "STALE_VERSION", (
+            f"Expected reason=STALE_VERSION, got: {entry['reason']}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +296,12 @@ async def test_metadata_properties_list(client):
         assert "status" in prop, f"Missing status in {prop}"
         assert "syncDetails" in prop, f"Missing syncDetails in {prop}"
         assert isinstance(prop["syncDetails"], list)
+    # Verify status field is valid (ACTIVE or DELETED) for all properties.
+    # DELETED properties may not exist in test data; only require valid statuses.
+    for p in data:
+        assert p["status"] in ("ACTIVE", "DELETED"), (
+            f"Invalid status {p['status']} for {p['propertyName']}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +388,7 @@ async def test_audit_query_by_operation(client, app):
 # ---------------------------------------------------------------------------
 
 
-async def test_audit_query_by_time_window(client):
+async def test_audit_query_by_time_window(client, app):
     """GA3: Query audit logs within a time window."""
     # Note the time slightly before the operation
     before = (datetime.now(timezone.utc) - timedelta(seconds=2)).isoformat()
@@ -335,6 +411,9 @@ async def test_audit_query_by_time_window(client):
         f"Ingest failed: {resp_ingest.json()}"
     )
 
+    # Flush the async audit writer so the entry is persisted to DB
+    await app.state.audit.flush()
+
     # Note the time slightly after
     after = (datetime.now(timezone.utc) + timedelta(seconds=2)).isoformat()
 
@@ -350,6 +429,13 @@ async def test_audit_query_by_time_window(client):
     assert isinstance(data, list)
     # At minimum the ingest event we just triggered should be in the window
     assert len(data) >= 1, "Expected at least one audit entry within time window"
+    # Verify every returned entry's createdAt falls within the requested time window
+    for entry in data:
+        created = entry.get("createdAt")
+        assert created is not None, "Audit entry missing createdAt"
+        assert before <= created <= after, (
+            f"Entry createdAt={created} not in window [{before}, {after}]"
+        )
 
     # Query with a time window in the distant past should return empty
     resp_empty = await client.get(
@@ -418,10 +504,14 @@ async def test_lock_expired_replacement(client, pool):
 # ---------------------------------------------------------------------------
 
 
-async def test_sync_retry(client, pool):
-    """GA12: Retry a failed sync — status goes SYNCING."""
+async def test_sync_retry(client, pool, app):
+    """GA12: Retry a failed sync — status goes SYNCING, then verify final state is SYNCED."""
     prop_name = f"ga12_sync_retry_{uuid.uuid4().hex[:8]}"
     backend_name = f"__byclaw_kgw__{prop_name}"
+
+    # Resolve endpoint_key matching the KN_DIRECT config so ensure_synced will match
+    cfg = await app.state.config_provider.get_kb_config(_KN_DIRECT)
+    endpoint_key = cfg.domain_url or cfg.domain_name
 
     # Insert a metadata property with a FAILED sync row
     async with pool.connection() as conn:
@@ -441,7 +531,7 @@ async def test_sync_retry(client, pool):
                 "INSERT INTO kgw_metadata_property_sync "
                 "(property_id, endpoint_key, sync_status, last_error) "
                 "VALUES (%s, %s, 'FAILED', 'simulated failure for test')",
-                (pid, "test_endpoint"),
+                (pid, endpoint_key),
             )
 
     # Retry sync
@@ -451,8 +541,9 @@ async def test_sync_retry(client, pool):
     )
     body = resp.json()
     assert body["resultCode"] == "0", body
-    assert body["resultObject"]["updated"] >= 1, (
-        f"Expected at least 1 row updated, got: {body}"
+    # Exactly one FAILED sync row should be transitioned to SYNCING
+    assert body["resultObject"]["updated"] == 1, (
+        f"Expected exactly 1 row updated, got: {body}"
     )
 
     # Verify status changed to SYNCING and last_error cleared
@@ -461,7 +552,7 @@ async def test_sync_retry(client, pool):
             await cur.execute(
                 "SELECT sync_status, last_error FROM kgw_metadata_property_sync "
                 "WHERE property_id=%s AND endpoint_key=%s",
-                (pid, "test_endpoint"),
+                (pid, endpoint_key),
             )
             row = await cur.fetchone()
             assert row is not None, "Sync row should exist"
@@ -470,6 +561,33 @@ async def test_sync_retry(client, pool):
             )
             assert row["last_error"] is None, (
                 f"Expected last_error cleared, got: {row['last_error']}"
+            )
+
+    # Trigger the actual sync via ensure_synced (lazy sync entry point)
+    from kgw.metadata.sync import ensure_synced
+
+    await ensure_synced(
+        app.state,
+        property_id=pid,
+        kn_code=_KN_DIRECT,
+        user_code=_USER_ID,
+    )
+
+    # Verify final state is SYNCED
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT sync_status, last_error FROM kgw_metadata_property_sync "
+                "WHERE property_id=%s AND endpoint_key=%s",
+                (pid, endpoint_key),
+            )
+            row = await cur.fetchone()
+            assert row is not None, "Sync row should still exist"
+            assert row["sync_status"] == "SYNCED", (
+                f"Expected SYNCED, got: {row['sync_status']}"
+            )
+            assert row["last_error"] is None, (
+                f"Expected last_error None after sync, got: {row['last_error']}"
             )
 
     # Cleanup
@@ -519,8 +637,9 @@ async def test_purge_retry(client, pool):
     )
     body = resp.json()
     assert body["resultCode"] == "0", body
-    assert body["resultObject"]["updated"] >= 1, (
-        f"Expected at least 1 row updated, got: {body}"
+    # Exactly one PURGE_FAILED sync row should be transitioned to PURGING
+    assert body["resultObject"]["updated"] == 1, (
+        f"Expected exactly 1 row updated, got: {body}"
     )
 
     # Verify status changed to PURGING and last_error cleared

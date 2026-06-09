@@ -51,6 +51,18 @@ async def test_import_markdown(client: httpx.AsyncClient) -> None:
     body = resp.json()
     assert body["resultCode"] == "0", f"GI1 import markdown: {body}"
 
+    # Verify file appears in listDir
+    resp = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DIRECT, "directoryPath": "/fileops"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"GI1 listDir after import: {body}"
+    data = body.get("resultObject", {}).get("data", [])
+    found = any("hello.md" in str(f) for f in data)
+    assert found, f"GI1 hello.md not in listDir: {data}"
+
 
 # ---------------------------------------------------------------------------
 # GI6: re-import same path (overwrite)
@@ -58,22 +70,26 @@ async def test_import_markdown(client: httpx.AsyncClient) -> None:
 
 
 async def test_reimport_same_path(client: httpx.AsyncClient) -> None:
-    """GI6: overwrite existing file with different content."""
+    """GI6: reimport of existing file path is rejected by backend."""
+    new_content = b"# Hello v2\n\nUpdated."
     resp = await client.post(
         "/kgw/api/v1/knowledgeItems/import",
         data={"knCode": _KN_DIRECT, "filePath": "/fileops/hello.md"},
         files={
             "fileContent": (
                 "hello.md",
-                b"# Hello v2\n\nUpdated.",
+                new_content,
                 "text/markdown",
             )
         },
         headers=_hdrs(),
     )
     body = resp.json()
-    # byclaw-qa rejects re-import of existing file at same path
     assert body["resultCode"] == "-1", f"GI6 reimport: {body}"
+    msg = body.get("resultMsg", "").lower()
+    assert "already exist" in msg, (
+        f"GI6 expected 'already exists' in error message: {body}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +114,20 @@ async def test_import_pdf(client: httpx.AsyncClient) -> None:
     body = resp.json()
     assert body["resultCode"] == "0", f"GI7 import PDF: {body}"
 
+    # Verify Content-Type can be read back via downloadFile
+    dl_resp = await client.post(
+        "/kgw/api/v1/downloadFile",
+        json={"knCode": _KN_DIRECT, "filePath": "/fileops/doc.pdf"},
+        headers=_hdrs(),
+    )
+    assert dl_resp.status_code == 200, (
+        f"GI7 download failed: status={dl_resp.status_code}"
+    )
+    dl_ct = dl_resp.headers.get("Content-Type", "")
+    assert "pdf" in dl_ct.lower(), (
+        f"GI7 expected pdf Content-Type via downloadFile, got: {dl_ct}"
+    )
+
 
 # ---------------------------------------------------------------------------
 # GI8: delete file
@@ -113,6 +143,18 @@ async def test_delete_file(client: httpx.AsyncClient) -> None:
     )
     body = resp.json()
     assert body["resultCode"] == "0", f"GI8 delete: {body}"
+
+    # Verify file is gone
+    resp = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DIRECT, "directoryPath": "/fileops"},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"GI8 listDir after delete: {body}"
+    data = body.get("resultObject", {}).get("data", [])
+    found = any("hello.md" in str(f) for f in data)
+    assert not found, f"GI8 hello.md should be gone after delete: {data}"
 
 
 # ---------------------------------------------------------------------------
@@ -215,19 +257,38 @@ async def test_build_trigger(client: httpx.AsyncClient) -> None:
 
 
 async def test_build_status(client: httpx.AsyncClient) -> None:
-    """GB3: query build status for a file."""
-    try:
+    """GB3: query build status for a file -- poll until complete and verify final state."""
+    # Poll until build completes (every 2s, timeout 120s)
+    final_body = None
+    for _ in range(60):
         resp = await client.post(
             "/kgw/api/v1/fileBuildStatus",
             json={"knCode": _KN_DIRECT, "filePath": "/fileops/build-test.md"},
             headers=_hdrs(),
         )
-    except httpx.RemoteProtocolError:
-        pytest.skip("Proxy interference — set NO_PROXY=127.0.0.1,localhost")
-    body = resp.json()
-    assert body["resultCode"] == "0", f"GB3 build status: {body}"
-    assert "status" in body.get("resultObject", {}), (
-        f"GB3 expected 'status' in resultObject, got: {body}"
+        body = resp.json()
+        assert body["resultCode"] == "0", f"GB3 build status: {body}"
+        ro = body.get("resultObject", {})
+        assert "status" in ro, f"GB3 expected 'status' in resultObject, got: {body}"
+        assert "currentStep" in ro, (
+            f"GB3 expected 'currentStep' in resultObject, got: {body}"
+        )
+        status = ro.get("status")
+        if status in ("success", "complete"):
+            final_body = body
+            break
+        if status in ("failed",):
+            step = ro.get("currentStep", "?")
+            pytest.fail(f"GB3 build failed at step={step}")
+        await asyncio.sleep(2)
+    else:
+        pytest.fail("GB3 build did not complete within 120 s")
+
+    # Verify final state
+    assert final_body is not None
+    final_ro = final_body.get("resultObject", {})
+    assert final_ro["status"] in ("success", "complete"), (
+        f"GB3 unexpected final status: {final_ro['status']}"
     )
 
 
@@ -238,16 +299,70 @@ async def test_build_status(client: httpx.AsyncClient) -> None:
 
 async def test_build_duplicate(client: httpx.AsyncClient) -> None:
     """GB4: triggering build for a file that already has one running."""
-    try:
-        resp = await client.post(
-            "/kgw/api/v1/fileToMarkdownIndex",
-            json={"knCode": _KN_DIRECT, "filePath": "/fileops/build-test.md"},
+    import uuid
+
+    path = f"/fileops/build-dup-{uuid.uuid4().hex[:8]}.md"
+
+    # 1. Import a fresh file
+    resp = await client.post(
+        "/kgw/api/v1/knowledgeItems/import",
+        data={"knCode": _KN_DIRECT, "filePath": path},
+        files={
+            "fileContent": (
+                "dup.md",
+                b"# Duplicate Build\n\nContent.",
+                "text/markdown",
+            )
+        },
+        headers=_hdrs(),
+    )
+    assert resp.json()["resultCode"] == "0", f"GB4 import: {resp.json()}"
+
+    # 2. Trigger first build
+    resp = await client.post(
+        "/kgw/api/v1/fileToMarkdownIndex",
+        json={"knCode": _KN_DIRECT, "filePath": path},
+        headers=_hdrs(),
+    )
+    assert resp.json()["resultCode"] == "0", f"GB4 first build: {resp.json()}"
+
+    # 3. Poll until build is in a non-terminal (running) state
+    is_running = False
+    for _ in range(20):
+        status_resp = await client.post(
+            "/kgw/api/v1/fileBuildStatus",
+            json={"knCode": _KN_DIRECT, "filePath": path},
             headers=_hdrs(),
         )
-    except httpx.RemoteProtocolError:
-        pytest.skip("Proxy interference — set NO_PROXY=127.0.0.1,localhost")
-    body = resp.json()
-    assert body["resultCode"] in ("0", "-1"), f"GB4 duplicate build: {body}"
+        sbody = status_resp.json()
+        status = sbody.get("resultObject", {}).get("status")
+        if status not in ("success", "complete", "failed"):
+            is_running = True
+            break
+        await asyncio.sleep(0.5)
+
+    if not is_running:
+        # Build completed before we could observe a running state.  This is
+        # a race condition inherent to the test design; retry with a
+        # shorter poll interval would be flaky.  Skip as untestable.
+        pytest.skip("GB4 build completed too quickly — cannot test duplicate")
+
+    # 4. Send duplicate build while first is running
+    resp2 = await client.post(
+        "/kgw/api/v1/fileToMarkdownIndex",
+        json={"knCode": _KN_DIRECT, "filePath": path},
+        headers=_hdrs(),
+    )
+    body2 = resp2.json()
+    assert body2["resultCode"] == "-1", f"GB4 duplicate build: {body2}"
+    msg = body2.get("resultMsg", "").lower()
+    assert (
+        "already" in msg
+        or "building" in msg
+        or "running" in msg
+        or "in progress" in msg
+        or "duplicate" in msg
+    ), f"GB4 expected 'already building' error: {body2}"
 
 
 # ---------------------------------------------------------------------------
@@ -257,18 +372,26 @@ async def test_build_duplicate(client: httpx.AsyncClient) -> None:
 
 async def test_listdir_root(client: httpx.AsyncClient) -> None:
     """GR1: POST listDir for root directory."""
-    try:
-        resp = await client.post(
-            "/kgw/api/v1/listDir",
-            json={"knCode": _KN_DIRECT, "directoryPath": "/"},
-            headers=_hdrs(),
-        )
-    except httpx.RemoteProtocolError:
-        pytest.skip("Proxy interference — set NO_PROXY=127.0.0.1,localhost")
+    resp = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DIRECT, "directoryPath": "/"},
+        headers=_hdrs(),
+    )
     body = resp.json()
     assert body["resultCode"] == "0", f"GR1 listDir: {body}"
     data = body.get("resultObject", {}).get("data", [])
     assert isinstance(data, list), f"GR1 expected list, got {type(data)}"
+    # Each returned item must have a "type" field (file or directory)
+    for item in data:
+        assert "type" in item, f"GR1 item missing 'type' field: {item}"
+        assert item["type"] in ("file", "directory"), (
+            f"GR1 item has unexpected type: {item}"
+        )
+    # Verify known test files appear
+    item_strs = [str(item) for item in data]
+    assert any("fileops" in s for s in item_strs), (
+        f"GR1 expected 'fileops' directory in root listing: {data}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -285,6 +408,20 @@ async def test_glob(client: httpx.AsyncClient) -> None:
     )
     body = resp.json()
     assert body["resultCode"] == "0", f"GR4 glob: {body}"
+    data = body.get("resultObject", {}).get("data", [])
+    # Verify top-level .md files match the glob pattern
+    assert isinstance(data, list), f"GR4 expected list, got {type(data)}"
+    assert len(data) > 0, f"GR4 expected at least one .md file in /fileops, got: {data}"
+    # Glob is non-recursive: all items must be .md files directly under /fileops
+    for item in data:
+        item_str = str(item)
+        assert ".md" in item_str, f"GR4 glob should only return .md files: {item}"
+        assert "/fileops/" in item_str, f"GR4 item not under /fileops: {item}"
+        # Subdirectory files have extra "/" after /fileops/ -- they must NOT appear
+        after_prefix = item_str.split("/fileops/", 1)[-1]
+        assert "/" not in after_prefix, (
+            f"GR4 glob is non-recursive, should not include subdirectory files: {item}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -312,8 +449,7 @@ async def test_readfile(client: httpx.AsyncClient) -> None:
         headers=_hdrs(),
     )
     body = resp.json()
-    if body["resultCode"] != "0":
-        pytest.skip(f"Import failed (file may already exist): {body}")
+    assert body["resultCode"] == "0", f"GR6 import failed: {body}"
 
     # 2. Trigger build
     resp = await client.post(
@@ -336,9 +472,7 @@ async def test_readfile(client: httpx.AsyncClient) -> None:
             break
         if status in ("failed",):
             _step = sbody.get("resultObject", {}).get("currentStep", "?")
-            pytest.skip(
-                f"Build failed at step={_step} — embedding API may be unreachable"
-            )
+            pytest.fail(f"GR6 build failed at step={_step}: {sbody}")
         await asyncio.sleep(2)
     else:
         pytest.fail("GR6 build did not complete within 120 s")
@@ -351,6 +485,17 @@ async def test_readfile(client: httpx.AsyncClient) -> None:
     )
     body = resp.json()
     assert body["resultCode"] == "0", f"GR6 readFile: {body}"
+    ro = body.get("resultObject", {})
+    assert "reachedEof" in ro, f"GR6 expected 'reachedEof' in resultObject, got: {body}"
+    assert ro["reachedEof"] is True, (
+        f"GR6 expected reachedEof=true after full read, got: {ro}"
+    )
+    # Verify returned content is a string (may be empty if backend has not
+    # yet indexed the full content after build completes)
+    content = ro.get("content", "")
+    assert isinstance(content, str), (
+        f"GR6 expected string content in read result, got: {type(content).__name__}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -463,14 +608,11 @@ async def test_import_broken_frontmatter(client: httpx.AsyncClient) -> None:
     assert body["resultCode"] == "0", f"GI5 import broken frontmatter: {body}"
 
     # Verify file appears in listDir
-    try:
-        resp = await client.post(
-            "/kgw/api/v1/listDir",
-            json={"knCode": _KN_DIRECT, "directoryPath": "/fileops"},
-            headers=_hdrs(),
-        )
-    except httpx.RemoteProtocolError:
-        pytest.skip("Proxy interference — set NO_PROXY=127.0.0.1,localhost")
+    resp = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DIRECT, "directoryPath": "/fileops"},
+        headers=_hdrs(),
+    )
     body = resp.json()
     assert body["resultCode"] == "0", f"GI5 listDir after import: {body}"
     data = body.get("resultObject", {}).get("data", [])
@@ -487,10 +629,14 @@ _KN_DISCOV = "300001"
 
 async def test_build_trigger_discovery(client: httpx.AsyncClient) -> None:
     """GB2: Trigger fileToMarkdownIndex via service discovery knCode=300001."""
+    import uuid
+
+    path = f"/fileops/discovery-build-{uuid.uuid4().hex[:8]}.md"
+
     # Import a file with knCode=300001
     resp = await client.post(
         "/kgw/api/v1/knowledgeItems/import",
-        data={"knCode": _KN_DISCOV, "filePath": "/fileops/discovery-build.md"},
+        data={"knCode": _KN_DISCOV, "filePath": path},
         files={
             "fileContent": (
                 "discovery-build.md",
@@ -501,18 +647,14 @@ async def test_build_trigger_discovery(client: httpx.AsyncClient) -> None:
         headers=_hdrs(),
     )
     body = resp.json()
-    # Discovery import may fail gracefully
-    assert body["resultCode"] in ("0", "-1"), f"GB2 import discovery: {body}"
+    assert body["resultCode"] == "0", f"GB2 import discovery: {body}"
 
     # Trigger build with knCode=300001
-    try:
-        resp = await client.post(
-            "/kgw/api/v1/fileToMarkdownIndex",
-            json={"knCode": _KN_DISCOV, "filePath": "/fileops/discovery-build.md"},
-            headers=_hdrs(),
-        )
-    except httpx.RemoteProtocolError:
-        pytest.skip("Proxy interference — set NO_PROXY=127.0.0.1,localhost")
+    resp = await client.post(
+        "/kgw/api/v1/fileToMarkdownIndex",
+        json={"knCode": _KN_DISCOV, "filePath": path},
+        headers=_hdrs(),
+    )
     body = resp.json()
     assert body["resultCode"] == "0", f"GB2 build trigger discovery: {body}"
 
@@ -536,9 +678,7 @@ async def test_delete_file_discovery(client: httpx.AsyncClient) -> None:
         headers=_hdrs(),
     )
     body = resp.json()
-    # Discovery import might fail gracefully
-    if body["resultCode"] != "0":
-        pytest.skip(f"GI9 discovery import failed (backend may be unavailable): {body}")
+    assert body["resultCode"] == "0", f"GI9 import discovery failed: {body}"
     # Now delete
     resp2 = await client.post(
         "/kgw/api/v1/knowledgeItems/delete",
@@ -546,20 +686,21 @@ async def test_delete_file_discovery(client: httpx.AsyncClient) -> None:
         headers=_hdrs(),
     )
     body2 = resp2.json()
-    assert body2["resultCode"] in ("0", "-1"), f"GI9 delete discovery: {body2}"
-    # If delete succeeded, verify file is gone
-    if body2["resultCode"] == "0":
-        resp3 = await client.post(
-            "/kgw/api/v1/listDir",
-            json={"knCode": _KN_DISCOV, "directoryPath": "/fileops"},
-            headers=_hdrs(),
-        )
-        if resp3.status_code == 200:
-            data = resp3.json().get("resultObject", {}).get("data", [])
-            fname = path.rsplit("/", 1)[-1]
-            assert not any(fname in str(f) for f in data), (
-                f"GI9 file should be gone after delete: {data}"
-            )
+    assert body2["resultCode"] == "0", f"GI9 delete discovery: {body2}"
+    # Verify file is gone
+    resp3 = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DISCOV, "directoryPath": "/fileops"},
+        headers=_hdrs(),
+    )
+    assert resp3.status_code == 200, (
+        f"GI9 listDir after delete status={resp3.status_code}"
+    )
+    data = resp3.json().get("resultObject", {}).get("data", [])
+    fname = path.rsplit("/", 1)[-1]
+    assert not any(fname in str(f) for f in data), (
+        f"GI9 file should be gone after delete: {data}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -568,8 +709,10 @@ async def test_delete_file_discovery(client: httpx.AsyncClient) -> None:
 
 
 async def test_build_retry_after_failure(client: httpx.AsyncClient) -> None:
-    """GB5: Build fails, then retry succeeds."""
-    path = "/fileops/retry-build.md"
+    """GB5: Retry build after first build completes — always verify retry path succeeds."""
+    import uuid
+
+    path = f"/fileops/retry-{uuid.uuid4().hex[:8]}.md"
 
     # 1. Import
     resp = await client.post(
@@ -577,7 +720,7 @@ async def test_build_retry_after_failure(client: httpx.AsyncClient) -> None:
         data={"knCode": _KN_DIRECT, "filePath": path},
         files={
             "fileContent": (
-                "retry-build.md",
+                "retry.md",
                 b"# Retry Build\n\nContent for retry test.",
                 "text/markdown",
             )
@@ -585,22 +728,17 @@ async def test_build_retry_after_failure(client: httpx.AsyncClient) -> None:
         headers=_hdrs(),
     )
     body = resp.json()
-    if body["resultCode"] != "0":
-        pytest.skip(f"GB5 import failed (file may exist): {body}")
+    assert body["resultCode"] == "0", f"GB5 import failed: {body}"
 
     # 2. Trigger first build
-    try:
-        resp = await client.post(
-            "/kgw/api/v1/fileToMarkdownIndex",
-            json={"knCode": _KN_DIRECT, "filePath": path},
-            headers=_hdrs(),
-        )
-    except httpx.RemoteProtocolError:
-        pytest.skip("Proxy interference — set NO_PROXY=127.0.0.1,localhost")
+    resp = await client.post(
+        "/kgw/api/v1/fileToMarkdownIndex",
+        json={"knCode": _KN_DIRECT, "filePath": path},
+        headers=_hdrs(),
+    )
     assert resp.json()["resultCode"] == "0", f"GB5 first build trigger: {resp.json()}"
 
-    # 3. Poll for status
-    build_failed = False
+    # 3. Poll for terminal status
     for _ in range(60):
         status_resp = await client.post(
             "/kgw/api/v1/fileBuildStatus",
@@ -609,28 +747,20 @@ async def test_build_retry_after_failure(client: httpx.AsyncClient) -> None:
         )
         sbody = status_resp.json()
         status = sbody.get("resultObject", {}).get("status")
-        if status in ("success", "complete"):
-            break
-        if status in ("failed",):
-            build_failed = True
+        if status in ("success", "complete", "failed"):
             break
         await asyncio.sleep(2)
     else:
-        # If build never completes, skip rather than fail (may be slow backend)
-        pytest.skip("GB5 build did not reach terminal state within 120 s")
+        pytest.fail("GB5 build did not reach terminal state within 120 s")
 
-    # 4. If build failed, retry and assert accepted
-    if build_failed:
-        try:
-            resp = await client.post(
-                "/kgw/api/v1/fileToMarkdownIndex",
-                json={"knCode": _KN_DIRECT, "filePath": path},
-                headers=_hdrs(),
-            )
-        except httpx.RemoteProtocolError:
-            pytest.skip("Proxy interference — set NO_PROXY=127.0.0.1,localhost")
-        body = resp.json()
-        assert body["resultCode"] == "0", f"GB5 retry build: {body}"
+    # 4. Always retry build and assert success
+    resp = await client.post(
+        "/kgw/api/v1/fileToMarkdownIndex",
+        json={"knCode": _KN_DIRECT, "filePath": path},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"GB5 retry build: {body}"
 
 
 # ---------------------------------------------------------------------------
@@ -640,14 +770,11 @@ async def test_build_retry_after_failure(client: httpx.AsyncClient) -> None:
 
 async def test_build_nonexistent_file(client: httpx.AsyncClient) -> None:
     """GB6: Build a file that was never imported - backend returns error."""
-    try:
-        resp = await client.post(
-            "/kgw/api/v1/fileToMarkdownIndex",
-            json={"knCode": _KN_DIRECT, "filePath": "/fileops/never-existed.md"},
-            headers=_hdrs(),
-        )
-    except httpx.RemoteProtocolError:
-        pytest.skip("Proxy interference — set NO_PROXY=127.0.0.1,localhost")
+    resp = await client.post(
+        "/kgw/api/v1/fileToMarkdownIndex",
+        json={"knCode": _KN_DIRECT, "filePath": "/fileops/never-existed.md"},
+        headers=_hdrs(),
+    )
     body = resp.json()
     assert body["resultCode"] == "-1", f"GB6 build nonexistent file: {body}"
 
@@ -685,14 +812,11 @@ async def test_listdir_subdirectory(client: httpx.AsyncClient) -> None:
     assert body["resultCode"] == "0", f"GR2 import in sub: {body}"
 
     # List subdirectory
-    try:
-        resp = await client.post(
-            "/kgw/api/v1/listDir",
-            json={"knCode": _KN_DIRECT, "directoryPath": "/fileops/sub"},
-            headers=_hdrs(),
-        )
-    except httpx.RemoteProtocolError:
-        pytest.skip("Proxy interference — set NO_PROXY=127.0.0.1,localhost")
+    resp = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DIRECT, "directoryPath": "/fileops/sub"},
+        headers=_hdrs(),
+    )
     body = resp.json()
     assert body["resultCode"] == "0", f"GR2 listDir sub: {body}"
     data = body.get("resultObject", {}).get("data", [])
@@ -707,14 +831,11 @@ async def test_listdir_subdirectory(client: httpx.AsyncClient) -> None:
 
 async def test_listdir_nonexistent(client: httpx.AsyncClient) -> None:
     """GR3: List a directory that doesn't exist returns error."""
-    try:
-        resp = await client.post(
-            "/kgw/api/v1/listDir",
-            json={"knCode": _KN_DIRECT, "directoryPath": "/fileops/ghost"},
-            headers=_hdrs(),
-        )
-    except httpx.RemoteProtocolError:
-        pytest.skip("Proxy interference — set NO_PROXY=127.0.0.1,localhost")
+    resp = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DIRECT, "directoryPath": "/fileops/ghost"},
+        headers=_hdrs(),
+    )
     body = resp.json()
     assert body["resultCode"] == "-1", f"GR3 listDir nonexistent: {body}"
 
@@ -768,8 +889,7 @@ async def test_readfile_line_window(client: httpx.AsyncClient) -> None:
         headers=_hdrs(),
     )
     body = resp.json()
-    if body["resultCode"] != "0":
-        pytest.skip(f"GR7 import failed (file may exist): {body}")
+    assert body["resultCode"] == "0", f"GR7 import failed: {body}"
 
     # 2. Trigger build
     resp = await client.post(
@@ -791,7 +911,8 @@ async def test_readfile_line_window(client: httpx.AsyncClient) -> None:
         if status in ("success", "complete"):
             break
         if status in ("failed",):
-            pytest.skip("GR7 build failed — embedding API may be unreachable")
+            _step = sbody.get("resultObject", {}).get("currentStep", "?")
+            pytest.fail(f"GR7 build failed at step={_step}: {sbody}")
         await asyncio.sleep(2)
     else:
         pytest.fail("GR7 build did not complete within 120 s")
@@ -809,6 +930,22 @@ async def test_readfile_line_window(client: httpx.AsyncClient) -> None:
     )
     body = resp.json()
     assert body["resultCode"] == "0", f"GR7 readFile with line window: {body}"
+    ro = body.get("resultObject", {})
+    assert "reachedEof" in ro, f"GR7 expected 'reachedEof' in resultObject, got: {body}"
+    assert ro["reachedEof"] is False, (
+        f"GR7 expected reachedEof=false when reading partial range, got: {ro}"
+    )
+    # Verify content is a string for requested line range 1-20
+    # (may be empty if backend has not yet indexed full content after build)
+    content = ro.get("content", "")
+    assert isinstance(content, str), (
+        f"GR7 expected string content from line range 1-20, "
+        f"got: {type(content).__name__}"
+    )
+    # Verify late content (line 40+) is NOT in the result
+    assert "Line 40:" not in content, (
+        f"GR7 line-range should NOT include lines outside 1-20: {content[:300]}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -848,8 +985,8 @@ async def test_download_file(client: httpx.AsyncClient) -> None:
         f"got {len(resp.content)} bytes"
     )
     content_type = resp.headers.get("Content-Type", "")
-    assert "pdf" in content_type.lower() or "octet-stream" in content_type.lower(), (
-        f"GR9 unexpected Content-Type: {content_type}"
+    assert content_type == "application/pdf", (
+        f"GR9 unexpected Content-Type: expected 'application/pdf', got '{content_type}'"
     )
 
 
@@ -895,6 +1032,10 @@ async def test_download_file_chinese_filename(client: httpx.AsyncClient) -> None
     assert "请假制度" in cd_header or "filename" in cd_header.lower(), (
         f"GR10 Content-Disposition missing filename: {cd_header}"
     )
+    # Verify RFC 5987 filename* encoding for Chinese characters
+    assert "filename*=UTF-8''" in cd_header and "%E8%AF%B7" in cd_header, (
+        f"GR10 missing RFC 5987 filename* encoding in Content-Disposition: {cd_header}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -923,20 +1064,18 @@ async def test_discovery_read_path(client: httpx.AsyncClient) -> None:
         headers=_hdrs(),
     )
     body = resp.json()
-    assert body["resultCode"] in ("0", "-1"), f"GR11 import discovery: {body}"
+    assert body["resultCode"] == "0", f"GR11 import discovery: {body}"
 
     # 2. Trigger build
-    try:
-        resp = await client.post(
-            "/kgw/api/v1/fileToMarkdownIndex",
-            json={"knCode": _KN_DISCOV, "filePath": path},
-            headers=_hdrs(),
-        )
-    except httpx.RemoteProtocolError:
-        pytest.skip("Proxy interference — set NO_PROXY=127.0.0.1,localhost")
+    resp = await client.post(
+        "/kgw/api/v1/fileToMarkdownIndex",
+        json={"knCode": _KN_DISCOV, "filePath": path},
+        headers=_hdrs(),
+    )
     build_body = resp.json()
-    if build_body["resultCode"] != "0":
-        pytest.skip(f"GR11 build trigger failed (discovery may be down): {build_body}")
+    assert build_body["resultCode"] == "0", (
+        f"GR11 build trigger discovery: {build_body}"
+    )
 
     # 3. Wait for build
     for _ in range(60):
@@ -950,49 +1089,33 @@ async def test_discovery_read_path(client: httpx.AsyncClient) -> None:
         if status in ("success", "complete"):
             break
         if status in ("failed",):
-            pytest.skip("GR11 build failed — embedding API may be unreachable")
+            _step = sbody.get("resultObject", {}).get("currentStep", "?")
+            pytest.fail(f"GR11 build failed at step={_step}")
         await asyncio.sleep(2)
     else:
         pytest.fail("GR11 build did not complete within 120 s")
 
-    # 4. listDir — verify file visible (discovery mode may be flaky)
-    try:
-        resp = await client.post(
-            "/kgw/api/v1/listDir",
-            json={"knCode": _KN_DISCOV, "directoryPath": "/fileops"},
-            headers=_hdrs(),
-        )
-    except httpx.RemoteProtocolError:
-        pytest.skip("Proxy interference — set NO_PROXY=127.0.0.1,localhost")
+    # 4. listDir — verify file visible
+    resp = await client.post(
+        "/kgw/api/v1/listDir",
+        json={"knCode": _KN_DISCOV, "directoryPath": "/fileops"},
+        headers=_hdrs(),
+    )
     body = resp.json()
-    if body["resultCode"] != "0":
-        pytest.skip(f"GR11 listDir discovery returned error: {body}")
+    assert body["resultCode"] == "0", f"GR11 listDir discovery: {body}"
     data = body.get("resultObject", {}).get("data", [])
     fname = path.rsplit("/", 1)[-1]
     found = any(fname in str(f) for f in data)
-    if not found:
-        pytest.skip(
-            f"GR11 file not visible in discovery listDir (backend may be out of sync): {data}"
-        )
+    assert found, f"GR11 file not visible in discovery listDir: {data}"
 
-    # 5. readFile — verify content (discovery mode may be flaky)
-    try:
-        resp = await client.post(
-            "/kgw/api/v1/readFile",
-            json={"knCode": _KN_DISCOV, "filePath": path},
-            headers=_hdrs(),
-        )
-    except httpx.RemoteProtocolError:
-        pytest.skip("Proxy interference — set NO_PROXY=127.0.0.1,localhost")
-    try:
-        body = resp.json()
-    except Exception:
-        pytest.skip(
-            f"GR11 readFile discovery returned non-JSON response "
-            f"(status={resp.status_code})"
-        )
-    # Discovery operations may return -1 when backend is partially available
-    assert body.get("resultCode") in ("0", "-1"), f"GR11 readFile discovery: {body}"
+    # 5. readFile — verify content
+    resp = await client.post(
+        "/kgw/api/v1/readFile",
+        json={"knCode": _KN_DISCOV, "filePath": path},
+        headers=_hdrs(),
+    )
+    body = resp.json()
+    assert body["resultCode"] == "0", f"GR11 readFile discovery: {body}"
 
     # 6. downloadFile — verify bytes (discovery mode)
     resp = await client.post(
