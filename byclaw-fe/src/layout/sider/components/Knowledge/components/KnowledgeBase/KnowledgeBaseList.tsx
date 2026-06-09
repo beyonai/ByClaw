@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Input, Button, Radio, Dropdown, List, theme, App, Tooltip, Typography } from 'antd';
-import { PlusOutlined, FilterOutlined, SearchOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Input, Dropdown, List, theme, App, Typography } from 'antd';
+import { SearchOutlined } from '@ant-design/icons';
 import { trim, get, isEmpty, intersection, debounce } from 'lodash';
 import { useIntl, useNavigate, useSelector } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
@@ -9,16 +9,17 @@ import ShareModal from '@/pages/knowledgeCenter/components/shareModal';
 import { getRuntimeActualUrl } from '@/utils';
 import withDrag, { DragType, IDragType } from '@/components/QueryInput/withDrag';
 import { deleteKnowledge } from '@/pages/manager/service/resources';
-import { queryAuthDoc } from '@/service/knowledgeCenter';
+import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import { IKnowledgeBaseItem } from './types';
 import InfiniteScrollAntdList from '../../../InfiniteScrollAntdList';
 import commonStyles from '../common.module.less';
 import EmptyTips from '@/components/EmptyTips';
 import useModuleEvent from '@/hooks/useModuleEvent';
 import { isTopAgent } from '@/service/digitalEmployees';
+import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import styles from './index.module.less';
 
-const { Paragraph } = Typography;
+const { Title, Paragraph } = Typography;
 
 interface KnowledgeBaseListProps {
   editable?: boolean;
@@ -29,25 +30,16 @@ interface KnowledgeBaseListProps {
   agentIds?: string;
 }
 
-/** 筛选：all 不传 ownerType；shared→企业 enterprise；private→个人 personal */
-enum FilterType {
-  all = 'all',
-  shared = 'shared',
-  private = 'private',
-}
-
-type ResourceCatalogMain = 'enterprise' | 'personal';
-
 const Draggable = withDrag(DragType.knowledgeBase);
 
 const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
-  const { editable, onSelect, onDrilldown, keyword } = props;
+  const { editable, onDrilldown, keyword } = props;
   const searchValue = useRef('');
   const listFetchRef = useRef(false);
-  const [filterType, setFilterType] = useState<FilterType>(FilterType.all);
+  // const [filterType, setFilterType] = useState<FilterType>(FilterType.all);
   const [loading, setLoading] = useState(false);
   const [knowledgeBases, setKnowledgeBases] = useState<IKnowledgeBaseItem[]>([]);
-  const [hasMore, setHasMore] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
   const [modalState, setModalState] = useState<{
     openType: '' | 'add' | 'rename' | 'share';
     info?: IKnowledgeBaseItem;
@@ -67,14 +59,14 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
   } = theme.useToken();
   const { moduleEventEmitter, logoutModuleEvent } = useModuleEvent('KNOWLEDGE_CENTER');
 
-  const filterTypes = useMemo(
-    () => [
-      { key: FilterType.all, label: intl.formatMessage({ id: 'dialogueRecord.all' }) },
-      { key: FilterType.shared, label: intl.formatMessage({ id: 'knowledgeCenter.shared' }) },
-      { key: FilterType.private, label: intl.formatMessage({ id: 'knowledgeCenter.myCreation' }) },
-    ],
-    [intl]
-  );
+  // const filterTypes = useMemo(
+  //   () => [
+  //     { key: FilterType.all, label: intl.formatMessage({ id: 'dialogueRecord.all' }) },
+  //     { key: FilterType.shared, label: intl.formatMessage({ id: 'knowledgeCenter.shared' }) },
+  //     { key: FilterType.private, label: intl.formatMessage({ id: 'knowledgeCenter.myCreation' }) },
+  //   ],
+  //   [intl]
+  // );
 
   // 获取知识库列表
   const loadKnowledgeBases = async (reset = false) => {
@@ -88,20 +80,16 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
         pageNum: number;
         pageSize: number;
         keyword: string;
-        type: string;
-        ownerType?: ResourceCatalogMain;
+        resourceStatus?: string;
+        resourceBizTypeList?: string[];
       } = {
         pageNum: 1,
-        pageSize: 100,
+        pageSize: 30,
         keyword: searchValue.current.trim(),
-        type: 'all',
+        resourceStatus: '2',
+        resourceBizTypeList: ['KG_DOC', 'KG_QA', 'KG_TERM'],
       };
-      if (filterType === FilterType.shared) {
-        payload.ownerType = 'enterprise';
-      } else if (filterType === FilterType.private) {
-        payload.ownerType = 'personal';
-      }
-      const response = await queryAuthDoc(payload);
+      const response = await listResourceUseAuth(payload);
       const rows = Array.isArray(response?.rows) ? response.rows : Array.isArray(response?.list) ? response.list : [];
       setKnowledgeBases(rows);
       setHasMore(false);
@@ -117,7 +105,7 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
   // 初始加载
   useEffect(() => {
     loadKnowledgeBases(true);
-  }, [filterType]);
+  }, []);
 
   const onKeywordChanged = debounce((keyword: string) => {
     searchValue.current = keyword;
@@ -281,13 +269,13 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
               }
             }}
           />
-          {editable && (
+          {/* {editable && (
             <Tooltip title={intl.formatMessage({ id: 'knowledgeCenter.create' })}>
               <Button icon={<PlusOutlined />} onClick={() => setModalState({ openType: 'add' })} />
             </Tooltip>
-          )}
+          )} */}
           {/* {!agentId && ( */}
-          <Dropdown
+          {/* <Dropdown
             trigger={['click']}
             menu={{
               onClick: ({ key }) => setFilterType(key as unknown as FilterType),
@@ -298,11 +286,12 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
             }}
           >
             <Button icon={<FilterOutlined />} />
-          </Dropdown>
+          </Dropdown> */}
           {/* )} */}
         </div>
       </div>
       <InfiniteScrollAntdList
+        className={employeeStyles.employeesList}
         dataSource={knowledgeBases}
         hasMore={hasMore}
         loading={loading}
@@ -348,28 +337,42 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
             <Draggable key={item.resourceId} data={item}>
               <List.Item
                 key={item.resourceId}
-                actions={actions}
-                onClick={() => onSelect?.(item, DragType.knowledgeBase)}
+                // actions={actions}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDrilldown(item);
+                }}
               >
                 <List.Item.Meta
                   title={
-                    <div className="textEllipsis" title={item.resourceName}>
-                      <span className={styles.nameText}>{item.resourceName}</span>
-                      {`${item?.isTop}` === '1' && isUser && (
-                        <AntdIcon type="icon-zhiding-fill" className={styles.pinBadge} />
-                      )}
-                    </div>
+                    <Title className={employeeStyles.name}>
+                      <span className={employeeStyles.nameRow} title={item.resourceName}>
+                        <span className={employeeStyles.nameText}>{item.resourceName}</span>
+                        {`${item?.isTop}` === '1' && isUser && (
+                          <AntdIcon type="icon-zhiding-fill" className={employeeStyles.pinBadge} />
+                        )}
+                      </span>
+                    </Title>
                   }
                   description={
-                    <Paragraph ellipsis={{ rows: 2 }} style={{ marginBottom: 0 }}>
+                    <Paragraph
+                      className={employeeStyles.description}
+                      ellipsis={{ tooltip: { title: item.resourceDesc, placement: 'right' } }}
+                    >
                       {item.resourceDesc}
                     </Paragraph>
                   }
                   avatar={
                     item.resourceLogoUrl ? (
-                      <img src={getRuntimeActualUrl(`/byaiService${item.resourceLogoUrl}`)} alt="" />
+                      <img
+                        className={styles.avatar}
+                        src={getRuntimeActualUrl(`/byaiService${item.resourceLogoUrl}`)}
+                        alt=""
+                      />
                     ) : (
-                      <AntdIcon type="icon-a-Book-oneshuji12" style={{ color: colorPrimary }} />
+                      <span className={styles.defaultAvatar}>
+                        <AntdIcon type="icon-a-Book-oneshuji12" style={{ color: colorPrimary }} />
+                      </span>
                     )
                   }
                 />

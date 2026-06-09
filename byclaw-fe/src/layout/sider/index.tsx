@@ -2,7 +2,7 @@ import React from 'react';
 
 import { CaretLeftOutlined, CaretRightOutlined } from '@ant-design/icons';
 // @ts-ignore
-import { useSelector, SelectLang, useIntl, useNavigate, useLocation } from '@umijs/max';
+import { useSelector, SelectLang, useIntl, useLocation } from '@umijs/max';
 import { Badge, theme, Divider, Dropdown, Tooltip } from 'antd';
 import classnames from 'classnames';
 import { omit, compact } from 'lodash';
@@ -44,7 +44,6 @@ const getCurrentTabByPathname = (pathname: string) => {
 };
 
 const Sidebar = () => {
-  const navigate = useNavigate();
   const { pathname } = useLocation();
 
   const { isSiderCollapsed, setSiderCollapsed } = useAppStore();
@@ -67,14 +66,16 @@ const Sidebar = () => {
   const { token } = theme.useToken();
   const intl = useIntl();
   const currentTab = React.useMemo(() => getCurrentTabByPathname(pathname), [pathname]);
-  const shouldHideSiderContent = React.useMemo(() => {
-    return Boolean(currentTab?.hideSider);
-  }, [currentTab]);
   const [activeKey, setActiveKey] = React.useState<(typeof tabItems)[number]['key']>(
     () => currentTab?.key ?? DEF_SIDER
   );
+  const [manualSiderOpenKey, setManualSiderOpenKey] = React.useState<(typeof tabItems)[number]['key']>();
+  const pathnameRef = React.useRef(pathname);
+  const shouldHideSiderContent = React.useMemo(() => {
+    return Boolean(currentTab?.hideSider && manualSiderOpenKey !== activeKey);
+  }, [activeKey, currentTab, manualSiderOpenKey]);
   const [siderContentWidth, setSiderContentWidth] = React.useState(() => {
-    if (shouldHideSiderContent) {
+    if (currentTab?.hideSider) {
       return 0;
     }
 
@@ -128,6 +129,7 @@ const Sidebar = () => {
   React.useEffect(() => {
     const handleSetSiderActiveKey = (key: string) => {
       setActiveKey(key);
+      setManualSiderOpenKey(key);
       setSiderCollapsed(false); // 确保侧边栏展开
     };
 
@@ -151,13 +153,23 @@ const Sidebar = () => {
 
   React.useEffect(() => {
     const hasKey = myTabItems.find((tab) => tab.key === currentTab?.key);
+    const pathnameChanged = pathnameRef.current !== pathname;
+    const shouldSyncActiveKey = Boolean(currentTab && hasKey && (pathnameChanged || !manualSiderOpenKey));
+    const nextActiveKey = shouldSyncActiveKey ? currentTab?.key : activeKey;
+    const nextManualSiderOpenKey = pathnameChanged ? undefined : manualSiderOpenKey;
+    const nextShouldHideSiderContent = Boolean(currentTab?.hideSider && nextManualSiderOpenKey !== nextActiveKey);
 
-    setSiderContentWidth(shouldHideSiderContent ? 0 : DEFAULT_SIDER_CONTENT_WIDTH);
+    if (pathnameChanged) {
+      pathnameRef.current = pathname;
+      setManualSiderOpenKey(undefined);
+    }
 
-    if (currentTab && hasKey) {
+    setSiderContentWidth(nextShouldHideSiderContent ? 0 : DEFAULT_SIDER_CONTENT_WIDTH);
+
+    if (shouldSyncActiveKey && currentTab) {
       setActiveKey(currentTab.key);
     }
-  }, [currentTab, myTabItems, shouldHideSiderContent]);
+  }, [activeKey, currentTab, manualSiderOpenKey, myTabItems, pathname]);
 
   if (!userInfo) return null;
 
@@ -182,10 +194,8 @@ const Sidebar = () => {
                 className={classnames(styles.tabItem, tab.key === activeKey && styles.activeTab)}
                 onClick={() => {
                   setActiveKey(tab.key);
+                  setManualSiderOpenKey(tab.key);
                   setSiderCollapsed(false);
-                  if (tab.navigatePath) {
-                    navigate(tab.navigatePath);
-                  }
                 }}
               >
                 <Badge

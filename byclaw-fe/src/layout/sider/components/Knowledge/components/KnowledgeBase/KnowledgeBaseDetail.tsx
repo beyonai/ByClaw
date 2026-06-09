@@ -10,6 +10,7 @@ import { downloadResourceFile } from '@/service/file';
 import { resolveTreeItemDirectoryPath } from './service';
 import type { QueryDirAndFileByLevelItem } from '@/service/knowledgeCenter';
 import { downloadFile } from '@/utils/file';
+import { getKnowledgeFileIconType } from '@/constants/icon';
 import useShowModal from '@/hooks/useShowModal';
 import RenameModal from '@/pages/knowledgeDetail/components/RenameModal';
 import { IDragType, DragType, onTreeNodeDragStart } from '@/components/QueryInput/withDrag';
@@ -34,24 +35,10 @@ function onDragStart(info: Parameters<Required<TreeProps>['onDragStart']>[0]) {
 
 function getNodeIcon(p: AntdTreeNodeAttribute) {
   const { isLeaf, title } = p;
-  if (!isLeaf) {
-    return <AntdIcon type="icon-wenjianjialanse" />;
-  }
-  let iconType = '';
-  const v = title as string;
-  if (/\.(doc|docx)$/.test(v)) {
-    iconType = 'Word';
-  } else if (v?.endsWith('.pdf')) {
-    iconType = 'PDF';
-  } else if (/\.(xls|xlsx)$/.test(v)) {
-    iconType = 'Excel';
-  } else if (v?.endsWith('.txt')) {
-    iconType = 'jishiben';
-  } else if (v?.endsWith('.ppt')) {
-    iconType = 'PPT';
-  } else if (/\.(png|jpg|jpeg)$/.test(v)) {
-    iconType = 'Image';
-  }
+  const iconType = getKnowledgeFileIconType(title as string, {
+    isDirectory: !isLeaf,
+    directoryIconType: 'wenjianjialanse',
+  });
 
   return <AntdIcon type={`icon-${iconType}`} />;
 }

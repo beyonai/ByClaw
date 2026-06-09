@@ -28,6 +28,7 @@ import {
   type BuildDatasetPayload,
 } from '@/service/knowledgeCenter';
 import { downloadFile } from '@/utils/file';
+import { getKnowledgeFileIconType } from '@/constants/icon';
 import DirectoryEmpty from '../components/DirectoryEmpty';
 import MoveModal from '../components/MoveModal';
 import RenameModal from '../components/RenameModal';
@@ -704,27 +705,10 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       {
         title: intl.formatMessage({ id: 'directoryManage.fileName' }),
         dataIndex: 'name',
-        width: '40%',
+        // width: '40%',
         align: 'center',
         render: (v: string, record: any) => {
-          let iconType = '';
-          if (/\.(doc|docx)$/.test(v)) {
-            iconType = 'Word';
-          } else if (v?.endsWith('.pdf')) {
-            iconType = 'PDF';
-          } else if (/\.(xls|xlsx)$/.test(v)) {
-            iconType = 'Excel';
-          } else if (v?.endsWith('.txt')) {
-            iconType = 'jishiben';
-          } else if (v?.endsWith('.ppt')) {
-            iconType = 'PPT';
-          } else if (v?.endsWith('.md')) {
-            iconType = 'markdown';
-          } else if (/\.(png|jpg|jpeg)$/.test(v)) {
-            iconType = 'Image';
-          } else if (record.type === 'directory') {
-            iconType = 'wenjianjia';
-          }
+          const iconType = getKnowledgeFileIconType(v, { isDirectory: record.type === 'directory' });
           let onClick: React.DOMAttributes<HTMLDivElement>['onClick'];
           let style: React.CSSProperties = {};
           if (record.type === 'directory') {
@@ -827,6 +811,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         title: intl.formatMessage({ id: 'common.operation' }),
         dataIndex: 'title',
         align: 'center',
+        width: 150,
         render: (v: string, record: any) => {
           const actions = getActions(record);
           if (!actions.length) {

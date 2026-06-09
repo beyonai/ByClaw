@@ -157,7 +157,7 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({ visible, resourceId, re
     >
       {loading ? (
         <div className={styles.loadingContainer}>
-          <Spin size="large" />
+          <Spin />
         </div>
       ) : (
         <>
