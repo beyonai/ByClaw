@@ -52,6 +52,7 @@ import java.util.stream.Collectors;
 import java.time.format.DateTimeFormatter;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -316,7 +317,7 @@ public class ConversationService {
             byaiSystemConfigListService.findByParamGroupCode(Constants.AGENT_SPACE_ID));
     }
 
-    public Map<String, List<FeedbackTypeDto>> getContentFeedbackType() {
+    public Map<String, List<FeedbackTypeDto>> getContentFeedbackType(String language) {
         List<ByaiSystemConfigList> values = byaiSystemConfigListService.findByParamGroupCode(Constants.FEEDBACK_TYPE);
         if (CollectionUtils.isEmpty(values)) {
             return new HashMap<>();
@@ -332,10 +333,23 @@ public class ConversationService {
             configs.forEach(config -> {
                 FeedbackTypeDto feedbackTypeDto = new FeedbackTypeDto();
                 BeanUtils.copyProperties(config, feedbackTypeDto);
+                feedbackTypeDto.setParamName(getLocalizedParamName(config, language));
                 res.computeIfAbsent(paramGroupCode, list -> new ArrayList<>()).add(feedbackTypeDto);
             });
         });
         return res;
+    }
+
+    private String getLocalizedParamName(ByaiSystemConfigList config, String language) {
+        if (StringUtils.equalsIgnoreCase(language, "en-US")) {
+            return config.getParamName();
+        }
+        return switch (StringUtils.defaultString(config.getParamValue())) {
+            case "ANS_INACCURATE" -> "答案不准确";
+            case "WRONG_PERSON" -> "找错人";
+            case "FEED_OTHER" -> "其他";
+            default -> config.getParamName();
+        };
     }
 
     public Object getSuassList(FilterQo qo) {

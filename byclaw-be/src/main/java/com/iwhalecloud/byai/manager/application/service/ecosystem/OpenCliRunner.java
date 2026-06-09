@@ -7,21 +7,41 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import javax.mail.Address;
+import javax.mail.BodyPart;
+import javax.mail.Flags;
+import javax.mail.Folder;
+import javax.mail.Message;
+import javax.mail.MessagingException;
+import javax.mail.Multipart;
+import javax.mail.Part;
+import javax.mail.Session;
+import javax.mail.Store;
+import javax.mail.internet.MimeUtility;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.manager.vo.ecosystem.EcosystemTaskVo;
+import org.jsoup.Jsoup;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
@@ -38,21 +58,30 @@ public class OpenCliRunner {
      * 知乎收藏夹 ID 提取规则，兼容 collection/123、collection=123 和纯数字。
      */
     private static final Pattern COLLECTION_PATTERN = Pattern.compile("(?:collection/|collection=|^)(\\d{3,})");
-
     /**
      * 知乎问题 ID 提取规则。
      */
     private static final Pattern QUESTION_PATTERN = Pattern.compile("question/(\\d{3,})");
-
     /**
      * 通用数字 ID 提取规则。
      */
     private static final Pattern NUMBER_PATTERN = Pattern.compile("\\d{3,}");
-
+    /**
+     * 日期范围提取规则，兼容前端“2026-05-01 至 2026-05-31”这类范围文本。
+     */
+    private static final Pattern DATE_PATTERN = Pattern.compile("(\\d{4}-\\d{2}-\\d{2})");
     /**
      * 未指定范围时的默认采集数量上限。
      */
     private static final int DEFAULT_LIMIT = 20;
+    /**
+     * IMAP P0 单次最多扫描最近若干封邮件，避免首次同步阻塞接口线程。
+     */
+    private static final int DEFAULT_IMAP_SCAN_LIMIT = 200;
+    /**
+     * 邮件附件单文件最大保留大小，超过时只在 Markdown 中记录文件名。
+     */
+    private static final int MAX_MAIL_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 
     /**
      * JSON 解析器，用于解析 OpenCLI JSON 输出。
@@ -67,6 +96,12 @@ public class OpenCliRunner {
     private Environment environment;
 
     /**
+     * OpenCLI manifest 能力目录，用于动态构造非硬编码站点命令。
+     */
+    @Autowired
+    private OpenCliCapabilityService openCliCapabilityService;
+
+    /**
      * 执行一次 OpenCLI 采集，并把命令输出归一化为 Markdown 条目和附件统计。
      *
      * @param task 采集任务
@@ -75,6 +110,9 @@ public class OpenCliRunner {
      */
     public CollectionResult collect(EcosystemTaskVo task, Long runId) {
         Path outputDir = createOutputDirectory(runId);
+        if ("mail".equalsIgnoreCase(defaultText(task.getConnectorCode(), ""))) {
+            return collectMail(task, outputDir);
+        }
         List<String> command = buildCollectCommand(task, outputDir);
         CommandResult commandResult = runCommand(command, resolveWorkDir(), timeout());
         if (commandResult.getExitCode() != 0) {
@@ -98,33 +136,12 @@ public class OpenCliRunner {
     }
 
     /**
-     * 检测 OpenCLI 运行时、版本和 Browser Bridge 连接状态。
-     *
-     * @return 运行时状态
-     */
-    public RuntimeStatus inspectRuntime() {
-        CommandResult version = runCommand(List.of(resolveBin().toString(), "--version"), resolveWorkDir(),
-            Duration.ofSeconds(20));
-        CommandResult doctor = version.getExitCode() == 0
-            ? runCommand(List.of(resolveBin().toString(), "doctor"), resolveWorkDir(), Duration.ofSeconds(30))
-            : new CommandResult(-1, "");
-
-        RuntimeStatus status = new RuntimeStatus();
-        status.setRuntimeName("OpenCLI");
-        status.setRuntimeVersion(version.getExitCode() == 0 ? firstLine(version.getOutput()) : "-");
-        status.setBrowserBridgeStatus(isBridgeConnected(doctor) ? "CONNECTED" : "DISCONNECTED");
-        status.setStatus(version.getExitCode() == 0 ? "ONLINE" : "OFFLINE");
-        status.setDiagnosticOutput(doctor.getOutput());
-        return status;
-    }
-
-    /**
      * 根据连接器类型构造 OpenCLI 命令。
      */
     private List<String> buildCollectCommand(EcosystemTaskVo task, Path outputDir) {
         List<String> command = new ArrayList<>();
         command.add(resolveBin().toString());
-        String profile = configured("BYCLAW_OPENCLI_PROFILE", "");
+        String profile = resolveOpenCliProfile(task);
         if (!isBlank(profile)) {
             command.add("--profile");
             command.add(profile);
@@ -139,8 +156,8 @@ public class OpenCliRunner {
             appendZhihuCommand(command, task, outputDir);
             return command;
         }
-        throw new OpenCliException(i18n("ecosystem.error.opencli.unsupported.connector"), command,
-            new CommandResult(-1, ""), "UNSUPPORTED_CONNECTOR");
+        appendGenericOpenCliCommand(command, task, outputDir);
+        return command;
     }
 
     /**
@@ -215,6 +232,279 @@ public class OpenCliRunner {
         command.add("persistent");
         command.add("--window");
         command.add("background");
+    }
+
+    /**
+     * 对 OpenCLI manifest 中的通用读命令做保守参数映射；复杂命令后续由前端表单显式传 openCliArgs。
+     */
+    private void appendGenericOpenCliCommand(List<String> command, EcosystemTaskVo task, Path outputDir) {
+        Map<String, Object> options = task == null || task.getOptions() == null ? Map.of() : task.getOptions();
+        String connectorCode = defaultText(task.getConnectorCode(), "").toLowerCase(Locale.ROOT);
+        String requestedCommand = stringValue(options.get("openCliCommand"));
+        OpenCliCapabilityService.CommandCapability openCliCommand = openCliCapabilityService.selectReadCommand(
+            connectorCode,
+            requestedCommand,
+            task.getSourceUrl(),
+            task.getScope(),
+            stringValue(options.get("originalText"))).orElseThrow(() -> new OpenCliException(
+            i18n("ecosystem.error.opencli.unsupported.connector"), command, new CommandResult(-1, ""),
+            "UNSUPPORTED_CONNECTOR"));
+        if (openCliCommand.requiresBrowserBridge() && !"web".equalsIgnoreCase(connectorCode)) {
+            throw new OpenCliException(i18n("ecosystem.error.opencli.browser.bridge.required"), command,
+                new CommandResult(-1, openCliCommand.description()), "BROWSER_BRIDGE_REQUIRED");
+        }
+        command.add(openCliCommand.site());
+        command.add(openCliCommand.name());
+        appendGenericOpenCliArgs(command, task, outputDir, openCliCommand, defaultMapMap(options.get("openCliArgs")));
+        command.add("-f");
+        command.add("json");
+    }
+
+    private void appendGenericOpenCliArgs(List<String> command,
+                                          EcosystemTaskVo task,
+                                          Path outputDir,
+                                          OpenCliCapabilityService.CommandCapability openCliCommand,
+                                          Map<String, Object> openCliArgs) {
+        for (OpenCliCapabilityService.CommandArg arg : openCliCommand.args()) {
+            String argName = arg.name();
+            Object supplied = openCliArgs.get(argName);
+            String value = supplied == null ? inferOpenCliArgValue(task, outputDir, arg) : stringValue(supplied);
+            if (isBlank(value) && arg.required() && arg.defaultValue() == null) {
+                throw new OpenCliException(i18n("ecosystem.error.opencli.args.required", argName),
+                    List.of(openCliCommand.site(), openCliCommand.name()), new CommandResult(-1, ""), "SOURCE_REQUIRED");
+            }
+            if (isBlank(value)) {
+                continue;
+            }
+            appendOpenCliArg(command, arg, value);
+        }
+    }
+
+    private String inferOpenCliArgValue(EcosystemTaskVo task, Path outputDir, OpenCliCapabilityService.CommandArg arg) {
+        String name = defaultText(arg.name(), "").toLowerCase(Locale.ROOT);
+        if ("output".equals(name) || "out".equals(name) || "dir".equals(name)) {
+            return outputDir.toString();
+        }
+        if ("limit".equals(name) || "max".equals(name) || "count".equals(name)) {
+            return String.valueOf(resolveLimit(task.getScope()));
+        }
+        if ("download-images".equals(name)) {
+            return "true";
+        }
+        String sourceUrl = defaultText(task.getSourceUrl(), "");
+        if (!isBlank(sourceUrl) && ("url".equals(name) || "input".equals(name) || "target".equals(name)
+            || "link".equals(name))) {
+            return sourceUrl;
+        }
+        if (!isBlank(sourceUrl) && "id".equals(name)) {
+            return extractByPattern(sourceUrl, NUMBER_PATTERN).orElse(sourceUrl);
+        }
+        String query = searchQueryFromScope(task.getScope());
+        if (!isBlank(query) && ("query".equals(name) || "keyword".equals(name) || "q".equals(name)
+            || "search".equals(name))) {
+            return query;
+        }
+        if (arg.positional() && !isBlank(sourceUrl)) {
+            return sourceUrl;
+        }
+        if (arg.positional() && !isBlank(query)) {
+            return query;
+        }
+        return "";
+    }
+
+    private void appendOpenCliArg(List<String> command, OpenCliCapabilityService.CommandArg arg, String value) {
+        if (arg.positional()) {
+            command.add(value);
+            return;
+        }
+        command.add("--" + arg.name());
+        if (!"boolean".equalsIgnoreCase(arg.type()) && !"bool".equalsIgnoreCase(arg.type())) {
+            command.add(value);
+        }
+        else if (!"true".equalsIgnoreCase(value)) {
+            command.add(value);
+        }
+    }
+
+    /**
+     * 通过 IMAP 采集个人邮箱，输出统一 Markdown 条目和附件资产。
+     */
+    private CollectionResult collectMail(EcosystemTaskVo task, Path outputDir) {
+        Map<String, Object> credentialConfig = credentialConfig(task);
+        String account = firstNonBlank(stringValue(credentialConfig.get("account")),
+            stringValue(credentialConfig.get("email")));
+        String password = stringValue(credentialConfig.get("token"));
+        String imapHost = stringValue(credentialConfig.get("imapHost"));
+        int imapPort = intValue(credentialConfig.get("imapPort"), boolValue(credentialConfig.get("imapSsl"), true)
+            ? 993 : 143);
+        boolean imapSsl = boolValue(credentialConfig.get("imapSsl"), true);
+        String folderName = firstNonBlank(mailFolderFromTask(task), stringValue(credentialConfig.get("imapFolder")),
+            "INBOX");
+        int limit = resolveLimit(task.getScope());
+        DateRange dateRange = resolveDateRange(task.getScope());
+        if (isBlank(account) || isBlank(password) || isBlank(imapHost)) {
+            throw new OpenCliException(i18n("ecosystem.error.mail.imap.config.required"),
+                List.of("imap", "collect", folderName), new CommandResult(-1, ""), "LOGIN_REQUIRED");
+        }
+
+        List<String> command = List.of("imap", "collect", "--host", imapHost, "--folder", folderName, "--limit",
+            String.valueOf(limit));
+        List<CollectionItem> items = new ArrayList<>();
+        int assetCount;
+        Store store = null;
+        Folder folder = null;
+        try {
+            Properties properties = new Properties();
+            properties.put("mail.store.protocol", "imap");
+            properties.put("mail.imap.host", imapHost);
+            properties.put("mail.imap.port", String.valueOf(imapPort));
+            properties.put("mail.imap.ssl.enable", String.valueOf(imapSsl));
+            properties.put("mail.imap.starttls.enable", String.valueOf(!imapSsl));
+            properties.put("mail.imap.connectiontimeout", String.valueOf(timeout().toMillis()));
+            properties.put("mail.imap.timeout", String.valueOf(timeout().toMillis()));
+            Session session = Session.getInstance(properties);
+            store = session.getStore("imap");
+            store.connect(imapHost, imapPort, account, password);
+            folder = store.getFolder(folderName);
+            folder.open(Folder.READ_ONLY);
+
+            int messageCount = folder.getMessageCount();
+            int scanLimit = Math.max(limit, Math.min(DEFAULT_IMAP_SCAN_LIMIT, limit * 5));
+            int start = Math.max(1, messageCount - scanLimit + 1);
+            Message[] messages = folder.getMessages(start, messageCount);
+            for (int index = messages.length - 1; index >= 0 && items.size() < limit; index--) {
+                Message message = messages[index];
+                if (!dateRange.includes(mailDate(message))) {
+                    continue;
+                }
+                items.add(toMailCollectionItem(task, message, folderName, outputDir, items.size() + 1));
+            }
+            assetCount = countAssets(outputDir);
+        }
+        catch (MessagingException e) {
+            throw new OpenCliException(i18n("ecosystem.error.mail.imap.failed"), command,
+                new CommandResult(-1, e.getMessage()), "LOGIN_REQUIRED");
+        }
+        catch (IOException e) {
+            throw new OpenCliException(i18n("ecosystem.error.mail.imap.failed"), command,
+                new CommandResult(-1, e.getMessage()), "OPENCLI_FAILED");
+        }
+        finally {
+            closeQuietly(folder);
+            closeQuietly(store);
+        }
+
+        if (items.isEmpty()) {
+            throw new OpenCliException(i18n("ecosystem.error.opencli.empty.output"), command,
+                new CommandResult(0, "{}"), "EMPTY_OUTPUT");
+        }
+        CollectionResult result = new CollectionResult();
+        result.setCommand(command);
+        result.setOutputDir(outputDir);
+        result.setRawOutput(mailRawOutput(account, imapHost, folderName, items.size(), assetCount));
+        result.setItems(items);
+        result.setAssetCount(assetCount);
+        return result;
+    }
+
+    /**
+     * 将单封邮件转换为 Markdown 条目。
+     */
+    private CollectionItem toMailCollectionItem(EcosystemTaskVo task, Message message, String folderName,
+                                                Path outputDir, int index) throws MessagingException, IOException {
+        String subject = defaultText(message.getSubject(), i18n("ecosystem.mail.subject.empty"));
+        MailBody body = extractMailBody(message, outputDir, index);
+        StringBuilder markdown = new StringBuilder();
+        markdown.append("# ").append(subject).append("\n\n");
+        appendMarkdownMeta(markdown, i18n("ecosystem.markdown.meta.source"), task.getSourceName());
+        appendMarkdownMeta(markdown, i18n("ecosystem.markdown.meta.mail.folder"), folderName);
+        appendMarkdownMeta(markdown, i18n("ecosystem.markdown.meta.mail.from"), addresses(message.getFrom()));
+        appendMarkdownMeta(markdown, i18n("ecosystem.markdown.meta.mail.to"),
+            addresses(message.getRecipients(Message.RecipientType.TO)));
+        appendMarkdownMeta(markdown, i18n("ecosystem.markdown.meta.mail.sent.at"), formatDate(mailDate(message)));
+        appendMarkdownMeta(markdown, "Message-ID", messageHeader(message, "Message-ID"));
+        markdown.append("\n");
+        markdown.append(defaultText(body.text(), i18n("ecosystem.mail.body.empty"))).append("\n");
+        if (!body.attachments().isEmpty()) {
+            markdown.append("\n## ").append(i18n("ecosystem.mail.attachments")).append("\n\n");
+            for (String attachment : body.attachments()) {
+                markdown.append("- ").append(attachment).append("\n");
+            }
+        }
+        return new CollectionItem(subject, sanitizeFileName(subject) + ".md", mailSourceUrl(folderName, message),
+            markdown.toString());
+    }
+
+    /**
+     * 提取邮件正文和附件。HTML 正文先降级为纯文本，附件写入临时目录交由统一产物链路上传。
+     */
+    private MailBody extractMailBody(Part part, Path outputDir, int messageIndex) throws MessagingException,
+        IOException {
+        if (part.isMimeType("text/plain")) {
+            return new MailBody(String.valueOf(part.getContent()), List.of());
+        }
+        if (part.isMimeType("text/html")) {
+            return new MailBody(Jsoup.parse(String.valueOf(part.getContent())).text(), List.of());
+        }
+        if (part.isMimeType("multipart/*")) {
+            Multipart multipart = (Multipart) part.getContent();
+            String html = "";
+            String plain = "";
+            List<String> attachments = new ArrayList<>();
+            for (int index = 0; index < multipart.getCount(); index++) {
+                BodyPart bodyPart = multipart.getBodyPart(index);
+                if (isAttachment(bodyPart)) {
+                    String fileName = saveMailAttachment(bodyPart, outputDir, messageIndex, attachments.size() + 1);
+                    if (!isBlank(fileName)) {
+                        attachments.add(fileName);
+                    }
+                    continue;
+                }
+                MailBody child = extractMailBody(bodyPart, outputDir, messageIndex);
+                if (isBlank(plain) && bodyPart.isMimeType("text/plain")) {
+                    plain = child.text();
+                }
+                if (isBlank(html) && bodyPart.isMimeType("text/html")) {
+                    html = child.text();
+                }
+                if (isBlank(plain) && !isBlank(child.text())) {
+                    plain = child.text();
+                }
+                attachments.addAll(child.attachments());
+            }
+            return new MailBody(firstNonBlank(plain, html), attachments);
+        }
+        return new MailBody("", List.of());
+    }
+
+    /**
+     * 判断 BodyPart 是否是附件或内联文件。
+     */
+    private boolean isAttachment(Part part) throws MessagingException {
+        String disposition = part.getDisposition();
+        return Part.ATTACHMENT.equalsIgnoreCase(disposition) || Part.INLINE.equalsIgnoreCase(disposition)
+            || !isBlank(part.getFileName());
+    }
+
+    /**
+     * 保存邮件附件，超过大小上限时跳过文件内容但返回附件名用于 Markdown 记录。
+     */
+    private String saveMailAttachment(BodyPart bodyPart, Path outputDir, int messageIndex, int attachmentIndex)
+        throws MessagingException, IOException {
+        String rawFileName = bodyPart.getFileName();
+        String fileName = sanitizeFileName(defaultText(rawFileName == null ? "" : MimeUtility.decodeText(rawFileName),
+            "attachment-" + attachmentIndex));
+        byte[] bytes;
+        try (InputStream inputStream = bodyPart.getInputStream()) {
+            bytes = inputStream.readNBytes(MAX_MAIL_ATTACHMENT_BYTES + 1);
+        }
+        if (bytes.length > MAX_MAIL_ATTACHMENT_BYTES) {
+            return fileName + " (" + i18n("ecosystem.mail.attachment.too.large") + ")";
+        }
+        Files.write(outputDir.resolve(String.format("mail-%03d-%02d-%s", messageIndex, attachmentIndex, fileName)),
+            bytes);
+        return fileName;
     }
 
     /**
@@ -299,6 +589,156 @@ public class OpenCliRunner {
     private void appendMarkdownMeta(StringBuilder markdown, String label, String value) {
         if (!isBlank(value)) {
             markdown.append("- ").append(label).append("：").append(value).append("\n");
+        }
+    }
+
+    /**
+     * 从任务临时 options 读取连接凭据。该配置只在运行时注入，不持久化到任务 options。
+     */
+    private Map<String, Object> credentialConfig(EcosystemTaskVo task) {
+        Map<String, Object> options = task == null || task.getOptions() == null ? Map.of() : task.getOptions();
+        if (options.get("credentialConfig") instanceof Map<?, ?> map) {
+            return objectMap(map);
+        }
+        return Map.of();
+    }
+
+    /**
+     * 邮箱 sourceUrl 字段在 IMAP 场景下复用为文件夹名，空值默认 INBOX。
+     */
+    private String mailFolderFromTask(EcosystemTaskVo task) {
+        String sourceUrl = task == null ? "" : defaultText(task.getSourceUrl(), "");
+        return "-".equals(sourceUrl) || sourceUrl.startsWith("http") || sourceUrl.startsWith("mail://")
+            ? ""
+            : sourceUrl;
+    }
+
+    /**
+     * 解析邮箱采集日期范围，默认最近 7 天。
+     */
+    private DateRange resolveDateRange(String scope) {
+        List<LocalDate> dates = new ArrayList<>();
+        if (!isBlank(scope)) {
+            Matcher dateMatcher = DATE_PATTERN.matcher(scope);
+            while (dateMatcher.find()) {
+                dates.add(LocalDate.parse(dateMatcher.group(1), DateTimeFormatter.ISO_LOCAL_DATE));
+            }
+        }
+        ZoneId zoneId = ZoneId.systemDefault();
+        if (dates.size() >= 2) {
+            return new DateRange(
+                Date.from(dates.get(0).atStartOfDay(zoneId).toInstant()),
+                Date.from(dates.get(1).plusDays(1).atStartOfDay(zoneId).toInstant()));
+        }
+        int days = resolveDays(scope);
+        LocalDate start = LocalDate.now(zoneId).minusDays(Math.max(1, days) - 1L);
+        return new DateRange(Date.from(start.atStartOfDay(zoneId).toInstant()), null);
+    }
+
+    /**
+     * 从范围文本中提取最近天数。
+     */
+    private int resolveDays(String scope) {
+        if (isBlank(scope)) {
+            return 7;
+        }
+        Matcher matcher = Pattern.compile("(\\d{1,3})").matcher(scope);
+        if (matcher.find()) {
+            return Math.max(1, Math.min(365, Integer.parseInt(matcher.group(1))));
+        }
+        return 7;
+    }
+
+    /**
+     * 邮件发送时间优先取 sentDate，缺失时取 receivedDate。
+     */
+    private Date mailDate(Message message) throws MessagingException {
+        Date sentDate = message.getSentDate();
+        return sentDate == null ? message.getReceivedDate() : sentDate;
+    }
+
+    /**
+     * 邮件来源定位，用于产物和去重排查。
+     */
+    private String mailSourceUrl(String folderName, Message message) throws MessagingException {
+        String messageId = messageHeader(message, "Message-ID");
+        return "mail://" + defaultText(folderName, "INBOX") + "/" + defaultText(messageId,
+            String.valueOf(message.getMessageNumber()));
+    }
+
+    /**
+     * 读取邮件头首值。
+     */
+    private String messageHeader(Message message, String name) throws MessagingException {
+        String[] headers = message.getHeader(name);
+        return headers == null || headers.length == 0 ? "" : headers[0];
+    }
+
+    /**
+     * 格式化地址数组。
+     */
+    private String addresses(Address[] addresses) {
+        if (addresses == null || addresses.length == 0) {
+            return "";
+        }
+        List<String> values = new ArrayList<>();
+        for (Address address : addresses) {
+            values.add(address.toString());
+        }
+        return String.join(", ", values);
+    }
+
+    /**
+     * 日期格式化为 ISO 字符串，便于 Markdown 和后续解析。
+     */
+    private String formatDate(Date date) {
+        return date == null ? "" : date.toInstant().toString();
+    }
+
+    /**
+     * 邮箱采集 raw 摘要不包含密码等敏感信息。
+     */
+    private String mailRawOutput(String account, String imapHost, String folderName, int itemCount, int assetCount) {
+        try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("source", "imap");
+            payload.put("account", account);
+            payload.put("imapHost", imapHost);
+            payload.put("folder", folderName);
+            payload.put("itemCount", itemCount);
+            payload.put("assetCount", assetCount);
+            return objectMapper.writeValueAsString(payload);
+        }
+        catch (IOException e) {
+            return "{}";
+        }
+    }
+
+    /**
+     * 安静关闭邮件文件夹。
+     */
+    private void closeQuietly(Folder folder) {
+        if (folder == null || !folder.isOpen()) {
+            return;
+        }
+        try {
+            folder.close(false);
+        }
+        catch (MessagingException ignored) {
+        }
+    }
+
+    /**
+     * 安静关闭邮件 Store。
+     */
+    private void closeQuietly(Store store) {
+        if (store == null || !store.isConnected()) {
+            return;
+        }
+        try {
+            store.close();
+        }
+        catch (MessagingException ignored) {
         }
     }
 
@@ -435,7 +875,7 @@ public class OpenCliRunner {
      */
     private Path resolveBin() {
         Path repoRoot = resolveRepoRoot();
-        String configured = configured("BYCLAW_OPENCLI_BIN", "byclaw-be/runtime/opencli/node_modules/.bin/opencli");
+        String configured = configured("BYKC_OPENCLI_BIN", "byclaw-be/runtime/opencli/node_modules/.bin/opencli");
         Path path = Paths.get(configured);
         return path.isAbsolute() ? path.normalize() : repoRoot.resolve(path).normalize();
     }
@@ -445,7 +885,7 @@ public class OpenCliRunner {
      */
     private Path resolveWorkDir() {
         Path repoRoot = resolveRepoRoot();
-        String configured = configured("BYCLAW_OPENCLI_WORKDIR", "byclaw-be/runtime/opencli");
+        String configured = configured("BYKC_OPENCLI_WORKDIR", "byclaw-be/runtime/opencli");
         Path path = Paths.get(configured);
         return path.isAbsolute() ? path.normalize() : repoRoot.resolve(path).normalize();
     }
@@ -468,7 +908,7 @@ public class OpenCliRunner {
      * 解析 OpenCLI 命令超时时间。
      */
     private Duration timeout() {
-        String seconds = configured("BYCLAW_OPENCLI_TIMEOUT_SECONDS", "120");
+        String seconds = configured("BYKC_OPENCLI_TIMEOUT_SECONDS", "120");
         try {
             return Duration.ofSeconds(Long.parseLong(seconds));
         }
@@ -600,25 +1040,82 @@ public class OpenCliRunner {
     }
 
     /**
-     * 获取输出第一行，常用于版本号展示。
+     * 优先使用任务固化的连接运行时配置；没有任务级配置时再读取应用环境变量兜底。
      */
-    private String firstLine(String value) {
-        if (isBlank(value)) {
-            return "-";
-        }
-        return value.lines().findFirst().orElse("-").trim();
+    private String resolveOpenCliProfile(EcosystemTaskVo task) {
+        Map<String, Object> options = task == null || task.getOptions() == null ? Map.of() : task.getOptions();
+        Map<String, Object> runtimeConfig = options.get("runtimeConfig") instanceof Map<?, ?> map
+            ? objectMap(map)
+            : Map.of();
+        return firstNonBlank(
+            stringValue(options.get("openCliProfile")),
+            stringValue(runtimeConfig.get("openCliProfile")),
+            stringValue(options.get("chromeProfile")),
+            stringValue(runtimeConfig.get("chromeProfile")),
+            configured("BYKC_OPENCLI_PROFILE", "")
+        );
     }
 
     /**
-     * 根据 opencli doctor 输出判断 Browser Bridge 是否可用。
+     * 将任意 key 类型的 Map 转为 String key，便于读取 JSONB 反序列化后的运行时配置。
      */
-    private boolean isBridgeConnected(CommandResult doctor) {
-        if (doctor.getExitCode() != 0) {
-            return false;
+    private Map<String, Object> objectMap(Map<?, ?> value) {
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        if (value == null) {
+            return result;
         }
-        String output = defaultText(doctor.getOutput(), "").toLowerCase(Locale.ROOT);
-        return !(output.contains("[fail]") || output.contains("[missing]") || output.contains("not connected")
-            || output.contains("not running") || output.contains("failed"));
+        for (Map.Entry<?, ?> entry : value.entrySet()) {
+            if (entry.getKey() != null) {
+                result.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+        }
+        return result;
+    }
+
+    private Map<String, Object> defaultMapMap(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            return objectMap(map);
+        }
+        return Map.of();
+    }
+
+    /**
+     * 对象转字符串，保留 null 语义。
+     */
+    private String stringValue(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    /**
+     * 对象转 int，解析失败时返回默认值。
+     */
+    private int intValue(Object value, int defaultValue) {
+        if (value == null || isBlank(String.valueOf(value))) {
+            return defaultValue;
+        }
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        }
+        catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
+    /**
+     * 对象转 boolean，空值使用默认值。
+     */
+    private boolean boolValue(Object value, boolean defaultValue) {
+        if (value == null || isBlank(String.valueOf(value))) {
+            return defaultValue;
+        }
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        return "true".equalsIgnoreCase(String.valueOf(value)) || "Y".equalsIgnoreCase(String.valueOf(value))
+            || "1".equals(String.valueOf(value));
     }
 
     /**
@@ -631,6 +1128,15 @@ public class OpenCliRunner {
             }
         }
         return "";
+    }
+
+    private String searchQueryFromScope(String scope) {
+        return defaultText(scope, "")
+            .replaceAll("(?:最近|近)\\s*\\d{1,3}\\s*天", " ")
+            .replaceAll("最近一周|近一周|最近两周|近两周|最近一个月|近一个月", " ")
+            .replaceAll("采集|同步|关于|的|内容|资料|帖子|文章", " ")
+            .replaceAll("\\s+", " ")
+            .trim();
     }
 
     /**
@@ -652,6 +1158,27 @@ public class OpenCliRunner {
      */
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    /**
+     * 邮箱正文和附件名列表。
+     */
+    private record MailBody(String text, List<String> attachments) {
+    }
+
+    /**
+     * 邮箱采集日期范围，endExclusive 为空时只校验起始时间。
+     */
+    private record DateRange(Date startInclusive, Date endExclusive) {
+
+        private boolean includes(Date value) {
+            if (value == null) {
+                return true;
+            }
+            boolean afterStart = startInclusive == null || !value.before(startInclusive);
+            boolean beforeEnd = endExclusive == null || value.before(endExclusive);
+            return afterStart && beforeEnd;
+        }
     }
 
     /**
@@ -841,77 +1368,6 @@ public class OpenCliRunner {
 
         public String getMarkdown() {
             return markdown;
-        }
-    }
-
-    /**
-     * OpenCLI 本机运行时检测结果。
-     */
-    public static class RuntimeStatus {
-
-        /**
-         * 运行时名称。
-         */
-        private String runtimeName;
-
-        /**
-         * 运行时版本。
-         */
-        private String runtimeVersion;
-
-        /**
-         * Browser Bridge 连接状态。
-         */
-        private String browserBridgeStatus;
-
-        /**
-         * 运行时总体状态。
-         */
-        private String status;
-
-        /**
-         * doctor 诊断输出，便于排查环境问题。
-         */
-        private String diagnosticOutput;
-
-        public String getRuntimeName() {
-            return runtimeName;
-        }
-
-        public void setRuntimeName(String runtimeName) {
-            this.runtimeName = runtimeName;
-        }
-
-        public String getRuntimeVersion() {
-            return runtimeVersion;
-        }
-
-        public void setRuntimeVersion(String runtimeVersion) {
-            this.runtimeVersion = runtimeVersion;
-        }
-
-        public String getBrowserBridgeStatus() {
-            return browserBridgeStatus;
-        }
-
-        public void setBrowserBridgeStatus(String browserBridgeStatus) {
-            this.browserBridgeStatus = browserBridgeStatus;
-        }
-
-        public String getStatus() {
-            return status;
-        }
-
-        public void setStatus(String status) {
-            this.status = status;
-        }
-
-        public String getDiagnosticOutput() {
-            return diagnosticOutput;
-        }
-
-        public void setDiagnosticOutput(String diagnosticOutput) {
-            this.diagnosticOutput = diagnosticOutput;
         }
     }
 }

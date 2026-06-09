@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.mapper.sandbox;
 
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
+import com.iwhalecloud.byai.manager.entity.sandbox.SandboxReconcileGroup;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import java.util.Date;
@@ -47,6 +48,9 @@ public interface SsSandboxRecordMapper {
                                                           @Param("resourceIds") List<Long> resourceIds);
 
     List<SsSandboxRecord> selectRunningByUser(@Param("userCode") String userCode);
+
+    List<SsSandboxRecord> selectRunningByUserAndSandboxType(@Param("userCode") String userCode,
+                                                            @Param("sandboxType") String sandboxType);
 
     /**
      * 更新沙箱状态为已释放
@@ -121,6 +125,14 @@ public interface SsSandboxRecordMapper {
     List<SsSandboxRecord> selectReconcileSandboxesPage(@Param("cursorTime") Date cursorTime,
                                                        @Param("cursorId") Long cursorId,
                                                        @Param("limit") int limit);
+
+    List<SandboxReconcileGroup> selectReconcileGroups(@Param("limit") int limit);
+
+    List<SsSandboxRecord> selectReconcileSandboxesByGroup(@Param("userCode") String userCode,
+                                                          @Param("sandboxType") String sandboxType,
+                                                          @Param("cursorTime") Date cursorTime,
+                                                          @Param("cursorId") Long cursorId,
+                                                          @Param("limit") int limit);
 
     int updateRenewSuccess(@Param("id") Long id,
                            @Param("remoteExpiresAt") Date remoteExpiresAt,

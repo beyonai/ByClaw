@@ -5,7 +5,7 @@ import java.util.List;
 import lombok.Data;
 
 /**
- * 本机采集端心跳请求。
+ * 浏览器登录态能力心跳请求。
  * @author qin.guoquan
  * @date 2026-05-29 21:12:18
  */
@@ -13,7 +13,7 @@ import lombok.Data;
 public class EcosystemAgentHeartbeatRequest {
 
     /**
-     * 本机采集端名称，通常是用户设备名。
+     * 浏览器登录态能力名称，通常是用户设备名或平台 Profile。
      */
     private String agentName;
 

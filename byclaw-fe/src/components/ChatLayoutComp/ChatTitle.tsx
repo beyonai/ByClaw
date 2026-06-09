@@ -12,6 +12,7 @@ import { IAgentType } from '@/typescript/agent';
 import NullableAntdCompWithAnim from '../NullableAntdCompWithAnim';
 import { isAdminVip } from '@/utils/auth';
 import { useSelector, useIntl } from '@umijs/max';
+import VNC from './components/VNC';
 
 interface ChatTitleProps {
   sessionId?: string;
@@ -45,6 +46,7 @@ export default function ChatTitle(props: ChatTitleProps) {
 
             <div className={styles.chatTitle}>{currentSession?.sessionName}</div>
             <div className={styles.actions}>
+              <VNC />
               {isAdminVip(userInfo) && (
                 <span className={styles.btn} onClick={() => setOpenTemplate(true)} style={{ padding: '0 8px' }}>
                   <AntdIcon type="icon-a-View-grid-listliebiaochakanmoshi" />

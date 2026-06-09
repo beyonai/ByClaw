@@ -14,6 +14,7 @@ import { queryKnowledgeCapability, type KnowledgeCapability } from '@/service/kn
 import {
   applyResourceUse,
   queryFixedEntryOperationCapability,
+  queryResourceOperationPermissions,
   type FixedEntryOperationCapability,
 } from '@/pages/manager/service/resources';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
@@ -44,6 +45,12 @@ interface IResourceItem {
   resourceBizType?: string;
   resourceSourcePkId?: string;
   catalogId?: string | number;
+  hasManagePermission?: boolean;
+  hasUsePermission?: boolean;
+  canViewDetail?: boolean;
+  canEdit?: boolean;
+  canManageAuth?: boolean;
+  canDelete?: boolean;
   canApplyUse?: boolean;
   canAuditUse?: boolean;
 }
@@ -52,7 +59,27 @@ interface Props {
   resourceType: string; // 对应资源类型
 }
 
-type EcosystemSourceKey = 'zhihu' | 'github' | 'web' | 'mail' | 'dingtalk';
+const getBannerUrl = (bannerList: any[], label: string) => {
+  const banner = bannerList.find((item) => item?.label === label);
+  return `${banner?.url ?? ''}`.trim().replace(/^`|`$/g, '').trim();
+};
+
+const parseBannerList = (value: any) => {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value !== 'string' || !value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
 
 const Resources: React.FC<Props> = ({ resourceType }) => {
   const intl = useIntl();
@@ -74,9 +101,10 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
 
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [collectorOpen, setCollectorOpen] = useState(false);
-  const [collectorInitialSource, setCollectorInitialSource] = useState<EcosystemSourceKey>();
+  const [collectorInitialSource, setCollectorInitialSource] = useState<string>();
   const [collectorInitialSourceUrl, setCollectorInitialSourceUrl] = useState('');
   const [collectorInitialScope, setCollectorInitialScope] = useState('');
+  const [collectorInitialCollectMode, setCollectorInitialCollectMode] = useState('');
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [resourceDetailOpen, setResourceDetailOpen] = useState(false);
@@ -123,6 +151,8 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const [knowledgeCapability, setKnowledgeCapability] = useState<KnowledgeCapability | null>(null);
   const [fixedEntryCapability, setFixedEntryCapability] = useState<FixedEntryOperationCapability | null>(null);
   const [brandVersion, setBrandVersion] = useState<'commercial' | 'openSource' | null>(null);
+  const [bannerList, setBannerList] = useState<any[]>([]);
+  const [bannerLoaded, setBannerLoaded] = useState(false);
 
   const topLevelCatalogList = React.useMemo(() => getTopLevelCatalogs(catalogList), [catalogList]);
   const refreshList = useCallback(() => {
@@ -177,13 +207,10 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     if (resourceType !== 'KG_DOC' || searchParams.get('ecosystem') !== '1') {
       return;
     }
-    const source = searchParams.get('source') || undefined;
-    const supportedSources: EcosystemSourceKey[] = ['zhihu', 'github', 'web', 'mail', 'dingtalk'];
-    setCollectorInitialSource(
-      supportedSources.includes(source as EcosystemSourceKey) ? (source as EcosystemSourceKey) : undefined
-    );
+    setCollectorInitialSource(searchParams.get('source') || undefined);
     setCollectorInitialSourceUrl(searchParams.get('sourceUrl') || '');
     setCollectorInitialScope(searchParams.get('scope') || '');
+    setCollectorInitialCollectMode(searchParams.get('collectMode') || '');
     setActiveTab('personal');
     setCollectorOpen(true);
   }, [resourceType, searchParams]);
@@ -225,7 +252,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   }, [activeTab, fixedEntryCapability, resourceType]);
 
   const handleDetail = useCallback(
-    (item: IResourceItem) => {
+    async (item: IResourceItem) => {
       const { resourceBizType, resourceId, resourceSourcePkId } = item;
 
       if (
@@ -257,6 +284,29 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         resourceBizType &&
         [resourceBizTypeMap.KG_DOC, resourceBizTypeMap.KG_QA, resourceBizTypeMap.KG_TERM].includes(resourceBizType)
       ) {
+        if (!resourceId) {
+          message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
+          return;
+        }
+        try {
+          const res: any = await queryResourceOperationPermissions({ resourceId });
+          const permissions = res?.data || res || {};
+          const canViewDetail =
+            permissions?.canViewDetail ??
+            permissions?.hasManagePermission ??
+            permissions?.hasUsePermission ??
+            permissions?.canEdit ??
+            permissions?.canManageAuth ??
+            permissions?.canDelete ??
+            false;
+          if (!canViewDetail) {
+            message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
+            return;
+          }
+        } catch (error: any) {
+          message.error(error?.msg || error?.message || intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
+          return;
+        }
         const params = new URLSearchParams();
         if (resourceId) {
           params.set('resourceId', resourceId);
@@ -431,6 +481,37 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const isEN = React.useMemo(() => {
     return local.includes('en');
   }, [local]);
+  const defaultBannerUrl = getRuntimeActualUrl(isEN ? '/beyond/market-en.png' : '/beyond/market.png');
+  const bannerLabel = React.useMemo(() => {
+    if (resourceType === 'KG_DOC') {
+      return activeTab === 'personal' ? '个人知识' : '企业知识';
+    }
+    if (resourceType === 'TOOL') {
+      return activeTab === 'personal' ? '个人工具' : '企业工具';
+    }
+    if (resourceType === 'VIEW') {
+      return activeTab === 'personal' ? '个人视图' : '企业视图';
+    }
+    if (resourceType === 'OBJECT') {
+      return activeTab === 'personal' ? '个人对象' : '企业对象';
+    }
+    return '';
+  }, [activeTab, resourceType]);
+  const customBannerUrl = getBannerUrl(bannerList, bannerLabel);
+  const bannerUrl = customBannerUrl ? getRuntimeActualUrl(customBannerUrl) : defaultBannerUrl;
+
+  useEffect(() => {
+    getDcSystemConfig({ paramCode: 'BYAI_BANNER' })
+      .then((res: any) => {
+        setBannerList(parseBannerList(res?.paramValue));
+      })
+      .catch(() => {
+        setBannerList([]);
+      })
+      .finally(() => {
+        setBannerLoaded(true);
+      });
+  }, []);
 
   return (
     <div className={styles.fileManagerContainer}>
@@ -451,13 +532,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         }}
       />
       <div className={classnames('full-width ub ub-ver ub-f1', styles.wrapper)}>
-        <div className="mb-16">
-          <img
-            className={styles.marketBg}
-            src={getRuntimeActualUrl(isEN ? '/beyond/market-en.png' : '/beyond/market.png')}
-            alt="poster"
-          />
-        </div>
+        <div className="mb-16">{bannerLoaded && <img className={styles.marketBg} src={bannerUrl} alt="poster" />}</div>
         <div className={classnames('ub ub-ac gap8', styles.filterBar)}>
           <Tabs
             className={classnames('ub-f1', styles.tabs)}
@@ -520,6 +595,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         initialSource={collectorInitialSource}
         initialSourceUrl={collectorInitialSourceUrl}
         initialScope={collectorInitialScope}
+        initialCollectMode={collectorInitialCollectMode}
         onCancel={() => {
           setCollectorOpen(false);
         }}

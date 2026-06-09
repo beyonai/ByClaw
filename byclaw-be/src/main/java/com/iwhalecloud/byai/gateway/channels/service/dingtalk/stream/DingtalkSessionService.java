@@ -48,7 +48,8 @@ public class DingtalkSessionService {
         Date createTime = new Date();
 
         ByaiSession session = new ByaiSession();
-        session.setSessionName(userText);
+        String sessionName = userText != null && userText.length() > 200 ? userText.substring(0, 200) : userText;
+        session.setSessionName(sessionName);
         session.setSessionContent(userText);
         session.setCreateTime(createTime);
         session.setObjectId(agentId);

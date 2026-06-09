@@ -40,6 +40,24 @@ public class ResourceOperationPermissionsVo {
     private String resourceBizType;
 
     /**
+     * 是否具备资源管理权限。
+     */
+    @Schema(description = "是否具备资源管理权限")
+    private Boolean hasManagePermission;
+
+    /**
+     * 是否具备资源使用权限。
+     */
+    @Schema(description = "是否具备资源使用权限")
+    private Boolean hasUsePermission;
+
+    /**
+     * 是否允许进入资源详情。
+     */
+    @Schema(description = "是否允许进入资源详情")
+    private Boolean canViewDetail;
+
+    /**
      * 是否可编辑信息。
      */
     @Schema(description = "是否可编辑信息")

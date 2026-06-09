@@ -33,13 +33,22 @@ async function qrySuperAssistantDetail(): Promise<IAgentFileUploadConf | null> {
   return null;
 }
 
+const default_globalConfig = {
+  enabled: false,
+  allowedFileTypes: [],
+  maxFileSize: 0,
+  maxFileCount: 0,
+};
+
 export default function useAgentUploadFileConfig(employeesList: IAgentCache[]) {
-  const [globalConfig, setGlobalConfig] = useState<IAgentFileUploadConf | null>(null);
+  const [globalConfig, setGlobalConfig] = useState<IAgentFileUploadConf>(default_globalConfig);
   const userInfo = useSelector(({ user }) => user.userInfo);
 
   useEffect(() => {
     if (userInfo) {
-      qrySuperAssistantDetail().then(setGlobalConfig);
+      qrySuperAssistantDetail().then((config) => {
+        setGlobalConfig(config || default_globalConfig);
+      });
     }
   }, [userInfo]);
 
@@ -73,5 +82,8 @@ export default function useAgentUploadFileConfig(employeesList: IAgentCache[]) {
     [globalConfig, employeesList]
   );
 
-  return getAgentUploadFileConfig;
+  return {
+    getAgentUploadFileConfig,
+    globalConfig,
+  };
 }

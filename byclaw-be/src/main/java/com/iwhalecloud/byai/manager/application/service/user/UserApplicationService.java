@@ -137,7 +137,11 @@ public class UserApplicationService extends BaseUserApplicationService {
 
         BeanUtils.copyProperties(usersDTO, users);
 
-        users.setPwd(MD5Utils.encrypt(super.getDefaultPwd(), users.getUserCode()));
+        String rawPassword = super.getDefaultPwd();
+        if (StringUtil.isNotEmpty(usersDTO.getPassword())) {
+            rawPassword = Sm4Util.decrypt(usersDTO.getPassword());
+        }
+        users.setPwd(MD5Utils.encrypt(rawPassword, users.getUserCode()));
         userService.addUser(users);
 
         // 创建用户关组织岗位信息

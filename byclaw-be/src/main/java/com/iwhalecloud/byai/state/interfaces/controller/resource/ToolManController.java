@@ -1,17 +1,33 @@
 package com.iwhalecloud.byai.state.interfaces.controller.resource;
 
-import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import org.springframework.web.util.UriUtils;
+
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtMcpService;
 import com.iwhalecloud.byai.manager.dto.resource.CallMcpParamsDto;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto;
-import com.iwhalecloud.byai.state.domain.chat.dto.UserSpaceDto;
-import com.iwhalecloud.byai.state.domain.chat.vo.UserSpaceVo;
-import io.modelcontextprotocol.spec.McpSchema;
-import jakarta.servlet.http.HttpServletRequest;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import com.iwhalecloud.byai.common.i18n.I18nUtil;
-import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.state.domain.resource.dto.ObjectZipImportItem;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.application.service.session.ByClawFileQueryApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawPersonalAgentArchivApplicationService;
@@ -20,11 +36,8 @@ import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDownloa
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillQueryApplicationService;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillUploadApplicationService;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
-import com.iwhalecloud.byai.state.domain.session.dto.ByClawFileDto;
-import com.iwhalecloud.byai.state.domain.session.dto.ByClawPersonalAgentArchiveDto;
-import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
-import com.iwhalecloud.byai.state.domain.session.qo.QryByClawFileByUserCodeQo;
-import com.iwhalecloud.byai.state.domain.session.qo.QrySkillListByUserCodeQo;
+import com.iwhalecloud.byai.state.domain.chat.dto.UserSpaceDto;
+import com.iwhalecloud.byai.state.domain.chat.vo.UserSpaceVo;
 import com.iwhalecloud.byai.state.domain.resource.dto.CurlImportRequest;
 import com.iwhalecloud.byai.state.domain.resource.dto.CurlParseResult;
 import com.iwhalecloud.byai.state.domain.resource.dto.ObjectZipImportResult;
@@ -42,25 +55,13 @@ import com.iwhalecloud.byai.state.domain.resource.qo.UpdateResourceBasicInfoQo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceApplicationService;
 import com.iwhalecloud.byai.state.domain.resource.service.ToolManService;
 import com.iwhalecloud.byai.state.domain.resource.vo.ResourceDetailVo;
+import com.iwhalecloud.byai.state.domain.session.dto.ByClawFileDto;
+import com.iwhalecloud.byai.state.domain.session.dto.ByClawPersonalAgentArchiveDto;
+import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
+import com.iwhalecloud.byai.state.domain.session.qo.QryByClawFileByUserCodeQo;
+import com.iwhalecloud.byai.state.domain.session.qo.QrySkillListByUserCodeQo;
+import io.modelcontextprotocol.spec.McpSchema;
 import io.swagger.v3.oas.annotations.Parameter;
-import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestMethod;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
-import org.springframework.web.util.UriUtils;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-
 @RestController
 @RequestMapping("/tool")
 public class ToolManController {
@@ -165,16 +166,21 @@ public class ToolManController {
      * 工具超市：上传 TOOLKIT / MCP / AGENT JSON，按 resourceCode 幂等写入主表与对应扩展表。
      */
     @PostMapping("/importToolJson")
-    public ResponseUtil<Map<String, Object>> importToolJson(
-        @Parameter(description = "资源 JSON 文件", required = true) @RequestParam("file") MultipartFile file,
+    public ResponseUtil<ObjectZipImportResult> importToolJson(
+        @Parameter(description = "资源 JSON 文件", required = true) @RequestParam("file") MultipartFile[] file,
         @Parameter(description = "所属目录 ID，可选") @RequestParam(value = "catalogId", required = false) Long catalogId,
         @Parameter(description = "资源归属类型：enterprise-企业，personal-个人",
             required = false) @RequestParam(value = "ownerType", required = false) String ownerType) {
+        if (isBatchImport(file)) {
+            return ResponseUtil.successResponse(I18nUtil.get("tool.resource.import.success"),
+                importToolJsonBatch(file, catalogId, ownerType));
+        }
         try {
             // 新入口只负责接收上传文件和目录/归属参数，
             // 具体的 JSON 校验、主表新增或更新、子表落库、FTP 同步，都统一下沉到 service。
-            Map<String, Object> data = toolManService.importToolJsonNewFromMultipart(file, catalogId, ownerType);
-            return ResponseUtil.successResponse(I18nUtil.get("tool.resource.import.success"), data);
+            Map<String, Object> data = toolManService.importToolJsonNewFromMultipart(file[0], catalogId, ownerType);
+            return ResponseUtil.successResponse(I18nUtil.get("tool.resource.import.success"),
+                buildToolJsonSuccessResult(file[0], data));
         }
         catch (IllegalArgumentException e) {
             // 参数缺失、JSON结构不合法、resourceBizType 不支持等可预期错误，
@@ -200,7 +206,6 @@ public class ToolManController {
      * @date 2026-04-23 18:17:00
      */
     @PostMapping(value = "/addToolFromThird", consumes = MediaType.APPLICATION_JSON_VALUE)
-    @ManageLogAnnotation(name = "智能体接口", description = "智能体资源同步")
     public ResponseUtil<Map<String, Object>> addToolFromThird(@RequestBody String jsonContent) {
         try {
             Map<String, Object> data = toolManService.addToolFromThird(jsonContent);
@@ -219,22 +224,120 @@ public class ToolManController {
         }
     }
 
+    private boolean isBatchImport(MultipartFile[] files) {
+        return files != null && files.length > 1;
+    }
+
+    private ObjectZipImportResult importToolJsonBatch(MultipartFile[] files, Long catalogId, String ownerType) {
+        ObjectZipImportResult result = new ObjectZipImportResult();
+        result.setTotal(files == null ? 0 : files.length);
+        if (files == null) {
+            return result;
+        }
+        for (MultipartFile multipartFile : files) {
+            try {
+                Map<String, Object> data = toolManService.importToolJsonNewFromMultipart(multipartFile, catalogId,
+                    ownerType);
+                mergeImportResult(result, buildToolJsonSuccessResult(multipartFile, data));
+            }
+            catch (Exception e) {
+                result.getItems().add(buildFailedImportItem(multipartFile, e));
+            }
+        }
+        fillBatchImportSummary(result);
+        return result;
+    }
+
+    private ObjectZipImportResult importZipBatch(MultipartFile[] files, Long catalogId, String ownerType,
+        boolean objectZip) {
+        ObjectZipImportResult result = new ObjectZipImportResult();
+        result.setTotal(files == null ? 0 : files.length);
+        if (files == null) {
+            return result;
+        }
+        for (MultipartFile multipartFile : files) {
+            try {
+                ObjectZipImportResult itemResult = objectZip
+                    ? toolManService.importObjectZipFromMultipart(multipartFile, catalogId, ownerType)
+                    : toolManService.importViewZipFromMultipart(multipartFile, catalogId, ownerType);
+                mergeImportResult(result, itemResult);
+            }
+            catch (Exception e) {
+                result.getItems().add(buildFailedImportItem(multipartFile, e));
+            }
+        }
+        fillBatchImportSummary(result);
+        return result;
+    }
+
+    private ObjectZipImportResult buildToolJsonSuccessResult(MultipartFile file, Map<String, Object> data) {
+        ObjectZipImportResult result = new ObjectZipImportResult();
+        ObjectZipImportItem item = new ObjectZipImportItem();
+        item.setResourceCode(file == null ? null : file.getOriginalFilename());
+        item.setResourceName(file == null ? null : file.getOriginalFilename());
+        item.setResourceId(String.valueOf(data.get("resourceId")));
+        item.setUpdated(Boolean.TRUE.equals(data.get("updated")));
+        item.setSuccess(true);
+        result.getItems().add(item);
+        fillBatchImportSummary(result);
+        return result;
+    }
+
+    private ObjectZipImportItem buildFailedImportItem(MultipartFile file, Exception e) {
+        ObjectZipImportItem item = new ObjectZipImportItem();
+        String fileName = file == null ? null : file.getOriginalFilename();
+        item.setResourceCode(fileName);
+        item.setResourceName(fileName);
+        item.setSuccess(false);
+        item.setMessage(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.import.failed"));
+        return item;
+    }
+
+    private void mergeImportResult(ObjectZipImportResult target, ObjectZipImportResult source) {
+        if (source == null) {
+            return;
+        }
+        target.getItems().addAll(source.getItems());
+    }
+
+    private void fillBatchImportSummary(ObjectZipImportResult result) {
+        if (result.getTotal() <= 0) {
+            result.setTotal(result.getItems().size());
+        }
+        List<ObjectZipImportItem> successItems = result.getItems().stream().filter(ObjectZipImportItem::isSuccess)
+            .collect(Collectors.toList());
+        List<ObjectZipImportItem> createdItems = successItems.stream().filter(item -> !item.isUpdated())
+            .collect(Collectors.toList());
+        List<ObjectZipImportItem> updatedItems = successItems.stream().filter(ObjectZipImportItem::isUpdated)
+            .collect(Collectors.toList());
+        result.setSuccess(successItems.size());
+        result.setFailed(result.getItems().size() - successItems.size());
+        result.setCreatedCount(createdItems.size());
+        result.setUpdatedCount(updatedItems.size());
+        result.setCreatedItems(new ArrayList<>(createdItems));
+        result.setUpdatedItems(new ArrayList<>(updatedItems));
+    }
+
     /**
      * 对象超市：上传对象压缩包，批量导入对象资源。
      */
     @PostMapping("/importObjectZip")
     public ResponseUtil<ObjectZipImportResult> importObjectZip(
-        @Parameter(description = "对象 zip 文件", required = true) @RequestParam("file") MultipartFile file,
+        @Parameter(description = "对象 zip 文件", required = true) @RequestParam("file") MultipartFile[] file,
         @Parameter(description = "所属目录 ID，可选") @RequestParam(value = "catalogId", required = false) Long catalogId,
         @Parameter(description = "资源归属类型：enterprise-企业，personal-个人",
             required = false) @RequestParam(value = "ownerType", required = false) String ownerType) {
+        if (isBatchImport(file)) {
+            return ResponseUtil.successResponse(I18nUtil.get("tool.object.zip.import.success"),
+                importZipBatch(file, catalogId, ownerType, true));
+        }
         try {
             // 核心流程统一下沉到 service：
             // 1. zip 落盘并解压；
             // 2. 解析 ontology/objects 下的对象 owl；
             // 3. 写主表 / 对象子表；
             // 4. 同步对象 json 与批次 zip 到 FTP。
-            ObjectZipImportResult data = toolManService.importObjectZipFromMultipart(file, catalogId, ownerType);
+            ObjectZipImportResult data = toolManService.importObjectZipFromMultipart(file[0], catalogId, ownerType);
             return ResponseUtil.successResponse(I18nUtil.get("tool.object.zip.import.success"), data);
         }
         catch (IllegalArgumentException e) {
@@ -258,17 +361,21 @@ public class ToolManController {
      */
     @PostMapping("/importViewZip")
     public ResponseUtil<ObjectZipImportResult> importViewZip(
-        @Parameter(description = "视图 zip 文件", required = true) @RequestParam("file") MultipartFile file,
+        @Parameter(description = "视图 zip 文件", required = true) @RequestParam("file") MultipartFile[] file,
         @Parameter(description = "所属目录 ID，可选") @RequestParam(value = "catalogId", required = false) Long catalogId,
         @Parameter(description = "资源归属类型：enterprise-企业，personal-个人",
             required = false) @RequestParam(value = "ownerType", required = false) String ownerType) {
+        if (isBatchImport(file)) {
+            return ResponseUtil.successResponse(I18nUtil.get("tool.view.zip.import.success"),
+                importZipBatch(file, catalogId, ownerType, false));
+        }
         try {
             // 核心流程统一下沉到 service：
             // 1. zip 落盘并解压；
             // 2. 解析 ontology/views 下的视图 owl；
             // 3. 写主表 / 视图子表 / 视图与对象关系；
             // 4. 同步视图 json 与批次 zip 到 FTP。
-            ObjectZipImportResult data = toolManService.importViewZipFromMultipart(file, catalogId, ownerType);
+            ObjectZipImportResult data = toolManService.importViewZipFromMultipart(file[0], catalogId, ownerType);
             return ResponseUtil.successResponse(I18nUtil.get("tool.view.zip.import.success"), data);
         }
         catch (IllegalArgumentException e) {
@@ -696,8 +803,10 @@ public class ToolManController {
     }
 
     /**
-     * 删除用户工作空间下的单个 skill 目录。 - 数字员工：skillPath 必须落在 /.openclaw/workspace-baiying-agent-{resourceId}/skills/ 之下 -
-     * 超级助手：skillPath 必须落在 /.openclaw/workspace/skills/ 之下 - userCode 留空时退回当前登录用户
+     * 删除用户工作空间下的单个 skill 目录。
+     * - 数字员工：skillPath 必须落在 /.openclaw/workspace-baiying-agent-{resourceId}/skills/ 之下
+     * - 超级助手：skillPath 必须落在 /.openclaw/workspace/skills/ 之下
+     * - userCode 留空时退回当前登录用户
      */
     @PostMapping("/deleteSkill")
     public ResponseUtil<ByClawSkillDto> deleteSkill(@RequestBody DeleteSkillQo request) {

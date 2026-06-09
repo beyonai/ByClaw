@@ -6,10 +6,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
@@ -17,6 +20,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchRouting;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport;
@@ -246,6 +250,11 @@ public class SandboxController {
             SandboxLaunchData data = sandboxUserContextRunner.callAsUser(userCode,
                 () -> sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey));
 
+            // 持久化用户首选 serviceKey（非默认类型时）
+            if (finalServiceKey != null && !SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)) {
+                sandboxService.savePreferredServiceKey(userCode, finalServiceKey);
+            }
+
             if (data == null) {
                 return ResponseUtil.fail("沙箱启动失败");
             }
@@ -466,6 +475,39 @@ public class SandboxController {
         }
 
         sandboxServiceSpecEntityMapper.deleteById(serviceKey.trim());
+        return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 查询用户首选 serviceKey
+     *
+     * @param userCode 用户工号
+     * @return 首选 serviceKey，未配置时 data 为 null
+     */
+    @GetMapping("/preferredServiceKey")
+    @Operation(summary = "查询用户首选沙箱 serviceKey", description = "查询 Redis 中缓存的用户首选沙箱 serviceKey")
+    public ResponseUtil getPreferredServiceKey(@RequestParam("userCode") String userCode) {
+        if (StringUtils.isBlank(userCode)) {
+            return ResponseUtil.fail("userCode is required");
+        }
+        String serviceKey = sandboxService.getPreferredServiceKey(userCode.trim());
+        return ResponseUtil.successResponse(serviceKey);
+    }
+
+    /**
+     * 清除用户首选 serviceKey
+     *
+     * @param params 请求参数，包含 userCode
+     * @return ResponseUtil
+     */
+    @PostMapping("/removePreferredServiceKey")
+    @Operation(summary = "清除用户首选沙箱 serviceKey", description = "清除 Redis 中缓存的用户首选沙箱 serviceKey，后续将使用默认类型")
+    public ResponseUtil removePreferredServiceKey(@RequestBody Map<String, Object> params) {
+        Object userCodeObj = params.get("userCode");
+        if (userCodeObj == null || userCodeObj.toString().trim().isEmpty()) {
+            return ResponseUtil.fail("userCode is required");
+        }
+        sandboxService.removePreferredServiceKey(userCodeObj.toString().trim());
         return ResponseUtil.successResponse();
     }
 }

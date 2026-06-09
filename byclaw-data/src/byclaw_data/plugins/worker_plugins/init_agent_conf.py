@@ -1235,8 +1235,9 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
                 OntologyToolLoader as _OntologyToolLoader,
                 configure_loader,
             )
+            resources = [resource.get("resourceCode") for resource in rel_resource_list or [] if resource.get("resourceBizType") in ["OBJECT", "VIEW"]]
 
-            loader = _OntologyToolLoader._build_loader(Path(scene_path))
+            loader = _OntologyToolLoader._build_loader(Path(scene_path), resources)
             logger.info(
                 "[InitPlugin] _build_shared_loader: OWL load + inject done scene_path=%s",
                 scene_path,

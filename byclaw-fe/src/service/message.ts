@@ -62,6 +62,20 @@ export const stopChat = (payload: any) =>
     ...payload,
   });
 
+export const getChatRunningStatus = (payload: { sessionIds: Array<string | number> }) =>
+  POST<any>('/byaiService/chat/runningStatus', {
+    ...payload,
+  });
+
+export const getChatRunningSnapshot = (payload: {
+  sessionId: string | number;
+  traceId?: string;
+  modelAnswerMessageId?: string | number;
+}) =>
+  POST<any>('/byaiService/chat/runningSnapshot', {
+    ...payload,
+  });
+
 export const getMessageByIds = (payload: any) =>
   POST<any>('/byaiService/assiman/getMessageByIds', {
     ...payload,

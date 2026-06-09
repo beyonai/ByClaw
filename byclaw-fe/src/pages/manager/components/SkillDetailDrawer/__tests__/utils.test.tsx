@@ -14,11 +14,24 @@ jest.mock('@umijs/max', () => ({
 
 import {
   getMCPToolsRenderConfig,
+  isByclawCodeAgentResource,
   parsePropertiesRecursive,
   parseSchema,
 } from '@/pages/employees/components/SkillDetailDrawer/SkillDetailDrawer.utils';
 
 describe('manager/components/SkillDetailDrawer/SkillDetailDrawer.utils', () => {
+  describe('isByclawCodeAgentResource', () => {
+    it('matches BYCLAW_CODE agent resources case-insensitively', () => {
+      expect(isByclawCodeAgentResource({ resourceBizType: 'AGENT', systemCode: 'BYCLAW_CODE' })).toBe(true);
+      expect(isByclawCodeAgentResource({ resourceBizType: 'AGENT', systemCode: 'byclaw_code' })).toBe(true);
+    });
+
+    it('does not match other resource types or system codes', () => {
+      expect(isByclawCodeAgentResource({ resourceBizType: 'TOOL', systemCode: 'BYCLAW_CODE' })).toBe(false);
+      expect(isByclawCodeAgentResource({ resourceBizType: 'AGENT', systemCode: 'BYAI' })).toBe(false);
+    });
+  });
+
   describe('parsePropertiesRecursive', () => {
     it('parses nested object properties recursively', () => {
       expect(

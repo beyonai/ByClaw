@@ -79,4 +79,8 @@ export default {
   'sandboxMgr.launch.serviceKey': '沙箱规格',
   'sandboxMgr.launch.serviceKeyPlaceholder': '不选则使用默认规格',
   'sandboxMgr.launch.success': '沙箱启动成功，sandboxId: {sandboxId}',
+  'sandboxMgr.launch.preferredServiceKey': '已缓存的沙箱规格',
+  'sandboxMgr.launch.clearPreferred': '清除',
+  'sandboxMgr.launch.preferredCleared': '已清除用户缓存的沙箱规格',
+  'sandboxMgr.launch.preferredClearFailed': '清除失败',
 };

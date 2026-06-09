@@ -1,14 +1,15 @@
 package com.iwhalecloud.byai.state.interfaces.controller.dataset;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.feign.request.knowledge.FolderDelete;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetIdDto;
@@ -19,6 +20,8 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.qo.resource.DirAndFileQo;
 import com.iwhalecloud.byai.manager.vo.resource.DirAndFileVo;
 import com.iwhalecloud.byai.state.domain.resource.qo.DatasetQo;
+import com.iwhalecloud.byai.state.domain.resource.dto.ObjectZipImportItem;
+import com.iwhalecloud.byai.state.domain.resource.dto.ObjectZipImportResult;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetDetailVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.KnowledgeCapabilityVo;
@@ -53,9 +56,6 @@ import jakarta.validation.Valid;
 public class DatasetController {
 
     private final Logger logger = LoggerFactory.getLogger(DatasetController.class);
-
-    @Autowired
-    private SsResourceService ssResourceService;
 
     @Autowired
     private DatasetApplicationService datasetApplicationService;
@@ -117,7 +117,7 @@ public class DatasetController {
      */
     @GetMapping("/detail")
     public ResponseUtil<DatasetDetailVo> detail(@RequestParam("resourceId") Long resourceId) {
-        DatasetDetailVo datasetDetailVo = ssResourceService.findDatasetDetailById(resourceId);
+        DatasetDetailVo datasetDetailVo = datasetApplicationService.detail(resourceId);
         return ResponseUtil.successResponse(I18nUtil.get("dataset.detail.query.success"), datasetDetailVo);
     }
 
@@ -248,11 +248,17 @@ public class DatasetController {
      * @return resourceId
      */
     @PostMapping(value = "/importDatasetJson", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseUtil<Long> importDatasetJson(@RequestParam(value = "ownerType", required = false) String ownerType,
-        @RequestParam(value = "catalogId", required = false) Long catalogId, @RequestPart("file") MultipartFile file) {
+    public ResponseUtil<ObjectZipImportResult> importDatasetJson(
+        @RequestParam(value = "ownerType", required = false) String ownerType,
+        @RequestParam(value = "catalogId", required = false) Long catalogId, @RequestPart("file") MultipartFile[] file) {
+        if (file != null && file.length > 1) {
+            return ResponseUtil.successResponse(I18nUtil.get("dataset.import.success"),
+                importDatasetJsonBatch(ownerType, catalogId, file));
+        }
         try {
-            Long resourceId = datasetApplicationService.importDatasetJson(ownerType, catalogId, file);
-            return ResponseUtil.successResponse(I18nUtil.get("dataset.import.success"), resourceId);
+            Long resourceId = datasetApplicationService.importDatasetJson(ownerType, catalogId, file[0]);
+            return ResponseUtil.successResponse(I18nUtil.get("dataset.import.success"),
+                buildDatasetImportSuccessResult(file[0], resourceId));
         }
         catch (IllegalArgumentException e) {
             return ResponseUtil.fail(e.getMessage());
@@ -262,6 +268,70 @@ public class DatasetController {
             return ResponseUtil.fail(I18nUtil.get("dataset.import.failed",
                 e.getMessage() != null ? e.getMessage() : I18nUtil.get("system.internal.error")));
         }
+    }
+
+    private ObjectZipImportResult importDatasetJsonBatch(String ownerType, Long catalogId, MultipartFile[] files) {
+        ObjectZipImportResult result = new ObjectZipImportResult();
+        result.setTotal(files == null ? 0 : files.length);
+        if (files == null) {
+            return result;
+        }
+        for (MultipartFile multipartFile : files) {
+            try {
+                Long resourceId = datasetApplicationService.importDatasetJson(ownerType, catalogId, multipartFile);
+                result.getItems().add(buildDatasetImportSuccessItem(multipartFile, resourceId));
+            }
+            catch (Exception e) {
+                result.getItems().add(buildDatasetImportFailedItem(multipartFile, e));
+            }
+        }
+        fillImportSummary(result);
+        return result;
+    }
+
+    private ObjectZipImportResult buildDatasetImportSuccessResult(MultipartFile file, Long resourceId) {
+        ObjectZipImportResult result = new ObjectZipImportResult();
+        result.getItems().add(buildDatasetImportSuccessItem(file, resourceId));
+        fillImportSummary(result);
+        return result;
+    }
+
+    private ObjectZipImportItem buildDatasetImportSuccessItem(MultipartFile file, Long resourceId) {
+        ObjectZipImportItem item = new ObjectZipImportItem();
+        String fileName = file == null ? null : file.getOriginalFilename();
+        item.setResourceCode(fileName);
+        item.setResourceName(fileName);
+        item.setResourceId(String.valueOf(resourceId));
+        item.setSuccess(true);
+        return item;
+    }
+
+    private ObjectZipImportItem buildDatasetImportFailedItem(MultipartFile file, Exception e) {
+        ObjectZipImportItem item = new ObjectZipImportItem();
+        String fileName = file == null ? null : file.getOriginalFilename();
+        item.setResourceCode(fileName);
+        item.setResourceName(fileName);
+        item.setSuccess(false);
+        item.setMessage(e.getMessage() != null ? e.getMessage() : I18nUtil.get("dataset.import.failed"));
+        return item;
+    }
+
+    private void fillImportSummary(ObjectZipImportResult result) {
+        if (result.getTotal() <= 0) {
+            result.setTotal(result.getItems().size());
+        }
+        List<ObjectZipImportItem> successItems = result.getItems().stream().filter(ObjectZipImportItem::isSuccess)
+            .collect(Collectors.toList());
+        List<ObjectZipImportItem> createdItems = successItems.stream().filter(item -> !item.isUpdated())
+            .collect(Collectors.toList());
+        List<ObjectZipImportItem> updatedItems = successItems.stream().filter(ObjectZipImportItem::isUpdated)
+            .collect(Collectors.toList());
+        result.setSuccess(successItems.size());
+        result.setFailed(result.getItems().size() - successItems.size());
+        result.setCreatedCount(createdItems.size());
+        result.setUpdatedCount(updatedItems.size());
+        result.setCreatedItems(new ArrayList<>(createdItems));
+        result.setUpdatedItems(new ArrayList<>(updatedItems));
     }
 
     /**

@@ -180,7 +180,7 @@ class ToolManServiceTest {
         ReflectionTestUtils.setField(service, "resourceArtifactStorageService", resourceArtifactStorageService);
         ReflectionTestUtils.setField(service, "ssResExtToolKitService", ssResExtToolKitService);
         ReflectionTestUtils.setField(service, "resourceDiscoveryRegistrationService", resourceDiscoveryRegistrationService);
-        ReflectionTestUtils.setField(service, "datasetSystem", "");
+        ReflectionTestUtils.setField(service, "datasetSystem", "WHALE_AGENT");
         prepareI18nUtil();
 
         SsResource resource = new SsResource();

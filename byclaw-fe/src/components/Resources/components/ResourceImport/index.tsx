@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { DownloadOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useRef } from 'react';
+import { CloseOutlined, DownloadOutlined, LoadingOutlined } from '@ant-design/icons';
 import { Modal, Upload, Tabs, Button, message, Form, TreeSelect, Alert, Table } from 'antd';
 import { useIntl } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
@@ -46,7 +46,7 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
 }) => {
   const intl = useIntl();
   const [importLoading, setImportLoading] = useState(false);
-  const [localFile, setLocalFile] = useState<File | null>(null);
+  const [localFiles, setLocalFiles] = useState<File[]>([]);
   const [importTab, setImportTab] = useState('localFile');
   const [curlText, setCurlText] = useState('');
   const [curlPanelLoading, setCurlPanelLoading] = useState(false);
@@ -56,6 +56,7 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   const [currentStep, setCurrentStep] = useState('import'); // 'import' or 'curlConfig'
   const [importResult, setImportResult] = useState<ResourceImportResult | null>(null);
   const [activeDiffItem, setActiveDiffItem] = useState<ResourceImportItem | null>(null);
+  const invalidFileMessageShownRef = useRef(false);
 
   const accept = resourceType === 'VIEW' || resourceType === 'OBJECT' ? '.zip' : '.json';
   const templateConfig = resourceImportTemplateMap[resourceType];
@@ -79,7 +80,8 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   const importFunc = async (data: FormData) => {
     try {
       // 从FormData中获取文件类型
-      const file = data.get('file') as File;
+      const files = data.getAll('file') as File[];
+      const file = files[0];
       const fileType = file ? file.name.split('.').pop() || '' : '';
       return await importResource(resourceType, fileType, data);
     } catch (error) {
@@ -97,7 +99,7 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   // 当弹窗关闭时重置状态
   useEffect(() => {
     if (!visible) {
-      setLocalFile(null);
+      setLocalFiles([]);
       setImportTab('localFile');
       setCurlText('');
       setCurrentStep('import');
@@ -109,17 +111,77 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
     }
   }, [visible, catalogId, curlForm]);
 
-  const localFileList: any[] = [];
-  if (localFile) {
-    localFileList.push({
-      uid: '-1',
-      name: localFile.name,
-      status: 'done',
+  const formatFileSize = (size: number) => {
+    if (size < 1024) {
+      return `${size} B`;
+    }
+    if (size < 1024 * 1024) {
+      return `${(size / 1024).toFixed(1)} KB`;
+    }
+    return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  };
+
+  const removeLocalFile = (fileIndex: number) => {
+    setLocalFiles((prevFiles) => prevFiles.filter((_, index) => index !== fileIndex));
+  };
+
+  const supportedFileTypesText = intl.formatMessage({ id: 'common.supportedFileTypes' });
+
+  const showUnsupportedFileTypeMessage = () => {
+    if (invalidFileMessageShownRef.current) {
+      return;
+    }
+
+    invalidFileMessageShownRef.current = true;
+    message.error(`${supportedFileTypesText}${accept.slice(1)}`);
+    setTimeout(() => {
+      invalidFileMessageShownRef.current = false;
+    }, 300);
+  };
+
+  const isAcceptedFile = (file: File) => {
+    const fileName = file.name || '';
+    const fileExtension = fileName.includes('.') ? `.${fileName.split('.').pop()?.toLowerCase()}` : '';
+    const acceptedTypes = accept
+      .split(',')
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
+
+    return acceptedTypes.includes(fileExtension);
+  };
+
+  const addLocalFiles = (fileList: File[]) => {
+    const acceptedFiles = fileList.filter(isAcceptedFile);
+
+    if (acceptedFiles.length !== fileList.length) {
+      showUnsupportedFileTypeMessage();
+    }
+
+    if (!acceptedFiles.length) {
+      return;
+    }
+
+    setLocalFiles((prevFiles) => {
+      const mergedFiles = [...prevFiles];
+      acceptedFiles.forEach((nextFile) => {
+        const duplicated = mergedFiles.some(
+          (prevFile) =>
+            prevFile.name === nextFile.name &&
+            prevFile.size === nextFile.size &&
+            prevFile.lastModified === nextFile.lastModified
+        );
+        if (!duplicated) {
+          mergedFiles.push(nextFile);
+        }
+      });
+      return mergedFiles;
     });
-  }
+  };
 
   const isZipSummaryMode =
     currentStep === 'import' && !!importResult && (resourceType === 'VIEW' || resourceType === 'OBJECT');
+  const isImportSummaryMode =
+    currentStep === 'import' && !!importResult && (isZipSummaryMode || (importResult.items || []).length > 1);
 
   const buildRangeText = (items: ResourceImportItem[] = []) =>
     items
@@ -140,24 +202,29 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   };
 
   const handleImportSubmit = async () => {
-    if (isZipSummaryMode) {
+    if (isImportSummaryMode) {
       handleImportComplete();
       return;
     }
-    if (importTab === 'localFile' && !localFile) {
+    if (importTab === 'localFile' && !localFiles.length) {
       message.warning(intl.formatMessage({ id: 'knowledgeCenter.import.uploadFirst' }));
       return;
     }
     setImportLoading(true);
     try {
-      if (importTab === 'localFile' && localFile) {
+      if (importTab === 'localFile' && localFiles.length) {
         const formData = new FormData();
-        formData.append('file', localFile);
+        localFiles.forEach((file) => {
+          formData.append('file', file);
+        });
         formData.append('ownerType', activeTab);
         formData.append('catalogId', `${selectedCatalogId || '-1'}`);
         formData.append('type', 'external');
         const importData = (await importFunc(formData)) as ResourceImportResult | undefined;
-        if ((resourceType === 'VIEW' || resourceType === 'OBJECT') && importData) {
+        if (
+          importData &&
+          (resourceType === 'VIEW' || resourceType === 'OBJECT' || (importData.items || []).length > 1)
+        ) {
           setImportResult(importData);
           setActiveDiffItem(null);
           return;
@@ -216,12 +283,15 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
 
   const finishText = intl.formatMessage({ id: 'resource.import.finish' });
   const confirmText = intl.formatMessage({ id: 'knowledgeCenter.import.confirm' });
+  const uploadHintText = importLoading
+    ? intl.formatMessage({ id: 'knowledgeCenter.import.importing' })
+    : `${intl.formatMessage({ id: 'knowledgeCenter.import.dragHint' })}，${supportedFileTypesText}${accept.slice(1)}`;
   const saveText = intl.formatMessage({ id: 'common.save' });
   const cancelText = intl.formatMessage({ id: 'common.cancel' });
   const backText = intl.formatMessage({ id: 'common.back' });
-  const primaryButtonText = isZipSummaryMode ? finishText : currentStep === 'import' ? confirmText : saveText;
-  const secondaryButtonText = isZipSummaryMode ? cancelText : currentStep === 'curlConfig' ? backText : cancelText;
-  const secondaryButtonAction = isZipSummaryMode ? onCancel : currentStep === 'curlConfig' ? handleBack : onCancel;
+  const primaryButtonText = isImportSummaryMode ? finishText : currentStep === 'import' ? confirmText : saveText;
+  const secondaryButtonText = isImportSummaryMode ? cancelText : currentStep === 'curlConfig' ? backText : cancelText;
+  const secondaryButtonAction = isImportSummaryMode ? onCancel : currentStep === 'curlConfig' ? handleBack : onCancel;
   const failedCount = importResult?.failed || failedItems.length;
   const failedSummaryDescription = failedItems.length
     ? intl.formatMessage({ id: 'resource.import.failedSummary' }, { failedCount })
@@ -238,7 +308,7 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
       cancelText={cancelText}
       confirmLoading={currentStep === 'import' ? importLoading : curlPanelLoading}
       destroyOnHidden
-      width={isZipSummaryMode ? 980 : currentStep === 'import' ? 800 : 860}
+      width={isImportSummaryMode ? 980 : currentStep === 'import' ? 800 : 860}
       footer={[
         <Button key="back" onClick={secondaryButtonAction}>
           {secondaryButtonText}
@@ -249,16 +319,16 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
           loading={currentStep === 'import' ? importLoading : curlPanelLoading}
           onClick={currentStep === 'import' ? handleImportSubmit : handleCurlSave}
           disabled={
-            !isZipSummaryMode &&
+            !isImportSummaryMode &&
             currentStep === 'import' &&
-            ((importTab === 'localFile' && !localFile) || (importTab === 'curlImport' && !curlText.trim()))
+            ((importTab === 'localFile' && !localFiles.length) || (importTab === 'curlImport' && !curlText.trim()))
           }
         >
           {primaryButtonText}
         </Button>,
       ]}
     >
-      {isZipSummaryMode ? (
+      {isImportSummaryMode ? (
         <div className={styles.summaryContainer}>
           <Alert
             type={failedItems.length ? 'warning' : 'success'}
@@ -427,32 +497,72 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
               label: intl.formatMessage({ id: 'common.localFile' }),
               children: (
                 <div className={styles.localFileContainer}>
-                  <Upload.Dragger
-                    accept={accept}
-                    maxCount={1}
-                    fileList={localFileList}
-                    className={styles.uploadDragger}
-                    beforeUpload={(file) => {
-                      setLocalFile(file as File);
-                      return false;
-                    }}
-                    onRemove={() => {
-                      setLocalFile(null);
-                    }}
-                  >
-                    <p>
-                      <AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" className={styles.uploadIcon} />
-                    </p>
-                    <p className={styles.uploadHint}>
-                      {`${intl.formatMessage({ id: 'knowledgeCenter.import.dragHint' })}，${intl.formatMessage({
-                        id: 'common.supportedFileTypes',
-                      })}${accept.slice(1)}`}
-                    </p>
-                    {/* <br />
+                  <div className={styles.uploadArea}>
+                    <Upload.Dragger
+                      accept={accept}
+                      multiple
+                      showUploadList={false}
+                      disabled={importLoading}
+                      className={`${styles.uploadDragger} ${importLoading ? styles.uploadDraggerLoading : ''}`}
+                      beforeUpload={(file, fileList) => {
+                        if (importLoading) {
+                          return false;
+                        }
+                        if ((file as any).uid === (fileList[0] as any)?.uid) {
+                          addLocalFiles(fileList as File[]);
+                        }
+                        return false;
+                      }}
+                      onDrop={(event) => {
+                        if (importLoading) {
+                          return;
+                        }
+
+                        const droppedFiles = Array.from(event.dataTransfer?.files || []);
+                        if (droppedFiles.some((file) => !isAcceptedFile(file))) {
+                          showUnsupportedFileTypeMessage();
+                        }
+                      }}
+                    >
+                      <p>
+                        {importLoading ? (
+                          <LoadingOutlined className={styles.uploadIcon} />
+                        ) : (
+                          <AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" className={styles.uploadIcon} />
+                        )}
+                      </p>
+                      <p className={styles.uploadHint}>{uploadHintText}</p>
+                      {/* <br />
                   <p className={styles.uploadFormatHint}>
                     {intl.formatMessage({ id: 'knowledgeCenter.import.formatHint' })}
                   </p>{' '} */}
-                  </Upload.Dragger>
+                    </Upload.Dragger>
+                    {localFiles.length ? (
+                      <div className={styles.fileCardScroller}>
+                        {localFiles.map((file, index) => (
+                          <div
+                            key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+                            className={styles.fileCard}
+                            title={file.name}
+                          >
+                            <div className={styles.fileCardIcon}>{accept.slice(1).toUpperCase()}</div>
+                            <div className={styles.fileCardMeta}>
+                              <div className={styles.fileCardName}>{file.name}</div>
+                              <div className={styles.fileCardSize}>{formatFileSize(file.size)}</div>
+                            </div>
+                            <Button
+                              type="text"
+                              disabled={importLoading}
+                              size="small"
+                              icon={<CloseOutlined />}
+                              className={styles.fileCardRemove}
+                              onClick={() => removeLocalFile(index)}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               ),
             },

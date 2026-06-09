@@ -36,6 +36,8 @@ RUN set -eux; \
     done; \
     echo ">>> built extensions:"; ls -la /build/out/
 
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS python312
+
 ## ── stage 2: final image ─────────────────────────────────────────
 FROM ghcr.io/openclaw/openclaw:2026.4.21
 
@@ -57,15 +59,21 @@ RUN set -eux; \
     printf 'Acquire::Retries "5";\n' > /etc/apt/apt.conf.d/80-retries; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        python3 \
-        python3-pip \
-        python3-venv \
         ca-certificates \
         unzip \
         zip; \
-    python3 -m pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
-    python3 -m pip config --global set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
     rm -rf /var/lib/apt/lists/*
+
+COPY --from=python312 /usr/local/bin/python3.12 /usr/local/bin/pip3.12 /usr/local/bin/
+COPY --from=python312 /usr/local/lib/libpython3.12.so* /usr/local/lib/
+COPY --from=python312 /usr/local/lib/python3.12 /usr/local/lib/python3.12
+
+RUN set -eux; \
+    ln -sf /usr/local/bin/python3.12 /usr/local/bin/python3; \
+    ln -sf /usr/local/bin/python3.12 /usr/bin/python3; \
+    python3 --version | grep -q 'Python 3.12'; \
+    python3 -m pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
+    python3 -m pip config --global set global.trusted-host pypi.tuna.tsinghua.edu.cn
 
 COPY --from=ext-builder /build/out/ /app/extensions/
 

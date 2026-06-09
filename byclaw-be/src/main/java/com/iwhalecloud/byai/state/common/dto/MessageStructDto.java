@@ -19,6 +19,10 @@ public class MessageStructDto {
 
     private Long messageId;
 
+    private Long sessionId;
+
+    private String traceId;
+
     private String id;
 
     private String content;

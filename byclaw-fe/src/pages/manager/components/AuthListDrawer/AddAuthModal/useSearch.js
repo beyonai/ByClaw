@@ -6,7 +6,7 @@ import { findAll } from '@/pages/manager/service/OrgMgr';
 import { dataItemTypeMap, searchTypeMap } from '@/pages/manager/components/PersonnelModel';
 
 const useSearch = (props) => {
-  const { searchKey, onlyUser, defaultPagination, setPagination, pageIndex, pageSize, setIsLoading } = props;
+  const { searchKey, onlyUser, defaultPagination, setPagination, pageNum, pageSize, setIsLoading } = props;
 
   const dispatch = useDispatch();
 
@@ -25,7 +25,7 @@ const useSearch = (props) => {
     findAll({
       keyword: searchKey,
       pageSize: 10,
-      pageIndex: 1,
+      pageNum: 1,
     })
       .then((res) => {
         const { orgList, userList, positionList, stationList } = res?.data || {};
@@ -75,10 +75,10 @@ const useSearch = (props) => {
       findAll({
         keyword: searchKey,
         pageSize,
-        pageIndex: params?.pageIndex,
+        pageNum: params?.pageNum,
       })
         .then((res) => {
-          const { list = [], pageIndex: newPageIndex, total: newTotal } = res?.data || {};
+          const { list = [], pageNum: newPageNum, total: newTotal } = res?.data || {};
           setSearchList((pre) => [
             ...pre,
             ...list.map((ele) => ({
@@ -91,7 +91,7 @@ const useSearch = (props) => {
           ]);
           setPagination((pre) => ({
             ...pre,
-            pageIndex: newPageIndex,
+            pageNum: newPageNum || params?.pageNum || 1,
             total: newTotal,
           }));
           setHasSearch(true);
@@ -111,10 +111,10 @@ const useSearch = (props) => {
         payload: {
           keyword: searchKey,
           pageSize,
-          pageIndex: params?.pageIndex,
+          pageNum: params?.pageNum,
         },
         success: (res) => {
-          const { list = [], pageIndex: newPageIndex, total: newTotal } = res?.data || {};
+          const { list = [], pageNum: newPageNum, total: newTotal } = res?.data || {};
           setSearchList((pre) => [
             ...pre,
             ...list.map((ele) => ({
@@ -127,7 +127,7 @@ const useSearch = (props) => {
           ]);
           setPagination((pre) => ({
             ...pre,
-            pageIndex: newPageIndex,
+            pageNum: newPageNum || params?.pageNum || 1,
             total: newTotal,
           }));
           setHasSearch(true);
@@ -147,10 +147,10 @@ const useSearch = (props) => {
         payload: {
           keyword: searchKey,
           pageSize,
-          pageIndex: params?.pageIndex,
+          pageNum: params?.pageNum,
         },
         success: (res) => {
-          const { list = [], pageIndex: newPageIndex, total: newTotal } = res?.data || {};
+          const { list = [], pageNum: newPageNum, total: newTotal } = res?.data || {};
           setSearchList((pre) => [
             ...pre,
             ...list.map((ele) => ({
@@ -163,7 +163,7 @@ const useSearch = (props) => {
           ]);
           setPagination((pre) => ({
             ...pre,
-            pageIndex: newPageIndex,
+            pageNum: newPageNum || params?.pageNum || 1,
             total: newTotal,
           }));
           setHasSearch(true);
@@ -183,10 +183,10 @@ const useSearch = (props) => {
         payload: {
           keyword: searchKey,
           pageSize,
-          pageIndex: params?.pageIndex,
+          pageNum: params?.pageNum,
         },
         success: (res) => {
-          const { list = [], pageIndex: newPageIndex, total: newTotal } = res?.data || {};
+          const { list = [], pageNum: newPageNum, total: newTotal } = res?.data || {};
           setSearchList((pre) => [
             ...pre,
             ...list.map((ele) => ({
@@ -198,7 +198,7 @@ const useSearch = (props) => {
           ]);
           setPagination((pre) => ({
             ...pre,
-            pageIndex: newPageIndex,
+            pageNum: newPageNum || params?.pageNum || 1,
             total: newTotal,
           }));
           setHasSearch(true);
@@ -215,29 +215,29 @@ const useSearch = (props) => {
     (key, loadMore = false) => {
       setSearchType(key);
 
-      let newPageIndex = pageIndex + 1;
+      let newPageNum = pageNum + 1;
       if (!loadMore) {
         setIsLoading(true);
         setSearchList([]);
         setPagination(defaultPagination);
-        newPageIndex = 1;
+        newPageNum = 1;
       }
 
       switch (key) {
         case searchTypeMap.station:
-          findStation({ pageIndex: newPageIndex });
+          findStation({ pageNum: newPageNum });
           break;
 
         case searchTypeMap.org:
-          findOrg({ pageIndex: newPageIndex });
+          findOrg({ pageNum: newPageNum });
           break;
 
         case searchTypeMap.user:
-          findUser({ pageIndex: newPageIndex });
+          findUser({ pageNum: newPageNum });
           break;
 
         case searchTypeMap.post:
-          findPosition({ pageIndex: newPageIndex });
+          findPosition({ pageNum: newPageNum });
           break;
 
         case searchTypeMap.all:
@@ -246,7 +246,7 @@ const useSearch = (props) => {
           break;
       }
     },
-    [handleFindAll, findOrg, findUser, findPosition, findStation, pageIndex]
+    [handleFindAll, findOrg, findUser, findPosition, findStation, pageNum]
   );
 
   return {
