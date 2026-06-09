@@ -395,7 +395,8 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   checkCanUploadFile = () => {
     const uploadFileConfig = this.getUploadFileConfig();
 
-    if (!uploadFileConfig || !uploadFileConfig.allowedFileTypes.length) {
+    if (!uploadFileConfig) {
+      //  || !uploadFileConfig.allowedFileTypes.length
       return true;
     }
 

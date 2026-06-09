@@ -48,7 +48,7 @@ import ToolSelectorModal from './ToolSelectorModal';
 import { compressImgFileAndUpload } from '@/pages/manager/utils/file';
 import { Image } from '@/pages/manager/components/Image';
 import { getAvatarUrl } from '@/pages/manager/utils/agent';
-import UploadFileConfig from './UploadFileConfig';
+// import UploadFileConfig from './UploadFileConfig';
 import styles from './index.module.less';
 import pStyles from '../index.module.less';
 import { DEFAULT_PERSONALITY_DEFINITION } from '../personalityDefinitionDefault';
@@ -1850,7 +1850,7 @@ const ConfigForm = (props) => {
               </Radio.Group>
             </Form.Item> */}
             {/* {(digitalType === 'FROM_THIRD' || digitalType === 'FROM_SANDBOX') && ( */}
-            <UploadFileConfig isOutsideSkills prologueRef={prologueRef} isReadOnly={isReadOnly} />
+            {/* <UploadFileConfig isOutsideSkills prologueRef={prologueRef} isReadOnly={isReadOnly} /> */}
             {/* )} */}
             {/* {digitalType === 'FROM_MANUALLY' && ( */}
             <>

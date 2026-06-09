@@ -1,12 +1,12 @@
 // @ts-ignore
 import { getIntl } from '@umijs/max';
 import type { IAgentFileUploadConf } from '@/hooks/useAgentUploadFileConfig';
-import { validateAccept } from '@/utils/file';
+// import { validateAccept } from '@/utils/file';
 import { message } from 'antd';
 
 interface Props {
   onDropFile: (files: File[]) => any;
-  uploadFileConfig?: () => IAgentFileUploadConf | undefined;
+  uploadFileConfig?: () => IAgentFileUploadConf | null;
   // setIsDraggingFile: (isDraggingFile: boolean) => void;
 }
 
@@ -85,14 +85,14 @@ export default class DragFileEventHandler {
         if (config && config.maxFileCount > 0) {
           requirements.push(intl.formatMessage({ id: 'upload.maxFilesLimit' }, { count: config.maxFileCount }));
         }
-        if (config && Array.isArray(config.allowedFileTypes) && config.allowedFileTypes.length > 0) {
-          const acceptedFileTypes = config.allowedFileTypes;
-          requirements.push(
-            `${intl.formatMessage({ id: 'common.supportedFileTypes' })}${acceptedFileTypes
-              .map((type) => type.trim())
-              .join(', ')}`
-          );
-        }
+        // if (config && Array.isArray(config.allowedFileTypes) && config.allowedFileTypes.length > 0) {
+        //   const acceptedFileTypes = config.allowedFileTypes;
+        //   requirements.push(
+        //     `${intl.formatMessage({ id: 'common.supportedFileTypes' })}${acceptedFileTypes
+        //       .map((type) => type.trim())
+        //       .join(', ')}`
+        //   );
+        // }
         if (config && config.maxFileSize > 0) {
           requirements.push(intl.formatMessage({ id: 'upload.fileSizeLimit' }, { size: config.maxFileSize }));
         }
@@ -149,13 +149,13 @@ export default class DragFileEventHandler {
       const config = this.props.uploadFileConfig();
       if (config) {
         if (!config.enabled) return;
-        if (config.allowedFileTypes && config.allowedFileTypes.length > 0) {
-          const accept = config.allowedFileTypes.join(',');
-          acceptFiles = acceptFiles.filter((file) => validateAccept(file, accept));
-          if (acceptFiles.length !== fileCount) {
-            message.error(`${getIntl().formatMessage({ id: 'common.supportedFileTypes' })}${accept}`);
-          }
-        }
+        // if (config.allowedFileTypes && config.allowedFileTypes.length > 0) {
+        //   const accept = config.allowedFileTypes.join(',');
+        //   acceptFiles = acceptFiles.filter((file) => validateAccept(file, accept));
+        //   if (acceptFiles.length !== fileCount) {
+        //     message.error(`${getIntl().formatMessage({ id: 'common.supportedFileTypes' })}${accept}`);
+        //   }
+        // }
         fileCount = acceptFiles.length;
         if (config.maxFileSize) {
           const maxFileSize = Number(config.maxFileSize) * 1024 * 1024;
