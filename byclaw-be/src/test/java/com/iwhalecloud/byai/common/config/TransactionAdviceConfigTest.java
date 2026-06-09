@@ -31,6 +31,12 @@ class TransactionAdviceConfigTest {
             .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
         assertThat(resolvePropagation(source, "upsertStandardJsonArtifact"))
             .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        assertThat(resolvePropagation(source, "prewarmDueCronSandboxes"))
+            .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        assertThat(resolvePropagation(source, "callAsUser"))
+            .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        assertThat(resolvePropagation(source, "runAsUser"))
+            .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
         assertThat(resolvePropagation(source, "createSomethingElse"))
             .isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
     }
@@ -54,6 +60,15 @@ class TransactionAdviceConfigTest {
         }
 
         public void upsertStandardJsonArtifact() {
+        }
+
+        public void prewarmDueCronSandboxes() {
+        }
+
+        public void callAsUser() {
+        }
+
+        public void runAsUser() {
         }
 
         public void createSomethingElse() {
