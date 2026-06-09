@@ -1,0 +1,153 @@
+FROM node:22-slim AS ext-builder
+
+WORKDIR /build
+
+RUN npm config set registry https://registry.npmmirror.com --global \
+    && npm config set fund false --global \
+    && npm config set audit false --global \
+    && npm config set prefer-offline true --global
+
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --prefix /build/toolchain --no-package-lock --omit=dev esbuild@0.25.12
+
+ENV PATH="/build/toolchain/node_modules/.bin:${PATH}"
+
+COPY byclaw-exe/extensions/baiying-enhance/package.json \
+     byclaw-exe/extensions/baiying-enhance/package-lock.json \
+     ./src/baiying-enhance/
+COPY byclaw-exe/extensions/byai-channel/package.json \
+     byclaw-exe/extensions/byai-channel/package-lock.json \
+     ./src/byai-channel/
+COPY byclaw-exe/extensions/byclaw-sqlite/package.json \
+     byclaw-exe/extensions/byclaw-sqlite/package-lock.json \
+     ./src/byclaw-sqlite/
+
+RUN --mount=type=cache,target=/root/.npm \
+    set -eux; \
+    pids=""; \
+    for dir in src/*/; do \
+        [ -f "$dir/package.json" ] || continue; \
+        name=$(basename "$dir"); \
+        echo ">>> npm ci --omit=dev: $name"; \
+        (cd "$dir" && npm ci --omit=dev --prefer-offline) & \
+        pids="$pids $!"; \
+    done; \
+    for pid in $pids; do wait "$pid"; done
+
+COPY byclaw-exe/extensions/baiying-enhance/ ./src/baiying-enhance/
+COPY byclaw-exe/extensions/byai-channel/ ./src/byai-channel/
+COPY byclaw-exe/extensions/byclaw-sqlite/ ./src/byclaw-sqlite/
+
+RUN set -eux; \
+    mkdir -p /build/out; \
+    for dir in src/*/; do \
+        [ -f "$dir/package.json" ] || continue; \
+        name=$(basename "$dir"); \
+        if node --input-type=module -e ' \
+            import { readFileSync } from "fs"; \
+            const pkg = JSON.parse(readFileSync(process.argv[1] + "package.json", "utf8")); \
+            process.exit((pkg.scripts || {}).build ? 0 : 1); \
+        ' "$dir"; then \
+            echo ">>> npm run build: $name"; \
+            (cd "$dir" && npm run build); \
+        fi; \
+        echo ">>> prune dev deps: $name"; \
+        (cd "$dir" && npm prune --omit=dev); \
+        target="/build/out/$name"; \
+        mkdir -p "$target"; \
+        [ -d "$dir/dist" ] && cp -r "$dir/dist" "$target/dist"; \
+        [ -d "$target/dist" ] && find "$target/dist" -name '*.map' -delete; \
+        for f in package.json openclaw.plugin.json; do \
+            [ -f "$dir/$f" ] && cp "$dir/$f" "$target/"; \
+        done; \
+        [ -d "$dir/node_modules" ] && cp -r "$dir/node_modules" "$target/node_modules"; \
+    done; \
+    echo ">>> built extensions:"; ls -la /build/out/
+
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS python312
+
+FROM ghcr.io/tencentcloud/cubesandbox-base:2026.16 AS cubesandbox-base
+
+FROM ghcr.io/openclaw/openclaw:2026.5.28-beta.4
+
+USER root
+
+RUN chown root:root /app
+WORKDIR /app
+
+ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
+    PIP_ROOT_USER_ACTION=ignore \
+    OPENCLAW_BUNDLED_PLUGINS_DIR=/app/dist/extensions \
+    ENVD_PORT=49983 \
+    ENVD_LOG_FILE=/var/log/envd.log \
+    OPENCLAW_GATEWAY_BIND=lan \
+    OPENCLAW_GATEWAY_PORT=18789 \
+    FILEBROWSER_PORT=8082 \
+    FILEBROWSER_ROOT=/by \
+    FILEBROWSER_BASEURL=/filebrowser \
+    OPENCLAW_STATE_DIR=/by/.openclaw \
+    DWS_CONFIG_DIR=/by/.openclaw/.dws
+
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources; \
+        sed -i 's|http://deb.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources; \
+    elif [ -f /etc/apt/sources.list ]; then \
+        sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list; \
+        sed -i 's|http://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list; \
+    fi; \
+    printf 'Acquire::Retries "5";\n' > /etc/apt/apt.conf.d/80-retries; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        unzip \
+        zip; \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=cubesandbox-base /usr/bin/envd /usr/bin/envd
+COPY --from=cubesandbox-base /usr/local/bin/cube-entrypoint.sh /usr/local/bin/cube-entrypoint.sh
+RUN chmod 0755 /usr/bin/envd /usr/local/bin/cube-entrypoint.sh
+
+COPY --from=python312 /usr/local/bin/python3.12 /usr/local/bin/pip3.12 /usr/local/bin/
+COPY --from=python312 /usr/local/lib/libpython3.12.so* /usr/local/lib/
+COPY --from=python312 /usr/local/lib/python3.12 /usr/local/lib/python3.12
+
+RUN set -eux; \
+    ln -sf /usr/local/bin/python3.12 /usr/local/bin/python3; \
+    ln -sf /usr/local/bin/python3.12 /usr/bin/python3; \
+    python3 --version | grep -q 'Python 3.12'; \
+    python3 -m pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
+    python3 -m pip config --global set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
+    python3 -m pip install --no-cache-dir redis websockify; \
+    rm -f /usr/bin/websockify; \
+    ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
+    websockify --help >/dev/null
+
+COPY --from=ext-builder /build/out/ /app/dist-runtime/extensions/
+
+RUN ln -s /app /app/node_modules/openclaw
+
+COPY middleware/openclaw/skills/ /app/skills/
+
+COPY middleware/openclaw/linux-amd64-filebrowser/filebrowser /usr/local/bin/filebrowser
+RUN chmod 0755 /usr/local/bin/filebrowser
+
+COPY middleware/openclaw/cli/dws /usr/local/bin/dws
+RUN chmod 0755 /usr/local/bin/dws
+
+COPY middleware/openclaw/runtime-bootstrap.sh /usr/local/bin/openclaw-runtime-bootstrap
+COPY middleware/openclaw/startAll.sh \
+     middleware/openclaw/start-filebrowser.sh \
+     middleware/openclaw/start-openclaw.sh \
+     /usr/local/bin/
+RUN chmod 0755 \
+    /usr/local/bin/openclaw-runtime-bootstrap \
+    /usr/local/bin/startAll.sh \
+    /usr/local/bin/start-filebrowser.sh \
+    /usr/local/bin/start-openclaw.sh
+
+EXPOSE 49983 18789 8082
+
+ENTRYPOINT ["/usr/local/bin/cube-entrypoint.sh"]
+CMD ["/usr/local/bin/startAll.sh"]
