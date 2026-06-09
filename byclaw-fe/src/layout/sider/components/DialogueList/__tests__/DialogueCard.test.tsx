@@ -81,7 +81,6 @@ describe('DialogueCard', () => {
     act(() => {
       chatSessionRuntimeManager.register({
         clientRequestId: 'request-1',
-        answerClientMsgId: 'message-1',
         sessionId: 'session-1',
       });
     });
