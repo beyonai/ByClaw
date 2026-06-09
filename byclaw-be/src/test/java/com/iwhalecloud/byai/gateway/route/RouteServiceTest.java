@@ -17,6 +17,7 @@ import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.GatewayStreamEventProcessor;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentTypeResolver;
+import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
@@ -258,7 +259,7 @@ class RouteServiceTest {
         ctx.setSessionId(3L);
         ctx.setUserMessageId(1L);
         ctx.setModelAnswerMessageId(2L);
-        ctx.setTraceId("1_2");
+        ctx.setTraceId(TraceIdCodec.encode(ctx.getUserMessageId(), ctx.getModelAnswerMessageId()));
         ctx.setParams(new HashMap<>());
         ctx.getParams().put("worker_agent_type", workerAgentType);
         ctx.gatewayEventQueue = new LinkedBlockingQueue<>();
@@ -269,7 +270,7 @@ class RouteServiceTest {
     private JSONObject currentTraceDoneEvent(ChatProcessContext ctx) {
         JSONObject event = new JSONObject();
         event.put("event_type", SseResponseEventEnum.appStreamResponse);
-        event.put("trace_id", ctx.getUserMessageId() + "_" + ctx.getModelAnswerMessageId());
+        event.put("trace_id", TraceIdCodec.encode(ctx.getUserMessageId(), ctx.getModelAnswerMessageId()));
         event.put("data", "{}");
         return event;
     }
