@@ -61,6 +61,15 @@ export const DEFAULT_MENU_CONFIG = [
     paramDesc: '对象',
     paramSeq: 6,
   },
+  {
+    paramId: 10001671,
+    paramGroupCode: 'MENU_ICON_SHOW_TAB',
+    paramName: '技能',
+    paramEnName: 'Skill',
+    paramValue: 'true',
+    paramDesc: '技能',
+    paramSeq: 7,
+  },
 ];
 
 export const MENU_NAME_TO_KEY_MAP: Record<string, string> = {
@@ -70,6 +79,7 @@ export const MENU_NAME_TO_KEY_MAP: Record<string, string> = {
   工具: 'tool',
   视图: 'view',
   对象: 'object',
+  技能: 'skill',
 };
 
 export const getVisibleMenuKeysFromConfig = (config: any[] = []) => {

@@ -6,6 +6,7 @@ import com.iwhalecloud.byai.common.constants.auth.GrantObjType;
 import com.iwhalecloud.byai.common.constants.auth.GrantType;
 import com.iwhalecloud.byai.common.login.bean.UsersOrganization;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import com.iwhalecloud.byai.manager.application.service.superassist.SuasSuperassistApplicationService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
@@ -68,6 +69,9 @@ public class ResourceAuthApplicationService {
     @Autowired
     private AuthApplicationService authApplicationService;
 
+    @Autowired
+    private SuasSuperassistApplicationService suasSuperassistApplicationService;
+
     /**
      * 组织-资源授权明细列表查询
      *
@@ -110,7 +114,15 @@ public class ResourceAuthApplicationService {
      * 分页查询数字员工关联的资源列表。 与 listResourceAuth 返回结构保持一致，但这里不走授权逻辑， 而是直接按数字员工与资源的关联关系查询。
      */
     public PageInfo<ResourceAuthVo> listDigitalEmployeeRelResourceAuth(DigEmployeeRelResourceQo qo) {
-        if (qo == null || qo.getResourceId() == null) {
+        if (qo == null) {
+            PageInfo<ResourceAuthVo> pageInfo = new PageInfo<>();
+            pageInfo.setList(Collections.emptyList());
+            return pageInfo;
+        }
+        if (qo.getResourceId() == null) {
+            qo.setResourceId(suasSuperassistApplicationService.resolveCurrentUserDefaultDigitalEmployeeId());
+        }
+        if (qo.getResourceId() == null) {
             PageInfo<ResourceAuthVo> pageInfo = new PageInfo<>();
             pageInfo.setList(Collections.emptyList());
             return pageInfo;

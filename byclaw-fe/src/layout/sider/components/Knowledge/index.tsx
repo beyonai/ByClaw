@@ -1,5 +1,5 @@
 import React from 'react';
-import { useIntl, useNavigate } from '@umijs/max';
+import { useIntl, useLocation, useNavigate } from '@umijs/max';
 import KnowledgeBaseTab from './components/KnowledgeBase';
 import styles from './index.module.less';
 import AntdIcon from '@/components/AntdIcon';
@@ -20,11 +20,13 @@ interface Props {
 const DataCenter: React.FC<Props> = (props) => {
   const { style, onSelect, editable = true, keyword, agentId, agentIds } = props;
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const intl = useIntl();
 
   const { layoutMode } = useGlobal();
 
   const isDebugMode = layoutMode === LayoutMode.debug;
+  const isKnowledgeCenterPage = pathname.startsWith('/knowledgeCenter');
 
   return (
     <div style={style} className={styles.container}>
@@ -32,13 +34,25 @@ const DataCenter: React.FC<Props> = (props) => {
         <div
           className={styles.router}
           style={{ background: 'linear-gradient(90deg, #1882ff0f 0%, #36ebca0f 100%)' }}
-          onClick={() => navigate('/knowledgeCenter')}
+          onClick={() =>
+            navigate(
+              isKnowledgeCenterPage
+                ? {
+                  pathname: '/chat',
+                }
+                : '/knowledgeCenter',
+              isKnowledgeCenterPage ? { state: { keepSiderActiveKey: 'knowledge' } } : undefined
+            )
+          }
         >
           <i className={classNames(styles.book, styles.icon, 'mr-6')} />
           <span style={{ fontWeight: 'bold', fontSize: 13 }}>
             {intl.formatMessage({ id: 'sider.knowledgeCenter' })}
           </span>
-          <AntdIcon type="icon-a-Rightyou" style={{ fontSize: 16, marginLeft: 'auto' }} />
+          <AntdIcon
+            type={isKnowledgeCenterPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
+            style={{ fontSize: 16, marginLeft: 'auto' }}
+          />
         </div>
       )}
       <KnowledgeBaseTab

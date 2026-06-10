@@ -1088,7 +1088,17 @@
                  INNER JOIN ss_resource a ON d.rel_resource_id = a.resource_id
         WHERE 1 = 1
           AND a.resource_status = 2
-          AND a.resource_biz_type IN ('KG_DOC', 'KG_QA', 'OBJECT', 'VIEW', 'TOOLKIT', 'MCP', 'AGENT')
+          <choose>
+              <when test="resourceBizTypeList != null and resourceBizTypeList.size() > 0">
+                  AND a.resource_biz_type IN
+                  <foreach collection="resourceBizTypeList" item="resourceBizType" open="(" separator="," close=")">
+                      #{resourceBizType}
+                  </foreach>
+              </when>
+              <otherwise>
+                  AND a.resource_biz_type IN ('KG_DOC', 'KG_QA', 'OBJECT', 'VIEW', 'TOOLKIT', 'MCP', 'AGENT')
+              </otherwise>
+          </choose>
           <if test="catalogIds != null and catalogIds.size() > 0">
               AND a.catalog_id IN
               <foreach collection="catalogIds" item="catalogIdItem" open="(" separator="," close=")">

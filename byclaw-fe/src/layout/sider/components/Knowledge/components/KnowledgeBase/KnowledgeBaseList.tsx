@@ -9,13 +9,14 @@ import ShareModal from '@/pages/knowledgeCenter/components/shareModal';
 import { getRuntimeActualUrl } from '@/utils';
 import withDrag, { DragType, IDragType } from '@/components/QueryInput/withDrag';
 import { deleteKnowledge } from '@/pages/manager/service/resources';
-import { listResourceUseAuth } from '@/pages/manager/service/resources';
+import { queryDigEmployeeRelResourceAuth } from '@/pages/manager/service/resources';
 import { IKnowledgeBaseItem } from './types';
 import InfiniteScrollAntdList from '../../../InfiniteScrollAntdList';
 import commonStyles from '../common.module.less';
 import EmptyTips from '@/components/EmptyTips';
 import useModuleEvent from '@/hooks/useModuleEvent';
 import { isTopAgent } from '@/service/digitalEmployees';
+import useGlobal from '@/hooks/useGlobal';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import styles from './index.module.less';
 
@@ -45,6 +46,7 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
     info?: IKnowledgeBaseItem;
   }>({ openType: '' });
   const navigate = useNavigate();
+  const { EventEmitter } = useGlobal();
   const { modal, message } = App.useApp();
   const { userInfo } = useSelector(({ user }: any) => ({
     userInfo: user.userInfo,
@@ -69,7 +71,7 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
   // );
 
   // 获取知识库列表
-  const loadKnowledgeBases = async (reset = false) => {
+  const loadKnowledgeBases = useCallback(async (reset = false) => {
     if (listFetchRef.current) return;
     listFetchRef.current = true;
     if (reset) {
@@ -89,7 +91,7 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
         resourceStatus: '2',
         resourceBizTypeList: ['KG_DOC', 'KG_QA', 'KG_TERM'],
       };
-      const response = await listResourceUseAuth(payload);
+      const response = await queryDigEmployeeRelResourceAuth(payload);
       const rows = Array.isArray(response?.rows) ? response.rows : Array.isArray(response?.list) ? response.list : [];
       setKnowledgeBases(rows);
       setHasMore(false);
@@ -100,12 +102,22 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
       listFetchRef.current = false;
       setLoading(false);
     }
-  };
+  }, []);
 
   // 初始加载
   useEffect(() => {
     loadKnowledgeBases(true);
-  }, []);
+  }, [loadKnowledgeBases]);
+
+  useEffect(() => {
+    const handleDefaultDigitalEmployeeChanged = () => {
+      loadKnowledgeBases(true);
+    };
+    EventEmitter.on('default-digital-employee-changed', handleDefaultDigitalEmployeeChanged);
+    return () => {
+      EventEmitter.off('default-digital-employee-changed', handleDefaultDigitalEmployeeChanged);
+    };
+  }, [EventEmitter, loadKnowledgeBases]);
 
   const onKeywordChanged = debounce((keyword: string) => {
     searchValue.current = keyword;

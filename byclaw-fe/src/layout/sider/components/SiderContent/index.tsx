@@ -14,6 +14,7 @@ const SearchAndQuery = lazy(() => import('@/layout/sider/components/SearchAndQue
 const ToolSiderPanel = () => <ResourceSiderPanel resourceType="TOOL" />;
 const ViewSiderPanel = () => <ResourceSiderPanel resourceType="VIEW" />;
 const ObjectSiderPanel = () => <ResourceSiderPanel resourceType="OBJECT" />;
+const SkillSiderPanel = () => <ResourceSiderPanel resourceType="SKILL" />;
 
 export const tabItems: any[] = [
   {
@@ -75,6 +76,15 @@ export const tabItems: any[] = [
     label: 'common.resourceType.object',
     ChildComponent: ObjectSiderPanel,
     navigatePath: '/objectCenter',
+    // hideSider: true,
+  },
+  {
+    key: 'skill',
+    icon: 'icon-chajian',
+    activeIcon: 'icon-chajian-fill',
+    label: 'common.skill',
+    ChildComponent: SkillSiderPanel,
+    navigatePath: '/skillCenter',
     // hideSider: true,
   },
 ] as const;

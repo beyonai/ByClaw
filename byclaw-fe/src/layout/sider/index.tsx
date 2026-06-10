@@ -44,7 +44,10 @@ const getCurrentTabByPathname = (pathname: string) => {
 };
 
 const Sidebar = () => {
-  const { pathname } = useLocation();
+  const location = useLocation();
+  const { pathname } = location;
+  const keepSiderActiveKey = (location.state as { keepSiderActiveKey?: (typeof tabItems)[number]['key'] } | null)
+    ?.keepSiderActiveKey;
 
   const { isSiderCollapsed, setSiderCollapsed } = useAppStore();
   const { EventEmitter } = useGlobal();
@@ -154,6 +157,16 @@ const Sidebar = () => {
   React.useEffect(() => {
     const hasKey = myTabItems.find((tab) => tab.key === currentTab?.key);
     const pathnameChanged = pathnameRef.current !== pathname;
+    const keepSiderActiveTab = keepSiderActiveKey && myTabItems.find((tab) => tab.key === keepSiderActiveKey);
+
+    if (pathnameChanged && keepSiderActiveTab) {
+      pathnameRef.current = pathname;
+      setManualSiderOpenKey(keepSiderActiveKey);
+      setActiveKey(keepSiderActiveKey);
+      setSiderContentWidth(DEFAULT_SIDER_CONTENT_WIDTH);
+      return;
+    }
+
     const shouldSyncActiveKey = Boolean(currentTab && hasKey && (pathnameChanged || !manualSiderOpenKey));
     const nextActiveKey = shouldSyncActiveKey ? currentTab?.key : activeKey;
     const nextManualSiderOpenKey = pathnameChanged ? undefined : manualSiderOpenKey;
@@ -169,7 +182,7 @@ const Sidebar = () => {
     if (shouldSyncActiveKey && currentTab) {
       setActiveKey(currentTab.key);
     }
-  }, [activeKey, currentTab, manualSiderOpenKey, myTabItems, pathname]);
+  }, [activeKey, currentTab, keepSiderActiveKey, manualSiderOpenKey, myTabItems, pathname]);
 
   if (!userInfo) return null;
 
