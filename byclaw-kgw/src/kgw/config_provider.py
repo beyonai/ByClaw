@@ -1,10 +1,9 @@
-"""Knowledge-base configuration provider (MinIO).
+"""Knowledge-base configuration provider (Redis).
 
-Configuration for each KB is stored in MinIO as
-``{prefix}{kn_code}.json`` (default prefix: ``resource/doc/KG_DOC_``).
-Every ``get_kb_config`` call reads MinIO directly — no caching — so the
-gateway always reflects the portal's current state. This matches v5
-spec §3.3.
+Configuration for each KB is stored in Redis as
+``KG_DOC_{kn_code}``.  Every ``get_kb_config`` call reads Redis
+directly — no caching — so the gateway always reflects the portal's
+current state.  This matches v5 spec §3.3.
 """
 
 from __future__ import annotations
@@ -13,8 +12,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-import aioboto3
-from botocore.exceptions import ClientError
+import redis.asyncio as redis_async
+from kgw.dispatcher import KbOp
 from kgw.observability.logger import get_logger
 
 _log = get_logger(__name__)
@@ -49,60 +48,26 @@ class KbConfig:
 
 
 class KbConfigProvider:
-    """Async MinIO reader for KB configuration JSON.
+    """Async Redis reader for KB configuration JSON.
 
     Modeled after byclaw-qa ``MinioResourceClient.get_kg_doc_config()``
     so the JSON shape stays compatible with existing portal-managed
     objects.
     """
 
-    def __init__(
-        self,
-        *,
-        endpoint_url: str,
-        access_key: str,
-        secret_key: str,
-        bucket: str,
-        prefix: str = "resource/doc/KG_DOC_",
-        session: aioboto3.Session | None = None,
-    ) -> None:
-        self._endpoint_url = endpoint_url
-        self._access_key = access_key
-        self._secret_key = secret_key
-        self._bucket = bucket
-        self._prefix = prefix
-        self._session = session or aioboto3.Session()
-
-    def _client(self):
-        return self._session.client(
-            "s3",
-            endpoint_url=self._endpoint_url,
-            aws_access_key_id=self._access_key,
-            aws_secret_access_key=self._secret_key,
-        )
+    def __init__(self, *, redis_client: redis_async.Redis) -> None:
+        self._redis = redis_client
 
     async def get_kb_config(self, kn_code: str) -> KbConfig | None:
-        """Return parsed KB config or None when the object is absent."""
-        key = f"{self._prefix}{kn_code}.json"
-        async with self._client() as s3:
-            try:
-                resp = await s3.get_object(Bucket=self._bucket, Key=key)
-            except ClientError as exc:
-                code = exc.response.get("Error", {}).get("Code")
-                if code in {"NoSuchKey", "404", "NoSuchBucket"}:
-                    _log.info("kb_config.not_found", kn_code=kn_code, key=key)
-                    return None
-                _log.error(
-                    "kb_config.fetch_error",
-                    kn_code=kn_code,
-                    key=key,
-                    error_code=code,
-                )
-                raise
-            body = await resp["Body"].read()
+        """Return parsed KB config or None when the key is absent."""
+        key = f"KG_DOC_{kn_code}"
+        raw = await self._redis.get(key)
+        if raw is None:
+            _log.info("kb_config.not_found", kn_code=kn_code, key=key)
+            return None
 
         try:
-            payload = json.loads(body.decode("utf-8"))
+            payload = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             _log.error("kb_config.parse_error", kn_code=kn_code, key=key, err=str(exc))
             raise
@@ -111,8 +76,6 @@ class KbConfigProvider:
 
 
 # Map portal KG_DOC operationId → gateway KbOp name (from dispatcher.py)
-from kgw.dispatcher import KbOp  # noqa: PLC0415
-
 _OPERATION_ID_MAP: dict[str, str] = {
     "createDir": KbOp.DIRECTORY_CREATE.value,
     "editDir": KbOp.DIRECTORY_UPDATE.value,
@@ -144,7 +107,7 @@ def _parse_kb_config(kn_code: str, payload: dict[str, Any]) -> KbConfig:
     """Translate the portal's KG_DOC JSON shape into a KbConfig record.
 
     The portal stores two different identifiers in KG_DOC:
-    - ``resourceId``  (the MinIO object key suffix, used as kn_code here)
+    - ``resourceId``  (the Redis key suffix, used as kn_code here)
     - ``resourceCode``(the identifier the KB backend recognises — used in
                        the knCode/knCodeList body field when calling the KB)
 
@@ -175,7 +138,7 @@ def _parse_kb_config(kn_code: str, payload: dict[str, Any]) -> KbConfig:
             for api_path, methods in (schema.get("paths") or {}).items():
                 if not isinstance(methods, dict):
                     continue
-                for _method, spec in methods.items():
+                for _, spec in methods.items():
                     if not isinstance(spec, dict):
                         continue
                     op_id = spec.get("operationId")

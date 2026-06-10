@@ -44,7 +44,6 @@ _TABLES_TO_DROP = (
 async def _mp_resources(  # pylint: disable=redefined-outer-name
     pg_dsn,
     redis_url,
-    minio_settings,  # pylint: disable=unused-argument
 ) -> AsyncIterator[tuple[httpx.AsyncClient, Any]]:
     """Build real app wired to DB+Redis; yield (client, pool); teardown after."""
     from kgw.audit import AuditWriter
@@ -67,18 +66,7 @@ async def _mp_resources(  # pylint: disable=redefined-outer-name
         timeout_seconds=10.0, max_connections=20, max_keepalive=5
     )
 
-    scheme = "https" if settings.file_storage_minio_secure else "http"
-    minio_ep = (
-        f"{scheme}://{settings.file_storage_minio_host}"
-        f":{settings.file_storage_minio_api_port}"
-    )
-    config_provider = KbConfigProvider(
-        endpoint_url=minio_ep,
-        access_key=settings.minio_access_key,
-        secret_key=settings.minio_secret_key,
-        bucket=settings.minio_bucket,
-        prefix=settings.minio_kg_doc_prefix,
-    )
+    config_provider = KbConfigProvider(redis_client=redis_client)
     auth_provider = AuthProvider(
         redis_client, key_template=settings.redis_auth_key_template
     )

@@ -171,8 +171,8 @@ _ALL_SERVICES: list[dict] = [
     ),
 ]
 
-_DIRECT_MINIO_KEY = f"resource/doc/KG_DOC_{_KN_DIRECT}.json"
-_DISCOV_MINIO_KEY = f"resource/doc/KG_DOC_{_KN_DISCOV}.json"
+_DIRECT_REDIS_KEY = f"KG_DOC_{_KN_DIRECT}"
+_DISCOV_REDIS_KEY = f"KG_DOC_{_KN_DISCOV}"
 
 _TABLES_TO_DROP = (
     "kgw_ingest_event",
@@ -235,20 +235,18 @@ async def _retry_on_loop_error(factory, max_retries=3):
 async def _app_resources(
     pg_dsn: str,
     redis_url: str,
-    minio_settings: dict[str, str],
 ) -> AsyncIterator[tuple[httpx.AsyncClient, Any, Any]]:
     """Build the gateway app wired to the running byclaw-qa backend.
 
     1. Verify byclaw-qa is reachable
-    2. Seed KB configs in MinIO
+    2. Seed KB configs in Redis
     3. Build byclaw-kgw app
     4. Yield (client, pool, app)
-    5. Teardown: drop kgw tables, cleanup MinIO
+    5. Teardown: drop kgw tables, cleanup Redis KB configs
     """
     # ---- 1. Start byclaw-qa as independent subprocess ----
     import subprocess
 
-    import aioboto3
     from kgw.audit import AuditWriter
     from kgw.auth_provider import AuthProvider
     from kgw.config_provider import KbConfigProvider
@@ -304,7 +302,7 @@ async def _app_resources(
                 _rc = body["resultObject"]["knCode"]
                 _resource_codes[label] = str(_rc)
 
-    # ---- 3. Seed KB configs in MinIO (with dynamic resourceCode) ----
+    # ---- 3. Seed KB configs in Redis (with dynamic resourceCode) ----
     direct_config = {
         "resourceId": int(_KN_DIRECT),
         "resourceCode": _resource_codes.get("direct", _RESOURCE_CODE_DIRECT),
@@ -321,23 +319,6 @@ async def _app_resources(
         "headers": {"Beyond-Token": "${Beyond-Token}", "Sso-Token": "${Sso-Token}"},
         "resourceService": _ALL_SERVICES,
     }
-    bucket = minio_settings["bucket"]
-    async with aioboto3.Session().client(
-        "s3",
-        endpoint_url=minio_settings["endpoint_url"],
-        aws_access_key_id=minio_settings["access_key"],
-        aws_secret_access_key=minio_settings["secret_key"],
-    ) as s3:
-        for key, config in [
-            (_DIRECT_MINIO_KEY, direct_config),
-            (_DISCOV_MINIO_KEY, discov_config),
-        ]:
-            await s3.put_object(
-                Bucket=bucket,
-                Key=key,
-                Body=json.dumps(config).encode(),
-                ContentType="application/json",
-            )
 
     # ---- 4. Build byclaw-kgw gateway ----
     get_settings.cache_clear()
@@ -363,22 +344,18 @@ async def _app_resources(
         },
     )
 
+    # Seed KB configs in Redis
+    for key, config in [
+        (_DIRECT_REDIS_KEY, direct_config),
+        (_DISCOV_REDIS_KEY, discov_config),
+    ]:
+        await redis_client.set(key, json.dumps(config))
+
     http_client = build_http_client(
         timeout_seconds=30.0, max_connections=20, max_keepalive=5
     )
 
-    scheme = "https" if settings.file_storage_minio_secure else "http"
-    minio_ep = (
-        f"{scheme}://{settings.file_storage_minio_host}"
-        f":{settings.file_storage_minio_api_port}"
-    )
-    config_provider = KbConfigProvider(
-        endpoint_url=minio_ep,
-        access_key=settings.minio_access_key,
-        secret_key=settings.minio_secret_key,
-        bucket=settings.minio_bucket,
-        prefix=settings.minio_kg_doc_prefix,
-    )
+    config_provider = KbConfigProvider(redis_client=redis_client)
     auth_provider = AuthProvider(
         redis_client, key_template=settings.redis_auth_key_template
     )
@@ -431,16 +408,10 @@ async def _app_resources(
     except RuntimeError:
         pass
 
-    # Cleanup MinIO KB configs
+    # Cleanup Redis KB configs
     try:
-        async with aioboto3.Session().client(
-            "s3",
-            endpoint_url=minio_settings["endpoint_url"],
-            aws_access_key_id=minio_settings["access_key"],
-            aws_secret_access_key=minio_settings["secret_key"],
-        ) as s3:
-            for key in [_DIRECT_MINIO_KEY, _DISCOV_MINIO_KEY]:
-                await s3.delete_object(Bucket=bucket, Key=key)
+        for key in [_DIRECT_REDIS_KEY, _DISCOV_REDIS_KEY]:
+            await redis_client.delete(key)
     except Exception:  # noqa: BLE001
         pass
 

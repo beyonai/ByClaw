@@ -56,8 +56,6 @@ def test_settings_loads_shared_env(monkeypatch: pytest.MonkeyPatch):
     assert s.minio_secret_key == "sk"
     assert s.minio_bucket == "byclaw"
     assert s.minio_secure is False
-    # KGW-specific defaults (not in repo .env, hard-coded)
-    assert s.minio_kg_doc_prefix == "resource/doc/KG_DOC_"
     assert s.redis_auth_key_template == "user:{user_code}:login:auth"
     assert s.http_default_timeout_seconds == 30.0
 

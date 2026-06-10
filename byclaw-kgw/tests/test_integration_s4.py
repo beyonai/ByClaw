@@ -57,7 +57,7 @@ _KB_CONFIG = {
     ],
 }
 
-_KB_MINIO_KEY = f"resource/doc/KG_DOC_{_KN_CODE}.json"
+_KB_REDIS_KEY = f"KG_DOC_{_KN_CODE}"
 
 _TABLES_TO_DROP = (
     "kgw_metadata_property_sync",
@@ -81,10 +81,8 @@ _TABLES_TO_DROP = (
 async def _s4_resources(
     pg_dsn,
     redis_url,
-    minio_settings,
 ) -> AsyncIterator[tuple[httpx.AsyncClient, Any, Any]]:
-    """Build real app wired to DB+Redis; seed KB config in MinIO; yield (client, pool, app)."""
-    import aioboto3
+    """Build real app wired to DB+Redis; seed KB config in Redis; yield (client, pool, app)."""
     from kgw.audit import AuditWriter
     from kgw.auth_provider import AuthProvider
     from kgw.config_provider import KbConfigProvider
@@ -96,42 +94,20 @@ async def _s4_resources(
 
     get_settings.cache_clear()
     settings = get_settings()
-    bucket = minio_settings["bucket"]
-
-    # Seed KB config — new Session, fully closed before yield
-    async with aioboto3.Session().client(
-        "s3",
-        endpoint_url=minio_settings["endpoint_url"],
-        aws_access_key_id=minio_settings["access_key"],
-        aws_secret_access_key=minio_settings["secret_key"],
-    ) as s3:
-        await s3.put_object(
-            Bucket=bucket,
-            Key=_KB_MINIO_KEY,
-            Body=json.dumps(_KB_CONFIG).encode(),
-            ContentType="application/json",
-        )
 
     pool = await build_pool(pg_dsn, min_size=1, max_size=5)
     await run_migrations(pool, _SQL_DIR)
 
     redis_client = redis_async.from_url(redis_url, decode_responses=False)
+
+    # Seed KB config in Redis
+    await redis_client.set(_KB_REDIS_KEY, json.dumps(_KB_CONFIG))
+
     http_client = build_http_client(
         timeout_seconds=10.0, max_connections=20, max_keepalive=5
     )
 
-    scheme = "https" if settings.file_storage_minio_secure else "http"
-    minio_ep = (
-        f"{scheme}://{settings.file_storage_minio_host}"
-        f":{settings.file_storage_minio_api_port}"
-    )
-    config_provider = KbConfigProvider(
-        endpoint_url=minio_ep,
-        access_key=settings.minio_access_key,
-        secret_key=settings.minio_secret_key,
-        bucket=settings.minio_bucket,
-        prefix=settings.minio_kg_doc_prefix,
-    )
+    config_provider = KbConfigProvider(redis_client=redis_client)
     auth_provider = AuthProvider(
         redis_client, key_template=settings.redis_auth_key_template
     )
@@ -166,15 +142,9 @@ async def _s4_resources(
 
     await pool.close()
 
-    # Cleanup MinIO — new Session, fully closed within this block
+    # Cleanup Redis KB config
     try:
-        async with aioboto3.Session().client(
-            "s3",
-            endpoint_url=minio_settings["endpoint_url"],
-            aws_access_key_id=minio_settings["access_key"],
-            aws_secret_access_key=minio_settings["secret_key"],
-        ) as s3:
-            await s3.delete_object(Bucket=bucket, Key=_KB_MINIO_KEY)
+        await redis_client.delete(_KB_REDIS_KEY)
     except Exception:  # noqa: BLE001
         pass
 

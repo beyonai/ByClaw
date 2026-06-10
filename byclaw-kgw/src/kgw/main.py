@@ -45,11 +45,6 @@ def _sql_dir() -> Path:
     raise FileNotFoundError("sql/ directory not found")
 
 
-def _build_minio_endpoint(settings: Settings) -> str:
-    scheme = "https" if settings.file_storage_minio_secure else "http"
-    return f"{scheme}://{settings.file_storage_minio_host}:{settings.file_storage_minio_api_port}"
-
-
 @asynccontextmanager
 async def _lifespan(app: FastAPI):  # pylint: disable=redefined-outer-name
     settings: Settings = get_settings()
@@ -70,13 +65,7 @@ async def _lifespan(app: FastAPI):  # pylint: disable=redefined-outer-name
         max_keepalive=settings.http_pool_max_keepalive,
     )
 
-    config_provider = KbConfigProvider(
-        endpoint_url=_build_minio_endpoint(settings),
-        access_key=settings.minio_access_key,
-        secret_key=settings.minio_secret_key,
-        bucket=settings.minio_bucket,
-        prefix=settings.minio_kg_doc_prefix,
-    )
+    config_provider = KbConfigProvider(redis_client=redis_client)
     auth_provider = AuthProvider(
         redis_client, key_template=settings.redis_auth_key_template
     )

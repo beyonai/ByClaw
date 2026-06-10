@@ -24,13 +24,6 @@ def _mock_settings(monkeypatch):
     mock_s.http_default_timeout_seconds = 5.0
     mock_s.http_pool_max_connections = 10
     mock_s.http_pool_max_keepalive = 5
-    mock_s.file_storage_minio_host = "minio"
-    mock_s.file_storage_minio_api_port = 9000
-    mock_s.file_storage_minio_secure = False
-    mock_s.minio_access_key = "ak"
-    mock_s.minio_secret_key = "sk"
-    mock_s.minio_bucket = "byclaw"
-    mock_s.minio_kg_doc_prefix = "resource/doc/KG_DOC_"
     mock_s.redis_auth_key_template = "user:{user_code}:login:auth"
     mock_s.audit_queue_max_size = 100
     mock_s.circuit_failure_threshold = 5

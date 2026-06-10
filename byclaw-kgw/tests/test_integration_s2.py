@@ -19,7 +19,7 @@ from httpx import ASGITransport
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="module")]
 
-# --- KB config seeded into MinIO for all S2 integration tests ---
+# --- KB config seeded into Redis for all S2 integration tests ---
 _KN_CODE = "test_kb_s2"
 _RESOURCE_CODE = "backend_s2_1"
 _KB_CONFIG = {
@@ -36,23 +36,21 @@ _KB_CONFIG = {
         {"name": "buildStatus", "path": "/api/v1/fileBuildStatus"},
     ],
 }
-_KB_MINIO_KEY = f"resource/doc/KG_DOC_{_KN_CODE}.json"
+_KB_REDIS_KEY = f"KG_DOC_{_KN_CODE}"
 
 
 @pytest_asyncio.fixture(loop_scope="module", scope="module")
-async def s2_client(pg_dsn, redis_url, minio_settings) -> AsyncIterator:  # pylint: disable=unused-argument,redefined-outer-name
+async def s2_client(pg_dsn, redis_url) -> AsyncIterator:  # pylint: disable=unused-argument,redefined-outer-name
     """Full app with real DB + Redis, KB config seeded in MinIO, KB backend mocked.
 
     Manually wires app.state instead of using lifespan to avoid connection
     issues in background test environments.
 
-    Key rule: every aioboto3 Session is created AND fully closed within a single
-    async-with block — never stored across a yield boundary (S1 integration
-    test pattern).
+    Key rule: Redis client is created once and shared — same pattern as
+    the production lifespan.
     """
     from pathlib import Path
 
-    import aioboto3
     from kgw.audit import AuditWriter
     from kgw.auth_provider import AuthProvider
     from kgw.config_provider import KbConfigProvider
@@ -65,39 +63,20 @@ async def s2_client(pg_dsn, redis_url, minio_settings) -> AsyncIterator:  # pyli
     sql_dir = Path(__file__).resolve().parent.parent / "sql"
     get_settings.cache_clear()
     settings = get_settings()
-    bucket = minio_settings["bucket"]
-
-    # Seed KB config — new Session, fully closed before yield
-    async with aioboto3.Session().client(
-        "s3",
-        endpoint_url=minio_settings["endpoint_url"],
-        aws_access_key_id=minio_settings["access_key"],
-        aws_secret_access_key=minio_settings["secret_key"],
-    ) as s3:
-        await s3.put_object(
-            Bucket=bucket,
-            Key=_KB_MINIO_KEY,
-            Body=json.dumps(_KB_CONFIG).encode(),
-            ContentType="application/json",
-        )
 
     pool = await build_pool(pg_dsn, min_size=1, max_size=5)
     await run_migrations(pool, sql_dir)
 
     redis_client = redis_async.from_url(redis_url, decode_responses=False)
+
+    # Seed KB config in Redis
+    await redis_client.set(_KB_REDIS_KEY, json.dumps(_KB_CONFIG))
+
     http_client = build_http_client(
         timeout_seconds=10.0, max_connections=20, max_keepalive=5
     )
 
-    scheme = "https" if settings.file_storage_minio_secure else "http"
-    minio_ep = f"{scheme}://{settings.file_storage_minio_host}:{settings.file_storage_minio_api_port}"
-    config_provider = KbConfigProvider(
-        endpoint_url=minio_ep,
-        access_key=settings.minio_access_key,
-        secret_key=settings.minio_secret_key,
-        bucket=settings.minio_bucket,
-        prefix=settings.minio_kg_doc_prefix,
-    )
+    config_provider = KbConfigProvider(redis_client=redis_client)
     auth_provider = AuthProvider(
         redis_client, key_template=settings.redis_auth_key_template
     )
@@ -125,15 +104,9 @@ async def s2_client(pg_dsn, redis_url, minio_settings) -> AsyncIterator:  # pyli
     await redis_client.aclose()
     await pool.close()
 
-    # Cleanup — new Session, fully closed within this block
+    # Cleanup Redis KB config
     try:
-        async with aioboto3.Session().client(
-            "s3",
-            endpoint_url=minio_settings["endpoint_url"],
-            aws_access_key_id=minio_settings["access_key"],
-            aws_secret_access_key=minio_settings["secret_key"],
-        ) as s3:
-            await s3.delete_object(Bucket=bucket, Key=_KB_MINIO_KEY)
+        await redis_client.delete(_KB_REDIS_KEY)
     except Exception:  # noqa: BLE001
         pass
 

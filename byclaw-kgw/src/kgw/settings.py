@@ -67,9 +67,6 @@ class Settings(BaseSettings):
         default=False, alias="FILE_STORAGE_MINIO_SECURE"
     )
 
-    # KGW-specific defaults (not in repo .env, hard-coded as portal contract)
-    minio_kg_doc_prefix: str = "resource/doc/KG_DOC_"
-
     # ---- HTTP client ----
     http_default_timeout_seconds: float = 30.0
     http_pool_max_connections: int = 200
