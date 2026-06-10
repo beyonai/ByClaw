@@ -500,7 +500,8 @@ function useChat(props: IProps) {
     const { queryQuestion, payload = {}, msgOpt = {} } = sendProps;
     const isResumeChat = get(payload, 'actionType') === 'RESUME';
     let isContinuingRunningTrace = false;
-    if (isSessionRunning) {
+    // 不要用 isSessionRunning，因为 isSessionRunning 是异步的，这里需要同步判断
+    if (chatSessionRuntimeManager.isSessionRunning(sessionId)) {
       if (!isResumeChat) {
         return false;
       }
