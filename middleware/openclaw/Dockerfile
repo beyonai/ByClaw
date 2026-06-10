@@ -67,7 +67,7 @@ RUN set -eux; \
 
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS python312
 
-FROM ghcr.io/openclaw/openclaw:2026.5.28-beta.4
+FROM ghcr.io/openclaw/openclaw:2026.6.1
 
 USER root
 
