@@ -44,6 +44,7 @@ public class RunningOutputStreamRegistry {
         value.put("instanceId", instanceId);
         value.put("token", ctx.runningOutputStreamToken);
         value.put("sessionId", ctx.sessionId);
+        value.put("userMessageId", ctx.userMessageId);
         value.put("modelAnswerMessageId", ctx.modelAnswerMessageId);
         value.put("traceId", ctx.traceId);
         value.put("clientRequestId", ctx.clientRequestId);
@@ -53,6 +54,7 @@ public class RunningOutputStreamRegistry {
             value.put("agentId", ctx.assistantChatDto.getAgentId());
             value.put("agentCode", ctx.assistantChatDto.getAgentCode());
             value.put("agentType", ctx.assistantChatDto.getAgentType());
+            value.put("chatContent", ctx.assistantChatDto.getChatContent());
         }
         redisTemplate.opsForValue().set(buildKey(ctx.sessionId), value.toJSONString(), RUNNING_TTL_SECONDS,
             TimeUnit.SECONDS);
@@ -166,6 +168,7 @@ public class RunningOutputStreamRegistry {
             info.setSessionId(running.getLong("sessionId"));
             info.setRunning(true);
             info.setTraceId(running.getString("traceId"));
+            info.setUserMessageId(running.getLong("userMessageId"));
             info.setClientRequestId(running.getString("clientRequestId"));
             info.setModelAnswerMessageId(running.getLong("modelAnswerMessageId"));
             info.setTransport(running.getString("transport"));
@@ -173,6 +176,7 @@ public class RunningOutputStreamRegistry {
             info.setAgentId(running.getLong("agentId"));
             info.setAgentCode(running.getString("agentCode"));
             info.setAgentType(running.getString("agentType"));
+            info.setChatContent(running.getString("chatContent"));
             Long ttl = redisTemplate.getExpire(key, TimeUnit.SECONDS);
             info.setTtlSeconds(ttl == null ? null : ttl);
             return info;

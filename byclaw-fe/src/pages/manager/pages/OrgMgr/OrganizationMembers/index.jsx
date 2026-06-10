@@ -254,13 +254,13 @@ const OrganizationMembers = ({ selectedOrg, setEmployeeVisible, setBaseVisible, 
       </div>
       {activeTab !== 'orgMember' && (
         <div className={styles.filter}>
-          <TreeFilter
+          {/* <TreeFilter
             title={intl.formatMessage({ id: 'orgMgr.filter.type' })}
             treeData={typeOptions}
             selectedList={selectValue}
             onOk={(v) => setSelectValue(v)}
             mode="radio"
-          />
+          /> */}
           <FieldFilter
             selectedList={fieldSelect}
             onOk={(v) => {

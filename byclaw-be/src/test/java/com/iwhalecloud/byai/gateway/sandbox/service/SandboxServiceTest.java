@@ -72,7 +72,7 @@ class SandboxServiceTest {
         ReflectionTestUtils.setField(sandboxService, "renewAheadSeconds", 120L);
 
         SandboxLaunchRouting routing = new SandboxLaunchRouting("openclaw", SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
-        when(sandboxLaunchContextFactory.resolveRouting(123L)).thenReturn(routing);
+        when(sandboxLaunchContextFactory.resolveRouting(123L, "user001")).thenReturn(routing);
 
         SsSandboxRecord record = new SsSandboxRecord();
         record.setId(1L);

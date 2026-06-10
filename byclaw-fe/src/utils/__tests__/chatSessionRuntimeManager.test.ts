@@ -8,14 +8,12 @@ describe('utils/chatSessionRuntimeManager', () => {
   it('tracks running state by request and session', () => {
     chatSessionRuntimeManager.register({
       clientRequestId: 'client-req-1',
-      answerClientMsgId: 'answer-client-1',
     });
 
     expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
 
     chatSessionRuntimeManager.bindSession('client-req-1', 's1');
     expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
-    expect(chatSessionRuntimeManager.getBySession('s1')?.answerClientMsgId).toBe('answer-client-1');
 
     chatSessionRuntimeManager.complete('client-req-1');
     expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
@@ -25,6 +23,7 @@ describe('utils/chatSessionRuntimeManager', () => {
     chatSessionRuntimeManager.hydrateRunning({
       sessionId: 's1',
       running: true,
+      clientRequestId: 'server-1',
       traceId: 'q1_a1',
       modelAnswerMessageId: 'a1',
     });
@@ -35,6 +34,7 @@ describe('utils/chatSessionRuntimeManager', () => {
     chatSessionRuntimeManager.hydrateRunning({
       sessionId: 's1',
       running: false,
+      clientRequestId: 'server-1',
     });
 
     expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
@@ -43,7 +43,6 @@ describe('utils/chatSessionRuntimeManager', () => {
   it('does not mark an existing local running state as restored', () => {
     chatSessionRuntimeManager.register({
       clientRequestId: 'local-1',
-      answerClientMsgId: 'local-1',
       sessionId: 's1',
       restored: false,
     });
@@ -51,7 +50,7 @@ describe('utils/chatSessionRuntimeManager', () => {
     chatSessionRuntimeManager.hydrateRunning({
       sessionId: 's1',
       running: true,
-      clientRequestId: 'server-1',
+      clientRequestId: 'local-1',
       traceId: 'q1_a1',
       modelAnswerMessageId: 'a1',
     });
@@ -67,12 +66,12 @@ describe('utils/chatSessionRuntimeManager', () => {
     chatSessionRuntimeManager.hydrateRunning({
       sessionId: 's1',
       running: true,
-      clientRequestId: 'server-1',
+      clientRequestId: 'local-1',
       traceId: 'q1_a1',
       modelAnswerMessageId: 'a1',
     });
 
-    chatSessionRuntimeManager.updateLastAppliedStreamId('server-1', '1710000000000-1');
+    chatSessionRuntimeManager.updateLastAppliedStreamId('local-1', '1710000000000-1');
 
     expect(chatSessionRuntimeManager.getBySession('s1')?.lastAppliedStreamId).toBe('1710000000000-1');
   });

@@ -44,7 +44,7 @@ public class ObjectStorageConfiguration {
 
     /**
      * 当前线程切换储存类型
-     * 
+     *
      * @param storageType 类型
      */
     public static void setStorageType(String storageType) {
@@ -53,7 +53,7 @@ public class ObjectStorageConfiguration {
 
     /**
      * 存储类型如果当前线程有指定，优先返回当前线程，没有则使用默认存储方案
-     * 
+     *
      * @return String
      */
     public String getStorageType() {
@@ -136,7 +136,6 @@ public class ObjectStorageConfiguration {
         String paramValue = null;
 
         if (StringUtils.isEmpty(paramValue)) {
-            log.warn("桶配置 {} 的配置值为空", bucketConfig.getConfigCode());
             return null;
         }
 

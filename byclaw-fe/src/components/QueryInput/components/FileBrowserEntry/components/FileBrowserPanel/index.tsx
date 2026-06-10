@@ -93,6 +93,7 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
   const [createFolderLoading, setCreateFolderLoading] = useState(false);
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [createFolderName, setCreateFolderName] = useState('');
+  const [downloadingPaths, setDownloadingPaths] = useState<Set<string>>(new Set());
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('none');
   const [searchKeyword, setSearchKeyword] = useState('');
@@ -272,7 +273,10 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
 
   const handleDownload = useCallback(
     async (item: FileBrowserItem) => {
+      if (downloadingPaths.has(item.path)) return;
+      setDownloadingPaths((prev) => new Set(prev).add(item.path));
       try {
+        message.loading({ content: t('fileBrowser.download.folderDownloading'), key: 'fileDownload', duration: 0 });
         const res: any = await downloadFile(resourceId, item.path);
         const blob = res?.file instanceof Blob ? res.file : new Blob([res?.file || res]);
         const url = URL.createObjectURL(blob);
@@ -283,15 +287,25 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+        message.destroy('fileDownload');
       } catch (e: any) {
+        message.destroy('fileDownload');
         message.error(e?.message || t('fileBrowser.download.failed'));
+      } finally {
+        setDownloadingPaths((prev) => {
+          const next = new Set(prev);
+          next.delete(item.path);
+          return next;
+        });
       }
     },
-    [resourceId, t]
+    [resourceId, t, downloadingPaths]
   );
 
   const handleDownloadFolder = useCallback(
     async (item: FileBrowserItem) => {
+      if (downloadingPaths.has(item.path)) return;
+      setDownloadingPaths((prev) => new Set(prev).add(item.path));
       try {
         message.loading({ content: t('fileBrowser.download.folderDownloading'), key: 'folderDownload', duration: 0 });
         const res: any = await downloadFolder(resourceId, item.path);
@@ -308,9 +322,15 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
       } catch (e: any) {
         message.destroy('folderDownload');
         message.error(e?.message || t('fileBrowser.download.failed'));
+      } finally {
+        setDownloadingPaths((prev) => {
+          const next = new Set(prev);
+          next.delete(item.path);
+          return next;
+        });
       }
     },
-    [resourceId, t]
+    [resourceId, t, downloadingPaths]
   );
 
   const handleDelete = useCallback(
@@ -497,6 +517,7 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
       actions.push({
         label: t('fileBrowser.action.download'),
         key: 'download',
+        disabled: downloadingPaths.has(record.path),
         icon: (
           <Tooltip title={t('fileBrowser.action.download')}>
             <span className="iconfont icon-a-Downloadxiazai" />
@@ -536,7 +557,7 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
 
       return actions;
     },
-    [t, isSearching]
+    [t, isSearching, downloadingPaths]
   );
 
   const columns = useMemo(
@@ -736,24 +757,26 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
         }}
       >
         <Spin spinning={previewInfo.loading} wrapperClassName="full-height-spin" style={{ flex: 1, minHeight: 0 }}>
-          {previewInfo.blob && (
-            <React.Suspense fallback={null}>
-              <PreViewFile
-                data={previewInfo.blob}
-                type={previewInfo.fileType}
-                title={previewInfo.fileName}
-                className={styles.preview}
-                extra={
-                  <span
-                    className={styles.previewClose}
-                    onClick={() => setPreviewInfo((prev) => ({ ...prev, open: false, blob: null }))}
-                  >
-                    <AntdIcon type="icon-a-Closeguanbi1" />
-                  </span>
-                }
-              />
-            </React.Suspense>
-          )}
+          <div className="ub full-height">
+            {previewInfo.blob && (
+              <React.Suspense fallback={null}>
+                <PreViewFile
+                  data={previewInfo.blob}
+                  type={previewInfo.fileType}
+                  title={previewInfo.fileName}
+                  className={styles.preview}
+                  extra={
+                    <span
+                      className={styles.previewClose}
+                      onClick={() => setPreviewInfo((prev) => ({ ...prev, open: false, blob: null }))}
+                    >
+                      <AntdIcon type="icon-a-Closeguanbi1" />
+                    </span>
+                  }
+                />
+              </React.Suspense>
+            )}
+          </div>
         </Spin>
       </Modal>
     </div>

@@ -15,6 +15,8 @@ HAS_FE=false
 HAS_BE=false
 HAS_EXE=false
 HAS_DATA=false
+HAS_KGW=false
+HAS_SUPPER=false
 
 for file in $STAGED_FILES; do
   case "$file" in
@@ -22,6 +24,8 @@ for file in $STAGED_FILES; do
     byclaw-be/*) HAS_BE=true ;;
     byclaw-exe/*) HAS_EXE=true ;;
     byclaw-data/*) HAS_DATA=true ;;
+    byclaw-kgw/*) HAS_KGW=true ;;
+    byclaw-supper/*) HAS_SUPPER=true ;;
   esac
 done
 
@@ -117,9 +121,47 @@ if [ "$HAS_DATA" = true ]; then
 fi
 
 # ────────────────────────────────────────────────────────────
+# Python (byclaw-kgw) checks: pre-commit
+# ────────────────────────────────────────────────────────────
+if [ "$HAS_KGW" = true ]; then
+  echo "🔍 [pre-commit] Running byclaw-kgw checks..."
+
+  if command -v pre-commit >/dev/null 2>&1; then
+    pre-commit run --config byclaw-kgw/.pre-commit-config.yaml
+    if [ $? -ne 0 ]; then
+      echo "❌ [pre-commit] byclaw-kgw checks failed"
+      EXIT_CODE=1
+    else
+      echo "✅ [pre-commit] byclaw-kgw checks passed"
+    fi
+  else
+    echo "⚠️  [pre-commit] pre-commit not found, skipping byclaw-kgw checks"
+  fi
+fi
+
+# ────────────────────────────────────────────────────────────
+# Python (byclaw-supper) checks: pre-commit
+# ────────────────────────────────────────────────────────────
+if [ "$HAS_SUPPER" = true ]; then
+  echo "🔍 [pre-commit] Running byclaw-supper checks..."
+
+  if command -v pre-commit >/dev/null 2>&1; then
+    pre-commit run --config byclaw-supper/.pre-commit-config.yaml
+    if [ $? -ne 0 ]; then
+      echo "❌ [pre-commit] byclaw-supper checks failed"
+      EXIT_CODE=1
+    else
+      echo "✅ [pre-commit] byclaw-supper checks passed"
+    fi
+  else
+    echo "⚠️  [pre-commit] pre-commit not found, skipping byclaw-supper checks"
+  fi
+fi
+
+# ────────────────────────────────────────────────────────────
 # Summary
 # ────────────────────────────────────────────────────────────
-if [ "$HAS_FE" = false ] && [ "$HAS_BE" = false ] && [ "$HAS_EXE" = false ] && [ "$HAS_DATA" = false ]; then
+if [ "$HAS_FE" = false ] && [ "$HAS_BE" = false ] && [ "$HAS_EXE" = false ] && [ "$HAS_DATA" = false ] && [ "$HAS_KGW" = false ] && [ "$HAS_SUPPER" = false ]; then
   echo "⏭️  [pre-commit] No module changes detected, skipping checks"
 fi
 

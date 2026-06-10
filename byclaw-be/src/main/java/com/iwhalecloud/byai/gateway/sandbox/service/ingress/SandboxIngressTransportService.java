@@ -104,7 +104,6 @@ public class SandboxIngressTransportService {
         }
         String contentType = request.getContentType();
         MediaType mediaType = StringUtils.hasText(contentType) ? MediaType.parse(contentType) : null;
-        long contentLength = request.getContentLengthLong();
         boolean hasRequestBody = hasRequestBody(request);
         if (!requiresRequestBody(method) && !hasRequestBody) {
             return null;
@@ -120,7 +119,7 @@ public class SandboxIngressTransportService {
 
             @Override
             public long contentLength() {
-                return contentLength;
+                return -1;
             }
 
             @Override

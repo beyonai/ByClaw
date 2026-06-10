@@ -1,6 +1,5 @@
 type RuntimeInfo = {
   clientRequestId: string;
-  answerClientMsgId: string;
   sessionId?: string;
   traceId?: string;
   answerMessageId?: string;
@@ -16,11 +15,13 @@ export type RunningChatInfo = {
   sessionId?: string;
   running?: boolean;
   traceId?: string;
-  clientRequestId?: string;
+  clientRequestId: string;
+  userMessageId?: string | number;
   modelAnswerMessageId?: string | number;
   agentId?: string | number | null;
   agentCode?: string | null;
   agentType?: string;
+  chatContent?: string;
 };
 
 type Listener = () => void;
@@ -51,18 +52,17 @@ class ChatSessionRuntimeManager {
       return;
     }
 
-    const clientRequestId = `${info.clientRequestId || info.traceId || info.modelAnswerMessageId || info.sessionId}`;
+    const { clientRequestId } = info;
     const answerMessageId = info.modelAnswerMessageId ? `${info.modelAnswerMessageId}` : undefined;
     const sessionId = `${info.sessionId}`;
     const activeClientRequestId = this.activeClientRequestIdBySessionId.get(sessionId);
     const activeInfo = activeClientRequestId
       ? this.activeByClientRequestId.get(activeClientRequestId)
-      : this.activeByClientRequestId.get(clientRequestId);
+      : this.activeByClientRequestId.get(clientRequestId ?? '');
 
     if (activeInfo && !activeInfo.restored) {
       this.register({
         clientRequestId: activeInfo.clientRequestId,
-        answerClientMsgId: activeInfo.answerClientMsgId,
         sessionId,
         traceId: info.traceId || activeInfo.traceId,
         answerMessageId: answerMessageId || activeInfo.answerMessageId,
@@ -78,7 +78,6 @@ class ChatSessionRuntimeManager {
 
     this.register({
       clientRequestId,
-      answerClientMsgId: answerMessageId || clientRequestId,
       sessionId,
       traceId: info.traceId,
       answerMessageId,

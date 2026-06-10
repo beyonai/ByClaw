@@ -53,10 +53,12 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     private static final String STREAM_KEY_SUFFIX = ":data_stream";
 
     /** 消费者组名称 */
-    private static final String CONSUMER_GROUP = "byai_conversation_service_group";
+    public static final String CONSUMER_GROUP = "byai_conversation_service_group";
 
     /** 消费者名称前缀（多实例时以 sessionId 区分） */
     private static final String CONSUMER_NAME_PREFIX = "byai_conversation_consumer:";
+
+    private static final String INIT_EVENT = "{\"event_type\":\"_init\"}";
 
     @Autowired
     private RedisConnectionFactory redisConnectionFactory;
@@ -230,6 +232,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
      */
     private void createConsumerGroupIfAbsent(String streamKey) {
         try {
+            ensureStreamExists(streamKey);
             redisTemplate.opsForStream().createGroup(streamKey, ReadOffset.latest(), CONSUMER_GROUP);
             log.info("已创建 Redis Stream 消费者组: {}, stream: {}", CONSUMER_GROUP, streamKey);
         } catch (Exception e) {
@@ -240,5 +243,13 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
                     e.getMessage(), streamKey);
             }
         }
+    }
+
+    private void ensureStreamExists(String streamKey) {
+        if (Boolean.TRUE.equals(redisTemplate.hasKey(streamKey))) {
+            return;
+        }
+        redisTemplate.opsForStream().add(streamKey, Map.of("data", INIT_EVENT));
+        log.info("Session Stream 不存在，已初始化创建, stream: {}", streamKey);
     }
 }

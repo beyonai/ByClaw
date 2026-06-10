@@ -1,48 +1,20 @@
+## ── stage 1: build byclaw extensions ──────────────────────────────
 FROM node:22-slim AS ext-builder
 
 WORKDIR /build
 
-RUN npm config set registry https://registry.npmmirror.com --global \
-    && npm config set fund false --global \
-    && npm config set audit false --global \
-    && npm config set prefer-offline true --global
+COPY byclaw-exe/extensions/ ./src/
 
-RUN --mount=type=cache,target=/root/.npm \
-    npm install --prefix /build/toolchain --no-package-lock --omit=dev esbuild@0.25.12
+RUN npm config set registry https://registry.npmmirror.com --global
 
-ENV PATH="/build/toolchain/node_modules/.bin:${PATH}"
-
-COPY byclaw-exe/extensions/baiying-enhance/package.json \
-     byclaw-exe/extensions/baiying-enhance/package-lock.json \
-     ./src/baiying-enhance/
-COPY byclaw-exe/extensions/byai-channel/package.json \
-     byclaw-exe/extensions/byai-channel/package-lock.json \
-     ./src/byai-channel/
-COPY byclaw-exe/extensions/byclaw-sqlite/package.json \
-     byclaw-exe/extensions/byclaw-sqlite/package-lock.json \
-     ./src/byclaw-sqlite/
-
-RUN --mount=type=cache,target=/root/.npm \
-    set -eux; \
-    pids=""; \
-    for dir in src/*/; do \
-        [ -f "$dir/package.json" ] || continue; \
-        name=$(basename "$dir"); \
-        echo ">>> npm ci --omit=dev: $name"; \
-        (cd "$dir" && npm ci --omit=dev --prefer-offline) & \
-        pids="$pids $!"; \
-    done; \
-    for pid in $pids; do wait "$pid"; done
-
-COPY byclaw-exe/extensions/baiying-enhance/ ./src/baiying-enhance/
-COPY byclaw-exe/extensions/byai-channel/ ./src/byai-channel/
-COPY byclaw-exe/extensions/byclaw-sqlite/ ./src/byclaw-sqlite/
-
+# install, build, prune, then assemble clean output into /build/out/
 RUN set -eux; \
     mkdir -p /build/out; \
     for dir in src/*/; do \
         [ -f "$dir/package.json" ] || continue; \
         name=$(basename "$dir"); \
+        echo ">>> npm install: $name"; \
+        (cd "$dir" && npm install); \
         if node --input-type=module -e ' \
             import { readFileSync } from "fs"; \
             const pkg = JSON.parse(readFileSync(process.argv[1] + "package.json", "utf8")); \
@@ -68,7 +40,8 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS python312
 
 FROM ghcr.io/tencentcloud/cubesandbox-base:2026.16 AS cubesandbox-base
 
-FROM ghcr.io/openclaw/openclaw:2026.5.28-beta.4
+## ── stage 2: final image ─────────────────────────────────────────
+FROM ghcr.io/openclaw/openclaw:2026.4.21
 
 USER root
 
@@ -77,10 +50,8 @@ WORKDIR /app
 
 ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
     PIP_ROOT_USER_ACTION=ignore \
-    OPENCLAW_BUNDLED_PLUGINS_DIR=/app/dist/extensions \
     ENVD_PORT=49983 \
     ENVD_LOG_FILE=/var/log/envd.log \
-    OPENCLAW_GATEWAY_BIND=lan \
     OPENCLAW_GATEWAY_PORT=18789 \
     FILEBROWSER_PORT=8082 \
     FILEBROWSER_ROOT=/by \
@@ -118,36 +89,68 @@ RUN set -eux; \
     ln -sf /usr/local/bin/python3.12 /usr/bin/python3; \
     python3 --version | grep -q 'Python 3.12'; \
     python3 -m pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
-    python3 -m pip config --global set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
-    python3 -m pip install --no-cache-dir redis websockify; \
-    rm -f /usr/bin/websockify; \
-    ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
-    websockify --help >/dev/null
+    python3 -m pip config --global set global.trusted-host pypi.tuna.tsinghua.edu.cn
 
-COPY --from=ext-builder /build/out/ /app/dist-runtime/extensions/
+COPY --from=ext-builder /build/out/ /app/extensions/
 
-RUN ln -s /app /app/node_modules/openclaw
-
+# add openclaw skills (overwrite same-name files with project content)
 COPY middleware/openclaw/skills/ /app/skills/
 
+# add filebrowser
 COPY middleware/openclaw/linux-amd64-filebrowser/filebrowser /usr/local/bin/filebrowser
 RUN chmod 0755 /usr/local/bin/filebrowser
 
+# add DingTalk workspace cli dws from the repository instead of downloading at build time
 COPY middleware/openclaw/cli/dws /usr/local/bin/dws
 RUN chmod 0755 /usr/local/bin/dws
 
-COPY middleware/openclaw/runtime-bootstrap.sh /usr/local/bin/openclaw-runtime-bootstrap
-COPY middleware/openclaw/startAll.sh \
-     middleware/openclaw/start-filebrowser.sh \
-     middleware/openclaw/start-openclaw.sh \
-     /usr/local/bin/
-RUN chmod 0755 \
-    /usr/local/bin/openclaw-runtime-bootstrap \
-    /usr/local/bin/startAll.sh \
-    /usr/local/bin/start-filebrowser.sh \
-    /usr/local/bin/start-openclaw.sh
+# CubeSandbox runtime commands. cube-entrypoint.sh owns envd; these scripts
+# only manage foreground/background business processes.
+RUN set -eux; \
+    printf '%s\n' \
+      '#!/bin/sh' \
+      'set -eu' \
+      '' \
+      'FILEBROWSER_PORT="${FILEBROWSER_PORT:-8082}"' \
+      'FILEBROWSER_ROOT="${FILEBROWSER_ROOT:-/by}"' \
+      'FILEBROWSER_BASEURL="${FILEBROWSER_BASEURL:-/filebrowser}"' \
+      '' \
+      'mkdir -p "${FILEBROWSER_ROOT}"' \
+      'exec filebrowser \' \
+      '  --root "${FILEBROWSER_ROOT}" \' \
+      '  --port "${FILEBROWSER_PORT}" \' \
+      '  --address 0.0.0.0 \' \
+      '  --noauth \' \
+      '  --baseurl "${FILEBROWSER_BASEURL}"' \
+      >/usr/local/bin/startFilebrowser.sh; \
+    printf '%s\n' \
+      '#!/bin/sh' \
+      'set -eu' \
+      '' \
+      'OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"' \
+      'OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-dev}"' \
+      'OPENCLAW_STATE_DIR="${OPENCLAW_STATE_DIR:-/by/.openclaw}"' \
+      'DWS_CONFIG_DIR="${DWS_CONFIG_DIR:-${OPENCLAW_STATE_DIR}/.dws}"' \
+      '' \
+      'mkdir -p "${OPENCLAW_STATE_DIR}" "${DWS_CONFIG_DIR}"' \
+      'exec node dist/index.js gateway \' \
+      '  --bind=lan \' \
+      '  --port="${OPENCLAW_GATEWAY_PORT}" \' \
+      '  --allow-unconfigured \' \
+      '  --verbose \' \
+      '  --token="${OPENCLAW_GATEWAY_TOKEN}"' \
+      >/usr/local/bin/startOpenclaw.sh; \
+    printf '%s\n' \
+      '#!/bin/sh' \
+      'set -eu' \
+      '' \
+      '/usr/local/bin/startFilebrowser.sh &' \
+      'exec /usr/local/bin/startOpenclaw.sh' \
+      >/usr/local/bin/startAll.sh; \
+    chmod 0755 /usr/local/bin/startFilebrowser.sh /usr/local/bin/startOpenclaw.sh /usr/local/bin/startAll.sh
 
+# Keep the default image command template-friendly: cube-entrypoint starts envd
+# for CubeSandbox's 49983 /health probe, then starts OpenClaw and filebrowser.
 EXPOSE 49983 18789 8082
-
 ENTRYPOINT ["/usr/local/bin/cube-entrypoint.sh"]
 CMD ["/usr/local/bin/startAll.sh"]

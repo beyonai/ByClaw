@@ -24,6 +24,9 @@ public class ModelVO implements Serializable {
     /** 提供商（如 OpenAI） */
     private String providerName;
 
+    /** 模型协议（OpenAI / Anthropic） */
+    private String modelProtocol;
+
     /** 型号（如 gpt-4-turbo-preview） */
     private String modelCode;
 

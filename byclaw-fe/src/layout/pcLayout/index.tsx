@@ -27,8 +27,6 @@ import useAgentUploadFileConfig from '@/hooks/useAgentUploadFileConfig';
 
 import GlobalContext, { Platform } from '../components/provider/global';
 
-import useNotification from './hooks/useNotification';
-
 import { getSsoLoginByIframe } from '@/utils/system';
 import { getHistoryState } from '@/utils/browser';
 
@@ -105,8 +103,6 @@ const PCLayout = () => {
     );
   }, [agentList, employeesList, agentId]);
 
-  useNotification();
-
   useEffect(() => {
     const onCloseContent = (isClose: boolean) => {
       setIsClose(isClose);
@@ -180,10 +176,8 @@ const PCLayout = () => {
     myEventEmitter.emit('beyond-driver-close');
   }, [sessionId]);
 
-  const getAgentUploadFileConfig = useAgentUploadFileConfig(employeesList);
-  const uploadFileConfig = React.useMemo(() => {
-    return getAgentUploadFileConfig(agentId);
-  }, [agentId, getAgentUploadFileConfig]);
+  const { globalConfig } = useAgentUploadFileConfig(employeesList);
+  const uploadFileConfig = React.useMemo(() => globalConfig, [globalConfig]);
 
   useEffect(() => {
     if (containChatLayout) {
