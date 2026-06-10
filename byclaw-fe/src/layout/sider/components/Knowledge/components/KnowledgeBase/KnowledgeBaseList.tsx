@@ -29,12 +29,13 @@ interface KnowledgeBaseListProps {
   keyword?: string;
   agentId?: string;
   agentIds?: string;
+  activeAgentResourceId?: string;
 }
 
 const Draggable = withDrag(DragType.knowledgeBase);
 
 const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
-  const { editable, onDrilldown, keyword } = props;
+  const { editable, onDrilldown, keyword, activeAgentResourceId } = props;
   const searchValue = useRef('');
   const listFetchRef = useRef(false);
   // const [filterType, setFilterType] = useState<FilterType>(FilterType.all);
@@ -71,38 +72,43 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
   // );
 
   // 获取知识库列表
-  const loadKnowledgeBases = useCallback(async (reset = false) => {
-    if (listFetchRef.current) return;
-    listFetchRef.current = true;
-    if (reset) {
-      setLoading(true);
-    }
-    try {
-      const payload: {
-        pageNum: number;
-        pageSize: number;
-        keyword: string;
-        resourceStatus?: string;
-        resourceBizTypeList?: string[];
-      } = {
-        pageNum: 1,
-        pageSize: 30,
-        keyword: searchValue.current.trim(),
-        resourceStatus: '2',
-        resourceBizTypeList: ['KG_DOC', 'KG_QA', 'KG_TERM'],
-      };
-      const response = await queryDigEmployeeRelResourceAuth(payload);
-      const rows = Array.isArray(response?.rows) ? response.rows : Array.isArray(response?.list) ? response.list : [];
-      setKnowledgeBases(rows);
-      setHasMore(false);
-    } catch (error) {
-      console.error('Failed to load knowledge bases:', error);
-      setHasMore(false);
-    } finally {
-      listFetchRef.current = false;
-      setLoading(false);
-    }
-  }, []);
+  const loadKnowledgeBases = useCallback(
+    async (reset = false) => {
+      if (listFetchRef.current) return;
+      listFetchRef.current = true;
+      if (reset) {
+        setLoading(true);
+      }
+      try {
+        const payload: {
+          resourceId?: string;
+          pageNum: number;
+          pageSize: number;
+          keyword: string;
+          resourceStatus?: string;
+          resourceBizTypeList?: string[];
+        } = {
+          resourceId: activeAgentResourceId,
+          pageNum: 1,
+          pageSize: 30,
+          keyword: searchValue.current.trim(),
+          resourceStatus: '2',
+          resourceBizTypeList: ['KG_DOC', 'KG_QA', 'KG_TERM'],
+        };
+        const response = await queryDigEmployeeRelResourceAuth(payload);
+        const rows = Array.isArray(response?.rows) ? response.rows : Array.isArray(response?.list) ? response.list : [];
+        setKnowledgeBases(rows);
+        setHasMore(false);
+      } catch (error) {
+        console.error('Failed to load knowledge bases:', error);
+        setHasMore(false);
+      } finally {
+        listFetchRef.current = false;
+        setLoading(false);
+      }
+    },
+    [activeAgentResourceId]
+  );
 
   // 初始加载
   useEffect(() => {
@@ -262,6 +268,16 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
     setModalState({ openType: '' });
   }, []);
 
+  const handleQuoteKnowledgeBase = useCallback(
+    (item: IKnowledgeBaseItem) => {
+      EventEmitter.emit('queryInput-insert-item', {
+        item,
+        type: DragType.knowledgeBase,
+      });
+    },
+    [EventEmitter]
+  );
+
   return (
     <div className={commonStyles.container}>
       {/* 搜索区域 */}
@@ -316,44 +332,55 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
           />
         }
         renderItem={(item) => {
+          const canEditItem = editable && (`${item?.createBy}` === `${userInfo.userId}` || isUser);
           const actions = [
-            <AntdIcon
-              key={`open-${item.resourceId}`}
-              type="icon-a-Folder-openwenjianjia-kai"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDrilldown(item);
-              }}
-            />,
-          ];
-          if (editable && (`${item?.createBy}` === `${userInfo.userId}` || isUser)) {
-            actions.push(
-              <Dropdown
-                key={`actions-${item.resourceId}`}
-                trigger={['click']}
-                menu={{
-                  items: getDropdownMenuItems(item),
-                  onClick: ({ key, domEvent }) => {
-                    domEvent.stopPropagation();
-                    onRowMenuItemClick(key, item);
+            <Dropdown
+              key={`detail-${item.resourceId}`}
+              trigger={['hover']}
+              overlayClassName={employeeStyles.mydropdown}
+              menu={{
+                items: [
+                  {
+                    key: 'detail',
+                    label: (
+                      <div className={employeeStyles.dropdownMenuItem}>
+                        {intl.formatMessage({ id: 'common.detail' })}
+                      </div>
+                    ),
                   },
+                  ...(canEditItem ? getDropdownMenuItems(item) : []),
+                ],
+                onClick: ({ key, domEvent }) => {
+                  domEvent.preventDefault();
+                  domEvent.stopPropagation();
+
+                  if (key === 'detail') {
+                    onDrilldown(item);
+                    return;
+                  }
+
+                  onRowMenuItemClick(key, item);
+                },
+              }}
+            >
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
                 }}
               >
-                <span onClick={(e) => e.stopPropagation()}>
-                  <AntdIcon type="icon-a-Setting-configshezhipeizhi" />
-                </span>
-              </Dropdown>
-            );
-          }
+                <AntdIcon type="icon-a-Moregengduo" />
+              </span>
+            </Dropdown>,
+          ];
+
           return (
             <Draggable key={item.resourceId} data={item}>
               <List.Item
                 key={item.resourceId}
-                // actions={actions}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDrilldown(item);
-                }}
+                className={styles.knowledgeItem}
+                actions={actions}
+                onDoubleClick={() => handleQuoteKnowledgeBase(item)}
               >
                 <List.Item.Meta
                   title={

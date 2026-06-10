@@ -87,9 +87,10 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   // 根据 resourceType 判断资源名称
   const getResourceName = () => {
     if (resourceType === 'KG_DOC') return intl.formatMessage({ id: 'resource.knowledge' });
-    if (resourceType === 'TOOL') return intl.formatMessage({ id: 'resource.tool' });
-    if (resourceType === 'OBJECT') return intl.formatMessage({ id: 'resource.object' });
-    if (resourceType === 'VIEW') return intl.formatMessage({ id: 'resource.view' });
+    if (resourceType === 'TOOL') return intl.formatMessage({ id: 'common.tool' });
+    if (resourceType === 'OBJECT') return intl.formatMessage({ id: 'common.object' });
+    if (resourceType === 'VIEW') return intl.formatMessage({ id: 'common.viewName' });
+    if (resourceType === 'SKILL') return intl.formatMessage({ id: 'common.skill' });
     return intl.formatMessage({ id: 'resource.default' }); // 默认值
   };
   const resourceName = getResourceName();

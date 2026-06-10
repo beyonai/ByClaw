@@ -202,26 +202,28 @@ const Sidebar = () => {
         <div className={styles.tabsContainer}>
           {myTabItems.map((tab) => {
             return (
-              <div
-                key={tab.key}
-                className={classnames(styles.tabItem, tab.key === activeKey && styles.activeTab)}
-                onClick={() => {
-                  setActiveKey(tab.key);
-                  setManualSiderOpenKey(tab.key);
-                  setSiderCollapsed(false);
-                }}
-              >
-                <Badge
-                  dot={tab.showDot || Number(tab.count) > 0}
-                  count={tab.count > 0 ? tab.count : undefined}
-                  size="small"
-                  style={{ padding: '0 3px' }}
+              <React.Fragment key={tab.key}>
+                {tab.key === 'knowledge' && <div className={styles.employeeResourceDivider} />}
+                <div
+                  className={classnames(styles.tabItem, tab.key === activeKey && styles.activeTab)}
+                  onClick={() => {
+                    setActiveKey(tab.key);
+                    setManualSiderOpenKey(tab.key);
+                    setSiderCollapsed(false);
+                  }}
                 >
-                  <AntdIcon type={tab.icon} className={styles.tabIcon} />
-                </Badge>
-                <span className={styles.tabLabel}>{intl.formatMessage({ id: tab.label })}</span>
-                <AntdIcon type={tab.activeIcon} className={styles.activeTabIcon} />
-              </div>
+                  <Badge
+                    dot={tab.showDot || Number(tab.count) > 0}
+                    count={tab.count > 0 ? tab.count : undefined}
+                    size="small"
+                    style={{ padding: '0 3px' }}
+                  >
+                    <AntdIcon type={tab.icon} className={styles.tabIcon} />
+                  </Badge>
+                  <span className={styles.tabLabel}>{intl.formatMessage({ id: tab.label })}</span>
+                  <AntdIcon type={tab.activeIcon} className={styles.activeTabIcon} />
+                </div>
+              </React.Fragment>
             );
           })}
         </div>

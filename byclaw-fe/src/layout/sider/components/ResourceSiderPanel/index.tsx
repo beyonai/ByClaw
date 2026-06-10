@@ -1,18 +1,19 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { SearchOutlined } from '@ant-design/icons';
-import { Empty, Input, List, Typography } from 'antd';
+import { Dropdown, Empty, Input, List, Typography } from 'antd';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
-import classNames from 'classnames';
 import { trim } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
+import { DragType, type IDragType } from '@/components/QueryInput/withDrag';
 import ResourceDetail from '@/components/Resources/components/ResourceDetail';
 import InfiniteScrollAntdList from '@/layout/sider/components/InfiniteScrollAntdList';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
-import { qrySkillListByUserCode, queryDigEmployeeRelResourceAuth } from '@/pages/manager/service/resources';
+import { queryDigEmployeeRelResourceAuth } from '@/pages/manager/service/resources';
 import { useSkillDetailDrawer } from '@/pages/manager/components/SkillDetailDrawer/useSkillDetailDrawer';
 import { ResourceTypeMap } from '@/constants/resource';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import useGlobal from '@/hooks/useGlobal';
+import ActiveSiderAgentBar, { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import styles from './index.module.less';
 
 const { Title, Paragraph } = Typography;
@@ -44,6 +45,7 @@ const resourceConfigMap: Record<
   {
     icon: string;
     labelId: string;
+    centerLabelId: string;
     navigatePath: string;
     siderKey: string;
     resourceBizTypeList: string[];
@@ -52,6 +54,7 @@ const resourceConfigMap: Record<
   TOOL: {
     icon: 'icon-chajian',
     labelId: 'common.tool',
+    centerLabelId: 'resourceTabs.toolCenter',
     navigatePath: '/toolCenter',
     siderKey: 'tool',
     resourceBizTypeList: [ResourceTypeMap.Agent, ResourceTypeMap.MCP, ResourceTypeMap.TOOLKIT],
@@ -59,6 +62,7 @@ const resourceConfigMap: Record<
   VIEW: {
     icon: 'icon-a-yemian-line',
     labelId: 'common.resourceType.view',
+    centerLabelId: 'resourceTabs.viewCenter',
     navigatePath: '/viewCenter',
     siderKey: 'view',
     resourceBizTypeList: [ResourceTypeMap.VIEW],
@@ -66,6 +70,7 @@ const resourceConfigMap: Record<
   OBJECT: {
     icon: 'icon-tongxun',
     labelId: 'common.resourceType.object',
+    centerLabelId: 'resourceTabs.objectCenter',
     navigatePath: '/objectCenter',
     siderKey: 'object',
     resourceBizTypeList: [ResourceTypeMap.OBJECT],
@@ -73,6 +78,7 @@ const resourceConfigMap: Record<
   SKILL: {
     icon: 'icon-chajian',
     labelId: 'common.skill',
+    centerLabelId: 'resourceTabs.skillCenter',
     navigatePath: '/skillCenter',
     siderKey: 'skill',
     resourceBizTypeList: [ResourceTypeMap.SKILL],
@@ -103,6 +109,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   const [currentItem, setCurrentItem] = useState<ResourceItem | null>(null);
 
   const config = resourceConfigMap[resourceType];
+  const activeSiderAgent = useActiveSiderAgent();
   const isResourceCenterPage = pathname.startsWith(config.navigatePath);
   const placeholder = intl.formatMessage(
     { id: 'form.inputPlaceholder' },
@@ -119,33 +126,35 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
       listFetchRef.current = true;
       setLoading(true);
       try {
-        if (resourceType === 'SKILL') {
-          const response = await qrySkillListByUserCode({
-            userCode: userInfo?.userCode,
-            keyword: trim(queryKeyword),
-          });
-          const rows = (Array.isArray(response) ? response : []).map((item: any, index: number) => ({
-            ...item,
-            resourceId: item.skillPath || item.resourceId || index,
-            resourceName: item.skillName || item.resourceName,
-            resourceDesc: item.skillDescZh || item.skillDescEn || item.resourceDesc,
-            resourceBizType: ResourceTypeMap.SKILL,
-            id: item.skillPath || item.resourceId || index,
-          }));
-          paginationRef.current = {
-            pageNum: 1,
-            total: rows.length,
-            loadedCount: rows.length,
-          };
-          setResourceList(rows);
-          setHasMore(false);
-          return;
-        }
+        // if (resourceType === 'SKILL') {
+        //   const response = await qrySkillListByUserCode({
+        //     userCode: userInfo?.userCode,
+        //     resourceId: activeSiderAgent.resourceId,
+        //     keyword: trim(queryKeyword),
+        //   });
+        //   const rows = (Array.isArray(response) ? response : []).map((item: any, index: number) => ({
+        //     ...item,
+        //     resourceId: item.skillPath || item.resourceId || index,
+        //     resourceName: item.skillName || item.resourceName,
+        //     resourceDesc: item.skillPath || item.skillDescEn || item.resourceDesc,
+        //     resourceBizType: ResourceTypeMap.SKILL,
+        //     id: item.skillPath || item.resourceId || index,
+        //   }));
+        //   paginationRef.current = {
+        //     pageNum: 1,
+        //     total: rows.length,
+        //     loadedCount: rows.length,
+        //   };
+        //   setResourceList(rows);
+        //   setHasMore(false);
+        //   return;
+        // }
 
         const response = await queryDigEmployeeRelResourceAuth({
           pageNum,
           pageSize: PAGE_SIZE,
           keyword: trim(queryKeyword),
+          resourceId: activeSiderAgent.resourceId,
           resourceBizTypeList: config.resourceBizTypeList,
         });
         const rows = Array.isArray(response?.rows) ? response.rows : Array.isArray(response?.list) ? response.list : [];
@@ -174,7 +183,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         setLoading(false);
       }
     },
-    [config.resourceBizTypeList, resourceType, userInfo?.userCode]
+    [activeSiderAgent.resourceId, config.resourceBizTypeList, resourceType, userInfo?.userCode]
   );
 
   useEffect(() => {
@@ -262,10 +271,24 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     setResourceDetailOpen(true);
   };
 
+  const getQuoteType = (): IDragType => {
+    if (resourceType === 'TOOL') return DragType.tool;
+    if (resourceType === 'SKILL') return DragType.SKILL;
+    return DragType.OBJECT;
+  };
+
+  const handleQuoteResource = (item: ResourceItem) => {
+    EventEmitter.emit('queryInput-insert-item', {
+      item: { ...item, isFromResourceModule: true },
+      type: getQuoteType(),
+    });
+  };
+
   return (
     <div className={styles.container}>
+      <ActiveSiderAgentBar agent={activeSiderAgent} />
       <div
-        className={classNames(styles.router, 'ub ub-ac ub-pj pointer gap2')}
+        className={styles.router}
         onClick={() =>
           navigate(
             isResourceCenterPage
@@ -278,7 +301,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         }
       >
         <AntdIcon type={config.icon} />
-        <span className={styles.middle}>{intl.formatMessage({ id: config.labelId })}中心</span>
+        <span className={styles.middle}>{intl.formatMessage({ id: config.centerLabelId })}</span>
         <AntdIcon
           type={isResourceCenterPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
           style={{ fontSize: 16, marginLeft: 'auto' }}
@@ -300,7 +323,44 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
           next={() => loadResources()}
           renderEmpty={<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />}
           renderItem={(item: ResourceItem) => (
-            <List.Item key={item.resourceId} className={styles.resourceItem} onClick={() => handleDetail(item)}>
+            <List.Item
+              key={item.resourceId}
+              className={styles.resourceItem}
+              onDoubleClick={() => handleQuoteResource(item)}
+              actions={[
+                <Dropdown
+                  key="detail"
+                  trigger={['hover']}
+                  overlayClassName={employeeStyles.mydropdown}
+                  menu={{
+                    items: [
+                      {
+                        key: 'detail',
+                        label: (
+                          <div className={employeeStyles.dropdownMenuItem}>
+                            {intl.formatMessage({ id: 'common.detail' })}
+                          </div>
+                        ),
+                      },
+                    ],
+                    onClick: ({ domEvent }) => {
+                      domEvent.preventDefault();
+                      domEvent.stopPropagation();
+                      handleDetail(item);
+                    },
+                  }}
+                >
+                  <span
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      event.preventDefault();
+                    }}
+                  >
+                    <AntdIcon type="icon-a-Moregengduo" />
+                  </span>
+                </Dropdown>,
+              ]}
+            >
               <List.Item.Meta
                 avatar={
                   <span className={styles.resourceAvatar}>

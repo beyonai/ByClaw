@@ -10,9 +10,10 @@ interface Props {
   keyword?: string;
   agentId?: string;
   agentIds?: string;
+  activeAgentResourceId?: string;
 }
 
-const KnowledgeBaseTab = ({ editable, onSelect, keyword, agentId, agentIds }: Props) => {
+const KnowledgeBaseTab = ({ editable, onSelect, keyword, agentId, agentIds, activeAgentResourceId }: Props) => {
   const [currentKnowledgeBase, setCurrentKnowledgeBase] = useState<IKnowledgeBaseItem | null>(null);
 
   // 进入知识库详情
@@ -37,6 +38,7 @@ const KnowledgeBaseTab = ({ editable, onSelect, keyword, agentId, agentIds }: Pr
           keyword={keyword}
           agentId={agentId}
           agentIds={agentIds}
+          activeAgentResourceId={activeAgentResourceId}
         />
       </div>
 

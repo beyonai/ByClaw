@@ -1384,6 +1384,7 @@ export default {
   'resourceTabs.objectCenter': 'Object Center',
   'resourceTabs.viewCenter': 'View Center',
   'resourceTabs.toolCenter': 'Tool Center',
+  'resourceTabs.skillCenter': 'Skill Center',
   'resourceTabs.skillUpload.uploadButton': 'Upload',
   'resourceTabs.skillUpload.onlyZip': 'Only .zip or .tar.gz files are supported',
   'resourceTabs.skillUpload.noUserCode': 'Unable to get user code, please login again',
