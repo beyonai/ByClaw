@@ -26,6 +26,7 @@ from kgw.config_provider import KbConfigProvider
 from kgw.db import build_pool, run_migrations
 from kgw.envelope import KgwError
 from kgw.http_client import build_http_client
+from kgw.observability.access_log import AccessLogMiddleware
 from kgw.observability.logger import configure_logging, get_logger
 from kgw.observability.metrics import REGISTRY
 from kgw.observability.tracing import TraceIdMiddleware
@@ -48,7 +49,7 @@ def _sql_dir() -> Path:
 @asynccontextmanager
 async def _lifespan(app: FastAPI):  # pylint: disable=redefined-outer-name
     settings: Settings = get_settings()
-    configure_logging(json_logs=True)
+    configure_logging(json_logs=settings.log_json)
 
     pool = await build_pool(
         settings.db_dsn,
@@ -127,6 +128,7 @@ def build_app() -> FastAPI:
     app = FastAPI(  # pylint: disable=redefined-outer-name
         title="byclaw-kgw", version="0.1.0", lifespan=_lifespan
     )
+    app.add_middleware(AccessLogMiddleware)
     app.add_middleware(TraceIdMiddleware)
 
     @app.exception_handler(KgwError)

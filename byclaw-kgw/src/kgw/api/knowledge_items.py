@@ -472,7 +472,9 @@ async def knowledge_item_import(
         )
     )
     asyncio.create_task(
-        _write_history(state.pool, kn_code=kn_code, file_path=file_path),
+        _write_history(
+            state.pool, kn_code=kn_code, file_path=file_path, version="fileImport"
+        ),
         name=f"write_history:{kn_code}:{GatewayOp.FILE_IMPORT.value}",
     )
 

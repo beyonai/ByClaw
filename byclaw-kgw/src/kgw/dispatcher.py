@@ -183,10 +183,19 @@ async def dispatch_json(
     # Normalize to plain str for stringly-typed sinks (Prometheus, audit, logs).
     op_str = operation.value if isinstance(operation, enum.Enum) else str(operation)
 
-    # 1. Fetch KB config from MinIO
+    # 1. Fetch KB config
     config = await state.config_provider.get_kb_config(kn_code)
     if config is None:
         raise KBNotFound(f"unknown knCode: {kn_code}", kn_code=kn_code)
+
+    _log.info(
+        "dispatch.config_resolved",
+        kn_code=kn_code,
+        resource_code=config.resource_code,
+        domain_url=config.domain_url,
+        domain_name=config.domain_name,
+        operation=op_str,
+    )
 
     # 2. Map gateway operation → KB operation and validate it is supported
     kb_op = _GATEWAY_TO_KB_OP.get(operation)
@@ -239,6 +248,12 @@ async def dispatch_json(
     except (KBNotFound, OperationNotSupported, CircuitOpen, BackendAuthFailed):  # pylint: disable=try-except-raise
         raise
     except httpx.TimeoutException as exc:
+        _log.error(
+            "dispatch.upstream_timeout",
+            kn_code=kn_code,
+            operation=op_str,
+            upstream=f"{config.domain_url or config.domain_name}{op_path}",
+        )
         cb.record_failure()
         _set_circuit_metric(kn_code, cb)
         raise UpstreamTimeout(
@@ -246,6 +261,12 @@ async def dispatch_json(
             kn_code=kn_code,
         ) from exc
     except (httpx.ConnectError, httpx.NetworkError) as exc:
+        _log.error(
+            "dispatch.upstream_connect_error",
+            kn_code=kn_code,
+            operation=op_str,
+            upstream=f"{config.domain_url or config.domain_name}{op_path}",
+        )
         cb.record_failure()
         _set_circuit_metric(kn_code, cb)
         raise UpstreamConnectError(
@@ -253,6 +274,13 @@ async def dispatch_json(
             kn_code=kn_code,
         ) from exc
     except DiscoveryHttpClientError as exc:
+        _log.error(
+            "dispatch.discovery_error",
+            kn_code=kn_code,
+            operation=op_str,
+            upstream=f"{config.domain_name}{op_path}",
+            error=str(exc),
+        )
         cb.record_failure()
         _set_circuit_metric(kn_code, cb)
         raise UpstreamConnectError(
@@ -260,6 +288,12 @@ async def dispatch_json(
             kn_code=kn_code,
         ) from exc
     except BackendAuthError as exc:
+        _log.error(
+            "dispatch.backend_auth_failed",
+            kn_code=kn_code,
+            operation=op_str,
+            error=str(exc),
+        )
         cb.record_failure()
         _set_circuit_metric(kn_code, cb)
         raise BackendAuthFailed(str(exc), kn_code=kn_code) from exc
@@ -287,10 +321,10 @@ async def dispatch_json(
                 actor_kind="user",
                 operation_type=op_str,
                 kn_code=kn_code,
-                file_path=file_path,
+                file_path=file_path or body.get("directoryPath"),
                 payload_size_bytes=None,
                 row_count=None,
-                payload_redacted={"knCode": kn_code, "filePath": file_path},
+                payload_redacted=body,
                 result_code=result_code,
                 result_msg=resp_body.get("resultMsg"),
                 latency_ms=latency_ms,
@@ -299,15 +333,28 @@ async def dispatch_json(
 
     # 10. Write history — state-changing writes only (background, fire-and-forget)
     if operation in _WRITE_HISTORY_OPS:
+        history_path = file_path or body.get("directoryPath", "")
         asyncio.create_task(
-            _write_history(state.pool, kn_code=kn_code, file_path=file_path or ""),
+            _write_history(
+                state.pool, kn_code=kn_code, file_path=history_path, version=op_str
+            ),
             name=f"write_history:{kn_code}:{op_str}",
         )
+
+    _log.info(
+        "dispatch.completed",
+        kn_code=kn_code,
+        operation=op_str,
+        result_code=result_code,
+        latency_ms=latency_ms,
+    )
 
     return resp_body
 
 
-async def _write_history(pool: Any, *, kn_code: str, file_path: str) -> None:
+async def _write_history(
+    pool: Any, *, kn_code: str, file_path: str, version: str = ""
+) -> None:
     """Insert a kgw_kb_write_history row. Failures are logged and swallowed."""
     try:
         async with pool.connection() as conn:
@@ -316,7 +363,7 @@ async def _write_history(pool: Any, *, kn_code: str, file_path: str) -> None:
                 {
                     "kn_code": kn_code,
                     "file_path": file_path,
-                    "version": "",
+                    "version": version,
                     "source_id": None,
                 },
             )
