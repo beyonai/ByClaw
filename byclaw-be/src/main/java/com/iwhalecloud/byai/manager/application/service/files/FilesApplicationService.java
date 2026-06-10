@@ -432,7 +432,7 @@ public class FilesApplicationService {
      * @param filePath 文件路径
      * @return 输入流
      */
-    private InputStream openCommonFileInputStream(String bucketName, String filePath) {
+    public InputStream openCommonFileInputStream(String bucketName, String filePath) {
         try {
             return commonFileStorage.read(commonFilePathResolver.arbitrary(bucketName, filePath));
         }
