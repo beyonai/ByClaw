@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -215,34 +214,9 @@ async def test_dispatch_file_to_markdown_index_maps_to_build_trigger():
 
 
 @pytest.mark.asyncio
-async def test_dispatch_write_history_called_for_write_ops():
-    """directoryCreate should trigger write_history insert."""
-    state = _make_state()
-    req = _make_request(state)
-    with respx.mock:
-        respx.post("http://kb.test/api/v1/directories/create").mock(
-            return_value=httpx.Response(
-                200, json={"resultCode": "0", "resultMsg": "ok", "resultObject": {}}
-            )
-        )
-        state.http = httpx.AsyncClient()
-        await dispatch_json(
-            req,
-            operation="directoryCreate",
-            kn_code="test_kb",
-            user_id="u1",
-            body={"knCode": "test_kb"},
-            file_path="/docs",
-        )
-    # Yield control so the background create_task can run
-    await asyncio.sleep(0)
-    # pool.connection was called for write_history
-    state.pool.connection.assert_called()
-
-
 @pytest.mark.asyncio
-async def test_dispatch_build_status_no_write_history():
-    """fileBuildStatus is read-shaped: no audit, no kgw_kb_write_history."""
+async def test_dispatch_build_status_no_audit():
+    """fileBuildStatus is read-shaped: no audit."""
     state = _make_state()
     req = _make_request(state)
     with respx.mock:
@@ -264,9 +238,6 @@ async def test_dispatch_build_status_no_write_history():
             user_id="u1",
             body={"knCode": "test_kb"},
         )
-    await asyncio.sleep(0)
-    # pool.connection should NOT be called for buildStatus (not a write-history op)
-    state.pool.connection.assert_not_called()
     state.audit.record.assert_not_called()
 
 
@@ -409,8 +380,8 @@ async def test_dispatch_read_op_does_not_audit():
 
 
 @pytest.mark.asyncio
-async def test_dispatch_read_op_no_write_history():
-    """Read ops must not insert kgw_kb_write_history."""
+async def test_dispatch_read_op_no_audit():
+    """Read ops must not audit."""
     state = _make_state()
     state.config_provider.get_kb_config.return_value = KbConfig(
         kn_code="test_kb",
@@ -437,8 +408,7 @@ async def test_dispatch_read_op_no_write_history():
             user_id="u1",
             body={"knCode": "test_kb"},
         )
-    await asyncio.sleep(0)
-    state.pool.connection.assert_not_called()
+    state.audit.record.assert_not_called()
 
 
 @pytest.mark.asyncio

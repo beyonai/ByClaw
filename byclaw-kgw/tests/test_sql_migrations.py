@@ -20,7 +20,6 @@ async def test_s1_migrations_create_expected_tables(pg_dsn: str):
             cur = await conn.execute("SELECT filename FROM kgw_migration")
             recorded = {row["filename"] for row in await cur.fetchall()}
         assert "001_kgw_audit_log.sql" in recorded
-        assert "002_kgw_kb_write_history.sql" in recorded
         assert "003_kgw_kb_source_lock.sql" in recorded
         assert "004_kgw_kb_conflict_log.sql" in recorded
 
@@ -32,9 +31,6 @@ async def test_s1_migrations_create_expected_tables(pg_dsn: str):
                      WHERE table_name = 'kgw_audit_log'
                        AND table_schema = current_schema()) AS audit,
                     (SELECT COUNT(*) FROM information_schema.tables
-                     WHERE table_name = 'kgw_kb_write_history'
-                       AND table_schema = current_schema()) AS history,
-                    (SELECT COUNT(*) FROM information_schema.tables
                      WHERE table_name = 'kgw_kb_source_lock'
                        AND table_schema = current_schema()) AS lock,
                     (SELECT COUNT(*) FROM information_schema.tables
@@ -44,14 +40,12 @@ async def test_s1_migrations_create_expected_tables(pg_dsn: str):
             )
             row = await cur.fetchone()
             assert row["audit"] >= 1
-            assert row["history"] >= 1
             assert row["lock"] >= 1
             assert row["conflict"] >= 1
     finally:
         async with pool.connection() as conn:
             for table in (
                 "kgw_audit_log",
-                "kgw_kb_write_history",
                 "kgw_kb_source_lock",
                 "kgw_kb_conflict_log",
                 "kgw_migration",
@@ -96,7 +90,6 @@ async def test_audit_log_columns_present(pg_dsn: str):
         async with pool.connection() as conn:
             for table in (
                 "kgw_audit_log",
-                "kgw_kb_write_history",
                 "kgw_kb_source_lock",
                 "kgw_kb_conflict_log",
                 "kgw_migration",
@@ -145,7 +138,6 @@ async def test_s4_migrations_create_expected_tables(pg_dsn: str):
                 "kgw_metadata_binding_outbox",
                 "kgw_metadata_property",
                 "kgw_audit_log",
-                "kgw_kb_write_history",
                 "kgw_kb_source_lock",
                 "kgw_kb_conflict_log",
                 "kgw_migration",

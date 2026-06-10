@@ -214,7 +214,7 @@ async def test_download_file_streams(s3_client):  # pylint: disable=redefined-ou
 
 
 async def test_list_dir_single_kb(s3_client):  # pylint: disable=redefined-outer-name
-    """Single-KB read passes through dispatch_json without write_history."""
+    """Single-KB read passes through dispatch_json."""
     with respx.mock(assert_all_called=False) as r:
         r.post("http://kb-s3-a.internal/api/v1/listDir").mock(
             return_value=httpx.Response(

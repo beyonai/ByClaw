@@ -10,7 +10,6 @@ from kgw.dispatcher import (
     GatewayOp,
     KbOp,
     _remap_kn_code,
-    _write_history,
     dispatch_fanout_json,
     dispatch_json,
 )
@@ -316,8 +315,6 @@ async def knowledge_item_import(
     backend_name keys before uploading. Non-markdown files use the original
     proxy_upload streaming path unchanged.
     """
-    import asyncio
-
     from kgw.audit import AuditEntry
 
     state = request.app.state
@@ -471,13 +468,6 @@ async def knowledge_item_import(
             latency_ms=None,
         )
     )
-    asyncio.create_task(
-        _write_history(
-            state.pool, kn_code=kn_code, file_path=file_path, version="fileImport"
-        ),
-        name=f"write_history:{kn_code}:{GatewayOp.FILE_IMPORT.value}",
-    )
-
     return result
 
 

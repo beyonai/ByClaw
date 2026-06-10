@@ -57,7 +57,6 @@ _TABLES_TO_DROP = (
     "kgw_metadata_binding_outbox",
     "kgw_metadata_property",
     "kgw_audit_log",
-    "kgw_kb_write_history",
     "kgw_kb_source_lock",
     "kgw_kb_conflict_log",
     "kgw_migration",

@@ -126,20 +126,7 @@ _DEFAULT_KB_PATHS: dict[KbOp, str] = {
     KbOp.METADATA_PROPERTIES_DELETE: "/api/v1/metadataProperties/delete",
 }
 
-# Operations that write to kgw_kb_write_history (state-changing writes only)
-_WRITE_HISTORY_OPS: frozenset[GatewayOp] = frozenset(
-    {
-        GatewayOp.DIRECTORY_CREATE,
-        GatewayOp.DIRECTORY_UPDATE,
-        GatewayOp.DIRECTORY_DELETE,
-        GatewayOp.FILE_IMPORT,
-        GatewayOp.FILE_DELETE,
-        GatewayOp.FILE_TO_MARKDOWN_INDEX,
-    }
-)
-
-# Read operations — do NOT write audit log and do NOT write kgw_kb_write_history
-# (v5 spec §7.1: only high-risk writes are audited)
+# Read operations — do NOT write audit log (v5 spec §7.1: only writes are audited)
 _READ_OPS: frozenset[GatewayOp] = frozenset(
     {
         GatewayOp.KNOWLEDGE_SEARCH,
@@ -153,11 +140,6 @@ _READ_OPS: frozenset[GatewayOp] = frozenset(
         GatewayOp.FILE_BUILD_STATUS,  # status query: read-shaped, no audit, no history
     }
 )
-
-_WRITE_HISTORY_SQL = """
-INSERT INTO kgw_kb_write_history (kn_code, file_path, version, source_id)
-VALUES (%(kn_code)s, %(file_path)s, %(version)s, %(source_id)s)
-"""
 
 
 async def dispatch_json(
@@ -331,16 +313,6 @@ async def dispatch_json(
             )
         )
 
-    # 10. Write history — state-changing writes only (background, fire-and-forget)
-    if operation in _WRITE_HISTORY_OPS:
-        history_path = file_path or body.get("directoryPath", "")
-        asyncio.create_task(
-            _write_history(
-                state.pool, kn_code=kn_code, file_path=history_path, version=op_str
-            ),
-            name=f"write_history:{kn_code}:{op_str}",
-        )
-
     _log.info(
         "dispatch.completed",
         kn_code=kn_code,
@@ -350,26 +322,6 @@ async def dispatch_json(
     )
 
     return resp_body
-
-
-async def _write_history(
-    pool: Any, *, kn_code: str, file_path: str, version: str = ""
-) -> None:
-    """Insert a kgw_kb_write_history row. Failures are logged and swallowed."""
-    try:
-        async with pool.connection() as conn:
-            await conn.execute(
-                _WRITE_HISTORY_SQL,
-                {
-                    "kn_code": kn_code,
-                    "file_path": file_path,
-                    "version": version,
-                    "source_id": None,
-                },
-            )
-            await conn.commit()
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("write_history.failed", kn_code=kn_code, error=str(exc))
 
 
 def _remap_kn_code(

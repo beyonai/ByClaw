@@ -140,7 +140,6 @@ async def test_audit_writer_persists_entries(pg_dsn: str):
     finally:
         async with pool.connection() as conn:
             await conn.execute("DROP TABLE IF EXISTS kgw_audit_log CASCADE")
-            await conn.execute("DROP TABLE IF EXISTS kgw_kb_write_history CASCADE")
             await conn.execute("DROP TABLE IF EXISTS kgw_kb_source_lock CASCADE")
             await conn.execute("DROP TABLE IF EXISTS kgw_kb_conflict_log CASCADE")
             await conn.execute("DROP TABLE IF EXISTS kgw_migration CASCADE")

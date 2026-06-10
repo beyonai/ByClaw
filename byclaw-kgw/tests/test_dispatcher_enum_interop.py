@@ -4,7 +4,6 @@ from kgw.dispatcher import (
     _DEFAULT_KB_PATHS,
     _GATEWAY_TO_KB_OP,
     _READ_OPS,
-    _WRITE_HISTORY_OPS,
     GatewayOp,
     KbOp,
 )
@@ -34,11 +33,6 @@ def test_str_in_read_ops_frozenset():
     """Both raw-str and enum membership tests succeed."""
     assert "knowledgeSearch" in _READ_OPS
     assert GatewayOp.KNOWLEDGE_SEARCH in _READ_OPS
-
-
-def test_str_in_write_history_ops_frozenset():
-    assert "directoryCreate" in _WRITE_HISTORY_OPS
-    assert GatewayOp.DIRECTORY_CREATE in _WRITE_HISTORY_OPS
 
 
 def test_metadata_operation_str_compat():
