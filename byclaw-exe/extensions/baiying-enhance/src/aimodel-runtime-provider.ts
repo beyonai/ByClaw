@@ -57,11 +57,10 @@ export function registerBaiyingAimodelRuntimeProvider(
     api.registerProvider({
         id: BAIYING_AIMODEL_PROVIDER_API,
         label: "Baiying AI Model",
-        // Dynamic Baiying providers still use the built-in OpenAI-compatible
-        // transport. Route that providerConfig.api through this hook, then
-        // guard inside resolveSyntheticAuth so unrelated OpenAI-compatible
-        // providers are left alone.
-        hookAliases: ["openai-completions"],
+        // Dynamic Baiying providers use the built-in OpenAI-compatible or Anthropic
+        // transport. Route providerConfig.api through this hook, then guard inside
+        // resolveSyntheticAuth so unrelated providers are left alone.
+        hookAliases: ["openai-completions", "anthropic-messages"],
         auth: [],
         resolveSyntheticAuth: ({ provider, providerConfig }) => {
             const providerId = normalizeString(provider);

@@ -36,9 +36,9 @@ function defaultModelDefinition(provider: ProviderBundle) {
   return {
     id: provider.modelId,
     name: provider.modelName ?? provider.modelId,
-    api: "openai-completions" as const,
+    api: provider.api,
     reasoning: false,
-    input: ["text"] as Array<"text" | "image">,
+    input: provider.input ?? (["text"] as Array<"text" | "image">),
     cost: {
       input: 0,
       output: 0,

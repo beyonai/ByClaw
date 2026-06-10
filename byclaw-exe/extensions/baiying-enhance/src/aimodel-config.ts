@@ -1,4 +1,4 @@
-import type { ProviderBundle } from "./agent-adapter.js";
+import type { AimodelModelInput, AimodelProviderApi, ProviderBundle } from "./agent-adapter.js";
 import { rememberAimodelAuthToken } from "./aimodel-auth-cache.js";
 import type { BaiyingRedisJsonStore, RedisJsonPayload } from "./redis-json-store.js";
 import { MANAGED_PROVIDER_PREFIX } from "./types.js";
@@ -7,6 +7,8 @@ export const DEFAULT_AIMODEL_CONFIG_REDIS_KEY = "byai:aimodel:config";
 export const DEFAULT_AIMODEL_TYPELIST_REDIS_KEY = "byai:aimodel:typelist";
 export const DEFAULT_AIMODEL_TYPELIST_FIELD = "LLM";
 export const DEFAULT_AIMODEL_SECRET_PROVIDER_NAME = "baiying-aimodel-redis";
+export const AIMODEL_ABILITY_TEXT = "3";
+export const AIMODEL_ABILITY_MULTIMODAL = "7";
 
 type LoggerLike = {
     warn: (message: string) => void;
@@ -106,6 +108,39 @@ function modelIdFromAimodelRecord(raw: AiModelConfigRecord): string {
     return nonEmptyString(raw.instanceId) || nonEmptyString(raw.modelCode);
 }
 
+export function normalizeAimodelAbilities(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value.map((item) => String(item).trim()).filter(Boolean);
+}
+
+export function resolveAimodelModelInputFromAbilities(abilities: string[]): AimodelModelInput[] {
+    if (abilities.includes(AIMODEL_ABILITY_MULTIMODAL)) {
+        return ["text", "image"];
+    }
+    return ["text"];
+}
+
+export function resolveAimodelProviderApiFromInstanceParam(
+    instanceParam: Record<string, unknown>,
+): AimodelProviderApi {
+    const candidates = [
+        nonEmptyString(instanceParam.providerName),
+        nonEmptyString(instanceParam.modelProtocol),
+    ];
+    for (const candidate of candidates) {
+        const normalized = candidate.toLowerCase();
+        if (normalized === "anthropic") {
+            return "anthropic-messages";
+        }
+        if (normalized === "openai") {
+            return "openai-completions";
+        }
+    }
+    return "openai-completions";
+}
+
 function parseBaiyingAimodelProviderBundleFromRecord(params: {
     raw: AiModelConfigRecord;
     modelId: string;
@@ -125,17 +160,19 @@ function parseBaiyingAimodelProviderBundleFromRecord(params: {
         raw.instanceParam && typeof raw.instanceParam === "object"
             ? (raw.instanceParam as Record<string, unknown>)
             : {};
+    const abilities = normalizeAimodelAbilities(instanceParam.abilities);
     return {
         baseUrl,
         apiKey: buildBaiyingAimodelSecretRef({
             modelId: params.modelId,
             secretProviderName: params.secretProviderName,
         }),
-        api: "openai-completions",
+        api: resolveAimodelProviderApiFromInstanceParam(instanceParam),
         modelId: modelCode,
         modelName: nonEmptyString(raw.modelName) || modelCode,
         contextWindow: positiveInt(raw.maxContentToken) ?? 128000,
         maxTokens: positiveInt(instanceParam.maxTokens) ?? 8192,
+        input: resolveAimodelModelInputFromAbilities(abilities),
     };
 }
 

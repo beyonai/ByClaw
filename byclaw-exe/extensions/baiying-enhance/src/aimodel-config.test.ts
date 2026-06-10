@@ -6,6 +6,8 @@ import {
   parseBaiyingAimodelProviderBundle,
   providerKeyForBaiyingModelId,
   readAuthTokenFromAimodelTypeListPayload,
+  resolveAimodelModelInputFromAbilities,
+  resolveAimodelProviderApiFromInstanceParam,
   resolveDefaultBaiyingAimodelProviderBundle,
 } from "./aimodel-config.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
@@ -83,8 +85,64 @@ describe("Baiying AI model config", () => {
       modelName: "glm-5-turbo",
       contextWindow: 128000,
       maxTokens: 1024,
+      input: ["text"],
     });
     expect(JSON.stringify(provider)).not.toContain("secret-token");
+  });
+
+  it("maps providerName OpenAI and Anthropic to OpenClaw provider APIs", () => {
+    expect(
+      resolveAimodelProviderApiFromInstanceParam({
+        providerName: "OpenAI",
+      }),
+    ).toBe("openai-completions");
+    expect(
+      resolveAimodelProviderApiFromInstanceParam({
+        providerName: "Anthropic",
+      }),
+    ).toBe("anthropic-messages");
+    expect(
+      resolveAimodelProviderApiFromInstanceParam({
+        modelProtocol: "Anthropic",
+      }),
+    ).toBe("anthropic-messages");
+  });
+
+  it("maps abilities 3 to text-only and 7 to multimodal input", () => {
+    expect(resolveAimodelModelInputFromAbilities(["3"])).toEqual(["text"]);
+    expect(resolveAimodelModelInputFromAbilities(["7"])).toEqual(["text", "image"]);
+    expect(resolveAimodelModelInputFromAbilities(["3", "7"])).toEqual(["text", "image"]);
+  });
+
+  it("maps Redis Anthropic multimodal model config into provider bundle", () => {
+    const provider = parseBaiyingAimodelProviderBundle({
+      payload: {
+        ...createAimodelPayload(),
+        raw: {
+          authToken: "secret-token",
+          instanceId: "10243472",
+          instanceParam: {
+            providerName: "Anthropic",
+            abilities: ["6", "5", "7", "2"],
+            maxTokens: 131072,
+          },
+          maxContentToken: "262144",
+          modelCode: "claude-sonnet-4-6",
+          modelName: "claude-sonnet-4-6",
+          status: 1,
+          url: "https://api.example.com/anthropic",
+        },
+      },
+      modelId: "10243472",
+      secretProviderName: DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
+    });
+    expect(provider).toEqual(
+      expect.objectContaining({
+        api: "anthropic-messages",
+        input: ["text", "image"],
+        modelId: "claude-sonnet-4-6",
+      }),
+    );
   });
 
   it("writes managed provider config with SecretRef and agent model primary", () => {
@@ -144,6 +202,7 @@ describe("Baiying AI model config", () => {
         expect.objectContaining({
           id: "glm-5-turbo",
           api: "openai-completions",
+          input: ["text"],
           contextWindow: 128000,
           maxTokens: 1024,
         }),

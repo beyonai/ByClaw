@@ -194,6 +194,8 @@ function retainedDefaultAimodelBundleFromConfig(cfg: {
                 models?: Array<{
                     id?: string;
                     name?: string;
+                    api?: unknown;
+                    input?: unknown;
                     contextWindow?: number;
                     maxTokens?: number;
                 }>;
@@ -216,17 +218,25 @@ function retainedDefaultAimodelBundleFromConfig(cfg: {
     if (!providerEntry || !modelEntry || !baseUrl || !apiKey) {
         return null;
     }
+    const providerApi =
+        providerEntry.api === "anthropic-messages" ? "anthropic-messages" : "openai-completions";
+    const modelInput = Array.isArray(modelEntry.input)
+        ? modelEntry.input.filter(
+              (item): item is "text" | "image" => item === "text" || item === "image",
+          )
+        : undefined;
     return {
         providerKey: parsed.provider,
         modelRef: primary,
         provider: {
             baseUrl,
             apiKey,
-            api: "openai-completions",
+            api: providerApi,
             modelId: parsed.model,
             modelName: modelEntry.name?.trim() || parsed.model,
             contextWindow: modelEntry.contextWindow,
             maxTokens: modelEntry.maxTokens,
+            input: modelInput?.length ? modelInput : undefined,
         },
         hash: "retained",
     };

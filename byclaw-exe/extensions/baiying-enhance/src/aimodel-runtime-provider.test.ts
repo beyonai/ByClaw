@@ -17,7 +17,7 @@ describe("Baiying AI model runtime provider", () => {
 
         const provider = registerProvider.mock.calls[0]?.[0];
         expect(provider?.id).toBe("baiying-aimodel");
-        expect(provider?.hookAliases).toEqual(["openai-completions"]);
+        expect(provider?.hookAliases).toEqual(["openai-completions", "anthropic-messages"]);
         expect(
             provider?.resolveSyntheticAuth?.({
                 provider: "baiying-m-10004009",
