@@ -45,11 +45,14 @@ public class GatewayStreamEventProcessor {
      */
     public boolean handleHistoryEventIfNecessary(ChatProcessContext ctx, JSONObject dataJson) {
         String receivedTraceId = dataJson == null ? null : dataJson.getString("trace_id");
-        if (StringUtils.isBlank(receivedTraceId) || !receivedTraceId.contains("_")) {
+        if (StringUtils.isBlank(receivedTraceId)) {
             return true;
         }
         if (receivedTraceId.equals(ctx.traceId)) {
             return false;
+        }
+        if (!TraceIdCodec.canDecode(receivedTraceId)) {
+            return true;
         }
 
         String eventType = normalizeEventType(ctx, dataJson);
@@ -150,9 +153,9 @@ public class GatewayStreamEventProcessor {
 
     private HistoryBatch createHistoryBatch(ChatProcessContext ctx, String traceId) {
         try {
-            String[] parts = traceId.split("_", 2);
-            Long historyUserMessageId = Long.parseLong(parts[0]);
-            Long historyModelAnswerMessageId = Long.parseLong(parts[1]);
+            TraceIdCodec.TraceMessageIds messageIds = TraceIdCodec.decode(traceId);
+            Long historyUserMessageId = messageIds.getUserMessageId();
+            Long historyModelAnswerMessageId = messageIds.getModelAnswerMessageId();
             Long taskId = resolveHistoryTaskId(historyUserMessageId);
             MessageContext historyMsgCtx = new MessageContext(
                 AgentTypeEnum.getNameCode(ctx.assistantChatDto.getAgentType()),

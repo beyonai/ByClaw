@@ -61,10 +61,8 @@ function MobileLayout() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  const getAgentUploadFileConfig = useAgentUploadFileConfig(employeesList);
-  const uploadFileConfig = React.useMemo(() => {
-    return getAgentUploadFileConfig(agentId);
-  }, [agentId, getAgentUploadFileConfig]);
+  const { globalConfig } = useAgentUploadFileConfig(employeesList);
+  const uploadFileConfig = React.useMemo(() => globalConfig, [globalConfig]);
 
   return (
     <>

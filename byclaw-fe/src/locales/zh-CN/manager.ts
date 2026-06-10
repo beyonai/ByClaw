@@ -412,6 +412,8 @@ export default {
   'modelMgr.modal.modelTypeRERANK': '重排模型（RERANK）',
   'modelMgr.modal.modelTypeEMBEDDING': '向量模型（EMBEDDING）',
   'modelMgr.modal.provider': '提供商',
+  'modelMgr.modal.modelProtocol': '模型协议',
+  'modelMgr.modal.modelProtocolPlaceholder': '请选择模型协议',
   'modelMgr.modal.input': '输入',
   'modelMgr.modal.output': '输出',
   'modelMgr.modal.run': '运行',

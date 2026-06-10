@@ -39,7 +39,8 @@ export default function useGlobalChatRuntime() {
       sessionList
         .map((item) => item.sessionId)
         .filter(Boolean)
-        .map((item) => `${item}`),
+        .map((item) => `${item}`)
+        .join(','),
     [sessionList]
   );
 
@@ -49,7 +50,7 @@ export default function useGlobalChatRuntime() {
     }
 
     try {
-      const list: RunningChatInfo[] = await getChatRunningStatus({ sessionIds });
+      const list: RunningChatInfo[] = await getChatRunningStatus({ sessionIds: sessionIds.split(',') });
       hydrateRunningSessions(list || []);
     } catch (error) {
       console.error(error);
@@ -112,25 +113,25 @@ export default function useGlobalChatRuntime() {
     syncRunningStatus();
   }, [syncRunningStatus]);
 
-  useEffect(() => {
-    if (!userId) {
-      return;
-    }
+  // useEffect(() => {
+  //   if (!userId) {
+  //     return;
+  //   }
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        syncRunningStatus();
-      }
-    };
+  //   const handleVisibilityChange = () => {
+  //     if (document.visibilityState === 'visible') {
+  //       syncRunningStatus();
+  //     }
+  //   };
 
-    window.addEventListener('online', syncRunningStatus);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    const timer = window.setInterval(syncRunningStatus, 30000);
+  //   window.addEventListener('online', syncRunningStatus);
+  //   document.addEventListener('visibilitychange', handleVisibilityChange);
+  //   const timer = window.setInterval(syncRunningStatus, 30000);
 
-    return () => {
-      window.removeEventListener('online', syncRunningStatus);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.clearInterval(timer);
-    };
-  }, [syncRunningStatus, userId]);
+  //   return () => {
+  //     window.removeEventListener('online', syncRunningStatus);
+  //     document.removeEventListener('visibilitychange', handleVisibilityChange);
+  //     window.clearInterval(timer);
+  //   };
+  // }, [syncRunningStatus, userId]);
 }

@@ -82,6 +82,9 @@ public class SandboxService {
     /** 沙箱状态：已释放 */
     private static final String STATUS_RELEASED = "RELEASED";
 
+    /** 沙箱状态：启动失败 */
+    private static final String STATUS_FAILED = "FAILED";
+
     /** 手动释放终止原因。 */
     private static final String RELEASE_REASON_MANUAL = "release.manual";
 
@@ -93,6 +96,17 @@ public class SandboxService {
 
     /** reconcile 发现远端不存在或不可复用时终止旧记录的原因。 */
     private static final String RELEASE_REASON_REMOTE_MISSING = "release.remote.missing";
+
+    /** 启动前发现模型环境变量缺失。 */
+    private static final String RELEASE_REASON_MODEL_ENV_MISSING = "launch.model-env.missing";
+
+    private static final List<String> REQUIRED_MODEL_ENV_KEYS = List.of(
+        "MODEL_BASE_URL",
+        "MODEL_ID",
+        "MODEL_NAME",
+        "MODEL_ALIAS",
+        "MODEL_API_KEY"
+    );
 
     /** 集成类型：沙箱 */
     private static final String INTEGRATION_TYPE_SANDBOX = "FROM_SANDBOX";
@@ -578,6 +592,8 @@ public class SandboxService {
             throw new BdpRuntimeException(I18nUtil.get("sandbox.launch.busy"));
         }
 
+        validateRequiredModelEnvs(record, launchContext.getEnvs());
+
         request.setMetadata(buildLaunchMetadata(record));
 
         LOGGER.info("调用生命周期服务启动沙箱，记录：{}，envKeys：{}", sandboxRef(record),
@@ -635,6 +651,29 @@ public class SandboxService {
         LOGGER.info("沙箱启动成功，记录：{}，endpoint：{}，timeoutSeconds：{}，remoteExpiresAt：{}，nextRenewAt：{}",
             sandboxRef(record), endpoint, launchData.getTimeoutSeconds(), remoteExpiresAt, nextRenewAt);
         return launchData;
+    }
+
+    private void validateRequiredModelEnvs(SsSandboxRecord record, Map<String, String> envs) {
+        if (record != null && SandboxLaunchRouting.BYCLAW_CODE_AGENT_SANDBOX_TYPE.equals(record.getSandboxType())) {
+            return;
+        }
+        List<String> missingKeys = REQUIRED_MODEL_ENV_KEYS.stream()
+            .filter(key -> envs == null || StringUtils.isBlank(envs.get(key)))
+            .collect(Collectors.toList());
+        if (missingKeys.isEmpty()) {
+            return;
+        }
+
+        String message = I18nUtil.get("sandbox.launch.model.config.required");
+        LOGGER.error("沙箱启动模型环境变量缺失，记录：{}，missingKeys：{}", sandboxRef(record), missingKeys);
+        int failed = sandboxRecordMapper.updateStatusToFailed(record.getId(),
+            RELEASE_REASON_MODEL_ENV_MISSING, new Date(), record.getLockVersion());
+        if (failed > 0) {
+            incrementVersions(record, true);
+            record.setStatus(STATUS_FAILED);
+            record.setReleaseReason(RELEASE_REASON_MODEL_ENV_MISSING);
+        }
+        throw new BdpRuntimeException(message);
     }
 
     private Map<String, String> buildLaunchMetadata(SsSandboxRecord record) {

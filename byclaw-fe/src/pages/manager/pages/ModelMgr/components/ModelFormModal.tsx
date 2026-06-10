@@ -185,6 +185,7 @@ const ModelFormModal: React.FC<Props> = (props) => {
           const nextFormValues = {
             displayName: detail.displayName,
             providerName: detail.providerName,
+            modelProtocol: detail.modelProtocol || 'OpenAI',
             modelCode: detail.modelCode,
             modelType: normalizeModelType(detail.modelType),
             apiEndpoint: detail.apiEndpoint || 'https://api.example.com/v1',
