@@ -3,6 +3,16 @@
 # ==============================================
 # 环境变量 直接从系统 env 获取，不硬编码
 # ==============================================
+if [ -z "${GBRAIN_HOME}" ]; then
+    echo "❌ GBRAIN_HOME 未设置"
+    exit 1
+fi
+
+if [ ! -d "${GBRAIN_HOME}" ]; then
+    echo "📁 创建 GBRAIN_HOME 目录：${GBRAIN_HOME}"
+    mkdir -p "${GBRAIN_HOME}" || exit 1
+fi
+
 DB_FILE="${GBRAIN_HOME}/.gbrain/brain.pglite"
 
 # ==============================================
