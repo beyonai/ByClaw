@@ -764,6 +764,8 @@ export default {
   'messageForm.pleaseUpload': '请上传{files}',
 
   'messageList.deleteMessageConfirm': '确定删除该消息吗？',
+  'messageList.troubleshoot': '排障',
+  'messageList.troubleshootPrompt': '当前消息的traceId为{traceId}，请帮我排除故障',
 
   'citeRender.title': '引用消息',
   'citeRender.deleteConfirm': '确定删除该引用吗？',
