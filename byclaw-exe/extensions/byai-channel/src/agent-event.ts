@@ -4,7 +4,6 @@ import {
   emitSdkChunkTracked,
   getLastSdkEmitChunk,
   isRootSessionKey,
-  isChildSessionKey,
   markActiveSdkModelFallbackStep,
   markActiveSdkCompactionRetryPending,
   markActiveSdkRootLifecycleFinished,
@@ -25,6 +24,7 @@ import {
 } from "./agent-event-kind.js";
 import { AgentEvent } from "./types";
 import type { OpenClawPluginApi } from "@openclaw/plugin-sdk/core";
+import { isSubagentSessionKey } from "openclaw/plugin-sdk/routing";
 import { emitIncrementalText, getAgentNameById, normalizeReasoningPreviewText } from "./utils";
 import {
   buildThinkingEndText,
@@ -260,7 +260,7 @@ async function handleReasoningEndTransition(
   if (!sdkEmitter) {
     return;
   }
-  const previousEmit = getLastSdkEmitChunk(request.accountId);
+  const previousEmit = getLastSdkEmitChunk(request.sessionId);
   await emitSdkChunkTracked({
     emitter: sdkEmitter,
     sessionId: request.sessionId,
@@ -427,7 +427,7 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
   api.logger.info(
     `[byai-channel] onAgentEvent: ${JSON.stringify(event)}`,
   );
-  const isChildSession = isChildSessionKey(resolvedSessionKey);
+  const isChildSession = isSubagentSessionKey(resolvedSessionKey);
   const currentStream = resolveAssistantDisplayStream(event, isChildSession);
   const previousStream = lastAgentAssistantEvent.stream;
   const isPreviousThinking = previousStream === "thinking";
