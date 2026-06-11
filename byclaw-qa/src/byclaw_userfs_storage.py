@@ -70,6 +70,12 @@ def _require_service_name() -> str:
     return service_name
 
 
+def _normalize_location(location: StorageLocation) -> StorageLocation:
+    if location.namespace != _NAMESPACE:
+        return StorageLocation(namespace=_NAMESPACE, key=location.key)
+    return location
+
+
 def _path_from_location(location: StorageLocation) -> str:
     if location.namespace != _NAMESPACE:
         raise StorageConfigurationError(f"unsupported storage namespace: {location.namespace}")
@@ -114,6 +120,7 @@ class ByClawUserFsKnowledgeStorageProvider:
         *,
         content_type: str,
     ) -> StoredObject:
+        location = _normalize_location(location)
         file_path = _path_from_location(location)
         headers = build_byclaw_userfs_headers()
         response = await self._request(
@@ -137,6 +144,7 @@ class ByClawUserFsKnowledgeStorageProvider:
         )
 
     async def read(self, location: StorageLocation) -> bytes:
+        location = _normalize_location(location)
         file_path = _path_from_location(location)
         headers = build_byclaw_userfs_headers()
         response = await self._request(
@@ -153,6 +161,7 @@ class ByClawUserFsKnowledgeStorageProvider:
         return b""
 
     async def delete(self, location: StorageLocation) -> None:
+        location = _normalize_location(location)
         file_path = _path_from_location(location)
         headers = build_byclaw_userfs_headers()
         await self._request(
@@ -175,6 +184,8 @@ class ByClawUserFsKnowledgeStorageProvider:
         *,
         overwrite: bool = False,
     ) -> None:
+        source = _normalize_location(source)
+        target = _normalize_location(target)
         source_path = _path_from_location(source)
         target_path = _path_from_location(target)
         headers = build_byclaw_userfs_headers()

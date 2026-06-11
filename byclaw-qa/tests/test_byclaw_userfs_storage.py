@@ -305,11 +305,25 @@ async def test_delete_quietly_swallows_storage_error(monkeypatch):
         reset_byclaw_userfs_headers(token)
 
 
-async def test_path_from_location_rejects_wrong_namespace():
-    from byclaw_userfs_storage import (
-        ByClawUserFsKnowledgeStorageProvider,
-        _path_from_location,
-    )
+def test_normalize_location_sets_namespace_to_byclaw_user():
+    from byclaw_userfs_storage import _normalize_location
+
+    result = _normalize_location(StorageLocation("OTHER-NS", "/.bykc/KB001/raw/origin/a.txt"))
+    assert result.namespace == "BYCLAW-USER"
+    assert result.key == "/.bykc/KB001/raw/origin/a.txt"
+
+
+def test_normalize_location_preserves_already_correct_namespace():
+    from byclaw_userfs_storage import _normalize_location
+
+    original = StorageLocation("BYCLAW-USER", "/.bykc/KB001/raw/origin/a.txt")
+    result = _normalize_location(original)
+    assert result.namespace == "BYCLAW-USER"
+    assert result.key == "/.bykc/KB001/raw/origin/a.txt"
+
+
+def test_path_from_location_rejects_wrong_namespace():
+    from byclaw_userfs_storage import _path_from_location
 
     with pytest.raises(StorageConfigurationError):
         _path_from_location(StorageLocation("OTHER-NS", "/.bykc/KB001/raw/origin/a.txt"))
