@@ -686,6 +686,10 @@ export default {
   'dialogueRecord.listTitle': '当前还没有对话记录呢～',
   'dialogueRecord.listTip': '不妨主动打个招呼，和虚拟伙伴、真实同事开启协作聊天吧！',
 
+  'chat.bottomContent.suggestQuestion': '推荐问题',
+  'chat.bottomContent.suggestReplay': '推荐回放',
+  'chat.bottomContent.suggestSkill': '推荐技能',
+  'chat.recommendQuestion.noMore': '没有更多了',
   'chat.bottomContent.todo.desc': '条待办事项，请及时处理',
   'chat.bottomContent.todoList.title': '待办事项',
   'chat.bottomContent.todoList.initiator': '发起人',

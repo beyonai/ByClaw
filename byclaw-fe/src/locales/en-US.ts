@@ -692,6 +692,10 @@ export default {
   'dialogueRecord.listTip':
     'Why not take the initiative to say hello and start a collaborative chat with virtual partners and real colleagues!',
 
+  'chat.bottomContent.suggestQuestion': 'Question',
+  'chat.bottomContent.suggestReplay': 'Replay',
+  'chat.bottomContent.suggestSkill': 'Skill',
+  'chat.recommendQuestion.noMore': 'No more',
   'chat.bottomContent.todo.desc': ' pending task, please handle it promptly',
   'chat.bottomContent.todoList.title': 'Todo List',
   'chat.bottomContent.todoList.initiator': 'Initiator',
