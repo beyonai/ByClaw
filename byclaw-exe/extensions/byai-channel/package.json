@@ -4,7 +4,7 @@
   "description": "ByAI Channel - HTTP Webhook + Redis SDK channel with configurable streaming support",
   "type": "module",
   "scripts": {
-    "build": "esbuild index.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/index.js --sourcemap --packages=external --external:openclaw --external:minio && esbuild src/channel-plugin-api.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/channel-plugin-api.js --sourcemap --packages=external --external:openclaw --external:minio && esbuild src/runtime-setter-api.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/runtime-setter-api.js --sourcemap --packages=external --external:openclaw --external:minio",
+    "build": "esbuild index.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/index.js --sourcemap --packages=external --external:openclaw --external:minio && esbuild channel-plugin-api.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/channel-plugin-api.js --sourcemap --packages=external --external:openclaw --external:minio && esbuild runtime-setter-api.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/runtime-setter-api.js --sourcemap --packages=external --external:openclaw --external:minio",
     "test": "vitest run"
   },
   "dependencies": {
