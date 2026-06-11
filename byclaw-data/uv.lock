@@ -382,18 +382,30 @@ dev = [
 
 [[package]]
 name = "by-framework"
-version = "0.2.1"
-source = { registry = "https://pypi.org/simple/" }
+version = "0.2.2.dev0"
+source = { editable = "../../by-framework-python" }
 dependencies = [
     { name = "dill" },
     { name = "httpx" },
     { name = "redis" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a9/b4/725bc1469c7e38ac25921be24e9bc34ac99213dbcfdcff85a089fdc39d06/by_framework-0.2.1.tar.gz", hash = "sha256:ef23e18759cd33dee5553b02a0900fc1164c75e3514c24542c04de13e71c82d8", size = 946814, upload-time = "2026-05-18T10:24:24.043Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b2/74/9d67e4ea9cc131f06a10fee978e4e0415f0202a18c0bb3ddd71827dd9d7a/by_framework-0.2.1-py3-none-any.whl", hash = "sha256:e4b25636eea60b4f0dcb220655d95bd2d52f050f459c98165b5195bee879019d", size = 137484, upload-time = "2026-05-18T10:24:22.544Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "dill", specifier = ">=0.4.1" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "isort", marker = "extra == 'dev'", specifier = ">=5.13.0" },
+    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0.0" },
+    { name = "pyink", marker = "extra == 'dev'", specifier = ">=24.0.0" },
+    { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.0.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
+    { name = "redis", specifier = ">=7.0.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.3.0" },
+    { name = "typing-extensions", specifier = ">=4.0.0" },
 ]
+provides-extras = ["dev"]
 
 [[package]]
 name = "by-framework-history-byclaw"
@@ -408,6 +420,30 @@ wheels = [
 ]
 
 [[package]]
+name = "by-framework-trace-langfuse"
+version = "0.0.3.dev0"
+source = { editable = "../../by-framework-python/libs/by-framework-trace-langfuse" }
+dependencies = [
+    { name = "by-framework" },
+    { name = "langchain" },
+    { name = "langfuse" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "by-framework", editable = "../../by-framework-python" },
+    { name = "isort", marker = "extra == 'dev'", specifier = ">=5.13.0" },
+    { name = "langchain", specifier = ">=0.3.0" },
+    { name = "langfuse", specifier = ">=3.0.0" },
+    { name = "pyink", marker = "extra == 'dev'", specifier = ">=24.0.0" },
+    { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.0.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.3.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "byclaw-data"
 version = "0.1.0"
 source = { editable = "." }
@@ -415,6 +451,7 @@ dependencies = [
     { name = "by-datacloud" },
     { name = "by-framework" },
     { name = "by-framework-history-byclaw" },
+    { name = "by-framework-trace-langfuse" },
     { name = "langchain-openai" },
     { name = "langfuse" },
     { name = "python-dotenv" },
@@ -431,8 +468,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "by-datacloud", editable = "../../by-datacloud" },
-    { name = "by-framework", specifier = ">=0.2.0", index = "https://pypi.org/simple/" },
+    { name = "by-framework", editable = "../../by-framework-python" },
     { name = "by-framework-history-byclaw", specifier = ">=0.0.3" },
+    { name = "by-framework-trace-langfuse", editable = "../../by-framework-python/libs/by-framework-trace-langfuse" },
     { name = "langchain-openai", specifier = ">=1.1.11" },
     { name = "langfuse", specifier = ">=2.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
