@@ -10,6 +10,7 @@ from by_qa.knowledge_base.infrastructure.storage import (
     StorageConfigurationError,
     StorageError,
     StorageLocation,
+    StoredObject,
 )
 
 _HEADER_CONTEXT: ContextVar[dict[str, str]] = ContextVar(
@@ -84,7 +85,7 @@ class ByClawUserFsKnowledgeStorageProvider:
     transport: Transport | None = None
 
     async def ensure_ready(self) -> None:
-        return None
+        _require_service_name()
 
     def build_original_location(self, *, kb_code: str, knowledge_base_id: int, fs_entry_id: int, file_path: str, mime_type: str) -> StorageLocation:
         _ = knowledge_base_id, fs_entry_id, mime_type
@@ -113,8 +114,6 @@ class ByClawUserFsKnowledgeStorageProvider:
         *,
         content_type: str,
     ) -> StoredObject:
-        from by_qa.knowledge_base.infrastructure.storage import StoredObject
-
         file_path = _path_from_location(location)
         headers = build_byclaw_userfs_headers()
         response = await self._request(
@@ -128,7 +127,8 @@ class ByClawUserFsKnowledgeStorageProvider:
             },
             files={"file": ("file", content, content_type)},
         )
-        data = response.get("data", {}) if isinstance(response.get("data"), dict) else {}
+        raw_data = response.get("data")
+        data = raw_data if isinstance(raw_data, dict) else {}
         return StoredObject(
             location=location,
             size=data.get("fileSize", len(content)),

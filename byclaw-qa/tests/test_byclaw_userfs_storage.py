@@ -262,3 +262,78 @@ async def test_move_calls_rename_endpoint_with_overwrite(monkeypatch):
         "newPath": "/.bykc/KB001/raw/origin/b.txt",
         "overwrite": True,
     }
+
+
+async def test_delete_quietly_succeeds(monkeypatch):
+    monkeypatch.setenv("BE_DOMAINNAME", "ByaiService")
+    from byclaw_userfs_storage import (
+        ByClawUserFsKnowledgeStorageProvider,
+        reset_byclaw_userfs_headers,
+    )
+
+    transport = FakeTransport([{"status_code": 200, "data": {"code": "00000"}}])
+    provider = ByClawUserFsKnowledgeStorageProvider(transport=transport)
+    token = _set_token()
+    try:
+        await provider.delete_quietly(StorageLocation("BYCLAW-USER", "/.bykc/KB001/raw/origin/a.txt"))
+    finally:
+        reset_byclaw_userfs_headers(token)
+
+
+class ErrorTransport:
+    def __init__(self, error):
+        self._error = error
+
+    async def __call__(self, **kwargs):
+        raise self._error
+
+
+async def test_delete_quietly_swallows_storage_error(monkeypatch):
+    monkeypatch.setenv("BE_DOMAINNAME", "ByaiService")
+    from by_qa.knowledge_base.infrastructure.storage import StorageError
+    from byclaw_userfs_storage import (
+        ByClawUserFsKnowledgeStorageProvider,
+        reset_byclaw_userfs_headers,
+    )
+
+    transport = ErrorTransport(StorageError("simulated"))
+    provider = ByClawUserFsKnowledgeStorageProvider(transport=transport)
+    token = _set_token()
+    try:
+        await provider.delete_quietly(StorageLocation("BYCLAW-USER", "/.bykc/KB001/raw/origin/a.txt"))
+    finally:
+        reset_byclaw_userfs_headers(token)
+
+
+async def test_path_from_location_rejects_wrong_namespace():
+    from byclaw_userfs_storage import (
+        ByClawUserFsKnowledgeStorageProvider,
+        _path_from_location,
+    )
+
+    with pytest.raises(StorageConfigurationError):
+        _path_from_location(StorageLocation("OTHER-NS", "/.bykc/KB001/raw/origin/a.txt"))
+
+
+async def test_path_from_location_rejects_wrong_prefix():
+    from byclaw_userfs_storage import _path_from_location
+
+    with pytest.raises(StorageConfigurationError):
+        _path_from_location(StorageLocation("BYCLAW-USER", "/other/a.txt"))
+
+
+async def test_ensure_ready_requires_be_domainname(monkeypatch):
+    monkeypatch.delenv("BE_DOMAINNAME", raising=False)
+    from byclaw_userfs_storage import ByClawUserFsKnowledgeStorageProvider
+
+    provider = ByClawUserFsKnowledgeStorageProvider()
+    with pytest.raises(StorageConfigurationError):
+        await provider.ensure_ready()
+
+
+async def test_ensure_ready_accepts_be_domainname(monkeypatch):
+    monkeypatch.setenv("BE_DOMAINNAME", "ByaiService")
+    from byclaw_userfs_storage import ByClawUserFsKnowledgeStorageProvider
+
+    provider = ByClawUserFsKnowledgeStorageProvider()
+    await provider.ensure_ready()
