@@ -770,6 +770,8 @@ export default {
   'messageForm.pleaseUpload': 'Please upload {files}',
 
   'messageList.deleteMessageConfirm': 'Are you sure to delete this message?',
+  'messageList.troubleshoot': 'Troubleshoot',
+  'messageList.troubleshootPrompt': 'The traceId of the current message is {traceId}. Please help me troubleshoot it.',
 
   'citeRender.title': 'Referenced Messages',
   'citeRender.deleteConfirm': 'Are you sure to delete this reference?',
