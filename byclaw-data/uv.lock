@@ -289,7 +289,7 @@ wheels = [
 [[package]]
 name = "by-datacloud"
 version = "0.1.41"
-source = { registry = "https://pypi.org/simple/" }
+source = { editable = "../../by-datacloud" }
 dependencies = [
     { name = "aiochclient", extra = ["aiohttp"] },
     { name = "aiomysql" },
@@ -324,9 +324,60 @@ dependencies = [
     { name = "uvicorn" },
     { name = "watchfiles" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f0/81/dbeed2c7ef7c288e37711f1df2f88f595726676b66e31bb7dd32ff9b62cc/by_datacloud-0.1.41.tar.gz", hash = "sha256:91d0da09a4f94323dd87f9cc3ce9996d991552c1391d50f761d27c228ebd0e48", size = 8906580, upload-time = "2026-06-01T07:06:24.408Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f8/66/016551842c1436b7874a4e30c225130480ce30fa8bc650cf0affbdd98828/by_datacloud-0.1.41-py3-none-any.whl", hash = "sha256:ce8d69a2917884c452200529752f820f2a68fb0e4163d60864e96c7212a67d1d", size = 898217, upload-time = "2026-06-01T07:06:22.022Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "aiochclient", extras = ["aiohttp"], specifier = ">=2.0" },
+    { name = "aiomysql", specifier = ">=0.2" },
+    { name = "aiosqlite", specifier = ">=0.19" },
+    { name = "asyncpg", specifier = ">=0.29" },
+    { name = "boto3", specifier = ">=1.34" },
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "jieba", specifier = ">=0.42.1" },
+    { name = "langchain", specifier = ">=0.3.0" },
+    { name = "langchain-core", specifier = ">=0.3.0" },
+    { name = "langchain-openai", specifier = ">=1.1.11" },
+    { name = "langgraph", specifier = ">=1.0.10" },
+    { name = "langgraph-checkpoint-postgres", specifier = ">=2.0.0" },
+    { name = "llama-index-embeddings-openai", specifier = ">=0.3.0" },
+    { name = "mcp", specifier = ">=1.18.0" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "opengauss-sqlalchemy", specifier = ">=2.4.0" },
+    { name = "pandas", specifier = ">=2.0" },
+    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.8" },
+    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.1" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pydantic-settings", specifier = ">=2.0" },
+    { name = "pypinyin", specifier = ">=0.50" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
+    { name = "python-multipart", specifier = ">=0.0.12" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "rapidfuzz", specifier = ">=3.14.3" },
+    { name = "rdflib", specifier = ">=7.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
+    { name = "sqlglot" },
+    { name = "sqlparse", specifier = ">=0.5" },
+    { name = "strawberry-graphql", extras = ["fastapi"], specifier = ">=0.260" },
+    { name = "uvicorn", specifier = ">=0.32.0" },
+    { name = "watchfiles", specifier = ">=1.0" },
+]
+provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "datacloud-analysis", editable = "../../by-datacloud/packages/datacloud-analysis" },
+    { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.2.0" },
+    { name = "mypy", specifier = ">=1.11" },
+    { name = "pre-commit", specifier = ">=3.8" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23" },
+    { name = "pytest-cov", specifier = ">=5.0" },
+    { name = "ruff", specifier = ">=0.6" },
 ]
 
 [[package]]
@@ -379,7 +430,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "by-datacloud", specifier = ">=0.1.41" },
+    { name = "by-datacloud", editable = "../../by-datacloud" },
     { name = "by-framework", specifier = ">=0.2.0", index = "https://pypi.org/simple/" },
     { name = "by-framework-history-byclaw", specifier = ">=0.0.3" },
     { name = "langchain-openai", specifier = ">=1.1.11" },

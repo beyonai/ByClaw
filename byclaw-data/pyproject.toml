@@ -38,6 +38,7 @@ url = "https://pypi.org/simple/"
 
 [tool.uv.sources]
 by-framework = { index = "pypi" }
+by-datacloud = { path = "D:\\data\\code\\baiying\\by-datacloud", editable = true }
 
 [dependency-groups]
 dev = [
