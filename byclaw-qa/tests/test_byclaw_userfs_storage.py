@@ -68,3 +68,53 @@ def test_location_rejects_empty_kb_code():
             fs_entry_id=34,
             file_path="/a.txt",
         )
+
+
+# -- Task 2: request header context -------------------------------------------
+
+def test_build_headers_forwards_beyond_token_and_system_code():
+    from byclaw_userfs_storage import (
+        build_byclaw_userfs_headers,
+        reset_byclaw_userfs_headers,
+        set_byclaw_userfs_headers,
+    )
+
+    token = set_byclaw_userfs_headers({"beyond-token": "token-123"})
+    try:
+        assert build_byclaw_userfs_headers() == {
+            "system-code": "BYCLAW-QA",
+            "beyond-token": "token-123",
+        }
+    finally:
+        reset_byclaw_userfs_headers(token)
+
+
+def test_build_headers_accepts_case_insensitive_request_header():
+    from byclaw_userfs_storage import (
+        build_byclaw_userfs_headers,
+        reset_byclaw_userfs_headers,
+        set_byclaw_userfs_headers,
+    )
+
+    token = set_byclaw_userfs_headers({"Beyond-Token": "token-123"})
+    try:
+        assert build_byclaw_userfs_headers()["beyond-token"] == "token-123"
+    finally:
+        reset_byclaw_userfs_headers(token)
+
+
+def test_build_headers_requires_beyond_token():
+    from byclaw_userfs_storage import (
+        build_byclaw_userfs_headers,
+        reset_byclaw_userfs_headers,
+        set_byclaw_userfs_headers,
+    )
+
+    from by_qa.knowledge_base.infrastructure.storage import StorageAuthenticationError
+
+    token = set_byclaw_userfs_headers({})
+    try:
+        with pytest.raises(StorageAuthenticationError):
+            build_byclaw_userfs_headers()
+    finally:
+        reset_byclaw_userfs_headers(token)

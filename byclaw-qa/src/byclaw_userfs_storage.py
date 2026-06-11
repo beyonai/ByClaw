@@ -1,11 +1,40 @@
 from __future__ import annotations
 
+from contextvars import ContextVar, Token
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from by_qa.knowledge_base.infrastructure.storage import (
     StorageConfigurationError,
     StorageLocation,
 )
+
+_HEADER_CONTEXT: ContextVar[dict[str, str]] = ContextVar(
+    "byclaw_userfs_headers",
+    default={},
+)
+_SYSTEM_CODE = "BYCLAW-QA"
+
+
+def set_byclaw_userfs_headers(headers: Mapping[str, str]) -> Token[dict[str, str]]:
+    normalized = {str(key).lower(): str(value) for key, value in headers.items()}
+    return _HEADER_CONTEXT.set(normalized)
+
+
+def reset_byclaw_userfs_headers(token: Token[dict[str, str]]) -> None:
+    _HEADER_CONTEXT.reset(token)
+
+
+def build_byclaw_userfs_headers() -> dict[str, str]:
+    from by_qa.knowledge_base.infrastructure.storage import StorageAuthenticationError
+
+    token = (_HEADER_CONTEXT.get().get("beyond-token") or "").strip()
+    if not token:
+        raise StorageAuthenticationError("missing beyond-token for ByClaw UserFS storage")
+    return {
+        "system-code": _SYSTEM_CODE,
+        "beyond-token": token,
+    }
 
 _NAMESPACE = "BYCLAW-USER"
 _ROOT = "/.bykc"
