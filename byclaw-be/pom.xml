@@ -24,17 +24,53 @@
             </activation>
             <repositories>
                 <repository>
-                    <id>central</id>
-                    <name>Maven Central</name>
-                    <url>https://repo1.maven.org/maven2</url>
+                    <id>sonatype-central-snapshots</id>
+                    <name>Sonatype Central Snapshots</name>
+                    <url>https://central.sonatype.com/repository/maven-snapshots</url>
+                    <releases>
+                        <enabled>false</enabled>
+                    </releases>
+                    <snapshots>
+                        <enabled>true</enabled>
+                        <updatePolicy>always</updatePolicy>
+                    </snapshots>
+                </repository>
+                <repository>
+                    <id>aliyun-apache-snapshots</id>
+                    <name>Aliyun Apache Snapshots</name>
+                    <url>https://maven.aliyun.com/repository/apache-snapshots</url>
+                    <releases>
+                        <enabled>false</enabled>
+                    </releases>
+                    <snapshots>
+                        <enabled>true</enabled>
+                        <updatePolicy>always</updatePolicy>
+                    </snapshots>
+                </repository>
+                <repository>
+                    <id>apache-snapshots</id>
+                    <name>Apache Snapshots</name>
+                    <url>https://repository.apache.org/snapshots/</url>
+                    <releases>
+                        <enabled>false</enabled>
+                    </releases>
+                    <snapshots>
+                        <enabled>true</enabled>
+                        <updatePolicy>always</updatePolicy>
+                    </snapshots>
+                </repository>
+                <repository>
+                    <id>aliyun-central</id>
+                    <name>Aliyun Maven Mirror</name>
+                    <url>https://maven.aliyun.com/repository/central</url>
                     <snapshots>
                         <enabled>false</enabled>
                     </snapshots>
                 </repository>
                 <repository>
-                    <id>aliyun</id>
-                    <name>Aliyun Maven Mirror</name>
-                    <url>https://maven.aliyun.com/repository/central</url>
+                    <id>central</id>
+                    <name>Maven Central</name>
+                    <url>https://repo1.maven.org/maven2</url>
                     <snapshots>
                         <enabled>false</enabled>
                     </snapshots>
@@ -68,7 +104,7 @@
         <xmlbeans.version>5.1.1</xmlbeans.version>
         <pagehelper-spring-boot-starter.version>1.4.7</pagehelper-spring-boot-starter.version>
         <pagehelper.version>5.3.3</pagehelper.version>
-        <gateway.sdk.version>0.2.6</gateway.sdk.version>
+        <gateway.sdk.version>0.2.9-SNAPSHOT</gateway.sdk.version>
         <!-- opentelemetry -->
         <opentelemetry.instrumentation.version>2.22.0</opentelemetry.instrumentation.version>
 
