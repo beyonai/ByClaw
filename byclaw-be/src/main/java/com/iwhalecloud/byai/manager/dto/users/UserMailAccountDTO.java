@@ -6,6 +6,8 @@ import lombok.Setter;
 
 /**
  * 用户个人邮箱账号保存/删除/设默认请求。
+ * @author qin.guoquan
+ * @date 2026-06-11 17:38:38
  */
 @Getter
 @Setter

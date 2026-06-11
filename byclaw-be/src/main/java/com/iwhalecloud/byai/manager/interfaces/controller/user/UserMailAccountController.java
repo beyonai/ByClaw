@@ -15,6 +15,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 个人中心-个人邮箱账号管理接口。
+ * @author qin.guoquan
+ * @date 2026-06-11 17:38:38
  */
 @RestController
 @RequestMapping("/userMailAccount")

@@ -27,6 +27,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 用户个人邮箱账号管理，只做账号配置维护，不做 IMAP/SMTP 可用性测试。
+ * @author qin.guoquan
+ * @date 2026-06-11 17:38:38
  */
 @Service
 public class UserMailAccountApplicationService {

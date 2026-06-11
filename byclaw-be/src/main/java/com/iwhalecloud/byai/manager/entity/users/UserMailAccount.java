@@ -9,6 +9,8 @@ import lombok.Setter;
 
 /**
  * 用户个人邮箱账号配置。
+ * @author qin.guoquan
+ * @date 2026-06-11 17:38:38
  */
 @Getter
 @Setter

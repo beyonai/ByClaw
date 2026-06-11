@@ -9,6 +9,8 @@ import lombok.Setter;
 
 /**
  * 用户个人邮箱账号安全视图，不返回授权码明文。
+ * @author qin.guoquan
+ * @date 2026-06-11 17:38:38
  */
 @Getter
 @Setter
