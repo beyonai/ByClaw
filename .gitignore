@@ -69,3 +69,6 @@ byclaw-data/resource/import_package_owl_onto_bak/
 
 # Vscode
 .vscode/
+byclaw-data/trace_result.json
+byclaw-data/.vscode/launch.json
+byclaw-data/.vscode/settings.json
