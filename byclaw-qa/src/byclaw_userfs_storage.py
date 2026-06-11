@@ -10,6 +10,7 @@ from by_qa.knowledge_base.infrastructure.storage import (
     StorageConfigurationError,
     StorageError,
     StorageLocation,
+    StorageOperationError,
     StoredObject,
 )
 
@@ -110,8 +111,64 @@ class ByClawUserFsKnowledgeStorageProvider:
     async def _request(self, *, method: str, path: str, headers: dict[str, str], **kwargs: Any) -> dict[str, Any]:
         if self.transport is not None:
             return await self.transport(method=method, path=path, headers=headers, **kwargs)
-        # Real transport will be implemented in Task 4
-        raise StorageConfigurationError("real transport not yet implemented")
+
+        from by_framework.common.redis_client import init_redis
+        from by_framework.core.discovery import DiscoveryClient
+        from by_framework.util.discovery_http_client import DiscoveryHttpClient
+        from by_framework.util.http_client import RetryConfig
+        from by_qa.config import get_settings
+
+        service_name = _require_service_name()
+        settings = get_settings()
+        redis_client = init_redis(
+            host=settings.redis_host,
+            port=settings.redis_port,
+            db=settings.redis_database,
+            password=settings.redis_password or None,
+            username=settings.redis_username or None,
+            decode_responses=True,
+        )
+        discovery_client = DiscoveryClient(redis_client=redis_client, cache_interval=5)
+        retry_config = RetryConfig(max_attempts=3, retry_on_status_codes=frozenset({502, 503, 504}))
+        try:
+            async with DiscoveryHttpClient(discovery_client, retry_config=retry_config) as client:
+                files = kwargs.pop("files", None)
+                if files is not None:
+                    # Multipart upload path
+                    parts: list[tuple[str, Any]] = []
+                    data = kwargs.pop("data", None)
+                    if data:
+                        for key, value in data.items():
+                            parts.append((key, (None, str(value))))
+                    for field_name, (filename, content_bytes, content_type) in files.items():
+                        parts.append((field_name, (filename, content_bytes, content_type)))
+                    response = await client._upload_with_discovery(
+                        service_name=service_name,
+                        path=path,
+                        parts=parts,
+                        headers=headers,
+                    )
+                else:
+                    response = await client._request_with_discovery(
+                        method=method,
+                        service_name=service_name,
+                        path=path,
+                        headers=headers,
+                        **kwargs,
+                    )
+            if not response.is_success:
+                raise StorageOperationError(
+                    f"byclaw-userfs: HTTP {response.status_code} for {method} {path}"
+                )
+            result: dict[str, Any] = {
+                "status_code": response.status_code,
+                "data": response.data if isinstance(response.data, dict) else {},
+            }
+            if response.content is not None:
+                result["content"] = response.content
+            return result
+        finally:
+            await discovery_client.close()
 
     async def write(
         self,
