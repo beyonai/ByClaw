@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from by_qa.knowledge_base.infrastructure.storage import StorageConfigurationError
+from by_qa.knowledge_base.infrastructure.storage import (
+    StorageAuthenticationError,
+    StorageConfigurationError,
+    StorageConflictError,
+    StorageNotFoundError,
+    StorageOperationError,
+)
 
 
 def test_build_original_location_uses_byclaw_user_namespace_and_origin_path():
@@ -351,3 +357,55 @@ async def test_ensure_ready_accepts_be_domainname(monkeypatch):
 
     provider = ByClawUserFsKnowledgeStorageProvider()
     await provider.ensure_ready()
+
+
+# -- Task 5: error translation ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("status_code", "error_type"),
+    [
+        (401, StorageAuthenticationError),
+        (403, StorageAuthenticationError),
+        (404, StorageNotFoundError),
+        (409, StorageConflictError),
+        (400, StorageOperationError),
+        (500, StorageOperationError),
+    ],
+)
+async def test_http_errors_translate_to_storage_errors(monkeypatch, status_code, error_type):
+    monkeypatch.setenv("BE_DOMAINNAME", "ByaiService")
+    from byclaw_userfs_storage import (
+        ByClawUserFsKnowledgeStorageProvider,
+        reset_byclaw_userfs_headers,
+    )
+
+    transport = FakeTransport([
+        {"status_code": status_code, "data": {"code": "ERROR", "msg": "failed"}}
+    ])
+    provider = ByClawUserFsKnowledgeStorageProvider(transport=transport)
+    token = _set_token()
+    try:
+        with pytest.raises(error_type):
+            await provider.read(StorageLocation("BYCLAW-USER", "/.bykc/KB001/raw/origin/a.txt"))
+    finally:
+        reset_byclaw_userfs_headers(token)
+
+
+async def test_non_success_business_code_translates_to_operation_error(monkeypatch):
+    monkeypatch.setenv("BE_DOMAINNAME", "ByaiService")
+    from byclaw_userfs_storage import (
+        ByClawUserFsKnowledgeStorageProvider,
+        reset_byclaw_userfs_headers,
+    )
+
+    transport = FakeTransport([
+        {"status_code": 200, "data": {"code": "E0001", "msg": "business failed"}}
+    ])
+    provider = ByClawUserFsKnowledgeStorageProvider(transport=transport)
+    token = _set_token()
+    try:
+        with pytest.raises(StorageOperationError):
+            await provider.delete(StorageLocation("BYCLAW-USER", "/.bykc/KB001/raw/origin/a.txt"))
+    finally:
+        reset_byclaw_userfs_headers(token)

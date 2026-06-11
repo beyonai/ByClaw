@@ -7,9 +7,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from by_qa.knowledge_base.infrastructure.storage import (
+    StorageAuthenticationError,
     StorageConfigurationError,
+    StorageConflictError,
     StorageError,
     StorageLocation,
+    StorageNotFoundError,
     StorageOperationError,
     StoredObject,
 )
@@ -85,6 +88,34 @@ def _path_from_location(location: StorageLocation) -> str:
     return location.key
 
 
+def _translate_response_error(status_code: int | None, message: str) -> StorageError:
+    if status_code in {401, 403}:
+        return StorageAuthenticationError(message)
+    if status_code == 404:
+        return StorageNotFoundError(message)
+    if status_code == 409:
+        return StorageConflictError(message)
+    return StorageOperationError(message)
+
+
+def _extract_response_message(data: Any) -> str:
+    if isinstance(data, dict):
+        return str(data.get("msg") or "")
+    return ""
+
+
+def _ensure_json_success(response: dict[str, Any], op: str) -> dict[str, Any]:
+    status_code = int(response.get("status_code") or 0)
+    data = response.get("data")
+    if status_code and not (200 <= status_code < 300):
+        msg = _extract_response_message(data) or f"byclaw-userfs.{op}: HTTP {status_code}"
+        raise _translate_response_error(status_code, msg)
+    if isinstance(data, dict) and data.get("code") not in {None, "00000"}:
+        msg = str(data.get("msg") or f"byclaw-userfs.{op}: {data.get('code')}")
+        raise _translate_response_error(status_code or None, msg)
+    return data if isinstance(data, dict) else {}
+
+
 @dataclass
 class ByClawUserFsKnowledgeStorageProvider:
     provider_name: str = "byclaw-userfs"
@@ -110,7 +141,13 @@ class ByClawUserFsKnowledgeStorageProvider:
 
     async def _request(self, *, method: str, path: str, headers: dict[str, str], **kwargs: Any) -> dict[str, Any]:
         if self.transport is not None:
-            return await self.transport(method=method, path=path, headers=headers, **kwargs)
+            response = await self.transport(method=method, path=path, headers=headers, **kwargs)
+            status_code = int(response.get("status_code") or 0)
+            if status_code and not (200 <= status_code < 300):
+                data = response.get("data")
+                msg = _extract_response_message(data) or f"byclaw-userfs: HTTP {status_code} for {method} {path}"
+                raise _translate_response_error(status_code, msg)
+            return response
 
         from by_framework.common.redis_client import init_redis
         from by_framework.core.discovery import DiscoveryClient
@@ -157,9 +194,8 @@ class ByClawUserFsKnowledgeStorageProvider:
                         **kwargs,
                     )
             if not response.is_success:
-                raise StorageOperationError(
-                    f"byclaw-userfs: HTTP {response.status_code} for {method} {path}"
-                )
+                msg = f"byclaw-userfs: HTTP {response.status_code} for {method} {path}"
+                raise _translate_response_error(response.status_code, msg)
             result: dict[str, Any] = {
                 "status_code": response.status_code,
                 "data": response.data if isinstance(response.data, dict) else {},
@@ -191,8 +227,7 @@ class ByClawUserFsKnowledgeStorageProvider:
             },
             files={"file": ("file", content, content_type)},
         )
-        raw_data = response.get("data")
-        data = raw_data if isinstance(raw_data, dict) else {}
+        data = _ensure_json_success(response, "write")
         return StoredObject(
             location=location,
             size=data.get("fileSize", len(content)),
@@ -221,12 +256,13 @@ class ByClawUserFsKnowledgeStorageProvider:
         location = _normalize_location(location)
         file_path = _path_from_location(location)
         headers = build_byclaw_userfs_headers()
-        await self._request(
+        response = await self._request(
             method="POST",
             path=f"{_BASE_PATH}/files/delete",
             headers=headers,
             json={"spaceType": _SPACE_TYPE, "path": file_path},
         )
+        _ensure_json_success(response, "delete")
 
     async def delete_quietly(self, location: StorageLocation) -> None:
         try:
@@ -246,7 +282,7 @@ class ByClawUserFsKnowledgeStorageProvider:
         source_path = _path_from_location(source)
         target_path = _path_from_location(target)
         headers = build_byclaw_userfs_headers()
-        await self._request(
+        response = await self._request(
             method="POST",
             path=f"{_BASE_PATH}/files/rename",
             headers=headers,
@@ -257,3 +293,4 @@ class ByClawUserFsKnowledgeStorageProvider:
                 "overwrite": overwrite,
             },
         )
+        _ensure_json_success(response, "move")
