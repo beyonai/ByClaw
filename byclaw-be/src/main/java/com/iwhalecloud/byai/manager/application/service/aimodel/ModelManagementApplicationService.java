@@ -314,6 +314,9 @@ public class ModelManagementApplicationService {
         if (inParams.get("providerName") != null) {
             vo.setProviderName(String.valueOf(inParams.get("providerName")));
         }
+        if (inParams.get("modelProtocol") != null) {
+            vo.setModelProtocol(String.valueOf(inParams.get("modelProtocol")));
+        }
         if (inParams.get("abilities") != null) {
             vo.setAbilities(buildResponseAbilities(vo, inParams.get("abilities")));
         }
@@ -490,6 +493,7 @@ public class ModelManagementApplicationService {
     private Map<String, Object> buildInParamsFromRequest(ModelUpsertRequest request, Long modelId) {
         Map<String, Object> inParams = new HashMap<>();
         putIfNonEmpty(inParams, "providerName", request.getProviderName());
+        putIfNonEmpty(inParams, "modelProtocol", request.getModelProtocol());
         putIfNonEmptyCollection(inParams, "abilities", request.getAbilities());
         putIfNonEmptyCollection(inParams, "systems", request.getSystems());
         putIfNonEmptyCollection(inParams, "headers", request.getHeaders());

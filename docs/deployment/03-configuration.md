@@ -50,7 +50,8 @@
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
-| `FILE_STORAGE_TYPE` | 文件存储类型 | `minio` |
+| `FILE_STORAGE_TYPE` | 上传/下载接口使用的文件存储类型：`minio`、`file`、`local` 等 | `minio` |
+| `FILE_STORAGE_LOCAL_PATH` | `FILE_STORAGE_TYPE=file` 或 `local` 时的服务器文件根目录 | `/mnt/byclaw-file` |
 | `FILE_STORAGE_MINIO_HOST` | MinIO 主机 | `127.0.0.1` |
 | `FILE_STORAGE_MINIO_API_PORT` | MinIO API 端口 | `9000` |
 | `FILE_STORAGE_MINIO_UI_PORT` | MinIO Console 端口 | `9001` |
@@ -58,12 +59,10 @@
 | `FILE_STORAGE_MINIO_SECRET_KEY` | MinIO Secret Key | - |
 | `FILE_STORAGE_MINIO_SECURE` | 是否使用 HTTPS | `false` |
 | `FILE_STORAGE_MINIO_BUCKET_NAME` | Bucket 名称 | `byclaw` |
-| `FILE_STORAGE_MINIO_MOUNT_ENABLED` | 是否启用挂载 | `true` |
-| `FILE_STORAGE_MINIO_MOUNT_PATH` | ⚠️ 挂载路径（重要） | - |
+| `FILE_STORAGE_MINIO_MOUNT_ENABLED` | 是否启用 legacy rclone 挂载 | `false` |
+| `FILE_STORAGE_MINIO_MOUNT_PATH` | legacy rclone 挂载路径 | - |
 
-> ⚠️ **重要提醒：** `FILE_STORAGE_MINIO_MOUNT_PATH` 指定的目录必须在部署前提前创建好，并设置正确的权限！
-> 详细步骤请参考 [前置条件 - 数据目录准备](./01-prerequisites.md#5-⚠️-重要数据目录准备必须)。
-> 如果不需要挂载功能，可以设置 `FILE_STORAGE_MINIO_MOUNT_ENABLED=false`。
+> 新部署推荐保持 `FILE_STORAGE_MINIO_MOUNT_ENABLED=false`，并使用 `BYCLAW_SANDBOX_VOLUME_BACKEND=file` 把 OpenClaw `/by` 切到 NFS/SMB/OpenMediaVault/CephFS。上传接口可继续使用 `FILE_STORAGE_TYPE=minio`；如果希望上传接口也写入服务器文件型存储，可切为 `FILE_STORAGE_TYPE=file` 并设置 `FILE_STORAGE_LOCAL_PATH=/mnt/byclaw-file`。
 
 ## 6. OpenSandbox 配置
 
@@ -76,6 +75,29 @@
 | `BYCLAW_SANDBOX_API_KEY` | 沙箱 API Key | `dev` |
 | `BYCLAW_SANDBOX_STORAGE_MODE` | 沙箱存储模式 | `minio` |
 | `BYCLAW_SANDBOX_HEARTBEAT_TIMEOUT` | 心跳超时 | `PT5M` |
+| `BYCLAW_SANDBOX_VOLUME_BACKEND` | OpenClaw `/by` 运行态卷后端：`minio-mount` 或 `file` | `minio-mount` |
+| `BYCLAW_SANDBOX_FILE_VOLUME_ROOT` | 文件型运行态卷根路径，所有 openSandbox Docker 节点必须一致 | `/mnt/byclaw-file` |
+| `BYCLAW_SANDBOX_FILE_VOLUME_TYPE` | 文件型运行态卷类型：`cephfs`、`nfs`、`smb`、`bind` | `bind` |
+| `BYCLAW_SANDBOX_FILE_VOLUME_SNAPSHOT_PROVIDER` | 快照/备份提供方：`ceph`、`nas`、`zfs`、`btrfs`、`lvm`、`none` | `none` |
+| `BYCLAW_SANDBOX_FILE_BROWSER_ENABLED` | 是否部署 File Browser 浏览用户 `/by` | `false` |
+
+Docker-only 推荐配置：
+
+```bash
+FILE_STORAGE_TYPE=minio
+FILE_STORAGE_MINIO_MOUNT_ENABLED=false
+BYCLAW_SANDBOX_VOLUME_BACKEND=file
+BYCLAW_SANDBOX_FILE_VOLUME_ROOT=/mnt/byclaw-file
+BYCLAW_SANDBOX_FILE_VOLUME_TYPE=nfs
+BYCLAW_SANDBOX_FILE_VOLUME_SNAPSHOT_PROVIDER=nas
+```
+
+上传接口切到同一文件型存储时：
+
+```bash
+FILE_STORAGE_TYPE=file
+FILE_STORAGE_LOCAL_PATH=/mnt/byclaw-file
+```
 
 ## 7. QA 模块配置
 

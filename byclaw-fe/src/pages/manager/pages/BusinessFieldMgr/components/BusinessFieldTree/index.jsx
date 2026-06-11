@@ -123,13 +123,13 @@ const BusinessFieldTree = ({
       payload: {
         catalogId,
         resourceBizTypeList: RESOURCE_BIZ_TYPE_LIST,
-        pageIndex: 1,
+        pageNum: 1,
         pageSize: 1,
       },
       success: (res) => {
         if (canceled) return;
         const { data } = res || {};
-        const total = data?.total ?? data?.rows?.length ?? 0;
+        const total = data?.total ?? data?.list?.length ?? 0;
         setHasRelatedAssets(total > 0);
         setAssetCheckLoading(false);
       },

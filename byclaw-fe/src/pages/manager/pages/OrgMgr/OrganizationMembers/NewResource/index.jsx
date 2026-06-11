@@ -48,56 +48,23 @@ const NewResource = (props, ref) => {
   const { selectedOrg } = useContext(OrgMgrContext);
   const grantToObjId = selectedOrg?.orgId;
 
-  const isLoading = useSelector(
-    ({ loading }) => loading.effects['orgMgr/listResource'] || loading.effects['employeeMgr/selectDigitalEmployeeByQo']
-  );
+  const isLoading = useSelector(({ loading }) => loading.effects['orgMgr/listResource']);
 
   const [data, setData] = useState({
     dataSource: [],
     total: 0,
   });
-  console.log(data);
-
   const [pageInfo, setPageInfo] = useState({
     pageNum: 1,
     pageSize: 10,
   });
 
-  const getEmployeeListType = useCallback(() => {
-    if (selectValue === 1) return 'manager';
-    if (selectValue === 2) return 'authorize';
-    return '';
-  }, [selectValue]);
-
   const getListOwnResource = useCallback(
     debounce((params) => {
-      if (activeTab === 'employee') {
-        dispatch({
-          type: 'employeeMgr/selectDigitalEmployeeByQo',
-          payload: {
-            orgId: grantToObjId,
-            pageNum: params?.pageNum || params?.pageNum || pageInfo.pageNum,
-            pageSize: params?.pageSize || pageInfo.pageSize,
-            keyword: searchValue,
-            type: getEmployeeListType(),
-            systemCodes: sourceValue,
-            catalogIds: fieldValue?.map((item) => Number(item)).filter((item) => !Number.isNaN(item)),
-          },
-          success: (resData) => {
-            const list = Array.isArray(resData?.list) ? resData.list : Array.isArray(resData?.list) ? resData.list : [];
-            const pageNum = resData?.pageNum || params?.pageNum || params?.pageNum || 1;
-            const pageSize = resData?.pageSize || params?.pageSize || 10;
-            const total = resData?.total !== null && resData?.total !== undefined ? resData.total : list.length;
-
-            setData({ dataSource: list.map(normalizeRow), total });
-            setPageInfo({ pageNum, pageSize });
-          },
-        });
-        return;
-      }
-
       let resourceBizTypeList = [];
-      if (activeTab === 'knowledge') {
+      if (activeTab === 'employee') {
+        resourceBizTypeList = ['DIG_EMPLOYEE'];
+      } else if (activeTab === 'knowledge') {
         resourceBizTypeList = ['KG_DOC', 'KG_QA', 'KG_TERM'];
       } else if (activeTab === 'tool') {
         resourceBizTypeList = ['AGENT', 'MCP', 'TOOLKIT'];
@@ -111,6 +78,7 @@ const NewResource = (props, ref) => {
         type: 'orgMgr/listResource',
         payload: {
           grantToObjId: grantToObjId ? `${grantToObjId}` : undefined,
+          orgId: grantToObjId,
           pageNum: pageInfo.pageNum,
           pageSize: pageInfo.pageSize,
           keyword: searchValue,
@@ -144,7 +112,7 @@ const NewResource = (props, ref) => {
         },
       });
     }, 300),
-    [grantToObjId, pageInfo, searchValue, selectValue, activeTab, fieldValue, sourceValue, getEmployeeListType]
+    [dispatch, grantToObjId, pageInfo, searchValue, selectValue, activeTab, fieldValue, sourceValue]
   );
 
   useEffect(() => {

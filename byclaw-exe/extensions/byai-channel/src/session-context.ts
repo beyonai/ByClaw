@@ -1,6 +1,7 @@
 import path from "node:path";
 import { EmitOptions, EventType, type GatewayDataEmitter } from "@byclaw/by-framework";
 import type { ByaiInboundMessage, Language } from "./types.js";
+import { isSessionDispatchBusy } from "./session-dispatch-gate.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 const DEFAULT_ACCOUNT_KEY = "default";
@@ -72,6 +73,7 @@ export interface ActiveSdkRequest {
   deferredForFollowup: boolean;
   followupRunStarted: boolean;
   compactionRetryPending: boolean;
+  modelFallbackPending: boolean;
   rootLifecyclePhase?: "end" | "error";
   hasEmittedContent: boolean;
   lastReasoningText: string;
@@ -318,6 +320,11 @@ export function registerActiveSdkRequest(params: {
   }
   const existingBySession = activeSdkRequestsBySession.get(params.sessionKey);
   if (existingBySession) {
+    if (isSessionDispatchBusy(params.sessionKey)) {
+      throw new Error(
+        `byai-channel: refused to replace in-flight SDK request while session dispatch gate is held: ${params.sessionKey}`,
+      );
+    }
     clearActiveSdkRequestRecord(existingBySession);
   }
   const existingRequestByTraceId = activeSdkRequestsByTraceId.get(params.traceId);
@@ -338,6 +345,7 @@ export function registerActiveSdkRequest(params: {
     deferredForFollowup: false,
     followupRunStarted: false,
     compactionRetryPending: false,
+    modelFallbackPending: false,
     rootLifecyclePhase: undefined,
     hasEmittedContent: false,
     lastReasoningText: "",
@@ -483,6 +491,7 @@ export function markActiveSdkRootLifecycleStarted(
   }
   request.rootLifecyclePhase = undefined;
   request.compactionRetryPending = false;
+  request.modelFallbackPending = false;
   if (request.awaitingFollowup) {
     request.awaitingFollowup = false;
     request.deferredForFollowup = true;
@@ -505,6 +514,33 @@ export function markActiveSdkRootLifecycleFinished(
   request.rootLifecyclePhase = phase;
   request.awaitingFollowup = false;
   request.followupRunStarted = false;
+  return request;
+}
+
+export type ActiveSdkModelFallbackOutcome =
+  | "next_fallback"
+  | "succeeded"
+  | "chain_exhausted";
+
+export function markActiveSdkModelFallbackStep(
+  sessionKey: string | undefined,
+  outcome: ActiveSdkModelFallbackOutcome,
+): ActiveSdkRequest | undefined {
+  if (!sessionKey || !isRootSessionKey(sessionKey)) {
+    return undefined;
+  }
+  const request = resolveActiveSdkRequestBySessionKey(sessionKey);
+  if (!request) {
+    return undefined;
+  }
+  if (outcome === "next_fallback") {
+    request.modelFallbackPending = true;
+    request.rootLifecyclePhase = undefined;
+    request.awaitingFollowup = false;
+    request.followupRunStarted = false;
+    return request;
+  }
+  request.modelFallbackPending = false;
   return request;
 }
 
@@ -564,7 +600,8 @@ export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boole
       request.pendingOutboundCount === 0 &&
       !request.awaitingFollowup &&
       !request.followupRunStarted &&
-      !request.compactionRetryPending,
+      !request.compactionRetryPending &&
+      !request.modelFallbackPending,
   );
 }
 
@@ -616,6 +653,7 @@ export async function markActiveSdkRequestSubagentSpawned(
   request.deferredForFollowup = false;
   request.followupRunStarted = false;
   request.compactionRetryPending = false;
+  request.modelFallbackPending = false;
   request.lastReasoningText = "";
   request.lastReasoningMessageId = "";
   activeSdkRequestsByChild.set(childSessionKey, request);
@@ -671,6 +709,7 @@ export function markActiveSdkFollowupRunStarted(
   request.awaitingFollowup = false;
   request.deferredForFollowup = true;
   request.followupRunStarted = true;
+  request.modelFallbackPending = false;
   request.lastReasoningText = "";
   request.lastReasoningMessageId = "";
   return request;
@@ -689,5 +728,6 @@ export async function completeActiveSdkFollowupBySessionKey(
   request.awaitingFollowup = false;
   request.followupRunStarted = false;
   request.rootLifecyclePhase = "end";
+  request.modelFallbackPending = false;
   return await completeActiveSdkRequest(request);
 }

@@ -24,6 +24,9 @@ public class ModelUpsertRequest implements Serializable {
     /** 提供商 */
     private String providerName;
 
+    /** 模型协议：OpenAI / Anthropic */
+    private String modelProtocol;
+
     /** 型号 */
     private String modelCode;
 

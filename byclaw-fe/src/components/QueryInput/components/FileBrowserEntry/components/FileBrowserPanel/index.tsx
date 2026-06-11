@@ -51,7 +51,7 @@ function getIconType(name: string, isDir: boolean): string {
 
 function getFileType(name: string): string {
   const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() || '' : '';
-  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp'].includes(ext)) return ext === 'jpeg' ? 'jpg' : ext;
+  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp'].includes(ext)) return 'image';
   if (['html', 'htm'].includes(ext)) return 'h5';
   return ext;
 }
@@ -757,24 +757,26 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
         }}
       >
         <Spin spinning={previewInfo.loading} wrapperClassName="full-height-spin" style={{ flex: 1, minHeight: 0 }}>
-          {previewInfo.blob && (
-            <React.Suspense fallback={null}>
-              <PreViewFile
-                data={previewInfo.blob}
-                type={previewInfo.fileType}
-                title={previewInfo.fileName}
-                className={styles.preview}
-                extra={
-                  <span
-                    className={styles.previewClose}
-                    onClick={() => setPreviewInfo((prev) => ({ ...prev, open: false, blob: null }))}
-                  >
-                    <AntdIcon type="icon-a-Closeguanbi1" />
-                  </span>
-                }
-              />
-            </React.Suspense>
-          )}
+          <div className="ub full-height">
+            {previewInfo.blob && (
+              <React.Suspense fallback={null}>
+                <PreViewFile
+                  data={previewInfo.blob}
+                  type={previewInfo.fileType}
+                  title={previewInfo.fileName}
+                  className={styles.preview}
+                  extra={
+                    <span
+                      className={styles.previewClose}
+                      onClick={() => setPreviewInfo((prev) => ({ ...prev, open: false, blob: null }))}
+                    >
+                      <AntdIcon type="icon-a-Closeguanbi1" />
+                    </span>
+                  }
+                />
+              </React.Suspense>
+            )}
+          </div>
         </Spin>
       </Modal>
     </div>

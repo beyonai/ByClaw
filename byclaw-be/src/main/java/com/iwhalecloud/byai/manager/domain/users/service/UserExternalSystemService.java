@@ -57,4 +57,17 @@ public class UserExternalSystemService {
         return userExternalSystemMapper.selectOne(queryWrapper);
     }
 
+    /**
+     * @param sourceType 来源类型
+     * @param userId 系统用户 ID
+     * @return UserExternalSystem
+     */
+    public UserExternalSystem findByUserId(Integer sourceType, Long userId) {
+        LambdaQueryWrapper<UserExternalSystem> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(UserExternalSystem::getSourceType, sourceType);
+        queryWrapper.eq(UserExternalSystem::getUserId, userId);
+        queryWrapper.last("LIMIT 1");
+        return userExternalSystemMapper.selectOne(queryWrapper);
+    }
+
 }

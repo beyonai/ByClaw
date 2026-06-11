@@ -199,6 +199,37 @@ class SandboxIngressFacadeTest {
     }
 
     @Test
+    void forward_filebrowserUploadWithShorterInputStream_usesStreamingBody() throws Exception {
+        try (TestHttpServer server = new TestHttpServer()) {
+            SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");
+            bindCurrentUser("alice");
+
+            byte[] body = "file-content".getBytes(StandardCharsets.UTF_8);
+            MockHttpServletRequest request = new MockHttpServletRequest("POST",
+                "/filebrowser/openclaw-api/upload") {
+                @Override
+                public long getContentLengthLong() {
+                    return body.length + 1024L;
+                }
+            };
+            request.setScheme("http");
+            request.setServerName("gateway.example.test");
+            request.setRemoteAddr("127.0.0.1");
+            request.setContentType("application/octet-stream");
+            request.setContent(body);
+
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            facade.forward("filebrowser", "/openclaw-api/upload", request, response);
+
+            assertThat(response.getStatus()).isEqualTo(200);
+            assertThat(server.lastMethod()).isEqualTo("POST");
+            assertThat(server.lastPath()).isEqualTo("/v1/sandboxes/sb-1/proxy/8081/filebrowser/openclaw-api/upload");
+            assertThat(new String(server.lastBody(), StandardCharsets.UTF_8)).isEqualTo("file-content");
+            assertThat(server.lastHeader("Transfer-Encoding")).isEqualTo("chunked");
+        }
+    }
+
+    @Test
     void forward_filebrowserRootRequest_preservesRootTrailingSlash() throws Exception {
         try (TestHttpServer server = new TestHttpServer()) {
             SandboxIngressFacade facade = buildFacade(server.baseUrl(), "minio", "sandbox-api-key");

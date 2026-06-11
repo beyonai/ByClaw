@@ -20,9 +20,11 @@ from by_qa.qa.common.operation_registry import OPERATION_REGISTRY, OperationType
 from by_qa.core import logger
 from by_qa.qa.common.models import CoreInput, StreamEventType
 from by_qa.qa.engines.instant.engine import InstantQAEngine
-from redis_agent_config import convert_agent_config_to_engine_config
-from minio_agent_config import load_agent_config_from_minio, extract_prologue_model_id
-from minio_client import MinioResourceClient
+from redis_agent_config import (
+    convert_agent_config_to_engine_config,
+    load_agent_config_from_redis,
+    extract_prologue_model_id,
+)
 from by_framework.core.discovery import DiscoveryClient
 from by_framework.util.discovery_http_client import DiscoveryHttpClient
 from by_framework.util.http_client import RetryConfig
@@ -37,8 +39,6 @@ from exceptions import (
 )
 
 dotenv.load_dotenv()
-
-_minio = MinioResourceClient()
 
 
 FINAL_ANSWER_ROLES = {
@@ -322,11 +322,7 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
             ),
         )
 
-        agent_config = await load_agent_config_from_minio(_minio, str(agent_id))
-        # load_agent_config_from_minio already fetches this internally, but we need
-        # the raw employee config here to extract the prologue modelId without
-        # changing that function's signature.
-        employee_config = await _minio.get_dig_employee_config(str(agent_id))
+        agent_config, employee_config = await load_agent_config_from_redis(context.redis, str(agent_id))
         prologue_model_id = extract_prologue_model_id(employee_config)
         if prologue_model_id:
             logger.info(

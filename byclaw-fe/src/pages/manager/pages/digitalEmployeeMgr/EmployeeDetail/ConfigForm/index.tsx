@@ -155,7 +155,7 @@ const getDigitalEmployeeTemplate = (templates: any[] = [], ownerType?: string, a
     list.find((item) => item?.ownerType === effectiveOwnerType && item?.agentType === agentType) ||
     list.find((item) => item?.ownerType === effectiveOwnerType);
 
-  return findTemplate(templates) || findTemplate(DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES) || {};
+  return findTemplate(templates) || {};
 };
 
 const mapTemplatePromptsToConfigList = (prompts: any[] = [], templateKey?: string) =>
@@ -166,10 +166,11 @@ const mapTemplatePromptsToConfigList = (prompts: any[] = [], templateKey?: strin
     paramValue: item?.defaultValue || '',
     paramSeq: index + 1,
     promptKey: item?.key || '',
+    tip: item?.tip || '',
   }));
 
 const parseCorePersonaDefinition = (value: string, isEN?: boolean) => {
-  const tabs: Array<{ key: string; name: string; isSystem: boolean }> = [];
+  const tabs: Array<{ key: string; name: string; isSystem: boolean; tip?: string }> = [];
   const fieldValues: Record<string, string> = {};
   let isArray = false;
 
@@ -198,6 +199,7 @@ const parseCorePersonaDefinition = (value: string, isEN?: boolean) => {
           key: item.key,
           name: isEN ? item.nameEn || item.name || item.key : item.name || item.key,
           isSystem: false,
+          tip: item.tip || '',
         });
       });
     }
@@ -209,9 +211,9 @@ const parseCorePersonaDefinition = (value: string, isEN?: boolean) => {
 };
 
 const buildTemplatePromptConfig = (templateList: any[] = [], isEN?: boolean) => {
-  const corePersonaDefinition: Array<{ name: string; nameEn?: string; key: string; value: string }> = [];
+  const corePersonaDefinition: Array<{ name: string; nameEn?: string; key: string; value: string; tip?: string }> = [];
   const fieldValues: Record<string, string> = {};
-  const tabs: Array<{ key: string; name: string; isSystem: boolean }> = [];
+  const tabs: Array<{ key: string; name: string; isSystem: boolean; tip?: string }> = [];
 
   templateList.forEach((item) => {
     const key = item.paramEnName || item.paramName;
@@ -221,13 +223,18 @@ const buildTemplatePromptConfig = (templateList: any[] = [], isEN?: boolean) => 
       key,
       name: displayName,
       isSystem: true,
+      tip: item.tip || '',
     });
-    corePersonaDefinition.push({
+    const promptConfig = {
       name: item.paramName || key,
       nameEn: item.paramEnName,
       key,
       value,
-    });
+    };
+    if (item.tip) {
+      promptConfig.tip = item.tip;
+    }
+    corePersonaDefinition.push(promptConfig);
     fieldValues[key] = value;
   });
 
@@ -297,7 +304,9 @@ const ConfigForm = (props) => {
   const [robotModalOpen, setRobotModalOpen] = useState(false);
   const [robotItem, setRobotItem] = useState<RobotConfig>({ channel: '' });
   const [templateData, setTemplateData] = useState([]);
-  const [configurableTabs, setConfigurableTabs] = useState<Array<{ key: string; name: string; isSystem: boolean }>>([]);
+  const [configurableTabs, setConfigurableTabs] = useState<
+    Array<{ key: string; name: string; isSystem: boolean; tip?: string }>
+  >([]);
   const [agentTypeOptions, setAgentTypeOptions] = useState([]);
   const [bundledSkillOptions, setBundledSkillOptions] = useState([]);
   const [bundledSkillLoading, setBundledSkillLoading] = useState(false);
@@ -396,7 +405,7 @@ const ConfigForm = (props) => {
         });
         if (!mounted) return;
 
-        const list = parseConfigList(res?.paramValue || res?.data?.paramValue || res?.data || res);
+        const list = parseConfigList(res?.paramValue);
         setBundledSkillOptions(
           list
             .map((item) => ({
@@ -604,7 +613,11 @@ const ConfigForm = (props) => {
     const fetchTemplateData = async () => {
       const applyTemplateData = (templates: any[] = []) => {
         const template = getDigitalEmployeeTemplate(templates, effectiveOwnerType, agentType);
-        const promptList = mapTemplatePromptsToConfigList(template?.prompts || [], template?.key);
+        const templatePrompts =
+          Array.isArray(template?.prompts) && template.prompts.length > 0
+            ? template.prompts
+            : DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES;
+        const promptList = mapTemplatePromptsToConfigList(templatePrompts, template?.key);
         const nextTemplateData =
           Array.isArray(promptList) && promptList.length > 0 ? promptList : DEFAULT_TEMPLATE_DATA;
 
@@ -665,12 +678,23 @@ const ConfigForm = (props) => {
 
     const parsedConfig = parseCorePersonaDefinition(corePersonaDefinitionValue, isEN);
     const templateKeys = templateData.map((item) => item.paramEnName || item.paramName).filter(Boolean);
+    const templateTipMap = templateData.reduce((result, item) => {
+      const key = item.paramEnName || item.paramName;
+      if (key && item.tip) {
+        result[key] = item.tip;
+      }
+      return result;
+    }, {});
     const matchesCurrentTemplate = templateKeys.some((key) => parsedConfig.tabs.some((tab) => tab.key === key));
 
     if (parsedConfig.isArray && parsedConfig.tabs.length > 0 && matchesCurrentTemplate) {
-      setConfigurableTabs(parsedConfig.tabs);
+      const parsedTabs = parsedConfig.tabs.map((tab) => ({
+        ...tab,
+        tip: tab.tip || templateTipMap[tab.key] || '',
+      }));
+      setConfigurableTabs(parsedTabs);
       setActivePromptTabKey((current) =>
-        current && parsedConfig.tabs.some((item) => item.key === current) ? current : parsedConfig.tabs[0].key
+        current && parsedTabs.some((item) => item.key === current) ? current : parsedTabs[0].key
       );
 
       internalSyncRef.current = true;
@@ -820,7 +844,10 @@ const ConfigForm = (props) => {
   }, [updateResource]);
 
   const syncRoleToForm = useCallback(
-    (overrideValues: Record<string, any> = {}, tabs?: Array<{ key: string; name: string; isSystem?: boolean }>) => {
+    (
+      overrideValues: Record<string, any> = {},
+      tabs?: Array<{ key: string; name: string; isSystem?: boolean; tip?: string }>
+    ) => {
       let roleObj = {};
       const roleStr = form.getFieldValue('role') || '{}';
       try {
@@ -848,10 +875,11 @@ const ConfigForm = (props) => {
       roleObj.roleAttributes = current.roleAttributes || current.workStandard || '';
 
       // 将所有配置存成 JSON 放到 corePersonaDefinition 字段（数组格式）
-      const corePersonaDefinition: Array<{ name: string; nameEn?: string; key: string; value: string }> = [];
+      const corePersonaDefinition: Array<{ name: string; nameEn?: string; key: string; value: string; tip?: string }> =
+        [];
 
       // 获取所有 prompt 字段的名称映射（从模板数据中获取）
-      const fieldNameMap: Record<string, { name: string; nameEn?: string; key: string }> = {};
+      const fieldNameMap: Record<string, { name: string; nameEn?: string; key: string; tip?: string }> = {};
 
       // 尝试从模板数据中获取字段映射
       if (templateData && Array.isArray(templateData)) {
@@ -861,13 +889,14 @@ const ConfigForm = (props) => {
               name: item.paramName,
               nameEn: item.paramEnName,
               key: item.paramEnName,
+              tip: item.tip,
             };
           }
         });
       }
 
       // 从现有的 corePersonaDefinition 中获取 name 信息（用于编辑时保持原有值）
-      const existingMetaMap: Record<string, { name?: string; nameEn?: string }> = {};
+      const existingMetaMap: Record<string, { name?: string; nameEn?: string; tip?: string }> = {};
       try {
         const existingData = JSON.parse(current.corePersonaDefinition || '[]');
         if (Array.isArray(existingData)) {
@@ -876,6 +905,7 @@ const ConfigForm = (props) => {
               existingMetaMap[item.key] = {
                 name: item.name,
                 nameEn: item.nameEn,
+                tip: item.tip,
               };
             }
           });
@@ -890,7 +920,7 @@ const ConfigForm = (props) => {
         const fieldInfo = fieldNameMap[tab.key];
         const key = fieldInfo?.key || tab.key;
         const existingMeta = existingMetaMap[key] || {};
-        const item: { name: string; nameEn?: string; key: string; value: string } = {
+        const item: { name: string; nameEn?: string; key: string; value: string; tip?: string } = {
           name: existingMeta.name || fieldInfo?.name || tab.name || tab.key,
           key,
           value: fieldValue || '',
@@ -898,6 +928,10 @@ const ConfigForm = (props) => {
 
         if (existingMeta.nameEn || fieldInfo?.nameEn) {
           item.nameEn = existingMeta.nameEn || fieldInfo?.nameEn;
+        }
+
+        if (existingMeta.tip || fieldInfo?.tip || tab.tip) {
+          item.tip = existingMeta.tip || fieldInfo?.tip || tab.tip;
         }
 
         corePersonaDefinition.push(item);
@@ -1032,6 +1066,11 @@ const ConfigForm = (props) => {
       label: (
         <span className={styles.customPromptTabLabel}>
           <span className={styles.promptFieldLabel}>{item.name}</span>
+          {item.tip && (
+            <Tooltip title={item.tip}>
+              <ExclamationCircleOutlined className={styles.promptFieldTipIcon} onClick={(e) => e.stopPropagation()} />
+            </Tooltip>
+          )}
           {!isReadOnly && configurableTabs.length > 1 && (
             <Popconfirm
               title={intl.formatMessage({ id: 'employeeDetail.promptField.deleteConfirm' })}
@@ -1430,7 +1469,7 @@ const ConfigForm = (props) => {
                 <span>
                   {intl.formatMessage({ id: 'employeeDetail.coreAbility' })}
                   <Tooltip title={intl.formatMessage({ id: 'employeeDetail.coreAbilityHint' })}>
-                    <QuestionCircleOutlined className={styles.tooltipIcon} />
+                    <ExclamationCircleOutlined className={styles.tooltipIcon} />
                   </Tooltip>
                 </span>
                 {!isReadOnly && (

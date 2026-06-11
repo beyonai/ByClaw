@@ -3,6 +3,11 @@
   "name": "Baiying Enhance",
   "description": "Sync authorized Baiying digital employee JSON from Redis into OpenClaw and expose Redis-backed resources through baiying_call.",
   "version": "1.0.0",
+  "enabledByDefault": true,
+  "providers": ["baiying-aimodel"],
+  "contracts": {
+    "tools": ["baiying_call"]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": true,
@@ -96,10 +101,20 @@
         "description": "Redis Hash key for Baiying AI model config. Digital employees read prologue.modelId and resolve details from this hash.",
         "default": "byai:aimodel:config"
       },
+      "aimodelTypeListRedisKey": {
+        "type": "string",
+        "description": "Redis Hash key for Baiying AI model type list. Field LLM supplies the default model for main and digital employees without prologue.modelId.",
+        "default": "byai:aimodel:typelist"
+      },
       "aimodelSecretProviderName": {
         "type": "string",
         "description": "Exec SecretRef provider name used for runtime authToken lookup. The token is not written into openclaw.json.",
         "default": "baiying-aimodel-redis"
+      },
+      "aimodelDefaultPollIntervalMs": {
+        "type": "number",
+        "description": "Deprecated and ignored. Default LLM diff runs on each main agent run instead of polling.",
+        "default": 0
       },
       "persistAgentContentIndex": {
         "type": "boolean",

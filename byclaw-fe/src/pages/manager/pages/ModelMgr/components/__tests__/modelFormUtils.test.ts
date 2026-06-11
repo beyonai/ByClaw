@@ -3,6 +3,9 @@ import {
   buildLlmHeaders,
   buildRerankHeaders,
   extractModelId,
+  getDefaultFormValues,
+  getDefaultLlmDebugSuffix,
+  getApiEndpointPlaceholder,
   headersListToObject,
   joinUrl,
   normalizeModelType,
@@ -113,6 +116,34 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
     });
   });
 
+  describe('getDefaultFormValues', () => {
+    it('defaults modelProtocol to OpenAI', () => {
+      expect(getDefaultFormValues().modelProtocol).toBe('OpenAI');
+    });
+  });
+
+  describe('getDefaultLlmDebugSuffix', () => {
+    it('uses anthropic messages endpoint for Anthropic protocol', () => {
+      expect(getDefaultLlmDebugSuffix('Anthropic')).toBe('/v1/messages');
+    });
+
+    it('uses chat completions endpoint for OpenAI and empty values', () => {
+      expect(getDefaultLlmDebugSuffix('OpenAI')).toBe('/chat/completions');
+      expect(getDefaultLlmDebugSuffix(undefined)).toBe('/chat/completions');
+    });
+  });
+
+  describe('getApiEndpointPlaceholder', () => {
+    it('returns anthropic example endpoint for Anthropic protocol', () => {
+      expect(getApiEndpointPlaceholder('Anthropic')).toBe('https://api.example.com/anthropic');
+    });
+
+    it('returns openai example endpoint for OpenAI and default', () => {
+      expect(getApiEndpointPlaceholder('OpenAI')).toBe('https://api.example.com/v1');
+      expect(getApiEndpointPlaceholder(undefined)).toBe('https://api.example.com/v1');
+    });
+  });
+
   describe('buildAutoDebugRequestText', () => {
     it('builds default LLM debug payload', () => {
       const result = JSON.parse(
@@ -169,6 +200,44 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
       expect(result.messages).toEqual([{ role: 'assistant', content: 'cached' }]);
       expect(result.temperature).toBe(0.5);
       expect(result.stream).toBe(false);
+    });
+
+    it('uses anthropic suffix when modelProtocol is Anthropic', () => {
+      const result = JSON.parse(
+        buildAutoDebugRequestText({
+          formValues: {
+            modelType: 'LLM',
+            modelProtocol: 'Anthropic',
+            apiEndpoint: 'https://api.anthropic.com',
+            modelCode: 'claude-3-5-sonnet',
+            headers: [],
+          },
+          defaultUserMessage: 'hello',
+        })
+      );
+
+      expect(result.url).toBe('https://api.anthropic.com/v1/messages');
+    });
+
+    it('resets suffix when modelProtocol changes to Anthropic', () => {
+      const result = JSON.parse(
+        buildAutoDebugRequestText({
+          formValues: {
+            modelType: 'LLM',
+            modelProtocol: 'Anthropic',
+            apiEndpoint: 'https://api.anthropic.com',
+            modelCode: 'claude-3-5-sonnet',
+            headers: [],
+          },
+          prevText: JSON.stringify({
+            url: 'https://api.anthropic.com/chat/completions',
+            messages: [{ role: 'user', content: 'hello' }],
+          }),
+          changedKeys: ['modelProtocol'],
+        })
+      );
+
+      expect(result.url).toBe('https://api.anthropic.com/v1/messages');
     });
 
     it('uses raw previous text as a user message when previous text is not valid json', () => {

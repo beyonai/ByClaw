@@ -24,6 +24,7 @@ import {
   resolveSdkLocalFilePath,
 } from "./session-context.js";
 import type { ResolvedByaiAccount, ByaiSdkInboundMessage, SdkInboundFile } from "./types.js";
+import { getRedisInfo, getUserCode } from "./utils.js";
 
 export interface ByaiSdkAppOptions {
   account: ResolvedByaiAccount;
@@ -37,25 +38,6 @@ export interface ByaiSdkAppOptions {
 }
 
 type ByaiSdkLogger = NonNullable<ByaiSdkAppOptions["log"]>;
-
-function getRedisInfo() {
-  const { REDIS_USERNAME, REDIS_PASSWORD, REDIS_HOST, REDIS_PORT, REDIS_DATABASE } = process.env;
-  if (!REDIS_HOST || !REDIS_PORT) {
-    return null;
-  }
-  return {
-    username: REDIS_USERNAME,
-    password: REDIS_PASSWORD,
-    host: REDIS_HOST,
-    port: parseInt(REDIS_PORT, 10),
-    db: parseInt(REDIS_DATABASE || "0", 10),
-  };
-}
-
-function getUserCode(): string | null {
-  const code = String(process.env.USER_CODE ?? "").trim();
-  return code || null;
-}
 
 function getInboundMessageFromByFramework(data: AskAgentCommand) {
   let questionText = "";
@@ -372,8 +354,7 @@ export class ByaiSdkApp {
         await deliverReplyToAgentViaSdk({
           message: inbound,
           account: this.account,
-          // cfg: this.currentConfig(),
-          cfg: this.cfg,
+          cfg: this.currentConfig(),
           abortController,
           log: this.log,
           onReply: async (text, type, options) => {

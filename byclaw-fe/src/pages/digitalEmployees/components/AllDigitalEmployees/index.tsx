@@ -26,6 +26,7 @@ import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
 import { applyResourceUse } from '@/pages/manager/service/resources';
 import type { IOnOkParams } from '@/components/Resources/components/ResourceFilter';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 
 type DisableActionList = Array<'delete' | 'apply' | 'unapply' | 'edit'>;
 
@@ -36,6 +37,28 @@ const ALL_CATEGORY_KEY = '__ALL__';
 type ICategory = {
   dirName: string;
   catalogId: string | number;
+};
+
+const getBannerUrl = (bannerList: any[], label: string) => {
+  const banner = bannerList.find((item) => item?.label === label);
+  return `${banner?.url ?? ''}`.trim().replace(/^`|`$/g, '').trim();
+};
+
+const parseBannerList = (value: any) => {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value !== 'string' || !value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 };
 
 function AllDigitalEmployees(
@@ -70,6 +93,8 @@ function AllDigitalEmployees(
   const [authType, setAuthType] = useState<'useAuth' | 'mgrAuth'>('useAuth');
   const [useApplyAuditOpen, setUseApplyAuditOpen] = useState(false);
   const [paginationInfo, paginationDispatch] = useReducer(paginationReducer, getDefaultPagination({ pageSize: 30 }));
+  const [bannerList, setBannerList] = useState<any[]>([]);
+  const [bannerLoaded, setBannerLoaded] = useState(false);
   const hasInitializedRef = React.useRef(false);
 
   const hasMore = paginationInfo.total > size(list);
@@ -77,6 +102,22 @@ function AllDigitalEmployees(
   const isEN = React.useMemo(() => {
     return local.includes('en');
   }, [local]);
+  const defaultBannerUrl = getRuntimeActualUrl(isEN ? '/beyond/market-en.png' : '/beyond/market.png');
+  const customBannerUrl = getBannerUrl(bannerList, '数字员工');
+  const bannerUrl = customBannerUrl ? getRuntimeActualUrl(customBannerUrl) : defaultBannerUrl;
+
+  useEffect(() => {
+    getDcSystemConfig({ paramCode: 'BYAI_BANNER' })
+      .then((res: any) => {
+        setBannerList(parseBannerList(res?.paramValue));
+      })
+      .catch(() => {
+        setBannerList([]);
+      })
+      .finally(() => {
+        setBannerLoaded(true);
+      });
+  }, []);
 
   const myEmployeesTypeList = useMemo((): ICategory[] => {
     const allCategory: ICategory = {
@@ -112,6 +153,8 @@ function AllDigitalEmployees(
         keyword,
         ...(buildFilterParam?.('enterprise', filterParam) || {}),
         ownerType: 'enterprise',
+        orderField: 'updateTime',
+        orderBy: 'desc',
       };
 
       if (catalogId !== undefined && catalogId !== null && `${catalogId}` !== '' && catalogId !== ALL_CATEGORY_KEY) {
@@ -364,13 +407,7 @@ function AllDigitalEmployees(
 
   return (
     <div className="full-width full-height ub ub-ver">
-      <div className="mb-16">
-        <img
-          className={styles.marketBg}
-          src={getRuntimeActualUrl(isEN ? '/beyond/market-en.png' : '/beyond/market.png')}
-          alt="poster"
-        />
-      </div>
+      <div className="mb-16">{bannerLoaded && <img className={styles.marketBg} src={bannerUrl} alt="poster" />}</div>
       <div
         id="guideStep2-5"
         className={classnames('ub ub-ac gap8', styles.body)}

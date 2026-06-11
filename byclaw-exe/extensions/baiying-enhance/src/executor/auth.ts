@@ -4,6 +4,8 @@ import path from "node:path";
 import type { Dict } from "./types.js";
 import { isRecord } from "./types.js";
 import { canonicalHeaderName } from "./resource-type.js";
+import type { BaiyingEnhanceLogger } from "./debug-channel.js";
+import { getSharedRedisJsonStore, type BaiyingRedisJsonStore } from "../redis-json-store.js";
 
 export type AuthContext = {
   session: string;
@@ -97,6 +99,143 @@ export function normalizeCustomHeaders(rawHeaders: unknown): Record<string, stri
     headers[headerName] = headerValue;
   }
   return headers;
+}
+
+const HEADER_PLACEHOLDER_RE = /^\$\{([^}]+)\}$/;
+
+function headerPlaceholderName(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const match = value.trim().match(HEADER_PLACEHOLDER_RE);
+  return match?.[1]?.trim() ?? "";
+}
+
+function hasHeaderPlaceholders(headers: Record<string, string>): boolean {
+  return Object.values(headers).some((value) => !!headerPlaceholderName(value));
+}
+
+async function resolveLoginAuthUserIdCandidates(
+  authContext: AuthContext,
+  store: BaiyingRedisJsonStore,
+): Promise<string[]> {
+  const candidates = [
+    authContext.userId.trim(),
+    String(process.env.USER_ID ?? "").trim(),
+    String(process.env.BAIYING_USER_ID ?? "").trim(),
+  ];
+  const userCode = String(process.env.USER_CODE ?? "").trim();
+  if (userCode) {
+    const mappedPromise = store.getStringByKey?.(`SHARE_BFM_USER_CODE_${userCode}`);
+    const mapped = mappedPromise ? await mappedPromise.catch(() => null) : null;
+    candidates.push(String(mapped ?? "").trim(), userCode);
+  }
+  return Array.from(new Set(candidates.filter(Boolean)));
+}
+
+async function loadLoginAuthHash(params: {
+  authContext: AuthContext;
+  logger?: BaiyingEnhanceLogger;
+}): Promise<Record<string, string> | null> {
+  const store = getSharedRedisJsonStore({ logger: params.logger });
+  const userIds = await resolveLoginAuthUserIdCandidates(params.authContext, store);
+  for (const userId of userIds) {
+    const hashPromise = store.getHashByKey?.(`user:${userId}:login:auth`);
+    const authHash = hashPromise ? await hashPromise.catch(() => null) : null;
+    if (authHash) {
+      return authHash;
+    }
+  }
+  return null;
+}
+
+/** Replace exact `${fieldName}` header values from Redis hash `user:${userId}:login:auth`. */
+export async function resolveHeaderPlaceholdersInPlace(params: {
+  headers: Record<string, string>;
+  authContext: AuthContext;
+  logger?: BaiyingEnhanceLogger;
+}): Promise<Record<string, string>> {
+  if (!hasHeaderPlaceholders(params.headers)) {
+    return params.headers;
+  }
+
+  const authHash = await loadLoginAuthHash({
+    authContext: params.authContext,
+    logger: params.logger,
+  });
+  if (!authHash) {
+    return params.headers;
+  }
+
+  applyHeaderPlaceholdersFromAuthHash(params.headers, authHash);
+  return params.headers;
+}
+
+function applyHeaderPlaceholdersFromAuthHash(
+  headers: Record<string, string>,
+  authHash: Record<string, string>,
+): void {
+  const valuesByLowerKey = new Map<string, string>();
+  for (const [key, value] of Object.entries(authHash)) {
+    const normalizedKey = key.trim().toLowerCase();
+    const normalizedValue = String(value ?? "").trim();
+    if (normalizedKey && normalizedValue) {
+      valuesByLowerKey.set(normalizedKey, normalizedValue);
+    }
+  }
+
+  for (const [headerName, headerValue] of Object.entries(headers)) {
+    const placeholder = headerPlaceholderName(headerValue);
+    if (!placeholder) {
+      continue;
+    }
+    const resolved = valuesByLowerKey.get(placeholder.toLowerCase());
+    if (resolved) {
+      headers[headerName] = resolved;
+    }
+  }
+}
+
+function asHeaderRecord(value: unknown): Record<string, string> | null {
+  return isRecord(value) ? (value as Record<string, string>) : null;
+}
+
+export async function resolveCapabilityHeaderPlaceholdersInPlace(params: {
+  capability: {
+    metadata?: { default_headers?: unknown };
+    tool?: { headers?: unknown };
+    tools?: Array<{ headers?: unknown }>;
+    agent?: { headers?: unknown };
+    mcp?: { headers?: unknown };
+  };
+  authContext: AuthContext;
+  logger?: BaiyingEnhanceLogger;
+}): Promise<void> {
+  const headerBlocks = [
+    asHeaderRecord(params.capability.metadata?.default_headers),
+    asHeaderRecord(params.capability.tool?.headers),
+    asHeaderRecord(params.capability.agent?.headers),
+    asHeaderRecord(params.capability.mcp?.headers),
+    ...(Array.isArray(params.capability.tools)
+      ? params.capability.tools.map((tool) => asHeaderRecord(tool.headers))
+      : []),
+  ].filter((headers): headers is Record<string, string> => !!headers && hasHeaderPlaceholders(headers));
+
+  if (headerBlocks.length === 0) {
+    return;
+  }
+
+  const authHash = await loadLoginAuthHash({
+    authContext: params.authContext,
+    logger: params.logger,
+  });
+  if (!authHash) {
+    return;
+  }
+
+  for (const headers of headerBlocks) {
+    applyHeaderPlaceholdersFromAuthHash(headers, authHash);
+  }
 }
 
 const EXCLUDED_AUTH_HEADERS = new Set([

@@ -56,7 +56,7 @@ export default function EmployeeDrawer(props: IProps) {
   }));
 
   const [curActiveLink, setCurActiveLink] = useState<string>('');
-  const [sortType] = useState('focus');
+  const [sortType] = useState('updateTime');
   const [list, setList] = useState<IAgentCache[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 

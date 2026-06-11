@@ -133,7 +133,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   }, []);
 
   const onBeforeSend = useCallback(async (param = {}) => {
-    await getSandboxesInfoUrl();
+    void getSandboxesInfoUrl();
 
     return EventEmitter.invoke('beyond-chat-beforesend-hook', param);
   }, []);

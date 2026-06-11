@@ -16,10 +16,19 @@ import type { SdkInboundFile, SdkProcessorDeps } from "./types.js";
 import {
   bindActiveSdkRequestRunId,
   registerActiveSdkRequest,
-  resolveActiveSdkRequestBySessionKey,
   resolveSdkLocalFilePath,
 } from "./session-context.js";
 import { ensureSessionReasoningStream, shouldForceReasoningStream } from "./reasoning-stream.js";
+import {
+  buildPromptInjectionSnapshot,
+  setPromptInjectionSnapshot,
+} from "./prompt-injection-snapshot.js";
+import {
+  runSessionDispatchExclusive,
+  sessionDispatchQueueDepth,
+} from "./session-dispatch-gate.js";
+import { waitForSdkSessionDispatchSettled } from "./session-dispatch-settle.js";
+import { consumeWorkspaceReloadHint } from "./workspace-reload-hints.js";
 import { EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import { getAgentNameById } from "./utils.js";
 import { buildAgentReadyTitle } from "./i18n.js";
@@ -201,12 +210,9 @@ async function resolveSdkInboundMediaPayload(params: {
 }
 
 export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise<void> {
-  const { message, account, cfg, log, onReply } = deps;
+  const { message, account, cfg, log } = deps;
 
-  // 获取完整的 PluginRuntime
   const rt = getByaiRuntime();
-
-  // 解析路由
   const routePeerId = message.sessionId?.trim() || message.userId;
   const routing = rt.channel.routing.resolveAgentRoute({
     cfg,
@@ -227,10 +233,49 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
     targetAgentId,
     sessionId: message.sessionId,
     userId: message.userId,
-    perSessionId:
-      account.config.sessionKeyPerSessionId ??
-      false,
+    perSessionId: account.config.sessionKeyPerSessionId ?? false,
   });
+
+  const { meta } = await runSessionDispatchExclusive(sessionKey, async () => {
+    return await deliverReplyToAgentViaSdkUnderGate({
+      ...deps,
+      sessionKey,
+      routing,
+      targetAgentId,
+      extraPayload,
+    });
+  });
+
+  if (meta.queued) {
+    log?.info?.(
+      `[diagnose-sdk] session dispatch dequeued: sessionKey=${sessionKey}, queueDepthBefore=${meta.queueDepthBefore}, gateWaitMs=${meta.waitMs}`,
+    );
+  }
+}
+
+type DeliverReplyUnderGateDeps = SdkProcessorDeps & {
+  sessionKey: string;
+  routing: {
+    sessionKey: string;
+    agentId: string;
+    channel: string;
+    accountId: string;
+  };
+  targetAgentId: string;
+  extraPayload: {
+    agent_id?: string;
+    agent_code?: string;
+    agent_name?: string;
+  };
+};
+
+async function deliverReplyToAgentViaSdkUnderGate(
+  deps: DeliverReplyUnderGateDeps,
+): Promise<void> {
+  const { message, account, cfg, log, onReply, sessionKey, routing, targetAgentId, extraPayload } =
+    deps;
+
+  const rt = getByaiRuntime();
   const sessionAgentId = resolveAgentIdFromSessionKey(sessionKey);
   let sessionAgentName = sessionAgentId;
   if (extraPayload.agent_id || extraPayload.agent_code) {
@@ -265,7 +310,7 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
     }
   }
 
-  registerActiveSdkRequest({
+  const activeRequest = registerActiveSdkRequest({
     accountId: account.accountId,
     sessionKey,
     to: `user:${message.sessionId}`,
@@ -277,6 +322,17 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
     abortController: deps.abortController,
     beyondToken: message.beyondToken,
   });
+
+  const workspaceDir = rt.agent.resolveAgentWorkspaceDir(cfg, sessionAgentId);
+  const includeUserMdReloadHint = consumeWorkspaceReloadHint(workspaceDir);
+  setPromptInjectionSnapshot(
+    sessionKey,
+    buildPromptInjectionSnapshot({
+      request: activeRequest,
+      workspaceDir,
+      includeUserMdReloadHint,
+    }),
+  );
 
   const body = rt.channel.reply.formatAgentEnvelope({
     channel: CHANNEL_ID,
@@ -322,25 +378,11 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
     ...inboundMediaPayload,
   };
 
-  let checkInterval: NodeJS.Timeout | null = null;
-
   try {
-    // 创建 dispatcher
-    const {
-      dispatcher,
-      replyOptions,
-    } = rt.channel.reply.createReplyDispatcherWithTyping({
-      deliver: async (payload: { text?: string; isError?: boolean }, info: { kind: string }) => {
-        if (info.kind === "final" && payload.text) {
-          const activeReq = resolveActiveSdkRequestBySessionKey(sessionKey);
-          if (activeReq && !activeReq.hasEmittedContent && activeReq.boundRunIds.size === 0) {
-            await onReply(payload.text, "final");
-          }
-        }
-      },
+    const { dispatcher, replyOptions } = rt.channel.reply.createReplyDispatcherWithTyping({
+      deliver: () => {},
     });
 
-    // finalize 上下文
     const finalizedCtx = rt.channel.reply.finalizeInboundContext(ctxPayload);
     log?.info?.(`[diagnose-sdk] finalized ctx, SessionKey: ${finalizedCtx.SessionKey}`);
 
@@ -357,9 +399,7 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
             disableBlockStreaming: true,
             onAgentRunStart: async (runId: string) => {
               bindActiveSdkRequestRunId(sessionKey, runId);
-              log?.info?.(
-                `[diagnose-sdk] onAgentRunStart called, runId: ${runId}}`,
-              );
+              log?.info?.(`[diagnose-sdk] onAgentRunStart called, runId: ${runId}}`);
               await onReply(buildAgentReadyTitle(message.language, sessionAgentName), "partial", {
                 parentMessageId: "-1",
                 eventType: EventType.REASONING_LOG_DELTA,
@@ -379,9 +419,11 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
     log?.error?.(`[diagnose-sdk] Message dispatch failed: ${String(err)}`);
     throw err;
   } finally {
-    // 确保清理定时器
-    if (checkInterval) {
-      clearInterval(checkInterval);
-    }
+    const settle = await waitForSdkSessionDispatchSettled(sessionKey, {
+      abortSignal: deps.abortController?.signal,
+    });
+    log?.info?.(
+      `[diagnose-sdk] session dispatch settled: sessionKey=${sessionKey}, settled=${String(settle.settled)}, timedOut=${String(settle.timedOut)}, waitMs=${settle.waitMs}, rootLifecyclePhase=${settle.rootLifecyclePhase ?? "none"}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
+    );
   }
 }

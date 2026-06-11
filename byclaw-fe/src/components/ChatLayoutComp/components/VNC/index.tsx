@@ -5,7 +5,7 @@ import { isPlainObject } from 'lodash';
 import DesktopOutlined from '@ant-design/icons/DesktopOutlined';
 import useAppStore from '@/models/common/useAppStore';
 import useGlobal from '@/hooks/useGlobal';
-import { getVNCUrl } from '@/utils/chat';
+import { getVNCUrl, resolveSandboxesInfo } from '@/utils/chat';
 
 export default function VNC() {
   const intl = useIntl();
@@ -20,7 +20,7 @@ export default function VNC() {
       let myDrawerType = data;
 
       if (isPlainObject(data)) {
-        myDrawerType = data?.drawerType;
+        myDrawerType = (data as { drawerType?: string })?.drawerType;
       }
 
       if (myDrawerType === 'vnc') {
@@ -41,8 +41,11 @@ export default function VNC() {
     <Button
       ghost
       type="text"
-      onClick={() => {
-        const url = getVNCUrl(sandboxesInfo);
+      onClick={async () => {
+        const resolvedSandboxesInfo = await resolveSandboxesInfo(sandboxesInfo);
+        if (!resolvedSandboxesInfo?.sandboxId) return;
+
+        const url = getVNCUrl(resolvedSandboxesInfo);
         setSiderCollapsed(true);
         EventEmitter.emit('beyond-main-driver-open-type', {
           drawerType: 'vnc',
