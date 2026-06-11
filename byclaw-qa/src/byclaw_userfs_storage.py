@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
+from collections.abc import Awaitable, Callable, Mapping
 from contextvars import ContextVar, Token
-from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from by_qa.knowledge_base.infrastructure.storage import (
     StorageConfigurationError,
+    StorageError,
     StorageLocation,
 )
 
@@ -38,6 +41,10 @@ def build_byclaw_userfs_headers() -> dict[str, str]:
 
 _NAMESPACE = "BYCLAW-USER"
 _ROOT = "/.bykc"
+_SPACE_TYPE = "USER"
+_BASE_PATH = "/aiFactoryServer/fs/operation/v1"
+
+Transport = Callable[..., Awaitable[dict[str, Any]]]
 
 
 def _normalize_kb_code(kb_code: str) -> str:
@@ -55,10 +62,26 @@ def _normalize_db_path(file_path: str) -> str:
     return "/".join(parts)
 
 
+def _require_service_name() -> str:
+    service_name = os.getenv("BE_DOMAINNAME", "").strip()
+    if not service_name:
+        raise StorageConfigurationError("BE_DOMAINNAME is required for ByClaw UserFS storage")
+    return service_name
+
+
+def _path_from_location(location: StorageLocation) -> str:
+    if location.namespace != _NAMESPACE:
+        raise StorageConfigurationError(f"unsupported storage namespace: {location.namespace}")
+    if not location.key.startswith("/.bykc/"):
+        raise StorageConfigurationError("unsupported ByClaw UserFS storage path")
+    return location.key
+
+
 @dataclass
 class ByClawUserFsKnowledgeStorageProvider:
     provider_name: str = "byclaw-userfs"
     storage_path_bound_to_logical_path: bool = True
+    transport: Transport | None = None
 
     async def ensure_ready(self) -> None:
         return None
@@ -75,4 +98,94 @@ class ByClawUserFsKnowledgeStorageProvider:
         return StorageLocation(
             namespace=_NAMESPACE,
             key=f"{_ROOT}/{_normalize_kb_code(kb_code)}/raw/markdown/{_normalize_db_path(file_path)}.md",
+        )
+
+    async def _request(self, *, method: str, path: str, headers: dict[str, str], **kwargs: Any) -> dict[str, Any]:
+        if self.transport is not None:
+            return await self.transport(method=method, path=path, headers=headers, **kwargs)
+        # Real transport will be implemented in Task 4
+        raise StorageConfigurationError("real transport not yet implemented")
+
+    async def write(
+        self,
+        location: StorageLocation,
+        content: bytes,
+        *,
+        content_type: str,
+    ) -> StoredObject:
+        from by_qa.knowledge_base.infrastructure.storage import StoredObject
+
+        file_path = _path_from_location(location)
+        headers = build_byclaw_userfs_headers()
+        response = await self._request(
+            method="POST",
+            path=f"{_BASE_PATH}/files/put",
+            headers=headers,
+            data={
+                "spaceType": _SPACE_TYPE,
+                "path": file_path,
+                "contentType": content_type,
+            },
+            files={"file": ("file", content, content_type)},
+        )
+        data = response.get("data", {}) if isinstance(response.get("data"), dict) else {}
+        return StoredObject(
+            location=location,
+            size=data.get("fileSize", len(content)),
+            checksum=data.get("checksum"),
+            content_type=data.get("contentType", content_type),
+        )
+
+    async def read(self, location: StorageLocation) -> bytes:
+        file_path = _path_from_location(location)
+        headers = build_byclaw_userfs_headers()
+        response = await self._request(
+            method="GET",
+            path=f"{_BASE_PATH}/files/get",
+            headers=headers,
+            params={"spaceType": _SPACE_TYPE, "path": file_path},
+        )
+        content = response.get("content")
+        if isinstance(content, bytes):
+            return content
+        if isinstance(content, str):
+            return content.encode("utf-8")
+        return b""
+
+    async def delete(self, location: StorageLocation) -> None:
+        file_path = _path_from_location(location)
+        headers = build_byclaw_userfs_headers()
+        await self._request(
+            method="POST",
+            path=f"{_BASE_PATH}/files/delete",
+            headers=headers,
+            json={"spaceType": _SPACE_TYPE, "path": file_path},
+        )
+
+    async def delete_quietly(self, location: StorageLocation) -> None:
+        try:
+            await self.delete(location)
+        except StorageError:
+            return
+
+    async def move(
+        self,
+        source: StorageLocation,
+        target: StorageLocation,
+        *,
+        overwrite: bool = False,
+    ) -> None:
+        source_path = _path_from_location(source)
+        target_path = _path_from_location(target)
+        headers = build_byclaw_userfs_headers()
+        await self._request(
+            method="POST",
+            path=f"{_BASE_PATH}/files/rename",
+            headers=headers,
+            json={
+                "spaceType": _SPACE_TYPE,
+                "oldPath": source_path,
+                "newPath": target_path,
+                "overwrite": overwrite,
+            },
         )

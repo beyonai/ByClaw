@@ -118,3 +118,147 @@ def test_build_headers_requires_beyond_token():
             build_byclaw_userfs_headers()
     finally:
         reset_byclaw_userfs_headers(token)
+
+
+# -- Task 3: storage operations ------------------------------------------------
+
+from by_qa.knowledge_base.infrastructure.storage import StorageLocation
+
+
+class FakeTransport:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    async def __call__(self, *, method, path, headers, json=None, data=None, files=None, params=None):
+        self.calls.append(
+            {
+                "method": method,
+                "path": path,
+                "headers": headers,
+                "json": json,
+                "data": data,
+                "files": files,
+                "params": params,
+            }
+        )
+        return self.responses.pop(0)
+
+
+def _set_token():
+    from byclaw_userfs_storage import set_byclaw_userfs_headers
+    return set_byclaw_userfs_headers({"beyond-token": "token-123"})
+
+
+async def test_write_uploads_multipart_and_returns_stored_object(monkeypatch):
+    monkeypatch.setenv("BE_DOMAINNAME", "ByaiService")
+    from byclaw_userfs_storage import (
+        ByClawUserFsKnowledgeStorageProvider,
+        reset_byclaw_userfs_headers,
+    )
+
+    transport = FakeTransport([
+        {
+            "status_code": 200,
+            "data": {
+                "fileSize": 5,
+                "checksum": "abc",
+                "contentType": "text/plain",
+            },
+        }
+    ])
+    provider = ByClawUserFsKnowledgeStorageProvider(transport=transport)
+    token = _set_token()
+    try:
+        stored = await provider.write(
+            StorageLocation("BYCLAW-USER", "/.bykc/KB001/raw/origin/a.txt"),
+            b"hello",
+            content_type="text/plain",
+        )
+    finally:
+        reset_byclaw_userfs_headers(token)
+
+    assert stored.size == 5
+    assert stored.checksum == "abc"
+    call = transport.calls[0]
+    assert call["method"] == "POST"
+    assert call["path"] == "/aiFactoryServer/fs/operation/v1/files/put"
+    assert call["headers"] == {"system-code": "BYCLAW-QA", "beyond-token": "token-123"}
+    assert call["data"] == {
+        "spaceType": "USER",
+        "path": "/.bykc/KB001/raw/origin/a.txt",
+        "contentType": "text/plain",
+    }
+    assert call["files"]["file"][1] == b"hello"
+
+
+async def test_read_returns_response_bytes(monkeypatch):
+    monkeypatch.setenv("BE_DOMAINNAME", "ByaiService")
+    from byclaw_userfs_storage import (
+        ByClawUserFsKnowledgeStorageProvider,
+        reset_byclaw_userfs_headers,
+    )
+
+    transport = FakeTransport([{"status_code": 200, "content": b"hello"}])
+    provider = ByClawUserFsKnowledgeStorageProvider(transport=transport)
+    token = _set_token()
+    try:
+        content = await provider.read(StorageLocation("BYCLAW-USER", "/.bykc/KB001/raw/origin/a.txt"))
+    finally:
+        reset_byclaw_userfs_headers(token)
+
+    assert content == b"hello"
+    assert transport.calls[0]["method"] == "GET"
+    assert transport.calls[0]["params"] == {
+        "spaceType": "USER",
+        "path": "/.bykc/KB001/raw/origin/a.txt",
+    }
+
+
+async def test_delete_calls_delete_endpoint(monkeypatch):
+    monkeypatch.setenv("BE_DOMAINNAME", "ByaiService")
+    from byclaw_userfs_storage import (
+        ByClawUserFsKnowledgeStorageProvider,
+        reset_byclaw_userfs_headers,
+    )
+
+    transport = FakeTransport([{"status_code": 200, "data": {"code": "00000", "data": {"deleted": True}}}])
+    provider = ByClawUserFsKnowledgeStorageProvider(transport=transport)
+    token = _set_token()
+    try:
+        await provider.delete(StorageLocation("BYCLAW-USER", "/.bykc/KB001/raw/origin/a.txt"))
+    finally:
+        reset_byclaw_userfs_headers(token)
+
+    assert transport.calls[0]["path"] == "/aiFactoryServer/fs/operation/v1/files/delete"
+    assert transport.calls[0]["json"] == {
+        "spaceType": "USER",
+        "path": "/.bykc/KB001/raw/origin/a.txt",
+    }
+
+
+async def test_move_calls_rename_endpoint_with_overwrite(monkeypatch):
+    monkeypatch.setenv("BE_DOMAINNAME", "ByaiService")
+    from byclaw_userfs_storage import (
+        ByClawUserFsKnowledgeStorageProvider,
+        reset_byclaw_userfs_headers,
+    )
+
+    transport = FakeTransport([{"status_code": 200, "data": {"code": "00000"}}])
+    provider = ByClawUserFsKnowledgeStorageProvider(transport=transport)
+    token = _set_token()
+    try:
+        await provider.move(
+            StorageLocation("BYCLAW-USER", "/.bykc/KB001/raw/origin/a.txt"),
+            StorageLocation("BYCLAW-USER", "/.bykc/KB001/raw/origin/b.txt"),
+            overwrite=True,
+        )
+    finally:
+        reset_byclaw_userfs_headers(token)
+
+    assert transport.calls[0]["json"] == {
+        "spaceType": "USER",
+        "oldPath": "/.bykc/KB001/raw/origin/a.txt",
+        "newPath": "/.bykc/KB001/raw/origin/b.txt",
+        "overwrite": True,
+    }
