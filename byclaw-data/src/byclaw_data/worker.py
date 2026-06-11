@@ -366,6 +366,20 @@ def _extract_tool_resource_codes(
 _SKILL_PLACEHOLDER_RE = re.compile(
     r"\{\{(query|compute|action|ontology|view|inference|knowledge):([^}]+)\}\}"
 )
+_SKILL_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
+
+
+def _parse_skill_meta(content: str) -> dict[str, str]:
+    """从 SKILL.md 内容中解析 frontmatter 的 name 和 description 字段。"""
+    m = _SKILL_FRONTMATTER_RE.match(content)
+    if not m:
+        return {}
+    result: dict[str, str] = {}
+    for line in m.group(1).splitlines():
+        if ":" in line:
+            k, _, v = line.partition(":")
+            result[k.strip()] = v.strip().strip('"')
+    return result
 
 
 def _extract_skill_resource_ids(resource_list: list[Any]) -> list[str]:
@@ -437,59 +451,121 @@ def _load_skills(
     resource_list: list[Any],
     user_code: str,
     tools_dict: dict[str, Any],
-) -> tuple[str, str] | None:
-    """加载 skill 内容，返回替换占位符后的 task_prompt 与首个 skill 目录；无 skill 时返回 None。
+    agent_id: str = "",
+) -> tuple[str, str, list[dict[str, str]]] | None:
+    """加载 skill，返回 (task_prompt, first_skill_path, skill_catalog)；无 skill 时返回 None。
+
+    路径A：resource_list 中有 SKILL 条目，按 resourceId 精确加载。
+    路径B：无 SKILL 条目时，自动扫描 _build_skill_dirs 返回的目录（personal_dir 覆盖 agent_dir）。
+
+    skill_catalog 格式：[{"name": ..., "description": ..., "location": "SKILL.md 绝对路径"}]
+    由调用方写入 config["configurable"]["extras"]["skill_catalog"]，供 activate_skill 工具按需加载。
 
     Args:
         resource_list: extra_payload["resource_list"]
         user_code:     command.header.user_code
         tools_dict:    AgentConfig.extra["redirect_tools"]，key 为真实 tool 名
-
-    Returns:
-        task_prompt 字符串，或 None（无 SKILL 条目时）
+        agent_id:      agent id，用于路径B目录构建
     """
     skill_ids = _extract_skill_resource_ids(resource_list)
-    if not skill_ids:
-        return None
 
     minio_root = os.environ.get(
         "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
     )
-    parts: list[str] = []
+    # skill_entries: [(name, description, raw_content, skill_md_path)]
+    skill_entries: list[tuple[str, str, str, Path]] = []
     all_warnings: list[str] = []
     first_skill_path = ""
+    _log = logging.getLogger(__name__)
 
-    for resource_id in skill_ids:
-        skill_path = (
-            Path(minio_root) / f"byclaw-{user_code}" / "by" / resource_id.lstrip("/")
+    if skill_ids:
+        # 路径A：显式 SKILL 条目
+        for resource_id in skill_ids:
+            skill_path = (
+                Path(minio_root) / f"byclaw-{user_code}" / "by" / resource_id.lstrip("/")
+            )
+            if not first_skill_path:
+                first_skill_path = str(skill_path)
+            skill_md = skill_path / "SKILL.md"
+            if not skill_md.exists():
+                _log.warning("_load_skills: SKILL.md not found at %s, skipping", skill_md)
+                continue
+            try:
+                content = skill_md.read_text(encoding="utf-8")
+            except OSError as exc:
+                _log.warning("_load_skills: failed to read %s: %s, skipping", skill_md, exc)
+                continue
+            meta = _parse_skill_meta(content)
+            content, w = _replace_skill_placeholders(content, tools_dict)
+            all_warnings.extend(w)
+            skill_entries.append((
+                meta.get("name") or skill_path.name,
+                meta.get("description") or "",
+                content,
+                skill_md,
+            ))
+    else:
+        # 路径B：无显式条目，自动扫描 skill 目录。
+        # _build_skill_dirs 返回 [agent_dir, personal_dir]，优先级从低到高。
+        # 后扫描的目录（personal_dir）以 skill 目录名为 key 覆盖前者，避免重复注入。
+        skill_dirs = _build_skill_dirs(user_code=user_code, agent_id=agent_id)
+        _log.info(
+            "_load_skills: no explicit SKILL entries, scanning dirs=%s", skill_dirs
         )
-        if not first_skill_path:
-            first_skill_path = str(skill_path)
-        skill_md = skill_path / "SKILL.md"
-        if not skill_md.exists():
-            logging.getLogger(__name__).warning(
-                "_load_skills: SKILL.md not found at %s, skipping", skill_md
-            )
-            continue
-        try:
-            content = skill_md.read_text(encoding="utf-8")
-        except OSError as exc:
-            logging.getLogger(__name__).warning(
-                "_load_skills: failed to read %s: %s, skipping", skill_md, exc
-            )
-            continue
+        # key = skill 目录名，value = skill_md Path；后扫描覆盖前扫描
+        skill_map: dict[str, Path] = {}
+        for skill_dir in skill_dirs:
+            skill_dir_path = Path(skill_dir)
+            if not skill_dir_path.is_dir():
+                continue
+            for skill_md in sorted(skill_dir_path.rglob("SKILL.md")):
+                skill_map[skill_md.parent.name] = skill_md
 
-        content, w = _replace_skill_placeholders(content, tools_dict)
-        all_warnings.extend(w)
-        parts.append(content)
+        for skill_dir_name, skill_md in sorted(skill_map.items()):
+            if not first_skill_path:
+                first_skill_path = str(skill_md.parent)
+            try:
+                content = skill_md.read_text(encoding="utf-8")
+            except OSError as exc:
+                _log.warning(
+                    "_load_skills: failed to read %s: %s, skipping", skill_md, exc
+                )
+                continue
+            meta = _parse_skill_meta(content)
+            content, w = _replace_skill_placeholders(content, tools_dict)
+            all_warnings.extend(w)
+            skill_entries.append((
+                meta.get("name") or skill_dir_name,
+                meta.get("description") or "",
+                content,
+                skill_md,
+            ))
+            _log.info(
+                "_load_skills: auto-loaded skill '%s' from %s",
+                meta.get("name") or skill_dir_name,
+                skill_md,
+            )
 
-    if not parts:
+    if not skill_entries:
         return None
 
-    task_prompt = "\n\n---\n\n".join(parts)
+    # skill_catalog 供 activate_skill 工具按需加载完整指令
+    skill_catalog = [
+        {"name": name, "description": desc, "location": str(skill_md)}
+        for name, desc, _, skill_md in skill_entries
+    ]
+
+    # system prompt 只注入轻量索引，完整指令由 activate_skill 按需拉取
+    index_lines = ["## 可用 Skills\n"]
+    for name, desc, _, _ in skill_entries:
+        index_lines.append(f"- **{name}**：{desc}" if desc else f"- **{name}**")
+    index_lines.append(
+        "\n> 当用户提到某个 skill 名称或请求对应分析时，先调用 `activate_skill(name=...)` 加载完整指令，再按指令执行。"
+    )
+    task_prompt = "\n".join(index_lines)
     if all_warnings:
         task_prompt += "\n\n" + "\n".join(all_warnings)
-    return task_prompt, first_skill_path
+    return task_prompt, first_skill_path, skill_catalog
 
 
 # ── 路径B：自动 skill 发现（路径构建在此，扫描/解析委托 SDK）─────────────────────
@@ -2133,6 +2209,7 @@ class DataCloudWorker(GatewayWorker):
                 resource_list=_resource_list_for_extract,
                 user_code=_dyn_user_code,
                 tools_dict={},  # 动态路径无 AgentConfig，占位符替换跳过
+                agent_id=str(by_agent_id or ""),
             )
             _dyn_minio_root = os.environ.get(
                 "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
@@ -2146,11 +2223,14 @@ class DataCloudWorker(GatewayWorker):
                 "skill_workspace_dir": _dyn_skill_ws,
             }
             if _dyn_skill_task_prompt:
-                _dyn_extras["task_prompt"] = _dyn_skill_task_prompt
+                _dyn_task_prompt, _dyn_first_dir, _dyn_catalog = _dyn_skill_task_prompt
+                _dyn_extras["task_prompt"] = _dyn_task_prompt
+                _dyn_extras["skill_catalog"] = _dyn_catalog
                 logger.info(
-                    "Skill loaded (dynamic path): session=%s skill_workspace_dir=%s",
+                    "Skill loaded (dynamic path): session=%s skill_workspace_dir=%s catalog_size=%d",
                     context.session_id,
                     _dyn_skill_ws,
+                    len(_dyn_catalog),
                 )
             else:
                 logger.info(
@@ -2664,9 +2744,10 @@ class DataCloudWorker(GatewayWorker):
                     resource_list=_resource_list_for_extract,
                     user_code=_user_code_for_skill,
                     tools_dict=tools_dict,
+                    agent_id=str(by_agent_id or ""),
                 )
                 if _skill_task_prompt:
-                    _task_prompt, _first_skill_dir = _skill_task_prompt
+                    _task_prompt, _first_skill_dir, _skill_catalog = _skill_task_prompt
                     graph_input["prompts_overwrite"]["task_prompt"] = _task_prompt
                     _skill_ws = str(
                         Path(_minio_root) / f"byclaw-{_user_code_for_skill}" / "by"
@@ -2680,6 +2761,7 @@ class DataCloudWorker(GatewayWorker):
                         "task_prompt": _task_prompt,
                         "agent_id": str(by_agent_id or ""),
                         "be_domainname": os.environ.get("BE_DOMAINNAME", ""),
+                        "skill_catalog": _skill_catalog,
                     }
                     logger.info(
                         "Skill loaded: session=%s skill_workspace_dir=%s skill_dir=%s",
