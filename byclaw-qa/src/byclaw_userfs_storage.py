@@ -47,7 +47,7 @@ def build_byclaw_userfs_headers() -> dict[str, str]:
 _NAMESPACE = "BYCLAW-USER"
 _ROOT = "/.bykc"
 _SPACE_TYPE = "USER"
-_BASE_PATH = "/aiFactoryServer/fs/operation/v1"
+_BASE_PATH = "/byaiService/fs/operation/v1"
 
 Transport = Callable[..., Awaitable[dict[str, Any]]]
 

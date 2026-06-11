@@ -188,7 +188,7 @@ async def test_write_uploads_multipart_and_returns_stored_object(monkeypatch):
     assert stored.checksum == "abc"
     call = transport.calls[0]
     assert call["method"] == "POST"
-    assert call["path"] == "/aiFactoryServer/fs/operation/v1/files/put"
+    assert call["path"] == "/byaiService/fs/operation/v1/files/put"
     assert call["headers"] == {"system-code": "BYCLAW-QA", "beyond-token": "token-123"}
     assert call["data"] == {
         "spaceType": "USER",
@@ -236,7 +236,7 @@ async def test_delete_calls_delete_endpoint(monkeypatch):
     finally:
         reset_byclaw_userfs_headers(token)
 
-    assert transport.calls[0]["path"] == "/aiFactoryServer/fs/operation/v1/files/delete"
+    assert transport.calls[0]["path"] == "/byaiService/fs/operation/v1/files/delete"
     assert transport.calls[0]["json"] == {
         "spaceType": "USER",
         "path": "/.bykc/KB001/raw/origin/a.txt",
