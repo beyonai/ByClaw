@@ -48,7 +48,7 @@ from redis_agent_config import get_kg_doc_from_redis
 
 @app.middleware("http")
 async def byclaw_userfs_header_context_middleware(request, call_next):
-    token = set_byclaw_userfs_headers(dict(request.headers))
+    token = set_byclaw_userfs_headers({"beyond-token": request.headers.get("beyond-token", "")})
     try:
         return await call_next(request)
     finally:
