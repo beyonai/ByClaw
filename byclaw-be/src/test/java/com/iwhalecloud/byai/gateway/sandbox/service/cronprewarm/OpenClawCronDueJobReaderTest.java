@@ -1,10 +1,12 @@
 package com.iwhalecloud.byai.gateway.sandbox.service.cronprewarm;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.sql.Statement;
 
 import org.junit.jupiter.api.Test;
@@ -19,6 +21,7 @@ class OpenClawCronDueJobReaderTest {
 
     @Test
     void readsEnabledNotRunningJobsInsideLookaheadWindow() throws Exception {
+        assumeSqliteAvailable();
         Path database = tempDir.resolve("openclaw.sqlite");
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath());
             Statement statement = connection.createStatement()) {
@@ -59,6 +62,7 @@ class OpenClawCronDueJobReaderTest {
 
     @Test
     void reportsMissingCronJobsTable() throws Exception {
+        assumeSqliteAvailable();
         Path database = tempDir.resolve("missing-table.sqlite");
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath());
             Statement statement = connection.createStatement()) {
@@ -73,6 +77,7 @@ class OpenClawCronDueJobReaderTest {
 
     @Test
     void reportsMissingRequiredColumns() throws Exception {
+        assumeSqliteAvailable();
         Path database = tempDir.resolve("missing-columns.sqlite");
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath());
             Statement statement = connection.createStatement()) {
@@ -83,5 +88,14 @@ class OpenClawCronDueJobReaderTest {
 
         assertThat(result.getStatus()).isEqualTo(OpenClawCronDueJobs.Status.MISSING_COLUMNS);
         assertThat(result.getMissingColumns()).containsExactlyInAnyOrder("next_run_at_ms", "running_at_ms");
+    }
+
+    private void assumeSqliteAvailable() {
+        try (Connection ignored = DriverManager.getConnection("jdbc:sqlite::memory:")) {
+            // SQLite JDBC depends on a native library; skip these integration-style tests if the host blocks it.
+        }
+        catch (SQLException | UnsatisfiedLinkError | ExceptionInInitializerError e) {
+            assumeTrue(false, "SQLite JDBC native library is unavailable on this host: " + e.getMessage());
+        }
     }
 }
