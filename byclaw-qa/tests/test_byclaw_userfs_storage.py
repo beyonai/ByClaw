@@ -409,3 +409,13 @@ async def test_non_success_business_code_translates_to_operation_error(monkeypat
             await provider.delete(StorageLocation("BYCLAW-USER", "/.bykc/KB001/raw/origin/a.txt"))
     finally:
         reset_byclaw_userfs_headers(token)
+
+
+def test_factory_returns_knowledge_storage_provider():
+    from by_qa.knowledge_base.infrastructure.storage import KnowledgeStorageProvider
+    from byclaw_userfs_storage import build_byclaw_userfs_storage_provider
+
+    provider = build_byclaw_userfs_storage_provider()
+
+    assert isinstance(provider, KnowledgeStorageProvider)
+    assert provider.provider_name == "byclaw-userfs"

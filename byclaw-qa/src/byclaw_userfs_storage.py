@@ -294,3 +294,16 @@ class ByClawUserFsKnowledgeStorageProvider:
             },
         )
         _ensure_json_success(response, "move")
+
+
+def build_byclaw_userfs_storage_provider() -> ByClawUserFsKnowledgeStorageProvider:
+    return ByClawUserFsKnowledgeStorageProvider()
+
+
+__all__ = [
+    "ByClawUserFsKnowledgeStorageProvider",
+    "build_byclaw_userfs_headers",
+    "build_byclaw_userfs_storage_provider",
+    "reset_byclaw_userfs_headers",
+    "set_byclaw_userfs_headers",
+]
