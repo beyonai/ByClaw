@@ -113,6 +113,18 @@ export type ISendConf = {
   onlyQuery?: boolean;
 };
 
+function getClientRequestId(queryMsgId: string, answerMsgId: string) {
+  return `${queryMsgId}_${answerMsgId}`;
+}
+
+function getAnswerClientMsgId(clientRequestId: string) {
+  return clientRequestId.split('_')[1];
+}
+
+function getQueryClientMsgId(clientRequestId: string) {
+  return clientRequestId.split('_')[0];
+}
+
 /**
  * 聊天功能Hook
  * 提供消息发送、接收、会话管理等核心聊天功能
@@ -294,16 +306,15 @@ function useChat(props: IProps) {
 
   const createRestoredAnswerMessage = usePersistFn((runningInfo: RunningChatInfo, sessionId?: string) => {
     const messageId = runningInfo.modelAnswerMessageId ? `${runningInfo.modelAnswerMessageId}` : '';
-    const queryMsgId = runningInfo.traceId?.split('_')?.[0];
     return createMessage({
-      msgId: messageId || `${runningInfo.clientRequestId || runningInfo.traceId || runningInfo.sessionId}`,
+      msgId: getAnswerClientMsgId(runningInfo.clientRequestId),
       messageId,
       text: '',
       fromBeyond: true,
       messageState: IMessageState.Answer,
       sessionId: runningInfo.sessionId ? `${runningInfo.sessionId}` : sessionId,
       traceId: runningInfo.traceId,
-      queryMsgId,
+      queryMsgId: getQueryClientMsgId(runningInfo.clientRequestId),
       agentId: runningInfo.agentId ? `${runningInfo.agentId}` : undefined,
       agentType: runningInfo.agentType as IAgentType,
       metadata: runningInfo.agentId ? JSON.stringify({ agentId: runningInfo.agentId }) : '',
@@ -312,15 +323,12 @@ function useChat(props: IProps) {
 
   const createRestoredAnswerMessageFromSnapshot = usePersistFn((snapshot: any, runningInfo: RunningChatInfo) => {
     const answerMsg = createMessage(fetchMessageHandler(snapshot));
-    if (runningInfo.clientRequestId) {
-      set(answerMsg, 'msgId', runningInfo.clientRequestId);
-    }
-    const queryMsgId = runningInfo.traceId?.split('_')?.[0];
+    set(answerMsg, 'msgId', getAnswerClientMsgId(runningInfo.clientRequestId));
     set(answerMsg, 'messageState', IMessageState.Answer);
     set(answerMsg, 'traceId', snapshot?.traceId || runningInfo.traceId);
     set(answerMsg, 'snapshotStreamId', snapshot?.snapshotStreamId);
     set(answerMsg, 'streamId', snapshot?.snapshotStreamId);
-    set(answerMsg, 'queryMsgId', answerMsg.queryMsgId || queryMsgId);
+    set(answerMsg, 'queryMsgId', getQueryClientMsgId(runningInfo.clientRequestId));
     set(
       answerMsg,
       'sessionId',
@@ -338,7 +346,7 @@ function useChat(props: IProps) {
     return answerMsg;
   });
 
-  const stopRestoredRunningSession = usePersistFn((answerMsg: IMessage, runningInfo?: RunningChatInfo) => {
+  const stopRestoredRunningSession = usePersistFn((answerMsg: IMessage, runningInfo: RunningChatInfo) => {
     if (answerMsg.messageState === IMessageState.Cancel) return Promise.resolve();
     set(answerMsg, 'messageState', IMessageState.Cancel);
     updateMessage(answerMsg);
@@ -346,12 +354,12 @@ function useChat(props: IProps) {
 
     return webSocketManager.sendMessageWhenReady({
       type: 'STOP_CHAT',
-      clientRequestId: runningInfo?.clientRequestId || answerMsg.msgId,
-      sessionId: answerMsg.sessionId || runningInfo?.sessionId || sessionId,
-      messageId: answerMsg.messageId || runningInfo?.modelAnswerMessageId,
-      agentId: runningInfo?.agentId || answerMsg.agentId || null,
-      agentCode: runningInfo?.agentCode || null,
-      agentType: runningInfo?.agentType || answerMsg.agentType,
+      clientRequestId: runningInfo.clientRequestId,
+      sessionId: answerMsg.sessionId || runningInfo.sessionId || sessionId,
+      messageId: answerMsg.messageId || runningInfo.modelAnswerMessageId,
+      agentId: runningInfo.agentId || answerMsg.agentId || null,
+      agentCode: runningInfo.agentCode || null,
+      agentType: runningInfo.agentType || answerMsg.agentType,
     });
   });
 
@@ -379,7 +387,10 @@ function useChat(props: IProps) {
 
         const messageId = runningInfo.modelAnswerMessageId ? `${runningInfo.modelAnswerMessageId}` : '';
         let answerMsg = messageListRef.current.find((item) => {
-          return `${item.messageId}` === messageId || `${item.msgId}` === `${runningInfo.clientRequestId}`;
+          return (
+            `${item.messageId}` === messageId ||
+            `${item.msgId}` === `${getAnswerClientMsgId(runningInfo.clientRequestId)}`
+          );
         });
 
         if (!answerMsg) {
@@ -391,24 +402,23 @@ function useChat(props: IProps) {
         chatSessionRuntimeManager.hydrateRunning(runningInfo, () => answerMsg?.cancelSSE?.());
 
         const runtimeInfo = chatSessionRuntimeManager.getBySession(sessionId);
-        const askMessageId = answerMsg.queryMsgId || '';
+        const askClientMessageId = getQueryClientMsgId(runningInfo.clientRequestId);
         const queryMsg =
-          messageListRef.current.find((item) => {
-            return [`${item.messageId}`, `${item.msgId}`].includes(`${askMessageId}`);
-          }) ||
+          messageListRef.current.find(
+            (item) =>
+              `${item.messageId}` === `${runningInfo.userMessageId}` || `${item.msgId}` === `${askClientMessageId}`
+          ) ||
           createMessage({
-            msgId: askMessageId,
-            messageId: askMessageId,
-            text: '',
+            msgId: askClientMessageId,
+            messageId: `${runningInfo.userMessageId ?? askClientMessageId}`,
+            text: runningInfo.chatContent || '',
             fromBeyond: false,
             messageState: IMessageState.Done,
             sessionId,
           });
 
         registerSessionChatContext(sessionId, {
-          clientRequestId:
-            runtimeInfo?.clientRequestId ||
-            `${runningInfo.clientRequestId || runningInfo.traceId || runningInfo.modelAnswerMessageId || sessionId}`,
+          clientRequestId: runtimeInfo!.clientRequestId,
           queryMsg,
           answerMsg,
           restored: true,
@@ -445,7 +455,7 @@ function useChat(props: IProps) {
             set(answerMsg, 'messageState', IMessageState.Answer);
             answerMsg = updateMessage(answerMsg, { isAssign: true });
             chatSessionRuntimeManager.updateLastAppliedStreamId(
-              latestRuntimeInfo?.clientRequestId || runningInfo.clientRequestId || answerMsg.msgId,
+              latestRuntimeInfo?.clientRequestId || runningInfo.clientRequestId,
               snapshotStreamId
             );
           }
@@ -464,15 +474,7 @@ function useChat(props: IProps) {
         flushRestoredChatStreamBuffer(restoreKey);
       }
     };
-  }, [
-    sessionId,
-    createRestoredAnswerMessage,
-    createRestoredAnswerMessageFromSnapshot,
-    flowHandler,
-    getMessageList,
-    stopRestoredRunningSession,
-    updateMessage,
-  ]);
+  }, [sessionId]);
 
   /**
    * 发送查询函数
@@ -498,7 +500,8 @@ function useChat(props: IProps) {
     const { queryQuestion, payload = {}, msgOpt = {} } = sendProps;
     const isResumeChat = get(payload, 'actionType') === 'RESUME';
     let isContinuingRunningTrace = false;
-    if (isSessionRunning) {
+    // 不要用 isSessionRunning，因为 isSessionRunning 是异步的，这里需要同步判断
+    if (chatSessionRuntimeManager.isSessionRunning(sessionId)) {
       if (!isResumeChat) {
         return false;
       }
@@ -603,7 +606,7 @@ function useChat(props: IProps) {
     set(newQueryMsg, 'extParams', extParams);
     set(newQueryMsg, 'answerMsgId', newAnswerMsg.msgId);
 
-    const clientRequestId = newAnswerMsg.msgId;
+    const clientRequestId = getClientRequestId(newQueryMsg.msgId, newAnswerMsg.msgId);
 
     if (!isContinuingRunningTrace) {
       registerPendingChatContext({
@@ -618,7 +621,6 @@ function useChat(props: IProps) {
 
       chatSessionRuntimeManager.register({
         clientRequestId,
-        answerClientMsgId: clientRequestId,
         sessionId: newAnswerMsg.sessionId,
         restored: false,
         cancel: () => newAnswerMsg.cancelSSE?.(),
@@ -660,7 +662,7 @@ function useChat(props: IProps) {
 
       return webSocketManager.sendMessageWhenReady({
         type: 'STOP_CHAT',
-        clientRequestId: newAnswerMsg.msgId,
+        clientRequestId,
         ...pick(newAnswerMsg, ['agentId', 'sessionId', 'messageId', 'agentType']),
         agentId: Number(_agentId) ? _agentId : null,
         agentCode: Number(_agentId) ? null : _agentId,

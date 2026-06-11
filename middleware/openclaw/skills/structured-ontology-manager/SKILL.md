@@ -1,5 +1,5 @@
 ---
-name: 个人结构化本体管理
+name: structured-ontology-manager
 description: "对话式结构化个人本体管理：通过自然语言创建、删除个人结构化本体对象和视图，数据存储在个人 SQLite 中"
 allowed-tools: execute, read_file
 ---

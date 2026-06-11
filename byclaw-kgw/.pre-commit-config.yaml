@@ -1,0 +1,56 @@
+repos:
+  # Python formatting and imports
+  - repo: https://github.com/pycqa/isort
+    rev: "5.13.2"
+    hooks:
+      - id: isort
+        name: isort (Python import sorting)
+        args: [--profile, black, --line-length, "88"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: "v0.9.4"
+    hooks:
+      - id: ruff
+        name: ruff (Python linter)
+        args: [--fix]
+      - id: ruff-format
+        name: ruff-format (Python formatter)
+
+  # Python syntax and semantic issues
+  - repo: https://github.com/pycqa/pylint
+    rev: "v3.3.1"
+    hooks:
+      - id: pylint
+        name: pylint (Python code analysis)
+        args: [--rcfile=byclaw-kgw/pylintrc]
+        types: [python]
+
+  # Pyink (alternative formatter)
+  - repo: local
+    hooks:
+      - id: pyink
+        name: pyink (Python formatter)
+        entry: pyink
+        args: [--diff]
+        language: python
+        additional_dependencies: [pyink==25.12.0]
+        types: [python]
+
+  # General
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: "v5.0.0"
+    hooks:
+      - id: trailing-whitespace
+        name: trailing whitespace
+      - id: end-of-file-fixer
+        name: end of file fixer
+      - id: check-yaml
+        name: check yaml
+      - id: check-toml
+        name: check toml
+      - id: check-added-large-files
+        name: check for added large files
+        args: [--maxkb=500]
+      - id: mixed-line-ending
+        name: mixed line ending
+        args: [--fix=no]

@@ -298,10 +298,6 @@ function ApplicationSession(props: IProps) {
             },
             files,
           },
-
-          llmMessageId: currentMessage.messageId,
-          taskOperateType: 'FEEDBACK',
-          taskStepId: get(messageListItemContent, 'stepId'),
         },
         msgOpt: {
           answerMsg: {},

@@ -132,7 +132,7 @@ const {
   activeSdkRequestsByRun,
 } = getSessionContextStore();
 
-const sdkEmitterLastChunks = new WeakMap<GatewayDataEmitter, EmitOptions>();
+const sdkEmitterLastChunks = new Map<string, EmitOptions & { traceId: string }>();
 
 function normalizeAlias(value: string | undefined | null): string | null {
   const trimmed = value?.trim();
@@ -232,17 +232,8 @@ export function resolveSdkEmitter(accountId: string): GatewayDataEmitter | undef
   return sdkEmitters.get(normalizeAccountId(accountId));
 }
 
-export function getLastSdkEmitChunkByEmitter(
-  emitter: GatewayDataEmitter | undefined,
-) {
-  if (!emitter) {
-    return undefined;
-  }
-  return sdkEmitterLastChunks.get(emitter);
-}
-
-export function getLastSdkEmitChunk(accountId: string) {
-  return getLastSdkEmitChunkByEmitter(resolveSdkEmitter(accountId));
+export function getLastSdkEmitChunk(sessionId: string | number) {
+  return sdkEmitterLastChunks.get(`${sessionId}`);
 }
 
 export async function emitSdkChunkTracked(params: {
@@ -261,7 +252,8 @@ export async function emitSdkChunkTracked(params: {
     params.text,
     params.options || {},
   );
-  sdkEmitterLastChunks.set(params.emitter, {
+  sdkEmitterLastChunks.set(`${params.sessionId}`, {
+    traceId: params.traceId || "",
     messageId: params.options?.messageId,
     parentMessageId: params.options?.parentMessageId,
     eventType: params.options?.eventType,
@@ -443,10 +435,6 @@ export function resolveActiveSdkRunBinding(
 
 export function isRootSessionKey(sessionKey?: string) {
   return !!sessionKey && !!activeSdkRequestsBySession.get(sessionKey);
-}
-
-export function isChildSessionKey(sessionKey?: string) {
-  return !!sessionKey && !!activeSdkRequestsByChild.get(sessionKey);
 }
 
 export function clearActiveSdkRequestByTarget(accountId: string, to: string): void {

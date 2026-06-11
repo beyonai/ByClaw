@@ -15,6 +15,8 @@ public class RunningChatInfo {
 
     private String clientRequestId;
 
+    private Long userMessageId;
+
     private Long modelAnswerMessageId;
 
     private String transport;
@@ -28,4 +30,6 @@ public class RunningChatInfo {
     private String agentCode;
 
     private String agentType;
+
+    private String chatContent;
 }

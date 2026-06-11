@@ -4,7 +4,6 @@ import {
   emitSdkChunkTracked,
   getLastSdkEmitChunk,
   isRootSessionKey,
-  isChildSessionKey,
   markActiveSdkCompactionRetryPending,
   markActiveSdkRootLifecycleFinished,
   markActiveSdkRootLifecycleStarted,
@@ -18,6 +17,7 @@ import {
 } from "./sdk-session-completion.js";
 import { AgentEvent } from "./types";
 import type { OpenClawPluginApi } from "@openclaw/plugin-sdk/core";
+import { isSubagentSessionKey } from "openclaw/plugin-sdk/routing";
 import { emitIncrementalText, getAgentNameById, normalizeReasoningPreviewText } from "./utils";
 import {
   buildThinkingEndText,
@@ -25,17 +25,25 @@ import {
   buildToolStartTitle as buildLocalizedToolStartTitle,
 } from "./i18n.js";
 
-let lastAgentAssistantEvent: {
-  seq: number;
-  stream: string;
-  runId: string;
-  startTime: number;
-} = {
-  seq: 0,
-  stream: "",
-  runId: "",
-  startTime: 0,
-};
+const lastAgentAssistantEventMap: {
+  [key: string]: {
+    seq: number;
+    stream: string;
+    startTime: number;
+  }
+} = {};
+
+function getLastAgentAssistantEvent(runId: string) {
+  if (lastAgentAssistantEventMap[runId]) {
+    return lastAgentAssistantEventMap[runId];
+  }
+  lastAgentAssistantEventMap[runId] = {
+    seq: 0,
+    stream: "",
+    startTime: 0,
+  };
+  return lastAgentAssistantEventMap[runId];
+}
 
 const toolStartArgsByCallId = new Map<string, Record<string, any>>();
 
@@ -200,7 +208,7 @@ async function handleAssistantEvent(
   if (!visibleDelta) return;
   request.hasEmittedContent = true;
   await emitSdkChunk(request, visibleDelta, {
-    messageId: request.sessionKey,
+    messageId: event.runId,
     parentMessageId: "-1",
     eventType: isChildSession ? EventType.REASONING_LOG_DELTA : EventType.ANSWER_DELTA,
   });
@@ -214,7 +222,7 @@ async function handleReasoningEndTransition(
   if (!sdkEmitter) {
     return;
   }
-  const previousEmit = getLastSdkEmitChunk(request.accountId);
+  const previousEmit = getLastSdkEmitChunk(request.sessionId);
   await emitSdkChunkTracked({
     emitter: sdkEmitter,
     sessionId: request.sessionId,
@@ -288,6 +296,7 @@ async function handleLifecycleEvent(
     activeRequest.sessionKey,
     `root_lifecycle_${phase}`,
   );
+  delete lastAgentAssistantEventMap[event.runId];
 }
 
 async function handleCompactionEvent(
@@ -309,7 +318,7 @@ async function handleCompactionEvent(
 
   if (shouldHoldCompletion) {
     cancelActiveSdkCompletionCheck(activeRequest.sessionKey);
-    const previousEmit = getLastSdkEmitChunk(activeRequest.accountId);
+    const previousEmit = getLastSdkEmitChunk(activeRequest.sessionId);
     await emitSdkChunk(activeRequest, "", {
       eventType: previousEmit?.eventType,
       contentType: "5007",
@@ -340,7 +349,7 @@ async function handleThinkingEvent(
   isPreviousThinking: boolean,
 ) {
   const text = event.data?.text as string ?? "";
-  const previousEmit = getLastSdkEmitChunk(request.accountId);
+  const previousEmit = getLastSdkEmitChunk(request.sessionId);
   const options: EmitOptions = {
     eventType: EventType.REASONING_LOG_DELTA,
   };
@@ -369,7 +378,8 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
   if (!correlationKey) {
     return;
   }
-  if (lastAgentAssistantEvent.runId === runId && lastAgentAssistantEvent.seq >= seq) {
+  const lastAgentAssistantEvent = getLastAgentAssistantEvent(runId);
+  if (lastAgentAssistantEvent.seq >= seq) {
     return;
   }
   const request = resolvedSessionKey
@@ -381,14 +391,13 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
   api.logger.info(
     `[byai-channel] onAgentEvent: ${JSON.stringify(event)}`,
   );
-  const isChildSession = isChildSessionKey(resolvedSessionKey);
+  const isChildSession = isSubagentSessionKey(resolvedSessionKey);
   const isPreviousThinking = lastAgentAssistantEvent.stream === "thinking";
   if (isPreviousThinking && event.stream !== "thinking") {
     await handleReasoningEndTransition(request, Date.now() - lastAgentAssistantEvent.startTime);
   }
   const previousStream = lastAgentAssistantEvent.stream;
   lastAgentAssistantEvent.seq = seq;
-  lastAgentAssistantEvent.runId = runId;
   if (previousStream !== event.stream) {
     lastAgentAssistantEvent.startTime = Date.now();
   }
