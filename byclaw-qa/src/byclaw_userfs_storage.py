@@ -104,13 +104,20 @@ def _extract_response_message(data: Any) -> str:
     return ""
 
 
+_SUCCESS_CODES: frozenset[str | int | None] = frozenset({None, "00000", "0", 0})
+
+
+def _is_success_code(code: object) -> bool:
+    return code in _SUCCESS_CODES
+
+
 def _ensure_json_success(response: dict[str, Any], op: str) -> dict[str, Any]:
     status_code = int(response.get("status_code") or 0)
     data = response.get("data")
     if status_code and not (200 <= status_code < 300):
         msg = _extract_response_message(data) or f"byclaw-userfs.{op}: HTTP {status_code}"
         raise _translate_response_error(status_code, msg)
-    if isinstance(data, dict) and data.get("code") not in {None, "00000"}:
+    if isinstance(data, dict) and not _is_success_code(data.get("code")):
         msg = str(data.get("msg") or f"byclaw-userfs.{op}: {data.get('code')}")
         raise _translate_response_error(status_code or None, msg)
     return data if isinstance(data, dict) else {}
@@ -196,13 +203,55 @@ class ByClawUserFsKnowledgeStorageProvider:
             if not response.is_success:
                 msg = f"byclaw-userfs: HTTP {response.status_code} for {method} {path}"
                 raise _translate_response_error(response.status_code, msg)
-            result: dict[str, Any] = {
+            return {
                 "status_code": response.status_code,
                 "data": response.data if isinstance(response.data, dict) else {},
             }
-            if response.content is not None:
-                result["content"] = response.content
-            return result
+        finally:
+            await discovery_client.close()
+
+    async def _download_bytes(self, *, path: str, headers: dict[str, str], params: dict[str, str]) -> bytes:
+        if self.transport is not None:
+            response = await self.transport(method="GET", path=path, headers=headers, params=params)
+            status_code = int(response.get("status_code") or 0)
+            if status_code and not (200 <= status_code < 300):
+                msg = _extract_response_message(response.get("data")) or f"byclaw-userfs: HTTP {status_code} for GET {path}"
+                raise _translate_response_error(status_code, msg)
+            content = response.get("content")
+            if isinstance(content, bytes):
+                return content
+            if isinstance(content, str):
+                return content.encode("utf-8")
+            return b""
+
+        from by_framework.common.redis_client import init_redis
+        from by_framework.core.discovery import DiscoveryClient
+        from by_framework.util.http_client import RetryConfig
+        from by_qa.config import get_settings
+
+        import httpx
+
+        service_name = _require_service_name()
+        settings = get_settings()
+        redis_client = init_redis(
+            host=settings.redis_host,
+            port=settings.redis_port,
+            db=settings.redis_database,
+            password=settings.redis_password or None,
+            username=settings.redis_username or None,
+            decode_responses=True,
+        )
+        discovery_client = DiscoveryClient(redis_client=redis_client, cache_interval=5)
+        try:
+            instance = await discovery_client.discover(service_name)
+            if not instance:
+                raise StorageOperationError(f"No available instances for service: {service_name}")
+            url = f"http://{instance.host}:{instance.port}{path}"
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(url, headers=headers, params=params)
+                if not resp.is_success:
+                    raise _translate_response_error(resp.status_code, f"byclaw-userfs.read: HTTP {resp.status_code}")
+                return resp.content
         finally:
             await discovery_client.close()
 
@@ -239,18 +288,11 @@ class ByClawUserFsKnowledgeStorageProvider:
         location = _normalize_location(location)
         file_path = _path_from_location(location)
         headers = build_byclaw_userfs_headers()
-        response = await self._request(
-            method="GET",
+        return await self._download_bytes(
             path=f"{_BASE_PATH}/files/get",
             headers=headers,
             params={"spaceType": _SPACE_TYPE, "path": file_path},
         )
-        content = response.get("content")
-        if isinstance(content, bytes):
-            return content
-        if isinstance(content, str):
-            return content.encode("utf-8")
-        return b""
 
     async def delete(self, location: StorageLocation) -> None:
         location = _normalize_location(location)
