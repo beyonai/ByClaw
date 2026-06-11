@@ -1,20 +1,19 @@
 /**
- * Plugin runtime singleton.
- * Stores the PluginRuntime from api.runtime (set during register()).
- * Used by message-processor.ts to access dispatch functions.
+ * Plugin runtime singleton shared across bundled entry chunks (index,
+ * channel-plugin-api, runtime-setter-api). Uses globalThis so esbuild splits
+ * do not create duplicate module-level state.
  */
 
 import type { PluginRuntime } from "openclaw/plugin-sdk";
+import { createPluginRuntimeStore } from "openclaw/plugin-sdk/runtime-store";
 
-let runtime: PluginRuntime | null = null;
+const {
+  setRuntime: setByaiRuntime,
+  tryGetRuntime: getOptionalByaiRuntime,
+  getRuntime: getByaiRuntime,
+} = createPluginRuntimeStore<PluginRuntime>({
+  pluginId: "byai-channel",
+  errorMessage: "ByAI Channel runtime not initialized - plugin not registered",
+});
 
-export function setByaiRuntime(r: PluginRuntime): void {
-  runtime = r;
-}
-
-export function getByaiRuntime(): PluginRuntime {
-  if (!runtime) {
-    throw new Error("ByAI Channel runtime not initialized - plugin not registered");
-  }
-  return runtime;
-}
+export { getByaiRuntime, getOptionalByaiRuntime, setByaiRuntime };

@@ -1,0 +1,138 @@
+/**
+ * Per-sessionKey FIFO mutex for SDK inbound dispatch.
+ * Ensures only one OpenClaw dispatch runs at a time for a given sessionKey,
+ * avoiding transcript races during embedded prompt lock release windows.
+ */
+
+type GateEntry = {
+  running: boolean;
+  waiters: number;
+  tail: Promise<void>;
+};
+
+const GATE_STATE = Symbol.for("openclaw.byaiChannel.sessionDispatchGate");
+
+function getGateStore(): Map<string, GateEntry> {
+  const globalState = globalThis as typeof globalThis & {
+    [GATE_STATE]?: Map<string, GateEntry>;
+  };
+  if (!globalState[GATE_STATE]) {
+    globalState[GATE_STATE] = new Map<string, GateEntry>();
+  }
+  return globalState[GATE_STATE];
+}
+
+function normalizeSessionKey(sessionKey: string | undefined): string | null {
+  const trimmed = sessionKey?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function getOrCreateEntry(store: Map<string, GateEntry>, sessionKey: string): GateEntry {
+  let entry = store.get(sessionKey);
+  if (!entry) {
+    entry = {
+      running: false,
+      waiters: 0,
+      tail: Promise.resolve(),
+    };
+    store.set(sessionKey, entry);
+  }
+  return entry;
+}
+
+export function isSessionDispatchBusy(sessionKey: string | undefined): boolean {
+  const normalized = normalizeSessionKey(sessionKey);
+  if (!normalized) {
+    return false;
+  }
+  const entry = getGateStore().get(normalized);
+  return Boolean(entry && (entry.running || entry.waiters > 0));
+}
+
+export function sessionDispatchQueueDepth(sessionKey: string | undefined): number {
+  const normalized = normalizeSessionKey(sessionKey);
+  if (!normalized) {
+    return 0;
+  }
+  const entry = getGateStore().get(normalized);
+  if (!entry) {
+    return 0;
+  }
+  return entry.waiters + (entry.running ? 1 : 0);
+}
+
+export type SessionDispatchGateRunMeta = {
+  sessionKey: string;
+  queued: boolean;
+  queueDepthBefore: number;
+  waitMs: number;
+};
+
+/**
+ * Run `task` exclusively for `sessionKey`. Tasks for the same key are FIFO-queued.
+ */
+export async function runSessionDispatchExclusive<T>(
+  sessionKey: string,
+  task: () => Promise<T>,
+): Promise<{ result: T; meta: SessionDispatchGateRunMeta }> {
+  const normalized = normalizeSessionKey(sessionKey);
+  if (!normalized) {
+    const result = await task();
+    return {
+      result,
+      meta: {
+        sessionKey: sessionKey,
+        queued: false,
+        queueDepthBefore: 0,
+        waitMs: 0,
+      },
+    };
+  }
+
+  const store = getGateStore();
+  const entry = getOrCreateEntry(store, normalized);
+  const queueDepthBefore = entry.running ? entry.waiters + 1 : entry.waiters;
+  const queued = entry.running || entry.waiters > 0;
+  if (queued) {
+    entry.waiters += 1;
+  }
+
+  const waitStartedAt = Date.now();
+  const previous = entry.tail;
+  let release!: () => void;
+  entry.tail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  await previous;
+  const waitMs = Date.now() - waitStartedAt;
+
+  entry.running = true;
+  if (queued) {
+    entry.waiters = Math.max(0, entry.waiters - 1);
+  }
+
+  try {
+    const result = await task();
+    return {
+      result,
+      meta: {
+        sessionKey: normalized,
+        queued,
+        queueDepthBefore,
+        waitMs,
+      },
+    };
+  } finally {
+    entry.running = false;
+    release();
+    if (!entry.running && entry.waiters === 0) {
+      store.delete(normalized);
+    }
+  }
+}
+
+/** Reset gate state between tests. */
+export function resetSessionDispatchGateForTest(): void {
+  getGateStore().clear();
+}

@@ -8,3 +8,7 @@
 - [5. 中间件部署](06-middleware-deployment.md)
 - [6. 拆分部署](08-standalone-deployment.md)
 - [7. 验证和故障排查](09-verification.md)
+- [8. Docker 文件型存储升级 HTML 手册](docker-file-storage-upgrade.html)
+- [9. Docker 文件型运行态存储部署](10-docker-file-storage-deployment.md)
+- [10. MinIO 到文件型存储迁移](11-minio-to-file-storage-migration.md)
+- [11. 一键部署存储模式切换 HTML](12-one-click-storage-deployment.html)

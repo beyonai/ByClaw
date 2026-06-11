@@ -10,7 +10,10 @@ if [ -f "$ENV_FILE" ]; then
     set +a
 fi
 
-if [ "$STANDALONE_MODULES" = "NONE" ]; then
+# 统一加载存储 profile，保证 pull/update/init 看到同一份 .env 派生配置。
+. "$SCRIPT_DIR/../storage-profile.sh"
+
+if [ "${STANDALONE_MODULES:-}" = "NONE" ]; then
     echo "STANDALONE_MODULES=NONE, skipping all standalone image pulls."
     exit 0
 fi

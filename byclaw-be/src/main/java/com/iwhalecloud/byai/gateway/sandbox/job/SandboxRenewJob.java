@@ -32,6 +32,12 @@ public class SandboxRenewJob {
                 report.getTotalCandidates(), report.getScannedCount(), report.getAffectedCount(),
                 report.getSkippedCount(), report.getFailedCount(), report.getAffectedSandboxes(),
                 report.getSkippedSandboxes(), report.getFailedSandboxes());
+            SandboxLifecycleJobReport cronPrelaunchReport = sandboxService.prelaunchDueCronSandboxes();
+            LOGGER.info("定时任务沙箱预启动任务执行完成，候选 {} 个，扫描 {} 个，启动 {} 个，跳过 {} 个，失败 {} 个，启动用户：{}，跳过用户：{}，失败用户：{}",
+                cronPrelaunchReport.getTotalCandidates(), cronPrelaunchReport.getScannedCount(),
+                cronPrelaunchReport.getAffectedCount(), cronPrelaunchReport.getSkippedCount(),
+                cronPrelaunchReport.getFailedCount(), cronPrelaunchReport.getAffectedSandboxes(),
+                cronPrelaunchReport.getSkippedSandboxes(), cronPrelaunchReport.getFailedSandboxes());
         } catch (Exception e) {
             LOGGER.error("沙箱续约任务执行异常", e);
         }

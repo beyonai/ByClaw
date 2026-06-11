@@ -364,6 +364,25 @@ function useChat(props: IProps) {
   });
 
   useEffect(() => {
+    const handler = (message: any) => {
+      const data = get(message, 'data') || message;
+      const messageSessionId = get(data, 'sessionId') || get(message, 'sessionId');
+      if (!messageSessionId || `${messageSessionId}` !== `${sessionId}`) return;
+
+      const answerMsg = fetchMessageHandler({
+        ...data,
+        sessionId: messageSessionId,
+      });
+      updateMessage(answerMsg, { allowCreateSession: false });
+    };
+
+    webSocketManager.onMessage('NEW_MESSAGE', handler);
+    return () => {
+      webSocketManager.offMessage('NEW_MESSAGE', handler);
+    };
+  }, [sessionId, updateMessage]);
+
+  useEffect(() => {
     if (!sessionId) {
       return;
     }

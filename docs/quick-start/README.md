@@ -60,11 +60,23 @@ cp .env.example .env
 ### 4.1 一键启动中间件和应用
 
 ```bash
-cd deploy
-sh start-standalone.sh
+cp .env.example .env
+# 在 .env 中设置 BYCLAW_DEPLOY_STORAGE=nfs|minio|nfs-hybrid
+sh deploy.sh init
 ```
 
-脚本会先启动 `deploy/middleware`，再启动 `deploy/standalone`。
+脚本会读取 `.env`，按 `BYCLAW_DEPLOY_STORAGE` 选择存储方案，然后启动 `deploy/middleware` 和 `deploy/standalone`。
+
+可选存储模式：
+
+```bash
+# .env
+BYCLAW_DEPLOY_STORAGE=nfs
+
+BYCLAW_DEPLOY_STORAGE=minio
+
+BYCLAW_DEPLOY_STORAGE=nfs-hybrid
+```
 
 启动完成后，访问：
 

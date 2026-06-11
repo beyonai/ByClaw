@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>远程桌面</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #f7f8fa;
+      --surface: #ffffff;
+      --border: rgba(0, 0, 0, 0.15);
+      --border-light: rgba(0, 0, 0, 0.06);
+      --text: #14161a;
+      --text-secondary: #40454d;
+      --text-tertiary: #707680;
+      --primary: #165dff;
+      --primary-bg: #e8f3ff;
+      --primary-hover: #4080ff;
+      --fill: rgba(0, 0, 0, 0.04);
+      --fill-hover: rgba(0, 0, 0, 0.06);
+      --screen-bg: #1a1d24;
+      --ok: #00b42a;
+      --warn: #ff7d00;
+      --err: #f53f3f;
+      --radius: 10px;
+      --radius-sm: 8px;
+      --radius-xs: 6px;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .page {
+      min-height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .tv {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      min-height: 100%;
+    }
+
+    .tv-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border-light);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+
+    .tv-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .tv-title svg {
+      width: 18px;
+      height: 18px;
+      color: var(--text-secondary);
+    }
+
+    .tv-bar-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--text-tertiary);
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--text-tertiary);
+      flex-shrink: 0;
+    }
+
+    .status-dot.connecting { background: var(--warn); animation: pulse 1.2s ease infinite; }
+    .status-dot.connected  { background: var(--ok); }
+    .status-dot.error      { background: var(--err); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+
+    .btn {
+      appearance: none;
+      border: 1px solid var(--border-light);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 13px;
+      padding: 5px 14px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+
+    .btn:hover:not(:disabled) {
+      border-color: var(--border);
+      background: var(--fill);
+    }
+
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .btn-primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--primary-hover);
+      border-color: var(--primary-hover);
+    }
+
+    .tv-body {
+      display: flex;
+      flex: 1;
+      position: relative;
+      min-height: 0;
+      overflow: visible;
+      background: var(--bg);
+    }
+
+    /* ── sidebar ── */
+    .sidebar-wrap {
+      position: relative;
+      flex: 0 0 56px;
+      width: 56px;
+      flex-shrink: 0;
+      z-index: 20;
+      transition: width 0.2s, flex-basis 0.2s;
+    }
+
+    .sidebar-wrap.collapsed {
+      flex: 0 0 0;
+      width: 0;
+    }
+
+    .sidebar {
+      width: 56px;
+      background: var(--bg);
+      border-right: 1px solid var(--border-light);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 10px 0;
+      gap: 4px;
+      height: 100%;
+      overflow: hidden;
+      transition: opacity 0.2s, visibility 0.2s;
+    }
+
+    .sidebar-wrap.collapsed .sidebar {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .sidebar-btn {
+      width: 36px;
+      height: 36px;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s, color 0.15s;
+      flex-shrink: 0;
+    }
+
+    .sidebar-btn:hover:not(:disabled) {
+      background: var(--fill-hover);
+      color: var(--text);
+    }
+
+    .sidebar-btn.active {
+      background: var(--primary-bg);
+      color: var(--primary);
+    }
+
+    .sidebar-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .sidebar-btn svg { width: 18px; height: 18px; }
+
+    .sidebar-toggle {
+      position: absolute;
+      top: 50%;
+      left: 56px;
+      transform: translateY(-50%);
+      width: 18px;
+      height: 52px;
+      padding: 0;
+      background: var(--surface);
+      border: 1px solid var(--border-light);
+      border-left: none;
+      border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+      box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-tertiary);
+      z-index: 25;
+      pointer-events: auto;
+      transition: color 0.15s, background 0.15s;
+    }
+
+    .sidebar-toggle:hover {
+      color: var(--primary);
+      background: var(--primary-bg);
+    }
+
+    .sidebar-wrap.collapsed .sidebar-toggle {
+      left: 0;
+      border-left: 1px solid var(--border-light);
+    }
+
+    .sidebar-toggle svg {
+      width: 10px;
+      height: 10px;
+      transition: transform 0.2s;
+      pointer-events: none;
+    }
+
+    .sidebar-wrap.collapsed .sidebar-toggle svg {
+      transform: rotate(180deg);
+    }
+
+    .sidebar-wrap.collapsed .panel {
+      display: none !important;
+    }
+
+    /* ── flyout panels ── */
+    .panel {
+      position: absolute;
+      left: 56px;
+      top: 8px;
+      width: 280px;
+      max-height: calc(100% - 16px);
+      overflow-y: auto;
+      background: var(--surface);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+      padding: 16px;
+      z-index: 9;
+      display: none;
+    }
+
+    .panel.open { display: block; }
+
+    .panel h3 {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 12px;
+    }
+
+    .panel label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 10px;
+      cursor: pointer;
+    }
+
+    .panel label input[type="checkbox"] {
+      accent-color: var(--primary);
+      width: 14px;
+      height: 14px;
+    }
+
+    .panel textarea {
+      width: 100%;
+      min-height: 88px;
+      font-size: 13px;
+      padding: 10px 12px;
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+      color: var(--text);
+      resize: vertical;
+      margin-bottom: 10px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .panel textarea:focus {
+      border-color: var(--primary);
+    }
+
+    .panel .btn { width: 100%; }
+
+    .panel-hint {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      margin-top: 8px;
+      line-height: 1.5;
+    }
+
+    /* ── screen ── */
+    .tv-screen-wrap {
+      position: relative;
+      flex: 1;
+      min-width: 0;
+      min-height: 320px;
+      margin: 12px 12px 12px 0;
+      background: var(--screen-bg);
+      border-radius: var(--radius);
+      border: 1px solid var(--border-light);
+      overflow: hidden;
+    }
+
+    .sidebar-wrap.collapsed + .tv-screen-wrap {
+      margin-left: 12px;
+    }
+
+    #screen { width: 100%; height: 100%; min-height: 320px; }
+
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      background: var(--screen-bg);
+      color: var(--text-tertiary);
+      font-size: 13px;
+      pointer-events: none;
+      transition: opacity 0.2s;
+      z-index: 5;
+    }
+
+    .overlay.hidden { opacity: 0; visibility: hidden; }
+
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 2px solid rgba(255, 255, 255, 0.12);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="tv" id="tv">
+      <div class="tv-bar">
+        <div class="tv-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <rect x="2" y="5" width="20" height="14" rx="2"/>
+            <path d="M8 21h8"/>
+          </svg>
+          <span>远程桌面</span>
+        </div>
+        <div class="tv-bar-right">
+          <div class="status">
+            <span class="status-dot connecting" id="statusDot"></span>
+            <span id="statusText">连接中…</span>
+          </div>
+          <button class="btn btn-primary" id="btnReconnect" type="button" disabled>重新连接</button>
+        </div>
+      </div>
+
+      <div class="tv-body">
+        <div class="sidebar-wrap" id="sidebarWrap">
+          <aside class="sidebar" id="sidebar">
+            <button class="sidebar-btn" id="btnKeyboard" type="button" title="键盘输入" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"/></svg>
+            </button>
+            <button class="sidebar-btn" id="btnClipboard" type="button" title="剪贴板" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+            </button>
+            <button class="sidebar-btn" id="btnFullscreen" type="button" title="全屏">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+            </button>
+            <button class="sidebar-btn" id="btnSettings" type="button" title="设置" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+            </button>
+            <button class="sidebar-btn" id="btnDisconnect" type="button" title="断开连接" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2v10"/><path d="M5.5 5.5a7 7 0 1 0 9.9 0"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+            </button>
+          </aside>
+          <button class="sidebar-toggle" id="btnSidebarToggle" type="button" title="收起/展开工具栏" aria-label="收起/展开工具栏">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg>
+          </button>
+
+          <div class="panel" id="panelClipboard">
+            <h3>剪贴板</h3>
+            <textarea id="clipboardText" placeholder="输入或粘贴文本，发送到远程桌面…"></textarea>
+            <button class="btn btn-primary" id="btnClipboardSend" type="button">发送到远程</button>
+            <p class="panel-hint">远程复制的内容会自动同步到此处。</p>
+          </div>
+
+          <div class="panel" id="panelSettings">
+            <h3>显示设置</h3>
+            <label><input type="checkbox" id="optViewOnly"> 仅查看（禁止操作）</label>
+            <label><input type="checkbox" id="optScale" checked> 本地缩放</label>
+            <label><input type="checkbox" id="optResize" checked> 远程自适应</label>
+            <button class="btn" id="btnCtrlAltDel" type="button" style="margin-top:4px">发送 Ctrl+Alt+Del</button>
+          </div>
+        </div>
+
+        <div class="tv-screen-wrap">
+          <div id="screen"></div>
+          <div class="overlay" id="overlay">
+            <div class="spinner"></div>
+            <span id="overlayText">正在连接远程桌面…</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import RFB from './core/rfb.js';
+
+    const screenEl = document.getElementById('screen');
+    const overlay = document.getElementById('overlay');
+    const overlayText = document.getElementById('overlayText');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const btnReconnect = document.getElementById('btnReconnect');
+    const btnFullscreen = document.getElementById('btnFullscreen');
+    const btnKeyboard = document.getElementById('btnKeyboard');
+    const btnClipboard = document.getElementById('btnClipboard');
+    const btnSettings = document.getElementById('btnSettings');
+    const btnDisconnect = document.getElementById('btnDisconnect');
+    const btnSidebarToggle = document.getElementById('btnSidebarToggle');
+    const sidebarWrap = document.getElementById('sidebarWrap');
+    const panelClipboard = document.getElementById('panelClipboard');
+    const panelSettings = document.getElementById('panelSettings');
+    const clipboardText = document.getElementById('clipboardText');
+    const btnClipboardSend = document.getElementById('btnClipboardSend');
+    const optViewOnly = document.getElementById('optViewOnly');
+    const optScale = document.getElementById('optScale');
+    const optResize = document.getElementById('optResize');
+    const btnCtrlAltDel = document.getElementById('btnCtrlAltDel');
+    const tv = document.getElementById('tv');
+
+    let rfb = null;
+    let openPanel = null;
+
+    function getWsUrl() {
+      let pathname = window.location.pathname.replace(/\/index\.html$/i, '');
+      const prefix = pathname.replace(/\/$/, '');
+      let wsPath = prefix ? prefix + '/websockify' : 'websockify';
+      if (wsPath.charAt(0) === '/') wsPath = wsPath.slice(1);
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return protocol + '//' + window.location.host + '/' + wsPath;
+    }
+
+    function setStatus(state, text) {
+      statusDot.className = 'status-dot ' + state;
+      statusText.textContent = text;
+    }
+
+    function showOverlay(text) {
+      overlayText.textContent = text;
+      overlay.classList.remove('hidden');
+    }
+
+    function hideOverlay() {
+      overlay.classList.add('hidden');
+    }
+
+    function setConnected(connected) {
+      [btnKeyboard, btnClipboard, btnSettings, btnDisconnect, btnCtrlAltDel, btnClipboardSend]
+        .forEach((el) => { el.disabled = !connected; });
+    }
+
+    function closePanels() {
+      panelClipboard.classList.remove('open');
+      panelSettings.classList.remove('open');
+      btnClipboard.classList.remove('active');
+      btnSettings.classList.remove('active');
+      openPanel = null;
+    }
+
+    function togglePanel(name) {
+      const map = {
+        clipboard: { panel: panelClipboard, btn: btnClipboard },
+        settings: { panel: panelSettings, btn: btnSettings },
+      };
+      const target = map[name];
+      if (!target) return;
+      if (openPanel === name) {
+        closePanels();
+        return;
+      }
+      closePanels();
+      target.panel.classList.add('open');
+      target.btn.classList.add('active');
+      openPanel = name;
+    }
+
+    function applySettings() {
+      if (!rfb) return;
+      rfb.viewOnly = optViewOnly.checked;
+      rfb.scaleViewport = optScale.checked;
+      rfb.resizeSession = optResize.checked;
+    }
+
+    function connect() {
+      closePanels();
+      if (rfb) {
+        try { rfb.disconnect(); } catch (_) { /* ignore */ }
+        rfb = null;
+      }
+      screenEl.innerHTML = '';
+      btnReconnect.disabled = true;
+      setConnected(false);
+      setStatus('connecting', '连接中…');
+      showOverlay('正在连接远程桌面…');
+
+      try {
+        rfb = new RFB(screenEl, getWsUrl(), { shared: true });
+        applySettings();
+
+        rfb.addEventListener('connect', () => {
+          setStatus('connected', '已连接');
+          hideOverlay();
+          btnReconnect.disabled = false;
+          setConnected(true);
+          rfb.focus();
+        });
+
+        rfb.addEventListener('disconnect', (e) => {
+          const clean = e.detail && e.detail.clean;
+          setStatus('error', clean ? '已断开' : '连接中断');
+          showOverlay(clean ? '连接已断开' : '连接中断，请点击重新连接');
+          btnReconnect.disabled = false;
+          setConnected(false);
+        });
+
+        rfb.addEventListener('clipboard', (e) => {
+          if (e.detail && e.detail.text) {
+            clipboardText.value = e.detail.text;
+          }
+        });
+      } catch (err) {
+        setStatus('error', '连接失败');
+        showOverlay('连接失败：' + (err.message || err));
+        btnReconnect.disabled = false;
+        setConnected(false);
+      }
+    }
+
+    btnReconnect.addEventListener('click', connect);
+
+    btnKeyboard.addEventListener('click', () => {
+      if (rfb) rfb.focus();
+    });
+
+    btnClipboard.addEventListener('click', () => togglePanel('clipboard'));
+
+    btnSettings.addEventListener('click', () => togglePanel('settings'));
+
+    btnDisconnect.addEventListener('click', () => {
+      if (rfb) rfb.disconnect();
+    });
+
+    btnClipboardSend.addEventListener('click', () => {
+      if (rfb && clipboardText.value) {
+        rfb.clipboardPasteFrom(clipboardText.value);
+      }
+    });
+
+    btnCtrlAltDel.addEventListener('click', () => {
+      if (rfb) rfb.sendCtrlAltDel();
+    });
+
+    [optViewOnly, optScale, optResize].forEach((el) => {
+      el.addEventListener('change', applySettings);
+    });
+
+    btnFullscreen.addEventListener('click', () => {
+      const fn = tv.requestFullscreen || tv.webkitRequestFullscreen || tv.msRequestFullscreen;
+      if (fn) fn.call(tv);
+    });
+
+    btnSidebarToggle.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      sidebarWrap.classList.toggle('collapsed');
+      closePanels();
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!openPanel) return;
+      if (!sidebarWrap.contains(e.target)) closePanels();
+    });
+
+    connect();
+  </script>
+</body>
+</html>

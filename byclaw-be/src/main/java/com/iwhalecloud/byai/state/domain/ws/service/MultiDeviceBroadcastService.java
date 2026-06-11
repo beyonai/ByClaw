@@ -162,4 +162,14 @@ public class MultiDeviceBroadcastService {
         }
         return sentCount;
     }
+
+    /**
+     * 向指定用户的所有在线 WebSocket 通道推送消息，可按 session 限定。
+     */
+    public int broadcastRawToUser(Long userId, Long sessionId, JSONObject message) {
+        if (message != null && sessionId != null) {
+            message.put("sessionId", String.valueOf(sessionId));
+        }
+        return broadcastRawToUser(userId, message);
+    }
 }

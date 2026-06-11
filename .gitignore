@@ -11,7 +11,10 @@ Thumbs.db
 logs
 *.log
 tmp/
+.tmp/
 .cache/
+node-diagnostics/
+*.heapsnapshot
 
 # Node (byclaw-fe 等)
 node_modules/
@@ -42,10 +45,8 @@ byclaw-qa/client.py
 .env*
 .env.*
 !.env.example
+auth-profiles.json
 upload.sh
-deploy/config/nginx-standalone.conf
-deploy/config/ssl/
-.trivyignore
 
 # byclaw-data：本体 OWL 包（体积大/环境差异大，由部署或本地生成；仅保留 README 占位）
 byclaw-data/resource/import_package_owl_onto/**
@@ -70,9 +71,9 @@ byclaw-data/resource/import_package_owl_onto_bak/
 # Claude
 .claude/
 
+# Agent/local tool state
+.codegraph/
+.playwright-mcp/
+
 # Vscode
 .vscode/
-
-# Docker build artifacts
-**/build-info.json
-.trivyignore

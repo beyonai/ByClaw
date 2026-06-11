@@ -1,8 +1,7 @@
-import { definePluginEntry, type OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
-import { byclawSqliteConfigSchema, resolveByclawSqliteConfig } from "./src/config.js";
-import { registerSqlExecuteHttpRoute } from "./src/http.js";
-import { SqliteExecutor } from "./src/sqlite-executor.js";
-import { createSqlExecuteTool } from "./src/tool.js";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { byclawSqliteConfigSchema } from "./src/config.js";
+import { registerByclawSqlitePlugin } from "./src/register-plugin.js";
 
 export default definePluginEntry({
   id: "byclaw-sqlite",
@@ -12,24 +11,6 @@ export default definePluginEntry({
     jsonSchema: byclawSqliteConfigSchema as unknown as Record<string, unknown>,
   }),
   register(api: OpenClawPluginApi) {
-    const config = resolveByclawSqliteConfig(api.pluginConfig);
-    const executor = new SqliteExecutor({
-      config,
-      logger: api.logger,
-    });
-
-    api.registerTool(createSqlExecuteTool({ config, executor }), {
-      name: config.toolName,
-    });
-    registerSqlExecuteHttpRoute({ api, config, executor });
-    api.registerService({
-      id: "byclaw-sqlite-runtime",
-      start: async () => {
-        api.logger.info(`byclaw-sqlite: ready (${config.dbPath})`);
-      },
-      stop: async () => {
-        executor.close();
-      },
-    });
+    registerByclawSqlitePlugin(api);
   },
 });
