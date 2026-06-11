@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import sys
+import time
 import traceback
 import uuid
 from collections import OrderedDict
@@ -362,7 +363,9 @@ def _extract_tool_resource_codes(
     return object_codes, view_codes
 
 
-_SKILL_PLACEHOLDER_RE = re.compile(r"\{\{(query|compute|action):([^}]+)\}\}")
+_SKILL_PLACEHOLDER_RE = re.compile(
+    r"\{\{(query|compute|action|ontology|view|inference|knowledge):([^}]+)\}\}"
+)
 
 
 def _extract_skill_resource_ids(resource_list: list[Any]) -> list[str]:
@@ -398,6 +401,13 @@ def _replace_skill_placeholders(
     def replacer(m: re.Match) -> str:  # type: ignore[type-arg]
         kind = m.group(1)
         code = m.group(2)
+
+        # 本体语义类占位符预留，当前返回告警占位
+        if kind in ("ontology", "view", "inference", "knowledge"):
+            warnings.append(
+                f"⚠️ 本体占位符 {{{{{kind}:{code}}}}} 暂未挂载，由后续本体推理模块填充"
+            )
+            return m.group(0)
 
         if kind == "action":
             parts = code.split(":", 1)
@@ -480,6 +490,42 @@ def _load_skills(
     if all_warnings:
         task_prompt += "\n\n" + "\n".join(all_warnings)
     return task_prompt, first_skill_path
+
+
+# ── 路径B：自动 skill 发现（路径构建在此，扫描/解析委托 SDK）─────────────────────
+
+
+def _extract_rel_skills(agent_list: list[Any]) -> set[str]:
+    """从 agent_list 第一个 agent 的 relSkills 提取白名单。空集合=不过滤。"""
+    agent_cfg = agent_list[0] if agent_list and isinstance(agent_list, list) else {}
+    if not isinstance(agent_cfg, dict):
+        return set()
+    rel = agent_cfg.get("relSkills") or []
+    if isinstance(rel, str):
+        try:
+            rel = json.loads(rel)
+        except (ValueError, TypeError):
+            rel = []
+    return {str(s).strip() for s in rel if s}
+
+
+def _build_skill_dirs(user_code: str, agent_id: str) -> list[str]:
+    """构建 skill 目录列表（agent 级 + 个人级），供 OntologyAgent.ask(skill_dirs=) 使用。"""
+    minio_root = os.environ.get(
+        "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
+    )
+    agent_dir = os.environ.get("AGENT_SKILLS_DIR", "/app/skills")
+    personal_dir = str(
+        Path(minio_root)
+        / f"byclaw-{user_code}"
+        / "by"
+        / f"byclaw-{user_code}"
+        / "by"
+        / ".bydc"
+        / f"agent_{agent_id}"
+        / "skills"
+    )
+    return [agent_dir, personal_dir]
 
 
 def _normalize_recall(raw: Any) -> list[str]:
