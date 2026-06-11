@@ -187,6 +187,7 @@ export default {
   'personnelModel.subordinate': '下级',
 
   // FileBrowser
+  'fileBrowser.title': '文件管理',
   'fileBrowser.root': '根目录',
   'fileBrowser.empty': '暂无文件',
   'fileBrowser.error.loadFailed': '加载文件列表失败',
@@ -196,9 +197,11 @@ export default {
   'fileBrowser.column.actions': '操作',
   'fileBrowser.toolbar.upload': '上传',
   'fileBrowser.toolbar.newFolder': '新建文件夹',
+  'fileBrowser.toolbar.refresh': '刷新',
   'fileBrowser.toolbar.move': '移动',
   'fileBrowser.toolbar.delete': '删除',
   'fileBrowser.toolbar.back': '返回上一层',
+  'fileBrowser.toolbar.search': '搜索文件和文件夹',
   'fileBrowser.action.preview': '预览',
   'fileBrowser.action.download': '下载',
   'fileBrowser.action.rename': '重命名',
@@ -210,6 +213,9 @@ export default {
   'fileBrowser.upload.success': '上传成功',
   'fileBrowser.upload.failed': '上传失败',
   'fileBrowser.download.failed': '下载失败',
+  'fileBrowser.download.downloading': '正在下载...',
+  'fileBrowser.download.folderDownloading': '正在打包下载...',
+  'fileBrowser.download.useFullPage': '文件夹下载功能请在完整文件管理页面使用',
   'fileBrowser.delete.success': '删除成功',
   'fileBrowser.delete.failed': '删除失败',
   'fileBrowser.delete.confirm': '确定删除吗？',
@@ -226,8 +232,6 @@ export default {
   'fileBrowser.createFolder.prompt': '请输入文件夹名称',
   'fileBrowser.createFolder.success': '创建文件夹成功',
   'fileBrowser.createFolder.failed': '创建文件夹失败',
-  'fileBrowser.toolbar.search': '搜索文件和文件夹',
   'fileBrowser.search.result': '搜索 "{keyword}" 的结果：{count} 项',
   'fileBrowser.search.noResult': '未找到匹配的文件或文件夹',
-  'fileBrowser.download.folderDownloading': '正在打包下载...',
 };

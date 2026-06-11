@@ -188,6 +188,7 @@ export default {
   'personnelModel.subordinate': 'Subordinate',
 
   // FileBrowser
+  'fileBrowser.title': 'File Management',
   'fileBrowser.root': 'Root',
   'fileBrowser.empty': 'No files',
   'fileBrowser.error.loadFailed': 'Failed to load file list',
@@ -197,9 +198,11 @@ export default {
   'fileBrowser.column.actions': 'Actions',
   'fileBrowser.toolbar.upload': 'Upload',
   'fileBrowser.toolbar.newFolder': 'New Folder',
+  'fileBrowser.toolbar.refresh': 'Refresh',
   'fileBrowser.toolbar.move': 'Move',
   'fileBrowser.toolbar.delete': 'Delete',
   'fileBrowser.toolbar.back': 'Go back',
+  'fileBrowser.toolbar.search': 'Search files and folders',
   'fileBrowser.action.preview': 'Preview',
   'fileBrowser.action.download': 'Download',
   'fileBrowser.action.rename': 'Rename',
@@ -211,6 +214,9 @@ export default {
   'fileBrowser.upload.success': 'Upload successful',
   'fileBrowser.upload.failed': 'Upload failed',
   'fileBrowser.download.failed': 'Download failed',
+  'fileBrowser.download.downloading': 'Downloading...',
+  'fileBrowser.download.folderDownloading': 'Packaging for download...',
+  'fileBrowser.download.useFullPage': 'Please use the full file management page to download folders',
   'fileBrowser.delete.success': 'Deleted successfully',
   'fileBrowser.delete.failed': 'Delete failed',
   'fileBrowser.delete.confirm': 'Confirm deletion?',
@@ -227,8 +233,6 @@ export default {
   'fileBrowser.createFolder.prompt': 'Enter folder name',
   'fileBrowser.createFolder.success': 'Folder created successfully',
   'fileBrowser.createFolder.failed': 'Failed to create folder',
-  'fileBrowser.toolbar.search': 'Search files and folders',
   'fileBrowser.search.result': 'Results for "{keyword}": {count} items',
   'fileBrowser.search.noResult': 'No matching files or folders found',
-  'fileBrowser.download.folderDownloading': 'Packaging for download...',
 };

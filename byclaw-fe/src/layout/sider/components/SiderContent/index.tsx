@@ -10,6 +10,7 @@ const EmployeeList = lazy(() => import('@/layout/sider/components/EmployeeList')
 const Knowledge = lazy(() => import('@/layout/sider/components/Knowledge'));
 const ResourceSiderPanel = lazy(() => import('@/layout/sider/components/ResourceSiderPanel'));
 const SearchAndQuery = lazy(() => import('@/layout/sider/components/SearchAndQuery'));
+const FileSiderPanel = lazy(() => import('@/layout/sider/components/FileSiderPanel'));
 
 const ToolSiderPanel = () => <ResourceSiderPanel resourceType="TOOL" />;
 const ViewSiderPanel = () => <ResourceSiderPanel resourceType="VIEW" />;
@@ -86,6 +87,14 @@ export const tabItems: any[] = [
     ChildComponent: SkillSiderPanel,
     navigatePath: '/skillCenter',
     // hideSider: true,
+  },
+  {
+    key: 'file',
+    icon: 'icon-a-changjing-line',
+    activeIcon: 'icon-changjing-fill',
+    label: 'common.file',
+    ChildComponent: FileSiderPanel,
+    navigatePath: '/files',
   },
 ] as const;
 

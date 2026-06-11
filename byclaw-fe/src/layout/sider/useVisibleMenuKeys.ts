@@ -4,7 +4,7 @@ import { getDcSystemConfigListByStandType } from '@/service/auth';
 import { DEFAULT_MENU_CONFIG, getVisibleMenuKeysFromConfig } from '@/constants/system';
 
 const defaultVisibleKeys = getVisibleMenuKeysFromConfig(DEFAULT_MENU_CONFIG);
-const NEW_DEFAULT_VISIBLE_KEYS = ['skill'];
+const NEW_DEFAULT_VISIBLE_KEYS = ['skill', 'file'];
 
 const appendMissingNewDefaultKeys = (visibleKeys: string[], configData: any[] = []) => {
   const configuredKeySet = new Set(

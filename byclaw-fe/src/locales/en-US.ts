@@ -1053,6 +1053,7 @@ export default {
   'sider.knowledge': 'Knowledge',
   'sider.space': 'Space',
   'sider.knowledgeSource': 'Knowledge sources',
+  'sider.files': 'Files',
   'achievementSpace.section.allFiles': 'All Files',
   'achievementSpace.searchPlaceholder': 'Search by result name or source',
   'achievementSpace.action.enterDialogue': 'Enter Dialogue',

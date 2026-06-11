@@ -148,6 +148,11 @@ export default [
             component: './knowledgeCenter',
           },
           {
+            path: '/files',
+            name: 'files',
+            component: './files',
+          },
+          {
             path: '/objectCenter',
             name: 'objectCenter',
             component: './objectCenter',
