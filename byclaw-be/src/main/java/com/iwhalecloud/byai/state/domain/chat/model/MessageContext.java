@@ -277,7 +277,7 @@ public class MessageContext {
                 messageList.add(answerDelta);
                 String content = answerDelta.getChoices().get(0).getDelta().getContent();
                 if (content != null) {
-                    textList.add(new StringBuilder());
+                    textList.add(new StringBuilder(content));
                 }
             }
         }

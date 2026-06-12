@@ -35,14 +35,18 @@ type NativeAgentJson = {
     allowSpawnFrom?: string[];
 };
 
+export type AimodelProviderApi = "openai-completions" | "anthropic-messages";
+export type AimodelModelInput = "text" | "image";
+
 export type ProviderBundle = {
     baseUrl: string;
     apiKey: unknown;
-    api: "openai-completions";
+    api: AimodelProviderApi;
     modelId: string;
     modelName?: string;
     contextWindow?: number;
     maxTokens?: number;
+    input?: AimodelModelInput[];
 };
 
 export type AdaptedManagedAgent = {

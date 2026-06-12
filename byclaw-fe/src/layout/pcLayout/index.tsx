@@ -42,12 +42,24 @@ const pcUnShowLayoutRoute: Record<string, boolean> = {
   '/digitalEmployeesCreate': true,
 };
 
+const pcHideSiderContentRoute: Record<string, boolean> = {
+  '/settings': true,
+};
+
 function isPcUnShowLayoutRoute(pathname: string) {
   let path = pathname;
   if (pathname.endsWith('/')) {
     path = pathname.slice(0, -1);
   }
   return !!pcUnShowLayoutRoute[path || pathname];
+}
+
+function isPcHideSiderContentRoute(pathname: string) {
+  let path = pathname;
+  if (pathname.endsWith('/')) {
+    path = pathname.slice(0, -1);
+  }
+  return !!pcHideSiderContentRoute[path || pathname];
 }
 
 const PCSessionId = 'pcSessionId';
@@ -68,7 +80,7 @@ const PCLayout = () => {
     const currentTab = tabItems.find((item) => item.navigatePath === pathname);
 
     // 检查 tabItems 中的 hideSider 属性
-    if (currentTab?.hideSider) {
+    if (currentTab?.hideSider || isPcHideSiderContentRoute(pathname)) {
       setSiderContentWidth(0);
     }
     // 检查特定路由是否需要隐藏侧边栏

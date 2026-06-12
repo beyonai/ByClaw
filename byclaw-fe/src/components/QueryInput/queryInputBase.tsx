@@ -123,8 +123,13 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     EventEmitter.emit('pcLayout-contains-chatLayout', false);
   }
 
+  onSelectMentionPopoverItem: RichInputRef['insertItem'] = (item, type) => {
+    this.richInputRef.current?.insertItem(item, type);
+    this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }));
+  };
+
   setCommonStateBySchema = (schema: any) => {
-    const { queryQuestion, inputSchema, payload: { files } = {} } = schema;
+    const { queryQuestion, inputSchema, mentionItem, payload: { files } = {} } = schema;
 
     this.setState((prevState) => ({
       ...prevState,
@@ -150,6 +155,13 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
       setTimeout(() => {
         // 目的：等待因为agentId和agentType的改变，导致RichInput的组件的内容修改
         this.richInputRef.current?.setText(inputSchema);
+      });
+    }
+
+    if (mentionItem) {
+      setTimeout(() => {
+        // 目的：等待因为agentId和agentType的改变，导致RichInput的组件的内容修改
+        this.onSelectMentionPopoverItem(mentionItem?.item, mentionItem.type);
       });
     }
   };

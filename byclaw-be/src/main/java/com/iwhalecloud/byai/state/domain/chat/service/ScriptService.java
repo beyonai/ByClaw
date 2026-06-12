@@ -262,15 +262,15 @@ public class ScriptService extends AbstractChatProcess {
     }
 
     private String getTraceId(Long userMessageId, Long modelAnswerMessageId) {
-        return userMessageId.toString() + "_" + modelAnswerMessageId.toString();
+        return TraceIdCodec.encode(userMessageId, modelAnswerMessageId);
     }
 
     private Long getUserMessageIdByTraceId(String traceId) {
-        return Long.parseLong(traceId.split("_")[0]);
+        return TraceIdCodec.decode(traceId).getUserMessageId();
     }
 
     private Long getModelAnswerMessageIdByTraceId(String traceId) {
-        return Long.parseLong(traceId.split("_")[1]);
+        return TraceIdCodec.decode(traceId).getModelAnswerMessageId();
     }
 
     /**

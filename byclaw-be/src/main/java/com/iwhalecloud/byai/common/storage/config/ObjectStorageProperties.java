@@ -30,7 +30,7 @@ public class ObjectStorageProperties {
 
 
     /**
-     * 存储类型，支持MINIO|ALI_YUN_OSS|FTP|SFTP｜LOCAL｜WHALE_AGENT
+     * 存储类型，支持MINIO|ALI_YUN_OSS|FTP|SFTP｜LOCAL｜FILE｜WHALE_AGENT
      */
     private String storageType;
 
@@ -75,7 +75,7 @@ public class ObjectStorageProperties {
             case StorageType.MINIO -> this.getMinio().getBucket();
             case StorageType.ALI_YUN_OSS -> this.getAliyunOss().getBucket();
             case StorageType.FTP, StorageType.SFTP -> this.getFtpConfig().getPath();
-            case StorageType.LOCAL, StorageType.WHALE_AGENT -> "";
+            case StorageType.LOCAL, StorageType.FILE, StorageType.WHALE_AGENT -> "";
             default -> throw new ByAiArgumentException(
                 I18nUtil.get("storage.properties.unsupported.storage.type", this.storageType));
         };

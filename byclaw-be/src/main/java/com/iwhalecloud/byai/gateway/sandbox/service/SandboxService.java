@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -82,6 +83,9 @@ public class SandboxService {
     /** 沙箱状态：已释放 */
     private static final String STATUS_RELEASED = "RELEASED";
 
+    /** 沙箱状态：启动失败 */
+    private static final String STATUS_FAILED = "FAILED";
+
     /** 手动释放终止原因。 */
     private static final String RELEASE_REASON_MANUAL = "release.manual";
 
@@ -93,6 +97,17 @@ public class SandboxService {
 
     /** reconcile 发现远端不存在或不可复用时终止旧记录的原因。 */
     private static final String RELEASE_REASON_REMOTE_MISSING = "release.remote.missing";
+
+    /** 启动前发现模型环境变量缺失。 */
+    private static final String RELEASE_REASON_MODEL_ENV_MISSING = "launch.model-env.missing";
+
+    private static final List<String> REQUIRED_MODEL_ENV_KEYS = List.of(
+        "MODEL_BASE_URL",
+        "MODEL_ID",
+        "MODEL_NAME",
+        "MODEL_ALIAS",
+        "MODEL_API_KEY"
+    );
 
     /** 集成类型：沙箱 */
     private static final String INTEGRATION_TYPE_SANDBOX = "FROM_SANDBOX";
@@ -162,6 +177,8 @@ public class SandboxService {
 
     /** Redis key 前缀：用户首选沙箱 serviceKey */
     private static final String PREFERRED_SERVICE_KEY_PREFIX = "byai:sandbox:preferred-service-key:";
+
+    private static final String CRON_NEXT_RUN_REDIS_KEY = "sandbox:cron:nextRunTime";
 
     /** 沙箱空闲超时时间（分钟） */
     @Value("${sandbox.idle.timeout.minutes:30}")
@@ -578,6 +595,8 @@ public class SandboxService {
             throw new BdpRuntimeException(I18nUtil.get("sandbox.launch.busy"));
         }
 
+        validateRequiredModelEnvs(record, launchContext.getEnvs());
+
         request.setMetadata(buildLaunchMetadata(record));
 
         LOGGER.info("调用生命周期服务启动沙箱，记录：{}，envKeys：{}", sandboxRef(record),
@@ -635,6 +654,29 @@ public class SandboxService {
         LOGGER.info("沙箱启动成功，记录：{}，endpoint：{}，timeoutSeconds：{}，remoteExpiresAt：{}，nextRenewAt：{}",
             sandboxRef(record), endpoint, launchData.getTimeoutSeconds(), remoteExpiresAt, nextRenewAt);
         return launchData;
+    }
+
+    private void validateRequiredModelEnvs(SsSandboxRecord record, Map<String, String> envs) {
+        if (record != null && SandboxLaunchRouting.BYCLAW_CODE_AGENT_SANDBOX_TYPE.equals(record.getSandboxType())) {
+            return;
+        }
+        List<String> missingKeys = REQUIRED_MODEL_ENV_KEYS.stream()
+            .filter(key -> envs == null || StringUtils.isBlank(envs.get(key)))
+            .collect(Collectors.toList());
+        if (missingKeys.isEmpty()) {
+            return;
+        }
+
+        String message = I18nUtil.get("sandbox.launch.model.config.required");
+        LOGGER.error("沙箱启动模型环境变量缺失，记录：{}，missingKeys：{}", sandboxRef(record), missingKeys);
+        int failed = sandboxRecordMapper.updateStatusToFailed(record.getId(),
+            RELEASE_REASON_MODEL_ENV_MISSING, new Date(), record.getLockVersion());
+        if (failed > 0) {
+            incrementVersions(record, true);
+            record.setStatus(STATUS_FAILED);
+            record.setReleaseReason(RELEASE_REASON_MODEL_ENV_MISSING);
+        }
+        throw new BdpRuntimeException(message);
     }
 
     private Map<String, String> buildLaunchMetadata(SsSandboxRecord record) {
@@ -1230,6 +1272,71 @@ public class SandboxService {
     }
 
     /**
+     * Prelaunch sandboxes for users whose cron jobs are about to run.
+     *
+     * @return prelaunch job report
+     */
+    public SandboxLifecycleJobReport prelaunchDueCronSandboxes() {
+        SandboxLifecycleJobReport report = new SandboxLifecycleJobReport("cron-prelaunch");
+        Map<String, String> nextRunEntries = RedisUtil.hmGetEntries(CRON_NEXT_RUN_REDIS_KEY);
+        int total = nextRunEntries.size();
+        report.setTotalCandidates(total);
+        if (total <= 0) {
+            return report;
+        }
+
+        long nowMillis = System.currentTimeMillis();
+        long renewAheadMillis = TimeUnit.SECONDS.toMillis(Math.max(0L, renewAheadSeconds));
+        LOGGER.info("开始扫描定时任务沙箱预启动，候选数量：{}，当前时间：{}，renewAheadSeconds：{}",
+            total, new Date(nowMillis), renewAheadSeconds);
+
+        for (Map.Entry<String, String> entry : nextRunEntries.entrySet()) {
+            report.addScannedCount(1);
+            String userCode = StringUtils.trimToNull(entry.getKey());
+            String nextRunTimeValue = StringUtils.trimToNull(entry.getValue());
+            if (userCode == null) {
+                report.addSkippedSandbox("blank-user");
+                LOGGER.warn("定时任务沙箱预启动跳过：用户编码为空，nextRunTime：{}", nextRunTimeValue);
+                continue;
+            }
+            Long nextRunTimeMillis = parseCronNextRunTimeMillis(nextRunTimeValue);
+            if (nextRunTimeMillis == null) {
+                report.addSkippedSandbox(userCode);
+                LOGGER.debug("定时任务沙箱预启动跳过：nextRunTime 无效，用户编码：{}，nextRunTime：{}",
+                    userCode, nextRunTimeValue);
+                continue;
+            }
+            long remainingMillis = nextRunTimeMillis - nowMillis;
+            if (remainingMillis > renewAheadMillis) {
+                report.addSkippedSandbox(userCode);
+                LOGGER.debug("定时任务沙箱预启动未到窗口，用户编码：{}，nextRunTime：{}，remainingMillis：{}",
+                    userCode, new Date(nextRunTimeMillis), remainingMillis);
+                continue;
+            }
+
+            try {
+                LOGGER.info("定时任务沙箱预启动命中，用户编码：{}，nextRunTime：{}，remainingMillis：{}",
+                    userCode, new Date(nextRunTimeMillis), remainingMillis);
+                SandboxLaunchData launchData = sandboxUserContextRunner.callAsUser(userCode,
+                    () -> launchSandbox(userCode, null));
+                if (launchData == null || StringUtils.isBlank(launchData.getSandboxId())) {
+                    report.addFailedSandbox(userCode);
+                    LOGGER.warn("定时任务沙箱预启动失败：生命周期服务返回为空，用户编码：{}", userCode);
+                    continue;
+                }
+                report.addAffectedSandbox(userCode);
+                LOGGER.info("定时任务沙箱预启动成功，用户编码：{}，sandboxId：{}，endpoint：{}",
+                    userCode, launchData.getSandboxId(), launchData.getEndpoint());
+            }
+            catch (Exception e) {
+                report.addFailedSandbox(userCode);
+                LOGGER.error("定时任务沙箱预启动异常，用户编码：{}，nextRunTime：{}", userCode, nextRunTimeValue, e);
+            }
+        }
+        return report;
+    }
+
+    /**
      * Reconcile DB lifecycle state with the OpenSandbox runtime. If a non-released
      * record points to a missing sandbox id, close that stale record and start a
      * replacement through the normal launch path.
@@ -1744,6 +1851,34 @@ public class SandboxService {
         }
         long nextRenewMillis = remoteExpiresAt.getTime() - TimeUnit.SECONDS.toMillis(Math.max(0L, renewAheadSeconds));
         return new Date(Math.max(System.currentTimeMillis(), nextRenewMillis));
+    }
+
+    private Long parseCronNextRunTimeMillis(String value) {
+        String text = StringUtils.trimToNull(value);
+        if (text == null) {
+            return null;
+        }
+        try {
+            double numeric = Double.parseDouble(text);
+            if (Double.isFinite(numeric) && numeric > 0) {
+                return (long) numeric;
+            }
+        }
+        catch (NumberFormatException ignored) {
+            // Fall through to ISO date parsing.
+        }
+        try {
+            return Instant.parse(text).toEpochMilli();
+        }
+        catch (Exception ignored) {
+            // Fall through to offset date-time parsing.
+        }
+        try {
+            return OffsetDateTime.parse(text).toInstant().toEpochMilli();
+        }
+        catch (Exception ignored) {
+            return null;
+        }
     }
 
     private SsSandboxRecord refreshLastAccessTime(SsSandboxRecord record, Date now) {

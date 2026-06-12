@@ -5,13 +5,12 @@ import {
   formatPairingApproveHint,
   setAccountEnabledInConfigSection,
   type ChannelPlugin,
-} from "openclaw/plugin-sdk";
-import { EventType } from "@byclaw/by-framework";
+} from "openclaw/plugin-sdk/core";
 import { ByaiChannelConfigSchema } from "./config-schema.js";
 import { listByaiAccountIds, resolveByaiAccount, resolveDefaultByaiAccountId } from "./config.js";
 import type { ResolvedByaiAccount, ByaiProbe } from "./types.js";
 import { sendReplyCallback } from "./webhook-handler.js";
-import { ByaiSdkApp } from "./sdk-app.js";
+import type { ByaiSdkApp } from "./sdk-app.js";
 import {
   emitSdkChunkTracked,
   resolveActiveSdkRequestByTarget,
@@ -54,6 +53,7 @@ async function emitSdkText(params: {
       options: {},
     });
   }
+  const { EventType } = await import("@byclaw/by-framework");
   await sdkEmitter.emitState(
     request.sessionId,
     request.traceId || "",
@@ -314,7 +314,8 @@ export const byaiChannelPlugin: ChannelPlugin<ResolvedByaiAccount, ByaiProbe> = 
       log?.info?.(`[${account.accountId}] ${CHANNEL_ID} SDK mode enabled, starting...`);
 
       try {
-        sdkApp = new ByaiSdkApp({
+        const { ByaiSdkApp: SdkApp } = await import("./sdk-app.js");
+        sdkApp = new SdkApp({
           account,
           cfg,
           log,

@@ -105,6 +105,7 @@ export default {
   'resource.kgQa': 'Q&A',
   'resource.personalDefaultAssistant': 'Default',
   'resource.personalDefaultKnowledgeDoc': 'Default',
+  'resource.personalDefaultKnowledgeDeleteNotAllowed': 'Default personal knowledge base cannot be deleted',
   'resource.personalAssistant': 'Assistant',
   'resource.superAssistant': 'Super Assistant',
   'resource.currentDefaultAssistant': 'Default',
@@ -691,6 +692,10 @@ export default {
   'dialogueRecord.listTip':
     'Why not take the initiative to say hello and start a collaborative chat with virtual partners and real colleagues!',
 
+  'chat.bottomContent.suggestQuestion': 'Question',
+  'chat.bottomContent.suggestReplay': 'Replay',
+  'chat.bottomContent.suggestSkill': 'Skill',
+  'chat.recommendQuestion.noMore': 'No more',
   'chat.bottomContent.todo.desc': ' pending task, please handle it promptly',
   'chat.bottomContent.todoList.title': 'Todo List',
   'chat.bottomContent.todoList.initiator': 'Initiator',
@@ -770,6 +775,8 @@ export default {
   'messageForm.pleaseUpload': 'Please upload {files}',
 
   'messageList.deleteMessageConfirm': 'Are you sure to delete this message?',
+  'messageList.troubleshoot': 'Troubleshoot',
+  'messageList.troubleshootPrompt': 'The traceId of the current message is {traceId}. Please help me troubleshoot it.',
 
   'citeRender.title': 'Referenced Messages',
   'citeRender.deleteConfirm': 'Are you sure to delete this reference?',

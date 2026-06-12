@@ -1,5 +1,7 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/compat";
 
+export const BAIYING_AIMODEL_PROVIDER_API = "baiying-aimodel";
+
 export type AgentListEntry = NonNullable<NonNullable<OpenClawConfig["agents"]>["list"]>[number];
 
 export type BaiyingEnhancePluginConfig = {
@@ -76,6 +78,13 @@ export type BaiyingEnhancePluginConfig = {
     defaultApiKey?: string;
     /** Redis Hash key for Baiying AI model config. Default `byai:aimodel:config`. */
     aimodelConfigRedisKey?: string;
+    /** Redis Hash key for Baiying AI model type list. Default `byai:aimodel:typelist`; field `LLM` supplies the default model. */
+    aimodelTypeListRedisKey?: string;
+    /**
+     * @deprecated Ignored. Default LLM is checked on each main agent run (before_model_resolve)
+     * against `aimodel-default-llm-index.json`; flush runs only when Redis typelist changed.
+     */
+    aimodelDefaultPollIntervalMs?: number;
     /** Exec SecretRef provider name for runtime Redis authToken lookup. Default `baiying-aimodel-redis`. */
     aimodelSecretProviderName?: string;
     /**

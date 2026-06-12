@@ -3,14 +3,18 @@ package com.iwhalecloud.byai.gateway.sandbox.service;
 import java.time.OffsetDateTime;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.context.support.StaticMessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.iwhalecloud.byai.common.feign.response.SandboxResponse;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
@@ -20,7 +24,9 @@ import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationSe
 import com.iwhalecloud.byai.manager.entity.sandbox.SandboxReconcileGroup;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
+import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -34,9 +40,16 @@ import static org.mockito.Mockito.when;
 
 class SandboxServiceTest {
 
+    private boolean i18nPrepared;
+
     @AfterEach
     void tearDown() {
         CurrentUserHolder.clearLoginInfo();
+        LocaleContextHolder.resetLocaleContext();
+        if (i18nPrepared) {
+            ReflectionTestUtils.setField(I18nUtil.class, "messageSource", null);
+            i18nPrepared = false;
+        }
     }
 
     @Test
@@ -155,6 +168,64 @@ class SandboxServiceTest {
             "user001", "openclaw", "sandbox-1", "fresh-token");
 
         assertThat(result).isEqualTo("persisted-token");
+    }
+
+    @Test
+    void doLaunchSandbox_marksRecordFailedWhenRequiredModelEnvsMissing() {
+        prepareI18n();
+        SandboxLaunchContextFactory sandboxLaunchContextFactory = mock(SandboxLaunchContextFactory.class);
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxLifecycleFacade sandboxLifecycleFacade = mock(SandboxLifecycleFacade.class);
+        com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService systemConfigService =
+            mock(com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxLaunchContextFactory", sandboxLaunchContextFactory);
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", sandboxLifecycleFacade);
+        ReflectionTestUtils.setField(sandboxService, "byaiSystemConfigService", systemConfigService);
+
+        SandboxLaunchRouting routing = new SandboxLaunchRouting("openclaw",
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        Map<String, String> envs = Map.of(
+            "MODEL_BASE_URL", "https://model.example",
+            "MODEL_ID", "glm-5.1",
+            "MODEL_NAME", "glm-5.1",
+            "MODEL_ALIAS", "glm-5.1"
+        );
+        SandboxLaunchContext launchContext = new SandboxLaunchContext("openclaw", envs, Map.of(), "gateway-token");
+        when(sandboxLaunchContextFactory.buildContext("user001", 100L, "openclaw")).thenReturn(launchContext);
+        doAnswer(invocation -> {
+            SsSandboxRecord record = invocation.getArgument(0);
+            record.setId(99L);
+            return 1;
+        }).when(sandboxRecordMapper).insert(any(SsSandboxRecord.class));
+        when(sandboxRecordMapper.updateStatusToFailed(eq(99L), eq("launch.model-env.missing"),
+            any(Date.class), eq(0))).thenReturn(1);
+
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(sandboxService, "doLaunchSandbox",
+            "user001", 100L, routing))
+            .isInstanceOf(BdpRuntimeException.class)
+            .hasMessage("Sandbox startup failed because model parameters are incomplete.");
+
+        verify(sandboxRecordMapper).insert(any(SsSandboxRecord.class));
+        verify(sandboxRecordMapper).updateStatusToFailed(eq(99L), eq("launch.model-env.missing"),
+            any(Date.class), eq(0));
+        verify(sandboxLifecycleFacade, never()).launchSandbox(any());
+    }
+
+    @Test
+    void validateRequiredModelEnvs_skipsByclawCodeAgentSandbox() {
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(99L);
+        record.setSandboxType(SandboxLaunchRouting.BYCLAW_CODE_AGENT_SANDBOX_TYPE);
+
+        ReflectionTestUtils.invokeMethod(sandboxService, "validateRequiredModelEnvs", record, Map.of());
+
+        verify(sandboxRecordMapper, never()).updateStatusToFailed(any(), any(), any(), any());
     }
 
     @Test
@@ -420,6 +491,15 @@ class SandboxServiceTest {
         assertThat(CurrentUserHolder.getLoginInfo()).isNull();
         verify(loginApplicationService).getLoginInfo("user001");
         verify(sandboxService).launchSandbox("user001", SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+    }
+
+    private void prepareI18n() {
+        StaticMessageSource messageSource = new StaticMessageSource();
+        messageSource.addMessage("sandbox.launch.model.config.required", Locale.US,
+            "Sandbox startup failed because model parameters are incomplete.");
+        LocaleContextHolder.setLocale(Locale.US);
+        ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
+        i18nPrepared = true;
     }
 
 }
