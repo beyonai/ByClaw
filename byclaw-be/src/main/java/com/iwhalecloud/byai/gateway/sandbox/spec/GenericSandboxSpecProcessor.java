@@ -67,6 +67,7 @@ public class GenericSandboxSpecProcessor implements SandboxSpecProcessor {
                 .image(ImageSpec.builder().uri(spec.getImage()).build())
                 .timeout(spec.getTimeout())
                 .resourceLimits(spec.getResourceLimits())
+                .resourceRequests(spec.getResourceRequests())
                 .env(mergedEnv)
                 .metadata(Map.of("userCode", userCode, "serviceKey", serviceKey))
                 .entrypoint(spec.getStartup() != null ? spec.getStartup().getEntrypoint() : null)

@@ -36,6 +36,8 @@ import com.iwhaleai.byai.framework.common.Constants;
 import com.iwhaleai.byai.framework.common.RedisClient;
 import com.iwhaleai.byai.framework.core.WorkerRegistry;
 import com.iwhaleai.byai.framework.core.discovery.ServiceRegistry;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest;
 import com.iwhalecloud.byai.common.feign.response.SandboxResponse;
@@ -47,6 +49,8 @@ import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxLeasePolicy;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimePage;
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport;
 import com.iwhalecloud.byai.manager.entity.sandbox.SandboxReconcileGroup;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
@@ -70,6 +74,8 @@ public class SandboxService {
     private static final String GATEWAY_TOKEN_METADATA_KEY = "gateway_token";
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SandboxService.class);
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     /** 沙箱状态：运行中 */
     private static final String STATUS_RUNNING = "RUNNING";
@@ -124,6 +130,10 @@ public class SandboxService {
     @Lazy
     @Autowired
     private SandboxLifecycleFacade sandboxLifecycleFacade;
+
+    @Lazy
+    @Autowired
+    private SandboxServiceSpecRepository sandboxServiceSpecRepository;
 
     @Lazy
     @Autowired
@@ -555,6 +565,8 @@ public class SandboxService {
         request.setUserCode(userCode);
         // request.setChatId(String.valueOf(System.currentTimeMillis()));
         request.setSandboxType(launchContext.getSandboxType());
+        request.setProfileKey(routing.getProfileKey());
+        SandboxServiceSpec effectiveSpec = resolveEffectiveSpec(launchContext.getSandboxType(), routing.getProfileKey());
         SandboxLeasePolicy leasePolicy = resolveDefaultLeasePolicy();
         Integer autoRelease = leasePolicy == SandboxLeasePolicy.REMOTE_AUTO_EXPIRE
             ? AUTO_RELEASE_REMOTE : AUTO_RELEASE_MANUAL;
@@ -567,6 +579,10 @@ public class SandboxService {
         record.setResourceId(routing.getEffectiveResourceId());
         record.setUserCode(userCode);
         record.setSandboxType(launchContext.getSandboxType());
+        record.setServiceType(resolveRecordServiceType(effectiveSpec, launchContext.getSandboxType()));
+        record.setProfileKey(resolveRecordProfileKey(effectiveSpec, routing.getProfileKey()));
+        record.setResourceRequests(toJsonOrNull(effectiveSpec != null ? effectiveSpec.getResourceRequests() : null));
+        record.setResourceLimits(toJsonOrNull(effectiveSpec != null ? effectiveSpec.getResourceLimits() : null));
         record.setStatus(STATUS_STARTING);
         record.setGatewayToken(gatewayToken);
         record.setAutoRelease(autoRelease);
@@ -679,6 +695,43 @@ public class SandboxService {
         throw new BdpRuntimeException(message);
     }
 
+    private SandboxServiceSpec resolveEffectiveSpec(String sandboxType, String profileKey) {
+        try {
+            return sandboxServiceSpecRepository.findByServiceKeyAndProfile(sandboxType, profileKey).orElse(null);
+        }
+        catch (Exception e) {
+            LOGGER.warn("解析沙箱规格失败，sandboxType={}，profileKey={}，原因：{}", sandboxType, profileKey, e.getMessage());
+            return null;
+        }
+    }
+
+    private String resolveRecordServiceType(SandboxServiceSpec spec, String fallback) {
+        if (spec != null && StringUtils.isNotBlank(spec.getServiceType())) {
+            return spec.getServiceType();
+        }
+        return fallback;
+    }
+
+    private String resolveRecordProfileKey(SandboxServiceSpec spec, String fallback) {
+        if (spec != null && StringUtils.isNotBlank(spec.getProfileKey())) {
+            return spec.getProfileKey();
+        }
+        return fallback;
+    }
+
+    private String toJsonOrNull(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return OBJECT_MAPPER.writeValueAsString(value);
+        }
+        catch (JsonProcessingException e) {
+            LOGGER.warn("序列化沙箱资源配置失败：{}", e.getMessage());
+            return null;
+        }
+    }
+
     private Map<String, String> buildLaunchMetadata(SsSandboxRecord record) {
         Map<String, String> metadata = new LinkedHashMap<>();
         if (record == null) {
@@ -686,6 +739,8 @@ public class SandboxService {
         }
         putMetadata(metadata, "userCode", record.getUserCode());
         putMetadata(metadata, "serviceKey", record.getSandboxType());
+        putMetadata(metadata, "serviceType", StringUtils.defaultIfBlank(record.getServiceType(), record.getSandboxType()));
+        putMetadata(metadata, "profileKey", record.getProfileKey());
         putMetadata(metadata, "resourceId", formatMetadataResourceId(record.getResourceId()));
         putMetadata(metadata, "resourceKey", formatMetadataResourceKey(record.getSandboxType(), record.getResourceId()));
         putMetadata(metadata, "recordId", record.getId());
