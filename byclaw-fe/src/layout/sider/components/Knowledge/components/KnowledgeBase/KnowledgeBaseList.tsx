@@ -125,6 +125,17 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
     };
   }, [EventEmitter, loadKnowledgeBases]);
 
+  useEffect(() => {
+    const handleResourceInstalled = () => {
+      loadKnowledgeBases(true);
+    };
+
+    window.addEventListener('digitalEmployeeResourceInstalled', handleResourceInstalled);
+    return () => {
+      window.removeEventListener('digitalEmployeeResourceInstalled', handleResourceInstalled);
+    };
+  }, [loadKnowledgeBases]);
+
   const onKeywordChanged = debounce((keyword: string) => {
     searchValue.current = keyword;
     loadKnowledgeBases(true);

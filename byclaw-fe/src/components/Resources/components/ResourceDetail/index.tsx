@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Descriptions, Spin } from 'antd';
+import { Button, Modal, Descriptions, Spin } from 'antd';
+import { CloseOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import { queryResourceMembers } from '@/pages/manager/service/resources';
 // import ResourceMembers from '../ResourceMembers';
@@ -27,9 +28,17 @@ interface ResourceDetailProps {
   resourceName: string;
   onCancel: () => void;
   onEdit: () => void;
+  panel?: boolean;
 }
 
-const ResourceDetail: React.FC<ResourceDetailProps> = ({ visible, resourceId, resourceName, item, onCancel }) => {
+const ResourceDetail: React.FC<ResourceDetailProps> = ({
+  visible,
+  resourceId,
+  resourceName,
+  item,
+  onCancel,
+  panel = false,
+}) => {
   const intl = useIntl();
   const [loading, setLoading] = useState(false);
   const [objectLoading, setObjectLoading] = useState(false);
@@ -146,15 +155,9 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({ visible, resourceId, re
     }
   };
 
-  return (
-    <Modal
-      title={`${resourceName}${intl.formatMessage({ id: 'common.detail' })}`}
-      open={visible}
-      onCancel={onCancel}
-      width={1000}
-      destroyOnHidden
-      footer={null}
-    >
+  const title = `${resourceName}${intl.formatMessage({ id: 'common.detail' })}`;
+  const detailContent = (
+    <>
       {loading ? (
         <div className={styles.loadingContainer}>
           <Spin />
@@ -190,6 +193,28 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({ visible, resourceId, re
           </Descriptions>
         </>
       )}
+    </>
+  );
+
+  if (panel) {
+    if (!visible) {
+      return null;
+    }
+
+    return (
+      <div className={styles.detailPanel}>
+        <div className={styles.panelHeader}>
+          <span className={styles.panelTitle}>{title}</span>
+          <Button type="text" size="small" icon={<CloseOutlined />} onClick={onCancel} />
+        </div>
+        <div className={styles.panelBody}>{detailContent}</div>
+      </div>
+    );
+  }
+
+  return (
+    <Modal title={title} open={visible} onCancel={onCancel} width={1000} destroyOnHidden footer={null}>
+      {detailContent}
     </Modal>
   );
 };

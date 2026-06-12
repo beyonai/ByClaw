@@ -74,8 +74,12 @@ const PCLayout = () => {
 
   // 检查当前路由是否需要隐藏侧边栏
   const [siderContentWidth, setSiderContentWidth] = React.useState(DEFAULT_SIDER_CONTENT_WIDTH);
+  const [detailPanel, setDetailPanel] = React.useState<React.ReactNode>(null);
+  const openDetailPanel = React.useCallback((panel: React.ReactNode) => setDetailPanel(panel), []);
+  const clearDetailPanel = React.useCallback(() => setDetailPanel(null), []);
 
   React.useEffect(() => {
+    clearDetailPanel();
     // 参考 sider 组件的逻辑，检查当前路径是否需要隐藏侧边栏
     const currentTab = tabItems.find((item) => item.navigatePath === pathname);
 
@@ -89,7 +93,7 @@ const PCLayout = () => {
     } else {
       setSiderContentWidth(DEFAULT_SIDER_CONTENT_WIDTH);
     }
-  }, [pathname]);
+  }, [clearDetailPanel, pathname]);
 
   const { setLoginModalOpen } = useAppStore();
 
@@ -257,20 +261,28 @@ const PCLayout = () => {
                   }}
                   ref={layoutRef}
                 >
-                  <SiderContentContext.Provider value={{ siderContentWidth, setSiderContentWidth }}>
-                    <Sider />
-                  </SiderContentContext.Provider>
-                  <MinorDrawer />
-                  <Content
-                    id={pcLayoutContentId}
-                    className={classNames(styles.content, {
-                      [styles.opening]: !isClose,
-                      [styles.closing]: isClose,
-                    })}
-                    style={{ marginLeft: userInfo ? 'var(--layout-gap)' : 0 }}
+                  <SiderContentContext.Provider
+                    value={{
+                      siderContentWidth,
+                      setSiderContentWidth,
+                      setDetailPanel: openDetailPanel,
+                      clearDetailPanel,
+                    }}
                   >
-                    <Outlet />
-                  </Content>
+                    <Sider />
+                    <MinorDrawer />
+                    <Content
+                      id={pcLayoutContentId}
+                      className={classNames(styles.content, {
+                        [styles.opening]: !isClose,
+                        [styles.closing]: isClose,
+                      })}
+                      style={{ marginLeft: userInfo ? 'var(--layout-gap)' : 0 }}
+                    >
+                      <Outlet />
+                    </Content>
+                    {detailPanel && <aside className={styles.detailPanel}>{detailPanel}</aside>}
+                  </SiderContentContext.Provider>
                   <MainDrawer />
                 </Layout>
                 <AbsoluteDrawer getContainer={() => layoutRef.current || window.document.body} />

@@ -2,6 +2,17 @@ jest.mock('@umijs/max', () => ({
   useIntl: () => ({
     formatMessage: ({ id }: { id: string }) => id,
   }),
+  useSelector: (selector: any) =>
+    selector({
+      user: {
+        userInfo: {
+          defaultDigEmployeeId: 'default-agent-1',
+        },
+      },
+      employees: {
+        defaultDigEmployeeId: 'default-agent-1',
+      },
+    }),
 }));
 
 jest.mock('antd', () => {

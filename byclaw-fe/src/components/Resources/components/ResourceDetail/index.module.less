@@ -1,3 +1,36 @@
+.detailPanel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.panelHeader {
+  height: 48px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(~'--@{antPrefix}-color-border-secondary');
+}
+
+.panelTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.panelBody {
+  flex: 1;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+}
+
 .loadingContainer {
   text-align: center;
   padding: 40px 0;

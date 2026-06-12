@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { SearchOutlined } from '@ant-design/icons';
 import { Dropdown, Empty, Input, List, Typography } from 'antd';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
@@ -9,11 +9,12 @@ import ResourceDetail from '@/components/Resources/components/ResourceDetail';
 import InfiniteScrollAntdList from '@/layout/sider/components/InfiniteScrollAntdList';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import { queryDigEmployeeRelResourceAuth } from '@/pages/manager/service/resources';
-import { useSkillDetailDrawer } from '@/pages/manager/components/SkillDetailDrawer/useSkillDetailDrawer';
+import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import { ResourceTypeMap } from '@/constants/resource';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import useGlobal from '@/hooks/useGlobal';
 import ActiveSiderAgentBar, { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import styles from './index.module.less';
 
 const { Title, Paragraph } = Typography;
@@ -93,7 +94,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   const { userInfo } = useSelector(({ user }: any) => ({
     userInfo: user.userInfo,
   }));
-  const { placeholder: skillDetailDrawerHolder, show: showSkillDetailDrawer } = useSkillDetailDrawer();
+  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
   const listFetchRef = useRef(false);
   const keywordRef = useRef('');
   const paginationRef = useRef({
@@ -105,9 +106,6 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   const [loading, setLoading] = useState(false);
   const [resourceList, setResourceList] = useState<ResourceItem[]>([]);
   const [hasMore, setHasMore] = useState(false);
-  const [resourceDetailOpen, setResourceDetailOpen] = useState(false);
-  const [currentItem, setCurrentItem] = useState<ResourceItem | null>(null);
-
   const config = resourceConfigMap[resourceType];
   const activeSiderAgent = useActiveSiderAgent();
   const isResourceCenterPage = pathname.startsWith(config.navigatePath);
@@ -213,6 +211,22 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     };
   }, [EventEmitter, loadResources]);
 
+  useEffect(() => {
+    const handleResourceInstalled = () => {
+      paginationRef.current = {
+        pageNum: 0,
+        total: 0,
+        loadedCount: 0,
+      };
+      loadResources({ reset: true, queryKeyword: keywordRef.current });
+    };
+
+    window.addEventListener('digitalEmployeeResourceInstalled', handleResourceInstalled);
+    return () => {
+      window.removeEventListener('digitalEmployeeResourceInstalled', handleResourceInstalled);
+    };
+  }, [loadResources]);
+
   const handleSearch = () => {
     const nextKeyword = trim(searchValue);
     keywordRef.current = nextKeyword;
@@ -239,6 +253,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
 
   const handleDetail = (item: ResourceItem) => {
     const { resourceBizType, resourceId } = item;
+    const closeDetailPanel = () => clearDetailPanel?.();
 
     if (
       resourceBizType &&
@@ -259,16 +274,31 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
       };
 
       if (resourceId) {
-        showSkillDetailDrawer({
-          id: resourceId,
-          title: titleMap[resourceBizType] || intl.formatMessage({ id: 'common.detail' }),
-        });
+        setDetailPanel?.(
+          <SkillDetailDrawer
+            resourceId={resourceId}
+            title={titleMap[resourceBizType] || intl.formatMessage({ id: 'common.detail' })}
+            open
+            panel
+            onClose={closeDetailPanel}
+          />
+        );
       }
       return;
     }
 
-    setCurrentItem(item);
-    setResourceDetailOpen(true);
+    setDetailPanel?.(
+      <ResourceDetail
+        visible
+        panel
+        resourceId={item.resourceId}
+        item={item}
+        resourceType={resourceType}
+        resourceName={getResourceName()}
+        onCancel={closeDetailPanel}
+        onEdit={() => {}}
+      />
+    );
   };
 
   const getQuoteType = (): IDragType => {
@@ -387,21 +417,6 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
           )}
         />
       </div>
-      {resourceDetailOpen && (
-        <ResourceDetail
-          visible={resourceDetailOpen}
-          resourceId={currentItem?.resourceId}
-          item={currentItem}
-          resourceType={resourceType}
-          resourceName={getResourceName()}
-          onCancel={() => {
-            setResourceDetailOpen(false);
-            setCurrentItem(null);
-          }}
-          onEdit={() => {}}
-        />
-      )}
-      {skillDetailDrawerHolder}
     </div>
   );
 };

@@ -29,7 +29,7 @@ const FileSiderPanel: React.FC = () => {
           )
         }
       >
-        <AntdIcon type="icon-a-Data-fileshujuwenjian" />
+        <AntdIcon type="icon-a-Folder-openwenjianjia-kai" />
         <span className={styles.middle}>{intl.formatMessage({ id: 'fileBrowserEntry.tab.files' })}</span>
         <AntdIcon
           type={isFilesPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}

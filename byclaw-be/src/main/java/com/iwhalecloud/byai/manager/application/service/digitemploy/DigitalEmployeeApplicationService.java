@@ -51,6 +51,7 @@ import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeePageVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeInstallResourceDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeIdDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.RelResourceInfo;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SetDefaultDigitalEmployeeDTO;
@@ -96,6 +97,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -712,6 +714,43 @@ public class DigitalEmployeeApplicationService {
             resourceId);
 
         return ssResource;
+    }
+
+    /**
+     * 增量安装知识或资源到数字员工，保留已有关联关系。
+     *
+     * @param installResourceDTO 安装入参
+     * @return 数字员工详情
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public DigitalEmployeeDetailsDTO installDigitalEmployeeRelResources(
+        DigitalEmployeeInstallResourceDTO installResourceDTO) {
+        Long digitalEmployeeId = installResourceDTO == null ? null : installResourceDTO.getDigitalEmployeeId();
+        List<Long> installRelIds = installResourceDTO == null ? null : installResourceDTO.getRelIds();
+        if (digitalEmployeeId == null || CollectionUtils.isEmpty(installRelIds)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.processor.param.notnull"));
+        }
+
+        SsResource ssResource = ssResourceService.findById(digitalEmployeeId);
+        validateDigitalEmployeeUpdatePermission(ssResource);
+
+        List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(digitalEmployeeId);
+        LinkedHashSet<Long> mergedRelIds = new LinkedHashSet<>();
+        if (CollectionUtils.isNotEmpty(resourceRelDetails)) {
+            mergedRelIds.addAll(
+                resourceRelDetails.stream().map(SsResourceRelDetail::getRelResourceId).collect(Collectors.toList()));
+        }
+        mergedRelIds.addAll(installRelIds);
+
+        this.compareSsResourceRelDetail(ssResource, new ArrayList<>(mergedRelIds), resourceRelDetails, null);
+        this.syncDigEmployeeSkillsToRedisQuietly(digitalEmployeeId);
+        this.synOpenClawWorkSpace(digitalEmployeeId);
+        operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
+
+        EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
+        employeeIdDTO.setResourceId(digitalEmployeeId);
+        return this.findDetailsById(employeeIdDTO);
     }
 
     /**

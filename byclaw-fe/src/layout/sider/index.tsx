@@ -51,6 +51,7 @@ const Sidebar = () => {
 
   const { isSiderCollapsed, setSiderCollapsed } = useAppStore();
   const { EventEmitter } = useGlobal();
+  const { clearDetailPanel } = React.useContext(SiderContentContext);
 
   const { userInfo } = useSelector(({ user }: any) => ({
     userInfo: user.userInfo,
@@ -145,6 +146,7 @@ const Sidebar = () => {
 
   React.useEffect(() => {
     setSiderContentWidth(shouldHideSiderContent ? 0 : DEFAULT_SIDER_CONTENT_WIDTH);
+    clearDetailPanel?.();
   }, [activeKey, shouldHideSiderContent]);
 
   React.useEffect(() => {
@@ -175,6 +177,7 @@ const Sidebar = () => {
     if (pathnameChanged) {
       pathnameRef.current = pathname;
       setManualSiderOpenKey(undefined);
+      clearDetailPanel?.();
     }
 
     setSiderContentWidth(nextShouldHideSiderContent ? 0 : DEFAULT_SIDER_CONTENT_WIDTH);
@@ -242,22 +245,20 @@ const Sidebar = () => {
           <div className={styles.userName}>{getDisplayUserNameInChat(userInfo.userName)}</div>
         </Dropdown>
       </div>
-      <SiderContentContext.Provider value={{ siderContentWidth, setSiderContentWidth }}>
-        <div
-          style={
-            {
-              '--sider-content-width': `${siderContentWidth}px`,
-            } as React.CSSProperties
-          }
-          className={classnames(styles.siderWrap, isSiderCollapsed && styles.collapsed)}
-        >
-          {siderContentWidth > 0 && (
-            <aside className={styles.sider}>
-              <SiderContent activeKey={activeKey} />
-            </aside>
-          )}
-        </div>
-      </SiderContentContext.Provider>
+      <div
+        style={
+          {
+            '--sider-content-width': `${siderContentWidth}px`,
+          } as React.CSSProperties
+        }
+        className={classnames(styles.siderWrap, isSiderCollapsed && styles.collapsed)}
+      >
+        {siderContentWidth > 0 && (
+          <aside className={styles.sider}>
+            <SiderContent activeKey={activeKey} />
+          </aside>
+        )}
+      </div>
       {!shouldHideSiderContent && (
         <div className={styles.collapseLine}>
           <div
