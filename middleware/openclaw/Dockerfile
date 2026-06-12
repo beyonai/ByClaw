@@ -72,7 +72,7 @@ FROM ghcr.io/openclaw/openclaw:2026.6.1
 USER root
 
 ARG OPENCLI_VERSION=1.8.0
-ARG OPENCLI_EXTENSION_VERSION=1.0.17
+ARG OPENCLI_EXTENSION_VERSION=1.0.15
 ARG INSTALL_BROWSER_STACK=true
 
 RUN chown root:root /app
@@ -116,7 +116,7 @@ RUN set -eux; \
         zip"; \
     case "${INSTALL_BROWSER_STACK}" in \
       true|1|yes|on) apt-get install -y --no-install-recommends ${base_packages} ${browser_packages} ;; \
-      *) apt-get install -y --no-install-recommends ${base_packages}; echo "skip browser/VNC/display/opencli stack" ;; \
+      *) apt-get install -y --no-install-recommends ${base_packages}; echo "skip browser/VNC/display/bycli stack" ;; \
     esac; \
     case "${INSTALL_BROWSER_STACK}" in \
       true|1|yes|on) \
@@ -157,7 +157,7 @@ RUN set -eux; \
         rm -f /tmp/opencli-extension.zip; \
         chromium --version; \
         x11vnc -version; \
-        opencli --version; \
+        bycli --version; \
         test -f /opt/opencli/extension/manifest.json; \
         ;; \
     esac; \
