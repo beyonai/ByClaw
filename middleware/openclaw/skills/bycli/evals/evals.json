@@ -1,0 +1,77 @@
+{
+  "skill_name": "bycli",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "bycli 有什么命令可以用？",
+      "expected_output": "运行 bycli list -f json 返回所有可用命令，按站点分组展示给用户",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "帮我用 bycli 抓取知乎热榜",
+      "expected_output": "运行 bycli zhihu hot -f json 获取热榜数据并展示给用户",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "bycli zhihu hot 命令报错了，说找不到 .HotList-item 这个元素",
+      "expected_output": "进入 AutoFix 流程：1) 用 --trace retain-on-failure 重跑收集 trace 2) 读 summary.md 分析 3) 用 bycli browser 探索当前 DOM 4) 修补 adapterSourcePath 指向的文件 5) 验证修复",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "帮我给 douban 写一个 adapter，我想抓取豆瓣电影 top250",
+      "expected_output": "进入 Adapter 编写流程：1) bycli doctor 2) 侦察站点 3) API 发现 4) 字段解码 5) 设计 columns 6) bycli browser init douban/top250 7) 编写 adapter 8) bycli browser verify",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "帮我打开 https://example.com 并提取页面上的表格数据",
+      "expected_output": "进入 Browser 驱动流程：1) openclaw browser start + bycli doctor 2) bycli browser <session> open url 3) bycli browser <session> state 4) 用 network 或 extract 获取数据 5) cleanup",
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "bycli xiaohongshu search 搜索结果返回空，是 adapter 坏了吗？",
+      "expected_output": "先排除非 adapter 问题：1) 换关键词重试 2) 普通 Chrome 检查 3) 注意软 404。仅在多次重试不同入口点都复现时才进入修复流程",
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "bycli 命令报 AUTH_REQUIRED 错误",
+      "expected_output": "硬停止，不修改代码。提示用户在 Chrome 中登录目标站点，然后确认 byCLI 扩展已安装",
+      "files": []
+    },
+    {
+      "id": 8,
+      "prompt": "帮我用浏览器登录 Gmail 然后查看最新邮件",
+      "expected_output": "Browser 驱动流程：open Gmail login page → fill form → submit → wait → state。如果停在登录页（MFA等），保持 session 不关闭，报告给用户",
+      "files": []
+    },
+    {
+      "id": 9,
+      "prompt": "把刚才抓到的文章存到知识库里",
+      "expected_output": "进入 Markdown 入库流程：1) list-kb 查询可用知识库 2) 让用户选择目标知识库 3) normalize dry-run 展示摘要 4) 用户确认后执行 ingest",
+      "files": []
+    },
+    {
+      "id": 10,
+      "prompt": "帮我把这个网页内容入库到个人知识库",
+      "expected_output": "进入 Markdown 入库流程：1) 用 bycli web read 获取 Markdown 2) list-kb 查询知识库 3) 用户选择后 normalize 4) 展示摘要确认 5) ingest 执行入库",
+      "files": []
+    },
+    {
+      "id": 11,
+      "prompt": "帮我读一下这个网页的内容",
+      "expected_output": "不触发入库流程。使用 bycli web read 或 browser extract 获取内容并展示给用户。用户未表达入库意图，不主动建议入库",
+      "files": []
+    },
+    {
+      "id": 12,
+      "prompt": "入库报 401 错误怎么办",
+      "expected_output": "停止入库操作，提示用户当前门户登录态不可用，需要恢复门户会话。不要求用户在对话中粘贴 token",
+      "files": []
+    }
+  ]
+}
