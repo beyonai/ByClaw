@@ -47,3 +47,15 @@ export async function getPreferredServiceKey(userCode: string) {
 export async function removePreferredServiceKey(params: { userCode: string }) {
   return POST('/byaiService/sandbox/removePreferredServiceKey', { ...params }, withCustomHandle);
 }
+
+export async function resizeSandbox(params: any) {
+  return POST('/byaiService/sandbox/resize', { ...params }, withCustomHandle);
+}
+
+export async function listResizeRecords(params: any) {
+  return POST('/byaiService/sandbox/listResizeRecords', { ...params }, withCustomHandle);
+}
+
+export async function listServiceProfiles(params: { serviceType?: string; enabledOnly?: boolean }) {
+  return POST('/byaiService/sandbox/listServiceProfiles', { ...params }, withCustomHandle);
+}

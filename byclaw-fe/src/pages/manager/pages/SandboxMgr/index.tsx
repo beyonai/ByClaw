@@ -9,6 +9,7 @@ import {
   EditOutlined,
   RocketOutlined,
   ClearOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { trim } from 'lodash';
 import {
@@ -28,6 +29,7 @@ import {
   Drawer,
   Form,
   Modal,
+  Tabs,
 } from 'antd';
 import { useIntl, useDispatch, useSelector } from '@umijs/max';
 import ModalDrawer from '@/pages/manager/components/ModalDrawer';
@@ -38,6 +40,7 @@ import styles from './index.module.less';
 
 const { Option } = Select;
 const RELEASABLE_STATUSES = ['STARTING', 'RUNNING'];
+const DEFAULT_SERVICE_TYPE = 'openclaw';
 
 const formatTimestamp = (value?: string | number | null) => {
   if (!value) return '-';
@@ -61,6 +64,24 @@ const renderEllipsisText = (value?: string | number | null) => {
   );
 };
 
+const compactJson = (value?: string | null) => {
+  if (!value) return '-';
+  try {
+    return JSON.stringify(JSON.parse(value));
+  } catch {
+    return value;
+  }
+};
+
+const resizeStatusColorMap: Record<string, string> = {
+  REQUESTED: 'processing',
+  RUNNING: 'processing',
+  SUCCESS: 'success',
+  FAILED: 'error',
+  DEFERRED: 'warning',
+  SKIPPED: 'default',
+};
+
 interface SsSandboxRecord {
   id: number;
   resourceId: number;
@@ -82,12 +103,61 @@ interface SsSandboxRecord {
   version?: number;
   createTime?: string | number;
   updateTime?: string | number;
+  serviceType?: string;
+  profileKey?: string;
+  resourceRequests?: string;
+  resourceLimits?: string;
+  resizeStatus?: string;
+  lastResizeAt?: string | number;
+  lastResizeReason?: string;
+  lastResizeDurationMs?: number;
+  lastResizeSuccess?: number;
+  lastResizeFromProfile?: string;
+  lastResizeToProfile?: string;
+  lastResizeError?: string;
 }
 
 interface ServiceSpecItem {
   serviceKey: string;
   specJson: string;
   templateJson?: string;
+}
+
+interface ServiceProfileItem {
+  id?: number;
+  serviceType: string;
+  profileKey: string;
+  resourceRequests?: string;
+  resourceLimits?: string;
+  resizeEnabled?: number;
+  resizeStrategy?: string;
+  enabled?: number;
+  sortOrder?: number;
+}
+
+interface SandboxResizeRecord {
+  id: number;
+  sandboxRecordId: number;
+  sandboxId?: string;
+  userCode?: string;
+  serviceType?: string;
+  fromProfileKey?: string;
+  toProfileKey?: string;
+  fromResourceRequests?: string;
+  fromResourceLimits?: string;
+  toResourceRequests?: string;
+  toResourceLimits?: string;
+  triggerSource?: string;
+  reasonCode?: string;
+  reasonDetail?: string;
+  resizeType?: string;
+  status?: string;
+  success?: number;
+  startedAt?: string | number;
+  finishedAt?: string | number;
+  durationMs?: number;
+  opensandboxRequestId?: string;
+  errorMessage?: string;
 }
 
 const SandboxMgr = () => {
@@ -112,6 +182,18 @@ const SandboxMgr = () => {
   const [editingSpec, setEditingSpec] = useState<ServiceSpecItem | null>(null);
   const [specForm] = Form.useForm();
   const [savingSpec, setSavingSpec] = useState(false);
+
+  // 沙箱弹性计算配置相关状态
+  const [specDrawerTab, setSpecDrawerTab] = useState('spec');
+  const [profileList, setProfileList] = useState<ServiceProfileItem[]>([]);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [resizeForm] = Form.useForm();
+  const [resizeSandboxList, setResizeSandboxList] = useState<SsSandboxRecord[]>([]);
+  const [resizeSandboxLoading, setResizeSandboxLoading] = useState(false);
+  const [selectedResizeRecord, setSelectedResizeRecord] = useState<SsSandboxRecord | null>(null);
+  const [resizeRecords, setResizeRecords] = useState<SandboxResizeRecord[]>([]);
+  const [resizeRecordsLoading, setResizeRecordsLoading] = useState(false);
+  const [resizing, setResizing] = useState(false);
 
   // 指定用户沙箱相关状态
   const [launchModalOpen, setLaunchModalOpen] = useState(false);
@@ -304,17 +386,63 @@ const SandboxMgr = () => {
     });
   }, [dispatch]);
 
+  const loadProfileList = useCallback(
+    (serviceType = DEFAULT_SERVICE_TYPE) => {
+      setProfileLoading(true);
+      dispatch({
+        type: 'sandboxMgr/listServiceProfiles',
+        payload: { serviceType, enabledOnly: true },
+        success: (data: ServiceProfileItem[]) => {
+          setProfileList(data || []);
+          setProfileLoading(false);
+        },
+        fail: () => {
+          setProfileLoading(false);
+        },
+      });
+    },
+    [dispatch]
+  );
+
+  const loadResizeRecords = useCallback(
+    (params: { sandboxRecordId?: number; userCode?: string; sandboxId?: string }) => {
+      if (!params.sandboxRecordId && !params.userCode && !params.sandboxId) {
+        setResizeRecords([]);
+        return;
+      }
+      setResizeRecordsLoading(true);
+      dispatch({
+        type: 'sandboxMgr/listResizeRecords',
+        payload: { ...params, limit: 50 },
+        success: (data: SandboxResizeRecord[]) => {
+          setResizeRecords(data || []);
+          setResizeRecordsLoading(false);
+        },
+        fail: () => {
+          setResizeRecordsLoading(false);
+        },
+      });
+    },
+    [dispatch]
+  );
+
   const handleOpenSpecDrawer = useCallback(() => {
     setSpecDrawerOpen(true);
     loadSpecList();
-  }, [loadSpecList]);
+    loadProfileList();
+  }, [loadProfileList, loadSpecList]);
 
   const handleCloseSpecDrawer = useCallback(() => {
     setSpecDrawerOpen(false);
     setSpecFormVisible(false);
     setEditingSpec(null);
     specForm.resetFields();
-  }, [specForm]);
+    setSpecDrawerTab('spec');
+    resizeForm.resetFields();
+    setResizeSandboxList([]);
+    setSelectedResizeRecord(null);
+    setResizeRecords([]);
+  }, [resizeForm, specForm]);
 
   const handleAddSpec = useCallback(() => {
     setEditingSpec(null);
@@ -376,6 +504,116 @@ const SandboxMgr = () => {
     setEditingSpec(null);
     specForm.resetFields();
   }, [specForm]);
+
+  // ==================== 沙箱弹性计算配置相关方法 ====================
+
+  const handleSelectResizeSandbox = useCallback(
+    (recordId?: number) => {
+      const record = resizeSandboxList.find((item) => item.id === recordId) || null;
+      setSelectedResizeRecord(record);
+      if (!record) {
+        setResizeRecords([]);
+        return;
+      }
+      resizeForm.setFieldsValue({
+        sandboxRecordId: record.id,
+        userCode: record.userCode,
+        serviceType: record.serviceType || record.sandboxType || DEFAULT_SERVICE_TYPE,
+      });
+      loadResizeRecords({ sandboxRecordId: record.id });
+    },
+    [loadResizeRecords, resizeForm, resizeSandboxList]
+  );
+
+  const handleQueryResizeSandboxes = useCallback(() => {
+    const values = resizeForm.getFieldsValue();
+    setResizeSandboxLoading(true);
+    dispatch({
+      type: 'sandboxMgr/listSandboxRecords',
+      payload: {
+        pageIndex: 1,
+        pageSize: 50,
+        keyword: trim(values.userCode || ''),
+        status: 'RUNNING',
+      },
+      success: (data: any) => {
+        const records = data?.list || [];
+        setResizeSandboxList(records);
+        setResizeSandboxLoading(false);
+        if (!records.length) {
+          setSelectedResizeRecord(null);
+          setResizeRecords([]);
+          message.warning(intl.formatMessage({ id: 'sandboxMgr.elastic.noRunningSandbox' }));
+          return;
+        }
+        const firstRecord = records[0];
+        setSelectedResizeRecord(firstRecord);
+        resizeForm.setFieldsValue({
+          sandboxRecordId: firstRecord.id,
+          userCode: firstRecord.userCode,
+          serviceType: firstRecord.serviceType || firstRecord.sandboxType || DEFAULT_SERVICE_TYPE,
+        });
+        loadResizeRecords({ sandboxRecordId: firstRecord.id });
+      },
+      fail: () => {
+        setResizeSandboxLoading(false);
+      },
+    });
+  }, [dispatch, intl, loadResizeRecords, resizeForm]);
+
+  const handleSubmitResize = useCallback(() => {
+    resizeForm.validateFields().then((values) => {
+      const record =
+        selectedResizeRecord || resizeSandboxList.find((item) => item.id === Number(values.sandboxRecordId));
+      if (!record) {
+        message.warning(intl.formatMessage({ id: 'sandboxMgr.elastic.selectSandboxRequired' }));
+        return;
+      }
+      setResizing(true);
+      dispatch({
+        type: 'sandboxMgr/resizeSandbox',
+        payload: {
+          sandboxRecordId: record.id,
+          toProfileKey: values.profileKey,
+          resizeType: values.resizeType || 'IN_PLACE',
+          triggerSource: 'MANUAL',
+          reasonCode: 'manual.frontend',
+          reasonDetail: values.reasonDetail || `frontend resize to ${values.profileKey}`,
+        },
+        success: () => {
+          setResizing(false);
+          message.success(intl.formatMessage({ id: 'sandboxMgr.elastic.resizeSuccess' }));
+          loadResizeRecords({ sandboxRecordId: record.id });
+          handleQueryResizeSandboxes();
+          loadData(
+            {
+              pageIndex: curParam.current?.pageIndex || pageInfo.pageIndex,
+              pageSize: curParam.current?.pageSize || pageInfo.pageSize,
+            },
+            curParam.current?.keyword || keyword,
+            curParam.current?.status || status,
+            true
+          );
+        },
+        fail: () => {
+          setResizing(false);
+          loadResizeRecords({ sandboxRecordId: record.id });
+        },
+      });
+    });
+  }, [
+    dispatch,
+    handleQueryResizeSandboxes,
+    intl,
+    keyword,
+    loadData,
+    loadResizeRecords,
+    pageInfo,
+    resizeForm,
+    resizeSandboxList,
+    selectedResizeRecord,
+    status,
+  ]);
 
   // ==================== 指定用户沙箱相关方法 ====================
 
@@ -658,6 +896,137 @@ const SandboxMgr = () => {
     },
   ];
 
+  const renderResizeStatus = (value?: string) => {
+    if (!value) return '-';
+    return <Tag color={resizeStatusColorMap[value] || 'default'}>{value}</Tag>;
+  };
+
+  const resizeSandboxColumns = [
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.id' }),
+      dataIndex: 'id',
+      width: 80,
+      align: 'center' as const,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.userCode' }),
+      dataIndex: 'userCode',
+      width: 130,
+      ellipsis: true,
+      render: renderEllipsisText,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.sandboxId' }),
+      dataIndex: 'sandboxId',
+      width: 220,
+      ellipsis: true,
+      render: renderEllipsisText,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.elastic.currentProfile' }),
+      dataIndex: 'profileKey',
+      width: 120,
+      render: (value: string, record: SsSandboxRecord) => <Tag color="blue">{value || record.sandboxType || '-'}</Tag>,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.elastic.resourceRequests' }),
+      dataIndex: 'resourceRequests',
+      width: 180,
+      ellipsis: true,
+      render: (value: string) => renderEllipsisText(compactJson(value)),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.elastic.resourceLimits' }),
+      dataIndex: 'resourceLimits',
+      width: 180,
+      ellipsis: true,
+      render: (value: string) => renderEllipsisText(compactJson(value)),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.action' }),
+      width: 100,
+      fixed: 'right' as const,
+      align: 'center' as const,
+      render: (_: any, record: SsSandboxRecord) => (
+        <Button size="small" type="link" onClick={() => handleSelectResizeSandbox(record.id)}>
+          {intl.formatMessage({ id: 'sandboxMgr.elastic.chooseSandbox' })}
+        </Button>
+      ),
+    },
+  ];
+
+  const resizeRecordColumns = [
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.id' }),
+      dataIndex: 'id',
+      width: 80,
+      align: 'center' as const,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.elastic.fromProfile' }),
+      dataIndex: 'fromProfileKey',
+      width: 120,
+      render: (value: string) => value || '-',
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.elastic.toProfile' }),
+      dataIndex: 'toProfileKey',
+      width: 120,
+      render: (value: string) => value || '-',
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.elastic.triggerSource' }),
+      dataIndex: 'triggerSource',
+      width: 160,
+      ellipsis: true,
+      render: renderEllipsisText,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.elastic.resizeType' }),
+      dataIndex: 'resizeType',
+      width: 130,
+      render: (value: string) => value || '-',
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.status' }),
+      dataIndex: 'status',
+      width: 120,
+      render: renderResizeStatus,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.elastic.durationMs' }),
+      dataIndex: 'durationMs',
+      width: 120,
+      render: (value: number) => value ?? '-',
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.elastic.startedAt' }),
+      dataIndex: 'startedAt',
+      width: 170,
+      render: (value: string | number) => formatTimestamp(value),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.elastic.finishedAt' }),
+      dataIndex: 'finishedAt',
+      width: 170,
+      render: (value: string | number) => formatTimestamp(value),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.elastic.reasonDetail' }),
+      dataIndex: 'reasonDetail',
+      width: 220,
+      ellipsis: true,
+      render: renderEllipsisText,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.elastic.errorMessage' }),
+      dataIndex: 'errorMessage',
+      width: 260,
+      ellipsis: true,
+      render: renderEllipsisText,
+    },
+  ];
+
   return (
     <div className={classNames('full-height ub ub-ver gap8', styles.container)}>
       <Row gutter={16} align="middle">
@@ -735,60 +1104,240 @@ const SandboxMgr = () => {
         title={intl.formatMessage({ id: 'sandboxMgr.config.title' })}
         open={specDrawerOpen}
         onClose={handleCloseSpecDrawer}
-        width={800}
+        width={960}
         destroyOnClose
       >
-        <div className={styles.specDrawerContent}>
-          <Row justify="end" style={{ marginBottom: 16 }}>
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleAddSpec}>
-              {intl.formatMessage({ id: 'sandboxMgr.config.add' })}
-            </Button>
-          </Row>
-          <Table<ServiceSpecItem>
-            rowKey="serviceKey"
-            dataSource={specList}
-            loading={specLoading}
-            pagination={false}
-            columns={[
-              {
-                title: intl.formatMessage({ id: 'sandboxMgr.config.serviceKey' }),
-                dataIndex: 'serviceKey',
-                width: 200,
-                ellipsis: true,
-              },
-              {
-                title: intl.formatMessage({ id: 'sandboxMgr.config.specJson' }),
-                dataIndex: 'specJson',
-                ellipsis: true,
-                render: (value: string) => (
-                  <Typography.Paragraph ellipsis={{ rows: 2 }} style={{ margin: 0 }}>
-                    {value}
-                  </Typography.Paragraph>
-                ),
-              },
-              {
-                title: intl.formatMessage({ id: 'sandboxMgr.table.action' }),
-                width: 150,
-                align: 'center',
-                render: (_: any, record: ServiceSpecItem) => (
-                  <Space size="small">
-                    <Button size="small" type="link" icon={<EditOutlined />} onClick={() => handleEditSpec(record)}>
-                      {intl.formatMessage({ id: 'SystemParams.params.edit' })}
+        <Tabs
+          activeKey={specDrawerTab}
+          onChange={setSpecDrawerTab}
+          items={[
+            {
+              key: 'spec',
+              label: intl.formatMessage({ id: 'sandboxMgr.config.tab.spec' }),
+              children: (
+                <div className={styles.specDrawerContent}>
+                  <Row justify="end" style={{ marginBottom: 16 }}>
+                    <Button type="primary" icon={<PlusOutlined />} onClick={handleAddSpec}>
+                      {intl.formatMessage({ id: 'sandboxMgr.config.add' })}
                     </Button>
-                    <Popconfirm
-                      title={intl.formatMessage({ id: 'sandboxMgr.config.deleteConfirm' })}
-                      onConfirm={() => handleDeleteSpec(record)}
+                  </Row>
+                  <Table<ServiceSpecItem>
+                    rowKey="serviceKey"
+                    dataSource={specList}
+                    loading={specLoading}
+                    pagination={false}
+                    columns={[
+                      {
+                        title: intl.formatMessage({ id: 'sandboxMgr.config.serviceKey' }),
+                        dataIndex: 'serviceKey',
+                        width: 200,
+                        ellipsis: true,
+                      },
+                      {
+                        title: intl.formatMessage({ id: 'sandboxMgr.config.specJson' }),
+                        dataIndex: 'specJson',
+                        ellipsis: true,
+                        render: (value: string) => (
+                          <Typography.Paragraph ellipsis={{ rows: 2 }} style={{ margin: 0 }}>
+                            {value}
+                          </Typography.Paragraph>
+                        ),
+                      },
+                      {
+                        title: intl.formatMessage({ id: 'sandboxMgr.table.action' }),
+                        width: 150,
+                        align: 'center',
+                        render: (_: any, record: ServiceSpecItem) => (
+                          <Space size="small">
+                            <Button
+                              size="small"
+                              type="link"
+                              icon={<EditOutlined />}
+                              onClick={() => handleEditSpec(record)}
+                            >
+                              {intl.formatMessage({ id: 'SystemParams.params.edit' })}
+                            </Button>
+                            <Popconfirm
+                              title={intl.formatMessage({ id: 'sandboxMgr.config.deleteConfirm' })}
+                              onConfirm={() => handleDeleteSpec(record)}
+                            >
+                              <Button size="small" type="link" danger icon={<DeleteOutlined />}>
+                                {intl.formatMessage({ id: 'SystemParams.params.delete' })}
+                              </Button>
+                            </Popconfirm>
+                          </Space>
+                        ),
+                      },
+                    ]}
+                  />
+                </div>
+              ),
+            },
+            {
+              key: 'elastic',
+              label: (
+                <Space size={4}>
+                  <ThunderboltOutlined />
+                  {intl.formatMessage({ id: 'sandboxMgr.config.tab.elastic' })}
+                </Space>
+              ),
+              children: (
+                <div className={styles.elasticContent}>
+                  <Form
+                    form={resizeForm}
+                    layout="vertical"
+                    preserve={false}
+                    initialValues={{ serviceType: DEFAULT_SERVICE_TYPE, resizeType: 'IN_PLACE' }}
+                  >
+                    <Row gutter={12}>
+                      <Col span={6}>
+                        <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.elastic.userCode' })} name="userCode">
+                          <Input
+                            allowClear
+                            placeholder={intl.formatMessage({ id: 'sandboxMgr.elastic.userCodePlaceholder' })}
+                          />
+                        </Form.Item>
+                      </Col>
+                      <Col span={7}>
+                        <Form.Item
+                          label={intl.formatMessage({ id: 'sandboxMgr.elastic.runningSandbox' })}
+                          name="sandboxRecordId"
+                          rules={[
+                            {
+                              required: true,
+                              message: intl.formatMessage({ id: 'sandboxMgr.elastic.selectSandboxRequired' }),
+                            },
+                          ]}
+                        >
+                          <Select
+                            allowClear
+                            loading={resizeSandboxLoading}
+                            placeholder={intl.formatMessage({ id: 'sandboxMgr.elastic.runningSandboxPlaceholder' })}
+                            onChange={handleSelectResizeSandbox}
+                          >
+                            {resizeSandboxList.map((item) => (
+                              <Option key={item.id} value={item.id}>
+                                #{item.id} / {item.userCode} / {item.profileKey || item.sandboxType || '-'}
+                              </Option>
+                            ))}
+                          </Select>
+                        </Form.Item>
+                      </Col>
+                      <Col span={5}>
+                        <Form.Item
+                          label={intl.formatMessage({ id: 'sandboxMgr.elastic.targetProfile' })}
+                          name="profileKey"
+                          rules={[
+                            {
+                              required: true,
+                              message: intl.formatMessage({ id: 'sandboxMgr.elastic.profileRequired' }),
+                            },
+                          ]}
+                        >
+                          <Select
+                            loading={profileLoading}
+                            placeholder={intl.formatMessage({ id: 'sandboxMgr.elastic.targetProfilePlaceholder' })}
+                          >
+                            {profileList.map((item) => (
+                              <Option key={`${item.serviceType}-${item.profileKey}`} value={item.profileKey}>
+                                {item.serviceType}-{item.profileKey}
+                              </Option>
+                            ))}
+                          </Select>
+                        </Form.Item>
+                      </Col>
+                      <Col span={6}>
+                        <Form.Item
+                          label={intl.formatMessage({ id: 'sandboxMgr.elastic.resizeType' })}
+                          name="resizeType"
+                        >
+                          <Select>
+                            <Option value="IN_PLACE">IN_PLACE</Option>
+                            <Option value="PREFERRED_ONLY">PREFERRED_ONLY</Option>
+                            <Option value="HOT_SWITCH">HOT_SWITCH</Option>
+                          </Select>
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Form.Item
+                      label={intl.formatMessage({ id: 'sandboxMgr.elastic.reasonDetail' })}
+                      name="reasonDetail"
                     >
-                      <Button size="small" type="link" danger icon={<DeleteOutlined />}>
-                        {intl.formatMessage({ id: 'SystemParams.params.delete' })}
+                      <Input.TextArea
+                        rows={2}
+                        placeholder={intl.formatMessage({ id: 'sandboxMgr.elastic.reasonDetailPlaceholder' })}
+                      />
+                    </Form.Item>
+                    <Space wrap>
+                      <Button onClick={handleQueryResizeSandboxes} loading={resizeSandboxLoading}>
+                        {intl.formatMessage({ id: 'sandboxMgr.elastic.queryRunning' })}
                       </Button>
-                    </Popconfirm>
-                  </Space>
-                ),
-              },
-            ]}
-          />
-        </div>
+                      <Button type="primary" onClick={handleSubmitResize} loading={resizing}>
+                        {intl.formatMessage({ id: 'sandboxMgr.elastic.execute' })}
+                      </Button>
+                      <Button
+                        onClick={() =>
+                          selectedResizeRecord && loadResizeRecords({ sandboxRecordId: selectedResizeRecord.id })
+                        }
+                        disabled={!selectedResizeRecord}
+                      >
+                        {intl.formatMessage({ id: 'sandboxMgr.elastic.refreshRecords' })}
+                      </Button>
+                    </Space>
+                  </Form>
+
+                  {selectedResizeRecord && (
+                    <div className={styles.selectedSandbox}>
+                      <Space size="middle" wrap>
+                        <span>
+                          {intl.formatMessage({ id: 'sandboxMgr.elastic.selectedSandbox' })}: #{selectedResizeRecord.id}
+                        </span>
+                        <span>{selectedResizeRecord.userCode}</span>
+                        <Tag color="blue">
+                          {selectedResizeRecord.profileKey || selectedResizeRecord.sandboxType || '-'}
+                        </Tag>
+                        <span>
+                          {intl.formatMessage({ id: 'sandboxMgr.elastic.resourceRequests' })}:{' '}
+                          {compactJson(selectedResizeRecord.resourceRequests)}
+                        </span>
+                        <span>
+                          {intl.formatMessage({ id: 'sandboxMgr.elastic.resourceLimits' })}:{' '}
+                          {compactJson(selectedResizeRecord.resourceLimits)}
+                        </span>
+                      </Space>
+                    </div>
+                  )}
+
+                  <Typography.Title level={5}>
+                    {intl.formatMessage({ id: 'sandboxMgr.elastic.runningList' })}
+                  </Typography.Title>
+                  <Table<SsSandboxRecord>
+                    rowKey="id"
+                    size="small"
+                    dataSource={resizeSandboxList}
+                    loading={resizeSandboxLoading}
+                    pagination={false}
+                    columns={resizeSandboxColumns}
+                    scroll={{ x: 1030 }}
+                  />
+
+                  <Typography.Title level={5} className={styles.resizeRecordTitle}>
+                    {intl.formatMessage({ id: 'sandboxMgr.elastic.records' })}
+                  </Typography.Title>
+                  <Table<SandboxResizeRecord>
+                    rowKey="id"
+                    size="small"
+                    dataSource={resizeRecords}
+                    loading={resizeRecordsLoading}
+                    pagination={false}
+                    columns={resizeRecordColumns}
+                    scroll={{ x: 1710 }}
+                  />
+                </div>
+              ),
+            },
+          ]}
+        />
       </Drawer>
 
       {/* 沙箱配置表单弹窗 */}
