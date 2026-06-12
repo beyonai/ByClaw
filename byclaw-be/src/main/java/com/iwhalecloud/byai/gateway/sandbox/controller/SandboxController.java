@@ -21,10 +21,12 @@ import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMappe
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchRouting;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxResizeService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
+import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxResizeRecord;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import io.swagger.v3.oas.annotations.Operation;
@@ -53,6 +55,9 @@ public class SandboxController {
 
     @Autowired
     private SandboxUserContextRunner sandboxUserContextRunner;
+
+    @Autowired
+    private SandboxResizeService sandboxResizeService;
 
     /**
      * 沙箱心跳接口
@@ -376,6 +381,30 @@ public class SandboxController {
         return ResponseUtil.successResponse();
     }
 
+    @PostMapping("/resize")
+    @Operation(summary = "动态调整沙箱资源规格", description = "通过 OpenSandbox 执行沙箱扩缩容，并记录审计流水")
+    public ResponseUtil resizeSandbox(@RequestBody Map<String, Object> params) {
+        try {
+            SsSandboxResizeRecord record = sandboxResizeService.handleResizeRequest(params);
+            return ResponseUtil.successResponse(record);
+        }
+        catch (Exception e) {
+            return ResponseUtil.fail("沙箱扩缩容处理失败: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/autoscale/alerts")
+    @Operation(summary = "Prometheus 沙箱扩缩容告警入口", description = "接收 Alertmanager webhook，生成动态扩缩容审计记录并按目标规格调用 OpenSandbox")
+    public ResponseUtil handleAutoscaleAlert(@RequestBody Map<String, Object> payload) {
+        try {
+            SsSandboxResizeRecord record = sandboxResizeService.handlePrometheusAlert(payload);
+            return ResponseUtil.successResponse(record);
+        }
+        catch (Exception e) {
+            return ResponseUtil.fail("沙箱扩缩容告警处理失败: " + e.getMessage());
+        }
+    }
+
     // ==================== 沙箱服务规格配置管理接口 ====================
 
     /**
@@ -390,6 +419,11 @@ public class SandboxController {
         List<Map<String, String>> result = list.stream().map(entity -> {
             Map<String, String> map = new HashMap<>();
             map.put("serviceKey", entity.getServiceKey());
+            map.put("serviceType", entity.getServiceType());
+            map.put("displayName", entity.getDisplayName());
+            map.put("enabled", entity.getEnabled() == null ? null : String.valueOf(entity.getEnabled()));
+            map.put("defaultProfileKey", entity.getDefaultProfileKey());
+            map.put("autoscaleEnabled", entity.getAutoscaleEnabled() == null ? null : String.valueOf(entity.getAutoscaleEnabled()));
             map.put("specJson", entity.getSpecJson());
             map.put("templateJson", entity.getTemplateJson());
             return map;
@@ -418,6 +452,11 @@ public class SandboxController {
 
         Map<String, String> result = new HashMap<>();
         result.put("serviceKey", entity.getServiceKey());
+        result.put("serviceType", entity.getServiceType());
+        result.put("displayName", entity.getDisplayName());
+        result.put("enabled", entity.getEnabled() == null ? null : String.valueOf(entity.getEnabled()));
+        result.put("defaultProfileKey", entity.getDefaultProfileKey());
+        result.put("autoscaleEnabled", entity.getAutoscaleEnabled() == null ? null : String.valueOf(entity.getAutoscaleEnabled()));
         result.put("specJson", entity.getSpecJson());
         result.put("templateJson", entity.getTemplateJson());
         return ResponseUtil.successResponse(result);

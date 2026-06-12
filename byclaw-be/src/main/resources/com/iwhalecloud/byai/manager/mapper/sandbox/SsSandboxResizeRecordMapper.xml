@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxResizeRecordMapper">
+
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxResizeRecord">
+        <id column="id" jdbcType="BIGINT" property="id" />
+        <result column="sandbox_record_id" jdbcType="BIGINT" property="sandboxRecordId" />
+        <result column="sandbox_id" jdbcType="VARCHAR" property="sandboxId" />
+        <result column="user_code" jdbcType="VARCHAR" property="userCode" />
+        <result column="service_type" jdbcType="VARCHAR" property="serviceType" />
+        <result column="from_profile_key" jdbcType="VARCHAR" property="fromProfileKey" />
+        <result column="to_profile_key" jdbcType="VARCHAR" property="toProfileKey" />
+        <result column="from_resource_requests" jdbcType="VARCHAR" property="fromResourceRequests" />
+        <result column="from_resource_limits" jdbcType="VARCHAR" property="fromResourceLimits" />
+        <result column="to_resource_requests" jdbcType="VARCHAR" property="toResourceRequests" />
+        <result column="to_resource_limits" jdbcType="VARCHAR" property="toResourceLimits" />
+        <result column="trigger_source" jdbcType="VARCHAR" property="triggerSource" />
+        <result column="reason_code" jdbcType="VARCHAR" property="reasonCode" />
+        <result column="reason_detail" jdbcType="VARCHAR" property="reasonDetail" />
+        <result column="resize_type" jdbcType="VARCHAR" property="resizeType" />
+        <result column="status" jdbcType="VARCHAR" property="status" />
+        <result column="success" jdbcType="INTEGER" property="success" />
+        <result column="started_at" jdbcType="TIMESTAMP" property="startedAt" />
+        <result column="finished_at" jdbcType="TIMESTAMP" property="finishedAt" />
+        <result column="duration_ms" jdbcType="BIGINT" property="durationMs" />
+        <result column="opensandbox_request_id" jdbcType="VARCHAR" property="opensandboxRequestId" />
+        <result column="opensandbox_response" jdbcType="VARCHAR" property="opensandboxResponse" />
+        <result column="error_message" jdbcType="VARCHAR" property="errorMessage" />
+        <result column="create_time" jdbcType="TIMESTAMP" property="createTime" />
+        <result column="update_time" jdbcType="TIMESTAMP" property="updateTime" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, sandbox_record_id, sandbox_id, user_code, service_type,
+        from_profile_key, to_profile_key, from_resource_requests, from_resource_limits,
+        to_resource_requests, to_resource_limits, trigger_source, reason_code, reason_detail,
+        resize_type, status, success, started_at, finished_at, duration_ms,
+        opensandbox_request_id, opensandbox_response, error_message, create_time, update_time
+    </sql>
+
+    <insert id="insert" parameterType="com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxResizeRecord"
+            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
+        INSERT INTO ss_sandbox_resize_record (
+            sandbox_record_id, sandbox_id, user_code, service_type,
+            from_profile_key, to_profile_key, from_resource_requests, from_resource_limits,
+            to_resource_requests, to_resource_limits, trigger_source, reason_code, reason_detail,
+            resize_type, status, success, started_at, finished_at, duration_ms,
+            opensandbox_request_id, opensandbox_response, error_message, create_time, update_time
+        ) VALUES (
+            #{sandboxRecordId,jdbcType=BIGINT},
+            #{sandboxId,jdbcType=VARCHAR},
+            #{userCode,jdbcType=VARCHAR},
+            #{serviceType,jdbcType=VARCHAR},
+            #{fromProfileKey,jdbcType=VARCHAR},
+            #{toProfileKey,jdbcType=VARCHAR},
+            #{fromResourceRequests,jdbcType=VARCHAR}::jsonb,
+            #{fromResourceLimits,jdbcType=VARCHAR}::jsonb,
+            #{toResourceRequests,jdbcType=VARCHAR}::jsonb,
+            #{toResourceLimits,jdbcType=VARCHAR}::jsonb,
+            #{triggerSource,jdbcType=VARCHAR},
+            #{reasonCode,jdbcType=VARCHAR},
+            #{reasonDetail,jdbcType=VARCHAR},
+            #{resizeType,jdbcType=VARCHAR},
+            #{status,jdbcType=VARCHAR},
+            #{success,jdbcType=INTEGER},
+            #{startedAt,jdbcType=TIMESTAMP},
+            #{finishedAt,jdbcType=TIMESTAMP},
+            #{durationMs,jdbcType=BIGINT},
+            #{opensandboxRequestId,jdbcType=VARCHAR},
+            #{opensandboxResponse,jdbcType=VARCHAR}::jsonb,
+            #{errorMessage,jdbcType=VARCHAR},
+            #{createTime,jdbcType=TIMESTAMP},
+            #{updateTime,jdbcType=TIMESTAMP}
+        )
+    </insert>
+
+    <update id="updateResult">
+        UPDATE ss_sandbox_resize_record
+        SET status = #{status,jdbcType=VARCHAR},
+            success = #{success,jdbcType=INTEGER},
+            finished_at = #{finishedAt,jdbcType=TIMESTAMP},
+            duration_ms = #{durationMs,jdbcType=BIGINT},
+            opensandbox_request_id = #{opensandboxRequestId,jdbcType=VARCHAR},
+            opensandbox_response = #{opensandboxResponse,jdbcType=VARCHAR}::jsonb,
+            error_message = #{errorMessage,jdbcType=VARCHAR},
+            update_time = #{finishedAt,jdbcType=TIMESTAMP}
+        WHERE id = #{id,jdbcType=BIGINT}
+    </update>
+
+    <select id="selectBySandboxRecordId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_resize_record
+        WHERE sandbox_record_id = #{sandboxRecordId,jdbcType=BIGINT}
+        ORDER BY started_at DESC, id DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>
