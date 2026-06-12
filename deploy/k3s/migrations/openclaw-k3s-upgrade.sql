@@ -1,13 +1,32 @@
 -- OpenClaw sandbox_service_spec 从 Docker/minio-mount 升级到 K3s/Longhorn 兼容
 -- 基于 docs/reports/openclaw.sql，去掉 minio 残留、参数化镜像与密钥
--- 执行前请替换占位环境变量；幂等：ON CONFLICT DO UPDATE
+-- 执行前请替换占位环境变量；幂等：兼容 OpenGauss
 
-ALTER TABLE "byai"."sandbox_service_spec"
-  ADD COLUMN IF NOT EXISTS service_type VARCHAR(128),
-  ADD COLUMN IF NOT EXISTS display_name VARCHAR(128),
-  ADD COLUMN IF NOT EXISTS enabled INTEGER DEFAULT 1,
-  ADD COLUMN IF NOT EXISTS default_profile_key VARCHAR(64),
-  ADD COLUMN IF NOT EXISTS autoscale_enabled INTEGER DEFAULT 0;
+CREATE OR REPLACE FUNCTION byai.add_column_if_missing(
+  p_schema_name TEXT,
+  p_table_name TEXT,
+  p_column_name TEXT,
+  p_column_definition TEXT
+) RETURNS VOID AS $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = p_schema_name
+      AND table_name = p_table_name
+      AND column_name = p_column_name
+  ) THEN
+    EXECUTE 'ALTER TABLE ' || quote_ident(p_schema_name) || '.' || quote_ident(p_table_name)
+      || ' ADD COLUMN ' || quote_ident(p_column_name) || ' ' || p_column_definition;
+  END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT byai.add_column_if_missing('byai', 'sandbox_service_spec', 'service_type', 'VARCHAR(128)');
+SELECT byai.add_column_if_missing('byai', 'sandbox_service_spec', 'display_name', 'VARCHAR(128)');
+SELECT byai.add_column_if_missing('byai', 'sandbox_service_spec', 'enabled', 'INTEGER DEFAULT 1');
+SELECT byai.add_column_if_missing('byai', 'sandbox_service_spec', 'default_profile_key', 'VARCHAR(64)');
+SELECT byai.add_column_if_missing('byai', 'sandbox_service_spec', 'autoscale_enabled', 'INTEGER DEFAULT 0');
 
 CREATE TABLE IF NOT EXISTS "byai"."sandbox_service_profile" (
   id BIGINT NOT NULL DEFAULT nextval('byai.seq_any_table'::regclass),
@@ -27,8 +46,18 @@ CREATE TABLE IF NOT EXISTS "byai"."sandbox_service_profile" (
 CREATE UNIQUE INDEX IF NOT EXISTS ux_sandbox_service_profile_type_key
   ON "byai"."sandbox_service_profile" (service_type, profile_key);
 
+UPDATE "byai"."sandbox_service_spec"
+SET service_type = 'openclaw',
+  display_name = 'OpenClaw',
+  enabled = 1,
+  default_profile_key = 'xs',
+  autoscale_enabled = 1,
+  updated_at = CURRENT_TIMESTAMP
+WHERE service_key = 'openclaw';
+-- spec_json/template_json 不在更新时覆盖，避免用未渲染占位符误删生产自定义配置
+
 INSERT INTO "byai"."sandbox_service_spec" ("service_key", "service_type", "display_name", "enabled", "default_profile_key", "autoscale_enabled", "spec_json", "template_json", "updated_at")
-VALUES (
+SELECT
   'openclaw',
   'openclaw',
   'OpenClaw',
@@ -100,39 +129,75 @@ VALUES (
     "servicePort": 8080,
     "resourceLimits": {"cpu": "2", "memory": "4Gi"}
   }',
-  COALESCE(
-    (SELECT template_json FROM "byai"."sandbox_service_spec" WHERE service_key = 'openclaw'),
-    '{}'
-  ),
+  '{}',
   CURRENT_TIMESTAMP
-)
-ON CONFLICT (service_key) DO UPDATE SET
-  service_type = EXCLUDED.service_type,
-  display_name = EXCLUDED.display_name,
-  enabled = EXCLUDED.enabled,
-  default_profile_key = EXCLUDED.default_profile_key,
-  autoscale_enabled = EXCLUDED.autoscale_enabled,
-  spec_json = EXCLUDED.spec_json,
-  updated_at = CURRENT_TIMESTAMP;
-  -- template_json 不在冲突时覆盖，避免误删生产自定义配置
+WHERE NOT EXISTS (SELECT 1 FROM "byai"."sandbox_service_spec" WHERE service_key = 'openclaw');
 
+UPDATE "byai"."sandbox_service_profile"
+SET resource_requests = '{"cpu":"250m","memory":"765Mi"}'::jsonb,
+  resource_limits = '{"cpu":"2","memory":"4Gi"}'::jsonb,
+  resize_enabled = 1,
+  resize_strategy = 'IN_PLACE',
+  enabled = 1,
+  sort_order = 10,
+  updated_at = CURRENT_TIMESTAMP
+WHERE service_type = 'openclaw' AND profile_key = 'xs';
 INSERT INTO "byai"."sandbox_service_profile" (
   service_type, profile_key, resource_requests, resource_limits,
   resize_enabled, resize_strategy, enabled, sort_order, updated_at
 )
-VALUES
-  ('openclaw', 'xs', '{"cpu":"250m","memory":"765Mi"}'::jsonb, '{"cpu":"2","memory":"4Gi"}'::jsonb, 1, 'IN_PLACE', 1, 10, CURRENT_TIMESTAMP),
-  ('openclaw', 's', '{"cpu":"500m","memory":"1Gi"}'::jsonb, '{"cpu":"2","memory":"4Gi"}'::jsonb, 1, 'IN_PLACE', 1, 20, CURRENT_TIMESTAMP),
-  ('openclaw', 'm', '{"cpu":"1","memory":"2Gi"}'::jsonb, '{"cpu":"2","memory":"4Gi"}'::jsonb, 1, 'IN_PLACE', 1, 30, CURRENT_TIMESTAMP),
-  ('openclaw', 'l', '{"cpu":"2","memory":"4Gi"}'::jsonb, '{"cpu":"2","memory":"4Gi"}'::jsonb, 1, 'IN_PLACE', 1, 40, CURRENT_TIMESTAMP)
-ON CONFLICT (service_type, profile_key) DO UPDATE SET
-  resource_requests = EXCLUDED.resource_requests,
-  resource_limits = EXCLUDED.resource_limits,
-  resize_enabled = EXCLUDED.resize_enabled,
-  resize_strategy = EXCLUDED.resize_strategy,
-  enabled = EXCLUDED.enabled,
-  sort_order = EXCLUDED.sort_order,
-  updated_at = CURRENT_TIMESTAMP;
+SELECT 'openclaw', 'xs', '{"cpu":"250m","memory":"765Mi"}'::jsonb, '{"cpu":"2","memory":"4Gi"}'::jsonb, 1, 'IN_PLACE', 1, 10, CURRENT_TIMESTAMP
+WHERE NOT EXISTS (SELECT 1 FROM "byai"."sandbox_service_profile" WHERE service_type = 'openclaw' AND profile_key = 'xs');
+
+UPDATE "byai"."sandbox_service_profile"
+SET resource_requests = '{"cpu":"500m","memory":"1Gi"}'::jsonb,
+  resource_limits = '{"cpu":"2","memory":"4Gi"}'::jsonb,
+  resize_enabled = 1,
+  resize_strategy = 'IN_PLACE',
+  enabled = 1,
+  sort_order = 20,
+  updated_at = CURRENT_TIMESTAMP
+WHERE service_type = 'openclaw' AND profile_key = 's';
+INSERT INTO "byai"."sandbox_service_profile" (
+  service_type, profile_key, resource_requests, resource_limits,
+  resize_enabled, resize_strategy, enabled, sort_order, updated_at
+)
+SELECT 'openclaw', 's', '{"cpu":"500m","memory":"1Gi"}'::jsonb, '{"cpu":"2","memory":"4Gi"}'::jsonb, 1, 'IN_PLACE', 1, 20, CURRENT_TIMESTAMP
+WHERE NOT EXISTS (SELECT 1 FROM "byai"."sandbox_service_profile" WHERE service_type = 'openclaw' AND profile_key = 's');
+
+UPDATE "byai"."sandbox_service_profile"
+SET resource_requests = '{"cpu":"1","memory":"2Gi"}'::jsonb,
+  resource_limits = '{"cpu":"2","memory":"4Gi"}'::jsonb,
+  resize_enabled = 1,
+  resize_strategy = 'IN_PLACE',
+  enabled = 1,
+  sort_order = 30,
+  updated_at = CURRENT_TIMESTAMP
+WHERE service_type = 'openclaw' AND profile_key = 'm';
+INSERT INTO "byai"."sandbox_service_profile" (
+  service_type, profile_key, resource_requests, resource_limits,
+  resize_enabled, resize_strategy, enabled, sort_order, updated_at
+)
+SELECT 'openclaw', 'm', '{"cpu":"1","memory":"2Gi"}'::jsonb, '{"cpu":"2","memory":"4Gi"}'::jsonb, 1, 'IN_PLACE', 1, 30, CURRENT_TIMESTAMP
+WHERE NOT EXISTS (SELECT 1 FROM "byai"."sandbox_service_profile" WHERE service_type = 'openclaw' AND profile_key = 'm');
+
+UPDATE "byai"."sandbox_service_profile"
+SET resource_requests = '{"cpu":"2","memory":"4Gi"}'::jsonb,
+  resource_limits = '{"cpu":"2","memory":"4Gi"}'::jsonb,
+  resize_enabled = 1,
+  resize_strategy = 'IN_PLACE',
+  enabled = 1,
+  sort_order = 40,
+  updated_at = CURRENT_TIMESTAMP
+WHERE service_type = 'openclaw' AND profile_key = 'l';
+INSERT INTO "byai"."sandbox_service_profile" (
+  service_type, profile_key, resource_requests, resource_limits,
+  resize_enabled, resize_strategy, enabled, sort_order, updated_at
+)
+SELECT 'openclaw', 'l', '{"cpu":"2","memory":"4Gi"}'::jsonb, '{"cpu":"2","memory":"4Gi"}'::jsonb, 1, 'IN_PLACE', 1, 40, CURRENT_TIMESTAMP
+WHERE NOT EXISTS (SELECT 1 FROM "byai"."sandbox_service_profile" WHERE service_type = 'openclaw' AND profile_key = 'l');
+
+DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
 
 -- 若需同步更新 template_json 中硬编码密钥，请单独审查 langfuse Authorization 等字段后执行：
 -- UPDATE "byai"."sandbox_service_spec" SET template_json = ... WHERE service_key = 'openclaw';
