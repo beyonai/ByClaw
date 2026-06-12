@@ -1,6 +1,7 @@
 import { EmitOptions, EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import {
   ActiveSdkRequest,
+  bindActiveSdkRequestRunId,
   emitSdkChunkTracked,
   getLastSdkEmitChunk,
   isRootSessionKey,
@@ -8,9 +9,11 @@ import {
   markActiveSdkCompactionRetryPending,
   markActiveSdkRootLifecycleFinished,
   markActiveSdkRootLifecycleStarted,
+  reserveStreamedAnswerDelta,
   resolveActiveSdkRequestBySessionKey,
   resolveActiveSdkRunBinding,
   resolveSdkEmitter,
+  markActiveSdkRequestSubagentSpawned,
 } from "./session-context";
 import {
   cancelActiveSdkCompletionCheck,
@@ -132,7 +135,6 @@ function stringValue(value: unknown): string {
 async function handleToolEvent(
   request: ActiveSdkRequest,
   event: AgentEvent,
-  isChildSession: boolean,
 ) {
   const sdkEmitter = resolveSdkEmitter(request.accountId);
   if (!sdkEmitter) {
@@ -199,8 +201,15 @@ async function handleToolEvent(
       objectType: "tool_call",
       status: data.isError ? "_ERROR_" : "_DONE_",
     });
-    if (data?.name === "baiying_call") {
-      setToBeEmittedChunkViaBaiyingCallTool(data?.result);
+    if (data.name === "baiying_call") {
+      setToBeEmittedChunkViaBaiyingCallTool(data.result);
+    } else if (data.name === "sessions_spawn" && data.result?.details && !data.isError) {
+      await markActiveSdkRequestSubagentSpawned(
+        request.sessionKey,
+        data.result.details.childSessionKey,
+        data.result.details.runId,
+      );
+      cancelActiveSdkCompletionCheck(request.sessionKey);
     }
   }
 }
@@ -238,18 +247,19 @@ async function handleAssistantEvent(
   const previousEmit = getLastSdkEmitChunk(request.accountId);
   const answerOptions: EmitOptions = {
     parentMessageId: "-1",
-    eventType: EventType.ANSWER_DELTA,
+    eventType: isChildSession ? EventType.REASONING_LOG_DELTA : EventType.ANSWER_DELTA,
     messageId: streamContext.isContinuingAnswer && previousEmit?.messageId
       ? previousEmit.messageId
       : request.sessionKey,
   };
-  await emitIncrementalText({
-    key: `${event.runId}:assistant:answer`,
-    rawText: stringValue(event.data?.text) || text,
-    emit: async (answerDelta) => {
-      await emitSdkChunk(request, sdkEmitter, answerDelta, answerOptions);
-    },
-  });
+  // 与 outbound.sendText 共享同一 runId 权威缓冲做前缀 diff：只 emit 超出已发全文的
+  // 后缀。无论本 assistant 帧与 sendText 谁先到，同一段文本只发一次（顺序不可控，
+  // 见 reserveStreamedAnswerDelta 注释）。
+  const cumulativeText = stringValue(event.data?.text) || text;
+  const answerDelta = reserveStreamedAnswerDelta(event.runId, cumulativeText);
+  if (answerDelta) {
+    await emitSdkChunk(request, sdkEmitter, answerDelta, answerOptions);
+  }
 }
 
 async function handleReasoningEndTransition(
@@ -328,6 +338,12 @@ async function handleLifecycleEvent(
     return;
   }
   const activeRequest = markActiveSdkRootLifecycleFinished(sessionKey, phase) ?? request;
+  if (phase === "error") {
+    const errorText = typeof data?.error === "string" ? data.error : "Agent run failed";
+    await emitSdkChunk(activeRequest, sdkEmitter, errorText, {
+      eventType: EventType.ANSWER_DELTA,
+    });
+  }
   if (phase === "end" && activeRequest.pendingChildSessionKeys.size > 0) {
     // root run 先结束，但仍有子 agent 未收尾；先用空行隔开后续恢复输出。
     await emitSdkChunk(activeRequest, sdkEmitter, "\n\n", {
@@ -339,6 +355,10 @@ async function handleLifecycleEvent(
     activeRequest.sessionKey,
     `root_lifecycle_${phase}`,
   );
+  // 注意：不要在此清理 streamedAnswerByRun。outbound.sendText 的去重判定经同一条
+  // FIFO 延后执行，可能晚于本 lifecycle/end 任务；此处清理会让延后的 sendText 读到
+  // 空缓冲、把 direct-path 汇总误判为新内容而重复 emit。缓冲改由 request 完成时
+  // （clearActiveSdkRequestRecord，等 pendingOutboundCount 归零后）统一按 boundRunIds 回收。
 }
 
 function handleCompactionEvent(
@@ -406,6 +426,9 @@ async function emitReasoningText(
 }
 
 export default async function handleAgentEvent(api: OpenClawPluginApi, event: AgentEvent) {
+  api.logger.info(
+    `[byai-channel] onAgentEvent: ${JSON.stringify(event)}`,
+  );
   const { seq, sessionKey, runId } = event;
   const runBinding = resolveActiveSdkRunBinding(runId);
   const resolvedSessionKey = sessionKey ?? runBinding?.sessionKey;
@@ -424,9 +447,12 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
   if (!request) {
     return;
   }
-  api.logger.info(
-    `[byai-channel] onAgentEvent: ${JSON.stringify(event)}`,
-  );
+  // direct-path 汇总等 turn 的 runId 不经 onAgentRunStart/subagent_spawned 绑定，
+  // 但其 assistant 事件能经 sessionKey 解析到本 request。补绑定并更新 lastBoundRunId，
+  // 使 outbound.sendText 的延后去重能定位到该 runId 的 answer 缓冲。
+  if (runId && resolvedSessionKey && request.lastBoundRunId !== runId) {
+    bindActiveSdkRequestRunId(resolvedSessionKey, runId);
+  }
   const isChildSession = isSubagentSessionKey(resolvedSessionKey);
   const currentStream = resolveAssistantDisplayStream(event, isChildSession);
   const previousStream = lastAgentAssistantEvent.stream;
@@ -441,7 +467,7 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
   }
   lastAgentAssistantEvent.stream = currentStream;
   if (event.stream === 'tool') {
-    await handleToolEvent(request, event, isChildSession);
+    await handleToolEvent(request, event);
   } else if (event.stream === 'assistant') {
     if (currentStream === "assistant" && previousStream !== "assistant" && toBeEmittedChunkAfterBaiyingCallTool) {
       // 无论是主agent还是subagent，开始输出正文前，先把baiying_call工具缓存起来的chunk emit出来

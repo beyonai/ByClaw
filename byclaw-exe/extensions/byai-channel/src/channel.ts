@@ -6,6 +6,7 @@ import {
   setAccountEnabledInConfigSection,
   type ChannelPlugin,
 } from "openclaw/plugin-sdk/core";
+import type { ChannelOutboundContext } from "openclaw/plugin-sdk/channel-contract";
 import { ByaiChannelConfigSchema } from "./config-schema.js";
 import { listByaiAccountIds, resolveByaiAccount, resolveDefaultByaiAccountId } from "./config.js";
 import type { ResolvedByaiAccount, ByaiProbe } from "./types.js";
@@ -13,10 +14,14 @@ import { sendReplyCallback } from "./webhook-handler.js";
 import type { ByaiSdkApp } from "./sdk-app.js";
 import {
   emitSdkChunkTracked,
+  reserveStreamedAnswerDelta,
   resolveActiveSdkRequestByTarget,
   resolveSdkEmitter,
   resolveWebhookContext,
 } from "./session-context.js";
+import { parseSessionIdFromTo } from "./outbound-dedup.js";
+import { EventType } from "@byclaw/by-framework";
+import { emitOutOfBandSdkEvent } from "./utils.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 
@@ -53,7 +58,6 @@ async function emitSdkText(params: {
       options: {},
     });
   }
-  const { EventType } = await import("@byclaw/by-framework");
   await sdkEmitter.emitState(
     request.sessionId,
     request.traceId || "",
@@ -62,6 +66,37 @@ async function emitSdkText(params: {
       eventType: EventType.APP_STREAM_RESPONSE,
     },
   );
+}
+
+// out-of-band 出站：没有 active SDK request 的 deliver（如 infra 注入），从 to 反解
+// sessionId 后作为独立一条 emit。区别于 emitSdkText：不依赖 ActiveSdkRequest，
+async function emitOutOfBandSdkText(params: {
+  to: string;
+  text: string;
+}): Promise<boolean> {
+  const sessionId = parseSessionIdFromTo(params.to);
+  if (!sessionId || !params.text) {
+    return false;
+  }
+  console.log(
+    `[byai-channel] outbound out-of-band emit: to=${params.to} sessionId=${sessionId} textLength=${params.text.length}`,
+  );
+  await emitOutOfBandSdkEvent({
+    sessionId,
+    data: {
+      choices: [
+        {
+          index: 0,
+          finish_reason: "",
+          delta: {
+            content: params.text,
+          }
+        }
+      ]
+    },
+    eventType: EventType.ANSWER_DELTA,
+  });
+  return true;
 }
 
 async function emitWebhookText(params: {
@@ -222,27 +257,35 @@ export const byaiChannelPlugin: ChannelPlugin<ResolvedByaiAccount, ByaiProbe> = 
     chunkerMode: "text",
     textChunkLimit: 10000,
 
-    sendText: async ({ to, text, accountId, replyToId }) => {
-      if (await emitWebhookText({ to, text, replyToId })) {
-        return {
-          channel: CHANNEL_ID,
-          messageId: replyToId ?? `byai-${Date.now()}`,
-          ok: true,
-        };
-      }
+    sendText: async (ctx: ChannelOutboundContext) => {
+      console.log("=======================sendText==========================");
+      console.log(ctx);
 
-      // SDK 场景下不直接依赖 outbound.sendText 收尾，原因见 agent-event.ts handleLifecycleEvent 注释。
-      // console.log(`outbound sendText`, text)
-      // await emitSdkText({ accountId, to, text });
-
-      return {
+      const { to, text, accountId, replyToId } = ctx;
+      const okResult = {
         channel: CHANNEL_ID,
         messageId: replyToId ?? `byai-${Date.now()}`,
         ok: true,
       };
+      if (await emitWebhookText({ to, text, replyToId })) {
+        return okResult;
+      }
+
+      const resolvedAccountId = accountId ?? "";
+      const request = resolveActiveSdkRequestByTarget(resolvedAccountId, to);
+
+      // out-of-band：无 active request（infra 注入等）。整段作为独立一条 emit。
+      // cron/heartbeat 在源头不走 deliver，不会到达这里。
+      if (!request) {
+        await emitOutOfBandSdkText({ to, text });
+      }
+      return okResult;
     },
 
-    sendMedia: async ({ to, text, mediaUrl, accountId }) => {
+    sendMedia: async (ctx: ChannelOutboundContext) => {
+      console.log("=======================sendMedia==========================");
+      console.log(ctx.text);
+      const { to, text, mediaUrl, accountId } = ctx;
       const combined = mediaUrl ? `${text}\n\nAttachment: ${mediaUrl}` : text;
       const handled = await emitWebhookText({
         to,

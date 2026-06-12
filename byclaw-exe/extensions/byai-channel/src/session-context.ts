@@ -67,9 +67,17 @@ export interface ActiveSdkRequest {
   traceId: string;
   createdAt: number;
   boundRunIds: Set<string>;
+  /** 最近一次绑定的 runId；outbound.sendText 无 runId 入参，用它定位当前活跃 run 的 answer 缓冲。 */
+  lastBoundRunId?: string;
   pendingChildSessionKeys: Set<string>;
   pendingOutboundCount: number;
   awaitingFollowup: boolean;
+  /**
+   * 置 awaitingFollowup=true 的时间戳（epoch ms）。subagent 结束后正常情况下 main 会被
+   * direct-path announce 重新唤醒（新 lifecycle start，数秒内）；但 direct+steer 都失败或
+   * 子 agent error 时 main 不会重启，awaitingFollowup 会永久挂住完成门。用它做短超时兜底。
+   */
+  awaitingFollowupSince?: number;
   deferredForFollowup: boolean;
   followupRunStarted: boolean;
   compactionRetryPending: boolean;
@@ -135,6 +143,66 @@ const {
 } = getSessionContextStore();
 
 const sdkEmitterLastChunks = new Map<string, EmitOptions & { traceId: string }>();
+
+// 按 runId 累计"已通过 answer 流（ANSWER_DELTA）emit 过的全文"。
+// 这是 assistant answer 流与 outbound.sendText 共享的权威缓冲：两条路径都通过
+// reserveStreamedAnswerDelta 做前缀 diff —— 各自只 emit "超出已发全文的后缀"，并把
+// 缓冲推进到更长的一方。由于二者发的文本互为同一最终答案的前缀，无论谁先到（顺序
+// 不可控：assistant 经 setImmediate+FIFO 滞后，sendText 由 core 同步调用），同一段
+// 文本只会被发一次，既不重复也不遗漏。lifecycle/request 清理时按 runId 回收。
+const streamedAnswerByRun = new Map<string, string>();
+
+/**
+ * 原子地为某 runId 预定一段 answer 增量：返回 fullText 中超出当前已发缓冲的后缀，
+ * 并把缓冲推进到二者中更长的全文。返回空串表示该文本已被（另一路径）发过，应抑制。
+ *
+ * - fullText 以缓冲为前缀 → 返回新增后缀（正常流式逐帧 / sendText 补尾）。
+ * - 缓冲已包含 fullText（fullText 是更短前缀）→ 返回 ""（对方已发更长，抑制）。
+ * - 二者非前缀关系（不同源，如 message 工具的全新内容）→ 返回整段 fullText，
+ *   并把缓冲设为 buffer+fullText，避免后续重复。
+ */
+export function reserveStreamedAnswerDelta(
+  runId: string | undefined,
+  fullText: string,
+): string {
+  if (!fullText) {
+    return "";
+  }
+  if (!runId) {
+    return fullText;
+  }
+  const buffer = streamedAnswerByRun.get(runId) ?? "";
+  if (!buffer) {
+    streamedAnswerByRun.set(runId, fullText);
+    return fullText;
+  }
+  if (fullText === buffer || buffer.includes(fullText)) {
+    return "";
+  }
+  if (fullText.startsWith(buffer)) {
+    streamedAnswerByRun.set(runId, fullText);
+    return fullText.slice(buffer.length);
+  }
+  // 非前缀同源：当作全新内容追加，缓冲并入以防后续重复。
+  streamedAnswerByRun.set(runId, `${buffer}${fullText}`);
+  return fullText;
+}
+
+/** 读取某 runId 已 emit 的 answer 全文；无则空串。 */
+export function getStreamedAnswer(runId: string | undefined): string {
+  if (!runId) {
+    return "";
+  }
+  return streamedAnswerByRun.get(runId) ?? "";
+}
+
+/** run 结束或 request 清理时回收该 runId 的 answer 缓冲。 */
+export function clearStreamedAnswer(runId: string | undefined): void {
+  if (!runId) {
+    return;
+  }
+  streamedAnswerByRun.delete(runId);
+}
 
 function normalizeAlias(value: string | undefined | null): string | null {
   const trimmed = value?.trim();
@@ -203,6 +271,7 @@ export function clearActiveSdkRequestRecord(request: ActiveSdkRequest): void {
   }
   for (const runId of request.boundRunIds) {
     activeSdkRequestsByRun.delete(runId);
+    streamedAnswerByRun.delete(runId);
   }
   request.boundRunIds.clear();
 }
@@ -423,6 +492,7 @@ export function bindActiveSdkRequestRunId(
     existingBinding.request.boundRunIds.delete(normalizedRunId);
   }
   request.boundRunIds.add(normalizedRunId);
+  request.lastBoundRunId = normalizedRunId;
   activeSdkRequestsByRun.set(normalizedRunId, {
     request,
     sessionKey: normalizedSessionKey,
@@ -593,12 +663,33 @@ export function markActiveSdkOutboundSent(
   return request;
 }
 
+/**
+ * subagent 全部结束后等待 main 续跑（重新 lifecycle start）的最长时间。正常 direct-path
+ * announce 会在数秒内重启 main；超过此窗口仍未 start，视为 main 不会再续跑（direct+steer
+ * 均失败 / 子 agent error 等），强制放行完成门，避免前端流永久不收尾、request 泄漏。
+ */
+const AWAITING_FOLLOWUP_TIMEOUT_MS = 45 * 1000;
+
+/** awaitingFollowup 是否已超过等待窗口（main 续跑迟迟未到）。 */
+function isAwaitingFollowupStale(request: ActiveSdkRequest, now = Date.now()): boolean {
+  if (!request.awaitingFollowup) {
+    return false;
+  }
+  if (request.awaitingFollowupSince === undefined) {
+    return false;
+  }
+  return now - request.awaitingFollowupSince >= AWAITING_FOLLOWUP_TIMEOUT_MS;
+}
+
 export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boolean {
+  // awaitingFollowup 正常会被 main 续跑的 lifecycle start 清掉；若超时仍未清，视为
+  // 不会再续跑，放行完成门（followupRunStarted 不在此豁免——它表示续跑已真正开始）。
+  const awaitingBlocks = request.awaitingFollowup && !isAwaitingFollowupStale(request);
   return Boolean(
     request.rootLifecyclePhase &&
       request.pendingChildSessionKeys.size === 0 &&
       request.pendingOutboundCount === 0 &&
-      !request.awaitingFollowup &&
+      !awaitingBlocks &&
       !request.followupRunStarted &&
       !request.compactionRetryPending &&
       !request.modelFallbackPending,
@@ -637,10 +728,9 @@ export async function completeActiveSdkRequest(
 export async function markActiveSdkRequestSubagentSpawned(
   requesterSessionKey: string,
   childSessionKey: string,
-  agentId: string,
   runId: string,
 ) {
-  if (!requesterSessionKey || !childSessionKey || !agentId) {
+  if (!requesterSessionKey || !childSessionKey) {
     return undefined;
   }
   const request = resolveActiveSdkRequestBySessionKey(requesterSessionKey);
@@ -686,32 +776,14 @@ export function markActiveSdkRequestSubagentEnded(
   request.pendingChildSessionKeys.delete(childSessionKey);
   channelRequestContextsBySessionKey.delete(childSessionKey);
   activeSdkRequestsByChild.delete(childSessionKey);
+  // 仅当所有子 session 都结束才进入"等 main 续跑"状态：还有兄弟子 agent 在跑时，
   if (request.pendingChildSessionKeys.size === 0) {
-    request.awaitingFollowup = !request.rootLifecyclePhase;
+    request.awaitingFollowup = true;
+    request.awaitingFollowupSince = Date.now();
     request.followupRunStarted = false;
     request.lastReasoningText = "";
     request.lastReasoningMessageId = "";
   }
-  return request;
-}
-
-export function markActiveSdkFollowupRunStarted(
-  sessionKey: string | undefined,
-): ActiveSdkRequest | undefined {
-  if (!sessionKey) {
-    return undefined;
-  }
-  const request = resolveActiveSdkRequestBySessionKey(sessionKey);
-  if (!request || !request.awaitingFollowup) {
-    return undefined;
-  }
-  request.rootLifecyclePhase = undefined;
-  request.awaitingFollowup = false;
-  request.deferredForFollowup = true;
-  request.followupRunStarted = true;
-  request.modelFallbackPending = false;
-  request.lastReasoningText = "";
-  request.lastReasoningMessageId = "";
   return request;
 }
 

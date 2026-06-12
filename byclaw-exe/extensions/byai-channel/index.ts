@@ -35,7 +35,6 @@ function logInfoOnce(api: OpenClawPluginApi, key: string, message: string): void
 
 async function enqueueAgentEvent(api: OpenClawPluginApi, event: AgentEvent): Promise<void> {
   await enqueueAfterAgentEvents(
-    api,
     `onAgentEvent runId=${event.runId ?? ""} seq=${String(event.seq)}`,
     async () => {
       await handleAgentEvent(api, event);
@@ -68,7 +67,6 @@ function registerFull(api: OpenClawPluginApi) {
     const request = await markActiveSdkRequestSubagentSpawned(
       ctx.requesterSessionKey,
       event.childSessionKey,
-      event.agentId,
       event.runId,
     );
     if (!request) {

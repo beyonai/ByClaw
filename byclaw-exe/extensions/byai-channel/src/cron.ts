@@ -1,10 +1,10 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createRedis, GatewayDataEmitter } from "@byclaw/by-framework";
+import { createRedis } from "@byclaw/by-framework";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { getOptionalByaiRuntime } from "./runtime";
-import { getRedisInfo, getUserCode } from "./utils";
+import { emitOutOfBandSdkEvent, getRedisInfo, getUserCode } from "./utils";
 
 type PluginHookGatewayCronRunStatus = "ok" | "error" | "skipped";
 
@@ -96,10 +96,6 @@ let cronNextRunUpdateQueued = false;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function normalizeId(value: unknown): string {
-  return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
 }
 
 function normalizeString(value: unknown): string | undefined {
@@ -310,44 +306,6 @@ export function startCronNextRunTimeRedisSync(api?: Pick<OpenClawPluginApi, "log
   cronNextRunTimer.unref?.();
 }
 
-async function getUserId(userCode: string, redis: ReturnType<typeof createRedis>) {
-  if (!userCode || !redis) {
-    return "";
-  }
-  const userId = await redis.get(`SHARE_BFM_USER_CODE_${userCode}`)
-  return normalizeId(userId);
-}
-
-async function emitOnce(params: {
-  sessionId?: string;
-  data: Record<string, any>;
-}) {
-  const redisInfo = getRedisInfo();
-  if (!redisInfo) {
-    return;
-  }
-  const userCode = getUserCode();
-  if (!userCode) {
-    return;
-  }
-  const redis = createRedis(redisInfo);
-  const userId = await getUserId(userCode, redis);
-  const emitter = new GatewayDataEmitter(redis, {
-    dataStreamName: "byai_gateway:session_event:data_stream",
-  });
-  await emitter.emitEvent({
-    data: {
-      ...params.data,
-      userId,
-      userCode,
-    },
-    sessionId: params.sessionId || "",
-    traceId: crypto.randomUUID(),
-    eventType: "cron_changed",
-  });
-  redis.quit();
-}
-
 export async function handleCronChangedEvent(
   event: PluginHookCronChangedEvent,
   api?: Pick<OpenClawPluginApi, "logger">,
@@ -390,9 +348,10 @@ export async function handleCronChangedEvent(
   if (sessionKey) {
     sessionId = resolveSessionId(sessionKey);
   }
-  await emitOnce({
+  await emitOutOfBandSdkEvent({
     sessionId,
     data,
+    eventType: "cron_changed",
   });
 }
 
