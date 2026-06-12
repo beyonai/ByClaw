@@ -76,3 +76,20 @@ byclaw-data/resource/import_package_owl_onto_bak/
 # Docker build artifacts
 **/build-info.json
 .trivyignore
+
+/deploy/middleware/initdb-official/
+/deploy/middleware/local-storage/
+/deploy/middleware/miniodata/
+/deploy/middleware/official-opengauss-data-compatible/
+
+
+
+/middleware/openclaw/.containerignore.local.macos
+/deploy/middleware/Containerfile.opengauss-official
+/middleware/openclaw/Dockerfile.local.macos
+/deploy/middleware/opensandbox-server.toml
+/byclaw-exe/extensions/baiying-enhance/pnpm-lock.yaml
+/byclaw-exe/extensions/byai-channel/pnpm-lock.yaml
+/byclaw-exe/extensions/baiying-enhance/pnpm-workspace.yaml
+/byclaw-exe/extensions/byai-channel/pnpm-workspace.yaml
+/scripts/upload_docs.py
