@@ -66,6 +66,7 @@ DATACLOUD_DATA_SERVICE_PORT="${DATACLOUD_DATA_SERVICE_PORT:-$DATACLOUD_PORT}"
 DATACLOUD_DATA_SERVICE_URL="${DATACLOUD_DATA_SERVICE_URL:-http://127.0.0.1:${DATACLOUD_DATA_SERVICE_PORT}}"
 DATACLOUD_API_BASE_URL="${DATACLOUD_API_BASE_URL:-http://${DATACLOUD_DOMAINNAME}.${NS_SERVICE}.svc.cluster.local:${DATACLOUD_DATA_SERVICE_PORT}}"
 BE_DOMAINNAME_URL="${BE_DOMAINNAME_URL:-http://byclaw-be.${NS_SERVICE}.svc.cluster.local:${BE_SERVER_PORT}}"
+BYCLAW_SERVICE_IMAGE_PULL_POLICY="${BYCLAW_SERVICE_IMAGE_PULL_POLICY:-Always}"
 
 DB_HOST="${DB_HOST:-opengauss.${NS_MIDDLEWARE}.svc.cluster.local}"
 DB_PORT="${DB_PORT:-5432}"
@@ -1133,6 +1134,7 @@ spec:
       containers:
         - name: be
           image: ${IMAGE_BE}
+          imagePullPolicy: ${BYCLAW_SERVICE_IMAGE_PULL_POLICY}
           ports:
             - name: http
               containerPort: ${BE_SERVER_PORT}
@@ -1290,6 +1292,7 @@ spec:
       containers:
         - name: fe
           image: ${IMAGE_FE}
+          imagePullPolicy: ${BYCLAW_SERVICE_IMAGE_PULL_POLICY}
           ports:
             - name: http
               containerPort: 80
@@ -1346,7 +1349,7 @@ spec:
       containers:
         - name: qa
           image: ${IMAGE_QA}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: ${BYCLAW_SERVICE_IMAGE_PULL_POLICY}
           args: ["api"]
           ports:
             - name: http
@@ -1453,7 +1456,7 @@ spec:
       containers:
         - name: data
           image: ${IMAGE_DATA}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: ${BYCLAW_SERVICE_IMAGE_PULL_POLICY}
           ports:
             - name: http
               containerPort: ${DATACLOUD_DATA_SERVICE_PORT}
