@@ -382,7 +382,7 @@ dev = [
 
 [[package]]
 name = "by-framework"
-version = "0.2.1"
+version = "0.2.2.dev4"
 source = { registry = "https://pypi.org/simple/" }
 dependencies = [
     { name = "dill" },
@@ -390,9 +390,9 @@ dependencies = [
     { name = "redis" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a9/b4/725bc1469c7e38ac25921be24e9bc34ac99213dbcfdcff85a089fdc39d06/by_framework-0.2.1.tar.gz", hash = "sha256:ef23e18759cd33dee5553b02a0900fc1164c75e3514c24542c04de13e71c82d8", size = 946814, upload-time = "2026-05-18T10:24:24.043Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c1/8e/a457fb619396690bb735408db02047a6219b27a114a285b6ee21e0bdf6c8/by_framework-0.2.2.dev4.tar.gz", hash = "sha256:7efde661c126054495dadf994dcee7c13af786c94fe7c6041a05da5b2f04656e", size = 1151375, upload-time = "2026-06-12T02:53:29.489Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b2/74/9d67e4ea9cc131f06a10fee978e4e0415f0202a18c0bb3ddd71827dd9d7a/by_framework-0.2.1-py3-none-any.whl", hash = "sha256:e4b25636eea60b4f0dcb220655d95bd2d52f050f459c98165b5195bee879019d", size = 137484, upload-time = "2026-05-18T10:24:22.544Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/9a/9b15941a2eae4515c992c5a839465d2cdc124673ab1a533f374612408139/by_framework-0.2.2.dev4-py3-none-any.whl", hash = "sha256:53d3eb09cc12f150d9d2e737d9621088a407143a7c4ba041b65f1d08607c58d8", size = 182531, upload-time = "2026-06-12T02:53:27.901Z" },
 ]
 
 [[package]]
@@ -408,6 +408,20 @@ wheels = [
 ]
 
 [[package]]
+name = "by-framework-trace-langfuse"
+version = "0.0.3.dev0"
+source = { registry = "https://pypi.org/simple/" }
+dependencies = [
+    { name = "by-framework" },
+    { name = "langchain" },
+    { name = "langfuse" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/93/c6/3672321ec1458834a9b4bf9f102476390aaa8e0fe0a777c67b76315bca4d/by_framework_trace_langfuse-0.0.3.dev0.tar.gz", hash = "sha256:17498fadf1f9237aaadffaae48fef58ce7a75ef23c1df876396a5e3575262b36", size = 7270, upload-time = "2026-06-08T09:56:01.085Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3b/bc/b2f7274f8dc3a2ae299828e4f3c53fc412b0085beec7659c74ac12cbf275/by_framework_trace_langfuse-0.0.3.dev0-py3-none-any.whl", hash = "sha256:32be0af6f4a8187200d5cf2d2ca25c95960ef206279cf9cbb495a32d281fdb57", size = 7696, upload-time = "2026-06-08T09:55:59.917Z" },
+]
+
+[[package]]
 name = "byclaw-data"
 version = "0.1.0"
 source = { editable = "." }
@@ -415,6 +429,7 @@ dependencies = [
     { name = "by-datacloud" },
     { name = "by-framework" },
     { name = "by-framework-history-byclaw" },
+    { name = "by-framework-trace-langfuse" },
     { name = "langchain-openai" },
     { name = "langfuse" },
     { name = "python-dotenv" },
@@ -431,8 +446,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "by-datacloud", editable = "../../by-datacloud" },
-    { name = "by-framework", specifier = ">=0.2.0", index = "https://pypi.org/simple/" },
+    { name = "by-framework", specifier = "==0.2.2.dev4" },
     { name = "by-framework-history-byclaw", specifier = ">=0.0.3" },
+    { name = "by-framework-trace-langfuse", specifier = "==0.0.3.dev0" },
     { name = "langchain-openai", specifier = ">=1.1.11" },
     { name = "langfuse", specifier = ">=2.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },

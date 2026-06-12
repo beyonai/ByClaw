@@ -886,30 +886,45 @@ def _create_early_langfuse_trace(
     agent_id: str,
     question: str = "",
     history: list[dict[str, str]] | None = None,
+    parent_observation_id: str = "",
 ) -> Any | None:
     """在 LLM 调用之前立即建 Langfuse trace，保持跨服务链路完整。
 
     trace_id 规则：
     - 上游提供合法 32 位小写 hex → 直接使用，与其他服务 trace 对齐
     - 非法格式 → 不传 trace_id，让 Langfuse 自动生成，原始值存入 metadata
+    parent_observation_id: LangfusePlugin.on_task_start 创建的 span id，
+        设置后 datacloud-agent span 会作为其子节点，确保完整父子层级。
     """
     if not os.getenv("LANGFUSE_SECRET_KEY"):
         return None
     try:
-        import re  # noqa: PLC0415
-
         from langfuse import Langfuse  # noqa: PLC0415
         from langfuse.types import TraceContext  # noqa: PLC0415
 
         _is_valid_lf_id = bool(trace_id and re.fullmatch(r"[0-9a-f]{32}", trace_id))
-        trace_context = TraceContext(trace_id=trace_id) if _is_valid_lf_id else None
+        _tc: dict[str, str] = {}
+        if _is_valid_lf_id:
+            _tc["trace_id"] = trace_id
+        if parent_observation_id:
+            _tc["parent_span_id"] = parent_observation_id
+        trace_context = TraceContext(**_tc) if _tc else None
 
+        # LANGFUSE_BASE_URL 是 SDK 4.x 标准变量，LANGFUSE_HOST 为旧版兼容
+        _lf_host = (
+            os.getenv("LANGFUSE_BASE_URL")
+            or os.getenv("LANGFUSE_HOST")
+            or "https://cloud.langfuse.com"
+        )
         lf = Langfuse(
             secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
             public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
-            host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+            host=_lf_host,
         )
-        ctx_mgr = lf.start_as_current_observation(
+        # 用 start_observation（不激活 OTel context），避免和 LangChain callback 的
+        # use_span() 冲突导致 LangGraph spans 消失。
+        # 层级靠显式 parent_span_id 传递，不依赖 OTel context propagation。
+        span = lf.start_observation(
             trace_context=trace_context,
             name="datacloud-agent",
             as_type="agent",
@@ -923,6 +938,7 @@ def _create_early_langfuse_trace(
                 "context_messages": (history or []) + [{"role": "user", "content": str(question)[:500]}],
             },
             metadata={
+                "object_type": "early_span",
                 "biz_trace_id": trace_id,
                 "message_id": message_id,
                 "agent_id": agent_id,
@@ -932,9 +948,7 @@ def _create_early_langfuse_trace(
                 "worker": os.getenv("DATACLOUD_GATEWAY_WORKER_ID", ""),
             },
         )
-        # __enter__ 激活 OTel span context，使请求期间所有日志自动带 tid=<lf_trace_id>
-        span = ctx_mgr.__enter__()
-        return (lf, span, ctx_mgr)
+        return (lf, span)
     except Exception:
         logger.debug("early langfuse trace creation skipped", exc_info=True)
         return None
@@ -950,12 +964,12 @@ def _update_early_langfuse_trace(
     if handle is None:
         return
     try:
-        lf, span, ctx_mgr = handle
+        lf, span = handle
         if status == "error":
             span.update(output={"error": error}, level="ERROR", status_message=error)
         else:
             span.update(output={"status": "ok"})
-        ctx_mgr.__exit__(None, None, None)
+        span.end()
         lf.flush()
     except Exception:
         pass
@@ -1611,7 +1625,7 @@ class DataCloudWorker(GatewayWorker):
                 _lf_handle = _early_lf_trace_ctx.get()
                 if _lf_handle is not None:
                     try:
-                        _lf_s, _span_s, _ctx_s = _lf_handle
+                        _lf_s, _span_s = _lf_handle
                         _result_status = (result or {}).get("status", "")
                         # 1. 是否触发澄清中断（status=waiting 表示被中断，准确率下降信号）
                         _lf_s.create_score(
@@ -1636,7 +1650,7 @@ class DataCloudWorker(GatewayWorker):
                 _lf_handle_err = _early_lf_trace_ctx.get()
                 if _lf_handle_err is not None:
                     try:
-                        _lf_e, _span_e, _ctx_e = _lf_handle_err
+                        _lf_e, _span_e = _lf_handle_err
                         _lf_e.create_score(
                             trace_id=_span_e.trace_id,
                             name="no_error",
@@ -1703,14 +1717,19 @@ class DataCloudWorker(GatewayWorker):
             agent_id=_cmd_agent_id,
             question=_cmd_question,
             history=_early_history,
+            # 把 LangfusePlugin 创建的 observation 作为父节点，确保层级正确
+            parent_observation_id=str(
+                getattr(getattr(context, "_langfuse_observation", None), "id", "") or ""
+            ),
         )
         _early_lf_trace_ctx.set(_early_lf_trace)
         _dc_logger.info(
             "DataCloudWorker.process_command: session=%s command=%s request_id=%s "
-            "trace_id=%s message_id=%s user_code=%s agent_id=%s",
+            "trace_id=%s header_trace_id=%s message_id=%s user_code=%s agent_id=%s",
             context.session_id,
             type(command).__name__,
             request_id,
+            context.trace_id,
             _cmd_trace_id,
             _cmd_message_id,
             _cmd_user_code,
@@ -2616,16 +2635,26 @@ class DataCloudWorker(GatewayWorker):
                 make_langfuse_callback,
             )
 
-            # 从 early trace span 取 Langfuse 分配的 trace_id，确保 LangChain callback
-            # 挂载到同一条 trace，实现 agent config 错误与 LLM 调用的链路统一
+            # 从 early trace span 取 trace_id 和 span id，
+            # trace_id 确保 LangChain callback 挂载到同一条 trace，
+            # span id 作为 parent_span_id 使 LangGraph 根节点直接成为 datacloud-agent 的子节点
             _early_span = _early_lf_trace[1] if _early_lf_trace else None
             _lf_trace_id = str(getattr(_early_span, "trace_id", "") or "")
-            _lf_handler = make_langfuse_callback(_lf_trace_id or None)
+            _lf_span_id = str(getattr(_early_span, "id", "") or "")
+            _lf_handler = make_langfuse_callback(_lf_trace_id or None, parent_span_id=_lf_span_id or None)
             if _lf_handler is not None:
                 config["callbacks"] = [_lf_handler]
                 config["metadata"] = {
                     "thread_id": thread_id,
                     "agent_id": str(by_agent_id or ""),
+                    # LangchainCallbackHandler 读取这几个字段写入 Langfuse trace/span
+                    "langfuse_trace_name": f"agent.workflow {by_agent_name or by_agent_id or ''}".strip(),
+                    "langfuse_user_id": str(getattr(getattr(command, "header", None), "user_code", "") or ""),
+                    "langfuse_session_id": context.session_id or "",
+                    "langfuse_tags": [
+                        f"agent_id:{by_agent_id or ''}",
+                        f"agent_name:{by_agent_name or ''}",
+                    ],
                 }
                 _lf_spans_list: list[dict[str, Any]] = []
                 current_tool_spans.set(_lf_spans_list)
