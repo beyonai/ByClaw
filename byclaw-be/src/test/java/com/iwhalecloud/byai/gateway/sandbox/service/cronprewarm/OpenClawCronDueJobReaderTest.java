@@ -7,6 +7,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -19,6 +20,8 @@ class OpenClawCronDueJobReaderTest {
 
     @Test
     void readsEnabledNotRunningJobsInsideLookaheadWindow() throws Exception {
+        assumeSqliteAvailable();
+
         Path database = tempDir.resolve("openclaw.sqlite");
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath());
             Statement statement = connection.createStatement()) {
@@ -59,6 +62,8 @@ class OpenClawCronDueJobReaderTest {
 
     @Test
     void reportsMissingCronJobsTable() throws Exception {
+        assumeSqliteAvailable();
+
         Path database = tempDir.resolve("missing-table.sqlite");
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath());
             Statement statement = connection.createStatement()) {
@@ -73,6 +78,8 @@ class OpenClawCronDueJobReaderTest {
 
     @Test
     void reportsMissingRequiredColumns() throws Exception {
+        assumeSqliteAvailable();
+
         Path database = tempDir.resolve("missing-columns.sqlite");
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath());
             Statement statement = connection.createStatement()) {
@@ -83,5 +90,14 @@ class OpenClawCronDueJobReaderTest {
 
         assertThat(result.getStatus()).isEqualTo(OpenClawCronDueJobs.Status.MISSING_COLUMNS);
         assertThat(result.getMissingColumns()).containsExactlyInAnyOrder("next_run_at_ms", "running_at_ms");
+    }
+
+    private void assumeSqliteAvailable() {
+        try (Connection ignored = DriverManager.getConnection("jdbc:sqlite::memory:")) {
+            // The test exercises SQLite-backed OpenClaw state; continue only when sqlite-jdbc native code is usable.
+        }
+        catch (Throwable e) {
+            Assumptions.assumeTrue(false, "SQLite native library is unavailable in this environment: " + e.getMessage());
+        }
     }
 }
