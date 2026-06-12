@@ -7,7 +7,7 @@ import ModelFormSection from './ModelFormSection';
 import {
   tokenMarks,
   DEFAULT_CONTEXT_TOKENS,
-  MAX_CONTEXT_TOKENS,
+  CONTEXT_TOKENS_CONFIG,
   MODEL_PROTOCOL_OPTIONS,
   getApiEndpointPlaceholder,
 } from './modelFormUtils';
@@ -49,11 +49,11 @@ const ApiTokenComp = (props: {
   const intl = useIntl();
 
   return (
-    <Space.Compact style={{ width: '100%' }}>
+    <Space.Compact className={styles.apiTokenWrap}>
       <Input
         type={tokenVisible ? 'text' : 'password'}
         placeholder={intl.formatMessage({ id: 'modelMgr.modal.apiTokenPlaceholder' })}
-        style={{ flex: 1 }}
+        className={styles.apiTokenInput}
         value={value}
         onChange={(e) => {
           onChange?.(trim(e.target.value));
@@ -61,7 +61,7 @@ const ApiTokenComp = (props: {
         disabled={!tokenVisible}
       />
       <Button type="default" onClick={() => setTokenVisible((v) => !v)}>
-        <span style={{ cursor: 'pointer', userSelect: 'none' }}>
+        <span className={styles.clickable}>
           {tokenVisible ? (
             <Space size={4}>
               <EyeInvisibleOutlined />
@@ -276,16 +276,16 @@ const ModelFormFields: React.FC<Props> = ({
 
           <div className={styles.grid2}>
             <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.connectTimeoutSec' })} name="connectTimeoutSec">
-              <InputNumber style={{ width: '100%' }} min={0} />
+              <InputNumber className={styles.fullWidth} min={0} />
             </Form.Item>
             <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.readTimeoutSec' })} name="readTimeoutSec">
-              <InputNumber style={{ width: '100%' }} min={0} />
+              <InputNumber className={styles.fullWidth} min={0} />
             </Form.Item>
             <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.maxRetries' })} name="maxRetries">
-              <InputNumber style={{ width: '100%' }} min={0} />
+              <InputNumber className={styles.fullWidth} min={0} />
             </Form.Item>
             <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.retryIntervalSec' })} name="retryIntervalSec">
-              <InputNumber style={{ width: '100%' }} min={0} />
+              <InputNumber className={styles.fullWidth} min={0} />
             </Form.Item>
           </div>
         </ModelFormSection>
@@ -309,7 +309,7 @@ const ModelFormFields: React.FC<Props> = ({
                   { required: true, message: intl.formatMessage({ id: 'modelMgr.modal.contextTokensPlaceholder' }) },
                 ]}
               >
-                <InputNumber min={1000} max={MAX_CONTEXT_TOKENS} step={1000} style={{ width: 140 }} />
+                <InputNumber {...CONTEXT_TOKENS_CONFIG} className={styles.tokenInput} />
               </Form.Item>
               <span className={styles.hint}>tokens</span>
               <div className={styles.sliderWrap}>
@@ -318,9 +318,7 @@ const ModelFormFields: React.FC<Props> = ({
                     const v = form.getFieldValue('contextTokens') || DEFAULT_CONTEXT_TOKENS;
                     return (
                       <Slider
-                        min={1000}
-                        max={MAX_CONTEXT_TOKENS}
-                        step={1}
+                        {...CONTEXT_TOKENS_CONFIG}
                         marks={tokenMarks as any}
                         value={v}
                         onChange={(val) => form.setFieldsValue({ contextTokens: val })}
@@ -337,19 +335,19 @@ const ModelFormFields: React.FC<Props> = ({
           </div>
           <div className={styles.grid3}>
             <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.temperature' })} name="temperature">
-              <InputNumber style={{ width: '100%' }} min={0} max={2} step={0.1} />
+              <InputNumber className={styles.fullWidth} min={0} max={2} step={0.1} />
             </Form.Item>
             <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.topP' })} name="topP">
-              <InputNumber style={{ width: '100%' }} min={0} max={1} step={0.05} />
+              <InputNumber className={styles.fullWidth} min={0} max={1} step={0.05} />
             </Form.Item>
             <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.maxTokens' })} name="maxTokens">
-              <InputNumber style={{ width: '100%' }} min={1} />
+              <InputNumber className={styles.fullWidth} min={1} />
             </Form.Item>
             <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.frequencyPenalty' })} name="frequencyPenalty">
-              <InputNumber style={{ width: '100%' }} min={-2} max={2} step={0.1} />
+              <InputNumber className={styles.fullWidth} min={-2} max={2} step={0.1} />
             </Form.Item>
             <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.presencePenalty' })} name="presencePenalty">
-              <InputNumber style={{ width: '100%' }} min={-2} max={2} step={0.1} />
+              <InputNumber className={styles.fullWidth} min={-2} max={2} step={0.1} />
             </Form.Item>
             <Form.Item
               label={intl.formatMessage({ id: 'modelMgr.modal.provider' })}
@@ -367,12 +365,12 @@ const ModelFormFields: React.FC<Props> = ({
             <Form.Item
               label={intl.formatMessage({ id: 'modelMgr.modal.extendParam' })}
               name="extendParam"
-              style={{ gridColumn: 'span 3' }}
+              className={styles.gridColSpan3}
             >
               <TextArea
                 placeholder={intl.formatMessage({ id: 'modelMgr.modal.extendParamPlaceholder' })}
                 rows={4}
-                style={{ width: '100%' }}
+                className={styles.fullWidth}
               />
             </Form.Item>
           </div>

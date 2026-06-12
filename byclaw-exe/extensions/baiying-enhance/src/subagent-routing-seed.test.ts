@@ -44,10 +44,15 @@ describe("buildSubagentRoutingMarkdown", () => {
       ],
     };
     const md = await buildSubagentRoutingMarkdown([adapted]);
-    expect(md).toContain(`\`${agentId}\``);
+    expect(md).toContain(`**agentId**: \`${agentId}\``);
     expect(md).toContain("CRM Bot");
     expect(md).toContain("Reports: Build reports");
     expect(md).toContain("revenue queries");
+    expect(md).toContain("**avoid**: password resets");
+    expect(md).toContain("**dispatch**: 派发一个边界清晰的子任务");
+    expect(md).toContain("**evidence**: 结构化结论");
+    expect(md).toContain("**resources**: OBJECT: Sales DB");
+    expect(md).not.toContain("**persona**:");
     expect(md).not.toMatch(/\*\*res\*\*:/);
   });
 
@@ -79,6 +84,9 @@ describe("buildSubagentRoutingMarkdown", () => {
     const md = await buildSubagentRoutingMarkdown([adapted]);
     expect(md).toContain("procurement");
     expect(md).toContain("INTERFACE");
+    expect(md).toContain("**requires:baiying_call**");
+    expect(md).toContain("必须明确要求该 agent 使用 `baiying_call`");
+    expect(md).toContain("`baiying_call` 工具结果");
   });
 
   it("uses raw detail corePersonaDefinition and coreCompetencies as routing hints", async () => {
@@ -133,13 +141,13 @@ describe("buildSubagentRoutingMarkdown", () => {
     };
 
     const md = await buildSubagentRoutingMarkdown([adapted]);
-    expect(md).toContain("**persona**: 工作规范: 回答严谨简洁");
-    expect(md).toContain("项目进度跟踪与可视化");
-    expect(md).toContain("任务分配与资源调度");
-    expect(md).toContain("风险预警与问题追踪");
-    expect(md).toContain("项目数据报表与总结分析");
+    expect(md).not.toContain("**persona**:");
+    expect(md).toContain("**route**:");
+    expect(md).toContain("作为项目管理数字员工");
     expect(md).toContain("团队成员工作负荷分析");
     expect(md).toContain("项目风险清单视图生成");
-    expect(md).toContain("帮我生成本周的项目数据看板");
+    expect(md).toContain("**avoid**:");
+    expect(md).toContain("不提供底层IT系统或网络故障排查");
+    expect(md).toContain("当前项目有哪些高风险项需要关注");
   });
 });

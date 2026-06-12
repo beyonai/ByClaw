@@ -11,6 +11,7 @@ export interface IKnowledgeBaseItem {
   manUserId: string;
   resourceStatus: string;
   isTop: string;
+  ownerType?: string;
 }
 
 // 知识库文档类型定义

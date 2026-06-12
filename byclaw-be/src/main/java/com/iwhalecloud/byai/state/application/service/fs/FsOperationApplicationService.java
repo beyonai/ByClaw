@@ -7,6 +7,7 @@ import java.net.URLConnection;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.Callable;
 
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -17,6 +18,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.storage.ResourceFS;
 import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
@@ -72,6 +74,16 @@ public class FsOperationApplicationService {
 
     public FsFileMetadataVo putFile(String spaceTypeValue, Long resourceId, String path, String contentType,
         MultipartFile file) {
+        return doPutFile(spaceTypeValue, resourceId, path, contentType, file);
+    }
+
+    public FsFileMetadataVo putFileAsUser(String userCode, String spaceTypeValue, Long resourceId, String path,
+        String contentType, MultipartFile file) {
+        return runAsUserCode(userCode, () -> doPutFile(spaceTypeValue, resourceId, path, contentType, file));
+    }
+
+    private FsFileMetadataVo doPutFile(String spaceTypeValue, Long resourceId, String path, String contentType,
+        MultipartFile file) {
         FsSpaceType spaceType = FsSpaceType.of(spaceTypeValue);
         String normalizedPath = normalizeFilePath(spaceType, path);
         // USER 空间只要求当前登录用户；RESOURCE 空间必须校验资源管理权限。
@@ -82,17 +94,37 @@ public class FsOperationApplicationService {
     }
 
     public FsDownload downloadFile(String spaceTypeValue, Long resourceId, String path) {
+        return doDownloadFile(null, spaceTypeValue, resourceId, path);
+    }
+
+    public FsDownload downloadFileAsUser(String userCode, String spaceTypeValue, Long resourceId, String path) {
+        return runAsUserCode(userCode, () -> doDownloadFile(userCode, spaceTypeValue, resourceId, path));
+    }
+
+    private FsDownload doDownloadFile(String runAsUserCode, String spaceTypeValue, Long resourceId, String path) {
         FsSpaceType spaceType = FsSpaceType.of(spaceTypeValue);
         String normalizedPath = normalizeFilePath(spaceType, path);
         checkReadPermission(spaceType, resourceId, normalizedPath);
         String fileName = fileNameOf(normalizedPath);
         String contentType = StringUtils.defaultIfBlank(URLConnection.guessContentTypeFromName(fileName),
             DEFAULT_CONTENT_TYPE);
-        StreamingResponseBody body = outputStream -> streamFile(spaceType, normalizedPath, outputStream);
+        StreamingResponseBody body =
+            outputStream -> runAsUserCode(runAsUserCode, () -> {
+                streamFile(spaceType, normalizedPath, outputStream);
+                return null;
+            });
         return new FsDownload(fileName, contentType, body);
     }
 
     public FsDeleteResultVo deleteFile(FsFileDeleteRequest request) {
+        return doDeleteFile(request);
+    }
+
+    public FsDeleteResultVo deleteFileAsUser(String userCode, FsFileDeleteRequest request) {
+        return runAsUserCode(userCode, () -> doDeleteFile(request));
+    }
+
+    private FsDeleteResultVo doDeleteFile(FsFileDeleteRequest request) {
         FsSpaceType spaceType = FsSpaceType.of(request.getSpaceType());
         String normalizedPath = normalizeFilePath(spaceType, request.getPath());
         checkWritePermission(spaceType, request.getResourceId(), normalizedPath);
@@ -105,6 +137,22 @@ public class FsOperationApplicationService {
         vo.setRecursive(false);
         vo.setDeletedCount(deleted ? 1 : 0);
         return vo;
+    }
+
+    public List<String> listFiles(String spaceTypeValue, Long resourceId, String path, Integer maxDepth) {
+        return doListFiles(spaceTypeValue, resourceId, path, maxDepth);
+    }
+
+    public List<String> listFilesAsUser(String userCode, String spaceTypeValue, Long resourceId, String path,
+        Integer maxDepth) {
+        return runAsUserCode(userCode, () -> doListFiles(spaceTypeValue, resourceId, path, maxDepth));
+    }
+
+    private List<String> doListFiles(String spaceTypeValue, Long resourceId, String path, Integer maxDepth) {
+        FsSpaceType spaceType = FsSpaceType.of(spaceTypeValue);
+        String normalizedPath = normalizeSpacePath(spaceType, path);
+        checkReadPermission(spaceType, resourceId, normalizedPath);
+        return list(spaceType, normalizedPath, maxDepth);
     }
 
     public FsDeleteResultVo createDirectory(FsDirectoryRequest request) {
@@ -282,8 +330,10 @@ public class FsOperationApplicationService {
             throw new BaseException("byclaw.fs.upload.file.not.empty");
         }
         if (spaceType == FsSpaceType.USER) {
+            userFS.init();
             return userFS.write(file, path);
         }
+        resourceFS.init();
         return resourceFS.write(file, path);
     }
 
@@ -291,9 +341,11 @@ public class FsOperationApplicationService {
         String resolvedContentType = StringUtils.defaultIfBlank(contentType, DEFAULT_CONTENT_TYPE);
         // 内部生成的小对象直接走流式写入，避免再伪造成 MultipartFile。
         if (spaceType == FsSpaceType.USER) {
+            userFS.init();
             userFS.write(new java.io.ByteArrayInputStream(bytes), bytes.length, resolvedContentType, path);
             return;
         }
+        resourceFS.init();
         resourceFS.write(new java.io.ByteArrayInputStream(bytes), bytes.length, resolvedContentType, path);
     }
 
@@ -320,16 +372,22 @@ public class FsOperationApplicationService {
 
     private boolean delete(FsSpaceType spaceType, String path) {
         if (spaceType == FsSpaceType.USER) {
+            userFS.init();
             return Boolean.TRUE.equals(userFS.delete(path));
         }
+        resourceFS.init();
         return Boolean.TRUE.equals(resourceFS.delete(path));
     }
 
     private List<String> list(FsSpaceType spaceType, String path) {
+        return list(spaceType, path, null);
+    }
+
+    private List<String> list(FsSpaceType spaceType, String path, Integer maxDepth) {
         if (spaceType == FsSpaceType.USER) {
-            return userFS.list(path, null);
+            return userFS.list(path, maxDepth);
         }
-        return resourceFS.list(path, null);
+        return resourceFS.list(path, maxDepth);
     }
 
     private void streamFile(FsSpaceType spaceType, String path, OutputStream outputStream) throws IOException {
@@ -483,6 +541,42 @@ public class FsOperationApplicationService {
         String normalized = StringUtils.removeEnd(StringUtils.defaultString(path), "/");
         int slashIndex = normalized.lastIndexOf('/');
         return slashIndex >= 0 ? normalized.substring(slashIndex + 1) : normalized;
+    }
+
+    private <T> T runAsUserCode(String userCode, Callable<T> callable) {
+        if (StringUtils.isBlank(userCode)) {
+            return callUnchecked(callable);
+        }
+        LoginInfo originalLoginInfo = CurrentUserHolder.getLoginInfo();
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserCode(userCode.trim());
+        CurrentUserHolder.setLoginInfo(loginInfo);
+        try {
+            return callUnchecked(callable);
+        }
+        finally {
+            restoreLoginInfo(originalLoginInfo);
+        }
+    }
+
+    private <T> T callUnchecked(Callable<T> callable) {
+        try {
+            return callable.call();
+        }
+        catch (RuntimeException e) {
+            throw e;
+        }
+        catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private void restoreLoginInfo(LoginInfo originalLoginInfo) {
+        if (originalLoginInfo == null) {
+            CurrentUserHolder.clearLoginInfo();
+            return;
+        }
+        CurrentUserHolder.setLoginInfo(originalLoginInfo);
     }
 
     public static class FsDownload {

@@ -14,3 +14,15 @@ export const getAgentListByPage = (payload: any, cancelToken?: AbortController) 
 
 export const validateTask = (payload: any, cancelToken?: AbortController) =>
   POST<any>('/byaiService/chat/validateTask', { ...payload }, { cancelToken });
+
+export const qryEmployeeDetail = (agentId: string, cancelToken?: AbortController) => {
+  return POST<any>(
+    '/byaiService/digitalEmployeeController/findDetailsById',
+    {
+      resourceId: agentId,
+    },
+    {
+      cancelToken,
+    }
+  );
+};

@@ -1,20 +1,21 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Button, Dropdown, Tabs, App, Skeleton } from 'antd';
+import { Button, Dropdown, App, Skeleton, Row, Col } from 'antd';
 import classNames from 'classnames';
-import { useIntl, useSelector, getLocale } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
 import AntdIcon from '@/components/AntdIcon';
 import { isAdminVip } from '@/utils/auth';
 import { deleteTemplate, getTemplateDetail, getTemplateList } from './services';
 // @ts-ignore
 import tmpBg from './tmp.jpeg';
-import styles from './index.module.less';
+
 import { get } from 'lodash';
 import TemplateModal from '@/components/ChatLayoutComp/components/CreateTemplate';
 import NullableAntdCompWithAnim from '@/components/NullableAntdCompWithAnim';
 import useAppStore from '@/models/common/useAppStore';
-import { getTemplateTypes } from '@/service/auth';
 import { downloadMinIOFileURL } from '@/service/file';
+
+import styles from './index.module.less';
 
 interface ITemplateItem {
   sessionId: string;
@@ -83,13 +84,10 @@ export default function RecommendTabs() {
   const { modal, message } = App.useApp();
   const [loadingItems, setLoadingItems] = useState<React.Key[]>([]);
   const [templateList, setTemplateList] = useState<ITemplateItem[]>([]);
-  const [tabList, setTabList] = useState([]); // 模板分类列表
-  const [currentTab, setCurrentTab] = useState(''); // 当前选中的分类
   const [isLoadingList, setIsLoadingList] = useState(false);
   const [imageErrors, setImageErrors] = useState<string[]>([]);
 
   const { setLoginModalOpen } = useAppStore();
-  const local = getLocale();
 
   const [templateModalProps, setTemplateModalProps] = useState<{
     open: boolean;
@@ -100,36 +98,25 @@ export default function RecommendTabs() {
   });
 
   // 获取模板数据
-  const fetchTemplateData = useCallback(
-    async (tabKey: string) => {
-      setIsLoadingList(true);
-      setTemplateList([]);
-      if (!tabKey) {
-        return;
-      }
-      try {
-        const res = await getTemplateList({
-          templateTypes: tabKey,
-          terminals: isAdminVip(userInfo) ? ['ALL', 'PC', 'APP'] : ['ALL', 'PC'],
-        });
+  const fetchTemplateData = useCallback(async () => {
+    setIsLoadingList(true);
+    setTemplateList([]);
+    try {
+      const res = await getTemplateList({
+        terminals: isAdminVip(userInfo) ? ['ALL', 'PC', 'APP'] : ['ALL', 'PC'],
+      });
 
-        setTemplateList((res as any)?.list || []);
-      } catch (error) {
-        console.error('获取模板数据失败:', error);
-      } finally {
-        setIsLoadingList(false);
-      }
-    },
-    [userInfo]
-  );
-
-  const isEN = React.useMemo(() => {
-    return local.includes('en');
-  }, [local]);
+      setTemplateList((res as any)?.list || []);
+    } catch (error) {
+      console.error('获取模板数据失败:', error);
+    } finally {
+      setIsLoadingList(false);
+    }
+  }, [userInfo]);
 
   useEffect(() => {
-    fetchTemplateData(currentTab);
-  }, [currentTab, fetchTemplateData]);
+    fetchTemplateData();
+  }, [fetchTemplateData]);
 
   // 监听userInfo变化，当用户登录后重新加载失败的图片
   useEffect(() => {
@@ -198,155 +185,131 @@ export default function RecommendTabs() {
         },
       });
     },
-    [currentTab, intl, modal, message]
+    [intl, modal, message]
   );
-
-  useEffect(() => {
-    // 模板分类列表
-    getTemplateTypes({
-      standType: 'TEMPLATE_TYPE',
-    }).then((data = []) => {
-      setTabList(data || []);
-      if (data?.length) {
-        setCurrentTab(data?.[0]?.paramValue);
-      }
-    });
-  }, []);
 
   return (
     <div className={styles.tabsWrap} id="guideStep3-1">
-      <Tabs
-        centered
-        activeKey={currentTab}
-        onChange={setCurrentTab}
-        items={(tabList || [])?.map?.((tab: { paramValue: string; paramName: string; paramEnName?: string }) => ({
-          key: tab.paramValue,
-          label: isEN ? tab.paramEnName || tab.paramName : tab.paramName,
-          children: (
-            <div className={styles.cardsGrid}>
-              {isLoadingList &&
-                // 显示3个骨架屏
-                Array.from({ length: 3 }).map((_, index) => (
-                  <Skeleton.Node active key={`skeleton-${index}`} style={{ width: '100%', height: 128 }} />
-                ))}
-              {templateList.map((item, index) => {
-                const itemKey = `${tab.paramValue}-${item.sessionId}`;
-                const coverSrc = buildTemplateCoverDownloadUrl(item);
-                return (
+      <Row gutter={[16, 16]}>
+        {isLoadingList &&
+          // 显示3个骨架屏
+          Array.from({ length: 3 }).map((_, index) => (
+            <Col span={8} key={`skeleton-${index}`}>
+              <Skeleton.Node active style={{ width: '100%', height: 128 }} />
+            </Col>
+          ))}
+        {templateList.map((item, index) => {
+          const coverSrc = buildTemplateCoverDownloadUrl(item);
+          return (
+            <Col span={8} key={item.sessionId}>
+              <div className={styles.cardItem} style={{ backgroundColor: colorCycle[index % colorCycle.length] }}>
+                <div className={styles.cardTitle}>{item.templateTitle}</div>
+                <div className={styles.poster}>
+                  <img
+                    // 这里要加个key，不然切换登录状态后，不会触发onError
+                    key={`${item.sessionId}-${imageErrors.includes(item.sessionId) ? 'error' : 'normal'}-img`}
+                    style={{ display: 'none' }}
+                    src={coverSrc || undefined}
+                    alt="poster"
+                    onError={() => handleImageError(item.sessionId)}
+                  />
                   <div
-                    key={itemKey}
-                    className={styles.cardItem}
-                    style={{ backgroundColor: colorCycle[index % colorCycle.length] }}
-                  >
-                    <div className={styles.cardTitle}>{item.templateTitle}</div>
-                    <div className={styles.poster}>
-                      <img
-                        // 这里要加个key，不然切换登录状态后，不会触发onError
-                        key={`${item.sessionId}-${imageErrors.includes(item.sessionId) ? 'error' : 'normal'}-img`}
-                        style={{ display: 'none' }}
-                        src={coverSrc || undefined}
-                        alt="poster"
-                        onError={() => handleImageError(item.sessionId)}
-                      />
-                      <div
-                        className={styles.posterImage}
-                        style={{
-                          backgroundImage: imageErrors.includes(item.sessionId)
-                            ? `url(${tmpBg})`
-                            : coverSrc
-                              ? `url(${coverSrc})`
-                              : `url(${tmpBg})`,
-                        }}
-                      />
-                    </div>
-                    <div className={styles.mask} />
-                    {isAdminVip(userInfo) && (
-                      <Dropdown
-                        menu={{
-                          items: [
-                            {
-                              key: 'edit',
-                              label: intl.formatMessage({ id: 'chat.recommendTabs.editTemplate' }),
-                            },
-                            {
-                              key: 'delete',
-                              label: intl.formatMessage({ id: 'chat.recommendTabs.deleteTemplate' }),
-                            },
-                          ],
-                          onClick: ({ key }) => {
-                            if (key === 'edit') {
-                              handleEditTemplate(item);
-                            } else if (key === 'delete') {
-                              handleDeleteTemplate(item);
-                            }
-                          },
-                        }}
-                        placement="bottomLeft"
-                        trigger={['hover']}
-                        disabled={loadingItems.includes(item.sessionId)}
-                      >
-                        <Button
-                          size="small"
-                          loading={loadingItems.includes(item.sessionId)}
-                          className={styles.editBtn}
-                          icon={<AntdIcon type="icon-a-Editbianji" />}
-                          onClick={() => handleEditTemplate(item)}
-                        />
-                      </Dropdown>
-                    )}
-                    <div className={classNames(styles.cardBtns)}>
-                      <Button
-                        size="small"
-                        className={styles.gradientBtn}
-                        loading={loadingItems.includes(item.sessionId)}
-                        icon={
-                          <GradientIcon>
-                            <path d="M580.16 50.944a38.464 38.464 0 0 1 55.616 34.368V193.92l200.384-100.224a38.464 38.464 0 0 1 55.616 34.368v597.312a38.528 38.528 0 0 1-21.248 34.368l-426.624 213.312a38.464 38.464 0 0 1-55.616-34.304V830.08l-200.384 100.224A38.4 38.4 0 0 1 132.288 896V298.624a38.4 38.4 0 0 1 21.184-34.304L580.16 50.944zM465.088 365.056v511.424l349.824-174.912V190.144L465.088 365.056z m-256-42.688v511.424l179.2-89.6V341.312a38.4 38.4 0 0 1 21.184-34.304l149.44-74.752V147.456L209.088 322.368z" />
-                          </GradientIcon>
+                    className={styles.posterImage}
+                    style={{
+                      backgroundImage: imageErrors.includes(item.sessionId)
+                        ? `url(${tmpBg})`
+                        : coverSrc
+                          ? `url(${coverSrc})`
+                          : `url(${tmpBg})`,
+                    }}
+                  />
+                </div>
+                <div className={styles.mask} />
+                {isAdminVip(userInfo) && (
+                  <Dropdown
+                    menu={{
+                      items: [
+                        {
+                          key: 'edit',
+                          label: intl.formatMessage({ id: 'chat.recommendTabs.editTemplate' }),
+                        },
+                        {
+                          key: 'delete',
+                          label: intl.formatMessage({ id: 'chat.recommendTabs.deleteTemplate' }),
+                        },
+                      ],
+                      onClick: ({ key }) => {
+                        if (key === 'edit') {
+                          handleEditTemplate(item);
+                        } else if (key === 'delete') {
+                          handleDeleteTemplate(item);
                         }
-                        onClick={() => makeSameStyle(item)}
-                      >
-                        <span className={styles.gradientText}>
-                          {intl.formatMessage({ id: 'chat.recommendTabs.makeSameStyle' })}
-                        </span>
-                      </Button>
-                      <Button
-                        size="small"
-                        icon={<AntdIcon type="icon-a-Replay-musiczhongxinbofang" />}
-                        onClick={() => {
-                          if (!checkLogin()) {
-                            return;
-                          }
-                          EventEmitter.emit('beyond-fullabsolute-driver-open-type', {
-                            drawerType: 'replaytmplate',
-                            canClose: false,
-                          });
-                          EventEmitter.emit('beyond-fullabsolute-driver-message', {
-                            sessionInfo: {
-                              sessionId: item.sessionId,
-                              sessionName: item.templateTitle,
-                            },
-                          });
-                        }}
-                      >
-                        <span className={styles.gradientText}>
-                          {intl.formatMessage({ id: 'chat.recommendTabs.viewReplay' })}
-                        </span>
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ),
-        }))}
-      />
+                      },
+                    }}
+                    placement="bottomLeft"
+                    trigger={['hover']}
+                    disabled={loadingItems.includes(item.sessionId)}
+                  >
+                    <Button
+                      size="small"
+                      loading={loadingItems.includes(item.sessionId)}
+                      className={styles.editBtn}
+                      icon={<AntdIcon type="icon-a-Editbianji" />}
+                      onClick={() => handleEditTemplate(item)}
+                    />
+                  </Dropdown>
+                )}
+                <div className={classNames(styles.cardBtns)}>
+                  <Button
+                    size="small"
+                    className={styles.gradientBtn}
+                    loading={loadingItems.includes(item.sessionId)}
+                    icon={
+                      <GradientIcon>
+                        <path d="M580.16 50.944a38.464 38.464 0 0 1 55.616 34.368V193.92l200.384-100.224a38.464 38.464 0 0 1 55.616 34.368v597.312a38.528 38.528 0 0 1-21.248 34.368l-426.624 213.312a38.464 38.464 0 0 1-55.616-34.304V830.08l-200.384 100.224A38.4 38.4 0 0 1 132.288 896V298.624a38.4 38.4 0 0 1 21.184-34.304L580.16 50.944zM465.088 365.056v511.424l349.824-174.912V190.144L465.088 365.056z m-256-42.688v511.424l179.2-89.6V341.312a38.4 38.4 0 0 1 21.184-34.304l149.44-74.752V147.456L209.088 322.368z" />
+                      </GradientIcon>
+                    }
+                    onClick={() => makeSameStyle(item)}
+                  >
+                    <span className={styles.gradientText}>
+                      {intl.formatMessage({ id: 'chat.recommendTabs.makeSameStyle' })}
+                    </span>
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<AntdIcon type="icon-a-Replay-musiczhongxinbofang" />}
+                    onClick={() => {
+                      if (!checkLogin()) {
+                        return;
+                      }
+                      EventEmitter.emit('beyond-fullabsolute-driver-open-type', {
+                        drawerType: 'replaytmplate',
+                        canClose: false,
+                      });
+                      EventEmitter.emit('beyond-fullabsolute-driver-message', {
+                        sessionInfo: {
+                          sessionId: item.sessionId,
+                          sessionName: item.templateTitle,
+                        },
+                      });
+                    }}
+                  >
+                    <span className={styles.gradientText}>
+                      {intl.formatMessage({ id: 'chat.recommendTabs.viewReplay' })}
+                    </span>
+                  </Button>
+                </div>
+              </div>
+            </Col>
+          );
+        })}
+      </Row>
       <NullableAntdCompWithAnim open={templateModalProps.open}>
         <TemplateModal
           {...templateModalProps}
           onClose={() => {
             setTemplateModalProps({ open: false, sessionId: '' });
-            fetchTemplateData(currentTab);
+            fetchTemplateData();
           }}
         />
       </NullableAntdCompWithAnim>

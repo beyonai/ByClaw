@@ -147,6 +147,9 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
   let digEmployeeChangeSubscriber:
     | ReturnType<typeof import("./dig-employee-change-subscriber.js").createDigEmployeeChangeSubscriber>
     | undefined;
+  let mainContextTemplateWatch:
+    | ReturnType<typeof import("./main-context-template-watch.js").createMainContextTemplateWatch>
+    | undefined;
   let serviceStopped = false;
 
   api.registerService({
@@ -160,11 +163,13 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
         { createAgentWatchdog },
         { createDigEmployeeAuthWatch },
         { createDigEmployeeChangeSubscriber },
-        { resolveEffectiveMainAgentsMdMode, loadMainAgentsTemplate },
+        { createMainContextTemplateWatch },
+        { resolveEffectiveMainAgentsMdMode, loadMainAgentsTemplate, seedMainAgentAgentsMd },
       ] = await Promise.all([
         import("./agent-watchdog.js"),
         import("./dig-employee-auth-watch.js"),
         import("./dig-employee-change-subscriber.js"),
+        import("./main-context-template-watch.js"),
         import("./main-workspace-seed.js"),
       ]);
 
@@ -228,6 +233,41 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
           await agentWatch?.__flushNow?.({ fullWorkspaceReseed: true });
         },
       });
+      if (
+        pluginCfg.mainWorkspaceAgentsAutoSeed !== false &&
+        pluginCfg.mainContextTemplateWatch !== false
+      ) {
+        mainContextTemplateWatch = createMainContextTemplateWatch({
+          redisJsonStore,
+          pluginConfig: pluginCfg,
+          logger: {
+            info: (message) => api.logger.info(message),
+            warn: (message) => api.logger.warn(message),
+            error: (message) => api.logger.error(message),
+          },
+          onChange: async () => {
+            if (serviceStopped) {
+              return;
+            }
+            await seedMainAgentAgentsMd({
+              api,
+              pluginConfig: pluginCfg,
+              redisJsonStore,
+              managedAgents: registry.list(),
+              redisContextOnly: true,
+              skipSubagentRouting: true,
+              log: {
+                warn: (message) => api.logger.warn(message),
+                info: (message) => api.logger.info(message),
+              },
+            });
+          },
+        });
+      } else {
+        api.logger.info(
+          "baiying-enhance: main context template watcher disabled (mainWorkspaceAgentsAutoSeed=false or mainContextTemplateWatch=false)",
+        );
+      }
       agentWatch = createAgentWatchdog({
         api,
         registry,
@@ -265,6 +305,13 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
         });
       }
       await agentWatch.start({ deferInitialFlush: true });
+      void mainContextTemplateWatch?.start().catch((err) => {
+        api.logger.warn(
+          `baiying-enhance: main context template watcher failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      });
       void (async () => {
         api.logger.info(
           "baiying-enhance: startup Redis auth sync scheduled in background; gateway ready will not wait for managed agent reseed",
@@ -289,6 +336,8 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
       serviceStopped = true;
       await digEmployeeChangeSubscriber?.stop();
       digEmployeeChangeSubscriber = undefined;
+      await mainContextTemplateWatch?.stop();
+      mainContextTemplateWatch = undefined;
       await digEmployeeAuthWatch?.stop();
       digEmployeeAuthWatch = undefined;
       await agentWatch?.stop();

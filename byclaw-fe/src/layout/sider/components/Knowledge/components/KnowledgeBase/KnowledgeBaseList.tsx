@@ -33,6 +33,7 @@ interface KnowledgeBaseListProps {
 }
 
 const Draggable = withDrag(DragType.knowledgeBase);
+// const PERSONAL_DEFAULT_OWNER_TYPE = 'personal_default';
 
 const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
   const { onDrilldown, keyword, activeAgentResourceId } = props;
