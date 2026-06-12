@@ -1,12 +1,12 @@
 // ByAI Channel Plugin for OpenClaw
 // Provides HTTP webhook integration with configurable streaming support
 
+import { defineBundledChannelEntry } from "openclaw/plugin-sdk/channel-entry-contract";
 import handleAgentEvent from "./src/agent-event.js";
 import { enqueueAfterAgentEvents, replaceAgentEventSubscription } from "./src/agent-event-serial.js";
 import { byaiChannelPlugin } from "./src/channel.js";
 import { registerByaiHooks } from "./src/hooks.js";
 import { setByaiRuntime } from "./src/runtime.js";
-import { registerTelemetry } from "./src/telemetry/index.js";
 import {
   markActiveSdkRequestSubagentEnded,
   markActiveSdkRequestSubagentSpawned,
@@ -16,7 +16,8 @@ import {
   scheduleActiveSdkCompletionCheck,
 } from "./src/sdk-session-completion.js";
 import { AgentEvent } from "./src/types.js";
-import type { OpenClawPluginApi } from "@openclaw/plugin-sdk/core";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
+import { handleCronChangedEvent, startCronNextRunTimeRedisSync } from "./src/cron.js";
 
 const LOG_ONCE_STATE = Symbol.for("openclaw.byaiChannel.logOnce");
 
@@ -37,108 +38,85 @@ async function enqueueAgentEvent(api: OpenClawPluginApi, event: AgentEvent): Pro
     api,
     `onAgentEvent runId=${event.runId ?? ""} seq=${String(event.seq)}`,
     async () => {
-    await handleAgentEvent(api, event);
+      await handleAgentEvent(api, event);
     },
   );
 }
 
-// 插件定义
-const plugin = {
+function registerFull(api: OpenClawPluginApi) {
+  replaceAgentEventSubscription(api, () => api.runtime.events.onAgentEvent((event) => {
+    // Keep SDK streaming completely outside OpenClaw's synchronous agent-event
+    // dispatch stack. 2026.5.x releases the embedded session lock while the
+    // model/tool loop is running; running Redis/SSE work in the same tick can
+    // interleave with core transcript writes and trip the session takeover fence.
+    const eventSnapshot = structuredClone(event);
+    setImmediate(() => {
+      void enqueueAgentEvent(api, eventSnapshot).catch((err) => {
+        api.logger.error(`[byai-channel] onAgentEvent enqueue failed: ${String(err)}`);
+      });
+    });
+  }));
+  registerByaiHooks(api);
+
+  api.on("subagent_spawned", async (event: {
+    runId: string;
+    childSessionKey: string;
+    agentId: string;
+  }, ctx: {
+    requesterSessionKey: string;
+  }) => {
+    const request = await markActiveSdkRequestSubagentSpawned(
+      ctx.requesterSessionKey,
+      event.childSessionKey,
+      event.agentId,
+      event.runId,
+    );
+    if (!request) {
+      return;
+    }
+    cancelActiveSdkCompletionCheck(request.sessionKey);
+  });
+  api.on("subagent_ended", (event) => {
+    const request = markActiveSdkRequestSubagentEnded(event?.targetSessionKey);
+    if (!request) {
+      return;
+    }
+    api.logger.info(
+      `[byai-channel] native subagent ended: requester=${request.sessionKey} child=${event?.targetSessionKey ?? ""} rootLifecyclePhase=${request.rootLifecyclePhase ?? ""} awaitingFollowup=${String(request.awaitingFollowup)}`,
+    );
+    scheduleActiveSdkCompletionCheck(api, request.sessionKey, "subagent_ended");
+  });
+  startCronNextRunTimeRedisSync(api);
+  api.on("cron_changed", (event) => {
+    api.logger.info(`[byai-channel] cron_changed: ${JSON.stringify(event)}`);
+    handleCronChangedEvent(event, api);
+  });
+  logInfoOnce(api, "channel-registered-successfully", "[byai-channel] channel registered successfully");
+}
+
+export default defineBundledChannelEntry({
   id: "byai-channel",
   name: "ByAI Channel",
   description: "HTTP webhook + Redis SDK channel with configurable streaming output",
-  configSchema: {
-    type: "object" as const,
-    additionalProperties: true,
-    properties: {
-      enabled: { type: "boolean" },
-      webhookPath: { type: "string" },
-      streamEnabled: { type: "boolean", description: "Enable streaming output" },
-      streamMode: { type: "string", enum: ["delta", "final"] },
-      forceReasoningStream: {
-        type: "boolean",
-        description: "Force reasoningLevel=stream for inbound SDK sessions before dispatch",
-      },
-      sessionKeyPerSessionId: {
-        type: "boolean",
-        description: "Build a dedicated SDK inbound sessionKey from effective agent id and sessionId",
-      },
-      dmPolicy: { type: "string", enum: ["open", "allowlist", "pairing"] },
-      allowFrom: { type: "array", items: { type: "string" } },
-      defaultTo: { type: "string" },
-      sdk: {
-        type: "object",
-        description: "SDK mode configuration",
-        properties: {
-          enabled: { type: "boolean", description: "Enable SDK mode (default: true)" },
-        },
-      },
-      telemetry: {
-        type: "object",
-        description: "Runtime telemetry snapshot configuration",
-        properties: {
-          enabled: { type: "boolean" },
-          consoleEnabled: { type: "boolean" },
-          redisEnabled: { type: "boolean" },
-          logIntervalMs: { type: "number" },
-          activeRunMaxAgeMs: { type: "number" },
-          activeToolCallMaxAgeMs: { type: "number" },
-          activeSubagentMaxAgeMs: { type: "number" },
-          activeLeaseMs: { type: "number" },
-          cautiousLeaseMs: { type: "number" },
-          idleGraceMs: { type: "number" },
-          maxAgeMs: { type: "number" },
-        },
-      },
-    },
+  importMetaUrl: import.meta.url,
+  plugin: {
+    specifier: "./channel-plugin-api.js",
+    exportName: "byaiChannelPlugin",
   },
-  register(api: OpenClawPluginApi) {
+  runtime: {
+    specifier: "./runtime-setter-api.js",
+    exportName: "setByaiRuntime",
+  },
+  configSchema: byaiChannelPlugin.configSchema,
+  registerCliMetadata(api) {
     logInfoOnce(api, "registering-channel-plugin", "[byai-channel] registering channel plugin");
-    setByaiRuntime(api.runtime);
-    const telemetry = registerTelemetry(api);
-    api.registerChannel({ plugin: byaiChannelPlugin });
-    replaceAgentEventSubscription(api, () => api.runtime.events.onAgentEvent(async (event) => {
-      telemetry.recordAgentEvent(event);
-      await enqueueAgentEvent(api, event);
-    }));
-    registerByaiHooks(api);
-
-    api.on("subagent_spawned", async (event: {
-      runId: string;
-      childSessionKey: string;
-      agentId: string;
-    }, ctx: {
-      requesterSessionKey: string;
-    }) => {
-      const request = await markActiveSdkRequestSubagentSpawned(
-        ctx.requesterSessionKey,
-        event.childSessionKey,
-        event.agentId,
-        event.runId,
-      );
-      if (!request) {
-        return;
-      }
-      cancelActiveSdkCompletionCheck(request.sessionKey);
-    });
-    api.on("subagent_ended", (event) => {
-      const request = markActiveSdkRequestSubagentEnded(event?.targetSessionKey);
-      if (!request) {
-        return;
-      }
-      api.logger.info(
-        `[byai-channel] native subagent ended: requester=${request.sessionKey} child=${event?.targetSessionKey ?? ""} rootLifecyclePhase=${request.rootLifecyclePhase ?? ""} awaitingFollowup=${String(request.awaitingFollowup)}`,
-      );
-      scheduleActiveSdkCompletionCheck(api, request.sessionKey, "subagent_ended");
-    });
-    logInfoOnce(api, "channel-registered-successfully", "[byai-channel] channel registered successfully");
   },
-};
-
-export default plugin;
+  registerFull,
+});
 
 // 重新导出 channel 插件对象
 export { byaiChannelPlugin };
+export { setByaiRuntime };
 
 // 重新导出类型
 export type {

@@ -24,10 +24,20 @@ function redisPayload(key: string, raw: Record<string, unknown>): RedisJsonPaylo
   return { key, content, raw, hash: "test" };
 }
 
-function setRedisFixtures(fixtures: Record<string, Record<string, unknown>>): void {
+function setRedisFixtures(
+  fixtures: Record<string, Record<string, unknown>>,
+  options: {
+    strings?: Record<string, string>;
+    hashes?: Record<string, Record<string, string>>;
+  } = {},
+): void {
   const payloads = new Map(Object.entries(fixtures).map(([key, raw]) => [key, redisPayload(key, raw)]));
+  const strings = new Map(Object.entries(options.strings ?? {}));
+  const hashes = new Map(Object.entries(options.hashes ?? {}));
   const store: BaiyingRedisJsonStore = {
     getJsonByKey: async (key) => payloads.get(key) ?? null,
+    getStringByKey: async (key) => strings.get(key) ?? null,
+    getHashByKey: async (key) => hashes.get(key) ?? null,
     getDigEmployeeJson: async (resourceId) => payloads.get(`DIG_EMPLOYEE_${resourceId}`) ?? null,
     getResourceJson: async ({ resourceBizType, resourceId }) => payloads.get(`${resourceBizType}_${resourceId}`) ?? null,
     close: async () => {},
@@ -37,6 +47,7 @@ function setRedisFixtures(fixtures: Record<string, Record<string, unknown>>): vo
 
 afterEach(() => {
   setSharedRedisJsonStore(null);
+  vi.unstubAllEnvs();
 });
 
 describe("resource-type helpers", () => {
@@ -499,6 +510,70 @@ describe("MCP transport chain", () => {
     expect(String(capability?.mcp?.server_url ?? "")).toContain("/mcp-servers/datacloud-data/mcp");
     const firstHeaders = fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>;
     expect(firstHeaders.Accept).toContain("application/json");
+  });
+
+  it("resolves resource header placeholders from user login auth hash before MCP refresh", async () => {
+    vi.stubEnv("USER_CODE", "0027024710");
+    setRedisFixtures(
+      {
+        MCP_9001: {
+          resourceBizType: "MCP",
+          resourceName: "Auth MCP",
+          domainURL: "http://mcp.example",
+          agentSseUrl: "/mcp",
+          mcpType: "streamable_http",
+          headers: {
+            Authorization: "${WHALE_AGENT_AUTHORIZATION}",
+            "Beyond-Token": "${beyond-token}",
+            "Sso-Token": "${Sso-Token}",
+            "X-Keep": "literal",
+          },
+        },
+      },
+      {
+        strings: { SHARE_BFM_USER_CODE_0027024710: "u-9001" },
+        hashes: {
+          "user:u-9001:login:auth": {
+            whale_agent_authorization: "Bearer redis-auth",
+            "BEYOND-TOKEN": "redis-beyond",
+            "sso-token": "redis-sso",
+          },
+        },
+      },
+    );
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2024-11-05" } }),
+          { status: 200, headers: { "content-type": "application/json", "mcp-session-id": "sid-auth" } },
+        ),
+      )
+      .mockResolvedValueOnce(new Response("", { status: 202, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ jsonrpc: "2.0", id: 2, result: { tools: [{ name: "run", inputSchema: { type: "object" } }] } }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+
+    const { capability } = await resolveCapability({
+      resourcesDir: path.join(import.meta.dirname, "../../resources"),
+      capabilityId: "9001",
+      resourceType: "MCP",
+      resourceContext: {},
+      authContext: { session: "", userId: "", headers: {} },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(capability?.mcp?.headers?.Authorization).toBe("Bearer redis-auth");
+    expect(capability?.mcp?.headers?.["Beyond-Token"]).toBe("redis-beyond");
+    expect(capability?.mcp?.headers?.["Sso-Token"]).toBe("redis-sso");
+    expect(capability?.mcp?.headers?.["X-Keep"]).toBe("literal");
+    const firstHeaders = fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(firstHeaders.Authorization).toBe("Bearer redis-auth");
+    expect(firstHeaders["Beyond-Token"]).toBe("redis-beyond");
+    expect(firstHeaders["Sso-Token"]).toBe("redis-sso");
   });
 
   it("listMcpToolsLive works with streamable_http", async () => {

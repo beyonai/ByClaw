@@ -52,7 +52,7 @@ function getIconType(name: string, isDir: boolean): string {
 
 function getFileType(name: string): string {
   const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() || '' : '';
-  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp'].includes(ext)) return 'image';
+  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp'].includes(ext)) return ext === 'jpeg' ? 'jpg' : ext;
   if (['html', 'htm'].includes(ext)) return 'h5';
   return ext;
 }

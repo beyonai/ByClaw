@@ -111,7 +111,11 @@ export type ReplyPayload = {
 export type AgentEvent = {
   seq: number;
   stream: string;
+  type?: string;
   runId: string;
+  ts?: number;
   sessionKey?: string;
+  sessionId?: string;
+  agentId?: string;
   data: Record<string, unknown>;
 };

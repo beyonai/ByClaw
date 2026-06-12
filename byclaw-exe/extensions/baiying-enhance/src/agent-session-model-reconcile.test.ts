@@ -5,6 +5,7 @@ import {
     isManagedModelRegisteredInConfig,
     parseModelPrimaryRef,
     reconcileAgentSessionModelsAfterSync,
+    waitForManagedModelTargetsInCurrentConfig,
 } from "./agent-session-model-reconcile.js";
 
 describe("isManagedModelRegisteredInConfig", () => {
@@ -146,6 +147,62 @@ describe("collectModelReconcileTargets", () => {
                 modelPrimary: "baiying-m-10004014/deepseek-v4-flash",
             },
         ]);
+    });
+});
+
+describe("waitForManagedModelTargetsInCurrentConfig", () => {
+    it("returns true when runtime current config already contains the target model", async () => {
+        const ready = await waitForManagedModelTargetsInCurrentConfig({
+            api: {
+                runtime: {
+                    config: {
+                        current: () => ({
+                            models: {
+                                providers: {
+                                    "baiying-m-10003989": {
+                                        models: [{ id: "qwen3.6-35b-a3b" }],
+                                    },
+                                },
+                            },
+                        }),
+                    },
+                },
+            } as never,
+            agents: [
+                {
+                    agentId: "baiying-agent-10000455",
+                    modelPrimary: "baiying-m-10003989/qwen3.6-35b-a3b",
+                },
+            ],
+            log: { warn: vi.fn() },
+            timeoutMs: 0,
+        });
+
+        expect(ready).toBe(true);
+    });
+
+    it("returns false and warns when runtime current config has not hot-loaded the model", async () => {
+        const warn = vi.fn();
+        const ready = await waitForManagedModelTargetsInCurrentConfig({
+            api: {
+                runtime: {
+                    config: {
+                        current: () => ({ models: { providers: {} } }),
+                    },
+                },
+            } as never,
+            agents: [
+                {
+                    agentId: "baiying-agent-10000455",
+                    modelPrimary: "baiying-m-10003989/qwen3.6-35b-a3b",
+                },
+            ],
+            log: { warn },
+            timeoutMs: 0,
+        });
+
+        expect(ready).toBe(false);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("runtime config has not loaded"));
     });
 });
 

@@ -1,33 +1,38 @@
-import { Type } from "@sinclair/typebox";
 import path from "node:path";
 import type { ResolvedByclawSqliteConfig } from "./types.js";
 import type { SqliteExecutor } from "./sqlite-executor.js";
 
-const sqlExecuteParameters = Type.Object(
-  {
-    sql: Type.String({ minLength: 1, description: "Single SQL statement to execute." }),
-    params: Type.Optional(
-      Type.Union([
-        Type.Object({}, { additionalProperties: true }),
-        Type.Array(Type.Any()),
-      ]),
-    ),
-    mode: Type.Optional(
-      Type.Union([
-        Type.Literal("auto"),
-        Type.Literal("all"),
-        Type.Literal("get"),
-        Type.Literal("run"),
-      ]),
-    ),
-    maxRows: Type.Optional(
-      Type.Number({ minimum: 1, description: "Per-request row cap for read queries." }),
-    ),
+const sqlExecuteParameters = {
+  type: "object",
+  additionalProperties: false,
+  required: ["sql"],
+  properties: {
+    sql: {
+      type: "string",
+      minLength: 1,
+      description: "Single SQL statement to execute.",
+    },
+    params: {
+      anyOf: [
+        {
+          type: "object",
+          additionalProperties: true,
+        },
+        {
+          type: "array",
+        },
+      ],
+    },
+    mode: {
+      enum: ["auto", "all", "get", "run"],
+    },
+    maxRows: {
+      type: "number",
+      minimum: 1,
+      description: "Per-request row cap for read queries.",
+    },
   },
-  {
-    additionalProperties: false,
-  },
-);
+} as const;
 
 function buildSummary(result: ReturnType<SqliteExecutor["execute"]>): string {
   if (!result.ok) {

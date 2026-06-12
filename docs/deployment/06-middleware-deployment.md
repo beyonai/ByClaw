@@ -150,6 +150,33 @@ OpenGauss 首次启动时会自动执行 `initdb/` 目录下的 SQL 脚本：
 curl http://localhost:9005/health
 ```
 
+如果使用 NFS/SMB/OpenMediaVault/CephFS 文件型运行态卷，请先确认每台 openSandbox Docker 宿主机已经挂载同一个文件系统根：
+
+```bash
+findmnt "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}"
+touch "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}/.opensandbox-probe"
+rm -f "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}/.opensandbox-probe"
+```
+
+然后生成 openSandbox 配置并启动：
+
+```bash
+cd deploy/middleware
+sh gen-opensandbox-config.sh
+docker compose up -d opensandbox-server
+```
+
+`opensandbox-server.toml` 会包含 `[docker.private_volume]`，用于兼容支持文件型 PRIVATE volume 根目录的 openSandbox 服务端镜像。当前配置示例：
+
+```toml
+[docker.private_volume]
+backend = "file"
+file_root = "/mnt/byclaw-file"
+file_type = "nfs"
+```
+
+如果所用 openSandbox server 镜像尚不支持该配置，需要先升级或改造 openSandbox 服务端。
+
 ## 数据持久化
 
 所有中间件的数据都持久化在 Docker volumes 中：

@@ -225,6 +225,49 @@ describe("createAgentWatchdog", () => {
         expect(JSON.stringify(loaded[0])).not.toContain("secret-token");
     });
 
+    it("uses the Redis LLM typelist default when a digital employee has no modelId", async () => {
+        const employeeContent = JSON.stringify({
+            resourceId: "10000666",
+            resourceName: "默认模型数字员工",
+            prologue: JSON.stringify({ descText: "hello" }),
+        });
+        const entries = new Map<string, RedisJsonPayload>([
+            ["10000666", payloadFromContent("DIG_EMPLOYEE_10000666", employeeContent)],
+        ]);
+
+        const loaded = await loadManagedAgentsFromRedis({
+            redisJsonStore: createMemoryRedisJsonStore(entries),
+            authorizedSourceKeys: new Set(["10000666"]),
+            embedApiKeysFromJson: false,
+            defaultModel: {
+                providerKey: "baiying-m-10004014",
+                modelRef: "baiying-m-10004014/deepseek-v4-flash",
+                provider: {
+                    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    apiKey: {
+                        source: "exec",
+                        provider: "baiying-aimodel-redis",
+                        id: "model:10004014",
+                    },
+                    api: "openai-completions",
+                    modelId: "deepseek-v4-flash",
+                    modelName: "deepseek-v4-flash",
+                },
+                hash: "default-hash",
+            },
+            log: { warn: vi.fn() },
+        });
+
+        expect(loaded).toHaveLength(1);
+        expect(loaded[0]?.baiyingModelId).toBeUndefined();
+        expect(loaded[0]?.providerKey).toBe("baiying-m-10004014");
+        expect(loaded[0]?.modelRef).toBe("baiying-m-10004014/deepseek-v4-flash");
+        expect(loaded[0]?.listEntry.model).toEqual({
+            primary: "baiying-m-10004014/deepseek-v4-flash",
+        });
+        expect(loaded[0]?.contentHash).toContain(":default-model:default-hash");
+    });
+
     it("__flushNow syncs prologue modelId changes without periodic scan", async () => {
         const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-model-scan-"));
         const employeeKey = "10000455";
@@ -319,6 +362,175 @@ describe("createAgentWatchdog", () => {
         expect(Object.keys(activeConfig.models.providers)).toContain("baiying-m-10004014");
         expect(Object.keys(activeConfig.models.providers)).not.toContain("baiying-m-neg-2000");
         expect(JSON.stringify(activeConfig)).not.toContain("secret-token-new");
+    });
+
+    it("__flushNow writes the Redis LLM typelist model as the main/default model", async () => {
+        const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-default-model-"));
+        const employeeKey = "10000666";
+        const employeeContent = JSON.stringify({
+            resourceId: employeeKey,
+            resourceName: "默认模型数字员工",
+            prologue: JSON.stringify({ descText: "no explicit model" }),
+        });
+        const entries = new Map<string, RedisJsonPayload>([
+            [employeeKey, payloadFromContent(`DIG_EMPLOYEE_${employeeKey}`, employeeContent)],
+        ]);
+        const typeListContent = JSON.stringify([
+            {
+                authToken: "default-secret-token",
+                instanceId: "10004014",
+                instanceParam: { maxTokens: 1024 },
+                isDefault: 1,
+                maxContentToken: "128000",
+                modelCode: "deepseek-v4-flash",
+                modelName: "deepseek-v4-flash",
+                modelType: "LLM",
+                status: 1,
+                url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            },
+        ]);
+        const hashEntries = new Map<string, RedisJsonPayload>([
+            [
+                "byai:aimodel:typelist:LLM",
+                payloadFromContent("byai:aimodel:typelist:LLM", typeListContent),
+            ],
+        ]);
+        let activeConfig: any = {
+            agents: {
+                list: [{ id: "main", name: "Main", identity: { name: "Main" } }],
+                defaults: { model: { primary: "minimax/MiniMax-M2.7-highspeed" } },
+            },
+            models: { providers: {} },
+        };
+        const writeConfigFile = vi.fn(async (next) => {
+            activeConfig = next;
+        });
+        const api = createMockApi(writeConfigFile) as any;
+        api.runtime.config.loadConfig = vi.fn(() => activeConfig);
+
+        const wd = createAgentWatchdogBase({
+            redisJsonStore: createMemoryRedisJsonStore(entries, hashEntries),
+            authorizationFilter: {
+                getAuthorizedSourceKeys: () => new Set([employeeKey]),
+            },
+            api,
+            registry: new AgentRegistryState(),
+            contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+            executorPath: path.join(dir, "executor.py"),
+            pluginConfig: {
+                embedApiKeysFromJson: false,
+                workspaceAutoSeed: false,
+                persistAgentContentIndex: false,
+                workspaceSkillScanIntervalMs: 0,
+            },
+            debounceMs: 60_000,
+        });
+
+        await wd.start();
+        await wd.__flushNow!();
+        await wd.stop();
+
+        expect(activeConfig.agents.defaults.model.primary).toBe(
+            "baiying-m-10004014/deepseek-v4-flash",
+        );
+        expect(
+            activeConfig.agents.list.find((entry: any) => entry.id === "baiying-agent-10000666")
+                ?.model,
+        ).toEqual({ primary: "baiying-m-10004014/deepseek-v4-flash" });
+        expect(activeConfig.models.providers["baiying-m-10004014"].models[0].id).toBe(
+            "deepseek-v4-flash",
+        );
+        expect(JSON.stringify(activeConfig)).not.toContain("default-secret-token");
+    });
+
+    it("__flushNow syncs the Redis default LLM even while dig-employee auth is pending", async () => {
+        const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-default-auth-pending-"));
+        const managedAgentId = `${MANAGED_AGENT_PREFIX}10000666`;
+        const typeListContent = JSON.stringify([
+            {
+                authToken: "default-secret-token",
+                instanceId: "10004014",
+                instanceParam: { maxTokens: 1024 },
+                isDefault: 1,
+                maxContentToken: "128000",
+                modelCode: "deepseek-v4-flash",
+                modelName: "deepseek-v4-flash",
+                modelType: "LLM",
+                status: 1,
+                url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            },
+        ]);
+        const hashEntries = new Map<string, RedisJsonPayload>([
+            [
+                "byai:aimodel:typelist:LLM",
+                payloadFromContent("byai:aimodel:typelist:LLM", typeListContent),
+            ],
+        ]);
+        let activeConfig: any = {
+            agents: {
+                list: [
+                    { id: "main", name: "Main", identity: { name: "Main" } },
+                    {
+                        id: managedAgentId,
+                        name: "Existing managed",
+                        identity: { name: "Existing managed" },
+                        model: { primary: "baiying-m-10004000/qwen3.6-27b" },
+                    },
+                ],
+                defaults: { model: { primary: "minimax/MiniMax-M2.7-highspeed" } },
+            },
+            models: {
+                providers: {
+                    "baiying-m-10004000": { models: [{ id: "qwen3.6-27b" }] },
+                },
+            },
+        };
+        const writeConfigFile = vi.fn(async (next) => {
+            activeConfig = next;
+        });
+        const api = createMockApi(writeConfigFile) as any;
+        api.runtime.config.loadConfig = vi.fn(() => activeConfig);
+
+        const wd = createAgentWatchdogBase({
+            redisJsonStore: createMemoryRedisJsonStore(new Map(), hashEntries),
+            authorizationFilter: { getAuthorizedSourceKeys: () => undefined },
+            api,
+            registry: new AgentRegistryState(),
+            contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+            executorPath: path.join(dir, "executor.py"),
+            pluginConfig: {
+                embedApiKeysFromJson: false,
+                workspaceAutoSeed: false,
+                persistAgentContentIndex: false,
+                workspaceSkillScanIntervalMs: 0,
+            },
+            debounceMs: 60_000,
+        });
+
+        await wd.start({ deferInitialFlush: true });
+        await wd.__flushNow!();
+        await wd.stop();
+
+        expect(writeConfigFile).toHaveBeenCalledTimes(1);
+        expect(activeConfig.agents.defaults.model.primary).toBe(
+            "baiying-m-10004014/deepseek-v4-flash",
+        );
+        expect(activeConfig.agents.list.find((entry: any) => entry.id === "main")?.model).toEqual({
+            primary: "baiying-m-10004014/deepseek-v4-flash",
+        });
+        expect(activeConfig.agents.list.find((entry: any) => entry.id === managedAgentId)).toEqual(
+            expect.objectContaining({
+                id: managedAgentId,
+                model: { primary: "baiying-m-10004000/qwen3.6-27b" },
+            }),
+        );
+        expect(activeConfig.models.providers["baiying-m-10004014"].models[0].id).toBe(
+            "deepseek-v4-flash",
+        );
+        expect(activeConfig.models.providers["baiying-m-10004000"].models[0].id).toBe(
+            "qwen3.6-27b",
+        );
+        expect(JSON.stringify(activeConfig)).not.toContain("default-secret-token");
     });
 
     it("leaves model unset on first sync when Redis AI model config is missing", async () => {

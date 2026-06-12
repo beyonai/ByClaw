@@ -2,7 +2,11 @@ import { Type } from "@sinclair/typebox";
 import { isSubagentSessionKey } from "openclaw/plugin-sdk/routing";
 import type { AgentRegistryState } from "./agent-state.js";
 import type { AdaptedManagedAgent } from "./agent-adapter.js";
-import { buildExecutorResourceContext, compactText, runBaiyingExecutor } from "./resource-metadata.js";
+import {
+  buildExecutorResourceContext,
+  compactText,
+  runBaiyingExecutor,
+} from "./resource-metadata.js";
 import { docAsyncState, type DocAsyncTaskRecord } from "./doc-async-state.js";
 import type { BaiyingAssociatedResource } from "./types.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
