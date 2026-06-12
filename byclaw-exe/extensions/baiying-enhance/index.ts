@@ -9,6 +9,7 @@ import { createBaiyingCallToolFactory } from "./src/baiying-call-tool.js";
 import { createDigEmployeeAuthWatch } from "./src/dig-employee-auth-watch.js";
 import { createDigEmployeeChangeSubscriber } from "./src/dig-employee-change-subscriber.js";
 import { registerBaiyingHttpRoutes } from "./src/http-routes.js";
+import { createMainContextTemplateWatch } from "./src/main-context-template-watch.js";
 import { resolveDefaultContentIndexPath } from "./src/agent-content-index.js";
 import { resolveBundledBaiyingResourcesDir } from "./src/plugin-paths.js";
 import { createRedisJsonStore, setSharedRedisJsonStore } from "./src/redis-json-store.js";
@@ -162,6 +163,9 @@ const plugin = {
 
         let agentWatch: Awaited<ReturnType<typeof createAgentWatchdog>> | undefined;
         let digEmployeeAuthWatch: ReturnType<typeof createDigEmployeeAuthWatch> | undefined;
+        let mainContextTemplateWatch:
+            | ReturnType<typeof createMainContextTemplateWatch>
+            | undefined;
         let digEmployeeChangeSubscriber:
             | ReturnType<typeof createDigEmployeeChangeSubscriber>
             | undefined;
@@ -227,6 +231,41 @@ const plugin = {
                         await agentWatch?.__flushNow?.({ fullWorkspaceReseed: true });
                     },
                 });
+                if (
+                    pluginCfg.mainWorkspaceAgentsAutoSeed !== false &&
+                    pluginCfg.mainContextTemplateWatch !== false
+                ) {
+                    mainContextTemplateWatch = createMainContextTemplateWatch({
+                        redisJsonStore,
+                        pluginConfig: pluginCfg,
+                        logger: {
+                            info: (message) => api.logger.info(message),
+                            warn: (message) => api.logger.warn(message),
+                            error: (message) => api.logger.error(message),
+                        },
+                        onChange: async () => {
+                            if (serviceStopped) {
+                                return;
+                            }
+                            await seedMainAgentAgentsMd({
+                                api,
+                                pluginConfig: pluginCfg,
+                                redisJsonStore,
+                                managedAgents: registry.list(),
+                                redisContextOnly: true,
+                                skipSubagentRouting: true,
+                                log: {
+                                    warn: (message) => api.logger.warn(message),
+                                    info: (message) => api.logger.info(message),
+                                },
+                            });
+                        },
+                    });
+                } else {
+                    api.logger.info(
+                        "baiying-enhance: main context template watcher disabled (mainWorkspaceAgentsAutoSeed=false or mainContextTemplateWatch=false)",
+                    );
+                }
                 agentWatch = createAgentWatchdog({
                     api,
                     registry,
@@ -265,6 +304,13 @@ const plugin = {
                 }
                 // Start sync engine before Redis auth so `onChange` always has `agentWatch`; defer first scan until dig auth has run once.
                 await agentWatch.start({ deferInitialFlush: true });
+                void mainContextTemplateWatch?.start().catch((err) => {
+                    api.logger.warn(
+                        `baiying-enhance: main context template watcher failed: ${
+                            err instanceof Error ? err.message : String(err)
+                        }`,
+                    );
+                });
                 void (async () => {
                     api.logger.info(
                         "baiying-enhance: startup Redis auth sync scheduled in background; gateway ready will not wait for managed agent reseed",
@@ -286,6 +332,8 @@ const plugin = {
                 serviceStopped = true;
                 await digEmployeeChangeSubscriber?.stop();
                 digEmployeeChangeSubscriber = undefined;
+                await mainContextTemplateWatch?.stop();
+                mainContextTemplateWatch = undefined;
                 await digEmployeeAuthWatch?.stop();
                 digEmployeeAuthWatch = undefined;
                 await agentWatch?.stop();

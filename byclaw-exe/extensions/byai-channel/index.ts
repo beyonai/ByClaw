@@ -5,6 +5,7 @@ import handleAgentEvent from "./src/agent-event.js";
 import { enqueueAfterAgentEvents, replaceAgentEventSubscription } from "./src/agent-event-serial.js";
 import { byaiChannelPlugin } from "./src/channel.js";
 import { registerByaiHooks } from "./src/hooks.js";
+import { registerContextSnapshotHook } from "./src/context-snapshot.js";
 import { setByaiRuntime } from "./src/runtime.js";
 import { registerTelemetry } from "./src/telemetry/index.js";
 import {
@@ -90,6 +91,18 @@ const plugin = {
           maxAgeMs: { type: "number" },
         },
       },
+      contextSnapshot: {
+        type: "object",
+        description: "Dump the latest final LLM input snapshot to the agent sessions directory",
+        properties: {
+          enabled: { type: "boolean", description: "Enable llm_input context snapshot dump (default: false)" },
+          fileName: { type: "string", description: "JSON filename under .openclaw/agents/<agent>/sessions" },
+          maxStringChars: { type: "number", description: "Max chars retained for each string field" },
+          maxArrayItems: { type: "number", description: "Max array items retained per array" },
+          includeHistoryMessages: { type: "boolean" },
+          includeTools: { type: "boolean" },
+        },
+      },
     },
   },
   register(api: OpenClawPluginApi) {
@@ -102,6 +115,7 @@ const plugin = {
       await enqueueAgentEvent(api, event);
     }));
     registerByaiHooks(api);
+    registerContextSnapshotHook(api);
 
     api.on("subagent_spawned", async (event: {
       runId: string;

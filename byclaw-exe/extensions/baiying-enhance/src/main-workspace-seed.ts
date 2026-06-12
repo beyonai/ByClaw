@@ -389,6 +389,16 @@ export async function seedMainAgentAgentsMd(params: {
   managedAgents?: AdaptedManagedAgent[];
   /** Optional Redis-backed system config store for main workspace context templates. */
   redisJsonStore?: BaiyingRedisJsonStore;
+  /**
+   * 仅应用 Redis 主上下文模板，不回退到内置 AGENTS.md 模板。
+   * 主 context watcher 使用该模式，避免 Redis 配置缺失时误把 AGENTS.md 覆盖回 bundled 内容。
+   */
+  redisContextOnly?: boolean;
+  /**
+   * 跳过 SUBAGENT_ROUTING.md 生成。主 context watcher 只负责
+   * AGENTS/SOUL/IDENTITY/USER/TOOLS，路由文件仍由数字员工同步链路维护。
+   */
+  skipSubagentRouting?: boolean;
 }): Promise<void> {
   const mainId = params.pluginConfig.mainParentAgentId?.trim() || "main";
   const workspaceDir = resolveAgentWorkspaceDir(params.api, mainId);
@@ -413,13 +423,32 @@ export async function seedMainAgentAgentsMd(params: {
       mode: contextMode,
       log: params.log,
     });
-  const writeSubagentRouting = (routingMode: "if_missing" | "if_managed_marker" | "always") =>
-    writeSubagentRoutingWithPolicy({
+  const writeSubagentRouting = async (routingMode: "if_missing" | "if_managed_marker" | "always") => {
+    if (params.skipSubagentRouting) {
+      return;
+    }
+    await writeSubagentRoutingWithPolicy({
       workspaceDir,
       mode: routingMode,
       managedAgents,
       log: params.log,
     });
+  };
+
+  if (params.redisContextOnly && !hasContextPrompts) {
+    params.log.info?.(
+      `baiying-enhance: main Redis context seed skipped (no valid Redis context template) agentId=${mainId}`,
+    );
+    return;
+  }
+
+  if (params.redisContextOnly && !contextAgentsPrompt) {
+    params.log.info?.(
+      `baiying-enhance: main Redis context seed only: mode=${contextMode} agentId=${mainId} template=redis:${resolveMainContextTemplateParamCode(params.pluginConfig.mainContextTemplateParamCode)}`,
+    );
+    await writeContextFiles();
+    return;
+  }
 
   if (mode === "off" && !contextAgentsPrompt) {
     if (hasContextPrompts) {

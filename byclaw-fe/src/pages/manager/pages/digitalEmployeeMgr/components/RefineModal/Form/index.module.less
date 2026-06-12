@@ -476,6 +476,24 @@
   }
 }
 
+.sectionCheckbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.sectionUnselected {
+  opacity: 0.4;
+  pointer-events: none;
+
+  :global {
+    .beyond-checkbox-wrapper {
+      pointer-events: auto;
+    }
+  }
+}
+
 // 核心能力部分样式（与外层保持一致）
 .coreAbilitySection {
   margin-bottom: 24px;

@@ -56,6 +56,12 @@ npm run build
 | `dmPolicy`      | string  | "open"                  | 消息策略: open/allowlist/pairing          |
 | `allowFrom`     | array   | []                      | 允许发送消息的用户列表，\* 表示允许所有人 |
 | `telemetry`     | object  | Redis 开启，console 关闭 | 输出运行态 busy snapshot，供外部 controller 判断是否续期容器 |
+| `contextSnapshot.enabled` | boolean | false | 是否在 `llm_input` hook dump 最终模型输入上下文 |
+| `contextSnapshot.fileName` | string | `llm_input_snapshots.json` | 写入 `.openclaw/agents/<agentId>/sessions/` 下的 JSON 文件名，每次触发都会覆写 |
+| `contextSnapshot.maxStringChars` | number | `200000` | 单个字符串字段最大保留字符数 |
+| `contextSnapshot.maxArrayItems` | number | `200` | 单个数组最大保留元素数 |
+| `contextSnapshot.includeHistoryMessages` | boolean | true | 是否写入历史消息 |
+| `contextSnapshot.includeTools` | boolean | true | 是否写入工具定义 |
 
 ### Telemetry 运行态输出
 
@@ -63,6 +69,65 @@ npm run build
 `byai_gateway:registry:worker:stats:openclaw`。如需本地日志调试，可显式设置
 `consoleEnabled: true` 输出 `[openclaw-busy-state]` JSON 行。该输出只包含运行态计数、原因和 lease 建议，
 不会包含 transcript、用户消息正文、工具参数或凭据。
+
+### Context Snapshot
+
+`contextSnapshot` 默认关闭。开启后，插件会在 OpenClaw 的 `llm_input` hook 中捕获即将提交给 LLM 的最终输入快照，并写入当前 agent 的 sessions 目录：
+
+```text
+~/.openclaw/agents/<agentId>/sessions/llm_input_snapshots.json
+```
+
+对于 main agent，默认路径类似：
+
+```text
+~/.openclaw/agents/main/sessions/llm_input_snapshots.json
+```
+
+线上如果 `.openclaw/agents/main/sessions` 挂载到 MinIO 卷，同样可以被外部读取。
+文件只保留最近一次 `llm_input` 快照，每次触发都会直接覆写，避免历史文件增长和磁盘占用问题。
+
+示例配置：
+
+```json
+{
+  "channels": {
+    "byai-channel": {
+      "contextSnapshot": {
+        "enabled": true,
+        "maxStringChars": 200000,
+        "maxArrayItems": 200,
+        "includeHistoryMessages": true,
+        "includeTools": true
+      }
+    }
+  },
+  "plugins": {
+    "entries": {
+      "byai-channel": {
+        "hooks": {
+          "allowConversationAccess": true
+        }
+      }
+    }
+  }
+}
+```
+
+文件内容是一个 JSON snapshot，包含：
+
+- `runId`
+- `sessionId`
+- `sessionKey`
+- `agentId`
+- `provider` / `model`
+- `byai.sessionId`
+- `byai.traceId`
+- `systemPrompt`
+- `prompt`
+- `historyMessages`
+- `tools`
+- `sizes`
 
 ### 与配置热重载协作
 
