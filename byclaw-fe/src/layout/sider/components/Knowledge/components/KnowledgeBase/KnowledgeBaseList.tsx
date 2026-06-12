@@ -1,23 +1,23 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Input, Dropdown, List, theme, App, Typography } from 'antd';
+import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
+import { Input, Dropdown, List, theme, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { trim, get, isEmpty, intersection, debounce } from 'lodash';
-import { useIntl, useNavigate, useSelector } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
+import ResourceDetail from '@/components/Resources/components/ResourceDetail';
 import DetailPanel from '@/pages/knowledgeCenter/components/DetailPanel';
 import ShareModal from '@/pages/knowledgeCenter/components/shareModal';
 import { getRuntimeActualUrl } from '@/utils';
 import withDrag, { DragType, IDragType } from '@/components/QueryInput/withDrag';
-import { deleteKnowledge } from '@/pages/manager/service/resources';
 import { queryDigEmployeeRelResourceAuth } from '@/pages/manager/service/resources';
 import { IKnowledgeBaseItem } from './types';
 import InfiniteScrollAntdList from '../../../InfiniteScrollAntdList';
 import commonStyles from '../common.module.less';
 import EmptyTips from '@/components/EmptyTips';
 import useModuleEvent from '@/hooks/useModuleEvent';
-import { isTopAgent } from '@/service/digitalEmployees';
 import useGlobal from '@/hooks/useGlobal';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import styles from './index.module.less';
 
 const { Title, Paragraph } = Typography;
@@ -35,7 +35,7 @@ interface KnowledgeBaseListProps {
 const Draggable = withDrag(DragType.knowledgeBase);
 
 const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
-  const { editable, onDrilldown, keyword, activeAgentResourceId } = props;
+  const { onDrilldown, keyword, activeAgentResourceId } = props;
   const searchValue = useRef('');
   const listFetchRef = useRef(false);
   // const [filterType, setFilterType] = useState<FilterType>(FilterType.all);
@@ -46,9 +46,8 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
     openType: '' | 'add' | 'rename' | 'share';
     info?: IKnowledgeBaseItem;
   }>({ openType: '' });
-  const navigate = useNavigate();
   const { EventEmitter } = useGlobal();
-  const { modal, message } = App.useApp();
+  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
   const { userInfo } = useSelector(({ user }: any) => ({
     userInfo: user.userInfo,
   }));
@@ -148,115 +147,6 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
     }
   }, [keyword]);
 
-  // 每行菜单项
-  const getDropdownMenuItems = (item: IKnowledgeBaseItem) => {
-    const items = [];
-    if (isUser) {
-      if (`${item.isTop}` === '1') {
-        items.push({ key: 'unpin', label: intl.formatMessage({ id: 'common.unpin' }) });
-      }
-      if (`${item.isTop}` === '0') {
-        items.push({ key: 'pin', label: intl.formatMessage({ id: 'common.pin' }) });
-      }
-    }
-
-    if (`${item?.createBy}` === `${userInfo.userId}`) {
-      items.push(
-        { key: 'detail', label: intl.formatMessage({ id: 'knowledgeDetail.detail' }) },
-        { key: 'rename', label: intl.formatMessage({ id: 'directoryManage.rename' }) },
-        { key: 'delete', label: intl.formatMessage({ id: 'common.delete' }) }
-      );
-    }
-    return items;
-  };
-
-  // 置顶：将该条移动到第一条
-  function onPin(resourceId: string) {
-    if (!resourceId) return;
-    setKnowledgeBases((prev) => {
-      const newList = [...prev];
-      const idx = newList.findIndex((i) => i.resourceId === resourceId);
-      if (idx !== -1) {
-        const target = { ...newList[idx], isTop: '1' };
-        newList.splice(idx, 1);
-        newList.unshift(target);
-      }
-      return newList;
-    });
-  }
-
-  // 取消置顶：将该条移动到所有置顶之后、非置顶之前（成为非置顶的第一条）
-  function onUnpin(resourceId: string) {
-    if (!resourceId) return;
-    setKnowledgeBases((prev) => {
-      const newList = [...prev];
-      const idx = newList.findIndex((i) => i.resourceId === resourceId);
-      if (idx !== -1) {
-        const target = { ...newList[idx], isTop: '0' };
-        newList.splice(idx, 1);
-        const firstNonTopIndex = newList.findIndex((i) => `${i.isTop}` === '0');
-        if (firstNonTopIndex === -1) {
-          newList.push(target);
-        } else {
-          newList.splice(firstNonTopIndex, 0, target);
-        }
-      }
-      return newList;
-    });
-  }
-
-  const onRowMenuItemClick = useCallback((key: string, item: IKnowledgeBaseItem) => {
-    if (key === 'detail') {
-      const param = {
-        resourceId: item.resourceId,
-        resourceBizType: item.resourceBizType,
-        resourceSourcePkId: item.resourceSourcePkId,
-      };
-      const query = Object.entries(param).reduce((s, [K, v]) => `${s}${s ? '&' : '?'}${K}=${v}`, '');
-      navigate(`/knowledgeDetail${query}`);
-    } else if (key === 'rename') {
-      setModalState({
-        openType: 'rename',
-        info: item,
-      });
-    } else if (key === 'share') {
-      setModalState({
-        openType: 'share',
-        info: item,
-      });
-    } else if (key === 'delete') {
-      const optResourceId = item.resourceId;
-      modal.confirm({
-        title: intl.formatMessage({ id: 'common.deleteTips' }),
-        content: item.resourceName,
-        onOk: () =>
-          new Promise<void>((resolve) => {
-            deleteKnowledge({
-              resourceId: optResourceId,
-            })
-              .then(() => {
-                message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
-                setKnowledgeBases((prev) => prev.filter((i) => i.resourceId !== optResourceId));
-                moduleEventEmitter.emit('REFRESH_KNOWLEDGE_BASE');
-              })
-              .finally(resolve);
-          }),
-      });
-    } else if (key === 'unpin' || key === 'pin') {
-      isTopAgent({
-        agentIds: [item.resourceId],
-        isTop: key === 'pin' ? 1 : 0,
-        agentTypeList: [item.resourceBizType],
-      }).then(() => {
-        if (key === 'pin') {
-          onPin(item.resourceId);
-        } else {
-          onUnpin(item.resourceId);
-        }
-      });
-    }
-  }, []);
-
   useEffect(() => {
     const onDelete = (item: IKnowledgeBaseItem) => {
       setKnowledgeBases((prev) => prev.filter((i) => i.resourceId !== item.resourceId));
@@ -287,6 +177,24 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
       });
     },
     [EventEmitter]
+  );
+
+  const handleDetail = useCallback(
+    (item: IKnowledgeBaseItem) => {
+      setDetailPanel?.(
+        <ResourceDetail
+          visible
+          panel
+          resourceId={item.resourceId}
+          item={item}
+          resourceType={item.resourceBizType || 'KG_DOC'}
+          resourceName={intl.formatMessage({ id: 'resource.knowledge' })}
+          onCancel={() => clearDetailPanel?.()}
+          onEdit={() => {}}
+        />
+      );
+    },
+    [clearDetailPanel, intl, setDetailPanel]
   );
 
   return (
@@ -343,7 +251,6 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
           />
         }
         renderItem={(item) => {
-          const canEditItem = editable && (`${item?.createBy}` === `${userInfo.userId}` || isUser);
           const actions = [
             <Dropdown
               key={`detail-${item.resourceId}`}
@@ -359,18 +266,11 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
                       </div>
                     ),
                   },
-                  ...(canEditItem ? getDropdownMenuItems(item) : []),
                 ],
-                onClick: ({ key, domEvent }) => {
+                onClick: ({ domEvent }) => {
                   domEvent.preventDefault();
                   domEvent.stopPropagation();
-
-                  if (key === 'detail') {
-                    onDrilldown(item);
-                    return;
-                  }
-
-                  onRowMenuItemClick(key, item);
+                  handleDetail(item);
                 },
               }}
             >
@@ -391,6 +291,10 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
                 key={item.resourceId}
                 className={styles.knowledgeItem}
                 actions={actions}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDrilldown(item);
+                }}
                 onDoubleClick={() => handleQuoteKnowledgeBase(item)}
               >
                 <List.Item.Meta

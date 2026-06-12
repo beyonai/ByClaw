@@ -39,6 +39,8 @@ export default {
   'common.cancelCollectSuccess': 'Unfavorited',
   'common.cancel': 'Cancel',
   'common.user': 'User',
+  'common.userPerson': 'User',
+  'common.manager': 'Manager',
   'common.initiator': 'Initiator',
   'common.handler': 'Handler',
   'common.fileName': 'Filename',

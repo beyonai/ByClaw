@@ -39,6 +39,8 @@ export default {
   'common.cancelCollectSuccess': '取消收藏成功',
   'common.cancel': '取消',
   'common.user': '用户',
+  'common.userPerson': '使用人',
+  'common.manager': '管理人',
   'common.initiator': '发起人',
   'common.handler': '处理人',
   'common.fileName': '文件名称',

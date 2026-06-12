@@ -17,6 +17,7 @@ interface IResourceItem {
   resourceBizType?: string;
   createTime?: number | string;
   resourceSourcePkId?: string;
+  resourceType?: React.Key;
   extInfo?: any;
 }
 
@@ -125,6 +126,12 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
     }
   };
 
+  const renderMemberNames = (members?: Array<{ grantToObjName?: string }>) => {
+    const names = (Array.isArray(members) ? members : []).map((member) => member.grantToObjName).filter(Boolean);
+
+    return names.length ? names.join('、') : intl.formatMessage({ id: 'common.none' });
+  };
+
   // 获取关联对象
   const getRelatedObjects = () => {
     try {
@@ -190,6 +197,14 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
             )}
 
             {getPropertiesInfo()}
+
+            <Descriptions.Item label={intl.formatMessage({ id: 'common.userPerson' })} span={2}>
+              <div className={styles.memberList}>{renderMemberNames(detailData?.useList)}</div>
+            </Descriptions.Item>
+
+            <Descriptions.Item label={intl.formatMessage({ id: 'common.manager' })} span={2}>
+              <div className={styles.memberList}>{renderMemberNames(detailData?.managerList)}</div>
+            </Descriptions.Item>
           </Descriptions>
         </>
       )}
