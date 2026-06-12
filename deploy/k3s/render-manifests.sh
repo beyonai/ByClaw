@@ -434,23 +434,461 @@ spec:
               cpu: "{{ cpu_limit | default('2') }}"
               memory: "{{ memory_limit | default('4Gi') }}"
           volumeMounts:
-            - name: workspace
-              mountPath: /by
-              subPathExpr: "byclaw-\$(USER_CODE)/by"
             - name: scratch
               mountPath: /tmp/scratch
       volumes:
-        - name: workspace
-          persistentVolumeClaim:
-            claimName: ${WORKSPACE_PVC_NAME}
         - name: scratch
           emptyDir:
             sizeLimit: ${SANDBOX_SCRATCH_SIZE:-10Gi}
 EOF
 
+cat > "$OUT_DIR/30-sandbox/.templates/opensandbox-resource-requests-patch.py" <<'EOF'
+from pathlib import Path
+
+
+def patch_file(path, replacements):
+    file_path = Path(path)
+    text = file_path.read_text()
+    original = text
+    for old, new in replacements:
+        if new in text:
+            continue
+        if old not in text:
+            raise RuntimeError(f"patch anchor not found in {path}: {old[:80]!r}")
+        text = text.replace(old, new, 1)
+    if text != original:
+        file_path.write_text(text)
+
+
+def append_once(path, marker, content):
+    file_path = Path(path)
+    text = file_path.read_text()
+    if marker in text:
+        return
+    file_path.write_text(text.rstrip() + "\n\n" + content.strip() + "\n")
+
+
+patch_file(
+    "/app/opensandbox_server/api/schema.py",
+    [
+        (
+            '''    resource_limits: Optional[ResourceLimits] = Field(
+        None,
+        alias="resourceLimits",
+        description="Runtime resource constraints for the sandbox instance. Optional when poolRef is provided.",
+    )
+''',
+            '''    resource_limits: Optional[ResourceLimits] = Field(
+        None,
+        alias="resourceLimits",
+        description="Runtime resource constraints for the sandbox instance. Optional when poolRef is provided.",
+    )
+    resource_requests: Optional[ResourceLimits] = Field(
+        None,
+        alias="resourceRequests",
+        description="Kubernetes resource requests for the sandbox instance. Defaults to resourceLimits when omitted.",
+    )
+''',
+        ),
+    ],
+)
+
+append_once(
+    "/app/opensandbox_server/api/schema.py",
+    "class ResizeSandboxRequest(BaseModel):",
+    '''
+class ResizeSandboxRequest(BaseModel):
+    """
+    Request to resize a running sandbox.
+    """
+    resource_requests: Optional[ResourceLimits] = Field(
+        None,
+        alias="resourceRequests",
+        description="Kubernetes resource requests for the sandbox instance.",
+    )
+    resource_limits: Optional[ResourceLimits] = Field(
+        None,
+        alias="resourceLimits",
+        description="Kubernetes resource limits for the sandbox instance.",
+    )
+    resize_type: Optional[str] = Field(
+        "IN_PLACE",
+        alias="resizeType",
+        description="Resize strategy requested by the caller.",
+    )
+    metadata: Optional[Dict[str, str]] = Field(
+        None,
+        description="Caller metadata propagated to the resize response.",
+    )
+
+    class Config:
+        populate_by_name = True
+
+
+class ResizeSandboxResponse(BaseModel):
+    """
+    Response for sandbox resize requests.
+    """
+    request_id: Optional[str] = Field(None, alias="requestId")
+    operation_id: Optional[str] = Field(None, alias="operationId")
+    sandbox_id: str = Field(..., alias="sandboxId")
+    state: str = Field("Running", description="Sandbox state after the resize request is accepted.")
+    message: Optional[str] = Field(None, description="Human-readable resize result.")
+    metadata: Optional[Dict[str, str]] = Field(None, description="Response metadata.")
+
+    class Config:
+        populate_by_name = True
+''',
+)
+
+patch_file(
+    "/app/opensandbox_server/services/k8s/create_helpers.py",
+    [
+        (
+            '''    resource_limits: Dict[str, str]
+    egress_mode: str
+''',
+            '''    resource_limits: Dict[str, str]
+    resource_requests: Dict[str, str]
+    egress_mode: str
+''',
+        ),
+        (
+            '''    resource_limits = {}
+    if request.resource_limits and request.resource_limits.root:
+        resource_limits = request.resource_limits.root
+
+    return _CreateWorkloadContext(
+''',
+            '''    resource_limits = {}
+    if request.resource_limits and request.resource_limits.root:
+        resource_limits = request.resource_limits.root
+
+    resource_requests = {}
+    if getattr(request, "resource_requests", None) and request.resource_requests.root:
+        resource_requests = request.resource_requests.root
+
+    return _CreateWorkloadContext(
+''',
+        ),
+        (
+            '''        resource_limits=resource_limits,
+        egress_mode=egress_mode,
+''',
+            '''        resource_limits=resource_limits,
+        resource_requests=resource_requests,
+        egress_mode=egress_mode,
+''',
+        ),
+    ],
+)
+
+patch_file(
+    "/app/opensandbox_server/services/k8s/provider_common.py",
+    [
+        (
+            '''    resource_limits: Dict[str, str],
+    *,
+''',
+            '''    resource_limits: Dict[str, str],
+    resource_requests: Optional[Dict[str, str]] = None,
+    *,
+''',
+        ),
+        (
+            '''    translated_limits = _translate_resource_limits_for_k8s(resource_limits)
+    resources = None
+    if translated_limits:
+        resources = V1ResourceRequirements(
+            limits=translated_limits,
+            requests=translated_limits,
+        )
+''',
+            '''    translated_limits = _translate_resource_limits_for_k8s(resource_limits)
+    translated_requests = _translate_resource_limits_for_k8s(resource_requests or {})
+    resources = None
+    if translated_limits:
+        resources = V1ResourceRequirements(
+            limits=translated_limits,
+            requests=translated_requests or translated_limits,
+        )
+''',
+        ),
+    ],
+)
+
+patch_file(
+    "/app/opensandbox_server/services/k8s/batchsandbox_provider.py",
+    [
+        (
+            '''        resource_limits: Dict[str, str],
+        labels: Dict[str, str],
+''',
+            '''        resource_limits: Dict[str, str],
+        resource_requests: Dict[str, str],
+        labels: Dict[str, str],
+''',
+        ),
+        (
+            '''            resource_limits=resource_limits,
+            has_network_policy=network_policy is not None,
+''',
+            '''            resource_limits=resource_limits,
+            resource_requests=resource_requests or {},
+            has_network_policy=network_policy is not None,
+''',
+        ),
+    ],
+)
+
+patch_file(
+    "/app/opensandbox_server/services/k8s/kubernetes_service.py",
+    [
+        (
+            '''    RenewSandboxExpirationRequest,
+    RenewSandboxExpirationResponse,
+    Sandbox,
+''',
+            '''    RenewSandboxExpirationRequest,
+    RenewSandboxExpirationResponse,
+    ResizeSandboxRequest,
+    ResizeSandboxResponse,
+    Sandbox,
+''',
+        ),
+        (
+            '''                resource_limits=context.resource_limits,
+                labels=context.labels,
+''',
+            '''                resource_limits=context.resource_limits,
+                resource_requests=context.resource_requests,
+                labels=context.labels,
+''',
+        ),
+    ],
+)
+
+patch_file(
+    "/app/opensandbox_server/services/k8s/kubernetes_service.py",
+    [
+        (
+            '''    async def create_sandbox(self, request: CreateSandboxRequest) -> CreateSandboxResponse:
+''',
+            '''    async def resize_sandbox(self, sandbox_id: str, request: ResizeSandboxRequest) -> ResizeSandboxResponse:
+        """
+        Resize a running BatchSandbox Pod via the Kubernetes pods/resize subresource.
+        """
+        import uuid
+        from kubernetes.client import ApiException
+
+        try:
+            workload = _get_workload_or_404(
+                self.workload_provider,
+                self.namespace,
+                sandbox_id,
+            )
+            status_info = self.workload_provider.get_status(workload)
+            normalized = _normalize_create_status(status_info)
+            if normalized.get("state") != "Running":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": SandboxErrorCodes.INVALID_STATE,
+                        "message": f"Sandbox {sandbox_id} is not running and cannot be resized.",
+                    },
+                )
+
+            resource_requests = {}
+            if request.resource_requests and request.resource_requests.root:
+                resource_requests = request.resource_requests.root
+            resource_limits = {}
+            if request.resource_limits and request.resource_limits.root:
+                resource_limits = request.resource_limits.root
+            if not resource_requests and not resource_limits:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.INVALID_PARAMETER,
+                        "message": "resourceRequests or resourceLimits is required.",
+                    },
+                )
+
+            pods = self.k8s_client.list_pods(
+                namespace=self.namespace,
+                label_selector=f"{SANDBOX_ID_LABEL}={sandbox_id}",
+            )
+            if not pods:
+                pods = self.k8s_client.list_pods(
+                    namespace=self.namespace,
+                    label_selector=f"batch-sandbox.sandbox.opensandbox.io/name={sandbox_id}",
+                )
+            if not pods:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={
+                        "code": SandboxErrorCodes.K8S_SANDBOX_NOT_FOUND,
+                        "message": f"Pod for sandbox {sandbox_id} was not found.",
+                    },
+                )
+
+            pod = pods[0]
+            pod_name = pod.metadata.name
+            container_name = pod.spec.containers[0].name
+            current_resources = pod.spec.containers[0].resources
+            if not resource_requests:
+                resource_requests = dict(current_resources.requests or {})
+            if not resource_limits:
+                resource_limits = dict(current_resources.limits or {})
+
+            resources = {
+                "requests": resource_requests,
+                "limits": resource_limits,
+            }
+            pod_resize_body = {
+                "spec": {
+                    "containers": [
+                        {
+                            "name": container_name,
+                            "resources": resources,
+                        }
+                    ]
+                }
+            }
+
+            if self.k8s_client._write_limiter:
+                self.k8s_client._write_limiter.acquire()
+            await asyncio.to_thread(
+                self.k8s_client.get_core_v1_api().patch_namespaced_pod_resize,
+                name=pod_name,
+                namespace=self.namespace,
+                body=pod_resize_body,
+            )
+
+            batchsandbox_name = workload["metadata"]["name"]
+            json_patch = [
+                {
+                    "op": "replace",
+                    "path": "/spec/template/spec/containers/0/resources",
+                    "value": resources,
+                }
+            ]
+            if self.k8s_client._write_limiter:
+                self.k8s_client._write_limiter.acquire()
+            await asyncio.to_thread(
+                self.k8s_client.get_custom_objects_api().api_client.call_api,
+                "/apis/{group}/{version}/namespaces/{namespace}/{plural}/{name}",
+                "PATCH",
+                {
+                    "group": "sandbox.opensandbox.io",
+                    "version": "v1alpha1",
+                    "namespace": self.namespace,
+                    "plural": "batchsandboxes",
+                    "name": batchsandbox_name,
+                },
+                [],
+                {
+                    "Accept": "application/json",
+                    "Content-Type": "application/json-patch+json",
+                },
+                body=json_patch,
+                response_type="object",
+                auth_settings=["BearerToken"],
+                _return_http_data_only=True,
+            )
+
+            return ResizeSandboxResponse(
+                requestId=str(uuid.uuid4()),
+                operationId=str(uuid.uuid4()),
+                sandboxId=sandbox_id,
+                state="Running",
+                message=f"Resize requested for pod {pod_name}.",
+                metadata=request.metadata or {},
+            )
+        except HTTPException:
+            raise
+        except ApiException as e:
+            logger.error("Failed to resize sandbox %s: %s", sandbox_id, e)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.K8S_API_ERROR,
+                    "message": f"Failed to resize sandbox: {e.body or e.reason or e}",
+                },
+            ) from e
+        except Exception as e:
+            logger.error("Failed to resize sandbox %s: %s", sandbox_id, e)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": SandboxErrorCodes.UNKNOWN_ERROR,
+                    "message": f"Failed to resize sandbox: {e}",
+                },
+            ) from e
+
+    async def create_sandbox(self, request: CreateSandboxRequest) -> CreateSandboxResponse:
+''',
+        ),
+    ],
+)
+
+patch_file(
+    "/app/opensandbox_server/api/lifecycle.py",
+    [
+        (
+            '''    RenewSandboxExpirationRequest,
+    RenewSandboxExpirationResponse,
+    Sandbox,
+''',
+            '''    RenewSandboxExpirationRequest,
+    RenewSandboxExpirationResponse,
+    ResizeSandboxRequest,
+    ResizeSandboxResponse,
+    Sandbox,
+''',
+        ),
+        (
+            '''@router.post(
+    "/sandboxes/{sandbox_id}/renew-expiration",
+''',
+            '''@router.post(
+    "/sandboxes/{sandbox_id}/resize",
+    response_model=ResizeSandboxResponse,
+    response_model_exclude_none=True,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        202: {"description": "Sandbox resize accepted"},
+        400: {"model": ErrorResponse, "description": "The resize request was invalid"},
+        401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
+        404: {"model": ErrorResponse, "description": "The requested sandbox does not exist"},
+        409: {"model": ErrorResponse, "description": "The sandbox cannot be resized in its current state"},
+        500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
+    },
+)
+async def resize_sandbox(
+    sandbox_id: str,
+    request: ResizeSandboxRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
+) -> ResizeSandboxResponse:
+    """
+    Resize a running sandbox.
+    """
+    return await sandbox_service.resize_sandbox(sandbox_id, request)
+
+
+@router.post(
+    "/sandboxes/{sandbox_id}/renew-expiration",
+''',
+        ),
+    ],
+)
+
+print("OpenSandbox resourceRequests and resize patch applied")
+EOF
+
 OPENSANDBOX_CONFIG_CHECKSUM="$({
     cat "$OUT_DIR/30-sandbox/opensandbox-server-k8s.toml"
     cat "$OUT_DIR/30-sandbox/.templates/batchsandbox-template.yaml"
+    cat "$OUT_DIR/30-sandbox/.templates/opensandbox-resource-requests-patch.py"
 } | compute_sha256)"
 
 {
@@ -482,6 +920,10 @@ EOF
 EOF
     sed 's/^/    /' "$OUT_DIR/30-sandbox/.templates/batchsandbox-template.yaml"
     cat <<EOF
+  opensandbox-resource-requests-patch.py: |
+EOF
+    sed 's/^/    /' "$OUT_DIR/30-sandbox/.templates/opensandbox-resource-requests-patch.py"
+    cat <<EOF
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -508,7 +950,7 @@ metadata:
   namespace: ${NS_SANDBOX}
 rules:
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "services", "events", "persistentvolumeclaims", "configmaps", "secrets"]
+    resources: ["pods", "pods/log", "pods/resize", "services", "events", "persistentvolumeclaims", "configmaps", "secrets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses", "networkpolicies"]
@@ -538,7 +980,7 @@ metadata:
   namespace: ${OPENSANDBOX_WORKLOAD_NAMESPACE}
 rules:
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "services", "events", "persistentvolumeclaims", "configmaps", "secrets"]
+    resources: ["pods", "pods/log", "pods/resize", "services", "events", "persistentvolumeclaims", "configmaps", "secrets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses", "networkpolicies"]
@@ -585,6 +1027,9 @@ spec:
         - name: server
           image: ${IMAGE_SANDBOX_SERVER}
           imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - python /etc/opensandbox/opensandbox-resource-requests-patch.py && exec /app/.venv/bin/python3 /app/.venv/bin/opensandbox-server --config /etc/opensandbox/config.toml
           env:
             - name: SANDBOX_CONFIG_PATH
               value: /etc/opensandbox/opensandbox-server-k8s.toml
@@ -721,6 +1166,8 @@ spec:
               value: "${BYCLAW_SANDBOX_PROFILE_ENABLED:-false}"
             - name: BYCLAW_SANDBOX_TIER_AUTOSCALE_ENABLED
               value: "${BYCLAW_SANDBOX_TIER_AUTOSCALE_ENABLED:-false}"
+            - name: BYAI_ACCESS_URLPATTERNS
+              value: "${BYAI_ACCESS_URLPATTERNS:-/byaiService/sandbox/autoscale/alerts,/sandbox/autoscale/alerts}"
             - name: BYCLAW_SANDBOX_VOLUME_BACKEND
               value: "${BYCLAW_SANDBOX_VOLUME_BACKEND:-file}"
             - name: FILE_STORAGE_TYPE

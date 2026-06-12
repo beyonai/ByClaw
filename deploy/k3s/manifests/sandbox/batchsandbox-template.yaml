@@ -1,0 +1,37 @@
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: BatchSandbox
+metadata:
+  namespace: by-service
+  labels:
+    byclaw.io/runtime: opensandbox
+spec:
+  replicas: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        byclaw.io/workload: sandbox
+    spec:
+      serviceAccountName: opensandbox-runtime
+      restartPolicy: Never
+      nodeSelector:
+        byclaw.io/node-pool: sandbox-general
+      containers:
+        - name: main
+          image: "{{ image }}"
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "1"
+              memory: "2Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          volumeMounts:
+            - name: scratch
+              mountPath: /tmp/scratch
+      volumes:
+        - name: scratch
+          emptyDir:
+            medium: ""
+            sizeLimit: 10Gi
