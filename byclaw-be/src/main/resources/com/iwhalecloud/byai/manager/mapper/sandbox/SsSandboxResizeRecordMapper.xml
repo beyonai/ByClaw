@@ -95,4 +95,21 @@
         LIMIT #{limit}
     </select>
 
+    <select id="selectByCondition" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_resize_record
+        WHERE 1 = 1
+        <if test="sandboxRecordId != null">
+            AND sandbox_record_id = #{sandboxRecordId,jdbcType=BIGINT}
+        </if>
+        <if test="userCode != null and userCode != ''">
+            AND user_code = #{userCode,jdbcType=VARCHAR}
+        </if>
+        <if test="sandboxId != null and sandboxId != ''">
+            AND sandbox_id = #{sandboxId,jdbcType=VARCHAR}
+        </if>
+        ORDER BY started_at DESC, id DESC
+        LIMIT #{limit}
+    </select>
+
 </mapper>

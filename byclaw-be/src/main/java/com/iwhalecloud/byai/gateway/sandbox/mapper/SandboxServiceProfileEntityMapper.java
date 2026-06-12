@@ -49,4 +49,30 @@ public interface SandboxServiceProfileEntityMapper extends BaseMapper<SandboxSer
         ORDER BY sort_order ASC, profile_key ASC
         """)
     List<SandboxServiceProfileEntity> selectEnabledProfiles(@Param("serviceType") String serviceType);
+
+    @Select("""
+        <script>
+        SELECT id,
+               service_type AS "serviceType",
+               profile_key AS "profileKey",
+               resource_requests AS "resourceRequests",
+               resource_limits AS "resourceLimits",
+               template_patch_json AS "templatePatchJson",
+               resize_enabled AS "resizeEnabled",
+               resize_strategy AS "resizeStrategy",
+               enabled,
+               sort_order AS "sortOrder"
+        FROM sandbox_service_profile
+        WHERE 1 = 1
+        <if test="serviceType != null and serviceType != ''">
+          AND service_type = #{serviceType}
+        </if>
+        <if test="enabledOnly">
+          AND enabled = 1
+        </if>
+        ORDER BY service_type ASC, sort_order ASC, profile_key ASC
+        </script>
+        """)
+    List<SandboxServiceProfileEntity> selectProfiles(@Param("serviceType") String serviceType,
+                                                     @Param("enabledOnly") boolean enabledOnly);
 }

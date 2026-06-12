@@ -17,8 +17,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceProfileEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
+import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceProfileEntity;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchRouting;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxResizeService;
@@ -29,6 +31,7 @@ import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxResizeRecord;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
+import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxResizeRecordMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -52,6 +55,12 @@ public class SandboxController {
 
     @Autowired
     private SandboxServiceSpecEntityMapper sandboxServiceSpecEntityMapper;
+
+    @Autowired
+    private SandboxServiceProfileEntityMapper sandboxServiceProfileEntityMapper;
+
+    @Autowired
+    private SsSandboxResizeRecordMapper sandboxResizeRecordMapper;
 
     @Autowired
     private SandboxUserContextRunner sandboxUserContextRunner;
@@ -405,6 +414,41 @@ public class SandboxController {
         }
     }
 
+    @PostMapping("/listResizeRecords")
+    @Operation(summary = "查询沙箱扩缩容记录", description = "按沙箱记录ID、用户编码或 sandboxId 查询扩缩容审计流水")
+    public ResponseUtil listResizeRecords(@RequestBody Map<String, Object> params) {
+        Long sandboxRecordId = parseLongParam(params.get("sandboxRecordId"));
+        if (sandboxRecordId == null) {
+            sandboxRecordId = parseLongParam(params.get("recordId"));
+        }
+        String userCode = stringParam(params.get("userCode"));
+        String sandboxId = stringParam(params.get("sandboxId"));
+        int limit = parseIntParam(params.get("limit"), 50);
+        limit = Math.max(1, Math.min(limit, 200));
+
+        if (sandboxRecordId == null && StringUtils.isBlank(userCode) && StringUtils.isBlank(sandboxId)) {
+            return ResponseUtil.fail("sandboxRecordId, userCode or sandboxId is required");
+        }
+
+        List<SsSandboxResizeRecord> list = sandboxResizeRecordMapper.selectByCondition(
+            sandboxRecordId,
+            userCode,
+            sandboxId,
+            limit
+        );
+        return ResponseUtil.successResponse(list);
+    }
+
+    @PostMapping("/listServiceProfiles")
+    @Operation(summary = "查询沙箱规格分层", description = "查询同一沙箱类型下可用的资源规格分层")
+    public ResponseUtil listServiceProfiles(@RequestBody Map<String, Object> params) {
+        String serviceType = StringUtils.defaultIfBlank(stringParam(params.get("serviceType")),
+            SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
+        boolean enabledOnly = !"false".equalsIgnoreCase(String.valueOf(params.getOrDefault("enabledOnly", "true")));
+        List<SandboxServiceProfileEntity> list = sandboxServiceProfileEntityMapper.selectProfiles(serviceType, enabledOnly);
+        return ResponseUtil.successResponse(list);
+    }
+
     // ==================== 沙箱服务规格配置管理接口 ====================
 
     /**
@@ -548,5 +592,37 @@ public class SandboxController {
         }
         sandboxService.removePreferredServiceKey(userCodeObj.toString().trim());
         return ResponseUtil.successResponse();
+    }
+
+    private String stringParam(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String str = value.toString().trim();
+        return str.isEmpty() ? null : str;
+    }
+
+    private Long parseLongParam(Object value) {
+        if (value == null || value.toString().trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value.toString().trim());
+        }
+        catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private int parseIntParam(Object value, int defaultValue) {
+        if (value == null || value.toString().trim().isEmpty()) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(value.toString().trim());
+        }
+        catch (NumberFormatException e) {
+            return defaultValue;
+        }
     }
 }

@@ -24,4 +24,9 @@ public interface SsSandboxResizeRecordMapper {
 
     List<SsSandboxResizeRecord> selectBySandboxRecordId(@Param("sandboxRecordId") Long sandboxRecordId,
                                                         @Param("limit") int limit);
+
+    List<SsSandboxResizeRecord> selectByCondition(@Param("sandboxRecordId") Long sandboxRecordId,
+                                                  @Param("userCode") String userCode,
+                                                  @Param("sandboxId") String sandboxId,
+                                                  @Param("limit") int limit);
 }
