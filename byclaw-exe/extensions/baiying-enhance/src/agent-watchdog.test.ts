@@ -1320,7 +1320,7 @@ describe("createAgentWatchdog", () => {
         expect(entry.skills).toEqual(["alpha"]);
     });
 
-    it("seeds main AGENTS.md when mainAgentsMdPath is set (default mainWorkspaceAgentsAutoSeed)", async () => {
+    it("seeds main SUBAGENT_ROUTING.md when mainAgentsMdPath is set (context handled by separate watcher)", async () => {
         const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-"));
         const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-"));
         await writeFile(path.join(dir, "demo.json"), STABLE_AGENT_JSON, "utf8");
@@ -1354,16 +1354,14 @@ describe("createAgentWatchdog", () => {
         await wd.__flushNow!();
         await wd.stop();
 
-        const agentsMd = await readFile(path.join(mainWs, "AGENTS.md"), "utf8");
-        expect(agentsMd.startsWith(MAIN_AGENTS_MARKER)).toBe(true);
-        expect(agentsMd).toContain("# From template");
+        expect(await pathExists(path.join(mainWs, "AGENTS.md"))).toBe(false);
 
         const routingMd = await readFile(path.join(mainWs, SUBAGENT_ROUTING_FILENAME), "utf8");
         expect(routingMd.startsWith(SUBAGENT_ROUTING_MARKER)).toBe(true);
         expect(routingMd).toContain(agentId);
     });
 
-    it("seeds main AGENTS.md when workspaceAutoSeed is false but mainWorkspaceAgentsAutoSeed is default", async () => {
+    it("seeds main SUBAGENT_ROUTING.md when workspaceAutoSeed is false but mainWorkspaceAgentsAutoSeed is default", async () => {
         const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-"));
         const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-"));
         await writeFile(path.join(dir, "demo.json"), STABLE_AGENT_JSON, "utf8");
@@ -1397,16 +1395,14 @@ describe("createAgentWatchdog", () => {
         await wd.__flushNow!();
         await wd.stop();
 
-        const agentsMd = await readFile(path.join(mainWs, "AGENTS.md"), "utf8");
-        expect(agentsMd.startsWith(MAIN_AGENTS_MARKER)).toBe(true);
-        expect(agentsMd).toContain("# No managed seed");
+        expect(await pathExists(path.join(mainWs, "AGENTS.md"))).toBe(false);
 
         const routingMd = await readFile(path.join(mainWs, SUBAGENT_ROUTING_FILENAME), "utf8");
         expect(routingMd.startsWith(SUBAGENT_ROUTING_MARKER)).toBe(true);
         expect(routingMd).toContain(agentId);
     });
 
-    it("seeds main context from Redis when bundled AGENTS.md source is disabled", async () => {
+    it("does not seed main context from Redis inside agent watchdog", async () => {
         const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-context-"));
         const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-context-"));
         await writeFile(path.join(mainWs, "SOUL.md"), "# Base Watchdog SOUL\n", "utf8");
@@ -1460,13 +1456,11 @@ describe("createAgentWatchdog", () => {
         await wd.stop();
 
         const soulMd = await readFile(path.join(mainWs, "SOUL.md"), "utf8");
-        expect(soulMd).toContain("# Base Watchdog SOUL");
-        expect(soulMd).toContain("<!-- baiying-enhance: main context SOUL.md:start -->");
-        expect(soulMd).toContain("# Redis Watchdog SOUL");
+        expect(soulMd).toBe("# Base Watchdog SOUL\n");
         expect(await pathExists(path.join(mainWs, "AGENTS.md"))).toBe(false);
     });
 
-    it("does not refresh main context files on auth reseed when Redis context is unchanged", async () => {
+    it("does not refresh main context files on auth reseed even when Redis context changes", async () => {
         const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-context-unchanged-"));
         const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-context-unchanged-"));
         const agentId = `${MANAGED_AGENT_PREFIX}10863047`;
@@ -1531,12 +1525,8 @@ describe("createAgentWatchdog", () => {
         await wd.start();
         await wd.__flushNow!();
 
-        expect(await readFile(path.join(mainWs, "AGENTS.md"), "utf8")).toContain(
-            "# Redis Watchdog AGENTS",
-        );
-        expect(await readFile(path.join(mainWs, "SOUL.md"), "utf8")).toContain(
-            "# Redis Watchdog SOUL",
-        );
+        expect(await pathExists(path.join(mainWs, "AGENTS.md"))).toBe(false);
+        expect(await readFile(path.join(mainWs, "SOUL.md"), "utf8")).toBe("# Base Watchdog SOUL\n");
 
         await writeFile(path.join(mainWs, "AGENTS.md"), `${MAIN_AGENTS_MARKER}\n\n# Manual AGENTS\n`, "utf8");
         await writeFile(path.join(mainWs, "SOUL.md"), "# Manual SOUL\n", "utf8");
@@ -1576,12 +1566,9 @@ describe("createAgentWatchdog", () => {
         await wd.__flushNow!({ fullWorkspaceReseed: true });
         await wd.stop();
 
-        expect(await readFile(path.join(mainWs, "AGENTS.md"), "utf8")).toContain(
-            "# Redis Watchdog AGENTS v2",
-        );
+        expect(await readFile(path.join(mainWs, "AGENTS.md"), "utf8")).toContain("# Manual AGENTS");
         const updatedSoul = await readFile(path.join(mainWs, "SOUL.md"), "utf8");
-        expect(updatedSoul).toContain("# Manual SOUL");
-        expect(updatedSoul).toContain("# Redis Watchdog SOUL v2");
+        expect(updatedSoul).toBe("# Manual SOUL\n");
     });
 
     it("calls writeConfigFile when only workspace skills changed", async () => {

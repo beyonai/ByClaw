@@ -70,6 +70,11 @@ export default {
   'refineModal.abilityNamePlaceholder': 'Ability {index} name',
   'refineModal.abilityDescPlaceholder': 'Please enter the ability description',
   'refineModal.workStandard': 'Work Guidelines',
+  'refineModal.step.basic': 'Basic Info',
+  'refineModal.step.persona': 'Role & Persona',
+  'refineModal.step.workflow': 'Workflow',
+  'refineModal.step.style': 'Communication',
+  'refineModal.progress': 'Completed {done} / {total} items',
 
   // Employee Detail
   'employeeDetail.refine': 'Auto-Complete',
