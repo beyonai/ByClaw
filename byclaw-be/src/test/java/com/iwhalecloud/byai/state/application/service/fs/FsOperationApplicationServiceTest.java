@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.fs;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -100,6 +101,52 @@ class FsOperationApplicationServiceTest {
 
         verify(userFS).write(any(MultipartFile.class), eq("/.sessions/sess-1/out.txt"));
         verify(userFS).write(any(MultipartFile.class), eq("/.sessions/sess-2/out.txt"));
+    }
+
+    @Test
+    void putFileAsUser_acceptsTargetUserStoragePrefixAndRestoresLoginContext() {
+        FsOperationApplicationService service = service();
+        FileMetadata metadata = new FileMetadata();
+        when(userFS.write(any(MultipartFile.class), anyString())).thenReturn(metadata);
+
+        service.putFileAsUser("adminvip", "USER", null, "/byclaw-adminvip/by/.personal-agents/100/a.tar.gz",
+            "application/gzip",
+            new MultipartFileUtil("file", "a.tar.gz", "application/gzip", "demo".getBytes(StandardCharsets.UTF_8)));
+
+        verify(userFS).write(any(MultipartFile.class), eq("/.personal-agents/100/a.tar.gz"));
+        assertThat(CurrentUserHolder.getCurrentUserCode()).isEqualTo("user001");
+    }
+
+    @Test
+    void listFilesAsUser_listsTargetUserPathAndRestoresLoginContext() {
+        FsOperationApplicationService service = service();
+        when(userFS.list(eq("/.personal-agents/100/"), eq(1)))
+            .thenReturn(List.of("/.personal-agents/100/a.tar.gz"));
+
+        List<String> result = service.listFilesAsUser("adminvip", "USER", null,
+            "/byclaw-adminvip/by/.personal-agents/100/", 1);
+
+        assertThat(result).containsExactly("/.personal-agents/100/a.tar.gz");
+        assertThat(CurrentUserHolder.getCurrentUserCode()).isEqualTo("user001");
+    }
+
+    @Test
+    void downloadFileAsUser_streamsUnderTargetUserContext() throws Exception {
+        FsOperationApplicationService service = service();
+        when(userFS.read(eq("/.personal-agents/100/a.tar.gz"))).thenAnswer(invocation -> {
+            assertThat(CurrentUserHolder.getCurrentUserCode()).isEqualTo("adminvip");
+            return new ByteArrayInputStream("archive".getBytes(StandardCharsets.UTF_8));
+        });
+
+        FsOperationApplicationService.FsDownload download =
+            service.downloadFileAsUser("adminvip", "USER", null, "/.personal-agents/100/a.tar.gz");
+        assertThat(CurrentUserHolder.getCurrentUserCode()).isEqualTo("user001");
+
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        download.getBody().writeTo(outputStream);
+
+        assertThat(outputStream.toString(StandardCharsets.UTF_8)).isEqualTo("archive");
+        assertThat(CurrentUserHolder.getCurrentUserCode()).isEqualTo("user001");
     }
 
     @Test
