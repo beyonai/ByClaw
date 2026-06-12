@@ -9,7 +9,7 @@ export const SUBAGENT_ROUTING_FILENAME = "SUBAGENT_ROUTING.md";
 /** Total output budget (many agents × compact cards). */
 const MAX_TOTAL_CHARS = 9000;
 /** One-line role / resourceDesc cap — enough to disambiguate intent, avoid SOUL-sized paste. */
-const MAX_ROLE_LINE = 220;
+const MAX_ROLE_LINE = 160;
 const MAX_INSTRUCTION_FALLBACK = 200;
 const MAX_PERSONA_LINE = 180;
 const MAX_PERSONA_FRAGMENTS = 3;
@@ -17,10 +17,14 @@ const MAX_PERSONA_FRAGMENT_CHARS = 64;
 const MAX_COMPETENCIES_INLINE = 4;
 const MAX_COMPETENCY_CHARS = 88;
 /** Per-side bullet fragments merged into one routing line. */
-const MAX_SCOPE_FRAGMENTS = 4;
-const MAX_SCOPE_CHARS = 44;
-const MAX_EXAMPLES_INLINE = 4;
+const MAX_ROUTE_FRAGMENTS = 4;
+const MAX_ROUTE_CHARS = 64;
+const MAX_AVOID_FRAGMENTS = 3;
+const MAX_AVOID_CHARS = 56;
+const MAX_EXAMPLES_INLINE = 3;
 const MAX_EXAMPLE_CHARS = 48;
+const MAX_RESOURCE_FRAGMENTS = 4;
+const MAX_RESOURCE_CHARS = 48;
 
 type RoutingHints = {
   resourceDesc?: string;
@@ -225,6 +229,15 @@ function routingKindLabel(integrationType: string | undefined): string {
   return "LLM";
 }
 
+function normalizeIntegrationType(integrationType: string | undefined): string {
+  return (integrationType ?? "").trim().toUpperCase();
+}
+
+function requiresBaiyingCall(integrationType: string | undefined): boolean {
+  const t = normalizeIntegrationType(integrationType);
+  return t === "INTERFACE" || t === "A2A" || t === "PAGE";
+}
+
 function oneLineRoleForAgent(
   adapted: AdaptedManagedAgent,
   hints: RoutingHints,
@@ -253,9 +266,100 @@ function effectiveCoreCompetencies(
   return hints.coreCompetencies;
 }
 
+function pushUniqueFragment(params: {
+  out: string[];
+  seen: Set<string>;
+  value: string | undefined;
+  maxChars: number;
+  maxFragments: number;
+}): void {
+  const value = params.value?.trim();
+  if (!value || params.out.length >= params.maxFragments) return;
+  const fragment = truncate(value, params.maxChars);
+  if (!fragment || params.seen.has(fragment)) return;
+  params.seen.add(fragment);
+  params.out.push(fragment);
+}
+
+function buildRouteFragments(params: {
+  roleLine: string;
+  competencyFragments: string[];
+  acceptFragments: string[];
+}): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const role = params.roleLine.startsWith("(no role snippet") ? "" : params.roleLine;
+  pushUniqueFragment({
+    out,
+    seen,
+    value: role,
+    maxChars: MAX_ROLE_LINE,
+    maxFragments: MAX_ROUTE_FRAGMENTS,
+  });
+  for (const fragment of params.acceptFragments) {
+    pushUniqueFragment({
+      out,
+      seen,
+      value: fragment,
+      maxChars: MAX_ROUTE_CHARS,
+      maxFragments: MAX_ROUTE_FRAGMENTS,
+    });
+  }
+  for (const fragment of params.competencyFragments) {
+    pushUniqueFragment({
+      out,
+      seen,
+      value: fragment,
+      maxChars: MAX_ROUTE_CHARS,
+      maxFragments: MAX_ROUTE_FRAGMENTS,
+    });
+  }
+  if (out.length === 0) {
+    out.push("(see agents_list / sub-agent workspace)");
+  }
+  return out;
+}
+
+function buildDispatchContract(integrationType: string | undefined): string {
+  if (requiresBaiyingCall(integrationType)) {
+    return "spawn brief 必须明确要求该 agent 使用 `baiying_call` 执行；不要只返回自然语言说明。";
+  }
+  return "派发一个边界清晰的子任务；要求结构化结果、依据、假设与不确定性。";
+}
+
+function buildEvidenceContract(integrationType: string | undefined): string {
+  // const t = normalizeIntegrationType(integrationType);
+  // if (t === "PAGE") {
+  //   return "页面/原型链接、页面ID/产物ID、`baiying_call` 结果、生成状态或失败原因。";
+  // }
+  // if (requiresBaiyingCall(integrationType)) {
+  //   return "`baiying_call` 工具结果、业务数据/执行状态或失败原因。";
+  // }
+  return "结构化结论、关键依据、假设与不确定性。";
+}
+
+function collectResourceFragments(adapted: AdaptedManagedAgent): string[] {
+  const resources = adapted.associatedResources ?? [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const resource of resources) {
+    const type = (resource.resourceBizType || resource.resourceType || "UNKNOWN").trim();
+    const name = resource.resourceName?.trim() || resource.resourceId;
+    pushUniqueFragment({
+      out,
+      seen,
+      value: `${type}: ${name}`,
+      maxChars: MAX_RESOURCE_CHARS,
+      maxFragments: MAX_RESOURCE_FRAGMENTS,
+    });
+    if (out.length >= MAX_RESOURCE_FRAGMENTS) return out;
+  }
+  return out;
+}
+
 /**
  * Build compact markdown for main-workspace `SUBAGENT_ROUTING.md`.
- * Optimized for intent routing density, not full persona replication.
+ * Optimized for parent-agent routing and dispatch contracts, not full persona replication.
  */
 export async function buildSubagentRoutingMarkdown(managed: AdaptedManagedAgent[]): Promise<string> {
   const managedOnly = managed
@@ -265,7 +369,9 @@ export async function buildSubagentRoutingMarkdown(managed: AdaptedManagedAgent[
   const lines: string[] = [
     "# Sub-agent routing (baiying-enhance)",
     "",
-    "Dense **hints only**. **Not** an allowlist — call `agents_list` in the same turn before `sessions_spawn`.",
+    "Dense **routing + dispatch hints only**. **Not** an allowlist — call `agents_list` in the same turn before `sessions_spawn`.",
+    "",
+    "Use each card to choose the agent, then copy its `dispatch` and `evidence` requirements into the spawn brief.",
     "",
     "---",
     "",
@@ -297,20 +403,25 @@ export async function buildSubagentRoutingMarkdown(managed: AdaptedManagedAgent[
 
     const integ = adapted.integrationType?.trim() || "NONE";
     const kind = routingKindLabel(adapted.integrationType);
+    const tags = requiresBaiyingCall(adapted.integrationType) ? " · **requires:baiying_call**" : "";
     const roleLine = oneLineRoleForAgent(adapted, hints);
     const competencies = effectiveCoreCompetencies(adapted, hints);
     const capFr = collectCompetencyFragments(competencies);
-    const inFr = collectDistributedFragments(
-      competencies,
-      "acceptBoundary",
-      MAX_SCOPE_FRAGMENTS,
-      MAX_SCOPE_CHARS,
-    );
-    const outFr = collectDistributedFragments(
+    const routeFr = buildRouteFragments({
+      roleLine,
+      competencyFragments: capFr,
+      acceptFragments: collectDistributedFragments(
+        competencies,
+        "acceptBoundary",
+        MAX_ROUTE_FRAGMENTS,
+        MAX_ROUTE_CHARS,
+      ),
+    });
+    const avoidFr = collectDistributedFragments(
       competencies,
       "rejectBoundary",
-      MAX_SCOPE_FRAGMENTS,
-      MAX_SCOPE_CHARS,
+      MAX_AVOID_FRAGMENTS,
+      MAX_AVOID_CHARS,
     );
     const exFr = collectDistributedFragments(
       competencies,
@@ -318,24 +429,21 @@ export async function buildSubagentRoutingMarkdown(managed: AdaptedManagedAgent[
       MAX_EXAMPLES_INLINE,
       MAX_EXAMPLE_CHARS,
     );
+    const resourceFr = collectResourceFragments(adapted);
 
     const card: string[] = [
       `## ${displayName}`,
-      `- \`${adapted.agentId}\` · **${integ}** · **${kind}**`,
-      `- **role**: ${roleLine}`,
+      `- **agentId**: \`${adapted.agentId}\` · **${integ}** · **${kind}**${tags}`,
+      `- **route**: ${routeFr.join(" · ")}`,
     ];
 
-    if (hints.corePersonaSummary) {
-      card.push(`- **persona**: ${hints.corePersonaSummary}`);
+    if (avoidFr.length > 0) {
+      card.push(`- **avoid**: ${avoidFr.join(" · ")}`);
     }
-    if (capFr.length > 0) {
-      card.push(`- **cap**: ${capFr.join(" · ")}`);
-    }
-    if (inFr.length > 0 || outFr.length > 0) {
-      const parts: string[] = [];
-      if (inFr.length > 0) parts.push(`in: ${inFr.join(" · ")}`);
-      if (outFr.length > 0) parts.push(`out: ${outFr.join(" · ")}`);
-      card.push(`- **scope**: ${parts.join(" | ")}`);
+    card.push(`- **dispatch**: ${buildDispatchContract(adapted.integrationType)}`);
+    card.push(`- **evidence**: ${buildEvidenceContract(adapted.integrationType)}`);
+    if (resourceFr.length > 0) {
+      card.push(`- **resources**: ${resourceFr.join(" · ")}`);
     }
     if (exFr.length > 0) {
       card.push(`- **ex**: ${exFr.join(" · ")}`);

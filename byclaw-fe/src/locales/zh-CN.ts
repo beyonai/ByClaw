@@ -119,7 +119,7 @@ export default {
   'knowledgeCenter.ecosystem.entry': '生态采集',
   'knowledgeCenter.ecosystem.title': '生态采集',
   'knowledgeCenter.ecosystem.sources': '采集源',
-  'knowledgeCenter.ecosystem.sourcesDesc': '来源由后端动态读取内置 OpenCLI manifest 和 Browser Bridge 能力目录生成',
+  'knowledgeCenter.ecosystem.sourcesDesc': '来源由后端动态读取内置 byCLI manifest 和 Browser Bridge 能力目录生成',
   'knowledgeCenter.ecosystem.source.zhihu': '知乎',
   'knowledgeCenter.ecosystem.source.github': 'GitHub',
   'knowledgeCenter.ecosystem.source.web': '网页',
@@ -128,7 +128,7 @@ export default {
   'knowledgeCenter.ecosystem.needBridge': '需浏览器登录态',
   'knowledgeCenter.ecosystem.needBrowserLogin': '需浏览器登录态',
   'knowledgeCenter.ecosystem.serverReady': '服务器可采集',
-  'knowledgeCenter.ecosystem.noDynamicSources': '暂未发现可用生态采集能力，请检查后端 OpenCLI 能力目录。',
+  'knowledgeCenter.ecosystem.noDynamicSources': '暂未发现可用生态采集能力，请检查后端 byCLI 能力目录。',
   'knowledgeCenter.ecosystem.bridgeRequired': '该采集源依赖浏览器登录态，请使用 ByClaw Browser Bridge。',
   'knowledgeCenter.ecosystem.browserAuthRequired':
     '该网站需要登录态采集，请先在浏览器完成登录，再使用 ByClaw Browser Bridge。',
@@ -315,7 +315,7 @@ export default {
   'knowledgeCenter.ecosystem.connectionName': '{source}连接',
   'knowledgeCenter.ecosystem.connectionSaved': '生态采集连接已保存',
   'knowledgeCenter.ecosystem.unsupportedRuntimeWarning':
-    '当前后端动态能力目录没有返回该来源，请检查 OpenCLI manifest 刷新或后端部署状态',
+    '当前后端动态能力目录没有返回该来源，请检查 byCLI manifest 刷新或后端部署状态',
   'knowledgeCenter.ecosystem.connectionRequired': '请先保存或选择连接配置',
   'knowledgeCenter.ecosystem.taskCompleted': '生态采集任务已完成',
   'knowledgeCenter.ecosystem.bridgeTaskDispatched': '采集任务已下发，请保持 Browser Bridge 在线',
@@ -328,7 +328,7 @@ export default {
   'knowledgeCenter.ecosystem.createAndStart': '创建并启动采集',
   'knowledgeCenter.ecosystem.unsupportedRuntimeTitle': '当前来源不在动态能力目录中',
   'knowledgeCenter.ecosystem.unsupportedRuntimeDesc':
-    '生态采集来源不再由前端静态枚举或 DB 连接器表兜底；请确认后端已成功执行 opencli list -f json 并刷新能力目录。',
+    '生态采集来源不再由前端静态枚举或 DB 连接器表兜底；请确认后端已成功执行 bycli list -f json 并刷新能力目录。',
   'knowledgeCenter.ecosystem.agent.detecting': '检测中',
   'knowledgeCenter.ecosystem.agent.online': '在线',
   'knowledgeCenter.ecosystem.agent.offline': '未连接',

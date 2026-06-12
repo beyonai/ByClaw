@@ -20,6 +20,15 @@ export const ByaiTelemetryConfigSchema = z.object({
   maxAgeMs: z.number().optional().default(30 * 60 * 1000),
 });
 
+export const ByaiContextSnapshotConfigSchema = z.object({
+  enabled: z.boolean().optional().default(false),
+  fileName: z.string().optional().default("llm_input_snapshots.json"),
+  maxStringChars: z.number().optional().default(200_000),
+  maxArrayItems: z.number().optional().default(200),
+  includeHistoryMessages: z.boolean().optional().default(true),
+  includeTools: z.boolean().optional().default(true),
+});
+
 export const ByaiChannelConfigSchema = z.object({
   enabled: z.boolean().optional().default(true),
   webhookPath: z.string().optional().default("/webhook/byai-channel"),
@@ -33,4 +42,5 @@ export const ByaiChannelConfigSchema = z.object({
   /** SDK 模式配置 */
   sdk: ByaiSdkConfigSchema.optional(),
   telemetry: ByaiTelemetryConfigSchema.optional(),
+  contextSnapshot: ByaiContextSnapshotConfigSchema.optional(),
 });

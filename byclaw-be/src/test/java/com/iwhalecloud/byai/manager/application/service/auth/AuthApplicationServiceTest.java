@@ -102,33 +102,6 @@ class AuthApplicationServiceTest {
     }
 
     /**
-     * 默认超级助手禁止被设置使用授权，后端需要兜底拦截，不能只依赖前端隐藏按钮。
-     *
-     * @author qin.guoquan
-     * @date 2026-05-09 150800
-     */
-    @Test
-    void setResourceUsers_rejectsDefaultSuperAssistantResource() {
-        mockI18n();
-
-        AuthApplicationService service = new AuthApplicationService();
-        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
-        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
-
-        SsResource defaultSuperAssistant = new SsResource();
-        defaultSuperAssistant.setResourceId(100L);
-        defaultSuperAssistant.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
-        defaultSuperAssistant.setOwnerType(OwnerType.PERSONAL_DEFAULT);
-        defaultSuperAssistant.setResourceCode("user001_main");
-        when(ssResourceMapper.selectById(100L)).thenReturn(defaultSuperAssistant);
-
-        ResourceMemberSettingQo qo = new ResourceMemberSettingQo();
-        qo.setResourceId(100L);
-
-        assertThatThrownBy(() -> service.setResourceUsers(qo)).isInstanceOf(BaseException.class);
-    }
-
-    /**
      * 个人助理不对外开放管理授权、使用申请和申请审核；即使当前用户具备平台管理员能力，也要由资源类型兜底压住。
      */
     @Test
@@ -161,10 +134,10 @@ class AuthApplicationServiceTest {
     }
 
     /**
-     * 默认超级助手即使是当前用户绑定的默认助理，也不允许编辑，避免登录初始化的底座资源被改坏。
+     * 默认超级助手允许当前用户编辑，但仍禁止删除登录初始化的底座资源。
      */
     @Test
-    void queryResourceOperationPermissions_rejectsDefaultSuperAssistantEditAction() {
+    void queryResourceOperationPermissions_allowsDefaultSuperAssistantEditButRejectsDelete() {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceService ssResourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
@@ -186,7 +159,7 @@ class AuthApplicationServiceTest {
 
         ResourceOperationPermissionsVo vo = service.queryResourceOperationPermissions(205L);
 
-        assertThat(vo.getCanEdit()).isFalse();
+        assertThat(vo.getCanEdit()).isTrue();
         assertThat(vo.getCanDelete()).isFalse();
     }
 

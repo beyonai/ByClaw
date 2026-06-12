@@ -90,7 +90,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   getUploadFileConfig = () => this.props.uploadFileConfig || this.props.globalContext.uploadFileConfig;
 
-  getUploadFileAccept = () => this.getUploadFileConfig()?.allowedFileTypes?.join(',');
+  getUploadFileAccept = () => ''; // 不限制文件类型，允许所有类型上传
 
   static getDerivedStateFromProps(nextProps: IProps, prevState: IState) {
     if (nextProps.employeesList?.length && !prevState.connectNetAgentId) {

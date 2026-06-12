@@ -122,7 +122,7 @@ export default {
   'knowledgeCenter.ecosystem.title': 'Eco Collect',
   'knowledgeCenter.ecosystem.sources': 'Sources',
   'knowledgeCenter.ecosystem.sourcesDesc':
-    'Sources are generated from the backend OpenCLI manifest and Browser Bridge capability directory',
+    'Sources are generated from the backend byCLI manifest and Browser Bridge capability directory',
   'knowledgeCenter.ecosystem.source.zhihu': 'Zhihu',
   'knowledgeCenter.ecosystem.source.github': 'GitHub',
   'knowledgeCenter.ecosystem.source.web': 'Web Page',
@@ -132,7 +132,7 @@ export default {
   'knowledgeCenter.ecosystem.needBrowserLogin': 'Browser login required',
   'knowledgeCenter.ecosystem.serverReady': 'Server collectible',
   'knowledgeCenter.ecosystem.noDynamicSources':
-    'No ecosystem collection capability was discovered. Check the backend OpenCLI capability directory.',
+    'No ecosystem collection capability was discovered. Check the backend byCLI capability directory.',
   'knowledgeCenter.ecosystem.bridgeRequired': 'This source depends on browser login state. Use ByClaw Browser Bridge.',
   'knowledgeCenter.ecosystem.browserAuthRequired':
     'This website needs login-state collection. Sign in through your browser first, then use ByClaw Browser Bridge.',
@@ -331,7 +331,7 @@ export default {
   'knowledgeCenter.ecosystem.connectionName': '{source} Connection',
   'knowledgeCenter.ecosystem.connectionSaved': 'Ecosystem collection connection saved',
   'knowledgeCenter.ecosystem.unsupportedRuntimeWarning':
-    'This source is not present in the backend dynamic capability directory. Check OpenCLI manifest refresh or backend deployment status.',
+    'This source is not present in the backend dynamic capability directory. Check byCLI manifest refresh or backend deployment status.',
   'knowledgeCenter.ecosystem.connectionRequired': 'Please save or select a connection first',
   'knowledgeCenter.ecosystem.taskCompleted': 'Ecosystem collection task completed',
   'knowledgeCenter.ecosystem.bridgeTaskDispatched': 'Collection task dispatched. Keep Browser Bridge online.',
@@ -344,7 +344,7 @@ export default {
   'knowledgeCenter.ecosystem.createAndStart': 'Create and Start Collection',
   'knowledgeCenter.ecosystem.unsupportedRuntimeTitle': 'Source is not in the dynamic capability directory',
   'knowledgeCenter.ecosystem.unsupportedRuntimeDesc':
-    'Ecosystem sources are no longer backed by frontend static enums or the DB connector table. Confirm that the backend has run opencli list -f json and refreshed the capability directory.',
+    'Ecosystem sources are no longer backed by frontend static enums or the DB connector table. Confirm that the backend has run bycli list -f json and refreshed the capability directory.',
   'knowledgeCenter.ecosystem.agent.detecting': 'Detecting',
   'knowledgeCenter.ecosystem.agent.online': 'Online',
   'knowledgeCenter.ecosystem.agent.offline': 'Disconnected',

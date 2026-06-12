@@ -28,7 +28,7 @@ import {
     resolveDefaultBaiyingAimodelProviderBundle,
 } from "./aimodel-config.js";
 import type { WorkspaceArchiveApi } from "./workspace-archive-api.js";
-import { resolveEffectiveMainAgentsMdMode, seedMainAgentAgentsMd } from "./main-workspace-seed.js";
+import { seedMainSubagentRouting } from "./main-workspace-seed.js";
 import { resolveAgentWorkspaceDir, seedManagedAgentWorkspace } from "./workspace-seed.js";
 import {
     archiveUnauthorizedActiveManagedWorkspaces,
@@ -987,17 +987,13 @@ export function createAgentWatchdog(params: {
             params.registry.replaceAll(effectiveManaged);
 
             const runMainAgentsSeed =
-                params.pluginConfig.mainWorkspaceAgentsAutoSeed !== false &&
-                resolveEffectiveMainAgentsMdMode(params.pluginConfig) !== "off";
+                params.pluginConfig.mainWorkspaceAgentsAutoSeed !== false;
 
-            const trySeedMainAgentsMd = async () => {
+            const trySeedMainSubagentRouting = async () => {
                 if (!runMainAgentsSeed) {
                     const reasons: string[] = [];
                     if (params.pluginConfig.mainWorkspaceAgentsAutoSeed === false) {
                         reasons.push("mainWorkspaceAgentsAutoSeed=false");
-                    }
-                    if (resolveEffectiveMainAgentsMdMode(params.pluginConfig) === "off") {
-                        reasons.push("mainAgentsMdMode=off");
                     }
                     if (reasons.length > 0) {
                         params.api.logger.info(
@@ -1007,7 +1003,9 @@ export function createAgentWatchdog(params: {
                     return;
                 }
                 try {
-                    await seedMainAgentAgentsMd({
+                    // 主 workspace context 已由 main-context-template watcher 独立维护；
+                    // 数字员工同步链路只负责随着员工集合变化刷新路由提示。
+                    await seedMainSubagentRouting({
                         api: params.api,
                         pluginConfig: params.pluginConfig,
                         managedAgents: effectiveManaged,
@@ -1018,7 +1016,7 @@ export function createAgentWatchdog(params: {
                     });
                 } catch (err) {
                     params.api.logger.warn(
-                        `baiying-enhance: main workspace AGENTS.md seed failed: ${
+                        `baiying-enhance: main workspace SUBAGENT_ROUTING.md seed failed: ${
                             err instanceof Error ? err.message : String(err)
                         }`,
                     );
@@ -1027,7 +1025,7 @@ export function createAgentWatchdog(params: {
 
             if (!shouldSync) {
                 await runMountedWorkspaceCheck("no-sync");
-                await trySeedMainAgentsMd();
+                await trySeedMainSubagentRouting();
                 prevSkillSignatures.clear();
                 prevToolSignatures.clear();
                 for (const m of effectiveManaged) {
@@ -1153,7 +1151,7 @@ export function createAgentWatchdog(params: {
                 }
             }
 
-            await trySeedMainAgentsMd();
+            await trySeedMainSubagentRouting();
 
             prevHashes.clear();
             for (const m of effectiveManaged) {

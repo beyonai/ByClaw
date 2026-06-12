@@ -94,7 +94,7 @@ public class SsSuperAssistKwCatalogApplicationService {
             throw new BaseRuntimeException(I18nUtil.get("file.upload.count.exceeded", maxFileCount, files.length));
         }
 
-        // 校验文件大小和文件类型
+        // 校验文件大小（文件类型不做限制）
         for (MultipartFile multipartFile : files) {
             long size = multipartFile.getSize();
             if (size > (maxFileSizeMB * 1024 * 1024)) {
