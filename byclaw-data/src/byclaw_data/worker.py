@@ -938,6 +938,7 @@ def _create_early_langfuse_trace(
                 "context_messages": (history or []) + [{"role": "user", "content": str(question)[:500]}],
             },
             metadata={
+                "object_type": "early_span",
                 "biz_trace_id": trace_id,
                 "message_id": message_id,
                 "agent_id": agent_id,

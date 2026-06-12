@@ -382,30 +382,18 @@ dev = [
 
 [[package]]
 name = "by-framework"
-version = "0.2.2.dev0"
-source = { editable = "../../by-framework-python" }
+version = "0.2.2.dev4"
+source = { registry = "https://pypi.org/simple/" }
 dependencies = [
     { name = "dill" },
     { name = "httpx" },
     { name = "redis" },
     { name = "typing-extensions" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "dill", specifier = ">=0.4.1" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "isort", marker = "extra == 'dev'", specifier = ">=5.13.0" },
-    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0.0" },
-    { name = "pyink", marker = "extra == 'dev'", specifier = ">=24.0.0" },
-    { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.0.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
-    { name = "redis", specifier = ">=7.0.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.3.0" },
-    { name = "typing-extensions", specifier = ">=4.0.0" },
+sdist = { url = "https://files.pythonhosted.org/packages/c1/8e/a457fb619396690bb735408db02047a6219b27a114a285b6ee21e0bdf6c8/by_framework-0.2.2.dev4.tar.gz", hash = "sha256:7efde661c126054495dadf994dcee7c13af786c94fe7c6041a05da5b2f04656e", size = 1151375, upload-time = "2026-06-12T02:53:29.489Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a3/9a/9b15941a2eae4515c992c5a839465d2cdc124673ab1a533f374612408139/by_framework-0.2.2.dev4-py3-none-any.whl", hash = "sha256:53d3eb09cc12f150d9d2e737d9621088a407143a7c4ba041b65f1d08607c58d8", size = 182531, upload-time = "2026-06-12T02:53:27.901Z" },
 ]
-provides-extras = ["dev"]
 
 [[package]]
 name = "by-framework-history-byclaw"
@@ -422,26 +410,16 @@ wheels = [
 [[package]]
 name = "by-framework-trace-langfuse"
 version = "0.0.3.dev0"
-source = { editable = "../../by-framework-python/libs/by-framework-trace-langfuse" }
+source = { registry = "https://pypi.org/simple/" }
 dependencies = [
     { name = "by-framework" },
     { name = "langchain" },
     { name = "langfuse" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "by-framework", editable = "../../by-framework-python" },
-    { name = "isort", marker = "extra == 'dev'", specifier = ">=5.13.0" },
-    { name = "langchain", specifier = ">=0.3.0" },
-    { name = "langfuse", specifier = ">=3.0.0" },
-    { name = "pyink", marker = "extra == 'dev'", specifier = ">=24.0.0" },
-    { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.0.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.3.0" },
+sdist = { url = "https://files.pythonhosted.org/packages/93/c6/3672321ec1458834a9b4bf9f102476390aaa8e0fe0a777c67b76315bca4d/by_framework_trace_langfuse-0.0.3.dev0.tar.gz", hash = "sha256:17498fadf1f9237aaadffaae48fef58ce7a75ef23c1df876396a5e3575262b36", size = 7270, upload-time = "2026-06-08T09:56:01.085Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3b/bc/b2f7274f8dc3a2ae299828e4f3c53fc412b0085beec7659c74ac12cbf275/by_framework_trace_langfuse-0.0.3.dev0-py3-none-any.whl", hash = "sha256:32be0af6f4a8187200d5cf2d2ca25c95960ef206279cf9cbb495a32d281fdb57", size = 7696, upload-time = "2026-06-08T09:55:59.917Z" },
 ]
-provides-extras = ["dev"]
 
 [[package]]
 name = "byclaw-data"
@@ -468,9 +446,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "by-datacloud", editable = "../../by-datacloud" },
-    { name = "by-framework", editable = "../../by-framework-python" },
+    { name = "by-framework", specifier = "==0.2.2.dev4" },
     { name = "by-framework-history-byclaw", specifier = ">=0.0.3" },
-    { name = "by-framework-trace-langfuse", editable = "../../by-framework-python/libs/by-framework-trace-langfuse" },
+    { name = "by-framework-trace-langfuse", specifier = "==0.0.3.dev0" },
     { name = "langchain-openai", specifier = ">=1.1.11" },
     { name = "langfuse", specifier = ">=2.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
