@@ -1,0 +1,964 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenClaw 沙箱规格分层与动态扩缩容方案</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #5e6a7d;
+      --line: #d8e0ea;
+      --soft: #f6f8fb;
+      --panel: #ffffff;
+      --blue: #1f6feb;
+      --green: #1f883d;
+      --orange: #b65c00;
+      --red: #cf222e;
+      --purple: #7c3aed;
+      --code-bg: #0f172a;
+      --code-fg: #e5edf8;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #f3f6fa;
+      font: 15px/1.72 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .shell {
+      width: min(1480px, calc(100% - 40px));
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 286px minmax(0, 1fr);
+      gap: 24px;
+      padding: 28px 0 60px;
+    }
+    nav {
+      position: sticky;
+      top: 18px;
+      max-height: calc(100vh - 36px);
+      overflow: auto;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    nav strong { display: block; margin: 0 0 10px; }
+    nav a {
+      display: block;
+      padding: 7px 9px;
+      color: var(--muted);
+      border-left: 3px solid transparent;
+      border-radius: 5px;
+      font-size: 13px;
+    }
+    nav a:hover {
+      color: var(--blue);
+      background: #eef6ff;
+      border-left-color: var(--blue);
+      text-decoration: none;
+    }
+    nav .sub { margin-left: 10px; border-left: 1px solid var(--line); }
+    main { min-width: 0; }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px 24px;
+      margin-bottom: 18px;
+    }
+    h1, h2, h3, h4 { line-height: 1.25; margin: 0 0 12px; }
+    h1 { font-size: 31px; letter-spacing: 0; }
+    h2 { font-size: 22px; padding-top: 2px; }
+    h3 { font-size: 17px; margin-top: 20px; }
+    h4 { font-size: 15px; margin-top: 16px; color: #243147; }
+    p { margin: 8px 0 12px; }
+    ul, ol { margin: 8px 0 14px 22px; padding: 0; }
+    li { margin: 4px 0; }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+    }
+    code {
+      background: #eef2f7;
+      border-radius: 4px;
+      padding: 2px 5px;
+    }
+    pre {
+      overflow: auto;
+      background: var(--code-bg);
+      color: var(--code-fg);
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin: 12px 0;
+    }
+    pre code { background: transparent; color: inherit; padding: 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 16px;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th { background: #eef3fa; }
+    .hero {
+      background: linear-gradient(180deg, #fff, #f7fbff);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 18px;
+    }
+    .lede { color: var(--muted); font-size: 16px; max-width: 1040px; }
+    .meta { color: var(--muted); font-size: 13px; }
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: 12px;
+      border: 1px solid var(--line);
+      background: var(--soft);
+      color: var(--muted);
+      margin-right: 4px;
+      white-space: nowrap;
+    }
+    .tag.ok { background: #dafbe1; color: var(--green); border-color: #aceebb; }
+    .tag.warn { background: #fff4ce; color: var(--orange); border-color: #f0d98c; }
+    .tag.bad { background: #ffebe9; color: var(--red); border-color: #ffb4ad; }
+    .tag.info { background: #eef6ff; color: var(--blue); border-color: #b8d7ff; }
+    .tag.purple { background: #f3e8ff; color: var(--purple); border-color: #d8b4fe; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcfe;
+      min-width: 0;
+    }
+    .box strong { display: block; margin-bottom: 5px; }
+    .callout {
+      border-left: 5px solid var(--blue);
+      background: #f7fbff;
+      border-radius: 8px;
+      padding: 13px 15px;
+      margin: 12px 0 16px;
+    }
+    .callout.warn { border-left-color: var(--orange); background: #fffaf0; }
+    .callout.good { border-left-color: var(--green); background: #f0fff4; }
+    .callout.bad { border-left-color: var(--red); background: #fff5f5; }
+    .diagram {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 12px;
+      margin: 14px 0 18px;
+      overflow: auto;
+    }
+    .diagram-title { font-weight: 800; margin-bottom: 8px; }
+    svg { max-width: 100%; height: auto; display: block; }
+    .svg-box { fill: #fff; stroke: #a8b4c5; stroke-width: 1.2; }
+    .svg-primary { fill: #eef6ff; stroke: var(--blue); }
+    .svg-good { fill: #dafbe1; stroke: var(--green); }
+    .svg-warn { fill: #fff4ce; stroke: var(--orange); }
+    .svg-bad { fill: #ffebe9; stroke: var(--red); }
+    .svg-purple { fill: #f3e8ff; stroke: var(--purple); }
+    .svg-text { font-size: 13px; fill: var(--ink); font-family: sans-serif; }
+    .svg-muted { font-size: 11px; fill: var(--muted); font-family: sans-serif; }
+    .svg-title { font-size: 14px; font-weight: 700; fill: var(--ink); font-family: sans-serif; }
+    .svg-line { stroke: #65758b; stroke-width: 1.5; fill: none; }
+    .svg-dash { stroke-dasharray: 5 5; }
+    .small { font-size: 13px; color: var(--muted); }
+    .kpi {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .kpi div {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .kpi b { display: block; font-size: 20px; margin-bottom: 2px; }
+    @media (max-width: 980px) {
+      .shell { display: block; width: min(100% - 24px, 1100px); }
+      nav { position: static; margin-bottom: 16px; }
+      .grid, .grid.two, .kpi { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <nav>
+      <strong>目录</strong>
+      <a href="#summary">0. 结论</a>
+      <a href="#current">1. 当前实现基础</a>
+      <a href="#tiering">2. 沙箱规格分层</a>
+      <div class="sub">
+        <a href="#tier-table">2.1 分层表</a>
+        <a href="#quota">2.2 限额边界</a>
+      </div>
+      <a href="#dynamic">3. 默认 XS 与动态升降级</a>
+      <div class="sub">
+        <a href="#answer">3.1 是否能实时调整</a>
+        <a href="#strategy">3.2 推荐策略</a>
+        <a href="#resize-flow">3.3 调整流程</a>
+      </div>
+      <a href="#autoscaling">4. 扩缩容体系</a>
+      <a href="#metrics">5. 指标与判定规则</a>
+      <a href="#implementation">6. 落地改造</a>
+      <a href="#yaml">7. YAML/SQL 示例</a>
+      <a href="#capacity">8. 容量规划</a>
+      <a href="#roadmap">9. 分阶段计划</a>
+      <a href="#faq">10. FAQ</a>
+      <a href="#refs">11. 参考资料</a>
+    </nav>
+
+    <main>
+      <div class="hero">
+        <h1>OpenClaw 沙箱规格分层与动态扩缩容方案</h1>
+        <p class="lede">本文面向 ByClaw 从单机 Docker + MinIO 升级到 k3s + Longhorn + OpenSandbox 之后的沙箱资源治理。目标是：默认给用户低成本的 <code>openclaw-xs</code>，再根据真实使用情况自动升级、降级、预热与释放，同时避免有状态沙箱被普通 HPA 误扩容。</p>
+        <p class="meta">生成日期：2026-06-12 · 范围：OpenClaw 沙箱 Pod、OpenSandbox 控制面、ByClaw BE 调度策略、Prometheus/Grafana 监控指标</p>
+        <div>
+          <span class="tag ok">默认 XS</span>
+          <span class="tag info">最高 2C/4Gi</span>
+          <span class="tag purple">Longhorn 工作区</span>
+          <span class="tag warn">有状态 Pod 不直接 HPA</span>
+        </div>
+      </div>
+
+      <section id="summary">
+        <h2>0. 结论</h2>
+        <div class="callout good">
+          <strong>结论：</strong>默认给所有用户分配 <code>openclaw-xs</code> 是合理的；可以根据用户实际 CPU、内存、会话活跃度、任务类型进行动态规格调整。但不建议把单个 OpenClaw 沙箱 Pod 当普通 Deployment 做 HPA 横向扩容。推荐采用“按用户创建/释放 + 规格分层 + 热切换升级 + 空闲释放 + 下次启动降级”的组合策略。
+        </div>
+
+        <table>
+          <tr><th>问题</th><th>建议答案</th><th>原因</th></tr>
+          <tr>
+            <td>默认是否都给 <code>openclaw-xs</code></td>
+            <td><span class="tag ok">是</span>，作为默认起步规格</td>
+            <td>降低常态资源占用，让集群容量跟真实活跃度匹配。</td>
+          </tr>
+          <tr>
+            <td>能否按用户使用情况实时扩容</td>
+            <td><span class="tag ok">可以</span>，但要分实现层级</td>
+            <td>最稳的是“新建更大规格沙箱并切流”；原地 resize 依赖 Kubernetes/OpenSandbox 能力。</td>
+          </tr>
+          <tr>
+            <td>能否从 XS 自动升到 S/M/L</td>
+            <td><span class="tag ok">可以</span></td>
+            <td>Prometheus 识别用户沙箱连续资源压力，BE 更新用户规格策略并触发升级。</td>
+          </tr>
+          <tr>
+            <td>能否自动降回 XS</td>
+            <td><span class="tag warn">可以，但不建议运行中频繁降级</span></td>
+            <td>内存下降可能带来风险。建议低负载持续一段时间后，下次启动降级或空闲后释放。</td>
+          </tr>
+          <tr>
+            <td>是否使用 HPA 扩单个沙箱</td>
+            <td><span class="tag bad">不建议</span></td>
+            <td>OpenClaw 沙箱包含浏览器、工作目录、gateway token 和会话状态，复制多个 Pod 会造成状态不一致。</td>
+          </tr>
+        </table>
+
+        <div class="kpi">
+          <div><b>0.25C/768Mi</b><span class="small">建议最小请求</span></div>
+          <div><b>2C/4Gi</b><span class="small">单沙箱最高上限</span></div>
+          <div><b>1 Pod/用户</b><span class="small">活跃沙箱基本模型</span></div>
+          <div><b>30 min</b><span class="small">建议默认空闲释放窗口</span></div>
+        </div>
+      </section>
+
+      <section id="current">
+        <h2>1. 当前实现基础</h2>
+        <p>当前 BE 已经具备通过 <code>sandbox_service_spec</code> 驱动 OpenSandbox 创建沙箱的基础能力。关键链路如下：</p>
+        <table>
+          <tr><th>模块</th><th>现状</th><th>对规格分层的意义</th></tr>
+          <tr>
+            <td><code>SandboxService</code></td>
+            <td>负责按用户、资源、serviceKey 启动或复用沙箱。</td>
+            <td>可以在这里接入用户默认规格、升级策略、释放策略。</td>
+          </tr>
+          <tr>
+            <td><code>launchSandboxWithServiceKey</code></td>
+            <td>支持显式传入 <code>serviceKey</code>。</td>
+            <td>可以用 <code>openclaw-xs/s/m/l</code> 实现规格分层。</td>
+          </tr>
+          <tr>
+            <td><code>SandboxServiceSpec</code></td>
+            <td>已有 <code>resourceLimits</code> 字段。</td>
+            <td>可以直接下发 CPU/内存 limits；还需要补 <code>resourceRequests</code>。</td>
+          </tr>
+          <tr>
+            <td><code>GenericSandboxSpecProcessor</code></td>
+            <td>从 DB spec 生成 <code>CreateSandboxRequest</code>。</td>
+            <td>适合扩展 requests、nodePool、priorityClass 等调度字段。</td>
+          </tr>
+          <tr>
+            <td><code>OpenSandboxRuntimeProvider</code></td>
+            <td>调用 OpenSandbox API 创建沙箱。</td>
+            <td>后续需要增加 resize / replace / migrate 接口封装。</td>
+          </tr>
+          <tr>
+            <td>Prometheus/Grafana</td>
+            <td>已部署并采集 Pod、节点、Namespace 资源指标。</td>
+            <td>可作为用户规格调整的事实来源。</td>
+          </tr>
+        </table>
+
+        <div class="diagram">
+          <div class="diagram-title">图 1：当前沙箱创建链路</div>
+          <svg viewBox="0 0 1120 360" role="img" aria-label="OpenClaw sandbox creation flow">
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M0 0 L10 5 L0 10z" fill="#65758b"/>
+              </marker>
+            </defs>
+            <rect class="svg-primary" x="30" y="70" width="150" height="70" rx="8"/>
+            <text class="svg-title" x="55" y="100">用户请求</text>
+            <text class="svg-muted" x="55" y="122">登录 / 打开 OpenClaw</text>
+
+            <path class="svg-line" marker-end="url(#arrow)" d="M180 105 H250"/>
+            <rect class="svg-box" x="250" y="70" width="170" height="70" rx="8"/>
+            <text class="svg-title" x="270" y="100">ByClaw BE</text>
+            <text class="svg-muted" x="270" y="122">SandboxService</text>
+
+            <path class="svg-line" marker-end="url(#arrow)" d="M420 105 H490"/>
+            <rect class="svg-purple" x="490" y="70" width="170" height="70" rx="8"/>
+            <text class="svg-title" x="510" y="100">sandbox_service_spec</text>
+            <text class="svg-muted" x="510" y="122">image/env/volume/resource</text>
+
+            <path class="svg-line" marker-end="url(#arrow)" d="M660 105 H730"/>
+            <rect class="svg-good" x="730" y="70" width="160" height="70" rx="8"/>
+            <text class="svg-title" x="755" y="100">OpenSandbox</text>
+            <text class="svg-muted" x="755" y="122">CreateSandbox API</text>
+
+            <path class="svg-line" marker-end="url(#arrow)" d="M890 105 H960"/>
+            <rect class="svg-warn" x="960" y="70" width="130" height="70" rx="8"/>
+            <text class="svg-title" x="982" y="100">k3s Pod</text>
+            <text class="svg-muted" x="982" y="122">/by PVC subPath</text>
+
+            <rect class="svg-box" x="250" y="210" width="840" height="90" rx="8"/>
+            <text class="svg-title" x="270" y="238">规格分层插入点</text>
+            <text class="svg-text" x="270" y="266">1. BE 选择 serviceKey：openclaw-xs / openclaw-s / openclaw-m / openclaw-l</text>
+            <text class="svg-text" x="270" y="290">2. DB spec 下发 resourceRequests/resourceLimits/nodePool/timeout</text>
+          </svg>
+        </div>
+      </section>
+
+      <section id="tiering">
+        <h2>2. 沙箱规格分层</h2>
+        <p>沙箱规格分层的核心原则是：<strong>requests 用于调度和容量核算，limits 用于限制单用户峰值</strong>。用户提到的边界“最小 <code>0.25C/765MB</code>，最高允许 <code>2C/4Gi</code>”应固化为平台策略。</p>
+
+        <h3 id="tier-table">2.1 推荐规格表</h3>
+        <table>
+          <tr><th>serviceKey</th><th>定位</th><th>requests</th><th>limits</th><th>适用用户/场景</th><th>调度池</th></tr>
+          <tr>
+            <td><code>openclaw-xs</code></td>
+            <td>默认起步规格</td>
+            <td><code>250m / 768Mi</code></td>
+            <td><code>1C / 2Gi</code></td>
+            <td>普通聊天、轻量 Agent、首次登录、低活跃用户</td>
+            <td><code>sandbox-general</code></td>
+          </tr>
+          <tr>
+            <td><code>openclaw-s</code></td>
+            <td>标准规格</td>
+            <td><code>500m / 1Gi</code></td>
+            <td><code>1.5C / 3Gi</code></td>
+            <td>普通持续使用、轻量浏览器、文件浏览</td>
+            <td><code>sandbox-general</code></td>
+          </tr>
+          <tr>
+            <td><code>openclaw-m</code></td>
+            <td>增强规格</td>
+            <td><code>1C / 2Gi</code></td>
+            <td><code>2C / 4Gi</code></td>
+            <td>浏览器/VNC、数据处理、长任务、多工具调用</td>
+            <td><code>sandbox-browser</code> 或 <code>sandbox-heavy</code></td>
+          </tr>
+          <tr>
+            <td><code>openclaw-l</code></td>
+            <td>重任务规格</td>
+            <td><code>1.5C / 3Gi</code></td>
+            <td><code>2C / 4Gi</code></td>
+            <td>高价值用户、管理员、批处理任务、长时运行任务</td>
+            <td><code>sandbox-heavy</code></td>
+          </tr>
+        </table>
+
+        <div class="callout warn">
+          <strong>注意：</strong><code>openclaw-l</code> 的 limits 仍然不超过 <code>2C/4Gi</code>，只是提高 requests，让调度器为它预留更稳定的资源。这样可以防止重任务被挤在资源很紧的节点上。
+        </div>
+
+        <h3 id="quota">2.2 限额边界</h3>
+        <table>
+          <tr><th>边界</th><th>建议值</th><th>说明</th></tr>
+          <tr><td>单沙箱最小 requests</td><td><code>250m / 768Mi</code></td><td>低于该值 Chrome、Node、OpenClaw gateway 更容易抖动。</td></tr>
+          <tr><td>单沙箱最大 limits</td><td><code>2C / 4Gi</code></td><td>避免单用户拖垮节点。</td></tr>
+          <tr><td>单用户同时沙箱数</td><td><code>1</code> 默认，管理员可放宽</td><td>OpenClaw 当前更适合一人一活跃工作区。</td></tr>
+          <tr><td>Namespace 总沙箱数</td><td>按节点 allocatable 动态计算</td><td>继续使用现有 <code>gen-resource-quota.sh</code> 思路。</td></tr>
+          <tr><td>空闲释放</td><td><code>30min</code> 默认</td><td>可对 XS/S 设置 30 分钟，M/L 设置 15 到 30 分钟。</td></tr>
+        </table>
+      </section>
+
+      <section id="dynamic">
+        <h2>3. 默认 XS 与动态升降级</h2>
+
+        <h3 id="answer">3.1 默认 XS 后，能否按用户使用情况实时动态扩缩容？</h3>
+        <div class="callout good">
+          <strong>可以做，但要分三类能力：</strong>第一类是“下次启动动态选规格”，当前最稳；第二类是“热切换升级”，当前可实现且风险可控；第三类是“运行中原地 resize”，需要 Kubernetes 版本、OpenSandbox API 和 Pod 权限都满足。
+        </div>
+
+        <table>
+          <tr><th>能力层级</th><th>是否推荐</th><th>是否中断当前会话</th><th>实现难度</th><th>说明</th></tr>
+          <tr>
+            <td>下次启动动态选规格</td>
+            <td><span class="tag ok">第一阶段推荐</span></td>
+            <td>不中断当前会话</td>
+            <td>低</td>
+            <td>当前 Pod 继续跑；BE 根据近期指标更新用户 preferred tier；下次创建沙箱时使用 S/M/L。</td>
+          </tr>
+          <tr>
+            <td>热切换升级</td>
+            <td><span class="tag ok">第二阶段推荐</span></td>
+            <td>轻微影响，文件不丢</td>
+            <td>中</td>
+            <td>创建更大规格新 Pod，挂载同一 Longhorn 用户目录，ready 后切 endpoint/token，再释放旧 Pod。</td>
+          </tr>
+          <tr>
+            <td>运行中原地 resize</td>
+            <td><span class="tag warn">增强能力</span></td>
+            <td>理论上不中断</td>
+            <td>中高</td>
+            <td>Kubernetes 官方已提供运行中调整容器 CPU/内存的能力，但需要集群版本、OpenSandbox 支持 resize 或 BE 具备 Kubernetes resize 权限。</td>
+          </tr>
+          <tr>
+            <td>HPA 复制沙箱 Pod</td>
+            <td><span class="tag bad">不推荐</span></td>
+            <td>状态不一致</td>
+            <td>中</td>
+            <td>复制多个 OpenClaw Pod 会造成浏览器会话、工作目录写入、gateway token、长连接路由混乱。</td>
+          </tr>
+        </table>
+
+        <h3 id="strategy">3.2 推荐动态策略</h3>
+        <p>建议把动态调整拆成<strong>升级快、降级慢</strong>：</p>
+        <table>
+          <tr><th>动作</th><th>触发条件</th><th>处理方式</th><th>冷却窗口</th></tr>
+          <tr>
+            <td>XS → S</td>
+            <td>CPU 使用率连续 5 分钟 > 75%，或内存 working set > 70%，或启动 Chrome 后明显接近上限</td>
+            <td>优先热切换升级；不具备热切换时记录为下次启动 S</td>
+            <td>15 分钟</td>
+          </tr>
+          <tr>
+            <td>S → M</td>
+            <td>CPU throttle 明显、内存 > 80%，或浏览器/VNC/文件处理任务启动</td>
+            <td>创建 M 规格新沙箱并切流</td>
+            <td>30 分钟</td>
+          </tr>
+          <tr>
+            <td>M → L</td>
+            <td>高价值用户、管理员任务、批处理任务、长时运行任务</td>
+            <td>需用户等级或任务类型授权，避免自动把所有压力都推到 L</td>
+            <td>60 分钟</td>
+          </tr>
+          <tr>
+            <td>L/M/S → XS</td>
+            <td>连续 24 小时或 7 次会话低负载</td>
+            <td>不建议运行中降级；更新 preferred tier，下次启动降级</td>
+            <td>24 小时</td>
+          </tr>
+          <tr>
+            <td>空闲释放</td>
+            <td>无心跳、无请求、无任务运行超过 TTL</td>
+            <td>释放沙箱 Pod，保留 Longhorn 用户目录</td>
+            <td>30 分钟默认</td>
+          </tr>
+        </table>
+
+        <h3 id="resize-flow">3.3 动态调整流程</h3>
+        <div class="diagram">
+          <div class="diagram-title">图 2：默认 XS 到动态升级/降级流程</div>
+          <svg viewBox="0 0 1120 520" role="img" aria-label="Sandbox tier dynamic resize flow">
+            <defs>
+              <marker id="arrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M0 0 L10 5 L0 10z" fill="#65758b"/>
+              </marker>
+            </defs>
+
+            <rect class="svg-primary" x="40" y="55" width="165" height="70" rx="8"/>
+            <text class="svg-title" x="65" y="84">用户启动</text>
+            <text class="svg-muted" x="65" y="106">默认 openclaw-xs</text>
+
+            <path class="svg-line" marker-end="url(#arrow2)" d="M205 90 H280"/>
+            <rect class="svg-good" x="280" y="55" width="185" height="70" rx="8"/>
+            <text class="svg-title" x="305" y="84">Prometheus 采集</text>
+            <text class="svg-muted" x="305" y="106">CPU / Memory / throttle</text>
+
+            <path class="svg-line" marker-end="url(#arrow2)" d="M465 90 H540"/>
+            <rect class="svg-purple" x="540" y="55" width="190" height="70" rx="8"/>
+            <text class="svg-title" x="568" y="84">Sandbox Resizer</text>
+            <text class="svg-muted" x="568" y="106">规则判断 + 冷却控制</text>
+
+            <path class="svg-line" marker-end="url(#arrow2)" d="M730 90 H805"/>
+            <rect class="svg-warn" x="805" y="55" width="250" height="70" rx="8"/>
+            <text class="svg-title" x="835" y="84">选择动作</text>
+            <text class="svg-muted" x="835" y="106">保持 / 升级 / 降级 / 释放</text>
+
+            <rect class="svg-box" x="80" y="200" width="250" height="95" rx="8"/>
+            <text class="svg-title" x="105" y="230">保持 XS</text>
+            <text class="svg-text" x="105" y="254">负载正常</text>
+            <text class="svg-muted" x="105" y="276">继续续约，低成本运行</text>
+
+            <rect class="svg-good" x="420" y="200" width="270" height="95" rx="8"/>
+            <text class="svg-title" x="445" y="230">升级 S/M/L</text>
+            <text class="svg-text" x="445" y="254">热切换或原地 resize</text>
+            <text class="svg-muted" x="445" y="276">优先保证用户体验</text>
+
+            <rect class="svg-warn" x="780" y="200" width="260" height="95" rx="8"/>
+            <text class="svg-title" x="805" y="230">降级策略</text>
+            <text class="svg-text" x="805" y="254">只更新 preferred tier</text>
+            <text class="svg-muted" x="805" y="276">下次启动降级，避免抖动</text>
+
+            <path class="svg-line" marker-end="url(#arrow2)" d="M930 125 V200"/>
+            <path class="svg-line" marker-end="url(#arrow2)" d="M930 125 C930 160 570 160 555 200"/>
+            <path class="svg-line" marker-end="url(#arrow2)" d="M930 125 C930 170 230 170 205 200"/>
+
+            <rect class="svg-box" x="80" y="370" width="960" height="90" rx="8"/>
+            <text class="svg-title" x="105" y="400">关键约束</text>
+            <text class="svg-text" x="105" y="426">OpenClaw 工作区在 Longhorn PVC 中，热切换不会丢文件；但浏览器内存态、正在执行的进程、WebSocket 长连接不能无损迁移。</text>
+            <text class="svg-text" x="105" y="450">所以运行中升级要先提示“正在提升沙箱规格”，新 Pod ready 后再切 endpoint；降级不要在活跃会话中强行执行。</text>
+          </svg>
+        </div>
+      </section>
+
+      <section id="autoscaling">
+        <h2>4. 扩缩容体系</h2>
+        <p>ByClaw 的扩缩容应分为三层：沙箱实例层、控制面层、节点池层。</p>
+        <table>
+          <tr><th>层级</th><th>对象</th><th>扩容方式</th><th>缩容方式</th><th>是否适合 HPA</th></tr>
+          <tr>
+            <td>沙箱实例层</td>
+            <td>每个用户的 OpenClaw Pod</td>
+            <td>按需创建、热切换升级、原地 resize</td>
+            <td>空闲 TTL 释放、下次启动降级</td>
+            <td><span class="tag bad">不适合直接 HPA</span></td>
+          </tr>
+          <tr>
+            <td>控制面层</td>
+            <td><code>opensandbox-server</code>、controller、BE、FE</td>
+            <td>HPA / KEDA</td>
+            <td>HPA / KEDA</td>
+            <td><span class="tag ok">适合</span></td>
+          </tr>
+          <tr>
+            <td>节点池层</td>
+            <td><code>sandbox-general</code>、<code>sandbox-heavy</code></td>
+            <td>加节点、云厂商 Cluster Autoscaler</td>
+            <td>释放空闲节点</td>
+            <td><span class="tag info">节点级扩缩</span></td>
+          </tr>
+        </table>
+
+        <h3>4.1 沙箱层不是横向副本，而是活跃用户数</h3>
+        <p>OpenClaw 沙箱不是无状态 Web 服务。每个沙箱包含用户工作目录、浏览器、VNC、gateway token、Agent 运行态。它的扩缩容模型应是：</p>
+        <pre><code>活跃用户数 ≈ 活跃沙箱 Pod 数
+空闲用户数 → 释放 Pod，只保留 Longhorn 用户目录
+重负载用户 → 升级到更大规格 Pod
+低负载用户 → 下次启动回到 XS/S</code></pre>
+
+        <h3>4.2 控制面 HPA</h3>
+        <p>控制面组件可以 HPA，因为它们是服务型组件：</p>
+        <table>
+          <tr><th>组件</th><th>min</th><th>max</th><th>触发</th><th>说明</th></tr>
+          <tr><td><code>opensandbox-server</code></td><td>2</td><td>6 或 12</td><td>CPU 70%、请求 QPS、创建队列长度</td><td>沙箱创建和代理入口。</td></tr>
+          <tr><td><code>byclaw-be</code></td><td>2</td><td>8 或 16</td><td>CPU、HTTP QPS、WebSocket 数</td><td>业务 API、沙箱调度策略、会话协调。</td></tr>
+          <tr><td><code>byclaw-fe</code></td><td>1</td><td>3</td><td>CPU 或请求量</td><td>nginx 静态服务，通常压力不大。</td></tr>
+          <tr><td><code>kube-state-metrics</code></td><td>1</td><td>1</td><td>不扩</td><td>监控基础组件。</td></tr>
+        </table>
+
+        <h3>4.3 KEDA 的位置</h3>
+        <p>KEDA 适合基于 Prometheus 指标扩控制面，或扩“待创建沙箱 worker 队列”。它不应直接复制用户沙箱 Pod。官方 KEDA Prometheus scaler 可以把 Prometheus 查询结果作为扩缩容指标。</p>
+      </section>
+
+      <section id="metrics">
+        <h2>5. 指标与判定规则</h2>
+        <p>规格调整需要从 Prometheus 拉取“用户沙箱维度”的指标。Pod 必须带上稳定标签：</p>
+        <pre><code>byclaw.io/workload=sandbox
+byclaw.io/user-code=${user_code}
+byclaw.io/service-key=openclaw-xs
+byclaw.io/tier=xs
+byclaw.io/sandbox-id=${sandbox_id}</code></pre>
+
+        <table>
+          <tr><th>指标</th><th>PromQL 示例</th><th>用途</th></tr>
+          <tr>
+            <td>CPU 使用</td>
+            <td><code>sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="by-sandbox", container!="", pod=~".*openclaw.*"}[5m]))</code></td>
+            <td>判断是否长期接近 requests 或 limits。</td>
+          </tr>
+          <tr>
+            <td>内存 working set</td>
+            <td><code>sum by (pod) (container_memory_working_set_bytes{namespace="by-sandbox", container!=""})</code></td>
+            <td>判断是否逼近 2Gi/3Gi/4Gi。</td>
+          </tr>
+          <tr>
+            <td>CPU throttle</td>
+            <td><code>rate(container_cpu_cfs_throttled_seconds_total{namespace="by-sandbox"}[5m])</code></td>
+            <td>判断 limits 是否造成明显限速。</td>
+          </tr>
+          <tr>
+            <td>重启次数</td>
+            <td><code>increase(kube_pod_container_status_restarts_total{namespace="by-sandbox"}[1h])</code></td>
+            <td>识别 OOM 或崩溃。</td>
+          </tr>
+          <tr>
+            <td>就绪状态</td>
+            <td><code>kube_pod_status_ready{namespace="by-sandbox", condition="false"}</code></td>
+            <td>识别升级/切换过程失败。</td>
+          </tr>
+        </table>
+
+        <h3>5.1 调整判定规则</h3>
+        <pre><code>if tier == xs and (cpu_p95_5m > 0.75C or mem_p95_5m > 1.4Gi):
+    targetTier = s
+
+if tier == s and (cpu_throttle_5m > threshold or mem_p95_5m > 2.4Gi):
+    targetTier = m
+
+if tier == m and userLevel in ["vip", "admin"] and longTaskRunning:
+    targetTier = l
+
+if tier in [s, m, l] and low_usage_days >= 1:
+    preferredTier = max(xs, tier - 1)   # 下次启动生效
+
+if idle_minutes >= idleTimeout:
+    releaseSandbox()</code></pre>
+
+        <div class="callout warn">
+          <strong>防抖规则：</strong>升级至少 15 到 30 分钟冷却；降级至少 24 小时观察；同一用户每天最多自动升级 2 次，避免因短峰值频繁重建。
+        </div>
+      </section>
+
+      <section id="implementation">
+        <h2>6. 落地改造</h2>
+
+        <h3>6.1 数据模型</h3>
+        <table>
+          <tr><th>表/配置</th><th>新增字段</th><th>说明</th></tr>
+          <tr>
+            <td><code>sandbox_service_spec.spec_json</code></td>
+            <td><code>resourceRequests</code>、<code>nodePool</code>、<code>priorityClassName</code></td>
+            <td>按规格分层描述 Pod 调度诉求。</td>
+          </tr>
+          <tr>
+            <td>用户偏好表或系统参数</td>
+            <td><code>preferred_service_key</code>、<code>last_resize_at</code>、<code>resize_reason</code></td>
+            <td>记录用户当前推荐规格。</td>
+          </tr>
+          <tr>
+            <td>沙箱记录表</td>
+            <td><code>tier</code>、<code>resource_request_cpu</code>、<code>resource_request_memory</code></td>
+            <td>方便审计每次启动的规格。</td>
+          </tr>
+          <tr>
+            <td>Redis</td>
+            <td><code>byclaw:sandbox:tier:{userCode}</code></td>
+            <td>快速读取用户当前推荐规格。</td>
+          </tr>
+        </table>
+
+        <h3>6.2 后端改造点</h3>
+        <table>
+          <tr><th>类/模块</th><th>改造</th><th>优先级</th></tr>
+          <tr>
+            <td><code>SandboxServiceSpec</code></td>
+            <td>增加 <code>resourceRequests</code>、<code>nodePool</code>、<code>resizePolicy</code>。</td>
+            <td>P0</td>
+          </tr>
+          <tr>
+            <td><code>CreateSandboxRequest</code></td>
+            <td>增加 <code>resourceRequests</code>。</td>
+            <td>P0</td>
+          </tr>
+          <tr>
+            <td><code>GenericSandboxSpecProcessor</code></td>
+            <td>把 spec 中 requests/limits 放入 OpenSandbox 创建请求。</td>
+            <td>P0</td>
+          </tr>
+          <tr>
+            <td><code>SandboxRuntimeRequestFactory</code></td>
+            <td>序列化 <code>resourceRequests</code> 到 payload。</td>
+            <td>P0</td>
+          </tr>
+          <tr>
+            <td><code>SandboxLaunchContextFactory</code></td>
+            <td>接入用户默认规格和任务类型选择。</td>
+            <td>P1</td>
+          </tr>
+          <tr>
+            <td><code>SandboxResizerJob</code> 新增</td>
+            <td>周期性读取 Prometheus，计算用户 tier，触发热切换或更新 preferred tier。</td>
+            <td>P1</td>
+          </tr>
+          <tr>
+            <td><code>OpenSandboxRuntimeProvider</code></td>
+            <td>新增 replace/resize 封装：创建新沙箱、切 endpoint、释放旧沙箱。</td>
+            <td>P1/P2</td>
+          </tr>
+        </table>
+
+        <h3>6.3 OpenSandbox 侧能力</h3>
+        <p>OpenSandbox 需要支持或透传以下字段：</p>
+        <pre><code>{
+  "resourceRequests": {
+    "cpu": "500m",
+    "memory": "1Gi"
+  },
+  "resourceLimits": {
+    "cpu": "2",
+    "memory": "4Gi"
+  },
+  "nodeSelector": {
+    "byclaw.io/node-pool": "sandbox-general"
+  },
+  "metadata": {
+    "userCode": "u001",
+    "serviceKey": "openclaw-s",
+    "tier": "s"
+  }
+}</code></pre>
+
+        <div class="callout">
+          <strong>如果 OpenSandbox 暂时不支持 requests：</strong>仍可先用 limits + 多 serviceKey 落地；但容量规划和调度准确性会打折，建议尽快补 requests。
+        </div>
+      </section>
+
+      <section id="yaml">
+        <h2>7. YAML/SQL 示例</h2>
+
+        <h3>7.1 sandbox_service_spec 示例</h3>
+        <pre><code>INSERT INTO byai.sandbox_service_spec(service_key, spec_json, template_json, updated_at)
+VALUES
+('openclaw-xs', '{
+  "image": "${IMAGE_OPENCLAW}",
+  "sandboxType": "byclaw",
+  "servicePort": 8080,
+  "resourceRequests": {"cpu": "250m", "memory": "768Mi"},
+  "resourceLimits": {"cpu": "1", "memory": "2Gi"},
+  "nodePool": "sandbox-general",
+  "timeout": 1800,
+  "env": {
+    "OPENCLAW_STATE_DIR": "/by/.openclaw",
+    "OPENCLAW_GATEWAY_TOKEN": "${OPENCLAW_GATEWAY_TOKEN}"
+  },
+  "volumes": [{
+    "key": "base",
+    "scope": "PRIVATE",
+    "subPath": "byclaw-${user_code}/by",
+    "hostPath": "${FILE_STORAGE_LOCAL_PATH}",
+    "readOnly": false,
+    "mountPath": "/by"
+  }]
+}', '{}', CURRENT_TIMESTAMP)
+ON CONFLICT (service_key) DO UPDATE
+SET spec_json = EXCLUDED.spec_json, updated_at = CURRENT_TIMESTAMP;</code></pre>
+
+        <h3>7.2 LimitRange 示例</h3>
+        <pre><code>apiVersion: v1
+kind: LimitRange
+metadata:
+  name: sandbox-resource-bounds
+  namespace: by-sandbox
+spec:
+  limits:
+    - type: Container
+      min:
+        cpu: "250m"
+        memory: "768Mi"
+      max:
+        cpu: "2"
+        memory: "4Gi"
+      defaultRequest:
+        cpu: "250m"
+        memory: "768Mi"
+      default:
+        cpu: "1"
+        memory: "2Gi"</code></pre>
+
+        <h3>7.3 控制面 HPA 示例</h3>
+        <pre><code>apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: opensandbox-server
+  namespace: by-sandbox
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: opensandbox-server
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80</code></pre>
+
+        <h3>7.4 原地 resize 方向示例</h3>
+        <p>Kubernetes 官方提供了运行中调整容器 CPU/内存的能力；若当前 k3s 版本和 OpenSandbox 均支持，可以由 OpenSandbox 代理执行 resize。示例形态如下，具体命令需以集群版本和 RBAC 为准：</p>
+        <pre><code># 方向示例：对目标 Pod 的 resize 子资源调整资源
+kubectl patch pod ${POD_NAME} \
+  -n by-sandbox \
+  --subresource=resize \
+  --type=merge \
+  -p '{
+    "spec": {
+      "containers": [{
+        "name": "main",
+        "resources": {
+          "requests": {"cpu": "500m", "memory": "1Gi"},
+          "limits": {"cpu": "1500m", "memory": "3Gi"}
+        }
+      }]
+    }
+  }'</code></pre>
+
+        <div class="callout warn">
+          <strong>不把原地 resize 作为第一阶段依赖：</strong>内存缩小、节点容量不足、运行时不支持、OpenSandbox 无 resize API 都可能导致调整失败。第一阶段应以“热切换升级 + 下次启动降级”为主。
+        </div>
+      </section>
+
+      <section id="capacity">
+        <h2>8. 容量规划</h2>
+        <p>容量以 requests 为准进行核算。假设系统和 Longhorn 预留后，每个 worker 可用于沙箱的资源约为总资源的 70% 到 80%。</p>
+
+        <table>
+          <tr><th>节点规格</th><th>节点数量</th><th>按 XS 估算</th><th>按 S 估算</th><th>按 M 估算</th><th>建议用途</th></tr>
+          <tr>
+            <td>4C / 16Gi</td>
+            <td>3</td>
+            <td>约 45 到 60 个活跃沙箱</td>
+            <td>约 25 到 35 个活跃沙箱</td>
+            <td>约 10 到 15 个活跃沙箱</td>
+            <td>小规模试点，100 注册用户以内</td>
+          </tr>
+          <tr>
+            <td>8C / 32Gi</td>
+            <td>3</td>
+            <td>约 100 到 140 个活跃沙箱</td>
+            <td>约 60 到 80 个活跃沙箱</td>
+            <td>约 25 到 35 个活跃沙箱</td>
+            <td>100 到 500 注册用户</td>
+          </tr>
+          <tr>
+            <td>16C / 64Gi</td>
+            <td>5</td>
+            <td>约 350 到 450 个活跃沙箱</td>
+            <td>约 220 到 300 个活跃沙箱</td>
+            <td>约 90 到 120 个活跃沙箱</td>
+            <td>1000 注册用户，20% 活跃率</td>
+          </tr>
+          <tr>
+            <td>16C / 64Gi</td>
+            <td>20</td>
+            <td>约 1400 到 1800 个活跃沙箱</td>
+            <td>约 900 到 1200 个活跃沙箱</td>
+            <td>约 360 到 480 个活跃沙箱</td>
+            <td>10000 注册用户，10% 活跃率需混合 XS/S</td>
+          </tr>
+        </table>
+
+        <div class="callout">
+          <strong>估算公式：</strong>可用沙箱数 = min(可用 CPU / 单沙箱 CPU request, 可用内存 / 单沙箱内存 request)。实际还要扣除 Longhorn 副本、Prometheus、OpenSandbox 控制面、BE、Redis、OpenGauss 等系统开销。
+        </div>
+      </section>
+
+      <section id="roadmap">
+        <h2>9. 分阶段计划</h2>
+        <table>
+          <tr><th>阶段</th><th>目标</th><th>交付物</th><th>风险</th></tr>
+          <tr>
+            <td>P0</td>
+            <td>规格分层可用</td>
+            <td>新增 <code>openclaw-xs/s/m/l</code> SQL；BE 默认选择 XS；LimitRange/ResourceQuota</td>
+            <td>低</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>下次启动动态规格</td>
+            <td>Prometheus 指标采集；用户 preferred tier；低负载降级、高负载升级策略</td>
+            <td>低</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>热切换升级</td>
+            <td>新建更大规格沙箱、ready 后切 endpoint、释放旧沙箱</td>
+            <td>中</td>
+          </tr>
+          <tr>
+            <td>P3</td>
+            <td>原地 resize</td>
+            <td>OpenSandbox resize API、Kubernetes resize RBAC、失败回退到热切换</td>
+            <td>中高</td>
+          </tr>
+          <tr>
+            <td>P4</td>
+            <td>节点池自动扩缩</td>
+            <td>云厂商节点自动扩缩容，general/heavy/browser 节点池分离</td>
+            <td>中</td>
+          </tr>
+        </table>
+      </section>
+
+      <section id="faq">
+        <h2>10. FAQ</h2>
+        <h3>Q1：默认 XS 会不会体验差？</h3>
+        <p>不会作为最终规格，而是起步规格。XS 有 <code>250m/768Mi</code> requests 和 <code>1C/2Gi</code> limits，可覆盖轻量会话。用户一旦触发浏览器、VNC、数据处理、长任务，就升级到 S/M。</p>
+
+        <h3>Q2：为什么不直接给所有人 S 或 M？</h3>
+        <p>这样会让集群容量被空闲用户占满。按 XS 起步，再根据真实负载升级，可以显著提高同等机器能承载的活跃用户数。</p>
+
+        <h3>Q3：运行中从 XS 升到 M，用户文件会丢吗？</h3>
+        <p>不会丢文件。用户目录在 Longhorn PVC 的 <code>byclaw-${user_code}/by</code> 下，新旧 Pod 挂载同一用户目录。但正在运行的浏览器内存态、shell 进程、WebSocket 长连接不能完全无损迁移，所以热切换需要前端提示和后端切 endpoint。</p>
+
+        <h3>Q4：为什么降级不建议实时做？</h3>
+        <p>CPU 降级通常问题较小，但内存下降可能触发 OOM 或运行时不稳定。降级收益不值得冒会话中断风险，建议记录低负载状态，下次启动或空闲释放后再降级。</p>
+
+        <h3>Q5：VPA 能不能直接做？</h3>
+        <p>VPA 适合给资源建议或管理控制器型工作负载。OpenClaw 是每用户有状态沙箱，更适合由 BE/OpenSandbox 的专用 Resizer 控制。后续可以参考 VPA 推荐值，但不要让 VPA 直接频繁驱逐用户沙箱。</p>
+      </section>
+
+      <section id="refs">
+        <h2>11. 参考资料</h2>
+        <ul>
+          <li><a href="https://kubernetes.io/docs/tasks/configure-pod-container/resize-container-resources/">Kubernetes 官方文档：Resize CPU and Memory Resources assigned to Containers</a></li>
+          <li><a href="https://kubernetes.io/docs/concepts/workloads/autoscaling/vertical-pod-autoscale/">Kubernetes 官方文档：Vertical Pod Autoscaling</a></li>
+          <li><a href="https://keda.sh/docs/2.20/scalers/prometheus/">KEDA 官方文档：Prometheus scaler</a></li>
+        </ul>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
