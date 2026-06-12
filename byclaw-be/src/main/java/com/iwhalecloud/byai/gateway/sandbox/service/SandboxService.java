@@ -404,6 +404,10 @@ public class SandboxService {
                 return buildLaunchData(existingRecord);
             }
             if (existingRecord != null) {
+                if (releaseStaleStartingRecordIfNecessary(existingRecord)) {
+                    LOGGER.warn("已清理陈旧启动中沙箱记录，重新拉起默认沙箱：{}", sandboxRef(existingRecord));
+                    return doLaunchSandbox(userCode, resourceId, routing);
+                }
                 LOGGER.warn("沙箱处于非可复用状态：{}", sandboxRef(existingRecord));
                 throw new BdpRuntimeException(I18nUtil.get("sandbox.launch.busy"));
             }
@@ -420,6 +424,24 @@ public class SandboxService {
     private String buildLaunchLockKey(String userCode, SandboxLaunchRouting routing) {
         return SANDBOX_LAUNCH_LOCK_PREFIX + userCode + ":" + routing.getSandboxType() + ":"
             + routing.getEffectiveResourceId();
+    }
+
+    private boolean releaseStaleStartingRecordIfNecessary(SsSandboxRecord record) {
+        if (record == null || !STATUS_STARTING.equals(record.getStatus()) || StringUtils.isNotBlank(record.getSandboxId())
+            || !isStaleStartingRecord(record)) {
+            return false;
+        }
+        LOGGER.warn("发现陈旧 STARTING 沙箱记录，准备本地释放后重拉：{}", sandboxRef(record));
+        return markStartingSandboxReleased(record, RELEASE_REASON_REMOTE_MISSING);
+    }
+
+    private boolean isStaleStartingRecord(SsSandboxRecord record) {
+        Date baseTime = record.getUpdateTime() != null ? record.getUpdateTime() : record.getCreateTime();
+        if (baseTime == null) {
+            return true;
+        }
+        long ageMillis = System.currentTimeMillis() - baseTime.getTime();
+        return ageMillis > TimeUnit.SECONDS.toMillis(SANDBOX_LAUNCH_LOCK_EXPIRE_SECONDS);
     }
 
     /**
@@ -1771,7 +1793,7 @@ public class SandboxService {
         LOGGER.info("沙箱释放完成：{}，releaseReason：{}", sandboxRef(record), releaseReason);
     }
 
-    private void markStartingSandboxReleased(SsSandboxRecord record, String releaseReason) {
+    private boolean markStartingSandboxReleased(SsSandboxRecord record, String releaseReason) {
         Date now = new Date();
         int marked = sandboxRecordMapper.markStartingReleased(record.getId(), releaseReason, now,
             record.getLockVersion());
@@ -1780,10 +1802,10 @@ public class SandboxService {
             if (latestRecord != null && STATUS_RUNNING.equals(latestRecord.getStatus())) {
                 LOGGER.info("启动中沙箱释放时记录已运行，改用运行中释放流程：{}", sandboxRef(latestRecord));
                 doRemoveSandbox(latestRecord, releaseReason);
-                return;
+                return true;
             }
             LOGGER.warn("启动中沙箱释放跳过，记录状态已变化：{}", sandboxRef(latestRecord));
-            return;
+            return false;
         }
         record.setStatus(STATUS_RELEASED);
         record.setReleaseReason(releaseReason);
@@ -1796,6 +1818,7 @@ public class SandboxService {
         sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
         unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType());
         LOGGER.info("启动中沙箱已标记释放：{}，releaseReason：{}", sandboxRef(record), releaseReason);
+        return true;
     }
 
     private void cleanupLaunchedSandboxAfterRecordReleased(SsSandboxRecord record) {
