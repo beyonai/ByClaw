@@ -5,6 +5,7 @@ CREATE SEQUENCE IF NOT EXISTS byai.seq_any_table;
 CREATE SEQUENCE IF NOT EXISTS byai.ss_resource_rel_detail_resource_rel_detail_id_seq;
 CREATE SEQUENCE IF NOT EXISTS byai.byai_message_relobj_id_seq;
 CREATE SEQUENCE IF NOT EXISTS byai.ss_sandbox_record_id_seq;
+CREATE SEQUENCE IF NOT EXISTS byai.ss_sandbox_resize_record_id_seq;
 
 -- ========== 表结构 ==========
 CREATE TABLE byai.au_privilege_grant (privilege_grant_id bigint, grant_type character varying(20), oper_type character varying(20), grant_obj_type character varying(20), grant_obj_id bigint, eff_date timestamp without time zone, exp_date timestamp without time zone, status_cd character varying(3), create_staff bigint, create_date timestamp without time zone, update_staff bigint, update_date timestamp without time zone, grant_to_type character varying(20), grant_to_obj_id bigint, grant_to_obj_type character varying(20), allow_unsubscribe character varying);
@@ -103,7 +104,8 @@ CREATE TABLE byai.query_config (query_id bigint, query_code character varying(10
 CREATE TABLE byai.resource_attribute_permissions (id bigint, resource_id bigint, resource_attribute_id bigint, data_scope_type character varying(50), create_by bigint, create_time timestamp without time zone, update_by bigint, update_time timestamp without time zone);
 CREATE TABLE byai.resource_rule_enabled (resource_template_id bigint, template_id bigint, resource_id bigint, user_id bigint, resource_enabled smallint, update_by bigint, create_time timestamp without time zone, update_time timestamp without time zone);
 CREATE TABLE byai.resource_template_relation (resource_template_id bigint, template_id bigint, resource_id bigint, create_time timestamp without time zone, create_by bigint, memory_rule_id character varying(50));
-CREATE TABLE byai.sandbox_service_spec (service_key character varying(128) NOT NULL, spec_json text NOT NULL, template_json text, updated_at timestamp without time zone DEFAULT pg_systimestamp());
+CREATE TABLE byai.sandbox_service_spec (service_key character varying(128) NOT NULL, spec_json text NOT NULL, template_json text, service_type character varying(128), display_name character varying(128), enabled integer DEFAULT 1, default_profile_key character varying(64), autoscale_enabled integer DEFAULT 0, updated_at timestamp without time zone DEFAULT pg_systimestamp());
+CREATE TABLE byai.sandbox_service_profile (id bigint NOT NULL DEFAULT nextval('byai.seq_any_table'::regclass), service_type character varying(128) NOT NULL, profile_key character varying(64) NOT NULL, resource_requests jsonb, resource_limits jsonb, template_patch_json jsonb, resize_enabled integer DEFAULT 0, resize_strategy character varying(32) DEFAULT 'IN_PLACE'::character varying, enabled integer DEFAULT 1, sort_order integer DEFAULT 0, updated_at timestamp without time zone DEFAULT pg_systimestamp());
 CREATE TABLE byai.sandbox_type_definitions (type_key character varying(128) NOT NULL, image character varying(512) NOT NULL, port integer NOT NULL, entrypoint character varying(1024), resource_limits text, mount_files character varying(1024) NOT NULL, mount_targets character varying(1024) NOT NULL, timeout integer, env_file_path character varying(1024), env_file_template text, updated_at timestamp without time zone DEFAULT pg_systimestamp());
 CREATE TABLE byai.ss_res_ext_agent (resource_id bigint, agent_type character varying(3), agent_sse_url character varying(2000), agent_web_url character varying(2000), agent_admin_url character varying(2000), prologue text, agent_sse_url_ori character varying(2000), agent_web_url_ori character varying(2000), agent_admin_url_ori character varying(2000), agent_dev_type character varying(10), agent_sse_head text, auth_type character varying(32), integration_type character varying(20), source_content text, target_content text);
 CREATE TABLE byai.ss_res_ext_attribute (ext_attribute_id bigint, resource_id bigint, attribute_type character varying(64), attribute_code character varying(255), attribute_value text, type character varying(64), format_exp_st character varying(1024), unit character varying(12), is_required smallint, term_type_code character varying(32), term_field character varying(12), attribute_desc character varying(3000), ext_meta text, sort integer, obj_id bigint);
@@ -132,7 +134,8 @@ CREATE TABLE byai.ss_resource_rel_detail (resource_rel_detail_id bigint, resourc
 CREATE TABLE byai.ss_resource_syn (syn_id bigint NOT NULL, resource_id bigint, system_code character varying(32), resource_source_pk_id bigint, resource_biz_type character varying(20), resource_type character varying(10), resource_name character varying(128), resource_desc character varying(4000), create_by bigint, create_date timestamp without time zone, update_date timestamp without time zone, repository character varying(4000));
 CREATE TABLE byai.ss_resource_version (resource_version_id bigint, resource_id bigint, system_code character varying(32), resource_source_pk_id bigint, resource_biz_type character varying(20), resource_type character varying(10), resource_name character varying(128), resource_desc character varying(1024), avatar character varying(1024), sample text, tags text, version_no character varying(20), catalog_id bigint, man_org_id bigint, man_user_id character varying(500), index_list text, publisher character varying(20), ext_info text, rel_resource_list text, resource_status integer, version_status integer, create_by bigint, create_time timestamp without time zone, update_by bigint, update_time timestamp without time zone, com_acct_id bigint);
 CREATE TABLE byai.ss_resource_artifact ( artifact_id BIGINT NOT NULL, resource_id BIGINT NOT NULL, resource_biz_type VARCHAR(100) NOT NULL, artifact_type VARCHAR(100) NOT NULL, storage_type VARCHAR(32) NOT NULL, artifact_path VARCHAR(1024) NOT NULL, status_cd VARCHAR(8) NOT NULL DEFAULT 'A', remark VARCHAR(1000) DEFAULT NULL, create_by BIGINT DEFAULT NULL, create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, update_by BIGINT DEFAULT NULL, update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, com_acct_id BIGINT DEFAULT NULL, CONSTRAINT pk_ss_resource_artifact PRIMARY KEY (artifact_id) );
-CREATE TABLE byai.ss_sandbox_record (id bigint NOT NULL DEFAULT nextval('byai.ss_sandbox_record_id_seq'::regclass), resource_id bigint NOT NULL, user_code character varying(500) NOT NULL, sandbox_type character varying(500) NOT NULL, endpoint character varying(3000), sandbox_id character varying(128), chat_id character varying(128), status character varying(32) NOT NULL DEFAULT 'RUNNING'::character varying, auto_release integer DEFAULT 1, lease_policy character varying(32) DEFAULT 'REMOTE_AUTO_EXPIRE'::character varying, timeout_seconds integer, remote_expires_at timestamp(6) without time zone, last_renew_at timestamp(6) without time zone, next_renew_at timestamp(6) without time zone, last_access_time timestamp(6) without time zone, release_time timestamp(6) without time zone, release_reason text, version integer DEFAULT 0, create_time timestamp(6) without time zone NOT NULL DEFAULT pg_systimestamp(), update_time timestamp(6) without time zone NOT NULL DEFAULT pg_systimestamp());
+CREATE TABLE byai.ss_sandbox_record (id bigint NOT NULL DEFAULT nextval('byai.ss_sandbox_record_id_seq'::regclass), resource_id bigint NOT NULL, user_code character varying(500) NOT NULL, sandbox_type character varying(500) NOT NULL, service_type character varying(128), profile_key character varying(64), resource_requests jsonb, resource_limits jsonb, endpoint character varying(3000), sandbox_id character varying(128), chat_id character varying(128), status character varying(32) NOT NULL DEFAULT 'RUNNING'::character varying, auto_release integer DEFAULT 1, lease_policy character varying(32) DEFAULT 'REMOTE_AUTO_EXPIRE'::character varying, timeout_seconds integer, remote_expires_at timestamp(6) without time zone, last_renew_at timestamp(6) without time zone, next_renew_at timestamp(6) without time zone, last_access_time timestamp(6) without time zone, release_time timestamp(6) without time zone, release_reason text, resize_status character varying(32), last_resize_at timestamp(6) without time zone, last_resize_reason text, last_resize_duration_ms bigint, last_resize_success integer, last_resize_from_profile character varying(64), last_resize_to_profile character varying(64), last_resize_error text, version integer DEFAULT 0, create_time timestamp(6) without time zone NOT NULL DEFAULT pg_systimestamp(), update_time timestamp(6) without time zone NOT NULL DEFAULT pg_systimestamp());
+CREATE TABLE byai.ss_sandbox_resize_record (id bigint NOT NULL DEFAULT nextval('byai.ss_sandbox_resize_record_id_seq'::regclass), sandbox_record_id bigint NOT NULL, sandbox_id character varying(128), user_code character varying(500) NOT NULL, service_type character varying(128), from_profile_key character varying(64), to_profile_key character varying(64), from_resource_requests jsonb, from_resource_limits jsonb, to_resource_requests jsonb, to_resource_limits jsonb, trigger_source character varying(64), reason_code character varying(128), reason_detail text, resize_type character varying(32), status character varying(32) NOT NULL DEFAULT 'REQUESTED'::character varying, success integer, started_at timestamp(6) without time zone, finished_at timestamp(6) without time zone, duration_ms bigint, opensandbox_request_id character varying(128), opensandbox_response jsonb, error_message text, create_time timestamp(6) without time zone NOT NULL DEFAULT pg_systimestamp(), update_time timestamp(6) without time zone NOT NULL DEFAULT pg_systimestamp());
 CREATE TABLE byai.ss_superassist_kw_catalog (kw_catalog_id bigint, superassist_id bigint, session_type character varying(200), is_last_session character varying(200), session_id bigint, session_datasetid bigint, catalog_id bigint, create_time timestamp without time zone, create_user bigint, enterprise_id bigint);
 CREATE TABLE byai.suas_superassist (superassist_id bigint, avatar character varying(255), intro text, name character varying(255), create_time timestamp with time zone, prologue text, status character varying(2), com_acct_id bigint, session_dataset_id bigint, create_user bigint, default_dig_employee_id bigint);
 CREATE TABLE byai.suas_superassist_resource_privilege (id bigint, superassist_id bigint, resource_id bigint, resource_type character varying(32), create_time timestamp without time zone, privilege_type character varying(5));
@@ -148,6 +151,11 @@ CREATE INDEX idx_sandbox_auto_release_timeout ON byai.ss_sandbox_record USING bt
 CREATE UNIQUE INDEX ux_ss_sandbox_record_active ON byai.ss_sandbox_record USING btree (user_code, sandbox_type, resource_id) TABLESPACE pg_default WHERE status IN ('STARTING'::character varying, 'RUNNING'::character varying, 'RELEASING'::character varying);
 CREATE INDEX idx_ss_sandbox_record_due_renew ON byai.ss_sandbox_record USING btree (status, lease_policy, next_renew_at) TABLESPACE pg_default;
 CREATE INDEX idx_ss_sandbox_record_auto_release ON byai.ss_sandbox_record USING btree (status, auto_release, last_access_time) TABLESPACE pg_default;
+CREATE UNIQUE INDEX ux_sandbox_service_profile_type_key ON byai.sandbox_service_profile USING btree (service_type, profile_key) TABLESPACE pg_default;
+CREATE INDEX idx_ss_sandbox_resize_record_record ON byai.ss_sandbox_resize_record USING btree (sandbox_record_id, started_at DESC) TABLESPACE pg_default;
+CREATE INDEX idx_ss_sandbox_resize_record_user ON byai.ss_sandbox_resize_record USING btree (user_code, started_at DESC) TABLESPACE pg_default;
+CREATE INDEX idx_ss_sandbox_resize_record_sandbox ON byai.ss_sandbox_resize_record USING btree (sandbox_id) TABLESPACE pg_default;
+CREATE INDEX idx_ss_sandbox_resize_record_status ON byai.ss_sandbox_resize_record USING btree (status, started_at) TABLESPACE pg_default;
 CREATE INDEX IF NOT EXISTS idx_ss_res_artifact_resid_status ON byai.ss_resource_artifact (resource_id, status_cd);
 CREATE INDEX IF NOT EXISTS idx_ss_res_artifact_biztype_status ON byai.ss_resource_artifact (resource_biz_type, status_cd);
 CREATE INDEX IF NOT EXISTS idx_ss_res_artifact_path_status ON byai.ss_resource_artifact (artifact_path, status_cd);
@@ -157,9 +165,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_ss_res_artifact_unique_active ON byai.ss_re
 ALTER TABLE byai.byai_message ADD PRIMARY KEY (id);
 ALTER TABLE byai.byai_message_relobj ADD PRIMARY KEY (id);
 ALTER TABLE byai.sandbox_service_spec ADD PRIMARY KEY (service_key);
+ALTER TABLE byai.sandbox_service_profile ADD PRIMARY KEY (id);
 ALTER TABLE byai.sandbox_type_definitions ADD PRIMARY KEY (type_key);
 ALTER TABLE byai.ss_resource_syn ADD PRIMARY KEY (syn_id);
 ALTER TABLE byai.ss_sandbox_record ADD PRIMARY KEY (id);
+ALTER TABLE byai.ss_sandbox_resize_record ADD PRIMARY KEY (id);
 
 -- ========== 注释 ==========
 COMMENT ON TABLE byai.byai_system_config IS '系统静态参数配置表';
@@ -421,6 +431,10 @@ COMMENT ON COLUMN byai.ss_sandbox_record.id IS '记录主键';
 COMMENT ON COLUMN byai.ss_sandbox_record.resource_id IS '资源ID';
 COMMENT ON COLUMN byai.ss_sandbox_record.user_code IS '用户编码';
 COMMENT ON COLUMN byai.ss_sandbox_record.sandbox_type IS '沙箱类型';
+COMMENT ON COLUMN byai.ss_sandbox_record.service_type IS '沙箱服务类型，例如 openclaw';
+COMMENT ON COLUMN byai.ss_sandbox_record.profile_key IS '沙箱资源规格分层，例如 xs/s/m/l';
+COMMENT ON COLUMN byai.ss_sandbox_record.resource_requests IS '当前沙箱资源 requests JSON';
+COMMENT ON COLUMN byai.ss_sandbox_record.resource_limits IS '当前沙箱资源 limits JSON';
 COMMENT ON COLUMN byai.ss_sandbox_record.endpoint IS '沙箱访问端点地址';
 COMMENT ON COLUMN byai.ss_sandbox_record.sandbox_id IS '沙箱运行时实例ID';
 COMMENT ON COLUMN byai.ss_sandbox_record.chat_id IS '会话ID';
@@ -434,6 +448,14 @@ COMMENT ON COLUMN byai.ss_sandbox_record.next_renew_at IS '下一次应检测续
 COMMENT ON COLUMN byai.ss_sandbox_record.last_access_time IS '最近一次访问时间（用于空闲超时判断）';
 COMMENT ON COLUMN byai.ss_sandbox_record.release_time IS '释放完成时间';
 COMMENT ON COLUMN byai.ss_sandbox_record.release_reason IS '释放原因';
+COMMENT ON COLUMN byai.ss_sandbox_record.resize_status IS '最近一次动态扩缩容状态';
+COMMENT ON COLUMN byai.ss_sandbox_record.last_resize_at IS '最近一次动态扩缩容时间';
+COMMENT ON COLUMN byai.ss_sandbox_record.last_resize_reason IS '最近一次动态扩缩容原因';
+COMMENT ON COLUMN byai.ss_sandbox_record.last_resize_duration_ms IS '最近一次动态扩缩容耗时毫秒';
+COMMENT ON COLUMN byai.ss_sandbox_record.last_resize_success IS '最近一次动态扩缩容是否成功：1-成功，0-失败';
+COMMENT ON COLUMN byai.ss_sandbox_record.last_resize_from_profile IS '最近一次动态扩缩容来源规格';
+COMMENT ON COLUMN byai.ss_sandbox_record.last_resize_to_profile IS '最近一次动态扩缩容目标规格';
+COMMENT ON COLUMN byai.ss_sandbox_record.last_resize_error IS '最近一次动态扩缩容错误信息';
 COMMENT ON COLUMN byai.ss_sandbox_record.version IS '乐观锁版本号';
 COMMENT ON COLUMN byai.ss_sandbox_record.create_time IS '创建时间';
 COMMENT ON COLUMN byai.ss_sandbox_record.update_time IS '更新时间';
@@ -464,6 +486,7 @@ SELECT setval('byai.seq_any_table', 10000000, True);
 SELECT setval('byai.ss_resource_rel_detail_resource_rel_detail_id_seq', 1, False);
 SELECT setval('byai.byai_message_relobj_id_seq', 3258, True);
 SELECT setval('byai.ss_sandbox_record_id_seq', 512, True);
+SELECT setval('byai.ss_sandbox_resize_record_id_seq', 512, True);
 
 -- ========== V0.0.1 (merged at 2026-05-21 09:56:18) ==========
 ALTER TABLE byai.ss_sandbox_record

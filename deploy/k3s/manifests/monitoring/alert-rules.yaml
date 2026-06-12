@@ -1,0 +1,35 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: byclaw-sandbox-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: byclaw.sandbox
+      rules:
+        - alert: SandboxPodPending
+          expr: kube_pod_status_phase{namespace="by-sandbox", phase="Pending"} > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "沙箱 Pod 长时间 Pending"
+            description: "namespace=by-sandbox 存在 Pending Pod，可能资源不足或 PVC 挂载失败"
+        - alert: SandboxPodOOMKilled
+          expr: increase(kube_pod_container_status_last_terminated_reason{namespace="by-sandbox", reason="OOMKilled"}[1h]) > 0
+          labels:
+            severity: critical
+            targetProfileKey: s
+            resizeType: IN_PLACE
+          annotations:
+            summary: "沙箱容器 OOMKilled"
+            reasonCode: "sandbox.oom_killed"
+        - alert: OpenSandboxHighLatency
+          expr: histogram_quantile(0.95, rate(opensandbox_sandbox_create_duration_seconds_bucket[5m])) > 30
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "沙箱创建 P95 延迟过高"
