@@ -98,6 +98,7 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             matcherList.add(Pattern.compile("/open/api/v1/conversation/read")); // 会话文件按行读取（免登录）
             matcherList.add(Pattern.compile("/chat/message/share-link/access")); // 消息分享链接
             matcherList.add(Pattern.compile("/open/api/getAllUserInfoByUserCode")); // 获取用户信息
+            matcherList.add(Pattern.compile("/commonFile/view")); // 文件查看（controller自行处理登录重定向）
 
             String[] patternList = StringUtils.isNotEmpty(urlPattenrs) ? urlPattenrs.split(",") : new String[0];
             for (String regex : patternList) {
