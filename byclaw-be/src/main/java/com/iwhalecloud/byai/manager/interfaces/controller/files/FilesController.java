@@ -1,9 +1,13 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.files;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService;
 import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +20,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 
 /**
  * @author he.duming
@@ -76,6 +84,29 @@ public class FilesController {
     @GetMapping(path = "/download")
     public void preview(HttpServletResponse response, @RequestParam("fileId") Long fileId) {
         filesApplicationService.download(response, fileId);
+    }
+
+    /**
+     * 文件查看（未登录时重定向到登录页）
+     */
+    @GetMapping(path = "/view")
+    public void view(HttpServletRequest request, HttpServletResponse response,
+        @RequestParam(value = "style", required = false) String style,
+        @RequestParam(value = "bucketName", required = false) String bucketName,
+        @RequestParam("filePath") String filePath) throws IOException {
+        if (CurrentUserHolder.getLoginInfo() == null) {
+            String currentUrl = request.getRequestURL().toString();
+            String queryString = request.getQueryString();
+            if (queryString != null) {
+                currentUrl += "?" + queryString;
+            }
+            ByaiSystemConfigService configService = ApplicationContextUtil.getBean(ByaiSystemConfigService.class);
+            String webBaseUrl = configService.getDcSystemConfigValueByCode("WEB_BASE_URL");
+            String redirectUrl = (webBaseUrl != null ? webBaseUrl : "") + "/mobile/login?redirectUrl=" + URLEncoder.encode(currentUrl, StandardCharsets.UTF_8);
+            response.sendRedirect(redirectUrl);
+            return;
+        }
+        filesApplicationService.preview(response, style, bucketName, filePath);
     }
 
 }
