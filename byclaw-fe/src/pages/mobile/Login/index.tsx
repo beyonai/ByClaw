@@ -1,6 +1,6 @@
 import React from 'react';
 import classNames from 'classnames';
-import { Form, Input, Button, message, Divider, Tabs, Space } from 'antd';
+import { Form, Input, Button, message, Tabs, Space } from 'antd';
 import { useIntl, useDispatch, useNavigate } from '@umijs/max';
 
 import { getPublicPath, getRootPagePath } from '@/utils';
