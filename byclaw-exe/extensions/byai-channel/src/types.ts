@@ -69,7 +69,7 @@ export interface SdkProcessorDeps {
     warn?: (msg: string) => void;
     error?: (msg: string) => void;
   };
-  onReply: (text: string, type: "partial" | "final", options?: Record<string, any>) => Promise<void>;
+  onReply: (text: string, options?: Record<string, any>) => Promise<void>;
   onReasoning?: (delta: string, text: string) => Promise<void>;
   onReasonEnd?: () => Promise<void>;
   onComplete?: () => Promise<void>;

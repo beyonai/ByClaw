@@ -9,12 +9,12 @@ import {
   markActiveSdkCompactionRetryPending,
   markActiveSdkRootLifecycleFinished,
   markActiveSdkRootLifecycleStarted,
-  reserveStreamedAnswerDelta,
   resolveActiveSdkRequestBySessionKey,
   resolveActiveSdkRunBinding,
   resolveSdkEmitter,
   markActiveSdkRequestSubagentSpawned,
 } from "./session-context";
+import { registerPendingMessageToolSend } from "./pending-message-tool.js";
 import {
   cancelActiveSdkCompletionCheck,
   scheduleActiveSdkCompletionCheck,
@@ -150,6 +150,14 @@ async function handleToolEvent(
     if (toolCallId && data?.args && typeof data.args === "object") {
       toolStartArgsByCallId.set(toolCallId, data.args);
     }
+    // message 工具的 action=send 是唯一"无 assistant 流、必须靠 outbound.sendText 投递"的
+    // 可见内容。登记一条待投递，sendText 命中即 emit、未命中即抑制（agent 回复回声）。
+    if (data?.name === "message") {
+      const sendText = extractMessageToolSendText(data?.args);
+      if (sendText) {
+        registerPendingMessageToolSend(request.sessionKey, { toolCallId, text: sendText });
+      }
+    }
     const title = buildToolStartTitle(request, data);
     await emitSdkChunk(request, sdkEmitter, title, {
       // 必须以toolCallId作为messageId，这个toolCallId可能会作为parentMessageId发送到其他worker(在baiying-enhance的实现)
@@ -252,14 +260,15 @@ async function handleAssistantEvent(
       ? previousEmit.messageId
       : request.sessionKey,
   };
-  // 与 outbound.sendText 共享同一 runId 权威缓冲做前缀 diff：只 emit 超出已发全文的
-  // 后缀。无论本 assistant 帧与 sendText 谁先到，同一段文本只发一次（顺序不可控，
-  // 见 reserveStreamedAnswerDelta 注释）。
-  const cumulativeText = stringValue(event.data?.text) || text;
-  const answerDelta = reserveStreamedAnswerDelta(event.runId, cumulativeText);
-  if (answerDelta) {
-    await emitSdkChunk(request, sdkEmitter, answerDelta, answerOptions);
-  }
+  // assistant 流是权威可见源，按 runId 做简单前缀增量即可（sendText 的去重改由
+  // message tool 事件驱动，不再和 assistant 流抢同一缓冲）。
+  await emitIncrementalText({
+    key: `${event.runId}:assistant:answer`,
+    rawText: stringValue(event.data?.text) || text,
+    emit: async (answerDelta) => {
+      await emitSdkChunk(request, sdkEmitter, answerDelta, answerOptions);
+    },
+  });
 }
 
 async function handleReasoningEndTransition(
@@ -355,10 +364,6 @@ async function handleLifecycleEvent(
     activeRequest.sessionKey,
     `root_lifecycle_${phase}`,
   );
-  // 注意：不要在此清理 streamedAnswerByRun。outbound.sendText 的去重判定经同一条
-  // FIFO 延后执行，可能晚于本 lifecycle/end 任务；此处清理会让延后的 sendText 读到
-  // 空缓冲、把 direct-path 汇总误判为新内容而重复 emit。缓冲改由 request 完成时
-  // （clearActiveSdkRequestRecord，等 pendingOutboundCount 归零后）统一按 boundRunIds 回收。
 }
 
 function handleCompactionEvent(
@@ -447,10 +452,10 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
   if (!request) {
     return;
   }
-  // direct-path 汇总等 turn 的 runId 不经 onAgentRunStart/subagent_spawned 绑定，
-  // 但其 assistant 事件能经 sessionKey 解析到本 request。补绑定并更新 lastBoundRunId，
-  // 使 outbound.sendText 的延后去重能定位到该 runId 的 answer 缓冲。
-  if (runId && resolvedSessionKey && request.lastBoundRunId !== runId) {
+  // direct-path 汇总 / announce 续跑等 turn 的 runId 不经 onAgentRunStart/subagent_spawned
+  // 绑定，但其事件能经 sessionKey 解析到本 request。补绑定使 boundRunIds 完整，request
+  // 清理时能回收其在 activeSdkRequestsByRun 的条目。
+  if (runId && resolvedSessionKey && !request.boundRunIds.has(runId)) {
     bindActiveSdkRequestRunId(resolvedSessionKey, runId);
   }
   const isChildSession = isSubagentSessionKey(resolvedSessionKey);
@@ -493,6 +498,22 @@ function extractToolStartArgs(data: {
     return "";
   }
   return JSON.stringify(data.args, null, 2);
+}
+
+// 从 message 工具 args 提取要发送给用户的可见文本。字段优先级对齐 core message-tool
+// 的清洗顺序（text/content/message/caption）。
+function extractMessageToolSendText(args: unknown): string {
+  if (!args || typeof args !== "object") {
+    return "";
+  }
+  const record = args as Record<string, unknown>;
+  for (const field of ["text", "content", "message", "caption"]) {
+    const value = stringValue(record[field]);
+    if (value.trim()) {
+      return value;
+    }
+  }
+  return "";
 }
 
 function extractToolResultText(result: unknown): string {

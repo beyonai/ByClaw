@@ -14,11 +14,11 @@ import { sendReplyCallback } from "./webhook-handler.js";
 import type { ByaiSdkApp } from "./sdk-app.js";
 import {
   emitSdkChunkTracked,
-  reserveStreamedAnswerDelta,
   resolveActiveSdkRequestByTarget,
   resolveSdkEmitter,
   resolveWebhookContext,
 } from "./session-context.js";
+import { consumePendingMessageToolSend } from "./pending-message-tool.js";
 import { parseSessionIdFromTo } from "./outbound-dedup.js";
 import { EventType } from "@byclaw/by-framework";
 import { emitOutOfBandSdkEvent } from "./utils.js";
@@ -278,6 +278,25 @@ export const byaiChannelPlugin: ChannelPlugin<ResolvedByaiAccount, ByaiProbe> = 
       // cron/heartbeat 在源头不走 deliver，不会到达这里。
       if (!request) {
         await emitOutOfBandSdkText({ to, text });
+        return okResult;
+      }
+      // in-band：sendText 到来的可能是 ① message 工具 action=send（无 assistant 流，
+      // 必须由 sendText 投递），或 ② agent 回复/汇总的回声（已由 onAgentEvent assistant
+      // 流发过，应抑制）。用 message tool 事件登记的待投递标记区分，不猜内容：
+      //   命中 → message 工具的全新内容 → emit
+      //   未命中 → agent 回复回声 → 抑制
+      if (!consumePendingMessageToolSend(request.sessionKey, text)) {
+        return okResult;
+      }
+      const sdkEmitter = resolveSdkEmitter(resolvedAccountId);
+      if (sdkEmitter) {
+        await emitSdkChunkTracked({
+          emitter: sdkEmitter,
+          sessionId: request.sessionId,
+          traceId: request.traceId,
+          text,
+          options: { eventType: EventType.ANSWER_DELTA },
+        });
       }
       return okResult;
     },
