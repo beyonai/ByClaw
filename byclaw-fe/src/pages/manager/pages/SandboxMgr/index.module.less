@@ -20,16 +20,154 @@
   overflow: auto;
 }
 
-.selectedSandbox {
+.elasticOverview {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(320px, 1.4fr) minmax(300px, 1.3fr);
+  gap: 12px;
   margin: 16px 0;
-  padding: 10px 12px;
+}
+
+.elasticCard {
+  min-width: 0;
+  padding: 14px 16px;
   border: 1px solid #d9e8ff;
-  border-radius: 6px;
+  border-radius: 8px;
   background: #f5f9ff;
+}
+
+.elasticCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: #1f1f1f;
+  font-weight: 600;
+}
+
+.sandboxIdentity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.sandboxIdentity > span:first-child {
+  color: #1677ff;
+  font-weight: 600;
+}
+
+.sandboxIdText {
+  max-width: 180px;
+}
+
+.profileTag {
+  margin-right: 0;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.resourceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.resourceMetric {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.resourceMetric :global(.anticon) {
+  color: #1677ff;
+}
+
+.resourceMetric strong {
+  margin-left: auto;
+  color: #1f1f1f;
+  font-weight: 600;
+}
+
+.resourcePill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  color: #1f1f1f;
+  background: #f0f5ff;
+  white-space: nowrap;
+}
+
+.resourcePill :global(.anticon) {
+  color: #1677ff;
+}
+
+.previewCard {
+  background: #fff;
+}
+
+.previewLine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 4px 0;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.previewLine strong {
+  min-width: 0;
+  color: #1f1f1f;
+  font-weight: 600;
+  text-align: right;
+}
+
+.previewEmpty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 72px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.optionContent {
+  line-height: 1.4;
+}
+
+.optionTitle {
+  color: #1f1f1f;
+  font-weight: 600;
+}
+
+.optionMeta {
+  margin-top: 3px;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  white-space: normal;
+}
+
+.strategyIcon {
+  color: #1677ff;
+}
+
+.infoIcon {
+  color: rgba(0, 0, 0, 0.35);
 }
 
 .resizeRecordTitle {
   margin-top: 20px !important;
+}
+
+@media (max-width: 1200px) {
+  .elasticOverview {
+    grid-template-columns: 1fr;
+  }
 }
 
 .jsonEditor {
