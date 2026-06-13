@@ -7,8 +7,11 @@ import com.iwhalecloud.byai.manager.application.service.files.FilesApplicationSe
 import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
+import com.iwhalecloud.byai.state.infrastructure.filter.sub.SessionFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,6 +41,9 @@ public class FilesController {
 
     @Autowired
     private FilesApplicationService filesApplicationService;
+
+    @Autowired
+    private SessionFilter sessionFilter;
 
     /**
      * 上传图标
@@ -94,6 +100,12 @@ public class FilesController {
         @RequestParam(value = "style", required = false) String style,
         @RequestParam(value = "bucketName", required = false) String bucketName,
         @RequestParam("filePath") String filePath) throws IOException {
+        HttpSession httpSession = request.getSession(false);
+        String userCode = httpSession != null
+            ? (String) httpSession.getAttribute("USER_CODE") : null;
+        if (StringUtils.isNotEmpty(userCode)) {
+            sessionFilter.doFilter(httpSession);
+        }
         if (CurrentUserHolder.getLoginInfo() == null) {
             String currentUrl = request.getRequestURL().toString();
             String queryString = request.getQueryString();
