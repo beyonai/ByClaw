@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.files;
 
+import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
@@ -113,7 +114,7 @@ public class FilesController {
                 currentUrl += "?" + queryString;
             }
             ByaiSystemConfigService configService = ApplicationContextUtil.getBean(ByaiSystemConfigService.class);
-            String webBaseUrl = configService.getDcSystemConfigValueByCode("WEB_BASE_URL");
+            String webBaseUrl = configService.getDcSystemConfigValueByCode(Constants.WEB_BASE_URL);
             String redirectUrl = (webBaseUrl != null ? webBaseUrl : "") + "/beyond/mobile/login?redirectUrl=" + URLEncoder.encode(currentUrl, StandardCharsets.UTF_8);
             response.sendRedirect(redirectUrl);
             return;
