@@ -6,7 +6,7 @@ import {
 } from "./session-context.js";
 import { clearPromptInjectionSnapshot } from "./prompt-injection-snapshot.js";
 
-const DEFAULT_SETTLE_POLL_MS = 80;
+const DEFAULT_SETTLE_POLL_MS = 1000;
 const DEFAULT_SETTLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 function sleep(ms: number): Promise<void> {

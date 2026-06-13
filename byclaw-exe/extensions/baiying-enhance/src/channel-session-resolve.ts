@@ -1,7 +1,7 @@
 /**
  * Resolve gateway/channel session id for `baiying_call` (per-request MCP X-Session-Id).
  *
- * Priority: explicit ctx fields → To/OriginatingTo `user:<id>` → byai-channel
+ * Priority: explicit ctx fields → To/OriginatingTo `<agentId>:<sessionId>` → byai-channel
  * in-process store (sessionKey / child) → none (executor may still use identity file).
  *
  * STORE_KEY must match `extensions/byai-channel/src/session-context.ts`.
@@ -63,17 +63,17 @@ function isFresh(request: ActiveSdkRequestLike | undefined, now: number): boolea
   return now - request.createdAt <= ACTIVE_SDK_REQUEST_TTL_MS;
 }
 
-/** Parse `user:<sessionId>` from channel-style addressing. */
+/** Parse `<agentId>:<sessionId>` from channel-style addressing. */
 export function parseUserPrefixedSessionId(value: unknown): string | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
   const t = value.trim();
-  const m = /^user:(.+)$/i.exec(t);
-  if (!m?.[1]) {
+  const m = t.split(':');
+  if (!m?.length) {
     return undefined;
   }
-  const id = m[1].trim();
+  const id = m[1]?.trim();
   return id || undefined;
 }
 

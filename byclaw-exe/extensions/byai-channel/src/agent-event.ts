@@ -1,10 +1,10 @@
 import { EmitOptions, EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import {
   ActiveSdkRequest,
+  bindActiveSdkRequestRunId,
   emitSdkChunkTracked,
   getLastSdkEmitChunk,
   isRootSessionKey,
-  isChildSessionKey,
   markActiveSdkModelFallbackStep,
   markActiveSdkCompactionRetryPending,
   markActiveSdkRootLifecycleFinished,
@@ -12,7 +12,9 @@ import {
   resolveActiveSdkRequestBySessionKey,
   resolveActiveSdkRunBinding,
   resolveSdkEmitter,
+  markActiveSdkRequestSubagentSpawned,
 } from "./session-context";
+import { registerPendingMessageToolSend } from "./pending-message-tool.js";
 import {
   cancelActiveSdkCompletionCheck,
   scheduleActiveSdkCompletionCheck,
@@ -133,7 +135,6 @@ function stringValue(value: unknown): string {
 async function handleToolEvent(
   request: ActiveSdkRequest,
   event: AgentEvent,
-  isChildSession: boolean,
 ) {
   const sdkEmitter = resolveSdkEmitter(request.accountId);
   if (!sdkEmitter) {
@@ -148,6 +149,14 @@ async function handleToolEvent(
   if (phase === "start") {
     if (toolCallId && data?.args && typeof data.args === "object") {
       toolStartArgsByCallId.set(toolCallId, data.args);
+    }
+    // message 工具的 action=send 是唯一"无 assistant 流、必须靠 outbound.sendText 投递"的
+    // 可见内容。登记一条待投递，sendText 命中即 emit、未命中即抑制（agent 回复回声）。
+    if (data?.name === "message") {
+      const sendText = extractMessageToolSendText(data?.args);
+      if (sendText) {
+        registerPendingMessageToolSend(request.sessionKey, { toolCallId, text: sendText });
+      }
     }
     const title = buildToolStartTitle(request, data);
     await emitSdkChunk(request, sdkEmitter, title, {
@@ -200,8 +209,15 @@ async function handleToolEvent(
       objectType: "tool_call",
       status: data.isError ? "_ERROR_" : "_DONE_",
     });
-    if (data?.name === "baiying_call") {
-      setToBeEmittedChunkViaBaiyingCallTool(data?.result);
+    if (data.name === "baiying_call") {
+      setToBeEmittedChunkViaBaiyingCallTool(data.result);
+    } else if (data.name === "sessions_spawn" && data.result?.details && !data.isError) {
+      await markActiveSdkRequestSubagentSpawned(
+        request.sessionKey,
+        data.result.details.childSessionKey,
+        data.result.details.runId,
+      );
+      cancelActiveSdkCompletionCheck(request.sessionKey);
     }
   }
 }
@@ -239,11 +255,13 @@ async function handleAssistantEvent(
   const previousEmit = getLastSdkEmitChunk(request.accountId);
   const answerOptions: EmitOptions = {
     parentMessageId: "-1",
-    eventType: EventType.ANSWER_DELTA,
+    eventType: isChildSession ? EventType.REASONING_LOG_DELTA : EventType.ANSWER_DELTA,
     messageId: streamContext.isContinuingAnswer && previousEmit?.messageId
       ? previousEmit.messageId
       : request.sessionKey,
   };
+  // assistant 流是权威可见源，按 runId 做简单前缀增量即可（sendText 的去重改由
+  // message tool 事件驱动，不再和 assistant 流抢同一缓冲）。
   await emitIncrementalText({
     key: `${event.runId}:assistant:answer`,
     rawText: stringValue(event.data?.text) || text,
@@ -346,7 +364,6 @@ async function handleLifecycleEvent(
     activeRequest.sessionKey,
     `root_lifecycle_${phase}`,
   );
-  delete lastAgentAssistantEventMap[event.runId];
 }
 
 function handleCompactionEvent(
@@ -414,6 +431,9 @@ async function emitReasoningText(
 }
 
 export default async function handleAgentEvent(api: OpenClawPluginApi, event: AgentEvent) {
+  api.logger.info(
+    `[byai-channel] onAgentEvent: ${JSON.stringify(event)}`,
+  );
   const { seq, sessionKey, runId } = event;
   const runBinding = resolveActiveSdkRunBinding(runId);
   const resolvedSessionKey = sessionKey ?? runBinding?.sessionKey;
@@ -432,10 +452,13 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
   if (!request) {
     return;
   }
-  api.logger.info(
-    `[byai-channel] onAgentEvent: ${JSON.stringify(event)}`,
-  );
-  const isChildSession = isChildSessionKey(resolvedSessionKey);
+  // direct-path 汇总 / announce 续跑等 turn 的 runId 不经 onAgentRunStart/subagent_spawned
+  // 绑定，但其事件能经 sessionKey 解析到本 request。补绑定使 boundRunIds 完整，request
+  // 清理时能回收其在 activeSdkRequestsByRun 的条目。
+  if (runId && resolvedSessionKey && !request.boundRunIds.has(runId)) {
+    bindActiveSdkRequestRunId(resolvedSessionKey, runId);
+  }
+  const isChildSession = isSubagentSessionKey(resolvedSessionKey);
   const currentStream = resolveAssistantDisplayStream(event, isChildSession);
   const previousStream = lastAgentAssistantEvent.stream;
   const isPreviousThinking = previousStream === "thinking";
@@ -449,7 +472,7 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
   }
   lastAgentAssistantEvent.stream = currentStream;
   if (event.stream === 'tool') {
-    await handleToolEvent(request, event, isChildSession);
+    await handleToolEvent(request, event);
   } else if (event.stream === 'assistant') {
     if (currentStream === "assistant" && previousStream !== "assistant" && toBeEmittedChunkAfterBaiyingCallTool) {
       // 无论是主agent还是subagent，开始输出正文前，先把baiying_call工具缓存起来的chunk emit出来
@@ -475,6 +498,22 @@ function extractToolStartArgs(data: {
     return "";
   }
   return JSON.stringify(data.args, null, 2);
+}
+
+// 从 message 工具 args 提取要发送给用户的可见文本。字段优先级对齐 core message-tool
+// 的清洗顺序（text/content/message/caption）。
+function extractMessageToolSendText(args: unknown): string {
+  if (!args || typeof args !== "object") {
+    return "";
+  }
+  const record = args as Record<string, unknown>;
+  for (const field of ["text", "content", "message", "caption"]) {
+    const value = stringValue(record[field]);
+    if (value.trim()) {
+      return value;
+    }
+  }
+  return "";
 }
 
 function extractToolResultText(result: unknown): string {
