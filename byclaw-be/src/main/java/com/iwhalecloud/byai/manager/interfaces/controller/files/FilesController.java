@@ -114,7 +114,7 @@ public class FilesController {
             }
             ByaiSystemConfigService configService = ApplicationContextUtil.getBean(ByaiSystemConfigService.class);
             String webBaseUrl = configService.getDcSystemConfigValueByCode("WEB_BASE_URL");
-            String redirectUrl = (webBaseUrl != null ? webBaseUrl : "") + "/mobile/login?redirectUrl=" + URLEncoder.encode(currentUrl, StandardCharsets.UTF_8);
+            String redirectUrl = (webBaseUrl != null ? webBaseUrl : "") + "/beyond/mobile/login?redirectUrl=" + URLEncoder.encode(currentUrl, StandardCharsets.UTF_8);
             response.sendRedirect(redirectUrl);
             return;
         }
