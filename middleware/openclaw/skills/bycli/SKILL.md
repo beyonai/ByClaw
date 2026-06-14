@@ -44,6 +44,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 
 - Agent 调用 bycli 时始终加 `-f json` 获取可解析输出
 - 浏览器操作前确认 `bycli doctor` 通过（仅 COOKIE/INTERCEPT/UI 策略需要）
+- 每次执行 `bycli doctor` 后（无论成功与否）必须紧接着执行 `bycli daemon status`，确认 daemon 处于 running 且 Extension 为 connected，据此判断桥接是否正常；任一不满足则视为桥接异常，按冷启动 / `bycli daemon restart` 处理或报告用户
 - 修复 adapter 时仅修改 trace `summary.md` 里 `adapterSourcePath` 指向的文件
 - 修复预算：每次失败最多 3 轮 trace → fix → retry
 - 写 adapter 后必须 `bycli browser verify` 通过 + 字段值与网页肉眼比对
@@ -79,7 +80,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 
 1. 用 `bycli browser` 系列命令完成任务，不跳到通用工具
 2. 按下方浏览器生命周期 + [browser.md](./references/browser.md) 规范执行
-3. 驱动前先 `bycli doctor` 确认桥接
+3. 驱动前先 `bycli doctor` 确认桥接，紧接着 `bycli daemon status` 确认 daemon running + Extension connected
 4. 任务结束后可建议用户「是否编写专用适配器」（仅建议，不自动执行）
 
 ### Markdown 入库 — 触发边界（最高优先级）
@@ -98,6 +99,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 ```bash
 npm install -g @sovovs/bycli    # 需要 Node >= 21
 bycli doctor                       # 检查浏览器桥接（PUBLIC/LOCAL 策略无需）
+bycli daemon status                # doctor 后必跑：确认 daemon running + Extension connected
 ```
 
 ### 命令发现
@@ -143,7 +145,7 @@ bycli gh pr list --limit 5         # 透传调用
 | 错误类型 | Agent 行为 |
 |---------|-----------|
 | AUTH_REQUIRED (exit 77) | STOP，提示用户登录 |
-| BROWSER_CONNECT (exit 69) | STOP，提示运行 `bycli doctor` |
+| BROWSER_CONNECT (exit 69) | STOP，提示运行 `bycli doctor` + `bycli daemon status` 诊断桥接 |
 | CAPTCHA / 限流 | STOP，不是 adapter 问题 |
 | SELECTOR / EMPTY_RESULT / API_ERROR | 进入 AutoFix 流程 |
 | TIMEOUT / PAGE_CHANGED | 进入 AutoFix 流程 |
@@ -167,6 +169,7 @@ bycli gh pr list --limit 5         # 透传调用
 ```bash
 openclaw browser --browser-profile openclaw start
 bycli doctor
+bycli daemon status                # doctor 后必跑：确认 daemon running + Extension connected
 bycli browser <session> open <url>
 bycli browser <session> state
 ```

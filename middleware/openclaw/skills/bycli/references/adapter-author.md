@@ -27,7 +27,7 @@ START
   │
   ▼
 ┌──────────────────────────┐
-│ bycli doctor 通？      │── no ──→ 修桥接（doctor 输出提示）
+│ bycli doctor + daemon status 通？│── no ──→ 修桥接（doctor 输出提示）
 └──────────────────────────┘
   │ yes
   ▼
@@ -94,7 +94,7 @@ DONE
 ## Runbook（勾选式）
 
 ```
-[ ] 1. bycli doctor 返回 "Everything looks good"
+[ ] 1. bycli doctor 返回 "Everything looks good"，且随后 bycli daemon status 显示 daemon running + Extension connected
 [ ] 2. 读站点记忆：
        [ ] ~/.bycli/sites/<site>/endpoints.json 存在？
        [ ] references/site-memory/<site>.md 存在？

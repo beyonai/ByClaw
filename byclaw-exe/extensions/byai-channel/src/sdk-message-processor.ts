@@ -15,6 +15,7 @@ import { buildAgentSessionKey, resolveAgentIdFromSessionKey } from "openclaw/plu
 import type { SdkInboundFile, SdkProcessorDeps } from "./types.js";
 import {
   bindActiveSdkRequestRunId,
+  clearActiveSdkRequestByTarget,
   registerActiveSdkRequest,
   resolveSdkLocalFilePath,
 } from "./session-context.js";
@@ -310,10 +311,13 @@ async function deliverReplyToAgentViaSdkUnderGate(
     }
   }
 
+  const { accountId } = account;
+  const To = `${sessionAgentId}:${message.sessionId}`;
+
   const activeRequest = registerActiveSdkRequest({
-    accountId: account.accountId,
+    accountId,
     sessionKey,
-    to: `user:${message.sessionId}`,
+    to: To,
     sessionId: message.sessionId,
     traceId: message.traceId,
     language: message.language,
@@ -343,7 +347,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
   });
   const inboundMediaPayload = await resolveSdkInboundMediaPayload({
     cfg,
-    accountId: account.accountId,
+    accountId,
     sessionId: message.sessionId,
     files: message.files,
     log,
@@ -355,9 +359,9 @@ async function deliverReplyToAgentViaSdkUnderGate(
     RawBody: message.text,
     CommandBody: message.text,
     From: `${CHANNEL_ID}:${message.userId}`,
-    To: `user:${message.sessionId}`,
+    To: To,
     SessionKey: sessionKey,
-    AccountId: routing.accountId,
+    AccountId: accountId,
     ChatType: "direct",
     SenderName: message.userId,
     SenderId: message.userId,
@@ -370,7 +374,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     // MessageSid: message.messageId,
     MessageSid: crypto.randomUUID(),
     OriginatingChannel: CHANNEL_ID,
-    OriginatingTo: `user:${message.sessionId}`,
+    OriginatingTo: To,
     /** Explicit gateway session id for tools (e.g. baiying_call); OpenClaw may forward to tool ctx. */
     ChannelSessionId: message.sessionId,
     /** Explicit gateway trace id for tools (e.g. baiying_call doc trace passthrough). */
@@ -384,7 +388,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     });
 
     const finalizedCtx = rt.channel.reply.finalizeInboundContext(ctxPayload);
-    log?.info?.(`[diagnose-sdk] finalized ctx, SessionKey: ${finalizedCtx.SessionKey}`);
+    log?.info?.(`[diagnose-sdk] finalized ctx, SessionKey: ${finalizedCtx.SessionKey}, To: ${To}`);
 
     const dispatchResult = await rt.channel.reply.withReplyDispatcher({
       dispatcher,
@@ -400,7 +404,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
             onAgentRunStart: async (runId: string) => {
               bindActiveSdkRequestRunId(sessionKey, runId);
               log?.info?.(`[diagnose-sdk] onAgentRunStart called, runId: ${runId}}`);
-              await onReply(buildAgentReadyTitle(message.language, sessionAgentName), "partial", {
+              await onReply(buildAgentReadyTitle(message.language, sessionAgentName), {
                 parentMessageId: "-1",
                 eventType: EventType.REASONING_LOG_DELTA,
                 contentType: SseReasonMessageType.think_title,
@@ -417,6 +421,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     );
   } catch (err) {
     log?.error?.(`[diagnose-sdk] Message dispatch failed: ${String(err)}`);
+    clearActiveSdkRequestByTarget(accountId, To);
     throw err;
   } finally {
     const settle = await waitForSdkSessionDispatchSettled(sessionKey, {
