@@ -534,6 +534,11 @@ export function markActiveSdkRootLifecycleFinished(
     request.rootLifecyclePhase = phase;
     request.awaitingFollowup = false;
     request.followupRunStarted = false;
+    // 2026.6.1 的 overflow 压缩在同一 run 内静默续跑，压缩后不再发新的 lifecycle start，
+    // compactionRetryPending 就没有信号来清；而单 run 只压缩一次（overflowRecoveryAttempted
+    // 一次性护栏），压缩之后到来的终态 end/error 必为真终态，此处释放该门安全。不清的话
+    // 完成门会被永久挡住，APP_STREAM_RESPONSE 永不发出、request 泄漏。
+    request.compactionRetryPending = false;
     return request;
 }
 

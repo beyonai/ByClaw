@@ -366,7 +366,7 @@ async function handleLifecycleEvent(
   );
 }
 
-function handleCompactionEvent(
+async function handleCompactionEvent(
   request: ActiveSdkRequest,
   event: AgentEvent,
   sessionKey?: string,
@@ -377,6 +377,10 @@ function handleCompactionEvent(
   }
   if (phase === "start") {
     markActiveSdkCompactionRetryPending(sessionKey ?? request.sessionKey, true);
+    await emitSdkChunk(request, resolveSdkEmitter(request.accountId), "", {
+      contentType: "5007",
+      eventType: EventType.ANSWER_DELTA,
+    });
     return;
   }
   if (phase === "end") {
@@ -485,7 +489,7 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
   } else if (event.stream === "lifecycle") {
     await handleLifecycleEvent(api, request, event, resolvedSessionKey);
   } else if (event.stream === "compaction") {
-    handleCompactionEvent(request, event, resolvedSessionKey);
+    await handleCompactionEvent(request, event, resolvedSessionKey);
   } else if (currentStream === "thinking") {
     await handleThinkingEvent(request, event, isPreviousThinking);
   }
