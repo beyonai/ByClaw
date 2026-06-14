@@ -1,6 +1,6 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { SearchOutlined } from '@ant-design/icons';
-import { Dropdown, Empty, Input, List, Typography } from 'antd';
+import { Breadcrumb, Dropdown, Empty, Input, List, Typography } from 'antd';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import { trim } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
@@ -8,7 +8,7 @@ import { DragType, type IDragType } from '@/components/QueryInput/withDrag';
 import ResourceDetail from '@/components/Resources/components/ResourceDetail';
 import InfiniteScrollAntdList from '@/layout/sider/components/InfiniteScrollAntdList';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
-import { queryDigEmployeeRelResourceAuth } from '@/pages/manager/service/resources';
+import { queryDigEmployeeRelResourceAuth, queryResourceMembers } from '@/pages/manager/service/resources';
 import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import { ResourceTypeMap } from '@/constants/resource';
 import { resourceBizTypeMap } from '@/constants/knowledge';
@@ -106,7 +106,130 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   const [loading, setLoading] = useState(false);
   const [resourceList, setResourceList] = useState<ResourceItem[]>([]);
   const [hasMore, setHasMore] = useState(false);
+  const [resourceDetails, setResourceDetails] = useState<Record<string, any>>({});
+
+  // 下钻相关状态
+  interface BreadcrumbItem {
+    resourceId: string;
+    resourceName: string;
+    resourceType: string;
+    originalList: ResourceItem[];
+  }
+  const [breadcrumb, setBreadcrumb] = useState<BreadcrumbItem[]>([]);
   const config = resourceConfigMap[resourceType];
+
+  /**
+   * 获取资源详情数据
+   */
+  const getResourceDetail = async (resourceId: string): Promise<any> => {
+    if (resourceDetails[resourceId]) {
+      return resourceDetails[resourceId];
+    }
+
+    try {
+      const data = await queryResourceMembers({ resourceId });
+      setResourceDetails((prev) => ({ ...prev, [resourceId]: data }));
+      return data;
+    } catch (error) {
+      console.error('Error fetching resource detail:', error);
+      return null;
+    }
+  };
+
+  /**
+   * 解析资源的extInfo.targetContent
+   */
+  const parseTargetContent = (itemOrDetail: any) => {
+    try {
+      const targetContent = itemOrDetail?.extInfo?.targetContent
+        ? JSON.parse(itemOrDetail.extInfo.targetContent)
+        : null;
+      return targetContent;
+    } catch (error) {
+      return null;
+    }
+  };
+
+  /**
+   * 判断是否处于下钻状态
+   */
+  const isInDrillDown = (): boolean => {
+    return breadcrumb.length > 0;
+  };
+
+  /**
+   * 判断资源是否可下钻
+   */
+  const canDrillDown = (item: ResourceItem): boolean => {
+    // 根层级：只有 VIEW 和 OBJECT 类型可以下钻
+    if (!isInDrillDown()) {
+      return resourceType === 'VIEW' || resourceType === 'OBJECT';
+    }
+
+    // 下钻层级：关联对象（有 resourceCode）可以继续下钻到属性
+    // 属性（没有 resourceCode，resourceId 包含 "-"）不能继续下钻
+    const resourceIdStr = String(item.resourceId);
+    return !!item.resourceCode && !resourceIdStr.includes('-');
+  };
+
+  /**
+   * 进入下钻层级
+   */
+  const handleDrillDown = async (item: ResourceItem) => {
+    setLoading(true);
+    try {
+      const detail = await getResourceDetail(item.resourceId);
+      const targetContent = detail ? parseTargetContent(detail) : parseTargetContent(item);
+
+      if (targetContent) {
+        // 将当前列表保存到面包屑中
+        const newBreadcrumbItem = {
+          resourceId: item.resourceId,
+          resourceName: item.resourceName,
+          resourceType: resourceType,
+          originalList: [...resourceList],
+        };
+
+        // 转换下钻数据为 ResourceItem 格式
+        const drillItems: ResourceItem[] = [];
+
+        // 添加关联对象
+        if (targetContent.objects && targetContent.objects.length > 0) {
+          targetContent.objects.forEach((obj: any) => {
+            drillItems.push({
+              resourceId: obj.resourceId,
+              resourceName: obj.resourceName,
+              resourceCode: obj.resourceCode,
+              resourceDesc: obj.resourceCode,
+            });
+          });
+        }
+
+        // 添加属性
+        if (targetContent.fields && targetContent.fields.length > 0) {
+          targetContent.fields.forEach((field: any) => {
+            drillItems.push({
+              resourceId: `${item.resourceId}-${field.propertyName}`,
+              resourceName: field.propertyName,
+              resourceDesc: field.propertyType,
+            });
+          });
+        }
+
+        setBreadcrumb((prev) => [...prev, newBreadcrumbItem]);
+        setResourceList(drillItems);
+        setHasMore(false);
+      }
+    } catch (error) {
+      console.error('Error drill down:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
+   * 判断是否在下钻状态
+   */
   const activeSiderAgent = useActiveSiderAgent();
   const isResourceCenterPage = pathname.startsWith(config.navigatePath);
   const placeholder = intl.formatMessage(
@@ -183,6 +306,16 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     },
     [activeSiderAgent.resourceId, config.resourceBizTypeList, resourceType, userInfo?.userCode]
   );
+
+  /**
+   * 清空面包屑，返回根层级
+   */
+  const handleReset = () => {
+    if (breadcrumb.length > 0) {
+      setBreadcrumb([]);
+      loadResources({ reset: true }); // 重新加载根层级数据，reset=true 确保从第一页开始
+    }
+  };
 
   useEffect(() => {
     keywordRef.current = '';
@@ -337,84 +470,130 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
           style={{ fontSize: 16, marginLeft: 'auto' }}
         />
       </div>
-      <Input
-        value={searchValue}
-        suffix={<SearchOutlined onClick={handleSearch} />}
-        placeholder={placeholder}
-        onChange={(event) => setSearchValue(event.target.value)}
-        onPressEnter={handleSearch}
-      />
+      {isInDrillDown() && (
+        <Breadcrumb className={styles.breadcrumb}>
+          <Breadcrumb.Item key="-1">
+            <span onClick={handleReset}>
+              <AntdIcon type="icon-a-Leftzuo" />
+              {intl.formatMessage({ id: 'dialogueRecord.all' })}
+            </span>
+          </Breadcrumb.Item>
+          {breadcrumb.map((crumb, index) => (
+            <Breadcrumb.Item key={crumb.resourceId}>
+              <span
+                onClick={() => {
+                  // 返回指定层级：点击第N项，回到第N项的列表
+                  const newBreadcrumb = breadcrumb.slice(0, index + 1);
+                  const targetItem = breadcrumb[index];
+                  setBreadcrumb(newBreadcrumb);
+                  setResourceList(targetItem.originalList);
+                  setHasMore(index === 0); // 只有根层级可以加载更多
+                }}
+              >
+                {crumb.resourceName}
+              </span>
+            </Breadcrumb.Item>
+          ))}
+        </Breadcrumb>
+      )}
+      {!isInDrillDown() && (
+        <Input
+          value={searchValue}
+          suffix={<SearchOutlined onClick={handleSearch} />}
+          placeholder={placeholder}
+          onChange={(event) => setSearchValue(event.target.value)}
+          onPressEnter={handleSearch}
+        />
+      )}
       <div className={styles.listContainer}>
         <InfiniteScrollAntdList
           className={employeeStyles.employeesList}
           dataSource={resourceList}
           hasMore={hasMore}
           loading={loading}
-          next={() => loadResources()}
+          next={() => !isInDrillDown() && loadResources()}
           renderEmpty={<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />}
-          renderItem={(item: ResourceItem) => (
-            <List.Item
-              key={item.resourceId}
-              className={styles.resourceItem}
-              onDoubleClick={() => handleQuoteResource(item)}
-              actions={[
-                <Dropdown
-                  key="detail"
-                  trigger={['hover']}
-                  overlayClassName={employeeStyles.mydropdown}
-                  menu={{
-                    items: [
-                      {
-                        key: 'detail',
-                        label: (
-                          <div className={employeeStyles.dropdownMenuItem}>
-                            {intl.formatMessage({ id: 'common.detail' })}
-                          </div>
-                        ),
-                      },
-                    ],
-                    onClick: ({ domEvent }) => {
-                      domEvent.preventDefault();
-                      domEvent.stopPropagation();
-                      handleDetail(item);
-                    },
-                  }}
-                >
-                  <span
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      event.preventDefault();
-                    }}
-                  >
-                    <AntdIcon type="icon-a-Moregengduo" />
-                  </span>
-                </Dropdown>,
-              ]}
-            >
-              <List.Item.Meta
-                avatar={
-                  <span className={styles.resourceAvatar}>
-                    <AntdIcon type={getResourceIcon()} />
-                  </span>
+          renderItem={(item: ResourceItem) => {
+            const drillable = canDrillDown(item);
+
+            return (
+              <List.Item
+                key={item.resourceId}
+                className={styles.resourceItem}
+                onClick={() => drillable && handleDrillDown(item)}
+                onDoubleClick={() => handleQuoteResource(item)}
+                actions={
+                  !isInDrillDown()
+                    ? [
+                      <Dropdown
+                        key="detail"
+                        trigger={['hover']}
+                        overlayClassName={employeeStyles.mydropdown}
+                        menu={{
+                          items: [
+                            {
+                              key: 'detail',
+                              label: (
+                                <div className={employeeStyles.dropdownMenuItem}>
+                                  {intl.formatMessage({ id: 'common.detail' })}
+                                </div>
+                              ),
+                            },
+                          ],
+                          onClick: ({ domEvent }) => {
+                            domEvent.preventDefault();
+                            domEvent.stopPropagation();
+                            handleDetail(item);
+                          },
+                        }}
+                      >
+                        <span
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            event.preventDefault();
+                          }}
+                        >
+                          <AntdIcon type="icon-a-Moregengduo" />
+                        </span>
+                      </Dropdown>,
+                    ]
+                    : undefined
                 }
-                title={
-                  <Title className={employeeStyles.name}>
-                    <span className={employeeStyles.nameRow} title={item.resourceName}>
-                      <span className={employeeStyles.nameText}>{item.resourceName}</span>
+              >
+                <List.Item.Meta
+                  avatar={
+                    <span className={styles.resourceAvatar}>
+                      {drillable && <AntdIcon type="icon-a-xiangyou" className={styles.drillIcon} />}
+                      <AntdIcon
+                        type={
+                          String(item.resourceId).includes('-')
+                            ? 'icon-a-Database-networkshujukuwangluo'
+                            : getResourceIcon()
+                        }
+                      />
                     </span>
-                  </Title>
-                }
-                description={
-                  <Paragraph
-                    className={employeeStyles.description}
-                    ellipsis={{ tooltip: { title: item.resourceDesc, placement: 'right' } }}
-                  >
-                    {item.resourceDesc}
-                  </Paragraph>
-                }
-              />
-            </List.Item>
-          )}
+                  }
+                  title={
+                    <Title className={employeeStyles.name}>
+                      <span className={employeeStyles.nameRow} title={item.resourceName}>
+                        <span className={employeeStyles.nameText}>{item.resourceName}</span>
+                      </span>
+                    </Title>
+                  }
+                  description={
+                    item.resourceDesc && (
+                      <Paragraph
+                        className={employeeStyles.description}
+                        ellipsis={{ tooltip: { title: item.resourceDesc, placement: 'right' } }}
+                      >
+                        {item.resourceDesc}
+                      </Paragraph>
+                    )
+                  }
+                />
+              </List.Item>
+            );
+          }}
         />
       </div>
     </div>

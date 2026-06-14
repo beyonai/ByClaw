@@ -31,7 +31,8 @@
   flex: 1;
   min-height: 0;
   margin-top: 8px;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .resourceItem {
@@ -47,9 +48,166 @@
   border-radius: 50%;
   background-color: rgba(22, 93, 255, 0.08);
   color: var(--beyond-color-primary);
+  position: relative;
 
   :global(.@{antPrefix}-icon),
   :global(.anticon) {
     font-size: 20px;
   }
+}
+
+.expandIcon {
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #8f959e;
+  font-size: 12px;
+
+  &:hover {
+    color: var(--beyond-color-primary);
+  }
+}
+
+.drillDownContent {
+  padding: 8px 0 8px 32px;
+  background-color: rgba(22, 93, 255, 0.03);
+  border-left: 2px solid rgba(22, 93, 255, 0.2);
+}
+
+.drillDownSection {
+  margin-bottom: 8px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.drillDownSectionTitle {
+  font-size: 12px;
+  font-weight: 500;
+  color: #646a73;
+  margin-bottom: 4px;
+}
+
+.drillDownObjects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.drillDownObject {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background-color: #fff;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #4a5058;
+  cursor: default;
+
+  :global(.@{antPrefix}-icon),
+  :global(.anticon) {
+    font-size: 12px;
+    color: #8f959e;
+  }
+
+  &:hover {
+    background-color: rgba(22, 93, 255, 0.1);
+  }
+}
+
+.drillDownObjectName {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drillDownProperties {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.drillDownProperty {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background-color: #fff;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #4a5058;
+  cursor: default;
+
+  :global(.@{antPrefix}-icon),
+  :global(.anticon) {
+    font-size: 12px;
+    color: #8f959e;
+  }
+
+  &:hover {
+    background-color: rgba(22, 93, 255, 0.1);
+  }
+}
+
+.drillDownPropertyName {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drillDownLoading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+}
+
+.drillDownEmpty {
+  padding: 8px;
+  font-size: 12px;
+  color: #8f959e;
+  text-align: center;
+}
+
+/* 面包屑导航 */
+.breadcrumb {
+  margin: 8px 0;
+
+  & > ol > li:first-child {
+    cursor: pointer;
+
+    :global {
+      .anticon {
+        font-size: 12px;
+        margin-right: 4px;
+      }
+    }
+  }
+
+  :global {
+    .@{antPrefix}-breadcrumb-separator {
+      margin: 0 4px;
+    }
+  }
+}
+
+/* 下钻图标 */
+.drillIcon {
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 12px;
+  color: #8f959e;
 }
