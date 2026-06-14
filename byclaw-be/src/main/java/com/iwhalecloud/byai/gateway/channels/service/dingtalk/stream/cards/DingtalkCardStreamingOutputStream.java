@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import org.slf4j.Logger;
@@ -59,7 +60,7 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
     private static final String FILE_PREVIEW_PLACEHOLDER = "{{file_preview_prefix}}";
 
     private static final String FILE_PREVIEW_URL_SUFFIX = "/byaiService/commonFile/view?filePath=";
-    private static final String WEB_BASE_URL_PARAM_CODE = "WEB_BASE_URL";
+    private static final String WEB_BASE_URL_PARAM_CODE = Constants.WEB_BASE_URL;
 
     private final ObjectMapper objectMapper;
     private final DingtalkCardService dingtalkCardService;
