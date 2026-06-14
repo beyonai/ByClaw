@@ -80,27 +80,40 @@ public class DingtalkRobotRegistryService {
             if (!properties.isEnabled() || resourceId == null) {
                 return;
             }
-            ResourceExtDigEmployeeDto digitalEmployee = ssResExtDigEmployeeService.findExtDigEmployeeById(resourceId);
-            if (digitalEmployee == null) {
-                logger.warn("Skip register DingTalk robot clients because resource not found. resourceId={}", resourceId);
-                return;
-            }
-            List<DingtalkRobotChannelConfig> robotConfigs = dingtalkRobotConfigService.buildRobotConfigs(digitalEmployee);
-            if (robotConfigs.isEmpty()) {
-                logger.info("No DingTalk robot configs found for resource. resourceId={}", resourceId);
-                return;
-            }
-            dingtalkRobotConfigService.replaceRobotConfigsForResource(resourceId, robotConfigs);
-            for (DingtalkRobotChannelConfig robotConfig : robotConfigs) {
-                if (activeRobotConfigs.containsKey(robotConfig.getRobotCode())) {
-                    logger.info("Skip register existing DingTalk stream bot. robotCode={}, resourceId={}",
-                            robotConfig.getRobotCode(), robotConfig.getResourceId());
-                    continue;
-                }
-                startRobotClient(robotConfig);
-            }
-            started.set(!openDingTalkClients.isEmpty());
+            doRegisterRobotClientsForResource(resourceId);
         }
+    }
+
+    public void forceRegisterRobotClientsForResource(Long resourceId) {
+        synchronized (refreshLock) {
+            if (resourceId == null) {
+                return;
+            }
+            doRegisterRobotClientsForResource(resourceId);
+        }
+    }
+
+    private void doRegisterRobotClientsForResource(Long resourceId) {
+        ResourceExtDigEmployeeDto digitalEmployee = ssResExtDigEmployeeService.findExtDigEmployeeById(resourceId);
+        if (digitalEmployee == null) {
+            logger.warn("Skip register DingTalk robot clients because resource not found. resourceId={}", resourceId);
+            return;
+        }
+        List<DingtalkRobotChannelConfig> robotConfigs = dingtalkRobotConfigService.buildRobotConfigs(digitalEmployee);
+        if (robotConfigs.isEmpty()) {
+            logger.info("No DingTalk robot configs found for resource. resourceId={}", resourceId);
+            return;
+        }
+        dingtalkRobotConfigService.replaceRobotConfigsForResource(resourceId, robotConfigs);
+        for (DingtalkRobotChannelConfig robotConfig : robotConfigs) {
+            if (activeRobotConfigs.containsKey(robotConfig.getRobotCode())) {
+                logger.info("Skip register existing DingTalk stream bot. robotCode={}, resourceId={}",
+                        robotConfig.getRobotCode(), robotConfig.getResourceId());
+                continue;
+            }
+            startRobotClient(robotConfig);
+        }
+        started.set(!openDingTalkClients.isEmpty());
     }
 
     public void refreshRobotClientsForResource(Long resourceId) {

@@ -32,6 +32,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ../config:/app/config
       - ./logs/be:/app/logs
+      - ${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}:${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}
     networks:
       - byclaw-network
     restart: unless-stopped

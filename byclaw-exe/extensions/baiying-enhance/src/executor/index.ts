@@ -13,12 +13,11 @@
  */
 
 import type { Dict, ExecutorResponse } from "./types.js";
-import { BaiyingExecutor } from "./executor.js";
+import type { BaiyingExecutor } from "./executor.js";
 import type { DocDeltaCallback } from "./doc-shared.js";
 import type { BaiyingEnhanceLogger } from "./debug-channel.js";
 
-export { BaiyingExecutor } from "./executor.js";
-export type { BaiyingExecutorOptions } from "./executor.js";
+export type { BaiyingExecutor, BaiyingExecutorOptions } from "./executor.js";
 export type { ExecutorResponse } from "./types.js";
 export type { DocDeltaCallback } from "./doc-shared.js";
 
@@ -29,11 +28,12 @@ export type { DocDeltaCallback } from "./doc-shared.js";
  */
 const executorCache = new Map<string, BaiyingExecutor>();
 
-function getExecutor(resourcesDir: string): BaiyingExecutor {
+async function getExecutor(resourcesDir: string): Promise<BaiyingExecutor> {
   const key = resourcesDir;
   let instance = executorCache.get(key);
   if (!instance) {
-    instance = new BaiyingExecutor({ resourcesDir });
+    const { BaiyingExecutor: ExecutorCtor } = await import("./executor.js");
+    instance = new ExecutorCtor({ resourcesDir });
     executorCache.set(key, instance);
   }
   return instance;
@@ -69,7 +69,7 @@ export async function runBaiyingExecutor(params: {
   /** Host logger; used for request logs emitted by resource executors. */
   logger?: BaiyingEnhanceLogger;
 }): Promise<ExecutorResponse> {
-  const executor = getExecutor(params.resourcesDir);
+  const executor = await getExecutor(params.resourcesDir);
   if (params.metadataOnly) {
     return await executor.describe({
       capabilityId: params.resourceId,

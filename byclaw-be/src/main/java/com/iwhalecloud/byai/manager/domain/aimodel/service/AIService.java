@@ -46,6 +46,10 @@ public class AIService {
     }
 
     public String generateText(String prompt, String modelCode) {
+        return generateText(null, prompt, modelCode, 4000);
+    }
+
+    public String generateText(String systemPrompt, String userPrompt, String modelCode, int maxTokens) {
         Map<String, String> defaultModel = getDefaultModel();
         String apiUrl = defaultModel.get("apiUrl");
         String apiKey = defaultModel.get("apiKey");
@@ -54,22 +58,21 @@ public class AIService {
             model = modelCode;
         }
         try {
-            // 构造请求体
             Map<String, Object> requestBody = new HashMap<>();
             requestBody.put("model", model);
 
             List<Map<String, String>> messages = new ArrayList<>();
-            messages.add(Map.of("role", "user", "content", prompt));
+            if (StringUtils.isNotBlank(systemPrompt)) {
+                messages.add(Map.of("role", "system", "content", systemPrompt));
+            }
+            messages.add(Map.of("role", "user", "content", userPrompt));
             requestBody.put("messages", messages);
 
             requestBody.put("temperature", 0.7);
-            requestBody.put("max_tokens", 4000);
+            requestBody.put("max_tokens", maxTokens);
             requestBody.put("enable_thinking", false);
-
-            // 关掉思考过程
             requestBody.put("chat_template_kwargs", Map.of("enable_thinking", false));
 
-            // 设置请求头
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("Authorization", "Bearer " + apiKey);
@@ -77,10 +80,8 @@ public class AIService {
 
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
 
-            // 发送请求
             ResponseEntity<String> response = restTemplate.postForEntity(apiUrl, entity, String.class);
 
-            // 解析响应
             if (response.getStatusCode() == HttpStatus.OK) {
                 Map<String, Object> responseMap = objectMapper.readValue(response.getBody(), Map.class);
                 List<Map<String, Object>> choices = (List<Map<String, Object>>) responseMap.get("choices");

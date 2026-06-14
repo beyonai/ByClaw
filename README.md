@@ -273,14 +273,16 @@ cp .env.example .env
 #    REDIS_PASSWORD、MID_FTP_* 等配置。
 #    如果中间件部署在远程机器，请替换为对应 IP。
 
-# 3. 拉取中间件镜像（首次部署需要）
-(cd deploy/middleware && sh pull.sh)
+# 3. 在 .env 中选择存储方案
+# BYCLAW_DEPLOY_STORAGE=nfs        # 推荐：OpenClaw /by 和 BE 文件 CRUD 都走 /mnt/byclaw-file
+# BYCLAW_DEPLOY_STORAGE=minio      # 兼容旧 MinIO/rclone 方案
+# BYCLAW_DEPLOY_STORAGE=nfs-hybrid # OpenClaw /by 走 NFS，上传下载 API 继续走 MinIO
 
-# 4. 启动中间件（Redis、MinIO、OpenGauss、Sandbox）
-(cd deploy/middleware && sh start-all.sh)
+# 4. 首次部署：按 .env 拉镜像、可选初始化 NFS、启动中间件和应用
+sh deploy.sh init
 
-# 5. 启动应用
-(cd deploy/standalone && docker compose up -d)
+# 5. 增量更新：按 .env 重新生成配置并重建服务，不重复初始化 NFS
+# sh deploy.sh update
 ```
 
 访问 **http://localhost:8080** 开始使用。

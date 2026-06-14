@@ -50,4 +50,15 @@ public interface ResourceFS {
      */
     FileMetadata write(MultipartFile multipartFile, String filePath);
 
+    /**
+     * 资源文件系统：写（流式）。
+     * 用于已经持有 InputStream 的场景，无需封装为 MultipartFile；底层实现由 ByclawFS 统一落到对象存储。
+     *
+     * @param inputStream 文件内容流；调用方负责关闭
+     * @param size        内容长度，必须 ≥ 0
+     * @param contentType MIME 类型，传 null 时由实现侧兜底为 application/octet-stream
+     * @param filePath    完整对象路径，必须以文件名结尾，不能以 '/' 结尾
+     */
+    FileMetadata write(InputStream inputStream, long size, String contentType, String filePath);
+
 }

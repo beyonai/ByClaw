@@ -40,8 +40,25 @@ public final class StorageType {
     public static final String LOCAL = "local";
 
     /**
+     * Mounted server filesystem storage. This is a deployment-facing alias of
+     * {@link #LOCAL}, used when uploads should go to NFS/SMB/CephFS bind mounts.
+     */
+    public static final String FILE = "file";
+
+    /**
      * WHALE_AGENT 服务
      */
     public static final String WHALE_AGENT = "whale-agent";
+
+    public static boolean isLocalFilesystem(String storageType) {
+        return LOCAL.equalsIgnoreCase(storageType) || FILE.equalsIgnoreCase(storageType);
+    }
+
+    public static boolean matches(String requestedStorageType, String serviceStorageType) {
+        if (isLocalFilesystem(requestedStorageType) && isLocalFilesystem(serviceStorageType)) {
+            return true;
+        }
+        return serviceStorageType != null && serviceStorageType.equalsIgnoreCase(requestedStorageType);
+    }
 
 }

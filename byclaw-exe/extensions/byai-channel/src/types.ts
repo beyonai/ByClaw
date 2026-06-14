@@ -69,7 +69,7 @@ export interface SdkProcessorDeps {
     warn?: (msg: string) => void;
     error?: (msg: string) => void;
   };
-  onReply: (text: string, type: "partial" | "final", options?: Record<string, any>) => Promise<void>;
+  onReply: (text: string, options?: Record<string, any>) => Promise<void>;
   onReasoning?: (delta: string, text: string) => Promise<void>;
   onReasonEnd?: () => Promise<void>;
   onComplete?: () => Promise<void>;
@@ -111,7 +111,11 @@ export type ReplyPayload = {
 export type AgentEvent = {
   seq: number;
   stream: string;
+  type?: string;
   runId: string;
+  ts?: number;
   sessionKey?: string;
+  sessionId?: string;
+  agentId?: string;
   data: Record<string, unknown>;
 };

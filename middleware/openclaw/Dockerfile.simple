@@ -64,3 +64,8 @@ RUN set -eux; \
 
 COPY --from=ext-builder /build/out/ /app/extensions/
 
+COPY middleware/openclaw/skills/iwhalehub/ /app/skills/iwhalehub/
+
+COPY middleware/openclaw/linux-amd64-filebrowser/filebrowser /usr/local/bin/filebrowser
+RUN chmod a+x /usr/local/bin/filebrowser
+

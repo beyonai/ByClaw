@@ -8,8 +8,10 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "by-datacloud>=0.1.41",
     "langchain-openai>=1.1.11",
-    "by-framework>=0.2.0",
+    "by-framework==0.2.2.dev4",
+    "by-framework-trace-langfuse==0.0.3.dev0",
     "by-framework-history-byclaw>=0.0.3",
+    "langfuse>=2.0.0",
 ]
 
 [project.scripts]
@@ -35,8 +37,11 @@ explicit = false
 name = "pypi"
 url = "https://pypi.org/simple/"
 
+[tool.uv]
+index-strategy = "unsafe-best-match"
+
 [tool.uv.sources]
-by-framework = { index = "pypi" }
+by-datacloud = { path = "D:\\data\\code\\baiying\\by-datacloud", editable = true }
 
 [dependency-groups]
 dev = [

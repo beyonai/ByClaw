@@ -3,6 +3,7 @@
   "name": "Byclaw SQLite",
   "description": "Expose the local byclaw SQLite database through a single sqlExecute capability for tools and Gateway HTTP callers.",
   "version": "2026.4.23",
+  "enabledByDefault": true,
   "activation": {
     "onStartup": true
   },

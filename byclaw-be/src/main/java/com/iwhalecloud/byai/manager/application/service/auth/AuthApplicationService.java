@@ -391,7 +391,7 @@ public class AuthApplicationService {
     public void setResourceUsers(ResourceMemberSettingQo qo) {
         // 1. 校验资源存在并拿到真实资源类型。
         SsResource ssResource = getRequiredResource(qo.getResourceId());
-        validateDefaultSuperAssistantUseAuthAllowed(ssResource);
+        // validateDefaultSuperAssistantUseAuthAllowed(ssResource); // 注释掉：_main 结尾的特殊逻辑已移除
 
         // 2. 使用人员设置允许当前用户维护自己绑定的默认个人资源。
         validateResourceUseSettingPermission(ssResource);
@@ -744,12 +744,15 @@ public class AuthApplicationService {
      * @date 2026-05-09 150800
      * @param ssResource 资源
      */
+    // 注释掉：_main 结尾的特殊逻辑已移除，此方法不再使用
+    /*
     private void validateDefaultSuperAssistantUseAuthAllowed(SsResource ssResource) {
         if (!isDefaultSuperAssistantResource(ssResource)) {
             return;
         }
         throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
     }
+    */
 
     /**
      * 判断当前用户是否具备资源成员设置权限。
@@ -2672,7 +2675,7 @@ public class AuthApplicationService {
         // 资源未注销时的原有逻辑
         boolean canSetUse = hasResourceUseSettingPermission(ssResource);
         boolean isDefaultResource = isDefaultPersonalResource(ssResource);
-        boolean isDefaultSuperAssistantResource = isDefaultSuperAssistantResource(ssResource);
+        boolean isDefaultSuperAssistantResource = isDefaultSuperAssistantResource(ssResource); // _main 结尾的资源，禁止删除
         boolean isBoundDefaultDigEmployee = isCurrentUserBoundDefaultDigitalEmployeeResource(ssResource);
         boolean isDigitalEmployee = ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(ssResource.getResourceBizType());
         // 个人助理类资源只作为个人空间资源使用，不开放管理授权、使用申请与使用申请审核入口。
@@ -2685,15 +2688,15 @@ public class AuthApplicationService {
             ? (canManage || isBoundDefaultDigEmployee)
             : (canManage && !isDefaultResource);
         // 默认超级助手是登录初始化的个人底座资源，即使当前用户绑定为默认助理，也不开放编辑入口。
-        vo.setCanEdit(canEdit && !isDefaultSuperAssistantResource && !isWhaleAgentExternalKnowledgeOrToolResource);
-        vo.setCanManageAuth(canManage && !isDefaultResource && !isDefaultSuperAssistantResource
-            && !isPersonalAssistantResource);
-        vo.setCanUseAuth(canSetUse && !isDefaultSuperAssistantResource);
+        vo.setCanEdit(canEdit && !isWhaleAgentExternalKnowledgeOrToolResource); // 移除 !isDefaultSuperAssistantResource
+        vo.setCanManageAuth(canManage && !isDefaultResource
+            && !isPersonalAssistantResource); // 移除 !isDefaultSuperAssistantResource
+        vo.setCanUseAuth(canSetUse); // 移除 !isDefaultSuperAssistantResource
         vo.setCanDelete(canManage && !isDefaultResource && !isDefaultSuperAssistantResource
-            && !isWhaleAgentExternalKnowledgeOrToolResource);
-        vo.setCanAuditUse(canSetUse && !isDefaultSuperAssistantResource && !isPersonalResourceUseApplyUnsupported);
-        vo.setCanApplyUse(!isDefaultSuperAssistantResource && !isPersonalResourceUseApplyUnsupported
-            && checkCanApplyUse(ssResource));
+            && !isWhaleAgentExternalKnowledgeOrToolResource); // _main 结尾的资源禁止删除
+        vo.setCanAuditUse(canSetUse && !isPersonalResourceUseApplyUnsupported); // 移除 !isDefaultSuperAssistantResource
+        vo.setCanApplyUse(!isPersonalResourceUseApplyUnsupported
+            && checkCanApplyUse(ssResource)); // 移除 !isDefaultSuperAssistantResource
 
         // “设为默认”入口统一收敛到左侧“全部列表项”，个人/企业资源卡片不再展示该操作。
         vo.setCanSetDefault(false);
@@ -2762,7 +2765,8 @@ public class AuthApplicationService {
     }
 
     /**
-     * 判断资源是否为默认超级助手。
+     * 判断资源是否为默认超级助手资源（resourceCode 以 _main 结尾的数字员工）。
+     * 默认超级助手是登录初始化的个人底座资源，不允许删除。
      * 默认超级助手统一落为真实 DIG_EMPLOYEE，且 resource_code 固定使用 {userCode}_main。
      *
      * @author qin.guoquan

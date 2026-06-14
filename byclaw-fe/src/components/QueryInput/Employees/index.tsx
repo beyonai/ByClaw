@@ -19,7 +19,6 @@ import type { IFile, IQueryFile } from '@/typescript/file';
 
 import { getDownloadOpenClawFileUrl, isOpenClawAgent, uploadFileToOpenClaw } from '@/utils/openClaw/utils';
 import queryStyles from '../index.module.less';
-import { RichInputRef } from '../RichInput';
 import MentionPopover from '../RichInput/mentionPopover';
 import styles from './index.module.less';
 
@@ -128,11 +127,6 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
     }
 
     return queryPayload;
-  };
-
-  onSelectMentionPopoverItem: RichInputRef['insertItem'] = (item, type) => {
-    this.richInputRef.current?.insertItem(item, type);
-    this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }));
   };
 
   onSwitchOnlineSearch = () => {

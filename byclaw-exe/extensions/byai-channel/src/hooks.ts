@@ -8,7 +8,6 @@ import {
   resolveActiveSdkRequestBySessionKey,
   resolveActiveSdkRequestByTarget,
   resolveSdkEmitter,
-  getSessionPathBySessionId,
 } from "./session-context.js";
 import {
   cancelActiveSdkCompletionCheck,
@@ -27,6 +26,12 @@ import {
   resolveInboundLanguage,
 } from "./i18n.js";
 import { getByaiRuntime } from "./runtime.js";
+import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
+import { takePromptInjectionSnapshot } from "./prompt-injection-snapshot.js";
+import {
+  consumeWorkspaceReloadHint,
+  markWorkspaceReloadHint,
+} from "./workspace-reload-hints.js";
 import path from "node:path";
 import fs from "node:fs/promises";
 
@@ -71,8 +76,6 @@ type ByaiUserInfo = {
   userName: string;
   sourceSystem?: string;
 };
-
-const pendingWorkspaceReloadHints = new Set<string>();
 
 function getRedisInfo(): RedisInfo | null {
   const {
@@ -193,11 +196,41 @@ async function syncWorkspaceUserMd(
     return;
   }
   await fs.writeFile(userMdPath, next, "utf8");
-  pendingWorkspaceReloadHints.add(path.resolve(workspaceDir));
+  markWorkspaceReloadHint(workspaceDir);
   api.logger.info(`byai-channel synced USER.md: ${userMdPath}`);
 }
 
 export function registerByaiHooks(api: OpenClawPluginApi): void {
+  // USER.md sync runs once per inbound dispatch, not on every before_prompt_build
+  // iteration (tool rounds re-enter before_prompt_build while the embedded session
+  // lock may be released for model I/O — see attempt.session-lock.ts).
+  api.on("before_dispatch", async (event, ctx) => {
+    if (ctx.channelId !== "byai-channel") {
+      return;
+    }
+    const sessionKey = event.sessionKey?.trim() || ctx.sessionKey?.trim();
+    if (!sessionKey) {
+      return;
+    }
+    const request = resolveActiveSdkRequestBySessionKey(sessionKey);
+    if (!request) {
+      return;
+    }
+    const agentId = resolveAgentIdFromSessionKey(sessionKey);
+    if (!agentId) {
+      return;
+    }
+    const rt = getByaiRuntime();
+    const cfg = rt.config.current?.() ?? rt.config.loadConfig();
+    const workspaceDir = rt.agent.resolveAgentWorkspaceDir(cfg, agentId);
+    const hintLanguage = request.language ?? resolveInboundLanguage(undefined).language;
+    try {
+      await syncWorkspaceUserMd(api, workspaceDir, hintLanguage);
+    } catch (err) {
+      api.logger.warn(`byai-channel sync USER.md failed: ${String(err)}`);
+    }
+  });
+
   api.on("before_prompt_build", (event: {
     prompt: string;
   }, ctx: {
@@ -212,6 +245,16 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     trigger?: string;
     channelId?: string; 
   }): BeforePromptBuildResult => {
+    const snapshot = takePromptInjectionSnapshot(ctx.sessionKey);
+    if (snapshot?.appendSystemContext) {
+      api.logger.info(
+        `before_prompt_build hook emits (snapshot), sessionId=${ctx.sessionId}, appendSystemContext=${snapshot.appendSystemContext}`,
+      );
+      return {
+        appendSystemContext: snapshot.appendSystemContext,
+      };
+    }
+
     let hintLanguage = resolveInboundLanguage(undefined).language;
     if (ctx.sessionKey) {
       const earlyRequest = resolveActiveSdkRequestBySessionKey(ctx.sessionKey);
@@ -219,14 +262,10 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
         hintLanguage = earlyRequest.language;
       }
     }
-    void syncWorkspaceUserMd(api, ctx.workspaceDir, hintLanguage).catch((err) => {
-      api.logger.warn(`byai-channel sync USER.md failed: ${String(err)}`);
-    });
     const sections: string[] = [];
     const normalizedWorkspace = ctx.workspaceDir ? path.resolve(ctx.workspaceDir) : "";
-    if (normalizedWorkspace && pendingWorkspaceReloadHints.has(normalizedWorkspace)) {
+    if (consumeWorkspaceReloadHint(normalizedWorkspace)) {
       sections.push(buildUserMdReloadPrompt(hintLanguage));
-      pendingWorkspaceReloadHints.delete(normalizedWorkspace);
     }
     if (ctx.sessionKey) {
       const request = resolveActiveSdkRequestBySessionKey(ctx.sessionKey);
@@ -245,66 +284,13 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
       }
     }
     const appendSystemContext = sections.join("\n\n");
-    api.logger.info(`before_prompt_build hook emits, sessionId=${ctx.sessionId}, appendSystemContext=${appendSystemContext}`);
+    api.logger.info(
+      `before_prompt_build hook emits, sessionId=${ctx.sessionId}, appendSystemContext=${appendSystemContext}`,
+    );
     return {
       appendSystemContext,
     };
   });
-
-  /*
-  api.on("before_message_write", (event: BeforeMessageWriteEvent, ctx: BeforeMessageWriteContext) => {
-    const sessionKey = event?.sessionKey ?? ctx?.sessionKey;
-    if (!sessionKey) {
-      return;
-    }
-    const request = resolveActiveSdkRequestBySessionKey(sessionKey);
-    if (!request) {
-      return;
-    }
-    void enqueueAfterAgentEvents(
-      api,
-      `before_message_write emit sessionKey=${sessionKey}`,
-      async () => {
-        const activeRequest = resolveActiveSdkRequestBySessionKey(sessionKey) ?? request;
-        const sdkEmitter = resolveSdkEmitter(activeRequest.accountId);
-        if (!sdkEmitter) {
-          return;
-        }
-        const payload = buildBeforeMessageWritePayload(event?.message, {
-          sessionKey,
-          agentId: event?.agentId ?? ctx?.agentId,
-        });
-        if (!payload) {
-          return;
-        }
-        await emitSdkChunkTracked({
-          emitter: sdkEmitter,
-          sessionId: activeRequest.sessionId,
-          traceId: activeRequest.traceId,
-          text: `写入消息: ${payload.role}`,
-          options: {
-            messageId: payload.messageId,
-            parentMessageId: "-1",
-            eventType: EventType.REASONING_LOG_DELTA,
-            contentType: SseReasonMessageType.think_title,
-          },
-        });
-        await emitSdkChunkTracked({
-          emitter: sdkEmitter,
-          sessionId: activeRequest.sessionId,
-          traceId: activeRequest.traceId,
-          text: payload.text,
-          options: {
-            messageId: `${payload.messageId}-payload`,
-            parentMessageId: payload.messageId,
-            eventType: EventType.REASONING_LOG_DELTA,
-            contentType: SseReasonMessageType.think_code_result,
-          },
-        });
-      },
-    );
-  });
-  */
 
   api.on("message_sending", (event: MessageSendingEvent, ctx: MessageHookContext) => {
     if (ctx?.channelId !== "byai-channel") {
@@ -314,34 +300,22 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     if (!request) {
       return;
     }
-    void enqueueAfterAgentEvents(
-      api,
-      `message_sending sessionKey=${request.sessionKey}`,
-      async () => {
-        const activeRequest = markActiveSdkOutboundSending(ctx?.accountId, event?.to);
-        if (!activeRequest) {
-          return;
-        }
-        if (!activeRequest.hasEmittedContent && event?.content) {
-          const sdkEmitter = resolveSdkEmitter(activeRequest.accountId);
-          if (sdkEmitter) {
-            await emitSdkChunkTracked({
-              emitter: sdkEmitter,
-              sessionId: activeRequest.sessionId,
-              traceId: activeRequest.traceId,
-              text: event.content,
-              options: {
-                messageId: activeRequest.sessionKey,
-                parentMessageId: "-1",
-                eventType: EventType.ANSWER_DELTA,
-              },
-            });
-            activeRequest.hasEmittedContent = true;
+    const accountId = ctx?.accountId;
+    const to = event?.to ?? "";
+    setImmediate(() => {
+      void enqueueAfterAgentEvents(
+        `message_sending sessionKey=${request.sessionKey}`,
+        async () => {
+          const activeRequest = markActiveSdkOutboundSending(accountId, to);
+          if (!activeRequest) {
+            return;
           }
-        }
-        cancelActiveSdkCompletionCheck(activeRequest.sessionKey);
-      },
-    );
+          cancelActiveSdkCompletionCheck(activeRequest.sessionKey);
+        },
+      ).catch((err) => {
+        api.logger.error(`[byai-channel] message_sending enqueue failed: ${String(err)}`);
+      });
+    });
   });
 
   api.on("message_sent", (event: MessageSendingEvent & { success?: boolean; error?: string }, ctx: MessageHookContext) => {
@@ -352,75 +326,26 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     if (!request) {
       return;
     }
-    void enqueueAfterAgentEvents(
-      api,
-      `message_sent sessionKey=${request.sessionKey}`,
-      async () => {
-        const activeRequest = markActiveSdkOutboundSent(ctx?.accountId, event?.to);
-        if (!activeRequest) {
-          return;
-        }
-        if (!activeRequest.rootLifecyclePhase) {
-          activeRequest.rootLifecyclePhase = event?.success === false ? "error" : "end";
-        }
-        scheduleActiveSdkCompletionCheck(
-          api,
-          activeRequest.sessionKey,
-          `message_sent:${event?.success === false ? "failed" : "ok"}`,
-        );
-      },
-    );
+    const accountId = ctx?.accountId;
+    const to = event?.to ?? "";
+    const success = event?.success;
+    setImmediate(() => {
+      void enqueueAfterAgentEvents(
+        `message_sent sessionKey=${request.sessionKey}`,
+        async () => {
+          const activeRequest = markActiveSdkOutboundSent(accountId, to);
+          if (!activeRequest) {
+            return;
+          }
+          scheduleActiveSdkCompletionCheck(
+            api,
+            activeRequest.sessionKey,
+            `message_sent:${success === false ? "failed" : "ok"}`,
+          );
+        },
+      ).catch((err) => {
+        api.logger.error(`[byai-channel] message_sent enqueue failed: ${String(err)}`);
+      });
+    });
   });
-}
-
-function buildBeforeMessageWritePayload(
-  message: unknown,
-  ctx: {
-    sessionKey: string;
-    agentId?: string;
-  },
-): { role: string, text: string; messageId: string } | null {
-  const role = typeof (message as { role?: unknown })?.role === "string"
-    ? String((message as { role?: string }).role)
-    : "unknown";
-  const content = extractMessageContent(message);
-  if (!content) {
-    return null;
-  }
-  const summary = JSON.stringify(
-    {
-      role,
-      content,
-    },
-    null,
-    2,
-  );
-  return {
-    role,
-    text: JSON.stringify(summary, null, 2),
-    messageId: `before_message_write:${ctx.sessionKey}:${Date.now()}`,
-  };
-}
-
-function extractMessageContent(message: unknown): string {
-  const rawContent = (message as { content?: unknown })?.content;
-  if (typeof rawContent === "string") {
-    return rawContent.trim();
-  }
-  if (!Array.isArray(rawContent)) {
-    return "";
-  }
-  const texts = rawContent
-    .map((item) => {
-      if (!item || typeof item !== "object") {
-        return "";
-      }
-      const candidate = item as { type?: unknown; text?: unknown };
-      if (candidate.type !== "text" || typeof candidate.text !== "string") {
-        return "";
-      }
-      return candidate.text.trim();
-    })
-    .filter(Boolean);
-  return texts.join("\n").trim();
 }

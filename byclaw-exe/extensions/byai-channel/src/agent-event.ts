@@ -1,23 +1,33 @@
 import { EmitOptions, EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import {
   ActiveSdkRequest,
+  bindActiveSdkRequestRunId,
   emitSdkChunkTracked,
   getLastSdkEmitChunk,
   isRootSessionKey,
-  isChildSessionKey,
+  markActiveSdkModelFallbackStep,
   markActiveSdkCompactionRetryPending,
   markActiveSdkRootLifecycleFinished,
   markActiveSdkRootLifecycleStarted,
   resolveActiveSdkRequestBySessionKey,
   resolveActiveSdkRunBinding,
   resolveSdkEmitter,
+  markActiveSdkRequestSubagentSpawned,
 } from "./session-context";
+import { registerPendingMessageToolSend } from "./pending-message-tool.js";
 import {
   cancelActiveSdkCompletionCheck,
   scheduleActiveSdkCompletionCheck,
 } from "./sdk-session-completion.js";
+import {
+  resolveAssistantDisplayStream,
+  resolveAssistantEventKind,
+  resolveAssistantEventText,
+  resolveReasoningEventText,
+} from "./agent-event-kind.js";
 import { AgentEvent } from "./types";
 import type { OpenClawPluginApi } from "@openclaw/plugin-sdk/core";
+import { isSubagentSessionKey } from "openclaw/plugin-sdk/routing";
 import { emitIncrementalText, getAgentNameById, normalizeReasoningPreviewText } from "./utils";
 import {
   buildThinkingEndText,
@@ -25,17 +35,27 @@ import {
   buildToolStartTitle as buildLocalizedToolStartTitle,
 } from "./i18n.js";
 
-let lastAgentAssistantEvent: {
+type AgentStreamState = {
   seq: number;
   stream: string;
   runId: string;
   startTime: number;
-} = {
-  seq: 0,
-  stream: "",
-  runId: "",
-  startTime: 0,
 };
+
+const lastAgentAssistantEventBySession = new Map<string, AgentStreamState>();
+
+function emptyAgentStreamState(): AgentStreamState {
+  return { seq: 0, stream: "", runId: "", startTime: 0 };
+}
+
+function resolveAgentStreamState(sessionKey: string): AgentStreamState {
+  let state = lastAgentAssistantEventBySession.get(sessionKey);
+  if (!state) {
+    state = emptyAgentStreamState();
+    lastAgentAssistantEventBySession.set(sessionKey, state);
+  }
+  return state;
+}
 
 const toolStartArgsByCallId = new Map<string, Record<string, any>>();
 
@@ -47,21 +67,25 @@ let toBeEmittedChunkAfterBaiyingCallTool: undefined | {
   options?: EmitOptions;
 } = undefined;
 
-async function emitChunkGenByBaiyingCallTool(request: ActiveSdkRequest) {
+async function emitChunkGenByBaiyingCallTool(request: ActiveSdkRequest, sdkEmitter?: ReturnType<typeof resolveSdkEmitter>) {
   if (!toBeEmittedChunkAfterBaiyingCallTool) {
     return;
   }
-  await emitSdkChunk(request, JSON.stringify(toBeEmittedChunkAfterBaiyingCallTool.data), toBeEmittedChunkAfterBaiyingCallTool.options);
+  if (!sdkEmitter) {
+    sdkEmitter = resolveSdkEmitter(request.accountId);
+  }
+  await emitSdkChunk(request, sdkEmitter, JSON.stringify(toBeEmittedChunkAfterBaiyingCallTool.data), toBeEmittedChunkAfterBaiyingCallTool.options);
   toBeEmittedChunkAfterBaiyingCallTool = undefined;
 }
 
 async function emitSdkChunk(
   request: ActiveSdkRequest,
+  sdkEmitter: ReturnType<typeof resolveSdkEmitter>,
   text: string,
   options?: EmitOptions,
 ): Promise<void> {
   await emitSdkChunkTracked({
-    emitter: resolveSdkEmitter(request.accountId),
+    emitter: sdkEmitter,
     sessionId: request.sessionId,
     traceId: request.traceId,
     text,
@@ -98,11 +122,24 @@ type ToolEventData = {
   };
 }
 
+function isActiveSdkModelFallbackOutcome(
+  value: unknown,
+): value is "next_fallback" | "succeeded" | "chain_exhausted" {
+  return value === "next_fallback" || value === "succeeded" || value === "chain_exhausted";
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
 async function handleToolEvent(
   request: ActiveSdkRequest,
   event: AgentEvent,
-  isChildSession: boolean,
 ) {
+  const sdkEmitter = resolveSdkEmitter(request.accountId);
+  if (!sdkEmitter) {
+    return;
+  }
   const data = event.data as ToolEventData;
   const phase = data?.phase ?? "";
   const toolCallId = data?.toolCallId ?? "";
@@ -113,18 +150,26 @@ async function handleToolEvent(
     if (toolCallId && data?.args && typeof data.args === "object") {
       toolStartArgsByCallId.set(toolCallId, data.args);
     }
+    // message 工具的 action=send 是唯一"无 assistant 流、必须靠 outbound.sendText 投递"的
+    // 可见内容。登记一条待投递，sendText 命中即 emit、未命中即抑制（agent 回复回声）。
+    if (data?.name === "message") {
+      const sendText = extractMessageToolSendText(data?.args);
+      if (sendText) {
+        registerPendingMessageToolSend(request.sessionKey, { toolCallId, text: sendText });
+      }
+    }
     const title = buildToolStartTitle(request, data);
-    await emitSdkChunk(request, title, {
+    await emitSdkChunk(request, sdkEmitter, title, {
       // 必须以toolCallId作为messageId，这个toolCallId可能会作为parentMessageId发送到其他worker(在baiying-enhance的实现)
       messageId: toolCallId,
       parentMessageId: "-1",
-      eventType: EventType.REASONING_LOG_DELTA,
+      eventType: EventType.REASONING_LOG_START,
       contentType: SseReasonMessageType.think_status_title,
       objectType: "tool_call",
       status: "_START_",
     });
     const args = extractToolStartArgs(data);
-    await emitSdkChunk(request, JSON.stringify({
+    await emitSdkChunk(request, sdkEmitter, JSON.stringify({
       title: "Input",
       json: args || "{}",
     }), {
@@ -139,7 +184,7 @@ async function handleToolEvent(
     if (toolCallId) {
       toolStartArgsByCallId.delete(toolCallId);
     }
-    await emitSdkChunk(request, title, {
+    await emitSdkChunk(request, sdkEmitter, title, {
       messageId: toolCallId,
       parentMessageId: "-1",
       eventType: EventType.REASONING_LOG_DELTA,
@@ -147,7 +192,7 @@ async function handleToolEvent(
       objectType: "tool_call",
       status: data.isError ? "_ERROR_" : "_DONE_",
     });
-    await emitSdkChunk(request, JSON.stringify({
+    await emitSdkChunk(request, sdkEmitter, JSON.stringify({
       title: "Output",
       json: result || "{}"
     }), {
@@ -156,53 +201,73 @@ async function handleToolEvent(
       eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.json_block,
     });
-    if (data?.name === "baiying_call") {
-      setToBeEmittedChunkViaBaiyingCallTool(data?.result);
+    await emitSdkChunk(request, sdkEmitter, "", {
+      messageId: toolCallId,
+      parentMessageId: "-1",
+      eventType: EventType.REASONING_LOG_END,
+      contentType: SseReasonMessageType.think_status_title,
+      objectType: "tool_call",
+      status: data.isError ? "_ERROR_" : "_DONE_",
+    });
+    if (data.name === "baiying_call") {
+      setToBeEmittedChunkViaBaiyingCallTool(data.result);
+    } else if (data.name === "sessions_spawn" && data.result?.details && !data.isError) {
+      await markActiveSdkRequestSubagentSpawned(
+        request.sessionKey,
+        data.result.details.childSessionKey,
+        data.result.details.runId,
+      );
+      cancelActiveSdkCompletionCheck(request.sessionKey);
     }
   }
 }
 
-const SILENT_REPLY_TOKEN = "NO_REPLY";
-const pendingSilentByRun = new Map<string, string>();
-
-function isSilentLeadFragment(text: string) {
-  const normalized = text.trim().toUpperCase();
-  if (!normalized || /[^A-Z_]/.test(normalized)) return false;
-  if (normalized === SILENT_REPLY_TOKEN) return true;
-  if (!SILENT_REPLY_TOKEN.startsWith(normalized)) return false;
-  return normalized === "NO";
-}
-
-function consumeAssistantDelta(runId: string, delta: string): string | null {
-  const previous = pendingSilentByRun.get(runId) ?? "";
-  const merged = previous + delta;
-
-  if (isSilentLeadFragment(merged)) {
-    pendingSilentByRun.set(runId, merged);
-    return null;
-  }
-
-  pendingSilentByRun.delete(runId);
-  return previous ? previous + delta : delta;
-}
+type AssistantStreamContext = {
+  isContinuingThinking: boolean;
+  isContinuingAnswer: boolean;
+};
 
 async function handleAssistantEvent(
   request: ActiveSdkRequest,
   event: AgentEvent,
   isChildSession: boolean,
+  streamContext: AssistantStreamContext,
 ) {
-  const { data } = event;
-  const { delta } = data || {};
-  if (!delta) {
+  const sdkEmitter = resolveSdkEmitter(request.accountId);
+  const kind = resolveAssistantEventKind(event, isChildSession);
+  if (kind === "ignore") {
     return;
   }
-  const visibleDelta = consumeAssistantDelta(event.runId, delta as string);
-  if (!visibleDelta) return;
-  request.hasEmittedContent = true;
-  await emitSdkChunk(request, visibleDelta, {
-    messageId: request.sessionKey,
+  const text = resolveAssistantEventText(event, kind);
+  if (!text) {
+    return;
+  }
+  if (kind === "reasoning") {
+    await emitReasoningText(
+      request,
+      event.runId,
+      "assistant",
+      text,
+      streamContext.isContinuingThinking,
+    );
+    return;
+  }
+  const previousEmit = getLastSdkEmitChunk(request.accountId);
+  const answerOptions: EmitOptions = {
     parentMessageId: "-1",
     eventType: isChildSession ? EventType.REASONING_LOG_DELTA : EventType.ANSWER_DELTA,
+    messageId: streamContext.isContinuingAnswer && previousEmit?.messageId
+      ? previousEmit.messageId
+      : request.sessionKey,
+  };
+  // assistant 流是权威可见源，按 runId 做简单前缀增量即可（sendText 的去重改由
+  // message tool 事件驱动，不再和 assistant 流抢同一缓冲）。
+  await emitIncrementalText({
+    key: `${event.runId}:assistant:answer`,
+    rawText: stringValue(event.data?.text) || text,
+    emit: async (answerDelta) => {
+      await emitSdkChunk(request, sdkEmitter, answerDelta, answerOptions);
+    },
   });
 }
 
@@ -214,27 +279,19 @@ async function handleReasoningEndTransition(
   if (!sdkEmitter) {
     return;
   }
-  const previousEmit = getLastSdkEmitChunk(request.accountId);
+  const previousEmit = getLastSdkEmitChunk(request.sessionId);
   await emitSdkChunkTracked({
     emitter: sdkEmitter,
     sessionId: request.sessionId,
     traceId: request.traceId,
     text: buildThinkingEndText(request.language, duration),
     options: {
-      eventType: EventType.REASONING_LOG_DELTA,
+      eventType: EventType.REASONING_LOG_END,
       messageId: previousEmit?.messageId,
       parentMessageId: previousEmit?.parentMessageId,
+      contentType: SseReasonMessageType.think_text,
     },
   });
-  // await emitSdkChunkTracked({
-  //   emitter: sdkEmitter,
-  //   sessionId: request.sessionId,
-  //   traceId: request.traceId,
-  //   text: "",
-  //   options: {
-  //     eventType: EventType.REASONING_LOG_END,
-  //   },
-  // });
 }
 
 /**
@@ -256,9 +313,29 @@ async function handleLifecycleEvent(
   event: AgentEvent,
   sessionKey?: string,
 ) {
+  const sdkEmitter = resolveSdkEmitter(request.accountId);
   const { data } = event;
   const phase = typeof data?.phase === "string" ? data.phase : undefined;
   if (!isRootSessionKey(sessionKey) || !phase) {
+    return;
+  }
+  if (phase === "fallback_step") {
+    if (!isActiveSdkModelFallbackOutcome(data?.fallbackStepFinalOutcome)) {
+      return;
+    }
+    const activeRequest = markActiveSdkModelFallbackStep(
+      sessionKey,
+      data.fallbackStepFinalOutcome,
+    ) ?? request;
+    if (data.fallbackStepFinalOutcome === "next_fallback") {
+      cancelActiveSdkCompletionCheck(activeRequest.sessionKey);
+      return;
+    }
+    scheduleActiveSdkCompletionCheck(
+      api,
+      activeRequest.sessionKey,
+      `model_fallback_${data.fallbackStepFinalOutcome}`,
+    );
     return;
   }
   if (phase === "start") {
@@ -270,16 +347,15 @@ async function handleLifecycleEvent(
     return;
   }
   const activeRequest = markActiveSdkRootLifecycleFinished(sessionKey, phase) ?? request;
-  if (phase === "error" && !activeRequest.hasEmittedContent) {
+  if (phase === "error") {
     const errorText = typeof data?.error === "string" ? data.error : "Agent run failed";
-    await emitSdkChunk(activeRequest, errorText, {
+    await emitSdkChunk(activeRequest, sdkEmitter, errorText, {
       eventType: EventType.ANSWER_DELTA,
     });
-    activeRequest.hasEmittedContent = true;
   }
   if (phase === "end" && activeRequest.pendingChildSessionKeys.size > 0) {
     // root run 先结束，但仍有子 agent 未收尾；先用空行隔开后续恢复输出。
-    await emitSdkChunk(activeRequest, "\n\n", {
+    await emitSdkChunk(activeRequest, sdkEmitter, "\n\n", {
       eventType: EventType.ANSWER_DELTA,
     });
   }
@@ -290,48 +366,25 @@ async function handleLifecycleEvent(
   );
 }
 
-async function handleCompactionEvent(
-  api: OpenClawPluginApi,
+function handleCompactionEvent(
   request: ActiveSdkRequest,
   event: AgentEvent,
   sessionKey?: string,
 ) {
-  const { data } = event;
-  const phase = typeof data?.phase === "string" ? data.phase : undefined;
-  const willRetry = data?.willRetry === true;
-  const shouldHoldCompletion = !phase || phase === "start" || willRetry;
-
-  const activeRequest =
-    markActiveSdkCompactionRetryPending(
-      sessionKey ?? request.sessionKey,
-      shouldHoldCompletion,
-    ) ?? request;
-
-  if (shouldHoldCompletion) {
-    cancelActiveSdkCompletionCheck(activeRequest.sessionKey);
-    const previousEmit = getLastSdkEmitChunk(activeRequest.accountId);
-    await emitSdkChunk(activeRequest, "", {
-      eventType: previousEmit?.eventType,
-      contentType: "5007",
-    });
-    api.logger.info(
-      `[byai-channel] sdk completion held for compaction: sessionKey=${activeRequest.sessionKey}, phase=${phase ?? "unknown"}, willRetry=${String(willRetry)}`,
-    );
+  const phase = typeof event.data?.phase === "string" ? event.data.phase : undefined;
+  if (!phase) {
     return;
   }
-
-  scheduleActiveSdkCompletionCheck(
-    api,
-    activeRequest.sessionKey,
-    `compaction_${phase}`,
-  );
-}
-
-function isCompactionAgentEvent(event: AgentEvent): boolean {
-  if (event.stream === "compaction" || event.data?.type === "compaction") {
-    return true;
+  if (phase === "start") {
+    markActiveSdkCompactionRetryPending(sessionKey ?? request.sessionKey, true);
+    return;
   }
-  return (event as AgentEvent & { type?: unknown }).type === "compaction";
+  if (phase === "end") {
+    markActiveSdkCompactionRetryPending(
+      sessionKey ?? request.sessionKey,
+      Boolean(event.data?.willRetry),
+    );
+  }
 }
 
 async function handleThinkingEvent(
@@ -339,10 +392,22 @@ async function handleThinkingEvent(
   event: AgentEvent,
   isPreviousThinking: boolean,
 ) {
-  const text = event.data?.text as string ?? "";
+  const text = resolveReasoningEventText(event);
+  await emitReasoningText(request, event.runId, "thinking", text, isPreviousThinking);
+}
+
+async function emitReasoningText(
+  request: ActiveSdkRequest,
+  runId: string,
+  source: string,
+  text: string,
+  isPreviousThinking: boolean,
+) {
+  const sdkEmitter = resolveSdkEmitter(request.accountId);
   const previousEmit = getLastSdkEmitChunk(request.accountId);
   const options: EmitOptions = {
     eventType: EventType.REASONING_LOG_DELTA,
+    contentType: SseReasonMessageType.think_text,
   };
   if (isPreviousThinking) {
     options.messageId = previousEmit?.messageId;
@@ -350,18 +415,25 @@ async function handleThinkingEvent(
   } else {
     options.messageId = Math.random().toString(16).slice(2);
     options.parentMessageId = "-1";
+    await emitSdkChunk(request, sdkEmitter, "", {
+      ...options,
+      eventType: EventType.REASONING_LOG_START,
+    });
   }
   await emitIncrementalText({
-    key: `${event.runId}:thinking`,
+    key: `${runId}:${source}:thinking`,
     rawText: text,
     normalize: normalizeReasoningPreviewText,
     emit: async (reasoningDelta) => {
-      await emitSdkChunk(request, reasoningDelta, options);
+      await emitSdkChunk(request, sdkEmitter, reasoningDelta, options);
     },
   });
 }
 
 export default async function handleAgentEvent(api: OpenClawPluginApi, event: AgentEvent) {
+  api.logger.info(
+    `[byai-channel] onAgentEvent: ${JSON.stringify(event)}`,
+  );
   const { seq, sessionKey, runId } = event;
   const runBinding = resolveActiveSdkRunBinding(runId);
   const resolvedSessionKey = sessionKey ?? runBinding?.sessionKey;
@@ -369,6 +441,8 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
   if (!correlationKey) {
     return;
   }
+  const streamStateKey = resolvedSessionKey || runId;
+  const lastAgentAssistantEvent = resolveAgentStreamState(streamStateKey);
   if (lastAgentAssistantEvent.runId === runId && lastAgentAssistantEvent.seq >= seq) {
     return;
   }
@@ -378,37 +452,41 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
   if (!request) {
     return;
   }
-  api.logger.info(
-    `[byai-channel] onAgentEvent: ${JSON.stringify(event)}`,
-  );
-  const isChildSession = isChildSessionKey(resolvedSessionKey);
-  const isPreviousThinking = lastAgentAssistantEvent.stream === "thinking";
-  if (isPreviousThinking && event.stream !== "thinking") {
+  // direct-path 汇总 / announce 续跑等 turn 的 runId 不经 onAgentRunStart/subagent_spawned
+  // 绑定，但其事件能经 sessionKey 解析到本 request。补绑定使 boundRunIds 完整，request
+  // 清理时能回收其在 activeSdkRequestsByRun 的条目。
+  if (runId && resolvedSessionKey && !request.boundRunIds.has(runId)) {
+    bindActiveSdkRequestRunId(resolvedSessionKey, runId);
+  }
+  const isChildSession = isSubagentSessionKey(resolvedSessionKey);
+  const currentStream = resolveAssistantDisplayStream(event, isChildSession);
+  const previousStream = lastAgentAssistantEvent.stream;
+  const isPreviousThinking = previousStream === "thinking";
+  if (isPreviousThinking && currentStream !== "thinking") {
     await handleReasoningEndTransition(request, Date.now() - lastAgentAssistantEvent.startTime);
   }
-  const previousStream = lastAgentAssistantEvent.stream;
   lastAgentAssistantEvent.seq = seq;
   lastAgentAssistantEvent.runId = runId;
-  if (previousStream !== event.stream) {
+  if (previousStream !== currentStream) {
     lastAgentAssistantEvent.startTime = Date.now();
   }
-  lastAgentAssistantEvent.stream = event.stream;
-  if (event.stream !== "lifecycle" && !isCompactionAgentEvent(event)) {
-    markActiveSdkCompactionRetryPending(resolvedSessionKey, false);
-  }
+  lastAgentAssistantEvent.stream = currentStream;
   if (event.stream === 'tool') {
-    await handleToolEvent(request, event, isChildSession);
+    await handleToolEvent(request, event);
   } else if (event.stream === 'assistant') {
-    if (previousStream !== "assistant" && toBeEmittedChunkAfterBaiyingCallTool) {
+    if (currentStream === "assistant" && previousStream !== "assistant" && toBeEmittedChunkAfterBaiyingCallTool) {
       // 无论是主agent还是subagent，开始输出正文前，先把baiying_call工具缓存起来的chunk emit出来
       await emitChunkGenByBaiyingCallTool(request);
     }
-    await handleAssistantEvent(request, event, isChildSession);
+    await handleAssistantEvent(request, event, isChildSession, {
+      isContinuingThinking: isPreviousThinking && currentStream === "thinking",
+      isContinuingAnswer: previousStream === "assistant" && currentStream === "assistant",
+    });
   } else if (event.stream === "lifecycle") {
     await handleLifecycleEvent(api, request, event, resolvedSessionKey);
-  } else if (isCompactionAgentEvent(event)) {
-    await handleCompactionEvent(api, request, event, resolvedSessionKey);
-  } else if (event.stream === "thinking") {
+  } else if (event.stream === "compaction") {
+    handleCompactionEvent(request, event, resolvedSessionKey);
+  } else if (currentStream === "thinking") {
     await handleThinkingEvent(request, event, isPreviousThinking);
   }
 }
@@ -420,6 +498,22 @@ function extractToolStartArgs(data: {
     return "";
   }
   return JSON.stringify(data.args, null, 2);
+}
+
+// 从 message 工具 args 提取要发送给用户的可见文本。字段优先级对齐 core message-tool
+// 的清洗顺序（text/content/message/caption）。
+function extractMessageToolSendText(args: unknown): string {
+  if (!args || typeof args !== "object") {
+    return "";
+  }
+  const record = args as Record<string, unknown>;
+  for (const field of ["text", "content", "message", "caption"]) {
+    const value = stringValue(record[field]);
+    if (value.trim()) {
+      return value;
+    }
+  }
+  return "";
 }
 
 function extractToolResultText(result: unknown): string {

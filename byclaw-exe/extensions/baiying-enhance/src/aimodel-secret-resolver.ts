@@ -1,8 +1,12 @@
 import {
+    DEFAULT_AIMODEL_TYPELIST_FIELD,
     decodeBaiyingAimodelSecretRefId,
     readAuthTokenFromAimodelPayload,
+    readAuthTokenFromAimodelTypeListPayload,
     resolveAimodelConfigRedisKey,
+    resolveAimodelTypeListRedisKey,
 } from "./aimodel-config.js";
+import { rememberAimodelAuthToken } from "./aimodel-auth-cache.js";
 import { loadBaiyingRedisEnvDefaults } from "./redis-env.js";
 import { createRedisJsonStore, type BaiyingRedisJsonStore } from "./redis-json-store.js";
 
@@ -42,11 +46,13 @@ export async function resolveAimodelSecretRequest(params: {
     request: string;
     redisJsonStore: BaiyingRedisJsonStore;
     redisKey?: string;
+    typeListRedisKey?: string;
 }): Promise<ExecSecretResolverResponse> {
     const request = parseRequest(params.request);
     const values: Record<string, string> = {};
     const errors: Record<string, { message: string }> = {};
     const redisKey = resolveAimodelConfigRedisKey(params.redisKey);
+    const typeListRedisKey = resolveAimodelTypeListRedisKey(params.typeListRedisKey);
 
     for (const id of request.ids) {
         const modelId = decodeBaiyingAimodelSecretRefId(id);
@@ -54,10 +60,19 @@ export async function resolveAimodelSecretRequest(params: {
             key: redisKey,
             field: modelId,
         });
-        const token = readAuthTokenFromAimodelPayload(payload ?? null);
+        let token = readAuthTokenFromAimodelPayload(payload ?? null);
+        if (!token) {
+            const typeListPayload = await params.redisJsonStore.getHashJson?.({
+                key: typeListRedisKey,
+                field: DEFAULT_AIMODEL_TYPELIST_FIELD,
+            });
+            token = readAuthTokenFromAimodelTypeListPayload(typeListPayload ?? null, modelId);
+        }
         if (token) {
             values[id] = token;
+            rememberAimodelAuthToken({ modelId, token });
         } else {
+            rememberAimodelAuthToken({ modelId, token: null });
             errors[id] = { message: `AI model config missing or invalid for id ${id}` };
         }
     }
@@ -85,6 +100,7 @@ export async function runAimodelSecretResolverCli(): Promise<void> {
             request: await readStdin(),
             redisJsonStore: store,
             redisKey: process.env.BAIYING_AIMODEL_CONFIG_REDIS_KEY,
+            typeListRedisKey: process.env.BAIYING_AIMODEL_TYPELIST_REDIS_KEY,
         });
         process.stdout.write(`${JSON.stringify(response)}\n`);
     } finally {

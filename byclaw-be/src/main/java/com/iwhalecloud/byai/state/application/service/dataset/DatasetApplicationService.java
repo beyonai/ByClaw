@@ -353,6 +353,7 @@ public class DatasetApplicationService {
         SsResource ssResource = ssResourceService.findById(resourceId);
         // 第三方知识库模式下，知识库由外部知识库体系发布，本系统不允许注销。
         validateKnowledgeBaseWritable();
+        validateDefaultPersonalDatasetDeletable(ssResource);
         validateDatasetManagePermission(ssResource);
         SsResExtDoc extDoc = ssResExtDocService.findById(resourceId);
         String targetContent = extDoc == null ? null : extDoc.getTargetContent();
@@ -382,13 +383,20 @@ public class DatasetApplicationService {
         if (ssResource == null) {
             throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
         }
-        if (OwnerType.PERSONAL_DEFAULT.equals(ssResource.getOwnerType())) {
-            throw new IllegalArgumentException(I18nUtil.get("user.permission.nopermission"));
-        }
         if (authApplicationService.hasResourceManagePermission(ssResource)) {
             return;
         }
         throw new IllegalArgumentException(I18nUtil.get("user.permission.nopermission"));
+    }
+
+    private void validateDefaultPersonalDatasetDeletable(SsResource ssResource) {
+        if (ssResource == null) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
+        }
+        // 默认个人知识库是个人空间底座资源，允许本人维护库内内容，但不允许注销整个知识库。
+        if (OwnerType.PERSONAL_DEFAULT.equals(ssResource.getOwnerType())) {
+            throw new IllegalArgumentException(I18nUtil.get("dataset.default.personal.delete.not.allowed"));
+        }
     }
 
     private void validateDatasetReadablePermission(SsResource ssResource) {

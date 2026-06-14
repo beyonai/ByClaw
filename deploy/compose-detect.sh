@@ -30,12 +30,15 @@ fi
 
 # Load .env and derive COMPOSE_PROJECT_NAME from CONTAINER_SUFFIX.
 # Scripts that already source .env will just overwrite — harmless.
-_DETECT_ENV_FILE="$(cd "$(dirname "$0")" && pwd)/../../.env"
+_DEPLOY_DIR="$(cd "$(pwd)/.." && pwd)"
+_DETECT_ENV_FILE="$_DEPLOY_DIR/../.env"
 if [ -f "$_DETECT_ENV_FILE" ]; then
     set -a
     . "$_DETECT_ENV_FILE" 2>/dev/null
     set +a
 fi
+
+. "$_DEPLOY_DIR/storage-profile.sh"
 
 # Determine project name from the calling script's directory
 _CALLER_DIR="$(basename "$(pwd)")"

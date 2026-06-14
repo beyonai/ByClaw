@@ -56,6 +56,12 @@ npm run build
 | `dmPolicy`      | string  | "open"                  | 消息策略: open/allowlist/pairing          |
 | `allowFrom`     | array   | []                      | 允许发送消息的用户列表，\* 表示允许所有人 |
 | `telemetry`     | object  | Redis 开启，console 关闭 | 输出运行态 busy snapshot，供外部 controller 判断是否续期容器 |
+| `contextSnapshot.enabled` | boolean | false | 是否在 `llm_input` hook dump 最终模型输入上下文 |
+| `contextSnapshot.fileName` | string | `llm_input_snapshots.json` | 写入 `.openclaw/agents/<agentId>/sessions/` 下的 JSON 文件名，每次触发都会覆写 |
+| `contextSnapshot.maxStringChars` | number | `200000` | 单个字符串字段最大保留字符数 |
+| `contextSnapshot.maxArrayItems` | number | `200` | 单个数组最大保留元素数 |
+| `contextSnapshot.includeHistoryMessages` | boolean | true | 是否写入历史消息 |
+| `contextSnapshot.includeTools` | boolean | true | 是否写入工具定义 |
 
 ### Telemetry 运行态输出
 
@@ -64,11 +70,86 @@ npm run build
 `consoleEnabled: true` 输出 `[openclaw-busy-state]` JSON 行。该输出只包含运行态计数、原因和 lease 建议，
 不会包含 transcript、用户消息正文、工具参数或凭据。
 
+### Context Snapshot
+
+`contextSnapshot` 默认关闭。开启后，插件会在 OpenClaw 的 `llm_input` hook 中捕获即将提交给 LLM 的最终输入快照，并写入当前 agent 的 sessions 目录：
+
+```text
+~/.openclaw/agents/<agentId>/sessions/llm_input_snapshots.json
+```
+
+对于 main agent，默认路径类似：
+
+```text
+~/.openclaw/agents/main/sessions/llm_input_snapshots.json
+```
+
+线上如果 `.openclaw/agents/main/sessions` 挂载到 MinIO 卷，同样可以被外部读取。
+文件只保留最近一次 `llm_input` 快照，每次触发都会直接覆写，避免历史文件增长和磁盘占用问题。
+
+示例配置：
+
+```json
+{
+  "channels": {
+    "byai-channel": {
+      "contextSnapshot": {
+        "enabled": true,
+        "maxStringChars": 200000,
+        "maxArrayItems": 200,
+        "includeHistoryMessages": true,
+        "includeTools": true
+      }
+    }
+  },
+  "plugins": {
+    "entries": {
+      "byai-channel": {
+        "hooks": {
+          "allowConversationAccess": true
+        }
+      }
+    }
+  }
+}
+```
+
+文件内容是一个 JSON snapshot，包含：
+
+- `runId`
+- `sessionId`
+- `sessionKey`
+- `agentId`
+- `provider` / `model`
+- `byai.sessionId`
+- `byai.traceId`
+- `systemPrompt`
+- `prompt`
+- `historyMessages`
+- `tools`
+- `sizes`
+
 ### 与配置热重载协作
 
 SDK 模式下，`ByaiSdkApp` 不缓存启动时传入的 `OpenClawConfig`。每次收到 `AskAgentCommand` 并调用 `deliverReplyToAgentViaSdk` 前，都会通过 `getByaiRuntime().config.current()` 读取当前运行时配置。
 
 这对 `baiying-enhance` 的数字员工模型热切换很关键：百应侧修改数字员工 `prologue.modelId` 后，`baiying-enhance` 会把最新 `agents.list[].model.primary` 与 `models.providers.baiying-m-*` 热写回 OpenClaw；`byai-channel` 后续入站消息会使用热重载后的 agent/model 定义，而不是继续使用 worker 启动时的旧配置。
+
+## Session 单写者与 Takeover 防护
+
+OpenClaw embedded run 在模型 I/O 前会短暂释放 session transcript 写锁，并在重抢锁时校验 `.jsonl` 指纹。若同一 `sessionKey` 上并发触发第二次 `dispatchReplyFromConfig`，可能触发：
+
+`EmbeddedAttemptSessionTakeoverError: session file changed while embedded prompt lock was released`
+
+`byai-channel` 在 SDK 入站路径做了两层防护（仅改本插件，不改 OpenClaw）：
+
+1. **Session 入站闸门**（`session-dispatch-gate.ts`）：同一 `sessionKey` 的 `deliverReplyToAgentViaSdk` 严格 FIFO 串行；后续消息会排队，日志可见 `session dispatch dequeued`。
+2. **Lifecycle 收尾等待**（`session-dispatch-settle.ts`）：`dispatchReplyFromConfig` 返回后仍等待 root lifecycle / 子 agent / outbound 完成，再释放闸门，避免“dispatch 已返回但 transcript 仍被占用”时启动下一条入站。
+3. **Prompt 注入快照**（`prompt-injection-snapshot.ts`）：在 dispatch 前预构建 `appendSystemContext`，`before_prompt_build` 优先读内存快照，避免在 hook 阶段做额外副作用。
+
+`before_dispatch` 仍负责一次性同步 `USER.md`（写盘）；`before_prompt_build` 只拼接系统上下文，不写 session transcript。
+
+**残余风险**：其他插件若在锁释放窗口写入 transcript 且不被 OpenClaw 视为 benign/owned，仍可能 takeover。本方案保证 **byai-channel 不再主动制造同 session 并发 dispatch**。
 
 ## Webhook 接口格式
 

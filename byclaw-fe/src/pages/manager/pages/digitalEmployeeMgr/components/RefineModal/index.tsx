@@ -11,6 +11,132 @@ import styles from './index.module.less';
 
 const nanoid = customAlphabet('abcdefghijklmnopqrstuvwxyz1234567890', 6);
 
+const ALL_SECTIONS = ['desc', 'abilities', 'tags', 'persona', 'greeting', 'questions'];
+const WORK_PROMPT_KEY = 'agent';
+const PERSONA_PROMPT_KEY = 'soul';
+const TOOL_PROMPT_KEY = 'tools';
+
+const normalizePromptKey = (key?: string, item: any = {}) => {
+  const candidates = [key, item?.name, item?.nameEn].filter(Boolean);
+  if (candidates.some((value) => ['agent', '工作规范', 'Work Specification'].includes(value))) return WORK_PROMPT_KEY;
+  if (
+    candidates.some((value) =>
+      ['persona', 'soul', 'corePersonaDefinition', '人格定义', 'Persona', 'Personality Definition'].includes(value)
+    )
+  ) {
+    return PERSONA_PROMPT_KEY;
+  }
+  if (candidates.some((value) => ['tool', 'tools', '工具规范', 'Tool Specification'].includes(value)))
+    return TOOL_PROMPT_KEY;
+  if (candidates.some((value) => ['memory', '记忆规范', 'Memory Specification'].includes(value))) return 'memory';
+  return key;
+};
+
+const parseJsonRecursively = (value: any, maxDepth = 5): any => {
+  if (maxDepth <= 0 || typeof value !== 'string') return value;
+  try {
+    const parsed = JSON.parse(value);
+    return typeof parsed === 'string' ? parseJsonRecursively(parsed, maxDepth - 1) : parsed;
+  } catch {
+    return value;
+  }
+};
+
+const stripJsonFence = (value: string) => {
+  const matched = value.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  return matched ? matched[1].trim() : value.trim();
+};
+
+const normalizeFieldValue = (value: any) => {
+  const parsed = parseJsonRecursively(value);
+  if (parsed === null || parsed === undefined) return '';
+  return typeof parsed === 'string' ? parsed : JSON.stringify(parsed);
+};
+
+const parsePromptConfigList = (value: any) => {
+  const parsed = parseJsonRecursively(value);
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed
+    .map((item) => {
+      if (!item) return item;
+      return {
+        ...item,
+        normalizedKey: normalizePromptKey(item.key, item),
+      };
+    })
+    .filter((item) => item?.key);
+};
+
+const getPromptItemText = (item: any) => {
+  const value = parseJsonRecursively(item?.value ?? '');
+  return typeof value === 'string' ? value : JSON.stringify(value);
+};
+
+const toPersistPromptItem = (item: any) => {
+  if (!item || typeof item !== 'object') return item;
+  return Object.fromEntries(Object.entries(item).filter(([key]) => key !== 'normalizedKey'));
+};
+
+const mergePromptConfigs = (baseConfigs: any[] = [], generatedConfigs: any[] = []) => {
+  if (!baseConfigs.length) return generatedConfigs;
+  if (!generatedConfigs.length) return baseConfigs;
+
+  const generatedMap = new Map(generatedConfigs.map((item) => [item.normalizedKey || item.key, item]));
+  const merged = baseConfigs.map((item) => {
+    const generated = generatedMap.get(item.normalizedKey || item.key);
+    if (!generated) return item;
+    return {
+      ...item,
+      value: getPromptItemText(generated),
+    };
+  });
+
+  generatedConfigs.forEach((item) => {
+    if (
+      !baseConfigs.some((baseItem) => (baseItem.normalizedKey || baseItem.key) === (item.normalizedKey || item.key))
+    ) {
+      merged.push(item);
+    }
+  });
+
+  return merged;
+};
+
+const isPersonaPrompt = (item: any) =>
+  item?.normalizedKey === PERSONA_PROMPT_KEY ||
+  item?.key === PERSONA_PROMPT_KEY ||
+  item?.key === 'persona' ||
+  item?.key === 'corePersonaDefinition' ||
+  item?.name === '人格定义' ||
+  item?.nameEn === 'Persona' ||
+  item?.nameEn === 'Personality Definition';
+
+const extractPersonaDefinitionText = (value: any) => {
+  const promptList = parsePromptConfigList(value);
+  if (!promptList.length) return value || '';
+
+  const personaItem = promptList.find(isPersonaPrompt);
+  return personaItem ? getPromptItemText(personaItem) : '';
+};
+
+const parseListLike = (value: any) => {
+  const parsed = parseJsonRecursively(value);
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === 'object') return Object.values(parsed);
+  if (typeof parsed !== 'string') return [];
+
+  const content = stripJsonFence(parsed);
+  const reparsed = parseJsonRecursively(content);
+  if (Array.isArray(reparsed)) return reparsed;
+  if (reparsed && typeof reparsed === 'object') return Object.values(reparsed);
+
+  return content
+    .split(/\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+};
+
 const RefineModal = ({ visible, onOk, onCancel, form, questionList, skills = [], knowledgeBases = [] }) => {
   const intl = useIntl();
   const [myForm] = Form.useForm();
@@ -20,59 +146,221 @@ const RefineModal = ({ visible, onOk, onCancel, form, questionList, skills = [],
   const [coreAbilities, setCoreAbilities] = useState([]);
 
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedSections, setSelectedSections] = useState(new Set(ALL_SECTIONS));
+  const [generatedPromptConfigs, setGeneratedPromptConfigs] = useState<any[]>([]);
   // 避免卸载后继续 setState
   const mountedRef = useRef(false);
   const timerRef = useRef(null);
+  const hasGeneratedRef = useRef(false);
 
   const customAlphabetRef = useRef(customAlphabet('abcdefghijklmnopqrstuvwxyz1234567890', 6));
 
   const handleOk = async () => {
     try {
       const values = await myForm.validateFields();
-      const coreCompetencies = coreAbilities.map((item) => ({
-        coreCompetency: item.name,
-        description: item.description,
-        acceptBoundary: Array.isArray(item.acceptBoundary) ? item.acceptBoundary : [],
-        rejectBoundary: Array.isArray(item.rejectBoundary) ? item.rejectBoundary : [],
-        example: Array.isArray(item.example) ? item.example : [],
-      }));
+      const has = (key) => selectedSections.has(key);
 
-      // 将弹窗内的能力与规范字段同步为外层所需 JSON 字段
-      const abilityDescObj = {
-        ability: '',
-        constraints: '', // 不再使用单个 constraints 字段
-        faqs: '', // 不再使用单个 faqs 字段
-      };
-      const roleObj = {
+      const result = {};
+
+      const currentPromptConfigs = parsePromptConfigList(form.getFieldValue('corePersonaDefinition'));
+      const promptConfigs = mergePromptConfigs(currentPromptConfigs, generatedPromptConfigs);
+      const personaText = values?.corePersonaDefinition || '';
+
+      if (has('desc')) result.resourceDesc = values.resourceDesc;
+      if (has('persona')) {
+        if (promptConfigs.length) {
+          const nextPromptConfigs = promptConfigs.map((item) => ({
+            ...item,
+            value: isPersonaPrompt(item) ? personaText : getPromptItemText(item),
+          }));
+          const hasPersonaPrompt = nextPromptConfigs.some(isPersonaPrompt);
+          if (!hasPersonaPrompt) {
+            nextPromptConfigs.push({
+              name: intl.formatMessage({ id: 'employeeDetail.personalityDefinition', defaultMessage: '人格定义' }),
+              key: PERSONA_PROMPT_KEY,
+              normalizedKey: PERSONA_PROMPT_KEY,
+              value: personaText,
+            });
+          }
+          result.corePersonaDefinition = JSON.stringify(nextPromptConfigs.map(toPersistPromptItem));
+          nextPromptConfigs.forEach((item) => {
+            if (item?.key) {
+              result[item.key] = getPromptItemText(item);
+            }
+          });
+          const workPrompt = nextPromptConfigs.find((item) => (item.normalizedKey || item.key) === WORK_PROMPT_KEY);
+          const toolPrompt = nextPromptConfigs.find((item) => (item.normalizedKey || item.key) === TOOL_PROMPT_KEY);
+          if (workPrompt) {
+            result.workStandard = getPromptItemText(workPrompt);
+          }
+          if (toolPrompt) {
+            result.toolStandard = getPromptItemText(toolPrompt);
+          }
+        } else {
+          result.corePersonaDefinition = personaText;
+        }
+      }
+      if (has('greeting')) result.descText = values.descText;
+      if (has('tags')) result.tags = values.tags;
+
+      if (has('abilities')) {
+        result.coreCompetencies = coreAbilities.map((item) => ({
+          coreCompetency: item.name,
+          description: item.description,
+          acceptBoundary: Array.isArray(item.acceptBoundary) ? item.acceptBoundary : [],
+          rejectBoundary: Array.isArray(item.rejectBoundary) ? item.rejectBoundary : [],
+          example: Array.isArray(item.example) ? item.example : [],
+        }));
+        result.coreAbility = '';
+        result.abilityDesc = JSON.stringify({
+          ability: '',
+          constraints: '',
+          faqs: '',
+        });
+      }
+
+      let roleObj = {};
+      try {
+        roleObj = JSON.parse(form.getFieldValue('role') || '{}');
+      } catch {
+        roleObj = {};
+      }
+
+      Object.assign(roleObj, {
         roleAttributes: values?.roleAttributes || '',
         processingFlow: values?.processingFlow || '',
         personalityDimensions: values?.personalityDimensions || '',
         wordPreferences: values?.wordPreferences || '',
         sentenceAndTone: values?.sentenceAndTone || '',
-        corePersonaDefinition: values?.corePersonaDefinition || '',
-      };
-      onOk(
-        {
-          ...values,
-          corePersonaDefinition: values?.corePersonaDefinition || '',
-          coreAbility: '',
-          coreCompetencies,
-          abilityDesc: JSON.stringify(abilityDescObj),
-          role: JSON.stringify(roleObj),
-        },
-        myQuestionList
-      );
+        corePersonaDefinition:
+          result.corePersonaDefinition || form.getFieldValue('corePersonaDefinition') || personaText,
+        personalityDefinition:
+          result.corePersonaDefinition || form.getFieldValue('corePersonaDefinition') || personaText,
+      });
+      if (promptConfigs.length) {
+        promptConfigs.forEach((item) => {
+          if (item?.key) {
+            roleObj[item.key] =
+              has('persona') && isPersonaPrompt(item) ? personaText : result[item.key] || getPromptItemText(item);
+          }
+        });
+      }
+      if (promptConfigs.length && has('persona')) {
+        roleObj[PERSONA_PROMPT_KEY] = personaText;
+      }
+      const workPrompt = promptConfigs.find((item) => (item.normalizedKey || item.key) === WORK_PROMPT_KEY);
+      const toolPrompt = promptConfigs.find((item) => (item.normalizedKey || item.key) === TOOL_PROMPT_KEY);
+      if (workPrompt) {
+        roleObj.workStandard = roleObj[workPrompt.key] || roleObj.workStandard || '';
+      }
+      if (toolPrompt) {
+        roleObj.toolStandard = roleObj[toolPrompt.key] || roleObj.toolStandard || '';
+      }
+      result.role = JSON.stringify(roleObj);
+
+      const questionsToPass = has('questions') ? myQuestionList : questionList;
+      onOk(result, questionsToPass);
     } catch (e) {
       console.error(e);
     }
   };
 
+  const applyAllFields = (fields: Record<string, any>) => {
+    const {
+      agentDescription,
+      characterDescription,
+      commonQuestions,
+      openingRemark,
+      agentTags,
+      roleAttributes,
+      processingFlow,
+      personalityDimensions,
+      wordPreferences,
+      sentenceAndTone,
+      coreCompetencies,
+      corePersonaDefinition,
+    } = fields;
+
+    const arr = parseListLike(agentTags);
+
+    const tagList = arr.map((it) => ({
+      label: typeof it === 'string' ? it : JSON.stringify(it),
+      value: typeof it === 'string' ? it : JSON.stringify(it),
+    }));
+
+    const normalizeText = (v) => parseListLike(v).join('\n');
+
+    let parsedCoreAbilities = [];
+    const abilityIcons = [
+      { type: 'icon-a-List-topliebiao3', label: '列表' },
+      { type: 'icon-a-Application-oneyingyong3', label: '立方体' },
+      { type: 'icon-a-Asteriskxinghao3', label: '星星' },
+      { type: 'icon-a-Circles-sevenyuanquan', label: '圆点' },
+      { type: 'icon-a-Circle-threeyuanquan', label: '人物' },
+      { type: 'icon-a-Circle-fouryuanquan', label: '工具' },
+    ];
+    const abilityColors = [
+      { value: '#EF7BE3', label: '粉色' },
+      { value: '#725CFA', label: '紫色' },
+      { value: '#165DFF', label: '蓝色' },
+      { value: '#58D764', label: '绿色' },
+      { value: '#FF903E', label: '橙色' },
+      { value: '#FF5A5A', label: '红色' },
+    ];
+    parsedCoreAbilities = parseListLike(coreCompetencies).map((item, index) => ({
+      id: nanoid(),
+      name: item?.coreCompetency || item?.name || '',
+      description: item?.description || '',
+      icon: abilityIcons[index % abilityIcons.length].type,
+      color: abilityColors[index % abilityColors.length].value,
+      expanded: true,
+      acceptBoundary: Array.isArray(item?.acceptBoundary) ? item.acceptBoundary : [],
+      rejectBoundary: Array.isArray(item?.rejectBoundary) ? item.rejectBoundary : [],
+      example: Array.isArray(item?.example) ? item.example : [],
+    }));
+
+    setCoreAbilities(parsedCoreAbilities);
+
+    const promptConfigs = parsePromptConfigList(corePersonaDefinition);
+    setGeneratedPromptConfigs(promptConfigs);
+
+    myForm.setFieldsValue({
+      resourceDesc: agentDescription,
+      role: characterDescription,
+      corePersonaDefinition: extractPersonaDefinitionText(corePersonaDefinition),
+      descText: openingRemark,
+      tags: tagList?.map((it) => it.value),
+      roleAttributes: normalizeText(roleAttributes),
+      processingFlow: normalizeText(processingFlow),
+      personalityDimensions: normalizeText(personalityDimensions),
+      wordPreferences: normalizeText(wordPreferences),
+      sentenceAndTone: normalizeText(sentenceAndTone),
+    });
+
+    setTags(tagList);
+    setSelectedSections(new Set(ALL_SECTIONS));
+
+    const commonQArr = parseListLike(commonQuestions);
+    setMyQuestionList(
+      commonQArr.map((q) => ({
+        infoTitle: q,
+        infoContent: q,
+        instructCode: q,
+        slotSettings: {},
+        infoType: 5,
+        datasetIdList: [],
+        uuid: customAlphabetRef.current(),
+      }))
+    );
+  };
+
   const onRegenerate = (formValue, questionListValue) => {
     const { resourceName, resourceDesc, descText, role } = formValue;
     if (!mountedRef.current) return;
-    setIsLoading(true);
 
-    // 从外层表单获取能力描述和工作规范相关字段
+    setIsLoading(true);
+    setGeneratedPromptConfigs([]);
+
     const outerFormValues = form.getFieldsValue();
     const {
       abilityBoundary,
@@ -84,7 +372,6 @@ const RefineModal = ({ visible, onOk, onCancel, form, questionList, skills = [],
       sentenceAndTone,
     } = outerFormValues;
 
-    // 构建 relIds：从 skills 和 knowledgeBases 中提取 resourceId
     const relIds = [];
     skills.forEach((it) => {
       relIds.push(`${it.resourceId}`);
@@ -95,156 +382,33 @@ const RefineModal = ({ visible, onOk, onCancel, form, questionList, skills = [],
       });
     });
 
-    const payload = {
+    const body = {
       agentName: resourceName,
       agentDescription: resourceDesc,
       characterDescription: role,
       openingRemark: descText,
       commonQuestions: questionListValue.map((i) => i.infoContent).join('\n'),
-      // 能力描述相关字段
       constraints: abilityBoundary || '',
       faqs: exampleQuestions || '',
-      // 工作规范相关字段
       roleAttributes: roleAttributes || '',
       processingFlow: processingFlow || '',
       personalityDimensions: personalityDimensions || '',
       wordPreferences: wordPreferences || '',
       sentenceAndTone: sentenceAndTone || '',
-      // 关联资源ID列表
       relIds,
-      OptimizeTypeEnum: '', //  "AGENT_NAME",  "AGENT_DESCRIPTION",  "CHARACTER_DESCRIPTION",   "OPENING_REMARKS",  "COMMON_PROBLEM",  "RECOMMENDED_QUESTION"
+      OptimizeTypeEnum: '',
     };
 
-    POST('/byaiService/digitalEmployeeController/v2/generate', {
-      ...payload,
-    })
+    POST<Record<string, any>>('/byaiService/meta/prompt/v3/digitalmploy', body)
       .then((data) => {
-        console.log('data', data);
         if (!mountedRef.current) return;
-
-        const {
-          agentDescription,
-          characterDescription,
-          commonQuestions,
-          openingRemark,
-          agentTags,
-          // 新增字段（与外层一致，后端逐步支持）
-          constraints,
-          faqs,
-          roleAttributes,
-          processingFlow,
-          personalityDimensions,
-          wordPreferences,
-          sentenceAndTone,
-          coreCompetencies, // 结构化核心能力列表
-          corePersonaDefinition,
-        } = data || {};
-        let arr = [];
-        try {
-          const [, test] = (agentTags || '').match(/.*(\[.*\]).*/);
-          // eslint-disable-next-line no-eval
-          arr = eval(test ?? '[]');
-        } catch (error) {
-          try {
-            arr = JSON.parse(agentTags ?? '[]');
-          } catch (error) {
-            arr = [];
-          }
-        }
-
-        const tagList = arr.map((it) => ({
-          label: it,
-          value: it,
-        }));
-        // 解析可能为代码块 JSON/数组/换行文本 → 统一为多行字符串
-        const parseListLike = (v) => {
-          if (Array.isArray(v)) return v;
-          if (typeof v === 'string') {
-            const m = v.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-            const content = m ? m[1] : v;
-            try {
-              const arr = JSON.parse(content);
-              if (Array.isArray(arr)) return arr;
-            } catch (e) {
-              // 解析失败，继续后续处理
-            }
-            return content
-              .split(/\n+/)
-              .map((s) => s.trim())
-              .filter(Boolean);
-          }
-          return [];
-        };
-        const normalizeText = (v) => parseListLike(v).join('\n');
-
-        // 处理 coreCompetencies 回显
-        let parsedCoreAbilities = [];
-        // 能力图标和颜色选项（与外层保持一致）
-        const abilityIcons = [
-          { type: 'icon-a-List-topliebiao3', label: '列表' },
-          { type: 'icon-a-Application-oneyingyong3', label: '立方体' },
-          { type: 'icon-a-Asteriskxinghao3', label: '星星' },
-          { type: 'icon-a-Circles-sevenyuanquan', label: '圆点' },
-          { type: 'icon-a-Circle-threeyuanquan', label: '人物' },
-          { type: 'icon-a-Circle-fouryuanquan', label: '工具' },
-        ];
-        const abilityColors = [
-          { value: '#EF7BE3', label: '粉色' },
-          { value: '#725CFA', label: '紫色' },
-          { value: '#165DFF', label: '蓝色' },
-          { value: '#58D764', label: '绿色' },
-          { value: '#FF903E', label: '橙色' },
-          { value: '#FF5A5A', label: '红色' },
-        ];
-        if (coreCompetencies && Array.isArray(JSON.parse(coreCompetencies))) {
-          parsedCoreAbilities = JSON.parse(coreCompetencies ?? '[]').map((item, index) => ({
-            id: nanoid(),
-            name: item.coreCompetency || '',
-            description: item.description || '',
-            icon: abilityIcons[index % abilityIcons.length].type,
-            color: abilityColors[index % abilityColors.length].value,
-            expanded: true,
-            acceptBoundary: Array.isArray(item.acceptBoundary) ? item.acceptBoundary : [],
-            rejectBoundary: Array.isArray(item.rejectBoundary) ? item.rejectBoundary : [],
-            example: Array.isArray(item.example) ? item.example : [],
-          }));
-        } else {
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const _constraintsText = normalizeText(constraints);
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const _faqsText = normalizeText(faqs);
-        }
-
-        setCoreAbilities(parsedCoreAbilities);
-
-        myForm.setFieldsValue({
-          resourceDesc: agentDescription,
-          role: characterDescription,
-          corePersonaDefinition,
-          descText: openingRemark,
-          tags: tagList?.map((it) => it.value),
-          // 工作规范（可能后端暂未返回，先做兜底）
-          roleAttributes: normalizeText(roleAttributes),
-          processingFlow: normalizeText(processingFlow),
-          personalityDimensions: normalizeText(personalityDimensions),
-          wordPreferences: normalizeText(wordPreferences),
-          sentenceAndTone: normalizeText(sentenceAndTone),
-        });
-        if (!mountedRef.current) return;
-        setTags(tagList);
-        // 兼容 commonQuestions 为代码块 JSON / 数组 / 换行字符串
-        const commonQArr = parseListLike(commonQuestions);
-        setMyQuestionList(
-          commonQArr.map((q) => ({
-            infoTitle: q,
-            infoContent: q,
-            instructCode: q,
-            slotSettings: {},
-            infoType: 5,
-            datasetIdList: [],
-            uuid: customAlphabetRef.current(),
-          }))
+        const fields = Object.fromEntries(
+          Object.entries(data || {})
+            .filter(([key]) => key !== 'contextSummary')
+            .map(([key, value]) => [key, normalizeFieldValue(value)])
         );
+        hasGeneratedRef.current = true;
+        applyAllFields(fields);
       })
       .finally(() => {
         if (!mountedRef.current) return;
@@ -254,12 +418,11 @@ const RefineModal = ({ visible, onOk, onCancel, form, questionList, skills = [],
 
   useEffect(() => {
     mountedRef.current = true;
-    if (visible) {
+    if (visible && !hasGeneratedRef.current) {
       const v = form.getFieldsValue();
       myForm.setFieldsValue(v);
       setMyQuestionList(questionList);
 
-      // 使用 setTimeout 确保在表单值更新后再获取
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
@@ -289,13 +452,18 @@ const RefineModal = ({ visible, onOk, onCancel, form, questionList, skills = [],
       }}
       footer={null}
       width={700}
-      loading={isLoading}
-      destroyOnHidden
       centered
       maskClosable={false}
     >
       <div className={styles.refineModalContent}>
-        {isLoading && <Spin spinning />}
+        {isLoading && (
+          <div className={styles.loadingContainer}>
+            <Spin />
+            <div className={styles.loadingHint}>
+              {intl.formatMessage({ id: 'refineModal.generating', defaultMessage: '正在生成配置...' })}
+            </div>
+          </div>
+        )}
         {!isLoading && (
           <div className={classNames(styles.formContainer, 'hideThumb')}>
             <MyForm
@@ -306,6 +474,8 @@ const RefineModal = ({ visible, onOk, onCancel, form, questionList, skills = [],
               setTagsOptions={setTags}
               coreAbilities={coreAbilities}
               setCoreAbilities={setCoreAbilities}
+              selectedSections={selectedSections}
+              setSelectedSections={setSelectedSections}
             />
           </div>
         )}

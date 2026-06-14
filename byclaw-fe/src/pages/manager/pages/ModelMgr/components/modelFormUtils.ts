@@ -9,12 +9,17 @@ export type ModelTagItem = {
 };
 
 export const SYSTEM_SOURCE_TYPES = ['DIG_EMPLOYEE'];
-export const DEFAULT_CONTEXT_TOKENS = 1024 * 198;
-export const MAX_CONTEXT_TOKENS = 2000 * 1000;
-export const DEFAULT_MAX_TOKENS = 1024 * 64;
+export const DEFAULT_CONTEXT_TOKENS = 200 * 1000;
+export const MAX_CONTEXT_TOKENS = 1000 * 1000;
+export const DEFAULT_MAX_TOKENS = 32 * 1000;
+export const CONTEXT_TOKENS_CONFIG = {
+  min: 1000,
+  max: MAX_CONTEXT_TOKENS,
+  step: 1000,
+};
 
-export const tokenMarks = Array.from({ length: 4 }, (_, index) => {
-  const value = (index + 1) * 500 * 1000;
+export const tokenMarks = Array.from({ length: 5 }, (_, index) => {
+  const value = (index + 1) * 200 * 1000;
   return [value, `${value / 1000}K`];
 }).reduce<Record<number, string>>((marks, [value, label]) => {
   marks[value as number] = label as string;
