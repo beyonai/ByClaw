@@ -1,0 +1,13 @@
+{
+  "id": "diagnostics-otel",
+  "name": "Diagnostics OpenTelemetry",
+  "description": "OpenClaw diagnostics OpenTelemetry exporter (BYAI Langfuse session/user mapping).",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
