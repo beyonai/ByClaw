@@ -22,7 +22,7 @@ type IProps = {
 
 function ThinkingProcessRender(props: IProps) {
   const { msg, updateMessage } = props;
-  const { thinkDone, thinkList, thinkCollapse, resourceFrom = [], msgId, messageState, messageId } = msg;
+  const { thinkDone, thinkList, thinkCollapse, resourceFrom = [], msgId, messageState, messageId, isHistoryMsg } = msg;
 
   const intl = useIntl();
   const { EventEmitter } = useGlobal();
@@ -32,7 +32,7 @@ function ThinkingProcessRender(props: IProps) {
 
   const transformedListRef = React.useRef<string>('');
 
-  const isThinkDone = thinkDone || ![IMessageState.Answer, IMessageState.Query].includes(messageState);
+  const isThinkDone = thinkDone || ![IMessageState.Answer, IMessageState.Query].includes(messageState) || isHistoryMsg;
 
   const updateMessageList = useCallback(
     (path: string, val: any) => {
