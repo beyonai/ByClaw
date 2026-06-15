@@ -24,6 +24,7 @@ function TitleWriter({
 }) {
   const [displayText, setDisplayText] = useState<string[]>([]);
   const [displayColorText, setDisplayColorText] = useState<string[]>([]);
+  const [videoEnded, setVideoEnded] = useState(true);
 
   const runner = useRef<NodeJS.Timeout>(undefined);
 
@@ -31,6 +32,8 @@ function TitleWriter({
     const defaultIcon = getRuntimeActualUrl('beyond/assistant.png');
     return getSystemConfigByStorage().assistant || defaultIcon;
   }, []);
+
+  const getAssistantVideo = React.useMemo(() => getRuntimeActualUrl('beyond/assistant.mp4'), []);
 
   const loopFN = () => {
     setDisplayText([]);
@@ -102,7 +105,26 @@ function TitleWriter({
         </span>
         {fullText && <span className={styles.blinkWriter} />}
       </div>
-      {showAssistant && <img alt="" className={styles.assistant} src={getAssistantIcon} />}
+      {showAssistant && (
+        <div className={styles.assistant}>
+          <div className={styles.wrapper}>
+            <img alt="" src={getAssistantIcon} style={{ display: videoEnded ? 'block' : 'none', width: '100%' }} />
+            <video
+              src={getAssistantVideo}
+              autoPlay
+              muted
+              playsInline
+              loop
+              // onEnded={() => setVideoEnded(true)}
+              onLoadedData={() => setVideoEnded(false)}
+              style={{ display: videoEnded ? 'none' : 'block', width: '100%' }}
+              // eslint-disable-next-line react/no-unknown-property
+              fetchPriority="low"
+            />
+            {/* <div className={styles.tips}>点击查看版本详情</div> */}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

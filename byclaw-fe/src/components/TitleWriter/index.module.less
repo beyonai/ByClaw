@@ -15,6 +15,36 @@
     right: 0;
     bottom: 0;
     width: 150px;
+
+    .wrapper {
+      position: relative;
+      width: 100%;
+      .tips {
+        position: absolute;
+        top: 30px;
+        left: 0;
+        padding: 4px;
+        border-radius: 4px;
+        background-color: #d3dbf6;
+        padding: 2px 8px;
+        border-radius: 4px;
+        color: #fff;
+
+        transform: translateX(-70%);
+
+        // 右上角三角形,指向上方助手,构成聊天气泡
+        &::after {
+          content: '';
+          position: absolute;
+          top: 6px;
+          right: -11px;
+          border-left: 6px solid #d3dbf6;
+          border-right: 6px solid transparent;
+          border-bottom: 6px solid transparent;
+          border-top: 6px solid transparent;
+        }
+      }
+    }
   }
 
   .title {
