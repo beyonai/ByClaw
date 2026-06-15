@@ -61,7 +61,7 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
    * @param {IMessage} msg - 要更新或添加的消息对象
    */
   const updateMessage = useCallback(
-    (msg: IMessage, opt: { isAssign?: boolean } = {}) => {
+    (msg: IMessage, opt: { isAssign?: boolean; allowCreateSession?: boolean } = {}) => {
       const { isAssign = false } = opt;
       const targetSessionId = getTargetSessionId(msg);
       if (!targetSessionId) return msg;
@@ -72,7 +72,7 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
         type: 'messageStore/updateSessionMessageList',
         payload: {
           sessionId: targetSessionId,
-          allowCreateSession: targetSessionId === DRAFT_SESSION_ID,
+          allowCreateSession: opt.allowCreateSession ?? targetSessionId === DRAFT_SESSION_ID,
           // callback的形式，拿到reducer里面最新的messageList，以防连续调用updateMessage时，后者覆盖前者
           messageList: (messageList: IMessage[]) => {
             let list = [...(messageList || [])];

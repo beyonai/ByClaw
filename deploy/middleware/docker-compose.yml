@@ -60,8 +60,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./opensandbox-server.toml:/etc/opensandbox/config.toml:ro
+      - ${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}:${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}
     environment:
       - SANDBOX_CONFIG_PATH=/etc/opensandbox/config.toml
+      - BYCLAW_SANDBOX_VOLUME_BACKEND=${BYCLAW_SANDBOX_VOLUME_BACKEND:-minio-mount}
+      - BYCLAW_SANDBOX_FILE_VOLUME_ROOT=${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}
+      - BYCLAW_SANDBOX_FILE_VOLUME_TYPE=${BYCLAW_SANDBOX_FILE_VOLUME_TYPE:-bind}
     networks:
       - byclaw-network
     restart: unless-stopped

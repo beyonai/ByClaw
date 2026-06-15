@@ -39,6 +39,7 @@ enum FilterType {
 type ResourceCatalogMain = 'enterprise' | 'personal';
 
 const Draggable = withDrag(DragType.knowledgeBase);
+const PERSONAL_DEFAULT_OWNER_TYPE = 'personal_default';
 
 const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
   const { editable, onSelect, onDrilldown, keyword } = props;
@@ -134,6 +135,7 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
   // 每行菜单项
   const getDropdownMenuItems = (item: IKnowledgeBaseItem) => {
     const items = [];
+    const isDefaultPersonalKnowledge = item.ownerType === PERSONAL_DEFAULT_OWNER_TYPE;
     if (isUser) {
       if (`${item.isTop}` === '1') {
         items.push({ key: 'unpin', label: intl.formatMessage({ id: 'common.unpin' }) });
@@ -146,9 +148,11 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
     if (`${item?.createBy}` === `${userInfo.userId}`) {
       items.push(
         { key: 'detail', label: intl.formatMessage({ id: 'knowledgeDetail.detail' }) },
-        { key: 'rename', label: intl.formatMessage({ id: 'directoryManage.rename' }) },
-        { key: 'delete', label: intl.formatMessage({ id: 'common.delete' }) }
+        { key: 'rename', label: intl.formatMessage({ id: 'directoryManage.rename' }) }
       );
+      if (!isDefaultPersonalKnowledge) {
+        items.push({ key: 'delete', label: intl.formatMessage({ id: 'common.delete' }) });
+      }
     }
     return items;
   };
@@ -221,6 +225,9 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
                 message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
                 setKnowledgeBases((prev) => prev.filter((i) => i.resourceId !== optResourceId));
                 moduleEventEmitter.emit('REFRESH_KNOWLEDGE_BASE');
+              })
+              .catch((error) => {
+                message.error(String(error || intl.formatMessage({ id: 'common.deleteFail' })));
               })
               .finally(resolve);
           }),

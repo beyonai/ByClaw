@@ -251,9 +251,39 @@
   gap: 12px;
 }
 
+.tokenInput {
+  width: 140px;
+}
+
+.apiTokenWrap {
+  width: 100%;
+}
+
+.apiTokenInput {
+  flex: 1;
+}
+
+.clickable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.fullWidth {
+  width: 100%;
+}
+
+.gridColSpan3 {
+  grid-column: span 3;
+}
+
 .sliderWrap {
   flex: 1;
+  min-width: 0;
   padding: 0 4px;
+
+  :global(.@{antPrefix}-slider) {
+    max-width: 100%;
+  }
 }
 
 .codePanel {

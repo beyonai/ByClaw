@@ -53,6 +53,8 @@ if (Test-Path $envFile) {
     }
 }
 
+. "$PSScriptRoot\storage-profile.ps1"
+
 # Determine project name
 $callerDir = Split-Path -Leaf (Get-Location)
 switch ($callerDir) {

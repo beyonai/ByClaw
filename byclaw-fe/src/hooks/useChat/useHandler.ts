@@ -343,7 +343,7 @@ function useHandler(props: IProps) {
 
         try {
           const jsonObj = JSON.parse(jsonStr);
-          if (!jsonObj?.command?.startsWith('opencli ')) return onionsProps;
+          if (!jsonObj?.command?.startsWith('bycli')) return onionsProps;
         } catch (error) {
           return onionsProps;
         }

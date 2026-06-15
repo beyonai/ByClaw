@@ -6,7 +6,7 @@ import { DEFAULT_MENU_CONFIG, getVisibleMenuKeysFromConfig } from '@/constants/s
 const defaultVisibleKeys = getVisibleMenuKeysFromConfig(DEFAULT_MENU_CONFIG);
 
 const useVisibleMenuKeys = (userInfo: any) => {
-  const [visibleKeys, setVisibleKeys] = useState<string[]>(defaultVisibleKeys);
+  const [visibleKeys, setVisibleKeys] = useState<string[]>([]);
 
   useEffect(() => {
     if (!userInfo) {
@@ -27,9 +27,15 @@ const useVisibleMenuKeys = (userInfo: any) => {
         if (Array.isArray(configData) && configData.length > 0) {
           const visibleMenuKeys = getVisibleMenuKeysFromConfig(configData);
           setVisibleKeys(visibleMenuKeys);
+        } else {
+          setVisibleKeys(defaultVisibleKeys);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (active) {
+          setVisibleKeys(defaultVisibleKeys);
+        }
+      });
 
     return () => {
       active = false;

@@ -214,24 +214,17 @@ public class AssistantChatApplicationService {
         // 校验文件数量和文件大小
         long maxFileCount = fileUpload.getMaxFileCount();
         long maxFileSizeMB = fileUpload.getMaxFileSize();
-        List<String> allowedFileTypes = fileUpload.getAllowedFileTypes();
         if (files.length > maxFileCount) {
             throw new BaseException(I18nUtil.get("file.upload.count.exceeded", maxFileCount, files.length));
         }
 
-        // 校验文件大小和文件类型
+        // 校验文件大小（文件类型不做限制）
         for (MultipartFile multipartFile : files) {
             long size = multipartFile.getSize();
             if (size > (maxFileSizeMB * 1024 * 1024)) {
                 // 将字节转换为MB，格式化在国际化文件中定义
                 double sizeMB = size / 1024.0 / 1024.0;
                 throw new BaseException(I18nUtil.get("file.upload.size.exceeded", maxFileSizeMB, sizeMB));
-            }
-
-            String fileSuffix = StringUtil.getFileSuffix(multipartFile.getOriginalFilename());
-            if (!allowedFileTypes.contains(fileSuffix)) {
-                String error = I18nUtil.get("file.upload.type.not.supported", StringUtils.join(allowedFileTypes, ","));
-                throw new BaseException(error);
             }
         }
     }

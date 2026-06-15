@@ -20,7 +20,6 @@ import type { IFile } from '@/typescript/file';
 import queryStyles from '../index.module.less';
 import styles from './index.module.less';
 import MentionPopover from '../RichInput/mentionPopover';
-import { RichInputRef } from '../RichInput';
 import { IChatSettingValue } from '@/typescript/cloud';
 import { agentTypeMap } from '@/constants/agent';
 
@@ -222,11 +221,6 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
     );
   };
 
-  onSelectMentionPopoverItem: RichInputRef['insertItem'] = (item, type) => {
-    this.richInputRef.current?.insertItem(item, type);
-    this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }));
-  };
-
   onSwitchOnlineSearch = () => {
     const { employeesList } = this.props;
     const { EventEmitter } = this.props.globalContext;
@@ -356,6 +350,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
           {this.checkCanUploadFile() && (
             <UploadFile
               ref={this.uploadFileRef}
+              accept={this.getUploadFileAccept()}
               beforeUpload={this.checkIsFilesValid}
               extendsPayload={{
                 agentId,
@@ -380,7 +375,6 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
                   },
                 });
               }}
-              accept={this.getUploadFileAccept()}
             />
           )}
           {this.STTRender()}

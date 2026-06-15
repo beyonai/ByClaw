@@ -9,6 +9,7 @@ import type { OpenClawPluginApi } from "@openclaw/plugin-sdk/core";
 
 const ACTIVE_SDK_COMPLETION_STATE = Symbol.for("openclaw.byaiChannel.activeSdkCompletionState");
 const ACTIVE_SDK_COMPLETION_DEBOUNCE_MS = 200;
+const ACTIVE_SDK_ERROR_COMPLETION_DEBOUNCE_MS = 1500;
 
 type ActiveSdkCompletionEntry = {
   token: number;
@@ -31,6 +32,15 @@ function getActiveSdkCompletionState(): ActiveSdkCompletionState {
   return globalState[ACTIVE_SDK_COMPLETION_STATE];
 }
 
+export function resolveActiveSdkCompletionDebounceMs(reason: string): number {
+  // OpenClaw emits a failed candidate's lifecycle error before the model
+  // fallback_step event. Keep error completion open long enough for the fallback
+  // lifecycle to cancel it, while successful/message_sent paths stay snappy.
+  return reason === "root_lifecycle_error"
+    ? ACTIVE_SDK_ERROR_COMPLETION_DEBOUNCE_MS
+    : ACTIVE_SDK_COMPLETION_DEBOUNCE_MS;
+}
+
 export function scheduleActiveSdkCompletionCheck(
   api: OpenClawPluginApi,
   sessionKey: string | undefined,
@@ -48,7 +58,6 @@ export function scheduleActiveSdkCompletionCheck(
   }
   current.timer = setTimeout(() => {
     void enqueueAfterAgentEvents(
-      api,
       `active sdk completion check sessionKey=${sessionKey}`,
       async () => {
         const latestEntry = state.entries.get(sessionKey);
@@ -73,7 +82,7 @@ export function scheduleActiveSdkCompletionCheck(
         state.entries.delete(sessionKey);
       },
     );
-  }, ACTIVE_SDK_COMPLETION_DEBOUNCE_MS);
+  }, resolveActiveSdkCompletionDebounceMs(reason));
   state.entries.set(sessionKey, current);
 }
 

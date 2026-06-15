@@ -73,6 +73,11 @@ export default {
   'refineModal.abilityNamePlaceholder': '能力{index}名称',
   'refineModal.abilityDescPlaceholder': '请输入能力描述',
   'refineModal.workStandard': '工作规范',
+  'refineModal.step.basic': '基础信息',
+  'refineModal.step.persona': '角色与人设',
+  'refineModal.step.workflow': '工作规范',
+  'refineModal.step.style': '沟通风格',
+  'refineModal.progress': '已完成 {done} / {total} 项',
 
   // 员工详情
   'employeeDetail.refine': '一键完善',

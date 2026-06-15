@@ -2,7 +2,6 @@ package com.iwhalecloud.byai.common.log.util;
 
 import static com.iwhalecloud.byai.common.log.exception.ServiceCode.REQUEST_ID;
 
-import org.slf4j.MDC;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import com.alibaba.ttl.TransmittableThreadLocal;
@@ -34,9 +33,6 @@ public final class RequestContextUtil {
         if (requestId != null) {
             // 1. 设置到 ThreadLocal
             REQUEST_ID_HOLDER.set(requestId);
-
-            // 2. 设置到 MDC（日志自动输出）
-            MDC.put(REQUEST_ID, String.valueOf(requestId));
         }
     }
 
@@ -93,7 +89,6 @@ public final class RequestContextUtil {
      */
     public static void clear() {
         REQUEST_ID_HOLDER.remove();
-        MDC.remove(REQUEST_ID);
     }
 
 }

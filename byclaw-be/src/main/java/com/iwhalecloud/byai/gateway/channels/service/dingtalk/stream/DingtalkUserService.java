@@ -233,7 +233,7 @@ public class DingtalkUserService {
         return senderStaffId;
     }
 
-    private void saveUserExternalSystem(
+    public void saveUserExternalSystem(
             String unionId, Long userId,
             OapiV2UserGetResponse.UserGetResponse userDetail) {
         if (unionId == null || unionId.isBlank() || userId == null || userDetail == null) {

@@ -22,6 +22,18 @@ public class ResourceUseAuthQo extends AuthQo implements Serializable {
     private Long catalogId;
 
     /**
+     * 授权对象类型：USER、ORG、POST、STATION。
+     */
+    @ApiModelProperty(value = "授权对象类型", required = false)
+    private String grantToObjType;
+
+    /**
+     * 授权对象标识。
+     */
+    @ApiModelProperty(value = "授权对象标识", required = false)
+    private Long grantToObjId;
+
+    /**
      * 后端按 catalogId 展开后的当前目录及子目录 ID。
      */
     private List<Long> catalogIds;

@@ -60,13 +60,6 @@ jest.mock('@/hooks/useTracker', () => ({
   }),
 }));
 
-jest.mock('@/utils/websocket', () => ({
-  __esModule: true,
-  default: {
-    clearNotification: jest.fn(),
-  },
-}));
-
 const session = {
   sessionId: 'session-1',
   sessionName: '会话 1',
@@ -88,7 +81,6 @@ describe('DialogueCard', () => {
     act(() => {
       chatSessionRuntimeManager.register({
         clientRequestId: 'request-1',
-        answerClientMsgId: 'message-1',
         sessionId: 'session-1',
       });
     });

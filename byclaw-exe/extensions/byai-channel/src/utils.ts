@@ -1,4 +1,5 @@
 
+import { createRedis, GatewayDataEmitter, SseMessageType } from "@byclaw/by-framework";
 import { getByaiRuntime } from "./runtime";
 
 let prevEmitIncrementKey = '';
@@ -96,4 +97,70 @@ export function getAgentDetailById(id?: string) {
 export function getAgentNameById(id?: string) {
   const detail = getAgentDetailById(id);
   return detail?.name ?? "";
+}
+
+
+export function getUserCode(): string | null {
+  const code = String(process.env.USER_CODE ?? "").trim();
+  return code || null;
+}
+
+export function getRedisInfo() {
+  const { REDIS_USERNAME, REDIS_PASSWORD, REDIS_HOST, REDIS_PORT, REDIS_DATABASE } = process.env;
+  if (!REDIS_HOST || !REDIS_PORT) {
+    return null;
+  }
+  return {
+    username: REDIS_USERNAME,
+    password: REDIS_PASSWORD,
+    host: REDIS_HOST,
+    port: parseInt(REDIS_PORT, 10),
+    db: parseInt(REDIS_DATABASE || "0", 10),
+  };
+}
+
+function normalizeId(value: unknown): string {
+  return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+}
+
+async function getUserId(userCode: string, redis: ReturnType<typeof createRedis>) {
+  if (!userCode || !redis) {
+    return "";
+  }
+  const userId = await redis.get(`SHARE_BFM_USER_CODE_${userCode}`)
+  return normalizeId(userId);
+}
+
+export async function emitOutOfBandSdkEvent(params: {
+  sessionId?: string;
+  data: Record<string, any>;
+  eventType: string;
+}) {
+  const redisInfo = getRedisInfo();
+  if (!redisInfo) {
+    return;
+  }
+  const userCode = getUserCode();
+  if (!userCode) {
+    return;
+  }
+  const redis = createRedis(redisInfo);
+  const userId = await getUserId(userCode, redis);
+  const emitter = new GatewayDataEmitter(redis, {
+    dataStreamName: "byai_gateway:session_event:data_stream",
+  });
+  await emitter.emitEvent({
+    data: {
+      ...params.data,
+      userId,
+      userCode,
+      created: Math.floor(Date.now() / 1000),
+      contentType: SseMessageType.text,
+      id: crypto.randomUUID().replace(/-/g, '').toUpperCase(),
+    },
+    sessionId: params.sessionId || "",
+    traceId: crypto.randomUUID().replace(/-/g, '').toUpperCase(),
+    eventType: params.eventType,
+  });
+  redis.quit();
 }

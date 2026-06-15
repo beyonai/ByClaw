@@ -33,6 +33,10 @@ const SIDER_ACTIVE_TAB_BY_PATH: Partial<Record<string, (typeof tabItems)[number]
   '/knowledgeDetail': 'knowledge',
 };
 
+const HIDE_SIDER_CONTENT_PATHS: Record<string, boolean> = {
+  '/settings': true,
+};
+
 const getCurrentTabByPathname = (pathname: string) => {
   const matchedTabKey = Object.entries(SIDER_ACTIVE_TAB_BY_PATH).find(([path]) => pathname.startsWith(path))?.[1];
 
@@ -41,6 +45,11 @@ const getCurrentTabByPathname = (pathname: string) => {
   }
 
   return tabItems.find((item) => item.navigatePath && pathname.startsWith(item.navigatePath));
+};
+
+const isHideSiderContentPath = (pathname: string) => {
+  const normalizedPathname = pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
+  return Boolean(HIDE_SIDER_CONTENT_PATHS[normalizedPathname || pathname]);
 };
 
 const Sidebar = () => {
@@ -68,8 +77,8 @@ const Sidebar = () => {
   const intl = useIntl();
   const currentTab = React.useMemo(() => getCurrentTabByPathname(pathname), [pathname]);
   const shouldHideSiderContent = React.useMemo(() => {
-    return Boolean(currentTab?.hideSider);
-  }, [currentTab]);
+    return Boolean(currentTab?.hideSider || isHideSiderContentPath(pathname));
+  }, [currentTab, pathname]);
   const [activeKey, setActiveKey] = React.useState<(typeof tabItems)[number]['key']>(
     () => currentTab?.key ?? DEF_SIDER
   );

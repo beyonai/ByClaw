@@ -48,7 +48,7 @@ import ToolSelectorModal from './ToolSelectorModal';
 import { compressImgFileAndUpload } from '@/pages/manager/utils/file';
 import { Image } from '@/pages/manager/components/Image';
 import { getAvatarUrl } from '@/pages/manager/utils/agent';
-import UploadFileConfig from './UploadFileConfig';
+// import UploadFileConfig from './UploadFileConfig';
 import styles from './index.module.less';
 import pStyles from '../index.module.less';
 import { DEFAULT_PERSONALITY_DEFINITION } from '../personalityDefinitionDefault';
@@ -169,6 +169,24 @@ const mapTemplatePromptsToConfigList = (prompts: any[] = [], templateKey?: strin
     tip: item?.tip || '',
   }));
 
+const normalizePromptConfigKey = (key?: string, item: any = {}) => {
+  const candidates = [key, item?.name, item?.nameEn, item?.paramName, item?.paramEnName].filter(Boolean);
+  if (candidates.some((value) => ['agent', '工作规范', 'Work Specification'].includes(value))) return 'agent';
+  if (
+    candidates.some((value) =>
+      ['persona', 'soul', 'corePersonaDefinition', '人格定义', 'Persona', 'Personality Definition'].includes(value)
+    )
+  ) {
+    return 'soul';
+  }
+  if (candidates.some((value) => ['tool', 'tools', '工具规范', 'Tool Specification'].includes(value))) return 'tools';
+  if (candidates.some((value) => ['memory', '记忆规范', 'Memory Specification'].includes(value))) return 'memory';
+  return key;
+};
+
+const getPromptConfigKey = (item: any = {}) =>
+  normalizePromptConfigKey(item.promptKey || item.key || item.paramEnName || item.paramName, item);
+
 const parseCorePersonaDefinition = (value: string, isEN?: boolean) => {
   const tabs: Array<{ key: string; name: string; isSystem: boolean; tip?: string }> = [];
   const fieldValues: Record<string, string> = {};
@@ -186,6 +204,8 @@ const parseCorePersonaDefinition = (value: string, isEN?: boolean) => {
       corePersonaData.forEach((item) => {
         if (!item?.key) return;
 
+        const key = normalizePromptConfigKey(item.key, item);
+
         let itemValue = item.value || '';
         if (typeof itemValue === 'string') {
           itemValue = parseJsonRecursively(itemValue);
@@ -194,9 +214,9 @@ const parseCorePersonaDefinition = (value: string, isEN?: boolean) => {
           }
         }
 
-        fieldValues[item.key] = itemValue;
+        fieldValues[key] = itemValue;
         tabs.push({
-          key: item.key,
+          key,
           name: isEN ? item.nameEn || item.name || item.key : item.name || item.key,
           isSystem: false,
           tip: item.tip || '',
@@ -216,7 +236,7 @@ const buildTemplatePromptConfig = (templateList: any[] = [], isEN?: boolean) => 
   const tabs: Array<{ key: string; name: string; isSystem: boolean; tip?: string }> = [];
 
   templateList.forEach((item) => {
-    const key = item.paramEnName || item.paramName;
+    const key = getPromptConfigKey(item);
     const value = (item.paramValue || '').replace(/\\n/g, '\n');
     const displayName = isEN ? item.paramEnName || item.paramName || key : item.paramName || key;
     tabs.push({
@@ -405,7 +425,7 @@ const ConfigForm = (props) => {
         });
         if (!mounted) return;
 
-        const list = parseConfigList(res?.paramValue || res?.data?.paramValue || res?.data || res);
+        const list = parseConfigList(res?.paramValue);
         setBundledSkillOptions(
           list
             .map((item) => ({
@@ -677,9 +697,9 @@ const ConfigForm = (props) => {
     if (!Array.isArray(templateData) || templateData.length === 0) return;
 
     const parsedConfig = parseCorePersonaDefinition(corePersonaDefinitionValue, isEN);
-    const templateKeys = templateData.map((item) => item.paramEnName || item.paramName).filter(Boolean);
+    const templateKeys = templateData.map((item) => getPromptConfigKey(item)).filter(Boolean);
     const templateTipMap = templateData.reduce((result, item) => {
-      const key = item.paramEnName || item.paramName;
+      const key = getPromptConfigKey(item);
       if (key && item.tip) {
         result[key] = item.tip;
       }
@@ -872,7 +892,7 @@ const ConfigForm = (props) => {
           current[key] ||
           (key === 'customPromptTabs' ? [] : key === 'customPromptValues' ? {} : key === 'bundledSkills' ? [] : '');
       });
-      roleObj.roleAttributes = current.roleAttributes || current.workStandard || '';
+      roleObj.roleAttributes = current.roleAttributes || current.workStandard || current.agent || '';
 
       // 将所有配置存成 JSON 放到 corePersonaDefinition 字段（数组格式）
       const corePersonaDefinition: Array<{ name: string; nameEn?: string; key: string; value: string; tip?: string }> =
@@ -884,11 +904,12 @@ const ConfigForm = (props) => {
       // 尝试从模板数据中获取字段映射
       if (templateData && Array.isArray(templateData)) {
         templateData.forEach((item: any) => {
-          if (item.paramEnName && item.paramName) {
-            fieldNameMap[item.paramEnName] = {
+          const key = getPromptConfigKey(item);
+          if (key && item.paramName) {
+            fieldNameMap[key] = {
               name: item.paramName,
               nameEn: item.paramEnName,
-              key: item.paramEnName,
+              key,
               tip: item.tip,
             };
           }
@@ -1850,7 +1871,7 @@ const ConfigForm = (props) => {
               </Radio.Group>
             </Form.Item> */}
             {/* {(digitalType === 'FROM_THIRD' || digitalType === 'FROM_SANDBOX') && ( */}
-            <UploadFileConfig isOutsideSkills prologueRef={prologueRef} isReadOnly={isReadOnly} />
+            {/* <UploadFileConfig isOutsideSkills prologueRef={prologueRef} isReadOnly={isReadOnly} /> */}
             {/* )} */}
             {/* {digitalType === 'FROM_MANUALLY' && ( */}
             <>
@@ -2428,7 +2449,7 @@ const ConfigForm = (props) => {
                 // 数组格式：[{name, key, value}, ...]
                 corePersonaData.forEach((item) => {
                   if (item && item.key) {
-                    const key = item.key;
+                    const key = normalizePromptConfigKey(item.key, item);
                     // 解析 value 字段（处理多层转义）
                     let value = item.value;
                     if (typeof value === 'string') {
@@ -2452,9 +2473,10 @@ const ConfigForm = (props) => {
                 });
               } else if (typeof corePersonaData === 'object' && corePersonaData !== null) {
                 // 兼容旧的对象格式：{key: value, ...}
-                Object.keys(corePersonaData).forEach((key) => {
-                  if (corePersonaData[key]) {
-                    let value = corePersonaData[key];
+                Object.keys(corePersonaData).forEach((rawKey) => {
+                  const key = normalizePromptConfigKey(rawKey);
+                  if (corePersonaData[rawKey]) {
+                    let value = corePersonaData[rawKey];
                     if (typeof value === 'string') {
                       value = parseJsonRecursively(value);
                       if (typeof value !== 'string') {
@@ -2491,14 +2513,24 @@ const ConfigForm = (props) => {
               coreCompetencies: coreCompetenciesFromTpl,
               abilityBoundary: data.constraints || '',
               exampleQuestions: faqsText,
-              roleAttributes: data.roleAttributes || data.workStandard || parsedSystemFields.workStandard || '',
+              roleAttributes:
+                data.roleAttributes ||
+                data.workStandard ||
+                parsedSystemFields.workStandard ||
+                parsedSystemFields.agent ||
+                '',
               processingFlow: data.processingFlow || '',
               personalityDimensions: data.personalityDimensions || '',
               wordPreferences: data.wordPreferences || '',
               sentenceAndTone: data.sentenceAndTone || '',
-              workStandard: data.workStandard || data.roleAttributes || parsedSystemFields.workStandard || '',
+              workStandard:
+                data.workStandard ||
+                data.roleAttributes ||
+                parsedSystemFields.workStandard ||
+                parsedSystemFields.agent ||
+                '',
               corePersonaDefinition: corePersonaDefinitionValue,
-              toolStandard: data.toolStandard || parsedSystemFields.toolStandard || '',
+              toolStandard: data.toolStandard || parsedSystemFields.toolStandard || parsedSystemFields.tools || '',
               memoryStandard: data.memoryStandard || parsedSystemFields.memoryStandard || '',
               questionRewrite: data.questionRewrite || parsedSystemFields.questionRewrite || '',
               questionDecomposition: data.questionDecomposition || parsedSystemFields.questionDecomposition || '',
@@ -2507,6 +2539,7 @@ const ConfigForm = (props) => {
               comprehensiveAnswer: data.comprehensiveAnswer || parsedSystemFields.comprehensiveAnswer || '',
               customPromptTabs,
               customPromptValues,
+              ...parsedSystemFields,
             });
 
             // 同步 abilityDesc 与 role JSON
@@ -2543,6 +2576,7 @@ const ConfigForm = (props) => {
             roleObj.singleSummary = data.singleSummary || '';
             roleObj.multipleSummary = data.multipleSummary || '';
             roleObj.comprehensiveAnswer = data.comprehensiveAnswer || '';
+            Object.assign(roleObj, parsedSystemFields);
 
             form.setFieldsValue({
               abilityDesc: JSON.stringify(abilityDescObj),

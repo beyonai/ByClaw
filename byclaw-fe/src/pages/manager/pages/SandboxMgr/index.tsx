@@ -8,6 +8,7 @@ import {
   PlusOutlined,
   EditOutlined,
   RocketOutlined,
+  ClearOutlined,
 } from '@ant-design/icons';
 import { trim } from 'lodash';
 import {
@@ -28,8 +29,9 @@ import {
   Form,
   Modal,
 } from 'antd';
-import { useIntl, useDispatch, useSearchParams, useSelector } from '@umijs/max';
+import { useIntl, useDispatch, useSelector } from '@umijs/max';
 import ModalDrawer from '@/pages/manager/components/ModalDrawer';
+import { getPreferredServiceKey, removePreferredServiceKey } from '@/pages/manager/service/SandboxMgr';
 import { isAdminVip } from '@/pages/manager/utils/auth';
 
 import styles from './index.module.less';
@@ -91,9 +93,8 @@ interface ServiceSpecItem {
 const SandboxMgr = () => {
   const intl = useIntl();
   const dispatch = useDispatch();
-  const [searchParams] = useSearchParams();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
-  const showLaunchButton = searchParams.get('spec') === '1' && isAdminVip(userInfo);
+  const showLaunchButton = isAdminVip(userInfo);
   const [pageInfo, setPageInfo] = useState({ pageIndex: 1, pageSize: 20, total: 0, totalPage: 0 });
   const [keyword, setKeyword] = useState('');
   const [status, setStatus] = useState('RUNNING');
@@ -117,6 +118,7 @@ const SandboxMgr = () => {
   const [launchForm] = Form.useForm();
   const [launching, setLaunching] = useState(false);
   const [launchSpecList, setLaunchSpecList] = useState<ServiceSpecItem[]>([]);
+  const [preferredMap, setPreferredMap] = useState<Record<string, string>>({});
 
   const refreshTimer = useRef<NodeJS.Timeout | null>(null);
   const curParam = useRef<{ pageIndex?: number; pageSize?: number; keyword?: string; status?: string }>({});
@@ -186,6 +188,32 @@ const SandboxMgr = () => {
     loadData(pageInfo, keyword, status);
   }, []);
 
+  // Load preferred serviceKey for each unique userCode in the list
+  useEffect(() => {
+    const userCodes = [...new Set(list.map((r) => r.userCode).filter(Boolean))];
+    if (!userCodes.length) return;
+    userCodes.forEach(async (code) => {
+      try {
+        const res: any = await getPreferredServiceKey(code);
+        const key = res?.code === 0 && typeof res.data === 'string' ? res.data : null;
+        if (key) {
+          setPreferredMap((prev) => ({ ...prev, [code]: key }));
+        } else {
+          setPreferredMap((prev) => {
+            if (prev[code]) {
+              const next = { ...prev };
+              delete next[code];
+              return next;
+            }
+            return prev;
+          });
+        }
+      } catch {
+        // ignore
+      }
+    });
+  }, [list]);
+
   const handleSearch = useCallback(() => {
     loadData({ ...pageInfo, pageIndex: 1 }, keyword, status);
   }, [loadData, pageInfo, keyword, status]);
@@ -233,7 +261,22 @@ const SandboxMgr = () => {
   );
 
   const handleView = useCallback((endpoint: string) => {
-    window.open(endpoint, '_blank');
+    // openclaw 控制台把 gatewayUrl/token 持久化在同源共享的 localStorage(openclaw.control.settings.v1)。
+    // 整页代理下所有 sandbox 同源，仅靠 URL 的 token 不够：若不显式覆盖 gatewayUrl，
+    // 第二次打开会复用上一次残留的 gatewayUrl，连到上一个 sandbox（端口串台）。
+    // 这里在打开 URL 上补上本 endpoint 对应的 gatewayUrl（ws(s)://当前host/代理前缀），强制覆盖残留。
+    try {
+      const url = new URL(endpoint, window.location.origin);
+      // 代理前缀：endpoint 路径去掉末尾的 /chat，即 /byaiService/openclaw-ui/{ip}/{port}
+      const proxyPrefix = url.pathname.replace(/\/chat$/, '');
+      // gatewayUrl 与 endpoint 同 host/同源，仅协议换成 ws(s)，避免与 endpoint 的 host 不一致。
+      const wsProto = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      const gatewayUrl = `${wsProto}//${url.host}${proxyPrefix}`;
+      url.searchParams.set('gatewayUrl', gatewayUrl);
+      window.open(url.toString(), '_blank');
+    } catch {
+      window.open(endpoint, '_blank');
+    }
   }, []);
 
   const canReleaseSandbox = useCallback((record: SsSandboxRecord) => RELEASABLE_STATUSES.includes(record.status), []);
@@ -397,6 +440,24 @@ const SandboxMgr = () => {
     });
   }, [dispatch, launchForm, loadData, pageInfo, keyword, status]);
 
+  const handleClearPreferred = useCallback(
+    async (userCode: string) => {
+      if (!trim(userCode)) return;
+      try {
+        await removePreferredServiceKey({ userCode: trim(userCode) });
+        setPreferredMap((prev) => {
+          const next = { ...prev };
+          delete next[userCode];
+          return next;
+        });
+        message.success(intl.formatMessage({ id: 'sandboxMgr.launch.preferredCleared' }));
+      } catch {
+        message.error(intl.formatMessage({ id: 'sandboxMgr.launch.preferredClearFailed' }));
+      }
+    },
+    [intl]
+  );
+
   const columns = [
     {
       title: intl.formatMessage({ id: 'sandboxMgr.table.id' }),
@@ -418,7 +479,25 @@ const SandboxMgr = () => {
       title: intl.formatMessage({ id: 'sandboxMgr.table.sandboxType' }),
       dataIndex: 'sandboxType',
       align: 'center' as const,
-      width: 140,
+      width: 200,
+      render: (value: string, record: SsSandboxRecord) => {
+        const preferred = preferredMap[record.userCode];
+        return (
+          <Space size={4}>
+            <span>{value || '-'}</span>
+            {preferred && (
+              <Popconfirm
+                title={`${intl.formatMessage({ id: 'sandboxMgr.launch.preferredServiceKey' })}: ${preferred}`}
+                onConfirm={() => handleClearPreferred(record.userCode)}
+              >
+                <Tag color="blue" style={{ cursor: 'pointer', marginLeft: 4 }}>
+                  <ClearOutlined />
+                </Tag>
+              </Popconfirm>
+            )}
+          </Space>
+        );
+      },
     },
     {
       title: intl.formatMessage({ id: 'sandboxMgr.table.resourceId' }),

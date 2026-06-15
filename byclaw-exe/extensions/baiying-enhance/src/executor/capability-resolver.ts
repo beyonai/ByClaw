@@ -1,7 +1,7 @@
 import type { Capability, CapabilityMcp, ResourceContext } from "./types.js";
 import { asString, isRecord } from "./types.js";
 import type { AuthContext } from "./auth.js";
-import { normalizeCustomHeaders } from "./auth.js";
+import { normalizeCustomHeaders, resolveCapabilityHeaderPlaceholdersInPlace } from "./auth.js";
 import { loadCapabilityDetails } from "./local-snapshot.js";
 import {
   buildCapabilityFromResourceContext,
@@ -16,6 +16,7 @@ import {
   normalizeResourceId,
   normalizeResourceType,
 } from "./resource-type.js";
+import type { BaiyingEnhanceLogger } from "./debug-channel.js";
 
 type FetchLike = typeof fetch;
 
@@ -81,6 +82,7 @@ export async function resolveCapability(params: {
   authContext: AuthContext;
   session?: string;
   fetchImpl?: FetchLike;
+  logger?: BaiyingEnhanceLogger;
 }): Promise<{ capability: Capability | null; resolvedType: string | null }> {
   const { capabilityId } = params;
   let resourceType = params.resourceType ?? null;
@@ -176,6 +178,12 @@ export async function resolveCapability(params: {
   }
 
   if (capability) {
+    await resolveCapabilityHeaderPlaceholdersInPlace({
+      capability,
+      authContext: params.authContext,
+      logger: params.logger,
+    });
+
     const capType = normalizeResourceType(capability.resource_type);
     if (capType === "object" || capType === "view") {
       // OBJECT / VIEW MCP lives on the datacloud-data-service, whose

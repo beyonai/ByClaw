@@ -6,6 +6,7 @@ jest.mock('../auth', () => ({
 
 describe('utils/websocket', () => {
   let socketInstance: any;
+  let socketInstances: any[];
   let WebSocketMock: any;
   let consoleLogSpy: jest.SpyInstance;
   let consoleWarnSpy: jest.SpyInstance;
@@ -15,6 +16,10 @@ describe('utils/websocket', () => {
     jest.resetModules();
     jest.clearAllMocks();
     jest.useFakeTimers();
+    const previousManager = (globalThis as any).__BYCLAW_WEBSOCKET_MANAGER__;
+    previousManager?.dispose?.();
+    delete (globalThis as any).__BYCLAW_WEBSOCKET_MANAGER__;
+    socketInstances = [];
     consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -37,6 +42,7 @@ describe('utils/websocket', () => {
         onclose: null,
         onerror: null,
       };
+      socketInstances.push(socketInstance);
       return socketInstance;
     });
     WebSocketMock.OPEN = 1;
@@ -44,6 +50,9 @@ describe('utils/websocket', () => {
   });
 
   afterEach(() => {
+    const manager = (globalThis as any).__BYCLAW_WEBSOCKET_MANAGER__;
+    manager?.dispose?.();
+    delete (globalThis as any).__BYCLAW_WEBSOCKET_MANAGER__;
     jest.useRealTimers();
     process.env.NODE_ENV = originalEnv;
     consoleLogSpy.mockRestore();
@@ -91,34 +100,27 @@ describe('utils/websocket', () => {
     expect(socketInstance.send).toHaveBeenCalledWith(JSON.stringify({ type: 'NOTIFICATION' }));
   });
 
-  it('dispatches incoming messages to callbacks and registered handlers', () => {
+  it('dispatches incoming messages to registered handlers', () => {
     mockGetToken.mockReturnValue('token-1');
     const ws = require('../websocket').default;
-    const onNotificationChange = jest.fn();
-    const onAddNotificationSessionCb = jest.fn();
     const handler = jest.fn();
 
-    ws.setOnNotificationChange(onNotificationChange);
-    ws.setOnAddNotificationSessionCb(onAddNotificationSessionCb);
-    ws.onMessage('CUSTOM', handler);
+    ws.onMessage('NOTIFICATION', handler);
 
     ws.disconnect();
     ws.init();
 
     socketInstance.onmessage({
       data: JSON.stringify({
-        type: 'CUSTOM',
+        type: 'NOTIFICATION',
         session: { sessionId: '1' },
       }),
     });
 
-    expect(onNotificationChange).toHaveBeenCalledWith(true);
-    expect(onAddNotificationSessionCb).toHaveBeenCalledWith({ sessionId: '1' });
-    expect(handler).toHaveBeenCalledWith({ type: 'CUSTOM', session: { sessionId: '1' } });
-    expect(ws.getHasNotification()).toBe(true);
+    expect(handler).toHaveBeenCalledWith({ type: 'NOTIFICATION', session: { sessionId: '1' } });
   });
 
-  it('clears notification state and disconnect tears down timers and socket', () => {
+  it('disconnect tears down timers and socket', () => {
     mockGetToken.mockReturnValue('token-1');
     const ws = require('../websocket').default;
 
@@ -126,11 +128,36 @@ describe('utils/websocket', () => {
     ws.init();
     socketInstance.onopen();
 
-    ws.clearNotification();
-    expect(ws.getHasNotification()).toBe(false);
-
     ws.disconnect();
     expect(socketInstance.close).toHaveBeenCalled();
     expect(ws.getConnectionStatus()).toBe('disconnected');
+  });
+
+  it('ignores stale socket events after a newer connection is created', () => {
+    mockGetToken.mockReturnValue('token-1');
+    const ws = require('../websocket').default;
+    const handler = jest.fn();
+
+    ws.onMessage('NOTIFICATION', handler);
+
+    ws.disconnect();
+    ws.init();
+    const staleSocket = socketInstances[0];
+
+    ws.disconnect();
+    ws.init();
+    const currentSocket = socketInstances[1];
+
+    staleSocket.onmessage({
+      data: JSON.stringify({
+        type: 'NOTIFICATION',
+        session: { sessionId: 'stale' },
+      }),
+    });
+    staleSocket.onclose({ code: 1000, reason: 'stale close' });
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(ws.getConnectionStatus()).toBe('connected');
+    expect(currentSocket.close).not.toHaveBeenCalled();
   });
 });

@@ -17,6 +17,7 @@ import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.GatewayStreamEventProcessor;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentTypeResolver;
+import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
@@ -67,11 +68,15 @@ class RouteServiceTest {
         messageSource.addMessage("sandbox.launch.progress.start", Locale.SIMPLIFIED_CHINESE, "个人助理正在启动中，请等待");
         messageSource.addMessage("sandbox.launch.progress.waiting", Locale.SIMPLIFIED_CHINESE, "个人助理仍在启动中，请稍等");
         messageSource.addMessage("sandbox.launch.progress.failed", Locale.SIMPLIFIED_CHINESE, "沙箱启动失败，请联系管理员");
+        messageSource.addMessage("sandbox.launch.model.config.required", Locale.SIMPLIFIED_CHINESE,
+                "沙箱启动失败，模型参数配置不完整，请联系管理员");
         messageSource.addMessage("sandbox.launch.progress.start", Locale.US, "Your personal assistant is starting up, please wait.");
         messageSource.addMessage("sandbox.launch.progress.waiting", Locale.US,
                 "Your personal assistant is still starting up, please wait a moment.");
         messageSource.addMessage("sandbox.launch.progress.failed", Locale.US,
                 "Sandbox startup failed, please contact the administrator.");
+        messageSource.addMessage("sandbox.launch.model.config.required", Locale.US,
+                "Sandbox startup failed because model parameters are incomplete. Please contact the administrator.");
         when(jwtService.createJwt(any())).thenReturn("test-beyond-token");
 
         routeService = new RouteService();
@@ -188,6 +193,31 @@ class RouteServiceTest {
     }
 
     @Test
+    void route_emitsModelConfigMessage_whenSandboxRestartFailsWithBusinessException() {
+        ChatProcessContext ctx = buildContext();
+        when(sequenceService.nextVal()).thenReturn(100L);
+        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+                .thenThrow(new BdpRuntimeException(I18nUtil.get("sandbox.launch.model.config.required")));
+
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenReturn(failedResponse(ExecutionStatus.ERR_AGENT_TYPE_UNAVAILABLE, "agent unavailable"));
+
+        assertThatThrownBy(() -> routeService.route(ctx))
+                .isInstanceOf(BdpRuntimeException.class)
+                .hasMessage("沙箱启动失败，模型参数配置不完整，请联系管理员");
+
+        org.assertj.core.api.Assertions.assertThat(output(ctx))
+                .contains("reasoningLogStart")
+                .contains("reasoningLogEnd")
+                .contains("沙箱启动失败，模型参数配置不完整，请联系管理员")
+                .doesNotContain("沙箱启动失败，请联系管理员");
+        verify(gatewayClient, times(1)).sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any());
+        verify(sandboxService, never()).waitWorkerReadySync(anyString(), anyLong());
+    }
+
+    @Test
     void route_retriesByclawCodeSandboxWithUserScopedTargetAgentType() throws Exception {
         ChatProcessContext ctx = buildContext(WorkerAgentType.BYCLAW_CODE.getCode(), 123L);
         when(sequenceService.nextVal()).thenReturn(100L);
@@ -258,7 +288,7 @@ class RouteServiceTest {
         ctx.setSessionId(3L);
         ctx.setUserMessageId(1L);
         ctx.setModelAnswerMessageId(2L);
-        ctx.setTraceId("1_2");
+        ctx.setTraceId(TraceIdCodec.encode(ctx.getUserMessageId(), ctx.getModelAnswerMessageId()));
         ctx.setParams(new HashMap<>());
         ctx.getParams().put("worker_agent_type", workerAgentType);
         ctx.gatewayEventQueue = new LinkedBlockingQueue<>();
@@ -269,7 +299,7 @@ class RouteServiceTest {
     private JSONObject currentTraceDoneEvent(ChatProcessContext ctx) {
         JSONObject event = new JSONObject();
         event.put("event_type", SseResponseEventEnum.appStreamResponse);
-        event.put("trace_id", ctx.getUserMessageId() + "_" + ctx.getModelAnswerMessageId());
+        event.put("trace_id", TraceIdCodec.encode(ctx.getUserMessageId(), ctx.getModelAnswerMessageId()));
         event.put("data", "{}");
         return event;
     }

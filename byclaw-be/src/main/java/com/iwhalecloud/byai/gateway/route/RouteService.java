@@ -444,9 +444,9 @@ public class RouteService {
             launchData = sandboxService.restartSandboxAfterRemoteExitWithoutWait(userCode, agentId, targetAgentType);
         }
         catch (Exception e) {
-            sendSandboxProgressMessage(ctx, SseResponseEventEnum.reasoningLogEnd,
-                I18nUtil.get("sandbox.launch.progress.failed"));
-            throw new BdpRuntimeException(I18nUtil.get("sandbox.launch.progress.failed"), e);
+            String failureMessage = resolveSandboxLaunchFailureMessage(e);
+            sendSandboxProgressMessage(ctx, SseResponseEventEnum.reasoningLogEnd, failureMessage);
+            throw new BdpRuntimeException(failureMessage, e);
         }
 
         if (launchData == null) {
@@ -468,6 +468,22 @@ public class RouteService {
         sendSandboxProgressMessage(ctx, SseResponseEventEnum.reasoningLogEnd,
             I18nUtil.get("sandbox.launch.progress.failed"));
         throw new BdpRuntimeException(I18nUtil.get("sandbox.launch.progress.failed"));
+    }
+
+    private String resolveSandboxLaunchFailureMessage(Throwable throwable) {
+        String userFacingMessage = findUserFacingSandboxLaunchFailureMessage(throwable);
+        return StringUtils.defaultIfBlank(userFacingMessage, I18nUtil.get("sandbox.launch.progress.failed"));
+    }
+
+    private String findUserFacingSandboxLaunchFailureMessage(Throwable throwable) {
+        Throwable cursor = throwable;
+        while (cursor != null) {
+            if (cursor instanceof BdpRuntimeException && StringUtils.isNotBlank(cursor.getMessage())) {
+                return cursor.getMessage();
+            }
+            cursor = cursor.getCause();
+        }
+        return null;
     }
 
     private void sendSandboxProgressMessage(ChatProcessContext ctx, String event, String message) {

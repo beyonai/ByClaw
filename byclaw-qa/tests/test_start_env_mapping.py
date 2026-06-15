@@ -85,3 +85,48 @@ def test_start_maps_file_storage_minio_source_env(tmp_path: Path) -> None:
         "MINIO_SECRET_KEY=minioadmin",
         "MINIO_SECURE=false",
     ]
+
+
+def _custom_storage_provider_source_env() -> dict[str, str]:
+    """Source env with BY_QA_STORAGE_PROVIDER, without MinIO vars."""
+    return {
+        "QA_DOMAINNAME": "byclaw-qa-manager",
+        "HOST": "localhost",
+        "DB_USER": "postgres",
+        "DB_PASS": "postgres",
+        "REDIS_HOST": "localhost",
+        "REDIS_PORT": "6379",
+        "REDIS_DATABASE": "0",
+        "BYCLAW_QA_PORT": "8000",
+        "BYCLAW_QA_AGENT_DATA_PATH": "agent_data",
+        "BYCLAW_QA_KB_FETCH_CACHE_TTL_SECONDS": "86400",
+        "BYCLAW_QA_KB_FETCH_CACHE_CLEANUP_INTERVAL_SECONDS": "600",
+        "BYCLAW_QA_BYAI_WORKER_ID": "instant-search-worker-1",
+        "BY_QA_STORAGE_PROVIDER": "byclaw_userfs_storage:build_byclaw_userfs_storage_provider",
+    }
+
+
+def test_start_skips_minio_validation_when_custom_storage_provider(tmp_path: Path) -> None:
+    qa_dir = tmp_path / "byclaw-qa"
+    qa_dir.mkdir()
+    shutil.copy2(Path(__file__).resolve().parents[1] / "start.sh", qa_dir / "start.sh")
+    _write_env(qa_dir / ".env", _custom_storage_provider_source_env())
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    exec_log = tmp_path / "exec.log"
+    env_log = tmp_path / "env.log"
+    _write_fake_uv(fake_bin, exec_log, env_log)
+
+    result = subprocess.run(
+        ["bash", str(qa_dir / "start.sh"), "api"],
+        cwd=qa_dir,
+        env={"PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"},
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert exec_log.read_text().strip() == "run uvicorn api:app --host 0.0.0.0 --port 8000"
