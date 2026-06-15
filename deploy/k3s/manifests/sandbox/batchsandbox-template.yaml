@@ -19,7 +19,7 @@ spec:
       containers:
         - name: main
           image: "{{ image }}"
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: "{{ image_pull_policy | default('Always') }}"
           resources:
             requests:
               cpu: "1"

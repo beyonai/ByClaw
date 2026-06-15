@@ -54,6 +54,15 @@ IMAGE_REDIS="${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}"
 IMAGE_OPENGAUSS="${IMAGE_OPENGAUSS:-ghcr.io/beyonai/byclaw/byclaw-opengauss:main}"
 IMAGE_SANDBOX_SERVER="${IMAGE_SANDBOX_SERVER:-sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server:v0.1.14}"
 
+if [ "$OPENSANDBOX_WORKLOAD_NAMESPACE" != "$NS_SERVICE" ]; then
+    cat >&2 <<EOF
+Error: OPENSANDBOX_WORKLOAD_NAMESPACE must be ${NS_SERVICE} for the current ByClaw workspace model.
+BE initializes sandbox workspace files through PVC ${WORKSPACE_PVC_NAME}, and Kubernetes PVCs cannot be mounted across namespaces.
+Set OPENSANDBOX_WORKLOAD_NAMESPACE=${NS_SERVICE}, or implement the future sharded workspace PVC mapping before changing it.
+EOF
+    exit 1
+fi
+
 BE_DOMAINNAME="${BE_DOMAINNAME:-ByaiService}"
 QA_DOMAINNAME="${QA_DOMAINNAME:-byclaw-qa-manager}"
 DATACLOUD_DOMAINNAME="${DATACLOUD_DOMAINNAME:-byclaw-datacloud}"
@@ -67,6 +76,7 @@ DATACLOUD_DATA_SERVICE_URL="${DATACLOUD_DATA_SERVICE_URL:-http://127.0.0.1:${DAT
 DATACLOUD_API_BASE_URL="${DATACLOUD_API_BASE_URL:-http://${DATACLOUD_DOMAINNAME}.${NS_SERVICE}.svc.cluster.local:${DATACLOUD_DATA_SERVICE_PORT}}"
 BE_DOMAINNAME_URL="${BE_DOMAINNAME_URL:-http://byclaw-be.${NS_SERVICE}.svc.cluster.local:${BE_SERVER_PORT}}"
 BYCLAW_SERVICE_IMAGE_PULL_POLICY="${BYCLAW_SERVICE_IMAGE_PULL_POLICY:-Always}"
+OPENSANDBOX_SANDBOX_IMAGE_PULL_POLICY="${OPENSANDBOX_SANDBOX_IMAGE_PULL_POLICY:-IfNotPresent}"
 
 DB_HOST="${DB_HOST:-opengauss.${NS_MIDDLEWARE}.svc.cluster.local}"
 DB_PORT="${DB_PORT:-5432}"
@@ -216,19 +226,6 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: ${WORKSPACE_PVC_NAME}
-  namespace: ${NS_SANDBOX}
-spec:
-  accessModes:
-    - ReadWriteMany
-  storageClassName: ${STORAGE_CLASS}
-  resources:
-    requests:
-      storage: ${WORKSPACE_PVC_SIZE}
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: ${WORKSPACE_PVC_NAME}
   namespace: ${NS_SERVICE}
 spec:
   accessModes:
@@ -343,6 +340,29 @@ spec:
       targetPort: 5432
 EOF
 
+if [ "${OPENGAUSS_PUBLIC_ENABLED:-false}" = "true" ]; then
+    cat >> "$OUT_DIR/20-middleware/opengauss.yaml" <<EOF
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${OPENGAUSS_PUBLIC_SERVICE_NAME:-opengauss-public}
+  namespace: ${NS_MIDDLEWARE}
+  labels:
+    app: opengauss
+    byclaw.io/expose: public
+spec:
+  type: LoadBalancer
+  selector:
+    app: opengauss
+  ports:
+    - name: postgres
+      port: ${OPENGAUSS_PUBLIC_PORT:-5432}
+      targetPort: 5432
+      protocol: TCP
+EOF
+fi
+
 cat > "$OUT_DIR/20-middleware/redis.yaml" <<EOF
 apiVersion: v1
 kind: Secret
@@ -423,10 +443,17 @@ spec:
       restartPolicy: Never
       nodeSelector:
         byclaw.io/node-pool: ${OPENSANDBOX_NODE_POOL}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              byclaw.io/workload: sandbox
       containers:
         - name: main
           image: "{{ image }}"
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: ${OPENSANDBOX_SANDBOX_IMAGE_PULL_POLICY}
           resources:
             requests:
               cpu: "{{ cpu_request | default('1') }}"
@@ -878,6 +905,75 @@ async def resize_sandbox(
 
 @router.post(
     "/sandboxes/{sandbox_id}/renew-expiration",
+''',
+        ),
+    ],
+)
+
+patch_file(
+    "/app/opensandbox_server/services/k8s/volume_helper.py",
+    [
+        (
+            '''        elif vol.host is not None:
+            host_path = vol.host.path
+
+            pod_volumes.append({
+                "name": vol_name,
+                "hostPath": {
+                    "path": host_path,
+                    "type": "DirectoryOrCreate",
+                },
+            })
+''',
+            '''        elif vol.host is not None:
+            host_path = vol.host.path
+
+            # ByClaw k3s uses a shared Longhorn RWX PVC for sandbox workspaces.
+            # Older ByClaw payloads still send the workspace root as a host path;
+            # translate that compatibility marker to the real PVC backend.
+            byclaw_workspace_host_path = __import__("os").environ.get(
+                "BYCLAW_WORKSPACE_HOST_PATH",
+                "/mnt/byclaw-workspace",
+            )
+            if host_path == byclaw_workspace_host_path:
+                pvc_claim_name = __import__("os").environ.get(
+                    "BYCLAW_WORKSPACE_PVC_NAME",
+                    "byclaw-workspace",
+                )
+                if pvc_claim_name not in pvc_to_volume_name:
+                    pod_volumes.append({
+                        "name": vol_name,
+                        "persistentVolumeClaim": {
+                            "claimName": pvc_claim_name,
+                        },
+                    })
+                    pvc_to_volume_name[pvc_claim_name] = vol_name
+                    existing_volume_names.add(vol_name)
+
+                mount = {
+                    "name": pvc_to_volume_name[pvc_claim_name],
+                    "mountPath": vol.mount_path,
+                    "readOnly": vol.read_only,
+                }
+                if vol.sub_path:
+                    mount["subPath"] = vol.sub_path
+                mounts.append(mount)
+
+                logger.info(
+                    "Added ByClaw workspace PVC volume '%s' (claim: %s) mounted at '%s' for sandbox",
+                    vol_name,
+                    pvc_claim_name,
+                    vol.mount_path,
+                )
+                continue
+
+            pod_volumes.append({
+                "name": vol_name,
+                "hostPath": {
+                    "path": host_path,
+                    "type": "DirectoryOrCreate",
+                },
+            })
 ''',
         ),
     ],
