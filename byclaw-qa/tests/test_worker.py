@@ -1,4 +1,5 @@
 import sys
+import uuid
 import pytest
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -227,6 +228,8 @@ async def test_process_command_uses_all_agent_kbs_when_call_kb_ids_empty(call_kb
         emit_chunk=AsyncMock(),
         session_id="s1",
         agent_runtime_state=SimpleNamespace(session_manager=SimpleNamespace(user_code="u1")),
+        get_trace_parent_observation_id=lambda:uuid.uuid4().hex,
+        trace_id=lambda:uuid.uuid4().hex
     )
 
     with (
@@ -270,6 +273,8 @@ async def test_process_command_filters_agent_kbs_by_call_kb_ids_subset():
         emit_chunk=AsyncMock(),
         session_id="s1",
         agent_runtime_state=SimpleNamespace(session_manager=SimpleNamespace(user_code="u1")),
+        get_trace_parent_observation_id=lambda:uuid.uuid4().hex,
+        trace_id=lambda:uuid.uuid4().hex
     )
 
     with (
@@ -486,6 +491,8 @@ async def test_process_command_lets_engine_load_model_provider():
         agent_runtime_state=SimpleNamespace(
             session_manager=SimpleNamespace(user_code="test")
         ),
+        get_trace_parent_observation_id=lambda:uuid.uuid4().hex,
+        trace_id=lambda:uuid.uuid4().hex
     )
 
     with (
@@ -562,6 +569,8 @@ async def test_process_command_logs_run_search_payload_with_agent_id_and_call_kb
         agent_runtime_state=SimpleNamespace(
             session_manager=SimpleNamespace(user_code="test-user")
         ),
+        get_trace_parent_observation_id=lambda:uuid.uuid4().hex,
+        trace_id=lambda:uuid.uuid4().hex
     )
 
     with (
@@ -664,6 +673,8 @@ async def test_process_command_uses_async_context_for_engine_and_stream():
         agent_runtime_state=SimpleNamespace(
             session_manager=SimpleNamespace(user_code="u1")
         ),
+        get_trace_parent_observation_id=lambda:uuid.uuid4().hex,
+        trace_id=lambda:uuid.uuid4().hex
     )
 
     with (
@@ -709,6 +720,8 @@ async def test_process_command_passes_prologue_model_id_to_provider():
         agent_runtime_state=SimpleNamespace(
             session_manager=SimpleNamespace(user_code="u1")
         ),
+        get_trace_parent_observation_id=lambda:uuid.uuid4().hex,
+        trace_id=lambda:uuid.uuid4().hex
     )
 
     captured_prologue_id: list[str | None] = []
@@ -946,6 +959,8 @@ async def test_process_command_uploads_report_after_final_answer():
         agent_runtime_state=SimpleNamespace(
             session_manager=SimpleNamespace(user_code="0027011322")
         ),
+        get_trace_parent_observation_id=lambda:uuid.uuid4().hex,
+        trace_id=lambda:uuid.uuid4().hex
     )
 
     with (
@@ -991,6 +1006,8 @@ async def test_process_command_does_not_report_upload_success_when_upload_fails(
         agent_runtime_state=SimpleNamespace(
             session_manager=SimpleNamespace(user_code="0027011322")
         ),
+        get_trace_parent_observation_id=lambda:uuid.uuid4().hex,
+        trace_id=lambda:uuid.uuid4().hex
     )
 
     with (
@@ -1039,6 +1056,8 @@ async def test_process_command_emits_upload_failure_message_when_upload_fails():
         agent_runtime_state=SimpleNamespace(
             session_manager=SimpleNamespace(user_code="0027011322")
         ),
+        get_trace_parent_observation_id=lambda:uuid.uuid4().hex,
+        trace_id=lambda:uuid.uuid4().hex
     )
 
     with (
@@ -1095,6 +1114,8 @@ async def test_process_command_skips_upload_when_no_final_answer():
         agent_runtime_state=SimpleNamespace(
             session_manager=SimpleNamespace(user_code="u1")
         ),
+        get_trace_parent_observation_id=lambda:uuid.uuid4().hex,
+        trace_id=lambda:uuid.uuid4().hex
     )
 
     with (
