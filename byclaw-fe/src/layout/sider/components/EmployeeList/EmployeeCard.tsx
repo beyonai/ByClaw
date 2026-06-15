@@ -269,7 +269,9 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
           title={
             <Title className={styles.name}>
               <span className={classNames(styles.nameRow)}>
-                <span className={classNames(styles.nameText)}>{employee?.resourceName || employee?.name || ''}</span>
+                <span className={classNames(styles.nameText)}>
+                  {employee?.resourceName || employee?.name || employee?.id || ''}
+                </span>
                 {`${employee?.isTop}` === '1' && <AntdIcon type="icon-zhiding-fill" className={styles.pinBadge} />}
                 {employee?.tagName && (
                   <span className={styles.tag}>

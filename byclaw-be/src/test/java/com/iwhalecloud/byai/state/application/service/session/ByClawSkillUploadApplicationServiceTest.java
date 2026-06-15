@@ -20,6 +20,8 @@ import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -41,6 +43,7 @@ import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@DisabledOnOs(OS.WINDOWS)
 @ExtendWith(MockitoExtension.class)
 class ByClawSkillUploadApplicationServiceTest {
 

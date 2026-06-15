@@ -1,5 +1,6 @@
 import {
   completeActiveSdkRequest,
+  markActiveSdkDispatchSettled,
   resolveActiveSdkRequestBySessionKey,
   shouldCompleteActiveSdkRequest,
   type ActiveSdkRequest,
@@ -67,6 +68,10 @@ export async function waitForSdkSessionDispatchSettled(
   if (!normalized) {
     return { settled: true, timedOut: false, waitMs: 0, clearedRequest: false };
   }
+
+  // settle 运行 ⇒ dispatch promise 已 resolve ⇒ 这一轮 agent run 已终结。置权威终结标记，
+  // 兜住 onAgentEvent 零事件的路径（precheck-blocked），避免 poll 到超时挂死前端流。
+  markActiveSdkDispatchSettled(normalized);
 
   for (;;) {
     const request = resolveActiveSdkRequestBySessionKey(normalized);

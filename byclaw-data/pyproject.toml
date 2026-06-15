@@ -8,8 +8,9 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "by-datacloud>=0.1.41",
     "langchain-openai>=1.1.11",
-    "by-framework==0.2.2.dev4",
-    "by-framework-trace-langfuse==0.0.3.dev0",
+    "by-framework==0.2.2.dev5",
+    "by-framework-trace-langfuse==0.0.3.dev2",
+    "by-framework-langgraph==0.0.3.dev2",
     "by-framework-history-byclaw>=0.0.3",
     "langfuse>=2.0.0",
 ]
