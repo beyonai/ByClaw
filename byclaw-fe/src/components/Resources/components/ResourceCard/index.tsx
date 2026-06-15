@@ -186,6 +186,9 @@ const getInstallLabelId = (resource: IResourceCardItem, resourceType?: string) =
 
 const canInstallResource = (resource: IResourceCardItem, resourceType?: string) => {
   const bizType = resource?.resourceBizType || resourceType;
+  if (bizType === 'SKILL' || resourceType === 'SKILL') {
+    return Boolean(resource?.resourceId && resource?.hasUsePermission);
+  }
   return Boolean(resource?.resourceId && bizType && bizType !== 'DIG_EMPLOYEE');
 };
 
@@ -461,6 +464,7 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.canAuditUse,
     resource?.canDelete,
     resource?.canRestore,
+    resource?.hasUsePermission,
     resource?.ownerType,
     resource?.resourceBizType,
     resource?.resourceId,

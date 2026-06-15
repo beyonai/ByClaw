@@ -1117,6 +1117,65 @@
             a.resource_id DESC
     </select>
 
+    <select id="queryDigEmployeeSkillResourceAuthList" resultType="com.iwhalecloud.byai.manager.vo.auth.ResourceAuthVo">
+        SELECT
+            a.resource_id,
+            a.resource_source_pk_id,
+            a.system_code,
+            a.resource_biz_type,
+            a.resource_type,
+            a.resource_name,
+            a.resource_code,
+            a.resource_desc,
+            a.avatar,
+            a.sample,
+            a.tags,
+            a.resource_version_id,
+            a.host_type,
+            a.catalog_id,
+            a.man_org_id,
+            a.man_user_id,
+            a.index_list,
+            a.create_by,
+            a.create_time,
+            a.update_by,
+            a.update_time,
+            a.com_acct_id,
+            a.resource_status,
+            a.resource_d_verid,
+            a.resource_r_verid,
+            a.resource_code,
+            a.publish_time,
+            a.shelf_time,
+            a.unshelf_time,
+            a.auth_status,
+            a.publish_portal,
+            a.parent_resource_id,
+            a.publish_type,
+            a.owner_type
+        FROM ss_res_ext_dig_employee e
+            INNER JOIN ss_resource a
+                ON a.resource_biz_type = 'SKILL'
+                AND POSITION(CONCAT('"', a.resource_code, '"') IN e.skills) > 0
+        WHERE e.resource_id = #{resourceId}
+          AND a.resource_status = 2
+          <if test="catalogIds != null and catalogIds.size() > 0">
+              AND a.catalog_id IN
+              <foreach collection="catalogIds" item="catalogIdItem" open="(" separator="," close=")">
+                  #{catalogIdItem}
+              </foreach>
+          </if>
+          <if test="(catalogIds == null or catalogIds.size() == 0) and catalogId != null">
+              AND a.catalog_id = #{catalogId}
+          </if>
+          <if test="keyword != null and keyword != ''">
+              AND a.resource_name LIKE CONCAT('%', #{keyword}, '%')
+          </if>
+        ORDER BY
+            a.update_time DESC,
+            a.resource_id DESC
+    </select>
+
 
     <!-- 根据资源ID删除 resource_rule_enabled 表的数据 -->
     <delete id="deleteResourceRuleEnabledByResourceId">

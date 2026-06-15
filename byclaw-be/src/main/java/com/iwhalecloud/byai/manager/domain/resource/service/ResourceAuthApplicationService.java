@@ -131,9 +131,25 @@ public class ResourceAuthApplicationService {
         qo.setKeyword(keyword);
         qo.setCatalogIds(ssResourceCatalogService.findSelfAndDescendantCatalogIds(qo.getCatalogId()));
         Page<ResourceAuthVo> page = PageHelper.startPage(qo.getPageNum(), qo.getPageSize());
-        ssResourceMapper.queryDigEmployeeRelResourceAuthList(qo);
+        if (isSkillOnlyQuery(qo.getResourceBizTypeList())) {
+            ssResourceMapper.queryDigEmployeeSkillResourceAuthList(qo);
+        }
+        else {
+            ssResourceMapper.queryDigEmployeeRelResourceAuthList(qo);
+        }
         PageInfo<ResourceAuthVo> pageInfo = PageHelperUtil.toPageInfo(page);
         return pageInfo;
+    }
+
+    private boolean isSkillOnlyQuery(List<String> resourceBizTypeList) {
+        if (CollectionUtils.isEmpty(resourceBizTypeList)) {
+            return false;
+        }
+        List<String> normalizedBizTypes = resourceBizTypeList.stream()
+            .filter(StringUtils::isNotBlank)
+            .map(StringUtils::trim)
+            .toList();
+        return normalizedBizTypes.size() == 1 && StringUtils.equalsIgnoreCase(normalizedBizTypes.get(0), "SKILL");
     }
 
     private void fillCatalogIds(ResourceUseAuthQo resourceUseAuthQo) {

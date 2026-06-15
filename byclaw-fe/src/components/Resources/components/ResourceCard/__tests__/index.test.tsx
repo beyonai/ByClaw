@@ -38,6 +38,10 @@ jest.mock('@/pages/manager/service/resources', () => ({
   queryResourceOperationPermissions: jest.fn(),
 }));
 
+jest.mock('@/pages/manager/service/DigitalEmployeeMgr', () => ({
+  installDigitalEmployeeRelResources: jest.fn(),
+}));
+
 jest.mock('@/components/AntdIcon', () => ({
   __esModule: true,
   default: ({ type, className }: { type: string; className?: string }) => (
@@ -99,5 +103,37 @@ describe('ResourceCard', () => {
     );
 
     expect(screen.getByText('common.editInfo')).toBeTruthy();
+  });
+
+  it('hides install skill action when skill has no use permission', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="SKILL"
+        resource={{
+          resourceId: 'skill-1',
+          resourceName: 'Skill',
+          resourceBizType: 'SKILL',
+          hasUsePermission: false,
+        }}
+      />
+    );
+
+    expect(screen.queryByText('resource.installSkill')).toBeNull();
+  });
+
+  it('shows install skill action when skill has use permission', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="SKILL"
+        resource={{
+          resourceId: 'skill-1',
+          resourceName: 'Skill',
+          resourceBizType: 'SKILL',
+          hasUsePermission: true,
+        }}
+      />
+    );
+
+    expect(screen.getByText('resource.installSkill')).toBeTruthy();
   });
 });

@@ -23,6 +23,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeInstallResourceDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeIdDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SetDefaultDigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
@@ -450,6 +451,42 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
+    void installDigitalEmployeeRelResources_rejectsSkillWithoutUsePermission() {
+        DigitalEmployeeInstallResourceDTO dto = new DigitalEmployeeInstallResourceDTO();
+        dto.setDigitalEmployeeId(100L);
+        dto.setRelIds(List.of(300L));
+
+        SsResource currentDefaultResource = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResource skillResource = buildSkillResource(300L, 2L);
+
+        when(ssResourceService.findById(100L)).thenReturn(currentDefaultResource);
+        when(ssResourceService.findByIdList(List.of(300L))).thenReturn(List.of(skillResource));
+        when(authApplicationService.hasResourceManagePermission(currentDefaultResource)).thenReturn(true);
+        when(authApplicationService.hasResourceUsePermission(skillResource)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.installDigitalEmployeeRelResources(dto)).isInstanceOf(RuntimeException.class);
+        verify(ssResourceRelDetailService, never()).findByResourceId(100L);
+    }
+
+    @Test
+    void installDigitalEmployeeRelResources_rejectsSkillWhenDefaultDigitalEmployeeHasNoManagePermission() {
+        DigitalEmployeeInstallResourceDTO dto = new DigitalEmployeeInstallResourceDTO();
+        dto.setDigitalEmployeeId(100L);
+        dto.setRelIds(List.of(300L));
+
+        SsResource currentDefaultResource = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResource skillResource = buildSkillResource(300L, 2L);
+
+        when(ssResourceService.findById(100L)).thenReturn(currentDefaultResource);
+        when(ssResourceService.findByIdList(List.of(300L))).thenReturn(List.of(skillResource));
+        when(authApplicationService.hasResourceManagePermission(currentDefaultResource)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.installDigitalEmployeeRelResources(dto)).isInstanceOf(RuntimeException.class);
+        verify(authApplicationService, never()).hasResourceUsePermission(skillResource);
+        verify(ssResourceRelDetailService, never()).findByResourceId(100L);
+    }
+
+    @Test
     void updateDigitalEmployee_forcesDefaultPersonalAssistantToAssistantRuntime() {
         DigitalEmployeeDTO dto = new DigitalEmployeeDTO();
         dto.setResourceId(100L);
@@ -640,6 +677,15 @@ class DigitalEmployeeApplicationServiceTest {
         resource.setResourceId(resourceId);
         resource.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
         resource.setOwnerType(ownerType);
+        resource.setCreateBy(createBy);
+        return resource;
+    }
+
+    private SsResource buildSkillResource(Long resourceId, Long createBy) {
+        SsResource resource = new SsResource();
+        resource.setResourceId(resourceId);
+        resource.setResourceBizType("SKILL");
+        resource.setOwnerType(OwnerType.ENTERPRISE);
         resource.setCreateBy(createBy);
         return resource;
     }

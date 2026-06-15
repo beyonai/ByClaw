@@ -133,6 +133,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 public class DigitalEmployeeApplicationService {
 
     public static final Logger logger = LoggerFactory.getLogger(DigitalEmployeeApplicationService.class);
+    private static final String RESOURCE_BIZ_TYPE_SKILL = "SKILL";
 
     private static final String BELONG_COMPANY = "COMPANY";
 
@@ -733,7 +734,13 @@ public class DigitalEmployeeApplicationService {
         }
 
         SsResource ssResource = ssResourceService.findById(digitalEmployeeId);
-        validateDigitalEmployeeUpdatePermission(ssResource);
+        List<SsResource> installRelResources = findInstallRelResources(installRelIds);
+        if (containsSkillResource(installRelResources)) {
+            validateSkillInstallPermission(ssResource, installRelResources);
+        }
+        else {
+            validateDigitalEmployeeUpdatePermission(ssResource);
+        }
 
         List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(digitalEmployeeId);
         LinkedHashSet<Long> mergedRelIds = new LinkedHashSet<>();
@@ -751,6 +758,45 @@ public class DigitalEmployeeApplicationService {
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(digitalEmployeeId);
         return this.findDetailsById(employeeIdDTO);
+    }
+
+    private List<SsResource> findInstallRelResources(List<Long> installRelIds) {
+        List<Long> distinctRelIds = installRelIds.stream().filter(Objects::nonNull).distinct()
+            .collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(distinctRelIds)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.processor.param.notnull"));
+        }
+        List<SsResource> resources = ssResourceService.findByIdList(distinctRelIds);
+        if (CollectionUtils.isEmpty(resources) || resources.size() != distinctRelIds.size()) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
+        }
+        return resources;
+    }
+
+    private boolean containsSkillResource(List<SsResource> resources) {
+        return resources != null && resources.stream()
+            .anyMatch(resource -> resource != null
+                && StringUtils.equals(RESOURCE_BIZ_TYPE_SKILL, resource.getResourceBizType()));
+    }
+
+    private void validateSkillInstallPermission(SsResource digitalEmployee, List<SsResource> installRelResources) {
+        if (digitalEmployee == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
+        }
+        Long defaultDigEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
+        if (defaultDigEmployeeId == null || !Objects.equals(defaultDigEmployeeId, digitalEmployee.getResourceId())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+        }
+        if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+        }
+        for (SsResource resource : installRelResources) {
+            if (resource != null && StringUtils.equals(RESOURCE_BIZ_TYPE_SKILL, resource.getResourceBizType())
+                && !authApplicationService.hasResourceUsePermission(resource)) {
+                throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+            }
+        }
     }
 
     /**
