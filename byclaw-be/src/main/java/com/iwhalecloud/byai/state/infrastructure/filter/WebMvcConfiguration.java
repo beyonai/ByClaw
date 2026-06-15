@@ -2,8 +2,11 @@ package com.iwhalecloud.byai.state.infrastructure.filter;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -115,8 +118,67 @@ public class WebMvcConfiguration implements WebMvcConfigurer {
      * @return StandardServletMultipartResolver 实例
      */
     @Bean(name = "multipartResolver")
-    public StandardServletMultipartResolver multipartResolver() {
-        return new StandardServletMultipartResolver();
+    public StandardServletMultipartResolver multipartResolver(
+        @Value("${byclaw.sandbox.ingress-multipart-skip-prefixes:/filebrowser,/novnc,/openDesign,/v1/sandboxes,/openclaw-ui}")
+        String ingressMultipartSkipPrefixes) {
+        List<String> proxyPrefixes = parseSandboxIngressProxyPrefixes(ingressMultipartSkipPrefixes);
+        return new StandardServletMultipartResolver() {
+            @Override
+            public boolean isMultipart(HttpServletRequest request) {
+                if (isSandboxIngressProxyRequest(request, proxyPrefixes)) {
+                    return false;
+                }
+                return super.isMultipart(request);
+            }
+        };
+    }
+
+    private static List<String> parseSandboxIngressProxyPrefixes(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        List<String> prefixes = Arrays.stream(value.split(","))
+            .map(String::trim)
+            .filter(prefix -> !prefix.isBlank())
+            .map(WebMvcConfiguration::normalizeProxyPrefix)
+            .filter(prefix -> !"/".equals(prefix))
+            .distinct()
+            .toList();
+        return prefixes;
+    }
+
+    private static String normalizeProxyPrefix(String prefix) {
+        String normalized = prefix.startsWith("/") ? prefix : "/" + prefix;
+        while (normalized.length() > 1 && normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
+    }
+
+    private static boolean isSandboxIngressProxyRequest(HttpServletRequest request, List<String> proxyPrefixes) {
+        String path = stripContextPath(request.getRequestURI(), request.getContextPath());
+        for (String prefix : proxyPrefixes) {
+            if (path.equals(prefix) || path.startsWith(prefix + "/")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String stripContextPath(String requestUri, String contextPath) {
+        if (requestUri == null || requestUri.isBlank()) {
+            return "";
+        }
+        if (contextPath == null || contextPath.isBlank() || "/".equals(contextPath)) {
+            return requestUri;
+        }
+        if (requestUri.equals(contextPath)) {
+            return "";
+        }
+        if (requestUri.startsWith(contextPath + "/")) {
+            return requestUri.substring(contextPath.length());
+        }
+        return requestUri;
     }
 
     /**
@@ -207,9 +269,9 @@ public class WebMvcConfiguration implements WebMvcConfigurer {
         // 配置 fastJsonConverter 的相关属性（如你原来的代码）
         FastJsonConfig fastJsonConfig = new FastJsonConfig();
         fastJsonConfig.setFeatures(Feature.DisableCircularReferenceDetect
-        // Feature.DisableSpecialKeyDetect,
-        // Feature.IgnoreAutoType,
-        // Feature.SupportArrayToBean
+            // Feature.DisableSpecialKeyDetect,
+            // Feature.IgnoreAutoType,
+            // Feature.SupportArrayToBean
         );
         SerializeConfig serializeConfig = new SerializeConfig();
         // 配置数值类型转String

@@ -1,4 +1,4 @@
-import { DEFAULT_ACCOUNT_ID, type OpenClawConfig } from "openclaw/plugin-sdk";
+import { DEFAULT_ACCOUNT_ID, type OpenClawConfig } from "openclaw/plugin-sdk/core";
 import { ByaiChannelConfigSchema } from "./config-schema.js";
 import type { ByaiChannelConfig, ResolvedByaiAccount } from "./types.js";
 

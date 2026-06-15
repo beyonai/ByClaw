@@ -4,7 +4,7 @@ import { isEmpty, last, size } from 'lodash';
 import { notification } from 'antd';
 
 import MessageList from '@/components/MessageList';
-import QueryInput from '@/components/QueryInput';
+
 import ReferenceSource from '@/components/ReferenceSource';
 import ForwardMessages from './components/ForwardMessages';
 
@@ -12,6 +12,7 @@ import ChatLayoutCompContext from './hooks/useContext';
 
 import { agentTypeMap } from '@/constants/agent';
 import { Platform } from '@/layout/components/provider/global';
+import useAppStore from '@/models/common/useAppStore';
 
 import useChat, { ISendProps } from '@/hooks/useChat';
 import type { IAgentType } from '@/typescript/agent';
@@ -24,6 +25,7 @@ import classnames from 'classnames';
 import useEventEmitterHooks from './hooks/useEventEmitterHooks';
 import ChatTitle from './ChatTitle';
 import MultiChoices from './components/MultiChoices';
+import EasyConfirm from './components/EasyConfirm';
 
 import type { IState as UseEmployeesIState } from '@/models/useEmployees.ts';
 
@@ -85,6 +87,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
 
   const { EventEmitter, setAgentId, platform, agentId } = useGlobal();
   const isPC = platform === Platform.pc;
+  const { getSandboxesInfoUrl } = useAppStore();
 
   /** 对话的额外参数 */
   const tempParamsRef = useRef(sendExtraParams);
@@ -129,7 +132,9 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     });
   }, []);
 
-  const onBeforeSend = useCallback((param = {}) => {
+  const onBeforeSend = useCallback(async (param = {}) => {
+    void getSandboxesInfoUrl();
+
     return EventEmitter.invoke('beyond-chat-beforesend-hook', param);
   }, []);
 
@@ -150,21 +155,34 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     [agentList, employeesList]
   );
 
-  const { sendQuery, messageList, hasMore, getMessageList, setMessageList, onNext, updateMessage, deleteMessage } =
-    useChat({
-      chatUrl,
-      sessionId,
-      agentType: myAgentType,
-      addSession,
-      onBeforeSend,
-    });
+  const {
+    sendQuery,
+    messageList,
+    hasMore,
+    getMessageList,
+    setMessageList,
+    onNext,
+    updateMessage,
+    deleteMessage,
+    isSessionRunning,
+    cancelCurrentSession,
+  } = useChat({
+    chatUrl,
+    sessionId,
+    agentType: myAgentType,
+    addSession,
+    onBeforeSend,
+  });
   const lastMsg = last(messageList);
 
   const onCancel = useCallback(() => {
-    if ([IMessageState.Query, IMessageState.Answer].includes(lastMsg?.messageState as IMessageState)) {
-      lastMsg?.cancelSSE?.();
+    if (
+      isSessionRunning ||
+      [IMessageState.Query, IMessageState.Answer].includes(lastMsg?.messageState as IMessageState)
+    ) {
+      cancelCurrentSession();
     }
-  }, [lastMsg?.cancelSSE, lastMsg?.messageState]);
+  }, [cancelCurrentSession, isSessionRunning, lastMsg?.messageState]);
 
   const { disabledInput, multiChoicesList, setMultiChoicesList, multiChoicesMsgId, setMultiChoicesMsgId } =
     useEventEmitterHooks({
@@ -288,6 +306,13 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     scrollToBottom: messageListCompRef.current?.toBottom,
   }));
 
+  const messageState = React.useMemo(() => {
+    if (isSessionRunning) {
+      return IMessageState.Answer;
+    }
+    return lastMsg?.messageState;
+  }, [isSessionRunning, lastMsg?.messageState]);
+
   return (
     <ChatLayoutCompContext.Provider
       value={{
@@ -331,25 +356,20 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 })}
                 id="queryInputWrapper"
               >
+                <EasyConfirm
+                  messageState={messageState}
+                  disabledInput={disabledInput}
+                  isBottom={isBottom}
+                  cannotAt={cannotAt}
+                  queryInputProps={queryInputProps}
+                  lastMsg={lastMsg}
+                  sessionId={sessionId}
+                  onSend={onSend}
+                  onCancel={onCancel}
+                  myAgentType={myAgentType}
+                  setMyAgentType={setMyAgentType}
+                />
                 {/* {isBottom && TopButtons} */}
-                <div
-                  className={classnames(styles.queryInput, {
-                    [styles.queryInputDisabled]: disabledInput,
-                  })}
-                  data-isbottom={isBottom}
-                >
-                  <QueryInput
-                    messageState={lastMsg?.messageState}
-                    onSend={onSend}
-                    onCancel={onCancel}
-                    myAgentType={myAgentType}
-                    setMyAgentType={setMyAgentType}
-                    isBottom={isBottom}
-                    cannotAt={cannotAt}
-                    sessionId={sessionId}
-                    {...queryInputProps}
-                  />
-                </div>
               </div>
             )}
             {isMultiChoices && (

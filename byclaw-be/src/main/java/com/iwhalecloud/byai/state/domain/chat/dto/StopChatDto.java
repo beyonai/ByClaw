@@ -20,6 +20,6 @@ public class StopChatDto {
 
     private Long messageId;
 
-    private String clientId;
+    private String clientRequestId;
 
 }

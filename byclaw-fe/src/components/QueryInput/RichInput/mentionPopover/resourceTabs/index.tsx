@@ -59,6 +59,7 @@ const ResourceTabs: React.FC<Props> = ({
   const [sharedResources, setSharedResources] = useState<any[]>([]);
   const [sharedLoading, setSharedLoading] = useState(false);
   const [brandVersion, setBrandVersion] = useState<'commercial' | 'openSource' | null>(null);
+  const [brandVersionLoaded, setBrandVersionLoaded] = useState(false);
   const sharedQueryKeyRef = useRef('');
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -74,7 +75,7 @@ const ResourceTabs: React.FC<Props> = ({
   const { layoutMode, agentInfo, EventEmitter } = useGlobal();
 
   const { agentType } = agentInfo || {};
-  const isOpenSource = brandVersion === 'openSource';
+  const isOpenSource = brandVersionLoaded && brandVersion !== 'commercial';
 
   const { message } = App.useApp();
 
@@ -97,10 +98,14 @@ const ResourceTabs: React.FC<Props> = ({
   useEffect(() => {
     getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
       .then((res: any) => {
-        setBrandVersion(res?.paramValue);
+        const nextBrandVersion = res?.paramValue;
+        setBrandVersion(nextBrandVersion === 'commercial' ? 'commercial' : null);
       })
       .catch(() => {
-        setBrandVersion('openSource');
+        setBrandVersion(null);
+      })
+      .finally(() => {
+        setBrandVersionLoaded(true);
       });
   }, []);
 
@@ -393,7 +398,7 @@ const ResourceTabs: React.FC<Props> = ({
     if (visibleKeys.includes('tool')) visible.push('tool');
     if (visibleKeys.includes('view')) visible.push('view');
     if (visibleKeys.includes('object')) visible.push('object');
-    if (visibleKeys.includes('file')) visible.push('file');
+    visible.push('file');
     if (isOpenSource) visible.push('skill');
     if (!visible.length) return;
     const newActiveTabValue = activeTab && visible.includes(activeTab) ? activeTab : visible[0];

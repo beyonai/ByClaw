@@ -34,8 +34,9 @@ import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawFileDto;
 
 /**
- * 用户 byclaw 文件查询应用服务。 职责说明： 1. 负责在指定用户上下文中查询 UserFS； 2. 负责控制“查询会话文件”的业务语义； 3. 负责将 UserFS 路径整理为前端可直接消费的文件列表结构。 * @author
- * qin.guoquan * @date 2026-04-18 19:38:18
+ * 用户 byclaw 文件查询应用服务。 职责说明： 1. 负责在指定用户上下文中查询 UserFS； 2. 负责控制“查询会话文件”的业务语义； 3. 负责将 UserFS 路径整理为前端可直接消费的文件列表结构。
+ * @author qin.guoquan
+ * @date 2026-04-18 19:38:18
  */
 @Service
 public class ByClawFileQueryApplicationService {

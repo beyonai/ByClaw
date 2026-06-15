@@ -12,6 +12,8 @@ import {
   buildDebugDefaults,
   extractModelId,
   getDefaultFormValues,
+  DEFAULT_CONTEXT_TOKENS,
+  DEFAULT_MAX_TOKENS,
   type ModelTagItem,
   normalizeModelType,
   SYSTEM_SOURCE_TYPES,
@@ -38,7 +40,7 @@ const ModelFormModal: React.FC<Props> = (props) => {
     { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeRERANK' }), value: 'RERANK' },
     { label: intl.formatMessage({ id: 'modelMgr.modal.modelTypeEMBEDDING' }), value: 'EMBEDDING' },
   ]);
-  const [activeSections, setActiveSections] = useState<string[]>(['basic', 'connection']);
+  const [activeSections, setActiveSections] = useState<string[]>(['basic', 'connection', 'params', 'tags']);
   const [submitAction, setSubmitAction] = useState<'save_continue' | 'save_close' | null>(null);
 
   /** 新增场景下首次「保存」成功后返回的模型 id，用于不关弹窗时右侧「运行」调试 */
@@ -73,7 +75,7 @@ const ModelFormModal: React.FC<Props> = (props) => {
 
   useEffect(() => {
     if (!open) return;
-    setActiveSections(type === 'debug' ? ['basic', 'connection', 'params'] : ['basic', 'connection']);
+    setActiveSections(type === 'debug' ? ['basic', 'connection', 'params'] : ['basic', 'connection', 'params', 'tags']);
 
     // 模型类型动态下发：paramGroupCode=SYSTEM_MODEL_TYPE
     getByParamGroupCode({ paramGroupCode: 'SYSTEM_MODEL_TYPE' })
@@ -183,6 +185,7 @@ const ModelFormModal: React.FC<Props> = (props) => {
           const nextFormValues = {
             displayName: detail.displayName,
             providerName: detail.providerName,
+            modelProtocol: detail.modelProtocol || 'OpenAI',
             modelCode: detail.modelCode,
             modelType: normalizeModelType(detail.modelType),
             apiEndpoint: detail.apiEndpoint || 'https://api.example.com/v1',
@@ -192,10 +195,10 @@ const ModelFormModal: React.FC<Props> = (props) => {
             readTimeoutSec: detail.readTimeoutSec ?? 60,
             maxRetries: detail.maxRetries ?? 3,
             retryIntervalSec: detail.retryIntervalSec ?? 1,
-            contextTokens: detail.contextTokens ?? 128000,
+            contextTokens: detail.contextTokens ?? DEFAULT_CONTEXT_TOKENS,
             temperature: detail.temperature ?? 0.7,
             topP: detail.topP ?? 0.9,
-            maxTokens: detail.maxTokens ?? 1024,
+            maxTokens: detail.maxTokens ?? DEFAULT_MAX_TOKENS,
             frequencyPenalty: detail.frequencyPenalty ?? 0,
             presencePenalty: detail.presencePenalty ?? 0,
             abilities: detail.abilities || [],
@@ -457,7 +460,6 @@ const ModelFormModal: React.FC<Props> = (props) => {
     >
       <div className={styles.modalBody}>
         <ModelFormFields
-          intl={intl}
           form={form}
           modalTitle={modalTitle}
           currentDisplayName={currentDisplayName}

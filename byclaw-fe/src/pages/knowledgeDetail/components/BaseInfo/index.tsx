@@ -11,16 +11,19 @@ import { useIntl, useNavigate } from '@umijs/max';
 import { isEmpty } from 'lodash';
 
 const hiddenForNow = true;
+const PERSONAL_DEFAULT_OWNER_TYPE = 'personal_default';
 
 const BaseInfo = ({
   data,
   resourceId,
   allowKnowledgeBaseDelete,
+  canManage = false,
   backPath = '/knowledgeCenter',
 }: {
   data: any;
   resourceId: string;
   allowKnowledgeBaseDelete?: boolean;
+  canManage?: boolean;
   backPath?: string;
 }) => {
   const [showVisibleRange, setShowVisibleRange] = useState(false);
@@ -29,6 +32,20 @@ const BaseInfo = ({
   const intl = useIntl();
   const navigate = useNavigate();
   const disabledTip = intl.formatMessage({ id: 'resource.thirdPartyKnowledgeBaseMode' });
+  const noPermissionDisabledTip = intl.formatMessage({ id: 'common.noPermissionOperation' });
+  const defaultPersonalKnowledgeDeleteTip = intl.formatMessage({
+    id: 'resource.personalDefaultKnowledgeDeleteNotAllowed',
+  });
+  const isDefaultPersonalKnowledge = data?.ownerType === PERSONAL_DEFAULT_OWNER_TYPE;
+  const canDeleteKnowledge = Boolean(allowKnowledgeBaseDelete && canManage && !isDefaultPersonalKnowledge);
+  let deleteDisabledTip;
+  if (!allowKnowledgeBaseDelete) {
+    deleteDisabledTip = disabledTip;
+  } else if (isDefaultPersonalKnowledge) {
+    deleteDisabledTip = defaultPersonalKnowledgeDeleteTip;
+  } else if (!canManage) {
+    deleteDisabledTip = noPermissionDisabledTip;
+  }
 
   const renderIcon = useMemo(() => {
     try {
@@ -52,17 +69,21 @@ const BaseInfo = ({
   }, [data]);
 
   const onDeleteFolder = () => {
-    if (!allowKnowledgeBaseDelete) {
+    if (!canDeleteKnowledge) {
       return;
     }
     Modal.confirm({
       title: intl.formatMessage({ id: 'common.deleteTips' }),
       content: intl.formatMessage({ id: 'common.deleteConfirm2' }, { content: data?.resourceName }),
       onOk: () =>
-        deleteKnowledge({ resourceId: resourceId }).then(() => {
-          message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
-          navigate(backPath, { replace: true });
-        }),
+        deleteKnowledge({ resourceId: resourceId })
+          .then(() => {
+            message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
+            navigate(backPath, { replace: true });
+          })
+          .catch((error) => {
+            message.error(String(error || intl.formatMessage({ id: 'common.deleteFail' })));
+          }),
     });
   };
 
@@ -95,10 +116,10 @@ const BaseInfo = ({
           </>
         )}
 
-        <Tooltip title={!allowKnowledgeBaseDelete ? disabledTip : undefined}>
+        <Tooltip title={deleteDisabledTip}>
           <div
             className={classNames(styles.baseInfoActionItem, {
-              disabled: !allowKnowledgeBaseDelete,
+              disabled: !canDeleteKnowledge,
             })}
             onClick={onDeleteFolder}
           >

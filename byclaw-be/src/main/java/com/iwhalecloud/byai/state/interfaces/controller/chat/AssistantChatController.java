@@ -1,6 +1,11 @@
 package com.iwhalecloud.byai.state.interfaces.controller.chat;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
@@ -16,11 +21,19 @@ import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.manager.dto.resource.UploadResult;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.state.application.service.callback.CallbackApplicationService;
 import com.iwhalecloud.byai.state.application.service.chat.AssistantChatApplicationService;
 import com.iwhalecloud.byai.state.common.dto.MessageStructDto;
 import com.iwhalecloud.byai.state.domain.callback.dto.CallbackRequest;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotRequest;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatStatusRequest;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
+import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
+import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
+import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -89,6 +102,15 @@ public class AssistantChatController {
 
     @Autowired
     private FeignDataCloudService feignDataCloudService;
+
+    @Autowired
+    private RunningOutputStreamRegistry runningOutputStreamRegistry;
+
+    @Autowired
+    private RunningChatSnapshotService runningChatSnapshotService;
+
+    @Autowired
+    private SessionService sessionService;
 
     @Operation(summary = "获取消息详情(提供给问数，慧笔，鲸灵)", description = "根据消息ID获取消息详情，副驾调用主驾", responses = {
         @ApiResponse(responseCode = "0", description = "获取成功",
@@ -223,6 +245,48 @@ public class AssistantChatController {
             log.error(e.getMessage(), e);
         }
         return ResponseUtil.success("OK");
+    }
+
+    @PostMapping(value = "/runningStatus")
+    public ResponseUtil<List<RunningChatInfo>> runningStatus(@RequestBody RunningChatStatusRequest request) {
+        List<Long> sessionIds = request == null ? Collections.emptyList() : request.getSessionIds();
+        if (sessionIds == null || sessionIds.isEmpty()) {
+            return ResponseUtil.successResponse(Collections.emptyList());
+        }
+
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        Set<Long> allowedSessionIds = sessionService.findBatchByIds(sessionIds).stream()
+            .filter(session -> isCurrentUserSession(session, currentUserId))
+            .map(ByaiSession::getSessionId)
+            .collect(Collectors.toSet());
+
+        List<RunningChatInfo> list = sessionIds.stream()
+            .filter(allowedSessionIds::contains)
+            .map(runningOutputStreamRegistry::getRunning)
+            .collect(Collectors.toList());
+        return ResponseUtil.successResponse(list);
+    }
+
+    @PostMapping(value = "/runningSnapshot")
+    public ResponseUtil<RunningChatSnapshotResponse> runningSnapshot(
+        @RequestBody RunningChatSnapshotRequest request) {
+        if (request == null || request.getSessionId() == null) {
+            return ResponseUtil.successResponse(null);
+        }
+
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        ByaiSession session = sessionService.findById(request.getSessionId());
+        if (!isCurrentUserSession(session, currentUserId)) {
+            return ResponseUtil.successResponse(null);
+        }
+
+        RunningChatSnapshotResponse snapshot = runningChatSnapshotService.get(request.getSessionId(),
+            request.getTraceId(), request.getModelAnswerMessageId());
+        return ResponseUtil.successResponse(snapshot);
+    }
+
+    private boolean isCurrentUserSession(ByaiSession session, Long currentUserId) {
+        return session != null && Objects.equals(session.getCreatorId(), currentUserId);
     }
 
     /**

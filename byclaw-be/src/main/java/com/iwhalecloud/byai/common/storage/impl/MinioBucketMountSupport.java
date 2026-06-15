@@ -6,6 +6,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.iwhalecloud.byai.common.exception.BaseException;
@@ -22,10 +23,14 @@ public class MinioBucketMountSupport {
     @Autowired
     private MinioMountHostExecutor minioMountHostExecutor;
 
+    @Value("${byclaw.sandbox.volume.backend:minio-mount}")
+    private String volumeBackend;
+
     public void mountSingleBucketOnAllTargets(String storageType, String bucketName) {
         if (!shouldMount(storageType)) {
-            LOGGER.info("当前配置不需要执行单桶MinIO挂载，跳过, storageType={}, mountEnabled={}, bucketName={}",
-                storageType, minioConfig.getMount() == null ? null : minioConfig.getMount().getEnabled(), bucketName);
+            LOGGER.info("当前配置不需要执行单桶MinIO挂载，跳过, storageType={}, volumeBackend={}, mountEnabled={}, bucketName={}",
+                storageType, resolveVolumeBackend(),
+                minioConfig.getMount() == null ? null : minioConfig.getMount().getEnabled(), bucketName);
             return;
         }
         validateMountConfig();
@@ -119,8 +124,13 @@ public class MinioBucketMountSupport {
 
     private boolean shouldMount(String storageType) {
         return StringUtils.equalsIgnoreCase(StringUtils.trimToEmpty(storageType), "minio")
+            && StringUtils.equalsIgnoreCase(resolveVolumeBackend(), "minio-mount")
             && minioConfig.getMount() != null
             && Boolean.TRUE.equals(minioConfig.getMount().getEnabled());
+    }
+
+    private String resolveVolumeBackend() {
+        return StringUtils.defaultIfBlank(volumeBackend, "minio-mount");
     }
 
     private String resolveMountDirectory(String bucketName) {

@@ -1,5 +1,7 @@
 {{RESOLVER_BLOCK}}
 
+{{UPSTREAM_BLOCK}}
+
 map $http_upgrade $connection_upgrade {
     default upgrade;
     '' close;

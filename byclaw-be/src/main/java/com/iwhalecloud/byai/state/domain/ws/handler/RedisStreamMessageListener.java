@@ -5,14 +5,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Scope;
 import org.springframework.data.redis.connection.stream.MapRecord;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.stream.StreamListener;
 import org.springframework.stereotype.Component;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
-import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
-import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
-import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
+import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager;
+import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamEventRouter;
 
 /**
  * Redis Stream 数据流消息监听器。
@@ -44,16 +44,17 @@ public class RedisStreamMessageListener implements StreamListener<String, MapRec
     private static final Logger logger = LoggerFactory.getLogger(RedisStreamMessageListener.class);
 
     @Autowired
-    private OutputStreamManager outputStreamManager;
+    private SessionStreamEventRouter sessionStreamEventRouter;
 
     @Autowired
-    private MultiDeviceBroadcastService multiDeviceBroadcastService;
+    private RedisTemplate<String, Object> redisTemplate;
 
     @Override
     public void onMessage(MapRecord<String, String, String> message) {
         String rawData = message.getValue().get("data");
         if (rawData == null) {
             logger.warn("Redis Stream 消息 data 字段为空, messageId: {}", message.getId());
+            acknowledge(message);
             return;
         }
 
@@ -62,33 +63,31 @@ public class RedisStreamMessageListener implements StreamListener<String, MapRec
             dataJson = JSON.parseObject(rawData);
         } catch (Exception e) {
             logger.error("Redis Stream 消息 data 字段解析失败, raw: {}", rawData, e);
+            acknowledge(message);
             return;
         }
 
         String sessionId = dataJson.getString("session_id");
 
         if (sessionId == null) {
+            acknowledge(message);
             return;
         }
 
-        ChatProcessContext ctx = outputStreamManager.getContext(sessionId);
-        if (ctx == null || ctx.gatewayEventQueue == null) {
-            return;
-        }
+        dataJson.put("stream_id", message.getId().getValue());
 
-        // 将事件投入队列，由请求线程消费并写入 OutputStream，保证 SSE 实时推流
-        ctx.gatewayEventQueue.offer(dataJson);
+        sessionStreamEventRouter.dispatch(dataJson);
+        acknowledge(message);
+    }
 
-        // 多端广播：将事件推送到同一用户的其他 WebSocket 设备
+    private void acknowledge(MapRecord<String, String, String> message) {
         try {
-            multiDeviceBroadcastService.broadcastRawEvent(
-                ctx.getUserId(),
-                ctx.getSessionId(),
-                dataJson,
-                ctx.getSenderChannel()
-            );
-        } catch (Exception e) {
-            logger.warn("多端广播异常, sessionId: {}", sessionId, e);
+            redisTemplate.opsForStream()
+                .acknowledge(message.getStream(), SessionStreamManager.CONSUMER_GROUP, message.getId());
+        }
+        catch (Exception e) {
+            logger.warn("ack Session Stream 消息失败, stream: {}, messageId: {}",
+                message.getStream(), message.getId(), e);
         }
     }
 }

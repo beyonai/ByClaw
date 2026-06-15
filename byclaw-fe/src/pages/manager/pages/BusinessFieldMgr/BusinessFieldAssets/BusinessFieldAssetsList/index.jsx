@@ -1,14 +1,15 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { Pagination, Tag, message } from 'antd';
+import { Pagination, message } from 'antd';
 import { connect } from 'dva';
-import { useIntl, history } from '@umijs/max';
+import { useIntl } from '@umijs/max';
 import { debounce } from 'lodash';
-import dayjs from 'dayjs';
-import { getAvatarUrl } from '@/pages/manager/utils/agent';
-import Ellipsis from '@/pages/manager/components/Ellipsis';
 import ResizeTable from '@/pages/manager/components/ResizeTable';
-import { useSkillDetailDrawer } from '@/pages/manager/components/SkillDetailDrawer/useSkillDetailDrawer';
-import { resourceBizTypeMap } from '@/pages/manager/constants/digitalResource';
+import { ownerTypeMap, resourceStatus } from '@/pages/manager/constants/digitalResource';
+import { buildResourceCommonColumns } from '@/pages/manager/utils/resourceColumns';
+import defResourceIcon from '@/pages/manager/assets/defResourceIcon.png';
+import employeeIcon from '@/pages/manager/assets/Avatar.png';
+import knowledgeIcon from '@/pages/manager/assets/knowledge.png';
+import { ALL_FIELD_KEY } from '../../components/BusinessFieldTree';
 import styles from './index.module.less';
 
 const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, dispatch }) => {
@@ -19,22 +20,19 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
 
   const temp = useRef({}); // 保存当前的筛选和排序状态
   const [pageInfo, setPageInfo] = useState({
-    pageIndex: 1,
+    pageNum: 1,
     pageSize: 10,
     total: 0,
   });
-
-  // 技能详情抽屉（复用 asset/skills 的详情能力）
-  const { placeholder: SkillDetailDrawerHolder, show: showSkillDetailDrawer } = useSkillDetailDrawer();
 
   // 根据资产类型映射 resourceBizTypeList
   const getResourceBizTypeList = (type) => {
     const typeMap = {
       toolset: ['TOOLKIT', 'TOOL'], // 工具集
-      digitalEmployee: ['DIG_EMPLOYEE'], // 数字员工
+      employee: ['DIG_EMPLOYEE'], // 数字员工
       businessOntology: [], // 业务本体（待确认）
       knowledge: ['KG_DOC', 'KG_QA', 'KG_TERM'], // 知识资产
-      skill: ['AGENT'], // 技能资产
+      tool: ['AGENT', 'MCP', 'TOOLKIT'], // 工具资产
       MCP: ['MCP'], // MCP服务
       dataset: [], // 数据集（待确认）
       view: ['VIEW'], // 视图
@@ -69,14 +67,22 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
         }
       }
 
+      const getResourceLogoUrl = (item) => {
+        const logoUrl = item.resourceLogoUrl || item.avatar || item.logoUrl || item.pluginUrl;
+        return logoUrl;
+      };
+
+      const isAllCategory = selectedField?.fieldId === ALL_FIELD_KEY;
+      const catalogId = selectedField?.fieldId ?? selectedField?.catalogId;
+
       const payload = {
-        catalogId: selectedField?.fieldId || selectedField?.catalogId,
+        ...(isAllCategory ? {} : { catalogId }),
         keyword: searchKeyword || '',
         resourceStatusList: params.resourceStatusList ?? [],
         resourceBizTypeList,
         shelfTime,
         publishTime,
-        pageIndex: params.pageIndex ?? pageInfo.pageIndex,
+        pageNum: params.pageNum ?? pageInfo.pageNum,
         pageSize: params.pageSize ?? pageInfo.pageSize,
         ...params,
       };
@@ -87,12 +93,15 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
         success: (res) => {
           const { data } = res;
           // 根据实际接口返回的数据结构进行字段映射
-          const mappedData = (data?.rows || []).map((item) => {
+          const mappedData = (data?.list || []).map((item) => {
             const {
               resourceId,
               resourceName,
               resourceDesc,
               avatar,
+              resourceLogoUrl,
+              logoUrl,
+              pluginUrl,
               tags: tagsRaw,
               catalogName,
               resourceStatus,
@@ -130,6 +139,7 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
               description: resourceDesc || '',
               // 头像（可能为null）
               avatar: avatar || null,
+              resourceLogoUrl: getResourceLogoUrl({ ...item, resourceLogoUrl, avatar, logoUrl, pluginUrl }),
               // 标签（已解析为数组）
               tags,
               // 所属领域名称
@@ -147,7 +157,7 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
           setDataSource(mappedData);
           setPageInfo((prev) => ({
             ...prev,
-            pageIndex: payload.pageIndex || prev.pageIndex,
+            pageNum: payload.pageNum || prev.pageNum,
             pageSize: payload.pageSize || prev.pageSize,
             total: data?.total || 0,
           }));
@@ -165,7 +175,7 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
 
   const onSearch = useCallback(
     (values = {}, filters, sorter) => {
-      const params = { pageIndex: 1, ...values };
+      const params = { pageNum: 1, ...values };
 
       // 处理状态筛选
       if (filters?.status) {
@@ -205,8 +215,8 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
 
   // 当选中领域、资产类型变化时，获取数据
   useEffect(() => {
-    if (selectedField?.fieldId >= 0) {
-      getList();
+    if (selectedField?.fieldId === ALL_FIELD_KEY || selectedField?.fieldId >= 0) {
+      getList({ pageNum: 1 });
     } else {
       setDataSource([]);
       setPageInfo((prev) => ({ ...prev, total: 0 }));
@@ -215,7 +225,7 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
 
   // 搜索防抖处理：搜索关键词变化时，重置分页到第1页
   useEffect(() => {
-    if (!selectedField?.fieldId && !selectedField?.catalogId) {
+    if (selectedField?.fieldId === undefined && selectedField?.catalogId === undefined) {
       return;
     }
 
@@ -224,7 +234,7 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
       prevSearchKeywordRef.current = searchKeyword;
 
       const debouncedFn = debounce(() => {
-        onSearch({ pageIndex: 1 });
+        onSearch({ pageNum: 1 });
       }, 300);
 
       debouncedFn();
@@ -285,174 +295,28 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
   // );
 
   const columns = useMemo(
-    () => [
-      {
-        title: intl.formatMessage({ id: 'businessField.assets.table.name' }),
-        dataIndex: 'name',
-        key: 'name',
-        width: 150,
-        render: (text, record) => (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {assetType === 'digitalEmployee' && (
-              <img
-                width={24}
-                height={24}
-                style={{ borderRadius: '24px' }}
-                src={getAvatarUrl(record.avatar)}
-                alt="logo"
-              />
-            )}
-            <Ellipsis tooltip lines={1}>
-              {text || '-'}
-            </Ellipsis>
-          </div>
-        ),
-      },
-      {
-        title: intl.formatMessage({ id: 'businessField.assets.table.description' }),
-        dataIndex: 'description',
-        key: 'description',
-        width: 200,
-        render: (text) => (
-          <Ellipsis tooltip lines={1}>
-            {text || '-'}
-          </Ellipsis>
-        ),
-      },
-      {
-        title: intl.formatMessage({ id: 'businessField.assets.table.tags' }),
-        dataIndex: 'tags',
-        key: 'tags',
-        width: 120,
-        render: (tags) => {
-          if (!tags || !Array.isArray(tags) || tags.length === 0) return '-';
-          return (
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <Ellipsis tooltip lines={1}>
-                {tags.slice(0, 2).map((tag, index) => (
-                  <Tag key={tag || index} style={{ marginBottom: 4 }}>
-                    {tag}
-                  </Tag>
-                ))}
-                {tags.length > 2 && <Tag>+{tags.length - 2}</Tag>}
-              </Ellipsis>
-            </div>
-          );
+    () =>
+      buildResourceCommonColumns({
+        intl,
+        activeTab: assetType,
+        ownerTypeMap,
+        resourceStatus,
+        getIconSrc: (record, tab) => {
+          if (record?.resourceLogoUrl) {
+            const logoUrl = `${record.resourceLogoUrl}`;
+            return logoUrl.startsWith('/') ? `/aiFactoryServer${logoUrl}` : logoUrl;
+          }
+
+          switch (tab) {
+            case 'employee':
+              return employeeIcon;
+            case 'knowledge':
+              return knowledgeIcon;
+            default:
+              return defResourceIcon;
+          }
         },
-      },
-      {
-        title: intl.formatMessage({ id: 'businessField.assets.table.domain' }),
-        dataIndex: 'domain',
-        key: 'domain',
-        width: 120,
-        render: (text) => (
-          <Ellipsis tooltip lines={1}>
-            {text || '-'}
-          </Ellipsis>
-        ),
-      },
-      {
-        title: intl.formatMessage({ id: 'businessField.assets.table.status' }),
-        dataIndex: 'status',
-        key: 'status',
-        width: 110,
-        filters: [
-          { text: intl.formatMessage({ id: 'resourceStatus.draft' }), value: 0 },
-          // { text: '待上架', value: 1 },
-          { text: intl.formatMessage({ id: 'resourceStatus.published' }), value: 2 },
-          { text: intl.formatMessage({ id: 'resourceStatus.unpublished' }), value: 3 },
-          { text: intl.formatMessage({ id: 'orgMgr.digital.reviewing' }), value: 4 },
-          { text: intl.formatMessage({ id: 'resourceStatus.notPassed' }), value: 5 },
-        ],
-        render: (status) => {
-          // 状态映射：0-草稿 1-待上架 2-已上架 3-已下架 4-审批中 5-审批不通过
-          const statusMap = {
-            0: { text: intl.formatMessage({ id: 'resourceStatus.draft' }), color: 'default' },
-            1: { text: intl.formatMessage({ id: 'digitalResourceMgr.status.pending' }), color: 'orange' },
-            2: { text: intl.formatMessage({ id: 'resourceStatus.published' }), color: 'green' },
-            3: { text: intl.formatMessage({ id: 'resourceStatus.unpublished' }), color: 'default' },
-            4: { text: intl.formatMessage({ id: 'orgMgr.digital.reviewing' }), color: 'orange' },
-            5: { text: intl.formatMessage({ id: 'resourceStatus.notPassed' }), color: 'red' },
-          };
-          const statusInfo = statusMap[status] || {
-            text:
-              status !== null && status !== undefined
-                ? `${intl.formatMessage({ id: 'businessField.assets.table.status' })}${status}`
-                : '-',
-            color: 'default',
-          };
-          const colorMap = {
-            green: '#52c41a',
-            orange: '#fa8c16',
-            red: '#ff4d4f',
-            default: '#d9d9d9',
-          };
-          return (
-            <span>
-              <span
-                style={{
-                  display: 'inline-block',
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  backgroundColor: colorMap[statusInfo.color] || '#d9d9d9',
-                  marginRight: 6,
-                }}
-              />
-              {statusInfo.text}
-            </span>
-          );
-        },
-      },
-      {
-        title: intl.formatMessage({ id: 'businessField.assets.table.organization' }),
-        dataIndex: 'organization',
-        key: 'organization',
-        width: 120,
-        render: (text) => (
-          <Ellipsis tooltip lines={1}>
-            {text || '-'}
-          </Ellipsis>
-        ),
-      },
-      {
-        title: intl.formatMessage({ id: 'businessField.assets.table.releaseTime' }),
-        dataIndex: 'releaseTime',
-        key: 'releaseTime',
-        width: 115,
-        sorter: true,
-        render: (text) => {
-          if (!text) return '-';
-          return dayjs(text).format('YYYY-MM-DD');
-        },
-      },
-      {
-        title: intl.formatMessage({ id: 'businessField.assets.table.latestListTime' }),
-        dataIndex: 'latestListTime',
-        key: 'latestListTime',
-        width: 115,
-        sorter: true,
-        render: (text) => {
-          if (!text) return '-';
-          return dayjs(text).format('YYYY-MM-DD');
-        },
-      },
-      // {
-      //   title: intl.formatMessage({ id: 'businessField.assets.table.action' }),
-      //   key: 'action',
-      //   fixed: 'right',
-      //   width: 100,
-      //   render: (_, record) => (
-      //     <a
-      //       onClick={() => {
-      //         handleDetail(record);
-      //       }}
-      //     >
-      //       {intl.formatMessage({ id: 'businessField.assets.table.detail' })}
-      //     </a>
-      //   ),
-      // },
-    ],
+      }),
     [assetType, intl]
   );
 
@@ -469,27 +333,25 @@ const BusinessFieldAssetsList = ({ selectedField, assetType, searchKeyword, disp
           className={styles.tableWrap}
         />
       </div>
-      <div className="text-align-right">
+      <div className={styles.footer}>
         <Pagination
           showQuickJumper
           showSizeChanger
           size="small"
           showTotal={(tot) => {
-            const start = (pageInfo.pageIndex - 1) * pageInfo.pageSize + 1;
-            const end = Math.min(pageInfo.pageIndex * pageInfo.pageSize, tot);
+            const start = (pageInfo.pageNum - 1) * pageInfo.pageSize + 1;
+            const end = Math.min(pageInfo.pageNum * pageInfo.pageSize, tot);
             return intl.formatMessage({ id: 'businessField.assets.pagination.total' }, { start, end, total: tot });
           }}
-          current={pageInfo.pageIndex}
+          current={pageInfo.pageNum}
           pageSize={pageInfo.pageSize}
-          onChange={(pageIndex, pageSize) => {
-            onSearch({ pageIndex, pageSize });
+          onChange={(pageNum, pageSize) => {
+            onSearch({ pageNum, pageSize });
           }}
           total={pageInfo.total}
           className={`${styles.pagination} mb-8`}
         />
       </div>
-      {/* 技能详情抽屉占位 */}
-      {SkillDetailDrawerHolder}
     </>
   );
 };

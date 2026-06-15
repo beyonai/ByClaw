@@ -3,8 +3,6 @@ package com.iwhalecloud.byai.state.application.service.session;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.storage.UserFS;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
-import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,7 +38,7 @@ class ByClawSkillQueryApplicationServiceTest {
     private UserFS userFS;
 
     @Mock
-    private SsResourceService ssResourceService;
+    private ByClawSkillPathResolver skillPathResolver;
 
     private ByClawSkillQueryApplicationService byClawSkillQueryApplicationService;
 
@@ -54,7 +52,7 @@ class ByClawSkillQueryApplicationServiceTest {
 
         byClawSkillQueryApplicationService = new ByClawSkillQueryApplicationService();
         ReflectionTestUtils.setField(byClawSkillQueryApplicationService, "userFS", userFS);
-        ReflectionTestUtils.setField(byClawSkillQueryApplicationService, "ssResourceService", ssResourceService);
+        ReflectionTestUtils.setField(byClawSkillQueryApplicationService, "skillPathResolver", skillPathResolver);
     }
 
     @AfterEach
@@ -64,7 +62,7 @@ class ByClawSkillQueryApplicationServiceTest {
 
     @Test
     void shouldAggregateSkillDirectoriesAndSortBySkillName() {
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_SKILL_ROOT_PREFIX);
         when(userFS.list(eq(AGENT_SKILL_ROOT_PREFIX), isNull())).thenReturn(Arrays.asList(
             AGENT_SKILL_ROOT_PREFIX + "zeta/SKILL.md",
             AGENT_SKILL_ROOT_PREFIX + "zeta/resources/a.txt",
@@ -87,7 +85,7 @@ class ByClawSkillQueryApplicationServiceTest {
 
     @Test
     void shouldFilterBySkillNameAndIgnoreDirectoryWithoutSkillDoc() {
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_SKILL_ROOT_PREFIX);
         when(userFS.list(eq(AGENT_SKILL_ROOT_PREFIX), isNull())).thenReturn(Arrays.asList(
             AGENT_SKILL_ROOT_PREFIX + "baiying/resources/prompt.txt",
             AGENT_SKILL_ROOT_PREFIX + "baiying/requirements.txt",
@@ -100,7 +98,7 @@ class ByClawSkillQueryApplicationServiceTest {
 
     @Test
     void shouldReturnOnlyOneLevelSkillDocFiles() {
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_SKILL_ROOT_PREFIX);
         when(userFS.list(eq(AGENT_SKILL_ROOT_PREFIX), isNull())).thenReturn(Arrays.asList(
             AGENT_SKILL_ROOT_PREFIX + "baiying/SKILL.md",
             AGENT_SKILL_ROOT_PREFIX + "baiying/resources/SKILL.md",
@@ -116,7 +114,7 @@ class ByClawSkillQueryApplicationServiceTest {
 
     @Test
     void shouldMatchKeywordAgainstSkillDirectoryNameOnly() {
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_SKILL_ROOT_PREFIX);
         when(userFS.list(eq(AGENT_SKILL_ROOT_PREFIX), isNull())).thenReturn(Arrays.asList(
             AGENT_SKILL_ROOT_PREFIX + "baiying-agent/SKILL.md",
             AGENT_SKILL_ROOT_PREFIX + "other-skill/SKILL.md"));
@@ -129,7 +127,7 @@ class ByClawSkillQueryApplicationServiceTest {
 
     @Test
     void shouldReturnEmptyListWhenBucketOrPrefixHasNoObjects() {
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_SKILL_ROOT_PREFIX);
         when(userFS.list(eq(AGENT_SKILL_ROOT_PREFIX), isNull())).thenReturn(Collections.emptyList());
 
         List<ByClawSkillDto> result = byClawSkillQueryApplicationService.qrySkillListByUserCode(USER_CODE, RESOURCE_ID, null);
@@ -139,7 +137,7 @@ class ByClawSkillQueryApplicationServiceTest {
 
     @Test
     void shouldReturnEmptyListWhenObjectKeysIsNull() {
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_SKILL_ROOT_PREFIX);
         when(userFS.list(eq(AGENT_SKILL_ROOT_PREFIX), isNull())).thenReturn(null);
 
         List<ByClawSkillDto> result = byClawSkillQueryApplicationService.qrySkillListByUserCode(USER_CODE, RESOURCE_ID, null);
@@ -157,7 +155,7 @@ class ByClawSkillQueryApplicationServiceTest {
 
     @Test
     void shouldQuerySuperAssistantWorkspaceWhenResourceIdIsNull() {
-        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("adminvip_main"));
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(WORKSPACE_SKILL_ROOT_PREFIX);
         when(userFS.list(eq(WORKSPACE_SKILL_ROOT_PREFIX), isNull())).thenReturn(Arrays.asList(
             WORKSPACE_SKILL_ROOT_PREFIX + "assistant-core/SKILL.md",
             WORKSPACE_SKILL_ROOT_PREFIX + "assistant-core/resources/logo.png"));
@@ -170,9 +168,4 @@ class ByClawSkillQueryApplicationServiceTest {
         assertEquals(WORKSPACE_SKILL_ROOT_PREFIX + "assistant-core/SKILL.md", result.get(0).getSkillDocObjectKey());
     }
 
-    private SsResource resource(String resourceCode) {
-        SsResource resource = new SsResource();
-        resource.setResourceCode(resourceCode);
-        return resource;
-    }
 }

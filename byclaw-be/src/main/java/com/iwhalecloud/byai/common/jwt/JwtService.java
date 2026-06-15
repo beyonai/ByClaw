@@ -126,6 +126,19 @@ public class JwtService implements InitializingBean {
     }
 
     /**
+     * 生成指定有效期的百应 JWT。
+     *
+     * @param jwtPayload 令牌载荷
+     * @param timeout 有效期数值
+     * @param timeUnit 有效期单位
+     * @return JWT 字符串
+     */
+    public String createJwt(Object jwtPayload, long timeout, TimeUnit timeUnit) {
+        long expiredAt = System.currentTimeMillis() + timeUnit.toMillis(timeout);
+        return this.createRS256(jwtPayload, expiredAt);
+    }
+
+    /**
      * 创建刷新要认证
      * 
      * @param jwtPayload 加载参数

@@ -26,12 +26,12 @@ metadata:
 ## Default Configuration
 
 - **Default repository**: `beyonai/ByClaw`
-- **Environment variable**: `GITHUB_TOKEN` — GitHub PAT with `repo` scope
+- **授权方式**: OAuth Device Flow（自动，无需手动配置）
 - 用户不指定仓库时使用默认值，无需询问
 
 ## Workflow
 
-**IMPORTANT**: Always start by executing Step 0. Do NOT skip it. Do NOT tell the user "GITHUB_TOKEN is required" without first running the script.
+**IMPORTANT**: Always start by executing Step 0. Do NOT ask the user for a token. Do NOT suggest creating a token. Do NOT mention GITHUB_TOKEN or environment variables.
 
 ### Step 0: Check Authorization (MANDATORY FIRST STEP)
 
@@ -41,22 +41,22 @@ Run this command immediately — do not ask the user anything first:
 node skills/github-code-analysis/scripts/gh-pr-list.mjs --limit 1
 ```
 
-Check the JSON output:
-- If `"auth_required": true` is in the output, respond to the user with **exactly** this message (as markdown, with the clickable link):
+**If `"ok": true`** → proceed based on user intent.
 
----
+**If `"auth_required": true`** → the output already contains `verification_uri`, `user_code`, and `message`. Do these things:
+1. Show the `message` field content to the user verbatim (it has the link and code)
+2. STOP and wait for user to say "授权完了" / "done" / "好了"
+3. When user confirms, execute:
 
-GitHub 授权未配置，请先创建 Personal Access Token：
+```bash
+node skills/github-code-analysis/scripts/gh-auth-login.mjs --poll
+```
 
-👉 [点击这里创建 GitHub Token](https://github.com/settings/tokens/new?scopes=repo&description=ByClaw+PR+Review+Skill)
+4. If poll returns `"ok": true` → 授权成功，重新执行用户的原始请求
+5. If poll returns `"retry": true` → 告诉用户"还没完成，请确认浏览器中已授权"
+6. If poll returns expired error → 重新执行 Step 0（会生成新的授权码）
 
-创建时确保勾选 **repo** 权限。创建完成后，将 token 设置为环境变量 `GITHUB_TOKEN` 并重启服务。
-
----
-
-Then STOP. Do not proceed to any other step.
-
-- If `"ok": true`, proceed based on user intent.
+**禁止**：不得提及 GITHUB_TOKEN、PAT、Personal Access Token、环境变量、手动配置。授权完全由脚本自动处理。
 
 ---
 

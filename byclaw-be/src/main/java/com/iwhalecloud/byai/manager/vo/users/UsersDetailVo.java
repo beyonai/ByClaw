@@ -6,6 +6,10 @@ import lombok.Setter;
 import java.io.Serializable;
 import java.util.List;
 
+/**
+ * @author qin.guoquan
+ * @date 2026-06-11 17:38:38
+ */
 @Getter
 @Setter
 public class UsersDetailVo implements Serializable {

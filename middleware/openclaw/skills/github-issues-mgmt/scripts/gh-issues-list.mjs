@@ -5,9 +5,9 @@
  *
  * Usage:
  *   node gh-issues-list.mjs [--repo owner/repo] [--state open] [--labels bug,feature] [--limit 20]
- *
- * Env: GITHUB_TOKEN (required)
  */
+
+import { requireGitHubToken } from "./gh-token.mjs";
 
 const args = process.argv.slice(2);
 
@@ -20,22 +20,10 @@ const repo = getArg("repo") || process.env.GITHUB_PR_REVIEW_REPO || "beyonai/ByC
 const state = getArg("state") || "open";
 const labels = getArg("labels") || "";
 const limit = parseInt(getArg("limit") || "20", 10);
-const token = process.env.GITHUB_TOKEN;
+const token = await requireGitHubToken();
 
 function fail(message) {
   console.log(JSON.stringify({ ok: false, error: message }));
-  process.exit(1);
-}
-
-if (!token) {
-  const authUrl = "https://github.com/settings/tokens/new?scopes=repo&description=ByClaw+Issues+Mgmt+Skill";
-  console.log(JSON.stringify({
-    ok: false,
-    error: "GITHUB_TOKEN not configured",
-    auth_required: true,
-    auth_url: authUrl,
-    message: `GitHub 授权未配置。请点击以下链接创建 Personal Access Token：\n\n${authUrl}\n\n创建时请确保勾选 repo 权限。创建后设置环境变量：export GITHUB_TOKEN=<your_token>`,
-  }));
   process.exit(1);
 }
 

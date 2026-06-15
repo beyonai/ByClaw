@@ -12,12 +12,12 @@ import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatStreamRuntimeCoordinator;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
-import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
+import com.iwhalecloud.byai.state.domain.chat.service.GatewayStreamEventProcessor;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
-import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
-import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentTypeResolver;
+import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
@@ -35,6 +35,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Locale;
+import java.util.concurrent.LinkedBlockingQueue;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
@@ -44,10 +45,9 @@ class RouteServiceTest {
 
     private GatewayClient gatewayClient;
     private PythonSseService pythonSseService;
-    private SessionStreamManager sessionStreamManager;
+    private GatewayStreamEventProcessor gatewayStreamEventProcessor;
+    private ChatStreamRuntimeCoordinator chatStreamRuntimeCoordinator;
     private SandboxService sandboxService;
-    private OutputStreamManager outputStreamManager;
-    private RunningOutputStreamRegistry runningOutputStreamRegistry;
     private SequenceService sequenceService;
     private JwtService jwtService;
     private TargetAgentTypeResolver targetAgentTypeResolver;
@@ -58,10 +58,9 @@ class RouteServiceTest {
     void setUp() {
         gatewayClient = mock(GatewayClient.class);
         pythonSseService = mock(PythonSseService.class);
-        sessionStreamManager = mock(SessionStreamManager.class);
+        gatewayStreamEventProcessor = new GatewayStreamEventProcessor();
+        chatStreamRuntimeCoordinator = mock(ChatStreamRuntimeCoordinator.class);
         sandboxService = mock(SandboxService.class);
-        outputStreamManager = mock(OutputStreamManager.class);
-        runningOutputStreamRegistry = mock(RunningOutputStreamRegistry.class);
         sequenceService = mock(SequenceService.class);
         jwtService = mock(JwtService.class);
         targetAgentTypeResolver = new TargetAgentTypeResolver();
@@ -69,20 +68,23 @@ class RouteServiceTest {
         messageSource.addMessage("sandbox.launch.progress.start", Locale.SIMPLIFIED_CHINESE, "个人助理正在启动中，请等待");
         messageSource.addMessage("sandbox.launch.progress.waiting", Locale.SIMPLIFIED_CHINESE, "个人助理仍在启动中，请稍等");
         messageSource.addMessage("sandbox.launch.progress.failed", Locale.SIMPLIFIED_CHINESE, "沙箱启动失败，请联系管理员");
+        messageSource.addMessage("sandbox.launch.model.config.required", Locale.SIMPLIFIED_CHINESE,
+                "沙箱启动失败，模型参数配置不完整，请联系管理员");
         messageSource.addMessage("sandbox.launch.progress.start", Locale.US, "Your personal assistant is starting up, please wait.");
         messageSource.addMessage("sandbox.launch.progress.waiting", Locale.US,
                 "Your personal assistant is still starting up, please wait a moment.");
         messageSource.addMessage("sandbox.launch.progress.failed", Locale.US,
                 "Sandbox startup failed, please contact the administrator.");
+        messageSource.addMessage("sandbox.launch.model.config.required", Locale.US,
+                "Sandbox startup failed because model parameters are incomplete. Please contact the administrator.");
         when(jwtService.createJwt(any())).thenReturn("test-beyond-token");
 
         routeService = new RouteService();
         ReflectionTestUtils.setField(routeService, "gatewayClient", gatewayClient);
         ReflectionTestUtils.setField(routeService, "pythonSseService", pythonSseService);
-        ReflectionTestUtils.setField(routeService, "sessionStreamManager", sessionStreamManager);
+        ReflectionTestUtils.setField(routeService, "gatewayStreamEventProcessor", gatewayStreamEventProcessor);
+        ReflectionTestUtils.setField(routeService, "chatStreamRuntimeCoordinator", chatStreamRuntimeCoordinator);
         ReflectionTestUtils.setField(routeService, "sandboxService", sandboxService);
-        ReflectionTestUtils.setField(routeService, "outputStreamManager", outputStreamManager);
-        ReflectionTestUtils.setField(routeService, "runningOutputStreamRegistry", runningOutputStreamRegistry);
         ReflectionTestUtils.setField(routeService, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(routeService, "jwtService", jwtService);
         ReflectionTestUtils.setField(routeService, "targetAgentTypeResolver", targetAgentTypeResolver);
@@ -161,7 +163,7 @@ class RouteServiceTest {
         verify(sandboxService, times(1)).restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1");
         verify(gatewayClient, times(2)).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
-        verify(sessionStreamManager, times(1)).stopSessionListener("3");
+        verify(chatStreamRuntimeCoordinator, times(1)).stopIfStarted("3", true);
     }
 
     @Test
@@ -188,6 +190,31 @@ class RouteServiceTest {
                 .contains("沙箱启动失败，请联系管理员");
         verify(gatewayClient, times(1)).sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
+    }
+
+    @Test
+    void route_emitsModelConfigMessage_whenSandboxRestartFailsWithBusinessException() {
+        ChatProcessContext ctx = buildContext();
+        when(sequenceService.nextVal()).thenReturn(100L);
+        when(sandboxService.restartSandboxAfterRemoteExitWithoutWait("u1", null, "BYCLAW_EXE_u1"))
+                .thenThrow(new BdpRuntimeException(I18nUtil.get("sandbox.launch.model.config.required")));
+
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenReturn(failedResponse(ExecutionStatus.ERR_AGENT_TYPE_UNAVAILABLE, "agent unavailable"));
+
+        assertThatThrownBy(() -> routeService.route(ctx))
+                .isInstanceOf(BdpRuntimeException.class)
+                .hasMessage("沙箱启动失败，模型参数配置不完整，请联系管理员");
+
+        org.assertj.core.api.Assertions.assertThat(output(ctx))
+                .contains("reasoningLogStart")
+                .contains("reasoningLogEnd")
+                .contains("沙箱启动失败，模型参数配置不完整，请联系管理员")
+                .doesNotContain("沙箱启动失败，请联系管理员");
+        verify(gatewayClient, times(1)).sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any());
+        verify(sandboxService, never()).waitWorkerReadySync(anyString(), anyLong());
     }
 
     @Test
@@ -261,16 +288,18 @@ class RouteServiceTest {
         ctx.setSessionId(3L);
         ctx.setUserMessageId(1L);
         ctx.setModelAnswerMessageId(2L);
-        ctx.setTraceId("1_2");
+        ctx.setTraceId(TraceIdCodec.encode(ctx.getUserMessageId(), ctx.getModelAnswerMessageId()));
         ctx.setParams(new HashMap<>());
         ctx.getParams().put("worker_agent_type", workerAgentType);
+        ctx.gatewayEventQueue = new LinkedBlockingQueue<>();
+        when(chatStreamRuntimeCoordinator.startIfNecessary(ctx)).thenReturn(true);
         return ctx;
     }
 
     private JSONObject currentTraceDoneEvent(ChatProcessContext ctx) {
         JSONObject event = new JSONObject();
         event.put("event_type", SseResponseEventEnum.appStreamResponse);
-        event.put("trace_id", ctx.getUserMessageId() + "_" + ctx.getModelAnswerMessageId());
+        event.put("trace_id", TraceIdCodec.encode(ctx.getUserMessageId(), ctx.getModelAnswerMessageId()));
         event.put("data", "{}");
         return event;
     }

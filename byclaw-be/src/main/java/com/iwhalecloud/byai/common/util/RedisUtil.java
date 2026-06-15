@@ -153,6 +153,30 @@ public class RedisUtil {
     }
 
     /**
+     * 获取Hash所有字段和值。
+     *
+     * @param key 键名
+     * @return 字段名-字段值映射
+     */
+    public static Map<String, String> hmGetEntries(String key) {
+        if (StringUtil.isEmpty(key)) {
+            return Collections.emptyMap();
+        }
+        Map<Object, Object> entries = instance.stringRedisTemplate.opsForHash().entries(key);
+        if (entries == null || entries.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<String, String> result = new HashMap<>(entries.size());
+        for (Map.Entry<Object, Object> entry : entries.entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null) {
+                continue;
+            }
+            result.put(String.valueOf(entry.getKey()), String.valueOf(entry.getValue()));
+        }
+        return result;
+    }
+
+    /**
      * 获取Set的所有成员
      *
      * @param key 键名

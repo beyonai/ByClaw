@@ -84,13 +84,27 @@ docker-compose ps
 如果您想一键启动中间件和拆分模式应用，可以使用项目根目录的脚本：
 
 ```bash
-cd deploy
-sh start-standalone.sh
+cp .env.example .env
+# 在 .env 中设置 BYCLAW_DEPLOY_STORAGE=nfs|minio|nfs-hybrid
+sh deploy.sh init
 ```
 
 这个脚本会：
 1. 先启动中间件
 2. 再启动拆分模式应用
+
+存储模式通过 `.env` 切换：
+
+```bash
+# NFS 全文件型模式
+BYCLAW_DEPLOY_STORAGE=nfs
+
+# legacy MinIO 模式
+BYCLAW_DEPLOY_STORAGE=minio
+
+# NFS 运行态 + MinIO 上传接口
+BYCLAW_DEPLOY_STORAGE=nfs-hybrid
+```
 
 ## 按需启动服务
 

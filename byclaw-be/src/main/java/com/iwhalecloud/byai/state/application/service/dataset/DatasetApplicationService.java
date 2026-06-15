@@ -353,6 +353,7 @@ public class DatasetApplicationService {
         SsResource ssResource = ssResourceService.findById(resourceId);
         // 第三方知识库模式下，知识库由外部知识库体系发布，本系统不允许注销。
         validateKnowledgeBaseWritable();
+        validateDefaultPersonalDatasetDeletable(ssResource);
         validateDatasetManagePermission(ssResource);
         SsResExtDoc extDoc = ssResExtDocService.findById(resourceId);
         String targetContent = extDoc == null ? null : extDoc.getTargetContent();
@@ -382,13 +383,38 @@ public class DatasetApplicationService {
         if (ssResource == null) {
             throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
         }
-        if (OwnerType.PERSONAL_DEFAULT.equals(ssResource.getOwnerType())) {
-            throw new IllegalArgumentException(I18nUtil.get("user.permission.nopermission"));
-        }
         if (authApplicationService.hasResourceManagePermission(ssResource)) {
             return;
         }
         throw new IllegalArgumentException(I18nUtil.get("user.permission.nopermission"));
+    }
+
+    private void validateDefaultPersonalDatasetDeletable(SsResource ssResource) {
+        if (ssResource == null) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
+        }
+        // 默认个人知识库是个人空间底座资源，允许本人维护库内内容，但不允许注销整个知识库。
+        if (OwnerType.PERSONAL_DEFAULT.equals(ssResource.getOwnerType())) {
+            throw new IllegalArgumentException(I18nUtil.get("dataset.default.personal.delete.not.allowed"));
+        }
+    }
+
+    private void validateDatasetReadablePermission(SsResource ssResource) {
+        if (ssResource == null) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
+        }
+        if (authApplicationService.hasResourceAccessPermission(ssResource)) {
+            return;
+        }
+        throw new IllegalArgumentException(I18nUtil.get("user.permission.nopermission"));
+    }
+
+    private SsResource loadDatasetResource(Long resourceId) {
+        SsResource ssResource = ssResourceService.findById(resourceId);
+        if (ssResource == null) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
+        }
+        return ssResource;
     }
 
     /**
@@ -429,6 +455,7 @@ public class DatasetApplicationService {
      * @return 资源实体，未实现时返回 null
      */
     public DatasetDetailVo detail(Long resourceId) {
+        validateDatasetReadablePermission(loadDatasetResource(resourceId));
         return ssResourceService.findDatasetDetailById(resourceId);
     }
 
@@ -444,7 +471,8 @@ public class DatasetApplicationService {
     public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
         String fileDescription) throws IOException {
 
-        SsResource ssResource = ssResourceService.findById(resourceId);
+        SsResource ssResource = loadDatasetResource(resourceId);
+        validateDatasetManagePermission(ssResource);
 
         UploadResult uploadResult = new UploadResult();
         uploadResult.setResourceId(resourceId);
@@ -485,7 +513,8 @@ public class DatasetApplicationService {
      */
     public void build(DatasetBuild datasetBuild) {
 
-        SsResource ssResource = ssResourceService.findById(datasetBuild.getResourceId());
+        SsResource ssResource = loadDatasetResource(datasetBuild.getResourceId());
+        validateDatasetManagePermission(ssResource);
 
         // 构建知识文件
         KbFileToMarkdownIndex kbFileToMarkdownIndex = new KbFileToMarkdownIndex();
@@ -508,7 +537,8 @@ public class DatasetApplicationService {
     public void download(Long resourceId, String directoryPath, HttpServletResponse response) {
 
         // 获取知识库信息
-        SsResource ssResource = ssResourceService.findById(resourceId);
+        SsResource ssResource = loadDatasetResource(resourceId);
+        validateDatasetReadablePermission(ssResource);
 
         // 提取参数
         KbFileDownload kbFileDownload = new KbFileDownload();
@@ -537,7 +567,8 @@ public class DatasetApplicationService {
      */
     public void removeFile(RemoveFileDto removeFileDto) {
 
-        SsResource ssResource = ssResourceService.findById(removeFileDto.getResourceId());
+        SsResource ssResource = loadDatasetResource(removeFileDto.getResourceId());
+        validateDatasetManagePermission(ssResource);
 
         // 删除构建
         KbFileDelete kbFileDelete = new KbFileDelete();
@@ -560,7 +591,8 @@ public class DatasetApplicationService {
         String directoryName = folder.getDirectoryName();
 
         // 查询知识库
-        SsResource ssResource = ssResourceService.findById(resourceId);
+        SsResource ssResource = loadDatasetResource(resourceId);
+        validateDatasetManagePermission(ssResource);
 
         KbDirectoryCreate kbDirectoryCreate = new KbDirectoryCreate();
         kbDirectoryCreate.setKnCode(ssResource.getResourceCode());
@@ -587,7 +619,8 @@ public class DatasetApplicationService {
      */
     public KbDirectoryUpdate renameFolder(Folder folder) {
 
-        SsResource ssResource = ssResourceService.findById(folder.getResourceId());
+        SsResource ssResource = loadDatasetResource(folder.getResourceId());
+        validateDatasetManagePermission(ssResource);
 
         KbDirectoryUpdate kbDirectoryUpdate = new KbDirectoryUpdate();
         kbDirectoryUpdate.setKnCode(ssResource.getResourceCode());
@@ -607,7 +640,8 @@ public class DatasetApplicationService {
      */
     public void deleteFolder(FolderDelete folderDelete) {
 
-        SsResource ssResource = ssResourceService.findById(folderDelete.getResourceId());
+        SsResource ssResource = loadDatasetResource(folderDelete.getResourceId());
+        validateDatasetManagePermission(ssResource);
 
         KbDirectoryDelete kbDirectoryDelete = new KbDirectoryDelete();
         kbDirectoryDelete.setKnCode(ssResource.getResourceCode());
@@ -626,7 +660,8 @@ public class DatasetApplicationService {
      */
     public List<DirAndFileVo> queryDirAndFileByLevel(DirAndFileQo dirAndFileQo) {
 
-        SsResource ssResource = ssResourceService.findById(dirAndFileQo.getResourceId());
+        SsResource ssResource = loadDatasetResource(dirAndFileQo.getResourceId());
+        validateDatasetReadablePermission(ssResource);
 
         KbListDir kbListDir = new KbListDir();
         if (StringUtil.isNotEmpty(dirAndFileQo.getResourceCode())) {
@@ -933,10 +968,8 @@ public class DatasetApplicationService {
      */
     public ProcessStatus fileBuildStatus(Long resourceId, String directoryPath) {
 
-        SsResource ssResource = ssResourceService.findById(resourceId);
-        if (ssResource == null) {
-            return new ProcessStatus();
-        }
+        SsResource ssResource = loadDatasetResource(resourceId);
+        validateDatasetReadablePermission(ssResource);
 
         FileBuildStatus fileBuildStatus = new FileBuildStatus();
         fileBuildStatus.setKnCode(ssResource.getResourceCode());

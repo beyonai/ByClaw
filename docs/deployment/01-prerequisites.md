@@ -51,13 +51,25 @@ docker compose version
 
 > **说明：** ByClaw 的所有镜像均托管在 GHCR 公开仓库，无需登录即可拉取。
 
-## 4. rclone（MinIO 文件挂载）
+## 4. 运行态文件系统
 
-ByClaw 使用 [rclone](https://rclone.org/) 将 MinIO 对象存储桶以 FUSE 文件系统的方式挂载到宿主机。这样数字员工的沙箱环境可以像访问本地目录一样读写 MinIO 中的文件，无需通过 S3 API 中转。
+新部署推荐使用 NFS/SMB/OpenMediaVault 这类真实文件系统承载 OpenClaw 容器 `/by`。MinIO 继续用于对象存储、归档、共享和备份，不再推荐作为运行态文件系统。
+
+纯 Docker 环境请先阅读 [Docker 文件型运行态存储部署指南](./10-docker-file-storage-deployment.md)，并确保每台 openSandbox Docker 宿主机都能把同一个远端文件系统挂载到同一路径，例如：
+
+```bash
+sudo mkdir -p /mnt/byclaw-file
+findmnt /mnt/byclaw-file
+touch /mnt/byclaw-file/.probe
+```
+
+### legacy: rclone（MinIO 文件挂载）
+
+ByClaw 仍保留 [rclone](https://rclone.org/) 将 MinIO 对象存储桶以 FUSE 文件系统方式挂载到宿主机的 legacy 模式。该模式仅用于兼容旧部署，不推荐作为 OpenClaw `/by` 的长期运行态卷。
 
 > **注意：** rclone 需要安装在**目标宿主机**上（即 `FILE_STORAGE_MINIO_MOUNT_TARGET_*_HOST` 指向的机器），而不是运行 ByClaw 后端的机器。后端通过 SSH 远程执行 rclone 命令。
 
-### 为什么需要 rclone
+### legacy 模式为什么需要 rclone
 
 - 沙箱环境需要以本地文件路径访问用户上传的文件和知识库数据
 - rclone mount 将 MinIO bucket 映射为本地目录，对应用层完全透明
@@ -128,11 +140,31 @@ FILE_STORAGE_MINIO_MOUNT_TARGET_0_PASSWORD=your_password
 FILE_STORAGE_MINIO_MOUNT_TARGET_0_ENABLED=true
 ```
 
-如果不需要文件挂载功能，设置 `FILE_STORAGE_MINIO_MOUNT_ENABLED=false` 即可跳过。
+新部署建议设置：
+
+```bash
+BYCLAW_SANDBOX_VOLUME_BACKEND=file
+BYCLAW_SANDBOX_FILE_VOLUME_ROOT=/mnt/byclaw-file
+BYCLAW_SANDBOX_FILE_VOLUME_TYPE=nfs
+FILE_STORAGE_MINIO_MOUNT_ENABLED=false
+```
+
+只有旧部署需要继续使用 rclone 时，才设置 `BYCLAW_SANDBOX_VOLUME_BACKEND=minio-mount` 和 `FILE_STORAGE_MINIO_MOUNT_ENABLED=true`。
 
 ## 5. ⚠️ 重要：数据目录准备（必须）
 
-在部署之前，**必须**提前准备好 MinIO 挂载目录，否则容器可能无法正常启动！
+在部署之前，**必须**提前准备好运行态卷根目录，否则容器可能无法正常启动！
+
+新部署使用文件型运行态卷：
+
+```bash
+sudo mkdir -p /mnt/byclaw-file
+findmnt /mnt/byclaw-file
+sudo chmod -R 755 /mnt/byclaw-file
+sudo chown -R root:root /mnt/byclaw-file
+```
+
+旧 rclone 模式才需要准备 MinIO 挂载目录。
 
 根据您的 `.env` 配置中的 `FILE_STORAGE_MINIO_MOUNT_PATH` 创建目录：
 

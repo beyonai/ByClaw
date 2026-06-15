@@ -9,6 +9,7 @@ import { dataItemTypeMap } from '@/components/PersonnelModel';
 import RightItemRender from '@/components/OrgSelect/components/RightItemRender';
 import { searchTypeMap } from '@/components/PersonnelModel/const';
 import { IOrgCache } from '@/components/OrgSelect/MyOrgSelect';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 import {
   RESOURCE_BIZ_TYPE_ALL_VALUE,
   BELONG_DEPT_VALUE,
@@ -89,11 +90,13 @@ const ResourceFilterForm = ({
   defaultParam,
   activeTab,
   resourceType,
+  showStatusFilter,
 }: {
   onOk: (param: IOnOkParams) => void;
   defaultParam: IOnOkParams;
   resourceType?: string;
   activeTab?: string;
+  showStatusFilter?: boolean;
 }) => {
   const intl = useIntl();
   const [filterParam, setFilterParam] = React.useReducer(filterReducer, getDefaultParams(defaultParam));
@@ -220,29 +223,31 @@ const ResourceFilterForm = ({
           </div>
         )}
         {/* 筛选-状态 */}
-        <div className="ub ub-ver gap8">
-          <p className={styles.filterTitle}>{intl.formatMessage({ id: 'common.status' })}</p>
-          <div className="ub gap8 ub-wrap">
-            {statusOptions.map((item) => (
-              <div
-                key={item.value}
-                className={classnames(styles.statusItem, 'ub ub-ac pointer', {
-                  [styles.active]: filterStatus === item.value,
-                })}
-                onClick={() => {
-                  setFilterParam({
-                    type: 'update',
-                    item: {
-                      resourceStatus: item.value,
-                    },
-                  });
-                }}
-              >
-                {intl.formatMessage({ id: item.label })}
-              </div>
-            ))}
+        {showStatusFilter && (
+          <div className="ub ub-ver gap8">
+            <p className={styles.filterTitle}>{intl.formatMessage({ id: 'common.status' })}</p>
+            <div className="ub gap8 ub-wrap">
+              {statusOptions.map((item) => (
+                <div
+                  key={item.value}
+                  className={classnames(styles.statusItem, 'ub ub-ac pointer', {
+                    [styles.active]: filterStatus === item.value,
+                  })}
+                  onClick={() => {
+                    setFilterParam({
+                      type: 'update',
+                      item: {
+                        resourceStatus: item.value,
+                      },
+                    });
+                  }}
+                >
+                  {intl.formatMessage({ id: item.label })}
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* 筛选-权限 */}
         <div className="ub ub-ver gap8">
@@ -426,11 +431,33 @@ interface ResourceFilterWithDropdownProps {
   defaultParam: IOnOkParams;
   activeTab?: string;
   resourceType?: string;
+  alwaysShowStatusFilter?: boolean;
 }
 
-const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({ onOk, defaultParam, activeTab, resourceType }) => {
+const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({
+  onOk,
+  defaultParam,
+  activeTab,
+  resourceType,
+  alwaysShowStatusFilter,
+}) => {
   const intl = useIntl();
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
+  const [brandVersion, setBrandVersion] = React.useState<'commercial' | 'openSource' | null>();
+  const showStatusFilter = alwaysShowStatusFilter || brandVersion === 'openSource' || brandVersion === null;
+
+  React.useEffect(() => {
+    getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
+      .then((res: any) => {
+        const nextBrandVersion = res?.paramValue;
+        setBrandVersion(
+          nextBrandVersion === 'commercial' || nextBrandVersion === 'openSource' ? nextBrandVersion : null
+        );
+      })
+      .catch(() => {
+        setBrandVersion(null);
+      });
+  }, []);
 
   return (
     <Dropdown
@@ -444,6 +471,7 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({ onOk, defau
           }}
           defaultParam={defaultParam}
           activeTab={activeTab}
+          showStatusFilter={showStatusFilter}
         />
       )}
       getPopupContainer={() => window.document.body}
@@ -474,15 +502,17 @@ const ResourceFilter: React.FC<ResourceFilterWithDropdownProps> = ({ onOk, defau
             </div>
           )}
           {/* 筛选-状态 */}
-          <div className={styles.selectedItem}>
-            {intl.formatMessage({ id: 'common.status' })}：
-            {(() => {
-              const selectedOption = statusOptions.find((item) => item.value === get(defaultParam, 'resourceStatus'));
-              return selectedOption
-                ? intl.formatMessage({ id: selectedOption.label })
-                : intl.formatMessage({ id: 'resource.statusActive' });
-            })()}
-          </div>
+          {showStatusFilter && (
+            <div className={styles.selectedItem}>
+              {intl.formatMessage({ id: 'common.status' })}：
+              {(() => {
+                const selectedOption = statusOptions.find((item) => item.value === get(defaultParam, 'resourceStatus'));
+                return selectedOption
+                  ? intl.formatMessage({ id: selectedOption.label })
+                  : intl.formatMessage({ id: 'resource.statusActive' });
+              })()}
+            </div>
+          )}
           {/* 筛选-权限 */}
           <div className={styles.selectedItem}>
             {intl.formatMessage({ id: 'resource.permission' })}：

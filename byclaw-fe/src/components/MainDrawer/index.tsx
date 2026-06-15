@@ -99,7 +99,7 @@ function MainDrawer() {
 
   const ContentComp = React.useMemo(() => {
     keyRef.current = getRandomNumber(0, 100);
-    if (drawerType === 'iframe') {
+    if (['iframe', 'vnc'].includes(drawerType)) {
       return IframeRender;
     }
     if (drawerType === 'mobile') {

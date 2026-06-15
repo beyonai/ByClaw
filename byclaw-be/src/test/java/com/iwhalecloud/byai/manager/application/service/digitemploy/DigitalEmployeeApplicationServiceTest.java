@@ -43,6 +43,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Locale;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -631,6 +632,8 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(detailsDTO.getRelPrompt()).isEmpty();
         assertThat(detailsDTO.getRelTools()).isEmpty();
     }
+
+    // generateV3 moved to MetaPromptService — see MetaPromptServiceTest
 
     private SsResource buildDigitalEmployee(Long resourceId, String ownerType, Long createBy) {
         SsResource resource = new SsResource();

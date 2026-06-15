@@ -6,7 +6,6 @@ import { Badge } from 'antd';
 import { useDispatch, useNavigate, useSelector } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
 import ChatAvatar from '@/components/ChatAvatar';
-import webSocketManager from '@/utils/websocket';
 
 import { ISession } from '@/typescript/session';
 import { IAgentCache } from '@/typescript/agent';
@@ -87,8 +86,12 @@ const DialogueCard = ({ item, onClose }: { item: ISession; onClose: () => void }
               },
             });
 
-            // 清除websocket产生的红点
-            webSocketManager.clearNotification();
+            dispatch({
+              type: 'session/updateUnreadInfo',
+              payload: {
+                totalUnread: 0,
+              },
+            });
           }
 
           navigate('/mobile/notice');

@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.storage.config.ObjectStorageConfiguration;
+import com.iwhalecloud.byai.common.storage.constants.StorageType;
 
 /**
  * Resolves file-ingress capable backends by storage type.
@@ -30,7 +31,7 @@ public class FileIngressBackendRegistry {
 
     public FileIngressBackend getBackend(String storageType) {
         for (FileIngressBackend backend : backends) {
-            if (backend.getStorageType().equalsIgnoreCase(storageType)) {
+            if (StorageType.matches(storageType, backend.getStorageType())) {
                 return backend;
             }
         }

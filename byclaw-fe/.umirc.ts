@@ -67,12 +67,16 @@ export default defineConfig({
       changeOrigin: true,
       ws: true,
     },
-    [`${routerBase}byaiService`]: {
+    // openclaw 控制台整页代理：HTTP 资源与 WS 握手共用 /openclaw-ui 前缀，
+    // 需开启 ws 转发，且目标是后端（8086），而非 /ws 用的独立 ws 服务。
+    // 必须放在通配的 byaiService 规则之前，否则会被它先吃掉、WS 不转发。
+    [`${routerBase}byaiService/openclaw-ui`]: {
       target,
       changeOrigin: true,
+      ws: true,
     },
-    [`/filebrowser`]: {
-      target: 'http://127.0.0.1:8086/byaiService/filebrowser',
+    [`${routerBase}byaiService`]: {
+      target,
       changeOrigin: true,
     },
   },

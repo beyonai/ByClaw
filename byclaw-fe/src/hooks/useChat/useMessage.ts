@@ -7,19 +7,23 @@
  */
 import { delMessage } from '@/service/message';
 import { useDispatch, useSelector } from '@umijs/max';
-import { assign, merge, pullAllBy, size } from 'lodash';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { assign, merge, size } from 'lodash';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { SetStateAction } from 'react';
 
 import type { IMessageInfo } from '@/models/useMessageStore';
 import type { IMessage } from '@/typescript/message';
 import { getMsgId } from '@/utils/messgae';
-import useGlobal from '../useGlobal';
 import { getSessionObjectTypeMap } from '@/utils/session';
+import useGlobal from '../useGlobal';
 
 // 记录当前会话ID的引用，用于跟踪会话变化
 const curSessionId = {
   current: '',
 };
+
+export const DRAFT_SESSION_ID = '__message_store_draft_session__';
+export const EMPTY_ARRAY = [];
 
 /**
  * 消息管理Hook
@@ -28,78 +32,98 @@ const curSessionId = {
  * @returns {object} 消息管理相关方法和状态
  */
 export default function useMessage({ sessionId }: { sessionId?: string }) {
-  // 消息列表状态
-  const [messageList, setMessageList] = useState<IMessage[]>([]);
-  // 是否有更多消息（分页加载相关）
-  const [hasMore, setHasMore] = useState(true);
-
   const dispatch = useDispatch();
   const { sessionListMap } = useSelector((state: any) => state.messageStore);
   const { EventEmitter } = useGlobal();
 
-  const messageListRef = useRef(messageList);
+  const [optimisticSessionId, setOptimisticSessionId] = useState('');
+  const pendingDraftCleanupRef = useRef(false);
+
+  const activeSessionId = String(sessionId || optimisticSessionId || DRAFT_SESSION_ID);
+  const messageInfo = sessionListMap.get(activeSessionId) as (IMessageInfo & { hasMore?: boolean }) | undefined;
+  const messageList = useMemo(() => messageInfo?.list || EMPTY_ARRAY, [messageInfo]);
+  const hasMore = useMemo(() => {
+    if (!messageInfo?.list) return false;
+    if (typeof messageInfo.hasMore === 'boolean') return messageInfo.hasMore;
+    return size(messageInfo.list) >= messageInfo.pageSize;
+  }, [messageInfo]);
+
+  const messageListRef = useRef<IMessage[]>(messageList);
+
+  const getTargetSessionId = useCallback(
+    (msg?: Partial<IMessage>) => `${msg?.sessionId || curSessionId.current || activeSessionId}`,
+    [activeSessionId]
+  );
 
   /**
    * 更新消息方法
-   * 如果消息已存在（通过msgId匹配），则合并更新；否则添加为新消息
+   * 如果消息已存在（通过messageId或msgId匹配），则合并更新；否则添加为新消息
    * @param {IMessage} msg - 要更新或添加的消息对象
    */
   const updateMessage = useCallback(
-    (msg: IMessage, opt: { isAssign?: boolean } = {}) => {
+    (msg: IMessage, opt: { isAssign?: boolean; allowCreateSession?: boolean } = {}) => {
       const { isAssign = false } = opt;
+      const targetSessionId = getTargetSessionId(msg);
+      if (!targetSessionId) return msg;
 
       let newMessage = msg;
 
-      if (msg.sessionId && `${msg.sessionId}` !== `${curSessionId.current}`) {
-        const cacheList = sessionListMap.get(msg.sessionId);
+      dispatch({
+        type: 'messageStore/updateSessionMessageList',
+        payload: {
+          sessionId: targetSessionId,
+          allowCreateSession: opt.allowCreateSession ?? targetSessionId === DRAFT_SESSION_ID,
+          // callback的形式，拿到reducer里面最新的messageList，以防连续调用updateMessage时，后者覆盖前者
+          messageList: (messageList: IMessage[]) => {
+            let list = [...(messageList || [])];
 
-        if (!cacheList) {
-          return newMessage;
-        }
+            const targetIndex = list.findIndex(({ msgId, messageId }: IMessage) => {
+              if (messageId && msg.messageId) {
+                return `${messageId}` === `${msg.messageId}`;
+              }
+              return `${msgId}` === `${msg.msgId}`;
+            });
 
-        const { list } = cacheList || { list: [] };
+            if (targetIndex > -1) {
+              const targetMsg = list[targetIndex];
+              if (isAssign) {
+                newMessage = assign({}, targetMsg, msg);
+              } else {
+                newMessage = merge({}, targetMsg, msg);
+              }
+              newMessage.updateKey = getMsgId();
+              list[targetIndex] = newMessage;
+            } else {
+              list = [...list, newMessage];
+            }
 
-        const targetMsg = list.find(({ msgId } : { msgId: string }) => msgId === msg.msgId);
+            if (`${targetSessionId}` === `${curSessionId.current}` || `${targetSessionId}` === `${activeSessionId}`) {
+              messageListRef.current = list;
+            }
 
-        if (targetMsg) {
-          if (isAssign) {
-            newMessage = assign(targetMsg, msg);
-          } else {
-            newMessage = merge(targetMsg, msg);
-          }
-        } else {
-          list.push(newMessage);
-        }
-
-        dispatch({
-          type: 'messageStore/updateSessionMessageList',
-          payload: {
-            sessionId: msg.sessionId,
-            messageList: [...list],
+            return list;
           },
-        });
-
-        return newMessage;
-      }
-
-      setMessageList((prevList) => {
-        const targetMsg = prevList.find(({ msgId }) => msgId === msg.msgId);
-        if (targetMsg) {
-          if (isAssign) {
-            newMessage = assign(targetMsg, msg);
-          } else {
-            newMessage = merge(targetMsg, msg);
-          }
-          targetMsg.updateKey = getMsgId();
-          return [...prevList];
-        }
-
-        return [...prevList, msg];
+        },
       });
 
       return newMessage;
     },
-    [sessionListMap, dispatch]
+    [activeSessionId, dispatch, getTargetSessionId]
+  );
+
+  const setMessageList = useCallback(
+    (value: SetStateAction<IMessage[]>) => {
+      const nextList = typeof value === 'function' ? value(messageListRef.current) : value;
+      messageListRef.current = nextList;
+      dispatch({
+        type: 'messageStore/updateSessionMessageList',
+        payload: {
+          sessionId: curSessionId.current || activeSessionId,
+          messageList: [...nextList],
+        },
+      });
+    },
+    [activeSessionId, dispatch]
   );
 
   /**
@@ -107,66 +131,75 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
    * 根据消息ID从列表中移除指定消息
    * @param {IMessage} msg - 要删除的消息对象
    */
-  const deleteMessage = useCallback((msg: IMessage) => {
-    setMessageList((prevList) => {
-      return [...pullAllBy(prevList, [msg], 'msgId')];
-    });
-    if (msg.messageId) {
-      delMessage({ messageId: msg.messageId });
-    }
-  }, []);
+  const deleteMessage = useCallback(
+    (msg: IMessage) => {
+      const targetSessionId = getTargetSessionId(msg);
+      const cache = sessionListMap.get(targetSessionId);
+      const list: IMessage[] = cache?.list || messageListRef.current;
+      const nextList = list.filter((item) => `${item.msgId}` !== `${msg.msgId}`);
+      if (targetSessionId === curSessionId.current || targetSessionId === activeSessionId) {
+        messageListRef.current = nextList;
+      }
 
-  /**
-   * 设置会话ID方法
-   * 切换到新的会话前，保存当前会话的消息列表
-   * @param {string} newSessionId - 新的会话ID
-   */
-  const setSessionId = useCallback((newSessionId: string) => {
-    if (!curSessionId.current) {
-      // 保存当前消息列表到存储
       dispatch({
         type: 'messageStore/updateSessionMessageList',
         payload: {
-          sessionId: newSessionId,
-          messageList: [...messageListRef.current],
+          sessionId: targetSessionId,
+          messageList: nextList,
         },
       });
 
-      // todo： 临时代码，待优化
-      dispatch({
-        type: 'chatBI/clearTempFileList',
-        payload: {
-          sessionId: newSessionId,
-        },
-      });
-    }
+      if (msg.messageId) {
+        delMessage({ messageId: msg.messageId });
+      }
+    },
+    [dispatch, getTargetSessionId, sessionListMap]
+  );
 
-    // 更新当前会话ID
-    curSessionId.current = newSessionId;
-  }, []);
+  /**
+   * 设置会话ID方法
+   * 切换到新的会话前，保存当前草稿会话消息列表
+   * @param {string} newSessionId - 新的会话ID
+   */
+  const setSessionId = useCallback(
+    (newSessionId: string) => {
+      if (!curSessionId.current || curSessionId.current === DRAFT_SESSION_ID) {
+        dispatch({
+          type: 'messageStore/copyFromSession',
+          payload: {
+            fromSessionId: curSessionId.current || DRAFT_SESSION_ID,
+            targetSessionId: newSessionId,
+          },
+        });
+
+        if (curSessionId.current === DRAFT_SESSION_ID) {
+          pendingDraftCleanupRef.current = true;
+          setOptimisticSessionId(newSessionId);
+        }
+
+        // todo： 临时代码，待优化
+        dispatch({
+          type: 'chatBI/clearTempFileList',
+          payload: {
+            sessionId: newSessionId,
+          },
+        });
+      }
+
+      curSessionId.current = newSessionId;
+    },
+    [dispatch]
+  );
 
   // isPrev ==== 是否翻上一页（pageNum减少）
   const getMoreSessionMessage = useCallback(
-    (sessionId: string, isPrev?: boolean) => {
+    (targetSessionId: string, isPrev?: boolean) => {
       return dispatch({
         type: 'messageStore/getMoreSessionMessage',
         payload: {
           isPrev,
-          sessionId,
+          sessionId: targetSessionId,
         },
-      }).then((listInfo?: IMessageInfo & { hasMore: boolean }) => {
-        if (!listInfo) {
-          return;
-        }
-        const { list } = listInfo;
-
-        setMessageList(list || []);
-        if (!isPrev) {
-          // 其实只有向上翻页（pageNum增加）的时候，hasMore才有意义。
-          // 如果是向下翻页（pageNum减少）的话，hasMore相当于判断当前pageNum是否大于1，因此这种方向的滚动不需要更新hasMore
-          // 总结：hasMore只针对pageNum增加的滚动才有意义
-          setHasMore(listInfo.hasMore);
-        }
       });
     },
     [dispatch]
@@ -174,7 +207,6 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
 
   const reloadLatestMessageList = useCallback(() => {
     return new Promise<void>((resolve) => {
-      setMessageList([]);
       dispatch({
         type: 'messageStore/getLatestSessionMessage',
         payload: {
@@ -182,25 +214,31 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
         },
       }).then((listInfo?: IMessageInfo) => {
         if (!listInfo) return;
-        const { list, pageSize } = listInfo || {};
-        setMessageList(list || []);
-        setHasMore(size(list) >= pageSize);
         // 再套一个requestIdleCallback，等待视图更新后，再resolve
         requestIdleCallback(() => resolve());
       });
     });
-  }, []);
+  }, [dispatch]);
+
+  useEffect(() => {
+    curSessionId.current = activeSessionId;
+  }, [activeSessionId]);
 
   /**
    * 会话ID变化时的副作用
    * 当会话ID变化时，加载对应会话的消息列表
    */
   useEffect(() => {
-    curSessionId.current = sessionId || '';
-    setHasMore(false);
-    setMessageList([]);
-
     if (!sessionId) {
+      if (!optimisticSessionId) {
+        dispatch({
+          type: 'messageStore/updateSessionMessageList',
+          payload: {
+            sessionId: DRAFT_SESSION_ID,
+            messageList: [],
+          },
+        });
+      }
       return;
     }
 
@@ -219,11 +257,7 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
     }).then((listInfo: IMessageInfo) => {
       // 只接受最新的session的数据
       if (`${sessionId}` !== `${curSessionId.current}`) return;
-      const { list, pageSize, targetMessageId } = listInfo || {};
-
-      setMessageList(list || []);
-      // 不要用total和list的长度来判断hasMore，因为如果请求的是中间页数，list的长度就会比total小
-      setHasMore(size(list) >= pageSize);
+      const { list, targetMessageId } = listInfo || {};
 
       dispatch({
         type: 'session/myBatchReadMessages',
@@ -249,37 +283,45 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
         targetMessageId,
       });
     });
+  }, [optimisticSessionId, sessionId, dispatch, EventEmitter]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    setOptimisticSessionId('');
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!pendingDraftCleanupRef.current || activeSessionId === DRAFT_SESSION_ID) return;
+
+    pendingDraftCleanupRef.current = false;
+    dispatch({
+      type: 'messageStore/cleanSessionMessage',
+      payload: {
+        sessionId: DRAFT_SESSION_ID,
+      },
+    });
+  }, [activeSessionId, dispatch]);
 
   /**
    * 消息列表变化时的副作用
-   * 当消息列表变化时，将其同步到存储中
+   * 当前 hook 只订阅 store 中的会话消息，同时把当前会话概要同步给 session model
    */
   useEffect(() => {
     messageListRef.current = messageList;
-    if (curSessionId.current) {
-      dispatch({
-        type: 'messageStore/updateSessionMessageList',
-        payload: {
-          sessionId: curSessionId.current,
-          messageList: [...messageList],
-        },
-      });
+    if (sessionId) {
       dispatch({
         type: 'session/updateSessionContent',
         payload: {
-          sessionId: curSessionId.current,
+          sessionId,
           messageList: [...messageList],
         },
       });
     }
-  }, [messageList, dispatch]);
+  }, [messageList, dispatch, sessionId]);
 
   useEffect(() => {
     const onCleanSessionMessage = (mySessionId: string) => {
       if (`${mySessionId}` === `${curSessionId.current}`) {
-        setMessageList([]);
-
         dispatch({
           type: 'messageStore/cleanSessionMessage',
           payload: {
@@ -293,7 +335,7 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
     return () => {
       EventEmitter.off('on-clean-session-message', onCleanSessionMessage);
     };
-  }, []);
+  }, [dispatch, EventEmitter]);
 
   // 返回消息管理相关的状态和方法
   return {

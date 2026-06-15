@@ -113,6 +113,12 @@ export function applySessionModelFromPrimary(
         entry.modelOverride = parsed.model;
         entry.modelOverrideSource = "auto";
         changed = true;
+        if (runtime.provider !== parsed.provider) {
+            delete entry.authProfileOverride;
+            delete entry.authProfileOverrideSource;
+            delete entry.authProfileOverrideCompactionCount;
+            changed = true;
+        }
     } else if (
         overrides.model &&
         !overrides.provider &&
@@ -176,6 +182,57 @@ export function collectModelReconcileTargets(params: {
     }
 
     return [...targets.entries()].map(([agentId, modelPrimary]) => ({ agentId, modelPrimary }));
+}
+
+export async function waitForManagedModelTargetsInCurrentConfig(params: {
+    api: OpenClawPluginApi;
+    agents: AgentSessionModelReconcileTarget[];
+    log: { warn: (message: string) => void };
+    timeoutMs?: number;
+    pollMs?: number;
+}): Promise<boolean> {
+    const currentConfig = params.api.runtime?.config?.current;
+    if (!currentConfig) {
+        return true;
+    }
+
+    const parsedTargets = params.agents
+        .map((agent) => ({
+            agentId: agent.agentId,
+            modelPrimary: agent.modelPrimary,
+            parsed: parseModelPrimaryRef(agent.modelPrimary),
+        }))
+        .filter((target) => target.parsed);
+    if (parsedTargets.length === 0) {
+        return true;
+    }
+
+    const timeoutMs = params.timeoutMs ?? 3000;
+    const pollMs = params.pollMs ?? 100;
+    const deadline = Date.now() + timeoutMs;
+    let missing = parsedTargets;
+
+    for (;;) {
+        const cfg = currentConfig() as ConfigWithProviders;
+        missing = parsedTargets.filter((target) => {
+            const parsed = target.parsed!;
+            return !isManagedModelRegisteredInConfig(cfg, parsed.provider, parsed.model);
+        });
+        if (missing.length === 0) {
+            return true;
+        }
+        if (Date.now() >= deadline) {
+            break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+
+    params.log.warn(
+        `baiying-enhance: session model reconcile delayed because runtime config has not loaded provider(s): ${missing
+            .map((target) => `${target.agentId}:${target.modelPrimary}`)
+            .join(", ")}`,
+    );
+    return false;
 }
 
 /**

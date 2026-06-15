@@ -3,56 +3,33 @@ jest.mock('dompurify', () => ({
 }));
 
 jest.mock('@umijs/max', () => ({
+  getLocale: jest.fn(() => 'en-US'),
   useDispatch: jest.fn(),
 }));
 
-const createHelperInstance = (name: string) => ({
-  name,
-  send: jest.fn(() => ({
-    promise: Promise.resolve({ ok: true }),
-    cancel: jest.fn(),
-  })),
-});
-
-jest.mock('../useSseSender/sendHelper', () => {
-  return jest.fn().mockImplementation((chatUrl?: string) => ({
-    ...createHelperInstance('default'),
-    chatUrl,
-  }));
-});
-
-jest.mock('../useSseSender/openclaw/sendHelper', () => {
-  return jest.fn().mockImplementation((config?: any) => ({
-    ...createHelperInstance('openclaw'),
-    config,
-  }));
-});
-
-jest.mock('../useGlobal', () => ({
+jest.mock('@/utils/websocket', () => ({
   __esModule: true,
-  default: jest.fn(),
-}));
-
-jest.mock('@/utils/openClaw/utils', () => ({
-  isOpenClawAgent: jest.fn(),
+  default: {
+    onMessage: jest.fn(),
+    offMessage: jest.fn(),
+    sendMessageWhenReady: jest.fn(() => Promise.resolve()),
+  },
 }));
 
 import { renderHook, act } from '@testing-library/react';
 import { useDispatch } from '@umijs/max';
 import DOMPurify from 'dompurify';
 
-import SendHelper from '../useSseSender/sendHelper';
-import OpenclawSendHelper from '../useSseSender/openclaw/sendHelper';
-import useGlobal from '../useGlobal';
-import { isOpenClawAgent } from '@/utils/openClaw/utils';
+import webSocketManager from '@/utils/websocket';
 
 import useSend from '../useSseSender/useSend';
 
 const mockUseDispatch = useDispatch as jest.Mock;
-const mockUseGlobal = useGlobal as jest.MockedFunction<typeof useGlobal>;
-const mockIsOpenClawAgent = isOpenClawAgent as jest.MockedFunction<typeof isOpenClawAgent>;
-const MockSendHelper = SendHelper as unknown as jest.Mock;
-const MockOpenclawSendHelper = OpenclawSendHelper as unknown as jest.Mock;
+const mockWebSocketManager = webSocketManager as unknown as {
+  onMessage: jest.Mock;
+  offMessage: jest.Mock;
+  sendMessageWhenReady: jest.Mock;
+};
 
 describe('hooks/useSseSender/useSend', () => {
   let dispatch: jest.Mock;
@@ -61,13 +38,9 @@ describe('hooks/useSseSender/useSend', () => {
     jest.clearAllMocks();
     dispatch = jest.fn();
     mockUseDispatch.mockReturnValue(dispatch);
-    mockUseGlobal.mockReturnValue({
-      agentInfo: null,
-    } as any);
-    mockIsOpenClawAgent.mockReturnValue(false);
   });
 
-  it('uses the default send helper and sanitizes outgoing text', async () => {
+  it('uses websocket for sending and sanitizes outgoing text', async () => {
     const { result } = renderHook(() =>
       useSend({
         sessionId: 'session-1',
@@ -80,64 +53,55 @@ describe('hooks/useSseSender/useSend', () => {
 
     await act(async () => {
       const { promise } = result.current.send('<b>hello</b>', { foo: 'bar' }, { callback, traceId: 'trace-1' });
-      await promise;
+      await expect(promise).resolves.toEqual({});
     });
 
-    const helperInstance = MockSendHelper.mock.results.at(-1)?.value;
-    expect(helperInstance.send).toHaveBeenCalledWith(
-      {
-        language: 'en',
+    expect(mockWebSocketManager.sendMessageWhenReady).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'LLM_MESSAGE',
         chatContent: 'safe:<b>hello</b>',
         relModelId: -1,
         accessTerminal: 'Web',
         sessionId: 'session-1',
         chatId: 'session-1',
         foo: 'bar',
-      },
-      expect.objectContaining({
-        traceId: 'trace-1',
-        callback: expect.any(Function),
-      }),
-      {
-        useEventSource: false,
-      }
+      })
     );
     expect(DOMPurify.sanitize).toHaveBeenCalledWith('<b>hello</b>');
-
-    const wrappedCallback = helperInstance.send.mock.calls[0][1].callback;
-    wrappedCallback({ message: 'payload' }, { event: 'answerDelta' });
-    expect(callback).toHaveBeenCalledWith({ message: 'payload' }, { event: 'answerDelta' });
+    expect(mockWebSocketManager.onMessage).not.toHaveBeenCalledWith('CHAT_STREAM', expect.any(Function));
+    expect(callback).not.toHaveBeenCalled();
   });
 
-  it('switches to the openclaw helper when the current agent is openclaw', async () => {
-    mockUseGlobal.mockReturnValue({
-      agentInfo: { agentId: 'agent-1', agentType: '013' },
-    } as any);
-    mockIsOpenClawAgent.mockReturnValue(true);
-
+  it('sends openclaw payload through websocket manager', async () => {
     const { result } = renderHook(() =>
       useSend({
         sessionId: 'session-2',
+        agentType: '013',
         chatUrl: '/chat/url',
       })
     );
 
     await act(async () => {
-      await Promise.resolve();
+      const { promise } = result.current.send('hello', {
+        agentType: '013',
+        extParams: {
+          clientId: 'client-1',
+        },
+      });
+      await expect(promise).resolves.toEqual({});
     });
 
-    act(() => {
-      result.current.send('hello');
-    });
-
-    expect(MockOpenclawSendHelper).toHaveBeenCalledWith({
-      agentInfo: { agentId: 'agent-1', agentType: '013' },
-      updateSession: expect.objectContaining({
-        current: expect.any(Function),
-      }),
-    });
-
-    const helperInstance = MockOpenclawSendHelper.mock.results.at(-1)?.value;
-    expect(helperInstance.send).toHaveBeenCalled();
+    expect(mockWebSocketManager.sendMessageWhenReady).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'LLM_MESSAGE',
+        chatContent: 'safe:hello',
+        sessionId: 'session-2',
+        chatId: 'session-2',
+        agentType: '013',
+        extParams: {
+          clientId: 'client-1',
+        },
+      })
+    );
   });
 });

@@ -86,6 +86,11 @@ public class EcosystemTaskVo {
     private String runLocation;
 
     /**
+     * 采集模式，例如 SERVER_OPENCLI、USER_BROWSER_BRIDGE。
+     */
+    private String collectMode;
+
+    /**
      * 调度类型。
      */
     private String scheduleType;
@@ -99,6 +104,11 @@ public class EcosystemTaskVo {
      * 调度扩展配置。
      */
     private Map<String, Object> scheduleConfig;
+
+    /**
+     * 任务扩展选项，包含 collectMode、连接 runtimeConfig、聊天/插件入口上下文等。
+     */
+    private Map<String, Object> options;
 
     /**
      * 下次计划运行时间。

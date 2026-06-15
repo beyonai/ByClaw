@@ -70,6 +70,11 @@ export default {
   'refineModal.abilityNamePlaceholder': 'Ability {index} name',
   'refineModal.abilityDescPlaceholder': 'Please enter the ability description',
   'refineModal.workStandard': 'Work Guidelines',
+  'refineModal.step.basic': 'Basic Info',
+  'refineModal.step.persona': 'Role & Persona',
+  'refineModal.step.workflow': 'Workflow',
+  'refineModal.step.style': 'Communication',
+  'refineModal.progress': 'Completed {done} / {total} items',
 
   // Employee Detail
   'employeeDetail.refine': 'Auto-Complete',
@@ -95,7 +100,7 @@ export default {
   'employeeDetail.configureKnowledge': 'Configure Knowledge',
   'employeeDetail.qaKnowledge': 'Q&A Knowledge Base',
   'employeeDetail.documentKnowledge': 'Document Knowledge Base',
-  'employeeDetail.tagSearchPlaceholder': 'Search or add tags, press Enter to complete',
+  'employeeDetail.tagSearchPlaceholder': 'Add tags, press Enter to complete',
   'employeeDetail.skillType.agent': 'Agent',
   'employeeDetail.skillType.toolkit': 'Toolkit',
   'employeeDetail.skillType.tool': 'Tool',

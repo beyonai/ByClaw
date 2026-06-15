@@ -22,9 +22,6 @@ export const getAgentAvatarUrl = (iconUrl: string) => {
   if (!iconUrl || iconUrl === 'default') {
     return `${getPublicPath()}${getDefaultAssistantAvatar()}`;
   }
-  if (iconUrl.startsWith(getPublicPath())) {
-    return iconUrl;
-  }
   if (iconUrl.startsWith('beyond/')) {
     return `${getPublicPath()}${iconUrl}`;
   }
@@ -32,6 +29,10 @@ export const getAgentAvatarUrl = (iconUrl: string) => {
     return iconUrl;
   }
   if (isBase64(iconUrl)) {
+    return iconUrl;
+  }
+  const publicPath = getPublicPath();
+  if (publicPath !== '/' && iconUrl.startsWith(publicPath)) {
     return iconUrl;
   }
 

@@ -33,9 +33,14 @@ public class EcosystemConnectorVo {
     private Boolean available;
 
     /**
-     * 是否必须依赖本机采集端和浏览器登录态。
+     * 兼容字段：默认采集模式是否必须依赖用户侧 Browser Bridge。
      */
     private Boolean requiresLocalAgent;
+
+    /**
+     * 是否存在浏览器登录态认证能力。
+     */
+    private Boolean requiresBrowserAuth;
 
     /**
      * 支持的运行位置，LOCAL / SERVER。
@@ -46,6 +51,16 @@ public class EcosystemConnectorVo {
      * 支持的认证方式，BROWSER / TOKEN / OAUTH / IMAP / PUBLIC_URL。
      */
     private List<String> authTypes;
+
+    /**
+     * 支持的采集模式，例如 SERVER_OPENCLI、USER_BROWSER_BRIDGE。
+     */
+    private List<String> collectModes;
+
+    /**
+     * 默认采集模式。需要登录态的网站优先使用服务端托管浏览器，而不是要求普通用户本机安装 OpenCLI。
+     */
+    private String defaultCollectMode;
 
     /**
      * 连接器能力清单，例如 read、downloadImages、markdown。

@@ -47,9 +47,14 @@ public class EcosystemTaskCreateRequest {
     private String ownerType;
 
     /**
-     * 运行位置，LOCAL 表示本机采集端，SERVER 表示服务器运行。
+     * 运行位置，LOCAL 表示用户浏览器桥接侧，SERVER 表示平台侧执行。
      */
     private String runLocation;
+
+    /**
+     * 采集模式，例如 SERVER_OPENCLI、USER_BROWSER_BRIDGE。
+     */
+    private String collectMode;
 
     /**
      * 调度类型，例如 once、manual、daily、weekly。

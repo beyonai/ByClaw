@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -86,11 +87,27 @@ public class OpenSandboxClient {
      * 远端不支持或非 2xx 时返回空列表，不阻断创建流程。
      */
     public List<SandboxDetail> listSandboxes(String userCode, String serviceKey) {
+        if (userCode == null || userCode.isBlank() || serviceKey == null || serviceKey.isBlank()) {
+            return List.of();
+        }
+        return listSandboxesByMetadata(Map.of("userCode", userCode, "serviceKey", serviceKey), 1, 100);
+    }
+
+    public List<SandboxDetail> listSandboxesByMetadata(Map<String, String> metadata, int pageNo, int pageSize) {
+        try {
+            return listSandboxesByMetadataStrict(metadata, pageNo, pageSize);
+        } catch (OpenSandboxException e) {
+            log.debug("listSandboxes failed (will create new if needed): {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    public List<SandboxDetail> listSandboxesByMetadataStrict(Map<String, String> metadata, int pageNo, int pageSize) {
         SandboxProperties.OpenSandboxConfig cfg = properties.getOpensandbox();
         if (!cfg.isListSandboxesBeforeCreate()) {
             return List.of();
         }
-        if (userCode == null || userCode.isBlank() || serviceKey == null || serviceKey.isBlank()) {
+        if (metadata == null || metadata.isEmpty()) {
             return List.of();
         }
         String path = cfg.getListSandboxesPath();
@@ -102,19 +119,25 @@ public class OpenSandboxClient {
         }
         HttpUrl base = HttpUrl.parse(baseUrl + path);
         if (base == null) {
-            log.warn("listSandboxes: invalid URL baseUrl={} path={}", baseUrl, path);
-            return List.of();
+            throw new OpenSandboxException("Invalid OpenSandbox list URL: baseUrl=" + baseUrl + " path=" + path);
         }
         HttpUrl.Builder urlBuilder = base.newBuilder()
-                .addQueryParameter(cfg.getListQueryUserCodeParam(), userCode)
-                .addQueryParameter(cfg.getListQueryServiceKeyParam(), serviceKey);
-        Request httpRequest = newRequestBuilder(urlBuilder.build().toString()).get().build();
-        try {
-            return executeSandboxesList(httpRequest);
-        } catch (OpenSandboxException e) {
-            log.debug("listSandboxes failed (will create new if needed): {}", e.getMessage());
-            return List.of();
+                .addQueryParameter("page", String.valueOf(Math.max(1, pageNo)))
+                .addQueryParameter("pageSize", String.valueOf(Math.max(1, pageSize)));
+        for (Map.Entry<String, String> entry : metadata.entrySet()) {
+            if (entry == null || entry.getKey() == null || entry.getKey().isBlank()
+                || entry.getValue() == null || entry.getValue().isBlank()) {
+                continue;
+            }
+            String queryName = switch (entry.getKey()) {
+                case "userCode" -> cfg.getListQueryUserCodeParam();
+                case "serviceKey" -> cfg.getListQueryServiceKeyParam();
+                default -> "metadata." + entry.getKey();
+            };
+            urlBuilder.addQueryParameter(queryName, entry.getValue());
         }
+        Request httpRequest = newRequestBuilder(urlBuilder.build().toString()).get().build();
+        return executeSandboxesList(httpRequest);
     }
 
     public SandboxDetail getSandbox(String sandboxId) {

@@ -8,6 +8,7 @@ import UploadFile from '../UploadFile';
 
 interface DirectoryEmptyProps {
   baseInfo: any;
+  canManage?: boolean;
   setShowAddFolder: (show: boolean) => void;
   uploadLoading: boolean;
   setUploadLoading: (loading: boolean) => void;
@@ -17,6 +18,7 @@ interface DirectoryEmptyProps {
 
 const DirectoryEmpty = ({
   baseInfo,
+  canManage = false,
   setShowAddFolder,
   uploadLoading,
   setUploadLoading,
@@ -30,28 +32,30 @@ const DirectoryEmpty = ({
       <Empty description="" />
       <p className={styles.emptyTitle}>{intl.formatMessage({ id: 'directoryEmpty.noContent' })}</p>
       <p className={styles.emptyDesc}>{intl.formatMessage({ id: 'directoryEmpty.emptyDesc' })}</p>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 5,
-          justifyContent: 'center',
-        }}
-      >
-        <Button
-          icon={<AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" style={{ fontSize: 18 }} />}
-          onClick={() => setShowAddFolder(true)}
+      {canManage && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            justifyContent: 'center',
+          }}
         >
-          {intl.formatMessage({ id: 'knowledgeDetail.newFolder' })}
-        </Button>
-        <UploadFile
-          baseInfo={baseInfo}
-          uploadLoading={uploadLoading}
-          setUploadLoading={setUploadLoading}
-          reload={reload}
-          directoryPath={directoryPath}
-        />
-      </div>
+          <Button
+            icon={<AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" style={{ fontSize: 18 }} />}
+            onClick={() => setShowAddFolder(true)}
+          >
+            {intl.formatMessage({ id: 'knowledgeDetail.newFolder' })}
+          </Button>
+          <UploadFile
+            baseInfo={baseInfo}
+            uploadLoading={uploadLoading}
+            setUploadLoading={setUploadLoading}
+            reload={reload}
+            directoryPath={directoryPath}
+          />
+        </div>
+      )}
     </div>
   );
 };

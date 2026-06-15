@@ -32,15 +32,43 @@ from by_qa.knowledge_base.services.errors import (
     KnowledgeBaseConfigurationError,
     KnowledgeBaseValidationError,
 )
+from byclaw_userfs_storage import reset_byclaw_userfs_headers, set_byclaw_userfs_headers
 from by_qa.main import (
     app,
     resolve_document_chunking_service,
     resolve_knowledge_item_ingestion_service,
     resolve_knowledge_item_search_service,
 )
-from minio_client import MinioResourceClient
+import os
 
-_minio = MinioResourceClient()
+import redis.asyncio as aioredis
+
+from redis_agent_config import get_kg_doc_from_redis
+
+
+@app.middleware("http")
+async def byclaw_userfs_header_context_middleware(request, call_next):
+    token = set_byclaw_userfs_headers({"beyond-token": request.headers.get("beyond-token", "")})
+    try:
+        return await call_next(request)
+    finally:
+        reset_byclaw_userfs_headers(token)
+
+
+def _require_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+
+_redis = aioredis.Redis(
+    host=_require_env("BYAI_REDIS_HOST"),
+    port=int(_require_env("BYAI_REDIS_PORT")),
+    db=int(os.getenv("BYAI_REDIS_DB", "0")),
+    username=os.getenv("BYAI_REDIS_USERNAME") or None,
+    password=os.getenv("BYAI_REDIS_PASSWORD") or None,
+)
 
 
 def _success(result_object: dict[str, Any] | None = None) -> JSONResponse:
@@ -66,15 +94,15 @@ def _error(result_msg: str, result_object: dict[str, Any] | None = None) -> JSON
 
 
 async def _resolve_kn_code(resource_id: str) -> str | None:
-    """Look up resourceCode from MinIO. Returns None on failure."""
-    config = await _minio.get_kg_doc_config(resource_id)
+    """Look up resourceCode from Redis KG_DOC_{resource_id}. Returns None on failure."""
+    config = await get_kg_doc_from_redis(_redis, resource_id)
     if config is None:
         return None
     code = config.get("resourceCode")
     if not code:
-        logger.warning("KG_DOC_%s.json missing resourceCode field", resource_id)
+        logger.warning("KG_DOC config from Redis key=%s missing resourceCode field", f"KG_DOC_{resource_id}")
         return None
-    logger.info("Mapped resourceId %s -> knCode %s", resource_id, code)
+    logger.info("Resolved knCode from Redis: resourceId=%s -> knCode=%s", resource_id, code)
     return str(code)
 
 

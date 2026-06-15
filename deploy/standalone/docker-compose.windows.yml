@@ -10,6 +10,7 @@ services:
     volumes:
       - ../config:/app/config
       - ./logs/be:/app/logs
+      - ${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-C:/ProgramData/byclaw/file}:${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-C:/ProgramData/byclaw/file}
 
   qa-manager:
     volumes:

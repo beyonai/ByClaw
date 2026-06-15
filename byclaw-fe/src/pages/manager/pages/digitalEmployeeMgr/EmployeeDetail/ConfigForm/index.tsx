@@ -48,7 +48,7 @@ import ToolSelectorModal from './ToolSelectorModal';
 import { compressImgFileAndUpload } from '@/pages/manager/utils/file';
 import { Image } from '@/pages/manager/components/Image';
 import { getAvatarUrl } from '@/pages/manager/utils/agent';
-import UploadFileConfig from './UploadFileConfig';
+// import UploadFileConfig from './UploadFileConfig';
 import styles from './index.module.less';
 import pStyles from '../index.module.less';
 import { DEFAULT_PERSONALITY_DEFINITION } from '../personalityDefinitionDefault';
@@ -56,6 +56,7 @@ import RobotModal from './RobotModal';
 import { normalizeCatalogTree } from '@/utils/catalog';
 import { DEFAULT_AGENT_TYPE_OPTIONS, DEFAULT_TEMPLATE_DATA } from '../../constants';
 import Ellipsis from '@/pages/manager/components/Ellipsis';
+import { DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES } from '@/pages/manager/constants/digitalResource';
 
 const { TextArea } = Input;
 
@@ -130,8 +131,64 @@ const parseJsonRecursively = (str: string, maxDepth: number = 5): any => {
   }
 };
 
+const parseDigitalEmployeeTemplates = (value: any) => {
+  if (!value) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+      return [];
+    }
+  }
+  return [value];
+};
+
+const getDigitalEmployeeTemplate = (templates: any[] = [], ownerType?: string, agentType?: string) => {
+  const effectiveOwnerType = ownerType === 'personal' ? 'personal' : 'enterprise';
+  const findTemplate = (list: any[] = []) =>
+    list.find((item) => item?.ownerType === effectiveOwnerType && item?.agentType === agentType) ||
+    list.find((item) => item?.ownerType === effectiveOwnerType);
+
+  return findTemplate(templates) || {};
+};
+
+const mapTemplatePromptsToConfigList = (prompts: any[] = [], templateKey?: string) =>
+  prompts.map((item, index) => ({
+    paramGroupCode: templateKey || 'TEMPLATE_DIGITAL_EMPLOYEE',
+    paramName: item?.name || item?.key || '',
+    paramEnName: item?.enName || item?.key || '',
+    paramValue: item?.defaultValue || '',
+    paramSeq: index + 1,
+    promptKey: item?.key || '',
+    tip: item?.tip || '',
+  }));
+
+const normalizePromptConfigKey = (key?: string, item: any = {}) => {
+  const candidates = [key, item?.name, item?.nameEn, item?.paramName, item?.paramEnName].filter(Boolean);
+  if (candidates.some((value) => ['agent', '工作规范', 'Work Specification'].includes(value))) return 'agent';
+  if (
+    candidates.some((value) =>
+      ['persona', 'soul', 'corePersonaDefinition', '人格定义', 'Persona', 'Personality Definition'].includes(value)
+    )
+  ) {
+    return 'soul';
+  }
+  if (candidates.some((value) => ['tool', 'tools', '工具规范', 'Tool Specification'].includes(value))) return 'tools';
+  if (candidates.some((value) => ['memory', '记忆规范', 'Memory Specification'].includes(value))) return 'memory';
+  return key;
+};
+
+const getPromptConfigKey = (item: any = {}) =>
+  normalizePromptConfigKey(item.promptKey || item.key || item.paramEnName || item.paramName, item);
+
 const parseCorePersonaDefinition = (value: string, isEN?: boolean) => {
-  const tabs: Array<{ key: string; name: string; isSystem: boolean }> = [];
+  const tabs: Array<{ key: string; name: string; isSystem: boolean; tip?: string }> = [];
   const fieldValues: Record<string, string> = {};
   let isArray = false;
 
@@ -147,6 +204,8 @@ const parseCorePersonaDefinition = (value: string, isEN?: boolean) => {
       corePersonaData.forEach((item) => {
         if (!item?.key) return;
 
+        const key = normalizePromptConfigKey(item.key, item);
+
         let itemValue = item.value || '';
         if (typeof itemValue === 'string') {
           itemValue = parseJsonRecursively(itemValue);
@@ -155,11 +214,12 @@ const parseCorePersonaDefinition = (value: string, isEN?: boolean) => {
           }
         }
 
-        fieldValues[item.key] = itemValue;
+        fieldValues[key] = itemValue;
         tabs.push({
-          key: item.key,
+          key,
           name: isEN ? item.nameEn || item.name || item.key : item.name || item.key,
           isSystem: false,
+          tip: item.tip || '',
         });
       });
     }
@@ -171,25 +231,30 @@ const parseCorePersonaDefinition = (value: string, isEN?: boolean) => {
 };
 
 const buildTemplatePromptConfig = (templateList: any[] = [], isEN?: boolean) => {
-  const corePersonaDefinition: Array<{ name: string; nameEn?: string; key: string; value: string }> = [];
+  const corePersonaDefinition: Array<{ name: string; nameEn?: string; key: string; value: string; tip?: string }> = [];
   const fieldValues: Record<string, string> = {};
-  const tabs: Array<{ key: string; name: string; isSystem: boolean }> = [];
+  const tabs: Array<{ key: string; name: string; isSystem: boolean; tip?: string }> = [];
 
   templateList.forEach((item) => {
-    const key = item.paramEnName || item.paramName;
+    const key = getPromptConfigKey(item);
     const value = (item.paramValue || '').replace(/\\n/g, '\n');
     const displayName = isEN ? item.paramEnName || item.paramName || key : item.paramName || key;
     tabs.push({
       key,
       name: displayName,
       isSystem: true,
+      tip: item.tip || '',
     });
-    corePersonaDefinition.push({
+    const promptConfig = {
       name: item.paramName || key,
       nameEn: item.paramEnName,
       key,
       value,
-    });
+    };
+    if (item.tip) {
+      promptConfig.tip = item.tip;
+    }
+    corePersonaDefinition.push(promptConfig);
     fieldValues[key] = value;
   });
 
@@ -218,8 +283,8 @@ const ConfigForm = (props) => {
     showBaseList,
     updateResource,
     updateCompositeAppInfo,
-    skills,
-    setSkills,
+    selectedTools,
+    setSelectedTools,
     knowledgeBases,
     setKnowledgeBases,
     tagOptions,
@@ -259,7 +324,9 @@ const ConfigForm = (props) => {
   const [robotModalOpen, setRobotModalOpen] = useState(false);
   const [robotItem, setRobotItem] = useState<RobotConfig>({ channel: '' });
   const [templateData, setTemplateData] = useState([]);
-  const [configurableTabs, setConfigurableTabs] = useState<Array<{ key: string; name: string; isSystem: boolean }>>([]);
+  const [configurableTabs, setConfigurableTabs] = useState<
+    Array<{ key: string; name: string; isSystem: boolean; tip?: string }>
+  >([]);
   const [agentTypeOptions, setAgentTypeOptions] = useState([]);
   const [bundledSkillOptions, setBundledSkillOptions] = useState([]);
   const [bundledSkillLoading, setBundledSkillLoading] = useState(false);
@@ -267,7 +334,7 @@ const ConfigForm = (props) => {
   const [bundledSkillSearchName, setBundledSkillSearchName] = useState('');
   const formOwnerType = Form.useWatch('ownerType', form, { form, preserve: true });
   const effectiveOwnerType = formOwnerType || ownerType;
-  const selectedBundledSkills = Form.useWatch('bundledSkills', { form, preserve: true }) || [];
+  const selectedSkills = Form.useWatch('bundledSkills', { form, preserve: true }) || [];
 
   useEffect(() => {
     let mounted = true;
@@ -358,7 +425,7 @@ const ConfigForm = (props) => {
         });
         if (!mounted) return;
 
-        const list = parseConfigList(res?.paramValue || res?.data?.paramValue || res?.data || res);
+        const list = parseConfigList(res?.paramValue);
         setBundledSkillOptions(
           list
             .map((item) => ({
@@ -422,6 +489,18 @@ const ConfigForm = (props) => {
     };
   }, []);
 
+  useEffect(() => {
+    if (agentId || !Array.isArray(catalogList) || catalogList.length === 0) return;
+
+    const currentCatalogId = form.getFieldValue('catalogId');
+    if (currentCatalogId !== undefined && currentCatalogId !== null && `${currentCatalogId}` !== '') return;
+
+    const firstCatalogId = catalogList[0]?.catalogId;
+    if (firstCatalogId === undefined || firstCatalogId === null || `${firstCatalogId}` === '') return;
+
+    form.setFieldsValue({ catalogId: firstCatalogId });
+  }, [agentId, catalogList, form]);
+
   const robotChannelLabelMap = useMemo(
     () =>
       robotChannelOptions.reduce((map, item) => {
@@ -451,7 +530,7 @@ const ConfigForm = (props) => {
   const internalSyncRef = useRef(false);
 
   const [relResourceInfoModalOpen, setRelResourceInfoModalOpen] = useState(false);
-  const [skillItem, setSkillItem] = useState(null);
+  const [selectedToolItem, setSelectedToolItem] = useState(null);
   const [boundaryModalOpen, setBoundaryModalOpen] = useState(false);
   const [editingBoundaryAbilityId, setEditingBoundaryAbilityId] = useState(null);
   const [exampleModalOpen, setExampleModalOpen] = useState(false);
@@ -488,7 +567,7 @@ const ConfigForm = (props) => {
 
   const handleToolSelectorConfirm = useCallback(
     (selectedRows) => {
-      setSkills((prev) => {
+      setSelectedTools((prev) => {
         const existMap = new Map(prev.map((it) => [`${it.resourceId}`, it]));
         selectedRows.forEach((item) => {
           const resourceId = `${item.resourceId || item.id}`;
@@ -505,7 +584,7 @@ const ConfigForm = (props) => {
         return Array.from(existMap.values());
       });
     },
-    [setSkills, normalizeSkillType]
+    [setSelectedTools, normalizeSkillType]
   );
 
   // 记录上一次的初始岗位职责，用于判断是否需要根据外部变更重新回显
@@ -551,43 +630,21 @@ const ConfigForm = (props) => {
     if (!agentType) return;
     let cancelled = false;
 
-    const getStandType = () => {
-      switch (agentType) {
-        // 助手
-        case '001':
-          return 'TEMPLATE_PERSONAL_ASSISTANT';
-        // 问答
-        case '006':
-          return 'TEMPLATE_GENERAL_QUESTIONS_ANSWERS';
-        // 问数
-        case '005':
-          return 'TEMPLATE_BYCLAW_DATA';
-        // 其他
-        default:
-          return 'TEMPLATE_DEFAULT_OTHER';
-      }
-    };
-
     const fetchTemplateData = async () => {
-      try {
-        const response = await getDcSystemConfigListByStandType({
-          standType: getStandType(),
-        });
-        if (cancelled) return;
+      const applyTemplateData = (templates: any[] = []) => {
+        const template = getDigitalEmployeeTemplate(templates, effectiveOwnerType, agentType);
+        const templatePrompts =
+          Array.isArray(template?.prompts) && template.prompts.length > 0
+            ? template.prompts
+            : DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES;
+        const promptList = mapTemplatePromptsToConfigList(templatePrompts, template?.key);
+        const nextTemplateData =
+          Array.isArray(promptList) && promptList.length > 0 ? promptList : DEFAULT_TEMPLATE_DATA;
 
-        let templateData = response?.data;
-        if (!Array.isArray(templateData) || templateData.length === 0) {
-          templateData = DEFAULT_TEMPLATE_DATA;
-        } else {
-          templateData = [...response.data].sort((a, b) => (a.paramSeq || 0) - (b.paramSeq || 0));
-        }
+        setTemplateData(nextTemplateData);
 
-        setTemplateData(templateData);
+        const { tabs, fieldValues, corePersonaDefinitionJson } = buildTemplatePromptConfig(nextTemplateData, isEN);
 
-        const { tabs, fieldValues, corePersonaDefinitionJson } = buildTemplatePromptConfig(templateData, isEN);
-
-        // 新建时使用模板，编辑时使用已有数据
-        // 通过 agentId 判断是否为新建：没有 agentId 表示新建
         if (!agentId) {
           setConfigurableTabs(tabs);
           setActivePromptTabKey((current) => current || tabs[0]?.key);
@@ -611,9 +668,19 @@ const ConfigForm = (props) => {
           });
           internalSyncRef.current = false;
         }
+      };
+
+      try {
+        const response = await getDcSystemConfig({
+          paramCode: 'TEMPLATE_DIGITAL_EMPLOYEE',
+        });
+        if (cancelled) return;
+        const templates = parseDigitalEmployeeTemplates(response?.paramValue || response);
+        applyTemplateData(templates);
       } catch (error) {
         if (cancelled) return;
         console.error('获取自定义配置模板失败', error);
+        applyTemplateData();
       }
     };
 
@@ -621,7 +688,7 @@ const ConfigForm = (props) => {
     return () => {
       cancelled = true;
     };
-  }, [agentType, agentId, form]);
+  }, [agentType, agentId, effectiveOwnerType, form, isEN]);
 
   const corePersonaDefinitionValue = Form.useWatch('corePersonaDefinition', { form, preserve: true });
 
@@ -630,13 +697,24 @@ const ConfigForm = (props) => {
     if (!Array.isArray(templateData) || templateData.length === 0) return;
 
     const parsedConfig = parseCorePersonaDefinition(corePersonaDefinitionValue, isEN);
-    const templateKeys = templateData.map((item) => item.paramEnName || item.paramName).filter(Boolean);
+    const templateKeys = templateData.map((item) => getPromptConfigKey(item)).filter(Boolean);
+    const templateTipMap = templateData.reduce((result, item) => {
+      const key = getPromptConfigKey(item);
+      if (key && item.tip) {
+        result[key] = item.tip;
+      }
+      return result;
+    }, {});
     const matchesCurrentTemplate = templateKeys.some((key) => parsedConfig.tabs.some((tab) => tab.key === key));
 
     if (parsedConfig.isArray && parsedConfig.tabs.length > 0 && matchesCurrentTemplate) {
-      setConfigurableTabs(parsedConfig.tabs);
+      const parsedTabs = parsedConfig.tabs.map((tab) => ({
+        ...tab,
+        tip: tab.tip || templateTipMap[tab.key] || '',
+      }));
+      setConfigurableTabs(parsedTabs);
       setActivePromptTabKey((current) =>
-        current && parsedConfig.tabs.some((item) => item.key === current) ? current : parsedConfig.tabs[0].key
+        current && parsedTabs.some((item) => item.key === current) ? current : parsedTabs[0].key
       );
 
       internalSyncRef.current = true;
@@ -786,7 +864,10 @@ const ConfigForm = (props) => {
   }, [updateResource]);
 
   const syncRoleToForm = useCallback(
-    (overrideValues: Record<string, any> = {}, tabs?: Array<{ key: string; name: string; isSystem?: boolean }>) => {
+    (
+      overrideValues: Record<string, any> = {},
+      tabs?: Array<{ key: string; name: string; isSystem?: boolean; tip?: string }>
+    ) => {
       let roleObj = {};
       const roleStr = form.getFieldValue('role') || '{}';
       try {
@@ -811,29 +892,32 @@ const ConfigForm = (props) => {
           current[key] ||
           (key === 'customPromptTabs' ? [] : key === 'customPromptValues' ? {} : key === 'bundledSkills' ? [] : '');
       });
-      roleObj.roleAttributes = current.roleAttributes || current.workStandard || '';
+      roleObj.roleAttributes = current.roleAttributes || current.workStandard || current.agent || '';
 
       // 将所有配置存成 JSON 放到 corePersonaDefinition 字段（数组格式）
-      const corePersonaDefinition: Array<{ name: string; nameEn?: string; key: string; value: string }> = [];
+      const corePersonaDefinition: Array<{ name: string; nameEn?: string; key: string; value: string; tip?: string }> =
+        [];
 
       // 获取所有 prompt 字段的名称映射（从模板数据中获取）
-      const fieldNameMap: Record<string, { name: string; nameEn?: string; key: string }> = {};
+      const fieldNameMap: Record<string, { name: string; nameEn?: string; key: string; tip?: string }> = {};
 
       // 尝试从模板数据中获取字段映射
       if (templateData && Array.isArray(templateData)) {
         templateData.forEach((item: any) => {
-          if (item.paramEnName && item.paramName) {
-            fieldNameMap[item.paramEnName] = {
+          const key = getPromptConfigKey(item);
+          if (key && item.paramName) {
+            fieldNameMap[key] = {
               name: item.paramName,
               nameEn: item.paramEnName,
-              key: item.paramEnName,
+              key,
+              tip: item.tip,
             };
           }
         });
       }
 
       // 从现有的 corePersonaDefinition 中获取 name 信息（用于编辑时保持原有值）
-      const existingMetaMap: Record<string, { name?: string; nameEn?: string }> = {};
+      const existingMetaMap: Record<string, { name?: string; nameEn?: string; tip?: string }> = {};
       try {
         const existingData = JSON.parse(current.corePersonaDefinition || '[]');
         if (Array.isArray(existingData)) {
@@ -842,6 +926,7 @@ const ConfigForm = (props) => {
               existingMetaMap[item.key] = {
                 name: item.name,
                 nameEn: item.nameEn,
+                tip: item.tip,
               };
             }
           });
@@ -856,7 +941,7 @@ const ConfigForm = (props) => {
         const fieldInfo = fieldNameMap[tab.key];
         const key = fieldInfo?.key || tab.key;
         const existingMeta = existingMetaMap[key] || {};
-        const item: { name: string; nameEn?: string; key: string; value: string } = {
+        const item: { name: string; nameEn?: string; key: string; value: string; tip?: string } = {
           name: existingMeta.name || fieldInfo?.name || tab.name || tab.key,
           key,
           value: fieldValue || '',
@@ -864,6 +949,10 @@ const ConfigForm = (props) => {
 
         if (existingMeta.nameEn || fieldInfo?.nameEn) {
           item.nameEn = existingMeta.nameEn || fieldInfo?.nameEn;
+        }
+
+        if (existingMeta.tip || fieldInfo?.tip || tab.tip) {
+          item.tip = existingMeta.tip || fieldInfo?.tip || tab.tip;
         }
 
         corePersonaDefinition.push(item);
@@ -998,6 +1087,11 @@ const ConfigForm = (props) => {
       label: (
         <span className={styles.customPromptTabLabel}>
           <span className={styles.promptFieldLabel}>{item.name}</span>
+          {item.tip && (
+            <Tooltip title={item.tip}>
+              <ExclamationCircleOutlined className={styles.promptFieldTipIcon} onClick={(e) => e.stopPropagation()} />
+            </Tooltip>
+          )}
           {!isReadOnly && configurableTabs.length > 1 && (
             <Popconfirm
               title={intl.formatMessage({ id: 'employeeDetail.promptField.deleteConfirm' })}
@@ -1396,7 +1490,7 @@ const ConfigForm = (props) => {
                 <span>
                   {intl.formatMessage({ id: 'employeeDetail.coreAbility' })}
                   <Tooltip title={intl.formatMessage({ id: 'employeeDetail.coreAbilityHint' })}>
-                    <QuestionCircleOutlined className={styles.tooltipIcon} />
+                    <ExclamationCircleOutlined className={styles.tooltipIcon} />
                   </Tooltip>
                 </span>
                 {!isReadOnly && (
@@ -1600,7 +1694,7 @@ const ConfigForm = (props) => {
               </Form.Item>
             </div>
 
-            {/* 目录管理 */}
+            {/* 所属领域 */}
             <Form.Item label={intl.formatMessage({ id: 'employeeDetail.catalogManage' })} name="catalogId">
               <TreeSelect
                 allowClear
@@ -1777,7 +1871,7 @@ const ConfigForm = (props) => {
               </Radio.Group>
             </Form.Item> */}
             {/* {(digitalType === 'FROM_THIRD' || digitalType === 'FROM_SANDBOX') && ( */}
-            <UploadFileConfig isOutsideSkills prologueRef={prologueRef} isReadOnly={isReadOnly} />
+            {/* <UploadFileConfig isOutsideSkills prologueRef={prologueRef} isReadOnly={isReadOnly} /> */}
             {/* )} */}
             {/* {digitalType === 'FROM_MANUALLY' && ( */}
             <>
@@ -1880,19 +1974,16 @@ const ConfigForm = (props) => {
                       + {intl.formatMessage({ id: 'common.plus' })}
                     </Button>
                   </div>
-                  {/* <UploadFileConfig prologueRef={prologueRef} isReadOnly={isReadOnly} setSkills={setSkills} /> */}
+                  {/* <UploadFileConfig prologueRef={prologueRef} isReadOnly={isReadOnly} /> */}
                   <div className={styles.skillsList}>
-                    {skills.map((skill, index) => {
+                    {selectedTools.map((tool, index) => {
                       return (
-                        <Card
-                          key={[skill.id, index].join()}
-                          className={classnames(styles.configCard, styles.skillCard)}
-                        >
+                        <Card key={[tool.id, index].join()} className={classnames(styles.configCard, styles.skillCard)}>
                           <div className={styles.skillContent}>
                             <AntdIcon type="icon-chajiantubiao" className={styles.fontSize36MarginRight12} />
                             <div className={styles.skillInfo}>
                               <div className={styles.skillHeader}>
-                                <span className={styles.skillName}>{skill.resourceName}</span>
+                                <span className={styles.skillName}>{tool.resourceName}</span>
                                 <Tag size="small" className={styles.skillTag}>
                                   {
                                     {
@@ -1908,19 +1999,19 @@ const ConfigForm = (props) => {
                                       MCP: 'MCP',
                                       VIEW: intl.formatMessage({ id: 'employeeDetail.view' }),
                                       OBJECT: intl.formatMessage({ id: 'employeeDetail.object' }),
-                                    }[skill.grantResourceType]
+                                    }[tool.grantResourceType]
                                   }
                                 </Tag>
                               </div>
-                              <div className={styles.skillDescription}>{skill.description}</div>
+                              <div className={styles.skillDescription}>{tool.description}</div>
                             </div>
                             <div className={styles.skillActions}>
                               {isReadOnly ? (
                                 <Space>
-                                  {['VIEW', 'OBJECT'].includes(skill.grantResourceType) && (
+                                  {['VIEW', 'OBJECT'].includes(tool.grantResourceType) && (
                                     <EyeOutlined
                                       onClick={() => {
-                                        setSkillItem(skill);
+                                        setSelectedToolItem(tool);
                                         setRelResourceInfoModalOpen(true);
                                       }}
                                     />
@@ -1928,10 +2019,10 @@ const ConfigForm = (props) => {
                                 </Space>
                               ) : (
                                 <Space>
-                                  {['VIEW', 'OBJECT'].includes(skill.grantResourceType) && (
+                                  {['VIEW', 'OBJECT'].includes(tool.grantResourceType) && (
                                     <FormOutlined
                                       onClick={() => {
-                                        setSkillItem(skill);
+                                        setSelectedToolItem(tool);
                                         setRelResourceInfoModalOpen(true);
                                       }}
                                     />
@@ -1939,7 +2030,7 @@ const ConfigForm = (props) => {
                                   <AntdIcon
                                     type="icon-a-Deleteshanchu"
                                     onClick={() => {
-                                      setSkills(skills.filter((it) => it.resourceId !== skill.resourceId));
+                                      setSelectedTools(selectedTools.filter((it) => it.resourceId !== tool.resourceId));
                                     }}
                                   />
                                 </Space>
@@ -1972,9 +2063,9 @@ const ConfigForm = (props) => {
                       + {intl.formatMessage({ id: 'common.plus' })}
                     </Button>
                   </div>
-                  {selectedBundledSkills.length > 0 && (
+                  {selectedSkills.length > 0 && (
                     <div className={styles.skillsList}>
-                      {selectedBundledSkills
+                      {selectedSkills
                         .map((code) => bundledSkillOptions.find((item) => item.value === code))
                         .filter(Boolean)
                         .map((item) => (
@@ -1993,9 +2084,7 @@ const ConfigForm = (props) => {
                                     <AntdIcon
                                       type="icon-a-Deleteshanchu"
                                       onClick={() => {
-                                        updateBundledSkills(
-                                          selectedBundledSkills.filter((code) => code !== item.value)
-                                        );
+                                        updateBundledSkills(selectedSkills.filter((code) => code !== item.value));
                                       }}
                                     />
                                   </Space>
@@ -2360,7 +2449,7 @@ const ConfigForm = (props) => {
                 // 数组格式：[{name, key, value}, ...]
                 corePersonaData.forEach((item) => {
                   if (item && item.key) {
-                    const key = item.key;
+                    const key = normalizePromptConfigKey(item.key, item);
                     // 解析 value 字段（处理多层转义）
                     let value = item.value;
                     if (typeof value === 'string') {
@@ -2384,9 +2473,10 @@ const ConfigForm = (props) => {
                 });
               } else if (typeof corePersonaData === 'object' && corePersonaData !== null) {
                 // 兼容旧的对象格式：{key: value, ...}
-                Object.keys(corePersonaData).forEach((key) => {
-                  if (corePersonaData[key]) {
-                    let value = corePersonaData[key];
+                Object.keys(corePersonaData).forEach((rawKey) => {
+                  const key = normalizePromptConfigKey(rawKey);
+                  if (corePersonaData[rawKey]) {
+                    let value = corePersonaData[rawKey];
                     if (typeof value === 'string') {
                       value = parseJsonRecursively(value);
                       if (typeof value !== 'string') {
@@ -2423,14 +2513,24 @@ const ConfigForm = (props) => {
               coreCompetencies: coreCompetenciesFromTpl,
               abilityBoundary: data.constraints || '',
               exampleQuestions: faqsText,
-              roleAttributes: data.roleAttributes || data.workStandard || parsedSystemFields.workStandard || '',
+              roleAttributes:
+                data.roleAttributes ||
+                data.workStandard ||
+                parsedSystemFields.workStandard ||
+                parsedSystemFields.agent ||
+                '',
               processingFlow: data.processingFlow || '',
               personalityDimensions: data.personalityDimensions || '',
               wordPreferences: data.wordPreferences || '',
               sentenceAndTone: data.sentenceAndTone || '',
-              workStandard: data.workStandard || data.roleAttributes || parsedSystemFields.workStandard || '',
+              workStandard:
+                data.workStandard ||
+                data.roleAttributes ||
+                parsedSystemFields.workStandard ||
+                parsedSystemFields.agent ||
+                '',
               corePersonaDefinition: corePersonaDefinitionValue,
-              toolStandard: data.toolStandard || parsedSystemFields.toolStandard || '',
+              toolStandard: data.toolStandard || parsedSystemFields.toolStandard || parsedSystemFields.tools || '',
               memoryStandard: data.memoryStandard || parsedSystemFields.memoryStandard || '',
               questionRewrite: data.questionRewrite || parsedSystemFields.questionRewrite || '',
               questionDecomposition: data.questionDecomposition || parsedSystemFields.questionDecomposition || '',
@@ -2439,6 +2539,7 @@ const ConfigForm = (props) => {
               comprehensiveAnswer: data.comprehensiveAnswer || parsedSystemFields.comprehensiveAnswer || '',
               customPromptTabs,
               customPromptValues,
+              ...parsedSystemFields,
             });
 
             // 同步 abilityDesc 与 role JSON
@@ -2475,6 +2576,7 @@ const ConfigForm = (props) => {
             roleObj.singleSummary = data.singleSummary || '';
             roleObj.multipleSummary = data.multipleSummary || '';
             roleObj.comprehensiveAnswer = data.comprehensiveAnswer || '';
+            Object.assign(roleObj, parsedSystemFields);
 
             form.setFieldsValue({
               abilityDesc: JSON.stringify(abilityDescObj),
@@ -2580,7 +2682,7 @@ const ConfigForm = (props) => {
         open={relResourceInfoModalOpen}
         onClose={() => setRelResourceInfoModalOpen(false)}
         onOk={(item) => {
-          setSkills((prev) => {
+          setSelectedTools((prev) => {
             const target = prev.find((it) => it.resourceId === item.resourceId);
             if (target) {
               Object.assign(target, item);
@@ -2589,7 +2691,7 @@ const ConfigForm = (props) => {
             return prev;
           });
         }}
-        item={skillItem}
+        item={selectedToolItem}
         isReadOnly={isReadOnly}
       />
       <Modal
@@ -2627,7 +2729,7 @@ const ConfigForm = (props) => {
               {filteredBundledSkillOptions.length > 0 ? (
                 <div className={styles.bundledSkillCardList}>
                   {filteredBundledSkillOptions.map((item) => {
-                    const isSelected = selectedBundledSkills.includes(item.value);
+                    const isSelected = selectedSkills.includes(item.value);
 
                     return (
                       <div key={item.value} className={styles.bundledSkillModalCard}>
@@ -2657,10 +2759,10 @@ const ConfigForm = (props) => {
                             size="small"
                             onClick={() => {
                               if (isSelected) {
-                                updateBundledSkills(selectedBundledSkills.filter((code) => code !== item.value));
+                                updateBundledSkills(selectedSkills.filter((code) => code !== item.value));
                                 return;
                               }
-                              updateBundledSkills([...selectedBundledSkills, item.value]);
+                              updateBundledSkills([...selectedSkills, item.value]);
                             }}
                           >
                             {isSelected

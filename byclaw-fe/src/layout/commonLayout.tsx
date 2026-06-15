@@ -10,6 +10,7 @@ import { setUserToken, initAdminVipList } from '@/utils/auth';
 import BeyondBroadcastChannel from '@/utils/broadcastChannel';
 import { getDcSystemConfigValueByCodes as getDcSystemConfigValueByCodesService } from '@/service/layout';
 import { SYSTEM_CONFIG_STORAGE_KEY } from '@/constants/system';
+import useGlobalChatRuntime from '@/hooks/useGlobalChatRuntime';
 
 function formatImgUrl(url?: string) {
   if (!url) return '';
@@ -37,6 +38,8 @@ const CommonLayout = () => {
 
   const [pageTitle, setPageTitle] = useState(getSystemConfigByStorage().title || '');
   const [favicon, setFavicon] = useState(getSystemConfigByStorage().favicon || getRuntimeActualUrl('/favicon.svg'));
+
+  useGlobalChatRuntime();
 
   const queryClient = useMemo(() => {
     return new QueryClient({

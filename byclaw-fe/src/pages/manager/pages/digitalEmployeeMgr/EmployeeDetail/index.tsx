@@ -79,6 +79,33 @@ const parseBundledSkills = (value) => {
   }
 };
 
+const parseDigitalEmployeeTemplates = (value) => {
+  if (!value) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+      return [];
+    }
+  }
+  return [value];
+};
+
+const getDigitalEmployeeTemplate = (templates, ownerType, agentType) => {
+  const effectiveOwnerType = ownerType === 'personal' ? 'personal' : 'enterprise';
+  const findTemplate = (list) =>
+    list.find((item) => item?.ownerType === effectiveOwnerType && item?.agentType === agentType) ||
+    list.find((item) => item?.ownerType === effectiveOwnerType);
+
+  return findTemplate(templates) || {};
+};
+
 const EmployeeDetail = ({ loading }) => {
   const dispatch = useDispatch();
   const intl = useIntl();
@@ -261,7 +288,7 @@ const EmployeeDetail = ({ loading }) => {
   const [auditErrors, setAuditErrors] = useState({});
   const [issues, setIssues] = useState([]);
 
-  const [skills, setSkills] = useState([]);
+  const [selectedTools, setSelectedTools] = useState([]);
   const [coreCompetenciesState, setCoreCompetenciesState] = useState([]);
   const [memoryRules, setMemoryRules] = useState([]);
 
@@ -426,6 +453,7 @@ const EmployeeDetail = ({ loading }) => {
             machineChannel: machineChannelRaw,
             robotChannelConfigList: robotChannelConfigListRaw,
             catalogId,
+            relTools,
           } = res || {};
 
           // debugger;
@@ -800,16 +828,28 @@ const EmployeeDetail = ({ loading }) => {
             resultDataRef.current = { ...res, appId: agentId };
             setResourceStatus(res?.resourceStatus);
             prologueRef.current = prologueTemp;
+            const relResourceSkills = (relResourceList || [])
+              .filter((it) =>
+                ['AGENT', 'TOOLKIT', 'TOOL', 'MCP', 'VIEW', 'OBJECT'].includes(
+                  it.grantResourceType || it.resourceBizType
+                )
+              )
+              .map(skillHandler);
+            const relToolSkills = (Array.isArray(relTools) ? relTools : [])
+              .filter(Boolean)
+              .map((toolCode) => ({
+                resourceId: toolCode,
+                resourceName: toolCode === '*' ? '全部工具' : toolCode,
+                grantResourceType: 'TOOLKIT',
+                description: '',
+                relTools: toolCode,
+              }))
+              .filter((tool) => !relResourceSkills.some((skill) => `${skill.resourceId}` === `${tool.resourceId}`));
+
+            if (relResourceSkills.length > 0 || relToolSkills.length > 0) {
+              setSelectedTools([...relResourceSkills, ...relToolSkills]);
+            }
             if (relResourceList?.length > 0) {
-              setSkills(
-                relResourceList
-                  .filter((it) =>
-                    ['AGENT', 'TOOLKIT', 'TOOL', 'MCP', 'VIEW', 'OBJECT'].includes(
-                      it.grantResourceType || it.resourceBizType
-                    )
-                  )
-                  .map(skillHandler)
-              );
               setKnowledgeBases(
                 knowledgeBases.map((it) => ({
                   ...it,
@@ -834,15 +874,10 @@ const EmployeeDetail = ({ loading }) => {
   );
 
   const fetchDefaultTemplate = useCallback(async () => {
-    const paramCode =
-      ownerType === 'personal'
-        ? 'OPENCLAW_AGENT_ROLE_TEMPLATE_PERSONAL_ASSISTANT'
-        : 'OPENCLAW_AGENT_ROLE_TEMPLATE_DIGITAL_EMPLOYEE';
-
-    try {
-      const res = await getDcSystemConfig({ paramCode });
-      const templateConfig = JSON.parse(res?.paramValue || '{}');
-      const { relSkills = [], relTools = [] } = templateConfig;
+    const applyTemplate = (templates = []) => {
+      const templateConfig = getDigitalEmployeeTemplate(templates, ownerType, effectiveAgentType || agentType);
+      const relSkills = Array.isArray(templateConfig?.relSkills) ? templateConfig.relSkills : [];
+      const relTools = Array.isArray(templateConfig?.relTools) ? templateConfig.relTools : [];
 
       if (relSkills.length > 0) {
         form.setFieldsValue({ bundledSkills: relSkills });
@@ -870,12 +905,19 @@ const EmployeeDetail = ({ loading }) => {
       });
 
       if (defaultSkills.length > 0) {
-        setSkills((prev) => [...prev, ...defaultSkills]);
+        setSelectedTools((prev) => [...prev, ...defaultSkills]);
       }
+    };
+
+    try {
+      const res = await getDcSystemConfig({ paramCode: 'TEMPLATE_DIGITAL_EMPLOYEE' });
+      const templates = parseDigitalEmployeeTemplates(res?.paramValue || res);
+      applyTemplate(templates);
     } catch (error) {
       console.error('fetchDefaultTemplate error', error);
+      applyTemplate();
     }
-  }, [ownerType, form]);
+  }, [agentType, effectiveAgentType, ownerType, form]);
 
   useEffect(() => {
     if (agentId) {
@@ -1002,7 +1044,7 @@ const EmployeeDetail = ({ loading }) => {
         const relResourceInfoList = [];
         const relIds = [];
         const relTools = [];
-        skills.forEach((it) => {
+        selectedTools.forEach((it) => {
           if (it.relTools) {
             relTools.push(it.relTools);
           } else {
@@ -1215,7 +1257,7 @@ const EmployeeDetail = ({ loading }) => {
       prologueRef,
       form,
       questionList,
-      skills,
+      selectedTools,
       knowledgeBases,
       avatar,
       managementAddresses,
@@ -1493,8 +1535,8 @@ const EmployeeDetail = ({ loading }) => {
                 showBaseList={showBaseList}
                 updateResource={noop}
                 updateCompositeAppInfo={null}
-                skills={skills}
-                setSkills={setSkills}
+                selectedTools={selectedTools}
+                setSelectedTools={setSelectedTools}
                 knowledgeBases={knowledgeBases}
                 setKnowledgeBases={setKnowledgeBases}
                 tagOptions={tagOptions}
@@ -1571,7 +1613,7 @@ const EmployeeDetail = ({ loading }) => {
             agentName={agentName}
             agentData={resultDataRef.current}
             knowledgeBases={knowledgeBases}
-            skills={skills}
+            skills={selectedTools}
           />
         )}
       </div>
@@ -1635,11 +1677,11 @@ const EmployeeDetail = ({ loading }) => {
           digitalType={baseListType}
           agentType={effectiveAgentType}
           reload={() => getCompositeAppInfo('reload')}
-          skills={skills}
+          skills={selectedTools}
           knowledgeBases={knowledgeBases}
           handleUpdateItem={(item) => {
             if (baseListType === '005') {
-              setSkills((prev) => {
+              setSelectedTools((prev) => {
                 const targetItem = prev.find((it) => it.resourceId === item.resourceId);
                 if (targetItem) {
                   Object.assign(targetItem, item);
@@ -1660,7 +1702,7 @@ const EmployeeDetail = ({ loading }) => {
           }}
           handleSelect={(item) => {
             if (baseListType === '005') {
-              setSkills((pre) => [...pre, item]);
+              setSelectedTools((pre) => [...pre, item]);
             } else if (baseListType === '006') {
               const knowledgeItem = {
                 ...item,
@@ -1677,7 +1719,7 @@ const EmployeeDetail = ({ loading }) => {
           }}
           handleRemove={(item) => {
             if (baseListType === '005') {
-              setSkills(skills.filter((it) => it.resourceId !== item.resourceId));
+              setSelectedTools(selectedTools.filter((it) => it.resourceId !== item.resourceId));
             } else if (baseListType === '006') {
               setKnowledgeBases(
                 knowledgeBases.map((it) => ({
@@ -1693,7 +1735,7 @@ const EmployeeDetail = ({ loading }) => {
         visible={refineModalOpen}
         form={form}
         questionList={questionList}
-        skills={skills}
+        skills={selectedTools}
         knowledgeBases={knowledgeBases}
         onOk={(formValue, myQuestionList) => {
           setQuestionList(myQuestionList);

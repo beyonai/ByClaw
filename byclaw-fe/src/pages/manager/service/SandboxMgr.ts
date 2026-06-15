@@ -1,4 +1,4 @@
-import { POST } from '@/service/common/request';
+import { GET, POST } from '@/service/common/request';
 
 const withCustomHandle = {
   responseCfg: {
@@ -38,4 +38,12 @@ export async function deleteServiceSpec(params: { serviceKey: string }) {
 
 export async function launchByUserCode(params: { userCode: string; serviceKey?: string }) {
   return POST('/byaiService/sandbox/launchByUserCode', { ...params }, withCustomHandle);
+}
+
+export async function getPreferredServiceKey(userCode: string) {
+  return GET('/byaiService/sandbox/preferredServiceKey', { userCode }, withCustomHandle);
+}
+
+export async function removePreferredServiceKey(params: { userCode: string }) {
+  return POST('/byaiService/sandbox/removePreferredServiceKey', { ...params }, withCustomHandle);
 }

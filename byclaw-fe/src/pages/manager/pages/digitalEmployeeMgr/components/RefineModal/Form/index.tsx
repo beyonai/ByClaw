@@ -1,6 +1,7 @@
 // @ts-nocheck
 import React, { useRef, useState } from 'react';
-import { Input, Form, Card, Select, Collapse, Button, Popover } from 'antd';
+import { Input, Form, Card, Select, Collapse, Button, Popover, Checkbox } from 'antd';
+import classNames from 'classnames';
 import { customAlphabet } from 'nanoid';
 import { compact, last, set } from 'lodash';
 import { useIntl } from '@umijs/max';
@@ -44,8 +45,22 @@ const MyForm = (props) => {
     setTagsOptions,
     coreAbilities = [],
     setCoreAbilities,
+    selectedSections,
+    setSelectedSections,
   } = props;
   const intl = useIntl();
+
+  const toggleSection = (key) => {
+    setSelectedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
   const customAlphabetRef = useRef(customAlphabet('abcdefghijklmnopqrstuvwxyz1234567890', 6));
 
   const compositionRef = useRef(false);
@@ -124,43 +139,50 @@ const MyForm = (props) => {
         />
       </Form.Item>
 
-      <Form.Item
-        label={intl.formatMessage({ id: 'employeeDetail.digitalEmployeeDescription' })}
-        name="resourceDesc"
-        rules={[
-          {
-            required: true,
-            message: intl.formatMessage({
-              id: 'employeeDetail.characterPlaceholder',
-            }),
-          },
-        ]}
-      >
-        <TextArea
-          rows={4}
-          placeholder={intl.formatMessage({
-            id: 'employeeDetail.digitalEmployeeDescriptionPlaceholder',
-          })}
-          onCompositionStart={() => {
-            compositionRef.current = true;
-          }}
-          onCompositionEnd={(e) => handleCompositionEnd(e, 'intro')}
-        />
-      </Form.Item>
+      <div className={classNames({ [styles.sectionUnselected]: !selectedSections.has('desc') })}>
+        <Form.Item
+          label={
+            <span className={styles.sectionCheckbox}>
+              <Checkbox checked={selectedSections.has('desc')} onChange={() => toggleSection('desc')} />
+              {intl.formatMessage({ id: 'employeeDetail.digitalEmployeeDescription' })}
+            </span>
+          }
+          name="resourceDesc"
+          rules={[
+            {
+              required: true,
+              message: intl.formatMessage({
+                id: 'employeeDetail.characterPlaceholder',
+              }),
+            },
+          ]}
+        >
+          <TextArea
+            rows={4}
+            placeholder={intl.formatMessage({
+              id: 'employeeDetail.digitalEmployeeDescriptionPlaceholder',
+            })}
+            onCompositionStart={() => {
+              compositionRef.current = true;
+            }}
+            onCompositionEnd={(e) => handleCompositionEnd(e, 'intro')}
+          />
+        </Form.Item>
+      </div>
 
       {/* 核心能力 */}
-      <div className={styles.coreAbilitySection}>
+      <div
+        className={classNames(styles.coreAbilitySection, {
+          [styles.sectionUnselected]: !selectedSections.has('abilities'),
+        })}
+      >
         <div className={styles.sectionLabel}>
           <div className="ub ub-ac">
-            <div
-              style={{
-                margin: '5px 4px 0 0',
-                fontSize: '16px',
-                color: '#ff4d4f',
-              }}
-            >
-              *
-            </div>
+            <Checkbox
+              checked={selectedSections.has('abilities')}
+              onChange={() => toggleSection('abilities')}
+              style={{ marginRight: 4 }}
+            />
             <div style={{ fontSize: 14, fontWeight: 500, color: '#14161a' }}>
               {intl.formatMessage({ id: 'refineModal.coreAbility' })}
             </div>
@@ -343,65 +365,98 @@ const MyForm = (props) => {
       />
 
       {/* 标签管理 */}
-      <Form.Item label={intl.formatMessage({ id: 'employeeDetail.tags' })} name="tags">
-        <Select
-          mode="multiple"
-          value={selectedTags}
-          onChange={(values) => {
-            setSelectedTags(values);
-            // 更新表单值
-            form.setFieldsValue({ tags: values });
-          }}
-          onDeselect={handleTagDeselect}
-          placeholder={intl.formatMessage({ id: 'employeeDetail.tagSearchPlaceholder' })}
-          options={tagsOptions}
-          filterOption={(inputValue, option) => {
-            return option?.value?.toLowerCase().includes(inputValue.toLowerCase());
-          }}
-          onSearch={(value) => {
-            setInputTag(value);
-          }}
-          onInputKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              handleTagPressEnter();
-            }
-          }}
-          style={{ marginBottom: 8 }}
-          showSearch
-          allowClear
-        />
-      </Form.Item>
-      <Form.Item
-        label={intl.formatMessage({ id: 'employeeDetail.personalityDefinition' })}
-        name="corePersonaDefinition"
+      <div className={classNames({ [styles.sectionUnselected]: !selectedSections.has('tags') })}>
+        <Form.Item
+          label={
+            <span className={styles.sectionCheckbox}>
+              <Checkbox checked={selectedSections.has('tags')} onChange={() => toggleSection('tags')} />
+              {intl.formatMessage({ id: 'employeeDetail.tags' })}
+            </span>
+          }
+          name="tags"
+        >
+          <Select
+            mode="multiple"
+            value={selectedTags}
+            onChange={(values) => {
+              setSelectedTags(values);
+              form.setFieldsValue({ tags: values });
+            }}
+            onDeselect={handleTagDeselect}
+            placeholder={intl.formatMessage({ id: 'employeeDetail.tagSearchPlaceholder' })}
+            options={tagsOptions}
+            filterOption={(inputValue, option) => {
+              return option?.value?.toLowerCase().includes(inputValue.toLowerCase());
+            }}
+            onSearch={(value) => {
+              setInputTag(value);
+            }}
+            onInputKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleTagPressEnter();
+              }
+            }}
+            style={{ marginBottom: 8 }}
+            showSearch
+            allowClear
+          />
+        </Form.Item>
+      </div>
+      <div className={classNames({ [styles.sectionUnselected]: !selectedSections.has('persona') })}>
+        <Form.Item
+          label={
+            <span className={styles.sectionCheckbox}>
+              <Checkbox checked={selectedSections.has('persona')} onChange={() => toggleSection('persona')} />
+              {intl.formatMessage({ id: 'employeeDetail.personalityDefinition' })}
+            </span>
+          }
+          name="corePersonaDefinition"
+        >
+          <TextArea
+            rows={4}
+            placeholder={intl.formatMessage({
+              id: 'employeeDetail.personalityDefinitionRequired',
+            })}
+            onCompositionStart={() => {
+              compositionRef.current = true;
+            }}
+            onCompositionEnd={handleCompositionEnd}
+          />
+        </Form.Item>
+      </div>
+      <div className={classNames({ [styles.sectionUnselected]: !selectedSections.has('greeting') })}>
+        <Form.Item
+          label={
+            <span className={styles.sectionCheckbox}>
+              <Checkbox checked={selectedSections.has('greeting')} onChange={() => toggleSection('greeting')} />
+              {intl.formatMessage({ id: 'refineModal.opening' })}
+            </span>
+          }
+          name="descText"
+        >
+          <TextArea
+            rows={3}
+            placeholder={intl.formatMessage({
+              id: 'refineModal.openingPlaceholder',
+            })}
+            onCompositionStart={() => {
+              compositionRef.current = true;
+            }}
+            onCompositionEnd={handleCompositionEnd}
+          />
+        </Form.Item>
+      </div>
+      <div
+        className={classNames(styles.commonQuestion, {
+          [styles.sectionUnselected]: !selectedSections.has('questions'),
+        })}
       >
-        <TextArea
-          rows={4}
-          placeholder={intl.formatMessage({
-            id: 'employeeDetail.personalityDefinitionRequired',
-          })}
-          onCompositionStart={() => {
-            compositionRef.current = true;
-          }}
-          onCompositionEnd={handleCompositionEnd}
-        />
-      </Form.Item>
-      <Form.Item label={intl.formatMessage({ id: 'refineModal.opening' })} name="descText">
-        <TextArea
-          rows={3}
-          placeholder={intl.formatMessage({
-            id: 'refineModal.openingPlaceholder',
-          })}
-          onCompositionStart={() => {
-            compositionRef.current = true;
-          }}
-          onCompositionEnd={handleCompositionEnd}
-        />
-      </Form.Item>
-      <div className={styles.commonQuestion}>
         <div className={styles.questionLabel}>
-          <span>{intl.formatMessage({ id: 'refineModal.questions' })}</span>
+          <span className={styles.sectionCheckbox}>
+            <Checkbox checked={selectedSections.has('questions')} onChange={() => toggleSection('questions')} />
+            {intl.formatMessage({ id: 'refineModal.questions' })}
+          </span>
           <AntdIcon
             type="icon-a-Plusjia"
             onClick={() => {
