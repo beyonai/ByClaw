@@ -9,7 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@byclaw/by-framework": "^1.3.1",
+    "@byclaw/by-framework": "^1.4.0",
     "@sinclair/typebox": "0.34.48",
     "ioredis": "^5.10.1"
   },
