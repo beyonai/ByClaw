@@ -2630,24 +2630,46 @@ class DataCloudWorker(GatewayWorker):
         }
 
         try:
-            from datacloud_analysis.langfuse_handler import (  # noqa: PLC0415
-                current_tool_spans,
-                make_langfuse_callback,
-            )
-
-            # 从 early trace span 取 trace_id 和 span id，
-            # trace_id 确保 LangChain callback 挂载到同一条 trace，
-            # span id 作为 parent_span_id 使 LangGraph 根节点直接成为 datacloud-agent 的子节点
+            # LangGraph 的根 span 必须挂在 datacloud-agent span 之下（父子关系），
+            # 而不是框架层的 worker.execute/DEBUG 节点（否则两者平级）。
+            # parent_observation_id = datacloud-agent span 的 id。
             _early_span = _early_lf_trace[1] if _early_lf_trace else None
             _lf_trace_id = str(getattr(_early_span, "trace_id", "") or "")
-            _lf_span_id = str(getattr(_early_span, "id", "") or "")
-            _lf_handler = make_langfuse_callback(_lf_trace_id or None, parent_span_id=_lf_span_id or None)
+            _early_span_id = str(getattr(_early_span, "id", "") or "")
+
+            _lf_handler = None
+            if _lf_trace_id and _early_span_id:
+                # 优先用新包（by_framework_trace_langfuse），parent 明确为 datacloud-agent span
+                try:
+                    from by_framework_trace_langfuse import (  # noqa: PLC0415
+                        build_langchain_callback,
+                    )
+                    _lf_handler = build_langchain_callback(
+                        trace_id=_lf_trace_id,
+                        parent_observation_id=_early_span_id,
+                    )
+                except (ImportError, Exception):
+                    pass
+
+            if _lf_handler is None:
+                # 降级：用旧包（datacloud_analysis.langfuse_handler）
+                try:
+                    from datacloud_analysis.langfuse_handler import (  # noqa: PLC0415
+                        make_langfuse_callback,
+                    )
+                    _lf_handler = make_langfuse_callback(
+                        _lf_trace_id or None,
+                        parent_span_id=_early_span_id or None,
+                    )
+                except (ImportError, Exception):
+                    pass
+
             if _lf_handler is not None:
                 config["callbacks"] = [_lf_handler]
                 config["metadata"] = {
                     "thread_id": thread_id,
                     "agent_id": str(by_agent_id or ""),
-                    # LangchainCallbackHandler 读取这几个字段写入 Langfuse trace/span
+                    # LangChain CallbackHandler 读取这几个字段写入 Langfuse trace/span
                     "langfuse_trace_name": f"agent.workflow {by_agent_name or by_agent_id or ''}".strip(),
                     "langfuse_user_id": str(getattr(getattr(command, "header", None), "user_code", "") or ""),
                     "langfuse_session_id": context.session_id or "",
@@ -2656,6 +2678,9 @@ class DataCloudWorker(GatewayWorker):
                         f"agent_name:{by_agent_name or ''}",
                     ],
                 }
+                from datacloud_analysis.langfuse_handler import (  # noqa: PLC0415
+                    current_tool_spans,
+                )
                 _lf_spans_list: list[dict[str, Any]] = []
                 current_tool_spans.set(_lf_spans_list)
         except Exception:
@@ -2890,11 +2915,15 @@ class DataCloudWorker(GatewayWorker):
             # ── Langfuse：补写 trace input / output ──────────────────────────
             try:
                 _lf_callbacks = config.get("callbacks") or []
+                # 兼容新旧两种 handler 类名：
+                # 旧: LangchainCallbackHandler（datacloud_analysis.langfuse_handler）
+                # 新: CallbackHandler（by_framework_trace_langfuse，来自 langfuse.langchain）
+                _LANGFUSE_CB_NAMES = {"LangchainCallbackHandler", "CallbackHandler"}
                 _lf_handler = next(
                     (
                         cb
                         for cb in _lf_callbacks
-                        if type(cb).__name__ == "LangchainCallbackHandler"
+                        if type(cb).__name__ in _LANGFUSE_CB_NAMES
                     ),
                     None,
                 )
