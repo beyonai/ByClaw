@@ -53,10 +53,14 @@ export const getDebugSession = (payload: { agentId?: string } = {}) =>
     ...payload,
   });
 
-export const getDcSystemConfigListByStandType = (payload: any = {}) =>
-  POST<any>('/byaiService/system/staticdata/getDcSystemConfigListByStandType', {
-    ...payload,
-  });
+export const getDcSystemConfigListByStandType = (payload: any = {}, config: any = {}) =>
+  POST<any>(
+    '/byaiService/system/staticdata/getDcSystemConfigListByStandType',
+    {
+      ...payload,
+    },
+    config
+  );
 
 // 获取模板类型  不鉴权
 export const getTemplateTypes = (payload: any = {}) =>
