@@ -22,13 +22,18 @@ if [ -z "${KUBECONFIG:-}" ] && [ -f "${K3S_DATA_DIR}/server/kubeconfig" ]; then
 fi
 
 NS_MONITORING="${NS_MONITORING:-monitoring}"
+NS_SERVICE="${NS_SERVICE:-by-service}"
 STORAGE_CLASS="${STORAGE_CLASS:-longhorn}"
 K3S_API_HOST="${K3S_API_HOST:-127.0.0.1}"
 MONITORING_EXTERNAL_BASE_URL="${MONITORING_EXTERNAL_BASE_URL:-http://${K3S_API_HOST}}"
 MONITORING_PROMETHEUS_RETENTION="${MONITORING_PROMETHEUS_RETENTION:-15d}"
 MONITORING_PROMETHEUS_PVC_SIZE="${MONITORING_PROMETHEUS_PVC_SIZE:-50Gi}"
 MONITORING_GRAFANA_PVC_SIZE="${MONITORING_GRAFANA_PVC_SIZE:-10Gi}"
+OPENSANDBOX_WORKLOAD_NAMESPACE="${OPENSANDBOX_WORKLOAD_NAMESPACE:-${NS_SERVICE}}"
+BE_SERVER_PORT="${BE_SERVER_PORT:-8086}"
+ALERTMANAGER_WEBHOOK_URL="${ALERTMANAGER_WEBHOOK_URL:-http://byclaw-be.${NS_SERVICE}.svc.cluster.local:${BE_SERVER_PORT}/byaiService/sandbox/autoscale/alerts}"
 IMAGE_PROMETHEUS="${IMAGE_PROMETHEUS:-quay.io/prometheus/prometheus:v2.55.1}"
+IMAGE_ALERTMANAGER="${IMAGE_ALERTMANAGER:-quay.io/prometheus/alertmanager:v0.27.0}"
 IMAGE_NODE_EXPORTER="${IMAGE_NODE_EXPORTER:-quay.io/prometheus/node-exporter:v1.8.2}"
 IMAGE_KUBE_STATE_METRICS="${IMAGE_KUBE_STATE_METRICS:-m.daocloud.io/registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.14.0}"
 IMAGE_GRAFANA="${IMAGE_GRAFANA:-grafana/grafana:11.3.1}"
@@ -77,6 +82,7 @@ wait_monitoring_ready() {
     local timeout="${BYCLAW_K3S_MONITORING_WAIT_TIMEOUT_SECONDS:-300}"
     echo "========== Waiting for monitoring =========="
     kubectl_cmd -n "$NS_MONITORING" rollout status deploy/prometheus --timeout="${timeout}s"
+    kubectl_cmd -n "$NS_MONITORING" rollout status deploy/alertmanager --timeout="${timeout}s"
     kubectl_cmd -n "$NS_MONITORING" rollout status deploy/grafana --timeout="${timeout}s"
     kubectl_cmd -n "$NS_MONITORING" rollout status deploy/kube-state-metrics --timeout="${timeout}s"
     kubectl_cmd -n "$NS_MONITORING" rollout status ds/node-exporter --timeout="${timeout}s"
@@ -94,184 +100,51 @@ verify_prometheus_targets() {
         'wget -qO- http://127.0.0.1:9090/prometheus/api/v1/targets 2>/dev/null | sed "s/,/,\n/g" | grep -E "\"health\":\"(up|down)\"|\"job\"" | head -80' || true
 }
 
-create_grafana_dashboard() {
-    local dashboard_file="/tmp/byclaw-grafana-dashboard.json"
+verify_prometheus_rules() {
+    local pod
+    pod="$(kubectl_cmd -n "$NS_MONITORING" get pod -l app=prometheus \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+    if [ -z "$pod" ]; then
+        return 0
+    fi
+    echo "========== Prometheus sandbox autoscale rules =========="
+    kubectl_cmd -n "$NS_MONITORING" exec "$pod" -- sh -lc \
+        'wget -qO- http://127.0.0.1:9090/prometheus/api/v1/rules 2>/dev/null | grep -o "OpenClawSandbox[A-Za-z]*" | sort -u' || true
+}
+
+create_grafana_dashboards() {
     local grafana_url="${MONITORING_EXTERNAL_BASE_URL%/}/grafana"
+    local dashboard_dir="${SCRIPT_DIR}/manifests/monitoring/dashboards"
     if ! command -v curl >/dev/null 2>&1; then
         echo "Warning: curl not found; skip Grafana dashboard import." >&2
         return 0
     fi
-    cat >"$dashboard_file" <<'JSON'
-{
-  "overwrite": true,
-  "dashboard": {
-    "id": null,
-    "uid": "byclaw-k3s-pods",
-    "title": "ByClaw K3s Cluster & Pod Resources",
-    "tags": ["byclaw", "k3s", "pods"],
-    "timezone": "browser",
-    "schemaVersion": 39,
-    "version": 1,
-    "refresh": "30s",
-    "time": {
-      "from": "now-1h",
-      "to": "now"
-    },
-    "panels": [
-      {
-        "id": 1,
-        "title": "Node CPU Usage %",
-        "type": "timeseries",
-        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
-        "targets": [
-          {
-            "refId": "A",
-            "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
-            "legendFormat": "{{instance}}"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "percent",
-            "min": 0,
-            "max": 100
-          }
-        }
-      },
-      {
-        "id": 2,
-        "title": "Node Memory Usage %",
-        "type": "timeseries",
-        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
-        "targets": [
-          {
-            "refId": "A",
-            "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
-            "legendFormat": "{{instance}}"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "percent",
-            "min": 0,
-            "max": 100
-          }
-        }
-      },
-      {
-        "id": 3,
-        "title": "Namespace CPU Usage",
-        "type": "timeseries",
-        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
-        "targets": [
-          {
-            "refId": "A",
-            "expr": "sum by (namespace) (rate(container_cpu_usage_seconds_total{container!=\"\",pod!=\"\"}[5m]))",
-            "legendFormat": "{{namespace}}"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "cores"
-          }
-        }
-      },
-      {
-        "id": 4,
-        "title": "Namespace Memory Working Set",
-        "type": "timeseries",
-        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
-        "targets": [
-          {
-            "refId": "A",
-            "expr": "sum by (namespace) (container_memory_working_set_bytes{container!=\"\",pod!=\"\"})",
-            "legendFormat": "{{namespace}}"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "bytes"
-          }
-        }
-      },
-      {
-        "id": 5,
-        "title": "Top Pod CPU Usage",
-        "type": "table",
-        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
-        "targets": [
-          {
-            "refId": "A",
-            "expr": "topk(20, sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{container!=\"\",pod!=\"\"}[5m])))",
-            "format": "table",
-            "instant": true
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "cores"
-          }
-        }
-      },
-      {
-        "id": 6,
-        "title": "Top Pod Memory Working Set",
-        "type": "table",
-        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
-        "targets": [
-          {
-            "refId": "A",
-            "expr": "topk(20, sum by (namespace, pod) (container_memory_working_set_bytes{container!=\"\",pod!=\"\"}))",
-            "format": "table",
-            "instant": true
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "bytes"
-          }
-        }
-      },
-      {
-        "id": 7,
-        "title": "Pod Restarts",
-        "type": "timeseries",
-        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
-        "targets": [
-          {
-            "refId": "A",
-            "expr": "sum by (namespace, pod) (increase(kube_pod_container_status_restarts_total[1h]))",
-            "legendFormat": "{{namespace}}/{{pod}}"
-          }
-        ]
-      },
-      {
-        "id": 8,
-        "title": "Pods Not Ready",
-        "type": "table",
-        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
-        "targets": [
-          {
-            "refId": "A",
-            "expr": "kube_pod_status_ready{condition=\"false\"} == 1",
-            "format": "table",
-            "instant": true
-          }
-        ]
-      }
-    ]
-  }
-}
-JSON
-    echo "========== Importing Grafana dashboard =========="
-    if curl -fsS --retry 20 --retry-delay 3 \
-        -u "admin:${GRAFANA_ADMIN_PASSWORD}" \
-        -H "Content-Type: application/json" \
-        -X POST "${grafana_url}/api/dashboards/db" \
-        --data-binary "@${dashboard_file}" >/dev/null; then
-        echo "    dashboard: ${grafana_url}/d/byclaw-k3s-pods/byclaw-k3s-cluster-and-pod-resources"
-    else
-        echo "Warning: failed to import Grafana dashboard through ${grafana_url}; monitoring stack is still installed." >&2
+    if [ ! -d "$dashboard_dir" ]; then
+        echo "Warning: dashboard directory not found: ${dashboard_dir}" >&2
+        return 0
+    fi
+    echo "========== Importing Grafana dashboards =========="
+    local dashboard_file import_ok=0
+    for dashboard_file in "$dashboard_dir"/*.json; do
+        [ -f "$dashboard_file" ] || continue
+        if curl -fsS --retry 20 --retry-delay 3 \
+            -u "admin:${GRAFANA_ADMIN_PASSWORD}" \
+            -H "Content-Type: application/json" \
+            -X POST "${grafana_url}/api/dashboards/db" \
+            --data-binary "@${dashboard_file}" >/tmp/byclaw-grafana-import.json; then
+            python3 - <<'PY' /tmp/byclaw-grafana-import.json "$(basename "$dashboard_file")"
+import json, sys
+payload = json.load(open(sys.argv[1]))
+name = sys.argv[2]
+print(f"    imported {name}: {payload.get('url', 'ok')}")
+PY
+            import_ok=1
+        else
+            echo "Warning: failed to import ${dashboard_file} through ${grafana_url}" >&2
+        fi
+    done
+    if [ "$import_ok" -eq 0 ]; then
+        echo "Warning: no Grafana dashboards imported; monitoring stack is still installed." >&2
     fi
 }
 
@@ -331,6 +204,12 @@ data:
     global:
       scrape_interval: 30s
       evaluation_interval: 30s
+    rule_files:
+      - /etc/prometheus/rules/*.yml
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ["alertmanager.${NS_MONITORING}.svc.cluster.local:9093"]
     scrape_configs:
       - job_name: prometheus
         metrics_path: /prometheus/metrics
@@ -423,6 +302,170 @@ data:
             target_label: pod
 ---
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-sandbox-autoscale-rules
+  namespace: ${NS_MONITORING}
+data:
+  sandbox-autoscale-rules.yml: |
+    groups:
+      - name: byclaw.sandbox.autoscale
+        interval: 30s
+        rules:
+          - alert: OpenClawSandboxCpuHigh
+            expr: |
+              sum by (namespace, pod) (
+                rate(container_cpu_usage_seconds_total{
+                  namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                  container="sandbox",
+                  pod=~"[0-9a-f-]{36}-[0-9]+"
+                }[5m])
+              )
+              /
+              sum by (namespace, pod) (
+                kube_pod_container_resource_requests{
+                  namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                  container="sandbox",
+                  resource="cpu"
+                }
+              ) > ${SANDBOX_AUTOSCALE_CPU_HIGH_RATIO:-0.85}
+            for: ${SANDBOX_AUTOSCALE_CPU_HIGH_FOR:-5m}
+            labels:
+              severity: warning
+              service_type: openclaw
+              trigger_source: PROMETHEUS_ALERT
+              reason_code: metrics.cpu.high
+              suggested_resize_type: IN_PLACE
+            annotations:
+              summary: "OpenClaw 沙箱 CPU 持续偏高"
+              reason_detail: "CPU 使用率连续 ${SANDBOX_AUTOSCALE_CPU_HIGH_FOR:-5m} 超过 request 的 ${SANDBOX_AUTOSCALE_CPU_HIGH_PERCENT:-85}%，建议升一级规格。pod={{ \$labels.pod }} value={{ \$value }}"
+
+          - alert: OpenClawSandboxMemoryHigh
+            expr: |
+              sum by (namespace, pod) (
+                container_memory_working_set_bytes{
+                  namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                  container="sandbox",
+                  pod=~"[0-9a-f-]{36}-[0-9]+"
+                }
+              )
+              /
+              sum by (namespace, pod) (
+                kube_pod_container_resource_requests{
+                  namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                  container="sandbox",
+                  resource="memory"
+                }
+              ) > ${SANDBOX_AUTOSCALE_MEMORY_HIGH_RATIO:-0.90}
+            for: ${SANDBOX_AUTOSCALE_MEMORY_HIGH_FOR:-5m}
+            labels:
+              severity: warning
+              service_type: openclaw
+              trigger_source: PROMETHEUS_ALERT
+              reason_code: metrics.memory.high
+              suggested_resize_type: IN_PLACE
+            annotations:
+              summary: "OpenClaw 沙箱内存持续偏高"
+              reason_detail: "内存 Working Set 连续 ${SANDBOX_AUTOSCALE_MEMORY_HIGH_FOR:-5m} 超过 request 的 ${SANDBOX_AUTOSCALE_MEMORY_HIGH_PERCENT:-90}%，建议升一级规格。pod={{ \$labels.pod }} value={{ \$value }}"
+
+          - alert: OpenClawSandboxMemoryCritical
+            expr: |
+              sum by (namespace, pod) (
+                container_memory_working_set_bytes{
+                  namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                  container="sandbox",
+                  pod=~"[0-9a-f-]{36}-[0-9]+"
+                }
+              )
+              /
+              sum by (namespace, pod) (
+                kube_pod_container_resource_limits{
+                  namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                  container="sandbox",
+                  resource="memory"
+                }
+              ) > ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_RATIO:-0.85}
+            for: ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_FOR:-2m}
+            labels:
+              severity: critical
+              service_type: openclaw
+              trigger_source: PROMETHEUS_ALERT
+              reason_code: metrics.memory.critical
+              suggested_resize_type: HOT_SWITCH
+            annotations:
+              summary: "OpenClaw 沙箱内存接近上限"
+              reason_detail: "内存 Working Set 连续 ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_FOR:-2m} 超过 limit 的 ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_PERCENT:-85}%，建议优先原地调整，失败时热切换。pod={{ \$labels.pod }} value={{ \$value }}"
+
+          - alert: OpenClawSandboxLowUsage
+            expr: |
+              (
+                sum by (namespace, pod) (
+                  rate(container_cpu_usage_seconds_total{
+                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                    container="sandbox",
+                    pod=~"[0-9a-f-]{36}-[0-9]+"
+                  }[15m])
+                )
+                /
+                sum by (namespace, pod) (
+                  kube_pod_container_resource_requests{
+                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                    container="sandbox",
+                    resource="cpu"
+                  }
+                ) < ${SANDBOX_AUTOSCALE_CPU_LOW_RATIO:-0.25}
+              )
+              and
+              (
+                sum by (namespace, pod) (
+                  container_memory_working_set_bytes{
+                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                    container="sandbox",
+                    pod=~"[0-9a-f-]{36}-[0-9]+"
+                  }
+                )
+                /
+                sum by (namespace, pod) (
+                  kube_pod_container_resource_requests{
+                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                    container="sandbox",
+                    resource="memory"
+                  }
+                ) < ${SANDBOX_AUTOSCALE_MEMORY_LOW_RATIO:-0.50}
+              )
+            for: ${SANDBOX_AUTOSCALE_LOW_USAGE_FOR:-45m}
+            labels:
+              severity: info
+              service_type: openclaw
+              trigger_source: PROMETHEUS_ALERT
+              reason_code: metrics.low_usage
+              suggested_resize_type: PREFERRED_ONLY
+            annotations:
+              summary: "OpenClaw 沙箱资源长期低使用"
+              reason_detail: "CPU 和内存长期低于当前 request 阈值，建议只更新用户下一次启动推荐规格。pod={{ \$labels.pod }} value={{ \$value }}"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: ${NS_MONITORING}
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: byclaw-autoscale
+      group_by: ["alertname", "namespace", "pod"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: ${SANDBOX_AUTOSCALE_ALERT_REPEAT_INTERVAL:-30m}
+    receivers:
+      - name: byclaw-autoscale
+        webhook_configs:
+          - url: "${ALERTMANAGER_WEBHOOK_URL}"
+            send_resolved: false
+---
+apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: prometheus-data
@@ -441,6 +484,8 @@ metadata:
   namespace: ${NS_MONITORING}
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: prometheus
@@ -478,12 +523,17 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /etc/prometheus
+            - name: rules
+              mountPath: /etc/prometheus/rules
             - name: data
               mountPath: /prometheus
       volumes:
         - name: config
           configMap:
             name: prometheus-config
+        - name: rules
+          configMap:
+            name: prometheus-sandbox-autoscale-rules
         - name: data
           persistentVolumeClaim:
             claimName: prometheus-data
@@ -499,6 +549,62 @@ spec:
   ports:
     - name: http
       port: 9090
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: ${NS_MONITORING}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alertmanager
+  template:
+    metadata:
+      labels:
+        app: alertmanager
+    spec:
+      containers:
+        - name: alertmanager
+          image: ${IMAGE_ALERTMANAGER}
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+          ports:
+            - name: http
+              containerPort: 9093
+          resources:
+            requests:
+              cpu: "${MONITORING_ALERTMANAGER_CPU_REQUEST:-100m}"
+              memory: "${MONITORING_ALERTMANAGER_MEMORY_REQUEST:-128Mi}"
+            limits:
+              cpu: "${MONITORING_ALERTMANAGER_CPU_LIMIT:-500m}"
+              memory: "${MONITORING_ALERTMANAGER_MEMORY_LIMIT:-512Mi}"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alertmanager
+            - name: data
+              mountPath: /alertmanager
+      volumes:
+        - name: config
+          configMap:
+            name: alertmanager-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: ${NS_MONITORING}
+spec:
+  selector:
+    app: alertmanager
+  ports:
+    - name: http
+      port: 9093
       targetPort: http
 ---
 apiVersion: apps/v1
@@ -738,14 +844,20 @@ spec:
                   number: 3000
 EOF
 
+kubectl_cmd -n "$NS_MONITORING" rollout restart deploy/prometheus deploy/alertmanager >/dev/null 2>&1 || true
+
 wait_monitoring_ready
 verify_prometheus_targets
-create_grafana_dashboard
+verify_prometheus_rules
+create_grafana_dashboards
 
 echo "========== Monitoring install completed =========="
 echo "    Prometheus: ${MONITORING_EXTERNAL_BASE_URL}/prometheus"
 echo "    Grafana: ${MONITORING_EXTERNAL_BASE_URL}/grafana"
-echo "    Grafana dashboard: ${MONITORING_EXTERNAL_BASE_URL}/grafana/d/byclaw-k3s-pods/byclaw-k3s-cluster-and-pod-resources"
+echo "    Grafana dashboards:"
+echo "      - ${MONITORING_EXTERNAL_BASE_URL}/grafana/d/byclaw-k3s-nodes"
+echo "      - ${MONITORING_EXTERNAL_BASE_URL}/grafana/d/byclaw-k3s-namespace"
+echo "      - ${MONITORING_EXTERNAL_BASE_URL}/grafana/d/byclaw-k3s-pods"
 echo "    Grafana user: admin"
 echo "    Grafana password: run:"
 echo "      kubectl -n ${NS_MONITORING} get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d; echo"
