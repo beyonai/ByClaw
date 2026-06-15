@@ -8,7 +8,7 @@
 
 **硬停止（不修改代码）：**
 - **AUTH_REQUIRED** (exit 77) — 提示用户登录
-- **BROWSER_CONNECT** (exit 69) — 提示用户运行 `bycli doctor`
+- **BROWSER_CONNECT** (exit 69) — 提示用户运行 `bycli doctor` + `bycli daemon status` 诊断桥接
 - **CAPTCHA / 限流** — 不是 adapter 问题
 
 **作用域：**

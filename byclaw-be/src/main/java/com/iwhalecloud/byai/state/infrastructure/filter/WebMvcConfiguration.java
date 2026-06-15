@@ -119,7 +119,7 @@ public class WebMvcConfiguration implements WebMvcConfigurer {
      */
     @Bean(name = "multipartResolver")
     public StandardServletMultipartResolver multipartResolver(
-        @Value("${byclaw.sandbox.ingress-multipart-skip-prefixes:/filebrowser,/novnc,/openDesign,/v1/sandboxes}")
+        @Value("${byclaw.sandbox.ingress-multipart-skip-prefixes:/filebrowser,/novnc,/openDesign,/v1/sandboxes,/openclaw-ui}")
         String ingressMultipartSkipPrefixes) {
         List<String> proxyPrefixes = parseSandboxIngressProxyPrefixes(ingressMultipartSkipPrefixes);
         return new StandardServletMultipartResolver() {

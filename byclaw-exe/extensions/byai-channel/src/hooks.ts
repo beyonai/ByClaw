@@ -1,13 +1,10 @@
-import { EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import { createRedis } from "@byclaw/by-framework";
 import { enqueueAfterAgentEvents } from "./agent-event-serial.js";
 import {
-  emitSdkChunkTracked,
   markActiveSdkOutboundSent,
   markActiveSdkOutboundSending,
   resolveActiveSdkRequestBySessionKey,
   resolveActiveSdkRequestByTarget,
-  resolveSdkEmitter,
 } from "./session-context.js";
 import {
   cancelActiveSdkCompletionCheck,
@@ -292,61 +289,6 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     };
   });
 
-  /*
-  api.on("before_message_write", (event: BeforeMessageWriteEvent, ctx: BeforeMessageWriteContext) => {
-    const sessionKey = event?.sessionKey ?? ctx?.sessionKey;
-    if (!sessionKey) {
-      return;
-    }
-    const request = resolveActiveSdkRequestBySessionKey(sessionKey);
-    if (!request) {
-      return;
-    }
-    void enqueueAfterAgentEvents(
-      api,
-      `before_message_write emit sessionKey=${sessionKey}`,
-      async () => {
-        const activeRequest = resolveActiveSdkRequestBySessionKey(sessionKey) ?? request;
-        const sdkEmitter = resolveSdkEmitter(activeRequest.accountId);
-        if (!sdkEmitter) {
-          return;
-        }
-        const payload = buildBeforeMessageWritePayload(event?.message, {
-          sessionKey,
-          agentId: event?.agentId ?? ctx?.agentId,
-        });
-        if (!payload) {
-          return;
-        }
-        await emitSdkChunkTracked({
-          emitter: sdkEmitter,
-          sessionId: activeRequest.sessionId,
-          traceId: activeRequest.traceId,
-          text: `写入消息: ${payload.role}`,
-          options: {
-            messageId: payload.messageId,
-            parentMessageId: "-1",
-            eventType: EventType.REASONING_LOG_DELTA,
-            contentType: SseReasonMessageType.think_title,
-          },
-        });
-        await emitSdkChunkTracked({
-          emitter: sdkEmitter,
-          sessionId: activeRequest.sessionId,
-          traceId: activeRequest.traceId,
-          text: payload.text,
-          options: {
-            messageId: `${payload.messageId}-payload`,
-            parentMessageId: payload.messageId,
-            eventType: EventType.REASONING_LOG_DELTA,
-            contentType: SseReasonMessageType.think_code_result,
-          },
-        });
-      },
-    );
-  });
-  */
-
   api.on("message_sending", (event: MessageSendingEvent, ctx: MessageHookContext) => {
     if (ctx?.channelId !== "byai-channel") {
       return;
@@ -359,7 +301,6 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     const to = event?.to ?? "";
     setImmediate(() => {
       void enqueueAfterAgentEvents(
-        api,
         `message_sending sessionKey=${request.sessionKey}`,
         async () => {
           const activeRequest = markActiveSdkOutboundSending(accountId, to);
@@ -387,7 +328,6 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     const success = event?.success;
     setImmediate(() => {
       void enqueueAfterAgentEvents(
-        api,
         `message_sent sessionKey=${request.sessionKey}`,
         async () => {
           const activeRequest = markActiveSdkOutboundSent(accountId, to);
@@ -405,56 +345,4 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
       });
     });
   });
-}
-
-function buildBeforeMessageWritePayload(
-  message: unknown,
-  ctx: {
-    sessionKey: string;
-    agentId?: string;
-  },
-): { role: string, text: string; messageId: string } | null {
-  const role = typeof (message as { role?: unknown })?.role === "string"
-    ? String((message as { role?: string }).role)
-    : "unknown";
-  const content = extractMessageContent(message);
-  if (!content) {
-    return null;
-  }
-  const summary = JSON.stringify(
-    {
-      role,
-      content,
-    },
-    null,
-    2,
-  );
-  return {
-    role,
-    text: JSON.stringify(summary, null, 2),
-    messageId: `before_message_write:${ctx.sessionKey}:${Date.now()}`,
-  };
-}
-
-function extractMessageContent(message: unknown): string {
-  const rawContent = (message as { content?: unknown })?.content;
-  if (typeof rawContent === "string") {
-    return rawContent.trim();
-  }
-  if (!Array.isArray(rawContent)) {
-    return "";
-  }
-  const texts = rawContent
-    .map((item) => {
-      if (!item || typeof item !== "object") {
-        return "";
-      }
-      const candidate = item as { type?: unknown; text?: unknown };
-      if (candidate.type !== "text" || typeof candidate.text !== "string") {
-        return "";
-      }
-      return candidate.text.trim();
-    })
-    .filter(Boolean);
-  return texts.join("\n").trim();
 }

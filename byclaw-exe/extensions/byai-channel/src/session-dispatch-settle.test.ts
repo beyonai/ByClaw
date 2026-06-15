@@ -103,7 +103,7 @@ describe("waitForSdkSessionDispatchSettled", () => {
     }
   });
 
-  it("does not settle while compaction retry is pending", async () => {
+  it("settles after compaction retry once the terminal lifecycle arrives (2026.6.1 silent retry)", async () => {
     vi.resetModules();
     const sessionContext = await import("./session-context.js");
     const request = sessionContext.registerActiveSdkRequest({
@@ -117,16 +117,13 @@ describe("waitForSdkSessionDispatchSettled", () => {
     });
 
     try {
+      // compaction start/end{willRetry} 挡住完成门；2026.6.1 压缩后在同一 run 内静默续跑，
+      // 不再发新的 lifecycle start，所以完成门只能靠真正的终态 lifecycle end 来释放。
       sessionContext.markActiveSdkCompactionRetryPending(request.sessionKey, true);
-      sessionContext.markActiveSdkRootLifecycleFinished(request.sessionKey, "end");
       expect(sessionContext.shouldCompleteActiveSdkRequest(request)).toBe(false);
 
-      sessionContext.markActiveSdkRootLifecycleStarted(request.sessionKey);
-      expect(request.rootLifecyclePhase).toBeUndefined();
+      sessionContext.markActiveSdkRootLifecycleFinished(request.sessionKey, "end");
       expect(request.compactionRetryPending).toBe(false);
-      expect(sessionContext.shouldCompleteActiveSdkRequest(request)).toBe(false);
-
-      sessionContext.markActiveSdkRootLifecycleFinished(request.sessionKey, "end");
       expect(sessionContext.shouldCompleteActiveSdkRequest(request)).toBe(true);
     } finally {
       sessionContext.clearActiveSdkRequestRecord(request);

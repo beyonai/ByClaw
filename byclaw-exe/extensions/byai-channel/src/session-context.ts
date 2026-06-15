@@ -2,6 +2,7 @@ import path from "node:path";
 import { EmitOptions, EventType, type GatewayDataEmitter } from "@byclaw/by-framework";
 import type { ByaiInboundMessage, Language } from "./types.js";
 import { isSessionDispatchBusy } from "./session-dispatch-gate.js";
+import { clearPendingMessageToolSends } from "./pending-message-tool.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 const DEFAULT_ACCOUNT_KEY = "default";
@@ -60,30 +61,36 @@ export interface SharedChannelRequestContext {
 }
 
 export interface ActiveSdkRequest {
-    accountId: string;
-    sessionKey: string;
-    to: string;
-    sessionId: string;
-    traceId: string;
-    createdAt: number;
-    boundRunIds: Set<string>;
-    pendingChildSessionKeys: Set<string>;
-    pendingOutboundCount: number;
-    awaitingFollowup: boolean;
-    deferredForFollowup: boolean;
-    followupRunStarted: boolean;
-    compactionRetryPending: boolean;
-    modelFallbackPending: boolean;
-    rootLifecyclePhase?: "end" | "error";
-    hasEmittedContent: boolean;
-    lastReasoningText: string;
-    lastReasoningMessageId: string;
-    language: Language;
-    /** Mirrors `ByaiSdkInboundMessage.languageProvided` (LANG env or metadata.language). */
-    languageProvided: boolean;
-    channelExtension?: Record<string, unknown> | string;
-    abortController?: AbortController;
-    beyondToken?: string;
+  accountId: string;
+  sessionKey: string;
+  to: string;
+  sessionId: string;
+  traceId: string;
+  createdAt: number;
+  boundRunIds: Set<string>;
+  pendingChildSessionKeys: Set<string>;
+  pendingOutboundCount: number;
+  awaitingFollowup: boolean;
+  /**
+   * 置 awaitingFollowup=true 的时间戳（epoch ms）。subagent 结束后正常情况下 main 会被
+   * direct-path announce 重新唤醒（新 lifecycle start，数秒内）；但 direct+steer 都失败或
+   * 子 agent error 时 main 不会重启，awaitingFollowup 会永久挂住完成门。用它做短超时兜底。
+   */
+  awaitingFollowupSince?: number;
+  deferredForFollowup: boolean;
+  followupRunStarted: boolean;
+  compactionRetryPending: boolean;
+  modelFallbackPending: boolean;
+  rootLifecyclePhase?: "end" | "error";
+  hasEmittedContent: boolean;
+  lastReasoningText: string;
+  lastReasoningMessageId: string;
+  language: Language;
+  /** Mirrors `ByaiSdkInboundMessage.languageProvided` (LANG env or metadata.language). */
+  languageProvided: boolean;
+  channelExtension?: Record<string, unknown> | string;
+  abortController?: AbortController;
+  beyondToken?: string;
 }
 
 interface ActiveSdkRunBinding {
@@ -193,18 +200,20 @@ function buildActiveSdkTargetKey(accountId: string, to: string): string {
 }
 
 export function clearActiveSdkRequestRecord(request: ActiveSdkRequest): void {
-    activeSdkRequestsByTarget.delete(buildActiveSdkTargetKey(request.accountId, request.to));
-    activeSdkRequestsByTraceId.delete(request.traceId);
-    channelRequestContextsBySessionKey.delete(request.sessionKey);
-    activeSdkRequestsBySession.delete(request.sessionKey);
-    for (const childSessionKey of request.pendingChildSessionKeys) {
-        channelRequestContextsBySessionKey.delete(childSessionKey);
-        activeSdkRequestsByChild.delete(childSessionKey);
-    }
-    for (const runId of request.boundRunIds) {
-        activeSdkRequestsByRun.delete(runId);
-    }
-    request.boundRunIds.clear();
+  activeSdkRequestsByTarget.delete(buildActiveSdkTargetKey(request.accountId, request.to));
+  activeSdkRequestsByTraceId.delete(request.traceId);
+  channelRequestContextsBySessionKey.delete(request.sessionKey);
+  activeSdkRequestsBySession.delete(request.sessionKey);
+  for (const childSessionKey of request.pendingChildSessionKeys) {
+    channelRequestContextsBySessionKey.delete(childSessionKey);
+    activeSdkRequestsByChild.delete(childSessionKey);
+  }
+  for (const runId of request.boundRunIds) {
+    activeSdkRequestsByRun.delete(runId);
+  }
+  request.boundRunIds.clear();
+  sdkEmitterLastChunks.delete(request.sessionKey);
+  clearPendingMessageToolSends(request.sessionKey);
 }
 
 function pruneStaleActiveSdkRequests(now = Date.now()): void {
@@ -234,20 +243,11 @@ export function resolveSdkEmitter(accountId: string): GatewayDataEmitter | undef
     return sdkEmitters.get(normalizeAccountId(accountId));
 }
 
-export function getLastSdkEmitChunkByEmitter(
-    emitter: GatewayDataEmitter | undefined,
-) {
-    if (!emitter) {
-        return undefined;
-    }
-    return sdkEmitterLastChunks.get(emitter);
+export function getLastSdkEmitChunk(runId: string) {
+    return sdkEmitterLastChunks.get(runId);
 }
 
-export function getLastSdkEmitChunk(accountId: string) {
-    return getLastSdkEmitChunkByEmitter(resolveSdkEmitter(accountId));
-}
-
-export async function emitSdkChunkTracked(params: {
+export async function emitSdkChunkTracked(sessionKey: string, params: {
     emitter: GatewayDataEmitter | undefined;
     sessionId: string;
     traceId?: string;
@@ -263,7 +263,8 @@ export async function emitSdkChunkTracked(params: {
         params.text,
         params.options || {},
     );
-    sdkEmitterLastChunks.set(params.emitter, {
+    sdkEmitterLastChunks.set(sessionKey, {
+        traceId: params.traceId || "",
         messageId: params.options?.messageId,
         parentMessageId: params.options?.parentMessageId,
         eventType: params.options?.eventType,
@@ -526,6 +527,11 @@ export function markActiveSdkRootLifecycleFinished(
     request.rootLifecyclePhase = phase;
     request.awaitingFollowup = false;
     request.followupRunStarted = false;
+    // 2026.6.1 的 overflow 压缩在同一 run 内静默续跑，压缩后不再发新的 lifecycle start，
+    // compactionRetryPending 就没有信号来清；而单 run 只压缩一次（overflowRecoveryAttempted
+    // 一次性护栏），压缩之后到来的终态 end/error 必为真终态，此处释放该门安全。不清的话
+    // 完成门会被永久挡住，APP_STREAM_RESPONSE 永不发出、request 泄漏。
+    request.compactionRetryPending = false;
     return request;
 }
 
@@ -605,16 +611,37 @@ export function markActiveSdkOutboundSent(
     return request;
 }
 
+/**
+ * subagent 全部结束后等待 main 续跑（重新 lifecycle start）的最长时间。正常 direct-path
+ * announce 会在数秒内重启 main；超过此窗口仍未 start，视为 main 不会再续跑（direct+steer
+ * 均失败 / 子 agent error 等），强制放行完成门，避免前端流永久不收尾、request 泄漏。
+ */
+const AWAITING_FOLLOWUP_TIMEOUT_MS = 45 * 1000;
+
+/** awaitingFollowup 是否已超过等待窗口（main 续跑迟迟未到）。 */
+function isAwaitingFollowupStale(request: ActiveSdkRequest, now = Date.now()): boolean {
+  if (!request.awaitingFollowup) {
+    return false;
+  }
+  if (request.awaitingFollowupSince === undefined) {
+    return false;
+  }
+  return now - request.awaitingFollowupSince >= AWAITING_FOLLOWUP_TIMEOUT_MS;
+}
+
 export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boolean {
-    return Boolean(
-        request.rootLifecyclePhase &&
-        request.pendingChildSessionKeys.size === 0 &&
-        request.pendingOutboundCount === 0 &&
-        !request.awaitingFollowup &&
-        !request.followupRunStarted &&
-        !request.compactionRetryPending &&
-        !request.modelFallbackPending,
-    );
+  // awaitingFollowup 正常会被 main 续跑的 lifecycle start 清掉；若超时仍未清，视为
+  // 不会再续跑，放行完成门（followupRunStarted 不在此豁免——它表示续跑已真正开始）。
+  const awaitingBlocks = request.awaitingFollowup && !isAwaitingFollowupStale(request);
+  return Boolean(
+    request.rootLifecyclePhase &&
+      request.pendingChildSessionKeys.size === 0 &&
+      request.pendingOutboundCount === 0 &&
+      !awaitingBlocks &&
+      !request.followupRunStarted &&
+      !request.compactionRetryPending &&
+      !request.modelFallbackPending,
+  );
 }
 
 export async function completeActiveSdkRequest(
@@ -647,38 +674,37 @@ export async function completeActiveSdkRequest(
 }
 
 export async function markActiveSdkRequestSubagentSpawned(
-    requesterSessionKey: string,
-    childSessionKey: string,
-    agentId: string,
-    runId: string,
+  requesterSessionKey: string,
+  childSessionKey: string,
+  runId: string,
 ) {
-    if (!requesterSessionKey || !childSessionKey || !agentId) {
-        return undefined;
-    }
-    const request = resolveActiveSdkRequestBySessionKey(requesterSessionKey);
-    if (!request) {
-        return undefined;
-    }
-    request.pendingChildSessionKeys.add(childSessionKey);
-    request.rootLifecyclePhase = undefined;
-    request.awaitingFollowup = false;
-    request.deferredForFollowup = false;
-    request.followupRunStarted = false;
-    request.compactionRetryPending = false;
-    request.modelFallbackPending = false;
-    request.lastReasoningText = "";
-    request.lastReasoningMessageId = "";
-    activeSdkRequestsByChild.set(childSessionKey, request);
-    upsertChannelRequestContextBySessionKey({
-        sessionKey: childSessionKey,
-        traceId: request.traceId,
-        accountId: request.accountId,
-        createdAt: request.createdAt,
-        fields: {
-            ...(channelRequestContextsBySessionKey.get(request.sessionKey)?.fields ?? {}),
-            requesterSessionKey,
-        },
-    });
+  if (!requesterSessionKey || !childSessionKey) {
+    return undefined;
+  }
+  const request = resolveActiveSdkRequestBySessionKey(requesterSessionKey);
+  if (!request) {
+    return undefined;
+  }
+  request.pendingChildSessionKeys.add(childSessionKey);
+  request.rootLifecyclePhase = undefined;
+  request.awaitingFollowup = false;
+  request.deferredForFollowup = false;
+  request.followupRunStarted = false;
+  request.compactionRetryPending = false;
+  request.modelFallbackPending = false;
+  request.lastReasoningText = "";
+  request.lastReasoningMessageId = "";
+  activeSdkRequestsByChild.set(childSessionKey, request);
+  upsertChannelRequestContextBySessionKey({
+    sessionKey: childSessionKey,
+    traceId: request.traceId,
+    accountId: request.accountId,
+    createdAt: request.createdAt,
+    fields: {
+      ...(channelRequestContextsBySessionKey.get(request.sessionKey)?.fields ?? {}),
+      requesterSessionKey,
+    },
+  });
 
     bindActiveSdkRequestRunId(childSessionKey, runId);
     return request;
@@ -687,44 +713,26 @@ export async function markActiveSdkRequestSubagentSpawned(
 export function markActiveSdkRequestSubagentEnded(
     childSessionKey: string | undefined,
 ): ActiveSdkRequest | undefined {
-    if (!childSessionKey) {
-        return undefined;
-    }
-    pruneStaleActiveSdkRequests();
-    const request = activeSdkRequestsByChild.get(childSessionKey);
-    if (!request) {
-        return undefined;
-    }
-    request.pendingChildSessionKeys.delete(childSessionKey);
-    channelRequestContextsBySessionKey.delete(childSessionKey);
-    activeSdkRequestsByChild.delete(childSessionKey);
-    if (request.pendingChildSessionKeys.size === 0) {
-        request.awaitingFollowup = !request.rootLifecyclePhase;
-        request.followupRunStarted = false;
-        request.lastReasoningText = "";
-        request.lastReasoningMessageId = "";
-    }
-    return request;
-}
-
-export function markActiveSdkFollowupRunStarted(
-    sessionKey: string | undefined,
-): ActiveSdkRequest | undefined {
-    if (!sessionKey) {
-        return undefined;
-    }
-    const request = resolveActiveSdkRequestBySessionKey(sessionKey);
-    if (!request || !request.awaitingFollowup) {
-        return undefined;
-    }
-    request.rootLifecyclePhase = undefined;
-    request.awaitingFollowup = false;
-    request.deferredForFollowup = true;
-    request.followupRunStarted = true;
-    request.modelFallbackPending = false;
+  if (!childSessionKey) {
+    return undefined;
+  }
+  pruneStaleActiveSdkRequests();
+  const request = activeSdkRequestsByChild.get(childSessionKey);
+  if (!request) {
+    return undefined;
+  }
+  request.pendingChildSessionKeys.delete(childSessionKey);
+  channelRequestContextsBySessionKey.delete(childSessionKey);
+  activeSdkRequestsByChild.delete(childSessionKey);
+  // 仅当所有子 session 都结束才进入"等 main 续跑"状态：还有兄弟子 agent 在跑时，
+  if (request.pendingChildSessionKeys.size === 0) {
+    request.awaitingFollowup = true;
+    request.awaitingFollowupSince = Date.now();
+    request.followupRunStarted = false;
     request.lastReasoningText = "";
     request.lastReasoningMessageId = "";
-    return request;
+  }
+  return request;
 }
 
 export async function completeActiveSdkFollowupBySessionKey(

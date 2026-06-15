@@ -5,7 +5,6 @@ import {
   WorkerRegistry,
   WorkerRunner,
   GatewayDataEmitter,
-  EventType,
   type AskAgentCommand,
   WorkerHeartbeat,
   ActionType,
@@ -16,10 +15,7 @@ import { getByaiRuntime } from "./runtime.js";
 import { deliverReplyToAgentViaSdk } from "./sdk-message-processor.js";
 import {
   resolveActiveSdkRequestByTraceId,
-  clearActiveSdkRequestByTarget,
-  emitSdkChunkTracked,
   registerSdkEmitter,
-  shouldDeferActiveSdkFinal,
   clearActiveSdkRequestRecord,
   resolveSdkLocalFilePath,
 } from "./session-context.js";
@@ -347,8 +343,6 @@ export class ByaiSdkApp {
         debug?.(`[${this.account.accountId}] failed to write session id file: ${String(err)}`);
       }
 
-      let hasDeltaChunk = false;
-      const sdkTarget = `user:${sessionId}`;
       const abortController = new AbortController();
       try {
         await deliverReplyToAgentViaSdk({
@@ -357,53 +351,11 @@ export class ByaiSdkApp {
           cfg: this.currentConfig(),
           abortController,
           log: this.log,
-          onReply: async (text, type, options) => {
+          onReply: async (text, options) => {
             if (!text) {
               return;
             }
-            if (type === "final") {
-              if (!hasDeltaChunk) {
-                hasDeltaChunk = true;
-                // 做一个防御，如果收到final之前没有任何的onPartialReply，则认为是没有流式输出，则直接发送final
-                await emitSdkChunkTracked({
-                  emitter,
-                  sessionId,
-                  traceId,
-                  text,
-                  options: options || {},
-                });
-              }
-              if (shouldDeferActiveSdkFinal(this.account.accountId, sdkTarget)) {
-                info?.(
-                  `[${this.account.accountId}] byai-channel SDK final deferred: target=${sdkTarget}`,
-                );
-                await emitSdkChunkTracked({
-                  emitter,
-                  sessionId,
-                  traceId,
-                  text: "\n\n",
-                  options: {},
-                });
-                return;
-              }
-              info?.(
-                `[${this.account.accountId}] byai-channel SDK emitState, eventType: ${EventType.APP_STREAM_RESPONSE}`,
-              );
-              await emitter.emitState(sessionId, traceId || "", "", {
-                eventType: EventType.APP_STREAM_RESPONSE,
-              });
-              clearActiveSdkRequestByTarget(this.account.accountId, sdkTarget);
-            } else {
-              hasDeltaChunk = true;
-              info?.(`[${this.account.accountId}] byai-channel SDK emitChunk: ${text}`);
-              await emitSdkChunkTracked({
-                emitter,
-                sessionId,
-                traceId,
-                text,
-                options: options || {},
-              });
-            }
+            await emitter.emitChunk(sessionId, traceId, text, options || {});
           },
         });
 
@@ -414,7 +366,6 @@ export class ByaiSdkApp {
             err,
           )}`,
         );
-        clearActiveSdkRequestByTarget(this.account.accountId, sdkTarget);
         try {
           await emitter.emitState(sessionId, traceId || "", "", {
             eventType: "error",

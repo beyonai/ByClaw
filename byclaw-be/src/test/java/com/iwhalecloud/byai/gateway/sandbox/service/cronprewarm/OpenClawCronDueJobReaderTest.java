@@ -9,6 +9,7 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -92,10 +93,10 @@ class OpenClawCronDueJobReaderTest {
 
     private void assumeSqliteAvailable() {
         try (Connection ignored = DriverManager.getConnection("jdbc:sqlite::memory:")) {
-            // SQLite JDBC depends on a native library; skip these integration-style tests if the host blocks it.
+            // The test exercises SQLite-backed OpenClaw state; continue only when sqlite-jdbc native code is usable.
         }
-        catch (SQLException | UnsatisfiedLinkError | ExceptionInInitializerError e) {
-            assumeTrue(false, "SQLite JDBC native library is unavailable on this host: " + e.getMessage());
+        catch (Throwable e) {
+            Assumptions.assumeTrue(false, "SQLite native library is unavailable in this environment: " + e.getMessage());
         }
     }
 }

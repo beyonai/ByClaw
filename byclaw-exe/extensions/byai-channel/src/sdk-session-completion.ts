@@ -58,7 +58,6 @@ export function scheduleActiveSdkCompletionCheck(
   }
   current.timer = setTimeout(() => {
     void enqueueAfterAgentEvents(
-      api,
       `active sdk completion check sessionKey=${sessionKey}`,
       async () => {
         const latestEntry = state.entries.get(sessionKey);
