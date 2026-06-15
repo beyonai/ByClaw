@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Modal, Descriptions, Spin } from 'antd';
+import { Button, Modal, Spin } from 'antd';
 import { CloseOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import { queryResourceMembers } from '@/pages/manager/service/resources';
@@ -110,17 +110,25 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
     }
   };
 
+  const renderDetailField = (label: React.ReactNode, value: React.ReactNode) => (
+    <div className={styles.detailField}>
+      <div className={styles.detailLabel}>{label}</div>
+      <div className={styles.detailValue}>{value || '-'}</div>
+    </div>
+  );
+
   // 获取属性信息
   const getPropertiesInfo = () => {
     try {
       const targetContent = detailData?.extInfo?.targetContent ? JSON.parse(detailData.extInfo.targetContent) : null;
-      return targetContent?.fields ? (
-        <Descriptions.Item label={`${resourceName}${intl.formatMessage({ id: 'resource.property' })}`} span={2}>
+      return targetContent?.fields
+        ? renderDetailField(
+          `${resourceName}${intl.formatMessage({ id: 'resource.property' })}`,
           <div className={styles.targetContent}>
             {targetContent.fields.map((field: any) => field.propertyName).join('、')}
           </div>
-        </Descriptions.Item>
-      ) : null;
+        )
+        : null;
     } catch (error) {
       return null;
     }
@@ -136,8 +144,9 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
   const getRelatedObjects = () => {
     try {
       const targetContent = detailData?.extInfo?.targetContent ? JSON.parse(detailData.extInfo.targetContent) : null;
-      return targetContent?.objects && targetContent.objects.length > 0 ? (
-        <Descriptions.Item label={intl.formatMessage({ id: 'resource.relatedObjects' })} span={2}>
+      return targetContent?.objects && targetContent.objects.length > 0
+        ? renderDetailField(
+          intl.formatMessage({ id: 'resource.relatedObjects' }),
           <div className={styles.targetContent}>
             <div className={styles.objectCardGrid}>
               {targetContent.objects.map((object: any, index: number) => (
@@ -155,8 +164,8 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
               ))}
             </div>
           </div>
-        </Descriptions.Item>
-      ) : null;
+        )
+        : null;
     } catch (error) {
       return null;
     }
@@ -170,43 +179,40 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
           <Spin />
         </div>
       ) : (
-        <>
-          <Descriptions bordered column={1} className={styles.descriptions}>
-            <Descriptions.Item label={`${resourceName}${intl.formatMessage({ id: 'common.title' })}`}>
-              {item?.resourceName}
-            </Descriptions.Item>
-            <Descriptions.Item label={`${resourceName}${intl.formatMessage({ id: 'common.code' })}`}>
-              {item?.resourceCode}
-            </Descriptions.Item>
-            <Descriptions.Item label={`${resourceName}${intl.formatMessage({ id: 'common.description' })}`} span={2}>
-              <div className={styles.descriptionContent}>{item?.resourceDesc || item?.description}</div>
-            </Descriptions.Item>
+        <div className={styles.detailFields}>
+          {renderDetailField(`${resourceName}${intl.formatMessage({ id: 'common.title' })}`, item?.resourceName)}
+          {renderDetailField(`${resourceName}${intl.formatMessage({ id: 'common.code' })}`, item?.resourceCode)}
+          {renderDetailField(
+            `${resourceName}${intl.formatMessage({ id: 'common.description' })}`,
+            <div className={styles.descriptionContent}>{item?.resourceDesc || item?.description || '-'}</div>
+          )}
 
-            {getRelatedObjects()}
+          {getRelatedObjects()}
 
-            {selectedObject && (
-              <Descriptions.Item label={intl.formatMessage({ id: 'resource.relatedObjectProperties' })} span={2}>
-                {objectLoading ? (
-                  <div className={styles.loadingContainer}>
-                    <Spin size="small" />
-                  </div>
-                ) : (
-                  <div className={styles.targetContent}>{getObjectProperties()}</div>
-                )}
-              </Descriptions.Item>
+          {selectedObject &&
+            renderDetailField(
+              intl.formatMessage({ id: 'resource.relatedObjectProperties' }),
+              objectLoading ? (
+                <div className={styles.loadingContainer}>
+                  <Spin size="small" />
+                </div>
+              ) : (
+                <div className={styles.targetContent}>{getObjectProperties()}</div>
+              )
             )}
 
-            {getPropertiesInfo()}
+          {getPropertiesInfo()}
 
-            <Descriptions.Item label={intl.formatMessage({ id: 'common.userPerson' })} span={2}>
-              <div className={styles.memberList}>{renderMemberNames(detailData?.useList)}</div>
-            </Descriptions.Item>
+          {renderDetailField(
+            intl.formatMessage({ id: 'common.userPerson' }),
+            <div className={styles.memberList}>{renderMemberNames(detailData?.useList)}</div>
+          )}
 
-            <Descriptions.Item label={intl.formatMessage({ id: 'common.manager' })} span={2}>
-              <div className={styles.memberList}>{renderMemberNames(detailData?.managerList)}</div>
-            </Descriptions.Item>
-          </Descriptions>
-        </>
+          {renderDetailField(
+            intl.formatMessage({ id: 'common.manager' }),
+            <div className={styles.memberList}>{renderMemberNames(detailData?.managerList)}</div>
+          )}
+        </div>
       )}
     </>
   );

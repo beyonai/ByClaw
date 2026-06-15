@@ -1,6 +1,6 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { Breadcrumb, Dropdown, Empty, Input, List, Tooltip, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import { Breadcrumb, Dropdown, Empty, Input, List, Typography } from 'antd';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import { trim } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
@@ -96,6 +96,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   }));
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
   const listFetchRef = useRef(false);
+  const itemClickTimerRef = useRef<number | null>(null);
   const keywordRef = useRef('');
   const paginationRef = useRef({
     pageNum: 0,
@@ -116,6 +117,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     originalList: ResourceItem[];
   }
   const [breadcrumb, setBreadcrumb] = useState<BreadcrumbItem[]>([]);
+  const [currentLevelOriginalList, setCurrentLevelOriginalList] = useState<ResourceItem[]>([]); // 当前层级的原始列表，用于前端搜索
   const config = resourceConfigMap[resourceType];
 
   /**
@@ -200,7 +202,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
               resourceId: obj.resourceId,
               resourceName: obj.resourceName,
               resourceCode: obj.resourceCode,
-              resourceDesc: obj.resourceCode,
+              resourceDesc: obj.resourceDesc,
             });
           });
         }
@@ -211,12 +213,13 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
             drillItems.push({
               resourceId: `${item.resourceId}-${field.propertyName}`,
               resourceName: field.propertyName,
-              resourceDesc: field.propertyType,
+              resourceDesc: field.propertyCode,
             });
           });
         }
 
         setBreadcrumb((prev) => [...prev, newBreadcrumbItem]);
+        setCurrentLevelOriginalList(drillItems); // 保存当前层级的原始列表用于搜索
         setResourceList(drillItems);
         setHasMore(false);
       }
@@ -317,6 +320,15 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     }
   };
 
+  const handleBreadcrumbClick = (index: number) => {
+    const newBreadcrumb = breadcrumb.slice(0, index + 1);
+    const targetLevelOriginalList = breadcrumb[index + 1]?.originalList ?? [];
+    setBreadcrumb(newBreadcrumb);
+    setResourceList(targetLevelOriginalList);
+    setCurrentLevelOriginalList(targetLevelOriginalList);
+    setHasMore(false);
+  };
+
   useEffect(() => {
     keywordRef.current = '';
     paginationRef.current = {
@@ -363,12 +375,30 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   const handleSearch = () => {
     const nextKeyword = trim(searchValue);
     keywordRef.current = nextKeyword;
-    paginationRef.current = {
-      pageNum: 0,
-      total: 0,
-      loadedCount: 0,
-    };
-    loadResources({ reset: true, queryKeyword: nextKeyword });
+
+    if (isInDrillDown()) {
+      // 下钻状态：前端模糊搜索
+      if (!nextKeyword) {
+        // 搜索框为空，显示原始列表
+        setResourceList(currentLevelOriginalList);
+      } else {
+        // 根据关键字过滤，只匹配 resourceName 和 resourceDesc
+        const filtered = currentLevelOriginalList.filter((item) => {
+          const nameMatch = item.resourceName?.toLowerCase().includes(nextKeyword.toLowerCase());
+          const descMatch = item.resourceDesc?.toLowerCase().includes(nextKeyword.toLowerCase());
+          return nameMatch || descMatch;
+        });
+        setResourceList(filtered);
+      }
+    } else {
+      // 非下钻状态：后端搜索
+      paginationRef.current = {
+        pageNum: 0,
+        total: 0,
+        loadedCount: 0,
+      };
+      loadResources({ reset: true, queryKeyword: nextKeyword });
+    }
   };
 
   const getResourceIcon = () => {
@@ -430,7 +460,45 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         resourceName={getResourceName()}
         onCancel={closeDetailPanel}
         onEdit={() => {}}
-      />
+      />,
+      { width: 350 }
+    );
+  };
+
+  /**
+   * 渲染资源详情下拉菜单
+   */
+  const renderDetailDropdown = (item: ResourceItem) => {
+    return (
+      <Dropdown
+        key="detail"
+        trigger={['hover']}
+        overlayClassName={employeeStyles.mydropdown}
+        menu={{
+          items: [
+            {
+              key: 'detail',
+              label: (
+                <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.detail' })}</div>
+              ),
+            },
+          ],
+          onClick: ({ domEvent }) => {
+            domEvent.preventDefault();
+            domEvent.stopPropagation();
+            handleDetail(item);
+          },
+        }}
+      >
+        <span
+          onClick={(event) => {
+            event.stopPropagation();
+            event.preventDefault();
+          }}
+        >
+          <AntdIcon type="icon-a-Moregengduo" />
+        </span>
+      </Dropdown>
     );
   };
 
@@ -447,64 +515,80 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     });
   };
 
+  const clearItemClickTimer = useCallback(() => {
+    if (itemClickTimerRef.current !== null) {
+      window.clearTimeout(itemClickTimerRef.current);
+      itemClickTimerRef.current = null;
+    }
+  }, []);
+
+  const handleResourceItemClick = useCallback(
+    (item: ResourceItem, drillable: boolean) => {
+      clearItemClickTimer();
+      itemClickTimerRef.current = window.setTimeout(() => {
+        itemClickTimerRef.current = null;
+        if (drillable) {
+          void handleDrillDown(item);
+        }
+      }, 220);
+    },
+    [clearItemClickTimer, handleDrillDown]
+  );
+
+  const handleResourceItemDoubleClick = useCallback(
+    (item: ResourceItem) => {
+      clearItemClickTimer();
+      handleQuoteResource(item);
+    },
+    [clearItemClickTimer, handleQuoteResource]
+  );
+
+  useEffect(() => {
+    return clearItemClickTimer;
+  }, [clearItemClickTimer]);
+
+  const navigatePath = isResourceCenterPage ? { pathname: '/chat' } : config.navigatePath;
+  const navigateState = isResourceCenterPage ? { state: { keepSiderActiveKey: config.siderKey } } : undefined;
+
   return (
     <div className={styles.container}>
       <ActiveSiderAgentBar agent={activeSiderAgent} />
-      <div
-        className={styles.router}
-        onClick={() =>
-          navigate(
-            isResourceCenterPage
-              ? {
-                pathname: '/chat',
-              }
-              : config.navigatePath,
-            isResourceCenterPage ? { state: { keepSiderActiveKey: config.siderKey } } : undefined
-          )
-        }
-      >
+      <div className={styles.router} onClick={() => navigate(navigatePath, navigateState)}>
         <AntdIcon type={config.icon} />
         <span className={styles.middle}>{intl.formatMessage({ id: config.centerLabelId })}</span>
-        <AntdIcon
-          type={isResourceCenterPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
-          style={{ fontSize: 16, marginLeft: 'auto' }}
-        />
+        <AntdIcon type={isResourceCenterPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'} className={styles.routerIcon} />
       </div>
       {isInDrillDown() && (
         <Breadcrumb className={styles.breadcrumb}>
           <Breadcrumb.Item key="-1">
             <span onClick={handleReset}>
-              <AntdIcon type="icon-a-Leftzuo" />
+              <AntdIcon type="icon-a-Leftzuo" className={styles.breadcrumbBackIcon} />
               {intl.formatMessage({ id: 'dialogueRecord.all' })}
             </span>
           </Breadcrumb.Item>
-          {breadcrumb.map((crumb, index) => (
-            <Breadcrumb.Item key={crumb.resourceId}>
-              <span
-                onClick={() => {
-                  // 返回指定层级：点击第N项，回到第N项的列表
-                  const newBreadcrumb = breadcrumb.slice(0, index + 1);
-                  const targetItem = breadcrumb[index];
-                  setBreadcrumb(newBreadcrumb);
-                  setResourceList(targetItem.originalList);
-                  setHasMore(index === 0); // 只有根层级可以加载更多
-                }}
-              >
-                {crumb.resourceName}
-              </span>
-            </Breadcrumb.Item>
-          ))}
+          {breadcrumb.map((crumb, index) => {
+            const isLast = index === breadcrumb.length - 1;
+            return (
+              <Breadcrumb.Item key={crumb.resourceId}>
+                {isLast ? (
+                  <span className={styles.breadcrumbUnclickable}>{crumb.resourceName}</span>
+                ) : (
+                  <span className={styles.breadcrumbClickable} onClick={() => handleBreadcrumbClick(index)}>
+                    {crumb.resourceName}
+                  </span>
+                )}
+              </Breadcrumb.Item>
+            );
+          })}
         </Breadcrumb>
       )}
-      {!isInDrillDown() && (
-        <Input
-          value={searchValue}
-          suffix={<SearchOutlined onClick={handleSearch} />}
-          placeholder={placeholder}
-          onChange={(event) => setSearchValue(event.target.value)}
-          onPressEnter={handleSearch}
-        />
-      )}
+      <Input
+        value={searchValue}
+        suffix={<SearchOutlined onClick={handleSearch} />}
+        placeholder={placeholder}
+        onChange={(event) => setSearchValue(event.target.value)}
+        onPressEnter={handleSearch}
+      />
       <div className={styles.listContainer}>
         <InfiniteScrollAntdList
           className={employeeStyles.employeesList}
@@ -520,45 +604,9 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
               <List.Item
                 key={item.resourceId}
                 className={styles.resourceItem}
-                onClick={() => drillable && handleDrillDown(item)}
-                onDoubleClick={() => handleQuoteResource(item)}
-                actions={
-                  !isInDrillDown()
-                    ? [
-                      <Dropdown
-                        key="detail"
-                        trigger={['hover']}
-                        overlayClassName={employeeStyles.mydropdown}
-                        menu={{
-                          items: [
-                            {
-                              key: 'detail',
-                              label: (
-                                <div className={employeeStyles.dropdownMenuItem}>
-                                  {intl.formatMessage({ id: 'common.detail' })}
-                                </div>
-                              ),
-                            },
-                          ],
-                          onClick: ({ domEvent }) => {
-                            domEvent.preventDefault();
-                            domEvent.stopPropagation();
-                            handleDetail(item);
-                          },
-                        }}
-                      >
-                        <span
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            event.preventDefault();
-                          }}
-                        >
-                          <AntdIcon type="icon-a-Moregengduo" />
-                        </span>
-                      </Dropdown>,
-                    ]
-                    : undefined
-                }
+                onClick={() => handleResourceItemClick(item, drillable)}
+                onDoubleClick={() => handleResourceItemDoubleClick(item)}
+                actions={!isInDrillDown() ? [renderDetailDropdown(item)] : undefined}
               >
                 <List.Item.Meta
                   avatar={
@@ -575,9 +623,11 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
                   }
                   title={
                     <Title className={employeeStyles.name}>
-                      <span className={employeeStyles.nameRow} title={item.resourceName}>
-                        <span className={employeeStyles.nameText}>{item.resourceName}</span>
-                      </span>
+                      <Tooltip title={item.resourceName}>
+                        <span className={employeeStyles.nameRow}>
+                          <span className={employeeStyles.nameText}>{item.resourceName}</span>
+                        </span>
+                      </Tooltip>
                     </Title>
                   }
                   description={

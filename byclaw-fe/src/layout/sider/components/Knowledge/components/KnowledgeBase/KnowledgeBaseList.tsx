@@ -39,6 +39,7 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
   const { onDrilldown, keyword, activeAgentResourceId } = props;
   const searchValue = useRef('');
   const listFetchRef = useRef(false);
+  const itemClickTimerRef = useRef<number | null>(null);
   // const [filterType, setFilterType] = useState<FilterType>(FilterType.all);
   const [loading, setLoading] = useState(false);
   const [knowledgeBases, setKnowledgeBases] = useState<IKnowledgeBaseItem[]>([]);
@@ -180,6 +181,38 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
     [EventEmitter]
   );
 
+  const clearItemClickTimer = useCallback(() => {
+    if (itemClickTimerRef.current !== null) {
+      window.clearTimeout(itemClickTimerRef.current);
+      itemClickTimerRef.current = null;
+    }
+  }, []);
+
+  const handleKnowledgeBaseItemClick = useCallback(
+    (event: React.MouseEvent<HTMLElement>, item: IKnowledgeBaseItem) => {
+      event.stopPropagation();
+      clearItemClickTimer();
+      itemClickTimerRef.current = window.setTimeout(() => {
+        itemClickTimerRef.current = null;
+        onDrilldown(item);
+      }, 220);
+    },
+    [clearItemClickTimer, onDrilldown]
+  );
+
+  const handleKnowledgeBaseItemDoubleClick = useCallback(
+    (event: React.MouseEvent<HTMLElement>, item: IKnowledgeBaseItem) => {
+      event.stopPropagation();
+      clearItemClickTimer();
+      handleQuoteKnowledgeBase(item);
+    },
+    [clearItemClickTimer, handleQuoteKnowledgeBase]
+  );
+
+  useEffect(() => {
+    return clearItemClickTimer;
+  }, [clearItemClickTimer]);
+
   const handleDetail = useCallback(
     (item: IKnowledgeBaseItem) => {
       setDetailPanel?.(
@@ -192,7 +225,8 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
           resourceName={intl.formatMessage({ id: 'resource.knowledge' })}
           onCancel={() => clearDetailPanel?.()}
           onEdit={() => {}}
-        />
+        />,
+        { width: 350 }
       );
     },
     [clearDetailPanel, intl, setDetailPanel]
@@ -292,11 +326,8 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
                 key={item.resourceId}
                 className={styles.knowledgeItem}
                 actions={actions}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDrilldown(item);
-                }}
-                onDoubleClick={() => handleQuoteKnowledgeBase(item)}
+                onClick={(event) => handleKnowledgeBaseItemClick(event, item)}
+                onDoubleClick={(event) => handleKnowledgeBaseItemDoubleClick(event, item)}
               >
                 <List.Item.Meta
                   title={

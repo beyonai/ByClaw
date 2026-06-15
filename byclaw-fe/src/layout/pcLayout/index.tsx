@@ -11,7 +11,11 @@ import Auth from '../auth';
 import AntdProvider from '../components/provider/antd';
 import Header from '../header';
 import Sider from '../sider';
-import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from '../sider/siderContentContext';
+import {
+  SiderContentContext,
+  DEFAULT_SIDER_CONTENT_WIDTH,
+  type DetailPanelOptions,
+} from '../sider/siderContentContext';
 import { tabItems } from '../sider/components/SiderContent';
 
 import PasswordModal from '@/pages/settings/components/PasswordModal';
@@ -75,8 +79,15 @@ const PCLayout = () => {
   // 检查当前路由是否需要隐藏侧边栏
   const [siderContentWidth, setSiderContentWidth] = React.useState(DEFAULT_SIDER_CONTENT_WIDTH);
   const [detailPanel, setDetailPanel] = React.useState<React.ReactNode>(null);
-  const openDetailPanel = React.useCallback((panel: React.ReactNode) => setDetailPanel(panel), []);
-  const clearDetailPanel = React.useCallback(() => setDetailPanel(null), []);
+  const [detailPanelWidth, setDetailPanelWidth] = React.useState<React.CSSProperties['width']>();
+  const openDetailPanel = React.useCallback((panel: React.ReactNode, options?: DetailPanelOptions) => {
+    setDetailPanel(panel);
+    setDetailPanelWidth(options?.width);
+  }, []);
+  const clearDetailPanel = React.useCallback(() => {
+    setDetailPanel(null);
+    setDetailPanelWidth(undefined);
+  }, []);
 
   React.useEffect(() => {
     clearDetailPanel();
@@ -103,6 +114,12 @@ const PCLayout = () => {
   const [modPswModalVisible, setModPswModalVisible] = useState(false);
   const [pcLayoutContentId] = useState('pcLayoutId');
   const [containChatLayout, setContainChatLayout] = useState(false);
+  const detailPanelBasis =
+    detailPanelWidth === undefined
+      ? undefined
+      : typeof detailPanelWidth === 'number'
+        ? `${detailPanelWidth}px`
+        : detailPanelWidth;
 
   const { userInfo } = useSelector(({ user }) => ({ userInfo: user.userInfo }));
   const { agentList, employeesList } = useSelector(({ employees }) => ({
@@ -281,7 +298,21 @@ const PCLayout = () => {
                     >
                       <Outlet />
                     </Content>
-                    {detailPanel && <aside className={styles.detailPanel}>{detailPanel}</aside>}
+                    {detailPanel && (
+                      <aside
+                        className={styles.detailPanel}
+                        style={
+                          detailPanelBasis
+                            ? {
+                              flex: `0 0 ${detailPanelBasis}`,
+                              width: detailPanelBasis,
+                            }
+                            : undefined
+                        }
+                      >
+                        {detailPanel}
+                      </aside>
+                    )}
                   </SiderContentContext.Provider>
                   <MainDrawer />
                 </Layout>

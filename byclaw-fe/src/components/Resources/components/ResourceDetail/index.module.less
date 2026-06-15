@@ -36,12 +36,31 @@
   padding: 40px 0;
 }
 
-.descriptions {
-  :global {
-    .beyond-descriptions-item-label {
-      width: 140px;
-    }
-  }
+.detailFields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detailField {
+  padding: 12px;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.detailLabel {
+  margin-bottom: 8px;
+  color: #707680;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.detailValue {
+  color: #1f2533;
+  font-size: 14px;
+  line-height: 22px;
+  word-break: break-word;
 }
 
 .descriptionContent {
@@ -75,8 +94,8 @@
 }
 
 .objectCardGrid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -85,7 +104,7 @@
   border: 1px solid #e8e8e8;
   border-radius: 4px;
   padding: 12px;
-  min-width: 200px;
+  min-width: 0;
   cursor: pointer;
   transition: all 0.3s ease;
 
@@ -101,11 +120,17 @@
   margin-bottom: 8px;
   color: #333;
   font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .objectCardCode {
   font-size: 12px;
   color: #666;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .selectedObjectCard {
