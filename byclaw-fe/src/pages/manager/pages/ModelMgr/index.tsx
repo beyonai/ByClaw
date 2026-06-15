@@ -326,6 +326,7 @@ const ModelMgr: React.FC = () => {
         type: 'modelMgr/setDefaultModel',
         payload: {
           modelId: record.id,
+          modelType: record.modelType || 'LLM',
           tagId: '1',
         },
         success: () => {

@@ -463,6 +463,7 @@ export function createAgentWatchdog(params: {
         const defaultModelFromRedis = await resolveDefaultBaiyingAimodelProviderBundle({
             redisJsonStore: params.redisJsonStore,
             redisKey: aimodelTypeListRedisKey,
+            modelType: DEFAULT_AIMODEL_TYPELIST_FIELD,
             secretProviderName: resolveAimodelSecretProviderName(
                 params.pluginConfig.aimodelSecretProviderName,
             ),

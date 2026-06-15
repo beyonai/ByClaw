@@ -30,7 +30,9 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.iwhalecloud.byai.manager.entity.tag.ByaiTagRelation;
@@ -50,6 +52,12 @@ import org.springframework.transaction.annotation.Transactional;
 public class ModelManagementApplicationService {
 
     private static final String DEFAULT_CHAT_MODEL_TAG_ID = "1";
+
+    private static final Long DEFAULT_MODEL_TAG_ID = 1L;
+
+    private static final String DEFAULT_MODEL_TYPE_LLM = "LLM";
+
+    private static final Set<String> REQUIRED_DEFAULT_MODEL_TYPES = Set.of(DEFAULT_MODEL_TYPE_LLM, "EMBEDDING");
 
     private static final int MASK_PREFIX_LEN = 3;
 
@@ -143,6 +151,7 @@ public class ModelManagementApplicationService {
         if (request.getAbilities() != null && !request.getAbilities().isEmpty()) {
             byaiTagRelationService.saveAimodelAbilities(modelId, request.getAbilities(), currentUserId);
         }
+        ensureDefaultModelForTypeIfMissing(modelId);
 
         Map<String, String> data = new HashMap<>(1);
         data.put("id", String.valueOf(modelId));
@@ -159,6 +168,7 @@ public class ModelManagementApplicationService {
         if (entity == null) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40004, "aimodel.not.found");
         }
+        validateModelNotCurrentRequiredDefault(entity, "aimodel.default_model.delete.forbidden");
         validateModelNotUsedByActiveDigitalEmployee(modelId, "aimodel.delete.digital.employee.in.use");
         byaiAimodelDomainService.deleteById(modelId);
         return Boolean.TRUE;
@@ -178,9 +188,13 @@ public class ModelManagementApplicationService {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.status.invalid");
         }
         if (ModelStatusEnum.DISABLED.name().equals(status)) {
+            validateModelNotCurrentRequiredDefault(entity, "aimodel.default_model.disable.forbidden");
             validateModelNotUsedByActiveDigitalEmployee(modelId, "aimodel.disable.digital.employee.in.use");
         }
         byaiAimodelDomainService.setStatus(modelId, status);
+        if (ModelStatusEnum.ENABLED.name().equals(status)) {
+            ensureDefaultModelForTypeIfMissing(modelId);
+        }
         return Boolean.TRUE;
     }
 
@@ -617,9 +631,15 @@ public class ModelManagementApplicationService {
     }
 
     public String getDefaultModelId() {
+        return getDefaultModelId(DEFAULT_MODEL_TYPE_LLM);
+    }
+
+    public String getDefaultModelId(String modelType) {
+        String normalizedModelType = normalizeModelType(modelType, DEFAULT_MODEL_TYPE_LLM);
         ModelRequest request = new ModelRequest();
         request.setStatus(Constants.STATUS_ENABLED);
-        request.setTagId(1L);
+        request.setTagId(DEFAULT_MODEL_TAG_ID);
+        request.setModelType(normalizedModelType);
         List<ByaiAimodel> byaiAimodels = listModel(request);
         if (CollectionUtils.isEmpty(byaiAimodels)) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.chat_model.not.configured");
@@ -637,28 +657,122 @@ public class ModelManagementApplicationService {
      *
      * @param modelDefault 默认模型
      */
+    @Transactional(rollbackFor = Exception.class)
     public void setDefaultModel(ModelDefault modelDefault) {
+        if (modelDefault == null || modelDefault.getModelId() == null) {
+            throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.modelId.required");
+        }
         Long modelId = modelDefault.getModelId();
-        Long tagId = modelDefault.getTagId();
-
-        List<ByaiTagRelation> aiModels = byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL, tagId);
-
-        Map<Long, ByaiTagRelation> byaiTagRelationMap = new HashMap<>(aiModels.size());
-        for (ByaiTagRelation byaiTagRelation : aiModels) {
-            byaiTagRelationMap.put(byaiTagRelation.getObjId(), byaiTagRelation);
+        ByaiAimodel target = byaiAimodelDomainService.getById(modelId);
+        if (target == null) {
+            throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40004, "aimodel.not.found");
         }
-
-        // 如果不存在,则新增
-        ByaiTagRelation byaiTagRelation = byaiTagRelationMap.remove(modelId);
-        if (byaiTagRelation == null) {
-            byaiTagRelationService.save(Constants.OBJ_TYPE_AIMODEL, modelId, tagId);
+        String targetModelType = normalizeModelType(target.getModelType(), DEFAULT_MODEL_TYPE_LLM);
+        String modelType = normalizeModelType(modelDefault.getModelType(), targetModelType);
+        if (!modelType.equals(targetModelType)) {
+            throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.default_model.type.invalid");
         }
-
-        // 删除其他模型的默认对话标签
-        for (ByaiTagRelation tempTagRelation : byaiTagRelationMap.values()) {
-            Long relationId = tempTagRelation.getRelationId();
-            byaiTagRelationService.removeById(relationId);
+        validateDefaultModelType(modelType);
+        if (!ModelStatusEnum.isEnabledDb(target.getStatus())) {
+            throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.default_model.enabled.required");
         }
+        assignDefaultModelForType(target, modelType);
+    }
 
+    private void ensureDefaultModelForTypeIfMissing(Long modelId) {
+        ByaiAimodel entity = byaiAimodelDomainService.getById(modelId);
+        if (entity == null || !ModelStatusEnum.isEnabledDb(entity.getStatus())) {
+            return;
+        }
+        String modelType = normalizeModelType(entity.getModelType(), DEFAULT_MODEL_TYPE_LLM);
+        if (!REQUIRED_DEFAULT_MODEL_TYPES.contains(modelType) || hasEnabledDefaultModelForType(modelType)) {
+            return;
+        }
+        assignDefaultModelForType(entity, modelType);
+    }
+
+    private void assignDefaultModelForType(ByaiAimodel target, String modelType) {
+        List<ByaiTagRelation> defaultRelations = byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL,
+            DEFAULT_MODEL_TAG_ID);
+        ByaiTagRelation keptTargetRelation = null;
+        List<Long> affectedModelIds = new ArrayList<>();
+        for (ByaiTagRelation relation : defaultRelations) {
+            Long relationModelId = relation.getObjId();
+            ByaiAimodel relationModel = byaiAimodelDomainService.getById(relationModelId);
+            boolean staleRelation = relationModel == null;
+            boolean sameTypeRelation = relationModel != null
+                && modelType.equals(normalizeModelType(relationModel.getModelType(), DEFAULT_MODEL_TYPE_LLM));
+            if (!staleRelation && !sameTypeRelation) {
+                continue;
+            }
+            if (target.getModelId().equals(relationModelId) && keptTargetRelation == null) {
+                keptTargetRelation = relation;
+                continue;
+            }
+            byaiTagRelationService.removeById(relation.getRelationId());
+            if (relationModelId != null) {
+                affectedModelIds.add(relationModelId);
+            }
+        }
+        if (keptTargetRelation == null) {
+            byaiTagRelationService.save(Constants.OBJ_TYPE_AIMODEL, target.getModelId(), DEFAULT_MODEL_TAG_ID);
+        }
+        affectedModelIds.add(target.getModelId());
+        affectedModelIds.stream().distinct().forEach(this::refreshModelRedisCache);
+    }
+
+    private void refreshModelRedisCache(Long modelId) {
+        ByaiAimodel entity = byaiAimodelDomainService.getById(modelId);
+        if (entity == null) {
+            byaiAimodelDomainService.removeFromRedis(modelId);
+            return;
+        }
+        if (ModelStatusEnum.isEnabledDb(entity.getStatus())) {
+            byaiAimodelDomainService.syncToRedis(entity);
+        }
+        else {
+            byaiAimodelDomainService.removeFromRedis(modelId);
+        }
+    }
+
+    private void validateModelNotCurrentRequiredDefault(ByaiAimodel entity, String messageKey) {
+        String modelType = normalizeModelType(entity.getModelType(), DEFAULT_MODEL_TYPE_LLM);
+        if (!REQUIRED_DEFAULT_MODEL_TYPES.contains(modelType) || !isDefaultModel(entity.getModelId())) {
+            return;
+        }
+        throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, I18nUtil.get(messageKey, modelType));
+    }
+
+    private boolean hasEnabledDefaultModelForType(String modelType) {
+        return byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL, DEFAULT_MODEL_TAG_ID)
+            .stream()
+            .map(ByaiTagRelation::getObjId)
+            .distinct()
+            .map(byaiAimodelDomainService::getById)
+            .anyMatch(model -> model != null
+                && modelType.equals(normalizeModelType(model.getModelType(), DEFAULT_MODEL_TYPE_LLM))
+                && ModelStatusEnum.isEnabledDb(model.getStatus()));
+    }
+
+    private boolean isDefaultModel(Long modelId) {
+        if (modelId == null) {
+            return false;
+        }
+        return byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL, DEFAULT_MODEL_TAG_ID)
+            .stream()
+            .anyMatch(relation -> modelId.equals(relation.getObjId()));
+    }
+
+    private void validateDefaultModelType(String modelType) {
+        if (!REQUIRED_DEFAULT_MODEL_TYPES.contains(modelType)) {
+            throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.default_model.type.invalid");
+        }
+    }
+
+    private String normalizeModelType(String modelType, String fallback) {
+        if (StringUtil.isEmpty(modelType)) {
+            return fallback;
+        }
+        return modelType.trim().toUpperCase(Locale.ROOT);
     }
 }

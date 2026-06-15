@@ -172,6 +172,10 @@ export function resolveAimodelTypeListRedisKey(value: unknown): string {
     return nonEmptyString(value) || DEFAULT_AIMODEL_TYPELIST_REDIS_KEY;
 }
 
+export function resolveAimodelTypeListField(value: unknown): string {
+    return nonEmptyString(value).toUpperCase() || DEFAULT_AIMODEL_TYPELIST_FIELD;
+}
+
 export function resolveAimodelSecretProviderName(value: unknown): string {
     const candidate = nonEmptyString(value);
     return /^[a-z][a-z0-9_-]{0,63}$/.test(candidate)
@@ -473,6 +477,7 @@ export async function resolveBaiyingAimodelProviderBundle(params: {
 export async function resolveDefaultBaiyingAimodelProviderBundle(params: {
     redisJsonStore: BaiyingRedisJsonStore;
     redisKey?: string;
+    modelType?: string;
     secretProviderName: string;
     log: LoggerLike;
 }): Promise<{
@@ -482,30 +487,35 @@ export async function resolveDefaultBaiyingAimodelProviderBundle(params: {
     hash: string;
 } | null> {
     const redisKey = resolveAimodelTypeListRedisKey(params.redisKey);
+    const typelistField = resolveAimodelTypeListField(params.modelType);
     const payload = await params.redisJsonStore.getHashJson?.({
         key: redisKey,
-        field: DEFAULT_AIMODEL_TYPELIST_FIELD,
+        field: typelistField,
     });
     if (!payload) {
         params.log.warn(
-            `baiying-enhance: Redis AI model typelist missing/unreadable key=${redisKey} field=${DEFAULT_AIMODEL_TYPELIST_FIELD}`,
+            `baiying-enhance: Redis AI model typelist missing/unreadable key=${redisKey} field=${typelistField}`,
         );
         return null;
     }
     if (!Array.isArray(payload.raw)) {
         params.log.warn(
-            `baiying-enhance: Redis AI model typelist invalid key=${redisKey} field=${DEFAULT_AIMODEL_TYPELIST_FIELD}`,
+            `baiying-enhance: Redis AI model typelist invalid key=${redisKey} field=${typelistField}`,
         );
         return null;
     }
     const records = payload.raw.filter(
         (item): item is AiModelConfigRecord => item && typeof item === "object",
     );
-    const isUsableLlm = (record: AiModelConfigRecord): boolean => {
-        const modelType = nonEmptyString(record.modelType);
-        return normalizeStatus(record.status) === 1 && (!modelType || modelType === "LLM");
+    const isUsableModelType = (record: AiModelConfigRecord): boolean => {
+        const recordModelType = resolveAimodelTypeListField(record.modelType);
+        return (
+            normalizeStatus(record.status) === 1 &&
+            (recordModelType === typelistField ||
+                (!nonEmptyString(record.modelType) && typelistField === DEFAULT_AIMODEL_TYPELIST_FIELD))
+        );
     };
-    const usable = records.filter(isUsableLlm);
+    const usable = records.filter(isUsableModelType);
     // Prefer the explicit Redis default marker; fall back to list order only for legacy payloads.
     const defaultMarked = usable.filter(
         (record) => normalizeDefaultFlag(record.isDefault) === 1,
@@ -514,28 +524,28 @@ export async function resolveDefaultBaiyingAimodelProviderBundle(params: {
     const defaultMarkedCount = defaultMarked.length;
     if (defaultMarkedCount > 1) {
         params.log.warn(
-            `baiying-enhance: Redis LLM typelist has ${defaultMarkedCount} models with isDefault=1; default is taken from the first marked entry. Re-save default in manager or restart byclaw-be to sync typelist.`,
+            `baiying-enhance: Redis ${typelistField} typelist has ${defaultMarkedCount} models with isDefault=1; default is taken from the first marked entry. Re-save default in manager or restart byclaw-be to sync typelist.`,
         );
     }
     if (selected && usable[0] && selected !== usable[0]) {
         params.log.warn(
-            `baiying-enhance: Redis LLM typelist first entry (${modelIdFromAimodelRecord(usable[0]) || "?"}) is not isDefault=1; selecting marked default ${modelIdFromAimodelRecord(selected) || "?"}. Typelist order may be stale.`,
+            `baiying-enhance: Redis ${typelistField} typelist first entry (${modelIdFromAimodelRecord(usable[0]) || "?"}) is not isDefault=1; selecting marked default ${modelIdFromAimodelRecord(selected) || "?"}. Typelist order may be stale.`,
         );
     } else if (selected && normalizeDefaultFlag(selected.isDefault) !== 1) {
         params.log.warn(
-            `baiying-enhance: Redis LLM typelist has no isDefault=1 entry; falling back to first usable model (${modelIdFromAimodelRecord(selected) || "?"}).`,
+            `baiying-enhance: Redis ${typelistField} typelist has no isDefault=1 entry; falling back to first usable model (${modelIdFromAimodelRecord(selected) || "?"}).`,
         );
     }
     if (!selected) {
         params.log.warn(
-            `baiying-enhance: Redis AI model typelist has no active LLM model key=${redisKey} field=${DEFAULT_AIMODEL_TYPELIST_FIELD}`,
+            `baiying-enhance: Redis AI model typelist has no active ${typelistField} model key=${redisKey} field=${typelistField}`,
         );
         return null;
     }
     const modelId = modelIdFromAimodelRecord(selected);
     if (!modelId) {
         params.log.warn(
-            `baiying-enhance: Redis AI model typelist default LLM missing instanceId/modelCode key=${redisKey}`,
+            `baiying-enhance: Redis AI model typelist default ${typelistField} missing instanceId/modelCode key=${redisKey}`,
         );
         return null;
     }
@@ -546,7 +556,7 @@ export async function resolveDefaultBaiyingAimodelProviderBundle(params: {
     });
     if (!provider) {
         params.log.warn(
-            `baiying-enhance: Redis AI model typelist default LLM invalid modelId=${modelId}`,
+            `baiying-enhance: Redis AI model typelist default ${typelistField} invalid modelId=${modelId}`,
         );
         return null;
     }

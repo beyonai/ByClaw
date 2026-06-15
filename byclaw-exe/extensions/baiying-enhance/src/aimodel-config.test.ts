@@ -582,6 +582,49 @@ describe("Baiying AI model config", () => {
     expect(JSON.stringify(provider)).not.toContain("default-secret-token");
   });
 
+  it("can resolve an EMBEDDING typelist default without reading the LLM field", async () => {
+    const embeddingContent = JSON.stringify([
+      {
+        authToken: "embedding-secret-token",
+        instanceId: "20004014",
+        instanceParam: {},
+        isDefault: 1,
+        maxContentToken: "8192",
+        modelCode: "text-embedding-v4",
+        modelName: "text-embedding-v4",
+        modelType: "EMBEDDING",
+        status: 1,
+        url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      },
+    ]);
+    const requestedFields: string[] = [];
+    const provider = await resolveDefaultBaiyingAimodelProviderBundle({
+      redisJsonStore: {
+        getJsonByKey: async () => null,
+        getHashJson: async ({ field }) => {
+          requestedFields.push(field);
+          return field === "EMBEDDING"
+            ? {
+                key: "byai:aimodel:typelist",
+                content: embeddingContent,
+                raw: JSON.parse(embeddingContent) as unknown,
+                hash: "embedding-typelist-hash",
+              }
+            : null;
+        },
+        getDigEmployeeJson: async () => null,
+        getResourceJson: async () => null,
+        close: async () => {},
+      },
+      modelType: "EMBEDDING",
+      secretProviderName: DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
+      log: { warn: () => undefined },
+    });
+
+    expect(requestedFields).toEqual(["EMBEDDING"]);
+    expect(provider?.modelRef).toBe("baiying-m-20004014/text-embedding-v4");
+  });
+
   it("can read a default model token from the LLM typelist payload", () => {
     expect(readAuthTokenFromAimodelTypeListPayload(createAimodelTypeListPayload(), "10004014")).toBe(
       "default-secret-token",
