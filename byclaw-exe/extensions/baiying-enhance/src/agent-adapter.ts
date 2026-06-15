@@ -79,6 +79,12 @@ export type AdaptedManagedAgent = {
     coreCompetencies?: BaiyingCoreCompetency[];
 };
 
+const MANAGED_AGENT_EXPERIMENTAL: NonNullable<AgentListEntry["experimental"]> = {
+    // Baiying employees need the baiying_call plugin tool directly visible.
+    // Global lean mode compacts plugin tools behind exec/wait, which breaks that contract.
+    localModelLean: false,
+};
+
 function slugifyBase(name: string): string {
     const s = name
         .replace(/\.json$/i, "")
@@ -262,6 +268,7 @@ function adaptRawBaiyingDetail(params: {
         id: agentId,
         name,
         identity: { name },
+        experimental: MANAGED_AGENT_EXPERIMENTAL,
         skills: listSkills,
         tools: listTools,
     };
@@ -338,6 +345,7 @@ export function adaptAgentJson(params: {
             id: agentId,
             name,
             identity: { name },
+            experimental: MANAGED_AGENT_EXPERIMENTAL,
             skills: normalizeAgentListSkills(asRecord),
         };
 
@@ -380,6 +388,7 @@ export function adaptAgentJson(params: {
                     ? native.name.trim()
                     : agentId,
         },
+        experimental: MANAGED_AGENT_EXPERIMENTAL,
         skills: normalizeAgentListSkills(asRecord),
     };
 
