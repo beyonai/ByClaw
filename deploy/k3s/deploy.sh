@@ -95,7 +95,7 @@ apply_longhorn_settings() {
     echo "========== Applying Longhorn settings =========="
     sed -e "s|\${LONGHORN_DATA_PATH}|${LONGHORN_DATA_PATH:-/data/longhorn}|g" \
         -e "s|\${LONGHORN_NAMESPACE}|${ns}|g" \
-        -e "s|\${LONGHORN_REPLICA_COUNT}|${LONGHORN_REPLICA_COUNT:-1}|g" \
+        -e "s|\${LONGHORN_REPLICA_COUNT}|${LONGHORN_REPLICA_COUNT:-3}|g" \
         "$SCRIPT_DIR/manifests/storage/longhorn-settings.yaml" | kubectl_cmd apply -f -
 }
 
@@ -119,6 +119,41 @@ install_monitoring() {
     bash "$SCRIPT_DIR/install-monitoring.sh" "$ENV_FILE"
 }
 
+ensure_servicelb_node_pool() {
+    if [ "${K3S_ENABLE_SERVICELB:-true}" != "true" ]; then
+        return 0
+    fi
+    local node="${BYCLAW_K3S_SERVICELB_NODE_NAME:-${BYCLAW_K3S_INGRESS_NODE_NAME:-}}"
+    local all_nodes n
+    if [ -z "$node" ]; then
+        node="$(kubectl_cmd get nodes -l node-role.kubernetes.io/control-plane -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+    fi
+    if [ -z "$node" ]; then
+        echo "Warning: cannot find control-plane node for ServiceLB exposure." >&2
+        return 0
+    fi
+    echo "========== Ensuring K3s ServiceLB node pool =========="
+    echo "    servicelb node: $node"
+    kubectl_cmd label node "$node" svccontroller.k3s.cattle.io/enablelb=true --overwrite >/dev/null
+    if [ "${BYCLAW_K3S_SERVICELB_EXCLUSIVE:-true}" = "true" ]; then
+        all_nodes="$(kubectl_cmd get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)"
+        for n in $all_nodes; do
+            [ "$n" = "$node" ] && continue
+            kubectl_cmd label node "$n" svccontroller.k3s.cattle.io/enablelb- >/dev/null 2>&1 || true
+        done
+    fi
+}
+
+remove_traefik_hostport_patch() {
+    if ! kubectl_cmd -n kube-system get deploy traefik >/dev/null 2>&1; then
+        return 0
+    fi
+    # Older deployments patched Traefik itself with hostPort 80 while ServiceLB was disabled.
+    # With ServiceLB enabled, svclb-traefik owns host ports 80/443.
+    kubectl_cmd -n kube-system patch deploy traefik --type=json \
+        -p='[{"op":"remove","path":"/spec/template/spec/containers/0/ports/2/hostPort"}]' >/dev/null 2>&1 || true
+}
+
 sync_registry_config() {
     if [ "${BYCLAW_K3S_SYNC_REGISTRIES_ON_UPDATE:-true}" != "true" ]; then
         return 0
@@ -126,6 +161,14 @@ sync_registry_config() {
     echo "========== Syncing k3s registry configuration =========="
     bash "$SCRIPT_DIR/install-k3s.sh" "$ENV_FILE" registry-sync
     refresh_longhorn_csi_after_k3s_restart
+}
+
+prune_empty_images() {
+    if [ "${BYCLAW_K3S_PRUNE_EMPTY_IMAGES_ON_UPDATE:-true}" != "true" ]; then
+        return 0
+    fi
+    echo "========== Pruning empty image refs after update =========="
+    bash "$SCRIPT_DIR/install-k3s.sh" "$ENV_FILE" image-prune
 }
 
 refresh_longhorn_csi_after_k3s_restart() {
@@ -358,6 +401,13 @@ ensure_master_http_ingress() {
     if ! kubectl_cmd -n kube-system get deploy traefik >/dev/null 2>&1; then
         return 0
     fi
+    if [ "${K3S_ENABLE_SERVICELB:-true}" = "true" ]; then
+        echo "========== Ensuring master HTTP ingress through ServiceLB =========="
+        ensure_servicelb_node_pool
+        remove_traefik_hostport_patch
+        kubectl_cmd -n kube-system rollout status deploy/traefik --timeout=180s
+        return 0
+    fi
     local node="${BYCLAW_K3S_INGRESS_NODE_NAME:-}"
     if [ -z "$node" ]; then
         node="$(kubectl_cmd get nodes -l node-role.kubernetes.io/control-plane -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
@@ -526,12 +576,14 @@ case "$ACTION" in
     update)
         load_env
         sync_registry_config
+        ensure_servicelb_node_pool
         ensure_master_http_ingress
         apply_generated
         install_monitoring
         cleanup_bad_pods
         rollout_restart_workloads
         rollout_wait
+        prune_empty_images
         echo "K3s update completed."
         ;;
     stop)

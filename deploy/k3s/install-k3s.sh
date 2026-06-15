@@ -3,6 +3,7 @@
 # Usage:
 #   bash deploy/k3s/install-k3s.sh [env.k3s]
 #   bash deploy/k3s/install-k3s.sh [env.k3s] registry-sync
+#   bash deploy/k3s/install-k3s.sh [env.k3s] image-prune
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -49,8 +50,12 @@ K3S_PASSWORD="${K3S_SSH_PASSWORD:-${K3S_SERVER_PASSWORD:-}}"
 K3S_NODE_INTERNAL_IPS="${K3S_NODE_INTERNAL_IPS:-}"
 K3S_NODE_EXTERNAL_IPS="${K3S_NODE_EXTERNAL_IPS:-}"
 K3S_TLS_SANS="${K3S_TLS_SANS:-}"
+K3S_ENABLE_SERVICELB="${K3S_ENABLE_SERVICELB:-true}"
 BYCLAW_K3S_CLEAN_STALE_PROCESSES="${BYCLAW_K3S_CLEAN_STALE_PROCESSES:-true}"
 BYCLAW_K3S_FORCE_REINSTALL="${BYCLAW_K3S_FORCE_REINSTALL:-false}"
+BYCLAW_K3S_PRUNE_EMPTY_IMAGES_ON_UPDATE="${BYCLAW_K3S_PRUNE_EMPTY_IMAGES_ON_UPDATE:-true}"
+BYCLAW_K3S_PRUNE_DANGLING_IMAGES="${BYCLAW_K3S_PRUNE_DANGLING_IMAGES:-true}"
+BYCLAW_K3S_PRUNE_IMAGE_REPOS="${BYCLAW_K3S_PRUNE_IMAGE_REPOS:-}"
 
 POOL_GENERAL="${K3S_NODE_POOL_GENERAL:-sandbox-general}"
 POOL_BROWSER="${K3S_NODE_POOL_BROWSER:-sandbox-browser}"
@@ -308,6 +313,12 @@ k3s_registry_install_args() {
     fi
 }
 
+k3s_servicelb_install_args() {
+    if [ "${K3S_ENABLE_SERVICELB}" != "true" ]; then
+        printf '%s' ' --disable servicelb'
+    fi
+}
+
 registries_mirrors_enabled() {
     [ -n "${K3S_REGISTRY_MIRROR_DOCKER:-}" ] \
         || [ -n "${K3S_REGISTRY_MIRROR_K8S:-}" ] \
@@ -535,6 +546,158 @@ sync_registries_all_cluster_nodes() {
     done
 }
 
+image_repo_from_ref() {
+    local ref="$1"
+    local last
+    ref="${ref%@sha256:*}"
+    last="${ref##*/}"
+    if [[ "$last" == *:* ]]; then
+        ref="${ref%:*}"
+    fi
+    printf '%s\n' "$ref"
+}
+
+default_prune_image_repos() {
+    local image
+    local repo
+    local repos=""
+    for image in "${IMAGE_BE:-}" "${IMAGE_FE:-}" "${IMAGE_QA:-}" "${IMAGE_DATA:-}"; do
+        [ -n "$image" ] || continue
+        repo="$(image_repo_from_ref "$image")"
+        [ -n "$repo" ] || continue
+        case ",${repos}," in
+            *",${repo},"*) ;;
+            *)
+                if [ -n "$repos" ]; then
+                    repos="${repos},${repo}"
+                else
+                    repos="$repo"
+                fi
+                ;;
+        esac
+    done
+    printf '%s\n' "$repos"
+}
+
+prune_empty_images_on_host() {
+    local host="$1"
+    local repos_csv="$2"
+    [ -n "$repos_csv" ] || return 0
+    ssh_run "$host" "set -euo pipefail
+export K3S_DATA_DIR='${K3S_DATA_DIR}'
+repos_csv=$(shell_single_quote "$repos_csv")
+prune_dangling='${BYCLAW_K3S_PRUNE_DANGLING_IMAGES}'
+echo \"[remote:\$(hostname)] prune empty image refs for repos: \${repos_csv}\"
+if ! command -v k3s >/dev/null 2>&1; then
+  echo \"[remote:\$(hostname)] k3s not found; skip image prune\"
+  exit 0
+fi
+image_table=\"\$(sudo K3S_DATA_DIR=\"\${K3S_DATA_DIR}\" k3s ctr -n k8s.io images ls 2>/dev/null || true)\"
+if [ -z \"\$image_table\" ]; then
+  echo \"[remote:\$(hostname)] containerd image table is empty or unavailable\"
+  exit 0
+fi
+tagged_digests=\"\$(printf '%s\n' \"\$image_table\" | awk -v repos=\"\$repos_csv\" '
+function repo_of(ref, base, last) {
+  base = ref
+  sub(/@sha256:.*/, \"\", base)
+  last = base
+  sub(/^.*\\//, \"\", last)
+  if (last ~ /:/) {
+    sub(/:[^:\\/]*$/, \"\", base)
+  }
+  return base
+}
+function matched(ref, base, i) {
+  base = repo_of(ref)
+  for (i = 1; i <= n; i++) {
+    if (base == repo[i]) return 1
+  }
+  return 0
+}
+BEGIN {
+  n = split(repos, repo, \",\")
+}
+NR > 1 && matched(\$1) && \$1 !~ /@sha256:/ && \$3 ~ /^sha256:/ {
+  print \$3
+}
+' | sort -u)\"
+removed=0
+kept=0
+printf '%s\n' \"\$image_table\" | awk -v repos=\"\$repos_csv\" '
+function repo_of(ref, base, last) {
+  base = ref
+  sub(/@sha256:.*/, \"\", base)
+  last = base
+  sub(/^.*\\//, \"\", last)
+  if (last ~ /:/) {
+    sub(/:[^:\\/]*$/, \"\", base)
+  }
+  return base
+}
+function matched(ref, base, i) {
+  base = repo_of(ref)
+  for (i = 1; i <= n; i++) {
+    if (base == repo[i]) return 1
+  }
+  return 0
+}
+BEGIN {
+  n = split(repos, repo, \",\")
+}
+NR > 1 && matched(\$1) && \$1 ~ /@sha256:/ && \$3 ~ /^sha256:/ {
+  print \$1, \$3
+}
+' | while read -r ref digest; do
+  [ -n \"\$ref\" ] || continue
+  if printf '%s\n' \"\$tagged_digests\" | grep -qx \"\$digest\"; then
+    echo \"[remote:\$(hostname)] keep tagged digest ref: \$ref\"
+    kept=\$((kept + 1))
+    continue
+  fi
+  echo \"[remote:\$(hostname)] remove empty digest ref: \$ref\"
+  sudo K3S_DATA_DIR=\"\${K3S_DATA_DIR}\" k3s ctr -n k8s.io images rm \"\$ref\" >/dev/null 2>&1 || true
+  removed=\$((removed + 1))
+done
+if [ \"\$prune_dangling\" = \"true\" ]; then
+  used_image_ids=\"\$(sudo K3S_DATA_DIR=\"\${K3S_DATA_DIR}\" k3s crictl ps -a 2>/dev/null | awk 'NR > 1 {print \$2}' | sort -u)\"
+  sudo K3S_DATA_DIR=\"\${K3S_DATA_DIR}\" k3s crictl images 2>/dev/null | awk '\$1 == \"<none>\" && \$2 == \"<none>\" {print \$3}' | while read -r image_id; do
+    [ -n \"\$image_id\" ] || continue
+    if printf '%s\n' \"\$used_image_ids\" | grep -qx \"\$image_id\"; then
+      echo \"[remote:\$(hostname)] keep dangling image used by container: \$image_id\"
+      continue
+    fi
+    echo \"[remote:\$(hostname)] remove dangling image: \$image_id\"
+    sudo K3S_DATA_DIR=\"\${K3S_DATA_DIR}\" k3s crictl rmi \"\$image_id\" >/dev/null 2>&1 || true
+  done
+fi
+echo \"[remote:\$(hostname)] image prune completed\"
+sudo K3S_DATA_DIR=\"\${K3S_DATA_DIR}\" k3s crictl images | awk 'NR==1 || /byclaw\\/byclaw-(be|fe|qa|data)/ || /<none>/'
+"
+}
+
+prune_empty_images_all_cluster_nodes() {
+    local host
+    local repos_csv="${BYCLAW_K3S_PRUNE_IMAGE_REPOS:-}"
+    if [ "${BYCLAW_K3S_PRUNE_EMPTY_IMAGES_ON_UPDATE}" != "true" ]; then
+        echo "Image prune skipped: BYCLAW_K3S_PRUNE_EMPTY_IMAGES_ON_UPDATE=${BYCLAW_K3S_PRUNE_EMPTY_IMAGES_ON_UPDATE}"
+        return 0
+    fi
+    if [ -z "$repos_csv" ]; then
+        repos_csv="$(default_prune_image_repos)"
+    fi
+    if [ -z "$repos_csv" ]; then
+        echo "Image prune skipped: no ByClaw image repositories configured"
+        return 0
+    fi
+    log_step "Prune empty containerd image refs on all cluster nodes"
+    echo "    repositories: $repos_csv"
+    for host in "${SERVER_HOSTS[@]}" "${AGENT_HOSTS[@]}"; do
+        [ -n "$host" ] || continue
+        prune_empty_images_on_host "$host" "$repos_csv"
+    done
+}
+
 ssh_base() {
     if [ -n "$K3S_PASSWORD" ]; then
         if ! command -v sshpass >/dev/null 2>&1; then
@@ -722,7 +885,7 @@ curl -sfL '${K3S_INSTALL_SCRIPT_URL}' | $(k3s_install_name_env_for_host "$host" 
   $(k3s_advertise_address_args "$host") \
   $(k3s_node_name_args "$host" "server") \
   $(k3s_registry_install_args) \
-  --disable servicelb \
+  $(k3s_servicelb_install_args) \
   --data-dir '${K3S_DATA_DIR}' \
   --kubelet-arg=root-dir='${K3S_KUBELET_ROOT}' \
   --kubelet-arg=kube-reserved='${K3S_SERVER_KUBE_RESERVED}' \
@@ -767,7 +930,7 @@ curl -sfL '${K3S_INSTALL_SCRIPT_URL}' | $(k3s_install_name_env_for_host "$host" 
   $(k3s_advertise_address_args "$host") \
   $(k3s_node_name_args "$host" "server") \
   $(k3s_registry_install_args) \
-  --disable servicelb \
+  $(k3s_servicelb_install_args) \
   --data-dir '${K3S_DATA_DIR}' \
   --kubelet-arg=root-dir='${K3S_KUBELET_ROOT}' \
   --kubelet-arg=kube-reserved='${K3S_SERVER_KUBE_RESERVED}' \
@@ -986,8 +1149,14 @@ if [ "$INSTALL_ACTION" = "registry-sync" ]; then
     echo "k3s registry sync completed."
     exit 0
 fi
+if [ "$INSTALL_ACTION" = "image-prune" ]; then
+    echo "========== Prune k3s empty image refs =========="
+    prune_empty_images_all_cluster_nodes
+    echo "k3s empty image prune completed."
+    exit 0
+fi
 if [ "$INSTALL_ACTION" != "install" ]; then
-    echo "Error: unsupported install-k3s action '$INSTALL_ACTION'. Use install or registry-sync." >&2
+    echo "Error: unsupported install-k3s action '$INSTALL_ACTION'. Use install, registry-sync, or image-prune." >&2
     exit 1
 fi
 
@@ -1006,6 +1175,7 @@ if registries_config_enabled; then
     fi
 fi
 echo "    join url: ${K3S_JOIN_URL}"
+echo "    servicelb enabled: ${K3S_ENABLE_SERVICELB}"
 echo "    custom node names: ${K3S_CUSTOM_NODE_NAMES}"
 if [ "${K3S_CUSTOM_NODE_NAMES}" = "true" ]; then
     for host in "${SERVER_HOSTS[@]}"; do
