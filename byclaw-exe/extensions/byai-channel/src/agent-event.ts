@@ -153,7 +153,7 @@ async function handleToolEvent(
       // 必须以toolCallId作为messageId，这个toolCallId可能会作为parentMessageId发送到其他worker(在baiying-enhance的实现)
       messageId: toolCallId,
       parentMessageId: "-1",
-      eventType: EventType.REASONING_LOG_START,
+      eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.think_status_title,
       objectType: "tool_call",
       status: "_START_",
@@ -190,14 +190,6 @@ async function handleToolEvent(
       parentMessageId: toolCallId,
       eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.json_block,
-    });
-    await emitSdkChunk(request, sdkEmitter, "", {
-      messageId: toolCallId,
-      parentMessageId: "-1",
-      eventType: EventType.REASONING_LOG_END,
-      contentType: SseReasonMessageType.think_status_title,
-      objectType: "tool_call",
-      status: data.isError ? "_ERROR_" : "_DONE_",
     });
     if (data?.name === "baiying_call") {
       setToBeEmittedChunkViaBaiyingCallTool(data?.result);
