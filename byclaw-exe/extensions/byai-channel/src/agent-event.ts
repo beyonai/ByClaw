@@ -67,25 +67,24 @@ let toBeEmittedChunkAfterBaiyingCallTool: undefined | {
   options?: EmitOptions;
 } = undefined;
 
-async function emitChunkGenByBaiyingCallTool(request: ActiveSdkRequest, sdkEmitter?: ReturnType<typeof resolveSdkEmitter>) {
+async function emitChunkGenByBaiyingCallTool(event: AgentEvent, request: ActiveSdkRequest, sdkEmitter?: ReturnType<typeof resolveSdkEmitter>) {
   if (!toBeEmittedChunkAfterBaiyingCallTool) {
     return;
   }
   if (!sdkEmitter) {
     sdkEmitter = resolveSdkEmitter(request.accountId);
   }
-  await emitSdkChunk(request, sdkEmitter, JSON.stringify(toBeEmittedChunkAfterBaiyingCallTool.data), toBeEmittedChunkAfterBaiyingCallTool.options);
+  await emitSdkChunk(request, JSON.stringify(toBeEmittedChunkAfterBaiyingCallTool.data), toBeEmittedChunkAfterBaiyingCallTool.options);
   toBeEmittedChunkAfterBaiyingCallTool = undefined;
 }
 
 async function emitSdkChunk(
   request: ActiveSdkRequest,
-  sdkEmitter: ReturnType<typeof resolveSdkEmitter>,
   text: string,
   options?: EmitOptions,
 ): Promise<void> {
-  await emitSdkChunkTracked({
-    emitter: sdkEmitter,
+  await emitSdkChunkTracked(request.sessionKey, {
+    emitter: resolveSdkEmitter(request.accountId),
     sessionId: request.sessionId,
     traceId: request.traceId,
     text,
@@ -159,17 +158,17 @@ async function handleToolEvent(
       }
     }
     const title = buildToolStartTitle(request, data);
-    await emitSdkChunk(request, sdkEmitter, title, {
+    await emitSdkChunk(request, title, {
       // 必须以toolCallId作为messageId，这个toolCallId可能会作为parentMessageId发送到其他worker(在baiying-enhance的实现)
       messageId: toolCallId,
       parentMessageId: "-1",
-      eventType: EventType.REASONING_LOG_START,
+      eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.think_status_title,
       objectType: "tool_call",
       status: "_START_",
     });
     const args = extractToolStartArgs(data);
-    await emitSdkChunk(request, sdkEmitter, JSON.stringify({
+    await emitSdkChunk(request, JSON.stringify({
       title: "Input",
       json: args || "{}",
     }), {
@@ -184,7 +183,7 @@ async function handleToolEvent(
     if (toolCallId) {
       toolStartArgsByCallId.delete(toolCallId);
     }
-    await emitSdkChunk(request, sdkEmitter, title, {
+    await emitSdkChunk(request, title, {
       messageId: toolCallId,
       parentMessageId: "-1",
       eventType: EventType.REASONING_LOG_DELTA,
@@ -192,7 +191,7 @@ async function handleToolEvent(
       objectType: "tool_call",
       status: data.isError ? "_ERROR_" : "_DONE_",
     });
-    await emitSdkChunk(request, sdkEmitter, JSON.stringify({
+    await emitSdkChunk(request, JSON.stringify({
       title: "Output",
       json: result || "{}"
     }), {
@@ -200,14 +199,6 @@ async function handleToolEvent(
       parentMessageId: toolCallId,
       eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.json_block,
-    });
-    await emitSdkChunk(request, sdkEmitter, "", {
-      messageId: toolCallId,
-      parentMessageId: "-1",
-      eventType: EventType.REASONING_LOG_END,
-      contentType: SseReasonMessageType.think_status_title,
-      objectType: "tool_call",
-      status: data.isError ? "_ERROR_" : "_DONE_",
     });
     if (data.name === "baiying_call") {
       setToBeEmittedChunkViaBaiyingCallTool(data.result);
@@ -233,7 +224,6 @@ async function handleAssistantEvent(
   isChildSession: boolean,
   streamContext: AssistantStreamContext,
 ) {
-  const sdkEmitter = resolveSdkEmitter(request.accountId);
   const kind = resolveAssistantEventKind(event, isChildSession);
   if (kind === "ignore") {
     return;
@@ -252,13 +242,14 @@ async function handleAssistantEvent(
     );
     return;
   }
-  const previousEmit = getLastSdkEmitChunk(request.accountId);
+  const previousEmit = getLastSdkEmitChunk(request.sessionKey);
   const answerOptions: EmitOptions = {
     parentMessageId: "-1",
     eventType: isChildSession ? EventType.REASONING_LOG_DELTA : EventType.ANSWER_DELTA,
+    // 不是连续回复时，新增一个 messageId分组，用于前端区分显示不同段落
     messageId: streamContext.isContinuingAnswer && previousEmit?.messageId
       ? previousEmit.messageId
-      : request.sessionKey,
+      : Math.random().toString(16).slice(2),
   };
   // assistant 流是权威可见源，按 runId 做简单前缀增量即可（sendText 的去重改由
   // message tool 事件驱动，不再和 assistant 流抢同一缓冲）。
@@ -266,7 +257,7 @@ async function handleAssistantEvent(
     key: `${event.runId}:assistant:answer`,
     rawText: stringValue(event.data?.text) || text,
     emit: async (answerDelta) => {
-      await emitSdkChunk(request, sdkEmitter, answerDelta, answerOptions);
+      await emitSdkChunk(request, answerDelta, answerOptions);
     },
   });
 }
@@ -279,8 +270,8 @@ async function handleReasoningEndTransition(
   if (!sdkEmitter) {
     return;
   }
-  const previousEmit = getLastSdkEmitChunk(request.sessionId);
-  await emitSdkChunkTracked({
+  const previousEmit = getLastSdkEmitChunk(request.sessionKey);
+  await emitSdkChunkTracked(request.sessionKey, {
     emitter: sdkEmitter,
     sessionId: request.sessionId,
     traceId: request.traceId,
@@ -313,7 +304,6 @@ async function handleLifecycleEvent(
   event: AgentEvent,
   sessionKey?: string,
 ) {
-  const sdkEmitter = resolveSdkEmitter(request.accountId);
   const { data } = event;
   const phase = typeof data?.phase === "string" ? data.phase : undefined;
   if (!isRootSessionKey(sessionKey) || !phase) {
@@ -349,13 +339,7 @@ async function handleLifecycleEvent(
   const activeRequest = markActiveSdkRootLifecycleFinished(sessionKey, phase) ?? request;
   if (phase === "error") {
     const errorText = typeof data?.error === "string" ? data.error : "Agent run failed";
-    await emitSdkChunk(activeRequest, sdkEmitter, errorText, {
-      eventType: EventType.ANSWER_DELTA,
-    });
-  }
-  if (phase === "end" && activeRequest.pendingChildSessionKeys.size > 0) {
-    // root run 先结束，但仍有子 agent 未收尾；先用空行隔开后续恢复输出。
-    await emitSdkChunk(activeRequest, sdkEmitter, "\n\n", {
+    await emitSdkChunk(request, errorText, {
       eventType: EventType.ANSWER_DELTA,
     });
   }
@@ -377,7 +361,7 @@ async function handleCompactionEvent(
   }
   if (phase === "start") {
     markActiveSdkCompactionRetryPending(sessionKey ?? request.sessionKey, true);
-    await emitSdkChunk(request, resolveSdkEmitter(request.accountId), "", {
+    await emitSdkChunk(request, "", {
       contentType: "5007",
       eventType: EventType.ANSWER_DELTA,
     });
@@ -407,8 +391,7 @@ async function emitReasoningText(
   text: string,
   isPreviousThinking: boolean,
 ) {
-  const sdkEmitter = resolveSdkEmitter(request.accountId);
-  const previousEmit = getLastSdkEmitChunk(request.accountId);
+  const previousEmit = getLastSdkEmitChunk(request.sessionKey);
   const options: EmitOptions = {
     eventType: EventType.REASONING_LOG_DELTA,
     contentType: SseReasonMessageType.think_text,
@@ -419,7 +402,7 @@ async function emitReasoningText(
   } else {
     options.messageId = Math.random().toString(16).slice(2);
     options.parentMessageId = "-1";
-    await emitSdkChunk(request, sdkEmitter, "", {
+    await emitSdkChunk(request, "", {
       ...options,
       eventType: EventType.REASONING_LOG_START,
     });
@@ -429,7 +412,7 @@ async function emitReasoningText(
     rawText: text,
     normalize: normalizeReasoningPreviewText,
     emit: async (reasoningDelta) => {
-      await emitSdkChunk(request, sdkEmitter, reasoningDelta, options);
+      await emitSdkChunk(request, reasoningDelta, options);
     },
   });
 }
@@ -480,7 +463,7 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
   } else if (event.stream === 'assistant') {
     if (currentStream === "assistant" && previousStream !== "assistant" && toBeEmittedChunkAfterBaiyingCallTool) {
       // 无论是主agent还是subagent，开始输出正文前，先把baiying_call工具缓存起来的chunk emit出来
-      await emitChunkGenByBaiyingCallTool(request);
+      await emitChunkGenByBaiyingCallTool(event, request);
     }
     await handleAssistantEvent(request, event, isChildSession, {
       isContinuingThinking: isPreviousThinking && currentStream === "thinking",

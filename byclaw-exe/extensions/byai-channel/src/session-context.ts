@@ -212,6 +212,7 @@ export function clearActiveSdkRequestRecord(request: ActiveSdkRequest): void {
     activeSdkRequestsByRun.delete(runId);
   }
   request.boundRunIds.clear();
+  sdkEmitterLastChunks.delete(request.sessionKey);
   clearPendingMessageToolSends(request.sessionKey);
 }
 
@@ -242,20 +243,11 @@ export function resolveSdkEmitter(accountId: string): GatewayDataEmitter | undef
     return sdkEmitters.get(normalizeAccountId(accountId));
 }
 
-export function getLastSdkEmitChunkByEmitter(
-    emitter: GatewayDataEmitter | undefined,
-) {
-    if (!emitter) {
-        return undefined;
-    }
-    return sdkEmitterLastChunks.get(emitter);
+export function getLastSdkEmitChunk(runId: string) {
+    return sdkEmitterLastChunks.get(runId);
 }
 
-export function getLastSdkEmitChunk(accountId: string) {
-    return getLastSdkEmitChunkByEmitter(resolveSdkEmitter(accountId));
-}
-
-export async function emitSdkChunkTracked(params: {
+export async function emitSdkChunkTracked(sessionKey: string, params: {
     emitter: GatewayDataEmitter | undefined;
     sessionId: string;
     traceId?: string;
@@ -271,7 +263,8 @@ export async function emitSdkChunkTracked(params: {
         params.text,
         params.options || {},
     );
-    sdkEmitterLastChunks.set(params.emitter, {
+    sdkEmitterLastChunks.set(sessionKey, {
+        traceId: params.traceId || "",
         messageId: params.options?.messageId,
         parentMessageId: params.options?.parentMessageId,
         eventType: params.options?.eventType,

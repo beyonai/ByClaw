@@ -5,7 +5,6 @@ import {
   WorkerRegistry,
   WorkerRunner,
   GatewayDataEmitter,
-  EventType,
   type AskAgentCommand,
   WorkerHeartbeat,
   ActionType,
@@ -16,10 +15,7 @@ import { getByaiRuntime } from "./runtime.js";
 import { deliverReplyToAgentViaSdk } from "./sdk-message-processor.js";
 import {
   resolveActiveSdkRequestByTraceId,
-  clearActiveSdkRequestByTarget,
-  emitSdkChunkTracked,
   registerSdkEmitter,
-  shouldDeferActiveSdkFinal,
   clearActiveSdkRequestRecord,
   resolveSdkLocalFilePath,
 } from "./session-context.js";
@@ -359,13 +355,7 @@ export class ByaiSdkApp {
             if (!text) {
               return;
             }
-            await emitSdkChunkTracked({
-              emitter,
-              sessionId,
-              traceId,
-              text,
-              options: options || {},
-            });
+            await emitter.emitChunk(sessionId, traceId, text, options || {});
           },
         });
 

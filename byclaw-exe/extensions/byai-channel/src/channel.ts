@@ -13,7 +13,6 @@ import type { ResolvedByaiAccount, ByaiProbe } from "./types.js";
 import { sendReplyCallback } from "./webhook-handler.js";
 import type { ByaiSdkApp } from "./sdk-app.js";
 import {
-  emitSdkChunkTracked,
   resolveActiveSdkRequestByTarget,
   resolveSdkEmitter,
   resolveWebhookContext,
@@ -50,13 +49,12 @@ async function emitSdkText(params: {
     `[byai-channel] outbound sdk emit: accountId=${params.accountId || "default"} to=${params.to} sessionId=${request.sessionId} traceId=${request.traceId || ""} textLength=${params.text.length}`,
   );
   if (params.text) {
-    await emitSdkChunkTracked({
-      emitter: sdkEmitter,
-      sessionId: request.sessionId,
-      traceId: request.traceId,
-      text: params.text,
-      options: {},
-    });
+    await sdkEmitter.emitChunk(
+      request.sessionId,
+      request.traceId || "",
+      params.text,
+      {},
+    );
   }
   await sdkEmitter.emitState(
     request.sessionId,
@@ -290,13 +288,12 @@ export const byaiChannelPlugin: ChannelPlugin<ResolvedByaiAccount, ByaiProbe> = 
       }
       const sdkEmitter = resolveSdkEmitter(resolvedAccountId);
       if (sdkEmitter) {
-        await emitSdkChunkTracked({
-          emitter: sdkEmitter,
-          sessionId: request.sessionId,
-          traceId: request.traceId,
+        await sdkEmitter.emitChunk(
+          request.sessionId,
+          request.traceId || "",
           text,
-          options: { eventType: EventType.ANSWER_DELTA },
-        });
+          { eventType: EventType.ANSWER_DELTA },
+        );
       }
       return okResult;
     },
