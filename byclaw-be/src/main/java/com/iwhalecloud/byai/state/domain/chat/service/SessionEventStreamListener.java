@@ -97,14 +97,6 @@ public class SessionEventStreamListener
         }
         dataJson.put("stream_id", message.getId().getValue());
 
-        String eventType = dataJson.getString("event_type");
-        if (!sessionStreamEventRouter.isBackgroundAnswerMessageEvent(eventType)) {
-            log.debug("忽略未知后台会话事件, streamKey={}, messageId={}, eventType={}",
-                message.getStream(), message.getId(), eventType);
-            acknowledge(message);
-            return;
-        }
-
         String streamId = message.getId().getValue();
         String dedupKey = DEDUP_KEY_PREFIX + streamId;
         if (!tryAcquireDedup(dedupKey)) {
