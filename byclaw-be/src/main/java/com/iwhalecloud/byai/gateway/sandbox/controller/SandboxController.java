@@ -6,8 +6,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.gateway.sandbox.service.ingress.openclaw.OpenClawUiProxyPaths;
+import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -67,6 +71,12 @@ public class SandboxController {
 
     @Autowired
     private SandboxResizeService sandboxResizeService;
+
+    @Autowired
+    private ByaiSystemConfigService byaiSystemConfigService;
+
+    @Value("${server.servlet.context-path:}")
+    private String contextPath;
 
     /**
      * 沙箱心跳接口
@@ -318,9 +328,18 @@ public class SandboxController {
 
         int offset = (pageIndex - 1) * pageSize;
         List<SsSandboxRecord> list = sandboxRecordMapper.selectByPage(keyword, status, offset, pageSize);
-        list.forEach(record -> record.setEndpoint(
-            SandboxEndpointRecordSupport.resolveInstanceEndpoint(record.getEndpoint(),
-                SandboxEndpointRecordSupport.OPENCLAW_INSTANCE)));
+        // 动态端口的 openclaw 控制台外网不可达；配置了 WEB_BASE_URL 时改写为经网关整页代理的对外地址，
+        // 未配置则保持原始 endpoint（原逻辑）。
+        String webBaseUrl = byaiSystemConfigService.getDcSystemConfigValueByCode(Constants.WEB_BASE_URL);
+        list.forEach(record -> {
+            String rawEndpoint = SandboxEndpointRecordSupport.resolveInstanceEndpoint(record.getEndpoint(),
+                SandboxEndpointRecordSupport.OPENCLAW_INSTANCE);
+            if (StringUtils.isNotBlank(webBaseUrl)) {
+                record.setEndpoint(OpenClawUiProxyPaths.toProxyUrl(rawEndpoint, webBaseUrl, contextPath));
+            } else {
+                record.setEndpoint(rawEndpoint);
+            }
+        });
         int total = sandboxRecordMapper.countByCondition(keyword, status);
         int totalPage = (total + pageSize - 1) / pageSize;
 
