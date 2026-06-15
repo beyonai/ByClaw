@@ -6,6 +6,7 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import Any
 
+from by_qa.core import logger
 from by_qa.knowledge_base.infrastructure.storage import (
     StorageAuthenticationError,
     StorageConfigurationError,
@@ -119,6 +120,7 @@ def _ensure_json_success(response: dict[str, Any], op: str) -> dict[str, Any]:
         raise _translate_response_error(status_code, msg)
     if isinstance(data, dict) and not _is_success_code(data.get("code")):
         msg = str(data.get("msg") or f"byclaw-userfs.{op}: {data.get('code')}")
+        logger.warning("byclaw-userfs %s business error: code=%s, msg=%s, body=%s", op, data.get("code"), data.get("msg"), data)
         raise _translate_response_error(status_code or None, msg)
     return data if isinstance(data, dict) else {}
 
@@ -153,6 +155,7 @@ class ByClawUserFsKnowledgeStorageProvider:
             if status_code and not (200 <= status_code < 300):
                 data = response.get("data")
                 msg = _extract_response_message(data) or f"byclaw-userfs: HTTP {status_code} for {method} {path}"
+                logger.warning("byclaw-userfs request failed: %s %s -> %d, body=%s", method, path, status_code, data)
                 raise _translate_response_error(status_code, msg)
             return response
 
@@ -202,6 +205,7 @@ class ByClawUserFsKnowledgeStorageProvider:
                     )
             if not response.is_success:
                 msg = f"byclaw-userfs: HTTP {response.status_code} for {method} {path}"
+                logger.warning("byclaw-userfs request failed: %s %s -> %d, body=%s", method, path, response.status_code, response.data)
                 raise _translate_response_error(response.status_code, msg)
             return {
                 "status_code": response.status_code,
@@ -215,7 +219,9 @@ class ByClawUserFsKnowledgeStorageProvider:
             response = await self.transport(method="GET", path=path, headers=headers, params=params)
             status_code = int(response.get("status_code") or 0)
             if status_code and not (200 <= status_code < 300):
-                msg = _extract_response_message(response.get("data")) or f"byclaw-userfs: HTTP {status_code} for GET {path}"
+                data = response.get("data")
+                msg = _extract_response_message(data) or f"byclaw-userfs: HTTP {status_code} for GET {path}"
+                logger.warning("byclaw-userfs download failed: GET %s -> %d, body=%s", path, status_code, data)
                 raise _translate_response_error(status_code, msg)
             content = response.get("content")
             if isinstance(content, bytes):
@@ -245,11 +251,13 @@ class ByClawUserFsKnowledgeStorageProvider:
         try:
             instance = await discovery_client.discover(service_name)
             if not instance:
+                logger.warning("byclaw-userfs download: no available instances for service=%s", service_name)
                 raise StorageOperationError(f"No available instances for service: {service_name}")
             url = f"http://{instance.host}:{instance.port}{path}"
             async with httpx.AsyncClient() as client:
                 resp = await client.get(url, headers=headers, params=params)
                 if not resp.is_success:
+                    logger.warning("byclaw-userfs download failed: GET %s -> %d, body=%s", path, resp.status_code, resp.text[:500])
                     raise _translate_response_error(resp.status_code, f"byclaw-userfs.read: HTTP {resp.status_code}")
                 return resp.content
         finally:
