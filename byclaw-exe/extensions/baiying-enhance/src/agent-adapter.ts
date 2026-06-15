@@ -35,8 +35,27 @@ type NativeAgentJson = {
     allowSpawnFrom?: string[];
 };
 
-export type AimodelProviderApi = "openai-completions" | "anthropic-messages";
+export type AimodelProviderApi = "openai-completions" | "openai-responses" | "anthropic-messages";
 export type AimodelModelInput = "text" | "image";
+export type AimodelThinkingLevel =
+    | "off"
+    | "minimal"
+    | "low"
+    | "medium"
+    | "high"
+    | "xhigh"
+    | "adaptive"
+    | "max";
+export type AimodelThinkingLevelMap = Partial<Record<AimodelThinkingLevel, string | null>>;
+export type AimodelThinkingBudgets = Partial<
+    Record<Exclude<AimodelThinkingLevel, "off" | "xhigh" | "adaptive">, number>
+>;
+
+export type AimodelModelCompat = {
+    thinkingFormat?: string;
+    supportedReasoningEfforts?: string[];
+    reasoningEffortMap?: Record<string, string>;
+};
 
 export type ProviderBundle = {
     baseUrl: string;
@@ -47,6 +66,10 @@ export type ProviderBundle = {
     contextWindow?: number;
     maxTokens?: number;
     input?: AimodelModelInput[];
+    reasoning?: boolean;
+    thinkingLevelMap?: AimodelThinkingLevelMap;
+    thinkingBudgets?: AimodelThinkingBudgets;
+    compat?: AimodelModelCompat;
 };
 
 export type AdaptedManagedAgent = {

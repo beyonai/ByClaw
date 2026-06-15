@@ -86,6 +86,7 @@ describe("Baiying AI model config", () => {
       contextWindow: 128000,
       maxTokens: 1024,
       input: ["text"],
+      reasoning: false,
     });
     expect(JSON.stringify(provider)).not.toContain("secret-token");
   });
@@ -106,6 +107,187 @@ describe("Baiying AI model config", () => {
         modelProtocol: "Anthropic",
       }),
     ).toBe("anthropic-messages");
+    expect(
+      resolveAimodelProviderApiFromInstanceParam({
+        modelProtocol: "OpenAI Responses",
+      }),
+    ).toBe("openai-responses");
+  });
+
+  it("maps DeepSeek reasoning config to OpenClaw compat fields", () => {
+    const provider = parseBaiyingAimodelProviderBundle({
+      payload: {
+        ...createAimodelPayload(),
+        raw: {
+          authToken: "secret-token",
+          instanceId: "10243473",
+          instanceParam: {
+            providerName: "OpenAI",
+            modelProtocol: "OpenAI",
+            maxTokens: 8192,
+            reasoningConfig: {
+              enabled: true,
+              defaultLevel: "max",
+              capability: "effort",
+              compatFormat: "deepseek",
+            },
+          },
+          maxContentToken: "128000",
+          modelCode: "deepseek-reasoner",
+          modelName: "DeepSeek Reasoner",
+          status: 1,
+          url: "https://api.deepseek.com/v1",
+        },
+      },
+      modelId: "10243473",
+      secretProviderName: DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
+    });
+
+    expect(provider).toEqual(
+      expect.objectContaining({
+        reasoning: true,
+        thinkingLevelMap: { off: "max" },
+        compat: {
+          thinkingFormat: "deepseek",
+          supportedReasoningEfforts: ["high", "max"],
+          reasoningEffortMap: {
+            minimal: "high",
+            low: "high",
+            medium: "high",
+            high: "high",
+            adaptive: "high",
+            xhigh: "max",
+            max: "max",
+          },
+        },
+      }),
+    );
+  });
+
+  it("maps Qwen budget thinking config into model params", () => {
+    const provider = parseBaiyingAimodelProviderBundle({
+      payload: {
+        ...createAimodelPayload(),
+        raw: {
+          authToken: "secret-token",
+          instanceId: "10243474",
+          instanceParam: {
+            providerName: "OpenAI",
+            modelProtocol: "OpenAI",
+            maxTokens: 16384,
+            reasoningConfig: {
+              enabled: true,
+              defaultLevel: "high",
+              capability: "budget",
+              compatFormat: "qwen",
+              budgets: {
+                low: 2048,
+                medium: 8192,
+                high: 12000,
+              },
+            },
+          },
+          maxContentToken: "128000",
+          modelCode: "qwen3-max",
+          modelName: "qwen3-max",
+          status: 1,
+          url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        },
+      },
+      modelId: "10243474",
+      secretProviderName: DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
+    });
+
+    expect(provider).toEqual(
+      expect.objectContaining({
+        reasoning: true,
+        thinkingLevelMap: { off: "high" },
+        thinkingBudgets: { low: 2048, medium: 8192, high: 12000 },
+        compat: { thinkingFormat: "qwen" },
+      }),
+    );
+  });
+
+  it("maps Anthropic budget config without OpenAI compat thinkingFormat", () => {
+    const provider = parseBaiyingAimodelProviderBundle({
+      payload: {
+        ...createAimodelPayload(),
+        raw: {
+          authToken: "secret-token",
+          instanceId: "10243475",
+          instanceParam: {
+            providerName: "Anthropic",
+            modelProtocol: "Anthropic",
+            maxTokens: 32768,
+            reasoningConfig: {
+              enabled: true,
+              defaultLevel: "medium",
+              capability: "budget",
+              compatFormat: "anthropic",
+              budgets: {
+                medium: 8192,
+              },
+            },
+          },
+          maxContentToken: "200000",
+          modelCode: "claude-sonnet-4-6",
+          modelName: "claude-sonnet-4-6",
+          status: 1,
+          url: "https://api.example.com/anthropic",
+        },
+      },
+      modelId: "10243475",
+      secretProviderName: DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
+    });
+
+    expect(provider).toEqual(
+      expect.objectContaining({
+        api: "anthropic-messages",
+        reasoning: true,
+        thinkingLevelMap: { off: "medium" },
+        thinkingBudgets: { medium: 8192 },
+        compat: undefined,
+      }),
+    );
+  });
+
+  it("preserves Anthropic adaptive thinking as an OpenClaw thinking level", () => {
+    const provider = parseBaiyingAimodelProviderBundle({
+      payload: {
+        ...createAimodelPayload(),
+        raw: {
+          authToken: "secret-token",
+          instanceId: "10243476",
+          instanceParam: {
+            providerName: "Anthropic",
+            modelProtocol: "Anthropic",
+            maxTokens: 32768,
+            reasoningConfig: {
+              enabled: true,
+              defaultLevel: "adaptive",
+              capability: "adaptive",
+              compatFormat: "anthropic",
+            },
+          },
+          maxContentToken: "200000",
+          modelCode: "claude-sonnet-4-6",
+          modelName: "claude-sonnet-4-6",
+          status: 1,
+          url: "https://api.example.com/anthropic",
+        },
+      },
+      modelId: "10243476",
+      secretProviderName: DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
+    });
+
+    expect(provider).toEqual(
+      expect.objectContaining({
+        api: "anthropic-messages",
+        reasoning: true,
+        thinkingLevelMap: { off: "adaptive" },
+        compat: undefined,
+      }),
+    );
   });
 
   it("maps abilities 3 to text-only and 7 to multimodal input", () => {

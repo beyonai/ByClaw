@@ -1,4 +1,12 @@
-import type { AimodelModelInput, AimodelProviderApi, ProviderBundle } from "./agent-adapter.js";
+import type {
+    AimodelModelCompat,
+    AimodelModelInput,
+    AimodelProviderApi,
+    AimodelThinkingBudgets,
+    AimodelThinkingLevel,
+    AimodelThinkingLevelMap,
+    ProviderBundle,
+} from "./agent-adapter.js";
 import { rememberAimodelAuthToken } from "./aimodel-auth-cache.js";
 import type { BaiyingRedisJsonStore, RedisJsonPayload } from "./redis-json-store.js";
 import { MANAGED_PROVIDER_PREFIX } from "./types.js";
@@ -9,6 +17,20 @@ export const DEFAULT_AIMODEL_TYPELIST_FIELD = "LLM";
 export const DEFAULT_AIMODEL_SECRET_PROVIDER_NAME = "baiying-aimodel-redis";
 export const AIMODEL_ABILITY_TEXT = "3";
 export const AIMODEL_ABILITY_MULTIMODAL = "7";
+
+const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "adaptive", "max"]);
+const THINKING_CAPABILITIES = new Set(["unsupported", "binary", "effort", "budget", "adaptive"]);
+const THINKING_FORMATS = new Set([
+    "auto",
+    "openai",
+    "qwen",
+    "qwen-chat-template",
+    "deepseek",
+    "openrouter",
+    "together",
+    "zai",
+    "anthropic",
+]);
 
 type LoggerLike = {
     warn: (message: string) => void;
@@ -33,6 +55,16 @@ type AiModelConfigRecord = {
     url?: unknown;
 };
 
+type BaiyingReasoningConfig = {
+    enabled: boolean;
+    defaultLevel: AimodelThinkingLevel;
+    capability: "unsupported" | "binary" | "effort" | "budget" | "adaptive";
+    compatFormat: string;
+    supportedEfforts?: string[];
+    effortMap?: Record<string, string>;
+    budgets?: AimodelThinkingBudgets;
+};
+
 function nonEmptyString(value: unknown): string {
     return typeof value === "string" && value.trim() ? value.trim() : "";
 }
@@ -45,6 +77,49 @@ function positiveInt(value: unknown): number | undefined {
               ? Number(value.trim())
               : NaN;
     return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
+}
+
+function normalizeLowerEnum(value: unknown, allowed: Set<string>, fallback: string): string {
+    const candidate = nonEmptyString(value).toLowerCase();
+    return allowed.has(candidate) ? candidate : fallback;
+}
+
+function normalizeStringArray(value: unknown): string[] | undefined {
+    if (!Array.isArray(value)) {
+        return undefined;
+    }
+    const normalized = value.map((item) => nonEmptyString(item).toLowerCase()).filter(Boolean);
+    return normalized.length > 0 ? Array.from(new Set(normalized)) : undefined;
+}
+
+function normalizeStringMap(value: unknown): Record<string, string> | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+    }
+    const out: Record<string, string> = {};
+    for (const [key, rawValue] of Object.entries(value as Record<string, unknown>)) {
+        const normalizedKey = nonEmptyString(key).toLowerCase();
+        const normalizedValue = nonEmptyString(rawValue);
+        if (normalizedKey && normalizedValue) {
+            out[normalizedKey] = normalizedValue;
+        }
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function normalizeThinkingBudgets(value: unknown): AimodelThinkingBudgets | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+    }
+    const out: AimodelThinkingBudgets = {};
+    for (const [key, rawValue] of Object.entries(value as Record<string, unknown>)) {
+        const level = normalizeLowerEnum(key, THINKING_LEVELS, "");
+        const budget = positiveInt(rawValue);
+        if (level && level !== "off" && level !== "xhigh" && level !== "adaptive" && budget) {
+            out[level as keyof AimodelThinkingBudgets] = budget;
+        }
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function normalizeStatus(value: unknown): number | undefined {
@@ -134,11 +209,149 @@ export function resolveAimodelProviderApiFromInstanceParam(
         if (normalized === "anthropic") {
             return "anthropic-messages";
         }
+        if (
+            normalized === "openai-responses" ||
+            normalized === "openai responses" ||
+            normalized === "responses"
+        ) {
+            return "openai-responses";
+        }
         if (normalized === "openai") {
             return "openai-completions";
         }
     }
     return "openai-completions";
+}
+
+function parseReasoningConfig(instanceParam: Record<string, unknown>): BaiyingReasoningConfig {
+    const raw =
+        instanceParam.reasoningConfig &&
+        typeof instanceParam.reasoningConfig === "object" &&
+        !Array.isArray(instanceParam.reasoningConfig)
+            ? (instanceParam.reasoningConfig as Record<string, unknown>)
+            : {};
+    const capability = normalizeLowerEnum(raw.capability, THINKING_CAPABILITIES, "unsupported") as
+        | "unsupported"
+        | "binary"
+        | "effort"
+        | "budget"
+        | "adaptive";
+    const enabled = Boolean(raw.enabled) && capability !== "unsupported";
+    return {
+        enabled,
+        defaultLevel: (enabled
+            ? normalizeLowerEnum(raw.defaultLevel, THINKING_LEVELS, "medium")
+            : "off") as AimodelThinkingLevel,
+        capability,
+        compatFormat: normalizeLowerEnum(raw.compatFormat, THINKING_FORMATS, "auto"),
+        supportedEfforts: normalizeStringArray(raw.supportedEfforts),
+        effortMap: normalizeStringMap(raw.effortMap),
+        budgets: normalizeThinkingBudgets(raw.budgets),
+    };
+}
+
+function inferThinkingFormat(params: {
+    api: AimodelProviderApi;
+    baseUrl: string;
+    modelId: string;
+    providerName?: unknown;
+    modelProtocol?: unknown;
+    configuredFormat: string;
+}): string | undefined {
+    if (params.configuredFormat && params.configuredFormat !== "auto") {
+        return params.configuredFormat;
+    }
+    const haystack = [
+        params.baseUrl,
+        params.modelId,
+        nonEmptyString(params.providerName),
+        nonEmptyString(params.modelProtocol),
+    ]
+        .join(" ")
+        .toLowerCase();
+    if (params.api === "anthropic-messages" || haystack.includes("anthropic") || haystack.includes("claude")) {
+        return "anthropic";
+    }
+    if (haystack.includes("deepseek")) {
+        return "deepseek";
+    }
+    if (haystack.includes("qwen") || haystack.includes("dashscope")) {
+        return "qwen";
+    }
+    if (haystack.includes("openrouter")) {
+        return "openrouter";
+    }
+    if (haystack.includes("together")) {
+        return "together";
+    }
+    if (haystack.includes("zai") || haystack.includes("glm")) {
+        return "zai";
+    }
+    return params.api === "openai-completions" || params.api === "openai-responses" ? "openai" : undefined;
+}
+
+function defaultEffortMapForFormat(format?: string): Record<string, string> | undefined {
+    if (format !== "deepseek") {
+        return undefined;
+    }
+    return {
+        minimal: "high",
+        low: "high",
+        medium: "high",
+        high: "high",
+        adaptive: "high",
+        xhigh: "max",
+        max: "max",
+    };
+}
+
+function defaultSupportedEffortsForFormat(format?: string): string[] | undefined {
+    if (format === "deepseek") {
+        return ["high", "max"];
+    }
+    return undefined;
+}
+
+function resolveReasoningModelOptions(params: {
+    api: AimodelProviderApi;
+    baseUrl: string;
+    modelId: string;
+    instanceParam: Record<string, unknown>;
+}): Pick<ProviderBundle, "reasoning" | "thinkingLevelMap" | "thinkingBudgets" | "compat"> {
+    const config = parseReasoningConfig(params.instanceParam);
+    if (!config.enabled || config.defaultLevel === "off") {
+        return { reasoning: false };
+    }
+    const format = inferThinkingFormat({
+        api: params.api,
+        baseUrl: params.baseUrl,
+        modelId: params.modelId,
+        providerName: params.instanceParam.providerName,
+        modelProtocol: params.instanceParam.modelProtocol,
+        configuredFormat: config.compatFormat,
+    });
+    const thinkingLevelMap: AimodelThinkingLevelMap = {
+        off: config.defaultLevel,
+    };
+    const effortMap = config.effortMap ?? defaultEffortMapForFormat(format);
+    const supportedReasoningEfforts =
+        config.supportedEfforts ?? defaultSupportedEffortsForFormat(format);
+    const compat: AimodelModelCompat = {};
+    if (format && format !== "anthropic") {
+        compat.thinkingFormat = format;
+    }
+    if (supportedReasoningEfforts?.length) {
+        compat.supportedReasoningEfforts = supportedReasoningEfforts;
+    }
+    if (effortMap && Object.keys(effortMap).length > 0) {
+        compat.reasoningEffortMap = effortMap;
+    }
+    return {
+        reasoning: true,
+        thinkingLevelMap,
+        thinkingBudgets: config.budgets,
+        compat: Object.keys(compat).length > 0 ? compat : undefined,
+    };
 }
 
 function parseBaiyingAimodelProviderBundleFromRecord(params: {
@@ -161,18 +374,25 @@ function parseBaiyingAimodelProviderBundleFromRecord(params: {
             ? (raw.instanceParam as Record<string, unknown>)
             : {};
     const abilities = normalizeAimodelAbilities(instanceParam.abilities);
+    const api = resolveAimodelProviderApiFromInstanceParam(instanceParam);
     return {
         baseUrl,
         apiKey: buildBaiyingAimodelSecretRef({
             modelId: params.modelId,
             secretProviderName: params.secretProviderName,
         }),
-        api: resolveAimodelProviderApiFromInstanceParam(instanceParam),
+        api,
         modelId: modelCode,
         modelName: nonEmptyString(raw.modelName) || modelCode,
         contextWindow: positiveInt(raw.maxContentToken) ?? 128000,
         maxTokens: positiveInt(instanceParam.maxTokens) ?? 8192,
         input: resolveAimodelModelInputFromAbilities(abilities),
+        ...resolveReasoningModelOptions({
+            api,
+            baseUrl,
+            modelId: modelCode,
+            instanceParam,
+        }),
     };
 }
 

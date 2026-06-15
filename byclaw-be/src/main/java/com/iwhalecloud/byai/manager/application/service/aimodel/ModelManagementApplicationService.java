@@ -12,6 +12,7 @@ import com.iwhalecloud.byai.manager.dto.aimodel.ModelDefault;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelListRequest;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelListResponse;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelRequest;
+import com.iwhalecloud.byai.manager.dto.aimodel.ModelReasoningConfig;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelUpsertRequest;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelVO;
 import com.iwhalecloud.byai.manager.entity.aimodel.ByaiAimodel;
@@ -53,6 +54,15 @@ public class ModelManagementApplicationService {
     private static final int MASK_PREFIX_LEN = 3;
 
     private static final int MASK_SUFFIX_LEN = 4;
+
+    private static final List<String> REASONING_LEVELS = List.of("off", "minimal", "low", "medium", "high", "xhigh",
+        "adaptive", "max");
+
+    private static final List<String> REASONING_CAPABILITIES = List.of("unsupported", "binary", "effort", "budget",
+        "adaptive");
+
+    private static final List<String> REASONING_COMPAT_FORMATS = List.of("auto", "openai", "qwen",
+        "qwen-chat-template", "deepseek", "openrouter", "together", "zai", "anthropic");
 
     @Autowired
     private ByaiAimodelDomainService byaiAimodelDomainService;
@@ -259,6 +269,32 @@ public class ModelManagementApplicationService {
         if (request.getContextTokens() == null || request.getContextTokens() < 1) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.contextTokens.required");
         }
+        validateReasoningConfig(request.getReasoningConfig(), request.getMaxTokens());
+    }
+
+    private void validateReasoningConfig(ModelReasoningConfig config, Integer maxTokens) {
+        if (config == null) {
+            return;
+        }
+        String defaultLevel = normalizeReasoningString(config.getDefaultLevel(), "off");
+        String capability = normalizeReasoningString(config.getCapability(), "unsupported");
+        String compatFormat = normalizeReasoningString(config.getCompatFormat(), "auto");
+        if (!REASONING_LEVELS.contains(defaultLevel) || !REASONING_CAPABILITIES.contains(capability)
+            || !REASONING_COMPAT_FORMATS.contains(compatFormat)) {
+            throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.reasoning.invalid");
+        }
+        if (config.getBudgets() == null || config.getBudgets().isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, Integer> entry : config.getBudgets().entrySet()) {
+            String level = normalizeReasoningString(entry.getKey(), "");
+            Integer budget = entry.getValue();
+            if (!REASONING_LEVELS.contains(level) || "off".equals(level) || "adaptive".equals(level)
+                || budget == null || budget < 1
+                || (maxTokens != null && maxTokens > 0 && budget >= maxTokens)) {
+                throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.reasoning.invalid");
+            }
+        }
     }
 
     /**
@@ -303,6 +339,7 @@ public class ModelManagementApplicationService {
             setVoInParamsStrings(vo, inParams);
             setVoInParamsNumbers(vo, inParams);
             setVoInParamsUpdatedAt(vo, inParams);
+            setVoReasoningConfig(vo, inParams);
         }
         catch (Exception e) {
             log.error("inParams to ModelVO fail, inParams={}", inParamsJson, e);
@@ -329,6 +366,14 @@ public class ModelManagementApplicationService {
         if (inParams.get("extendParam") != null) {
             vo.setExtendParam(MapParamUtil.getStringValue(inParams, "extendParam"));
         }
+    }
+
+    private void setVoReasoningConfig(ModelVO vo, Map<String, Object> inParams) {
+        if (inParams.get("reasoningConfig") == null) {
+            return;
+        }
+        vo.setReasoningConfig(JSON.parseObject(JSON.toJSONString(inParams.get("reasoningConfig")),
+            ModelReasoningConfig.class));
     }
 
     /**
@@ -506,11 +551,36 @@ public class ModelManagementApplicationService {
         putIfNonNull(inParams, "maxTokens", request.getMaxTokens());
         putIfNonNull(inParams, "frequencyPenalty", request.getFrequencyPenalty());
         putIfNonNull(inParams, "presencePenalty", request.getPresencePenalty());
+        putIfNonNull(inParams, "reasoningConfig", normalizeReasoningConfigForStorage(request.getReasoningConfig()));
         putIfNonNull(inParams, "extendParam", request.getExtendParam());
         if (modelId != null) {
             inParams.put("updatedAt", formatUpdatedAt(new Date()));
         }
         return inParams;
+    }
+
+    private ModelReasoningConfig normalizeReasoningConfigForStorage(ModelReasoningConfig config) {
+        if (config == null) {
+            return null;
+        }
+        ModelReasoningConfig normalized = new ModelReasoningConfig();
+        String capability = normalizeReasoningString(config.getCapability(), "unsupported");
+        boolean enabled = Boolean.TRUE.equals(config.getEnabled()) && !"unsupported".equals(capability);
+        normalized.setEnabled(enabled);
+        normalized.setDefaultLevel(enabled ? normalizeReasoningString(config.getDefaultLevel(), "medium") : "off");
+        normalized.setCapability(capability);
+        normalized.setCompatFormat(normalizeReasoningString(config.getCompatFormat(), "auto"));
+        normalized.setSupportedEfforts(config.getSupportedEfforts());
+        normalized.setEffortMap(config.getEffortMap());
+        normalized.setBudgets(config.getBudgets());
+        return normalized;
+    }
+
+    private String normalizeReasoningString(String value, String fallback) {
+        if (value == null || value.trim().isEmpty()) {
+            return fallback;
+        }
+        return value.trim().toLowerCase(java.util.Locale.ROOT);
     }
 
     private void putIfNonEmpty(Map<String, Object> map, String key, String value) {
