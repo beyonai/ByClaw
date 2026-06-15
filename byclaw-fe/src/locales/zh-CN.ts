@@ -1217,7 +1217,7 @@ export default {
   'chatBI.inputSearchKeyword': '请输入搜索关键词',
 
   // IndicatorDrawer组件
-  'thinkingProcess.done': '已思考完成',
+  'thinkingProcess.done': '已思考结束',
   'thinkingProcess.thinking': '深度思考中...',
   'thinkingProcess.foundReferences': '找到 {count} 篇参考资料',
 

@@ -70,36 +70,40 @@ function ThinkingProcessRender(props: IProps) {
     }
   }, [JSON.stringify(thinkList), isThinkDone, messageId]);
 
+  useEffect(() => {
+    setMyThinkCollapse(isThinkDone);
+  }, [isThinkDone]);
+
   if ((isNil(thinkList) || isEmpty(thinkList)) && isEmpty(resourceFrom)) return null;
 
   return (
     <>
       <p style={{ color: '##707680' }}>
         {isThinkDone && (
-          <span className="ub ub-ac">
-            {intl.formatMessage({ id: 'thinkingProcess.done' })}
+          <span
+            className="ub ub-ac pointer"
+            onClick={() => {
+              setMyThinkCollapse((prevState) => {
+                updateMessage({
+                  ...msg,
+                  thinkCollapse: !prevState,
+                });
+
+                return !prevState;
+              });
+            }}
+          >
+            <span style={{ color: 'var(--beyond-color-text-tertiary)' }}>
+              {intl.formatMessage({ id: 'thinkingProcess.done' })}
+            </span>
             {!myThinkCollapse && (
               <UpOutlined
-                style={{ fontSize: '12px', marginLeft: '12px' }}
-                onClick={() => {
-                  updateMessage({
-                    ...msg,
-                    thinkCollapse: true,
-                  });
-                  setMyThinkCollapse(true);
-                }}
+                style={{ fontSize: '12px', marginLeft: '12px', color: 'var(--beyond-color-text-tertiary)' }}
               />
             )}
             {myThinkCollapse && (
               <DownOutlined
-                style={{ fontSize: '12px', marginLeft: '12px' }}
-                onClick={() => {
-                  updateMessage({
-                    ...msg,
-                    thinkCollapse: false,
-                  });
-                  setMyThinkCollapse(false);
-                }}
+                style={{ fontSize: '12px', marginLeft: '12px', color: 'var(--beyond-color-text-tertiary)' }}
               />
             )}
           </span>
