@@ -15,6 +15,22 @@ if [ ! -f "$ENV_FILE" ]; then
     exit 1
 fi
 
+collect_env_file_variable_keys() {
+    awk '
+        /^[[:space:]]*(#|$)/ { next }
+        /^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=/ {
+            line = $0
+            sub(/^[[:space:]]*export[[:space:]]+/, "", line)
+            sub(/[[:space:]]*=.*/, "", line)
+            gsub(/[[:space:]]/, "", line)
+            print line
+        }
+    ' "$1" | sort -u
+}
+
+INITIAL_VARIABLE_KEYS="$(compgen -v | sort -u)"
+ENV_FILE_VARIABLE_KEYS="$(collect_env_file_variable_keys "$ENV_FILE")"
+
 set -a
 . "$ENV_FILE"
 set +a
@@ -39,6 +55,7 @@ OPENSANDBOX_HPA_MIN="${OPENSANDBOX_HPA_MIN:-$OPENSANDBOX_REPLICAS}"
 BYCLAW_BE_REPLICAS="${BYCLAW_BE_REPLICAS:-1}"
 BYCLAW_FE_REPLICAS="${BYCLAW_FE_REPLICAS:-1}"
 BYCLAW_QA_REPLICAS="${BYCLAW_QA_REPLICAS:-1}"
+BYCLAW_QA_WORKER_REPLICAS="${BYCLAW_QA_WORKER_REPLICAS:-1}"
 BYCLAW_DATA_REPLICAS="${BYCLAW_DATA_REPLICAS:-1}"
 BYCLAW_DEPLOY_CONFIG_DIR="${BYCLAW_DEPLOY_CONFIG_DIR:-$SCRIPT_DIR/../config}"
 BYCLAW_BE_APPLICATION_PROPERTIES="${BYCLAW_DEPLOY_CONFIG_DIR}/application.properties"
@@ -65,8 +82,9 @@ fi
 
 BE_DOMAINNAME="${BE_DOMAINNAME:-ByaiService}"
 QA_DOMAINNAME="${QA_DOMAINNAME:-byclaw-qa-manager}"
+QA_WORKER_NAME="${QA_WORKER_NAME:-byclaw-qa-worker}"
 DATACLOUD_DOMAINNAME="${DATACLOUD_DOMAINNAME:-byclaw-datacloud}"
-HOST="${HOST:-${BYCLAW_INGRESS_HOST:-byclaw.example.com}}"
+HOST="${HOST:-byclaw-be.${NS_SERVICE}.svc.cluster.local}"
 BE_SERVER_PORT="${BE_SERVER_PORT:-8086}"
 BE_WS_PORT="${BE_WS_PORT:-8082}"
 BYCLAW_QA_PORT="${BYCLAW_QA_PORT:-8000}"
@@ -194,6 +212,133 @@ compute_sha256() {
     else
         shasum -a 256 | awk '{print $1}'
     fi
+}
+
+render_env_line() {
+    local key="$1"
+    local value="${2:-}"
+    printf '%s=%s\n' "$key" "$value"
+}
+
+runtime_blacklist_prefixes() {
+    local prefixes
+    prefixes="K3S_,BYCLAW_K3S_,BYCLAW_RUNTIME_,BASH,COMP_,IMAGE_,LC_,LONGHORN_,MONITORING_,NS_,OPENGAUSS_PUBLIC_,OPENSANDBOX_,QUOTA_,REMOTE_,SSH_,SUDO_"
+    if [ -n "${BYCLAW_RUNTIME_ENV_EXTRA_BLACKLIST_PREFIXES:-}" ]; then
+        prefixes="${prefixes},${BYCLAW_RUNTIME_ENV_EXTRA_BLACKLIST_PREFIXES}"
+    fi
+    printf '%s' "$prefixes"
+}
+
+runtime_blacklist_keys() {
+    local keys
+    keys="_,ALERTMANAGER_WEBHOOK_URL,BYCLAW_BE_APPLICATION_PROPERTIES,BYCLAW_BE_LOGBACK_XML,BYCLAW_DEPLOY_CONFIG_DIR,BYCLAW_DEPLOY_STORAGE,BYCLAW_FE_NGINX_CONF,BYCLAW_INGRESS_HOST,BYCLAW_SERVICE_IMAGE_PULL_POLICY,DIRSTACK,ENV_FILE,ENV_FILE_VARIABLE_KEYS,EUID,FUNCNAME,GENERATE_STATIC_SANDBOX_WILDCARD_INGRESS,GROUPS,HOME,HOST,HOSTNAME,IFS,INITIAL_VARIABLE_KEYS,KUBE_DNS_SERVICE_IP,LINENO,LOGNAME,MACHTYPE,OLDPWD,OPENGAUSS_PVC_SIZE,OPTARG,OPTERR,OPTIND,OSTYPE,OUT_DIR,PATH,PIPESTATUS,PPID,PS1,PS2,PS4,PWD,RANDOM,SANDBOX_INGRESS_HOST,SCRIPT_DIR,SECONDS,SHELL,SHELLOPTS,SHLVL,SSHPASS,STORAGE_CLASS,TERM,TMPDIR,UID,USER,WORKSPACE_PVC_NAME,WORKSPACE_PVC_SIZE"
+    if [ -n "${BYCLAW_RUNTIME_ENV_EXTRA_BLACKLIST_KEYS:-}" ]; then
+        keys="${keys},${BYCLAW_RUNTIME_ENV_EXTRA_BLACKLIST_KEYS}"
+    fi
+    printf '%s' "$keys"
+}
+
+csv_contains_token() {
+    local csv="$1"
+    local token="$2"
+    case ",${csv}," in
+        *,"${token}",*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+is_runtime_blacklisted_key() {
+    local key="$1"
+    local prefix
+    if csv_contains_token "$(runtime_blacklist_keys)" "$key"; then
+        return 0
+    fi
+    IFS=',' read -ra prefixes <<< "$(runtime_blacklist_prefixes)"
+    for prefix in "${prefixes[@]}"; do
+        [ -n "$prefix" ] || continue
+        case "$key" in
+            "$prefix"*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+is_env_file_variable_key() {
+    local key="$1"
+    grep -Fxq "$key" <<< "$ENV_FILE_VARIABLE_KEYS"
+}
+
+is_initial_variable_key() {
+    local key="$1"
+    grep -Fxq "$key" <<< "$INITIAL_VARIABLE_KEYS"
+}
+
+is_runtime_secret_key() {
+    local key="$1"
+    case "$key" in
+        *PASSWORD*|*PASS*|*SECRET*|*TOKEN*|*PRIVATE_KEY*|*API_KEY*|*ACCESS_KEY*|*SECRET_KEY*|*CREDENTIAL*|*_KEY)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+render_byclaw_runtime_payload() {
+    local target="$1"
+    local key value declaration
+    while IFS= read -r key; do
+        case "$key" in
+            [A-Z_]*)
+                ;;
+            *)
+                continue
+                ;;
+        esac
+        if ! [[ "$key" =~ ^[A-Z_][A-Z0-9_]*$ ]]; then
+            continue
+        fi
+        if is_runtime_blacklisted_key "$key"; then
+            continue
+        fi
+        if is_initial_variable_key "$key" && ! is_env_file_variable_key "$key"; then
+            continue
+        fi
+        declaration="$(declare -p "$key" 2>/dev/null || true)"
+        case "$declaration" in
+            declare\ -a*|declare\ -A*) continue ;;
+        esac
+        if is_runtime_secret_key "$key"; then
+            [ "$target" = "secret" ] || continue
+        else
+            [ "$target" = "env" ] || continue
+        fi
+        value="${!key-}"
+        render_env_line "$key" "$value"
+    done < <(compgen -v | sort)
+}
+
+write_byclaw_runtime_env_files() {
+    local dir="$1"
+    render_byclaw_runtime_payload env > "$dir/.byclaw-runtime.env"
+    render_byclaw_runtime_payload secret > "$dir/.byclaw-runtime-secret.env"
+    {
+        render_env_line "HOST" "byclaw-be.${NS_SERVICE}.svc.cluster.local"
+        render_env_line "SERVICE_NAME" "$BE_DOMAINNAME"
+    } > "$dir/.byclaw-be-runtime.env"
+    {
+        render_env_line "HOST" "${QA_DOMAINNAME}.${NS_SERVICE}.svc.cluster.local"
+        render_env_line "SERVICE_NAME" "$QA_DOMAINNAME"
+    } > "$dir/.byclaw-qa-runtime.env"
+    {
+        render_env_line "HOST" "${QA_WORKER_NAME}.${NS_SERVICE}.svc.cluster.local"
+        render_env_line "SERVICE_NAME" "$QA_WORKER_NAME"
+    } > "$dir/.byclaw-qa-worker-runtime.env"
+    {
+        render_env_line "HOST" "${DATACLOUD_DOMAINNAME}.${NS_SERVICE}.svc.cluster.local"
+        render_env_line "SERVICE_NAME" "$DATACLOUD_DOMAINNAME"
+    } > "$dir/.byclaw-data-runtime.env"
 }
 
 rm -rf "$OUT_DIR"
@@ -1209,36 +1354,12 @@ spec:
 EOF
 } > "$OUT_DIR/30-sandbox/opensandbox.yaml"
 
+write_byclaw_runtime_env_files "$OUT_DIR/40-service"
+BYCLAW_RUNTIME_ENV_CHECKSUM="$(cat "$OUT_DIR/40-service"/.byclaw-runtime.env "$OUT_DIR/40-service"/.byclaw-*-runtime.env "$OUT_DIR/40-service"/.byclaw-runtime-secret.env | compute_sha256)"
+
 {
 render_byclaw_be_configmap
 cat <<EOF
-apiVersion: v1
-kind: Secret
-metadata:
-  name: byclaw-sandbox-api
-  namespace: ${NS_SERVICE}
-type: Opaque
-stringData:
-  api-key: "${BYCLAW_SANDBOX_API_KEY}"
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: byclaw-db-auth
-  namespace: ${NS_SERVICE}
-type: Opaque
-stringData:
-  password: "${DB_PASS}"
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: byclaw-redis-auth
-  namespace: ${NS_SERVICE}
-type: Opaque
-stringData:
-  password: "${REDIS_PASSWORD}"
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -1255,6 +1376,8 @@ spec:
     metadata:
       labels:
         app: byclaw-be
+      annotations:
+        byclaw.io/runtime-env-sha256: "${BYCLAW_RUNTIME_ENV_CHECKSUM}"
     spec:
       securityContext:
         fsGroup: 1001
@@ -1267,78 +1390,13 @@ spec:
               containerPort: ${BE_SERVER_PORT}
             - name: ws
               containerPort: ${BE_WS_PORT}
-          env:
-            - name: BE_DOMAINNAME
-              value: "${BE_DOMAINNAME}"
-            - name: QA_DOMAINNAME
-              value: "${QA_DOMAINNAME}"
-            - name: DATACLOUD_DOMAINNAME
-              value: "${DATACLOUD_DOMAINNAME}"
-            - name: HOST
-              value: "${HOST}"
-            - name: BE_SERVER_PORT
-              value: "${BE_SERVER_PORT}"
-            - name: BE_WS_PORT
-              value: "${BE_WS_PORT}"
-            - name: BYCLAW_SANDBOX_ENABLE
-              value: "${BYCLAW_SANDBOX_ENABLE:-true}"
-            - name: BYCLAW_SANDBOX_BASE_URL
-              value: "${BYCLAW_SANDBOX_BASE_URL}"
-            - name: BYCLAW_SANDBOX_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: byclaw-sandbox-api
-                  key: api-key
-            - name: BYCLAW_SANDBOX_ENDPOINT_SCHEME
-              value: "${BYCLAW_SANDBOX_ENDPOINT_SCHEME}"
-            - name: BYCLAW_SANDBOX_PROFILE_ENABLED
-              value: "${BYCLAW_SANDBOX_PROFILE_ENABLED:-false}"
-            - name: BYCLAW_SANDBOX_TIER_AUTOSCALE_ENABLED
-              value: "${BYCLAW_SANDBOX_TIER_AUTOSCALE_ENABLED:-false}"
-            - name: BYAI_ACCESS_URLPATTERNS
-              value: "${BYAI_ACCESS_URLPATTERNS:-/byaiService/sandbox/autoscale/alerts,/sandbox/autoscale/alerts}"
-            - name: BYCLAW_SANDBOX_VOLUME_BACKEND
-              value: "${BYCLAW_SANDBOX_VOLUME_BACKEND:-file}"
-            - name: FILE_STORAGE_TYPE
-              value: "${FILE_STORAGE_TYPE:-file}"
-            - name: FILE_STORAGE_MINIO_MOUNT_ENABLED
-              value: "${FILE_STORAGE_MINIO_MOUNT_ENABLED:-false}"
-            - name: BYCLAW_SANDBOX_FILE_VOLUME_ROOT
-              value: "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}"
-            - name: FILE_STORAGE_LOCAL_PATH
-              value: "${FILE_STORAGE_LOCAL_PATH}"
-            - name: BYCLAW_SANDBOX_FILE_VOLUME_TYPE
-              value: "${BYCLAW_SANDBOX_FILE_VOLUME_TYPE:-bind}"
-            - name: DB_HOST
-              value: "${DB_HOST}"
-            - name: DB_PORT
-              value: "${DB_PORT}"
-            - name: DB_TYPE
-              value: "${DB_TYPE}"
-            - name: DB_USER
-              value: "${DB_USER}"
-            - name: DB_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: byclaw-db-auth
-                  key: password
-            - name: DB_DATABASE
-              value: "${DB_DATABASE}"
-            - name: DB_SCHEMA
-              value: "${DB_SCHEMA}"
-            - name: REDIS_HOST
-              value: "${REDIS_HOST}"
-            - name: REDIS_PORT
-              value: "${REDIS_PORT}"
-            - name: REDIS_USERNAME
-              value: "${REDIS_USERNAME}"
-            - name: REDIS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: byclaw-redis-auth
-                  key: password
-            - name: REDIS_DATABASE
-              value: "${REDIS_DATABASE}"
+          envFrom:
+            - configMapRef:
+                name: byclaw-runtime-env
+            - configMapRef:
+                name: byclaw-be-runtime-env
+            - secretRef:
+                name: byclaw-runtime-secret
           resources:
             requests:
               cpu: "${BYCLAW_BE_CPU_REQUEST:-500m}"
@@ -1354,6 +1412,10 @@ spec:
               mountPath: /app/logs
             - name: workspace
               mountPath: ${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}
+            - name: runtime-env-file
+              mountPath: /etc/byclaw/.env
+              subPath: .env
+              readOnly: true
       volumes:
         - name: config
           configMap:
@@ -1363,6 +1425,9 @@ spec:
         - name: workspace
           persistentVolumeClaim:
             claimName: ${WORKSPACE_PVC_NAME}
+        - name: runtime-env-file
+          configMap:
+            name: byclaw-be-runtime-env-file
 ---
 apiVersion: v1
 kind: Service
@@ -1472,6 +1537,8 @@ spec:
     metadata:
       labels:
         app: ${QA_DOMAINNAME}
+      annotations:
+        byclaw.io/runtime-env-sha256: "${BYCLAW_RUNTIME_ENV_CHECKSUM}"
     spec:
       containers:
         - name: qa
@@ -1481,65 +1548,13 @@ spec:
           ports:
             - name: http
               containerPort: ${BYCLAW_QA_PORT}
-          env:
-            - name: QA_DOMAINNAME
-              value: "${QA_DOMAINNAME}"
-            - name: BE_DOMAINNAME
-              value: "${BE_DOMAINNAME}"
-            - name: HOST
-              value: "${HOST}"
-            - name: BYCLAW_QA_PORT
-              value: "${BYCLAW_QA_PORT}"
-            - name: BYCLAW_QA_AGENT_DATA_PATH
-              value: "${BYCLAW_QA_AGENT_DATA_PATH}"
-            - name: BYCLAW_QA_KB_FETCH_CACHE_TTL_SECONDS
-              value: "${BYCLAW_QA_KB_FETCH_CACHE_TTL_SECONDS}"
-            - name: BYCLAW_QA_KB_FETCH_CACHE_CLEANUP_INTERVAL_SECONDS
-              value: "${BYCLAW_QA_KB_FETCH_CACHE_CLEANUP_INTERVAL_SECONDS}"
-            - name: BYCLAW_QA_KB_MINIO_BUCKET
-              value: "${BYCLAW_QA_KB_MINIO_BUCKET}"
-            - name: BYCLAW_QA_KB_MINIO_MARKDOWN_BUCKET
-              value: "${BYCLAW_QA_KB_MINIO_MARKDOWN_BUCKET}"
-            - name: BYCLAW_QA_BYAI_WORKER_ID
-              value: "${BYCLAW_QA_BYAI_WORKER_ID}"
-            - name: DB_HOST
-              value: "${DB_HOST}"
-            - name: DB_PORT
-              value: "${DB_PORT}"
-            - name: DB_TYPE
-              value: "${DB_TYPE}"
-            - name: DB_USER
-              value: "${DB_USER}"
-            - name: DB_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: byclaw-db-auth
-                  key: password
-            - name: DB_DATABASE
-              value: "${DB_DATABASE}"
-            - name: DB_SCHEMA
-              value: "${DB_SCHEMA}"
-            - name: REDIS_HOST
-              value: "${REDIS_HOST}"
-            - name: REDIS_PORT
-              value: "${REDIS_PORT}"
-            - name: REDIS_USERNAME
-              value: "${REDIS_USERNAME}"
-            - name: REDIS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: byclaw-redis-auth
-                  key: password
-            - name: REDIS_DATABASE
-              value: "${REDIS_DATABASE}"
-            - name: MINIO_ENDPOINT
-              value: "${MINIO_ENDPOINT}"
-            - name: MINIO_ACCESS_KEY
-              value: "${MINIO_ACCESS_KEY}"
-            - name: MINIO_SECRET_KEY
-              value: "${MINIO_SECRET_KEY}"
-            - name: MINIO_SECURE
-              value: "${MINIO_SECURE}"
+          envFrom:
+            - configMapRef:
+                name: byclaw-runtime-env
+            - configMapRef:
+                name: byclaw-qa-runtime-env
+            - secretRef:
+                name: byclaw-runtime-secret
           resources:
             requests:
               cpu: "${BYCLAW_QA_CPU_REQUEST:-250m}"
@@ -1547,6 +1562,63 @@ spec:
             limits:
               cpu: "${BYCLAW_QA_CPU_LIMIT:-1}"
               memory: "${BYCLAW_QA_MEMORY_LIMIT:-2Gi}"
+          volumeMounts:
+            - name: runtime-env-file
+              mountPath: /etc/byclaw/.env
+              subPath: .env
+              readOnly: true
+      volumes:
+        - name: runtime-env-file
+          configMap:
+            name: byclaw-qa-runtime-env-file
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${QA_WORKER_NAME}
+  namespace: ${NS_SERVICE}
+spec:
+  replicas: ${BYCLAW_QA_WORKER_REPLICAS}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ${QA_WORKER_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${QA_WORKER_NAME}
+      annotations:
+        byclaw.io/runtime-env-sha256: "${BYCLAW_RUNTIME_ENV_CHECKSUM}"
+    spec:
+      containers:
+        - name: qa-worker
+          image: ${IMAGE_QA}
+          imagePullPolicy: ${BYCLAW_SERVICE_IMAGE_PULL_POLICY}
+          args: ["worker"]
+          envFrom:
+            - configMapRef:
+                name: byclaw-runtime-env
+            - configMapRef:
+                name: byclaw-qa-worker-runtime-env
+            - secretRef:
+                name: byclaw-runtime-secret
+          resources:
+            requests:
+              cpu: "${BYCLAW_QA_CPU_REQUEST:-250m}"
+              memory: "${BYCLAW_QA_MEMORY_REQUEST:-512Mi}"
+            limits:
+              cpu: "${BYCLAW_QA_CPU_LIMIT:-1}"
+              memory: "${BYCLAW_QA_MEMORY_LIMIT:-2Gi}"
+          volumeMounts:
+            - name: runtime-env-file
+              mountPath: /etc/byclaw/.env
+              subPath: .env
+              readOnly: true
+      volumes:
+        - name: runtime-env-file
+          configMap:
+            name: byclaw-qa-worker-runtime-env-file
 ---
 apiVersion: v1
 kind: Service
@@ -1579,6 +1651,8 @@ spec:
     metadata:
       labels:
         app: ${DATACLOUD_DOMAINNAME}
+      annotations:
+        byclaw.io/runtime-env-sha256: "${BYCLAW_RUNTIME_ENV_CHECKSUM}"
     spec:
       containers:
         - name: data
@@ -1587,67 +1661,13 @@ spec:
           ports:
             - name: http
               containerPort: ${DATACLOUD_DATA_SERVICE_PORT}
-          env:
-            - name: DATACLOUD_DOMAINNAME
-              value: "${DATACLOUD_DOMAINNAME}"
-            - name: BE_DOMAINNAME
-              value: "${BE_DOMAINNAME}"
-            - name: BE_DOMAINNAME_URL
-              value: "${BE_DOMAINNAME_URL}"
-            - name: HOST
-              value: "${HOST}"
-            - name: BE_SERVER_PORT
-              value: "${BE_SERVER_PORT}"
-            - name: DATACLOUD_PORT
-              value: "${DATACLOUD_PORT}"
-            - name: DATACLOUD_DATA_SERVICE_PORT
-              value: "${DATACLOUD_DATA_SERVICE_PORT}"
-            - name: DATACLOUD_DATA_SERVICE_URL
-              value: "${DATACLOUD_DATA_SERVICE_URL}"
-            - name: DATACLOUD_API_BASE_URL
-              value: "${DATACLOUD_API_BASE_URL}"
-            - name: DATACLOUD_START_MCP_SERVICE
-              value: "${DATACLOUD_START_MCP_SERVICE}"
-            - name: DATACLOUD_START_GATEWAY_WORKER
-              value: "${DATACLOUD_START_GATEWAY_WORKER}"
-            - name: DATACLOUD_GATEWAY_WORKER_ID
-              value: "${DATACLOUD_GATEWAY_WORKER_ID}"
-            - name: DATACLOUD_GATEWAY_CONSUMER_GROUP
-              value: "${DATACLOUD_GATEWAY_CONSUMER_GROUP}"
-            - name: DATACLOUD_GATEWAY_WORKSPACE_DIR
-              value: "${DATACLOUD_GATEWAY_WORKSPACE_DIR}"
-            - name: DATACLOUD_RESULT_FILE_API_BASE_URL
-              value: "${DATACLOUD_RESULT_FILE_API_BASE_URL}"
-            - name: DB_HOST
-              value: "${DB_HOST}"
-            - name: DB_PORT
-              value: "${DB_PORT}"
-            - name: DB_TYPE
-              value: "${DB_TYPE}"
-            - name: DB_USER
-              value: "${DB_USER}"
-            - name: DB_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: byclaw-db-auth
-                  key: password
-            - name: DB_DATABASE
-              value: "${DB_DATABASE}"
-            - name: DB_SCHEMA
-              value: "${DB_SCHEMA}"
-            - name: REDIS_HOST
-              value: "${REDIS_HOST}"
-            - name: REDIS_PORT
-              value: "${REDIS_PORT}"
-            - name: REDIS_USERNAME
-              value: "${REDIS_USERNAME}"
-            - name: REDIS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: byclaw-redis-auth
-                  key: password
-            - name: REDIS_DATABASE
-              value: "${REDIS_DATABASE}"
+          envFrom:
+            - configMapRef:
+                name: byclaw-runtime-env
+            - configMapRef:
+                name: byclaw-data-runtime-env
+            - secretRef:
+                name: byclaw-runtime-secret
           resources:
             requests:
               cpu: "${BYCLAW_DATA_CPU_REQUEST:-250m}"
@@ -1655,6 +1675,15 @@ spec:
             limits:
               cpu: "${BYCLAW_DATA_CPU_LIMIT:-1}"
               memory: "${BYCLAW_DATA_MEMORY_LIMIT:-2Gi}"
+          volumeMounts:
+            - name: runtime-env-file
+              mountPath: /etc/byclaw/.env
+              subPath: .env
+              readOnly: true
+      volumes:
+        - name: runtime-env-file
+          configMap:
+            name: byclaw-data-runtime-env-file
 ---
 apiVersion: v1
 kind: Service

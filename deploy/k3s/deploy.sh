@@ -389,7 +389,7 @@ wait_service_ready() {
         "service workloads" \
         "${BYCLAW_K3S_SERVICE_WAIT_TIMEOUT_SECONDS:-600}" \
         "${BYCLAW_K3S_SERVICE_WAIT_INTERVAL_SECONDS:-10}" \
-        "byclaw-be byclaw-fe ${QA_DOMAINNAME:-byclaw-qa-manager} ${DATACLOUD_DOMAINNAME:-byclaw-datacloud}" \
+        "byclaw-be byclaw-fe ${QA_DOMAINNAME:-byclaw-qa-manager} ${QA_WORKER_NAME:-byclaw-qa-worker} ${DATACLOUD_DOMAINNAME:-byclaw-datacloud}" \
         "" \
         ""
 }
@@ -456,6 +456,51 @@ ensure_opengauss_schema() {
     kubectl_cmd -n "$ns" exec "$pod" -- sh -lc 'set -e; for f in /tmp/01_init.sql /tmp/02_ddl.sql /tmp/03_grant.sql /tmp/04_dml.sql; do echo "    running $f"; su - omm -c "/usr/local/opengauss/bin/gsql -d postgres -f $f"; done'
 }
 
+apply_runtime_env_config() {
+    local ns="${NS_SERVICE:-by-service}"
+    local runtime_env="$GENERATED_DIR/40-service/.byclaw-runtime.env"
+    local runtime_secret="$GENERATED_DIR/40-service/.byclaw-runtime-secret.env"
+    local name file merged_file
+    if [ ! -f "$runtime_env" ]; then
+        echo "Error: runtime env file not found: $runtime_env" >&2
+        return 1
+    fi
+    if [ ! -f "$runtime_secret" ]; then
+        echo "Error: runtime secret env file not found: $runtime_secret" >&2
+        return 1
+    fi
+    echo "========== Applying ByClaw runtime env =========="
+    echo "    namespace: $ns"
+    echo "    configMap: byclaw-runtime-env"
+    echo "    mounted file: /etc/byclaw/.env"
+    kubectl_cmd -n "$ns" create configmap byclaw-runtime-env \
+        --from-env-file="$runtime_env" \
+        --dry-run=client -o yaml | kubectl_cmd apply -f -
+    for name in byclaw-be byclaw-qa byclaw-qa-worker byclaw-data; do
+        file="$GENERATED_DIR/40-service/.${name}-runtime.env"
+        if [ ! -f "$file" ]; then
+            echo "Error: workload runtime env file not found: $file" >&2
+            return 1
+        fi
+        echo "    configMap: ${name}-runtime-env"
+        kubectl_cmd -n "$ns" create configmap "${name}-runtime-env" \
+            --from-env-file="$file" \
+            --dry-run=client -o yaml | kubectl_cmd apply -f -
+        merged_file="$(mktemp)"
+        {
+            cat "$runtime_env"
+            cat "$file"
+        } > "$merged_file"
+        kubectl_cmd -n "$ns" create configmap "${name}-runtime-env-file" \
+            --from-file=.env="$merged_file" \
+            --dry-run=client -o yaml | kubectl_cmd apply -f -
+        rm -f "$merged_file"
+    done
+    kubectl_cmd -n "$ns" create secret generic byclaw-runtime-secret \
+        --from-env-file="$runtime_secret" \
+        --dry-run=client -o yaml | kubectl_cmd apply -f -
+}
+
 apply_generated() {
     require_kubectl
     render_manifests
@@ -470,6 +515,7 @@ apply_generated() {
     ensure_opengauss_schema
     # 仅 apply opensandbox.yaml；.templates/ 下是 BatchSandbox Jinja 模板，不是集群资源
     kubectl_cmd apply -f "$GENERATED_DIR/30-sandbox/opensandbox.yaml"
+    apply_runtime_env_config
     kubectl_cmd apply -f "$GENERATED_DIR/40-service/"
     cleanup_bad_pods_in_namespace "${NS_SANDBOX:-by-sandbox}"
     cleanup_bad_pods_in_namespace "${NS_SERVICE:-by-service}"
@@ -502,6 +548,7 @@ rollout_restart_workloads() {
     kubectl_cmd -n "${NS_SERVICE:-by-service}" rollout restart deploy/byclaw-be 2>/dev/null || true
     kubectl_cmd -n "${NS_SERVICE:-by-service}" rollout restart deploy/byclaw-fe 2>/dev/null || true
     kubectl_cmd -n "${NS_SERVICE:-by-service}" rollout restart "deploy/${QA_DOMAINNAME:-byclaw-qa-manager}" 2>/dev/null || true
+    kubectl_cmd -n "${NS_SERVICE:-by-service}" rollout restart "deploy/${QA_WORKER_NAME:-byclaw-qa-worker}" 2>/dev/null || true
     kubectl_cmd -n "${NS_SERVICE:-by-service}" rollout restart "deploy/${DATACLOUD_DOMAINNAME:-byclaw-datacloud}" 2>/dev/null || true
 }
 
