@@ -676,6 +676,14 @@ export default {
   'knowledgeDetail.uploadConfirmFiles': '已选择 {count} 个文件',
   'knowledgeDetail.uploadConfirmMoreFiles': '等 {count} 个文件',
   'knowledgeDetail.uploadConfirmDirectory': '上传目录：{directoryPath}',
+  'knowledgeDetail.uploadInfo': '上传信息',
+  'knowledgeDetail.uploadDirectory': '上传目录',
+  'knowledgeDetail.selectedFiles': '选择文件',
+  'knowledgeDetail.fileList': '文件列表',
+  'knowledgeDetail.confirmOverwriteUpload': '确认覆盖并上传',
+  'knowledgeDetail.overwriteWarningTitle': '检测到同路径同名文件，将执行覆盖上传',
+  'knowledgeDetail.overwriteWarningDesc':
+    '覆盖时会先删除知识库中的旧文件，再上传新文件；如果新文件导入失败，旧文件可能无法恢复。请确认后再继续。',
   'knowledgeDetail.processFrontMatter': '解析 YAML Front Matter',
   'knowledgeDetail.processFrontMatterTip':
     '仅当 Markdown 文件开头包含 --- 包裹的 YAML front matter header，并希望将其中字段写入文件元数据时开启。',

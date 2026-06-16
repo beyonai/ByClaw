@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Breadcrumb, Dropdown, Empty, Input, List, message, Tooltip, Typography } from 'antd';
+import { Breadcrumb, Dropdown, Empty, Input, List, message, Modal, Tooltip, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import { trim } from 'lodash';
@@ -9,7 +9,12 @@ import ResourceDetail from '@/components/Resources/components/ResourceDetail';
 import PropertyDetail from '@/components/Resources/components/PropertyDetail';
 import InfiniteScrollAntdList from '@/layout/sider/components/InfiniteScrollAntdList';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
-import { queryDigEmployeeRelResourceAuth, queryResourceMembers } from '@/pages/manager/service/resources';
+import {
+  deleteSkill,
+  queryDigEmployeeRelResourceAuth,
+  queryResourceMembers,
+  qrySkillListByUserCode,
+} from '@/pages/manager/service/resources';
 import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import { batchHandleAuth, listAuthDetail } from '@/pages/manager/service/DigitalResourceMgr';
@@ -23,6 +28,7 @@ import styles from './index.module.less';
 const { Title, Paragraph } = Typography;
 
 type ResourceSiderType = 'TOOL' | 'VIEW' | 'OBJECT' | 'SKILL';
+type SkillSourceType = 'bound' | 'uploaded';
 const PAGE_SIZE = 30;
 
 interface ResourceItem {
@@ -42,6 +48,10 @@ interface ResourceItem {
   propertyCode?: string;
   propertyGroup?: string;
   dataType?: string;
+  sourceType?: SkillSourceType;
+  skillPath?: string;
+  skillDocObjectKey?: string;
+  objectKey?: string;
 }
 
 interface Props {
@@ -95,6 +105,58 @@ const resourceConfigMap: Record<
 
 const PROPERTY_RESOURCE_TYPE = 'PROPERTY';
 const SHARE_GRANT_TYPE = 'FORCE_USE';
+const SKILL_SOURCE_BOUND: SkillSourceType = 'bound';
+const SKILL_SOURCE_UPLOADED: SkillSourceType = 'uploaded';
+
+const getArrayData = (response: any) => {
+  if (Array.isArray(response)) return response;
+  if (Array.isArray(response?.rows)) return response.rows;
+  if (Array.isArray(response?.list)) return response.list;
+  if (Array.isArray(response?.data)) return response.data;
+  return [];
+};
+
+const getSkillSourceKey = (item: ResourceItem) =>
+  String(
+    item.resourceCode || item.resourceName || item.skillPath || item.objectKey || item.resourceId || ''
+  ).toLowerCase();
+
+const mapBoundSkillRows = (rows: any[]): ResourceItem[] =>
+  rows.map((item) => ({
+    ...item,
+    sourceType: SKILL_SOURCE_BOUND,
+  }));
+
+const mapUploadedSkillRows = (rows: any[]): ResourceItem[] =>
+  rows.map((item, index) => ({
+    ...item,
+    resourceId: String(item.skillPath || item.objectKey || item.resourceId || `uploaded-skill-${index}`),
+    resourceCode: item.skillCode || item.resourceCode,
+    resourceName: item.skillName || item.resourceName,
+    resourceDesc: item.skillPath || item.skillDescEn || item.resourceDesc,
+    resourceBizType: ResourceTypeMap.SKILL,
+    sourceType: SKILL_SOURCE_UPLOADED,
+    id: item.skillPath || item.objectKey || item.resourceId || `uploaded-skill-${index}`,
+  }));
+
+const mergeSkillRows = (boundRows: ResourceItem[], uploadedRows: ResourceItem[]) => {
+  const existedKeys = new Set(boundRows.map(getSkillSourceKey).filter(Boolean));
+  const dedupedUploadedRows = uploadedRows.filter((item) => {
+    const key = getSkillSourceKey(item);
+    if (key && existedKeys.has(key)) {
+      return false;
+    }
+    if (key) {
+      existedKeys.add(key);
+    }
+    return true;
+  });
+
+  return {
+    rows: [...boundRows, ...dedupedUploadedRows],
+    uploadedCount: dedupedUploadedRows.length,
+  };
+};
 
 const getGrantItem = (item: any) => ({
   ...item,
@@ -142,6 +204,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     total: 0,
     loadedCount: 0,
   });
+  const uploadedSkillCountRef = useRef(0);
   const [searchValue, setSearchValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [resourceList, setResourceList] = useState<ResourceItem[]>([]);
@@ -296,30 +359,6 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
       listFetchRef.current = true;
       setLoading(true);
       try {
-        // if (resourceType === 'SKILL') {
-        //   const response = await qrySkillListByUserCode({
-        //     userCode: userInfo?.userCode,
-        //     resourceId: activeSiderAgent.resourceId,
-        //     keyword: trim(queryKeyword),
-        //   });
-        //   const rows = (Array.isArray(response) ? response : []).map((item: any, index: number) => ({
-        //     ...item,
-        //     resourceId: item.skillPath || item.resourceId || index,
-        //     resourceName: item.skillName || item.resourceName,
-        //     resourceDesc: item.skillPath || item.skillDescEn || item.resourceDesc,
-        //     resourceBizType: ResourceTypeMap.SKILL,
-        //     id: item.skillPath || item.resourceId || index,
-        //   }));
-        //   paginationRef.current = {
-        //     pageNum: 1,
-        //     total: rows.length,
-        //     loadedCount: rows.length,
-        //   };
-        //   setResourceList(rows);
-        //   setHasMore(false);
-        //   return;
-        // }
-
         const response = await queryDigEmployeeRelResourceAuth({
           pageNum,
           pageSize: PAGE_SIZE,
@@ -327,9 +366,30 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
           resourceId: activeSiderAgent.resourceId,
           resourceBizTypeList: config.resourceBizTypeList,
         });
-        const rows = Array.isArray(response?.rows) ? response.rows : Array.isArray(response?.list) ? response.list : [];
+        let rows = getArrayData(response);
         const responsePageNum = Number(response?.pageNum) || pageNum;
-        const responseTotal = Number(response?.total) || 0;
+        let responseTotal = Number(response?.total) || 0;
+
+        if (resourceType === 'SKILL') {
+          rows = mapBoundSkillRows(rows);
+
+          if (reset) {
+            const uploadedResponse = await qrySkillListByUserCode({
+              userCode: userInfo?.userCode,
+              resourceId: activeSiderAgent.resourceId,
+              keyword: trim(queryKeyword),
+            });
+            const uploadedRows = mapUploadedSkillRows(getArrayData(uploadedResponse));
+            const merged = mergeSkillRows(rows, uploadedRows);
+            rows = merged.rows;
+            uploadedSkillCountRef.current = merged.uploadedCount;
+          }
+
+          responseTotal += uploadedSkillCountRef.current;
+        } else if (reset) {
+          uploadedSkillCountRef.current = 0;
+        }
+
         const loadedCount = reset ? rows.length : paginationRef.current.loadedCount + rows.length;
         paginationRef.current = {
           pageNum: responsePageNum,
@@ -418,6 +478,25 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     };
   }, [loadResources]);
 
+  useEffect(() => {
+    const handleResourceTypeReload = (nextResourceType: string) => {
+      if (nextResourceType !== 'SKILL' || resourceType !== 'SKILL' || isInDrillDown()) {
+        return;
+      }
+      paginationRef.current = {
+        pageNum: 0,
+        total: 0,
+        loadedCount: 0,
+      };
+      loadResources({ reset: true, queryKeyword: keywordRef.current });
+    };
+
+    EventEmitter.on('beyond-resourceList-resourceType-reload', handleResourceTypeReload);
+    return () => {
+      EventEmitter.off('beyond-resourceList-resourceType-reload', handleResourceTypeReload);
+    };
+  }, [EventEmitter, loadResources, resourceType, breadcrumb.length]);
+
   const handleSearch = () => {
     const nextKeyword = trim(searchValue);
     keywordRef.current = nextKeyword;
@@ -469,12 +548,92 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     return intl.formatMessage({ id: 'resource.default' });
   };
 
+  const renderUploadedSkillDetail = (item: ResourceItem) => (
+    <div className={styles.uploadedSkillDetail}>
+      <div className={styles.uploadedSkillDetailTitle}>{item.resourceName}</div>
+      <div className={styles.uploadedSkillDetailItem}>
+        <div className={styles.uploadedSkillDetailLabel}>sourceType</div>
+        <div className={styles.uploadedSkillDetailValue}>{item.sourceType}</div>
+      </div>
+      {item.skillPath && (
+        <div className={styles.uploadedSkillDetailItem}>
+          <div className={styles.uploadedSkillDetailLabel}>skillPath</div>
+          <div className={styles.uploadedSkillDetailValue}>{item.skillPath}</div>
+        </div>
+      )}
+      {item.skillDocObjectKey && (
+        <div className={styles.uploadedSkillDetailItem}>
+          <div className={styles.uploadedSkillDetailLabel}>skillDocObjectKey</div>
+          <div className={styles.uploadedSkillDetailValue}>{item.skillDocObjectKey}</div>
+        </div>
+      )}
+      {item.resourceDesc && (
+        <div className={styles.uploadedSkillDetailItem}>
+          <div className={styles.uploadedSkillDetailLabel}>{intl.formatMessage({ id: 'common.description' })}</div>
+          <div className={styles.uploadedSkillDetailValue}>{item.resourceDesc}</div>
+        </div>
+      )}
+    </div>
+  );
+
+  const handleDeleteUploadedSkill = async (item: ResourceItem) => {
+    const skillPath = item.skillPath || item.objectKey || item.resourceId;
+    if (!skillPath) {
+      message.error(intl.formatMessage({ id: 'common.deleteFail' }));
+      return;
+    }
+
+    try {
+      const params: { skillPath: string; resourceId?: string | number; userCode?: string } = {
+        skillPath: String(skillPath),
+      };
+      if (activeSiderAgent.resourceId) {
+        params.resourceId = activeSiderAgent.resourceId;
+      }
+      if (userInfo?.userCode) {
+        params.userCode = userInfo.userCode;
+      }
+
+      await deleteSkill(params);
+      setResourceList((prev) =>
+        prev.filter((resource) => (resource.skillPath || resource.objectKey || resource.resourceId) !== skillPath)
+      );
+      clearDetailPanel?.();
+      message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
+      EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
+    } catch (error) {
+      console.error('技能删除失败：', error);
+      message.error(intl.formatMessage({ id: 'common.deleteFailed' }));
+    }
+  };
+
   const handleDetail = (item: ResourceItem) => {
     const { resourceBizType, resourceId } = item;
     const closeDetailPanel = () => clearDetailPanel?.();
 
     if (resourceBizType === PROPERTY_RESOURCE_TYPE) {
       setDetailPanel?.(<PropertyDetail item={item} onClose={closeDetailPanel} />, { width: 350 });
+      return;
+    }
+
+    if (resourceBizType === ResourceTypeMap.SKILL) {
+      if (item.sourceType === SKILL_SOURCE_UPLOADED) {
+        setDetailPanel?.(renderUploadedSkillDetail(item), { width: 350 });
+        return;
+      }
+
+      if (resourceId) {
+        setDetailPanel?.(
+          <SkillDetailDrawer
+            resourceId={resourceId}
+            title={intl.formatMessage({ id: 'common.skill' })}
+            open
+            panel
+            onClose={closeDetailPanel}
+          />,
+          { width: 350 }
+        );
+      }
       return;
     }
 
@@ -597,37 +756,47 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
    * 渲染资源详情下拉菜单
    */
   const renderDetailDropdown = (item: ResourceItem) => {
+    const isUploadedSkill = item.resourceBizType === ResourceTypeMap.SKILL && item.sourceType === SKILL_SOURCE_UPLOADED;
+    const menuItems = [
+      {
+        key: 'detail',
+        label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.detail' })}</div>,
+      },
+    ];
+    if (isUploadedSkill) {
+      menuItems.push({
+        key: 'delete',
+        label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.delete' })}</div>,
+      });
+    } else if (item.resourceBizType !== PROPERTY_RESOURCE_TYPE) {
+      menuItems.push({
+        key: 'share',
+        label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.share' })}</div>,
+      });
+    }
+
     return (
       <Dropdown
         key="detail"
         trigger={['hover']}
         overlayClassName={employeeStyles.mydropdown}
         menu={{
-          items: [
-            {
-              key: 'detail',
-              label: (
-                <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.detail' })}</div>
-              ),
-            },
-            ...(item.resourceBizType === PROPERTY_RESOURCE_TYPE
-              ? []
-              : [
-                {
-                  key: 'share',
-                  label: (
-                    <div className={employeeStyles.dropdownMenuItem}>
-                      {intl.formatMessage({ id: 'common.share' })}
-                    </div>
-                  ),
-                },
-              ]),
-          ],
+          items: menuItems,
           onClick: ({ key, domEvent }) => {
             domEvent.preventDefault();
             domEvent.stopPropagation();
             if (key === 'share') {
               void handleShare(item);
+              return;
+            }
+            if (key === 'delete') {
+              Modal.confirm({
+                title: intl.formatMessage({ id: 'common.deleteTips' }),
+                content: item.resourceName,
+                okText: intl.formatMessage({ id: 'common.confirm' }),
+                cancelText: intl.formatMessage({ id: 'common.cancel' }),
+                onOk: () => handleDeleteUploadedSkill(item),
+              });
               return;
             }
             handleDetail(item);
@@ -772,6 +941,15 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
                       <Tooltip title={item.resourceName}>
                         <span className={employeeStyles.nameRow}>
                           <span className={employeeStyles.nameText}>{item.resourceName}</span>
+                          {resourceType === 'SKILL' && item.sourceType && (
+                            <span
+                              className={`${styles.sourceTag} ${
+                                item.sourceType === SKILL_SOURCE_UPLOADED ? styles.uploadedSourceTag : ''
+                              }`}
+                            >
+                              {item.sourceType === SKILL_SOURCE_UPLOADED ? '上传' : '绑定'}
+                            </span>
+                          )}
                         </span>
                       </Tooltip>
                     </Title>

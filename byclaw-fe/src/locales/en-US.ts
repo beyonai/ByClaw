@@ -681,6 +681,14 @@ export default {
   'knowledgeDetail.uploadConfirmFiles': '{count} file(s) selected',
   'knowledgeDetail.uploadConfirmMoreFiles': 'and {count} more file(s)',
   'knowledgeDetail.uploadConfirmDirectory': 'Upload directory: {directoryPath}',
+  'knowledgeDetail.uploadInfo': 'Upload Info',
+  'knowledgeDetail.uploadDirectory': 'Upload Directory',
+  'knowledgeDetail.selectedFiles': 'Selected Files',
+  'knowledgeDetail.fileList': 'File List',
+  'knowledgeDetail.confirmOverwriteUpload': 'Overwrite and Upload',
+  'knowledgeDetail.overwriteWarningTitle': 'Existing files with the same path will be overwritten',
+  'knowledgeDetail.overwriteWarningDesc':
+    'Overwrite will delete the existing knowledge file first, then upload the new one. If the new import fails, the old file may not be recoverable. Please confirm before continuing.',
   'knowledgeDetail.processFrontMatter': 'Parse YAML Front Matter',
   'knowledgeDetail.processFrontMatterTip':
     'Enable this only when Markdown files start with a YAML front matter header wrapped by ---, and you want those fields written into file metadata.',

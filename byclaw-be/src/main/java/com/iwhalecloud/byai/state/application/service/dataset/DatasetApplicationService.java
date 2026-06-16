@@ -37,6 +37,8 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Set;
@@ -471,6 +473,33 @@ public class DatasetApplicationService {
         return uploadFiles(files, resourceId, directoryPath, fileDescription, Boolean.FALSE);
     }
 
+    public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
+        String fileDescription, Boolean processFrontMatter) throws IOException {
+        return uploadFiles(files, resourceId, directoryPath, fileDescription, processFrontMatter, Boolean.FALSE);
+    }
+
+    /**
+     * 知识库文件上传前检查同路径同名冲突，供前端展示覆盖确认。
+     *
+     * @param request 检查请求
+     * @return 冲突文件路径
+     */
+    public KnowledgeUploadConflictCheckResponse checkUploadFileConflicts(
+        KnowledgeUploadConflictCheckRequest request) {
+        if (request == null || request.getResourceId() == null) {
+            throw new BaseException("知识库资源标识不能为空");
+        }
+        SsResource ssResource = loadDatasetResource(request.getResourceId());
+        validateDatasetManagePermission(ssResource);
+
+        KnowledgeUploadConflictCheckResponse response = new KnowledgeUploadConflictCheckResponse();
+        List<String> overwritePaths = findExistingKnowledgeFilePaths(ssResource, request.getDirectoryPath(),
+            request.getFileNames());
+        response.setOverwritePaths(overwritePaths);
+        response.setConflict(!overwritePaths.isEmpty());
+        return response;
+    }
+
     /***
      * 上传文件到知识库
      *
@@ -479,10 +508,11 @@ public class DatasetApplicationService {
      * @param directoryPath 文件目录路径
      * @param fileDescription 文件描述
      * @param processFrontMatter 是否解析 Markdown 文件中的 YAML front matter
+     * @param overwrite 同路径同名文件存在时是否先删除旧文件再上传
      * @throws IOException 异常信息
      */
     public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
-        String fileDescription, Boolean processFrontMatter) throws IOException {
+        String fileDescription, Boolean processFrontMatter, Boolean overwrite) throws IOException {
 
         SsResource ssResource = loadDatasetResource(resourceId);
         validateDatasetManagePermission(ssResource);
@@ -492,13 +522,23 @@ public class DatasetApplicationService {
         uploadResult.setResourceCode(ssResource.getResourceCode());
         uploadResult.setResourceName(ssResource.getResourceName());
 
+        List<String> uploadFileNames = Arrays.stream(files).map(MultipartFile::getOriginalFilename).toList();
+        Set<String> existingFilePaths = Boolean.TRUE.equals(overwrite)
+            ? new HashSet<>(findExistingKnowledgeFilePaths(ssResource, directoryPath, uploadFileNames))
+            : new HashSet<>();
+
         for (MultipartFile multipartFile : files) {
 
             // 上传文件到知识库
             KbFileImport kbFileImport = new KbFileImport();
             kbFileImport.setKnCode(ssResource.getResourceCode());
 
-            kbFileImport.setFilePath(buildKnowledgeFilePath(directoryPath, multipartFile.getOriginalFilename()));
+            String filePath = buildKnowledgeFilePath(directoryPath, multipartFile.getOriginalFilename());
+            if (existingFilePaths.contains(filePath)) {
+                // QA 暂不支持原子覆盖，BE 只能在用户确认 overwrite=true 后先删旧文件再导入新文件。
+                deleteKnowledgeFile(ssResource, filePath, "覆盖上传前删除知识库旧文件");
+            }
+            kbFileImport.setFilePath(filePath);
             kbFileImport
                 .setFileDescription(fileDescription != null ? fileDescription : multipartFile.getOriginalFilename());
             // 是否解析 YAML front matter 由用户上传确认弹窗决定，后端只负责透传给 QA。
@@ -581,15 +621,21 @@ public class DatasetApplicationService {
 
         SsResource ssResource = loadDatasetResource(removeFileDto.getResourceId());
         validateDatasetManagePermission(ssResource);
+        deleteKnowledgeFile(ssResource, removeFileDto.getDirectoryPath(), "删除知识库文件");
 
-        // 删除构建
+    }
+
+    /**
+     * 删除知识库文件。覆盖上传时复用该逻辑，保证手动删除和覆盖删除走同一套 QA 响应校验。
+     */
+    private void deleteKnowledgeFile(SsResource ssResource, String filePath, String operationName) {
         KbFileDelete kbFileDelete = new KbFileDelete();
         kbFileDelete.setKnCode(ssResource.getResourceCode());
-        kbFileDelete.setFilePath(removeFileDto.getDirectoryPath());
+        kbFileDelete.setFilePath(filePath);
         logger.info("删除文件入参:{}", JSON.toJSONString(kbFileDelete));
         PythonBuildResponse<Void> removeResponse = feignPythonBuildService.deleteKnowledgeItem(kbFileDelete);
         logger.info("删除文件返回:{}", JSON.toJSONString(removeResponse));
-        assertPythonBuildSuccess(removeResponse, "删除知识库文件");
+        assertPythonBuildSuccess(removeResponse, operationName);
 
     }
 
@@ -706,6 +752,52 @@ public class DatasetApplicationService {
         }
 
         return resultList;
+    }
+
+    /**
+     * 查询指定目录下已存在的同名文件，返回完整文件路径。QA 的 import 暂不支持覆盖，所以覆盖上传前必须先找出旧文件。
+     */
+    private List<String> findExistingKnowledgeFilePaths(SsResource ssResource, String directoryPath,
+        List<String> fileNames) {
+        if (fileNames == null || fileNames.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        Set<String> targetFileNames = new HashSet<>();
+        for (String fileName : fileNames) {
+            String normalizedFileName = StringUtils.trimToEmpty(fileName).replace('\\', '/');
+            if (StringUtils.isNotBlank(normalizedFileName) && !normalizedFileName.contains("/")) {
+                targetFileNames.add(normalizedFileName);
+            }
+        }
+        if (targetFileNames.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        KbListDir kbListDir = new KbListDir();
+        kbListDir.setKnCode(ssResource.getResourceCode());
+        kbListDir.setDirectoryPath(normalizeKnowledgeDirectoryPath(directoryPath));
+        PythonBuildResponse<Data> response = feignPythonBuildService.listDir(kbListDir);
+        assertPythonBuildSuccess(response, "检查知识库同名文件");
+
+        List<String> existingFilePaths = new ArrayList<>();
+        Data resultObject = response.getResultObject();
+        if (resultObject == null || resultObject.getData() == null) {
+            return existingFilePaths;
+        }
+        for (DirOrFile dirOrFile : resultObject.getData()) {
+            if (dirOrFile == null || !"file".equalsIgnoreCase(dirOrFile.getType())) {
+                continue;
+            }
+            String existingName = getLastSplitName(dirOrFile.getName());
+            String existingPath = StringUtils.contains(dirOrFile.getName(), "/")
+                ? normalizeKnowledgeFilePath(dirOrFile.getName())
+                : buildKnowledgeFilePath(directoryPath, existingName);
+            if (targetFileNames.contains(existingName)) {
+                existingFilePaths.add(existingPath);
+            }
+        }
+        return existingFilePaths;
     }
 
     /**
@@ -1003,6 +1095,20 @@ public class DatasetApplicationService {
         }
         return "/".equals(normalizedDirectoryPath) ? "/" + normalizedFileName
             : normalizedDirectoryPath + "/" + normalizedFileName;
+    }
+
+    /**
+     * QA 返回的文件名按完整文件路径处理，统一补齐开头斜杠并压缩重复斜杠。
+     */
+    private String normalizeKnowledgeFilePath(String filePath) {
+        String normalizedPath = StringUtils.trimToEmpty(filePath).replace('\\', '/').replaceAll("/+", "/");
+        if (StringUtils.isBlank(normalizedPath)) {
+            throw new BaseException("知识库文件路径不合法");
+        }
+        if (!normalizedPath.startsWith("/")) {
+            normalizedPath = "/" + normalizedPath;
+        }
+        return normalizedPath;
     }
 
     /**
