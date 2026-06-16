@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Breadcrumb, Dropdown, Empty, Input, List, message, Modal, Tooltip, Typography } from 'antd';
+import { Breadcrumb, Button, Dropdown, Empty, Input, List, message, Modal, Tooltip, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import { trim } from 'lodash';
@@ -14,6 +14,7 @@ import {
   queryDigEmployeeRelResourceAuth,
   queryResourceMembers,
   qrySkillListByUserCode,
+  uploadSkillZip,
 } from '@/pages/manager/service/resources';
 import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
@@ -23,6 +24,9 @@ import { resourceBizTypeMap } from '@/constants/knowledge';
 import useGlobal from '@/hooks/useGlobal';
 import ActiveSiderAgentBar, { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
+import { getManagerMenuConfig, normalizeMenuUrl } from '@/pages/manager/layout/sider/menuConfig';
+import { getRuntimeActualUrl } from '@/utils';
+import { getToken } from '@/utils/auth';
 import styles from './index.module.less';
 
 const { Title, Paragraph } = Typography;
@@ -107,6 +111,8 @@ const PROPERTY_RESOURCE_TYPE = 'PROPERTY';
 const SHARE_GRANT_TYPE = 'FORCE_USE';
 const SKILL_SOURCE_BOUND: SkillSourceType = 'bound';
 const SKILL_SOURCE_UPLOADED: SkillSourceType = 'uploaded';
+const UI_SKILL_MENU_CODE = 'menu_ui_agent';
+const UI_SKILL_MENU_NAME = '界面技能';
 
 const getArrayData = (response: any) => {
   if (Array.isArray(response)) return response;
@@ -198,6 +204,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
   const listFetchRef = useRef(false);
   const itemClickTimerRef = useRef<number | null>(null);
+  const skillUploadInputRef = useRef<HTMLInputElement | null>(null);
   const keywordRef = useRef('');
   const paginationRef = useRef({
     pageNum: 0,
@@ -214,6 +221,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   const [shareRecord, setShareRecord] = useState<ResourceItem | null>(null);
   const [shareAuthList, setShareAuthList] = useState<any[]>([]);
   const [shareBlackList, setShareBlackList] = useState<any[]>([]);
+  const [skillUploading, setSkillUploading] = useState(false);
 
   // 下钻相关状态
   interface BreadcrumbItem {
@@ -523,6 +531,98 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         loadedCount: 0,
       };
       loadResources({ reset: true, queryKeyword: nextKeyword });
+    }
+  };
+
+  const handleSkillImportClick = () => {
+    if (skillUploadInputRef.current) {
+      skillUploadInputRef.current.value = '';
+    }
+    skillUploadInputRef.current?.click();
+  };
+
+  const handleSkillImportChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const uploadFiles = Array.from(event.target.files || []).filter(Boolean);
+    event.target.value = '';
+    if (!uploadFiles.length) {
+      return;
+    }
+
+    if (
+      uploadFiles.some((file) => {
+        const fileName = file.name.toLowerCase();
+        return !fileName.endsWith('.zip') && !fileName.endsWith('.tar.gz');
+      })
+    ) {
+      message.error(intl.formatMessage({ id: 'resourceTabs.skillUpload.onlyZip' }));
+      return;
+    }
+
+    const userCode = userInfo?.userCode;
+    if (!userCode) {
+      message.error(intl.formatMessage({ id: 'resourceTabs.skillUpload.noUserCode' }));
+      return;
+    }
+
+    setSkillUploading(true);
+    try {
+      const formData = new FormData();
+      uploadFiles.forEach((file) => {
+        formData.append('files', file);
+      });
+      formData.append('userCode', userCode);
+      if (activeSiderAgent.resourceId) {
+        formData.append('resourceId', String(activeSiderAgent.resourceId));
+      }
+
+      const response = await uploadSkillZip(formData);
+      message.success(response?.msg || intl.formatMessage({ id: 'resourceTabs.skillUpload.success' }));
+      EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
+    } catch (error: any) {
+      message.error(error?.message || error || intl.formatMessage({ id: 'resourceTabs.skillUpload.failed' }));
+    } finally {
+      setSkillUploading(false);
+    }
+  };
+
+  const handleComplexSkillDevelop = () => {
+    message.info('代码智能体开发中，敬请期待');
+  };
+
+  const openManagerMenu = (menu: any) => {
+    if (menu?.menuUrl) {
+      let url = normalizeMenuUrl(menu.menuUrl);
+      if (url.includes('${Beyond-token}')) {
+        url = url.replace('${Beyond-token}', getToken());
+      }
+      window.open(url, '_blank');
+      return true;
+    }
+
+    const routePath = menu?.routePath || (String(menu?.path || '').startsWith('/manager/') ? menu.path : '');
+    if (routePath) {
+      window.open(`${window.location.origin}${getRuntimeActualUrl(routePath)}`, '_blank');
+      return true;
+    }
+
+    return false;
+  };
+
+  const handlePageSkillDevelop = async () => {
+    try {
+      const menus = await getManagerMenuConfig();
+      const matchedMenu = menus.find((item: any) => {
+        const names = [item.name, item.nameEn, item.menuNameCn, item.menuNameEn].filter(Boolean).map(String);
+        return item.menuCode === UI_SKILL_MENU_CODE || names.some((name) => name.includes(UI_SKILL_MENU_NAME));
+      });
+
+      if (matchedMenu && openManagerMenu(matchedMenu)) {
+        return;
+      }
+
+      message.warning('未找到界面技能管理菜单配置');
+    } catch (error: any) {
+      message.warning(error?.message || '未找到界面技能管理菜单配置');
     }
   };
 
@@ -904,6 +1004,35 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         onChange={(event) => setSearchValue(event.target.value)}
         onPressEnter={handleSearch}
       />
+      {resourceType === 'SKILL' && (
+        <>
+          <input
+            ref={skillUploadInputRef}
+            className={styles.skillUploadInput}
+            type="file"
+            accept=".zip,.tar.gz"
+            multiple
+            onChange={handleSkillImportChange}
+          />
+          <div className={styles.skillActionBar}>
+            <Button
+              size="small"
+              className={styles.skillActionButton}
+              loading={skillUploading}
+              disabled={skillUploading}
+              onClick={handleSkillImportClick}
+            >
+              技能导入
+            </Button>
+            <Button size="small" className={styles.skillActionButton} onClick={handleComplexSkillDevelop}>
+              复杂技能开发
+            </Button>
+            <Button size="small" className={styles.skillActionButton} onClick={handlePageSkillDevelop}>
+              页面技能开发
+            </Button>
+          </div>
+        </>
+      )}
       <div className={styles.listContainer}>
         <InfiniteScrollAntdList
           className={employeeStyles.employeesList}
