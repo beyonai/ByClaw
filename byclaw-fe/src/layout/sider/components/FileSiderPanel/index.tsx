@@ -2,8 +2,8 @@ import React from 'react';
 import { Empty, Spin } from 'antd';
 import { useIntl, useLocation, useNavigate } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
-import FileBrowserPanel from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel';
 import ActiveSiderAgentBar, { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
+import FileMiniList from './FileMiniList';
 import styles from './index.module.less';
 
 const FileSiderPanel: React.FC = () => {
@@ -39,7 +39,7 @@ const FileSiderPanel: React.FC = () => {
       <div className={styles.content}>
         {activeSiderAgent.resourceId ? (
           <React.Suspense fallback={<Spin />}>
-            <FileBrowserPanel resourceId={activeSiderAgent.resourceId} mode="preview" />
+            <FileMiniList resourceId={activeSiderAgent.resourceId} />
           </React.Suspense>
         ) : (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />

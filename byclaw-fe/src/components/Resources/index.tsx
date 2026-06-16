@@ -328,7 +328,6 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
           panel
           resourceId={item.resourceId}
           item={item}
-          resourceType={resourceType}
           resourceName={resourceName}
           onCancel={() => clearDetailPanel?.()}
           onEdit={() => {}}

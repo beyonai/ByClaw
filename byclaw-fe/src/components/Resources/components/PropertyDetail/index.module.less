@@ -1,0 +1,59 @@
+.detailPanel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.panelHeader {
+  height: 48px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(~'--@{antPrefix}-color-border-secondary');
+}
+
+.panelTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.panelBody {
+  flex: 1;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+}
+
+.detailFields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detailField {
+  padding: 12px;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.detailLabel {
+  margin-bottom: 8px;
+  color: #707680;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.detailValue {
+  color: #1f2533;
+  font-size: 14px;
+  line-height: 22px;
+  word-break: break-word;
+}

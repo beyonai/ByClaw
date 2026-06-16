@@ -17,7 +17,6 @@ interface IResourceItem {
   resourceBizType?: string;
   createTime?: number | string;
   resourceSourcePkId?: string;
-  resourceType?: React.Key;
   extInfo?: any;
 }
 
@@ -25,7 +24,6 @@ interface ResourceDetailProps {
   visible: boolean;
   resourceId?: string | number;
   item: IResourceItem | null;
-  resourceType: string;
   resourceName: string;
   onCancel: () => void;
   onEdit: () => void;

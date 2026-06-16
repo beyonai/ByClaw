@@ -2,6 +2,8 @@ import { createContext } from 'react';
 import { noop } from 'lodash';
 
 export const DEFAULT_SIDER_CONTENT_WIDTH = 280;
+export const SIDER_BAR_WIDTH = 56;
+export const HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH = 'half-main-content';
 
 export type DetailPanelOptions = {
   width?: number | string;

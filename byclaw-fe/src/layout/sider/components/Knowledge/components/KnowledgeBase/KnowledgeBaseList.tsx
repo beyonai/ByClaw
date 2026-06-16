@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
-import { Input, Dropdown, List, theme, Typography } from 'antd';
+import { Input, Dropdown, List, message, theme, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { trim, get, isEmpty, intersection, debounce } from 'lodash';
 import { useIntl, useSelector } from '@umijs/max';
@@ -7,9 +7,11 @@ import AntdIcon from '@/components/AntdIcon';
 import ResourceDetail from '@/components/Resources/components/ResourceDetail';
 import DetailPanel from '@/pages/knowledgeCenter/components/DetailPanel';
 import ShareModal from '@/pages/knowledgeCenter/components/shareModal';
+import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import { getRuntimeActualUrl } from '@/utils';
 import withDrag, { DragType, IDragType } from '@/components/QueryInput/withDrag';
 import { queryDigEmployeeRelResourceAuth } from '@/pages/manager/service/resources';
+import { batchHandleAuth, listAuthDetail } from '@/pages/manager/service/DigitalResourceMgr';
 import { IKnowledgeBaseItem } from './types';
 import InfiniteScrollAntdList from '../../../InfiniteScrollAntdList';
 import commonStyles from '../common.module.less';
@@ -21,6 +23,36 @@ import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import styles from './index.module.less';
 
 const { Title, Paragraph } = Typography;
+const SHARE_GRANT_TYPE = 'FORCE_USE';
+
+const getGrantItem = (item: any) => ({
+  ...item,
+  id: `${String(item.grantToObjType).toLowerCase()}_${item.grantToObjId}`,
+  name: item.grantToObjName,
+  type: item.grantToObjType,
+});
+
+const transformGrantItem = (item: any) => {
+  const [, idFromKey] = String(item.id || '').split('_');
+  return {
+    grantToObjId: idFromKey || item.grantToObjId,
+    grantToObjType: item.type || item.grantToObjType,
+  };
+};
+
+interface AuthDetailResponse {
+  code?: number;
+  msg?: string;
+  data?: {
+    redList?: any[];
+    blackList?: any[];
+  };
+}
+
+interface AuthSaveResponse {
+  code?: number;
+  msg?: string;
+}
 
 interface KnowledgeBaseListProps {
   editable?: boolean;
@@ -48,6 +80,10 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
     openType: '' | 'add' | 'rename' | 'share';
     info?: IKnowledgeBaseItem;
   }>({ openType: '' });
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareRecord, setShareRecord] = useState<IKnowledgeBaseItem | null>(null);
+  const [shareAuthList, setShareAuthList] = useState<any[]>([]);
+  const [shareBlackList, setShareBlackList] = useState<any[]>([]);
   const { EventEmitter } = useGlobal();
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
   const { userInfo } = useSelector(({ user }: any) => ({
@@ -221,7 +257,6 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
           panel
           resourceId={item.resourceId}
           item={item}
-          resourceType={item.resourceBizType || 'KG_DOC'}
           resourceName={intl.formatMessage({ id: 'resource.knowledge' })}
           onCancel={() => clearDetailPanel?.()}
           onEdit={() => {}}
@@ -230,6 +265,80 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
       );
     },
     [clearDetailPanel, intl, setDetailPanel]
+  );
+
+  const handleShare = useCallback(
+    async (item: IKnowledgeBaseItem) => {
+      if (!item.resourceId || !item.resourceBizType) return;
+      try {
+        const detail = (await listAuthDetail({
+          grantType: SHARE_GRANT_TYPE,
+          grantObjType: item.resourceBizType,
+          grantObjId: item.resourceId,
+        })) as unknown as AuthDetailResponse;
+
+        if (detail && detail.code === 0) {
+          setShareRecord(item);
+          setShareAuthList(detail.data?.redList?.map(getGrantItem) || []);
+          setShareBlackList(detail.data?.blackList?.map(getGrantItem) || []);
+          setShareModalOpen(true);
+          return;
+        }
+
+        message.error(detail?.msg || intl.formatMessage({ id: 'common.operationFailed' }));
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
+      }
+    },
+    [intl]
+  );
+
+  const handleShareCancel = useCallback(() => {
+    setShareModalOpen(false);
+    setShareRecord(null);
+    setShareAuthList([]);
+    setShareBlackList([]);
+  }, []);
+
+  const handleShareConfirm = useCallback(
+    async (authList: any[]) => {
+      if (!shareRecord?.resourceId || !shareRecord?.resourceBizType) return;
+
+      const redList = authList.map((item) => ({
+        ...transformGrantItem(item),
+        grantType: SHARE_GRANT_TYPE,
+      }));
+      const blackList = shareBlackList.map((item) => ({
+        ...transformGrantItem(item),
+        grantType: SHARE_GRANT_TYPE,
+      }));
+
+      try {
+        const res = (await batchHandleAuth(
+          {
+            grantObjId: shareRecord.resourceId,
+            grantObjType: shareRecord.resourceBizType,
+            redList,
+            blackList,
+            resourceId: shareRecord.resourceId,
+          },
+          '/byaiService/auth/privilegeGrant/setResourceUsers'
+        )) as unknown as AuthSaveResponse;
+
+        if (res && res.code === 0) {
+          message.success(intl.formatMessage({ id: 'common.shareSuccess' }));
+          handleShareCancel();
+          loadKnowledgeBases(true);
+          moduleEventEmitter.emit('REFRESH_KNOWLEDGE_BASE');
+          return;
+        }
+
+        message.error(res?.msg || intl.formatMessage({ id: 'common.shareFailed' }));
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'common.shareFailed' }));
+      }
+    },
+    [handleShareCancel, intl, loadKnowledgeBases, moduleEventEmitter, shareBlackList, shareRecord]
   );
 
   return (
@@ -301,10 +410,22 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
                       </div>
                     ),
                   },
+                  {
+                    key: 'share',
+                    label: (
+                      <div className={employeeStyles.dropdownMenuItem}>
+                        {intl.formatMessage({ id: 'common.share' })}
+                      </div>
+                    ),
+                  },
                 ],
-                onClick: ({ domEvent }) => {
+                onClick: ({ key, domEvent }) => {
                   domEvent.preventDefault();
                   domEvent.stopPropagation();
+                  if (key === 'share') {
+                    void handleShare(item);
+                    return;
+                  }
                   handleDetail(item);
                 },
               }}
@@ -386,6 +507,15 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
           }}
           onCancel={closeModal}
           info={modalState.info}
+        />
+      )}
+      {shareModalOpen && (
+        <AddAuthModal
+          title={intl.formatMessage({ id: 'auth.addAuthObject' })}
+          value={shareAuthList}
+          showPost={false}
+          onCancel={handleShareCancel}
+          onOk={handleShareConfirm}
         />
       )}
       {modalState.openType === 'rename' && (

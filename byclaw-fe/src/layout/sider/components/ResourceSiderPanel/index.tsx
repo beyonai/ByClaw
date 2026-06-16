@@ -1,15 +1,18 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Breadcrumb, Dropdown, Empty, Input, List, Tooltip, Typography } from 'antd';
+import { Breadcrumb, Dropdown, Empty, Input, List, message, Tooltip, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import { trim } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
 import { DragType, type IDragType } from '@/components/QueryInput/withDrag';
 import ResourceDetail from '@/components/Resources/components/ResourceDetail';
+import PropertyDetail from '@/components/Resources/components/PropertyDetail';
 import InfiniteScrollAntdList from '@/layout/sider/components/InfiniteScrollAntdList';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import { queryDigEmployeeRelResourceAuth, queryResourceMembers } from '@/pages/manager/service/resources';
 import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
+import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
+import { batchHandleAuth, listAuthDetail } from '@/pages/manager/service/DigitalResourceMgr';
 import { ResourceTypeMap } from '@/constants/resource';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import useGlobal from '@/hooks/useGlobal';
@@ -35,6 +38,10 @@ interface ResourceItem {
   createUserName?: string;
   extInfo?: any;
   isTop?: string | number;
+  propertyName?: string;
+  propertyCode?: string;
+  propertyGroup?: string;
+  dataType?: string;
 }
 
 interface Props {
@@ -86,6 +93,38 @@ const resourceConfigMap: Record<
   },
 };
 
+const PROPERTY_RESOURCE_TYPE = 'PROPERTY';
+const SHARE_GRANT_TYPE = 'FORCE_USE';
+
+const getGrantItem = (item: any) => ({
+  ...item,
+  id: `${String(item.grantToObjType).toLowerCase()}_${item.grantToObjId}`,
+  name: item.grantToObjName,
+  type: item.grantToObjType,
+});
+
+const transformGrantItem = (item: any) => {
+  const [, idFromKey] = String(item.id || '').split('_');
+  return {
+    grantToObjId: idFromKey || item.grantToObjId,
+    grantToObjType: item.type || item.grantToObjType,
+  };
+};
+
+interface AuthDetailResponse {
+  code?: number;
+  msg?: string;
+  data?: {
+    redList?: any[];
+    blackList?: any[];
+  };
+}
+
+interface AuthSaveResponse {
+  code?: number;
+  msg?: string;
+}
+
 const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   const intl = useIntl();
   const navigate = useNavigate();
@@ -108,6 +147,10 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   const [resourceList, setResourceList] = useState<ResourceItem[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [resourceDetails, setResourceDetails] = useState<Record<string, any>>({});
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareRecord, setShareRecord] = useState<ResourceItem | null>(null);
+  const [shareAuthList, setShareAuthList] = useState<any[]>([]);
+  const [shareBlackList, setShareBlackList] = useState<any[]>([]);
 
   // 下钻相关状态
   interface BreadcrumbItem {
@@ -203,6 +246,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
               resourceName: obj.resourceName,
               resourceCode: obj.resourceCode,
               resourceDesc: obj.resourceDesc,
+              resourceBizType: 'OBJECT',
             });
           });
         }
@@ -211,9 +255,11 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         if (targetContent.fields && targetContent.fields.length > 0) {
           targetContent.fields.forEach((field: any) => {
             drillItems.push({
-              resourceId: `${item.resourceId}-${field.propertyName}`,
+              ...field,
+              resourceId: field.propertyCode,
               resourceName: field.propertyName,
               resourceDesc: field.propertyCode,
+              resourceBizType: PROPERTY_RESOURCE_TYPE,
             });
           });
         }
@@ -406,17 +452,31 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     return 'icon-chuangjianfangshi-shujuku';
   };
 
-  const getResourceName = () => {
-    if (resourceType === 'TOOL') return intl.formatMessage({ id: 'resource.tool' });
-    if (resourceType === 'VIEW') return intl.formatMessage({ id: 'resource.view' });
-    if (resourceType === 'OBJECT') return intl.formatMessage({ id: 'resource.object' });
-    if (resourceType === 'SKILL') return intl.formatMessage({ id: 'common.skill' });
+  const getResourceName = (resourceBizType?: string) => {
+    if (resourceBizType === ResourceTypeMap.TOOL || resourceBizType === resourceBizTypeMap.TOOL) {
+      return intl.formatMessage({ id: 'resource.tool' });
+    }
+    if (resourceBizType === ResourceTypeMap.VIEW) return intl.formatMessage({ id: 'resource.view' });
+    if (resourceBizType === ResourceTypeMap.OBJECT) return intl.formatMessage({ id: 'resource.object' });
+    if (resourceBizType === ResourceTypeMap.SKILL) return intl.formatMessage({ id: 'common.skill' });
+    if (resourceBizType === PROPERTY_RESOURCE_TYPE) return intl.formatMessage({ id: 'resource.property' });
+    if (
+      resourceBizType &&
+      [resourceBizTypeMap.KG_DOC, resourceBizTypeMap.KG_QA, resourceBizTypeMap.KG_TERM].includes(resourceBizType)
+    ) {
+      return intl.formatMessage({ id: 'resource.knowledge' });
+    }
     return intl.formatMessage({ id: 'resource.default' });
   };
 
   const handleDetail = (item: ResourceItem) => {
     const { resourceBizType, resourceId } = item;
     const closeDetailPanel = () => clearDetailPanel?.();
+
+    if (resourceBizType === PROPERTY_RESOURCE_TYPE) {
+      setDetailPanel?.(<PropertyDetail item={item} onClose={closeDetailPanel} />, { width: 350 });
+      return;
+    }
 
     if (
       resourceBizType &&
@@ -425,7 +485,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         resourceBizTypeMap.TOOL,
         resourceBizTypeMap.TOOLKIT,
         resourceBizTypeMap.AGENT,
-        ResourceTypeMap.SKILL,
+        // ResourceTypeMap.SKILL,
       ].includes(resourceBizType)
     ) {
       const titleMap: Record<string, string> = {
@@ -456,13 +516,81 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         panel
         resourceId={item.resourceId}
         item={item}
-        resourceType={resourceType}
-        resourceName={getResourceName()}
+        resourceName={getResourceName(item.resourceBizType)}
         onCancel={closeDetailPanel}
         onEdit={() => {}}
       />,
       { width: 350 }
     );
+  };
+
+  const handleShare = async (item: ResourceItem) => {
+    if (!item.resourceId || !item.resourceBizType) return;
+    try {
+      const detail = (await listAuthDetail({
+        grantType: SHARE_GRANT_TYPE,
+        grantObjType: item.resourceBizType,
+        grantObjId: item.resourceId,
+      })) as unknown as AuthDetailResponse;
+
+      if (detail && detail.code === 0) {
+        setShareRecord(item);
+        setShareAuthList(detail.data?.redList?.map(getGrantItem) || []);
+        setShareBlackList(detail.data?.blackList?.map(getGrantItem) || []);
+        setShareModalOpen(true);
+        return;
+      }
+
+      message.error(detail?.msg || intl.formatMessage({ id: 'common.operationFailed' }));
+    } catch (error: any) {
+      message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
+    }
+  };
+
+  const handleShareCancel = () => {
+    setShareModalOpen(false);
+    setShareRecord(null);
+    setShareAuthList([]);
+    setShareBlackList([]);
+  };
+
+  const handleShareConfirm = async (authList: any[]) => {
+    if (!shareRecord?.resourceId || !shareRecord?.resourceBizType) return;
+
+    const redList = authList.map((item) => ({
+      ...transformGrantItem(item),
+      grantType: SHARE_GRANT_TYPE,
+    }));
+    const blackList = shareBlackList.map((item) => ({
+      ...transformGrantItem(item),
+      grantType: SHARE_GRANT_TYPE,
+    }));
+
+    try {
+      const res = (await batchHandleAuth(
+        {
+          grantObjId: shareRecord.resourceId,
+          grantObjType: shareRecord.resourceBizType,
+          redList,
+          blackList,
+          resourceId: shareRecord.resourceId,
+        },
+        '/byaiService/auth/privilegeGrant/setResourceUsers'
+      )) as unknown as AuthSaveResponse;
+
+      if (res && res.code === 0) {
+        message.success(intl.formatMessage({ id: 'common.shareSuccess' }));
+        handleShareCancel();
+        if (!isInDrillDown()) {
+          loadResources({ reset: true });
+        }
+        return;
+      }
+
+      message.error(res?.msg || intl.formatMessage({ id: 'common.shareFailed' }));
+    } catch (error: any) {
+      message.error(error?.message || intl.formatMessage({ id: 'common.shareFailed' }));
+    }
   };
 
   /**
@@ -482,10 +610,26 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
                 <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.detail' })}</div>
               ),
             },
+            ...(item.resourceBizType === PROPERTY_RESOURCE_TYPE
+              ? []
+              : [
+                {
+                  key: 'share',
+                  label: (
+                    <div className={employeeStyles.dropdownMenuItem}>
+                      {intl.formatMessage({ id: 'common.share' })}
+                    </div>
+                  ),
+                },
+              ]),
           ],
-          onClick: ({ domEvent }) => {
+          onClick: ({ key, domEvent }) => {
             domEvent.preventDefault();
             domEvent.stopPropagation();
+            if (key === 'share') {
+              void handleShare(item);
+              return;
+            }
             handleDetail(item);
           },
         }}
@@ -529,10 +673,12 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         itemClickTimerRef.current = null;
         if (drillable) {
           void handleDrillDown(item);
+        } else if (item.resourceBizType === PROPERTY_RESOURCE_TYPE) {
+          handleDetail(item);
         }
       }, 220);
     },
-    [clearItemClickTimer, handleDrillDown]
+    [clearItemClickTimer, handleDrillDown, handleDetail]
   );
 
   const handleResourceItemDoubleClick = useCallback(
@@ -606,7 +752,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
                 className={styles.resourceItem}
                 onClick={() => handleResourceItemClick(item, drillable)}
                 onDoubleClick={() => handleResourceItemDoubleClick(item)}
-                actions={!isInDrillDown() ? [renderDetailDropdown(item)] : undefined}
+                actions={[renderDetailDropdown(item)]}
               >
                 <List.Item.Meta
                   avatar={
@@ -614,7 +760,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
                       {drillable && <AntdIcon type="icon-a-xiangyou" className={styles.drillIcon} />}
                       <AntdIcon
                         type={
-                          String(item.resourceId).includes('-')
+                          item.resourceBizType === PROPERTY_RESOURCE_TYPE || String(item.resourceId).includes('-')
                             ? 'icon-a-Database-networkshujukuwangluo'
                             : getResourceIcon()
                         }
@@ -646,6 +792,15 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
           }}
         />
       </div>
+      {shareModalOpen && (
+        <AddAuthModal
+          title={intl.formatMessage({ id: 'auth.addAuthObject' })}
+          value={shareAuthList}
+          showPost={false}
+          onCancel={handleShareCancel}
+          onOk={handleShareConfirm}
+        />
+      )}
     </div>
   );
 };

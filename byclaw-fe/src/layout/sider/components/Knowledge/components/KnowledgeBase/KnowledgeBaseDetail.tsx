@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useContext } from 'react';
 import { Input, Breadcrumb, Tree, Spin, App, ConfigProvider, Dropdown } from 'antd';
 import { EllipsisOutlined, LeftOutlined } from '@ant-design/icons';
 import classnames from 'classnames';
@@ -6,11 +6,17 @@ import { AntdTreeNodeAttribute, EventDataNode } from 'antd/es/tree';
 import AntdIcon from '@/components/AntdIcon';
 import { useIntl, useSelector } from '@umijs/max';
 import useVirtualHeight from '@/hooks/useVirtualHeight';
+import useGlobal from '@/hooks/useGlobal';
 import { downloadResourceFile } from '@/service/file';
 import { resolveTreeItemDirectoryPath } from './service';
+import { HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH, SiderContentContext } from '@/layout/sider/siderContentContext';
 import type { QueryDirAndFileByLevelItem } from '@/service/knowledgeCenter';
 import { downloadFile } from '@/utils/file';
 import { getKnowledgeFileIconType } from '@/constants/icon';
+import {
+  getMimeType,
+  isPreviewable,
+} from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import useShowModal from '@/hooks/useShowModal';
 import RenameModal from '@/pages/knowledgeDetail/components/RenameModal';
 import { IDragType, DragType, onTreeNodeDragStart } from '@/components/QueryInput/withDrag';
@@ -20,6 +26,10 @@ import { deleteTreeNode, updateTreeNode } from './utils';
 import commonStyles from '../common.module.less';
 import styles from './index.module.less';
 import { TreeProps } from 'antd/lib';
+
+const PreViewFile = React.lazy(() =>
+  import('@/components/Preview/Twins').then((module) => ({ default: module.PreViewFile }))
+);
 
 interface KnowledgeBaseDetailProps {
   editable?: boolean;
@@ -43,13 +53,50 @@ function getNodeIcon(p: AntdTreeNodeAttribute) {
   return <AntdIcon type={`icon-${iconType}`} />;
 }
 
+function getFileType(name: string): string {
+  const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() || '' : '';
+  if (ext === 'jpeg') return 'jpg';
+  if (['html', 'htm'].includes(ext)) return 'h5';
+  return ext;
+}
+
+interface FilePreviewPanelProps {
+  blob: Blob | null;
+  fileName: string;
+  fileType: string;
+  loading: boolean;
+  onClose: () => void;
+}
+
+const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ blob, fileName, fileType, loading, onClose }) => (
+  <div className={styles.previewPanel}>
+    <div className={styles.previewHeader}>
+      <span className={styles.previewTitle}>{fileName}</span>
+      <span className={styles.previewClose} onClick={onClose}>
+        <AntdIcon type="icon-a-Closeguanbi1" />
+      </span>
+    </div>
+    <div className={styles.previewBody}>
+      <Spin spinning={loading} wrapperClassName={styles.previewSpin}>
+        {blob && (
+          <React.Suspense fallback={null}>
+            <PreViewFile data={blob} type={fileType} title={fileName} className={styles.previewContent} />
+          </React.Suspense>
+        )}
+      </Spin>
+    </div>
+  </div>
+);
+
 const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
   const { editable, dataset, onGoBack, onSelect } = props;
   const [searchValue, setSearchValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [treeData, setTreeData] = useState<IKnowledgeDetailTreeItem[]>([]);
   const treeWrap = useRef<HTMLDivElement>(null);
+  const treeClickTimerRef = useRef<number | null>(null);
   const virtualHeight = useVirtualHeight(treeWrap);
+  const { EventEmitter } = useGlobal();
   const { userInfo } = useSelector(({ user }: any) => ({
     userInfo: user.userInfo,
   }));
@@ -57,6 +104,7 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
   const intl = useIntl();
   const { modal, message } = App.useApp();
   const [modalState, modalAction] = useShowModal();
+  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
 
   const qryFlatternList = async (parentId: string) => {
     if (parentId === '-1') {
@@ -108,6 +156,95 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
   useEffect(() => {
     qryFlatternList('-1');
   }, [searchValue]);
+
+  const clearTreeClickTimer = useCallback(() => {
+    if (treeClickTimerRef.current !== null) {
+      window.clearTimeout(treeClickTimerRef.current);
+      treeClickTimerRef.current = null;
+    }
+  }, []);
+
+  const getTreeNodeDragType = useCallback(
+    (item: IKnowledgeDetailTreeItem): IDragType => (item.type === 'file' ? DragType.file : DragType.folder),
+    []
+  );
+
+  const renderPreviewPanel = useCallback(
+    (item: IKnowledgeDetailTreeItem, options: { blob?: Blob | null; loading: boolean }) => {
+      setDetailPanel?.(
+        <FilePreviewPanel
+          blob={options.blob ?? null}
+          fileName={String(item.title || item.collectionName || '')}
+          fileType={getFileType(String(item.title || item.collectionName || ''))}
+          loading={options.loading}
+          onClose={() => clearDetailPanel?.()}
+        />,
+        { width: HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH }
+      );
+    },
+    [clearDetailPanel, setDetailPanel]
+  );
+
+  const handlePreviewFile = useCallback(
+    async (item: IKnowledgeDetailTreeItem) => {
+      const fileName = String(item.title || item.collectionName || '');
+      if (!isPreviewable(fileName)) return;
+
+      const directoryPath = resolveTreeItemDirectoryPath(item);
+      if (!directoryPath) {
+        message.warning('无法解析文件路径');
+        return;
+      }
+
+      renderPreviewPanel(item, { loading: true });
+      try {
+        const res: any = await downloadResourceFile({
+          resourceId: dataset.resourceId,
+          directoryPath,
+        });
+        const rawBlob = res?.file instanceof Blob ? res.file : res instanceof Blob ? res : new Blob([res?.file || res]);
+        const mimeType = getMimeType(fileName);
+        const blob = mimeType ? new Blob([rawBlob], { type: mimeType }) : rawBlob;
+        renderPreviewPanel(item, { blob, loading: false });
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.preview.failed' }));
+        clearDetailPanel?.();
+      }
+    },
+    [clearDetailPanel, dataset.resourceId, intl, message, renderPreviewPanel]
+  );
+
+  const handleTreeNodeClick = useCallback(
+    (event: React.MouseEvent, node: EventDataNode<IKnowledgeDetailTreeItem>) => {
+      event.stopPropagation();
+      clearTreeClickTimer();
+      treeClickTimerRef.current = window.setTimeout(() => {
+        treeClickTimerRef.current = null;
+        if (node.type === 'file') {
+          void handlePreviewFile(node);
+          return;
+        }
+        onSelect?.(node, getTreeNodeDragType(node));
+      }, 220);
+    },
+    [clearTreeClickTimer, getTreeNodeDragType, handlePreviewFile, onSelect]
+  );
+
+  const handleTreeNodeDoubleClick = useCallback(
+    (event: React.MouseEvent, node: EventDataNode<IKnowledgeDetailTreeItem>) => {
+      event.stopPropagation();
+      clearTreeClickTimer();
+      EventEmitter.emit('queryInput-insert-item', {
+        item: node,
+        type: getTreeNodeDragType(node),
+      });
+    },
+    [EventEmitter, clearTreeClickTimer, getTreeNodeDragType]
+  );
+
+  useEffect(() => {
+    return clearTreeClickTimer;
+  }, [clearTreeClickTimer]);
 
   const expandFolder = ({ key, children }: EventDataNode<IKnowledgeDetailTreeItem>) =>
     new Promise<void>((resolve) => {
@@ -203,9 +340,8 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
                 [styles.selectable]: !!onSelect,
                 [styles.notselectable]: !onSelect,
               })}
-              onClick={(e, node) => {
-                onSelect?.(node, node.type === 'file' ? DragType.file : DragType.folder);
-              }}
+              onClick={handleTreeNodeClick}
+              onDoubleClick={handleTreeNodeDoubleClick}
               draggable={editable ? { icon: <span /> } : false}
               titleRender={(item) => {
                 if (!editable) {

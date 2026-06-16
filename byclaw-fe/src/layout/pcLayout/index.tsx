@@ -14,6 +14,8 @@ import Sider from '../sider';
 import {
   SiderContentContext,
   DEFAULT_SIDER_CONTENT_WIDTH,
+  HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH,
+  SIDER_BAR_WIDTH,
   type DetailPanelOptions,
 } from '../sider/siderContentContext';
 import { tabItems } from '../sider/components/SiderContent';
@@ -114,21 +116,44 @@ const PCLayout = () => {
   const [modPswModalVisible, setModPswModalVisible] = useState(false);
   const [pcLayoutContentId] = useState('pcLayoutId');
   const [containChatLayout, setContainChatLayout] = useState(false);
+  const dragFileEventHandlerRef = useRef<DragFileEventHandler>(null);
+  const layoutRef = useRef<HTMLElement>(null);
+  const [layoutWidth, setLayoutWidth] = useState(0);
+  const mainContentHalfWidth =
+    layoutWidth > 0 ? Math.max(280, Math.floor((layoutWidth - SIDER_BAR_WIDTH - siderContentWidth - 16) / 2)) : 450;
   const detailPanelBasis =
     detailPanelWidth === undefined
       ? undefined
       : typeof detailPanelWidth === 'number'
         ? `${detailPanelWidth}px`
-        : detailPanelWidth;
+        : detailPanelWidth === HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH
+          ? `${mainContentHalfWidth}px`
+          : detailPanelWidth;
+
+  useEffect(() => {
+    const layoutElement = layoutRef.current;
+    if (!layoutElement) return undefined;
+
+    const updateLayoutWidth = () => {
+      setLayoutWidth(layoutElement.clientWidth);
+    };
+    updateLayoutWidth();
+
+    if (!window.ResizeObserver) return undefined;
+
+    const resizeObserver = new ResizeObserver(updateLayoutWidth);
+    resizeObserver.observe(layoutElement);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
 
   const { userInfo } = useSelector(({ user }) => ({ userInfo: user.userInfo }));
   const { agentList, employeesList } = useSelector(({ employees }) => ({
     agentList: employees.agentList || [],
     employeesList: employees.employeesList,
   }));
-
-  const dragFileEventHandlerRef = useRef<DragFileEventHandler>(null);
-  const layoutRef = useRef<HTMLElement>(null);
 
   const curAgentInfo = React.useMemo(() => {
     return [...(agentList || []), ...(employeesList || [])].find(
@@ -272,10 +297,13 @@ const PCLayout = () => {
                 {!userInfo && <Header />}
                 <Layout
                   className={classNames('full-width full-height ub-f1', styles.layout)}
-                  style={{
-                    // 用gap实现起来很难搞，因为在没有展开drawer的情况下，也占了8px的位置，因此采用了--layout-gap这种方式来做一个margin处理
-                    padding: userInfo ? '8px 8px 8px 0' : 0,
-                  }}
+                  style={
+                    {
+                      // 用gap实现起来很难搞，因为在没有展开drawer的情况下，也占了8px的位置，因此采用了--layout-gap这种方式来做一个margin处理
+                      padding: userInfo ? '8px 8px 8px 0' : 0,
+                      '--sider-content-width': `${siderContentWidth}px`,
+                    } as React.CSSProperties
+                  }
                   ref={layoutRef}
                 >
                   <SiderContentContext.Provider
