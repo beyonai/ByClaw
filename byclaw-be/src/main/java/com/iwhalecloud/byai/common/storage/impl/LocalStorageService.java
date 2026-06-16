@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -105,6 +106,17 @@ public class LocalStorageService extends AbstractFileIngressStorageService<Void>
     public FileMetadata put(StorageLocation location, InputStream inputStream, long size, String contentType) {
         Path target = resolve(location);
         try {
+            if (isDirectoryMarker(location.getPath())) {
+                Files.createDirectories(target);
+                FileMetadata metadata = new FileMetadata();
+                metadata.setBucketName(location.getBucketOrRoot());
+                metadata.setFileName(target.getFileName() == null ? "" : target.getFileName().toString());
+                metadata.setFileUrl(location.getPath());
+                metadata.setFileSize(0L);
+                metadata.setContentType(contentType);
+                metadata.setStorageType(getStorageType());
+                return metadata;
+            }
             Files.createDirectories(target.getParent());
             Files.copy(inputStream, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             FileMetadata metadata = new FileMetadata();
@@ -146,14 +158,26 @@ public class LocalStorageService extends AbstractFileIngressStorageService<Void>
         if (!Files.exists(root)) {
             return List.of();
         }
-        try (Stream<Path> stream = maxDepth == null ? Files.walk(root) : Files.walk(root, maxDepth)) {
+        if (Files.isRegularFile(root)) {
             Path storageRoot = resolve(StorageLocation.of(prefix.getNamespace(), prefix.getBucketOrRoot(), ""));
-            return stream.filter(Files::isRegularFile)
-                .map(path -> StorageObject.builder()
-                    .bucketOrRoot(prefix.getBucketOrRoot())
-                    .path(storageRoot.relativize(path).toString().replace('\\', '/'))
-                    .build())
-                .collect(Collectors.toList());
+            return List.of(toStorageObject(prefix.getBucketOrRoot(), storageRoot, root));
+        }
+        try {
+            Path storageRoot = resolve(StorageLocation.of(prefix.getNamespace(), prefix.getBucketOrRoot(), ""));
+            if (!prefix.isRecursive()) {
+                try (Stream<Path> stream = Files.list(root)) {
+                    return stream
+                        .filter(path -> Files.isRegularFile(path) || Files.isDirectory(path))
+                        .map(path -> toStorageObject(prefix.getBucketOrRoot(), storageRoot, path))
+                        .collect(Collectors.toList());
+                }
+            }
+            try (Stream<Path> stream = maxDepth == null ? Files.walk(root) : Files.walk(root, maxDepth)) {
+                return stream
+                    .filter(Files::isRegularFile)
+                    .map(path -> toStorageObject(prefix.getBucketOrRoot(), storageRoot, path))
+                    .collect(Collectors.toList());
+            }
         }
         catch (IOException e) {
             throw new IllegalStateException("Local file list failed: " + root, e);
@@ -171,16 +195,62 @@ public class LocalStorageService extends AbstractFileIngressStorageService<Void>
     }
 
     @Override
+    public void deletePrefix(StoragePrefix prefix) {
+        Path root = resolve(StorageLocation.of(prefix.getNamespace(), prefix.getBucketOrRoot(), prefix.getPrefix()));
+        if (!Files.exists(root)) {
+            return;
+        }
+        try (Stream<Path> stream = Files.walk(root)) {
+            List<Path> paths = stream.sorted(Comparator.reverseOrder()).collect(Collectors.toList());
+            for (Path path : paths) {
+                Files.deleteIfExists(path);
+            }
+        }
+        catch (IOException e) {
+            throw new IllegalStateException("Local file prefix delete failed: " + root, e);
+        }
+    }
+
+    @Override
     public void copy(StorageLocation source, StorageLocation target) {
         try {
             Path sourcePath = resolve(source);
             Path targetPath = resolve(target);
+            if (Files.isDirectory(sourcePath) || isDirectoryMarker(target.getPath())) {
+                Files.createDirectories(targetPath);
+                return;
+            }
             Files.createDirectories(targetPath.getParent());
             Files.copy(sourcePath, targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         }
         catch (IOException e) {
             throw new IllegalStateException("Local file copy failed", e);
         }
+    }
+
+    private StorageObject toStorageObject(String bucketOrRoot, Path storageRoot, Path path) {
+        String relativePath = storageRoot.relativize(path).toString().replace('\\', '/');
+        boolean isDirectory = Files.isDirectory(path);
+        if (isDirectory && !relativePath.endsWith("/")) {
+            relativePath = relativePath + "/";
+        }
+        StorageObject.StorageObjectBuilder builder = StorageObject.builder()
+            .bucketOrRoot(bucketOrRoot)
+            .path(relativePath)
+            .isDir(isDirectory);
+        if (!isDirectory) {
+            try {
+                builder.size(Files.size(path));
+            }
+            catch (IOException ignored) {
+                // Size is optional metadata for list operations.
+            }
+        }
+        return builder.build();
+    }
+
+    private boolean isDirectoryMarker(String path) {
+        return StringUtils.trimToEmpty(path).replace('\\', '/').endsWith("/");
     }
 
     private Path resolve(StorageLocation location) {
