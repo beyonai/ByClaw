@@ -5,6 +5,7 @@ import {
   debugModelEmbedding,
   debugModelNonStream,
   debugModelStream,
+  completeAllModelConfig,
   deleteModel,
   getModelDetail,
   getModelListByPage,
@@ -100,6 +101,21 @@ export default {
           success?.(response.data || response);
         } else {
           showRequestErrorModal(response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.setDefaultModelFail' }));
+          fail?.(response || {});
+        }
+      } catch (error) {
+        const err = { msg: getErrorText(error) };
+        message.error(err.msg);
+        fail?.(err);
+      }
+    },
+    *completeAllModelConfig({ success, fail }, { call }) {
+      try {
+        const response = unwrapResponse(yield call(completeAllModelConfig));
+        if (response.code === 0) {
+          success?.(response.data || response);
+        } else {
+          showRequestErrorModal(response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.completeModelConfigFail' }));
           fail?.(response || {});
         }
       } catch (error) {

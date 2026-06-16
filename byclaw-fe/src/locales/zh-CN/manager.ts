@@ -348,6 +348,19 @@ export default {
   'modelMgr.operationSuccess': '操作成功',
   'modelMgr.debug': '调试',
   'modelMgr.heroDesc': '统一查看模型状态、能力标签与系统归属，支持快速筛选、调试和启停。',
+  'modelMgr.completeAllButton': '一键完善参数',
+  'modelMgr.completeAllTooltip': '调用默认联网 LLM 识别全部模型能力，并批量补齐上下文、MaxTokens 和 Thinking 参数',
+  'modelMgr.completeConfirmTitle': '一键完善全部模型参数',
+  'modelMgr.completeConfirmContent':
+    '系统将调用默认 LLM 联网识别模型能力，并批量更新上下文、MaxTokens 和 Thinking 参数，不会修改 URL、Model Code、API Key 和供应商。是否继续？',
+  'modelMgr.completeConfirmOk': '开始完善',
+  'modelMgr.completeSuccess': '模型参数完善完成',
+  'modelMgr.completeResultTitle': '一键完善结果',
+  'modelMgr.completeStats': '共 {total} 个，更新 {updated} 个，跳过 {skipped} 个，失败 {failed} 个',
+  'modelMgr.completeNoChanges': '没有字段需要更新',
+  'modelMgr.completeUpdated': '已更新',
+  'modelMgr.completeSkipped': '已跳过',
+  'modelMgr.completeFailed': '失败',
   'modelMgr.statsTotal': '模型总数',
   'modelMgr.filterTitle': '筛选条件',
   'modelMgr.searchLabel': '搜索',
@@ -364,6 +377,7 @@ export default {
   'modelMgr.error.updateModelStatusFail': '更新模型状态失败',
   'modelMgr.error.deleteModelFail': '删除模型失败',
   'modelMgr.error.setDefaultModelFail': '设置默认模型失败',
+  'modelMgr.error.completeModelConfigFail': '一键完善模型参数失败',
   'modelMgr.error.debugModelFail': '模型调试失败',
 
   // 模型管理-编辑/调试弹窗

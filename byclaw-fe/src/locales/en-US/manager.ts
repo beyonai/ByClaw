@@ -348,6 +348,20 @@ export default {
   'modelMgr.debug': 'Debug',
   'modelMgr.heroDesc':
     'Review model status, capabilities, and system ownership in one place, with faster filtering, debugging, and lifecycle actions.',
+  'modelMgr.completeAllButton': 'Complete params',
+  'modelMgr.completeAllTooltip':
+    'Use the default web-enabled LLM to identify model capabilities and complete context, MaxTokens, and Thinking parameters in bulk',
+  'modelMgr.completeConfirmTitle': 'Complete all model parameters',
+  'modelMgr.completeConfirmContent':
+    'The system will call the default LLM to identify model capabilities and update context, MaxTokens, and Thinking parameters in bulk. URL, Model Code, API Key, and provider will not be changed. Continue?',
+  'modelMgr.completeConfirmOk': 'Start',
+  'modelMgr.completeSuccess': 'Model parameters completed',
+  'modelMgr.completeResultTitle': 'Completion result',
+  'modelMgr.completeStats': '{total} total, {updated} updated, {skipped} skipped, {failed} failed',
+  'modelMgr.completeNoChanges': 'No fields need to be updated',
+  'modelMgr.completeUpdated': 'Updated',
+  'modelMgr.completeSkipped': 'Skipped',
+  'modelMgr.completeFailed': 'Failed',
   'modelMgr.statsTotal': 'Total models',
   'modelMgr.filterTitle': 'Filters',
   'modelMgr.searchLabel': 'Search',
@@ -364,6 +378,7 @@ export default {
   'modelMgr.error.updateModelStatusFail': 'Failed to update model status',
   'modelMgr.error.deleteModelFail': 'Failed to delete model',
   'modelMgr.error.setDefaultModelFail': 'Failed to set default model',
+  'modelMgr.error.completeModelConfigFail': 'Failed to complete model parameters',
   'modelMgr.error.debugModelFail': 'Model debug failed',
 
   // Model Management - Edit/Debug Modal

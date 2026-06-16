@@ -1,4 +1,4 @@
-import { message } from 'antd';
+import { message, Modal } from 'antd';
 import classNames from 'classnames';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useIntl, useSelector } from '@umijs/max';
@@ -46,8 +46,10 @@ const ModelMgr: React.FC = () => {
       loading.effects['modelMgr/deleteModel'] ||
       loading.effects['modelMgr/debugModel'] ||
       loading.effects['modelMgr/debugModelRerank'] ||
+      loading.effects['modelMgr/completeAllModelConfig'] ||
       loading.effects['modelMgr/testModel']
   );
+  const completeLoading = useSelector(({ loading }: any) => loading.effects['modelMgr/completeAllModelConfig']);
 
   const [list, setList] = useState<any[]>([]);
   const [pagination, setPagination] = useState(initPagination);
@@ -355,6 +357,114 @@ const ModelMgr: React.FC = () => {
     fetchOverviewStats();
   }, [fetchOverviewStats, resetAndFetch]);
 
+  const formatCompleteValue = useCallback((value: any) => {
+    if (value === undefined || value === null || value === '') return '-';
+    if (typeof value === 'object') return JSON.stringify(value);
+    return `${value}`;
+  }, []);
+
+  const renderCompleteStatus = useCallback(
+    (statusValue: string) => {
+      const normalized = `${statusValue || 'SKIPPED'}`.toUpperCase();
+      let statusClass = styles.completeStatusSkipped;
+      let text = intl.formatMessage({ id: 'modelMgr.completeSkipped' });
+      if (normalized === 'UPDATED') {
+        statusClass = styles.completeStatusUpdated;
+        text = intl.formatMessage({ id: 'modelMgr.completeUpdated' });
+      }
+      else if (normalized === 'FAILED') {
+        statusClass = styles.completeStatusFailed;
+        text = intl.formatMessage({ id: 'modelMgr.completeFailed' });
+      }
+      return <span className={classNames(styles.completeStatus, statusClass)}>{text}</span>;
+    },
+    [intl]
+  );
+
+  const showCompleteResult = useCallback(
+    (res: any) => {
+      const items = Array.isArray(res?.items) ? res.items : [];
+      Modal.info({
+        title: intl.formatMessage({ id: 'modelMgr.completeResultTitle' }),
+        width: 760,
+        content: (
+          <div className={styles.completeResult}>
+            <div className={styles.completeStats}>
+              {intl.formatMessage(
+                { id: 'modelMgr.completeStats' },
+                {
+                  total: res?.total ?? items.length,
+                  updated: res?.updated ?? 0,
+                  skipped: res?.skipped ?? 0,
+                  failed: res?.failed ?? 0,
+                }
+              )}
+            </div>
+            <div className={styles.completeResultList}>
+              {items.map((item: any, itemIndex: number) => {
+                const changes = Array.isArray(item?.changes) ? item.changes : [];
+                const warnings = Array.isArray(item?.warnings) ? item.warnings : [];
+                return (
+                  <div className={styles.completeResultItem} key={item?.id || item?.modelCode || itemIndex}>
+                    <div className={styles.completeResultHead}>
+                      <div>
+                        <div>{item?.displayName || item?.modelCode || item?.id || '-'}</div>
+                        <div className={styles.completeResultSub}>
+                          {item?.modelCode || '-'} · {item?.source || '-'} · {item?.confidence || '-'}
+                        </div>
+                      </div>
+                      {renderCompleteStatus(item?.status)}
+                    </div>
+                    {changes.length ? (
+                      <div className={styles.completeChangeList}>
+                        {changes.map((change: any, index: number) => (
+                          <div className={styles.completeChangeItem} key={`${change?.field || 'field'}-${index}`}>
+                            <span className={styles.completeChangeField}>{change?.field || '-'}</span>
+                            <span>
+                              {formatCompleteValue(change?.before)} → {formatCompleteValue(change?.after)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className={styles.completeMuted}>
+                        {item?.errorMessage || intl.formatMessage({ id: 'modelMgr.completeNoChanges' })}
+                      </div>
+                    )}
+                    {warnings.length ? <div className={styles.completeMuted}>{warnings.join('；')}</div> : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ),
+      });
+    },
+    [formatCompleteValue, intl, renderCompleteStatus]
+  );
+
+  const completeAllModelConfigAction = useCallback(() => {
+    Modal.confirm({
+      title: intl.formatMessage({ id: 'modelMgr.completeConfirmTitle' }),
+      content: intl.formatMessage({ id: 'modelMgr.completeConfirmContent' }),
+      okText: intl.formatMessage({ id: 'modelMgr.completeConfirmOk' }),
+      cancelText: intl.formatMessage({ id: 'common.cancel' }),
+      onOk: () =>
+        new Promise<void>((resolve) => {
+          dispatch({
+            type: 'modelMgr/completeAllModelConfig',
+            success: (res: any) => {
+              message.success(intl.formatMessage({ id: 'modelMgr.completeSuccess' }));
+              reloadAll();
+              showCompleteResult(res);
+              resolve();
+            },
+            fail: () => resolve(),
+          });
+        }),
+    });
+  }, [dispatch, intl, reloadAll, showCompleteResult]);
+
   const cardItemFn = useCallback(
     (record: any) => {
       return (
@@ -384,6 +494,8 @@ const ModelMgr: React.FC = () => {
           onSearch={resetAndFetch}
           onReset={clearFilters}
           onAdd={() => formAction.handleShow('add')}
+          onCompleteConfig={completeAllModelConfigAction}
+          completeLoading={!!completeLoading}
           activeFilterCount={activeFilterCount}
           total={overviewStats.total}
           enabledCount={overviewStats.enabledCount}
