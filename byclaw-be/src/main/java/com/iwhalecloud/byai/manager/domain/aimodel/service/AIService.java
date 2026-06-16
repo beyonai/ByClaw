@@ -67,7 +67,7 @@ public class AIService {
             requestBody.put("messages", messages);
 
             requestBody.put("temperature", 0.7);
-            requestBody.put("max_tokens", maxTokens);
+            requestBody.put("max_tokens", maxTokens > 0 ? maxTokens : 4000);
             applyThinkingParams(requestBody, defaultModel);
 
             // 设置请求头

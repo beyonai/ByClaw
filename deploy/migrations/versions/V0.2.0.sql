@@ -53,3 +53,15 @@ CREATE INDEX IF NOT EXISTS idx_po_user_mail_account_user
 CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_mail_account_default
     ON byai.po_user_mail_account (user_id)
     WHERE default_flag = 'Y' AND delete_flag = '0';
+
+
+-- 删除生态采集不用的库表脚本（功能代码已经删掉）
+DROP TABLE IF EXISTS byai.bykc_ec_import_record CASCADE;
+DROP TABLE IF EXISTS byai.bykc_ec_artifact_signal CASCADE;
+DROP TABLE IF EXISTS byai.bykc_ec_artifact CASCADE;
+DROP TABLE IF EXISTS byai.bykc_ec_sync_run_step CASCADE;
+DROP TABLE IF EXISTS byai.bykc_ec_sync_run CASCADE;
+DROP TABLE IF EXISTS byai.bykc_ec_sync_task CASCADE;
+DROP TABLE IF EXISTS byai.bykc_ec_connection CASCADE;
+DROP TABLE IF EXISTS byai.bykc_ec_collector_agent CASCADE;
+DROP TABLE IF EXISTS byai.bykc_ec_connector CASCADE;

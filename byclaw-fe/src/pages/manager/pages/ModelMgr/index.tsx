@@ -371,8 +371,7 @@ const ModelMgr: React.FC = () => {
       if (normalized === 'UPDATED') {
         statusClass = styles.completeStatusUpdated;
         text = intl.formatMessage({ id: 'modelMgr.completeUpdated' });
-      }
-      else if (normalized === 'FAILED') {
+      } else if (normalized === 'FAILED') {
         statusClass = styles.completeStatusFailed;
         text = intl.formatMessage({ id: 'modelMgr.completeFailed' });
       }

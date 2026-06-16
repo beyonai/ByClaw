@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useState, useEffect, useRef } from 'react';
-import { CloudSyncOutlined, UploadOutlined, SearchOutlined, PlusOutlined } from '@ant-design/icons';
+import { UploadOutlined, SearchOutlined, PlusOutlined } from '@ant-design/icons';
 import { useIntl, getLocale, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
 import { Button, Input, Space, Tooltip, message, Tabs } from 'antd';
@@ -24,7 +24,6 @@ import ResourceDetail from './components/ResourceDetail';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
 import DetailPanel from '@/pages/knowledgeCenter/components/DetailPanel';
-import EcosystemCollector from '@/pages/knowledgeCenter/components/EcosystemCollector';
 import { useSkillDetailDrawer } from '@/pages/manager/components/SkillDetailDrawer/useSkillDetailDrawer';
 import ResourceFilter from './components/ResourceFilter';
 import { getDefaultParams } from './components/ResourceFilter';
@@ -102,11 +101,6 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [importModalOpen, setImportModalOpen] = useState(false);
-  const [collectorOpen, setCollectorOpen] = useState(false);
-  const [collectorInitialSource, setCollectorInitialSource] = useState<string>();
-  const [collectorInitialSourceUrl, setCollectorInitialSourceUrl] = useState('');
-  const [collectorInitialScope, setCollectorInitialScope] = useState('');
-  const [collectorInitialCollectMode, setCollectorInitialCollectMode] = useState('');
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [currentItem, setCurrentItem] = useState<IResourceItem | null>(null);
@@ -204,18 +198,6 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         });
       });
   }, [resourceType]);
-
-  useEffect(() => {
-    if (resourceType !== 'KG_DOC' || searchParams.get('ecosystem') !== '1') {
-      return;
-    }
-    setCollectorInitialSource(searchParams.get('source') || undefined);
-    setCollectorInitialSourceUrl(searchParams.get('sourceUrl') || '');
-    setCollectorInitialScope(searchParams.get('scope') || '');
-    setCollectorInitialCollectMode(searchParams.get('collectMode') || '');
-    setActiveTab('personal');
-    setCollectorOpen(true);
-  }, [resourceType, searchParams]);
 
   useEffect(() => {
     try {
@@ -403,32 +385,6 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         }}
       />
 
-      {resourceType === 'KG_DOC' && (
-        <Tooltip
-          title={
-            activeTab === 'enterprise' && !canImportCurrentEnterpriseResource ? noPermissionDisabledTip : undefined
-          }
-        >
-          <span>
-            <Button
-              icon={<CloudSyncOutlined />}
-              disabled={activeTab === 'enterprise' && !canImportCurrentEnterpriseResource}
-              onClick={() => {
-                if (activeTab === 'enterprise' && !canImportCurrentEnterpriseResource) {
-                  return;
-                }
-                setCollectorInitialSource(undefined);
-                setCollectorInitialSourceUrl('');
-                setCollectorInitialScope('');
-                setCollectorOpen(true);
-              }}
-            >
-              {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.entry' })}
-            </Button>
-          </span>
-        </Tooltip>
-      )}
-
       {brandVersion === 'openSource' && resourceType === 'KG_DOC' && (activeTab === 'personal' || isAdmin) && (
         <Tooltip title={!knowledgeCapability?.allowKnowledgeBaseCreate ? knowledgeCapabilityDisabledTip : undefined}>
           <span>
@@ -597,19 +553,6 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         onSuccess={() => {
           setImportModalOpen(false);
           refreshList();
-        }}
-      />
-      <EcosystemCollector
-        open={collectorOpen}
-        ownerType={activeTab}
-        catalogId={catalogId}
-        catalogList={catalogList}
-        initialSource={collectorInitialSource}
-        initialSourceUrl={collectorInitialSourceUrl}
-        initialScope={collectorInitialScope}
-        initialCollectMode={collectorInitialCollectMode}
-        onCancel={() => {
-          setCollectorOpen(false);
         }}
       />
       <ResourceEdit

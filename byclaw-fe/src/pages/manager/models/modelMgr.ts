@@ -115,7 +115,9 @@ export default {
         if (response.code === 0) {
           success?.(response.data || response);
         } else {
-          showRequestErrorModal(response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.completeModelConfigFail' }));
+          showRequestErrorModal(
+            response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.completeModelConfigFail' })
+          );
           fail?.(response || {});
         }
       } catch (error) {

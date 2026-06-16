@@ -47,10 +47,7 @@ const ModelCardItem: React.FC<Props> = ({
     isDefault === true ||
     (Array.isArray(abilitiesArr) && abilitiesArr.some((item) => `${item}` === '1'));
   const normalizedModelType = `${modelType || 'LLM'}`.toUpperCase();
-  const canSetDefault =
-    recordStatus === 'ENABLED' &&
-    !isDefaultModel &&
-    DEFAULT_MODEL_TYPES.has(normalizedModelType);
+  const canSetDefault = recordStatus === 'ENABLED' && !isDefaultModel && DEFAULT_MODEL_TYPES.has(normalizedModelType);
 
   let statusActions: Array<{
     status: Extract<ModelStatus, 'ENABLED' | 'DISABLED'>;

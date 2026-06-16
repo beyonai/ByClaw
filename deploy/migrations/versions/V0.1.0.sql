@@ -350,7 +350,7 @@ UPDATE "byai"."sandbox_service_spec" SET "spec_json" = '{
         "memory": "2048Mi"
     }
 }',
-"template_json" = '{
+                                         "template_json" = '{
     "meta": {
         "lastTouchedAt": "2026-03-27T08:46:51.148Z",
         "lastTouchedVersion": "2026.3.28"

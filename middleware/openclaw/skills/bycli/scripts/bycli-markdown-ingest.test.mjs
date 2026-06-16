@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { spawn } from "node:child_process";
 
-const SCRIPT = "middleware/openclaw/skills/bycli-markdown-ingestion/scripts/bycli-markdown-ingest.mjs";
+const SCRIPT = "middleware/openclaw/skills/bycli/scripts/bycli-markdown-ingest.mjs";
 
 function createServer() {
   const requests = [];
