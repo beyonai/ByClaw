@@ -10,6 +10,7 @@ import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.util.CurlParser;
 import com.iwhalecloud.byai.common.util.CurlParser.ParsedCurl;
+import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtAgentService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtMcpService;
@@ -87,13 +88,8 @@ public class ResourceCurlService {
         "insert", "modify", "edit", "publish", "send", "submit", "upload", "download", "import", "export", "sync",
         "bind", "unbind", "grant", "revoke", "approve", "reject");
 
-    private static final OkHttpClient RESOURCE_CURL_HTTP_CLIENT = new OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).writeTimeout(10, TimeUnit.SECONDS)
-        .build();
-
     private static final OkHttpClient RESOURCE_JSON_VALIDATION_HTTP_CLIENT = new OkHttpClient.Builder()
-        .connectTimeout(3, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS).writeTimeout(3, TimeUnit.SECONDS)
-        .build();
+        .connectTimeout(3, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS).writeTimeout(3, TimeUnit.SECONDS).build();
 
     @Autowired
     private SsResourceService ssResourceService;
@@ -196,7 +192,7 @@ public class ResourceCurlService {
         Long resourceId = request == null ? null : request.getResourceId();
         String curl = normalizeCurlLineContinuation(request == null ? null : request.getCurl());
         ResourceCurlContent content = loadResourceCurlContent(resourceId);
-        return runCurl(content, curl, RESOURCE_CURL_HTTP_CLIENT);
+        return runCurl(content, curl);
     }
 
     /**
@@ -205,13 +201,13 @@ public class ResourceCurlService {
     public ResourceCurlRunResult runValidationToolkitTool(String sourceContent) {
         String curl = tryBuildConnectivityValidationCurlByRule(sourceContent);
         if (StringUtils.isBlank(curl)) {
-            return skippedValidationResult(I18nUtil.get(
-                "resource.json.connectivity.validation.toolkit.readonly.notfound"));
+            return skippedValidationResult(
+                I18nUtil.get("resource.json.connectivity.validation.toolkit.readonly.notfound"));
         }
         curl = resolveTemplatePlaceholders(curl);
         if (containsTemplatePlaceholder(curl)) {
-            return skippedValidationResult(I18nUtil.get(
-                "resource.json.connectivity.validation.toolkit.placeholder.url"));
+            return skippedValidationResult(
+                I18nUtil.get("resource.json.connectivity.validation.toolkit.placeholder.url"));
         }
         return runRawResourceCurl(ResourceBizType.TOOLKIT.getCode(), sourceContent, curl);
     }
@@ -254,7 +250,7 @@ public class ResourceCurlService {
         // 写入前校验阶段没有 resourceId 和扩展表上下文，只能用当前 JSON 作为 source/target 的 host 白名单来源。
         content.setSourceContent(sourceContent);
         content.setTargetContent(sourceContent);
-        return runCurl(content, curl, RESOURCE_JSON_VALIDATION_HTTP_CLIENT);
+        return runCurl(content, curl);
     }
 
     private ResourceCurlRunResult skippedValidationResult(String reason) {
@@ -266,7 +262,7 @@ public class ResourceCurlService {
         return result;
     }
 
-    private ResourceCurlRunResult runCurl(ResourceCurlContent content, String curl, OkHttpClient httpClient) {
+    private ResourceCurlRunResult runCurl(ResourceCurlContent content, String curl) {
         String normalizedCurl = normalizeCurlLineContinuation(curl);
         validateSafeCurlCommand(normalizedCurl);
 
@@ -276,6 +272,7 @@ public class ResourceCurlService {
 
         long start = System.currentTimeMillis();
         ResourceCurlRunResult result = new ResourceCurlRunResult();
+        OkHttpClient httpClient = OkHttpUtil.getHttpClient();
         try (Response response = httpClient.newCall(buildHttpRequest(parsed)).execute()) {
             result.setSuccess(response.isSuccessful());
             result.setStatusCode(response.code());
@@ -369,10 +366,6 @@ public class ResourceCurlService {
         }
     }
 
-    private JSONObject resolveOpenApiNode(JSONObject root) {
-        return resolveOpenApiNode(root, false);
-    }
-
     private JSONObject resolveOpenApiNode(JSONObject root, boolean preferReadOnlyOperation) {
         if (root == null) {
             return null;
@@ -451,7 +444,8 @@ public class ResourceCurlService {
 
         String method = StringUtils.upperCase(StringUtils.defaultIfBlank(selectedService.getString("method"), "POST"));
         String requestBody = buildSimpleServiceRequestBody(selectedService.getJSONArray("bodyParams"));
-        Map<String, Object> headers = buildSimpleServiceHeaders(root, selectedService, StringUtils.isNotBlank(requestBody));
+        Map<String, Object> headers = buildSimpleServiceHeaders(root, selectedService,
+            StringUtils.isNotBlank(requestBody));
         String url = appendQueryParams(joinUrl(baseUrl, path), selectedService.getJSONArray("queryParams"));
         return buildCurlScript(method, url, headers, requestBody);
     }
@@ -481,13 +475,12 @@ public class ResourceCurlService {
         if ("get".equalsIgnoreCase(method)) {
             return true;
         }
-        String haystack = StringUtils.lowerCase(String.join(" ",
-            StringUtils.defaultString(method),
-            StringUtils.defaultString(service.getString("path")),
-            StringUtils.defaultString(service.getString("action")),
-            StringUtils.defaultString(service.getString("serviceCode")),
-            StringUtils.defaultString(service.getString("serviceName")),
-            StringUtils.defaultString(service.getString("serviceDesc"))));
+        String haystack = StringUtils.lowerCase(
+            String.join(" ", StringUtils.defaultString(method), StringUtils.defaultString(service.getString("path")),
+                StringUtils.defaultString(service.getString("action")),
+                StringUtils.defaultString(service.getString("serviceCode")),
+                StringUtils.defaultString(service.getString("serviceName")),
+                StringUtils.defaultString(service.getString("serviceDesc"))));
         if (containsAnyKeyword(haystack, WRITE_OPERATION_KEYWORDS)) {
             return false;
         }
@@ -734,8 +727,8 @@ public class ResourceCurlService {
     }
 
     private boolean isReadOnlyOperation(OpenApiOperation operation) {
-        return operation != null && isReadOnlyOperation(operation.path(),
-            StringUtils.lowerCase(operation.method()), operation.operation());
+        return operation != null
+            && isReadOnlyOperation(operation.path(), StringUtils.lowerCase(operation.method()), operation.operation());
     }
 
     private boolean isReadOnlyOperation(String path, String method, JSONObject operation) {
@@ -753,10 +746,8 @@ public class ResourceCurlService {
         if (operation == null) {
             return StringUtils.lowerCase(StringUtils.defaultString(method) + " " + StringUtils.defaultString(path));
         }
-        return StringUtils.lowerCase(String.join(" ",
-            StringUtils.defaultString(method),
-            StringUtils.defaultString(path),
-            StringUtils.defaultString(operation.getString("operationId")),
+        return StringUtils.lowerCase(String.join(" ", StringUtils.defaultString(method),
+            StringUtils.defaultString(path), StringUtils.defaultString(operation.getString("operationId")),
             StringUtils.defaultString(operation.getString("summary")),
             StringUtils.defaultString(operation.getString("description"))));
     }
@@ -842,8 +833,8 @@ public class ResourceCurlService {
                 }
                 // 优先按 operationId 精确匹配；导入 JSON 缺 operationId 时，再用 path/action 关键词兜底。
                 String currentOperationId = operation == null ? null : operation.getString("operationId");
-                if (StringUtils.isNotBlank(operationId) && StringUtils.equalsIgnoreCase(operationId,
-                    currentOperationId)) {
+                if (StringUtils.isNotBlank(operationId)
+                    && StringUtils.equalsIgnoreCase(operationId, currentOperationId)) {
                     return current;
                 }
                 if (matchesOperationKeyword(path, currentOperationId, normalizedKeywords)) {
@@ -876,8 +867,8 @@ public class ResourceCurlService {
         if (keywords == null || keywords.isEmpty()) {
             return false;
         }
-        String haystack = StringUtils.lowerCase(StringUtils.defaultString(path) + " "
-            + StringUtils.defaultString(operationId));
+        String haystack = StringUtils
+            .lowerCase(StringUtils.defaultString(path) + " " + StringUtils.defaultString(operationId));
         return keywords.stream().anyMatch(haystack::contains);
     }
 

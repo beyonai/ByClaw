@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -475,8 +476,7 @@ public class SandboxService {
             .retryOnException(e -> true).build();
         Retry retry = Retry.of("sandbox-probe-" + userCode, config);
 
-        OkHttpClient httpClient = new OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS)
-            .readTimeout(5, TimeUnit.SECONDS).build();
+         OkHttpClient httpClient = OkHttpUtil.getHttpClient();
 
         try {
             return Retry.decorateCheckedSupplier(retry, () -> {

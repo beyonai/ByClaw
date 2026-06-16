@@ -2,6 +2,10 @@ package com.iwhalecloud.byai.common.log.util;
 
 import static com.iwhalecloud.byai.common.log.exception.ServiceCode.REQUEST_ID;
 
+import cn.hutool.core.util.IdUtil;
+import com.iwhalecloud.byai.state.domain.ws.handler.RedisStreamMessageListener;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import com.alibaba.ttl.TransmittableThreadLocal;
@@ -14,6 +18,8 @@ import jakarta.servlet.http.HttpServletRequest;
  * @author system
  */
 public final class RequestContextUtil {
+
+    private static final Logger logger = LoggerFactory.getLogger(RequestContextUtil.class);
 
     private RequestContextUtil() {
         // 工具类，禁止实例化
@@ -64,7 +70,7 @@ public final class RequestContextUtil {
             }
         }
         catch (Exception e) {
-            // 忽略异常
+            logger.error(e.getMessage(), e);
         }
 
         return null;
@@ -79,7 +85,7 @@ public final class RequestContextUtil {
         Long requestId = getRequestId();
         if (requestId == null) {
             // 如果走到这里，说明入口没有设置 REQUEST_ID
-            requestId = SnowFlake.nextId();
+            requestId = IdUtil.getSnowflakeNextId();
         }
         return requestId;
     }

@@ -6,6 +6,7 @@ import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
 
+import com.iwhalecloud.byai.ByaiServerApplication;
 import com.iwhalecloud.byai.common.log.util.RequestContextUtil;
 import com.iwhalecloud.byai.manager.domain.log.service.LogExceptionInfoService;
 import com.iwhalecloud.byai.manager.entity.log.LogExceptionInfo;
@@ -13,6 +14,8 @@ import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -33,9 +36,10 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Aspect
 @Component
-@Slf4j
 @ConditionalOnProperty(prefix = "exception.log", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class ExceptionLogAspect {
+
+    private Logger logger = LoggerFactory.getLogger(ExceptionLogAspect.class);
 
     @Autowired
     private LogExceptionInfoService logExceptionInfoService;
@@ -125,7 +129,7 @@ public class ExceptionLogAspect {
 
         }
         catch (Exception ex) {
-            log.error("记录异常日志失败", ex);
+            logger.error("记录异常日志失败", ex);
         }
     }
 
@@ -147,12 +151,14 @@ public class ExceptionLogAspect {
      * @return 堆栈信息的字符串表示
      */
     private String getStackTrace(Exception e) {
+
+        logger.error(e.getMessage(), e);
+
         if (e instanceof PythonRuntimeException) {
             return ((PythonRuntimeException) e).getTraceback();
         }
+
         StringWriter sw = new StringWriter();
-        PrintWriter pw = new PrintWriter(sw);
-        e.printStackTrace(pw);
         return sw.toString();
     }
 

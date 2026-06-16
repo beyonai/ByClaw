@@ -1,9 +1,8 @@
 package com.iwhalecloud.byai.state.domain.ws.handler;
 
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
-
+import cn.hutool.core.util.IdUtil;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
@@ -12,7 +11,6 @@ import com.iwhalecloud.byai.manager.application.service.ecosystem.EcosystemColle
 import com.iwhalecloud.byai.manager.dto.ecosystem.EcosystemAgentHeartbeatRequest;
 import com.iwhalecloud.byai.state.domain.notification.service.NotificationService;
 import com.iwhalecloud.byai.common.log.util.RequestContextUtil;
-import com.iwhalecloud.byai.common.log.util.SnowFlake;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import com.alibaba.fastjson.JSON;
@@ -77,7 +75,7 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
         String message = frame.text();
 
         // 生成并设置 REQUEST_ID（WebSocket 消息入口）
-        Long requestId = SnowFlake.nextId();
+        Long requestId = IdUtil.getSnowflakeNextId();
         RequestContextUtil.setRequestId(requestId);
         log.debug("WebSocket 消息处理开始，REQUEST_ID: {}", requestId);
 

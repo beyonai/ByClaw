@@ -4,21 +4,21 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.feign.response.knowledge.ModelDto;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
+import okhttp3.MediaType;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 
 /**
  * OpenAI服务实现 直接使用OpenAI API规范
@@ -26,10 +26,10 @@ import org.springframework.web.client.RestTemplate;
 @Service
 public class AIService {
 
+    private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json; charset=utf-8");
+
     @Autowired
     private AiModelService aiModelService;
-
-    private final RestTemplate restTemplate = new RestTemplate();
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -73,25 +73,27 @@ public class AIService {
             requestBody.put("enable_thinking", false);
             requestBody.put("chat_template_kwargs", Map.of("enable_thinking", false));
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("Authorization", "Bearer " + apiKey);
-            headers.set("X-CHANNEL", "BYAI");
+            Request request = new Request.Builder()
+                .url(apiUrl)
+                .post(RequestBody.create(objectMapper.writeValueAsString(requestBody), JSON_MEDIA_TYPE))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + apiKey)
+                .header("X-CHANNEL", "BYAI")
+                .build();
 
-            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
-
-            ResponseEntity<String> response = restTemplate.postForEntity(apiUrl, entity, String.class);
-
-            if (response.getStatusCode() == HttpStatus.OK) {
-                Map<String, Object> responseMap = objectMapper.readValue(response.getBody(), Map.class);
-                List<Map<String, Object>> choices = (List<Map<String, Object>>) responseMap.get("choices");
-                if (choices != null && !choices.isEmpty()) {
-                    Map<String, Object> firstChoice = choices.get(0);
-                    Map<String, String> message = (Map<String, String>) firstChoice.get("message");
-                    return message.get("content");
+            try (Response response = OkHttpUtil.getHttpClient().newCall(request).execute()) {
+                if (response.code() == HttpStatus.OK.value()) {
+                    String responseBody = response.body() != null ? response.body().string() : null;
+                    Map<String, Object> responseMap = objectMapper.readValue(responseBody, Map.class);
+                    List<Map<String, Object>> choices = (List<Map<String, Object>>) responseMap.get("choices");
+                    if (choices != null && !choices.isEmpty()) {
+                        Map<String, Object> firstChoice = choices.get(0);
+                        Map<String, String> message = (Map<String, String>) firstChoice.get("message");
+                        return message.get("content");
+                    }
                 }
+                throw new BaseException(I18nUtil.get("ai.openai.api.request.failed", response.code()));
             }
-            throw new BaseException(I18nUtil.get("ai.openai.api.request.failed", response.getStatusCode()));
         }
         catch (Exception e) {
             throw new BaseException(I18nUtil.get("ai.openai.api.call.failed", e.getMessage()), e);
