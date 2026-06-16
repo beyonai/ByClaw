@@ -37,6 +37,7 @@ from exceptions import (
     ModelNotFoundError,
     StorageError,
 )
+from utils import langfuse_scope, extract_ip
 
 dotenv.load_dotenv()
 
@@ -487,14 +488,16 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
             from redis_model_config import request_prologue_model_id
             token = request_prologue_model_id.set(prologue_model_id)
             try:
-                return await self._run_search(
-                    config, input_data, context,
-                    agent_id=agent_id,
-                    session_id=session_id,
-                    user_code=user_code,
-                    parent_message_id=parent_message_id,
-                    root_message_id=root_message_id,
-                )
+                with langfuse_scope(context) as callbacks:
+                    config["callbacks"] = callbacks
+                    return await self._run_search(
+                        config, input_data, context,
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        user_code=user_code,
+                        parent_message_id=parent_message_id,
+                        root_message_id=root_message_id,
+                    )
             finally:
                 request_prologue_model_id.reset(token)
         except ConfigurationError as exc:
@@ -668,7 +671,7 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
 def main() -> None:
     worker_mod.run_worker(
         InstantSearchWorker,
-        worker_id=os.getenv("BYAI_WORKER_ID", "instant-search-worker-1"),
+        worker_id=os.getenv("BYAI_WORKER_ID", "instant-search-worker") + "-" + extract_ip(),
         redis_host=os.getenv("BYAI_REDIS_HOST", "10.10.168.204"),
         redis_port=int(os.getenv("BYAI_REDIS_PORT", 6379)),
         redis_db=int(os.getenv("BYAI_REDIS_DB", 0)),
