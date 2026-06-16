@@ -41,6 +41,11 @@ public class SandboxServiceSpec {
     private Map<String, String> resourceLimits;
 
     /**
+     * Resource requests (CreateSandboxRequest.resourceRequests).
+     */
+    private Map<String, String> resourceRequests;
+
+    /**
      * Sandbox auto-expiration timeout in seconds.
      * Null means no automatic expiration.
      */
@@ -65,4 +70,11 @@ public class SandboxServiceSpec {
      * template for openclaw.json
      */
     private String templateJson;
+
+    /**
+     * Resolved service type and profile. They are derived from DB metadata and not required in spec_json.
+     */
+    private String serviceType;
+
+    private String profileKey;
 }

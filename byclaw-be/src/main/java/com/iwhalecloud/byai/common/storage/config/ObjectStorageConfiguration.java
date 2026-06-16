@@ -51,6 +51,10 @@ public class ObjectStorageConfiguration {
         storageTypeThreadLocal.set(storageType);
     }
 
+    public static void clearStorageType() {
+        storageTypeThreadLocal.remove();
+    }
+
     /**
      * 存储类型如果当前线程有指定，优先返回当前线程，没有则使用默认存储方案
      *

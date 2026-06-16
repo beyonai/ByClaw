@@ -1,0 +1,203 @@
+{
+  "overwrite": true,
+  "folderUid": "",
+  "message": "ByClaw K3s namespace pods dashboard",
+  "dashboard": {
+    "uid": "byclaw-k3s-namespace",
+    "title": "K3s 命名空间 Pod 详情",
+    "tags": ["byclaw", "k3s", "namespace", "pods"],
+    "timezone": "browser",
+    "schemaVersion": 39,
+    "version": 1,
+    "refresh": "30s",
+    "time": {"from": "now-1h", "to": "now"},
+    "templating": {
+      "list": [
+        {
+          "name": "datasource",
+          "type": "datasource",
+          "query": "prometheus",
+          "current": {},
+          "hide": 2,
+          "refresh": 1
+        },
+        {
+          "name": "namespace",
+          "type": "query",
+          "label": "Namespace",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "query": {"query": "label_values(kube_pod_info, namespace)", "refId": "StandardVariableQuery"},
+          "includeAll": false,
+          "multi": false,
+          "refresh": 2,
+          "sort": 1,
+          "current": {}
+        }
+      ]
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Pod 总数",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "targets": [{"refId": "A", "expr": "count(kube_pod_info{namespace=\"$namespace\"})", "instant": true}],
+        "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}}}
+      },
+      {
+        "id": 2,
+        "title": "Running",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "targets": [{"refId": "A", "expr": "sum(kube_pod_status_phase{namespace=\"$namespace\", phase=\"Running\"})", "instant": true}],
+        "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}}}
+      },
+      {
+        "id": 3,
+        "title": "Pending",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "targets": [{"refId": "A", "expr": "sum(kube_pod_status_phase{namespace=\"$namespace\", phase=\"Pending\"})", "instant": true}],
+        "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}]}}}
+      },
+      {
+        "id": 4,
+        "title": "Failed",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "targets": [{"refId": "A", "expr": "sum(kube_pod_status_phase{namespace=\"$namespace\", phase=\"Failed\"})", "instant": true}],
+        "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}}
+      },
+      {
+        "id": 5,
+        "title": "Not Ready",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "targets": [{"refId": "A", "expr": "sum(kube_pod_status_ready{namespace=\"$namespace\", condition=\"false\"})", "instant": true}],
+        "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}}
+      },
+      {
+        "id": 6,
+        "title": "分布节点数",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "targets": [{"refId": "A", "expr": "count(count by (node) (kube_pod_info{namespace=\"$namespace\"}))", "instant": true}],
+        "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "purple", "value": null}]}}}
+      },
+      {
+        "id": 7,
+        "title": "各节点 Pod 分布",
+        "type": "piechart",
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 4},
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "targets": [{"refId": "A", "expr": "count by (node) (kube_pod_info{namespace=\"$namespace\"})", "legendFormat": "{{node}}", "instant": true}],
+        "options": {"legend": {"displayMode": "table", "placement": "right", "values": ["value", "percent"]}, "pieType": "donut", "reduceOptions": {"calcs": ["lastNotNull"]}}
+      },
+      {
+        "id": 8,
+        "title": "Namespace CPU 使用趋势",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 4},
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "targets": [{"refId": "A", "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",container!=\"\",pod!=\"\"}[5m]))", "legendFormat": "CPU cores"}],
+        "fieldConfig": {"defaults": {"unit": "cores", "custom": {"drawStyle": "line", "fillOpacity": 15}}}
+      },
+      {
+        "id": 9,
+        "title": "Namespace 内存使用趋势",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 4},
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "targets": [{"refId": "A", "expr": "sum(container_memory_working_set_bytes{namespace=\"$namespace\",container!=\"\",pod!=\"\"})", "legendFormat": "Memory"}],
+        "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"drawStyle": "line", "fillOpacity": 15}}}
+      },
+      {
+        "id": 10,
+        "title": "Pod 列表（节点 / CPU / 内存）",
+        "type": "table",
+        "gridPos": {"h": 14, "w": 24, "x": 0, "y": 12},
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "targets": [
+          {"refId": "info", "expr": "kube_pod_info{namespace=\"$namespace\"}", "format": "table", "instant": true},
+          {"refId": "phase", "expr": "kube_pod_status_phase{namespace=\"$namespace\"} == 1", "format": "table", "instant": true},
+          {"refId": "cpu", "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",container!=\"\",pod!=\"\"}[5m]))", "format": "table", "instant": true},
+          {"refId": "mem", "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"$namespace\",container!=\"\",pod!=\"\"})", "format": "table", "instant": true},
+          {"refId": "restarts", "expr": "sum by (pod) (kube_pod_container_status_restarts_total{namespace=\"$namespace\"})", "format": "table", "instant": true},
+          {"refId": "ready", "expr": "kube_pod_status_ready{namespace=\"$namespace\", condition=\"true\"}", "format": "table", "instant": true}
+        ],
+        "transformations": [
+          {"id": "seriesToColumns", "options": {"byField": "pod"}},
+          {"id": "organize", "options": {
+            "excludeByName": {
+              "Time": true, "Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true, "Time 5": true,
+              "__name__": true, "created_by_kind": true, "created_by_name": true, "host_network": true,
+              "instance": true, "job": true, "namespace": true, "namespace 1": true, "namespace 2": true,
+              "namespace 3": true, "namespace 4": true, "namespace 5": true, "uid": true, "priority_class": true,
+              "condition": true, "Value #info": true, "Value #ready": true, "host_ip": true
+            },
+            "renameByName": {
+              "pod": "Pod",
+              "node": "节点",
+              "pod_ip": "Pod IP",
+              "phase": "状态",
+              "Value #cpu": "CPU (cores)",
+              "Value #mem": "内存",
+              "Value #restarts": "重启次数"
+            }
+          }}
+        ],
+        "fieldConfig": {
+          "defaults": {"custom": {"align": "auto", "filterable": true}},
+          "overrides": [
+            {"matcher": {"id": "byName", "options": "CPU (cores)"}, "properties": [{"id": "unit", "value": "cores"}, {"id": "decimals", "value": 3}]},
+            {"matcher": {"id": "byName", "options": "内存"}, "properties": [{"id": "unit", "value": "bytes"}]},
+            {"matcher": {"id": "byName", "options": "重启次数"}, "properties": [{"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 3}, {"color": "red", "value": 10}]}}, {"id": "custom.cellOptions", "value": {"type": "color-background"}}]}
+          ]
+        },
+        "options": {"showHeader": true, "sortBy": [{"displayName": "CPU (cores)", "desc": true}]}
+      },
+      {
+        "id": 11,
+        "title": "Top Pod CPU",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 26},
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "targets": [{"refId": "A", "expr": "topk(10, sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",container!=\"\",pod!=\"\"}[5m])))", "legendFormat": "{{pod}}"}],
+        "fieldConfig": {"defaults": {"unit": "cores"}}
+      },
+      {
+        "id": 12,
+        "title": "Top Pod 内存",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 26},
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "targets": [{"refId": "A", "expr": "topk(10, sum by (pod) (container_memory_working_set_bytes{namespace=\"$namespace\",container!=\"\",pod!=\"\"}))", "legendFormat": "{{pod}}"}],
+        "fieldConfig": {"defaults": {"unit": "bytes"}}
+      },
+      {
+        "id": 13,
+        "title": "各节点 CPU 用量",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 34},
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "targets": [{"refId": "A", "expr": "sum by (instance) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",container!=\"\",pod!=\"\"}[5m]))", "legendFormat": "{{instance}}"}],
+        "fieldConfig": {"defaults": {"unit": "cores"}}
+      },
+      {
+        "id": 14,
+        "title": "各节点内存用量",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 34},
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "targets": [{"refId": "A", "expr": "sum by (instance) (container_memory_working_set_bytes{namespace=\"$namespace\",container!=\"\",pod!=\"\"})", "legendFormat": "{{instance}}"}],
+        "fieldConfig": {"defaults": {"unit": "bytes"}}
+      }
+    ]
+  }
+}

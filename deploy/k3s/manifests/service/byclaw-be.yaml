@@ -1,0 +1,95 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: byclaw-be-config
+  namespace: by-service
+data:
+  # 挂载 deploy/config 下 application.properties；生产可用 initContainer 或外部 Secret
+  placeholder: "mount-from-deploy-config"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: byclaw-be
+  namespace: by-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: byclaw-be
+  template:
+    metadata:
+      labels:
+        app: byclaw-be
+    spec:
+      containers:
+        - name: be
+          image: ghcr.io/beyonai/byclaw/byclaw-be:main
+          ports:
+            - name: http
+              containerPort: 8086
+            - name: ws
+              containerPort: 8082
+          env:
+            - name: BYCLAW_SANDBOX_ENABLE
+              value: "true"
+            - name: BYCLAW_SANDBOX_BASE_URL
+              value: "http://opensandbox-server.by-sandbox.svc.cluster.local:9005"
+            - name: BYCLAW_SANDBOX_ENDPOINT_SCHEME
+              value: "https"
+            - name: BYCLAW_SANDBOX_PROFILE_ENABLED
+              value: "true"
+            - name: BYCLAW_SANDBOX_TIER_AUTOSCALE_ENABLED
+              value: "true"
+            - name: BYCLAW_SANDBOX_VOLUME_BACKEND
+              value: "file"
+            - name: FILE_STORAGE_TYPE
+              value: "file"
+            - name: FILE_STORAGE_MINIO_MOUNT_ENABLED
+              value: "false"
+            - name: BYCLAW_SANDBOX_FILE_VOLUME_ROOT
+              value: "/mnt/byclaw-workspace"
+            - name: FILE_STORAGE_LOCAL_PATH
+              value: "/mnt/byclaw-workspace"
+            - name: BYCLAW_SANDBOX_FILE_VOLUME_TYPE
+              value: "bind"
+            - name: DB_HOST
+              value: "opengauss.by-middleware.svc.cluster.local"
+            - name: REDIS_HOST
+              value: "redis.by-middleware.svc.cluster.local"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: workspace
+              mountPath: /mnt/byclaw-workspace
+      volumes:
+        - name: config
+          configMap:
+            name: byclaw-be-config
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: byclaw-workspace
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: byclaw-be
+  namespace: by-service
+spec:
+  selector:
+    app: byclaw-be
+  ports:
+    - name: http
+      port: 8086
+      targetPort: http
+    - name: ws
+      port: 8082
+      targetPort: ws

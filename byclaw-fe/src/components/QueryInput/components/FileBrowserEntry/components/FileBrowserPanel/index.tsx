@@ -35,7 +35,7 @@ interface FileBrowserPanelProps {
 }
 
 function getIconType(name: string, isDir: boolean): string {
-  if (isDir) return 'wenjianjia';
+  if (isDir) return 'wenjianjialanse';
   if (/\.(doc|docx)$/i.test(name)) return 'Word';
   if (/\.pdf$/i.test(name)) return 'PDF';
   if (/\.(xls|xlsx|csv)$/i.test(name)) return 'Excel';

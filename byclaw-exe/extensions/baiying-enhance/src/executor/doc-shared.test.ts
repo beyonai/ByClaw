@@ -1,10 +1,22 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { getCommonGatewayMetadata } from "./doc-shared.js";
+import { getCommonGatewayMetadata, resolveLangfuseParentObservationId } from "./doc-shared.js";
 
 const STORE_KEY = "__OPENCLAW_BYAI_CHANNEL_SESSION_CONTEXT_STORE__";
 
 afterEach(() => {
   delete (globalThis as typeof globalThis & { [STORE_KEY]?: unknown })[STORE_KEY];
+});
+
+describe("resolveLangfuseParentObservationId", () => {
+  it("reads Langfuse parent observation id from resource context", () => {
+    expect(
+      resolveLangfuseParentObservationId({
+        resource_context: {
+          langfuse_parent_observation_id: "405506aa1c59aa26",
+        },
+      }),
+    ).toBe("405506aa1c59aa26");
+  });
 });
 
 describe("getCommonGatewayMetadata", () => {

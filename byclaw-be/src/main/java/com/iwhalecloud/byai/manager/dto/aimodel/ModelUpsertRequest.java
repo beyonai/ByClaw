@@ -72,6 +72,9 @@ public class ModelUpsertRequest implements Serializable {
 
     private Double presencePenalty;
 
+    /** Reasoning / Thinking 配置 */
+    private ModelReasoningConfig reasoningConfig;
+
     /** 入参模板 */
     private String inparamTemplate;
 

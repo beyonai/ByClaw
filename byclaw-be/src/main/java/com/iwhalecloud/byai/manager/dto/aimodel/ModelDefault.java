@@ -19,6 +19,8 @@ public class ModelDefault {
     private Long modelId;
 
     /** 标签 ID */
-    @NotNull(message = "{aimodel.tagId.required}")
     private Long tagId;
+
+    /** 模型类型 */
+    private String modelType;
 }

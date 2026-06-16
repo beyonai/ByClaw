@@ -43,6 +43,7 @@ describe("adaptAgentJson", () => {
         expect(res.modelRef).toBe("");
         expect(res.systemPrompt).toBe("Be brief.");
         expect(res.listEntry.model).toBeUndefined();
+        expect(res.listEntry.experimental).toEqual({ localModelLean: false });
         expect(res.listEntry.skills).toEqual([]);
     });
 
@@ -67,6 +68,7 @@ describe("adaptAgentJson", () => {
         expect(res.modelRef).toBe("");
         expect(res.provider).toBeUndefined();
         expect(res.listEntry.model).toBeUndefined();
+        expect(res.listEntry.experimental).toEqual({ localModelLean: false });
         expect(res.systemPrompt).toBe("Help users.");
         expect(res.listEntry.skills).toEqual([]);
     });
@@ -224,6 +226,7 @@ describe("adaptAgentJson", () => {
         expect(res.listEntry.tools).toEqual({
             allow: ["*", "read", "write", "baiying_call"],
         });
+        expect(res.listEntry.experimental).toEqual({ localModelLean: false });
     });
 
     it("maps raw Baiying detail (integrationType INTERFACE)", () => {

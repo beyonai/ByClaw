@@ -17,10 +17,12 @@ import {
   type DocAsyncSendParams,
   type DocDeltaCallback,
   getCommonGatewayMetadata,
+  resolveLangfuseParentObservationId as resolvePayloadLangfuseParentObservationId,
 } from "../doc-shared.js";
 import { executeDocViaSdk } from "../doc-gateway.js";
 import { executeViaCallAgent } from "../call-agent.js";
 import { logBaiyingRequest, type BaiyingEnhanceLogger } from "../debug-channel.js";
+import { resolveLangfuseParentObservationIdWithRetry } from "../../langfuse-observation.js";
 // Raw ioredis fallback. Only imported from here — this module is the only
 // place that should reference `doc-redis.ts`, and only when the caller has
 // explicitly opted into `BAIYING_DOC_BACKEND=raw`.
@@ -219,6 +221,21 @@ async function executeDatasetDocViaCallAgent(input: {
 }): Promise<ExecutorResponse> {
   const sessionId = resolveDocSessionId(input.parameters, input.datasetId);
   const channelTraceId = resolveDocChannelTraceId(input.parameters);
+  let langfuseParentObservationId = resolvePayloadLangfuseParentObservationId(input.parameters);
+  if (!langfuseParentObservationId) {
+    const resourceContext = isRecord(input.parameters.resource_context)
+      ? (input.parameters.resource_context as Dict)
+      : {};
+    langfuseParentObservationId = await resolveLangfuseParentObservationIdWithRetry(
+      {
+        ...input.parameters,
+        toolCallId: input.parameters.tool_call_id,
+        requesterSessionKey:
+          asString(resourceContext.requester_session_key) || asString(resourceContext.session_key),
+      },
+      { attempts: 8, delayMs: 50 },
+    );
+  }
   const traceId = channelTraceId || `${sessionId}-${Date.now()}`;
   const defaultKbId = asString(input.capability.metadata?.resource_code) || input.datasetId;
   const callKbIds = stringList(input.parameters.call_kb_ids, [defaultKbId]);
@@ -238,9 +255,15 @@ async function executeDatasetDocViaCallAgent(input: {
   if (channelTraceId) {
     payload["channel-trace-id"] = channelTraceId;
   }
+  if (langfuseParentObservationId) {
+    payload.langfuseParentObservationId = langfuseParentObservationId;
+  }
   const metadata = getCommonGatewayMetadata(input.parameters);
   if (channelTraceId) {
     metadata["channel-trace-id"] = channelTraceId;
+  }
+  if (langfuseParentObservationId) {
+    metadata.langfuseParentObservationId = langfuseParentObservationId;
   }
 
   return executeViaCallAgent({
@@ -262,6 +285,7 @@ async function executeDatasetDocViaCallAgent(input: {
       system_code: input.capability.metadata?.system_code,
     },
     metadata,
+    langfuseParentObservationId,
     onDelta: input.onDelta,
     signal: input.signal,
     logger: input.logger,

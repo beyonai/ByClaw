@@ -49,6 +49,7 @@ export type ExecuteViaCallAgentInput = {
   logger?: BaiyingEnhanceLogger;
   parentMessageId: string;
   toolCallId?: string;
+  langfuseParentObservationId?: string;
 };
 
 export async function executeViaCallAgent(
@@ -83,6 +84,9 @@ export async function executeViaCallAgent(
     const metadata = {
       ...(input.metadata || {}),
       toolCallId: input.toolCallId,
+      ...(input.langfuseParentObservationId
+        ? { langfuseParentObservationId: input.langfuseParentObservationId }
+        : {}),
     };
 
     logBaiyingRequest(input.logger, "call_agent.dispatch", {
@@ -100,6 +104,7 @@ export async function executeViaCallAgent(
       user_code: input.userCode ?? nonEmptyEnv("USER_CODE"),
       user_name: input.userName ?? nonEmptyEnv("USER_NAME"),
       task_group_id: input.taskGroupId ?? "",
+      langfuse_parent_observation_id: input.langfuseParentObservationId,
       metadata,
       content: input.content,
       payload: input.payload,
@@ -108,7 +113,7 @@ export async function executeViaCallAgent(
       target: input.target,
     });
 
-    const result = await callAgent(deps, {
+    const callAgentInput = {
       sessionId: input.sessionId,
       traceId: input.traceId,
       sourceAgentType,
@@ -122,7 +127,11 @@ export async function executeViaCallAgent(
       taskGroupId: input.taskGroupId,
       metadata,
       probeAgentType: input.probeAgentType ?? false,
-    });
+      ...(input.langfuseParentObservationId
+        ? { langfuseParentObservationId: input.langfuseParentObservationId }
+        : {}),
+    };
+    const result = await callAgent(deps, callAgentInput as Parameters<typeof callAgent>[1]);
 
     const commandPayload = {
       action_type: "CALL_AGENT",
@@ -134,6 +143,7 @@ export async function executeViaCallAgent(
         target_agent_type: input.targetAgentType,
         parent_message_id: result.parentMessageId ?? defaultParentMessageId,
         task_group_id: input.taskGroupId ?? "",
+        langfuse_parent_observation_id: input.langfuseParentObservationId ?? "",
         user_code: input.userCode ?? nonEmptyEnv("USER_CODE") ?? "",
         user_name: input.userName ?? nonEmptyEnv("USER_NAME") ?? "",
         metadata,
