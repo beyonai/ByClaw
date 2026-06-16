@@ -67,7 +67,37 @@ export default {
   'sandboxMgr.config.saveSuccess': 'Saved successfully',
   'sandboxMgr.config.deleteSuccess': 'Deleted successfully',
   'sandboxMgr.config.tab.spec': 'Sandbox Base Config',
-  'sandboxMgr.config.tab.elastic': 'Sandbox Elastic Compute',
+  'sandboxMgr.config.tab.profile': 'Service Profiles',
+  'sandboxMgr.config.tab.elastic': 'Elastic Resize',
+
+  // Sandbox service profiles
+  'sandboxMgr.profile.tip':
+    'Manage resource profiles under a sandbox service type. Elastic resize only uses enabled profiles that allow resize.',
+  'sandboxMgr.profile.add': 'Add Profile',
+  'sandboxMgr.profile.addTitle': 'Add Service Profile',
+  'sandboxMgr.profile.editTitle': 'Edit Service Profile',
+  'sandboxMgr.profile.serviceType': 'Service Type',
+  'sandboxMgr.profile.profileKey': 'Profile Key',
+  'sandboxMgr.profile.resourceRequests': 'Requests JSON',
+  'sandboxMgr.profile.resourceLimits': 'Limits JSON',
+  'sandboxMgr.profile.templatePatchJson': 'Template Patch JSON',
+  'sandboxMgr.profile.resizeEnabled': 'Resize Enabled',
+  'sandboxMgr.profile.enabled': 'Enabled',
+  'sandboxMgr.profile.disabled': 'Disabled',
+  'sandboxMgr.profile.sortOrder': 'Sort',
+  'sandboxMgr.profile.serviceTypePlaceholder': 'Enter service type, e.g. openclaw',
+  'sandboxMgr.profile.profileKeyPlaceholder': 'Enter profile key, e.g. xs, s, m, l',
+  'sandboxMgr.profile.resourceRequestsPlaceholder': 'Enter requests JSON, e.g. {"cpu":"500m","memory":"1Gi"}',
+  'sandboxMgr.profile.resourceLimitsPlaceholder': 'Enter limits JSON, e.g. {"cpu":"2","memory":"4Gi"}',
+  'sandboxMgr.profile.templatePatchJsonPlaceholder': 'Enter template patch JSON (optional)',
+  'sandboxMgr.profile.serviceTypeRequired': 'Please enter service type',
+  'sandboxMgr.profile.profileKeyRequired': 'Please enter profile key',
+  'sandboxMgr.profile.resourceRequestsRequired': 'Please enter requests JSON',
+  'sandboxMgr.profile.resourceLimitsRequired': 'Please enter limits JSON',
+  'sandboxMgr.profile.saveSuccess': 'Profile saved',
+  'sandboxMgr.profile.deleteSuccess': 'Profile disabled',
+  'sandboxMgr.profile.deleteConfirm':
+    'Disable this profile? It will no longer appear as a target profile for elastic resize.',
 
   // Sandbox Elastic Compute
   'sandboxMgr.elastic.userCode': 'User Code',
@@ -112,11 +142,14 @@ export default {
   'sandboxMgr.elastic.profile.m': 'M Enhanced',
   'sandboxMgr.elastic.profile.l': 'L High Performance',
   'sandboxMgr.elastic.strategy.IN_PLACE': 'In-place Resize',
-  'sandboxMgr.elastic.strategy.IN_PLACE.desc': 'Adjust resources on the current running sandbox without switching access.',
+  'sandboxMgr.elastic.strategy.IN_PLACE.desc':
+    'Adjust resources on the current running sandbox without switching access.',
   'sandboxMgr.elastic.strategy.PREFERRED_ONLY': 'Next Launch Only',
-  'sandboxMgr.elastic.strategy.PREFERRED_ONLY.desc': 'Update the user preferred profile only, without interrupting the current sandbox.',
+  'sandboxMgr.elastic.strategy.PREFERRED_ONLY.desc':
+    'Update the user preferred profile only, without interrupting the current sandbox.',
   'sandboxMgr.elastic.strategy.HOT_SWITCH': 'Hot Switch',
-  'sandboxMgr.elastic.strategy.HOT_SWITCH.desc': 'Start a new sandbox with the target profile and switch the endpoint after it is ready.',
+  'sandboxMgr.elastic.strategy.HOT_SWITCH.desc':
+    'Start a new sandbox with the target profile and switch the endpoint after it is ready.',
   'sandboxMgr.elastic.status.REQUESTED': 'Requested',
   'sandboxMgr.elastic.status.RUNNING': 'Running',
   'sandboxMgr.elastic.status.SUCCESS': 'Success',

@@ -31,6 +31,7 @@ import {
   Tag,
   Drawer,
   Form,
+  InputNumber,
   Modal,
   Tabs,
 } from 'antd';
@@ -229,6 +230,10 @@ const SandboxMgr = () => {
   const [resizeRecords, setResizeRecords] = useState<SandboxResizeRecord[]>([]);
   const [resizeRecordsLoading, setResizeRecordsLoading] = useState(false);
   const [resizing, setResizing] = useState(false);
+  const [profileFormVisible, setProfileFormVisible] = useState(false);
+  const [editingProfile, setEditingProfile] = useState<ServiceProfileItem | null>(null);
+  const [profileForm] = Form.useForm();
+  const [savingProfile, setSavingProfile] = useState(false);
 
   // 指定用户沙箱相关状态
   const [launchModalOpen, setLaunchModalOpen] = useState(false);
@@ -595,11 +600,11 @@ const SandboxMgr = () => {
   }, [dispatch]);
 
   const loadProfileList = useCallback(
-    (serviceType = DEFAULT_SERVICE_TYPE) => {
+    (serviceType = DEFAULT_SERVICE_TYPE, enabledOnly = false) => {
       setProfileLoading(true);
       dispatch({
         type: 'sandboxMgr/listServiceProfiles',
-        payload: { serviceType, enabledOnly: true },
+        payload: { serviceType, enabledOnly },
         success: (data: ServiceProfileItem[]) => {
           setProfileList(data || []);
           setProfileLoading(false);
@@ -644,13 +649,16 @@ const SandboxMgr = () => {
     setSpecDrawerOpen(false);
     setSpecFormVisible(false);
     setEditingSpec(null);
+    setProfileFormVisible(false);
+    setEditingProfile(null);
     specForm.resetFields();
+    profileForm.resetFields();
     setSpecDrawerTab('spec');
     resizeForm.resetFields();
     setResizeSandboxList([]);
     setSelectedResizeRecord(null);
     setResizeRecords([]);
-  }, [resizeForm, specForm]);
+  }, [profileForm, resizeForm, specForm]);
 
   const handleAddSpec = useCallback(() => {
     setEditingSpec(null);
@@ -712,6 +720,85 @@ const SandboxMgr = () => {
     setEditingSpec(null);
     specForm.resetFields();
   }, [specForm]);
+
+  // ==================== 沙箱服务规格档位相关方法 ====================
+
+  const handleAddProfile = useCallback(() => {
+    setEditingProfile(null);
+    profileForm.setFieldsValue({
+      serviceType: DEFAULT_SERVICE_TYPE,
+      resizeStrategy: 'IN_PLACE',
+      resizeEnabled: true,
+      enabled: true,
+      sortOrder: 0,
+      resourceRequests: '{"cpu":"500m","memory":"1Gi"}',
+      resourceLimits: '{"cpu":"2","memory":"4Gi"}',
+    });
+    setProfileFormVisible(true);
+  }, [profileForm]);
+
+  const handleEditProfile = useCallback(
+    (record: ServiceProfileItem) => {
+      setEditingProfile(record);
+      profileForm.setFieldsValue({
+        ...record,
+        resizeEnabled: record.resizeEnabled !== 0,
+        enabled: record.enabled !== 0,
+      });
+      setProfileFormVisible(true);
+    },
+    [profileForm]
+  );
+
+  const handleDeleteProfile = useCallback(
+    (record: ServiceProfileItem) => {
+      dispatch({
+        type: 'sandboxMgr/deleteServiceProfile',
+        payload: { id: record.id, serviceType: record.serviceType, profileKey: record.profileKey },
+        success: () => {
+          loadProfileList();
+        },
+      });
+    },
+    [dispatch, loadProfileList]
+  );
+
+  const handleSaveProfile = useCallback(() => {
+    profileForm.validateFields().then((values) => {
+      setSavingProfile(true);
+      dispatch({
+        type: 'sandboxMgr/saveServiceProfile',
+        payload: {
+          id: editingProfile?.id,
+          serviceType: trim(values.serviceType || DEFAULT_SERVICE_TYPE),
+          profileKey: trim(values.profileKey || ''),
+          resourceRequests: trim(values.resourceRequests || ''),
+          resourceLimits: trim(values.resourceLimits || ''),
+          templatePatchJson: trim(values.templatePatchJson || ''),
+          resizeEnabled: values.resizeEnabled ? 1 : 0,
+          resizeStrategy: values.resizeStrategy || 'IN_PLACE',
+          enabled: values.enabled ? 1 : 0,
+          sortOrder: values.sortOrder || 0,
+        },
+        success: () => {
+          setSavingProfile(false);
+          setProfileFormVisible(false);
+          setEditingProfile(null);
+          profileForm.resetFields();
+          loadProfileList();
+        },
+        fail: () => {
+          setSavingProfile(false);
+        },
+      });
+    });
+  }, [dispatch, editingProfile, loadProfileList, profileForm]);
+
+  const handleCancelProfileForm = useCallback(() => {
+    setProfileFormVisible(false);
+    setEditingProfile(null);
+    profileForm.resetFields();
+  }, [profileForm]);
 
   // ==================== 沙箱弹性计算配置相关方法 ====================
 
@@ -1246,6 +1333,91 @@ const SandboxMgr = () => {
       render: renderEllipsisText,
     },
   ];
+
+  const profileColumns = [
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.profile.serviceType' }),
+      dataIndex: 'serviceType',
+      width: 140,
+      ellipsis: true,
+      render: renderEllipsisText,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.profile.profileKey' }),
+      dataIndex: 'profileKey',
+      width: 140,
+      render: (value: string, record: ServiceProfileItem) => renderProfileTag(value, record.serviceType),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.elastic.resourceGuaranteed' }),
+      dataIndex: 'resourceRequests',
+      width: 190,
+      render: (value: string) => renderResourceCompact(value),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.elastic.resourceLimit' }),
+      dataIndex: 'resourceLimits',
+      width: 190,
+      render: (value: string) => renderResourceCompact(value),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.elastic.resizeType' }),
+      dataIndex: 'resizeStrategy',
+      width: 150,
+      render: renderStrategy,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.profile.resizeEnabled' }),
+      dataIndex: 'resizeEnabled',
+      width: 110,
+      align: 'center' as const,
+      render: (value: number) => (
+        <Tag color={value === 0 ? 'default' : 'green'}>
+          {intl.formatMessage({ id: value === 0 ? 'sandboxMgr.profile.disabled' : 'sandboxMgr.profile.enabled' })}
+        </Tag>
+      ),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.profile.enabled' }),
+      dataIndex: 'enabled',
+      width: 110,
+      align: 'center' as const,
+      render: (value: number) => (
+        <Tag color={value === 0 ? 'default' : 'green'}>
+          {intl.formatMessage({ id: value === 0 ? 'sandboxMgr.profile.disabled' : 'sandboxMgr.profile.enabled' })}
+        </Tag>
+      ),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.profile.sortOrder' }),
+      dataIndex: 'sortOrder',
+      width: 100,
+      align: 'center' as const,
+      render: (value: number) => value ?? 0,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.action' }),
+      width: 150,
+      align: 'center' as const,
+      fixed: 'right' as const,
+      render: (_: any, record: ServiceProfileItem) => (
+        <Space size="small">
+          <Button size="small" type="link" icon={<EditOutlined />} onClick={() => handleEditProfile(record)}>
+            {intl.formatMessage({ id: 'SystemParams.params.edit' })}
+          </Button>
+          <Popconfirm
+            title={intl.formatMessage({ id: 'sandboxMgr.profile.deleteConfirm' })}
+            onConfirm={() => handleDeleteProfile(record)}
+          >
+            <Button size="small" type="link" danger icon={<DeleteOutlined />}>
+              {intl.formatMessage({ id: 'SystemParams.params.delete' })}
+            </Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
+
   const selectedResource = selectedResizeRecord
     ? getResourceInfo(selectedResizeRecord.resourceRequests, selectedResizeRecord.resourceLimits)
     : null;
@@ -1259,6 +1431,7 @@ const SandboxMgr = () => {
         (PROFILE_ORDER[(a.profileKey || '').toLowerCase()] || a.sortOrder || 999) -
         (PROFILE_ORDER[(b.profileKey || '').toLowerCase()] || b.sortOrder || 999)
     );
+  const enabledProfileList = sortedProfileList.filter((item) => item.enabled !== 0 && item.resizeEnabled !== 0);
 
   return (
     <div className={classNames('full-height ub ub-ver gap8', styles.container)}>
@@ -1407,6 +1580,39 @@ const SandboxMgr = () => {
               ),
             },
             {
+              key: 'profile',
+              label: intl.formatMessage({ id: 'sandboxMgr.config.tab.profile' }),
+              children: (
+                <div className={styles.specDrawerContent}>
+                  <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
+                    <Col>
+                      <Typography.Text type="secondary">
+                        {intl.formatMessage({ id: 'sandboxMgr.profile.tip' })}
+                      </Typography.Text>
+                    </Col>
+                    <Col>
+                      <Space>
+                        <Button icon={<ReloadOutlined />} onClick={() => loadProfileList()} loading={profileLoading}>
+                          {intl.formatMessage({ id: 'sandboxMgr.action.refresh' })}
+                        </Button>
+                        <Button type="primary" icon={<PlusOutlined />} onClick={handleAddProfile}>
+                          {intl.formatMessage({ id: 'sandboxMgr.profile.add' })}
+                        </Button>
+                      </Space>
+                    </Col>
+                  </Row>
+                  <Table<ServiceProfileItem>
+                    rowKey={(record) => String(record.id || `${record.serviceType}-${record.profileKey}`)}
+                    dataSource={sortedProfileList}
+                    loading={profileLoading}
+                    pagination={false}
+                    columns={profileColumns}
+                    scroll={{ x: 1340 }}
+                  />
+                </div>
+              ),
+            },
+            {
               key: 'elastic',
               label: (
                 <Space size={4}>
@@ -1480,7 +1686,7 @@ const SandboxMgr = () => {
                             placeholder={intl.formatMessage({ id: 'sandboxMgr.elastic.targetProfilePlaceholder' })}
                             optionLabelProp="label"
                           >
-                            {sortedProfileList.map((item) => (
+                            {enabledProfileList.map((item) => (
                               <Option
                                 key={`${item.serviceType}-${item.profileKey}`}
                                 value={item.profileKey}
@@ -1756,6 +1962,161 @@ const SandboxMgr = () => {
             <Input.TextArea
               rows={8}
               placeholder={intl.formatMessage({ id: 'sandboxMgr.config.templateJsonPlaceholder' })}
+              style={{ fontFamily: 'monospace' }}
+            />
+          </Form.Item>
+        </Form>
+      </ModalDrawer>
+
+      {/* 沙箱服务规格档位表单 */}
+      <ModalDrawer
+        title={intl.formatMessage({
+          id: editingProfile ? 'sandboxMgr.profile.editTitle' : 'sandboxMgr.profile.addTitle',
+        })}
+        open={profileFormVisible}
+        onCancel={handleCancelProfileForm}
+        onOk={handleSaveProfile}
+        confirmLoading={savingProfile}
+        width={720}
+      >
+        <Form form={profileForm} layout="vertical" preserve={false}>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item
+                label={intl.formatMessage({ id: 'sandboxMgr.profile.serviceType' })}
+                name="serviceType"
+                rules={[
+                  { required: true, message: intl.formatMessage({ id: 'sandboxMgr.profile.serviceTypeRequired' }) },
+                ]}
+              >
+                <Input
+                  disabled={!!editingProfile}
+                  placeholder={intl.formatMessage({ id: 'sandboxMgr.profile.serviceTypePlaceholder' })}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                label={intl.formatMessage({ id: 'sandboxMgr.profile.profileKey' })}
+                name="profileKey"
+                rules={[
+                  { required: true, message: intl.formatMessage({ id: 'sandboxMgr.profile.profileKeyRequired' }) },
+                ]}
+              >
+                <Input
+                  disabled={!!editingProfile}
+                  placeholder={intl.formatMessage({ id: 'sandboxMgr.profile.profileKeyPlaceholder' })}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.elastic.resizeType' })} name="resizeStrategy">
+                <Select>
+                  {RESIZE_STRATEGIES.map((item) => (
+                    <Option key={item} value={item}>
+                      {getResizeStrategyLabel(item)}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.profile.sortOrder' })} name="sortOrder">
+                <InputNumber min={0} precision={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={4}>
+              <Form.Item
+                label={intl.formatMessage({ id: 'sandboxMgr.profile.resizeEnabled' })}
+                name="resizeEnabled"
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col span={4}>
+              <Form.Item
+                label={intl.formatMessage({ id: 'sandboxMgr.profile.enabled' })}
+                name="enabled"
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item
+            label={intl.formatMessage({ id: 'sandboxMgr.profile.resourceRequests' })}
+            name="resourceRequests"
+            rules={[
+              { required: true, message: intl.formatMessage({ id: 'sandboxMgr.profile.resourceRequestsRequired' }) },
+              {
+                validator: (_, value) => {
+                  if (!value) return Promise.resolve();
+                  try {
+                    const parsed = JSON.parse(value);
+                    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return Promise.resolve();
+                  } catch (e) {
+                    // handled below
+                  }
+                  return Promise.reject(new Error(intl.formatMessage({ id: 'sandboxMgr.config.invalidJson' })));
+                },
+              },
+            ]}
+          >
+            <Input.TextArea
+              rows={4}
+              placeholder={intl.formatMessage({ id: 'sandboxMgr.profile.resourceRequestsPlaceholder' })}
+              style={{ fontFamily: 'monospace' }}
+            />
+          </Form.Item>
+          <Form.Item
+            label={intl.formatMessage({ id: 'sandboxMgr.profile.resourceLimits' })}
+            name="resourceLimits"
+            rules={[
+              { required: true, message: intl.formatMessage({ id: 'sandboxMgr.profile.resourceLimitsRequired' }) },
+              {
+                validator: (_, value) => {
+                  if (!value) return Promise.resolve();
+                  try {
+                    const parsed = JSON.parse(value);
+                    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return Promise.resolve();
+                  } catch (e) {
+                    // handled below
+                  }
+                  return Promise.reject(new Error(intl.formatMessage({ id: 'sandboxMgr.config.invalidJson' })));
+                },
+              },
+            ]}
+          >
+            <Input.TextArea
+              rows={4}
+              placeholder={intl.formatMessage({ id: 'sandboxMgr.profile.resourceLimitsPlaceholder' })}
+              style={{ fontFamily: 'monospace' }}
+            />
+          </Form.Item>
+          <Form.Item
+            label={intl.formatMessage({ id: 'sandboxMgr.profile.templatePatchJson' })}
+            name="templatePatchJson"
+            rules={[
+              {
+                validator: (_, value) => {
+                  if (!value) return Promise.resolve();
+                  try {
+                    const parsed = JSON.parse(value);
+                    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return Promise.resolve();
+                  } catch (e) {
+                    // handled below
+                  }
+                  return Promise.reject(new Error(intl.formatMessage({ id: 'sandboxMgr.config.invalidJson' })));
+                },
+              },
+            ]}
+          >
+            <Input.TextArea
+              rows={4}
+              placeholder={intl.formatMessage({ id: 'sandboxMgr.profile.templatePatchJsonPlaceholder' })}
               style={{ fontFamily: 'monospace' }}
             />
           </Form.Item>

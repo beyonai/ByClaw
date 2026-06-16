@@ -13,6 +13,8 @@ import {
   resizeSandbox,
   listResizeRecords,
   listServiceProfiles,
+  saveServiceProfile,
+  deleteServiceProfile,
 } from '@/pages/manager/service/SandboxMgr';
 import { unwrapResponse, getErrorText } from '@/pages/manager/models/modelMgr';
 
@@ -180,6 +182,38 @@ export default {
           success?.(response.data || []);
         } else {
           message.error(response?.msg || 'Failed to fetch service profiles');
+          fail?.(response || {});
+        }
+      } catch (error) {
+        const err = { msg: getErrorText(error) };
+        message.error(err.msg);
+        fail?.(err);
+      }
+    },
+    *saveServiceProfile({ payload, success, fail }, { call }) {
+      try {
+        const response = unwrapResponse(yield call(saveServiceProfile, payload));
+        if (response.code === 0) {
+          message.success(getIntl().formatMessage({ id: 'sandboxMgr.profile.saveSuccess' }));
+          success?.(response.data);
+        } else {
+          message.error(response?.msg || 'Failed to save service profile');
+          fail?.(response || {});
+        }
+      } catch (error) {
+        const err = { msg: getErrorText(error) };
+        message.error(err.msg);
+        fail?.(err);
+      }
+    },
+    *deleteServiceProfile({ payload, success, fail }, { call }) {
+      try {
+        const response = unwrapResponse(yield call(deleteServiceProfile, payload));
+        if (response.code === 0) {
+          message.success(getIntl().formatMessage({ id: 'sandboxMgr.profile.deleteSuccess' }));
+          success?.(response.data);
+        } else {
+          message.error(response?.msg || 'Failed to delete service profile');
           fail?.(response || {});
         }
       } catch (error) {

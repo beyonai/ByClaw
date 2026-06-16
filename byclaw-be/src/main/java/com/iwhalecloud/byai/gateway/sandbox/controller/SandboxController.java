@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.gateway.sandbox.service.ingress.openclaw.OpenClawUiProxyPaths;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
@@ -50,6 +51,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 @RequestMapping("/sandbox")
 @Tag(name = "沙箱管理", description = "提供沙箱心跳保活、状态查询等功能")
 public class SandboxController {
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Autowired
     private SandboxService sandboxService;
@@ -464,8 +467,90 @@ public class SandboxController {
         String serviceType = StringUtils.defaultIfBlank(stringParam(params.get("serviceType")),
             SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
         boolean enabledOnly = !"false".equalsIgnoreCase(String.valueOf(params.getOrDefault("enabledOnly", "true")));
-        List<SandboxServiceProfileEntity> list = sandboxServiceProfileEntityMapper.selectProfiles(serviceType, enabledOnly);
+        List<SandboxServiceProfileEntity> list =
+            sandboxServiceProfileEntityMapper.selectProfiles(serviceType, enabledOnly);
         return ResponseUtil.successResponse(list);
+    }
+
+    @PostMapping("/saveServiceProfile")
+    @Operation(summary = "保存沙箱服务规格档位", description = "新增或更新同一沙箱服务类型下的规格档位配置")
+    public ResponseUtil saveServiceProfile(@RequestBody Map<String, Object> params) {
+        String serviceType = StringUtils.defaultIfBlank(stringParam(params.get("serviceType")),
+            SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
+        String profileKey = stringParam(params.get("profileKey"));
+        String resourceRequests = stringParam(params.get("resourceRequests"));
+        String resourceLimits = stringParam(params.get("resourceLimits"));
+        String templatePatchJson = stringParam(params.get("templatePatchJson"));
+        String resizeStrategy = StringUtils.defaultIfBlank(stringParam(params.get("resizeStrategy")), "IN_PLACE");
+
+        if (StringUtils.isBlank(profileKey)) {
+            return ResponseUtil.fail("profileKey is required");
+        }
+        if (StringUtils.isBlank(resourceRequests)) {
+            return ResponseUtil.fail("resourceRequests is required");
+        }
+        if (StringUtils.isBlank(resourceLimits)) {
+            return ResponseUtil.fail("resourceLimits is required");
+        }
+        if (!isJsonObject(resourceRequests)) {
+            return ResponseUtil.fail("resourceRequests must be a valid JSON object");
+        }
+        if (!isJsonObject(resourceLimits)) {
+            return ResponseUtil.fail("resourceLimits must be a valid JSON object");
+        }
+        if (StringUtils.isNotBlank(templatePatchJson) && !isJsonObject(templatePatchJson)) {
+            return ResponseUtil.fail("templatePatchJson must be a valid JSON object");
+        }
+
+        Long id = parseLongParam(params.get("id"));
+        SandboxServiceProfileEntity entity = id == null
+            ? sandboxServiceProfileEntityMapper.selectProfile(serviceType, profileKey)
+            : sandboxServiceProfileEntityMapper.selectById(id);
+        boolean creating = entity == null;
+        if (creating) {
+            entity = new SandboxServiceProfileEntity();
+            entity.setServiceType(serviceType);
+            entity.setProfileKey(profileKey);
+        }
+        entity.setResourceRequests(resourceRequests);
+        entity.setResourceLimits(resourceLimits);
+        entity.setTemplatePatchJson(templatePatchJson);
+        entity.setResizeEnabled(parseIntParam(params.get("resizeEnabled"), 1));
+        entity.setResizeStrategy(resizeStrategy);
+        entity.setEnabled(parseIntParam(params.get("enabled"), 1));
+        entity.setSortOrder(parseIntParam(params.get("sortOrder"), 0));
+
+        if (creating) {
+            sandboxServiceProfileEntityMapper.insertProfile(entity);
+        }
+        else {
+            sandboxServiceProfileEntityMapper.updateProfile(entity);
+        }
+        return ResponseUtil.successResponse();
+    }
+
+    @PostMapping("/deleteServiceProfile")
+    @Operation(summary = "禁用沙箱服务规格档位", description = "禁用指定规格档位，避免影响历史扩缩容记录")
+    public ResponseUtil deleteServiceProfile(@RequestBody Map<String, Object> params) {
+        Long id = parseLongParam(params.get("id"));
+        if (id == null) {
+            String serviceType = StringUtils.defaultIfBlank(stringParam(params.get("serviceType")),
+                SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
+            String profileKey = stringParam(params.get("profileKey"));
+            if (StringUtils.isBlank(profileKey)) {
+                return ResponseUtil.fail("id or profileKey is required");
+            }
+            SandboxServiceProfileEntity entity =
+                sandboxServiceProfileEntityMapper.selectProfile(serviceType, profileKey);
+            if (entity != null) {
+                id = entity.getId();
+            }
+        }
+        if (id == null) {
+            return ResponseUtil.fail("Service profile not found");
+        }
+        sandboxServiceProfileEntityMapper.disableProfile(id);
+        return ResponseUtil.successResponse();
     }
 
     // ==================== 沙箱服务规格配置管理接口 ====================
@@ -642,6 +727,16 @@ public class SandboxController {
         }
         catch (NumberFormatException e) {
             return defaultValue;
+        }
+    }
+
+    private boolean isJsonObject(String value) {
+        try {
+            Object parsed = objectMapper.readValue(value, Object.class);
+            return parsed instanceof Map;
+        }
+        catch (Exception e) {
+            return false;
         }
     }
 }

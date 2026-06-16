@@ -59,3 +59,11 @@ export async function listResizeRecords(params: any) {
 export async function listServiceProfiles(params: { serviceType?: string; enabledOnly?: boolean }) {
   return POST('/byaiService/sandbox/listServiceProfiles', { ...params }, withCustomHandle);
 }
+
+export async function saveServiceProfile(params: any) {
+  return POST('/byaiService/sandbox/saveServiceProfile', { ...params }, withCustomHandle);
+}
+
+export async function deleteServiceProfile(params: { id?: number; serviceType?: string; profileKey?: string }) {
+  return POST('/byaiService/sandbox/deleteServiceProfile', { ...params }, withCustomHandle);
+}
