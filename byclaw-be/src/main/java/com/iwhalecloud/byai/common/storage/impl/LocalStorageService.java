@@ -17,8 +17,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -30,12 +32,34 @@ public class LocalStorageService extends AbstractFileIngressStorageService<Void>
 
     public static final String STORAGE_TYPE = "local";
     private static final String DEFAULT_NAMESPACE = "default";
+    private static final Set<PosixFilePermission> SHARED_DIRECTORY_PERMISSIONS = Set.of(
+        PosixFilePermission.OWNER_READ,
+        PosixFilePermission.OWNER_WRITE,
+        PosixFilePermission.OWNER_EXECUTE,
+        PosixFilePermission.GROUP_READ,
+        PosixFilePermission.GROUP_WRITE,
+        PosixFilePermission.GROUP_EXECUTE,
+        PosixFilePermission.OTHERS_READ,
+        PosixFilePermission.OTHERS_WRITE,
+        PosixFilePermission.OTHERS_EXECUTE
+    );
+    private static final Set<PosixFilePermission> SHARED_FILE_PERMISSIONS = Set.of(
+        PosixFilePermission.OWNER_READ,
+        PosixFilePermission.OWNER_WRITE,
+        PosixFilePermission.GROUP_READ,
+        PosixFilePermission.GROUP_WRITE,
+        PosixFilePermission.OTHERS_READ,
+        PosixFilePermission.OTHERS_WRITE
+    );
 
     @Value("${file.storage.local.path:${byclaw.sandbox.base-path:/tmp/byclaw-storage}}")
     private String basePath;
 
     @Value("${file.storage.type:local}")
     private String configuredStorageType;
+
+    @Value("${file.storage.local.shared-permissions.enabled:true}")
+    private boolean sharedPermissionsEnabled;
 
     @Override
     public String getStorageType() {
@@ -94,7 +118,9 @@ public class LocalStorageService extends AbstractFileIngressStorageService<Void>
     @Override
     protected boolean doCreateBucket(String bucketName) {
         try {
-            Files.createDirectories(resolve(StorageLocation.of(DEFAULT_NAMESPACE, bucketName, "")));
+            Path bucketRoot = resolve(StorageLocation.of(DEFAULT_NAMESPACE, bucketName, ""));
+            Files.createDirectories(bucketRoot);
+            applyDirectoryPermissions(bucketRoot);
             return true;
         }
         catch (IOException e) {
@@ -108,6 +134,7 @@ public class LocalStorageService extends AbstractFileIngressStorageService<Void>
         try {
             if (isDirectoryMarker(location.getPath())) {
                 Files.createDirectories(target);
+                applyDirectoryPermissions(target);
                 FileMetadata metadata = new FileMetadata();
                 metadata.setBucketName(location.getBucketOrRoot());
                 metadata.setFileName(target.getFileName() == null ? "" : target.getFileName().toString());
@@ -118,7 +145,9 @@ public class LocalStorageService extends AbstractFileIngressStorageService<Void>
                 return metadata;
             }
             Files.createDirectories(target.getParent());
+            applyDirectoryPermissions(target.getParent());
             Files.copy(inputStream, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            applyFilePermissions(target);
             FileMetadata metadata = new FileMetadata();
             metadata.setBucketName(location.getBucketOrRoot());
             metadata.setFileName(target.getFileName().toString());
@@ -218,13 +247,39 @@ public class LocalStorageService extends AbstractFileIngressStorageService<Void>
             Path targetPath = resolve(target);
             if (Files.isDirectory(sourcePath) || isDirectoryMarker(target.getPath())) {
                 Files.createDirectories(targetPath);
+                applyDirectoryPermissions(targetPath);
                 return;
             }
             Files.createDirectories(targetPath.getParent());
+            applyDirectoryPermissions(targetPath.getParent());
             Files.copy(sourcePath, targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            applyFilePermissions(targetPath);
         }
         catch (IOException e) {
             throw new IllegalStateException("Local file copy failed", e);
+        }
+    }
+
+    private void applyDirectoryPermissions(Path path) {
+        applyPermissions(path, SHARED_DIRECTORY_PERMISSIONS);
+    }
+
+    private void applyFilePermissions(Path path) {
+        applyPermissions(path, SHARED_FILE_PERMISSIONS);
+    }
+
+    private void applyPermissions(Path path, Set<PosixFilePermission> permissions) {
+        if (!sharedPermissionsEnabled || path == null) {
+            return;
+        }
+        try {
+            Files.setPosixFilePermissions(path, permissions);
+        }
+        catch (UnsupportedOperationException ignored) {
+            // Non-POSIX filesystems, object-store mocks, and local dev on unsupported platforms can ignore this.
+        }
+        catch (IOException ignored) {
+            // Permission changes are best-effort. The primary write/read path should not fail because chmod is denied.
         }
     }
 
