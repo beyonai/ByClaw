@@ -11,6 +11,11 @@ export type ModelTagItem = {
 export const SYSTEM_SOURCE_TYPES = ['DIG_EMPLOYEE'];
 export const DEFAULT_CONTEXT_TOKENS = 1024 * 198;
 export const MAX_CONTEXT_TOKENS = 2000 * 1000;
+export const CONTEXT_TOKENS_CONFIG = {
+  min: 1000,
+  max: MAX_CONTEXT_TOKENS,
+  step: 1000,
+};
 export const DEFAULT_MAX_TOKENS = 1024 * 64;
 export const THINKING_LEVEL_OPTIONS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'adaptive', 'max'] as const;
 export const THINKING_CAPABILITY_OPTIONS = ['unsupported', 'binary', 'effort', 'budget', 'adaptive'] as const;
