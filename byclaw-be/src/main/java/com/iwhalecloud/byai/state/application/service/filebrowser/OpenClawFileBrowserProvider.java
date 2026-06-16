@@ -262,17 +262,17 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
 
     private String resolvePath(String relativePath) {
         if (relativePath == null || relativePath.isBlank() || "/".equals(relativePath)) {
-            return ROOT_PREFIX + "/";
+            return ROOT_PREFIX;
         }
         if (relativePath.contains("..")) {
             throw new IllegalArgumentException("非法路径: " + relativePath);
         }
-        String normalized = relativePath.startsWith("/") ? relativePath : "/" + relativePath;
-        String absolutePath = ROOT_PREFIX + normalized;
-        if (!absolutePath.startsWith(ROOT_PREFIX)) {
+        String normalized = relativePath.trim().replace('\\', '/');
+        normalized = ROOT_PREFIX + normalized.replaceFirst("^/+", "");
+        if (!normalized.startsWith(ROOT_PREFIX)) {
             throw new IllegalArgumentException("非法路径: " + relativePath);
         }
-        return absolutePath;
+        return normalized;
     }
 
     private List<FileBrowserItemVo> parseItemList(String json) {
