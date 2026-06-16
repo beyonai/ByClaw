@@ -559,6 +559,56 @@ describe("createAgentWatchdog", () => {
         );
     });
 
+    it("falls back to the default model when Redis AI model config is missing", async () => {
+        const employeeContent = JSON.stringify({
+            resourceId: "10000281",
+            resourceName: "项目管理数字员工",
+            prologue: JSON.stringify({ modelId: -2000 }),
+        });
+        const entries = new Map<string, RedisJsonPayload>([
+            ["10000281", payloadFromContent("DIG_EMPLOYEE_10000281", employeeContent)],
+        ]);
+        const warn = vi.fn();
+        const defaultModel = {
+            providerKey: "baiying-m-10004014",
+            modelRef: "baiying-m-10004014/deepseek-v4-flash",
+            provider: {
+                baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                apiKey: {
+                    source: "exec" as const,
+                    provider: "baiying-aimodel-redis",
+                    id: "model:10004014",
+                },
+                api: "openai-completions" as const,
+                modelId: "deepseek-v4-flash",
+                modelName: "deepseek-v4-flash",
+            },
+            hash: "default-hash",
+        };
+
+        const loaded = await loadManagedAgentsFromRedis({
+            redisJsonStore: createMemoryRedisJsonStore(entries),
+            authorizedSourceKeys: new Set(["10000281"]),
+            embedApiKeysFromJson: false,
+            defaultModel,
+            log: { warn },
+        });
+
+        expect(loaded).toHaveLength(1);
+        expect(loaded[0]?.providerKey).toBe("baiying-m-10004014");
+        expect(loaded[0]?.modelRef).toBe("baiying-m-10004014/deepseek-v4-flash");
+        expect(loaded[0]?.listEntry.model).toEqual({
+            primary: "baiying-m-10004014/deepseek-v4-flash",
+        });
+        expect(JSON.stringify(loaded[0])).not.toContain("baiying-m-neg-2000");
+        expect(warn).toHaveBeenCalledWith(
+            "baiying-enhance: Redis AI model config missing/unreadable modelId=-2000",
+        );
+        expect(warn).toHaveBeenCalledWith(
+            "baiying-enhance: Redis AI model config unavailable for modelId=-2000; falling back to default model baiying-m-10004014/deepseek-v4-flash",
+        );
+    });
+
     it("retains last synced aimodel when Redis AI model config becomes unavailable", async () => {
         const employeeContent = JSON.stringify({
             resourceId: "10000281",
