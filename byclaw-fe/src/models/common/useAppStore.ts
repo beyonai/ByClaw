@@ -88,7 +88,15 @@ export type IState = {
   sandboxesInfo: ISandboxesInfoState;
   getSandboxesInfoUrl: () => Promise<ISandboxesInfo>;
 
-  versionInfo: null | Record<string, unknown>;
+  versionInfo: null | {
+    version: string;
+    branch: string;
+    commit: string;
+    commitFull: string;
+    buildTime: string;
+    module: string;
+    commitMsg: string;
+  };
   getVersionInfo: () => void;
 };
 
