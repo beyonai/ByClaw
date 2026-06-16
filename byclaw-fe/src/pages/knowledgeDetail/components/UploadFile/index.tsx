@@ -54,8 +54,8 @@ const UploadFile = (props: IProps) => {
     });
     formData.append('resourceId', baseInfo?.resourceId);
     formData.append('directoryPath', uploadDirectory);
-    // 当前交互需要将开关值取反后传给后端：开关打开时传 false，关闭时传 true。
-    formData.append('processFrontMatter', String(!processFrontMatter));
+    // 由用户在上传确认弹窗中决定是否让 QA 解析 Markdown 的 YAML front matter。
+    formData.append('processFrontMatter', String(processFrontMatter));
 
     try {
       setUploadLoading(true);
