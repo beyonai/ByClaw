@@ -677,6 +677,17 @@ export default {
   'knowledgeDetail.uploadFile': 'Upload File',
   'knowledgeDetail.sameNameFileOverwriteTip': 'Same name files will be overwritten',
   'knowledgeDetail.uploadSuccess': 'Upload successful',
+  'knowledgeDetail.uploadConfirmTitle': 'Confirm Upload',
+  'knowledgeDetail.uploadConfirmFiles': '{count} file(s) selected',
+  'knowledgeDetail.uploadConfirmMoreFiles': 'and {count} more file(s)',
+  'knowledgeDetail.uploadConfirmDirectory': 'Upload directory: {directoryPath}',
+  'knowledgeDetail.processFrontMatter': 'Parse YAML Front Matter',
+  'knowledgeDetail.processFrontMatterTip':
+    'Enable this only when Markdown files start with a YAML front matter header wrapped by ---, and you want those fields written into file metadata.',
+  'knowledgeDetail.processFrontMatterWarning':
+    'When enabled, every front matter field must already be defined as a knowledge base metadata property, otherwise the upload will fail.',
+  'knowledgeDetail.processFrontMatterDefaultTip':
+    'Keep this off if you are not sure. The file will be uploaded normally without parsing the special header.',
 
   'knowledgeCenter.create': 'Create',
   'knowledgeCenter.shared': 'Business Knowledge Base',

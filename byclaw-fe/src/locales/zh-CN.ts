@@ -672,6 +672,16 @@ export default {
   'knowledgeDetail.uploadFile': '上传文件',
   'knowledgeDetail.sameNameFileOverwriteTip': '相同文件名将覆盖更新',
   'knowledgeDetail.uploadSuccess': '上传成功',
+  'knowledgeDetail.uploadConfirmTitle': '确认上传文件',
+  'knowledgeDetail.uploadConfirmFiles': '已选择 {count} 个文件',
+  'knowledgeDetail.uploadConfirmMoreFiles': '等 {count} 个文件',
+  'knowledgeDetail.uploadConfirmDirectory': '上传目录：{directoryPath}',
+  'knowledgeDetail.processFrontMatter': '解析 YAML Front Matter',
+  'knowledgeDetail.processFrontMatterTip':
+    '仅当 Markdown 文件开头包含 --- 包裹的 YAML front matter header，并希望将其中字段写入文件元数据时开启。',
+  'knowledgeDetail.processFrontMatterWarning':
+    '开启后，front matter 中的字段必须已在知识库元数据属性中定义，否则上传会失败。',
+  'knowledgeDetail.processFrontMatterDefaultTip': '不确定时请保持关闭，系统将按普通文件上传，不解析特殊头内容。',
 
   'knowledgeCenter.create': '创建知识库',
   'knowledgeCenter.shared': '企业知识库',

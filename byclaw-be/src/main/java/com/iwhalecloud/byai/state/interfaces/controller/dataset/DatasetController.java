@@ -186,17 +186,19 @@ public class DatasetController {
      * @param resourceId 资源标识
      * @param directoryPath 文件目录路径
      * @param fileDescription 文件描述
+     * @param processFrontMatter 是否解析 Markdown 文件中的 YAML front matter
      * @return ResponseUtil
      */
     @PostMapping(value = "/uploadFiles", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseUtil<UploadResult> uploadFiles(@RequestPart("files") MultipartFile[] files,
         @RequestPart("resourceId") Long resourceId, @RequestPart(value = "directoryPath") String directoryPath,
-        @RequestPart(value = "fileDescription", required = false) String fileDescription) {
+        @RequestPart(value = "fileDescription", required = false) String fileDescription,
+        @RequestPart(value = "processFrontMatter", required = false) String processFrontMatter) {
         try {
 
             directoryPath = new String(directoryPath.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
             UploadResult uploadResult = datasetApplicationService.uploadFiles(files, resourceId, directoryPath,
-                fileDescription);
+                fileDescription, Boolean.valueOf(processFrontMatter));
             return ResponseUtil.successResponse(I18nUtil.get("dataset.file.upload.success"), uploadResult);
         }
         catch (Exception e) {
