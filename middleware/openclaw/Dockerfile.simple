@@ -67,5 +67,26 @@ COPY --from=ext-builder /build/out/ /app/extensions/
 COPY middleware/openclaw/skills/iwhalehub/ /app/skills/iwhalehub/
 
 COPY middleware/openclaw/linux-amd64-filebrowser/filebrowser /usr/local/bin/filebrowser
-RUN chmod a+x /usr/local/bin/filebrowser
+COPY middleware/openclaw/filebrowser-ui/ /usr/local/share/openclaw/filebrowser-ui/
+COPY middleware/openclaw/filebrowser-ui-proxy.py /usr/local/bin/openclaw-filebrowser-ui-proxy
+
+# startAll 启动链：startAll.sh 会按需拉起 start-filebrowser.sh 等，最后 exec start-openclaw.sh 起网关。
+COPY middleware/openclaw/runtime-bootstrap.sh /usr/local/bin/openclaw-runtime-bootstrap
+COPY middleware/openclaw/startAll.sh \
+     middleware/openclaw/start-filebrowser.sh \
+     middleware/openclaw/start-openclaw.sh \
+     /usr/local/bin/
+
+RUN chmod a+x \
+    /usr/local/bin/filebrowser \
+    /usr/local/bin/openclaw-filebrowser-ui-proxy \
+    /usr/local/bin/openclaw-runtime-bootstrap \
+    /usr/local/bin/startAll.sh \
+    /usr/local/bin/start-filebrowser.sh \
+    /usr/local/bin/start-openclaw.sh
+
+# openclaw 网关（start-openclaw.sh 默认 8080）与 filebrowser UI（start-filebrowser.sh 默认 8082）
+EXPOSE 8080 8082
+
+ENTRYPOINT ["/usr/local/bin/startAll.sh"]
 

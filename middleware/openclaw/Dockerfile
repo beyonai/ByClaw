@@ -192,6 +192,8 @@ RUN chmod a+x /usr/local/bin/filebrowser
 
 COPY middleware/openclaw/runtime-bootstrap.sh /usr/local/bin/openclaw-runtime-bootstrap
 COPY middleware/openclaw/novnc-index.html /usr/local/share/openclaw/novnc-index.html
+COPY middleware/openclaw/filebrowser-ui/ /usr/local/share/openclaw/filebrowser-ui/
+COPY middleware/openclaw/filebrowser-ui-proxy.py /usr/local/bin/openclaw-filebrowser-ui-proxy
 COPY middleware/openclaw/startAll.sh \
      middleware/openclaw/start-filebrowser.sh \
      middleware/openclaw/start-display.sh \
@@ -203,6 +205,7 @@ COPY middleware/openclaw/startAll.sh \
      /usr/local/bin/
 RUN chmod +x \
     /usr/local/bin/openclaw-runtime-bootstrap \
+    /usr/local/bin/openclaw-filebrowser-ui-proxy \
     /usr/local/bin/startAll.sh \
     /usr/local/bin/start-filebrowser.sh \
     /usr/local/bin/start-display.sh \
