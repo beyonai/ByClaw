@@ -347,6 +347,16 @@ export async function loadManagedAgentsFromRedis(params: {
                     sourceHash: result.hash,
                     contentHashLabel: "model",
                 });
+            } else if (params.defaultModel) {
+                params.log.warn(
+                    `baiying-enhance: Redis AI model config unavailable for modelId=${res.baiyingModelId}; falling back to default model ${params.defaultModel.modelRef}`,
+                );
+                next = attachAimodelBundleToAgent({
+                    next,
+                    resolvedModel: params.defaultModel,
+                    sourceHash: result.hash,
+                    contentHashLabel: `default-model-for-missing-${res.baiyingModelId}`,
+                });
             } else {
                 const previous = params.previousByAgentId?.get(next.agentId);
                 if (previous) {
@@ -463,6 +473,7 @@ export function createAgentWatchdog(params: {
         const defaultModelFromRedis = await resolveDefaultBaiyingAimodelProviderBundle({
             redisJsonStore: params.redisJsonStore,
             redisKey: aimodelTypeListRedisKey,
+            modelType: DEFAULT_AIMODEL_TYPELIST_FIELD,
             secretProviderName: resolveAimodelSecretProviderName(
                 params.pluginConfig.aimodelSecretProviderName,
             ),

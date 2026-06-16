@@ -1,0 +1,32 @@
+# kube-prometheus-stack Helm values 片段
+# helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+#   -n monitoring -f manifests/monitoring/values-prometheus.yaml
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+grafana:
+  enabled: true
+  adminPassword: change-me
+alertmanager:
+  enabled: true
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: webhook-notify
+      group_by: ['alertname', 'namespace']
+      routes:
+        - match:
+            severity: critical
+          receiver: webhook-notify
+    receivers:
+      - name: webhook-notify
+        webhook_configs:
+          - url: 'http://byclaw-be.by-service.svc.cluster.local:8086/sandbox/autoscale/alerts'
+            send_resolved: true
+kube-state-metrics:
+  enabled: true
+nodeExporter:
+  enabled: true

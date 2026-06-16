@@ -193,6 +193,21 @@ export function resolveDocChannelTraceId(requestPayload: Dict): string {
   return "";
 }
 
+export function resolveLangfuseParentObservationId(requestPayload: Dict): string {
+  const topLevel = isRecord(requestPayload)
+    ? asString(requestPayload.langfuseParentObservationId) ||
+      asString(requestPayload.langfuse_parent_observation_id)
+    : "";
+  if (topLevel) return topLevel;
+  const resourceContext: ResourceContext = isRecord(requestPayload)
+    ? (isRecord(requestPayload.resource_context) ? (requestPayload.resource_context as ResourceContext) : {})
+    : {};
+  return (
+    asString(resourceContext.langfuse_parent_observation_id) ||
+    asString(resourceContext.langfuseParentObservationId)
+  );
+}
+
 
 export function readRedisConfig(): RedisConfig {
   const config: RedisConfig = {};

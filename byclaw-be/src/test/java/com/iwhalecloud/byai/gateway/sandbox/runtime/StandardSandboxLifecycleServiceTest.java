@@ -69,7 +69,7 @@ class StandardSandboxLifecycleServiceTest {
         when(valueOperations.get(lockKey)).thenReturn("lock-token-mismatch");
 
         SandboxServiceSpec spec = new SandboxServiceSpec();
-        when(specRepository.findByServiceKey("openclaw")).thenReturn(java.util.Optional.of(spec));
+        when(specRepository.findByServiceKeyAndProfile("openclaw", null)).thenReturn(java.util.Optional.of(spec));
         CreateSandboxRequest createRequest = CreateSandboxRequest.builder().timeout(300).build();
         when(specProcessor.buildCreateRequest("user001", "openclaw", null, null, spec)).thenReturn(createRequest);
         when(runtimeProvider.findReusable("user001", "openclaw")).thenReturn(java.util.Optional.empty());
@@ -106,7 +106,7 @@ class StandardSandboxLifecycleServiceTest {
         when(valueOperations.get(lockKey)).thenReturn("lock-token-mismatch");
 
         SandboxServiceSpec spec = new SandboxServiceSpec();
-        when(specRepository.findByServiceKey("openclaw")).thenReturn(java.util.Optional.of(spec));
+        when(specRepository.findByServiceKeyAndProfile("openclaw", null)).thenReturn(java.util.Optional.of(spec));
 
         CreateSandboxRequest createRequest = CreateSandboxRequest.builder()
             .env(Map.of("KEY", "VALUE"))

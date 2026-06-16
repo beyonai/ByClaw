@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opensandbox-server
+  namespace: by-sandbox
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opensandbox-runtime
+  namespace: by-sandbox
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: opensandbox-sandbox-manager
+  namespace: by-sandbox
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services", "events", "persistentvolumeclaims", "configmaps", "secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["sandbox.opensandbox.io"]
+    resources: ["batchsandboxes", "pools", "sandboxsnapshots"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opensandbox-server-sandbox-manager
+  namespace: by-sandbox
+subjects:
+  - kind: ServiceAccount
+    name: opensandbox-server
+    namespace: by-sandbox
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: opensandbox-sandbox-manager
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opensandbox-runtime
+  namespace: by-service
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: opensandbox-sandbox-manager
+  namespace: by-service
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services", "events", "persistentvolumeclaims", "configmaps", "secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["sandbox.opensandbox.io"]
+    resources: ["batchsandboxes", "pools", "sandboxsnapshots"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opensandbox-server-sandbox-manager
+  namespace: by-service
+subjects:
+  - kind: ServiceAccount
+    name: opensandbox-server
+    namespace: by-sandbox
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: opensandbox-sandbox-manager

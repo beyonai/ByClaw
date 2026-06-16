@@ -1,0 +1,26 @@
+# 沙箱 wildcard host 路由示例
+# 实际 Ingress 由 OpenSandbox gateway 模式动态创建；此为静态网关兜底样例
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sandbox-gateway-wildcard
+  namespace: by-sandbox
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - "*.sandbox.example.com"
+      secretName: sandbox-wildcard-tls
+  rules:
+    - host: "*.sandbox.example.com"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: opensandbox-ingress-gateway
+                port:
+                  number: 8080

@@ -22,6 +22,8 @@ public class CreateSandboxRequest {
 
     private Map<String, String> resourceLimits;
 
+    private Map<String, String> resourceRequests;
+
     private Map<String, String> env;
 
     private Map<String, String> metadata;

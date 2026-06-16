@@ -37,6 +37,8 @@ import com.iwhaleai.byai.framework.common.Constants;
 import com.iwhaleai.byai.framework.common.RedisClient;
 import com.iwhaleai.byai.framework.core.WorkerRegistry;
 import com.iwhaleai.byai.framework.core.discovery.ServiceRegistry;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest;
 import com.iwhalecloud.byai.common.feign.response.SandboxResponse;
@@ -48,6 +50,8 @@ import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxLeasePolicy;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimePage;
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport;
 import com.iwhalecloud.byai.manager.entity.sandbox.SandboxReconcileGroup;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
@@ -71,6 +75,8 @@ public class SandboxService {
     private static final String GATEWAY_TOKEN_METADATA_KEY = "gateway_token";
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SandboxService.class);
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     /** 沙箱状态：运行中 */
     private static final String STATUS_RUNNING = "RUNNING";
@@ -99,17 +105,6 @@ public class SandboxService {
     /** reconcile 发现远端不存在或不可复用时终止旧记录的原因。 */
     private static final String RELEASE_REASON_REMOTE_MISSING = "release.remote.missing";
 
-    /** 启动前发现模型环境变量缺失。 */
-    private static final String RELEASE_REASON_MODEL_ENV_MISSING = "launch.model-env.missing";
-
-    private static final List<String> REQUIRED_MODEL_ENV_KEYS = List.of(
-        "MODEL_BASE_URL",
-        "MODEL_ID",
-        "MODEL_NAME",
-        "MODEL_ALIAS",
-        "MODEL_API_KEY"
-    );
-
     /** 集成类型：沙箱 */
     private static final String INTEGRATION_TYPE_SANDBOX = "FROM_SANDBOX";
 
@@ -125,6 +120,10 @@ public class SandboxService {
     @Lazy
     @Autowired
     private SandboxLifecycleFacade sandboxLifecycleFacade;
+
+    @Lazy
+    @Autowired
+    private SandboxServiceSpecRepository sandboxServiceSpecRepository;
 
     @Lazy
     @Autowired
@@ -395,6 +394,10 @@ public class SandboxService {
                 return buildLaunchData(existingRecord);
             }
             if (existingRecord != null) {
+                if (releaseStaleStartingRecordIfNecessary(existingRecord)) {
+                    LOGGER.warn("已清理陈旧启动中沙箱记录，重新拉起默认沙箱：{}", sandboxRef(existingRecord));
+                    return doLaunchSandbox(userCode, resourceId, routing);
+                }
                 LOGGER.warn("沙箱处于非可复用状态：{}", sandboxRef(existingRecord));
                 throw new BdpRuntimeException(I18nUtil.get("sandbox.launch.busy"));
             }
@@ -411,6 +414,24 @@ public class SandboxService {
     private String buildLaunchLockKey(String userCode, SandboxLaunchRouting routing) {
         return SANDBOX_LAUNCH_LOCK_PREFIX + userCode + ":" + routing.getSandboxType() + ":"
             + routing.getEffectiveResourceId();
+    }
+
+    private boolean releaseStaleStartingRecordIfNecessary(SsSandboxRecord record) {
+        if (record == null || !STATUS_STARTING.equals(record.getStatus()) || StringUtils.isNotBlank(record.getSandboxId())
+            || !isStaleStartingRecord(record)) {
+            return false;
+        }
+        LOGGER.warn("发现陈旧 STARTING 沙箱记录，准备本地释放后重拉：{}", sandboxRef(record));
+        return markStartingSandboxReleased(record, RELEASE_REASON_REMOTE_MISSING);
+    }
+
+    private boolean isStaleStartingRecord(SsSandboxRecord record) {
+        Date baseTime = record.getUpdateTime() != null ? record.getUpdateTime() : record.getCreateTime();
+        if (baseTime == null) {
+            return true;
+        }
+        long ageMillis = System.currentTimeMillis() - baseTime.getTime();
+        return ageMillis > TimeUnit.SECONDS.toMillis(SANDBOX_LAUNCH_LOCK_EXPIRE_SECONDS);
     }
 
     /**
@@ -555,6 +576,8 @@ public class SandboxService {
         request.setUserCode(userCode);
         // request.setChatId(String.valueOf(System.currentTimeMillis()));
         request.setSandboxType(launchContext.getSandboxType());
+        request.setProfileKey(routing.getProfileKey());
+        SandboxServiceSpec effectiveSpec = resolveEffectiveSpec(launchContext.getSandboxType(), routing.getProfileKey());
         SandboxLeasePolicy leasePolicy = resolveDefaultLeasePolicy();
         Integer autoRelease = leasePolicy == SandboxLeasePolicy.REMOTE_AUTO_EXPIRE
             ? AUTO_RELEASE_REMOTE : AUTO_RELEASE_MANUAL;
@@ -567,6 +590,10 @@ public class SandboxService {
         record.setResourceId(routing.getEffectiveResourceId());
         record.setUserCode(userCode);
         record.setSandboxType(launchContext.getSandboxType());
+        record.setServiceType(resolveRecordServiceType(effectiveSpec, launchContext.getSandboxType()));
+        record.setProfileKey(resolveRecordProfileKey(effectiveSpec, routing.getProfileKey()));
+        record.setResourceRequests(toJsonOrNull(effectiveSpec != null ? effectiveSpec.getResourceRequests() : null));
+        record.setResourceLimits(toJsonOrNull(effectiveSpec != null ? effectiveSpec.getResourceLimits() : null));
         record.setStatus(STATUS_STARTING);
         record.setGatewayToken(gatewayToken);
         record.setAutoRelease(autoRelease);
@@ -594,8 +621,6 @@ public class SandboxService {
                 existingRecord == null ? null : sandboxRef(existingRecord));
             throw new BdpRuntimeException(I18nUtil.get("sandbox.launch.busy"));
         }
-
-        validateRequiredModelEnvs(record, launchContext.getEnvs());
 
         request.setMetadata(buildLaunchMetadata(record));
 
@@ -656,27 +681,41 @@ public class SandboxService {
         return launchData;
     }
 
-    private void validateRequiredModelEnvs(SsSandboxRecord record, Map<String, String> envs) {
-        if (record != null && SandboxLaunchRouting.BYCLAW_CODE_AGENT_SANDBOX_TYPE.equals(record.getSandboxType())) {
-            return;
+    private SandboxServiceSpec resolveEffectiveSpec(String sandboxType, String profileKey) {
+        try {
+            return sandboxServiceSpecRepository.findByServiceKeyAndProfile(sandboxType, profileKey).orElse(null);
         }
-        List<String> missingKeys = REQUIRED_MODEL_ENV_KEYS.stream()
-            .filter(key -> envs == null || StringUtils.isBlank(envs.get(key)))
-            .collect(Collectors.toList());
-        if (missingKeys.isEmpty()) {
-            return;
+        catch (Exception e) {
+            LOGGER.warn("解析沙箱规格失败，sandboxType={}，profileKey={}，原因：{}", sandboxType, profileKey, e.getMessage());
+            return null;
         }
+    }
 
-        String message = I18nUtil.get("sandbox.launch.model.config.required");
-        LOGGER.error("沙箱启动模型环境变量缺失，记录：{}，missingKeys：{}", sandboxRef(record), missingKeys);
-        int failed = sandboxRecordMapper.updateStatusToFailed(record.getId(),
-            RELEASE_REASON_MODEL_ENV_MISSING, new Date(), record.getLockVersion());
-        if (failed > 0) {
-            incrementVersions(record, true);
-            record.setStatus(STATUS_FAILED);
-            record.setReleaseReason(RELEASE_REASON_MODEL_ENV_MISSING);
+    private String resolveRecordServiceType(SandboxServiceSpec spec, String fallback) {
+        if (spec != null && StringUtils.isNotBlank(spec.getServiceType())) {
+            return spec.getServiceType();
         }
-        throw new BdpRuntimeException(message);
+        return fallback;
+    }
+
+    private String resolveRecordProfileKey(SandboxServiceSpec spec, String fallback) {
+        if (spec != null && StringUtils.isNotBlank(spec.getProfileKey())) {
+            return spec.getProfileKey();
+        }
+        return fallback;
+    }
+
+    private String toJsonOrNull(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return OBJECT_MAPPER.writeValueAsString(value);
+        }
+        catch (JsonProcessingException e) {
+            LOGGER.warn("序列化沙箱资源配置失败：{}", e.getMessage());
+            return null;
+        }
     }
 
     private Map<String, String> buildLaunchMetadata(SsSandboxRecord record) {
@@ -686,6 +725,8 @@ public class SandboxService {
         }
         putMetadata(metadata, "userCode", record.getUserCode());
         putMetadata(metadata, "serviceKey", record.getSandboxType());
+        putMetadata(metadata, "serviceType", StringUtils.defaultIfBlank(record.getServiceType(), record.getSandboxType()));
+        putMetadata(metadata, "profileKey", record.getProfileKey());
         putMetadata(metadata, "resourceId", formatMetadataResourceId(record.getResourceId()));
         putMetadata(metadata, "resourceKey", formatMetadataResourceKey(record.getSandboxType(), record.getResourceId()));
         putMetadata(metadata, "recordId", record.getId());
@@ -1716,7 +1757,7 @@ public class SandboxService {
         LOGGER.info("沙箱释放完成：{}，releaseReason：{}", sandboxRef(record), releaseReason);
     }
 
-    private void markStartingSandboxReleased(SsSandboxRecord record, String releaseReason) {
+    private boolean markStartingSandboxReleased(SsSandboxRecord record, String releaseReason) {
         Date now = new Date();
         int marked = sandboxRecordMapper.markStartingReleased(record.getId(), releaseReason, now,
             record.getLockVersion());
@@ -1725,10 +1766,10 @@ public class SandboxService {
             if (latestRecord != null && STATUS_RUNNING.equals(latestRecord.getStatus())) {
                 LOGGER.info("启动中沙箱释放时记录已运行，改用运行中释放流程：{}", sandboxRef(latestRecord));
                 doRemoveSandbox(latestRecord, releaseReason);
-                return;
+                return true;
             }
             LOGGER.warn("启动中沙箱释放跳过，记录状态已变化：{}", sandboxRef(latestRecord));
-            return;
+            return false;
         }
         record.setStatus(STATUS_RELEASED);
         record.setReleaseReason(releaseReason);
@@ -1741,6 +1782,7 @@ public class SandboxService {
         sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
         unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType());
         LOGGER.info("启动中沙箱已标记释放：{}，releaseReason：{}", sandboxRef(record), releaseReason);
+        return true;
     }
 
     private void cleanupLaunchedSandboxAfterRecordReleased(SsSandboxRecord record) {

@@ -1,0 +1,786 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ByClaw OpenSandbox K3s 分布式升级方案</title>
+  <style>
+    :root { --ink:#182235; --muted:#5f6878; --line:#d9e0ea; --panel:#f7f9fc; --accent:#1764c8; --warn:#a16207; --bad:#b42318; --ok:#147447; --code-bg:#101828; --code-ink:#e6edf6; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; color:var(--ink); line-height:1.68; }
+    a { color:var(--accent); }
+    .layout { display:grid; grid-template-columns:280px minmax(0,1100px); gap:28px; max-width:1440px; margin:0 auto; padding:28px 22px 56px; }
+    .toc { position:sticky; top:18px; border:1px solid var(--line); background:var(--panel); padding:14px; max-height:90vh; overflow:auto; }
+    .toc ul { list-style:none; margin:0; padding:0; }
+    .toc a { display:block; padding:6px 8px; font-size:14px; color:var(--ink); text-decoration:none; border-radius:6px; }
+    .toc a:hover { background:#eaf2ff; }
+    .toc .sub { margin-left:12px; border-left:1px solid var(--line); padding-left:8px; }
+    h1 { font-size:32px; margin:0 0 10px; }
+    h2 { font-size:22px; margin:32px 0 12px; padding-top:22px; border-top:1px solid var(--line); }
+    h3 { font-size:18px; margin:20px 0 10px; }
+    h4 { font-size:16px; margin:18px 0 8px; }
+    h5 { font-size:15px; margin:14px 0 6px; color:var(--ink); }
+    .lede { color:var(--muted); font-size:17px; }
+    .tag { display:inline-block; border-radius:999px; padding:2px 8px; font-size:12px; border:1px solid #cbd5e1; margin-right:4px; }
+    .tag.ok { color:var(--ok); background:#f0fdf4; border-color:#bbf7d0; }
+    .callout { border-left:5px solid var(--accent); background:var(--panel); padding:14px 16px; margin:14px 0; border-radius:8px; }
+    .callout.warn { border-left-color:var(--warn); background:#fffaf0; }
+    table { width:100%; border-collapse:collapse; font-size:14px; margin:14px 0; }
+    th,td { border:1px solid var(--line); padding:9px 10px; vertical-align:top; text-align:left; }
+    th { background:#edf3fb; }
+    pre { background:var(--code-bg); color:var(--code-ink); padding:12px 14px; border-radius:8px; overflow:auto; font-size:13px; }
+    code { font-family:ui-monospace,Menlo,monospace; background:#eef2f7; padding:1px 4px; border-radius:4px; font-size:0.92em; }
+    pre code { background:transparent; padding:0; }
+    .diagram { border:1px solid var(--line); border-radius:8px; padding:12px; margin:16px 0; overflow:hidden; }
+    .diagram-title { font-weight:800; margin-bottom:8px; }
+    .diagram svg { display:block; width:100%; height:auto; }
+    .svg-box { fill:#f8fafc; stroke:#b8c2d4; stroke-width:1.2; }
+    .svg-box.primary { fill:#eaf2ff; stroke:#2b6fcf; }
+    .svg-box.good { fill:#ecfdf5; stroke:#10b981; }
+    .svg-box.warn { fill:#fffbeb; stroke:#d97706; }
+    .svg-line { stroke:#536179; stroke-width:1.5; fill:none; }
+    .svg-dashed { stroke-dasharray:5 5; }
+    .svg-label { font-size:11px; fill:#334155; font-family:sans-serif; }
+    .svg-title { font-size:13px; font-weight:700; fill:#172033; font-family:sans-serif; }
+    .svg-note { font-size:10px; fill:#64748b; font-family:sans-serif; }
+    @media (max-width:960px) { .layout { grid-template-columns:1fr; } .toc { position:static; } }
+  </style>
+</head>
+<body>
+<div class="layout">
+<aside class="toc">
+  <strong>目录</strong>
+  <ul>
+    <li><a href="#summary">1. 结论</a></li>
+    <li><a href="#compare">2. 升级前后架构对比</a>
+      <ul class="sub">
+        <li><a href="#compare-topology">2.1 拓扑与组件</a></li>
+        <li><a href="#compare-storage">2.2 存储与文件流</a></li>
+        <li><a href="#compare-sandbox">2.3 沙箱运行时</a></li>
+        <li><a href="#compare-ops">2.4 运维与配置</a></li>
+      </ul>
+    </li>
+    <li><a href="#namespaces">3. Namespace 划分</a></li>
+    <li><a href="#architecture">4. 总体架构</a></li>
+    <li><a href="#deploy-flow">5. 一键部署流程</a></li>
+    <li><a href="#storage">6. 存储方案</a>
+      <ul class="sub">
+        <li><a href="#longhorn">6.1 Longhorn 演进</a></li>
+        <li><a href="#file-storage-local-path">6.1.5 FILE_STORAGE_LOCAL_PATH</a></li>
+      </ul>
+    </li>
+    <li><a href="#quota">7. 动态 ResourceQuota</a></li>
+    <li><a href="#monitoring">8. 监控与扩缩容</a></li>
+    <li><a href="#ingress">9. Ingress 访问实例</a></li>
+    <li><a href="#openclaw-sql">10. openclaw.sql 兼容</a></li>
+    <li><a href="#commands">11. 命令手册</a></li>
+    <li><a href="#risks">12. 风险</a></li>
+  </ul>
+</aside>
+<main>
+  <h1>ByClaw OpenSandbox K3s 分布式升级方案</h1>
+  <p class="lede">将沙箱从 Docker 单机迁移到 k3s HA 集群。ByClaw API 不变，OpenSandbox runtime 切换为 <code>kubernetes</code>；存储默认使用 <strong>Longhorn 分布式 RWX PVC</strong>（不依赖 NFS），彻底弃用 minio-mount/rclone；部署与现有 <code>deploy.sh</code> 同风格的一键脚本。</p>
+  <p><span class="tag ok">已落地</span> <code>deploy/k3s/</code> · <code>scripts/deploy-k3s.sh</code> · 生成日期 2026-06-11</p>
+
+  <section id="summary">
+    <h2>1. 结论</h2>
+    <div class="callout">
+      <strong>推荐路径：</strong>3 台 server+worker HA k3s → Namespace 三分（by-service / by-middleware / by-sandbox）→ <a href="#longhorn">Longhorn 分布式 RWX PVC</a>（<code>deploy/k3s/install-longhorn.sh</code>）→ OpenSandbox <code>runtime.type=kubernetes</code> + gateway Ingress → Prometheus/HPA/KEDA 扩缩容 + Alertmanager webhook 通知。与现状 Docker+MinIO 的全面对比见 <a href="#compare">第 2 节</a>。
+    </div>
+    <table>
+      <tr><th>能力</th><th>状态</th><th>说明</th></tr>
+      <tr><td>分布式沙箱 Pod</td><td><span class="tag ok">满足</span></td><td>OpenSandbox BatchSandbox CRD 调度到多 worker</td></tr>
+      <tr><td>统一 Ingress</td><td><span class="tag ok">满足</span></td><td>wildcard host 或 path-prefix，见第 9 节</td></tr>
+      <tr><td>Longhorn 工作区</td><td><span class="tag ok">满足</span></td><td>3 副本 RWX PVC + subPath，弃用 NFS/minio-mount</td></tr>
+      <tr><td>动态配额</td><td><span class="tag ok">满足</span></td><td><code>gen-resource-quota.sh</code> 按节点 allocatable 计算</td></tr>
+      <tr><td>监控扩缩容</td><td><span class="tag ok">满足</span></td><td>Prometheus + HPA/KEDA + webhook 告警</td></tr>
+      <tr><td>一键脚本</td><td><span class="tag ok">已落地</span></td><td><code>deploy/k3s/deploy.sh init|update|stop</code></td></tr>
+    </table>
+  </section>
+
+  <section id="compare">
+    <h2>2. 升级前后架构全面对比（Docker + MinIO vs K3s + Longhorn）</h2>
+    <p>本节对照<strong>当前生产默认路径</strong>（<code>deploy/standalone</code> + <code>deploy/middleware</code>，<code>BYCLAW_DEPLOY_STORAGE=minio</code>）与<strong>升级目标路径</strong>（<code>deploy/k3s/</code>，Longhorn RWX + OpenSandbox <code>kubernetes</code> runtime）。BE 业务 API 与 <code>sandbox_service_spec</code> 卷语义（<code>subPath</code>、<code>scope</code>、<code>/by</code>）保持不变；变化集中在<strong>运行时、存储后端与集群编排</strong>。</p>
+
+    <div class="diagram">
+      <div class="diagram-title">图 0：两种部署拓扑并排对比</div>
+      <svg viewBox="0 0 1100 520" role="img" aria-label="Docker+MinIO 与 K3s+Longhorn 架构对比图">
+        <defs><marker id="a0" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#536179"/></marker></defs>
+        <text class="svg-title" x="30" y="28">现状：Docker Compose + MinIO + OpenSandbox Docker runtime</text>
+        <rect class="svg-box warn" x="30" y="40" width="500" height="200" rx="8"/>
+        <rect class="svg-box" x="50" y="60" width="90" height="45" rx="5"/><text class="svg-label" x="65" y="85">fe (nginx)</text>
+        <rect class="svg-box primary" x="160" y="60" width="90" height="45" rx="5"/><text class="svg-label" x="175" y="85">be</text>
+        <rect class="svg-box" x="270" y="60" width="80" height="45" rx="5"/><text class="svg-label" x="280" y="85">redis</text>
+        <rect class="svg-box" x="370" y="60" width="90" height="45" rx="5"/><text class="svg-label" x="380" y="85">opengauss</text>
+        <rect class="svg-box warn" x="50" y="120" width="90" height="45" rx="5"/><text class="svg-label" x="62" y="140">minio</text><text class="svg-note" x="55" y="155">S3 对象存储</text>
+        <rect class="svg-box good" x="160" y="120" width="130" height="45" rx="5"/><text class="svg-label" x="168" y="140">opensandbox</text><text class="svg-note" x="165" y="155">docker.sock</text>
+        <rect class="svg-box" x="310" y="120" width="200" height="45" rx="5"/><text class="svg-label" x="320" y="140">沙箱 Docker 容器 × N</text><text class="svg-note" x="318" y="155">rclone 挂 MinIO 桶 → /by</text>
+        <text class="svg-label" x="50" y="195">单机 bridge 网络 · 端口映射 · 无 K8s 调度</text>
+        <text class="svg-note" x="50" y="215">脚本：deploy.sh · storage-profile.sh (minio)</text>
+
+        <text class="svg-title" x="570" y="28">升级后：k3s HA + Longhorn + OpenSandbox Kubernetes runtime</text>
+        <rect class="svg-box good" x="570" y="40" width="500" height="200" rx="8"/>
+        <rect class="svg-box primary" x="590" y="60" width="130" height="40" rx="5"/><text class="svg-label" x="600" y="85">by-service: fe/be</text>
+        <rect class="svg-box" x="740" y="60" width="150" height="40" rx="5"/><text class="svg-label" x="750" y="85">by-middleware</text>
+        <rect class="svg-box good" x="590" y="115" width="300" height="50" rx="5"/><text class="svg-label" x="600" y="138">by-sandbox: opensandbox + BatchSandbox Pod</text>
+        <rect class="svg-box warn" x="910" y="115" width="140" height="50" rx="5"/><text class="svg-label" x="920" y="138">Longhorn PVC RWX</text>
+        <rect class="svg-box" x="590" y="180" width="460" height="45" rx="5"/><text class="svg-label" x="600" y="200">k3s 三节点 · Traefik Ingress · node-pool 调度 · HPA/KEDA</text>
+        <text class="svg-note" x="590" y="215">脚本：deploy-k3s.sh · install-longhorn.sh</text>
+
+        <text class="svg-title" x="30" y="270">关键差异摘要</text>
+        <rect class="svg-box" x="30" y="285" width="520" height="210" rx="6"/>
+        <text class="svg-label" x="45" y="310">① 沙箱载体：Docker 容器 → K8s BatchSandbox Pod</text>
+        <text class="svg-label" x="45" y="335">② 用户 /by：rclone FUSE 挂 MinIO 桶 → PVC subPath 原生 POSIX</text>
+        <text class="svg-label" x="45" y="360">③ BE 文件：MinIO S3 API → LocalStorageService 写共享 PVC</text>
+        <text class="svg-label" x="45" y="385">④ 入口：宿主机端口 + nginx 反代 → wildcard Ingress</text>
+        <text class="svg-label" x="45" y="410">⑤ 扩展：单机垂直扩容 → 多 worker 水平调度 + 配额/监控</text>
+        <text class="svg-label" x="45" y="435">⑥ 高可用：单点 Docker 守护进程 → 3 节点 k3s control-plane HA</text>
+        <text class="svg-note" x="45" y="465">MinIO 可从沙箱工作区链路移除；系统附件桶可保留 MinIO（混合模式见 storage-profile nfs-hybrid）</text>
+
+        <rect class="svg-box good" x="570" y="285" width="500" height="210" rx="6"/>
+        <text class="svg-label" x="585" y="310">BE Java：无需改业务代码（路径约定 subPath 不变）</text>
+        <text class="svg-label" x="585" y="335">需改：Deployment 挂 PVC、env、opensandbox runtime 配置</text>
+        <text class="svg-label" x="585" y="360">需跑：openclaw-k3s-upgrade.sql 去 minio-mount env</text>
+        <text class="svg-label" x="585" y="385">OpenSandbox：v0.1.9 docker → v0.1.14+ kubernetes</text>
+        <text class="svg-label" x="585" y="410">回滚：保留 deploy/middleware docker-compose 通道</text>
+        <text class="svg-note" x="585" y="450">详见下文分维度对比表</text>
+      </svg>
+    </div>
+
+    <h3 id="compare-topology">2.1 拓扑、组件与网络</h3>
+    <table>
+      <tr><th>维度</th><th>现状：Docker + MinIO</th><th>升级后：K3s + Longhorn</th></tr>
+      <tr><td>编排</td><td><code>docker compose</code>（<code>deploy/standalone</code> + <code>deploy/middleware</code>）</td><td>k3s + <code>kubectl apply</code>（<code>deploy/k3s/manifests/</code>）</td></tr>
+      <tr><td>物理形态</td><td>通常 1～2 台宿主机；FE/BE/中间件/沙箱同机或分机</td><td>3 台 server+worker HA；沙箱 Pod 可调度到任意 worker</td></tr>
+      <tr><td>逻辑隔离</td><td>Docker bridge 网络 <code>byclaw-network-{suffix}</code></td><td>Namespace：<code>by-service</code> / <code>by-middleware</code> / <code>by-sandbox</code></td></tr>
+      <tr><td>前端入口</td><td>fe 容器内 nginx，映射 <code>8080/8443</code></td><td>Traefik Ingress + TLS Secret；业务域与沙箱域可拆分</td></tr>
+      <tr><td>BE 暴露</td><td>宿主机 <code>8086</code> + <code>8082</code>（WS）</td><td>ClusterIP + Ingress；集群内 <code>byclaw-be.by-service</code></td></tr>
+      <tr><td>中间件</td><td>compose：redis、opengauss、<strong>minio</strong>、opensandbox-server</td><td>StatefulSet/Deployment：redis、opengauss；<strong>默认不部署 MinIO</strong></td></tr>
+      <tr><td>OpenSandbox</td><td>挂 <code>/var/run/docker.sock</code>，<code>runtime.type=docker</code></td><td>ServiceAccount + CRD，<code>runtime.type=kubernetes</code></td></tr>
+      <tr><td>沙箱实例</td><td>Docker 容器，由本机 dockerd 创建</td><td>BatchSandbox CR → Pod，由 kube-scheduler 选节点</td></tr>
+      <tr><td>沙箱访问</td><td><code>BYCLAW_SANDBOX_HOST:动态端口</code> 或 nginx 反代</td><td><code>https://{sandboxId}-{port}.sandbox.example.com</code>（wildcard Ingress）</td></tr>
+      <tr><td>服务发现</td><td>容器名 / 宿主机 IP + 端口</td><td>K8s DNS：<code>*.svc.cluster.local</code></td></tr>
+      <tr><td>一键脚本</td><td><code>scripts/deploy.sh</code> · <code>deploy.sh init|update</code></td><td><code>scripts/deploy-k3s.sh</code> · <code>deploy/k3s/deploy.sh init|update</code></td></tr>
+    </table>
+
+    <h3 id="compare-storage">2.2 存储与用户文件流（核心差异）</h3>
+    <div class="callout warn">
+      <strong>现状痛点：</strong>用户工作区经 <code>minio-mount</code> + <code>rclone</code> 以 FUSE 方式挂进沙箱，对象存储语义与 POSIX 文件操作（rename、锁、小文件）不匹配；BE 经 S3 API 写桶，沙箱经 FUSE 读，链路长、故障点多。
+    </div>
+    <div class="callout">
+      <strong>升级思路：</strong>用户私有目录统一为<strong>共享 POSIX 卷</strong>上的 <code>byclaw-{user}/by/</code>；BE 与沙箱看同一份数据，MinIO 从沙箱工作区链路退出（系统级附件可另议）。
+    </div>
+
+    <table>
+      <tr><th>维度</th><th>Docker + MinIO（<code>BYCLAW_DEPLOY_STORAGE=minio</code>）</th><th>K3s + Longhorn（<code>BYCLAW_DEPLOY_STORAGE=longhorn</code>）</th></tr>
+      <tr><td>存储 profile</td><td><code>deploy/storage-profile.sh</code> → <code>FILE_STORAGE_TYPE=minio</code></td><td><code>env.k3s</code> → <code>FILE_STORAGE_TYPE=file</code></td></tr>
+      <tr><td>沙箱卷后端</td><td><code>BYCLAW_SANDBOX_VOLUME_BACKEND=minio-mount</code></td><td><code>BYCLAW_SANDBOX_VOLUME_BACKEND=file</code></td></tr>
+      <tr><td>MinIO 角色</td><td>用户桶 <code>byclaw-{user}</code> 存对象；启动时 <code>InitMinioBucketMountRunner</code> 初始化</td><td>沙箱工作区<strong>不依赖</strong> MinIO；可选保留给图标/会话等非 /by 附件</td></tr>
+      <tr><td>沙箱 /by 实现</td><td>OpenSandbox <code>[docker.private_volume]</code> → 宿主机执行 <code>rclone mount :s3:{bucket}</code></td><td>BatchSandbox <code>PVC + subPath: byclaw-{user}/by</code> → 容器 <code>/by</code></td></tr>
+      <tr><td>BE 写用户文件</td><td><code>MinioStorageService</code>（S3 PutObject）</td><td><code>LocalStorageService</code>（<code>Files.write</code> 到 PVC 挂载点）</td></tr>
+      <tr><td>BE 物理路径</td><td>无本地路径；桶名即命名空间</td><td><code>FILE_STORAGE_LOCAL_PATH/byclaw-{user}/by/...</code>（见 §6.1.5）</td></tr>
+      <tr><td>bootstrap（openclaw.json）</td><td>UserFS → MinIO 桶内 <code>/.openclaw/</code></td><td>UserFS → 同一 PVC 目录；沙箱挂载后立即可见</td></tr>
+      <tr><td>用户注册建目录</td><td><code>objectStorage.init(bucket)</code> 建 MinIO 桶</td><td><code>FileStorageUserSpaceProvisioner</code> → <code>mkdir .../byclaw-{user}/by</code></td></tr>
+      <tr><td>持久层</td><td><code>deploy/middleware/miniodata</code> 本地目录</td><td>Longhorn 3 副本块卷 + RWX share-manager</td></tr>
+      <tr><td>BE 与沙箱一致性</td><td>S3 与 FUSE 两层抽象，延迟/缓存/语义差异风险</td><td>同一 PVC 子目录，强一致 POSIX 视图</td></tr>
+      <tr><td>大文件 / FFmpeg</td><td>FUSE 上直接写，性能差</td><td>临时目录 <code>emptyDir</code> scratch，完成后移入 PVC</td></tr>
+      <tr><td>filebrowser :8082</td><td>依赖挂载点 POSIX 语义（minio-mount 下体验差）</td><td>原生目录，RWX 下多节点可读</td></tr>
+    </table>
+
+    <div class="diagram">
+      <div class="diagram-title">图 0b：用户文件读写路径对比</div>
+      <svg viewBox="0 0 1100 300" role="img" aria-label="用户文件读写路径对比">
+        <text class="svg-title" x="30" y="25">MinIO 路径（现状）</text>
+        <rect class="svg-box primary" x="30" y="40" width="70" height="35" rx="5"/><text class="svg-label" x="42" y="62">BE</text>
+        <rect class="svg-box warn" x="130" y="40" width="70" height="35" rx="5"/><text class="svg-label" x="142" y="62">MinIO</text>
+        <rect class="svg-box" x="230" y="40" width="90" height="35" rx="5"/><text class="svg-label" x="238" y="62">rclone</text>
+        <rect class="svg-box good" x="350" y="40" width="90" height="35" rx="5"/><text class="svg-label" x="365" y="62">沙箱 /by</text>
+        <path class="svg-line" marker-end="url(#a0)" d="M100 58 L130 58"/><path class="svg-line" marker-end="url(#a0)" d="M200 58 L230 58"/><path class="svg-line" marker-end="url(#a0)" d="M320 58 L350 58"/>
+        <text class="svg-note" x="30" y="95">S3 API → 对象 → FUSE 挂载 → 容器内文件路径</text>
+
+        <text class="svg-title" x="30" y="130">Longhorn 路径（升级后）</text>
+        <rect class="svg-box primary" x="30" y="145" width="70" height="35" rx="5"/><text class="svg-label" x="42" y="167">BE</text>
+        <rect class="svg-box warn" x="130" y="145" width="120" height="35" rx="5"/><text class="svg-label" x="135" y="167">PVC/byclaw-u/by</text>
+        <rect class="svg-box good" x="290" y="145" width="90" height="35" rx="5"/><text class="svg-label" x="305" y="167">沙箱 /by</text>
+        <path class="svg-line" marker-end="url(#a0)" d="M100 163 L130 163"/><path class="svg-line" marker-end="url(#a0)" d="M250 163 L290 163"/>
+        <text class="svg-note" x="30" y="200">BE Files.* 与沙箱 subPath 挂载同一目录树，无 S3/FUSE 中间层</text>
+
+        <text class="svg-title" x="550" y="25">目录约定（两者相同）</text>
+        <rect class="svg-box" x="550" y="45" width="520" height="100" rx="6"/>
+        <text class="svg-label" x="565" y="75">桶名 / subPath 前缀：<code>byclaw-{userCode}</code></text>
+        <text class="svg-label" x="565" y="100">逻辑工作区根：<code>/by</code></text>
+        <text class="svg-label" x="565" y="125">私有配置：<code>/.openclaw/openclaw.json</code></text>
+      </svg>
+    </div>
+
+    <h3 id="compare-sandbox">2.3 沙箱运行时、调度与高可用</h3>
+    <table>
+      <tr><th>维度</th><th>Docker runtime</th><th>Kubernetes runtime</th></tr>
+      <tr><td>OpenSandbox 配置</td><td><code>deploy/middleware/gen-opensandbox-config.sh</code> → <code>[runtime] type=docker</code></td><td><code>deploy/k3s/gen-opensandbox-k8s-config.sh</code> → <code>type=kubernetes</code></td></tr>
+      <tr><td>私有卷配置段</td><td><code>[docker.private_volume] backend=minio-mount file_root=...</code></td><td><code>[storage] allowed_host_paths=[]</code>；卷由 BatchSandbox 模板 PVC 定义</td></tr>
+      <tr><td>创建 API payload</td><td>BE 传 <code>volumes[].subPath/scope/mountPath</code> + <code>host.path</code></td><td>同上；K8s 侧<strong>忽略 host.path</strong>，用模板 PVC</td></tr>
+      <tr><td>并发沙箱上限</td><td>单机 dockerd、CPU/内存/磁盘；无集群级配额</td><td>Namespace ResourceQuota + LimitRange；<code>gen-resource-quota.sh</code> 按节点算</td></tr>
+      <tr><td>节点池</td><td>无；所有容器同机</td><td><code>nodeSelector: byclaw.io/node-pool</code>（general/browser/heavy）</td></tr>
+      <tr><td>BE 多副本</td><td>可起多个 be 容器，但 MinIO 一致；沙箱仍绑单机 dockerd</td><td>BE Deployment 多副本 + RWX PVC；沙箱跨节点</td></tr>
+      <tr><td>控制面 HA</td><td>无；dockerd 挂则全挂</td><td>k3s 3 节点 etcd 嵌入；允许 1 节点故障</td></tr>
+      <tr><td>沙箱网络出口</td><td>egress 容器 + docker 网络</td><td>egress sidecar + <code>dns+nft</code>（K8s 配置）</td></tr>
+      <tr><td>监控扩缩</td><td>主要靠宿主机监控 + 人工</td><td>Prometheus + HPA（opensandbox-server）+ KEDA（沙箱池指标）</td></tr>
+      <tr><td>版本</td><td>默认镜像 <code>opensandbox/server:v0.1.9</code></td><td>要求 <code>v0.1.14+</code>（BatchSandbox CRD）</td></tr>
+    </table>
+
+    <h3 id="compare-ops">2.4 环境变量、运维与迁移</h3>
+    <table>
+      <tr><th>配置项</th><th>Docker + MinIO 典型值</th><th>K3s + Longhorn 典型值</th></tr>
+      <tr><td><code>BYCLAW_DEPLOY_STORAGE</code></td><td><code>minio</code></td><td><code>longhorn</code>（<code>env.k3s</code>）</td></tr>
+      <tr><td><code>FILE_STORAGE_TYPE</code></td><td><code>minio</code></td><td><code>file</code></td></tr>
+      <tr><td><code>BYCLAW_SANDBOX_VOLUME_BACKEND</code></td><td><code>minio-mount</code></td><td><code>file</code></td></tr>
+      <tr><td><code>FILE_STORAGE_MINIO_MOUNT_ENABLED</code></td><td><code>true</code></td><td><code>false</code></td></tr>
+      <tr><td><code>FILE_STORAGE_LOCAL_PATH</code></td><td>通常未设（走 S3）</td><td><code>/mnt/byclaw-workspace</code>（PVC 挂载点）</td></tr>
+      <tr><td><code>BYCLAW_SANDBOX_FILE_VOLUME_TYPE</code></td><td><code>bind</code>（docker 挂宿主机路径时）</td><td><code>bind</code>（Pod 内 POSIX，非 StorageClass 名）</td></tr>
+      <tr><td><code>BYCLAW_SANDBOX_BASE_URL</code></td><td><code>http://宿主机:9005</code></td><td><code>http://opensandbox-server.by-sandbox.svc:9005</code></td></tr>
+      <tr><td>中间件模块</td><td>redis + opengauss + minio + opensandbox</td><td>redis + opengauss（无 minio）+ opensandbox</td></tr>
+      <tr><td>数据备份</td><td>备份 <code>miniodata/</code>、<code>middleware/data/</code></td><td>Longhorn 卷快照/备份；PVC Retain 策略</td></tr>
+      <tr><td>回滚</td><td>—</td><td>改 <code>BYCLAW_SANDBOX_BASE_URL</code> + <code>deploy/middleware/start-opensandbox.sh</code></td></tr>
+    </table>
+
+    <h4>2.4.1 能力矩阵（何时选哪种）</h4>
+    <table>
+      <tr><th>能力 / 场景</th><th>Docker + MinIO</th><th>K3s + Longhorn</th></tr>
+      <tr><td>POC / 单机演示</td><td><span class="tag ok">适合</span> 组件少、一键 compose</td><td>过重，除非已有集群</td></tr>
+      <tr><td>多用户并发沙箱</td><td><span class="tag">受限</span> 单机 dockerd 瓶颈</td><td><span class="tag ok">适合</span> 多 worker 调度</td></tr>
+      <tr><td>OpenClaw /by 重 IO</td><td><span class="tag">差</span> rclone FUSE</td><td><span class="tag ok">较好</span> POSIX + scratch 策略</td></tr>
+      <tr><td>FileBrowser 上传下载</td><td><span class="tag">一般</span></td><td><span class="tag ok">适合</span> RWX 原生目录</td></tr>
+      <tr><td>服务高可用</td><td><span class="tag">单点</span></td><td><span class="tag ok">3 节点 HA</span></td></tr>
+      <tr><td>运维复杂度</td><td><span class="tag ok">低</span></td><td><span class="tag">中高</span> 需 K8s/Longhorn 技能</td></tr>
+      <tr><td>BE 代码改动</td><td>—</td><td><span class="tag ok">无</span> 仅部署与 SQL 迁移</td></tr>
+      <tr><td>已有 MinIO 生态（非 /by）</td><td><span class="tag ok">原生</span></td><td>可 hybrid：工作区 file，附件仍 minio</td></tr>
+    </table>
+
+    <h4>2.4.2 迁移检查清单</h4>
+    <table>
+      <tr><th>步骤</th><th>动作</th><th>验证</th></tr>
+      <tr><td>1</td><td>安装 k3s + Longhorn，创建 RWX PVC <code>byclaw-workspace</code></td><td><code>kubectl get pvc -n by-sandbox</code></td></tr>
+      <tr><td>2</td><td>BE 挂 PVC，设 <code>FILE_STORAGE_TYPE=file</code></td><td>BE 启动通过 <code>SandboxVolumeBackendValidator</code></td></tr>
+      <tr><td>3</td><td>执行 <code>openclaw-k3s-upgrade.sql</code></td><td>spec 无 <code>FILE_STORAGE_MINIO_MOUNT_PATH</code></td></tr>
+      <tr><td>4</td><td>部署 OpenSandbox k8s runtime + BatchSandbox 模板</td><td>smoke 创建沙箱成功</td></tr>
+      <tr><td>5</td><td>rsync MinIO 桶或旧 NFS 数据 → PVC <code>byclaw-*/by/</code></td><td>沙箱内 <code>/by/.openclaw</code> 可读</td></tr>
+      <tr><td>6</td><td>切换 Ingress / <code>BYCLAW_SANDBOX_BASE_URL</code></td><td>wildcard URL 可访问 8080/8081/8082</td></tr>
+      <tr><td>7</td><td>关闭 <code>FILE_STORAGE_MINIO_MOUNT_ENABLED</code>，停 minio（若不再需要）</td><td>新用户注册目录在 PVC 上创建</td></tr>
+    </table>
+
+    <div class="callout">
+      <strong>总结：</strong>升级不是「换一套 BE」，而是把沙箱运行时从<strong>单机 Docker + 对象存储 FUSE</strong>迁到<strong>集群 Pod + 分布式 POSIX 卷</strong>。MinIO 在现状中同时承担「用户工作区对象桶」和「S3 附件」；升级后用户 <code>/by</code> 工作区退出 MinIO 链路，路径命名（<code>byclaw-{user}/by</code>）保持不变，从而降低 FUSE 语义风险并解锁多节点调度。Docker 部署保留为回滚与开发环境选项。
+    </div>
+  </section>
+
+  <section id="namespaces">
+    <h2>3. Namespace 划分</h2>
+    <table>
+      <tr><th>Namespace</th><th>组件</th><th>说明</th></tr>
+      <tr><td><code>by-service</code></td><td>byclaw-be、byclaw-fe、Ingress</td><td>业务服务；沙箱生命周期 API 调 OpenSandbox</td></tr>
+      <tr><td><code>by-middleware</code></td><td>Redis、openGauss、alertmanager-webhook</td><td>中间件；不跑沙箱 Pod</td></tr>
+      <tr><td><code>by-sandbox</code></td><td>opensandbox-server、BatchSandbox Pod、PVC</td><td>沙箱运行时；ResourceQuota 主要约束此 NS</td></tr>
+      <tr><td><code>monitoring</code></td><td>kube-prometheus-stack、Grafana</td><td>集群监控</td></tr>
+    </table>
+    <p>Manifest：<code>deploy/k3s/manifests/namespaces.yaml</code></p>
+  </section>
+
+  <section id="architecture">
+    <h2>4. 总体架构（SVG）</h2>
+    <div class="diagram">
+      <div class="diagram-title">图 1：三 Namespace + Traefik + NFS</div>
+      <svg viewBox="0 0 1100 420" role="img">
+        <defs><marker id="a1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#536179"/></marker></defs>
+        <rect class="svg-box primary" x="30" y="30" width="120" height="50" rx="6"/><text class="svg-title" x="55" y="58">用户</text>
+        <rect class="svg-box" x="200" y="20" width="140" height="70" rx="6"/><text class="svg-title" x="230" y="48">Traefik</text><text class="svg-label" x="218" y="68">Ingress 80/443</text>
+        <rect class="svg-box primary" x="400" y="10" width="280" height="100" rx="6"/><text class="svg-title" x="480" y="38">by-service</text><text class="svg-label" x="420" y="62">byclaw-fe / byclaw-be</text><text class="svg-label" x="420" y="82">SandboxLifecycle API</text>
+        <rect class="svg-box" x="400" y="130" width="280" height="90" rx="6"/><text class="svg-title" x="480" y="158">by-middleware</text><text class="svg-label" x="420" y="182">Redis · openGauss · webhook</text>
+        <rect class="svg-box good" x="400" y="240" width="280" height="120" rx="6"/><text class="svg-title" x="480" y="268">by-sandbox</text><text class="svg-label" x="420" y="292">opensandbox-server (k8s runtime)</text><text class="svg-label" x="420" y="312">BatchSandbox Pods</text><text class="svg-label" x="420" y="332">PVC byclaw-workspace (RWX)</text>
+        <rect class="svg-box warn" x="750" y="240" width="300" height="120" rx="6"/><text class="svg-title" x="820" y="268">k3s 三节点 HA</text><text class="svg-label" x="770" y="292">server+worker · /data 数据盘</text><text class="svg-label" x="770" y="312">node-pool: general/browser/heavy</text>
+        <rect class="svg-box" x="750" y="100" width="180" height="60" rx="6"/><text class="svg-title" x="790" y="128">NFS Server</text><text class="svg-label" x="768" y="148">/exports/byclaw</text>
+        <path class="svg-line" marker-end="url(#a1)" d="M150 55 L200 55"/><path class="svg-line" marker-end="url(#a1)" d="M340 55 L400 55"/>
+        <path class="svg-line" marker-end="url(#a1)" d="M540 110 L540 130"/><path class="svg-line" marker-end="url(#a1)" d="M560 110 L560 240"/>
+        <path class="svg-line" marker-end="url(#a1)" d="M680 300 L750 300"/><path class="svg-line" marker-end="url(#a1)" d="M840 160 L680 280"/>
+        <path class="svg-line" style="stroke-dasharray:5 5" marker-end="url(#a1)" d="M200 90 C200 200 350 350 400 320"/><text class="svg-label" x="220" y="200">sandboxId-port 路由</text>
+      </svg>
+    </div>
+
+    <div class="diagram">
+      <div class="diagram-title">图 2：沙箱启动 → Ingress 访问时序</div>
+      <svg viewBox="0 0 1100 200" role="img">
+        <text class="svg-label" x="40" y="30">1. BE POST /v1/sandboxes</text>
+        <text class="svg-label" x="40" y="55">2. OpenSandbox 创建 BatchSandbox + Service + Ingress</text>
+        <text class="svg-label" x="40" y="80">3. Scheduler 选节点 · 挂载 PVC subPath=byclaw-{user}/by</text>
+        <text class="svg-label" x="40" y="105">4. GET endpoint → https://{id}-8080.sandbox.example.com</text>
+        <text class="svg-label" x="40" y="130">5. 用户浏览器 → Traefik → Sandbox Service → Pod:8080</text>
+        <rect class="svg-box primary" x="520" y="20" width="100" height="40" rx="6"/><text class="svg-title" x="545" y="45">ByClaw</text>
+        <rect class="svg-box good" x="660" y="20" width="120" height="40" rx="6"/><text class="svg-title" x="675" y="45">OpenSandbox</text>
+        <rect class="svg-box" x="820" y="20" width="100" height="40" rx="6"/><text class="svg-title" x="845" y="45">k3s</text>
+        <rect class="svg-box" x="960" y="20" width="100" height="40" rx="6"/><text class="svg-title" x="985" y="45">用户</text>
+        <path class="svg-line" marker-end="url(#a1)" d="M620 40 L660 40"/><path class="svg-line" marker-end="url(#a1)" d="M780 40 L820 40"/>
+        <path class="svg-line" marker-end="url(#a1)" d="M920 40 L960 40"/>
+        <path class="svg-line" style="stroke-dasharray:5 5" d="M1010 60 C1010 120 600 150 560 60"/>
+      </svg>
+    </div>
+  </section>
+
+  <section id="deploy-flow">
+    <h2>5. 一键部署 / 升级流程（SVG）</h2>
+    <div class="diagram">
+      <div class="diagram-title">图 3：与现有 deploy.sh 对齐的命令流</div>
+      <svg viewBox="0 0 1100 280" role="img">
+        <rect class="svg-box primary" x="30" y="40" width="200" height="50" rx="6"/><text class="svg-title" x="50" y="70">scripts/deploy-k3s.sh</text>
+        <rect class="svg-box" x="280" y="20" width="120" height="35" rx="6"/><text class="svg-label" x="300" y="42">init</text>
+        <rect class="svg-box" x="280" y="65" width="120" height="35" rx="6"/><text class="svg-label" x="282" y="87">storage-init</text>
+        <rect class="svg-box" x="280" y="110" width="120" height="35" rx="6"/><text class="svg-label" x="295" y="132">update</text>
+        <rect class="svg-box" x="280" y="155" width="120" height="35" rx="6"/><text class="svg-label" x="300" y="177">stop</text>
+        <rect class="svg-box good" x="450" y="40" width="220" height="150" rx="6"/><text class="svg-title" x="480" y="68">deploy/k3s/deploy.sh</text>
+        <text class="svg-label" x="465" y="95">install-longhorn</text>
+        <text class="svg-label" x="465" y="115">install-k3s (可选)</text>
+        <text class="svg-label" x="465" y="135">kubectl apply manifests</text>
+        <text class="svg-label" x="465" y="155">gen-opensandbox-k8s-config</text>
+        <text class="svg-label" x="465" y="175">gen-resource-quota --apply</text>
+        <rect class="svg-box warn" x="720" y="40" width="340" height="150" rx="6"/><text class="svg-title" x="750" y="68">产物</text>
+        <text class="svg-label" x="735" y="95">namespaces · storage · middleware</text>
+        <text class="svg-label" x="735" y="115">service · sandbox · ingress</text>
+        <text class="svg-label" x="735" y="135">monitoring HPA / alert rules</text>
+        <text class="svg-label" x="735" y="155">opensandbox-server-k8s.toml</text>
+        <path class="svg-line" marker-end="url(#a1)" d="M230 65 L280 65"/><path class="svg-line" marker-end="url(#a1)" d="M400 115 L450 115"/>
+        <path class="svg-line" marker-end="url(#a1)" d="M670 115 L720 115"/>
+      </svg>
+    </div>
+    <pre><code># 本地（已有 kubeconfig）
+K3S_ENV_FILE=deploy/k3s/env.k3s sh deploy/k3s/deploy.sh init
+K3S_ENV_FILE=deploy/k3s/env.k3s sh deploy/k3s/deploy.sh update
+
+# 远程（与 scripts/deploy.sh 204 环境一致）
+sh scripts/deploy-k3s.sh 204 init
+sh scripts/deploy-k3s.sh 204 update
+sh scripts/deploy-k3s.sh 204 stop</code></pre>
+  </section>
+
+  <section id="storage">
+    <h2>6. 存储：Longhorn 分布式 PVC，弃用 NFS / minio-mount / rclone</h2>
+    <div class="callout warn"><strong>原则：</strong>沙箱工作区使用 Longhorn <code>ReadWriteMany</code> PVC（<code>storageClassName: longhorn</code>）；<code>FILE_STORAGE_MINIO_MOUNT_ENABLED=false</code>；不再部署外部 NFS。pip/FFmpeg 临时目录仍用 <code>emptyDir</code>。</div>
+    <div class="diagram">
+      <div class="diagram-title">图 4：存储分层</div>
+      <svg viewBox="0 0 1100 220" role="img">
+        <rect class="svg-box good" x="40" y="40" width="200" height="70" rx="6"/><text class="svg-title" x="70" y="68">持久工作区</text><text class="svg-label" x="55" y="90">PVC byclaw-workspace RWX</text><text class="svg-label" x="55" y="105">subPath byclaw-user/by</text>
+        <rect class="svg-box" x="300" y="40" width="200" height="70" rx="6"/><text class="svg-title" x="340" y="68">临时 scratch</text><text class="svg-label" x="315" y="90">emptyDir 本地 NVMe</text><text class="svg-label" x="315" y="105">pip / FFmpeg 缓存</text>
+        <rect class="svg-box warn" x="560" y="40" width="200" height="70" rx="6"/><text class="svg-title" x="600" y="68">演进 Longhorn</text><text class="svg-label" x="575" y="90">3 节点块副本 RWX</text>
+        <rect class="svg-box" x="820" y="40" width="200" height="70" rx="6" style="opacity:0.5"/><text class="svg-title" x="860" y="68">已弃用</text><text class="svg-label" x="835" y="90">minio-mount rclone</text>
+        <path class="svg-line" marker-end="url(#a1)" d="M240 75 L300 75"/><text class="svg-label" x="248" y="65">NFS Server</text>
+      </svg>
+    </div>
+    <table>
+      <tr><th>场景</th><th>存储</th><th>原因</th></tr>
+      <tr><td>OpenClaw /by 工作区</td><td>Longhorn PVC RWX</td><td>3 副本跨节点调度、FileBrowser 上传下载</td></tr>
+      <tr><td>pip install 依赖</td><td>emptyDir scratch</td><td>大量小文件不走 RWX 层，完成后同步到 /by</td></tr>
+      <tr><td>FFmpeg 转码</td><td>emptyDir scratch</td><td>顺序大文件写本地 NVMe，完成后 mv 到 PVC</td></tr>
+      <tr><td>中间件数据盘</td><td>Longhorn RWO</td><td>openGauss 等 StatefulSet 使用 <code>longhorn</code> RWO</td></tr>
+    </table>
+    <p>BE 侧 volume payload 只传 <code>subPath/scope/mountPath</code>（<code>SandboxRuntimeRequestFactory</code>），K8s 模板用 PVC 承接，无需改 Java 代码。</p>
+
+    <section id="longhorn">
+      <h3>6.1 Longhorn 分布式存储方案（默认）</h3>
+      <div class="callout">
+        <strong>定位：</strong>在 3 台 k3s 节点 <code>/data/longhorn</code> NVMe 上部署 <a href="https://longhorn.io/">Longhorn</a>，沙箱工作区 PVC 使用集群内 3 副本块存储 + RWX share-manager。一键脚本：<code>deploy/k3s/install-longhorn.sh</code>，<code>deploy/k3s/deploy.sh init</code> 默认自动执行（<code>BYCLAW_K3S_INSTALL_LONGHORN=true</code>）。
+      </div>
+
+      <h4>6.1.1 为什么 ByClaw 适合 Longhorn</h4>
+      <table>
+        <tr><th>负载特征</th><th>NFS 痛点</th><th>Longhorn 做法</th></tr>
+        <tr><td>OpenClaw <code>/by</code> 工作区（跨节点）</td><td>NFS Server 单点；故障影响全集群挂载</td><td>卷副本分布在 node-1/2/3，任一节点故障仍可调度（需≥2 副本）</td></tr>
+        <tr><td>pip 依赖（大量小文件）</td><td>NFS 元数据操作延迟高</td><td>工作区仍用 RWX PVC；pip 缓存目录挂 <code>emptyDir</code> 本地 NVMe，装完 rsync 回工作区</td></tr>
+        <tr><td>FFmpeg 大文件转码</td><td>并发写锁竞争</td><td>转码输出写 <code>emptyDir</code> scratch，完成后移动至 Longhorn PVC</td></tr>
+        <tr><td>FileBrowser 上传下载</td><td>需 RWX + POSIX rename</td><td>Longhorn RWX 经 NFS-ganesha share-manager 暴露，语义满足 FileBrowser</td></tr>
+        <tr><td>3×984G 数据盘</td><td>外部 NAS 需另购</td><td>直接消费节点 <code>/data</code>，Longhorn 默认路径 <code>/var/lib/longhorn</code> 建议改到 <code>/data/longhorn</code></td></tr>
+      </table>
+
+      <div class="diagram">
+        <div class="diagram-title">图 4a：Longhorn 在 k3s 三节点上的架构</div>
+        <svg viewBox="0 0 1100 480" role="img" aria-label="Longhorn 三节点架构图">
+          <defs><marker id="lh1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#536179"/></marker></defs>
+          <!-- control plane -->
+          <rect class="svg-box primary" x="380" y="15" width="340" height="55" rx="6"/>
+          <text class="svg-title" x="430" y="38">longhorn-system（控制面）</text>
+          <text class="svg-label" x="400" y="58">Manager · CSI Driver · UI · Instance Manager</text>
+          <!-- nodes -->
+          <rect class="svg-box good" x="30" y="100" width="320" height="200" rx="6"/>
+          <text class="svg-title" x="120" y="125">node-1 /data NVMe</text>
+          <text class="svg-label" x="50" y="148">Longhorn Engine（主）</text>
+          <text class="svg-label" x="50" y="168">Replica-1 块副本</text>
+          <text class="svg-label" x="50" y="188">Share Manager Pod（RWX 时）</text>
+          <rect class="svg-box" x="50" y="205" width="120" height="40" rx="4"/><text class="svg-label" x="65" y="230">Sandbox Pod A</text>
+          <rect class="svg-box" x="190" y="205" width="130" height="40" rx="4"/><text class="svg-label" x="200" y="225">PVC subPath</text><text class="svg-note" x="202" y="238">byclaw-user/by</text>
+
+          <rect class="svg-box good" x="390" y="100" width="320" height="200" rx="6"/>
+          <text class="svg-title" x="480" y="125">node-2 /data NVMe</text>
+          <text class="svg-label" x="410" y="148">Replica-2 块副本</text>
+          <text class="svg-label" x="410" y="168">同步复制（默认 3 副本）</text>
+          <rect class="svg-box" x="430" y="205" width="120" height="40" rx="4"/><text class="svg-label" x="445" y="230">Sandbox Pod B</text>
+
+          <rect class="svg-box good" x="750" y="100" width="320" height="200" rx="6"/>
+          <text class="svg-title" x="840" y="125">node-3 /data NVMe</text>
+          <text class="svg-label" x="770" y="148">Replica-3 块副本</text>
+          <text class="svg-label" x="770" y="168">监控组件副本</text>
+          <rect class="svg-box" x="790" y="205" width="120" height="40" rx="4"/><text class="svg-label" x="805" y="230">Sandbox Pod C</text>
+
+          <!-- by-sandbox ns -->
+          <rect class="svg-box warn" x="30" y="330" width="500" height="130" rx="6"/>
+          <text class="svg-title" x="50" y="358">by-sandbox 命名空间</text>
+          <text class="svg-label" x="50" y="380">PVC byclaw-workspace · accessModes: ReadWriteMany · storageClassName: longhorn-rwx</text>
+          <text class="svg-label" x="50" y="400">BatchSandbox 模板：workspace PVC + emptyDir scratch（pip/FFmpeg）</text>
+          <text class="svg-label" x="50" y="420">OpenSandbox 仍通过 subPath 隔离用户目录，BE 代码无需改动</text>
+
+          <!-- CSI -->
+          <rect class="svg-box" x="580" y="330" width="490" height="130" rx="6"/>
+          <text class="svg-title" x="600" y="358">Kubernetes 存储栈</text>
+          <text class="svg-label" x="600" y="380">PVC → PV → Longhorn Volume（块设备）</text>
+          <text class="svg-label" x="600" y="400">RWO：Pod 直接挂载块设备（高性能顺序写）</text>
+          <text class="svg-label" x="600" y="420">RWX：Share Manager 导出 NFS 协议 → 多 Pod 同时挂载</text>
+
+          <path class="svg-line" marker-end="url(#lh1)" d="M550 55 L190 100"/>
+          <path class="svg-line" marker-end="url(#lh1)" d="M550 55 L550 100"/>
+          <path class="svg-line" marker-end="url(#lh1)" d="M550 55 L910 100"/>
+          <path class="svg-line svg-dashed" marker-end="url(#lh1)" d="M190 245 L190 330"/>
+          <path class="svg-line svg-dashed" marker-end="url(#lh1)" d="M490 245 L280 330"/>
+          <path class="svg-line svg-dashed" marker-end="url(#lh1)" d="M850 245 L350 330"/>
+        </svg>
+      </div>
+
+      <div class="diagram">
+        <div class="diagram-title">图 4b：沙箱读写路径（RWO 块设备 vs RWX 共享工作区）</div>
+        <svg viewBox="0 0 1100 340" role="img" aria-label="Longhorn 读写流程图">
+          <defs><marker id="lh2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#536179"/></marker></defs>
+          <text class="svg-title" x="40" y="28">路径 A：持久工作区（RWX longhorn-rwx）</text>
+          <rect class="svg-box primary" x="40" y="45" width="100" height="40" rx="6"/><text class="svg-label" x="55" y="70">沙箱 Pod</text>
+          <rect class="svg-box" x="170" y="45" width="110" height="40" rx="6"/><text class="svg-label" x="180" y="65">kubelet 挂载</text>
+          <rect class="svg-box good" x="310" y="45" width="130" height="40" rx="6"/><text class="svg-label" x="320" y="65">Share Manager</text>
+          <rect class="svg-box warn" x="470" y="45" width="120" height="40" rx="6"/><text class="svg-label" x="485" y="65">Longhorn Engine</text>
+          <rect class="svg-box" x="620" y="35" width="90" height="25" rx="4"/><text class="svg-note" x="630" y="52">Replica-1</text>
+          <rect class="svg-box" x="620" y="65" width="90" height="25" rx="4"/><text class="svg-note" x="630" y="82">Replica-2</text>
+          <rect class="svg-box" x="730" y="50" width="90" height="25" rx="4"/><text class="svg-note" x="740" y="67">Replica-3</text>
+          <text class="svg-label" x="850" y="70">/by 用户工作区 · FileBrowser</text>
+          <path class="svg-line" marker-end="url(#lh2)" d="M140 65 L170 65"/><path class="svg-line" marker-end="url(#lh2)" d="M280 65 L310 65"/>
+          <path class="svg-line" marker-end="url(#lh2)" d="M440 65 L470 65"/><path class="svg-line" marker-end="url(#lh2)" d="M590 65 L620 65"/>
+
+          <text class="svg-title" x="40" y="130">路径 B：pip / FFmpeg 临时目录（emptyDir 本地 NVMe，不经 Longhorn）</text>
+          <rect class="svg-box primary" x="40" y="148" width="100" height="40" rx="6"/><text class="svg-label" x="55" y="173">沙箱 Pod</text>
+          <rect class="svg-box good" x="170" y="148" width="150" height="40" rx="6"/><text class="svg-label" x="185" y="168">emptyDir /tmp/scratch</text>
+          <rect class="svg-box" x="350" y="148" width="180" height="40" rx="6"/><text class="svg-label" x="360" y="168">节点 /data/kubelet 本地盘</text>
+          <text class="svg-label" x="560" y="173">pip install · ffmpeg 转码 · 编译缓存</text>
+          <path class="svg-line" marker-end="url(#lh2)" d="M140 168 L170 168"/><path class="svg-line" marker-end="url(#lh2)" d="M320 168 L350 168"/>
+          <path class="svg-line svg-dashed" marker-end="url(#lh2)" d="M530 168 C600 200 400 250 280 65"/>
+          <text class="svg-note" x="480" y="215">任务完成后 rsync/mv 产物到 /by（路径 A）</text>
+
+          <text class="svg-title" x="40" y="250">路径 C：卷创建与调度（CSI）</text>
+          <rect class="svg-box" x="40" y="268" width="130" height="35" rx="6"/><text class="svg-label" x="55" y="290">OpenSandbox 创建 Pod</text>
+          <rect class="svg-box" x="200" y="268" width="100" height="35" rx="6"/><text class="svg-label" x="215" y="290">PVC 绑定</text>
+          <rect class="svg-box good" x="330" y="268" width="120" height="35" rx="6"/><text class="svg-label" x="345" y="290">Longhorn CSI</text>
+          <rect class="svg-box warn" x="480" y="268" width="140" height="35" rx="6"/><text class="svg-label" x="495" y="290">在 3 节点建副本</text>
+          <rect class="svg-box" x="650" y="268" width="120" height="35" rx="6"/><text class="svg-label" x="665" y="290">Scheduler 挂卷</text>
+          <rect class="svg-box primary" x="800" y="268" width="100" height="35" rx="6"/><text class="svg-label" x="820" y="290">Pod Running</text>
+          <path class="svg-line" marker-end="url(#lh2)" d="M170 285 L200 285"/><path class="svg-line" marker-end="url(#lh2)" d="M300 285 L330 285"/>
+          <path class="svg-line" marker-end="url(#lh2)" d="M450 285 L480 285"/><path class="svg-line" marker-end="url(#lh2)" d="M620 285 L650 285"/>
+          <path class="svg-line" marker-end="url(#lh2)" d="M770 285 L800 285"/>
+        </svg>
+      </div>
+
+      <div class="diagram">
+        <div class="diagram-title">图 4c：从 NFS 迁移到 Longhorn 的流程</div>
+        <svg viewBox="0 0 1100 200" role="img" aria-label="NFS 到 Longhorn 迁移流程图">
+          <defs><marker id="lh3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#536179"/></marker></defs>
+          <rect class="svg-box" x="20" y="70" width="130" height="50" rx="6"/><text class="svg-title" x="35" y="95">① 部署 Longhorn</text><text class="svg-note" x="30" y="110">longhorn.yaml</text>
+          <rect class="svg-box" x="180" y="70" width="130" height="50" rx="6"/><text class="svg-title" x="195" y="95">② 启用 RWX</text><text class="svg-note" x="188" y="110">share-manager</text>
+          <rect class="svg-box good" x="340" y="70" width="150" height="50" rx="6"/><text class="svg-title" x="355" y="95">③ 新建 PVC</text><text class="svg-note" x="350" y="110">longhorn-rwx 500Gi</text>
+          <rect class="svg-box warn" x="520" y="70" width="150" height="50" rx="6"/><text class="svg-title" x="535" y="95">④ rsync 数据</text><text class="svg-note" x="530" y="110">NFS → Longhorn</text>
+          <rect class="svg-box" x="700" y="70" width="160" height="50" rx="6"/><text class="svg-title" x="715" y="95">⑤ 更新模板</text><text class="svg-note" x="708" y="110">claimName + SC</text>
+          <rect class="svg-box primary" x="890" y="70" width="170" height="50" rx="6"/><text class="svg-title" x="905" y="95">⑥ 灰度验证</text><text class="svg-note" x="900" y="110">smoke + 回滚 NFS</text>
+          <path class="svg-line" marker-end="url(#lh3)" d="M150 95 L180 95"/><path class="svg-line" marker-end="url(#lh3)" d="M310 95 L340 95"/>
+          <path class="svg-line" marker-end="url(#lh3)" d="M490 95 L520 95"/><path class="svg-line" marker-end="url(#lh3)" d="M670 95 L700 95"/>
+          <path class="svg-line" marker-end="url(#lh3)" d="M860 95 L890 95"/>
+          <text class="svg-label" x="20" y="45">并行期：NFS 与 Longhorn 双跑，ByClaw baseUrl 不变，仅切换 PVC StorageClass</text>
+          <text class="svg-label" x="20" y="155">回滚：BatchSandbox template 改回 claimName=byclaw-workspace-nfs，无需改 BE</text>
+        </svg>
+      </div>
+
+      <h4>6.1.2 存储方案对比</h4>
+      <table>
+        <tr><th>方案</th><th>分布式</th><th>RWX</th><th>小文件 pip</th><th>大文件 FFmpeg</th><th>运维复杂度</th><th>本项目建议</th></tr>
+        <tr><td><strong>Longhorn</strong></td><td>是（3 副本）</td><td>share-manager</td><td>中（RWX 层仍有开销）</td><td>好（RWO 直挂；RWX 用 scratch）</td><td>中</td><td><strong>默认方案</strong>，<code>install-longhorn.sh</code></td></tr>
+        <tr><td>NFS（外部）</td><td>否（Server 单点）</td><td>原生</td><td>中</td><td>中</td><td>低</td><td><strong>已弃用</strong>（K3s 部署不再使用）</td></tr>
+        <tr><td>JuiceFS</td><td>是</td><td>是</td><td>好</td><td>好</td><td>中高（需 Redis+对象存储）</td><td>有大对象存储时可选</td></tr>
+        <tr><td>CephFS</td><td>是</td><td>原生</td><td>好</td><td>好</td><td>高</td><td>企业已有 Ceph 时</td></tr>
+        <tr><td>minio-mount/rclone</td><td>—</td><td>FUSE 语义差</td><td>差</td><td>差</td><td>—</td><td><strong>已弃用</strong></td></tr>
+      </table>
+
+      <h4>6.1.3 部署与配置要点</h4>
+      <pre><code># 1. 安装 Longhorn（在已有 k3s 集群上）
+kubectl apply -f https://raw.githubusercontent.com/longhorn/longhorn/v1.6.2/deploy/longhorn.yaml
+
+# 2. 将默认数据路径改到 /data（避免根分区 40G 爆满）
+# Longhorn UI → Settings → Default Data Path = /data/longhorn
+
+# 3. 创建 RWX StorageClass（Longhorn UI 或 CRD 启用 accessMode RWX）
+# env.k3s 中：
+STORAGE_CLASS=longhorn-rwx
+WORKSPACE_PVC_NAME=byclaw-workspace-lh
+
+# 4. 更新 BatchSandbox 模板 claimName，scratch 仍用 emptyDir
+# deploy/k3s/manifests/sandbox/batchsandbox-template.yaml
+
+# 5. 从 NFS 迁移数据（维护窗口）
+kubectl -n by-sandbox run rsync-migrate --rm -it --image=alpine \
+  --overrides='...' -- sh -c \
+  "apk add rsync &amp;&amp; rsync -av /nfs-src/ /lh-dst/"</code></pre>
+
+      <table>
+        <tr><th>配置项</th><th>推荐值（3 节点）</th><th>说明</th></tr>
+        <tr><td>Number of Replicas</td><td>3</td><td>与节点数一致，允许挂掉 1 台仍可读</td></tr>
+        <tr><td>Data Locality</td><td>best-effort</td><td>尽量在 Pod 所在节点放一份副本，降低网络 IO</td></tr>
+        <tr><td>Storage Reserved</td><td>≥ 250GiB/节点</td><td>为 containerd、kubelet、镜像缓存预留，与文档 11 节一致</td></tr>
+        <tr><td>RWX 启用</td><td>必须</td><td>沙箱 Pod 可能调度到任意 worker，工作区需多节点同时挂载</td></tr>
+        <tr><td>回收策略</td><td>Retain（生产）</td><td>删 PVC 不立即删底层卷，防误删用户数据</td></tr>
+      </table>
+
+      <div class="callout warn">
+        <strong>注意：</strong>Longhorn RWX 不是内核原生并行文件系统，底层通过 share-manager（NFS-ganesha）导出。对<strong>极高频小文件随机写</strong>（如 node_modules 全量安装）仍建议走 emptyDir scratch，再同步到 Longhorn PVC。这与 NFS 阶段策略一致，只是持久层从外部 NFS 换成集群内副本块存储。
+      </div>
+
+      <h4>6.1.4 与 ByClaw 现有代码的衔接（BE 私有目录 ↔ Longhorn）</h4>
+      <p>BE 为每个用户维护<strong>私有工作区</strong>，路径约定与 Longhorn PVC <code>subPath</code> 天然对齐，<strong>无需改 Java 业务代码</strong>；只需让 BE Pod 与沙箱 Pod 共享同一 PVC 目录树。</p>
+      <pre><code>Longhorn PVC 根 (byclaw-workspace，挂载于 BE /mnt/byclaw-workspace)
+└── byclaw-{userCode}/by/          ← 沙箱 subPath 挂载到容器 /by
+    └── .openclaw/openclaw.json    ← BE UserFS 在创建沙箱前写入</code></pre>
+      <table>
+        <tr><th>层</th><th>是否改动</th><th>说明</th></tr>
+        <tr><td><code>UserBucketNameResolver</code></td><td>否</td><td>桶名 <code>byclaw-{userCode}</code>，与 spec <code>subPath</code> 前缀一致</td></tr>
+        <tr><td><code>ByclawUserFS</code> + <code>LocalStorageService</code></td><td>否</td><td>逻辑根 <code>/by</code> → 物理路径 <code>{FILE_STORAGE_LOCAL_PATH}/byclaw-{user}/by/...</code>，写时 <code>createDirectories</code> 自动建目录</td></tr>
+        <tr><td><code>SandboxWorkspaceBootstrapInitializer</code></td><td>否</td><td>创建沙箱前经 UserFS 写 <code>/.openclaw/openclaw.json</code> 等到同一目录树</td></tr>
+        <tr><td><code>GenericSandboxSpecProcessor</code></td><td>否</td><td>渲染 <code>subPath: byclaw-${user_code}/by</code>、<code>mountPath: /by</code>、<code>scope: PRIVATE</code></td></tr>
+        <tr><td><code>SandboxRuntimeRequestFactory</code></td><td>否</td><td>发给 OpenSandbox 的 payload 仅含 <code>subPath/scope/mountPath</code>（K8s runtime 用 PVC+subPath，忽略 <code>host.path</code>）</td></tr>
+        <tr><td><code>sandbox_service_spec</code> volumes</td><td>否</td><td>迁移 SQL 已保留 <code>subPath: byclaw-${user_code}/by</code></td></tr>
+        <tr><td><code>byclaw-be</code> Deployment</td><td>是（挂载）</td><td>必须挂 <code>byclaw-workspace</code> PVC 到 <code>/mnt/byclaw-workspace</code>，否则 bootstrap/UserFS 与沙箱文件不一致</td></tr>
+        <tr><td><code>BYCLAW_SANDBOX_FILE_VOLUME_TYPE</code></td><td>是（配置）</td><td>填 <code>bind</code>（Pod 内 POSIX 路径），<strong>不是</strong> <code>longhorn</code>——后者会被 <code>SandboxVolumeBackendValidator</code> 拒绝启动</td></tr>
+        <tr><td>OpenSandbox BatchSandbox 模板</td><td>是（仅 PVC）</td><td><code>claimName: byclaw-workspace</code>，<code>subPath: {{ workspace_subpath }}</code> 由 API 注入</td></tr>
+        <tr><td><code>deploy/k3s/env.k3s</code></td><td>是</td><td><code>FILE_STORAGE_TYPE=file</code>、<code>FILE_STORAGE_LOCAL_PATH=/mnt/byclaw-workspace</code>、<code>BYCLAW_SANDBOX_VOLUME_BACKEND=file</code></td></tr>
+      </table>
+      <p>详细运维笔记：<code>deploy/k3s/manifests/storage/longhorn-notes.md</code></p>
+
+      <h4 id="file-storage-local-path">6.1.5 分布式下 <code>FILE_STORAGE_LOCAL_PATH</code> 的处理逻辑</h4>
+      <div class="callout">
+        <strong>核心结论：</strong><code>FILE_STORAGE_LOCAL_PATH</code> 在 BE 代码里表示<strong>当前 JVM 进程能直接读写的 POSIX 根目录</strong>，不是「某台物理机的本地盘」。分布式能力由 <strong>K8s 将同一块 Longhorn RWX PVC 挂进每个 BE / 沙箱 Pod 的同一路径</strong> 保证；BE Java 侧<strong>零 Longhorn 感知、零分布式存储客户端</strong>，只做 <code>Path.of(basePath).resolve(...)</code> 拼接。
+      </div>
+
+      <h5>两套配置、两个消费者</h5>
+      <p>配置链（<code>byclaw-be/config/application.properties</code>）：</p>
+      <pre><code>file.storage.type=${FILE_STORAGE_TYPE:minio}
+file.storage.local.path=${FILE_STORAGE_LOCAL_PATH:${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:/tmp/byclaw-storage}}
+byclaw.sandbox.volume.file-root=${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:}</code></pre>
+      <table>
+        <tr><th>配置项</th><th>消费者</th><th>K3s 分布式下的含义</th></tr>
+        <tr><td><code>FILE_STORAGE_LOCAL_PATH</code></td><td><code>LocalStorageService</code>、<code>FileStorageUserSpaceProvisioner</code></td><td>BE 所有文件 I/O 的物理根（Pod 内挂载点）</td></tr>
+        <tr><td><code>BYCLAW_SANDBOX_FILE_VOLUME_ROOT</code></td><td><code>SandboxVolumeBackendValidator</code>、spec <code>hostPath</code> 模板渲染</td><td>启动校验 + Docker 时代 OpenSandbox 用；<strong>K8s runtime 忽略 <code>host.path</code></strong></td></tr>
+        <tr><td><code>BYCLAW_SANDBOX_FILE_VOLUME_TYPE</code></td><td>仅启动校验 / 日志</td><td>描述挂载类型（<code>bind|nfs|smb|cephfs</code>），<strong>不参与路径计算</strong>；Longhorn 场景填 <code>bind</code></td></tr>
+        <tr><td><code>FILE_STORAGE_TYPE</code></td><td>存储路由、用户空间初始化</td><td>必须设为 <code>file</code>，否则 BE 仍走 MinIO/SFTP，不会调用 <code>LocalStorageService</code></td></tr>
+      </table>
+      <p>K3s 推荐三处对齐为同一路径：</p>
+      <pre><code>FILE_STORAGE_TYPE=file
+FILE_STORAGE_LOCAL_PATH=/mnt/byclaw-workspace
+BYCLAW_SANDBOX_FILE_VOLUME_ROOT=/mnt/byclaw-workspace
+BYCLAW_SANDBOX_FILE_VOLUME_TYPE=bind
+BYCLAW_SANDBOX_VOLUME_BACKEND=file</code></pre>
+
+      <h5>BE 路径拼接算法（<code>LocalStorageService.resolve</code>）</h5>
+      <p>BE 无 NFS/Longhorn 客户端，仅用 Java NIO <code>Files.*</code>：</p>
+      <pre><code>物理路径 = FILE_STORAGE_LOCAL_PATH / byclaw-{userCode} / by / {相对路径}</code></pre>
+      <table>
+        <tr><th>场景</th><th>逻辑路径（UserFS）</th><th>物理路径示例（user=alice）</th></tr>
+        <tr><td>沙箱 bootstrap</td><td><code>/.openclaw/openclaw.json</code></td><td><code>/mnt/byclaw-workspace/byclaw-alice/by/.openclaw/openclaw.json</code></td></tr>
+        <tr><td>用户文件 API</td><td><code>/by/docs/a.pdf</code></td><td><code>/mnt/byclaw-workspace/byclaw-alice/by/docs/a.pdf</code></td></tr>
+        <tr><td>用户注册建目录</td><td>—</td><td><code>FileStorageUserSpaceProvisioner</code> → <code>mkdir .../byclaw-alice/by</code></td></tr>
+        <tr><td>沙箱卷 subPath</td><td>容器内 <code>/by</code></td><td>PVC 上 <code>byclaw-alice/by</code>（与上表同一目录树）</td></tr>
+      </table>
+      <p>建目录时机：用户注册时 <code>ensureUserSpace</code> 预建 <code>{root}/byclaw-{user}/by</code>；任意写文件时 <code>Files.createDirectories(parent)</code> 兜底。</p>
+
+      <div class="diagram">
+        <div class="diagram-title">图 4d：分布式下 FILE_STORAGE_LOCAL_PATH 与 Longhorn PVC 的关系</div>
+        <svg viewBox="0 0 1100 420" role="img" aria-label="FILE_STORAGE_LOCAL_PATH 分布式挂载关系图">
+          <defs><marker id="a4d" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#536179"/></marker></defs>
+          <rect class="svg-box warn" x="380" y="20" width="340" height="55" rx="6"/>
+          <text class="svg-title" x="420" y="42">Longhorn RWX PVC: byclaw-workspace</text>
+          <text class="svg-note" x="400" y="62">集群内 3 副本块存储 + share-manager 导出 RWX</text>
+          <rect class="svg-box primary" x="40" y="110" width="200" height="70" rx="6"/>
+          <text class="svg-title" x="55" y="135">byclaw-be Pod-1</text>
+          <text class="svg-label" x="50" y="155">mount → /mnt/byclaw-workspace</text>
+          <text class="svg-note" x="50" y="170">= FILE_STORAGE_LOCAL_PATH</text>
+          <rect class="svg-box primary" x="40" y="210" width="200" height="70" rx="6"/>
+          <text class="svg-title" x="55" y="235">byclaw-be Pod-2（HPA 副本）</text>
+          <text class="svg-label" x="50" y="255">同一 PVC、同一路径</text>
+          <text class="svg-note" x="50" y="270">无需会话粘滞</text>
+          <rect class="svg-box good" x="860" y="110" width="200" height="70" rx="6"/>
+          <text class="svg-title" x="875" y="135">沙箱 Pod（任意 worker）</text>
+          <text class="svg-label" x="870" y="155">subPath: byclaw-{user}/by</text>
+          <text class="svg-note" x="870" y="170">mountPath: /by</text>
+          <rect class="svg-box" x="380" y="300" width="340" height="90" rx="6"/>
+          <text class="svg-title" x="400" y="325">PVC 目录树（BE 与沙箱共享视图）</text>
+          <text class="svg-label" x="395" y="345">/byclaw-alice/by/.openclaw/openclaw.json  ← BE bootstrap 写入</text>
+          <text class="svg-label" x="395" y="365">/byclaw-alice/by/docs/...               ← 沙箱内 /by/docs/...</text>
+          <path class="svg-line" marker-end="url(#a4d)" d="M240 145 L380 48"/>
+          <path class="svg-line" marker-end="url(#a4d)" d="M240 245 L380 60"/>
+          <path class="svg-line" marker-end="url(#a4d)" d="M860 145 L720 48"/>
+          <path class="svg-line" style="stroke-dasharray:5 5" marker-end="url(#a4d)" d="M550 75 L550 300"/>
+          <path class="svg-line" style="stroke-dasharray:5 5" marker-end="url(#a4d)" d="M140 280 L450 300"/>
+          <path class="svg-line" style="stroke-dasharray:5 5" marker-end="url(#a4d)" d="M960 180 L650 300"/>
+          <text class="svg-note" x="560" y="100">CSI 挂载</text>
+        </svg>
+      </div>
+
+      <h5>Docker 单机 vs K3s 分布式对比</h5>
+      <table>
+        <tr><th>维度</th><th>Docker 部署</th><th>K3s + Longhorn</th></tr>
+        <tr><td>BE 路径代码</td><td><code>Path.of(FILE_STORAGE_LOCAL_PATH)</code></td><td>完全相同</td></tr>
+        <tr><td>物理存储</td><td>宿主机 bind / 外部 NFS / CephFS</td><td>Longhorn RWX PVC 挂进 Pod</td></tr>
+        <tr><td>OpenSandbox 卷配置</td><td><code>[docker.private_volume] file_root</code>，每台 Docker 节点需同路径挂载</td><td><code>runtime.type=kubernetes</code>，BatchSandbox 用 PVC + subPath，不看 <code>file_root</code></td></tr>
+        <tr><td>spec 中 <code>hostPath</code></td><td>OpenSandbox Docker runtime 实际使用</td><td>K8s runtime <strong>忽略</strong>，仅用 API 的 <code>subPath/scope/mountPath</code></td></tr>
+        <tr><td>分布式由谁保证</td><td>运维保证每台机器共享挂载一致</td><td>Longhorn CSI + RWX PVC</td></tr>
+        <tr><td>BE 多副本</td><td>需共享 NFS/Ceph，或单副本</td><td>多 Pod 挂同一 RWX PVC，任意副本可读写</td></tr>
+      </table>
+
+      <h5>部署约束（运维侧，无需改 Java）</h5>
+      <table>
+        <tr><th>约束</th><th>原因</th></tr>
+        <tr><td>BE Deployment 必须挂 <code>byclaw-workspace</code> PVC</td><td>不挂则 BE 写容器 ephemeral 盘，沙箱读 Longhorn → 数据分裂</td></tr>
+        <tr><td>三处路径一致：<code>FILE_STORAGE_LOCAL_PATH</code> = <code>BYCLAW_SANDBOX_FILE_VOLUME_ROOT</code> = Pod <code>volumeMount.mountPath</code></td><td>保证 bootstrap、UserFS、校验器指向同一根</td></tr>
+        <tr><td>PVC 必须 <code>ReadWriteMany</code></td><td>BE 多副本 + 沙箱跨节点调度需多 Pod 同时挂载</td></tr>
+        <tr><td><code>FILE_STORAGE_TYPE=file</code></td><td>激活 <code>LocalStorageService</code> 与用户目录 <code>ensureUserSpace</code></td></tr>
+        <tr><td>系统附件（图标、会话临时文件等）</td><td>与用户工作区分离；<code>StorageCategory</code> 桶映射可仍走 MinIO，与 <code>/by</code> 工作区无关</td></tr>
+      </table>
+
+      <div class="callout warn">
+        <strong>易错点：</strong>勿将 <code>BYCLAW_SANDBOX_FILE_VOLUME_TYPE</code> 设为 <code>longhorn</code>——Longhorn 是 StorageClass 名，对 BE 而言只是 Pod 内的 POSIX 挂载，应填 <code>bind</code>。勿把 <code>FILE_STORAGE_LOCAL_PATH</code> 理解成「绑定某 worker 节点本地目录」；在 K3s 下它始终是<strong>Pod 挂载命名空间内的共享卷根路径</strong>。
+      </div>
+    </section>
+  </section>
+
+  <section id="quota">
+    <h2>7. 动态 ResourceQuota（不写死）</h2>
+    <p><code>deploy/k3s/gen-resource-quota.sh</code> 读取 <code>kubectl get nodes -o json</code> 汇总 allocatable，按环境变量比例分配：</p>
+    <pre><code>QUOTA_SYSTEM_RESERVE_PERCENT=15   # 系统预留
+QUOTA_SANDBOX_PERCENT=70          # by-sandbox
+QUOTA_MIDDLEWARE_PERCENT=10       # by-middleware
+QUOTA_SERVICE_PERCENT=5           # by-service
+
+./deploy/k3s/gen-resource-quota.sh deploy/k3s/env.k3s --dry-run
+./deploy/k3s/gen-resource-quota.sh deploy/k3s/env.k3s --apply</code></pre>
+    <p>输出 <code>manifests/generated-resource-quota.yaml</code>，含 sandbox 的 ResourceQuota + LimitRange（默认 request 1C/2Gi，limit 2C/4Gi）。三台 72C/276Gi 示例：sandbox 约 50C/193Gi requests。</p>
+  </section>
+
+  <section id="monitoring">
+    <h2>8. 监控与扩缩容业务流程</h2>
+    <div class="diagram">
+      <div class="diagram-title">图 5：Prometheus 监控 + webhook 通知 + HPA/KEDA 扩缩容</div>
+      <svg viewBox="0 0 1100 300" role="img">
+        <rect class="svg-box" x="40" y="50" width="150" height="60" rx="6"/><text class="svg-title" x="70" y="78">kubelet/cAdvisor</text>
+        <rect class="svg-box good" x="230" y="40" width="170" height="80" rx="6"/><text class="svg-title" x="260" y="68">Prometheus</text><text class="svg-label" x="245" y="90">节点·Pod·Ingress 指标</text>
+        <rect class="svg-box" x="440" y="30" width="150" height="50" rx="6"/><text class="svg-title" x="465" y="58">Grafana</text>
+        <rect class="svg-box warn" x="440" y="95" width="150" height="50" rx="6"/><text class="svg-title" x="455" y="123">Alertmanager</text>
+        <rect class="svg-box primary" x="640" y="95" width="180" height="50" rx="6"/><text class="svg-title" x="655" y="123">webhook 通知</text>
+        <rect class="svg-box good" x="230" y="160" width="170" height="70" rx="6"/><text class="svg-title" x="270" y="188">HPA / KEDA</text><text class="svg-label" x="245" y="210">opensandbox-server 副本</text>
+        <rect class="svg-box" x="440" y="160" width="150" height="70" rx="6"/><text class="svg-title" x="465" y="188">Metrics Server</text>
+        <path class="svg-line" marker-end="url(#a1)" d="M190 80 L230 80"/><path class="svg-line" marker-end="url(#a1)" d="M400 70 L440 55"/>
+        <path class="svg-line" marker-end="url(#a1)" d="M400 100 L440 120"/><path class="svg-line" marker-end="url(#a1)" d="M590 120 L640 120"/>
+        <path class="svg-line" style="stroke-dasharray:5 5" marker-end="url(#a1)" d="M315 120 L315 160"/><path class="svg-line" marker-end="url(#a1)" d="M400 195 L440 195"/>
+      </svg>
+    </div>
+    <table>
+      <tr><th>层级</th><th>自动扩缩</th><th>告警通知</th></tr>
+      <tr><td>opensandbox-server</td><td>HPA CPU/内存 70-80%</td><td>创建失败率、P95 延迟</td></tr>
+      <tr><td>沙箱池</td><td>KEDA + Prometheus 自定义指标</td><td>Pending Pod &gt;5min</td></tr>
+      <tr><td>worker 节点</td><td>裸金属：预留池+告警（无自动买机器）</td><td>节点磁盘/内存水位</td></tr>
+    </table>
+    <p>配置：<code>deploy/k3s/manifests/monitoring/</code>（values-prometheus.yaml、hpa-opensandbox.yaml、keda-scaledobject-example.yaml、alert-rules.yaml、webhook-receiver.yaml）</p>
+  </section>
+
+  <section id="ingress">
+    <h2>9. Sandbox 启动后 Ingress 访问实例</h2>
+    <h3>9.1 wildcard host（推荐）</h3>
+    <pre><code># OpenSandbox 返回 endpoint 示例
+https://abc123-8080.sandbox.example.com/
+
+# 验证（smoke）
+export BYCLAW_SANDBOX_BASE_URL=http://opensandbox-server.by-sandbox.svc.cluster.local:9005
+sh deploy/k3s/smoke/create-sandbox.sh
+sh deploy/k3s/smoke/check-endpoint.sh &lt;sandboxId&gt; 8080
+curl -k https://abc123-8080.sandbox.example.com/</code></pre>
+    <p>Manifest 样例：<code>deploy/k3s/manifests/ingress/sandbox-wildcard-ingress.yaml</code></p>
+    <h3>9.2 path-prefix（迁移兼容 ByClaw 代理）</h3>
+    <pre><code>https://sandbox.example.com/s/{sandboxId}/8080/
+# Manifest: sandbox-path-prefix-example.yaml</code></pre>
+    <h3>9.3 OpenClaw 端口回归清单</h3>
+    <table>
+      <tr><th>端口</th><th>实例</th><th>验收</th></tr>
+      <tr><td>8080</td><td>openclaw 主界面</td><td>HTTPS URL 可打开</td></tr>
+      <tr><td>8081</td><td>noVNC</td><td>WebSocket 建连</td></tr>
+      <tr><td>8082</td><td>filebrowser</td><td>NFS 上传下载</td></tr>
+      <tr><td>9222</td><td>CDP</td><td>浏览器调试</td></tr>
+    </table>
+  </section>
+
+  <section id="openclaw-sql">
+    <h2>10. openclaw.sql 元数据兼容迁移</h2>
+    <div class="diagram">
+      <div class="diagram-title">图 6：Docker spec → K3s 兼容</div>
+      <svg viewBox="0 0 1100 180" role="img">
+        <rect class="svg-box warn" x="30" y="50" width="200" height="80" rx="6"/><text class="svg-title" x="50" y="78">docs/reports/openclaw.sql</text><text class="svg-label" x="40" y="100">hostPath + MINIO_MOUNT</text><text class="svg-label" x="40" y="115">硬编码镜像/密钥</text>
+        <rect class="svg-box good" x="300" y="50" width="220" height="80" rx="6"/><text class="svg-title" x="320" y="78">openclaw-k3s-upgrade.sql</text><text class="svg-label" x="310" y="100">${IMAGE_OPENCLAW}</text><text class="svg-label" x="310" y="115">FILE_STORAGE_LOCAL_PATH</text>
+        <rect class="svg-box primary" x="600" y="50" width="220" height="80" rx="6"/><text class="svg-title" x="630" y="78">BatchSandbox PVC</text><text class="svg-label" x="615" y="100">subPath 不变</text><text class="svg-label" x="615" y="115">scope PRIVATE 不变</text>
+        <path class="svg-line" marker-end="url(#a1)" d="M230 90 L300 90"/><path class="svg-line" marker-end="url(#a1)" d="M520 90 L600 90"/>
+      </svg>
+    </div>
+    <table>
+      <tr><th>字段</th><th>Docker 现状</th><th>K3s 处理</th></tr>
+      <tr><td>volumes.subPath</td><td><code>byclaw-${user_code}/by</code></td><td>不变；映射到 PVC subPath</td></tr>
+      <tr><td>volumes.hostPath</td><td><code>${FILE_STORAGE_LOCAL_PATH}</code></td><td>BE 不传 hostPath 到 OS API；OS K8s 模板挂 PVC</td></tr>
+      <tr><td>env FILE_STORAGE_MINIO_MOUNT_PATH</td><td>存在</td><td>迁移 SQL 删除，改 BYCLAW_SANDBOX_FILE_VOLUME_ROOT</td></tr>
+      <tr><td>image</td><td>硬编码 registry</td><td>参数化 <code>${IMAGE_OPENCLAW}</code></td></tr>
+      <tr><td>template_json</td><td>含 langfuse 硬编码密钥</td><td>保留现有行；建议后续参数化</td></tr>
+    </table>
+    <pre><code>psql -h opengauss.by-middleware -U gaussdb -d postgres \
+  -f deploy/k3s/migrations/openclaw-k3s-upgrade.sql</code></pre>
+  </section>
+
+  <section id="commands">
+    <h2>11. 命令手册（与脚本一一对应）</h2>
+    <table>
+      <tr><th>目标</th><th>命令</th><th>脚本</th></tr>
+      <tr><td>首次部署</td><td><code>sh scripts/deploy-k3s.sh 204 init</code></td><td>deploy/k3s/deploy.sh init（含 Longhorn）</td></tr>
+      <tr><td>仅存储</td><td><code>sh scripts/deploy-k3s.sh 204 storage-init</code></td><td>deploy/k3s/deploy.sh storage-init</td></tr>
+      <tr><td>升级</td><td><code>sh scripts/deploy-k3s.sh 204 update</code></td><td>deploy/k3s/deploy.sh update</td></tr>
+      <tr><td>停止</td><td><code>sh scripts/deploy-k3s.sh 204 stop</code></td><td>deploy/k3s/deploy.sh stop</td></tr>
+      <tr><td>生成 OS 配置</td><td><code>./gen-opensandbox-k8s-config.sh env.k3s</code></td><td>deploy/k3s/</td></tr>
+      <tr><td>动态配额</td><td><code>./gen-resource-quota.sh env.k3s --apply</code></td><td>deploy/k3s/</td></tr>
+      <tr><td>安装 k3s</td><td><code>BYCLAW_K3S_INSTALL_K3S=true ... init</code></td><td>install-k3s.sh</td></tr>
+      <tr><td>回滚 Docker</td><td>改 BYCLAW_SANDBOX_BASE_URL + start-opensandbox.sh</td><td>deploy/middleware/</td></tr>
+    </table>
+    <p>详细说明：<code>deploy/k3s/README.md</code></p>
+  </section>
+
+  <section id="risks">
+    <h2>12. 风险清单</h2>
+    <table>
+      <tr><th>风险</th><th>缓解</th></tr>
+      <tr><td>OpenSandbox v0.1.9 仅 Docker runtime</td><td>升级到 v0.1.14+ 并 PoC BatchSandbox CRD</td></tr>
+      <tr><td>Longhorn RWX 小文件开销</td><td>pip/FFmpeg 用 emptyDir scratch，产物再同步到 PVC</td></tr>
+      <tr><td>Longhorn RWX 小文件开销</td><td>share-manager 层仍有 NFS 语义开销；高频写走 emptyDir scratch</td></tr>
+      <tr><td>noVNC path-prefix 相对路径</td><td>优先 wildcard host</td></tr>
+      <tr><td>3 节点无自动加机器</td><td>动态配额 + 告警 + 容量预留</td></tr>
+      <tr><td>openclaw.sql 硬编码密钥</td><td>迁移 SQL 参数化；轮换生产密钥</td></tr>
+    </table>
+    <p class="lede" style="font-size:14px;margin-top:24px">源码依据：<code>byclaw-be/.../gateway/sandbox/</code>、<code>deploy/storage-profile.sh</code>、<code>deploy/k3s/</code>。Docker 部署保留为回滚通道。</p>
+  </section>
+</main>
+</div>
+</body>
+</html>

@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.gateway.sandbox.mapper;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
@@ -10,6 +11,48 @@ import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity
 
 @Mapper
 public interface SandboxServiceSpecEntityMapper extends BaseMapper<SandboxServiceSpecEntity> {
+
+    @Select("""
+        SELECT service_key AS "serviceKey",
+               spec_json AS "specJson",
+               template_json AS "templateJson"
+        FROM sandbox_service_spec
+        WHERE service_key = #{serviceKey}
+        LIMIT 1
+        """)
+    SandboxServiceSpecEntity selectLegacyByServiceKey(@Param("serviceKey") String serviceKey);
+
+    @Select("""
+        SELECT service_key AS "serviceKey",
+               spec_json AS "specJson",
+               template_json AS "templateJson",
+               service_type AS "serviceType",
+               display_name AS "displayName",
+               enabled,
+               default_profile_key AS "defaultProfileKey",
+               autoscale_enabled AS "autoscaleEnabled"
+        FROM sandbox_service_spec
+        WHERE service_key = #{serviceKey}
+        LIMIT 1
+        """)
+    SandboxServiceSpecEntity selectProfileAwareByServiceKey(@Param("serviceKey") String serviceKey);
+
+    @Select("""
+        SELECT service_key AS "serviceKey",
+               spec_json AS "specJson",
+               template_json AS "templateJson",
+               service_type AS "serviceType",
+               display_name AS "displayName",
+               enabled,
+               default_profile_key AS "defaultProfileKey",
+               autoscale_enabled AS "autoscaleEnabled"
+        FROM sandbox_service_spec
+        WHERE service_type = #{serviceType}
+          AND COALESCE(enabled, 1) = 1
+        ORDER BY service_key ASC
+        LIMIT 1
+        """)
+    SandboxServiceSpecEntity selectProfileAwareByServiceType(@Param("serviceType") String serviceType);
 
     /**
      * 插入沙箱服务规格配置（处理 PostgreSQL jsonb 类型）

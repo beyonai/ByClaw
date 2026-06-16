@@ -5,6 +5,8 @@ import React from 'react';
 import styles from '../index.module.less';
 import { renderAbilityTags, renderStatusTag, renderSystemTags, type ModelStatus } from './modelMgrViewUtils';
 
+const DEFAULT_MODEL_TYPES = new Set(['LLM', 'EMBEDDING']);
+
 type Props = {
   intl: any;
   record: any;
@@ -44,11 +46,11 @@ const ModelCardItem: React.FC<Props> = ({
     isDefault === 1 ||
     isDefault === true ||
     (Array.isArray(abilitiesArr) && abilitiesArr.some((item) => `${item}` === '1'));
+  const normalizedModelType = `${modelType || 'LLM'}`.toUpperCase();
   const canSetDefault =
     recordStatus === 'ENABLED' &&
     !isDefaultModel &&
-    Array.isArray(abilitiesArr) &&
-    abilitiesArr.some((item) => `${item}` === '3');
+    DEFAULT_MODEL_TYPES.has(normalizedModelType);
 
   let statusActions: Array<{
     status: Extract<ModelStatus, 'ENABLED' | 'DISABLED'>;
@@ -95,7 +97,12 @@ const ModelCardItem: React.FC<Props> = ({
             </span>
           </div>
         </div>
-        <div>{recordStatus ? renderStatusTag(intl, recordStatus) : null}</div>
+        <div className={styles.cardStatusGroup}>
+          {isDefaultModel ? (
+            <span className={styles.defaultBadge}>{intl.formatMessage({ id: 'modelMgr.defaultModel' })}</span>
+          ) : null}
+          {recordStatus ? renderStatusTag(intl, recordStatus) : null}
+        </div>
       </div>
 
       <div className={styles.content}>

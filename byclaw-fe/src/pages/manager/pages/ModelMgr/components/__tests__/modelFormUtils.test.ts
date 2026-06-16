@@ -1,6 +1,7 @@
 import {
   buildAutoDebugRequestText,
   buildLlmHeaders,
+  buildReasoningConfigPayload,
   buildRerankHeaders,
   extractModelId,
   getDefaultFormValues,
@@ -169,6 +170,8 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
         messages: [{ role: 'user', content: 'hello' }],
         temperature: 0.1,
         stream: true,
+        enable_thinking: false,
+        chat_template_kwargs: { enable_thinking: false },
       });
     });
 
@@ -217,6 +220,75 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
       );
 
       expect(result.url).toBe('https://api.anthropic.com/v1/messages');
+    });
+
+    it('adds reasoning effort when DeepSeek thinking is enabled', () => {
+      const result = JSON.parse(
+        buildAutoDebugRequestText({
+          formValues: {
+            modelType: 'LLM',
+            apiEndpoint: 'https://api.deepseek.com/v1',
+            modelCode: 'deepseek-reasoner',
+            headers: [],
+            reasoningConfig: {
+              enabled: true,
+              capability: 'effort',
+              defaultLevel: 'max',
+              compatFormat: 'deepseek',
+            },
+          },
+          defaultUserMessage: 'hello',
+        })
+      );
+
+      expect(result.reasoning_effort).toBe('max');
+      expect(result.enable_thinking).toBeUndefined();
+    });
+
+    it('maps adaptive OpenAI-compatible debug effort to medium', () => {
+      const result = JSON.parse(
+        buildAutoDebugRequestText({
+          formValues: {
+            modelType: 'LLM',
+            apiEndpoint: 'https://api.example.com/v1',
+            modelCode: 'reasoning-model',
+            headers: [],
+            reasoningConfig: {
+              enabled: true,
+              capability: 'adaptive',
+              defaultLevel: 'adaptive',
+              compatFormat: 'openai',
+            },
+          },
+          defaultUserMessage: 'hello',
+        })
+      );
+
+      expect(result.reasoning_effort).toBe('medium');
+    });
+
+    it('uses Anthropic adaptive thinking payload when configured', () => {
+      const result = JSON.parse(
+        buildAutoDebugRequestText({
+          formValues: {
+            modelType: 'LLM',
+            modelProtocol: 'Anthropic',
+            apiEndpoint: 'https://api.anthropic.com',
+            modelCode: 'claude-sonnet-4-6',
+            headers: [],
+            reasoningConfig: {
+              enabled: true,
+              capability: 'adaptive',
+              defaultLevel: 'adaptive',
+              compatFormat: 'anthropic',
+            },
+          },
+          defaultUserMessage: 'hello',
+        })
+      );
+
+      expect(result.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
+      expect(result.enable_thinking).toBeUndefined();
     });
 
     it('resets suffix when modelProtocol changes to Anthropic', () => {
@@ -322,6 +394,51 @@ describe('manager/pages/ModelMgr/components/modelFormUtils', () => {
         headers: { Authorization: 'Bearer token', 'X-App': 'manager' },
         model: 'text-embedding-3',
         input: 'hello',
+      });
+    });
+  });
+
+  describe('buildReasoningConfigPayload', () => {
+    it('normalizes disabled reasoning config and omits UI-only effort map text', () => {
+      expect(
+        buildReasoningConfigPayload({
+          reasoningConfig: {
+            enabled: true,
+            capability: 'unsupported',
+            defaultLevel: 'high',
+            compatFormat: 'qwen',
+          },
+          reasoningEffortMapText: '{"high":"high"}',
+        })
+      ).toEqual({
+        enabled: false,
+        defaultLevel: 'off',
+        capability: 'unsupported',
+        compatFormat: 'qwen',
+      });
+    });
+
+    it('keeps supported efforts, effort map and budgets for enabled config', () => {
+      expect(
+        buildReasoningConfigPayload({
+          reasoningConfig: {
+            enabled: true,
+            capability: 'adaptive',
+            defaultLevel: 'adaptive',
+            compatFormat: 'anthropic',
+            supportedEfforts: ['low', 'adaptive', 'high'],
+            budgets: { low: 2048, high: 8192, max: undefined },
+          },
+          reasoningEffortMapText: '{"adaptive":"high","max":"max"}',
+        })
+      ).toEqual({
+        enabled: true,
+        defaultLevel: 'adaptive',
+        capability: 'adaptive',
+        compatFormat: 'anthropic',
+        supportedEfforts: ['low', 'adaptive', 'high'],
+        effortMap: { adaptive: 'high', max: 'max' },
+        budgets: { low: 2048, high: 8192 },
       });
     });
   });
