@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 class EcosystemCollectionIngestionControllerTest {
 
     @Test
-    void exposesOpenCliArtifactAndKnowledgeImportEndpoints() throws Exception {
+    void exposesArtifactAndKnowledgeImportEndpoints() throws Exception {
         Class<?> controllerType = Class.forName(
             "com.iwhalecloud.byai.state.interfaces.controller.ecosystem.EcosystemCollectionIngestionController");
 
@@ -21,7 +21,6 @@ class EcosystemCollectionIngestionControllerTest {
         RequestMapping requestMapping = controllerType.getAnnotation(RequestMapping.class);
         assertArrayEquals(new String[] {"/ecosystemCollection/ingestion"}, requestMapping.value());
 
-        assertPostMapping(controllerType, "collectWithOpenCli", "/opencli/collect");
         assertPostMapping(controllerType, "storeArtifacts", "/artifacts/store");
         assertPostMapping(controllerType, "importMarkdown", "/knowledge/import");
     }
