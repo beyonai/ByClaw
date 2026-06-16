@@ -11,3 +11,8 @@ __pycache__/
 tests/
 agent_data/
 byclaw_qa.egg-info/
+.env
+.git/
+Dockerfile
+docker-compose*.yml
+client.py
