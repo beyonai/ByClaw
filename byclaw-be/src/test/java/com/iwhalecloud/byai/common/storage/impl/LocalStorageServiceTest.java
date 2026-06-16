@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.io.ByteArrayInputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -47,6 +49,25 @@ class LocalStorageServiceTest {
             new ByteArrayInputStream(new byte[0]), 0L, "application/x-directory");
 
         assertThat(tempDir.resolve("byclaw-user001/by/workspace")).isDirectory();
+    }
+
+    @Test
+    void putAppliesSharedPermissionsForMountedFileStorage() throws Exception {
+        LocalStorageService service = service("file");
+
+        service.put(StorageLocation.of("default", "byclaw-user001", "by/.openclaw/workspace/skills/SKILL.md"),
+            new ByteArrayInputStream("skill".getBytes()), 5L, "text/markdown");
+
+        assertThat(Files.getPosixFilePermissions(tempDir.resolve("byclaw-user001/by/.openclaw/workspace/skills")))
+            .containsAll(Set.of(
+                PosixFilePermission.OWNER_WRITE,
+                PosixFilePermission.GROUP_WRITE,
+                PosixFilePermission.OTHERS_WRITE));
+        assertThat(Files.getPosixFilePermissions(tempDir.resolve("byclaw-user001/by/.openclaw/workspace/skills/SKILL.md")))
+            .containsAll(Set.of(
+                PosixFilePermission.OWNER_WRITE,
+                PosixFilePermission.GROUP_WRITE,
+                PosixFilePermission.OTHERS_WRITE));
     }
 
     @Test
@@ -94,6 +115,7 @@ class LocalStorageServiceTest {
         LocalStorageService service = new LocalStorageService();
         ReflectionTestUtils.setField(service, "basePath", tempDir.toString());
         ReflectionTestUtils.setField(service, "configuredStorageType", configuredStorageType);
+        ReflectionTestUtils.setField(service, "sharedPermissionsEnabled", true);
         return service;
     }
 }
