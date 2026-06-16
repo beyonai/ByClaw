@@ -40,6 +40,7 @@ import type {
 import type { OpenClawPluginService } from "openclaw/plugin-sdk/plugin-entry";
 import { registerUnhandledRejectionHandler } from "openclaw/plugin-sdk/runtime-env";
 import { redactSensitiveText } from "openclaw/plugin-sdk/security-runtime";
+import { clearToolObservation, publishToolObservation } from "./langfuse-observation-bridge.js";
 
 const DEFAULT_SERVICE_NAME = "openclaw";
 const DROPPED_OTEL_ATTRIBUTE_KEYS = new Set([
@@ -3313,14 +3314,18 @@ export function createDiagnosticsOtelService(
           options,
           privateData,
         );
-        trackTrustedSpan(
-          evt,
-          metadata,
-          spanWithDuration("openclaw.tool.execution", spanAttrs, undefined, {
-            parentContext: activeTrustedParentContext(evt, metadata),
-            startTimeMs: evt.ts,
-          }),
-        );
+        const span = spanWithDuration("openclaw.tool.execution", spanAttrs, undefined, {
+          parentContext: activeTrustedParentContext(evt, metadata),
+          startTimeMs: evt.ts,
+        });
+        trackTrustedSpan(evt, metadata, span);
+        publishToolObservation({
+          toolCallId: evt.toolCallId,
+          runId: evt.runId,
+          sessionKey: evt.sessionKey,
+          observationId: span.spanContext().spanId,
+          startedAtMs: evt.ts,
+        });
       };
 
       const recordToolExecutionCompleted = (
@@ -3352,6 +3357,11 @@ export function createDiagnosticsOtelService(
           });
         setSpanAttrs(span, spanAttrs);
         span.end(evt.ts);
+        clearToolObservation({
+          toolCallId: evt.toolCallId,
+          runId: evt.runId,
+          sessionKey: evt.sessionKey,
+        });
       };
 
       const recordToolExecutionError = (
@@ -3394,6 +3404,11 @@ export function createDiagnosticsOtelService(
           message: redactSensitiveText(evt.errorCategory),
         });
         span.end(evt.ts);
+        clearToolObservation({
+          toolCallId: evt.toolCallId,
+          runId: evt.runId,
+          sessionKey: evt.sessionKey,
+        });
       };
 
       const recordToolExecutionBlocked = (
@@ -3419,6 +3434,11 @@ export function createDiagnosticsOtelService(
         });
         setSpanAttrs(span, spanAttrs);
         span.end(evt.ts);
+        clearToolObservation({
+          toolCallId: evt.toolCallId,
+          runId: evt.runId,
+          sessionKey: evt.sessionKey,
+        });
       };
 
       const recordPayloadLarge = (

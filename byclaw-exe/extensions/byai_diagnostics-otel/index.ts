@@ -1,10 +1,10 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { createDiagnosticsOtelService } from "./src/service.js";
 
-/** BYAI Langfuse exporter; registers as bundled `diagnostics-otel` for internalDiagnostics. */
+/** BYAI Langfuse exporter; keeps the official diagnostics id so OpenClaw grants internal diagnostics. */
 export default definePluginEntry({
   id: "diagnostics-otel",
-  name: "Diagnostics OpenTelemetry",
+  name: "BYAI Diagnostics OpenTelemetry",
   description:
     "Export OpenClaw diagnostics to OpenTelemetry (BYAI Langfuse session/user mapping and byai-channel inbound traces)",
   register(api) {

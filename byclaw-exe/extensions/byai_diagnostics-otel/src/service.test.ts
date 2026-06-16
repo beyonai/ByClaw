@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const telemetryState = vi.hoisted(() => {
@@ -206,6 +209,8 @@ describe("BYAI diagnostics OTel correlation", () => {
     sdkStart.mockClear();
     sdkShutdown.mockClear();
     registerUnhandledRejectionHandler.mockClear();
+    delete (globalThis as any).__byaiDiagnosticsOtelLangfuseObservationBridge;
+    vi.unstubAllEnvs();
   });
 
   it("parents OpenClaw run and model spans under BYAI SDK inbound spans", async () => {
@@ -365,5 +370,58 @@ describe("BYAI diagnostics OTel correlation", () => {
 
     await service.stop?.(ctx as never);
     vi.unstubAllEnvs();
+  });
+
+  it("publishes the active tool span id for plugin tools and clears it after completion", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "byai-otel-bridge-"));
+    vi.stubEnv("BYAI_LANGFUSE_OBSERVATION_BRIDGE_FILE", path.join(dir, "bridge.json"));
+    const service = createDiagnosticsOtelService();
+    const { ctx, emitTrusted } = createContext();
+    await service.start(ctx as never);
+    const nowMs = Date.now();
+
+    emitTrusted({
+      type: "tool.execution.started",
+      runId: "run-tool",
+      sessionKey: "session-tool",
+      toolCallId: "call-tool",
+      toolName: "baiying_call",
+      toolSource: "plugin",
+      toolOwner: "baiying-enhance",
+      ts: nowMs,
+    } as never);
+
+    const bridge = (globalThis as any).__byaiDiagnosticsOtelLangfuseObservationBridge;
+    expect(bridge?.getToolObservationId?.({
+      runId: "run-tool",
+      sessionKey: "session-tool",
+      toolCallId: "call-tool",
+    })).toBe("0000000000000001");
+    expect(
+      JSON.parse(fs.readFileSync(path.join(dir, "bridge.json"), "utf8")).entries[
+        "session:session-tool:tool:call-tool"
+      ].observationId,
+    ).toBe("0000000000000001");
+
+    emitTrusted({
+      type: "tool.execution.completed",
+      runId: "run-tool",
+      sessionKey: "session-tool",
+      toolCallId: "call-tool",
+      toolName: "baiying_call",
+      toolSource: "plugin",
+      toolOwner: "baiying-enhance",
+      durationMs: 25,
+      ts: nowMs + 25,
+    } as never);
+
+    expect(bridge?.getToolObservationId?.({
+      runId: "run-tool",
+      sessionKey: "session-tool",
+      toolCallId: "call-tool",
+    })).toBeUndefined();
+
+    await service.stop?.(ctx as never);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
