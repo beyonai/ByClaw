@@ -76,7 +76,7 @@ DATACLOUD_DATA_SERVICE_URL="${DATACLOUD_DATA_SERVICE_URL:-http://127.0.0.1:${DAT
 DATACLOUD_API_BASE_URL="${DATACLOUD_API_BASE_URL:-http://${DATACLOUD_DOMAINNAME}.${NS_SERVICE}.svc.cluster.local:${DATACLOUD_DATA_SERVICE_PORT}}"
 BE_DOMAINNAME_URL="${BE_DOMAINNAME_URL:-http://byclaw-be.${NS_SERVICE}.svc.cluster.local:${BE_SERVER_PORT}}"
 BYCLAW_SERVICE_IMAGE_PULL_POLICY="${BYCLAW_SERVICE_IMAGE_PULL_POLICY:-Always}"
-OPENSANDBOX_SANDBOX_IMAGE_PULL_POLICY="${OPENSANDBOX_SANDBOX_IMAGE_PULL_POLICY:-IfNotPresent}"
+OPENSANDBOX_SANDBOX_IMAGE_PULL_POLICY="${OPENSANDBOX_SANDBOX_IMAGE_PULL_POLICY:-Always}"
 
 DB_HOST="${DB_HOST:-opengauss.${NS_MIDDLEWARE}.svc.cluster.local}"
 DB_PORT="${DB_PORT:-5432}"
@@ -974,6 +974,33 @@ patch_file(
                     "type": "DirectoryOrCreate",
                 },
             })
+''',
+        ),
+    ],
+)
+
+patch_file(
+    "/app/opensandbox_server/services/k8s/kubernetes_service.py",
+    [
+        (
+            '''            if expires is not None:
+                endpoint = self._build_signed_endpoint(sandbox_id, port, expires)
+            else:
+                endpoint = self.workload_provider.get_endpoint_info(workload, port, sandbox_id)
+''',
+            '''            if resolve_internal and expires is None:
+                pod_ip = None
+                parse_pod_ip = getattr(self.workload_provider, "_parse_pod_ip", None)
+                if callable(parse_pod_ip):
+                    pod_ip = parse_pod_ip(workload)
+                if pod_ip:
+                    endpoint = Endpoint(endpoint=f"{pod_ip}:{port}")
+                else:
+                    endpoint = self.workload_provider.get_endpoint_info(workload, port, sandbox_id)
+            elif expires is not None:
+                endpoint = self._build_signed_endpoint(sandbox_id, port, expires)
+            else:
+                endpoint = self.workload_provider.get_endpoint_info(workload, port, sandbox_id)
 ''',
         ),
     ],

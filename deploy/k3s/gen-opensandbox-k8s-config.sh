@@ -22,6 +22,7 @@ set +a
 OPENSANDBOX_WORKLOAD_NAMESPACE="${OPENSANDBOX_WORKLOAD_NAMESPACE:-${NS_SERVICE:-by-service}}"
 BYCLAW_SANDBOX_FILE_VOLUME_ROOT="${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-workspace}"
 FILE_STORAGE_LOCAL_PATH="${FILE_STORAGE_LOCAL_PATH:-$BYCLAW_SANDBOX_FILE_VOLUME_ROOT}"
+OPENSANDBOX_SANDBOX_IMAGE_PULL_POLICY="${OPENSANDBOX_SANDBOX_IMAGE_PULL_POLICY:-Always}"
 
 toml_string_array() {
     local raw="${1:-}"
@@ -71,7 +72,7 @@ volume_default_size = "${OPENSANDBOX_VOLUME_DEFAULT_SIZE:-20Gi}"
 namespace = "${OPENSANDBOX_WORKLOAD_NAMESPACE}"
 service_account = "opensandbox-runtime"
 workload_provider = "batchsandbox"
-image_pull_policy = "IfNotPresent"
+image_pull_policy = "${OPENSANDBOX_SANDBOX_IMAGE_PULL_POLICY}"
 sandbox_create_timeout_seconds = 120
 sandbox_create_poll_interval_seconds = 1.0
 snapshot_create_timeout_seconds = 900
