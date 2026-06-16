@@ -62,6 +62,24 @@
   }
 }
 
+.treeScroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.fileTree:global(.@{antPrefix}-tree) {
+  :global {
+    .@{antPrefix}-tree-indent-unit {
+      width: 12px;
+    }
+
+    .@{antPrefix}-tree-switcher {
+      width: 18px;
+    }
+  }
+}
+
 .fileItem {
   min-height: 36px;
   padding: 6px 8px;
