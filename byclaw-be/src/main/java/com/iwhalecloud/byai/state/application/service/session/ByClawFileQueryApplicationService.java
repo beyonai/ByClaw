@@ -1,6 +1,6 @@
 package com.iwhalecloud.byai.state.application.service.session;
 
-import com.iwhalecloud.byai.common.storage.impl.MinioStorageService;
+import com.iwhalecloud.byai.common.storage.ObjectStorage;
 import com.iwhalecloud.byai.common.storage.model.StorageObject;
 import com.iwhalecloud.byai.common.storage.model.StoragePrefix;
 import com.iwhalecloud.byai.common.storage.util.UserBucketNameResolver;
@@ -47,7 +47,7 @@ public class ByClawFileQueryApplicationService {
     private UserFS userFS;
 
     @Autowired
-    private MinioStorageService minioStorageService;
+    private ObjectStorage objectStorage;
 
     private static final String SESSION_ROOT_PREFIX = ConversationStoragePathResolver.SESSION_OBJECT_PREFIX + "/";
 
@@ -178,7 +178,7 @@ public class ByClawFileQueryApplicationService {
 
         StoragePrefix storagePrefix = StoragePrefix.of("workspace", bucketOrRoot, prefix, "private", false);
 
-        List<StorageObject> objects = minioStorageService.list(storagePrefix, null);
+        List<StorageObject> objects = objectStorage.list(storagePrefix, null);
 
         List<UserSpaceVo> resultList = new ArrayList<>();
         for (StorageObject storageObject : objects) {

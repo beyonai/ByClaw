@@ -2,7 +2,7 @@
 set -eu
 
 log() {
-  printf '[opencli] %s\n' "$*"
+  printf '[bycli] %s\n' "$*"
 }
 
 if [ "${OPENCLAW_BOOTSTRAPPED:-}" != "1" ] && [ -f /usr/local/bin/openclaw-runtime-bootstrap ]; then
@@ -52,41 +52,41 @@ PY
   export OPENCLI_PROFILE
 fi
 
-if ! command -v opencli >/dev/null 2>&1; then
+if ! command -v bycli >/dev/null 2>&1; then
   if [ "${OPENCLAW_ENABLE_OPENCLI}" = "true" ]; then
-    log "opencli binary not found"
+    log "bycli binary not found"
     exit 1
   fi
-  log "opencli binary not found; skip"
+  log "bycli binary not found; skip"
   exit 0
 fi
 
 log "starting daemon and watching profile alias: ${OPENCLI_PROFILE}"
 
-run_opencli() {
+run_bycli() {
   if command -v timeout >/dev/null 2>&1; then
-    timeout "${OPENCLI_COMMAND_TIMEOUT}" opencli "$@"
+    timeout "${OPENCLI_COMMAND_TIMEOUT}" bycli "$@"
   else
-    opencli "$@"
+    bycli "$@"
   fi
 }
 
-run_opencli_without_profile() {
+run_bycli_without_profile() {
   if command -v timeout >/dev/null 2>&1; then
-    timeout "${OPENCLI_COMMAND_TIMEOUT}" env -u OPENCLI_PROFILE opencli "$@"
+    timeout "${OPENCLI_COMMAND_TIMEOUT}" env -u OPENCLI_PROFILE bycli "$@"
   else
-    env -u OPENCLI_PROFILE opencli "$@"
+    env -u OPENCLI_PROFILE bycli "$@"
   fi
 }
 
-run_opencli daemon restart >/tmp/openclaw-opencli-daemon.log 2>&1 || true
+run_bycli daemon restart >/tmp/openclaw-opencli-daemon.log 2>&1 || true
 
 while true; do
-  output="$(run_opencli_without_profile profile list 2>/dev/null || true)"
+  output="$(run_bycli_without_profile profile list 2>/dev/null || true)"
 
   if printf '%s\n' "${output}" | grep -Eq "[[:space:]]${OPENCLI_PROFILE}([[:space:]]|[),]|$)"; then
-    run_opencli profile use "${OPENCLI_PROFILE}" >/tmp/openclaw-opencli-use.log 2>&1 || true
-    run_opencli doctor >/tmp/openclaw-opencli-doctor.log 2>&1 || true
+    run_bycli profile use "${OPENCLI_PROFILE}" >/tmp/openclaw-opencli-use.log 2>&1 || true
+    run_bycli doctor >/tmp/openclaw-opencli-doctor.log 2>&1 || true
     log "profile ${OPENCLI_PROFILE} is ready"
     case "${OPENCLI_PROFILE_WATCH}" in
       false|0|no|off) exit 0 ;;
@@ -112,9 +112,9 @@ while true; do
   )"
 
   if [ -n "${context_id}" ]; then
-    run_opencli_without_profile profile rename "${context_id}" "${OPENCLI_PROFILE}" >/tmp/openclaw-opencli-rename.log 2>&1 || true
-    run_opencli profile use "${OPENCLI_PROFILE}" >/tmp/openclaw-opencli-use.log 2>&1 || true
-    run_opencli doctor >/tmp/openclaw-opencli-doctor.log 2>&1 || true
+    run_bycli_without_profile profile rename "${context_id}" "${OPENCLI_PROFILE}" >/tmp/openclaw-opencli-rename.log 2>&1 || true
+    run_bycli profile use "${OPENCLI_PROFILE}" >/tmp/openclaw-opencli-use.log 2>&1 || true
+    run_bycli doctor >/tmp/openclaw-opencli-doctor.log 2>&1 || true
     log "profile ${OPENCLI_PROFILE} is bound to context ${context_id}"
     case "${OPENCLI_PROFILE_WATCH}" in
       false|0|no|off) exit 0 ;;

@@ -25,9 +25,9 @@ export const fileIconMap: Record<string, string> = {
   tiff: 'icon-Image',
   ico: 'icon-Image',
   svg: 'icon-Image',
-  folder: 'icon-wenjianjia',
-  chat: 'icon-wenjianjia',
-  other: 'icon-wenjianjia',
+  folder: 'icon-wenjianjialanse',
+  chat: 'icon-wenjianjialanse',
+  other: 'icon-wenjianjialanse',
 };
 
 export const getKnowledgeFileIconType = (
@@ -38,7 +38,7 @@ export const getKnowledgeFileIconType = (
     defaultIconType?: string;
   }
 ) => {
-  const { isDirectory = false, directoryIconType = 'wenjianjia', defaultIconType = 'jishiben' } = options || {};
+  const { isDirectory = false, directoryIconType = 'wenjianjialanse', defaultIconType = 'jishiben' } = options || {};
 
   if (isDirectory) {
     return directoryIconType;

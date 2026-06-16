@@ -72,6 +72,28 @@
     width: 280px;
   }
 
+  .heroActions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 10px;
+  }
+
+  .completeConfigButton {
+    min-width: 136px;
+    height: 32px;
+    color: var(--brand-blue);
+    background: rgba(255, 255, 255, 0.86);
+    border-color: #a9c6ff;
+    box-shadow: 0 8px 18px -14px rgba(22, 93, 255, 0.7);
+
+    &:hover {
+      color: #0e42d2;
+      border-color: var(--brand-blue);
+      background: #ffffff;
+    }
+  }
+
   .statsRow {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -189,6 +211,30 @@
     justify-content: space-between;
     gap: 12px;
     padding: 18px 18px 0;
+  }
+
+  .cardStatusGroup {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    max-width: 156px;
+  }
+
+  .defaultBadge {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 9px;
+    color: #165dff;
+    font-weight: 600;
+    font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
+    background: #edf3ff;
+    border: 1px solid #a9c6ff;
+    border-radius: 999px;
   }
 
   .titleBlock {
@@ -341,6 +387,97 @@
     font-size: 12px;
   }
 
+  .completeResult {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 520px;
+    overflow-y: auto;
+  }
+
+  .completeStats {
+    padding: 10px 12px;
+    color: var(--text-2);
+    background: #f8fbff;
+    border: 1px solid #e5eefc;
+    border-radius: 10px;
+  }
+
+  .completeResultList {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .completeResultItem {
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+
+  .completeResultHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+    color: var(--text-1);
+    font-weight: 600;
+  }
+
+  .completeResultSub {
+    color: var(--text-3);
+    font-weight: 400;
+    font-size: 12px;
+  }
+
+  .completeStatus {
+    flex: none;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  .completeStatusUpdated {
+    color: #0f9960;
+    background: #e8fff4;
+  }
+
+  .completeStatusSkipped {
+    color: #7b8ba1;
+    background: #f2f4f8;
+  }
+
+  .completeStatusFailed {
+    color: #c92a2a;
+    background: #fff1f0;
+  }
+
+  .completeChangeList {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .completeChangeItem {
+    display: grid;
+    grid-template-columns: 132px minmax(0, 1fr);
+    gap: 10px;
+    color: var(--text-2);
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  .completeChangeField {
+    color: var(--text-3);
+  }
+
+  .completeMuted {
+    color: var(--text-3);
+    font-size: 12px;
+  }
+
   .emptyState {
     position: relative;
     display: flex;
@@ -439,6 +576,15 @@
     .cardBottom {
       flex-direction: column;
       align-items: flex-start;
+    }
+
+    .heroActions {
+      align-items: stretch;
+      width: 100%;
+    }
+
+    .completeConfigButton {
+      width: 100%;
     }
 
     .statsRow,

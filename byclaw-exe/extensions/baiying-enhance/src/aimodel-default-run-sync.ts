@@ -162,6 +162,7 @@ export async function resolveMainDefaultAimodelOnAgentRun(
     const resolved = await resolveDefaultBaiyingAimodelProviderBundle({
         redisJsonStore: deps.redisJsonStore,
         redisKey: aimodelTypeListRedisKey,
+        modelType: DEFAULT_AIMODEL_TYPELIST_FIELD,
         secretProviderName: resolveAimodelSecretProviderName(
             deps.pluginConfig.aimodelSecretProviderName,
         ),

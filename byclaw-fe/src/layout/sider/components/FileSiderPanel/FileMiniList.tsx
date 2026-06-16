@@ -1,11 +1,10 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Dropdown, Empty, Input, List, Modal, Spin, Typography, message } from 'antd';
+import { Button, Dropdown, Empty, Input, List, Modal, Spin, Tooltip, Tree, Typography, message } from 'antd';
 import { EllipsisOutlined, SearchOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
 import KnowledgeBreadcrumb from '@/components/KnowledgeBreadcrumb';
 import { DragType } from '@/components/QueryInput/withDrag';
-import InfiniteScrollAntdList from '@/layout/sider/components/InfiniteScrollAntdList';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import useGlobal from '@/hooks/useGlobal';
 import { HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH, SiderContentContext } from '@/layout/sider/siderContentContext';
@@ -13,7 +12,14 @@ import {
   getMimeType,
   isPreviewable,
 } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
-import { downloadFile, getDefaultPath, listFiles, searchFiles, type FileBrowserItem } from '@/service/fileBrowser';
+import {
+  downloadFile,
+  downloadFolder,
+  getDefaultPath,
+  listFiles,
+  searchFiles,
+  type FileBrowserItem,
+} from '@/service/fileBrowser';
 import { queryDigEmployeeRelResourceAuth } from '@/pages/manager/service/resources';
 import {
   createFolder as createKnowledgeFolder,
@@ -22,27 +28,19 @@ import {
   type QueryDirAndFileByLevelItem,
 } from '@/service/knowledgeCenter';
 import type { IKnowledgeBaseItem } from '@/layout/sider/components/Knowledge/components/KnowledgeBase/types';
+import { getKnowledgeFileIconType } from '@/constants/icon';
+import commonStyles from '../Knowledge/components/common.module.less';
 import styles from './index.module.less';
 
-const { Title } = Typography;
 const PreViewFile = React.lazy(() =>
   import('@/components/Preview/Twins').then((module) => ({ default: module.PreViewFile }))
 );
 
 function getIconType(name: string, isDir: boolean): string {
-  if (isDir) return 'wenjianjia';
-  if (/\.(doc|docx)$/i.test(name)) return 'Word';
-  if (/\.pdf$/i.test(name)) return 'PDF';
-  if (/\.(xls|xlsx|csv)$/i.test(name)) return 'Excel';
-  if (/\.txt$/i.test(name)) return 'jishiben';
-  if (/\.(ppt|pptx)$/i.test(name)) return 'PPT';
-  if (/\.md$/i.test(name)) return 'markdown';
-  if (/\.(png|jpg|jpeg|gif|svg|webp|bmp)$/i.test(name)) return 'Image';
-  if (/\.(mp4|avi|mov|mkv|webm)$/i.test(name)) return 'shipin';
-  if (/\.(mp3|wav|flac)$/i.test(name)) return 'yinpin';
-  if (/\.(zip|rar|7z|tar|gz)$/i.test(name)) return 'a-Data-fileshujuwenjian';
-  if (/\.(js|ts|jsx|tsx|py|java|c|cpp|go|rs|rb|sh)$/i.test(name)) return 'a-Codedaima';
-  return 'a-Data-fileshujuwenjian';
+  return getKnowledgeFileIconType(name, {
+    isDirectory: isDir,
+    directoryIconType: 'wenjianjialanse',
+  });
 }
 
 function isDirectory(item: FileBrowserItem) {
@@ -76,6 +74,27 @@ function getRawBlob(res: any) {
   return res?.file instanceof Blob ? res.file : res instanceof Blob ? res : new Blob([res?.file || res]);
 }
 
+function toFileTreeData(
+  list: FileBrowserItem[],
+  childrenByPath: Record<string, FileBrowserItem[]>,
+  options: { rootLevel: boolean }
+): FileTreeItem[] {
+  return sortFileBrowserItems(list).map((item) => {
+    const dir = isDirectory(item);
+    const directoryPath = ensureDirectoryPath(item.path);
+    return {
+      ...item,
+      key: dir ? directoryPath : item.path,
+      title: <span>{item.name}</span>,
+      isLeaf: !dir || options.rootLevel,
+      children:
+        dir && childrenByPath[directoryPath]
+          ? toFileTreeData(childrenByPath[directoryPath], childrenByPath, { rootLevel: false })
+          : undefined,
+    };
+  });
+}
+
 function normalizeReferenceItem(item: FileBrowserItem, resourceId: string) {
   const dir = isDirectory(item);
   return {
@@ -106,9 +125,11 @@ interface FilePreviewPanelProps {
   onClose: () => void;
 }
 
-interface DisplayFileBrowserItem {
-  item: FileBrowserItem;
-  depth: number;
+interface FileTreeItem extends FileBrowserItem {
+  key: string;
+  title: React.ReactNode;
+  isLeaf: boolean;
+  children?: FileTreeItem[];
 }
 
 const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ blob, fileName, fileType, loading, onClose }) => (
@@ -142,7 +163,6 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const [pathInitialized, setPathInitialized] = useState(false);
   const [searchValue, setSearchValue] = useState('');
   const [isSearching, setIsSearching] = useState(false);
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [childrenByPath, setChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [saveTarget, setSaveTarget] = useState<FileBrowserItem | null>(null);
@@ -177,7 +197,6 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     setItems([]);
     setSearchValue('');
     setIsSearching(false);
-    setExpandedPaths(new Set());
     setChildrenByPath({});
     if (!resourceId) return;
     getDefaultPath(resourceId)
@@ -211,20 +230,9 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     return sortFileBrowserItems(items);
   }, [items]);
 
-  const displayItems = useMemo(() => {
-    const result: DisplayFileBrowserItem[] = [];
-    const appendItems = (list: FileBrowserItem[], depth: number) => {
-      sortFileBrowserItems(list).forEach((item) => {
-        const path = ensureDirectoryPath(item.path);
-        result.push({ item, depth });
-        if (isDirectory(item) && expandedPaths.has(path)) {
-          appendItems(childrenByPath[path] || [], depth + 1);
-        }
-      });
-    };
-    appendItems(sortedItems, 0);
-    return result;
-  }, [childrenByPath, expandedPaths, sortedItems]);
+  const fileTreeData = useMemo(() => {
+    return toFileTreeData(sortedItems, childrenByPath, { rootLevel: getPathDepth(currentPath) === 0 });
+  }, [childrenByPath, currentPath, sortedItems]);
 
   const knowledgeFolderPath = useMemo(() => {
     const segments = knowledgeDirectoryPath.split('/').filter(Boolean);
@@ -287,7 +295,6 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       if (!target) return;
       setSearchValue('');
       setIsSearching(false);
-      setExpandedPaths(new Set());
       setChildrenByPath({});
       setCurrentPath(target.id);
     },
@@ -299,13 +306,11 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       const nextKeyword = keyword.trim();
       if (!nextKeyword) {
         setIsSearching(false);
-        setExpandedPaths(new Set());
         setChildrenByPath({});
         fetchList(currentPath);
         return;
       }
       setIsSearching(true);
-      setExpandedPaths(new Set());
       setChildrenByPath({});
       setLoading(true);
       try {
@@ -344,38 +349,6 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     [clearDetailPanel, setDetailPanel]
   );
 
-  const toggleDirectory = useCallback(
-    async (item: FileBrowserItem) => {
-      const path = ensureDirectoryPath(item.path);
-      if (expandedPaths.has(path)) {
-        setExpandedPaths((prev) => {
-          const next = new Set(prev);
-          next.delete(path);
-          return next;
-        });
-        return;
-      }
-
-      try {
-        if (!childrenByPath[path]) {
-          const res: any = await listFiles({ resourceId, path });
-          setChildrenByPath((prev) => ({
-            ...prev,
-            [path]: unwrapListResponse<FileBrowserItem>(res),
-          }));
-        }
-        setExpandedPaths((prev) => {
-          const next = new Set(prev);
-          next.add(path);
-          return next;
-        });
-      } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
-      }
-    },
-    [childrenByPath, expandedPaths, intl, resourceId]
-  );
-
   const handlePreview = useCallback(
     async (item: FileBrowserItem) => {
       if (!isPreviewable(item.name)) return;
@@ -395,27 +368,75 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     [clearDetailPanel, intl, renderPreviewPanel, resourceId]
   );
 
-  const handleItemClick = useCallback(
-    (item: FileBrowserItem) => {
+  const handleDownload = useCallback(
+    async (item: FileBrowserItem) => {
+      const messageKey = isDirectory(item) ? 'folderDownload' : 'fileDownload';
+      message.loading({
+        content: intl.formatMessage({
+          id: isDirectory(item) ? 'fileBrowser.download.folderDownloading' : 'fileBrowser.download.downloading',
+        }),
+        key: messageKey,
+        duration: 0,
+      });
+      try {
+        const res: any = isDirectory(item)
+          ? await downloadFolder(resourceId, item.path)
+          : await downloadFile(resourceId, item.path);
+        const blob = res?.file instanceof Blob ? res.file : new Blob([res?.file || res]);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = res?.fileName || (isDirectory(item) ? `${item.name}.zip` : item.name);
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        message.destroy(messageKey);
+      } catch (error: any) {
+        message.destroy(messageKey);
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.download.failed' }));
+      }
+    },
+    [intl, resourceId]
+  );
+
+  const loadTreeNode = useCallback(
+    async (node: FileTreeItem) => {
+      if (!isDirectory(node)) return;
+      const path = ensureDirectoryPath(node.path);
+      if (childrenByPath[path]) return;
+      try {
+        const res: any = await listFiles({ resourceId, path });
+        setChildrenByPath((prev) => ({
+          ...prev,
+          [path]: unwrapListResponse<FileBrowserItem>(res),
+        }));
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+      }
+    },
+    [childrenByPath, intl, resourceId]
+  );
+
+  const handleTreeNodeClick = useCallback(
+    (event: React.MouseEvent, node: FileTreeItem) => {
+      event.stopPropagation();
       clearClickTimer();
       clickTimerRef.current = window.setTimeout(() => {
         clickTimerRef.current = null;
-        if (isDirectory(item)) {
+        if (isDirectory(node)) {
           if (isSearching || getPathDepth(currentPath) === 0) {
             setSearchValue('');
             setIsSearching(false);
-            setExpandedPaths(new Set());
             setChildrenByPath({});
-            setCurrentPath(ensureDirectoryPath(item.path));
-            return;
+            setCurrentPath(ensureDirectoryPath(node.path));
           }
-          void toggleDirectory(item);
-        } else {
-          void handlePreview(item);
+          return;
         }
+        void handlePreview(node);
       }, 220);
     },
-    [clearClickTimer, currentPath, handlePreview, isSearching, toggleDirectory]
+    [clearClickTimer, currentPath, handlePreview, isSearching]
   );
 
   const handleItemDoubleClick = useCallback(
@@ -567,32 +588,38 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         )}
       </div>
       <Spin spinning={loading} wrapperClassName={styles.listSpin}>
-        <InfiniteScrollAntdList
-          className={employeeStyles.employeesList}
-          dataSource={displayItems}
-          hasMore={false}
-          loading={false}
-          next={() => {}}
-          renderEmpty={
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'fileBrowser.empty' })} />
-          }
-          renderItem={(record: DisplayFileBrowserItem) => {
-            const fileItem = record.item;
-            const dir = isDirectory(fileItem);
-            return (
-              <List.Item
-                key={fileItem.path}
-                className={styles.fileItem}
-                style={{ paddingLeft: 8 + record.depth * 18 }}
-                onClick={() => handleItemClick(fileItem)}
-                onDoubleClick={() => handleItemDoubleClick(fileItem)}
-                actions={[
+        <div className={styles.treeScroll}>
+          {fileTreeData.length ? (
+            <Tree.DirectoryTree
+              showIcon
+              selectable={false}
+              treeData={fileTreeData}
+              loadData={(node) => loadTreeNode(node as unknown as FileTreeItem)}
+              icon={(node) => {
+                const item = node as unknown as FileTreeItem;
+                return <AntdIcon type={`icon-${getIconType(item.name, isDirectory(item))}`} />;
+              }}
+              className={`${commonStyles.tree} ${styles.fileTree}`}
+              onClick={handleTreeNodeClick as any}
+              onDoubleClick={(_, node) => handleItemDoubleClick(node as unknown as FileTreeItem)}
+              titleRender={(item) => (
+                <>
+                  <Tooltip title={item.name} placement="right">
+                    <span>{item.name}</span>
+                  </Tooltip>
                   <Dropdown
-                    key="saveToKnowledge"
                     trigger={['hover']}
                     overlayClassName={employeeStyles.mydropdown}
                     menu={{
                       items: [
+                        {
+                          key: 'download',
+                          label: (
+                            <div className={employeeStyles.dropdownMenuItem}>
+                              {intl.formatMessage({ id: 'directoryManage.downloadFile' })}
+                            </div>
+                          ),
+                        },
                         {
                           key: 'saveToKnowledge',
                           label: (
@@ -602,37 +629,29 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
                           ),
                         },
                       ],
-                      onClick: ({ domEvent }) => {
+                      onClick: ({ key, domEvent }) => {
                         domEvent.stopPropagation();
-                        openSaveToKnowledge(fileItem);
+                        if (key === 'download') {
+                          void handleDownload(item as FileTreeItem);
+                        } else if (key === 'saveToKnowledge') {
+                          openSaveToKnowledge(item as FileTreeItem);
+                        }
                       },
                     }}
                   >
                     <EllipsisOutlined
+                      className={commonStyles.treeActionIcon}
                       onClick={(event) => event.stopPropagation()}
                       onMouseDown={(event) => event.stopPropagation()}
                     />
-                  </Dropdown>,
-                ]}
-              >
-                <List.Item.Meta
-                  avatar={
-                    <span className={styles.fileAvatar}>
-                      <AntdIcon type={`icon-${getIconType(fileItem.name, dir)}`} />
-                    </span>
-                  }
-                  title={
-                    <Title className={employeeStyles.name}>
-                      <span className={employeeStyles.nameRow} title={fileItem.name}>
-                        <span className={employeeStyles.nameText}>{fileItem.name}</span>
-                      </span>
-                    </Title>
-                  }
-                />
-              </List.Item>
-            );
-          }}
-        />
+                  </Dropdown>
+                </>
+              )}
+            />
+          ) : (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'fileBrowser.empty' })} />
+          )}
+        </div>
       </Spin>
       <Modal
         open={saveModalOpen}

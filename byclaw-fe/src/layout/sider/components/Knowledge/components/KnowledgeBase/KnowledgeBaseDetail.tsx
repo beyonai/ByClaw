@@ -105,8 +105,9 @@ function onDragStart(info: Parameters<Required<TreeProps>['onDragStart']>[0]) {
 
 function getNodeIcon(p: AntdTreeNodeAttribute) {
   const { isLeaf, title } = p;
+  const data = p as unknown as Partial<IKnowledgeDetailTreeItem>;
   const iconType = getKnowledgeFileIconType(title as string, {
-    isDirectory: !isLeaf,
+    isDirectory: data.type === 'directory' || !isLeaf,
     directoryIconType: 'wenjianjialanse',
   });
 

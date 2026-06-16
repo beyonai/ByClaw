@@ -18,6 +18,8 @@ import com.iwhalecloud.byai.gateway.sandbox.client.model.CreateSandboxRequest;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.CreateSandboxResponse;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.ErrorResponse;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.RenewSandboxExpirationRequest;
+import com.iwhalecloud.byai.gateway.sandbox.client.model.ResizeSandboxRequest;
+import com.iwhalecloud.byai.gateway.sandbox.client.model.ResizeSandboxResponse;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxDetail;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxEndpoint;
 import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
@@ -190,6 +192,15 @@ public class OpenSandboxClient {
         String url = baseUrl + "/v1/sandboxes/" + sandboxId + "/endpoints/" + port;
         Request httpRequest = newRequestBuilder(url).get().build();
         return execute(httpRequest, SandboxEndpoint.class);
+    }
+
+    public ResizeSandboxResponse resizeSandbox(String sandboxId, ResizeSandboxRequest request) {
+        String url = baseUrl + "/v1/sandboxes/" + sandboxId + "/resize";
+        String body = toJson(request);
+        Request httpRequest = newRequestBuilder(url)
+            .post(RequestBody.create(body, JSON_MEDIA_TYPE))
+            .build();
+        return execute(httpRequest, ResizeSandboxResponse.class);
     }
 
     /**

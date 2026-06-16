@@ -102,7 +102,7 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
         String sandboxType = launchRequest.getSandboxType();
         String redisKey = buildRedisKey(userCode, sandboxType);
 
-        SandboxServiceSpec spec = specRepository.findByServiceKey(sandboxType).orElse(null);
+        SandboxServiceSpec spec = specRepository.findByServiceKeyAndProfile(sandboxType, launchRequest.getProfileKey()).orElse(null);
         if (spec == null) {
             throw new IllegalArgumentException("Unknown sandbox service key: " + sandboxType);
         }

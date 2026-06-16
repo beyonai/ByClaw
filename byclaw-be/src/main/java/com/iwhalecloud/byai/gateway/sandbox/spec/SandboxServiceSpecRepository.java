@@ -4,5 +4,8 @@ import java.util.Optional;
 
 public interface SandboxServiceSpecRepository {
     Optional<SandboxServiceSpec> findByServiceKey(String serviceKey);
-}
 
+    default Optional<SandboxServiceSpec> findByServiceKeyAndProfile(String serviceKey, String profileKey) {
+        return findByServiceKey(serviceKey);
+    }
+}

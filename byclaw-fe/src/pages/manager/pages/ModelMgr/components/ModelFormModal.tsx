@@ -10,7 +10,9 @@ import ModelFormFields from './ModelFormFields';
 import {
   buildAutoDebugRequestText,
   buildDebugDefaults,
+  buildReasoningConfigPayload,
   extractModelId,
+  formatReasoningEffortMapText,
   getDefaultFormValues,
   DEFAULT_CONTEXT_TOKENS,
   DEFAULT_MAX_TOKENS,
@@ -201,6 +203,8 @@ const ModelFormModal: React.FC<Props> = (props) => {
             maxTokens: detail.maxTokens ?? DEFAULT_MAX_TOKENS,
             frequencyPenalty: detail.frequencyPenalty ?? 0,
             presencePenalty: detail.presencePenalty ?? 0,
+            reasoningConfig: detail.reasoningConfig ?? getDefaultFormValues().reasoningConfig,
+            reasoningEffortMapText: formatReasoningEffortMapText(detail.reasoningConfig),
             abilities: detail.abilities || [],
             systems: detail.systems || [],
             status: detail.status || 'ENABLED',
@@ -252,15 +256,20 @@ const ModelFormModal: React.FC<Props> = (props) => {
   }, [type, data, intl]);
 
   /** 构建提交 payload（新增时若有 savedNewId 则带 id 以便后续保存为更新） */
-  const buildUpsertPayload = (values: any) => ({
-    ...(type === 'edit' || type === 'debug'
-      ? { id: data?.id }
-      : type === 'add' && savedNewId !== null && savedNewId !== undefined
-        ? { id: savedNewId }
-        : {}),
-    ...values,
-    modelType: normalizeModelType(values?.modelType),
-  });
+  const buildUpsertPayload = (values: any) => {
+    const restValues = { ...(values || {}) };
+    delete restValues.reasoningEffortMapText;
+    return {
+      ...(type === 'edit' || type === 'debug'
+        ? { id: data?.id }
+        : type === 'add' && savedNewId !== null && savedNewId !== undefined
+          ? { id: savedNewId }
+          : {}),
+      ...restValues,
+      reasoningConfig: buildReasoningConfigPayload(values),
+      modelType: normalizeModelType(values?.modelType),
+    };
+  };
 
   const querySavedModelId = (values: any) =>
     new Promise<string | number | undefined>((resolve) => {

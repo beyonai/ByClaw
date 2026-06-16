@@ -3,7 +3,6 @@ package com.iwhalecloud.byai.state.application.service.filebrowser;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.zip.ZipEntry;
@@ -15,12 +14,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
-import com.iwhalecloud.byai.common.storage.impl.MinioStorageService;
+import com.iwhalecloud.byai.common.storage.ObjectStorage;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
+import com.iwhalecloud.byai.common.storage.model.StorageObject;
+import com.iwhalecloud.byai.common.storage.model.StoragePrefix;
 import com.iwhalecloud.byai.common.storage.util.UserBucketNameResolver;
 import com.iwhalecloud.byai.state.domain.filebrowser.vo.FileBrowserItemVo;
-
-import io.minio.messages.Item;
 
 @Component
 public class MinioFileBrowserProvider implements FileBrowserProvider {
@@ -28,11 +27,13 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
     private static final Logger LOGGER = LoggerFactory.getLogger(MinioFileBrowserProvider.class);
 
     private static final String ROOT_PREFIX = "by/";
+    private static final String NAMESPACE = "workspace";
+    private static final String SHARE_TYPE_PRIVATE = "private";
 
-    private final MinioStorageService minioStorageService;
+    private final ObjectStorage objectStorage;
 
-    public MinioFileBrowserProvider(MinioStorageService minioStorageService) {
-        this.minioStorageService = minioStorageService;
+    public MinioFileBrowserProvider(ObjectStorage objectStorage) {
+        this.objectStorage = objectStorage;
     }
 
     @Override
@@ -40,11 +41,11 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
         String bucket = resolveBucket(userCode);
         String prefix = resolveAbsolutePath(resourceId, normalizeDirPath(relativePath));
 
-        List<Item> items = minioStorageService.listObjectKeys(bucket, prefix, false);
+        List<StorageObject> items = objectStorage.list(buildPrefix(bucket, prefix, false), null);
         List<FileBrowserItemVo> result = new ArrayList<>();
 
-        for (Item item : items) {
-            String objectName = item.objectName();
+        for (StorageObject item : items) {
+            String objectName = item.getPath();
             if (objectName.equals(prefix)) {
                 continue;
             }
@@ -56,10 +57,7 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
             } else {
                 vo.setName(extractFileName(objectName));
                 vo.setPath(toRelativePath(objectName));
-                vo.setSize(item.size());
-                if (item.lastModified() != null) {
-                    vo.setLastModified(item.lastModified().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
-                }
+                vo.setSize(item.getSize());
             }
             result.add(vo);
         }
@@ -80,7 +78,7 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
             if (StringUtils.isBlank(contentType)) {
                 contentType = "application/octet-stream";
             }
-            minioStorageService.uploadBytes(bucket, objectKey, file.getBytes(), contentType);
+            objectStorage.put(buildLocation(bucket, objectKey), file.getInputStream(), file.getSize(), contentType);
             LOGGER.info("文件上传成功: bucket={}, key={}", bucket, objectKey);
         }
     }
@@ -89,8 +87,7 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
     public InputStream download(String userCode, Long resourceId, String relativePath) {
         String bucket = resolveBucket(userCode);
         String objectKey = resolveAbsolutePath(resourceId, relativePath);
-        StorageLocation location = StorageLocation.of("", bucket, objectKey);
-        return minioStorageService.get(location);
+        return objectStorage.get(buildLocation(bucket, objectKey));
     }
 
     @Override
@@ -99,12 +96,9 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
         for (String relativePath : relativePaths) {
             String absolutePath = resolveAbsolutePath(resourceId, relativePath);
             if (relativePath.endsWith("/")) {
-                List<Item> items = minioStorageService.listObjectKeys(bucket, absolutePath, true);
-                for (Item item : items) {
-                    minioStorageService.deleteObjectIfExists(bucket, item.objectName());
-                }
+                objectStorage.deletePrefix(buildPrefix(bucket, absolutePath, true));
             } else {
-                minioStorageService.deleteObjectIfExists(bucket, absolutePath);
+                objectStorage.delete(buildLocation(bucket, absolutePath));
             }
             LOGGER.info("文件删除成功: bucket={}, path={}", bucket, absolutePath);
         }
@@ -120,15 +114,16 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
 
         if (sourcePath.endsWith("/")) {
             targetAbsolute = targetAbsolute.endsWith("/") ? targetAbsolute : targetAbsolute + "/";
-            List<Item> items = minioStorageService.listObjectKeys(bucket, sourceAbsolute, true);
-            for (Item item : items) {
-                String newKey = targetAbsolute + item.objectName().substring(sourceAbsolute.length());
-                minioStorageService.copyObject(bucket, item.objectName(), newKey);
-                minioStorageService.deleteObjectIfExists(bucket, item.objectName());
+            objectStorage.put(buildLocation(bucket, targetAbsolute), InputStream.nullInputStream(), 0L,
+                "application/x-directory");
+            List<StorageObject> items = objectStorage.list(buildPrefix(bucket, sourceAbsolute, true), null);
+            for (StorageObject item : items) {
+                String newKey = targetAbsolute + item.getPath().substring(sourceAbsolute.length());
+                objectStorage.copy(buildLocation(bucket, item.getPath()), buildLocation(bucket, newKey));
             }
+            objectStorage.deletePrefix(buildPrefix(bucket, sourceAbsolute, true));
         } else {
-            minioStorageService.copyObject(bucket, sourceAbsolute, targetAbsolute);
-            minioStorageService.deleteObjectIfExists(bucket, sourceAbsolute);
+            objectStorage.move(buildLocation(bucket, sourceAbsolute), buildLocation(bucket, targetAbsolute));
         }
         LOGGER.info("文件重命名成功: bucket={}, {} -> {}", bucket, sourceAbsolute, targetAbsolute);
     }
@@ -144,17 +139,18 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
                 String dirName = extractDirName(sourceAbsolute,
                     sourceAbsolute.substring(0, sourceAbsolute.lastIndexOf('/', sourceAbsolute.length() - 2) + 1));
                 String newPrefix = targetAbsolute + dirName + "/";
-                List<Item> items = minioStorageService.listObjectKeys(bucket, sourceAbsolute, true);
-                for (Item item : items) {
-                    String newKey = newPrefix + item.objectName().substring(sourceAbsolute.length());
-                    minioStorageService.copyObject(bucket, item.objectName(), newKey);
-                    minioStorageService.deleteObjectIfExists(bucket, item.objectName());
+                objectStorage.put(buildLocation(bucket, newPrefix), InputStream.nullInputStream(), 0L,
+                    "application/x-directory");
+                List<StorageObject> items = objectStorage.list(buildPrefix(bucket, sourceAbsolute, true), null);
+                for (StorageObject item : items) {
+                    String newKey = newPrefix + item.getPath().substring(sourceAbsolute.length());
+                    objectStorage.copy(buildLocation(bucket, item.getPath()), buildLocation(bucket, newKey));
                 }
+                objectStorage.deletePrefix(buildPrefix(bucket, sourceAbsolute, true));
             } else {
                 String fileName = extractFileName(sourceAbsolute);
                 String newKey = targetAbsolute + fileName;
-                minioStorageService.copyObject(bucket, sourceAbsolute, newKey);
-                minioStorageService.deleteObjectIfExists(bucket, sourceAbsolute);
+                objectStorage.move(buildLocation(bucket, sourceAbsolute), buildLocation(bucket, newKey));
             }
         }
         LOGGER.info("文件移动成功: bucket={}, targets -> {}", bucket, targetAbsolute);
@@ -164,7 +160,7 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
     public void createFolder(String userCode, Long resourceId, String relativePath) {
         String bucket = resolveBucket(userCode);
         String folderKey = resolveAbsolutePath(resourceId, normalizeDirPath(relativePath));
-        minioStorageService.uploadBytes(bucket, folderKey, new byte[0], "application/x-directory");
+        objectStorage.put(buildLocation(bucket, folderKey), InputStream.nullInputStream(), 0L, "application/x-directory");
         LOGGER.info("文件夹创建成功: bucket={}, key={}", bucket, folderKey);
     }
 
@@ -174,11 +170,11 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
         String prefix = resolveAbsolutePath(resourceId, normalizeDirPath(relativePath));
         String lowerKeyword = keyword.toLowerCase();
 
-        List<Item> items = minioStorageService.listObjectKeys(bucket, prefix, true);
+        List<StorageObject> items = objectStorage.list(buildPrefix(bucket, prefix, true), null);
         List<FileBrowserItemVo> result = new ArrayList<>();
 
-        for (Item item : items) {
-            String objectName = item.objectName();
+        for (StorageObject item : items) {
+            String objectName = item.getPath();
             if (objectName.equals(prefix)) {
                 continue;
             }
@@ -192,10 +188,7 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
             vo.setName(fileName);
             vo.setPath(toRelativePath(objectName));
             if (!isDir) {
-                vo.setSize(item.size());
-                if (item.lastModified() != null) {
-                    vo.setLastModified(item.lastModified().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
-                }
+                vo.setSize(item.getSize());
             }
             result.add(vo);
         }
@@ -207,22 +200,21 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
         String bucket = resolveBucket(userCode);
         String prefix = resolveAbsolutePath(resourceId, normalizeDirPath(relativePath));
 
-        List<Item> items = minioStorageService.listObjectKeys(bucket, prefix, true);
+        List<StorageObject> items = objectStorage.list(buildPrefix(bucket, prefix, true), null);
 
         try (ZipOutputStream zos = new ZipOutputStream(outputStream)) {
             byte[] buffer = new byte[8192];
-            for (Item item : items) {
+            for (StorageObject item : items) {
                 if (item.isDir()) {
                     continue;
                 }
-                String objectName = item.objectName();
+                String objectName = item.getPath();
                 String entryName = objectName.substring(prefix.length());
                 if (entryName.isEmpty()) {
                     continue;
                 }
                 zos.putNextEntry(new ZipEntry(entryName));
-                StorageLocation location = StorageLocation.of("", bucket, objectName);
-                try (InputStream in = minioStorageService.get(location)) {
+                try (InputStream in = objectStorage.get(buildLocation(bucket, objectName))) {
                     int len;
                     while ((len = in.read(buffer)) > 0) {
                         zos.write(buffer, 0, len);
@@ -235,6 +227,14 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
 
     private String resolveBucket(String userCode) {
         return UserBucketNameResolver.buildUserBucketName(userCode);
+    }
+
+    private StorageLocation buildLocation(String bucket, String objectKey) {
+        return StorageLocation.of(NAMESPACE, bucket, objectKey, SHARE_TYPE_PRIVATE);
+    }
+
+    private StoragePrefix buildPrefix(String bucket, String prefix, boolean recursive) {
+        return StoragePrefix.of(NAMESPACE, bucket, prefix, SHARE_TYPE_PRIVATE, recursive);
     }
 
     private String resolveAbsolutePath(Long resourceId, String relativePath) {
