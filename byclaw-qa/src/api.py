@@ -32,6 +32,7 @@ from by_qa.knowledge_base.services.errors import (
     KnowledgeBaseConfigurationError,
     KnowledgeBaseValidationError,
 )
+from byclaw_userfs_storage import reset_byclaw_userfs_headers, set_byclaw_userfs_headers
 from by_qa.main import (
     app,
     resolve_document_chunking_service,
@@ -43,6 +44,15 @@ import os
 import redis.asyncio as aioredis
 
 from redis_agent_config import get_kg_doc_from_redis
+
+
+@app.middleware("http")
+async def byclaw_userfs_header_context_middleware(request, call_next):
+    token = set_byclaw_userfs_headers({"beyond-token": request.headers.get("beyond-token", "")})
+    try:
+        return await call_next(request)
+    finally:
+        reset_byclaw_userfs_headers(token)
 
 
 def _require_env(name: str) -> str:
