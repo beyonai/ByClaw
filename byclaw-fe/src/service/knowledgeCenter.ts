@@ -407,6 +407,21 @@ export const uploadFiles = (data: FormData) =>
     },
   });
 
+export interface CheckUploadFileConflictsPayload {
+  resourceId: string | number;
+  directoryPath: string;
+  fileNames: string[];
+}
+
+export interface CheckUploadFileConflictsResult {
+  conflict: boolean;
+  overwritePaths: string[];
+}
+
+// 上传前检查同路径同名文件，供前端做覆盖确认
+export const checkUploadFileConflicts = (data: CheckUploadFileConflictsPayload) =>
+  POST<CheckUploadFileConflictsResult>('/byaiService/datasetController/checkUploadFileConflicts', data);
+
 // 删除文件
 export const removeFile = (data: RemoveFilePayload, config?: ConfigType) =>
   POST<any>('/byaiService/datasetController/removeFile', data, {
