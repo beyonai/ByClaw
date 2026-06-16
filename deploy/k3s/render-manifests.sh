@@ -35,6 +35,23 @@ set -a
 . "$ENV_FILE"
 set +a
 
+if grep -Fxq "BYCLAW_TIMEZONE" <<< "$ENV_FILE_VARIABLE_KEYS"; then
+    BYCLAW_TIMEZONE="${BYCLAW_TIMEZONE:-Asia/Shanghai}"
+elif grep -Fxq "TZ" <<< "$ENV_FILE_VARIABLE_KEYS"; then
+    BYCLAW_TIMEZONE="${TZ:-Asia/Shanghai}"
+else
+    BYCLAW_TIMEZONE="Asia/Shanghai"
+fi
+TZ="$BYCLAW_TIMEZONE"
+if grep -Fxq "BYCLAW_DEFAULT_LANGUAGE" <<< "$ENV_FILE_VARIABLE_KEYS"; then
+    BYCLAW_DEFAULT_LANGUAGE="${BYCLAW_DEFAULT_LANGUAGE:-zh-CN}"
+elif grep -Fxq "LANGUAGE" <<< "$ENV_FILE_VARIABLE_KEYS"; then
+    BYCLAW_DEFAULT_LANGUAGE="${LANGUAGE:-zh-CN}"
+else
+    BYCLAW_DEFAULT_LANGUAGE="zh-CN"
+fi
+LANGUAGE="$BYCLAW_DEFAULT_LANGUAGE"
+
 NS_SERVICE="${NS_SERVICE:-by-service}"
 NS_MIDDLEWARE="${NS_MIDDLEWARE:-by-middleware}"
 NS_SANDBOX="${NS_SANDBOX:-by-sandbox}"
@@ -319,9 +336,20 @@ render_byclaw_runtime_payload() {
     done < <(compgen -v | sort)
 }
 
+ensure_env_file_line() {
+    local file="$1"
+    local key="$2"
+    local value="$3"
+    if ! grep -Eq "^${key}=" "$file"; then
+        render_env_line "$key" "$value" >> "$file"
+    fi
+}
+
 write_byclaw_runtime_env_files() {
     local dir="$1"
     render_byclaw_runtime_payload env > "$dir/.byclaw-runtime.env"
+    ensure_env_file_line "$dir/.byclaw-runtime.env" "TZ" "$BYCLAW_TIMEZONE"
+    ensure_env_file_line "$dir/.byclaw-runtime.env" "LANGUAGE" "$BYCLAW_DEFAULT_LANGUAGE"
     render_byclaw_runtime_payload secret > "$dir/.byclaw-runtime-secret.env"
     {
         render_env_line "HOST" "byclaw-be.${NS_SERVICE}.svc.cluster.local"
@@ -440,6 +468,8 @@ spec:
           ports:
             - containerPort: 5432
           env:
+            - name: TZ
+              value: "${BYCLAW_TIMEZONE}"
             - name: GS_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -538,6 +568,8 @@ spec:
           image: ${IMAGE_REDIS}
           args: ["redis-server", "--requirepass", "\$(REDIS_PASSWORD)"]
           env:
+            - name: TZ
+              value: "${BYCLAW_TIMEZONE}"
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -599,6 +631,11 @@ spec:
         - name: main
           image: "{{ image }}"
           imagePullPolicy: ${OPENSANDBOX_SANDBOX_IMAGE_PULL_POLICY}
+          env:
+            - name: TZ
+              value: "${BYCLAW_TIMEZONE}"
+            - name: LANGUAGE
+              value: "${BYCLAW_DEFAULT_LANGUAGE}"
           resources:
             requests:
               cpu: "{{ cpu_request | default('1') }}"
@@ -1300,6 +1337,10 @@ spec:
           args:
             - python /etc/opensandbox/opensandbox-resource-requests-patch.py && exec /app/.venv/bin/python3 /app/.venv/bin/opensandbox-server --config /etc/opensandbox/config.toml
           env:
+            - name: TZ
+              value: "${BYCLAW_TIMEZONE}"
+            - name: LANGUAGE
+              value: "${BYCLAW_DEFAULT_LANGUAGE}"
             - name: SANDBOX_CONFIG_PATH
               value: /etc/opensandbox/opensandbox-server-k8s.toml
             - name: OPENSANDBOX_SERVER_API_KEY
@@ -1488,6 +1529,11 @@ spec:
           ports:
             - name: http
               containerPort: 80
+          env:
+            - name: TZ
+              value: "${BYCLAW_TIMEZONE}"
+            - name: LANGUAGE
+              value: "${BYCLAW_DEFAULT_LANGUAGE}"
           resources:
             requests:
               cpu: "${BYCLAW_FE_CPU_REQUEST:-100m}"

@@ -68,6 +68,7 @@ SELECT
     "env": {
       "TZ": "Asia/Shanghai",
       "LANG": "zh_CN",
+      "LANGUAGE": "zh-CN",
       "MODEL_ID": "${MODEL_ID}",
       "NODE_ENV": "production",
       "USER_CODE": "${user_code}",
@@ -78,6 +79,7 @@ SELECT
       "GBRAIN_HOME": "/by/.openclaw/gbrain",
       "MODEL_ALIAS": "${MODEL_ALIAS}",
       "OPENCLAW_TZ": "Asia/Shanghai",
+      "OPENCLAW_LANGUAGE": "zh-CN",
       "BEYOND_TOKEN": "${BEYOND_TOKEN}",
       "GBRAIN_MODEL": "openai:qwen-turbo",
       "NODE_OPTIONS": "--max-old-space-size=4096",

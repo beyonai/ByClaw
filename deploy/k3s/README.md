@@ -159,6 +159,15 @@ K3S_ENV_FILE=deploy/k3s/env.k3s sh deploy/k3s/deploy.sh storage-init
 - `generated/40-service/.byclaw-runtime.env`：非敏感运行时配置，例如 `HOST`、`DB_HOST`、`REDIS_HOST`、`LANGFUSE_BASE_URL`
 - `generated/40-service/.byclaw-runtime-secret.env`：敏感配置，例如数据库密码、Redis 密码、OpenSandbox API key、`LANGFUSE_SECRET_KEY`
 
+默认区域设置为东八区、简体中文：
+
+```bash
+BYCLAW_TIMEZONE=Asia/Shanghai
+BYCLAW_DEFAULT_LANGUAGE=zh-CN
+```
+
+渲染时会写入标准容器环境变量 `TZ` 和 `LANGUAGE`。业务 Pod 通过 runtime ConfigMap 读取；FE、OpenSandbox server 和 OpenSandbox 创建的沙箱 Pod 会在 Deployment/BatchSandbox 模板中显式注入。兼容旧写法：私有 `env.k3s` 只配置 `TZ` 或 `LANGUAGE` 时也会被转换为默认值来源。
+
 运行时变量采用黑名单机制，不再维护业务白名单。默认会排除 `K3S_`、镜像、Longhorn、OpenSandbox 安装、监控安装等部署控制变量，避免 SSH、集群节点、镜像仓库等部署信息进入业务 Pod。新增业务变量只要写入 `env.k3s`，且没有命中黑名单，就会自动同步给业务 Pod。变量名包含 `PASSWORD`、`PASS`、`SECRET`、`TOKEN`、`API_KEY`、`ACCESS_KEY`、`PRIVATE_KEY` 或以 `_KEY` 结尾时，会自动进入 Secret。
 
 `HOST` 是当前工作负载注册到服务发现里的地址，不再放入通用 runtime env。部署脚本会为 BE、QA API、QA worker、DataCloud 分别生成工作负载专属 ConfigMap，确保服务注册地址分别指向自己的集群 DNS，例如 `byclaw-be.by-service.svc.cluster.local`、`byclaw-qa-manager.by-service.svc.cluster.local`、`byclaw-qa-worker.by-service.svc.cluster.local`。QA API 与 QA worker 的 `SERVICE_NAME` 也会严格区分，分别使用 `QA_DOMAINNAME` 和 `QA_WORKER_NAME`。
