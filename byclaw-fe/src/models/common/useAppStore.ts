@@ -87,6 +87,9 @@ export type IState = {
 
   sandboxesInfo: ISandboxesInfoState;
   getSandboxesInfoUrl: () => Promise<ISandboxesInfo>;
+
+  versionInfo: null | Record<string, unknown>;
+  getVersionInfo: () => void;
 };
 
 const useAppStore = create<IState>()(
@@ -212,6 +215,21 @@ const useAppStore = create<IState>()(
             });
 
             return sandboxesInfoPromise;
+          },
+
+          versionInfo: null,
+          getVersionInfo: async () => {
+            try {
+              const res = await fetch(`${_PUBLIC_PATH_}build-info.json`, {
+                method: 'GET',
+                priority: 'low',
+              });
+              const data = await res.json();
+              console.log(data);
+              set({ versionInfo: data || null });
+            } catch (err) {
+              console.log(err);
+            }
           },
         };
       },

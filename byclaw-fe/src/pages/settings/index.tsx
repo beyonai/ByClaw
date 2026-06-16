@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 import {
   DownOutlined,
@@ -15,6 +15,7 @@ import {
 import { getLocale, setLocale, useIntl, useSelector } from '@umijs/max';
 import { Avatar, Card, Menu, Modal, Select, Space, Typography } from 'antd';
 
+import useAppStore from '@/models/common/useAppStore';
 import AntdIcon from '@/components/AntdIcon';
 import { globalLogout } from '@/service/common/request';
 import { getPublicPath } from '@/utils';
@@ -29,6 +30,8 @@ const { Text } = Typography;
 type SettingsMenuKey = 'general' | 'email';
 
 const Settings: React.FC = () => {
+  const { versionInfo, getVersionInfo } = useAppStore();
+
   const intl = useIntl();
   const language = getLocale();
   const [modal, contextHolder] = Modal.useModal();
@@ -46,6 +49,12 @@ const Settings: React.FC = () => {
   // 获取用户信息
   const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
 
+  useEffect(() => {
+    if (userInfo && !versionInfo) {
+      getVersionInfo();
+    }
+  }, [userInfo, versionInfo]);
+
   const renderGeneralSettings = () => (
     <>
       {/* 用户信息卡片 */}
@@ -62,6 +71,21 @@ const Settings: React.FC = () => {
           </Space>
         </div>
       </Card>
+
+      {/* 版本信息 */}
+      <>
+        {versionInfo?.version && (
+          <div className={classNames(styles.settingBox, 'ub ub-ver')}>
+            <div className={styles.settingItem}>
+              <div className={styles.settingLabel}>
+                {/* <SkinOutlined className={styles.settingIcon} /> */}
+                <span>{intl.formatMessage({ id: 'sider.version' })}</span>
+              </div>
+              <>{versionInfo?.version}</>
+            </div>
+          </div>
+        )}
+      </>
 
       <div className={classNames(styles.settingBox, 'ub ub-ver')}>
         {/* 界面主题 */}

@@ -809,6 +809,7 @@ export default {
   'sider.space': '空间',
   'sider.knowledgeSource': '知识来源',
   'sider.files': '文件',
+  'sider.version': '版本号',
   'achievementSpace.section.allFiles': '全部文件',
   'achievementSpace.searchPlaceholder': '按成果名称、来源搜索',
   'achievementSpace.action.enterDialogue': '进入对话',

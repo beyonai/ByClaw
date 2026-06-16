@@ -804,6 +804,7 @@ export default {
   'sider.space': 'Space',
   'sider.knowledgeSource': 'Knowledge sources',
   'sider.files': 'Files',
+  'sider.version': 'Version',
   'achievementSpace.section.allFiles': 'All Files',
   'achievementSpace.searchPlaceholder': 'Search by result name or source',
   'achievementSpace.action.enterDialogue': 'Enter Dialogue',
