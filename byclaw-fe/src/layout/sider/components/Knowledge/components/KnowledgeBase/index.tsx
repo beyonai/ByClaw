@@ -44,7 +44,12 @@ const KnowledgeBaseTab = ({ editable, onSelect, keyword, agentId, agentIds, acti
 
       {currentKnowledgeBase && (
         <div style={{ height: '100%' }}>
-          <KnowledgeBaseDetail editable={editable} dataset={currentKnowledgeBase} onGoBack={handleGoBack} />
+          <KnowledgeBaseDetail
+            editable={editable}
+            dataset={currentKnowledgeBase}
+            onGoBack={handleGoBack}
+            activeAgentResourceId={activeAgentResourceId}
+          />
         </div>
       )}
     </>

@@ -63,22 +63,39 @@
 }
 
 .fileItem {
-  cursor: default;
+  min-height: 36px;
+  padding: 6px 8px;
+  cursor: pointer;
+
+  :global {
+    .@{antPrefix}-list-item-meta {
+      min-width: 0;
+      align-items: center;
+    }
+
+    .@{antPrefix}-list-item-meta-avatar {
+      margin-right: 6px !important;
+    }
+
+    .@{antPrefix}-list-item-meta-content {
+      min-width: 0;
+    }
+  }
 }
 
 .fileAvatar {
-  width: 32px;
-  height: 32px;
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  background-color: rgba(22, 93, 255, 0.08);
+  border-radius: 0;
+  background-color: transparent;
   color: var(--beyond-color-primary);
 
   :global(.@{antPrefix}-icon),
   :global(.anticon) {
-    font-size: 20px;
+    font-size: 18px;
   }
 }
 
