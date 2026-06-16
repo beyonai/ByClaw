@@ -1,5 +1,19 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Dropdown, Empty, Input, List, Modal, Spin, Tooltip, Tree, Typography, message } from 'antd';
+import {
+  Button,
+  Dropdown,
+  Empty,
+  Input,
+  List,
+  Modal,
+  Space,
+  Spin,
+  Tooltip,
+  Tree,
+  Typography,
+  Upload,
+  message,
+} from 'antd';
 import { EllipsisOutlined, SearchOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
@@ -18,6 +32,7 @@ import {
   getDefaultPath,
   listFiles,
   searchFiles,
+  uploadFiles,
   type FileBrowserItem,
 } from '@/service/fileBrowser';
 import { queryDigEmployeeRelResourceAuth } from '@/pages/manager/service/resources';
@@ -56,6 +71,12 @@ function ensureDirectoryPath(path: string) {
   return path.endsWith('/') ? path : `${path}/`;
 }
 
+function getParentDirectoryPath(path: string) {
+  const segments = path.split('/').filter(Boolean);
+  segments.pop();
+  return segments.length ? `/${segments.join('/')}/` : '/';
+}
+
 function getPathDepth(path: string) {
   return path.split('/').filter(Boolean).length;
 }
@@ -74,11 +95,7 @@ function getRawBlob(res: any) {
   return res?.file instanceof Blob ? res.file : res instanceof Blob ? res : new Blob([res?.file || res]);
 }
 
-function toFileTreeData(
-  list: FileBrowserItem[],
-  childrenByPath: Record<string, FileBrowserItem[]>,
-  options: { rootLevel: boolean }
-): FileTreeItem[] {
+function toFileTreeData(list: FileBrowserItem[], childrenByPath: Record<string, FileBrowserItem[]>): FileTreeItem[] {
   return sortFileBrowserItems(list).map((item) => {
     const dir = isDirectory(item);
     const directoryPath = ensureDirectoryPath(item.path);
@@ -86,10 +103,10 @@ function toFileTreeData(
       ...item,
       key: dir ? directoryPath : item.path,
       title: <span>{item.name}</span>,
-      isLeaf: !dir || options.rootLevel,
+      isLeaf: !dir,
       children:
         dir && childrenByPath[directoryPath]
-          ? toFileTreeData(childrenByPath[directoryPath], childrenByPath, { rootLevel: false })
+          ? toFileTreeData(childrenByPath[directoryPath], childrenByPath)
           : undefined,
     };
   });
@@ -111,6 +128,12 @@ function getFileType(name: string): string {
   if (ext === 'jpeg') return 'jpg';
   if (['html', 'htm'].includes(ext)) return 'h5';
   return ext;
+}
+
+function formatFileSize(size: number) {
+  if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  if (size >= 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${size} B`;
 }
 
 interface FileMiniListProps {
@@ -174,6 +197,10 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const [knowledgeFolders, setKnowledgeFolders] = useState<QueryDirAndFileByLevelItem[]>([]);
   const [knowledgeFolderLoading, setKnowledgeFolderLoading] = useState(false);
   const [savingToKnowledge, setSavingToKnowledge] = useState(false);
+  const [uploadConfirmOpen, setUploadConfirmOpen] = useState(false);
+  const [pendingUploadFiles, setPendingUploadFiles] = useState<File[]>([]);
+  const [pendingUploadPath, setPendingUploadPath] = useState('');
+  const [uploadingFiles, setUploadingFiles] = useState(false);
 
   const fetchList = useCallback(
     async (path: string) => {
@@ -231,8 +258,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   }, [items]);
 
   const fileTreeData = useMemo(() => {
-    return toFileTreeData(sortedItems, childrenByPath, { rootLevel: getPathDepth(currentPath) === 0 });
-  }, [childrenByPath, currentPath, sortedItems]);
+    return toFileTreeData(sortedItems, childrenByPath);
+  }, [childrenByPath, sortedItems]);
 
   const knowledgeFolderPath = useMemo(() => {
     const segments = knowledgeDirectoryPath.split('/').filter(Boolean);
@@ -399,6 +426,55 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     },
     [intl, resourceId]
   );
+
+  const executeUpload = useCallback(
+    async (targetPath: string, fileList: File[]) => {
+      if (!fileList.length || uploadingFiles) return;
+      const uploadPath = ensureDirectoryPath(targetPath || currentPath || '/');
+      setUploadingFiles(true);
+      try {
+        await uploadFiles(resourceId, uploadPath, fileList);
+        message.success(intl.formatMessage({ id: 'fileBrowser.upload.success' }));
+        setUploadConfirmOpen(false);
+        setPendingUploadFiles([]);
+        setPendingUploadPath('');
+        if (uploadPath === ensureDirectoryPath(currentPath)) {
+          setSearchValue('');
+          setIsSearching(false);
+          setChildrenByPath({});
+          await fetchList(currentPath);
+          return;
+        }
+        const res: any = await listFiles({ resourceId, path: uploadPath });
+        setChildrenByPath((prev) => ({
+          ...prev,
+          [uploadPath]: unwrapListResponse<FileBrowserItem>(res),
+        }));
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
+      } finally {
+        setUploadingFiles(false);
+      }
+    },
+    [currentPath, fetchList, intl, resourceId, uploadingFiles]
+  );
+
+  const handleUploadSelect = useCallback((targetPath: string, fileList: File[]) => {
+    if (!fileList.length) return;
+    setPendingUploadPath(ensureDirectoryPath(targetPath));
+    setPendingUploadFiles(fileList);
+    setUploadConfirmOpen(true);
+  }, []);
+
+  const handleCancelUploadConfirm = useCallback(() => {
+    if (uploadingFiles) return;
+    setUploadConfirmOpen(false);
+    setPendingUploadFiles([]);
+    setPendingUploadPath('');
+  }, [uploadingFiles]);
+
+  const previewUploadFiles = pendingUploadFiles.slice(0, 3);
+  const remainingUploadFileCount = pendingUploadFiles.length - previewUploadFiles.length;
 
   const loadTreeNode = useCallback(
     async (node: FileTreeItem) => {
@@ -597,55 +673,79 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
               loadData={(node) => loadTreeNode(node as unknown as FileTreeItem)}
               icon={(node) => {
                 const item = node as unknown as FileTreeItem;
-                return <AntdIcon type={`icon-${getIconType(item.name, isDirectory(item))}`} />;
+                return (
+                  <Tooltip title={item.name} placement="right">
+                    <span>
+                      <AntdIcon type={`icon-${getIconType(item.name, isDirectory(item))}`} />
+                    </span>
+                  </Tooltip>
+                );
               }}
               className={`${commonStyles.tree} ${styles.fileTree}`}
               onClick={handleTreeNodeClick as any}
               onDoubleClick={(_, node) => handleItemDoubleClick(node as unknown as FileTreeItem)}
               titleRender={(item) => (
-                <>
-                  <Tooltip title={item.name} placement="right">
-                    <span>{item.name}</span>
-                  </Tooltip>
-                  <Dropdown
-                    trigger={['hover']}
-                    overlayClassName={employeeStyles.mydropdown}
-                    menu={{
-                      items: [
-                        {
-                          key: 'download',
-                          label: (
-                            <div className={employeeStyles.dropdownMenuItem}>
-                              {intl.formatMessage({ id: 'directoryManage.downloadFile' })}
-                            </div>
-                          ),
+                <Tooltip title={item.name} placement="right">
+                  <span className={styles.treeTitleContent}>
+                    <span className={styles.treeTitleText}>{item.name}</span>
+                    <Dropdown
+                      trigger={['hover']}
+                      overlayClassName={employeeStyles.mydropdown}
+                      menu={{
+                        items: [
+                          {
+                            key: 'upload',
+                            label: (
+                              <Upload
+                                showUploadList={false}
+                                multiple
+                                beforeUpload={(_, fileList) => {
+                                  const targetPath = isDirectory(item) ? item.path : getParentDirectoryPath(item.path);
+                                  handleUploadSelect(targetPath, fileList as unknown as File[]);
+                                  return false;
+                                }}
+                              >
+                                <div className={employeeStyles.dropdownMenuItem}>
+                                  {intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}
+                                </div>
+                              </Upload>
+                            ),
+                          },
+                          {
+                            key: 'download',
+                            label: (
+                              <div className={employeeStyles.dropdownMenuItem}>
+                                {intl.formatMessage({ id: 'directoryManage.downloadFile' })}
+                              </div>
+                            ),
+                          },
+                          {
+                            key: 'saveToKnowledge',
+                            label: (
+                              <div className={employeeStyles.dropdownMenuItem}>
+                                {intl.formatMessage({ id: 'fileSider.saveToKnowledge' })}
+                              </div>
+                            ),
+                          },
+                        ],
+                        onClick: ({ key, domEvent }) => {
+                          domEvent.stopPropagation();
+                          if (key === 'download') {
+                            void handleDownload(item as FileTreeItem);
+                          } else if (key === 'saveToKnowledge') {
+                            openSaveToKnowledge(item as FileTreeItem);
+                          }
                         },
-                        {
-                          key: 'saveToKnowledge',
-                          label: (
-                            <div className={employeeStyles.dropdownMenuItem}>
-                              {intl.formatMessage({ id: 'fileSider.saveToKnowledge' })}
-                            </div>
-                          ),
-                        },
-                      ],
-                      onClick: ({ key, domEvent }) => {
-                        domEvent.stopPropagation();
-                        if (key === 'download') {
-                          void handleDownload(item as FileTreeItem);
-                        } else if (key === 'saveToKnowledge') {
-                          openSaveToKnowledge(item as FileTreeItem);
-                        }
-                      },
-                    }}
-                  >
-                    <EllipsisOutlined
-                      className={commonStyles.treeActionIcon}
-                      onClick={(event) => event.stopPropagation()}
-                      onMouseDown={(event) => event.stopPropagation()}
-                    />
-                  </Dropdown>
-                </>
+                      }}
+                    >
+                      <EllipsisOutlined
+                        className={commonStyles.treeActionIcon}
+                        onClick={(event) => event.stopPropagation()}
+                        onMouseDown={(event) => event.stopPropagation()}
+                      />
+                    </Dropdown>
+                  </span>
+                </Tooltip>
               )}
             />
           ) : (
@@ -653,6 +753,85 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           )}
         </div>
       </Spin>
+      <Modal
+        title={intl.formatMessage({ id: 'knowledgeDetail.uploadConfirmTitle' })}
+        open={uploadConfirmOpen}
+        okText={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
+        confirmLoading={uploadingFiles}
+        onOk={() => executeUpload(pendingUploadPath, pendingUploadFiles)}
+        onCancel={handleCancelUploadConfirm}
+        destroyOnClose
+        width="50vw"
+        style={{ minWidth: 640, maxWidth: 960 }}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space
+            direction="vertical"
+            size={12}
+            style={{
+              width: '100%',
+              padding: 16,
+              border: '1px solid #f0f0f0',
+              borderRadius: 10,
+              background: '#fafafa',
+            }}
+          >
+            <Typography.Text strong>{intl.formatMessage({ id: 'knowledgeDetail.uploadInfo' })}</Typography.Text>
+            <div style={{ display: 'grid', gridTemplateColumns: '86px minmax(0, 1fr)', rowGap: 8, columnGap: 12 }}>
+              <Typography.Text type="secondary">
+                {intl.formatMessage({ id: 'knowledgeDetail.uploadDirectory' })}
+              </Typography.Text>
+              <Typography.Text ellipsis style={{ maxWidth: '100%' }}>
+                {pendingUploadPath || '/'}
+              </Typography.Text>
+              <Typography.Text type="secondary">
+                {intl.formatMessage({ id: 'knowledgeDetail.selectedFiles' })}
+              </Typography.Text>
+              <Typography.Text>
+                {intl.formatMessage({ id: 'knowledgeDetail.uploadConfirmFiles' }, { count: pendingUploadFiles.length })}
+              </Typography.Text>
+            </div>
+
+            <div style={{ width: '100%', padding: 12, borderRadius: 10, background: '#fff' }}>
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Typography.Text strong>{intl.formatMessage({ id: 'knowledgeDetail.fileList' })}</Typography.Text>
+                <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                  {previewUploadFiles.map((file) => (
+                    <div
+                      key={`${file.name}-${file.size}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 12,
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        background: '#f7f8fa',
+                      }}
+                    >
+                      <Typography.Text ellipsis style={{ flex: 1, maxWidth: '100%' }}>
+                        {file.name}
+                      </Typography.Text>
+                      <Typography.Text type="secondary" style={{ flex: 'none', fontSize: 12 }}>
+                        {formatFileSize(file.size)}
+                      </Typography.Text>
+                    </div>
+                  ))}
+                </Space>
+                {remainingUploadFileCount > 0 && (
+                  <Typography.Text type="secondary">
+                    {intl.formatMessage(
+                      { id: 'knowledgeDetail.uploadConfirmMoreFiles' },
+                      { count: remainingUploadFileCount }
+                    )}
+                  </Typography.Text>
+                )}
+              </Space>
+            </div>
+          </Space>
+        </Space>
+      </Modal>
       <Modal
         open={saveModalOpen}
         title={intl.formatMessage({ id: 'fileSider.saveToKnowledge' })}
