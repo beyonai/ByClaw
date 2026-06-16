@@ -108,7 +108,7 @@ public class UsernameAuthenticationFilter extends AbstractAuthenticationProcessi
         loginForm.setLoginType(request.getParameter("loginType"));
         loginForm.setAccountCode(request.getParameter("accountCode"));
         loginForm.setAccountPwd(request.getParameter("accountPwd"));
-        loginForm.setAccountPwd(request.getParameter("encrypt"));
+        loginForm.setEncrypt(request.getParameter("encrypt"));
         return loginForm;
     }
 
