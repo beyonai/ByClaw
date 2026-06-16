@@ -152,7 +152,31 @@ K3S_ENV_FILE=deploy/k3s/env.k3s sh deploy/k3s/deploy.sh storage-init
 
 ## Manifest 生成
 
-部署前会由 `render-manifests.sh` 渲染到 `deploy/k3s/generated/`，该目录已被 `.gitignore` 忽略，因为生成物包含 Secret `stringData`。
+部署前会由 `render-manifests.sh` 渲染到 `deploy/k3s/generated/`，该目录已被 `.gitignore` 忽略。
+
+业务服务运行时变量不再逐项写死到 Deployment YAML 中。`render-manifests.sh` 会根据 `env.k3s` 和脚本计算出的业务默认值生成：
+
+- `generated/40-service/.byclaw-runtime.env`：非敏感运行时配置，例如 `HOST`、`DB_HOST`、`REDIS_HOST`、`LANGFUSE_BASE_URL`
+- `generated/40-service/.byclaw-runtime-secret.env`：敏感配置，例如数据库密码、Redis 密码、OpenSandbox API key、`LANGFUSE_SECRET_KEY`
+
+运行时变量采用黑名单机制，不再维护业务白名单。默认会排除 `K3S_`、镜像、Longhorn、OpenSandbox 安装、监控安装等部署控制变量，避免 SSH、集群节点、镜像仓库等部署信息进入业务 Pod。新增业务变量只要写入 `env.k3s`，且没有命中黑名单，就会自动同步给业务 Pod。变量名包含 `PASSWORD`、`PASS`、`SECRET`、`TOKEN`、`API_KEY`、`ACCESS_KEY`、`PRIVATE_KEY` 或以 `_KEY` 结尾时，会自动进入 Secret。
+
+`HOST` 是当前工作负载注册到服务发现里的地址，不再放入通用 runtime env。部署脚本会为 BE、QA API、QA worker、DataCloud 分别生成工作负载专属 ConfigMap，确保服务注册地址分别指向自己的集群 DNS，例如 `byclaw-be.by-service.svc.cluster.local`、`byclaw-qa-manager.by-service.svc.cluster.local`、`byclaw-qa-worker.by-service.svc.cluster.local`。QA API 与 QA worker 的 `SERVICE_NAME` 也会严格区分，分别使用 `QA_DOMAINNAME` 和 `QA_WORKER_NAME`。
+
+如需额外排除变量，可在私有 `env.k3s` 中配置：
+
+```bash
+BYCLAW_RUNTIME_ENV_EXTRA_BLACKLIST_PREFIXES=FOO_,BAR_
+BYCLAW_RUNTIME_ENV_EXTRA_BLACKLIST_KEYS=FOO_PASSWORD,BAR_TOKEN
+```
+
+`deploy.sh init|update` 会在 apply 业务服务前自动创建/更新：
+
+- `ConfigMap/byclaw-runtime-env`，供业务 Pod 通过 `envFrom` 读取
+- `ConfigMap/byclaw-runtime-env-file`，挂载为 `/etc/byclaw/.env`
+- `Secret/byclaw-runtime-secret`，供业务 Pod 通过 `envFrom` 读取敏感变量
+
+因此不要直接手工 apply `generated/40-service/` 作为完整部署流程；应使用 `deploy.sh` 或 `scripts/deploy-k3s.sh`，确保运行时配置卷先创建。
 
 生成内容包括：
 
