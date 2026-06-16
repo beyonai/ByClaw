@@ -38,7 +38,16 @@ function formatDate(value: any) {
   return date.isValid() ? date.format('YYYY-MM-DD') : '-';
 }
 
-export default function FileBrowserEntry() {
+interface FileBrowserEntryProps {
+  listenGlobalOpen?: boolean;
+  showTrigger?: boolean;
+}
+
+interface OpenFileBrowserPayload {
+  resourceId?: string;
+}
+
+export default function FileBrowserEntry({ listenGlobalOpen = false, showTrigger = true }: FileBrowserEntryProps) {
   const intl = useIntl();
   const t = useCallback((id: string, values?: Record<string, any>) => intl.formatMessage({ id }, values), [intl]);
   const [open, setOpen] = useState(false);
@@ -51,17 +60,19 @@ export default function FileBrowserEntry() {
   const [resourceLoading, setResourceLoading] = useState(false);
   const [relatedResources, setRelatedResources] = useState<any[]>([]);
   const [detailResourceId, setDetailResourceId] = useState<string>();
+  const [eventResourceId, setEventResourceId] = useState<string>();
   const entryRef = useRef<HTMLSpanElement>(null);
   const { pathname } = useLocation();
-  const { agentId } = useGlobal();
+  const { agentId, EventEmitter } = useGlobal();
   const { defaultDigEmployeeId, userInfo } = useSelector(({ employees, user }: any) => ({
     defaultDigEmployeeId: employees?.defaultDigEmployeeId,
     userInfo: user?.userInfo,
   }));
 
-  const resourceId = useMemo(() => {
+  const defaultResourceId = useMemo(() => {
     return `${agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId || ''}`;
   }, [agentId, defaultDigEmployeeId, userInfo?.defaultDigEmployeeId]);
+  const resourceId = eventResourceId || defaultResourceId;
 
   const prologue = useMemo(() => safeJsonParse(agentDetail?.prologue), [agentDetail?.prologue]);
   const modelInfo = prologue?.modelInfo || {};
@@ -141,15 +152,32 @@ export default function FileBrowserEntry() {
     loadRelatedResources();
   }, [activeTab, loadRelatedResources, open]);
 
-  const openFileBrowser = () => {
-    if (!resourceId) {
-      message.warning(t('fileBrowserEntry.warning.missingResourceId'));
-      return;
-    }
-    setPortalContainer(resolvePortalContainer());
-    setActiveTab('files');
-    setOpen(true);
-  };
+  const openFileBrowser = useCallback(
+    (payload?: OpenFileBrowserPayload) => {
+      const nextResourceId = payload?.resourceId || defaultResourceId;
+
+      if (!nextResourceId) {
+        message.warning(t('fileBrowserEntry.warning.missingResourceId'));
+        return;
+      }
+
+      setEventResourceId(payload?.resourceId);
+      setPortalContainer(resolvePortalContainer());
+      setActiveTab('files');
+      setOpen(true);
+    },
+    [defaultResourceId, resolvePortalContainer, t]
+  );
+
+  useEffect(() => {
+    if (!listenGlobalOpen) return undefined;
+
+    EventEmitter.on('file-browser-open', openFileBrowser);
+
+    return () => {
+      EventEmitter.off('file-browser-open', openFileBrowser);
+    };
+  }, [EventEmitter, listenGlobalOpen, openFileBrowser]);
 
   const handleOpenKeyDown = (event: React.KeyboardEvent<HTMLSpanElement>) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -281,19 +309,21 @@ export default function FileBrowserEntry() {
 
   return (
     <>
-      <Tooltip title={fileManagementTip}>
-        <span
-          aria-label={fileManagementTip}
-          className={styles.fileBrowserEntry}
-          onClick={openFileBrowser}
-          onKeyDown={handleOpenKeyDown}
-          ref={entryRef}
-          role="button"
-          tabIndex={0}
-        >
-          <img className={styles.fileBrowserIcon} src={fileBrowserIcon} alt={fileManagementTip} />
-        </span>
-      </Tooltip>
+      {showTrigger && (
+        <Tooltip title={fileManagementTip}>
+          <span
+            aria-label={fileManagementTip}
+            className={styles.fileBrowserEntry}
+            onClick={() => openFileBrowser()}
+            onKeyDown={handleOpenKeyDown}
+            ref={entryRef}
+            role="button"
+            tabIndex={0}
+          >
+            <img className={styles.fileBrowserIcon} src={fileBrowserIcon} alt={fileManagementTip} />
+          </span>
+        </Tooltip>
+      )}
       {open &&
         container &&
         createPortal(

@@ -1,0 +1,163 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 8px;
+}
+
+.router {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  background: var(--user-fill-color, #f2f6fa);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.middle {
+  font-size: 13px;
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.miniList {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.breadcrumbBar {
+  flex-shrink: 0;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.searchResult {
+  color: var(--beyond-color-text-tertiary);
+  font-size: 12px;
+}
+
+.listSpin {
+  flex: 1;
+  min-height: 0;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      height: 100%;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+  }
+}
+
+.fileItem {
+  min-height: 36px;
+  padding: 6px 8px;
+  cursor: pointer;
+
+  :global {
+    .@{antPrefix}-list-item-meta {
+      min-width: 0;
+      align-items: center;
+    }
+
+    .@{antPrefix}-list-item-meta-avatar {
+      margin-right: 6px !important;
+    }
+
+    .@{antPrefix}-list-item-meta-content {
+      min-width: 0;
+    }
+  }
+}
+
+.fileAvatar {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+  background-color: transparent;
+  color: var(--beyond-color-primary);
+
+  :global(.@{antPrefix}-icon),
+  :global(.anticon) {
+    font-size: 18px;
+  }
+}
+
+.previewPanel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.previewHeader {
+  height: 48px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(~'--@{antPrefix}-color-border-secondary');
+}
+
+.previewTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.previewClose {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: #707680;
+  cursor: pointer;
+
+  &:hover {
+    background: #f2f6fa;
+    color: #1f2533;
+  }
+}
+
+.previewBody {
+  flex: 1;
+  min-height: 0;
+}
+
+.previewSpin {
+  height: 100%;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      height: 100%;
+    }
+  }
+}
+
+.previewContent {
+  height: 100%;
+}

@@ -1,24 +1,58 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Input, Button, Radio, Dropdown, List, theme, App, Tooltip, Typography } from 'antd';
-import { PlusOutlined, FilterOutlined, SearchOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
+import { Input, Dropdown, List, message, theme, Typography } from 'antd';
+import { SearchOutlined } from '@ant-design/icons';
 import { trim, get, isEmpty, intersection, debounce } from 'lodash';
-import { useIntl, useNavigate, useSelector } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
+import ResourceDetail from '@/components/Resources/components/ResourceDetail';
 import DetailPanel from '@/pages/knowledgeCenter/components/DetailPanel';
 import ShareModal from '@/pages/knowledgeCenter/components/shareModal';
+import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import { getRuntimeActualUrl } from '@/utils';
 import withDrag, { DragType, IDragType } from '@/components/QueryInput/withDrag';
-import { deleteKnowledge } from '@/pages/manager/service/resources';
-import { queryAuthDoc } from '@/service/knowledgeCenter';
+import { queryDigEmployeeRelResourceAuth } from '@/pages/manager/service/resources';
+import { batchHandleAuth, listAuthDetail } from '@/pages/manager/service/DigitalResourceMgr';
 import { IKnowledgeBaseItem } from './types';
 import InfiniteScrollAntdList from '../../../InfiniteScrollAntdList';
 import commonStyles from '../common.module.less';
 import EmptyTips from '@/components/EmptyTips';
 import useModuleEvent from '@/hooks/useModuleEvent';
-import { isTopAgent } from '@/service/digitalEmployees';
+import useGlobal from '@/hooks/useGlobal';
+import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import styles from './index.module.less';
 
-const { Paragraph } = Typography;
+const { Title, Paragraph } = Typography;
+const SHARE_GRANT_TYPE = 'FORCE_USE';
+
+const getGrantItem = (item: any) => ({
+  ...item,
+  id: `${String(item.grantToObjType).toLowerCase()}_${item.grantToObjId}`,
+  name: item.grantToObjName,
+  type: item.grantToObjType,
+});
+
+const transformGrantItem = (item: any) => {
+  const [, idFromKey] = String(item.id || '').split('_');
+  return {
+    grantToObjId: idFromKey || item.grantToObjId,
+    grantToObjType: item.type || item.grantToObjType,
+  };
+};
+
+interface AuthDetailResponse {
+  code?: number;
+  msg?: string;
+  data?: {
+    redList?: any[];
+    blackList?: any[];
+  };
+}
+
+interface AuthSaveResponse {
+  code?: number;
+  msg?: string;
+}
 
 interface KnowledgeBaseListProps {
   editable?: boolean;
@@ -27,34 +61,31 @@ interface KnowledgeBaseListProps {
   keyword?: string;
   agentId?: string;
   agentIds?: string;
+  activeAgentResourceId?: string;
 }
-
-/** 筛选：all 不传 ownerType；shared→企业 enterprise；private→个人 personal */
-enum FilterType {
-  all = 'all',
-  shared = 'shared',
-  private = 'private',
-}
-
-type ResourceCatalogMain = 'enterprise' | 'personal';
 
 const Draggable = withDrag(DragType.knowledgeBase);
-const PERSONAL_DEFAULT_OWNER_TYPE = 'personal_default';
+// const PERSONAL_DEFAULT_OWNER_TYPE = 'personal_default';
 
 const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
-  const { editable, onSelect, onDrilldown, keyword } = props;
+  const { onDrilldown, keyword, activeAgentResourceId } = props;
   const searchValue = useRef('');
   const listFetchRef = useRef(false);
-  const [filterType, setFilterType] = useState<FilterType>(FilterType.all);
+  const itemClickTimerRef = useRef<number | null>(null);
+  // const [filterType, setFilterType] = useState<FilterType>(FilterType.all);
   const [loading, setLoading] = useState(false);
   const [knowledgeBases, setKnowledgeBases] = useState<IKnowledgeBaseItem[]>([]);
-  const [hasMore, setHasMore] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
   const [modalState, setModalState] = useState<{
     openType: '' | 'add' | 'rename' | 'share';
     info?: IKnowledgeBaseItem;
   }>({ openType: '' });
-  const navigate = useNavigate();
-  const { modal, message } = App.useApp();
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareRecord, setShareRecord] = useState<IKnowledgeBaseItem | null>(null);
+  const [shareAuthList, setShareAuthList] = useState<any[]>([]);
+  const [shareBlackList, setShareBlackList] = useState<any[]>([]);
+  const { EventEmitter } = useGlobal();
+  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
   const { userInfo } = useSelector(({ user }: any) => ({
     userInfo: user.userInfo,
   }));
@@ -68,57 +99,79 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
   } = theme.useToken();
   const { moduleEventEmitter, logoutModuleEvent } = useModuleEvent('KNOWLEDGE_CENTER');
 
-  const filterTypes = useMemo(
-    () => [
-      { key: FilterType.all, label: intl.formatMessage({ id: 'dialogueRecord.all' }) },
-      { key: FilterType.shared, label: intl.formatMessage({ id: 'knowledgeCenter.shared' }) },
-      { key: FilterType.private, label: intl.formatMessage({ id: 'knowledgeCenter.myCreation' }) },
-    ],
-    [intl]
-  );
+  // const filterTypes = useMemo(
+  //   () => [
+  //     { key: FilterType.all, label: intl.formatMessage({ id: 'dialogueRecord.all' }) },
+  //     { key: FilterType.shared, label: intl.formatMessage({ id: 'knowledgeCenter.shared' }) },
+  //     { key: FilterType.private, label: intl.formatMessage({ id: 'knowledgeCenter.myCreation' }) },
+  //   ],
+  //   [intl]
+  // );
 
   // 获取知识库列表
-  const loadKnowledgeBases = async (reset = false) => {
-    if (listFetchRef.current) return;
-    listFetchRef.current = true;
-    if (reset) {
-      setLoading(true);
-    }
-    try {
-      const payload: {
-        pageNum: number;
-        pageSize: number;
-        keyword: string;
-        type: string;
-        ownerType?: ResourceCatalogMain;
-      } = {
-        pageNum: 1,
-        pageSize: 100,
-        keyword: searchValue.current.trim(),
-        type: 'all',
-      };
-      if (filterType === FilterType.shared) {
-        payload.ownerType = 'enterprise';
-      } else if (filterType === FilterType.private) {
-        payload.ownerType = 'personal';
+  const loadKnowledgeBases = useCallback(
+    async (reset = false) => {
+      if (listFetchRef.current) return;
+      listFetchRef.current = true;
+      if (reset) {
+        setLoading(true);
       }
-      const response = await queryAuthDoc(payload);
-      const rows = Array.isArray(response?.rows) ? response.rows : Array.isArray(response?.list) ? response.list : [];
-      setKnowledgeBases(rows);
-      setHasMore(false);
-    } catch (error) {
-      console.error('Failed to load knowledge bases:', error);
-      setHasMore(false);
-    } finally {
-      listFetchRef.current = false;
-      setLoading(false);
-    }
-  };
+      try {
+        const payload: {
+          resourceId?: string;
+          pageNum: number;
+          pageSize: number;
+          keyword: string;
+          resourceStatus?: string;
+          resourceBizTypeList?: string[];
+        } = {
+          resourceId: activeAgentResourceId,
+          pageNum: 1,
+          pageSize: 30,
+          keyword: searchValue.current.trim(),
+          resourceStatus: '2',
+          resourceBizTypeList: ['KG_DOC', 'KG_QA', 'KG_TERM'],
+        };
+        const response = await queryDigEmployeeRelResourceAuth(payload);
+        const rows = Array.isArray(response?.rows) ? response.rows : Array.isArray(response?.list) ? response.list : [];
+        setKnowledgeBases(rows);
+        setHasMore(false);
+      } catch (error) {
+        console.error('Failed to load knowledge bases:', error);
+        setHasMore(false);
+      } finally {
+        listFetchRef.current = false;
+        setLoading(false);
+      }
+    },
+    [activeAgentResourceId]
+  );
 
   // 初始加载
   useEffect(() => {
     loadKnowledgeBases(true);
-  }, [filterType]);
+  }, [loadKnowledgeBases]);
+
+  useEffect(() => {
+    const handleDefaultDigitalEmployeeChanged = () => {
+      loadKnowledgeBases(true);
+    };
+    EventEmitter.on('default-digital-employee-changed', handleDefaultDigitalEmployeeChanged);
+    return () => {
+      EventEmitter.off('default-digital-employee-changed', handleDefaultDigitalEmployeeChanged);
+    };
+  }, [EventEmitter, loadKnowledgeBases]);
+
+  useEffect(() => {
+    const handleResourceInstalled = () => {
+      loadKnowledgeBases(true);
+    };
+
+    window.addEventListener('digitalEmployeeResourceInstalled', handleResourceInstalled);
+    return () => {
+      window.removeEventListener('digitalEmployeeResourceInstalled', handleResourceInstalled);
+    };
+  }, [loadKnowledgeBases]);
 
   const onKeywordChanged = debounce((keyword: string) => {
     searchValue.current = keyword;
@@ -131,121 +184,6 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
       onKeywordChanged(keyword);
     }
   }, [keyword]);
-
-  // 每行菜单项
-  const getDropdownMenuItems = (item: IKnowledgeBaseItem) => {
-    const items = [];
-    const isDefaultPersonalKnowledge = item.ownerType === PERSONAL_DEFAULT_OWNER_TYPE;
-    if (isUser) {
-      if (`${item.isTop}` === '1') {
-        items.push({ key: 'unpin', label: intl.formatMessage({ id: 'common.unpin' }) });
-      }
-      if (`${item.isTop}` === '0') {
-        items.push({ key: 'pin', label: intl.formatMessage({ id: 'common.pin' }) });
-      }
-    }
-
-    if (`${item?.createBy}` === `${userInfo.userId}`) {
-      items.push(
-        { key: 'detail', label: intl.formatMessage({ id: 'knowledgeDetail.detail' }) },
-        { key: 'rename', label: intl.formatMessage({ id: 'directoryManage.rename' }) }
-      );
-      if (!isDefaultPersonalKnowledge) {
-        items.push({ key: 'delete', label: intl.formatMessage({ id: 'common.delete' }) });
-      }
-    }
-    return items;
-  };
-
-  // 置顶：将该条移动到第一条
-  function onPin(resourceId: string) {
-    if (!resourceId) return;
-    setKnowledgeBases((prev) => {
-      const newList = [...prev];
-      const idx = newList.findIndex((i) => i.resourceId === resourceId);
-      if (idx !== -1) {
-        const target = { ...newList[idx], isTop: '1' };
-        newList.splice(idx, 1);
-        newList.unshift(target);
-      }
-      return newList;
-    });
-  }
-
-  // 取消置顶：将该条移动到所有置顶之后、非置顶之前（成为非置顶的第一条）
-  function onUnpin(resourceId: string) {
-    if (!resourceId) return;
-    setKnowledgeBases((prev) => {
-      const newList = [...prev];
-      const idx = newList.findIndex((i) => i.resourceId === resourceId);
-      if (idx !== -1) {
-        const target = { ...newList[idx], isTop: '0' };
-        newList.splice(idx, 1);
-        const firstNonTopIndex = newList.findIndex((i) => `${i.isTop}` === '0');
-        if (firstNonTopIndex === -1) {
-          newList.push(target);
-        } else {
-          newList.splice(firstNonTopIndex, 0, target);
-        }
-      }
-      return newList;
-    });
-  }
-
-  const onRowMenuItemClick = useCallback((key: string, item: IKnowledgeBaseItem) => {
-    if (key === 'detail') {
-      const param = {
-        resourceId: item.resourceId,
-        resourceBizType: item.resourceBizType,
-        resourceSourcePkId: item.resourceSourcePkId,
-      };
-      const query = Object.entries(param).reduce((s, [K, v]) => `${s}${s ? '&' : '?'}${K}=${v}`, '');
-      navigate(`/knowledgeDetail${query}`);
-    } else if (key === 'rename') {
-      setModalState({
-        openType: 'rename',
-        info: item,
-      });
-    } else if (key === 'share') {
-      setModalState({
-        openType: 'share',
-        info: item,
-      });
-    } else if (key === 'delete') {
-      const optResourceId = item.resourceId;
-      modal.confirm({
-        title: intl.formatMessage({ id: 'common.deleteTips' }),
-        content: item.resourceName,
-        onOk: () =>
-          new Promise<void>((resolve) => {
-            deleteKnowledge({
-              resourceId: optResourceId,
-            })
-              .then(() => {
-                message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
-                setKnowledgeBases((prev) => prev.filter((i) => i.resourceId !== optResourceId));
-                moduleEventEmitter.emit('REFRESH_KNOWLEDGE_BASE');
-              })
-              .catch((error) => {
-                message.error(String(error || intl.formatMessage({ id: 'common.deleteFail' })));
-              })
-              .finally(resolve);
-          }),
-      });
-    } else if (key === 'unpin' || key === 'pin') {
-      isTopAgent({
-        agentIds: [item.resourceId],
-        isTop: key === 'pin' ? 1 : 0,
-        agentTypeList: [item.resourceBizType],
-      }).then(() => {
-        if (key === 'pin') {
-          onPin(item.resourceId);
-        } else {
-          onUnpin(item.resourceId);
-        }
-      });
-    }
-  }, []);
 
   useEffect(() => {
     const onDelete = (item: IKnowledgeBaseItem) => {
@@ -269,6 +207,140 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
     setModalState({ openType: '' });
   }, []);
 
+  const handleQuoteKnowledgeBase = useCallback(
+    (item: IKnowledgeBaseItem) => {
+      EventEmitter.emit('queryInput-insert-item', {
+        item,
+        type: DragType.knowledgeBase,
+      });
+    },
+    [EventEmitter]
+  );
+
+  const clearItemClickTimer = useCallback(() => {
+    if (itemClickTimerRef.current !== null) {
+      window.clearTimeout(itemClickTimerRef.current);
+      itemClickTimerRef.current = null;
+    }
+  }, []);
+
+  const handleKnowledgeBaseItemClick = useCallback(
+    (event: React.MouseEvent<HTMLElement>, item: IKnowledgeBaseItem) => {
+      event.stopPropagation();
+      clearItemClickTimer();
+      itemClickTimerRef.current = window.setTimeout(() => {
+        itemClickTimerRef.current = null;
+        onDrilldown(item);
+      }, 220);
+    },
+    [clearItemClickTimer, onDrilldown]
+  );
+
+  const handleKnowledgeBaseItemDoubleClick = useCallback(
+    (event: React.MouseEvent<HTMLElement>, item: IKnowledgeBaseItem) => {
+      event.stopPropagation();
+      clearItemClickTimer();
+      handleQuoteKnowledgeBase(item);
+    },
+    [clearItemClickTimer, handleQuoteKnowledgeBase]
+  );
+
+  useEffect(() => {
+    return clearItemClickTimer;
+  }, [clearItemClickTimer]);
+
+  const handleDetail = useCallback(
+    (item: IKnowledgeBaseItem) => {
+      setDetailPanel?.(
+        <ResourceDetail
+          visible
+          panel
+          resourceId={item.resourceId}
+          item={item}
+          resourceName={intl.formatMessage({ id: 'resource.knowledge' })}
+          onCancel={() => clearDetailPanel?.()}
+          onEdit={() => {}}
+        />,
+        { width: 350 }
+      );
+    },
+    [clearDetailPanel, intl, setDetailPanel]
+  );
+
+  const handleShare = useCallback(
+    async (item: IKnowledgeBaseItem) => {
+      if (!item.resourceId || !item.resourceBizType) return;
+      try {
+        const detail = (await listAuthDetail({
+          grantType: SHARE_GRANT_TYPE,
+          grantObjType: item.resourceBizType,
+          grantObjId: item.resourceId,
+        })) as unknown as AuthDetailResponse;
+
+        if (detail && detail.code === 0) {
+          setShareRecord(item);
+          setShareAuthList(detail.data?.redList?.map(getGrantItem) || []);
+          setShareBlackList(detail.data?.blackList?.map(getGrantItem) || []);
+          setShareModalOpen(true);
+          return;
+        }
+
+        message.error(detail?.msg || intl.formatMessage({ id: 'common.operationFailed' }));
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
+      }
+    },
+    [intl]
+  );
+
+  const handleShareCancel = useCallback(() => {
+    setShareModalOpen(false);
+    setShareRecord(null);
+    setShareAuthList([]);
+    setShareBlackList([]);
+  }, []);
+
+  const handleShareConfirm = useCallback(
+    async (authList: any[]) => {
+      if (!shareRecord?.resourceId || !shareRecord?.resourceBizType) return;
+
+      const redList = authList.map((item) => ({
+        ...transformGrantItem(item),
+        grantType: SHARE_GRANT_TYPE,
+      }));
+      const blackList = shareBlackList.map((item) => ({
+        ...transformGrantItem(item),
+        grantType: SHARE_GRANT_TYPE,
+      }));
+
+      try {
+        const res = (await batchHandleAuth(
+          {
+            grantObjId: shareRecord.resourceId,
+            grantObjType: shareRecord.resourceBizType,
+            redList,
+            blackList,
+            resourceId: shareRecord.resourceId,
+          },
+          '/byaiService/auth/privilegeGrant/setResourceUsers'
+        )) as unknown as AuthSaveResponse;
+
+        if (res && res.code === 0) {
+          message.success(intl.formatMessage({ id: 'common.shareSuccess' }));
+          handleShareCancel();
+          loadKnowledgeBases(true);
+          moduleEventEmitter.emit('REFRESH_KNOWLEDGE_BASE');
+          return;
+        }
+
+        message.error(res?.msg || intl.formatMessage({ id: 'common.shareFailed' }));
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'common.shareFailed' }));
+      }
+    },
+    [handleShareCancel, intl, loadKnowledgeBases, moduleEventEmitter, shareBlackList, shareRecord]
+  );
+
   return (
     <div className={commonStyles.container}>
       {/* 搜索区域 */}
@@ -288,13 +360,13 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
               }
             }}
           />
-          {editable && (
+          {/* {editable && (
             <Tooltip title={intl.formatMessage({ id: 'knowledgeCenter.create' })}>
               <Button icon={<PlusOutlined />} onClick={() => setModalState({ openType: 'add' })} />
             </Tooltip>
-          )}
+          )} */}
           {/* {!agentId && ( */}
-          <Dropdown
+          {/* <Dropdown
             trigger={['click']}
             menu={{
               onClick: ({ key }) => setFilterType(key as unknown as FilterType),
@@ -305,11 +377,12 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
             }}
           >
             <Button icon={<FilterOutlined />} />
-          </Dropdown>
+          </Dropdown> */}
           {/* )} */}
         </div>
       </div>
       <InfiniteScrollAntdList
+        className={employeeStyles.employeesList}
         dataSource={knowledgeBases}
         hasMore={hasMore}
         loading={loading}
@@ -323,60 +396,90 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
         }
         renderItem={(item) => {
           const actions = [
-            <AntdIcon
-              key={`open-${item.resourceId}`}
-              type="icon-a-Folder-openwenjianjia-kai"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDrilldown(item);
-              }}
-            />,
-          ];
-          if (editable && (`${item?.createBy}` === `${userInfo.userId}` || isUser)) {
-            actions.push(
-              <Dropdown
-                key={`actions-${item.resourceId}`}
-                trigger={['click']}
-                menu={{
-                  items: getDropdownMenuItems(item),
-                  onClick: ({ key, domEvent }) => {
-                    domEvent.stopPropagation();
-                    onRowMenuItemClick(key, item);
+            <Dropdown
+              key={`detail-${item.resourceId}`}
+              trigger={['hover']}
+              overlayClassName={employeeStyles.mydropdown}
+              menu={{
+                items: [
+                  {
+                    key: 'detail',
+                    label: (
+                      <div className={employeeStyles.dropdownMenuItem}>
+                        {intl.formatMessage({ id: 'common.detail' })}
+                      </div>
+                    ),
                   },
+                  {
+                    key: 'share',
+                    label: (
+                      <div className={employeeStyles.dropdownMenuItem}>
+                        {intl.formatMessage({ id: 'common.share' })}
+                      </div>
+                    ),
+                  },
+                ],
+                onClick: ({ key, domEvent }) => {
+                  domEvent.preventDefault();
+                  domEvent.stopPropagation();
+                  if (key === 'share') {
+                    void handleShare(item);
+                    return;
+                  }
+                  handleDetail(item);
+                },
+              }}
+            >
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
                 }}
               >
-                <span onClick={(e) => e.stopPropagation()}>
-                  <AntdIcon type="icon-a-Setting-configshezhipeizhi" />
-                </span>
-              </Dropdown>
-            );
-          }
+                <AntdIcon type="icon-a-Moregengduo" />
+              </span>
+            </Dropdown>,
+          ];
+
           return (
             <Draggable key={item.resourceId} data={item}>
               <List.Item
                 key={item.resourceId}
+                className={styles.knowledgeItem}
                 actions={actions}
-                onClick={() => onSelect?.(item, DragType.knowledgeBase)}
+                onClick={(event) => handleKnowledgeBaseItemClick(event, item)}
+                onDoubleClick={(event) => handleKnowledgeBaseItemDoubleClick(event, item)}
               >
                 <List.Item.Meta
                   title={
-                    <div className="textEllipsis" title={item.resourceName}>
-                      <span className={styles.nameText}>{item.resourceName}</span>
-                      {`${item?.isTop}` === '1' && isUser && (
-                        <AntdIcon type="icon-zhiding-fill" className={styles.pinBadge} />
-                      )}
-                    </div>
+                    <Title className={employeeStyles.name}>
+                      <span className={employeeStyles.nameRow} title={item.resourceName}>
+                        <span className={employeeStyles.nameText}>{item.resourceName}</span>
+                        {`${item?.isTop}` === '1' && isUser && (
+                          <AntdIcon type="icon-zhiding-fill" className={employeeStyles.pinBadge} />
+                        )}
+                      </span>
+                    </Title>
                   }
                   description={
-                    <Paragraph ellipsis={{ rows: 2 }} style={{ marginBottom: 0 }}>
+                    <Paragraph
+                      className={employeeStyles.description}
+                      ellipsis={{ tooltip: { title: item.resourceDesc, placement: 'right' } }}
+                    >
                       {item.resourceDesc}
                     </Paragraph>
                   }
                   avatar={
                     item.resourceLogoUrl ? (
-                      <img src={getRuntimeActualUrl(`/byaiService${item.resourceLogoUrl}`)} alt="" />
+                      <img
+                        className={styles.avatar}
+                        src={getRuntimeActualUrl(`/byaiService${item.resourceLogoUrl}`)}
+                        alt=""
+                      />
                     ) : (
-                      <AntdIcon type="icon-a-Book-oneshuji12" style={{ color: colorPrimary }} />
+                      <span className={styles.defaultAvatar}>
+                        <AntdIcon type="icon-a-Book-oneshuji12" style={{ color: colorPrimary }} />
+                      </span>
                     )
                   }
                 />
@@ -404,6 +507,15 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
           }}
           onCancel={closeModal}
           info={modalState.info}
+        />
+      )}
+      {shareModalOpen && (
+        <AddAuthModal
+          title={intl.formatMessage({ id: 'auth.addAuthObject' })}
+          value={shareAuthList}
+          showPost={false}
+          onCancel={handleShareCancel}
+          onOk={handleShareConfirm}
         />
       )}
       {modalState.openType === 'rename' && (

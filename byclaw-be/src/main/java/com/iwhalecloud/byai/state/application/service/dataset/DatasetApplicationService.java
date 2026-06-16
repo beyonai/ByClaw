@@ -37,6 +37,8 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Set;
@@ -258,9 +260,7 @@ public class DatasetApplicationService {
             true);
         logger.info("创建知识库返回:{}", JSON.toJSONString(ret));
 
-        if (!PythonBuildResponse.RESPONSE_SUCCESS.equalsIgnoreCase(ret.getResultCode())) {
-            throw new BaseException("Create Knowledge fail:" + ret.getResultMsg());
-        }
+        assertPythonBuildSuccess(ret, "创建知识库");
         return ret.getResultObject();
     }
 
@@ -470,6 +470,49 @@ public class DatasetApplicationService {
      */
     public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
         String fileDescription) throws IOException {
+        return uploadFiles(files, resourceId, directoryPath, fileDescription, Boolean.FALSE);
+    }
+
+    public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
+        String fileDescription, Boolean processFrontMatter) throws IOException {
+        return uploadFiles(files, resourceId, directoryPath, fileDescription, processFrontMatter, Boolean.FALSE);
+    }
+
+    /**
+     * 知识库文件上传前检查同路径同名冲突，供前端展示覆盖确认。
+     *
+     * @param request 检查请求
+     * @return 冲突文件路径
+     */
+    public KnowledgeUploadConflictCheckResponse checkUploadFileConflicts(
+        KnowledgeUploadConflictCheckRequest request) {
+        if (request == null || request.getResourceId() == null) {
+            throw new BaseException("知识库资源标识不能为空");
+        }
+        SsResource ssResource = loadDatasetResource(request.getResourceId());
+        validateDatasetManagePermission(ssResource);
+
+        KnowledgeUploadConflictCheckResponse response = new KnowledgeUploadConflictCheckResponse();
+        List<String> overwritePaths = findExistingKnowledgeFilePaths(ssResource, request.getDirectoryPath(),
+            request.getFileNames());
+        response.setOverwritePaths(overwritePaths);
+        response.setConflict(!overwritePaths.isEmpty());
+        return response;
+    }
+
+    /***
+     * 上传文件到知识库
+     *
+     * @param files 文件信息
+     * @param resourceId 资源标识
+     * @param directoryPath 文件目录路径
+     * @param fileDescription 文件描述
+     * @param processFrontMatter 是否解析 Markdown 文件中的 YAML front matter
+     * @param overwrite 同路径同名文件存在时是否先删除旧文件再上传
+     * @throws IOException 异常信息
+     */
+    public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
+        String fileDescription, Boolean processFrontMatter, Boolean overwrite) throws IOException {
 
         SsResource ssResource = loadDatasetResource(resourceId);
         validateDatasetManagePermission(ssResource);
@@ -479,23 +522,31 @@ public class DatasetApplicationService {
         uploadResult.setResourceCode(ssResource.getResourceCode());
         uploadResult.setResourceName(ssResource.getResourceName());
 
+        List<String> uploadFileNames = Arrays.stream(files).map(MultipartFile::getOriginalFilename).toList();
+        Set<String> existingFilePaths = Boolean.TRUE.equals(overwrite)
+            ? new HashSet<>(findExistingKnowledgeFilePaths(ssResource, directoryPath, uploadFileNames))
+            : new HashSet<>();
+
         for (MultipartFile multipartFile : files) {
 
             // 上传文件到知识库
             KbFileImport kbFileImport = new KbFileImport();
             kbFileImport.setKnCode(ssResource.getResourceCode());
 
-            if (StringUtil.isEmpty(directoryPath)) {
-                kbFileImport.setFilePath("/" + multipartFile.getOriginalFilename());
+            String filePath = buildKnowledgeFilePath(directoryPath, multipartFile.getOriginalFilename());
+            if (existingFilePaths.contains(filePath)) {
+                // QA 暂不支持原子覆盖，BE 只能在用户确认 overwrite=true 后先删旧文件再导入新文件。
+                deleteKnowledgeFile(ssResource, filePath, "覆盖上传前删除知识库旧文件");
             }
-            else {
-                kbFileImport.setFilePath(directoryPath + "/" + multipartFile.getOriginalFilename());
-            }
+            kbFileImport.setFilePath(filePath);
             kbFileImport
                 .setFileDescription(fileDescription != null ? fileDescription : multipartFile.getOriginalFilename());
+            // 是否解析 YAML front matter 由用户上传确认弹窗决定，后端只负责透传给 QA。
+            kbFileImport.setProcessFrontMatter(Boolean.TRUE.equals(processFrontMatter));
             kbFileImport.setMultipartFile(multipartFile);
             PythonBuildResponse<KbImportResult> importRet = feignPythonBuildService.importKnowledgeItem(kbFileImport);
             logger.info("导入文件:{}", JSON.toJSONString(importRet));
+            assertPythonBuildSuccess(importRet, "上传知识库文件");
 
             UploadItem uploadItem = new UploadItem();
             uploadItem.setFileName(multipartFile.getOriginalFilename());
@@ -524,6 +575,7 @@ public class DatasetApplicationService {
         logger.info("知识构建入参是:{}", JSON.toJSONString(kbFileToMarkdownIndex));
         PythonBuildResponse<Void> buildRet = feignPythonBuildService.fileToMarkdownIndex(kbFileToMarkdownIndex);
         logger.info("构建结果是:{}", JSON.toJSONString(buildRet));
+        assertPythonBuildSuccess(buildRet, "构建知识库文件");
 
     }
 
@@ -569,14 +621,21 @@ public class DatasetApplicationService {
 
         SsResource ssResource = loadDatasetResource(removeFileDto.getResourceId());
         validateDatasetManagePermission(ssResource);
+        deleteKnowledgeFile(ssResource, removeFileDto.getDirectoryPath(), "删除知识库文件");
 
-        // 删除构建
+    }
+
+    /**
+     * 删除知识库文件。覆盖上传时复用该逻辑，保证手动删除和覆盖删除走同一套 QA 响应校验。
+     */
+    private void deleteKnowledgeFile(SsResource ssResource, String filePath, String operationName) {
         KbFileDelete kbFileDelete = new KbFileDelete();
         kbFileDelete.setKnCode(ssResource.getResourceCode());
-        kbFileDelete.setFilePath(removeFileDto.getDirectoryPath());
+        kbFileDelete.setFilePath(filePath);
         logger.info("删除文件入参:{}", JSON.toJSONString(kbFileDelete));
         PythonBuildResponse<Void> removeResponse = feignPythonBuildService.deleteKnowledgeItem(kbFileDelete);
         logger.info("删除文件返回:{}", JSON.toJSONString(removeResponse));
+        assertPythonBuildSuccess(removeResponse, operationName);
 
     }
 
@@ -598,16 +657,12 @@ public class DatasetApplicationService {
         kbDirectoryCreate.setKnCode(ssResource.getResourceCode());
 
         String directoryPath = folder.getDirectoryPath();
-        if (StringUtil.isNotEmpty(directoryPath)) {
-            kbDirectoryCreate.setDirectoryPath(directoryPath.concat("/").concat(directoryName));
-        }
-        else {
-            kbDirectoryCreate.setDirectoryPath("/".concat(directoryName));
-        }
+        kbDirectoryCreate.setDirectoryPath(buildKnowledgeFilePath(directoryPath, directoryName));
         kbDirectoryCreate.setDirectoryDescription(folder.getDirectoryDescription());
 
         PythonBuildResponse<Void> ret = feignPythonBuildService.createDirectory(kbDirectoryCreate);
         logger.info("创建目录:{}", JsonUtil.toJSONString(ret));
+        assertPythonBuildSuccess(ret, "创建知识库目录");
 
         return kbDirectoryCreate;
     }
@@ -629,6 +684,7 @@ public class DatasetApplicationService {
 
         PythonBuildResponse<Void> ret = feignPythonBuildService.updateDirectory(kbDirectoryUpdate);
         logger.info("修改目录:{}", JsonUtil.toJSONString(ret));
+        assertPythonBuildSuccess(ret, "重命名知识库目录");
 
         return kbDirectoryUpdate;
     }
@@ -649,6 +705,7 @@ public class DatasetApplicationService {
 
         PythonBuildResponse<Void> ret = feignPythonBuildService.deleteDirectory(kbDirectoryDelete);
         logger.info("删除目录:{}", JsonUtil.toJSONString(ret));
+        assertPythonBuildSuccess(ret, "删除知识库目录");
 
     }
 
@@ -671,15 +728,16 @@ public class DatasetApplicationService {
             kbListDir.setKnCode(ssResource.getResourceCode());
         }
 
-        String listDirectoryPath = dirAndFileQo.getDirectoryPath();
-        if (StringUtil.isEmpty(listDirectoryPath)) {
-            listDirectoryPath = "/";
-        }
+        String listDirectoryPath = normalizeKnowledgeDirectoryPath(dirAndFileQo.getDirectoryPath());
         kbListDir.setDirectoryPath(listDirectoryPath);
         PythonBuildResponse<Data> response = feignPythonBuildService.listDir(kbListDir);
+        assertPythonBuildSuccess(response, "查询知识库目录");
         Data resultObject = response.getResultObject();
 
         List<DirAndFileVo> resultList = new ArrayList<>();
+        if (resultObject == null || resultObject.getData() == null) {
+            return resultList;
+        }
         for (DirOrFile dirOrFile : resultObject.getData()) {
             DirAndFileVo dirAndFileVo = new DirAndFileVo();
             String type = dirOrFile.getType();
@@ -694,6 +752,52 @@ public class DatasetApplicationService {
         }
 
         return resultList;
+    }
+
+    /**
+     * 查询指定目录下已存在的同名文件，返回完整文件路径。QA 的 import 暂不支持覆盖，所以覆盖上传前必须先找出旧文件。
+     */
+    private List<String> findExistingKnowledgeFilePaths(SsResource ssResource, String directoryPath,
+        List<String> fileNames) {
+        if (fileNames == null || fileNames.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        Set<String> targetFileNames = new HashSet<>();
+        for (String fileName : fileNames) {
+            String normalizedFileName = StringUtils.trimToEmpty(fileName).replace('\\', '/');
+            if (StringUtils.isNotBlank(normalizedFileName) && !normalizedFileName.contains("/")) {
+                targetFileNames.add(normalizedFileName);
+            }
+        }
+        if (targetFileNames.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        KbListDir kbListDir = new KbListDir();
+        kbListDir.setKnCode(ssResource.getResourceCode());
+        kbListDir.setDirectoryPath(normalizeKnowledgeDirectoryPath(directoryPath));
+        PythonBuildResponse<Data> response = feignPythonBuildService.listDir(kbListDir);
+        assertPythonBuildSuccess(response, "检查知识库同名文件");
+
+        List<String> existingFilePaths = new ArrayList<>();
+        Data resultObject = response.getResultObject();
+        if (resultObject == null || resultObject.getData() == null) {
+            return existingFilePaths;
+        }
+        for (DirOrFile dirOrFile : resultObject.getData()) {
+            if (dirOrFile == null || !"file".equalsIgnoreCase(dirOrFile.getType())) {
+                continue;
+            }
+            String existingName = getLastSplitName(dirOrFile.getName());
+            String existingPath = StringUtils.contains(dirOrFile.getName(), "/")
+                ? normalizeKnowledgeFilePath(dirOrFile.getName())
+                : buildKnowledgeFilePath(directoryPath, existingName);
+            if (targetFileNames.contains(existingName)) {
+                existingFilePaths.add(existingPath);
+            }
+        }
+        return existingFilePaths;
     }
 
     /**
@@ -975,8 +1079,70 @@ public class DatasetApplicationService {
         fileBuildStatus.setKnCode(ssResource.getResourceCode());
         fileBuildStatus.setFilePath(directoryPath);
         PythonBuildResponse<ProcessStatus> ret = feignPythonBuildService.fileBuildStatus(fileBuildStatus);
+        assertPythonBuildSuccess(ret, "查询知识库文件构建状态");
         return ret.getResultObject();
 
+    }
+
+    /**
+     * 统一知识库文件路径拼接，避免根目录 "/" 拼成 "//文件名"，从源头保证 BE 与 QA 的路径语义一致。
+     */
+    private String buildKnowledgeFilePath(String directoryPath, String fileName) {
+        String normalizedDirectoryPath = normalizeKnowledgeDirectoryPath(directoryPath);
+        String normalizedFileName = StringUtils.trimToEmpty(fileName).replace('\\', '/');
+        if (StringUtils.isBlank(normalizedFileName) || normalizedFileName.contains("/")) {
+            throw new BaseException("知识库文件名不合法");
+        }
+        return "/".equals(normalizedDirectoryPath) ? "/" + normalizedFileName
+            : normalizedDirectoryPath + "/" + normalizedFileName;
+    }
+
+    /**
+     * QA 返回的文件名按完整文件路径处理，统一补齐开头斜杠并压缩重复斜杠。
+     */
+    private String normalizeKnowledgeFilePath(String filePath) {
+        String normalizedPath = StringUtils.trimToEmpty(filePath).replace('\\', '/').replaceAll("/+", "/");
+        if (StringUtils.isBlank(normalizedPath)) {
+            throw new BaseException("知识库文件路径不合法");
+        }
+        if (!normalizedPath.startsWith("/")) {
+            normalizedPath = "/" + normalizedPath;
+        }
+        return normalizedPath;
+    }
+
+    /**
+     * 知识库目录路径统一为 "/" 或 "/a/b" 形式，不保留末尾斜杠，便于上传、查询、建目录使用同一套路径。
+     */
+    private String normalizeKnowledgeDirectoryPath(String directoryPath) {
+        String normalizedPath = StringUtils.trimToEmpty(directoryPath).replace('\\', '/').replaceAll("/+", "/");
+        if (StringUtils.isBlank(normalizedPath) || "/".equals(normalizedPath)) {
+            return "/";
+        }
+        if (!normalizedPath.startsWith("/")) {
+            normalizedPath = "/" + normalizedPath;
+        }
+        normalizedPath = StringUtils.removeEnd(normalizedPath, "/");
+        for (String pathPart : normalizedPath.split("/")) {
+            if ("..".equals(pathPart)) {
+                throw new BaseException("知识库目录路径不合法");
+            }
+        }
+        return normalizedPath;
+    }
+
+    /**
+     * QA 知识库接口业务失败时必须向前端抛错，避免出现“后端提示成功但文件没有落库/不可见”的假成功。
+     */
+    private void assertPythonBuildSuccess(PythonBuildResponse<?> response, String operationName) {
+        if (response == null) {
+            throw new BaseException(operationName + "失败：知识库服务响应为空");
+        }
+        if (PythonBuildResponse.RESPONSE_SUCCESS.equalsIgnoreCase(StringUtils.trimToEmpty(response.getResultCode()))) {
+            return;
+        }
+        String resultMsg = StringUtils.defaultIfBlank(response.getResultMsg(), response.getResultCode());
+        throw new BaseException(operationName + "失败：" + resultMsg);
     }
 
 }

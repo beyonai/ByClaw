@@ -160,7 +160,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
   }, [resourceType]);
 
   return (
-    <div id={getScrollableTarget} className={styles.scrollArea}>
+    <div id={getScrollableTarget} className={styles.sectionsContainer}>
       <Spin
         wrapperClassName={styles.spinningWrapper}
         tip={intl.formatMessage({ id: 'common.loading' })}
@@ -183,27 +183,32 @@ const ResourceList: React.FC<ResourceListProps> = ({
             }
             dataLength={list.length}
             scrollableTarget={getScrollableTarget}
-            className={styles.infiniteScroll}
-            scrollThreshold="80px"
+            className={styles.messageRowWrap}
+            scrollThreshold="50px"
             hasChildren={list.length > 0}
+            style={{
+              overflow: 'visible',
+            }}
           >
-            <div className={styles.cardGrid}>
-              {list.map((item) => (
-                <ResourceCard
-                  key={item.resourceId}
-                  resource={item}
-                  resourceType={resourceType}
-                  onCardClick={() => onDetail(item)}
-                  actionConfig={{
-                    scene: activeTab === 'personal' ? 'personal' : 'enterprise',
-                    onEdit: () => onEdit(item),
-                    onAuth: (authType) => onAuth(item, authType),
-                    onApplyUse: () => onApplyUse(item),
-                    onAuditUse: () => onAuditUse(item),
-                    onDelete: () => handleDel(item),
-                  }}
-                />
-              ))}
+            <div className={styles.categorySection}>
+              <div className={styles.employeeList}>
+                {list.map((item) => (
+                  <ResourceCard
+                    key={item.resourceId}
+                    resource={item}
+                    resourceType={resourceType}
+                    onCardClick={() => onDetail(item)}
+                    actionConfig={{
+                      scene: activeTab === 'personal' ? 'personal' : 'enterprise',
+                      onEdit: () => onEdit(item),
+                      onAuth: (authType) => onAuth(item, authType),
+                      onApplyUse: () => onApplyUse(item),
+                      onAuditUse: () => onAuditUse(item),
+                      onDelete: () => handleDel(item),
+                    }}
+                  />
+                ))}
+              </div>
             </div>
           </InfiniteScroll>
         )}
