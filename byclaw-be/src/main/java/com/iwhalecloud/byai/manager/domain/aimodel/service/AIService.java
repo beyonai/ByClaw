@@ -43,6 +43,10 @@ public class AIService {
     }
 
     public String generateText(String prompt, String modelCode) {
+        return generateText(null, prompt, modelCode, 4000);
+    }
+
+    public String generateText(String systemPrompt, String userPrompt, String modelCode, int maxTokens) {
         ModelDto defaultModel = getDefaultModel();
         String apiUrl = defaultModel.getUrl() + "/chat/completions";
         String apiKey = defaultModel.getAuthToken();
@@ -56,11 +60,14 @@ public class AIService {
             requestBody.put("model", model);
 
             List<Map<String, String>> messages = new ArrayList<>();
-            messages.add(Map.of("role", "user", "content", prompt));
+            if (StringUtils.isNotBlank(systemPrompt)) {
+                messages.add(Map.of("role", "system", "content", systemPrompt));
+            }
+            messages.add(Map.of("role", "user", "content", userPrompt));
             requestBody.put("messages", messages);
 
             requestBody.put("temperature", 0.7);
-            requestBody.put("max_tokens", 4000);
+            requestBody.put("max_tokens", maxTokens);
             applyThinkingParams(requestBody, defaultModel);
 
             // 设置请求头
