@@ -1,6 +1,9 @@
 package com.iwhalecloud.byai.gateway.sandbox.workspace;
 
+import java.nio.file.Files;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -71,6 +74,13 @@ class SandboxWorkspaceBootstrapInitializerTest {
             .hasContent("{\"profile\":\"xs\"}");
         assertThat(tempDir.resolve(".openclaw/identity/by_user_info.json"))
             .exists();
+        assertThat(tempDir.resolve(".sessions"))
+            .isDirectory();
+        assertThat(Files.getPosixFilePermissions(tempDir.resolve(".sessions")))
+            .containsAll(Set.of(
+                PosixFilePermission.OWNER_WRITE,
+                PosixFilePermission.GROUP_WRITE,
+                PosixFilePermission.OTHERS_WRITE));
         verify(userFS, never()).write(any(MultipartFile.class), any(String.class));
     }
 }

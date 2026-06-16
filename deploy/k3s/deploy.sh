@@ -456,6 +456,37 @@ ensure_opengauss_schema() {
     kubectl_cmd -n "$ns" exec "$pod" -- sh -lc 'set -e; for f in /tmp/01_init.sql /tmp/02_ddl.sql /tmp/03_grant.sql /tmp/04_dml.sql; do echo "    running $f"; su - omm -c "/usr/local/opengauss/bin/gsql -d postgres -f $f"; done'
 }
 
+apply_opengauss_migrations() {
+    if [ "${BYCLAW_K3S_APPLY_OPENGAUSS_MIGRATIONS:-true}" != "true" ]; then
+        return 0
+    fi
+    local ns="${NS_MIDDLEWARE:-by-middleware}"
+    local pod="${OPENGAUSS_POD_NAME:-opengauss-0}"
+    local migration_dir="${BYCLAW_K3S_MIGRATIONS_DIR:-$SCRIPT_DIR/migrations}"
+    local files f base remote
+    if [ ! -d "$migration_dir" ]; then
+        echo "    OpenGauss migrations directory not found; skip: $migration_dir"
+        return 0
+    fi
+    files="$(find "$migration_dir" -maxdepth 1 -type f -name '*.auto.sql' | sort || true)"
+    if [ -z "$files" ]; then
+        echo "    OpenGauss migrations: none"
+        echo "    only *.auto.sql files are applied automatically; placeholder SQL files are skipped"
+        return 0
+    fi
+    echo "========== Applying OpenGauss migrations =========="
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        base="$(basename "$f")"
+        remote="/tmp/byclaw-k3s-migration-${base}"
+        echo "    running migration: $base"
+        kubectl_cmd -n "$ns" cp "$f" "$pod:$remote"
+        kubectl_cmd -n "$ns" exec "$pod" -- sh -lc "su - omm -c \"/usr/local/opengauss/bin/gsql -d postgres -v ON_ERROR_STOP=1 -f $remote\""
+    done <<EOF
+$files
+EOF
+}
+
 apply_runtime_env_config() {
     local ns="${NS_SERVICE:-by-service}"
     local runtime_env="$GENERATED_DIR/40-service/.byclaw-runtime.env"
@@ -513,6 +544,7 @@ apply_generated() {
     cleanup_bad_pods_in_namespace "${NS_MIDDLEWARE:-by-middleware}"
     wait_middleware_ready
     ensure_opengauss_schema
+    apply_opengauss_migrations
     # 仅 apply opensandbox.yaml；.templates/ 下是 BatchSandbox Jinja 模板，不是集群资源
     kubectl_cmd apply -f "$GENERATED_DIR/30-sandbox/opensandbox.yaml"
     apply_runtime_env_config
