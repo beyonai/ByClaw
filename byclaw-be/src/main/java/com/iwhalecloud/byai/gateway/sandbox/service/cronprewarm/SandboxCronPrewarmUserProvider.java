@@ -1,6 +1,9 @@
 package com.iwhalecloud.byai.gateway.sandbox.service.cronprewarm;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -15,6 +18,8 @@ import com.iwhalecloud.byai.manager.entity.users.Users;
 
 @Service
 public class SandboxCronPrewarmUserProvider {
+
+    private static final int RECENT_LOGIN_DAYS = 90;
 
     private final SandboxCronPrewarmProperties properties;
 
@@ -37,8 +42,11 @@ public class SandboxCronPrewarmUserProvider {
         }
 
         LambdaQueryWrapper<Users> queryWrapper = new LambdaQueryWrapper<>();
+        Date recentLoginSince = Date.from(Instant.now().minus(RECENT_LOGIN_DAYS, ChronoUnit.DAYS));
         queryWrapper.eq(Users::getState, UserState.ACTIVE)
             .isNotNull(Users::getUserCode)
+            .isNotNull(Users::getLastLoginDate)
+            .ge(Users::getLastLoginDate, recentLoginSince)
             .orderByAsc(Users::getUserId);
         Page<Users> page = new Page<>(1, limit, false);
         return userService.selectList(page, queryWrapper)
