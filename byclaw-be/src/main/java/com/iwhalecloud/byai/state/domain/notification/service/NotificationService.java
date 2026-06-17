@@ -27,6 +27,7 @@ import com.iwhalecloud.byai.state.domain.message.service.MemoryMessageService;
 import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.iwhalecloud.byai.state.domain.template.enums.DebugModeEnum;
 import com.iwhalecloud.byai.state.domain.ws.constant.Constant;
 import com.iwhalecloud.byai.state.domain.ws.manager.NettyArrayOutputStream;
 import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
@@ -275,6 +276,7 @@ public class NotificationService {
         session.setObjectType(ConversationObjectType.NOTIFICATION); // 设置对象类型
         session.setSessionType(SessionType.H_AS.getCode());
         session.setCreatorId(targetId); // 设置创建者ID
+        session.setIsDebug(DebugModeEnum.DEBUG_0.getNum()); // 设置为非调试会话
         session.setEnterpriseId(CurrentUserHolder.getEnterpriseId()); // 设置企业ID
 
         // 保存会话到数据库
