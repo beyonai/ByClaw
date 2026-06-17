@@ -23,6 +23,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.application.service.filebrowser.FileBrowserApplicationService;
+import com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserCopyRequest;
 import com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserDeleteRequest;
 import com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserListRequest;
 import com.iwhalecloud.byai.state.domain.filebrowser.dto.FileBrowserMoveRequest;
@@ -230,6 +231,36 @@ public class FileBrowserController {
     }
 
     /**
+     * 复制文件或文件夹到目标目录
+     *
+     * @param request 包含resourceId、源路径和目标目录
+     * @return 复制结果
+     */
+    @PostMapping("/copy")
+    public ResponseUtil copy(@RequestBody FileBrowserCopyRequest request) {
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        if (StringUtils.isBlank(userCode)) {
+            return ResponseUtil.fail("用户未登录");
+        }
+        if (request.getResourceId() == null) {
+            return ResponseUtil.fail("resourceId is required");
+        }
+        if (StringUtils.isBlank(request.getSourcePath())) {
+            return ResponseUtil.fail("sourcePath is required");
+        }
+        if (StringUtils.isBlank(request.getTargetDirectory())) {
+            return ResponseUtil.fail("targetDirectory is required");
+        }
+        try {
+            fileBrowserService.copy(userCode, request.getResourceId(), request.getSourcePath(),
+                request.getTargetDirectory());
+            return ResponseUtil.successResponse();
+        } catch (Exception e) {
+            return ResponseUtil.fail("复制失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 创建文件夹
      *
      * @param request 包含resourceId和文件夹路径
@@ -249,6 +280,32 @@ public class FileBrowserController {
         }
         try {
             fileBrowserService.createFolder(userCode, request.getResourceId(), request.getPath());
+            return ResponseUtil.successResponse();
+        } catch (Exception e) {
+            return ResponseUtil.fail("创建文件夹失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 幂等确保文件夹存在，主要用于共享文件夹、日志文件夹等系统入口。
+     *
+     * @param request 包含resourceId和文件夹路径
+     * @return 处理结果
+     */
+    @PostMapping("/ensureFolder")
+    public ResponseUtil ensureFolder(@RequestBody FileBrowserListRequest request) {
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        if (StringUtils.isBlank(userCode)) {
+            return ResponseUtil.fail("用户未登录");
+        }
+        if (request.getResourceId() == null) {
+            return ResponseUtil.fail("resourceId is required");
+        }
+        if (StringUtils.isBlank(request.getPath())) {
+            return ResponseUtil.fail("path is required");
+        }
+        try {
+            fileBrowserService.ensureFolder(userCode, request.getResourceId(), request.getPath());
             return ResponseUtil.successResponse();
         } catch (Exception e) {
             return ResponseUtil.fail("创建文件夹失败: " + e.getMessage());

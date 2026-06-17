@@ -93,6 +93,14 @@ export interface BuildDatasetPayload {
 export const queryDirAndFileByLevel = (data: QueryDirAndFileByLevelParams) =>
   POST<QueryDirAndFileByLevelItem[]>('/byaiService/datasetController/queryDirAndFileByLevel', data);
 
+export interface SearchDirAndFilePayload extends QueryDirAndFileByLevelParams {
+  keyword: string;
+}
+
+// 按关键字递归搜索知识库目录与文件
+export const searchDirAndFile = (data: SearchDirAndFilePayload) =>
+  POST<QueryDirAndFileByLevelItem[]>('/byaiService/datasetController/searchDirAndFile', data);
+
 /** datasetController/renameFolder 请求体 */
 export interface RenameFolderPayload {
   resourceId: number;

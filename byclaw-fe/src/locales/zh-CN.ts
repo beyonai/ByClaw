@@ -637,7 +637,7 @@ export default {
   'directoryManage.missingKnowledgeBaseInfo': '缺少文档库信息',
   'directoryManage.buildProgress': '构建进度',
   'directoryManage.deleteFile': '删除文件',
-  'directoryManage.downloadFile': '下载文件',
+  'directoryManage.downloadFile': '下载',
   'directoryManage.downloadMissingParams': '无法下载：缺少文件路径或文档库信息',
   'directoryManage.deleteFolderMissingParams': '无法删除：缺少目录路径或文档库信息',
   'directoryManage.deleteFileMissingParams': '无法删除：缺少文件路径或文档库信息',

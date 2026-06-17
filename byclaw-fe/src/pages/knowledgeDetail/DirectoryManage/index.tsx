@@ -25,6 +25,7 @@ import {
   deleteFolder,
   getFileBuildStatus,
   removeFile,
+  searchDirAndFile,
   type BuildDatasetPayload,
 } from '@/service/knowledgeCenter';
 import { downloadFile } from '@/utils/file';
@@ -40,6 +41,7 @@ export interface DirectoryManageRef {
 
 interface IProps {
   searchValue?: string;
+  setSearchValue?: React.Dispatch<React.SetStateAction<string>>;
   baseInfo: any;
   canManage?: boolean;
   setShowAddFolder: (show: boolean) => void;
@@ -70,8 +72,45 @@ type IFileBuildStatus = {
   stepDict?: IBuildStatusItem[];
 };
 
+function normalizeDirectoryPath(path?: string) {
+  const normalizedPath = `${path || '/'}`.trim().replace(/\\/g, '/').replace(/\/+/g, '/');
+  if (!normalizedPath || normalizedPath === '/') {
+    return '/';
+  }
+  return normalizedPath.startsWith('/') ? normalizedPath : `/${normalizedPath}`;
+}
+
+function buildFolderPathFromDirectoryPath(directoryPath: string, rootTitle: string) {
+  const segments = normalizeDirectoryPath(directoryPath).split('/').filter(Boolean);
+  const nextFolderPath = [{ id: '-1', title: rootTitle }];
+  let accumulatedPath = '';
+  segments.forEach((segment) => {
+    accumulatedPath += `/${segment}`;
+    nextFolderPath.push({
+      id: accumulatedPath,
+      title: segment,
+    });
+  });
+  return nextFolderPath;
+}
+
+function normalizeDirectoryRows(rows: any[] = []) {
+  return rows.map((row) => ({
+    ...row,
+    collectionName: row.collectionName ?? row.name,
+  }));
+}
+
 const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) => {
-  const { searchValue = '', baseInfo, canManage = false, setShowAddFolder, uploadLoading, setUploadLoading } = props;
+  const {
+    searchValue = '',
+    setSearchValue,
+    baseInfo,
+    canManage = false,
+    setShowAddFolder,
+    uploadLoading,
+    setUploadLoading,
+  } = props;
 
   const { folderPath, setFolderPath } = props;
 
@@ -89,6 +128,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
   const [queryingBuildStatusIds, setQueryingBuildStatusIds] = useState<string[]>([]);
   const [pollingFileIds, setPollingFileIds] = useState<string[]>([]);
   const [visibleFileIds, setVisibleFileIds] = useState<string[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const fileRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
   const queryingFileIdsRef = useRef<Set<string>>(new Set());
   const queriedFileIdsRef = useRef<Set<string>>(new Set());
@@ -123,16 +163,37 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
   }, [folderPath]);
 
   const getDirectoryList = useCallback(
-    (_params?: Record<string, any>) => {
-      void _params;
+    async (_params?: Record<string, any>) => {
       const rid = baseInfo?.resourceId;
       if (rid === null || rid === undefined || rid === '') return;
+      const keyword = String(_params?.name ?? searchValue).trim();
+      if (keyword) {
+        setSearchLoading(true);
+        try {
+          const res = await searchDirAndFile({
+            resourceId: Number(rid),
+            directoryPath: '/',
+            keyword,
+          });
+          setState({
+            directoryList: normalizeDirectoryRows(Array.isArray(res) ? res : []),
+          });
+        } catch (error) {
+          console.error(error);
+          setState({
+            directoryList: [],
+          });
+        } finally {
+          setSearchLoading(false);
+        }
+        return;
+      }
       queryDirAndFileByLevel({
         resourceId: Number(rid),
         directoryPath: getListDirectoryPath(),
       });
     },
-    [baseInfo?.resourceId, getListDirectoryPath, queryDirAndFileByLevel]
+    [baseInfo?.resourceId, getListDirectoryPath, queryDirAndFileByLevel, searchValue, setState]
   );
 
   useEffect(() => {
@@ -140,8 +201,14 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     setState({
       directoryList: [],
     });
-    getDirectoryList();
-  }, [baseInfo?.resourceId, currentFolderId, getDirectoryList, setState]);
+    const timer = window.setTimeout(
+      () => {
+        getDirectoryList();
+      },
+      searchValue.trim() ? 300 : 0
+    );
+    return () => window.clearTimeout(timer);
+  }, [baseInfo?.resourceId, currentFolderId, getDirectoryList, searchValue, setState]);
 
   useEffect(() => {
     return () => {
@@ -161,14 +228,8 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
   );
 
   const displayDirectoryList = useMemo(() => {
-    const kw = searchValue.trim().toLowerCase();
-    if (!kw) return directoryList;
-    return directoryList.filter((item: any) =>
-      String(item.collectionName ?? item.name ?? '')
-        .toLowerCase()
-        .includes(kw)
-    );
-  }, [directoryList, searchValue]);
+    return directoryList;
+  }, [directoryList]);
 
   /** 构建 / 查询构建状态 共用的完整文件路径 */
   const getBuildDirectoryPath = useCallback(
@@ -700,6 +761,15 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     [buildingFileIds, canManage, getFileRowKey, intl]
   );
 
+  const getFileRowRef = useCallback(
+    (rowKey: string) => (el: HTMLDivElement | null) => {
+      if (el) {
+        fileRefs.current[rowKey] = el as HTMLTableRowElement;
+      }
+    },
+    []
+  );
+
   const columns = useMemo(
     () => [
       {
@@ -714,13 +784,22 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
           if (record.type === 'directory') {
             style = { cursor: 'pointer' };
             onClick = () => {
-              setFolderPath((prev) => [
-                ...prev,
-                {
-                  id: record.id,
-                  title: record.collectionName ?? record.name,
-                },
-              ]);
+              if (searchValue.trim()) {
+                const directoryPath = getBuildDirectoryPath(record);
+                setFolderPath(buildFolderPathFromDirectoryPath(directoryPath, folderPath[0].title));
+                setSearchValue?.('');
+                return;
+              }
+              setFolderPath((prev) => {
+                const directoryPath = normalizeDirectoryPath(getBuildDirectoryPath(record));
+                return [
+                  ...prev,
+                  {
+                    id: directoryPath,
+                    title: record.collectionName ?? record.name,
+                  },
+                ];
+              });
             };
           }
 
@@ -732,13 +811,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
               onClick={onClick}
               style={{ display: 'flex', alignItems: 'center', ...style }}
               title={v}
-              ref={
-                isFile
-                  ? (el) => {
-                    if (el) fileRefs.current[rowKey] = el as HTMLTableRowElement;
-                  }
-                  : undefined
-              }
+              ref={isFile ? getFileRowRef(rowKey) : undefined}
             >
               <AntdIcon type={`icon-${iconType}`} style={{ fontSize: 24, marginRight: 14 }} />
               <div className="textEllipsis">{v}</div>
@@ -821,7 +894,17 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         },
       },
     ],
-    [getActions, getBuildProgressText, handleAction, intl]
+    [
+      folderPath,
+      getActions,
+      getBuildDirectoryPath,
+      getBuildProgressText,
+      getFileRowRef,
+      handleAction,
+      intl,
+      searchValue,
+      setSearchValue,
+    ]
   );
 
   const handleBreadcrumbClick = (index: number) => {
@@ -856,7 +939,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
           }}
           endMessage={null}
           scrollDivId="directoryTable"
-          loading={directoryLoading}
+          loading={directoryLoading || searchLoading}
         />
       </div>
       {moveModalVisible && (

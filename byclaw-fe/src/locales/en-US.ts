@@ -629,7 +629,7 @@ export default {
   'directoryManage.missingKnowledgeBaseInfo': 'Missing knowledge base information',
   'directoryManage.buildProgress': 'Build Progress',
   'directoryManage.deleteFile': 'Delete File',
-  'directoryManage.downloadFile': 'Download File',
+  'directoryManage.downloadFile': 'Download',
   'directoryManage.downloadMissingParams': 'Unable to download: missing file path or knowledge base information',
   'directoryManage.deleteFolderMissingParams': 'Unable to delete: missing folder path or knowledge base information',
   'directoryManage.deleteFileMissingParams': 'Unable to delete: missing file path or knowledge base information',
