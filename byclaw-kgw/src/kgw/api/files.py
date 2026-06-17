@@ -97,7 +97,7 @@ async def read_file(
     )
 
 
-@router.post("/dslGuide")
+@router.get("/dslGuide")
 async def dsl_guide() -> dict[str, Any]:
     """Return the static Agent DSL syntax reference guide."""
     return {

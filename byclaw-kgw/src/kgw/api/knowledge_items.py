@@ -358,6 +358,12 @@ async def knowledge_item_import(
         pending_keys: list[tuple[int, str, str]] = []
 
         if front_matter:
+            _log.info(
+                "import.front_matter.found",
+                kn_code=kn_code,
+                file_path=file_path,
+                keys=list(front_matter.keys()),
+            )
             # Q1=A: reject unregistered field names
             n2b, _, props_by_name = await _resolve_property_map(
                 pool, list(front_matter.keys())
@@ -387,6 +393,13 @@ async def knowledge_item_import(
                         )
             # Rewrite front-matter keys to backend names
             modified_content = _rewrite_front_matter(raw_content, n2b)
+        else:
+            _log.info(
+                "import.front_matter.skipped",
+                kn_code=kn_code,
+                file_path=file_path,
+                reason="no frontmatter in markdown file",
+            )
 
         # Upload buffered bytes via httpx directly (stream already consumed)
         try:
@@ -429,12 +442,24 @@ async def knowledge_item_import(
         if attempt_id is not None:
             result_ok = result.get("resultCode") == "0"
             if result_ok:
+                _log.info(
+                    "import.metadata.synced",
+                    kn_code=kn_code,
+                    file_path=file_path,
+                    keys=list(front_matter.keys()),
+                )
                 await binding_mod.mark_synced_by_attempt(pool, attempt_id=attempt_id)
             else:
                 await _rollback_binding(
                     pool, attempt_id=attempt_id, pending_keys=pending_keys
                 )
     else:
+        _log.info(
+            "import.front_matter.skipped",
+            kn_code=kn_code,
+            file_path=file_path,
+            reason="not a markdown file",
+        )
         # Non-markdown: original streaming proxy_upload path (no buffering)
         try:
             result = await proxy_upload(

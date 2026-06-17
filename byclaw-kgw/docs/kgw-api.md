@@ -83,7 +83,7 @@
 | `POST` | `/kgw/api/v1/downloadFile` | 下载原始文件 |
 | `POST` | `/kgw/api/v1/fileToMarkdownIndex` | 异步触发知识构建 |
 | `POST` | `/kgw/api/v1/fileBuildStatus` | 查询文档构建状态 |
-| `POST` | `/kgw/api/v1/dslGuide` | 获取 DSL 构建指引（静态内容） |
+| `GET` | `/kgw/api/v1/dslGuide` | 获取 DSL 构建指引（静态内容） |
 
 ### 检索
 
@@ -301,7 +301,7 @@
 `status` 取值：`processing` / `success` / `failed`
 `currentStep` 取值：`markdown` / `chunking` / `vectorizing` / `complete`
 
-### `POST /kgw/api/v1/dslGuide`
+### `GET /kgw/api/v1/dslGuide`
 
 返回当前知识库支持的 DSL 字段定义（静态文档内容，无需请求体）。供前端或 Agent 构建检索条件时参考。
 

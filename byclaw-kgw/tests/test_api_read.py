@@ -174,15 +174,11 @@ def test_read_file_calls_dispatch():
 
 
 def test_dsl_guide_returns_static_content():
-    """POST /dslGuide returns the static DSL guide without calling any backend."""
+    """GET /dslGuide returns the static DSL guide without calling any backend."""
     from kgw.dsl_guide import DSL_GUIDE_CONTENT
 
     client = TestClient(_build_files_app())
-    resp = client.post(
-        "/kgw/api/v1/dslGuide",
-        json={"knCode": "kb1"},
-        headers={"X-User-Id": "u1"},
-    )
+    resp = client.get("/kgw/api/v1/dslGuide")
     assert resp.status_code == 200
     body = resp.json()
     assert body["resultCode"] == "0"
