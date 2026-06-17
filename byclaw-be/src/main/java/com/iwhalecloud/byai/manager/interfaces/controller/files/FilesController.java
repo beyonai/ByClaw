@@ -107,7 +107,7 @@ public class FilesController {
         if (StringUtils.isNotEmpty(userCode)) {
             sessionFilter.doFilter(httpSession);
         }
-        if (CurrentUserHolder.getLoginInfo() == null) {
+        if (StringUtils.isEmpty(userCode)) {
             String currentUrl = request.getRequestURL().toString();
             String queryString = request.getQueryString();
             if (queryString != null) {
@@ -115,7 +115,15 @@ public class FilesController {
             }
             ByaiSystemConfigService configService = ApplicationContextUtil.getBean(ByaiSystemConfigService.class);
             String webBaseUrl = configService.getDcSystemConfigValueByCode(Constants.WEB_BASE_URL);
-            String redirectUrl = (webBaseUrl != null ? webBaseUrl : "") + "/beyond/mobile/login?redirectUrl=" + URLEncoder.encode(currentUrl, StandardCharsets.UTF_8);
+            String env = System.getenv("BE_ENV");
+            // development 环境前端无 /beyond 基路径，直连本地 dev server；生产带 /beyond 前缀。
+            boolean isDev = StringUtils.isNotEmpty(env) && "development".equals(env);
+            String loginPath = isDev ? "/mobile/login" : "/beyond/mobile/login";
+            if (isDev) {
+                webBaseUrl = "http://localhost:8000";
+            }
+            String redirectUrl = (webBaseUrl != null ? webBaseUrl : "") + loginPath
+                + "?redirectUrl=" + URLEncoder.encode(currentUrl, StandardCharsets.UTF_8);
             response.sendRedirect(redirectUrl);
             return;
         }
