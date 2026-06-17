@@ -24,12 +24,6 @@ export type DocumentationNotificationResult = {
 };
 
 function resolveWebhookUrl(config: ResolvedNotificationConfig): string | undefined {
-  if (config.webhookUrlEnv) {
-    const fromEnv = process.env[config.webhookUrlEnv]?.trim();
-    if (fromEnv) {
-      return fromEnv;
-    }
-  }
   return config.webhookUrl?.trim() || undefined;
 }
 

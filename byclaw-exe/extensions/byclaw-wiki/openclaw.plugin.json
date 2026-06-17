@@ -133,11 +133,7 @@
       },
       "notificationWebhookUrl": {
         "type": "string",
-        "description": "Optional group robot webhook URL. Prefer notificationWebhookUrlEnv for secrets."
-      },
-      "notificationWebhookUrlEnv": {
-        "type": "string",
-        "description": "Environment variable name that contains the group robot webhook URL."
+        "description": "Optional group robot webhook URL."
       },
       "notificationRobotType": {
         "type": "string",

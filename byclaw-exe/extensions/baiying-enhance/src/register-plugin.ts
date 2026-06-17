@@ -76,7 +76,9 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
       error: (message) => api.logger.error(message),
     },
   });
+
   setSharedRedisJsonStore(redisJsonStore);
+
   registerBaiyingAimodelRuntimeProvider(api, pluginCfg);
 
   registerBaiyingHttpRoutes({ api, registry });

@@ -82,7 +82,7 @@ and restart Gateway.
           retryMaxAttempts: 3,
           includeRawOutputInToolResult: false,
           gitDepth: 1,
-          notificationWebhookUrlEnv: "BYCLAW_WIKI_ROBOT_WEBHOOK",
+          notificationWebhookUrl: "https://oapi.dingtalk.com/robot/send?access_token=...",
           notificationRobotType: "dingtalk"
         }
       }
@@ -114,8 +114,7 @@ The intended flow is:
    `documentMarkdown` to send that generated document to the group robot for
    review.
 
-Configure `notificationWebhookUrlEnv` instead of putting webhook secrets
-directly in `openclaw.json`.
+Configure `notificationWebhookUrl` in `openclaw.json`.
 
 Supported `notificationRobotType` values:
 

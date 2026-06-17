@@ -89,12 +89,7 @@ export const byclawWikiConfigSchema = {
     },
     notificationWebhookUrl: {
       type: "string",
-      description:
-        "Optional group robot webhook URL. Prefer notificationWebhookUrlEnv for secrets.",
-    },
-    notificationWebhookUrlEnv: {
-      type: "string",
-      description: "Environment variable name that contains the group robot webhook URL.",
+      description: "Optional group robot webhook URL.",
     },
     notificationRobotType: {
       enum: ["generic", "wecom", "dingtalk", "feishu"],
@@ -240,7 +235,6 @@ export function resolveByclawWikiConfig(raw: unknown): ResolvedByclawWikiConfig 
     gitDepth: readPositiveInteger(config.gitDepth, 1),
     notification: {
       webhookUrl: readString(config.notificationWebhookUrl, "") || undefined,
-      webhookUrlEnv: readString(config.notificationWebhookUrlEnv, "") || undefined,
       robotType: readRobotType(config.notificationRobotType),
       maxOutputChars: readPositiveInteger(config.notificationMaxOutputChars, 3000),
       minOutputChars: readNonNegativeInteger(config.notificationMinOutputChars, 1),

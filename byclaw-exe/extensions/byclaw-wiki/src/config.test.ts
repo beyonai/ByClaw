@@ -91,17 +91,15 @@ describe("resolveByclawWikiConfig", () => {
     assert.equal(config.dataDir, path.join(path.sep, "state", "wiki-cache"));
   });
 
-  it("resolves notification config with env-based webhook preferred", () => {
+  it("resolves notification config from plugin config", () => {
     const config = resolveByclawWikiConfig({
       notificationWebhookUrl: "https://example.test/direct",
-      notificationWebhookUrlEnv: "BYCLAW_WIKI_ROBOT_WEBHOOK",
       notificationRobotType: "wecom",
       notificationMaxOutputChars: 1200,
       notificationMinOutputChars: 10,
     });
 
     assert.equal(config.notification.webhookUrl, "https://example.test/direct");
-    assert.equal(config.notification.webhookUrlEnv, "BYCLAW_WIKI_ROBOT_WEBHOOK");
     assert.equal(config.notification.robotType, "wecom");
     assert.equal(config.notification.maxOutputChars, 1200);
     assert.equal(config.notification.minOutputChars, 10);
