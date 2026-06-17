@@ -35,6 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeInstallResourceDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeIdDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SetDefaultDigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -124,6 +125,21 @@ public class DigitalEmployeeController {
         DigitalEmployeeDetailsDTO details = digitalEmployeeApplicationService.findDetailsById(employeeIdDTO);
         digitalEmployeeApplicationService.applyInputRuntimeFieldsForResponse(details, digitalEmployeeDTO);
 
+        return ResponseUtil.successResponse(I18nUtil.get("digemployee.update.success"), details);
+    }
+
+    /**
+     * 安装知识或资源到数字员工。
+     *
+     * @param installResourceDTO 安装对象
+     * @return ResponseUtil
+     */
+    @ManageLogAnnotation(name = "数字员工", description = "安装知识或资源")
+    @RequestMapping(value = "/installRelResources", method = RequestMethod.POST)
+    public ResponseUtil<DigitalEmployeeDetailsDTO> installRelResources(
+        @RequestBody DigitalEmployeeInstallResourceDTO installResourceDTO) {
+        DigitalEmployeeDetailsDTO details =
+            digitalEmployeeApplicationService.installDigitalEmployeeRelResources(installResourceDTO);
         return ResponseUtil.successResponse(I18nUtil.get("digemployee.update.success"), details);
     }
 

@@ -163,13 +163,17 @@ describe('Auth Service', () => {
 
       getDcSystemConfigListByStandType(payload);
 
-      expect(mockPOST).toHaveBeenCalledWith('/byaiService/system/staticdata/getDcSystemConfigListByStandType', payload);
+      expect(mockPOST).toHaveBeenCalledWith(
+        '/byaiService/system/staticdata/getDcSystemConfigListByStandType',
+        { ...payload },
+        {}
+      );
     });
 
     it('should call POST with empty object when no payload provided', () => {
       getDcSystemConfigListByStandType();
 
-      expect(mockPOST).toHaveBeenCalledWith('/byaiService/system/staticdata/getDcSystemConfigListByStandType', {});
+      expect(mockPOST).toHaveBeenCalledWith('/byaiService/system/staticdata/getDcSystemConfigListByStandType', {}, {});
     });
   });
 

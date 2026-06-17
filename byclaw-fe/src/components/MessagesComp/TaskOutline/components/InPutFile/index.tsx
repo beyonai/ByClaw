@@ -28,7 +28,7 @@ const getFileIcon = (fileName: string) => {
 
   // 处理空值
   if (!nameStr.includes('.')) {
-    return 'wenjianjia'; // 文件夹图标
+    return 'wenjianjialanse'; // 文件夹图标
   }
 
   const extension = nameStr.split('.').pop()?.toLowerCase();

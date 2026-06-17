@@ -214,6 +214,8 @@ public class FeignPythonBuildService {
             formFields.put("knCode", kbFileImport.getKnCode());
             formFields.put("filePath", kbFileImport.getFilePath());
             formFields.put("fileDescription", kbFileImport.getFileDescription());
+            formFields.put("processFrontMatter", String.valueOf(Boolean.TRUE.equals(
+                kbFileImport.getProcessFrontMatter())));
 
             String requestPath = resolvePath(kbFileImport, KnowledgeServiceOperation.UPLOAD_FILE);
             KnowledgeServiceEndpoint endpoint = resolveRoute(kbFileImport);

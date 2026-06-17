@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Descriptions, Spin } from 'antd';
+import { Button, Modal, Spin } from 'antd';
+import { CloseOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import { queryResourceMembers } from '@/pages/manager/service/resources';
 // import ResourceMembers from '../ResourceMembers';
@@ -23,13 +24,20 @@ interface ResourceDetailProps {
   visible: boolean;
   resourceId?: string | number;
   item: IResourceItem | null;
-  resourceType: string;
   resourceName: string;
   onCancel: () => void;
   onEdit: () => void;
+  panel?: boolean;
 }
 
-const ResourceDetail: React.FC<ResourceDetailProps> = ({ visible, resourceId, resourceName, item, onCancel }) => {
+const ResourceDetail: React.FC<ResourceDetailProps> = ({
+  visible,
+  resourceId,
+  resourceName,
+  item,
+  onCancel,
+  panel = false,
+}) => {
   const intl = useIntl();
   const [loading, setLoading] = useState(false);
   const [objectLoading, setObjectLoading] = useState(false);
@@ -100,28 +108,43 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({ visible, resourceId, re
     }
   };
 
+  const renderDetailField = (label: React.ReactNode, value: React.ReactNode) => (
+    <div className={styles.detailField}>
+      <div className={styles.detailLabel}>{label}</div>
+      <div className={styles.detailValue}>{value || '-'}</div>
+    </div>
+  );
+
   // 获取属性信息
   const getPropertiesInfo = () => {
     try {
       const targetContent = detailData?.extInfo?.targetContent ? JSON.parse(detailData.extInfo.targetContent) : null;
-      return targetContent?.fields ? (
-        <Descriptions.Item label={`${resourceName}${intl.formatMessage({ id: 'resource.property' })}`} span={2}>
+      return targetContent?.fields
+        ? renderDetailField(
+          `${resourceName}${intl.formatMessage({ id: 'resource.property' })}`,
           <div className={styles.targetContent}>
             {targetContent.fields.map((field: any) => field.propertyName).join('、')}
           </div>
-        </Descriptions.Item>
-      ) : null;
+        )
+        : null;
     } catch (error) {
       return null;
     }
+  };
+
+  const renderMemberNames = (members?: Array<{ grantToObjName?: string }>) => {
+    const names = (Array.isArray(members) ? members : []).map((member) => member.grantToObjName).filter(Boolean);
+
+    return names.length ? names.join('、') : intl.formatMessage({ id: 'common.none' });
   };
 
   // 获取关联对象
   const getRelatedObjects = () => {
     try {
       const targetContent = detailData?.extInfo?.targetContent ? JSON.parse(detailData.extInfo.targetContent) : null;
-      return targetContent?.objects && targetContent.objects.length > 0 ? (
-        <Descriptions.Item label={intl.formatMessage({ id: 'resource.relatedObjects' })} span={2}>
+      return targetContent?.objects && targetContent.objects.length > 0
+        ? renderDetailField(
+          intl.formatMessage({ id: 'resource.relatedObjects' }),
           <div className={styles.targetContent}>
             <div className={styles.objectCardGrid}>
               {targetContent.objects.map((object: any, index: number) => (
@@ -139,57 +162,78 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({ visible, resourceId, re
               ))}
             </div>
           </div>
-        </Descriptions.Item>
-      ) : null;
+        )
+        : null;
     } catch (error) {
       return null;
     }
   };
 
-  return (
-    <Modal
-      title={`${resourceName}${intl.formatMessage({ id: 'common.detail' })}`}
-      open={visible}
-      onCancel={onCancel}
-      width={1000}
-      destroyOnHidden
-      footer={null}
-    >
+  const title = `${resourceName}${intl.formatMessage({ id: 'common.detail' })}`;
+  const detailContent = (
+    <>
       {loading ? (
         <div className={styles.loadingContainer}>
-          <Spin size="large" />
+          <Spin />
         </div>
       ) : (
-        <>
-          <Descriptions bordered column={1} className={styles.descriptions}>
-            <Descriptions.Item label={`${resourceName}${intl.formatMessage({ id: 'common.title' })}`}>
-              {item?.resourceName}
-            </Descriptions.Item>
-            <Descriptions.Item label={`${resourceName}${intl.formatMessage({ id: 'common.code' })}`}>
-              {item?.resourceCode}
-            </Descriptions.Item>
-            <Descriptions.Item label={`${resourceName}${intl.formatMessage({ id: 'common.description' })}`} span={2}>
-              <div className={styles.descriptionContent}>{item?.resourceDesc || item?.description}</div>
-            </Descriptions.Item>
+        <div className={styles.detailFields}>
+          {renderDetailField(`${resourceName}${intl.formatMessage({ id: 'common.title' })}`, item?.resourceName)}
+          {renderDetailField(`${resourceName}${intl.formatMessage({ id: 'common.code' })}`, item?.resourceCode)}
+          {renderDetailField(
+            `${resourceName}${intl.formatMessage({ id: 'common.description' })}`,
+            <div className={styles.descriptionContent}>{item?.resourceDesc || item?.description || '-'}</div>
+          )}
 
-            {getRelatedObjects()}
+          {getRelatedObjects()}
 
-            {selectedObject && (
-              <Descriptions.Item label={intl.formatMessage({ id: 'resource.relatedObjectProperties' })} span={2}>
-                {objectLoading ? (
-                  <div className={styles.loadingContainer}>
-                    <Spin size="small" />
-                  </div>
-                ) : (
-                  <div className={styles.targetContent}>{getObjectProperties()}</div>
-                )}
-              </Descriptions.Item>
+          {selectedObject &&
+            renderDetailField(
+              intl.formatMessage({ id: 'resource.relatedObjectProperties' }),
+              objectLoading ? (
+                <div className={styles.loadingContainer}>
+                  <Spin size="small" />
+                </div>
+              ) : (
+                <div className={styles.targetContent}>{getObjectProperties()}</div>
+              )
             )}
 
-            {getPropertiesInfo()}
-          </Descriptions>
-        </>
+          {getPropertiesInfo()}
+
+          {renderDetailField(
+            intl.formatMessage({ id: 'common.userPerson' }),
+            <div className={styles.memberList}>{renderMemberNames(detailData?.useList)}</div>
+          )}
+
+          {renderDetailField(
+            intl.formatMessage({ id: 'common.manager' }),
+            <div className={styles.memberList}>{renderMemberNames(detailData?.managerList)}</div>
+          )}
+        </div>
       )}
+    </>
+  );
+
+  if (panel) {
+    if (!visible) {
+      return null;
+    }
+
+    return (
+      <div className={styles.detailPanel}>
+        <div className={styles.panelHeader}>
+          <span className={styles.panelTitle}>{title}</span>
+          <Button type="text" size="small" icon={<CloseOutlined />} onClick={onCancel} />
+        </div>
+        <div className={styles.panelBody}>{detailContent}</div>
+      </div>
+    );
+  }
+
+  return (
+    <Modal title={title} open={visible} onCancel={onCancel} width={1000} destroyOnHidden footer={null}>
+      {detailContent}
     </Modal>
   );
 };

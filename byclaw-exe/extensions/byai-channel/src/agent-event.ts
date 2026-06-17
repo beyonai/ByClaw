@@ -13,6 +13,7 @@ import {
   resolveActiveSdkRunBinding,
   resolveSdkEmitter,
   markActiveSdkRequestSubagentSpawned,
+  registerAgentRunEndPromise,
 } from "./session-context";
 import { registerPendingMessageToolSend } from "./pending-message-tool.js";
 import {
@@ -28,7 +29,7 @@ import {
 import { AgentEvent } from "./types";
 import type { OpenClawPluginApi } from "@openclaw/plugin-sdk/core";
 import { isSubagentSessionKey } from "openclaw/plugin-sdk/routing";
-import { emitIncrementalText, getAgentNameById, normalizeReasoningPreviewText } from "./utils";
+import { emitIncrementalText, generateRandomId, getAgentNameById, normalizeReasoningPreviewText } from "./utils";
 import {
   buildThinkingEndText,
   buildToolResultTitle as buildLocalizedToolResultTitle,
@@ -249,7 +250,7 @@ async function handleAssistantEvent(
     // 不是连续回复时，新增一个 messageId分组，用于前端区分显示不同段落
     messageId: streamContext.isContinuingAnswer && previousEmit?.messageId
       ? previousEmit.messageId
-      : Math.random().toString(16).slice(2),
+      : generateRandomId(),
   };
   // assistant 流是权威可见源，按 runId 做简单前缀增量即可（sendText 的去重改由
   // message tool 事件驱动，不再和 assistant 流抢同一缓冲）。
@@ -331,6 +332,7 @@ async function handleLifecycleEvent(
   if (phase === "start") {
     const activeRequest = markActiveSdkRootLifecycleStarted(sessionKey) ?? request;
     cancelActiveSdkCompletionCheck(activeRequest.sessionKey);
+    registerAgentRunEndPromise(event.runId);
     return;
   }
   if (phase !== "end" && phase !== "error") {
@@ -400,7 +402,7 @@ async function emitReasoningText(
     options.messageId = previousEmit?.messageId;
     options.parentMessageId = previousEmit?.parentMessageId;
   } else {
-    options.messageId = Math.random().toString(16).slice(2);
+    options.messageId = generateRandomId();
     options.parentMessageId = "-1";
     await emitSdkChunk(request, "", {
       ...options,

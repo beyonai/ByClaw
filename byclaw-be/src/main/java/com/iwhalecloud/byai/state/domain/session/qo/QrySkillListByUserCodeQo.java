@@ -19,7 +19,7 @@ public class QrySkillListByUserCodeQo {
     private String userCode;
 
     /**
-     * 数字员工资源ID，用于拼接工作空间路径。
+     * 数字员工资源ID，用于拼接工作空间路径；接口入参为空时回退到当前用户默认数字员工。
      */
     private Long resourceId;
 

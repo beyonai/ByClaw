@@ -1,5 +1,5 @@
 // tslint:disable:ordered-imports
-import React, { memo, useEffect, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import classNames from 'classnames';
 
 // @ts-ignore
@@ -11,7 +11,13 @@ import Auth from '../auth';
 import AntdProvider from '../components/provider/antd';
 import Header from '../header';
 import Sider from '../sider';
-import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from '../sider/siderContentContext';
+import {
+  SiderContentContext,
+  DEFAULT_SIDER_CONTENT_WIDTH,
+  HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH,
+  SIDER_BAR_WIDTH,
+  type DetailPanelOptions,
+} from '../sider/siderContentContext';
 import { tabItems } from '../sider/components/SiderContent';
 
 import PasswordModal from '@/pages/settings/components/PasswordModal';
@@ -24,6 +30,7 @@ import MainDrawer from '@/components/MainDrawer';
 import MinorDrawer from '@/components/MinorDrawer';
 import DragFileEventHandler from '@/components/QueryInput/dragFileEventHandler';
 import useAgentUploadFileConfig from '@/hooks/useAgentUploadFileConfig';
+import useVersionNotification from '@/hooks/useVersionNotification';
 
 import GlobalContext, { Platform } from '../components/provider/global';
 
@@ -74,8 +81,19 @@ const PCLayout = () => {
 
   // 检查当前路由是否需要隐藏侧边栏
   const [siderContentWidth, setSiderContentWidth] = React.useState(DEFAULT_SIDER_CONTENT_WIDTH);
+  const [detailPanel, setDetailPanel] = React.useState<React.ReactNode>(null);
+  const [detailPanelWidth, setDetailPanelWidth] = React.useState<React.CSSProperties['width']>();
+  const openDetailPanel = useCallback((panel: React.ReactNode, options?: DetailPanelOptions) => {
+    setDetailPanel(panel);
+    setDetailPanelWidth(options?.width);
+  }, []);
+  const clearDetailPanel = useCallback(() => {
+    setDetailPanel(null);
+    setDetailPanelWidth(undefined);
+  }, []);
 
   React.useEffect(() => {
+    clearDetailPanel();
     // 参考 sider 组件的逻辑，检查当前路径是否需要隐藏侧边栏
     const currentTab = tabItems.find((item) => item.navigatePath === pathname);
 
@@ -89,9 +107,10 @@ const PCLayout = () => {
     } else {
       setSiderContentWidth(DEFAULT_SIDER_CONTENT_WIDTH);
     }
-  }, [pathname]);
+  }, [clearDetailPanel, pathname]);
 
   const { setLoginModalOpen } = useAppStore();
+  useVersionNotification(myEventEmitter);
 
   const [isClose, setIsClose] = useState(false);
   const [sessionId, setSessionId] = useState<string>('');
@@ -99,15 +118,44 @@ const PCLayout = () => {
   const [modPswModalVisible, setModPswModalVisible] = useState(false);
   const [pcLayoutContentId] = useState('pcLayoutId');
   const [containChatLayout, setContainChatLayout] = useState(false);
+  const dragFileEventHandlerRef = useRef<DragFileEventHandler>(null);
+  const layoutRef = useRef<HTMLElement>(null);
+  const [layoutWidth, setLayoutWidth] = useState(0);
+  const mainContentHalfWidth =
+    layoutWidth > 0 ? Math.max(280, Math.floor((layoutWidth - SIDER_BAR_WIDTH - siderContentWidth - 16) / 2)) : 450;
+  const detailPanelBasis =
+    detailPanelWidth === undefined
+      ? undefined
+      : typeof detailPanelWidth === 'number'
+        ? `${detailPanelWidth}px`
+        : detailPanelWidth === HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH
+          ? `${mainContentHalfWidth}px`
+          : detailPanelWidth;
+
+  useEffect(() => {
+    const layoutElement = layoutRef.current;
+    if (!layoutElement) return undefined;
+
+    const updateLayoutWidth = () => {
+      setLayoutWidth(layoutElement.clientWidth);
+    };
+    updateLayoutWidth();
+
+    if (!window.ResizeObserver) return undefined;
+
+    const resizeObserver = new ResizeObserver(updateLayoutWidth);
+    resizeObserver.observe(layoutElement);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
 
   const { userInfo } = useSelector(({ user }) => ({ userInfo: user.userInfo }));
   const { agentList, employeesList } = useSelector(({ employees }) => ({
     agentList: employees.agentList || [],
     employeesList: employees.employeesList,
   }));
-
-  const dragFileEventHandlerRef = useRef<DragFileEventHandler>(null);
-  const layoutRef = useRef<HTMLElement>(null);
 
   const curAgentInfo = React.useMemo(() => {
     return [...(agentList || []), ...(employeesList || [])].find(
@@ -251,26 +299,51 @@ const PCLayout = () => {
                 {!userInfo && <Header />}
                 <Layout
                   className={classNames('full-width full-height ub-f1', styles.layout)}
-                  style={{
-                    // 用gap实现起来很难搞，因为在没有展开drawer的情况下，也占了8px的位置，因此采用了--layout-gap这种方式来做一个margin处理
-                    padding: userInfo ? '8px 8px 8px 0' : 0,
-                  }}
+                  style={
+                    {
+                      // 用gap实现起来很难搞，因为在没有展开drawer的情况下，也占了8px的位置，因此采用了--layout-gap这种方式来做一个margin处理
+                      padding: userInfo ? '8px 8px 8px 0' : 0,
+                      '--sider-content-width': `${siderContentWidth}px`,
+                    } as React.CSSProperties
+                  }
                   ref={layoutRef}
                 >
-                  <SiderContentContext.Provider value={{ siderContentWidth, setSiderContentWidth }}>
-                    <Sider />
-                  </SiderContentContext.Provider>
-                  <MinorDrawer />
-                  <Content
-                    id={pcLayoutContentId}
-                    className={classNames(styles.content, {
-                      [styles.opening]: !isClose,
-                      [styles.closing]: isClose,
-                    })}
-                    style={{ marginLeft: userInfo ? 'var(--layout-gap)' : 0 }}
+                  <SiderContentContext.Provider
+                    value={{
+                      siderContentWidth,
+                      setSiderContentWidth,
+                      setDetailPanel: openDetailPanel,
+                      clearDetailPanel,
+                    }}
                   >
-                    <Outlet />
-                  </Content>
+                    <Sider />
+                    <MinorDrawer />
+                    <Content
+                      id={pcLayoutContentId}
+                      className={classNames(styles.content, {
+                        [styles.opening]: !isClose,
+                        [styles.closing]: isClose,
+                      })}
+                      style={{ marginLeft: userInfo ? 'var(--layout-gap)' : 0 }}
+                    >
+                      <Outlet />
+                    </Content>
+                    {detailPanel && (
+                      <aside
+                        className={styles.detailPanel}
+                        style={
+                          detailPanelBasis
+                            ? {
+                              flex: `0 0 ${detailPanelBasis}`,
+                              width: detailPanelBasis,
+                            }
+                            : undefined
+                        }
+                      >
+                        {detailPanel}
+                      </aside>
+                    )}
+                  </SiderContentContext.Provider>
                   <MainDrawer />
                 </Layout>
                 <AbsoluteDrawer getContainer={() => layoutRef.current || window.document.body} />

@@ -65,4 +65,9 @@ public final class GrantObjType {
      * 标签
      */
     public static final String TAG = "TAG";
+
+    /**
+     * 技能
+     */
+    public static final String SKILL = "SKILL";
 }

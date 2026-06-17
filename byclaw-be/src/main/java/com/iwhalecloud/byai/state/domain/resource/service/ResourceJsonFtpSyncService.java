@@ -52,9 +52,15 @@ public class ResourceJsonFtpSyncService {
         String fileName = pathResolver.buildResourceJsonFileName(resourceBizType, resourceId);
         MultipartFileUtil multipartFile = new MultipartFileUtil(fileName, fileName, "application/json", bytes);
 
-        ObjectStorageConfiguration.setStorageType(ftpConfig.getType());
-        FileStorageContext fileStorageContext = FileStorageContext.ftpCustomBasePathWithSubdirectory(absoluteBasePath, dirName, true);
-        fileIngressService.uploadFile(multipartFile, fileStorageContext);
-        LOGGER.info("资源 JSON 已同步至开放资源目录: {}/{}", dirName, fileName);
+        try {
+            ObjectStorageConfiguration.setStorageType(ftpConfig.getType());
+            FileStorageContext fileStorageContext = FileStorageContext.ftpCustomBasePathWithSubdirectory(absoluteBasePath,
+                dirName, true);
+            fileIngressService.uploadFile(multipartFile, fileStorageContext);
+            LOGGER.info("资源 JSON 已同步至开放资源目录: {}/{}", dirName, fileName);
+        }
+        finally {
+            ObjectStorageConfiguration.clearStorageType();
+        }
     }
 }

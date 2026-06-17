@@ -55,10 +55,16 @@ public class ResourcePackageFtpUploadService {
             return;
         }
         MultipartFileUtil multipartFile = new MultipartFileUtil(fileName, fileName, contentType, content);
-        ObjectStorageConfiguration.setStorageType(ftpConfig.getType());
-        FileStorageContext fileStorageContext = FileStorageContext.ftpCustomBasePathWithSubdirectory(absoluteBasePath, subDirectory, true);
-        fileIngressService.uploadFile(multipartFile, fileStorageContext);
-        LOGGER.info("资源文件已同步至开放资源目录: {}/{}", subDirectory, fileName);
+        try {
+            ObjectStorageConfiguration.setStorageType(ftpConfig.getType());
+            FileStorageContext fileStorageContext = FileStorageContext.ftpCustomBasePathWithSubdirectory(absoluteBasePath,
+                subDirectory, true);
+            fileIngressService.uploadFile(multipartFile, fileStorageContext);
+            LOGGER.info("资源文件已同步至开放资源目录: {}/{}", subDirectory, fileName);
+        }
+        finally {
+            ObjectStorageConfiguration.clearStorageType();
+        }
     }
 
     /**

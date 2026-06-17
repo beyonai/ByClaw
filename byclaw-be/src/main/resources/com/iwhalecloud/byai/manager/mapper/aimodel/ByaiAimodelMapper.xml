@@ -125,11 +125,14 @@
         and
             d.obj_type = 'AI_MODEL'
         and
-            d.tag_id = 3
+            d.tag_id = 1
         <where>
             and b.obj_type = 'AI_MODEL'
             <if test="status != null and status != ''">
                 AND a.status = #{status}
+            </if>
+            <if test="modelType != null and modelType != ''">
+                AND a.model_type = #{modelType}
             </if>
             <if test="tagId != null and tagId != ''">
                 AND b.tag_id = #{tagId}
@@ -165,11 +168,14 @@
         and
         d.obj_type = 'AI_MODEL'
         and
-        d.tag_id = 3
+        d.tag_id = 1
         <where>
             and b.obj_type = 'AI_MODEL'
             <if test="status != null and status != ''">
                 AND a.status = #{status}
+            </if>
+            <if test="modelType != null and modelType != ''">
+                AND a.model_type = #{modelType}
             </if>
             <if test="tagId != null and tagId != ''">
                 AND b.tag_id = #{tagId}

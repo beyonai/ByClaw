@@ -67,12 +67,12 @@ RUN set -eux; \
 
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS python312
 
-FROM ghcr.io/openclaw/openclaw:2026.6.1
+FROM ghcr.io/openclaw/openclaw:2026.6.6
 
 USER root
 
-ARG OPENCLI_VERSION=1.8.1
-ARG OPENCLI_EXTENSION_VERSION=1.0.17
+ARG OPENCLI_VERSION=1.8.0
+ARG OPENCLI_EXTENSION_VERSION=1.0.15
 ARG INSTALL_BROWSER_STACK=true
 
 RUN chown root:root /app
@@ -116,7 +116,7 @@ RUN set -eux; \
         zip"; \
     case "${INSTALL_BROWSER_STACK}" in \
       true|1|yes|on) apt-get install -y --no-install-recommends ${base_packages} ${browser_packages} ;; \
-      *) apt-get install -y --no-install-recommends ${base_packages}; echo "skip browser/VNC/display/opencli stack" ;; \
+      *) apt-get install -y --no-install-recommends ${base_packages}; echo "skip browser/VNC/display/bycli stack" ;; \
     esac; \
     case "${INSTALL_BROWSER_STACK}" in \
       true|1|yes|on) \
@@ -149,7 +149,7 @@ RUN set -eux; \
         ffmpeg -hide_banner -loglevel error -y -f lavfi -i sine=frequency=1000:duration=1 -q:a 9 -acodec libmp3lame "${tmp_mp3}"; \
         ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${tmp_mp3}"; \
         rm -f "${tmp_mp3}"; \
-        npm install -g "@jackwener/opencli@${OPENCLI_VERSION}"; \
+        npm install -g "@sovovs/bycli@${OPENCLI_VERSION}"; \
         mkdir -p /opt/opencli/extension; \
         curl -fsSL -o /tmp/opencli-extension.zip \
             "https://github.com/jackwener/OpenCLI/releases/download/v${OPENCLI_VERSION}/opencli-extension-v${OPENCLI_EXTENSION_VERSION}.zip"; \
@@ -157,7 +157,7 @@ RUN set -eux; \
         rm -f /tmp/opencli-extension.zip; \
         chromium --version; \
         x11vnc -version; \
-        opencli --version; \
+        bycli --version; \
         test -f /opt/opencli/extension/manifest.json; \
         ;; \
     esac; \
@@ -173,7 +173,7 @@ RUN set -eux; \
     python3 --version | grep -q 'Python 3.12'; \
     python3 -m pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
     python3 -m pip config --global set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
-    python3 -m pip install --no-cache-dir redis websockify; \
+    python3 -m pip install --no-cache-dir redis websockify by-framework; \
     rm -f /usr/bin/websockify; \
     ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
     websockify --help >/dev/null
@@ -192,6 +192,8 @@ RUN chmod a+x /usr/local/bin/filebrowser
 
 COPY middleware/openclaw/runtime-bootstrap.sh /usr/local/bin/openclaw-runtime-bootstrap
 COPY middleware/openclaw/novnc-index.html /usr/local/share/openclaw/novnc-index.html
+COPY middleware/openclaw/filebrowser-ui/ /usr/local/share/openclaw/filebrowser-ui/
+COPY middleware/openclaw/filebrowser-ui-proxy.py /usr/local/bin/openclaw-filebrowser-ui-proxy
 COPY middleware/openclaw/startAll.sh \
      middleware/openclaw/start-filebrowser.sh \
      middleware/openclaw/start-display.sh \
@@ -203,6 +205,7 @@ COPY middleware/openclaw/startAll.sh \
      /usr/local/bin/
 RUN chmod +x \
     /usr/local/bin/openclaw-runtime-bootstrap \
+    /usr/local/bin/openclaw-filebrowser-ui-proxy \
     /usr/local/bin/startAll.sh \
     /usr/local/bin/start-filebrowser.sh \
     /usr/local/bin/start-display.sh \

@@ -83,6 +83,9 @@ public class ModelVO implements Serializable {
 
     private Double presencePenalty;
 
+    /** Reasoning / Thinking 配置 */
+    private ModelReasoningConfig reasoningConfig;
+
     /** 最近更新时间（ISO8601 或 YYYY-MM-DD HH:mm:ss） */
     private String updatedAt;
 

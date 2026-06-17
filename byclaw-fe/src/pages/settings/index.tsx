@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 import {
   DownOutlined,
@@ -13,8 +13,9 @@ import {
 } from '@ant-design/icons';
 // @ts-ignore
 import { getLocale, setLocale, useIntl, useSelector } from '@umijs/max';
-import { Avatar, Card, Menu, Modal, Select, Space, Typography } from 'antd';
+import { Avatar, Button, Card, Collapse, Descriptions, Menu, Modal, Select, Space, Typography } from 'antd';
 
+import useAppStore from '@/models/common/useAppStore';
 import AntdIcon from '@/components/AntdIcon';
 import { globalLogout } from '@/service/common/request';
 import { getPublicPath } from '@/utils';
@@ -27,8 +28,30 @@ const { Option } = Select;
 const { Text } = Typography;
 
 type SettingsMenuKey = 'general' | 'email';
+type VersionInfo = {
+  version: string;
+  branch: string;
+  commit: string;
+  commitFull: string;
+  buildTime: string;
+  module: string;
+  commitMsg: string;
+};
+type VersionInfoEntry = [keyof VersionInfo, VersionInfo[keyof VersionInfo]];
+
+const versionDetailLabelIds: Record<keyof VersionInfo, string> = {
+  version: 'settings.versionInfo.version',
+  branch: 'settings.versionInfo.branch',
+  commit: 'settings.versionInfo.commit',
+  commitFull: 'settings.versionInfo.commitFull',
+  buildTime: 'settings.versionInfo.buildTime',
+  module: 'settings.versionInfo.module',
+  commitMsg: 'settings.versionInfo.commitMsg',
+};
 
 const Settings: React.FC = () => {
+  const { versionInfo, getVersionInfo } = useAppStore();
+
   const intl = useIntl();
   const language = getLocale();
   const [modal, contextHolder] = Modal.useModal();
@@ -36,6 +59,7 @@ const Settings: React.FC = () => {
   const [theme, setTheme] = useState<string>('light');
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [activeMenu, setActiveMenu] = useState<SettingsMenuKey>('general');
+  const [versionDetailsOpen, setVersionDetailsOpen] = useState<boolean>(false);
   const termsUrl = `${getPublicPath()}legal/terms/index.html`;
   const privacyUrl = `${getPublicPath()}legal/privacy/index.html`;
 
@@ -45,6 +69,28 @@ const Settings: React.FC = () => {
 
   // 获取用户信息
   const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
+
+  useEffect(() => {
+    if (userInfo && !versionInfo) {
+      getVersionInfo();
+    }
+  }, [userInfo, versionInfo]);
+
+  const versionInfoEntries = versionInfo ? (Object.entries(versionInfo) as VersionInfoEntry[]) : [];
+  const versionDetailItems = versionInfoEntries
+    .filter(([key, value]) => {
+      return (
+        value !== undefined &&
+        value !== null &&
+        value !== '' &&
+        !['commitFull', 'commit', 'commitMsg', 'module'].includes(key)
+      );
+    })
+    .map(([key, value]) => ({
+      key,
+      label: intl.formatMessage({ id: versionDetailLabelIds[key] }),
+      children: String(value),
+    }));
 
   const renderGeneralSettings = () => (
     <>
@@ -62,6 +108,59 @@ const Settings: React.FC = () => {
           </Space>
         </div>
       </Card>
+
+      {/* 版本信息 */}
+      <>
+        {versionInfo?.version && (
+          <div className={classNames(styles.settingBox, styles.versionSettingBox, 'ub ub-ver')}>
+            <div className={styles.settingItem}>
+              <div className={styles.settingLabel}>
+                {/* <SkinOutlined className={styles.settingIcon} /> */}
+                <span>{intl.formatMessage({ id: 'sider.version' })}</span>
+              </div>
+              <Button
+                aria-controls="settings-version-details"
+                aria-expanded={versionDetailsOpen}
+                aria-label={versionInfo.version}
+                className={styles.versionButton}
+                size="small"
+                type="text"
+                onClick={() => setVersionDetailsOpen((open) => !open)}
+              >
+                <span>{versionInfo.version}</span>
+                <DownOutlined
+                  className={classNames(styles.versionButtonIcon, {
+                    [styles.versionButtonIconOpen]: versionDetailsOpen,
+                  })}
+                />
+              </Button>
+            </div>
+            <Collapse
+              activeKey={versionDetailsOpen ? ['versionDetails'] : []}
+              className={styles.versionCollapse}
+              collapsible="disabled"
+              ghost
+              items={[
+                {
+                  key: 'versionDetails',
+                  label: null,
+                  showArrow: false,
+                  children: (
+                    <div id="settings-version-details">
+                      <Descriptions
+                        className={styles.versionDescriptions}
+                        column={1}
+                        items={versionDetailItems}
+                        size="small"
+                      />
+                    </div>
+                  ),
+                },
+              ]}
+            />
+          </div>
+        )}
+      </>
 
       <div className={classNames(styles.settingBox, 'ub ub-ver')}>
         {/* 界面主题 */}

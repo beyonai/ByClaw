@@ -1,5 +1,5 @@
 import { EyeInvisibleOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
-import { Button, Form, Input, InputNumber, Select, Slider, Space } from 'antd';
+import { Button, Form, Input, InputNumber, Select, Slider, Space, Switch } from 'antd';
 import React, { useMemo } from 'react';
 import { trim } from 'lodash';
 import { useIntl } from '@umijs/max';
@@ -9,6 +9,9 @@ import {
   DEFAULT_CONTEXT_TOKENS,
   CONTEXT_TOKENS_CONFIG,
   MODEL_PROTOCOL_OPTIONS,
+  THINKING_CAPABILITY_OPTIONS,
+  THINKING_COMPAT_FORMAT_OPTIONS,
+  THINKING_LEVEL_OPTIONS,
   getApiEndpointPlaceholder,
 } from './modelFormUtils';
 import styles from './ModelFormModal.module.less';
@@ -101,7 +104,22 @@ const ModelFormFields: React.FC<Props> = ({
 }) => {
   const intl = useIntl();
   const currentModelProtocol = Form.useWatch('modelProtocol', form);
+  const currentModelType = Form.useWatch('modelType', form);
+  const reasoningConfig = Form.useWatch('reasoningConfig', form) || {};
   const apiEndpointPlaceholder = useMemo(() => getApiEndpointPlaceholder(currentModelProtocol), [currentModelProtocol]);
+  const isLlmModel = `${currentModelType ?? 'LLM'}`.trim().toUpperCase() === 'LLM';
+  const reasoningEnabled = Boolean(reasoningConfig?.enabled);
+  const reasoningCapability = `${reasoningConfig?.capability ?? 'unsupported'}`;
+  const thinkingLevelOptions = THINKING_LEVEL_OPTIONS.map((value) => ({ label: value, value }));
+  const supportedThinkingLevelOptions = THINKING_LEVEL_OPTIONS.filter((value) => value !== 'off').map((value) => ({
+    label: value,
+    value,
+  }));
+  const thinkingCapabilityOptions = THINKING_CAPABILITY_OPTIONS.map((value) => ({
+    label: intl.formatMessage({ id: `modelMgr.modal.reasoningCapability.${value}` }),
+    value,
+  }));
+  const thinkingCompatFormatOptions = THINKING_COMPAT_FORMAT_OPTIONS.map((value) => ({ label: value, value }));
   // const sectionGuideItems = useMemo(
   //   () => [
   //     { key: 'basic', icon: <RightOutlined />, label: intl.formatMessage({ id: 'modelMgr.modal.basicConfig' }) },
@@ -359,9 +377,111 @@ const ModelFormFields: React.FC<Props> = ({
                 options={[
                   { label: 'OpenAI', value: 'OpenAI' },
                   { label: 'Anthropic', value: 'Anthropic' },
+                  { label: 'Qwen', value: 'Qwen' },
+                  { label: 'DeepSeek', value: 'DeepSeek' },
+                  { label: 'OpenRouter', value: 'OpenRouter' },
+                  { label: 'Together', value: 'Together' },
+                  { label: 'ZAI', value: 'ZAI' },
                 ]}
               />
             </Form.Item>
+            {isLlmModel ? (
+              <>
+                <div className={styles.hintBlock} style={{ gridColumn: 'span 3' }}>
+                  <div className={styles.hintTitle}>{intl.formatMessage({ id: 'modelMgr.modal.reasoningTitle' })}</div>
+                  <div className={styles.hint}>{intl.formatMessage({ id: 'modelMgr.modal.reasoningDesc' })}</div>
+                </div>
+                <Form.Item
+                  label={intl.formatMessage({ id: 'modelMgr.modal.reasoningEnabled' })}
+                  name={['reasoningConfig', 'enabled']}
+                  valuePropName="checked"
+                >
+                  <Switch
+                    onChange={(checked) => {
+                      if (!checked) {
+                        form.setFieldsValue({
+                          reasoningConfig: {
+                            ...reasoningConfig,
+                            enabled: false,
+                            defaultLevel: 'off',
+                          },
+                        });
+                        return;
+                      }
+                      if (reasoningCapability === 'unsupported') {
+                        form.setFieldsValue({
+                          reasoningConfig: {
+                            ...reasoningConfig,
+                            enabled: true,
+                            capability: 'effort',
+                            defaultLevel: 'medium',
+                          },
+                        });
+                      }
+                    }}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label={intl.formatMessage({ id: 'modelMgr.modal.reasoningCapability' })}
+                  name={['reasoningConfig', 'capability']}
+                >
+                  <Select options={thinkingCapabilityOptions} />
+                </Form.Item>
+                <Form.Item
+                  label={intl.formatMessage({ id: 'modelMgr.modal.reasoningDefaultLevel' })}
+                  name={['reasoningConfig', 'defaultLevel']}
+                >
+                  <Select disabled={!reasoningEnabled} options={thinkingLevelOptions} />
+                </Form.Item>
+                <Form.Item
+                  label={intl.formatMessage({ id: 'modelMgr.modal.reasoningCompatFormat' })}
+                  name={['reasoningConfig', 'compatFormat']}
+                >
+                  <Select disabled={!reasoningEnabled} options={thinkingCompatFormatOptions} />
+                </Form.Item>
+                <Form.Item
+                  label={intl.formatMessage({ id: 'modelMgr.modal.reasoningSupportedEfforts' })}
+                  name={['reasoningConfig', 'supportedEfforts']}
+                >
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    disabled={!reasoningEnabled}
+                    options={supportedThinkingLevelOptions}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label={intl.formatMessage({ id: 'modelMgr.modal.reasoningEffortMap' })}
+                  name="reasoningEffortMapText"
+                  style={{ gridColumn: 'span 3' }}
+                >
+                  <TextArea
+                    disabled={!reasoningEnabled}
+                    placeholder='{"minimal":"high","xhigh":"max","max":"max"}'
+                    rows={3}
+                  />
+                </Form.Item>
+                {reasoningCapability === 'budget' ? (
+                  <>
+                    <Form.Item label="minimal budget" name={['reasoningConfig', 'budgets', 'minimal']}>
+                      <InputNumber disabled={!reasoningEnabled} style={{ width: '100%' }} min={1} />
+                    </Form.Item>
+                    <Form.Item label="low budget" name={['reasoningConfig', 'budgets', 'low']}>
+                      <InputNumber disabled={!reasoningEnabled} style={{ width: '100%' }} min={1} />
+                    </Form.Item>
+                    <Form.Item label="medium budget" name={['reasoningConfig', 'budgets', 'medium']}>
+                      <InputNumber disabled={!reasoningEnabled} style={{ width: '100%' }} min={1} />
+                    </Form.Item>
+                    <Form.Item label="high budget" name={['reasoningConfig', 'budgets', 'high']}>
+                      <InputNumber disabled={!reasoningEnabled} style={{ width: '100%' }} min={1} />
+                    </Form.Item>
+                    <Form.Item label="max budget" name={['reasoningConfig', 'budgets', 'max']}>
+                      <InputNumber disabled={!reasoningEnabled} style={{ width: '100%' }} min={1} />
+                    </Form.Item>
+                  </>
+                ) : null}
+              </>
+            ) : null}
             <Form.Item
               label={intl.formatMessage({ id: 'modelMgr.modal.extendParam' })}
               name="extendParam"

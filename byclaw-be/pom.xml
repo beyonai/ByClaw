@@ -120,9 +120,9 @@
         <mybatis-spring-boot-starter.version>2.3.1</mybatis-spring-boot-starter.version>
 
         <!-- Logging -->
-        <log4j.version>2.20.0</log4j.version>
-        <log4j-to-slf4j.version>2.20.0</log4j-to-slf4j.version>
-        <log4j-api.version>2.20.0</log4j-api.version>
+        <log4j.version>2.26.0</log4j.version>
+        <log4j-to-slf4j.version>2.26.0</log4j-to-slf4j.version>
+        <log4j-api.version>2.26.0</log4j-api.version>
         <logback.version>1.5.18</logback.version>
 
         <!-- Testing -->

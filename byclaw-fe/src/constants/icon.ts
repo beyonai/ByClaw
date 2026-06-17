@@ -25,7 +25,53 @@ export const fileIconMap: Record<string, string> = {
   tiff: 'icon-Image',
   ico: 'icon-Image',
   svg: 'icon-Image',
-  folder: 'icon-wenjianjia',
-  chat: 'icon-wenjianjia',
-  other: 'icon-wenjianjia',
+  folder: 'icon-wenjianjialanse',
+  chat: 'icon-wenjianjialanse',
+  other: 'icon-wenjianjialanse',
+};
+
+export const getKnowledgeFileIconType = (
+  fileName?: string,
+  options?: {
+    isDirectory?: boolean;
+    directoryIconType?: string;
+    defaultIconType?: string;
+  }
+) => {
+  const { isDirectory = false, directoryIconType = 'wenjianjialanse', defaultIconType = 'jishiben' } = options || {};
+
+  if (isDirectory) {
+    return directoryIconType;
+  }
+
+  const normalizedFileName = String(fileName || '').toLowerCase();
+  const ext = normalizedFileName.split('.').pop();
+
+  switch (ext) {
+    case 'doc':
+    case 'docx':
+      return 'Word';
+    case 'pdf':
+      return 'PDF';
+    case 'xls':
+    case 'xlsx':
+      return 'Excel';
+    case 'txt':
+      return 'jishiben';
+    case 'ppt':
+    case 'pptx':
+      return 'PPT';
+    case 'md':
+      return 'markdown';
+    case 'png':
+    case 'jpg':
+    case 'jpeg':
+    case 'gif':
+    case 'webp':
+    case 'bmp':
+    case 'svg':
+      return 'Image';
+    default:
+      return defaultIconType;
+  }
 };

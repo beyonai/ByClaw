@@ -11,9 +11,7 @@ import java.util.Map;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.manager.application.service.ecosystem.EcosystemArtifactStorageService;
 import com.iwhalecloud.byai.manager.application.service.ecosystem.EcosystemKnowledgeImportService;
-import com.iwhalecloud.byai.manager.application.service.ecosystem.OpenCliRunner;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
-import com.iwhalecloud.byai.manager.vo.ecosystem.EcosystemRunVo;
 import com.iwhalecloud.byai.manager.vo.ecosystem.EcosystemTaskVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,8 +21,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 生态采集入库步骤接口。
- * 用于按步骤补齐 OpenCLI 采集、采集产物落地和 Markdown 知识库导入能力。
+ * bycli Markdown 入库桥接口。
+ * 用于将 bycli 已采集的 Markdown 产物落地并导入知识库。
  *
  * @author qin.guoquan
  * @date 2026-06-01
@@ -32,12 +30,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/ecosystemCollection/ingestion")
 public class EcosystemCollectionIngestionController {
-
-    /**
-     * OpenCLI 运行器，负责真实采集。
-     */
-    @Autowired
-    private OpenCliRunner openCliRunner;
 
     /**
      * 采集产物落地服务，负责文件存储和 files 元数据写入。
@@ -58,22 +50,7 @@ public class EcosystemCollectionIngestionController {
     private SequenceService sequenceService;
 
     /**
-     * 执行一次 OpenCLI 采集，并返回可继续落地产物或导入知识库的归一化结果。
-     *
-     * @param request 采集任务和可选运行 ID
-     * @return OpenCLI 采集结果
-     */
-    @PostMapping("/opencli/collect")
-    public ResponseUtil<CollectionResultPayload> collectWithOpenCli(@RequestBody OpenCliCollectRequest request) {
-        EcosystemTaskVo task = requireTask(request == null ? null : request.getTask());
-        Long runId = request == null || request.getRunId() == null ? sequenceService.nextVal() : request.getRunId();
-        OpenCliRunner.CollectionResult collectionResult = openCliRunner.collect(task, runId);
-        return ResponseUtil.successResponse(I18nUtil.get("ecosystem.ingestion.opencli.collect.success"),
-            toPayload(collectionResult));
-    }
-
-    /**
-     * 将 OpenCLI 采集输出落为运行产物，包括 Markdown、附件、raw 和 manifest。
+     * 将 bycli 采集输出落为运行产物，包括 Markdown、附件、raw 和 manifest。
      *
      * @param request 运行 ID、采集任务和采集输出
      * @return 产物存储结果
@@ -85,7 +62,7 @@ public class EcosystemCollectionIngestionController {
         }
         EcosystemTaskVo task = requireTask(request.getTask());
         Long runId = request.getRunId() == null ? sequenceService.nextVal() : request.getRunId();
-        OpenCliRunner.CollectionResult collectionResult = toCollectionResult(request.getCollectionResult());
+        EcosystemArtifactStorageService.CollectionResult collectionResult = toCollectionResult(request.getCollectionResult());
         EcosystemArtifactStorageService.StorageResult storageResult =
             artifactStorageService.store(runId, task, collectionResult);
         return ResponseUtil.successResponse(I18nUtil.get("ecosystem.ingestion.artifact.store.success"),
@@ -122,25 +99,6 @@ public class EcosystemCollectionIngestionController {
         return task;
     }
 
-    private CollectionResultPayload toPayload(OpenCliRunner.CollectionResult result) {
-        CollectionResultPayload payload = new CollectionResultPayload();
-        payload.setCommand(result.getCommand());
-        payload.setOutputDir(result.getOutputDir() == null ? null : result.getOutputDir().toString());
-        payload.setRawOutput(result.getRawOutput());
-        payload.setAssetCount(result.getAssetCount());
-        List<CollectionItemPayload> items = new ArrayList<>();
-        for (OpenCliRunner.CollectionItem item : result.getItems()) {
-            CollectionItemPayload itemPayload = new CollectionItemPayload();
-            itemPayload.setTitle(item.getTitle());
-            itemPayload.setFileName(item.getFileName());
-            itemPayload.setSourceUrl(item.getSourceUrl());
-            itemPayload.setMarkdown(item.getMarkdown());
-            items.add(itemPayload);
-        }
-        payload.setItems(items);
-        return payload;
-    }
-
     private StorageResultPayload toPayload(EcosystemArtifactStorageService.StorageResult result) {
         StorageResultPayload payload = new StorageResultPayload();
         payload.setStoragePath(result.getStoragePath());
@@ -157,19 +115,20 @@ public class EcosystemCollectionIngestionController {
         return payload;
     }
 
-    private OpenCliRunner.CollectionResult toCollectionResult(CollectionResultPayload payload) {
+    private EcosystemArtifactStorageService.CollectionResult toCollectionResult(CollectionResultPayload payload) {
         if (payload == null) {
             throw new IllegalArgumentException(I18nUtil.get("ecosystem.error.opencli.empty.output"));
         }
-        OpenCliRunner.CollectionResult result = new OpenCliRunner.CollectionResult();
+        EcosystemArtifactStorageService.CollectionResult result =
+            new EcosystemArtifactStorageService.CollectionResult();
         result.setCommand(payload.getCommand());
         result.setOutputDir(resolveOutputDir(payload.getOutputDir()));
         result.setRawOutput(payload.getRawOutput());
         result.setAssetCount(payload.getAssetCount());
-        List<OpenCliRunner.CollectionItem> items = new ArrayList<>();
+        List<EcosystemArtifactStorageService.CollectionItem> items = new ArrayList<>();
         for (CollectionItemPayload item : safeList(payload.getItems())) {
-            items.add(new OpenCliRunner.CollectionItem(item.getTitle(), item.getFileName(), item.getSourceUrl(),
-                item.getMarkdown()));
+            items.add(new EcosystemArtifactStorageService.CollectionItem(item.getTitle(), item.getFileName(),
+                item.getSourceUrl(), item.getMarkdown()));
         }
         result.setItems(items);
         return result;
@@ -219,29 +178,6 @@ public class EcosystemCollectionIngestionController {
 
     private <T> List<T> safeList(List<T> values) {
         return values == null ? List.of() : values;
-    }
-
-    public static class OpenCliCollectRequest {
-
-        private Long runId;
-
-        private EcosystemTaskVo task;
-
-        public Long getRunId() {
-            return runId;
-        }
-
-        public void setRunId(Long runId) {
-            this.runId = runId;
-        }
-
-        public EcosystemTaskVo getTask() {
-            return task;
-        }
-
-        public void setTask(EcosystemTaskVo task) {
-            this.task = task;
-        }
     }
 
     public static class ArtifactStoreRequest {
@@ -420,7 +356,7 @@ public class EcosystemCollectionIngestionController {
 
         private String storagePath;
 
-        private List<EcosystemRunVo.ArtifactVo> artifacts;
+        private List<EcosystemArtifactStorageService.ArtifactFile> artifacts;
 
         private List<MarkdownFilePayload> markdownFiles;
 
@@ -432,11 +368,11 @@ public class EcosystemCollectionIngestionController {
             this.storagePath = storagePath;
         }
 
-        public List<EcosystemRunVo.ArtifactVo> getArtifacts() {
+        public List<EcosystemArtifactStorageService.ArtifactFile> getArtifacts() {
             return artifacts;
         }
 
-        public void setArtifacts(List<EcosystemRunVo.ArtifactVo> artifacts) {
+        public void setArtifacts(List<EcosystemArtifactStorageService.ArtifactFile> artifacts) {
             this.artifacts = artifacts;
         }
 

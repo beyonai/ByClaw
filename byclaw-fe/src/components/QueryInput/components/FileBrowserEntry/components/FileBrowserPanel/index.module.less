@@ -101,3 +101,39 @@
     }
   }
 }
+
+.previewMode {
+  .toolbar {
+    padding: 8px 0;
+    border-bottom: 0;
+
+    .toolbarRight {
+      width: 100%;
+    }
+
+    :global(.@{antPrefix}-input-search) {
+      width: 100% !important;
+    }
+
+    .searchInput {
+      width: 100%;
+      height: 32px;
+    }
+  }
+
+  .breadcrumbBar {
+    min-height: 36px;
+    padding: 6px 0;
+  }
+
+  .content {
+    padding: 0;
+
+    :global {
+      .@{antPrefix}-table-thead > tr > th,
+      .@{antPrefix}-table-tbody > tr > td {
+        padding: 8px 4px;
+      }
+    }
+  }
+}

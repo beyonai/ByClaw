@@ -6,9 +6,9 @@ import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.util.JsonUtil;
 import java.io.IOException;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -20,27 +20,19 @@ import okhttp3.sse.EventSourceListener;
 import okhttp3.sse.EventSources;
 import org.apache.commons.collections.MapUtils;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
- * GPT-Proxy chat/completions 流式代理 ApplicationService。
- * 负责：调用上游 SSE 接口并将流式数据透传给前端。
- *
- * <p>安全要求：
- * - Authorization token 仅允许服务端配置，禁止前端传入/透传
- * - 禁止在日志/异常信息中输出 token、sessionId 等敏感信息
+ * GPT-Proxy chat/completions 流式代理 ApplicationService。 负责：调用上游 SSE 接口并将流式数据透传给前端。
+ * <p>
+ * 安全要求： - Authorization token 仅允许服务端配置，禁止前端传入/透传 - 禁止在日志/异常信息中输出 token、sessionId 等敏感信息
  *
  * @author system
  */
 @Service
 @Slf4j
 public class GptProxyChatCompletionsStreamApplicationService {
-
-
-    @Value("${byai.gptproxy.connectTimeoutMs:30000}")
-    private int gptProxyConnectTimeoutMs;
 
     @Autowired
     private ModelManagementApplicationService modelManagementApplicationService;
@@ -52,20 +44,13 @@ public class GptProxyChatCompletionsStreamApplicationService {
         Long modelId = modelManagementApplicationService.parseModelIdFromBody(body);
         AtomicBoolean statusUpdated = new AtomicBoolean(false);
         SseEmitter emitter = new SseEmitter(0L);
-        OkHttpClient client = buildStreamClient();
+        OkHttpClient client = OkHttpUtil.getHttpClient();
         Request request = buildStreamRequest(body);
         AtomicReference<EventSource> ref = new AtomicReference<>();
         registerEmitterCallbacks(emitter, ref, modelId, statusUpdated);
         ref.set(EventSources.createFactory(client).newEventSource(request,
-                createStreamListener(emitter, modelId, statusUpdated)));
+            createStreamListener(emitter, modelId, statusUpdated)));
         return emitter;
-    }
-
-    private OkHttpClient buildStreamClient() {
-        return new OkHttpClient.Builder()
-                .connectTimeout(gptProxyConnectTimeoutMs, TimeUnit.MILLISECONDS)
-                .readTimeout(0, TimeUnit.MILLISECONDS)
-                .build();
     }
 
     private Request buildStreamRequest(Map<String, Object> body) {
@@ -76,16 +61,14 @@ public class GptProxyChatCompletionsStreamApplicationService {
         Map<String, Object> headersMap = MapUtils.getMap(inputMap, "headers");
         removeAdditionParam(inputMap);
         RequestBody requestBody = RequestBody.create(JsonUtil.toJSONString(inputMap), json);
-        Request.Builder builder = new Request.Builder()
-                .url(url)
-                .post(requestBody)
-                .addHeader("Accept", "text/event-stream")
-                .addHeader("Content-Type", "application/json");
+        Request.Builder builder = new Request.Builder().url(url).post(requestBody)
+            .addHeader("Accept", "text/event-stream").addHeader("Content-Type", "application/json");
         buildHeader(headersMap, builder);
         return builder.build();
     }
 
-    private void onStreamEnd(AtomicReference<EventSource> ref, Long modelId, AtomicBoolean statusUpdated, boolean success) {
+    private void onStreamEnd(AtomicReference<EventSource> ref, Long modelId, AtomicBoolean statusUpdated,
+        boolean success) {
         EventSource es = ref.get();
         if (es != null) {
             es.cancel();
@@ -95,8 +78,8 @@ public class GptProxyChatCompletionsStreamApplicationService {
         }
     }
 
-    private void registerEmitterCallbacks(SseEmitter emitter, AtomicReference<EventSource> ref,
-                                          Long modelId, AtomicBoolean statusUpdated) {
+    private void registerEmitterCallbacks(SseEmitter emitter, AtomicReference<EventSource> ref, Long modelId,
+        AtomicBoolean statusUpdated) {
         emitter.onCompletion(() -> onStreamEnd(ref, modelId, statusUpdated, true));
         emitter.onTimeout(() -> {
             onStreamEnd(ref, modelId, statusUpdated, false);
@@ -115,7 +98,8 @@ public class GptProxyChatCompletionsStreamApplicationService {
                         emitter.complete();
                         eventSource.cancel();
                     }
-                } catch (IOException ex) {
+                }
+                catch (IOException ex) {
                     eventSource.cancel();
                     emitter.complete();
                 }
@@ -158,11 +142,9 @@ public class GptProxyChatCompletionsStreamApplicationService {
         int errorCode = CommonErrorCode.AIMODEL_ERROR_CODE_50010;
         if (response != null) {
             int code = response.code();
-            errorCode = code >= 400 && code < 500
-                ? CommonErrorCode.AIMODEL_ERROR_CODE_40001
+            errorCode = code >= 400 && code < 500 ? CommonErrorCode.AIMODEL_ERROR_CODE_40001
                 : CommonErrorCode.AIMODEL_ERROR_CODE_50010;
         }
         return new BaseException(errorCode, "aimodel.debug.upstream.error", t);
     }
 }
-

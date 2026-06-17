@@ -1,7 +1,6 @@
 package com.iwhalecloud.byai.manager.vo.ecosystem;
 
 import java.util.Date;
-import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
@@ -197,8 +196,4 @@ public class EcosystemTaskVo {
      */
     private Integer lastFailedCount;
 
-    /**
-     * 任务关联的分层信号。
-     */
-    private List<EcosystemSignalVo> signals;
 }

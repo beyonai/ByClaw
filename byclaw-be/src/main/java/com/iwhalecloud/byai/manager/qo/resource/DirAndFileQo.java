@@ -17,4 +17,9 @@ public class DirAndFileQo {
     private String resourceCode;
 
     private String directoryPath;
+
+    /**
+     * 目录/文件搜索关键字。
+     */
+    private String keyword;
 }

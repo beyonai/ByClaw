@@ -22,7 +22,6 @@ import com.iwhalecloud.byai.common.storage.model.FileStorageContext;
 import com.iwhalecloud.byai.common.storage.util.MultipartFileUtil;
 import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.mapper.file.FilesMapper;
-import com.iwhalecloud.byai.manager.vo.ecosystem.EcosystemRunVo;
 import com.iwhalecloud.byai.manager.vo.ecosystem.EcosystemTaskVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -62,21 +61,21 @@ public class EcosystemArtifactStorageService {
     private ObjectMapper objectMapper;
 
     /**
-     * 将 OpenCLI 采集结果落到统一文件存储，并返回可入库的 Markdown 文件和产物视图。
+     * 将 bycli 采集结果落到统一文件存储，并返回可入库的 Markdown 文件和产物视图。
      *
      * @param runId 本次采集运行 ID
      * @param task 采集任务配置
-     * @param collectionResult OpenCLI 采集结果
+     * @param collectionResult bycli 采集结果
      * @return 存储结果，包含对象存储路径、产物清单和待导入 Markdown 文件
      */
-    public StorageResult store(Long runId, EcosystemTaskVo task, OpenCliRunner.CollectionResult collectionResult) {
+    public StorageResult store(Long runId, EcosystemTaskVo task, CollectionResult collectionResult) {
         String artifactBasePath = "ecosystem/users/" + currentUserId() + "/runs/" + runId + "/";
         FileStorageContext storageContext = FileStorageContext.sandboxWorkspace(artifactBasePath, null);
         StorageResult result = new StorageResult();
         result.setStoragePath(artifactBasePath);
 
         int index = 1;
-        for (OpenCliRunner.CollectionItem item : collectionResult.getItems()) {
+        for (CollectionItem item : collectionResult.getItems()) {
             String fileName = uniqueFileName(index++, item.getFileName(), ".md");
             byte[] bytes = item.getMarkdown().getBytes(StandardCharsets.UTF_8);
             StoredFile storedFile = uploadAndPersist(fileName, "text/markdown", bytes, storageContext, task);
@@ -168,10 +167,10 @@ public class EcosystemArtifactStorageService {
     }
 
     /**
-     * 将内部文件存储结果转换为运行产物视图，供 bykc_ec_artifact 持久化和前端展示。
+     * 将内部文件存储结果转换为入库桥返回给 bycli 的产物视图。
      */
-    private EcosystemRunVo.ArtifactVo toArtifactVo(StoredFile storedFile) {
-        EcosystemRunVo.ArtifactVo artifact = new EcosystemRunVo.ArtifactVo();
+    private ArtifactFile toArtifactVo(StoredFile storedFile) {
+        ArtifactFile artifact = new ArtifactFile();
         artifact.setArtifactType(storedFile.getArtifactType());
         artifact.setArtifactName(storedFile.getArtifactName());
         artifact.setStoragePath(storedFile.getFileUrl());
@@ -187,7 +186,7 @@ public class EcosystemArtifactStorageService {
     /**
      * 生成原始 OpenCLI 输出产物，便于问题回放和运行审计。
      */
-    private String rawPayload(OpenCliRunner.CollectionResult collectionResult) {
+    private String rawPayload(CollectionResult collectionResult) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("command", collectionResult.getCommand());
         payload.put("rawOutput", collectionResult.getRawOutput());
@@ -198,7 +197,7 @@ public class EcosystemArtifactStorageService {
     /**
      * 生成本次采集的 manifest，记录任务、命令、数量、存储路径和产物索引。
      */
-    private String manifestPayload(Long runId, EcosystemTaskVo task, OpenCliRunner.CollectionResult collectionResult,
+    private String manifestPayload(Long runId, EcosystemTaskVo task, CollectionResult collectionResult,
                                    StorageResult storageResult) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("runId", runId);
@@ -328,7 +327,7 @@ public class EcosystemArtifactStorageService {
         /**
          * 已存储产物视图列表。
          */
-        private final List<EcosystemRunVo.ArtifactVo> artifacts = new ArrayList<>();
+        private final List<ArtifactFile> artifacts = new ArrayList<>();
 
         /**
          * 需要继续导入知识库的 Markdown 文件列表。
@@ -343,12 +342,216 @@ public class EcosystemArtifactStorageService {
             this.storagePath = storagePath;
         }
 
-        public List<EcosystemRunVo.ArtifactVo> getArtifacts() {
+        public List<ArtifactFile> getArtifacts() {
             return artifacts;
         }
 
         public List<MarkdownImportFile> getMarkdownFiles() {
             return markdownFiles;
+        }
+    }
+
+    /**
+     * bycli 归一化后的采集结果。
+     */
+    public static class CollectionResult {
+
+        /**
+         * 实际执行的 bycli 命令。
+         */
+        private List<String> command = List.of();
+
+        /**
+         * bycli 输出目录，可选；用于补充附件归档。
+         */
+        private Path outputDir;
+
+        /**
+         * 原始输出文本，用于审计和回放。
+         */
+        private String rawOutput;
+
+        /**
+         * 归档附件数量。
+         */
+        private int assetCount;
+
+        /**
+         * Markdown 条目列表。
+         */
+        private List<CollectionItem> items = List.of();
+
+        public List<String> getCommand() {
+            return command;
+        }
+
+        public void setCommand(List<String> command) {
+            this.command = command == null ? List.of() : command;
+        }
+
+        public Path getOutputDir() {
+            return outputDir;
+        }
+
+        public void setOutputDir(Path outputDir) {
+            this.outputDir = outputDir;
+        }
+
+        public String getRawOutput() {
+            return rawOutput;
+        }
+
+        public void setRawOutput(String rawOutput) {
+            this.rawOutput = rawOutput;
+        }
+
+        public int getAssetCount() {
+            return assetCount;
+        }
+
+        public void setAssetCount(int assetCount) {
+            this.assetCount = assetCount;
+        }
+
+        public List<CollectionItem> getItems() {
+            return items;
+        }
+
+        public void setItems(List<CollectionItem> items) {
+            this.items = items == null ? List.of() : items;
+        }
+    }
+
+    /**
+     * bycli 采集到的单篇 Markdown 条目。
+     */
+    public static class CollectionItem {
+
+        private final String title;
+
+        private final String fileName;
+
+        private final String sourceUrl;
+
+        private final String markdown;
+
+        public CollectionItem(String title, String fileName, String sourceUrl, String markdown) {
+            this.title = title;
+            this.fileName = fileName;
+            this.sourceUrl = sourceUrl;
+            this.markdown = markdown;
+        }
+
+        public String getTitle() {
+            return title;
+        }
+
+        public String getFileName() {
+            return fileName;
+        }
+
+        public String getSourceUrl() {
+            return sourceUrl;
+        }
+
+        public String getMarkdown() {
+            return markdown;
+        }
+    }
+
+    /**
+     * 已归档产物的轻量视图。
+     */
+    public static class ArtifactFile {
+
+        private String artifactType;
+
+        private String artifactName;
+
+        private String storagePath;
+
+        private Integer itemCount;
+
+        private Long fileId;
+
+        private String fileUrl;
+
+        private String contentType;
+
+        private String fileSystemType;
+
+        private String sourceUrl;
+
+        public String getArtifactType() {
+            return artifactType;
+        }
+
+        public void setArtifactType(String artifactType) {
+            this.artifactType = artifactType;
+        }
+
+        public String getArtifactName() {
+            return artifactName;
+        }
+
+        public void setArtifactName(String artifactName) {
+            this.artifactName = artifactName;
+        }
+
+        public String getStoragePath() {
+            return storagePath;
+        }
+
+        public void setStoragePath(String storagePath) {
+            this.storagePath = storagePath;
+        }
+
+        public Integer getItemCount() {
+            return itemCount;
+        }
+
+        public void setItemCount(Integer itemCount) {
+            this.itemCount = itemCount;
+        }
+
+        public Long getFileId() {
+            return fileId;
+        }
+
+        public void setFileId(Long fileId) {
+            this.fileId = fileId;
+        }
+
+        public String getFileUrl() {
+            return fileUrl;
+        }
+
+        public void setFileUrl(String fileUrl) {
+            this.fileUrl = fileUrl;
+        }
+
+        public String getContentType() {
+            return contentType;
+        }
+
+        public void setContentType(String contentType) {
+            this.contentType = contentType;
+        }
+
+        public String getFileSystemType() {
+            return fileSystemType;
+        }
+
+        public void setFileSystemType(String fileSystemType) {
+            this.fileSystemType = fileSystemType;
+        }
+
+        public String getSourceUrl() {
+            return sourceUrl;
+        }
+
+        public void setSourceUrl(String sourceUrl) {
+            this.sourceUrl = sourceUrl;
         }
     }
 

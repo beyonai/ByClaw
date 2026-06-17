@@ -17,6 +17,7 @@ export const ResourceTypeMap = {
   VIEW: 'VIEW',
   OBJECT: 'OBJECT',
   SKILL: 'SKILL',
+  PROPERTY: 'PROPERTY',
 
   Knowledge: 'Knowledge', // 知识库插件
   KnowledgeKIT: 'KnowledgeKIT', // 知识库插件库

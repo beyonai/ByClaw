@@ -1,8 +1,13 @@
 package com.iwhalecloud.byai.state.interfaces.controller.notification;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.manager.dto.notification.NotificationManageDto;
+import com.iwhalecloud.byai.manager.dto.notification.NotificationQueryDto;
 import com.iwhalecloud.byai.manager.dto.notification.NotificationReadDto;
+import com.iwhalecloud.byai.manager.entity.notification.ByaiNotification;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+import com.iwhalecloud.byai.manager.vo.notification.NotificationVO;
 import com.iwhalecloud.byai.state.domain.notification.service.NotificationService;
 import jakarta.validation.Valid;
 import org.apache.commons.collections.CollectionUtils;
@@ -26,6 +31,96 @@ public class NotificationController {
 
     @Autowired
     private NotificationService notificationService;
+
+    /**
+     * 管理端分页查询通知
+     */
+    @PostMapping("/manage/page")
+    public ResponseUtil<Page<NotificationVO>> managePage(@RequestBody NotificationQueryDto queryDto) {
+        try {
+            return ResponseUtil.successResponse(notificationService.queryManagePage(queryDto));
+        }
+        catch (Exception e) {
+            logger.error("分页查询通知失败", e);
+            return ResponseUtil.fail("Failed to query notification page!" + e.getMessage());
+        }
+    }
+
+    /**
+     * 管理端查询通知详情
+     */
+    @PostMapping("/manage/detail")
+    public ResponseUtil<ByaiNotification> manageDetail(@RequestBody NotificationManageDto request) {
+        try {
+            if (request == null || request.getId() == null) {
+                return ResponseUtil.fail("Parameter error: id cannot be empty!");
+            }
+            return ResponseUtil.successResponse(notificationService.getManageNotification(request.getId()));
+        }
+        catch (Exception e) {
+            logger.error("查询通知详情失败", e);
+            return ResponseUtil.fail("Failed to query notification detail!" + e.getMessage());
+        }
+    }
+
+    /**
+     * 管理端创建通知
+     */
+    @PostMapping("/manage/create")
+    public ResponseUtil<ByaiNotification> manageCreate(@RequestBody NotificationManageDto request) {
+        try {
+            return ResponseUtil.successResponse(notificationService.createManageNotification(request));
+        }
+        catch (Exception e) {
+            logger.error("创建通知失败", e);
+            return ResponseUtil.fail("Failed to create notification!" + e.getMessage());
+        }
+    }
+
+    /**
+     * 管理端更新通知
+     */
+    @PostMapping("/manage/update")
+    public ResponseUtil<ByaiNotification> manageUpdate(@RequestBody NotificationManageDto request) {
+        try {
+            return ResponseUtil.successResponse(notificationService.updateManageNotification(request));
+        }
+        catch (Exception e) {
+            logger.error("更新通知失败", e);
+            return ResponseUtil.fail("Failed to update notification!" + e.getMessage());
+        }
+    }
+
+    /**
+     * 管理端删除通知
+     */
+    @PostMapping("/manage/delete")
+    public ResponseUtil<Boolean> manageDelete(@RequestBody NotificationManageDto request) {
+        try {
+            if (request == null || request.getId() == null) {
+                return ResponseUtil.fail("Parameter error: id cannot be empty!");
+            }
+            return ResponseUtil.successResponse(notificationService.deleteManageNotification(request.getId()));
+        }
+        catch (Exception e) {
+            logger.error("删除通知失败", e);
+            return ResponseUtil.fail("Failed to delete notification!" + e.getMessage());
+        }
+    }
+
+    /**
+     * 查询最新版本通知
+     */
+    @PostMapping("/version/latest")
+    public ResponseUtil<ByaiNotification> latestVersionNotification() {
+        try {
+            return ResponseUtil.successResponse(notificationService.getLatestVersionNotification());
+        }
+        catch (Exception e) {
+            logger.error("查询最新版本通知失败", e);
+            return ResponseUtil.fail("Failed to query latest version notification!" + e.getMessage());
+        }
+    }
 
     /**
      * 批量设置通知已读

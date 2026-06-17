@@ -57,6 +57,7 @@ final class SandboxRuntimeRequestFactory {
         payload.put("entrypoint", request != null ? request.getEntrypoint() : null);
         payload.put("env", request != null ? request.getEnv() : null);
         payload.put("image", buildImagePayload(request != null ? request.getImage() : null));
+        payload.put("resourceRequests", request != null ? request.getResourceRequests() : null);
         payload.put("resourceLimits", request != null ? request.getResourceLimits() : null);
         payload.put("volumes", buildVolumesPayload(request != null ? request.getVolumes() : null));
         payload.put("extensions", request != null ? request.getExtensions() : null);

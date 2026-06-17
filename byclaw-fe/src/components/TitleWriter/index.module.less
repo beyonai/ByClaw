@@ -2,7 +2,7 @@
   color: #0d111a;
   font-weight: bold;
   margin: 100px auto 0;
-  padding-bottom: 30px;
+  padding-bottom: 50px;
   width: 96%;
   max-width: 850px;
   &.withAssistant {
@@ -15,6 +15,48 @@
     right: 0;
     bottom: 0;
     width: 150px;
+
+    .wrapper {
+      position: relative;
+      width: 100%;
+      .tips {
+        position: absolute;
+        top: 57px;
+        left: 13px;
+        background-color: #d3dbf6;
+        padding: 2px 8px;
+        border-radius: 4px;
+        color: #fff;
+        cursor: pointer;
+
+        // 宽度随字数自适应,最大 200px,超出省略号
+        width: fit-content;
+        max-width: 200px;
+        overflow: visible;
+
+        transform: translateX(-70%);
+
+        .tipsText {
+          display: block;
+          max-width: 200px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        // 右上角三角形,指向上方助手,构成聊天气泡
+        &::after {
+          content: '';
+          position: absolute;
+          top: 6px;
+          right: -11px;
+          border-left: 6px solid #d3dbf6;
+          border-right: 6px solid transparent;
+          border-bottom: 6px solid transparent;
+          border-top: 6px solid transparent;
+        }
+      }
+    }
   }
 
   .title {

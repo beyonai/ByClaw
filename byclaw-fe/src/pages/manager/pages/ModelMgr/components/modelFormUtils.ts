@@ -9,17 +9,39 @@ export type ModelTagItem = {
 };
 
 export const SYSTEM_SOURCE_TYPES = ['DIG_EMPLOYEE'];
-export const DEFAULT_CONTEXT_TOKENS = 200 * 1000;
-export const MAX_CONTEXT_TOKENS = 1000 * 1000;
-export const DEFAULT_MAX_TOKENS = 32 * 1000;
+export const DEFAULT_CONTEXT_TOKENS = 1024 * 198;
+export const MAX_CONTEXT_TOKENS = 2000 * 1000;
 export const CONTEXT_TOKENS_CONFIG = {
   min: 1000,
   max: MAX_CONTEXT_TOKENS,
   step: 1000,
 };
+export const DEFAULT_MAX_TOKENS = 1024 * 64;
+export const THINKING_LEVEL_OPTIONS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'adaptive', 'max'] as const;
+export const THINKING_CAPABILITY_OPTIONS = ['unsupported', 'binary', 'effort', 'budget', 'adaptive'] as const;
+export const THINKING_COMPAT_FORMAT_OPTIONS = [
+  'auto',
+  'openai',
+  'qwen',
+  'qwen-chat-template',
+  'deepseek',
+  'openrouter',
+  'together',
+  'zai',
+  'anthropic',
+] as const;
 
-export const tokenMarks = Array.from({ length: 5 }, (_, index) => {
-  const value = (index + 1) * 200 * 1000;
+export const DEFAULT_REASONING_CONFIG = {
+  enabled: false,
+  defaultLevel: 'off',
+  capability: 'unsupported',
+  compatFormat: 'auto',
+  supportedEfforts: [],
+  budgets: {},
+};
+
+export const tokenMarks = Array.from({ length: 4 }, (_, index) => {
+  const value = (index + 1) * 500 * 1000;
   return [value, `${value / 1000}K`];
 }).reduce<Record<number, string>>((marks, [value, label]) => {
   marks[value as number] = label as string;
@@ -41,6 +63,7 @@ export function buildDebugDefaults(intl: any) {
 
 export const MODEL_PROTOCOL_OPTIONS = [
   { label: 'OpenAI', value: 'OpenAI' },
+  { label: 'OpenAI Responses', value: 'OpenAI Responses' },
   { label: 'Anthropic', value: 'Anthropic' },
 ] as const;
 
@@ -75,6 +98,8 @@ export function getDefaultFormValues() {
     maxTokens: DEFAULT_MAX_TOKENS,
     frequencyPenalty: 0,
     presencePenalty: 0,
+    reasoningConfig: { ...DEFAULT_REASONING_CONFIG },
+    reasoningEffortMapText: '',
   };
 }
 
@@ -177,6 +202,127 @@ function safeParseJsonObject(text: string): any | null {
   }
 }
 
+export function formatReasoningEffortMapText(reasoningConfig?: any) {
+  const effortMap = reasoningConfig?.effortMap;
+  if (!effortMap || typeof effortMap !== 'object' || Array.isArray(effortMap)) {
+    return '';
+  }
+  return JSON.stringify(effortMap, null, 2);
+}
+
+function safeParseReasoningEffortMap(text: any) {
+  if (typeof text !== 'string' || !text.trim()) return undefined;
+  const parsed = safeParseJsonObject(text);
+  if (!parsed) return undefined;
+  const out: Record<string, string> = {};
+  Object.keys(parsed).forEach((key) => {
+    const k = `${key}`.trim();
+    const v = `${parsed[key] ?? ''}`.trim();
+    if (k && v) {
+      out[k] = v;
+    }
+  });
+  return Object.keys(out).length ? out : undefined;
+}
+
+export function buildReasoningConfigPayload(values: any) {
+  const raw = values?.reasoningConfig && typeof values.reasoningConfig === 'object' ? values.reasoningConfig : {};
+  const capability = `${raw.capability ?? DEFAULT_REASONING_CONFIG.capability}`.trim() || 'unsupported';
+  const enabled = Boolean(raw.enabled) && capability !== 'unsupported';
+  const next: Record<string, any> = {
+    enabled,
+    defaultLevel: enabled ? `${raw.defaultLevel ?? 'medium'}` : 'off',
+    capability,
+    compatFormat: `${raw.compatFormat ?? 'auto'}`,
+  };
+  if (!enabled) {
+    return next;
+  }
+  if (Array.isArray(raw.supportedEfforts) && raw.supportedEfforts.length) {
+    next.supportedEfforts = raw.supportedEfforts;
+  }
+  const effortMap = safeParseReasoningEffortMap(values?.reasoningEffortMapText);
+  if (effortMap) {
+    next.effortMap = effortMap;
+  }
+  if (raw.budgets && typeof raw.budgets === 'object' && !Array.isArray(raw.budgets)) {
+    const budgets: Record<string, number> = {};
+    Object.keys(raw.budgets).forEach((level) => {
+      const value = Number(raw.budgets[level]);
+      if (Number.isFinite(value) && value > 0) {
+        budgets[level] = Math.floor(value);
+      }
+    });
+    if (Object.keys(budgets).length) {
+      next.budgets = budgets;
+    }
+  }
+  return next;
+}
+
+function getReasoningBudget(reasoningConfig: any, level: string) {
+  const value = reasoningConfig?.budgets?.[level];
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
+}
+
+function resolveDebugReasoningEffort(reasoningConfig: any, effortMapText: any, defaultLevel: string) {
+  const effortMap = safeParseReasoningEffortMap(effortMapText);
+  if (effortMap?.[defaultLevel]) return effortMap[defaultLevel];
+  if (defaultLevel === 'minimal' || defaultLevel === 'low' || defaultLevel === 'medium') return 'high';
+  if (defaultLevel === 'adaptive') return 'medium';
+  if (defaultLevel === 'xhigh' || defaultLevel === 'max') return 'max';
+  return defaultLevel;
+}
+
+function applyReasoningDebugParams(req: Record<string, any>, formValues: any) {
+  const reasoningConfig = formValues?.reasoningConfig || {};
+  const capability = `${reasoningConfig?.capability ?? 'unsupported'}`.trim().toLowerCase();
+  const defaultLevel = `${reasoningConfig?.defaultLevel ?? 'off'}`.trim().toLowerCase();
+  const enabled = Boolean(reasoningConfig?.enabled) && capability !== 'unsupported' && defaultLevel !== 'off';
+  if (!enabled) {
+    req.enable_thinking = false;
+    req.chat_template_kwargs = { enable_thinking: false };
+    return;
+  }
+  const compatFormat = `${reasoningConfig?.compatFormat ?? 'auto'}`.trim().toLowerCase();
+  if (['deepseek', 'openai', 'openrouter', 'zai'].includes(compatFormat)) {
+    req.reasoning_effort = resolveDebugReasoningEffort(
+      reasoningConfig,
+      formValues?.reasoningEffortMapText,
+      defaultLevel
+    );
+    return;
+  }
+  if (compatFormat === 'together') {
+    req.reasoning = { enabled: true };
+    return;
+  }
+  if (compatFormat === 'qwen') {
+    req.enable_thinking = true;
+    const budget = getReasoningBudget(reasoningConfig, defaultLevel);
+    if (budget) req.thinking_budget = budget;
+    return;
+  }
+  if (compatFormat === 'qwen-chat-template') {
+    req.chat_template_kwargs = { enable_thinking: true };
+    const budget = getReasoningBudget(reasoningConfig, defaultLevel);
+    if (budget) req.thinking_budget = budget;
+    return;
+  }
+  if (compatFormat === 'anthropic') {
+    if (defaultLevel === 'adaptive') {
+      req.thinking = { type: 'adaptive', display: 'summarized' };
+      return;
+    }
+    const budget = getReasoningBudget(reasoningConfig, defaultLevel);
+    req.thinking = budget ? { type: 'enabled', budget_tokens: budget } : { type: 'enabled' };
+    return;
+  }
+  req.enable_thinking = true;
+  req.chat_template_kwargs = { enable_thinking: true };
+}
+
 export function buildAutoDebugRequestText(options: {
   formValues: any;
   id?: string;
@@ -235,18 +381,16 @@ export function buildAutoDebugRequestText(options: {
     const temperature = !isTypeSwitch && typeof prevObj?.temperature === 'number' ? prevObj.temperature : 0.1;
     const stream = !isTypeSwitch && typeof prevObj?.stream === 'boolean' ? prevObj.stream : true;
 
-    return JSON.stringify(
-      {
-        url,
-        headers: Object.keys(headersObj).length ? headersObj : {},
-        model: modelNoOrCode,
-        messages,
-        temperature,
-        stream,
-      },
-      null,
-      2
-    );
+    const req: Record<string, any> = {
+      url,
+      headers: Object.keys(headersObj).length ? headersObj : {},
+      model: modelNoOrCode,
+      messages,
+      temperature,
+      stream,
+    };
+    applyReasoningDebugParams(req, formValues);
+    return JSON.stringify(req, null, 2);
   }
 
   if (modelType === 'RERANK') {

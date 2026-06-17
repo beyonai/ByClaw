@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ByClaw OpenSandbox K3s + Longhorn 一键部署手册</title>
+  <style>
+    :root {
+      --ink: #17202a;
+      --muted: #596579;
+      --line: #d8dee8;
+      --soft: #f6f8fb;
+      --blue: #1f6feb;
+      --green: #1f883d;
+      --orange: #b65c00;
+      --red: #cf222e;
+      --card: #fff;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #f3f5f8;
+      font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    .shell {
+      width: min(1380px, calc(100% - 40px));
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 250px minmax(0, 1fr);
+      gap: 22px;
+      padding: 34px 0 56px;
+    }
+    nav {
+      position: sticky;
+      top: 18px;
+      max-height: calc(100vh - 36px);
+      overflow: auto;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    nav strong { display: block; margin-bottom: 8px; }
+    nav a {
+      display: block;
+      color: var(--muted);
+      text-decoration: none;
+      padding: 7px 8px;
+      border-left: 3px solid transparent;
+      border-radius: 5px;
+      font-size: 13px;
+    }
+    nav a:hover { color: var(--blue); background: #eef6ff; border-left-color: var(--blue); }
+    main { min-width: 0; }
+    section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px 24px;
+      margin-bottom: 18px;
+    }
+    h1, h2, h3 { line-height: 1.25; margin: 0 0 12px; }
+    h1 { font-size: 30px; }
+    h2 { font-size: 22px; padding-top: 2px; }
+    h3 { font-size: 17px; margin-top: 18px; }
+    p { margin: 8px 0 12px; }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+    }
+    code { background: #eef2f7; border-radius: 4px; padding: 2px 5px; }
+    pre {
+      overflow: auto;
+      background: #0f172a;
+      color: #e5edf8;
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin: 12px 0;
+    }
+    pre code { background: transparent; color: inherit; padding: 0; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+    th, td { border: 1px solid var(--line); padding: 9px 10px; vertical-align: top; }
+    th { background: var(--soft); text-align: left; }
+    .lede { color: var(--muted); font-size: 16px; }
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: 12px;
+      border: 1px solid var(--line);
+      background: var(--soft);
+      color: var(--muted);
+    }
+    .ok { background: #dafbe1; color: var(--green); border-color: #aceebb; }
+    .warn { background: #fff4ce; color: var(--orange); border-color: #f0d98c; }
+    .danger { background: #ffebe9; color: var(--red); border-color: #ffb4ad; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .box { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fbfcfe; }
+    .diagram {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 12px;
+      overflow: auto;
+    }
+    svg { max-width: 100%; height: auto; }
+    .svg-box { fill: #fff; stroke: #9aa9bd; stroke-width: 1.2; }
+    .svg-primary { fill: #eef6ff; stroke: var(--blue); }
+    .svg-good { fill: #dafbe1; stroke: var(--green); }
+    .svg-warn { fill: #fff4ce; stroke: var(--orange); }
+    .svg-text { font-size: 13px; fill: var(--ink); }
+    .svg-muted { font-size: 12px; fill: var(--muted); }
+    .svg-line { stroke: #65758b; stroke-width: 1.4; fill: none; }
+    @media (max-width: 900px) {
+      .shell { display: block; width: min(100% - 24px, 1000px); }
+      nav { position: static; margin-bottom: 16px; }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <nav>
+      <strong>目录</strong>
+      <a href="#goal">1. 目标</a>
+      <a href="#files">2. 交付文件</a>
+      <a href="#topology">3. 节点拓扑</a>
+      <a href="#env">4. env.k3s 配置</a>
+      <a href="#deploy">5. 一键部署</a>
+      <a href="#longhorn">6. Longhorn</a>
+      <a href="#manifests">7. Manifest 生成</a>
+      <a href="#verify">8. 验收</a>
+      <a href="#rollback">9. 回滚</a>
+      <a href="#troubleshooting">10. 排障</a>
+    </nav>
+
+    <main>
+      <section id="goal">
+        <h1>ByClaw OpenSandbox K3s + Longhorn 一键部署手册</h1>
+        <p class="lede">目标是把 OpenSandbox 从 Docker 单机 runtime 升级到 K3s 集群 runtime，并用 Longhorn RWX PVC 承载 <code>/by</code> 工作区。部署入口保持一条命令：<code>scripts/deploy-k3s.sh &lt;env&gt; init</code> 或直接在集群节点执行 <code>deploy/k3s/deploy.sh init</code>。</p>
+        <p><span class="tag ok">支持</span> 指定 K3s server/agent 节点 <span class="tag ok">支持</span> 节点池分配 <span class="tag ok">支持</span> Longhorn 一键安装 <span class="tag warn">注意</span> 生产 Secret 写入 <code>envs/&lt;name&gt;/env.k3s</code>，不要提交。</p>
+      </section>
+
+      <section id="files">
+        <h2>1. 交付文件</h2>
+        <table>
+          <tr><th>文件</th><th>作用</th></tr>
+          <tr><td><code>scripts/deploy-k3s.sh</code></td><td>远程部署包装器，上传当前 git HEAD 和 <code>envs/&lt;name&gt;/env.k3s</code>，再在远端执行 K3s 部署。</td></tr>
+          <tr><td><code>deploy/k3s/env.k3s.example</code></td><td>部署参数模板，包含 server/agent、节点池、Longhorn、镜像、namespace、密钥占位符。</td></tr>
+          <tr><td><code>deploy/k3s/install-k3s.sh</code></td><td>通过 SSH 安装 HA K3s：首个 server 执行 <code>--cluster-init</code>，其他 server/agent 加入，并统一打节点池标签。</td></tr>
+          <tr><td><code>deploy/k3s/install-longhorn.sh</code></td><td>安装 Longhorn，设置默认数据路径、RWX、默认副本数。</td></tr>
+          <tr><td><code>deploy/k3s/render-manifests.sh</code></td><td>根据 <code>env.k3s</code> 渲染 K8s YAML 到 <code>deploy/k3s/generated/</code>。</td></tr>
+          <tr><td><code>deploy/k3s/deploy.sh</code></td><td>本地/远端统一入口：<code>init</code>、<code>cluster-init</code>、<code>storage-init</code>、<code>render</code>、<code>update</code>、<code>stop</code>。</td></tr>
+        </table>
+      </section>
+
+      <section id="topology">
+        <h2>2. 节点拓扑</h2>
+        <p>K3s 控制面与工作节点分开配置。server 节点组成 embedded etcd HA；agent 节点用于承载沙箱和重负载任务。节点池通过 <code>byclaw.io/node-pool</code> 标签驱动调度。</p>
+        <div class="diagram">
+          <svg viewBox="0 0 1040 360" role="img" aria-label="K3s node topology">
+            <defs>
+              <marker id="arrow" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+                <path d="M0,0 L10,4 L0,8 z" fill="#65758b"></path>
+              </marker>
+            </defs>
+            <rect class="svg-box svg-primary" x="30" y="35" width="250" height="90" rx="8"></rect>
+            <text class="svg-text" x="55" y="65">K3s server HA</text>
+            <text class="svg-muted" x="55" y="90">node-1,node-2,node-3</text>
+            <text class="svg-muted" x="55" y="112">embedded etcd + kube-api</text>
+            <rect class="svg-box svg-good" x="390" y="35" width="250" height="90" rx="8"></rect>
+            <text class="svg-text" x="415" y="65">agent browser pool</text>
+            <text class="svg-muted" x="415" y="90">node-4,node-5</text>
+            <text class="svg-muted" x="415" y="112">OpenClaw browser / VNC</text>
+            <rect class="svg-box svg-warn" x="750" y="35" width="250" height="90" rx="8"></rect>
+            <text class="svg-text" x="775" y="65">agent heavy pool</text>
+            <text class="svg-muted" x="775" y="90">node-6</text>
+            <text class="svg-muted" x="775" y="112">FFmpeg / large jobs</text>
+            <path class="svg-line" marker-end="url(#arrow)" d="M160 145 L160 225"></path>
+            <path class="svg-line" marker-end="url(#arrow)" d="M515 145 L515 225"></path>
+            <path class="svg-line" marker-end="url(#arrow)" d="M875 145 L875 225"></path>
+            <rect class="svg-box" x="30" y="235" width="970" height="80" rx="8"></rect>
+            <text class="svg-text" x="55" y="265">Longhorn distributed storage</text>
+            <text class="svg-muted" x="55" y="290">每个节点准备 /data/longhorn；工作区 PVC 使用 RWX；BE Pod 与 sandbox Pod 挂同一 PVC，不再走 minio-mount/rclone。</text>
+          </svg>
+        </div>
+      </section>
+
+      <section id="env">
+        <h2>3. env.k3s 配置</h2>
+        <p>本地部署复制 <code>deploy/k3s/env.k3s.example</code>；远程部署推荐放到 <code>envs/204/env.k3s</code>，由 <code>scripts/deploy-k3s.sh</code> 同步到服务器。</p>
+        <pre><code>cp deploy/k3s/env.k3s.example deploy/k3s/env.k3s
+vi deploy/k3s/env.k3s</code></pre>
+        <h3>最小节点配置示例</h3>
+        <pre><code>K3S_API_HOST=k3s-api.internal.example.com
+K3S_JOIN_URL=https://k3s-api.internal.example.com:6443
+K3S_SERVER_HOSTS=10.10.10.11,10.10.10.12,10.10.10.13
+K3S_AGENT_HOSTS=10.10.10.21,10.10.10.22,10.10.10.23
+K3S_SSH_USER=root
+K3S_SSH_PORT=22
+K3S_SSH_PASSWORD=
+
+K3S_NODE_POOL_GENERAL_HOSTS=10.10.10.11,10.10.10.12,10.10.10.13
+K3S_NODE_POOL_BROWSER_HOSTS=10.10.10.21,10.10.10.22
+K3S_NODE_POOL_HEAVY_HOSTS=10.10.10.23</code></pre>
+        <h3>关键业务配置</h3>
+        <pre><code>STORAGE_CLASS=longhorn
+WORKSPACE_PVC_NAME=byclaw-workspace
+WORKSPACE_PVC_SIZE=500Gi
+LONGHORN_DATA_PATH=/data/longhorn
+LONGHORN_REPLICA_COUNT=3
+
+OPENSANDBOX_API_KEY=&lt;replace-me&gt;
+BYCLAW_SANDBOX_API_KEY=&lt;same-as-opensandbox-or-dedicated&gt;
+BYCLAW_SANDBOX_BASE_URL=http://opensandbox-server.by-sandbox.svc.cluster.local:9005
+
+IMAGE_BE=&lt;your-registry&gt;/byclaw-be:&lt;tag&gt;
+IMAGE_FE=&lt;your-registry&gt;/byclaw-fe:&lt;tag&gt;
+IMAGE_SANDBOX_SERVER=&lt;your-registry&gt;/opensandbox/server:&lt;tag&gt;</code></pre>
+      </section>
+
+      <section id="deploy">
+        <h2>4. 一键部署流程</h2>
+        <div class="grid">
+          <div class="box"><strong>cluster-init</strong><br />仅安装 K3s server/agent，并打节点池标签。</div>
+          <div class="box"><strong>storage-init</strong><br />仅安装 Longhorn 并创建工作区 PVC。</div>
+          <div class="box"><strong>init</strong><br />完整路径：K3s（可选）→ Longhorn → 渲染 manifest → apply → 等待 rollout。</div>
+        </div>
+        <h3>远程一键部署</h3>
+        <p>前提：<code>envs/&lt;env&gt;/.env</code> 配好远端 <code>HOST</code>、<code>HOST_USER</code>、<code>DEPLOY_DIR</code>；<code>envs/&lt;env&gt;/env.k3s</code> 配 K3s 集群参数。</p>
+        <pre><code># 首次完整部署
+sh scripts/deploy-k3s.sh 204 init
+
+# 更新镜像、配置或 manifest
+sh scripts/deploy-k3s.sh 204 update
+
+# 只停止 workload，保留 namespace/PVC/Longhorn 数据
+sh scripts/deploy-k3s.sh 204 stop</code></pre>
+        <h3>在 K3s server 本机部署</h3>
+        <pre><code>K3S_ENV_FILE=deploy/k3s/env.k3s sh deploy/k3s/deploy.sh init
+K3S_ENV_FILE=deploy/k3s/env.k3s sh deploy/k3s/deploy.sh update
+K3S_ENV_FILE=deploy/k3s/env.k3s sh deploy/k3s/deploy.sh render</code></pre>
+        <p><span class="tag warn">注意</span> 远程脚本使用 <code>git archive HEAD</code> 上传代码，新增脚本和手册需要先进入可审查的提交或明确同步方式，否则远端会拿不到。</p>
+      </section>
+
+      <section id="longhorn">
+        <h2>5. Longhorn 分布式部署</h2>
+        <p><code>install-k3s.sh</code> 会在每台节点准备 <code>/data/longhorn</code>，并尝试安装 <code>open-iscsi</code>、<code>nfs-common/nfs-utils</code> 等 Longhorn RWX 依赖。<code>install-longhorn.sh</code> 使用官方 manifest 安装 Longhorn，并应用以下设置：</p>
+        <table>
+          <tr><th>设置</th><th>来源</th><th>说明</th></tr>
+          <tr><td><code>default-data-path</code></td><td><code>LONGHORN_DATA_PATH</code></td><td>默认 <code>/data/longhorn</code>，避免根盘被工作区数据打满。</td></tr>
+          <tr><td><code>allow-rwx-volume</code></td><td>固定 true</td><td>允许 <code>byclaw-workspace</code> 使用 RWX。</td></tr>
+          <tr><td><code>default-replica-count</code></td><td><code>LONGHORN_REPLICA_COUNT</code></td><td>三节点建议 3；容量紧张时可先用 2，但可用性下降。</td></tr>
+        </table>
+        <pre><code># 仅初始化 Longhorn 和工作区 PVC
+K3S_ENV_FILE=deploy/k3s/env.k3s sh deploy/k3s/deploy.sh storage-init</code></pre>
+      </section>
+
+      <section id="manifests">
+        <h2>6. Manifest 生成机制</h2>
+        <p>部署不再直接 apply 静态业务 YAML，而是先渲染到 <code>deploy/k3s/generated/</code>。这样 namespace、镜像、host、Secret、StorageClass、节点池都来自同一份 <code>env.k3s</code>。</p>
+        <table>
+          <tr><th>生成目录</th><th>内容</th></tr>
+          <tr><td><code>00-namespaces</code></td><td><code>by-service</code>、<code>by-middleware</code>、<code>by-sandbox</code>、<code>monitoring</code></td></tr>
+          <tr><td><code>10-storage</code></td><td>service/sandbox 两个 namespace 下同名 RWX PVC</td></tr>
+          <tr><td><code>20-middleware</code></td><td>Redis、openGauss、Secret、PVC</td></tr>
+          <tr><td><code>30-sandbox</code></td><td>OpenSandbox Server、RBAC、ConfigMap、BatchSandbox 模板、API Key Secret</td></tr>
+          <tr><td><code>40-service</code></td><td>ByClaw BE/FE，BE 注入 <code>BYCLAW_SANDBOX_API_KEY</code> 并挂载工作区 PVC</td></tr>
+          <tr><td><code>50-ingress</code></td><td>ByClaw 业务入口。沙箱 wildcard endpoint 默认交给 OpenSandbox 动态管理。</td></tr>
+        </table>
+        <p><span class="tag danger">安全要求</span> <code>deploy/k3s/generated/</code> 含 Secret stringData，已被 <code>deploy/k3s/.gitignore</code> 忽略，不要手动提交。</p>
+      </section>
+
+      <section id="verify">
+        <h2>7. 验收命令</h2>
+        <pre><code>kubectl get nodes -L byclaw.io/node-pool,byclaw.io/k3s-role
+kubectl get storageclass longhorn
+kubectl -n longhorn-system get pods
+kubectl -n by-sandbox get pvc
+kubectl -n by-sandbox rollout status deploy/opensandbox-server
+kubectl -n by-service rollout status deploy/byclaw-be
+
+# 直连 OpenSandbox 创建 smoke sandbox
+export BYCLAW_SANDBOX_BASE_URL=http://opensandbox-server.by-sandbox.svc.cluster.local:9005
+export BYCLAW_SANDBOX_API_KEY=&lt;api-key&gt;
+sh deploy/k3s/smoke/create-sandbox.sh</code></pre>
+        <p>业务验收还需要从 ByClaw BE 发起一次真实 OpenClaw sandbox 创建，确认 <code>/by</code> 在 BE Pod 和 sandbox Pod 中能看到同一用户目录。</p>
+      </section>
+
+      <section id="rollback">
+        <h2>8. 回滚策略</h2>
+        <table>
+          <tr><th>场景</th><th>动作</th></tr>
+          <tr><td>OpenSandbox K8s runtime 不稳定</td><td>将 BE 的 <code>BYCLAW_SANDBOX_BASE_URL</code> 切回 Docker OpenSandbox 地址，执行 <code>deploy.sh update</code> 或旧部署脚本。</td></tr>
+          <tr><td>业务服务异常</td><td><code>sh deploy/k3s/deploy.sh stop</code> 缩容 K3s workload，PVC 和 Longhorn 数据保留。</td></tr>
+          <tr><td>Longhorn 数据迁移未完成</td><td>不要删除旧 MinIO/NFS 数据源；先只切灰度用户或测试租户。</td></tr>
+        </table>
+      </section>
+
+      <section id="troubleshooting">
+        <h2>9. 常见问题</h2>
+        <table>
+          <tr><th>现象</th><th>检查点</th></tr>
+          <tr><td>agent 加入失败</td><td>确认 <code>K3S_JOIN_URL</code> 从 agent 可访问，token 一致，6443 未被防火墙拦截。</td></tr>
+          <tr><td>沙箱 Pod Pending</td><td>检查 <code>kubectl get nodes -L byclaw.io/node-pool</code>，确认模板中的 <code>OPENSANDBOX_NODE_POOL</code> 有可调度节点。</td></tr>
+          <tr><td>Longhorn PVC Pending</td><td>检查 Longhorn manager/driver/deployer Pod、节点磁盘路径 <code>/data/longhorn</code>、iSCSI/NFS 依赖。</td></tr>
+          <tr><td>BE 调 OpenSandbox 401</td><td>确认 <code>BYCLAW_SANDBOX_API_KEY</code> 与 <code>OPENSANDBOX_API_KEY</code> 一致或符合服务端配置。</td></tr>
+          <tr><td>BE 和沙箱看到的文件不一致</td><td>确认 BE Deployment 和 BatchSandbox 模板使用同一个 <code>WORKSPACE_PVC_NAME</code>，且 BE 挂载路径等于 <code>FILE_STORAGE_LOCAL_PATH</code>。</td></tr>
+        </table>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

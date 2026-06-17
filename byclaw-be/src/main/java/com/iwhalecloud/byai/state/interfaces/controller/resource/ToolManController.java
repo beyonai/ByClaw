@@ -24,6 +24,7 @@ import org.springframework.web.util.UriUtils;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.manager.application.service.superassist.SuasSuperassistApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtMcpService;
 import com.iwhalecloud.byai.manager.dto.resource.CallMcpParamsDto;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto;
@@ -82,6 +83,9 @@ public class ToolManController {
 
     @Autowired
     private ByClawSkillQueryApplicationService byClawSkillQueryApplicationService;
+
+    @Autowired
+    private SuasSuperassistApplicationService suasSuperassistApplicationService;
 
     @Autowired
     private ByClawSkillUploadApplicationService byClawSkillUploadApplicationService;
@@ -672,7 +676,7 @@ public class ToolManController {
     }
 
     /**
-     * 查询用户工作空间下 skills 目录的 skill 列表。 userCode 为空时回退到当前登录用户；仅支持 MinIO 存储模式。
+     * 查询用户工作空间下 skills 目录的 skill 列表。 userCode 为空时回退到当前登录用户；resourceId 为空时回退到默认数字员工；仅支持 MinIO 存储模式。
      */
     @PostMapping("/qrySkillListByUserCode")
     public ResponseUtil<List<ByClawSkillDto>> qrySkillListByUserCode(@RequestBody QrySkillListByUserCodeQo request) {
@@ -683,8 +687,11 @@ public class ToolManController {
             String requestUserCode = request == null ? null : request.getUserCode();
             String resolvedUserCode = requestUserCode != null && !requestUserCode.trim().isEmpty() ? requestUserCode
                 : CurrentUserHolder.getCurrentUserCode();
+            Long resolvedResourceId = request.getResourceId() == null
+                ? suasSuperassistApplicationService.resolveCurrentUserDefaultDigitalEmployeeId()
+                : request.getResourceId();
             List<ByClawSkillDto> data = byClawSkillQueryApplicationService.qrySkillListByUserCode(resolvedUserCode,
-                request.getResourceId(), request == null ? null : request.getKeyword());
+                resolvedResourceId, request == null ? null : request.getKeyword());
             return ResponseUtil.successResponse(I18nUtil.get("byclaw.user.skill.list.query.success"), data);
         }
         catch (IllegalArgumentException e) {

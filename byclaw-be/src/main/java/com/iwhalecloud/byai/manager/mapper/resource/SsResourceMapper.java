@@ -110,6 +110,13 @@ public interface SsResourceMapper extends BaseMapper<SsResource> {
     List<ResourceAuthVo> queryDigEmployeeRelResourceAuthList(DigEmployeeRelResourceQo qo);
 
     /**
+     * 分页查询数字员工关联的技能资源列表。
+     *
+     * 技能关系存储在 ss_res_ext_dig_employee.skills JSON 数组中，数组元素对应 ss_resource.resource_code。
+     */
+    List<ResourceAuthVo> queryDigEmployeeSkillResourceAuthList(DigEmployeeRelResourceQo qo);
+
+    /**
      * 根据资源ID删除 resource_rule_enabled 表的数据 注意：resource_rule_enabled 表在 ConversationServer 模块中，如果表在同一个数据库中，可以通过此方法删除
      *
      * @param resourceId 资源ID

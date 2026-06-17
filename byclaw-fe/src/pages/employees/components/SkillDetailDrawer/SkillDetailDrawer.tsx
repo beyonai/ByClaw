@@ -16,7 +16,7 @@ import {
   message,
 } from 'antd';
 import { createPortal } from 'react-dom';
-import { LinkOutlined } from '@ant-design/icons';
+import { CloseOutlined, LinkOutlined } from '@ant-design/icons';
 import { compact } from 'lodash';
 import Image from '@/components/Image';
 import {
@@ -45,6 +45,7 @@ const { Paragraph } = Typography;
 
 interface SkillDetailDrawerProps extends DrawerProps {
   resourceId?: string;
+  panel?: boolean;
 }
 
 export type ISkillDetail = {
@@ -380,7 +381,7 @@ const RenderDetailPanel = (props: { skillDetail: ISkillDetail }) => {
 };
 
 export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
-  const { open, loading = false, onClose, resourceId, title = '', ...restProps } = props;
+  const { open, loading = false, onClose, resourceId, title = '', panel = false, ...restProps } = props;
 
   const intl = useIntl();
 
@@ -633,6 +634,29 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
     );
   };
 
+  const detailTitle = title || getTitleByBizType(skillDetail?.resourceBizType);
+  const detailContent = (
+    <Spin spinning={panel ? loading || isLoading : loading} wrapperClassName="full-height-spin">
+      <div className={classNames(styles.skillDetailDrawer, 'full-height')}>{renderDrawerContent()}</div>
+    </Spin>
+  );
+
+  if (panel) {
+    if (!open) {
+      return null;
+    }
+
+    return (
+      <div className={classNames(styles.skillDetailPanel, 'full-height')}>
+        <div className={styles.panelHeader}>
+          <span className={styles.panelTitle}>{detailTitle}</span>
+          <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose} />
+        </div>
+        <div className={styles.panelBody}>{detailContent}</div>
+      </div>
+    );
+  }
+
   return (
     <>
       <Drawer
@@ -640,14 +664,12 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
         width={800}
         onClose={onClose}
         bodyStyle={{ padding: '16px 24px' }}
-        title={title || getTitleByBizType(skillDetail?.resourceBizType)}
+        title={detailTitle}
         loading={isLoading}
         mask={false}
         {...restProps}
       >
-        <Spin spinning={loading} wrapperClassName="full-height-spin">
-          <div className={classNames(styles.skillDetailDrawer, 'full-height')}>{renderDrawerContent()}</div>
-        </Spin>
+        {detailContent}
       </Drawer>
     </>
   );

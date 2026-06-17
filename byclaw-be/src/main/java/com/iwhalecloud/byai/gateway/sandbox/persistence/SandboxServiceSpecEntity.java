@@ -15,4 +15,9 @@ public class SandboxServiceSpecEntity {
     private String serviceKey;
     private String specJson;
     private String templateJson;
+    private String serviceType;
+    private String displayName;
+    private Integer enabled;
+    private String defaultProfileKey;
+    private Integer autoscaleEnabled;
 }

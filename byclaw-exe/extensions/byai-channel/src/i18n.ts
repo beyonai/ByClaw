@@ -306,3 +306,10 @@ export function buildThinkingEndText(language: string | undefined, duration: num
         ? `\n\nThinking end after ${(duration / 1000).toFixed(1)}s`
         : `\n\n思考结束，耗时${(duration / 1000).toFixed(1)}秒`;
 }
+
+export function buildMaxTokenErrorText(language: string | undefined) {
+    if (isEnglishLanguage(language)) {
+        return "Due to reaching the maximum output limit of the model, the answer was truncated. Raise the maxToken parameter of the model and try again.";
+    }
+    return "因达到模型单次输出上限被截断，未能完整生成。请尝试调高该模型的**maxToken**参数后重试。";
+}

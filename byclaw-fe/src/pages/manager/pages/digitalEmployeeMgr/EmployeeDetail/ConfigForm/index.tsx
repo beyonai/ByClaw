@@ -37,6 +37,7 @@ import { DingtalkCircleFilled } from '@ant-design/icons';
 import { getByParamGroupCode } from '@/pages/manager/service/System';
 import { getCatalogOnResource, getDcSystemConfigListByStandType } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
+import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import ExampleModal from './ExampleModal';
 import MemoryConfigModal from './MemoryConfigModal';
 import AbilityBoundaryModal from './AbilityBoundaryModal';
@@ -100,23 +101,6 @@ const rolePromptFieldNames = [
   'customPromptTabs',
   'customPromptValues',
 ];
-
-const parseConfigList = (value: any) => {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (typeof value !== 'string' || !value) {
-    return [];
-  }
-
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
 
 const parseJsonRecursively = (str: string, maxDepth: number = 5): any => {
   if (maxDepth <= 0 || typeof str !== 'string') return str;
@@ -420,19 +404,31 @@ const ConfigForm = (props) => {
     const fetchBundledSkills = async () => {
       setBundledSkillLoading(true);
       try {
-        const res = await getDcSystemConfig({
-          paramCode: 'OPENCLAW_BUNDLED_SKILLS',
+        const res = await listResourceUseAuth({
+          resourceBizTypeList: ['SKILL'],
+          pageNum: 1,
+          pageSize: 9999,
         });
         if (!mounted) return;
 
-        const list = parseConfigList(res?.paramValue);
+        const pageInfo = res?.data || res || {};
+        const list = pageInfo?.list || pageInfo?.rows || [];
         setBundledSkillOptions(
           list
             .map((item) => ({
               ...item,
-              value: item.skillCode || item.skillName,
-              label: item.skillName || item.skillCode,
-              description: isEN ? item.skillDescEn || item.skillDescZh : item.skillDescZh || item.skillDescEn,
+              value:
+                item.itemId ||
+                item.objId ||
+                item.resourceId ||
+                item.id ||
+                item.resourceCode ||
+                item.code ||
+                item.resourceName ||
+                item.itemName ||
+                item.name,
+              label: item.itemName || item.name || item.resourceName || item.resourceCode || '-',
+              description: item.resourceDesc || item.description || item.pluginDesc || item.desc || '',
             }))
             .filter((item) => item.value)
         );
@@ -2045,58 +2041,56 @@ const ConfigForm = (props) => {
               )}
 
               {/* 配置技能 */}
-              {bundledSkillOptions.length > 0 && (
-                <div className={styles.skillsSection}>
-                  <div className={styles.sectionHeader}>
-                    <span className={styles.sectionTitle}>
-                      {intl.formatMessage({ id: 'employeeDetail.configureBundledSkills' })}
-                    </span>
-                    <Button
-                      type="link"
-                      size="small"
-                      disabled={isReadOnly}
-                      onClick={() => {
-                        setBundledSkillSearchName('');
-                        setBundledSkillModalOpen(true);
-                      }}
-                    >
-                      + {intl.formatMessage({ id: 'common.plus' })}
-                    </Button>
-                  </div>
-                  {selectedSkills.length > 0 && (
-                    <div className={styles.skillsList}>
-                      {selectedSkills
-                        .map((code) => bundledSkillOptions.find((item) => item.value === code))
-                        .filter(Boolean)
-                        .map((item) => (
-                          <Card key={item.value} className={classnames(styles.configCard, styles.skillCard)}>
-                            <div className={styles.skillContent}>
-                              <AntdIcon type="icon-chajiantubiao" className={styles.fontSize36MarginRight12} />
-                              <div className={styles.skillInfo}>
-                                <div className={styles.skillHeader}>
-                                  <span className={styles.skillName}>{item.label}</span>
-                                </div>
-                                <div className={styles.skillDescription}>{item.description}</div>
-                              </div>
-                              <div className={styles.skillActions}>
-                                {!isReadOnly && (
-                                  <Space>
-                                    <AntdIcon
-                                      type="icon-a-Deleteshanchu"
-                                      onClick={() => {
-                                        updateBundledSkills(selectedSkills.filter((code) => code !== item.value));
-                                      }}
-                                    />
-                                  </Space>
-                                )}
-                              </div>
-                            </div>
-                          </Card>
-                        ))}
-                    </div>
-                  )}
+              <div className={styles.skillsSection}>
+                <div className={styles.sectionHeader}>
+                  <span className={styles.sectionTitle}>
+                    {intl.formatMessage({ id: 'employeeDetail.configureBundledSkills' })}
+                  </span>
+                  <Button
+                    type="link"
+                    size="small"
+                    disabled={isReadOnly}
+                    onClick={() => {
+                      setBundledSkillSearchName('');
+                      setBundledSkillModalOpen(true);
+                    }}
+                  >
+                    + {intl.formatMessage({ id: 'common.plus' })}
+                  </Button>
                 </div>
-              )}
+                {selectedSkills.length > 0 && (
+                  <div className={styles.skillsList}>
+                    {selectedSkills
+                      .map((code) => bundledSkillOptions.find((item) => item.value === code))
+                      .filter(Boolean)
+                      .map((item) => (
+                        <Card key={item.value} className={classnames(styles.configCard, styles.skillCard)}>
+                          <div className={styles.skillContent}>
+                            <AntdIcon type="icon-chajiantubiao" className={styles.fontSize36MarginRight12} />
+                            <div className={styles.skillInfo}>
+                              <div className={styles.skillHeader}>
+                                <span className={styles.skillName}>{item.label}</span>
+                              </div>
+                              <div className={styles.skillDescription}>{item.description}</div>
+                            </div>
+                            <div className={styles.skillActions}>
+                              {!isReadOnly && (
+                                <Space>
+                                  <AntdIcon
+                                    type="icon-a-Deleteshanchu"
+                                    onClick={() => {
+                                      updateBundledSkills(selectedSkills.filter((code) => code !== item.value));
+                                    }}
+                                  />
+                                </Space>
+                              )}
+                            </div>
+                          </div>
+                        </Card>
+                      ))}
+                  </div>
+                )}
+              </div>
 
               {/* 配置机器人 */}
               {robotChannelOptions.length > 0 && (

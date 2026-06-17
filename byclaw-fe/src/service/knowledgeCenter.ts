@@ -14,211 +14,6 @@ export interface KnowledgeCapability {
   allowKnowledgeImport: boolean;
 }
 
-export interface EcosystemConnector {
-  connectorCode: string;
-  connectorName: string;
-  category: string;
-  available: boolean;
-  requiresLocalAgent: boolean;
-  requiresBrowserAuth?: boolean;
-  runLocations: string[];
-  authTypes: string[];
-  collectModes?: string[];
-  defaultCollectMode?: string;
-  capabilities: string[];
-  runtimeType: string;
-  status: string;
-  description: string;
-}
-
-export interface EcosystemAgentStatus {
-  connected: boolean;
-  agentName: string;
-  runtimeName: string;
-  runtimeVersion: string;
-  browserBridgeStatus: string;
-  chromeProfile: string;
-  lastHeartbeatTime: string;
-  siteSessions: Array<{
-    siteCode: string;
-    siteName: string;
-    status: string;
-    statusName: string;
-  }>;
-}
-
-export interface EcosystemSignal {
-  signalType: string;
-  signalTypeName: string;
-  signalCode: string;
-  signalName: string;
-  confidence: number;
-  source: string;
-}
-
-export interface EcosystemConnection {
-  connectionId: string;
-  connectorCode: string;
-  ownerType: string;
-  authType: string;
-  authTypeName: string;
-  connectionName: string;
-  runLocation: string;
-  runLocationName: string;
-  credentialConfig?: {
-    hasToken?: boolean;
-    tokenLast4?: string;
-    account?: string;
-    imapHost?: string;
-    imapPort?: string | number;
-    imapSsl?: boolean | string;
-    imapFolder?: string;
-    oauthProvider?: string;
-  };
-  runtimeConfig?: Record<string, any>;
-  siteSessions?: Array<Record<string, any>>;
-  status: string;
-  statusName: string;
-  lastCheckTime?: string;
-  createTime?: string;
-}
-
-export interface EcosystemTask {
-  taskId: string;
-  taskName: string;
-  connectorCode: string;
-  connectionId?: string;
-  connectionName?: string;
-  connectionStatus?: string;
-  authType?: string;
-  lastCheckTime?: string;
-  sourceName: string;
-  sourceUrl: string;
-  scope: string;
-  ownerType: string;
-  runLocation: string;
-  collectMode?: string;
-  scheduleType: string;
-  scheduleTypeName?: string;
-  scheduleConfig?: Record<string, any>;
-  nextRunTime?: string;
-  lastScheduledRunTime?: string;
-  importTarget: string;
-  targetName: string;
-  status: string;
-  createTime: string;
-  lastRunId?: string;
-  lastRunStatus?: string;
-  lastRunStatusName?: string;
-  lastRunTime?: string;
-  lastMarkdownCount?: number;
-  lastFailedCount?: number;
-  signals: EcosystemSignal[];
-}
-
-export interface EcosystemRun {
-  runId: string;
-  taskId: string;
-  status: string;
-  currentStep: string;
-  totalCount: number;
-  markdownCount: number;
-  assetCount: number;
-  failedCount: number;
-  needActionType?: string;
-  needActionMessage?: string;
-  needActionStatus?: string;
-  storagePath: string;
-  targetName: string;
-  startedAt: string;
-  finishedAt: string;
-  steps: Array<{
-    stepCode: string;
-    stepName: string;
-    status: string;
-    statusName: string;
-    message: string;
-  }>;
-  artifacts: Array<{
-    artifactType: string;
-    artifactName: string;
-    storagePath: string;
-    itemCount: number;
-    fileId?: string;
-    fileUrl?: string;
-    contentType?: string;
-    fileSystemType?: string;
-    sourceUrl?: string;
-  }>;
-  signals: EcosystemSignal[];
-}
-
-export interface EcosystemTaskCreatePayload {
-  taskName: string;
-  connectorCode: string;
-  connectionId?: string | number;
-  sourceUrl?: string;
-  scope?: string;
-  ownerType: string;
-  runLocation: string;
-  collectMode?: string;
-  scheduleType: string;
-  scheduleConfig?: Record<string, any>;
-  importTarget: string;
-  catalogId?: string | number;
-  knowledgeBaseId?: string;
-  knowledgeBaseResourceId?: string | number;
-  knowledgeBaseName?: string;
-  project?: string;
-  product?: string;
-  customer?: string;
-  domain?: string;
-  signalTags?: string[];
-  assets?: Array<{
-    assetType?: string;
-    fileName?: string;
-    contentType?: string;
-    dataUrl?: string;
-    sourceUrl?: string;
-    alt?: string;
-  }>;
-  options?: Record<string, any>;
-}
-
-export interface EcosystemConnectionSavePayload {
-  connectionId?: string | number;
-  connectorCode: string;
-  authType: string;
-  runLocation: string;
-  collectMode?: string;
-  connectionName?: string;
-  token?: string;
-  account?: string;
-  imapHost?: string;
-  imapPort?: string | number;
-  imapSsl?: boolean | string;
-  imapFolder?: string;
-  oauthProvider?: string;
-  chromeProfile?: string;
-  openCliProfile?: string;
-  serverEndpoint?: string;
-  siteSessions?: Array<Record<string, any>>;
-}
-
-export interface EcosystemSkillPlanPayload extends Partial<EcosystemTaskCreatePayload> {
-  originalText?: string;
-  text?: string;
-  chatSessionId?: string | number;
-  chatQueryMessageId?: string | number;
-}
-
-export interface EcosystemSkillPlanResult {
-  plan: Record<string, any>;
-  ready: boolean;
-  missingActions: string[];
-  card: Record<string, any>;
-}
-
 // 查询我创建的文档库列表
 export const getResourceListByPage = (data: any) => POST<any>('/byaiService/datasetController/selectDatasetByQo', data);
 
@@ -245,57 +40,6 @@ export const queryResourceDetail = (data: any) => {
 // 查询知识库页面能力开关
 export const queryKnowledgeCapability = () =>
   GET<KnowledgeCapability>('/byaiService/datasetController/queryKnowledgeCapability');
-
-// 生态采集：连接器清单
-export const queryEcosystemConnectors = () => GET<EcosystemConnector[]>('/byaiService/ecosystemCollection/connectors');
-
-// 生态采集：Browser Bridge 状态
-export const queryEcosystemBrowserBridgeStatus = () =>
-  GET<EcosystemAgentStatus>('/byaiService/ecosystemCollection/browserBridge/status');
-
-// 生态采集：用户连接列表
-export const queryEcosystemConnections = (data?: { connectorCode?: string }) =>
-  GET<EcosystemConnection[]>('/byaiService/ecosystemCollection/connections', data || {});
-
-// 生态采集：保存用户连接
-export const saveEcosystemConnection = (data: EcosystemConnectionSavePayload) =>
-  POST<EcosystemConnection>('/byaiService/ecosystemCollection/connections', data);
-
-// 生态采集：创建任务
-export const createEcosystemTask = (data: EcosystemTaskCreatePayload) =>
-  POST<EcosystemTask>('/byaiService/ecosystemCollection/tasks', data);
-
-// 生态采集：任务列表
-export const queryEcosystemTasks = () => GET<EcosystemTask[]>('/byaiService/ecosystemCollection/tasks');
-
-// 生态采集：更新任务状态
-export const updateEcosystemTaskStatus = (data: {
-  taskId: string | number;
-  status: 'CREATED' | 'DISABLED' | 'ARCHIVED';
-}) => POST<EcosystemTask>('/byaiService/ecosystemCollection/tasks/status', data);
-
-// 生态采集：启动一次运行
-export const startEcosystemRun = (data: { taskId: string | number; triggerType: string }) =>
-  POST<EcosystemRun>('/byaiService/ecosystemCollection/runs/start', data);
-
-// 生态采集：查询运行详情
-export const queryEcosystemRun = (data: { runId: string | number }) =>
-  GET<EcosystemRun>('/byaiService/ecosystemCollection/runs/detail', data);
-
-// 生态采集：处理运行中的待用户动作
-export const handleEcosystemRunAction = (data: { runId: string | number; action: string }) =>
-  POST<EcosystemRun>('/byaiService/ecosystemCollection/runs/action', data);
-
-// 生态采集：OpenClaw 技能入口生成采集计划
-export const buildEcosystemSkillPlan = (data: EcosystemSkillPlanPayload) =>
-  POST<EcosystemSkillPlanResult>('/byaiService/ecosystemCollection/skill/plan', data);
-
-// 生态采集：OpenClaw 技能入口确认后启动采集
-export const startEcosystemSkillCollection = (data: { plan: Record<string, any> }) =>
-  POST<{ task: EcosystemTask; run: EcosystemRun; taskId: string; runId: string; status: string; message: string }>(
-    '/byaiService/ecosystemCollection/skill/start',
-    data
-  );
 
 // 分享文档库
 export const share = (data: any) => POST<any>('/byaiService/datasetController/share', data);
@@ -348,6 +92,14 @@ export interface BuildDatasetPayload {
 // 查询文件夹和文件列表
 export const queryDirAndFileByLevel = (data: QueryDirAndFileByLevelParams) =>
   POST<QueryDirAndFileByLevelItem[]>('/byaiService/datasetController/queryDirAndFileByLevel', data);
+
+export interface SearchDirAndFilePayload extends QueryDirAndFileByLevelParams {
+  keyword: string;
+}
+
+// 按关键字递归搜索知识库目录与文件
+export const searchDirAndFile = (data: SearchDirAndFilePayload) =>
+  POST<QueryDirAndFileByLevelItem[]>('/byaiService/datasetController/searchDirAndFile', data);
 
 /** datasetController/renameFolder 请求体 */
 export interface RenameFolderPayload {
@@ -406,6 +158,21 @@ export const uploadFiles = (data: FormData) =>
       'Content-Type': 'multipart/form-data; charset=utf-8',
     },
   });
+
+export interface CheckUploadFileConflictsPayload {
+  resourceId: string | number;
+  directoryPath: string;
+  fileNames: string[];
+}
+
+export interface CheckUploadFileConflictsResult {
+  conflict: boolean;
+  overwritePaths: string[];
+}
+
+// 上传前检查同路径同名文件，供前端做覆盖确认
+export const checkUploadFileConflicts = (data: CheckUploadFileConflictsPayload) =>
+  POST<CheckUploadFileConflictsResult>('/byaiService/datasetController/checkUploadFileConflicts', data);
 
 // 删除文件
 export const removeFile = (data: RemoveFilePayload, config?: ConfigType) =>
