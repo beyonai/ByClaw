@@ -507,9 +507,9 @@ export default {
   'multiChoices.saveToKnowledge.fileName': '文件名称',
   'multiChoices.saveToKnowledge.autoSaveCountdown': '{countdown} 秒后自动保存',
   'multiChoices.saveToKnowledge.defaultFileName': '{userName}和{agentName}的会话记录_{timestamp}',
-  'multiChoices.saveToWorkspace': '保存到会话空间',
-  'multiChoices.saveToWorkspace.success': '保存到会话空间成功',
-  'multiChoices.saveToWorkspace.failed': '保存到会话空间失败',
+  'multiChoices.saveToWorkspace': '保存到会话文件夹',
+  'multiChoices.saveToWorkspace.success': '保存到会话文件夹成功',
+  'multiChoices.saveToWorkspace.failed': '保存到会话文件夹失败',
   'multiChoices.saveToWorkspace.userInfoFailed': '获取用户信息失败',
   'multiChoices.saveToWorkspace.autoSave': '{seconds} 秒后自动保存',
   'multiChoices.export.messageTitle': '消息 {index}',
@@ -530,6 +530,7 @@ export default {
 
   'messageList.deleteMessageConfirm': '确定删除该消息吗？',
   'messageList.troubleshoot': '排障',
+  'messageList.troubleshootTooltip': '利用百应运维数字员工，帮您排除故障',
   'messageList.troubleshootPrompt': '当前消息的traceId为{traceId}，请帮我排除故障',
 
   'citeRender.title': '引用消息',

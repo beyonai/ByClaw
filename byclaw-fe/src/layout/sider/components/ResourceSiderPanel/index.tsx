@@ -1007,13 +1007,29 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
           })}
         </Breadcrumb>
       )}
-      <Input
-        value={searchValue}
-        suffix={<SearchOutlined onClick={handleSearch} />}
-        placeholder={placeholder}
-        onChange={(event) => setSearchValue(event.target.value)}
-        onPressEnter={handleSearch}
-      />
+      <div className={styles.searchActionRow}>
+        <Input
+          className={styles.searchInput}
+          value={searchValue}
+          suffix={<SearchOutlined onClick={handleSearch} />}
+          placeholder={placeholder}
+          onChange={(event) => setSearchValue(event.target.value)}
+          onPressEnter={handleSearch}
+        />
+        {resourceType === 'SKILL' && (
+          <Button
+            // type="primary"
+            size="small"
+            className={styles.skillUploadButton}
+            icon={<AntdIcon type="icon-a-Uploadshangchuan" />}
+            loading={skillUploading}
+            disabled={skillUploading}
+            onClick={handleSkillImportClick}
+          >
+            {intl.formatMessage({ id: 'resourceTabs.skillUpload.uploadButton' })}
+          </Button>
+        )}
+      </div>
       {resourceType === 'SKILL' && (
         <>
           <input
@@ -1028,16 +1044,17 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
             <Button
               size="small"
               className={styles.skillActionButton}
-              loading={skillUploading}
-              disabled={skillUploading}
-              onClick={handleSkillImportClick}
+              icon={<AntdIcon type="icon-a-changjing-line" />}
+              onClick={handleComplexSkillDevelop}
             >
-              {intl.formatMessage({ id: 'resourceTabs.skillUpload.uploadSkill' })}
-            </Button>
-            <Button size="small" className={styles.skillActionButton} onClick={handleComplexSkillDevelop}>
               {intl.formatMessage({ id: 'resourceTabs.skillUpload.complexSkillDevelop' })}
             </Button>
-            <Button size="small" className={styles.skillActionButton} onClick={handlePageSkillDevelop}>
+            <Button
+              size="small"
+              className={styles.skillActionButton}
+              icon={<AntdIcon type="icon-a-yemian-line" />}
+              onClick={handlePageSkillDevelop}
+            >
               {intl.formatMessage({ id: 'resourceTabs.skillUpload.pageSkillDevelop' })}
             </Button>
           </div>

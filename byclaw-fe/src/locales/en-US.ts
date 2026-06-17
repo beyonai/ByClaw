@@ -520,6 +520,7 @@ export default {
 
   'messageList.deleteMessageConfirm': 'Are you sure to delete this message?',
   'messageList.troubleshoot': 'Troubleshoot',
+  'messageList.troubleshootTooltip': 'Call the WhalesBI digital employee to help you troubleshoot the fault',
   'messageList.troubleshootPrompt': 'The traceId of the current message is {traceId}. Please help me troubleshoot it.',
 
   'citeRender.title': 'Referenced Messages',

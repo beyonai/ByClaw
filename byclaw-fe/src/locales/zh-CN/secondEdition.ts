@@ -290,7 +290,7 @@ export default {
   'fileBrowser.search.noResult': '未找到匹配的文件或文件夹',
   'fileSider.saveToKnowledge': '保存到知识库',
   'fileSider.saveToKnowledge.failed': '保存到知识库失败',
-  'fileSider.saveToKnowledge.backToList': '返回知识库列表',
+  'fileSider.saveToKnowledge.backToList': '返回',
   'fileSider.saveToKnowledge.rootTip': '当前目录下暂无文件夹，可直接保存到此目录',
   'fileSider.saveToKnowledge.noManagePermission': '您对当前数字员工下的知识库，无管理权限，无法操作',
 };

@@ -1,6 +1,5 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Button,
   Collapse,
   Dropdown,
   Empty,
@@ -19,6 +18,7 @@ import { EllipsisOutlined, SearchOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
 import KnowledgeBreadcrumb from '@/components/KnowledgeBreadcrumb';
+import KnowledgeTargetSelector from '@/components/KnowledgeTargetSelector';
 import UploadConfirmModal, { type UploadConfirmFile } from '@/components/UploadConfirmModal';
 import { DragType } from '@/components/QueryInput/withDrag';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
@@ -445,17 +445,6 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const fileTreeData = useMemo(() => {
     return toFileTreeData(sortedItems, childrenByPath);
   }, [childrenByPath, sortedItems]);
-
-  const knowledgeFolderPath = useMemo(() => {
-    const segments = knowledgeDirectoryPath.split('/').filter(Boolean);
-    const paths = [{ title: intl.formatMessage({ id: 'fileBrowser.root' }), id: '/' }];
-    let accumulated = '/';
-    for (const segment of segments) {
-      accumulated += `${segment}/`;
-      paths.push({ title: segment, id: accumulated });
-    }
-    return paths;
-  }, [intl, knowledgeDirectoryPath]);
 
   const copyFolderPath = useMemo(() => {
     const rootPath = copyTargetType === 'session' ? SESSION_FILE_PATH : SHARED_FILE_PATH;
@@ -1271,101 +1260,44 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           </Spin>
         </Space>
       </Modal>
-      <Modal
+      <KnowledgeTargetSelector
         open={saveModalOpen}
-        title={intl.formatMessage({ id: 'fileSider.saveToKnowledge' })}
-        okText={intl.formatMessage({ id: 'common.confirm' })}
-        cancelText={intl.formatMessage({ id: 'common.cancel' })}
-        confirmLoading={savingToKnowledge}
-        okButtonProps={{ disabled: !selectedKnowledgeBase }}
         onOk={handleConfirmSaveToKnowledge}
         onCancel={() => {
           if (savingToKnowledge) return;
           setSaveModalOpen(false);
           setSaveTarget(null);
         }}
-        destroyOnClose
-      >
-        {!selectedKnowledgeBase ? (
-          <>
-            <Input.Search
-              allowClear
-              value={knowledgeKeyword}
-              placeholder={intl.formatMessage({ id: 'multiChoices.saveToKnowledge.searchPlaceholder' })}
-              onChange={(event) => setKnowledgeKeyword(event.target.value)}
-              onSearch={() => loadKnowledgeBases()}
-              style={{ marginBottom: 12 }}
-            />
-            <Spin spinning={knowledgeLoading}>
-              <List
-                dataSource={knowledgeBases}
-                locale={{ emptyText: intl.formatMessage({ id: 'multiChoices.saveToKnowledge.empty' }) }}
-                renderItem={(kb) => (
-                  <List.Item onClick={() => handleSelectKnowledgeBase(kb)} style={{ cursor: 'pointer' }}>
-                    <List.Item.Meta
-                      avatar={<AntdIcon type="icon-zhishi" />}
-                      title={<Typography.Text>{kb.resourceName}</Typography.Text>}
-                      description={kb.resourceDesc}
-                    />
-                  </List.Item>
-                )}
-              />
-            </Spin>
-          </>
-        ) : (
-          <>
-            <Button
-              size="small"
-              style={{ marginBottom: 12 }}
-              onClick={() => {
-                setSelectedKnowledgeBase(null);
-                setKnowledgeFolders([]);
-                setKnowledgeDirectoryPath('/');
-              }}
-            >
-              {intl.formatMessage({ id: 'fileSider.saveToKnowledge.backToList' })}
-            </Button>
-            <Typography.Paragraph strong ellipsis>
-              {selectedKnowledgeBase.resourceName}
-            </Typography.Paragraph>
-            <KnowledgeBreadcrumb
-              folderPath={knowledgeFolderPath}
-              handleBreadcrumbClick={(index) => {
-                const target = knowledgeFolderPath[index];
-                if (target && selectedKnowledgeBase) {
-                  void loadKnowledgeFolders(selectedKnowledgeBase, target.id);
-                }
-              }}
-            />
-            <Spin spinning={knowledgeFolderLoading}>
-              <List
-                dataSource={knowledgeFolders}
-                locale={{ emptyText: intl.formatMessage({ id: 'fileSider.saveToKnowledge.rootTip' }) }}
-                renderItem={(folder) => (
-                  <List.Item
-                    onClick={() => {
-                      if (!selectedKnowledgeBase) return;
-                      const nextPath =
-                        String(folder.directoryPath ?? '').trim() ||
-                        joinKnowledgeDirectoryPath(knowledgeDirectoryPath, folder.name);
-                      void loadKnowledgeFolders(
-                        selectedKnowledgeBase,
-                        nextPath.startsWith('/') ? nextPath : `/${nextPath}`
-                      );
-                    }}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <List.Item.Meta
-                      avatar={<AntdIcon type="icon-wenjianjialanse" />}
-                      title={<Typography.Text>{folder.name}</Typography.Text>}
-                    />
-                  </List.Item>
-                )}
-              />
-            </Spin>
-          </>
-        )}
-      </Modal>
+        confirmLoading={savingToKnowledge}
+        okDisabled={!selectedKnowledgeBase}
+        keyword={knowledgeKeyword}
+        onKeywordChange={setKnowledgeKeyword}
+        onSearch={(keyword) => loadKnowledgeBases(keyword)}
+        knowledgeBases={knowledgeBases}
+        knowledgeLoading={knowledgeLoading}
+        selectedKnowledgeBase={selectedKnowledgeBase}
+        onSelectKnowledgeBase={(kb) => handleSelectKnowledgeBase(kb as IKnowledgeBaseItem)}
+        onBackToList={() => {
+          setSelectedKnowledgeBase(null);
+          setKnowledgeFolders([]);
+          setKnowledgeDirectoryPath('/');
+        }}
+        directoryPath={knowledgeDirectoryPath}
+        folders={knowledgeFolders}
+        folderLoading={knowledgeFolderLoading}
+        onBreadcrumbClick={(directoryPath) => {
+          if (selectedKnowledgeBase) {
+            void loadKnowledgeFolders(selectedKnowledgeBase, directoryPath);
+          }
+        }}
+        onFolderClick={(_, directoryPath) => {
+          if (selectedKnowledgeBase) {
+            void loadKnowledgeFolders(selectedKnowledgeBase, directoryPath);
+          }
+        }}
+        emptyText={intl.formatMessage({ id: 'multiChoices.saveToKnowledge.empty' })}
+        folderEmptyText={intl.formatMessage({ id: 'fileSider.saveToKnowledge.rootTip' })}
+      />
     </div>
   );
 };
