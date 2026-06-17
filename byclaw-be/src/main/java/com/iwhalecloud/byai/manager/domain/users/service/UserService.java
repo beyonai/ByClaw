@@ -188,6 +188,12 @@ public class UserService {
         return usersMapper.selectList(page, queryWrapper);
     }
 
+    public List<Users> listCronPrewarmCandidateUsers(String state, Date recentLoginSince, Long cursorUserId,
+        String sandboxType, Long resourceId, int limit) {
+        return usersMapper.listCronPrewarmCandidateUsers(state, recentLoginSince, cursorUserId, sandboxType, resourceId,
+            Math.max(1, limit));
+    }
+
     /**
      * 保存用户
      *
