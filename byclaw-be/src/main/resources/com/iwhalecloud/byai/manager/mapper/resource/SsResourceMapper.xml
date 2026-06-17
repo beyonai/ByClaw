@@ -1079,13 +1079,26 @@
             a.publish_portal,
             a.parent_resource_id,
             a.publish_type,
-            a.owner_type
+            a.owner_type,
+            esk.skill_type,
+            esk.source_type,
+            esk.version,
+            esk.skill_url,
+            esk.skill_package_format,
+            esk.skill_original_filename,
+            esk.skill_package_size,
+            esk.skill_package_hash,
+            esk.target_content,
+            esk.sync_status,
+            esk.sync_error,
+            esk.last_sync_time
         FROM (
                  SELECT DISTINCT rel_resource_id
                  FROM ss_resource_rel_detail
                  WHERE resource_id = #{resourceId}
              ) d
                  INNER JOIN ss_resource a ON d.rel_resource_id = a.resource_id
+                 LEFT JOIN ss_res_ext_skill esk ON a.resource_id = esk.resource_id
         WHERE 1 = 1
           AND a.resource_status = 2
           <choose>
@@ -1152,11 +1165,24 @@
             a.publish_portal,
             a.parent_resource_id,
             a.publish_type,
-            a.owner_type
+            a.owner_type,
+            esk.skill_type,
+            esk.source_type,
+            esk.version,
+            esk.skill_url,
+            esk.skill_package_format,
+            esk.skill_original_filename,
+            esk.skill_package_size,
+            esk.skill_package_hash,
+            esk.target_content,
+            esk.sync_status,
+            esk.sync_error,
+            esk.last_sync_time
         FROM ss_res_ext_dig_employee e
             INNER JOIN ss_resource a
                 ON a.resource_biz_type = 'SKILL'
                 AND POSITION(CONCAT('"', a.resource_code, '"') IN e.skills) > 0
+            LEFT JOIN ss_res_ext_skill esk ON a.resource_id = esk.resource_id
         WHERE e.resource_id = #{resourceId}
           AND a.resource_status = 2
           <if test="catalogIds != null and catalogIds.size() > 0">

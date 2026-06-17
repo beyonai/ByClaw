@@ -17,6 +17,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeS
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDocService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtMcpService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtObjectService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtToolService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtToolKitService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtViewService;
@@ -54,6 +55,7 @@ import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmp
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventType;
 import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
+import com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.util.CurlParser;
 import com.iwhalecloud.byai.state.domain.resource.dto.CurlParseResult;
@@ -130,6 +132,9 @@ public class ToolManService {
     private SsResExtDigEmployeeService ssResExtDigEmployeeService;
 
     @Autowired
+    private SsResExtSkillService ssResExtSkillService;
+
+    @Autowired
     private SsResourceRelDetailService ssResourceRelDetailService;
 
     @Autowired
@@ -170,6 +175,9 @@ public class ToolManService {
 
     @Autowired
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
+
+    @Autowired
+    private ByClawSkillResourceApplicationService byClawSkillResourceApplicationService;
 
     @Autowired
     private ResourceRuntimeInfoResolver resourceRuntimeInfoResolver;
@@ -645,6 +653,18 @@ public class ToolManService {
         return result;
     }
 
+    /**
+     * 技能管理导入：仅接收 zip，落主资源表、技能扩展表，并同步到个人/企业 skill hub。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ObjectZipImportResult importSkillZipFromMultipart(MultipartFile[] files, Long catalogId, String ownerType) {
+        return byClawSkillResourceApplicationService.importSkillZips(files, catalogId, ownerType);
+    }
+
+    public ObjectZipImportResult previewSkillZipImportConflicts(MultipartFile[] files, String ownerType) {
+        return byClawSkillResourceApplicationService.previewSkillZipImportConflicts(files, ownerType);
+    }
+
     // ==================== 资源生命周期 ====================
 
     /**
@@ -684,7 +704,15 @@ public class ToolManService {
             throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
         }
         validateResourceManagePermission(resource);
+        validateInnerSkillReadonly(resource);
         String resourceBizType = StringUtils.trimToEmpty(resource.getResourceBizType());
+        if (StringUtils.equals(resourceBizType, ResourceBizType.SKILL.getCode())) {
+            if (!forceDelete) {
+                validateResourceCanDelete(resourceId, resource, resourceBizType);
+            }
+            deleteResourceAndAllRel(resourceId);
+            return;
+        }
         // 商业版本（dataset.system=WHALE_AGENT）下，知识/工具由智能体门户发布，本系统不允许注销。
         validateCommercialEditionKnowledgeOrToolWritable(resource);
         String targetContent = findTargetContentByBizType(resourceBizType, resourceId);
@@ -733,15 +761,18 @@ public class ToolManService {
             throw new IllegalArgumentException(I18nUtil.get("resource.notfound"));
         }
         validateResourceManagePermission(resource);
+        validateInnerSkillReadonly(resource);
 
         String resourceBizType = StringUtils.trimToEmpty(resource.getResourceBizType());
         String targetContent = findTargetContentByBizType(resourceBizType, resourceId);
+        List<Long> affectedDigitalEmployeeIds = findAffectedDigitalEmployeeIds(resourceId, resourceBizType);
 
         deleteRegisteredArtifacts(resourceId, resourceBizType);
         privilegeGrantService.removeAllByGrantObj(resourceBizType, resourceId);
         ssResourceRelDetailService.removeAllByResourceIdOrRelResourceId(resourceId);
         deleteResourceExtByBizType(resourceId, resourceBizType);
         ssResourceService.removeById(resourceId);
+        syncAffectedDigitalEmployees(affectedDigitalEmployeeIds);
         removeDigEmployeeFromRedisIfNecessary(resourceId, resourceBizType);
         if (StringUtils.equals(resourceBizType, ResourceBizType.DIG_EMPLOYEE.getCode())) {
             // 硬删除也需要回退默认助理指向，避免遗留无效引用。
@@ -778,6 +809,7 @@ public class ToolManService {
         if (!DELETE_RESOURCE_BIZ_TYPES.contains(resourceBizType)) {
             throw new IllegalArgumentException(I18nUtil.get("tool.resource.delete.type.unsupported"));
         }
+        validateInnerSkillReadonly(resource);
 
         // 反查数字员工是否关联了当前资源。
         // 若存在关联，则直接阻断删除，并提示前端先去数字员工管理界面解除关系。
@@ -885,6 +917,7 @@ public class ToolManService {
         // 商业版本（dataset.system=WHALE_AGENT）下，知识/工具由智能体门户发布，本系统不允许编辑。
         validateCommercialEditionKnowledgeOrToolWritable(resource);
         validateResourceManagePermission(resource);
+        validateInnerSkillReadonly(resource);
 
         // 3. 更新资源名称、资源描述，以及本次修改的操作人和修改时间。
         resource.setResourceName(resourceName);
@@ -938,6 +971,17 @@ public class ToolManService {
             return;
         }
         throw new IllegalArgumentException(I18nUtil.get("user.permission.nopermission"));
+    }
+
+    private void validateInnerSkillReadonly(SsResource resource) {
+        if (resource == null || !StringUtils.equals(resource.getResourceBizType(), ResourceBizType.SKILL.getCode())) {
+            return;
+        }
+        var extSkill = ssResExtSkillService.findById(resource.getResourceId());
+        if (extSkill != null && StringUtils.equalsIgnoreCase(extSkill.getSkillType(),
+            SsResExtSkillService.INNER_SKILL_TYPE)) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.inner.readonly"));
+        }
     }
 
     // ==================== 导入参数与 targetContent 同步 ====================
@@ -1037,6 +1081,7 @@ public class ToolManService {
             case "TOOLKIT" -> updateToolKitTargetContent(resourceId, resourceName, resourceDesc);
             case "MCP" -> updateMcpTargetContent(resourceId, resourceName, resourceDesc);
             case "AGENT" -> updateAgentTargetContent(resourceId, resourceName, resourceDesc);
+            case "SKILL" -> byClawSkillResourceApplicationService.refreshSkillBasicInfo(resource);
             default -> updateKnowledgeTargetContent(resource, resourceBizType);
         };
 
@@ -1212,7 +1257,8 @@ public class ToolManService {
         if (!StringUtils.equals(resourceBizType, ResourceBizType.DIG_EMPLOYEE.getCode()) || resourceId == null) {
             return;
         }
-        RedisUtil.removeKey(DigEmployeeRedisKeys.skillCacheKey(resourceId));
+        // RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存已暂停维护，这里不再主动触碰该 key。
+        // RedisUtil.removeKey(DigEmployeeRedisKeys.skillCacheKey(resourceId));
         if (digEmployeeRedisSyncProperties != null && digEmployeeRedisSyncProperties.isJsonRedisSyncEnabled()) {
             RedisUtil.removeKey(DigEmployeeRedisKeys.configJsonKey(resourceId));
         }
@@ -1232,12 +1278,46 @@ public class ToolManService {
         }
     }
 
+    private List<Long> findAffectedDigitalEmployeeIds(Long resourceId, String resourceBizType) {
+        if (!StringUtils.equals(resourceBizType, ResourceBizType.SKILL.getCode()) || resourceId == null) {
+            return Collections.emptyList();
+        }
+        List<SsResourceRelDetail> relations = ssResourceRelDetailService
+            .list(new LambdaQueryWrapper<SsResourceRelDetail>().eq(SsResourceRelDetail::getRelResourceId, resourceId));
+        if (CollectionUtils.isEmpty(relations)) {
+            return Collections.emptyList();
+        }
+        return relations.stream()
+            .map(SsResourceRelDetail::getResourceId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+    }
+
+    private void syncAffectedDigitalEmployees(List<Long> digitalEmployeeIds) {
+        if (CollectionUtils.isEmpty(digitalEmployeeIds)) {
+            return;
+        }
+        for (Long digitalEmployeeId : digitalEmployeeIds) {
+            try {
+                digitalEmployeeApplicationService.synOpenClawWorkSpace(digitalEmployeeId);
+            }
+            catch (Exception e) {
+                LOGGER.warn("技能资源删除后同步数字员工工作区失败, digitalEmployeeId={}, error={}", digitalEmployeeId,
+                    e.getMessage());
+            }
+        }
+    }
+
     private void deleteResourceExtByBizType(Long resourceId, String resourceBizType) {
         // 根据资源类型删除各自的扩展表。
         // 当前删除接口只覆盖几类技能资源，因此这里按业务类型显式分流。
-        if (StringUtils.equals(resourceBizType, ResourceBizType.TOOL.getCode())
-            || StringUtils.equals(resourceBizType, ResourceBizType.SKILL.getCode())) {
+        if (StringUtils.equals(resourceBizType, ResourceBizType.TOOL.getCode())) {
             ssResExtToolService.removeById(resourceId);
+            return;
+        }
+        if (StringUtils.equals(resourceBizType, ResourceBizType.SKILL.getCode())) {
+            ssResExtSkillService.removeById(resourceId);
             return;
         }
         if (isKnowledgeResourceBizType(resourceBizType)) {

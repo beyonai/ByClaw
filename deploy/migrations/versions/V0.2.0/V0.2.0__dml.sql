@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 UPDATE byai.sandbox_service_spec SET template_json = '{"mcp": {"servers": {"env": {"GBRAIN_HOME": "/by/.openclaw/gbrain"}, "gbrain": {"args": ["serve"], "command": "gbrain"}}}, "meta": {"lastTouchedAt": "2026-03-27T08:46:51.148Z", "lastTouchedVersion": "2026.3.28"}, "hooks": {"internal": {"enabled": true, "entries": {"boot-md": {"enabled": false}, "session-memory": {"enabled": true}}}}, "tools": {"web": {"search": {"enabled": false}}, "profile": "full"}, "agents": {"list": [{"id": "main", "skills": [], "default": true, "workspace": "${OPENCLAW_STATE_DIR}/workspace"}], "defaults": {"model": {}, "models": {}, "subagents": {"maxConcurrent": 8}, "compaction": {"mode": "safeguard"}, "maxConcurrent": 4, "skipBootstrap": true, "verboseDefault": "full", "thinkingDefault": "high", "blockStreamingBreak": "text_end", "blockStreamingDefault": "on"}}, "models": {"providers": {}}, "skills": {"load": {"watch": true, "watchDebounceMs": 5000}, "install": {"nodeManager": "pnpm"}}, "wizard": {"lastRunAt": "2026-02-03T07:41:55.092Z", "lastRunMode": "local", "lastRunCommand": "configure", "lastRunVersion": "2026.1.30"}, "browser": {"enabled": true, "headless": false, "profiles": {"openclaw": {"color": "#4F7FFF", "driver": "openclaw", "cdpPort": 9222, "headless": false, "executablePath": "/usr/bin/chromium"}}, "extraArgs": ["--load-extension=/opt/opencli/extension", "--disable-extensions-except=/opt/opencli/extension", "--disable-dev-shm-usage", "--window-size=1365,768", "--display=:99"], "noSandbox": true, "ssrfPolicy": {"allowedHostnames": ["localhost", "127.0.0.1"]}, "defaultProfile": "openclaw", "executablePath": "/usr/bin/chromium", "localLaunchTimeoutMs": 60000, "localCdpReadyTimeoutMs": 60000}, "gateway": {"auth": {"mode": "token", "token": "${OPENCLAW_GATEWAY_TOKEN}"}, "bind": "lan", "mode": "local", "port": 18789, "controlUi": {"allowedOrigins": ["*"], "allowInsecureAuth": true, "dangerouslyDisableDeviceAuth": true, "dangerouslyAllowHostHeaderOriginFallback": true}, "tailscale": {"mode": "off", "resetOnExit": false}}, "logging": {"file": "/by/.openclaw/logs/openclaw.log", "level": "info", "maxFileBytes": 104857600}, "plugins": {"load": {"paths": ["/app/dist-runtime/extensions/baiying-enhance", "/app/dist-runtime/extensions/byai-channel", "/app/dist-runtime/extensions/byclaw-sqlite"]}, "allow": ["browser", "byai-channel", "baiying-enhance", "byclaw-sqlite", "diagnostics-otel"], "slots": {"memory": "none"}, "enabled": true, "entries": {"xai": {"enabled": false}, "browser": {"enabled": true}, "byai-channel": {"enabled": true, "hooks": {"allowConversationAccess": true}}, "byclaw-sqlite": {"enabled": true}, "baiying-enhance": {"config": {"watchDebounceMs": 500, "mainParentAgentId": "main", "workspaceAutoSeed": true, "embedApiKeysFromJson": true, "mergeAllowSpawnForMain": true}, "enabled": true}, "diagnostics-otel": {"enabled": false}, "byai_diagnostics-otel": {"enabled": true}}}, "channels": {"byai-channel": {"enabled": true, "dmPolicy": "open", "allowFrom": ["*"], "webhookPath": "/webhook/byai-channel", "streamEnabled": true, "blockStreaming": true, "sessionKeyPerSessionId": true}}, "commands": {"native": "auto", "restart": true, "nativeSkills": "auto", "ownerDisplay": "raw"}, "diagnostics": {"otel": {"logs": false, "traces": true, "enabled": true, "headers": {"Authorization": "Basic ${LANGFUSE_OTEL_AUTH_SECRET}", "x-langfuse-ingestion-version": "4"}, "metrics": false, "endpoint": "${LANGFUSE_BASE_URL}/api/public/otel", "protocol": "http/protobuf", "sampleRate": 1, "serviceName": "openclaw-gateway", "captureContent": {"enabled": true, "toolInputs": true, "toolOutputs": true, "systemPrompt": true, "inputMessages": true, "outputMessages": true, "toolDefinitions": true}, "flushIntervalMs": 5000}, "enabled": true}}' WHERE service_key = 'openclaw';
 
 update byai_aimodel set model_protocol ='OpenAI' where model_type ='LLM' and model_protocol is null and url not like '%anthropic%';
@@ -568,3 +569,203 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
 		"skillDescEn": "bycli is an all-in-one skill that unifies any website, desktop app, or external CLI into a single bycli ‹ site> <command> interface, letting an agent run commands, drive the browser, fix or author adapters, and ingest collected content into a knowledge base without"
 	}
 ]', 'OpenClaw 仓库 skills/ 目录下内置（随安装分发）的 Agent Skill 元数据 JSON 数组');
+=======
+
+
+---平台内置技能初始化
+DROP TABLE IF EXISTS tmp_builtin_skill_seed;
+
+CREATE TEMP TABLE tmp_builtin_skill_seed (
+    resource_name varchar(255),
+    resource_code varchar(255),
+    resource_desc text
+);
+
+INSERT INTO tmp_builtin_skill_seed (resource_name, resource_code, resource_desc)
+VALUES
+    ('content-to-outline', 'content-to-outline', '将 GitHub URL、微信文章、博客、研究报告或主题关键词解析为结构化 slide-outline.json，提炼核心主张、关键主题、支撑案例和受众问题，规划 8-12 页播客视频幻灯片大纲，并统一驱动 PPT 生成和播客脚本生成，保证幻灯片内容与音频对话按 slide 编号一致。'),
+    ('dingtalk-todo-sync', 'dingtalk-todo-sync', '扫描 GitHub Issues 生成结构化待办清单，并通过钉钉 Webhook 机器人推送到钉钉群；支持 GitHub 授权检查、按优先级和标签整理 open issues、批量待办同步，以及自定义 Markdown 或文本消息通知。'),
+    ('dws', 'dws', '通过 dws CLI 管理钉钉 AI 表格、日历、通讯录、群聊与机器人、待办、OA 审批、考勤、日志、DING 消息、开放平台文档、钉钉文档、云盘、AI 听记、邮箱等能力；支持查询、创建、修改、删除、发送、审批、上传下载和设备登录鉴权流程。'),
+    ('gbrain', 'gbrain', '使用 gbrain CLI 管理 agent 第二大脑和长期记忆，支持 brain-first 查询、全文/向量检索、读取与写入记忆、导入 Markdown 知识库、维护图谱和时间线、embed、sync、dream、onboard 等操作，适用于项目背景、历史决策、人物关系和长期知识沉淀。'),
+    ('github-code-analysis', 'github-code-analysis', '面向 GitHub 仓库的代码分析套件，支持 PR 审查、代码质量扫描、安全扫描、性能扫描、不一致性检测和自动文档生成；可拉取 PR diff 或克隆仓库，从安全、性能、质量、测试等维度生成报告或评论。'),
+    ('github-issues-mgmt', 'github-issues-mgmt', 'GitHub Issues 管理工具，支持从自然语言、CSV 或 Excel 需求描述中提取任务并批量创建 Issues，也支持列出、查询、按状态或标签过滤现有 Issues；默认面向 ByClaw 仓库并内置 OAuth Device Flow 授权流程。'),
+    ('iwhalehub', 'iwhalehub', '连接 iWhale Hub 资源市场，支持按关键词搜索、浏览、比较、校验并安装平台资源，返回资源名称、编码、描述、标签、版本、注册表信息和可安装的 skillId，适用于从技能广场查找和安装技能或后续资源类型。'),
+    ('podcast-script-generator', 'podcast-script-generator', '将主题关键词、文章、博客、URL 提取内容或 slide-outline.json 转换为自然的双人播客对话脚本；生成 host/guest 角色轮次、标题、大纲，并支持按幻灯片编号输出 slide 标注，便于 TTS 合成和视频字幕/画面同步。'),
+    ('podcast-video-composer', 'podcast-video-composer', '将 PPTX 幻灯片、音频文件、播客脚本 JSON、TTS timing 或 slide durations 合成为 1920×1080 MP4；支持按脚本 slide 标注计算每页停留时间、生成并烧录底部字幕、输出最终播客视频和字幕资产。'),
+    ('pptx-generator', 'pptx-generator', 'PowerPoint 生成与编辑工具，支持读取和分析 PPTX、基于模板进行 XML 编辑，以及用 PptxGenJS 从零创建封面、目录、内容页、章节页、总结页等幻灯片；内置设计系统、配色、字体、版式和 QA 流程，也可直接消费 slide-outline.json。'),
+    ('structured-ontology-manager', 'structured-ontology-manager', '对话式结构化个人本体管理工具，支持查询、创建、删除个人结构化本体对象和视图，维护字段与术语绑定，并将对象数据持久化到个人 SQLite 动态表；支持挂载本体到当前数字员工或个人助理。'),
+    ('unstructured-ontology-manager', 'unstructured-ontology-manager', '对话式非结构化个人本体管理工具，支持查询个人知识库和目录、创建或删除绑定知识库目录的非结构化本体对象，并挂载到数字员工或个人助理；适用于以知识库文档作为数据来源而不建 SQLite 表的本体管理。'),
+    ('volcengine-podcast-tts', 'volcengine-podcast-tts', '将 podcast-script-generator 输出的双人播客脚本转换为火山引擎/豆包 TTS V3 双声道语音，生成 podcast.mp3 和包含句子级或轮次级 start、duration、slide 信息的 timing JSON；支持低并发、缓存、重试和字幕精确同步。'),
+    ('wechat-tech-article', 'wechat-tech-article', '将 GitHub 开源项目分析转换为微信公众号风格技术文章，流程包含仓库克隆、README/依赖/架构/基准数据分析、本地实测和文章撰写；输出突出核心数据、项目优势、实战演练和手机友好的技术分享 Markdown，并可衔接播客视频流水线。');
+
+INSERT INTO byai.ss_resource (
+    resource_id,
+    system_code,
+    resource_biz_type,
+    resource_type,
+    resource_name,
+    resource_desc,
+    resource_version_id,
+    host_type,
+    catalog_id,
+    man_org_id,
+    man_user_id,
+    create_by,
+    create_time,
+    update_by,
+    update_time,
+    com_acct_id,
+    resource_status,
+    resource_d_verid,
+    resource_r_verid,
+    resource_code,
+    publish_time,
+    auth_status,
+    publish_portal,
+    parent_resource_id,
+    publish_type,
+    owner_type,
+    impl_type,
+    worker_agent_type
+)
+SELECT
+    nextval('byai.seq_any_table'::regclass),
+    'BYAI',
+    'SKILL',
+    'ATOM',
+    v.resource_name,
+    v.resource_desc,
+    '1.0',
+    'hosted',
+    10,
+    -1,
+    10001,
+    10001,
+    CURRENT_TIMESTAMP,
+    10001,
+    CURRENT_TIMESTAMP,
+    1,
+    2,
+    -1,
+    -1,
+    v.resource_code,
+    CURRENT_TIMESTAMP,
+    'passed',
+    1,
+    -1,
+    'publish',
+    'enterprise',
+    'SKILL',
+    'NONE'
+FROM tmp_builtin_skill_seed v
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM byai.ss_resource r
+    WHERE r.resource_biz_type = 'SKILL'
+      AND r.owner_type = 'enterprise'
+      AND r.resource_code = v.resource_code
+);
+
+INSERT INTO byai.ss_res_ext_skill (
+    resource_id,
+    skill_type,
+    source_type,
+    version,
+    skill_url,
+    skill_package_format,
+    skill_original_filename,
+    skill_package_size,
+    skill_package_hash,
+    target_content,
+    sync_status,
+    sync_error,
+    last_sync_time
+)
+SELECT
+    r.resource_id,
+    'inner',
+    'SYSTEM_BUILTIN',
+    'v0.1',
+    '',
+    'zip',
+    NULL,
+    NULL,
+    NULL,
+    json_build_object(
+        'resourceId', r.resource_id,
+        'resourceCode', r.resource_code,
+        'resourceName', r.resource_name,
+        'resourceDesc', r.resource_desc,
+        'resourceBizType', r.resource_biz_type,
+        'resourceType', r.resource_type,
+        'ownerType', r.owner_type,
+        'sourceType', 'SYSTEM_BUILTIN',
+        'skillType', 'inner',
+        'skillUrl', '',
+        'version', 'v0.1',
+        'skillPackageFormat', 'zip',
+        'skillOriginalFilename', NULL,
+        'skillPackageSize', NULL,
+        'skillPackageHash', NULL,
+        'syncStatus', 'SUCCESS',
+        'syncError', NULL,
+        'lastSyncTime', to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+    )::text,
+    'SUCCESS',
+    NULL,
+    CURRENT_TIMESTAMP
+FROM byai.ss_resource r
+         JOIN tmp_builtin_skill_seed v
+              ON v.resource_code = r.resource_code
+WHERE r.resource_biz_type = 'SKILL'
+  AND r.owner_type = 'enterprise'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM byai.ss_res_ext_skill e
+    WHERE e.resource_id = r.resource_id
+);
+
+UPDATE byai.ss_res_ext_skill e
+SET
+    skill_type = 'inner',
+    source_type = 'SYSTEM_BUILTIN',
+    version = COALESCE(NULLIF(e.version, ''), 'v0.1'),
+    skill_url = '',
+    skill_package_format = 'zip',
+    skill_original_filename = NULL,
+    skill_package_size = NULL,
+    skill_package_hash = NULL,
+    target_content = json_build_object(
+        'resourceId', r.resource_id,
+        'resourceCode', r.resource_code,
+        'resourceName', r.resource_name,
+        'resourceDesc', r.resource_desc,
+        'resourceBizType', r.resource_biz_type,
+        'resourceType', r.resource_type,
+        'ownerType', r.owner_type,
+        'sourceType', 'SYSTEM_BUILTIN',
+        'skillType', 'inner',
+        'skillUrl', '',
+        'version', COALESCE(NULLIF(e.version, ''), 'v0.1'),
+        'skillPackageFormat', 'zip',
+        'skillOriginalFilename', NULL,
+        'skillPackageSize', NULL,
+        'skillPackageHash', NULL,
+        'syncStatus', 'SUCCESS',
+        'syncError', NULL,
+        'lastSyncTime', to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+                     )::text,
+    sync_status = 'SUCCESS',
+    sync_error = NULL,
+    last_sync_time = CURRENT_TIMESTAMP
+FROM byai.ss_resource r
+    JOIN tmp_builtin_skill_seed v
+ON v.resource_code = r.resource_code
+WHERE e.resource_id = r.resource_id
+  AND r.resource_biz_type = 'SKILL'
+  AND r.owner_type = 'enterprise';
+
+COMMIT;
+
+DROP TABLE IF EXISTS tmp_builtin_skill_seed;
+>>>>>>> Stashed changes

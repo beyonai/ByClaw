@@ -2,7 +2,7 @@ import React from 'react';
 
 import { CaretLeftOutlined, CaretRightOutlined } from '@ant-design/icons';
 // @ts-ignore
-import { useSelector, SelectLang, useIntl, useLocation } from '@umijs/max';
+import { useSelector, SelectLang, useIntl, useLocation, useNavigate } from '@umijs/max';
 import { Badge, theme, Divider, Dropdown, Tooltip } from 'antd';
 import classnames from 'classnames';
 import { omit, compact } from 'lodash';
@@ -29,6 +29,8 @@ import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContent
 
 export const DEF_SIDER = 'sessions';
 
+const CENTER_TAB_KEYS = new Set(['agent', 'knowledge', 'tool', 'view', 'object', 'skill', 'file']);
+
 const SIDER_ACTIVE_TAB_BY_PATH: Partial<Record<string, (typeof tabItems)[number]['key']>> = {
   '/knowledgeDetail': 'knowledge',
 };
@@ -45,6 +47,7 @@ const getCurrentTabByPathname = (pathname: string) => {
 
 const Sidebar = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { pathname } = location;
   const keepSiderActiveKey = (location.state as { keepSiderActiveKey?: (typeof tabItems)[number]['key'] } | null)
     ?.keepSiderActiveKey;
@@ -87,6 +90,39 @@ const Sidebar = () => {
   });
 
   const handleNewChat = useNewChat();
+
+  const handleMenuTabClick = React.useCallback(
+    (tab: (typeof tabItems)[number]) => {
+      const isChatPage = pathname.startsWith('/chat');
+
+      // 左侧主菜单切换时，最右侧详情面板要及时关闭；即使重复点击当前菜单也要生效。
+      clearDetailPanel?.();
+      setActiveKey(tab.key);
+      setManualSiderOpenKey(tab.key);
+      setSiderCollapsed(false);
+
+      if (!tab.navigatePath) {
+        return;
+      }
+
+      if (tab.key === 'sessions') {
+        if (!isChatPage && pathname !== tab.navigatePath) {
+          navigate(tab.navigatePath);
+        }
+        return;
+      }
+
+      // 会话面板打开时，点击资源类菜单只切换左侧栏，不打断右侧当前会话。
+      if (isChatPage) {
+        return;
+      }
+
+      if (CENTER_TAB_KEYS.has(tab.key) && pathname !== tab.navigatePath) {
+        navigate(tab.navigatePath);
+      }
+    },
+    [clearDetailPanel, navigate, pathname, setSiderCollapsed]
+  );
 
   const showSearchAndQueryTab = React.useMemo(() => {
     const hasEmployee = [...agentList, ...employeesList].find((agent) =>
@@ -197,7 +233,13 @@ const Sidebar = () => {
         </div>
         <SiderSearch />
         <Tooltip placement="right" title={intl.formatMessage({ id: 'sider.newChat' })}>
-          <div className={styles.sideIconWrap} onClick={handleNewChat}>
+          <div
+            className={styles.sideIconWrap}
+            onClick={() => {
+              clearDetailPanel?.();
+              handleNewChat();
+            }}
+          >
             <Icon type="icon-xinjianduihua-fill" style={{ color: token.colorPrimary }} />
           </div>
         </Tooltip>
@@ -209,11 +251,7 @@ const Sidebar = () => {
                 {tab.key === 'knowledge' && <div className={styles.employeeResourceDivider} />}
                 <div
                   className={classnames(styles.tabItem, tab.key === activeKey && styles.activeTab)}
-                  onClick={() => {
-                    setActiveKey(tab.key);
-                    setManualSiderOpenKey(tab.key);
-                    setSiderCollapsed(false);
-                  }}
+                  onClick={() => handleMenuTabClick(tab)}
                 >
                   <Badge
                     dot={tab.showDot || Number(tab.count) > 0}

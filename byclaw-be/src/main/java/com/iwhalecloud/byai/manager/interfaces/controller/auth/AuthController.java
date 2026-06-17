@@ -488,7 +488,7 @@ public class AuthController {
     }
 
     /**
-     * 补齐资源列表范围： 1. 个人知识库 / 个人数字员工只额外返回当前用户绑定的默认资源； 2. 企业知识库 / 工具 / 对象 / 视图按平台全部企业资源查询。
+     * 补齐资源列表范围： 1. 个人知识库 / 个人数字员工只额外返回当前用户绑定的默认资源； 2. 企业知识库 / 工具 / 对象 / 视图 / 技能按平台全部企业资源查询。
      */
     private void enrichResourceListScope(ResourceUseAuthQo resourceUseAuthQo) {
         if (resourceUseAuthQo == null || CollectionUtils.isEmpty(resourceUseAuthQo.getResourceBizTypeList())) {
