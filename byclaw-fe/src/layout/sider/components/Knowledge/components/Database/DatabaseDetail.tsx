@@ -70,25 +70,26 @@ function getNodeIcon(p: any) {
 
 const DatabaseDetail = (props: DatabaseDetailProps) => {
   const { editable, knowledge, onGoBack, onSelect } = props;
+  const intl = useIntl();
   const [loading, setLoading] = useState(false);
   const [treeData, setTreeData] = useState<ITreeItem[]>([
     {
       key: 'dimensions',
-      title: '维度',
+      title: intl.formatMessage({ id: 'common.dimension' }),
       iconType: 'icon-folder-fill',
       type: NodeType.dimension,
       children: [],
     },
     {
       key: 'measures',
-      title: '指标',
+      title: intl.formatMessage({ id: 'common.indicator' }),
       type: NodeType.measure,
       iconType: 'icon-folder-fill-1',
       children: [],
     },
     {
       key: 'calc',
-      title: '计算公式',
+      title: intl.formatMessage({ id: 'common.calculationFormula' }),
       type: NodeType.calculation,
       iconType: 'icon-a-Calculatorjisuanqi',
       children: [],
@@ -97,7 +98,6 @@ const DatabaseDetail = (props: DatabaseDetailProps) => {
   const treeWrap = useRef<HTMLDivElement>(null);
   const virtualHeight = useVirtualHeight(treeWrap);
 
-  const intl = useIntl();
   const qryTreeData = async () => {
     setLoading(true);
     const response = await queryKnowledgeBaseView({
