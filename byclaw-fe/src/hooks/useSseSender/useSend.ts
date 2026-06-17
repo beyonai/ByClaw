@@ -80,6 +80,11 @@ export default function useSend(params: IParam) {
           ...(payload || {}),
         })
         .then(() => ({}))
+        .catch((error) => {
+          // WS 连接失败（本地开发后端未启动等）属预期情况：记录但不抛出，避免 Unhandled Rejection。
+          console.error('WebSocket 发送消息失败:', error);
+          return {};
+        })
         .finally(closeConsoleGroup);
 
       return {
