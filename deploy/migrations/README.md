@@ -76,7 +76,7 @@ baseline 的版本前缀可带预发布段（如 `V0.0.1-alpha__baseline__ddl.sq
 3. 每个文件应能在单事务中执行
 4. 已合并的脚本不要修改，需要修正就在新版本目录里写新脚本
 5. 大表 DDL 注意锁表风险，必要时使用 `CONCURRENTLY`（需在事务外执行）
-6. DDL 写进 `__ddl.sql`、DML 写进 `__dml.sql`，不要混放
+6. DDL 写进 `__ddl.sql`、DML 写进 `__dml.sql`，不要混放（工具会校验，混放会中止）
 
 ## 合并工具 (merge_migrations.py)
 
@@ -99,11 +99,12 @@ python3 deploy/migrations/merge_migrations.py --audit-db "host=localhost port=54
 ### 工作原理
 
 1. **STEP 0 — 布局校验**：检查 `versions/` 下目录与文件命名是否合规，任一不合规立即中止（退出码 1）
-2. 读取 `.applied`，获取已合并版本
-3. 扫描 `versions/` 各版本目录，按语义化版本排序，跳过 baseline 与已合并版本
-4. 直接读取每个版本预拆好的 `__ddl.sql` / `__dml.sql`（不再自动拆分/分类语句）
-5. 以版本标记块（`-- ========== V0.0.2 (merged at ...) ==========`）追加到对应 initdb 文件
-6. 记录到 `.applied`
+2. **STEP 0 — 内容校验**：检查 `__ddl.sql` 里是否混入 DML、`__dml.sql` 里是否混入 DDL，混放立即中止（baseline 文件不校验）
+3. 读取 `.applied`，获取已合并版本
+4. 扫描 `versions/` 各版本目录，按语义化版本排序，跳过 baseline 与已合并版本
+5. 直接读取每个版本预拆好的 `__ddl.sql` / `__dml.sql`（不再自动拆分/分类语句）
+6. 以版本标记块（`-- ========== V0.0.2 (merged at ...) ==========`）追加到对应 initdb 文件
+7. 记录到 `.applied`
 
 ### 防重复机制
 
