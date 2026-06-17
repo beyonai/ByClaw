@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 """
-merge_migrations.py - 将 deploy/migrations/versions/ 下的增量脚本
-自动区分 DDL/DML 后追加合并到 deploy/middleware/initdb/ 对应文件。
+merge_migrations.py - 将 deploy/migrations/versions/ 下各版本目录中预拆好的
+DDL/DML 增量脚本，按语义化版本顺序追加合并到 deploy/middleware/initdb/ 对应文件。
+
+目录结构（每个版本一个子目录）：
+    versions/V0.0.1/V0.0.1__ddl.sql              -> 合并进 02_ddl.sql
+    versions/V0.0.1/V0.0.1__dml.sql              -> 合并进 04_dml.sql
+    versions/V0.0.1/V0.0.1-alpha__baseline__*.sql -> 基线全量快照，跳过
+
+版本排序遵循语义化版本：major.minor.patch，预发布 alpha < beta < rc < 正式版，
+同类预发布按序号比较（alpha.2 < alpha.10）。
 
 用法:
-    python scripts/merge_migrations.py [--audit-db "host=... port=... dbname=... user=... password=..."] [--dry-run]
+    python merge_migrations.py [--audit-db "host=... port=... dbname=... user=... password=..."] [--dry-run]
 """
 
 import argparse
-import os
 import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -22,136 +28,6 @@ INITDB_DIR = SCRIPT_DIR.parent / "middleware" / "initdb"
 DDL_FILE = INITDB_DIR / "02_ddl.sql"
 DML_FILE = INITDB_DIR / "04_dml.sql"
 APPLIED_FILE = SCRIPT_DIR / ".applied"
-
-BASELINE_PATTERN = re.compile(r".*__baseline\.sql$", re.IGNORECASE)
-
-DDL_KEYWORDS = re.compile(
-    r"^\s*(CREATE|ALTER|DROP|COMMENT\s+ON|GRANT|REVOKE|TRUNCATE)\b",
-    re.IGNORECASE,
-)
-DML_KEYWORDS = re.compile(
-    r"^\s*(INSERT|UPDATE|DELETE|MERGE)\b",
-    re.IGNORECASE,
-)
-SET_KEYWORDS = re.compile(
-    r"^\s*SET\b",
-    re.IGNORECASE,
-)
-
-
-# ---------------------------------------------------------------------------
-# SQL Statement Splitter
-# ---------------------------------------------------------------------------
-
-def split_statements(sql: str) -> list[str]:
-    """Split SQL text into individual statements, respecting quotes, $$ blocks, and comments."""
-    statements: list[str] = []
-    current: list[str] = []
-    i = 0
-    n = len(sql)
-
-    while i < n:
-        ch = sql[i]
-
-        # Single-line comment
-        if ch == '-' and i + 1 < n and sql[i + 1] == '-':
-            end = sql.find('\n', i)
-            if end == -1:
-                end = n
-            current.append(sql[i:end])
-            i = end
-            continue
-
-        # Block comment
-        if ch == '/' and i + 1 < n and sql[i + 1] == '*':
-            end = sql.find('*/', i + 2)
-            if end == -1:
-                end = n
-            else:
-                end += 2
-            current.append(sql[i:end])
-            i = end
-            continue
-
-        # Single-quoted string
-        if ch == "'":
-            j = i + 1
-            while j < n:
-                if sql[j] == "'" and j + 1 < n and sql[j + 1] == "'":
-                    j += 2  # escaped quote
-                elif sql[j] == "'":
-                    j += 1
-                    break
-                else:
-                    j += 1
-            current.append(sql[i:j])
-            i = j
-            continue
-
-        # Dollar-quoted string ($$...$$, $tag$...$tag$)
-        if ch == '$':
-            match = re.match(r'\$([A-Za-z_]*)\$', sql[i:])
-            if match:
-                tag = match.group(0)
-                end = sql.find(tag, i + len(tag))
-                if end == -1:
-                    end = n
-                else:
-                    end += len(tag)
-                current.append(sql[i:end])
-                i = end
-                continue
-
-        # Statement terminator
-        if ch == ';':
-            current.append(';')
-            stmt = ''.join(current).strip()
-            if stmt and stmt != ';':
-                statements.append(stmt)
-            current = []
-            i += 1
-            continue
-
-        current.append(ch)
-        i += 1
-
-    # Remaining content without trailing semicolon
-    remainder = ''.join(current).strip()
-    if remainder:
-        statements.append(remainder)
-
-    return statements
-
-
-# ---------------------------------------------------------------------------
-# Statement Classifier
-# ---------------------------------------------------------------------------
-
-def classify_statement(stmt: str) -> str:
-    """Classify a SQL statement as 'ddl', 'dml', or 'set'."""
-    # Strip comments to find the first meaningful token
-    lines = stmt.split('\n')
-    effective = ""
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith('--'):
-            continue
-        effective = stripped
-        break
-
-    if not effective:
-        # Pure comment block - treat as context
-        return "set"
-
-    if SET_KEYWORDS.match(effective):
-        return "set"
-    if DDL_KEYWORDS.match(effective):
-        return "ddl"
-    if DML_KEYWORDS.match(effective):
-        return "dml"
-
-    # Default: treat as DDL (safer for schema changes)
-    return "ddl"
 
 
 # ---------------------------------------------------------------------------
@@ -177,59 +53,193 @@ def write_applied(applied: set[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Version File Discovery
+# Version Discovery & Ordering
 # ---------------------------------------------------------------------------
 
-def discover_versions() -> list[Path]:
-    """Find all migration version files, sorted by name, excluding baselines."""
+# 每个版本是 versions/ 下的一个子目录，目录名形如：
+#   V0.0.1              正式版
+#   V0.1.0-alpha.2      预发布版（alpha/beta/rc + 序号）
+# 目录内的迁移文件已手工预拆为：
+#   <版本>__ddl.sql / <版本>__dml.sql        —— 需要合并的增量
+#   *__baseline__ddl.sql / *__baseline__dml.sql —— 基线全量快照，跳过
+VERSION_DIR_PATTERN = re.compile(r"^V\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$")
+BASELINE_FILE_PATTERN = re.compile(r".*__baseline__(ddl|dml)\.sql$", re.IGNORECASE)
+DDL_FILE_PATTERN = re.compile(r".*__ddl\.sql$", re.IGNORECASE)
+DML_FILE_PATTERN = re.compile(r".*__dml\.sql$", re.IGNORECASE)
+
+# 预发布标识排序权重：alpha < beta < rc < 正式版
+_PRERELEASE_RANK = {"alpha": 0, "beta": 1, "rc": 2}
+
+
+class Version:
+    """一个版本目录及其预拆的 ddl/dml 文件。"""
+
+    def __init__(self, directory: Path):
+        self.directory = directory
+        self.name = directory.name  # 如 V0.1.0-alpha.2
+        self.sort_key = parse_version_sort_key(self.name)
+        self.ddl_files: list[Path] = []
+        self.dml_files: list[Path] = []
+        for f in sorted(directory.glob("*.sql")):
+            if BASELINE_FILE_PATTERN.match(f.name):
+                continue  # 跳过 baseline 全量快照
+            if DDL_FILE_PATTERN.match(f.name):
+                self.ddl_files.append(f)
+            elif DML_FILE_PATTERN.match(f.name):
+                self.dml_files.append(f)
+
+
+def parse_version_sort_key(name: str):
+    """把版本目录名解析成可比较的排序键。
+
+    规则（语义化版本）：
+      - 主体按 major.minor.patch 数字比较；
+      - 预发布版排在同主体的正式版之前（V1.0.0-alpha < V1.0.0）；
+      - 预发布之间 alpha < beta < rc，同类按数字序号比较（alpha.2 < alpha.10）。
+
+    返回元组：(major, minor, patch, is_release, prerelease_rank, prerelease_num)
+      is_release=1 表示正式版（排在预发布之后）。
+    """
+    raw = name[1:] if name.startswith(("V", "v")) else name
+    core, _, pre = raw.partition("-")
+
+    parts = core.split(".")
+    nums = []
+    for i in range(3):
+        try:
+            nums.append(int(parts[i]) if i < len(parts) else 0)
+        except ValueError:
+            nums.append(0)
+    major, minor, patch = nums[0], nums[1], nums[2]
+
+    if not pre:
+        # 正式版：排在所有预发布之后
+        return (major, minor, patch, 1, 0, 0)
+
+    # 预发布：如 alpha / alpha.2 / beta.1 / rc.3
+    pre_parts = pre.split(".")
+    label = pre_parts[0].lower()
+    rank = _PRERELEASE_RANK.get(label, 99)
+    seq = 0
+    for token in pre_parts[1:]:
+        if token.isdigit():
+            seq = int(token)
+            break
+    return (major, minor, patch, 0, rank, seq)
+
+
+def discover_versions() -> list["Version"]:
+    """发现所有版本目录，按语义化版本排序；不含可合并文件的目录会被忽略。"""
     if not VERSIONS_DIR.exists():
         return []
-    files = sorted(VERSIONS_DIR.glob("*.sql"))
-    return [f for f in files if not BASELINE_PATTERN.match(f.name)]
+    versions = []
+    for entry in VERSIONS_DIR.iterdir():
+        if not entry.is_dir():
+            continue
+        if not VERSION_DIR_PATTERN.match(entry.name):
+            continue
+        version = Version(entry)
+        if not version.ddl_files and not version.dml_files:
+            continue  # 只有 baseline 或空目录，无增量可合并
+        versions.append(version)
+    versions.sort(key=lambda v: v.sort_key)
+    return versions
+
+
+# ---------------------------------------------------------------------------
+# Layout Validation
+# ---------------------------------------------------------------------------
+
+# 版本目录内允许的文件名后缀（{版本} 由所在目录名校验）：
+#   {版本}__ddl.sql / {版本}__dml.sql
+#   {版本}__baseline__ddl.sql / {版本}__baseline__dml.sql
+_ALLOWED_SUFFIXES = ("__ddl.sql", "__dml.sql", "__baseline__ddl.sql", "__baseline__dml.sql")
+
+
+def validate_layout() -> list[str]:
+    """校验 versions/ 目录结构与命名规范，返回错误列表（空表示通过）。
+
+    规则：
+      1. versions/ 下只能是版本目录，不能有散落文件；
+      2. 目录名必须匹配 V{major}.{minor}.{patch}[-prerelease]（如 V0.1.0、V0.1.0-alpha.2）；
+      3. 目录内文件必须是 {目录名}[-...]__ddl.sql / __dml.sql / __baseline__{ddl,dml}.sql，
+         且文件名的版本前缀必须与所在目录一致。
+    """
+    errors: list[str] = []
+    if not VERSIONS_DIR.exists():
+        return [f"versions 目录不存在: {VERSIONS_DIR}"]
+
+    for entry in sorted(VERSIONS_DIR.iterdir()):
+        rel = entry.name
+        if entry.is_file():
+            errors.append(f"versions/ 下不应有文件: {rel}（迁移脚本须放在版本目录内）")
+            continue
+        if not entry.is_dir():
+            continue
+        if not VERSION_DIR_PATTERN.match(rel):
+            errors.append(
+                f"版本目录名不规范: {rel}（应形如 V0.1.0 或 V0.1.0-alpha.2，"
+                f"需 V 前缀 + major.minor.patch）"
+            )
+            continue  # 目录名都不对，不再校验内部文件
+
+        sql_files = list(entry.glob("*.sql"))
+        if not sql_files:
+            errors.append(f"{rel}/ 为空，没有任何 .sql 文件")
+        for f in sorted(entry.iterdir()):
+            if f.is_dir():
+                errors.append(f"{rel}/ 下不应有子目录: {f.name}")
+                continue
+            if not f.name.endswith(".sql"):
+                errors.append(f"{rel}/{f.name} 不是 .sql 文件")
+                continue
+            # 文件名须为 {目录名}<可选 -prerelease> + 允许的后缀
+            matched_suffix = next((s for s in _ALLOWED_SUFFIXES if f.name.endswith(s)), None)
+            if matched_suffix is None:
+                errors.append(
+                    f"{rel}/{f.name} 文件名后缀不规范"
+                    f"（应以 __ddl.sql / __dml.sql / __baseline__ddl.sql / __baseline__dml.sql 结尾）"
+                )
+                continue
+            prefix = f.name[: -len(matched_suffix)]
+            # 前缀须以目录名开头（baseline 允许形如 V0.0.1-alpha 的预发布后缀）
+            if prefix != rel and not prefix.startswith(rel + "-"):
+                errors.append(
+                    f"{rel}/{f.name} 版本前缀与目录不一致"
+                    f"（前缀 '{prefix}' 应为 '{rel}' 或 '{rel}-<prerelease>'）"
+                )
+    return errors
 
 
 # ---------------------------------------------------------------------------
 # Merge Logic
 # ---------------------------------------------------------------------------
 
-def merge_one_version(
-    version_file: Path,
-    dry_run: bool = False,
-) -> tuple[list[str], list[str]]:
-    """Parse and classify statements from a version file.
-    Returns (ddl_statements, dml_statements)."""
-    content = version_file.read_text(encoding="utf-8")
-    statements = split_statements(content)
+def read_version_sql(version: "Version") -> tuple[str, str]:
+    """读取一个版本预拆好的 DDL / DML 原文（不做语句拆分/分类）。
 
-    ddl_stmts: list[str] = []
-    dml_stmts: list[str] = []
-    set_stmts: list[str] = []
+    新结构下每个版本目录已手工分好 __ddl.sql / __dml.sql，
+    脚本只需原样读取并追加，无需再 split/classify。
+    返回 (ddl_text, dml_text)，缺失的部分为空串。
+    """
+    def _read_all(files: list[Path]) -> str:
+        chunks = []
+        for f in files:
+            text = f.read_text(encoding="utf-8").strip()
+            if text:
+                chunks.append(text)
+        return "\n\n".join(chunks)
 
-    for stmt in statements:
-        category = classify_statement(stmt)
-        if category == "ddl":
-            ddl_stmts.append(stmt)
-        elif category == "dml":
-            dml_stmts.append(stmt)
-        else:
-            set_stmts.append(stmt)
-
-    # Prepend SET statements to both DDL and DML sections if present
-    if set_stmts:
-        set_block = [s for s in set_stmts if s.rstrip(';').strip()]
-        if ddl_stmts and set_block:
-            ddl_stmts = set_block + ddl_stmts
-        if dml_stmts and set_block:
-            dml_stmts = set_block + dml_stmts
-
-    return ddl_stmts, dml_stmts
+    return _read_all(version.ddl_files), _read_all(version.dml_files)
 
 
-def format_merge_block(version_name: str, statements: list[str]) -> str:
-    """Format statements as a merge block with version header."""
+def format_merge_block(version_name: str, body: str) -> str:
+    """Format a version's SQL text as a merge block with version header."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     header = f"\n-- ========== {version_name} (merged at {now}) ==========\n"
-    body = "\n".join(s if s.endswith(";") else s + ";" for s in statements)
+    body = body.strip()
+    if body and not body.endswith(";"):
+        body += "\n"
     return header + body + "\n"
 
 
@@ -254,10 +264,9 @@ def append_to_file(filepath: Path, content: str, dry_run: bool = False) -> None:
 # ---------------------------------------------------------------------------
 
 def audit_version_coverage(applied: set[str]) -> list[str]:
-    """Check that all version files (except baseline) are in .applied."""
+    """Check that all discovered versions are recorded in .applied."""
     issues = []
-    all_versions = discover_versions()
-    for v in all_versions:
+    for v in discover_versions():
         if v.name not in applied:
             issues.append(f"  MISSING: {v.name} not in .applied")
     return issues
@@ -409,6 +418,19 @@ def main():
     print("=" * 60)
     print()
 
+    # Step 0: Validate layout & naming before doing anything.
+    print("[STEP 0] Validating versions/ layout...")
+    layout_errors = validate_layout()
+    if layout_errors:
+        print(f"  FAIL: {len(layout_errors)} issue(s) found:")
+        for e in layout_errors:
+            print(f"    - {e}")
+        print()
+        print("[ABORT] 请修复以上目录/命名问题后重试。")
+        sys.exit(1)
+    print("  PASS: layout OK")
+    print()
+
     # Step 1: Read applied versions
     applied = read_applied()
     print(f"[INFO] Already applied: {len(applied)} version(s)")
@@ -426,55 +448,45 @@ def main():
         print()
 
     # Step 3: Merge each pending version
-    total_ddl = 0
-    total_dml = 0
+    merged_count = 0
 
-    for version_file in pending:
-        ddl_stmts, dml_stmts = merge_one_version(version_file, dry_run=args.dry_run)
-        total_ddl += len(ddl_stmts)
-        total_dml += len(dml_stmts)
+    for version in pending:
+        ddl_text, dml_text = read_version_sql(version)
+        has_ddl = bool(ddl_text.strip())
+        has_dml = bool(dml_text.strip())
 
-        print(f"[MERGE] {version_file.name}: {len(ddl_stmts)} DDL, {len(dml_stmts)} DML")
+        print(f"[MERGE] {version.name}: "
+              f"{'DDL' if has_ddl else 'no-ddl'}, {'DML' if has_dml else 'no-dml'}")
 
         if args.dry_run:
-            if ddl_stmts:
-                print(f"        DDL statements:")
-                for s in ddl_stmts[:3]:
-                    preview = s[:80].replace('\n', ' ')
-                    print(f"          {preview}...")
-                if len(ddl_stmts) > 3:
-                    print(f"          ... and {len(ddl_stmts) - 3} more")
-            if dml_stmts:
-                print(f"        DML statements:")
-                for s in dml_stmts[:3]:
-                    preview = s[:80].replace('\n', ' ')
-                    print(f"          {preview}...")
-                if len(dml_stmts) > 3:
-                    print(f"          ... and {len(dml_stmts) - 3} more")
-        else:
-            # Check if already present in target files (guards against .applied being deleted)
-            already_in_ddl = version_already_in_file(DDL_FILE, version_file.stem)
-            already_in_dml = version_already_in_file(DML_FILE, version_file.stem)
+            for label, text in (("DDL", ddl_text), ("DML", dml_text)):
+                if text.strip():
+                    preview = text.strip().splitlines()[0][:80]
+                    line_count = len(text.strip().splitlines())
+                    print(f"        {label}: {line_count} line(s), starts: {preview}")
+            continue
 
-            if already_in_ddl or already_in_dml:
-                print(f"[SKIP] {version_file.name}: already present in target file(s), recovering .applied")
-                applied.add(version_file.name)
-                write_applied(applied)
-                continue
-
-            if ddl_stmts:
-                block = format_merge_block(version_file.stem, ddl_stmts)
-                append_to_file(DDL_FILE, block)
-            if dml_stmts:
-                block = format_merge_block(version_file.stem, dml_stmts)
-                append_to_file(DML_FILE, block)
-
-            applied.add(version_file.name)
+        # Guard against .applied being deleted: skip if already merged into targets.
+        already_in_ddl = version_already_in_file(DDL_FILE, version.name)
+        already_in_dml = version_already_in_file(DML_FILE, version.name)
+        if already_in_ddl or already_in_dml:
+            print(f"[SKIP] {version.name}: already present in target file(s), recovering .applied")
+            applied.add(version.name)
             write_applied(applied)
+            continue
+
+        if has_ddl:
+            append_to_file(DDL_FILE, format_merge_block(version.name, ddl_text))
+        if has_dml:
+            append_to_file(DML_FILE, format_merge_block(version.name, dml_text))
+
+        applied.add(version.name)
+        write_applied(applied)
+        merged_count += 1
 
     if not args.dry_run and pending:
         print()
-        print(f"[DONE] Merged {len(pending)} version(s): {total_ddl} DDL + {total_dml} DML statements")
+        print(f"[DONE] Merged {merged_count} version(s) into {DDL_FILE.name} / {DML_FILE.name}")
 
     # Step 4: Audit checks
     print()
