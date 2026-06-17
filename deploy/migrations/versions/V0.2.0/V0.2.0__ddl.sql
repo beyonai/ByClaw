@@ -114,3 +114,6 @@ DROP TABLE IF EXISTS byai.bykc_ec_sync_task CASCADE;
 DROP TABLE IF EXISTS byai.bykc_ec_connection CASCADE;
 DROP TABLE IF EXISTS byai.bykc_ec_collector_agent CASCADE;
 DROP TABLE IF EXISTS byai.bykc_ec_connector CASCADE;
+
+ALTER TABLE byai.byai_aimodel ADD COLUMN model_protocol VARCHAR(64) DEFAULT null;
+
