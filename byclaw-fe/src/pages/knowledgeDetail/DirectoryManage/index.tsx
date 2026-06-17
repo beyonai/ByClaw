@@ -101,6 +101,135 @@ function normalizeDirectoryRows(rows: any[] = []) {
   }));
 }
 
+function unwrapDirectoryRows(res: any) {
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res?.data)) return res.data;
+  return [];
+}
+
+function getDirectoryRowName(row: any) {
+  return String(row?.collectionName ?? row?.name ?? row?.fileName ?? '').trim();
+}
+
+function getPathSegments(path?: string) {
+  return normalizeDirectoryPath(path).split('/').filter(Boolean);
+}
+
+function getParentDirectoryPath(path?: string) {
+  const segments = getPathSegments(path);
+  segments.pop();
+  return segments.length ? `/${segments.join('/')}` : '/';
+}
+
+function resolveSearchRowPath(row: any) {
+  const name = getDirectoryRowName(row);
+  const directoryPath = normalizeDirectoryPath(row?.directoryPath || row?.path || '');
+  if (row?.type === 'directory') {
+    return directoryPath === '/' && name ? `/${name}` : directoryPath;
+  }
+
+  if (!name) {
+    return directoryPath;
+  }
+
+  const segments = getPathSegments(directoryPath);
+  const lastSegment = segments[segments.length - 1];
+  if (lastSegment === name) {
+    return directoryPath;
+  }
+  return normalizeDirectoryPath(`${directoryPath}/${name}`);
+}
+
+function buildSearchDirectoryRows(rows: any[] = []) {
+  type SearchNode = {
+    path: string;
+    row: any;
+    children: SearchNode[];
+  };
+
+  const nodeMap = new Map<string, SearchNode>();
+  const rootNodes: SearchNode[] = [];
+
+  const appendChild = (parent: SearchNode | null, child: SearchNode) => {
+    const siblings = parent ? parent.children : rootNodes;
+    if (!siblings.some((item) => item.path === child.path)) {
+      siblings.push(child);
+    }
+  };
+
+  const getOrCreateDirectoryNode = (path: string) => {
+    const normalizedPath = normalizeDirectoryPath(path);
+    const existed = nodeMap.get(normalizedPath);
+    if (existed) {
+      return existed;
+    }
+
+    const segments = getPathSegments(normalizedPath);
+    const name = segments[segments.length - 1] || normalizedPath;
+    const node: SearchNode = {
+      path: normalizedPath,
+      row: {
+        name,
+        collectionName: name,
+        type: 'directory',
+        directoryPath: normalizedPath,
+        __synthetic: true,
+      },
+      children: [],
+    };
+    nodeMap.set(normalizedPath, node);
+
+    const parentPath = getParentDirectoryPath(normalizedPath);
+    const parentNode = parentPath === '/' ? null : getOrCreateDirectoryNode(parentPath);
+    appendChild(parentNode, node);
+    return node;
+  };
+
+  normalizeDirectoryRows(rows).forEach((row) => {
+    const rowPath = resolveSearchRowPath(row);
+    if (!rowPath || rowPath === '/') return;
+
+    const parentPath = getParentDirectoryPath(rowPath);
+    const parentNode = parentPath === '/' ? null : getOrCreateDirectoryNode(parentPath);
+    const existed = nodeMap.get(rowPath);
+    const nextRow = {
+      ...row,
+      name: getDirectoryRowName(row) || getPathSegments(rowPath).slice(-1)[0],
+      collectionName: row.collectionName ?? row.name ?? row.fileName ?? getPathSegments(rowPath).slice(-1)[0],
+      directoryPath: rowPath,
+    };
+
+    if (existed) {
+      existed.row = {
+        ...nextRow,
+        __synthetic: false,
+      };
+      appendChild(parentNode, existed);
+      return;
+    }
+
+    const node: SearchNode = {
+      path: rowPath,
+      row: nextRow,
+      children: [],
+    };
+    nodeMap.set(rowPath, node);
+    appendChild(parentNode, node);
+  });
+
+  const flatten = (nodes: SearchNode[], level = 0): any[] => {
+    return nodes.flatMap((node) => [
+      {
+        ...node.row,
+        __level: level,
+      },
+      ...flatten(node.children, level + 1),
+    ]);
+  };
+
+  return flatten(rootNodes);
+}
+
 const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) => {
   const {
     searchValue = '',
@@ -176,7 +305,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
             keyword,
           });
           setState({
-            directoryList: normalizeDirectoryRows(Array.isArray(res) ? res : []),
+            directoryList: buildSearchDirectoryRows(unwrapDirectoryRows(res)),
           });
         } catch (error) {
           console.error(error);
@@ -709,6 +838,10 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
 
   const getActions = useCallback(
     (record: any) => {
+      if (record?.__synthetic) {
+        return [];
+      }
+
       let actionList: ActionItem[] = [];
 
       if (canManage) {
@@ -809,7 +942,12 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
           return (
             <div
               onClick={onClick}
-              style={{ display: 'flex', alignItems: 'center', ...style }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                paddingLeft: Number(record?.__level || 0) * 28,
+                ...style,
+              }}
               title={v}
               ref={isFile ? getFileRowRef(rowKey) : undefined}
             >

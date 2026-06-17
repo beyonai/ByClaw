@@ -90,7 +90,7 @@ const resourceConfigMap: Record<
     resourceBizTypeList: [ResourceTypeMap.VIEW],
   },
   OBJECT: {
-    icon: 'icon-tongxun',
+    icon: 'icon-mob-faxian02',
     labelId: 'common.resourceType.object',
     centerLabelId: 'resourceTabs.objectCenter',
     navigatePath: '/objectCenter',
@@ -98,7 +98,7 @@ const resourceConfigMap: Record<
     resourceBizTypeList: [ResourceTypeMap.OBJECT],
   },
   SKILL: {
-    icon: 'icon-chajian',
+    icon: 'icon-a-changjing-line',
     labelId: 'common.skill',
     centerLabelId: 'resourceTabs.skillCenter',
     navigatePath: '/skillCenter',
@@ -586,7 +586,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   };
 
   const handleComplexSkillDevelop = () => {
-    message.info('代码智能体开发中，敬请期待');
+    message.info(intl.formatMessage({ id: 'resourceTabs.skillUpload.codeAgentDeveloping' }));
   };
 
   const openManagerMenu = (menu: any) => {
@@ -620,9 +620,9 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         return;
       }
 
-      message.warning('未找到界面技能管理菜单配置');
+      message.warning(intl.formatMessage({ id: 'resourceTabs.skillUpload.noMenuConfig' }));
     } catch (error: any) {
-      message.warning(error?.message || '未找到界面技能管理菜单配置');
+      message.warning(error?.message || intl.formatMessage({ id: 'resourceTabs.skillUpload.noMenuConfig' }));
     }
   };
 
@@ -652,18 +652,28 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     <div className={styles.uploadedSkillDetail}>
       <div className={styles.uploadedSkillDetailTitle}>{item.resourceName}</div>
       <div className={styles.uploadedSkillDetailItem}>
-        <div className={styles.uploadedSkillDetailLabel}>sourceType</div>
-        <div className={styles.uploadedSkillDetailValue}>{item.sourceType}</div>
+        <div className={styles.uploadedSkillDetailLabel}>
+          {intl.formatMessage({ id: 'resourceTabs.skillDetail.sourceType' })}
+        </div>
+        <div className={styles.uploadedSkillDetailValue}>
+          {item.sourceType === SKILL_SOURCE_UPLOADED
+            ? intl.formatMessage({ id: 'resourceTabs.skillDetail.uploaded' })
+            : intl.formatMessage({ id: 'resourceTabs.skillDetail.bound' })}
+        </div>
       </div>
       {item.skillPath && (
         <div className={styles.uploadedSkillDetailItem}>
-          <div className={styles.uploadedSkillDetailLabel}>skillPath</div>
+          <div className={styles.uploadedSkillDetailLabel}>
+            {intl.formatMessage({ id: 'resourceTabs.skillDetail.skillPath' })}
+          </div>
           <div className={styles.uploadedSkillDetailValue}>{item.skillPath}</div>
         </div>
       )}
       {item.skillDocObjectKey && (
         <div className={styles.uploadedSkillDetailItem}>
-          <div className={styles.uploadedSkillDetailLabel}>skillDocObjectKey</div>
+          <div className={styles.uploadedSkillDetailLabel}>
+            {intl.formatMessage({ id: 'resourceTabs.skillDetail.skillDocObjectKey' })}
+          </div>
           <div className={styles.uploadedSkillDetailValue}>{item.skillDocObjectKey}</div>
         </div>
       )}
@@ -1022,13 +1032,13 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
               disabled={skillUploading}
               onClick={handleSkillImportClick}
             >
-              技能导入
+              {intl.formatMessage({ id: 'resourceTabs.skillUpload.uploadSkill' })}
             </Button>
             <Button size="small" className={styles.skillActionButton} onClick={handleComplexSkillDevelop}>
-              复杂技能开发
+              {intl.formatMessage({ id: 'resourceTabs.skillUpload.complexSkillDevelop' })}
             </Button>
             <Button size="small" className={styles.skillActionButton} onClick={handlePageSkillDevelop}>
-              页面技能开发
+              {intl.formatMessage({ id: 'resourceTabs.skillUpload.pageSkillDevelop' })}
             </Button>
           </div>
         </>
@@ -1076,7 +1086,9 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
                                 item.sourceType === SKILL_SOURCE_UPLOADED ? styles.uploadedSourceTag : ''
                               }`}
                             >
-                              {item.sourceType === SKILL_SOURCE_UPLOADED ? '上传' : '绑定'}
+                              {item.sourceType === SKILL_SOURCE_UPLOADED
+                                ? intl.formatMessage({ id: 'resourceTabs.skillDetail.uploaded' })
+                                : intl.formatMessage({ id: 'resourceTabs.skillDetail.bound' })}
                             </span>
                           )}
                         </span>

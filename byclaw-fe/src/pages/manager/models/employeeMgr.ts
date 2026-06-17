@@ -183,7 +183,7 @@ export default {
           message.success(response.msg);
         }
         // yield put({ type: 'employees/getAllDigitalEmployees' });
-        success?.(returnedId);
+        success?.(returnedId, response.data);
       } else {
         message.error(response?.msg);
         fail?.(response || {});

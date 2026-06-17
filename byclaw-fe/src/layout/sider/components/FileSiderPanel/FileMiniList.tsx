@@ -9,16 +9,17 @@ import {
   Modal,
   Space,
   Spin,
-  Tooltip,
   Tree,
   Typography,
   Upload,
   message,
+  Tooltip,
 } from 'antd';
 import { EllipsisOutlined, SearchOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
 import KnowledgeBreadcrumb from '@/components/KnowledgeBreadcrumb';
+import UploadConfirmModal, { type UploadConfirmFile } from '@/components/UploadConfirmModal';
 import { DragType } from '@/components/QueryInput/withDrag';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import useGlobal from '@/hooks/useGlobal';
@@ -39,6 +40,7 @@ import {
 } from '@/service/fileBrowser';
 import { queryDigEmployeeManageKnowledgeResourceAuth } from '@/pages/manager/service/resources';
 import {
+  checkUploadFileConflicts,
   createFolder as createKnowledgeFolder,
   queryDirAndFileByLevel,
   uploadFiles as uploadKnowledgeFiles,
@@ -126,12 +128,6 @@ function getFileType(name: string): string {
   return ext;
 }
 
-function formatFileSize(size: number) {
-  if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
-  if (size >= 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${size} B`;
-}
-
 interface FileMiniListProps {
   resourceId: string;
 }
@@ -179,13 +175,6 @@ function getSessionFilePath(sessionId?: string) {
 
 function getDefaultFileCategoryKey(sessionId?: string): FileCategoryKey {
   return getNormalizedSessionId(sessionId) ? 'session' : 'root';
-}
-
-function getFileCategoryRootPath(categoryKey?: FileCategoryKey) {
-  if (categoryKey === 'session') return SESSION_FILE_PATH;
-  if (categoryKey === 'shared') return SHARED_FILE_PATH;
-  if (categoryKey === 'log') return LOG_FILE_PATH;
-  return ROOT_FILE_PATH;
 }
 
 function normalizeFileBrowserPath(path?: string) {
@@ -244,6 +233,17 @@ function buildScopedFolderPath(currentPath: string, rootPath: string) {
   return paths;
 }
 
+interface PendingKnowledgeUpload extends UploadConfirmFile {
+  source: FileBrowserItem;
+  targetDirectoryPath: string;
+}
+
+interface FileCategoryCache {
+  path: string;
+  items: FileBrowserItem[];
+  childrenByPath: Record<string, FileBrowserItem[]>;
+}
+
 const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ blob, fileName, fileType, loading, onClose }) => (
   <div className={styles.previewPanel}>
     <div className={styles.previewHeader}>
@@ -269,6 +269,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const { EventEmitter, sessionId } = useGlobal();
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
   const clickTimerRef = useRef<number | null>(null);
+  const categoryCacheRef = useRef<Partial<Record<FileCategoryKey, FileCategoryCache>>>({});
   const [currentPath, setCurrentPath] = useState('');
   const [activeCategoryKey, setActiveCategoryKey] = useState<FileCategoryKey | undefined>('root');
   const [items, setItems] = useState<FileBrowserItem[]>([]);
@@ -329,27 +330,61 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const activeCategory = useMemo(() => {
     return fileCategories.find((item) => item.key === activeCategoryKey);
   }, [activeCategoryKey, fileCategories]);
+  const [knowledgeUploadConfirmOpen, setKnowledgeUploadConfirmOpen] = useState(false);
+  const [pendingKnowledgeUploads, setPendingKnowledgeUploads] = useState<PendingKnowledgeUpload[]>([]);
+  const [pendingKnowledgeConflicts, setPendingKnowledgeConflicts] = useState<string[]>([]);
+  const [pendingKnowledgeDirectoryPath, setPendingKnowledgeDirectoryPath] = useState('/');
+  const [pendingKnowledgeBase, setPendingKnowledgeBase] = useState<IKnowledgeBaseItem | null>(null);
+
+  const updateCategoryCache = useCallback(
+    (categoryKey: FileCategoryKey | undefined, cache: Partial<FileCategoryCache> & Pick<FileCategoryCache, 'path'>) => {
+      if (!categoryKey) return;
+      const prev = categoryCacheRef.current[categoryKey];
+      categoryCacheRef.current[categoryKey] = {
+        path: cache.path,
+        items: cache.items ?? prev?.items ?? [],
+        childrenByPath: cache.childrenByPath ?? prev?.childrenByPath ?? {},
+      };
+    },
+    []
+  );
 
   const fetchList = useCallback(
-    async (path: string) => {
+    async (path: string, options: { force?: boolean; categoryKey?: FileCategoryKey | undefined } = {}) => {
+      const cacheKey = options.categoryKey ?? activeCategoryKey;
+      const cached = cacheKey ? categoryCacheRef.current[cacheKey] : undefined;
+      if (!options.force && cached?.path === path) {
+        setItems(cached.items);
+        setChildrenByPath(cached.childrenByPath);
+        return;
+      }
       setLoading(true);
       try {
         const res: any = await listFiles({ resourceId, path });
         const data = res?.data ?? res ?? [];
-        setItems(Array.isArray(data) ? data : []);
+        const nextItems = Array.isArray(data) ? data : [];
+        const nextChildrenByPath = options.force ? {} : cached?.childrenByPath || {};
+        setItems(nextItems);
+        setChildrenByPath(nextChildrenByPath);
+        updateCategoryCache(cacheKey, {
+          path,
+          items: nextItems,
+          childrenByPath: nextChildrenByPath,
+        });
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
       } finally {
         setLoading(false);
       }
     },
-    [intl, resourceId]
+    [activeCategoryKey, intl, resourceId, updateCategoryCache]
   );
 
   useEffect(() => {
     const defaultCategoryKey = getDefaultFileCategoryKey(sessionId);
     const defaultCategoryPath = defaultCategoryKey === 'session' ? getSessionFilePath(sessionId) : ROOT_FILE_PATH;
     setPathInitialized(false);
+    categoryCacheRef.current = {};
     setActiveCategoryKey(defaultCategoryKey);
     setCurrentPath(defaultCategoryPath);
     setItems([]);
@@ -380,11 +415,18 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       }
       const nextCategory = fileCategories.find((item) => item.key === nextKey);
       if (!nextCategory) return;
+      const cached = categoryCacheRef.current[nextCategory.key];
       setActiveCategoryKey(nextCategory.key);
       setSearchValue('');
       setIsSearching(false);
-      setChildrenByPath({});
-      if (nextCategory.ensure) {
+      if (cached?.path === nextCategory.path) {
+        setItems(cached.items);
+        setChildrenByPath(cached.childrenByPath);
+      } else {
+        setItems([]);
+        setChildrenByPath({});
+      }
+      if (nextCategory.ensure && !cached) {
         try {
           await ensureFolder({ resourceId, path: nextCategory.path });
         } catch (error: any) {
@@ -395,34 +437,6 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     },
     [fileCategories, intl, resourceId]
   );
-
-  const folderPath = useMemo(() => {
-    const categoryRootPath = getFileCategoryRootPath(activeCategoryKey);
-    if (categoryRootPath !== ROOT_FILE_PATH) {
-      const rootPath = ensureDirectoryPath(categoryRootPath);
-      const normalizedCurrentPath = ensureDirectoryPath(normalizeFileBrowserPath(currentPath));
-      const paths = [{ title: intl.formatMessage({ id: 'fileBrowser.root' }), id: rootPath }];
-      if (!normalizedCurrentPath.startsWith(rootPath) || normalizedCurrentPath === rootPath) {
-        return paths;
-      }
-
-      let accumulated = rootPath;
-      const childSegments = normalizedCurrentPath.slice(rootPath.length).split('/').filter(Boolean);
-      for (const segment of childSegments) {
-        accumulated += `${segment}/`;
-        paths.push({ title: segment, id: accumulated });
-      }
-      return paths;
-    }
-
-    const segments = currentPath.split('/').filter(Boolean);
-    const paths = [{ title: intl.formatMessage({ id: 'fileBrowser.root' }), id: '/' }];
-    const firstSegment = segments[0];
-    if (firstSegment) {
-      paths.push({ title: firstSegment, id: `/${firstSegment}/` });
-    }
-    return paths;
-  }, [activeCategoryKey, currentPath, intl]);
 
   const sortedItems = useMemo(() => {
     return sortFileBrowserItems(items);
@@ -509,18 +523,6 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       }
     },
     [intl, resourceId]
-  );
-
-  const handleBreadcrumbClick = useCallback(
-    (index: number) => {
-      const target = folderPath[index];
-      if (!target) return;
-      setSearchValue('');
-      setIsSearching(false);
-      setChildrenByPath({});
-      setCurrentPath(target.id);
-    },
-    [folderPath]
   );
 
   const handleSearch = useCallback(
@@ -637,21 +639,41 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           setSearchValue('');
           setIsSearching(false);
           setChildrenByPath({});
-          await fetchList(currentPath);
+          await fetchList(currentPath, { force: true });
           return;
         }
         const res: any = await listFiles({ resourceId, path: uploadPath });
-        setChildrenByPath((prev) => ({
-          ...prev,
-          [uploadPath]: unwrapListResponse<FileBrowserItem>(res),
-        }));
+        setChildrenByPath((prev) => {
+          const nextChildrenByPath = {
+            ...prev,
+            [uploadPath]: unwrapListResponse<FileBrowserItem>(res),
+          };
+          if (!isSearching) {
+            updateCategoryCache(activeCategoryKey, {
+              path: currentPath,
+              items,
+              childrenByPath: nextChildrenByPath,
+            });
+          }
+          return nextChildrenByPath;
+        });
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
       } finally {
         setUploadingFiles(false);
       }
     },
-    [currentPath, fetchList, intl, resourceId, uploadingFiles]
+    [
+      activeCategoryKey,
+      currentPath,
+      fetchList,
+      intl,
+      isSearching,
+      items,
+      resourceId,
+      updateCategoryCache,
+      uploadingFiles,
+    ]
   );
 
   const handleUploadSelect = useCallback((targetPath: string, fileList: File[]) => {
@@ -668,9 +690,6 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     setPendingUploadPath('');
   }, [uploadingFiles]);
 
-  const previewUploadFiles = pendingUploadFiles.slice(0, 3);
-  const remainingUploadFileCount = pendingUploadFiles.length - previewUploadFiles.length;
-
   const loadTreeNode = useCallback(
     async (node: FileTreeItem) => {
       if (!isDirectory(node)) return;
@@ -678,15 +697,25 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       if (childrenByPath[path]) return;
       try {
         const res: any = await listFiles({ resourceId, path });
-        setChildrenByPath((prev) => ({
-          ...prev,
-          [path]: unwrapListResponse<FileBrowserItem>(res),
-        }));
+        setChildrenByPath((prev) => {
+          const nextChildrenByPath = {
+            ...prev,
+            [path]: unwrapListResponse<FileBrowserItem>(res),
+          };
+          if (!isSearching) {
+            updateCategoryCache(activeCategoryKey, {
+              path: currentPath,
+              items,
+              childrenByPath: nextChildrenByPath,
+            });
+          }
+          return nextChildrenByPath;
+        });
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
       }
     },
-    [childrenByPath, intl, resourceId]
+    [activeCategoryKey, childrenByPath, currentPath, intl, isSearching, items, resourceId, updateCategoryCache]
   );
 
   const handleTreeNodeClick = useCallback(
@@ -696,18 +725,12 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       clickTimerRef.current = window.setTimeout(() => {
         clickTimerRef.current = null;
         if (isDirectory(node)) {
-          if (isSearching || getPathDepth(currentPath) === 0) {
-            setSearchValue('');
-            setIsSearching(false);
-            setChildrenByPath({});
-            setCurrentPath(ensureDirectoryPath(node.path));
-          }
           return;
         }
         void handlePreview(node);
       }, 220);
     },
-    [clearClickTimer, currentPath, handlePreview, isSearching]
+    [clearClickTimer, handlePreview]
   );
 
   const handleItemDoubleClick = useCallback(
@@ -758,7 +781,12 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   );
 
   const uploadFileToKnowledge = useCallback(
-    async (item: FileBrowserItem, kb: IKnowledgeBaseItem, directoryPath: string) => {
+    async (
+      item: FileBrowserItem,
+      kb: IKnowledgeBaseItem,
+      directoryPath: string,
+      options: { processFrontMatter?: boolean; overwrite?: boolean } = {}
+    ) => {
       const res: any = await downloadFile(resourceId, item.path);
       const rawBlob = getRawBlob(res);
       const mimeType = rawBlob.type || getMimeType(item.name) || undefined;
@@ -766,8 +794,9 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       const formData = new FormData();
       formData.append('resourceId', String(kb.resourceId));
       formData.append('directoryPath', directoryPath);
-      formData.append('overwrite', 'true');
       formData.append('files', file);
+      formData.append('processFrontMatter', String(!options.processFrontMatter));
+      formData.append('overwrite', String(Boolean(options.overwrite)));
       await uploadKnowledgeFiles(formData);
     },
     [resourceId]
@@ -802,7 +831,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     async function copyDirectory(
       item: FileBrowserItem,
       kb: IKnowledgeBaseItem,
-      parentDirectoryPath: string
+      parentDirectoryPath: string,
+      options: { processFrontMatter?: boolean; overwrite?: boolean } = {}
     ): Promise<void> {
       const targetDirectoryPath = joinKnowledgeDirectoryPath(parentDirectoryPath, item.name);
       await ensureKnowledgeFolder(kb, parentDirectoryPath, item.name);
@@ -811,13 +841,66 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       const children = unwrapListResponse<FileBrowserItem>(response);
       for (const child of children) {
         if (isDirectory(child)) {
-          await copyDirectory(child, kb, targetDirectoryPath);
+          await copyDirectory(child, kb, targetDirectoryPath, options);
         } else {
-          await uploadFileToKnowledge(child, kb, targetDirectoryPath);
+          await uploadFileToKnowledge(child, kb, targetDirectoryPath, options);
         }
       }
     },
     [ensureKnowledgeFolder, resourceId, uploadFileToKnowledge]
+  );
+
+  const collectKnowledgeUploads = useCallback(
+    async function collectUploads(
+      item: FileBrowserItem,
+      parentDirectoryPath: string
+    ): Promise<PendingKnowledgeUpload[]> {
+      if (!isDirectory(item)) {
+        return [
+          {
+            source: item,
+            targetDirectoryPath: parentDirectoryPath,
+            name: item.name,
+            size: item.size,
+          },
+        ];
+      }
+
+      const targetDirectoryPath = joinKnowledgeDirectoryPath(parentDirectoryPath, item.name);
+      const response = await listFiles({ resourceId, path: ensureDirectoryPath(item.path) });
+      const children = unwrapListResponse<FileBrowserItem>(response);
+      const result: PendingKnowledgeUpload[] = [];
+      for (const child of children) {
+        const childUploads = await collectUploads(child, targetDirectoryPath);
+        result.push(...childUploads);
+      }
+      return result;
+    },
+    [resourceId]
+  );
+
+  const checkKnowledgeUploadConflicts = useCallback(
+    async (kb: IKnowledgeBaseItem, uploads: PendingKnowledgeUpload[]) => {
+      const groups = uploads.reduce<Record<string, string[]>>((acc, item) => {
+        if (!acc[item.targetDirectoryPath]) {
+          acc[item.targetDirectoryPath] = [];
+        }
+        acc[item.targetDirectoryPath].push(item.name);
+        return acc;
+      }, {});
+
+      const conflicts: string[] = [];
+      for (const [directoryPath, fileNames] of Object.entries(groups)) {
+        const response = await checkUploadFileConflicts({
+          resourceId: kb.resourceId,
+          directoryPath,
+          fileNames,
+        });
+        conflicts.push(...(response?.overwritePaths || []));
+      }
+      return conflicts;
+    },
+    []
   );
 
   const handleConfirmSaveToKnowledge = useCallback(async () => {
@@ -829,27 +912,26 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
     setSavingToKnowledge(true);
     try {
-      if (isDirectory(saveTarget)) {
-        await copyFileBrowserDirectoryToKnowledge(saveTarget, selectedKnowledgeBase, knowledgeDirectoryPath);
-      } else {
-        await uploadFileToKnowledge(saveTarget, selectedKnowledgeBase, knowledgeDirectoryPath);
-      }
-      message.success(intl.formatMessage({ id: 'multiChoices.saveToKnowledge.success' }));
+      const uploads = await collectKnowledgeUploads(saveTarget, knowledgeDirectoryPath);
+      const conflicts = await checkKnowledgeUploadConflicts(selectedKnowledgeBase, uploads);
+      setPendingKnowledgeBase(selectedKnowledgeBase);
+      setPendingKnowledgeDirectoryPath(knowledgeDirectoryPath);
+      setPendingKnowledgeUploads(uploads);
+      setPendingKnowledgeConflicts(conflicts);
       setSaveModalOpen(false);
-      setSaveTarget(null);
+      setKnowledgeUploadConfirmOpen(true);
     } catch (error: any) {
       message.error(error?.message || intl.formatMessage({ id: 'fileSider.saveToKnowledge.failed' }));
     } finally {
       setSavingToKnowledge(false);
     }
   }, [
-    copyFileBrowserDirectoryToKnowledge,
+    checkKnowledgeUploadConflicts,
+    collectKnowledgeUploads,
     intl,
     knowledgeDirectoryPath,
-    message,
     saveTarget,
     selectedKnowledgeBase,
-    uploadFileToKnowledge,
   ]);
 
   const handleConfirmCopyToFileBrowser = useCallback(async () => {
@@ -864,16 +946,103 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       message.success(intl.formatMessage({ id: 'fileBrowser.copy.success' }));
       setCopyModalOpen(false);
       setCopyTarget(null);
+      delete categoryCacheRef.current[copyTargetType];
       setChildrenByPath({});
       if (copyDirectoryPath === ensureDirectoryPath(currentPath)) {
-        await fetchList(currentPath);
+        await fetchList(currentPath, { force: true });
       }
     } catch (error: any) {
       message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.copy.failed' }));
     } finally {
       setCopyingToFileBrowser(false);
     }
-  }, [copyDirectoryPath, copyTarget, currentPath, fetchList, intl, resourceId]);
+  }, [copyDirectoryPath, copyTarget, copyTargetType, currentPath, fetchList, intl, resourceId]);
+
+  const handleConfirmKnowledgeUpload = useCallback(
+    async (processFrontMatter: boolean) => {
+      if (!saveTarget || !pendingKnowledgeBase) return;
+      const overwrite = pendingKnowledgeConflicts.length > 0;
+      setSavingToKnowledge(true);
+      try {
+        if (isDirectory(saveTarget)) {
+          await copyFileBrowserDirectoryToKnowledge(saveTarget, pendingKnowledgeBase, pendingKnowledgeDirectoryPath, {
+            processFrontMatter,
+            overwrite,
+          });
+        } else {
+          await uploadFileToKnowledge(saveTarget, pendingKnowledgeBase, pendingKnowledgeDirectoryPath, {
+            processFrontMatter,
+            overwrite,
+          });
+        }
+        message.success(intl.formatMessage({ id: 'multiChoices.saveToKnowledge.success' }));
+        setKnowledgeUploadConfirmOpen(false);
+        setPendingKnowledgeUploads([]);
+        setPendingKnowledgeConflicts([]);
+        setPendingKnowledgeBase(null);
+        setPendingKnowledgeDirectoryPath('/');
+        setSaveModalOpen(false);
+        setSaveTarget(null);
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileSider.saveToKnowledge.failed' }));
+      } finally {
+        setSavingToKnowledge(false);
+      }
+    },
+    [
+      copyFileBrowserDirectoryToKnowledge,
+      intl,
+      pendingKnowledgeBase,
+      pendingKnowledgeConflicts.length,
+      pendingKnowledgeDirectoryPath,
+      saveTarget,
+      uploadFileToKnowledge,
+    ]
+  );
+
+  const handleCancelKnowledgeUpload = useCallback(() => {
+    if (savingToKnowledge) return;
+    setKnowledgeUploadConfirmOpen(false);
+    setPendingKnowledgeUploads([]);
+    setPendingKnowledgeConflicts([]);
+    setPendingKnowledgeBase(null);
+    setPendingKnowledgeDirectoryPath('/');
+    setSaveTarget(null);
+  }, [savingToKnowledge]);
+
+  const isKnowledgeUploadConfirm = knowledgeUploadConfirmOpen;
+  const uploadConfirmFiles: UploadConfirmFile[] = isKnowledgeUploadConfirm
+    ? pendingKnowledgeUploads
+    : pendingUploadFiles;
+  const uploadConfirmDirectoryPath = isKnowledgeUploadConfirm
+    ? pendingKnowledgeDirectoryPath
+    : pendingUploadPath || '/';
+  const uploadConfirmConflicts = isKnowledgeUploadConfirm ? pendingKnowledgeConflicts : [];
+  const uploadConfirmLoading = isKnowledgeUploadConfirm ? savingToKnowledge : uploadingFiles;
+  const uploadConfirmOkText = isKnowledgeUploadConfirm
+    ? intl.formatMessage({
+      id: pendingKnowledgeConflicts.length ? 'knowledgeDetail.confirmOverwriteUpload' : 'knowledgeDetail.uploadFile',
+    })
+    : intl.formatMessage({ id: 'fileBrowser.toolbar.upload' });
+
+  const handleUploadConfirmOk = useCallback(
+    (processFrontMatter: boolean) => {
+      if (isKnowledgeUploadConfirm) {
+        void handleConfirmKnowledgeUpload(processFrontMatter);
+        return;
+      }
+      void executeUpload(pendingUploadPath, pendingUploadFiles);
+    },
+    [executeUpload, handleConfirmKnowledgeUpload, isKnowledgeUploadConfirm, pendingUploadFiles, pendingUploadPath]
+  );
+
+  const handleUploadConfirmCancel = useCallback(() => {
+    if (isKnowledgeUploadConfirm) {
+      handleCancelKnowledgeUpload();
+      return;
+    }
+    handleCancelUploadConfirm();
+  }, [handleCancelKnowledgeUpload, handleCancelUploadConfirm, isKnowledgeUploadConfirm]);
 
   useEffect(() => {
     return clearClickTimer;
@@ -939,13 +1108,6 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
   const fileTreeContent = (
     <div className={styles.categoryBody}>
-      <div className={styles.breadcrumbBar}>
-        {isSearching ? (
-          <span className={styles.searchResult}>{searchValue}</span>
-        ) : (
-          <KnowledgeBreadcrumb folderPath={folderPath} handleBreadcrumbClick={handleBreadcrumbClick} />
-        )}
-      </div>
       <Spin spinning={loading} wrapperClassName={styles.listSpin}>
         <div className={styles.treeScroll}>
           {fileTreeData.length ? (
@@ -968,36 +1130,40 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
               onClick={handleTreeNodeClick as any}
               onDoubleClick={(_, node) => handleItemDoubleClick(node as unknown as FileTreeItem)}
               titleRender={(item) => (
-                <Tooltip title={item.name} placement="right">
-                  <span className={styles.treeTitleContent}>
-                    <span className={styles.treeTitleText}>{item.name}</span>
-                    <Dropdown
-                      trigger={['hover']}
-                      overlayClassName={employeeStyles.mydropdown}
-                      menu={{
-                        items: getFileActionItems(item as FileTreeItem),
-                        onClick: ({ key, domEvent }) => {
-                          domEvent.stopPropagation();
-                          if (key === 'download') {
-                            void handleDownload(item as FileTreeItem);
-                          } else if (key === 'saveToKnowledge') {
-                            openSaveToKnowledge(item as FileTreeItem);
-                          } else if (key === 'saveToSessionFiles') {
-                            openCopyToFileBrowser(item as FileTreeItem, 'session');
-                          } else if (key === 'saveToSharedFiles') {
-                            openCopyToFileBrowser(item as FileTreeItem, 'shared');
-                          }
-                        },
-                      }}
+                <span className={styles.treeTitleContent}>
+                  <Tooltip title={item.name} placement="right">
+                    <span className={styles.treeTitleName}>
+                      <span className={styles.treeTitleText}>{item.name}</span>
+                    </span>
+                  </Tooltip>
+                  <Dropdown
+                    trigger={['hover']}
+                    overlayClassName={employeeStyles.mydropdown}
+                    menu={{
+                      items: getFileActionItems(item as FileTreeItem),
+                      onClick: ({ key, domEvent }) => {
+                        domEvent.stopPropagation();
+                        if (key === 'download') {
+                          void handleDownload(item as FileTreeItem);
+                        } else if (key === 'saveToKnowledge') {
+                          openSaveToKnowledge(item as FileTreeItem);
+                        } else if (key === 'saveToSessionFiles') {
+                          openCopyToFileBrowser(item as FileTreeItem, 'session');
+                        } else if (key === 'saveToSharedFiles') {
+                          openCopyToFileBrowser(item as FileTreeItem, 'shared');
+                        }
+                      },
+                    }}
+                  >
+                    <span
+                      className={`${commonStyles.treeActionIcon} ${styles.treeActionTrigger}`}
+                      onClick={(event) => event.stopPropagation()}
+                      onMouseDown={(event) => event.stopPropagation()}
                     >
-                      <EllipsisOutlined
-                        className={commonStyles.treeActionIcon}
-                        onClick={(event) => event.stopPropagation()}
-                        onMouseDown={(event) => event.stopPropagation()}
-                      />
-                    </Dropdown>
-                  </span>
-                </Tooltip>
+                      <EllipsisOutlined />
+                    </span>
+                  </Dropdown>
+                </span>
               )}
             />
           ) : (
@@ -1039,85 +1205,17 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           children: category.key === activeCategoryKey ? fileTreeContent : null,
         }))}
       />
-      <Modal
-        title={intl.formatMessage({ id: 'knowledgeDetail.uploadConfirmTitle' })}
-        open={uploadConfirmOpen}
-        okText={intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}
-        cancelText={intl.formatMessage({ id: 'common.cancel' })}
-        confirmLoading={uploadingFiles}
-        onOk={() => executeUpload(pendingUploadPath, pendingUploadFiles)}
-        onCancel={handleCancelUploadConfirm}
-        destroyOnClose
-        width="50vw"
-        style={{ minWidth: 640, maxWidth: 960 }}
-      >
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Space
-            direction="vertical"
-            size={12}
-            style={{
-              width: '100%',
-              padding: 16,
-              border: '1px solid #f0f0f0',
-              borderRadius: 10,
-              background: '#fafafa',
-            }}
-          >
-            <Typography.Text strong>{intl.formatMessage({ id: 'knowledgeDetail.uploadInfo' })}</Typography.Text>
-            <div style={{ display: 'grid', gridTemplateColumns: '86px minmax(0, 1fr)', rowGap: 8, columnGap: 12 }}>
-              <Typography.Text type="secondary">
-                {intl.formatMessage({ id: 'knowledgeDetail.uploadDirectory' })}
-              </Typography.Text>
-              <Typography.Text ellipsis style={{ maxWidth: '100%' }}>
-                {pendingUploadPath || '/'}
-              </Typography.Text>
-              <Typography.Text type="secondary">
-                {intl.formatMessage({ id: 'knowledgeDetail.selectedFiles' })}
-              </Typography.Text>
-              <Typography.Text>
-                {intl.formatMessage({ id: 'knowledgeDetail.uploadConfirmFiles' }, { count: pendingUploadFiles.length })}
-              </Typography.Text>
-            </div>
-
-            <div style={{ width: '100%', padding: 12, borderRadius: 10, background: '#fff' }}>
-              <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                <Typography.Text strong>{intl.formatMessage({ id: 'knowledgeDetail.fileList' })}</Typography.Text>
-                <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                  {previewUploadFiles.map((file) => (
-                    <div
-                      key={`${file.name}-${file.size}`}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 12,
-                        padding: '8px 10px',
-                        borderRadius: 8,
-                        background: '#f7f8fa',
-                      }}
-                    >
-                      <Typography.Text ellipsis style={{ flex: 1, maxWidth: '100%' }}>
-                        {file.name}
-                      </Typography.Text>
-                      <Typography.Text type="secondary" style={{ flex: 'none', fontSize: 12 }}>
-                        {formatFileSize(file.size)}
-                      </Typography.Text>
-                    </div>
-                  ))}
-                </Space>
-                {remainingUploadFileCount > 0 && (
-                  <Typography.Text type="secondary">
-                    {intl.formatMessage(
-                      { id: 'knowledgeDetail.uploadConfirmMoreFiles' },
-                      { count: remainingUploadFileCount }
-                    )}
-                  </Typography.Text>
-                )}
-              </Space>
-            </div>
-          </Space>
-        </Space>
-      </Modal>
+      <UploadConfirmModal
+        open={uploadConfirmOpen || knowledgeUploadConfirmOpen}
+        files={uploadConfirmFiles}
+        directoryPath={uploadConfirmDirectoryPath}
+        conflicts={uploadConfirmConflicts}
+        loading={uploadConfirmLoading}
+        showProcessFrontMatter={isKnowledgeUploadConfirm}
+        okText={uploadConfirmOkText}
+        onOk={handleUploadConfirmOk}
+        onCancel={handleUploadConfirmCancel}
+      />
       <Modal
         open={copyModalOpen}
         title={intl.formatMessage({

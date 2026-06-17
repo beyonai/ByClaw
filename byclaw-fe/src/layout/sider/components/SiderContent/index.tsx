@@ -72,8 +72,8 @@ export const tabItems: any[] = [
   },
   {
     key: 'object',
-    icon: 'icon-tongxun',
-    activeIcon: 'icon-tongxun-fill',
+    icon: 'icon-mob-faxian02',
+    activeIcon: 'icon-mob-faxian01',
     label: 'common.resourceType.object',
     ChildComponent: ObjectSiderPanel,
     navigatePath: '/objectCenter',
@@ -81,8 +81,8 @@ export const tabItems: any[] = [
   },
   {
     key: 'skill',
-    icon: 'icon-chajian',
-    activeIcon: 'icon-chajian-fill',
+    icon: 'icon-a-changjing-line',
+    activeIcon: 'icon-changjing-fill',
     label: 'common.skill',
     ChildComponent: SkillSiderPanel,
     navigatePath: '/skillCenter',
@@ -90,8 +90,8 @@ export const tabItems: any[] = [
   },
   {
     key: 'file',
-    icon: 'icon-a-changjing-line',
-    activeIcon: 'icon-changjing-fill',
+    icon: 'icon-a-View-listxiangqingliebiao',
+    activeIcon: 'icon-a-View-listxiangqingliebiao1',
     label: 'common.file',
     ChildComponent: FileSiderPanel,
     navigatePath: '/files',
