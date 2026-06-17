@@ -63,6 +63,7 @@ WORKSPACE_PVC_NAME="${WORKSPACE_PVC_NAME:-byclaw-workspace}"
 WORKSPACE_PVC_SIZE="${WORKSPACE_PVC_SIZE:-500Gi}"
 BYCLAW_SANDBOX_FILE_VOLUME_ROOT="${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-workspace}"
 FILE_STORAGE_LOCAL_PATH="${FILE_STORAGE_LOCAL_PATH:-$BYCLAW_SANDBOX_FILE_VOLUME_ROOT}"
+FILE_STORAGE_MINIO_MOUNT_PATH="${FILE_STORAGE_MINIO_MOUNT_PATH:-$BYCLAW_SANDBOX_FILE_VOLUME_ROOT}"
 BYCLAW_SANDBOX_BASE_URL="${BYCLAW_SANDBOX_BASE_URL:-http://opensandbox-server.${NS_SANDBOX}.svc.cluster.local:9005}"
 BYCLAW_SANDBOX_ENDPOINT_SCHEME="${BYCLAW_SANDBOX_ENDPOINT_SCHEME:-https}"
 OPENSANDBOX_API_PORT="${OPENSANDBOX_API_PORT:-9005}"
@@ -1451,6 +1452,7 @@ spec:
               readOnly: true
             - name: logs
               mountPath: /app/logs
+              subPath: logs/be
             - name: workspace
               mountPath: ${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}
             - name: runtime-env-file
@@ -1462,7 +1464,8 @@ spec:
           configMap:
             name: byclaw-be-config
         - name: logs
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: ${WORKSPACE_PVC_NAME}
         - name: workspace
           persistentVolumeClaim:
             claimName: ${WORKSPACE_PVC_NAME}
@@ -1546,10 +1549,16 @@ spec:
               mountPath: /etc/nginx/conf.d/default.conf
               subPath: default.conf
               readOnly: true
+            - name: nginx-logs
+              mountPath: /var/log/nginx
+              subPath: logs/nginx
       volumes:
         - name: nginx-config
           configMap:
             name: byclaw-fe-nginx
+        - name: nginx-logs
+          persistentVolumeClaim:
+            claimName: ${WORKSPACE_PVC_NAME}
 ---
 apiVersion: v1
 kind: Service
@@ -1609,11 +1618,23 @@ spec:
               cpu: "${BYCLAW_QA_CPU_LIMIT:-1}"
               memory: "${BYCLAW_QA_MEMORY_LIMIT:-2Gi}"
           volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: logs
+              mountPath: /app/logs
+              subPath: logs/qa-manager
             - name: runtime-env-file
               mountPath: /etc/byclaw/.env
               subPath: .env
               readOnly: true
       volumes:
+        - name: config
+          configMap:
+            name: byclaw-be-config
+        - name: logs
+          persistentVolumeClaim:
+            claimName: ${WORKSPACE_PVC_NAME}
         - name: runtime-env-file
           configMap:
             name: byclaw-qa-runtime-env-file
@@ -1657,11 +1678,23 @@ spec:
               cpu: "${BYCLAW_QA_CPU_LIMIT:-1}"
               memory: "${BYCLAW_QA_MEMORY_LIMIT:-2Gi}"
           volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: logs
+              mountPath: /app/logs
+              subPath: logs/qa-worker
             - name: runtime-env-file
               mountPath: /etc/byclaw/.env
               subPath: .env
               readOnly: true
       volumes:
+        - name: config
+          configMap:
+            name: byclaw-be-config
+        - name: logs
+          persistentVolumeClaim:
+            claimName: ${WORKSPACE_PVC_NAME}
         - name: runtime-env-file
           configMap:
             name: byclaw-qa-worker-runtime-env-file
@@ -1722,11 +1755,28 @@ spec:
               cpu: "${BYCLAW_DATA_CPU_LIMIT:-1}"
               memory: "${BYCLAW_DATA_MEMORY_LIMIT:-2Gi}"
           volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: logs
+              mountPath: /app/logs
+              subPath: logs/data
+            - name: workspace
+              mountPath: ${FILE_STORAGE_MINIO_MOUNT_PATH}
             - name: runtime-env-file
               mountPath: /etc/byclaw/.env
               subPath: .env
               readOnly: true
       volumes:
+        - name: config
+          configMap:
+            name: byclaw-be-config
+        - name: logs
+          persistentVolumeClaim:
+            claimName: ${WORKSPACE_PVC_NAME}
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: ${WORKSPACE_PVC_NAME}
         - name: runtime-env-file
           configMap:
             name: byclaw-data-runtime-env-file
