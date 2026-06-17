@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect } from 'react';
-import { useSelector } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 
 import { NotificationContentComp } from '@/pages/chat/components/BottomContent/systemNotification';
 import useAppStore from '@/models/common/useAppStore';
@@ -40,6 +40,7 @@ export const saveReadVersionNotificationId = (id?: string | number | null) => {
 };
 
 function useVersionNotification(eventEmitter: any) {
+  const intl = useIntl();
   const { userInfo } = useSelector(({ user }) => ({ userInfo: user.userInfo }));
 
   const { getVersionNotification } = useAppStore();
@@ -56,11 +57,11 @@ function useVersionNotification(eventEmitter: any) {
       };
 
       eventEmitter.emit('beyond-titlewriter-set-assistanttips', {
-        tips: '点击查看版本详情',
+        tips: intl.formatMessage({ id: 'versionNotification.viewDetailsTip' }),
         onClick,
       });
     },
-    [eventEmitter]
+    [eventEmitter, intl]
   );
 
   useEffect(() => {

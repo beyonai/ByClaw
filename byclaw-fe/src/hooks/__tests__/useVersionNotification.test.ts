@@ -1,5 +1,13 @@
 jest.mock('@umijs/max', () => ({
   useSelector: jest.fn(),
+  useIntl: jest.fn(() => ({
+    formatMessage: jest.fn(({ id }: { id: string }) => {
+      if (id === 'versionNotification.viewDetailsTip') {
+        return 'Click to view version details';
+      }
+      return id;
+    }),
+  })),
 }));
 
 jest.mock('@/pages/manager/service/NotificationMgr', () => ({
@@ -68,7 +76,7 @@ describe('useVersionNotification', () => {
     await waitFor(() => {
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         'beyond-titlewriter-set-assistanttips',
-        expect.objectContaining({ tips: '点击查看版本详情' })
+        expect.objectContaining({ tips: 'Click to view version details' })
       );
     });
 
