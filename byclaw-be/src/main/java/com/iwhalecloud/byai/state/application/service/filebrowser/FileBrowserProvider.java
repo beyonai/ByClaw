@@ -23,6 +23,8 @@ public interface FileBrowserProvider {
 
     void move(String userCode, Long resourceId, List<String> sourcePaths, String targetDirectory);
 
+    void copy(String userCode, Long resourceId, String sourcePath, String targetDirectory);
+
     void createFolder(String userCode, Long resourceId, String relativePath);
 
     List<FileBrowserItemVo> search(String userCode, Long resourceId, String relativePath, String keyword);

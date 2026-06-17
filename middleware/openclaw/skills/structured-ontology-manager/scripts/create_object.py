@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """创建结构化本体对象（信息收集 + 提交两阶段）。
 
 I/O 协议：stdin JSON → stdout JSON
@@ -43,6 +43,8 @@ I/O 协议：stdin JSON → stdout JSON
 出参（stdout JSON）:
     {"ok": true, "resource_id": "..."}
     {"ok": false, "missing": [...], "error": "..."}
+
+所有业务逻辑由 datacloud_data_service 的 ontology-manager API 提供服务。
 """
 
 from __future__ import annotations
@@ -53,15 +55,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from _common import load_embedding_model_from_redis, post_ontology_api
+
 
 def main() -> None:
     raw = sys.argv[1] if len(sys.argv) > 1 else sys.stdin.read().strip()
     if not raw:
         print(json.dumps({"ok": False, "error": "缺少入参"}), flush=True)
         sys.exit(1)
-
-    # 预加载 Embedding 模型配置（从 Redis），使 build_terms 内的向量回填可用
-    from _common import load_embedding_model_from_redis
 
     load_embedding_model_from_redis()
 
@@ -74,34 +75,32 @@ def main() -> None:
         print(json.dumps({"ok": False, "error": "entity_code 不能为空"}), flush=True)
         sys.exit(1)
 
-    from datacloud_knowledge.ingestion.ontology_build import OntologyBuildSession
-
-    session = OntologyBuildSession()
-
     if action == "collect":
-        state = session.collect_object_info(
-            entity_code=entity_code,
-            session_id=session_id,
-            entity_name=params.get("entity_name", ""),
-            entity_desc=params.get("entity_desc", ""),
-            fields=params.get("fields"),
+        result = post_ontology_api(
+            "/object/collect",
+            {
+                "entity_code": entity_code,
+                "session_id": session_id,
+                "entity_name": params.get("entity_name", ""),
+                "entity_desc": params.get("entity_desc", ""),
+                "fields": params.get("fields"),
+            },
         )
-        if not state.get("ok", True):
-            print(json.dumps(state, ensure_ascii=False), flush=True)
-            return
-        missing = state.pop("missing", [])
-        print(
-            json.dumps({"ok": True, "state": state, "missing": missing}, ensure_ascii=False),
-            flush=True,
-        )
+        print(json.dumps(result, ensure_ascii=False), flush=True)
 
     elif action == "submit":
-        result = session.submit_object(entity_code=entity_code, session_id=session_id)
+        result = post_ontology_api(
+            "/object/submit",
+            {"entity_code": entity_code, "session_id": session_id},
+        )
         print(json.dumps(result, ensure_ascii=False), flush=True)
 
     else:
         print(
-            json.dumps({"ok": False, "error": f"未知 action: {action}，合法值: collect/submit"}),
+            json.dumps(
+                {"ok": False, "error": f"未知 action: {action}，合法值: collect/submit"},
+                ensure_ascii=False,
+            ),
             flush=True,
         )
         sys.exit(1)

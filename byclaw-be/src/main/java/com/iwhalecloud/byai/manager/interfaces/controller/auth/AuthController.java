@@ -474,6 +474,20 @@ public class AuthController {
     }
 
     /**
+     * 查询当前用户对数字员工关联知识库中具备管理权限的知识库列表。
+     *
+     * 用于“保存到知识库”等写入场景，避免前端展示仅有关联但当前用户无管理权限的知识库。
+     */
+    @PostMapping("/queryDigEmployeeManageKnowledgeResourceAuth")
+    public ResponseUtil<PageInfo<ResourceAuthVo>> queryDigEmployeeManageKnowledgeResourceAuth(
+        @RequestBody DigEmployeeRelResourceQo qo) {
+        PageInfo<ResourceAuthVo> pageVO =
+            resourceAuthApplicationService.listDigitalEmployeeManageKnowledgeResourceAuth(qo);
+        return ResponseUtil.successResponse(I18nUtil.get("auth.digemployee.manage.knowledge.list.query.success"),
+            pageVO);
+    }
+
+    /**
      * 补齐资源列表范围： 1. 个人知识库 / 个人数字员工只额外返回当前用户绑定的默认资源； 2. 企业知识库 / 工具 / 对象 / 视图按平台全部企业资源查询。
      */
     private void enrichResourceListScope(ResourceUseAuthQo resourceUseAuthQo) {

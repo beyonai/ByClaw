@@ -163,6 +163,16 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
     }
 
     @Override
+    public void copy(String userCode, Long resourceId, String sourcePath, String targetDirectory) {
+        String normalizedTargetDirectory = ensureDirectoryPath(targetDirectory);
+        if (sourcePath.endsWith("/")) {
+            copyDirectory(userCode, resourceId, sourcePath, normalizedTargetDirectory);
+        } else {
+            copyFileToDirectory(userCode, resourceId, sourcePath, normalizedTargetDirectory);
+        }
+    }
+
+    @Override
     public void createFolder(String userCode, Long resourceId, String relativePath) {
         try {
             String path = resolvePath(relativePath);
@@ -196,10 +206,9 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
     @Override
     public List<FileBrowserItemVo> search(String userCode, Long resourceId, String relativePath, String keyword) {
         List<FileBrowserItemVo> allItems = list(userCode, resourceId, relativePath);
-        String lowerKeyword = keyword.toLowerCase();
         List<FileBrowserItemVo> result = new ArrayList<>();
         for (FileBrowserItemVo item : allItems) {
-            if (item.getName().toLowerCase().contains(lowerKeyword)) {
+            if (FileBrowserSearchMatcher.matches(item.getName(), item.getPath(), keyword)) {
                 result.add(item);
             }
         }
@@ -208,30 +217,15 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
 
     @Override
     public void downloadFolder(String userCode, Long resourceId, String relativePath, OutputStream outputStream) throws IOException {
-        List<FileBrowserItemVo> items = list(userCode, resourceId, relativePath);
+        String rootPath = ensureDirectoryPath(relativePath);
+        List<FileBrowserItemVo> items = list(userCode, resourceId, rootPath);
         if (items.isEmpty()) {
             return;
         }
 
         try (ZipOutputStream zos = new ZipOutputStream(outputStream)) {
             byte[] buffer = new byte[8192];
-            for (FileBrowserItemVo item : items) {
-                if (item.isDir()) {
-                    continue;
-                }
-                try {
-                    zos.putNextEntry(new ZipEntry(item.getName()));
-                    try (InputStream in = download(userCode, resourceId, item.getPath())) {
-                        int len;
-                        while ((len = in.read(buffer)) > 0) {
-                            zos.write(buffer, 0, len);
-                        }
-                    }
-                    zos.closeEntry();
-                } catch (Exception e) {
-                    LOGGER.warn("OpenClaw文件夹下载-跳过文件: path={}, error={}", item.getPath(), e.getMessage());
-                }
-            }
+            writeZipEntries(userCode, resourceId, rootPath, items, zos, buffer);
         }
     }
 
@@ -303,5 +297,103 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
             LOGGER.error("解析OpenClaw响应失败", e);
         }
         return result;
+    }
+
+    private void copyDirectory(String userCode, Long resourceId, String sourcePath, String targetDirectory) {
+        String normalizedSourcePath = ensureDirectoryPath(sourcePath);
+        String dirName = extractName(normalizedSourcePath);
+        String targetPath = ensureDirectoryPath(targetDirectory) + dirName + "/";
+        if (targetPath.startsWith(normalizedSourcePath)) {
+            throw new IllegalArgumentException("不能复制文件夹到自身或其子目录下");
+        }
+        createFolder(userCode, resourceId, targetPath);
+        for (FileBrowserItemVo child : list(userCode, resourceId, normalizedSourcePath)) {
+            if (child.isDir()) {
+                copyDirectory(userCode, resourceId, child.getPath(), targetPath);
+            } else {
+                copyFileToDirectory(userCode, resourceId, child.getPath(), targetPath);
+            }
+        }
+    }
+
+    private void copyFileToDirectory(String userCode, Long resourceId, String sourcePath, String targetDirectory) {
+        String targetPath = resolvePath(targetDirectory);
+        HttpUrl targetUrl;
+        try {
+            targetUrl = buildTargetUrl(userCode, API_PREFIX + "/upload", null);
+        } catch (Exception e) {
+            throw new RuntimeException("文件复制失败：沙箱环境不可用", e);
+        }
+
+        try (InputStream inputStream = download(userCode, resourceId, sourcePath)) {
+            byte[] bytes = inputStream.readAllBytes();
+            MultipartBody body = new MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("files", extractName(sourcePath),
+                    RequestBody.create(bytes, MediaType.parse("application/octet-stream")))
+                .addFormDataPart("path", targetPath)
+                .build();
+            Request request = new Request.Builder().url(targetUrl).post(body).build();
+            executeForString(request);
+            LOGGER.info("OpenClaw文件复制成功: {} -> {}", sourcePath, targetDirectory);
+        } catch (IOException e) {
+            throw new RuntimeException("文件复制失败: " + sourcePath, e);
+        }
+    }
+
+    private void writeZipEntries(String userCode, Long resourceId, String rootPath, List<FileBrowserItemVo> items,
+        ZipOutputStream zos, byte[] buffer) {
+        for (FileBrowserItemVo item : items) {
+            if (item.isDir()) {
+                writeZipEntries(userCode, resourceId, rootPath, list(userCode, resourceId, ensureDirectoryPath(item.getPath())),
+                    zos, buffer);
+                continue;
+            }
+            try {
+                String entryName = buildZipEntryName(rootPath, item.getPath());
+                if (entryName.isEmpty()) {
+                    continue;
+                }
+                zos.putNextEntry(new ZipEntry(entryName));
+                try (InputStream in = download(userCode, resourceId, item.getPath())) {
+                    int len;
+                    while ((len = in.read(buffer)) > 0) {
+                        zos.write(buffer, 0, len);
+                    }
+                }
+                zos.closeEntry();
+            } catch (Exception e) {
+                LOGGER.warn("OpenClaw文件夹下载-跳过文件: path={}, error={}", item.getPath(), e.getMessage());
+            }
+        }
+    }
+
+    private String buildZipEntryName(String rootPath, String itemPath) {
+        String normalizedRoot = ensureDirectoryPath(rootPath);
+        String normalizedItem = itemPath == null ? "" : itemPath.trim().replace('\\', '/').replaceAll("/+", "/");
+        if (normalizedItem.startsWith(normalizedRoot)) {
+            return normalizedItem.substring(normalizedRoot.length());
+        }
+        return extractName(normalizedItem);
+    }
+
+    private String ensureDirectoryPath(String path) {
+        if (path == null || path.isBlank() || "/".equals(path)) {
+            return "/";
+        }
+        String normalized = path.trim().replace('\\', '/').replaceAll("/+", "/");
+        if (!normalized.startsWith("/")) {
+            normalized = "/" + normalized;
+        }
+        return normalized.endsWith("/") ? normalized : normalized + "/";
+    }
+
+    private String extractName(String path) {
+        String normalized = path == null ? "" : path.trim().replace('\\', '/');
+        if (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        int lastSlash = normalized.lastIndexOf('/');
+        return lastSlash >= 0 ? normalized.substring(lastSlash + 1) : normalized;
     }
 }

@@ -35,6 +35,23 @@
   overflow-x: hidden;
 }
 
+.skillUploadInput {
+  display: none;
+}
+
+.skillActionBar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.skillActionButton {
+  min-width: 0;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
 .resourceItem {
   cursor: default;
 }
@@ -89,7 +106,7 @@
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background-color: rgba(22, 93, 255, 0.08);
+  // background-color: rgba(22, 93, 255, 0.08);
   color: var(--beyond-color-primary);
   position: relative;
 

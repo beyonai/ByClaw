@@ -64,6 +64,10 @@ const KnowledgeDetail: React.FC = () => {
   }, [folderPath]);
 
   const canManageKnowledge = Boolean(operationPermissions?.hasManagePermission);
+  const canCreateFolder =
+    canManageKnowledge &&
+    resourceBizType !== ResourceTypeMap.knowledgeBaseQa &&
+    resourceBizType !== ResourceTypeMap.knowledgeBaseTerm;
 
   useEffect(() => {
     let mounted = true;
@@ -138,6 +142,7 @@ const KnowledgeDetail: React.FC = () => {
         <DirectoryManage
           ref={directoryRef}
           searchValue={searchValue}
+          setSearchValue={setSearchValue}
           baseInfo={baseInfo}
           setShowAddFolder={setShowAddFolder}
           canManage={canManageKnowledge}
@@ -221,9 +226,7 @@ const KnowledgeDetail: React.FC = () => {
                 />
                 {tabKey === 'directoryManage' && (
                   <>
-                    {canManageKnowledge &&
-                      resourceBizType !== ResourceTypeMap.knowledgeBaseQa &&
-                      resourceBizType !== ResourceTypeMap.knowledgeBaseTerm && (
+                    {canCreateFolder && (
                       <Button
                         icon={<AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" style={{ fontSize: 18 }} />}
                         onClick={() => setShowAddFolder(true)}

@@ -13,6 +13,7 @@ import {
   resolveActiveSdkRunBinding,
   resolveSdkEmitter,
   markActiveSdkRequestSubagentSpawned,
+  registerAgentRunEndPromise,
 } from "./session-context";
 import { registerPendingMessageToolSend } from "./pending-message-tool.js";
 import {
@@ -331,6 +332,7 @@ async function handleLifecycleEvent(
   if (phase === "start") {
     const activeRequest = markActiveSdkRootLifecycleStarted(sessionKey) ?? request;
     cancelActiveSdkCompletionCheck(activeRequest.sessionKey);
+    registerAgentRunEndPromise(event.runId);
     return;
   }
   if (phase !== "end" && phase !== "error") {

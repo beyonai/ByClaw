@@ -173,7 +173,7 @@ RUN set -eux; \
     python3 --version | grep -q 'Python 3.12'; \
     python3 -m pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
     python3 -m pip config --global set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
-    python3 -m pip install --no-cache-dir redis websockify; \
+    python3 -m pip install --no-cache-dir redis websockify by-framework; \
     rm -f /usr/bin/websockify; \
     ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
     websockify --help >/dev/null

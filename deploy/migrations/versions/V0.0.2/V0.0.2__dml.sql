@@ -1,6 +1,11 @@
+
 update byai.po_users_organization set position_id =1 where  position_id not in(select position_id from byai.po_position);
 
+
+
 delete from byai.byai_system_config where param_code in('SYSTEM_BACKEND_MENU_MANAGE');
+
+
 INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc) VALUES (10000375, null, 'SYSTEM_BACKEND_MENU_MANAGE', '后台菜单管理', 'SYSTEM_BACKEND_MENU_MANAGE', '[
     {
         "menuCode": "menu_org",
@@ -74,7 +79,11 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
     }
 ]', '企业后台菜单管理');
 
+
+
 delete from byai.byai_system_config where param_code in('DIG_EMPLOYEE_FILE_UPLOAD_CONFIG');
+
+
 INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc) VALUES (10863540, 'text', 'DIG_EMPLOYEE_FILE_UPLOAD_CONFIG', '数字员工文件上传全局配置', 'DIG_EMPLOYEE_FILE_UPLOAD_CONFIG', '{
     "enabled": true,
     "allowedFileTypes": [".docx", ".doc", ".pdf", ".txt", ".md", ".xlsx", ".xls", ".csv", ".pptx", ".ppt", ".png", ".jpeg", ".jpg",".mp4", ".mov",".html", ".zip", ".gz", ".json", ".wav"],
@@ -82,7 +91,11 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
     "maxFileCount": 5
 }', '数字员工文件上传全局配置');
 
+
+
 delete from byai.byai_system_config where param_code in('TEMPLATE_DIGITAL_EMPLOYEE');
+
+
 INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc) VALUES (10028461, 'text', 'TEMPLATE_DIGITAL_EMPLOYEE', '数字员工提示词模版', 'TEMPLATE_DIGITAL_EMPLOYEE', '[
   {
     "name": "个人助理",

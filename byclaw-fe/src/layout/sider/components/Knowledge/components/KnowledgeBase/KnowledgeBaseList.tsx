@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
-import { Input, Dropdown, List, message, theme, Typography } from 'antd';
+import { Input, Dropdown, List, message, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { trim, get, isEmpty, intersection, debounce } from 'lodash';
 import { useIntl, useSelector } from '@umijs/max';
@@ -94,9 +94,9 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
   const isUser = isEmpty(intersection(userTypeList, ['PLAT_MAN', 'PLAT_DEVOPS']));
 
   const intl = useIntl();
-  const {
-    token: { colorPrimary },
-  } = theme.useToken();
+  // const {
+  //   token: { colorPrimary },
+  // } = theme.useToken();
   const { moduleEventEmitter, logoutModuleEvent } = useModuleEvent('KNOWLEDGE_CENTER');
 
   // const filterTypes = useMemo(
@@ -478,7 +478,7 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
                       />
                     ) : (
                       <span className={styles.defaultAvatar}>
-                        <AntdIcon type="icon-a-Book-oneshuji12" style={{ color: colorPrimary }} />
+                        <AntdIcon type="icon-chuangjianfangshi-wendangku" />
                       </span>
                     )
                   }
