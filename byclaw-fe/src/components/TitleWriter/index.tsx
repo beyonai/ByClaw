@@ -110,7 +110,7 @@ const Assistant = React.memo((props: { showAssistantTips?: boolean }) => {
 
   const { EventEmitter } = useGlobal();
 
-  const getAssistantVideo = React.useMemo(() => getRuntimeActualUrl('beyond/assistant2.mp4'), []);
+  const getAssistantVideo = React.useMemo(() => getRuntimeActualUrl('beyond/assistant.mp4'), []);
   const getAssistantIcon = React.useMemo(() => {
     const defaultIcon = getRuntimeActualUrl('beyond/assistant.png');
     return getSystemConfigByStorage().assistant || defaultIcon;
