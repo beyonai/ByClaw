@@ -13,6 +13,7 @@ dependencies = [
     "by-framework-langgraph==0.0.3.dev2",
     "by-framework-history-byclaw>=0.0.3",
     "langfuse>=2.0.0",
+    "deepagents>=0.4.7",
 ]
 
 [project.scripts]
@@ -42,7 +43,7 @@ url = "https://pypi.org/simple/"
 index-strategy = "unsafe-best-match"
 
 [tool.uv.sources]
-by-datacloud = { path = "D:\\data\\code\\baiying\\by-datacloud", editable = true }
+#by-datacloud = { path = "D:\\data\\code\\baiying\\by-datacloud", editable = true }
 
 [dependency-groups]
 dev = [

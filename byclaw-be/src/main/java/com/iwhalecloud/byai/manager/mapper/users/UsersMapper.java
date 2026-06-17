@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.mapper.users;
 
 import com.iwhalecloud.byai.manager.entity.temp.TempQo;
+import java.util.Date;
 import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
@@ -120,4 +121,8 @@ public interface UsersMapper extends BaseMapper<Users> {
      * @return 用户详情列表
      */
     List<UsersDetailVo> selectUsersDetailVoByCode(@Param("list") List<String> list);
+
+    List<Users> listCronPrewarmCandidateUsers(@Param("state") String state,
+        @Param("recentLoginSince") Date recentLoginSince, @Param("cursorUserId") Long cursorUserId,
+        @Param("sandboxType") String sandboxType, @Param("resourceId") Long resourceId, @Param("limit") int limit);
 }

@@ -33,11 +33,18 @@ type DefaultAimodelBundle = {
 };
 
 function defaultModelDefinition(provider: ProviderBundle) {
+  const params =
+    provider.thinkingBudgets && Object.keys(provider.thinkingBudgets).length > 0
+      ? { baiyingThinkingBudgets: provider.thinkingBudgets }
+      : undefined;
   return {
     id: provider.modelId,
     name: provider.modelName ?? provider.modelId,
     api: provider.api,
-    reasoning: false,
+    reasoning: provider.reasoning ?? false,
+    ...(provider.thinkingLevelMap ? { thinkingLevelMap: provider.thinkingLevelMap } : {}),
+    ...(provider.compat ? { compat: provider.compat } : {}),
+    ...(params ? { params } : {}),
     input: provider.input ?? (["text"] as Array<"text" | "image">),
     cost: {
       input: 0,

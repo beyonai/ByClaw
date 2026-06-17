@@ -181,7 +181,7 @@ public class PrivilegeGrantService {
         queryWrapper.eq(PrivilegeGrant::getStatusCd, "A");
         queryWrapper.in(PrivilegeGrant::getGrantType, GrantType.AVAILABLE_USE, GrantType.ALLOW_MANAGE);
         queryWrapper.in(PrivilegeGrant::getGrantObjType, GrantObjType.AGENT, GrantObjType.DIG_EMPLOYEE,
-            GrantObjType.MCP, GrantObjType.KG_DOC, GrantObjType.KG_DB, GrantObjType.TOOLKIT, GrantObjType.TOOL);
+            GrantObjType.MCP, GrantObjType.KG_DOC, GrantObjType.KG_DB, GrantObjType.TOOLKIT, GrantObjType.TOOL, GrantObjType.SKILL);
         return privilegeGrantMapper.selectList(queryWrapper);
     }
 

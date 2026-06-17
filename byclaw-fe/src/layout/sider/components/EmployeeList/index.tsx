@@ -5,12 +5,12 @@
 import React, { useState, Suspense, useRef, useEffect, createContext } from 'react';
 import { SearchOutlined } from '@ant-design/icons';
 // @ts-ignore
-import { useIntl } from '@umijs/max';
+import { useIntl, useLocation, useNavigate } from '@umijs/max';
 import { Input, Tabs } from 'antd';
 import classNames from 'classnames';
 import { trim, get } from 'lodash';
 
-// import AntdIcon from '@/components/AntdIcon';
+import AntdIcon from '@/components/AntdIcon';
 
 import AllEmployees from './components/AllEmployees';
 import FrequentEmployess from './components/FrequentEmployess';
@@ -60,14 +60,16 @@ const EmployeeList: React.FC<EmployeeListProps> = (props) => {
   const { chatMode, style, keyword } = props;
 
   const intl = useIntl();
-  // const navigate = useNavigate();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
 
   const CompRef = useRef<any>({});
   const isFirstRender = useRef(true);
 
   const SelectItems = React.useMemo(() => getSelectItems(intl), [intl]);
 
-  // const isInput = isInputMode(chatMode);
+  const isInput = isInputMode(chatMode);
+  const isDigitalEmployeesPage = pathname.startsWith('/digitalEmployees');
 
   const [searchName, setSearchName] = useState(() => {
     const s: Record<string, string> = {};
@@ -106,19 +108,31 @@ const EmployeeList: React.FC<EmployeeListProps> = (props) => {
 
   return (
     <div className={classNames(styles.employeesSider, styles.list)} style={style}>
-      {/* {!isInput && (
+      {!isInput && (
         <div className="ub ub-ac gap12">
           <div
             className={classNames(styles.discoverAgent, 'ub ub-ac ub-pj pointer mb-8 gap2')}
             style={{ background: 'linear-gradient(90deg, #3150ff0f 0%, #c067ff0f 100%)' }}
-            onClick={() => navigate('/digitalEmployees')}
+            onClick={() =>
+              navigate(
+                isDigitalEmployeesPage
+                  ? {
+                      pathname: '/chat',
+                    }
+                  : '/digitalEmployees',
+                isDigitalEmployeesPage ? { state: { keepSiderActiveKey: 'agent' } } : undefined
+              )
+            }
           >
             <AntdIcon className={classNames('mr-6', styles.icon)} type="icon-faxian" />
             <span style={{ fontWeight: 'bold', fontSize: 13 }}>{intl.formatMessage({ id: 'sider.findAgent' })}</span>
-            <AntdIcon type="icon-a-Rightyou" style={{ fontSize: 16, marginLeft: 'auto' }} />
+            <AntdIcon
+              type={isDigitalEmployeesPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
+              style={{ fontSize: 16, marginLeft: 'auto' }}
+            />
           </div>
         </div>
-      )} */}
+      )}
       <div className="ub-ac gap8 mb-8" style={{ display: keyword ? 'none' : 'flex' }}>
         <Input
           value={searchName[selectedKeys]}

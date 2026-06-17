@@ -35,7 +35,7 @@ function MoreActions(porps: { deleteMessage: (message: IMessage) => void; msg: I
       {troubleshootDrawerHolder}
       {traceId && (
         <div className={btnStyles.actionsBarItem} role="presentation">
-          <Tooltip title={intl.formatMessage({ id: 'messageList.troubleshoot' })}>
+          <Tooltip title={intl.formatMessage({ id: 'messageList.troubleshootTooltip' })}>
             <Button
               type="text"
               size="small"

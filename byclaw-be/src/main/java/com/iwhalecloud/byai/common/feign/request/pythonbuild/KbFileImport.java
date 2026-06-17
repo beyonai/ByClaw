@@ -22,6 +22,11 @@ public class KbFileImport {
     /** 文件描述，可选 */
     private String fileDescription;
 
+    /**
+     * 是否解析 Markdown 文件中的 YAML front matter。默认不解析，由前端上传确认弹窗显式控制。
+     */
+    private Boolean processFrontMatter;
+
     /** 文件二进制内容（multipart 中的 {@code fileContent} 部分），必填 */
     private MultipartFile multipartFile;
 }

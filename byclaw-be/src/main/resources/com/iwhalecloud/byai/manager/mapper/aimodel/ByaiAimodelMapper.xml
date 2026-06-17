@@ -125,11 +125,14 @@
         and
             d.obj_type = 'AI_MODEL'
         and
-            d.tag_id = 3
+            d.tag_id = 1
         <where>
             and b.obj_type = 'AI_MODEL'
             <if test="status != null and status != ''">
                 AND a.status = #{status}
+            </if>
+            <if test="modelType != null and modelType != ''">
+                AND a.model_type = #{modelType}
             </if>
             <if test="tagId != null and tagId != ''">
                 AND b.tag_id = #{tagId}
@@ -165,11 +168,14 @@
         and
         d.obj_type = 'AI_MODEL'
         and
-        d.tag_id = 3
+        d.tag_id = 1
         <where>
             and b.obj_type = 'AI_MODEL'
             <if test="status != null and status != ''">
                 AND a.status = #{status}
+            </if>
+            <if test="modelType != null and modelType != ''">
+                AND a.model_type = #{modelType}
             </if>
             <if test="tagId != null and tagId != ''">
                 AND b.tag_id = #{tagId}
@@ -177,4 +183,46 @@
         </where>
 
     </select>
+
+    <select id="listDefaultAiModel" resultMap="BaseResultMap">
+        SELECT
+            a.model_id,
+            a.model_type,
+            a.model_name,
+            a.model_no,
+            a.url,
+            a.ori_url,
+            a.auth_token,
+            a.status,
+            a.is_support_chart,
+            a.is_deepthink,
+            a.max_content_token,
+            a.in_params,
+            a.create_by,
+            a.create_time,
+            a.inparam_template,
+            a.model_protocol
+        FROM byai_aimodel a
+        <where>
+            <if test="tagId != null">
+                AND a.model_id IN (
+                    SELECT obj_id
+                    FROM byai_tag_relation
+                    WHERE obj_type = 'AI_MODEL'
+                      AND tag_id = #{tagId}
+                )
+            </if>
+            <if test="status != null and status != ''">
+                AND a.status = #{status}
+            </if>
+            <if test="modelType != null and modelType != ''">
+                AND a.model_type = #{modelType}
+            </if>
+            <if test="modelProtocol != null and modelProtocol != ''">
+                AND a.model_protocol = #{modelProtocol}
+            </if>
+        </where>
+    </select>
+
+
 </mapper>

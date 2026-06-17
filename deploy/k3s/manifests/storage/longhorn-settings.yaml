@@ -1,0 +1,22 @@
+# Longhorn 运行时配置（install-longhorn.sh 通过 envsubst 渲染后 apply）
+apiVersion: longhorn.io/v1beta2
+kind: Setting
+metadata:
+  name: default-data-path
+  namespace: ${LONGHORN_NAMESPACE}
+value: "${LONGHORN_DATA_PATH}"
+---
+# RWX: Longhorn >= v1.1 原生支持，PVC 设 ReadWriteMany 即可（无需 allow-rwx-volume，v1.6 已移除该 Setting）
+apiVersion: longhorn.io/v1beta2
+kind: Setting
+metadata:
+  name: default-replica-count
+  namespace: ${LONGHORN_NAMESPACE}
+value: "${LONGHORN_REPLICA_COUNT}"
+---
+apiVersion: longhorn.io/v1beta2
+kind: Setting
+metadata:
+  name: storage-minimal-available-percentage
+  namespace: ${LONGHORN_NAMESPACE}
+value: "15"

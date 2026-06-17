@@ -1,0 +1,23 @@
+# path-prefix 路由示例（迁移初期兼容 ByClaw 代理）
+# URL: https://sandbox.example.com/s/{sandboxId}/{port}/
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sandbox-path-prefix
+  namespace: by-sandbox
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.middlewares: by-sandbox-strip-prefix@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: sandbox.example.com
+      http:
+        paths:
+          - path: /s
+            pathType: Prefix
+            backend:
+              service:
+                name: opensandbox-ingress-gateway
+                port:
+                  number: 8080

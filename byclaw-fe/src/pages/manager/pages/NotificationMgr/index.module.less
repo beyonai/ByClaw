@@ -1,0 +1,61 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  padding: 16px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.tableWrap {
+  flex: 1;
+  min-height: 0;
+}
+
+.contentCell {
+  max-width: 360px;
+}
+
+.contentPreview {
+  height: 100%;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  background: #fafafa;
+}
+
+.plainPreview {
+  margin: 0;
+  height: 100%;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.markdownPreview {
+  :global {
+    .newmdWrap {
+      padding: 0;
+      background: transparent;
+    }
+  }
+}
+
+.drawerContent {
+  height: 100%;
+  overflow: auto;
+}

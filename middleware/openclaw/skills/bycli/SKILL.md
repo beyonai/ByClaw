@@ -33,7 +33,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - AUTH_REQUIRED（exit 77）/ BROWSER_CONNECT（exit 69）/ CAPTCHA / 限流 → 不修改代码，报告用户
 - 不要绕过入库脚本手写 `curl`、`fetch` 或自行拼签名头
 - 不要把 token、SESSION、Cookie、Beyond-Token、签名盐写入技能文件、命令参数或对话回复
-- 不要在用户未明确表达入库意图时主动建议入库
+- 非 bycli 采集收尾场景下，不要在用户未明确表达入库意图时主动建议入库（采集收尾必须主动问一次，属例外）
 - 不要采集成功后不主动询问是否入库，也不要采集完不落盘就询问
 - 不要把采集产物落到 `/tmp/` 或工作区根目录，不要让入参与正文分在不同目录，不要覆盖已有时间戳目录
 - 不要在入库失败时清理产物、Session 结束时自动清理、未列清单未确认就清理、删除 `audit_required=true` 目录
@@ -44,10 +44,14 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 
 - Agent 调用 bycli 时始终加 `-f json` 获取可解析输出
 - 浏览器操作前确认 `bycli doctor` 通过（仅 COOKIE/INTERCEPT/UI 策略需要）
-- 每次执行 `bycli doctor` 后（无论成功与否）必须紧接着执行 `bycli daemon status`，确认 daemon 处于 running 且 Extension 为 connected，据此判断桥接是否正常；任一不满足则视为桥接异常，按冷启动 / `bycli daemon restart` 处理或报告用户
+- 每次执行 `bycli doctor` 后（无论成功与否）必须紧接着执行 `bycli daemon status`，确认 daemon 处于 running 且 Extension 为 connected，据此判断桥接是否正常；任一不满足则视为桥接异常，按以下阶梯升级处理：
+  1. 桥接异常 → 先按冷启动流程重启（`openclaw browser start` → `bycli doctor` → `bycli daemon status`）
+  2. 仍异常 → `bycli daemon restart`，再 `bycli daemon status` 复检
+  3. `bycli daemon restart` 后仍连接不上（daemon 未 running 或 Extension 未 connected）→ **STOP，停止一切浏览器动作**，提示用户检查 Chrome 是否正常启动、byCLI 扩展插件是否已安装并启用，恢复后再重试；不得继续驱动或降级到通用工具
 - 修复 adapter 时仅修改 trace `summary.md` 里 `adapterSourcePath` 指向的文件
 - 修复预算：每次失败最多 3 轮 trace → fix → retry
 - 写 adapter 后必须 `bycli browser verify` 通过 + 字段值与网页肉眼比对
+- **采集 / 获取数据成功后必须做收尾两问（见「Browser 驱动成功后 — 强制两问收尾」）：①「复用」——仅当本次走了 `bycli browser` 降级驱动（无现成 adapter）时，问是否把过程存为 adapter；②「归档」——无论用何种方式采集成功，都按「采集后入库衔接」问是否入库。两问按各自触发条件该问必问，都不自动执行，须等用户答复**
 - 浏览器 session 结束后执行 cleanup（close tab → stop daemon → stop browser）
 - Login/Auth 页面例外：不关闭 session，报告 session name + URL 给用户
 - 入库必须通过 `node scripts/bycli-markdown-ingest.mjs` 执行，不得旁路
@@ -67,7 +71,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 
 关键区分：
 - 有现成 adapter → 直接用 `bycli <site> <command>`
-- 没有 adapter 但需要一次性数据 → Browser 驱动
+- 没有 adapter 但需要一次性数据 → Browser 驱动（采集成功后走「强制两问收尾」：问①复用 adapter + 问②入库）
 - 没有 adapter 且需要复用 → 写新 adapter
 - 现有 adapter 报错 → AutoFix
 - 已有 Markdown 内容 + 用户说"入库" → Markdown 入库
@@ -81,16 +85,47 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 1. 用 `bycli browser` 系列命令完成任务，不跳到通用工具
 2. 按下方浏览器生命周期 + [browser.md](./references/browser.md) 规范执行
 3. 驱动前先 `bycli doctor` 确认桥接，紧接着 `bycli daemon status` 确认 daemon running + Extension connected
-4. 任务结束后可建议用户「是否编写专用适配器」（仅建议，不自动执行）
+4. 采集 / 获取数据成功后，**必须**按下方「Browser 驱动成功后 — 强制两问收尾」执行：降级驱动场景先问①「复用」再问②「归档」（仅询问，不自动执行）
+
+### Browser 驱动成功后 — 强制两问收尾（不可跳过）
+
+采集 / 获取数据成功后做收尾两问。两问**触发条件不同**，各自该问必问：
+
+**问题 ①「复用」— 是否保存为 adapter（仅降级驱动时问）：**
+
+触发条件：本次数据通过 `bycli browser` 降级驱动获取（即 `bycli list -f json` 无现成 adapter）。已有现成 adapter（直接 `bycli <site> <command>`）则**跳过此问**——本来就有 adapter，无需再造。
+
+在返回数据的同一轮回复里问：
+
+> 「本次数据是通过浏览器实时驱动获取的。是否把刚才的获取过程保存成一个专用 adapter（适配器）？保存后下次同类请求可直接 `bycli <site> <command>` 快速获取，无需再驱动浏览器。（是 / 否）」
+
+- 用户答**是 / 需要 / 保存 / 可以**等肯定意图 → 进入 [adapter-author.md](./references/adapter-author.md) 流程，把本次驱动过程（站点、命令、抓到的接口 / DOM、字段）沉淀为 adapter（含 verify、原始请求重放、交付，均按该流程 runbook 执行）
+- 用户答**否 / 不用 / 跳过** → 不写 adapter
+
+**问题 ②「归档」— 是否存入知识库（任何采集方式都问）：**
+
+触发条件：**无论用现成 adapter 还是降级驱动**，只要采集成功就问。具体落盘时机、话术、入库流程**一律以下方「采集后入库衔接」章节为准**，此处不重述——即先自动落盘再询问，确认后 `list-kb` 选库 → normalize 预览 → ingest。
+
+**强制约束：**
+
+- 问①与问②相互独立：①问「过程要不要复用」（仅降级驱动），②问「数据要不要归档」（所有采集）。二者互不替代，也不互为前提
+- 当本次是降级驱动时，①②**都要问**，顺序先①后②，不得问了一个省另一个
+- 当本次用现成 adapter 时，只问②
+- 都不自动执行，必须等用户对每一问分别答复后才进入对应流程
+- 不向用户暴露本收尾的内部触发条件（步骤编号、流程名）
 
 ### Markdown 入库 — 触发边界（最高优先级）
 
-仅在用户**明确表达入库意图**时进入此工作流。以下情况**不触发**：
+区分两个场景，规则不同：
 
-- 用户只是在查数据/读网页/浏览内容——即使刚用 bycli 获取了 Markdown，也不自动入库
-- 用户说"保存文件"/"下载"——这是本地文件操作，不是知识库入库
-- 用户说"记住这个"/"记一下"——这是对话记忆，不是知识库入库
-- 没有明确的入库目标表达时，不要主动建议入库
+**场景 A — bycli 采集收尾（主动问）：** 本 skill 通过 bycli 采集 / 获取数据**成功**后，必须按「采集后入库衔接」自动落盘并**主动询问一次**是否入库。这是采集流程的固定收尾，不受下方「明确意图」约束——即使用户没说「入库」，也要主动问这一次（用户答跳过即停，不重复纠缠）。
+
+**场景 B — 已有内容直接入库（需明确意图）：** 当不是 bycli 采集收尾、而是用户拿着已有内容请求归档时，仅在用户**明确表达入库意图**时才进入。以下情况**不触发、也不主动建议**：
+
+- 用户只是在查数据 / 读网页 / 浏览内容（且非 bycli 采集收尾场景）
+- 用户说"保存文件" / "下载"——这是本地文件操作，不是知识库入库
+- 用户说"记住这个" / "记一下"——这是对话记忆，不是知识库入库
+- 没有明确入库目标，且不属于场景 A 时，不要主动建议入库
 
 ## 基础用法
 
@@ -145,7 +180,7 @@ bycli gh pr list --limit 5         # 透传调用
 | 错误类型 | Agent 行为 |
 |---------|-----------|
 | AUTH_REQUIRED (exit 77) | STOP，提示用户登录 |
-| BROWSER_CONNECT (exit 69) | STOP，提示运行 `bycli doctor` + `bycli daemon status` 诊断桥接 |
+| BROWSER_CONNECT (exit 69) | STOP，运行 `bycli doctor` + `bycli daemon status` 诊断；`bycli daemon restart` 后仍连不上则停止一切动作，提示用户检查 Chrome 与 byCLI 扩展插件是否正常启动 |
 | CAPTCHA / 限流 | STOP，不是 adapter 问题 |
 | SELECTOR / EMPTY_RESULT / API_ERROR | 进入 AutoFix 流程 |
 | TIMEOUT / PAGE_CHANGED | 进入 AutoFix 流程 |
@@ -231,7 +266,7 @@ pkill -f chromium 2>/dev/null || true
 
 ## 采集后入库衔接（强制）
 
-bycli 成功采集到数据后：
+本章节是「强制两问收尾」中**问②（归档/入库）的权威定义**——无论用现成 adapter 还是降级驱动，bycli 成功采集到数据后都按此执行，问②不在别处重复询问。
 
 ### 1. 自动落盘（采集完成时立即执行，无需等用户确认）
 
@@ -355,4 +390,4 @@ node scripts/bycli-markdown-ingest.mjs ingest \
 - 不要假设所有 adapter 都需要浏览器——`PUBLIC`/`LOCAL` 不需要。
 - 不要从失败的 adapter 默默 fallback 到手写 `fetch`——先走 `--trace retain-on-failure`。
 - 不要在 `bycli browser` 中硬编码 CSS selector——用 `state`/`find` 获取 numeric ref。
-- 不要在用户只是浏览内容时自动触发入库——必须有明确入库意图。
+- 不要在用户只是浏览内容时自动触发入库——但 bycli 采集成功后必须主动问一次（采集收尾例外）。

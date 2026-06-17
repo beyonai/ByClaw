@@ -32,4 +32,5 @@ export interface IKnowledgeDetailTreeItem extends IKnowledgeCollectionItem {
   /** 与 queryDirAndFileByLevel 一致，用于展开子级、请求子列表 */
   directoryPath?: string;
   children?: IKnowledgeDetailTreeItem[];
+  isLeaf?: boolean;
 }

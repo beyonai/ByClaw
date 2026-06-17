@@ -1,6 +1,6 @@
 import { Button, Space, message, Modal, Input } from 'antd';
 import React, { useCallback, useState } from 'react';
-import { CloseOutlined, SelectOutlined, FileAddOutlined } from '@ant-design/icons';
+import { CloseOutlined, SelectOutlined } from '@ant-design/icons';
 import { isEmpty, compact, get } from 'lodash';
 import classnames from 'classnames';
 import { useIntl, useSelector, useDispatch, useNavigate } from '@umijs/max';
@@ -233,7 +233,7 @@ function MultiChoices(props: IProps) {
             {multiChoicesList.includes('collect') && (
               <Space>
                 <Button
-                  icon={<FileAddOutlined />}
+                  icon={<AntdIcon type="icon-a-Boxhezioutline" style={{ fontSize: '16px' }} />}
                   onClick={() => {
                     setSaveToKnowledgeOpen(true);
                   }}
@@ -242,7 +242,7 @@ function MultiChoices(props: IProps) {
                   {intl.formatMessage({ id: 'multiChoices.saveToKnowledge' })}
                 </Button>
                 <Button
-                  icon={<AntdIcon type="icon-a-Starxingxing" style={{ fontSize: '16px' }} />}
+                  icon={<AntdIcon type="icon-a-View-listxiangqingliebiao" style={{ fontSize: '16px' }} />}
                   onClick={() => {
                     try {
                       const userCode = userInfo?.userCode || '';

@@ -18,6 +18,7 @@ function mockRequest(overrides: Partial<ActiveSdkRequest> = {}): ActiveSdkReques
     compactionRetryPending: false,
     modelFallbackPending: false,
     rootLifecyclePhase: "end",
+    dispatchSettled: false,
     lastReasoningText: "",
     lastReasoningMessageId: "",
     language: "zh-CN",
@@ -84,6 +85,8 @@ describe("waitForSdkSessionDispatchSettled", () => {
     });
 
     try {
+      // 收到 lifecycle 事件 ⇒ run 真正启动过，绑定 runId 以走 rootLifecyclePhase 完成路径。
+      sessionContext.bindActiveSdkRequestRunId(request.sessionKey, "run-fallback-settle");
       sessionContext.markActiveSdkRootLifecycleFinished(request.sessionKey, "error");
       expect(sessionContext.shouldCompleteActiveSdkRequest(request)).toBe(true);
 
@@ -119,6 +122,7 @@ describe("waitForSdkSessionDispatchSettled", () => {
     try {
       // compaction start/end{willRetry} 挡住完成门；2026.6.1 压缩后在同一 run 内静默续跑，
       // 不再发新的 lifecycle start，所以完成门只能靠真正的终态 lifecycle end 来释放。
+      sessionContext.bindActiveSdkRequestRunId(request.sessionKey, "run-compaction-settle");
       sessionContext.markActiveSdkCompactionRetryPending(request.sessionKey, true);
       expect(sessionContext.shouldCompleteActiveSdkRequest(request)).toBe(false);
 
@@ -128,5 +132,36 @@ describe("waitForSdkSessionDispatchSettled", () => {
     } finally {
       sessionContext.clearActiveSdkRequestRecord(request);
     }
+  });
+
+  it("settles a precheck-blocked run via dispatchSettled (no lifecycle events, no timeout)", async () => {
+    vi.resetModules();
+    const sessionContext = await import("./session-context.js");
+    const settle = await import("./session-dispatch-settle.js");
+    const sessionKey = "agent:main:direct:precheck-blocked";
+    const request = sessionContext.registerActiveSdkRequest({
+      accountId: "default",
+      sessionKey,
+      to: "user:precheck-blocked",
+      sessionId: "precheck-blocked",
+      traceId: "trace-precheck-blocked",
+      language: "zh_CN",
+      languageProvided: false,
+    });
+
+    // 模拟 context-overflow precheck-blocked：dispatch 已 resolve 但 onAgentEvent 零事件，
+    // rootLifecyclePhase 永远 undefined。settle 必须靠 dispatchSettled 立即收尾，而非 poll 超时。
+    vi.spyOn(sessionContext, "completeActiveSdkRequest").mockResolvedValue(true);
+
+    const result = await settle.waitForSdkSessionDispatchSettled(sessionKey, {
+      pollMs: 5,
+      timeoutMs: 1000,
+    });
+
+    expect(request.dispatchSettled).toBe(true);
+    expect(result.settled).toBe(true);
+    expect(result.timedOut).toBe(false);
+    vi.restoreAllMocks();
+    sessionContext.clearActiveSdkRequestRecord(request);
   });
 });

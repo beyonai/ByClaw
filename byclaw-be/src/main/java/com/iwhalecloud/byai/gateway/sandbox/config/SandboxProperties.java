@@ -14,6 +14,10 @@ public class SandboxProperties {
 
     private VolumeConfig volume = new VolumeConfig();
 
+    private ProfileConfig profile = new ProfileConfig();
+
+    private TierAutoscaleConfig tierAutoscale = new TierAutoscaleConfig();
+
     /**
      * Redis metadata cache TTL. DB remains the lifecycle source of truth.
      */
@@ -80,6 +84,22 @@ public class SandboxProperties {
     }
 
     @Data
+    public static class ProfileConfig {
+        /**
+         * Disabled by default so legacy standalone/Docker deployments keep the old service_key-only flow.
+         */
+        private boolean enabled = false;
+    }
+
+    @Data
+    public static class TierAutoscaleConfig {
+        /**
+         * Dynamic sandbox resizing is opt-in. ByClaw records and decides, OpenSandbox performs the resize.
+         */
+        private boolean enabled = false;
+    }
+
+    @Data
     public static class OpenSandboxConfig {
         private String baseUrl;
         private String apiKey;
@@ -96,7 +116,7 @@ public class SandboxProperties {
         private boolean listSandboxesBeforeCreate = true;
 
         /**
-         * 列表接口路径（相对 baseUrl），默认 GET /v1/sandboxes?userCode=&serviceKey=
+         * 列表接口路径（相对 baseUrl），默认 GET /v1/sandboxes?metadata=userCode%3D...%26serviceKey%3D...
          */
         private String listSandboxesPath = "/v1/sandboxes";
 

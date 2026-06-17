@@ -86,13 +86,6 @@ public class TransactionAdviceConfig {
         txMap.put("synOpenClawWorkSpace", notSurpportedTx);
         txMap.put("syncResourceJsonByBizType", notSurpportedTx);
         txMap.put("upsertStandardJsonArtifact", notSurpportedTx);
-        // 生态采集会跨 OpenCLI、对象存储和知识库导入，业务层会捕获失败并落运行记录。
-        // 这些长流程不能被全局 REQUIRED 大事务包住，否则内部导入失败被捕获后仍会导致 rollback-only。
-        txMap.put("dispatchScheduledRuns", notSurpportedTx);
-        txMap.put("startRun", notSurpportedTx);
-        txMap.put("startChatCollection", notSurpportedTx);
-        txMap.put("startSkillCollection", notSurpportedTx);
-        txMap.put("handleRunAction", notSurpportedTx);
         txMap.put("prewarmDueCronSandboxes", notSurpportedTx);
         txMap.put("callAsUser", notSurpportedTx);
         txMap.put("runAsUser", notSurpportedTx);

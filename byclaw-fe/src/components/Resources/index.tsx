@@ -1,5 +1,5 @@
-import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { CloudSyncOutlined, UploadOutlined, SearchOutlined, PlusOutlined } from '@ant-design/icons';
+import React, { useCallback, useContext, useState, useEffect, useRef } from 'react';
+import { UploadOutlined, SearchOutlined, PlusOutlined } from '@ant-design/icons';
 import { useIntl, getLocale, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
 import { Button, Input, Space, Tooltip, message, Tabs } from 'antd';
@@ -24,13 +24,13 @@ import ResourceDetail from './components/ResourceDetail';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
 import DetailPanel from '@/pages/knowledgeCenter/components/DetailPanel';
-import EcosystemCollector from '@/pages/knowledgeCenter/components/EcosystemCollector';
 import { useSkillDetailDrawer } from '@/pages/manager/components/SkillDetailDrawer/useSkillDetailDrawer';
 import ResourceFilter from './components/ResourceFilter';
 import { getDefaultParams } from './components/ResourceFilter';
 import ResourceList from './components/ResourceList';
 import { saveTool } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { resourceBizTypeMap } from '@/constants/knowledge';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { get, trim, intersection, isEmpty } from 'lodash';
 import styles from './index.module.less';
 
@@ -87,9 +87,10 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   // 根据 resourceType 判断资源名称
   const getResourceName = () => {
     if (resourceType === 'KG_DOC') return intl.formatMessage({ id: 'resource.knowledge' });
-    if (resourceType === 'TOOL') return intl.formatMessage({ id: 'resource.tool' });
-    if (resourceType === 'OBJECT') return intl.formatMessage({ id: 'resource.object' });
-    if (resourceType === 'VIEW') return intl.formatMessage({ id: 'resource.view' });
+    if (resourceType === 'TOOL') return intl.formatMessage({ id: 'common.tool' });
+    if (resourceType === 'OBJECT') return intl.formatMessage({ id: 'common.object' });
+    if (resourceType === 'VIEW') return intl.formatMessage({ id: 'common.viewName' });
+    if (resourceType === 'SKILL') return intl.formatMessage({ id: 'common.skill' });
     return intl.formatMessage({ id: 'resource.default' }); // 默认值
   };
   const resourceName = getResourceName();
@@ -100,14 +101,8 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [importModalOpen, setImportModalOpen] = useState(false);
-  const [collectorOpen, setCollectorOpen] = useState(false);
-  const [collectorInitialSource, setCollectorInitialSource] = useState<string>();
-  const [collectorInitialSourceUrl, setCollectorInitialSourceUrl] = useState('');
-  const [collectorInitialScope, setCollectorInitialScope] = useState('');
-  const [collectorInitialCollectMode, setCollectorInitialCollectMode] = useState('');
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
-  const [resourceDetailOpen, setResourceDetailOpen] = useState(false);
   const [currentItem, setCurrentItem] = useState<IResourceItem | null>(null);
   const [catalogId, setCatalogId] = useState<string>('');
   const [searchValue, setSearchValue] = useState('');
@@ -125,6 +120,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   };
 
   const [activeTab, setActiveTab] = useState<'personal' | 'enterprise'>(defaultTab());
+  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
 
   useEffect(() => {
     const tabFromUrl = searchParams.get('tab');
@@ -202,18 +198,6 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         });
       });
   }, [resourceType]);
-
-  useEffect(() => {
-    if (resourceType !== 'KG_DOC' || searchParams.get('ecosystem') !== '1') {
-      return;
-    }
-    setCollectorInitialSource(searchParams.get('source') || undefined);
-    setCollectorInitialSourceUrl(searchParams.get('sourceUrl') || '');
-    setCollectorInitialScope(searchParams.get('scope') || '');
-    setCollectorInitialCollectMode(searchParams.get('collectMode') || '');
-    setActiveTab('personal');
-    setCollectorOpen(true);
-  }, [resourceType, searchParams]);
 
   useEffect(() => {
     try {
@@ -320,10 +304,20 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         return;
       }
 
-      setCurrentItem(item);
-      setResourceDetailOpen(true);
+      setDetailPanel?.(
+        <ResourceDetail
+          visible
+          panel
+          resourceId={item.resourceId}
+          item={item}
+          resourceName={resourceName}
+          onCancel={() => clearDetailPanel?.()}
+          onEdit={() => {}}
+        />,
+        { width: 350 }
+      );
     },
-    [activeTab, intl, navigate, showSkillDetailDrawer]
+    [activeTab, clearDetailPanel, intl, navigate, resourceName, resourceType, setDetailPanel, showSkillDetailDrawer]
   );
 
   const handleEditItem = (item: IResourceItem) => {
@@ -390,32 +384,6 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
           setDebouncedSearchValue(searchValue);
         }}
       />
-
-      {resourceType === 'KG_DOC' && (
-        <Tooltip
-          title={
-            activeTab === 'enterprise' && !canImportCurrentEnterpriseResource ? noPermissionDisabledTip : undefined
-          }
-        >
-          <span>
-            <Button
-              icon={<CloudSyncOutlined />}
-              disabled={activeTab === 'enterprise' && !canImportCurrentEnterpriseResource}
-              onClick={() => {
-                if (activeTab === 'enterprise' && !canImportCurrentEnterpriseResource) {
-                  return;
-                }
-                setCollectorInitialSource(undefined);
-                setCollectorInitialSourceUrl('');
-                setCollectorInitialScope('');
-                setCollectorOpen(true);
-              }}
-            >
-              {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.entry' })}
-            </Button>
-          </span>
-        </Tooltip>
-      )}
 
       {brandVersion === 'openSource' && resourceType === 'KG_DOC' && (activeTab === 'personal' || isAdmin) && (
         <Tooltip title={!knowledgeCapability?.allowKnowledgeBaseCreate ? knowledgeCapabilityDisabledTip : undefined}>
@@ -587,19 +555,6 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
           refreshList();
         }}
       />
-      <EcosystemCollector
-        open={collectorOpen}
-        ownerType={activeTab}
-        catalogId={catalogId}
-        catalogList={catalogList}
-        initialSource={collectorInitialSource}
-        initialSourceUrl={collectorInitialSourceUrl}
-        initialScope={collectorInitialScope}
-        initialCollectMode={collectorInitialCollectMode}
-        onCancel={() => {
-          setCollectorOpen(false);
-        }}
-      />
       <ResourceEdit
         visible={editModalOpen}
         item={currentItem as any}
@@ -683,20 +638,6 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
           createType={currentItem?.resourceId ? 'import' : 'create'}
           catalogId={catalogId}
           catalogList={catalogList}
-        />
-      )}
-      {resourceDetailOpen && (
-        <ResourceDetail
-          visible={resourceDetailOpen}
-          resourceId={currentItem?.resourceId}
-          item={currentItem}
-          resourceType={resourceType}
-          resourceName={resourceName}
-          onCancel={() => {
-            setResourceDetailOpen(false);
-            setCurrentItem(null);
-          }}
-          onEdit={() => {}}
         />
       )}
       {skillDetailDrawerHolder}

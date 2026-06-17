@@ -2,10 +2,12 @@ package com.iwhalecloud.byai.manager.domain.resource.service;
 
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
+import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.auth.GrantObjType;
 import com.iwhalecloud.byai.common.constants.auth.GrantType;
 import com.iwhalecloud.byai.common.login.bean.UsersOrganization;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import com.iwhalecloud.byai.manager.application.service.superassist.SuasSuperassistApplicationService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
@@ -14,6 +16,7 @@ import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.resource.request.DigEmployeeRelResourceQo;
 import com.iwhalecloud.byai.manager.domain.resource.request.ResourceUseAuthQo;
+import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.qo.auth.AuthQo;
 import com.iwhalecloud.byai.manager.qo.auth.DigitalEmployeeAuthQo;
 import com.iwhalecloud.byai.manager.qo.auth.PrivilegeGrantQo;
@@ -30,19 +33,24 @@ import com.iwhalecloud.byai.state.domain.resource.service.ResourceAuthContextSer
 import com.iwhalecloud.byai.state.domain.index.service.IndexService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class ResourceAuthApplicationService {
 
     private static final String BELONG_COMPANY = "COMPANY";
+
+    private static final List<String> KNOWLEDGE_RESOURCE_BIZ_TYPES = List.of(
+        Constants.ResourceBizType.KG_DOC,
+        Constants.ResourceBizType.KG_QA,
+        Constants.ResourceBizType.KG_TERM);
 
     @Autowired
     private PrivilegeGrantService privilegeGrantService;
@@ -67,6 +75,9 @@ public class ResourceAuthApplicationService {
 
     @Autowired
     private AuthApplicationService authApplicationService;
+
+    @Autowired
+    private SuasSuperassistApplicationService suasSuperassistApplicationService;
 
     /**
      * 组织-资源授权明细列表查询
@@ -110,7 +121,15 @@ public class ResourceAuthApplicationService {
      * 分页查询数字员工关联的资源列表。 与 listResourceAuth 返回结构保持一致，但这里不走授权逻辑， 而是直接按数字员工与资源的关联关系查询。
      */
     public PageInfo<ResourceAuthVo> listDigitalEmployeeRelResourceAuth(DigEmployeeRelResourceQo qo) {
-        if (qo == null || qo.getResourceId() == null) {
+        if (qo == null) {
+            PageInfo<ResourceAuthVo> pageInfo = new PageInfo<>();
+            pageInfo.setList(Collections.emptyList());
+            return pageInfo;
+        }
+        if (qo.getResourceId() == null) {
+            qo.setResourceId(suasSuperassistApplicationService.resolveCurrentUserDefaultDigitalEmployeeId());
+        }
+        if (qo.getResourceId() == null) {
             PageInfo<ResourceAuthVo> pageInfo = new PageInfo<>();
             pageInfo.setList(Collections.emptyList());
             return pageInfo;
@@ -119,9 +138,101 @@ public class ResourceAuthApplicationService {
         qo.setKeyword(keyword);
         qo.setCatalogIds(ssResourceCatalogService.findSelfAndDescendantCatalogIds(qo.getCatalogId()));
         Page<ResourceAuthVo> page = PageHelper.startPage(qo.getPageNum(), qo.getPageSize());
-        ssResourceMapper.queryDigEmployeeRelResourceAuthList(qo);
+        if (isSkillOnlyQuery(qo.getResourceBizTypeList())) {
+            ssResourceMapper.queryDigEmployeeSkillResourceAuthList(qo);
+        }
+        else {
+            ssResourceMapper.queryDigEmployeeRelResourceAuthList(qo);
+        }
         PageInfo<ResourceAuthVo> pageInfo = PageHelperUtil.toPageInfo(page);
         return pageInfo;
+    }
+
+    /**
+     * 查询当前用户对指定数字员工关联知识库中具备管理权限的知识库。
+     *
+     * 这里不复用普通“数字员工关联资源列表”的分页结果再过滤，否则可能出现第一页被权限过滤空、
+     * 后续页其实有可管理知识库的问题。先取完整候选集，再按后端统一管理权限口径过滤，最后手动分页。
+     */
+    public PageInfo<ResourceAuthVo> listDigitalEmployeeManageKnowledgeResourceAuth(DigEmployeeRelResourceQo qo) {
+        if (qo == null) {
+            return PageHelperUtil.emptyPage(1L, 10L);
+        }
+        if (qo.getResourceId() == null) {
+            qo.setResourceId(suasSuperassistApplicationService.resolveCurrentUserDefaultDigitalEmployeeId());
+        }
+        if (qo.getResourceId() == null) {
+            return PageHelperUtil.emptyPage(safeLong(qo.getPageNum(), 1L), safeLong(qo.getPageSize(), 10L));
+        }
+
+        qo.setKeyword(StringUtils.trimToNull(qo.getKeyword()));
+        qo.setResourceBizTypeList(KNOWLEDGE_RESOURCE_BIZ_TYPES);
+        qo.setCatalogIds(ssResourceCatalogService.findSelfAndDescendantCatalogIds(qo.getCatalogId()));
+
+        List<ResourceAuthVo> candidateResources = ssResourceMapper.queryDigEmployeeRelResourceAuthList(qo);
+        if (CollectionUtils.isEmpty(candidateResources)) {
+            return PageHelperUtil.emptyPage(safeLong(qo.getPageNum(), 1L), safeLong(qo.getPageSize(), 10L));
+        }
+
+        Map<Long, SsResource> resourceMap = loadResourceMap(candidateResources);
+        List<ResourceAuthVo> manageableResources = candidateResources.stream()
+            .filter(item -> hasManagePermission(item, resourceMap))
+            .collect(Collectors.toList());
+
+        return buildPagedResourceAuth(manageableResources, qo.getPageNum(), qo.getPageSize());
+    }
+
+    private Map<Long, SsResource> loadResourceMap(List<ResourceAuthVo> candidateResources) {
+        List<Long> resourceIds = candidateResources.stream()
+            .map(ResourceAuthVo::getResourceId)
+            .filter(java.util.Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(resourceIds)) {
+            return Collections.emptyMap();
+        }
+        return ssResourceMapper.selectBatchIds(resourceIds).stream()
+            .collect(Collectors.toMap(SsResource::getResourceId, Function.identity(), (left, right) -> left));
+    }
+
+    private boolean hasManagePermission(ResourceAuthVo item, Map<Long, SsResource> resourceMap) {
+        if (item == null || item.getResourceId() == null) {
+            return false;
+        }
+        SsResource resource = resourceMap.get(item.getResourceId());
+        return authApplicationService.hasResourceManagePermission(resource);
+    }
+
+    private PageInfo<ResourceAuthVo> buildPagedResourceAuth(List<ResourceAuthVo> resources, Integer pageNum,
+        Integer pageSize) {
+        int safePageNum = pageNum == null || pageNum < 1 ? 1 : pageNum;
+        int safePageSize = pageSize == null || pageSize < 1 ? 10 : pageSize;
+        int total = resources.size();
+        int fromIndex = Math.min((safePageNum - 1) * safePageSize, total);
+        int toIndex = Math.min(fromIndex + safePageSize, total);
+
+        PageInfo<ResourceAuthVo> pageInfo = new PageInfo<>();
+        pageInfo.setPageNum(safePageNum);
+        pageInfo.setPageSize(safePageSize);
+        pageInfo.setTotal(total);
+        pageInfo.setTotalPages((int) Math.ceil((double) total / safePageSize));
+        pageInfo.setList(resources.subList(fromIndex, toIndex));
+        return pageInfo;
+    }
+
+    private long safeLong(Integer value, long defaultValue) {
+        return value == null ? defaultValue : value.longValue();
+    }
+
+    private boolean isSkillOnlyQuery(List<String> resourceBizTypeList) {
+        if (CollectionUtils.isEmpty(resourceBizTypeList)) {
+            return false;
+        }
+        List<String> normalizedBizTypes = resourceBizTypeList.stream()
+            .filter(StringUtils::isNotBlank)
+            .map(StringUtils::trim)
+            .toList();
+        return normalizedBizTypes.size() == 1 && StringUtils.equalsIgnoreCase(normalizedBizTypes.get(0), "SKILL");
     }
 
     private void fillCatalogIds(ResourceUseAuthQo resourceUseAuthQo) {

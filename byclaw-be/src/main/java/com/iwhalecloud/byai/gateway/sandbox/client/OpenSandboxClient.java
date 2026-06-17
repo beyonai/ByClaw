@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.StringJoiner;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +19,8 @@ import com.iwhalecloud.byai.gateway.sandbox.client.model.CreateSandboxRequest;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.CreateSandboxResponse;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.ErrorResponse;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.RenewSandboxExpirationRequest;
+import com.iwhalecloud.byai.gateway.sandbox.client.model.ResizeSandboxRequest;
+import com.iwhalecloud.byai.gateway.sandbox.client.model.ResizeSandboxResponse;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxDetail;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxEndpoint;
 import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
@@ -124,20 +127,39 @@ public class OpenSandboxClient {
         HttpUrl.Builder urlBuilder = base.newBuilder()
                 .addQueryParameter("page", String.valueOf(Math.max(1, pageNo)))
                 .addQueryParameter("pageSize", String.valueOf(Math.max(1, pageSize)));
-        for (Map.Entry<String, String> entry : metadata.entrySet()) {
-            if (entry == null || entry.getKey() == null || entry.getKey().isBlank()
-                || entry.getValue() == null || entry.getValue().isBlank()) {
-                continue;
-            }
-            String queryName = switch (entry.getKey()) {
-                case "userCode" -> cfg.getListQueryUserCodeParam();
-                case "serviceKey" -> cfg.getListQueryServiceKeyParam();
-                default -> "metadata." + entry.getKey();
-            };
-            urlBuilder.addQueryParameter(queryName, entry.getValue());
+        String metadataQuery = buildMetadataQuery(metadata);
+        if (!metadataQuery.isBlank()) {
+            urlBuilder.addQueryParameter("metadata", metadataQuery);
         }
         Request httpRequest = newRequestBuilder(urlBuilder.build().toString()).get().build();
         return executeSandboxesList(httpRequest);
+    }
+
+    private static String buildMetadataQuery(Map<String, String> metadata) {
+        StringJoiner joiner = new StringJoiner("&");
+        addMetadataQueryPart(joiner, metadata, "userCode");
+        addMetadataQueryPart(joiner, metadata, "serviceKey");
+        metadata.entrySet().stream()
+            .filter(OpenSandboxClient::isValidMetadataEntry)
+            .filter(entry -> !"userCode".equals(entry.getKey()) && !"serviceKey".equals(entry.getKey()))
+            .sorted(Map.Entry.comparingByKey())
+            .forEach(entry -> joiner.add(entry.getKey() + "=" + entry.getValue()));
+        return joiner.toString();
+    }
+
+    private static void addMetadataQueryPart(StringJoiner joiner, Map<String, String> metadata, String key) {
+        String value = metadata.get(key);
+        if (value != null && !value.isBlank()) {
+            joiner.add(key + "=" + value);
+        }
+    }
+
+    private static boolean isValidMetadataEntry(Map.Entry<String, String> entry) {
+        return entry != null
+            && entry.getKey() != null
+            && !entry.getKey().isBlank()
+            && entry.getValue() != null
+            && !entry.getValue().isBlank();
     }
 
     public SandboxDetail getSandbox(String sandboxId) {
@@ -190,6 +212,15 @@ public class OpenSandboxClient {
         String url = baseUrl + "/v1/sandboxes/" + sandboxId + "/endpoints/" + port;
         Request httpRequest = newRequestBuilder(url).get().build();
         return execute(httpRequest, SandboxEndpoint.class);
+    }
+
+    public ResizeSandboxResponse resizeSandbox(String sandboxId, ResizeSandboxRequest request) {
+        String url = baseUrl + "/v1/sandboxes/" + sandboxId + "/resize";
+        String body = toJson(request);
+        Request httpRequest = newRequestBuilder(url)
+            .post(RequestBody.create(body, JSON_MEDIA_TYPE))
+            .build();
+        return execute(httpRequest, ResizeSandboxResponse.class);
     }
 
     /**

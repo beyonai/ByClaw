@@ -38,7 +38,22 @@ describe('useVisibleMenuKeys', () => {
     });
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions']);
+      expect(result.current).toEqual(['sessions', 'skill', 'file']);
+    });
+  });
+
+  it('does not append skill when remote config explicitly hides it', async () => {
+    mockGetDcSystemConfigListByStandType.mockResolvedValue({
+      data: [
+        { paramName: '会话', paramValue: 'true', paramSeq: 1 },
+        { paramName: '技能', paramValue: 'false', paramSeq: 2 },
+      ],
+    });
+
+    const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
+
+    await waitFor(() => {
+      expect(result.current).toEqual(['sessions', 'file']);
     });
   });
 

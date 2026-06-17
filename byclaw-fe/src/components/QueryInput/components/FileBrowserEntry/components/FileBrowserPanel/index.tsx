@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Empty, Input, message, Modal, Spin, Tooltip, Upload } from 'antd';
-import { CaretUpOutlined, CaretDownOutlined, ReloadOutlined } from '@ant-design/icons';
+import { CaretUpOutlined, CaretDownOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 // @ts-ignore
 import { useIntl } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
@@ -31,10 +31,11 @@ const PreViewFile = React.lazy(() =>
 
 interface FileBrowserPanelProps {
   resourceId: string;
+  mode?: 'full' | 'preview';
 }
 
 function getIconType(name: string, isDir: boolean): string {
-  if (isDir) return 'wenjianjia';
+  if (isDir) return 'wenjianjialanse';
   if (/\.(doc|docx)$/i.test(name)) return 'Word';
   if (/\.pdf$/i.test(name)) return 'PDF';
   if (/\.(xls|xlsx|csv)$/i.test(name)) return 'Excel';
@@ -59,9 +60,10 @@ function getFileType(name: string): string {
 type SortField = 'name' | 'size' | 'lastModified';
 type SortOrder = 'asc' | 'desc' | 'none';
 
-const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
+const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 'full' }) => {
   const intl = useIntl();
   const t = useCallback((id: string, values?: Record<string, any>) => intl.formatMessage({ id }, values), [intl]);
+  const isPreviewMode = mode === 'preview';
 
   const [currentPath, setCurrentPath] = useState<string>('');
   const [items, setItems] = useState<FileBrowserItem[]>([]);
@@ -96,6 +98,7 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
   const [downloadingPaths, setDownloadingPaths] = useState<Set<string>>(new Set());
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('none');
+  const [inputKeyword, setInputKeyword] = useState('');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [isSearching, setIsSearching] = useState(false);
 
@@ -222,12 +225,14 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
   }, [folderPath]);
 
   const handleEnterDir = useCallback((item: FileBrowserItem) => {
+    setInputKeyword('');
     setSearchKeyword('');
     setIsSearching(false);
     setCurrentPath(item.path.endsWith('/') ? item.path : item.path + '/');
   }, []);
 
   const handleRefresh = useCallback(() => {
+    setInputKeyword('');
     setSearchKeyword('');
     setIsSearching(false);
     fetchList(currentPath);
@@ -423,9 +428,6 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
     (key: string, record: FileBrowserItem) => {
       const isDir = record.isDir || (record as any).dir;
       switch (key) {
-        case 'preview':
-          handlePreview(record);
-          break;
         case 'download':
           if (isDir) {
             handleDownloadFolder(record);
@@ -475,6 +477,7 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
         case 'locate': {
           const path = record.path;
           const parentPath = isDir ? path.replace(/[^/]+\/?$/, '') : path.replace(/[^/]+$/, '');
+          setInputKeyword('');
           setSearchKeyword('');
           setIsSearching(false);
           setCurrentPath(parentPath || '/');
@@ -482,12 +485,11 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
         }
       }
     },
-    [handlePreview, handleDownload, handleDownloadFolder, handleDelete, t]
+    [handleDownload, handleDownloadFolder, handleDelete, t]
   );
 
   const getActions = useCallback(
     (record: FileBrowserItem) => {
-      const isDir = record.isDir || (record as any).dir;
       const actions: any[] = [];
 
       if (isSearching) {
@@ -497,18 +499,6 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
           icon: (
             <Tooltip title={t('fileBrowser.action.locate')}>
               <span className="iconfont icon-a-Localyidingwei" />
-            </Tooltip>
-          ),
-        });
-      }
-
-      if (!isDir && isPreviewable(record.name)) {
-        actions.push({
-          label: t('fileBrowser.action.preview'),
-          key: 'preview',
-          icon: (
-            <Tooltip title={t('fileBrowser.action.preview')}>
-              <span className="iconfont icon-a-Preview-openyulan-dakai" />
             </Tooltip>
           ),
         });
@@ -525,146 +515,161 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
         ),
       });
 
-      actions.push({
-        label: t('fileBrowser.action.info'),
-        key: 'info',
-        icon: (
-          <Tooltip title={t('fileBrowser.action.info')}>
-            <span className="iconfont icon-a-Infoxinxi" />
-          </Tooltip>
-        ),
-      });
+      if (!isPreviewMode) {
+        actions.push({
+          label: t('fileBrowser.action.info'),
+          key: 'info',
+          icon: (
+            <Tooltip title={t('fileBrowser.action.info')}>
+              <span className="iconfont icon-a-Infoxinxi" />
+            </Tooltip>
+          ),
+        });
 
-      actions.push({
-        label: t('fileBrowser.action.rename'),
-        key: 'rename',
-        icon: (
-          <Tooltip title={t('fileBrowser.action.rename')}>
-            <span className="iconfont icon-a-Editbianji" />
-          </Tooltip>
-        ),
-      });
+        actions.push({
+          label: t('fileBrowser.action.rename'),
+          key: 'rename',
+          icon: (
+            <Tooltip title={t('fileBrowser.action.rename')}>
+              <span className="iconfont icon-a-Editbianji" />
+            </Tooltip>
+          ),
+        });
 
-      actions.push({
-        label: t('fileBrowser.action.delete'),
-        key: 'delete',
-        icon: (
-          <Tooltip title={t('fileBrowser.action.delete')}>
-            <span className="iconfont icon-a-Deleteshanchu" />
-          </Tooltip>
-        ),
-      });
+        actions.push({
+          label: t('fileBrowser.action.delete'),
+          key: 'delete',
+          icon: (
+            <Tooltip title={t('fileBrowser.action.delete')}>
+              <span className="iconfont icon-a-Deleteshanchu" />
+            </Tooltip>
+          ),
+        });
+      }
 
       return actions;
     },
-    [t, isSearching, downloadingPaths]
+    [t, isSearching, downloadingPaths, isPreviewMode]
   );
 
-  const columns = useMemo(
-    () => [
-      {
-        title: (
-          <span className={styles.sortableHeader} onClick={() => toggleSort('name')}>
-            {t('fileBrowser.column.name')} {getSortIcon('name')}
-          </span>
-        ),
-        dataIndex: 'name',
-        width: '40%',
-        render: (v: string, record: FileBrowserItem) => {
-          const isDir = record.isDir || (record as any).dir;
-          const iconType = getIconType(v, isDir);
-          const style: React.CSSProperties = isDir ? { cursor: 'pointer' } : {};
-          const onClick = isDir ? () => handleEnterDir(record) : undefined;
+  const columns = useMemo(() => {
+    const nameColumn = {
+      title: (
+        <span className={styles.sortableHeader} onClick={() => toggleSort('name')}>
+          {t('fileBrowser.column.name')} {getSortIcon('name')}
+        </span>
+      ),
+      dataIndex: 'name',
+      width: isPreviewMode ? '85%' : '40%',
+      render: (v: string, record: FileBrowserItem) => {
+        const isDir = record.isDir || (record as any).dir;
+        const canPreview = !isDir && isPreviewable(record.name);
+        const iconType = getIconType(v, isDir);
+        const style: React.CSSProperties = isDir || canPreview ? { cursor: 'pointer' } : {};
+        const onClick = isDir ? () => handleEnterDir(record) : canPreview ? () => handlePreview(record) : undefined;
 
-          return (
-            <div onClick={onClick} style={{ display: 'flex', alignItems: 'center', ...style }} title={record.path}>
-              <AntdIcon type={`icon-${iconType}`} style={{ fontSize: 24, marginRight: 14, flexShrink: 0 }} />
-              <div style={{ overflow: 'hidden' }}>
-                <div className="textEllipsis">{v}</div>
-                {isSearching && <div className={styles.searchPath}>{record.path}</div>}
-              </div>
+        return (
+          <div onClick={onClick} style={{ display: 'flex', alignItems: 'center', ...style }} title={record.path}>
+            <AntdIcon type={`icon-${iconType}`} style={{ fontSize: 24, marginRight: 14, flexShrink: 0 }} />
+            <div style={{ overflow: 'hidden' }}>
+              <div className="textEllipsis">{v}</div>
+              {isSearching && <div className={styles.searchPath}>{record.path}</div>}
             </div>
-          );
-        },
+          </div>
+        );
       },
-      {
-        title: (
-          <span className={styles.sortableHeader} onClick={() => toggleSort('size')}>
-            {t('fileBrowser.column.size')} {getSortIcon('size')}
-          </span>
-        ),
-        dataIndex: 'size',
-        width: '15%',
-        render: (v: number, record: FileBrowserItem) => {
-          const isDir = record.isDir || (record as any).dir;
-          return isDir ? '-' : formatFileSize(v);
-        },
+    };
+    const sizeColumn = {
+      title: (
+        <span className={styles.sortableHeader} onClick={() => toggleSort('size')}>
+          {t('fileBrowser.column.size')} {getSortIcon('size')}
+        </span>
+      ),
+      dataIndex: 'size',
+      width: '15%',
+      render: (v: number, record: FileBrowserItem) => {
+        const isDir = record.isDir || (record as any).dir;
+        return isDir ? '-' : formatFileSize(v);
       },
-      {
-        title: (
-          <span className={styles.sortableHeader} onClick={() => toggleSort('lastModified')}>
-            {t('fileBrowser.column.lastModified')} {getSortIcon('lastModified')}
-          </span>
-        ),
-        dataIndex: 'lastModified',
-        width: '20%',
-        render: (v: string) => {
-          if (!v) return '-';
-          try {
-            return new Date(v).toLocaleString();
-          } catch {
-            return v;
-          }
-        },
+    };
+    const modifiedColumn = {
+      title: (
+        <span className={styles.sortableHeader} onClick={() => toggleSort('lastModified')}>
+          {t('fileBrowser.column.lastModified')} {getSortIcon('lastModified')}
+        </span>
+      ),
+      dataIndex: 'lastModified',
+      width: '20%',
+      render: (v: string) => {
+        if (!v) return '-';
+        try {
+          return new Date(v).toLocaleString();
+        } catch {
+          return v;
+        }
       },
-      {
-        title: t('fileBrowser.column.actions'),
-        dataIndex: 'actions',
-        width: '25%',
-        render: (_: any, record: FileBrowserItem) => {
-          const actions = getActions(record);
-          if (!actions.length) return null;
-          return <ButtonsWithMore actions={actions} maximun={4} handleAction={(key) => handleAction(key, record)} />;
-        },
+    };
+    const actionColumn = {
+      title: t('fileBrowser.column.actions'),
+      dataIndex: 'actions',
+      width: isPreviewMode ? '15%' : '25%',
+      render: (_: any, record: FileBrowserItem) => {
+        const actions = getActions(record);
+        if (!actions.length) return null;
+        return (
+          <ButtonsWithMore
+            actions={actions}
+            maximun={isPreviewMode ? 3 : 4}
+            handleAction={(key) => handleAction(key, record)}
+          />
+        );
       },
-    ],
-    [t, getActions, handleAction, handleEnterDir, toggleSort, getSortIcon, isSearching]
-  );
+    };
+
+    return isPreviewMode ? [nameColumn, actionColumn] : [nameColumn, sizeColumn, modifiedColumn, actionColumn];
+  }, [t, getActions, handleAction, handleEnterDir, handlePreview, toggleSort, getSortIcon, isSearching, isPreviewMode]);
 
   return (
-    <div className={styles.fileBrowserPanel}>
+    <div className={`${styles.fileBrowserPanel} ${isPreviewMode ? styles.previewMode : ''}`}>
       <div className={styles.toolbar}>
-        <Upload
-          showUploadList={false}
-          multiple
-          beforeUpload={(_, fileList) => {
-            handleUpload(fileList as unknown as File[]);
-            return false;
-          }}
-        >
-          <Button icon={<AntdIcon type="icon-a-Uploadshangchuan" style={{ fontSize: 18 }} />} size="small">
-            {t('fileBrowser.toolbar.upload')}
-          </Button>
-        </Upload>
-        <Button
-          icon={<AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" style={{ fontSize: 18 }} />}
-          size="small"
-          onClick={() => {
-            setCreateFolderName('');
-            setCreateFolderOpen(true);
-          }}
-        >
-          {t('fileBrowser.toolbar.newFolder')}
-        </Button>
+        {!isPreviewMode && (
+          <>
+            <Upload
+              showUploadList={false}
+              multiple
+              beforeUpload={(_, fileList) => {
+                handleUpload(fileList as unknown as File[]);
+                return false;
+              }}
+            >
+              <Button icon={<AntdIcon type="icon-a-Uploadshangchuan" style={{ fontSize: 18 }} />} size="small">
+                {t('fileBrowser.toolbar.upload')}
+              </Button>
+            </Upload>
+            <Button
+              icon={<AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" style={{ fontSize: 18 }} />}
+              size="small"
+              onClick={() => {
+                setCreateFolderName('');
+                setCreateFolderOpen(true);
+              }}
+            >
+              {t('fileBrowser.toolbar.newFolder')}
+            </Button>
+          </>
+        )}
         <div className={styles.toolbarRight}>
-          <Input.Search
+          <Input
+            className={styles.searchInput}
             allowClear
+            value={inputKeyword}
+            suffix={<SearchOutlined onClick={() => handleSearch(inputKeyword)} />}
             placeholder={t('fileBrowser.toolbar.search')}
-            onSearch={handleSearch}
-            style={{ width: 200 }}
+            onChange={(event) => setInputKeyword(event.target.value)}
+            onPressEnter={() => handleSearch(inputKeyword)}
             size="small"
           />
-          <Button icon={<ReloadOutlined />} size="small" onClick={handleRefresh} />
+          {!isPreviewMode && <Button icon={<ReloadOutlined />} size="small" onClick={handleRefresh} />}
         </div>
       </div>
 
@@ -678,19 +683,21 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId }) => {
         </div>
       ) : (
         <div className={styles.breadcrumbBar}>
-          <Tooltip title={t('fileBrowser.toolbar.back')}>
-            <span
-              className={styles.backBtn}
-              onClick={handleGoBack}
-              style={{
-                opacity: folderPath.length <= 1 ? 0.3 : 1,
-                cursor: folderPath.length <= 1 ? 'not-allowed' : 'pointer',
-              }}
-            >
-              <AntdIcon type="icon-a-Returnfanhui" style={{ fontSize: 16 }} />
-            </span>
-          </Tooltip>
-          <AntdIcon type="icon-a-Homeshouye" style={{ fontSize: 16 }} />
+          {!isPreviewMode && (
+            <Tooltip title={t('fileBrowser.toolbar.back')}>
+              <span
+                className={styles.backBtn}
+                onClick={handleGoBack}
+                style={{
+                  opacity: folderPath.length <= 1 ? 0.3 : 1,
+                  cursor: folderPath.length <= 1 ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <AntdIcon type="icon-a-Returnfanhui" style={{ fontSize: 16 }} />
+              </span>
+            </Tooltip>
+          )}
+          {!isPreviewMode && <AntdIcon type="icon-a-Homeshouye" style={{ fontSize: 16 }} />}
           <KnowledgeBreadcrumb folderPath={folderPath} handleBreadcrumbClick={handleBreadcrumbClick} />
         </div>
       )}

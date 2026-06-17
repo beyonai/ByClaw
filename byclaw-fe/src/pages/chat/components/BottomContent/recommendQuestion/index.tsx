@@ -2,13 +2,14 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Col, Empty, Row, Spin, Typography } from 'antd';
 import { EnterOutlined } from '@ant-design/icons';
 import classNames from 'classnames';
+import { getLocale } from '@umijs/max';
+// @ts-ignore
+import { getDcSystemConfigListByStandType } from '@/service/auth';
 // @ts-ignore
 import { useIntl, useSelector } from '@umijs/max';
 import InfiniteScroll from 'react-infinite-scroll-component';
 import AntdIcon from '@/components/AntdIcon';
 import useGlobal from '@/hooks/useGlobal';
-import { POST } from '@/service/common/request';
-import { FALLBACK_QUESTIONS } from './fallbackQuestions';
 
 import styles from './index.module.less';
 
@@ -30,24 +31,38 @@ export interface IRecommendQuestion {
   prompt?: string;
 }
 
-interface IRecommendQuestionPageReq {
-  pageNum: number;
-  pageSize: number;
-}
-
-interface IRecommendQuestionPageRes {
-  list: IRecommendQuestion[];
-  total: number;
-}
-
 // 分页获取推荐问题列表，配合滚动加载使用
-function getRecommendQuestionList(params: IRecommendQuestionPageReq) {
-  return POST<IRecommendQuestionPageRes>('/byaiService/api/v1/recommend-questions/page', params, {
-    responseCfg: { hideErrorTips: true },
-  });
+function getRecommendQuestionList(isEN: boolean = false) {
+  return getDcSystemConfigListByStandType(
+    {
+      standType: 'RECOMMENDED_QUESTIONS',
+    },
+    {
+      responseCfg: { hideErrorTips: true },
+    }
+  ).then(
+    (
+      list: {
+        paramId: number;
+        paramGroupCode: string;
+        paramGroupName: string;
+        paramName: string;
+        paramEnName: string;
+        paramValue: string;
+        paramDesc: string;
+        paramSeq: number;
+      }[]
+    ) => {
+      return {
+        list: list.map((item) => ({
+          questionId: item.paramId.toString(),
+          question: isEN ? item.paramEnName : item.paramName,
+        })),
+        total: list.length,
+      };
+    }
+  );
 }
-
-const PAGE_SIZE = 10;
 
 // 判断 icon 是否为 iconfont 名（约定以 icon- 开头），否则按 emoji/纯文本渲染
 function isIconFont(icon?: string): boolean {
@@ -76,6 +91,11 @@ export default function RecommendQuestion() {
 
   const hasMore = list.length < total || !inited;
 
+  const local = getLocale();
+  const isEN = React.useMemo(() => {
+    return local.includes('en');
+  }, [local]);
+
   const loadMore = useCallback(async () => {
     if (loadingRef.current) {
       return;
@@ -84,7 +104,8 @@ export default function RecommendQuestion() {
     setLoading(true);
     const next = pageNum + 1;
     try {
-      const res = await getRecommendQuestionList({ pageNum: next, pageSize: PAGE_SIZE });
+      const res = await getRecommendQuestionList(isEN);
+
       const newList = res?.list || [];
       setList((prev) => (next === 1 ? newList : [...prev, ...newList]));
       setTotal(res?.total || 0);
@@ -92,16 +113,12 @@ export default function RecommendQuestion() {
     } catch (error) {
       console.error('获取推荐问题失败:', error);
       // 首屏请求异常时使用兜底的 30 条推荐问题；翻页失败则保持已有列表
-      if (next === 1) {
-        setList(FALLBACK_QUESTIONS);
-        setTotal(FALLBACK_QUESTIONS.length);
-      }
     } finally {
       loadingRef.current = false;
       setLoading(false);
       setInited(true);
     }
-  }, [pageNum]);
+  }, [pageNum, isEN]);
 
   // 登录态变化时重置并重新拉取
   useEffect(() => {

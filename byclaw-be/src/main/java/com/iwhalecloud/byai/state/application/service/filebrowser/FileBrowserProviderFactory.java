@@ -9,6 +9,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 @Component
 public class FileBrowserProviderFactory {
 
+    private static final String FILE_BROWSER_TYPE = "FILE_BROWSER_TYPE";
     private static final String BRAND_VERSION_CODE = "BYAI_BRAND_VERSION";
     private static final String COMMERCIAL = "commercial";
 
@@ -27,6 +28,12 @@ public class FileBrowserProviderFactory {
     }
 
     public FileBrowserProvider getProvider() {
+        String fileBrowserType = systemConfigService.getDcSystemConfigValueByCode(FILE_BROWSER_TYPE);
+        if (FileBrowserType.MINIO.name().equalsIgnoreCase(fileBrowserType)) {
+            return getProvider(FileBrowserType.MINIO);
+        } else if (FileBrowserType.OPENCLAW.name().equalsIgnoreCase(fileBrowserType)) {
+            return getProvider(FileBrowserType.OPENCLAW);
+        }
         String brandVersion = systemConfigService.getDcSystemConfigValueByCode(BRAND_VERSION_CODE);
         FileBrowserType type = COMMERCIAL.equalsIgnoreCase(brandVersion)
             ? FileBrowserType.OPENCLAW

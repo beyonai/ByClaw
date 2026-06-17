@@ -11,6 +11,7 @@ import { resolveBundledBaiyingResourcesDir } from "./plugin-paths.js";
 import { registerManagedAgentModelHooks } from "./managed-agent-model-hook.js";
 import { createRedisJsonStore, setSharedRedisJsonStore } from "./redis-json-store.js";
 import { loadBaiyingRedisEnvDefaults } from "./redis-env.js";
+import { createBaiyingCallToolFactory } from "./baiying-call-tool.js";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
 
 function resolvePluginPath(api: OpenClawPluginApi, raw: string): string {
@@ -80,55 +81,25 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
 
   registerBaiyingHttpRoutes({ api, registry });
 
-  let baiyingCallToolFactory: ((ctx: unknown) => unknown) | undefined;
-  let baiyingCallToolFactoryReady: Promise<void> | undefined;
-
-  const installBaiyingCallToolFactory = (
-    createBaiyingCallToolFactory: typeof import("./baiying-call-tool.js").createBaiyingCallToolFactory,
-  ) => {
-    baiyingCallToolFactory = createBaiyingCallToolFactory({
-      registry,
-      executorPath: executorResourcesDir,
-      embedApiKeysFromJson: pluginCfg.embedApiKeysFromJson === true,
-      envApiKeyTemplate: pluginCfg.envApiKeyTemplate,
-      defaultProxyUrl: pluginCfg.defaultProxyUrl,
-      defaultApiKey: pluginCfg.defaultApiKey,
-      logger: {
-        info: (message) => api.logger.info(message),
-        warn: (message) => api.logger.warn(message),
-        error: (message) => api.logger.error(message),
-      },
-    });
-  };
-
-  const ensureBaiyingCallToolFactoryReady = (): Promise<void> => {
-    if (baiyingCallToolFactory) {
-      return Promise.resolve();
-    }
-    baiyingCallToolFactoryReady ??= import("./baiying-call-tool.js")
-      .then(({ createBaiyingCallToolFactory }) => {
-        installBaiyingCallToolFactory(createBaiyingCallToolFactory);
-        api.logger.info("baiying-enhance: baiying_call tool factory ready (preload)");
-      })
-      .catch((err) => {
-        baiyingCallToolFactoryReady = undefined;
-        throw err;
-      });
-    return baiyingCallToolFactoryReady;
-  };
+  const baiyingCallToolFactory = createBaiyingCallToolFactory({
+    registry,
+    executorPath: executorResourcesDir,
+    embedApiKeysFromJson: pluginCfg.embedApiKeysFromJson === true,
+    envApiKeyTemplate: pluginCfg.envApiKeyTemplate,
+    defaultProxyUrl: pluginCfg.defaultProxyUrl,
+    defaultApiKey: pluginCfg.defaultApiKey,
+    logger: {
+      info: (message) => api.logger.info(message),
+      warn: (message) => api.logger.warn(message),
+      error: (message) => api.logger.error(message),
+    },
+  });
+  api.logger.info("baiying-enhance: baiying_call tool factory ready");
 
   api.registerTool(
-    (ctx) => baiyingCallToolFactory?.(ctx) ?? null,
+    (ctx) => baiyingCallToolFactory(ctx),
     { name: "baiying_call" },
   );
-
-  void ensureBaiyingCallToolFactoryReady().catch((err) => {
-    api.logger.warn(
-      `baiying-enhance: baiying_call tool factory preload failed: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-  });
 
   registerManagedAgentModelHooks(api, {
     api,
@@ -158,7 +129,6 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
       const startMs = performance.now();
       serviceStopped = false;
 
-      await ensureBaiyingCallToolFactoryReady();
       const [
         { createAgentWatchdog },
         { createDigEmployeeAuthWatch },

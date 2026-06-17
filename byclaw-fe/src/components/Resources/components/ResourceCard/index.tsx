@@ -1,12 +1,15 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { Typography, Dropdown, Button, Popconfirm, Tooltip, message } from 'antd';
 import type { MenuProps } from 'antd';
-import { useIntl } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import classnames from 'classnames';
 import { debounce, noop } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
 import { queryResourceOperationPermissions, restoreResource } from '@/pages/manager/service/resources';
+import { installDigitalEmployeeRelResources } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { useRequest } from '@/hooks/useRequest';
+import useGlobal from '@/hooks/useGlobal';
+import type { IState as IEmployeesState } from '@/models/useEmployees';
 import styles from './index.module.less';
 
 const { Paragraph } = Typography;
@@ -172,6 +175,23 @@ const ConfirmMenuLabel = ({
   );
 };
 
+const getInstallLabelId = (resource: IResourceCardItem, resourceType?: string) => {
+  const bizType = resource?.resourceBizType || resourceType;
+  if (['KG_DOC', 'KG_QA', 'KG_TERM'].includes(bizType || '')) return 'resource.installKnowledge';
+  if (bizType === 'VIEW' || resourceType === 'VIEW') return 'resource.installView';
+  if (bizType === 'OBJECT' || resourceType === 'OBJECT') return 'resource.installObject';
+  if (bizType === 'SKILL' || resourceType === 'SKILL') return 'resource.installSkill';
+  return 'resource.installTool';
+};
+
+const canInstallResource = (resource: IResourceCardItem, resourceType?: string) => {
+  const bizType = resource?.resourceBizType || resourceType;
+  if (bizType === 'SKILL' || resourceType === 'SKILL') {
+    return Boolean(resource?.resourceId && resource?.hasUsePermission);
+  }
+  return Boolean(resource?.resourceId && bizType && bizType !== 'DIG_EMPLOYEE');
+};
+
 const RenderContent = (props: ResourceCardProps) => {
   const { resource, onCardClick, actionConfig, avatarNode, description, headerExtra, hoverExtra, resourceType } = props;
   const { ownerType } = resource || {};
@@ -186,6 +206,14 @@ const RenderContent = (props: ResourceCardProps) => {
   } = actionConfig || {};
 
   const intl = useIntl();
+  const { agentInfo } = useGlobal();
+  const { userInfo, defaultDigEmployeeId } = useSelector(
+    ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
+      userInfo: user.userInfo,
+      defaultDigEmployeeId: employees.defaultDigEmployeeId,
+    })
+  );
+  const activeDigitalEmployeeId = agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
 
   const { mutate: handleRestore, isLoading: restoring } = useRequest({
     mutationFn: (params: any) => {
@@ -200,6 +228,20 @@ const RenderContent = (props: ResourceCardProps) => {
     onError: () => {
       // 提示重复所以注销掉了
       // message.error(intl.formatMessage({ id: 'common.operationFailed' }));
+    },
+  });
+  const { mutate: handleInstall, isLoading: installing } = useRequest({
+    mutationFn: () => {
+      return installDigitalEmployeeRelResources({
+        digitalEmployeeId: `${activeDigitalEmployeeId}`,
+        relIds: [`${resource.resourceId}`],
+      });
+    },
+    onSuccess: () => {
+      message.success(intl.formatMessage({ id: 'resource.installSuccess' }));
+      window.dispatchEvent(
+        new CustomEvent('digitalEmployeeResourceInstalled', { detail: { resourceId: resource?.resourceId } })
+      );
     },
   });
 
@@ -348,6 +390,29 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
+    // 安装到当前默认数字员工
+    if (canInstallResource(resource, resourceType)) {
+      const disabled = !activeDigitalEmployeeId;
+      items.push({
+        key: 'install',
+        label: (
+          <ConfirmMenuLabel
+            disabled={disabled || installing}
+            title={intl.formatMessage({ id: 'resource.installConfirm' })}
+            onConfirm={() => handleInstall(undefined)}
+          >
+            <BuildMenuLabel
+              icon="icon-a-Addtianjia"
+              text={intl.formatMessage({ id: getInstallLabelId(resource, resourceType) })}
+              disabled={disabled}
+              disabledTip={intl.formatMessage({ id: 'resource.noDefaultDigitalEmployee' })}
+              loading={installing}
+            />
+          </ConfirmMenuLabel>
+        ),
+      });
+    }
+
     // 注销数据
     if (canDelete) {
       items.push({
@@ -388,6 +453,8 @@ const RenderContent = (props: ResourceCardProps) => {
     return items;
   }, [
     actionConfig,
+    activeDigitalEmployeeId,
+    handleInstall,
     intl,
     resource?.canSetDefault,
     resource?.canEdit,
@@ -397,8 +464,12 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.canAuditUse,
     resource?.canDelete,
     resource?.canRestore,
+    resource?.hasUsePermission,
     resource?.ownerType,
     resource?.resourceBizType,
+    resource?.resourceId,
+    resourceType,
+    installing,
     restoring,
   ]);
 

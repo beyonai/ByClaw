@@ -3,6 +3,7 @@ import { EmitOptions, EventType, type GatewayDataEmitter } from "@byclaw/by-fram
 import type { ByaiInboundMessage, Language } from "./types.js";
 import { isSessionDispatchBusy } from "./session-dispatch-gate.js";
 import { clearPendingMessageToolSends } from "./pending-message-tool.js";
+import { generateRandomId } from "./utils.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 const DEFAULT_ACCOUNT_KEY = "default";
@@ -82,6 +83,13 @@ export interface ActiveSdkRequest {
   compactionRetryPending: boolean;
   modelFallbackPending: boolean;
   rootLifecyclePhase?: "end" | "error";
+  /**
+   * 主 dispatch promise 已 resolve（agent run 已彻底终结）。这是比 onAgentEvent 更权威的
+   * 终结信号：context-overflow precheck-blocked 等路径下 onAgentEvent 零事件、rootLifecyclePhase
+   * 永远 undefined，但 dispatchReplyFromConfig 仍会返回。settle 在 dispatch resolve 之后运行，
+   * 进入完成判定前置位此标记，避免完成门被伪信号永久挡住。
+   */
+  dispatchSettled: boolean;
   hasEmittedContent: boolean;
   lastReasoningText: string;
   lastReasoningMessageId: string;
@@ -91,11 +99,20 @@ export interface ActiveSdkRequest {
   channelExtension?: Record<string, unknown> | string;
   abortController?: AbortController;
   beyondToken?: string;
+  agentEndHooks?: Map<string, Promise<{
+    success?: boolean;
+    error?: string;
+  }>>
 }
 
 interface ActiveSdkRunBinding {
     request: ActiveSdkRequest;
     sessionKey: string;
+}
+
+interface AgentEndResult {
+    success?: boolean;
+    error?: string;
 }
 
 interface SessionContextStore {
@@ -107,6 +124,11 @@ interface SessionContextStore {
     activeSdkRequestsBySession: Map<string, ActiveSdkRequest>;
     activeSdkRequestsByChild: Map<string, ActiveSdkRequest>;
     activeSdkRequestsByRun: Map<string, ActiveSdkRunBinding>;
+    agentEndResultByRun: Map<string, {
+        resolve: (result: AgentEndResult) => void;
+        reject: (reason?: unknown) => void;
+        promise: Promise<AgentEndResult>;
+    }>;
 }
 
 function getSessionContextStore(): SessionContextStore {
@@ -124,6 +146,7 @@ function getSessionContextStore(): SessionContextStore {
             activeSdkRequestsBySession: new Map<string, ActiveSdkRequest>(),
             activeSdkRequestsByChild: new Map<string, ActiveSdkRequest>(),
             activeSdkRequestsByRun: new Map<string, ActiveSdkRunBinding>(),
+            agentEndResultByRun: new Map(),
         };
     }
 
@@ -139,6 +162,7 @@ const {
     activeSdkRequestsBySession,
     activeSdkRequestsByChild,
     activeSdkRequestsByRun,
+    agentEndResultByRun,
 } = getSessionContextStore();
 
 const sdkEmitterLastChunks = new Map<string, EmitOptions & { traceId: string }>();
@@ -210,6 +234,7 @@ export function clearActiveSdkRequestRecord(request: ActiveSdkRequest): void {
   }
   for (const runId of request.boundRunIds) {
     activeSdkRequestsByRun.delete(runId);
+    agentEndResultByRun.delete(runId);
   }
   request.boundRunIds.clear();
   sdkEmitterLastChunks.delete(request.sessionKey);
@@ -356,6 +381,7 @@ export function registerActiveSdkRequest(params: {
         compactionRetryPending: false,
         modelFallbackPending: false,
         rootLifecyclePhase: undefined,
+        dispatchSettled: false,
         hasEmittedContent: false,
         lastReasoningText: "",
         lastReasoningMessageId: "",
@@ -535,6 +561,24 @@ export function markActiveSdkRootLifecycleFinished(
     return request;
 }
 
+/**
+ * 标记主 dispatch promise 已 resolve（agent run 已终结）。settle 在 dispatch resolve 之后、
+ * 进入完成 poll 之前调用，作为 onAgentEvent 零事件路径（precheck-blocked 等）的权威终结兜底。
+ */
+export function markActiveSdkDispatchSettled(
+    sessionKey: string | undefined,
+): ActiveSdkRequest | undefined {
+    if (!sessionKey) {
+        return undefined;
+    }
+    const request = resolveActiveSdkRequestBySessionKey(sessionKey);
+    if (!request) {
+        return undefined;
+    }
+    request.dispatchSettled = true;
+    return request;
+}
+
 export type ActiveSdkModelFallbackOutcome =
     | "next_fallback"
     | "succeeded"
@@ -633,8 +677,19 @@ export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boole
   // awaitingFollowup 正常会被 main 续跑的 lifecycle start 清掉；若超时仍未清，视为
   // 不会再续跑，放行完成门（followupRunStarted 不在此豁免——它表示续跑已真正开始）。
   const awaitingBlocks = request.awaitingFollowup && !isAwaitingFollowupStale(request);
+  // run 已终结的判据，按是否真正启动过 agent run 分两条路，互不误伤：
+  // - boundRunIds 非空 ⇒ 启动过 run，onAgentEvent 总线有活动。dispatch promise 只 gate 在
+  //   reply payload 投递完、不等总线 drain，可能早于流式结束（已观测 seq25 在 dispatch 后才到）。
+  //   所以这条路只认 rootLifecyclePhase——它由 lifecycle terminal 置位，core 保证终态前已 flush
+  //   完所有 assistant delta，是“流已 drain”的权威信号。dispatchSettled 不参与，避免截断在途 delta。
+  // - boundRunIds 为空 ⇒ run 从未启动（precheck-blocked / before_agent_run 阻断等），onAgentEvent
+  //   永远零事件、rootLifecyclePhase 永远 undefined。此时唯一的终结信号是 dispatchSettled。
+  const runStarted = request.boundRunIds.size > 0;
+  const runFinished = runStarted
+    ? Boolean(request.rootLifecyclePhase)
+    : request.dispatchSettled;
   return Boolean(
-    request.rootLifecyclePhase &&
+    runFinished &&
       request.pendingChildSessionKeys.size === 0 &&
       request.pendingOutboundCount === 0 &&
       !awaitingBlocks &&
@@ -660,6 +715,30 @@ export async function completeActiveSdkRequest(
     const sdkEmitter = resolveSdkEmitter(latest.accountId);
     if (!sdkEmitter) {
         throw new Error(`No active SDK emitter for account: ${latest.accountId}`);
+    }
+    const [rootRunId] = latest.boundRunIds;
+    if (rootRunId && agentEndResultByRun.has(rootRunId)) {
+        try {
+            const result = await Promise.race([
+                agentEndResultByRun.get(rootRunId)?.promise,
+                new Promise<void>((resolve, reject) => setTimeout(() => {
+                    reject(new Error("waiting for agent end result timeout"));
+                }, 10000)),
+            ]);
+            if (result?.error) {
+                await sdkEmitter.emitChunk(
+                    latest.sessionId,
+                    latest.traceId || "",
+                    result.error,
+                    {
+                        eventType: EventType.ANSWER_DELTA,
+                        messageId: generateRandomId(),
+                    },
+                );
+            }
+        } catch (error) {
+            console.error("Error waiting for agent end result:", error);
+        }
     }
     await sdkEmitter.emitState(
         latest.sessionId,
@@ -750,4 +829,29 @@ export async function completeActiveSdkFollowupBySessionKey(
     request.rootLifecyclePhase = "end";
     request.modelFallbackPending = false;
     return await completeActiveSdkRequest(request);
+}
+
+export function registerAgentRunEndPromise(runId: string) {
+    if (agentEndResultByRun.has(runId)) {
+        return;
+    }
+    let _resolve: (result: AgentEndResult) => void = () => {};
+    let _reject: (reason?: unknown) => void = () => {};
+    const promise = new Promise<AgentEndResult>((resolve, reject) => {
+        _resolve = resolve;
+        _reject = reject;
+    });
+    agentEndResultByRun.set(runId, {
+        promise,
+        resolve: _resolve,
+        reject: _reject,
+    });
+}
+
+export function getAgentRunEndPromiseResolver(runId: string) {
+    if (!agentEndResultByRun.has(runId)) {
+        return undefined;
+    }
+    const { resolve } = agentEndResultByRun.get(runId) || {};
+    return resolve;
 }

@@ -13,6 +13,8 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetIdDto;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckResponse;
 import com.iwhalecloud.byai.manager.dto.resource.RemoveFileDto;
 import com.iwhalecloud.byai.manager.dto.resource.UploadResult;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
@@ -180,23 +182,51 @@ public class DatasetController {
         return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"), dirAndFileVos);
     }
 
+    /**
+     * 按关键字递归搜索知识库目录和文件。
+     *
+     * @return ResponseUtil
+     */
+    @PostMapping("/searchDirAndFile")
+    public ResponseUtil<List<DirAndFileVo>> searchDirAndFile(@RequestBody DirAndFileQo dirAndFileQo) {
+        List<DirAndFileVo> dirAndFileVos = datasetApplicationService.searchDirAndFile(dirAndFileQo);
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"), dirAndFileVos);
+    }
+
+    /**
+     * 上传前检查同路径同名文件，供前端做覆盖确认。
+     *
+     * @param request 检查请求
+     * @return 冲突文件路径
+     */
+    @PostMapping("/checkUploadFileConflicts")
+    public ResponseUtil<KnowledgeUploadConflictCheckResponse> checkUploadFileConflicts(
+        @RequestBody KnowledgeUploadConflictCheckRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
+            datasetApplicationService.checkUploadFileConflicts(request));
+    }
+
     /***
      * 上传文件到知识库
      *
      * @param resourceId 资源标识
      * @param directoryPath 文件目录路径
      * @param fileDescription 文件描述
+     * @param processFrontMatter 是否解析 Markdown 文件中的 YAML front matter
+     * @param overwrite 同路径同名文件存在时是否覆盖
      * @return ResponseUtil
      */
     @PostMapping(value = "/uploadFiles", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseUtil<UploadResult> uploadFiles(@RequestPart("files") MultipartFile[] files,
         @RequestPart("resourceId") Long resourceId, @RequestPart(value = "directoryPath") String directoryPath,
-        @RequestPart(value = "fileDescription", required = false) String fileDescription) {
+        @RequestPart(value = "fileDescription", required = false) String fileDescription,
+        @RequestPart(value = "processFrontMatter", required = false) String processFrontMatter,
+        @RequestPart(value = "overwrite", required = false) String overwrite) {
         try {
 
             directoryPath = new String(directoryPath.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
             UploadResult uploadResult = datasetApplicationService.uploadFiles(files, resourceId, directoryPath,
-                fileDescription);
+                fileDescription, Boolean.valueOf(processFrontMatter), Boolean.valueOf(overwrite));
             return ResponseUtil.successResponse(I18nUtil.get("dataset.file.upload.success"), uploadResult);
         }
         catch (Exception e) {

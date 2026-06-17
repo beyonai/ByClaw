@@ -1,0 +1,160 @@
+{
+  "overwrite": true,
+  "dashboard": {
+    "id": null,
+    "uid": "byclaw-k3s-pods",
+    "title": "ByClaw K3s Cluster & Pod Resources",
+    "tags": ["byclaw", "k3s", "pods"],
+    "timezone": "browser",
+    "schemaVersion": 39,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Node CPU Usage %",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+            "legendFormat": "{{instance}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Node Memory Usage %",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
+            "legendFormat": "{{instance}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Namespace CPU Usage",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "sum by (namespace) (rate(container_cpu_usage_seconds_total{container!=\"\",pod!=\"\"}[5m]))",
+            "legendFormat": "{{namespace}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "cores"
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Namespace Memory Working Set",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "sum by (namespace) (container_memory_working_set_bytes{container!=\"\",pod!=\"\"})",
+            "legendFormat": "{{namespace}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "bytes"
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Top Pod CPU Usage",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "topk(20, sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{container!=\"\",pod!=\"\"}[5m])))",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "cores"
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Top Pod Memory Working Set",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "topk(20, sum by (namespace, pod) (container_memory_working_set_bytes{container!=\"\",pod!=\"\"}))",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "bytes"
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Pod Restarts",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "sum by (namespace, pod) (increase(kube_pod_container_status_restarts_total[1h]))",
+            "legendFormat": "{{namespace}}/{{pod}}"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Pods Not Ready",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "kube_pod_status_ready{condition=\"false\"} == 1",
+            "format": "table",
+            "instant": true
+          }
+        ]
+      }
+    ]
+  }
+}

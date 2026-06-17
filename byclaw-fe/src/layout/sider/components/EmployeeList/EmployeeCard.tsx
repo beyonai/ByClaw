@@ -82,6 +82,9 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
                   EventEmitter.emit('beyond-update-employee', {
                     defaultResourceId: newDefaultId,
                   });
+                  EventEmitter.emit('default-digital-employee-changed', {
+                    defaultResourceId: newDefaultId,
+                  });
                 })
                 .catch((error: any) => {
                   message.error(error?.message || error || intl.formatMessage({ id: 'common.operationFailed' }));
@@ -266,7 +269,9 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
           title={
             <Title className={styles.name}>
               <span className={classNames(styles.nameRow)}>
-                <span className={classNames(styles.nameText)}>{employee?.resourceName || employee?.name || ''}</span>
+                <span className={classNames(styles.nameText)}>
+                  {employee?.resourceName || employee?.name || employee?.id || ''}
+                </span>
                 {`${employee?.isTop}` === '1' && <AntdIcon type="icon-zhiding-fill" className={styles.pinBadge} />}
                 {employee?.tagName && (
                   <span className={styles.tag}>

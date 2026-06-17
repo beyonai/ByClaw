@@ -32,16 +32,18 @@ import java.util.*;
 public class DingtalkFileDownloadService {
 
     private static final Logger logger = LoggerFactory.getLogger(DingtalkFileDownloadService.class);
+
     private static final String MESSAGE_FILE_DOWNLOAD_URL = "https://api.dingtalk.com/v1.0/robot/messageFiles/download";
+
     private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json; charset=utf-8");
 
     private final ObjectMapper objectMapper;
+
     private final OkHttpClient okHttpClient = new OkHttpClient();
 
     @Autowired
     private DingtalkTokenService dingtalkTokenService;
-    @Autowired
-    private DingtalkUserService dingtalkUserService;
+
     @Autowired
     private com.iwhalecloud.byai.state.application.service.chat.AssistantChatApplicationService assistantChatApplicationService;
 
@@ -49,7 +51,8 @@ public class DingtalkFileDownloadService {
         this.objectMapper = objectMapper;
     }
 
-    public DingtalkMessageFileDownloadResult downloadMessageFile(String accessToken,  String robotCode, DingtalkMessageDownloadInfo downloadInfo) {
+    public DingtalkMessageFileDownloadResult downloadMessageFile(String accessToken, String robotCode,
+        DingtalkMessageDownloadInfo downloadInfo) {
         if (!StringUtils.hasText(accessToken)) {
             throw new IllegalStateException("DingTalk accessToken is empty");
         }
@@ -65,42 +68,36 @@ public class DingtalkFileDownloadService {
             requestBody.put("downloadCode", downloadInfo.getDownloadCode());
             requestBody.put("robotCode", robotCode);
 
-            Request request = new Request.Builder()
-                    .url(MESSAGE_FILE_DOWNLOAD_URL)
-                    .addHeader("x-acs-dingtalk-access-token", accessToken)
-                    .addHeader("Content-Type", "application/json")
-                    .post(RequestBody.create(objectMapper.writeValueAsString(requestBody), JSON_MEDIA_TYPE))
-                    .build();
+            Request request = new Request.Builder().url(MESSAGE_FILE_DOWNLOAD_URL)
+                .addHeader("x-acs-dingtalk-access-token", accessToken).addHeader("Content-Type", "application/json")
+                .post(RequestBody.create(objectMapper.writeValueAsString(requestBody), JSON_MEDIA_TYPE)).build();
 
             try (Response response = okHttpClient.newCall(request).execute()) {
                 String responseBody = readResponseBody(response);
                 if (!response.isSuccessful()) {
-                    throw new IllegalStateException("Download DingTalk message file failed, httpCode="
-                            + response.code() + ", body=" + responseBody);
+                    throw new IllegalStateException("Download DingTalk message file failed, httpCode=" + response.code()
+                        + ", body=" + responseBody);
                 }
 
                 JsonNode root = objectMapper.readTree(responseBody);
                 if (root.has("code") && root.get("code").asInt(0) != 0) {
                     throw new IllegalStateException("Download DingTalk message file failed, code="
-                            + root.path("code").asText() + ", message=" + root.path("message").asText());
+                        + root.path("code").asText() + ", message=" + root.path("message").asText());
                 }
 
                 JsonNode resultNode = root.has("result") ? root.get("result") : root;
                 DingtalkMessageFileDownloadResult result = new DingtalkMessageFileDownloadResult();
                 result.setDownloadUrl(getText(resultNode, "downloadUrl"));
                 result.setContentType(getText(resultNode, "contentType"));
-                result.setFileName(getText(
-                    resultNode,
-                    "fileName",
-                    downloadInfo.getFileName()
-                ));
+                result.setFileName(getText(resultNode, "fileName", downloadInfo.getFileName()));
 
                 if (!StringUtils.hasText(result.getDownloadUrl())) {
                     throw new IllegalStateException("Download DingTalk message file failed, downloadUrl is empty");
                 }
                 return result;
             }
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new IllegalStateException(e);
         }
     }
@@ -110,9 +107,7 @@ public class DingtalkFileDownloadService {
             throw new IllegalStateException("DingTalk downloadUrl is empty");
         }
 
-        Request.Builder requestBuilder = new Request.Builder()
-                .url(downloadResult.getDownloadUrl())
-                .get();
+        Request.Builder requestBuilder = new Request.Builder().url(downloadResult.getDownloadUrl()).get();
 
         Request request = requestBuilder.build();
         try (Response response = okHttpClient.newCall(request).execute()) {
@@ -140,15 +135,18 @@ public class DingtalkFileDownloadService {
                     downloadResult.setFileName(downloadResult.getFileName() + "." + ext);
                 }
             }
-            logger.info("downloadMessageFileBinary downloadResult={}, fileName={}", downloadResult, downloadResult.getFileName());
+            logger.info("downloadMessageFileBinary downloadResult={}, fileName={}", downloadResult,
+                downloadResult.getFileName());
 
             return bytes;
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new IllegalStateException(e);
         }
     }
 
-    public List<MessageFileDto> downloadMessageFiles(DingtalkCallbackMessage DDMessage, AssistantChatDto assistantChatDto) {
+    public List<MessageFileDto> downloadMessageFiles(DingtalkCallbackMessage DDMessage,
+        AssistantChatDto assistantChatDto) {
         List<DingtalkMessageDownloadInfo> downloadInfos = extractDownloadInfos(DDMessage);
         String senderStaffId = DDMessage.getSenderStaffId();
         String robotCode = DDMessage.getRobotCode();
@@ -167,7 +165,8 @@ public class DingtalkFileDownloadService {
                 downloadResult = new DingtalkMessageFileDownloadResult();
                 downloadResult.setDownloadUrl(downloadInfo.getDownloadUrl());
                 downloadResult.setFileName(downloadInfo.getFileName());
-            } else {
+            }
+            else {
                 downloadResult = downloadMessageFile(accessToken, robotCode, downloadInfo);
             }
             logger.info("downloadMessageFiles={}, downloadCode={}", downloadResult, downloadInfo.getDownloadCode());
@@ -177,8 +176,7 @@ public class DingtalkFileDownloadService {
             String fileName = downloadResult.getFileName();
             String contentType = downloadResult.getContentType();
 
-            multipartFiles.add(new DingtalkDownloadedMultipartFile(
-                    "file" + (idx++), fileName, contentType, fileBytes));
+            multipartFiles.add(new DingtalkDownloadedMultipartFile("file" + (idx++), fileName, contentType, fileBytes));
         }
 
         if (multipartFiles.isEmpty()) {
@@ -186,13 +184,9 @@ public class DingtalkFileDownloadService {
         }
 
         try {
-            SessionUploadResult uploadResult =
-                assistantChatApplicationService.uploadFiles(
-                        multipartFiles.toArray(new MultipartFile[0]),
-                        assistantChatDto.getSessionId(),
-                        SessionType.H_AS.getCode(),
-                        assistantChatDto.getAgentId()
-                );
+            SessionUploadResult uploadResult = assistantChatApplicationService.uploadFiles(
+                multipartFiles.toArray(new MultipartFile[0]), assistantChatDto.getSessionId(),
+                SessionType.H_AS.getCode(), assistantChatDto.getAgentId());
 
             if (uploadResult != null && uploadResult.getSessionId() != null) {
                 assistantChatDto.setSessionId(uploadResult.getSessionId());
@@ -209,7 +203,8 @@ public class DingtalkFileDownloadService {
                     if (DingtalkMsgType.PICTURE.matches(msgType) || DingtalkMsgType.RICH_TEXT.matches(msgType)) {
                         dto.setFileType("image");
                         // dto.setFileType("file");
-                    } else {
+                    }
+                    else {
                         dto.setFileType("file");
                     }
                     // dto.setUseType("content");
@@ -217,7 +212,8 @@ public class DingtalkFileDownloadService {
                 }
             }
             return messageFiles;
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
@@ -228,22 +224,24 @@ public class DingtalkFileDownloadService {
         String msgtype = DDMessage.getMsgtype();
         if (DingtalkMsgType.RICH_TEXT.matches(msgtype)) {
             collectRichTextDownloadInfos(DDMessage, downloadInfoMap);
-        } else if (DingtalkMsgType.INTERACTIVE_CARD.matches(msgtype)) {
+        }
+        else if (DingtalkMsgType.INTERACTIVE_CARD.matches(msgtype)) {
             collectInteractiveCardDownloadInfos(DDMessage, downloadInfoMap);
-        } else if (hasDirectContentDownloadCode(msgtype)) {
+        }
+        else if (hasDirectContentDownloadCode(msgtype)) {
             collectDownloadInfoFromMap(DDMessage, downloadInfoMap);
-        } 
+        }
 
         return new ArrayList<>(downloadInfoMap.values());
     }
 
     private boolean hasDirectContentDownloadCode(String msgtype) {
-        return DingtalkMsgType.PICTURE.matches(msgtype)
-                || DingtalkMsgType.VIDEO.matches(msgtype)
-                || DingtalkMsgType.FILE.matches(msgtype);
+        return DingtalkMsgType.PICTURE.matches(msgtype) || DingtalkMsgType.VIDEO.matches(msgtype)
+            || DingtalkMsgType.FILE.matches(msgtype);
     }
 
-    private void collectDownloadInfoFromMap(DingtalkCallbackMessage DDMessage, Map<String, DingtalkMessageDownloadInfo> downloadInfoMap) {
+    private void collectDownloadInfoFromMap(DingtalkCallbackMessage DDMessage,
+        Map<String, DingtalkMessageDownloadInfo> downloadInfoMap) {
         Object contentNode = DDMessage.getContent();
 
         if (!(contentNode instanceof Map<?, ?> nodeMap)) {
@@ -252,7 +250,8 @@ public class DingtalkFileDownloadService {
         addDownloadInfo(nodeMap, null, DDMessage, downloadInfoMap);
     }
 
-    private void collectRichTextDownloadInfos(DingtalkCallbackMessage DDMessage, Map<String, DingtalkMessageDownloadInfo> downloadInfoMap) {
+    private void collectRichTextDownloadInfos(DingtalkCallbackMessage DDMessage,
+        Map<String, DingtalkMessageDownloadInfo> downloadInfoMap) {
         Object contentNode = DDMessage.getContent();
 
         if (!(contentNode instanceof Map<?, ?> contentMap)) {
@@ -290,20 +289,21 @@ public class DingtalkFileDownloadService {
         }
     }
 
-    private void collectInteractiveCardDownloadInfos(DingtalkCallbackMessage DDMessage, Map<String, DingtalkMessageDownloadInfo> downloadInfoMap) {
+    private void collectInteractiveCardDownloadInfos(DingtalkCallbackMessage DDMessage,
+        Map<String, DingtalkMessageDownloadInfo> downloadInfoMap) {
         return;
         // Object contentNode = DDMessage.getContent();
         // if (!(contentNode instanceof Map<?, ?> nodeMap)) {
-        //     return;
+        // return;
         // }
         // Object bizCustomActionUrlNode = nodeMap.get("biz_custom_action_url");
         // if (bizCustomActionUrlNode == null) {
-        //     return;
+        // return;
         // }
 
         // String actionUrl = String.valueOf(bizCustomActionUrlNode);
         // if (actionUrl.isBlank()) {
-        //     return;
+        // return;
         // }
 
         // String senderStaffId = DDMessage.getSenderStaffId();
@@ -311,18 +311,18 @@ public class DingtalkFileDownloadService {
         // String msgtype = DDMessage.getMsgtype();
 
         // if (actionUrl.startsWith("http://") || actionUrl.startsWith("https://")) {
-        //     String fileName = resolveDownloadFileName(null, msgtype, robotCode);
-        //     DingtalkMessageDownloadInfo info = new DingtalkMessageDownloadInfo(null, fileName);
-        //     info.setDownloadUrl(actionUrl);
-        //     downloadInfoMap.putIfAbsent("directUrl:" + actionUrl, info);
-        //     return;
+        // String fileName = resolveDownloadFileName(null, msgtype, robotCode);
+        // DingtalkMessageDownloadInfo info = new DingtalkMessageDownloadInfo(null, fileName);
+        // info.setDownloadUrl(actionUrl);
+        // downloadInfoMap.putIfAbsent("directUrl:" + actionUrl, info);
+        // return;
         // }
 
         // String spaceId = extractUrlParam(actionUrl, "spaceId");
         // String fileId = extractUrlParam(actionUrl, "fileId");
         // if (!StringUtils.hasText(spaceId) || !StringUtils.hasText(fileId)) {
-        //     logger.warn("InteractiveCard missing spaceId or fileId. actionUrl={}", actionUrl);
-        //     return;
+        // logger.warn("InteractiveCard missing spaceId or fileId. actionUrl={}", actionUrl);
+        // return;
         // }
 
         // String accessToken = dingtalkTokenService.getAccessToken(senderStaffId, robotCode);
@@ -330,8 +330,8 @@ public class DingtalkFileDownloadService {
 
         // String resourceUrl = fetchDriveFileDownloadUrl(accessToken, spaceId, fileId, unionId);
         // if (!StringUtils.hasText(resourceUrl)) {
-        //     logger.warn("Failed to get drive file resourceUrl. spaceId={}, fileId={}", spaceId, fileId);
-        //     return;
+        // logger.warn("Failed to get drive file resourceUrl. spaceId={}, fileId={}", spaceId, fileId);
+        // return;
         // }
 
         // String fileName = resolveDownloadFileName(extractUrlParam(actionUrl, "fileName"), msgtype, robotCode);
@@ -341,47 +341,44 @@ public class DingtalkFileDownloadService {
     }
 
     // private String fetchDriveFileDownloadUrl(String accessToken, String spaceId, String fileId, String unionId) {
-    //     String url = "https://api.dingtalk.com/v1.0/drive/spaces/" + spaceId + "/files/" + fileId + "/downloadInfos?unionId=" + unionId;
-    //     Request request = new Request.Builder()
-    //             .url(url)
-    //             .addHeader("x-acs-dingtalk-access-token", accessToken)
-    //             .addHeader("Content-Type", "application/json")
-    //             .get()
-    //             .build();
-    //     try (Response response = okHttpClient.newCall(request).execute()) {
-    //         String body = readResponseBody(response);
-    //         if (!response.isSuccessful()) {
-    //             logger.error("Fetch drive file download info failed. httpCode={}, body={}", response.code(), body);
-    //             return null;
-    //         }
-    //         JsonNode root = objectMapper.readTree(body);
-    //         return root.path("downloadInfo").path("resourceUrl").asText(null);
-    //     } catch (IOException e) {
-    //         throw new IllegalStateException(e);
-    //     }
+    // String url = "https://api.dingtalk.com/v1.0/drive/spaces/" + spaceId + "/files/" + fileId +
+    // "/downloadInfos?unionId=" + unionId;
+    // Request request = new Request.Builder()
+    // .url(url)
+    // .addHeader("x-acs-dingtalk-access-token", accessToken)
+    // .addHeader("Content-Type", "application/json")
+    // .get()
+    // .build();
+    // try (Response response = okHttpClient.newCall(request).execute()) {
+    // String body = readResponseBody(response);
+    // if (!response.isSuccessful()) {
+    // logger.error("Fetch drive file download info failed. httpCode={}, body={}", response.code(), body);
+    // return null;
+    // }
+    // JsonNode root = objectMapper.readTree(body);
+    // return root.path("downloadInfo").path("resourceUrl").asText(null);
+    // } catch (IOException e) {
+    // throw new IllegalStateException(e);
+    // }
     // }
 
     // private String extractUrlParam(String url, String paramName) {
-    //     if (url == null) {
-    //         return null;
-    //     }
-    //     int queryStart = url.indexOf('?');
-    //     String query = queryStart >= 0 ? url.substring(queryStart + 1) : url;
-    //     for (String param : query.split("&")) {
-    //         String[] kv = param.split("=", 2);
-    //         if (kv.length == 2 && kv[0].equals(paramName)) {
-    //             return kv[1];
-    //         }
-    //     }
-    //     return null;
+    // if (url == null) {
+    // return null;
+    // }
+    // int queryStart = url.indexOf('?');
+    // String query = queryStart >= 0 ? url.substring(queryStart + 1) : url;
+    // for (String param : query.split("&")) {
+    // String[] kv = param.split("=", 2);
+    // if (kv.length == 2 && kv[0].equals(paramName)) {
+    // return kv[1];
+    // }
+    // }
+    // return null;
     // }
 
-    private void addDownloadInfo(
-        Map<?, ?> itemMap,
-        String itemType,
-        DingtalkCallbackMessage DDMessage,
-        Map<String, DingtalkMessageDownloadInfo> downloadInfoMap
-    ) {
+    private void addDownloadInfo(Map<?, ?> itemMap, String itemType, DingtalkCallbackMessage DDMessage,
+        Map<String, DingtalkMessageDownloadInfo> downloadInfoMap) {
         Object downloadCodeNode = itemMap.get("downloadCode");
         Object fileNameNode = itemMap.get("fileName");
 
@@ -405,7 +402,8 @@ public class DingtalkFileDownloadService {
             String defaultName = robotCode + "_" + System.currentTimeMillis();
             if (DingtalkMsgType.PICTURE.matches(msgtype) || DingtalkMsgType.RICH_TEXT.matches(msgtype)) {
                 defaultName += ".png";
-            } else if (DingtalkMsgType.VIDEO.matches(msgtype)) {
+            }
+            else if (DingtalkMsgType.VIDEO.matches(msgtype)) {
                 defaultName += ".mp4";
             }
             return defaultName;

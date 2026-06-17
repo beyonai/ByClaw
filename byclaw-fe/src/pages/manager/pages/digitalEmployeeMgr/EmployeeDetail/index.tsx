@@ -1170,7 +1170,7 @@ const EmployeeDetail = ({ loading }) => {
                 resourceBizType: 'DIG_EMPLOYEE',
                 isFrontAccess: _isFrontAccess,
               },
-          success: (resp) => {
+          success: (resp, data) => {
             const savedResourceId = resp?.resourceId || resp?.id || currentResourceId || resp;
             const savedData = resp && typeof resp === 'object' ? resp : {};
 
@@ -1187,7 +1187,7 @@ const EmployeeDetail = ({ loading }) => {
               type: 'employees/updateEmployee',
               payload: {
                 employee: agentHandler({
-                  ...savedData,
+                  ...(currentResourceId ? savedData : data),
                   resourceId: savedResourceId,
                   id: `${savedResourceId || ''}`,
                 }),

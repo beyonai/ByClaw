@@ -59,7 +59,10 @@ public enum ResourceTypeValueMapping {
     MAN_USER(ResourceBizTypeEnum.MAN_USER.name(), "MAN_USER"),
 
     // 管理组织资源
-    MAN_ORG(ResourceBizTypeEnum.MAN_ORG.name(), "MAN_ORG");
+    MAN_ORG(ResourceBizTypeEnum.MAN_ORG.name(), "MAN_ORG"),
+
+    // 技能资源
+    SKILL(ResourceBizTypeEnum.SKILL.name(), "SKILL");
 
     private final String resourceType;
 
