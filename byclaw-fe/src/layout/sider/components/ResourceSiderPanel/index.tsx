@@ -518,7 +518,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   };
 
   const handleComplexSkillDevelop = () => {
-    message.info('代码智能体开发中，敬请期待');
+    message.info(intl.formatMessage({ id: 'resourceTabs.skillUpload.codeAgentDeveloping' }));
   };
 
   const openManagerMenu = (menu: any) => {
@@ -552,9 +552,9 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         return;
       }
 
-      message.warning('未找到界面技能管理菜单配置');
+      message.warning(intl.formatMessage({ id: 'resourceTabs.skillUpload.noMenuConfig' }));
     } catch (error: any) {
-      message.warning(error?.message || '未找到界面技能管理菜单配置');
+      message.warning(error?.message || intl.formatMessage({ id: 'resourceTabs.skillUpload.noMenuConfig' }));
     }
   };
 

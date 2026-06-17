@@ -72,8 +72,9 @@ interface Props {
   resourceType: string; // 对应资源类型
 }
 
-const getBannerUrl = (bannerList: any[], label: string) => {
-  const banner = bannerList.find((item) => item?.label === label);
+const getBannerUrl = (bannerList: any[], labels: string | string[]) => {
+  const labelList = Array.isArray(labels) ? labels : [labels];
+  const banner = bannerList.find((item) => labelList.includes(item?.label));
   return `${banner?.url ?? ''}`.trim().replace(/^`|`$/g, '').trim();
 };
 
@@ -484,19 +485,27 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const defaultBannerUrl = getRuntimeActualUrl(isEN ? '/beyond/market-en.png' : '/beyond/market.png');
   const bannerLabel = React.useMemo(() => {
     if (resourceType === 'KG_DOC') {
-      return activeTab === 'personal' ? '个人知识' : '企业知识';
+      return activeTab === 'personal'
+        ? [intl.formatMessage({ id: 'resource.banner.personalKnowledge' }), '个人知识']
+        : [intl.formatMessage({ id: 'resource.banner.enterpriseKnowledge' }), '企业知识'];
     }
     if (resourceType === 'TOOL') {
-      return activeTab === 'personal' ? '个人工具' : '企业工具';
+      return activeTab === 'personal'
+        ? [intl.formatMessage({ id: 'resource.banner.personalTool' }), '个人工具']
+        : [intl.formatMessage({ id: 'resource.banner.enterpriseTool' }), '企业工具'];
     }
     if (resourceType === 'VIEW') {
-      return activeTab === 'personal' ? '个人视图' : '企业视图';
+      return activeTab === 'personal'
+        ? [intl.formatMessage({ id: 'resource.banner.personalView' }), '个人视图']
+        : [intl.formatMessage({ id: 'resource.banner.enterpriseView' }), '企业视图'];
     }
     if (resourceType === 'OBJECT') {
-      return activeTab === 'personal' ? '个人对象' : '企业对象';
+      return activeTab === 'personal'
+        ? [intl.formatMessage({ id: 'resource.banner.personalObject' }), '个人对象']
+        : [intl.formatMessage({ id: 'resource.banner.enterpriseObject' }), '企业对象'];
     }
-    return '';
-  }, [activeTab, resourceType]);
+    return [];
+  }, [activeTab, intl, resourceType]);
   const customBannerUrl = getBannerUrl(bannerList, bannerLabel);
   const bannerUrl = customBannerUrl ? getRuntimeActualUrl(customBannerUrl) : defaultBannerUrl;
 
