@@ -477,7 +477,11 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     const uploadFileConfig = this.getUploadFileConfig();
     if (!uploadFileConfig) return true;
     const { fileList } = this.state;
-    if (uploadFileConfig.maxFileCount > 0 && fileList && fileList.length >= uploadFileConfig.maxFileCount) {
+    if (
+      uploadFileConfig.maxFileCount > 0 &&
+      fileList &&
+      fileList.length + files.length > uploadFileConfig.maxFileCount
+    ) {
       message.error(getIntl().formatMessage({ id: 'upload.maxFilesLimit' }, { count: uploadFileConfig.maxFileCount }));
       return false;
     }

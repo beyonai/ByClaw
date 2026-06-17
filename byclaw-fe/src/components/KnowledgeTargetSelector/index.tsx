@@ -1,8 +1,7 @@
-import React, { useMemo } from 'react';
-import { Button, Empty, Input, List, Modal, Spin, Tooltip, Typography } from 'antd';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Empty, Input, Modal, Spin, Tooltip, Tree } from 'antd';
 import { useIntl } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
-import KnowledgeBreadcrumb from '@/components/KnowledgeBreadcrumb';
 import type { QueryDirAndFileByLevelItem } from '@/service/knowledgeCenter';
 import styles from './index.module.less';
 
@@ -31,12 +30,11 @@ export interface KnowledgeTargetSelectorProps {
   knowledgeLoading?: boolean;
   selectedKnowledgeBase?: KnowledgeTargetItem | null;
   onSelectKnowledgeBase: (knowledgeBase: KnowledgeTargetItem) => void;
-  onBackToList: () => void;
   directoryPath: string;
   folders: QueryDirAndFileByLevelItem[];
   folderLoading?: boolean;
-  onBreadcrumbClick: (directoryPath: string) => void;
   onFolderClick: (folder: QueryDirAndFileByLevelItem, directoryPath: string) => void;
+  onLoadFolderChildren?: (directoryPath: string) => Promise<QueryDirAndFileByLevelItem[] | void>;
   emptyText?: React.ReactNode;
   folderEmptyText?: React.ReactNode;
   className?: string;
@@ -59,25 +57,42 @@ function joinDirectoryPath(parentPath: string, name: string) {
   return normalizeDirectoryPath(`${normalizeDirectoryPath(parentPath)}/${name}`);
 }
 
-function buildFolderPath(directoryPath: string, rootTitle: string) {
-  const paths = [{ title: rootTitle, id: '/' }];
-  let accumulated = '';
-  normalizeDirectoryPath(directoryPath)
-    .split('/')
-    .filter(Boolean)
-    .forEach((segment) => {
-      accumulated += `/${segment}`;
-      paths.push({ title: segment, id: accumulated });
-    });
-  return paths;
-}
-
 function getKnowledgeBaseId(item: KnowledgeTargetItem) {
   return item.resourceId ?? item.id;
 }
 
 function getKnowledgeBaseName(item: KnowledgeTargetItem) {
   return item.resourceName ?? item.name ?? getKnowledgeBaseId(item) ?? '';
+}
+
+function getFolderPath(folder: QueryDirAndFileByLevelItem, parentPath: string) {
+  return normalizeDirectoryPath(
+    String(folder.directoryPath ?? '').trim() || joinDirectoryPath(parentPath, folder.name)
+  );
+}
+
+interface FolderTreeNode {
+  key: string;
+  title: string;
+  folder?: QueryDirAndFileByLevelItem;
+  children?: FolderTreeNode[];
+}
+
+function buildFolderTreeNodes(
+  parentPath: string,
+  folders: QueryDirAndFileByLevelItem[],
+  childrenByPath: Record<string, QueryDirAndFileByLevelItem[]>
+): FolderTreeNode[] {
+  return folders.map((folder) => {
+    const folderPath = getFolderPath(folder, parentPath);
+    const children = childrenByPath[folderPath];
+    return {
+      key: folderPath,
+      title: folder.name,
+      folder,
+      children: children ? buildFolderTreeNodes(folderPath, children, childrenByPath) : undefined,
+    };
+  });
 }
 
 const KnowledgeTargetSelectorContent: React.FC<KnowledgeTargetSelectorContentProps> = (props) => {
@@ -89,135 +104,178 @@ const KnowledgeTargetSelectorContent: React.FC<KnowledgeTargetSelectorContentPro
     knowledgeLoading = false,
     selectedKnowledgeBase,
     onSelectKnowledgeBase,
-    onBackToList,
     directoryPath,
     folders,
     folderLoading = false,
-    onBreadcrumbClick,
     onFolderClick,
+    onLoadFolderChildren,
     emptyText,
     folderEmptyText,
     className,
   } = props;
   const intl = useIntl();
+  const normalizedDirectoryPath = normalizeDirectoryPath(directoryPath);
+  const [rootFolders, setRootFolders] = useState<QueryDirAndFileByLevelItem[]>([]);
+  const [childrenByPath, setChildrenByPath] = useState<Record<string, QueryDirAndFileByLevelItem[]>>({});
+  const [selectedFolderKeys, setSelectedFolderKeys] = useState<React.Key[]>(['/']);
+  const [expandedFolderKeys, setExpandedFolderKeys] = useState<React.Key[]>(['/']);
 
-  const folderPath = useMemo(
-    () => buildFolderPath(directoryPath, intl.formatMessage({ id: 'fileBrowser.root' })),
-    [directoryPath, intl]
+  useEffect(() => {
+    if (!selectedKnowledgeBase) {
+      setRootFolders([]);
+      setChildrenByPath({});
+      setSelectedFolderKeys(['/']);
+      setExpandedFolderKeys(['/']);
+      return;
+    }
+    if (normalizedDirectoryPath === '/') {
+      setRootFolders(folders);
+      setSelectedFolderKeys(['/']);
+      setExpandedFolderKeys((prev) => (prev.includes('/') ? prev : ['/', ...prev]));
+    } else {
+      setChildrenByPath((prev) => ({
+        ...prev,
+        [normalizedDirectoryPath]: folders,
+      }));
+      setSelectedFolderKeys([normalizedDirectoryPath]);
+      setExpandedFolderKeys((prev) => [...new Set([...prev, '/', normalizedDirectoryPath])]);
+    }
+  }, [folders, normalizedDirectoryPath, selectedKnowledgeBase]);
+
+  const folderTreeData = useMemo<FolderTreeNode[]>(() => {
+    return [
+      {
+        key: '/',
+        title: intl.formatMessage({ id: 'fileBrowser.root' }),
+        children: buildFolderTreeNodes('/', rootFolders, childrenByPath),
+      },
+    ];
+  }, [childrenByPath, intl, rootFolders]);
+
+  const loadTreeNode = useCallback(
+    async (node: FolderTreeNode) => {
+      const path = String(node.key);
+      if (path === '/' || childrenByPath[path] || !onLoadFolderChildren) {
+        return;
+      }
+      const children = await onLoadFolderChildren(path);
+      if (children) {
+        setChildrenByPath((prev) => ({
+          ...prev,
+          [path]: children,
+        }));
+      }
+    },
+    [childrenByPath, onLoadFolderChildren]
   );
-
-  if (selectedKnowledgeBase) {
-    const selectedName = getKnowledgeBaseName(selectedKnowledgeBase);
-    return (
-      <div className={[styles.selector, className].filter(Boolean).join(' ')}>
-        <div className={styles.folderHeader}>
-          <Button
-            size="small"
-            className={styles.backButton}
-            onClick={onBackToList}
-            icon={<AntdIcon type="icon-a-Leftzuo" />}
-          >
-            {intl.formatMessage({ id: 'fileSider.saveToKnowledge.backToList' })}
-          </Button>
-          <span className={styles.selectedTitle}>{selectedName}</span>
-        </div>
-        <KnowledgeBreadcrumb
-          folderPath={folderPath}
-          handleBreadcrumbClick={(index) => {
-            const target = folderPath[index];
-            if (target) {
-              onBreadcrumbClick(target.id);
-            }
-          }}
-        />
-        <Spin spinning={folderLoading}>
-          <List
-            className={styles.folderList}
-            dataSource={folders}
-            locale={{
-              emptyText: folderEmptyText ?? intl.formatMessage({ id: 'fileSider.saveToKnowledge.rootTip' }),
-            }}
-            renderItem={(folder) => {
-              const nextPath =
-                String(folder.directoryPath ?? '').trim() || joinDirectoryPath(directoryPath, folder.name);
-              const normalizedNextPath = normalizeDirectoryPath(nextPath);
-              return (
-                <List.Item className={styles.folderItem} onClick={() => onFolderClick(folder, normalizedNextPath)}>
-                  <List.Item.Meta
-                    className={styles.folderMeta}
-                    avatar={<AntdIcon type="icon-wenjianjialanse" className={styles.folderIcon} />}
-                    title={
-                      <Tooltip title={folder.name}>
-                        <Typography.Text ellipsis>{folder.name}</Typography.Text>
-                      </Tooltip>
-                    }
-                  />
-                </List.Item>
-              );
-            }}
-          />
-        </Spin>
-      </div>
-    );
-  }
 
   return (
     <div className={[styles.selector, className].filter(Boolean).join(' ')}>
-      <div className={styles.toolbar}>
-        <Input.Search
-          allowClear
-          value={keyword}
-          placeholder={intl.formatMessage({ id: 'multiChoices.saveToKnowledge.searchPlaceholder' })}
-          onChange={(event) => onKeywordChange(event.target.value)}
-          onSearch={onSearch}
-          className={styles.search}
-        />
-      </div>
-      <Spin spinning={knowledgeLoading}>
-        <div className={styles.content}>
-          {knowledgeBases.length ? (
-            <div className={styles.cardGrid}>
-              {knowledgeBases.map((item) => {
-                const id = getKnowledgeBaseId(item);
-                const idStr = String(id);
-                const name = String(getKnowledgeBaseName(item));
-                const desc = item.resourceDesc ?? item.description;
-                return (
-                  <div
-                    key={idStr}
-                    className={styles.card}
-                    onClick={() => {
-                      onSelectKnowledgeBase(item);
-                    }}
-                  >
-                    <span className={styles.cardIcon}>
-                      <AntdIcon type="icon-chuangjianfangshi-wendangku" />
-                    </span>
-                    <div className={styles.cardBody}>
-                      <Tooltip title={name}>
-                        <Typography.Text ellipsis className={styles.cardTitle}>
-                          {name}
-                        </Typography.Text>
-                      </Tooltip>
-                      {desc && (
-                        <Tooltip title={String(desc)}>
-                          <Typography.Text ellipsis className={styles.cardDesc}>
-                            {desc}
-                          </Typography.Text>
-                        </Tooltip>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            !knowledgeLoading && (
-              <Empty description={emptyText ?? intl.formatMessage({ id: 'multiChoices.saveToKnowledge.empty' })} />
-            )
-          )}
+      <div className={styles.leftPanel}>
+        <div className={styles.toolbar}>
+          <Input.Search
+            allowClear
+            value={keyword}
+            placeholder={intl.formatMessage({ id: 'multiChoices.saveToKnowledge.searchPlaceholder' })}
+            onChange={(event) => onKeywordChange(event.target.value)}
+            onSearch={onSearch}
+            className={styles.search}
+          />
         </div>
-      </Spin>
+        <Spin spinning={knowledgeLoading}>
+          <div className={styles.content}>
+            {knowledgeBases.length ? (
+              <div className={styles.cardGrid}>
+                {knowledgeBases.map((item) => {
+                  const id = getKnowledgeBaseId(item);
+                  const idStr = String(id);
+                  const name = String(getKnowledgeBaseName(item));
+                  const desc = item.resourceDesc ?? item.description;
+                  const selected = selectedKnowledgeBase
+                    ? String(getKnowledgeBaseId(selectedKnowledgeBase)) === idStr
+                    : false;
+                  return (
+                    <div
+                      key={idStr}
+                      className={[styles.card, selected ? styles.cardSelected : ''].filter(Boolean).join(' ')}
+                      onClick={() => {
+                        onSelectKnowledgeBase(item);
+                      }}
+                    >
+                      <span className={styles.cardIcon}>
+                        <AntdIcon type="icon-chuangjianfangshi-wendangku" style={{ fontSize: 16 }} />
+                      </span>
+                      <div className={styles.cardBody}>
+                        <Tooltip title={name}>
+                          <div className={styles.cardTitle}>{name}</div>
+                        </Tooltip>
+                        {desc && (
+                          <Tooltip title={String(desc)}>
+                            <div className={styles.cardDesc}>{desc}</div>
+                          </Tooltip>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              !knowledgeLoading && (
+                <Empty description={emptyText ?? intl.formatMessage({ id: 'multiChoices.saveToKnowledge.empty' })} />
+              )
+            )}
+          </div>
+        </Spin>
+      </div>
+      <div className={styles.rightPanel}>
+        <div className={styles.folderHeader}>
+          <span className={styles.selectedTitle}>
+            {selectedKnowledgeBase
+              ? getKnowledgeBaseName(selectedKnowledgeBase)
+              : intl.formatMessage({ id: 'multiChoices.saveToKnowledge.selectKb' })}
+          </span>
+        </div>
+        {selectedKnowledgeBase ? (
+          <Spin spinning={folderLoading}>
+            <div className={styles.folderTreeWrap}>
+              <Tree
+                className={styles.folderTree}
+                treeData={folderTreeData}
+                selectedKeys={selectedFolderKeys}
+                expandedKeys={expandedFolderKeys}
+                loadData={(node) => loadTreeNode(node as unknown as FolderTreeNode)}
+                onExpand={(keys) => setExpandedFolderKeys(keys)}
+                titleRender={(node) => (
+                  <Tooltip title={node.title}>
+                    <span className={styles.folderTreeTitle}>
+                      <AntdIcon type="icon-wenjianjialanse" className={styles.folderIcon} />
+                      <span className={styles.folderTreeName}>{node.title}</span>
+                    </span>
+                  </Tooltip>
+                )}
+                onSelect={(keys, info) => {
+                  const node = info.node as unknown as FolderTreeNode;
+                  const nextPath = String(node.key);
+                  setSelectedFolderKeys(keys.length ? keys : [nextPath]);
+                  setExpandedFolderKeys((prev) => [...new Set([...prev, nextPath])]);
+                  onFolderClick(
+                    node.folder || ({ name: node.title, type: 'directory', directoryPath: nextPath } as any),
+                    nextPath
+                  );
+                }}
+              />
+              {!rootFolders.length && !folderLoading && (
+                <Empty
+                  className={styles.folderEmpty}
+                  description={folderEmptyText ?? intl.formatMessage({ id: 'fileSider.saveToKnowledge.rootTip' })}
+                />
+              )}
+            </div>
+          </Spin>
+        ) : (
+          <Empty description={intl.formatMessage({ id: 'multiChoices.saveToKnowledge.selectKb' })} />
+        )}
+      </div>
     </div>
   );
 };
@@ -229,7 +287,7 @@ const KnowledgeTargetSelector: React.FC<KnowledgeTargetSelectorProps> = (props) 
     onCancel,
     confirmLoading,
     okDisabled,
-    width,
+    width = 900,
     zIndex,
     destroyOnClose = true,
     ...selectorProps

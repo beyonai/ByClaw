@@ -121,11 +121,14 @@ function SaveToKnowledgeModal(props: SaveToKnowledgeModalProps) {
       } else if (Array.isArray((response as any)?.data)) {
         rows = (response as any).data;
       }
-      setKnowledgeFolders(rows.filter((item: QueryDirAndFileByLevelItem) => item.type === 'directory'));
+      const folders = rows.filter((item: QueryDirAndFileByLevelItem) => item.type === 'directory');
+      setKnowledgeFolders(folders);
       setKnowledgeDirectoryPath(directoryPath);
+      return folders;
     } catch (error) {
       console.error(error);
       setKnowledgeFolders([]);
+      return [];
     } finally {
       setKnowledgeFolderLoading(false);
     }
@@ -134,6 +137,22 @@ function SaveToKnowledgeModal(props: SaveToKnowledgeModalProps) {
   const handleSelectKnowledgeBase = (knowledgeBase: any) => {
     setSelectedKnowledgeBase(knowledgeBase);
     void loadKnowledgeFolders(knowledgeBase, '/');
+  };
+
+  const loadKnowledgeFolderChildren = async (knowledgeBase: any, directoryPath: string) => {
+    const resourceId = knowledgeBase?.resourceId ?? knowledgeBase?.id;
+    if (!resourceId) return [];
+    const response = await queryDirAndFileByLevel({
+      resourceId: Number(resourceId),
+      directoryPath,
+    });
+    let rows: QueryDirAndFileByLevelItem[] = [];
+    if (Array.isArray(response)) {
+      rows = response;
+    } else if (Array.isArray((response as any)?.data)) {
+      rows = (response as any).data;
+    }
+    return rows.filter((item: QueryDirAndFileByLevelItem) => item.type === 'directory');
   };
 
   const handleConfirmSave = async () => {
@@ -223,23 +242,19 @@ function SaveToKnowledgeModal(props: SaveToKnowledgeModalProps) {
         knowledgeLoading={loading}
         selectedKnowledgeBase={selectedKnowledgeBase}
         onSelectKnowledgeBase={handleSelectKnowledgeBase}
-        onBackToList={() => {
-          setSelectedKnowledgeBase(null);
-          setKnowledgeDirectoryPath('/');
-          setKnowledgeFolders([]);
-        }}
         directoryPath={knowledgeDirectoryPath}
         folders={knowledgeFolders}
         folderLoading={knowledgeFolderLoading}
-        onBreadcrumbClick={(directoryPath) => {
-          if (selectedKnowledgeBase) {
-            void loadKnowledgeFolders(selectedKnowledgeBase, directoryPath);
-          }
-        }}
         onFolderClick={(_, directoryPath) => {
           if (selectedKnowledgeBase) {
             void loadKnowledgeFolders(selectedKnowledgeBase, directoryPath);
           }
+        }}
+        onLoadFolderChildren={(directoryPath) => {
+          if (selectedKnowledgeBase) {
+            return loadKnowledgeFolderChildren(selectedKnowledgeBase, directoryPath);
+          }
+          return Promise.resolve([]);
         }}
         emptyText={intl.formatMessage({ id: 'multiChoices.saveToKnowledge.empty' })}
         folderEmptyText={intl.formatMessage({ id: 'fileSider.saveToKnowledge.rootTip' })}

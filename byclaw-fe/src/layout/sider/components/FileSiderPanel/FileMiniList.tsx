@@ -483,14 +483,33 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           resourceId: Number(kb.resourceId),
           directoryPath,
         });
-        setKnowledgeFolders(
-          unwrapListResponse<QueryDirAndFileByLevelItem>(response).filter((item) => item.type === 'directory')
+        const folders = unwrapListResponse<QueryDirAndFileByLevelItem>(response).filter(
+          (item) => item.type === 'directory'
         );
+        setKnowledgeFolders(folders);
         setKnowledgeDirectoryPath(directoryPath);
+        return folders;
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+        return [];
       } finally {
         setKnowledgeFolderLoading(false);
+      }
+    },
+    [intl]
+  );
+
+  const loadKnowledgeFolderChildren = useCallback(
+    async (kb: IKnowledgeBaseItem, directoryPath: string) => {
+      try {
+        const response = await queryDirAndFileByLevel({
+          resourceId: Number(kb.resourceId),
+          directoryPath,
+        });
+        return unwrapListResponse<QueryDirAndFileByLevelItem>(response).filter((item) => item.type === 'directory');
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+        return [];
       }
     },
     [intl]
@@ -1277,23 +1296,19 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         knowledgeLoading={knowledgeLoading}
         selectedKnowledgeBase={selectedKnowledgeBase}
         onSelectKnowledgeBase={(kb) => handleSelectKnowledgeBase(kb as IKnowledgeBaseItem)}
-        onBackToList={() => {
-          setSelectedKnowledgeBase(null);
-          setKnowledgeFolders([]);
-          setKnowledgeDirectoryPath('/');
-        }}
         directoryPath={knowledgeDirectoryPath}
         folders={knowledgeFolders}
         folderLoading={knowledgeFolderLoading}
-        onBreadcrumbClick={(directoryPath) => {
-          if (selectedKnowledgeBase) {
-            void loadKnowledgeFolders(selectedKnowledgeBase, directoryPath);
-          }
-        }}
         onFolderClick={(_, directoryPath) => {
           if (selectedKnowledgeBase) {
             void loadKnowledgeFolders(selectedKnowledgeBase, directoryPath);
           }
+        }}
+        onLoadFolderChildren={(directoryPath) => {
+          if (selectedKnowledgeBase) {
+            return loadKnowledgeFolderChildren(selectedKnowledgeBase, directoryPath);
+          }
+          return Promise.resolve([]);
         }}
         emptyText={intl.formatMessage({ id: 'multiChoices.saveToKnowledge.empty' })}
         folderEmptyText={intl.formatMessage({ id: 'fileSider.saveToKnowledge.rootTip' })}
