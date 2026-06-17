@@ -54,6 +54,22 @@ class LocalStorageServiceTest {
     }
 
     @Test
+    void initCreatesBucketRootForMountedFileStorage() throws Exception {
+        LocalStorageService service = service("file");
+
+        service.init("byclaw");
+        service.mount("byclaw-datacloud");
+
+        assertThat(tempDir.resolve("byclaw")).isDirectory();
+        assertThat(tempDir.resolve("byclaw-datacloud")).isDirectory();
+        assertThat(Files.getPosixFilePermissions(tempDir.resolve("byclaw")))
+            .containsAll(Set.of(
+                PosixFilePermission.OWNER_WRITE,
+                PosixFilePermission.GROUP_WRITE,
+                PosixFilePermission.OTHERS_WRITE));
+    }
+
+    @Test
     void putAppliesSharedPermissionsForMountedFileStorage() throws Exception {
         LocalStorageService service = service("file");
 
