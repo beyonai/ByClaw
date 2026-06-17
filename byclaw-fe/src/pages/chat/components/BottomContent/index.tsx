@@ -1,12 +1,13 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Tabs } from 'antd';
-import { useIntl } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 
 import useGlobal from '@/hooks/useGlobal';
 
 import RecommendQuestion from './recommendQuestion';
 import RecommendTabs from './recommendTabs';
 import SuggestSkill from './suggestSkill';
+import SystemNotification from './systemNotification';
 
 import type { TabsProps } from 'antd/lib/tabs';
 import styles from './index.module.less';
@@ -16,6 +17,11 @@ export default function BottomContent() {
 
   const { agentInfo } = useGlobal();
   const { agentId } = agentInfo || {};
+
+  const [currentTab, setCurrentTab] = useState('suggestQuestion');
+  const oldTabKeyRef = useRef('suggestQuestion');
+
+  const userInfo = useSelector(({ user }) => user.userInfo);
 
   const tabList = useMemo<TabsProps['items']>(() => {
     const items: TabsProps['items'] = [
@@ -40,17 +46,38 @@ export default function BottomContent() {
         // destroyOnHidden: true,
       });
     }
+
+    if (userInfo) {
+      items.push({
+        key: 'systemNotification',
+        label: intl.formatMessage({ id: 'chat.bottomContent.systemNotification' }),
+        children: <SystemNotification />,
+      });
+    }
+
     return items;
-  }, [intl, agentId]);
+  }, [intl, agentId, userInfo]);
 
-  const [currentTab, setCurrentTab] = useState('suggestQuestion');
+  useEffect(() => {
+    if (agentId) {
+      setCurrentTab('suggestSkill');
+      return;
+    }
 
-  // 若当前选中的 tab 已不存在（如 agentId 消失导致技能 tab 被移除），回退到首个 tab
-  const activeKey = (tabList || []).some((item) => item?.key === currentTab) ? currentTab : tabList?.[0]?.key;
+    setCurrentTab(oldTabKeyRef.current === 'suggestSkill' ? 'suggestQuestion' : oldTabKeyRef.current);
+  }, [agentId]);
 
   return (
     <div className={styles.bottomContent}>
-      <Tabs centered activeKey={activeKey} onChange={setCurrentTab} items={tabList || []} />
+      <Tabs
+        centered
+        activeKey={currentTab}
+        onChange={(key) => {
+          setCurrentTab(key);
+          oldTabKeyRef.current = key;
+        }}
+        items={tabList || []}
+      />
     </div>
   );
 }

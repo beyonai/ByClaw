@@ -23,6 +23,7 @@ export default {
   'menu.systemParams.system': '参数配置管理',
   'menu.systemParams.modal': '模型配置管理',
   'menu.systemParams.sandbox': '沙箱配置管理',
+  'menu.business.notification': '通知管理',
   'common.add': '新增',
   'common.edit': '编辑',
   'common.view': '查看',

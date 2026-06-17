@@ -76,6 +76,11 @@ export default [
             name: 'managerBusinessField',
             component: './manager/pages/BusinessFieldMgr',
           },
+          {
+            path: '/manager/notification',
+            name: 'managerNotification',
+            component: './manager/pages/NotificationMgr',
+          },
         ],
       },
       {

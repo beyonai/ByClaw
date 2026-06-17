@@ -1,5 +1,5 @@
 // tslint:disable:ordered-imports
-import React, { memo, useEffect, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import classNames from 'classnames';
 
 // @ts-ignore
@@ -30,6 +30,7 @@ import MainDrawer from '@/components/MainDrawer';
 import MinorDrawer from '@/components/MinorDrawer';
 import DragFileEventHandler from '@/components/QueryInput/dragFileEventHandler';
 import useAgentUploadFileConfig from '@/hooks/useAgentUploadFileConfig';
+import useVersionNotification from '@/hooks/useVersionNotification';
 
 import GlobalContext, { Platform } from '../components/provider/global';
 
@@ -82,11 +83,11 @@ const PCLayout = () => {
   const [siderContentWidth, setSiderContentWidth] = React.useState(DEFAULT_SIDER_CONTENT_WIDTH);
   const [detailPanel, setDetailPanel] = React.useState<React.ReactNode>(null);
   const [detailPanelWidth, setDetailPanelWidth] = React.useState<React.CSSProperties['width']>();
-  const openDetailPanel = React.useCallback((panel: React.ReactNode, options?: DetailPanelOptions) => {
+  const openDetailPanel = useCallback((panel: React.ReactNode, options?: DetailPanelOptions) => {
     setDetailPanel(panel);
     setDetailPanelWidth(options?.width);
   }, []);
-  const clearDetailPanel = React.useCallback(() => {
+  const clearDetailPanel = useCallback(() => {
     setDetailPanel(null);
     setDetailPanelWidth(undefined);
   }, []);
@@ -109,6 +110,7 @@ const PCLayout = () => {
   }, [clearDetailPanel, pathname]);
 
   const { setLoginModalOpen } = useAppStore();
+  useVersionNotification(myEventEmitter);
 
   const [isClose, setIsClose] = useState(false);
   const [sessionId, setSessionId] = useState<string>('');

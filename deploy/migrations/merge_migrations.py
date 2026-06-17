@@ -155,6 +155,136 @@ def discover_versions() -> list["Version"]:
 #   {版本}__baseline__ddl.sql / {版本}__baseline__dml.sql
 _ALLOWED_SUFFIXES = ("__ddl.sql", "__dml.sql", "__baseline__ddl.sql", "__baseline__dml.sql")
 
+# 语句分类关键字：DDL（结构变更）与 DML（数据变更）。
+_DDL_KEYWORDS = re.compile(
+    r"^(CREATE|ALTER|DROP|TRUNCATE|COMMENT\s+ON|GRANT|REVOKE)\b",
+    re.IGNORECASE,
+)
+_DML_KEYWORDS = re.compile(
+    r"^(INSERT|UPDATE|DELETE|MERGE)\b",
+    re.IGNORECASE,
+)
+
+
+def split_sql_statements(sql: str) -> list[str]:
+    """把 SQL 文本切成独立语句，正确跳过单/双引号、$$ 块、行/块注释里的分号。"""
+    statements: list[str] = []
+    current: list[str] = []
+    i, n = 0, len(sql)
+    while i < n:
+        ch = sql[i]
+        # 行注释
+        if ch == '-' and i + 1 < n and sql[i + 1] == '-':
+            end = sql.find('\n', i)
+            end = n if end == -1 else end
+            current.append(sql[i:end])
+            i = end
+            continue
+        # 块注释
+        if ch == '/' and i + 1 < n and sql[i + 1] == '*':
+            end = sql.find('*/', i + 2)
+            end = n if end == -1 else end + 2
+            current.append(sql[i:end])
+            i = end
+            continue
+        # 单引号字符串
+        if ch == "'":
+            j = i + 1
+            while j < n:
+                if sql[j] == "'" and j + 1 < n and sql[j + 1] == "'":
+                    j += 2
+                elif sql[j] == "'":
+                    j += 1
+                    break
+                else:
+                    j += 1
+            current.append(sql[i:j])
+            i = j
+            continue
+        # 双引号标识符
+        if ch == '"':
+            j = sql.find('"', i + 1)
+            j = n if j == -1 else j + 1
+            current.append(sql[i:j])
+            i = j
+            continue
+        # $$ / $tag$ 美元引用块
+        if ch == '$':
+            mt = re.match(r'\$([A-Za-z_]*)\$', sql[i:])
+            if mt:
+                tag = mt.group(0)
+                end = sql.find(tag, i + len(tag))
+                end = n if end == -1 else end + len(tag)
+                current.append(sql[i:end])
+                i = end
+                continue
+        # 语句结束
+        if ch == ';':
+            stmt = ''.join(current).strip()
+            if stmt:
+                statements.append(stmt)
+            current = []
+            i += 1
+            continue
+        current.append(ch)
+        i += 1
+    tail = ''.join(current).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
+def classify_statement(stmt: str) -> str:
+    """返回 'ddl' / 'dml' / 'other'。取首个非注释/非空行的关键字判断。"""
+    effective = ""
+    for line in stmt.splitlines():
+        s = line.strip()
+        if not s or s.startswith('--'):
+            continue
+        effective = s
+        break
+    if not effective:
+        return "other"
+    if _DDL_KEYWORDS.match(effective):
+        return "ddl"
+    if _DML_KEYWORDS.match(effective):
+        return "dml"
+    return "other"
+
+
+def first_line(stmt: str) -> str:
+    """语句首个有效行，用于错误提示定位。"""
+    for line in stmt.splitlines():
+        s = line.strip()
+        if s and not s.startswith('--'):
+            return s[:80]
+    return stmt[:80]
+
+
+def validate_content() -> list[str]:
+    """校验文件内容与文件类型一致：__ddl.sql 里不应有 DML，__dml.sql 里不应有 DDL。
+
+    baseline 文件不校验（全量快照可能 DDL/DML 混排）。
+    'other'（SET / 注释 / 函数调用等）不报错，避免误杀。
+    """
+    errors: list[str] = []
+    for version in discover_versions():
+        checks = [(f, "ddl") for f in version.ddl_files] + [(f, "dml") for f in version.dml_files]
+        for filepath, expected in checks:
+            try:
+                content = filepath.read_text(encoding="utf-8")
+            except Exception as e:
+                errors.append(f"{version.name}/{filepath.name} 读取失败: {e}")
+                continue
+            for stmt in split_sql_statements(content):
+                category = classify_statement(stmt)
+                if category != "other" and category != expected:
+                    errors.append(
+                        f"{version.name}/{filepath.name} 含 {category.upper()} 语句"
+                        f"（该文件应只有 {expected.upper()}）: {first_line(stmt)}"
+                    )
+    return errors
+
 
 def validate_layout() -> list[str]:
     """校验 versions/ 目录结构与命名规范，返回错误列表（空表示通过）。
@@ -429,6 +559,18 @@ def main():
         print("[ABORT] 请修复以上目录/命名问题后重试。")
         sys.exit(1)
     print("  PASS: layout OK")
+
+    # Step 0b: Validate file content (DDL/DML 不可放错文件)。
+    print("[STEP 0] Validating DDL/DML content placement...")
+    content_errors = validate_content()
+    if content_errors:
+        print(f"  FAIL: {len(content_errors)} issue(s) found:")
+        for e in content_errors:
+            print(f"    - {e}")
+        print()
+        print("[ABORT] 请修复以上 DDL/DML 错放问题后重试。")
+        sys.exit(1)
+    print("  PASS: content OK")
     print()
 
     # Step 1: Read applied versions

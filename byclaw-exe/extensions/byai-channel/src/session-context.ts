@@ -3,6 +3,7 @@ import { EmitOptions, EventType, type GatewayDataEmitter } from "@byclaw/by-fram
 import type { ByaiInboundMessage, Language } from "./types.js";
 import { isSessionDispatchBusy } from "./session-dispatch-gate.js";
 import { clearPendingMessageToolSends } from "./pending-message-tool.js";
+import { generateRandomId } from "./utils.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 const DEFAULT_ACCOUNT_KEY = "default";
@@ -98,11 +99,20 @@ export interface ActiveSdkRequest {
   channelExtension?: Record<string, unknown> | string;
   abortController?: AbortController;
   beyondToken?: string;
+  agentEndHooks?: Map<string, Promise<{
+    success?: boolean;
+    error?: string;
+  }>>
 }
 
 interface ActiveSdkRunBinding {
     request: ActiveSdkRequest;
     sessionKey: string;
+}
+
+interface AgentEndResult {
+    success?: boolean;
+    error?: string;
 }
 
 interface SessionContextStore {
@@ -114,6 +124,11 @@ interface SessionContextStore {
     activeSdkRequestsBySession: Map<string, ActiveSdkRequest>;
     activeSdkRequestsByChild: Map<string, ActiveSdkRequest>;
     activeSdkRequestsByRun: Map<string, ActiveSdkRunBinding>;
+    agentEndResultByRun: Map<string, {
+        resolve: (result: AgentEndResult) => void;
+        reject: (reason?: unknown) => void;
+        promise: Promise<AgentEndResult>;
+    }>;
 }
 
 function getSessionContextStore(): SessionContextStore {
@@ -131,6 +146,7 @@ function getSessionContextStore(): SessionContextStore {
             activeSdkRequestsBySession: new Map<string, ActiveSdkRequest>(),
             activeSdkRequestsByChild: new Map<string, ActiveSdkRequest>(),
             activeSdkRequestsByRun: new Map<string, ActiveSdkRunBinding>(),
+            agentEndResultByRun: new Map(),
         };
     }
 
@@ -146,6 +162,7 @@ const {
     activeSdkRequestsBySession,
     activeSdkRequestsByChild,
     activeSdkRequestsByRun,
+    agentEndResultByRun,
 } = getSessionContextStore();
 
 const sdkEmitterLastChunks = new Map<string, EmitOptions & { traceId: string }>();
@@ -217,6 +234,7 @@ export function clearActiveSdkRequestRecord(request: ActiveSdkRequest): void {
   }
   for (const runId of request.boundRunIds) {
     activeSdkRequestsByRun.delete(runId);
+    agentEndResultByRun.delete(runId);
   }
   request.boundRunIds.clear();
   sdkEmitterLastChunks.delete(request.sessionKey);
@@ -698,6 +716,30 @@ export async function completeActiveSdkRequest(
     if (!sdkEmitter) {
         throw new Error(`No active SDK emitter for account: ${latest.accountId}`);
     }
+    const [rootRunId] = latest.boundRunIds;
+    if (rootRunId && agentEndResultByRun.has(rootRunId)) {
+        try {
+            const result = await Promise.race([
+                agentEndResultByRun.get(rootRunId)?.promise,
+                new Promise<void>((resolve, reject) => setTimeout(() => {
+                    reject(new Error("waiting for agent end result timeout"));
+                }, 10000)),
+            ]);
+            if (result?.error) {
+                await sdkEmitter.emitChunk(
+                    latest.sessionId,
+                    latest.traceId || "",
+                    result.error,
+                    {
+                        eventType: EventType.ANSWER_DELTA,
+                        messageId: generateRandomId(),
+                    },
+                );
+            }
+        } catch (error) {
+            console.error("Error waiting for agent end result:", error);
+        }
+    }
     await sdkEmitter.emitState(
         latest.sessionId,
         latest.traceId || "",
@@ -787,4 +829,29 @@ export async function completeActiveSdkFollowupBySessionKey(
     request.rootLifecyclePhase = "end";
     request.modelFallbackPending = false;
     return await completeActiveSdkRequest(request);
+}
+
+export function registerAgentRunEndPromise(runId: string) {
+    if (agentEndResultByRun.has(runId)) {
+        return;
+    }
+    let _resolve: (result: AgentEndResult) => void = () => {};
+    let _reject: (reason?: unknown) => void = () => {};
+    const promise = new Promise<AgentEndResult>((resolve, reject) => {
+        _resolve = resolve;
+        _reject = reject;
+    });
+    agentEndResultByRun.set(runId, {
+        promise,
+        resolve: _resolve,
+        reject: _reject,
+    });
+}
+
+export function getAgentRunEndPromiseResolver(runId: string) {
+    if (!agentEndResultByRun.has(runId)) {
+        return undefined;
+    }
+    const { resolve } = agentEndResultByRun.get(runId) || {};
+    return resolve;
 }

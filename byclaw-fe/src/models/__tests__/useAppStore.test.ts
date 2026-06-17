@@ -12,6 +12,10 @@ jest.mock('@/service/system', () => ({
   bathQryPropertyKey: jest.fn(),
 }));
 
+jest.mock('@/pages/manager/service/NotificationMgr', () => ({
+  getLatestVersionNotification: jest.fn(),
+}));
+
 // Mock zustand persist
 jest.mock('zustand/middleware', () => ({
   devtools: (fn: any) => fn,
