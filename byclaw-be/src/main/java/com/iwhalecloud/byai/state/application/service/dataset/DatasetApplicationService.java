@@ -484,8 +484,7 @@ public class DatasetApplicationService {
      * @param request 检查请求
      * @return 冲突文件路径
      */
-    public KnowledgeUploadConflictCheckResponse checkUploadFileConflicts(
-        KnowledgeUploadConflictCheckRequest request) {
+    public KnowledgeUploadConflictCheckResponse checkUploadFileConflicts(KnowledgeUploadConflictCheckRequest request) {
         if (request == null || request.getResourceId() == null) {
             throw new BaseException("知识库资源标识不能为空");
         }
@@ -717,15 +716,14 @@ public class DatasetApplicationService {
      */
     public List<DirAndFileVo> queryDirAndFileByLevel(DirAndFileQo dirAndFileQo) {
 
-        SsResource ssResource = loadDatasetResource(dirAndFileQo.getResourceId());
-        validateDatasetReadablePermission(ssResource);
-
         KbListDir kbListDir = new KbListDir();
-        if (StringUtil.isNotEmpty(dirAndFileQo.getResourceCode())) {
-            kbListDir.setKnCode(dirAndFileQo.getResourceCode());
+        if (dirAndFileQo.getResourceId() != null) {
+            SsResource ssResource = loadDatasetResource(dirAndFileQo.getResourceId());
+            validateDatasetReadablePermission(ssResource);
+            kbListDir.setKnCode(ssResource.getResourceCode());
         }
         else {
-            kbListDir.setKnCode(ssResource.getResourceCode());
+            kbListDir.setKnCode(dirAndFileQo.getResourceCode());
         }
 
         String listDirectoryPath = normalizeKnowledgeDirectoryPath(dirAndFileQo.getDirectoryPath());

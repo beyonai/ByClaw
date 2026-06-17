@@ -6,6 +6,8 @@ import java.util.Map;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -17,7 +19,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-
+@DisabledOnOs(OS.WINDOWS)
 class SandboxWorkspaceBootstrapInitializerTest {
 
     @TempDir

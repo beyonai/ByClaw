@@ -108,4 +108,6 @@ public class LoginInfo implements Serializable {
      */
     private Boolean isDefaultPwd = false;
 
+    private String language;
+
 }

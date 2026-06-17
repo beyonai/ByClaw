@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelRequest;
 import com.iwhalecloud.byai.manager.entity.aimodel.ByaiAimodel;
 import java.util.List;
+
+import com.iwhalecloud.byai.manager.qo.aimodel.DefaultAiModelQo;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -50,4 +52,11 @@ public interface ByaiAimodelMapper extends BaseMapper<ByaiAimodel> {
 
     List<ByaiAimodel> listModelInner(ModelRequest request);
 
+    /**
+     * 查询默认模型
+     *
+     * @param defaultAiModelQo 查询条件
+     * @return ByaiAimodel
+     */
+    List<ByaiAimodel> listDefaultAiModel(DefaultAiModelQo defaultAiModelQo);
 }
