@@ -1,9 +1,15 @@
 import classNames from 'classnames';
 import { get } from 'lodash';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './index.module.less';
 import { getRuntimeActualUrl } from '@/utils';
 import { getSystemConfigByStorage } from '@/utils/system';
+import useGlobal from '@/hooks/useGlobal';
+
+type ITips = {
+  tips: string;
+  onClick?: () => void;
+};
 
 function TitleWriter({
   className,
@@ -13,6 +19,7 @@ function TitleWriter({
   fullText,
   highlightStart = 1000,
   showAssistant,
+  showAssistantTips = false,
 }: {
   className?: string;
   title: React.ReactNode;
@@ -21,19 +28,48 @@ function TitleWriter({
   fullText: string;
   highlightStart?: number;
   showAssistant?: boolean;
+  showAssistantTips?: boolean;
 }) {
   const [displayText, setDisplayText] = useState<string[]>([]);
   const [displayColorText, setDisplayColorText] = useState<string[]>([]);
   const [videoEnded, setVideoEnded] = useState(true);
 
-  const runner = useRef<NodeJS.Timeout>(undefined);
+  // 助手提示气泡:tipsList 通过事件接收,始终展示第一项,点击后移除当前项;为空时不显示
+  const [tipsList, setTipsList] = useState<ITips[]>([]);
+  const [displayTips, setDisplayTips] = useState('');
 
+  const runner = useRef<NodeJS.Timeout>(undefined);
+  const tipsRunner = useRef<NodeJS.Timeout>(undefined);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const { EventEmitter } = useGlobal();
+
+  const getAssistantVideo = React.useMemo(() => getRuntimeActualUrl('beyond/assistant.mp4'), []);
   const getAssistantIcon = React.useMemo(() => {
     const defaultIcon = getRuntimeActualUrl('beyond/assistant.png');
     return getSystemConfigByStorage().assistant || defaultIcon;
   }, []);
 
-  const getAssistantVideo = React.useMemo(() => getRuntimeActualUrl('beyond/assistant.mp4'), []);
+  const playAssistantVideo = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+
+    setVideoEnded(false);
+    try {
+      video.currentTime = 0;
+    } catch {
+      // Some browsers do not allow seeking before enough metadata is ready.
+    }
+
+    const playPromise = video.play();
+    if (playPromise) {
+      playPromise.catch(() => {
+        setVideoEnded(true);
+      });
+    }
+  }, []);
 
   const loopFN = () => {
     setDisplayText([]);
@@ -78,6 +114,56 @@ function TitleWriter({
     };
   }, [fullText]);
 
+  useEffect(() => {
+    const handler = (list: ITips | ITips[]) => {
+      const next = Array.isArray(list) ? list : [list];
+      setTipsList(next);
+    };
+
+    EventEmitter.on('beyond-titlewriter-set-assistanttips', handler);
+
+    return () => {
+      EventEmitter.off('beyond-titlewriter-set-assistanttips', handler);
+    };
+  }, []);
+
+  // 始终展示第一项,以打字机效果逐字出现
+  useEffect(() => {
+    clearTimeout(tipsRunner.current);
+    const current = get(tipsList, 0);
+    if (!current) {
+      setDisplayTips('');
+      return;
+    }
+
+    const chars = current.tips.split('');
+    let idx = 0;
+    setDisplayTips('');
+    playAssistantVideo();
+
+    const typing = () => {
+      setDisplayTips(chars.slice(0, idx + 1).join(''));
+      if (idx < chars.length - 1) {
+        tipsRunner.current = setTimeout(() => {
+          idx += 1;
+          typing();
+        }, 100);
+      }
+    };
+    typing();
+
+    return () => {
+      clearTimeout(tipsRunner.current);
+    };
+  }, [tipsList, playAssistantVideo]);
+
+  const handleTipsClick = () => {
+    const current = get(tipsList, 0);
+    current?.onClick?.();
+    // 移除当前项,展示下一项;为空时气泡消失
+    setTipsList((prev) => prev.slice(1));
+  };
+
   return (
     <div className={classNames(styles.titleWriter, className, { [styles.withAssistant]: showAssistant })}>
       <div className={styles.title}>
@@ -110,18 +196,25 @@ function TitleWriter({
           <div className={styles.wrapper}>
             <img alt="" src={getAssistantIcon} style={{ display: videoEnded ? 'block' : 'none', width: '100%' }} />
             <video
+              ref={videoRef}
               src={getAssistantVideo}
-              autoPlay
               muted
               playsInline
-              loop
-              // onEnded={() => setVideoEnded(true)}
-              onLoadedData={() => setVideoEnded(false)}
+              // loop
+              onLoadedData={playAssistantVideo}
+              onEnded={() => {
+                videoRef.current?.pause();
+                // setVideoEnded(true);
+              }}
               style={{ display: videoEnded ? 'none' : 'block', width: '100%' }}
               // eslint-disable-next-line react/no-unknown-property
               fetchPriority="low"
             />
-            {/* <div className={styles.tips}>点击查看版本详情</div> */}
+            {showAssistantTips && displayTips && (
+              <div className={styles.tips} onClick={handleTipsClick}>
+                <span className={styles.tipsText}>{displayTips}</span>
+              </div>
+            )}
           </div>
         </div>
       )}

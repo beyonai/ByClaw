@@ -32,7 +32,7 @@ public class ByaiNotification implements Serializable {
     /** 通知内容 */
     private String content;
 
-    /** 通知类型：0-系统通知 1-业务通知 */
+    /** 通知类型：0-系统通知 1-业务通知 2-版本通知 */
     private Short bizType;
 
     /** 优先级:1-低 2-中 3-高 4-紧急 */

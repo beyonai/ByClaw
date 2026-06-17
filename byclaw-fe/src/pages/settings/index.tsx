@@ -78,7 +78,14 @@ const Settings: React.FC = () => {
 
   const versionInfoEntries = versionInfo ? (Object.entries(versionInfo) as VersionInfoEntry[]) : [];
   const versionDetailItems = versionInfoEntries
-    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .filter(([key, value]) => {
+      return (
+        value !== undefined &&
+        value !== null &&
+        value !== '' &&
+        !['commitFull', 'commit', 'commitMsg', 'module'].includes(key)
+      );
+    })
     .map(([key, value]) => ({
       key,
       label: intl.formatMessage({ id: versionDetailLabelIds[key] }),

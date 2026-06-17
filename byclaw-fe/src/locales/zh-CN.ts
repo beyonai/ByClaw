@@ -448,6 +448,7 @@ export default {
   'chat.bottomContent.suggestQuestion': '推荐问题',
   'chat.bottomContent.suggestReplay': '推荐回放',
   'chat.bottomContent.suggestSkill': '推荐技能',
+  'chat.bottomContent.systemNotification': '系统通知',
   'chat.recommendQuestion.noMore': '没有更多了',
   'chat.bottomContent.todo.desc': '条待办事项，请及时处理',
   'chat.bottomContent.todoList.title': '待办事项',

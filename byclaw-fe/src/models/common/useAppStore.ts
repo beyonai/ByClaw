@@ -6,6 +6,10 @@ import { isEmpty, get as lodashGet } from 'lodash';
 import { bathQryPropertyKey } from '@/service/system';
 import { getSandboxInfo } from '@/service/message';
 
+import { getLatestVersionNotification } from '@/pages/manager/service/NotificationMgr';
+
+import type { IVersionInfo, IVersionNotification } from '@/typescript/version';
+
 import type {
   SettingItemKey,
   ISettingConfContent,
@@ -88,16 +92,11 @@ export type IState = {
   sandboxesInfo: ISandboxesInfoState;
   getSandboxesInfoUrl: () => Promise<ISandboxesInfo>;
 
-  versionInfo: null | {
-    version: string;
-    branch: string;
-    commit: string;
-    commitFull: string;
-    buildTime: string;
-    module: string;
-    commitMsg: string;
-  };
+  versionInfo: null | IVersionInfo;
   getVersionInfo: () => void;
+
+  versionNotification: null | IVersionNotification;
+  getVersionNotification: () => Promise<IVersionNotification | null>;
 };
 
 const useAppStore = create<IState>()(
@@ -235,6 +234,26 @@ const useAppStore = create<IState>()(
               const data = await res.json();
               console.log(data);
               set({ versionInfo: data || null });
+            } catch (err) {
+              console.log(err);
+            }
+          },
+
+          versionNotification: null,
+          getVersionNotification: async () => {
+            if (get().versionNotification) {
+              return get().versionNotification;
+            }
+
+            try {
+              const res = await getLatestVersionNotification();
+              if (res && res?.code === 0) {
+                set({ versionNotification: res.data || null });
+
+                return res.data || null;
+              }
+
+              return null;
             } catch (err) {
               console.log(err);
             }

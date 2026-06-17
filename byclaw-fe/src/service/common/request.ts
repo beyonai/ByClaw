@@ -21,7 +21,7 @@ export interface ConfigType {
   responseCfg?: {
     hideErrorTips?: boolean;
     customHandle?: boolean;
-  };
+  } & Record<string, unknown>;
 }
 
 interface ResponseDataType {

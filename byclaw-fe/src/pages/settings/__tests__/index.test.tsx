@@ -76,12 +76,12 @@ describe('Settings version info', () => {
   it('expands version details after clicking the version button', () => {
     render(<Settings />);
 
-    expect(screen.queryByText('abc123')).not.toBeInTheDocument();
+    expect(screen.queryByText('main')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '1.2.3' }));
 
-    expect(screen.getByText('abc123')).toBeInTheDocument();
-    expect(screen.getByText('byclaw-fe')).toBeInTheDocument();
-    expect(screen.getByText('feat: show version details')).toBeInTheDocument();
+    expect(screen.getByText('main')).toBeInTheDocument();
+    expect(screen.getByText('2026-06-16 10:00:00')).toBeInTheDocument();
+    expect(screen.queryByText('abc123')).not.toBeInTheDocument();
   });
 });
