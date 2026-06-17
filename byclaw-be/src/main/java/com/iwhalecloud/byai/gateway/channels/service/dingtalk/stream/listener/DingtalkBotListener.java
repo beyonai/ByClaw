@@ -309,7 +309,8 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
         }
 
         DingtalkCardStreamingOutputStream outputStream =
-                new DingtalkCardStreamingOutputStream(objectMapper, dingtalkCardService, cardSession);
+                new DingtalkCardStreamingOutputStream(objectMapper, dingtalkCardService, cardSession,
+                        null, CurrentUserHolder.getCurrentUserCode());
         try {
             channelService.chat(assistantChatDto, outputStream);
             outputStream.finish();
