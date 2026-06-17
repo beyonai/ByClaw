@@ -12,6 +12,7 @@ from pathlib import Path
 
 from kgw.observability.logger import get_logger
 from psycopg.rows import dict_row
+from psycopg.sql import SQL, Identifier
 from psycopg_pool import AsyncConnectionPool
 
 _log = get_logger(__name__)
@@ -44,8 +45,13 @@ async def build_pool(
     return pool
 
 
-async def run_migrations(pool: AsyncConnectionPool, sql_dir: Path) -> list[str]:
+async def run_migrations(
+    pool: AsyncConnectionPool, sql_dir: Path, *, schema: str = ""
+) -> list[str]:
     """Apply each ``NNN_*.sql`` in ``sql_dir`` once; return newly applied names.
+
+    If *schema* is non-empty, ``CREATE SCHEMA IF NOT EXISTS`` is issued
+    before migrations so that the search_path target always exists.
 
     Files not matching ``*.sql`` (case-insensitive suffix) are ignored, regardless of name prefix. Files are
     applied in lexical order of filename. Each migration is a single
@@ -58,6 +64,10 @@ async def run_migrations(pool: AsyncConnectionPool, sql_dir: Path) -> list[str]:
     files = sorted(p for p in sql_dir.iterdir() if p.suffix.lower() == ".sql")
 
     async with pool.connection() as conn:
+        if schema:
+            await conn.execute(
+                SQL("CREATE SCHEMA IF NOT EXISTS {}").format(Identifier(schema))
+            )
         await conn.execute(_MIGRATION_TABLE_DDL)
         # Read already-applied files in the same transaction as DDL creation.
         cur = await conn.execute("SELECT filename FROM kgw_migration")

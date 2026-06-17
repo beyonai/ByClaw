@@ -56,7 +56,7 @@ async def _lifespan(app: FastAPI):  # pylint: disable=redefined-outer-name
         min_size=settings.db_pool_min_size,
         max_size=settings.db_pool_max_size,
     )
-    await run_migrations(pool, _sql_dir())
+    await run_migrations(pool, _sql_dir(), schema=settings.db_schema)
 
     redis_client = redis_async.from_url(settings.redis_url, decode_responses=False)
 
