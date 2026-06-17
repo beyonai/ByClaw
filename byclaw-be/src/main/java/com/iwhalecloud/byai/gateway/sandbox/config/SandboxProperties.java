@@ -116,7 +116,7 @@ public class SandboxProperties {
         private boolean listSandboxesBeforeCreate = true;
 
         /**
-         * 列表接口路径（相对 baseUrl），默认 GET /v1/sandboxes?userCode=&serviceKey=
+         * 列表接口路径（相对 baseUrl），默认 GET /v1/sandboxes?metadata=userCode%3D...%26serviceKey%3D...
          */
         private String listSandboxesPath = "/v1/sandboxes";
 
