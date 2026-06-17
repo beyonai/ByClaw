@@ -1548,6 +1548,41 @@ class DataCloudWorker(GatewayWorker):
             else "None (dynamic agents will skip OWL inject)",
         )
 
+        # 扩展本体池：从所有 AgentConfig 的 mounted_objects 收集全量对象，
+        # 加载到 TOOL_POOL（全部 LOCKED）。
+        # 不再依赖 extResourceList（已废弃），统一由 relResourceList 声明对象。
+        # 超过 TOOL_POOL_THRESHOLD 时启用锚点驱动模式（is_anchor_mode()==True）。
+        if self._resource_path and self._shared_loader is not None:
+            _all_object_codes: list[str] = list(dict.fromkeys(
+                code
+                for cfg in self.plugin_registry.get_agent_configs_snapshot()
+                for code in (cfg.extra.get("mounted_objects") or [])
+                if isinstance(code, str)
+            ))
+            if _all_object_codes:
+                try:
+                    from datacloud_analysis.tools.tool_pool import (  # noqa: PLC0415
+                        _init_ext_tool_pool,
+                    )
+
+                    _init_ext_tool_pool(
+                        resource_path=self._resource_path,
+                        loader=self._shared_loader,
+                        ext_codes=_all_object_codes,
+                    )
+                    logger.info(
+                        "DataCloudWorker: TOOL_POOL initialized all_codes_count=%d",
+                        len(_all_object_codes),
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "DataCloudWorker: _init_ext_tool_pool failed", exc_info=True
+                    )
+            else:
+                logger.info(
+                    "DataCloudWorker: no mounted_objects found, TOOL_POOL init skipped"
+                )
+
     async def _resolve_agent_configs_snapshot(
         self,
         execution: Any,

@@ -22,6 +22,7 @@ export default {
   'menu.systemParams.system': 'Parameter Configuration',
   'menu.systemParams.modal': 'Model Configuration',
   'menu.systemParams.sandbox': 'Sandbox',
+  'menu.business.notification': 'Notification',
   'common.add': 'Add',
   'common.edit': 'Edit',
   'common.view': 'View',

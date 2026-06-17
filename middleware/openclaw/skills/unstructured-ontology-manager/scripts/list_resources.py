@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """查询个人本体对象列表（非结构化，仅 OBJECT 类型）。
 
 I/O 协议：stdin JSON → stdout JSON

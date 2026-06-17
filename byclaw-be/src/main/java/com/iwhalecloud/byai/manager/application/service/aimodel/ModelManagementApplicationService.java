@@ -69,8 +69,8 @@ public class ModelManagementApplicationService {
     private static final List<String> REASONING_CAPABILITIES = List.of("unsupported", "binary", "effort", "budget",
         "adaptive");
 
-    private static final List<String> REASONING_COMPAT_FORMATS = List.of("auto", "openai", "qwen",
-        "qwen-chat-template", "deepseek", "openrouter", "together", "zai", "anthropic");
+    private static final List<String> REASONING_COMPAT_FORMATS = List.of("auto", "openai", "qwen", "qwen-chat-template",
+        "deepseek", "openrouter", "together", "zai", "anthropic");
 
     @Autowired
     private ByaiAimodelDomainService byaiAimodelDomainService;
@@ -203,12 +203,9 @@ public class ModelManagementApplicationService {
         if (CollectionUtils.isEmpty(employeeNames)) {
             return;
         }
-        String employeeNameText = employeeNames.stream()
-            .filter(StringUtil::isNotEmpty)
-            .distinct()
+        String employeeNameText = employeeNames.stream().filter(StringUtil::isNotEmpty).distinct()
             .collect(Collectors.joining("、"));
-        throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001,
-            I18nUtil.get(messageKey, employeeNameText));
+        throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, I18nUtil.get(messageKey, employeeNameText));
     }
 
     /**
@@ -303,9 +300,8 @@ public class ModelManagementApplicationService {
         for (Map.Entry<String, Integer> entry : config.getBudgets().entrySet()) {
             String level = normalizeReasoningString(entry.getKey(), "");
             Integer budget = entry.getValue();
-            if (!REASONING_LEVELS.contains(level) || "off".equals(level) || "adaptive".equals(level)
-                || budget == null || budget < 1
-                || (maxTokens != null && maxTokens > 0 && budget >= maxTokens)) {
+            if (!REASONING_LEVELS.contains(level) || "off".equals(level) || "adaptive".equals(level) || budget == null
+                || budget < 1 || (maxTokens != null && maxTokens > 0 && budget >= maxTokens)) {
                 throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.reasoning.invalid");
             }
         }
@@ -386,8 +382,8 @@ public class ModelManagementApplicationService {
         if (inParams.get("reasoningConfig") == null) {
             return;
         }
-        vo.setReasoningConfig(JSON.parseObject(JSON.toJSONString(inParams.get("reasoningConfig")),
-            ModelReasoningConfig.class));
+        vo.setReasoningConfig(
+            JSON.parseObject(JSON.toJSONString(inParams.get("reasoningConfig")), ModelReasoningConfig.class));
     }
 
     /**
@@ -540,6 +536,7 @@ public class ModelManagementApplicationService {
         entity.setModelName(request.getDisplayName());
         entity.setModelNo(request.getModelCode());
         entity.setModelType(request.getModelType() != null ? request.getModelType() : "LLM");
+        entity.setModelProtocol(request.getModelProtocol());
         entity.setStatus(ModelStatusEnum
             .toDbCode(request.getStatus() != null ? request.getStatus() : ModelStatusEnum.DISABLED.name()));
         entity.setUrl(request.getApiEndpoint());
@@ -625,10 +622,6 @@ public class ModelManagementApplicationService {
         return byaiAimodelDomainService.listModel(request);
     }
 
-    public List<ByaiAimodel> listModelInner(ModelRequest request) {
-        request.setStatus(Constants.STATUS_ENABLED);
-        return byaiAimodelDomainService.listModelInner(request);
-    }
 
     public String getDefaultModelId() {
         return getDefaultModelId(DEFAULT_MODEL_TYPE_LLM);
@@ -744,11 +737,8 @@ public class ModelManagementApplicationService {
     }
 
     private boolean hasEnabledDefaultModelForType(String modelType) {
-        return byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL, DEFAULT_MODEL_TAG_ID)
-            .stream()
-            .map(ByaiTagRelation::getObjId)
-            .distinct()
-            .map(byaiAimodelDomainService::getById)
+        return byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL, DEFAULT_MODEL_TAG_ID).stream()
+            .map(ByaiTagRelation::getObjId).distinct().map(byaiAimodelDomainService::getById)
             .anyMatch(model -> model != null
                 && modelType.equals(normalizeModelType(model.getModelType(), DEFAULT_MODEL_TYPE_LLM))
                 && ModelStatusEnum.isEnabledDb(model.getStatus()));
@@ -758,8 +748,7 @@ public class ModelManagementApplicationService {
         if (modelId == null) {
             return false;
         }
-        return byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL, DEFAULT_MODEL_TAG_ID)
-            .stream()
+        return byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL, DEFAULT_MODEL_TAG_ID).stream()
             .anyMatch(relation -> modelId.equals(relation.getObjId()));
     }
 

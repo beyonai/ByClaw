@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.sandbox.job;
 
+import com.iwhalecloud.byai.gateway.sandbox.config.SandboxJobSchedulerConfiguration;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLifecycleJobReport;
 import org.slf4j.Logger;
@@ -24,7 +25,9 @@ public class SandboxCleanupJob {
     /**
      * 定时清理超时沙箱，默认每分钟检测一次。
      */
-    @Scheduled(fixedDelayString = "${sandbox.cleanup.fixed-delay:60000}")
+    @Scheduled(fixedDelayString = "${sandbox.cleanup.fixed-delay:60000}",
+        initialDelayString = "${sandbox.cleanup.initial-delay:35000}",
+        scheduler = SandboxJobSchedulerConfiguration.SANDBOX_JOB_TASK_SCHEDULER)
     public void cleanupExpiredSandboxes() {
         LOGGER.info("开始执行沙箱清理任务");
         try {

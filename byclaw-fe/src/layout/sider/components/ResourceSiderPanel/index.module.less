@@ -35,6 +35,63 @@
   overflow-x: hidden;
 }
 
+.searchActionRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+}
+
+.skillUploadInput {
+  display: none;
+}
+
+.skillUploadButton {
+  flex: none;
+  min-width: 64px;
+  height: 30px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+}
+
+.skillActionBar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.skillActionButton {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  :global(.@{antPrefix}-btn-icon),
+  :global(.@{antPrefix}-btn-loading-icon) {
+    flex: none;
+  }
+
+  :global(.@{antPrefix}-btn-icon + span),
+  :global(.@{antPrefix}-btn-loading-icon + span) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 .resourceItem {
   cursor: default;
 }
@@ -89,7 +146,7 @@
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background-color: rgba(22, 93, 255, 0.08);
+  // background-color: rgba(22, 93, 255, 0.08);
   color: var(--beyond-color-primary);
   position: relative;
 

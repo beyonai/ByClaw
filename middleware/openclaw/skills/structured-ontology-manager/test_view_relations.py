@@ -1,8 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """服务器端测试脚本：验证视图 OWL 生成包含 _relations.owl 并上传成功。
 
 运行方式：
-    /tmp/ont_env/bin/python /by/.openclaw/workspace-baiying-agent-10002029/skills/structured-ontology-manager/test_view_relations.py
+    /usr/local/bin/python3 /by/.openclaw/workspace-baiying-agent-10002029/skills/structured-ontology-manager/test_view_relations.py
 """
 from __future__ import annotations
 

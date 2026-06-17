@@ -7,6 +7,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.SystemCode;
@@ -91,6 +93,16 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 public class DatasetApplicationService {
 
     public static final Logger logger = LoggerFactory.getLogger(DatasetApplicationService.class);
+
+    /**
+     * 知识库目录搜索递归深度保护，避免异常目录结构导致接口耗时失控。
+     */
+    private static final int KNOWLEDGE_DIR_SEARCH_MAX_DEPTH = 20;
+
+    /**
+     * 知识库目录搜索最多返回数量。左侧面板只用于定位文件，命中太多时应通过更精确关键字缩小范围。
+     */
+    private static final int KNOWLEDGE_DIR_SEARCH_MAX_RESULT_SIZE = 500;
 
     @Autowired
     private SsResourceService ssResourceService;
@@ -484,8 +496,7 @@ public class DatasetApplicationService {
      * @param request 检查请求
      * @return 冲突文件路径
      */
-    public KnowledgeUploadConflictCheckResponse checkUploadFileConflicts(
-        KnowledgeUploadConflictCheckRequest request) {
+    public KnowledgeUploadConflictCheckResponse checkUploadFileConflicts(KnowledgeUploadConflictCheckRequest request) {
         if (request == null || request.getResourceId() == null) {
             throw new BaseException("知识库资源标识不能为空");
         }
@@ -592,6 +603,13 @@ public class DatasetApplicationService {
         SsResource ssResource = loadDatasetResource(resourceId);
         validateDatasetReadablePermission(ssResource);
 
+        boolean directoryDownload = StringUtils.endsWith(StringUtils.trimToEmpty(directoryPath).replace('\\', '/'),
+            "/");
+        if (directoryDownload) {
+            downloadKnowledgeDirectoryZip(ssResource, directoryPath, response);
+            return;
+        }
+
         // 提取参数
         KbFileDownload kbFileDownload = new KbFileDownload();
         kbFileDownload.setKnCode(ssResource.getResourceCode());
@@ -610,6 +628,62 @@ public class DatasetApplicationService {
         catch (Exception e) {
             logger.error(e.getMessage(), e);
         }
+    }
+
+    /**
+     * 目录下载按 zip 包输出，和文件管理里的文件夹下载体验保持一致。
+     */
+    private void downloadKnowledgeDirectoryZip(SsResource ssResource, String directoryPath,
+        HttpServletResponse response) {
+        String normalizedDirectoryPath = normalizeKnowledgeDirectoryPath(directoryPath);
+        String directoryName = getLastSplitName(normalizedDirectoryPath);
+        String zipFileName = StringUtils.defaultIfBlank(directoryName,
+            StringUtils.defaultIfBlank(ssResource.getResourceName(), "knowledge")) + ".zip";
+
+        response.setContentType("application/zip");
+        response.setHeader("Content-Disposition",
+            "attachment;filename=" + URLEncoder.encode(zipFileName, StandardCharsets.UTF_8));
+
+        try (
+            ZipOutputStream zipOutputStream = new ZipOutputStream(response.getOutputStream(), StandardCharsets.UTF_8)) {
+            addKnowledgeDirectoryToZip(ssResource.getResourceCode(), normalizedDirectoryPath, "", zipOutputStream);
+        }
+        catch (Exception e) {
+            logger.error("下载知识库目录失败 directoryPath={}", directoryPath, e);
+        }
+    }
+
+    private void addKnowledgeDirectoryToZip(String knCode, String directoryPath, String relativePrefix,
+        ZipOutputStream zipOutputStream) throws IOException {
+        List<DirAndFileVo> children = listKnowledgeDir(knCode, directoryPath);
+        for (DirAndFileVo child : children) {
+            String entryName = sanitizeZipEntryName(child.getName());
+            if (StringUtils.isBlank(entryName)) {
+                continue;
+            }
+            if ("directory".equalsIgnoreCase(child.getType())) {
+                String directoryEntryName = relativePrefix + entryName + "/";
+                zipOutputStream.putNextEntry(new ZipEntry(directoryEntryName));
+                zipOutputStream.closeEntry();
+                addKnowledgeDirectoryToZip(knCode, child.getDirectoryPath(), directoryEntryName, zipOutputStream);
+                continue;
+            }
+
+            String filePath = normalizeKnowledgeFilePath(child.getDirectoryPath());
+            KbFileDownload kbFileDownload = new KbFileDownload();
+            kbFileDownload.setKnCode(knCode);
+            kbFileDownload.setFilePath(filePath);
+            zipOutputStream
+                .putNextEntry(new ZipEntry(relativePrefix + sanitizeZipEntryName(getLastSplitName(filePath))));
+            try (InputStream inputStream = feignPythonBuildService.fileDownload(kbFileDownload)) {
+                IOUtils.copy(inputStream, zipOutputStream);
+            }
+            zipOutputStream.closeEntry();
+        }
+    }
+
+    private String sanitizeZipEntryName(String name) {
+        return StringUtils.trimToEmpty(name).replace('\\', '_').replace('/', '_');
     }
 
     /**
@@ -717,19 +791,72 @@ public class DatasetApplicationService {
      */
     public List<DirAndFileVo> queryDirAndFileByLevel(DirAndFileQo dirAndFileQo) {
 
-        SsResource ssResource = loadDatasetResource(dirAndFileQo.getResourceId());
-        validateDatasetReadablePermission(ssResource);
-
-        KbListDir kbListDir = new KbListDir();
-        if (StringUtil.isNotEmpty(dirAndFileQo.getResourceCode())) {
-            kbListDir.setKnCode(dirAndFileQo.getResourceCode());
+        String knCode = null;
+        if (dirAndFileQo.getResourceId() != null) {
+            SsResource ssResource = loadDatasetResource(dirAndFileQo.getResourceId());
+            validateDatasetReadablePermission(ssResource);
+            knCode = resolveKnowledgeCode(dirAndFileQo, ssResource);
         }
         else {
-            kbListDir.setKnCode(ssResource.getResourceCode());
+            // openApi接口查询不做校验
+            knCode = dirAndFileQo.getResourceCode();
         }
 
         String listDirectoryPath = normalizeKnowledgeDirectoryPath(dirAndFileQo.getDirectoryPath());
-        kbListDir.setDirectoryPath(listDirectoryPath);
+        return listKnowledgeDir(knCode, listDirectoryPath);
+    }
+
+    /**
+     * 按关键字递归搜索知识库目录和文件。 目录和文件可能存在同名、多层同名，返回结果必须携带完整 directoryPath，前端据此构建唯一树节点。
+     */
+    public List<DirAndFileVo> searchDirAndFile(DirAndFileQo dirAndFileQo) {
+        SsResource ssResource = loadDatasetResource(dirAndFileQo.getResourceId());
+        validateDatasetReadablePermission(ssResource);
+
+        String keyword = StringUtils.trimToEmpty(dirAndFileQo.getKeyword());
+        List<DirAndFileVo> resultList = new ArrayList<>();
+        if (StringUtils.isBlank(keyword)) {
+            return resultList;
+        }
+
+        String knCode = resolveKnowledgeCode(dirAndFileQo, ssResource);
+        String rootDirectoryPath = normalizeKnowledgeDirectoryPath(dirAndFileQo.getDirectoryPath());
+        searchKnowledgeDir(knCode, rootDirectoryPath, keyword.toLowerCase(), 0, resultList);
+        return resultList;
+    }
+
+    private String resolveKnowledgeCode(DirAndFileQo dirAndFileQo, SsResource ssResource) {
+        if (StringUtil.isNotEmpty(dirAndFileQo.getResourceCode())) {
+            return dirAndFileQo.getResourceCode();
+        }
+        return ssResource.getResourceCode();
+    }
+
+    private void searchKnowledgeDir(String knCode, String directoryPath, String keyword, int depth,
+        List<DirAndFileVo> resultList) {
+        if (depth > KNOWLEDGE_DIR_SEARCH_MAX_DEPTH || resultList.size() >= KNOWLEDGE_DIR_SEARCH_MAX_RESULT_SIZE) {
+            return;
+        }
+
+        List<DirAndFileVo> currentLevelItems = listKnowledgeDir(knCode, directoryPath);
+        for (DirAndFileVo item : currentLevelItems) {
+            if (resultList.size() >= KNOWLEDGE_DIR_SEARCH_MAX_RESULT_SIZE) {
+                return;
+            }
+            String itemName = StringUtils.trimToEmpty(item.getName());
+            if (StringUtils.containsIgnoreCase(itemName, keyword)) {
+                resultList.add(item);
+            }
+            if ("directory".equalsIgnoreCase(item.getType())) {
+                searchKnowledgeDir(knCode, item.getDirectoryPath(), keyword, depth + 1, resultList);
+            }
+        }
+    }
+
+    private List<DirAndFileVo> listKnowledgeDir(String knCode, String directoryPath) {
+        KbListDir kbListDir = new KbListDir();
+        kbListDir.setKnCode(knCode);
+        kbListDir.setDirectoryPath(normalizeKnowledgeDirectoryPath(directoryPath));
         PythonBuildResponse<Data> response = feignPythonBuildService.listDir(kbListDir);
         assertPythonBuildSuccess(response, "查询知识库目录");
         Data resultObject = response.getResultObject();

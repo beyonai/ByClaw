@@ -186,6 +186,27 @@
         </where>
     </select>
 
+    <select id="listCronPrewarmCandidateUsers" resultMap="usersResultMap">
+        select u.user_id,
+               u.user_code
+        from po_users u
+        where u.state = #{state}
+          and u.user_code is not null
+          and u.last_login_date is not null
+          and u.last_login_date <![CDATA[>=]]> #{recentLoginSince}
+          and u.user_id <![CDATA[>]]> #{cursorUserId}
+          and not exists (
+              select 1
+              from ss_sandbox_record r
+              where r.user_code = u.user_code
+                and r.sandbox_type = #{sandboxType}
+                and r.resource_id = #{resourceId}
+                and r.status = 'RUNNING'
+          )
+        order by u.user_id asc
+        limit #{limit}
+    </select>
+
     <select id="findUserIdsByOrgId" resultType="java.lang.Long" parameterType="java.lang.Long">
         select a.user_id
         from po_users a

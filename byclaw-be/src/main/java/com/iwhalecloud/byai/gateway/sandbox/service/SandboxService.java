@@ -19,6 +19,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -77,6 +78,8 @@ public class SandboxService {
     private static final Logger LOGGER = LoggerFactory.getLogger(SandboxService.class);
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    private static final AtomicInteger RECONCILE_POOL_SEQUENCE = new AtomicInteger(1);
 
     /** 沙箱状态：运行中 */
     private static final String STATUS_RUNNING = "RUNNING";
@@ -1404,7 +1407,7 @@ public class SandboxService {
         }
 
         int concurrency = Math.max(1, reconcileRemoteConcurrency);
-        ExecutorService executorService = Executors.newFixedThreadPool(concurrency);
+        ExecutorService executorService = Executors.newFixedThreadPool(concurrency, newReconcileThreadFactory());
         AtomicInteger remainingRecords = new AtomicInteger(Math.max(1, reconcileMaxRecordsPerRun));
         long deadline = System.currentTimeMillis() + Math.max(1L, reconcileMaxDurationMs);
         try {
@@ -1453,6 +1456,17 @@ public class SandboxService {
             total, report.getScannedCount(), report.getAffectedCount(), report.getSkippedCount(), report.getFailedCount(),
             report.getAffectedSandboxes(), report.getSkippedSandboxes(), report.getFailedSandboxes());
         return report;
+    }
+
+    private static ThreadFactory newReconcileThreadFactory() {
+        int poolIndex = RECONCILE_POOL_SEQUENCE.getAndIncrement();
+        AtomicInteger threadIndex = new AtomicInteger(1);
+        ThreadFactory delegate = Executors.defaultThreadFactory();
+        return runnable -> {
+            Thread thread = delegate.newThread(runnable);
+            thread.setName("sandbox-reconcile-" + poolIndex + "-" + threadIndex.getAndIncrement());
+            return thread;
+        };
     }
 
     private SandboxLifecycleJobReport reconcileGroup(SandboxReconcileGroup group, AtomicInteger remainingRecords,

@@ -51,15 +51,20 @@ public class SandboxCronPrewarmService {
 
     public SandboxCronPrewarmReport prewarmDueCronSandboxes() {
         SandboxCronPrewarmReport report = new SandboxCronPrewarmReport();
-        List<String> userCodes = userProvider.listUserCodes();
+        List<SandboxCronPrewarmUserCandidate> users = userProvider.listUsers();
         int launchesRemaining = properties.normalizedMaxLaunchesPerRun();
 
-        for (String userCode : userCodes) {
+        for (SandboxCronPrewarmUserCandidate user : users) {
             if (launchesRemaining <= 0) {
                 break;
             }
             report.incrementScannedUsers();
-            launchesRemaining -= scanUser(userCode, report, launchesRemaining);
+            try {
+                launchesRemaining -= scanUser(user.getUserCode(), report, launchesRemaining);
+            }
+            finally {
+                userProvider.markScanned(user);
+            }
         }
 
         return report;

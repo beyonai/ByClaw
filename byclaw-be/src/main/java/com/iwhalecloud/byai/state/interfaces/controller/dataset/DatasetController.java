@@ -183,6 +183,17 @@ public class DatasetController {
     }
 
     /**
+     * 按关键字递归搜索知识库目录和文件。
+     *
+     * @return ResponseUtil
+     */
+    @PostMapping("/searchDirAndFile")
+    public ResponseUtil<List<DirAndFileVo>> searchDirAndFile(@RequestBody DirAndFileQo dirAndFileQo) {
+        List<DirAndFileVo> dirAndFileVos = datasetApplicationService.searchDirAndFile(dirAndFileQo);
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"), dirAndFileVos);
+    }
+
+    /**
      * 上传前检查同路径同名文件，供前端做覆盖确认。
      *
      * @param request 检查请求

@@ -31,6 +31,8 @@ public class SandboxCronPrewarmProperties {
 
     private int snapshotCopyRetry = 1;
 
+    private long scanLockTtlSeconds = 300L;
+
     private String userCodes;
 
     public boolean isEnabled() {
@@ -121,6 +123,14 @@ public class SandboxCronPrewarmProperties {
         this.snapshotCopyRetry = snapshotCopyRetry;
     }
 
+    public long getScanLockTtlSeconds() {
+        return scanLockTtlSeconds;
+    }
+
+    public void setScanLockTtlSeconds(long scanLockTtlSeconds) {
+        this.scanLockTtlSeconds = scanLockTtlSeconds;
+    }
+
     public String getUserCodes() {
         return userCodes;
     }
@@ -143,5 +153,9 @@ public class SandboxCronPrewarmProperties {
 
     public int normalizedSnapshotCopyRetry() {
         return Math.max(1, snapshotCopyRetry);
+    }
+
+    public long normalizedScanLockTtlSeconds() {
+        return Math.max(1L, scanLockTtlSeconds);
     }
 }

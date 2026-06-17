@@ -5,18 +5,21 @@ import {
   markActiveSdkOutboundSending,
   resolveActiveSdkRequestBySessionKey,
   resolveActiveSdkRequestByTarget,
+  resolveActiveSdkRunBinding,
+  getAgentRunEndPromiseResolver,
 } from "./session-context.js";
 import {
   cancelActiveSdkCompletionCheck,
   scheduleActiveSdkCompletionCheck,
 } from "./sdk-session-completion.js";
 import type { OpenClawPluginApi } from "@openclaw/plugin-sdk/core";
-import type { Language } from "./types.js";
+import type { Language, PluginHookAgentContext, PluginHookAgentEndEvent } from "./types.js";
 import {
   BYAI_USER_MD_SECTION_END,
   BYAI_USER_MD_SECTION_START,
   buildChannelExtensionPrompt,
   buildLanguagePrompt,
+  buildMaxTokenErrorText,
   buildSessionFilesPrompt,
   buildUserMdByaiUserSection,
   buildUserMdReloadPrompt,
@@ -344,5 +347,57 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
         api.logger.error(`[byai-channel] message_sent enqueue failed: ${String(err)}`);
       });
     });
+  });
+
+  api.on("agent_end", (event: PluginHookAgentEndEvent, ctx: PluginHookAgentContext) => {
+    api.logger.info(
+      `agent_end hook emits, runId=${ctx.runId}, success=${event.success}, error=${event.error}`,
+    );
+    const { runId } = ctx;
+    if (!runId) {
+      return;
+    }
+    const language = resolveActiveSdkRunBinding(runId)?.request?.language;
+    const resolve = getAgentRunEndPromiseResolver(runId);
+    let _success = event.success;
+    let _error = event.error;
+    // stopReason=length 等部分情况下，虽然 event.success = true。但是业务上可以认为失败了。
+    if (_success && Array.isArray(event.messages) && event.messages.length) {
+      const lastAssistant = event.messages
+        .slice()
+        .toReversed()
+        .find((message) => {
+          if (message && typeof message === "object" && "role" in message) {
+            return message.role === "assistant";
+          }
+          return false;
+        });
+      if (lastAssistant) {
+        const {
+          stopReason,
+          errorMessage,
+        } = lastAssistant as {
+          stopReason?: string;
+          errorMessage?: string;
+        }
+        if (errorMessage) {
+          _success = false;
+          _error = errorMessage;
+        } else if (stopReason === "length") {
+          _success = false;
+          _error = buildMaxTokenErrorText(language);
+        } else if (stopReason === "aborted") {
+          // 兜底。正常来说 stopReason=aborted 时，error=true, 且有 errorMessage
+          _success = false;
+          _error = "The request was interrupted (timed out or cancelled voluntarily) and the reply could not be completed. Please try again.";
+        }
+      }
+    }
+    if (resolve) {
+      resolve({
+        success: _success,
+        error: _error,
+      });
+    }
   });
 }

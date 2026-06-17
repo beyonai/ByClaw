@@ -35,6 +35,7 @@ const localeIdByPath: Record<string, string> = {
   '/manager/systemParams/system': 'menu.systemParams.system',
   '/manager/systemParams/modal': 'menu.systemParams.modal',
   '/manager/systemParams/sandbox': 'menu.systemParams.sandbox',
+  '/manager/notification': 'menu.business.notification',
 };
 
 export const fallbackMenuConfig = [
@@ -79,6 +80,13 @@ export const fallbackMenuConfig = [
     name: '沙箱配置管理',
     localeId: 'menu.systemParams.sandbox',
     icon: CodeSandboxOutlined,
+    adminVipOnly: true,
+  },
+  {
+    path: '/manager/notification',
+    name: '通知管理',
+    localeId: 'menu.business.notification',
+    icon: ExperimentOutlined,
     adminVipOnly: true,
   },
 ];

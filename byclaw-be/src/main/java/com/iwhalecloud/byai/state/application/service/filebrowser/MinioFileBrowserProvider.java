@@ -157,6 +157,24 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
     }
 
     @Override
+    public void copy(String userCode, Long resourceId, String sourcePath, String targetDirectory) {
+        String bucket = resolveBucket(userCode);
+        String targetAbsolute = resolveAbsolutePath(resourceId, normalizeDirPath(targetDirectory));
+        String sourceAbsolute = resolveAbsolutePath(resourceId, sourcePath);
+
+        objectStorage.put(buildLocation(bucket, targetAbsolute), InputStream.nullInputStream(), 0L,
+            "application/x-directory");
+
+        if (sourcePath.endsWith("/")) {
+            copyDirectory(bucket, sourceAbsolute, targetAbsolute);
+        } else {
+            String fileName = extractFileName(sourceAbsolute);
+            objectStorage.copy(buildLocation(bucket, sourceAbsolute), buildLocation(bucket, targetAbsolute + fileName));
+        }
+        LOGGER.info("文件复制成功: bucket={}, {} -> {}", bucket, sourceAbsolute, targetAbsolute);
+    }
+
+    @Override
     public void createFolder(String userCode, Long resourceId, String relativePath) {
         String bucket = resolveBucket(userCode);
         String folderKey = resolveAbsolutePath(resourceId, normalizeDirPath(relativePath));
@@ -168,8 +186,6 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
     public List<FileBrowserItemVo> search(String userCode, Long resourceId, String relativePath, String keyword) {
         String bucket = resolveBucket(userCode);
         String prefix = resolveAbsolutePath(resourceId, normalizeDirPath(relativePath));
-        String lowerKeyword = keyword.toLowerCase();
-
         List<StorageObject> items = objectStorage.list(buildPrefix(bucket, prefix, true), null);
         List<FileBrowserItemVo> result = new ArrayList<>();
 
@@ -180,7 +196,7 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
             }
             boolean isDir = item.isDir() || objectName.endsWith("/");
             String fileName = extractFileName(objectName);
-            if (!fileName.toLowerCase().contains(lowerKeyword)) {
+            if (!FileBrowserSearchMatcher.matches(fileName, toRelativePath(objectName), keyword)) {
                 continue;
             }
             FileBrowserItemVo vo = new FileBrowserItemVo();
@@ -269,6 +285,33 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
             return rel.isEmpty() ? "/" : "/" + rel;
         }
         return absolutePath;
+    }
+
+    private void copyDirectory(String bucket, String sourceAbsolute, String targetAbsolute) {
+        String sourcePrefix = normalizeDirPath(sourceAbsolute);
+        String dirName = extractDirName(sourcePrefix,
+            sourcePrefix.substring(0, sourcePrefix.lastIndexOf('/', sourcePrefix.length() - 2) + 1));
+        String targetPrefix = targetAbsolute + dirName + "/";
+        if (targetPrefix.startsWith(sourcePrefix)) {
+            throw new IllegalArgumentException("不能复制文件夹到自身或其子目录下");
+        }
+
+        objectStorage.put(buildLocation(bucket, targetPrefix), InputStream.nullInputStream(), 0L,
+            "application/x-directory");
+        List<StorageObject> items = objectStorage.list(buildPrefix(bucket, sourcePrefix, true), null);
+        for (StorageObject item : items) {
+            String objectName = item.getPath();
+            if (objectName.equals(sourcePrefix)) {
+                continue;
+            }
+            String newKey = targetPrefix + objectName.substring(sourcePrefix.length());
+            if (item.isDir() || objectName.endsWith("/")) {
+                objectStorage.put(buildLocation(bucket, normalizeDirPath(newKey)), InputStream.nullInputStream(), 0L,
+                    "application/x-directory");
+            } else {
+                objectStorage.copy(buildLocation(bucket, objectName), buildLocation(bucket, newKey));
+            }
+        }
     }
 
     private String extractFileName(String objectName) {

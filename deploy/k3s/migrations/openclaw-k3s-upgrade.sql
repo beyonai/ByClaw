@@ -116,7 +116,13 @@ SELECT
       {"port": 8082, "instance": "filebrowser", "protocol": "http"},
       {"port": 9222, "protocol": "http"}
     ],
-    "startup": {"entrypoint": ["/usr/local/bin/startAll.sh"]},
+    "startup": {
+      "entrypoint": [
+        "/bin/sh",
+        "-lc",
+        "umask 0000; mkdir -p /by/.sessions /by/.openclaw; chmod a+rwx /by /by/.sessions /by/.openclaw 2>/dev/null || true; chmod -R a+rwX /by/.sessions /by/.openclaw 2>/dev/null || true; exec /usr/local/bin/startAll.sh"
+      ]
+    },
     "volumes": [
       {
         "key": "base",

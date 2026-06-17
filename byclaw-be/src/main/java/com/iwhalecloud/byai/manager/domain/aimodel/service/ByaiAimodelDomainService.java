@@ -3,8 +3,10 @@ package com.iwhalecloud.byai.manager.domain.aimodel.service;
 import com.alibaba.fastjson.JSONObject;
 import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelStatusEnum;
 import com.iwhalecloud.byai.manager.domain.tag.service.ByaiTagRelationService;
+import com.iwhalecloud.byai.manager.qo.aimodel.DefaultAiModelQo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelListRequest;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelRequest;
@@ -30,8 +32,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
- * 模型定义领域服务（byai_aimodel）
- * 负责分页查询、按 ID 查询、新增/更新、删除、设置状态及与 Redis 联动
+ * 模型定义领域服务（byai_aimodel） 负责分页查询、按 ID 查询、新增/更新、删除、设置状态及与 Redis 联动
  *
  * @author system
  */
@@ -65,15 +66,15 @@ public class ByaiAimodelDomainService {
         if (StringUtil.isNotEmpty(request.getModelId())) {
             try {
                 modelIdLong = Long.parseLong(request.getModelId());
-            } catch (NumberFormatException e) {
+            }
+            catch (NumberFormatException e) {
                 log.warn("modelId parse fail, modelId={}", request.getModelId());
             }
         }
 
         PageHelper.startPage(pageNum, pageSize);
-        List<ByaiAimodel> list = byaiAimodelMapper.selectByCondition(
-            statusDb, request.getAbility(), request.getSystem(),
-            modelIdLong, request.getModelName(), request.getKeyword());
+        List<ByaiAimodel> list = byaiAimodelMapper.selectByCondition(statusDb, request.getAbility(),
+            request.getSystem(), modelIdLong, request.getModelName(), request.getKeyword());
         com.github.pagehelper.PageInfo<ByaiAimodel> phPageInfo = new com.github.pagehelper.PageInfo<>(list);
         return PageHelperUtil.toPageInfo(phPageInfo);
     }
@@ -81,7 +82,7 @@ public class ByaiAimodelDomainService {
     /**
      * 判断模型名称是否已被占用：新增时 excludeModelId 传 null（存在同名即占用）；修改时传当前 id（存在其他记录同名即占用）
      *
-     * @param modelName      模型名称（displayName 对应 model_name），建议调用方先 trim
+     * @param modelName 模型名称（displayName 对应 model_name），建议调用方先 trim
      * @param excludeModelId 排除的模型 ID，为 null 时统计所有同名
      * @return true 表示名称已被占用，不允许保存
      */
@@ -106,8 +107,7 @@ public class ByaiAimodelDomainService {
     }
 
     /**
-     * 新增或更新（由调用方保证 id 为空为新增、有值为更新）
-     * 启用状态（OOA）时同步写入 Redis
+     * 新增或更新（由调用方保证 id 为空为新增、有值为更新） 启用状态（OOA）时同步写入 Redis
      *
      * @param entity 实体（新增时 modelId 由本方法填充）
      * @return 主键 ID
@@ -116,12 +116,14 @@ public class ByaiAimodelDomainService {
         if (entity.getModelId() == null) {
             entity.setModelId(SequenceService.nextVal());
             byaiAimodelMapper.insert(entity);
-        } else {
+        }
+        else {
             byaiAimodelMapper.updateById(entity);
         }
         if (ModelStatusEnum.isEnabledDb(entity.getStatus())) {
             syncToRedis(entity);
-        } else {
+        }
+        else {
             removeFromRedis(entity.getModelId());
         }
         return entity.getModelId();
@@ -143,7 +145,7 @@ public class ByaiAimodelDomainService {
     /**
      * 设置状态；启用时写入 Redis，停用时从 Redis 移除
      *
-     * @param modelId   模型 ID
+     * @param modelId 模型 ID
      * @param apiStatus API 状态（ENABLED/DISABLED/TESTING）
      */
     public void setStatus(Long modelId, String apiStatus) {
@@ -162,7 +164,8 @@ public class ByaiAimodelDomainService {
         byaiAimodelMapper.updateById(entity);
         if (ModelStatusEnum.isEnabledDb(dbCode)) {
             syncToRedis(entity);
-        } else {
+        }
+        else {
             removeFromRedis(modelId);
         }
     }
@@ -218,7 +221,8 @@ public class ByaiAimodelDomainService {
                 }
                 RedisUtil.hmPutAll(RedisConfig.AI_MODEL_TYPE_KEY, entries);
             }
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             log.error("rebuildTypeList fail", e);
         }
     }
@@ -235,13 +239,15 @@ public class ByaiAimodelDomainService {
         dto.setModelName(entity.getModelName());
         dto.setModelType(entity.getModelType());
         dto.setIsDefault(resolveDefaultFlag(entity));
-        dto.setMaxContentToken(entity.getMaxContentToken() != null ? String.valueOf(entity.getMaxContentToken()) : null);
+        dto.setMaxContentToken(
+            entity.getMaxContentToken() != null ? String.valueOf(entity.getMaxContentToken()) : null);
         dto.setStatus("OOA".equals(entity.getStatus()) ? 1 : 0);
         if (StringUtil.isNotEmpty(entity.getInParams())) {
             try {
                 JSONObject jo = JSONObject.parseObject(entity.getInParams());
                 dto.setInstanceParam(jo != null ? jo : new HashMap<>());
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 log.debug("inParams parse to map fail, inParams={}", entity.getInParams());
                 dto.setInstanceParam(new HashMap<>());
             }
@@ -256,8 +262,7 @@ public class ByaiAimodelDomainService {
         if (entity.getModelId() == null) {
             return 0;
         }
-        return byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL, DEFAULT_MODEL_TAG_ID)
-            .stream()
+        return byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL, DEFAULT_MODEL_TAG_ID).stream()
             .anyMatch(rel -> entity.getModelId().equals(rel.getObjId())) ? 1 : 0;
     }
 
@@ -278,8 +283,7 @@ public class ByaiAimodelDomainService {
                 }
             }
         }
-        models.sort(Comparator
-            .comparing((ModelDto dto) -> !Integer.valueOf(1).equals(dto.getIsDefault()))
+        models.sort(Comparator.comparing((ModelDto dto) -> !Integer.valueOf(1).equals(dto.getIsDefault()))
             .thenComparing(dto -> dto.getInstanceId() == null ? "" : dto.getInstanceId()));
         return models;
     }
@@ -293,7 +297,8 @@ public class ByaiAimodelDomainService {
         }
         try {
             return Sm4Util.decrypt(encrypted);
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             log.debug("aimodel token decrypt fail, use original");
             return encrypted;
         }
@@ -311,6 +316,17 @@ public class ByaiAimodelDomainService {
             return Collections.emptyList();
         }
         return byaiAimodelMapper.listModelInner(request);
+    }
+
+    /**
+     * 列出默认模型
+     *
+     * @param defaultAiModelQo 模型管理
+     * @return ByaiAimodel
+     */
+    public ByaiAimodel getDefaultAiModel(DefaultAiModelQo defaultAiModelQo) {
+        List<ByaiAimodel> byaiAiModels = byaiAimodelMapper.listDefaultAiModel(defaultAiModelQo);
+        return ListUtil.isNotEmpty(byaiAiModels) ? byaiAiModels.getFirst() : null;
     }
 
 }

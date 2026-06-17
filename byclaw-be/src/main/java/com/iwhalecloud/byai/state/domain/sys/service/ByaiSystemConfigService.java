@@ -44,15 +44,28 @@ public class ByaiSystemConfigService {
     private ByaiSystemConfigListMapper byaiSystemConfigListMapper;
 
     /**
-     * 根据paramCode获取配置值
+     * 根据paramCode获取配置值，会进行环境变量替换
      *
      * @param paramCode 编码
      * @return String
      */
     public String getDcSystemConfigValueByCode(String paramCode) {
 
-        String cacheJson = RedisUtil.hmGet(RedisConfig.SYSTEM_CONFIG_CODE_KEY, paramCode);
+        String paramValue = this.findByParamCode(paramCode);
 
+        // 对环境变量${xxxx}进行替换
+        return paramValue != null ? this.environmentReplace(paramValue) : null;
+    }
+
+    /**
+     * 查找缓存值，不进行${xxxx}环境变量的替换
+     *
+     * @param paramCode 缓存编码
+     * @return String
+     */
+    public String findByParamCode(String paramCode) {
+
+        String cacheJson = RedisUtil.hmGet(RedisConfig.SYSTEM_CONFIG_CODE_KEY, paramCode);
         ByaiSystemConfig byaiSystemConfig;
         if (StringUtil.isNotEmpty(cacheJson)) {
             byaiSystemConfig = JsonUtil.parseObject(cacheJson, ByaiSystemConfig.class);
@@ -62,9 +75,7 @@ public class ByaiSystemConfigService {
             queryWrapper.eq(ByaiSystemConfig::getParamCode, paramCode);
             byaiSystemConfig = byaiSystemConfigMapper.selectOne(queryWrapper);
         }
-
-        // 对环境变量进行替换
-        return byaiSystemConfig != null ? this.environmentReplace(byaiSystemConfig.getParamValue()) : null;
+        return byaiSystemConfig != null ? byaiSystemConfig.getParamValue() : null;
     }
 
     /**

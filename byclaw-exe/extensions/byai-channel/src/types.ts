@@ -119,3 +119,35 @@ export type AgentEvent = {
   agentId?: string;
   data: Record<string, unknown>;
 };
+
+export type PluginHookAgentEndEvent = {
+  runId?: string;
+  messages: unknown[];
+  success: boolean;
+  error?: string;
+  durationMs?: number;
+};
+
+export type PluginHookAgentContext = {
+  runId?: string;
+  jobId?: string;
+  agentId?: string;
+  sessionKey?: string;
+  sessionId?: string;
+  workspaceDir?: string;
+  modelProviderId?: string;
+  modelId?: string;
+  messageProvider?: string;
+  /** Channel/plugin id for channel-originated runs, e.g. `discord`. */
+  channel?: string;
+  /** Conversation target id for channel-originated runs. Mirrors `channelId` for compatibility. */
+  chatId?: string;
+  /** Sender identity for channel-originated runs when available. */
+  senderId?: string;
+  trigger?: string;
+  channelId?: string;
+  /** Resolved effective context-token budget after model/config/agent caps. */
+  contextTokenBudget?: number;
+  /** Native/configured reference window when a lower cap wins. */
+  contextWindowReferenceTokens?: number;
+};

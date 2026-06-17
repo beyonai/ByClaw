@@ -18,6 +18,7 @@ import {
   clearActiveSdkRequestByTarget,
   registerActiveSdkRequest,
   resolveSdkLocalFilePath,
+  registerAgentRunEndPromise,
 } from "./session-context.js";
 import { ensureSessionReasoningStream, shouldForceReasoningStream } from "./reasoning-stream.js";
 import {
@@ -403,6 +404,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
             disableBlockStreaming: true,
             onAgentRunStart: async (runId: string) => {
               bindActiveSdkRequestRunId(sessionKey, runId);
+              registerAgentRunEndPromise(runId);
               log?.info?.(`[diagnose-sdk] onAgentRunStart called, runId: ${runId}}`);
               await onReply(buildAgentReadyTitle(message.language, sessionAgentName), {
                 parentMessageId: "-1",

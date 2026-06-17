@@ -151,6 +151,68 @@
   }
 }
 
+.versionSettingBox {
+  gap: 0;
+}
+
+.versionButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  // color: var(--beyond-color-primary);
+  font-weight: 500;
+}
+
+.versionButtonIcon {
+  font-size: 10px;
+  transition: transform 0.2s ease;
+}
+
+.versionButtonIconOpen {
+  transform: rotate(180deg);
+}
+
+.versionCollapse {
+  :global {
+    .@{antPrefix}-collapse-item {
+      border: none;
+    }
+
+    .@{antPrefix}-collapse-header {
+      display: none !important;
+    }
+
+    .@{antPrefix}-collapse-content-box {
+      padding: 12px 0 0 !important;
+    }
+  }
+}
+
+.versionDescriptions {
+  padding-top: 12px;
+  border-top: 1px solid #0000000d;
+
+  :global {
+    .@{antPrefix}-descriptions-row > th,
+    .@{antPrefix}-descriptions-row > td {
+      padding-bottom: 8px;
+    }
+
+    .@{antPrefix}-descriptions-item-label {
+      width: 96px;
+      color: var(--beyond-color-text-tertiary);
+      font-size: 13px;
+    }
+
+    .@{antPrefix}-descriptions-item-content {
+      min-width: 0;
+      color: var(--beyond-color-text);
+      font-size: 13px;
+      word-break: break-all;
+    }
+  }
+}
+
 .selectBox {
   width: 120px;
 

@@ -11,8 +11,7 @@ if [ "${OPENCLAW_BOOTSTRAPPED:-}" != "1" ] && [ -f /usr/local/bin/openclaw-runti
 fi
 
 : "${OPENCLAW_ENABLE_FILEBROWSER:=true}"
-: "${OPENCLAW_STATE_DIR:=/by/.openclaw}"
-: "${FILEBROWSER_ROOT:=${OPENCLAW_STATE_DIR}}"
+: "${FILEBROWSER_ROOT:=/by/.openclaw}"
 : "${FILEBROWSER_PORT:=8082}"
 : "${FILEBROWSER_ADDRESS:=0.0.0.0}"
 : "${FILEBROWSER_BASEURL:=/filebrowser}"
@@ -22,11 +21,11 @@ fi
 : "${FILEBROWSER_UI_PROXY:=/usr/local/bin/openclaw-filebrowser-ui-proxy}"
 
 if [ -z "${FILEBROWSER_DEFAULT_PATH:-}" ]; then
-  FILEBROWSER_DEFAULT_PATH="${OPENCLAW_STATE_DIR%/}"
+  FILEBROWSER_DEFAULT_PATH="${FILEBROWSER_ROOT%/}"
 fi
 
 if [ -z "${FILEBROWSER_ALLOWED_ROOTS:-}" ]; then
-  FILEBROWSER_ALLOWED_ROOTS="${OPENCLAW_STATE_DIR%/}"
+  FILEBROWSER_ALLOWED_ROOTS="${FILEBROWSER_ROOT%/}"
 fi
 
 case "${OPENCLAW_ENABLE_FILEBROWSER}" in
