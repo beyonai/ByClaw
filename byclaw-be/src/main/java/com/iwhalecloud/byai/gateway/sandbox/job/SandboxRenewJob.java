@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import com.iwhalecloud.byai.gateway.sandbox.config.SandboxJobSchedulerConfiguration;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLifecycleJobReport;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 
@@ -24,7 +25,9 @@ public class SandboxRenewJob {
         this.sandboxService = sandboxService;
     }
 
-    @Scheduled(fixedDelayString = "${sandbox.renew.fixed-delay:60000}")
+    @Scheduled(fixedDelayString = "${sandbox.renew.fixed-delay:60000}",
+        initialDelayString = "${sandbox.renew.initial-delay:20000}",
+        scheduler = SandboxJobSchedulerConfiguration.SANDBOX_JOB_TASK_SCHEDULER)
     public void renewDueSandboxes() {
         try {
             SandboxLifecycleJobReport report = sandboxService.renewDueSandboxes();
