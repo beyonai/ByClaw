@@ -68,9 +68,6 @@
 | `POST` | `/api/v1/fileToMarkdownIndex` | 异步触发知识构建 |
 | `POST` | `/api/v1/fileBuildStatus` | 查询文档构建状态 |
 | `POST` | `/api/v1/knowledgeItems/search` | 知识检索 |
-| `POST` | `/api/v1/knowledgeItems/importByResourceId` | 按资源 ID 上传文档（Agent 工具） |
-| `POST` | `/api/v1/fileToMarkdownIndexByResourceId` | 按资源 ID 触发知识构建（Agent 工具） |
-| `POST` | `/api/v1/knowledgeItems/searchByResourceId` | 按资源 ID 知识检索（Agent 工具） |
 
 ## 知识库管理
 
@@ -320,6 +317,37 @@
 
 将文档上传到指定知识库下面。
 
+行为描述：
+
+- 当上传文件为 Markdown 且 `processFrontMatter` 为 `true` 时，服务端会额外解析文档开头的 YAML front matter header。
+- 若解析到合法的 YAML front matter header，则会将其中字段按同名 `propertyName` 自动录入为该文件的元数据。
+- 该行为适用于类似 Obsidian 文档头的结构化元数据写法。
+- 如果已有属性不存在于知识库系统，则文件上传失败
+- 当 `processFrontMatter` 为 `false` 时，跳过 YAML front matter 解析，不做元数据自动录入
+
+YAML front matter header 示例：
+
+```yaml
+---
+title: LLM Wiki 中间层知识构建
+aliases:
+  - LLM Wiki Middle Layer Construction
+  - Karpathy LLM Wiki 中间层设计
+tags:
+  - llm-wiki
+  - knowledge-construction
+  - obsidian/pkm
+  - knowledge-base/research
+doc_type: research
+status: active
+source: official-research
+owner: by-qa
+created: 2026-05-11
+updated: 2026-05-11
+module: karpathy
+---
+```
+
 请求体：`multipart/form-data`
 
 | 字段 | 类型 | 必填 | 说明 |
@@ -328,6 +356,7 @@
 | `filePath` | string | 是 | 上传到知识库后的文件全路径，以 `/` 开头，不包括知识库名称 |
 | `fileDescription` | string | 否 | 文件描述 |
 | `fileContent` | file | 是 | 文件二进制内容 |
+| `processFrontMatter` | boolean | 否 | 是否解析 YAML front matter 并自动录入元数据，默认 `true` |
 
 表单示例：
 
@@ -336,7 +365,8 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
   -F "knCode=1" \
   -F "filePath=/制度/人事/考勤制度.pdf" \
   -F "fileDescription=考勤制度原文" \
-  -F "fileContent=@./考勤制度.pdf"
+  -F "fileContent=@./考勤制度.pdf" \
+  -F "processFrontMatter=true"
 ```
 
 成功响应示例：
@@ -763,8 +793,10 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
 | `query` | string | 是 | 需要检索的内容 |
 | `knCodeList` | array[string] | 是 | 知识库编码列表 |
 | `topK` | integer | 是 | 最终返回条数，必须大于 0 |
-| `fileTypeList` | array[string] | 否 | 按照文件类型过滤 |
 | `searchMode` | string | 是 | 检索模式：`fullTextRecall`、`embedding`、`mixedRecall` |
+| `where` | object | 否 | Agent DSL 过滤 AST，详见 metadata_api.md |
+| `metadataFieldList` | array[string] | 否 | 需要返回的元数据字段 |
+| `fileTypeList` | array[string] | 否 | 按文件类型过滤；向下兼容字段，与 `where` 同时存在时合取 |
 
 请求示例：
 
@@ -773,8 +805,8 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
   "query": "员工请假流程是什么",
   "knCodeList": ["1"],
   "topK": 5,
-  "fileTypeList": ["pdf"],
-  "searchMode": "mixedRecall"
+  "searchMode": "mixedRecall",
+  "where": {"in": {"fieldName": "fileType", "value": ["pdf"]}}
 }
 ```
 
@@ -819,163 +851,6 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
 {
   "resultCode": "-1",
   "resultMsg": "topK must be greater than 0",
-  "resultObject": {}
-}
-```
-
-## Agent 工具接口
-
-以下接口专门提供给数字员工（Agent）作为工具调用，使用外部资源 ID（`resourceId`）代替内部知识库编码（`knCode`）。系统自动从 MinIO 配置文件读取 `resourceId` 与 `knCode` 的映射关系，调用方无需感知内部编码。
-
-### 接口总览
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| `POST` | `/api/v1/knowledgeItems/importByResourceId` | 按资源 ID 上传文档 |
-| `POST` | `/api/v1/fileToMarkdownIndexByResourceId` | 按资源 ID 触发知识构建 |
-| `POST` | `/api/v1/knowledgeItems/searchByResourceId` | 按资源 ID 知识检索 |
-
-### `POST /api/v1/knowledgeItems/importByResourceId`
-
-按资源 ID 上传文档到对应知识库。
-
-请求体：`multipart/form-data`
-
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `resourceId` | string | 是 | 知识库资源 ID，系统自动映射为内部 `knCode` |
-| `filePath` | string | 是 | 上传到知识库后的文件全路径，以 `/` 开头，不包括知识库名称 |
-| `fileDescription` | string | 否 | 文件描述 |
-| `fileContent` | file | 是 | 文件二进制内容 |
-
-表单示例：
-
-```bash
-curl -X POST http://localhost:8000/api/v1/knowledgeItems/importByResourceId \
-  -F "resourceId=10000003" \
-  -F "filePath=/制度/人事/考勤制度.pdf" \
-  -F "fileDescription=考勤制度原文" \
-  -F "fileContent=@./考勤制度.pdf"
-```
-
-成功响应示例：
-
-```json
-{
-  "resultCode": "0",
-  "resultMsg": "success",
-  "resultObject": {}
-}
-```
-
-失败响应示例：
-
-```json
-{
-  "resultCode": "-1",
-  "resultMsg": "cannot resolve resourceId: 99999",
-  "resultObject": {}
-}
-```
-
-### `POST /api/v1/fileToMarkdownIndexByResourceId`
-
-按资源 ID 异步触发对应知识库下文件的构建任务。
-
-请求体：`application/json`
-
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `resourceId` | string | 是 | 知识库资源 ID，系统自动映射为内部 `knCode` |
-| `filePath` | string | 是 | 需构建的文档全路径，以 `/` 开头，不包括知识库名称 |
-
-请求示例：
-
-```json
-{
-  "resourceId": "10000003",
-  "filePath": "/制度/人事/请假制度.pdf"
-}
-```
-
-成功响应示例：
-
-```json
-{
-  "resultCode": "0",
-  "resultMsg": "success",
-  "resultObject": {}
-}
-```
-
-失败响应示例：
-
-```json
-{
-  "resultCode": "-1",
-  "resultMsg": "cannot resolve resourceId: 99999",
-  "resultObject": {}
-}
-```
-
-### `POST /api/v1/knowledgeItems/searchByResourceId`
-
-按资源 ID 列表进行知识检索。响应中的 `knCode` 字段会自动回映为对应的 `resourceId`，保持调用方 ID 体系一致。
-
-请求体：`application/json`
-
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `resourceIdList` | array[string] | 是 | 知识库资源 ID 列表，系统自动映射为内部 `knCodeList` |
-| `query` | string | 是 | 需要检索的内容 |
-| `topK` | integer | 是 | 最终返回条数，必须大于 0 |
-| `fileTypeList` | array[string] | 否 | 按照文件类型过滤 |
-| `searchMode` | string | 是 | 检索模式：`fullTextRecall`、`embedding`、`mixedRecall` |
-
-请求示例：
-
-```json
-{
-  "resourceIdList": ["10000003"],
-  "query": "员工请假流程是什么",
-  "topK": 5,
-  "fileTypeList": ["pdf"],
-  "searchMode": "mixedRecall"
-}
-```
-
-成功响应示例：
-
-```json
-{
-  "resultCode": "0",
-  "resultMsg": "success",
-  "resultObject": {
-    "data": [
-      {
-        "knCode": "10000003",
-        "filePath": "/制度/人事/请假制度.pdf",
-        "chunkNo": 3,
-        "chunkId": 10023,
-        "chunkText": "员工请假需在 OA 系统发起申请，经部门负责人审批后生效。",
-        "score": 92,
-        "imagePath": "/images/10023.png",
-        "startLine": 18,
-        "endLine": 26
-      }
-    ]
-  }
-}
-```
-
-说明：响应中 `knCode` 返回的是请求时传入的 `resourceId`，而非系统内部编码。
-
-失败响应示例：
-
-```json
-{
-  "resultCode": "-1",
-  "resultMsg": "cannot resolve one or more resourceIds: ['99999']",
   "resultObject": {}
 }
 ```

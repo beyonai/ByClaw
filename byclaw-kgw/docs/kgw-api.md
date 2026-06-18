@@ -186,7 +186,7 @@
 
 ### `POST /kgw/api/v1/knowledgeItems/import`
 
-将文档上传到指定知识库。对于 markdown 文件，若文件包含 YAML front-matter，网关会自动将其中的 `propertyName` 键改写为后端 `backend_name`（如 `__byclaw_kgw__status__v7`）再上传；`propertyName` 必须已在元数据属性主目录中声明。
+将文档上传到指定知识库。对于 markdown 文件，若 `processFrontMatter` 为 `true`（默认）且文件包含 YAML front-matter，网关会自动将其中的 `propertyName` 键改写为后端 `backend_name`（如 `__byclaw_kgw__status__v7`）再上传；`propertyName` 必须已在元数据属性主目录中声明。若 `processFrontMatter` 为 `false`，则跳过 front-matter 解析和元数据注册流程。
 
 请求体：`multipart/form-data`
 
@@ -195,6 +195,7 @@
 | `knCode` | string | 是 | 知识库编码 |
 | `filePath` | string | 是 | 上传后的文件全路径，以 `/` 开头 |
 | `fileContent` | file | 是 | 文件二进制内容 |
+| `processFrontMatter` | boolean | 否 | 是否解析 YAML front-matter 并自动录入元数据，默认 `true` |
 
 成功响应：`resultCode: "0"`, `resultObject: {}`
 

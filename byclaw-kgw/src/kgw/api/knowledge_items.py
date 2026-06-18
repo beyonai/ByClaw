@@ -308,12 +308,15 @@ async def knowledge_item_import(
     kn_code: Annotated[str, Form(alias="knCode")],
     file_path: Annotated[str, Form(alias="filePath")],
     file_content: Annotated[UploadFile, File(alias="fileContent")],
+    process_front_matter: Annotated[bool, Form(alias="processFrontMatter")] = True,
 ) -> dict[str, Any]:
     """Stream multipart upload to the KB backend without buffering full file in RAM.
 
-    For markdown files, parses YAML front matter and rewrites property names to
-    backend_name keys before uploading. Non-markdown files use the original
-    proxy_upload streaming path unchanged.
+    For markdown files with *process_front_matter* enabled, parses YAML front
+    matter and rewrites property names to backend_name keys before uploading.
+    When disabled, front matter parsing and metadata registration are skipped
+    entirely. Non-markdown files use the original proxy_upload streaming path
+    unchanged.
     """
     from kgw.audit import AuditEntry
 
@@ -348,7 +351,13 @@ async def knowledge_item_import(
     base_url = await resolve_base_url(config)
     url = base_url + op_path
 
-    if _is_markdown(file_path):
+    common_fields = {
+        "knCode": config.resource_code,
+        "filePath": file_path,
+        "processFrontMatter": str(process_front_matter).lower(),
+    }
+
+    if _is_markdown(file_path) and process_front_matter:
         # Buffer the full file — required for front-matter parsing and rewriting
         raw_content: bytes = await file_content.read()
         front_matter = _parse_front_matter(raw_content)
@@ -413,7 +422,7 @@ async def knowledge_item_import(
                         "text/markdown",
                     )
                 },
-                data={"knCode": config.resource_code, "filePath": file_path},
+                data=common_fields,
                 timeout=60.0,
             )
             if resp.status_code in (401, 403):
@@ -458,15 +467,19 @@ async def knowledge_item_import(
             "import.front_matter.skipped",
             kn_code=kn_code,
             file_path=file_path,
-            reason="not a markdown file",
+            reason=(
+                "processFrontMatter disabled"
+                if not process_front_matter
+                else "not a markdown file"
+            ),
         )
-        # Non-markdown: original streaming proxy_upload path (no buffering)
+        # Streaming proxy_upload path (no buffering, no front matter processing)
         try:
             result = await proxy_upload(
                 url=url,
                 upstream_headers=headers,
                 http=state.http,
-                form_fields={"knCode": config.resource_code, "filePath": file_path},
+                form_fields=common_fields,
                 upload_file=file_content,
                 kn_code=kn_code,
                 operation=GatewayOp.FILE_IMPORT,
