@@ -50,7 +50,7 @@ def main() -> None:
             print(json.dumps(result, ensure_ascii=False), flush=True)
             return
         missing = result.pop("missing", []) if isinstance(result.get("missing"), list) else []
-        if not result.get("kb_id"):
+        if not params.get("kb_id"):
             missing.append("kb_id")
         result["entity_code"] = entity_code
         print(
