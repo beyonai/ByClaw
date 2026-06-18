@@ -285,6 +285,63 @@ class SandboxServiceTest {
     }
 
     @Test
+    void removeSandbox_recordsManualReleaseReasonWithCurrentOperator() {
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+
+        LoginInfo operator = new LoginInfo();
+        operator.setUserCode("operator001");
+        CurrentUserHolder.setLoginInfo(operator);
+
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(1L);
+        record.setUserCode("owner001");
+        record.setSandboxType("openclaw");
+        record.setResourceId(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        record.setStatus("RUNNING");
+        record.setLockVersion(3);
+
+        when(sandboxRecordMapper.selectRunningByUserAndResources(eq("owner001"), isNull(), eq(List.of())))
+            .thenReturn(List.of(record));
+        when(sandboxRecordMapper.markReleasing(eq(1L), eq("release.manual:operator001"), any(Date.class), eq(3)))
+            .thenReturn(0);
+
+        sandboxService.removeSandbox("owner001", null);
+
+        verify(sandboxRecordMapper).markReleasing(eq(1L), eq("release.manual:operator001"), any(Date.class), eq(3));
+        verify(sandboxRecordMapper, never()).updateStatusToReleased(any(), any(), any(), any());
+    }
+
+    @Test
+    void removeSandboxById_recordsManualReleaseReasonWithCurrentOperator() {
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+
+        LoginInfo operator = new LoginInfo();
+        operator.setUserCode("admin001");
+        CurrentUserHolder.setLoginInfo(operator);
+
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(1L);
+        record.setUserCode("owner001");
+        record.setSandboxType("openclaw");
+        record.setResourceId(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        record.setStatus("STARTING");
+        record.setLockVersion(5);
+
+        when(sandboxRecordMapper.selectById(1L)).thenReturn(record);
+        when(sandboxRecordMapper.markStartingReleased(eq(1L), eq("release.manual:admin001"), any(Date.class), eq(5)))
+            .thenReturn(0);
+
+        sandboxService.removeSandboxById(1L);
+
+        verify(sandboxRecordMapper).markStartingReleased(eq(1L), eq("release.manual:admin001"), any(Date.class), eq(5));
+        verify(sandboxRecordMapper, never()).markReleasing(any(), any(), any(), any());
+    }
+
+    @Test
     void reconcileRecordWithRemote_overridesGatewayBindingFromRemoteMetadata() {
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
         SandboxService sandboxService = new SandboxService();
