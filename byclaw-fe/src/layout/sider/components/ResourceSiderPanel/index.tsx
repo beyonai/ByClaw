@@ -117,6 +117,26 @@ const getArrayData = (response: any) => {
   return [];
 };
 
+const getResourceUniqueKey = (item: ResourceItem, index: number) => {
+  const id = item?.resourceId ?? item?.resourceSourcePkId ?? item?.resourceCode;
+  if (id === undefined || id === null || String(id) === '') {
+    return `__resource_index_${index}`;
+  }
+  return `${item?.resourceBizType || ''}:${String(id)}`;
+};
+
+const dedupeResourceList = (items: ResourceItem[]) => {
+  const seen = new Set<string>();
+  return items.filter((item, index) => {
+    const key = getResourceUniqueKey(item, index);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+};
+
 const getGrantItem = (item: any) => ({
   ...item,
   id: `${String(item.grantToObjType).toLowerCase()}_${item.grantToObjId}`,
@@ -159,6 +179,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   const itemClickTimerRef = useRef<number | null>(null);
   const skillUploadInputRef = useRef<HTMLInputElement | null>(null);
   const keywordRef = useRef('');
+  const resourceListRef = useRef<ResourceItem[]>([]);
   const paginationRef = useRef({
     pageNum: 0,
     total: 0,
@@ -185,6 +206,10 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   const [breadcrumb, setBreadcrumb] = useState<BreadcrumbItem[]>([]);
   const [currentLevelOriginalList, setCurrentLevelOriginalList] = useState<ResourceItem[]>([]); // 当前层级的原始列表，用于前端搜索
   const config = resourceConfigMap[resourceType];
+
+  useEffect(() => {
+    resourceListRef.current = resourceList;
+  }, [resourceList]);
 
   /**
    * 获取资源详情数据
@@ -330,16 +355,25 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         const responsePageNum = Number(response?.pageNum) || pageNum;
         const responseTotal = Number(response?.total) || 0;
 
-        const loadedCount = reset ? rows.length : paginationRef.current.loadedCount + rows.length;
+        const previousList = reset ? [] : resourceListRef.current;
+        const nextList = reset ? dedupeResourceList(rows) : dedupeResourceList([...previousList, ...rows]);
+        const loadedCount = nextList.length;
+        const hasNewUniqueRows = nextList.length > previousList.length;
         paginationRef.current = {
           pageNum: responsePageNum,
           total: responseTotal,
           loadedCount,
         };
-        setResourceList((prev) => (reset ? rows : [...prev, ...rows]));
-        setHasMore(responseTotal > 0 ? loadedCount < responseTotal : rows.length >= PAGE_SIZE);
+        resourceListRef.current = nextList;
+        setResourceList(nextList);
+        setHasMore(
+          responseTotal > 0
+            ? rows.length > 0 && loadedCount < responseTotal && (reset || hasNewUniqueRows)
+            : rows.length >= PAGE_SIZE && hasNewUniqueRows
+        );
       } catch {
         if (reset) {
+          resourceListRef.current = [];
           setResourceList([]);
           paginationRef.current = {
             pageNum: 0,

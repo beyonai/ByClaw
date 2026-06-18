@@ -532,7 +532,7 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(relSkills.get(0))
             .containsEntry("skillCode", "dws")
             .containsEntry("skillType", "hub")
-            .containsEntry("skillUrl", "/byclaw/resource/skill/zhangsan-hub/dws.zip")
+            .containsEntry("skillUrl", "/byaiService/tool/downloadSkillZip?skillId=300")
             .containsEntry("versionUrl", "/byaiService/tool/getSkillVersion?skillId=300");
     }
 

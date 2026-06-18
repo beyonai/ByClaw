@@ -479,7 +479,7 @@ public class ByClawSkillResourceApplicationService {
         content.put("skillType", extSkill.getSkillType());
         content.put("skillPath", skillPath);
         content.put("skillDocObjectKey", skillDocObjectKey);
-        content.put("skillUrl", normalizeResourceObjectKey(extSkill.getSkillUrl()));
+        content.put("skillUrl", buildSkillDownloadUrl(skillResource.getResourceId()));
         content.put("version", extSkill.getVersion());
         content.put("skillPackageFormat", extSkill.getSkillPackageFormat());
         content.put("skillOriginalFilename", extSkill.getSkillOriginalFilename());
@@ -489,6 +489,10 @@ public class ByClawSkillResourceApplicationService {
         content.put("syncError", extSkill.getSyncError());
         content.put("lastSyncTime", extSkill.getLastSyncTime());
         return JSON.toJSONString(content);
+    }
+
+    private String buildSkillDownloadUrl(Long skillId) {
+        return skillId == null ? "" : "/byaiService/tool/downloadSkillZip?skillId=" + skillId;
     }
 
     public SkillPackageMetadata inspectSkillPackage(MultipartFile file) {
