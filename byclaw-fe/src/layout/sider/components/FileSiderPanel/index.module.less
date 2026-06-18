@@ -89,6 +89,66 @@
   min-width: 0;
 }
 
+.categoryHeaderMain {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.categoryHeaderMainWithActions {
+  align-items: center;
+  min-height: 26px;
+  width: 100%;
+
+  .categoryTitle {
+    line-height: 26px;
+  }
+}
+
+.categoryActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+  transform: translateY(7px);
+
+  :global(.@{antPrefix}-upload) {
+    display: inline-flex;
+  }
+}
+
+.categoryActionButton {
+  height: 26px;
+  padding: 0 7px;
+  border-color: #d9d9d9;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2533;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 24px;
+  box-shadow: none;
+  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+
+  &:hover,
+  &:focus {
+    border-color: var(--beyond-color-primary, #1677ff);
+    background: #fff;
+    color: var(--beyond-color-primary, #1677ff);
+  }
+
+  &:active {
+    border-color: var(--beyond-color-primary, #1677ff);
+    background: #f5f9ff;
+  }
+}
+
+.categoryActionIcon {
+  font-size: 15px;
+}
+
 .categoryHeaderActive {
   .categoryTitle {
     color: var(--beyond-color-primary, #1677ff);
@@ -138,7 +198,17 @@
 }
 
 .fileTree:global(.@{antPrefix}-tree) {
+  color: #595959;
+  font-size: 13px;
+  font-weight: 400;
+
   :global {
+    .@{antPrefix}-tree-title {
+      color: inherit;
+      font-size: inherit;
+      font-weight: inherit;
+    }
+
     .@{antPrefix}-tree-indent-unit {
       width: 12px;
     }
@@ -166,6 +236,10 @@
 .treeTitleText {
   display: inline-block;
   max-width: 100%;
+  color: #595959;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 20px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

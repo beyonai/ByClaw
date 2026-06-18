@@ -50,8 +50,9 @@ public class MinioFileBrowserProvider implements FileBrowserProvider {
                 continue;
             }
             FileBrowserItemVo vo = new FileBrowserItemVo();
-            vo.setDir(item.isDir());
-            if (item.isDir()) {
+            boolean isDir = item.isDir() || objectName.endsWith("/");
+            vo.setDir(isDir);
+            if (isDir) {
                 vo.setName(extractDirName(objectName, prefix));
                 vo.setPath(toRelativePath(objectName));
             } else {

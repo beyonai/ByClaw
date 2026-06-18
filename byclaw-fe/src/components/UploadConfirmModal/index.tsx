@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Modal, Space, Switch, Typography } from 'antd';
+import { Alert, Button, Modal, Space, Switch, Typography } from 'antd';
 import { useIntl } from '@umijs/max';
 
 export interface UploadConfirmFile {
@@ -15,6 +15,8 @@ interface UploadConfirmModalProps {
   loading?: boolean;
   showProcessFrontMatter?: boolean;
   okText?: string;
+  directoryActionText?: string;
+  onDirectoryAction?: () => void;
   onOk: (processFrontMatter: boolean) => void;
   onCancel: () => void;
 }
@@ -34,6 +36,8 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
   loading = false,
   showProcessFrontMatter = false,
   okText,
+  directoryActionText,
+  onDirectoryAction,
   onOk,
   onCancel,
 }) => {
@@ -84,9 +88,16 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
             <Typography.Text type="secondary">
               {intl.formatMessage({ id: 'knowledgeDetail.uploadDirectory' })}
             </Typography.Text>
-            <Typography.Text ellipsis style={{ maxWidth: '100%' }}>
-              {directoryPath || '/'}
-            </Typography.Text>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <Typography.Text ellipsis style={{ flex: 1, maxWidth: '100%' }}>
+                {directoryPath || '/'}
+              </Typography.Text>
+              {onDirectoryAction && (
+                <Button size="small" onClick={onDirectoryAction} disabled={loading}>
+                  {directoryActionText || intl.formatMessage({ id: 'fileBrowser.upload.changeDirectory' })}
+                </Button>
+              )}
+            </div>
             <Typography.Text type="secondary">
               {intl.formatMessage({ id: 'knowledgeDetail.selectedFiles' })}
             </Typography.Text>

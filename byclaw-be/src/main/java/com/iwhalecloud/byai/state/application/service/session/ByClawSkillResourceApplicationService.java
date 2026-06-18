@@ -114,6 +114,7 @@ public class ByClawSkillResourceApplicationService {
             SkillPackageMetadata metadata = inspectSkillPackage(uploadFile);
             SsResource skillResource = saveOrUpdateSkillResource(metadata, OwnerType.PERSONAL,
                 DEFAULT_SKILL_CATALOG_ID);
+            authApplicationService.ensureCreatorDefaultPrivileges(skillResource);
             SsResExtSkill extSkill = saveOrUpdateSkillExt(userCode, skillResource, uploadFile, metadata,
                 uploadedSkill.getSkillPath(), uploadedSkill.getSkillDocObjectKey(), SOURCE_TYPE_CHAT_UPLOAD);
             bindSkillToDigitalEmployee(resolvedDigitalEmployeeId, skillResource.getResourceId());
@@ -219,6 +220,7 @@ public class ByClawSkillResourceApplicationService {
             SkillPackageMetadata metadata = inspectSkillPackage(file);
             SsResource skillResource = saveOrUpdateSkillResource(metadata, OwnerType.PERSONAL,
                 DEFAULT_SKILL_CATALOG_ID);
+            authApplicationService.ensureCreatorDefaultPrivileges(skillResource);
             String skillPath = normalizeUploadedFilePath(directoryPath, metadata.originalFilename());
             SsResExtSkill extSkill = saveOrUpdateSkillExt(userCode, skillResource, file, metadata, skillPath, null,
                 SOURCE_TYPE_FILE_MANAGE_UPLOAD);

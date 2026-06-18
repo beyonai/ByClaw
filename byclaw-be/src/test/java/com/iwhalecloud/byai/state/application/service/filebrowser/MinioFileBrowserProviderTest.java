@@ -56,6 +56,20 @@ class MinioFileBrowserProviderTest {
     }
 
     @Test
+    void listTreatsTrailingSlashPathAsDirectory() {
+        MinioFileBrowserProvider provider = new MinioFileBrowserProvider(objectStorage);
+        when(objectStorage.list(any(StoragePrefix.class), eq(null))).thenReturn(List.of(
+            StorageObject.builder().bucketOrRoot("byclaw-adminvip").path("by/workspace/docs/").build()));
+
+        List<FileBrowserItemVo> items = provider.list("adminvip", 10005856L, "/workspace/");
+
+        assertThat(items).hasSize(1);
+        assertThat(items.get(0).isDir()).isTrue();
+        assertThat(items.get(0).getName()).isEqualTo("docs");
+        assertThat(items.get(0).getPath()).isEqualTo("/workspace/docs/");
+    }
+
+    @Test
     void uploadWritesFilesThroughObjectStorage() throws Exception {
         MinioFileBrowserProvider provider = new MinioFileBrowserProvider(objectStorage);
         when(objectStorage.put(any(StorageLocation.class), any(), eq(4L), eq("text/plain")))
