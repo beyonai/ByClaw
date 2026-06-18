@@ -2040,51 +2040,60 @@ data:
 
           - alert: OpenClawSandboxLowUsage
             expr: |
-              (
-                sum by (namespace, pod) (
-                  rate(container_cpu_usage_seconds_total{
-                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                    container="sandbox",
-                    pod=~"[0-9a-f-]{36}-[0-9]+"
-                  }[15m])
+              label_replace(
+                (
+                  sum by (namespace, pod) (
+                    rate(container_cpu_usage_seconds_total{
+                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                      container="sandbox",
+                      pod=~"[0-9a-f-]{36}-[0-9]+"
+                    }[${SANDBOX_AUTOSCALE_CPU_LOW_RATE_WINDOW:-1m}])
+                  )
+                  /
+                  sum by (namespace, pod) (
+                    kube_pod_container_resource_requests{
+                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                      container="sandbox",
+                      resource="cpu"
+                    }
+                  ) < ${SANDBOX_AUTOSCALE_CPU_LOW_RATIO:-0.25}
                 )
-                /
-                sum by (namespace, pod) (
-                  kube_pod_container_resource_requests{
-                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                    container="sandbox",
-                    resource="cpu"
-                  }
-                ) < ${SANDBOX_AUTOSCALE_CPU_LOW_RATIO:-0.25}
-              )
-              and
-              (
-                sum by (namespace, pod) (
-                  container_memory_working_set_bytes{
-                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                    container="sandbox",
-                    pod=~"[0-9a-f-]{36}-[0-9]+"
-                  }
+                and on (namespace, pod)
+                (
+                  sum by (namespace, pod) (
+                    container_memory_working_set_bytes{
+                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                      container="sandbox",
+                      pod=~"[0-9a-f-]{36}-[0-9]+"
+                    }
+                  )
+                  /
+                  sum by (namespace, pod) (
+                    kube_pod_container_resource_requests{
+                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                      container="sandbox",
+                      resource="memory"
+                    }
+                  ) < ${SANDBOX_AUTOSCALE_MEMORY_LOW_RATIO:-0.50}
                 )
-                /
-                sum by (namespace, pod) (
-                  kube_pod_container_resource_requests{
-                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                    container="sandbox",
-                    resource="memory"
-                  }
-                ) < ${SANDBOX_AUTOSCALE_MEMORY_LOW_RATIO:-0.50}
+                and on (namespace, pod)
+                kube_pod_status_phase{
+                  namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                  phase="Running",
+                  pod=~"[0-9a-f-]{36}-[0-9]+"
+                } == 1,
+                "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
               )
-            for: ${SANDBOX_AUTOSCALE_LOW_USAGE_FOR:-45m}
+            for: ${SANDBOX_AUTOSCALE_LOW_USAGE_FOR:-5m}
             labels:
               severity: info
               serviceType: openclaw
               triggerSource: PROMETHEUS_ALERT
               reasonCode: metrics.low_usage
-              resizeType: PREFERRED_ONLY
+              resizeType: IN_PLACE
             annotations:
               summary: "OpenClaw 沙箱资源长期低使用"
-              reason_detail: "CPU 和内存长期低于当前 request 阈值，建议只更新用户下一次启动推荐规格。pod={{ \$labels.pod }} value={{ \$value }}"
+              reason_detail: "CPU 连续 ${SANDBOX_AUTOSCALE_LOW_USAGE_FOR:-5m} 低于 request 的 ${SANDBOX_AUTOSCALE_CPU_LOW_PERCENT:-25}% 且内存低于 request 的 ${SANDBOX_AUTOSCALE_MEMORY_LOW_PERCENT:-50}%，建议原地降一级规格。pod={{ \$labels.pod }} value={{ \$value }}"
 EOF
 fi
 

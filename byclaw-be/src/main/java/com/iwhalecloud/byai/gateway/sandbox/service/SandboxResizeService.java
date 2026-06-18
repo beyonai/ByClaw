@@ -86,8 +86,13 @@ public class SandboxResizeService {
                 "suggestedResizeType", "suggested_resize_type", "strategy"),
             DEFAULT_RESIZE_TYPE);
         String serviceType = StringUtils.defaultIfBlank(record.getServiceType(), record.getSandboxType());
-        if (StringUtils.isBlank(toProfileKey) && isScaleUpAlert(reasonCode)) {
-            toProfileKey = resolveNextProfileKey(serviceType, record.getProfileKey());
+        if (StringUtils.isBlank(toProfileKey)) {
+            if (isScaleUpAlert(reasonCode)) {
+                toProfileKey = resolveNextProfileKey(serviceType, record.getProfileKey());
+            }
+            else if (isScaleDownAlert(reasonCode)) {
+                toProfileKey = resolvePreviousProfileKey(serviceType, record.getProfileKey());
+            }
         }
 
         SandboxServiceSpec targetSpec = null;
@@ -223,6 +228,12 @@ public class SandboxResizeService {
             || StringUtils.containsIgnoreCase(reasonCode, "oom");
     }
 
+    private boolean isScaleDownAlert(String reasonCode) {
+        return StringUtils.containsIgnoreCase(reasonCode, "low")
+            || StringUtils.containsIgnoreCase(reasonCode, "idle")
+            || StringUtils.containsIgnoreCase(reasonCode, "underutilized");
+    }
+
     private String resolveNextProfileKey(String serviceType, String currentProfileKey) {
         if (profileEntityMapper == null || StringUtils.isBlank(serviceType)) {
             return null;
@@ -251,6 +262,37 @@ public class SandboxResizeService {
         }
         catch (Exception e) {
             LOGGER.warn("解析扩容目标规格失败，serviceType={}，currentProfile={}，原因：{}",
+                serviceType, currentProfileKey, e.getMessage());
+        }
+        return null;
+    }
+
+    private String resolvePreviousProfileKey(String serviceType, String currentProfileKey) {
+        if (profileEntityMapper == null || StringUtils.isBlank(serviceType) || StringUtils.isBlank(currentProfileKey)) {
+            return null;
+        }
+        try {
+            List<SandboxServiceProfileEntity> profiles = profileEntityMapper.selectEnabledProfiles(serviceType);
+            if (profiles == null || profiles.isEmpty()) {
+                return null;
+            }
+            String previousProfileKey = null;
+            for (SandboxServiceProfileEntity profile : profiles) {
+                if (profile == null || profile.getResizeEnabled() != null && profile.getResizeEnabled() == 0) {
+                    continue;
+                }
+                String profileKey = profile.getProfileKey();
+                if (StringUtils.isBlank(profileKey)) {
+                    continue;
+                }
+                if (profileKey.equalsIgnoreCase(currentProfileKey)) {
+                    return previousProfileKey;
+                }
+                previousProfileKey = profileKey;
+            }
+        }
+        catch (Exception e) {
+            LOGGER.warn("解析降配目标规格失败，serviceType={}，currentProfile={}，原因：{}",
                 serviceType, currentProfileKey, e.getMessage());
         }
         return null;
