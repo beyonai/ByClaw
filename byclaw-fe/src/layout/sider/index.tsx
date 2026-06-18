@@ -23,6 +23,7 @@ import SiderSearch from './siderSearch';
 import useNewChat from '../header/components/NewChat/useNewChat';
 import { getDisplayUserNameInChat } from '@/utils/chat';
 import useGlobal from '@/hooks/useGlobal';
+import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContentContext';
@@ -237,6 +238,7 @@ const Sidebar = () => {
             className={styles.sideIconWrap}
             onClick={() => {
               clearDetailPanel?.();
+              clearEasyConfirmInputDraft();
               handleNewChat();
             }}
           >
