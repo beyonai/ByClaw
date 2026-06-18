@@ -87,10 +87,10 @@ function registerFull(api: OpenClawPluginApi) {
     );
     scheduleActiveSdkCompletionCheck(api, request.sessionKey, "subagent_ended");
   });
-  startCronNextRunTimeRedisSync(api);
+  startCronNextRunTimeRedisSync();
   api.on("cron_changed", (event) => {
     api.logger.info(`[byai-channel] cron_changed: ${JSON.stringify(event)}`);
-    handleCronChangedEvent(event, api);
+    handleCronChangedEvent(event);
   });
   logInfoOnce(api, "channel-registered-successfully", "[byai-channel] channel registered successfully");
 }
