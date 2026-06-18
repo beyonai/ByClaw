@@ -27,10 +27,11 @@ the plugin retries in the background with exponential backoff. Defaults:
 Until a repository has been cloned and indexed, `code_to_wiki` returns a clear
 repository-not-ready error with the last failure and next retry time.
 
-By default, `code_to_wiki` does not return raw CodeGraph output to OpenClaw tool
-results. This keeps Gateway terminals and session logs readable. Set
-`includeRawOutputInToolResult: true` when you want the model to receive the full
-CodeGraph result and generate an operation document from it.
+By default, `code_to_wiki` returns raw CodeGraph output to OpenClaw tool results
+so the model can inspect source and generate operation documents from code. Each
+lookup result also includes the repository local checkout path. Set
+`includeRawOutputInToolResult: false` only when you intentionally want quieter
+tool results.
 
 ## Example config
 
@@ -80,9 +81,10 @@ and restart Gateway.
           retryInitialDelayMs: 300000,
           retryMaxDelayMs: 21600000,
           retryMaxAttempts: 3,
-          includeRawOutputInToolResult: false,
+          includeRawOutputInToolResult: true,
           gitDepth: 1,
           notificationWebhookUrl: "https://oapi.dingtalk.com/robot/send?access_token=...",
+          notificationDingtalkSecret: "SEC...",
           notificationRobotType: "dingtalk"
         }
       }
@@ -115,6 +117,10 @@ The intended flow is:
    review.
 
 Configure `notificationWebhookUrl` in `openclaw.json`.
+
+For DingTalk robots with signing enabled, also configure
+`notificationDingtalkSecret`. The plugin computes `timestamp` and `sign` for
+each request and appends them to the webhook URL.
 
 Supported `notificationRobotType` values:
 

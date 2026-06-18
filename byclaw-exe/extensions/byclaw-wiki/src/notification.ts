@@ -1,3 +1,4 @@
+import { createHmac, randomUUID } from "node:crypto";
 import type {
   CodegraphMode,
   NotificationRobotType,
@@ -24,7 +25,23 @@ export type DocumentationNotificationResult = {
 };
 
 function resolveWebhookUrl(config: ResolvedNotificationConfig): string | undefined {
-  return config.webhookUrl?.trim() || undefined;
+  const webhookUrl = config.webhookUrl?.trim();
+  if (!webhookUrl) {
+    return undefined;
+  }
+  if (config.robotType !== "dingtalk" || !config.dingtalkSecret?.trim()) {
+    return webhookUrl;
+  }
+
+  const timestamp = String(Date.now());
+  const secret = config.dingtalkSecret.trim();
+  const sign = createHmac("sha256", Buffer.from(secret, "utf8"))
+    .update(`${timestamp}\n${secret}`, "utf8")
+    .digest("base64");
+  const url = new URL(webhookUrl);
+  url.searchParams.set("timestamp", timestamp);
+  url.searchParams.set("sign", sign);
+  return url.toString();
 }
 
 function truncateText(value: string, maxChars: number): string {
@@ -65,6 +82,7 @@ function buildPayload(robotType: NotificationRobotType, markdown: string): unkno
     case "dingtalk":
       return {
         msgtype: "markdown",
+        msgUuid: randomUUID(),
         markdown: {
           title: "Byclaw Wiki 文档更新提醒",
           text: markdown,
@@ -86,6 +104,35 @@ function buildPayload(robotType: NotificationRobotType, markdown: string): unkno
   }
 }
 
+async function parseRobotResponse(response: Response): Promise<{ ok: boolean; error?: string }> {
+  const body = await response.text().catch(() => "");
+  if (!body.trim()) {
+    return {
+      ok: response.ok,
+      error: response.ok ? undefined : response.statusText,
+    };
+  }
+
+  try {
+    const payload = JSON.parse(body) as { errcode?: number | string; errmsg?: string };
+    if (payload.errcode !== undefined && String(payload.errcode) !== "0") {
+      return {
+        ok: false,
+        error: `errcode=${payload.errcode}, errmsg=${payload.errmsg ?? ""}`.trim(),
+      };
+    }
+    return {
+      ok: response.ok,
+      error: response.ok ? undefined : body,
+    };
+  } catch {
+    return {
+      ok: response.ok,
+      error: response.ok ? undefined : body,
+    };
+  }
+}
+
 export async function sendDocumentationNotification(
   params: DocumentationNotificationRequest,
 ): Promise<DocumentationNotificationResult> {
@@ -97,19 +144,19 @@ export async function sendDocumentationNotification(
     };
   }
 
-  const webhookUrl = resolveWebhookUrl(params.config);
-  if (!webhookUrl) {
-    return {
-      attempted: false,
-      skippedReason: "webhook_not_configured",
-    };
-  }
-
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10_000);
   timer.unref();
 
   try {
+    const webhookUrl = resolveWebhookUrl(params.config);
+    if (!webhookUrl) {
+      return {
+        attempted: false,
+        skippedReason: "webhook_not_configured",
+      };
+    }
+
     const markdown = buildMarkdown(params);
     const response = await fetch(webhookUrl, {
       method: "POST",
@@ -119,12 +166,13 @@ export async function sendDocumentationNotification(
       body: JSON.stringify(buildPayload(params.config.robotType, markdown)),
       signal: controller.signal,
     });
+    const robotResponse = await parseRobotResponse(response);
 
     return {
       attempted: true,
-      ok: response.ok,
+      ok: response.ok && robotResponse.ok,
       statusCode: response.status,
-      error: response.ok ? undefined : await response.text().catch(() => response.statusText),
+      error: response.ok && robotResponse.ok ? undefined : robotResponse.error ?? response.statusText,
     };
   } catch (error) {
     return {

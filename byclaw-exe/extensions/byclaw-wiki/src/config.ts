@@ -79,8 +79,8 @@ export const byclawWikiConfigSchema = {
     includeRawOutputInToolResult: {
       type: "boolean",
       description:
-        "Whether code_to_wiki returns raw CodeGraph output to OpenClaw. Default false keeps terminal/tool logs quiet.",
-      default: false,
+        "Whether code_to_wiki returns raw CodeGraph output to OpenClaw. Default true lets agents inspect source and generate documents.",
+      default: true,
     },
     gitDepth: {
       type: "number",
@@ -90,6 +90,10 @@ export const byclawWikiConfigSchema = {
     notificationWebhookUrl: {
       type: "string",
       description: "Optional group robot webhook URL.",
+    },
+    notificationDingtalkSecret: {
+      type: "string",
+      description: "Optional DingTalk robot SEC secret used to sign webhook requests.",
     },
     notificationRobotType: {
       enum: ["generic", "wecom", "dingtalk", "feishu"],
@@ -231,10 +235,11 @@ export function resolveByclawWikiConfig(raw: unknown): ResolvedByclawWikiConfig 
     retryInitialDelayMs: readPositiveInteger(config.retryInitialDelayMs, 5 * 60 * 1000),
     retryMaxDelayMs: readPositiveInteger(config.retryMaxDelayMs, 6 * 60 * 60 * 1000),
     retryMaxAttempts: readPositiveInteger(config.retryMaxAttempts, 3),
-    includeRawOutputInToolResult: readBoolean(config.includeRawOutputInToolResult, false),
+    includeRawOutputInToolResult: readBoolean(config.includeRawOutputInToolResult, true),
     gitDepth: readPositiveInteger(config.gitDepth, 1),
     notification: {
       webhookUrl: readString(config.notificationWebhookUrl, "") || undefined,
+      dingtalkSecret: readString(config.notificationDingtalkSecret, "") || undefined,
       robotType: readRobotType(config.notificationRobotType),
       maxOutputChars: readPositiveInteger(config.notificationMaxOutputChars, 3000),
       minOutputChars: readNonNegativeInteger(config.notificationMinOutputChars, 1),

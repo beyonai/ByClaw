@@ -42,7 +42,7 @@ describe("resolveByclawWikiConfig", () => {
     assert.equal(config.retryInitialDelayMs, 5 * 60 * 1000);
     assert.equal(config.retryMaxDelayMs, 6 * 60 * 60 * 1000);
     assert.equal(config.retryMaxAttempts, 3);
-    assert.equal(config.includeRawOutputInToolResult, false);
+    assert.equal(config.includeRawOutputInToolResult, true);
     assert.equal(config.gitDepth, 1);
     assert.equal(config.repositories.length, 1);
     assert.equal(config.repositories[0]?.id, "byclaw");
@@ -94,12 +94,14 @@ describe("resolveByclawWikiConfig", () => {
   it("resolves notification config from plugin config", () => {
     const config = resolveByclawWikiConfig({
       notificationWebhookUrl: "https://example.test/direct",
+      notificationDingtalkSecret: "SEC-example",
       notificationRobotType: "wecom",
       notificationMaxOutputChars: 1200,
       notificationMinOutputChars: 10,
     });
 
     assert.equal(config.notification.webhookUrl, "https://example.test/direct");
+    assert.equal(config.notification.dingtalkSecret, "SEC-example");
     assert.equal(config.notification.robotType, "wecom");
     assert.equal(config.notification.maxOutputChars, 1200);
     assert.equal(config.notification.minOutputChars, 10);

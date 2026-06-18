@@ -103,21 +103,27 @@ function buildToolText(params: {
   ok: boolean;
   mode: string;
   repositoryId: string;
+  localPath: string;
   output: string;
   includeRawOutput: boolean;
   notification: { attempted: boolean; ok?: boolean; skippedReason?: string; error?: string };
 }): string {
   const outputBytes = Buffer.byteLength(params.output);
+  const header = [
+    `Repository: ${params.repositoryId}`,
+    `Local checkout path: ${params.localPath}`,
+    "Use this local checkout path when you need to refer to where the indexed source code lives on disk.",
+  ].join("\n");
 
   if (params.includeRawOutput) {
     return params.ok
-      ? `code_to_wiki ${params.mode} result for ${params.repositoryId}:\n\n${params.output}`
-      : `code_to_wiki ${params.mode} failed for ${params.repositoryId}:\n\n${params.output}`;
+      ? `code_to_wiki ${params.mode} result:\n\n${header}\n\nCodeGraph output:\n\n${params.output}`
+      : `code_to_wiki ${params.mode} failed:\n\n${header}\n\nCodeGraph output:\n\n${params.output}`;
   }
 
   return params.ok
-    ? `code_to_wiki ${params.mode} completed for ${params.repositoryId}; raw CodeGraph output omitted (${outputBytes} bytes).`
-    : `code_to_wiki ${params.mode} failed for ${params.repositoryId}; raw output omitted (${outputBytes} bytes).`;
+    ? `code_to_wiki ${params.mode} completed; raw CodeGraph output omitted (${outputBytes} bytes).\n\n${header}`
+    : `code_to_wiki ${params.mode} failed; raw output omitted (${outputBytes} bytes).\n\n${header}`;
 }
 
 export function createCodeToWikiTool(params: {
@@ -132,7 +138,7 @@ export function createCodeToWikiTool(params: {
     name: params.config.toolName,
     label: "Code To Wiki",
     description:
-      "Inspect the configured GitHub source repositories through CodeGraph before answering code, architecture, API, or implementation questions.",
+      "Inspect the configured GitHub source repositories through CodeGraph before answering code, architecture, API, or implementation questions. Results include the repository local checkout path and, by default, raw CodeGraph output.",
     parameters: codeToWikiParameters,
     async execute(_toolCallId: string, input: Record<string, unknown>) {
       const request = normalizeRequest(input);
@@ -164,7 +170,7 @@ export function createCodeToWikiTool(params: {
           content: [
             {
               type: "text" as const,
-              text: `code_to_wiki status for ${repository.id}: ${status?.state ?? "unknown"}.`,
+              text: `code_to_wiki status for ${repository.id}: ${status?.state ?? "unknown"}.\nLocal checkout path: ${repository.localPath}`,
             },
           ],
           details,
@@ -268,6 +274,7 @@ export function createCodeToWikiTool(params: {
                 ok: result.ok,
                 mode,
                 repositoryId: repository.id,
+                localPath: repository.localPath,
                 output,
                 includeRawOutput: params.config.includeRawOutputInToolResult,
                 notification: { attempted: false, skippedReason: "lookup_only" },
