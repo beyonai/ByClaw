@@ -1840,6 +1840,60 @@ class DataCloudWorker(GatewayWorker):
             getattr(context, "locale", "<not set>"),
         )
 
+        # ── 用户 token 设置（从 Redis 读取，写入 context）──
+        # 先用 user_code 查 SHARE_BFM_USER_CODE_{user_code} 得到 user_id，
+        # 再用 user:{user_id}:login:auth 读取 token hash。
+        _auth_user_id = _cmd_user_code
+        if _auth_user_id:
+            try:
+                _uid_key = f"SHARE_BFM_USER_CODE_{_auth_user_id}"
+                _real_user_id: str = str(await self.redis.get(_uid_key) or "").strip()
+                if not _real_user_id:
+                    logger.warning(
+                        "[user-auth] user_id not found in redis: key=%s session=%s",
+                        _uid_key,
+                        context.session_id,
+                    )
+                _redis_auth_key = f"user:{_real_user_id or _auth_user_id}:login:auth"
+                _redis_auth_data: dict[str, str] = await self.redis.hgetall(_redis_auth_key)
+                if _redis_auth_data:
+                    _whale_token = _redis_auth_data.get("WHALE_AGENT_AUTHORIZATION", "")
+                    _sso_token = _redis_auth_data.get("Sso-Token", "")
+                    _beyond_token = _redis_auth_data.get("Beyond-Token", "")
+                    # 写入 context 属性
+                    try:
+                        if _whale_token:
+                            context.whale_agent_authorization = _whale_token
+                        if _sso_token:
+                            context.sso_token = _sso_token
+                        if _beyond_token:
+                            context.beyond_token = _beyond_token
+                    except AttributeError:
+                        pass
+                    # 回填到 header_metadata，使下游 header_metadata.get("Beyond-Token") 等读取生效
+                    if _whale_token and not header_metadata.get("WHALE_AGENT_AUTHORIZATION"):
+                        header_metadata["WHALE_AGENT_AUTHORIZATION"] = _whale_token
+                    if _sso_token and not header_metadata.get("Sso-Token"):
+                        header_metadata["Sso-Token"] = _sso_token
+                    if _beyond_token and not header_metadata.get("Beyond-Token"):
+                        header_metadata["Beyond-Token"] = _beyond_token
+                    logger.info(
+                        "[user-auth] loaded tokens from redis: key=%s session=%s"
+                        " whale=%s sso=%s beyond=%s",
+                        _redis_auth_key,
+                        context.session_id,
+                        "***" if _whale_token else "<empty>",
+                        "***" if _sso_token else "<empty>",
+                        "***" if _beyond_token else "<empty>",
+                    )
+            except Exception:
+                logger.warning(
+                    "[user-auth] failed to load tokens from redis: user_id=%s session=%s",
+                    _auth_user_id,
+                    context.session_id,
+                    exc_info=True,
+                )
+
         # 来源 1：extra_payload.call_object_ids / call_view_ids（内部委派）
         # 来源 2：extra_payload.resource_list 中的 OBJECT / VIEW 资源码（前端选择）
         # 来源 3：header_metadata 中由 interrupt 写入的恢复值（ResumeCommand 时）
