@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Form, Input, Select, Col, Dropdown, Tag } from 'antd';
-import { isString, concat } from 'lodash';
+import { isString, concat, isEqual } from 'lodash';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import classnames from 'classnames';
 
@@ -56,6 +56,7 @@ function getFormValueFromEvent(...args: unknown[]) {
 }
 
 const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRenderProps) => {
+  const form = Form.useFormInstance();
   const {
     formType,
     fieldCode,
@@ -167,11 +168,23 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
     comp = <Select mode="tags" />;
   }
 
+  useEffect(() => {
+    if (!name) return;
+
+    const currentValue = form.getFieldValue(name);
+    const shouldSync = fieldValue !== undefined || !form.isFieldTouched(name);
+
+    if (shouldSync && !isEqual(currentValue, initialValue)) {
+      form.setFieldValue(name, initialValue);
+    }
+  }, [fieldValue, form, initialValue, name]);
+
   const visibleErrorTips = isInitialErrorVisible ? errorTips : undefined;
 
   return (
     <Col span={span} key={key}>
       <Form.Item
+        key={key}
         name={name}
         label={fieldName}
         rules={rules}
