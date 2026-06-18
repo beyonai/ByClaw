@@ -96,7 +96,7 @@ public class SandboxService {
     /** 沙箱状态：启动失败 */
     private static final String STATUS_FAILED = "FAILED";
 
-    /** 手动释放终止原因。 */
+    /** 手动释放终止原因前缀。 */
     private static final String RELEASE_REASON_MANUAL = "release.manual";
 
     /** 自动空闲超时释放终止原因。 */
@@ -1000,6 +1000,7 @@ public class SandboxService {
      * @param resourceId 资源ID
      */
     public void removeSandbox(String userCode, Long resourceId) {
+        String releaseReason = manualReleaseReason(userCode);
         String sandboxType = null;
         List<Long> effectiveResourceIds = new ArrayList<>();
         if (resourceId != null) {
@@ -1016,7 +1017,7 @@ public class SandboxService {
         LOGGER.info("开始手动释放沙箱，用户编码：{}，资源ID：{}，命中记录数：{}，记录：{}",
             userCode, resourceId, records.size(), records.stream().map(this::sandboxRef).collect(Collectors.toList()));
         for (SsSandboxRecord record : records) {
-            doRemoveSandbox(record, RELEASE_REASON_MANUAL);
+            doRemoveSandbox(record, releaseReason);
         }
     }
 
@@ -1028,15 +1029,27 @@ public class SandboxService {
         if (record == null) {
             throw new BdpRuntimeException("sandbox record not found");
         }
+        String releaseReason = manualReleaseReason(record.getUserCode());
         if (STATUS_STARTING.equals(record.getStatus())) {
-            markStartingSandboxReleased(record, RELEASE_REASON_MANUAL);
+            markStartingSandboxReleased(record, releaseReason);
             return;
         }
         if (!STATUS_RUNNING.equals(record.getStatus())) {
             LOGGER.warn("沙箱手动释放跳过，记录非可释放状态：{}", sandboxRef(record));
             return;
         }
-        doRemoveSandbox(record, RELEASE_REASON_MANUAL);
+        doRemoveSandbox(record, releaseReason);
+    }
+
+    private String manualReleaseReason(String fallbackUserCode) {
+        String operatorUserCode = StringUtils.trimToEmpty(CurrentUserHolder.getCurrentUserCode());
+        if (StringUtils.isBlank(operatorUserCode)) {
+            operatorUserCode = StringUtils.trimToEmpty(fallbackUserCode);
+        }
+        if (StringUtils.isBlank(operatorUserCode)) {
+            return RELEASE_REASON_MANUAL;
+        }
+        return RELEASE_REASON_MANUAL + ":" + operatorUserCode;
     }
 
     public void updateSandboxById(Long id, Integer autoRelease) {
