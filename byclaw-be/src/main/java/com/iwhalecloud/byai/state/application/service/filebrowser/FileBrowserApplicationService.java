@@ -10,6 +10,8 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService;
 import com.iwhalecloud.byai.state.domain.filebrowser.vo.FileBrowserItemVo;
 
 @Service
@@ -17,10 +19,16 @@ public class FileBrowserApplicationService {
 
     private static final String DEFAULT_WORKSPACE_TEMPLATE = ".openclaw/workspace-baiying-agent-%s/";
 
+    private static final String RESOURCE_SKILL_ROOT = "/byclaw/resource/skill";
+
     private final FileBrowserProviderFactory providerFactory;
 
-    public FileBrowserApplicationService(FileBrowserProviderFactory providerFactory) {
+    private final ByClawSkillResourceApplicationService byClawSkillResourceApplicationService;
+
+    public FileBrowserApplicationService(FileBrowserProviderFactory providerFactory,
+        ByClawSkillResourceApplicationService byClawSkillResourceApplicationService) {
         this.providerFactory = providerFactory;
+        this.byClawSkillResourceApplicationService = byClawSkillResourceApplicationService;
     }
 
     public String getDefaultPath(Long resourceId) {
@@ -33,6 +41,8 @@ public class FileBrowserApplicationService {
 
     public void upload(String userCode, Long resourceId, String relativePath, MultipartFile[] files) throws Exception {
         providerFactory.getProvider().upload(userCode, resourceId, relativePath, files);
+        byClawSkillResourceApplicationService.registerFileManagedSkills(userCode, resourceId, relativePath,
+            files == null ? java.util.Collections.emptyList() : java.util.Arrays.asList(files));
     }
 
     public InputStream download(String userCode, Long resourceId, String relativePath) {
@@ -40,14 +50,18 @@ public class FileBrowserApplicationService {
     }
 
     public void delete(String userCode, Long resourceId, List<String> relativePaths) {
+        assertNotResourceManagedPath(relativePaths);
         providerFactory.getProvider().delete(userCode, resourceId, relativePaths);
     }
 
     public void rename(String userCode, Long resourceId, String sourcePath, String newName) {
+        assertNotResourceManagedPath(List.of(sourcePath));
         providerFactory.getProvider().rename(userCode, resourceId, sourcePath, newName);
     }
 
     public void move(String userCode, Long resourceId, List<String> sourcePaths, String targetDirectory) {
+        assertNotResourceManagedPath(sourcePaths);
+        assertNotResourceManagedPath(List.of(targetDirectory));
         providerFactory.getProvider().move(userCode, resourceId, sourcePaths, targetDirectory);
     }
 
@@ -131,5 +145,33 @@ public class FileBrowserApplicationService {
             normalizedPath = "/" + normalizedPath;
         }
         return normalizedPath.endsWith("/") ? normalizedPath : normalizedPath + "/";
+    }
+
+    private void assertNotResourceManagedPath(List<String> paths) {
+        if (paths == null) {
+            return;
+        }
+        for (String path : paths) {
+            String normalizedPath = normalizePath(path);
+            if (isResourceManagedSkillPath(normalizedPath)) {
+                throw new IllegalArgumentException(I18nUtil.get("byclaw.filebrowser.resource.managed.readonly",
+                    normalizedPath));
+            }
+        }
+    }
+
+    private boolean isResourceManagedSkillPath(String normalizedPath) {
+        return RESOURCE_SKILL_ROOT.equals(normalizedPath) || normalizedPath.startsWith(RESOURCE_SKILL_ROOT + "/");
+    }
+
+    private String normalizePath(String path) {
+        String normalizedPath = StringUtils.defaultIfBlank(path, "/").trim().replace('\\', '/').replaceAll("/+", "/");
+        if (StringUtils.contains(normalizedPath, "..")) {
+            throw new IllegalArgumentException("非法路径: " + path);
+        }
+        if (!normalizedPath.startsWith("/")) {
+            normalizedPath = "/" + normalizedPath;
+        }
+        return StringUtils.removeEnd(normalizedPath, "/");
     }
 }

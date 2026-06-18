@@ -9,6 +9,7 @@ export interface FixedEntryOperationCapability {
   canImportEnterpriseToolkit: boolean; // 是否能导入企业工具包
   canImportEnterpriseView: boolean; // 是否能导入企业视图
   canImportEnterpriseObject: boolean; // 是否能导入企业对象
+  canImportEnterpriseSkill?: boolean; // 是否能导入企业技能
 }
 
 /**
@@ -129,6 +130,15 @@ export function importResource(resourceType: string, fileType: string, data: For
   });
 }
 
+export function checkSkillImportConflicts(data: FormData) {
+  return POST<ResourceImportResult>('/byaiService/tool/checkSkillZipImportConflicts', data, {
+    timeout: 480000,
+    headers: {
+      'Content-Type': 'multipart/form-data; charset=utf-8',
+    },
+  });
+}
+
 /**
  * 获取当前用户有权限使用的资源列表
  * @param params 查询参数（包含keyword等）
@@ -235,6 +245,10 @@ export const queryResourceDetail = (params: any) => {
 
 export const queryMCPToolsList = (params: { resourceId: string }) => {
   return POST<any>('/byaiService/tool/mcp/listTools', params);
+};
+
+export const querySkillUsedDigitalEmployees = (params: { resourceId: string | number }) => {
+  return POST<any[]>('/byaiService/tool/querySkillUsedDigitalEmployees', params);
 };
 
 export const queryCallMCPToolRequest = (params: {
