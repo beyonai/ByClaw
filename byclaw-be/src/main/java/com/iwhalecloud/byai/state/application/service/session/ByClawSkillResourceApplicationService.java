@@ -114,6 +114,7 @@ public class ByClawSkillResourceApplicationService {
             SkillPackageMetadata metadata = inspectSkillPackage(uploadFile);
             SsResource skillResource = saveOrUpdateSkillResource(metadata, OwnerType.PERSONAL,
                 DEFAULT_SKILL_CATALOG_ID);
+            authApplicationService.ensureCreatorDefaultPrivileges(skillResource);
             SsResExtSkill extSkill = saveOrUpdateSkillExt(userCode, skillResource, uploadFile, metadata,
                 uploadedSkill.getSkillPath(), uploadedSkill.getSkillDocObjectKey(), SOURCE_TYPE_CHAT_UPLOAD);
             bindSkillToDigitalEmployee(resolvedDigitalEmployeeId, skillResource.getResourceId());
@@ -219,6 +220,7 @@ public class ByClawSkillResourceApplicationService {
             SkillPackageMetadata metadata = inspectSkillPackage(file);
             SsResource skillResource = saveOrUpdateSkillResource(metadata, OwnerType.PERSONAL,
                 DEFAULT_SKILL_CATALOG_ID);
+            authApplicationService.ensureCreatorDefaultPrivileges(skillResource);
             String skillPath = normalizeUploadedFilePath(directoryPath, metadata.originalFilename());
             SsResExtSkill extSkill = saveOrUpdateSkillExt(userCode, skillResource, file, metadata, skillPath, null,
                 SOURCE_TYPE_FILE_MANAGE_UPLOAD);
@@ -479,7 +481,7 @@ public class ByClawSkillResourceApplicationService {
         content.put("skillType", extSkill.getSkillType());
         content.put("skillPath", skillPath);
         content.put("skillDocObjectKey", skillDocObjectKey);
-        content.put("skillUrl", normalizeResourceObjectKey(extSkill.getSkillUrl()));
+        content.put("skillUrl", buildSkillDownloadUrl(skillResource.getResourceId()));
         content.put("version", extSkill.getVersion());
         content.put("skillPackageFormat", extSkill.getSkillPackageFormat());
         content.put("skillOriginalFilename", extSkill.getSkillOriginalFilename());
@@ -489,6 +491,10 @@ public class ByClawSkillResourceApplicationService {
         content.put("syncError", extSkill.getSyncError());
         content.put("lastSyncTime", extSkill.getLastSyncTime());
         return JSON.toJSONString(content);
+    }
+
+    private String buildSkillDownloadUrl(Long skillId) {
+        return skillId == null ? "" : "/byaiService/tool/downloadSkillZip?skillId=" + skillId;
     }
 
     public SkillPackageMetadata inspectSkillPackage(MultipartFile file) {

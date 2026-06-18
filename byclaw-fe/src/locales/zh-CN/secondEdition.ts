@@ -258,6 +258,8 @@ export default {
   'fileBrowser.copy.noSubFolder': '当前目录下暂无子文件夹，可直接保存到此目录',
   'fileBrowser.copy.success': '复制成功',
   'fileBrowser.copy.failed': '复制失败',
+  'fileBrowser.upload.changeDirectory': '切换目录',
+  'fileBrowser.upload.selectDirectoryTitle': '选择上传目录',
   'fileBrowser.save.missingResource': '无法获取{target}资源',
   'fileBrowser.save.saving': '正在保存到{target}',
   'fileBrowser.save.success': '已保存到{target}',

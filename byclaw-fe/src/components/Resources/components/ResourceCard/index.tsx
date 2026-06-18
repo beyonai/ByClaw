@@ -275,7 +275,7 @@ const RenderContent = (props: ResourceCardProps) => {
       return resource.tagName;
     }
     if (isInnerSkillResource(resource, resourceType)) {
-      return '系统内置';
+      return intl.formatMessage({ id: 'resource.systemBuiltin' });
     }
     // 超级助手只按 resourceCode 后缀识别，不再依赖 ownerType=personal_default。
     if (
