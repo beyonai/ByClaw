@@ -47,6 +47,8 @@ public class ResourceAuthApplicationService {
 
     private static final String BELONG_COMPANY = "COMPANY";
 
+    private static final String SKILL_RESOURCE_BIZ_TYPE = "SKILL";
+
     private static final List<String> KNOWLEDGE_RESOURCE_BIZ_TYPES = List.of(
         Constants.ResourceBizType.KG_DOC,
         Constants.ResourceBizType.KG_QA,
@@ -138,7 +140,7 @@ public class ResourceAuthApplicationService {
         qo.setKeyword(keyword);
         qo.setCatalogIds(ssResourceCatalogService.findSelfAndDescendantCatalogIds(qo.getCatalogId()));
         Page<ResourceAuthVo> page = PageHelper.startPage(qo.getPageNum(), qo.getPageSize());
-        if (isSkillOnlyQuery(qo.getResourceBizTypeList())) {
+        if (isSkillOnlyQuery(qo)) {
             ssResourceMapper.queryDigEmployeeSkillResourceAuthList(qo);
         }
         else {
@@ -146,6 +148,17 @@ public class ResourceAuthApplicationService {
         }
         PageInfo<ResourceAuthVo> pageInfo = PageHelperUtil.toPageInfo(page);
         return pageInfo;
+    }
+
+    /**
+     * 技能关联当前存放在数字员工扩展表 skills 字段中，不在 ss_resource_rel_detail 里，
+     * 因此仅查询技能时需要走技能专用 SQL，避免技能列表为空。
+     */
+    private boolean isSkillOnlyQuery(DigEmployeeRelResourceQo qo) {
+        return qo != null
+            && CollectionUtils.isNotEmpty(qo.getResourceBizTypeList())
+            && qo.getResourceBizTypeList().size() == 1
+            && StringUtils.equals(SKILL_RESOURCE_BIZ_TYPE, qo.getResourceBizTypeList().get(0));
     }
 
     /**
@@ -222,17 +235,6 @@ public class ResourceAuthApplicationService {
 
     private long safeLong(Integer value, long defaultValue) {
         return value == null ? defaultValue : value.longValue();
-    }
-
-    private boolean isSkillOnlyQuery(List<String> resourceBizTypeList) {
-        if (CollectionUtils.isEmpty(resourceBizTypeList)) {
-            return false;
-        }
-        List<String> normalizedBizTypes = resourceBizTypeList.stream()
-            .filter(StringUtils::isNotBlank)
-            .map(StringUtils::trim)
-            .toList();
-        return normalizedBizTypes.size() == 1 && StringUtils.equalsIgnoreCase(normalizedBizTypes.get(0), "SKILL");
     }
 
     private void fillCatalogIds(ResourceUseAuthQo resourceUseAuthQo) {

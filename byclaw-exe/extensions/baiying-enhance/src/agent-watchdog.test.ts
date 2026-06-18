@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, readdir, unlink, writeFile } from "node:fs/promises";
-import { readdirSync, readFileSync } from "node:fs";
+import { createReadStream, readdirSync, readFileSync } from "node:fs";
 import { MAIN_AGENTS_MARKER } from "./main-workspace-seed.js";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     DEFAULT_INDEX_FILENAME,
@@ -18,6 +20,8 @@ import { AgentRegistryState } from "./agent-state.js";
 import { SUBAGENT_ROUTING_FILENAME, SUBAGENT_ROUTING_MARKER } from "./subagent-routing-seed.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 import type { BaiyingRedisJsonStore, RedisJsonPayload } from "./redis-json-store.js";
+
+const execFileAsync = promisify(execFile);
 
 /** Fixed JSON string so SHA-256 is stable across runs. */
 const STABLE_AGENT_JSON =
@@ -62,6 +66,16 @@ function createMockApi(
 async function writeWorkspaceSkill(workspaceDir: string, name: string): Promise<void> {
     await mkdir(path.join(workspaceDir, "skills", name), { recursive: true });
     await writeFile(path.join(workspaceDir, "skills", name, "SKILL.md"), `# ${name}\n`, "utf8");
+}
+
+async function createHubSkillZip(skillCode: string): Promise<string> {
+    const root = await mkdtemp(path.join(tmpdir(), "baiying-wd-hub-skill-"));
+    const skillDir = path.join(root, skillCode);
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(path.join(skillDir, "SKILL.md"), `# ${skillCode}\n`, "utf8");
+    const zipPath = path.join(root, `${skillCode}.zip`);
+    await execFileAsync("zip", ["-qr", zipPath, skillCode], { cwd: root });
+    return zipPath;
 }
 
 function payloadFromContent(key: string, content: string): RedisJsonPayload {
@@ -140,6 +154,7 @@ function createAgentWatchdog(params: any) {
 
 describe("createAgentWatchdog", () => {
     afterEach(() => {
+        vi.restoreAllMocks();
         vi.unstubAllEnvs();
     });
 
@@ -1673,6 +1688,100 @@ describe("createAgentWatchdog", () => {
         const entry = next.agents.list.find((a: any) => a.id === agentId);
         expect(entry.skills).toEqual(["alpha"]);
         expect(entry.workspace).toBe(agentWs);
+    });
+
+    it("touches skills reload marker when only a hub skill download changed", async () => {
+        const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-hub-skill-"));
+        const stateDir = await mkdtemp(path.join(tmpdir(), "baiying-wd-hub-state-"));
+        const agentWs = await mkdtemp(path.join(tmpdir(), "baiying-agentws-"));
+        const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-"));
+        const employee = {
+            resourceId: "10026037",
+            resourceName: "Hub Skill Agent",
+            relSkills: [
+                {
+                    skillCode: "hub-skill",
+                    skillType: "hub",
+                    skillUrl: "/byaiService/tool/downloadSkillZip?skillId=1",
+                    versionUrl: "/byaiService/tool/getSkillVersion?skillId=1",
+                },
+            ],
+        };
+        const content = JSON.stringify(employee);
+        await writeFile(path.join(dir, "DIG_EMPLOYEE_10026037.json"), content, "utf8");
+        const agentId = `${MANAGED_AGENT_PREFIX}10026037`;
+        await writeFile(
+            path.join(dir, DEFAULT_INDEX_FILENAME),
+            JSON.stringify({
+                version: INDEX_VERSION,
+                entries: {
+                    [agentId]: createHash("sha256").update(content, "utf8").digest("hex"),
+                },
+            }),
+            "utf8",
+        );
+        const zipPath = await createHubSkillZip("hub-skill");
+        vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+        vi.stubEnv("BAIYING_WORKSPACE_ARCHIVE_BASE_URL", "http://example.test/byaiService");
+        vi.spyOn(globalThis, "fetch")
+            .mockResolvedValueOnce(
+                new Response(
+                    JSON.stringify({
+                        code: 0,
+                        success: true,
+                        data: {
+                            version: "v1",
+                            skillUrl: "/byaiService/tool/downloadSkillZip?skillId=1",
+                        },
+                    }),
+                    { status: 200, headers: { "content-type": "application/json" } },
+                ),
+            )
+            .mockResolvedValueOnce(
+                new Response(createReadStream(zipPath) as any, {
+                    status: 200,
+                    headers: { "content-type": "application/zip" },
+                }),
+            );
+
+        const writeConfigFile = vi.fn(async () => {});
+        const api = createMockApi(writeConfigFile, [
+            { id: "main", name: "Main", workspace: mainWs, identity: { name: "Main" } },
+            {
+                id: agentId,
+                name: "Hub Skill Agent",
+                workspace: agentWs,
+                identity: { name: "Hub Skill Agent" },
+                skills: ["hub-skill"],
+                tools: { alsoAllow: ["baiying_call"] },
+            },
+        ]) as any;
+
+        const wd = createAgentWatchdog({
+            api,
+            registry: new AgentRegistryState(),
+            absoluteDir: dir,
+            contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+            executorPath: path.join(dir, "executor.py"),
+            pluginConfig: {
+                workspaceAutoSeed: false,
+                persistAgentContentIndex: true,
+                workspaceSkillScanIntervalMs: 0,
+            },
+            debounceMs: 60_000,
+        });
+
+        await wd.start();
+        await wd.__flushNow!();
+        await wd.stop();
+
+        expect(writeConfigFile).toHaveBeenCalledTimes(1);
+        const next = writeConfigFile.mock.calls[0][0];
+        const entry = next.agents.list.find((a: any) => a.id === agentId);
+        expect(entry.skills).toEqual(["hub-skill"]);
+        expect(next.skills.entries.__baiying_enhance_reload.enabled).toBe(false);
+        expect(next.skills.entries.__baiying_enhance_reload.config.reason).toBe("hub-skill-sync");
+        await expect(readFile(path.join(stateDir, "skills", "hub-skill", "SKILL.md"), "utf8")).resolves.toContain("# hub-skill");
     });
 
     it("merges JSON, agent workspace, and main shared workspace skills", async () => {

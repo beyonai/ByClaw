@@ -243,7 +243,7 @@ const ResourceTabs: React.FC<Props> = ({
       if (
         uploadFiles.some((file) => {
           const fileName = file.name.toLowerCase();
-          return !fileName.endsWith('.zip') && !fileName.endsWith('.tar.gz');
+          return !fileName.endsWith('.zip');
         })
       ) {
         message.error(intl.formatMessage({ id: 'resourceTabs.skillUpload.onlyZip' }));

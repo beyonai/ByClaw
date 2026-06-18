@@ -8,6 +8,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 数字员工扩展信息DTO 继承 SsResource 获取基础资源字段，手动添加扩展字段
@@ -129,11 +130,12 @@ public class DigitalEmployeeDTO extends SsResExtDigEmployee {
     private List<RelResourceInfo> relResourceInfoList;
 
     /**
-     * 关联技能编码列表（前端入参，字符数组）。
+     * 关联技能列表（前端入参）。兼容历史字符数组，新格式为对象数组：
+     * {skillCode, skillType, skillUrl, versionUrl}。
      * 写入时序列化为 JSON 字符串落到 {@link SsResExtDigEmployee#getSkills()} 列；
      * 编辑回显时由 findDetailsById 反序列化重新填充。
      */
-    private List<String> relSkills;
+    private List<Map<String, Object>> relSkills;
 
     /**
      * 关联工具编码列表（前端入参，字符数组）。不入库，仅作为运行期字段：
