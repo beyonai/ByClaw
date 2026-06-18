@@ -127,6 +127,9 @@ export function shouldDeferManagedAgentModelOverrideForRun(params: {
   if (!currentProvider || !currentModel) {
     return false;
   }
+  if (!currentProvider.startsWith("baiying-m-")) {
+    return false;
+  }
   return (
     currentProvider !== params.resolved.providerOverride ||
     currentModel !== params.resolved.modelOverride
@@ -135,7 +138,7 @@ export function shouldDeferManagedAgentModelOverrideForRun(params: {
 
 const UNRESOLVED_SECRETREF_MARKER = "secretref-managed";
 const MAIN_INBOUND_DEFAULT_MODEL_RUNTIME_WAIT_MS = 5000;
-const MANAGED_INBOUND_MODEL_RUNTIME_WAIT_MS = 5000;
+const MANAGED_INBOUND_MODEL_RUNTIME_WAIT_MS = 15000;
 const INBOUND_MODEL_RUNTIME_POLL_MS = 100;
 
 export function hasManagedModelConfigDrift(params: {
@@ -299,6 +302,48 @@ async function waitForManagedAgentModelFromConfig(params: {
   }
 }
 
+async function resolveManagedAgentModelForInbound(params: {
+  api: OpenClawPluginApi;
+  agentId: string;
+  flushNow?: () => Promise<void>;
+  flushBeforeResolve?: boolean;
+  runtimeConfigWaitMs?: number;
+}): Promise<ManagedAgentModelResolveResult | undefined> {
+  let resolved = resolveManagedAgentModelFromConfig({
+    cfg: currentRuntimeConfig(params.api),
+    agentId: params.agentId,
+  });
+  if (params.flushNow && (params.flushBeforeResolve || !resolved)) {
+    await params.flushNow();
+    const expected = resolveManagedAgentModelFromConfig({
+      cfg: params.api.runtime.config.loadConfig(),
+      agentId: params.agentId,
+    });
+    const currentAfterFlush = resolveManagedAgentModelFromConfig({
+      cfg: currentRuntimeConfig(params.api),
+      agentId: params.agentId,
+    });
+    if (expected && sameResolvedModel(currentAfterFlush, expected)) {
+      resolved = currentAfterFlush;
+    } else if (expected || !currentAfterFlush) {
+      resolved = await waitForManagedAgentModelFromConfig({
+        api: params.api,
+        agentId: params.agentId,
+        timeoutMs: params.runtimeConfigWaitMs ?? MANAGED_INBOUND_MODEL_RUNTIME_WAIT_MS,
+        expected,
+      });
+      if (!resolved && expected) {
+        params.api.logger?.warn?.(
+          `baiying-enhance: managed inbound model sync for ${params.agentId} wrote ${expected.providerOverride}/${expected.modelOverride}, but runtime config did not expose it before dispatch`,
+        );
+      }
+    } else {
+      resolved = currentAfterFlush;
+    }
+  }
+  return resolved;
+}
+
 /**
  * Align one session entry with the managed agent's config primary before get-reply
  * runs. Reconcile-after-sync only touches sessions that already exist; brand-new
@@ -355,38 +400,13 @@ export async function syncManagedAgentSessionModelForInbound(params: {
   if (!agentId?.startsWith(MANAGED_AGENT_PREFIX)) {
     return;
   }
-  let resolved = resolveManagedAgentModelFromConfig({
-    cfg: currentRuntimeConfig(params.api),
+  const resolved = await resolveManagedAgentModelForInbound({
+    api: params.api,
     agentId,
+    flushNow: params.flushNow,
+    flushBeforeResolve: params.flushBeforeResolve,
+    runtimeConfigWaitMs: params.runtimeConfigWaitMs,
   });
-  if (params.flushNow && (params.flushBeforeResolve || !resolved)) {
-    await params.flushNow();
-    const expected = resolveManagedAgentModelFromConfig({
-      cfg: params.api.runtime.config.loadConfig(),
-      agentId,
-    });
-    const currentAfterFlush = resolveManagedAgentModelFromConfig({
-      cfg: currentRuntimeConfig(params.api),
-      agentId,
-    });
-    if (expected && sameResolvedModel(currentAfterFlush, expected)) {
-      resolved = currentAfterFlush;
-    } else if (expected || !currentAfterFlush) {
-      resolved = await waitForManagedAgentModelFromConfig({
-        api: params.api,
-        agentId,
-        timeoutMs: params.runtimeConfigWaitMs ?? MANAGED_INBOUND_MODEL_RUNTIME_WAIT_MS,
-        expected,
-      });
-      if (!resolved && expected) {
-        params.api.logger?.warn?.(
-          `baiying-enhance: managed inbound model sync for ${agentId} wrote ${expected.providerOverride}/${expected.modelOverride}, but runtime config did not expose it before dispatch`,
-        );
-      }
-    } else {
-      resolved = currentAfterFlush;
-    }
-  }
   if (!resolved) {
     return;
   }
@@ -486,6 +506,18 @@ export function registerManagedAgentModelHooks(
         return undefined;
       }
       return resolved;
+    }
+    if (agentId?.startsWith(MANAGED_AGENT_PREFIX)) {
+      const flushed = await resolveManagedAgentModelForInbound({
+        api,
+        agentId,
+        flushNow: aimodelRunSync?.getFlushNow(),
+        flushBeforeResolve: true,
+        runtimeConfigWaitMs: MANAGED_INBOUND_MODEL_RUNTIME_WAIT_MS,
+      });
+      if (flushed) {
+        return flushed;
+      }
     }
     const entry = currentRuntimeConfig(api).agents?.list?.find((item) => item.id === agentId);
     const primary = entry?.model?.primary?.trim();

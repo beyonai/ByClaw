@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildManagedAgentRuntimeModelSystemContext,
   hasManagedModelConfigDrift,
+  registerManagedAgentModelHooks,
   resolveManagedAgentModelFromConfig,
   shouldDeferManagedAgentModelOverrideForRun,
   syncManagedAgentSessionModelForInbound,
@@ -198,6 +199,85 @@ describe("shouldDeferManagedAgentModelOverrideForRun", () => {
         currentModel: "qwen3.6-35b-a3b",
       }),
     ).toBe(false);
+  });
+
+  it("allows Redis-managed overrides when the run is still on OpenClaw's built-in default model", () => {
+    expect(
+      shouldDeferManagedAgentModelOverrideForRun({
+        resolved: {
+          providerOverride: "baiying-m-10003989",
+          modelOverride: "qwen3.6-35b-a3b",
+        },
+        currentProvider: "openai",
+        currentModel: "gpt-5.5",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("registerManagedAgentModelHooks", () => {
+  it("flushes and returns a managed model override during cold before_model_resolve", async () => {
+    let currentCfg: any = {
+      agents: { list: [{ id: "main" }] },
+      models: { providers: {} },
+    };
+    const syncedCfg = {
+      agents: {
+        list: [
+          {
+            id: "baiying-agent-10000455",
+            model: { primary: "baiying-m-10004000/qwen3.6-27b" },
+          },
+        ],
+      },
+      models: {
+        providers: {
+          "baiying-m-10004000": {
+            models: [{ id: "qwen3.6-27b" }],
+          },
+        },
+      },
+    };
+    const flushNow = vi.fn(async () => {
+      setTimeout(() => {
+        currentCfg = syncedCfg;
+      }, 20);
+    });
+    const handlers: Record<string, (event: any, ctx: any) => Promise<any>> = {};
+    const api = {
+      logger: { info: vi.fn(), warn: vi.fn() },
+      runtime: {
+        config: {
+          current: () => currentCfg,
+          loadConfig: () => currentCfg,
+        },
+      },
+      on: (name: string, handler: (event: any, ctx: any) => Promise<any>) => {
+        handlers[name] = handler;
+      },
+    } as never;
+
+    registerManagedAgentModelHooks(api, {
+      api,
+      pluginConfig: { mainParentAgentId: "main" },
+      redisJsonStore: {} as never,
+      getFlushNow: () => flushNow,
+    });
+
+    await expect(
+      handlers.before_model_resolve?.(
+        {},
+        {
+          agentId: "baiying-agent-10000455",
+          modelProviderId: "openai",
+          modelId: "gpt-5.5",
+        },
+      ),
+    ).resolves.toEqual({
+      providerOverride: "baiying-m-10004000",
+      modelOverride: "qwen3.6-27b",
+    });
+    expect(flushNow).toHaveBeenCalledOnce();
   });
 });
 
