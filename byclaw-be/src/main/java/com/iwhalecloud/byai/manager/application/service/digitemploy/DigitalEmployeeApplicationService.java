@@ -745,6 +745,48 @@ public class DigitalEmployeeApplicationService {
         return this.findDetailsById(employeeIdDTO);
     }
 
+    /**
+     * 从数字员工卸载知识或资源，仅解除关联关系，不删除资源本身。
+     *
+     * @param uninstallResourceDTO 卸载入参
+     * @return 数字员工详情
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public DigitalEmployeeDetailsDTO uninstallDigitalEmployeeRelResources(
+        DigitalEmployeeInstallResourceDTO uninstallResourceDTO) {
+        Long digitalEmployeeId = uninstallResourceDTO == null ? null : uninstallResourceDTO.getDigitalEmployeeId();
+        List<Long> uninstallRelIds = uninstallResourceDTO == null ? null : uninstallResourceDTO.getRelIds();
+        if (digitalEmployeeId == null || CollectionUtils.isEmpty(uninstallRelIds)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.processor.param.notnull"));
+        }
+
+        SsResource ssResource = ssResourceService.findById(digitalEmployeeId);
+        List<SsResource> uninstallRelResources = findInstallRelResources(uninstallRelIds);
+        if (containsSkillResource(uninstallRelResources)) {
+            validateSkillUninstallPermission(ssResource);
+        }
+        else {
+            validateDigitalEmployeeUpdatePermission(ssResource);
+        }
+
+        List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(digitalEmployeeId);
+        Set<Long> uninstallRelIdSet = uninstallRelIds.stream().filter(Objects::nonNull).collect(Collectors.toSet());
+        List<Long> remainingRelIds = CollectionUtils.isEmpty(resourceRelDetails) ? Collections.emptyList()
+            : resourceRelDetails.stream().map(SsResourceRelDetail::getRelResourceId).filter(Objects::nonNull)
+                .filter(relResourceId -> !uninstallRelIdSet.contains(relResourceId)).distinct()
+                .collect(Collectors.toList());
+
+        this.compareSsResourceRelDetail(ssResource, remainingRelIds, resourceRelDetails, null);
+        this.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployeeId);
+        this.synOpenClawWorkSpace(digitalEmployeeId);
+        operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
+
+        EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
+        employeeIdDTO.setResourceId(digitalEmployeeId);
+        return this.findDetailsById(employeeIdDTO);
+    }
+
     private List<SsResource> findInstallRelResources(List<Long> installRelIds) {
         List<Long> distinctRelIds = installRelIds.stream().filter(Objects::nonNull).distinct()
             .collect(Collectors.toList());
@@ -780,6 +822,19 @@ public class DigitalEmployeeApplicationService {
                 && !authApplicationService.hasResourceUsePermission(resource)) {
                 throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
             }
+        }
+    }
+
+    private void validateSkillUninstallPermission(SsResource digitalEmployee) {
+        if (digitalEmployee == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
+        }
+        Long defaultDigEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
+        if (defaultDigEmployeeId == null || !Objects.equals(defaultDigEmployeeId, digitalEmployee.getResourceId())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+        }
+        if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
         }
     }
 

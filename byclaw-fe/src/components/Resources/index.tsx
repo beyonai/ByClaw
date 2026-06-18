@@ -32,6 +32,7 @@ import ResourceList from './components/ResourceList';
 import { saveTool } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
+import useGlobal from '@/hooks/useGlobal';
 import { get, trim, intersection, isEmpty } from 'lodash';
 import styles from './index.module.less';
 
@@ -97,6 +98,7 @@ const parseBannerList = (value: any) => {
 
 const Resources: React.FC<Props> = ({ resourceType }) => {
   const intl = useIntl();
+  const { EventEmitter } = useGlobal();
 
   // 根据 resourceType 判断资源名称
   const getResourceName = () => {
@@ -168,6 +170,30 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const refreshList = useCallback(() => {
     setRefreshKey((prevKey) => prevKey + 1);
   }, []);
+
+  useEffect(() => {
+    const handleResourceTypeReload = (changedResourceType?: string) => {
+      if (changedResourceType !== resourceType) {
+        return;
+      }
+      if (resourceType === 'SKILL') {
+        const nextSearchParams = new URLSearchParams(searchParams);
+        nextSearchParams.set('tab', 'personal');
+        setCatalogId('');
+        setSearchValue('');
+        setDebouncedSearchValue('');
+        setDropdownParam(getDefaultParams());
+        setActiveTab('personal');
+        setSearchParams(nextSearchParams);
+      }
+      refreshList();
+    };
+
+    EventEmitter.on('beyond-resourceList-resourceType-reload', handleResourceTypeReload);
+    return () => {
+      EventEmitter.off('beyond-resourceList-resourceType-reload', handleResourceTypeReload);
+    };
+  }, [EventEmitter, refreshList, resourceType, searchParams, setSearchParams]);
 
   // 防抖定时器
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
