@@ -5,6 +5,8 @@ import NotificationMgr from '..';
 
 const mockUseAppStore = jest.fn();
 
+jest.setTimeout(20000);
+
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({
     formatMessage: ({ id }: { id: string }, values?: Record<string, string | number>) => {

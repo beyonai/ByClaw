@@ -24,7 +24,7 @@ import ShareSelect from '@/components/ChatLayoutComp/components/MultiChoices/com
 
 import styles from './index.module.less';
 import useLocateMessage from '@/hooks/useLocateMessage';
-import { fileIconMap as typeIconMap } from '@/constants/icon';
+import { getFileIconType } from '@/constants/icon';
 
 const PreViewFile = React.lazy(() =>
   import('@/components/Preview/Twins').then((module) => ({ default: module.PreViewFile }))
@@ -511,7 +511,7 @@ const AchievementSpacePage: React.FC = () => {
             <div className={styles.cardGrid}>
               {tableData.map((record) => {
                 const currentTypeKey = typeKey(record);
-                const iconType = typeIconMap[currentTypeKey] ?? typeIconMap.other;
+                const iconType = `icon-${getFileIconType(currentTypeKey)}`;
                 return (
                   <div key={record.id} className={styles.fileCard}>
                     <div className={classNames(styles.fileCardHeader, 'ub ub-ac gap8')}>
@@ -525,7 +525,7 @@ const AchievementSpacePage: React.FC = () => {
                         ) : (
                           <AntdIcon
                             style={{ fontSize: 16 }}
-                            type={iconType || typeIconMap.other}
+                            type={iconType}
                             className={classNames(styles.fileIcon, styles[`fileIcon${currentTypeKey}`])}
                           />
                         )}
@@ -544,7 +544,7 @@ const AchievementSpacePage: React.FC = () => {
                       ) : (
                         <AntdIcon
                           style={{ fontSize: CARD_BODY_ICON_SIZE }}
-                          type={iconType || typeIconMap.other}
+                          type={iconType}
                           className={classNames(styles.fileBodyIcon, styles[`fileIcon${currentTypeKey}`])}
                         />
                       )}

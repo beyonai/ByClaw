@@ -26,6 +26,10 @@ cd byclaw-qa
 
 `api` 模式会使用 `uvicorn` 启动 `by_qa.main:app`。
 
+API 请求会按请求创建模型配置 provider，但默认创建的
+`RedisModelConfigProvider` 会复用进程级 Redis 客户端和连接池，避免按请求建立并滞留
+Redis 连接。worker 显式注入的 Redis 客户端不受该共享逻辑影响。
+
 启动即时问答 worker：
 
 ```bash
