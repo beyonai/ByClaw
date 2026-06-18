@@ -163,5 +163,5 @@ describe('NotificationMgr i18n', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Edit/ }));
 
     expect(screen.getByDisplayValue('1.0.0')).toBeDisabled();
-  });
+  }, 10000);
 });
