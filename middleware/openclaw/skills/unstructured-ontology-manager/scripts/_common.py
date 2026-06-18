@@ -53,7 +53,9 @@ async def _post_via_discovery(
     body: dict[str, Any] = response.data if isinstance(response.data, dict) else {}
     if not response.is_success or body.get("code", 0) != 0:
         raise ValueError(f"HTTP {response.status_code} {service_name}{path}: {body.get('msg', body)}")
-    return body.get("data")
+    if body and "data" in body:
+        return body["data"]
+    return body
 
 
 def post_json(path: str, payload: dict[str, Any], service_env: str = "BE_DOMAINNAME") -> Any:
