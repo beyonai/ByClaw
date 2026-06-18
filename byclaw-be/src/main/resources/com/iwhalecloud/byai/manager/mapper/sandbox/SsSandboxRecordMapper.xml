@@ -246,7 +246,6 @@
         </set>
         WHERE id = #{id,jdbcType=BIGINT}
           AND status = 'RUNNING'
-          AND lock_version = #{lockVersion,jdbcType=INTEGER}
     </update>
 
     <update id="updateResizeSummary">
@@ -264,7 +263,6 @@
             lock_version = lock_version + 1
         WHERE id = #{id,jdbcType=BIGINT}
           AND status = 'RUNNING'
-          AND lock_version = #{lockVersion,jdbcType=INTEGER}
     </update>
 
     <update id="updateStatusToFailed">

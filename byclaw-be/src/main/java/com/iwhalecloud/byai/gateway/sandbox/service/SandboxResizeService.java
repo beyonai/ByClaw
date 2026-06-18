@@ -171,10 +171,10 @@ public class SandboxResizeService {
     @SuppressWarnings("unchecked")
     public SsSandboxResizeRecord handlePrometheusAlert(Map<String, Object> payload) {
         Map<String, Object> params = new LinkedHashMap<>();
-        params.put("triggerSource", "PROMETHEUS_ALERT");
-        params.put("reasonCode", "prometheus.alert");
-        params.put("reasonDetail", toJsonOrNull(payload));
         if (payload == null) {
+            params.put("triggerSource", "PROMETHEUS_ALERT");
+            params.put("reasonCode", "prometheus.alert");
+            params.put("reasonDetail", toJsonOrNull(payload));
             return handleResizeRequest(params);
         }
         Object alertsObj = payload.get("alerts");
@@ -189,6 +189,8 @@ public class SandboxResizeService {
         }
         copyNestedMap(params, (Map<String, Object>) payload.get("labels"));
         copyNestedMap(params, (Map<String, Object>) payload.get("annotations"));
+        params.putIfAbsent("triggerSource", "PROMETHEUS_ALERT");
+        params.putIfAbsent("reasonCode", "prometheus.alert");
         params.putIfAbsent("reasonDetail", toJsonOrNull(payload));
         return handleResizeRequest(params);
     }
