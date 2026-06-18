@@ -30,3 +30,13 @@ class ModelConfigError(ByclawQAError):
 class ModelNotFoundError(ModelConfigError):
     """Required model not found in Redis model registry."""
     pass
+
+
+class UserResolutionError(ConfigurationError):
+    """Failed to resolve BFM user mapping or login auth config from Redis."""
+    pass
+
+
+class AuthResolutionError(ConfigurationError):
+    """Failed to resolve auth header placeholder from Redis login:auth hash."""
+    pass
