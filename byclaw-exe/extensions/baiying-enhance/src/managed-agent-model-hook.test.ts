@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildManagedAgentRuntimeModelSystemContext,
   hasManagedModelConfigDrift,
+  registerManagedAgentModelHooks,
   resolveManagedAgentModelFromConfig,
   shouldDeferManagedAgentModelOverrideForRun,
   syncManagedAgentSessionModelForInbound,
@@ -199,6 +200,85 @@ describe("shouldDeferManagedAgentModelOverrideForRun", () => {
       }),
     ).toBe(false);
   });
+
+  it("allows Redis-managed overrides when the run is still on OpenClaw's built-in default model", () => {
+    expect(
+      shouldDeferManagedAgentModelOverrideForRun({
+        resolved: {
+          providerOverride: "baiying-m-10003989",
+          modelOverride: "qwen3.6-35b-a3b",
+        },
+        currentProvider: "openai",
+        currentModel: "gpt-5.5",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("registerManagedAgentModelHooks", () => {
+  it("flushes and returns a managed model override during cold before_model_resolve", async () => {
+    let currentCfg: any = {
+      agents: { list: [{ id: "main" }] },
+      models: { providers: {} },
+    };
+    const syncedCfg = {
+      agents: {
+        list: [
+          {
+            id: "baiying-agent-10000455",
+            model: { primary: "baiying-m-10004000/qwen3.6-27b" },
+          },
+        ],
+      },
+      models: {
+        providers: {
+          "baiying-m-10004000": {
+            models: [{ id: "qwen3.6-27b" }],
+          },
+        },
+      },
+    };
+    const flushNow = vi.fn(async () => {
+      setTimeout(() => {
+        currentCfg = syncedCfg;
+      }, 20);
+    });
+    const handlers: Record<string, (event: any, ctx: any) => Promise<any>> = {};
+    const api = {
+      logger: { info: vi.fn(), warn: vi.fn() },
+      runtime: {
+        config: {
+          current: () => currentCfg,
+          loadConfig: () => currentCfg,
+        },
+      },
+      on: (name: string, handler: (event: any, ctx: any) => Promise<any>) => {
+        handlers[name] = handler;
+      },
+    } as never;
+
+    registerManagedAgentModelHooks(api, {
+      api,
+      pluginConfig: { mainParentAgentId: "main" },
+      redisJsonStore: {} as never,
+      getFlushNow: () => flushNow,
+    });
+
+    await expect(
+      handlers.before_model_resolve?.(
+        {},
+        {
+          agentId: "baiying-agent-10000455",
+          modelProviderId: "openai",
+          modelId: "gpt-5.5",
+        },
+      ),
+    ).resolves.toEqual({
+      providerOverride: "baiying-m-10004000",
+      modelOverride: "qwen3.6-27b",
+    });
+    expect(flushNow).toHaveBeenCalledOnce();
+  });
 });
 
 describe("syncManagedAgentSessionModelForInbound", () => {
@@ -269,5 +349,150 @@ describe("syncManagedAgentSessionModelForInbound", () => {
     expect(entry.providerOverride).toBe("baiying-m-10004000");
     expect(entry.modelOverride).toBe("qwen3.6-27b");
     expect(entry.modelOverrideSource).toBe("auto");
+  });
+
+  it("flushes and waits when the target managed agent model is not loaded yet", async () => {
+    const entry: Record<string, unknown> = {
+      modelProvider: "openai",
+      model: "gpt-5.5",
+    };
+    let currentCfg: any = {
+      session: { store: "(multiple)" },
+      agents: { list: [] },
+      models: { providers: {} },
+    };
+    const updateSessionStoreEntry = vi.fn(async (_params) => {
+      const mutator = _params.update as (entry: Record<string, unknown>) => Promise<void>;
+      await mutator(entry);
+    });
+    const flushNow = vi.fn(async () => {
+      setTimeout(() => {
+        currentCfg = {
+          session: { store: "(multiple)" },
+          agents: {
+            list: [
+              {
+                id: "baiying-agent-10000455",
+                model: { primary: "baiying-m-10004000/qwen3.6-27b" },
+              },
+            ],
+          },
+          models: {
+            providers: {
+              "baiying-m-10004000": {
+                models: [{ id: "qwen3.6-27b" }],
+              },
+            },
+          },
+        };
+      }, 20);
+    });
+    const api = {
+      runtime: {
+        config: {
+          current: () => currentCfg,
+          loadConfig: () => currentCfg,
+        },
+        agent: {
+          session: {
+            resolveStorePath: () => "/tmp/sessions.json",
+            updateSessionStoreEntry,
+          },
+        },
+      },
+    } as never;
+
+    await syncManagedAgentSessionModelForInbound({
+      api,
+      sessionKey: "agent:baiying-agent-10000455:byai-channel:direct:10006251",
+      flushNow,
+      runtimeConfigWaitMs: 300,
+    });
+
+    expect(flushNow).toHaveBeenCalledOnce();
+    expect(updateSessionStoreEntry).toHaveBeenCalledOnce();
+    expect(entry.providerOverride).toBe("baiying-m-10004000");
+    expect(entry.modelOverride).toBe("qwen3.6-27b");
+  });
+
+  it("uses the post-flush fallback model instead of a stale registered model", async () => {
+    const entry: Record<string, unknown> = {
+      modelProvider: "baiying-m-old",
+      model: "expired-model",
+    };
+    let diskCfg: any = {
+      session: { store: "(multiple)" },
+      agents: {
+        list: [
+          {
+            id: "baiying-agent-10000455",
+            model: { primary: "baiying-m-old/expired-model" },
+          },
+        ],
+      },
+      models: {
+        providers: {
+          "baiying-m-old": {
+            models: [{ id: "expired-model" }],
+          },
+        },
+      },
+    };
+    let currentCfg = structuredClone(diskCfg);
+    const updateSessionStoreEntry = vi.fn(async (_params) => {
+      const mutator = _params.update as (entry: Record<string, unknown>) => Promise<void>;
+      await mutator(entry);
+    });
+    const flushNow = vi.fn(async () => {
+      diskCfg = {
+        session: { store: "(multiple)" },
+        agents: {
+          list: [
+            {
+              id: "baiying-agent-10000455",
+              model: { primary: "baiying-m-default/default-llm" },
+            },
+          ],
+        },
+        models: {
+          providers: {
+            "baiying-m-default": {
+              models: [{ id: "default-llm" }],
+            },
+          },
+        },
+      };
+      setTimeout(() => {
+        currentCfg = structuredClone(diskCfg);
+      }, 20);
+    });
+    const api = {
+      runtime: {
+        config: {
+          current: () => currentCfg,
+          loadConfig: () => diskCfg,
+        },
+        agent: {
+          session: {
+            resolveStorePath: () => "/tmp/sessions.json",
+            updateSessionStoreEntry,
+          },
+        },
+      },
+      logger: { warn: vi.fn() },
+    } as never;
+
+    await syncManagedAgentSessionModelForInbound({
+      api,
+      sessionKey: "agent:baiying-agent-10000455:byai-channel:direct:10006251",
+      flushNow,
+      flushBeforeResolve: true,
+      runtimeConfigWaitMs: 300,
+    });
+
+    expect(flushNow).toHaveBeenCalledOnce();
+    expect(updateSessionStoreEntry).toHaveBeenCalledOnce();
+    expect(entry.providerOverride).toBe("baiying-m-default");
+    expect(entry.modelOverride).toBe("default-llm");
   });
 });

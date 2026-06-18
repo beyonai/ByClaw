@@ -13,6 +13,7 @@ import {
 import { adaptAgentJson, type AdaptedManagedAgent } from "./agent-adapter.js";
 import { mergeDefaultAimodelIntoConfig, mergeManagedAgentsIntoConfig } from "./agent-registry.js";
 import { AgentRegistryState } from "./agent-state.js";
+import { mutateOpenClawConfigFile } from "./config-writer.js";
 import {
     MANAGED_AGENT_PREFIX,
     MANAGED_PROVIDER_PREFIX,
@@ -214,8 +215,7 @@ function retainedDefaultAimodelBundleFromConfig(cfg: {
     const providerEntry = cfg.models?.providers?.[parsed.provider];
     const modelEntry = providerEntry?.models?.find((entry) => entry.id?.trim() === parsed.model);
     const baseUrl = typeof providerEntry?.baseUrl === "string" ? providerEntry.baseUrl.trim() : "";
-    const apiKey = providerEntry?.apiKey;
-    if (!providerEntry || !modelEntry || !baseUrl || !apiKey) {
+    if (!providerEntry || !modelEntry || !baseUrl) {
         return null;
     }
     const providerApi =
@@ -230,7 +230,7 @@ function retainedDefaultAimodelBundleFromConfig(cfg: {
         modelRef: primary,
         provider: {
             baseUrl,
-            apiKey,
+            apiKey: providerEntry.apiKey,
             api: providerApi,
             modelId: parsed.model,
             modelName: modelEntry.name?.trim() || parsed.model,
@@ -499,19 +499,20 @@ export function createAgentWatchdog(params: {
         ) {
             return false;
         }
-        const next = mergeDefaultAimodelIntoConfig({
-            base: paramsIn.cfgBeforeLoad,
-            defaultModel,
-            mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
-            aimodelConfigRedisKey: params.pluginConfig.aimodelConfigRedisKey,
-            aimodelTypeListRedisKey: params.pluginConfig.aimodelTypeListRedisKey,
-            aimodelSecretProviderName: params.pluginConfig.aimodelSecretProviderName,
-            aimodelSecretResolverCommand: process.execPath,
-            aimodelSecretResolverArgs: [
-                params.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js",
-            ],
-        });
-        await params.api.runtime.config.writeConfigFile(next);
+        await mutateOpenClawConfigFile(params.api, (base) =>
+            mergeDefaultAimodelIntoConfig({
+                base,
+                defaultModel,
+                mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
+                aimodelConfigRedisKey: params.pluginConfig.aimodelConfigRedisKey,
+                aimodelTypeListRedisKey: params.pluginConfig.aimodelTypeListRedisKey,
+                aimodelSecretProviderName: params.pluginConfig.aimodelSecretProviderName,
+                aimodelSecretResolverCommand: process.execPath,
+                aimodelSecretResolverArgs: [
+                    params.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js",
+                ],
+            }),
+        );
         params.api.logger.info(
             `baiying-enhance: synced platform default LLM ${defaultModel.modelRef} (${paramsIn.reason})`,
         );
@@ -587,36 +588,41 @@ export function createAgentWatchdog(params: {
                 return;
             }
 
-            const next = structuredClone(cfg);
-            const list = next.agents?.list;
-            if (!Array.isArray(list)) {
-                return;
-            }
-            let touched = 0;
-            for (let i = 0; i < list.length; i += 1) {
-                const entry = list[i];
-                if (!entry.id) {
-                    continue;
-                }
-                const skills = nextSkillsById.get(entry.id);
-                if (!skills) {
-                    continue;
-                }
-                list[i] = { ...entry, skills };
-                touched += 1;
-            }
-            if (touched === 0) {
-                return;
-            }
             attemptedSkillSyncSignature = Array.from(nextSkillsById.entries())
                 .sort(([a], [b]) => a.localeCompare(b))
                 .map(([id, skills]) => `${id}:${skillSignature(skills)}`)
                 .join("|");
-            touchSkillsSnapshotInvalidation(next, {
-                managed: effectiveManaged,
-                reason: "workspace-skill-sync",
+            let touched = 0;
+            await mutateOpenClawConfigFile(params.api, (base) => {
+                const next = structuredClone(base);
+                const list = next.agents?.list;
+                if (!Array.isArray(list)) {
+                    return base;
+                }
+                for (let i = 0; i < list.length; i += 1) {
+                    const entry = list[i];
+                    if (!entry.id) {
+                        continue;
+                    }
+                    const skills = nextSkillsById.get(entry.id);
+                    if (!skills) {
+                        continue;
+                    }
+                    list[i] = { ...entry, skills };
+                    touched += 1;
+                }
+                if (touched === 0) {
+                    return base;
+                }
+                touchSkillsSnapshotInvalidation(next, {
+                    managed: effectiveManaged,
+                    reason: "workspace-skill-sync",
+                });
+                return next;
             });
-            await params.api.runtime.config.writeConfigFile(next);
+            if (touched === 0) {
+                return;
+            }
             lastSkillSyncFailureSignature = "";
             params.registry.replaceAll(effectiveManaged);
             prevSkillSignatures.clear();
@@ -1059,35 +1065,35 @@ export function createAgentWatchdog(params: {
                 return;
             }
 
-            const cfgBefore = params.api.runtime.config.loadConfig();
-            const next = mergeManagedAgentsIntoConfig({
-                base: cfgBefore,
-                managed: effectiveManaged,
-                defaultModel,
-                mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
-                mergeAllowSpawnForMain: params.pluginConfig.mergeAllowSpawnForMain !== false,
-                aimodelConfigRedisKey: params.pluginConfig.aimodelConfigRedisKey,
-                aimodelTypeListRedisKey: params.pluginConfig.aimodelTypeListRedisKey,
-                aimodelSecretProviderName: params.pluginConfig.aimodelSecretProviderName,
-                aimodelSecretResolverCommand: process.execPath,
-                aimodelSecretResolverArgs: [
-                    params.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js",
-                ],
-            });
-            if (
-                hasSkillChanges ||
-                hasToolChanges ||
-                added.length > 0 ||
-                removed.length > 0 ||
-                deleteBatchSet.size > 0
-            ) {
-                touchSkillsSnapshotInvalidation(next, {
+            await mutateOpenClawConfigFile(params.api, (base) => {
+                const next = mergeManagedAgentsIntoConfig({
+                    base,
                     managed: effectiveManaged,
-                    reason: hasToolChanges ? "agent-tool-policy-sync" : "agent-skill-sync",
+                    defaultModel,
+                    mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
+                    mergeAllowSpawnForMain: params.pluginConfig.mergeAllowSpawnForMain !== false,
+                    aimodelConfigRedisKey: params.pluginConfig.aimodelConfigRedisKey,
+                    aimodelTypeListRedisKey: params.pluginConfig.aimodelTypeListRedisKey,
+                    aimodelSecretProviderName: params.pluginConfig.aimodelSecretProviderName,
+                    aimodelSecretResolverCommand: process.execPath,
+                    aimodelSecretResolverArgs: [
+                        params.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js",
+                    ],
                 });
-            }
-
-            await params.api.runtime.config.writeConfigFile(next);
+                if (
+                    hasSkillChanges ||
+                    hasToolChanges ||
+                    added.length > 0 ||
+                    removed.length > 0 ||
+                    deleteBatchSet.size > 0
+                ) {
+                    touchSkillsSnapshotInvalidation(next, {
+                        managed: effectiveManaged,
+                        reason: hasToolChanges ? "agent-tool-policy-sync" : "agent-skill-sync",
+                    });
+                }
+                return next;
+            });
             const runtimeCfgAfterWrite = params.api.runtime.config.loadConfig();
             logManagedProviderRuntimeDiagnostics({
                 cfg: runtimeCfgAfterWrite,

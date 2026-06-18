@@ -29,9 +29,13 @@ MONITORING_PROMETHEUS_RETENTION="${MONITORING_PROMETHEUS_RETENTION:-15d}"
 MONITORING_PROMETHEUS_PVC_SIZE="${MONITORING_PROMETHEUS_PVC_SIZE:-50Gi}"
 MONITORING_GRAFANA_PVC_SIZE="${MONITORING_GRAFANA_PVC_SIZE:-10Gi}"
 IMAGE_PROMETHEUS="${IMAGE_PROMETHEUS:-quay.io/prometheus/prometheus:v2.55.1}"
+IMAGE_ALERTMANAGER="${IMAGE_ALERTMANAGER:-quay.io/prometheus/alertmanager:v0.27.0}"
 IMAGE_NODE_EXPORTER="${IMAGE_NODE_EXPORTER:-quay.io/prometheus/node-exporter:v1.8.2}"
 IMAGE_KUBE_STATE_METRICS="${IMAGE_KUBE_STATE_METRICS:-m.daocloud.io/registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.14.0}"
 IMAGE_GRAFANA="${IMAGE_GRAFANA:-grafana/grafana:11.3.1}"
+NS_SERVICE="${NS_SERVICE:-by-service}"
+OPENSANDBOX_WORKLOAD_NAMESPACE="${OPENSANDBOX_WORKLOAD_NAMESPACE:-$NS_SERVICE}"
+ALERTMANAGER_WEBHOOK_URL="${ALERTMANAGER_WEBHOOK_URL:-http://byclaw-be.${NS_SERVICE}.svc.cluster.local:8086/byaiService/sandbox/autoscale/alerts}"
 
 kubectl_cmd() {
     if command -v k3s >/dev/null 2>&1; then
@@ -77,6 +81,7 @@ wait_monitoring_ready() {
     local timeout="${BYCLAW_K3S_MONITORING_WAIT_TIMEOUT_SECONDS:-300}"
     echo "========== Waiting for monitoring =========="
     kubectl_cmd -n "$NS_MONITORING" rollout status deploy/prometheus --timeout="${timeout}s"
+    kubectl_cmd -n "$NS_MONITORING" rollout status deploy/alertmanager --timeout="${timeout}s"
     kubectl_cmd -n "$NS_MONITORING" rollout status deploy/grafana --timeout="${timeout}s"
     kubectl_cmd -n "$NS_MONITORING" rollout status deploy/kube-state-metrics --timeout="${timeout}s"
     kubectl_cmd -n "$NS_MONITORING" rollout status ds/node-exporter --timeout="${timeout}s"
@@ -138,6 +143,7 @@ echo "========== Installing monitoring =========="
 echo "    namespace: ${NS_MONITORING}"
 echo "    external base URL: ${MONITORING_EXTERNAL_BASE_URL}"
 echo "    Prometheus: ${MONITORING_EXTERNAL_BASE_URL}/prometheus"
+echo "    Alertmanager: ${MONITORING_EXTERNAL_BASE_URL}/alertmanager"
 echo "    Grafana: ${MONITORING_EXTERNAL_BASE_URL}/grafana"
 
 kubectl_cmd create namespace "$NS_MONITORING" --dry-run=client -o yaml | kubectl_cmd apply -f -
@@ -179,6 +185,151 @@ subjects:
 apiVersion: v1
 kind: ConfigMap
 metadata:
+  name: alertmanager-config
+  namespace: ${NS_MONITORING}
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: byclaw-autoscale
+      group_by: ["alertname", "namespace", "pod"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 30m
+    receivers:
+      - name: byclaw-autoscale
+        webhook_configs:
+          - url: "${ALERTMANAGER_WEBHOOK_URL}"
+            send_resolved: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-sandbox-autoscale-rules
+  namespace: ${NS_MONITORING}
+data:
+  sandbox-autoscale-rules.yml: |
+    groups:
+      - name: byclaw.sandbox.autoscale
+        interval: 30s
+        rules:
+          - alert: OpenClawSandboxCpuHigh
+            expr: |
+              label_replace(
+                sum by (namespace, pod) (
+                  rate(container_cpu_usage_seconds_total{
+                  namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                  container="sandbox",
+                  pod=~"[0-9a-f-]{36}-[0-9]+"
+                }[5m])
+              )
+              /
+              sum by (namespace, pod) (
+                kube_pod_container_resource_requests{
+                  namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                  container="sandbox",
+                  resource="cpu"
+                }
+              ) > ${SANDBOX_AUTOSCALE_CPU_HIGH_RATIO:-0.85},
+                "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
+              )
+            for: ${SANDBOX_AUTOSCALE_CPU_HIGH_FOR:-5m}
+            labels:
+              severity: warning
+              serviceType: openclaw
+              triggerSource: PROMETHEUS_ALERT
+              reasonCode: metrics.cpu.high
+              resizeType: IN_PLACE
+            annotations:
+              summary: "OpenClaw 沙箱 CPU 持续偏高"
+              reason_detail: "CPU 使用率连续 ${SANDBOX_AUTOSCALE_CPU_HIGH_FOR:-5m} 超过 request 的 ${SANDBOX_AUTOSCALE_CPU_HIGH_PERCENT:-85}%，建议升一级规格。pod={{ \$labels.pod }} value={{ \$value }}"
+
+          - alert: OpenClawSandboxMemoryHigh
+            expr: |
+              label_replace(
+                sum by (namespace, pod) (
+                  container_memory_working_set_bytes{
+                  namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                  container="sandbox",
+                  pod=~"[0-9a-f-]{36}-[0-9]+"
+                }
+              )
+              /
+              sum by (namespace, pod) (
+                kube_pod_container_resource_requests{
+                  namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                  container="sandbox",
+                  resource="memory"
+                }
+              ) > ${SANDBOX_AUTOSCALE_MEMORY_HIGH_RATIO:-0.90},
+                "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
+              )
+            for: ${SANDBOX_AUTOSCALE_MEMORY_HIGH_FOR:-5m}
+            labels:
+              severity: warning
+              serviceType: openclaw
+              triggerSource: PROMETHEUS_ALERT
+              reasonCode: metrics.memory.high
+              resizeType: IN_PLACE
+            annotations:
+              summary: "OpenClaw 沙箱内存持续偏高"
+              reason_detail: "内存 Working Set 连续 ${SANDBOX_AUTOSCALE_MEMORY_HIGH_FOR:-5m} 超过 request 的 ${SANDBOX_AUTOSCALE_MEMORY_HIGH_PERCENT:-90}%，建议升一级规格。pod={{ \$labels.pod }} value={{ \$value }}"
+
+          - alert: OpenClawSandboxMemoryCritical
+            expr: |
+              label_replace(
+                sum by (namespace, pod) (
+                  container_memory_working_set_bytes{
+                  namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                  container="sandbox",
+                  pod=~"[0-9a-f-]{36}-[0-9]+"
+                }
+              )
+              /
+              sum by (namespace, pod) (
+                kube_pod_container_resource_limits{
+                  namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                  container="sandbox",
+                  resource="memory"
+                }
+              ) > ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_RATIO:-0.85},
+                "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
+              )
+            for: ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_FOR:-2m}
+            labels:
+              severity: critical
+              serviceType: openclaw
+              triggerSource: PROMETHEUS_ALERT
+              reasonCode: metrics.memory.critical
+              resizeType: IN_PLACE
+            annotations:
+              summary: "OpenClaw 沙箱内存接近上限"
+              reason_detail: "内存 Working Set 连续 ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_FOR:-2m} 超过 limit 的 ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_PERCENT:-85}%，建议原地升配。pod={{ \$labels.pod }} value={{ \$value }}"
+          - alert: OpenClawSandboxOOMKilled
+            expr: |
+              label_replace(
+                increase(kube_pod_container_status_last_terminated_reason{
+                namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                container="sandbox",
+                reason="OOMKilled",
+                pod=~"[0-9a-f-]{36}-[0-9]+"
+              }[10m]) > 0,
+                "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
+              )
+            labels:
+              severity: critical
+              serviceType: openclaw
+              triggerSource: PROMETHEUS_ALERT
+              reasonCode: metrics.memory.oom_killed
+              resizeType: IN_PLACE
+            annotations:
+              summary: "OpenClaw 沙箱 OOMKilled"
+              reason_detail: "沙箱容器最近 10m 发生 OOMKilled，建议按数据库规格原地升配。pod={{ \$labels.pod }} value={{ \$value }}"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
   name: prometheus-config
   namespace: ${NS_MONITORING}
 data:
@@ -186,6 +337,12 @@ data:
     global:
       scrape_interval: 30s
       evaluation_interval: 30s
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ["alertmanager.${NS_MONITORING}.svc.cluster.local:9093"]
+    rule_files:
+      - /etc/prometheus/rules/*.yml
     scrape_configs:
       - job_name: prometheus
         metrics_path: /prometheus/metrics
@@ -335,12 +492,17 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /etc/prometheus
+            - name: rules
+              mountPath: /etc/prometheus/rules
             - name: data
               mountPath: /prometheus
       volumes:
         - name: config
           configMap:
             name: prometheus-config
+        - name: rules
+          configMap:
+            name: prometheus-sandbox-autoscale-rules
         - name: data
           persistentVolumeClaim:
             claimName: prometheus-data
@@ -356,6 +518,60 @@ spec:
   ports:
     - name: http
       port: 9090
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: ${NS_MONITORING}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alertmanager
+  template:
+    metadata:
+      labels:
+        app: alertmanager
+    spec:
+      containers:
+        - name: alertmanager
+          image: ${IMAGE_ALERTMANAGER}
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+            - --web.route-prefix=/alertmanager
+            - --web.external-url=${MONITORING_EXTERNAL_BASE_URL}/alertmanager
+          ports:
+            - name: http
+              containerPort: 9093
+          resources:
+            requests:
+              cpu: "${MONITORING_ALERTMANAGER_CPU_REQUEST:-50m}"
+              memory: "${MONITORING_ALERTMANAGER_MEMORY_REQUEST:-64Mi}"
+            limits:
+              cpu: "${MONITORING_ALERTMANAGER_CPU_LIMIT:-200m}"
+              memory: "${MONITORING_ALERTMANAGER_MEMORY_LIMIT:-256Mi}"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alertmanager
+      volumes:
+        - name: config
+          configMap:
+            name: alertmanager-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: ${NS_MONITORING}
+spec:
+  selector:
+    app: alertmanager
+  ports:
+    - name: http
+      port: 9093
       targetPort: http
 ---
 apiVersion: apps/v1
@@ -588,6 +804,13 @@ spec:
                 name: prometheus
                 port:
                   number: 9090
+          - path: /alertmanager
+            pathType: Prefix
+            backend:
+              service:
+                name: alertmanager
+                port:
+                  number: 9093
           - path: /grafana
             pathType: Prefix
             backend:
@@ -597,12 +820,14 @@ spec:
                   number: 3000
 EOF
 
+kubectl_cmd -n "$NS_MONITORING" rollout restart deploy/prometheus deploy/alertmanager >/dev/null 2>&1 || true
 wait_monitoring_ready
 verify_prometheus_targets
 create_grafana_dashboards
 
 echo "========== Monitoring install completed =========="
 echo "    Prometheus: ${MONITORING_EXTERNAL_BASE_URL}/prometheus"
+echo "    Alertmanager: ${MONITORING_EXTERNAL_BASE_URL}/alertmanager"
 echo "    Grafana: ${MONITORING_EXTERNAL_BASE_URL}/grafana"
 echo "    Grafana dashboards:"
 echo "      - ${MONITORING_EXTERNAL_BASE_URL}/grafana/d/byclaw-k3s-nodes"

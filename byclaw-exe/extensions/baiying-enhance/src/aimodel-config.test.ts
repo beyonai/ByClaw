@@ -327,7 +327,7 @@ describe("Baiying AI model config", () => {
     );
   });
 
-  it("writes managed provider config with SecretRef and agent model primary", () => {
+  it("writes managed provider config without persisted apiKey and with agent model primary", () => {
     const provider = parseBaiyingAimodelProviderBundle({
       payload: createAimodelPayload(),
       modelId: "-2000",
@@ -374,11 +374,6 @@ describe("Baiying AI model config", () => {
     });
     expect(cfg.models?.providers?.[providerKey]).toEqual({
       baseUrl: "https://lab.iwhalecloud.com/gpt-proxy/v1",
-      apiKey: {
-        source: "exec",
-        provider: "baiying-aimodel-redis",
-        id: "model:-2000",
-      },
       api: "openai-completions",
       models: [
         expect.objectContaining({

@@ -56,7 +56,8 @@ function getRecommendQuestionList(isEN: boolean = false) {
       return {
         list: list.map((item) => ({
           questionId: item.paramId.toString(),
-          question: isEN ? item.paramEnName : item.paramName,
+          title: isEN ? item.paramEnName : item.paramName,
+          question: isEN ? item.paramDesc : item.paramValue,
         })),
         total: list.length,
       };

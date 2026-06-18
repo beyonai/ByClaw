@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Empty, List, Spin, message } from 'antd';
 import classNames from 'classnames';
 import { isEmpty } from 'lodash';
+import { useIntl } from '@umijs/max';
 import { querySystemNotificationPage } from '@/pages/manager/service/NotificationMgr';
 import Markdown from '@/components/Markdown';
 import useGlobal from '@/hooks/useGlobal';
@@ -76,6 +77,8 @@ export const NotificationContentComp = (props: { content: string }) => {
 };
 
 export default function SystemNotification() {
+  const intl = useIntl();
+
   const [messageApi, contextHolder] = message.useMessage();
   const scrollWrapRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<INotificationItem[]>([]);
@@ -120,7 +123,7 @@ export default function SystemNotification() {
         }
 
         if (res?.code !== undefined && res.code !== 0) {
-          messageApi.error(res?.msg || '系统通知查询失败');
+          messageApi.error(res?.msg || intl.formatMessage({ id: 'systemNotification.queryFailed' }));
           return;
         }
 
@@ -135,8 +138,8 @@ export default function SystemNotification() {
         setPageNum(current);
         setHasMore(calcHasMore(pageData, current, nextList.length, rows.length));
       } catch (error) {
-        console.error('获取系统通知失败:', error);
-        messageApi.error('系统通知查询失败');
+        console.error(intl.formatMessage({ id: 'systemNotification.fetchFailedLog' }), error);
+        messageApi.error(intl.formatMessage({ id: 'systemNotification.queryFailed' }));
       } finally {
         if (requestSeq === requestSeqRef.current) {
           loadingRef.current = false;
@@ -146,7 +149,7 @@ export default function SystemNotification() {
         }
       }
     },
-    [messageApi]
+    [intl, messageApi]
   );
 
   const getDetail = useCallback(async (info: INotificationItem | IVersionNotification) => {
@@ -239,7 +242,9 @@ export default function SystemNotification() {
             <Spin size="small" />
           </div>
         ) : null}
-        {!hasMore && list.length > 0 ? <div className={styles.endRow}>没有更多了</div> : null}
+        {!hasMore && list.length > 0 ? (
+          <div className={styles.endRow}>{intl.formatMessage({ id: 'common.endMessage' })}</div>
+        ) : null}
       </div>
       {contextHolder}
     </div>

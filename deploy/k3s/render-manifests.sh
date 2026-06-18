@@ -1890,8 +1890,9 @@ data:
         rules:
           - alert: OpenClawSandboxCpuHigh
             expr: |
-              sum by (namespace, pod) (
-                rate(container_cpu_usage_seconds_total{
+              label_replace(
+                sum by (namespace, pod) (
+                  rate(container_cpu_usage_seconds_total{
                   namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
                   container="sandbox",
                   pod=~"[0-9a-f-]{36}-[0-9]+"
@@ -1904,22 +1905,25 @@ data:
                   container="sandbox",
                   resource="cpu"
                 }
-              ) > ${SANDBOX_AUTOSCALE_CPU_HIGH_RATIO:-0.85}
+              ) > ${SANDBOX_AUTOSCALE_CPU_HIGH_RATIO:-0.85},
+                "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
+              )
             for: ${SANDBOX_AUTOSCALE_CPU_HIGH_FOR:-5m}
             labels:
               severity: warning
-              service_type: openclaw
-              trigger_source: PROMETHEUS_ALERT
-              reason_code: metrics.cpu.high
-              suggested_resize_type: IN_PLACE
+              serviceType: openclaw
+              triggerSource: PROMETHEUS_ALERT
+              reasonCode: metrics.cpu.high
+              resizeType: IN_PLACE
             annotations:
               summary: "OpenClaw 沙箱 CPU 持续偏高"
               reason_detail: "CPU 使用率连续 ${SANDBOX_AUTOSCALE_CPU_HIGH_FOR:-5m} 超过 request 的 ${SANDBOX_AUTOSCALE_CPU_HIGH_PERCENT:-85}%，建议升一级规格。pod={{ \$labels.pod }} value={{ \$value }}"
 
           - alert: OpenClawSandboxMemoryHigh
             expr: |
-              sum by (namespace, pod) (
-                container_memory_working_set_bytes{
+              label_replace(
+                sum by (namespace, pod) (
+                  container_memory_working_set_bytes{
                   namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
                   container="sandbox",
                   pod=~"[0-9a-f-]{36}-[0-9]+"
@@ -1932,22 +1936,25 @@ data:
                   container="sandbox",
                   resource="memory"
                 }
-              ) > ${SANDBOX_AUTOSCALE_MEMORY_HIGH_RATIO:-0.90}
+              ) > ${SANDBOX_AUTOSCALE_MEMORY_HIGH_RATIO:-0.90},
+                "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
+              )
             for: ${SANDBOX_AUTOSCALE_MEMORY_HIGH_FOR:-5m}
             labels:
               severity: warning
-              service_type: openclaw
-              trigger_source: PROMETHEUS_ALERT
-              reason_code: metrics.memory.high
-              suggested_resize_type: IN_PLACE
+              serviceType: openclaw
+              triggerSource: PROMETHEUS_ALERT
+              reasonCode: metrics.memory.high
+              resizeType: IN_PLACE
             annotations:
               summary: "OpenClaw 沙箱内存持续偏高"
               reason_detail: "内存 Working Set 连续 ${SANDBOX_AUTOSCALE_MEMORY_HIGH_FOR:-5m} 超过 request 的 ${SANDBOX_AUTOSCALE_MEMORY_HIGH_PERCENT:-90}%，建议升一级规格。pod={{ \$labels.pod }} value={{ \$value }}"
 
           - alert: OpenClawSandboxMemoryCritical
             expr: |
-              sum by (namespace, pod) (
-                container_memory_working_set_bytes{
+              label_replace(
+                sum by (namespace, pod) (
+                  container_memory_working_set_bytes{
                   namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
                   container="sandbox",
                   pod=~"[0-9a-f-]{36}-[0-9]+"
@@ -1960,17 +1967,40 @@ data:
                   container="sandbox",
                   resource="memory"
                 }
-              ) > ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_RATIO:-0.85}
+              ) > ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_RATIO:-0.85},
+                "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
+              )
             for: ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_FOR:-2m}
             labels:
               severity: critical
-              service_type: openclaw
-              trigger_source: PROMETHEUS_ALERT
-              reason_code: metrics.memory.critical
-              suggested_resize_type: HOT_SWITCH
+              serviceType: openclaw
+              triggerSource: PROMETHEUS_ALERT
+              reasonCode: metrics.memory.critical
+              resizeType: IN_PLACE
             annotations:
               summary: "OpenClaw 沙箱内存接近上限"
-              reason_detail: "内存 Working Set 连续 ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_FOR:-2m} 超过 limit 的 ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_PERCENT:-85}%，建议优先原地调整，失败时热切换。pod={{ \$labels.pod }} value={{ \$value }}"
+              reason_detail: "内存 Working Set 连续 ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_FOR:-2m} 超过 limit 的 ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_PERCENT:-85}%，建议原地升配。pod={{ \$labels.pod }} value={{ \$value }}"
+
+          - alert: OpenClawSandboxOOMKilled
+            expr: |
+              label_replace(
+                increase(kube_pod_container_status_last_terminated_reason{
+                namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                container="sandbox",
+                reason="OOMKilled",
+                pod=~"[0-9a-f-]{36}-[0-9]+"
+              }[10m]) > 0,
+                "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
+              )
+            labels:
+              severity: critical
+              serviceType: openclaw
+              triggerSource: PROMETHEUS_ALERT
+              reasonCode: metrics.memory.oom_killed
+              resizeType: IN_PLACE
+            annotations:
+              summary: "OpenClaw 沙箱 OOMKilled"
+              reason_detail: "沙箱容器最近 10m 发生 OOMKilled，建议按数据库规格原地升配。pod={{ \$labels.pod }} value={{ \$value }}"
 
           - alert: OpenClawSandboxLowUsage
             expr: |
@@ -2012,10 +2042,10 @@ data:
             for: ${SANDBOX_AUTOSCALE_LOW_USAGE_FOR:-45m}
             labels:
               severity: info
-              service_type: openclaw
-              trigger_source: PROMETHEUS_ALERT
-              reason_code: metrics.low_usage
-              suggested_resize_type: PREFERRED_ONLY
+              serviceType: openclaw
+              triggerSource: PROMETHEUS_ALERT
+              reasonCode: metrics.low_usage
+              resizeType: PREFERRED_ONLY
             annotations:
               summary: "OpenClaw 沙箱资源长期低使用"
               reason_detail: "CPU 和内存长期低于当前 request 阈值，建议只更新用户下一次启动推荐规格。pod={{ \$labels.pod }} value={{ \$value }}"

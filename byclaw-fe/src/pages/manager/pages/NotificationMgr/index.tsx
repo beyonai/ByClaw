@@ -25,10 +25,12 @@ import {
   ReloadOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
+import { useIntl } from '@umijs/max';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 
 import Markdown from '@/components/Markdown';
+import useAppStore from '@/models/common/useAppStore';
 import {
   BIZ_TYPE_SYSTEM,
   BIZ_TYPE_VERSION,
@@ -73,10 +75,10 @@ const tabBizTypeMap: Record<NoticeTab, number> = {
 };
 
 const priorityOptions = [
-  { label: '低', value: 1, color: 'default' },
-  { label: '中', value: 2, color: 'blue' },
-  { label: '高', value: 3, color: 'orange' },
-  { label: '紧急', value: 4, color: 'red' },
+  { labelId: 'systemNotification.priority.low', value: 1, color: 'default' },
+  { labelId: 'systemNotification.priority.medium', value: 2, color: 'blue' },
+  { labelId: 'systemNotification.priority.high', value: 3, color: 'orange' },
+  { labelId: 'systemNotification.priority.urgent', value: 4, color: 'red' },
 ];
 
 const normalizeRows = (pageData: any): NoticeRecord[] => {
@@ -89,6 +91,7 @@ const getTotal = (pageData: any) => Number(pageData?.total ?? pageData?.totalCou
 const getPriorityMeta = (priority?: number) => priorityOptions.find((item) => item.value === priority);
 
 const NotificationMgr: React.FC = () => {
+  const intl = useIntl();
   const [activeTab, setActiveTab] = useState<NoticeTab>('version');
   const [keyword, setKeyword] = useState('');
   const [priority, setPriority] = useState<number | undefined>();
@@ -100,8 +103,11 @@ const NotificationMgr: React.FC = () => {
   const [previewRecord, setPreviewRecord] = useState<NoticeRecord | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm<NoticeFormValues>();
+  const { versionInfo, getVersionInfo } = useAppStore();
 
   const isVersionTab = activeTab === 'version';
+  const latestVersionNo = versionInfo?.version;
+  const canUseLatestVersionNo = Boolean(latestVersionNo);
 
   const fetchList = useCallback(
     async (params?: Partial<{ current: number; pageSize: number; keyword: string; priority?: number }>) => {
@@ -121,7 +127,7 @@ const NotificationMgr: React.FC = () => {
           priority: isVersionTab ? undefined : nextPriority,
         });
         if (res?.code !== 0) {
-          message.error(res?.msg || '通知列表查询失败');
+          message.error(res?.msg || intl.formatMessage({ id: 'notificationMgr.listQueryFailed' }));
           return;
         }
         const pageData = res?.data || {};
@@ -135,7 +141,7 @@ const NotificationMgr: React.FC = () => {
         setLoading(false);
       }
     },
-    [activeTab, isVersionTab, keyword, pagination.current, pagination.pageSize, priority]
+    [activeTab, intl, isVersionTab, keyword, pagination.current, pagination.pageSize, priority]
   );
 
   useEffect(() => {
@@ -145,12 +151,22 @@ const NotificationMgr: React.FC = () => {
     fetchList({ current: 1, keyword: '', priority: undefined });
   }, [activeTab]);
 
+  useEffect(() => {
+    if (formOpen && !editingRecord && isVersionTab && latestVersionNo) {
+      form.setFieldValue('versionNo', latestVersionNo);
+    }
+  }, [editingRecord, form, formOpen, isVersionTab, latestVersionNo]);
+
   const openCreate = () => {
     setEditingRecord(null);
     form.resetFields();
     form.setFieldsValue({
       priority: 2,
+      versionNo: isVersionTab && canUseLatestVersionNo ? latestVersionNo : undefined,
     });
+    if (isVersionTab && !versionInfo) {
+      getVersionInfo();
+    }
     setFormOpen(true);
   };
 
@@ -178,10 +194,12 @@ const NotificationMgr: React.FC = () => {
       });
       const res: any = editingRecord ? await updateNotification(payload) : await createNotification(payload);
       if (res?.code !== 0) {
-        message.error(res?.msg || '通知保存失败');
+        message.error(res?.msg || intl.formatMessage({ id: 'notificationMgr.saveFailed' }));
         return;
       }
-      message.success(editingRecord ? '通知已更新' : '通知已创建');
+      message.success(
+        intl.formatMessage({ id: editingRecord ? 'notificationMgr.updateSuccess' : 'notificationMgr.createSuccess' })
+      );
       setFormOpen(false);
       fetchList();
     } finally {
@@ -192,17 +210,17 @@ const NotificationMgr: React.FC = () => {
   const handleDelete = async (record: NoticeRecord) => {
     const res: any = await deleteNotification({ id: record.id });
     if (res?.code !== 0) {
-      message.error(res?.msg || '通知删除失败');
+      message.error(res?.msg || intl.formatMessage({ id: 'notificationMgr.deleteFailed' }));
       return;
     }
-    message.success('通知已删除');
+    message.success(intl.formatMessage({ id: 'notificationMgr.deleteSuccess' }));
     fetchList();
   };
 
   const columns = useMemo<ColumnsType<NoticeRecord>>(() => {
     const base: ColumnsType<NoticeRecord> = [
       {
-        title: '标题',
+        title: intl.formatMessage({ id: 'notificationMgr.column.title' }),
         dataIndex: 'title',
         width: 220,
         render: (value) => (
@@ -214,7 +232,9 @@ const NotificationMgr: React.FC = () => {
         ),
       },
       {
-        title: isVersionTab ? 'Markdown 内容' : '通知内容',
+        title: intl.formatMessage({
+          id: isVersionTab ? 'notificationMgr.column.markdownContent' : 'notificationMgr.column.content',
+        }),
         dataIndex: 'content',
         render: (value) => (
           <Tooltip title={value}>
@@ -228,7 +248,7 @@ const NotificationMgr: React.FC = () => {
 
     if (isVersionTab) {
       base.push({
-        title: '版本号',
+        title: intl.formatMessage({ id: 'notificationMgr.column.versionNo' }),
         dataIndex: 'extraInfo',
         width: 140,
         render: (value) => value || '-',
@@ -237,38 +257,41 @@ const NotificationMgr: React.FC = () => {
 
     if (!isVersionTab) {
       base.push({
-        title: '优先级',
+        title: intl.formatMessage({ id: 'notificationMgr.column.priority' }),
         dataIndex: 'priority',
         width: 96,
         render: (value) => {
           const meta = getPriorityMeta(value);
-          return <Tag color={meta?.color}>{meta?.label || '-'}</Tag>;
+          return <Tag color={meta?.color}>{meta?.labelId ? intl.formatMessage({ id: meta.labelId }) : '-'}</Tag>;
         },
       });
     }
 
     base.push(
       {
-        title: '创建时间',
+        title: intl.formatMessage({ id: 'notificationMgr.column.createdAt' }),
         dataIndex: 'createTime',
         width: 180,
         render: (value) => value || '-',
       },
       {
-        title: '操作',
+        title: intl.formatMessage({ id: 'common.operation' }),
         fixed: 'right',
         width: 180,
         render: (_, record) => (
           <Space size={4}>
             <Button type="link" icon={<EyeOutlined />} onClick={() => setPreviewRecord(record)}>
-              预览
+              {intl.formatMessage({ id: 'common.preview' })}
             </Button>
             <Button type="link" icon={<EditOutlined />} onClick={() => openEdit(record)}>
-              编辑
+              {intl.formatMessage({ id: 'common.edit' })}
             </Button>
-            <Popconfirm title="确认删除该通知？" onConfirm={() => handleDelete(record)}>
+            <Popconfirm
+              title={intl.formatMessage({ id: 'notificationMgr.deleteConfirm' })}
+              onConfirm={() => handleDelete(record)}
+            >
               <Button type="link" danger icon={<DeleteOutlined />}>
-                删除
+                {intl.formatMessage({ id: 'common.delete' })}
               </Button>
             </Popconfirm>
           </Space>
@@ -276,11 +299,11 @@ const NotificationMgr: React.FC = () => {
       }
     );
     return base;
-  }, [isVersionTab]);
+  }, [intl, isVersionTab]);
 
   const tabItems = [
-    { key: 'version', label: '版本通知' },
-    { key: 'system', label: '系统通知' },
+    { key: 'version', label: intl.formatMessage({ id: 'notificationMgr.versionNotice' }) },
+    { key: 'system', label: intl.formatMessage({ id: 'notificationMgr.systemNotice' }) },
   ];
 
   return (
@@ -291,7 +314,7 @@ const NotificationMgr: React.FC = () => {
         <div className={styles.filters}>
           <Input
             allowClear
-            placeholder="搜索标题"
+            placeholder={intl.formatMessage({ id: 'notificationMgr.searchTitle' })}
             prefix={<SearchOutlined />}
             style={{ width: 220 }}
             value={keyword}
@@ -302,10 +325,13 @@ const NotificationMgr: React.FC = () => {
             <>
               <Select
                 allowClear
-                placeholder="优先级"
+                placeholder={intl.formatMessage({ id: 'notificationMgr.column.priority' })}
                 style={{ width: 120 }}
                 value={priority}
-                options={priorityOptions.map(({ label, value }) => ({ label, value }))}
+                options={priorityOptions.map(({ labelId, value }) => ({
+                  label: intl.formatMessage({ id: labelId }),
+                  value,
+                }))}
                 onChange={(value) => {
                   setPriority(value);
                   fetchList({ current: 1, priority: value });
@@ -314,14 +340,14 @@ const NotificationMgr: React.FC = () => {
             </>
           )}
           <Button icon={<SearchOutlined />} onClick={() => fetchList({ current: 1 })}>
-            查询
+            {intl.formatMessage({ id: 'common.search' })}
           </Button>
           <Button icon={<ReloadOutlined />} onClick={() => fetchList()}>
-            刷新
+            {intl.formatMessage({ id: 'common.refresh' })}
           </Button>
         </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          新增通知
+          {intl.formatMessage({ id: 'notificationMgr.addNotification' })}
         </Button>
       </div>
 
@@ -337,48 +363,85 @@ const NotificationMgr: React.FC = () => {
             pageSize: pagination.pageSize,
             total: pagination.total,
             showSizeChanger: true,
-            showTotal: (total) => `共 ${total} 条`,
+            showTotal: (total) => intl.formatMessage({ id: 'common.totalItems' }, { total }),
             onChange: (current, pageSize) => fetchList({ current, pageSize }),
           }}
         />
       </div>
 
       <Modal
-        destroyOnClose
+        destroyOnHidden
         width={860}
-        title={`${editingRecord ? '编辑' : '新增'}${isVersionTab ? '版本通知' : '系统通知'}`}
+        title={intl.formatMessage(
+          { id: editingRecord ? 'notificationMgr.editNoticeTitle' : 'notificationMgr.createNoticeTitle' },
+          {
+            type: intl.formatMessage({
+              id: isVersionTab ? 'notificationMgr.versionNotice' : 'notificationMgr.systemNotice',
+            }),
+          }
+        )}
         open={formOpen}
         confirmLoading={submitting}
         onCancel={() => setFormOpen(false)}
         onOk={handleSubmit}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="title" label="标题" rules={[{ required: true, message: '请输入通知标题' }]}>
-            <Input maxLength={100} placeholder={isVersionTab ? '例如：v1.2.0 更新公告' : '请输入系统通知标题'} />
+          <Form.Item
+            name="title"
+            label={intl.formatMessage({ id: 'notificationMgr.column.title' })}
+            rules={[{ required: true, message: intl.formatMessage({ id: 'notificationMgr.titleRequired' }) }]}
+          >
+            <Input
+              maxLength={100}
+              placeholder={intl.formatMessage({
+                id: isVersionTab ? 'notificationMgr.versionTitlePlaceholder' : 'notificationMgr.systemTitlePlaceholder',
+              })}
+            />
           </Form.Item>
           {isVersionTab && (
-            <Form.Item name="versionNo" label="版本号" rules={[{ required: true, message: '请输入版本号' }]}>
-              <Input maxLength={50} placeholder="例如：1.2.0" />
+            <Form.Item
+              name="versionNo"
+              label={intl.formatMessage({ id: 'notificationMgr.column.versionNo' })}
+              rules={[{ required: true, message: intl.formatMessage({ id: 'notificationMgr.versionNoRequired' }) }]}
+            >
+              <Input
+                disabled={Boolean(editingRecord)}
+                maxLength={50}
+                placeholder={intl.formatMessage({ id: 'notificationMgr.versionNoPlaceholder' })}
+              />
             </Form.Item>
           )}
           <Form.Item
             name="content"
-            label={isVersionTab ? 'Markdown 内容' : '通知内容'}
-            rules={[{ required: true, message: '请输入通知内容' }]}
+            label={intl.formatMessage({
+              id: isVersionTab ? 'notificationMgr.column.markdownContent' : 'notificationMgr.column.content',
+            })}
+            rules={[{ required: true, message: intl.formatMessage({ id: 'notificationMgr.contentRequired' }) }]}
           >
             <Input.TextArea
               rows={10}
               showCount
               maxLength={10000}
-              placeholder={isVersionTab ? '# 更新内容' : '请输入通知正文'}
+              placeholder={intl.formatMessage({
+                id: isVersionTab ? 'notificationMgr.markdownContentPlaceholder' : 'notificationMgr.contentPlaceholder',
+              })}
             />
           </Form.Item>
           {!isVersionTab && (
             <>
-              <Form.Item name="priority" label="优先级" rules={[{ required: true, message: '请选择优先级' }]}>
-                <Select options={priorityOptions.map(({ label, value }) => ({ label, value }))} />
+              <Form.Item
+                name="priority"
+                label={intl.formatMessage({ id: 'notificationMgr.column.priority' })}
+                rules={[{ required: true, message: intl.formatMessage({ id: 'notificationMgr.priorityRequired' }) }]}
+              >
+                <Select
+                  options={priorityOptions.map(({ labelId, value }) => ({
+                    label: intl.formatMessage({ id: labelId }),
+                    value,
+                  }))}
+                />
               </Form.Item>
-              <Form.Item name="expireTime" label="过期时间">
+              <Form.Item name="expireTime" label={intl.formatMessage({ id: 'notificationMgr.expireTime' })}>
                 <DatePicker showTime style={{ width: '100%' }} />
               </Form.Item>
             </>
@@ -388,7 +451,7 @@ const NotificationMgr: React.FC = () => {
 
       <Drawer
         width={720}
-        title={previewRecord?.title || '通知预览'}
+        title={previewRecord?.title || intl.formatMessage({ id: 'notificationMgr.previewTitle' })}
         open={!!previewRecord}
         onClose={() => setPreviewRecord(null)}
       >
