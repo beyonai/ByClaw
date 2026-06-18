@@ -194,8 +194,8 @@ data:
     route:
       receiver: byclaw-autoscale
       group_by: ["alertname", "namespace", "pod"]
-      group_wait: 30s
-      group_interval: 5m
+      group_wait: ${ALERTMANAGER_AUTOSCALE_GROUP_WAIT:-5s}
+      group_interval: ${ALERTMANAGER_AUTOSCALE_GROUP_INTERVAL:-1m}
       repeat_interval: 30m
     receivers:
       - name: byclaw-autoscale
@@ -212,7 +212,7 @@ data:
   sandbox-autoscale-rules.yml: |
     groups:
       - name: byclaw.sandbox.autoscale
-        interval: 30s
+        interval: ${SANDBOX_AUTOSCALE_RULE_INTERVAL:-15s}
         rules:
           - alert: OpenClawSandboxCpuHigh
             expr: |
@@ -222,7 +222,7 @@ data:
                   namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
                   container="sandbox",
                   pod=~"[0-9a-f-]{36}-[0-9]+"
-                }[5m])
+                }[${SANDBOX_AUTOSCALE_CPU_RATE_WINDOW:-1m}])
               )
               /
               sum by (namespace, pod) (
@@ -231,10 +231,16 @@ data:
                   container="sandbox",
                   resource="cpu"
                 }
-              ) > ${SANDBOX_AUTOSCALE_CPU_HIGH_RATIO:-0.85},
+              ) > ${SANDBOX_AUTOSCALE_CPU_HIGH_RATIO:-1.00}
+              and on (namespace, pod)
+              kube_pod_status_phase{
+                namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                phase="Running",
+                pod=~"[0-9a-f-]{36}-[0-9]+"
+              } == 1,
                 "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
               )
-            for: ${SANDBOX_AUTOSCALE_CPU_HIGH_FOR:-5m}
+            for: ${SANDBOX_AUTOSCALE_CPU_HIGH_FOR:-30s}
             labels:
               severity: warning
               serviceType: openclaw
@@ -243,7 +249,7 @@ data:
               resizeType: IN_PLACE
             annotations:
               summary: "OpenClaw 沙箱 CPU 持续偏高"
-              reason_detail: "CPU 使用率连续 ${SANDBOX_AUTOSCALE_CPU_HIGH_FOR:-5m} 超过 request 的 ${SANDBOX_AUTOSCALE_CPU_HIGH_PERCENT:-85}%，建议升一级规格。pod={{ \$labels.pod }} value={{ \$value }}"
+              reason_detail: "CPU 使用率连续 ${SANDBOX_AUTOSCALE_CPU_HIGH_FOR:-30s} 超过 request 的 ${SANDBOX_AUTOSCALE_CPU_HIGH_PERCENT:-100}%，建议原地升一级规格。pod={{ \$labels.pod }} value={{ \$value }}"
 
           - alert: OpenClawSandboxMemoryHigh
             expr: |
@@ -262,10 +268,16 @@ data:
                   container="sandbox",
                   resource="memory"
                 }
-              ) > ${SANDBOX_AUTOSCALE_MEMORY_HIGH_RATIO:-0.90},
+              ) > ${SANDBOX_AUTOSCALE_MEMORY_HIGH_RATIO:-0.55}
+              and on (namespace, pod)
+              kube_pod_status_phase{
+                namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                phase="Running",
+                pod=~"[0-9a-f-]{36}-[0-9]+"
+              } == 1,
                 "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
               )
-            for: ${SANDBOX_AUTOSCALE_MEMORY_HIGH_FOR:-5m}
+            for: ${SANDBOX_AUTOSCALE_MEMORY_HIGH_FOR:-15s}
             labels:
               severity: warning
               serviceType: openclaw
@@ -274,7 +286,7 @@ data:
               resizeType: IN_PLACE
             annotations:
               summary: "OpenClaw 沙箱内存持续偏高"
-              reason_detail: "内存 Working Set 连续 ${SANDBOX_AUTOSCALE_MEMORY_HIGH_FOR:-5m} 超过 request 的 ${SANDBOX_AUTOSCALE_MEMORY_HIGH_PERCENT:-90}%，建议升一级规格。pod={{ \$labels.pod }} value={{ \$value }}"
+              reason_detail: "内存 Working Set 连续 ${SANDBOX_AUTOSCALE_MEMORY_HIGH_FOR:-15s} 超过 request 的 ${SANDBOX_AUTOSCALE_MEMORY_HIGH_PERCENT:-55}%，建议原地升一级规格。pod={{ \$labels.pod }} value={{ \$value }}"
 
           - alert: OpenClawSandboxMemoryCritical
             expr: |
@@ -293,10 +305,16 @@ data:
                   container="sandbox",
                   resource="memory"
                 }
-              ) > ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_RATIO:-0.85},
+              ) > ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_RATIO:-0.75}
+              and on (namespace, pod)
+              kube_pod_status_phase{
+                namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                phase="Running",
+                pod=~"[0-9a-f-]{36}-[0-9]+"
+              } == 1,
                 "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
               )
-            for: ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_FOR:-2m}
+            for: ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_FOR:-30s}
             labels:
               severity: critical
               serviceType: openclaw
@@ -305,16 +323,34 @@ data:
               resizeType: IN_PLACE
             annotations:
               summary: "OpenClaw 沙箱内存接近上限"
-              reason_detail: "内存 Working Set 连续 ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_FOR:-2m} 超过 limit 的 ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_PERCENT:-85}%，建议原地升配。pod={{ \$labels.pod }} value={{ \$value }}"
+              reason_detail: "内存 Working Set 连续 ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_FOR:-30s} 超过 limit 的 ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_PERCENT:-75}%，建议立即原地升配。pod={{ \$labels.pod }} value={{ \$value }}"
           - alert: OpenClawSandboxOOMKilled
             expr: |
               label_replace(
-                increase(kube_pod_container_status_last_terminated_reason{
-                namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                container="sandbox",
-                reason="OOMKilled",
-                pod=~"[0-9a-f-]{36}-[0-9]+"
-              }[10m]) > 0,
+                (
+                  kube_pod_container_status_terminated_reason{
+                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                    container="sandbox",
+                    reason="OOMKilled",
+                    pod=~"[0-9a-f-]{36}-[0-9]+"
+                  } == 1
+                  unless
+                  kube_pod_container_status_terminated_reason{
+                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                    container="sandbox",
+                    reason="OOMKilled",
+                    pod=~"[0-9a-f-]{36}-[0-9]+"
+                  } offset ${SANDBOX_AUTOSCALE_OOM_LOOKBACK:-5m} == 1
+                )
+                or
+                (
+                  increase(kube_pod_container_status_last_terminated_reason{
+                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                    container="sandbox",
+                    reason="OOMKilled",
+                    pod=~"[0-9a-f-]{36}-[0-9]+"
+                  }[${SANDBOX_AUTOSCALE_OOM_LOOKBACK:-5m}]) > 0
+                ),
                 "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
               )
             labels:
@@ -325,7 +361,7 @@ data:
               resizeType: IN_PLACE
             annotations:
               summary: "OpenClaw 沙箱 OOMKilled"
-              reason_detail: "沙箱容器最近 10m 发生 OOMKilled，建议按数据库规格原地升配。pod={{ \$labels.pod }} value={{ \$value }}"
+              reason_detail: "沙箱容器最近 ${SANDBOX_AUTOSCALE_OOM_LOOKBACK:-5m} 发生 OOMKilled，建议按数据库规格立即原地升配。pod={{ \$labels.pod }} value={{ \$value }}"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -335,11 +371,12 @@ metadata:
 data:
   prometheus.yml: |
     global:
-      scrape_interval: 30s
-      evaluation_interval: 30s
+      scrape_interval: ${MONITORING_PROMETHEUS_SCRAPE_INTERVAL:-15s}
+      evaluation_interval: ${MONITORING_PROMETHEUS_EVALUATION_INTERVAL:-15s}
     alerting:
       alertmanagers:
-        - static_configs:
+        - path_prefix: /alertmanager
+          static_configs:
             - targets: ["alertmanager.${NS_MONITORING}.svc.cluster.local:9093"]
     rule_files:
       - /etc/prometheus/rules/*.yml
