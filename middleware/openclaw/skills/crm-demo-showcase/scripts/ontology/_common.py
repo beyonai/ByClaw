@@ -54,7 +54,9 @@ async def _post_via_discovery(
     body: dict[str, Any] = response.data if isinstance(response.data, dict) else {}
     if not response.is_success or body.get("code", 0) != 0:
         raise ValueError(f"HTTP {response.status_code} {service_name}{path}: {body.get('msg', body)}")
-    return body.get("data")
+    if body and "data" in body:
+        return body["data"]
+    return body
 
 
 def post_json(path: str, payload: dict[str, Any], service_env: str = "BE_DOMAINNAME") -> Any:
@@ -121,12 +123,11 @@ def _run_async_in_thread(coro: Any) -> Any:
 
 def delete_resource_by_code(resource_code: str) -> None:
     """通过 resourceCode 直接下架个人本体。"""
-    data = post_json(
+    post_json(
         path="/byaiService/tool/deleteResourceByCodeAndOwnerType",
         payload={"resourceCode": resource_code, "ownerType": "personal"},
     )
-    if not data or data.get("code") != 0:
-        raise RuntimeError(f"下架本体失败: {data}")
+    # post_json 内部已校验 HTTP 状态码和 body.code != 0，抛异常即为失败，无需再检查返回值
 
 
 def load_embedding_model_from_redis() -> bool:

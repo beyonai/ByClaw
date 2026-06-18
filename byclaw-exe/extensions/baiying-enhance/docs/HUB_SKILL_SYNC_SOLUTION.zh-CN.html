@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>baiying-enhance Hub Skill 同步与动态加载方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --text: #16202a;
+      --muted: #5d6b78;
+      --line: #d8e0e8;
+      --accent: #0b7285;
+      --accent-2: #2f6fdd;
+      --ok: #1f8a4c;
+      --warn: #a65f00;
+      --code-bg: #111827;
+      --code-text: #e5edf6;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", "PingFang SC", sans-serif;
+      line-height: 1.65;
+    }
+
+    header {
+      background: #0f2533;
+      color: #f7fbff;
+      padding: 48px 24px 36px;
+      border-bottom: 5px solid var(--accent);
+    }
+
+    header .wrap,
+    main {
+      width: min(1120px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 32px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    header p {
+      max-width: 860px;
+      margin: 0;
+      color: #c9d6df;
+      font-size: 16px;
+    }
+
+    main {
+      padding: 28px 0 52px;
+    }
+
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin: 18px 0;
+      padding: 24px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 22px;
+      line-height: 1.3;
+    }
+
+    h3 {
+      margin: 22px 0 10px;
+      font-size: 17px;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    ul,
+    ol {
+      margin: 10px 0 0;
+      padding-left: 22px;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 4px;
+      background: #eef3f7;
+      color: #143141;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 14px 0;
+      padding: 16px;
+      overflow: auto;
+      border-radius: 8px;
+      background: var(--code-bg);
+      color: var(--code-text);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+      color: inherit;
+      font-size: inherit;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #eef4f8;
+      font-weight: 700;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fbfdff;
+    }
+
+    .card strong {
+      display: block;
+      margin-bottom: 6px;
+      color: #0f2533;
+    }
+
+    .note {
+      border-left: 4px solid var(--accent);
+      background: #eef9fb;
+      padding: 12px 14px;
+      margin: 14px 0;
+      color: #173744;
+    }
+
+    .warn {
+      border-left-color: var(--warn);
+      background: #fff6e8;
+      color: #503000;
+    }
+
+    .ok {
+      border-left-color: var(--ok);
+      background: #eefaf2;
+      color: #143d24;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(130px, 1fr));
+      gap: 10px;
+      margin: 18px 0;
+    }
+
+    .step {
+      position: relative;
+      min-height: 110px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfdff;
+      padding: 12px;
+    }
+
+    .step .num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      color: #fff;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .step b {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .step p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 900px) {
+      .grid,
+      .flow {
+        grid-template-columns: 1fr;
+      }
+
+      header .wrap,
+      main {
+        width: min(100% - 28px, 1120px);
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>baiying-enhance Hub Skill 同步与动态加载方案</h1>
+      <p>
+        本文说明 baiying-enhance 如何支持百应数字员工 <code>relSkills</code> 的新对象格式，
+        如何自动发现 ByaiService、按版本下载 hub skill，以及 OpenClaw 如何基于
+        <code>agents.list[].skills</code> 做 skill 动态加载过滤。
+      </p>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>目标</h2>
+      <div class="grid">
+        <div class="card">
+          <strong>兼容新旧 relSkills</strong>
+          旧格式字符串数组继续可用；新格式对象可以表达内置 skill 与 hub 下载 skill。
+        </div>
+        <div class="card">
+          <strong>按版本自动更新</strong>
+          每次托管 agent 全量同步时请求 <code>versionUrl</code>，仅在版本变化或本地缺失时下载。
+        </div>
+        <div class="card">
+          <strong>动态加载过滤</strong>
+          只把 agent 需要的 <code>skillCode</code> 写入 <code>agents.list[].skills</code>，
+          OpenClaw 按该列表过滤加载。
+        </div>
+      </div>
+
+      <p>
+        方案边界很明确：<code>relSkills</code> 负责声明数字员工要使用哪些 skill；
+        hub 同步模块负责把 hub skill 安装到全局 skill 搜索目录；
+        OpenClaw 运行时负责在构建 agent 上下文时按 <code>skills</code> 列表选择实际加载哪些 skill。
+      </p>
+    </section>
+
+    <section>
+      <h2>relSkills 数据格式</h2>
+      <p>支持三类输入，最终都归一化为 OpenClaw 的 skill 名称列表。</p>
+
+      <h3>1. 旧格式字符串</h3>
+      <pre><code>{
+  "relSkills": ["dws", "clawhub"]
+}</code></pre>
+
+      <h3>2. OpenClaw 内置 skill</h3>
+      <pre><code>{
+  "skillCode": "dws",
+  "skillType": "inner"
+}</code></pre>
+      <p>
+        内置 skill 不下载，只把 <code>skillCode</code> 写入 <code>agents.list[].skills</code>。
+        前提是该 skill 已经存在于 OpenClaw 或全局 skill 搜索路径中。
+      </p>
+
+      <h3>3. ByClawHub 下载 skill</h3>
+      <pre><code>{
+  "skillCode": "guizang-ppt-skill-main",
+  "skillType": "hub",
+  "skillUrl": "/byaiService/tool/downloadSkillZip?skillId=10026639",
+  "versionUrl": "/byaiService/tool/getSkillVersion?skillId=10026639"
+}</code></pre>
+      <p>
+        hub skill 同样把 <code>skillCode</code> 写入 <code>agents.list[].skills</code>。
+        额外的 <code>skillUrl</code> 与 <code>versionUrl</code> 会保存到适配后的
+        <code>hubSkills</code> 元数据中，供同步模块下载与更新本地文件。
+      </p>
+
+      <div class="note">
+        如果 <code>relSkills</code> 不存在或为空，插件仍会回退读取旧的根级 <code>skills</code> 字段。
+        这保证旧数字员工 JSON 与旧配置不需要迁移即可继续运行。
+      </div>
+    </section>
+
+    <section>
+      <h2>整体执行流程</h2>
+      <div class="flow">
+        <div class="step">
+          <span class="num">1</span>
+          <b>读取 Redis 数字员工</b>
+          <p>从授权列表和 <code>DIG_EMPLOYEE_*</code> JSON 中加载可见 agent。</p>
+        </div>
+        <div class="step">
+          <span class="num">2</span>
+          <b>适配 agent 配置</b>
+          <p>将 <code>relSkills</code> 转为 <code>agents.list[].skills</code> 和 <code>hubSkills</code>。</p>
+        </div>
+        <div class="step">
+          <span class="num">3</span>
+          <b>同步 hub skill</b>
+          <p>发现 ByaiService，检查版本，必要时下载并原子替换。</p>
+        </div>
+        <div class="step">
+          <span class="num">4</span>
+          <b>写入 OpenClaw 配置</b>
+          <p>更新托管 agent、模型、工具与 skill 过滤列表。</p>
+        </div>
+        <div class="step">
+          <span class="num">5</span>
+          <b>触发快照刷新</b>
+          <p>hub 文件变化时写内部 reload marker，让 OpenClaw 重建 skill 快照。</p>
+        </div>
+      </div>
+
+      <p>
+        同步发生在 <code>agent-watchdog</code> 的全量 Redis flush 中，并且在配置变更检测完成前执行。
+        这样 OpenClaw 看到新的 <code>agents.list[].skills</code> 时，对应 hub skill 文件已经就绪。
+      </p>
+    </section>
+
+    <section>
+      <h2>关键模块职责</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>模块</th>
+            <th>职责</th>
+            <th>关键点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>src/agent-adapter.ts</code></td>
+            <td>把百应数字员工 JSON 适配成 OpenClaw agent。</td>
+            <td>
+              <code>relSkills</code> 字符串或对象都归一化为 <code>skills</code>；
+              <code>skillType=hub</code> 的对象额外输出 <code>hubSkills</code>。
+            </td>
+          </tr>
+          <tr>
+            <td><code>src/hub-skill-sync.ts</code></td>
+            <td>执行 hub skill 发现、鉴权、版本检查、下载和安装。</td>
+            <td>
+              安装目录为 <code>${OPENCLAW_STATE_DIR}/skills/&lt;skillCode&gt;</code>；
+              元数据写入 <code>.baiying-hub-skill.json</code>。
+            </td>
+          </tr>
+          <tr>
+            <td><code>src/agent-watchdog.ts</code></td>
+            <td>把 hub 同步接入 Redis 全量同步流程。</td>
+            <td>
+              当 hub 文件变化但 agent JSON 未变化时，更新
+              <code>skills.entries.__baiying_enhance_reload</code> 触发快照刷新。
+            </td>
+          </tr>
+          <tr>
+            <td><code>src/types.ts</code> / <code>openclaw.plugin.json</code></td>
+            <td>暴露插件配置。</td>
+            <td><code>hubSkillAutoSync</code> 默认开启，可显式关闭。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>版本自动更新机制</h2>
+      <h3>安装目录与元数据</h3>
+      <p>hub skill 统一安装在 OpenClaw 全局状态目录下：</p>
+      <pre><code>${OPENCLAW_STATE_DIR}/skills/&lt;skillCode&gt;/
+  SKILL.md
+  .baiying-hub-skill.json
+  ...skill files</code></pre>
+
+      <p><code>.baiying-hub-skill.json</code> 记录下载来源与本地版本：</p>
+      <pre><code>{
+  "skillCode": "guizang-ppt-skill-main",
+  "version": "v0.1",
+  "skillUrl": "http://byai-service/byaiService/tool/downloadSkillZip?skillId=10026639",
+  "versionUrl": "http://byai-service/byaiService/tool/getSkillVersion?skillId=10026639",
+  "downloadedAt": "2026-06-18T08:01:43.000Z"
+}</code></pre>
+
+      <h3>更新判定</h3>
+      <ol>
+        <li>收集所有托管 agent 的 <code>hubSkills</code>，按 <code>skillCode</code> 去重。</li>
+        <li>从 Redis 服务注册表 <code>byai_gateway:sd:instances:ByaiService</code> 发现 ByaiService 基础地址。</li>
+        <li>将相对 <code>versionUrl</code> 解析为完整 URL，并发起 GET 请求。</li>
+        <li>读取返回体 <code>data.version</code>，如果存在 <code>data.skillUrl</code>，优先使用它作为下载地址。</li>
+        <li>比较本地 <code>.baiying-hub-skill.json</code> 的 <code>version</code> 与远端版本。</li>
+        <li>如果本地 metadata 缺失、本地 <code>SKILL.md</code> 缺失或版本不同，则下载 zip 并覆盖本地目录。</li>
+        <li>如果版本相同且 <code>SKILL.md</code> 存在，则跳过下载。</li>
+      </ol>
+
+      <pre><code>for each hubSkillRef:
+  version = GET resolve(versionUrl)
+  local = read skills/&lt;skillCode&gt;/.baiying-hub-skill.json
+
+  if local.version == version.data.version and SKILL.md exists:
+    skip
+  else:
+    zip = GET resolve(version.data.skillUrl || relSkills.skillUrl)
+    validate zip entries
+    extract zip
+    locate one skill root containing SKILL.md
+    atomically replace skills/&lt;skillCode&gt;
+    write .baiying-hub-skill.json</code></pre>
+
+      <h3>鉴权来源与安全边界</h3>
+      <p>请求 hub API 时只透传 allowlist 内的 header，避免把无关登录态或敏感字段扩散出去。</p>
+      <table>
+        <thead>
+          <tr>
+            <th>来源</th>
+            <th>用途</th>
+            <th>优先级说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>baiying-session.json</code></td>
+            <td>复用本地登录态。</td>
+            <td>作为基础鉴权来源。</td>
+          </tr>
+          <tr>
+            <td>环境变量覆盖</td>
+            <td>允许测试或部署环境注入 token。</td>
+            <td>覆盖本地会话中同名 header。</td>
+          </tr>
+          <tr>
+            <td>Redis 登录 auth hash</td>
+            <td>读取当前用户实时登录态。</td>
+            <td>可覆盖过期本地 session，避免 <code>Beyond-Token</code> 过期导致 hub sync 失败。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>允许透传的 header 名称：</p>
+      <pre><code>Beyond-Token
+Sso-Token
+Authorization
+X-User-Id</code></pre>
+
+      <h3>下载包校验与原子替换</h3>
+      <ul>
+        <li>下载前不删除本地旧版本。版本请求或下载失败时，只记录 warning，保留已有 skill。</li>
+        <li>用 <code>unzip -Z -1</code> 枚举 zip entries，拒绝绝对路径、Windows 盘符路径和 <code>..</code> 路径穿越。</li>
+        <li>zip 可以是根目录直接包含 <code>SKILL.md</code>，也可以是单个顶层 skill 目录。</li>
+        <li>解压到临时目录后，先复制到 swap 目录，再 rename 替换目标目录；替换失败时回滚旧目录。</li>
+      </ul>
+
+      <div class="note ok">
+        这个策略保证“版本检查总是发生，下载只在必要时发生”，同时保证下载失败不会破坏已有可用 skill。
+      </div>
+    </section>
+
+    <section>
+      <h2>Skill 动态加载过滤</h2>
+      <p>
+        OpenClaw 的 skill 加载过滤入口是 agent 配置里的 <code>agents.list[].skills</code>。
+        baiying-enhance 不把 hub metadata 写进 OpenClaw agent 配置，只写最终 skill 名称，避免运行时关心百应下载协议。
+      </p>
+
+      <h3>适配前</h3>
+      <pre><code>{
+  "id": 10026037,
+  "name": "杜甫的知识开发助手",
+  "relSkills": [
+    { "skillCode": "weread-skills", "skillType": "hub", "skillUrl": "...", "versionUrl": "..." },
+    { "skillCode": "guizang-ppt-skill-main", "skillType": "hub", "skillUrl": "...", "versionUrl": "..." },
+    { "skillCode": "dws", "skillType": "inner" }
+  ]
+}</code></pre>
+
+      <h3>适配后</h3>
+      <pre><code>{
+  "id": "baiying-agent-10026037",
+  "name": "杜甫的知识开发助手",
+  "skills": ["weread-skills", "guizang-ppt-skill-main", "dws"],
+  "tools": { "alsoAllow": ["baiying_call"] }
+}</code></pre>
+
+      <p>
+        运行时效果是：该 agent 构建上下文时，只加载上面三个 skill。
+        其他全局 skill 即使存在于 <code>${OPENCLAW_STATE_DIR}/skills</code>，也不会进入该 agent 的 skill 上下文。
+      </p>
+
+      <h3>hub 文件变化但 skills 列表不变</h3>
+      <p>
+        一个常见情况是 hub skill 的 zip 内容更新了，但 <code>agents.list[].skills</code>
+        仍然是同一个 <code>skillCode</code>。如果只比较 agent JSON，OpenClaw 可能不会重建 skill 快照。
+        因此同步模块下载新版本后，watchdog 会写入一个禁用的内部 marker：
+      </p>
+
+      <pre><code>skills.entries.__baiying_enhance_reload = {
+  "enabled": false,
+  "config": {
+    "reason": "hub-skill-sync",
+    "managedSnapshotSignature": "..."
+  }
+}</code></pre>
+
+      <p>
+        这个 marker 不代表一个可用 skill，只用于改变配置快照，让 OpenClaw 感知 skill 文件已经变化，
+        从而刷新 skill snapshot。
+      </p>
+
+      <div class="note">
+        workspace 上传的 skill 扫描逻辑与 hub skill 同步保持分离。
+        <code>workspaceSkillAutoEnable</code> 仍只处理工作区里的 <code>skills/&lt;dir&gt;/SKILL.md</code>，
+        不参与 hub 下载目录管理。
+      </div>
+    </section>
+
+    <section>
+      <h2>配置项</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>配置</th>
+            <th>默认值</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>hubSkillAutoSync</code></td>
+            <td><code>true</code></td>
+            <td>是否启用 hub skill 自动版本检查与下载。关闭后仍会写入 <code>agents.list[].skills</code>，但不会自动准备本地文件。</td>
+          </tr>
+          <tr>
+            <td><code>workspaceSkillAutoEnable</code></td>
+            <td><code>true</code></td>
+            <td>是否把工作区上传的 skill 合并到托管 agent 的 skills 列表；与 hub 下载逻辑互不替代。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <pre><code>{
+  "plugins": {
+    "entries": {
+      "baiying-enhance": {
+        "enabled": true,
+        "config": {
+          "hubSkillAutoSync": true,
+          "workspaceSkillAutoEnable": true
+        }
+      }
+    }
+  }
+}</code></pre>
+    </section>
+
+    <section>
+      <h2>上线与验证</h2>
+      <h3>构建与测试</h3>
+      <pre><code>cd byclaw-exe/extensions/baiying-enhance
+npm test -- --run src/agent-adapter.test.ts src/hub-skill-sync.test.ts src/agent-watchdog.test.ts
+npm run build</code></pre>
+
+      <h3>本地运行验证</h3>
+      <ol>
+        <li>把插件目录复制到 <code>~/.openclaw/extensions/baiying-enhance</code>。</li>
+        <li>确保 OpenClaw 配置加载该插件，并配置 Redis 连接环境变量。</li>
+        <li>启动 gateway 后观察日志，应该出现 <code>hub skill sync checked=...</code>。</li>
+        <li>检查 <code>~/.openclaw/skills/&lt;skillCode&gt;/SKILL.md</code> 和 <code>.baiying-hub-skill.json</code>。</li>
+        <li>通过 byai-channel Redis Stream 入站消息测试目标 agent，确认返回内容能识别已配置 skill。</li>
+      </ol>
+
+      <h3>Redis Stream 验证点</h3>
+      <pre><code>控制流:
+byai_gateway:ctrl:agent_type:BYCLAW_EXE_&lt;USER_CODE&gt;
+
+结果流:
+byai_gateway:session:&lt;sessionId&gt;:data_stream
+
+目标 agent:
+extra_payload.agent_id = "10026037"</code></pre>
+
+      <div class="note ok">
+        已验证样例：向 <code>BYCLAW_EXE_0027012991</code> 控制流写入消息后，
+        <code>杜甫的知识开发助手</code> 返回了 <code>weread-skills</code> 与
+        <code>guizang-ppt-skill-main</code>，并且日志显示 <code>rootLifecyclePhase=end</code>。
+      </div>
+    </section>
+
+    <section>
+      <h2>故障处理</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>现象</th>
+            <th>可能原因</th>
+            <th>处理建议</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>日志出现 <code>version request failed HTTP 401</code></td>
+            <td>本地会话 token 过期，或 Redis 登录 auth hash 缺失。</td>
+            <td>确认 <code>USER_CODE</code> 能映射到用户 ID，并检查 <code>user:&lt;userId&gt;:login:auth</code>。</td>
+          </tr>
+          <tr>
+            <td>hub skill 未下载</td>
+            <td><code>relSkills</code> 对象缺少 <code>skillCode</code>、<code>skillUrl</code> 或 <code>versionUrl</code>。</td>
+            <td>修正数字员工 JSON；对象字段完整后会在下次全量同步时检查。</td>
+          </tr>
+          <tr>
+            <td>zip 下载成功但安装失败</td>
+            <td>zip 内没有唯一 <code>SKILL.md</code> 根目录，或路径包含不安全 entry。</td>
+            <td>重新打包 skill，保证根目录或单个顶层目录中存在 <code>SKILL.md</code>。</td>
+          </tr>
+          <tr>
+            <td>文件已更新但 agent 仍用旧 skill</td>
+            <td>OpenClaw skill snapshot 未刷新。</td>
+            <td>确认同步后写入了 <code>__baiying_enhance_reload</code> marker；必要时触发一次 Redis full flush。</td>
+          </tr>
+          <tr>
+            <td>agent 看不到某个 skill</td>
+            <td><code>agents.list[].skills</code> 过滤列表不包含该 skillCode。</td>
+            <td>检查数字员工 <code>relSkills</code> 是否包含对应 <code>skillCode</code>，以及适配后 OpenClaw 配置是否写入。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>实现原则</h2>
+      <ul>
+        <li>兼容优先：旧 <code>relSkills: string[]</code> 与旧 <code>skills</code> 行为不改变。</li>
+        <li>职责分离：agent adapter 只做配置归一化；hub sync 只做文件准备；OpenClaw 只按 <code>skills</code> 过滤加载。</li>
+        <li>失败保守：远端 version 或 download 失败时保留本地已有 skill，不从 agent 配置中删除 <code>skillCode</code>。</li>
+        <li>最小下载：每次都请求版本，但只有版本不一致或本地缺失时才下载 zip。</li>
+        <li>安全安装：下载包必须经过路径校验，安装采用临时目录和原子替换。</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

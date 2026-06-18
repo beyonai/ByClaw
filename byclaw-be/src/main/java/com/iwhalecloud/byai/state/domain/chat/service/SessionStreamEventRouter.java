@@ -327,6 +327,7 @@ public class SessionStreamEventRouter {
         wsMessage.put("type", "NEW_MESSAGE");
         wsMessage.put("sessionId", String.valueOf(sessionId));
         wsMessage.put("data", JSON.toJSON(message));
-        multiDeviceBroadcastService.broadcastRawToUser(userId, sessionId, wsMessage);
+        // 后台事件，发送给所有的活跃通道
+        multiDeviceBroadcastService.broadcastRawToUser(userId, wsMessage, null);
     }
 }

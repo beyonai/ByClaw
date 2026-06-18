@@ -85,12 +85,14 @@ def main() -> None:
                 "kb_directory": params.get("kb_directory", ""),
             },
         )
-        # 非结构化还需要 kb_id
+        # 非结构化还需要 kb_id：检查入参而非 API 返回值
         if result.get("ok", True):
             missing = result.pop("missing", []) if isinstance(result.get("missing"), list) else []
-            if not result.get("kb_id"):
+            if not params.get("kb_id"):
                 missing.append("kb_id")
             result["missing"] = missing
+        if result and "entity_code" in result:
+            result["entity_code"] = entity_code
         print(json.dumps(result, ensure_ascii=False), flush=True)
 
     elif action == "submit":

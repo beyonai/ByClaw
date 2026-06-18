@@ -17,6 +17,7 @@ import {
     parseModelPrimaryRef,
 } from "./agent-session-model-reconcile.js";
 import { mergeDefaultAimodelIntoConfig } from "./agent-registry.js";
+import { mutateOpenClawConfigFile } from "./config-writer.js";
 import type { ManagedAgentModelResolveResult } from "./managed-agent-model-hook.js";
 import type { BaiyingRedisJsonStore } from "./redis-json-store.js";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
@@ -25,7 +26,9 @@ export type AimodelDefaultRunSyncDeps = {
     api: OpenClawPluginApi;
     redisJsonStore: BaiyingRedisJsonStore;
     pluginConfig: BaiyingEnhancePluginConfig;
-    getFlushNow: () => (() => Promise<void>) | undefined;
+    getFlushNow: () =>
+        | ((opts?: { fullWorkspaceReseed?: boolean; deletedSourceKeys?: string[] }) => Promise<void>)
+        | undefined;
     aimodelSecretResolverScriptPath?: string;
 };
 
@@ -37,6 +40,14 @@ export type AimodelDefaultRunSyncOptions = {
      * session transcript lock.
      */
     allowConfigMutation?: boolean;
+    /**
+     * Wait for OpenClaw hot reload to expose the newly written model provider
+     * through runtime config before returning an override. This is important for
+     * first inbound messages, where using the override before the model catalog
+     * is live would only trade one Unknown model failure for another.
+     */
+    runtimeConfigWaitMs?: number;
+    runtimeConfigPollMs?: number;
 };
 
 type ResolvedDefaultBundle = {
@@ -65,6 +76,29 @@ function isDefaultModelRegisteredInCurrentConfig(
         provider,
         model,
     );
+}
+
+async function waitForDefaultModelRegisteredInCurrentConfig(
+    api: OpenClawPluginApi,
+    provider: string,
+    model: string,
+    options?: AimodelDefaultRunSyncOptions,
+): Promise<boolean> {
+    const timeoutMs = options?.runtimeConfigWaitMs ?? 250;
+    const pollMs = options?.runtimeConfigPollMs ?? 50;
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+
+    for (;;) {
+        if (isDefaultModelRegisteredInCurrentConfig(api, provider, model)) {
+            return true;
+        }
+        if (Date.now() >= deadline) {
+            return false;
+        }
+        await new Promise((resolveDelay) =>
+            setTimeout(resolveDelay, Math.max(10, pollMs)),
+        );
+    }
 }
 
 function isDefaultModelRegisteredOnDisk(
@@ -117,23 +151,24 @@ async function syncDefaultModelDirectly(params: {
     bundle: ResolvedDefaultBundle;
     reason: string;
 }): Promise<void> {
-    const next = mergeDefaultAimodelIntoConfig({
-        base: loadDiskConfig(params.deps.api),
-        defaultModel: {
-            providerKey: params.bundle.providerKey,
-            modelRef: params.bundle.modelRef,
-            provider: params.bundle.provider,
-        },
-        mainParentAgentId: resolveMainParentAgentId(params.deps.pluginConfig),
-        aimodelConfigRedisKey: params.deps.pluginConfig.aimodelConfigRedisKey,
-        aimodelTypeListRedisKey: params.deps.pluginConfig.aimodelTypeListRedisKey,
-        aimodelSecretProviderName: params.deps.pluginConfig.aimodelSecretProviderName,
-        aimodelSecretResolverCommand: process.execPath,
-        aimodelSecretResolverArgs: [
-            params.deps.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js",
-        ],
-    });
-    await params.deps.api.runtime.config.writeConfigFile(next);
+    await mutateOpenClawConfigFile(params.deps.api, (base) =>
+        mergeDefaultAimodelIntoConfig({
+            base,
+            defaultModel: {
+                providerKey: params.bundle.providerKey,
+                modelRef: params.bundle.modelRef,
+                provider: params.bundle.provider,
+            },
+            mainParentAgentId: resolveMainParentAgentId(params.deps.pluginConfig),
+            aimodelConfigRedisKey: params.deps.pluginConfig.aimodelConfigRedisKey,
+            aimodelTypeListRedisKey: params.deps.pluginConfig.aimodelTypeListRedisKey,
+            aimodelSecretProviderName: params.deps.pluginConfig.aimodelSecretProviderName,
+            aimodelSecretResolverCommand: process.execPath,
+            aimodelSecretResolverArgs: [
+                params.deps.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js",
+            ],
+        }),
+    );
     params.deps.api.logger.info(
         `baiying-enhance: synced platform default LLM ${params.bundle.modelRef} (${params.reason})`,
     );
@@ -226,14 +261,12 @@ export async function resolveMainDefaultAimodelOnAgentRun(
             bundle,
             reason: "main run aimodel config repair",
         });
-        await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
-        if (
-            isDefaultModelRegisteredInCurrentConfig(
-                deps.api,
-                override.providerOverride,
-                override.modelOverride,
-            )
-        ) {
+        if (await waitForDefaultModelRegisteredInCurrentConfig(
+            deps.api,
+            override.providerOverride,
+            override.modelOverride,
+            options,
+        )) {
             return override;
         }
         deps.api.logger.warn(
@@ -289,14 +322,12 @@ export async function resolveMainDefaultAimodelOnAgentRun(
         await saveAimodelDefaultLlmIndex(indexPath, snapshot, warnLog);
     }
 
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
-    if (
-        isDefaultModelRegisteredInCurrentConfig(
-            deps.api,
-            override.providerOverride,
-            override.modelOverride,
-        )
-    ) {
+    if (await waitForDefaultModelRegisteredInCurrentConfig(
+        deps.api,
+        override.providerOverride,
+        override.modelOverride,
+        options,
+    )) {
         return override;
     }
 

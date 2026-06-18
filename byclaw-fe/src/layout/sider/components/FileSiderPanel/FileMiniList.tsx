@@ -1,6 +1,7 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Collapse,
+  Button,
   Dropdown,
   Empty,
   Input,
@@ -30,6 +31,7 @@ import {
 } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import {
   copyFile,
+  createFolder as createFileBrowserFolder,
   downloadFile,
   downloadFolder,
   ensureFolder,
@@ -153,9 +155,14 @@ interface FileTreeItem extends FileBrowserItem {
 
 type FileCategoryKey = 'root' | 'session' | 'shared' | 'log';
 type FileCopyTargetType = 'session' | 'shared';
-type FileActionKey = 'upload' | 'preview' | 'download' | 'saveToKnowledge' | 'saveToSessionFiles' | 'saveToSharedFiles';
-
-const PREVIEW_UNAVAILABLE_MESSAGE = '文件不可在线预览，请下载查看';
+type FileActionKey =
+  | 'upload'
+  | 'createFolder'
+  | 'preview'
+  | 'download'
+  | 'saveToKnowledge'
+  | 'saveToSessionFiles'
+  | 'saveToSharedFiles';
 
 interface FileCategoryItem {
   key: FileCategoryKey;
@@ -298,6 +305,10 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const [pendingUploadFiles, setPendingUploadFiles] = useState<File[]>([]);
   const [pendingUploadPath, setPendingUploadPath] = useState('');
   const [uploadingFiles, setUploadingFiles] = useState(false);
+  const [uploadDirectoryPickerOpen, setUploadDirectoryPickerOpen] = useState(false);
+  const [uploadDirectoryPath, setUploadDirectoryPath] = useState('/');
+  const [uploadDirectoryFolders, setUploadDirectoryFolders] = useState<FileBrowserItem[]>([]);
+  const [uploadDirectoryLoading, setUploadDirectoryLoading] = useState(false);
   const [copyModalOpen, setCopyModalOpen] = useState(false);
   const [copyTarget, setCopyTarget] = useState<FileBrowserItem | null>(null);
   const [copyTargetType, setCopyTargetType] = useState<FileCopyTargetType>('session');
@@ -305,6 +316,10 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const [copyFolders, setCopyFolders] = useState<FileBrowserItem[]>([]);
   const [copyFolderLoading, setCopyFolderLoading] = useState(false);
   const [copyingToFileBrowser, setCopyingToFileBrowser] = useState(false);
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [createFolderParentPath, setCreateFolderParentPath] = useState('');
+  const [createFolderName, setCreateFolderName] = useState('');
+  const [creatingFolder, setCreatingFolder] = useState(false);
 
   const fileCategories = useMemo<FileCategoryItem[]>(() => {
     return [
@@ -457,6 +472,16 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     return buildScopedFolderPath(copyDirectoryPath, rootPath);
   }, [copyDirectoryPath, copyTargetType]);
 
+  const uploadDirectoryBreadcrumb = useMemo(() => {
+    return [
+      {
+        title: intl.formatMessage({ id: 'fileBrowser.root' }),
+        id: ROOT_FILE_PATH,
+      },
+      ...buildScopedFolderPath(uploadDirectoryPath, ROOT_FILE_PATH),
+    ];
+  }, [intl, uploadDirectoryPath]);
+
   const loadKnowledgeBases = useCallback(
     async (keyword = knowledgeKeyword) => {
       setKnowledgeLoading(true);
@@ -539,6 +564,23 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     [intl, resourceId]
   );
 
+  const loadUploadDirectoryFolders = useCallback(
+    async (directoryPath: string) => {
+      const normalizedPath = ensureDirectoryPath(directoryPath || '/');
+      setUploadDirectoryLoading(true);
+      try {
+        const response = await listFiles({ resourceId, path: normalizedPath });
+        setUploadDirectoryFolders(unwrapListResponse<FileBrowserItem>(response).filter((item) => isDirectory(item)));
+        setUploadDirectoryPath(normalizedPath);
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+      } finally {
+        setUploadDirectoryLoading(false);
+      }
+    },
+    [intl, resourceId]
+  );
+
   const handleSearch = useCallback(
     async (keyword: string) => {
       const nextKeyword = keyword.trim();
@@ -589,7 +631,10 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
   const handlePreview = useCallback(
     async (item: FileBrowserItem) => {
-      if (!canPreviewFile(item)) return;
+      if (!canPreviewFile(item)) {
+        message.warning(intl.formatMessage({ id: 'fileBrowser.preview.unavailable' }));
+        return;
+      }
 
       renderPreviewPanel(item, { loading: true });
       try {
@@ -603,7 +648,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         clearDetailPanel?.();
       }
     },
-    [clearDetailPanel, intl, renderPreviewPanel, resourceId]
+    [clearDetailPanel, intl, message, renderPreviewPanel, resourceId]
   );
 
   const handleDownload = useCallback(
@@ -690,12 +735,102 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     ]
   );
 
+  const refreshFileBrowserDirectory = useCallback(
+    async (directoryPath: string) => {
+      const normalizedPath = ensureDirectoryPath(directoryPath || ROOT_FILE_PATH);
+      if (isPathIn(normalizedPath, SHARED_FILE_PATH)) {
+        delete categoryCacheRef.current.shared;
+      }
+      if (normalizedPath === ensureDirectoryPath(currentPath)) {
+        setSearchValue('');
+        setIsSearching(false);
+        setChildrenByPath({});
+        await fetchList(currentPath, { force: true });
+        return;
+      }
+      const res: any = await listFiles({ resourceId, path: normalizedPath });
+      const directoryChildren = unwrapListResponse<FileBrowserItem>(res);
+      setChildrenByPath((prev) => {
+        const nextChildrenByPath = {
+          ...prev,
+          [normalizedPath]: directoryChildren,
+        };
+        if (!isSearching) {
+          updateCategoryCache(activeCategoryKey, {
+            path: currentPath,
+            items,
+            childrenByPath: nextChildrenByPath,
+          });
+        }
+        return nextChildrenByPath;
+      });
+    },
+    [activeCategoryKey, currentPath, fetchList, isSearching, items, resourceId, updateCategoryCache]
+  );
+
   const handleUploadSelect = useCallback((targetPath: string, fileList: File[]) => {
     if (!fileList.length) return;
     setPendingUploadPath(ensureDirectoryPath(targetPath));
     setPendingUploadFiles(fileList);
     setUploadConfirmOpen(true);
   }, []);
+
+  const openUploadDirectoryPicker = useCallback(() => {
+    const initialPath = ensureDirectoryPath(pendingUploadPath || currentPath || ROOT_FILE_PATH);
+    setUploadDirectoryPickerOpen(true);
+    void loadUploadDirectoryFolders(initialPath);
+  }, [currentPath, loadUploadDirectoryFolders, pendingUploadPath]);
+
+  const handleConfirmUploadDirectory = useCallback(() => {
+    setPendingUploadPath(ensureDirectoryPath(uploadDirectoryPath || ROOT_FILE_PATH));
+    setUploadDirectoryPickerOpen(false);
+  }, [uploadDirectoryPath]);
+
+  const handleSharedUploadSelect = useCallback(
+    async (fileList: File[]) => {
+      if (!fileList.length) return;
+      try {
+        await ensureFolder({ resourceId, path: SHARED_FILE_PATH });
+        handleUploadSelect(SHARED_FILE_PATH, fileList);
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.createFolder.failed' }));
+      }
+    },
+    [handleUploadSelect, intl, resourceId]
+  );
+
+  const openCreateFolder = useCallback((parentPath: string) => {
+    setCreateFolderParentPath(ensureDirectoryPath(parentPath || ROOT_FILE_PATH));
+    setCreateFolderName('');
+    setCreateFolderOpen(true);
+  }, []);
+
+  const handleCreateFolder = useCallback(async () => {
+    const folderName = createFolderName.trim();
+    if (!folderName) return;
+    if (/[\\/]/.test(folderName)) {
+      message.warning(intl.formatMessage({ id: 'fileBrowser.createFolder.prompt' }));
+      return;
+    }
+    const parentPath = ensureDirectoryPath(createFolderParentPath || currentPath || ROOT_FILE_PATH);
+    setCreatingFolder(true);
+    try {
+      await ensureFolder({ resourceId, path: parentPath });
+      await createFileBrowserFolder({
+        resourceId,
+        path: buildTargetFolderPath(parentPath, folderName),
+      });
+      message.success(intl.formatMessage({ id: 'fileBrowser.createFolder.success' }));
+      setCreateFolderOpen(false);
+      setCreateFolderName('');
+      setCreateFolderParentPath('');
+      await refreshFileBrowserDirectory(parentPath);
+    } catch (error: any) {
+      message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.createFolder.failed' }));
+    } finally {
+      setCreatingFolder(false);
+    }
+  }, [createFolderName, createFolderParentPath, currentPath, intl, refreshFileBrowserDirectory, resourceId]);
 
   const handleCancelUploadConfirm = useCallback(() => {
     if (uploadingFiles) return;
@@ -742,13 +877,13 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           return;
         }
         if (!canPreviewFile(node)) {
-          message.warning(PREVIEW_UNAVAILABLE_MESSAGE);
+          message.warning(intl.formatMessage({ id: 'fileBrowser.preview.unavailable' }));
           return;
         }
         void handlePreview(node);
       }, 220);
     },
-    [clearClickTimer, handlePreview]
+    [clearClickTimer, handlePreview, intl, message]
   );
 
   const handleItemDoubleClick = useCallback(
@@ -1083,7 +1218,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       }
 
       const actionKeys: FileActionKey[] = [
-        ...(dir ? (['upload'] as FileActionKey[]) : []),
+        ...(dir ? (['upload', 'createFolder'] as FileActionKey[]) : []),
         ...(canPreviewFile(item) ? (['preview'] as FileActionKey[]) : []),
         'download',
         ...extraActions,
@@ -1111,6 +1246,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         }
         const labelIdMap: Record<FileActionKey, string> = {
           upload: 'fileBrowser.toolbar.upload',
+          createFolder: 'common.create',
           preview: 'fileBrowser.action.preview',
           download: 'directoryManage.downloadFile',
           saveToKnowledge: 'fileSider.saveToKnowledge',
@@ -1172,6 +1308,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
                             void handlePreview(item as FileTreeItem);
                           } else if (key === 'download') {
                             void handleDownload(item as FileTreeItem);
+                          } else if (key === 'createFolder') {
+                            openCreateFolder(ensureDirectoryPath((item as FileTreeItem).path));
                           } else if (key === 'saveToKnowledge') {
                             openSaveToKnowledge(item as FileTreeItem);
                           } else if (key === 'saveToSessionFiles') {
@@ -1226,7 +1364,49 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
                 .filter(Boolean)
                 .join(' ')}
             >
-              <span className={styles.categoryTitle}>{intl.formatMessage({ id: category.titleId })}</span>
+              <div
+                className={[
+                  styles.categoryHeaderMain,
+                  category.key === 'shared' ? styles.categoryHeaderMainWithActions : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                <span className={styles.categoryTitle}>{intl.formatMessage({ id: category.titleId })}</span>
+                {category.key === 'shared' && (
+                  <span className={styles.categoryActions} onClick={(event) => event.stopPropagation()}>
+                    <Upload
+                      showUploadList={false}
+                      multiple
+                      beforeUpload={(_, fileList) => {
+                        void handleSharedUploadSelect(fileList as unknown as File[]);
+                        return false;
+                      }}
+                    >
+                      <Button
+                        icon={<AntdIcon type="icon-a-Uploadshangchuan" className={styles.categoryActionIcon} />}
+                        size="small"
+                        className={styles.categoryActionButton}
+                      >
+                        {intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}
+                      </Button>
+                    </Upload>
+                    <Button
+                      icon={
+                        <AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" className={styles.categoryActionIcon} />
+                      }
+                      size="small"
+                      className={styles.categoryActionButton}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openCreateFolder(SHARED_FILE_PATH);
+                      }}
+                    >
+                      {intl.formatMessage({ id: 'common.create' })}
+                    </Button>
+                  </span>
+                )}
+              </div>
               <span className={styles.categoryPath}>{category.path}</span>
             </div>
           ),
@@ -1241,9 +1421,83 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         loading={uploadConfirmLoading}
         showProcessFrontMatter={isKnowledgeUploadConfirm}
         okText={uploadConfirmOkText}
+        directoryActionText={intl.formatMessage({ id: 'fileBrowser.upload.changeDirectory' })}
+        onDirectoryAction={isKnowledgeUploadConfirm ? undefined : openUploadDirectoryPicker}
         onOk={handleUploadConfirmOk}
         onCancel={handleUploadConfirmCancel}
       />
+      <Modal
+        open={createFolderOpen}
+        title={intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' })}
+        okText={intl.formatMessage({ id: 'common.confirm' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
+        confirmLoading={creatingFolder}
+        onOk={handleCreateFolder}
+        onCancel={() => {
+          if (creatingFolder) return;
+          setCreateFolderOpen(false);
+          setCreateFolderParentPath('');
+          setCreateFolderName('');
+        }}
+        destroyOnClose
+      >
+        <Input
+          value={createFolderName}
+          placeholder={intl.formatMessage({ id: 'fileBrowser.createFolder.prompt' })}
+          onChange={(event) => setCreateFolderName(event.target.value)}
+          onPressEnter={handleCreateFolder}
+          maxLength={100}
+        />
+      </Modal>
+      <Modal
+        open={uploadDirectoryPickerOpen}
+        title={intl.formatMessage({ id: 'fileBrowser.upload.selectDirectoryTitle' })}
+        okText={intl.formatMessage({ id: 'common.confirm' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
+        confirmLoading={uploadDirectoryLoading}
+        onOk={handleConfirmUploadDirectory}
+        onCancel={() => {
+          if (uploadDirectoryLoading) return;
+          setUploadDirectoryPickerOpen(false);
+        }}
+        zIndex={1001}
+        destroyOnClose
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Typography.Text>
+            {intl.formatMessage({ id: 'fileBrowser.copy.targetDirectory' })}
+            {uploadDirectoryPath}
+          </Typography.Text>
+          <KnowledgeBreadcrumb
+            folderPath={uploadDirectoryBreadcrumb}
+            handleBreadcrumbClick={(index) => {
+              const target = uploadDirectoryBreadcrumb[index];
+              if (target) {
+                void loadUploadDirectoryFolders(target.id);
+              }
+            }}
+          />
+          <Spin spinning={uploadDirectoryLoading}>
+            <List
+              dataSource={uploadDirectoryFolders}
+              locale={{ emptyText: intl.formatMessage({ id: 'fileBrowser.copy.noSubFolder' }) }}
+              renderItem={(folder) => (
+                <List.Item
+                  onClick={() => {
+                    void loadUploadDirectoryFolders(buildTargetFolderPath(uploadDirectoryPath, folder.name));
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <List.Item.Meta
+                    avatar={<AntdIcon type="icon-wenjianjialanse" />}
+                    title={<Typography.Text>{folder.name}</Typography.Text>}
+                  />
+                </List.Item>
+              )}
+            />
+          </Spin>
+        </Space>
+      </Modal>
       <Modal
         open={copyModalOpen}
         title={intl.formatMessage({

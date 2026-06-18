@@ -8,6 +8,14 @@ allowed-tools: execute, read_file
 
 通过自然语言对话，管理非结构化本体对象。支持创建、删除操作，对象绑定知识库目录（不建 SQLite 表）。
 
+## ⚠️ 执行规则（最高优先级，不得违反）
+
+1. **必须直接执行脚本**，禁止自行编写任何 Python/Shell 代码来替代或模拟脚本功能
+2. **禁止重写脚本逻辑**：即使你能理解脚本内容，也不允许复现、改写或内联其逻辑
+3. **所有操作通过 Bash 调用已有脚本完成**，脚本路径见下方意图路由表
+4. **解析脚本输出**：读取脚本 stdout 的 JSON，`ok: true` 为成功，`ok: false` 为失败，失败时将 `error` 字段内容告知用户
+5. **不允许推测结果**：脚本未执行前不得告知用户操作成功或失败
+
 ## 能力范围
 
 - 查询已有本体对象列表
@@ -42,17 +50,26 @@ allowed-tools: execute, read_file
 
 ## 意图路由
 
-| 用户表达 | 意图 | 调用脚本 |
-|----------|------|----------|
-| 查看/列出 + 对象 | 查询列表 | `scripts/list_resources.py` |
-| 查看知识库 | 查询知识库 | `scripts/list_knowledge_bases.py` |
-| 查看目录 | 查询目录 | `scripts/list_kb_directories.py` |
-| 创建/新建 + 对象 | 收集对象信息 | `scripts/create_object.py collect` |
-| 确认提交 | 提交对象 | `scripts/create_object.py submit` |
-| 删除 + 对象 | 删除对象 | `scripts/delete_object.py` |
-| 挂载/添加到助理/数字员工 | 挂载本体 | `scripts/mount_resource.py` |
-| 查看术语类型 | 查枚举 | `scripts/list_term_types.py` |
-| 查看术语值 | 查枚举值 | `scripts/get_term_type_values.py` |
+每条意图对应一条 Bash 命令，**直接执行，不得改写**：
+
+| 用户表达 | Bash 命令（在 skill 根目录执行） |
+|----------|--------------------------------|
+| 查看/列出 + 对象 | `/usr/local/bin/python3 scripts/list_resources.py '{}'` |
+| 查看知识库列表 | `/usr/local/bin/python3 scripts/list_knowledge_bases.py '{}'` |
+| 查看知识库目录 | `/usr/local/bin/python3 scripts/list_kb_directories.py '{"kb_id":"<kb_id>"}'` |
+| 创建/新建 + 对象（收集阶段） | `/usr/local/bin/python3 scripts/create_object.py '{"action":"collect","entity_code":"<code>","entity_name":"<name>","kb_id":"<kb_id>","kb_directory":"<dir>","fields":[]},"session_id":"<sid>"'` |
+| 确认提交 | `/usr/local/bin/python3 scripts/create_object.py '{"action":"submit","entity_code":"<code>","session_id":"<sid>"}'` |
+| 删除 + 对象 | `/usr/local/bin/python3 scripts/delete_object.py '{"entity_code":"<code>"}'` |
+| 挂载/添加到助理/数字员工 | `/usr/local/bin/python3 scripts/mount_resource.py '{"agent_id":<id>,"resource_code":"<code>"}'` |
+| 查看术语类型 | `/usr/local/bin/python3 scripts/list_term_types.py '{}'` |
+| 查看术语值 | `/usr/local/bin/python3 scripts/get_term_type_values.py '{"term_type_code":"<code>"}'` |
+
+**输出处理规则**：
+- `{"ok": true, ...}` → 操作成功，向用户展示 `data` 中的关键信息
+- `{"ok": false, "error": "..."}` → 操作失败，将 `error` 原文告知用户，**不要猜测原因或自行重试**
+- `{"ok": true, "missing": [...]}` → 收集阶段还缺字段，根据 `missing` 列表向用户追问，**不要尝试填充默认值**
+
+> `kb_id` 必须来自 `list_knowledge_bases.py` 返回的 **`resourceCode`** 字段（如 `"16"`），不是 `resourceId`
 
 ## 字段说明
 

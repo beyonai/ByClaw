@@ -59,8 +59,6 @@ function canPreviewFile(record: FileBrowserItem) {
 type SortField = 'name' | 'size' | 'lastModified';
 type SortOrder = 'asc' | 'desc' | 'none';
 
-const PREVIEW_UNAVAILABLE_MESSAGE = '文件不可在线预览，请下载查看';
-
 const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ blob, fileName, fileType, loading, onClose }) => (
   <div className={styles.previewPanel}>
     <div className={styles.previewHeader}>
@@ -612,7 +610,7 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
           ? () => handleEnterDir(record)
           : canPreview
             ? () => handlePreview(record)
-            : () => message.warning(PREVIEW_UNAVAILABLE_MESSAGE);
+            : () => message.warning(t('fileBrowser.preview.unavailable'));
 
         return (
           <div onClick={onClick} style={{ display: 'flex', alignItems: 'center', ...style }} title={record.path}>

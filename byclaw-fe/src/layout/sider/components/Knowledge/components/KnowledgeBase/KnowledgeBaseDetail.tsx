@@ -408,7 +408,10 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
   const handlePreviewFile = useCallback(
     async (item: IKnowledgeDetailTreeItem) => {
       const fileName = getKnowledgeItemName(item);
-      if (!isPreviewable(fileName)) return;
+      if (!isPreviewable(fileName)) {
+        message.warning(intl.formatMessage({ id: 'fileBrowser.preview.unavailable' }));
+        return;
+      }
 
       const directoryPath = resolveTreeItemDirectoryPath(item);
       if (!directoryPath) {

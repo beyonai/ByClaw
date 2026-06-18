@@ -34,6 +34,7 @@ import {
 } from "./session-dispatch-gate.js";
 import { waitForSdkSessionDispatchSettled } from "./session-dispatch-settle.js";
 import { consumeWorkspaceReloadHint } from "./workspace-reload-hints.js";
+import { waitForManagedBaiyingAgentConfig } from "./managed-agent-config-wait.js";
 import { EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import { getAgentNameById } from "./utils.js";
 import {
@@ -262,8 +263,16 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
   });
 
   const { meta } = await runSessionDispatchExclusive(sessionKey, async () => {
+    const dispatchCfg = await waitForManagedBaiyingAgentConfig({
+      runtime: rt,
+      cfg,
+      agentId: targetAgentId,
+      log,
+    });
+
     return await deliverReplyToAgentViaSdkUnderGate({
       ...deps,
+      cfg: dispatchCfg,
       sessionKey,
       routing,
       targetAgentId,
