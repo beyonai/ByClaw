@@ -112,6 +112,19 @@ public class SandboxProperties {
          * PROCESSING records older than this are treated as abandoned and can be claimed again.
          */
         private Duration processingTimeout = Duration.ofMinutes(10);
+
+        /**
+         * Optional Prometheus API used to select a right-sized downscale target instead of always stepping down once.
+         */
+        private String prometheusBaseUrl;
+
+        private Duration prometheusQueryWindow = Duration.ofMinutes(5);
+
+        private double downscaleCpuHeadroom = 2.0D;
+
+        private double downscaleMemoryHeadroom = 1.25D;
+
+        private String boundaryBlacklistPodSuffix = "-0";
     }
 
     @Data

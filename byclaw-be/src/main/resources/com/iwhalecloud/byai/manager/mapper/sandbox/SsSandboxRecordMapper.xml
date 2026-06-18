@@ -164,6 +164,18 @@
         ORDER BY create_time DESC
     </select>
 
+    <select id="selectRunningAutoscaleRecords" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE status = 'RUNNING'
+          AND sandbox_id IS NOT NULL
+          AND sandbox_id != ''
+          AND profile_key IS NOT NULL
+          AND profile_key != ''
+          AND COALESCE(NULLIF(service_type, ''), NULLIF(sandbox_type, '')) IS NOT NULL
+        ORDER BY service_type ASC, profile_key ASC, id ASC
+    </select>
+
     <!-- 更新沙箱状态为已释放 -->
     <update id="updateStatusToReleased">
         UPDATE ss_sandbox_record

@@ -108,6 +108,44 @@ class SandboxResizeServiceTest {
         verify(fixture.openSandboxClient, never()).resizeSandbox(any(), any());
     }
 
+    @Test
+    void buildBoundaryBlacklistMetrics_outputsOnlyBoundaryDirections() {
+        SandboxFixture fixture = newFixture();
+        SsSandboxRecord lowest = runningRecord("xs");
+        lowest.setId(1L);
+        lowest.setSandboxId("sandbox-low");
+        SsSandboxRecord middle = runningRecord("s");
+        middle.setId(2L);
+        middle.setSandboxId("sandbox-mid");
+        SsSandboxRecord highest = runningRecord("l");
+        highest.setId(3L);
+        highest.setSandboxId("sandbox-high");
+        when(fixture.sandboxRecordMapper.selectRunningAutoscaleRecords())
+            .thenReturn(List.of(lowest, middle, highest));
+        when(fixture.profileEntityMapper.selectEnabledProfiles("openclaw")).thenReturn(profiles("xs", "s", "l"));
+
+        String metrics = fixture.service.buildBoundaryBlacklistMetrics();
+
+        assertThat(metrics).contains(
+            "byclaw_sandbox_autoscale_runtime_info",
+            "sandboxId=\"sandbox-mid\"",
+            "userCode=\"user001\"",
+            "serviceType=\"openclaw\"",
+            "byclaw_sandbox_autoscale_boundary_blacklist",
+            "sandboxId=\"sandbox-low\"",
+            "pod=\"sandbox-low-0\"",
+            "profileKey=\"xs\"",
+            "direction=\"down\"",
+            "boundary=\"min\"",
+            "sandboxId=\"sandbox-high\"",
+            "pod=\"sandbox-high-0\"",
+            "profileKey=\"l\"",
+            "direction=\"up\"",
+            "boundary=\"max\""
+        );
+        assertThat(metrics).doesNotContain("byclaw_sandbox_autoscale_boundary_blacklist{sandboxId=\"sandbox-mid\"");
+    }
+
     private SandboxFixture newFixture() {
         SandboxProperties properties = new SandboxProperties();
         properties.getTierAutoscale().setEnabled(true);
@@ -121,7 +159,7 @@ class SandboxResizeServiceTest {
         SandboxService sandboxService = mock(SandboxService.class);
         SandboxResizeService service = new SandboxResizeService(properties, openSandboxClient, specRepository,
             profileEntityMapper, sandboxRecordMapper, resizeRecordMapper, sandboxService);
-        return new SandboxFixture(service, openSandboxClient, specRepository, profileEntityMapper,
+        return new SandboxFixture(service, properties, openSandboxClient, specRepository, profileEntityMapper,
             sandboxRecordMapper, resizeRecordMapper);
     }
 
@@ -163,6 +201,7 @@ class SandboxResizeServiceTest {
     }
 
     private record SandboxFixture(SandboxResizeService service,
+                                  SandboxProperties properties,
                                   OpenSandboxClient openSandboxClient,
                                   SandboxServiceSpecRepository specRepository,
                                   SandboxServiceProfileEntityMapper profileEntityMapper,

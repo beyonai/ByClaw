@@ -1,7 +1,15 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
+import java.io.IOException;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -14,6 +22,7 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.ResizeSandboxRequest;
@@ -57,6 +66,7 @@ public class SandboxResizeService {
     private final SsSandboxResizeRecordMapper resizeRecordMapper;
     private final SandboxService sandboxService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final HttpClient httpClient = HttpClient.newHttpClient();
 
     public SandboxResizeService(SandboxProperties sandboxProperties,
                                 OpenSandboxClient openSandboxClient,
@@ -104,7 +114,7 @@ public class SandboxResizeService {
                 toProfileKey = resolveNextProfileKey(serviceType, fromProfileKey);
             }
             else if (isScaleDownAlert(reasonCode)) {
-                toProfileKey = resolvePreviousProfileKey(serviceType, fromProfileKey);
+                toProfileKey = resolveScaleDownProfileKey(serviceType, fromProfileKey, params);
             }
         }
 
@@ -242,6 +252,46 @@ public class SandboxResizeService {
         }
     }
 
+    public String buildBoundaryBlacklistMetrics() {
+        StringBuilder metrics = new StringBuilder();
+        metrics.append("# HELP byclaw_sandbox_autoscale_runtime_info ")
+            .append("Running sandbox metadata used to enrich autoscale alerts.\n");
+        metrics.append("# TYPE byclaw_sandbox_autoscale_runtime_info gauge\n");
+        metrics.append("# HELP byclaw_sandbox_autoscale_boundary_blacklist ")
+            .append("Running sandboxes that are already at an autoscale boundary and should be ignored by same-direction alerts.\n");
+        metrics.append("# TYPE byclaw_sandbox_autoscale_boundary_blacklist gauge\n");
+        if (sandboxProperties == null || sandboxProperties.getTierAutoscale() == null
+            || !sandboxProperties.getTierAutoscale().isEnabled()) {
+            return metrics.toString();
+        }
+        List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningAutoscaleRecords();
+        if (records == null || records.isEmpty()) {
+            return metrics.toString();
+        }
+        Map<String, ProfileBoundary> boundaryByServiceType = new HashMap<>();
+        for (SsSandboxRecord record : records) {
+            if (record == null || StringUtils.isAnyBlank(record.getSandboxId(), record.getProfileKey())) {
+                continue;
+            }
+            String serviceType = StringUtils.defaultIfBlank(record.getServiceType(), record.getSandboxType());
+            if (StringUtils.isBlank(serviceType)) {
+                continue;
+            }
+            appendRuntimeInfoMetric(metrics, record, serviceType);
+            ProfileBoundary boundary = boundaryByServiceType.computeIfAbsent(serviceType, this::resolveProfileBoundary);
+            if (boundary == null || !boundary.isValid()) {
+                continue;
+            }
+            if (record.getProfileKey().equalsIgnoreCase(boundary.maxProfileKey())) {
+                appendBoundaryBlacklistMetric(metrics, record, serviceType, "up", "max");
+            }
+            if (record.getProfileKey().equalsIgnoreCase(boundary.minProfileKey())) {
+                appendBoundaryBlacklistMetric(metrics, record, serviceType, "down", "min");
+            }
+        }
+        return metrics.toString();
+    }
+
     @SuppressWarnings("unchecked")
     public SsSandboxResizeRecord handlePrometheusAlert(Map<String, Object> payload) {
         Map<String, Object> params = new LinkedHashMap<>();
@@ -310,6 +360,71 @@ public class SandboxResizeService {
         return sandboxProperties != null && sandboxProperties.getTierAutoscale() != null
             ? sandboxProperties.getTierAutoscale()
             : new SandboxProperties.TierAutoscaleConfig();
+    }
+
+    private ProfileBoundary resolveProfileBoundary(String serviceType) {
+        if (profileEntityMapper == null || StringUtils.isBlank(serviceType)) {
+            return null;
+        }
+        try {
+            List<SandboxServiceProfileEntity> profiles = profileEntityMapper.selectEnabledProfiles(serviceType);
+            if (profiles == null || profiles.isEmpty()) {
+                return null;
+            }
+            String minProfileKey = null;
+            String maxProfileKey = null;
+            for (SandboxServiceProfileEntity profile : profiles) {
+                if (profile == null || profile.getResizeEnabled() != null && profile.getResizeEnabled() == 0) {
+                    continue;
+                }
+                String profileKey = profile.getProfileKey();
+                if (StringUtils.isBlank(profileKey)) {
+                    continue;
+                }
+                if (minProfileKey == null) {
+                    minProfileKey = profileKey;
+                }
+                maxProfileKey = profileKey;
+            }
+            return new ProfileBoundary(minProfileKey, maxProfileKey);
+        }
+        catch (Exception e) {
+            LOGGER.warn("解析沙箱扩缩容边界失败，serviceType={}，原因：{}", serviceType, e.getMessage());
+            return null;
+        }
+    }
+
+    private void appendBoundaryBlacklistMetric(StringBuilder metrics,
+                                               SsSandboxRecord record,
+                                               String serviceType,
+                                               String direction,
+                                               String boundary) {
+        String pod = resolveAutoscalePodName(record);
+        metrics.append("byclaw_sandbox_autoscale_boundary_blacklist{")
+            .append("sandboxId=\"").append(escapePrometheusMetricLabel(record.getSandboxId())).append("\",")
+            .append("pod=\"").append(escapePrometheusMetricLabel(pod)).append("\",")
+            .append("userCode=\"").append(escapePrometheusMetricLabel(record.getUserCode())).append("\",")
+            .append("serviceType=\"").append(escapePrometheusMetricLabel(serviceType)).append("\",")
+            .append("profileKey=\"").append(escapePrometheusMetricLabel(record.getProfileKey())).append("\",")
+            .append("direction=\"").append(direction).append("\",")
+            .append("boundary=\"").append(boundary).append("\"")
+            .append("} 1\n");
+    }
+
+    private void appendRuntimeInfoMetric(StringBuilder metrics, SsSandboxRecord record, String serviceType) {
+        String pod = resolveAutoscalePodName(record);
+        metrics.append("byclaw_sandbox_autoscale_runtime_info{")
+            .append("sandboxId=\"").append(escapePrometheusMetricLabel(record.getSandboxId())).append("\",")
+            .append("pod=\"").append(escapePrometheusMetricLabel(pod)).append("\",")
+            .append("userCode=\"").append(escapePrometheusMetricLabel(record.getUserCode())).append("\",")
+            .append("serviceType=\"").append(escapePrometheusMetricLabel(serviceType)).append("\",")
+            .append("profileKey=\"").append(escapePrometheusMetricLabel(record.getProfileKey())).append("\"")
+            .append("} 1\n");
+    }
+
+    private String resolveAutoscalePodName(SsSandboxRecord record) {
+        return record.getSandboxId() + StringUtils.defaultString(
+            getTierAutoscaleConfig().getBoundaryBlacklistPodSuffix(), "-0");
     }
 
     private String resolveResizeDirection(String serviceType, String fromProfileKey, String toProfileKey,
@@ -468,6 +583,214 @@ public class SandboxResizeService {
                 serviceType, currentProfileKey, e.getMessage());
         }
         return null;
+    }
+
+    private String resolveScaleDownProfileKey(String serviceType, String currentProfileKey, Map<String, Object> params) {
+        String fallbackProfileKey = resolvePreviousProfileKey(serviceType, currentProfileKey);
+        SandboxUsage usage = queryCurrentSandboxUsage(params);
+        if (usage == null || profileEntityMapper == null || StringUtils.isAnyBlank(serviceType, currentProfileKey)) {
+            return fallbackProfileKey;
+        }
+        try {
+            List<SandboxServiceProfileEntity> profiles = profileEntityMapper.selectEnabledProfiles(serviceType);
+            if (profiles == null || profiles.isEmpty()) {
+                return fallbackProfileKey;
+            }
+            int currentIndex = -1;
+            List<SandboxServiceProfileEntity> enabledProfiles = new java.util.ArrayList<>();
+            for (SandboxServiceProfileEntity profile : profiles) {
+                if (profile == null || profile.getResizeEnabled() != null && profile.getResizeEnabled() == 0
+                    || StringUtils.isBlank(profile.getProfileKey())) {
+                    continue;
+                }
+                if (profile.getProfileKey().equalsIgnoreCase(currentProfileKey)) {
+                    currentIndex = enabledProfiles.size();
+                }
+                enabledProfiles.add(profile);
+            }
+            if (currentIndex <= 0) {
+                return fallbackProfileKey;
+            }
+
+            double requiredCpuCores = usage.cpuCores() * Math.max(1D, getTierAutoscaleConfig().getDownscaleCpuHeadroom());
+            long requiredMemoryBytes = Math.round(usage.memoryBytes()
+                * Math.max(1D, getTierAutoscaleConfig().getDownscaleMemoryHeadroom()));
+            String selectedProfileKey = fallbackProfileKey;
+            for (int i = 0; i < currentIndex; i++) {
+                SandboxServiceProfileEntity profile = enabledProfiles.get(i);
+                SandboxServiceSpec spec = specRepository.findByServiceKeyAndProfile(serviceType, profile.getProfileKey())
+                    .orElse(null);
+                if (spec == null || spec.getResourceRequests() == null) {
+                    continue;
+                }
+                double requestCpuCores = parseCpuCores(spec.getResourceRequests().get("cpu"));
+                long requestMemoryBytes = parseMemoryBytes(spec.getResourceRequests().get("memory"));
+                if (requestCpuCores >= requiredCpuCores && requestMemoryBytes >= requiredMemoryBytes) {
+                    selectedProfileKey = StringUtils.defaultIfBlank(spec.getProfileKey(), profile.getProfileKey());
+                    break;
+                }
+            }
+            LOGGER.info("沙箱低水位目标规格解析完成，serviceType={}，currentProfile={}，fallbackProfile={}，targetProfile={}，cpuCores={}，memoryBytes={}",
+                serviceType, currentProfileKey, fallbackProfileKey, selectedProfileKey, usage.cpuCores(),
+                usage.memoryBytes());
+            return selectedProfileKey;
+        }
+        catch (Exception e) {
+            LOGGER.warn("解析降配目标规格失败，serviceType={}，currentProfile={}，原因：{}",
+                serviceType, currentProfileKey, e.getMessage());
+            return fallbackProfileKey;
+        }
+    }
+
+    private SandboxUsage queryCurrentSandboxUsage(Map<String, Object> params) {
+        SandboxProperties.TierAutoscaleConfig config = getTierAutoscaleConfig();
+        String prometheusBaseUrl = config.getPrometheusBaseUrl();
+        String namespace = firstNonBlank(params, "namespace");
+        String pod = firstNonBlank(params, "pod");
+        if (StringUtils.isAnyBlank(prometheusBaseUrl, namespace, pod)) {
+            return null;
+        }
+        try {
+            String window = toPrometheusDuration(config.getPrometheusQueryWindow(), "5m");
+            String cpuQuery = String.format(Locale.ROOT,
+                "sum(rate(container_cpu_usage_seconds_total{namespace=\"%s\",container=\"sandbox\",pod=\"%s\"}[%s]))",
+                escapePrometheusLabelValue(namespace), escapePrometheusLabelValue(pod), window);
+            String memoryQuery = String.format(Locale.ROOT,
+                "sum(container_memory_working_set_bytes{namespace=\"%s\",container=\"sandbox\",pod=\"%s\"})",
+                escapePrometheusLabelValue(namespace), escapePrometheusLabelValue(pod));
+            Double cpuCores = queryPrometheusScalar(prometheusBaseUrl, cpuQuery);
+            Double memoryBytes = queryPrometheusScalar(prometheusBaseUrl, memoryQuery);
+            if (cpuCores == null || memoryBytes == null) {
+                return null;
+            }
+            return new SandboxUsage(cpuCores, Math.max(0L, memoryBytes.longValue()));
+        }
+        catch (RuntimeException e) {
+            LOGGER.warn("查询沙箱 Prometheus 用量失败，namespace={}，pod={}，原因={}", namespace, pod, e.getMessage());
+            return null;
+        }
+    }
+
+    private Double queryPrometheusScalar(String prometheusBaseUrl, String query) {
+        try {
+            String url = resolvePrometheusQueryUrl(prometheusBaseUrl) + "?query="
+                + URLEncoder.encode(query, StandardCharsets.UTF_8);
+            HttpRequest request = HttpRequest.newBuilder(URI.create(url)).GET().build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                LOGGER.warn("Prometheus 查询失败，status={}，query={}", response.statusCode(), query);
+                return null;
+            }
+            JsonNode root = objectMapper.readTree(response.body());
+            JsonNode result = root.path("data").path("result");
+            if (!result.isArray() || result.isEmpty()) {
+                return null;
+            }
+            JsonNode value = result.get(0).path("value");
+            if (!value.isArray() || value.size() < 2) {
+                return null;
+            }
+            return value.get(1).asDouble();
+        }
+        catch (IOException e) {
+            LOGGER.warn("Prometheus 查询 IO 异常，query={}，原因={}", query, e.getMessage());
+            return null;
+        }
+        catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOGGER.warn("Prometheus 查询被中断，query={}", query);
+            return null;
+        }
+    }
+
+    private String resolvePrometheusQueryUrl(String baseUrl) {
+        String normalized = StringUtils.removeEnd(StringUtils.trim(baseUrl), "/");
+        if (StringUtils.endsWith(normalized, "/api/v1/query")) {
+            return normalized;
+        }
+        return normalized + "/api/v1/query";
+    }
+
+    private String toPrometheusDuration(Duration duration, String fallback) {
+        long seconds = duration == null || duration.isNegative() || duration.isZero()
+            ? 0L
+            : duration.toSeconds();
+        if (seconds <= 0L) {
+            return fallback;
+        }
+        if (seconds % 3600L == 0L) {
+            return (seconds / 3600L) + "h";
+        }
+        if (seconds % 60L == 0L) {
+            return (seconds / 60L) + "m";
+        }
+        return seconds + "s";
+    }
+
+    private String escapePrometheusLabelValue(String value) {
+        return StringUtils.defaultString(value)
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"");
+    }
+
+    private String escapePrometheusMetricLabel(String value) {
+        return escapePrometheusLabelValue(value).replace("\n", "\\n");
+    }
+
+    private double parseCpuCores(String value) {
+        if (StringUtils.isBlank(value)) {
+            return 0D;
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        try {
+            if (normalized.endsWith("m")) {
+                return Double.parseDouble(StringUtils.removeEnd(normalized, "m")) / 1000D;
+            }
+            return Double.parseDouble(normalized);
+        }
+        catch (NumberFormatException e) {
+            return 0D;
+        }
+    }
+
+    private long parseMemoryBytes(String value) {
+        if (StringUtils.isBlank(value)) {
+            return 0L;
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        try {
+            if (normalized.endsWith("ki")) {
+                return Math.round(Double.parseDouble(StringUtils.removeEnd(normalized, "ki")) * 1024D);
+            }
+            if (normalized.endsWith("mi")) {
+                return Math.round(Double.parseDouble(StringUtils.removeEnd(normalized, "mi")) * 1024D * 1024D);
+            }
+            if (normalized.endsWith("gi")) {
+                return Math.round(Double.parseDouble(StringUtils.removeEnd(normalized, "gi")) * 1024D * 1024D * 1024D);
+            }
+            if (normalized.endsWith("k")) {
+                return Math.round(Double.parseDouble(StringUtils.removeEnd(normalized, "k")) * 1000D);
+            }
+            if (normalized.endsWith("m")) {
+                return Math.round(Double.parseDouble(StringUtils.removeEnd(normalized, "m")) * 1000D * 1000D);
+            }
+            if (normalized.endsWith("g")) {
+                return Math.round(Double.parseDouble(StringUtils.removeEnd(normalized, "g")) * 1000D * 1000D * 1000D);
+            }
+            return Math.round(Double.parseDouble(normalized));
+        }
+        catch (NumberFormatException e) {
+            return 0L;
+        }
+    }
+
+    private record SandboxUsage(double cpuCores, long memoryBytes) {
+    }
+
+    private record ProfileBoundary(String minProfileKey, String maxProfileKey) {
+        private boolean isValid() {
+            return StringUtils.isNoneBlank(minProfileKey, maxProfileKey);
+        }
     }
 
     private String normalizeSandboxId(String value) {
