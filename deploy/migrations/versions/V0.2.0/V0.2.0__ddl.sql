@@ -115,10 +115,8 @@ DROP TABLE IF EXISTS byai.bykc_ec_connection CASCADE;
 DROP TABLE IF EXISTS byai.bykc_ec_collector_agent CASCADE;
 DROP TABLE IF EXISTS byai.bykc_ec_connector CASCADE;
 
-<<<<<<< Updated upstream
 ALTER TABLE byai.byai_aimodel ADD COLUMN model_protocol VARCHAR(64) DEFAULT null;
 
-=======
 -- 技能扩展表
 CREATE TABLE byai.ss_res_ext_skill (
     resource_id int8 NOT NULL,
@@ -151,4 +149,3 @@ COMMENT ON COLUMN byai.ss_res_ext_skill.target_content IS '技能资源JSON内�
 COMMENT ON COLUMN byai.ss_res_ext_skill.sync_status IS '同步状态：PENDING=待同步，SUCCESS=同步成功，FAILED=同步失败';
 COMMENT ON COLUMN byai.ss_res_ext_skill.sync_error IS '最近一次同步失败原因';
 COMMENT ON COLUMN byai.ss_res_ext_skill.last_sync_time IS '最近一次同步时间';
->>>>>>> Stashed changes
