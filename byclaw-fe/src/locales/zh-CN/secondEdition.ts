@@ -285,6 +285,7 @@ export default {
   'fileBrowser.move.success': '移动成功',
   'fileBrowser.move.failed': '移动失败',
   'fileBrowser.preview.failed': '预览失败',
+  'fileBrowser.preview.unavailable': '文件不可在线预览，请下载查看',
   'fileBrowser.createFolder.prompt': '请输入文件夹名称',
   'fileBrowser.createFolder.success': '创建文件夹成功',
   'fileBrowser.createFolder.failed': '创建文件夹失败',

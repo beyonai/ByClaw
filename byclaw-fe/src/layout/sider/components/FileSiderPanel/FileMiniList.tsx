@@ -164,8 +164,6 @@ type FileActionKey =
   | 'saveToSessionFiles'
   | 'saveToSharedFiles';
 
-const PREVIEW_UNAVAILABLE_MESSAGE = '文件不可在线预览，请下载查看';
-
 interface FileCategoryItem {
   key: FileCategoryKey;
   titleId: string;
@@ -633,7 +631,10 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
   const handlePreview = useCallback(
     async (item: FileBrowserItem) => {
-      if (!canPreviewFile(item)) return;
+      if (!canPreviewFile(item)) {
+        message.warning(intl.formatMessage({ id: 'fileBrowser.preview.unavailable' }));
+        return;
+      }
 
       renderPreviewPanel(item, { loading: true });
       try {
@@ -647,7 +648,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         clearDetailPanel?.();
       }
     },
-    [clearDetailPanel, intl, renderPreviewPanel, resourceId]
+    [clearDetailPanel, intl, message, renderPreviewPanel, resourceId]
   );
 
   const handleDownload = useCallback(
@@ -876,13 +877,13 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           return;
         }
         if (!canPreviewFile(node)) {
-          message.warning(PREVIEW_UNAVAILABLE_MESSAGE);
+          message.warning(intl.formatMessage({ id: 'fileBrowser.preview.unavailable' }));
           return;
         }
         void handlePreview(node);
       }, 220);
     },
-    [clearClickTimer, handlePreview]
+    [clearClickTimer, handlePreview, intl, message]
   );
 
   const handleItemDoubleClick = useCallback(
