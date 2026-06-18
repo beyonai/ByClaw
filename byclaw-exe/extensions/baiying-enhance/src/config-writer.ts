@@ -2,6 +2,7 @@ import type { OpenClawConfig, OpenClawPluginApi } from "openclaw/plugin-sdk/comp
 
 type MutableConfigRuntime = OpenClawPluginApi["runtime"]["config"] & {
   mutateConfigFile?: (params: {
+    afterWrite: { mode: "auto" };
     mutate: (
       config: OpenClawConfig,
     ) => OpenClawConfig | void | Promise<OpenClawConfig | void>;
@@ -24,6 +25,7 @@ export async function mutateOpenClawConfigFile(
   const runtimeConfig = api.runtime.config as MutableConfigRuntime;
   if (typeof runtimeConfig.mutateConfigFile === "function") {
     await runtimeConfig.mutateConfigFile({
+      afterWrite: { mode: "auto" },
       mutate: (base) => {
         const next = mutator(base);
         return replaceConfigContents(base, next);

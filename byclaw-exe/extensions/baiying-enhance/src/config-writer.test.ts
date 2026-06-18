@@ -34,6 +34,10 @@ describe("mutateOpenClawConfigFile", () => {
     });
 
     expect(api.runtime.config.mutateConfigFile).toHaveBeenCalledTimes(1);
+    expect(api.runtime.config.mutateConfigFile).toHaveBeenCalledWith({
+      afterWrite: { mode: "auto" },
+      mutate: expect.any(Function),
+    });
     expect(api.runtime.config.writeConfigFile).not.toHaveBeenCalled();
     expect(diskConfig.plugins.entries["byai-channel"].enabled).toBe(true);
     expect(diskConfig.models.providers["baiying-m-10000482"]).toEqual(
