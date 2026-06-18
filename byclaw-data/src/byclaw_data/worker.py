@@ -1882,9 +1882,9 @@ class DataCloudWorker(GatewayWorker):
                         " whale=%s sso=%s beyond=%s",
                         _redis_auth_key,
                         context.session_id,
-                        "***" if _whale_token else "<empty>",
-                        "***" if _sso_token else "<empty>",
-                        "***" if _beyond_token else "<empty>",
+                        f"{_whale_token[:4]}...{_whale_token[-4:]}" if len(_whale_token) > 8 else ("***" if _whale_token else "<empty>"),
+                        f"{_sso_token[:4]}...{_sso_token[-4:]}" if len(_sso_token) > 8 else ("***" if _sso_token else "<empty>"),
+                        f"{_beyond_token[:4]}...{_beyond_token[-4:]}" if len(_beyond_token) > 8 else ("***" if _beyond_token else "<empty>"),
                     )
             except Exception:
                 logger.warning(
