@@ -1,11 +1,11 @@
 import type { OpenClawConfig, OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 
 type MutableConfigRuntime = OpenClawPluginApi["runtime"]["config"] & {
-  mutateConfigFile?: (
-    mutator: (
+  mutateConfigFile?: (params: {
+    mutate: (
       config: OpenClawConfig,
-    ) => OpenClawConfig | void | Promise<OpenClawConfig | void>,
-  ) => Promise<void>;
+    ) => OpenClawConfig | void | Promise<OpenClawConfig | void>;
+  }) => Promise<void>;
 };
 
 function replaceConfigContents(target: OpenClawConfig, next: OpenClawConfig): OpenClawConfig {
@@ -23,9 +23,11 @@ export async function mutateOpenClawConfigFile(
 ): Promise<void> {
   const runtimeConfig = api.runtime.config as MutableConfigRuntime;
   if (typeof runtimeConfig.mutateConfigFile === "function") {
-    await runtimeConfig.mutateConfigFile((base) => {
-      const next = mutator(base);
-      return replaceConfigContents(base, next);
+    await runtimeConfig.mutateConfigFile({
+      mutate: (base) => {
+        const next = mutator(base);
+        return replaceConfigContents(base, next);
+      },
     });
     return;
   }

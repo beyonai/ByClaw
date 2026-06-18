@@ -17,8 +17,8 @@ describe("mutateOpenClawConfigFile", () => {
           writeConfigFile: vi.fn(async () => {
             throw new Error("Config write rejected");
           }),
-          mutateConfigFile: vi.fn(async (mutator) => {
-            await mutator(diskConfig);
+          mutateConfigFile: vi.fn(async (params) => {
+            await params.mutate(diskConfig);
           }),
         },
       },
