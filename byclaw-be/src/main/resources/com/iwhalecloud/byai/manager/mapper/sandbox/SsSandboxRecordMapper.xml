@@ -246,6 +246,48 @@
         </set>
         WHERE id = #{id,jdbcType=BIGINT}
           AND status = 'RUNNING'
+          AND resize_status = 'PROCESSING'
+          AND last_resize_to_profile = #{lastResizeToProfile,jdbcType=VARCHAR}
+          <choose>
+            <when test="lastResizeFromProfile != null and lastResizeFromProfile != ''">
+              AND profile_key = #{lastResizeFromProfile,jdbcType=VARCHAR}
+            </when>
+            <otherwise>
+              AND (profile_key IS NULL OR profile_key = '')
+            </otherwise>
+          </choose>
+    </update>
+
+    <update id="claimResize">
+        UPDATE ss_sandbox_record
+        SET resize_status = #{resizeStatus,jdbcType=VARCHAR},
+            last_resize_at = #{lastResizeAt,jdbcType=TIMESTAMP},
+            last_resize_reason = #{lastResizeReason,jdbcType=VARCHAR},
+            last_resize_duration_ms = NULL,
+            last_resize_success = #{lastResizeSuccess,jdbcType=INTEGER},
+            last_resize_from_profile = #{lastResizeFromProfile,jdbcType=VARCHAR},
+            last_resize_to_profile = #{lastResizeToProfile,jdbcType=VARCHAR},
+            last_resize_error = #{lastResizeError,jdbcType=VARCHAR},
+            update_time = #{lastResizeAt,jdbcType=TIMESTAMP},
+            version = version + 1,
+            lock_version = lock_version + 1
+        WHERE id = #{id,jdbcType=BIGINT}
+          AND status = 'RUNNING'
+          AND lock_version = #{lockVersion,jdbcType=INTEGER}
+          <choose>
+            <when test="fromProfileKey != null and fromProfileKey != ''">
+              AND profile_key = #{fromProfileKey,jdbcType=VARCHAR}
+            </when>
+            <otherwise>
+              AND (profile_key IS NULL OR profile_key = '')
+            </otherwise>
+          </choose>
+          AND (
+            resize_status IS NULL
+            OR resize_status NOT IN ('REQUESTED', 'PROCESSING')
+            OR last_resize_at IS NULL
+            OR last_resize_at &lt; #{processingStaleBefore,jdbcType=TIMESTAMP}
+          )
     </update>
 
     <update id="updateResizeSummary">
@@ -263,6 +305,16 @@
             lock_version = lock_version + 1
         WHERE id = #{id,jdbcType=BIGINT}
           AND status = 'RUNNING'
+          AND resize_status = 'PROCESSING'
+          AND last_resize_to_profile = #{lastResizeToProfile,jdbcType=VARCHAR}
+          <choose>
+            <when test="lastResizeFromProfile != null and lastResizeFromProfile != ''">
+              AND profile_key = #{lastResizeFromProfile,jdbcType=VARCHAR}
+            </when>
+            <otherwise>
+              AND (profile_key IS NULL OR profile_key = '')
+            </otherwise>
+          </choose>
     </update>
 
     <update id="updateStatusToFailed">

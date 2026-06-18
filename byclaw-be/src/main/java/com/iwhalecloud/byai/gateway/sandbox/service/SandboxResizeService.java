@@ -1,8 +1,10 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
+import java.time.Duration;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import org.apache.commons.lang3.StringUtils;
@@ -34,6 +36,16 @@ public class SandboxResizeService {
     private static final String STATUS_SUCCESS = "SUCCESS";
     private static final String STATUS_FAILED = "FAILED";
     private static final String STATUS_DEFERRED = "DEFERRED";
+    private static final String STATUS_PROCESSING = "PROCESSING";
+    private static final String STATUS_SKIPPED_NOOP = "SKIPPED_NOOP";
+    private static final String STATUS_SKIPPED_BOUNDARY = "SKIPPED_BOUNDARY";
+    private static final String STATUS_SKIPPED_INVALID = "SKIPPED_INVALID";
+    private static final String STATUS_SKIPPED_DUPLICATE = "SKIPPED_DUPLICATE";
+    private static final String STATUS_SKIPPED_COOLDOWN = "SKIPPED_COOLDOWN";
+    private static final String STATUS_SKIPPED_STALE = "SKIPPED_STALE";
+    private static final String DIRECTION_UP = "UP";
+    private static final String DIRECTION_DOWN = "DOWN";
+    private static final String DIRECTION_MANUAL = "MANUAL";
     private static final String DEFAULT_TRIGGER_SOURCE = "MANUAL";
     private static final String DEFAULT_RESIZE_TYPE = "IN_PLACE";
 
@@ -86,37 +98,79 @@ public class SandboxResizeService {
                 "suggestedResizeType", "suggested_resize_type", "strategy"),
             DEFAULT_RESIZE_TYPE);
         String serviceType = StringUtils.defaultIfBlank(record.getServiceType(), record.getSandboxType());
+        String fromProfileKey = record.getProfileKey();
         if (StringUtils.isBlank(toProfileKey)) {
             if (isScaleUpAlert(reasonCode)) {
-                toProfileKey = resolveNextProfileKey(serviceType, record.getProfileKey());
+                toProfileKey = resolveNextProfileKey(serviceType, fromProfileKey);
             }
             else if (isScaleDownAlert(reasonCode)) {
-                toProfileKey = resolvePreviousProfileKey(serviceType, record.getProfileKey());
+                toProfileKey = resolvePreviousProfileKey(serviceType, fromProfileKey);
             }
         }
 
+        Date startedAt = new Date();
+        String direction = resolveResizeDirection(serviceType, fromProfileKey, toProfileKey, reasonCode);
+        String idempotencyKey = buildIdempotencyKey(record, serviceType, fromProfileKey, toProfileKey, resizeType,
+            direction);
         SandboxServiceSpec targetSpec = null;
         if (StringUtils.isNotBlank(toProfileKey)) {
             targetSpec = specRepository.findByServiceKeyAndProfile(serviceType, toProfileKey).orElse(null);
         }
 
-        Date startedAt = new Date();
-        SsSandboxResizeRecord audit = buildRequestedAudit(record, serviceType, toProfileKey, triggerSource,
-            reasonCode, reasonDetail, resizeType, targetSpec, startedAt);
-        resizeRecordMapper.insert(audit);
+        if (StringUtils.isBlank(toProfileKey)) {
+            String status = DIRECTION_UP.equals(direction) || DIRECTION_DOWN.equals(direction)
+                ? STATUS_SKIPPED_BOUNDARY
+                : STATUS_SKIPPED_INVALID;
+            String message = DIRECTION_UP.equals(direction)
+                ? "sandbox is already at the highest resize profile"
+                : DIRECTION_DOWN.equals(direction)
+                    ? "sandbox is already at the lowest resize profile"
+                    : "target profile key is required";
+            return buildSkippedAudit(record, serviceType, toProfileKey, triggerSource, reasonCode, reasonDetail,
+                resizeType, targetSpec, startedAt, idempotencyKey, status, message, 0);
+        }
+        if (targetSpec == null) {
+            return buildSkippedAudit(record, serviceType, toProfileKey, triggerSource, reasonCode, reasonDetail,
+                resizeType, null, startedAt, idempotencyKey, STATUS_SKIPPED_INVALID,
+                "target profile is not enabled or not found", 0);
+        }
 
-        if (StringUtils.isBlank(toProfileKey) || targetSpec == null) {
-            String message = StringUtils.isBlank(toProfileKey)
-                ? "target profile key is required"
-                : "target profile is not enabled or not found";
-            finishDeferred(record, audit, message, 0);
-            return audit;
+        String resolvedToProfileKey = StringUtils.defaultIfBlank(targetSpec.getProfileKey(), toProfileKey);
+        if (StringUtils.equalsIgnoreCase(fromProfileKey, resolvedToProfileKey)) {
+            return buildSkippedAudit(record, serviceType, resolvedToProfileKey, triggerSource, reasonCode,
+                reasonDetail, resizeType, targetSpec, startedAt, idempotencyKey, STATUS_SKIPPED_NOOP,
+                "sandbox is already running on target profile", 1);
         }
         if ("PREFERRED_ONLY".equalsIgnoreCase(resizeType)) {
+            SsSandboxResizeRecord audit = buildRequestedAudit(record, serviceType, resolvedToProfileKey,
+                triggerSource, reasonCode, reasonDetail, resizeType, targetSpec, startedAt);
+            audit.setIdempotencyKey(idempotencyKey);
+            resizeRecordMapper.insert(audit);
             sandboxService.savePreferredServiceKey(record.getUserCode(), serviceType + "-" + toProfileKey);
-            finishDeferred(record, audit, "preferred profile will apply on next sandbox start", 1);
+            finishDeferred(audit, "preferred profile will apply on next sandbox start", 1);
             return audit;
         }
+        if (isCooldownActive(record, direction, startedAt)) {
+            return buildSkippedAudit(record, serviceType, resolvedToProfileKey, triggerSource, reasonCode,
+                reasonDetail, resizeType, targetSpec, startedAt, idempotencyKey, STATUS_SKIPPED_COOLDOWN,
+                "sandbox resize cooldown is active", 1);
+        }
+        Date processingStaleBefore = new Date(startedAt.getTime()
+            - toMillis(getTierAutoscaleConfig().getProcessingTimeout()));
+        int claimed = sandboxRecordMapper.claimResize(record.getId(), fromProfileKey, resolvedToProfileKey,
+            STATUS_PROCESSING, startedAt, reasonDetail, null, fromProfileKey, resolvedToProfileKey, null,
+            processingStaleBefore, record.getLockVersion());
+        if (claimed != 1) {
+            return buildSkippedAudit(record, serviceType, resolvedToProfileKey, triggerSource, reasonCode,
+                reasonDetail, resizeType, targetSpec, startedAt, idempotencyKey, STATUS_SKIPPED_DUPLICATE,
+                "another resize action already claimed this sandbox or the sandbox profile changed", 1);
+        }
+
+        SsSandboxResizeRecord audit = buildRequestedAudit(record, serviceType, resolvedToProfileKey, triggerSource,
+            reasonCode, reasonDetail, resizeType, targetSpec, startedAt);
+        audit.setStatus(STATUS_PROCESSING);
+        audit.setIdempotencyKey(idempotencyKey);
+        resizeRecordMapper.insert(audit);
 
         long startMillis = System.currentTimeMillis();
         try {
@@ -124,7 +178,7 @@ public class SandboxResizeService {
                 .resourceRequests(targetSpec.getResourceRequests())
                 .resourceLimits(targetSpec.getResourceLimits())
                 .resizeType(resizeType)
-                .metadata(buildResizeMetadata(record, audit, toProfileKey, reasonCode))
+                .metadata(buildResizeMetadata(record, audit, resolvedToProfileKey, reasonCode))
                 .build();
             ResizeSandboxResponse response = openSandboxClient.resizeSandbox(record.getSandboxId(), request);
             Date finishedAt = new Date();
@@ -133,6 +187,30 @@ public class SandboxResizeService {
             String requestId = response != null
                 ? StringUtils.defaultIfBlank(response.getRequestId(), response.getOperationId())
                 : null;
+            String newSandboxId = response != null && StringUtils.isNotBlank(response.getSandboxId())
+                ? response.getSandboxId()
+                : null;
+            int updated = sandboxRecordMapper.updateResizeSuccess(record.getId(), newSandboxId, null, null,
+                resolvedToProfileKey, toJsonOrNull(targetSpec.getResourceRequests()),
+                toJsonOrNull(targetSpec.getResourceLimits()), STATUS_SUCCESS, finishedAt, reasonDetail,
+                durationMs, 1, fromProfileKey, resolvedToProfileKey, null,
+                record.getLockVersion());
+            if (updated != 1) {
+                String message = "resize completed but local sandbox record state changed before result update";
+                resizeRecordMapper.updateResult(audit.getId(), STATUS_SKIPPED_STALE, 0, finishedAt, durationMs,
+                    requestId, responseJson, message);
+                audit.setStatus(STATUS_SKIPPED_STALE);
+                audit.setSuccess(0);
+                audit.setFinishedAt(finishedAt);
+                audit.setDurationMs(durationMs);
+                audit.setOpensandboxRequestId(requestId);
+                audit.setOpensandboxResponse(responseJson);
+                audit.setErrorMessage(message);
+                audit.setSkipReason(message);
+                LOGGER.warn("沙箱扩缩容结果写回被跳过，recordId={}，sandboxId={}，fromProfile={}，toProfile={}，原因：{}",
+                    record.getId(), record.getSandboxId(), fromProfileKey, resolvedToProfileKey, message);
+                return audit;
+            }
             resizeRecordMapper.updateResult(audit.getId(), STATUS_SUCCESS, 1, finishedAt, durationMs,
                 requestId, responseJson, null);
             audit.setStatus(STATUS_SUCCESS);
@@ -142,17 +220,8 @@ public class SandboxResizeService {
             audit.setOpensandboxRequestId(requestId);
             audit.setOpensandboxResponse(responseJson);
 
-            String newSandboxId = response != null && StringUtils.isNotBlank(response.getSandboxId())
-                ? response.getSandboxId()
-                : null;
-            String resolvedToProfileKey = StringUtils.defaultIfBlank(targetSpec.getProfileKey(), toProfileKey);
-            sandboxRecordMapper.updateResizeSuccess(record.getId(), newSandboxId, null, null,
-                resolvedToProfileKey, toJsonOrNull(targetSpec.getResourceRequests()),
-                toJsonOrNull(targetSpec.getResourceLimits()), STATUS_SUCCESS, finishedAt, reasonDetail,
-                durationMs, 1, record.getProfileKey(), resolvedToProfileKey, null,
-                record.getLockVersion());
             LOGGER.info("沙箱扩缩容成功，recordId={}，sandboxId={}，fromProfile={}，toProfile={}，durationMs={}",
-                record.getId(), record.getSandboxId(), record.getProfileKey(), resolvedToProfileKey, durationMs);
+                record.getId(), record.getSandboxId(), fromProfileKey, resolvedToProfileKey, durationMs);
             return audit;
         }
         catch (Exception e) {
@@ -161,14 +230,14 @@ public class SandboxResizeService {
             resizeRecordMapper.updateResult(audit.getId(), STATUS_FAILED, 0, finishedAt, durationMs,
                 null, null, e.getMessage());
             sandboxRecordMapper.updateResizeSummary(record.getId(), STATUS_FAILED, finishedAt, reasonDetail,
-                durationMs, 0, record.getProfileKey(), toProfileKey, e.getMessage(), record.getLockVersion());
+                durationMs, 0, fromProfileKey, resolvedToProfileKey, e.getMessage(), record.getLockVersion());
             audit.setStatus(STATUS_FAILED);
             audit.setSuccess(0);
             audit.setFinishedAt(finishedAt);
             audit.setDurationMs(durationMs);
             audit.setErrorMessage(e.getMessage());
             LOGGER.warn("沙箱扩缩容失败，recordId={}，sandboxId={}，toProfile={}，原因：{}",
-                record.getId(), record.getSandboxId(), toProfileKey, e.getMessage());
+                record.getId(), record.getSandboxId(), resolvedToProfileKey, e.getMessage());
             return audit;
         }
     }
@@ -177,20 +246,23 @@ public class SandboxResizeService {
     public SsSandboxResizeRecord handlePrometheusAlert(Map<String, Object> payload) {
         Map<String, Object> params = new LinkedHashMap<>();
         if (payload == null) {
-            params.put("triggerSource", "PROMETHEUS_ALERT");
-            params.put("reasonCode", "prometheus.alert");
-            params.put("reasonDetail", toJsonOrNull(payload));
-            return handleResizeRequest(params);
+            return buildPayloadSkippedAudit("prometheus alert payload is empty");
         }
         Object alertsObj = payload.get("alerts");
         if (alertsObj instanceof Iterable<?> alerts) {
             for (Object item : alerts) {
                 if (item instanceof Map<?, ?> alert) {
+                    if (isResolvedAlert(alert)) {
+                        continue;
+                    }
                     copyNestedMap(params, (Map<String, Object>) alert.get("labels"));
                     copyNestedMap(params, (Map<String, Object>) alert.get("annotations"));
                     break;
                 }
             }
+        }
+        if (params.isEmpty() && isResolvedAlert(payload)) {
+            return buildPayloadSkippedAudit("prometheus alert is resolved");
         }
         copyNestedMap(params, (Map<String, Object>) payload.get("labels"));
         copyNestedMap(params, (Map<String, Object>) payload.get("annotations"));
@@ -232,6 +304,106 @@ public class SandboxResizeService {
         return StringUtils.containsIgnoreCase(reasonCode, "low")
             || StringUtils.containsIgnoreCase(reasonCode, "idle")
             || StringUtils.containsIgnoreCase(reasonCode, "underutilized");
+    }
+
+    private SandboxProperties.TierAutoscaleConfig getTierAutoscaleConfig() {
+        return sandboxProperties != null && sandboxProperties.getTierAutoscale() != null
+            ? sandboxProperties.getTierAutoscale()
+            : new SandboxProperties.TierAutoscaleConfig();
+    }
+
+    private String resolveResizeDirection(String serviceType, String fromProfileKey, String toProfileKey,
+                                          String reasonCode) {
+        if (isScaleUpAlert(reasonCode)) {
+            return DIRECTION_UP;
+        }
+        if (isScaleDownAlert(reasonCode)) {
+            return DIRECTION_DOWN;
+        }
+        return resolveProfileDirection(serviceType, fromProfileKey, toProfileKey);
+    }
+
+    private String resolveProfileDirection(String serviceType, String fromProfileKey, String toProfileKey) {
+        if (StringUtils.isAnyBlank(serviceType, fromProfileKey, toProfileKey)
+            || StringUtils.equalsIgnoreCase(fromProfileKey, toProfileKey)
+            || profileEntityMapper == null) {
+            return DIRECTION_MANUAL;
+        }
+        try {
+            List<SandboxServiceProfileEntity> profiles = profileEntityMapper.selectEnabledProfiles(serviceType);
+            int fromIndex = -1;
+            int toIndex = -1;
+            int index = 0;
+            for (SandboxServiceProfileEntity profile : profiles) {
+                if (profile == null || profile.getResizeEnabled() != null && profile.getResizeEnabled() == 0) {
+                    continue;
+                }
+                String profileKey = profile.getProfileKey();
+                if (StringUtils.isBlank(profileKey)) {
+                    continue;
+                }
+                if (profileKey.equalsIgnoreCase(fromProfileKey)) {
+                    fromIndex = index;
+                }
+                if (profileKey.equalsIgnoreCase(toProfileKey)) {
+                    toIndex = index;
+                }
+                index++;
+            }
+            if (fromIndex >= 0 && toIndex >= 0) {
+                if (toIndex > fromIndex) {
+                    return DIRECTION_UP;
+                }
+                if (toIndex < fromIndex) {
+                    return DIRECTION_DOWN;
+                }
+            }
+        }
+        catch (Exception e) {
+            LOGGER.warn("解析扩缩容方向失败，serviceType={}，fromProfile={}，toProfile={}，原因：{}",
+                serviceType, fromProfileKey, toProfileKey, e.getMessage());
+        }
+        return DIRECTION_MANUAL;
+    }
+
+    private boolean isCooldownActive(SsSandboxRecord record, String direction, Date now) {
+        if (record == null || record.getLastResizeAt() == null || record.getLastResizeSuccess() == null
+            || record.getLastResizeSuccess() != 1) {
+            return false;
+        }
+        Duration cooldown = DIRECTION_DOWN.equals(direction)
+            ? getTierAutoscaleConfig().getScaleDownCooldown()
+            : DIRECTION_UP.equals(direction) ? getTierAutoscaleConfig().getScaleUpCooldown() : Duration.ZERO;
+        long cooldownMillis = toMillis(cooldown);
+        return cooldownMillis > 0 && now.getTime() - record.getLastResizeAt().getTime() < cooldownMillis;
+    }
+
+    private long toMillis(Duration duration) {
+        if (duration == null || duration.isNegative() || duration.isZero()) {
+            return 0L;
+        }
+        return duration.toMillis();
+    }
+
+    private String buildIdempotencyKey(SsSandboxRecord record, String serviceType, String fromProfileKey,
+                                       String toProfileKey, String resizeType, String direction) {
+        return String.join(":",
+            "sandbox-resize",
+            normalizeKey(record != null ? record.getId() : null),
+            normalizeKey(record != null ? record.getSandboxId() : null),
+            normalizeKey(serviceType),
+            normalizeKey(direction),
+            normalizeKey(fromProfileKey),
+            normalizeKey(toProfileKey),
+            normalizeKey(resizeType)
+        );
+    }
+
+    private String normalizeKey(Object value) {
+        if (value == null || StringUtils.isBlank(value.toString())) {
+            return "-";
+        }
+        return value.toString().trim().toLowerCase(Locale.ROOT);
     }
 
     private String resolveNextProfileKey(String serviceType, String currentProfileKey) {
@@ -337,14 +509,66 @@ public class SandboxResizeService {
         return audit;
     }
 
-    private void finishDeferred(SsSandboxRecord record, SsSandboxResizeRecord audit, String message, int success) {
+    private SsSandboxResizeRecord buildSkippedAudit(SsSandboxRecord record,
+                                                    String serviceType,
+                                                    String toProfileKey,
+                                                    String triggerSource,
+                                                    String reasonCode,
+                                                    String reasonDetail,
+                                                    String resizeType,
+                                                    SandboxServiceSpec targetSpec,
+                                                    Date startedAt,
+                                                    String idempotencyKey,
+                                                    String status,
+                                                    String message,
+                                                    int success) {
+        SsSandboxResizeRecord audit = buildRequestedAudit(record, serviceType, toProfileKey, triggerSource,
+            reasonCode, reasonDetail, resizeType, targetSpec, startedAt);
+        Date finishedAt = new Date();
+        audit.setIdempotencyKey(idempotencyKey);
+        audit.setStatus(status);
+        audit.setSuccess(success);
+        audit.setFinishedAt(finishedAt);
+        audit.setDurationMs(Math.max(0L, finishedAt.getTime() - startedAt.getTime()));
+        audit.setErrorMessage(message);
+        audit.setSkipReason(message);
+        audit.setUpdateTime(finishedAt);
+        LOGGER.info("沙箱扩缩容跳过，recordId={}，sandboxId={}，fromProfile={}，toProfile={}，status={}，原因：{}",
+            record.getId(), record.getSandboxId(), record.getProfileKey(), toProfileKey, status, message);
+        return audit;
+    }
+
+    private SsSandboxResizeRecord buildPayloadSkippedAudit(String message) {
+        Date now = new Date();
+        SsSandboxResizeRecord audit = new SsSandboxResizeRecord();
+        audit.setTriggerSource("PROMETHEUS_ALERT");
+        audit.setReasonCode("prometheus.alert");
+        audit.setReasonDetail(message);
+        audit.setStatus(STATUS_SKIPPED_INVALID);
+        audit.setSuccess(1);
+        audit.setStartedAt(now);
+        audit.setFinishedAt(now);
+        audit.setDurationMs(0L);
+        audit.setErrorMessage(message);
+        audit.setSkipReason(message);
+        audit.setCreateTime(now);
+        audit.setUpdateTime(now);
+        return audit;
+    }
+
+    private boolean isResolvedAlert(Map<?, ?> alert) {
+        if (alert == null) {
+            return false;
+        }
+        Object status = alert.get("status");
+        return status != null && "resolved".equalsIgnoreCase(status.toString());
+    }
+
+    private void finishDeferred(SsSandboxResizeRecord audit, String message, int success) {
         Date finishedAt = new Date();
         long durationMs = Math.max(0L, finishedAt.getTime() - audit.getStartedAt().getTime());
         resizeRecordMapper.updateResult(audit.getId(), STATUS_DEFERRED, success, finishedAt, durationMs,
             null, null, message);
-        sandboxRecordMapper.updateResizeSummary(record.getId(), STATUS_DEFERRED, finishedAt,
-            audit.getReasonDetail(), durationMs, success, record.getProfileKey(), audit.getToProfileKey(),
-            message, record.getLockVersion());
         audit.setStatus(STATUS_DEFERRED);
         audit.setSuccess(success);
         audit.setFinishedAt(finishedAt);

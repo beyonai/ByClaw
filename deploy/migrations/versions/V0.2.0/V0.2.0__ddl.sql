@@ -117,3 +117,34 @@ DROP TABLE IF EXISTS byai.bykc_ec_connector CASCADE;
 
 ALTER TABLE byai.byai_aimodel ADD COLUMN model_protocol VARCHAR(64) DEFAULT null;
 
+
+CREATE OR REPLACE FUNCTION byai.add_column_if_missing(
+    p_schema_name TEXT,
+    p_table_name TEXT,
+    p_column_name TEXT,
+    p_column_definition TEXT
+) RETURNS VOID AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = p_schema_name
+          AND table_name = p_table_name
+          AND column_name = p_column_name
+    ) THEN
+        EXECUTE 'ALTER TABLE ' || quote_ident(p_schema_name) || '.' || quote_ident(p_table_name)
+            || ' ADD COLUMN ' || quote_ident(p_column_name) || ' ' || p_column_definition;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_resize_record', 'idempotency_key', 'VARCHAR(512)');
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_resize_record', 'skip_reason', 'TEXT');
+
+CREATE INDEX IF NOT EXISTS idx_ss_sandbox_resize_record_idempotency
+    ON byai.ss_sandbox_resize_record (idempotency_key, started_at DESC);
+
+COMMENT ON COLUMN byai.ss_sandbox_resize_record.idempotency_key IS '扩缩容动作幂等键';
+COMMENT ON COLUMN byai.ss_sandbox_resize_record.skip_reason IS '扩缩容动作跳过原因';
+
+DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);

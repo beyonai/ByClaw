@@ -18,6 +18,7 @@
         <result column="reason_code" jdbcType="VARCHAR" property="reasonCode" />
         <result column="reason_detail" jdbcType="VARCHAR" property="reasonDetail" />
         <result column="resize_type" jdbcType="VARCHAR" property="resizeType" />
+        <result column="idempotency_key" jdbcType="VARCHAR" property="idempotencyKey" />
         <result column="status" jdbcType="VARCHAR" property="status" />
         <result column="success" jdbcType="INTEGER" property="success" />
         <result column="started_at" jdbcType="TIMESTAMP" property="startedAt" />
@@ -26,6 +27,7 @@
         <result column="opensandbox_request_id" jdbcType="VARCHAR" property="opensandboxRequestId" />
         <result column="opensandbox_response" jdbcType="VARCHAR" property="opensandboxResponse" />
         <result column="error_message" jdbcType="VARCHAR" property="errorMessage" />
+        <result column="skip_reason" jdbcType="VARCHAR" property="skipReason" />
         <result column="create_time" jdbcType="TIMESTAMP" property="createTime" />
         <result column="update_time" jdbcType="TIMESTAMP" property="updateTime" />
     </resultMap>
@@ -34,8 +36,8 @@
         id, sandbox_record_id, sandbox_id, user_code, service_type,
         from_profile_key, to_profile_key, from_resource_requests, from_resource_limits,
         to_resource_requests, to_resource_limits, trigger_source, reason_code, reason_detail,
-        resize_type, status, success, started_at, finished_at, duration_ms,
-        opensandbox_request_id, opensandbox_response, error_message, create_time, update_time
+        resize_type, idempotency_key, status, success, started_at, finished_at, duration_ms,
+        opensandbox_request_id, opensandbox_response, error_message, skip_reason, create_time, update_time
     </sql>
 
     <insert id="insert" parameterType="com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxResizeRecord"
@@ -44,8 +46,8 @@
             sandbox_record_id, sandbox_id, user_code, service_type,
             from_profile_key, to_profile_key, from_resource_requests, from_resource_limits,
             to_resource_requests, to_resource_limits, trigger_source, reason_code, reason_detail,
-            resize_type, status, success, started_at, finished_at, duration_ms,
-            opensandbox_request_id, opensandbox_response, error_message, create_time, update_time
+            resize_type, idempotency_key, status, success, started_at, finished_at, duration_ms,
+            opensandbox_request_id, opensandbox_response, error_message, skip_reason, create_time, update_time
         ) VALUES (
             #{sandboxRecordId,jdbcType=BIGINT},
             #{sandboxId,jdbcType=VARCHAR},
@@ -61,6 +63,7 @@
             #{reasonCode,jdbcType=VARCHAR},
             #{reasonDetail,jdbcType=VARCHAR},
             #{resizeType,jdbcType=VARCHAR},
+            #{idempotencyKey,jdbcType=VARCHAR},
             #{status,jdbcType=VARCHAR},
             #{success,jdbcType=INTEGER},
             #{startedAt,jdbcType=TIMESTAMP},
@@ -69,6 +72,7 @@
             #{opensandboxRequestId,jdbcType=VARCHAR},
             #{opensandboxResponse,jdbcType=VARCHAR}::jsonb,
             #{errorMessage,jdbcType=VARCHAR},
+            #{skipReason,jdbcType=VARCHAR},
             #{createTime,jdbcType=TIMESTAMP},
             #{updateTime,jdbcType=TIMESTAMP}
         )
@@ -83,6 +87,7 @@
             opensandbox_request_id = #{opensandboxRequestId,jdbcType=VARCHAR},
             opensandbox_response = #{opensandboxResponse,jdbcType=VARCHAR}::jsonb,
             error_message = #{errorMessage,jdbcType=VARCHAR},
+            skip_reason = #{errorMessage,jdbcType=VARCHAR},
             update_time = #{finishedAt,jdbcType=TIMESTAMP}
         WHERE id = #{id,jdbcType=BIGINT}
     </update>

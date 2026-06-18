@@ -97,6 +97,21 @@ public class SandboxProperties {
          * Dynamic sandbox resizing is opt-in. ByClaw records and decides, OpenSandbox performs the resize.
          */
         private boolean enabled = false;
+
+        /**
+         * Minimum interval before another scale-up action is accepted for the same sandbox.
+         */
+        private Duration scaleUpCooldown = Duration.ofMinutes(2);
+
+        /**
+         * Minimum interval before another scale-down action is accepted for the same sandbox.
+         */
+        private Duration scaleDownCooldown = Duration.ofMinutes(5);
+
+        /**
+         * PROCESSING records older than this are treated as abandoned and can be claimed again.
+         */
+        private Duration processingTimeout = Duration.ofMinutes(10);
     }
 
     @Data
