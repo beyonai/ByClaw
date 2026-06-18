@@ -127,7 +127,7 @@ const useKnowledgeStore = create<IState>()(
             } catch (e) {
               console.error(e);
               cacheSet({ directoryList: [] });
-              return [];
+              return Promise.reject(e);
             } finally {
               cacheSet({ directoryLoading: false });
             }

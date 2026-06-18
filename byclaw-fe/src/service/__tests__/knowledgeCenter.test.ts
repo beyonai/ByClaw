@@ -246,14 +246,24 @@ describe('Knowledge Center Service', () => {
   describe('queryDirAndFileByLevel', () => {
     it('should call POST with correct endpoint and data', () => {
       const data = { resourceId: 10014248, directoryPath: '/' };
+      mockPOST.mockResolvedValueOnce([]);
       queryDirAndFileByLevel(data);
-      expect(mockPOST).toHaveBeenCalledWith('/byaiService/datasetController/queryDirAndFileByLevel', data);
+      expect(mockPOST).toHaveBeenCalledWith('/byaiService/datasetController/queryDirAndFileByLevel', data, {
+        responseCfg: {
+          hideErrorTips: true,
+        },
+      });
     });
 
     it('should call POST with nested directory path', () => {
       const data = { resourceId: 1, directoryPath: '/一级目录' };
+      mockPOST.mockResolvedValueOnce([]);
       queryDirAndFileByLevel(data);
-      expect(mockPOST).toHaveBeenCalledWith('/byaiService/datasetController/queryDirAndFileByLevel', data);
+      expect(mockPOST).toHaveBeenCalledWith('/byaiService/datasetController/queryDirAndFileByLevel', data, {
+        responseCfg: {
+          hideErrorTips: true,
+        },
+      });
     });
   });
 });

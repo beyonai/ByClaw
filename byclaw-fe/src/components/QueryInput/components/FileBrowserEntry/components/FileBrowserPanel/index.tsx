@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Button, Empty, Input, message, Modal, Spin, Tooltip, Upload } from 'antd';
 import { CaretUpOutlined, CaretDownOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 // @ts-ignore
@@ -7,6 +7,8 @@ import AntdIcon from '@/components/AntdIcon';
 import KnowledgeBreadcrumb from '@/components/KnowledgeBreadcrumb';
 import ButtonsWithMore from '@/components/ButtonsWithMore';
 import InfiniteScrollTable from '@/components/InfiniteScrollTable';
+import { HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH, SiderContentContext } from '@/layout/sider/siderContentContext';
+import { getFileIconType } from '@/constants/icon';
 import {
   listFiles,
   uploadFiles,
@@ -34,20 +36,12 @@ interface FileBrowserPanelProps {
   mode?: 'full' | 'preview';
 }
 
-function getIconType(name: string, isDir: boolean): string {
-  if (isDir) return 'wenjianjialanse';
-  if (/\.(doc|docx)$/i.test(name)) return 'Word';
-  if (/\.pdf$/i.test(name)) return 'PDF';
-  if (/\.(xls|xlsx|csv)$/i.test(name)) return 'Excel';
-  if (/\.txt$/i.test(name)) return 'jishiben';
-  if (/\.(ppt|pptx)$/i.test(name)) return 'PPT';
-  if (/\.md$/i.test(name)) return 'markdown';
-  if (/\.(png|jpg|jpeg|gif|svg|webp|bmp)$/i.test(name)) return 'Image';
-  if (/\.(mp4|avi|mov|mkv|webm)$/i.test(name)) return 'shipin';
-  if (/\.(mp3|wav|flac)$/i.test(name)) return 'yinpin';
-  if (/\.(zip|rar|7z|tar|gz)$/i.test(name)) return 'a-Data-fileshujuwenjian';
-  if (/\.(js|ts|jsx|tsx|py|java|c|cpp|go|rs|rb|sh)$/i.test(name)) return 'a-Codedaima';
-  return 'a-Data-fileshujuwenjian';
+interface FilePreviewPanelProps {
+  blob: Blob | null;
+  fileName: string;
+  fileType: string;
+  loading: boolean;
+  onClose: () => void;
 }
 
 function getFileType(name: string): string {
@@ -57,13 +51,41 @@ function getFileType(name: string): string {
   return ext;
 }
 
+function canPreviewFile(record: FileBrowserItem) {
+  const isDir = record.isDir || (record as any).dir;
+  return !isDir && isPreviewable(record.name);
+}
+
 type SortField = 'name' | 'size' | 'lastModified';
 type SortOrder = 'asc' | 'desc' | 'none';
+
+const PREVIEW_UNAVAILABLE_MESSAGE = '文件不可在线预览，请下载查看';
+
+const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ blob, fileName, fileType, loading, onClose }) => (
+  <div className={styles.previewPanel}>
+    <div className={styles.previewHeader}>
+      <span className={styles.previewTitle}>{fileName}</span>
+      <span className={styles.previewClose} onClick={onClose}>
+        <AntdIcon type="icon-a-Closeguanbi1" />
+      </span>
+    </div>
+    <div className={styles.previewBody}>
+      <Spin spinning={loading} wrapperClassName={styles.previewSpin}>
+        {blob && (
+          <React.Suspense fallback={null}>
+            <PreViewFile data={blob} type={fileType} title={fileName} className={styles.previewContent} />
+          </React.Suspense>
+        )}
+      </Spin>
+    </div>
+  </div>
+);
 
 const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 'full' }) => {
   const intl = useIntl();
   const t = useCallback((id: string, values?: Record<string, any>) => intl.formatMessage({ id }, values), [intl]);
   const isPreviewMode = mode === 'preview';
+  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
 
   const [currentPath, setCurrentPath] = useState<string>('');
   const [items, setItems] = useState<FileBrowserItem[]>([]);
@@ -77,20 +99,6 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
   const [moveOpen, setMoveOpen] = useState(false);
   const [movePaths, setMovePaths] = useState<string[]>([]);
   const [moveLoading, setMoveLoading] = useState(false);
-
-  const [previewInfo, setPreviewInfo] = useState<{
-    open: boolean;
-    blob: Blob | null;
-    loading: boolean;
-    fileName: string;
-    fileType: string;
-  }>({
-    open: false,
-    blob: null,
-    loading: false,
-    fileName: '',
-    fileType: '',
-  });
 
   const [createFolderLoading, setCreateFolderLoading] = useState(false);
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
@@ -388,21 +396,39 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
     [resourceId, movePaths, t, handleRefresh]
   );
 
+  const renderPreviewPanel = useCallback(
+    (item: FileBrowserItem, options: { blob?: Blob | null; loading: boolean }) => {
+      setDetailPanel?.(
+        <FilePreviewPanel
+          blob={options.blob ?? null}
+          fileName={item.name}
+          fileType={getFileType(item.name)}
+          loading={options.loading}
+          onClose={() => clearDetailPanel?.()}
+        />,
+        { width: HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH }
+      );
+    },
+    [clearDetailPanel, setDetailPanel]
+  );
+
   const handlePreview = useCallback(
     async (item: FileBrowserItem) => {
-      setPreviewInfo({ open: true, blob: null, loading: true, fileName: item.name, fileType: getFileType(item.name) });
+      if (!isPreviewable(item.name)) return;
+
+      renderPreviewPanel(item, { loading: true });
       try {
         const res: any = await downloadFile(resourceId, item.path);
         const rawBlob = res?.file instanceof Blob ? res.file : new Blob([res?.file || res]);
         const mimeType = getMimeType(item.name);
         const blob = mimeType ? new Blob([rawBlob], { type: mimeType }) : rawBlob;
-        setPreviewInfo((prev) => ({ ...prev, blob, loading: false }));
+        renderPreviewPanel(item, { blob, loading: false });
       } catch (e: any) {
         message.error(e?.message || t('fileBrowser.preview.failed'));
-        setPreviewInfo((prev) => ({ ...prev, open: false, loading: false }));
+        clearDetailPanel?.();
       }
     },
-    [resourceId, t]
+    [clearDetailPanel, renderPreviewPanel, resourceId, t]
   );
 
   const handleCreateFolder = useCallback(async () => {
@@ -428,6 +454,9 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
     (key: string, record: FileBrowserItem) => {
       const isDir = record.isDir || (record as any).dir;
       switch (key) {
+        case 'preview':
+          handlePreview(record);
+          break;
         case 'download':
           if (isDir) {
             handleDownloadFolder(record);
@@ -485,7 +514,7 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
         }
       }
     },
-    [handleDownload, handleDownloadFolder, handleDelete, t]
+    [handleDownload, handleDownloadFolder, handleDelete, handlePreview, t]
   );
 
   const getActions = useCallback(
@@ -499,6 +528,18 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
           icon: (
             <Tooltip title={t('fileBrowser.action.locate')}>
               <span className="iconfont icon-a-Localyidingwei" />
+            </Tooltip>
+          ),
+        });
+      }
+
+      if (canPreviewFile(record)) {
+        actions.push({
+          label: t('fileBrowser.action.preview'),
+          key: 'preview',
+          icon: (
+            <Tooltip title={t('fileBrowser.action.preview')}>
+              <span className="iconfont icon-a-Preview-openyulan-dakai" />
             </Tooltip>
           ),
         });
@@ -563,16 +604,23 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
       width: isPreviewMode ? '85%' : '40%',
       render: (v: string, record: FileBrowserItem) => {
         const isDir = record.isDir || (record as any).dir;
-        const canPreview = !isDir && isPreviewable(record.name);
-        const iconType = getIconType(v, isDir);
-        const style: React.CSSProperties = isDir || canPreview ? { cursor: 'pointer' } : {};
-        const onClick = isDir ? () => handleEnterDir(record) : canPreview ? () => handlePreview(record) : undefined;
+        const canPreview = canPreviewFile(record);
+        const iconType = getFileIconType(v, { isDirectory: isDir });
+        const cursor = isDir || canPreview ? 'pointer' : 'default';
+        const style: React.CSSProperties = { cursor };
+        const onClick = isDir
+          ? () => handleEnterDir(record)
+          : canPreview
+            ? () => handlePreview(record)
+            : () => message.warning(PREVIEW_UNAVAILABLE_MESSAGE);
 
         return (
           <div onClick={onClick} style={{ display: 'flex', alignItems: 'center', ...style }} title={record.path}>
             <AntdIcon type={`icon-${iconType}`} style={{ fontSize: 24, marginRight: 14, flexShrink: 0 }} />
             <div style={{ overflow: 'hidden' }}>
-              <div className="textEllipsis">{v}</div>
+              <div className="textEllipsis" style={{ cursor }}>
+                {v}
+              </div>
               {isSearching && <div className={styles.searchPath}>{record.path}</div>}
             </div>
           </div>
@@ -747,44 +795,6 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
           onPressEnter={handleCreateFolder}
           autoFocus
         />
-      </Modal>
-
-      <Modal
-        centered
-        destroyOnHidden
-        open={previewInfo.open}
-        title=""
-        width="90vw"
-        onCancel={() => setPreviewInfo((prev) => ({ ...prev, open: false, blob: null }))}
-        footer={null}
-        closable={false}
-        styles={{
-          content: { padding: 0, height: '90vh' },
-          body: { padding: 0, height: '100%', display: 'flex', flexDirection: 'column' },
-        }}
-      >
-        <Spin spinning={previewInfo.loading} wrapperClassName="full-height-spin" style={{ flex: 1, minHeight: 0 }}>
-          <div className="ub full-height">
-            {previewInfo.blob && (
-              <React.Suspense fallback={null}>
-                <PreViewFile
-                  data={previewInfo.blob}
-                  type={previewInfo.fileType}
-                  title={previewInfo.fileName}
-                  className={styles.preview}
-                  extra={
-                    <span
-                      className={styles.previewClose}
-                      onClick={() => setPreviewInfo((prev) => ({ ...prev, open: false, blob: null }))}
-                    >
-                      <AntdIcon type="icon-a-Closeguanbi1" />
-                    </span>
-                  }
-                />
-              </React.Suspense>
-            )}
-          </div>
-        </Spin>
       </Modal>
     </div>
   );

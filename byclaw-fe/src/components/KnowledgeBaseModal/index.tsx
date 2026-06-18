@@ -9,7 +9,7 @@ import { useIntl } from '@umijs/max';
 import KnowledgeBreadcrumb from '../KnowledgeBreadcrumb';
 import { getResourceListByPage, queryDirAndFileByLevel } from '@/service/knowledgeCenter';
 import { ResourceTypeMap, FileUploadStatusMap, FileUploadStatusColors } from '@/constants/resource';
-import { getKnowledgeFileIconType } from '@/constants/icon';
+import { getFileIconType } from '@/constants/icon';
 import { getRuntimeActualUrl } from '@/utils';
 import { saveShowcaseToDoc } from '@/service/showcase';
 import AntdIcon from '@/components/AntdIcon';
@@ -215,7 +215,7 @@ const KnowledgeBaseModal: React.FC<KnowledgeBaseModalProps> = (props) => {
       dataIndex: 'name',
       title: intl.formatMessage({ id: 'common.fileName' }),
       render: (v: string, record: any) => {
-        const iconType = getKnowledgeFileIconType(v, { isDirectory: record.type === 'directory' });
+        const iconType = getFileIconType(v, { isDirectory: record.type === 'directory' });
 
         return (
           <div style={{ display: 'flex', alignItems: 'center', columnGap: 12, width: '100%' }}>

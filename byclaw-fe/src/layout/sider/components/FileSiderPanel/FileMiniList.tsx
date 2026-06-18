@@ -47,7 +47,7 @@ import {
   type QueryDirAndFileByLevelItem,
 } from '@/service/knowledgeCenter';
 import type { IKnowledgeBaseItem } from '@/layout/sider/components/Knowledge/components/KnowledgeBase/types';
-import { getKnowledgeFileIconType } from '@/constants/icon';
+import { getFileIconType } from '@/constants/icon';
 import commonStyles from '../Knowledge/components/common.module.less';
 import styles from './index.module.less';
 
@@ -56,7 +56,7 @@ const PreViewFile = React.lazy(() =>
 );
 
 function getIconType(name: string, isDir: boolean): string {
-  return getKnowledgeFileIconType(name, {
+  return getFileIconType(name, {
     isDirectory: isDir,
     directoryIconType: 'wenjianjialanse',
   });
@@ -64,6 +64,10 @@ function getIconType(name: string, isDir: boolean): string {
 
 function isDirectory(item: FileBrowserItem) {
   return item.isDir || (item as any).dir;
+}
+
+function canPreviewFile(item: FileBrowserItem) {
+  return !isDirectory(item) && isPreviewable(item.name);
 }
 
 function unwrapListResponse<T>(res: any): T[] {
@@ -149,7 +153,9 @@ interface FileTreeItem extends FileBrowserItem {
 
 type FileCategoryKey = 'root' | 'session' | 'shared' | 'log';
 type FileCopyTargetType = 'session' | 'shared';
-type FileActionKey = 'upload' | 'download' | 'saveToKnowledge' | 'saveToSessionFiles' | 'saveToSharedFiles';
+type FileActionKey = 'upload' | 'preview' | 'download' | 'saveToKnowledge' | 'saveToSessionFiles' | 'saveToSharedFiles';
+
+const PREVIEW_UNAVAILABLE_MESSAGE = '文件不可在线预览，请下载查看';
 
 interface FileCategoryItem {
   key: FileCategoryKey;
@@ -583,7 +589,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
   const handlePreview = useCallback(
     async (item: FileBrowserItem) => {
-      if (!isPreviewable(item.name)) return;
+      if (!canPreviewFile(item)) return;
 
       renderPreviewPanel(item, { loading: true });
       try {
@@ -733,6 +739,10 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       clickTimerRef.current = window.setTimeout(() => {
         clickTimerRef.current = null;
         if (isDirectory(node)) {
+          return;
+        }
+        if (!canPreviewFile(node)) {
+          message.warning(PREVIEW_UNAVAILABLE_MESSAGE);
           return;
         }
         void handlePreview(node);
@@ -1074,6 +1084,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
       const actionKeys: FileActionKey[] = [
         ...(dir ? (['upload'] as FileActionKey[]) : []),
+        ...(canPreviewFile(item) ? (['preview'] as FileActionKey[]) : []),
         'download',
         ...extraActions,
       ];
@@ -1100,6 +1111,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         }
         const labelIdMap: Record<FileActionKey, string> = {
           upload: 'fileBrowser.toolbar.upload',
+          preview: 'fileBrowser.action.preview',
           download: 'directoryManage.downloadFile',
           saveToKnowledge: 'fileSider.saveToKnowledge',
           saveToSessionFiles: 'fileBrowser.save.toSessionFiles',
@@ -1137,42 +1149,50 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
               className={`${commonStyles.tree} ${styles.fileTree}`}
               onClick={handleTreeNodeClick as any}
               onDoubleClick={(_, node) => handleItemDoubleClick(node as unknown as FileTreeItem)}
-              titleRender={(item) => (
-                <span className={styles.treeTitleContent}>
-                  <Tooltip title={item.name} placement="right">
-                    <span className={styles.treeTitleName}>
-                      <span className={styles.treeTitleText}>{item.name}</span>
-                    </span>
-                  </Tooltip>
-                  <Dropdown
-                    trigger={['hover']}
-                    overlayClassName={employeeStyles.mydropdown}
-                    menu={{
-                      items: getFileActionItems(item as FileTreeItem),
-                      onClick: ({ key, domEvent }) => {
-                        domEvent.stopPropagation();
-                        if (key === 'download') {
-                          void handleDownload(item as FileTreeItem);
-                        } else if (key === 'saveToKnowledge') {
-                          openSaveToKnowledge(item as FileTreeItem);
-                        } else if (key === 'saveToSessionFiles') {
-                          openCopyToFileBrowser(item as FileTreeItem, 'session');
-                        } else if (key === 'saveToSharedFiles') {
-                          openCopyToFileBrowser(item as FileTreeItem, 'shared');
-                        }
-                      },
-                    }}
-                  >
-                    <span
-                      className={`${commonStyles.treeActionIcon} ${styles.treeActionTrigger}`}
-                      onClick={(event) => event.stopPropagation()}
-                      onMouseDown={(event) => event.stopPropagation()}
+              titleRender={(item) => {
+                const cursor = canPreviewFile(item as FileTreeItem) ? 'pointer' : 'default';
+
+                return (
+                  <span className={styles.treeTitleContent}>
+                    <Tooltip title={item.name} placement="right">
+                      <span className={styles.treeTitleName} style={{ cursor }}>
+                        <span className={styles.treeTitleText} style={{ cursor }}>
+                          {item.name}
+                        </span>
+                      </span>
+                    </Tooltip>
+                    <Dropdown
+                      trigger={['hover']}
+                      overlayClassName={employeeStyles.mydropdown}
+                      menu={{
+                        items: getFileActionItems(item as FileTreeItem),
+                        onClick: ({ key, domEvent }) => {
+                          domEvent.stopPropagation();
+                          if (key === 'preview') {
+                            void handlePreview(item as FileTreeItem);
+                          } else if (key === 'download') {
+                            void handleDownload(item as FileTreeItem);
+                          } else if (key === 'saveToKnowledge') {
+                            openSaveToKnowledge(item as FileTreeItem);
+                          } else if (key === 'saveToSessionFiles') {
+                            openCopyToFileBrowser(item as FileTreeItem, 'session');
+                          } else if (key === 'saveToSharedFiles') {
+                            openCopyToFileBrowser(item as FileTreeItem, 'shared');
+                          }
+                        },
+                      }}
                     >
-                      <EllipsisOutlined />
-                    </span>
-                  </Dropdown>
-                </span>
-              )}
+                      <span
+                        className={`${commonStyles.treeActionIcon} ${styles.treeActionTrigger}`}
+                        onClick={(event) => event.stopPropagation()}
+                        onMouseDown={(event) => event.stopPropagation()}
+                      >
+                        <EllipsisOutlined />
+                      </span>
+                    </Dropdown>
+                  </span>
+                );
+              }}
             />
           ) : (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'fileBrowser.empty' })} />
