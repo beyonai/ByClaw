@@ -68,6 +68,7 @@ export interface QueryDirAndFileByLevelParams {
 
   /** 当前所在目录路径，根目录为 "/" */
   directoryPath: string;
+  language?: string;
 }
 
 /** queryDirAndFileByLevel 单条记录 */
@@ -91,7 +92,11 @@ export interface BuildDatasetPayload {
 
 // 查询文件夹和文件列表
 export const queryDirAndFileByLevel = (data: QueryDirAndFileByLevelParams) =>
-  POST<QueryDirAndFileByLevelItem[]>('/byaiService/datasetController/queryDirAndFileByLevel', data);
+  POST<QueryDirAndFileByLevelItem[]>('/byaiService/datasetController/queryDirAndFileByLevel', data, {
+    responseCfg: {
+      hideErrorTips: true,
+    },
+  });
 
 export interface SearchDirAndFilePayload extends QueryDirAndFileByLevelParams {
   keyword: string;

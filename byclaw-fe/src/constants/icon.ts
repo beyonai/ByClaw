@@ -1,36 +1,26 @@
-export const fileIconMap: Record<string, string> = {
-  ppt: 'icon-PPT',
-  pptx: 'icon-PPT',
-  excel: 'icon-Excel',
-  xlsx: 'icon-Excel',
-  text: 'icon-jishiben',
-  txt: 'icon-jishiben',
-  md: 'icon-jishiben',
-  word: 'icon-Word',
-  doc: 'icon-Word',
-  docx: 'icon-Word',
-  paper: 'icon-PDF',
-  pdf: 'icon-PDF',
-  table: 'icon-Excel',
-  record: 'icon-jishiben',
-  ocr: 'icon-jishiben',
-  file: 'icon-jishiben',
-  image: 'icon-Image',
-  png: 'icon-Image',
-  jpg: 'icon-Image',
-  jpeg: 'icon-Image',
-  gif: 'icon-Image',
-  webp: 'icon-Image',
-  bmp: 'icon-Image',
-  tiff: 'icon-Image',
-  ico: 'icon-Image',
-  svg: 'icon-Image',
-  folder: 'icon-wenjianjialanse',
-  chat: 'icon-wenjianjialanse',
-  other: 'icon-wenjianjialanse',
+const fileIconTypeGroups: Record<string, string[]> = {
+  PPT: ['ppt', 'pptx'],
+  Excel: ['excel', 'xls', 'xlsx', 'csv', 'table'],
+  jishiben: ['text', 'txt', 'record', 'ocr', 'file'],
+  markdown: ['md', 'markdown'],
+  Word: ['word', 'doc', 'docx'],
+  PDF: ['paper', 'pdf'],
+  Image: ['image', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tiff', 'ico', 'svg'],
+  shipin: ['mp4', 'avi', 'mov', 'mkv', 'webm'],
+  yinpin: ['mp3', 'wav', 'flac'],
+  'a-Data-fileshujuwenjian': ['zip', 'rar', '7z', 'tar', 'gz', 'other'],
+  'a-Codedaima': ['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'c', 'cpp', 'go', 'rs', 'rb', 'sh'],
+  wenjianjialanse: ['folder', 'chat'],
 };
 
-export const getKnowledgeFileIconType = (
+const fileIconTypeMap = Object.entries(fileIconTypeGroups).reduce<Record<string, string>>((map, [iconType, keys]) => {
+  keys.forEach((key) => {
+    map[key] = iconType;
+  });
+  return map;
+}, {});
+
+export const getFileIconType = (
   fileName?: string,
   options?: {
     isDirectory?: boolean;
@@ -38,40 +28,18 @@ export const getKnowledgeFileIconType = (
     defaultIconType?: string;
   }
 ) => {
-  const { isDirectory = false, directoryIconType = 'wenjianjialanse', defaultIconType = 'jishiben' } = options || {};
+  const {
+    isDirectory = false,
+    directoryIconType = 'wenjianjialanse',
+    defaultIconType = 'a-Data-fileshujuwenjian',
+  } = options || {};
 
   if (isDirectory) {
     return directoryIconType;
   }
 
   const normalizedFileName = String(fileName || '').toLowerCase();
-  const ext = normalizedFileName.split('.').pop();
+  const ext = normalizedFileName.includes('.') ? normalizedFileName.split('.').pop() : normalizedFileName;
 
-  switch (ext) {
-    case 'doc':
-    case 'docx':
-      return 'Word';
-    case 'pdf':
-      return 'PDF';
-    case 'xls':
-    case 'xlsx':
-      return 'Excel';
-    case 'txt':
-      return 'jishiben';
-    case 'ppt':
-    case 'pptx':
-      return 'PPT';
-    case 'md':
-      return 'markdown';
-    case 'png':
-    case 'jpg':
-    case 'jpeg':
-    case 'gif':
-    case 'webp':
-    case 'bmp':
-    case 'svg':
-      return 'Image';
-    default:
-      return defaultIconType;
-  }
+  return (ext && fileIconTypeMap[ext]) || defaultIconType;
 };

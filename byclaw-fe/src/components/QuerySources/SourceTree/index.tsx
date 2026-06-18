@@ -15,7 +15,7 @@ import {
 } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
-import { fileIconMap } from '@/constants/icon';
+import { getFileIconType } from '@/constants/icon';
 import useGlobal from '@/hooks/useGlobal';
 import type { KnowledgeSource, SourceRootId, SourceTreeNode, SourceTreeNodeId, SourceTreeProps } from '../types';
 import styles from './index.less';
@@ -143,7 +143,7 @@ const SourceTree: React.FC<SourceTreeProps> = (props) => {
     [isNodeChecked, getCheckedCount]
   );
 
-  const getFileIconType = (node: SourceTreeNode): string => {
+  const getSourceFileIconType = (node: SourceTreeNode): string => {
     const sourceData = node.sourceData as any;
 
     let rawType: string | undefined =
@@ -159,10 +159,7 @@ const SourceTree: React.FC<SourceTreeProps> = (props) => {
       }
     }
 
-    const normalized = (rawType || '').toString().toLowerCase();
-    const key = normalized || 'file';
-
-    return fileIconMap[key] || fileIconMap.file;
+    return `icon-${getFileIconType(rawType || 'file', { defaultIconType: 'jishiben' })}`;
   };
 
   const renderNodeIcon = (node: SourceTreeNode) => {
@@ -172,7 +169,7 @@ const SourceTree: React.FC<SourceTreeProps> = (props) => {
       case SourceTreeNodeTypeMap.more:
         return <EyeOutlined />;
       case SourceTreeNodeTypeMap.file: {
-        const iconType = getFileIconType(node);
+        const iconType = getSourceFileIconType(node);
         return <AntdIcon type={iconType} className={styles.nodeIcon} />;
       }
       case SourceTreeNodeTypeMap.webSearch:
