@@ -848,7 +848,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
   const handlePreviewFile = useCallback(
     async (record: any) => {
       if (!canPreviewRecord(record)) {
-        message.warning('文件不可在线预览，请下载查看');
+        message.warning(intl.formatMessage({ id: 'fileBrowser.preview.unavailable' }));
         return;
       }
 
@@ -1133,8 +1133,8 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
               title={v}
               ref={isFile ? getFileRowRef(rowKey) : undefined}
             >
-              <AntdIcon type={`icon-${iconType}`} style={{ fontSize: 24, marginRight: 14 }} />
-              <div className="textEllipsis" style={{ cursor: style.cursor }}>
+              <AntdIcon type={`icon-${iconType}`} className={styles.fileNameIcon} />
+              <div className={classNames('textEllipsis', styles.fileNameText)} style={{ cursor: style.cursor }}>
                 {v}
               </div>
             </div>
@@ -1205,14 +1205,17 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       {
         title: intl.formatMessage({ id: 'common.operation' }),
         dataIndex: 'title',
-        align: 'center',
         width: 150,
         render: (v: string, record: any) => {
           const actions = getActions(record);
           if (!actions.length) {
             return null;
           }
-          return <ButtonsWithMore actions={actions} maximun={4} handleAction={(key) => handleAction(key, record)} />;
+          return (
+            <div className={styles.operationActions}>
+              <ButtonsWithMore actions={actions} maximun={4} handleAction={(key) => handleAction(key, record)} />
+            </div>
+          );
         },
       },
     ],

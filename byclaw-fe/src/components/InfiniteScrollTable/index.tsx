@@ -28,6 +28,19 @@ type InfiniteScrollTableProps = {
   endMessage?: React.ReactNode;
 };
 
+const getColumnStyle = (width?: number | string): React.CSSProperties => {
+  if (width) {
+    return {
+      width,
+      flex: `0 0 ${typeof width === 'number' ? `${width}px` : width}`,
+    };
+  }
+  return {
+    flex: '1 1 0',
+    minWidth: 0,
+  };
+};
+
 const InfiniteScrollTable = (props: InfiniteScrollTableProps) => {
   const {
     columns,
@@ -79,7 +92,7 @@ const InfiniteScrollTable = (props: InfiniteScrollTableProps) => {
           </div>
         )}
         {columns.map((item) => (
-          <div key={item.dataIndex} className={styles.th} style={item?.width ? { width: item?.width } : { flex: 1 }}>
+          <div key={item.dataIndex} className={styles.th} style={getColumnStyle(item?.width)}>
             {item.title}
           </div>
         ))}
@@ -146,11 +159,7 @@ const InfiniteScrollTable = (props: InfiniteScrollTableProps) => {
                     </div>
                   )}
                   {columns.map((column, index) => (
-                    <div
-                      className={styles.tr}
-                      key={index}
-                      style={column?.width ? { width: column?.width } : { flex: 1 }}
-                    >
+                    <div className={styles.tr} key={index} style={getColumnStyle(column?.width)}>
                       {column?.render ? column?.render(item[column.dataIndex], item) : item[column.dataIndex]}
                     </div>
                   ))}

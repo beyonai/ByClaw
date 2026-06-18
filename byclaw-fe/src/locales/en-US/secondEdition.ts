@@ -286,6 +286,7 @@ export default {
   'fileBrowser.move.success': 'Moved successfully',
   'fileBrowser.move.failed': 'Move failed',
   'fileBrowser.preview.failed': 'Preview failed',
+  'fileBrowser.preview.unavailable': 'This file cannot be previewed online. Please download it to view.',
   'fileBrowser.createFolder.prompt': 'Enter folder name',
   'fileBrowser.createFolder.success': 'Folder created successfully',
   'fileBrowser.createFolder.failed': 'Failed to create folder',
