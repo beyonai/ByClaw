@@ -107,7 +107,6 @@ function upsertDefaultAimodelProvider(
   ensureConfigModelContainers(cfg);
   cfg.models!.providers![defaultModel.providerKey] = {
     baseUrl: defaultModel.provider.baseUrl,
-    apiKey: defaultModel.provider.apiKey,
     api: defaultModel.provider.api,
     models: [defaultModelDefinition(defaultModel.provider)],
   };
@@ -258,7 +257,6 @@ export function mergeManagedAgentsIntoConfig(params: {
     if (m.provider && m.providerKey) {
       providers[m.providerKey] = {
         baseUrl: m.provider.baseUrl,
-        apiKey: m.provider.apiKey,
         api: m.provider.api,
         models: [defaultModelDefinition(m.provider)],
       };

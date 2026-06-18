@@ -47,9 +47,8 @@ from __future__ import annotations
 
 import json
 import sys
-from copy import deepcopy
-from pathlib import Path
 import traceback
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -86,13 +85,12 @@ def main() -> None:
                 "object_relations": params.get("object_relations"),
             },
         )
-        if not state.get("ok", True):
-            output_state = deepcopy(state)
-            output_state['view_code'] = view_code
-            print(json.dumps(output_state, ensure_ascii=False), flush=True)
+        if not result.get("ok", True):
+            result['view_code'] = view_code
+            print(json.dumps(result, ensure_ascii=False), flush=True)
             return
         missing = result.pop("missing", []) if isinstance(result.get("missing"), list) else []
-        output_state = deepcopy(state)
+        output_state = dict(result)
         output_state['view_code'] = view_code
         print(
             json.dumps({"ok": True, "state": output_state, "missing": missing}, ensure_ascii=False),

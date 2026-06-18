@@ -153,6 +153,11 @@
         "type": "string",
         "description": "Optional path to the content index file; default is ~/.openclaw/baiying-enhance/agent-content-index-<id>.json."
       },
+      "hubSkillAutoSync": {
+        "type": "boolean",
+        "description": "Version-check and install object-form relSkills with skillType=hub under OPENCLAW_STATE_DIR/skills/<skillCode> before config reload (default true).",
+        "default": true
+      },
       "workspaceSkillAutoEnable": {
         "type": "boolean",
         "description": "Merge user-uploaded workspace skills (skills/<dir>/SKILL.md, using SKILL.md frontmatter name when present) into managed agents.list[].skills alongside JSON relSkills/skills (default true).",

@@ -47,6 +47,22 @@ function resolveModelIdFromApiKeyRef(
     return modelId || null;
 }
 
+function resolveModelIdFromProviderId(providerId: string): string | null {
+    const normalized = providerId.trim();
+    if (!normalized.startsWith(MANAGED_PROVIDER_PREFIX)) {
+        return null;
+    }
+    const suffix = normalized.slice(MANAGED_PROVIDER_PREFIX.length);
+    if (!suffix) {
+        return null;
+    }
+    if (suffix.startsWith("neg-")) {
+        const positivePart = suffix.slice("neg-".length);
+        return positivePart ? `-${positivePart}` : null;
+    }
+    return suffix;
+}
+
 export function registerBaiyingAimodelRuntimeProvider(
     api: OpenClawPluginApi,
     pluginConfig: BaiyingEnhancePluginConfig,
@@ -60,17 +76,18 @@ export function registerBaiyingAimodelRuntimeProvider(
         // Dynamic Baiying providers use the built-in OpenAI-compatible or Anthropic
         // transport. Route providerConfig.api through this hook, then guard inside
         // resolveSyntheticAuth so unrelated providers are left alone.
-        hookAliases: ["openai-completions", "anthropic-messages"],
+        hookAliases: ["openai-completions", "openai-responses", "anthropic-messages"],
         auth: [],
         resolveSyntheticAuth: ({ provider, providerConfig }) => {
             const providerId = normalizeString(provider);
             if (!providerId.startsWith(MANAGED_PROVIDER_PREFIX)) {
                 return undefined;
             }
-            const modelId = resolveModelIdFromApiKeyRef(
-                (providerConfig as ProviderConfigLike | undefined)?.apiKey,
-                secretProviderName,
-            );
+            const modelId =
+                resolveModelIdFromApiKeyRef(
+                    (providerConfig as ProviderConfigLike | undefined)?.apiKey,
+                    secretProviderName,
+                ) ?? resolveModelIdFromProviderId(providerId);
             if (!modelId) {
                 return undefined;
             }

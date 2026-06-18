@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.gateway.sandbox.service;
 
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.apache.commons.lang3.StringUtils;
@@ -16,6 +17,8 @@ import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.ResizeSandboxRequest;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.ResizeSandboxResponse;
 import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
+import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceProfileEntityMapper;
+import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceProfileEntity;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
@@ -37,6 +40,7 @@ public class SandboxResizeService {
     private final SandboxProperties sandboxProperties;
     private final OpenSandboxClient openSandboxClient;
     private final SandboxServiceSpecRepository specRepository;
+    private final SandboxServiceProfileEntityMapper profileEntityMapper;
     private final SsSandboxRecordMapper sandboxRecordMapper;
     private final SsSandboxResizeRecordMapper resizeRecordMapper;
     private final SandboxService sandboxService;
@@ -45,12 +49,14 @@ public class SandboxResizeService {
     public SandboxResizeService(SandboxProperties sandboxProperties,
                                 OpenSandboxClient openSandboxClient,
                                 SandboxServiceSpecRepository specRepository,
+                                SandboxServiceProfileEntityMapper profileEntityMapper,
                                 @Lazy SsSandboxRecordMapper sandboxRecordMapper,
                                 SsSandboxResizeRecordMapper resizeRecordMapper,
                                 @Lazy SandboxService sandboxService) {
         this.sandboxProperties = sandboxProperties;
         this.openSandboxClient = openSandboxClient;
         this.specRepository = specRepository;
+        this.profileEntityMapper = profileEntityMapper;
         this.sandboxRecordMapper = sandboxRecordMapper;
         this.resizeRecordMapper = resizeRecordMapper;
         this.sandboxService = sandboxService;
@@ -66,16 +72,28 @@ public class SandboxResizeService {
             throw new IllegalArgumentException("running sandbox record not found");
         }
 
-        String toProfileKey = firstNonBlank(params, "toProfileKey", "targetProfileKey", "profileKey");
-        String triggerSource = StringUtils.defaultIfBlank(firstNonBlank(params, "triggerSource", "source"),
+        String toProfileKey = firstNonBlank(params, "toProfileKey", "targetProfileKey", "to_profile_key",
+            "target_profile_key");
+        String triggerSource = StringUtils.defaultIfBlank(firstNonBlank(params, "triggerSource", "trigger_source",
+                "source"),
             DEFAULT_TRIGGER_SOURCE);
-        String reasonCode = StringUtils.defaultIfBlank(firstNonBlank(params, "reasonCode", "alertName"),
+        String reasonCode = StringUtils.defaultIfBlank(firstNonBlank(params, "reasonCode", "reason_code", "alertName"),
             "manual.resize");
-        String reasonDetail = StringUtils.defaultIfBlank(firstNonBlank(params, "reasonDetail", "description"),
+        String reasonDetail = StringUtils.defaultIfBlank(firstNonBlank(params, "reasonDetail", "reason_detail",
+                "description"),
             toJsonOrNull(params));
-        String resizeType = StringUtils.defaultIfBlank(firstNonBlank(params, "resizeType", "strategy"),
+        String resizeType = StringUtils.defaultIfBlank(firstNonBlank(params, "resizeType", "resize_type",
+                "suggestedResizeType", "suggested_resize_type", "strategy"),
             DEFAULT_RESIZE_TYPE);
         String serviceType = StringUtils.defaultIfBlank(record.getServiceType(), record.getSandboxType());
+        if (StringUtils.isBlank(toProfileKey)) {
+            if (isScaleUpAlert(reasonCode)) {
+                toProfileKey = resolveNextProfileKey(serviceType, record.getProfileKey());
+            }
+            else if (isScaleDownAlert(reasonCode)) {
+                toProfileKey = resolvePreviousProfileKey(serviceType, record.getProfileKey());
+            }
+        }
 
         SandboxServiceSpec targetSpec = null;
         if (StringUtils.isNotBlank(toProfileKey)) {
@@ -158,10 +176,10 @@ public class SandboxResizeService {
     @SuppressWarnings("unchecked")
     public SsSandboxResizeRecord handlePrometheusAlert(Map<String, Object> payload) {
         Map<String, Object> params = new LinkedHashMap<>();
-        params.put("triggerSource", "PROMETHEUS_ALERT");
-        params.put("reasonCode", "prometheus.alert");
-        params.put("reasonDetail", toJsonOrNull(payload));
         if (payload == null) {
+            params.put("triggerSource", "PROMETHEUS_ALERT");
+            params.put("reasonCode", "prometheus.alert");
+            params.put("reasonDetail", toJsonOrNull(payload));
             return handleResizeRequest(params);
         }
         Object alertsObj = payload.get("alerts");
@@ -176,6 +194,8 @@ public class SandboxResizeService {
         }
         copyNestedMap(params, (Map<String, Object>) payload.get("labels"));
         copyNestedMap(params, (Map<String, Object>) payload.get("annotations"));
+        params.putIfAbsent("triggerSource", "PROMETHEUS_ALERT");
+        params.putIfAbsent("reasonCode", "prometheus.alert");
         params.putIfAbsent("reasonDetail", toJsonOrNull(payload));
         return handleResizeRequest(params);
     }
@@ -189,8 +209,9 @@ public class SandboxResizeService {
             return sandboxRecordMapper.selectById(recordId);
         }
         String userCode = firstNonBlank(params, "userCode", "user_code");
-        String sandboxId = firstNonBlank(params, "sandboxId", "sandbox_id", "pod");
-        String sandboxType = StringUtils.defaultIfBlank(firstNonBlank(params, "sandboxType", "serviceType"),
+        String sandboxId = normalizeSandboxId(firstNonBlank(params, "sandboxId", "sandbox_id", "pod"));
+        String sandboxType = StringUtils.defaultIfBlank(firstNonBlank(params, "sandboxType", "sandbox_type",
+                "serviceType", "service_type"),
             SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
         if (StringUtils.isBlank(sandboxId)) {
             return null;
@@ -199,6 +220,90 @@ public class SandboxResizeService {
             return sandboxRecordMapper.selectLatestBySandboxIdAnyUser(sandboxId);
         }
         return sandboxRecordMapper.selectLatestBySandboxId(userCode, sandboxType, sandboxId);
+    }
+
+    private boolean isScaleUpAlert(String reasonCode) {
+        return StringUtils.containsIgnoreCase(reasonCode, "high")
+            || StringUtils.containsIgnoreCase(reasonCode, "critical")
+            || StringUtils.containsIgnoreCase(reasonCode, "oom");
+    }
+
+    private boolean isScaleDownAlert(String reasonCode) {
+        return StringUtils.containsIgnoreCase(reasonCode, "low")
+            || StringUtils.containsIgnoreCase(reasonCode, "idle")
+            || StringUtils.containsIgnoreCase(reasonCode, "underutilized");
+    }
+
+    private String resolveNextProfileKey(String serviceType, String currentProfileKey) {
+        if (profileEntityMapper == null || StringUtils.isBlank(serviceType)) {
+            return null;
+        }
+        try {
+            List<SandboxServiceProfileEntity> profiles = profileEntityMapper.selectEnabledProfiles(serviceType);
+            if (profiles == null || profiles.isEmpty()) {
+                return null;
+            }
+            boolean returnNext = StringUtils.isBlank(currentProfileKey);
+            for (SandboxServiceProfileEntity profile : profiles) {
+                if (profile == null || profile.getResizeEnabled() != null && profile.getResizeEnabled() == 0) {
+                    continue;
+                }
+                String profileKey = profile.getProfileKey();
+                if (StringUtils.isBlank(profileKey)) {
+                    continue;
+                }
+                if (returnNext) {
+                    return profileKey;
+                }
+                if (profileKey.equalsIgnoreCase(currentProfileKey)) {
+                    returnNext = true;
+                }
+            }
+        }
+        catch (Exception e) {
+            LOGGER.warn("解析扩容目标规格失败，serviceType={}，currentProfile={}，原因：{}",
+                serviceType, currentProfileKey, e.getMessage());
+        }
+        return null;
+    }
+
+    private String resolvePreviousProfileKey(String serviceType, String currentProfileKey) {
+        if (profileEntityMapper == null || StringUtils.isBlank(serviceType) || StringUtils.isBlank(currentProfileKey)) {
+            return null;
+        }
+        try {
+            List<SandboxServiceProfileEntity> profiles = profileEntityMapper.selectEnabledProfiles(serviceType);
+            if (profiles == null || profiles.isEmpty()) {
+                return null;
+            }
+            String previousProfileKey = null;
+            for (SandboxServiceProfileEntity profile : profiles) {
+                if (profile == null || profile.getResizeEnabled() != null && profile.getResizeEnabled() == 0) {
+                    continue;
+                }
+                String profileKey = profile.getProfileKey();
+                if (StringUtils.isBlank(profileKey)) {
+                    continue;
+                }
+                if (profileKey.equalsIgnoreCase(currentProfileKey)) {
+                    return previousProfileKey;
+                }
+                previousProfileKey = profileKey;
+            }
+        }
+        catch (Exception e) {
+            LOGGER.warn("解析降配目标规格失败，serviceType={}，currentProfile={}，原因：{}",
+                serviceType, currentProfileKey, e.getMessage());
+        }
+        return null;
+    }
+
+    private String normalizeSandboxId(String value) {
+        if (StringUtils.isBlank(value)) {
+            return value;
+        }
+        String trimmed = value.trim();
+        return trimmed.replaceFirst("^([0-9a-fA-F-]{36})-\\d+$", "$1");
     }
 
     private SsSandboxResizeRecord buildRequestedAudit(SsSandboxRecord record,
