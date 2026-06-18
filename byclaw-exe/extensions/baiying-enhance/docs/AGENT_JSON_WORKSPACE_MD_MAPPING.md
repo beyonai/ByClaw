@@ -30,7 +30,8 @@
 |------|------|
 | 始终写出 `skills` | 每个托管子 agent（`baiying-agent-*`）在 **`agents.list[]`** 中都带有 **`skills`** 字段，不再依赖「有值才出现」。 |
 | 默认空数组 | 无可用配置时为 **`[]`**。 |
-| **`relSkills`（优先）** | JSON **根**上为非空字符串数组时（如数字员工详情里的 `["dws","clawhub"]`），**`agents.list[].skills`** 即为该数组（元素 `trim`，去掉空串）。 |
+| **`relSkills`（优先）** | JSON **根**上为非空数组时，**`agents.list[].skills`** 写入每项 skill 名称。兼容字符串数组（如 `["dws","clawhub"]`），也支持对象数组：`skillType: "inner"` 只引用 `skillCode`；`skillType: "hub"` 写入 `skillCode` 并触发 hub 下载同步。 |
+| **Hub skill 同步** | `hubSkillAutoSync` 默认开启；hub 对象的 `versionUrl` / `skillUrl` 可为 ByaiService 相对路径。插件通过 Redis 服务注册表发现 ByaiService，每次同步先查版本，只有本地 `${OPENCLAW_STATE_DIR}/skills/<skillCode>` 缺失或版本不同才下载覆盖，并写 `.baiying-hub-skill.json`。 |
 | **`skills`（兼容）** | 若无有效 **`relSkills`**，则读取根级 **`skills`**（旧版「原生简化」JSON）；仍无则为 **`[]`**。 |
 | **Workspace 上传 skill** | 默认扫描 `skills/<目录>/SKILL.md`，优先使用 `SKILL.md` frontmatter `name` 作为 skill filter 名称：只把当前 agent workspace 下的 skill 并入该 agent，不读取其它 agent workspace；main workspace (`workspace/skills`) 下的 skill 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 并入托管子 agent。 |
 

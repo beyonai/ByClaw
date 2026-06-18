@@ -44,6 +44,7 @@ import {
     skillSignature,
     watchWorkspaceSkillDirs,
 } from "./workspace-skills.js";
+import { syncHubSkillsForManagedAgents } from "./hub-skill-sync.js";
 
 export type LoadedManagedAgent = AdaptedManagedAgent & {
     /** SHA-256 hash of the source JSON content for change detection. */
@@ -456,6 +457,7 @@ export function createAgentWatchdog(params: {
     let unauthorizedMountedWorkspaceCheckDeferredLogged = false;
 
     const persistIndex = params.pluginConfig.persistAgentContentIndex !== false;
+    const hubSkillAutoSync = params.pluginConfig.hubSkillAutoSync !== false;
     const workspaceSkillAutoEnable = params.pluginConfig.workspaceSkillAutoEnable !== false;
     const workspaceSkillIncludeMainShared =
         params.pluginConfig.workspaceSkillIncludeMainShared === true;
@@ -794,6 +796,31 @@ export function createAgentWatchdog(params: {
                     warn: (m) => params.api.logger.warn(m),
                 },
             });
+            let hasHubSkillChanges = false;
+            if (hubSkillAutoSync) {
+                try {
+                    const hubSkillSync = await syncHubSkillsForManagedAgents({
+                        managed: filteredManaged,
+                        redisJsonStore: params.redisJsonStore,
+                        logger: {
+                            info: (m) => params.api.logger.info(m),
+                            warn: (m) => params.api.logger.warn(m),
+                        },
+                    });
+                    hasHubSkillChanges = hubSkillSync.changed;
+                    if (hubSkillSync.checked > 0) {
+                        params.api.logger.info(
+                            `baiying-enhance: hub skill sync checked=${hubSkillSync.checked} downloaded=${hubSkillSync.downloaded.length} skipped=${hubSkillSync.skipped.length}`,
+                        );
+                    }
+                } catch (err) {
+                    params.api.logger.warn(
+                        `baiying-enhance: hub skill sync failed; keeping existing local hub skills: ${
+                            err instanceof Error ? err.message : String(err)
+                        }`,
+                    );
+                }
+            }
             if (isColdStartMountedWorkspaceCheck) {
                 await cleanupManagedBootstrapFilesOnColdStart({
                     api: params.api,
@@ -952,6 +979,7 @@ export function createAgentWatchdog(params: {
                 hasSkillChanges ||
                 hasToolChanges ||
                 hasConfigModelDrift ||
+                hasHubSkillChanges ||
                 deleteBatchSet.size > 0;
             const forceFullReseed = forceAuthReseed;
             const shouldSync = hasChanges || forceFullReseed;
@@ -964,6 +992,7 @@ export function createAgentWatchdog(params: {
                     updated.length > 0 ||
                     removed.length > 0 ||
                     hasSkillChanges ||
+                    hasHubSkillChanges ||
                     hasToolChanges)
             ) {
                 const trigger =
@@ -971,6 +1000,13 @@ export function createAgentWatchdog(params: {
                         ? `explicit delete (${[...deleteBatchSet].join(", ")})`
                         : forceAuthReseed
                           ? "full workspace reseed (auth)"
+                          : hasHubSkillChanges &&
+                              added.length === 0 &&
+                              updated.length === 0 &&
+                              removed.length === 0 &&
+                              !hasSkillChanges &&
+                              !hasToolChanges
+                            ? "hub skill sync"
                           : hasSkillChanges &&
                               added.length === 0 &&
                               updated.length === 0 &&
@@ -978,7 +1014,7 @@ export function createAgentWatchdog(params: {
                             ? "workspace skill sync"
                             : `managed agent sync (${params.debounceMs}ms coalesce)`;
                 params.api.logger.info(
-                    `baiying-enhance: ${trigger} — delta: +${added.length} ~${updated.length} -${removed.length}; skillChanges=${hasSkillChanges}; toolChanges=${hasToolChanges}; fullWorkspaceReseed=${forceFullReseed}`,
+                    `baiying-enhance: ${trigger} — delta: +${added.length} ~${updated.length} -${removed.length}; skillChanges=${hasSkillChanges}; toolChanges=${hasToolChanges}; hubSkillChanges=${hasHubSkillChanges}; fullWorkspaceReseed=${forceFullReseed}`,
                 );
                 const detailLines: string[] = [];
                 for (const a of added) {
@@ -1082,6 +1118,7 @@ export function createAgentWatchdog(params: {
                 });
                 if (
                     hasSkillChanges ||
+                    hasHubSkillChanges ||
                     hasToolChanges ||
                     added.length > 0 ||
                     removed.length > 0 ||
@@ -1089,7 +1126,11 @@ export function createAgentWatchdog(params: {
                 ) {
                     touchSkillsSnapshotInvalidation(next, {
                         managed: effectiveManaged,
-                        reason: hasToolChanges ? "agent-tool-policy-sync" : "agent-skill-sync",
+                        reason: hasToolChanges
+                            ? "agent-tool-policy-sync"
+                            : hasHubSkillChanges
+                              ? "hub-skill-sync"
+                              : "agent-skill-sync",
                     });
                 }
                 return next;
