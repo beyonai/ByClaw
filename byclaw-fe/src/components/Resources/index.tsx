@@ -24,6 +24,7 @@ import ResourceDetail from './components/ResourceDetail';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
 import DetailPanel from '@/pages/knowledgeCenter/components/DetailPanel';
+import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import { useSkillDetailDrawer } from '@/pages/manager/components/SkillDetailDrawer/useSkillDetailDrawer';
 import ResourceFilter from './components/ResourceFilter';
 import { getDefaultParams } from './components/ResourceFilter';
@@ -53,6 +54,18 @@ interface IResourceItem {
   canDelete?: boolean;
   canApplyUse?: boolean;
   canAuditUse?: boolean;
+  skillType?: string;
+  sourceType?: string;
+  version?: string;
+  skillUrl?: string;
+  skillPackageFormat?: string;
+  skillOriginalFilename?: string;
+  skillPackageSize?: number | string;
+  skillPackageHash?: string;
+  targetContent?: string;
+  syncStatus?: string;
+  syncError?: string;
+  lastSyncTime?: string;
 }
 
 interface Props {
@@ -232,12 +245,31 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     if (resourceType === 'OBJECT') {
       return fixedEntryCapability.canImportEnterpriseObject;
     }
+    if (resourceType === 'SKILL') {
+      return fixedEntryCapability.canImportEnterpriseSkill === true;
+    }
     return true;
   }, [activeTab, fixedEntryCapability, resourceType]);
 
   const handleDetail = useCallback(
     async (item: IResourceItem) => {
       const { resourceBizType, resourceId, resourceSourcePkId } = item;
+
+      if (resourceBizType === 'SKILL') {
+        if (resourceId) {
+          setDetailPanel?.(
+            <SkillDetailDrawer
+              resourceId={resourceId}
+              title={intl.formatMessage({ id: 'common.skill' })}
+              open
+              panel
+              onClose={() => clearDetailPanel?.()}
+            />,
+            { width: 350 }
+          );
+        }
+        return;
+      }
 
       if (
         resourceBizType &&
