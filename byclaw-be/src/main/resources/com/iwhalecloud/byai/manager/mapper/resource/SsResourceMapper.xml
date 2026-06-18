@@ -1131,7 +1131,7 @@
     </select>
 
     <select id="queryDigEmployeeSkillResourceAuthList" resultType="com.iwhalecloud.byai.manager.vo.auth.ResourceAuthVo">
-        SELECT
+        SELECT DISTINCT
             a.resource_id,
             a.resource_source_pk_id,
             a.system_code,
@@ -1178,13 +1178,16 @@
             esk.sync_status,
             esk.sync_error,
             esk.last_sync_time
-        FROM ss_res_ext_dig_employee e
+        FROM (
+                 SELECT DISTINCT rel_resource_id
+                 FROM ss_resource_rel_detail
+                 WHERE resource_id = #{resourceId}
+             ) d
             INNER JOIN ss_resource a
-                ON a.resource_biz_type = 'SKILL'
-                AND POSITION(CONCAT('"', a.resource_code, '"') IN e.skills) > 0
+                ON d.rel_resource_id = a.resource_id
+                AND a.resource_biz_type = 'SKILL'
             LEFT JOIN ss_res_ext_skill esk ON a.resource_id = esk.resource_id
-        WHERE e.resource_id = #{resourceId}
-          AND a.resource_status = 2
+        WHERE a.resource_status = 2
           <if test="catalogIds != null and catalogIds.size() > 0">
               AND a.catalog_id IN
               <foreach collection="catalogIds" item="catalogIdItem" open="(" separator="," close=")">

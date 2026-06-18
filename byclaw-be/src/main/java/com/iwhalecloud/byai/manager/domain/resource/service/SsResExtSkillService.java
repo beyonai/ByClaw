@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtSkillMapper;
 import java.util.regex.Matcher;
@@ -56,7 +57,7 @@ public class SsResExtSkillService {
      */
     public void saveOrUpdate(SsResExtSkill ssResExtSkill) {
         if (ssResExtSkill == null || ssResExtSkill.getResourceId() == null) {
-            throw new IllegalArgumentException("技能资源ID不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.resource.id.empty"));
         }
         fillDefaults(ssResExtSkill);
         if (ssResExtSkillMapper.selectById(ssResExtSkill.getResourceId()) == null) {

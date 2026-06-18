@@ -1448,27 +1448,10 @@ public class DigitalEmployeeApplicationService {
         Map<String, Object> relSkill = new LinkedHashMap<>();
         relSkill.put("skillCode", skillResource == null ? null : skillResource.getResourceCode());
         relSkill.put("skillType", skillType);
-        relSkill.put("skillUrl", innerSkill ? "" : normalizeSkillUrl(extSkill == null ? null : extSkill.getSkillUrl()));
+        relSkill.put("skillUrl", innerSkill ? "" : buildSkillDownloadUrl(
+            skillResource == null ? null : skillResource.getResourceId(), null));
         relSkill.put("versionUrl", buildSkillVersionUrl(skillResource == null ? null : skillResource.getResourceId(), null));
         return relSkill;
-    }
-
-    private String normalizeSkillUrl(String skillUrl) {
-        if (StringUtils.isBlank(skillUrl)) {
-            return "";
-        }
-        String normalized = skillUrl.trim().replace('\\', '/').replaceAll("/+", "/");
-        String withoutLeadingSlash = StringUtils.removeStart(normalized, "/");
-        if (StringUtils.startsWith(withoutLeadingSlash, "byclaw/resource/")) {
-            return "/" + withoutLeadingSlash;
-        }
-        if (StringUtils.startsWith(withoutLeadingSlash, "resource/")) {
-            return "/byclaw/" + withoutLeadingSlash;
-        }
-        if (StringUtils.startsWith(withoutLeadingSlash, "skill/")) {
-            return "/byclaw/resource/" + withoutLeadingSlash;
-        }
-        return normalized.startsWith("/") ? normalized : "/" + normalized;
     }
 
     private void syncDigEmployeeConfigJsonToRedisQuietly(Long resourceId, String jsonContent) {
@@ -1885,10 +1868,9 @@ public class DigitalEmployeeApplicationService {
             Map<String, Object> relSkill = new LinkedHashMap<>();
             relSkill.put("skillCode", skillCode);
             relSkill.put("skillType", skillType);
-            relSkill.put("skillUrl", innerSkill ? "" : normalizeSkillUrl(firstNotBlank(
-                stringValue(itemMap.get("skillUrl")),
-                extSkill == null ? null : extSkill.getSkillUrl(),
-                "")));
+            relSkill.put("skillUrl", innerSkill ? "" : buildSkillDownloadUrl(
+                skillResource == null ? resourceId : skillResource.getResourceId(),
+                stringValue(itemMap.get("skillUrl"))));
             relSkill.put("versionUrl", buildSkillVersionUrl(skillResource == null ? resourceId : skillResource.getResourceId(),
                 stringValue(itemMap.get("versionUrl"))));
             result.add(relSkill);
@@ -1916,6 +1898,13 @@ public class DigitalEmployeeApplicationService {
             return StringUtils.defaultString(fallback);
         }
         return "/byaiService/tool/getSkillVersion?skillId=" + resourceId;
+    }
+
+    private String buildSkillDownloadUrl(Long resourceId, String fallback) {
+        if (resourceId == null) {
+            return StringUtils.defaultString(fallback);
+        }
+        return "/byaiService/tool/downloadSkillZip?skillId=" + resourceId;
     }
 
     private Long parseLongSafely(String value) {

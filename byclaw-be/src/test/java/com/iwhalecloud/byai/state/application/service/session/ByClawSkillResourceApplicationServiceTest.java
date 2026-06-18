@@ -121,7 +121,7 @@ class ByClawSkillResourceApplicationServiceTest {
         assertThat(ext.getSkillType()).isEqualTo("hub");
         assertThat(ext.getSkillUrl()).isEqualTo("/byclaw/resource/skill/user001-hub/demo-skill.zip");
         assertThat(ext.getTargetContent()).contains("\"resourceId\":7001", "\"sourceType\":\"CHAT_UPLOAD\"",
-            "\"skillUrl\":\"/byclaw/resource/skill/user001-hub/demo-skill.zip\"");
+            "\"skillUrl\":\"/byaiService/tool/downloadSkillZip?skillId=7001\"");
 
         ArgumentCaptor<SsResourceRelDetail> relCaptor = ArgumentCaptor.forClass(SsResourceRelDetail.class);
         verify(ssResourceRelDetailService).save(relCaptor.capture());
@@ -269,7 +269,7 @@ class ByClawSkillResourceApplicationServiceTest {
         String targetContent = service.refreshSkillBasicInfo(resource);
 
         assertThat(targetContent).contains("\"resourceName\":\"Demo Skill New\"", "\"version\":\"v0.2\"",
-            "\"skillUrl\":\"/byclaw/resource/skill/user001-hub/demo-skill.zip\"");
+            "\"skillUrl\":\"/byaiService/tool/downloadSkillZip?skillId=7201\"");
         verify(ssResExtSkillService).saveOrUpdate(ext);
         verify(resourceArtifactStorageService).uploadToSubdirectory(any(byte[].class), eq("skill"),
             eq("SKILL_7201.json"), eq("application/json"));
