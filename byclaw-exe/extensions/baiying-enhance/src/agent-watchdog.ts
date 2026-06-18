@@ -215,8 +215,7 @@ function retainedDefaultAimodelBundleFromConfig(cfg: {
     const providerEntry = cfg.models?.providers?.[parsed.provider];
     const modelEntry = providerEntry?.models?.find((entry) => entry.id?.trim() === parsed.model);
     const baseUrl = typeof providerEntry?.baseUrl === "string" ? providerEntry.baseUrl.trim() : "";
-    const apiKey = providerEntry?.apiKey;
-    if (!providerEntry || !modelEntry || !baseUrl || !apiKey) {
+    if (!providerEntry || !modelEntry || !baseUrl) {
         return null;
     }
     const providerApi =
@@ -231,7 +230,7 @@ function retainedDefaultAimodelBundleFromConfig(cfg: {
         modelRef: primary,
         provider: {
             baseUrl,
-            apiKey,
+            apiKey: providerEntry.apiKey,
             api: providerApi,
             modelId: parsed.model,
             modelName: modelEntry.name?.trim() || parsed.model,
