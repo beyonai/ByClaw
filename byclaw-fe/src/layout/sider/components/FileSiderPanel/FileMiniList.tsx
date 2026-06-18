@@ -164,6 +164,8 @@ type FileActionKey =
   | 'saveToSessionFiles'
   | 'saveToSharedFiles';
 
+const PREVIEW_UNAVAILABLE_MESSAGE = '文件不可在线预览，请下载查看';
+
 interface FileCategoryItem {
   key: FileCategoryKey;
   titleId: string;

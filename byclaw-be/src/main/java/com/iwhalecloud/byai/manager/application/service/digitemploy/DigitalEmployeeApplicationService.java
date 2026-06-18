@@ -1891,11 +1891,9 @@ public class DigitalEmployeeApplicationService {
             }
             relSkill.put("skillCode", skillCode);
             relSkill.put("skillType", skillType);
-            relSkill.put("skillUrl", innerSkill ? "" : buildSkillDownloadUrl(
-                skillResource == null ? resourceId : skillResource.getResourceId(),
+            relSkill.put("skillUrl", innerSkill ? "" : buildSkillDownloadUrl(resolvedResourceId,
                 stringValue(itemMap.get("skillUrl"))));
-            relSkill.put("versionUrl", buildSkillVersionUrl(skillResource == null ? resourceId : skillResource.getResourceId(),
-                stringValue(itemMap.get("versionUrl"))));
+            relSkill.put("versionUrl", buildSkillVersionUrl(resolvedResourceId, stringValue(itemMap.get("versionUrl"))));
             result.add(relSkill);
         }
         return result;
