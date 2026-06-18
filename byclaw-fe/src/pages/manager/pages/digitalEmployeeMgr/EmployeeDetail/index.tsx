@@ -1747,6 +1747,9 @@ const EmployeeDetail = ({ loading }) => {
         questionList={questionList}
         skills={selectedTools}
         knowledgeBases={knowledgeBases}
+        agentType={effectiveAgentType}
+        resourceId={agentId}
+        modelCode={modelName}
         onOk={(formValue, myQuestionList) => {
           setQuestionList(myQuestionList);
           form.setFieldsValue(formValue);

@@ -60,6 +60,10 @@ export default {
   // 优化模态框
   'refineModal.title': '一键生成配置',
   'refineModal.regenerate': '重新生成',
+  'refineModal.generating': '正在生成配置...',
+  'refineModal.waitingStream': '正在连接模型并准备生成结果',
+  'refineModal.generateFailed': '生成失败，请重试',
+  'refineModal.generateIncomplete': '生成结果不完整，请重试',
   'refineModal.namePlaceholder': '请输入名称',
   'refineModal.character': '人设描述',
   'refineModal.characterPlaceholder': '请输入人设描述',
