@@ -29,7 +29,10 @@ export type ByclawWikiPluginConfig = {
   includeRawOutputInToolResult?: unknown;
   gitDepth?: unknown;
   notificationWebhookUrl?: unknown;
+  notificationDingtalkAccessToken?: unknown;
   notificationDingtalkSecret?: unknown;
+  notificationDingtalkActionCardBtnTitle?: unknown;
+  notificationDingtalkActionCardBtnUrl?: unknown;
   notificationRobotType?: unknown;
   notificationMaxOutputChars?: unknown;
   notificationMinOutputChars?: unknown;
@@ -39,7 +42,10 @@ export type NotificationRobotType = "generic" | "wecom" | "dingtalk" | "feishu";
 
 export type ResolvedNotificationConfig = {
   webhookUrl?: string;
+  dingtalkAccessToken?: string;
   dingtalkSecret?: string;
+  dingtalkActionCardBtnTitle: string;
+  dingtalkActionCardBtnUrl: string;
   robotType: NotificationRobotType;
   maxOutputChars: number;
   minOutputChars: number;

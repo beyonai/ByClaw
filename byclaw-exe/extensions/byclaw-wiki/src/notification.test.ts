@@ -29,6 +29,8 @@ describe("sendDocumentationNotification", () => {
       config: {
         webhookUrl: "https://oapi.dingtalk.com/robot/send?access_token=token",
         dingtalkSecret: secret,
+        dingtalkActionCardBtnTitle: "通过",
+        dingtalkActionCardBtnUrl: "",
         robotType: "dingtalk",
         maxOutputChars: 3000,
         minOutputChars: 1,
@@ -61,6 +63,8 @@ describe("sendDocumentationNotification", () => {
     const result = await sendDocumentationNotification({
       config: {
         webhookUrl: "https://oapi.dingtalk.com/robot/send?access_token=token",
+        dingtalkActionCardBtnTitle: "通过",
+        dingtalkActionCardBtnUrl: "",
         robotType: "dingtalk",
         maxOutputChars: 3000,
         minOutputChars: 1,
@@ -78,5 +82,56 @@ describe("sendDocumentationNotification", () => {
     assert.equal(result.ok, false);
     assert.match(result.error ?? "", /310000/);
     assert.match(result.error ?? "", /sign not match/);
+  });
+
+  it("sends DingTalk ActionCard with configurable approve button", async () => {
+    let requestedUrl = "";
+    let requestedBody = "";
+
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      requestedUrl = String(input);
+      requestedBody = String(init?.body ?? "");
+      return new Response(JSON.stringify({ errcode: 0, errmsg: "ok" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const result = await sendDocumentationNotification({
+      config: {
+        dingtalkAccessToken: "token-from-config",
+        dingtalkActionCardBtnTitle: "审核通过",
+        dingtalkActionCardBtnUrl: "https://example.test/approve",
+        robotType: "dingtalk",
+        maxOutputChars: 3000,
+        minOutputChars: 1,
+      },
+      repository: {
+        id: "byclaw",
+        remoteUrl: "https://github.com/beyonai/ByClaw.git",
+        branch: "develop",
+        localPath: "/tmp/byclaw",
+      },
+      documentTitle: "Skill 上传文档",
+      question: "如何上传 Skill？",
+      documentMarkdown: "## 如何上传 Skill\n\n### 操作步骤\n1. 点击「上传」。",
+    });
+
+    const url = new URL(requestedUrl);
+    const payload = JSON.parse(requestedBody) as {
+      msgtype?: string;
+      actionCard?: Record<string, unknown>;
+    };
+
+    assert.equal(result.ok, true);
+    assert.equal(url.origin + url.pathname, "https://oapi.dingtalk.com/robot/send");
+    assert.equal(url.searchParams.get("access_token"), "token-from-config");
+    assert.equal(payload.msgtype, "actionCard");
+    assert.equal(payload.actionCard?.title, "Skill 上传文档");
+    assert.equal(payload.actionCard?.btnTitle, "审核通过");
+    assert.equal(payload.actionCard?.btnUrl, "https://example.test/approve");
+    assert.equal(payload.actionCard?.singleTitle, "审核通过");
+    assert.equal(payload.actionCard?.singleURL, "https://example.test/approve");
+    assert.match(String(payload.actionCard?.text ?? ""), /如何上传 Skill/);
   });
 });

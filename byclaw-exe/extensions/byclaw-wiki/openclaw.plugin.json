@@ -135,9 +135,23 @@
         "type": "string",
         "description": "Optional group robot webhook URL."
       },
+      "notificationDingtalkAccessToken": {
+        "type": "string",
+        "description": "Optional DingTalk custom robot access token. Used to build the webhook URL when notificationWebhookUrl is not set."
+      },
       "notificationDingtalkSecret": {
         "type": "string",
         "description": "Optional DingTalk robot SEC secret used to sign webhook requests."
+      },
+      "notificationDingtalkActionCardBtnTitle": {
+        "type": "string",
+        "description": "DingTalk ActionCard single button title.",
+        "default": "通过"
+      },
+      "notificationDingtalkActionCardBtnUrl": {
+        "type": "string",
+        "description": "DingTalk ActionCard single button jump URL.",
+        "default": "http://39.105.105.85/beyond/chat"
       },
       "notificationRobotType": {
         "type": "string",

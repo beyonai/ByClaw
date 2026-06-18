@@ -84,7 +84,11 @@ and restart Gateway.
           includeRawOutputInToolResult: true,
           gitDepth: 1,
           notificationWebhookUrl: "https://oapi.dingtalk.com/robot/send?access_token=...",
+          // Or configure only the token and let the plugin build the webhook URL:
+          // notificationDingtalkAccessToken: "...",
           notificationDingtalkSecret: "SEC...",
+          notificationDingtalkActionCardBtnTitle: "通过",
+          notificationDingtalkActionCardBtnUrl: "http://39.105.105.85/beyond/chat",
           notificationRobotType: "dingtalk"
         }
       }
@@ -116,17 +120,25 @@ The intended flow is:
    `documentMarkdown` to send that generated document to the group robot for
    review.
 
-Configure `notificationWebhookUrl` in `openclaw.json`.
+Configure `notificationWebhookUrl` in `openclaw.json`. For DingTalk custom
+robots, you can also configure `notificationDingtalkAccessToken` instead of the
+full webhook URL.
 
 For DingTalk robots with signing enabled, also configure
 `notificationDingtalkSecret`. The plugin computes `timestamp` and `sign` for
 each request and appends them to the webhook URL.
 
+DingTalk notifications are sent as a single-button ActionCard. The default
+button is `通过`, and the default button URL is
+`http://39.105.105.85/beyond/chat`; set
+`notificationDingtalkActionCardBtnTitle` and
+`notificationDingtalkActionCardBtnUrl` to customize it.
+
 Supported `notificationRobotType` values:
 
 - `generic`: JSON payload with `type` and `markdown`.
 - `wecom`: Enterprise WeChat `markdown` message.
-- `dingtalk`: DingTalk `markdown` message.
+- `dingtalk`: DingTalk single-button `actionCard` message.
 - `feishu`: Feishu text message.
 
 ## HTTP route

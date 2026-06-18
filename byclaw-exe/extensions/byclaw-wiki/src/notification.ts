@@ -6,6 +6,8 @@ import type {
   ResolvedWikiRepositoryConfig,
 } from "./types.js";
 
+const DINGTALK_CUSTOM_ROBOT_WEBHOOK = "https://oapi.dingtalk.com/robot/send";
+
 export type DocumentationNotificationRequest = {
   config: ResolvedNotificationConfig;
   repository: ResolvedWikiRepositoryConfig;
@@ -24,11 +26,25 @@ export type DocumentationNotificationResult = {
   error?: string;
 };
 
-function resolveWebhookUrl(config: ResolvedNotificationConfig): string | undefined {
+function resolveBaseWebhookUrl(config: ResolvedNotificationConfig): string | undefined {
   const webhookUrl = config.webhookUrl?.trim();
+  if (!webhookUrl) {
+    if (config.robotType !== "dingtalk" || !config.dingtalkAccessToken?.trim()) {
+      return undefined;
+    }
+    const url = new URL(DINGTALK_CUSTOM_ROBOT_WEBHOOK);
+    url.searchParams.set("access_token", config.dingtalkAccessToken.trim());
+    return url.toString();
+  }
+  return webhookUrl;
+}
+
+function resolveWebhookUrl(config: ResolvedNotificationConfig): string | undefined {
+  const webhookUrl = resolveBaseWebhookUrl(config);
   if (!webhookUrl) {
     return undefined;
   }
+
   if (config.robotType !== "dingtalk" || !config.dingtalkSecret?.trim()) {
     return webhookUrl;
   }
@@ -51,8 +67,12 @@ function truncateText(value: string, maxChars: number): string {
   return `${value.slice(0, Math.max(0, maxChars - 30))}\n\n... output truncated ...`;
 }
 
+function resolveNotificationTitle(params: DocumentationNotificationRequest): string {
+  return params.documentTitle || "Byclaw Wiki: 操作文档待更新";
+}
+
 function buildMarkdown(params: DocumentationNotificationRequest): string {
-  const title = params.documentTitle || "Byclaw Wiki: 操作文档待更新";
+  const title = resolveNotificationTitle(params);
   const question = params.question || params.query || "(未提供问题)";
   const documentMarkdown = truncateText(params.documentMarkdown.trim(), params.config.maxOutputChars);
   return [
@@ -70,7 +90,13 @@ function buildMarkdown(params: DocumentationNotificationRequest): string {
   ].join("\n");
 }
 
-function buildPayload(robotType: NotificationRobotType, markdown: string): unknown {
+function buildPayload(params: {
+  robotType: NotificationRobotType;
+  config: ResolvedNotificationConfig;
+  title: string;
+  markdown: string;
+}): unknown {
+  const { robotType, config, title, markdown } = params;
   switch (robotType) {
     case "wecom":
       return {
@@ -80,14 +106,22 @@ function buildPayload(robotType: NotificationRobotType, markdown: string): unkno
         },
       };
     case "dingtalk":
-      return {
-        msgtype: "markdown",
-        msgUuid: randomUUID(),
-        markdown: {
-          title: "Byclaw Wiki 文档更新提醒",
-          text: markdown,
-        },
-      };
+      {
+        const btnTitle = config.dingtalkActionCardBtnTitle.trim() || "通过";
+        const btnUrl = config.dingtalkActionCardBtnUrl.trim();
+        return {
+          msgtype: "actionCard",
+          msgUuid: randomUUID(),
+          actionCard: {
+            title,
+            text: markdown,
+            btnTitle,
+            btnUrl,
+            singleTitle: btnTitle,
+            singleURL: btnUrl,
+          },
+        };
+      }
     case "feishu":
       return {
         msg_type: "text",
@@ -157,13 +191,21 @@ export async function sendDocumentationNotification(
       };
     }
 
+    const title = resolveNotificationTitle(params);
     const markdown = buildMarkdown(params);
     const response = await fetch(webhookUrl, {
       method: "POST",
       headers: {
         "content-type": "application/json; charset=utf-8",
       },
-      body: JSON.stringify(buildPayload(params.config.robotType, markdown)),
+      body: JSON.stringify(
+        buildPayload({
+          robotType: params.config.robotType,
+          config: params.config,
+          title,
+          markdown,
+        }),
+      ),
       signal: controller.signal,
     });
     const robotResponse = await parseRobotResponse(response);
