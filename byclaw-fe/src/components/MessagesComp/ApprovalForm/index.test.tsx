@@ -118,6 +118,23 @@ function renderApprovalForm() {
   };
 }
 
+function createApprovalFormProps(messageListItemContent: OperationFormConfirmation) {
+  return {
+    message: {
+      messageId: 'message-1',
+      queryMsgId: 'query-1',
+      traceId: 'trace-1',
+    } as any,
+    messageIdx: 0,
+    messageListItem: {
+      uuid: 'list-item-1',
+      orginContent: '{}',
+    } as any,
+    messageListItemContent,
+    updateMessageListItemContent: jest.fn(),
+  };
+}
+
 function getButton(text: string) {
   return screen
     .getByText((content, node) => node?.tagName === 'SPAN' && content.replace(/\s/g, '') === text)
@@ -133,6 +150,65 @@ function queryButton(text: string) {
 }
 
 describe('ApprovalForm', () => {
+  it('updates input value when fieldValue changes after initial render', async () => {
+    const initialContent: OperationFormConfirmation = {
+      sourceAgentType: 'agent',
+      metadata: '{}',
+      schemaVersion: '1',
+      formId: 'approval-form',
+      title: 'Approval',
+      description: 'Please confirm',
+      substance: [
+        {
+          toolCallId: 'tool-call-1',
+          toolName: 'tool-one',
+          actionCode: 'action-one',
+          actionName: 'Action One',
+          title: 'Step One',
+          description: 'First step',
+          rule: [
+            [
+              {
+                formType: 'input',
+                fieldCode: 'customerName',
+                fieldPath: 'customerName',
+                fieldName: 'Customer Name',
+                fieldType: 'string',
+                fieldValue: 'Alice',
+              },
+            ],
+          ],
+        },
+      ],
+    };
+    const nextContent: OperationFormConfirmation = {
+      ...initialContent,
+      substance: [
+        {
+          ...initialContent.substance[0],
+          rule: [
+            [
+              {
+                ...initialContent.substance[0].rule[0][0],
+                fieldValue: 'Bob',
+              },
+            ],
+          ],
+        },
+      ],
+    };
+
+    const { rerender } = render(<ApprovalForm {...createApprovalFormProps(initialContent)} />);
+
+    expect(screen.getByLabelText('Customer Name')).toHaveValue('Alice');
+
+    rerender(<ApprovalForm {...createApprovalFormProps(nextContent)} />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Customer Name')).toHaveValue('Bob');
+    });
+  });
+
   it('renders horizontal steps and only the current step form content', async () => {
     const { container, messageListItemContent } = renderApprovalForm();
 

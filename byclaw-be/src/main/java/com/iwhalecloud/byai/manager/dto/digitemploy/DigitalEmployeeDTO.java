@@ -129,11 +129,15 @@ public class DigitalEmployeeDTO extends SsResExtDigEmployee {
     private List<RelResourceInfo> relResourceInfoList;
 
     /**
-     * 关联技能编码列表（前端入参，字符数组）。
+     * 关联技能列表（前端入参）。兼容历史字符数组，新格式为对象数组：
+     * {skillCode, skillType, skillUrl, versionUrl}。
      * 写入时序列化为 JSON 字符串落到 {@link SsResExtDigEmployee#getSkills()} 列；
      * 编辑回显时由 findDetailsById 反序列化重新填充。
+     *
+     * 这里不能声明为 List<Map<String, Object>>，否则历史字符串数组会在 Jackson 反序列化阶段失败，
+     * 无法进入应用层的标准化兼容逻辑。
      */
-    private List<String> relSkills;
+    private List<Object> relSkills;
 
     /**
      * 关联工具编码列表（前端入参，字符数组）。不入库，仅作为运行期字段：

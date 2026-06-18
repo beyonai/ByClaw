@@ -18,6 +18,7 @@ import useTracker from '@/hooks/useTracker';
 
 import { ISession } from '@/typescript/session';
 import { IAgentCache } from '@/typescript/agent';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
 
 import styles from './index.module.less';
 
@@ -80,6 +81,7 @@ const DialogueCard = ({
 
   const { setAgentId, setSessionId, sessionId } = useGlobal();
   const { trackerEmployeeClick } = useTracker();
+  const { clearDetailPanel } = React.useContext(SiderContentContext);
 
   const { sessionLoading, editLoading, delLoading } = useSelector((state: ConnectState) => state.session);
   const { employeesList } = useSelector(({ employees }) => ({
@@ -214,6 +216,7 @@ const DialogueCard = ({
         }
 
         if (editingSessionId === sessionId) return;
+        clearDetailPanel?.();
 
         if (Array.isArray(item.sessionExts) && item.sessionExts.length > 0) {
           dispatch({

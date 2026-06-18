@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Breadcrumb, Button, Dropdown, Empty, Input, List, message, Modal, Tooltip, Typography } from 'antd';
+import { Breadcrumb, Button, Dropdown, Empty, Input, List, message, Tooltip, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import { trim } from 'lodash';
@@ -10,10 +10,8 @@ import PropertyDetail from '@/components/Resources/components/PropertyDetail';
 import InfiniteScrollAntdList from '@/layout/sider/components/InfiniteScrollAntdList';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import {
-  deleteSkill,
   queryDigEmployeeRelResourceAuth,
   queryResourceMembers,
-  qrySkillListByUserCode,
   uploadSkillZip,
 } from '@/pages/manager/service/resources';
 import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
@@ -32,7 +30,6 @@ import styles from './index.module.less';
 const { Title, Paragraph } = Typography;
 
 type ResourceSiderType = 'TOOL' | 'VIEW' | 'OBJECT' | 'SKILL';
-type SkillSourceType = 'bound' | 'uploaded';
 const PAGE_SIZE = 30;
 
 interface ResourceItem {
@@ -52,7 +49,7 @@ interface ResourceItem {
   propertyCode?: string;
   propertyGroup?: string;
   dataType?: string;
-  sourceType?: SkillSourceType;
+  sourceType?: string;
   skillPath?: string;
   skillDocObjectKey?: string;
   objectKey?: string;
@@ -90,7 +87,7 @@ const resourceConfigMap: Record<
     resourceBizTypeList: [ResourceTypeMap.VIEW],
   },
   OBJECT: {
-    icon: 'icon-mob-faxian02',
+    icon: 'icon-tongxun',
     labelId: 'common.resourceType.object',
     centerLabelId: 'resourceTabs.objectCenter',
     navigatePath: '/objectCenter',
@@ -98,7 +95,7 @@ const resourceConfigMap: Record<
     resourceBizTypeList: [ResourceTypeMap.OBJECT],
   },
   SKILL: {
-    icon: 'icon-a-changjing-line',
+    icon: 'icon-chajian',
     labelId: 'common.skill',
     centerLabelId: 'resourceTabs.skillCenter',
     navigatePath: '/skillCenter',
@@ -109,8 +106,6 @@ const resourceConfigMap: Record<
 
 const PROPERTY_RESOURCE_TYPE = 'PROPERTY';
 const SHARE_GRANT_TYPE = 'FORCE_USE';
-const SKILL_SOURCE_BOUND: SkillSourceType = 'bound';
-const SKILL_SOURCE_UPLOADED: SkillSourceType = 'uploaded';
 const UI_SKILL_MENU_CODE = 'menu_ui_agent';
 const UI_SKILL_MENU_NAME = '界面技能';
 
@@ -122,46 +117,24 @@ const getArrayData = (response: any) => {
   return [];
 };
 
-const getSkillSourceKey = (item: ResourceItem) =>
-  String(
-    item.resourceCode || item.resourceName || item.skillPath || item.objectKey || item.resourceId || ''
-  ).toLowerCase();
+const getResourceUniqueKey = (item: ResourceItem, index: number) => {
+  const id = item?.resourceId ?? item?.resourceSourcePkId ?? item?.resourceCode;
+  if (id === undefined || id === null || String(id) === '') {
+    return `__resource_index_${index}`;
+  }
+  return `${item?.resourceBizType || ''}:${String(id)}`;
+};
 
-const mapBoundSkillRows = (rows: any[]): ResourceItem[] =>
-  rows.map((item) => ({
-    ...item,
-    sourceType: SKILL_SOURCE_BOUND,
-  }));
-
-const mapUploadedSkillRows = (rows: any[]): ResourceItem[] =>
-  rows.map((item, index) => ({
-    ...item,
-    resourceId: String(item.skillPath || item.objectKey || item.resourceId || `uploaded-skill-${index}`),
-    resourceCode: item.skillCode || item.resourceCode,
-    resourceName: item.skillName || item.resourceName,
-    resourceDesc: item.skillPath || item.skillDescEn || item.resourceDesc,
-    resourceBizType: ResourceTypeMap.SKILL,
-    sourceType: SKILL_SOURCE_UPLOADED,
-    id: item.skillPath || item.objectKey || item.resourceId || `uploaded-skill-${index}`,
-  }));
-
-const mergeSkillRows = (boundRows: ResourceItem[], uploadedRows: ResourceItem[]) => {
-  const existedKeys = new Set(boundRows.map(getSkillSourceKey).filter(Boolean));
-  const dedupedUploadedRows = uploadedRows.filter((item) => {
-    const key = getSkillSourceKey(item);
-    if (key && existedKeys.has(key)) {
+const dedupeResourceList = (items: ResourceItem[]) => {
+  const seen = new Set<string>();
+  return items.filter((item, index) => {
+    const key = getResourceUniqueKey(item, index);
+    if (seen.has(key)) {
       return false;
     }
-    if (key) {
-      existedKeys.add(key);
-    }
+    seen.add(key);
     return true;
   });
-
-  return {
-    rows: [...boundRows, ...dedupedUploadedRows],
-    uploadedCount: dedupedUploadedRows.length,
-  };
 };
 
 const getGrantItem = (item: any) => ({
@@ -206,12 +179,12 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   const itemClickTimerRef = useRef<number | null>(null);
   const skillUploadInputRef = useRef<HTMLInputElement | null>(null);
   const keywordRef = useRef('');
+  const resourceListRef = useRef<ResourceItem[]>([]);
   const paginationRef = useRef({
     pageNum: 0,
     total: 0,
     loadedCount: 0,
   });
-  const uploadedSkillCountRef = useRef(0);
   const [searchValue, setSearchValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [resourceList, setResourceList] = useState<ResourceItem[]>([]);
@@ -233,6 +206,10 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   const [breadcrumb, setBreadcrumb] = useState<BreadcrumbItem[]>([]);
   const [currentLevelOriginalList, setCurrentLevelOriginalList] = useState<ResourceItem[]>([]); // 当前层级的原始列表，用于前端搜索
   const config = resourceConfigMap[resourceType];
+
+  useEffect(() => {
+    resourceListRef.current = resourceList;
+  }, [resourceList]);
 
   /**
    * 获取资源详情数据
@@ -374,40 +351,29 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
           resourceId: activeSiderAgent.resourceId,
           resourceBizTypeList: config.resourceBizTypeList,
         });
-        let rows = getArrayData(response);
+        const rows = getArrayData(response);
         const responsePageNum = Number(response?.pageNum) || pageNum;
-        let responseTotal = Number(response?.total) || 0;
+        const responseTotal = Number(response?.total) || 0;
 
-        if (resourceType === 'SKILL') {
-          rows = mapBoundSkillRows(rows);
-
-          if (reset) {
-            const uploadedResponse = await qrySkillListByUserCode({
-              userCode: userInfo?.userCode,
-              resourceId: activeSiderAgent.resourceId,
-              keyword: trim(queryKeyword),
-            });
-            const uploadedRows = mapUploadedSkillRows(getArrayData(uploadedResponse));
-            const merged = mergeSkillRows(rows, uploadedRows);
-            rows = merged.rows;
-            uploadedSkillCountRef.current = merged.uploadedCount;
-          }
-
-          responseTotal += uploadedSkillCountRef.current;
-        } else if (reset) {
-          uploadedSkillCountRef.current = 0;
-        }
-
-        const loadedCount = reset ? rows.length : paginationRef.current.loadedCount + rows.length;
+        const previousList = reset ? [] : resourceListRef.current;
+        const nextList = reset ? dedupeResourceList(rows) : dedupeResourceList([...previousList, ...rows]);
+        const loadedCount = nextList.length;
+        const hasNewUniqueRows = nextList.length > previousList.length;
         paginationRef.current = {
           pageNum: responsePageNum,
           total: responseTotal,
           loadedCount,
         };
-        setResourceList((prev) => (reset ? rows : [...prev, ...rows]));
-        setHasMore(responseTotal > 0 ? loadedCount < responseTotal : rows.length >= PAGE_SIZE);
+        resourceListRef.current = nextList;
+        setResourceList(nextList);
+        setHasMore(
+          responseTotal > 0
+            ? rows.length > 0 && loadedCount < responseTotal && (reset || hasNewUniqueRows)
+            : rows.length >= PAGE_SIZE && hasNewUniqueRows
+        );
       } catch {
         if (reset) {
+          resourceListRef.current = [];
           setResourceList([]);
           paginationRef.current = {
             pageNum: 0,
@@ -421,7 +387,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         setLoading(false);
       }
     },
-    [activeSiderAgent.resourceId, config.resourceBizTypeList, resourceType, userInfo?.userCode]
+    [activeSiderAgent.resourceId, config.resourceBizTypeList]
   );
 
   /**
@@ -551,7 +517,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     if (
       uploadFiles.some((file) => {
         const fileName = file.name.toLowerCase();
-        return !fileName.endsWith('.zip') && !fileName.endsWith('.tar.gz');
+        return !fileName.endsWith('.zip');
       })
     ) {
       message.error(intl.formatMessage({ id: 'resourceTabs.skillUpload.onlyZip' }));
@@ -648,75 +614,6 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     return intl.formatMessage({ id: 'resource.default' });
   };
 
-  const renderUploadedSkillDetail = (item: ResourceItem) => (
-    <div className={styles.uploadedSkillDetail}>
-      <div className={styles.uploadedSkillDetailTitle}>{item.resourceName}</div>
-      <div className={styles.uploadedSkillDetailItem}>
-        <div className={styles.uploadedSkillDetailLabel}>
-          {intl.formatMessage({ id: 'resourceTabs.skillDetail.sourceType' })}
-        </div>
-        <div className={styles.uploadedSkillDetailValue}>
-          {item.sourceType === SKILL_SOURCE_UPLOADED
-            ? intl.formatMessage({ id: 'resourceTabs.skillDetail.uploaded' })
-            : intl.formatMessage({ id: 'resourceTabs.skillDetail.bound' })}
-        </div>
-      </div>
-      {item.skillPath && (
-        <div className={styles.uploadedSkillDetailItem}>
-          <div className={styles.uploadedSkillDetailLabel}>
-            {intl.formatMessage({ id: 'resourceTabs.skillDetail.skillPath' })}
-          </div>
-          <div className={styles.uploadedSkillDetailValue}>{item.skillPath}</div>
-        </div>
-      )}
-      {item.skillDocObjectKey && (
-        <div className={styles.uploadedSkillDetailItem}>
-          <div className={styles.uploadedSkillDetailLabel}>
-            {intl.formatMessage({ id: 'resourceTabs.skillDetail.skillDocObjectKey' })}
-          </div>
-          <div className={styles.uploadedSkillDetailValue}>{item.skillDocObjectKey}</div>
-        </div>
-      )}
-      {item.resourceDesc && (
-        <div className={styles.uploadedSkillDetailItem}>
-          <div className={styles.uploadedSkillDetailLabel}>{intl.formatMessage({ id: 'common.description' })}</div>
-          <div className={styles.uploadedSkillDetailValue}>{item.resourceDesc}</div>
-        </div>
-      )}
-    </div>
-  );
-
-  const handleDeleteUploadedSkill = async (item: ResourceItem) => {
-    const skillPath = item.skillPath || item.objectKey || item.resourceId;
-    if (!skillPath) {
-      message.error(intl.formatMessage({ id: 'common.deleteFail' }));
-      return;
-    }
-
-    try {
-      const params: { skillPath: string; resourceId?: string | number; userCode?: string } = {
-        skillPath: String(skillPath),
-      };
-      if (activeSiderAgent.resourceId) {
-        params.resourceId = activeSiderAgent.resourceId;
-      }
-      if (userInfo?.userCode) {
-        params.userCode = userInfo.userCode;
-      }
-
-      await deleteSkill(params);
-      setResourceList((prev) =>
-        prev.filter((resource) => (resource.skillPath || resource.objectKey || resource.resourceId) !== skillPath)
-      );
-      clearDetailPanel?.();
-      message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
-      EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
-    } catch (error) {
-      console.error('技能删除失败：', error);
-      message.error(intl.formatMessage({ id: 'common.deleteFailed' }));
-    }
-  };
-
   const handleDetail = (item: ResourceItem) => {
     const { resourceBizType, resourceId } = item;
     const closeDetailPanel = () => clearDetailPanel?.();
@@ -727,11 +624,6 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     }
 
     if (resourceBizType === ResourceTypeMap.SKILL) {
-      if (item.sourceType === SKILL_SOURCE_UPLOADED) {
-        setDetailPanel?.(renderUploadedSkillDetail(item), { width: 350 });
-        return;
-      }
-
       if (resourceId) {
         setDetailPanel?.(
           <SkillDetailDrawer
@@ -866,19 +758,13 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
    * 渲染资源详情下拉菜单
    */
   const renderDetailDropdown = (item: ResourceItem) => {
-    const isUploadedSkill = item.resourceBizType === ResourceTypeMap.SKILL && item.sourceType === SKILL_SOURCE_UPLOADED;
     const menuItems = [
       {
         key: 'detail',
         label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.detail' })}</div>,
       },
     ];
-    if (isUploadedSkill) {
-      menuItems.push({
-        key: 'delete',
-        label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.delete' })}</div>,
-      });
-    } else if (item.resourceBizType !== PROPERTY_RESOURCE_TYPE) {
+    if (item.resourceBizType !== PROPERTY_RESOURCE_TYPE) {
       menuItems.push({
         key: 'share',
         label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.share' })}</div>,
@@ -897,16 +783,6 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
             domEvent.stopPropagation();
             if (key === 'share') {
               void handleShare(item);
-              return;
-            }
-            if (key === 'delete') {
-              Modal.confirm({
-                title: intl.formatMessage({ id: 'common.deleteTips' }),
-                content: item.resourceName,
-                okText: intl.formatMessage({ id: 'common.confirm' }),
-                cancelText: intl.formatMessage({ id: 'common.cancel' }),
-                onOk: () => handleDeleteUploadedSkill(item),
-              });
               return;
             }
             handleDetail(item);
@@ -1007,20 +883,35 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
           })}
         </Breadcrumb>
       )}
-      <Input
-        value={searchValue}
-        suffix={<SearchOutlined onClick={handleSearch} />}
-        placeholder={placeholder}
-        onChange={(event) => setSearchValue(event.target.value)}
-        onPressEnter={handleSearch}
-      />
+      <div className={styles.searchActionRow}>
+        <Input
+          className={styles.searchInput}
+          value={searchValue}
+          suffix={<SearchOutlined onClick={handleSearch} />}
+          placeholder={placeholder}
+          onChange={(event) => setSearchValue(event.target.value)}
+          onPressEnter={handleSearch}
+        />
+        {resourceType === 'SKILL' && (
+          <Button
+            size="small"
+            className={styles.skillUploadButton}
+            icon={<AntdIcon type="icon-a-Uploadshangchuan" />}
+            loading={skillUploading}
+            disabled={skillUploading}
+            onClick={handleSkillImportClick}
+          >
+            {intl.formatMessage({ id: 'resourceTabs.skillUpload.uploadButton' })}
+          </Button>
+        )}
+      </div>
       {resourceType === 'SKILL' && (
         <>
           <input
             ref={skillUploadInputRef}
             className={styles.skillUploadInput}
             type="file"
-            accept=".zip,.tar.gz"
+            accept=".zip"
             multiple
             onChange={handleSkillImportChange}
           />
@@ -1028,16 +919,17 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
             <Button
               size="small"
               className={styles.skillActionButton}
-              loading={skillUploading}
-              disabled={skillUploading}
-              onClick={handleSkillImportClick}
+              icon={<AntdIcon type="icon-a-changjing-line" />}
+              onClick={handleComplexSkillDevelop}
             >
-              {intl.formatMessage({ id: 'resourceTabs.skillUpload.uploadSkill' })}
-            </Button>
-            <Button size="small" className={styles.skillActionButton} onClick={handleComplexSkillDevelop}>
               {intl.formatMessage({ id: 'resourceTabs.skillUpload.complexSkillDevelop' })}
             </Button>
-            <Button size="small" className={styles.skillActionButton} onClick={handlePageSkillDevelop}>
+            <Button
+              size="small"
+              className={styles.skillActionButton}
+              icon={<AntdIcon type="icon-a-yemian-line" />}
+              onClick={handlePageSkillDevelop}
+            >
               {intl.formatMessage({ id: 'resourceTabs.skillUpload.pageSkillDevelop' })}
             </Button>
           </div>
@@ -1080,17 +972,6 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
                       <Tooltip title={item.resourceName}>
                         <span className={employeeStyles.nameRow}>
                           <span className={employeeStyles.nameText}>{item.resourceName}</span>
-                          {resourceType === 'SKILL' && item.sourceType && (
-                            <span
-                              className={`${styles.sourceTag} ${
-                                item.sourceType === SKILL_SOURCE_UPLOADED ? styles.uploadedSourceTag : ''
-                              }`}
-                            >
-                              {item.sourceType === SKILL_SOURCE_UPLOADED
-                                ? intl.formatMessage({ id: 'resourceTabs.skillDetail.uploaded' })
-                                : intl.formatMessage({ id: 'resourceTabs.skillDetail.bound' })}
-                            </span>
-                          )}
                         </span>
                       </Tooltip>
                     </Title>

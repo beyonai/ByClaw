@@ -1,11 +1,14 @@
 import React, { useCallback, useState, useEffect, useMemo } from 'react';
 import { Spin, message } from 'antd';
-import { useIntl } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import InfiniteScroll from '@/components/InfiniteScroll';
 import Empty from '@/components/Empty';
 import ResourceCard from '../ResourceCard';
 import { listResourceUseAuth, deleteResource, deleteKnowledge } from '@/pages/manager/service/resources';
+import { findDetailsById } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { useRequest } from '@/hooks/useRequest';
+import useGlobal from '@/hooks/useGlobal';
+import type { IState as IEmployeesState } from '@/models/useEmployees';
 import type { KnowledgeCapability } from '@/service/knowledgeCenter';
 import { buildResourceListFilterParam, getBaseResourceBizTypeList } from '../../utils';
 import styles from './index.module.less';
@@ -25,6 +28,18 @@ interface IResourceItem {
   canDelete?: boolean;
   canApplyUse?: boolean;
   canAuditUse?: boolean;
+  skillType?: string;
+  sourceType?: string;
+  version?: string;
+  skillUrl?: string;
+  skillPackageFormat?: string;
+  skillOriginalFilename?: string;
+  skillPackageSize?: number | string;
+  skillPackageHash?: string;
+  targetContent?: string;
+  syncStatus?: string;
+  syncError?: string;
+  lastSyncTime?: string;
 }
 
 interface ResourceListProps {
@@ -46,6 +61,21 @@ interface ResourceListProps {
 
 const PAGE_SIZE_DEFAULT = 30;
 
+const normalizeResponseData = (response: any) => response?.data ?? response;
+
+const collectInstalledResourceIds = (detail: any) => {
+  const installedIds = new Set<string>();
+  const relResourceList = Array.isArray(detail?.relResourceList) ? detail.relResourceList : [];
+  const relSkills = Array.isArray(detail?.relSkills) ? detail.relSkills : [];
+  [...relResourceList, ...relSkills].forEach((item: any) => {
+    const resourceId = item?.resourceId ?? item?.relResourceId ?? item?.skillId;
+    if (resourceId !== undefined && resourceId !== null && `${resourceId}` !== '') {
+      installedIds.add(`${resourceId}`);
+    }
+  });
+  return installedIds;
+};
+
 const ResourceList: React.FC<ResourceListProps> = ({
   resourceType,
   activeTab,
@@ -63,8 +93,17 @@ const ResourceList: React.FC<ResourceListProps> = ({
   const baseResourceBizTypeList = useMemo(() => getBaseResourceBizTypeList(resourceType), [resourceType]);
 
   const intl = useIntl();
+  const { agentInfo } = useGlobal();
+  const { userInfo, defaultDigEmployeeId } = useSelector(
+    ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
+      userInfo: user.userInfo,
+      defaultDigEmployeeId: employees.defaultDigEmployeeId,
+    })
+  );
+  const activeDigitalEmployeeId = agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
   const [loading, setLoading] = useState(false);
   const [list, setList] = useState<IResourceItem[]>([]);
+  const [installedResourceIds, setInstalledResourceIds] = useState<ReadonlySet<string>>(new Set());
   const [pageInfo, setPageInfo] = useState({
     pageNum: 1,
     pageSize: PAGE_SIZE_DEFAULT,
@@ -127,6 +166,28 @@ const ResourceList: React.FC<ResourceListProps> = ({
     getList({ pageIndex: 1 });
   }, [baseResourceBizTypeList, activeTab, catalogId, dropdownParam, getList]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (resourceType !== 'SKILL' || !activeDigitalEmployeeId) {
+      setInstalledResourceIds(new Set());
+      return () => {
+        cancelled = true;
+      };
+    }
+    findDetailsById({ resourceId: `${activeDigitalEmployeeId}` })
+      .then((res) => {
+        if (cancelled) return;
+        setInstalledResourceIds(collectInstalledResourceIds(normalizeResponseData(res)));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setInstalledResourceIds(new Set());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeDigitalEmployeeId, resourceType]);
+
   // 监听资源操作事件，刷新列表
   useEffect(() => {
     const handleResourceChanged = () => {
@@ -139,6 +200,24 @@ const ResourceList: React.FC<ResourceListProps> = ({
       window.removeEventListener('resourceDeleted', handleResourceChanged);
     };
   }, [onRefresh]);
+
+  useEffect(() => {
+    const handleResourceInstalled = (event: Event) => {
+      const resourceId = (event as CustomEvent<{ resourceId?: string | number }>).detail?.resourceId;
+      if (resourceType !== 'SKILL' || resourceId === undefined || resourceId === null || `${resourceId}` === '') {
+        return;
+      }
+      setInstalledResourceIds((prev) => {
+        const next = new Set(prev);
+        next.add(`${resourceId}`);
+        return next;
+      });
+    };
+    window.addEventListener('digitalEmployeeResourceInstalled', handleResourceInstalled);
+    return () => {
+      window.removeEventListener('digitalEmployeeResourceInstalled', handleResourceInstalled);
+    };
+  }, [resourceType]);
 
   const loadMore = useCallback(() => {
     if (loading || !hasMore) return;
@@ -200,6 +279,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
                     onCardClick={() => onDetail(item)}
                     actionConfig={{
                       scene: activeTab === 'personal' ? 'personal' : 'enterprise',
+                      installedResourceIds,
                       onEdit: () => onEdit(item),
                       onAuth: (authType) => onAuth(item, authType),
                       onApplyUse: () => onApplyUse(item),

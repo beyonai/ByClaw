@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
+import com.alibaba.fastjson2.JSON;
 import com.iwhalecloud.byai.common.constants.resource.DigitalEmployType;
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
@@ -18,6 +19,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.OperationLogService;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceRuntimeInfoResolver;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceEventService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
@@ -27,7 +29,9 @@ import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeInstallResour
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeIdDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SetDefaultDigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
 import com.iwhalecloud.byai.manager.vo.digitemploy.SetDefaultDigitalEmployeeResultVo;
@@ -52,6 +56,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -62,6 +67,7 @@ class DigitalEmployeeApplicationServiceTest {
 
     private SsResourceService ssResourceService;
     private SsResExtDigEmployeeService ssResExtDigEmployeeService;
+    private SsResExtSkillService ssResExtSkillService;
     private SsResourceRelDetailService ssResourceRelDetailService;
     private SuasSuperassistService suasSuperassistService;
     private OperationLogService operationLogService;
@@ -79,6 +85,7 @@ class DigitalEmployeeApplicationServiceTest {
     void setUp() {
         ssResourceService = mock(SsResourceService.class);
         ssResExtDigEmployeeService = mock(SsResExtDigEmployeeService.class);
+        ssResExtSkillService = mock(SsResExtSkillService.class);
         ssResourceRelDetailService = mock(SsResourceRelDetailService.class);
         suasSuperassistService = mock(SuasSuperassistService.class);
         operationLogService = mock(OperationLogService.class);
@@ -100,6 +107,7 @@ class DigitalEmployeeApplicationServiceTest {
         ReflectionTestUtils.setField(service, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
         ReflectionTestUtils.setField(service, "ssResExtDigEmployeeService", ssResExtDigEmployeeService);
+        ReflectionTestUtils.setField(service, "ssResExtSkillService", ssResExtSkillService);
         ReflectionTestUtils.setField(service, "ssResourceRelDetailService", ssResourceRelDetailService);
         ReflectionTestUtils.setField(service, "resourceRuntimeInfoResolver", new ResourceRuntimeInfoResolver());
         ReflectionTestUtils.setField(service, "suasSuperassistService", suasSuperassistService);
@@ -293,7 +301,8 @@ class DigitalEmployeeApplicationServiceTest {
 
         assertThat(extCaptor.getValue().getResourceId()).isEqualTo(301L);
         assertThat(extCaptor.getValue().getTagName()).isNull();
-        assertThat(extCaptor.getValue().getSkills()).isEqualTo("[\"1\",\"2\",\"3\"]");
+        assertThat(extCaptor.getValue().getSkills()).isEqualTo(
+            "[{\"skillCode\":\"1\",\"skillType\":\"hub\",\"skillUrl\":\"\",\"versionUrl\":\"\"},{\"skillCode\":\"2\",\"skillType\":\"hub\",\"skillUrl\":\"\",\"versionUrl\":\"\"},{\"skillCode\":\"3\",\"skillType\":\"hub\",\"skillUrl\":\"\",\"versionUrl\":\"\"}]");
     }
 
     @Test
@@ -487,6 +496,49 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
+    void rebuildAndSaveDigitalEmployeeRelSkills_writesStandardSkillJsonFromRelations() {
+        SsResExtDigEmployee extDigEmployee = new SsResExtDigEmployee();
+        extDigEmployee.setResourceId(100L);
+
+        SsResourceRelDetail skillRel = new SsResourceRelDetail();
+        skillRel.setResourceId(100L);
+        skillRel.setRelResourceId(300L);
+        SsResourceRelDetail objectRel = new SsResourceRelDetail();
+        objectRel.setResourceId(100L);
+        objectRel.setRelResourceId(400L);
+
+        SsResource skillResource = buildSkillResource(300L, 2L);
+        skillResource.setResourceCode("dws");
+        SsResource objectResource = new SsResource();
+        objectResource.setResourceId(400L);
+        objectResource.setResourceBizType(ResourceBizTypeEnum.OBJECT.name());
+
+        SsResExtSkill extSkill = new SsResExtSkill();
+        extSkill.setResourceId(300L);
+        extSkill.setSkillType("hub");
+        extSkill.setSkillUrl("resource/skill/zhangsan-hub/dws.zip");
+
+        when(ssResExtDigEmployeeService.findById(100L)).thenReturn(extDigEmployee);
+        when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of(skillRel, objectRel));
+        when(ssResourceService.findByIdList(List.of(300L, 400L))).thenReturn(List.of(skillResource, objectResource));
+        when(ssResourceService.findByIdList(List.of(300L))).thenReturn(List.of(skillResource));
+        when(ssResExtSkillService.findById(300L)).thenReturn(extSkill);
+
+        service.rebuildAndSaveDigitalEmployeeRelSkills(100L);
+
+        ArgumentCaptor<SsResExtDigEmployee> extCaptor = ArgumentCaptor.forClass(SsResExtDigEmployee.class);
+        verify(ssResExtDigEmployeeService, atLeastOnce()).update(extCaptor.capture());
+        List<Map> relSkills = JSON.parseArray(extCaptor.getValue().getSkills(), Map.class);
+        assertThat(relSkills).hasSize(1);
+        assertThat(relSkills.get(0))
+            .containsEntry("resourceId", 300)
+            .containsEntry("skillCode", "dws")
+            .containsEntry("skillType", "hub")
+            .containsEntry("skillUrl", "/byaiService/tool/downloadSkillZip?skillId=300")
+            .containsEntry("versionUrl", "/byaiService/tool/getSkillVersion?skillId=300");
+    }
+
+    @Test
     void updateDigitalEmployee_forcesDefaultPersonalAssistantToAssistantRuntime() {
         DigitalEmployeeDTO dto = new DigitalEmployeeDTO();
         dto.setResourceId(100L);
@@ -501,14 +553,12 @@ class DigitalEmployeeApplicationServiceTest {
         when(ssResourceService.findById(100L)).thenReturn(currentDefaultResource);
         when(ssResExtDigEmployeeService.findById(100L)).thenReturn(currentDefaultExt);
         when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of());
-        when(ssResourceRelDetailService.querySkillsForOpenApi(100L)).thenReturn(List.of());
-
         SsResource result = service.updateDigitalEmployee(dto);
 
         ArgumentCaptor<SsResource> resourceCaptor = ArgumentCaptor.forClass(SsResource.class);
         ArgumentCaptor<SsResExtDigEmployee> extCaptor = ArgumentCaptor.forClass(SsResExtDigEmployee.class);
         verify(ssResourceService).updateResourceEntity(resourceCaptor.capture());
-        verify(ssResExtDigEmployeeService).update(extCaptor.capture());
+        verify(ssResExtDigEmployeeService, atLeastOnce()).update(extCaptor.capture());
 
         assertThat(dto.getAgentType()).isEqualTo(DigitalEmployType.AGENT_TYPE_ASSISTANT.getCode());
         assertThat(result.getWorkerAgentType()).isEqualTo(WorkerAgentType.BYCLAW_EXE.getCode());
@@ -524,75 +574,107 @@ class DigitalEmployeeApplicationServiceTest {
         dto.setOwnerType(OwnerType.PERSONAL);
         dto.setAgentType(DigitalEmployType.AGENT_TYPE_ASSISTANT.getCode());
         dto.setSkills("[\"dws\",\"blucli\"]");
-        dto.setRelSkills(List.of("old"));
+        dto.setRelSkills(List.of(skillRel("old")));
 
         SsResource resource = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
         SsResExtDigEmployee ext = buildDigitalEmployeeExt(100L, "数字员工");
         ext.setSkills("[\"old\"]");
+        SsResource dwsSkill = buildSkillResource(300L, 2L);
+        dwsSkill.setResourceCode("dws");
+        SsResource blucliSkill = buildSkillResource(301L, 2L);
+        blucliSkill.setResourceCode("blucli");
+        SsResourceRelDetail dwsRel = new SsResourceRelDetail();
+        dwsRel.setResourceId(100L);
+        dwsRel.setRelResourceId(300L);
+        SsResourceRelDetail blucliRel = new SsResourceRelDetail();
+        blucliRel.setResourceId(100L);
+        blucliRel.setRelResourceId(301L);
 
         when(ssResourceService.findById(100L)).thenReturn(resource);
         when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
         when(ssResExtDigEmployeeService.findById(100L)).thenReturn(ext);
-        when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of());
-        when(ssResourceRelDetailService.querySkillsForOpenApi(100L)).thenReturn(List.of());
-
+        when(ssResourceService.getResourceListByCode(any())).thenReturn(List.of(dwsSkill, blucliSkill));
+        when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of()).thenReturn(List.of(dwsRel, blucliRel));
+        when(ssResourceService.findByIdList(List.of(300L, 301L))).thenReturn(List.of(dwsSkill, blucliSkill));
         service.updateDigitalEmployee(dto);
 
         ArgumentCaptor<SsResExtDigEmployee> extCaptor = ArgumentCaptor.forClass(SsResExtDigEmployee.class);
-        verify(ssResExtDigEmployeeService).update(extCaptor.capture());
+        verify(ssResExtDigEmployeeService, atLeastOnce()).update(extCaptor.capture());
 
-        assertThat(extCaptor.getValue().getSkills()).isEqualTo("[\"dws\",\"blucli\"]");
+        List<Map> relSkills = JSON.parseArray(extCaptor.getValue().getSkills(), Map.class);
+        assertThat(relSkills).hasSize(2);
+        assertThat(relSkills.get(0))
+            .containsEntry("resourceId", 300)
+            .containsEntry("skillCode", "dws")
+            .containsEntry("skillUrl", "/byaiService/tool/downloadSkillZip?skillId=300")
+            .containsEntry("versionUrl", "/byaiService/tool/getSkillVersion?skillId=300");
+        assertThat(relSkills.get(1))
+            .containsEntry("resourceId", 301)
+            .containsEntry("skillCode", "blucli")
+            .containsEntry("skillUrl", "/byaiService/tool/downloadSkillZip?skillId=301")
+            .containsEntry("versionUrl", "/byaiService/tool/getSkillVersion?skillId=301");
     }
 
     @Test
-    void findDetailsById_populatesRelSkillsFromStoredSkills() {
+    void findDetailsById_populatesRelSkillsFromRelations() {
         EmployeeIdDTO dto = new EmployeeIdDTO();
         dto.setResourceId(100L);
 
         DigitalEmployeeDetailsDTO detailsDTO = new DigitalEmployeeDetailsDTO();
         detailsDTO.setResourceId(100L);
         detailsDTO.setPrologue("{}");
-        detailsDTO.setSkills("[\"1\",\"2\",\"3\"]");
+        detailsDTO.setSkills("[\"stale\"]");
+        SsResource skillResource = buildSkillResource(300L, 2L);
+        skillResource.setResourceCode("dws");
+        SsResourceRelDetail skillRel = new SsResourceRelDetail();
+        skillRel.setResourceId(100L);
+        skillRel.setRelResourceId(300L);
 
         when(ssResExtDigEmployeeService.findDetailsById(100L)).thenReturn(detailsDTO);
         when(ssResourceService.findRelResource(100L)).thenReturn(List.of());
+        when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of(skillRel));
+        when(ssResourceService.findByIdList(List.of(300L))).thenReturn(List.of(skillResource));
         when(templateRuleInfoApplicationService.findMemoryConfigsByResourceIdAndUserId(100L, 1L)).thenReturn(List.of());
 
         DigitalEmployeeDetailsDTO result = service.findDetailsById(dto);
 
-        assertThat(result.getSkills()).isEqualTo("[\"1\",\"2\",\"3\"]");
-        assertThat(result.getRelSkills()).containsExactly("1", "2", "3");
+        List<Map> relSkills = JSON.parseArray(result.getSkills(), Map.class);
+        assertThat(relSkills).hasSize(1);
+        assertThat(relSkills.get(0))
+            .containsEntry("resourceId", 300)
+            .containsEntry("skillCode", "dws");
+        assertSkillCodes(result.getRelSkills(), "dws");
     }
 
     @Test
-    void applyInputRuntimeFieldsForResponse_usesSubmittedSkillsAndIgnoresSubmittedRelSkills() {
+    void applyInputRuntimeFieldsForResponse_keepsRelationBasedSkills() {
         DigitalEmployeeDetailsDTO details = new DigitalEmployeeDetailsDTO();
-        details.setSkills("[\"old\"]");
-        details.setRelSkills(List.of("old"));
+        details.setSkills("[{\"skillCode\":\"relation-skill\"}]");
+        details.setRelSkills(List.of(skillRel("relation-skill")));
 
         DigitalEmployeeDTO input = new DigitalEmployeeDTO();
         input.setSkills("[\"dws\",\"blucli\"]");
-        input.setRelSkills(List.of("old"));
+        input.setRelSkills(List.of(skillRel("old")));
 
         service.applyInputRuntimeFieldsForResponse(details, input);
 
-        assertThat(details.getSkills()).isEqualTo("[\"dws\",\"blucli\"]");
-        assertThat(details.getRelSkills()).containsExactly("dws", "blucli");
+        assertThat(details.getSkills()).isEqualTo("[{\"skillCode\":\"relation-skill\"}]");
+        assertSkillCodes(details.getRelSkills(), "relation-skill");
     }
 
     @Test
     void applyInputRuntimeFieldsForResponse_ignoresSubmittedRelSkillsWhenSkillsAbsent() {
         DigitalEmployeeDetailsDTO details = new DigitalEmployeeDetailsDTO();
         details.setSkills("[\"old\"]");
-        details.setRelSkills(List.of("old"));
+        details.setRelSkills(List.of(skillRel("old")));
 
         DigitalEmployeeDTO input = new DigitalEmployeeDTO();
-        input.setRelSkills(List.of("dws", "blucli"));
+        input.setRelSkills(List.of(skillRel("dws"), skillRel("blucli")));
 
         service.applyInputRuntimeFieldsForResponse(details, input);
 
         assertThat(details.getSkills()).isEqualTo("[\"old\"]");
-        assertThat(details.getRelSkills()).containsExactly("old");
+        assertSkillCodes(details.getRelSkills(), "old");
     }
 
     @Test
@@ -695,5 +777,18 @@ class DigitalEmployeeApplicationServiceTest {
         resource.setResourceId(resourceId);
         resource.setTagName(tagName);
         return resource;
+    }
+
+    private Map<String, Object> skillRel(String skillCode) {
+        return Map.of("skillCode", skillCode, "skillType", "hub", "skillUrl", "", "versionUrl", "");
+    }
+
+    private void assertSkillCodes(List<Object> relSkills, String... skillCodes) {
+        assertThat(relSkills).extracting(item -> ((Map<String, Object>) item).get("skillCode"))
+            .containsExactly((Object[]) skillCodes);
+        assertThat(relSkills).allSatisfy(item -> {
+            Map<String, Object> relSkill = (Map<String, Object>) item;
+            assertThat(relSkill.get("skillType")).isEqualTo("hub");
+        });
     }
 }

@@ -27,10 +27,14 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
+import com.iwhalecloud.byai.manager.mapper.users.UsersMapper;
 import com.iwhalecloud.byai.manager.qo.auth.AuthDetailQo;
+import com.iwhalecloud.byai.manager.qo.auth.ResourceMemberQueryQo;
 import com.iwhalecloud.byai.manager.qo.auth.ResourceUseApplyApproveQo;
 import com.iwhalecloud.byai.manager.qo.auth.ResourceUseApplyQo;
 import com.iwhalecloud.byai.manager.qo.auth.ResourceMemberSettingQo;
+import com.iwhalecloud.byai.manager.vo.auth.ResourceMemberItemVo;
+import com.iwhalecloud.byai.manager.vo.auth.ResourceMemberQueryResultVo;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import org.junit.jupiter.api.AfterEach;
@@ -310,6 +314,55 @@ class AuthApplicationServiceTest {
         service.setResourceUsers(qo);
 
         verify(privilegeGrantMapper).update(any(PrivilegeGrant.class), any(LambdaUpdateWrapper.class));
+    }
+
+    /**
+     * 历史/初始化资源可能只有 create_by，没有显式 ALLOW_MANAGE 授权记录。
+     * 查询资源成员时仍要把创建人展示为管理人员，避免详情页管理人员为空。
+     */
+    @Test
+    void queryResourceMembers_includesCreatorAsImplicitManagerAndUser() {
+        AuthApplicationService service = new AuthApplicationService();
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        UsersMapper usersMapper = mock(UsersMapper.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "usersMapper", usersMapper);
+
+        SsResource resource = new SsResource();
+        resource.setResourceId(400L);
+        resource.setResourceBizType(ResourceBizTypeEnum.SKILL.name());
+        resource.setCreateBy(10001L);
+        when(ssResourceMapper.selectById(400L)).thenReturn(resource);
+        when(privilegeGrantService.queryResourceMembers(eq(400L), eq(ResourceBizTypeEnum.SKILL.name()), any()))
+            .thenReturn(List.of());
+
+        Users creator = new Users();
+        creator.setUserId(10001L);
+        creator.setUserName("平台管理员");
+        when(usersMapper.selectById(10001L)).thenReturn(creator);
+
+        ResourceMemberQueryQo qo = new ResourceMemberQueryQo();
+        qo.setResourceId(400L);
+
+        ResourceMemberQueryResultVo result = service.queryResourceMembers(qo);
+
+        assertThat(result.getManagerList()).hasSize(1);
+        ResourceMemberItemVo manager = result.getManagerList().get(0);
+        assertThat(manager.getGrantToObjType()).isEqualTo(GrantToObjType.USER);
+        assertThat(manager.getGrantToObjId()).isEqualTo(10001L);
+        assertThat(manager.getGrantToObjName()).isEqualTo("平台管理员");
+        assertThat(manager.getGrantType()).isEqualTo(GrantType.ALLOW_MANAGE);
+        assertThat(manager.getGrantToType()).isEqualTo(Color.RED);
+
+        assertThat(result.getUseList()).hasSize(1);
+        ResourceMemberItemVo user = result.getUseList().get(0);
+        assertThat(user.getGrantToObjType()).isEqualTo(GrantToObjType.USER);
+        assertThat(user.getGrantToObjId()).isEqualTo(10001L);
+        assertThat(user.getGrantToObjName()).isEqualTo("平台管理员");
+        assertThat(user.getGrantType()).isEqualTo(GrantType.FORCE_USE);
+        assertThat(user.getGrantToType()).isEqualTo(Color.RED);
     }
 
     /**

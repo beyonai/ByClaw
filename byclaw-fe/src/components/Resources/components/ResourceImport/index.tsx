@@ -12,7 +12,7 @@ import type {
   ResourceImportItem,
   ResourceImportResult,
 } from '@/pages/manager/service/resources';
-import { importResource } from '@/pages/manager/service/resources';
+import { checkSkillImportConflicts, importResource } from '@/pages/manager/service/resources';
 
 interface ResourceImportProps {
   visible: boolean;
@@ -58,7 +58,7 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   const [activeDiffItem, setActiveDiffItem] = useState<ResourceImportItem | null>(null);
   const invalidFileMessageShownRef = useRef(false);
 
-  const accept = resourceType === 'VIEW' || resourceType === 'OBJECT' ? '.zip' : '.json';
+  const accept = resourceType === 'VIEW' || resourceType === 'OBJECT' || resourceType === 'SKILL' ? '.zip' : '.json';
   const templateConfig = resourceImportTemplateMap[resourceType];
   const templateUrl = templateConfig
     ? getRuntimeActualUrl(`/download/resource-import-templates/${templateConfig.fileName}`)
@@ -179,7 +179,9 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   };
 
   const isZipSummaryMode =
-    currentStep === 'import' && !!importResult && (resourceType === 'VIEW' || resourceType === 'OBJECT');
+    currentStep === 'import' &&
+    !!importResult &&
+    (resourceType === 'VIEW' || resourceType === 'OBJECT' || resourceType === 'SKILL');
   const isImportSummaryMode =
     currentStep === 'import' && !!importResult && (isZipSummaryMode || (importResult.items || []).length > 1);
 
@@ -194,6 +196,35 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   const failedItems = (importResult?.items || []).filter((item) => !item.success);
   const isNoPermissionUpdateError = (item: ResourceImportItem) =>
     String(item.message || '').includes('无权限通过导入进行资源更新');
+
+  const buildLocalImportFormData = () => {
+    const formData = new FormData();
+    localFiles.forEach((file) => {
+      formData.append('file', file);
+    });
+    formData.append('ownerType', activeTab);
+    formData.append('catalogId', `${selectedCatalogId || '-1'}`);
+    formData.append('type', 'external');
+    return formData;
+  };
+
+  const confirmSkillOverwrite = (updatedItems: ResourceImportItem[] = []) => {
+    return new Promise<boolean>((resolve) => {
+      Modal.confirm({
+        title: intl.formatMessage({ id: 'resource.import.skillOverwriteConfirmTitle' }),
+        content: (
+          <div>
+            <div>{intl.formatMessage({ id: 'resource.import.skillOverwriteConfirmDesc' })}</div>
+            <div className={styles.confirmConflictList}>{buildRangeText(updatedItems)}</div>
+          </div>
+        ),
+        okText: intl.formatMessage({ id: 'common.confirm' }),
+        cancelText: intl.formatMessage({ id: 'common.cancel' }),
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      });
+    });
+  };
 
   const handleImportComplete = () => {
     setImportResult(null);
@@ -213,17 +244,31 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
     setImportLoading(true);
     try {
       if (importTab === 'localFile' && localFiles.length) {
-        const formData = new FormData();
-        localFiles.forEach((file) => {
-          formData.append('file', file);
-        });
-        formData.append('ownerType', activeTab);
-        formData.append('catalogId', `${selectedCatalogId || '-1'}`);
-        formData.append('type', 'external');
+        if (resourceType === 'SKILL') {
+          const conflictData = (await checkSkillImportConflicts(buildLocalImportFormData())) as
+            | ResourceImportResult
+            | undefined;
+          const conflictFailedItems = (conflictData?.items || []).filter((item) => !item.success);
+          if (conflictFailedItems.length) {
+            setImportResult(conflictData || null);
+            setActiveDiffItem(null);
+            return;
+          }
+          if ((conflictData?.updatedItems || []).length) {
+            const confirmed = await confirmSkillOverwrite(conflictData?.updatedItems || []);
+            if (!confirmed) {
+              return;
+            }
+          }
+        }
+        const formData = buildLocalImportFormData();
         const importData = (await importFunc(formData)) as ResourceImportResult | undefined;
         if (
           importData &&
-          (resourceType === 'VIEW' || resourceType === 'OBJECT' || (importData.items || []).length > 1)
+          (resourceType === 'VIEW' ||
+            resourceType === 'OBJECT' ||
+            resourceType === 'SKILL' ||
+            (importData.items || []).length > 1)
         ) {
           setImportResult(importData);
           setActiveDiffItem(null);
@@ -356,6 +401,7 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
                   {(importResult?.updatedItems || []).map((item) => (
                     <div key={`${item.resourceId || item.resourceCode}`} className={styles.updatedItem}>
                       <span>{`${item.resourceCode}：${item.resourceName}`}</span>
+                      {item.message ? <span className={styles.diffSummary}>{item.message}</span> : null}
                       {item.diffSummary ? <span className={styles.diffSummary}>{item.diffSummary}</span> : null}
                       {(item.diffDetails || []).length ? (
                         <Button type="link" onClick={() => setActiveDiffItem(item)}>

@@ -22,4 +22,6 @@ public class FixedEntryOperationCapabilityVo {
     private Boolean canImportEnterpriseView;
 
     private Boolean canImportEnterpriseObject;
+
+    private Boolean canImportEnterpriseSkill;
 }
