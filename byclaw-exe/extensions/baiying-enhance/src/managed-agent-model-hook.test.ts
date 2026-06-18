@@ -270,4 +270,149 @@ describe("syncManagedAgentSessionModelForInbound", () => {
     expect(entry.modelOverride).toBe("qwen3.6-27b");
     expect(entry.modelOverrideSource).toBe("auto");
   });
+
+  it("flushes and waits when the target managed agent model is not loaded yet", async () => {
+    const entry: Record<string, unknown> = {
+      modelProvider: "openai",
+      model: "gpt-5.5",
+    };
+    let currentCfg: any = {
+      session: { store: "(multiple)" },
+      agents: { list: [] },
+      models: { providers: {} },
+    };
+    const updateSessionStoreEntry = vi.fn(async (_params) => {
+      const mutator = _params.update as (entry: Record<string, unknown>) => Promise<void>;
+      await mutator(entry);
+    });
+    const flushNow = vi.fn(async () => {
+      setTimeout(() => {
+        currentCfg = {
+          session: { store: "(multiple)" },
+          agents: {
+            list: [
+              {
+                id: "baiying-agent-10000455",
+                model: { primary: "baiying-m-10004000/qwen3.6-27b" },
+              },
+            ],
+          },
+          models: {
+            providers: {
+              "baiying-m-10004000": {
+                models: [{ id: "qwen3.6-27b" }],
+              },
+            },
+          },
+        };
+      }, 20);
+    });
+    const api = {
+      runtime: {
+        config: {
+          current: () => currentCfg,
+          loadConfig: () => currentCfg,
+        },
+        agent: {
+          session: {
+            resolveStorePath: () => "/tmp/sessions.json",
+            updateSessionStoreEntry,
+          },
+        },
+      },
+    } as never;
+
+    await syncManagedAgentSessionModelForInbound({
+      api,
+      sessionKey: "agent:baiying-agent-10000455:byai-channel:direct:10006251",
+      flushNow,
+      runtimeConfigWaitMs: 300,
+    });
+
+    expect(flushNow).toHaveBeenCalledOnce();
+    expect(updateSessionStoreEntry).toHaveBeenCalledOnce();
+    expect(entry.providerOverride).toBe("baiying-m-10004000");
+    expect(entry.modelOverride).toBe("qwen3.6-27b");
+  });
+
+  it("uses the post-flush fallback model instead of a stale registered model", async () => {
+    const entry: Record<string, unknown> = {
+      modelProvider: "baiying-m-old",
+      model: "expired-model",
+    };
+    let diskCfg: any = {
+      session: { store: "(multiple)" },
+      agents: {
+        list: [
+          {
+            id: "baiying-agent-10000455",
+            model: { primary: "baiying-m-old/expired-model" },
+          },
+        ],
+      },
+      models: {
+        providers: {
+          "baiying-m-old": {
+            models: [{ id: "expired-model" }],
+          },
+        },
+      },
+    };
+    let currentCfg = structuredClone(diskCfg);
+    const updateSessionStoreEntry = vi.fn(async (_params) => {
+      const mutator = _params.update as (entry: Record<string, unknown>) => Promise<void>;
+      await mutator(entry);
+    });
+    const flushNow = vi.fn(async () => {
+      diskCfg = {
+        session: { store: "(multiple)" },
+        agents: {
+          list: [
+            {
+              id: "baiying-agent-10000455",
+              model: { primary: "baiying-m-default/default-llm" },
+            },
+          ],
+        },
+        models: {
+          providers: {
+            "baiying-m-default": {
+              models: [{ id: "default-llm" }],
+            },
+          },
+        },
+      };
+      setTimeout(() => {
+        currentCfg = structuredClone(diskCfg);
+      }, 20);
+    });
+    const api = {
+      runtime: {
+        config: {
+          current: () => currentCfg,
+          loadConfig: () => diskCfg,
+        },
+        agent: {
+          session: {
+            resolveStorePath: () => "/tmp/sessions.json",
+            updateSessionStoreEntry,
+          },
+        },
+      },
+      logger: { warn: vi.fn() },
+    } as never;
+
+    await syncManagedAgentSessionModelForInbound({
+      api,
+      sessionKey: "agent:baiying-agent-10000455:byai-channel:direct:10006251",
+      flushNow,
+      flushBeforeResolve: true,
+      runtimeConfigWaitMs: 300,
+    });
+
+    expect(flushNow).toHaveBeenCalledOnce();
+    expect(updateSessionStoreEntry).toHaveBeenCalledOnce();
+    expect(entry.providerOverride).toBe("baiying-m-default");
+    expect(entry.modelOverride).toBe("default-llm");
+  });
 });

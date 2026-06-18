@@ -25,7 +25,9 @@ export type AimodelDefaultRunSyncDeps = {
     api: OpenClawPluginApi;
     redisJsonStore: BaiyingRedisJsonStore;
     pluginConfig: BaiyingEnhancePluginConfig;
-    getFlushNow: () => (() => Promise<void>) | undefined;
+    getFlushNow: () =>
+        | ((opts?: { fullWorkspaceReseed?: boolean; deletedSourceKeys?: string[] }) => Promise<void>)
+        | undefined;
     aimodelSecretResolverScriptPath?: string;
 };
 
@@ -37,6 +39,14 @@ export type AimodelDefaultRunSyncOptions = {
      * session transcript lock.
      */
     allowConfigMutation?: boolean;
+    /**
+     * Wait for OpenClaw hot reload to expose the newly written model provider
+     * through runtime config before returning an override. This is important for
+     * first inbound messages, where using the override before the model catalog
+     * is live would only trade one Unknown model failure for another.
+     */
+    runtimeConfigWaitMs?: number;
+    runtimeConfigPollMs?: number;
 };
 
 type ResolvedDefaultBundle = {
@@ -65,6 +75,29 @@ function isDefaultModelRegisteredInCurrentConfig(
         provider,
         model,
     );
+}
+
+async function waitForDefaultModelRegisteredInCurrentConfig(
+    api: OpenClawPluginApi,
+    provider: string,
+    model: string,
+    options?: AimodelDefaultRunSyncOptions,
+): Promise<boolean> {
+    const timeoutMs = options?.runtimeConfigWaitMs ?? 250;
+    const pollMs = options?.runtimeConfigPollMs ?? 50;
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+
+    for (;;) {
+        if (isDefaultModelRegisteredInCurrentConfig(api, provider, model)) {
+            return true;
+        }
+        if (Date.now() >= deadline) {
+            return false;
+        }
+        await new Promise((resolveDelay) =>
+            setTimeout(resolveDelay, Math.max(10, pollMs)),
+        );
+    }
 }
 
 function isDefaultModelRegisteredOnDisk(
@@ -226,14 +259,12 @@ export async function resolveMainDefaultAimodelOnAgentRun(
             bundle,
             reason: "main run aimodel config repair",
         });
-        await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
-        if (
-            isDefaultModelRegisteredInCurrentConfig(
-                deps.api,
-                override.providerOverride,
-                override.modelOverride,
-            )
-        ) {
+        if (await waitForDefaultModelRegisteredInCurrentConfig(
+            deps.api,
+            override.providerOverride,
+            override.modelOverride,
+            options,
+        )) {
             return override;
         }
         deps.api.logger.warn(
@@ -289,14 +320,12 @@ export async function resolveMainDefaultAimodelOnAgentRun(
         await saveAimodelDefaultLlmIndex(indexPath, snapshot, warnLog);
     }
 
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
-    if (
-        isDefaultModelRegisteredInCurrentConfig(
-            deps.api,
-            override.providerOverride,
-            override.modelOverride,
-        )
-    ) {
+    if (await waitForDefaultModelRegisteredInCurrentConfig(
+        deps.api,
+        override.providerOverride,
+        override.modelOverride,
+        options,
+    )) {
         return override;
     }
 
