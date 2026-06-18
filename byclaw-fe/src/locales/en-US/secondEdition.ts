@@ -259,6 +259,8 @@ export default {
   'fileBrowser.copy.noSubFolder': 'No subfolders here. You can save directly to this folder',
   'fileBrowser.copy.success': 'Copied successfully',
   'fileBrowser.copy.failed': 'Copy failed',
+  'fileBrowser.upload.changeDirectory': 'Change Directory',
+  'fileBrowser.upload.selectDirectoryTitle': 'Select Upload Directory',
   'fileBrowser.save.missingResource': 'Failed to get {target} resource',
   'fileBrowser.save.saving': 'Saving to {target}',
   'fileBrowser.save.success': 'Saved to {target}',

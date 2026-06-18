@@ -155,6 +155,48 @@ const getBundledSkillCode = (item: any) => {
 const normalizeBundledSkillCodes = (skills: any[] = []) =>
   compact(skills.map((item) => `${getBundledSkillCode(item) || ''}`.trim()));
 
+const normalizeBundledSkillItems = (skills: any[] = [], options: any[] = []) =>
+  compact(
+    skills.map((item) => {
+      const rawCode = `${getBundledSkillCode(item) || ''}`.trim();
+      const option =
+        options.find((skill) =>
+          [
+            skill?.value,
+            skill?.skillCode,
+            skill?.resourceCode,
+            skill?.code,
+            skill?.resourceId,
+            skill?.id,
+            skill?.label,
+            skill?.resourceName,
+            skill?.itemName,
+            skill?.name,
+          ]
+            .filter((value) => value !== undefined && value !== null)
+            .some((value) => `${value}`.trim() === rawCode)
+        ) || (typeof item === 'object' && item !== null ? item : null);
+
+      const resourceId = option?.resourceId || option?.skillId || option?.id;
+      const skillCode = `${
+        option?.skillCode || option?.resourceCode || option?.value || option?.code || rawCode || ''
+      }`.trim();
+      const normalized = {
+        resourceId,
+        skillCode,
+        skillType: option?.skillType,
+        skillUrl: option?.skillUrl,
+        versionUrl: option?.versionUrl,
+      };
+      Object.keys(normalized).forEach((key) => {
+        if (normalized[key] === undefined || normalized[key] === null || normalized[key] === '') {
+          delete normalized[key];
+        }
+      });
+      return normalized.skillCode || normalized.resourceId ? normalized : null;
+    })
+  );
+
 const mapTemplatePromptsToConfigList = (prompts: any[] = [], templateKey?: string) =>
   prompts.map((item, index) => ({
     paramGroupCode: templateKey || 'TEMPLATE_DIGITAL_EMPLOYEE',
@@ -984,13 +1026,29 @@ const ConfigForm = (props) => {
 
   const updateBundledSkills = useCallback(
     async (nextSkills = []) => {
-      const normalizedSkills = normalizeBundledSkillCodes(nextSkills);
+      const normalizedSkills = normalizeBundledSkillItems(nextSkills, bundledSkillOptions);
       form.setFieldsValue({ bundledSkills: normalizedSkills });
       await syncRoleToForm({ bundledSkills: normalizedSkills });
       updateResource();
     },
-    [form, syncRoleToForm, updateResource]
+    [bundledSkillOptions, form, syncRoleToForm, updateResource]
   );
+
+  useEffect(() => {
+    if (!bundledSkillOptions.length) {
+      return;
+    }
+    const currentSkills = form.getFieldValue('bundledSkills') || [];
+    if (!Array.isArray(currentSkills) || currentSkills.length === 0) {
+      return;
+    }
+    const normalizedSkills = normalizeBundledSkillItems(currentSkills, bundledSkillOptions);
+    if (JSON.stringify(currentSkills) === JSON.stringify(normalizedSkills)) {
+      return;
+    }
+    form.setFieldsValue({ bundledSkills: normalizedSkills });
+    syncRoleToForm({ bundledSkills: normalizedSkills });
+  }, [bundledSkillOptions, form, syncRoleToForm]);
 
   const filteredBundledSkillOptions = useMemo(() => {
     const keyword = trim(bundledSkillSearchName).toLowerCase();
