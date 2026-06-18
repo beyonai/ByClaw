@@ -30,12 +30,56 @@ MONITORING_PROMETHEUS_PVC_SIZE="${MONITORING_PROMETHEUS_PVC_SIZE:-50Gi}"
 MONITORING_GRAFANA_PVC_SIZE="${MONITORING_GRAFANA_PVC_SIZE:-10Gi}"
 IMAGE_PROMETHEUS="${IMAGE_PROMETHEUS:-quay.io/prometheus/prometheus:v2.55.1}"
 IMAGE_ALERTMANAGER="${IMAGE_ALERTMANAGER:-quay.io/prometheus/alertmanager:v0.27.0}"
+IMAGE_PROMETHEUS_WEBHOOK_DINGTALK="${IMAGE_PROMETHEUS_WEBHOOK_DINGTALK:-timonwong/prometheus-webhook-dingtalk:v2.1.0}"
 IMAGE_NODE_EXPORTER="${IMAGE_NODE_EXPORTER:-quay.io/prometheus/node-exporter:v1.8.2}"
 IMAGE_KUBE_STATE_METRICS="${IMAGE_KUBE_STATE_METRICS:-m.daocloud.io/registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.14.0}"
 IMAGE_GRAFANA="${IMAGE_GRAFANA:-grafana/grafana:11.3.1}"
 NS_SERVICE="${NS_SERVICE:-by-service}"
 OPENSANDBOX_WORKLOAD_NAMESPACE="${OPENSANDBOX_WORKLOAD_NAMESPACE:-$NS_SERVICE}"
 ALERTMANAGER_WEBHOOK_URL="${ALERTMANAGER_WEBHOOK_URL:-http://byclaw-be.${NS_SERVICE}.svc.cluster.local:8086/byaiService/sandbox/autoscale/alerts}"
+SANDBOX_AUTOSCALE_DINGTALK_ENABLED="${SANDBOX_AUTOSCALE_DINGTALK_ENABLED:-false}"
+SANDBOX_AUTOSCALE_DINGTALK_SERVICE_NAME="${SANDBOX_AUTOSCALE_DINGTALK_SERVICE_NAME:-prometheus-webhook-dingtalk}"
+SANDBOX_AUTOSCALE_DINGTALK_TARGET="${SANDBOX_AUTOSCALE_DINGTALK_TARGET:-sandbox}"
+SANDBOX_AUTOSCALE_DINGTALK_TIMEOUT="${SANDBOX_AUTOSCALE_DINGTALK_TIMEOUT:-5s}"
+SANDBOX_AUTOSCALE_DINGTALK_SEND_RESOLVED="${SANDBOX_AUTOSCALE_DINGTALK_SEND_RESOLVED:-false}"
+SANDBOX_AUTOSCALE_DINGTALK_WEBHOOK_URL="${SANDBOX_AUTOSCALE_DINGTALK_WEBHOOK_URL:-}"
+SANDBOX_AUTOSCALE_DINGTALK_SECRET="${SANDBOX_AUTOSCALE_DINGTALK_SECRET:-}"
+SANDBOX_AUTOSCALE_DINGTALK_RECEIVER_URL="${SANDBOX_AUTOSCALE_DINGTALK_RECEIVER_URL:-http://${SANDBOX_AUTOSCALE_DINGTALK_SERVICE_NAME}.${NS_MONITORING}.svc.cluster.local:8060/dingtalk/${SANDBOX_AUTOSCALE_DINGTALK_TARGET}/send}"
+
+is_true() {
+    case "${1:-}" in
+        true|TRUE|True|1|yes|YES|Yes|y|Y|on|ON|On)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+SANDBOX_AUTOSCALE_DINGTALK_ACTIVE=false
+SANDBOX_AUTOSCALE_DINGTALK_SEND_RESOLVED_VALUE=false
+ALERTMANAGER_DINGTALK_WEBHOOK_CONFIG=""
+PROMETHEUS_WEBHOOK_DINGTALK_SECRET_CONFIG=""
+if is_true "${SANDBOX_AUTOSCALE_DINGTALK_ENABLED}"; then
+    SANDBOX_AUTOSCALE_DINGTALK_ACTIVE=true
+    if is_true "${SANDBOX_AUTOSCALE_DINGTALK_SEND_RESOLVED}"; then
+        SANDBOX_AUTOSCALE_DINGTALK_SEND_RESOLVED_VALUE=true
+    fi
+    if [ -z "${SANDBOX_AUTOSCALE_DINGTALK_WEBHOOK_URL}" ]; then
+        echo "Error: SANDBOX_AUTOSCALE_DINGTALK_ENABLED=true requires SANDBOX_AUTOSCALE_DINGTALK_WEBHOOK_URL." >&2
+        exit 1
+    fi
+    if [ -z "${SANDBOX_AUTOSCALE_DINGTALK_TARGET}" ]; then
+        echo "Error: SANDBOX_AUTOSCALE_DINGTALK_TARGET cannot be empty when DingTalk alerting is enabled." >&2
+        exit 1
+    fi
+    ALERTMANAGER_DINGTALK_WEBHOOK_CONFIG="          - url: \"${SANDBOX_AUTOSCALE_DINGTALK_RECEIVER_URL}\"
+            send_resolved: ${SANDBOX_AUTOSCALE_DINGTALK_SEND_RESOLVED_VALUE}"
+    if [ -n "${SANDBOX_AUTOSCALE_DINGTALK_SECRET}" ]; then
+        PROMETHEUS_WEBHOOK_DINGTALK_SECRET_CONFIG="        secret: \"${SANDBOX_AUTOSCALE_DINGTALK_SECRET}\""
+    fi
+fi
 
 kubectl_cmd() {
     if command -v k3s >/dev/null 2>&1; then
@@ -82,6 +126,9 @@ wait_monitoring_ready() {
     echo "========== Waiting for monitoring =========="
     kubectl_cmd -n "$NS_MONITORING" rollout status deploy/prometheus --timeout="${timeout}s"
     kubectl_cmd -n "$NS_MONITORING" rollout status deploy/alertmanager --timeout="${timeout}s"
+    if [ "${SANDBOX_AUTOSCALE_DINGTALK_ACTIVE}" = "true" ]; then
+        kubectl_cmd -n "$NS_MONITORING" rollout status "deploy/${SANDBOX_AUTOSCALE_DINGTALK_SERVICE_NAME}" --timeout="${timeout}s"
+    fi
     kubectl_cmd -n "$NS_MONITORING" rollout status deploy/grafana --timeout="${timeout}s"
     kubectl_cmd -n "$NS_MONITORING" rollout status deploy/kube-state-metrics --timeout="${timeout}s"
     kubectl_cmd -n "$NS_MONITORING" rollout status ds/node-exporter --timeout="${timeout}s"
@@ -196,12 +243,13 @@ data:
       group_by: ["alertname", "namespace", "pod"]
       group_wait: ${ALERTMANAGER_AUTOSCALE_GROUP_WAIT:-5s}
       group_interval: ${ALERTMANAGER_AUTOSCALE_GROUP_INTERVAL:-1m}
-      repeat_interval: 30m
+      repeat_interval: ${ALERTMANAGER_AUTOSCALE_REPEAT_INTERVAL:-5m}
     receivers:
       - name: byclaw-autoscale
         webhook_configs:
           - url: "${ALERTMANAGER_WEBHOOK_URL}"
             send_resolved: false
+${ALERTMANAGER_DINGTALK_WEBHOOK_CONFIG}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -216,30 +264,36 @@ data:
         rules:
           - alert: OpenClawSandboxCpuHigh
             expr: |
-              label_replace(
+              (
+                label_replace(
+                  sum by (namespace, pod) (
+                    rate(container_cpu_usage_seconds_total{
+                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                    container="sandbox",
+                    pod=~"[0-9a-f-]{36}-[0-9]+"
+                  }[${SANDBOX_AUTOSCALE_CPU_RATE_WINDOW:-1m}])
+                )
+                /
                 sum by (namespace, pod) (
-                  rate(container_cpu_usage_seconds_total{
+                  kube_pod_container_resource_requests{
+                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                    container="sandbox",
+                    resource="cpu"
+                  }
+                ) > ${SANDBOX_AUTOSCALE_CPU_HIGH_RATIO:-1.00}
+                and on (namespace, pod)
+                kube_pod_status_phase{
                   namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                  container="sandbox",
+                  phase="Running",
                   pod=~"[0-9a-f-]{36}-[0-9]+"
-                }[${SANDBOX_AUTOSCALE_CPU_RATE_WINDOW:-1m}])
+                } == 1,
+                  "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
+                )
+                * on (sandboxId) group_left(userCode, profileKey)
+                byclaw_sandbox_autoscale_runtime_info
               )
-              /
-              sum by (namespace, pod) (
-                kube_pod_container_resource_requests{
-                  namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                  container="sandbox",
-                  resource="cpu"
-                }
-              ) > ${SANDBOX_AUTOSCALE_CPU_HIGH_RATIO:-1.00}
-              and on (namespace, pod)
-              kube_pod_status_phase{
-                namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                phase="Running",
-                pod=~"[0-9a-f-]{36}-[0-9]+"
-              } == 1,
-                "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
-              )
+              unless on (sandboxId)
+              byclaw_sandbox_autoscale_boundary_blacklist{direction="up"} == 1
             for: ${SANDBOX_AUTOSCALE_CPU_HIGH_FOR:-30s}
             labels:
               severity: warning
@@ -247,36 +301,43 @@ data:
               triggerSource: PROMETHEUS_ALERT
               reasonCode: metrics.cpu.high
               resizeType: IN_PLACE
+              resizeDirection: up
             annotations:
               summary: "OpenClaw 沙箱 CPU 持续偏高"
               reason_detail: "CPU 使用率连续 ${SANDBOX_AUTOSCALE_CPU_HIGH_FOR:-30s} 超过 request 的 ${SANDBOX_AUTOSCALE_CPU_HIGH_PERCENT:-100}%，建议原地升一级规格。pod={{ \$labels.pod }} value={{ \$value }}"
 
           - alert: OpenClawSandboxMemoryHigh
             expr: |
-              label_replace(
+              (
+                label_replace(
+                  sum by (namespace, pod) (
+                    container_memory_working_set_bytes{
+                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                    container="sandbox",
+                    pod=~"[0-9a-f-]{36}-[0-9]+"
+                  }
+                )
+                /
                 sum by (namespace, pod) (
-                  container_memory_working_set_bytes{
+                  kube_pod_container_resource_requests{
+                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                    container="sandbox",
+                    resource="memory"
+                  }
+                ) > ${SANDBOX_AUTOSCALE_MEMORY_HIGH_RATIO:-0.55}
+                and on (namespace, pod)
+                kube_pod_status_phase{
                   namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                  container="sandbox",
+                  phase="Running",
                   pod=~"[0-9a-f-]{36}-[0-9]+"
-                }
+                } == 1,
+                  "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
+                )
+                * on (sandboxId) group_left(userCode, profileKey)
+                byclaw_sandbox_autoscale_runtime_info
               )
-              /
-              sum by (namespace, pod) (
-                kube_pod_container_resource_requests{
-                  namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                  container="sandbox",
-                  resource="memory"
-                }
-              ) > ${SANDBOX_AUTOSCALE_MEMORY_HIGH_RATIO:-0.55}
-              and on (namespace, pod)
-              kube_pod_status_phase{
-                namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                phase="Running",
-                pod=~"[0-9a-f-]{36}-[0-9]+"
-              } == 1,
-                "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
-              )
+              unless on (sandboxId)
+              byclaw_sandbox_autoscale_boundary_blacklist{direction="up"} == 1
             for: ${SANDBOX_AUTOSCALE_MEMORY_HIGH_FOR:-15s}
             labels:
               severity: warning
@@ -284,36 +345,43 @@ data:
               triggerSource: PROMETHEUS_ALERT
               reasonCode: metrics.memory.high
               resizeType: IN_PLACE
+              resizeDirection: up
             annotations:
               summary: "OpenClaw 沙箱内存持续偏高"
               reason_detail: "内存 Working Set 连续 ${SANDBOX_AUTOSCALE_MEMORY_HIGH_FOR:-15s} 超过 request 的 ${SANDBOX_AUTOSCALE_MEMORY_HIGH_PERCENT:-55}%，建议原地升一级规格。pod={{ \$labels.pod }} value={{ \$value }}"
 
           - alert: OpenClawSandboxMemoryCritical
             expr: |
-              label_replace(
+              (
+                label_replace(
+                  sum by (namespace, pod) (
+                    container_memory_working_set_bytes{
+                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                    container="sandbox",
+                    pod=~"[0-9a-f-]{36}-[0-9]+"
+                  }
+                )
+                /
                 sum by (namespace, pod) (
-                  container_memory_working_set_bytes{
+                  kube_pod_container_resource_limits{
+                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                    container="sandbox",
+                    resource="memory"
+                  }
+                ) > ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_RATIO:-0.75}
+                and on (namespace, pod)
+                kube_pod_status_phase{
                   namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                  container="sandbox",
+                  phase="Running",
                   pod=~"[0-9a-f-]{36}-[0-9]+"
-                }
+                } == 1,
+                  "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
+                )
+                * on (sandboxId) group_left(userCode, profileKey)
+                byclaw_sandbox_autoscale_runtime_info
               )
-              /
-              sum by (namespace, pod) (
-                kube_pod_container_resource_limits{
-                  namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                  container="sandbox",
-                  resource="memory"
-                }
-              ) > ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_RATIO:-0.75}
-              and on (namespace, pod)
-              kube_pod_status_phase{
-                namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                phase="Running",
-                pod=~"[0-9a-f-]{36}-[0-9]+"
-              } == 1,
-                "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
-              )
+              unless on (sandboxId)
+              byclaw_sandbox_autoscale_boundary_blacklist{direction="up"} == 1
             for: ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_FOR:-30s}
             labels:
               severity: critical
@@ -321,94 +389,108 @@ data:
               triggerSource: PROMETHEUS_ALERT
               reasonCode: metrics.memory.critical
               resizeType: IN_PLACE
+              resizeDirection: up
             annotations:
               summary: "OpenClaw 沙箱内存接近上限"
               reason_detail: "内存 Working Set 连续 ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_FOR:-30s} 超过 limit 的 ${SANDBOX_AUTOSCALE_MEMORY_CRITICAL_PERCENT:-75}%，建议立即原地升配。pod={{ \$labels.pod }} value={{ \$value }}"
           - alert: OpenClawSandboxOOMKilled
             expr: |
-              label_replace(
-                (
-                  kube_pod_container_status_terminated_reason{
-                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                    container="sandbox",
-                    reason="OOMKilled",
-                    pod=~"[0-9a-f-]{36}-[0-9]+"
-                  } == 1
-                  unless
-                  kube_pod_container_status_terminated_reason{
-                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                    container="sandbox",
-                    reason="OOMKilled",
-                    pod=~"[0-9a-f-]{36}-[0-9]+"
-                  } offset ${SANDBOX_AUTOSCALE_OOM_LOOKBACK:-5m} == 1
+              (
+                label_replace(
+                  (
+                    kube_pod_container_status_terminated_reason{
+                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                      container="sandbox",
+                      reason="OOMKilled",
+                      pod=~"[0-9a-f-]{36}-[0-9]+"
+                    } == 1
+                    unless
+                    kube_pod_container_status_terminated_reason{
+                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                      container="sandbox",
+                      reason="OOMKilled",
+                      pod=~"[0-9a-f-]{36}-[0-9]+"
+                    } offset ${SANDBOX_AUTOSCALE_OOM_LOOKBACK:-5m} == 1
+                  )
+                  or
+                  (
+                    increase(kube_pod_container_status_last_terminated_reason{
+                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                      container="sandbox",
+                      reason="OOMKilled",
+                      pod=~"[0-9a-f-]{36}-[0-9]+"
+                    }[${SANDBOX_AUTOSCALE_OOM_LOOKBACK:-5m}]) > 0
+                  ),
+                  "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
                 )
-                or
-                (
-                  increase(kube_pod_container_status_last_terminated_reason{
-                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                    container="sandbox",
-                    reason="OOMKilled",
-                    pod=~"[0-9a-f-]{36}-[0-9]+"
-                  }[${SANDBOX_AUTOSCALE_OOM_LOOKBACK:-5m}]) > 0
-                ),
-                "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
+                * on (sandboxId) group_left(userCode, profileKey)
+                byclaw_sandbox_autoscale_runtime_info
               )
+              unless on (sandboxId)
+              byclaw_sandbox_autoscale_boundary_blacklist{direction="up"} == 1
             labels:
               severity: critical
               serviceType: openclaw
               triggerSource: PROMETHEUS_ALERT
               reasonCode: metrics.memory.oom_killed
               resizeType: IN_PLACE
+              resizeDirection: up
             annotations:
               summary: "OpenClaw 沙箱 OOMKilled"
               reason_detail: "沙箱容器最近 ${SANDBOX_AUTOSCALE_OOM_LOOKBACK:-5m} 发生 OOMKilled，建议按数据库规格立即原地升配。pod={{ \$labels.pod }} value={{ \$value }}"
 
           - alert: OpenClawSandboxLowUsage
             expr: |
-              label_replace(
-                (
-                  sum by (namespace, pod) (
-                    rate(container_cpu_usage_seconds_total{
-                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                      container="sandbox",
-                      pod=~"[0-9a-f-]{36}-[0-9]+"
-                    }[${SANDBOX_AUTOSCALE_CPU_LOW_RATE_WINDOW:-1m}])
+              (
+                label_replace(
+                  (
+                    sum by (namespace, pod) (
+                      rate(container_cpu_usage_seconds_total{
+                        namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                        container="sandbox",
+                        pod=~"[0-9a-f-]{36}-[0-9]+"
+                      }[${SANDBOX_AUTOSCALE_CPU_LOW_RATE_WINDOW:-1m}])
+                    )
+                    /
+                    sum by (namespace, pod) (
+                      kube_pod_container_resource_requests{
+                        namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                        container="sandbox",
+                        resource="cpu"
+                      }
+                    ) < ${SANDBOX_AUTOSCALE_CPU_LOW_RATIO:-0.25}
                   )
-                  /
-                  sum by (namespace, pod) (
-                    kube_pod_container_resource_requests{
-                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                      container="sandbox",
-                      resource="cpu"
-                    }
-                  ) < ${SANDBOX_AUTOSCALE_CPU_LOW_RATIO:-0.25}
-                )
-                and on (namespace, pod)
-                (
-                  sum by (namespace, pod) (
-                    container_memory_working_set_bytes{
-                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                      container="sandbox",
-                      pod=~"[0-9a-f-]{36}-[0-9]+"
-                    }
+                  and on (namespace, pod)
+                  (
+                    sum by (namespace, pod) (
+                      container_memory_working_set_bytes{
+                        namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                        container="sandbox",
+                        pod=~"[0-9a-f-]{36}-[0-9]+"
+                      }
+                    )
+                    /
+                    sum by (namespace, pod) (
+                      kube_pod_container_resource_requests{
+                        namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                        container="sandbox",
+                        resource="memory"
+                      }
+                    ) < ${SANDBOX_AUTOSCALE_MEMORY_LOW_RATIO:-0.50}
                   )
-                  /
-                  sum by (namespace, pod) (
-                    kube_pod_container_resource_requests{
-                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                      container="sandbox",
-                      resource="memory"
-                    }
-                  ) < ${SANDBOX_AUTOSCALE_MEMORY_LOW_RATIO:-0.50}
+                  and on (namespace, pod)
+                  kube_pod_status_phase{
+                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                    phase="Running",
+                    pod=~"[0-9a-f-]{36}-[0-9]+"
+                  } == 1,
+                  "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
                 )
-                and on (namespace, pod)
-                kube_pod_status_phase{
-                  namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
-                  phase="Running",
-                  pod=~"[0-9a-f-]{36}-[0-9]+"
-                } == 1,
-                "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
+                * on (sandboxId) group_left(userCode, profileKey)
+                byclaw_sandbox_autoscale_runtime_info
               )
+              unless on (sandboxId)
+              byclaw_sandbox_autoscale_boundary_blacklist{direction="down"} == 1
             for: ${SANDBOX_AUTOSCALE_LOW_USAGE_FOR:-5m}
             labels:
               severity: info
@@ -416,6 +498,7 @@ data:
               triggerSource: PROMETHEUS_ALERT
               reasonCode: metrics.low_usage
               resizeType: IN_PLACE
+              resizeDirection: down
             annotations:
               summary: "OpenClaw 沙箱资源长期低使用"
               reason_detail: "CPU 连续 ${SANDBOX_AUTOSCALE_LOW_USAGE_FOR:-5m} 低于 request 的 ${SANDBOX_AUTOSCALE_CPU_LOW_PERCENT:-25}% 且内存低于 request 的 ${SANDBOX_AUTOSCALE_MEMORY_LOW_PERCENT:-50}%，建议原地降一级规格。pod={{ \$labels.pod }} value={{ \$value }}"
@@ -442,6 +525,11 @@ data:
         metrics_path: /prometheus/metrics
         static_configs:
           - targets: ["127.0.0.1:9090"]
+
+      - job_name: byclaw-sandbox-autoscale-boundary-blacklist
+        metrics_path: /byaiService/sandbox/autoscale/boundary-blacklist/metrics
+        static_configs:
+          - targets: ["byclaw-be.${NS_SERVICE}.svc.cluster.local:${BE_SERVER_PORT:-8086}"]
 
       - job_name: kubernetes-apiservers
         kubernetes_sd_configs:
@@ -667,6 +755,111 @@ spec:
     - name: http
       port: 9093
       targetPort: http
+$(if [ "${SANDBOX_AUTOSCALE_DINGTALK_ACTIVE}" = "true" ]; then cat <<DINGTALK_YAML
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ${SANDBOX_AUTOSCALE_DINGTALK_SERVICE_NAME}-config
+  namespace: ${NS_MONITORING}
+type: Opaque
+stringData:
+  config.yml: |
+    timeout: ${SANDBOX_AUTOSCALE_DINGTALK_TIMEOUT}
+    templates:
+      - /etc/prometheus-webhook-dingtalk/sandbox.tmpl
+    targets:
+      ${SANDBOX_AUTOSCALE_DINGTALK_TARGET}:
+        url: "${SANDBOX_AUTOSCALE_DINGTALK_WEBHOOK_URL}"
+${PROMETHEUS_WEBHOOK_DINGTALK_SECRET_CONFIG}
+        message:
+          title: '{{ template "sandbox.title" . }}'
+          text: '{{ template "sandbox.content" . }}'
+  sandbox.tmpl: |
+    {{ define "sandbox.__direction_icon" }}{{ if eq .Labels.resizeDirection "down" }}📉{{ else if eq .Labels.reasonCode "metrics.low_usage" }}📉{{ else }}📈{{ end }}{{ end }}
+    {{ define "sandbox.__subject" }}[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ index .GroupLabels "alertname" }}{{ end }}
+    {{ define "sandbox.__alertmanagerURL" }}{{ .ExternalURL }}/#/alerts?receiver={{ .Receiver }}{{ end }}
+    {{ define "sandbox.__alert_list" }}{{ range . }}
+    #### \[{{ .Labels.severity | upper }}\] {{ .Annotations.summary }}
+
+    **Graph:** [{{ template "sandbox.__direction_icon" . }}]({{ .GeneratorURL }})
+
+    **Description:** {{ if .Annotations.description }}{{ .Annotations.description }}{{ else }}{{ .Annotations.reason_detail }}{{ end }}
+
+    **Details:**
+    {{ if .Labels.userCode }}> - USER_CODE: {{ .Labels.userCode | markdown | html }}
+    {{ end }}{{ range .Labels.SortedPairs }}{{ if and (ne (.Name) "severity") (ne (.Name) "summary") (ne (.Name) "userCode") }}> - {{ .Name }}: {{ .Value | markdown | html }}
+    {{ end }}{{ end }}
+
+    {{ end }}{{ end }}
+    {{ define "sandbox.title" }}{{ template "sandbox.__subject" . }}{{ end }}
+    {{ define "sandbox.content" }}#### \[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}\] **[{{ index .GroupLabels "alertname" }}]({{ template "sandbox.__alertmanagerURL" . }})**
+    {{ if gt (len .Alerts.Firing) 0 -}}
+    **Alerts Firing**
+    {{ template "sandbox.__alert_list" .Alerts.Firing }}
+    {{ range .AtMobiles }}@{{ . }}{{ end }}
+    {{- end }}
+    {{ if gt (len .Alerts.Resolved) 0 -}}
+    **Alerts Resolved**
+    {{ template "sandbox.__alert_list" .Alerts.Resolved }}
+    {{ range .AtMobiles }}@{{ . }}{{ end }}
+    {{- end }}
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${SANDBOX_AUTOSCALE_DINGTALK_SERVICE_NAME}
+  namespace: ${NS_MONITORING}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ${SANDBOX_AUTOSCALE_DINGTALK_SERVICE_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${SANDBOX_AUTOSCALE_DINGTALK_SERVICE_NAME}
+    spec:
+      containers:
+        - name: prometheus-webhook-dingtalk
+          image: ${IMAGE_PROMETHEUS_WEBHOOK_DINGTALK}
+          args:
+            - --config.file=/etc/prometheus-webhook-dingtalk/config.yml
+            - --web.listen-address=0.0.0.0:8060
+          ports:
+            - name: http
+              containerPort: 8060
+          resources:
+            requests:
+              cpu: "${MONITORING_DINGTALK_CPU_REQUEST:-20m}"
+              memory: "${MONITORING_DINGTALK_MEMORY_REQUEST:-32Mi}"
+            limits:
+              cpu: "${MONITORING_DINGTALK_CPU_LIMIT:-100m}"
+              memory: "${MONITORING_DINGTALK_MEMORY_LIMIT:-128Mi}"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus-webhook-dingtalk
+              readOnly: true
+      volumes:
+        - name: config
+          secret:
+            secretName: ${SANDBOX_AUTOSCALE_DINGTALK_SERVICE_NAME}-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${SANDBOX_AUTOSCALE_DINGTALK_SERVICE_NAME}
+  namespace: ${NS_MONITORING}
+spec:
+  selector:
+    app: ${SANDBOX_AUTOSCALE_DINGTALK_SERVICE_NAME}
+  ports:
+    - name: http
+      port: 8060
+      targetPort: http
+DINGTALK_YAML
+fi)
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -915,6 +1108,9 @@ spec:
 EOF
 
 kubectl_cmd -n "$NS_MONITORING" rollout restart deploy/prometheus deploy/alertmanager >/dev/null 2>&1 || true
+if [ "${SANDBOX_AUTOSCALE_DINGTALK_ACTIVE}" = "true" ]; then
+    kubectl_cmd -n "$NS_MONITORING" rollout restart "deploy/${SANDBOX_AUTOSCALE_DINGTALK_SERVICE_NAME}" >/dev/null 2>&1 || true
+fi
 wait_monitoring_ready
 verify_prometheus_targets
 create_grafana_dashboards
@@ -922,6 +1118,9 @@ create_grafana_dashboards
 echo "========== Monitoring install completed =========="
 echo "    Prometheus: ${MONITORING_EXTERNAL_BASE_URL}/prometheus"
 echo "    Alertmanager: ${MONITORING_EXTERNAL_BASE_URL}/alertmanager"
+if [ "${SANDBOX_AUTOSCALE_DINGTALK_ACTIVE}" = "true" ]; then
+    echo "    DingTalk alert webhook: enabled (${SANDBOX_AUTOSCALE_DINGTALK_SERVICE_NAME}/${SANDBOX_AUTOSCALE_DINGTALK_TARGET})"
+fi
 echo "    Grafana: ${MONITORING_EXTERNAL_BASE_URL}/grafana"
 echo "    Grafana dashboards:"
 echo "      - ${MONITORING_EXTERNAL_BASE_URL}/grafana/d/byclaw-k3s-nodes"
