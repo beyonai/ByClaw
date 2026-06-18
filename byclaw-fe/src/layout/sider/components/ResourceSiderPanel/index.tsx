@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Breadcrumb, Button, Dropdown, Empty, Input, List, message, Tooltip, Typography } from 'antd';
+import { Breadcrumb, Button, Dropdown, Empty, Input, List, message, Modal, Tooltip, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import { trim } from 'lodash';
@@ -17,6 +17,7 @@ import {
 import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import { batchHandleAuth, listAuthDetail } from '@/pages/manager/service/DigitalResourceMgr';
+import { uninstallDigitalEmployeeRelResources } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { ResourceTypeMap } from '@/constants/resource';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import useGlobal from '@/hooks/useGlobal';
@@ -754,6 +755,36 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     }
   };
 
+  const handleUninstallSkill = (item: ResourceItem) => {
+    if (!activeSiderAgent.resourceId) {
+      message.error(intl.formatMessage({ id: 'resource.noDefaultDigitalEmployee' }));
+      return;
+    }
+    const employeeName = activeSiderAgent.name || intl.formatMessage({ id: 'resource.currentDigitalEmployee' });
+
+    Modal.confirm({
+      title: intl.formatMessage({ id: 'resource.uninstallSkill' }),
+      content: intl.formatMessage({ id: 'resource.uninstallSkillConfirm' }, { employeeName }),
+      okText: intl.formatMessage({ id: 'common.confirm' }),
+      cancelText: intl.formatMessage({ id: 'common.cancel' }),
+      async onOk() {
+        try {
+          await uninstallDigitalEmployeeRelResources({
+            digitalEmployeeId: activeSiderAgent.resourceId!,
+            relIds: [item.resourceId],
+          });
+          message.success(intl.formatMessage({ id: 'resource.uninstallSuccess' }));
+          if (!isInDrillDown()) {
+            loadResources({ reset: true });
+          }
+          EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
+        } catch (error: any) {
+          message.error(error?.message || error || intl.formatMessage({ id: 'common.operationFailed' }));
+        }
+      },
+    });
+  };
+
   /**
    * 渲染资源详情下拉菜单
    */
@@ -770,6 +801,14 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.share' })}</div>,
       });
     }
+    if (resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL) {
+      menuItems.push({
+        key: 'uninstall',
+        label: (
+          <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'resource.uninstallSkill' })}</div>
+        ),
+      });
+    }
 
     return (
       <Dropdown
@@ -783,6 +822,10 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
             domEvent.stopPropagation();
             if (key === 'share') {
               void handleShare(item);
+              return;
+            }
+            if (key === 'uninstall') {
+              handleUninstallSkill(item);
               return;
             }
             handleDetail(item);
