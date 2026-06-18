@@ -32,6 +32,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDocService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtAgentService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtMcpService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtObjectService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceArtifactService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceCatalogService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtToolKitService;
@@ -56,7 +57,6 @@ import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeIdDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.RelResourceInfo;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SetDefaultDigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SsResourceDTO;
-import com.iwhalecloud.byai.manager.dto.resource.SsResourceRelDetailDTO;
 import com.iwhalecloud.byai.manager.dto.template.MemoryConfigDTO;
 import com.iwhalecloud.byai.manager.entity.aimodel.AiPrompt;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
@@ -64,6 +64,7 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResExtAgent;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDoc;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtMcp;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtObject;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtToolKit;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtView;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -96,6 +97,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -189,6 +191,9 @@ public class DigitalEmployeeApplicationService {
 
     @Autowired
     private SsResExtObjectService ssResExtObjectService;
+
+    @Autowired
+    private SsResExtSkillService ssResExtSkillService;
 
     @Autowired
     private TemplateRuleInfoApplicationService templateRuleInfoApplicationService;
@@ -370,6 +375,7 @@ public class DigitalEmployeeApplicationService {
     public SsResource saveDigitalEmployee(DigitalEmployeeDTO digitalEmployeeDTO) {
 
         boolean isFrontAccess = digitalEmployeeDTO.isFrontAccess();
+        normalizeRelSkillsForSave(digitalEmployeeDTO);
         // 商业版本（dataset.system=WHALE_AGENT）下，企业 tab 不允许创建编码型（011）/ 调试型（010）数字员工
         validateCommercialEditionDigitalEmployeeCreation(digitalEmployeeDTO);
         String resourceName = digitalEmployeeDTO.getResourceName();
@@ -421,7 +427,8 @@ public class DigitalEmployeeApplicationService {
         this.compareSsResourceRelDetail(ssResource, relIds, Collections.emptyList(),
             digitalEmployeeDTO.getRelResourceInfoList());
 
-        this.syncDigEmployeeSkillsToRedisQuietly(ssResource.getResourceId());
+        // 暂停生成 RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存，当前运行时改读 DIG_EMPLOYEE_{resourceId}。
+        // this.syncDigEmployeeSkillsToRedisQuietly(ssResource.getResourceId());
 
         // 前台的直接上架给予使用权限
         if (isFrontAccess) {
@@ -608,6 +615,7 @@ public class DigitalEmployeeApplicationService {
     public SsResource updateDigitalEmployee(DigitalEmployeeDTO digitalEmployeeDTO) {
 
         boolean isFrontAccess = digitalEmployeeDTO.isFrontAccess();
+        normalizeRelSkillsForSave(digitalEmployeeDTO);
 
         Long resourceId = digitalEmployeeDTO.getResourceId();
         String resourceName = digitalEmployeeDTO.getResourceName();
@@ -647,7 +655,8 @@ public class DigitalEmployeeApplicationService {
         List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(resourceId);
         this.compareSsResourceRelDetail(ssResource, relIds, resourceRelDetails,
             digitalEmployeeDTO.getRelResourceInfoList());
-        this.syncDigEmployeeSkillsToRedisQuietly(resourceId);
+        // 暂停生成 RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存，当前运行时改读 DIG_EMPLOYEE_{resourceId}。
+        // this.syncDigEmployeeSkillsToRedisQuietly(resourceId);
 
         // 前台的直接上架
         if (isFrontAccess) {
@@ -723,7 +732,9 @@ public class DigitalEmployeeApplicationService {
         mergedRelIds.addAll(installRelIds);
 
         this.compareSsResourceRelDetail(ssResource, new ArrayList<>(mergedRelIds), resourceRelDetails, null);
-        this.syncDigEmployeeSkillsToRedisQuietly(digitalEmployeeId);
+        this.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployeeId);
+        // 暂停生成 RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存，当前运行时改读 DIG_EMPLOYEE_{resourceId}。
+        // this.syncDigEmployeeSkillsToRedisQuietly(digitalEmployeeId);
         this.synOpenClawWorkSpace(digitalEmployeeId);
         operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
 
@@ -1308,7 +1319,8 @@ public class DigitalEmployeeApplicationService {
     private boolean isSupportedRelatedResourceBizType(String resourceBizType) {
         return StringUtils.equalsAny(resourceBizType, ResourceBizTypeEnum.TOOLKIT.name(),
             ResourceBizTypeEnum.MCP.name(), ResourceBizTypeEnum.AGENT.name(), ResourceBizTypeEnum.VIEW.name(),
-            ResourceBizTypeEnum.OBJECT.name()) || StringUtils.startsWithIgnoreCase(resourceBizType, "KG_");
+            ResourceBizTypeEnum.OBJECT.name(), ResourceBizTypeEnum.SKILL.name())
+            || StringUtils.startsWithIgnoreCase(resourceBizType, "KG_");
     }
 
     private String loadRelatedResourceTargetContent(String resourceBizType, Long resourceId) {
@@ -1336,25 +1348,110 @@ public class DigitalEmployeeApplicationService {
             SsResExtObject ext = ssResExtObjectService.findById(resourceId);
             return ext == null ? null : ext.getTargetContent();
         }
+        if (StringUtils.equals(resourceBizType, ResourceBizTypeEnum.SKILL.name())) {
+            SsResExtSkill ext = ssResExtSkillService.findById(resourceId);
+            return ext == null ? null : ext.getTargetContent();
+        }
         return null;
     }
 
     private void syncDigEmployeeSkillsToRedisQuietly(Long resourceId) {
-        try {
-            syncDigEmployeeSkillsToRedis(resourceId);
-        }
-        catch (Exception e) {
-            logger.error("同步数字员工技能信息到Redis失败，resourceId: {}, error: {}", resourceId, e.getMessage(), e);
-        }
+        // RESOURCE_DIG_EMPLOYEE_{resourceId} 为历史技能列表缓存，当前下游已切到 DIG_EMPLOYEE_{resourceId}
+        // + KG_DOC_{resourceId} 读取完整配置，先屏蔽写 Redis，避免继续产出旧口径缓存。
+        // try {
+        //     syncDigEmployeeSkillsToRedis(resourceId);
+        // }
+        // catch (Exception e) {
+        //     logger.error("同步数字员工技能信息到Redis失败，resourceId: {}, error: {}", resourceId, e.getMessage(), e);
+        // }
     }
 
     private void syncDigEmployeeSkillsToRedis(Long resourceId) {
+        // RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存写入已暂停；保留原逻辑注释便于需要时回滚。
+        // if (resourceId == null) {
+        //     return;
+        // }
+        // List<SsResourceRelDetailDTO> skills = ssResourceRelDetailService.querySkillsForOpenApi(resourceId);
+        // RedisUtil.setString(DigEmployeeRedisKeys.skillCacheKey(resourceId),
+        //     JSON.toJSONString(skills == null ? Collections.emptyList() : skills));
+    }
+
+    /**
+     * 按数字员工当前资源关联关系重建技能运行时配置，并写回 ss_res_ext_dig_employee.skills。
+     *
+     * 安装技能、对话框 #技能 上传/解绑都以 ss_resource_rel_detail 作为事实来源；这里统一补齐 relSkills 的
+     * skillType、skillUrl、versionUrl 等运行时字段，避免授权/安装和数字员工 JSON 之间出现口径漂移。
+     */
+    public void rebuildAndSaveDigitalEmployeeRelSkills(Long resourceId) {
         if (resourceId == null) {
             return;
         }
-        List<SsResourceRelDetailDTO> skills = ssResourceRelDetailService.querySkillsForOpenApi(resourceId);
-        RedisUtil.setString(DigEmployeeRedisKeys.skillCacheKey(resourceId),
-            JSON.toJSONString(skills == null ? Collections.emptyList() : skills));
+        SsResExtDigEmployee extDigEmployee = ssResExtDigEmployeeService.findById(resourceId);
+        if (extDigEmployee == null) {
+            logger.warn("重建数字员工技能列表失败：扩展表记录不存在, resourceId={}", resourceId);
+            return;
+        }
+
+        List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(resourceId);
+        if (CollectionUtils.isEmpty(resourceRelDetails)) {
+            extDigEmployee.setSkills(JSON.toJSONString(Collections.emptyList()));
+            ssResExtDigEmployeeService.update(extDigEmployee);
+            return;
+        }
+
+        List<Long> relResourceIds = resourceRelDetails.stream()
+            .map(SsResourceRelDetail::getRelResourceId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(relResourceIds)) {
+            extDigEmployee.setSkills(JSON.toJSONString(Collections.emptyList()));
+            ssResExtDigEmployeeService.update(extDigEmployee);
+            return;
+        }
+
+        List<SsResource> relResources = ssResourceService.findByIdList(relResourceIds);
+        if (CollectionUtils.isEmpty(relResources)) {
+            extDigEmployee.setSkills(JSON.toJSONString(Collections.emptyList()));
+            ssResExtDigEmployeeService.update(extDigEmployee);
+            return;
+        }
+
+        Map<Long, SsResource> skillResourceMap = relResources.stream()
+            .filter(item -> item != null && item.getResourceId() != null
+                && ResourceBizTypeEnum.SKILL.name().equals(item.getResourceBizType()))
+            .collect(Collectors.toMap(SsResource::getResourceId, item -> item, (left, right) -> left));
+        if (MapUtils.isEmpty(skillResourceMap)) {
+            extDigEmployee.setSkills(JSON.toJSONString(Collections.emptyList()));
+            ssResExtDigEmployeeService.update(extDigEmployee);
+            return;
+        }
+
+        List<Map<String, Object>> rawRelSkills = resourceRelDetails.stream()
+            .map(SsResourceRelDetail::getRelResourceId)
+            .filter(skillResourceMap::containsKey)
+            .distinct()
+            .map(relResourceId -> buildRelSkillFromResource(skillResourceMap.get(relResourceId)))
+            .collect(Collectors.toList());
+        extDigEmployee.setSkills(JSON.toJSONString(rawRelSkills));
+        ssResExtDigEmployeeService.update(extDigEmployee);
+    }
+
+    private Map<String, Object> buildRelSkillFromResource(SsResource skillResource) {
+        SsResExtSkill extSkill = skillResource == null || skillResource.getResourceId() == null
+            || ssResExtSkillService == null ? null : ssResExtSkillService.findById(skillResource.getResourceId());
+        String skillType = firstNotBlank(
+            extSkill == null ? null : extSkill.getSkillType(),
+            SsResExtSkillService.DEFAULT_SKILL_TYPE);
+        boolean innerSkill = StringUtils.equalsIgnoreCase(skillType, SsResExtSkillService.INNER_SKILL_TYPE);
+
+        Map<String, Object> relSkill = new LinkedHashMap<>();
+        relSkill.put("skillCode", skillResource == null ? null : skillResource.getResourceCode());
+        relSkill.put("skillType", skillType);
+        relSkill.put("skillUrl", innerSkill ? "" : buildSkillDownloadUrl(
+            skillResource == null ? null : skillResource.getResourceId(), null));
+        relSkill.put("versionUrl", buildSkillVersionUrl(skillResource == null ? null : skillResource.getResourceId(), null));
+        return relSkill;
     }
 
     private void syncDigEmployeeConfigJsonToRedisQuietly(Long resourceId, String jsonContent) {
@@ -1398,7 +1495,8 @@ public class DigitalEmployeeApplicationService {
         if (resourceId == null) {
             return;
         }
-        RedisUtil.removeKey(DigEmployeeRedisKeys.skillCacheKey(resourceId));
+        // RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存已暂停维护，这里不再主动触碰该 key。
+        // RedisUtil.removeKey(DigEmployeeRedisKeys.skillCacheKey(resourceId));
         removeDigEmployeeConfigJsonFromRedis(resourceId);
     }
 
@@ -1648,11 +1746,193 @@ public class DigitalEmployeeApplicationService {
         }
     }
 
-    private List<String> parseSkills(String skills) {
+    private void normalizeRelSkillsForSave(DigitalEmployeeDTO digitalEmployeeDTO) {
+        if (digitalEmployeeDTO == null) {
+            return;
+        }
+        List<Map<String, Object>> relSkills = buildStandardRelSkills(digitalEmployeeDTO.getRelSkills(),
+            digitalEmployeeDTO.getSkills());
+        if (relSkills == null) {
+            return;
+        }
+        digitalEmployeeDTO.setRelSkills(relSkills);
+        digitalEmployeeDTO.setSkills(JSON.toJSONString(relSkills));
+    }
+
+    private List<Map<String, Object>> parseSkills(String skills) {
         if (StringUtils.isBlank(skills)) {
             return null;
         }
-        return JSON.parseArray(skills, String.class);
+        return buildStandardRelSkills(JSON.parseArray(skills, Object.class), skills);
+    }
+
+    private List<Map<String, Object>> buildStandardRelSkills(List<?> relSkills, String skillsJson) {
+        if (relSkills == null && StringUtils.isBlank(skillsJson)) {
+            return null;
+        }
+        List<Object> rawItems = new ArrayList<>();
+        if (StringUtils.isNotBlank(skillsJson)) {
+            try {
+                rawItems.addAll(JSON.parseArray(skillsJson, Object.class));
+            }
+            catch (Exception e) {
+                logger.warn("解析数字员工技能列表失败, ignored. err={}", e.getMessage());
+            }
+        }
+        else if (relSkills != null) {
+            rawItems.addAll(relSkills);
+        }
+        if (CollectionUtils.isEmpty(rawItems)) {
+            return Collections.emptyList();
+        }
+
+        Set<Long> resourceIds = new LinkedHashSet<>();
+        Set<String> skillCodes = new LinkedHashSet<>();
+        for (Object rawItem : rawItems) {
+            Map<String, Object> itemMap = toMap(rawItem);
+            String resourceIdText = StringUtils.trimToNull(stringValue(itemMap.get("resourceId")));
+            if (resourceIdText == null) {
+                resourceIdText = StringUtils.trimToNull(stringValue(itemMap.get("skillId")));
+            }
+            if (resourceIdText == null) {
+                resourceIdText = StringUtils.trimToNull(stringValue(itemMap.get("value")));
+            }
+            Long resourceId = parseLongSafely(resourceIdText);
+            if (resourceId != null) {
+                resourceIds.add(resourceId);
+            }
+
+            String skillCode = firstNotBlank(
+                stringValue(itemMap.get("skillCode")),
+                stringValue(itemMap.get("resourceCode")),
+                parseLongSafely(stringValue(itemMap.get("value"))) == null ? stringValue(itemMap.get("value")) : null,
+                rawItem instanceof String ? (String) rawItem : null);
+            if (StringUtils.isNotBlank(skillCode)) {
+                skillCodes.add(skillCode);
+            }
+        }
+
+        Map<Long, SsResource> resourceById = new HashMap<>();
+        if (ssResourceService != null && !CollectionUtils.isEmpty(resourceIds)) {
+            List<SsResource> resources = ssResourceService.findByIdList(resourceIds);
+            if (!CollectionUtils.isEmpty(resources)) {
+                resources.stream()
+                    .filter(item -> item != null && ResourceBizTypeEnum.SKILL.name().equals(item.getResourceBizType()))
+                    .forEach(item -> resourceById.put(item.getResourceId(), item));
+            }
+        }
+
+        Map<String, SsResource> resourceByCode = new HashMap<>();
+        if (ssResourceService != null && !CollectionUtils.isEmpty(skillCodes)) {
+            List<SsResource> resources = ssResourceService.getResourceListByCode(new ArrayList<>(skillCodes));
+            if (!CollectionUtils.isEmpty(resources)) {
+                resources.stream()
+                    .filter(item -> item != null && ResourceBizTypeEnum.SKILL.name().equals(item.getResourceBizType()))
+                    .forEach(item -> resourceByCode.put(item.getResourceCode(), item));
+            }
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        Set<String> emittedSkillCodes = new LinkedHashSet<>();
+        for (Object rawItem : rawItems) {
+            Map<String, Object> itemMap = toMap(rawItem);
+            Long resourceId = parseLongSafely(firstNotBlank(
+                stringValue(itemMap.get("resourceId")),
+                stringValue(itemMap.get("skillId")),
+                stringValue(itemMap.get("value"))));
+            String inputSkillCode = firstNotBlank(
+                stringValue(itemMap.get("skillCode")),
+                stringValue(itemMap.get("resourceCode")),
+                parseLongSafely(stringValue(itemMap.get("value"))) == null ? stringValue(itemMap.get("value")) : null,
+                rawItem instanceof String ? (String) rawItem : null);
+            SsResource skillResource = resourceId == null ? null : resourceById.get(resourceId);
+            if (skillResource == null && StringUtils.isNotBlank(inputSkillCode)) {
+                skillResource = resourceByCode.get(inputSkillCode);
+            }
+
+            String skillCode = skillResource == null ? inputSkillCode : skillResource.getResourceCode();
+            if (StringUtils.isBlank(skillCode) || emittedSkillCodes.contains(skillCode)) {
+                continue;
+            }
+            emittedSkillCodes.add(skillCode);
+
+            SsResExtSkill extSkill = skillResource == null || skillResource.getResourceId() == null || ssResExtSkillService == null
+                ? null
+                : ssResExtSkillService.findById(skillResource.getResourceId());
+            String skillType = firstNotBlank(
+                stringValue(itemMap.get("skillType")),
+                extSkill == null ? null : extSkill.getSkillType(),
+                SsResExtSkillService.DEFAULT_SKILL_TYPE);
+            boolean innerSkill = StringUtils.equalsIgnoreCase(skillType, SsResExtSkillService.INNER_SKILL_TYPE);
+
+            Map<String, Object> relSkill = new LinkedHashMap<>();
+            relSkill.put("skillCode", skillCode);
+            relSkill.put("skillType", skillType);
+            relSkill.put("skillUrl", innerSkill ? "" : buildSkillDownloadUrl(
+                skillResource == null ? resourceId : skillResource.getResourceId(),
+                stringValue(itemMap.get("skillUrl"))));
+            relSkill.put("versionUrl", buildSkillVersionUrl(skillResource == null ? resourceId : skillResource.getResourceId(),
+                stringValue(itemMap.get("versionUrl"))));
+            result.add(relSkill);
+        }
+        return result;
+    }
+
+    private Map<String, Object> toMap(Object value) {
+        if (value instanceof Map) {
+            return (Map<String, Object>) value;
+        }
+        if (value instanceof String) {
+            Map<String, Object> map = new HashMap<>();
+            map.put("skillCode", value);
+            return map;
+        }
+        if (value == null) {
+            return Collections.emptyMap();
+        }
+        return JSON.parseObject(JSON.toJSONString(value), Map.class);
+    }
+
+    private String buildSkillVersionUrl(Long resourceId, String fallback) {
+        if (resourceId == null) {
+            return StringUtils.defaultString(fallback);
+        }
+        return "/byaiService/tool/getSkillVersion?skillId=" + resourceId;
+    }
+
+    private String buildSkillDownloadUrl(Long resourceId, String fallback) {
+        if (resourceId == null) {
+            return StringUtils.defaultString(fallback);
+        }
+        return "/byaiService/tool/downloadSkillZip?skillId=" + resourceId;
+    }
+
+    private Long parseLongSafely(String value) {
+        if (StringUtils.isBlank(value)) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value);
+        }
+        catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private String firstNotBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (StringUtils.isNotBlank(value)) {
+                return StringUtils.trim(value);
+            }
+        }
+        return null;
     }
 
     /** 反序列化 target_content 里的 relTools 数组；不存在或解析失败返回 null。 */

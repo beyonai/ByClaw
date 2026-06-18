@@ -136,4 +136,23 @@ describe('ResourceCard', () => {
 
     expect(screen.getByText('resource.installSkill')).toBeTruthy();
   });
+
+  it('hides install skill action when current digital employee already installed it', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resourceType="SKILL"
+        resource={{
+          resourceId: 'skill-1',
+          resourceName: 'Skill',
+          resourceBizType: 'SKILL',
+          hasUsePermission: true,
+        }}
+        actionConfig={{
+          installedResourceIds: new Set(['skill-1']),
+        }}
+      />
+    );
+
+    expect(screen.queryByText('resource.installSkill')).toBeNull();
+  });
 });

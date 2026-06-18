@@ -4,6 +4,7 @@ import type { ByaiInboundMessage, Language } from "./types.js";
 import { isSessionDispatchBusy } from "./session-dispatch-gate.js";
 import { clearPendingMessageToolSends } from "./pending-message-tool.js";
 import { generateRandomId } from "./utils.js";
+import { buildContextOverflowText } from "./i18n.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 const DEFAULT_ACCOUNT_KEY = "default";
@@ -61,6 +62,13 @@ export interface SharedChannelRequestContext {
     fields: Record<string, unknown>;
 }
 
+export type ActiveSdkOverflowDiagnostic = {
+  stopReason?: string;
+  usage?: unknown;
+  contextWindow?: number;
+  detectedAt: number;
+};
+
 export interface ActiveSdkRequest {
   accountId: string;
   sessionKey: string;
@@ -90,6 +98,29 @@ export interface ActiveSdkRequest {
    * 进入完成判定前置位此标记，避免完成门被伪信号永久挡住。
    */
   dispatchSettled: boolean;
+  /**
+   * 最近一次 model 调用的有效上下文窗口 / token 预算快照，由 model_call_started hook 捕获。
+   * core 不把 contextTokenBudget 透传进 agent_end 的 ctx，故在此按 sessionKey 暂存，供 agent_end
+   * 判别 length 截断是否属上下文压力（对齐 core threshold 判据 totalTokens > window-reserveTokens）。
+   */
+  lastContextWindow?: number;
+  lastContextBudget?: number;
+  /**
+   * 上一轮 agent run 以「上下文压力型 length 截断」结束（length + 上下文已越过 core 压缩阈值）。
+   * 由 agent_end hook 经 isContextPressureLength 判定后置位，under-gate 在 dispatch 返回后
+   * 读取以决定是否自动续跑。读取后即清。仅作单次快照，不参与完成门判定。
+   */
+  lastRunOverflowLength: boolean;
+  lastRunOverflowDiagnostic?: ActiveSdkOverflowDiagnostic;
+  /**
+   * 检测到上下文压力截断、正在/即将自动续跑（让 core 在 pre-prompt 压缩后续写真答案）。置位期间
+   * 阻断完成门，避免截断 run 的 lifecycle-end 让 settle 提前收尾、丢掉续跑答案。续跑 dispatch
+   * 返回后清。与 30min settle 硬超时叠加兜底。
+   */
+  overflowContinuePending: boolean;
+  overflowContinuationCompactionObserved: boolean;
+  /** 本 request 已自动续跑次数。达 MAX_OVERFLOW_AUTO_CONTINUE 后不再续，防压缩后仍溢出的死循环。 */
+  overflowContinueCount: number;
   hasEmittedContent: boolean;
   lastReasoningText: string;
   lastReasoningMessageId: string;
@@ -382,6 +413,10 @@ export function registerActiveSdkRequest(params: {
         modelFallbackPending: false,
         rootLifecyclePhase: undefined,
         dispatchSettled: false,
+        lastRunOverflowLength: false,
+        overflowContinuePending: false,
+        overflowContinuationCompactionObserved: false,
+        overflowContinueCount: 0,
         hasEmittedContent: false,
         lastReasoningText: "",
         lastReasoningMessageId: "",
@@ -618,9 +653,96 @@ export function markActiveSdkCompactionRetryPending(
         return undefined;
     }
     request.compactionRetryPending = pending;
+    if (pending && request.overflowContinuePending) {
+        request.overflowContinuationCompactionObserved = true;
+    }
     if (pending) {
         request.awaitingFollowup = false;
         request.followupRunStarted = false;
+    }
+    return request;
+}
+
+/**
+ * agent_end hook 判定上一轮为「上下文溢出型 length 截断」后置位的快照标记。under-gate 在
+ * dispatch 返回后读取以决定是否自动续跑，读取后即清。不参与完成门判定。
+ */
+export function markActiveSdkOverflowLength(
+    sessionKey: string | undefined,
+    overflow: boolean,
+    diagnostic?: Omit<ActiveSdkOverflowDiagnostic, "detectedAt">,
+): ActiveSdkRequest | undefined {
+    if (!sessionKey) {
+        return undefined;
+    }
+    const request = resolveActiveSdkRequestBySessionKey(sessionKey);
+    if (!request) {
+        return undefined;
+    }
+    request.lastRunOverflowLength = overflow;
+    request.lastRunOverflowDiagnostic = overflow
+      ? {
+          ...diagnostic,
+          detectedAt: Date.now(),
+        }
+      : undefined;
+    return request;
+}
+
+/**
+ * 阻断完成门，覆盖「检测到溢出型截断 → 自动续跑」的整个窗口：从截断 run 的 lifecycle-end
+ * 到续跑 run 的 lifecycle-end。置位时同时清增量计数交给调用方维护。
+ */
+export function markActiveSdkOverflowContinuePending(
+    sessionKey: string | undefined,
+    pending: boolean,
+): ActiveSdkRequest | undefined {
+    if (!sessionKey) {
+        return undefined;
+    }
+    const request = resolveActiveSdkRequestBySessionKey(sessionKey);
+    if (!request) {
+        return undefined;
+    }
+    request.overflowContinuePending = pending;
+    if (!pending) {
+        request.overflowContinuationCompactionObserved = false;
+    }
+    return request;
+}
+
+function isCoreContextOverflowPrecheckError(error: string): boolean {
+    return /Context overflow: prompt too large for the model \(precheck\)\.?/i.test(error);
+}
+
+function mapAgentEndErrorForSdk(request: ActiveSdkRequest, error: string): string {
+    if (isCoreContextOverflowPrecheckError(error)) {
+        return buildContextOverflowText(request.language);
+    }
+    return error;
+}
+
+/**
+ * 由 model_call_started hook 调用，按 sessionKey 暂存最近一次 model 调用的有效上下文窗口/预算。
+ * agent_end 判别 length 截断是否属上下文压力时读取（core 不把它透传进 agent_end 的 ctx）。
+ */
+export function markActiveSdkContextWindow(
+    sessionKey: string | undefined,
+    window: number | undefined,
+    budget: number | undefined,
+): ActiveSdkRequest | undefined {
+    if (!sessionKey) {
+        return undefined;
+    }
+    const request = resolveActiveSdkRequestBySessionKey(sessionKey);
+    if (!request) {
+        return undefined;
+    }
+    if (typeof window === "number" && window > 0) {
+        request.lastContextWindow = window;
+    }
+    if (typeof budget === "number" && budget > 0) {
+        request.lastContextBudget = budget;
     }
     return request;
 }
@@ -695,6 +817,7 @@ export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boole
       !awaitingBlocks &&
       !request.followupRunStarted &&
       !request.compactionRetryPending &&
+      !request.overflowContinuePending &&
       !request.modelFallbackPending,
   );
 }
@@ -716,20 +839,25 @@ export async function completeActiveSdkRequest(
     if (!sdkEmitter) {
         throw new Error(`No active SDK emitter for account: ${latest.accountId}`);
     }
-    const [rootRunId] = latest.boundRunIds;
-    if (rootRunId && agentEndResultByRun.has(rootRunId)) {
+    // 取最近绑定且登记了 end-promise 的 runId 作为终态来源。Set 保留插入序，正常单 run 即首个；
+    // 但溢出自动续跑会绑入续跑 runId，真正的终态回答/错误来自最后那个 run，不能用首个截断 run。
+    const terminalRunId = [...latest.boundRunIds]
+        .reverse()
+        .find((runId) => agentEndResultByRun.has(runId));
+    if (terminalRunId && agentEndResultByRun.has(terminalRunId)) {
         try {
             const result = await Promise.race([
-                agentEndResultByRun.get(rootRunId)?.promise,
-                new Promise<void>((resolve, reject) => setTimeout(() => {
+                agentEndResultByRun.get(terminalRunId)?.promise,
+                new Promise<AgentEndResult>((resolve, reject) => setTimeout(() => {
                     reject(new Error("waiting for agent end result timeout"));
                 }, 10000)),
             ]);
             if (result?.error) {
+                const errorText = mapAgentEndErrorForSdk(latest, result.error);
                 await sdkEmitter.emitChunk(
                     latest.sessionId,
                     latest.traceId || "",
-                    result.error,
+                    errorText,
                     {
                         eventType: EventType.ANSWER_DELTA,
                         messageId: generateRandomId(),
@@ -831,8 +959,16 @@ export async function completeActiveSdkFollowupBySessionKey(
     return await completeActiveSdkRequest(request);
 }
 
-export function registerAgentRunEndPromise(runId: string) {
+export function registerAgentRunEndPromise(runId: string, result?: AgentEndResult) {
     if (agentEndResultByRun.has(runId)) {
+        return;
+    }
+    if (result) {
+        agentEndResultByRun.set(runId, {
+            promise: Promise.resolve(result),
+            resolve: () => {},
+            reject: () => {},
+        });
         return;
     }
     let _resolve: (result: AgentEndResult) => void = () => {};
@@ -846,6 +982,7 @@ export function registerAgentRunEndPromise(runId: string) {
         resolve: _resolve,
         reject: _reject,
     });
+    return agentEndResultByRun.get(runId);
 }
 
 export function getAgentRunEndPromiseResolver(runId: string) {

@@ -29,10 +29,10 @@ const PropertyDetail: React.FC<PropertyDetailProps> = ({ item, onClose }) => {
   const intl = useIntl();
   const title = `${intl.formatMessage({ id: 'resource.property' })}${intl.formatMessage({ id: 'common.detail' })}`;
   const detailFields = [
-    { label: '属性名称', value: item.propertyName || item.resourceName },
-    { label: '属性编码', value: item.propertyCode || item.resourceId },
-    { label: '属性分组', value: item.propertyGroup },
-    { label: '数据类型', value: item.dataType },
+    { label: intl.formatMessage({ id: 'resource.propertyName' }), value: item.propertyName || item.resourceName },
+    { label: intl.formatMessage({ id: 'resource.propertyCode' }), value: item.propertyCode || item.resourceId },
+    { label: intl.formatMessage({ id: 'resource.propertyGroup' }), value: item.propertyGroup },
+    { label: intl.formatMessage({ id: 'resource.dataType' }), value: item.dataType },
   ];
 
   return (

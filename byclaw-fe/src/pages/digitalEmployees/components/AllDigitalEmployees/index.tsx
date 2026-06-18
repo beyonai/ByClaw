@@ -39,8 +39,9 @@ type ICategory = {
   catalogId: string | number;
 };
 
-const getBannerUrl = (bannerList: any[], label: string) => {
-  const banner = bannerList.find((item) => item?.label === label);
+const getBannerUrl = (bannerList: any[], labels: string | string[]) => {
+  const labelList = Array.isArray(labels) ? labels : [labels];
+  const banner = bannerList.find((item) => labelList.includes(item?.label));
   return `${banner?.url ?? ''}`.trim().replace(/^`|`$/g, '').trim();
 };
 
@@ -103,7 +104,7 @@ function AllDigitalEmployees(
     return local.includes('en');
   }, [local]);
   const defaultBannerUrl = getRuntimeActualUrl(isEN ? '/beyond/market-en.png' : '/beyond/market.png');
-  const customBannerUrl = getBannerUrl(bannerList, '数字员工');
+  const customBannerUrl = getBannerUrl(bannerList, [intl.formatMessage({ id: 'digitalEmployees.title' }), '数字员工']);
   const bannerUrl = customBannerUrl ? getRuntimeActualUrl(customBannerUrl) : defaultBannerUrl;
 
   useEffect(() => {

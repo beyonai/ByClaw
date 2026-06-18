@@ -6,6 +6,7 @@ import commonStyles from '../common.module.less';
 import { IDatabaseItem } from './types';
 import AntdIcon from '@/components/AntdIcon';
 import EmptyTips from '@/components/EmptyTips';
+import { useIntl } from '@umijs/max';
 
 const { Paragraph } = Typography;
 
@@ -17,6 +18,7 @@ interface Props {
 }
 
 const DatabaseList = ({ onSelect, onDrilldown }: Props) => {
+  const intl = useIntl();
   const container = React.useRef<HTMLDivElement>(null);
   const { loading, knowledgeBaseList } = useKnowledge({ setDefaultSelected: false });
 
@@ -33,8 +35,8 @@ const DatabaseList = ({ onSelect, onDrilldown }: Props) => {
           emptyText: (
             <EmptyTips
               icon="📂"
-              title="当前还没有创建数据库呢～"
-              description="你可新建或导入数据库，让数据查询、统计和复用更高效便捷吧！"
+              title={intl.formatMessage({ id: 'knowledge.database.emptyTitle' })}
+              description={intl.formatMessage({ id: 'knowledge.database.emptyDescription' })}
             />
           ),
         }}

@@ -44,6 +44,8 @@ class Msg(str, Enum):
     ERR_STORAGE_UNAVAILABLE = "err.storage_unavailable"
     ERR_MODEL_CONFIG_INVALID = "err.model_config_invalid"
     ERR_MODEL_NOT_FOUND = "err.model_not_found"
+    ERR_NO_USER_CODE = "err.no_user_code"
+    ERR_AUTH_FAILED = "err.auth_failed"
 
 
 MESSAGES: dict[str, dict[Msg, str]] = {
@@ -75,6 +77,8 @@ MESSAGES: dict[str, dict[Msg, str]] = {
         Msg.ERR_STORAGE_UNAVAILABLE: "存储服务暂时不可用，请稍后重试。",
         Msg.ERR_MODEL_CONFIG_INVALID: "模型配置异常，无法执行检索。",
         Msg.ERR_MODEL_NOT_FOUND: "未找到可用的AI模型，无法执行检索。",
+        Msg.ERR_NO_USER_CODE: "未找到有效用户标识，无法执行检索。",
+        Msg.ERR_AUTH_FAILED: "鉴权不通过，无法执行检索。",
     },
     "en_US": {
         Msg.NO_AGENT: "No available agent specified; cannot perform search.",
@@ -104,6 +108,8 @@ MESSAGES: dict[str, dict[Msg, str]] = {
         Msg.ERR_STORAGE_UNAVAILABLE: "Storage service is temporarily unavailable. Please try again later.",
         Msg.ERR_MODEL_CONFIG_INVALID: "Model configuration is invalid; cannot perform search.",
         Msg.ERR_MODEL_NOT_FOUND: "No available AI model found; cannot perform search.",
+        Msg.ERR_NO_USER_CODE: "No valid user identifier found; cannot perform search.",
+        Msg.ERR_AUTH_FAILED: "Authentication failed; cannot perform search.",
     },
 }
 
