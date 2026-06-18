@@ -478,7 +478,7 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
                       />
                     ) : (
                       <span className={styles.defaultAvatar}>
-                        <AntdIcon type="icon-chuangjianfangshi-wendangku" />
+                        <AntdIcon type="icon-chuangjianfangshi-wendangku" style={{ fontSize: 16 }} />
                       </span>
                     )
                   }
