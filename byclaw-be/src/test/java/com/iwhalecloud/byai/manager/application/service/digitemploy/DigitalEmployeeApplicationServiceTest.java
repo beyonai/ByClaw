@@ -496,6 +496,61 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
+    void uninstallDigitalEmployeeRelResources_removesSkillRelationAndRebuildsRelSkills() {
+        DigitalEmployeeInstallResourceDTO dto = new DigitalEmployeeInstallResourceDTO();
+        dto.setDigitalEmployeeId(100L);
+        dto.setRelIds(List.of(300L));
+
+        SsResource currentDefaultResource = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResource skillResource = buildSkillResource(300L, 2L);
+        skillResource.setResourceCode("dws");
+        SsResourceRelDetail skillRel = new SsResourceRelDetail();
+        skillRel.setResourceRelDetailId(900L);
+        skillRel.setResourceId(100L);
+        skillRel.setRelResourceId(300L);
+        SsResExtDigEmployee extDigEmployee = buildDigitalEmployeeExt(100L, "默认个人助理");
+        DigitalEmployeeDetailsDTO detailsDTO = new DigitalEmployeeDetailsDTO();
+        detailsDTO.setResourceId(100L);
+        detailsDTO.setPrologue("{}");
+
+        when(ssResourceService.findById(100L)).thenReturn(currentDefaultResource);
+        when(ssResourceService.findByIdList(List.of(300L))).thenReturn(List.of(skillResource));
+        when(authApplicationService.hasResourceManagePermission(currentDefaultResource)).thenReturn(true);
+        when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of(skillRel)).thenReturn(List.of())
+            .thenReturn(List.of()).thenReturn(List.of());
+        when(ssResExtDigEmployeeService.findById(100L)).thenReturn(extDigEmployee);
+        when(ssResExtDigEmployeeService.findDetailsById(100L)).thenReturn(detailsDTO);
+        when(ssResourceService.findRelResource(100L)).thenReturn(List.of());
+        when(templateRuleInfoApplicationService.findMemoryConfigsByResourceIdAndUserId(100L, 1L)).thenReturn(List.of());
+
+        DigitalEmployeeDetailsDTO result = service.uninstallDigitalEmployeeRelResources(dto);
+
+        verify(ssResourceRelDetailService).removeById(900L);
+        verify(authApplicationService, never()).hasResourceUsePermission(skillResource);
+        verify(operationLogService).recordOperationLog(eq(currentDefaultResource), eq(OperationTypeEnum.UPDATE));
+        List<Map> relSkills = JSON.parseArray(result.getSkills(), Map.class);
+        assertThat(relSkills).isEmpty();
+    }
+
+    @Test
+    void uninstallDigitalEmployeeRelResources_rejectsSkillWhenDefaultDigitalEmployeeHasNoManagePermission() {
+        DigitalEmployeeInstallResourceDTO dto = new DigitalEmployeeInstallResourceDTO();
+        dto.setDigitalEmployeeId(100L);
+        dto.setRelIds(List.of(300L));
+
+        SsResource currentDefaultResource = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResource skillResource = buildSkillResource(300L, 2L);
+
+        when(ssResourceService.findById(100L)).thenReturn(currentDefaultResource);
+        when(ssResourceService.findByIdList(List.of(300L))).thenReturn(List.of(skillResource));
+        when(authApplicationService.hasResourceManagePermission(currentDefaultResource)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.uninstallDigitalEmployeeRelResources(dto)).isInstanceOf(RuntimeException.class);
+        verify(authApplicationService, never()).hasResourceUsePermission(skillResource);
+        verify(ssResourceRelDetailService, never()).findByResourceId(100L);
+    }
+
+    @Test
     void rebuildAndSaveDigitalEmployeeRelSkills_writesStandardSkillJsonFromRelations() {
         SsResExtDigEmployee extDigEmployee = new SsResExtDigEmployee();
         extDigEmployee.setResourceId(100L);
