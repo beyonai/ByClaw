@@ -303,12 +303,12 @@ public class ScriptService extends AbstractChatProcess {
                 return;
             }
             JSONObject userMsg = new JSONObject();
-            userMsg.put("messageId", ctx.userMessageId);
+            userMsg.put("type", "NEW_MESSAGE");
             userMsg.put("sessionId", ctx.sessionId);
-            userMsg.put("chatContent", ctx.assistantChatDto.getChatContent());
-            userMsg.put("metadata", ctx.assistantChatDto.getMetadata());
-            multiDeviceBroadcastService.broadcastToUserDevices(ctx.userId, ctx.sessionId, "userMessage",
-                userMsg.toJSONString(), ctx.senderChannel);
+            userMsg.put("data", JSON.toJSON(ctx.askMsg));
+            userMsg.put("clientRequestId", ctx.assistantChatDto.getClientRequestId());
+            userMsg.put("agentId", ctx.assistantChatDto.getAgentId());
+            multiDeviceBroadcastService.broadcastRawToUser(ctx.userId, userMsg, ctx.senderChannel);
         }
         catch (Exception e) {
             log.warn("多端广播 userMessage 事件异常, sessionId: {}", ctx.sessionId, e);
@@ -361,7 +361,7 @@ public class ScriptService extends AbstractChatProcess {
      *
      * @param ctx
      */
-    private void initEvent(ChatProcessContext ctx) {
+    private ChatInitializationDto initEvent(ChatProcessContext ctx) {
         ChatInitializationDto chatInitializationDto = new ChatInitializationDto();
 
         Map<String, Object> metadata;
@@ -374,6 +374,7 @@ public class ScriptService extends AbstractChatProcess {
         chatInitializationDto.setTraceId(ctx.traceId);
         CompletionsUtils.responseWrite(ctx.res, SseResponseEventEnum.initialization,
             JSON.toJSONString(chatInitializationDto));
+        return chatInitializationDto;
     }
 
     /**
