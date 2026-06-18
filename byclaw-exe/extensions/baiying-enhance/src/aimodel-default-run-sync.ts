@@ -17,6 +17,7 @@ import {
     parseModelPrimaryRef,
 } from "./agent-session-model-reconcile.js";
 import { mergeDefaultAimodelIntoConfig } from "./agent-registry.js";
+import { mutateOpenClawConfigFile } from "./config-writer.js";
 import type { ManagedAgentModelResolveResult } from "./managed-agent-model-hook.js";
 import type { BaiyingRedisJsonStore } from "./redis-json-store.js";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
@@ -150,23 +151,24 @@ async function syncDefaultModelDirectly(params: {
     bundle: ResolvedDefaultBundle;
     reason: string;
 }): Promise<void> {
-    const next = mergeDefaultAimodelIntoConfig({
-        base: loadDiskConfig(params.deps.api),
-        defaultModel: {
-            providerKey: params.bundle.providerKey,
-            modelRef: params.bundle.modelRef,
-            provider: params.bundle.provider,
-        },
-        mainParentAgentId: resolveMainParentAgentId(params.deps.pluginConfig),
-        aimodelConfigRedisKey: params.deps.pluginConfig.aimodelConfigRedisKey,
-        aimodelTypeListRedisKey: params.deps.pluginConfig.aimodelTypeListRedisKey,
-        aimodelSecretProviderName: params.deps.pluginConfig.aimodelSecretProviderName,
-        aimodelSecretResolverCommand: process.execPath,
-        aimodelSecretResolverArgs: [
-            params.deps.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js",
-        ],
-    });
-    await params.deps.api.runtime.config.writeConfigFile(next);
+    await mutateOpenClawConfigFile(params.deps.api, (base) =>
+        mergeDefaultAimodelIntoConfig({
+            base,
+            defaultModel: {
+                providerKey: params.bundle.providerKey,
+                modelRef: params.bundle.modelRef,
+                provider: params.bundle.provider,
+            },
+            mainParentAgentId: resolveMainParentAgentId(params.deps.pluginConfig),
+            aimodelConfigRedisKey: params.deps.pluginConfig.aimodelConfigRedisKey,
+            aimodelTypeListRedisKey: params.deps.pluginConfig.aimodelTypeListRedisKey,
+            aimodelSecretProviderName: params.deps.pluginConfig.aimodelSecretProviderName,
+            aimodelSecretResolverCommand: process.execPath,
+            aimodelSecretResolverArgs: [
+                params.deps.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js",
+            ],
+        }),
+    );
     params.deps.api.logger.info(
         `baiying-enhance: synced platform default LLM ${params.bundle.modelRef} (${params.reason})`,
     );
