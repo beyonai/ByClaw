@@ -7,6 +7,7 @@ import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService;
 import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+import com.iwhalecloud.byai.common.storage.util.UserBucketNameResolver;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.infrastructure.filter.sub.SessionFilter;
 import jakarta.servlet.http.HttpServletRequest;
@@ -126,6 +127,25 @@ public class FilesController {
                 + "?redirectUrl=" + URLEncoder.encode(currentUrl, StandardCharsets.UTF_8);
             response.sendRedirect(redirectUrl);
             return;
+        }
+        // 用户桶（byclaw-{userCode}）越权校验：传入的是某用户的私有桶时，必须与当前登录用户一致。
+        // 公共桶（如 byclaw，不带 -userCode）不在此限。
+        if (StringUtils.startsWith(bucketName, "byclaw-")) {
+            String expectedBucket;
+            try {
+                expectedBucket = UserBucketNameResolver.buildUserBucketName(userCode);
+            } catch (Exception e) {
+                logger.warn("Build bucket name failed for userCode={}", userCode, e);
+                expectedBucket = null;
+            }
+            if (!StringUtils.equals(bucketName, expectedBucket)) {
+                logger.warn("Bucket access denied: bucket={}, loginUser={}, expectedBucket={}",
+                    bucketName, userCode, expectedBucket);
+                response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                response.setContentType("application/json;charset=UTF-8");
+                response.getWriter().write("{\"code\":-1,\"msg\":\"无权访问该文件\"}");
+                return;
+            }
         }
         filesApplicationService.preview(response, style, bucketName, filePath);
     }
