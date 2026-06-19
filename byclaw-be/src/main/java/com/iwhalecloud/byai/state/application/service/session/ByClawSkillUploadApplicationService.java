@@ -10,10 +10,7 @@ import java.util.Locale;
 import java.util.Set;
 
 import org.apache.commons.compress.archivers.ArchiveEntry;
-import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream;
-import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,7 +70,7 @@ public class ByClawSkillUploadApplicationService {
      * 上传单个 skill 压缩包。仅做大小、SKILL.md 唯一性两道校验，其它结构问题以静默忽略处理。
      *
      * @param userCode  目标用户编码（决定 bucket 名）
-     * @param zipFile   前端上传的 zip/tar.gz MultipartFile
+     * @param zipFile   前端上传的 zip MultipartFile
      * @return 与 query 接口同口径的 ByClawSkillDto
      */
     public ByClawSkillDto uploadSkillZip(String userCode, Long resourceId, MultipartFile zipFile) {
@@ -149,6 +146,9 @@ public class ByClawSkillUploadApplicationService {
         if (zipFile.getSize() > MAX_ZIP_SIZE_BYTES) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.size.exceeded"));
         }
+        if (!StringUtils.endsWithIgnoreCase(lastPathSegment(zipFile.getOriginalFilename()), ".zip")) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.file.invalid"));
+        }
     }
 
     /**
@@ -156,9 +156,6 @@ public class ByClawSkillUploadApplicationService {
      * 把内容缓存到 byte[]。单文件大小已被 MAX_ZIP_SIZE_BYTES 整体约束，缓存到内存可控。
      */
     private List<ParsedEntry> parseArchiveEntries(MultipartFile zipFile) {
-        if (isTarGzFile(zipFile)) {
-            return parseTarGzEntries(zipFile);
-        }
         return parseZipEntries(zipFile);
     }
 
@@ -186,37 +183,6 @@ public class ByClawSkillUploadApplicationService {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.empty"));
         }
         return result;
-    }
-
-    private List<ParsedEntry> parseTarGzEntries(MultipartFile tarGzFile) {
-        List<ParsedEntry> result = new ArrayList<>();
-        try (InputStream gzipIn = new GzipCompressorInputStream(tarGzFile.getInputStream());
-            TarArchiveInputStream tin = new TarArchiveInputStream(gzipIn)) {
-            TarArchiveEntry tarEntry;
-            while ((tarEntry = tin.getNextTarEntry()) != null) {
-                if (tarEntry.isDirectory() || !tarEntry.isFile()) {
-                    continue;
-                }
-                String normalized = normalizeEntryName(tarEntry.getName());
-                if (normalized == null) {
-                    continue;
-                }
-                byte[] content = tin.readAllBytes();
-                result.add(new ParsedEntry(normalized, content));
-            }
-        }
-        catch (IOException e) {
-            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), e);
-        }
-        if (result.isEmpty()) {
-            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.empty"));
-        }
-        return result;
-    }
-
-    private boolean isTarGzFile(MultipartFile file) {
-        String filename = lastPathSegment(file == null ? null : file.getOriginalFilename()).toLowerCase(Locale.ROOT);
-        return filename.endsWith(".tar.gz");
     }
 
     /**
@@ -371,9 +337,6 @@ public class ByClawSkillUploadApplicationService {
             return filename;
         }
         String lower = filename.toLowerCase(Locale.ROOT);
-        if (lower.endsWith(".tar.gz")) {
-            return filename.substring(0, filename.length() - ".tar.gz".length());
-        }
         int dot = filename.lastIndexOf('.');
         return dot > 0 ? filename.substring(0, dot) : filename;
     }

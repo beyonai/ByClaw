@@ -53,6 +53,25 @@ function resolveExecutorResourcesDir(
 
 const registry = new AgentRegistryState();
 const pluginRuntimeDir = path.dirname(fileURLToPath(import.meta.url));
+const PLUGIN_ID = "baiying-enhance";
+
+function warnIfConversationHooksBlocked(api: OpenClawPluginApi): void {
+  try {
+    const cfg =
+      api.runtime?.config?.current?.() ?? api.runtime?.config?.loadConfig?.();
+    const entry = cfg?.plugins?.entries?.[PLUGIN_ID] as
+      | { hooks?: { allowConversationAccess?: unknown } }
+      | undefined;
+    if (entry?.hooks?.allowConversationAccess === true) {
+      return;
+    }
+  } catch {
+    return;
+  }
+  api.logger.warn(
+    "baiying-enhance: OpenClaw conversation hooks may be blocked; set plugins.entries.baiying-enhance.hooks.allowConversationAccess=true so before_model_resolve can override Redis-managed models before the first inbound run",
+  );
+}
 
 export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
   loadBaiyingRedisEnvDefaults({
@@ -62,6 +81,7 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     },
   });
   const pluginCfg = (api.pluginConfig ?? {}) as BaiyingEnhancePluginConfig;
+  warnIfConversationHooksBlocked(api);
   api.registerReload({
     hotPrefixes: resolveConfigSyncHotPrefixes(pluginCfg),
   });
@@ -76,7 +96,9 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
       error: (message) => api.logger.error(message),
     },
   });
+
   setSharedRedisJsonStore(redisJsonStore);
+
   registerBaiyingAimodelRuntimeProvider(api, pluginCfg);
 
   registerBaiyingHttpRoutes({ api, registry });

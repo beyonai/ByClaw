@@ -2,42 +2,53 @@ import React from 'react';
 import { ClockCircleOutlined } from '@ant-design/icons';
 import { Tag, Typography } from 'antd';
 import { isNil } from 'lodash';
+import { useIntl } from '@umijs/max';
 
 import { INotificationItem } from './index';
 
 import styles from './index.module.less';
 
-const priorityMap: Record<string, { label: string; color: string }> = {
-  '1': { label: '低', color: 'default' },
-  '2': { label: '中', color: 'processing' },
-  '3': { label: '高', color: 'warning' },
-  '4': { label: '紧急', color: 'error' },
+type PriorityMeta = { labelId?: string; label?: string; color: string };
+
+const priorityMap: Record<string, PriorityMeta> = {
+  '1': { labelId: 'systemNotification.priority.low', color: 'default' },
+  '2': { labelId: 'systemNotification.priority.medium', color: 'processing' },
+  '3': { labelId: 'systemNotification.priority.high', color: 'warning' },
+  '4': { labelId: 'systemNotification.priority.urgent', color: 'error' },
 };
 
 function getPriorityMeta(priority?: string | number) {
   if (isNil(priority)) {
     return null;
   }
-  return priorityMap[String(priority)] || { label: priority ? `P${priority}` : '未设', color: 'default' };
+  return (
+    priorityMap[String(priority)] || {
+      labelId: priority ? undefined : 'systemNotification.priority.unset',
+      label: priority ? `P${priority}` : undefined,
+      color: 'default',
+    }
+  );
 }
 
 function NotificationComp(props: { item: INotificationItem }) {
+  const intl = useIntl();
   const { item } = props;
 
   const priorityMeta = getPriorityMeta(item.priority);
+  const title = item.title || intl.formatMessage({ id: 'systemNotification.unnamedNotification' });
 
   return (
     <div className={styles.content}>
       <div className={styles.titleRow}>
-        <Typography.Text className={styles.title} ellipsis={{ tooltip: item.title }}>
-          {item.title || '未命名通知'}
+        <Typography.Text className={styles.title} ellipsis={{ tooltip: title }}>
+          {title}
         </Typography.Text>
         <Tag icon={<ClockCircleOutlined />} className={styles.dateTag}>
           {item.createTime || '-'}
         </Tag>
         {priorityMeta && (
           <Tag color={priorityMeta.color} className={styles.priorityTag}>
-            {priorityMeta.label}
+            {priorityMeta.labelId ? intl.formatMessage({ id: priorityMeta.labelId }) : priorityMeta.label}
           </Tag>
         )}
       </div>

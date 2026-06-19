@@ -35,68 +35,65 @@
   overflow-x: hidden;
 }
 
+.searchActionRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+}
+
 .skillUploadInput {
   display: none;
 }
 
+.skillUploadButton {
+  flex: none;
+  min-width: 64px;
+  height: 30px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+}
+
 .skillActionBar {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
   margin-top: 8px;
 }
 
 .skillActionButton {
+  width: 100%;
   min-width: 0;
-  padding: 0 6px;
-  font-size: 12px;
+  height: 30px;
+  padding: 0 8px;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  :global(.@{antPrefix}-btn-icon),
+  :global(.@{antPrefix}-btn-loading-icon) {
+    flex: none;
+  }
+
+  :global(.@{antPrefix}-btn-icon + span),
+  :global(.@{antPrefix}-btn-loading-icon + span) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 .resourceItem {
   cursor: default;
-}
-
-.sourceTag {
-  flex: none;
-  margin-left: 6px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: rgba(22, 93, 255, 0.08);
-  color: var(--beyond-color-primary);
-  font-size: 11px;
-  line-height: 18px;
-}
-
-.uploadedSourceTag {
-  background: rgba(245, 166, 35, 0.16);
-  color: #9a6100;
-}
-
-.uploadedSkillDetail {
-  padding: 12px;
-}
-
-.uploadedSkillDetailTitle {
-  margin-bottom: 16px;
-  color: #1f2329;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.uploadedSkillDetailItem {
-  margin-bottom: 12px;
-}
-
-.uploadedSkillDetailLabel {
-  margin-bottom: 4px;
-  color: #646a73;
-  font-size: 12px;
-}
-
-.uploadedSkillDetailValue {
-  color: #1f2329;
-  line-height: 20px;
-  word-break: break-all;
 }
 
 .resourceAvatar {

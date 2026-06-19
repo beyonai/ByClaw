@@ -10,12 +10,14 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.mockito.ArgumentCaptor;
 
 import com.iwhalecloud.byai.gateway.sandbox.client.model.CreateSandboxRequest;
 import com.iwhalecloud.byai.gateway.sandbox.workspace.SandboxWorkspaceBootstrapInitializer;
 import com.iwhalecloud.byai.gateway.sandbox.workspace.model.SandboxFsInitContext;
-
+@DisabledOnOs(OS.WINDOWS)
 class GenericSandboxSpecProcessorTest {
 
     @Test

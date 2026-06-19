@@ -1,6 +1,7 @@
 import React, { forwardRef, useImperativeHandle } from 'react';
 
 import { Upload, UploadProps, App, Tooltip } from 'antd';
+import type { RcFile } from 'antd/es/upload';
 import classnames from 'classnames';
 import { head, isEmpty } from 'lodash';
 import { customAlphabet } from 'nanoid';
@@ -47,12 +48,32 @@ const UploadFile = forwardRef<UploadFileRef, IProps>((props, ref) => {
   const { message } = App.useApp();
   const intl = useIntl();
   const getNanoid = React.useRef<(size?: number) => string>(customAlphabet('abcdefghijklmnopqrstuvwxyz1234567890', 10));
+  const lastInvalidFileListKeyRef = React.useRef('');
   const uploadFileTip = intl.formatMessage({ id: 'queryInput.tooltip.uploadFile' });
 
-  const onUpload = async (file: File) => {
-    if (beforeUpload && !beforeUpload([file])) {
-      return;
+  const getFileListKey = (files: File[]) => {
+    return files.map((file) => `${file.name}-${file.size}-${file.lastModified}`).join('|');
+  };
+
+  const handleBeforeUpload: UploadProps['beforeUpload'] = (file, fileList) => {
+    const files = (fileList?.length ? fileList : [file]).map((item) => item as RcFile);
+    const fileListKey = getFileListKey(files);
+    const isInvalid = beforeUpload ? !beforeUpload(files) : false;
+    const hasInvalidType = files.some((item) => !validateAccept(item, accept));
+
+    if (isInvalid || hasInvalidType) {
+      if (hasInvalidType && lastInvalidFileListKeyRef.current !== fileListKey) {
+        message.error(`${intl.formatMessage({ id: 'common.supportedFileTypes' })}${accept}`);
+      }
+      lastInvalidFileListKeyRef.current = fileListKey;
+      return Upload.LIST_IGNORE;
     }
+
+    lastInvalidFileListKeyRef.current = '';
+    return true;
+  };
+
+  const onUpload = async (file: File) => {
     if (!validateAccept(file, accept)) {
       message.error(`${intl.formatMessage({ id: 'common.supportedFileTypes' })}${accept}`);
       return;
@@ -115,12 +136,13 @@ const UploadFile = forwardRef<UploadFileRef, IProps>((props, ref) => {
   return (
     <Upload
       disabled={disabled}
-      multiple={false}
+      multiple
       accept={accept}
       className={props.className}
       listType={props.listType}
       // accept=".doc,.docx,.xls,.xlsx,.ppt,.pdf,.txt"
       showUploadList={false}
+      beforeUpload={handleBeforeUpload}
       customRequest={async (options) => {
         const { file } = options;
         onUpload(file as File);

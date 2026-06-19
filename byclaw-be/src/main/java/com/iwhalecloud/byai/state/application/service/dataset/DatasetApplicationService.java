@@ -496,8 +496,7 @@ public class DatasetApplicationService {
      * @param request 检查请求
      * @return 冲突文件路径
      */
-    public KnowledgeUploadConflictCheckResponse checkUploadFileConflicts(
-        KnowledgeUploadConflictCheckRequest request) {
+    public KnowledgeUploadConflictCheckResponse checkUploadFileConflicts(KnowledgeUploadConflictCheckRequest request) {
         if (request == null || request.getResourceId() == null) {
             throw new BaseException("知识库资源标识不能为空");
         }
@@ -604,7 +603,8 @@ public class DatasetApplicationService {
         SsResource ssResource = loadDatasetResource(resourceId);
         validateDatasetReadablePermission(ssResource);
 
-        boolean directoryDownload = StringUtils.endsWith(StringUtils.trimToEmpty(directoryPath).replace('\\', '/'), "/");
+        boolean directoryDownload = StringUtils.endsWith(StringUtils.trimToEmpty(directoryPath).replace('\\', '/'),
+            "/");
         if (directoryDownload) {
             downloadKnowledgeDirectoryZip(ssResource, directoryPath, response);
             return;
@@ -633,7 +633,8 @@ public class DatasetApplicationService {
     /**
      * 目录下载按 zip 包输出，和文件管理里的文件夹下载体验保持一致。
      */
-    private void downloadKnowledgeDirectoryZip(SsResource ssResource, String directoryPath, HttpServletResponse response) {
+    private void downloadKnowledgeDirectoryZip(SsResource ssResource, String directoryPath,
+        HttpServletResponse response) {
         String normalizedDirectoryPath = normalizeKnowledgeDirectoryPath(directoryPath);
         String directoryName = getLastSplitName(normalizedDirectoryPath);
         String zipFileName = StringUtils.defaultIfBlank(directoryName,
@@ -643,8 +644,8 @@ public class DatasetApplicationService {
         response.setHeader("Content-Disposition",
             "attachment;filename=" + URLEncoder.encode(zipFileName, StandardCharsets.UTF_8));
 
-        try (ZipOutputStream zipOutputStream =
-            new ZipOutputStream(response.getOutputStream(), StandardCharsets.UTF_8)) {
+        try (
+            ZipOutputStream zipOutputStream = new ZipOutputStream(response.getOutputStream(), StandardCharsets.UTF_8)) {
             addKnowledgeDirectoryToZip(ssResource.getResourceCode(), normalizedDirectoryPath, "", zipOutputStream);
         }
         catch (Exception e) {
@@ -672,7 +673,8 @@ public class DatasetApplicationService {
             KbFileDownload kbFileDownload = new KbFileDownload();
             kbFileDownload.setKnCode(knCode);
             kbFileDownload.setFilePath(filePath);
-            zipOutputStream.putNextEntry(new ZipEntry(relativePrefix + sanitizeZipEntryName(getLastSplitName(filePath))));
+            zipOutputStream
+                .putNextEntry(new ZipEntry(relativePrefix + sanitizeZipEntryName(getLastSplitName(filePath))));
             try (InputStream inputStream = feignPythonBuildService.fileDownload(kbFileDownload)) {
                 IOUtils.copy(inputStream, zipOutputStream);
             }
@@ -789,18 +791,23 @@ public class DatasetApplicationService {
      */
     public List<DirAndFileVo> queryDirAndFileByLevel(DirAndFileQo dirAndFileQo) {
 
-        SsResource ssResource = loadDatasetResource(dirAndFileQo.getResourceId());
-        validateDatasetReadablePermission(ssResource);
+        String knCode = null;
+        if (dirAndFileQo.getResourceId() != null) {
+            SsResource ssResource = loadDatasetResource(dirAndFileQo.getResourceId());
+            validateDatasetReadablePermission(ssResource);
+            knCode = resolveKnowledgeCode(dirAndFileQo, ssResource);
+        }
+        else {
+            // openApi接口查询不做校验
+            knCode = dirAndFileQo.getResourceCode();
+        }
 
-        String knCode = resolveKnowledgeCode(dirAndFileQo, ssResource);
         String listDirectoryPath = normalizeKnowledgeDirectoryPath(dirAndFileQo.getDirectoryPath());
         return listKnowledgeDir(knCode, listDirectoryPath);
     }
 
     /**
-     * 按关键字递归搜索知识库目录和文件。
-     *
-     * 目录和文件可能存在同名、多层同名，返回结果必须携带完整 directoryPath，前端据此构建唯一树节点。
+     * 按关键字递归搜索知识库目录和文件。 目录和文件可能存在同名、多层同名，返回结果必须携带完整 directoryPath，前端据此构建唯一树节点。
      */
     public List<DirAndFileVo> searchDirAndFile(DirAndFileQo dirAndFileQo) {
         SsResource ssResource = loadDatasetResource(dirAndFileQo.getResourceId());

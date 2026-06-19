@@ -72,7 +72,7 @@ export default {
   'common.reset': '重置',
   'common.clear': '清空',
   'common.all': '全部',
-  'common.saveToWorkSpace': '保存到会话空间',
+  'common.saveToWorkSpace': '保存到会话文件夹',
   'form.name': '名称',
   'form.desc': '描述',
   'form.required': '必填项',

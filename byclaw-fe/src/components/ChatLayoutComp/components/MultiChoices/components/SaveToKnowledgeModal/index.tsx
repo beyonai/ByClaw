@@ -1,17 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Modal, Tabs, Input, Spin, Empty, message } from 'antd';
+import { Modal, Input, message } from 'antd';
 import { useIntl, useSelector } from '@umijs/max';
-import classnames from 'classnames';
-import AntdIcon from '@/components/AntdIcon';
+import KnowledgeTargetSelector from '@/components/KnowledgeTargetSelector';
+import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 
-import { listResourceUseAuth } from '@/pages/manager/service/resources';
-import { uploadFiles } from '@/service/knowledgeCenter';
+import { queryDigEmployeeManageKnowledgeResourceAuth } from '@/pages/manager/service/resources';
+import { queryDirAndFileByLevel, uploadFiles, type QueryDirAndFileByLevelItem } from '@/service/knowledgeCenter';
 import { referenceToOpenClawHandler } from '@/components/ChatLayoutComp/components/MultiChoices/util';
 
 import type { IMessage } from '@/typescript/message';
 import styles from './index.module.less';
-
-export type ResourceCatalogMain = 'enterprise' | 'personal';
 
 export interface SaveToKnowledgeModalProps {
   open: boolean;
@@ -22,21 +20,19 @@ export interface SaveToKnowledgeModalProps {
   agentName?: string;
 }
 
-const tabCatalog: { key: ResourceCatalogMain; labelId: string }[] = [
-  { key: 'personal', labelId: 'multiChoices.saveToKnowledge.personal' },
-  { key: 'enterprise', labelId: 'multiChoices.saveToKnowledge.enterprise' },
-];
-
 function SaveToKnowledgeModal(props: SaveToKnowledgeModalProps) {
   const { open, onClose, multiChoicesMsgId, messageList, onSuccess, agentName } = props;
   const intl = useIntl();
   const resolvedAgentName = agentName || intl.formatMessage({ id: 'common.digitalEmployee' });
   const { userInfo } = useSelector((state: any) => state.user);
-  const [activeCatalog, setActiveCatalog] = useState<ResourceCatalogMain>('personal');
+  const activeSiderAgent = useActiveSiderAgent();
   const [keyword, setKeyword] = useState('');
   const [list, setList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedResourceId, setSelectedResourceId] = useState<string | undefined>();
+  const [selectedKnowledgeBase, setSelectedKnowledgeBase] = useState<any | null>(null);
+  const [knowledgeDirectoryPath, setKnowledgeDirectoryPath] = useState('/');
+  const [knowledgeFolders, setKnowledgeFolders] = useState<QueryDirAndFileByLevelItem[]>([]);
+  const [knowledgeFolderLoading, setKnowledgeFolderLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [fileName, setFileName] = useState('');
@@ -59,13 +55,18 @@ function SaveToKnowledgeModal(props: SaveToKnowledgeModalProps) {
     if (!open) {
       return;
     }
-    setSelectedResourceId(undefined);
+    setSelectedKnowledgeBase(null);
+    setKnowledgeDirectoryPath('/');
+    setKnowledgeFolders([]);
     setKeyword('');
-    setActiveCatalog('personal');
   }, [open]);
 
   useEffect(() => {
     if (!open) {
+      return;
+    }
+    if (!activeSiderAgent.resourceId) {
+      setList([]);
       return;
     }
     let cancelled = false;
@@ -73,12 +74,11 @@ function SaveToKnowledgeModal(props: SaveToKnowledgeModalProps) {
     const timer = window.setTimeout(async () => {
       setLoading(true);
       try {
-        const res = await listResourceUseAuth({
+        const res = await queryDigEmployeeManageKnowledgeResourceAuth({
+          resourceId: activeSiderAgent.resourceId,
           pageNum: 1,
-          pageSize: 100,
+          pageSize: 30,
           keyword: keyword.trim(),
-          ownerType: activeCatalog,
-          resourceBizTypeList: ['KG_DOC'],
         });
         if (cancelled) {
           return;
@@ -100,15 +100,67 @@ function SaveToKnowledgeModal(props: SaveToKnowledgeModalProps) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [open, activeCatalog, keyword]);
+  }, [activeSiderAgent.resourceId, open, keyword]);
+
+  const selectedResourceId = selectedKnowledgeBase
+    ? String(selectedKnowledgeBase.resourceId ?? selectedKnowledgeBase.id ?? '')
+    : undefined;
+
+  const loadKnowledgeFolders = async (knowledgeBase: any, directoryPath: string) => {
+    const resourceId = knowledgeBase?.resourceId ?? knowledgeBase?.id;
+    if (!resourceId) return;
+    setKnowledgeFolderLoading(true);
+    try {
+      const response = await queryDirAndFileByLevel({
+        resourceId: Number(resourceId),
+        directoryPath,
+      });
+      let rows: QueryDirAndFileByLevelItem[] = [];
+      if (Array.isArray(response)) {
+        rows = response;
+      } else if (Array.isArray((response as any)?.data)) {
+        rows = (response as any).data;
+      }
+      const folders = rows.filter((item: QueryDirAndFileByLevelItem) => item.type === 'directory');
+      setKnowledgeFolders(folders);
+      setKnowledgeDirectoryPath(directoryPath);
+      return folders;
+    } catch (error) {
+      console.error(error);
+      setKnowledgeFolders([]);
+      return [];
+    } finally {
+      setKnowledgeFolderLoading(false);
+    }
+  };
+
+  const handleSelectKnowledgeBase = (knowledgeBase: any) => {
+    setSelectedKnowledgeBase(knowledgeBase);
+    void loadKnowledgeFolders(knowledgeBase, '/');
+  };
+
+  const loadKnowledgeFolderChildren = async (knowledgeBase: any, directoryPath: string) => {
+    const resourceId = knowledgeBase?.resourceId ?? knowledgeBase?.id;
+    if (!resourceId) return [];
+    const response = await queryDirAndFileByLevel({
+      resourceId: Number(resourceId),
+      directoryPath,
+    });
+    let rows: QueryDirAndFileByLevelItem[] = [];
+    if (Array.isArray(response)) {
+      rows = response;
+    } else if (Array.isArray((response as any)?.data)) {
+      rows = (response as any).data;
+    }
+    return rows.filter((item: QueryDirAndFileByLevelItem) => item.type === 'directory');
+  };
 
   const handleConfirmSave = async () => {
     if (!textFile) return;
     if (!selectedResourceId) return;
-
     const formData = new FormData();
     formData.append('resourceId', String(selectedResourceId));
-    formData.append('directoryPath', '/');
+    formData.append('directoryPath', knowledgeDirectoryPath || '/');
     formData.append('files', textFile);
 
     setSubmitting(true);
@@ -173,89 +225,40 @@ function SaveToKnowledgeModal(props: SaveToKnowledgeModalProps) {
     setCountdownTimer(timer);
   };
 
-  const tabItems = tabCatalog.map((t) => ({
-    key: t.key,
-    label: intl.formatMessage({ id: t.labelId }),
-    children: (
-      <div className={styles.modalContent}>
-        <Spin spinning={loading}>
-          {list.length === 0 && !loading ? (
-            <Empty description={intl.formatMessage({ id: 'multiChoices.saveToKnowledge.empty' })} />
-          ) : (
-            <div className={styles.listContainer}>
-              <div className={styles.grid}>
-                {list.map((item: any) => {
-                  const id = item.resourceId ?? item.id;
-                  const name = item.resourceName ?? item.name ?? id;
-                  const idStr = String(id);
-                  const isSelected = selectedResourceId === idStr;
-                  return (
-                    <div
-                      key={idStr}
-                      className={classnames(styles.card, { [styles.cardSelected]: isSelected })}
-                      onClick={() => setSelectedResourceId(idStr)}
-                    >
-                      <div className={styles.cardHeader}>
-                        <div className={styles.cardIcon}>
-                          <AntdIcon type="icon-chuangjianfangshi-wendangku" className={styles.icon} />
-                        </div>
-                        <span className={styles.cardTitle} title={String(name)}>
-                          {name}
-                        </span>
-                      </div>
-                      {item.resourceDesc && (
-                        <span className={styles.cardDesc} title={String(item.resourceDesc)}>
-                          {item.resourceDesc}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </Spin>
-      </div>
-    ),
-  }));
-
   return (
     <>
-      <Modal
-        title={intl.formatMessage({ id: 'multiChoices.saveToKnowledge.title' })}
+      <KnowledgeTargetSelector
         open={open}
-        zIndex={999}
         onCancel={onClose}
         onOk={handleOk}
         confirmLoading={submitting}
-        okButtonProps={{ disabled: !selectedResourceId || submitting }}
+        okDisabled={!selectedResourceId || submitting}
         width="60%"
-        destroyOnClose
-      >
-        <Tabs
-          activeKey={activeCatalog}
-          onChange={(k) => {
-            setActiveCatalog(k as ResourceCatalogMain);
-            setSelectedResourceId(undefined);
-            setKeyword('');
-          }}
-          tabBarExtraContent={{
-            right: (
-              <Input.Search
-                allowClear
-                placeholder={intl.formatMessage({
-                  id: 'multiChoices.saveToKnowledge.searchPlaceholder',
-                })}
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-                onSearch={(v) => setKeyword(v)}
-                className={styles.searchInput}
-              />
-            ),
-          }}
-          items={tabItems}
-        />
-      </Modal>
+        zIndex={999}
+        keyword={keyword}
+        onKeywordChange={setKeyword}
+        onSearch={setKeyword}
+        knowledgeBases={list}
+        knowledgeLoading={loading}
+        selectedKnowledgeBase={selectedKnowledgeBase}
+        onSelectKnowledgeBase={handleSelectKnowledgeBase}
+        directoryPath={knowledgeDirectoryPath}
+        folders={knowledgeFolders}
+        folderLoading={knowledgeFolderLoading}
+        onFolderClick={(_, directoryPath) => {
+          if (selectedKnowledgeBase) {
+            void loadKnowledgeFolders(selectedKnowledgeBase, directoryPath);
+          }
+        }}
+        onLoadFolderChildren={(directoryPath) => {
+          if (selectedKnowledgeBase) {
+            return loadKnowledgeFolderChildren(selectedKnowledgeBase, directoryPath);
+          }
+          return Promise.resolve([]);
+        }}
+        emptyText={intl.formatMessage({ id: 'multiChoices.saveToKnowledge.empty' })}
+        folderEmptyText={intl.formatMessage({ id: 'fileSider.saveToKnowledge.rootTip' })}
+      />
       <Modal
         title={intl.formatMessage({ id: 'multiChoices.saveToKnowledge.confirmTitle' })}
         open={confirmModalOpen}

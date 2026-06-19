@@ -1,0 +1,153 @@
+.selector {
+  min-height: 300px;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
+  gap: 16px;
+}
+
+.leftPanel,
+.rightPanel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.search {
+  flex: 1;
+  min-width: 0;
+}
+
+.content {
+  min-height: 260px;
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  max-height: 48vh;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.card {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(5, 5, 5, 0.08);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
+
+  &:hover {
+    border-color: rgba(22, 93, 255, 0.35);
+    box-shadow: 0 4px 14px rgba(22, 93, 255, 0.08);
+  }
+}
+
+.cardSelected {
+  border-color: #165dff;
+  background: #f4f8ff;
+}
+
+.cardIcon {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: rgba(22, 93, 255, 0.08);
+  color: #165dff;
+  font-size: 20px;
+}
+
+.cardBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.cardTitle {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #1f2329;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  word-break: break-all;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.cardDesc {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 4px;
+  color: #86909c;
+  font-size: 12px;
+  line-height: 18px;
+  word-break: break-all;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.folderHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  margin-bottom: 10px;
+}
+
+.selectedTitle {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  line-height: 24px;
+}
+
+.folderTreeWrap {
+  max-height: 48vh;
+  overflow-y: auto;
+  padding: 6px 4px;
+  border: 1px solid rgba(5, 5, 5, 0.06);
+  border-radius: 8px;
+}
+
+.folderTree {
+  min-width: 0;
+}
+
+.folderEmpty {
+  margin: 24px 0 12px;
+}
+
+.folderTreeTitle {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.folderTreeName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folderIcon {
+  flex: none;
+  color: #165dff;
+  font-size: 14px;
+}

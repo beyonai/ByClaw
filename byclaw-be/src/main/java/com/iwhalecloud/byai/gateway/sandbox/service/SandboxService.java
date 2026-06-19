@@ -19,6 +19,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -78,6 +79,8 @@ public class SandboxService {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
+    private static final AtomicInteger RECONCILE_POOL_SEQUENCE = new AtomicInteger(1);
+
     /** 沙箱状态：运行中 */
     private static final String STATUS_RUNNING = "RUNNING";
 
@@ -93,7 +96,7 @@ public class SandboxService {
     /** 沙箱状态：启动失败 */
     private static final String STATUS_FAILED = "FAILED";
 
-    /** 手动释放终止原因。 */
+    /** 手动释放终止原因前缀。 */
     private static final String RELEASE_REASON_MANUAL = "release.manual";
 
     /** 自动空闲超时释放终止原因。 */
@@ -997,6 +1000,7 @@ public class SandboxService {
      * @param resourceId 资源ID
      */
     public void removeSandbox(String userCode, Long resourceId) {
+        String releaseReason = manualReleaseReason(userCode);
         String sandboxType = null;
         List<Long> effectiveResourceIds = new ArrayList<>();
         if (resourceId != null) {
@@ -1013,7 +1017,7 @@ public class SandboxService {
         LOGGER.info("开始手动释放沙箱，用户编码：{}，资源ID：{}，命中记录数：{}，记录：{}",
             userCode, resourceId, records.size(), records.stream().map(this::sandboxRef).collect(Collectors.toList()));
         for (SsSandboxRecord record : records) {
-            doRemoveSandbox(record, RELEASE_REASON_MANUAL);
+            doRemoveSandbox(record, releaseReason);
         }
     }
 
@@ -1025,15 +1029,27 @@ public class SandboxService {
         if (record == null) {
             throw new BdpRuntimeException("sandbox record not found");
         }
+        String releaseReason = manualReleaseReason(record.getUserCode());
         if (STATUS_STARTING.equals(record.getStatus())) {
-            markStartingSandboxReleased(record, RELEASE_REASON_MANUAL);
+            markStartingSandboxReleased(record, releaseReason);
             return;
         }
         if (!STATUS_RUNNING.equals(record.getStatus())) {
             LOGGER.warn("沙箱手动释放跳过，记录非可释放状态：{}", sandboxRef(record));
             return;
         }
-        doRemoveSandbox(record, RELEASE_REASON_MANUAL);
+        doRemoveSandbox(record, releaseReason);
+    }
+
+    private String manualReleaseReason(String fallbackUserCode) {
+        String operatorUserCode = StringUtils.trimToEmpty(CurrentUserHolder.getCurrentUserCode());
+        if (StringUtils.isBlank(operatorUserCode)) {
+            operatorUserCode = StringUtils.trimToEmpty(fallbackUserCode);
+        }
+        if (StringUtils.isBlank(operatorUserCode)) {
+            return RELEASE_REASON_MANUAL;
+        }
+        return RELEASE_REASON_MANUAL + ":" + operatorUserCode;
     }
 
     public void updateSandboxById(Long id, Integer autoRelease) {
@@ -1404,7 +1420,7 @@ public class SandboxService {
         }
 
         int concurrency = Math.max(1, reconcileRemoteConcurrency);
-        ExecutorService executorService = Executors.newFixedThreadPool(concurrency);
+        ExecutorService executorService = Executors.newFixedThreadPool(concurrency, newReconcileThreadFactory());
         AtomicInteger remainingRecords = new AtomicInteger(Math.max(1, reconcileMaxRecordsPerRun));
         long deadline = System.currentTimeMillis() + Math.max(1L, reconcileMaxDurationMs);
         try {
@@ -1453,6 +1469,17 @@ public class SandboxService {
             total, report.getScannedCount(), report.getAffectedCount(), report.getSkippedCount(), report.getFailedCount(),
             report.getAffectedSandboxes(), report.getSkippedSandboxes(), report.getFailedSandboxes());
         return report;
+    }
+
+    private static ThreadFactory newReconcileThreadFactory() {
+        int poolIndex = RECONCILE_POOL_SEQUENCE.getAndIncrement();
+        AtomicInteger threadIndex = new AtomicInteger(1);
+        ThreadFactory delegate = Executors.defaultThreadFactory();
+        return runnable -> {
+            Thread thread = delegate.newThread(runnable);
+            thread.setName("sandbox-reconcile-" + poolIndex + "-" + threadIndex.getAndIncrement());
+            return thread;
+        };
     }
 
     private SandboxLifecycleJobReport reconcileGroup(SandboxReconcileGroup group, AtomicInteger remainingRecords,

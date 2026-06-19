@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -17,7 +19,7 @@ import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.storage.model.StorageObject;
 import com.iwhalecloud.byai.common.storage.model.StoragePrefix;
-
+@DisabledOnOs(OS.WINDOWS)
 class LocalStorageServiceTest {
 
     @TempDir
@@ -49,6 +51,22 @@ class LocalStorageServiceTest {
             new ByteArrayInputStream(new byte[0]), 0L, "application/x-directory");
 
         assertThat(tempDir.resolve("byclaw-user001/by/workspace")).isDirectory();
+    }
+
+    @Test
+    void initCreatesBucketRootForMountedFileStorage() throws Exception {
+        LocalStorageService service = service("file");
+
+        service.init("byclaw");
+        service.mount("byclaw-datacloud");
+
+        assertThat(tempDir.resolve("byclaw")).isDirectory();
+        assertThat(tempDir.resolve("byclaw-datacloud")).isDirectory();
+        assertThat(Files.getPosixFilePermissions(tempDir.resolve("byclaw")))
+            .containsAll(Set.of(
+                PosixFilePermission.OWNER_WRITE,
+                PosixFilePermission.GROUP_WRITE,
+                PosixFilePermission.OTHERS_WRITE));
     }
 
     @Test

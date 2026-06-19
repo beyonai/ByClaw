@@ -81,6 +81,22 @@ describe("session-context compaction completion gate", () => {
 
     clearActiveSdkRequestByTarget(request.accountId, request.to);
   });
+
+  it("releases the compaction gate on compaction end when willRetry is false", () => {
+    const request = setupRequest("compaction-no-retry");
+    const sessionKey = request.sessionKey;
+
+    markActiveSdkCompactionRetryPending(sessionKey, true);
+    expect(request.compactionRetryPending).toBe(true);
+
+    markActiveSdkCompactionRetryPending(sessionKey, false);
+    markActiveSdkRootLifecycleFinished(sessionKey, "end");
+
+    expect(request.compactionRetryPending).toBe(false);
+    expect(shouldCompleteActiveSdkRequest(request)).toBe(true);
+
+    clearActiveSdkRequestByTarget(request.accountId, request.to);
+  });
 });
 
 // context-overflow precheck 被 blocked 时，onAgentEvent 零事件、rootLifecyclePhase 永远 undefined，

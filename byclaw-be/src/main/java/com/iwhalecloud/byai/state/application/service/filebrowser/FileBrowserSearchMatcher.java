@@ -7,6 +7,9 @@ import org.apache.commons.lang3.StringUtils;
 /**
  * 文件浏览器模糊搜索匹配器。
  * 支持忽略大小写、空格和常见分隔符，也支持关键词字符按顺序散列匹配。
+ *
+ * @author qin.guoquan
+ * @date 2026-06-17 22:38:38
  */
 final class FileBrowserSearchMatcher {
 

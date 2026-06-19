@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRedis } from "@byclaw/by-framework";
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { getOptionalByaiRuntime } from "./runtime";
 import { emitOutOfBandSdkEvent, getRedisInfo, getUserCode } from "./utils";
 
@@ -257,7 +256,7 @@ async function upsertCronNextRunTimeField(params: {
   await params.redis.hset(CRON_NEXT_RUN_REDIS_KEY, params.userCode, String(params.nextRunTime));
 }
 
-export async function updateCronNextRunTimeRedis(api?: Pick<OpenClawPluginApi, "logger">) {
+export async function updateCronNextRunTimeRedis() {
   const redisInfo = getRedisInfo();
   if (!redisInfo) {
     return;
@@ -270,45 +269,41 @@ export async function updateCronNextRunTimeRedis(api?: Pick<OpenClawPluginApi, "
   try {
     const nextRunTime = await resolveNearestCronNextRunTime();
     await upsertCronNextRunTimeField({ redis, userCode, nextRunTime });
-    api?.logger.info(
-      `[byai-channel] cron nextRunTime synced: userCode=${userCode} nextRunTime=${String(nextRunTime)}`,
-    );
   } catch (err) {
-    api?.logger.warn(`[byai-channel] cron nextRunTime sync failed: ${String(err)}`);
+    console.warn(`[byai-channel] cron nextRunTime sync failed: ${String(err)}`);
   } finally {
     await redis.quit().catch(() => undefined);
   }
 }
 
-function requestCronNextRunTimeRedisUpdate(api?: Pick<OpenClawPluginApi, "logger">) {
+function requestCronNextRunTimeRedisUpdate() {
   if (cronNextRunUpdatePromise) {
     cronNextRunUpdateQueued = true;
     return cronNextRunUpdatePromise;
   }
-  cronNextRunUpdatePromise = updateCronNextRunTimeRedis(api).finally(() => {
+  cronNextRunUpdatePromise = updateCronNextRunTimeRedis().finally(() => {
     cronNextRunUpdatePromise = null;
     if (cronNextRunUpdateQueued) {
       cronNextRunUpdateQueued = false;
-      void requestCronNextRunTimeRedisUpdate(api);
+      void requestCronNextRunTimeRedisUpdate();
     }
   });
   return cronNextRunUpdatePromise;
 }
 
-export function startCronNextRunTimeRedisSync(api?: Pick<OpenClawPluginApi, "logger">) {
+export function startCronNextRunTimeRedisSync() {
   if (cronNextRunTimer) {
     return;
   }
-  void requestCronNextRunTimeRedisUpdate(api);
+  void requestCronNextRunTimeRedisUpdate();
   cronNextRunTimer = setInterval(() => {
-    void requestCronNextRunTimeRedisUpdate(api);
+    void requestCronNextRunTimeRedisUpdate();
   }, CRON_NEXT_RUN_SYNC_INTERVAL_MS);
   cronNextRunTimer.unref?.();
 }
 
 export async function handleCronChangedEvent(
   event: PluginHookCronChangedEvent,
-  api?: Pick<OpenClawPluginApi, "logger">,
 ) {
   const {
     action,
@@ -319,7 +314,7 @@ export async function handleCronChangedEvent(
     job,
   } = event;
   if (action === "added" || action === "updated" || action === "removed") {
-    void requestCronNextRunTimeRedisUpdate(api);
+    void requestCronNextRunTimeRedisUpdate();
   }
   if (action !== "finished") {
     // 暂时只投递finished事件

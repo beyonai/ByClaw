@@ -9,7 +9,7 @@ import AntdIcon from '../AntdIcon';
 import DetailDrawer from './DetailDrawer';
 import styles from './index.module.less';
 import classNames from 'classnames';
-import { getKnowledgeFileIconType } from '@/constants/icon';
+import { getFileIconType } from '@/constants/icon';
 
 export type IDrawerSourceFromInfo = {
   content: string;
@@ -34,7 +34,7 @@ type IProps = {
 
 export const RenderSourceIcon = ({ title, fontSize }: { title: string; fontSize?: number }) => {
   const renderIcon = useCallback((title: string, fontSize: number = 16) => {
-    const iconType = getKnowledgeFileIconType(title, { defaultIconType: '' });
+    const iconType = getFileIconType(title, { defaultIconType: '' });
     if (iconType) {
       return <AntdIcon type={`icon-${iconType}`} style={{ fontSize }} />;
     }

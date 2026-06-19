@@ -21,6 +21,7 @@ public class MetaPromptGenerateRequest {
     private String personalityDimensions;
     private String wordPreferences;
     private String sentenceAndTone;
+    private String corePersonaDefinition;
 
     private List<String> relIds;
     private String OptimizeTypeEnum;

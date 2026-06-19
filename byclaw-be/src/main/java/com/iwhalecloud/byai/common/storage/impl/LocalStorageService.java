@@ -116,6 +116,16 @@ public class LocalStorageService extends AbstractFileIngressStorageService<Void>
     }
 
     @Override
+    public void init(String bucketOrRoot) {
+        doCreateBucket(bucketOrRoot);
+    }
+
+    @Override
+    public void mount(String bucketOrRoot) {
+        doCreateBucket(bucketOrRoot);
+    }
+
+    @Override
     protected boolean doCreateBucket(String bucketName) {
         try {
             Path bucketRoot = resolve(StorageLocation.of(DEFAULT_NAMESPACE, bucketName, ""));

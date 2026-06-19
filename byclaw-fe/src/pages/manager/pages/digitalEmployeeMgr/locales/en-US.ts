@@ -58,6 +58,10 @@ export default {
   // Refine Modal
   'refineModal.title': 'Auto-Generate Configuration',
   'refineModal.regenerate': 'Regenerate',
+  'refineModal.generating': 'Generating configuration...',
+  'refineModal.waitingStream': 'Connecting to the model and preparing results',
+  'refineModal.generateFailed': 'Generation failed. Please try again.',
+  'refineModal.generateIncomplete': 'The generated result is incomplete. Please try again.',
   'refineModal.namePlaceholder': 'Enter name',
   'refineModal.character': 'Character Profile',
   'refineModal.characterPlaceholder': 'Enter character profile',

@@ -1163,9 +1163,9 @@ class DataCloudWorker(GatewayWorker):
         )
         return None
 
-    async def start_heartbeat(self) -> None:
+    async def start_heartbeat(self, **kwargs) -> None:
         setup_logging(extra_namespaces=("byclaw_data",))
-        await super().start_heartbeat()
+        await super().start_heartbeat(**kwargs)
 
         init_plugin = self.plugin_registry.get_plugin("datacloud_init_agent_conf")
         loaded_agent_ids = (
@@ -1228,6 +1228,41 @@ class DataCloudWorker(GatewayWorker):
             if self._shared_loader is not None
             else "None (dynamic agents will skip OWL inject)",
         )
+
+        # 扩展本体池：从所有 AgentConfig 的 mounted_objects 收集全量对象，
+        # 加载到 TOOL_POOL（全部 LOCKED）。
+        # 不再依赖 extResourceList（已废弃），统一由 relResourceList 声明对象。
+        # 超过 TOOL_POOL_THRESHOLD 时启用锚点驱动模式（is_anchor_mode()==True）。
+        if self._resource_path and self._shared_loader is not None:
+            _all_object_codes: list[str] = list(dict.fromkeys(
+                code
+                for cfg in self.plugin_registry.get_agent_configs_snapshot().configs
+                for code in (cfg.extra.get("mounted_objects") or [])
+                if isinstance(code, str)
+            ))
+            if _all_object_codes:
+                try:
+                    from datacloud_analysis.tools.tool_pool import (  # noqa: PLC0415
+                        _init_ext_tool_pool,
+                    )
+
+                    _init_ext_tool_pool(
+                        resource_path=self._resource_path,
+                        loader=self._shared_loader,
+                        ext_codes=_all_object_codes,
+                    )
+                    logger.info(
+                        "DataCloudWorker: TOOL_POOL initialized all_codes_count=%d",
+                        len(_all_object_codes),
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "DataCloudWorker: _init_ext_tool_pool failed", exc_info=True
+                    )
+            else:
+                logger.info(
+                    "DataCloudWorker: no mounted_objects found, TOOL_POOL init skipped"
+                )
 
     async def _resolve_agent_configs_snapshot(
         self,
@@ -1413,6 +1448,60 @@ class DataCloudWorker(GatewayWorker):
             _resolved_locale,
             getattr(context, "locale", "<not set>"),
         )
+
+        # ── 用户 token 设置（从 Redis 读取，写入 context）──
+        # 先用 user_code 查 SHARE_BFM_USER_CODE_{user_code} 得到 user_id，
+        # 再用 user:{user_id}:login:auth 读取 token hash。
+        _auth_user_id = _cmd_user_code
+        if _auth_user_id:
+            try:
+                _uid_key = f"SHARE_BFM_USER_CODE_{_auth_user_id}"
+                _real_user_id: str = str(await self.redis.get(_uid_key) or "").strip()
+                if not _real_user_id:
+                    logger.warning(
+                        "[user-auth] user_id not found in redis: key=%s session=%s",
+                        _uid_key,
+                        context.session_id,
+                    )
+                _redis_auth_key = f"user:{_real_user_id or _auth_user_id}:login:auth"
+                _redis_auth_data: dict[str, str] = await self.redis.hgetall(_redis_auth_key)
+                if _redis_auth_data:
+                    _whale_token = _redis_auth_data.get("WHALE_AGENT_AUTHORIZATION", "")
+                    _sso_token = _redis_auth_data.get("Sso-Token", "")
+                    _beyond_token = _redis_auth_data.get("Beyond-Token", "")
+                    # 写入 context 属性
+                    try:
+                        if _whale_token:
+                            context.whale_agent_authorization = _whale_token
+                        if _sso_token:
+                            context.sso_token = _sso_token
+                        if _beyond_token:
+                            context.beyond_token = _beyond_token
+                    except AttributeError:
+                        pass
+                    # 回填到 header_metadata，使下游 header_metadata.get("Beyond-Token") 等读取生效
+                    if _whale_token and not header_metadata.get("WHALE_AGENT_AUTHORIZATION"):
+                        header_metadata["WHALE_AGENT_AUTHORIZATION"] = _whale_token
+                    if _sso_token and not header_metadata.get("Sso-Token"):
+                        header_metadata["Sso-Token"] = _sso_token
+                    if _beyond_token and not header_metadata.get("Beyond-Token"):
+                        header_metadata["Beyond-Token"] = _beyond_token
+                    logger.info(
+                        "[user-auth] loaded tokens from redis: key=%s session=%s"
+                        " whale=%s sso=%s beyond=%s",
+                        _redis_auth_key,
+                        context.session_id,
+                        "***" if _whale_token else "<empty>",
+                        "***" if _sso_token else "<empty>",
+                        "***" if _beyond_token else "<empty>",
+                    )
+            except Exception:
+                logger.warning(
+                    "[user-auth] failed to load tokens from redis: user_id=%s session=%s",
+                    _auth_user_id,
+                    context.session_id,
+                    exc_info=True,
+                )
 
         # 来源 1：extra_payload.call_object_ids / call_view_ids（内部委派）
         # 来源 2：extra_payload.resource_list 中的 OBJECT / VIEW 资源码（前端选择）

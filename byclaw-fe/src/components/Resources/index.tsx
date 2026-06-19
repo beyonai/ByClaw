@@ -24,6 +24,7 @@ import ResourceDetail from './components/ResourceDetail';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
 import DetailPanel from '@/pages/knowledgeCenter/components/DetailPanel';
+import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import { useSkillDetailDrawer } from '@/pages/manager/components/SkillDetailDrawer/useSkillDetailDrawer';
 import ResourceFilter from './components/ResourceFilter';
 import { getDefaultParams } from './components/ResourceFilter';
@@ -31,6 +32,7 @@ import ResourceList from './components/ResourceList';
 import { saveTool } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
+import useGlobal from '@/hooks/useGlobal';
 import { get, trim, intersection, isEmpty } from 'lodash';
 import styles from './index.module.less';
 
@@ -53,14 +55,27 @@ interface IResourceItem {
   canDelete?: boolean;
   canApplyUse?: boolean;
   canAuditUse?: boolean;
+  skillType?: string;
+  sourceType?: string;
+  version?: string;
+  skillUrl?: string;
+  skillPackageFormat?: string;
+  skillOriginalFilename?: string;
+  skillPackageSize?: number | string;
+  skillPackageHash?: string;
+  targetContent?: string;
+  syncStatus?: string;
+  syncError?: string;
+  lastSyncTime?: string;
 }
 
 interface Props {
   resourceType: string; // 对应资源类型
 }
 
-const getBannerUrl = (bannerList: any[], label: string) => {
-  const banner = bannerList.find((item) => item?.label === label);
+const getBannerUrl = (bannerList: any[], labels: string | string[]) => {
+  const labelList = Array.isArray(labels) ? labels : [labels];
+  const banner = bannerList.find((item) => labelList.includes(item?.label));
   return `${banner?.url ?? ''}`.trim().replace(/^`|`$/g, '').trim();
 };
 
@@ -83,6 +98,7 @@ const parseBannerList = (value: any) => {
 
 const Resources: React.FC<Props> = ({ resourceType }) => {
   const intl = useIntl();
+  const { EventEmitter } = useGlobal();
 
   // 根据 resourceType 判断资源名称
   const getResourceName = () => {
@@ -154,6 +170,30 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const refreshList = useCallback(() => {
     setRefreshKey((prevKey) => prevKey + 1);
   }, []);
+
+  useEffect(() => {
+    const handleResourceTypeReload = (changedResourceType?: string) => {
+      if (changedResourceType !== resourceType) {
+        return;
+      }
+      if (resourceType === 'SKILL') {
+        const nextSearchParams = new URLSearchParams(searchParams);
+        nextSearchParams.set('tab', 'personal');
+        setCatalogId('');
+        setSearchValue('');
+        setDebouncedSearchValue('');
+        setDropdownParam(getDefaultParams());
+        setActiveTab('personal');
+        setSearchParams(nextSearchParams);
+      }
+      refreshList();
+    };
+
+    EventEmitter.on('beyond-resourceList-resourceType-reload', handleResourceTypeReload);
+    return () => {
+      EventEmitter.off('beyond-resourceList-resourceType-reload', handleResourceTypeReload);
+    };
+  }, [EventEmitter, refreshList, resourceType, searchParams, setSearchParams]);
 
   // 防抖定时器
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
@@ -232,12 +272,31 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     if (resourceType === 'OBJECT') {
       return fixedEntryCapability.canImportEnterpriseObject;
     }
+    if (resourceType === 'SKILL') {
+      return fixedEntryCapability.canImportEnterpriseSkill === true;
+    }
     return true;
   }, [activeTab, fixedEntryCapability, resourceType]);
 
   const handleDetail = useCallback(
     async (item: IResourceItem) => {
       const { resourceBizType, resourceId, resourceSourcePkId } = item;
+
+      if (resourceBizType === 'SKILL') {
+        if (resourceId) {
+          setDetailPanel?.(
+            <SkillDetailDrawer
+              resourceId={resourceId}
+              title={intl.formatMessage({ id: 'common.skill' })}
+              open
+              panel
+              onClose={() => clearDetailPanel?.()}
+            />,
+            { width: 350 }
+          );
+        }
+        return;
+      }
 
       if (
         resourceBizType &&
@@ -452,19 +511,27 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const defaultBannerUrl = getRuntimeActualUrl(isEN ? '/beyond/market-en.png' : '/beyond/market.png');
   const bannerLabel = React.useMemo(() => {
     if (resourceType === 'KG_DOC') {
-      return activeTab === 'personal' ? '个人知识' : '企业知识';
+      return activeTab === 'personal'
+        ? [intl.formatMessage({ id: 'resource.banner.personalKnowledge' }), '个人知识']
+        : [intl.formatMessage({ id: 'resource.banner.enterpriseKnowledge' }), '企业知识'];
     }
     if (resourceType === 'TOOL') {
-      return activeTab === 'personal' ? '个人工具' : '企业工具';
+      return activeTab === 'personal'
+        ? [intl.formatMessage({ id: 'resource.banner.personalTool' }), '个人工具']
+        : [intl.formatMessage({ id: 'resource.banner.enterpriseTool' }), '企业工具'];
     }
     if (resourceType === 'VIEW') {
-      return activeTab === 'personal' ? '个人视图' : '企业视图';
+      return activeTab === 'personal'
+        ? [intl.formatMessage({ id: 'resource.banner.personalView' }), '个人视图']
+        : [intl.formatMessage({ id: 'resource.banner.enterpriseView' }), '企业视图'];
     }
     if (resourceType === 'OBJECT') {
-      return activeTab === 'personal' ? '个人对象' : '企业对象';
+      return activeTab === 'personal'
+        ? [intl.formatMessage({ id: 'resource.banner.personalObject' }), '个人对象']
+        : [intl.formatMessage({ id: 'resource.banner.enterpriseObject' }), '企业对象'];
     }
-    return '';
-  }, [activeTab, resourceType]);
+    return [];
+  }, [activeTab, intl, resourceType]);
   const customBannerUrl = getBannerUrl(bannerList, bannerLabel);
   const bannerUrl = customBannerUrl ? getRuntimeActualUrl(customBannerUrl) : defaultBannerUrl;
 

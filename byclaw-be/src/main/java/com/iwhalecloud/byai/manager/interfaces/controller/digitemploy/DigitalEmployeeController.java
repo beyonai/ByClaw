@@ -144,6 +144,21 @@ public class DigitalEmployeeController {
     }
 
     /**
+     * 从数字员工卸载知识或资源。
+     *
+     * @param uninstallResourceDTO 卸载对象
+     * @return ResponseUtil
+     */
+    @ManageLogAnnotation(name = "数字员工", description = "卸载知识或资源")
+    @RequestMapping(value = "/uninstallRelResources", method = RequestMethod.POST)
+    public ResponseUtil<DigitalEmployeeDetailsDTO> uninstallRelResources(
+        @RequestBody DigitalEmployeeInstallResourceDTO uninstallResourceDTO) {
+        DigitalEmployeeDetailsDTO details =
+            digitalEmployeeApplicationService.uninstallDigitalEmployeeRelResources(uninstallResourceDTO);
+        return ResponseUtil.successResponse(I18nUtil.get("digemployee.update.success"), details);
+    }
+
+    /**
      * 设置默认数字员工
      *
      * @param dto 请求参数

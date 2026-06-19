@@ -16,10 +16,10 @@ export const getTemplateSessionDetail = (payload: any = {}) =>
 export const getWorkspaceList = (payload: { sessionId: string }, abortController: AbortController) =>
   POST<any>('/byaiService/workspace/list', { ...payload }, { cancelToken: abortController });
 
-// 文件保存到会话空间
+// 文件保存到会话文件夹
 export const createBatch = (payload: any = {}) => POST<any>('/byaiService/workspace/createBatch', { ...payload });
 
-// 工作空间保存到会话空间
+// 工作空间保存到会话文件夹
 export const saveToShowcaseBatch = (payload: { workspaceIds: string[] }) =>
   POST<any>('/byaiService/workspace/saveToShowcaseBatch', { ...payload });
 

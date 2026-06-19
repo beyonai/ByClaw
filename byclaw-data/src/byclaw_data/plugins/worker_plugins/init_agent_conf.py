@@ -623,6 +623,18 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
         rel_resource_list = detail_data.get("relResourceList") or []
         if not isinstance(rel_resource_list, list):
             rel_resource_list = []
+
+        # 读取 extResourceList → ext_codes（加载到 TOOL_POOL，初始 LOCKED，LLM 不可见）
+        ext_resource_list = detail_data.get("extResourceList") or []
+        if not isinstance(ext_resource_list, list):
+            ext_resource_list = []
+        self._ext_codes = [
+            r.get("resourceCode") for r in ext_resource_list
+            if isinstance(r, dict)
+            and r.get("resourceBizType") in {"OBJECT", "VIEW"}
+            and r.get("resourceCode")
+        ]
+
         dynamic_tools, build_diag = self._build_dynamic_tools_with_diagnostics(
             agent_id=agent_id,
             rel_resource_list=rel_resource_list,

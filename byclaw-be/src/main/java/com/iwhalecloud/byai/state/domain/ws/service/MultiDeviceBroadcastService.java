@@ -135,7 +135,7 @@ public class MultiDeviceBroadcastService {
      * @param message 原始消息
      * @return 成功写入的通道数量
      */
-    public int broadcastRawToUser(Long userId, JSONObject message) {
+    public int broadcastRawToUser(Long userId, JSONObject message, Channel senderChannel) {
         if (userId == null || message == null) {
             return 0;
         }
@@ -148,6 +148,9 @@ public class MultiDeviceBroadcastService {
         String frameText = message.toJSONString();
         int sentCount = 0;
         for (Channel channel : channels) {
+            if (channel.equals(senderChannel)) {
+                continue;
+            }
             if (!channel.isActive()) {
                 continue;
             }
@@ -161,15 +164,5 @@ public class MultiDeviceBroadcastService {
             }
         }
         return sentCount;
-    }
-
-    /**
-     * 向指定用户的所有在线 WebSocket 通道推送消息，可按 session 限定。
-     */
-    public int broadcastRawToUser(Long userId, Long sessionId, JSONObject message) {
-        if (message != null && sessionId != null) {
-            message.put("sessionId", String.valueOf(sessionId));
-        }
-        return broadcastRawToUser(userId, message);
     }
 }

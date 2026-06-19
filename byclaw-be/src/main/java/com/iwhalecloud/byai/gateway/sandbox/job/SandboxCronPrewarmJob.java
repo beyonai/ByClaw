@@ -9,6 +9,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import com.iwhalecloud.byai.common.util.RedisUtil;
+import com.iwhalecloud.byai.gateway.sandbox.config.SandboxJobSchedulerConfiguration;
 import com.iwhalecloud.byai.gateway.sandbox.service.cronprewarm.SandboxCronPrewarmProperties;
 import com.iwhalecloud.byai.gateway.sandbox.service.cronprewarm.SandboxCronPrewarmReport;
 import com.iwhalecloud.byai.gateway.sandbox.service.cronprewarm.SandboxCronPrewarmService;
@@ -34,7 +35,9 @@ public class SandboxCronPrewarmJob {
         this.properties = properties;
     }
 
-    @Scheduled(fixedDelayString = "${sandbox.cron-prewarm.fixed-delay:60000}")
+    @Scheduled(fixedDelayString = "${sandbox.cron-prewarm.fixed-delay:60000}",
+        initialDelayString = "${sandbox.cron-prewarm.initial-delay:5000}",
+        scheduler = SandboxJobSchedulerConfiguration.SANDBOX_JOB_TASK_SCHEDULER)
     public void prewarmDueCronSandboxes() {
         String lockValue = UUID.randomUUID().toString();
         boolean locked = false;

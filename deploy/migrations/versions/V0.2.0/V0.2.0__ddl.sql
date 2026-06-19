@@ -114,3 +114,38 @@ DROP TABLE IF EXISTS byai.bykc_ec_sync_task CASCADE;
 DROP TABLE IF EXISTS byai.bykc_ec_connection CASCADE;
 DROP TABLE IF EXISTS byai.bykc_ec_collector_agent CASCADE;
 DROP TABLE IF EXISTS byai.bykc_ec_connector CASCADE;
+
+ALTER TABLE byai.byai_aimodel ADD COLUMN model_protocol VARCHAR(64) DEFAULT null;
+
+-- 技能扩展表
+CREATE TABLE byai.ss_res_ext_skill (
+    resource_id int8 NOT NULL,
+    skill_type varchar(32) NOT NULL DEFAULT 'hub',
+    source_type varchar(64) NOT NULL,
+    version varchar(50) NOT NULL DEFAULT 'v0.1',
+    skill_url varchar(500) ,
+    skill_package_format varchar(32) NOT NULL DEFAULT 'zip',
+    skill_original_filename varchar(255),
+    skill_package_size int8,
+    skill_package_hash varchar(128),
+    target_content text,
+    sync_status varchar(32),
+    sync_error text,
+    last_sync_time timestamp,
+    CONSTRAINT pk_ss_res_ext_skill PRIMARY KEY (resource_id)
+);
+
+COMMENT ON TABLE byai.ss_res_ext_skill IS '技能资源扩展表';
+COMMENT ON COLUMN byai.ss_res_ext_skill.resource_id IS '资源ID，关联 byai.ss_resource.resource_id';
+COMMENT ON COLUMN byai.ss_res_ext_skill.skill_type IS '技能类型：hub=来自个人技能/企业技能管理的技能，inner=系统内置技能';
+COMMENT ON COLUMN byai.ss_res_ext_skill.source_type IS '技能来源类型：SYSTEM_BUILTIN=系统内置，SKILL_MANAGE_IMPORT=技能管理导入，CHAT_UPLOAD=对话框技能上传，FILE_MANAGE_UPLOAD=文件管理上传';
+COMMENT ON COLUMN byai.ss_res_ext_skill.version IS '技能版本号，初始值v0.1，每次有效变更自动递增，如v0.2';
+COMMENT ON COLUMN byai.ss_res_ext_skill.skill_url IS '技能压缩包在MinIO/对象存储中的内部路径(object key)，非外部下载URL';
+COMMENT ON COLUMN byai.ss_res_ext_skill.skill_package_format IS '技能压缩包格式，当前固定为zip';
+COMMENT ON COLUMN byai.ss_res_ext_skill.skill_original_filename IS '技能压缩包上传时的原始文件名';
+COMMENT ON COLUMN byai.ss_res_ext_skill.skill_package_size IS '技能压缩包大小，单位字节';
+COMMENT ON COLUMN byai.ss_res_ext_skill.skill_package_hash IS '技能压缩包内容哈希，用于重复上传、变更识别或审计';
+COMMENT ON COLUMN byai.ss_res_ext_skill.target_content IS '技能资源JSON内容，包含ss_resource基础字段和ss_res_ext_skill扩展字段，用于同步给下游运行环境';
+COMMENT ON COLUMN byai.ss_res_ext_skill.sync_status IS '同步状态：PENDING=待同步，SUCCESS=同步成功，FAILED=同步失败';
+COMMENT ON COLUMN byai.ss_res_ext_skill.sync_error IS '最近一次同步失败原因';
+COMMENT ON COLUMN byai.ss_res_ext_skill.last_sync_time IS '最近一次同步时间';

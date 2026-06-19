@@ -51,10 +51,23 @@ export interface IResourceCardItem {
   ownerType?: string;
   openSuperHelper?: string;
   tagName?: string;
+  skillType?: string;
+  sourceType?: string;
+  version?: string;
+  skillUrl?: string;
+  skillPackageFormat?: string;
+  skillOriginalFilename?: string;
+  skillPackageSize?: number | string;
+  skillPackageHash?: string;
+  targetContent?: string;
+  syncStatus?: string;
+  syncError?: string;
+  lastSyncTime?: string;
 }
 
 type ResourceCardActionConfig = {
   scene?: ResourceCardActionScene;
+  installedResourceIds?: ReadonlySet<string>;
   enableKnowledgeManage?: boolean;
   editDisabledTip?: React.ReactNode;
   manageAuthDisabledTip?: React.ReactNode;
@@ -192,6 +205,14 @@ const canInstallResource = (resource: IResourceCardItem, resourceType?: string) 
   return Boolean(resource?.resourceId && bizType && bizType !== 'DIG_EMPLOYEE');
 };
 
+const isSkillResource = (resource: IResourceCardItem, resourceType?: string) => {
+  return resource?.resourceBizType === 'SKILL' || resourceType === 'SKILL';
+};
+
+const isInnerSkillResource = (resource: IResourceCardItem, resourceType?: string) => {
+  return isSkillResource(resource, resourceType) && `${resource?.skillType || ''}`.toLowerCase() === 'inner';
+};
+
 const RenderContent = (props: ResourceCardProps) => {
   const { resource, onCardClick, actionConfig, avatarNode, description, headerExtra, hoverExtra, resourceType } = props;
   const { ownerType } = resource || {};
@@ -253,6 +274,9 @@ const RenderContent = (props: ResourceCardProps) => {
     if (resource.tagName) {
       return resource.tagName;
     }
+    if (isInnerSkillResource(resource, resourceType)) {
+      return intl.formatMessage({ id: 'resource.systemBuiltin' });
+    }
     // 超级助手只按 resourceCode 后缀识别，不再依赖 ownerType=personal_default。
     if (
       resource.resourceBizType === 'DIG_EMPLOYEE' &&
@@ -287,6 +311,10 @@ const RenderContent = (props: ResourceCardProps) => {
   const displayTopRightTag = getDisplayTopRightTag();
   const isCancelledResource = `${resource?.resourceStatus ?? ''}` === '3';
   const topRightTag = isCancelledResource ? intl.formatMessage({ id: 'resource.statusCancelled' }) : displayTopRightTag;
+  const isInnerSkill = isInnerSkillResource(resource, resourceType);
+  const isInstalledSkill =
+    isSkillResource(resource, resourceType) &&
+    Boolean(resource?.resourceId && actionConfig?.installedResourceIds?.has(`${resource.resourceId}`));
 
   const menuItems = useMemo<MenuProps['items']>(() => {
     const { canEdit, canManageAuth, canUseAuth, canApplyUse, canAuditUse, canDelete, canRestore } = resource || {};
@@ -322,7 +350,7 @@ const RenderContent = (props: ResourceCardProps) => {
     // }
 
     // 编辑信息
-    if (canEdit) {
+    if (canEdit && !isInnerSkill) {
       items.push({
         key: 'edit',
         label: <BuildMenuLabel icon="icon-a-Editorbianji" text={intl.formatMessage({ id: 'common.editInfo' })} />,
@@ -391,7 +419,7 @@ const RenderContent = (props: ResourceCardProps) => {
     }
 
     // 安装到当前默认数字员工
-    if (canInstallResource(resource, resourceType)) {
+    if (canInstallResource(resource, resourceType) && !isInstalledSkill) {
       const disabled = !activeDigitalEmployeeId;
       items.push({
         key: 'install',
@@ -414,7 +442,7 @@ const RenderContent = (props: ResourceCardProps) => {
     }
 
     // 注销数据
-    if (canDelete) {
+    if (canDelete && !isInnerSkill) {
       items.push({
         key: 'delete',
         label: (
@@ -468,7 +496,10 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.ownerType,
     resource?.resourceBizType,
     resource?.resourceId,
+    resource?.skillType,
     resourceType,
+    isInnerSkill,
+    isInstalledSkill,
     installing,
     restoring,
   ]);

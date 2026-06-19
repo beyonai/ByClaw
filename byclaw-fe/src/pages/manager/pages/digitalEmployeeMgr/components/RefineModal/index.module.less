@@ -29,11 +29,63 @@
   justify-content: center;
   padding: 60px 24px;
   gap: 16px;
+  min-height: 360px;
 }
 
 .loadingHint {
   color: #707680;
   font-size: 13px;
+}
+
+.streamResultList {
+  width: 100%;
+  max-width: 560px;
+  max-height: 260px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.streamWaiting {
+  color: #9aa1ad;
+  font-size: 13px;
+  text-align: center;
+}
+
+.streamTextOutput {
+  padding: 12px;
+  border: 1px solid #edf0f5;
+  border-radius: 6px;
+  background: #fafbfc;
+  color: #2f3542;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.streamResultItem {
+  padding: 10px 12px;
+  border: 1px solid #edf0f5;
+  border-radius: 6px;
+  background: #fafbfc;
+}
+
+.streamResultTitle {
+  color: #2f3542;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.streamResultText {
+  color: #707680;
+  font-size: 12px;
+  line-height: 18px;
+  margin-top: 4px;
+  word-break: break-word;
 }
 
 .footerBtns {

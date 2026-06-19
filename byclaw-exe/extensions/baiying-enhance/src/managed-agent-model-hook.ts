@@ -64,6 +64,18 @@ export function resolveManagedAgentModelFromConfig(params: {
   };
 }
 
+function sameResolvedModel(
+  a: ManagedAgentModelResolveResult | undefined,
+  b: ManagedAgentModelResolveResult | undefined,
+): boolean {
+  return Boolean(
+    a &&
+      b &&
+      a.providerOverride === b.providerOverride &&
+      a.modelOverride === b.modelOverride,
+  );
+}
+
 export function buildManagedAgentRuntimeModelSystemContext(params: {
   cfg: {
     agents?: { list?: Array<{ id?: string; model?: { primary?: string } }> };
@@ -115,6 +127,9 @@ export function shouldDeferManagedAgentModelOverrideForRun(params: {
   if (!currentProvider || !currentModel) {
     return false;
   }
+  if (!currentProvider.startsWith("baiying-m-")) {
+    return false;
+  }
   return (
     currentProvider !== params.resolved.providerOverride ||
     currentModel !== params.resolved.modelOverride
@@ -122,6 +137,9 @@ export function shouldDeferManagedAgentModelOverrideForRun(params: {
 }
 
 const UNRESOLVED_SECRETREF_MARKER = "secretref-managed";
+const MAIN_INBOUND_DEFAULT_MODEL_RUNTIME_WAIT_MS = 5000;
+const MANAGED_INBOUND_MODEL_RUNTIME_WAIT_MS = 15000;
+const INBOUND_MODEL_RUNTIME_POLL_MS = 100;
 
 export function hasManagedModelConfigDrift(params: {
   cfg: {
@@ -257,6 +275,75 @@ export function warnUnregisteredManagedModelPrimaries(params: {
   }
 }
 
+async function waitForManagedAgentModelFromConfig(params: {
+  api: OpenClawPluginApi;
+  agentId: string;
+  timeoutMs: number;
+  pollMs?: number;
+  expected?: ManagedAgentModelResolveResult;
+}): Promise<ManagedAgentModelResolveResult | undefined> {
+  const pollMs = params.pollMs ?? INBOUND_MODEL_RUNTIME_POLL_MS;
+  const deadline = Date.now() + Math.max(0, params.timeoutMs);
+
+  for (;;) {
+    const resolved = resolveManagedAgentModelFromConfig({
+      cfg: currentRuntimeConfig(params.api),
+      agentId: params.agentId,
+    });
+    if (resolved && (!params.expected || sameResolvedModel(resolved, params.expected))) {
+      return resolved;
+    }
+    if (Date.now() >= deadline) {
+      return undefined;
+    }
+    await new Promise((resolveDelay) =>
+      setTimeout(resolveDelay, Math.max(10, pollMs)),
+    );
+  }
+}
+
+async function resolveManagedAgentModelForInbound(params: {
+  api: OpenClawPluginApi;
+  agentId: string;
+  flushNow?: () => Promise<void>;
+  flushBeforeResolve?: boolean;
+  runtimeConfigWaitMs?: number;
+}): Promise<ManagedAgentModelResolveResult | undefined> {
+  let resolved = resolveManagedAgentModelFromConfig({
+    cfg: currentRuntimeConfig(params.api),
+    agentId: params.agentId,
+  });
+  if (params.flushNow && (params.flushBeforeResolve || !resolved)) {
+    await params.flushNow();
+    const expected = resolveManagedAgentModelFromConfig({
+      cfg: params.api.runtime.config.loadConfig(),
+      agentId: params.agentId,
+    });
+    const currentAfterFlush = resolveManagedAgentModelFromConfig({
+      cfg: currentRuntimeConfig(params.api),
+      agentId: params.agentId,
+    });
+    if (expected && sameResolvedModel(currentAfterFlush, expected)) {
+      resolved = currentAfterFlush;
+    } else if (expected || !currentAfterFlush) {
+      resolved = await waitForManagedAgentModelFromConfig({
+        api: params.api,
+        agentId: params.agentId,
+        timeoutMs: params.runtimeConfigWaitMs ?? MANAGED_INBOUND_MODEL_RUNTIME_WAIT_MS,
+        expected,
+      });
+      if (!resolved && expected) {
+        params.api.logger?.warn?.(
+          `baiying-enhance: managed inbound model sync for ${params.agentId} wrote ${expected.providerOverride}/${expected.modelOverride}, but runtime config did not expose it before dispatch`,
+        );
+      }
+    } else {
+      resolved = currentAfterFlush;
+    }
+  }
+  return resolved;
+}
+
 /**
  * Align one session entry with the managed agent's config primary before get-reply
  * runs. Reconcile-after-sync only touches sessions that already exist; brand-new
@@ -305,14 +392,20 @@ export async function syncManagedAgentSessionModelForInbound(params: {
   api: OpenClawPluginApi;
   sessionKey?: string;
   agentId?: string;
+  flushNow?: () => Promise<void>;
+  flushBeforeResolve?: boolean;
+  runtimeConfigWaitMs?: number;
 }): Promise<void> {
   const agentId = params.agentId?.trim() || resolveAgentIdFromSessionKey(params.sessionKey);
   if (!agentId?.startsWith(MANAGED_AGENT_PREFIX)) {
     return;
   }
-  const resolved = resolveManagedAgentModelFromConfig({
-    cfg: currentRuntimeConfig(params.api),
+  const resolved = await resolveManagedAgentModelForInbound({
+    api: params.api,
     agentId,
+    flushNow: params.flushNow,
+    flushBeforeResolve: params.flushBeforeResolve,
+    runtimeConfigWaitMs: params.runtimeConfigWaitMs,
   });
   if (!resolved) {
     return;
@@ -345,6 +438,7 @@ export function registerManagedAgentModelHooks(
   aimodelRunSync?: AimodelDefaultRunSyncDeps,
 ): void {
   const mainParentAgentId = aimodelRunSync?.pluginConfig.mainParentAgentId?.trim() || "main";
+  const managedInboundFlushChecked = new Set<string>();
   api.logger.info(
     `baiying-enhance: registered typed hooks for main default LLM run-check (mainParentAgentId=${mainParentAgentId}, aimodelRunSync=${aimodelRunSync ? "on" : "off"})`,
   );
@@ -353,6 +447,9 @@ export function registerManagedAgentModelHooks(
     const sessionKey = ctx.sessionKey?.trim() || event.sessionKey?.trim();
     const agentId = resolveAgentIdFromSessionKey(sessionKey) ?? ctx.agentId?.trim();
     if (aimodelRunSync) {
+      await resolveMainDefaultAimodelOnAgentRun(aimodelRunSync, agentId, {
+        runtimeConfigWaitMs: MAIN_INBOUND_DEFAULT_MODEL_RUNTIME_WAIT_MS,
+      });
       await syncMainAgentSessionModelForInbound({
         api,
         sessionKey,
@@ -364,7 +461,21 @@ export function registerManagedAgentModelHooks(
       api,
       sessionKey,
       agentId,
+      flushNow: aimodelRunSync?.getFlushNow(),
+      flushBeforeResolve:
+        Boolean(agentId?.startsWith(MANAGED_AGENT_PREFIX)) &&
+        !managedInboundFlushChecked.has(agentId!),
+      runtimeConfigWaitMs: MANAGED_INBOUND_MODEL_RUNTIME_WAIT_MS,
     });
+    if (
+      agentId?.startsWith(MANAGED_AGENT_PREFIX) &&
+      resolveManagedAgentModelFromConfig({
+        cfg: currentRuntimeConfig(api),
+        agentId,
+      })
+    ) {
+      managedInboundFlushChecked.add(agentId);
+    }
   });
 
   api.on("before_model_resolve", async (_event, ctx) => {
@@ -395,6 +506,18 @@ export function registerManagedAgentModelHooks(
         return undefined;
       }
       return resolved;
+    }
+    if (agentId?.startsWith(MANAGED_AGENT_PREFIX)) {
+      const flushed = await resolveManagedAgentModelForInbound({
+        api,
+        agentId,
+        flushNow: aimodelRunSync?.getFlushNow(),
+        flushBeforeResolve: true,
+        runtimeConfigWaitMs: MANAGED_INBOUND_MODEL_RUNTIME_WAIT_MS,
+      });
+      if (flushed) {
+        return flushed;
+      }
     }
     const entry = currentRuntimeConfig(api).agents?.list?.find((item) => item.id === agentId);
     const primary = entry?.model?.primary?.trim();
