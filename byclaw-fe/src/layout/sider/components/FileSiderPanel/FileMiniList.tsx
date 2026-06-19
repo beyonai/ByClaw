@@ -436,17 +436,17 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       }
       const nextCategory = fileCategories.find((item) => item.key === nextKey);
       if (!nextCategory) return;
+
+      // 清除缓存，确保切换 tab 时强制刷新数据
       const cached = categoryCacheRef.current[nextCategory.key];
+      delete categoryCacheRef.current[nextCategory.key];
+
       setActiveCategoryKey(nextCategory.key);
       setSearchValue('');
       setIsSearching(false);
-      if (cached?.path === nextCategory.path) {
-        setItems(cached.items);
-        setChildrenByPath(cached.childrenByPath);
-      } else {
-        setItems([]);
-        setChildrenByPath({});
-      }
+      setItems([]);
+      setChildrenByPath({});
+      // ensureFolder 只在缓存不存在时调用（即首次访问）
       if (nextCategory.ensure && !cached) {
         try {
           await ensureFolder({ resourceId, path: nextCategory.path });
@@ -456,8 +456,29 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       }
       setCurrentPath(nextCategory.path);
     },
-    [fileCategories, intl, resourceId]
+    [fileCategories, fetchList, intl, resourceId]
   );
+
+  // 监听会话聊天产生的文件，当打开 session tab 时刷新文件列表
+  useEffect(() => {
+    const handleSessionFileCreated = (payload: { fileList?: any[]; imageList?: any[]; sessionId?: string }) => {
+      // 如果当前打开的不是 session tab，不处理
+      if (activeCategoryKey !== 'session') return;
+      // 检查 payload 是否包含文件信息
+      const hasFiles =
+        (payload.fileList && payload.fileList.length > 0) || (payload.imageList && payload.imageList.length > 0);
+      if (hasFiles) {
+        // 刷新当前路径的文件列表
+        delete categoryCacheRef.current['session'];
+        void fetchList(currentPath, { force: true });
+      }
+    };
+
+    EventEmitter.on('beyond-create-message', handleSessionFileCreated);
+    return () => {
+      EventEmitter.off('beyond-create-message', handleSessionFileCreated);
+    };
+  }, [activeCategoryKey, currentPath, fetchList]);
 
   const sortedItems = useMemo(() => {
     return sortFileBrowserItems(items);
@@ -1367,7 +1388,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
               <div
                 className={[
                   styles.categoryHeaderMain,
-                  category.key === 'shared' ? styles.categoryHeaderMainWithActions : '',
+                  category.key === 'shared' || category.key === 'session' ? styles.categoryHeaderMainWithActions : '',
                 ]
                   .filter(Boolean)
                   .join(' ')}
@@ -1403,6 +1424,22 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
                       }}
                     >
                       {intl.formatMessage({ id: 'common.create' })}
+                    </Button>
+                  </span>
+                )}
+                {category.key === 'session' && (
+                  <span className={styles.categoryActions} onClick={(event) => event.stopPropagation()}>
+                    <Button
+                      icon={<AntdIcon type="icon-a-Refreshshuaxin1" className={styles.categoryActionIcon} />}
+                      size="small"
+                      className={styles.categoryActionButton}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        delete categoryCacheRef.current['session'];
+                        void fetchList(currentPath, { force: true });
+                      }}
+                    >
+                      {intl.formatMessage({ id: 'fileBrowser.toolbar.refresh' })}
                     </Button>
                   </span>
                 )}
