@@ -261,7 +261,7 @@ wheels = [
 
 [[package]]
 name = "by-qa"
-version = "0.1.9"
+version = "0.1.11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -269,9 +269,9 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/05/8e/89aad7e05dc1a0fb9bdb0f118ba88f308da8a59700542343a6691a11af24/by_qa-0.1.9.tar.gz", hash = "sha256:a48e78cb27957f66fa982a4f2702422c496cc70d914c146d3af334f943f0a7d0", size = 324097, upload-time = "2026-05-15T06:43:55.501Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9b/52/0552cbc42c0d8567068027a16cbdaa8b96b6f19bbd91d3ba1c35e3012dab/by_qa-0.1.11.tar.gz", hash = "sha256:3d95a9e735dcf246c53fa4e230f87d42620c335a26a4b1c91709bbdfa54e6340", size = 347379, upload-time = "2026-05-25T07:47:57.738Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/15/fe/ac2622f4aed01e4427ce95cb0d1944ed9080429b13a3fb863281edf1446f/by_qa-0.1.9-py3-none-any.whl", hash = "sha256:1581e81778093b0227532c827bdd1df97331f0a43f142fff45dda3226ac2f796", size = 151680, upload-time = "2026-05-15T06:43:53.507Z" },
+    { url = "https://files.pythonhosted.org/packages/52/cb/9dca9dfef1bbfb5c66bd0659d1c45371ea290ce94933290c4df05dcf4637/by_qa-0.1.11-py3-none-any.whl", hash = "sha256:49b29b37fcca73644ca4489f175e72cebf2dc0953714a3308504e5312dd0b842", size = 187499, upload-time = "2026-05-25T07:47:55.934Z" },
 ]
 
 [package.optional-dependencies]
@@ -280,6 +280,7 @@ all = [
     { name = "aiosqlite" },
     { name = "by-framework" },
     { name = "fastapi" },
+    { name = "jieba" },
     { name = "json-repair" },
     { name = "langchain" },
     { name = "langchain-core" },
@@ -315,7 +316,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "by-framework", specifier = ">=0.1.13" },
-    { name = "by-qa", extras = ["all"], specifier = "==0.1.9" },
+    { name = "by-qa", extras = ["all"], specifier = "==0.1.11" },
 ]
 
 [package.metadata.requires-dev]
@@ -642,6 +643,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/72/34/14ca021ce8e5dfedc
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl", hash = "sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12", size = 7484, upload-time = "2025-10-18T21:55:41.639Z" },
 ]
+
+[[package]]
+name = "jieba"
+version = "0.42.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c6/cb/18eeb235f833b726522d7ebed54f2278ce28ba9438e3135ab0278d9792a2/jieba-0.42.1.tar.gz", hash = "sha256:055ca12f62674fafed09427f176506079bc135638a14e23e25be909131928db2", size = 19214172, upload-time = "2020-01-20T14:27:23.5Z" }
 
 [[package]]
 name = "jiter"

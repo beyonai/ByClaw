@@ -18,6 +18,7 @@ export type CapabilityMetadata = {
   created_at?: unknown;
   default_headers?: Record<string, string>;
   impl_type?: string;
+  prologue?: string;
   [key: string]: unknown;
 };
 

@@ -12,11 +12,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
+import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
@@ -44,6 +47,9 @@ public class SandboxController {
     @Autowired
     private SandboxServiceSpecEntityMapper sandboxServiceSpecEntityMapper;
 
+    @Autowired
+    private SandboxUserContextRunner sandboxUserContextRunner;
+
     /**
      * 沙箱心跳接口
      * 前端定期轮询调用，更新沙箱最后访问时间，防止沙箱因空闲超时被自动回收
@@ -52,7 +58,7 @@ public class SandboxController {
      * @return ResponseUtil
      */
     @PostMapping("/heartbeat")
-    @Operation(summary = "沙箱心跳", description = "前端定期调用此接口，传入resourceId以保持沙箱活跃，防止空闲超时自动回收")
+    @Operation(summary = "沙箱心跳", description = "前端定期调用此接口，刷新当前用户所有运行中沙箱的活跃时间，防止空闲超时自动回收")
     @ApiResponses({
         @ApiResponse(responseCode = "0", description = "心跳成功"),
         @ApiResponse(responseCode = "-1", description = "心跳失败，参数缺失或沙箱不存在")
@@ -76,6 +82,58 @@ public class SandboxController {
             return ResponseUtil.successResponse();
         }
         return ResponseUtil.fail("No running sandbox found for this resource");
+    }
+
+    /**
+     * 沙箱续约接口
+     * 同时刷新本地访问时间并调用远端沙箱续约，避免本地空闲回收和远端自动过期
+     *
+     * @param params 请求参数，resourceId非必填，userCode在未登录上下文下必填
+     * @return ResponseUtil
+     */
+    @PostMapping("/renewSandbox")
+    @Operation(summary = "沙箱续约", description = "手动续约当前沙箱，同时刷新本地访问时间并延长远端租约")
+    @ApiResponses({
+        @ApiResponse(responseCode = "0", description = "续约成功"),
+        @ApiResponse(responseCode = "-1", description = "续约失败，用户缺失或沙箱不存在")
+    })
+    public ResponseUtil renewSandbox(@RequestBody Map<String, Object> params) {
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        if (userCode == null) {
+            Object userCodeObj = params.get("userCode");
+            if (userCodeObj == null || userCodeObj.toString().trim().isEmpty()) {
+                return ResponseUtil.fail("userCode is required");
+            }
+            userCode = userCodeObj.toString().trim();
+        }
+
+        Object resourceIdObj = params.get("resourceId");
+        Long resourceId = null;
+        if (resourceIdObj != null && resourceIdObj instanceof Number) {
+            resourceId = ((Number) resourceIdObj).longValue();
+        } else if (resourceIdObj != null) {
+            try {
+                resourceId = Long.parseLong(resourceIdObj.toString());
+            } catch (NumberFormatException e) {
+                return ResponseUtil.fail("resourceId must be a valid number");
+            }
+        }
+
+        SandboxInfo sandboxInfo = sandboxService.renewSandbox(userCode, resourceId);
+        if (sandboxInfo == null) {
+            return ResponseUtil.fail("No running sandbox found for this resource");
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("userCode", sandboxInfo.getUserCode());
+        result.put("sandboxType", sandboxInfo.getSandboxType());
+        result.put("sandboxId", sandboxInfo.getSandboxId());
+        result.put("endpoints", sandboxInfo.getEndpoints());
+        result.put("instanceEndpoints", sandboxInfo.getInstanceEndpoints());
+        result.put("token", sandboxInfo.getGatewayToken());
+        result.put("remoteExpiresAt", sandboxInfo.getRemoteExpiresAt());
+        result.put("lastHeartbeatTime", sandboxInfo.getLastHeartbeatTime());
+        return ResponseUtil.successResponse(result);
     }
 
     /**
@@ -113,6 +171,7 @@ public class SandboxController {
                 result.put("sandboxType", sandbox.getSandboxType());
                 result.put("sandboxId", sandbox.getSandboxId());
                 result.put("endpoints", sandbox.getEndpoints());
+                result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
                 result.put("token", sandbox.getGatewayToken());
                 data.add(result);
             }
@@ -158,6 +217,50 @@ public class SandboxController {
     }
 
     /**
+     * 按工号启动沙箱，支持通过 serviceKey 覆盖沙箱规格
+     *
+     * @param params 请求参数，userCode 必填，serviceKey 可选
+     * @return ResponseUtil
+     */
+    @PostMapping("/launchByUserCode")
+    @Operation(summary = "按工号启动沙箱", description = "按工号为指定用户启动沙箱，可选传入 serviceKey 覆盖默认沙箱规格")
+    @ApiResponses({
+        @ApiResponse(responseCode = "0", description = "启动成功"),
+        @ApiResponse(responseCode = "-1", description = "启动失败，参数缺失或规格不存在")
+    })
+    public ResponseUtil launchByUserCode(@RequestBody Map<String, Object> params) {
+        Object userCodeObj = params.get("userCode");
+        if (userCodeObj == null || userCodeObj.toString().trim().isEmpty()) {
+            return ResponseUtil.fail("userCode is required");
+        }
+        String userCode = userCodeObj.toString().trim();
+
+        Object serviceKeyObj = params.get("serviceKey");
+        String serviceKey = serviceKeyObj != null ? serviceKeyObj.toString().trim() : null;
+        if (serviceKey != null && serviceKey.isEmpty()) {
+            serviceKey = null;
+        }
+
+        try {
+            String finalServiceKey = serviceKey;
+            SandboxLaunchData data = sandboxUserContextRunner.callAsUser(userCode,
+                () -> sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey));
+
+            if (data == null) {
+                return ResponseUtil.fail("沙箱启动失败");
+            }
+            Map<String, Object> result = new HashMap<>();
+            result.put("endpoint", data.getEndpoint());
+            result.put("sandboxId", data.getSandboxId());
+            result.put("endpoints", data.getEndpoints());
+            result.put("instanceEndpoints", data.getInstanceEndpoints());
+            return ResponseUtil.successResponse(result);
+        } catch (Exception e) {
+            return ResponseUtil.fail("沙箱启动失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 分页查询沙箱记录（管理端）
      *
      * @param params 请求参数，包含 pageIndex、pageSize、keyword、status
@@ -192,6 +295,9 @@ public class SandboxController {
 
         int offset = (pageIndex - 1) * pageSize;
         List<SsSandboxRecord> list = sandboxRecordMapper.selectByPage(keyword, status, offset, pageSize);
+        list.forEach(record -> record.setEndpoint(
+            SandboxEndpointRecordSupport.resolveInstanceEndpoint(record.getEndpoint(),
+                SandboxEndpointRecordSupport.OPENCLAW_INSTANCE)));
         int total = sandboxRecordMapper.countByCondition(keyword, status);
         int totalPage = (total + pageSize - 1) / pageSize;
 

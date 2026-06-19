@@ -180,6 +180,7 @@ export default {
   'orgMgr.modal.phoneRule': 'Please enter a valid mobile number',
   'orgMgr.modal.role': 'Role',
   'orgMgr.modal.rolePlaceholder': 'Select role',
+  'orgMgr.modal.saveSuccess': 'Saved successfully',
 
   // Data Permission Modal
   'orgMgr.dataPermission.search': 'Enter keyword to search',
@@ -190,8 +191,10 @@ export default {
 
   // Tabs
   'orgMgr.tabs.employee': 'Digital Employee',
-  'orgMgr.tabs.skill': 'Skill Assets',
   'orgMgr.tabs.knowledge': 'Knowledge Assets',
+  'orgMgr.tabs.tool': 'Tool Assets',
+  'orgMgr.tabs.view': 'View Assets',
+  'orgMgr.tabs.object': 'Object Assets',
 
   // Table Columns (Extra)
   'orgMgr.table.type': 'Type',
@@ -291,10 +294,21 @@ export default {
   'resourceStatus.unpublished': 'Unpublished',
 
   // Resource Type
+  'resourceAction.push': 'Publish',
   'resourceAction.unPush': 'Unpublish',
+  'resourceAction.unPushTip': 'Confirm unpublish?',
   'resourceAction.useAuth': 'Use Authorization',
+  'resourceAction.manageAuth': 'Manage Authorization',
   'resourceAction.rollback': 'Rollback',
+  'resourceAction.rollbackTip': 'Confirm rollback?',
+  'resourceAction.rollbackSuccess': 'Rollback succeeded',
+  'resourceAction.operationSuccess': 'Operation succeeded',
   'resourceAction.publishSuccess': 'Publish succeeded',
+  'resourceAction.pushSuccess': 'Publish succeeded',
+  'resourceAction.unPushSuccess': 'Unpublish succeeded',
+  'resourceAction.operationFrequent': 'Operation too frequent. Please try again later',
+  'resourceAction.databaseNotExist': 'Database does not exist',
+
   'digitalEmployeeMgr.manual':
     "The system's default creation method supports skill and knowledge configuration and can create comprehensive, Q&A, and operational digital employees.",
   'digitalEmployeeMgr.thirdParty':
@@ -330,6 +344,15 @@ export default {
   'modelMgr.resultEmpty': 'No model data',
   'modelMgr.emptyTitle': 'No models to display yet',
   'modelMgr.emptyDesc': 'Create a model first, or reset the filters to review existing records.',
+
+  // Model Management Error Messages
+  'modelMgr.error.requestFail': 'Request failed',
+  'modelMgr.error.getModelListFail': 'Failed to fetch model list',
+  'modelMgr.error.getModelDetailFail': 'Failed to fetch model detail',
+  'modelMgr.error.saveModelFail': 'Failed to save model',
+  'modelMgr.error.updateModelStatusFail': 'Failed to update model status',
+  'modelMgr.error.deleteModelFail': 'Failed to delete model',
+  'modelMgr.error.debugModelFail': 'Model debug failed',
 
   // Model Management - Edit/Debug Modal
   'modelMgr.modal.editTitle': 'Edit model',

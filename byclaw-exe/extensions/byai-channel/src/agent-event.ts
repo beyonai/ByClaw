@@ -5,6 +5,7 @@ import {
   getLastSdkEmitChunk,
   isRootSessionKey,
   isChildSessionKey,
+  markActiveSdkCompactionRetryPending,
   markActiveSdkRootLifecycleFinished,
   markActiveSdkRootLifecycleStarted,
   resolveActiveSdkRequestBySessionKey,
@@ -46,25 +47,21 @@ let toBeEmittedChunkAfterBaiyingCallTool: undefined | {
   options?: EmitOptions;
 } = undefined;
 
-async function emitChunkGenByBaiyingCallTool(request: ActiveSdkRequest, sdkEmitter?: ReturnType<typeof resolveSdkEmitter>) {
+async function emitChunkGenByBaiyingCallTool(request: ActiveSdkRequest) {
   if (!toBeEmittedChunkAfterBaiyingCallTool) {
     return;
   }
-  if (!sdkEmitter) {
-    sdkEmitter = resolveSdkEmitter(request.accountId);
-  }
-  await emitSdkChunk(request, sdkEmitter, JSON.stringify(toBeEmittedChunkAfterBaiyingCallTool.data), toBeEmittedChunkAfterBaiyingCallTool.options);
+  await emitSdkChunk(request, JSON.stringify(toBeEmittedChunkAfterBaiyingCallTool.data), toBeEmittedChunkAfterBaiyingCallTool.options);
   toBeEmittedChunkAfterBaiyingCallTool = undefined;
 }
 
 async function emitSdkChunk(
   request: ActiveSdkRequest,
-  sdkEmitter: ReturnType<typeof resolveSdkEmitter>,
   text: string,
   options?: EmitOptions,
 ): Promise<void> {
   await emitSdkChunkTracked({
-    emitter: sdkEmitter,
+    emitter: resolveSdkEmitter(request.accountId),
     sessionId: request.sessionId,
     traceId: request.traceId,
     text,
@@ -106,10 +103,6 @@ async function handleToolEvent(
   event: AgentEvent,
   isChildSession: boolean,
 ) {
-  const sdkEmitter = resolveSdkEmitter(request.accountId);
-  if (!sdkEmitter) {
-    return;
-  }
   const data = event.data as ToolEventData;
   const phase = data?.phase ?? "";
   const toolCallId = data?.toolCallId ?? "";
@@ -121,7 +114,7 @@ async function handleToolEvent(
       toolStartArgsByCallId.set(toolCallId, data.args);
     }
     const title = buildToolStartTitle(request, data);
-    await emitSdkChunk(request, sdkEmitter, title, {
+    await emitSdkChunk(request, title, {
       // 必须以toolCallId作为messageId，这个toolCallId可能会作为parentMessageId发送到其他worker(在baiying-enhance的实现)
       messageId: toolCallId,
       parentMessageId: "-1",
@@ -131,7 +124,7 @@ async function handleToolEvent(
       status: "_START_",
     });
     const args = extractToolStartArgs(data);
-    await emitSdkChunk(request, sdkEmitter, JSON.stringify({
+    await emitSdkChunk(request, JSON.stringify({
       title: "Input",
       json: args || "{}",
     }), {
@@ -146,7 +139,7 @@ async function handleToolEvent(
     if (toolCallId) {
       toolStartArgsByCallId.delete(toolCallId);
     }
-    await emitSdkChunk(request, sdkEmitter, title, {
+    await emitSdkChunk(request, title, {
       messageId: toolCallId,
       parentMessageId: "-1",
       eventType: EventType.REASONING_LOG_DELTA,
@@ -154,7 +147,7 @@ async function handleToolEvent(
       objectType: "tool_call",
       status: data.isError ? "_ERROR_" : "_DONE_",
     });
-    await emitSdkChunk(request, sdkEmitter, JSON.stringify({
+    await emitSdkChunk(request, JSON.stringify({
       title: "Output",
       json: result || "{}"
     }), {
@@ -169,18 +162,44 @@ async function handleToolEvent(
   }
 }
 
+const SILENT_REPLY_TOKEN = "NO_REPLY";
+const pendingSilentByRun = new Map<string, string>();
+
+function isSilentLeadFragment(text: string) {
+  const normalized = text.trim().toUpperCase();
+  if (!normalized || /[^A-Z_]/.test(normalized)) return false;
+  if (normalized === SILENT_REPLY_TOKEN) return true;
+  if (!SILENT_REPLY_TOKEN.startsWith(normalized)) return false;
+  return normalized === "NO";
+}
+
+function consumeAssistantDelta(runId: string, delta: string): string | null {
+  const previous = pendingSilentByRun.get(runId) ?? "";
+  const merged = previous + delta;
+
+  if (isSilentLeadFragment(merged)) {
+    pendingSilentByRun.set(runId, merged);
+    return null;
+  }
+
+  pendingSilentByRun.delete(runId);
+  return previous ? previous + delta : delta;
+}
+
 async function handleAssistantEvent(
   request: ActiveSdkRequest,
   event: AgentEvent,
   isChildSession: boolean,
 ) {
-  const sdkEmitter = resolveSdkEmitter(request.accountId);
   const { data } = event;
   const { delta } = data || {};
   if (!delta) {
     return;
   }
-  await emitSdkChunk(request, sdkEmitter, delta as string, {
+  const visibleDelta = consumeAssistantDelta(event.runId, delta as string);
+  if (!visibleDelta) return;
+  request.hasEmittedContent = true;
+  await emitSdkChunk(request, visibleDelta, {
     messageId: request.sessionKey,
     parentMessageId: "-1",
     eventType: isChildSession ? EventType.REASONING_LOG_DELTA : EventType.ANSWER_DELTA,
@@ -237,7 +256,6 @@ async function handleLifecycleEvent(
   event: AgentEvent,
   sessionKey?: string,
 ) {
-  const sdkEmitter = resolveSdkEmitter(request.accountId);
   const { data } = event;
   const phase = typeof data?.phase === "string" ? data.phase : undefined;
   if (!isRootSessionKey(sessionKey) || !phase) {
@@ -252,9 +270,16 @@ async function handleLifecycleEvent(
     return;
   }
   const activeRequest = markActiveSdkRootLifecycleFinished(sessionKey, phase) ?? request;
+  if (phase === "error" && !activeRequest.hasEmittedContent) {
+    const errorText = typeof data?.error === "string" ? data.error : "Agent run failed";
+    await emitSdkChunk(activeRequest, errorText, {
+      eventType: EventType.ANSWER_DELTA,
+    });
+    activeRequest.hasEmittedContent = true;
+  }
   if (phase === "end" && activeRequest.pendingChildSessionKeys.size > 0) {
     // root run 先结束，但仍有子 agent 未收尾；先用空行隔开后续恢复输出。
-    await emitSdkChunk(activeRequest, sdkEmitter, "\n\n", {
+    await emitSdkChunk(activeRequest, "\n\n", {
       eventType: EventType.ANSWER_DELTA,
     });
   }
@@ -265,12 +290,55 @@ async function handleLifecycleEvent(
   );
 }
 
+async function handleCompactionEvent(
+  api: OpenClawPluginApi,
+  request: ActiveSdkRequest,
+  event: AgentEvent,
+  sessionKey?: string,
+) {
+  const { data } = event;
+  const phase = typeof data?.phase === "string" ? data.phase : undefined;
+  const willRetry = data?.willRetry === true;
+  const shouldHoldCompletion = !phase || phase === "start" || willRetry;
+
+  const activeRequest =
+    markActiveSdkCompactionRetryPending(
+      sessionKey ?? request.sessionKey,
+      shouldHoldCompletion,
+    ) ?? request;
+
+  if (shouldHoldCompletion) {
+    cancelActiveSdkCompletionCheck(activeRequest.sessionKey);
+    const previousEmit = getLastSdkEmitChunk(activeRequest.accountId);
+    await emitSdkChunk(activeRequest, "", {
+      eventType: previousEmit?.eventType,
+      contentType: "5007",
+    });
+    api.logger.info(
+      `[byai-channel] sdk completion held for compaction: sessionKey=${activeRequest.sessionKey}, phase=${phase ?? "unknown"}, willRetry=${String(willRetry)}`,
+    );
+    return;
+  }
+
+  scheduleActiveSdkCompletionCheck(
+    api,
+    activeRequest.sessionKey,
+    `compaction_${phase}`,
+  );
+}
+
+function isCompactionAgentEvent(event: AgentEvent): boolean {
+  if (event.stream === "compaction" || event.data?.type === "compaction") {
+    return true;
+  }
+  return (event as AgentEvent & { type?: unknown }).type === "compaction";
+}
+
 async function handleThinkingEvent(
   request: ActiveSdkRequest,
   event: AgentEvent,
   isPreviousThinking: boolean,
 ) {
-  const sdkEmitter = resolveSdkEmitter(request.accountId);
   const text = event.data?.text as string ?? "";
   const previousEmit = getLastSdkEmitChunk(request.accountId);
   const options: EmitOptions = {
@@ -280,7 +348,7 @@ async function handleThinkingEvent(
     options.messageId = previousEmit?.messageId;
     options.parentMessageId = previousEmit?.parentMessageId;
   } else {
-    options.messageId = Math.random().toString(16).slice(2),
+    options.messageId = Math.random().toString(16).slice(2);
     options.parentMessageId = "-1";
   }
   await emitIncrementalText({
@@ -288,7 +356,7 @@ async function handleThinkingEvent(
     rawText: text,
     normalize: normalizeReasoningPreviewText,
     emit: async (reasoningDelta) => {
-      await emitSdkChunk(request, sdkEmitter, reasoningDelta, options);
+      await emitSdkChunk(request, reasoningDelta, options);
     },
   });
 }
@@ -325,6 +393,9 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
     lastAgentAssistantEvent.startTime = Date.now();
   }
   lastAgentAssistantEvent.stream = event.stream;
+  if (event.stream !== "lifecycle" && !isCompactionAgentEvent(event)) {
+    markActiveSdkCompactionRetryPending(resolvedSessionKey, false);
+  }
   if (event.stream === 'tool') {
     await handleToolEvent(request, event, isChildSession);
   } else if (event.stream === 'assistant') {
@@ -335,6 +406,8 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
     await handleAssistantEvent(request, event, isChildSession);
   } else if (event.stream === "lifecycle") {
     await handleLifecycleEvent(api, request, event, resolvedSessionKey);
+  } else if (isCompactionAgentEvent(event)) {
+    await handleCompactionEvent(api, request, event, resolvedSessionKey);
   } else if (event.stream === "thinking") {
     await handleThinkingEvent(request, event, isPreviousThinking);
   }

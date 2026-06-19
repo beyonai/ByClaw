@@ -50,6 +50,12 @@ npm run build
 | `dmPolicy`      | string  | "open"                  | 消息策略: open/allowlist/pairing          |
 | `allowFrom`     | array   | []                      | 允许发送消息的用户列表，\* 表示允许所有人 |
 
+### 与配置热重载协作
+
+SDK 模式下，`ByaiSdkApp` 不缓存启动时传入的 `OpenClawConfig`。每次收到 `AskAgentCommand` 并调用 `deliverReplyToAgentViaSdk` 前，都会通过 `getByaiRuntime().config.current()` 读取当前运行时配置。
+
+这对 `baiying-enhance` 的数字员工模型热切换很关键：百应侧修改数字员工 `prologue.modelId` 后，`baiying-enhance` 会把最新 `agents.list[].model.primary` 与 `models.providers.baiying-m-*` 热写回 OpenClaw；`byai-channel` 后续入站消息会使用热重载后的 agent/model 定义，而不是继续使用 worker 启动时的旧配置。
+
 ## Webhook 接口格式
 
 ### 发送消息到 OpenClaw

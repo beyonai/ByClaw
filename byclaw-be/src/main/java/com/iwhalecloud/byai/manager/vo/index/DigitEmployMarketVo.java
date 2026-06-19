@@ -95,6 +95,11 @@ public class DigitEmployMarketVo {
     private String approveStatus;
 
     /**
+     * 资源状态
+     */
+    private Integer resourceStatus;
+
+    /**
      * 管理员用户ID
      */
     private String manUserId;

@@ -14,7 +14,7 @@ public interface ByaiTagRelationMapper extends BaseMapper<ByaiTagRelation> {
      * 根据对象类型和对象ID列表批量查询标签ID
      *
      * @param objType 对象类型
-     * @param objIds  对象ID列表
+     * @param objIds 对象ID列表
      * @return 标签ID列表（去重）
      */
     List<Long> findTagIdsByObjTypeAndObjIds(@Param("objType") String objType, @Param("objIds") List<Long> objIds);
@@ -23,10 +23,10 @@ public interface ByaiTagRelationMapper extends BaseMapper<ByaiTagRelation> {
      * 按对象类型+对象ID删除该对象下所有标签关系（用于模型能力关联先删后插）
      *
      * @param objType 对象类型（如 byai_aimodel）
-     * @param objId   对象ID（如模型主键）
+     * @param objId 对象ID（如模型主键）
      * @return 删除行数
      */
-    int deleteByObjTypeAndObjId(@Param("objType") String objType, @Param("objId") String objId);
+    int deleteByObjTypeAndObjId(@Param("objType") String objType, @Param("objId") Long objId);
 
     /**
      * 批量插入标签关系（用于模型-能力关联一次性写入）
@@ -37,5 +37,3 @@ public interface ByaiTagRelationMapper extends BaseMapper<ByaiTagRelation> {
     int insertBatch(@Param("list") List<ByaiTagRelation> list);
 
 }
-
-

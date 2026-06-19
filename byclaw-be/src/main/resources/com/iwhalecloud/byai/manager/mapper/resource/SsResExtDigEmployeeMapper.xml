@@ -56,6 +56,7 @@
         <result column="resource_type" property="resourceType" />
         <result column="resource_name" property="resourceName" />
         <result column="resource_desc" property="resourceDesc" />
+        <result column="owner_type" property="ownerType" />
         <result column="catalog_id" property="catalogId" />
         <result column="man_org_id" property="manOrgId" />
         <result column="man_user_id" property="manUserId" />
@@ -117,6 +118,41 @@
         <association property="ssResExtDigEmployee" javaType="com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee" resultMap="BaseResultMap" />
     </resultMap>
 
+    <select id="selectDigitalEmployeeNamesByModelId" resultType="java.lang.String">
+        SELECT a.resource_name
+        FROM ss_resource a
+        INNER JOIN ss_res_ext_dig_employee b ON a.resource_id = b.resource_id
+        WHERE a.resource_biz_type = 'DIG_EMPLOYEE'
+          AND a.resource_status = '2'
+          AND b.prologue IS NOT NULL
+        <choose>
+            <when test="_databaseId == 'postgresql'">
+                AND (
+                    b.prologue::jsonb->>'modelId' = CAST(#{modelId} AS TEXT)
+                    OR b.prologue::jsonb->'modelInfo'->>'modelId' = CAST(#{modelId} AS TEXT)
+                )
+            </when>
+            <when test="_databaseId == 'mysql'">
+                AND (
+                    JSON_UNQUOTE(JSON_EXTRACT(b.prologue, '$.modelId')) = CAST(#{modelId} AS CHAR)
+                    OR JSON_UNQUOTE(JSON_EXTRACT(b.prologue, '$.modelInfo.modelId')) = CAST(#{modelId} AS CHAR)
+                )
+            </when>
+            <when test="_databaseId == 'oracle'">
+                AND (
+                    JSON_VALUE(b.prologue, '$.modelId') = TO_CHAR(#{modelId})
+                    OR JSON_VALUE(b.prologue, '$.modelInfo.modelId') = TO_CHAR(#{modelId})
+                )
+            </when>
+            <otherwise>
+                AND (
+                    b.prologue::jsonb->>'modelId' = CAST(#{modelId} AS TEXT)
+                    OR b.prologue::jsonb->'modelInfo'->>'modelId' = CAST(#{modelId} AS TEXT)
+                )
+            </otherwise>
+        </choose>
+    </select>
+
     <select id="selectDigitalEmployeeByQo" resultMap="digitalEmployeePageVoResultMap">
         select a.resource_id,
                a.system_code,
@@ -125,6 +161,7 @@
                a.resource_type,
                a.resource_name,
                a.resource_desc,
+               a.owner_type,
                a.catalog_id,
                a.man_org_id,
                a.man_user_id,
@@ -510,7 +547,9 @@
                     or a.resource_desc like concat('%', #{keyword}, '%')
                 )
             </if>
-            order by COALESCE(a.update_time, '1970-01-01 00:00:00') desc, a.create_time desc
+            order by case when a.resource_status = 3 then 1 else 0 end asc,
+                     COALESCE(a.update_time, '1970-01-01 00:00:00') desc,
+                     a.create_time desc
         </where>
     </select>
 

@@ -231,10 +231,6 @@ export function mergeResourceContextIntoCapability(
       agentInfo.integration_type = rootAgent.integrationType;
     }
     capability.agent = agentInfo;
-    const selImpl = asString(selected.implType);
-    if (selImpl && !asString(capability.metadata.impl_type)) {
-      capability.metadata.impl_type = selImpl;
-    }
   }
   if (normalizedType === "mcp" || normalizedType === "object" || normalizedType === "view") {
     const mcpInfo = (capability.mcp ?? ({} as Capability["mcp"])) as NonNullable<Capability["mcp"]>;
@@ -557,6 +553,9 @@ export function buildCapabilityFromDetail(params: BuildFromDetailParams): Capabi
     if (implType) {
       capability.metadata.impl_type = implType;
     }
+    if (detail.prologue) {
+      capability.metadata.prologue = detail.prologue;
+    }
   } else if (resourceBizType === "MCP" || resourceBizType === "OBJECT" || resourceBizType === "VIEW") {
     const tools: CapabilityTool[] = [];
     const paramTools = Array.isArray(param.tools) ? (param.tools as unknown[]) : [];
@@ -697,10 +696,6 @@ export function buildCapabilityFromResourceContext(
         agent_home_url: selected.agentHomeUrl,
         integration_type: selected.integrationType,
       };
-      const impl = asString(selected.implType);
-      if (impl) {
-        capability.metadata.impl_type = impl;
-      }
       return capability;
     }
   }

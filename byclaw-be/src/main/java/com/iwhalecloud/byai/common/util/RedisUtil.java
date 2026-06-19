@@ -339,8 +339,7 @@ public class RedisUtil {
     }
 
     /**
-     * 删除指定的键
-     * 对应Redis的DEL命令
+     * 删除指定的键 对应Redis的DEL命令
      *
      * @param key 键名
      */
@@ -362,12 +361,13 @@ public class RedisUtil {
         }
         Set<String> keys = new java.util.HashSet<>();
         ScanOptions options = ScanOptions.scanOptions().match(prefix + "*").count(100).build();
-        try (Cursor<byte[]> cursor = instance.stringRedisTemplate.executeWithStickyConnection(
-                connection -> connection.keyCommands().scan(options))) {
+        try (Cursor<byte[]> cursor = instance.stringRedisTemplate
+            .executeWithStickyConnection(connection -> connection.keyCommands().scan(options))) {
             while (cursor != null && cursor.hasNext()) {
                 keys.add(new String(cursor.next()));
             }
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             throw new IllegalStateException("Scan redis keys by prefix failed, prefix=" + prefix, e);
         }
         if (keys == null || keys.isEmpty()) {
@@ -377,8 +377,7 @@ public class RedisUtil {
     }
 
     /**
-     * 设置键值并指定过期时间（秒）
-     * 对应Redis的SETEX命令
+     * 设置键值并指定过期时间（秒） 对应Redis的SETEX命令
      *
      * @param key 键名
      * @param seconds 过期时间（秒）
@@ -392,8 +391,7 @@ public class RedisUtil {
     }
 
     /**
-     * 当键不存在时设置值（原子操作）
-     * 对应Redis的SETNX命令
+     * 当键不存在时设置值（原子操作） 对应Redis的SETNX命令
      *
      * @param key 键名
      * @param value 字符串值
@@ -404,6 +402,21 @@ public class RedisUtil {
             return false;
         }
         return instance.stringRedisTemplate.opsForValue().setIfAbsent(key, value);
+    }
+
+    /**
+     * 设置超时时间
+     *
+     * @param key key
+     * @param timeout 超时时间
+     * @param unit 单位
+     * @return Boolean
+     */
+    public static Boolean expire(String key, long timeout, TimeUnit unit) {
+        if (StringUtil.isEmpty(key)) {
+            return false;
+        }
+        return instance.stringRedisTemplate.expire(key, timeout, unit);
     }
 
 }

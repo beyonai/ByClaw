@@ -7,6 +7,7 @@ import {
   SettingOutlined,
   PlusOutlined,
   EditOutlined,
+  RocketOutlined,
 } from '@ant-design/icons';
 import { trim } from 'lodash';
 import {
@@ -25,9 +26,11 @@ import {
   Tag,
   Drawer,
   Form,
+  Modal,
 } from 'antd';
-import { useIntl, useDispatch } from '@umijs/max';
+import { useIntl, useDispatch, useSearchParams, useSelector } from '@umijs/max';
 import ModalDrawer from '@/pages/manager/components/ModalDrawer';
+import { isAdminVip } from '@/pages/manager/utils/auth';
 
 import styles from './index.module.less';
 
@@ -88,6 +91,9 @@ interface ServiceSpecItem {
 const SandboxMgr = () => {
   const intl = useIntl();
   const dispatch = useDispatch();
+  const [searchParams] = useSearchParams();
+  const userInfo = useSelector(({ user }: any) => user.userInfo);
+  const showLaunchButton = searchParams.get('spec') === '1' && isAdminVip(userInfo);
   const [pageInfo, setPageInfo] = useState({ pageIndex: 1, pageSize: 20, total: 0, totalPage: 0 });
   const [keyword, setKeyword] = useState('');
   const [status, setStatus] = useState('RUNNING');
@@ -105,6 +111,12 @@ const SandboxMgr = () => {
   const [editingSpec, setEditingSpec] = useState<ServiceSpecItem | null>(null);
   const [specForm] = Form.useForm();
   const [savingSpec, setSavingSpec] = useState(false);
+
+  // 指定用户沙箱相关状态
+  const [launchModalOpen, setLaunchModalOpen] = useState(false);
+  const [launchForm] = Form.useForm();
+  const [launching, setLaunching] = useState(false);
+  const [launchSpecList, setLaunchSpecList] = useState<ServiceSpecItem[]>([]);
 
   const refreshTimer = useRef<NodeJS.Timeout | null>(null);
   const curParam = useRef<{ pageIndex?: number; pageSize?: number; keyword?: string; status?: string }>({});
@@ -337,6 +349,54 @@ const SandboxMgr = () => {
     specForm.resetFields();
   }, [specForm]);
 
+  // ==================== 指定用户沙箱相关方法 ====================
+
+  const handleOpenLaunchModal = useCallback(() => {
+    setLaunchModalOpen(true);
+    launchForm.resetFields();
+    dispatch({
+      type: 'sandboxMgr/listServiceSpec',
+      payload: {},
+      success: (data: ServiceSpecItem[]) => {
+        setLaunchSpecList(data || []);
+      },
+    });
+  }, [dispatch, launchForm]);
+
+  const handleLaunchSandbox = useCallback(() => {
+    launchForm.validateFields().then((values) => {
+      setLaunching(true);
+      const payload: { userCode: string; serviceKey?: string } = {
+        userCode: values.userCode,
+      };
+      if (values.serviceKey) {
+        payload.serviceKey = values.serviceKey;
+      }
+      dispatch({
+        type: 'sandboxMgr/launchByUserCode',
+        payload,
+        success: (data: any) => {
+          setLaunching(false);
+          setLaunchModalOpen(false);
+          message.success(
+            intl.formatMessage({ id: 'sandboxMgr.launch.success' }, { sandboxId: data?.sandboxId || '-' })
+          );
+          loadData(
+            {
+              pageIndex: curParam.current?.pageIndex || pageInfo.pageIndex,
+              pageSize: curParam.current?.pageSize || pageInfo.pageSize,
+            },
+            curParam.current?.keyword || keyword,
+            curParam.current?.status || status
+          );
+        },
+        fail: () => {
+          setLaunching(false);
+        },
+      });
+    });
+  }, [dispatch, launchForm, loadData, pageInfo, keyword, status]);
+
   const columns = [
     {
       title: intl.formatMessage({ id: 'sandboxMgr.table.id' }),
@@ -560,6 +620,11 @@ const SandboxMgr = () => {
         </Col>
         <Col>
           <Space size="middle">
+            {showLaunchButton && (
+              <Button type="primary" icon={<RocketOutlined />} onClick={handleOpenLaunchModal}>
+                {intl.formatMessage({ id: 'sandboxMgr.launch.button' })}
+              </Button>
+            )}
             <Button icon={<SettingOutlined />} onClick={handleOpenSpecDrawer}>
               {intl.formatMessage({ id: 'sandboxMgr.config.button' })}
             </Button>
@@ -735,6 +800,35 @@ const SandboxMgr = () => {
           </Form.Item>
         </Form>
       </ModalDrawer>
+
+      {/* 指定用户沙箱弹窗 */}
+      <Modal
+        title={intl.formatMessage({ id: 'sandboxMgr.launch.title' })}
+        open={launchModalOpen}
+        onCancel={() => setLaunchModalOpen(false)}
+        onOk={handleLaunchSandbox}
+        confirmLoading={launching}
+        destroyOnClose
+      >
+        <Form form={launchForm} layout="vertical" preserve={false}>
+          <Form.Item
+            label={intl.formatMessage({ id: 'sandboxMgr.launch.userCode' })}
+            name="userCode"
+            rules={[{ required: true, message: intl.formatMessage({ id: 'sandboxMgr.launch.userCodeRequired' }) }]}
+          >
+            <Input placeholder={intl.formatMessage({ id: 'sandboxMgr.launch.userCodePlaceholder' })} />
+          </Form.Item>
+          <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.launch.serviceKey' })} name="serviceKey">
+            <Select placeholder={intl.formatMessage({ id: 'sandboxMgr.launch.serviceKeyPlaceholder' })} allowClear>
+              {launchSpecList.map((item) => (
+                <Option key={item.serviceKey} value={item.serviceKey}>
+                  {item.serviceKey}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };

@@ -135,7 +135,7 @@ export async function getDefaultModel(params: any) {
 export async function getModelList(params: any) {
   return POST(
     '/byaiService/new/model/listModel',
-    { tagId: '1', ...params },
+    { tagId: '3', ...params },
     {
       responseCfg: {
         customHandle: true,

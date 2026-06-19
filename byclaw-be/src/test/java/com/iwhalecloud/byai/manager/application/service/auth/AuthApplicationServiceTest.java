@@ -502,6 +502,39 @@ class AuthApplicationServiceTest {
     }
 
     @Test
+    void handleAuth_syncsRequestedUserAuthToRedisWhenDuplicateUseGrantSkipped() {
+        AuthApplicationService service = new AuthApplicationService();
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
+        AuthRedisSyncService authRedisSyncService = mock(AuthRedisSyncService.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
+        ReflectionTestUtils.setField(service, "authRedisSyncService", authRedisSyncService);
+
+        AuthDTO userAuth = new AuthDTO();
+        userAuth.setGrantToObjType(GrantToObjType.USER);
+        userAuth.setGrantToObjId(1001L);
+
+        AuthRedBlackDTO dto = new AuthRedBlackDTO();
+        dto.setGrantType(GrantType.FORCE_USE);
+        dto.setGrantObjType(ResourceBizTypeEnum.AGENT.name());
+        dto.setGrantObjId(88L);
+        dto.setRedList(List.of(userAuth));
+
+        when(privilegeGrantService.findPrivilegeGrant(GrantType.FORCE_USE, ResourceBizTypeEnum.AGENT.name(), 88L,
+            Color.RED)).thenReturn(List.of());
+        when(privilegeGrantService.findPrivilegeGrant(GrantType.FORCE_USE, ResourceBizTypeEnum.AGENT.name(), 88L,
+            Color.BLACK)).thenReturn(List.of());
+        when(privilegeGrantMapper.selectCount(any())).thenReturn(1L);
+
+        service.handleAuth(dto);
+
+        verify(privilegeGrantService, never()).save(any(PrivilegeGrant.class));
+        verify(authRedisSyncService).asyncSyncAuthChangedUsers(argThat(userIds -> userIds.contains(1001L)),
+            eq(GrantType.FORCE_USE));
+    }
+
+    @Test
     void handleAuth_allowsInsertWhenPermissionExistsOnDifferentDimension() {
         AuthApplicationService service = new AuthApplicationService();
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);

@@ -2,6 +2,9 @@ export default {
   // QueryInput Chat组件
   'queryInput.onlineSearch': 'Online Search',
   'queryInput.superAgent': 'Super Agent',
+  'queryInput.tooltip.fileManagement': 'File Management',
+  'queryInput.tooltip.mentionDigitalEmployee': 'Mention Digital Employee',
+  'queryInput.tooltip.uploadFile': 'Upload File',
   'chatBI.selectKnowledgeBase': 'Select Knowledge Base',
 
   // useEmployees
@@ -93,6 +96,8 @@ export default {
   'settings.pleaseConfirmPassword': 'Please enter confirm password',
   'settings.passwordsMustMatch': 'The two passwords do not match',
   'settings.passwordComplexityError': 'Password must meet all complexity requirements',
+  'settings.initialPasswordNotAllowed':
+    'The initial password is the system default. You cannot use it as the new password.',
   'settings.passwordChangedSuccess': 'Password changed successfully',
   'settings.passwordComplexityRequirement':
     'The system currently requires high password complexity. Must contain numbers + uppercase letters + lowercase letters + symbols. Example: AB@20391byai',

@@ -123,7 +123,20 @@ export async function executeMcp(params: {
     headers,
     timeoutMs: params.timeoutMs ?? 30_000,
   });
-  if ("error" in data) return data.error;
+  if ("error" in data) {
+    const errorDetail = {
+      url: serverUrl,
+      headers,
+      request_params: params.parameters,
+      error_code: (data.error as ExecutorFailure).error_code,
+      error_message: (data.error as ExecutorFailure).error,
+    };
+    return makeError(
+      (data.error as ExecutorFailure).error_code,
+      `MCP request failed: ${(data.error as ExecutorFailure).error}`,
+      { errorDetail },
+    );
+  }
   if (!isRecord(data)) {
     return makeError(
       "MCP_CALL_FAILED",
@@ -203,6 +216,12 @@ async function callMcpJsonRpc(params: {
         error: makeError(
           "MCP_CALL_FAILED",
           `MCP legacy SSE call failed: ${err instanceof Error ? err.message : String(err)}`,
+          {
+            errorDetail: {
+              url: params.serverUrl,
+              error_message: err instanceof Error ? err.message : String(err),
+            },
+          },
         ),
       };
     }
@@ -214,13 +233,29 @@ async function callMcpJsonRpc(params: {
     headers: params.headers,
     timeoutMs: params.timeoutMs,
   });
-  if ("error" in result) return { error: makeError("MCP_CALL_FAILED", result.error.error.message) };
-  const data = extractJsonRpcPayload(result.response, result.bodyText);
+  if ("error" in result) return {
+    error: makeError("MCP_CALL_FAILED", `MCP call failed: ${result.error.error}`, {
+      errorDetail: {
+        url: params.serverUrl,
+        error_code: result.error.error_code,
+        error_message: result.error.error,
+      },
+    }),
+  };
+  const { response, bodyText } = result;
+  const data = extractJsonRpcPayload(response, bodyText);
   if (!isRecord(data)) {
     return {
       error: makeError(
         "MCP_CALL_FAILED",
-        `MCP call returned invalid payload: HTTP ${result.response.status}`,
+        `MCP call returned invalid payload: HTTP ${response.status}`,
+        {
+          errorDetail: {
+            url: params.serverUrl,
+            status: response.status,
+            response_body: bodyText.slice(0, 4096),
+          },
+        },
       ),
     };
   }
@@ -262,6 +297,7 @@ async function executeOntologyResourceViaCallAgent(input: {
   if (metadata["channel-trace-id"]) {
     payload["channel-trace-id"] = metadata["channel-trace-id"];
   }
+  const toolCallId = input.parameters.tool_call_id as string;
 
   return executeViaCallAgent({
     capability: input.capability,
@@ -270,6 +306,7 @@ async function executeOntologyResourceViaCallAgent(input: {
     sessionId,
     traceId,
     targetAgentType,
+    toolCallId,
     callMode: docCallMode(input.parameters),
     syncTimeoutSec: docSyncTimeoutSec(input.parameters),
     syncIntervalSec: docSyncIntervalSec(input.parameters),
@@ -283,7 +320,7 @@ async function executeOntologyResourceViaCallAgent(input: {
     },
     metadata,
     logger: input.logger,
-    parentMessageId: input.parameters.tool_call_id as string,
+    parentMessageId: toolCallId,
   });
 }
 

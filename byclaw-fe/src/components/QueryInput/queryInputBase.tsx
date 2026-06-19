@@ -89,6 +89,10 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     } as S & IState;
   }
 
+  getUploadFileConfig = () => this.props.uploadFileConfig || this.props.globalContext.uploadFileConfig;
+
+  getUploadFileAccept = () => this.getUploadFileConfig()?.allowedFileTypes?.join(',');
+
   static getDerivedStateFromProps(nextProps: IProps, prevState: IState) {
     if (nextProps.employeesList?.length && !prevState.connectNetAgentId) {
       const onlineSearchAgent = nextProps.employeesList.find((item) => item.agentType === agentTypeMap.networkSearch);
@@ -390,7 +394,8 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   };
 
   checkCanUploadFile = () => {
-    const { uploadFileConfig } = this.props;
+    const uploadFileConfig = this.getUploadFileConfig();
+
     if (
       !uploadFileConfig ||
       !uploadFileConfig.enabled ||
@@ -415,7 +420,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
       message.error(getIntl().formatMessage({ id: 'upload.duplicateFile' }));
       return false;
     }
-    const { uploadFileConfig } = this.props;
+    const uploadFileConfig = this.getUploadFileConfig();
     if (uploadFileConfig?.maxFileSize) {
       const maxFileSize = Number(uploadFileConfig.maxFileSize) * 1024 * 1024;
       if (fileItem.file.size > maxFileSize) {
@@ -462,7 +467,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   };
 
   checkIsFilesValid = (files: File[]) => {
-    const { uploadFileConfig } = this.props;
+    const uploadFileConfig = this.getUploadFileConfig();
     if (!uploadFileConfig) return true;
     if (!uploadFileConfig.enabled) return false;
     const { fileList } = this.state;

@@ -50,4 +50,6 @@ public class AnswerDelta {
     private String sourceAgentType;
 
     private String status;
+
+    private String traceId;
 }

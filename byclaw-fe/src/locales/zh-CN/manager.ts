@@ -180,6 +180,7 @@ export default {
   'orgMgr.modal.phoneRule': '请输入有效的手机号',
   'orgMgr.modal.role': '角色',
   'orgMgr.modal.rolePlaceholder': '请选择角色',
+  'orgMgr.modal.saveSuccess': '保存成功',
 
   // 数据权限弹窗
   'orgMgr.dataPermission.search': '请输入关键字',
@@ -190,8 +191,10 @@ export default {
 
   // 标签页
   'orgMgr.tabs.employee': '数字员工',
-  'orgMgr.tabs.skill': '技能资产',
   'orgMgr.tabs.knowledge': '知识资产',
+  'orgMgr.tabs.tool': '工具资产',
+  'orgMgr.tabs.view': '视图资产',
+  'orgMgr.tabs.object': '对象资产',
 
   // 表格列（额外）
   'orgMgr.table.type': '类型',
@@ -228,6 +231,10 @@ export default {
   'orgMgr.digital.reviewing': '审核中',
   'orgMgr.digital.published': '已上架',
   'orgMgr.digital.unpublished': '已下架',
+  'orgMgr.digital.ownerType': '归属',
+  'orgMgr.digital.ownerType.personal': '个人',
+  'orgMgr.digital.ownerType.enterprise': '企业',
+  'orgMgr.digital.ownerType.default': '默认',
 
   // 组织树
   'orgTree.title': '组织目录',
@@ -291,10 +298,21 @@ export default {
   'resourceStatus.unpublished': '已下架',
 
   // 资源类型
+  'resourceAction.push': '上架',
   'resourceAction.unPush': '下架',
+  'resourceAction.unPushTip': '确定要下架吗？',
   'resourceAction.useAuth': '使用授权',
+  'resourceAction.manageAuth': '管理授权',
   'resourceAction.rollback': '回退',
+  'resourceAction.rollbackTip': '确定要回退吗？',
+  'resourceAction.rollbackSuccess': '回退成功',
+  'resourceAction.operationSuccess': '操作成功',
   'resourceAction.publishSuccess': '发布成功',
+  'resourceAction.pushSuccess': '上架成功',
+  'resourceAction.unPushSuccess': '下架成功',
+  'resourceAction.operationFrequent': '操作频繁，请稍后再试',
+  'resourceAction.databaseNotExist': '数据库不存在',
+
   'digitalEmployeeMgr.manual': '系统默认创建方式，支持技能与知识配置，可创建综合型、问答型、操作型数字员工。',
   'digitalEmployeeMgr.thirdParty':
     '适配A2A协议，Bot、Dify、Hiagent等第三方平台智能体及页面型应用，支持页面集成与接口集成两种模式。',
@@ -328,6 +346,15 @@ export default {
   'modelMgr.resultEmpty': '暂无模型数据',
   'modelMgr.emptyTitle': '还没有可展示的模型',
   'modelMgr.emptyDesc': '可以先新建一个模型，或者重置筛选条件查看已有数据。',
+
+  // 模型管理错误提示
+  'modelMgr.error.requestFail': '请求失败',
+  'modelMgr.error.getModelListFail': '获取模型列表失败',
+  'modelMgr.error.getModelDetailFail': '获取模型详情失败',
+  'modelMgr.error.saveModelFail': '保存模型失败',
+  'modelMgr.error.updateModelStatusFail': '更新模型状态失败',
+  'modelMgr.error.deleteModelFail': '删除模型失败',
+  'modelMgr.error.debugModelFail': '模型调试失败',
 
   // 模型管理-编辑/调试弹窗
   'modelMgr.modal.editTitle': '编辑模型',

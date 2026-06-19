@@ -76,10 +76,11 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
             List<String> endpoints = info.getEndpoints();
             data.setEndpoint(CollectionUtils.isNotEmpty(endpoints) ? endpoints.getFirst() : "");
             data.setEndpoints(endpoints);
+            data.setInstanceEndpoints(info.getInstanceEndpoints());
             data.setServicePort(info.getServicePort());
-            data.setImageType(info.getImageType());
             data.setEndpointHeaders(info.getEndpointHeaders());
             data.setSandboxId(info.getSandboxId());
+            data.setGatewayToken(info.getGatewayToken());
             data.setTimeoutSeconds(info.getTimeoutSeconds());
             data.setRemoteExpiresAt(info.getRemoteExpiresAt());
             log.info("生命周期服务启动沙箱成功，provider={}，user={}，type={}，sandboxId={}，endpoints={}，remoteExpiresAt={}",
@@ -137,8 +138,9 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
                 .userCode(userCode)
                 .sandboxType(sandboxType)
                 .endpoints(endpoints)
+                .instanceEndpoints(instance.getInstanceEndpoints())
+                .gatewayToken(SandboxRuntimeRequestFactory.resolveGatewayToken(instance, request))
                 .servicePort(spec.getServicePort())
-                .imageType(spec.getImageType())
                 .endpointHeaders(runtimeProvider.resolveEndpointHeaders(instance))
                 .timeoutSeconds(timeoutSeconds)
                 .remoteExpiresAt(resolveRemoteExpiresAt(instance, timeoutSeconds))
@@ -210,16 +212,28 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
 
     @Override
     public SandboxResponse<Boolean> sandboxExists(SandboxInfo sandboxInfo) {
+        SandboxResponse<SandboxRuntimeInstance> response = getSandbox(sandboxInfo);
+        if (response == null || !response.isSuccess()) {
+            return SandboxResponse.error(response != null ? response.getMessage() : "响应为空");
+        }
+        SandboxRuntimeInstance instance = response.getData();
+        return SandboxResponse.success(instance != null && Boolean.TRUE.equals(instance.getReusable()));
+    }
+
+    @Override
+    public SandboxResponse<SandboxRuntimeInstance> getSandbox(SandboxInfo sandboxInfo) {
         try {
             if (sandboxInfo == null) {
-                return SandboxResponse.success(false);
+                return SandboxResponse.success(null);
             }
-            boolean exists = runtimeProvider.exists(
+            var remote = runtimeProvider.getSandbox(
                 sandboxInfo.getUserCode(), sandboxInfo.getSandboxType(), sandboxInfo);
-            log.info("生命周期服务查询远端沙箱存在性，provider={}，user={}，type={}，sandboxId={}，exists={}",
+            SandboxRuntimeInstance instance = remote.orElse(null);
+            log.info("生命周期服务查询远端沙箱详情，provider={}，user={}，type={}，sandboxId={}，exists={}，state={}，expiresAt={}，createdAt={}",
                 runtimeProvider.providerType(), sandboxInfo.getUserCode(), sandboxInfo.getSandboxType(),
-                sandboxInfo.getSandboxId(), exists);
-            return SandboxResponse.success(exists);
+                sandboxInfo.getSandboxId(), instance != null, instance != null ? instance.getState() : null,
+                instance != null ? instance.getExpiresAt() : null, instance != null ? instance.getCreatedAt() : null);
+            return SandboxResponse.success(instance);
         }
         catch (Exception e) {
             log.warn("Failed to reconcile sandbox by provider={}, user={}, type={}, sandboxId={}: {}",

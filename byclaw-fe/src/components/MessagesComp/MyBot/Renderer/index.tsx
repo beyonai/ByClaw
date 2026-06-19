@@ -3,7 +3,7 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import dayjs from 'dayjs';
 import classNames from 'classnames';
-import { chain, compact, head, set, debounce } from 'lodash';
+import { compact, head, set, debounce } from 'lodash';
 import { Button, Space, Spin, Modal, Input } from 'antd';
 // @ts-ignore
 import { useIntl } from '@umijs/max';
@@ -104,7 +104,7 @@ const CompInMarkdown = ({
                   try {
                     const templateFunc = new Function(
                       'pageParams',
-                      ` return ${chain(value).trimStart('${').trimEnd('}').value()}; `
+                      ` return ${value.replace(/^\$\{/, '').replace(/\}$/, '')}; `
                     );
                     val = templateFunc(parameters);
                   } catch (e) {

@@ -88,8 +88,7 @@ public class SocialController {
 
         logger.info("signature=" + signature + ", timestamp=" + timestamp + ", nonce=" + nonce);
 
-        // 注意不能用json格式返回
-        response.setContentType("text/html");
+        response.setContentType("text/plain");
         response.getWriter().print(echostr);
     }
 

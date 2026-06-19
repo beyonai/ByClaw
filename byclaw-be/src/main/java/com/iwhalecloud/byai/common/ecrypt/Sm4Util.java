@@ -14,7 +14,7 @@ import javax.crypto.spec.SecretKeySpec;
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import org.bouncycastle.pqc.legacy.math.linearalgebra.ByteUtils;
+import org.bouncycastle.util.encoders.Hex;
 
 /**
  * @author:
@@ -57,7 +57,7 @@ public class Sm4Util {
      */
     public static String encryptToForeEnd(String hexKey, String data) {
         // 16进制字符串-->byte[]
-        byte[] keyData = ByteUtils.fromHexString(hexKey);
+        byte[] keyData = Hex.decode(hexKey);
         // String-->byte[]
         try {
             byte[] srcData = data.getBytes(DEFAULT_ENCODING);
@@ -73,14 +73,14 @@ public class Sm4Util {
 
     public static String encrypt(String hexKey, String data) {
         // 16进制字符串-->byte[]
-        byte[] keyData = ByteUtils.fromHexString(hexKey);
+        byte[] keyData = Hex.decode(hexKey);
         // String-->byte[]
         // byte[] srcData = new byte[0];
         try {
             byte[] srcData = data.getBytes(DEFAULT_ENCODING);
             // 加密后的数组
             byte[] cipherArray = encryptEcbPadding(keyData, srcData);
-            String cipherText = ByteUtils.toHexString(cipherArray);
+            String cipherText = Hex.toHexString(cipherArray);
             return cipherText;
         }
         catch (UnsupportedEncodingException e) {
@@ -115,7 +115,7 @@ public class Sm4Util {
      */
     public static String decryptFromForeEnd(String hexKey, String encryptData) {
         try {
-            byte[] keyData = ByteUtils.fromHexString(hexKey);
+            byte[] keyData = Hex.decode(hexKey);
             byte[] cipherData = Base64Util.decodeByte(encryptData);
             byte[] srcData = decryptEcbPadding(keyData, cipherData);
             String decryptStr = new String(srcData, DEFAULT_ENCODING);
@@ -136,8 +136,8 @@ public class Sm4Util {
     public static String decrypt(String hexKey, String encryptData) {
 
         try {
-            byte[] keyData = ByteUtils.fromHexString(hexKey);
-            byte[] cipherData = ByteUtils.fromHexString(encryptData);
+            byte[] keyData = Hex.decode(hexKey);
+            byte[] cipherData = Hex.decode(encryptData);
             byte[] srcData = decryptEcbPadding(keyData, cipherData);
             String decryptStr = new String(srcData, DEFAULT_ENCODING);
             return decryptStr;

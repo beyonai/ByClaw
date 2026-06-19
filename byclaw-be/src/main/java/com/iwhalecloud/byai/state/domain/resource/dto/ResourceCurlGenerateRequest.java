@@ -15,4 +15,5 @@ public class ResourceCurlGenerateRequest {
      * 资源ID。
      */
     private Long resourceId;
+
 }

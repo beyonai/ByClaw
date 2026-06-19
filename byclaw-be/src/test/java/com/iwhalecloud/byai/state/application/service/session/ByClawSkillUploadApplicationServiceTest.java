@@ -3,9 +3,15 @@ package com.iwhalecloud.byai.state.application.service.session;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.Charset;
+import java.util.Arrays;
 import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
+import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -115,6 +121,24 @@ class ByClawSkillUploadApplicationServiceTest {
     }
 
     @Test
+    void shouldAcceptChineseSkillDirectoryFromGbkEncodedZip() {
+        MultipartFile zip = buildZip("铁算盘财务健康分析.zip", Charset.forName("GBK"),
+            "铁算盘财务健康分析/SKILL.md", "# 铁算盘",
+            "铁算盘财务健康分析/references/persona-guide.md", "guide");
+        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
+
+        assertEquals("铁算盘财务健康分析", dto.getSkillName());
+        assertEquals(AGENT_PREFIX + "铁算盘财务健康分析", dto.getSkillPath());
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "铁算盘财务健康分析/SKILL.md"));
+        assertTrue(pathCaptor.getAllValues()
+            .contains(AGENT_PREFIX + "铁算盘财务健康分析/references/persona-guide.md"));
+    }
+
+    @Test
     void shouldRejectZipWithMultipleSkillDocs() {
         // 两个 SKILL.md（即便分布在不同子目录），按"必须有且仅有一个"判定违规。
         MultipartFile zip = buildZip("skill.zip",
@@ -124,6 +148,21 @@ class ByClawSkillUploadApplicationServiceTest {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
             () -> service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip));
         assertTrue(ex.getMessage().contains("SKILL.md"));
+    }
+
+    @Test
+    void shouldUploadMultipleSkillZips() {
+        MultipartFile alpha = buildZip("alpha.zip", "alpha/SKILL.md", "# alpha");
+        MultipartFile beta = buildZip("beta.zip", "beta/SKILL.md", "# beta");
+        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+
+        var result = service.uploadSkillZips(USER_CODE, RESOURCE_ID, Arrays.asList(alpha, beta));
+
+        assertEquals(2, result.size());
+        assertEquals("alpha", result.get(0).getSkillName());
+        assertEquals("beta", result.get(1).getSkillName());
+        verify(userFS).delete(AGENT_PREFIX + "alpha/");
+        verify(userFS).delete(AGENT_PREFIX + "beta/");
     }
 
     @Test
@@ -150,6 +189,36 @@ class ByClawSkillUploadApplicationServiceTest {
         verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
         assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "fol-auto-biztravel/SKILL.md"));
         assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "fol-auto-biztravel/scripts/run.py"));
+    }
+
+    @Test
+    void shouldAcceptTarGzSkillArchive() {
+        MultipartFile tarGz = buildTarGz("content-factory.tar.gz",
+            "content-factory/SKILL.md", "# content factory",
+            "content-factory/scripts/main.py", "print('hi')");
+        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, tarGz);
+
+        assertEquals("content-factory", dto.getSkillName());
+        assertEquals(AGENT_PREFIX + "content-factory", dto.getSkillPath());
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "content-factory/SKILL.md"));
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "content-factory/scripts/main.py"));
+    }
+
+    @Test
+    void shouldFallbackSkillNameToTarGzNameWhenSkillDocAtRoot() {
+        MultipartFile tarGz = buildTarGz("root-skill.tar.gz",
+            "SKILL.md", "# root",
+            "scripts/run.py", "print('hi')");
+        when(ssResourceService.findById(RESOURCE_ID)).thenReturn(resource("employee_10000417"));
+
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, tarGz);
+
+        assertEquals("root-skill", dto.getSkillName());
+        verify(userFS).delete(AGENT_PREFIX + "root-skill/");
     }
 
     @Test
@@ -210,11 +279,15 @@ class ByClawSkillUploadApplicationServiceTest {
 
     /** 构造一个 zip MultipartFile，参数按 (entryName, content) 成对传入；filename 决定 originalFilename。 */
     private MultipartFile buildZip(String filename, String... entries) {
+        return buildZip(filename, null, entries);
+    }
+
+    private MultipartFile buildZip(String filename, Charset charset, String... entries) {
         if (entries.length % 2 != 0) {
             throw new IllegalArgumentException("entries 必须成对");
         }
         ByteArrayOutputStream buf = new ByteArrayOutputStream();
-        try (ZipOutputStream zos = new ZipOutputStream(buf)) {
+        try (ZipOutputStream zos = charset == null ? new ZipOutputStream(buf) : new ZipOutputStream(buf, charset)) {
             for (int i = 0; i < entries.length; i += 2) {
                 zos.putNextEntry(new ZipEntry(entries[i]));
                 zos.write(entries[i + 1].getBytes());
@@ -225,5 +298,29 @@ class ByClawSkillUploadApplicationServiceTest {
             throw new IllegalStateException(e);
         }
         return new MockMultipartFile("file", filename, "application/zip", buf.toByteArray());
+    }
+
+    private MultipartFile buildTarGz(String filename, String... entries) {
+        if (entries.length % 2 != 0) {
+            throw new IllegalArgumentException("entries 必须成对");
+        }
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        try (GzipCompressorOutputStream gzipOut = new GzipCompressorOutputStream(buf);
+            TarArchiveOutputStream tos = new TarArchiveOutputStream(gzipOut)) {
+            tos.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX);
+            for (int i = 0; i < entries.length; i += 2) {
+                byte[] content = entries[i + 1].getBytes();
+                TarArchiveEntry entry = new TarArchiveEntry(entries[i]);
+                entry.setSize(content.length);
+                tos.putArchiveEntry(entry);
+                tos.write(content);
+                tos.closeArchiveEntry();
+            }
+            tos.finish();
+        }
+        catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        return new MockMultipartFile("file", filename, "application/gzip", buf.toByteArray());
     }
 }

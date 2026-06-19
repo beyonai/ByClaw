@@ -36,7 +36,7 @@ function FileRender(props: IProps) {
   const { fileItem, onClose, rightBottomRender, canQuote } = props;
   const intl = useIntl();
   // const { messageId, collectIds = [] } = message || {};
-  console.log(props);
+
   const { EventEmitter, layoutMode } = useGlobal();
   const { onPreview, previewInfo, onClosePreviewModal, previewing } = usePreview();
   const { handleDownload, downloadFile, downloading } = useDownload();

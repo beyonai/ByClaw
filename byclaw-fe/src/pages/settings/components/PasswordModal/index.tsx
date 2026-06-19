@@ -10,6 +10,8 @@ import { updatePassword } from '@/service/user';
 import { encryptBySM } from '@/utils/encrypt/sm';
 import styles from './index.module.less';
 
+const INITIAL_PASSWORD = 'Byai@13579';
+
 interface PasswordModalProps {
   visible: boolean;
   onClose: () => void;
@@ -81,6 +83,10 @@ const PasswordModal: React.FC<PasswordModalProps> = ({ visible, onClose, unclosa
     (_: any, value: string) => {
       if (!value) {
         return Promise.reject(new Error(intl.formatMessage({ id: 'settings.pleaseEnterNewPassword' })));
+      }
+
+      if (value === INITIAL_PASSWORD) {
+        return Promise.reject(new Error(intl.formatMessage({ id: 'settings.initialPasswordNotAllowed' })));
       }
 
       if (!(hasEnoughComplexity(value) && hasValidLength(value) && hasOnlyValidChars(value))) {

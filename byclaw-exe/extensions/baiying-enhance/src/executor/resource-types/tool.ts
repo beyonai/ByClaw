@@ -67,11 +67,43 @@ export async function executeTool(params: {
     headers,
     timeoutMs: params.timeoutMs ?? 30_000,
   });
-  if ("error" in result) return result.error;
-  const parsed = tryParseJson(result.bodyText);
+
+  if ("error" in result) {
+    const errorDetail = {
+      url,
+      headers,
+      request_params: params.parameters,
+      error_code: result.error.error_code,
+      error_message: result.error.error,
+    };
+    return makeError(
+      result.error.error_code,
+      `Tool request failed: ${result.error.error}`,
+      { errorDetail },
+    );
+  }
+
+  const { response, bodyText } = result;
+
+  if (!response.ok) {
+    const errorDetail = {
+      url,
+      headers,
+      request_params: params.parameters,
+      status: response.status,
+      status_text: response.statusText,
+      response_body: bodyText.slice(0, 4096),
+    };
+    if (response.status === 401 || response.status === 403) {
+      return makeError("AUTH_EXPIRED", "Authentication expired or invalid, please re-login", { errorDetail });
+    }
+    return makeError("TOOL_REQUEST_FAILED", `HTTP ${response.status}: ${response.statusText}`, { errorDetail });
+  }
+
+  const parsed = tryParseJson(bodyText);
   return {
     success: true,
-    data: parsed != null ? parsed : result.bodyText,
+    data: parsed != null ? parsed : bodyText,
     type: "tool",
     target: { resource_id: capability.metadata?.resource_id },
   };

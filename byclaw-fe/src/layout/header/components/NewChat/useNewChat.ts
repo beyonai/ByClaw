@@ -1,10 +1,11 @@
 import { useCallback } from 'react';
 import useGlobal from '@/hooks/useGlobal';
 import { App } from 'antd';
-import { useLocation, useNavigate } from '@umijs/max';
+import { useIntl, useLocation, useNavigate } from '@umijs/max';
 import { DEF_SIDER } from '@/layout/sider';
 
 export default function useNewChat() {
+  const intl = useIntl();
   const { message } = App.useApp();
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -16,7 +17,8 @@ export default function useNewChat() {
       navigate('/chat');
       EventEmitter.emit('set-sider-active-key', DEF_SIDER);
     } else {
-      message.success('已经是最新会话');
+      message.destroy();
+      message.success(intl.formatMessage({ id: 'newChat.alreadyLatestSession' }));
     }
-  }, [pathname, sessionId, agentId]);
+  }, [EventEmitter, agentId, intl, message, navigate, pathname, sessionId, setAgentId, setSessionId]);
 }

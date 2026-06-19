@@ -1,4 +1,4 @@
-import { get, isPlainObject, set, isString } from 'lodash';
+import { get, isPlainObject, set, isString, omit } from 'lodash';
 
 import { formatSSEDate as formatAgentSSEDate } from './agent/util';
 import { isTextContentType } from '@/utils/messgae';
@@ -95,12 +95,28 @@ const thinkTaskUserInputHandler = (sseDataObj: any) => {
 };
 
 const approvalFormHandler = (sseDataObj: any) => {
+  const sourceAgentType = get(sseDataObj, 'agentId');
+  const metadata = get(sseDataObj, 'metadata');
+
   const content = get(sseDataObj, 'choices.0.delta.content', '');
+
+  let resp: Record<string, any> = {};
+
+  try {
+    resp = JSON.parse(content) || {};
+  } catch (e) {
+    console.error(e, content);
+  }
 
   return {
     message: {
       contentType: SSEMessageType.approvalForm,
-      content: formatAgentSSEDate(content),
+      content: {
+        sourceAgentType,
+        metadata,
+        ...omit(resp, ['actions']),
+        substance: resp.actions || [],
+      },
       status: SSEEventStatus.done,
     },
   };
@@ -241,6 +257,21 @@ const sseTypeHandlerMap = new Map<string, (sseDataObj: any, msgEvent?: string) =
   [`${SSEMessageType.thinkStatusTitle}`, thinkStatusTitleHandler],
 ]);
 
+const isResumeContentType = (contentType: SSEMessageType) => {
+  const resumeContentTypes = [
+    SSEMessageType.approvalForm,
+    SSEMessageType.thinkRewriteQuestion,
+    SSEMessageType.thinkTaskUserInput,
+  ];
+  return contentType && resumeContentTypes.some((item) => `${item}` === `${contentType}`);
+};
+
+const setResumeMessageId = (sseDataObj: any, message: IMessageListItem) => {
+  if (message && isResumeContentType(get(sseDataObj, 'contentType'))) {
+    set(message, 'resumeMessageId', get(sseDataObj, 'orderId'));
+  }
+};
+
 export const answerDeltaHandler = (sseDataObj: any, msgEvent?: string): { message?: Partial<IMessageListItem> } => {
   const contentType = get(sseDataObj, 'contentType');
   if (!contentType) {
@@ -254,8 +285,10 @@ export const answerDeltaHandler = (sseDataObj: any, msgEvent?: string): { messag
   Object.assign(res.message, {
     objectType: get(sseDataObj, 'objectType'),
     agentId: get(sseDataObj, 'agentId'),
+    uuid: get(sseDataObj, 'id'),
+    orginContent: get(sseDataObj, 'choices.0.delta.content', ''),
   });
-
+  setResumeMessageId(sseDataObj, res.message);
   return res;
 };
 
@@ -298,6 +331,8 @@ export const reasoningLogHandler = (sseDataObj: any, msgEvent?: string) => {
   if (isDone) {
     set(payload, 'message.status', SSEEventStatus.done);
   }
+
+  setResumeMessageId(mySseDataObj, payload.message as IMessageListItem);
 
   return payload;
 };

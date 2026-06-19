@@ -611,6 +611,7 @@ export function createBaiyingCallToolFactory(params: {
           channelTraceId: channelResolve.traceId,
           language: channelResolve.language,
           beyondToken: channelResolve.beyondToken,
+          parentSessionKey: channelResolve.parentSessionKey,
         });
         logChannelDebug(`baiying_call(${agent.agentId})`, {
           resourceContext: resourceContext as ResourceContext,

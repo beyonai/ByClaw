@@ -25,6 +25,7 @@ export interface ChannelSessionResolveResult {
   source: ChannelSessionSource;
   language?: string;
   beyondToken?: string;
+  parentSessionKey?: string;
 }
 
 export interface SharedChannelRequestContextLike {
@@ -104,7 +105,7 @@ export function resolveChannelRequestContextBySessionKey(
 
 function extractCommonFieldsFromSessionKey(
   sessionKey: string | undefined,
-): Pick<ChannelSessionResolveResult, "language" | "beyondToken" | "traceId" | "sessionId"> {
+): Pick<ChannelSessionResolveResult, "language" | "beyondToken" | "traceId" | "sessionId" | "parentSessionKey"> {
   const context = resolveChannelRequestContextBySessionKey(sessionKey);
   if (!context) {
     return {};
@@ -122,6 +123,7 @@ function extractCommonFieldsFromSessionKey(
   return {
     language,
     beyondToken,
+    parentSessionKey: fields?.requesterSessionKey as string | undefined,
     ...(sessionIdFromFields ? { sessionId: sessionIdFromFields } : {}),
     ...(traceFromContext ? { traceId: traceFromContext } : {}),
   };
@@ -198,6 +200,7 @@ export function resolveChannelSessionIdForTool(ctx: unknown, sessionKey: string)
       source: "ctx_channel_session_id",
       language: explicitLanguage || commonFields.language,
       beyondToken: explicitBeyondToken || commonFields.beyondToken,
+      parentSessionKey: commonFields.parentSessionKey,
     };
   }
 

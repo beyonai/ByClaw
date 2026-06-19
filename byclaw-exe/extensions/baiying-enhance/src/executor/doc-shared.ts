@@ -365,6 +365,7 @@ export async function pollDocResult(params: {
    * Defaults to 1500ms.
    */
   postTerminalDrainMs?: number;
+  toolCallId?: string;
 }): Promise<DocPollResult> {
   const start = Date.now();
   const streamName = params.streamName ?? `byai_gateway:session:${params.sessionId}:data_stream`;
@@ -499,7 +500,7 @@ export async function pollDocResult(params: {
     event_type: terminalEventType,
     text: aggregatedText,
     terminal_text: terminalText,
-    delta_text: delta,
+    // delta_text: delta,
     raw_message: terminalMsg,
     matched_stream_id: terminalStreamId,
     stream_name: streamName,

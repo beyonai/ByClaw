@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.runtime;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +22,9 @@ import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
 final class SandboxRuntimeRequestFactory {
 
     private static final String METADATA_IDEMPOTENCY_KEY = "idempotencyKey";
+    private static final String METADATA_GATEWAY_TOKEN = "gateway_token";
+    private static final String ENV_GATEWAY_TOKEN = "gateway_token";
+    private static final String ENV_OPENCLAW_GATEWAY_TOKEN = "OPENCLAW_GATEWAY_TOKEN";
     private static final int DEFAULT_SERVICE_PORT = 18789;
     private static final int DEFAULT_WHALE_AGENT_LIST_PAGE = 1;
     private static final int DEFAULT_WHALE_AGENT_LIST_PAGE_SIZE = 100;
@@ -28,13 +32,17 @@ final class SandboxRuntimeRequestFactory {
     private SandboxRuntimeRequestFactory() {
     }
 
-    static CreateSandboxRequest applyIdempotencyMetadata(CreateSandboxRequest request, String idempotencyKey) {
+    static CreateSandboxRequest applyRuntimeMetadata(CreateSandboxRequest request, String idempotencyKey) {
         Map<String, String> metadata = new LinkedHashMap<>();
         if (request != null && request.getMetadata() != null) {
             metadata.putAll(request.getMetadata());
         }
         if (StringUtils.isNotBlank(idempotencyKey)) {
             metadata.put(METADATA_IDEMPOTENCY_KEY, idempotencyKey);
+        }
+        String gatewayToken = extractGatewayToken(request);
+        if (StringUtils.isNotBlank(gatewayToken)) {
+            metadata.put(METADATA_GATEWAY_TOKEN, gatewayToken);
         }
         if (request != null) {
             request.setMetadata(metadata.isEmpty() ? null : metadata);
@@ -68,7 +76,10 @@ final class SandboxRuntimeRequestFactory {
         if (sandboxInfo == null || sandboxInfo.getTimeoutSeconds() == null || sandboxInfo.getTimeoutSeconds() <= 0) {
             return null;
         }
-        return new RenewSandboxExpirationRequest(OffsetDateTime.now().plusSeconds(sandboxInfo.getTimeoutSeconds()));
+        OffsetDateTime expiresAt = sandboxInfo.getRemoteExpiresAt() != null
+            ? OffsetDateTime.ofInstant(sandboxInfo.getRemoteExpiresAt().toInstant(), ZoneId.systemDefault())
+            : OffsetDateTime.now().plusSeconds(sandboxInfo.getTimeoutSeconds());
+        return new RenewSandboxExpirationRequest(expiresAt);
     }
 
     static RenewSandboxTimeoutRequest buildWhaleAgentRenewRequest(SandboxInfo sandboxInfo) {
@@ -83,10 +94,34 @@ final class SandboxRuntimeRequestFactory {
     }
 
     static WhaleAgentListSandboxesRequest buildWhaleAgentListSandboxesRequest(String userCode, String sandboxType) {
+        Map<String, String> metadata = new LinkedHashMap<>();
+        metadata.put("userCode", userCode);
+        metadata.put("serviceKey", sandboxType);
         return new WhaleAgentListSandboxesRequest(
             DEFAULT_WHALE_AGENT_LIST_PAGE,
             DEFAULT_WHALE_AGENT_LIST_PAGE_SIZE,
-            Map.of("userCode", userCode, "serviceKey", sandboxType));
+            metadata);
+    }
+
+    static String extractGatewayToken(CreateSandboxRequest request) {
+        if (request == null || request.getEnv() == null || request.getEnv().isEmpty()) {
+            return null;
+        }
+        String gatewayToken = request.getEnv().get(ENV_GATEWAY_TOKEN);
+        if (StringUtils.isBlank(gatewayToken)) {
+            gatewayToken = request.getEnv().get(ENV_OPENCLAW_GATEWAY_TOKEN);
+        }
+        return StringUtils.trimToNull(gatewayToken);
+    }
+
+    static String resolveGatewayToken(SandboxRuntimeInstance instance, CreateSandboxRequest request) {
+        if (instance != null && instance.getMetadata() != null) {
+            String gatewayToken = StringUtils.trimToNull(instance.getMetadata().get(METADATA_GATEWAY_TOKEN));
+            if (gatewayToken != null) {
+                return gatewayToken;
+            }
+        }
+        return extractGatewayToken(request);
     }
 
     static boolean isReusableSandboxState(SandboxStatus status) {

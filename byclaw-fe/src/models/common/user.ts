@@ -119,6 +119,40 @@ export default {
 
       return res;
     },
+    *setUserInfo({ payload }: { payload: any }, { put }: any): any {
+      if (!payload) return;
+      const data = payload.data;
+
+      if (!data) return;
+
+      const myUserInfo = {
+        ...data,
+        loginTime: data?.loginTime || Date.now(),
+      };
+
+      CookieUtil.set('uc', myUserInfo.userCode);
+      localStorage.setItem('uc', myUserInfo.userCode);
+
+      if (!myUserInfo.registerType) {
+        set(myUserInfo, 'isRetented', true);
+      }
+
+      setUserToken(payload);
+
+      yield put({
+        type: 'save',
+        payload: {
+          userInfo: myUserInfo,
+        },
+      });
+
+      yield put({
+        type: 'employees/save',
+        payload: {
+          defaultDigEmployeeId: myUserInfo.defaultDigEmployeeId || '',
+        },
+      });
+    },
   },
 
   reducers: {
@@ -141,34 +175,6 @@ export default {
           ...state.userInfo,
           ...payload,
         },
-      };
-    },
-    setUserInfo(state: UserState, { payload }: { payload: any }) {
-      if (!payload) return state;
-      const data = payload.data;
-
-      let myUserInfo = null;
-
-      if (data) {
-        myUserInfo = {
-          ...data,
-          loginTime: data?.loginTime || Date.now(),
-        };
-
-        CookieUtil.set('uc', myUserInfo.userCode);
-        localStorage.setItem('uc', myUserInfo.userCode);
-
-        if (!myUserInfo.registerType) {
-          set(myUserInfo, 'isRetented', true);
-        }
-
-        setUserToken(payload);
-      } else {
-        CookieUtil.set('uc');
-      }
-      return {
-        ...state,
-        userInfo: myUserInfo,
       };
     },
   },

@@ -7,7 +7,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.4.5</version>
+        <version>3.5.14</version>
         <relativePath/>
     </parent>
 
@@ -52,9 +52,9 @@
         <java.version>21</java.version>
 
         <!-- Spring Framework -->
-        <spring-boot.version>3.4.5</spring-boot.version>
-        <spring-cloud.version>2024.0.1</spring-cloud.version>
-        <spring-security.version>6.5.0</spring-security.version>
+        <spring-boot.version>3.5.14</spring-boot.version>
+        <spring-cloud.version>2025.0.2</spring-cloud.version>
+        <spring-security.version>6.5.9</spring-security.version>
 
         <!-- Build Tools -->
         <maven-compiler-plugin>3.11.0</maven-compiler-plugin>
@@ -97,8 +97,8 @@
         <resilience4j.version>2.0.2</resilience4j.version>
 
         <!-- JSON Processing -->
-        <jackson.version>3.0.3</jackson.version>
         <fastjson.version>2.0.53</fastjson.version>
+        <jackson3.version>3.1.1</jackson3.version>
         <guava.version>33.4.8-jre</guava.version>
 
         <!-- Apache Commons -->
@@ -128,17 +128,17 @@
         <reflections.version>0.10.2</reflections.version>
         <protobuf-java.version>3.24.4</protobuf-java.version>
         <transmittable-thread-local.version>2.14.2</transmittable-thread-local.version>
-        <jedis.version>5.0.2</jedis.version>
+        <jedis.version>6.0.0</jedis.version>
         <okhttp.version>4.12.0</okhttp.version>
         <pinyin.version>2.5.1</pinyin.version>
-        <tomcat.version>10.1.50</tomcat.version>
+        <tomcat.version>10.1.55</tomcat.version>
 
         <pdf.version>2.0.4</pdf.version>
         <pdfbox.version>3.0.3</pdfbox.version>
         <itextpdf.version>5.5.13.4</itextpdf.version>
         <itext.version>4.2.2</itext.version>
         <hibernate-validator.version>8.0.1.Final</hibernate-validator.version>
-        <netty.version>4.1.107.Final</netty.version>
+        <netty.version>4.1.133.Final</netty.version>
         <java-jwt.version>4.4.0</java-jwt.version>
         <hutool-all.version>5.8.38</hutool-all.version>
 
@@ -147,7 +147,7 @@
         <elasticsearch-client.version>8.15.5</elasticsearch-client.version>
         <lucene-core.version>9.11.1</lucene-core.version>
         <druid-starter.version>1.1.9</druid-starter.version>
-        <postgresql.version>42.7.2</postgresql.version>
+        <postgresql.version>42.7.11</postgresql.version>
         <kotlin.version>1.9.25</kotlin.version>
         <okio.version>3.4.0</okio.version>
         <springfox-swagger2.version>3.0.0</springfox-swagger2.version>
@@ -251,8 +251,8 @@
 
             <dependency>
                 <groupId>org.bouncycastle</groupId>
-                <artifactId>bcprov-jdk15on</artifactId>
-                <version>1.70</version>
+                <artifactId>bcprov-jdk18on</artifactId>
+                <version>1.84</version>
             </dependency>
 
             <dependency>
@@ -328,22 +328,6 @@
                 <groupId>org.mybatis</groupId>
                 <artifactId>mybatis-spring</artifactId>
                 <version>${mybatis-spring.version}</version>
-            </dependency>
-
-            <dependency>
-                <groupId>tools.jackson.core</groupId>
-                <artifactId>jackson-databind</artifactId>
-                <version>${jackson.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>tools.jackson.core</groupId>
-                <artifactId>jackson-core</artifactId>
-                <version>${jackson.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.fasterxml.jackson.core</groupId>
-                <artifactId>jackson-annotations</artifactId>
-                <version>3.0-rc5</version>
             </dependency>
 
             <dependency>
@@ -584,6 +568,23 @@
                 <version>${netty.version}</version>
             </dependency>
 
+            <!-- Override transitive dependencies for CVE fixes -->
+            <dependency>
+                <groupId>org.apache.opennlp</groupId>
+                <artifactId>opennlp-tools</artifactId>
+                <version>2.5.9</version>
+            </dependency>
+            <dependency>
+                <groupId>org.lz4</groupId>
+                <artifactId>lz4-java</artifactId>
+                <version>1.8.1</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-clients</artifactId>
+                <version>3.9.2</version>
+            </dependency>
+
             <dependency>
                 <groupId>com.auth0</groupId>
                 <artifactId>java-jwt</artifactId>
@@ -611,7 +612,7 @@
             <dependency>
                 <groupId>io.minio</groupId>
                 <artifactId>minio</artifactId>
-                <version>8.5.2</version>
+                <version>8.6.0</version>
             </dependency>
 
          <dependency>
@@ -777,6 +778,21 @@
                 <groupId>io.swagger</groupId>
                 <artifactId>swagger-annotations</artifactId>
                 <version>1.5.24</version>
+            </dependency>
+            <dependency>
+                <groupId>tools.jackson.core</groupId>
+                <artifactId>jackson-core</artifactId>
+                <version>${jackson3.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>tools.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+                <version>${jackson3.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>tools.jackson.dataformat</groupId>
+                <artifactId>jackson-dataformat-yaml</artifactId>
+                <version>${jackson3.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -1026,6 +1042,12 @@
             <groupId>com.aliyun.oss</groupId>
             <artifactId>aliyun-sdk-oss</artifactId>
             <version>${aliyun-sdk-oss.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.ini4j</groupId>
+                    <artifactId>ini4j</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
@@ -1250,12 +1272,7 @@
             <version>1.1.0</version>
         </dependency>
 
-        <!-- captcha -->
-        <dependency>
-            <groupId>com.github.penggle</groupId>
-            <artifactId>kaptcha</artifactId>
-            <version>2.3.2</version>
-        </dependency>
+
 
         <!-- Aliyun SMS -->
         <dependency>
@@ -1266,7 +1283,7 @@
         <!-- SM4 encryption -->
         <dependency>
             <groupId>org.bouncycastle</groupId>
-            <artifactId>bcprov-jdk15on</artifactId>
+            <artifactId>bcprov-jdk18on</artifactId>
         </dependency>
 
         <dependency>
@@ -1385,12 +1402,6 @@
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-configuration-processor</artifactId>
-            <optional>true</optional>
         </dependency>
 
         <!-- ==================== Test Dependencies ==================== -->
@@ -1543,11 +1554,6 @@
                                 <groupId>org.projectlombok</groupId>
                                 <artifactId>lombok</artifactId>
                                 <version>${lombok.version}</version>
-                            </path>
-                            <path>
-                                <groupId>org.springframework.boot</groupId>
-                                <artifactId>spring-boot-configuration-processor</artifactId>
-                                <version>${spring-boot.version}</version>
                             </path>
                         </annotationProcessorPaths>
                     </configuration>

@@ -1,6 +1,9 @@
 package com.iwhalecloud.byai.gateway.sandbox.runtime;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -10,8 +13,8 @@ import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxEndpoint;
 import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
 import com.iwhalecloud.byai.gateway.sandbox.spec.PortSpec;
-import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxImageType;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
+import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport;
 
 class OpenSandboxEndpointResolver {
 
@@ -27,43 +30,52 @@ class OpenSandboxEndpointResolver {
         if (instance == null) {
             return List.of();
         }
-        String imageType = spec != null ? spec.getImageType() : null;
+        Map<String, String> instanceEndpoints = resolveConfiguredInstanceEndpoints(instance, spec);
+        if (!instanceEndpoints.isEmpty()) {
+            instance.setInstanceEndpoints(instanceEndpoints);
+        }
         List<String> endpoints;
-        if (SandboxImageType.isUiAgent(imageType)) {
-            endpoints = List.of(buildUiAgentEndpoint(instance.getSandboxId(), resolveRequiredServicePort(spec)));
-        }
-        else if (SandboxImageType.isOpenclaw(imageType)
-            && spec != null && spec.getServicePort() != null) {
-            endpoints = List.of(resolveEndpointForPort(instance, spec.getServicePort(), protocolForPrimaryPort(spec)));
-        }
-        else if (instance.getEndpoints() != null) {
+        if (spec != null && spec.getServicePort() != null) {
+            String primaryEndpoint = resolvePrimaryEndpoint(instanceEndpoints, spec);
+            endpoints = StringUtils.isNotBlank(primaryEndpoint) ? List.of(primaryEndpoint) : List.of();
+        } else if (instance.getEndpoints() != null) {
             endpoints = instance.getEndpoints();
-        }
-        else {
-            endpoints = resolveConfiguredPortEndpoints(instance, spec);
+        } else {
+            endpoints = new ArrayList<>(instanceEndpoints.values());
         }
         instance.setEndpoints(endpoints);
         return endpoints;
     }
 
-    private List<String> resolveConfiguredPortEndpoints(SandboxRuntimeInstance instance, SandboxServiceSpec spec) {
-        if (spec == null || spec.getPorts() == null) {
-            return List.of();
+    private Map<String, String> resolveConfiguredInstanceEndpoints(SandboxRuntimeInstance instance, SandboxServiceSpec spec) {
+        List<PortSpec> ports = resolveConfiguredPorts(spec);
+        if (ports.isEmpty()) {
+            return Map.of();
         }
-        List<String> endpoints = new ArrayList<>();
-        for (PortSpec port : spec.getPorts()) {
+        LinkedHashMap<String, String> endpoints = new LinkedHashMap<>();
+        for (PortSpec port : ports) {
             if (port == null || port.getPort() == null) {
                 continue;
             }
-            endpoints.add(resolveEndpointForPort(instance, port.getPort(), port.getProtocol()));
+            String endpoint = resolveEndpointForPort(instance, port, spec);
+            if (StringUtils.isBlank(endpoint)) {
+                continue;
+            }
+            endpoints.put(resolveInstanceName(spec, port), endpoint);
         }
-        return endpoints;
+        return SandboxEndpointRecordSupport.normalizeInstanceEndpoints(endpoints);
     }
 
-    private String resolveEndpointForPort(SandboxRuntimeInstance instance, int port, String protocol) {
+    private String resolveEndpointForPort(SandboxRuntimeInstance instance, PortSpec portSpec, SandboxServiceSpec spec) {
+        int port = portSpec.getPort();
+        String instanceName = resolveInstanceName(spec, portSpec);
         SandboxEndpoint endpoint = openSandboxClient.getSandboxEndpoint(instance.getSandboxId(), port);
         captureEndpointHeaders(instance, endpoint);
-        return applyProtocol(endpoint != null ? endpoint.getEndpoint() : null, protocol);
+        String rawEndpoint = endpoint != null ? endpoint.getEndpoint() : null;
+        if (StringUtils.equalsIgnoreCase(instanceName, SandboxEndpointRecordSupport.OPENCLAW_INSTANCE)) {
+            return applyProtocol(rawEndpoint, portSpec.getProtocol());
+        }
+        return buildIngressEndpoint(instance != null ? instance.getSandboxId() : null, port);
     }
 
     private void captureEndpointHeaders(SandboxRuntimeInstance instance, SandboxEndpoint endpoint) {
@@ -74,37 +86,6 @@ class OpenSandboxEndpointResolver {
         if (headers != null && !headers.isEmpty()) {
             instance.setEndpointHeaders(headers);
         }
-    }
-
-    private String buildUiAgentEndpoint(String sandboxId, int servicePort) {
-        if (StringUtils.isBlank(sandboxId)) {
-            throw new IllegalArgumentException("sandboxId is required for uiagent endpoint");
-        }
-        String baseUrl = properties != null && properties.getOpensandbox() != null
-            ? properties.getOpensandbox().getUiAgentProxyBaseUrl() : null;
-        if (StringUtils.isBlank(baseUrl)) {
-            throw new IllegalArgumentException("byclaw.sandbox.opensandbox.ui-agent-proxy-base-url is required for uiagent");
-        }
-        String proxyEndpoint = StringUtils.removeEnd(baseUrl.trim(), "/")
-            + "/" + sandboxId + "/proxy/" + servicePort + "/";
-        return proxyEndpoint + "?gatewayUrl=" + toWebsocketGatewayUrl(proxyEndpoint);
-    }
-
-    private String toWebsocketGatewayUrl(String proxyEndpoint) {
-        if (StringUtils.startsWith(proxyEndpoint, "https://")) {
-            return "wss://" + StringUtils.removeStart(proxyEndpoint, "https://");
-        }
-        if (StringUtils.startsWith(proxyEndpoint, "http://")) {
-            return "ws://" + StringUtils.removeStart(proxyEndpoint, "http://");
-        }
-        return proxyEndpoint;
-    }
-
-    private int resolveRequiredServicePort(SandboxServiceSpec spec) {
-        if (spec == null || spec.getServicePort() == null || spec.getServicePort() <= 0) {
-            throw new IllegalArgumentException("spec.servicePort is required for uiagent");
-        }
-        return spec.getServicePort();
     }
 
     private String protocolForPort(SandboxServiceSpec spec, Integer servicePort) {
@@ -136,5 +117,55 @@ class OpenSandboxEndpointResolver {
             return endpoint;
         }
         return protocol + "://" + endpoint;
+    }
+
+    private List<PortSpec> resolveConfiguredPorts(SandboxServiceSpec spec) {
+        if (spec != null && spec.getPorts() != null && !spec.getPorts().isEmpty()) {
+            return spec.getPorts();
+        }
+        if (spec == null || spec.getServicePort() == null) {
+            return List.of();
+        }
+        PortSpec portSpec = new PortSpec();
+        portSpec.setPort(spec.getServicePort());
+        portSpec.setInstance(SandboxEndpointRecordSupport.OPENCLAW_INSTANCE);
+        portSpec.setProtocol(protocolForPrimaryPort(spec));
+        return List.of(portSpec);
+    }
+
+    private String resolveInstanceName(SandboxServiceSpec spec, PortSpec port) {
+        if (port != null && StringUtils.isNotBlank(port.getInstance())) {
+            return port.getInstance().trim();
+        }
+        if (spec != null && port != null && port.getPort() != null
+            && port.getPort().equals(spec.getServicePort())) {
+            return SandboxEndpointRecordSupport.OPENCLAW_INSTANCE;
+        }
+        return "port-" + (port != null ? port.getPort() : "unknown");
+    }
+
+    private String resolvePrimaryEndpoint(Map<String, String> instanceEndpoints, SandboxServiceSpec spec) {
+        if (spec == null || spec.getServicePort() == null) {
+            return SandboxEndpointRecordSupport.resolvePrimaryEndpoint(instanceEndpoints);
+        }
+        List<PortSpec> ports = resolveConfiguredPorts(spec);
+        for (PortSpec port : ports) {
+            if (port == null || !spec.getServicePort().equals(port.getPort())) {
+                continue;
+            }
+            String endpoint = instanceEndpoints.get(resolveInstanceName(spec, port));
+            if (StringUtils.isNotBlank(endpoint)) {
+                return endpoint;
+            }
+        }
+        return SandboxEndpointRecordSupport.resolvePrimaryEndpoint(instanceEndpoints);
+    }
+
+    private String buildIngressEndpoint(String sandboxId, int port) {
+        if (StringUtils.isBlank(sandboxId)) {
+            return null;
+        }
+        String encodedSandboxId = URLEncoder.encode(sandboxId, StandardCharsets.UTF_8).replace("+", "%20");
+        return "/v1/sandboxes/" + encodedSandboxId + "/proxy/" + port;
     }
 }

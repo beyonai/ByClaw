@@ -16,6 +16,7 @@ import {
   previewFile,
   uploadSkillZip,
 } from '@/pages/manager/service/resources';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 import { getDcSystemConfigListByStandType } from '@/service/auth';
 import { DEFAULT_MENU_CONFIG, getVisibleMenuKeysFromConfig } from '@/constants/system';
 import styles from './style.module.less';
@@ -57,6 +58,7 @@ const ResourceTabs: React.FC<Props> = ({
   const [queryKeyword, setQueryKeyword] = useState(initialKeyword);
   const [sharedResources, setSharedResources] = useState<any[]>([]);
   const [sharedLoading, setSharedLoading] = useState(false);
+  const [brandVersion, setBrandVersion] = useState<'commercial' | 'openSource' | null>(null);
   const sharedQueryKeyRef = useRef('');
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -66,11 +68,13 @@ const ResourceTabs: React.FC<Props> = ({
   const [pathHistory, setPathHistory] = useState<string[]>([]);
   const [downloadingFile, setDownloadingFile] = useState<string | null>(null);
   const downloadTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const skillUploadTimerRef = useRef<NodeJS.Timeout | null>(null);
   const downloadLockRef = useRef(false);
 
   const { layoutMode, agentInfo, EventEmitter } = useGlobal();
 
   const { agentType } = agentInfo || {};
+  const isOpenSource = brandVersion === 'openSource';
 
   const { message } = App.useApp();
 
@@ -90,7 +94,15 @@ const ResourceTabs: React.FC<Props> = ({
       .catch(() => {});
   }, []);
 
-  // console.log('agentInfo111', agentInfo);
+  useEffect(() => {
+    getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
+      .then((res: any) => {
+        setBrandVersion(res?.paramValue);
+      })
+      .catch(() => {
+        setBrandVersion('openSource');
+      });
+  }, []);
 
   const isDebug = layoutMode === 'debug';
   const intl = useIntl();
@@ -118,6 +130,13 @@ const ResourceTabs: React.FC<Props> = ({
   const onSelectObject = useCallback(
     (item: any) => {
       onSelect(item, ResourceType.OBJECT);
+    },
+    [onSelect]
+  );
+
+  const onSelectSkill = useCallback(
+    (item: any) => {
+      onSelect(item, ResourceType.SKILL);
     },
     [onSelect]
   );
@@ -211,8 +230,17 @@ const ResourceTabs: React.FC<Props> = ({
   const [skillUploading, setSkillUploading] = useState(false);
 
   const handleSkillUpload = useCallback(
-    async (file: File) => {
-      if (!file.name.endsWith('.zip')) {
+    async (files: File[]) => {
+      const uploadFiles = files.filter(Boolean);
+      if (!uploadFiles.length) {
+        return false;
+      }
+      if (
+        uploadFiles.some((file) => {
+          const fileName = file.name.toLowerCase();
+          return !fileName.endsWith('.zip') && !fileName.endsWith('.tar.gz');
+        })
+      ) {
         message.error(intl.formatMessage({ id: 'resourceTabs.skillUpload.onlyZip' }));
         return false;
       }
@@ -225,7 +253,9 @@ const ResourceTabs: React.FC<Props> = ({
       setSkillUploading(true);
       try {
         const formData = new FormData();
-        formData.append('file', file);
+        uploadFiles.forEach((file) => {
+          formData.append('files', file);
+        });
         formData.append('userCode', userCode);
         if (normalizedAgentId) {
           formData.append('resourceId', normalizedAgentId);
@@ -243,7 +273,20 @@ const ResourceTabs: React.FC<Props> = ({
         setSkillUploading(false);
       }
     },
-    [userInfo, normalizedAgentId, intl, message]
+    [userInfo, normalizedAgentId, intl, message, EventEmitter]
+  );
+
+  const scheduleSkillUpload = useCallback(
+    (files: File[]) => {
+      if (skillUploadTimerRef.current) {
+        clearTimeout(skillUploadTimerRef.current);
+      }
+      skillUploadTimerRef.current = setTimeout(() => {
+        handleSkillUpload(files);
+        skillUploadTimerRef.current = null;
+      }, 0);
+    },
+    [handleSkillUpload]
   );
 
   const hasAnyTab = true;
@@ -278,6 +321,9 @@ const ResourceTabs: React.FC<Props> = ({
     return () => {
       if (downloadTimerRef.current) {
         clearTimeout(downloadTimerRef.current);
+      }
+      if (skillUploadTimerRef.current) {
+        clearTimeout(skillUploadTimerRef.current);
       }
     };
   }, []);
@@ -348,11 +394,11 @@ const ResourceTabs: React.FC<Props> = ({
     if (visibleKeys.includes('view')) visible.push('view');
     if (visibleKeys.includes('object')) visible.push('object');
     if (visibleKeys.includes('file')) visible.push('file');
-    visible.push('skill');
+    if (isOpenSource) visible.push('skill');
     if (!visible.length) return;
     const newActiveTabValue = activeTab && visible.includes(activeTab) ? activeTab : visible[0];
     setActiveTab(newActiveTabValue);
-  }, [showKnowledgeTab, showSkillTab, agentIds, visibleKeys]);
+  }, [activeTab, showKnowledgeTab, showSkillTab, agentIds, visibleKeys, isOpenSource]);
 
   const tabItems = useMemo(() => {
     const items: {
@@ -419,11 +465,11 @@ const ResourceTabs: React.FC<Props> = ({
           <ResourceCitation
             resourceType="TOOL"
             onSelect={onSelectTool}
+            disableClick={true}
             keyword={queryKeyword}
             agentId={agentId}
             agentIds={agentIds}
             resourceBizTypeList={[...TOOL_TAB_BIZ_TYPES]}
-            disableClick={true}
             resources={shouldUseSharedResourceQuery ? getSharedTabResources(TOOL_TAB_BIZ_TYPES) : undefined}
             loadingOverride={shouldUseSharedResourceQuery ? sharedLoading : undefined}
           />
@@ -448,21 +494,23 @@ const ResourceTabs: React.FC<Props> = ({
         </div>
       ),
     });
-    items.push({
-      key: 'skill',
-      label: intl.formatMessage({ id: 'common.skill' }),
-      children: (
-        <div className={styles.listContainer}>
-          <ResourceCitation
-            resourceType="SKILL"
-            onSelect={onSelectObject}
-            keyword={queryKeyword}
-            agentId={agentId}
-            agentIds={agentIds}
-          />
-        </div>
-      ),
-    });
+    if (isOpenSource) {
+      items.push({
+        key: 'skill',
+        label: intl.formatMessage({ id: 'common.skill' }),
+        children: (
+          <div className={styles.listContainer}>
+            <ResourceCitation
+              resourceType="SKILL"
+              onSelect={onSelectSkill}
+              keyword={queryKeyword}
+              agentId={agentId}
+              agentIds={agentIds}
+            />
+          </div>
+        ),
+      });
+    }
     items.push({
       key: 'file',
       label: intl.formatMessage({ id: 'common.file' }),
@@ -535,6 +583,7 @@ const ResourceTabs: React.FC<Props> = ({
     queryKeyword,
     agentId,
     agentIds,
+    isOpenSource,
     showKnowledgeTab,
     showSkillTab,
     shouldUseSharedResourceQuery,
@@ -597,8 +646,8 @@ const ResourceTabs: React.FC<Props> = ({
       return visibleKeys.includes(tab.key);
     });
 
-    return [...baseTabs, ...filteredConditionalTabs, skillTab, fileTab];
-  }, [agentType, intl, visibleKeys]);
+    return [...baseTabs, ...filteredConditionalTabs, ...(isOpenSource ? [skillTab] : []), fileTab];
+  }, [agentType, intl, visibleKeys, isOpenSource]);
 
   if (!hasAnyTab) {
     return (
@@ -622,10 +671,11 @@ const ResourceTabs: React.FC<Props> = ({
             <div className={styles.searchRow}>
               {activeTab === 'skill' && (
                 <Upload
-                  accept=".zip"
+                  accept=".zip,.gz"
+                  multiple
                   showUploadList={false}
-                  beforeUpload={(file) => {
-                    handleSkillUpload(file);
+                  beforeUpload={(_, fileList) => {
+                    scheduleSkillUpload(fileList as File[]);
                     return false;
                   }}
                 >

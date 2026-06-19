@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
-import { BUILTIN_MAIN_AGENTS_MD } from "./built-in-main-agents-md.js";
+import { loadBuiltinMainAgentsMd } from "./built-in-main-agents-md.js";
 import {
   isMainAgentsForeignTakeoverDone,
   markMainAgentsForeignTakeoverDone,
@@ -10,21 +10,11 @@ import {
 import type { AdaptedManagedAgent } from "./agent-adapter.js";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
 import { SUBAGENT_ROUTING_FILENAME, buildSubagentRoutingMarkdown, SUBAGENT_ROUTING_MARKER } from "./subagent-routing-seed.js";
-import { buildBootstrapMd, resolveAgentWorkspaceDir } from "./workspace-seed.js";
+import { resolveAgentWorkspaceDir } from "./workspace-seed.js";
 
 export const MAIN_AGENTS_MARKER = "<!-- baiying-enhance: main agents template -->";
 
 const AGENTS_FILENAME = "AGENTS.md";
-const BOOTSTRAP_FILENAME = "BOOTSTRAP.md";
-
-async function seedMainWorkspaceBootstrap(params: {
-  workspaceDir: string;
-  log: { info?: (m: string) => void };
-}): Promise<void> {
-  const bootstrapPath = path.join(params.workspaceDir, BOOTSTRAP_FILENAME);
-  await fs.writeFile(bootstrapPath, buildBootstrapMd(), "utf8");
-  params.log.info?.(`baiying-enhance: wrote main ${BOOTSTRAP_FILENAME} (managed no-op): ${bootstrapPath}`);
-}
 
 async function writeSubagentRoutingWithPolicy(params: {
   workspaceDir: string;
@@ -158,6 +148,7 @@ export async function loadMainAgentsTemplate(cfg: BaiyingEnhancePluginConfig): P
   if (!hasBuiltinMainAgentsTemplateSource(cfg)) {
     return null;
   }
+  const BUILTIN_MAIN_AGENTS_MD = await loadBuiltinMainAgentsMd();
   if (!BUILTIN_MAIN_AGENTS_MD || BUILTIN_MAIN_AGENTS_MD.trim().length === 0) {
     return null;
   }
@@ -177,7 +168,6 @@ export async function seedMainAgentAgentsMd(params: {
   const mainId = params.pluginConfig.mainParentAgentId?.trim() || "main";
   const workspaceDir = resolveAgentWorkspaceDir(params.api, mainId);
   await fs.mkdir(workspaceDir, { recursive: true });
-  await seedMainWorkspaceBootstrap({ workspaceDir, log: params.log });
 
   const mode = resolveEffectiveMainAgentsMdMode(params.pluginConfig);
   if (mode === "off") {

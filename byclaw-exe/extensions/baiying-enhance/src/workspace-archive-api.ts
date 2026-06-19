@@ -31,6 +31,30 @@ export type WorkspaceArchiveApi = {
   downloadWorkspace: (params: { userCode: string; resourceId: string; archiveKind: WorkspaceArchiveKind; destinationWorkspaceDir: string }) => Promise<boolean>;
 };
 
+function archiveFetchTimeoutMs(): number {
+  const parsed = Number.parseInt(process.env.BAIYING_WORKSPACE_ARCHIVE_FETCH_TIMEOUT_MS || "5000", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 5000;
+}
+
+async function fetchArchive(url: string | URL, init?: RequestInit & { duplex?: "half" }): Promise<Response> {
+  const timeoutMs = archiveFetchTimeoutMs();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...(init ?? {}),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`workspace archive request timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function normalizeUserCode(userCode?: string): string {
   return (userCode ?? process.env.USER_CODE ?? "").trim();
 }
@@ -153,7 +177,7 @@ export function createWorkspaceArchiveApi(params: { logger?: LoggerLike } = {}):
 
   const status = async ({ userCode, resourceId, archiveKind }: { userCode: string; resourceId: string; archiveKind: WorkspaceArchiveKind }) => {
     const normalizedUserCode = normalizeUserCode(userCode);
-    const response = await fetch(await urlFor({ userCode: normalizedUserCode, resourceId, archiveKind, suffix: "/status" }));
+    const response = await fetchArchive(await urlFor({ userCode: normalizedUserCode, resourceId, archiveKind, suffix: "/status" }));
     const bodyText = await response.text().catch(() => "");
     if (!response.ok) {
       throw new Error(`workspace archive status failed HTTP ${response.status}: ${bodyText}`);
@@ -173,7 +197,7 @@ export function createWorkspaceArchiveApi(params: { logger?: LoggerLike } = {}):
         const url = new URL(await urlFor({ userCode: normalizedUserCode, resourceId, archiveKind }));
         url.searchParams.set("sha256", sha256);
         const multipart = await buildMultipartBody(archive.filePath, archiveFileName(archiveKind));
-        const response = await fetch(url, {
+        const response = await fetchArchive(url, {
           method: "POST",
           headers: multipart.headers,
           body: multipart.body,
@@ -199,7 +223,7 @@ export function createWorkspaceArchiveApi(params: { logger?: LoggerLike } = {}):
       const scratch = await fs.mkdtemp(path.join(tmpdir(), "baiying-workspace-restore-"));
       const archiveFilePath = path.join(scratch, archiveFileName(archiveKind));
       try {
-        const response = await fetch(await urlFor({ userCode: normalizedUserCode, resourceId, archiveKind }));
+        const response = await fetchArchive(await urlFor({ userCode: normalizedUserCode, resourceId, archiveKind }));
         if (!response.ok || !response.body) {
           throw new Error(`workspace archive download failed HTTP ${response.status}: ${await responseTextSafe(response)}`);
         }

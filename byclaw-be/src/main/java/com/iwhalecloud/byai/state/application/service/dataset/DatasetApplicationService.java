@@ -789,6 +789,7 @@ public class DatasetApplicationService {
          */
 
         SsResource myResource = new SsResource();
+        myResource.setResourceSourcePkId(datasetImportDto.getResourceSourcePkId());
         myResource.setResourceBizType(resourceBizType);
         myResource.setResourceCode(resourceCode);
         myResource.setResourceName(resourceName);
@@ -832,6 +833,7 @@ public class DatasetApplicationService {
         String oldTargetContent = oldExtDoc == null ? null : oldExtDoc.getTargetContent();
 
         // update的动作，待复用杜老板统一的update方法
+        existing.setResourceSourcePkId(existing.getResourceSourcePkId());
         existing.setResourceName(dto.getResourceName());
         existing.setResourceDesc(dto.getResourceDesc());
         existing.setResourceBizType(dto.getResourceBizType());

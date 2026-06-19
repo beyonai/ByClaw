@@ -117,8 +117,47 @@ export async function executeToolkit(params: {
         headers,
         timeoutMs: params.timeoutMs ?? 30_000,
       });
-  if ("error" in result) return result.error;
-  const { bodyText } = result;
+
+  if ("error" in result) {
+    const errorDetail = {
+      url,
+      headers,
+      request_params: params.parameters,
+      error_code: result.error.error_code,
+      error_message: result.error.error,
+    };
+    return makeError(
+      result.error.error_code,
+      `Toolkit request failed: ${result.error.error}`,
+      { errorDetail },
+    );
+  }
+
+  const { response, bodyText } = result;
+
+  if (!response.ok) {
+    const errorDetail = {
+      url,
+      headers,
+      request_params: params.parameters,
+      status: response.status,
+      status_text: response.statusText,
+      response_body: bodyText.slice(0, 4096),
+    };
+    if (response.status === 401 || response.status === 403) {
+      return makeError(
+        "AUTH_EXPIRED",
+        "Authentication expired or invalid, please re-login",
+        { errorDetail },
+      );
+    }
+    return makeError(
+      "TOOLKIT_REQUEST_FAILED",
+      `HTTP ${response.status}: ${response.statusText}`,
+      { errorDetail },
+    );
+  }
+
   const parsed = tryParseJson(bodyText);
   const data = parsed != null ? parsed : bodyText;
   return {

@@ -7,6 +7,10 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   changes:
     runs-on: ubuntu-latest
@@ -20,8 +24,8 @@ jobs:
       data: ${{ steps.filter.outputs.data }}
       qa: ${{ steps.filter.outputs.qa }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -49,11 +53,11 @@ jobs:
       run:
         working-directory: byclaw-fe
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
         with:
           version: 9
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: pnpm
@@ -72,8 +76,8 @@ jobs:
     if: needs.changes.outputs.be == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
@@ -86,7 +90,7 @@ jobs:
     if: needs.changes.outputs.exe == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Detect byclaw-exe project
         id: exe_project
         run: |
@@ -96,7 +100,7 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
             echo "Skip byclaw-exe job: byclaw-exe/pyproject.toml not found."
           fi
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         if: steps.exe_project.outputs.exists == 'true'
         with:
           python-version: "3.12"
@@ -115,8 +119,8 @@ jobs:
     if: needs.changes.outputs.data == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
       - name: Install & test (byclaw-data)
         working-directory: byclaw-data
         run: |
@@ -128,8 +132,8 @@ jobs:
     if: needs.changes.outputs.qa == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
       - name: Install & test (byclaw-qa)
         working-directory: byclaw-qa
         run: |

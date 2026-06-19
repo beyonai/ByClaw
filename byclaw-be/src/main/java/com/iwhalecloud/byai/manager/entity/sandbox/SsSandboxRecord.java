@@ -36,6 +36,9 @@ public class SsSandboxRecord {
     /** Runtime returned sandbox id. */
     private String sandboxId;
 
+    /** Gateway token bound to the sandbox instance. */
+    private String gatewayToken;
+
     /** 会话ID */
     private String chatId;
 
@@ -74,8 +77,11 @@ public class SsSandboxRecord {
     /** Release reason. */
     private String releaseReason;
 
-    /** Optimistic lock version. */
+    /** Business lifecycle version. */
     private Integer version;
+
+    /** Optimistic lock version for concurrent DB updates. */
+    private Integer lockVersion;
 
     /** 创建时间 */
     @JSONField(format = "yyyy-MM-dd HH:mm:ss")

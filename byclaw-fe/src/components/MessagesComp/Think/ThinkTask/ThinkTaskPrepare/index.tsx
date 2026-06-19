@@ -1,6 +1,6 @@
 // tslint:disable:ordered-imports
 import React, { useMemo, useState } from 'react';
-import { get, chain } from 'lodash';
+import { get } from 'lodash';
 import { useIntl } from '@umijs/max';
 import { DesktopOutlined } from '@ant-design/icons';
 
@@ -43,13 +43,12 @@ export default function ThinkTaskPrepare(props: IProps) {
 
   const codeData = useMemo(() => {
     // prettier-ignore
-    return chain(substance)
+    return substance
       .trim()
-      .trimStart('```py')
+      .replace(/^```py\s*/, '')
       .trim()
-      .trimEnd('```')
-      .trim()
-      .value();
+      .replace(/```$/, '')
+      .trim();
   }, [substance]);
 
   return (

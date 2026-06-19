@@ -28,7 +28,8 @@ function formatImgUrl(url?: string) {
 
 const CommonLayout = () => {
   const userInfo = useSelector(({ user }) => user.userInfo);
-  const { getFeedbackType, setENV, cleanCloudSettings, setCloudSettings, setDevConfig } = useAppStore();
+  const { getFeedbackType, getSandboxesInfoUrl, setENV, cleanCloudSettings, setCloudSettings, setDevConfig } =
+    useAppStore();
 
   const dispatch = useDispatch();
 
@@ -59,7 +60,9 @@ const CommonLayout = () => {
     dispatch({
       type: 'employees/getAllDigitalEmployees',
     });
+
     getFeedbackType().catch(() => {});
+    getSandboxesInfoUrl().catch(() => {});
 
     getDcSystemConfigValueByCodesService({
       paramCodes: ['COLD_FUSION', 'BOTE_CONFIG'],

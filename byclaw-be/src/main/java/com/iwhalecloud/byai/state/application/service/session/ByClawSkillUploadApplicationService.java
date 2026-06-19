@@ -8,9 +8,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
+import org.apache.commons.compress.archivers.ArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
+import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream;
+import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,17 +31,17 @@ import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
  * 用户工作空间 skill 上传应用服务。
  *
  * 校验范围（明确仅这两条，其它问题用静默忽略而不是抛错）：
- * 1. zip 文件大小 ≤ 50MB；
- * 2. zip 内必须有且仅有一个 SKILL.md（文件名忽略大小写）。
+ * 1. 压缩包文件大小 ≤ 50MB；
+ * 2. 压缩包内必须有且仅有一个 SKILL.md（文件名忽略大小写）。
  *
  * 落盘规则（与 {@link ByClawSkillQueryApplicationService} 完全对齐）：
  * - bucket = byclaw-{userCode}（由 UserFS / UserBucketNameResolver 统一生成）；
  * - 对象前缀：数字员工走 /.openclaw/workspace-baiying-agent-{resourceId}/skills/，超级助手走 /.openclaw/workspace/skills/；
- * - skillName 取自 zip 中 SKILL.md 所在目录的最后一段；若 SKILL.md 在 zip 根，回退到 zip 文件名去扩展名；
+ * - skillName 取自压缩包中 SKILL.md 所在目录的最后一段；若 SKILL.md 在压缩包根，回退到压缩包文件名去扩展名；
  * - 写入文件名统一规范为 "SKILL.md"，保证 query 的大小写敏感匹配能识别。
  *
  * 覆盖语义：上传若同 skillName 已存在，先整体清空旧目录再写新内容。
- * 不在服务端保留 zip 本体；解压后逐 entry 流式写入 MinIO。
+ * 不在服务端保留压缩包本体；解压后逐 entry 流式写入 MinIO。
  *
  * @author qin.guoquan
  * @date 2026-05-15 18:37:18
@@ -48,16 +51,19 @@ public class ByClawSkillUploadApplicationService {
 
     private static final Logger logger = LoggerFactory.getLogger(ByClawSkillUploadApplicationService.class);
 
-    /** 服务端再设一道软限制（50MB），避免上传超大 zip 长时间阻塞 worker。 */
+    /** 服务端再设一道软限制（50MB），避免上传超大压缩包长时间阻塞 worker。 */
     private static final long MAX_ZIP_SIZE_BYTES = 50L * 1024 * 1024;
 
     /** SKILL.md 的规范文件名；query 服务用 case-sensitive 匹配，写入时统一规范化为该值。 */
     private static final String CANONICAL_SKILL_DOC_NAME = "SKILL.md";
 
-    /** zip 解压时被判为噪音、直接跳过的顶层段。 */
+    /** 解压时被判为噪音、直接跳过的顶层段。 */
     private static final Set<String> IGNORED_TOP_LEVEL_NAMES = Set.of("__MACOSX");
 
     private static final String IGNORED_FILE_DS_STORE = ".DS_Store";
+
+    /** 兼容 Windows / 常见压缩工具未设置 UTF-8 标记时的中文 entry 名。 */
+    private static final String ZIP_ENTRY_NAME_FALLBACK_ENCODING = "GBK";
 
     @Autowired
     private UserFS userFS;
@@ -66,24 +72,24 @@ public class ByClawSkillUploadApplicationService {
     private SsResourceService ssResourceService;
 
     /**
-     * 上传单个 skill zip。仅做大小、SKILL.md 唯一性两道校验，其它结构问题以静默忽略处理。
+     * 上传单个 skill 压缩包。仅做大小、SKILL.md 唯一性两道校验，其它结构问题以静默忽略处理。
      *
      * @param userCode  目标用户编码（决定 bucket 名）
-     * @param zipFile   前端上传的 zip MultipartFile
+     * @param zipFile   前端上传的 zip/tar.gz MultipartFile
      * @return 与 query 接口同口径的 ByClawSkillDto
      */
     public ByClawSkillDto uploadSkillZip(String userCode, Long resourceId, MultipartFile zipFile) {
         validateInput(userCode, resourceId, zipFile);
 
         // 切换到目标用户上下文，bucket 解析与读写操作全程在切换后的 LoginInfo 下进行。
-        return ByClawSkillPaths.withUserContext(userCode, () -> {
+        return ByClawUserWorkspacePaths.withUserContext(userCode, () -> {
             // 桶不存在则创建；createBucketIfAbsent 是幂等操作，反复调用安全。
             userFS.init();
 
-            // 一次性把 zip 全部 entry 解析到内存中（已被 50MB 总大小约束），便于：
+            // 一次性把压缩包全部 entry 解析到内存中（已被 50MB 总大小约束），便于：
             // 1. 先做整体校验（必须仅一个 SKILL.md），失败时不写半个 skill；
             // 2. 写入前先清空旧目录，最大化避免「写一半失败」的脏状态。
-            List<ParsedEntry> entries = parseZipEntries(zipFile);
+            List<ParsedEntry> entries = parseArchiveEntries(zipFile);
             ParsedEntry skillDocEntry = findUniqueSkillDoc(entries);
             String skillBaseInZip = parentDirOf(skillDocEntry.entryName);
             String skillName = resolveSkillName(skillBaseInZip, zipFile.getOriginalFilename());
@@ -124,7 +130,18 @@ public class ByClawSkillUploadApplicationService {
         });
     }
 
-    /** 仅做硬性入参校验：userCode 非空、zip 非空、zip ≤ 50MB。 */
+    public List<ByClawSkillDto> uploadSkillZips(String userCode, Long resourceId, List<MultipartFile> zipFiles) {
+        if (zipFiles == null || zipFiles.isEmpty()) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.empty"));
+        }
+        List<ByClawSkillDto> result = new ArrayList<>();
+        for (MultipartFile zipFile : zipFiles) {
+            result.add(uploadSkillZip(userCode, resourceId, zipFile));
+        }
+        return result;
+    }
+
+    /** 仅做硬性入参校验：userCode 非空、压缩包非空、压缩包 ≤ 50MB。 */
     private void validateInput(String userCode, Long resourceId, MultipartFile zipFile) {
         if (StringUtils.isBlank(userCode)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.user.code.notempty"));
@@ -139,23 +156,29 @@ public class ByClawSkillUploadApplicationService {
 
     private String resolveSkillRootPrefix(Long resourceId) {
         if (resourceId == null) {
-            return ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX;
+            return ByClawUserWorkspacePaths.WORKSPACE_SKILL_ROOT_PREFIX;
         }
         SsResource resource = ssResourceService.findById(resourceId);
         String resourceCode = resource == null ? null : resource.getResourceCode();
-        return ByClawSkillPaths.isSuperAssistantResourceCode(resourceCode)
-            ? ByClawSkillPaths.WORKSPACE_SKILL_ROOT_PREFIX
-            : ByClawSkillPaths.buildAgentSkillRootPrefix(resourceId);
+        return ByClawUserWorkspacePaths.resolveSkillRootPrefix(resourceId, resourceCode);
     }
 
     /**
-     * 一次性解析 zip：跳过纯目录条目、噪音文件（__MACOSX/、.DS_Store）和路径穿越条目（含 ".."），
+     * 一次性解析压缩包：跳过纯目录条目、噪音文件（__MACOSX/、.DS_Store）和路径穿越条目（含 ".."），
      * 把内容缓存到 byte[]。单文件大小已被 MAX_ZIP_SIZE_BYTES 整体约束，缓存到内存可控。
      */
+    private List<ParsedEntry> parseArchiveEntries(MultipartFile zipFile) {
+        if (isTarGzFile(zipFile)) {
+            return parseTarGzEntries(zipFile);
+        }
+        return parseZipEntries(zipFile);
+    }
+
     private List<ParsedEntry> parseZipEntries(MultipartFile zipFile) {
         List<ParsedEntry> result = new ArrayList<>();
-        try (ZipInputStream zin = new ZipInputStream(zipFile.getInputStream())) {
-            ZipEntry zipEntry;
+        try (ZipArchiveInputStream zin = new ZipArchiveInputStream(zipFile.getInputStream(),
+            ZIP_ENTRY_NAME_FALLBACK_ENCODING, true, true)) {
+            ArchiveEntry zipEntry;
             while ((zipEntry = zin.getNextEntry()) != null) {
                 if (zipEntry.isDirectory()) {
                     continue;
@@ -177,8 +200,39 @@ public class ByClawSkillUploadApplicationService {
         return result;
     }
 
+    private List<ParsedEntry> parseTarGzEntries(MultipartFile tarGzFile) {
+        List<ParsedEntry> result = new ArrayList<>();
+        try (InputStream gzipIn = new GzipCompressorInputStream(tarGzFile.getInputStream());
+            TarArchiveInputStream tin = new TarArchiveInputStream(gzipIn)) {
+            TarArchiveEntry tarEntry;
+            while ((tarEntry = tin.getNextTarEntry()) != null) {
+                if (tarEntry.isDirectory() || !tarEntry.isFile()) {
+                    continue;
+                }
+                String normalized = normalizeEntryName(tarEntry.getName());
+                if (normalized == null) {
+                    continue;
+                }
+                byte[] content = tin.readAllBytes();
+                result.add(new ParsedEntry(normalized, content));
+            }
+        }
+        catch (IOException e) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), e);
+        }
+        if (result.isEmpty()) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.empty"));
+        }
+        return result;
+    }
+
+    private boolean isTarGzFile(MultipartFile file) {
+        String filename = lastPathSegment(file == null ? null : file.getOriginalFilename()).toLowerCase(Locale.ROOT);
+        return filename.endsWith(".tar.gz");
+    }
+
     /**
-     * 合规化 zip entry 名。返回 null 表示该 entry 应被忽略；返回非 null 表示一个合法相对路径。
+     * 合规化压缩包 entry 名。返回 null 表示该 entry 应被忽略；返回非 null 表示一个合法相对路径。
      * 路径穿越（".."）这里直接静默丢弃，不抛错，符合"仅校验大小与 SKILL.md"的口径。
      */
     private String normalizeEntryName(String rawName) {
@@ -199,15 +253,14 @@ public class ByClawSkillUploadApplicationService {
         if (IGNORED_TOP_LEVEL_NAMES.contains(segments[0])) {
             return null;
         }
-        for (String seg : segments) {
-            if ("..".equals(seg)) {
-                return null;
-            }
+        java.nio.file.Path entryPath = java.nio.file.Path.of(normalized).normalize();
+        if (entryPath.startsWith("..") || entryPath.isAbsolute()) {
+            return null;
         }
         if (IGNORED_FILE_DS_STORE.equals(segments[segments.length - 1])) {
             return null;
         }
-        return normalized;
+        return entryPath.toString();
     }
 
     /** 找出有且仅有一个 SKILL.md（文件名忽略大小写）。0 个或 ≥2 个都视为非法 zip。 */
@@ -227,8 +280,8 @@ public class ByClawSkillUploadApplicationService {
 
     /**
      * 推导 skillName。
-     * - SKILL.md 在 zip 子目录中：取该目录路径的最后一段（"outer/inner/SKILL.md" -> "inner"）；
-     * - SKILL.md 在 zip 根：回退到 zip 文件名去扩展名（"fol-auto-biztravel.zip" -> "fol-auto-biztravel"）；
+     * - SKILL.md 在压缩包子目录中：取该目录路径的最后一段（"outer/inner/SKILL.md" -> "inner"）；
+     * - SKILL.md 在压缩包根：回退到压缩包文件名去扩展名（"fol-auto-biztravel.zip" -> "fol-auto-biztravel"）；
      *   两种来源都不能给出非空名时，统一按 "缺 SKILL.md" 报错（user 视角是 zip 不可用）。
      */
     private String resolveSkillName(String skillBaseInZip, String zipOriginalFilename) {
@@ -245,7 +298,7 @@ public class ByClawSkillUploadApplicationService {
         return name;
     }
 
-    /** entryName 是否处于 skillBase（含递归子目录）下；skillBase 为空表示 zip 根，所有 entry 都视为在内。 */
+    /** entryName 是否处于 skillBase（含递归子目录）下；skillBase 为空表示压缩包根，所有 entry 都视为在内。 */
     private boolean isUnderSkillBase(String entryName, String skillBaseInZip) {
         if (StringUtils.isEmpty(skillBaseInZip)) {
             return true;
@@ -294,10 +347,14 @@ public class ByClawSkillUploadApplicationService {
         return slash >= 0 ? normalized.substring(slash + 1) : normalized;
     }
 
-    /** 去掉文件名最后一个扩展名；保留多段点号中的前部分（如 "skill.v2.zip" -> "skill.v2"）。 */
+    /** 去掉文件名压缩包扩展名；保留多段点号中的前部分（如 "skill.v2.zip" -> "skill.v2"）。 */
     private String stripFileExtension(String filename) {
         if (StringUtils.isBlank(filename)) {
             return filename;
+        }
+        String lower = filename.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".tar.gz")) {
+            return filename.substring(0, filename.length() - ".tar.gz".length());
         }
         int dot = filename.lastIndexOf('.');
         return dot > 0 ? filename.substring(0, dot) : filename;

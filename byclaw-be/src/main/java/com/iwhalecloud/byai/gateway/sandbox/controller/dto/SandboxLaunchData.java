@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
+import java.util.Map;
 
 @Data
 @NoArgsConstructor
@@ -12,6 +13,8 @@ import java.util.List;
 public class SandboxLaunchData {
 
     private List<String> endpoints;
+
+    private Map<String, String> instanceEndpoints;
 
     private String endpoint;
 }

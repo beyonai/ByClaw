@@ -2,7 +2,7 @@
 import React from 'react';
 // @ts-ignore
 import { getIntl, connect } from '@umijs/max';
-import { Button, message, Space } from 'antd';
+import { Button, message, Space, Tooltip } from 'antd';
 import classnames from 'classnames';
 import { get, isEmpty, pullAllBy, set, trim } from 'lodash';
 
@@ -12,6 +12,7 @@ import QueryInputBase, { IProps as pIProps, IState as pIState } from '@/componen
 import { chatModeMap } from '@/constants/query';
 
 import UploadFile from '../components/UploadFile';
+import FileBrowserEntry from '../components/FileBrowserEntry';
 
 import type { UserInfo } from '@/models/common/user';
 import type { IFile } from '@/typescript/file';
@@ -100,10 +101,6 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
     const { inputValue, fileList, deepThink, chatSettings, connectNet } = this.state;
     const { userInfo, chatMode, myAgentType } = this.props;
     const { agentId } = this.props.globalContext;
-    // 未显式选择数字员工时，使用登录态中的默认超级助手资源，避免再通过 "-1" 表达隐式超级助手。
-    // const defaultSuperAssistantId = get(userInfo, 'defaultDigEmployeeId');
-    // const targetAgentId = agentId || defaultSuperAssistantId;
-    // const targetAgentType = targetAgentId ? agentTypeMap.agent : myAgentType;
 
     const sendVal = trim(inputValue);
     if (!sendVal) return null;
@@ -305,10 +302,12 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
       chatMode,
     } = this.props;
     const { showMentionPopoverType } = this.state;
+    const mentionDigitalEmployeeTip = getIntl().formatMessage({ id: 'queryInput.tooltip.mentionDigitalEmployee' });
 
     return (
       <>
         <Space size="large" className={styles.bottomRight}>
+          <FileBrowserEntry />
           <MentionPopover
             type="@"
             chatMode={chatMode}
@@ -318,12 +317,22 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
             popoverPos={showMentionPopoverType === '@' ? staticEmptyObject : undefined}
             onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
           >
-            <span
-              className={styles.attachment}
-              onClick={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '@' }))}
-            >
-              @
-            </span>
+            <Tooltip title={mentionDigitalEmployeeTip}>
+              <span
+                aria-label={mentionDigitalEmployeeTip}
+                className={styles.attachment}
+                role="button"
+                tabIndex={0}
+                onClick={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '@' }))}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' && event.key !== ' ') return;
+                  event.preventDefault();
+                  this.setState((prev) => ({ ...prev, showMentionPopoverType: '@' }));
+                }}
+              >
+                @
+              </span>
+            </Tooltip>
           </MentionPopover>
           {this.checkCanQuote() && (
             <MentionPopover
@@ -347,6 +356,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
           {this.checkCanUploadFile() && (
             <UploadFile
               ref={this.uploadFileRef}
+              beforeUpload={this.checkIsFilesValid}
               extendsPayload={{
                 agentId,
                 sessionType: 'AGENT',
@@ -370,7 +380,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
                   },
                 });
               }}
-              accept={this.props.uploadFileConfig?.allowedFileTypes?.join(',')}
+              accept={this.getUploadFileAccept()}
             />
           )}
           {this.STTRender()}

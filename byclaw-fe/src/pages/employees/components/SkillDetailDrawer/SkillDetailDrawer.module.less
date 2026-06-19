@@ -89,7 +89,7 @@
   }
 
   .content {
-    padding-top: 40px;
+    margin-top: 40px;
     grid-template-columns: auto 1fr;
     row-gap: 16px;
     column-gap: 24px;
@@ -151,6 +151,10 @@
     }
 
     .itemTable {
+      width: 100%;
+      max-width: 100%;
+      overflow-x: auto;
+
       :global {
         .@{antPrefix}-table-thead .@{antPrefix}-table-cell {
           padding: 6px 16px 5px !important;
@@ -290,6 +294,12 @@
   :global {
     .@{antPrefix}-tabs-nav {
       margin-bottom: 16px;
+    }
+    .@{antPrefix}-tabs-content {
+      height: 100%;
+    }
+    .@{antPrefix}-tabs-tabpane {
+      height: 100%;
     }
   }
 }

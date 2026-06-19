@@ -23,6 +23,7 @@ import CookieUtil from '@/utils/cookie';
 import { setUserToken } from '@/utils/auth';
 
 describe('models/common/user', () => {
+  const effects = (userModel as any).effects;
   const reducers = (userModel as any).reducers;
 
   beforeEach(() => {
@@ -60,8 +61,7 @@ describe('models/common/user', () => {
     });
   });
 
-  it('setUserInfo stores user info, writes cookie/localStorage and calls setUserToken', () => {
-    const state = { userInfo: null };
+  it('setUserInfo effect stores user info, writes cookie/localStorage and calls setUserToken', () => {
     const payload = {
       data: {
         userCode: 'alice',
@@ -71,27 +71,45 @@ describe('models/common/user', () => {
       sessionId: 'session-1',
       token: 'token-1',
     };
+    const put = jest.fn((action) => action);
 
-    const next = reducers.setUserInfo(state as any, { payload });
+    const effect = effects.setUserInfo({ payload }, { put });
+    const next = effect.next();
 
     expect((CookieUtil as any).set).toHaveBeenCalledWith('uc', 'alice');
     expect(localStorage.getItem('uc')).toBe('alice');
     expect(setUserToken).toHaveBeenCalledWith(payload);
-    expect(next.userInfo).toMatchObject({
-      userCode: 'alice',
-      userName: 'Alice',
-      isRetented: true,
+    expect(put).toHaveBeenCalledWith({
+      type: 'save',
+      payload: {
+        userInfo: expect.objectContaining({
+          userCode: 'alice',
+          userName: 'Alice',
+          isRetented: true,
+        }),
+      },
     });
-    expect(next.userInfo.loginTime).toBeDefined();
+    expect(next.value).toEqual({
+      type: 'save',
+      payload: {
+        userInfo: expect.objectContaining({
+          userCode: 'alice',
+          userName: 'Alice',
+          isRetented: true,
+        }),
+      },
+    });
+    expect(next.done).toBe(false);
   });
 
-  it('setUserInfo clears cookie when payload has no data', () => {
-    const state = { userInfo: { userCode: 'alice' } };
-    const next = reducers.setUserInfo(state as any, { payload: {} });
+  it('setUserInfo effect does nothing when payload has no data', () => {
+    const put = jest.fn((action) => action);
+    const effect = effects.setUserInfo({ payload: {} }, { put });
+    const next = effect.next();
 
-    expect((CookieUtil as any).set).toHaveBeenCalledWith('uc');
-    expect(next).toEqual({
-      userInfo: null,
-    });
+    expect((CookieUtil as any).set).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
+    expect(next.value).toBeUndefined();
+    expect(next.done).toBe(true);
   });
 });

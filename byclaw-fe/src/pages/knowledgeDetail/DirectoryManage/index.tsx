@@ -84,10 +84,14 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
   const [curRecord, setCurRecord] = useState<any>({});
   const [buildingFileIds, setBuildingFileIds] = useState<string[]>([]);
   const [fileBuildStatusMap, setFileBuildStatusMap] = useState<Record<string, IFileBuildStatus>>({});
+  const [queryingBuildStatusIds, setQueryingBuildStatusIds] = useState<string[]>([]);
   const [pollingFileIds, setPollingFileIds] = useState<string[]>([]);
   const [visibleFileIds, setVisibleFileIds] = useState<string[]>([]);
   const fileRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
   const queryingFileIdsRef = useRef<Set<string>>(new Set());
+  const queriedFileIdsRef = useRef<Set<string>>(new Set());
+  const postBuildPollingIdsRef = useRef<Set<string>>(new Set());
+  const mountedRef = useRef(true);
 
   const [modalState, modalAction] = useShowModal();
 
@@ -99,6 +103,12 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     getCatalogTree,
     setState,
   } = useKnowledgeStore();
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   /** 列表查询用：当前目录路径（不含文件名），根为 "/" */
   const getListDirectoryPath = useCallback(() => {
@@ -200,6 +210,35 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
 
   const pollingFileIdsKey = useMemo(() => pollingFileIds.map((item) => `${item}`).join(','), [pollingFileIds]);
 
+  const isTerminalBuildStatus = useCallback((status?: string) => {
+    const normalizedStatus = `${status || ''}`;
+    return !normalizedStatus || normalizedStatus === 'complete' || normalizedStatus === 'failed';
+  }, []);
+
+  const collectVisibleFileIds = useCallback(() => {
+    if (typeof window === 'undefined') return;
+
+    const nextVisibleIds = fileRecords
+      .map((record: any) => {
+        const rowKey = getFileRowKey(record);
+        const element = fileRefs.current[rowKey];
+        if (!rowKey || !element) return '';
+
+        const rect = element.getBoundingClientRect();
+        const isVisible =
+          rect.bottom >= -100 &&
+          rect.top <= window.innerHeight + 100 &&
+          rect.right >= 0 &&
+          rect.left <= window.innerWidth;
+        return isVisible ? rowKey : '';
+      })
+      .filter(Boolean);
+
+    if (nextVisibleIds.length === 0) return;
+
+    setVisibleFileIds((prev) => [...new Set([...prev, ...nextVisibleIds])]);
+  }, [fileRecords, getFileRowKey]);
+
   const getBuildStatusLabel = useCallback(
     (dict: IBuildStatusItem[] = [], code?: string) => {
       if (!code) return '';
@@ -216,6 +255,8 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     (record: any) => {
       if (record?.type === 'directory') return '-';
       const rowKey = getFileRowKey(record);
+      if (queryingBuildStatusIds.includes(rowKey)) return <Spin size="small" />;
+
       const statusInfo = rowKey ? fileBuildStatusMap[rowKey] : undefined;
       if (!statusInfo) return '-';
 
@@ -232,7 +273,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         '-'
       );
     },
-    [fileBuildStatusMap, getBuildStatusLabel, getFileRowKey]
+    [fileBuildStatusMap, getBuildStatusLabel, getFileRowKey, queryingBuildStatusIds]
   );
 
   useEffect(() => {
@@ -246,11 +287,18 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     const fetchInitialStatuses = async () => {
       const visibleRecords = fileRecords.filter((record: any) => {
         const rowKey = getFileRowKey(record);
-        return visibleFileIds.includes(rowKey) && !queryingFileIdsRef.current.has(rowKey);
+        return (
+          visibleFileIds.includes(rowKey) &&
+          !queryingFileIdsRef.current.has(rowKey) &&
+          !queriedFileIdsRef.current.has(rowKey)
+        );
       });
 
       const recordsToQuery = visibleRecords.map((record: any) => getFileRowKey(record)).filter(Boolean);
+      if (recordsToQuery.length === 0) return;
+
       recordsToQuery.forEach((id) => queryingFileIdsRef.current.add(id));
+      setQueryingBuildStatusIds((prev) => [...new Set([...prev, ...recordsToQuery])]);
 
       const results = await Promise.all(
         visibleRecords.map(async (record: any) => {
@@ -274,9 +322,13 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         })
       );
 
-      if (cancelled) return;
-
       recordsToQuery.forEach((id) => queryingFileIdsRef.current.delete(id));
+      recordsToQuery.forEach((id) => queriedFileIdsRef.current.add(id));
+      if (mountedRef.current) {
+        setQueryingBuildStatusIds((prev) => prev.filter((id) => !recordsToQuery.includes(id)));
+      }
+
+      if (cancelled) return;
 
       setFileBuildStatusMap((prev) => {
         const nextStatusMap = { ...prev };
@@ -286,7 +338,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
           if (!rowKey || !data) return;
           nextStatusMap[rowKey] = data;
 
-          if (`${data?.status || ''}` === 'running') {
+          if (!isTerminalBuildStatus(data?.status)) {
             nextPollingIds.push(rowKey);
           }
         });
@@ -302,10 +354,11 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     return () => {
       cancelled = true;
     };
-  }, [baseInfo?.resourceId, visibleFileIds, fileRecords, getBuildDirectoryPath, getFileRowKey]);
+  }, [baseInfo?.resourceId, visibleFileIds, fileRecords, getBuildDirectoryPath, getFileRowKey, isTerminalBuildStatus]);
 
   useEffect(() => {
     const observers: IntersectionObserver[] = [];
+    const frameId = window.requestAnimationFrame(collectVisibleFileIds);
 
     fileRecords.forEach((record: any) => {
       const rowKey = getFileRowKey(record);
@@ -332,10 +385,14 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       observers.push(observer);
     });
 
+    window.addEventListener('resize', collectVisibleFileIds);
+
     return () => {
       observers.forEach((observer) => observer.disconnect());
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener('resize', collectVisibleFileIds);
     };
-  }, [fileRecords, getFileRowKey]);
+  }, [collectVisibleFileIds, fileRecords, getFileRowKey]);
 
   useEffect(() => {
     if (pollingFileIds.length === 0) return undefined;
@@ -394,10 +451,19 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       setPollingFileIds((prev) =>
         prev.filter((rowKey) => {
           const row = results.find((item) => item.rowKey === rowKey);
-          if (row?.missingRecord) return false;
-          if (!row?.data) return false;
+          const isPostBuildPolling = postBuildPollingIdsRef.current.has(rowKey);
+          if (row?.missingRecord) {
+            postBuildPollingIdsRef.current.delete(rowKey);
+            return false;
+          }
+          if (!row?.data) return isPostBuildPolling;
+
           const status = `${row?.data?.status || ''}`;
-          return status !== 'complete' && status !== 'failed';
+          if (status === 'complete' || status === 'failed') {
+            postBuildPollingIdsRef.current.delete(rowKey);
+            return false;
+          }
+          return isPostBuildPolling || !isTerminalBuildStatus(status);
         })
       );
 
@@ -413,25 +479,32 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [baseInfo?.resourceId, displayDirectoryList, getBuildDirectoryPath, pollingFileIdsKey, getFileRowKey]);
+  }, [
+    baseInfo?.resourceId,
+    displayDirectoryList,
+    getBuildDirectoryPath,
+    pollingFileIdsKey,
+    getFileRowKey,
+    isTerminalBuildStatus,
+  ]);
 
   const submitBuildTask = useCallback(
     (record: any) => {
       const directoryPath = getBuildDirectoryPath(record);
       if (!directoryPath) {
-        message.error('无法解析文件路径，请稍后重试');
+        message.error(intl.formatMessage({ id: 'directoryManage.resolveFilePathFailed' }));
         return;
       }
 
       const rowKey = getFileRowKey(record);
       if (!rowKey) {
-        message.error('无法解析文件路径，请稍后重试');
+        message.error(intl.formatMessage({ id: 'directoryManage.resolveFilePathFailed' }));
         return;
       }
 
       const rid = baseInfo?.resourceId;
       if (rid === null || rid === undefined || rid === '') {
-        message.error('缺少文档库信息');
+        message.error(intl.formatMessage({ id: 'directoryManage.missingKnowledgeBaseInfo' }));
         return;
       }
 
@@ -441,17 +514,24 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       };
 
       setBuildingFileIds((prev) => (prev.includes(rowKey) ? prev : [...prev, rowKey]));
-      setPollingFileIds((prev) => (prev.includes(rowKey) ? prev : [...prev, rowKey]));
-      message.info('已提交构建任务，后台处理中');
+      message.info(intl.formatMessage({ id: 'directoryManage.buildSubmitted' }));
 
       window.setTimeout(() => {
         void buildDataset(payload)
           .then(() => {
+            queriedFileIdsRef.current.delete(rowKey);
+            postBuildPollingIdsRef.current.add(rowKey);
+            setPollingFileIds((prev) => (prev.includes(rowKey) ? prev : [...prev, rowKey]));
             getDirectoryList();
           })
           .catch((error) => {
-            const errorMessage = error?.response?.data?.msg || error?.msg || error?.message || '构建失败';
+            const errorMessage =
+              error?.response?.data?.msg ||
+              error?.msg ||
+              error?.message ||
+              intl.formatMessage({ id: 'directoryManage.buildFailed' });
             message.error(errorMessage);
+            postBuildPollingIdsRef.current.delete(rowKey);
             setPollingFileIds((prev) => prev.filter((k) => k !== rowKey));
             getDirectoryList();
           })
@@ -460,7 +540,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
           });
       }, 0);
     },
-    [baseInfo?.resourceId, getBuildDirectoryPath, getDirectoryList, getFileRowKey, message]
+    [baseInfo?.resourceId, getBuildDirectoryPath, getDirectoryList, getFileRowKey, intl, message]
   );
 
   const handleAction = (key: string, record: any) => {
@@ -477,7 +557,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         const directoryPath = getBuildDirectoryPath(record);
         const rid = baseInfo?.resourceId;
         if (!directoryPath || rid === null || rid === undefined || rid === '') {
-          message.error('无法下载：缺少文件路径或文档库信息');
+          message.error(intl.formatMessage({ id: 'directoryManage.downloadMissingParams' }));
           break;
         }
         void downloadResourceFile({
@@ -491,8 +571,11 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       case 'build':
         if (buildingFileIds.includes(getFileRowKey(record))) return;
         Modal.confirm({
-          title: '构建文件',
-          content: `确定要构建文件 "${record?.collectionName ?? record?.name}" 吗？`,
+          title: intl.formatMessage({ id: 'directoryManage.buildFile' }),
+          content: intl.formatMessage(
+            { id: 'directoryManage.buildConfirm' },
+            { fileName: record?.collectionName ?? record?.name }
+          ),
           onOk: () => {
             submitBuildTask(record);
           },
@@ -511,7 +594,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
               const directoryPath = getBuildDirectoryPath(record);
               const rid = baseInfo?.resourceId;
               if (!directoryPath || rid === null || rid === undefined || rid === '') {
-                message.error('无法删除：缺少目录路径或文档库信息');
+                message.error(intl.formatMessage({ id: 'directoryManage.deleteFolderMissingParams' }));
                 return Promise.reject(new Error('invalid delete folder params'));
               }
               promise = deleteFolder({ resourceId: Number(rid), directoryPath });
@@ -519,7 +602,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
               const filePath = getBuildDirectoryPath(record);
               const rid = baseInfo?.resourceId;
               if (!filePath || rid === null || rid === undefined || rid === '') {
-                message.error('无法删除：缺少文件路径或文档库信息');
+                message.error(intl.formatMessage({ id: 'directoryManage.deleteFileMissingParams' }));
                 return Promise.reject(new Error('invalid remove file params'));
               }
               promise = removeFile({
@@ -568,7 +651,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
           label: intl.formatMessage({ id: 'common.delete' }),
           key: 'delete',
           icon: (
-            <Tooltip title="删除文件">
+            <Tooltip title={intl.formatMessage({ id: 'directoryManage.deleteFile' })}>
               <span className="iconfont icon-a-Deleteshanchu" />
             </Tooltip>
           ),
@@ -589,17 +672,17 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
           label: intl.formatMessage({ id: 'common.download' }),
           key: 'download',
           icon: (
-            <Tooltip title="下载文件">
+            <Tooltip title={intl.formatMessage({ id: 'directoryManage.downloadFile' })}>
               <span className="iconfont icon-a-Downloadxiazai" />
             </Tooltip>
           ),
         });
         actionList.unshift({
-          label: '构建',
+          label: intl.formatMessage({ id: 'directoryManage.build' }),
           key: 'build',
           disabled: isBuilding,
           icon: (
-            <Tooltip title="构建文件">
+            <Tooltip title={intl.formatMessage({ id: 'directoryManage.buildFile' })}>
               {isBuilding ? <Spin size="small" /> : <span className="iconfont icon-goujian" />}
             </Tooltip>
           ),
@@ -727,7 +810,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       // },
 
       {
-        title: '构建进度',
+        title: intl.formatMessage({ id: 'directoryManage.buildProgress' }),
         dataIndex: 'buildProgress',
         align: 'center',
         width: 150,

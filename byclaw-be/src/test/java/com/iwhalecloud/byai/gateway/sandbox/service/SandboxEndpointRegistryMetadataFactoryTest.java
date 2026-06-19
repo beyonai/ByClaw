@@ -10,17 +10,7 @@ class SandboxEndpointRegistryMetadataFactoryTest {
     void build_addsQueryTokenMetadataForSandboxEndpoint() {
         SandboxEndpointRegistryMetadataFactory factory = new SandboxEndpointRegistryMetadataFactory("ztesoft");
 
-        assertThat(factory.build("openclaw"))
-            .containsEntry(SandboxEndpointRegistryMetadataFactory.AUTH_TYPE_KEY,
-                SandboxEndpointRegistryMetadataFactory.QUERY_AUTH_TYPE)
-            .containsEntry(SandboxEndpointRegistryMetadataFactory.AUTH_PARAM_KEY,
-                SandboxEndpointRegistryMetadataFactory.TOKEN_PARAM_NAME)
-            .containsEntry(SandboxEndpointRegistryMetadataFactory.TOKEN_KEY, "ztesoft");
-
-        assertThat(factory.build(null))
-            .containsEntry(SandboxEndpointRegistryMetadataFactory.TOKEN_KEY, "ztesoft");
-
-        assertThat(factory.build("uiagent"))
+        assertThat(factory.build())
             .containsEntry(SandboxEndpointRegistryMetadataFactory.AUTH_TYPE_KEY,
                 SandboxEndpointRegistryMetadataFactory.QUERY_AUTH_TYPE)
             .containsEntry(SandboxEndpointRegistryMetadataFactory.AUTH_PARAM_KEY,
@@ -30,6 +20,6 @@ class SandboxEndpointRegistryMetadataFactoryTest {
 
     @Test
     void build_skipsBlankToken() {
-        assertThat(new SandboxEndpointRegistryMetadataFactory("").build("openclaw")).isNull();
+        assertThat(new SandboxEndpointRegistryMetadataFactory("").build()).isNull();
     }
 }

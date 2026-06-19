@@ -6,6 +6,7 @@ describe("plugin reload config", () => {
     expect(resolveConfigSyncHotPrefixes({})).toEqual([
       "plugins.entries.baiying-enhance",
       "agents",
+      "models",
     ]);
   });
 
@@ -17,6 +18,7 @@ describe("plugin reload config", () => {
     ).toEqual([
       "plugins.entries.baiying-enhance",
       "agents",
+      "models",
       "plugins.entries.byai-channel",
       "plugins.entries.minimax",
     ]);

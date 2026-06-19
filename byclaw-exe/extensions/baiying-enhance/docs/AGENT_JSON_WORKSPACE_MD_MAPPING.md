@@ -60,7 +60,7 @@
 | `IDENTITY.md` | 名称与头像路径 |
 | `USER.md` | 建议开场问题 |
 | `TOOLS.md` | `baiying_call` 使用说明与可用资源列表 |
-| `BOOTSTRAP.md` | 托管 no-op 引导文件；明确要求不做 onboarding、不检查修复文件、不因该文件创建/修改/删除任何内容 |
+| `BOOTSTRAP.md` | 不再由插件初始化；冷启动时仅删除历史版本生成的、带 `baiying-enhance` 托管标记的残留文件 |
 
 ---
 

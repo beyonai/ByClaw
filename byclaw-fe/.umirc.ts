@@ -11,7 +11,7 @@ const argvOptions = getArgvOptions();
 loadMonorepoEnvForUmi();
 
 /** 开发代理：在仓库根 .env 或 byclaw-fe/.env 中配置，避免改 .umirc.ts 产生冲突 */
-const target = `http://${process.env.HOST}:${process.env.BE_SERVER_PORT}` || 'http://localhost:8086';
+const target = `http://${process.env.BE_HOST || process.env.HOST || 'localhost'}:${process.env.BE_SERVER_PORT || '8086'}`;
 
 const wsTarget = process.env.BYCLAW_PORTAL_URL_WS?.trim() || 'http://localhost:8082';
 
@@ -69,6 +69,10 @@ export default defineConfig({
     },
     [`${routerBase}byaiService`]: {
       target,
+      changeOrigin: true,
+    },
+    [`/filebrowser`]: {
+      target: 'http://127.0.0.1:8086/byaiService/filebrowser',
       changeOrigin: true,
     },
   },

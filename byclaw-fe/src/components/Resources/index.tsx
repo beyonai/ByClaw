@@ -1,5 +1,5 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { UploadOutlined, SearchOutlined, PlusOutlined } from '@ant-design/icons';
+import { CloudSyncOutlined, UploadOutlined, SearchOutlined, PlusOutlined } from '@ant-design/icons';
 import { useIntl, getLocale, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
 import { Button, Input, Space, Tooltip, message, Tabs } from 'antd';
@@ -23,6 +23,7 @@ import ResourceDetail from './components/ResourceDetail';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
 import DetailPanel from '@/pages/knowledgeCenter/components/DetailPanel';
+import EcosystemCollector from '@/pages/knowledgeCenter/components/EcosystemCollector';
 import { useSkillDetailDrawer } from '@/pages/manager/components/SkillDetailDrawer/useSkillDetailDrawer';
 import ResourceFilter from './components/ResourceFilter';
 import { getDefaultParams } from './components/ResourceFilter';
@@ -51,6 +52,8 @@ interface Props {
   resourceType: string; // 对应资源类型
 }
 
+type EcosystemSourceKey = 'zhihu' | 'github' | 'web' | 'mail' | 'dingtalk';
+
 const Resources: React.FC<Props> = ({ resourceType }) => {
   const intl = useIntl();
 
@@ -70,6 +73,10 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [collectorOpen, setCollectorOpen] = useState(false);
+  const [collectorInitialSource, setCollectorInitialSource] = useState<EcosystemSourceKey>();
+  const [collectorInitialSourceUrl, setCollectorInitialSourceUrl] = useState('');
+  const [collectorInitialScope, setCollectorInitialScope] = useState('');
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [resourceDetailOpen, setResourceDetailOpen] = useState(false);
@@ -86,7 +93,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     if (tabFromUrl === 'enterprise' || tabFromUrl === 'personal') {
       return tabFromUrl;
     }
-    return resourceType === 'VIEW' ? 'enterprise' : 'personal';
+    return 'personal';
   };
 
   const [activeTab, setActiveTab] = useState<'personal' | 'enterprise'>(defaultTab());
@@ -165,6 +172,21 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         });
       });
   }, [resourceType]);
+
+  useEffect(() => {
+    if (resourceType !== 'KG_DOC' || searchParams.get('ecosystem') !== '1') {
+      return;
+    }
+    const source = searchParams.get('source') || undefined;
+    const supportedSources: EcosystemSourceKey[] = ['zhihu', 'github', 'web', 'mail', 'dingtalk'];
+    setCollectorInitialSource(
+      supportedSources.includes(source as EcosystemSourceKey) ? (source as EcosystemSourceKey) : undefined
+    );
+    setCollectorInitialSourceUrl(searchParams.get('sourceUrl') || '');
+    setCollectorInitialScope(searchParams.get('scope') || '');
+    setActiveTab('personal');
+    setCollectorOpen(true);
+  }, [resourceType, searchParams]);
 
   useEffect(() => {
     try {
@@ -319,7 +341,33 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         }}
       />
 
-      {brandVersion !== 'commercial' && resourceType === 'KG_DOC' && (activeTab === 'personal' || isAdmin) && (
+      {resourceType === 'KG_DOC' && (
+        <Tooltip
+          title={
+            activeTab === 'enterprise' && !canImportCurrentEnterpriseResource ? noPermissionDisabledTip : undefined
+          }
+        >
+          <span>
+            <Button
+              icon={<CloudSyncOutlined />}
+              disabled={activeTab === 'enterprise' && !canImportCurrentEnterpriseResource}
+              onClick={() => {
+                if (activeTab === 'enterprise' && !canImportCurrentEnterpriseResource) {
+                  return;
+                }
+                setCollectorInitialSource(undefined);
+                setCollectorInitialSourceUrl('');
+                setCollectorInitialScope('');
+                setCollectorOpen(true);
+              }}
+            >
+              {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.entry' })}
+            </Button>
+          </span>
+        </Tooltip>
+      )}
+
+      {brandVersion === 'openSource' && resourceType === 'KG_DOC' && (activeTab === 'personal' || isAdmin) && (
         <Tooltip title={!knowledgeCapability?.allowKnowledgeBaseCreate ? knowledgeCapabilityDisabledTip : undefined}>
           <span>
             <Button
@@ -340,7 +388,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         </Tooltip>
       )}
 
-      {brandVersion !== 'commercial' && (
+      {brandVersion === 'openSource' && (
         <Tooltip
           title={
             !canImportCurrentEnterpriseResource
@@ -369,14 +417,10 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   );
 
   const items: TabsProps['items'] = [
-    ...(resourceType !== 'VIEW'
-      ? [
-        {
-          key: 'personal',
-          label: `${intl.formatMessage({ id: 'resource.personal' })}${resourceName}`,
-        },
-      ]
-      : []),
+    {
+      key: 'personal',
+      label: `${intl.formatMessage({ id: 'resource.personal' })}${resourceName}`,
+    },
     {
       key: 'enterprise',
       label: `${intl.formatMessage({ id: 'resource.enterprise' })}${resourceName}`,
@@ -466,6 +510,18 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         onSuccess={() => {
           setImportModalOpen(false);
           refreshList();
+        }}
+      />
+      <EcosystemCollector
+        open={collectorOpen}
+        ownerType={activeTab}
+        catalogId={catalogId}
+        catalogList={catalogList}
+        initialSource={collectorInitialSource}
+        initialSourceUrl={collectorInitialSourceUrl}
+        initialScope={collectorInitialScope}
+        onCancel={() => {
+          setCollectorOpen(false);
         }}
       />
       <ResourceEdit

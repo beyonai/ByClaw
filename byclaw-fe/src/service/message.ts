@@ -66,3 +66,30 @@ export const getMessageByIds = (payload: any) =>
   POST<any>('/byaiService/assiman/getMessageByIds', {
     ...payload,
   });
+
+export const getSandboxInfo = (payload: any) =>
+  POST<any>('/byaiService/sandbox/getSandboxInfo', {
+    ...payload,
+  });
+
+export const updateMessageStructById = (payload: any) =>
+  POST<any>('/byaiService/chat/updateMessageStructById', {
+    ...payload,
+  });
+
+export const getTermsOptions = (payload: {
+  termSet: string;
+  termTypeCode: string;
+  termField: string;
+  datasetId: number;
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+}) =>
+  POST<any>('/byaiService/chat/getTermsOptions', {
+    ...payload,
+    page: payload.page || 1,
+    pageSize: payload.pageSize || 20,
+    keyword: payload.keyword || '',
+    datasetId: payload.datasetId || 0,
+  });
