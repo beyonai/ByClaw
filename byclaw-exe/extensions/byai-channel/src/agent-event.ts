@@ -20,6 +20,7 @@ import {
   cancelActiveSdkCompletionCheck,
   scheduleActiveSdkCompletionCheck,
 } from "./sdk-session-completion.js";
+import { isOpenClawContextOverflowDispatchError } from "./dispatch-error.js";
 import {
   resolveAssistantDisplayStream,
   resolveAssistantEventKind,
@@ -345,10 +346,14 @@ async function handleLifecycleEvent(
       eventType: EventType.ANSWER_DELTA,
     });
   }
+  const completionReason =
+    phase === "error" && isOpenClawContextOverflowDispatchError(data?.error)
+      ? "root_lifecycle_context_overflow_error"
+      : `root_lifecycle_${phase}`;
   scheduleActiveSdkCompletionCheck(
     api,
     activeRequest.sessionKey,
-    `root_lifecycle_${phase}`,
+    completionReason,
   );
 }
 

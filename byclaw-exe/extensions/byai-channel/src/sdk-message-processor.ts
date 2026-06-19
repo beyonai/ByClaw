@@ -35,6 +35,10 @@ import { waitForManagedBaiyingAgentConfig } from "./managed-agent-config-wait.js
 import { EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import { getAgentNameById } from "./utils.js";
 import { buildAgentReadyTitle } from "./i18n.js";
+import {
+  formatDispatchError,
+  isOpenClawContextOverflowDispatchError,
+} from "./dispatch-error.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 
@@ -392,6 +396,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     ...inboundMediaPayload,
   };
 
+  let deferDispatchSettleToAgentEvents = false;
   try {
     const { dispatcher, replyOptions } = rt.channel.reply.createReplyDispatcherWithTyping({
       deliver: () => {},
@@ -431,15 +436,29 @@ async function deliverReplyToAgentViaSdkUnderGate(
       `[diagnose-sdk] dispatch finished, queuedFinal=${String(dispatchResult.queuedFinal)}, counts=${JSON.stringify(dispatchResult.counts)}`,
     );
   } catch (err) {
-    log?.error?.(`[diagnose-sdk] Message dispatch failed: ${String(err)}`);
-    clearActiveSdkRequestByTarget(accountId, To);
-    throw err;
+    const errorText = formatDispatchError(err);
+    if (isOpenClawContextOverflowDispatchError(err)) {
+      deferDispatchSettleToAgentEvents = true;
+      log?.warn?.(
+        `[diagnose-sdk] Message dispatch reported context overflow; keeping SDK stream open for OpenClaw recovery: ${errorText}`,
+      );
+    } else {
+      log?.error?.(`[diagnose-sdk] Message dispatch failed: ${errorText}`);
+      clearActiveSdkRequestByTarget(accountId, To);
+      throw err;
+    }
   } finally {
-    const settle = await waitForSdkSessionDispatchSettled(sessionKey, {
-      abortSignal: deps.abortController?.signal,
-    });
-    log?.info?.(
-      `[diagnose-sdk] session dispatch settled: sessionKey=${sessionKey}, settled=${String(settle.settled)}, timedOut=${String(settle.timedOut)}, waitMs=${settle.waitMs}, rootLifecyclePhase=${settle.rootLifecyclePhase ?? "none"}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
-    );
+    if (deferDispatchSettleToAgentEvents) {
+      log?.info?.(
+        `[diagnose-sdk] session dispatch settle deferred to OpenClaw recovery events: sessionKey=${sessionKey}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
+      );
+    } else {
+      const settle = await waitForSdkSessionDispatchSettled(sessionKey, {
+        abortSignal: deps.abortController?.signal,
+      });
+      log?.info?.(
+        `[diagnose-sdk] session dispatch settled: sessionKey=${sessionKey}, settled=${String(settle.settled)}, timedOut=${String(settle.timedOut)}, waitMs=${settle.waitMs}, rootLifecyclePhase=${settle.rootLifecyclePhase ?? "none"}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
+      );
+    }
   }
 }
