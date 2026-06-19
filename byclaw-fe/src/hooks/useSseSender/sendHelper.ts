@@ -12,22 +12,17 @@ import { getMsgId } from '@/utils/messgae';
 export const ERROR_STATUS = {
   NOAUTH: '_NO_AUTH_',
   SSEERROR: '_SSE_ERROR_',
-  TIMEOUT: '_TIMEOUT_',
 };
 
-const REQ_TIMEOUT = 1200000; // 二十分钟
 export default class SendHelper {
   sendingMap = new Map<
     string,
     {
       abortController: AbortController;
-      timer: NodeJS.Timeout;
     }
   >();
 
   // abortController: AbortController | undefined = undefined;
-
-  timer: NodeJS.Timeout | undefined = undefined;
 
   /** 默认请求地址 */
   url: string = '/byaiService/chat/superAgentChat';
@@ -41,7 +36,7 @@ export default class SendHelper {
   clearAbortController(key: string) {
     console.log('clearAbortController----');
     if (!this.sendingMap.has(key)) return;
-    const { abortController, timer } = this.sendingMap.get(key)!;
+    const { abortController } = this.sendingMap.get(key)!;
     if (abortController && abortController.abort) {
       try {
         abortController.abort();
@@ -49,10 +44,6 @@ export default class SendHelper {
       } catch (e) {
         console.error(e);
       }
-    }
-
-    if (timer) {
-      clearTimeout(timer);
     }
   }
 
@@ -70,12 +61,7 @@ export default class SendHelper {
     const { signal } = abortController;
     const { callback } = params;
     const promise = new Promise<Record<string, unknown>>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(ERROR_STATUS.TIMEOUT);
-        this.clearAbortController(key);
-      }, REQ_TIMEOUT);
-
-      this.sendingMap.set(key, { abortController, timer });
+      this.sendingMap.set(key, { abortController });
 
       const headers = {
         'Content-Type': 'application/json',
@@ -119,9 +105,6 @@ export default class SendHelper {
           console.log('onclose');
         },
         onmessage: (msg: { data: string; event: string; id: string }) => {
-          if (this.timer) {
-            clearTimeout(this.timer);
-          }
           console.log(' *** msg:', msg, '***');
           const eventName = msg.event;
 

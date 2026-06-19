@@ -35,14 +35,41 @@ type NativeAgentJson = {
     allowSpawnFrom?: string[];
 };
 
+export type AimodelProviderApi = "openai-completions" | "openai-responses" | "anthropic-messages";
+export type AimodelModelInput = "text" | "image";
+export type AimodelThinkingLevel =
+    | "off"
+    | "minimal"
+    | "low"
+    | "medium"
+    | "high"
+    | "xhigh"
+    | "adaptive"
+    | "max";
+export type AimodelThinkingLevelMap = Partial<Record<AimodelThinkingLevel, string | null>>;
+export type AimodelThinkingBudgets = Partial<
+    Record<Exclude<AimodelThinkingLevel, "off" | "xhigh" | "adaptive">, number>
+>;
+
+export type AimodelModelCompat = {
+    thinkingFormat?: string;
+    supportedReasoningEfforts?: string[];
+    reasoningEffortMap?: Record<string, string>;
+};
+
 export type ProviderBundle = {
     baseUrl: string;
     apiKey: unknown;
-    api: "openai-completions";
+    api: AimodelProviderApi;
     modelId: string;
     modelName?: string;
     contextWindow?: number;
     maxTokens?: number;
+    input?: AimodelModelInput[];
+    reasoning?: boolean;
+    thinkingLevelMap?: AimodelThinkingLevelMap;
+    thinkingBudgets?: AimodelThinkingBudgets;
+    compat?: AimodelModelCompat;
 };
 
 export type AdaptedManagedAgent = {
@@ -73,6 +100,12 @@ export type AdaptedManagedAgent = {
     associatedResources?: BaiyingAssociatedResource[];
     /** Core competencies from Baiying detail. */
     coreCompetencies?: BaiyingCoreCompetency[];
+};
+
+const MANAGED_AGENT_EXPERIMENTAL: NonNullable<AgentListEntry["experimental"]> = {
+    // Baiying employees need the baiying_call plugin tool directly visible.
+    // Global lean mode compacts plugin tools behind exec/wait, which breaks that contract.
+    localModelLean: false,
 };
 
 function slugifyBase(name: string): string {
@@ -258,6 +291,7 @@ function adaptRawBaiyingDetail(params: {
         id: agentId,
         name,
         identity: { name },
+        experimental: MANAGED_AGENT_EXPERIMENTAL,
         skills: listSkills,
         tools: listTools,
     };
@@ -334,6 +368,7 @@ export function adaptAgentJson(params: {
             id: agentId,
             name,
             identity: { name },
+            experimental: MANAGED_AGENT_EXPERIMENTAL,
             skills: normalizeAgentListSkills(asRecord),
         };
 
@@ -376,6 +411,7 @@ export function adaptAgentJson(params: {
                     ? native.name.trim()
                     : agentId,
         },
+        experimental: MANAGED_AGENT_EXPERIMENTAL,
         skills: normalizeAgentListSkills(asRecord),
     };
 

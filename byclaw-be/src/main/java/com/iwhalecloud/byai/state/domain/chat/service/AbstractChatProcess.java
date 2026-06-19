@@ -41,7 +41,7 @@ public abstract class AbstractChatProcess {
             // 使用gateway sdk模式
             handleGatewayMode(context);
 
-            if (context.sendByFrameworkMsgOnly) {
+            if (context.asyncResponse || context.sendByFrameworkMsgOnly) {
                 return;
             }
 

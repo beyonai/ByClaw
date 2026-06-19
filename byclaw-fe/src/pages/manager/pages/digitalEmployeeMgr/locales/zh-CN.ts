@@ -73,6 +73,11 @@ export default {
   'refineModal.abilityNamePlaceholder': '能力{index}名称',
   'refineModal.abilityDescPlaceholder': '请输入能力描述',
   'refineModal.workStandard': '工作规范',
+  'refineModal.step.basic': '基础信息',
+  'refineModal.step.persona': '角色与人设',
+  'refineModal.step.workflow': '工作规范',
+  'refineModal.step.style': '沟通风格',
+  'refineModal.progress': '已完成 {done} / {total} 项',
 
   // 员工详情
   'employeeDetail.refine': '一键完善',
@@ -98,7 +103,7 @@ export default {
   'employeeDetail.configureKnowledge': '配置知识',
   'employeeDetail.qaKnowledge': '问答对知识库',
   'employeeDetail.documentKnowledge': '文档知识库',
-  'employeeDetail.tagSearchPlaceholder': '搜索或新增标签,按回车完成',
+  'employeeDetail.tagSearchPlaceholder': '新增标签,按回车完成',
   'employeeDetail.skillType.agent': '智能体',
   'employeeDetail.skillType.toolkit': '工具集',
   'employeeDetail.skillType.tool': '工具',

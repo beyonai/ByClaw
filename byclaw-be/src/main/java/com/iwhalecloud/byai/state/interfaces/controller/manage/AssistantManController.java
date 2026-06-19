@@ -270,9 +270,9 @@ public class AssistantManController {
         @ApiResponse(responseCode = "0", description = "查询成功"),
         @ApiResponse(responseCode = "500", description = "服务器内部错误")
     })
-    public ResponseUtil getContentFeedbackType() {
+    public ResponseUtil getContentFeedbackType(@RequestParam(name = "language", required = false) String language) {
 
-        return ResponseUtil.successResponse(messageService.getContentFeedbackType());
+        return ResponseUtil.successResponse(messageService.getContentFeedbackType(language));
     }
 
     /**

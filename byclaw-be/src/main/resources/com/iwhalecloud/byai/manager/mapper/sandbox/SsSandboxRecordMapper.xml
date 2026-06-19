@@ -7,6 +7,10 @@
         <result column="resource_id" jdbcType="BIGINT" property="resourceId" />
         <result column="user_code" jdbcType="VARCHAR" property="userCode" />
         <result column="sandbox_type" jdbcType="VARCHAR" property="sandboxType" />
+        <result column="service_type" jdbcType="VARCHAR" property="serviceType" />
+        <result column="profile_key" jdbcType="VARCHAR" property="profileKey" />
+        <result column="resource_requests" jdbcType="VARCHAR" property="resourceRequests" />
+        <result column="resource_limits" jdbcType="VARCHAR" property="resourceLimits" />
         <result column="endpoint" jdbcType="VARCHAR" property="endpoint" />
         <result column="sandbox_id" jdbcType="VARCHAR" property="sandboxId" />
         <result column="gateway_token" jdbcType="VARCHAR" property="gatewayToken" />
@@ -21,6 +25,14 @@
         <result column="last_access_time" jdbcType="TIMESTAMP" property="lastAccessTime" />
         <result column="release_time" jdbcType="TIMESTAMP" property="releaseTime" />
         <result column="release_reason" jdbcType="VARCHAR" property="releaseReason" />
+        <result column="resize_status" jdbcType="VARCHAR" property="resizeStatus" />
+        <result column="last_resize_at" jdbcType="TIMESTAMP" property="lastResizeAt" />
+        <result column="last_resize_reason" jdbcType="VARCHAR" property="lastResizeReason" />
+        <result column="last_resize_duration_ms" jdbcType="BIGINT" property="lastResizeDurationMs" />
+        <result column="last_resize_success" jdbcType="INTEGER" property="lastResizeSuccess" />
+        <result column="last_resize_from_profile" jdbcType="VARCHAR" property="lastResizeFromProfile" />
+        <result column="last_resize_to_profile" jdbcType="VARCHAR" property="lastResizeToProfile" />
+        <result column="last_resize_error" jdbcType="VARCHAR" property="lastResizeError" />
         <result column="version" jdbcType="INTEGER" property="version" />
         <result column="lock_version" jdbcType="INTEGER" property="lockVersion" />
         <result column="create_time" jdbcType="TIMESTAMP" property="createTime" />
@@ -28,9 +40,12 @@
     </resultMap>
 
     <sql id="Base_Column_List">
-        id, resource_id, user_code, sandbox_type, endpoint, sandbox_id, gateway_token, chat_id,
+        id, resource_id, user_code, sandbox_type, service_type, profile_key, resource_requests, resource_limits,
+        endpoint, sandbox_id, gateway_token, chat_id,
         status, auto_release, lease_policy, timeout_seconds, remote_expires_at,
         last_renew_at, next_renew_at, last_access_time, release_time, release_reason,
+        resize_status, last_resize_at, last_resize_reason, last_resize_duration_ms, last_resize_success,
+        last_resize_from_profile, last_resize_to_profile, last_resize_error,
         version, lock_version, create_time, update_time
     </sql>
 
@@ -38,14 +53,21 @@
     <insert id="insert" parameterType="com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord"
             useGeneratedKeys="true" keyProperty="id" keyColumn="id">
         INSERT INTO ss_sandbox_record (
-            resource_id, user_code, sandbox_type, endpoint, sandbox_id, gateway_token, chat_id,
+            resource_id, user_code, sandbox_type, service_type, profile_key, resource_requests, resource_limits,
+            endpoint, sandbox_id, gateway_token, chat_id,
             status, auto_release, lease_policy, timeout_seconds, remote_expires_at,
             last_renew_at, next_renew_at, last_access_time, release_time, release_reason,
+            resize_status, last_resize_at, last_resize_reason, last_resize_duration_ms, last_resize_success,
+            last_resize_from_profile, last_resize_to_profile, last_resize_error,
             version, lock_version, create_time, update_time
         ) VALUES (
             #{resourceId,jdbcType=BIGINT},
             #{userCode,jdbcType=VARCHAR},
             #{sandboxType,jdbcType=VARCHAR},
+            #{serviceType,jdbcType=VARCHAR},
+            #{profileKey,jdbcType=VARCHAR},
+            #{resourceRequests,jdbcType=VARCHAR}::jsonb,
+            #{resourceLimits,jdbcType=VARCHAR}::jsonb,
             #{endpoint,jdbcType=VARCHAR},
             #{sandboxId,jdbcType=VARCHAR},
             #{gatewayToken,jdbcType=VARCHAR},
@@ -60,6 +82,14 @@
             #{lastAccessTime,jdbcType=TIMESTAMP},
             #{releaseTime,jdbcType=TIMESTAMP},
             #{releaseReason,jdbcType=VARCHAR},
+            #{resizeStatus,jdbcType=VARCHAR},
+            #{lastResizeAt,jdbcType=TIMESTAMP},
+            #{lastResizeReason,jdbcType=VARCHAR},
+            #{lastResizeDurationMs,jdbcType=BIGINT},
+            #{lastResizeSuccess,jdbcType=INTEGER},
+            #{lastResizeFromProfile,jdbcType=VARCHAR},
+            #{lastResizeToProfile,jdbcType=VARCHAR},
+            #{lastResizeError,jdbcType=VARCHAR},
             COALESCE(#{version,jdbcType=INTEGER}, 0),
             COALESCE(#{lockVersion,jdbcType=INTEGER}, 0),
             #{createTime,jdbcType=TIMESTAMP},
@@ -125,6 +155,15 @@
         ORDER BY create_time DESC
     </select>
 
+    <select id="selectRunningByUserAndSandboxType" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE user_code = #{userCode,jdbcType=VARCHAR}
+          AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
+          AND status = 'RUNNING'
+        ORDER BY create_time DESC
+    </select>
+
     <!-- 更新沙箱状态为已释放 -->
     <update id="updateStatusToReleased">
         UPDATE ss_sandbox_record
@@ -181,6 +220,50 @@
             lock_version = lock_version + 1
         WHERE id = #{id,jdbcType=BIGINT}
           AND status = 'STARTING'
+          AND lock_version = #{lockVersion,jdbcType=INTEGER}
+    </update>
+
+    <update id="updateResizeSuccess">
+        UPDATE ss_sandbox_record
+        <set>
+            sandbox_id = COALESCE(#{sandboxId,jdbcType=VARCHAR}, sandbox_id),
+            endpoint = COALESCE(#{endpoint,jdbcType=VARCHAR}, endpoint),
+            gateway_token = COALESCE(#{gatewayToken,jdbcType=VARCHAR}, gateway_token),
+            profile_key = #{profileKey,jdbcType=VARCHAR},
+            resource_requests = #{resourceRequests,jdbcType=VARCHAR}::jsonb,
+            resource_limits = #{resourceLimits,jdbcType=VARCHAR}::jsonb,
+            resize_status = #{resizeStatus,jdbcType=VARCHAR},
+            last_resize_at = #{lastResizeAt,jdbcType=TIMESTAMP},
+            last_resize_reason = #{lastResizeReason,jdbcType=VARCHAR},
+            last_resize_duration_ms = #{lastResizeDurationMs,jdbcType=BIGINT},
+            last_resize_success = #{lastResizeSuccess,jdbcType=INTEGER},
+            last_resize_from_profile = #{lastResizeFromProfile,jdbcType=VARCHAR},
+            last_resize_to_profile = #{lastResizeToProfile,jdbcType=VARCHAR},
+            last_resize_error = #{lastResizeError,jdbcType=VARCHAR},
+            update_time = #{lastResizeAt,jdbcType=TIMESTAMP},
+            version = version + 1,
+            lock_version = lock_version + 1
+        </set>
+        WHERE id = #{id,jdbcType=BIGINT}
+          AND status = 'RUNNING'
+          AND lock_version = #{lockVersion,jdbcType=INTEGER}
+    </update>
+
+    <update id="updateResizeSummary">
+        UPDATE ss_sandbox_record
+        SET resize_status = #{resizeStatus,jdbcType=VARCHAR},
+            last_resize_at = #{lastResizeAt,jdbcType=TIMESTAMP},
+            last_resize_reason = #{lastResizeReason,jdbcType=VARCHAR},
+            last_resize_duration_ms = #{lastResizeDurationMs,jdbcType=BIGINT},
+            last_resize_success = #{lastResizeSuccess,jdbcType=INTEGER},
+            last_resize_from_profile = #{lastResizeFromProfile,jdbcType=VARCHAR},
+            last_resize_to_profile = #{lastResizeToProfile,jdbcType=VARCHAR},
+            last_resize_error = #{lastResizeError,jdbcType=VARCHAR},
+            update_time = #{lastResizeAt,jdbcType=TIMESTAMP},
+            version = version + 1,
+            lock_version = lock_version + 1
+        WHERE id = #{id,jdbcType=BIGINT}
+          AND status = 'RUNNING'
           AND lock_version = #{lockVersion,jdbcType=INTEGER}
     </update>
 
@@ -273,7 +356,7 @@
     <select id="countReconcileSandboxes" resultType="int">
         SELECT COUNT(*)
         FROM ss_sandbox_record
-        WHERE status != 'RELEASED'
+        WHERE status IN ('STARTING', 'RUNNING', 'RELEASING')
           AND sandbox_id IS NOT NULL
     </select>
 
@@ -281,6 +364,35 @@
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
         WHERE status != 'RELEASED'
+          AND sandbox_id IS NOT NULL
+        <if test="cursorTime != null and cursorId != null">
+          <![CDATA[
+          AND (update_time > #{cursorTime,jdbcType=TIMESTAMP}
+               OR (update_time = #{cursorTime,jdbcType=TIMESTAMP} AND id > #{cursorId,jdbcType=BIGINT}))
+          ]]>
+        </if>
+        ORDER BY update_time ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectReconcileGroups" resultType="com.iwhalecloud.byai.manager.entity.sandbox.SandboxReconcileGroup">
+        SELECT user_code AS "userCode",
+               sandbox_type AS "sandboxType",
+               COUNT(*) AS "recordCount"
+        FROM ss_sandbox_record
+        WHERE status IN ('STARTING', 'RUNNING', 'RELEASING')
+          AND sandbox_id IS NOT NULL
+        GROUP BY user_code, sandbox_type
+        ORDER BY MIN(update_time) ASC, user_code ASC, sandbox_type ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectReconcileSandboxesByGroup" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE user_code = #{userCode,jdbcType=VARCHAR}
+          AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
+          AND status IN ('STARTING', 'RUNNING', 'RELEASING')
           AND sandbox_id IS NOT NULL
         <if test="cursorTime != null and cursorId != null">
           <![CDATA[
@@ -398,6 +510,14 @@
         WHERE user_code = #{userCode,jdbcType=VARCHAR}
           AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
           AND sandbox_id = #{sandboxId,jdbcType=VARCHAR}
+        ORDER BY create_time DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectLatestBySandboxIdAnyUser" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_record
+        WHERE sandbox_id = #{sandboxId,jdbcType=VARCHAR}
         ORDER BY create_time DESC
         LIMIT 1
     </select>

@@ -193,5 +193,4 @@ public class OpenApiResourceController {
     public void downloadFromWorkSpace(HttpServletResponse response, @RequestParam("fileId") Long fileId) {
         filesApplicationService.download(response, fileId);
     }
-
 }

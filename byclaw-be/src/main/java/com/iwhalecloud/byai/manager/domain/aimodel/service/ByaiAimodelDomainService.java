@@ -2,7 +2,9 @@ package com.iwhalecloud.byai.manager.domain.aimodel.service;
 
 import com.alibaba.fastjson.JSONObject;
 import com.github.pagehelper.PageHelper;
+import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelStatusEnum;
+import com.iwhalecloud.byai.manager.domain.tag.service.ByaiTagRelationService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelListRequest;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelRequest;
@@ -18,6 +20,7 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.feign.response.knowledge.ModelDto;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,11 +39,16 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class ByaiAimodelDomainService {
 
+    private static final Long DEFAULT_MODEL_TAG_ID = 1L;
+
     @Autowired
     private ByaiAimodelMapper byaiAimodelMapper;
 
     @Autowired
     private SequenceService SequenceService;
+
+    @Autowired
+    private ByaiTagRelationService byaiTagRelationService;
 
     /**
      * 按条件分页查询（使用 PageHelper 实现分页，与项目现有分页方式一致）
@@ -205,7 +213,8 @@ public class ByaiAimodelDomainService {
             if (!typeMap.isEmpty()) {
                 Map<String, String> entries = new HashMap<>(typeMap.size());
                 for (Map.Entry<String, List<ModelDto>> entry : typeMap.entrySet()) {
-                    entries.put(entry.getKey(), JsonUtil.toJSONString(entry.getValue()));
+                    List<ModelDto> models = normalizeDefaultOrder(entry.getValue());
+                    entries.put(entry.getKey(), JsonUtil.toJSONString(models));
                 }
                 RedisUtil.hmPutAll(RedisConfig.AI_MODEL_TYPE_KEY, entries);
             }
@@ -225,7 +234,7 @@ public class ByaiAimodelDomainService {
         dto.setModelCode(entity.getModelNo());
         dto.setModelName(entity.getModelName());
         dto.setModelType(entity.getModelType());
-        dto.setIsDefault(entity.getIsDefault() != null ? entity.getIsDefault() : 0);
+        dto.setIsDefault(resolveDefaultFlag(entity));
         dto.setMaxContentToken(entity.getMaxContentToken() != null ? String.valueOf(entity.getMaxContentToken()) : null);
         dto.setStatus("OOA".equals(entity.getStatus()) ? 1 : 0);
         if (StringUtil.isNotEmpty(entity.getInParams())) {
@@ -238,6 +247,41 @@ public class ByaiAimodelDomainService {
             }
         }
         return dto;
+    }
+
+    private Integer resolveDefaultFlag(ByaiAimodel entity) {
+        if (entity.getIsDefault() != null) {
+            return entity.getIsDefault();
+        }
+        if (entity.getModelId() == null) {
+            return 0;
+        }
+        return byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL, DEFAULT_MODEL_TAG_ID)
+            .stream()
+            .anyMatch(rel -> entity.getModelId().equals(rel.getObjId())) ? 1 : 0;
+    }
+
+    private List<ModelDto> normalizeDefaultOrder(List<ModelDto> models) {
+        if (models == null || models.isEmpty()) {
+            return List.of();
+        }
+        ModelDto selectedDefault = null;
+        for (ModelDto dto : models) {
+            if (selectedDefault == null && dto != null && Integer.valueOf(1).equals(dto.getIsDefault())) {
+                selectedDefault = dto;
+            }
+        }
+        if (selectedDefault != null) {
+            for (ModelDto dto : models) {
+                if (dto != null) {
+                    dto.setIsDefault(dto == selectedDefault ? 1 : 0);
+                }
+            }
+        }
+        models.sort(Comparator
+            .comparing((ModelDto dto) -> !Integer.valueOf(1).equals(dto.getIsDefault()))
+            .thenComparing(dto -> dto.getInstanceId() == null ? "" : dto.getInstanceId()));
+        return models;
     }
 
     /**

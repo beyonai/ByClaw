@@ -1,6 +1,6 @@
 package com.iwhalecloud.byai.state.application.service.session;
 
-import com.iwhalecloud.byai.common.storage.impl.MinioStorageService;
+import com.iwhalecloud.byai.common.storage.ObjectStorage;
 import com.iwhalecloud.byai.common.storage.model.StorageObject;
 import com.iwhalecloud.byai.common.storage.model.StoragePrefix;
 import com.iwhalecloud.byai.common.storage.util.UserBucketNameResolver;
@@ -34,8 +34,9 @@ import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawFileDto;
 
 /**
- * 用户 byclaw 文件查询应用服务。 职责说明： 1. 负责在指定用户上下文中查询 UserFS； 2. 负责控制“查询会话文件”的业务语义； 3. 负责将 UserFS 路径整理为前端可直接消费的文件列表结构。 * @author
- * qin.guoquan * @date 2026-04-18 19:38:18
+ * 用户 byclaw 文件查询应用服务。 职责说明： 1. 负责在指定用户上下文中查询 UserFS； 2. 负责控制“查询会话文件”的业务语义； 3. 负责将 UserFS 路径整理为前端可直接消费的文件列表结构。
+ * @author qin.guoquan
+ * @date 2026-04-18 19:38:18
  */
 @Service
 public class ByClawFileQueryApplicationService {
@@ -46,7 +47,7 @@ public class ByClawFileQueryApplicationService {
     private UserFS userFS;
 
     @Autowired
-    private MinioStorageService minioStorageService;
+    private ObjectStorage objectStorage;
 
     private static final String SESSION_ROOT_PREFIX = ConversationStoragePathResolver.SESSION_OBJECT_PREFIX + "/";
 
@@ -177,7 +178,7 @@ public class ByClawFileQueryApplicationService {
 
         StoragePrefix storagePrefix = StoragePrefix.of("workspace", bucketOrRoot, prefix, "private", false);
 
-        List<StorageObject> objects = minioStorageService.list(storagePrefix, null);
+        List<StorageObject> objects = objectStorage.list(storagePrefix, null);
 
         List<UserSpaceVo> resultList = new ArrayList<>();
         for (StorageObject storageObject : objects) {

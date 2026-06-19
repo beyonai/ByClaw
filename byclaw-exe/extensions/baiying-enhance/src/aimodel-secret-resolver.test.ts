@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import { resolveAimodelSecretRequest } from "./aimodel-secret-resolver.js";
 import type { BaiyingRedisJsonStore, RedisJsonPayload } from "./redis-json-store.js";
 
-function payload(raw: Record<string, unknown>): RedisJsonPayload {
+function payload(raw: unknown, key = "byai:aimodel:config:-2000"): RedisJsonPayload {
     const content = JSON.stringify(raw);
     return {
-        key: "byai:aimodel:config:-2000",
+        key,
         content,
         raw,
         hash: createHash("sha256").update(content, "utf8").digest("hex"),
@@ -63,6 +63,39 @@ describe("AI model exec SecretRef resolver", () => {
                 "model:-2000": {
                     message: "AI model config missing or invalid for id model:-2000",
                 },
+            },
+        });
+    });
+
+    it("falls back to the LLM typelist when the config hash misses the model", async () => {
+        const response = await resolveAimodelSecretRequest({
+            request: JSON.stringify({ protocolVersion: 1, ids: ["model:10004014"] }),
+            redisJsonStore: store(
+                new Map([
+                    [
+                        "byai:aimodel:typelist:LLM",
+                        payload(
+                            [
+                                {
+                                    authToken: "default-secret-token",
+                                    instanceId: "10004014",
+                                    modelCode: "deepseek-v4-flash",
+                                    modelType: "LLM",
+                                    status: 1,
+                                    url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                                },
+                            ],
+                            "byai:aimodel:typelist:LLM",
+                        ),
+                    ],
+                ]),
+            ),
+        });
+
+        expect(response).toEqual({
+            protocolVersion: 1,
+            values: {
+                "model:10004014": "default-secret-token",
             },
         });
     });

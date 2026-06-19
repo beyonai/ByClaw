@@ -233,7 +233,7 @@ public class AuthApplicationService {
 
         long endTime = System.currentTimeMillis();
 
-        logger.info("AuthApplicationService buildUserAuthResources cost time:" + (endTime - startTime));
+        logger.debug("AuthApplicationService buildUserAuthResources cost time:{}", endTime - startTime);
 
         return result;
     }
@@ -323,7 +323,7 @@ public class AuthApplicationService {
         try {
             Map<String, String> resourceAuthMap = buildUserAuthResources(userId);
             authRedisApplicationService.writeUserAuth(userId, resourceAuthMap);
-            logger.info("同步用户{}权限到Redis完成，资源数量：{}", userId, resourceAuthMap.size());
+            logger.debug("同步用户{}权限到Redis完成，资源数量：{}", userId, resourceAuthMap.size());
         }
         catch (Exception e) {
             logger.error("同步用户{}权限到Redis失败：{}", userId, e.getMessage());
@@ -391,7 +391,7 @@ public class AuthApplicationService {
     public void setResourceUsers(ResourceMemberSettingQo qo) {
         // 1. 校验资源存在并拿到真实资源类型。
         SsResource ssResource = getRequiredResource(qo.getResourceId());
-        validateDefaultSuperAssistantUseAuthAllowed(ssResource);
+        // validateDefaultSuperAssistantUseAuthAllowed(ssResource); // 注释掉：_main 结尾的特殊逻辑已移除
 
         // 2. 使用人员设置允许当前用户维护自己绑定的默认个人资源。
         validateResourceUseSettingPermission(ssResource);
@@ -744,12 +744,15 @@ public class AuthApplicationService {
      * @date 2026-05-09 150800
      * @param ssResource 资源
      */
+    // 注释掉：_main 结尾的特殊逻辑已移除，此方法不再使用
+    /*
     private void validateDefaultSuperAssistantUseAuthAllowed(SsResource ssResource) {
         if (!isDefaultSuperAssistantResource(ssResource)) {
             return;
         }
         throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
     }
+    */
 
     /**
      * 判断当前用户是否具备资源成员设置权限。
@@ -788,6 +791,40 @@ public class AuthApplicationService {
             return false;
         }
         return hasResourceMemberSettingPermission(ssResource);
+    }
+
+    /**
+     * 判断当前登录用户是否具备指定资源的使用权限。
+     * 管理权限不在这里隐式算作使用权限，调用方如果允许“管理或使用”访问，请使用
+     * {@link #hasResourceAccessPermission(SsResource)}。
+     */
+    public boolean hasResourceUsePermission(SsResource ssResource) {
+        if (ssResource == null || ssResource.getResourceId() == null
+            || StringUtils.isBlank(ssResource.getResourceBizType())
+            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum())) {
+            return false;
+        }
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (currentUserId == null) {
+            return false;
+        }
+        if (currentUserId.equals(ssResource.getCreateBy()) || isCurrentUserBoundDefaultPersonalResource(ssResource)) {
+            return true;
+        }
+
+        List<Long> resourceIds = List.of(ssResource.getResourceId());
+        List<String> resourceBizTypes = List.of(ssResource.getResourceBizType());
+        if (queryCurrentUserUseBlacklistedResourceIds(resourceIds, resourceBizTypes).contains(ssResource.getResourceId())) {
+            return false;
+        }
+        return queryCurrentUserUsePermittedResourceIds(resourceIds, resourceBizTypes).contains(ssResource.getResourceId());
+    }
+
+    /**
+     * 判断当前登录用户是否可访问资源详情：管理权限或使用权限任一满足即可。
+     */
+    public boolean hasResourceAccessPermission(SsResource ssResource) {
+        return hasResourceManagePermission(ssResource) || hasResourceUsePermission(ssResource);
     }
 
     /**
@@ -1081,7 +1118,7 @@ public class AuthApplicationService {
                     logger.error("同步用户{}权限到Redis失败：{}", userId, e.getMessage());
                 }
             }
-            logger.info("批量同步用户权限到Redis进度：{}/{}", Math.min(i + batchSize, total), total);
+            logger.debug("批量同步用户权限到Redis进度：{}/{}", Math.min(i + batchSize, total), total);
         }
 
         logger.info("批量同步用户权限到Redis完成，总数：{}，成功：{}，失败：{}", total, successCount, failCount);
@@ -1461,7 +1498,7 @@ public class AuthApplicationService {
 
         }
 
-        logger.info("当前权限对比结果：{}", JSON.toJSONString(compareVo));
+        logger.debug("当前权限对比结果：{}", JSON.toJSONString(compareVo));
 
         // 处理红名单
         this.handleAdd(grantType, compareVo.getRedAddMap());
@@ -1900,7 +1937,7 @@ public class AuthApplicationService {
             String key = entry.getKey();
 
             // 当前权限信息key=DATASET:AUTHORITY:1_RED_READ_PERSON_1000901|AGENT_418202897625
-            logger.info("当前权限信息grantType={},key={}", grantType, key);
+            logger.debug("当前权限信息grantType={},key={}", grantType, key);
 
             PrivilegeGrant privilegeGrant = entry.getValue();
 
@@ -2617,6 +2654,10 @@ public class AuthApplicationService {
 
         boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum());
         boolean canManage = hasResourceManagePermission(ssResource);
+        boolean hasUsePermission = hasResourceUsePermission(ssResource);
+        vo.setHasManagePermission(canManage);
+        vo.setHasUsePermission(hasUsePermission);
+        vo.setCanViewDetail(!isResourceRemoved && (canManage || hasUsePermission));
 
         // 如果资源已注销，只允许恢复操作，其他操作全部禁用
         if (isResourceRemoved) {
@@ -2634,7 +2675,7 @@ public class AuthApplicationService {
         // 资源未注销时的原有逻辑
         boolean canSetUse = hasResourceUseSettingPermission(ssResource);
         boolean isDefaultResource = isDefaultPersonalResource(ssResource);
-        boolean isDefaultSuperAssistantResource = isDefaultSuperAssistantResource(ssResource);
+        boolean isDefaultSuperAssistantResource = isDefaultSuperAssistantResource(ssResource); // _main 结尾的资源，禁止删除
         boolean isBoundDefaultDigEmployee = isCurrentUserBoundDefaultDigitalEmployeeResource(ssResource);
         boolean isDigitalEmployee = ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(ssResource.getResourceBizType());
         // 个人助理类资源只作为个人空间资源使用，不开放管理授权、使用申请与使用申请审核入口。
@@ -2647,15 +2688,15 @@ public class AuthApplicationService {
             ? (canManage || isBoundDefaultDigEmployee)
             : (canManage && !isDefaultResource);
         // 默认超级助手是登录初始化的个人底座资源，即使当前用户绑定为默认助理，也不开放编辑入口。
-        vo.setCanEdit(canEdit && !isDefaultSuperAssistantResource && !isWhaleAgentExternalKnowledgeOrToolResource);
-        vo.setCanManageAuth(canManage && !isDefaultResource && !isDefaultSuperAssistantResource
-            && !isPersonalAssistantResource);
-        vo.setCanUseAuth(canSetUse && !isDefaultSuperAssistantResource);
+        vo.setCanEdit(canEdit && !isWhaleAgentExternalKnowledgeOrToolResource); // 移除 !isDefaultSuperAssistantResource
+        vo.setCanManageAuth(canManage && !isDefaultResource
+            && !isPersonalAssistantResource); // 移除 !isDefaultSuperAssistantResource
+        vo.setCanUseAuth(canSetUse); // 移除 !isDefaultSuperAssistantResource
         vo.setCanDelete(canManage && !isDefaultResource && !isDefaultSuperAssistantResource
-            && !isWhaleAgentExternalKnowledgeOrToolResource);
-        vo.setCanAuditUse(canSetUse && !isDefaultSuperAssistantResource && !isPersonalResourceUseApplyUnsupported);
-        vo.setCanApplyUse(!isDefaultSuperAssistantResource && !isPersonalResourceUseApplyUnsupported
-            && checkCanApplyUse(ssResource));
+            && !isWhaleAgentExternalKnowledgeOrToolResource); // _main 结尾的资源禁止删除
+        vo.setCanAuditUse(canSetUse && !isPersonalResourceUseApplyUnsupported); // 移除 !isDefaultSuperAssistantResource
+        vo.setCanApplyUse(!isPersonalResourceUseApplyUnsupported
+            && checkCanApplyUse(ssResource)); // 移除 !isDefaultSuperAssistantResource
 
         // “设为默认”入口统一收敛到左侧“全部列表项”，个人/企业资源卡片不再展示该操作。
         vo.setCanSetDefault(false);
@@ -2724,7 +2765,8 @@ public class AuthApplicationService {
     }
 
     /**
-     * 判断资源是否为默认超级助手。
+     * 判断资源是否为默认超级助手资源（resourceCode 以 _main 结尾的数字员工）。
+     * 默认超级助手是登录初始化的个人底座资源，不允许删除。
      * 默认超级助手统一落为真实 DIG_EMPLOYEE，且 resource_code 固定使用 {userCode}_main。
      *
      * @author qin.guoquan

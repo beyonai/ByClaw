@@ -22,6 +22,29 @@ from by_framework import run_worker
 from by_framework_history_byclaw.byclaw_history import ByClawHistoryBackend
 from dotenv import load_dotenv
 
+# by_framework 在模块导入时创建 RotatingFileHandler("by-framework.log")，
+# Windows 下多进程共用同一文件会在轮转时触发 WinError 32。
+# 此处将其替换为带 PID 后缀的文件，各进程独立写入。
+def _fix_framework_log_handler() -> None:
+    from logging.handlers import RotatingFileHandler
+
+    fw_logger = logging.getLogger("by-framework")
+    for h in fw_logger.handlers[:]:
+        if isinstance(h, RotatingFileHandler) and h.baseFilename.endswith("by-framework.log"):
+            fw_logger.removeHandler(h)
+            h.close()
+            new_h = RotatingFileHandler(
+                f"by-framework.{os.getpid()}.log",
+                maxBytes=h.maxBytes,
+                backupCount=h.backupCount,
+            )
+            new_h.setLevel(h.level)
+            new_h.setFormatter(h.formatter)
+            fw_logger.addHandler(new_h)
+            break
+
+_fix_framework_log_handler()
+
 from byclaw_data.runtime import normalize_runtime_environment
 
 logger = logging.getLogger(__name__)
@@ -132,13 +155,18 @@ def main() -> None:
     if not cfg.api_key:
         pass
 
+    # LangfusePlugin 由 run_worker 通过 _build_auto_trace_plugin() 自动发现并注册，
+    # 无需手动添加。只要 LANGFUSE_SECRET_KEY / LANGFUSE_PUBLIC_KEY / LANGFUSE_BASE_URL
+    # 均已配置，框架启动时会自动激活。
+    _plugin_list: list[Any] = [
+        InitDataCloudDigitalEmployeePlugin(),
+        RecommendedQuestionsPlugin(),
+    ]
+
     for attempt in range(1, _WORKER_RETRY_MAX + 1):
         run_worker(
             worker_class=DataCloudWorker,
-            plugin_list=[
-                InitDataCloudDigitalEmployeePlugin(),
-                RecommendedQuestionsPlugin(),
-            ],
+            plugin_list=_plugin_list,
             history_backend=ByClawHistoryBackend(base_url=cfg.be_domainname_url),
             **cfg.run_worker_kwargs(),
         )

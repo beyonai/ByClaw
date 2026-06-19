@@ -1,10 +1,11 @@
 package com.iwhalecloud.byai.state.domain.ws.handler;
 
+import cn.hutool.core.util.IdUtil;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.state.domain.notification.service.NotificationService;
 import com.iwhalecloud.byai.common.log.util.RequestContextUtil;
-import com.iwhalecloud.byai.common.log.util.SnowFlake;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import com.alibaba.fastjson.JSON;
@@ -66,22 +67,37 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
         String message = frame.text();
 
         // 生成并设置 REQUEST_ID（WebSocket 消息入口）
-        Long requestId = SnowFlake.nextId();
+        Long requestId = IdUtil.getSnowflakeNextId();
         RequestContextUtil.setRequestId(requestId);
         log.debug("WebSocket 消息处理开始，REQUEST_ID: {}", requestId);
 
         try {
-            ChatMessage chatMessage = JSON.parseObject(message, ChatMessage.class);
             LoginInfo userInfo = ctx.channel().attr(Constant.ATT_USER_INFO).get();
-            chatMessage.setSenderId(userInfo.getUserId());
-            chatMessage.setSenderName(userInfo.getUserName());
-            log.debug("websocket user message :{}", chatMessage);
-            switch (chatMessage.getType()) {
-                case HEARTBEAT -> handleHeartbeat(ctx);
-                case LLM_MESSAGE -> chatService.llmChat(ctx, chatMessage);
-                case SSE_STREAM -> chatService.sseStream(ctx, chatMessage);
-                case NOTIFICATION -> notificationService.getRealTimeNotification(ctx, message);
+            LoginInfo previousLoginInfo = CurrentUserHolder.getLoginInfo();
+            if (userInfo != null) {
+                CurrentUserHolder.setLoginInfo(userInfo);
+            }
+            try {
+                ChatMessage chatMessage = JSON.parseObject(message, ChatMessage.class);
+                chatMessage.setSenderId(userInfo.getUserId());
+                chatMessage.setSenderName(userInfo.getUserName());
+                log.debug("websocket user message :{}", chatMessage);
+                switch (chatMessage.getType()) {
+                    case HEARTBEAT -> handleHeartbeat(ctx);
+                    case LLM_MESSAGE -> chatService.llmChat(ctx, chatMessage);
+                    case SSE_STREAM -> chatService.sseStream(ctx, chatMessage);
+                    case NOTIFICATION -> notificationService.getRealTimeNotification(ctx, message);
+                    case STOP_CHAT -> chatService.stopChat(ctx, chatMessage);
                 default -> throw new RuntimeException(I18nUtil.get("ws.handler.unsupported.message.type", chatMessage.getType()));
+                }
+            }
+            finally {
+                if (previousLoginInfo == null) {
+                    CurrentUserHolder.clearLoginInfo();
+                }
+                else {
+                    CurrentUserHolder.setLoginInfo(previousLoginInfo);
+                }
             }
         }
         catch (Exception e) {

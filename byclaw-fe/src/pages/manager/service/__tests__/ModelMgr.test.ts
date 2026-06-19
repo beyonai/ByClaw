@@ -25,6 +25,7 @@ import {
   deleteModel,
   getModelDetail,
   getModelListByPage,
+  setDefaultModel,
   setModelStatus,
   upsertModel,
 } from '../ModelMgr';
@@ -82,6 +83,16 @@ describe('manager/service/ModelMgr', () => {
     const payload = { id: 'model-1', status: 'ENABLED' };
     setModelStatus(payload);
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/new/model/setModelStatus', payload, {
+      responseCfg: {
+        customHandle: true,
+      },
+    });
+  });
+
+  it('setDefaultModel calls POST with customHandle config', () => {
+    const payload = { modelId: 10013114, tagId: '1' };
+    setDefaultModel(payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/new/model/setDefaultModel', payload, {
       responseCfg: {
         customHandle: true,
       },
@@ -153,6 +164,78 @@ describe('manager/service/ModelMgr', () => {
     });
     expect(onDelta).toHaveBeenNthCalledWith(1, 'Hello');
     expect(onDelta).toHaveBeenNthCalledWith(2, ' World');
+  });
+
+  it('debugModelStream parses Anthropic content_block_delta events', async () => {
+    const onDelta = jest.fn();
+    const encoder = new TextEncoder();
+    const chunks = [
+      encoder.encode('data:{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hello"}}\n\n'),
+      encoder.encode(
+        'data:{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Anthropic"}}\n\n'
+      ),
+    ];
+
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: {
+        get: jest.fn(() => 'text/event-stream'),
+      },
+      body: {
+        getReader: () => ({
+          read: jest
+            .fn()
+            .mockResolvedValueOnce({ value: chunks[0], done: false })
+            .mockResolvedValueOnce({ value: chunks[1], done: false })
+            .mockResolvedValueOnce({ value: undefined, done: true }),
+        }),
+      },
+    });
+
+    await expect(debugModelStream({ onDelta })).resolves.toEqual({
+      code: 0,
+      data: {
+        output: 'Hello Anthropic',
+        success: true,
+      },
+    });
+    expect(onDelta).toHaveBeenNthCalledWith(1, 'Hello');
+    expect(onDelta).toHaveBeenNthCalledWith(2, ' Anthropic');
+  });
+
+  it('debugModelStream parses Anthropic lines separated by single newline', async () => {
+    const onDelta = jest.fn();
+    const encoder = new TextEncoder();
+    const chunks = [
+      encoder.encode('data:{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"A"}}\n'),
+      encoder.encode('data:{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"B"}}\n'),
+    ];
+
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: {
+        get: jest.fn(() => 'text/event-stream'),
+      },
+      body: {
+        getReader: () => ({
+          read: jest
+            .fn()
+            .mockResolvedValueOnce({ value: chunks[0], done: false })
+            .mockResolvedValueOnce({ value: chunks[1], done: false })
+            .mockResolvedValueOnce({ value: undefined, done: true }),
+        }),
+      },
+    });
+
+    await expect(debugModelStream({ onDelta })).resolves.toEqual({
+      code: 0,
+      data: {
+        output: 'AB',
+        success: true,
+      },
+    });
+    expect(onDelta).toHaveBeenNthCalledWith(1, 'A');
+    expect(onDelta).toHaveBeenNthCalledWith(2, 'B');
   });
 
   it('debugModelStream falls back to success payload when stream reader is missing', async () => {

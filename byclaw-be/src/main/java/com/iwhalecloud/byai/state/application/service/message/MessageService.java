@@ -717,7 +717,7 @@ public class MessageService {
      *
      * @return 按参数类型分组的反馈类型列表
      */
-    public Map<String, List<FeedbackTypeDto>> getContentFeedbackType() {
+    public Map<String, List<FeedbackTypeDto>> getContentFeedbackType(String language) {
         // 获取系统配置中的反馈类型
         List<ByaiSystemConfigList> values = byaiSystemConfigService.findByParamGroupCode(Constants.FEEDBACK_TYPE);
         if (CollectionUtils.isEmpty(values)) {
@@ -738,6 +738,7 @@ public class MessageService {
             configs.forEach(config -> {
                 FeedbackTypeDto feedbackTypeDto = new FeedbackTypeDto();
                 BeanUtils.copyProperties(config, feedbackTypeDto);
+                feedbackTypeDto.setParamName(getLocalizedParamName(config, language));
                 feedbackTypeDto.setParamCode(config.getParamValue());
                 res.computeIfAbsent(paramGroupCode, list -> {
                     return new ArrayList<>();
@@ -745,6 +746,18 @@ public class MessageService {
             });
         });
         return res;
+    }
+
+    private String getLocalizedParamName(ByaiSystemConfigList config, String language) {
+        if (StringUtils.equalsIgnoreCase(language, "en-US")) {
+            return config.getParamName();
+        }
+        return switch (StringUtils.defaultString(config.getParamValue())) {
+            case "ANS_INACCURATE" -> "答案不准确";
+            case "WRONG_PERSON" -> "找错人";
+            case "FEED_OTHER" -> "其他";
+            default -> config.getParamName();
+        };
     }
 
     /**

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { createMessage, multiChoicesHandler } from '@/utils/messgae';
 
 import { IMessageState } from '@/constants/message';
-import { ISendConf, ISendProps } from '@/hooks/useChat';
+import type { ISendConf, ISendProps } from '@/hooks/useChat';
 import type { IAgentType } from '@/typescript/agent';
 import { IMessage, IResourceFromItem } from '@/typescript/message';
 import useGlobal from '@/hooks/useGlobal';

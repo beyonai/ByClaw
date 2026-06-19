@@ -149,6 +149,16 @@ export function queryDigEmployeeRelResourceAuth(params: any) {
 }
 
 /**
+ * 查询当前用户对数字员工关联知识库中具备管理权限的知识库列表
+ * 用于保存文件到知识库等写入场景，权限口径以后端为准
+ * @param params 查询参数（包含resourceId数字员工ID、keyword搜索关键字等）
+ * @returns Promise 可管理知识库列表
+ */
+export function queryDigEmployeeManageKnowledgeResourceAuth(params: any) {
+  return POST<any>('/byaiService/auth/privilegeGrant/queryDigEmployeeManageKnowledgeResourceAuth', params);
+}
+
+/**
  * 查询固定入口操作能力
  * 获取当前用户在固定入口（如企业工作台）可进行的操作权限
  * @returns Promise<FixedEntryOperationCapability> 操作能力对象
@@ -333,9 +343,12 @@ export interface ResourceOperationPermissions {
   resourceId: string; // 资源ID
   ownerType: string; // 所有者类型
   resourceBizType: string; // 资源业务类型
+  hasManagePermission?: boolean; // 是否具备资源管理权限
+  hasUsePermission?: boolean; // 是否具备资源使用权限
+  canViewDetail?: boolean; // 是否允许进入资源详情
   canEdit: boolean; // 是否有编辑权限
   canManageAuth: boolean; // 是否有管理权限权限
-  canUseAuth: boolean; // 是否有使用权限
+  canUseAuth: boolean; // 是否可设置使用授权
   canDelete: boolean; // 是否有删除权限
   canApplyUse: boolean; // 是否可以申请使用
   canAuditUse: boolean; // 是否有审核权限

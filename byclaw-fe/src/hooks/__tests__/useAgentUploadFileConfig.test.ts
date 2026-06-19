@@ -39,7 +39,7 @@ describe('hooks/useAgentUploadFileConfig', () => {
       await Promise.resolve();
     });
 
-    expect(result.current('agent-1')).toEqual({
+    expect(result.current.getAgentUploadFileConfig('agent-1')).toEqual({
       enabled: false,
       allowedFileTypes: ['.png'],
       maxFileSize: 1024,
@@ -80,8 +80,8 @@ describe('hooks/useAgentUploadFileConfig', () => {
       await Promise.resolve();
     });
 
-    const first = result.current('agent-1');
-    const second = result.current('agent-1');
+    const first = result.current.getAgentUploadFileConfig('agent-1');
+    const second = result.current.getAgentUploadFileConfig('agent-1');
 
     expect(first).toEqual({
       enabled: true,
@@ -111,7 +111,7 @@ describe('hooks/useAgentUploadFileConfig', () => {
       await Promise.resolve();
     });
 
-    expect(result.current('agent-2')).toEqual({
+    expect(result.current.getAgentUploadFileConfig('agent-2')).toEqual({
       enabled: false,
       allowedFileTypes: ['.png'],
       maxFileSize: 1024,

@@ -2,11 +2,16 @@ import { Type } from "@sinclair/typebox";
 import { isSubagentSessionKey } from "openclaw/plugin-sdk/routing";
 import type { AgentRegistryState } from "./agent-state.js";
 import type { AdaptedManagedAgent } from "./agent-adapter.js";
-import { buildExecutorResourceContext, compactText, runBaiyingExecutor } from "./resource-metadata.js";
+import {
+  buildExecutorResourceContext,
+  compactText,
+  runBaiyingExecutor,
+} from "./resource-metadata.js";
 import { docAsyncState, type DocAsyncTaskRecord } from "./doc-async-state.js";
 import type { BaiyingAssociatedResource } from "./types.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 import { resolveChannelSessionIdForTool } from "./channel-session-resolve.js";
+import { resolveLangfuseParentObservationId } from "./langfuse-observation.js";
 import {
   baiyingEnhanceDebugEnabled,
   logBaiyingRequest,
@@ -414,6 +419,11 @@ export function createBaiyingCallToolFactory(params: {
           normalizeText((ctx as any)?.session_id) ||
           "agent:main:main";
         const channelResolve = resolveChannelSessionIdForTool(ctx, requesterSessionKey);
+        const langfuseParentObservationId = await resolveLangfuseParentObservationId({
+          ...(ctx && typeof ctx === "object" ? (ctx as Record<string, unknown>) : {}),
+          toolCallId: _toolCallId,
+          requesterSessionKey,
+        });
         const structuredArguments = isPlainRecord(toolParams.arguments)
           ? toolParams.arguments
           : undefined;
@@ -423,6 +433,7 @@ export function createBaiyingCallToolFactory(params: {
           requester_session_key: requesterSessionKey,
           channel_session_id: channelResolve.sessionId,
           channel_trace_id: channelResolve.traceId,
+          langfuse_parent_observation_id: langfuseParentObservationId,
           channel_session_source: channelResolve.source,
           tool_params: toolParams,
         });
@@ -438,6 +449,7 @@ export function createBaiyingCallToolFactory(params: {
           requester_session_key: requesterSessionKey,
           channel_session_id: channelResolve.sessionId,
           channel_trace_id: channelResolve.traceId,
+          langfuse_parent_observation_id: langfuseParentObservationId,
           channel_session_source: channelResolve.source,
         });
         if (
@@ -609,6 +621,7 @@ export function createBaiyingCallToolFactory(params: {
           sessionKey: requesterSessionKey,
           channelSessionId: channelResolve.sessionId,
           channelTraceId: channelResolve.traceId,
+          langfuseParentObservationId,
           language: channelResolve.language,
           beyondToken: channelResolve.beyondToken,
           parentSessionKey: channelResolve.parentSessionKey,
@@ -617,6 +630,7 @@ export function createBaiyingCallToolFactory(params: {
           resourceContext: resourceContext as ResourceContext,
           channelSessionId: channelResolve.sessionId,
           channelTraceId: channelResolve.traceId,
+          langfuseParentObservationId,
           logger: params.logger,
         });
         const payload: Record<string, unknown> = {
@@ -638,6 +652,7 @@ export function createBaiyingCallToolFactory(params: {
           selected_resource_name: selectedResource?.resourceName,
           channel_session_id: channelResolve.sessionId,
           channel_trace_id: channelResolve.traceId,
+          langfuse_parent_observation_id: langfuseParentObservationId,
           channel_session_source: channelResolve.source,
         });
         if (actionName) {

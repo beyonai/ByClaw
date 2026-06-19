@@ -3,9 +3,8 @@ import { Button, Spin } from 'antd';
 import classnames from 'classnames';
 import { head, last, size } from 'lodash';
 import React, { forwardRef, useCallback, useImperativeHandle } from 'react';
-// @ts-ignore
-import InfiniteScroll from '@/components/InfiniteScroll';
 
+import MessageInfiniteScroll from '@/components/MessageList/components/MessageInfiniteScroll';
 import useToBottomBtn from '@/components/MessageList/hooks/useToBottomBtn';
 import useRender from './useRender';
 import DividerTips from '@/components/MessageList/components/DividerTips';
@@ -55,7 +54,7 @@ function MessageList(props: IProps, ref: any) {
     hideAction,
   } = props;
 
-  const infiniteScrollRef = React.useRef<InfiniteScroll>(null);
+  const infiniteScrollRef = React.useRef<MessageInfiniteScroll>(null);
   const scrollMessageDomId = React.useRef<string>(`scrollMessage_${generateUniqueId()}`);
 
   const { renderMessage, extendsRender } = useRender({
@@ -98,7 +97,7 @@ function MessageList(props: IProps, ref: any) {
           className={classnames(styles.messageContent, 'full-height full-width hideThumb')}
           id={scrollMessageDomId.current}
         >
-          <InfiniteScroll
+          <MessageInfiniteScroll
             ref={infiniteScrollRef}
             next={(isPrev?: boolean) => {
               onNext?.(isPrev);
@@ -152,7 +151,7 @@ function MessageList(props: IProps, ref: any) {
                 </div>
               );
             })}
-          </InfiniteScroll>
+          </MessageInfiniteScroll>
         </div>
       </MessageListContext.Provider>
       {toBottomBtnVisable && showToBottomBtn && (

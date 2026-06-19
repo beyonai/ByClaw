@@ -4,8 +4,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.feign.response.knowledge.ModelDto;
@@ -22,6 +21,8 @@ import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelManagementApplicationService;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -72,6 +73,31 @@ public class SandboxLaunchContextFactory {
     @Lazy
     @Autowired
     private SandboxUserInfoFactory sandboxUserInfoFactory;
+
+    @Lazy
+    @Autowired
+    private SandboxService sandboxService;
+
+    /**
+     * 根据 resourceId 解析沙箱路由。
+     * 优先使用用户缓存的 serviceKey（当路由结果为默认类型时）。
+     *
+     * @param resourceId 资源ID
+     * @param userCode   用户工号，用于查找缓存的首选 serviceKey
+     * @return 沙箱启动路由
+     */
+    public SandboxLaunchRouting resolveRouting(Long resourceId, String userCode) {
+        SandboxLaunchRouting routing = resolveRouting(resourceId);
+        if (SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(routing.getSandboxType())
+            && StringUtils.isNotBlank(userCode)) {
+            String preferred = sandboxService.getPreferredServiceKey(userCode);
+            if (StringUtils.isNotBlank(preferred)) {
+                LOGGER.info("使用用户缓存的 serviceKey: userCode={}, serviceKey={}", userCode, preferred);
+                return new SandboxLaunchRouting(preferred, SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+            }
+        }
+        return routing;
+    }
 
     public SandboxLaunchRouting resolveRouting(Long resourceId) {
         if (resourceId == null || resourceId.equals(SandboxLaunchRouting.DEFAULT_RESOURCE_ID)) {
@@ -175,6 +201,7 @@ public class SandboxLaunchContextFactory {
         loadEnvFile(envs);
         envs.put("gateway_token", gatewayToken);
         envs.put("OPENCLAW_GATEWAY_TOKEN", gatewayToken);
+        applyCurrentUserAuthEnv(envs, userCode);
 
         if (digEmployee == null || StringUtils.isBlank(digEmployee.getPrologue())) {
             LOGGER.warn("资源ID：{} 的prologue为空，无法构建模型环境变量", resourceId);
@@ -216,9 +243,6 @@ public class SandboxLaunchContextFactory {
             }
             envs.put("MODEL_PROVIDER_NAME", modelProviderName);
             envs.put("NODE_OPTIONS", "--max-old-space-size=4096");
-            envs.put("BAIYING_SESSION", CurrentUserHolder.getSessionId());
-            String beyondToken = jwtService.createJwt(loginApplicationService.getLoginInfo(userCode));
-            envs.put("BEYOND_TOKEN", beyondToken);
 
             LOGGER.info("沙箱环境变量构建完成，资源ID：{}，modelId：{}，model_name：{}", resourceId, modelId, modelDto.getModelCode());
         }
@@ -227,6 +251,31 @@ public class SandboxLaunchContextFactory {
         }
 
         return envs;
+    }
+
+    private void applyCurrentUserAuthEnv(Map<String, String> envs, String userCode) {
+        if (StringUtils.isBlank(userCode)) {
+            return;
+        }
+
+        envs.put("USER_CODE", userCode);
+
+        String sessionId = CurrentUserHolder.getSessionId();
+        if (StringUtils.isNotBlank(sessionId)) {
+            envs.put("BAIYING_SESSION", sessionId);
+        }
+
+        try {
+            if (jwtService != null && loginApplicationService != null) {
+                String beyondToken = jwtService.createJwt(loginApplicationService.getLoginInfo(userCode));
+                if (StringUtils.isNotBlank(beyondToken)) {
+                    envs.put("BEYOND_TOKEN", beyondToken);
+                }
+            }
+        }
+        catch (Exception e) {
+            LOGGER.warn("构建沙箱 Beyond-Token 异常，userCode：{}，原因：{}", userCode, e.getMessage());
+        }
     }
 
     private void loadEnvFile(Map<String, String> envs) {

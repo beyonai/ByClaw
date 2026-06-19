@@ -225,6 +225,49 @@ describe("createAgentWatchdog", () => {
         expect(JSON.stringify(loaded[0])).not.toContain("secret-token");
     });
 
+    it("uses the Redis LLM typelist default when a digital employee has no modelId", async () => {
+        const employeeContent = JSON.stringify({
+            resourceId: "10000666",
+            resourceName: "默认模型数字员工",
+            prologue: JSON.stringify({ descText: "hello" }),
+        });
+        const entries = new Map<string, RedisJsonPayload>([
+            ["10000666", payloadFromContent("DIG_EMPLOYEE_10000666", employeeContent)],
+        ]);
+
+        const loaded = await loadManagedAgentsFromRedis({
+            redisJsonStore: createMemoryRedisJsonStore(entries),
+            authorizedSourceKeys: new Set(["10000666"]),
+            embedApiKeysFromJson: false,
+            defaultModel: {
+                providerKey: "baiying-m-10004014",
+                modelRef: "baiying-m-10004014/deepseek-v4-flash",
+                provider: {
+                    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    apiKey: {
+                        source: "exec",
+                        provider: "baiying-aimodel-redis",
+                        id: "model:10004014",
+                    },
+                    api: "openai-completions",
+                    modelId: "deepseek-v4-flash",
+                    modelName: "deepseek-v4-flash",
+                },
+                hash: "default-hash",
+            },
+            log: { warn: vi.fn() },
+        });
+
+        expect(loaded).toHaveLength(1);
+        expect(loaded[0]?.baiyingModelId).toBeUndefined();
+        expect(loaded[0]?.providerKey).toBe("baiying-m-10004014");
+        expect(loaded[0]?.modelRef).toBe("baiying-m-10004014/deepseek-v4-flash");
+        expect(loaded[0]?.listEntry.model).toEqual({
+            primary: "baiying-m-10004014/deepseek-v4-flash",
+        });
+        expect(loaded[0]?.contentHash).toContain(":default-model:default-hash");
+    });
+
     it("__flushNow syncs prologue modelId changes without periodic scan", async () => {
         const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-model-scan-"));
         const employeeKey = "10000455";
@@ -321,6 +364,175 @@ describe("createAgentWatchdog", () => {
         expect(JSON.stringify(activeConfig)).not.toContain("secret-token-new");
     });
 
+    it("__flushNow writes the Redis LLM typelist model as the main/default model", async () => {
+        const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-default-model-"));
+        const employeeKey = "10000666";
+        const employeeContent = JSON.stringify({
+            resourceId: employeeKey,
+            resourceName: "默认模型数字员工",
+            prologue: JSON.stringify({ descText: "no explicit model" }),
+        });
+        const entries = new Map<string, RedisJsonPayload>([
+            [employeeKey, payloadFromContent(`DIG_EMPLOYEE_${employeeKey}`, employeeContent)],
+        ]);
+        const typeListContent = JSON.stringify([
+            {
+                authToken: "default-secret-token",
+                instanceId: "10004014",
+                instanceParam: { maxTokens: 1024 },
+                isDefault: 1,
+                maxContentToken: "128000",
+                modelCode: "deepseek-v4-flash",
+                modelName: "deepseek-v4-flash",
+                modelType: "LLM",
+                status: 1,
+                url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            },
+        ]);
+        const hashEntries = new Map<string, RedisJsonPayload>([
+            [
+                "byai:aimodel:typelist:LLM",
+                payloadFromContent("byai:aimodel:typelist:LLM", typeListContent),
+            ],
+        ]);
+        let activeConfig: any = {
+            agents: {
+                list: [{ id: "main", name: "Main", identity: { name: "Main" } }],
+                defaults: { model: { primary: "minimax/MiniMax-M2.7-highspeed" } },
+            },
+            models: { providers: {} },
+        };
+        const writeConfigFile = vi.fn(async (next) => {
+            activeConfig = next;
+        });
+        const api = createMockApi(writeConfigFile) as any;
+        api.runtime.config.loadConfig = vi.fn(() => activeConfig);
+
+        const wd = createAgentWatchdogBase({
+            redisJsonStore: createMemoryRedisJsonStore(entries, hashEntries),
+            authorizationFilter: {
+                getAuthorizedSourceKeys: () => new Set([employeeKey]),
+            },
+            api,
+            registry: new AgentRegistryState(),
+            contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+            executorPath: path.join(dir, "executor.py"),
+            pluginConfig: {
+                embedApiKeysFromJson: false,
+                workspaceAutoSeed: false,
+                persistAgentContentIndex: false,
+                workspaceSkillScanIntervalMs: 0,
+            },
+            debounceMs: 60_000,
+        });
+
+        await wd.start();
+        await wd.__flushNow!();
+        await wd.stop();
+
+        expect(activeConfig.agents.defaults.model.primary).toBe(
+            "baiying-m-10004014/deepseek-v4-flash",
+        );
+        expect(
+            activeConfig.agents.list.find((entry: any) => entry.id === "baiying-agent-10000666")
+                ?.model,
+        ).toEqual({ primary: "baiying-m-10004014/deepseek-v4-flash" });
+        expect(activeConfig.models.providers["baiying-m-10004014"].models[0].id).toBe(
+            "deepseek-v4-flash",
+        );
+        expect(JSON.stringify(activeConfig)).not.toContain("default-secret-token");
+    });
+
+    it("__flushNow syncs the Redis default LLM even while dig-employee auth is pending", async () => {
+        const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-default-auth-pending-"));
+        const managedAgentId = `${MANAGED_AGENT_PREFIX}10000666`;
+        const typeListContent = JSON.stringify([
+            {
+                authToken: "default-secret-token",
+                instanceId: "10004014",
+                instanceParam: { maxTokens: 1024 },
+                isDefault: 1,
+                maxContentToken: "128000",
+                modelCode: "deepseek-v4-flash",
+                modelName: "deepseek-v4-flash",
+                modelType: "LLM",
+                status: 1,
+                url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            },
+        ]);
+        const hashEntries = new Map<string, RedisJsonPayload>([
+            [
+                "byai:aimodel:typelist:LLM",
+                payloadFromContent("byai:aimodel:typelist:LLM", typeListContent),
+            ],
+        ]);
+        let activeConfig: any = {
+            agents: {
+                list: [
+                    { id: "main", name: "Main", identity: { name: "Main" } },
+                    {
+                        id: managedAgentId,
+                        name: "Existing managed",
+                        identity: { name: "Existing managed" },
+                        model: { primary: "baiying-m-10004000/qwen3.6-27b" },
+                    },
+                ],
+                defaults: { model: { primary: "minimax/MiniMax-M2.7-highspeed" } },
+            },
+            models: {
+                providers: {
+                    "baiying-m-10004000": { models: [{ id: "qwen3.6-27b" }] },
+                },
+            },
+        };
+        const writeConfigFile = vi.fn(async (next) => {
+            activeConfig = next;
+        });
+        const api = createMockApi(writeConfigFile) as any;
+        api.runtime.config.loadConfig = vi.fn(() => activeConfig);
+
+        const wd = createAgentWatchdogBase({
+            redisJsonStore: createMemoryRedisJsonStore(new Map(), hashEntries),
+            authorizationFilter: { getAuthorizedSourceKeys: () => undefined },
+            api,
+            registry: new AgentRegistryState(),
+            contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+            executorPath: path.join(dir, "executor.py"),
+            pluginConfig: {
+                embedApiKeysFromJson: false,
+                workspaceAutoSeed: false,
+                persistAgentContentIndex: false,
+                workspaceSkillScanIntervalMs: 0,
+            },
+            debounceMs: 60_000,
+        });
+
+        await wd.start({ deferInitialFlush: true });
+        await wd.__flushNow!();
+        await wd.stop();
+
+        expect(writeConfigFile).toHaveBeenCalledTimes(1);
+        expect(activeConfig.agents.defaults.model.primary).toBe(
+            "baiying-m-10004014/deepseek-v4-flash",
+        );
+        expect(activeConfig.agents.list.find((entry: any) => entry.id === "main")?.model).toEqual({
+            primary: "baiying-m-10004014/deepseek-v4-flash",
+        });
+        expect(activeConfig.agents.list.find((entry: any) => entry.id === managedAgentId)).toEqual(
+            expect.objectContaining({
+                id: managedAgentId,
+                model: { primary: "baiying-m-10004000/qwen3.6-27b" },
+            }),
+        );
+        expect(activeConfig.models.providers["baiying-m-10004014"].models[0].id).toBe(
+            "deepseek-v4-flash",
+        );
+        expect(activeConfig.models.providers["baiying-m-10004000"].models[0].id).toBe(
+            "qwen3.6-27b",
+        );
+        expect(JSON.stringify(activeConfig)).not.toContain("default-secret-token");
+    });
+
     it("leaves model unset on first sync when Redis AI model config is missing", async () => {
         const employeeContent = JSON.stringify({
             resourceId: "10000281",
@@ -344,6 +556,56 @@ describe("createAgentWatchdog", () => {
         expect(loaded[0]?.listEntry.model).toBeUndefined();
         expect(warn).toHaveBeenCalledWith(
             "baiying-enhance: Redis AI model config missing/unreadable modelId=-2000",
+        );
+    });
+
+    it("falls back to the default model when Redis AI model config is missing", async () => {
+        const employeeContent = JSON.stringify({
+            resourceId: "10000281",
+            resourceName: "项目管理数字员工",
+            prologue: JSON.stringify({ modelId: -2000 }),
+        });
+        const entries = new Map<string, RedisJsonPayload>([
+            ["10000281", payloadFromContent("DIG_EMPLOYEE_10000281", employeeContent)],
+        ]);
+        const warn = vi.fn();
+        const defaultModel = {
+            providerKey: "baiying-m-10004014",
+            modelRef: "baiying-m-10004014/deepseek-v4-flash",
+            provider: {
+                baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                apiKey: {
+                    source: "exec" as const,
+                    provider: "baiying-aimodel-redis",
+                    id: "model:10004014",
+                },
+                api: "openai-completions" as const,
+                modelId: "deepseek-v4-flash",
+                modelName: "deepseek-v4-flash",
+            },
+            hash: "default-hash",
+        };
+
+        const loaded = await loadManagedAgentsFromRedis({
+            redisJsonStore: createMemoryRedisJsonStore(entries),
+            authorizedSourceKeys: new Set(["10000281"]),
+            embedApiKeysFromJson: false,
+            defaultModel,
+            log: { warn },
+        });
+
+        expect(loaded).toHaveLength(1);
+        expect(loaded[0]?.providerKey).toBe("baiying-m-10004014");
+        expect(loaded[0]?.modelRef).toBe("baiying-m-10004014/deepseek-v4-flash");
+        expect(loaded[0]?.listEntry.model).toEqual({
+            primary: "baiying-m-10004014/deepseek-v4-flash",
+        });
+        expect(JSON.stringify(loaded[0])).not.toContain("baiying-m-neg-2000");
+        expect(warn).toHaveBeenCalledWith(
+            "baiying-enhance: Redis AI model config missing/unreadable modelId=-2000",
+        );
+        expect(warn).toHaveBeenCalledWith(
+            "baiying-enhance: Redis AI model config unavailable for modelId=-2000; falling back to default model baiying-m-10004014/deepseek-v4-flash",
         );
     });
 
@@ -1108,7 +1370,7 @@ describe("createAgentWatchdog", () => {
         expect(entry.skills).toEqual(["alpha"]);
     });
 
-    it("seeds main AGENTS.md when mainAgentsMdPath is set (default mainWorkspaceAgentsAutoSeed)", async () => {
+    it("seeds main SUBAGENT_ROUTING.md when mainAgentsMdPath is set (context handled by separate watcher)", async () => {
         const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-"));
         const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-"));
         await writeFile(path.join(dir, "demo.json"), STABLE_AGENT_JSON, "utf8");
@@ -1142,16 +1404,14 @@ describe("createAgentWatchdog", () => {
         await wd.__flushNow!();
         await wd.stop();
 
-        const agentsMd = await readFile(path.join(mainWs, "AGENTS.md"), "utf8");
-        expect(agentsMd.startsWith(MAIN_AGENTS_MARKER)).toBe(true);
-        expect(agentsMd).toContain("# From template");
+        expect(await pathExists(path.join(mainWs, "AGENTS.md"))).toBe(false);
 
         const routingMd = await readFile(path.join(mainWs, SUBAGENT_ROUTING_FILENAME), "utf8");
         expect(routingMd.startsWith(SUBAGENT_ROUTING_MARKER)).toBe(true);
         expect(routingMd).toContain(agentId);
     });
 
-    it("seeds main AGENTS.md when workspaceAutoSeed is false but mainWorkspaceAgentsAutoSeed is default", async () => {
+    it("seeds main SUBAGENT_ROUTING.md when workspaceAutoSeed is false but mainWorkspaceAgentsAutoSeed is default", async () => {
         const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-"));
         const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-"));
         await writeFile(path.join(dir, "demo.json"), STABLE_AGENT_JSON, "utf8");
@@ -1185,13 +1445,180 @@ describe("createAgentWatchdog", () => {
         await wd.__flushNow!();
         await wd.stop();
 
-        const agentsMd = await readFile(path.join(mainWs, "AGENTS.md"), "utf8");
-        expect(agentsMd.startsWith(MAIN_AGENTS_MARKER)).toBe(true);
-        expect(agentsMd).toContain("# No managed seed");
+        expect(await pathExists(path.join(mainWs, "AGENTS.md"))).toBe(false);
 
         const routingMd = await readFile(path.join(mainWs, SUBAGENT_ROUTING_FILENAME), "utf8");
         expect(routingMd.startsWith(SUBAGENT_ROUTING_MARKER)).toBe(true);
         expect(routingMd).toContain(agentId);
+    });
+
+    it("does not seed main context from Redis inside agent watchdog", async () => {
+        const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-context-"));
+        const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-context-"));
+        await writeFile(path.join(mainWs, "SOUL.md"), "# Base Watchdog SOUL\n", "utf8");
+        const contextTemplate = {
+            schemaVersion: 1,
+            templateType: "agentContext",
+            scope: "mainWorkspace",
+            agentRole: "superAssistant",
+            files: {
+                "SOUL.md": { enabled: true, priorityPrompt: "# Redis Watchdog SOUL\n\n主控上下文。" },
+            },
+        };
+        const hashEntries = new Map<string, RedisJsonPayload>([
+            [
+                "byai:SystemConfig:paramCode:OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+                payloadFromContent(
+                    "byai:SystemConfig:paramCode:OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+                    JSON.stringify({
+                        paramCode: "OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+                        paramValue: JSON.stringify(contextTemplate),
+                    }),
+                ),
+            ],
+        ]);
+
+        const writeConfigFile = vi.fn(async () => {});
+        const api = createMockApi(writeConfigFile, [
+            { id: "main", name: "Main", workspace: mainWs, identity: { name: "Main" } },
+        ]) as any;
+
+        const wd = createAgentWatchdogBase({
+            api,
+            registry: new AgentRegistryState(),
+            redisJsonStore: createMemoryRedisJsonStore(new Map(), hashEntries),
+            authorizationFilter: { getAuthorizedSourceKeys: () => new Set() },
+            absoluteDir: dir,
+            contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+            executorPath: path.join(dir, "executor.py"),
+            pluginConfig: {
+                embedApiKeysFromJson: true,
+                workspaceAutoSeed: false,
+                persistAgentContentIndex: false,
+                workspaceSkillScanIntervalMs: 0,
+                useBundledMainAgentsMd: false,
+            },
+            debounceMs: 60_000,
+        });
+
+        await wd.start();
+        await wd.__flushNow!();
+        await wd.stop();
+
+        const soulMd = await readFile(path.join(mainWs, "SOUL.md"), "utf8");
+        expect(soulMd).toBe("# Base Watchdog SOUL\n");
+        expect(await pathExists(path.join(mainWs, "AGENTS.md"))).toBe(false);
+    });
+
+    it("does not refresh main context files on auth reseed even when Redis context changes", async () => {
+        const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-context-unchanged-"));
+        const mainWs = await mkdtemp(path.join(tmpdir(), "baiying-mainws-context-unchanged-"));
+        const agentId = `${MANAGED_AGENT_PREFIX}10863047`;
+        await writeFile(path.join(mainWs, "SOUL.md"), "# Base Watchdog SOUL\n", "utf8");
+
+        const contextTemplate = {
+            schemaVersion: 1,
+            templateType: "agentContext",
+            scope: "mainWorkspace",
+            agentRole: "superAssistant",
+            files: {
+                "AGENTS.md": {
+                    enabled: true,
+                    priorityPrompt: "# Redis Watchdog AGENTS\n\n主控提示词。",
+                },
+                "SOUL.md": {
+                    enabled: true,
+                    priorityPrompt: "# Redis Watchdog SOUL\n\n主控上下文。",
+                },
+            },
+        };
+        const hashEntries = new Map<string, RedisJsonPayload>([
+            [
+                "byai:SystemConfig:paramCode:OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+                payloadFromContent(
+                    "byai:SystemConfig:paramCode:OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+                    JSON.stringify({
+                        paramCode: "OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+                        paramValue: JSON.stringify(contextTemplate),
+                    }),
+                ),
+            ],
+        ]);
+        const entries = new Map<string, RedisJsonPayload>([
+            ["10863047", payloadFromContent("DIG_EMPLOYEE_10863047", STABLE_AGENT_JSON)],
+        ]);
+
+        const writeConfigFile = vi.fn(async () => {});
+        const api = createMockApi(writeConfigFile, [
+            { id: "main", name: "Main", workspace: mainWs, identity: { name: "Main" } },
+            { id: agentId, name: "Demo", identity: { name: "Demo" } },
+        ]) as any;
+
+        const wd = createAgentWatchdogBase({
+            api,
+            registry: new AgentRegistryState(),
+            redisJsonStore: createMemoryRedisJsonStore(entries, hashEntries),
+            authorizationFilter: { getAuthorizedSourceKeys: () => new Set(["10863047"]) },
+            absoluteDir: dir,
+            contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+            executorPath: path.join(dir, "executor.py"),
+            pluginConfig: {
+                embedApiKeysFromJson: true,
+                workspaceAutoSeed: false,
+                persistAgentContentIndex: false,
+                workspaceSkillScanIntervalMs: 0,
+                useBundledMainAgentsMd: false,
+            },
+            debounceMs: 60_000,
+        });
+
+        await wd.start();
+        await wd.__flushNow!();
+
+        expect(await pathExists(path.join(mainWs, "AGENTS.md"))).toBe(false);
+        expect(await readFile(path.join(mainWs, "SOUL.md"), "utf8")).toBe("# Base Watchdog SOUL\n");
+
+        await writeFile(path.join(mainWs, "AGENTS.md"), `${MAIN_AGENTS_MARKER}\n\n# Manual AGENTS\n`, "utf8");
+        await writeFile(path.join(mainWs, "SOUL.md"), "# Manual SOUL\n", "utf8");
+
+        await wd.__flushNow!({ fullWorkspaceReseed: true });
+
+        expect(await readFile(path.join(mainWs, "AGENTS.md"), "utf8")).toContain("# Manual AGENTS");
+        expect(await readFile(path.join(mainWs, "SOUL.md"), "utf8")).toBe("# Manual SOUL\n");
+        const routingMd = await readFile(path.join(mainWs, SUBAGENT_ROUTING_FILENAME), "utf8");
+        expect(routingMd.startsWith(SUBAGENT_ROUTING_MARKER)).toBe(true);
+        expect(routingMd).toContain(agentId);
+
+        const updatedContextTemplate = {
+            ...contextTemplate,
+            files: {
+                "AGENTS.md": {
+                    enabled: true,
+                    priorityPrompt: "# Redis Watchdog AGENTS v2\n\n主控提示词更新。",
+                },
+                "SOUL.md": {
+                    enabled: true,
+                    priorityPrompt: "# Redis Watchdog SOUL v2\n\n主控上下文更新。",
+                },
+            },
+        };
+        hashEntries.set(
+            "byai:SystemConfig:paramCode:OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+            payloadFromContent(
+                "byai:SystemConfig:paramCode:OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+                JSON.stringify({
+                    paramCode: "OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT",
+                    paramValue: JSON.stringify(updatedContextTemplate),
+                }),
+            ),
+        );
+
+        await wd.__flushNow!({ fullWorkspaceReseed: true });
+        await wd.stop();
+
+        expect(await readFile(path.join(mainWs, "AGENTS.md"), "utf8")).toContain("# Manual AGENTS");
+        const updatedSoul = await readFile(path.join(mainWs, "SOUL.md"), "utf8");
+        expect(updatedSoul).toBe("# Manual SOUL\n");
     });
 
     it("calls writeConfigFile when only workspace skills changed", async () => {

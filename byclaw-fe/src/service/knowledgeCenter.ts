@@ -93,6 +93,14 @@ export interface BuildDatasetPayload {
 export const queryDirAndFileByLevel = (data: QueryDirAndFileByLevelParams) =>
   POST<QueryDirAndFileByLevelItem[]>('/byaiService/datasetController/queryDirAndFileByLevel', data);
 
+export interface SearchDirAndFilePayload extends QueryDirAndFileByLevelParams {
+  keyword: string;
+}
+
+// 按关键字递归搜索知识库目录与文件
+export const searchDirAndFile = (data: SearchDirAndFilePayload) =>
+  POST<QueryDirAndFileByLevelItem[]>('/byaiService/datasetController/searchDirAndFile', data);
+
 /** datasetController/renameFolder 请求体 */
 export interface RenameFolderPayload {
   resourceId: number;
@@ -150,6 +158,21 @@ export const uploadFiles = (data: FormData) =>
       'Content-Type': 'multipart/form-data; charset=utf-8',
     },
   });
+
+export interface CheckUploadFileConflictsPayload {
+  resourceId: string | number;
+  directoryPath: string;
+  fileNames: string[];
+}
+
+export interface CheckUploadFileConflictsResult {
+  conflict: boolean;
+  overwritePaths: string[];
+}
+
+// 上传前检查同路径同名文件，供前端做覆盖确认
+export const checkUploadFileConflicts = (data: CheckUploadFileConflictsPayload) =>
+  POST<CheckUploadFileConflictsResult>('/byaiService/datasetController/checkUploadFileConflicts', data);
 
 // 删除文件
 export const removeFile = (data: RemoveFilePayload, config?: ConfigType) =>

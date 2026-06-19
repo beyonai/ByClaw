@@ -7,6 +7,18 @@ import { SSEEventStatus, SSEMessageType } from '@/constants/message';
 import type { IMessageListItem, IResComIdsListItem } from '@/typescript/message';
 import { isJSON } from '@/utils/json';
 
+const setOrderId = (sseDataObj: any, payload: any) => {
+  const orderId = get(sseDataObj, 'orderId') || '';
+  const parentOrderId = get(sseDataObj, 'parentOrderId') || '';
+
+  if (orderId && isPlainObject(get(payload, 'message.content'))) {
+    set(payload, 'message.content.orderId', `${orderId}`);
+  }
+  if (parentOrderId && isPlainObject(get(payload, 'message.content'))) {
+    set(payload, 'message.content.parentOrderId', `${parentOrderId}`);
+  }
+};
+
 const textHandler = (sseDataObj: any, msgEvent?: string) => {
   const content = get(sseDataObj, 'choices.0.delta.content', '');
 
@@ -27,16 +39,6 @@ const textHandler = (sseDataObj: any, msgEvent?: string) => {
       },
     },
   };
-
-  const orderId = get(sseDataObj, 'orderId') || '';
-  const parentOrderId = get(sseDataObj, 'parentOrderId') || '';
-
-  if (orderId) {
-    set(payload, 'message.content.orderId', `${orderId}`);
-  }
-  if (parentOrderId) {
-    set(payload, 'message.content.parentOrderId', `${parentOrderId}`);
-  }
 
   switch (msgEvent) {
     case 'answerStart':
@@ -185,8 +187,6 @@ const sseTypeHandler = (sseDataObj: any) => {
       content: {
         substance,
         sourceAgentType,
-        orderId: `${get(sseDataObj, 'orderId') || ''}`,
-        parentOrderId: `${get(sseDataObj, 'parentOrderId') || ''}`,
       },
       status: SSEEventStatus.done,
     },
@@ -229,16 +229,6 @@ function thinkStatusTitleHandler(sseDataObj: any) {
     },
   };
 
-  const orderId = get(sseDataObj, 'orderId') || '';
-  const parentOrderId = get(sseDataObj, 'parentOrderId') || '';
-
-  if (orderId) {
-    set(payload, 'message.content.orderId', `${orderId}`);
-  }
-  if (parentOrderId) {
-    set(payload, 'message.content.parentOrderId', `${parentOrderId}`);
-  }
-
   return payload;
 }
 
@@ -257,6 +247,21 @@ const sseTypeHandlerMap = new Map<string, (sseDataObj: any, msgEvent?: string) =
   [`${SSEMessageType.thinkStatusTitle}`, thinkStatusTitleHandler],
 ]);
 
+const isResumeContentType = (contentType: SSEMessageType) => {
+  const resumeContentTypes = [
+    SSEMessageType.approvalForm,
+    SSEMessageType.thinkRewriteQuestion,
+    SSEMessageType.thinkTaskUserInput,
+  ];
+  return contentType && resumeContentTypes.some((item) => `${item}` === `${contentType}`);
+};
+
+const setResumeMessageId = (sseDataObj: any, message: IMessageListItem) => {
+  if (message && isResumeContentType(get(sseDataObj, 'contentType'))) {
+    set(message, 'resumeMessageId', get(sseDataObj, 'orderId'));
+  }
+};
+
 export const answerDeltaHandler = (sseDataObj: any, msgEvent?: string): { message?: Partial<IMessageListItem> } => {
   const contentType = get(sseDataObj, 'contentType');
   if (!contentType) {
@@ -273,6 +278,9 @@ export const answerDeltaHandler = (sseDataObj: any, msgEvent?: string): { messag
     uuid: get(sseDataObj, 'id'),
     orginContent: get(sseDataObj, 'choices.0.delta.content', ''),
   });
+
+  setOrderId(sseDataObj, res);
+  setResumeMessageId(sseDataObj, res.message);
 
   return res;
 };
@@ -316,6 +324,8 @@ export const reasoningLogHandler = (sseDataObj: any, msgEvent?: string) => {
   if (isDone) {
     set(payload, 'message.status', SSEEventStatus.done);
   }
+
+  setResumeMessageId(mySseDataObj, payload.message as IMessageListItem);
 
   return payload;
 };

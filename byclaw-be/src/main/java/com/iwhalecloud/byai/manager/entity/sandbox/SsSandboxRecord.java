@@ -30,6 +30,18 @@ public class SsSandboxRecord {
     /** 沙箱类型 */
     private String sandboxType;
 
+    /** 沙箱服务类型，例如 openclaw。 */
+    private String serviceType;
+
+    /** 沙箱资源规格分层，例如 xs/s/m/l。 */
+    private String profileKey;
+
+    /** 创建或最近一次扩缩容后的资源 requests JSON。 */
+    private String resourceRequests;
+
+    /** 创建或最近一次扩缩容后的资源 limits JSON。 */
+    private String resourceLimits;
+
     /** 沙箱访问端点地址 */
     private String endpoint;
 
@@ -76,6 +88,31 @@ public class SsSandboxRecord {
 
     /** Release reason. */
     private String releaseReason;
+
+    /** 最近一次动态扩缩容状态。 */
+    private String resizeStatus;
+
+    /** 最近一次动态扩缩容时间。 */
+    @JSONField(format = "yyyy-MM-dd HH:mm:ss")
+    private Date lastResizeAt;
+
+    /** 最近一次动态扩缩容原因。 */
+    private String lastResizeReason;
+
+    /** 最近一次动态扩缩容耗时（毫秒）。 */
+    private Long lastResizeDurationMs;
+
+    /** 最近一次动态扩缩容是否成功：1-成功，0-失败。 */
+    private Integer lastResizeSuccess;
+
+    /** 最近一次动态扩缩容来源规格。 */
+    private String lastResizeFromProfile;
+
+    /** 最近一次动态扩缩容目标规格。 */
+    private String lastResizeToProfile;
+
+    /** 最近一次动态扩缩容错误信息。 */
+    private String lastResizeError;
 
     /** Business lifecycle version. */
     private Integer version;

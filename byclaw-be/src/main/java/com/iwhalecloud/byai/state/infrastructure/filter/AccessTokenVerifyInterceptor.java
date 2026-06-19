@@ -1,9 +1,10 @@
 package com.iwhalecloud.byai.state.infrastructure.filter;
 
-
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
+import com.iwhalecloud.byai.state.infrastructure.filter.sub.AccessTokenFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.io.IOException;
@@ -41,7 +42,6 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
     private static final Logger logger = LoggerFactory.getLogger(AccessTokenVerifyInterceptor.class);
 
-
     @Value("${byai.access.urlpatterns:}")
     private String urlPattenrs;
 
@@ -61,6 +61,9 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
     @Autowired
     private SsoTokenFilter ssoTokenFilter;
+
+    @Autowired
+    private AccessTokenFilter accessTokenFilter;
 
     @Autowired
     private LoginApplicationService loginApplicationService;
@@ -87,14 +90,16 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             matcherList.add(Pattern.compile("/api/v1/template-sessions/getTemplateTypes")); // 模板开放
             matcherList.add(Pattern.compile("/ws")); // ws 接口
             matcherList.add(Pattern.compile("/open/api/inner/.*"));
-            matcherList.add(Pattern.compile("/open/api/v1/queryDigEmployeeList"));      // 数字员工列表查询（免登录）
-            matcherList.add(Pattern.compile("/open/api/v1/queryDigEmployeeDetail"));    // 数字员工详情查询（免登录）
-            matcherList.add(Pattern.compile("/open/api/v1/queryDigEmployeeSkills"));    // 数字员工技能查询（免登录）
-            matcherList.add(Pattern.compile("/open/api/v1/conversation/writeTxt"));     // 会话文件覆盖写（免登录）
-            matcherList.add(Pattern.compile("/open/api/v1/conversation/appendTxt"));    // 会话文件追加写（免登录）
-            matcherList.add(Pattern.compile("/open/api/v1/conversation/read"));         // 会话文件按行读取（免登录）
+            matcherList.add(Pattern.compile("/open/api/v1/queryDigEmployeeList")); // 数字员工列表查询（免登录）
+            matcherList.add(Pattern.compile("/open/api/v1/queryDigEmployeeDetail")); // 数字员工详情查询（免登录）
+            matcherList.add(Pattern.compile("/open/api/v1/queryDigEmployeeSkills")); // 数字员工技能查询（免登录）
+            matcherList.add(Pattern.compile("/open/api/v1/conversation/writeTxt")); // 会话文件覆盖写（免登录）
+            matcherList.add(Pattern.compile("/open/api/v1/conversation/appendTxt")); // 会话文件追加写（免登录）
+            matcherList.add(Pattern.compile("/open/api/v1/conversation/read")); // 会话文件按行读取（免登录）
             matcherList.add(Pattern.compile("/chat/message/share-link/access")); // 消息分享链接
             matcherList.add(Pattern.compile("/open/api/getAllUserInfoByUserCode")); // 获取用户信息
+            matcherList.add(Pattern.compile("/commonFile/view")); // 文件查看（controller自行处理登录重定向）
+            matcherList.add(Pattern.compile("/openclaw-ui")); // openclaw 控制台整页代理（用 openclaw 自带 token 鉴权，非系统登录态）
 
             String[] patternList = StringUtils.isNotEmpty(urlPattenrs) ? urlPattenrs.split(",") : new String[0];
             for (String regex : patternList) {
@@ -165,6 +170,12 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             String ssoToken = request.getHeader("SSO-TOKEN");
             if (StringUtils.isNotEmpty(ssoToken)) {
                 return ssoTokenFilter.doFilter(ssoToken);
+            }
+
+            // 令牌认证
+            String accessToken = request.getHeader("accessToken");
+            if (StringUtil.isNotEmpty(accessToken)) {
+                return accessTokenFilter.doFilter(accessToken);
             }
 
             if ("true".equalsIgnoreCase(logRequest)) {

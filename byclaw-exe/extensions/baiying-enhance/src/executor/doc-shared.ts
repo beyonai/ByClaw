@@ -193,6 +193,21 @@ export function resolveDocChannelTraceId(requestPayload: Dict): string {
   return "";
 }
 
+export function resolveLangfuseParentObservationId(requestPayload: Dict): string {
+  const topLevel = isRecord(requestPayload)
+    ? asString(requestPayload.langfuseParentObservationId) ||
+      asString(requestPayload.langfuse_parent_observation_id)
+    : "";
+  if (topLevel) return topLevel;
+  const resourceContext: ResourceContext = isRecord(requestPayload)
+    ? (isRecord(requestPayload.resource_context) ? (requestPayload.resource_context as ResourceContext) : {})
+    : {};
+  return (
+    asString(resourceContext.langfuse_parent_observation_id) ||
+    asString(resourceContext.langfuseParentObservationId)
+  );
+}
+
 
 export function readRedisConfig(): RedisConfig {
   const config: RedisConfig = {};
@@ -365,6 +380,7 @@ export async function pollDocResult(params: {
    * Defaults to 1500ms.
    */
   postTerminalDrainMs?: number;
+  toolCallId?: string;
 }): Promise<DocPollResult> {
   const start = Date.now();
   const streamName = params.streamName ?? `byai_gateway:session:${params.sessionId}:data_stream`;
@@ -438,6 +454,8 @@ export async function pollDocResult(params: {
         if (asString(msg.session_id) !== params.sessionId) continue;
         const msgTraceId = asString(msg.trace_id);
         if (params.traceId && msgTraceId && msgTraceId !== params.traceId) continue;
+        const msgMessageId = asString(msg.message_id);
+        if (params.messageId && msgMessageId && msgMessageId !== params.messageId) continue;
 
         const eventType = asString(msg.event_type);
         const stateMsg = asString(msg.state_msg);
@@ -497,7 +515,7 @@ export async function pollDocResult(params: {
     event_type: terminalEventType,
     text: aggregatedText,
     terminal_text: terminalText,
-    delta_text: delta,
+    // delta_text: delta,
     raw_message: terminalMsg,
     matched_stream_id: terminalStreamId,
     stream_name: streamName,

@@ -1,17 +1,19 @@
-.scrollArea {
-  margin-top: 16px;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
-
 .spinningWrapper {
-  display: flex;
-  min-height: 400px;
+  height: 100%;
+  width: 100%;
 
   // 为空时居中
   &:has(.emptyWrap) {
     justify-content: center;
+  }
+
+  :global {
+    .@{antPrefix}-spin-container {
+      height: 100%;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+    }
   }
 }
 
@@ -23,25 +25,33 @@
   width: 100%;
 }
 
-.infiniteScroll {
-  flex: 1;
-  overflow: visible;
+.employeeList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+  gap: 20px;
+  margin: 0 6px;
 }
 
-.cardGrid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
-  padding: 4px;
+.sectionsContainer {
+  margin: 20px 0;
+  overflow-y: auto;
+  position: relative;
 
-  // 屏幕宽度小于1200px时，展示3列卡片
-  @media (max-width: 1300px) {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .categorySection {
+    width: 100%;
+    margin-bottom: 30px;
+    scroll-margin-top: 20px;
   }
+}
 
-  // 屏幕宽度小于768px时，展示2列卡片
-  @media (max-width: 1000px) {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+.messageRowWrap {
+  width: 100%;
+  min-width: 300px;
+  height: 100%;
+  min-height: 100%;
+
+  &.hasMore {
+    padding-bottom: 36px !important;
   }
 }
 

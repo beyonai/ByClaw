@@ -1,0 +1,35 @@
+.agentBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 8px 8px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #3150ff0f 0%, #c067ff0f 100%);
+  color: var(--beyond-color-text-secondary);
+  font-size: 13px;
+}
+
+.avatar {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  overflow: hidden;
+  border-radius: 50%;
+
+  :global(.@{antPrefix}-icon),
+  :global(.anticon) {
+    font-size: 18px;
+  }
+}
+
+.name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--beyond-color-text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -67,6 +67,13 @@ export async function updateDigitalEmployee(params: any) {
   return POST('/byaiService/digitalEmployeeController/updateDigitalEmployee', withResourceImplDefaults(params));
 }
 
+export async function installDigitalEmployeeRelResources(params: {
+  digitalEmployeeId: string | number;
+  relIds: Array<string | number>;
+}) {
+  return POST('/byaiService/digitalEmployeeController/installRelResources', { ...params });
+}
+
 export async function publishApp(params: any) {
   return POST('/byaiService/digitalEmployeeController/publishApp', { ...params });
 }
@@ -135,7 +142,7 @@ export async function getDefaultModel(params: any) {
 export async function getModelList(params: any) {
   return POST(
     '/byaiService/new/model/listModel',
-    { tagId: '1', ...params },
+    { tagId: '3', ...params },
     {
       responseCfg: {
         customHandle: true,

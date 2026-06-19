@@ -3,6 +3,10 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,10 +53,12 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     private static final String STREAM_KEY_SUFFIX = ":data_stream";
 
     /** 消费者组名称 */
-    private static final String CONSUMER_GROUP = "byai_conversation_service_group";
+    public static final String CONSUMER_GROUP = "byai_conversation_service_group";
 
     /** 消费者名称前缀（多实例时以 sessionId 区分） */
     private static final String CONSUMER_NAME_PREFIX = "byai_conversation_consumer:";
+
+    private static final String INIT_EVENT = "{\"event_type\":\"_init\"}";
 
     @Autowired
     private RedisConnectionFactory redisConnectionFactory;
@@ -66,6 +72,15 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     /** sessionId -> StreamMessageListenerContainer，按 session 管理监听容器 */
     private final Map<String, StreamMessageListenerContainer<String, MapRecord<String, String, String>>> containers =
         new ConcurrentHashMap<>();
+
+    /** sessionId -> running 标记续租任务 */
+    private final Map<String, ScheduledFuture<?>> keepAliveTasks = new ConcurrentHashMap<>();
+
+    private final ScheduledExecutorService keepAliveExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "chat-running-lease-keepalive");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     /**
      * 启动指定 session 的 Redis Stream 监听器。
@@ -114,6 +129,8 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
                 log.warn("停止旧的 session 监听容器时发生异常, sessionId: {}", sessionId, e);
             }
         }
+        cancelKeepAlive(sessionId);
+        startKeepAlive(sessionId, ctx);
 
         log.info("Session Stream 监听已启动, stream: {}, consumer: {}", streamKey, consumerName);
     }
@@ -138,6 +155,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
                 log.warn("停止 session 监听容器时发生异常, sessionId: {}", sessionId, e);
             }
         }
+        cancelKeepAlive(sessionId);
 
         // 清理 OutputStreamManager 中的上下文（确保不残留）
         OutputStreamManager outputStreamManager = applicationContext.getBean(OutputStreamManager.class);
@@ -163,7 +181,37 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
             }
         }
         containers.clear();
+        keepAliveTasks.values().forEach(task -> task.cancel(false));
+        keepAliveTasks.clear();
+        keepAliveExecutor.shutdownNow();
         log.info("所有 Session Stream 监听器已清理完成");
+    }
+
+    private void startKeepAlive(String sessionId, ChatProcessContext ctx) {
+        if (ctx == null) {
+            return;
+        }
+        RunningOutputStreamRegistry runningOutputStreamRegistry =
+            applicationContext.getBean(RunningOutputStreamRegistry.class);
+        RunningChatSnapshotService runningChatSnapshotService =
+            applicationContext.getBean(RunningChatSnapshotService.class);
+        ScheduledFuture<?> future = keepAliveExecutor.scheduleAtFixedRate(() -> {
+            try {
+                runningOutputStreamRegistry.touchRunning(ctx);
+                runningChatSnapshotService.touch(ctx);
+            }
+            catch (Exception e) {
+                log.warn("刷新 running 标记续租失败, sessionId: {}", sessionId, e);
+            }
+        }, 60, 60, TimeUnit.SECONDS);
+        keepAliveTasks.put(sessionId, future);
+    }
+
+    private void cancelKeepAlive(String sessionId) {
+        ScheduledFuture<?> future = keepAliveTasks.remove(sessionId);
+        if (future != null) {
+            future.cancel(false);
+        }
     }
 
     /**
@@ -184,6 +232,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
      */
     private void createConsumerGroupIfAbsent(String streamKey) {
         try {
+            ensureStreamExists(streamKey);
             redisTemplate.opsForStream().createGroup(streamKey, ReadOffset.latest(), CONSUMER_GROUP);
             log.info("已创建 Redis Stream 消费者组: {}, stream: {}", CONSUMER_GROUP, streamKey);
         } catch (Exception e) {
@@ -194,5 +243,13 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
                     e.getMessage(), streamKey);
             }
         }
+    }
+
+    private void ensureStreamExists(String streamKey) {
+        if (Boolean.TRUE.equals(redisTemplate.hasKey(streamKey))) {
+            return;
+        }
+        redisTemplate.opsForStream().add(streamKey, Map.of("data", INIT_EVENT));
+        log.info("Session Stream 不存在，已初始化创建, stream: {}", streamKey);
     }
 }

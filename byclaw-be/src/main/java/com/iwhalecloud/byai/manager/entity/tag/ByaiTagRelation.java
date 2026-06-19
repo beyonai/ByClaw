@@ -32,7 +32,7 @@ public class ByaiTagRelation {
     /**
      * 对象ID
      */
-    private String objId;
+    private Long objId;
 
     /**
      * 对象类型
@@ -47,13 +47,10 @@ public class ByaiTagRelation {
     /**
      * 创建人
      */
-    private String creatorBy;
+    private Long creatorBy;
 
     /**
      * 标签对象类型/编码，如能力编码、慧笔/问数等标识（Story byai_tag_relation.obj_code）
      */
     private String objCode;
 }
-
-
-

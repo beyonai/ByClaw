@@ -19,9 +19,10 @@ ARG BUILD_COMMIT=unknown
 ARG BUILD_COMMIT_FULL=unknown
 ARG BUILD_TIME=unknown
 ARG BUILD_MODULE=byclaw-fe
+ARG BUILD_COMMIT_MSG=unknown
 
-RUN printf '{"version":"%s","branch":"%s","commit":"%s","commitFull":"%s","buildTime":"%s","module":"%s"}\n' \
-    "$BUILD_VERSION" "$BUILD_BRANCH" "$BUILD_COMMIT" "$BUILD_COMMIT_FULL" "$BUILD_TIME" "$BUILD_MODULE" \
+RUN printf '{"version":"%s","branch":"%s","commit":"%s","commitFull":"%s","buildTime":"%s","module":"%s","commitMsg":"%s"}\n' \
+    "$BUILD_VERSION" "$BUILD_BRANCH" "$BUILD_COMMIT" "$BUILD_COMMIT_FULL" "$BUILD_TIME" "$BUILD_MODULE" "$BUILD_COMMIT_MSG" \
     > /usr/share/nginx/html/build-info.json
 
 EXPOSE 8080

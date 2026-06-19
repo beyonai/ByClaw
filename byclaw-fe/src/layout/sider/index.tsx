@@ -2,7 +2,7 @@ import React from 'react';
 
 import { CaretLeftOutlined, CaretRightOutlined } from '@ant-design/icons';
 // @ts-ignore
-import { useSelector, SelectLang, useIntl, useNavigate, useLocation } from '@umijs/max';
+import { useSelector, SelectLang, useIntl, useLocation } from '@umijs/max';
 import { Badge, theme, Divider, Dropdown, Tooltip } from 'antd';
 import classnames from 'classnames';
 import { omit, compact } from 'lodash';
@@ -44,11 +44,14 @@ const getCurrentTabByPathname = (pathname: string) => {
 };
 
 const Sidebar = () => {
-  const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const location = useLocation();
+  const { pathname } = location;
+  const keepSiderActiveKey = (location.state as { keepSiderActiveKey?: (typeof tabItems)[number]['key'] } | null)
+    ?.keepSiderActiveKey;
 
   const { isSiderCollapsed, setSiderCollapsed } = useAppStore();
   const { EventEmitter } = useGlobal();
+  const { clearDetailPanel } = React.useContext(SiderContentContext);
 
   const { userInfo } = useSelector(({ user }: any) => ({
     userInfo: user.userInfo,
@@ -67,14 +70,16 @@ const Sidebar = () => {
   const { token } = theme.useToken();
   const intl = useIntl();
   const currentTab = React.useMemo(() => getCurrentTabByPathname(pathname), [pathname]);
-  const shouldHideSiderContent = React.useMemo(() => {
-    return Boolean(currentTab?.hideSider);
-  }, [currentTab]);
   const [activeKey, setActiveKey] = React.useState<(typeof tabItems)[number]['key']>(
     () => currentTab?.key ?? DEF_SIDER
   );
+  const [manualSiderOpenKey, setManualSiderOpenKey] = React.useState<(typeof tabItems)[number]['key']>();
+  const pathnameRef = React.useRef(pathname);
+  const shouldHideSiderContent = React.useMemo(() => {
+    return Boolean(currentTab?.hideSider && manualSiderOpenKey !== activeKey);
+  }, [activeKey, currentTab, manualSiderOpenKey]);
   const [siderContentWidth, setSiderContentWidth] = React.useState(() => {
-    if (shouldHideSiderContent) {
+    if (currentTab?.hideSider) {
       return 0;
     }
 
@@ -128,6 +133,7 @@ const Sidebar = () => {
   React.useEffect(() => {
     const handleSetSiderActiveKey = (key: string) => {
       setActiveKey(key);
+      setManualSiderOpenKey(key);
       setSiderCollapsed(false); // 确保侧边栏展开
     };
 
@@ -140,6 +146,7 @@ const Sidebar = () => {
 
   React.useEffect(() => {
     setSiderContentWidth(shouldHideSiderContent ? 0 : DEFAULT_SIDER_CONTENT_WIDTH);
+    clearDetailPanel?.();
   }, [activeKey, shouldHideSiderContent]);
 
   React.useEffect(() => {
@@ -151,13 +158,34 @@ const Sidebar = () => {
 
   React.useEffect(() => {
     const hasKey = myTabItems.find((tab) => tab.key === currentTab?.key);
+    const pathnameChanged = pathnameRef.current !== pathname;
+    const keepSiderActiveTab = keepSiderActiveKey && myTabItems.find((tab) => tab.key === keepSiderActiveKey);
 
-    setSiderContentWidth(shouldHideSiderContent ? 0 : DEFAULT_SIDER_CONTENT_WIDTH);
+    if (pathnameChanged && keepSiderActiveTab) {
+      pathnameRef.current = pathname;
+      setManualSiderOpenKey(keepSiderActiveKey);
+      setActiveKey(keepSiderActiveKey);
+      setSiderContentWidth(DEFAULT_SIDER_CONTENT_WIDTH);
+      return;
+    }
 
-    if (currentTab && hasKey) {
+    const shouldSyncActiveKey = Boolean(currentTab && hasKey && (pathnameChanged || !manualSiderOpenKey));
+    const nextActiveKey = shouldSyncActiveKey ? currentTab?.key : activeKey;
+    const nextManualSiderOpenKey = pathnameChanged ? undefined : manualSiderOpenKey;
+    const nextShouldHideSiderContent = Boolean(currentTab?.hideSider && nextManualSiderOpenKey !== nextActiveKey);
+
+    if (pathnameChanged) {
+      pathnameRef.current = pathname;
+      setManualSiderOpenKey(undefined);
+      clearDetailPanel?.();
+    }
+
+    setSiderContentWidth(nextShouldHideSiderContent ? 0 : DEFAULT_SIDER_CONTENT_WIDTH);
+
+    if (shouldSyncActiveKey && currentTab) {
       setActiveKey(currentTab.key);
     }
-  }, [currentTab, myTabItems, shouldHideSiderContent]);
+  }, [activeKey, currentTab, keepSiderActiveKey, manualSiderOpenKey, myTabItems, pathname]);
 
   if (!userInfo) return null;
 
@@ -177,28 +205,28 @@ const Sidebar = () => {
         <div className={styles.tabsContainer}>
           {myTabItems.map((tab) => {
             return (
-              <div
-                key={tab.key}
-                className={classnames(styles.tabItem, tab.key === activeKey && styles.activeTab)}
-                onClick={() => {
-                  setActiveKey(tab.key);
-                  setSiderCollapsed(false);
-                  if (tab.navigatePath) {
-                    navigate(tab.navigatePath);
-                  }
-                }}
-              >
-                <Badge
-                  dot={tab.showDot || Number(tab.count) > 0}
-                  count={tab.count > 0 ? tab.count : undefined}
-                  size="small"
-                  style={{ padding: '0 3px' }}
+              <React.Fragment key={tab.key}>
+                {tab.key === 'knowledge' && <div className={styles.employeeResourceDivider} />}
+                <div
+                  className={classnames(styles.tabItem, tab.key === activeKey && styles.activeTab)}
+                  onClick={() => {
+                    setActiveKey(tab.key);
+                    setManualSiderOpenKey(tab.key);
+                    setSiderCollapsed(false);
+                  }}
                 >
-                  <AntdIcon type={tab.icon} className={styles.tabIcon} />
-                </Badge>
-                <span className={styles.tabLabel}>{intl.formatMessage({ id: tab.label })}</span>
-                <AntdIcon type={tab.activeIcon} className={styles.activeTabIcon} />
-              </div>
+                  <Badge
+                    dot={tab.showDot || Number(tab.count) > 0}
+                    count={tab.count > 0 ? tab.count : undefined}
+                    size="small"
+                    style={{ padding: '0 3px' }}
+                  >
+                    <AntdIcon type={tab.icon} className={styles.tabIcon} />
+                  </Badge>
+                  <span className={styles.tabLabel}>{intl.formatMessage({ id: tab.label })}</span>
+                  <AntdIcon type={tab.activeIcon} className={styles.activeTabIcon} />
+                </div>
+              </React.Fragment>
             );
           })}
         </div>
@@ -217,22 +245,20 @@ const Sidebar = () => {
           <div className={styles.userName}>{getDisplayUserNameInChat(userInfo.userName)}</div>
         </Dropdown>
       </div>
-      <SiderContentContext.Provider value={{ siderContentWidth, setSiderContentWidth }}>
-        <div
-          style={
-            {
-              '--sider-content-width': `${siderContentWidth}px`,
-            } as React.CSSProperties
-          }
-          className={classnames(styles.siderWrap, isSiderCollapsed && styles.collapsed)}
-        >
-          {siderContentWidth > 0 && (
-            <aside className={styles.sider}>
-              <SiderContent activeKey={activeKey} />
-            </aside>
-          )}
-        </div>
-      </SiderContentContext.Provider>
+      <div
+        style={
+          {
+            '--sider-content-width': `${siderContentWidth}px`,
+          } as React.CSSProperties
+        }
+        className={classnames(styles.siderWrap, isSiderCollapsed && styles.collapsed)}
+      >
+        {siderContentWidth > 0 && (
+          <aside className={styles.sider}>
+            <SiderContent activeKey={activeKey} />
+          </aside>
+        )}
+      </div>
       {!shouldHideSiderContent && (
         <div className={styles.collapseLine}>
           <div

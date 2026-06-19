@@ -1,12 +1,16 @@
 package com.iwhalecloud.byai.manager.domain.tag.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.manager.entity.tag.ByaiTagRelation;
 import com.iwhalecloud.byai.manager.mapper.tag.ByaiTagRelationMapper;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Date;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -18,70 +22,94 @@ import org.springframework.util.CollectionUtils;
 @Service
 public class ByaiTagRelationService {
 
-    /** 能力-模型关联在 byai_tag_relation 中的 obj_type（Story 一体化保存） */
-    public static final String OBJ_TYPE_AIMODEL = "AI_MODEL";
+    private static final Long DEFAULT_MODEL_TAG_ID = 1L;
 
     @Autowired
     private ByaiTagRelationMapper byaiTagRelationMapper;
 
     @Autowired
-    private SequenceService SequenceService;
+    private SequenceService sequenceService;
 
     /**
-     * 根据对象类型和对象ID列表批量查询标签ID
+     * 保存标签
      *
-     * @param objType 对象类型
-     * @param objIds  对象ID列表
-     * @return 标签ID列表（去重）
+     * @param ObjType 类型
+     * @param objId 类型标识
+     * @param tagId 标签标识
+     * @return ByaiTagRelation
      */
-    public List<Long> findTagIdsByObjTypeAndObjIds(String objType, List<Long> objIds) {
-        if (CollectionUtils.isEmpty(objIds)) {
-            return Collections.emptyList();
-        }
-        return byaiTagRelationMapper.findTagIdsByObjTypeAndObjIds(objType, objIds);
+    public ByaiTagRelation save(String ObjType, Long objId, Long tagId) {
+
+        ByaiTagRelation byaiTagRelation = new ByaiTagRelation();
+        byaiTagRelation.setRelationId(sequenceService.nextVal());
+        byaiTagRelation.setTagId(tagId);
+        byaiTagRelation.setObjId(objId);
+        byaiTagRelation.setObjType(ObjType);
+        byaiTagRelation.setCreateTime(new Date());
+        byaiTagRelation.setCreatorBy(CurrentUserHolder.getCurrentUserId());
+        byaiTagRelationMapper.insert(byaiTagRelation);
+
+        return byaiTagRelation;
     }
 
     /**
-     * 按对象类型+对象ID删除该对象下所有标签关系（用于模型能力关联先删后插）
+     * 删除标签
      *
-     * @param objType 对象类型（如 byai_aimodel）
-     * @param objId   对象ID（如模型主键字符串）
-     * @return 删除行数
+     * @param relationId 标签主键
      */
-    public int deleteByObjTypeAndObjId(String objType, String objId) {
-        if (objType == null || objId == null) {
-            return 0;
-        }
-        return byaiTagRelationMapper.deleteByObjTypeAndObjId(objType, objId);
+    public void removeById(Long relationId) {
+        byaiTagRelationMapper.deleteById(relationId);
+    }
+
+    /**
+     * @param objType 类型
+     * @param tagId 标签
+     * @return List<ByaiTagRelation>
+     */
+    public List<ByaiTagRelation> findTagRelation(String objType, Long tagId) {
+        LambdaQueryWrapper<ByaiTagRelation> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(ByaiTagRelation::getObjType, objType);
+        queryWrapper.eq(ByaiTagRelation::getTagId, tagId);
+        return byaiTagRelationMapper.selectList(queryWrapper);
     }
 
     /**
      * 保存模型-能力关联：先删该模型下能力关联，再按 abilities 列表批量插入 byai_tag_relation。
      *
-     * @param modelId   模型主键（保存后得到的 id）
+     * @param modelId 模型主键（保存后得到的 id）
      * @param abilities 能力列表（每项为能力/标签 ID 字符串，写入 tag_id）
      * @param creatorBy 创建人ID，可为 null
      */
     public void saveAimodelAbilities(Long modelId, List<String> abilities, Long creatorBy) {
-        if (modelId == null || CollectionUtils.isEmpty(abilities)) {
+        if (modelId == null) {
             return;
         }
-        String objId = String.valueOf(modelId);
-        byaiTagRelationMapper.deleteByObjTypeAndObjId(OBJ_TYPE_AIMODEL, objId);
+        LambdaQueryWrapper<ByaiTagRelation> deleteWrapper = new LambdaQueryWrapper<>();
+        deleteWrapper.eq(ByaiTagRelation::getObjType, Constants.OBJ_TYPE_AIMODEL);
+        deleteWrapper.eq(ByaiTagRelation::getObjId, modelId);
+        deleteWrapper.ne(ByaiTagRelation::getTagId, DEFAULT_MODEL_TAG_ID);
+        byaiTagRelationMapper.delete(deleteWrapper);
+        if (CollectionUtils.isEmpty(abilities)) {
+            return;
+        }
         Date now = new Date();
-        String creatorByStr = creatorBy != null ? String.valueOf(creatorBy) : null;
         List<ByaiTagRelation> list = new ArrayList<>();
-        for (String ability : abilities) {
+        Set<String> normalizedAbilities = new LinkedHashSet<>(abilities);
+        for (String ability : normalizedAbilities) {
             if (StringUtils.isEmpty(ability)) {
                 continue;
             }
+            Long tagId = Long.valueOf(ability);
+            if (DEFAULT_MODEL_TAG_ID.equals(tagId)) {
+                continue;
+            }
             ByaiTagRelation rel = new ByaiTagRelation();
-            rel.setRelationId(SequenceService.nextVal());
-            rel.setTagId(Long.valueOf(ability));
-            rel.setObjId(objId);
-            rel.setObjType(OBJ_TYPE_AIMODEL);
+            rel.setRelationId(sequenceService.nextVal());
+            rel.setTagId(tagId);
+            rel.setObjId(modelId);
+            rel.setObjType(Constants.OBJ_TYPE_AIMODEL);
             rel.setCreateTime(now);
-            rel.setCreatorBy(creatorByStr);
+            rel.setCreatorBy(creatorBy);
             list.add(rel);
         }
         if (!list.isEmpty()) {
@@ -89,17 +117,4 @@ public class ByaiTagRelationService {
         }
     }
 
-    /**
-     * 批量检查对象是否是重要用户
-     *
-     * @param objType 对象类型（如：重要用户）
-     * @param objIds  对象ID列表（数字员工ID列表）
-     * @return 有标签的对象ID列表
-     */
-    public List<Long> findImportantUserTagIds(String objType, List<Long> objIds) {
-        return findTagIdsByObjTypeAndObjIds(objType, objIds);
-    }
-
 }
-
-

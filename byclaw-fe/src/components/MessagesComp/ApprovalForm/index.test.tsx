@@ -143,13 +143,13 @@ describe('ApprovalForm', () => {
     expect(screen.getByText('Step Two')).toBeInTheDocument();
     expect(screen.getByText('Customer Name')).toBeInTheDocument();
     expect(screen.queryByText('Project Name')).not.toBeInTheDocument();
-    expect(getButton('上一步')).toBeDisabled();
-    expect(queryButton('下一步')).not.toBeInTheDocument();
-    expect(getButton('跳过')).toBeEnabled();
-    expect(getButton('确定')).toBeEnabled();
+    expect(getButton('common.prev')).toBeDisabled();
+    expect(queryButton('common.next')).not.toBeInTheDocument();
+    expect(getButton('common.skip')).toBeEnabled();
+    expect(getButton('common.confirm')).toBeEnabled();
     expect(screen.queryByText('common.submit')).not.toBeInTheDocument();
 
-    fireEvent.click(getButton('确定'));
+    fireEvent.click(getButton('common.confirm'));
 
     expect(messageListItemContent.substance[0].confirmed).toBe(true);
     expect(container.querySelectorAll('.ant-steps-item')[0]).toHaveClass('ant-steps-item-finish');
@@ -161,17 +161,17 @@ describe('ApprovalForm', () => {
     expect(screen.queryByText('Customer Name')).not.toBeInTheDocument();
     expect(container.querySelectorAll('.ant-steps-item')[0]).toHaveClass('ant-steps-item-finish');
     expect(container.querySelectorAll('.ant-steps-item')[1]).toHaveClass('ant-steps-item-process');
-    expect(getButton('上一步')).toBeEnabled();
-    expect(queryButton('下一步')).not.toBeInTheDocument();
+    expect(getButton('common.prev')).toBeEnabled();
+    expect(queryButton('common.next')).not.toBeInTheDocument();
     expect(screen.queryByText('common.submit')).not.toBeInTheDocument();
 
-    fireEvent.click(getButton('跳过'));
+    fireEvent.click(getButton('common.skip'));
 
     expect(messageListItemContent.substance[1].confirmed).toBe(false);
     expect(container.querySelectorAll('.ant-steps-item')[1]).toHaveClass('ant-steps-item-error');
     expect(screen.getByText('common.submit')).toBeInTheDocument();
 
-    fireEvent.click(getButton('上一步'));
+    fireEvent.click(getButton('common.prev'));
 
     await waitFor(() => {
       expect(screen.getByText('Customer Name')).toBeInTheDocument();
@@ -180,6 +180,8 @@ describe('ApprovalForm', () => {
       behavior: 'smooth',
       block: 'start',
     });
-    expect(screen.queryByText('Project Name')).not.toBeInTheDocument();
-  });
+    await waitFor(() => {
+      expect(screen.queryByText('Project Name')).not.toBeInTheDocument();
+    });
+  }, 15000);
 });

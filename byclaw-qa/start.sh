@@ -67,6 +67,10 @@ default_env_if_unset() {
     fi
 }
 
+using_custom_storage_provider() {
+    [[ -n "${BY_QA_STORAGE_PROVIDER-}" ]]
+}
+
 load_env_file "$SCRIPT_DIR/.env"
 
 usage() {
@@ -155,9 +159,13 @@ collect_required_source_missing_env() {
         BYCLAW_QA_AGENT_DATA_PATH \
         BYCLAW_QA_KB_FETCH_CACHE_TTL_SECONDS \
         BYCLAW_QA_KB_FETCH_CACHE_CLEANUP_INTERVAL_SECONDS \
-        BYCLAW_QA_KB_MINIO_BUCKET \
-        BYCLAW_QA_KB_MINIO_MARKDOWN_BUCKET \
         BYCLAW_QA_BYAI_WORKER_ID
+    if using_custom_storage_provider; then
+        return 0
+    fi
+    collect_missing_env "$missing_ref" \
+        BYCLAW_QA_KB_MINIO_BUCKET \
+        BYCLAW_QA_KB_MINIO_MARKDOWN_BUCKET
     collect_missing_minio_source_env "$missing_ref"
 }
 
@@ -257,6 +265,7 @@ default_env_if_unset "INSTANT_SEARCH_MAX_CONTEXT_RATIO" "0.8"
 default_env_if_unset "INSTANT_SEARCH_RESERVED_TOKENS" "2000"
 default_env_if_unset "INSTANT_SEARCH_MIN_SENTENCE_TOKENS" "50"
 default_env_if_unset "BY_QA_MODEL_CONFIG_PROVIDER" "redis_model_config:RedisModelConfigProvider"
+default_env_if_unset "BY_QA_STORAGE_PROVIDER" "byclaw_userfs_storage:build_byclaw_userfs_storage_provider"
 
 map_env_alias_if_unset "SERVICE_NAME" "QA_DOMAINNAME"
 if [[ -n "${ROOT_HOST_VALUE-}" && -z "${HOST_MACHINE-}" ]]; then

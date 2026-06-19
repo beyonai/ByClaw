@@ -2,9 +2,15 @@ package com.iwhalecloud.byai.state.domain.notification.service;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.iwhalecloud.byai.manager.dto.notification.NotificationManageDto;
+import com.iwhalecloud.byai.manager.dto.notification.NotificationQueryDto;
+import com.iwhalecloud.byai.manager.dto.notification.NotificationReadDto;
 import com.iwhalecloud.byai.manager.entity.notification.ByaiNotification;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.mapper.notification.ByaiNotificationMapper;
+import com.iwhalecloud.byai.manager.vo.notification.NotificationVO;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.util.JsonUtil;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
@@ -13,6 +19,7 @@ import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.state.application.service.message.MessageService;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.ContentVo;
+import com.iwhalecloud.byai.state.domain.chat.enums.MessageType;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.manager.vo.men.MenTaskVo;
 import com.iwhalecloud.byai.manager.dto.men.NotifyResultDto;
@@ -20,6 +27,7 @@ import com.iwhalecloud.byai.state.domain.message.service.MemoryMessageService;
 import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.iwhalecloud.byai.state.domain.template.enums.DebugModeEnum;
 import com.iwhalecloud.byai.state.domain.ws.constant.Constant;
 import com.iwhalecloud.byai.state.domain.ws.manager.NettyArrayOutputStream;
 import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
@@ -79,6 +87,18 @@ public class NotificationService {
 
     private static final String USER_NOTIFICATION_PREFIX = "USER_NOTIFICATION_";
 
+    private static final String UNREAD = "0";
+
+    private static final String NOT_DELETED = "0";
+
+    private static final String DELETED = "1";
+
+    private static final short DEFAULT_PRIORITY = 2;
+
+    private static final short SYSTEM_NOTIFICATION_BIZ_TYPE = 0;
+
+    private static final short VERSION_NOTIFICATION_BIZ_TYPE = 2;
+
     /**
      * 保存通知
      *
@@ -108,6 +128,129 @@ public class NotificationService {
     }
 
     /**
+     * 管理端分页查询通知。
+     */
+    public Page<NotificationVO> queryManagePage(NotificationQueryDto queryDto) {
+        NotificationQueryDto safeQuery = queryDto == null ? new NotificationQueryDto() : queryDto;
+        int pageNum = safeQuery.getPageNum() == null || safeQuery.getPageNum() < 1 ? 1 : safeQuery.getPageNum();
+        int pageSize = safeQuery.getPageSize() == null || safeQuery.getPageSize() < 1 ? 10 : safeQuery.getPageSize();
+        return byaiNotificationMapper.selectNotificationPage(new Page<>(pageNum, pageSize), safeQuery);
+    }
+
+    /**
+     * 管理端查询通知详情。
+     */
+    public ByaiNotification getManageNotification(Long id) {
+        if (id == null) {
+            throw new IllegalArgumentException("Notification id cannot be null");
+        }
+        ByaiNotification notification = byaiNotificationMapper.selectById(id);
+        if (notification == null || DELETED.equals(notification.getIsDeleted())) {
+            return null;
+        }
+        return notification;
+    }
+
+    /**
+     * 查询最新版本通知。
+     */
+    public ByaiNotification getLatestVersionNotification() {
+        LambdaQueryWrapper<ByaiNotification> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(ByaiNotification::getBizType, VERSION_NOTIFICATION_BIZ_TYPE)
+            .eq(ByaiNotification::getIsDeleted, NOT_DELETED)
+            .orderByDesc(ByaiNotification::getCreateTime)
+            .orderByDesc(ByaiNotification::getId)
+            .last("LIMIT 1");
+        return byaiNotificationMapper.selectOne(queryWrapper);
+    }
+
+    /**
+     * 管理端创建通知，复用现有保存能力。
+     */
+    public ByaiNotification createManageNotification(NotificationManageDto request) {
+        validateManageRequest(request, false);
+        ByaiNotification notification = new ByaiNotification();
+        notification.setId(sequenceService.nextVal());
+        applyManageFields(notification, request);
+        if (notification.getBizType() != SYSTEM_NOTIFICATION_BIZ_TYPE) {
+            notification.setIsRead(UNREAD);
+        }
+        notification.setIsDeleted(NOT_DELETED);
+        notification.setCreateTime(new Date());
+        if (notification.getPriority() == null && notification.getBizType() != VERSION_NOTIFICATION_BIZ_TYPE) {
+            notification.setPriority(DEFAULT_PRIORITY);
+        }
+        if (notification.getSenderId() == null) {
+            notification.setSenderId(CurrentUserHolder.getCurrentUserId());
+        }
+        save(notification, false);
+        return notification;
+    }
+
+    /**
+     * 管理端更新通知基础信息。
+     */
+    public ByaiNotification updateManageNotification(NotificationManageDto request) {
+        validateManageRequest(request, true);
+        ByaiNotification notification = byaiNotificationMapper.selectById(request.getId());
+        if (notification == null || DELETED.equals(notification.getIsDeleted())) {
+            throw new IllegalArgumentException("Notification does not exist");
+        }
+        applyManageFields(notification, request);
+        byaiNotificationMapper.updateById(notification);
+        return notification;
+    }
+
+    /**
+     * 管理端逻辑删除通知。
+     */
+    public boolean deleteManageNotification(Long id) {
+        if (id == null) {
+            throw new IllegalArgumentException("Notification id cannot be null");
+        }
+        ByaiNotification notification = new ByaiNotification();
+        notification.setId(id);
+        notification.setIsDeleted(DELETED);
+        return byaiNotificationMapper.updateById(notification) > 0;
+    }
+
+    private void validateManageRequest(NotificationManageDto request, boolean requireId) {
+        if (request == null) {
+            throw new IllegalArgumentException("Notification request cannot be null");
+        }
+        if (requireId && request.getId() == null) {
+            throw new IllegalArgumentException("Notification id cannot be null");
+        }
+        if (!requireId && StringUtils.isBlank(request.getTitle())) {
+            throw new IllegalArgumentException("Notification title cannot be blank");
+        }
+        if (!requireId && StringUtils.isBlank(request.getContent())) {
+            throw new IllegalArgumentException("Notification content cannot be blank");
+        }
+    }
+
+    private void applyManageFields(ByaiNotification notification, NotificationManageDto request) {
+        if (request.getTitle() != null) {
+            notification.setTitle(request.getTitle());
+        }
+        if (request.getContent() != null) {
+            notification.setContent(request.getContent());
+        }
+        if (request.getBizType() != null) {
+            notification.setBizType(request.getBizType());
+        }
+        if (request.getPriority() != null) {
+            notification.setPriority(request.getPriority());
+        }
+        if (request.getExpireTime() != null) {
+            notification.setExpireTime(request.getExpireTime());
+        }
+        if (request.getExtraInfo() != null) {
+            notification.setExtraInfo(request.getExtraInfo());
+        }
+    }
+
+    /**
      * 创建会话，如果存在则返回，不存在则创建新会话，保证一个人有且只有一个会话
      *
      * @param notification
@@ -133,6 +276,7 @@ public class NotificationService {
         session.setObjectType(ConversationObjectType.NOTIFICATION); // 设置对象类型
         session.setSessionType(SessionType.H_AS.getCode());
         session.setCreatorId(targetId); // 设置创建者ID
+        session.setIsDebug(DebugModeEnum.DEBUG_0.getNum()); // 设置为非调试会话
         session.setEnterpriseId(CurrentUserHolder.getEnterpriseId()); // 设置企业ID
 
         // 保存会话到数据库
@@ -265,6 +409,7 @@ public class NotificationService {
             return;
         }
         Map data = new HashMap();
+        data.put("type", MessageType.NOTIFICATION.name());
         data.put("session", complexNotifSession);
         try (NettyArrayOutputStream outputStream = new NettyArrayOutputStream(ctx)) {
             CompletionsUtils.responseWrite(outputStream, JsonUtil.toJSONString(data));
@@ -276,6 +421,46 @@ public class NotificationService {
 
     private String getUserNotifKey(Long userId) {
         return USER_NOTIFICATION_PREFIX + userId;
+    }
+
+    /**
+     * 批量设置通知已读
+     *
+     * @param notificationReadDto 已读参数
+     * @return ResultUtil
+     */
+    public int batchSetNotificationRead(NotificationReadDto notificationReadDto) {
+
+        try {
+
+            log.info("批量设置通知已读，参数：{}", notificationReadDto);
+
+            int updateCount = 0;
+
+            // 判断read参数
+            if ("ALL".equalsIgnoreCase(notificationReadDto.getRead())) {
+                // 设置当前用户所有通知为已读
+                updateCount = byaiNotificationMapper.setAllNotificationRead(notificationReadDto.getTargetId());
+                log.info("设置所有通知已读完成，更新了{}条记录", updateCount);
+            }
+            else {
+                // 批量设置指定ID的通知为已读
+                updateCount = byaiNotificationMapper.batchSetNotificationRead(notificationReadDto.getIdList(),
+                    notificationReadDto.getTargetId());
+            }
+
+            // 清除给标识ws，防止一直给用户推送消息
+            String userNotifKey = this.getUserNotifKey(notificationReadDto.getTargetId());
+            RedisUtil.removeKey(userNotifKey);
+
+            log.info("批量设置指定通知已读完成，更新了{}条记录", updateCount);
+
+            return updateCount;
+        }
+        catch (Exception e) {
+            log.error("批量设置通知已读异常", e);
+            throw e;
+        }
     }
 
 }

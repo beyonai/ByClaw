@@ -6,13 +6,17 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import com.iwhalecloud.byai.common.storage.constants.StorageType;
 import lombok.Data;
 
-import java.util.Map;
-
 @Data
 @ConfigurationProperties(prefix = "byclaw.sandbox")
 public class SandboxProperties {
 
     private OpenSandboxConfig opensandbox = new OpenSandboxConfig();
+
+    private VolumeConfig volume = new VolumeConfig();
+
+    private ProfileConfig profile = new ProfileConfig();
+
+    private TierAutoscaleConfig tierAutoscale = new TierAutoscaleConfig();
 
     /**
      * Redis metadata cache TTL. DB remains the lifecycle source of truth.
@@ -45,6 +49,55 @@ public class SandboxProperties {
      * Example: /data/byai/openclaw
      */
     private String basePath;
+
+    @Data
+    public static class VolumeConfig {
+
+        public static final String BACKEND_MINIO_MOUNT = "minio-mount";
+        public static final String BACKEND_FILE = "file";
+
+        /**
+         * Runtime volume backend for OpenSandbox PRIVATE volumes.
+         * minio-mount keeps the legacy rclone path; file points to a real filesystem root.
+         */
+        private String backend = BACKEND_MINIO_MOUNT;
+
+        /**
+         * Host path mounted on every OpenSandbox Docker node, for example /mnt/byclaw-file.
+         */
+        private String fileRoot;
+
+        /**
+         * Filesystem implementation behind fileRoot: cephfs, nfs, smb, or bind.
+         */
+        private String fileType = "bind";
+
+        /**
+         * Snapshot provider outside ByClaw: ceph, nas, zfs, btrfs, lvm, or none.
+         */
+        private String snapshotProvider = "none";
+
+        /**
+         * Whether a File Browser style UI is deployed for the runtime volume.
+         */
+        private boolean fileBrowserEnabled = false;
+    }
+
+    @Data
+    public static class ProfileConfig {
+        /**
+         * Disabled by default so legacy standalone/Docker deployments keep the old service_key-only flow.
+         */
+        private boolean enabled = false;
+    }
+
+    @Data
+    public static class TierAutoscaleConfig {
+        /**
+         * Dynamic sandbox resizing is opt-in. ByClaw records and decides, OpenSandbox performs the resize.
+         */
+        private boolean enabled = false;
+    }
 
     @Data
     public static class OpenSandboxConfig {

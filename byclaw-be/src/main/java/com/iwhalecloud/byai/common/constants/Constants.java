@@ -196,6 +196,11 @@ public final class Constants {
 
     public static final String THIRD_AGENT_URL = "THIRD_AGENT_URL";
 
+    /**
+     * 系统参数 code：Web 前端基础地址（协议+域名[+端口]），用于拼接对外可访问的 URL。
+     */
+    public static final String WEB_BASE_URL = "WEB_BASE_URL";
+
     public static final String DB_TABLE = "DB_TABLE";
 
     public static final String OUT_PARAM = "out_param";
@@ -248,6 +253,9 @@ public final class Constants {
      * 反馈桶名称
      */
     public static final String BUCKET_NAME_FEEDBACK = "byai-feedback";
+
+    /** 能力-模型关联在 byai_tag_relation 中的 obj_type（Story 一体化保存） */
+    public static final String OBJ_TYPE_AIMODEL = "AI_MODEL";
 
     /**
      * 图标桶名称

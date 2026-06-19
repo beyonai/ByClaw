@@ -5,13 +5,14 @@ import AntdIcon from '@/components/AntdIcon';
 import useGlobal from '@/hooks/useGlobal';
 import ChatAvatar from '@/components/ChatAvatar';
 import { ISession } from '@/typescript/session';
-import { SessionType } from '@/constants/session';
+// import { SessionType } from '@/constants/session';
 import CreateTemplate from '@/components/ChatLayoutComp/components/CreateTemplate';
 import styles from './ChatTitle.module.less';
 import { IAgentType } from '@/typescript/agent';
 import NullableAntdCompWithAnim from '../NullableAntdCompWithAnim';
 import { isAdminVip } from '@/utils/auth';
 import { useSelector, useIntl } from '@umijs/max';
+import VNC from './components/VNC';
 
 interface ChatTitleProps {
   sessionId?: string;
@@ -30,11 +31,11 @@ export default function ChatTitle(props: ChatTitleProps) {
 
   const [openTemplate, setOpenTemplate] = React.useState<boolean>(false);
 
-  const onToggleAchievements = () => {
-    achievementRef.current?.toggle();
-  };
+  // const onToggleAchievements = () => {
+  //   achievementRef.current?.toggle();
+  // };
 
-  const isSimpleSession = currentSession?.sessionType === SessionType.simple;
+  // const isSimpleSession = currentSession?.sessionType === SessionType.simple;
 
   return (
     <>
@@ -45,17 +46,18 @@ export default function ChatTitle(props: ChatTitleProps) {
 
             <div className={styles.chatTitle}>{currentSession?.sessionName}</div>
             <div className={styles.actions}>
+              <VNC />
               {isAdminVip(userInfo) && (
                 <span className={styles.btn} onClick={() => setOpenTemplate(true)} style={{ padding: '0 8px' }}>
                   <AntdIcon type="icon-a-View-grid-listliebiaochakanmoshi" />
                   <span>{intl.formatMessage({ id: 'chatTitle.saveAsTemplate' })}</span>
                 </span>
               )}
-              {!isSimpleSession && (
+              {/* {!isSimpleSession && (
                 <span className={styles.btn} onClick={onToggleAchievements}>
                   <AntdIcon type="icon-a-Folder-withdrawal-onetuichuwenjianjia1" />
                 </span>
-              )}
+              )} */}
             </div>
           </div>
         )}

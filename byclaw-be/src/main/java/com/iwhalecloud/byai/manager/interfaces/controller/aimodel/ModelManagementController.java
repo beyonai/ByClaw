@@ -1,9 +1,12 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.aimodel;
 
 import com.iwhalecloud.byai.manager.application.service.aimodel.GptProxyChatCompletionsStreamApplicationService;
+import com.iwhalecloud.byai.manager.application.service.aimodel.ModelConfigCompleteApplicationService;
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelDebugRerankApplicationService;
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelManagementApplicationService;
 import com.iwhalecloud.byai.manager.application.service.aimodel.RerankDebugResult;
+import com.iwhalecloud.byai.manager.dto.aimodel.ModelConfigCompleteResponse;
+import com.iwhalecloud.byai.manager.dto.aimodel.ModelDefault;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelIdRequest;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelListRequest;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelListResponse;
@@ -17,6 +20,7 @@ import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
+import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,6 +50,9 @@ public class ModelManagementController {
 
     @Autowired
     private ModelDebugRerankApplicationService modelDebugRerankApplicationService;
+
+    @Autowired
+    private ModelConfigCompleteApplicationService modelConfigCompleteApplicationService;
 
     /**
      * 模型列表（分页+过滤）
@@ -78,6 +85,15 @@ public class ModelManagementController {
     public ResponseUtil<Map<String, String>> upsertModel(@RequestBody ModelUpsertRequest request) {
         Map<String, String> data = modelManagementApplicationService.upsertModel(request, null);
         return ResponseUtil.success(data);
+    }
+
+    /**
+     * 一键完善全部模型参数。只更新上下文、maxTokens、采样与 Reasoning/Thinking 参数，不修改 URL、modelCode、apiKey、供应商。
+     */
+    @ApiOperation("一键完善全部模型参数")
+    @GetMapping(value = "/completeAllModelConfig", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseUtil<ModelConfigCompleteResponse> completeAllModelConfig() {
+        return ResponseUtil.success(modelConfigCompleteApplicationService.completeAllModelConfig());
     }
 
     /**
@@ -164,6 +180,19 @@ public class ModelManagementController {
     @GetMapping(value = "/getDefaultModelId", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseUtil<String> getDefaultModelId() {
         return ResponseUtil.successResponse(modelManagementApplicationService.getDefaultModelId());
+    }
+
+    /**
+     * 设置模型默认圣诞
+     *
+     * @param modelDefault 默认模型
+     * @return ResponseUtil
+     */
+    @ManageLogAnnotation(name = "模型管理", description = "设置默认对话模型")
+    @PostMapping(value = "/setDefaultModel", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseUtil<String> setDefaultModel(@RequestBody @Valid ModelDefault modelDefault) {
+        modelManagementApplicationService.setDefaultModel(modelDefault);
+        return ResponseUtil.successResponse();
     }
 
 }

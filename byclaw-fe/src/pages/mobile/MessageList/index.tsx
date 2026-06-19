@@ -3,11 +3,10 @@ import { Button, Spin, Checkbox } from 'antd';
 import classnames from 'classnames';
 import { head, last, size, uniq, pullAll } from 'lodash';
 import React, { forwardRef, useCallback, useImperativeHandle } from 'react';
-// @ts-ignore
-import InfiniteScroll from '@/components/InfiniteScroll';
 
 import { IMessageState } from '@/constants/message';
 
+import MessageInfiniteScroll from '@/components/MessageList/components/MessageInfiniteScroll';
 import useToBottomBtn from '@/components/MessageList/hooks/useToBottomBtn';
 import useRender from './useRender';
 import DividerTips from './components/DividerTips';
@@ -64,7 +63,7 @@ function MessageList(props: IProps, ref: any) {
   } = props;
   const { isMultiChoices = false, setMultiChoicesMsgId, multiChoicesMsgId } = props;
 
-  const infiniteScrollRef = React.useRef<InfiniteScroll>(null);
+  const infiniteScrollRef = React.useRef<MessageInfiniteScroll>(null);
   const scrollMessageDomId = React.useRef<string>(`scrollMessage_${generateUniqueId()}`);
 
   const { renderMessage, extendsRender } = useRender({
@@ -109,7 +108,7 @@ function MessageList(props: IProps, ref: any) {
         >
           {!sessionId && <WelcomeTips />}
           {sessionId && (
-            <InfiniteScroll
+            <MessageInfiniteScroll
               ref={infiniteScrollRef}
               next={(isPrev?: boolean) => {
                 onNext?.(isPrev);
@@ -197,7 +196,7 @@ function MessageList(props: IProps, ref: any) {
                   </div>
                 );
               })}
-            </InfiniteScroll>
+            </MessageInfiniteScroll>
           )}
         </div>
       </MessageListContext.Provider>

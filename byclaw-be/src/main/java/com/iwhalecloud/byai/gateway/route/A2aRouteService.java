@@ -5,13 +5,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
+import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
@@ -25,7 +24,6 @@ import com.iwhalecloud.byai.state.domain.chat.service.ParamService;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
 import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
-
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -36,10 +34,8 @@ import okhttp3.ResponseBody;
 import okio.BufferedSource;
 
 /**
- * 处理 createType=FROM_THIRD 且 integrationType=A2A 的外部智能体调用。
- * 流程：拉取 Agent Card → 构造 JSON-RPC message/stream 请求 → 解析 SSE 响应 →
- * 将 Task / Message / TaskStatusUpdate / TaskArtifactUpdate 映射为内部事件格式 →
- * 通过 PythonSseService 转写到客户端。
+ * 处理 createType=FROM_THIRD 且 integrationType=A2A 的外部智能体调用。 流程：拉取 Agent Card → 构造 JSON-RPC message/stream 请求 → 解析 SSE 响应
+ * → 将 Task / Message / TaskStatusUpdate / TaskArtifactUpdate 映射为内部事件格式 → 通过 PythonSseService 转写到客户端。
  */
 @Slf4j
 @Service
@@ -52,8 +48,9 @@ public class A2aRouteService {
     private static final long READ_TIMEOUT_SECONDS = 600L;
 
     /** 仅这几个头需要透传给 A2A 远端 */
-    private static final String[] A2A_FORWARD_HEADERS = {"beyond-token", "sso-token", "cookie", "system-code"};
-
+    private static final String[] A2A_FORWARD_HEADERS = {
+        "beyond-token", "sso-token", "cookie", "system-code"
+    };
 
     @Autowired
     private PythonSseService pythonSseService;
@@ -101,17 +98,14 @@ public class A2aRouteService {
     private AgentResourceChatInfoDto findExternalAgent(ChatProcessContext ctx) {
         Long agentId = ctx.getAssistantChatDto().getAgentId();
         @SuppressWarnings("unchecked")
-        List<AgentResourceChatInfoDto> agentList =
-                (List<AgentResourceChatInfoDto>) ctx.getParams().get("agent_list");
+        List<AgentResourceChatInfoDto> agentList = (List<AgentResourceChatInfoDto>) ctx.getParams().get("agent_list");
         if (CollectionUtils.isEmpty(agentList) || agentId == null) {
             throw new BdpRuntimeException(I18nUtil.get("route.a2a.agent.not.found"));
         }
         return agentList.stream()
-                .filter(a -> agentId.equals(a.getId())
-                        && "FROM_THIRD".equals(a.getCreateType())
-                        && "A2A".equals(a.getIntegrationType()))
-                .findFirst()
-                .orElseThrow(() -> new BdpRuntimeException(I18nUtil.get("route.a2a.agent.not.found")));
+            .filter(a -> agentId.equals(a.getId()) && "FROM_THIRD".equals(a.getCreateType())
+                && "A2A".equals(a.getIntegrationType()))
+            .findFirst().orElseThrow(() -> new BdpRuntimeException(I18nUtil.get("route.a2a.agent.not.found")));
     }
 
     private Map<String, Object> filterA2aHeaders(Map<String, Object> all) {
@@ -167,14 +161,14 @@ public class A2aRouteService {
     }
 
     private JSONObject fetchAgentCard(String cardUrl, Map<String, Object> headers) throws IOException {
-        OkHttpClient client = newClient();
+        OkHttpClient client = OkHttpUtil.getHttpClient();
         Request.Builder reqBuilder = new Request.Builder().url(cardUrl).get();
         applyHeaders(reqBuilder, headers);
 
         try (Response response = client.newCall(reqBuilder.build()).execute()) {
             if (!response.isSuccessful() || response.body() == null) {
-                throw new BdpRuntimeException(I18nUtil.get("route.a2a.card.fetch.failed",
-                        response != null ? response.code() : "unknown"));
+                throw new BdpRuntimeException(
+                    I18nUtil.get("route.a2a.card.fetch.failed", response != null ? response.code() : "unknown"));
             }
             String body = response.body().string();
             JSONObject card = JSON.parseObject(body);
@@ -188,9 +182,8 @@ public class A2aRouteService {
     private static final int HISTORY_MAX_ROUNDS = 10;
 
     /**
-     * 拼接历史会话上下文，对齐 Python 的 _handle_context_histories：
-     * "Here is the conversation history: \nFor context:\n[user] said: ...\n[assistant] said: ...\n"
-     * 历史消息 + 历史用户文件均由 ParamService.getChatHistories 统一处理。
+     * 拼接历史会话上下文，对齐 Python 的 _handle_context_histories： "Here is the conversation history: \nFor context:\n[user] said:
+     * ...\n[assistant] said: ...\n" 历史消息 + 历史用户文件均由 ParamService.getChatHistories 统一处理。
      */
     private String buildHistoryText(ChatProcessContext ctx) {
         if (ctx.assistantChatDto == null || ctx.sessionId == null) {
@@ -262,16 +255,13 @@ public class A2aRouteService {
         return request;
     }
 
-    private void streamFromA2aAgent(String rpcUrl, JSONObject jsonRpc,
-                                    Map<String, Object> headers, ChatProcessContext ctx) throws IOException {
-        OkHttpClient client = newClient();
+    private void streamFromA2aAgent(String rpcUrl, JSONObject jsonRpc, Map<String, Object> headers,
+        ChatProcessContext ctx) throws IOException {
+        OkHttpClient client = OkHttpUtil.getHttpClient();
         String jsonBody = jsonRpc.toJSONString();
 
-        Request.Builder reqBuilder = new Request.Builder()
-                .url(rpcUrl)
-                .post(RequestBody.create(jsonBody, JSON_TYPE))
-                .addHeader("Accept", "text/event-stream")
-                .addHeader("Content-Type", "application/json");
+        Request.Builder reqBuilder = new Request.Builder().url(rpcUrl).post(RequestBody.create(jsonBody, JSON_TYPE))
+            .addHeader("Accept", "text/event-stream").addHeader("Content-Type", "application/json");
         applyHeaders(reqBuilder, headers);
 
         log.info("A2A 调用外部智能体, sessionId: {}, rpcUrl: {}, body: {}", ctx.sessionId, rpcUrl, jsonBody);
@@ -347,13 +337,13 @@ public class A2aRouteService {
         if (internalLine == null) {
             return;
         }
-        pythonSseService.getContentFromPythonStreamV3(internalLine, ctx.res,
-                ctx.messageContext, ctx.getAgentIds(), ctx);
+        pythonSseService.getContentFromPythonStreamV3(internalLine, ctx.res, ctx.messageContext, ctx.getAgentIds(),
+            ctx);
     }
 
     private void dispatchA2aChunkEnd(ChatProcessContext ctx) {
         pythonSseService.getContentFromPythonStreamV3(wrapLine(SseResponseEventEnum.answerEnd, "{}"), ctx.res,
-                ctx.messageContext, ctx.getAgentIds(), ctx);
+            ctx.messageContext, ctx.getAgentIds(), ctx);
     }
 
     /**
@@ -384,7 +374,7 @@ public class A2aRouteService {
                 kind = "task";
             }
             else if (result.containsKey("status") && result.getJSONObject("status") != null
-                    && result.getJSONObject("status").containsKey("state")) {
+                && result.getJSONObject("status").containsKey("state")) {
                 kind = "status-update";
             }
             else if (result.containsKey("parts") && result.containsKey("role")) {
@@ -404,25 +394,21 @@ public class A2aRouteService {
             JSONObject status = result.getJSONObject("status");
             String state = status != null ? status.getString("state") : null;
             String text = status != null && status.getJSONObject("message") != null
-                    ? extractTextFromParts(status.getJSONObject("message").getJSONArray("parts"))
-                    : "";
+                ? extractTextFromParts(status.getJSONObject("message").getJSONArray("parts"))
+                : "";
             String contentType = "auth_required".equalsIgnoreCase(state) ? "4003" : "1002";
             return buildAnswerLine(SseResponseEventEnum.answerDelta, text, contentType);
         }
         if ("artifact-update".equalsIgnoreCase(kind)) {
             JSONObject artifact = result.getJSONObject("artifact");
-            String text = artifact != null
-                    ? extractTextFromParts(artifact.getJSONArray("parts"))
-                    : "";
+            String text = artifact != null ? extractTextFromParts(artifact.getJSONArray("parts")) : "";
             return buildAnswerLine(SseResponseEventEnum.answerDelta, text, "1002");
         }
         return null;
     }
 
     /**
-     * 兼容 OpenAI Chat Completions 的 data-only SSE chunk：
-     * data: {"choices":[{"delta":{"content":"..."}}]}
-     * data: [DONE]
+     * 兼容 OpenAI Chat Completions 的 data-only SSE chunk： data: {"choices":[{"delta":{"content":"..."}}]} data: [DONE]
      */
     private String convertOpenAiChunkToInternalLine(JSONObject chunk) {
         if (chunk.containsKey("error")) {
@@ -517,14 +503,6 @@ public class A2aRouteService {
         lineJson.put("event", event);
         lineJson.put("data", dataJson);
         return lineJson.toJSONString();
-    }
-
-    private OkHttpClient newClient() {
-        return new OkHttpClient.Builder()
-                .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .writeTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .build();
     }
 
     private void applyHeaders(Request.Builder reqBuilder, Map<String, Object> headers) {

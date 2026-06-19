@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.constants.env.EnvConfigKey;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
+import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.state.interfaces.controller.langfuse.dto.LangfuseQueryDto;
@@ -13,7 +14,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.util.UriComponentsBuilder;
-import com.iwhalecloud.byai.state.common.util.OkHttpUtil;
 import okhttp3.Headers;
 import okhttp3.Response;
 import java.time.LocalDateTime;
@@ -174,15 +174,12 @@ public class LangfuseService {
     }
 
     /**
-     * 从本地消息记录构建 Langfuse traces 格式的数据。
-     * 将用户输入(usage=1)与紧随其后的系统回答(usage=2)配对为一个 trace。
-     * 如果指定了 resMsgId，只返回该回复消息对应的一问一答。
+     * 从本地消息记录构建 Langfuse traces 格式的数据。 将用户输入(usage=1)与紧随其后的系统回答(usage=2)配对为一个 trace。 如果指定了 resMsgId，只返回该回复消息对应的一问一答。
      */
     private Map<String, Object> buildTracesFromLocalMessages(LangfuseQueryDto queryDto) {
         Long sessionId = Long.parseLong(queryDto.getSessionId());
 
-        com.iwhalecloud.byai.state.domain.message.qo.MessageQo messageQo =
-            new com.iwhalecloud.byai.state.domain.message.qo.MessageQo();
+        com.iwhalecloud.byai.state.domain.message.qo.MessageQo messageQo = new com.iwhalecloud.byai.state.domain.message.qo.MessageQo();
         messageQo.setSessionId(sessionId);
         messageQo.setTopK(queryDto.getLimit() != null ? queryDto.getLimit() * 2 : 100);
 
@@ -194,7 +191,8 @@ public class LangfuseService {
         if (StringUtils.isNotBlank(queryDto.getResMsgId())) {
             try {
                 resMsgId = Long.parseLong(queryDto.getResMsgId());
-            } catch (NumberFormatException ignored) {
+            }
+            catch (NumberFormatException ignored) {
             }
         }
 
@@ -262,8 +260,7 @@ public class LangfuseService {
         }
         try {
             long ms = Long.parseLong(millis);
-            return java.time.Instant.ofEpochMilli(ms)
-                .atZone(java.time.ZoneId.systemDefault())
+            return java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault())
                 .format(DateTimeFormatter.ISO_DATE_TIME);
         }
         catch (NumberFormatException e) {
@@ -686,22 +683,21 @@ public class LangfuseService {
             String endTimeIso = startTimeIso;
             Double latencySec = null;
 
-            com.iwhalecloud.byai.state.domain.message.qo.MessageQo messageQo =
-                new com.iwhalecloud.byai.state.domain.message.qo.MessageQo();
+            com.iwhalecloud.byai.state.domain.message.qo.MessageQo messageQo = new com.iwhalecloud.byai.state.domain.message.qo.MessageQo();
             messageQo.setSessionId(msg.getSessionId());
             messageQo.setTopK(100);
             List<ByaiMessageHotDto> messages = byaiMessageHotService.getMessages(messageQo);
             java.util.Collections.reverse(messages);
             for (int i = 0; i < messages.size() - 1; i++) {
-                if (messages.get(i).getMessageId().equals(messageId)
-                    && messages.get(i + 1).getUsage() != null
+                if (messages.get(i).getMessageId().equals(messageId) && messages.get(i + 1).getUsage() != null
                     && messages.get(i + 1).getUsage() == 2) {
                     ByaiMessageHotDto reply = messages.get(i + 1);
                     output = reply.getMessageContent();
                     endTimeIso = millisToIso(reply.getCreateTimeMillis());
                     if (msg.getCreateTimeMillis() != null && reply.getCreateTimeMillis() != null) {
                         try {
-                            long ms = Long.parseLong(reply.getCreateTimeMillis()) - Long.parseLong(msg.getCreateTimeMillis());
+                            long ms = Long.parseLong(reply.getCreateTimeMillis())
+                                - Long.parseLong(msg.getCreateTimeMillis());
                             latencySec = ms / 1000.0;
                         }
                         catch (NumberFormatException ignored) {
@@ -1062,8 +1058,8 @@ public class LangfuseService {
 
                 // 计算延迟时间
                 if (trace.containsKey("startTime") && trace.containsKey("endTime")) {
-                    Long duration = calculateDurationFromTimes(
-                        (String) trace.get("startTime"), (String) trace.get("endTime"));
+                    Long duration = calculateDurationFromTimes((String) trace.get("startTime"),
+                        (String) trace.get("endTime"));
                     if (duration != null) {
                         totalLatency += duration;
                     }

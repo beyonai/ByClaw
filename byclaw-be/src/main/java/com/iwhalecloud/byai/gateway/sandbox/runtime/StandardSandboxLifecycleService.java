@@ -8,7 +8,9 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -25,6 +27,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest;
 import com.iwhalecloud.byai.common.feign.response.SandboxResponse;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
+import com.iwhalecloud.byai.gateway.sandbox.client.model.CreateSandboxRequest;
 import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLifecycleFacade;
@@ -99,7 +102,7 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
         String sandboxType = launchRequest.getSandboxType();
         String redisKey = buildRedisKey(userCode, sandboxType);
 
-        SandboxServiceSpec spec = specRepository.findByServiceKey(sandboxType).orElse(null);
+        SandboxServiceSpec spec = specRepository.findByServiceKeyAndProfile(sandboxType, launchRequest.getProfileKey()).orElse(null);
         if (spec == null) {
             throw new IllegalArgumentException("Unknown sandbox service key: " + sandboxType);
         }
@@ -117,7 +120,8 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
                 runtimeProvider.providerType(), userCode, sandboxType, lockKey);
             var request = specProcessor.buildCreateRequest(
                 userCode, sandboxType, launchRequest.getEnvs(), launchRequest.getUserInfo(), spec);
-            String idempotencyKey = buildIdempotencyKey(userCode, sandboxType);
+            String idempotencyKey = buildIdempotencyKey(userCode, sandboxType, launchRequest.getMetadata());
+            mergeLaunchMetadata(request, launchRequest.getMetadata());
 
             Optional<SandboxRuntimeInstance> reusable = runtimeProvider.findReusable(userCode, sandboxType);
             if (reusable.isPresent()) {
@@ -245,6 +249,22 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
         }
     }
 
+    @Override
+    public SandboxResponse<SandboxRuntimePage<SandboxRuntimeInstance>> listSandboxesByMetadata(Map<String, String> metadata,
+                                                                                               int pageNo,
+                                                                                               int pageSize) {
+        try {
+            SandboxRuntimePage<SandboxRuntimeInstance> page = runtimeProvider.listSandboxesByMetadata(metadata,
+                pageNo, pageSize);
+            return SandboxResponse.success(page != null ? page : SandboxRuntimePage.empty(pageNo, pageSize));
+        }
+        catch (Exception e) {
+            log.warn("Failed to list sandboxes by metadata, provider={}, metadata={}, pageNo={}, pageSize={}: {}",
+                runtimeProvider.providerType(), metadata, pageNo, pageSize, e.getMessage(), e);
+            return SandboxResponse.error(e.getMessage());
+        }
+    }
+
     private void persistSandbox(String redisKey, SandboxInfo info) {
         long ttlSeconds = Math.max(60L, properties.getMetadataCacheTtl().toSeconds());
         redisTemplate.opsForValue().set(redisKey, serialize(info), ttlSeconds, TimeUnit.SECONDS);
@@ -310,8 +330,27 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
         }
     }
 
-    private static String buildIdempotencyKey(String userCode, String sandboxType) {
-        String raw = Objects.toString(userCode, "") + "\0" + Objects.toString(sandboxType, "");
+    private static void mergeLaunchMetadata(CreateSandboxRequest request, Map<String, String> launchMetadata) {
+        if (request == null || launchMetadata == null || launchMetadata.isEmpty()) {
+            return;
+        }
+        Map<String, String> metadata = new LinkedHashMap<>();
+        if (request.getMetadata() != null) {
+            metadata.putAll(request.getMetadata());
+        }
+        launchMetadata.forEach((key, value) -> {
+            if (key != null && !key.isBlank() && value != null && !value.isBlank()) {
+                metadata.put(key, value);
+            }
+        });
+        request.setMetadata(metadata.isEmpty() ? null : metadata);
+    }
+
+    private static String buildIdempotencyKey(String userCode, String sandboxType, Map<String, String> metadata) {
+        String resourceId = metadata != null ? Objects.toString(metadata.get("resourceId"), "") : "";
+        String recordId = metadata != null ? Objects.toString(metadata.get("recordId"), "") : "";
+        String raw = Objects.toString(userCode, "") + "\0" + Objects.toString(sandboxType, "")
+            + "\0" + resourceId + "\0" + recordId;
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] digest = md.digest(raw.getBytes(StandardCharsets.UTF_8));

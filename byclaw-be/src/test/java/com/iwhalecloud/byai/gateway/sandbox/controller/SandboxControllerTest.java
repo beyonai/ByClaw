@@ -18,6 +18,7 @@ import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
+import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 
 class SandboxControllerTest {
 
@@ -80,6 +81,7 @@ class SandboxControllerTest {
         SandboxController controller = new SandboxController();
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
         ReflectionTestUtils.setField(controller, "sandboxRecordMapper", sandboxRecordMapper);
+        ReflectionTestUtils.setField(controller, "byaiSystemConfigService", mock(ByaiSystemConfigService.class));
 
         SsSandboxRecord record = new SsSandboxRecord();
         record.setId(1L);

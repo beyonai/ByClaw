@@ -362,6 +362,18 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
     handleCloseMention();
   };
 
+  useEffect(() => {
+    const handleInsertItem = ({ item, type }: { item: any; type: IResourceType }) => {
+      insertItem(item, type);
+    };
+
+    EventEmitter.on('queryInput-insert-item', handleInsertItem);
+
+    return () => {
+      EventEmitter.off('queryInput-insert-item', handleInsertItem);
+    };
+  });
+
   const onDrop = (e: React.DragEvent) => {
     // 原有的内部数据拖拽逻辑
     const node = getDropData(e);

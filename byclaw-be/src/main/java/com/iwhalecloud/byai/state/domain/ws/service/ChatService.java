@@ -4,7 +4,13 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
+import com.alibaba.fastjson.JSONObject;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.state.application.service.chat.AssistantChatApplicationService;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
+import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
+import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import com.iwhalecloud.byai.state.application.service.message.MessageService;
@@ -36,6 +42,12 @@ public class ChatService {
     @Autowired
     private MessageService messageService;
 
+    @Autowired
+    private AssistantChatApplicationService assistantChatApplicationService;
+
+    @Autowired
+    private RunningOutputStreamRegistry runningOutputStreamRegistry;
+
     /**
      * Handles direct chat interactions with the Large Language Model.
      * <p>
@@ -51,7 +63,8 @@ public class ChatService {
         LoginInfo currentUser = ctx.channel().attr(Constant.ATT_USER_INFO).get();
         // 设置发送端 Channel，用于多端广播时排除发送端避免重复推送
         message.setSenderChannel(ctx.channel());
-        try (NettyArrayOutputStream outputStream = new NettyArrayOutputStream(ctx)) {
+        try (NettyArrayOutputStream outputStream = new NettyArrayOutputStream(ctx, message.getClientRequestId(),
+            "CHAT_STREAM")) {
             assistantChatService.chat(message, outputStream, currentUser);
         }
         catch (IOException e) {
@@ -96,6 +109,59 @@ public class ChatService {
             log.error("Error processing stream", e);
             // 发送错误消息给客户端
             NettyResponse.sendErrorResponse(ctx, "Error processing processing stream");
+        }
+    }
+
+    public void stopChat(ChannelHandlerContext ctx, ChatMessage message) {
+        LoginInfo currentUser = ctx.channel().attr(Constant.ATT_USER_INFO).get();
+        try {
+            if (currentUser != null) {
+                CurrentUserHolder.setLoginInfo(currentUser);
+            }
+            StopChatDto stopChatDto = new StopChatDto();
+            stopChatDto.setAgentId(message.getAgentId());
+            stopChatDto.setAgentCode(message.getAgentCode());
+            stopChatDto.setSessionId(message.getSessionId());
+            stopChatDto.setMessageId(message.getMessageId());
+            stopChatDto.setClientRequestId(message.getClientRequestId());
+            fillStopChatFromRunningInfo(stopChatDto);
+            assistantChatApplicationService.stopChat(stopChatDto);
+
+            JSONObject ack = new JSONObject();
+            ack.put("type", "STOP_CHAT_ACK");
+            ack.put("clientRequestId", message.getClientRequestId());
+            ack.put("sessionId", message.getSessionId() == null ? null : String.valueOf(message.getSessionId()));
+            ack.put("messageId", message.getMessageId());
+            ctx.writeAndFlush(new io.netty.handler.codec.http.websocketx.TextWebSocketFrame(ack.toJSONString()));
+        }
+        catch (Exception e) {
+            log.error("Error stopping chat", e);
+            NettyResponse.sendErrorResponse(ctx, "Error stopping chat");
+        }
+        finally {
+            CurrentUserHolder.clearLoginInfo();
+        }
+    }
+
+    private void fillStopChatFromRunningInfo(StopChatDto stopChatDto) {
+        if (stopChatDto == null || stopChatDto.getSessionId() == null) {
+            return;
+        }
+        RunningChatInfo runningInfo = runningOutputStreamRegistry.getRunning(stopChatDto.getSessionId());
+        if (!Boolean.TRUE.equals(runningInfo.getRunning())) {
+            return;
+        }
+        if (stopChatDto.getMessageId() == null) {
+            stopChatDto.setMessageId(runningInfo.getModelAnswerMessageId());
+        }
+        if (stopChatDto.getAgentId() == null) {
+            stopChatDto.setAgentId(runningInfo.getAgentId());
+        }
+        if (stopChatDto.getAgentCode() == null) {
+            stopChatDto.setAgentCode(runningInfo.getAgentCode());
+        }
+        if (stopChatDto.getClientRequestId() == null) {
+            stopChatDto.setClientRequestId(runningInfo.getClientRequestId());
         }
     }
 }

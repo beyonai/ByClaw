@@ -5,27 +5,38 @@
  * 集成了消息存储、会话管理和SSE通信
  * 处理不同类型的消息内容和响应状态
  */
-import { useCallback, useRef, useEffect, useMemo } from 'react';
+import { useCallback, useRef, useEffect, useMemo, useState } from 'react';
 
 // @ts-ignore
 import { useSelector, useDispatch } from '@umijs/max';
-import { cloneDeep, flow, get, isEmpty, last, noop, set, unset, isNil, pick, debounce, omit } from 'lodash';
+import { cloneDeep, flow, get, noop, set, isNil, pick, debounce, omit, isFunction, assign } from 'lodash';
 
 import usePersistFn from '@/hooks/usePersistFn';
 import useSend from '@/hooks/useSseSender/useSend';
+import { compareStreamId } from '@/hooks/useSseSender/chatStream';
+import { getChatRunningSnapshot, getChatRunningStatus } from '@/service/message';
 
 import { UserState } from '@/models/common/user';
 import { ISessionState } from '@/models/session';
 import useAppStore from '@/models/common/useAppStore';
 
-import { createMessage } from '@/utils/messgae';
+import { createMessage, fetchMessageHandler } from '@/utils/messgae';
 import { getFileTypeByName } from '@/utils/file';
-import { sseRequestManager } from '@/utils/sseRequestManager';
 
 import useHandler from './useHandler';
 import useMessage from './useMessage';
 import useGlobal from '@/hooks/useGlobal';
-import { stopChat } from '@/service/message';
+import webSocketManager from '@/utils/websocket';
+import { chatSessionRuntimeManager, type RunningChatInfo } from '@/utils/chatSessionRuntimeManager';
+import {
+  flushRestoredChatStreamBuffer,
+  getRestoredStreamKey,
+  registerPendingChatContext,
+  registerSessionChatContext,
+  startRestoringChatStream,
+  stopRestoringChatStream,
+  unregisterPendingChatContext,
+} from './chatRuntime';
 
 import { IMessageState } from '@/constants/message';
 import { agentTypeMap, ROOT_AGENT_ID } from '@/constants/agent';
@@ -102,6 +113,18 @@ export type ISendConf = {
   onlyQuery?: boolean;
 };
 
+function getClientRequestId(queryMsgId: string, answerMsgId: string) {
+  return `${queryMsgId}_${answerMsgId}`;
+}
+
+function getAnswerClientMsgId(clientRequestId: string) {
+  return clientRequestId.split('_')[1];
+}
+
+function getQueryClientMsgId(clientRequestId: string) {
+  return clientRequestId.split('_')[0];
+}
+
 /**
  * 聊天功能Hook
  * 提供消息发送、接收、会话管理等核心聊天功能
@@ -113,6 +136,7 @@ function useChat(props: IProps) {
   const { sessionId, agentType, addSession, onBeforeSend = noop, chatUrl } = props;
 
   const messageListRef = useRef<IMessage[]>([]);
+  const [runtimeVersion, setRuntimeVersion] = useState(0);
 
   const { userInfo, extParamsBySessionId } = useSelector((state: ConnectState) => ({
     userInfo: state.user.userInfo,
@@ -160,9 +184,41 @@ function useChat(props: IProps) {
     browserHandler,
   } = useHandler({ addSession, setSessionId });
 
+  const flowHandler = useMemo(
+    () =>
+      flow(
+        [
+          sessionInfoHandler,
+          messageIdHandler,
+          queryMessageIdHandler,
+          rewriteQuestionHandler,
+          textHandler,
+          messageHandler,
+          resComIdsHandler,
+          browserHandler,
+        ].filter(isFunction)
+      ),
+    [
+      sessionInfoHandler,
+      messageIdHandler,
+      queryMessageIdHandler,
+      rewriteQuestionHandler,
+      textHandler,
+      messageHandler,
+      resComIdsHandler,
+      browserHandler,
+    ]
+  );
+
   useEffect(() => {
     messageListRef.current = messageList;
   }, [messageList]);
+
+  useEffect(() => {
+    return chatSessionRuntimeManager.subscribe(() => {
+      setRuntimeVersion((version) => version + 1);
+    });
+  }, []);
 
   const defaultEmployee = useMemo(() => {
     if (!defaultDigEmployeeId) {
@@ -192,6 +248,253 @@ function useChat(props: IProps) {
     }
   });
 
+  const isSessionRunning = useMemo(() => {
+    return chatSessionRuntimeManager.isSessionRunning(sessionId);
+  }, [sessionId, runtimeVersion]);
+
+  const syncCurrentSessionRunningState = usePersistFn(async () => {
+    if (!sessionId || !chatSessionRuntimeManager.isSessionRunning(sessionId)) {
+      return;
+    }
+    try {
+      const list: RunningChatInfo[] = await getChatRunningStatus({ sessionIds: [sessionId] });
+      const runningInfo = list.find((item) => `${item.sessionId}` === `${sessionId}`);
+      if (runningInfo?.running) {
+        return;
+      }
+      chatSessionRuntimeManager.completeBySession(sessionId);
+      await reloadLatestMessageList();
+    } catch (error) {
+      console.error(error);
+    }
+  });
+
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        syncCurrentSessionRunningState();
+      }
+    };
+
+    window.addEventListener('online', syncCurrentSessionRunningState);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const timer = window.setInterval(syncCurrentSessionRunningState, 30000);
+
+    return () => {
+      window.removeEventListener('online', syncCurrentSessionRunningState);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.clearInterval(timer);
+    };
+  }, [sessionId, syncCurrentSessionRunningState]);
+
+  const cancelCurrentSession = usePersistFn(() => {
+    const runtimeInfo = chatSessionRuntimeManager.getBySession(sessionId);
+    if (runtimeInfo?.cancel) {
+      runtimeInfo.cancel();
+      return;
+    }
+
+    const runningMessage = [...messageListRef.current]
+      .reverse()
+      .find((item) => [IMessageState.Query, IMessageState.Answer].includes(item.messageState as IMessageState));
+    runningMessage?.cancelSSE?.();
+  });
+
+  const createRestoredAnswerMessage = usePersistFn((runningInfo: RunningChatInfo, sessionId?: string) => {
+    const messageId = runningInfo.modelAnswerMessageId ? `${runningInfo.modelAnswerMessageId}` : '';
+    return createMessage({
+      msgId: getAnswerClientMsgId(runningInfo.clientRequestId),
+      messageId,
+      text: '',
+      fromBeyond: true,
+      messageState: IMessageState.Answer,
+      sessionId: runningInfo.sessionId ? `${runningInfo.sessionId}` : sessionId,
+      traceId: runningInfo.traceId,
+      queryMsgId: getQueryClientMsgId(runningInfo.clientRequestId),
+      agentId: runningInfo.agentId ? `${runningInfo.agentId}` : undefined,
+      agentType: runningInfo.agentType as IAgentType,
+      metadata: runningInfo.agentId ? JSON.stringify({ agentId: runningInfo.agentId }) : '',
+    });
+  });
+
+  const createRestoredAnswerMessageFromSnapshot = usePersistFn((snapshot: any, runningInfo: RunningChatInfo) => {
+    const answerMsg = createMessage(fetchMessageHandler(snapshot));
+    set(answerMsg, 'msgId', getAnswerClientMsgId(runningInfo.clientRequestId));
+    set(answerMsg, 'messageState', IMessageState.Answer);
+    set(answerMsg, 'traceId', snapshot?.traceId || runningInfo.traceId);
+    set(answerMsg, 'snapshotStreamId', snapshot?.snapshotStreamId);
+    set(answerMsg, 'streamId', snapshot?.snapshotStreamId);
+    set(answerMsg, 'queryMsgId', getQueryClientMsgId(runningInfo.clientRequestId));
+    set(
+      answerMsg,
+      'sessionId',
+      snapshot?.sessionId ? `${snapshot.sessionId}` : `${runningInfo.sessionId || sessionId}`
+    );
+    if (!answerMsg.agentId && runningInfo.agentId) {
+      set(answerMsg, 'agentId', `${runningInfo.agentId}`);
+    }
+    if (!answerMsg.agentType && runningInfo.agentType) {
+      set(answerMsg, 'agentType', runningInfo.agentType);
+    }
+    if (!answerMsg.metadata && runningInfo.agentId) {
+      set(answerMsg, 'metadata', JSON.stringify({ agentId: runningInfo.agentId }));
+    }
+    return answerMsg;
+  });
+
+  const stopRestoredRunningSession = usePersistFn((answerMsg: IMessage, runningInfo: RunningChatInfo) => {
+    if (answerMsg.messageState === IMessageState.Cancel) return Promise.resolve();
+    set(answerMsg, 'messageState', IMessageState.Cancel);
+    updateMessage(answerMsg);
+    chatSessionRuntimeManager.completeBySession(answerMsg.sessionId || sessionId);
+
+    return webSocketManager.sendMessageWhenReady({
+      type: 'STOP_CHAT',
+      clientRequestId: runningInfo.clientRequestId,
+      sessionId: answerMsg.sessionId || runningInfo.sessionId || sessionId,
+      messageId: answerMsg.messageId || runningInfo.modelAnswerMessageId,
+      agentId: runningInfo.agentId || answerMsg.agentId || null,
+      agentCode: runningInfo.agentCode || null,
+      agentType: runningInfo.agentType || answerMsg.agentType,
+    });
+  });
+
+  useEffect(() => {
+    const handler = (message: any) => {
+      const data = get(message, 'data') || message;
+      const messageSessionId = get(data, 'sessionId') || get(message, 'sessionId');
+      if (!messageSessionId || `${messageSessionId}` !== `${sessionId}`) return;
+
+      const answerMsg = fetchMessageHandler({
+        ...data,
+        sessionId: messageSessionId,
+      });
+      updateMessage(answerMsg, { allowCreateSession: false });
+    };
+
+    webSocketManager.onMessage('NEW_MESSAGE', handler);
+    return () => {
+      webSocketManager.offMessage('NEW_MESSAGE', handler);
+    };
+  }, [sessionId, updateMessage]);
+
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+    let disposed = false;
+    let restoreKey = '';
+
+    getChatRunningStatus({ sessionIds: [sessionId] })
+      .then(async (list: RunningChatInfo[] = []) => {
+        if (disposed) return;
+        const runningInfo = list.find((item) => `${item.sessionId}` === `${sessionId}`);
+        if (!runningInfo || !runningInfo.traceId) {
+          return;
+        }
+        if (!runningInfo.running) {
+          chatSessionRuntimeManager.completeBySession(sessionId);
+          return;
+        }
+
+        restoreKey = getRestoredStreamKey(sessionId, runningInfo.traceId);
+        startRestoringChatStream(restoreKey);
+
+        const messageId = runningInfo.modelAnswerMessageId ? `${runningInfo.modelAnswerMessageId}` : '';
+        let answerMsg = messageListRef.current.find((item) => {
+          return (
+            `${item.messageId}` === messageId ||
+            `${item.msgId}` === `${getAnswerClientMsgId(runningInfo.clientRequestId)}`
+          );
+        });
+
+        if (!answerMsg) {
+          answerMsg = createRestoredAnswerMessage(runningInfo, sessionId);
+        }
+        answerMsg.cancelSSE = debounce(() => stopRestoredRunningSession(answerMsg!, runningInfo), 100);
+        set(answerMsg, 'messageState', IMessageState.Answer);
+        answerMsg = updateMessage(answerMsg, { isAssign: true });
+        chatSessionRuntimeManager.hydrateRunning(runningInfo, () => answerMsg?.cancelSSE?.());
+
+        const runtimeInfo = chatSessionRuntimeManager.getBySession(sessionId);
+        const askClientMessageId = getQueryClientMsgId(runningInfo.clientRequestId);
+        const queryMsg =
+          messageListRef.current.find(
+            (item) =>
+              `${item.messageId}` === `${runningInfo.userMessageId}` || `${item.msgId}` === `${askClientMessageId}`
+          ) ||
+          createMessage({
+            msgId: askClientMessageId,
+            messageId: `${runningInfo.userMessageId ?? askClientMessageId}`,
+            text: runningInfo.chatContent || '',
+            fromBeyond: false,
+            messageState: IMessageState.Done,
+            sessionId,
+          });
+
+        registerSessionChatContext(sessionId, {
+          clientRequestId: runtimeInfo!.clientRequestId,
+          queryMsg,
+          answerMsg,
+          restored: true,
+          getMessageList,
+          flowHandler,
+          updateMessage,
+        });
+
+        let snapshotAnswerMsg: IMessage | undefined;
+        try {
+          const snapshot = await getChatRunningSnapshot({
+            sessionId,
+            traceId: runningInfo.traceId,
+            modelAnswerMessageId: runningInfo.modelAnswerMessageId,
+          });
+          if (disposed) return;
+          if (snapshot?.messageId) {
+            snapshotAnswerMsg = createRestoredAnswerMessageFromSnapshot(snapshot, runningInfo);
+          }
+        } catch (error) {
+          console.error(error);
+        }
+
+        if (snapshotAnswerMsg) {
+          const latestRuntimeInfo = chatSessionRuntimeManager.getBySession(sessionId);
+          const snapshotStreamId = snapshotAnswerMsg.snapshotStreamId;
+          const shouldApplySnapshot =
+            !snapshotStreamId ||
+            !latestRuntimeInfo?.lastAppliedStreamId ||
+            compareStreamId(snapshotStreamId, latestRuntimeInfo.lastAppliedStreamId) > 0;
+          if (shouldApplySnapshot) {
+            assign(answerMsg, snapshotAnswerMsg);
+            answerMsg.cancelSSE = debounce(() => stopRestoredRunningSession(answerMsg!, runningInfo), 100);
+            set(answerMsg, 'messageState', IMessageState.Answer);
+            answerMsg = updateMessage(answerMsg, { isAssign: true });
+            chatSessionRuntimeManager.updateLastAppliedStreamId(
+              latestRuntimeInfo?.clientRequestId || runningInfo.clientRequestId,
+              snapshotStreamId
+            );
+          }
+        }
+
+        flushRestoredChatStreamBuffer(restoreKey);
+      })
+      .catch((error) => {
+        console.error(error);
+      });
+
+    return () => {
+      disposed = true;
+      if (restoreKey) {
+        stopRestoringChatStream(restoreKey);
+        flushRestoredChatStreamBuffer(restoreKey);
+      }
+    };
+  }, [sessionId]);
+
   /**
    * 发送查询函数
    * 处理消息发送、接收和状态更新的完整流程
@@ -213,21 +516,22 @@ function useChat(props: IProps) {
       return false;
     }
 
-    // 检查SSE并发限制
-    if (!sseRequestManager.canStartNewRequest()) {
-      return false;
-    }
-
     const { queryQuestion, payload = {}, msgOpt = {} } = sendProps;
     const isResumeChat = get(payload, 'actionType') === 'RESUME';
-    // 追问 RESUME：当前列表末尾常为「助手仍在回答」，需允许继续走与底部输入框一致的发送流程
-    if (!isResumeChat) {
-      const lastMessage = last(messageList);
-      if (
-        lastMessage?.messageState &&
-        [IMessageState.Query, IMessageState.Answer].includes(lastMessage?.messageState)
-      ) {
+    let isContinuingRunningTrace = false;
+    // 不要用 isSessionRunning，因为 isSessionRunning 是异步的，这里需要同步判断
+    if (chatSessionRuntimeManager.isSessionRunning(sessionId)) {
+      if (!isResumeChat) {
         return false;
+      }
+      const runningInfo = chatSessionRuntimeManager.getBySession(sessionId);
+      const traceId = payload.traceId ?? runningInfo?.traceId;
+      if (!traceId) {
+        return false;
+      }
+      isContinuingRunningTrace = true;
+      if (!payload.traceId) {
+        set(payload, 'traceId', traceId);
       }
     }
 
@@ -321,120 +625,82 @@ function useChat(props: IProps) {
     set(newQueryMsg, 'extParams', extParams);
     set(newQueryMsg, 'answerMsgId', newAnswerMsg.msgId);
 
-    const flowHandler = flow([
-      sessionInfoHandler,
-      messageIdHandler,
-      queryMessageIdHandler,
-      rewriteQuestionHandler,
-      textHandler,
-      messageHandler,
-      resComIdsHandler,
-      browserHandler,
-    ]); // 暂不支持异步方法!!!
+    const clientRequestId = getClientRequestId(newQueryMsg.msgId, newAnswerMsg.msgId);
+
+    if (!isContinuingRunningTrace) {
+      registerPendingChatContext({
+        clientRequestId,
+        queryMsg: newQueryMsg,
+        answerMsg: newAnswerMsg,
+        onlyQuery,
+        getMessageList,
+        flowHandler,
+        updateMessage,
+      });
+
+      chatSessionRuntimeManager.register({
+        clientRequestId,
+        sessionId: newAnswerMsg.sessionId,
+        restored: false,
+        cancel: () => newAnswerMsg.cancelSSE?.(),
+      });
+    }
 
     // 发送请求并处理SSE响应
-    const { promise, cancel } = send(
-      _queryQuestion,
-      {
-        sessionId,
-        resourceList,
-        extParams,
-        ...restPayload,
-        agentId: Number(_agentId) ? _agentId : null,
-        agentCode: Number(_agentId) ? null : _agentId,
-        agentType: _agentType,
-      },
-      {
-        callback: (sseRes: Partial<ISseRes> & Partial<ISession>, sseMsg: any) => {
-          // 忽略空响应
-          if (!sseRes || isEmpty(sseRes)) return;
-
-          flowHandler({
-            sseRes,
-            sseMsg,
-            newQueryMsg,
-            newAnswerMsg,
-          });
-
-          // 更新消息状态 - 这里会正确更新到对应sessionId的消息列表
-          if (!onlyQuery) {
-            newQueryMsg = updateMessage(newQueryMsg);
-          }
-          newAnswerMsg = updateMessage(newAnswerMsg);
-        },
+    const sendResult = send(_queryQuestion, {
+      sessionId,
+      resourceList,
+      extParams,
+      clientRequestId,
+      ...restPayload,
+      agentId: Number(_agentId) ? _agentId : null,
+      agentCode: Number(_agentId) ? null : _agentId,
+      agentType: _agentType,
+    });
+    const cancel = () => {
+      if (!isContinuingRunningTrace) {
+        unregisterPendingChatContext(clientRequestId);
       }
-    );
+      sendResult.cancel();
+    };
 
-    // 注册SSE请求到管理器
-    sseRequestManager.register(newAnswerMsg.sessionId || sessionId || '', newAnswerMsg.msgId, cancel, promise);
-
-    // 处理请求完成的情况
-    promise
-      .then(() => {
-        return new Promise<void>((resolve) => {
-          window.setTimeout(resolve, 100);
-        }); // 确保callback已全部更新
-      })
-      .then(() => {
-        // 注销SSE请求
-        sseRequestManager.unregister(newAnswerMsg.sessionId || sessionId || '', newAnswerMsg.msgId);
-
-        if (newAnswerMsg.shouldDelete) {
-          deleteMessage(newAnswerMsg);
-          return;
-        }
-
-        if (newAnswerMsg.messageState !== IMessageState.Cancel) {
-          // 设置回答消息状态为"完成"
-          set(newAnswerMsg, 'messageState', IMessageState.Done);
-        }
-
-        // 移除取消函数
-        unset(newAnswerMsg, 'cancelSSE');
-
-        updateMessage(newAnswerMsg);
-      })
-      .catch((e: Error) => {
-        // 注销SSE请求
-        sseRequestManager.unregister(newAnswerMsg.sessionId || sessionId || '', newAnswerMsg.msgId);
-
-        // 处理请求失败的情况
-        console.log('error', e);
-        // TODO: 根据返回e，设置IMessageState
-
-        set(newAnswerMsg, 'messageState', IMessageState.Error);
-
-        // 移除取消函数
-        unset(newAnswerMsg, 'cancelSSE');
-
-        updateMessage(newAnswerMsg);
-      });
+    if (isContinuingRunningTrace) {
+      return { cancel };
+    }
 
     // 添加取消功能到回答消息
     newAnswerMsg.cancelSSE = debounce(() => {
       if (newAnswerMsg.messageState === IMessageState.Cancel) return Promise.resolve();
       set(newAnswerMsg, 'messageState', IMessageState.Cancel);
 
-      // 注销SSE请求
-      sseRequestManager.unregister(newAnswerMsg.sessionId || sessionId || '', newAnswerMsg.msgId);
-
       updateMessage(newAnswerMsg);
+
+      chatSessionRuntimeManager.complete(newAnswerMsg.msgId);
 
       cancel();
 
-      return stopChat({
+      return webSocketManager.sendMessageWhenReady({
+        type: 'STOP_CHAT',
+        clientRequestId,
         ...pick(newAnswerMsg, ['agentId', 'sessionId', 'messageId', 'agentType']),
         agentId: Number(_agentId) ? _agentId : null,
         agentCode: Number(_agentId) ? null : _agentId,
-        clientId: newAnswerMsg.msgId,
       });
     }, 100);
 
     // 更新回答消息
     newAnswerMsg = updateMessage(newAnswerMsg, { isAssign: true });
+    registerPendingChatContext({
+      clientRequestId,
+      queryMsg: newQueryMsg,
+      answerMsg: newAnswerMsg,
+      onlyQuery,
+      getMessageList,
+      flowHandler,
+      updateMessage,
+    });
 
-    // 返回包含promise和cancel的对象
-    return { promise, cancel };
+    return { cancel };
   });
 
   /**
@@ -456,6 +722,8 @@ function useChat(props: IProps) {
     onNext, // 加载更多消息的方法
     updateMessage, // 更新消息的方法
     deleteMessage, // 删除消息的方法
+    isSessionRunning,
+    cancelCurrentSession,
 
     getMessageList,
     setMessageList,

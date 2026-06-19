@@ -12,6 +12,7 @@ import {
   docCallMode,
   docSyncIntervalSec,
   docSyncTimeoutSec,
+  resolveLangfuseParentObservationId,
   resolveDocChannelTraceId,
   resolveDocSessionId,
 } from "../doc-shared.js";
@@ -279,6 +280,7 @@ async function executeOntologyResourceViaCallAgent(input: {
 
   const sessionId = resolveDocSessionId(input.parameters, resourceId || resourceCode);
   const channelTraceId = resolveDocChannelTraceId(input.parameters);
+  const langfuseParentObservationId = resolveLangfuseParentObservationId(input.parameters);
   const traceId = channelTraceId || `${sessionId}-${Date.now()}`;
   const targetAgentType =
     asString(input.parameters.target_agent_type) ||
@@ -297,6 +299,11 @@ async function executeOntologyResourceViaCallAgent(input: {
   if (metadata["channel-trace-id"]) {
     payload["channel-trace-id"] = metadata["channel-trace-id"];
   }
+  if (langfuseParentObservationId) {
+    payload.langfuseParentObservationId = langfuseParentObservationId;
+    metadata.langfuseParentObservationId = langfuseParentObservationId;
+  }
+  const toolCallId = input.parameters.tool_call_id as string;
 
   return executeViaCallAgent({
     capability: input.capability,
@@ -305,6 +312,7 @@ async function executeOntologyResourceViaCallAgent(input: {
     sessionId,
     traceId,
     targetAgentType,
+    toolCallId,
     callMode: docCallMode(input.parameters),
     syncTimeoutSec: docSyncTimeoutSec(input.parameters),
     syncIntervalSec: docSyncIntervalSec(input.parameters),
@@ -317,8 +325,9 @@ async function executeOntologyResourceViaCallAgent(input: {
       [callKey]: [resourceCode],
     },
     metadata,
+    langfuseParentObservationId,
     logger: input.logger,
-    parentMessageId: input.parameters.tool_call_id as string,
+    parentMessageId: toolCallId,
   });
 }
 

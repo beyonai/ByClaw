@@ -48,6 +48,8 @@ export type ExecuteViaCallAgentInput = {
   signal?: AbortSignal;
   logger?: BaiyingEnhanceLogger;
   parentMessageId: string;
+  toolCallId?: string;
+  langfuseParentObservationId?: string;
 };
 
 export async function executeViaCallAgent(
@@ -79,6 +81,14 @@ export async function executeViaCallAgent(
       asString(input.metadata?.parent_message_id) ||
       `parent-${input.traceId || startedAt}`;
 
+    const metadata = {
+      ...(input.metadata || {}),
+      toolCallId: input.toolCallId,
+      ...(input.langfuseParentObservationId
+        ? { langfuseParentObservationId: input.langfuseParentObservationId }
+        : {}),
+    };
+
     logBaiyingRequest(input.logger, "call_agent.dispatch", {
       resource_id: input.capability.metadata?.resource_id,
       resource_type: input.capability.resource_type,
@@ -94,7 +104,8 @@ export async function executeViaCallAgent(
       user_code: input.userCode ?? nonEmptyEnv("USER_CODE"),
       user_name: input.userName ?? nonEmptyEnv("USER_NAME"),
       task_group_id: input.taskGroupId ?? "",
-      metadata: input.metadata ?? {},
+      langfuse_parent_observation_id: input.langfuseParentObservationId,
+      metadata,
       content: input.content,
       payload: input.payload,
       sync_timeout_sec: input.syncTimeoutSec,
@@ -102,7 +113,7 @@ export async function executeViaCallAgent(
       target: input.target,
     });
 
-    const result = await callAgent(deps, {
+    const callAgentInput = {
       sessionId: input.sessionId,
       traceId: input.traceId,
       sourceAgentType,
@@ -114,12 +125,16 @@ export async function executeViaCallAgent(
       userCode: input.userCode ?? nonEmptyEnv("USER_CODE"),
       userName: input.userName ?? nonEmptyEnv("USER_NAME"),
       taskGroupId: input.taskGroupId,
-      metadata: input.metadata,
+      metadata,
       probeAgentType: input.probeAgentType ?? false,
-    });
+      ...(input.langfuseParentObservationId
+        ? { langfuseParentObservationId: input.langfuseParentObservationId }
+        : {}),
+    };
+    const result = await callAgent(deps, callAgentInput as Parameters<typeof callAgent>[1]);
 
     const commandPayload = {
-      action_type: "ASK_AGENT",
+      action_type: "CALL_AGENT",
       header: {
         message_id: result.messageId,
         session_id: input.sessionId,
@@ -128,9 +143,10 @@ export async function executeViaCallAgent(
         target_agent_type: input.targetAgentType,
         parent_message_id: result.parentMessageId ?? defaultParentMessageId,
         task_group_id: input.taskGroupId ?? "",
+        langfuse_parent_observation_id: input.langfuseParentObservationId ?? "",
         user_code: input.userCode ?? nonEmptyEnv("USER_CODE") ?? "",
         user_name: input.userName ?? nonEmptyEnv("USER_NAME") ?? "",
-        metadata: input.metadata ?? {},
+        metadata,
       },
       body: {
         content: input.content,
@@ -185,6 +201,7 @@ export async function executeViaCallAgent(
       streamName: QueueNames.session_data_stream(input.sessionId),
       onDelta: input.onDelta,
       signal: input.signal,
+      toolCallId: input.toolCallId,
     });
 
     if (!poll.success) {

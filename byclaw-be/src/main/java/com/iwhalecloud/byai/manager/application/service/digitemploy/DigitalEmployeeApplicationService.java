@@ -51,6 +51,7 @@ import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeePageVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeInstallResourceDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.EmployeeIdDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.RelResourceInfo;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SetDefaultDigitalEmployeeDTO;
@@ -96,6 +97,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -131,6 +133,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 public class DigitalEmployeeApplicationService {
 
     public static final Logger logger = LoggerFactory.getLogger(DigitalEmployeeApplicationService.class);
+    private static final String RESOURCE_BIZ_TYPE_SKILL = "SKILL";
 
     private static final String BELONG_COMPANY = "COMPANY";
 
@@ -715,6 +718,88 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
+     * 增量安装知识或资源到数字员工，保留已有关联关系。
+     *
+     * @param installResourceDTO 安装入参
+     * @return 数字员工详情
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public DigitalEmployeeDetailsDTO installDigitalEmployeeRelResources(
+        DigitalEmployeeInstallResourceDTO installResourceDTO) {
+        Long digitalEmployeeId = installResourceDTO == null ? null : installResourceDTO.getDigitalEmployeeId();
+        List<Long> installRelIds = installResourceDTO == null ? null : installResourceDTO.getRelIds();
+        if (digitalEmployeeId == null || CollectionUtils.isEmpty(installRelIds)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.processor.param.notnull"));
+        }
+
+        SsResource ssResource = ssResourceService.findById(digitalEmployeeId);
+        List<SsResource> installRelResources = findInstallRelResources(installRelIds);
+        if (containsSkillResource(installRelResources)) {
+            validateSkillInstallPermission(ssResource, installRelResources);
+        }
+        else {
+            validateDigitalEmployeeUpdatePermission(ssResource);
+        }
+
+        List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(digitalEmployeeId);
+        LinkedHashSet<Long> mergedRelIds = new LinkedHashSet<>();
+        if (CollectionUtils.isNotEmpty(resourceRelDetails)) {
+            mergedRelIds.addAll(
+                resourceRelDetails.stream().map(SsResourceRelDetail::getRelResourceId).collect(Collectors.toList()));
+        }
+        mergedRelIds.addAll(installRelIds);
+
+        this.compareSsResourceRelDetail(ssResource, new ArrayList<>(mergedRelIds), resourceRelDetails, null);
+        this.syncDigEmployeeSkillsToRedisQuietly(digitalEmployeeId);
+        this.synOpenClawWorkSpace(digitalEmployeeId);
+        operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
+
+        EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
+        employeeIdDTO.setResourceId(digitalEmployeeId);
+        return this.findDetailsById(employeeIdDTO);
+    }
+
+    private List<SsResource> findInstallRelResources(List<Long> installRelIds) {
+        List<Long> distinctRelIds = installRelIds.stream().filter(Objects::nonNull).distinct()
+            .collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(distinctRelIds)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.processor.param.notnull"));
+        }
+        List<SsResource> resources = ssResourceService.findByIdList(distinctRelIds);
+        if (CollectionUtils.isEmpty(resources) || resources.size() != distinctRelIds.size()) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
+        }
+        return resources;
+    }
+
+    private boolean containsSkillResource(List<SsResource> resources) {
+        return resources != null && resources.stream()
+            .anyMatch(resource -> resource != null
+                && StringUtils.equals(RESOURCE_BIZ_TYPE_SKILL, resource.getResourceBizType()));
+    }
+
+    private void validateSkillInstallPermission(SsResource digitalEmployee, List<SsResource> installRelResources) {
+        if (digitalEmployee == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
+        }
+        Long defaultDigEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
+        if (defaultDigEmployeeId == null || !Objects.equals(defaultDigEmployeeId, digitalEmployee.getResourceId())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+        }
+        if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+        }
+        for (SsResource resource : installRelResources) {
+            if (resource != null && StringUtils.equals(RESOURCE_BIZ_TYPE_SKILL, resource.getResourceBizType())
+                && !authApplicationService.hasResourceUsePermission(resource)) {
+                throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+            }
+        }
+    }
+
+    /**
      * 设置当前用户默认数字员工。
      * 默认关系只维护在 suas_superassist.default_dig_employee_id 上，不再修改资源 owner_type 或扩展表 tag_name。
      * 这样超级助手、个人助理、企业数字员工都保持自身资源归属，默认身份只作为当前用户会话兜底 @ 对象。
@@ -1117,25 +1202,25 @@ public class DigitalEmployeeApplicationService {
         }
         List<SsResourceRelDetail> relDetails = ssResourceRelDetailService.findByResourceId(digEmployeeResourceId);
         if (CollectionUtils.isEmpty(relDetails)) {
-            logger.info("数字员工无关联资源，无需补齐资源JSON, digEmployeeResourceId={}", digEmployeeResourceId);
+            logger.debug("数字员工无关联资源，无需补齐资源JSON, digEmployeeResourceId={}", digEmployeeResourceId);
             return;
         }
 
         List<Long> relResourceIds = relDetails.stream().map(SsResourceRelDetail::getRelResourceId)
             .filter(java.util.Objects::nonNull).distinct().collect(Collectors.toList());
         if (CollectionUtils.isEmpty(relResourceIds)) {
-            logger.info("数字员工关联资源ID为空，无需补齐资源JSON, digEmployeeResourceId={}", digEmployeeResourceId);
+            logger.debug("数字员工关联资源ID为空，无需补齐资源JSON, digEmployeeResourceId={}", digEmployeeResourceId);
             return;
         }
 
         List<SsResource> relResources = ssResourceService.findByIdList(relResourceIds);
         if (CollectionUtils.isEmpty(relResources)) {
-            logger.info("数字员工关联资源不存在，无需补齐资源JSON, digEmployeeResourceId={}, relResourceIds={}", digEmployeeResourceId,
+            logger.debug("数字员工关联资源不存在，无需补齐资源JSON, digEmployeeResourceId={}, relResourceIds={}", digEmployeeResourceId,
                 relResourceIds);
             return;
         }
 
-        logger.info("数字员工关联资源JSON补齐开始, digEmployeeResourceId={}, relResourceIds={}", digEmployeeResourceId,
+        logger.debug("数字员工关联资源JSON补齐开始, digEmployeeResourceId={}, relResourceIds={}", digEmployeeResourceId,
             relResourceIds);
         for (SsResource relResource : relResources) {
             syncSingleRelatedResourceJsonIfMissing(digEmployeeResourceId, relResource);
@@ -1163,7 +1248,7 @@ public class DigitalEmployeeApplicationService {
         if (CollectionUtils.isEmpty(relResources)) {
             return;
         }
-        logger.info("数字员工关联资源Redis同步开始, digEmployeeResourceId={}, relResourceIds={}", digEmployeeResourceId,
+        logger.debug("数字员工关联资源Redis同步开始, digEmployeeResourceId={}, relResourceIds={}", digEmployeeResourceId,
             relResourceIds);
         for (SsResource relResource : relResources) {
             syncSingleRelatedResourceConfigJsonToRedisQuietly(digEmployeeResourceId, relResource);
@@ -1199,7 +1284,7 @@ public class DigitalEmployeeApplicationService {
             return;
         }
         syncResourceConfigJsonToRedis(resourceBizType, relResourceId, targetContent);
-        logger.info(
+        logger.debug(
             "数字员工关联资源配置已同步至Redis, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}, redisKey={}",
             digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType,
             DigEmployeeRedisKeys.resourceConfigJsonKey(resourceBizType, relResourceId));
@@ -1211,18 +1296,18 @@ public class DigitalEmployeeApplicationService {
         }
         String resourceBizType = StringUtils.trimToEmpty(relResource.getResourceBizType());
         if (!isSupportedRelatedResourceBizType(resourceBizType)) {
-            logger.info("数字员工关联资源类型不在补齐范围内，跳过, digEmployeeResourceId={}, relResourceId={}, resourceBizType={}",
+            logger.debug("数字员工关联资源类型不在补齐范围内，跳过, digEmployeeResourceId={}, relResourceId={}, resourceBizType={}",
                 digEmployeeResourceId, relResource.getResourceId(), resourceBizType);
             return;
         }
 
         Long relResourceId = relResource.getResourceId();
         boolean exists = resourceArtifactStorageService.existsResourceJsonByBizType(resourceBizType, relResourceId);
-        logger.info(
+        logger.debug(
             "数字员工关联资源JSON存在性检查完成, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}, exists={}",
             digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType, exists);
         if (exists) {
-            logger.info(
+            logger.debug(
                 "数字员工关联资源JSON已存在，跳过补发, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
                 digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType);
             return;
@@ -1237,13 +1322,13 @@ public class DigitalEmployeeApplicationService {
         }
 
         try {
-            logger.info(
+            logger.debug(
                 "数字员工关联资源JSON缺失，开始补发, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
                 digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType);
             resourceArtifactStorageService.syncResourceJsonByBizType(targetContent, resourceBizType, relResourceId);
             ssResourceArtifactService.upsertStandardJsonArtifact(relResourceId, resourceBizType,
                 "dig-employee-related-sync");
-            logger.info(
+            logger.debug(
                 "数字员工关联资源JSON补发成功, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
                 digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType);
         }
@@ -1332,7 +1417,7 @@ public class DigitalEmployeeApplicationService {
         }
         String redisKey = DigEmployeeRedisKeys.resourceConfigJsonKey(resourceBizType, resourceId);
         RedisUtil.setString(redisKey, jsonContent);
-        logger.info("资源完整配置已同步至Redis, resourceBizType={}, resourceId={}, redisKey={}", resourceBizType,
+        logger.debug("资源完整配置已同步至Redis, resourceBizType={}, resourceId={}, redisKey={}", resourceBizType,
             resourceId, redisKey);
     }
 

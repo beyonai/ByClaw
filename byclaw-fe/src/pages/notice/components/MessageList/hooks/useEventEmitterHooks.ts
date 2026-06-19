@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { createMessage } from '@/utils/messgae';
 
 import { IMessageState } from '@/constants/message';
-import { ISendConf, ISendProps } from '@/hooks/useChat';
+import type { ISendConf, ISendProps } from '@/hooks/useChat';
 import { IMessage } from '@/typescript/message';
 import useGlobal from '@/hooks/useGlobal';
 
