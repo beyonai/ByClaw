@@ -31,11 +31,13 @@ from by_framework.util.http_client import RetryConfig
 from i18n import Msg, set_lang, t, translate_fallback
 from middleware import build_agent_overrides
 from exceptions import (
+    AuthResolutionError,
     ByclawQAError,
     ConfigurationError,
     ModelConfigError,
     ModelNotFoundError,
     StorageError,
+    UserResolutionError,
 )
 from utils import langfuse_scope, extract_ip
 
@@ -104,9 +106,32 @@ async def _resolve_header_placeholders(
     redis_client: Any,
     user_code: str,
 ) -> dict[str, str]:
-    """Resolve ${KEY} placeholders in header values from Redis hash ``user:{user_code}:login:auth``."""
+    """Resolve ${KEY} placeholders in header values from Redis.
+
+    First resolves the real user ID from ``SHARE_BFM_USER_CODE_{user_code}``,
+    then looks up ``user:{real_user_id}:login:auth`` for the placeholder values.
+    """
     resolved: dict[str, str] = {}
-    redis_key = f"user:{user_code}:login:auth"
+    share_key = f"SHARE_BFM_USER_CODE_{user_code}"
+    try:
+        real_user_id = await redis_client.get(share_key)
+    except Exception as exc:
+        raise UserResolutionError(
+            f"Failed to read Redis key {share_key} for user_code={user_code}: {exc}",
+            details={"redis_key": share_key, "user_code": user_code},
+        ) from exc
+    if real_user_id is None:
+        raise UserResolutionError(
+            f"Share key {share_key} not found for user_code={user_code}",
+            details={"redis_key": share_key, "user_code": user_code},
+        )
+    real_user_id = real_user_id.decode("utf-8") if isinstance(real_user_id, bytes) else str(real_user_id)
+    if not real_user_id:
+        raise UserResolutionError(
+            f"Share key {share_key} resolved to empty value for user_code={user_code}",
+            details={"redis_key": share_key, "user_code": user_code},
+        )
+    redis_key = f"user:{real_user_id}:login:auth"
     for key, value in headers.items():
         value_str = str(value)
         matches = _PLACEHOLDER_RE.findall(value_str)
@@ -118,30 +143,21 @@ async def _resolve_header_placeholders(
             try:
                 redis_value = await redis_client.hget(redis_key, field)
             except Exception as exc:
-                logger.warning(
-                    "Failed to read Redis hash %s field %s for header placeholder: %s",
-                    redis_key,
-                    field,
-                    exc,
-                )
-                continue
+                raise AuthResolutionError(
+                    f"Failed to read Redis hash {redis_key} field {field}: {exc}",
+                    details={"redis_key": redis_key, "field": field, "user_code": user_code},
+                ) from exc
             if redis_value is None:
-                logger.warning(
-                    "Placeholder ${%s} not found in Redis key %s for user_code=%s",
-                    field,
-                    redis_key,
-                    user_code,
+                raise AuthResolutionError(
+                    f"Placeholder ${{{field}}} not found in Redis key {redis_key} for user_code={user_code}",
+                    details={"redis_key": redis_key, "field": field, "user_code": user_code},
                 )
-                continue
             decoded = redis_value.decode("utf-8") if isinstance(redis_value, bytes) else str(redis_value)
             if not decoded:
-                logger.warning(
-                    "Placeholder ${%s} resolved to empty value in Redis key %s for user_code=%s",
-                    field,
-                    redis_key,
-                    user_code,
+                raise AuthResolutionError(
+                    f"Placeholder ${{{field}}} resolved to empty value in Redis key {redis_key} for user_code={user_code}",
+                    details={"redis_key": redis_key, "field": field, "user_code": user_code},
                 )
-                continue
             result = result.replace(f"${{{field}}}", decoded)
         resolved[key] = result
     return resolved
@@ -297,7 +313,16 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
         if user_code == "" or user_code == "default":
             user_code = command.header.metadata.get("user_code", "default")
         if user_code == "default":
-            logger.warning("No valid user_code found for agent_id=%s; using default", agent_id)
+            message = t(Msg.ERR_NO_USER_CODE)
+            logger.warning(
+                "Instant search request rejected: no valid user_code for agent_id=%s",
+                agent_id,
+            )
+            await context.emit_chunk(
+                message,
+                event_type=event_type_mod.EventType.ANSWER_DELTA.value,
+            )
+            return message
         session_id = context.session_id
         call_kb_ids = command.extra_payload.get("call_kb_ids")
         query = str(getattr(command, "content", "")).strip()
@@ -339,9 +364,36 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
             _safe_json_dumps(_summarize_agent_config(agent_config)),
         )
         if request_headers and agent_config is not None:
-            request_headers = await _resolve_header_placeholders(
-                request_headers, context.redis, user_code
-            )
+            try:
+                request_headers = await _resolve_header_placeholders(
+                    request_headers, context.redis, user_code
+                )
+            except AuthResolutionError as exc:
+                logger.error(
+                    "Auth resolution error for agent_id=%s user_code=%s: %s",
+                    agent_id,
+                    user_code,
+                    exc,
+                )
+                message = t(Msg.ERR_AUTH_FAILED)
+                await context.emit_chunk(
+                    message,
+                    event_type=event_type_mod.EventType.ANSWER_DELTA.value,
+                )
+                return message
+            except UserResolutionError as exc:
+                logger.error(
+                    "User resolution error for agent_id=%s user_code=%s: %s",
+                    agent_id,
+                    user_code,
+                    exc,
+                )
+                message = t(Msg.ERR_NO_USER_CODE)
+                await context.emit_chunk(
+                    message,
+                    event_type=event_type_mod.EventType.ANSWER_DELTA.value,
+                )
+                return message
             for kb_list in (agent_config.knowledge_bases or {}).values():
                 for kb in kb_list or []:
                     existing = kb.get("headers") or {}

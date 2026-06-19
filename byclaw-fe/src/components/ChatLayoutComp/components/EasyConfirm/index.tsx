@@ -13,10 +13,17 @@ import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
 import type { IAgentType } from '@/typescript/agent';
 import type { IMessage } from '@/typescript/message';
 import type { ISendProps } from '@/hooks/useChat';
+import type { DefaultValueSchema } from '@/components/QueryInput/RichInput/types';
 
 import styles from './index.module.less';
 import inputStyle from '@/components/ChatLayoutComp/index.module.less';
 import { IMessageState } from '@/constants/message';
+
+const inputDraftMap = new Map<string, DefaultValueSchema>();
+
+export const clearEasyConfirmInputDraft = () => {
+  inputDraftMap.clear();
+};
 
 type IProps = {
   disabledInput: boolean;
@@ -65,6 +72,29 @@ const EasyConfirm = (props: IProps) => {
 
   const compProps = useMemo(() => list[page - 1], [page, list]);
 
+  const inputDraftKey = sessionId || 'default';
+  const inputDraft = inputDraftMap.get(inputDraftKey);
+
+  const onInputDraftChange = useCallback(
+    (draft: DefaultValueSchema) => {
+      if (!draft.text && isEmpty(draft.resourceList)) {
+        inputDraftMap.delete(inputDraftKey);
+        return;
+      }
+
+      inputDraftMap.set(inputDraftKey, draft);
+    },
+    [inputDraftKey]
+  );
+
+  const onSendWithDraftClean = useCallback(
+    (param: ISendProps) => {
+      inputDraftMap.delete(inputDraftKey);
+      onSend(param);
+    },
+    [inputDraftKey, onSend]
+  );
+
   useEffect(() => {
     currentMsgIdRef.current = lastMsg?.msgId || '';
   }, [lastMsg?.msgId]);
@@ -90,12 +120,12 @@ const EasyConfirm = (props: IProps) => {
           }
         });
 
-        const res = prevList.filter(
-          (item) =>
-            ![IFormStatus.FINISH, IFormStatus.ERROR, IFormStatus.DISABLED].includes(
-              item?.messageListItemContent?.formStatus
-            )
-        );
+        const res = prevList.filter((item) => {
+          const formStatus = item?.messageListItemContent?.formStatus;
+          if (!formStatus) return true;
+
+          return ![IFormStatus.FINISH, IFormStatus.ERROR, IFormStatus.DISABLED].includes(formStatus);
+        });
         return [...res];
       });
     };
@@ -120,7 +150,6 @@ const EasyConfirm = (props: IProps) => {
       >
         <QueryInput
           messageState={messageState}
-          onSend={onSend}
           onCancel={onCancel}
           myAgentType={myAgentType}
           setMyAgentType={setMyAgentType}
@@ -128,6 +157,9 @@ const EasyConfirm = (props: IProps) => {
           cannotAt={cannotAt}
           sessionId={sessionId}
           {...queryInputProps}
+          inputDraft={inputDraft}
+          onInputDraftChange={onInputDraftChange}
+          onSend={onSendWithDraftClean}
         />
       </div>
     );

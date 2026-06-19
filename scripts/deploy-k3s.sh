@@ -86,7 +86,7 @@ if [ -n "$REMOTE_PASSWORD" ]; then
         exit 1
     fi
     REMOTE_PASSWORD_Q="$(shell_quote "$REMOTE_PASSWORD")"
-    SSH_CMD="SSHPASS=$REMOTE_PASSWORD_Q sshpass -e ssh $SSH_OPTS"
+    SSH_CMD="sshpass -p $REMOTE_PASSWORD_Q ssh $SSH_OPTS"
 else
     SSH_CMD="ssh $SSH_OPTS"
 fi

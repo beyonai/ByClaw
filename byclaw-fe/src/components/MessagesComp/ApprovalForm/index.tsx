@@ -35,7 +35,7 @@ export type IProps = {
 type StepStatus = 'wait' | 'process' | 'finish' | 'error';
 
 function ApprovalForm(props: IProps) {
-  const { messageListItemContent, message, messageListItem, thinkListItem } = props;
+  const { messageListItemContent, message, messageListItem, thinkListItem, updateMessageListItemContent } = props;
   const { uuid, orginContent, resumeMessageId } = messageListItem || thinkListItem || {};
 
   const { messageId, traceId, sessionId } = message;
@@ -151,7 +151,7 @@ function ApprovalForm(props: IProps) {
         console.error(e);
       }
 
-      updateMessageStructById({
+      return updateMessageStructById({
         id: uuid,
         messageId,
         content: contentStr,
@@ -221,10 +221,13 @@ function ApprovalForm(props: IProps) {
 
     setIsDisableBtn(true);
 
-    EventEmitter.emit('beyond-chat-on-send-msg', payload);
+    updateMessageListItemContent(messageListItemContent);
+
     EventEmitter.emit('beyond-easyconfirm-set-approvalform-item', props);
 
-    myUpdateMessageStructById(operationForm);
+    myUpdateMessageStructById(operationForm).then(() => {
+      EventEmitter.emit('beyond-chat-on-send-msg', payload);
+    });
   };
 
   useEffect(() => {

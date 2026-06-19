@@ -17,22 +17,44 @@ describe("Baiying AI model runtime provider", () => {
 
         const provider = registerProvider.mock.calls[0]?.[0];
         expect(provider?.id).toBe("baiying-aimodel");
-        expect(provider?.hookAliases).toEqual(["openai-completions", "anthropic-messages"]);
+        expect(provider?.hookAliases).toEqual([
+            "openai-completions",
+            "openai-responses",
+            "anthropic-messages",
+        ]);
         expect(
             provider?.resolveSyntheticAuth?.({
                 provider: "baiying-m-10004009",
                 providerConfig: {
                     api: "openai-completions",
-                    apiKey: {
-                        source: "exec",
-                        provider: "baiying-aimodel-redis",
-                        id: "model:10004009",
-                    },
                 },
             }),
         ).toEqual({
             apiKey: "redis-token",
             source: "baiying-enhance Redis authToken (10004009)",
+            mode: "api-key",
+        });
+    });
+
+    it("derives negative Redis model ids from managed provider ids", () => {
+        const registerProvider = vi.fn();
+        registerBaiyingAimodelRuntimeProvider(
+            { registerProvider } as unknown as Parameters<typeof registerBaiyingAimodelRuntimeProvider>[0],
+            {},
+        );
+        rememberAimodelAuthToken({ modelId: "-500", token: "negative-token" });
+
+        const provider = registerProvider.mock.calls[0]?.[0];
+        expect(
+            provider?.resolveSyntheticAuth?.({
+                provider: "baiying-m-neg-500",
+                providerConfig: {
+                    api: "openai-responses",
+                },
+            }),
+        ).toEqual({
+            apiKey: "negative-token",
+            source: "baiying-enhance Redis authToken (-500)",
             mode: "api-key",
         });
     });
@@ -61,11 +83,6 @@ describe("Baiying AI model runtime provider", () => {
             provider?.resolveSyntheticAuth?.({
                 provider: "baiying-m-10004009",
                 providerConfig: {
-                    apiKey: {
-                        source: "exec",
-                        provider: "baiying-aimodel-redis",
-                        id: "model:10004009",
-                    },
                 },
             }),
         ).toBeUndefined();

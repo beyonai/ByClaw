@@ -27,10 +27,11 @@ the plugin retries in the background with exponential backoff. Defaults:
 Until a repository has been cloned and indexed, `code_to_wiki` returns a clear
 repository-not-ready error with the last failure and next retry time.
 
-By default, `code_to_wiki` does not return raw CodeGraph output to OpenClaw tool
-results. This keeps Gateway terminals and session logs readable. Set
-`includeRawOutputInToolResult: true` when you want the model to receive the full
-CodeGraph result and generate an operation document from it.
+By default, `code_to_wiki` returns raw CodeGraph output to OpenClaw tool results
+so the model can inspect source and generate operation documents from code. Each
+lookup result also includes the repository local checkout path. Set
+`includeRawOutputInToolResult: false` only when you intentionally want quieter
+tool results.
 
 ## Example config
 
@@ -80,9 +81,14 @@ and restart Gateway.
           retryInitialDelayMs: 300000,
           retryMaxDelayMs: 21600000,
           retryMaxAttempts: 3,
-          includeRawOutputInToolResult: false,
+          includeRawOutputInToolResult: true,
           gitDepth: 1,
           notificationWebhookUrl: "https://oapi.dingtalk.com/robot/send?access_token=...",
+          // Or configure only the token and let the plugin build the webhook URL:
+          // notificationDingtalkAccessToken: "...",
+          notificationDingtalkSecret: "SEC...",
+          notificationDingtalkActionCardBtnTitle: "通过",
+          notificationDingtalkActionCardBtnUrl: "http://39.105.105.85/beyond/chat",
           notificationRobotType: "dingtalk"
         }
       }
@@ -114,13 +120,25 @@ The intended flow is:
    `documentMarkdown` to send that generated document to the group robot for
    review.
 
-Configure `notificationWebhookUrl` in `openclaw.json`.
+Configure `notificationWebhookUrl` in `openclaw.json`. For DingTalk custom
+robots, you can also configure `notificationDingtalkAccessToken` instead of the
+full webhook URL.
+
+For DingTalk robots with signing enabled, also configure
+`notificationDingtalkSecret`. The plugin computes `timestamp` and `sign` for
+each request and appends them to the webhook URL.
+
+DingTalk notifications are sent as a single-button ActionCard. The default
+button is `通过`, and the default button URL is
+`http://39.105.105.85/beyond/chat`; set
+`notificationDingtalkActionCardBtnTitle` and
+`notificationDingtalkActionCardBtnUrl` to customize it.
 
 Supported `notificationRobotType` values:
 
 - `generic`: JSON payload with `type` and `markdown`.
 - `wecom`: Enterprise WeChat `markdown` message.
-- `dingtalk`: DingTalk `markdown` message.
+- `dingtalk`: DingTalk single-button `actionCard` message.
 - `feishu`: Feishu text message.
 
 ## HTTP route

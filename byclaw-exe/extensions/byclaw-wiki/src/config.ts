@@ -79,8 +79,8 @@ export const byclawWikiConfigSchema = {
     includeRawOutputInToolResult: {
       type: "boolean",
       description:
-        "Whether code_to_wiki returns raw CodeGraph output to OpenClaw. Default false keeps terminal/tool logs quiet.",
-      default: false,
+        "Whether code_to_wiki returns raw CodeGraph output to OpenClaw. Default true lets agents inspect source and generate documents.",
+      default: true,
     },
     gitDepth: {
       type: "number",
@@ -90,6 +90,25 @@ export const byclawWikiConfigSchema = {
     notificationWebhookUrl: {
       type: "string",
       description: "Optional group robot webhook URL.",
+    },
+    notificationDingtalkAccessToken: {
+      type: "string",
+      description:
+        "Optional DingTalk custom robot access token. Used to build the webhook URL when notificationWebhookUrl is not set.",
+    },
+    notificationDingtalkSecret: {
+      type: "string",
+      description: "Optional DingTalk robot SEC secret used to sign webhook requests.",
+    },
+    notificationDingtalkActionCardBtnTitle: {
+      type: "string",
+      description: "DingTalk ActionCard single button title.",
+      default: "通过",
+    },
+    notificationDingtalkActionCardBtnUrl: {
+      type: "string",
+      description: "DingTalk ActionCard single button jump URL.",
+      default: "http://39.105.105.85/beyond/chat",
     },
     notificationRobotType: {
       enum: ["generic", "wecom", "dingtalk", "feishu"],
@@ -231,10 +250,20 @@ export function resolveByclawWikiConfig(raw: unknown): ResolvedByclawWikiConfig 
     retryInitialDelayMs: readPositiveInteger(config.retryInitialDelayMs, 5 * 60 * 1000),
     retryMaxDelayMs: readPositiveInteger(config.retryMaxDelayMs, 6 * 60 * 60 * 1000),
     retryMaxAttempts: readPositiveInteger(config.retryMaxAttempts, 3),
-    includeRawOutputInToolResult: readBoolean(config.includeRawOutputInToolResult, false),
+    includeRawOutputInToolResult: readBoolean(config.includeRawOutputInToolResult, true),
     gitDepth: readPositiveInteger(config.gitDepth, 1),
     notification: {
       webhookUrl: readString(config.notificationWebhookUrl, "") || undefined,
+      dingtalkAccessToken: readString(config.notificationDingtalkAccessToken, "") || undefined,
+      dingtalkSecret: readString(config.notificationDingtalkSecret, "") || undefined,
+      dingtalkActionCardBtnTitle: readString(
+        config.notificationDingtalkActionCardBtnTitle,
+        "通过",
+      ),
+      dingtalkActionCardBtnUrl: readString(
+        config.notificationDingtalkActionCardBtnUrl,
+        "http://39.105.105.85/beyond/chat",
+      ),
       robotType: readRobotType(config.notificationRobotType),
       maxOutputChars: readPositiveInteger(config.notificationMaxOutputChars, 3000),
       minOutputChars: readNonNegativeInteger(config.notificationMinOutputChars, 1),

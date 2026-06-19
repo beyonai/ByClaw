@@ -19,7 +19,7 @@ import { resolveTreeItemDirectoryPath } from './service';
 import { HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH, SiderContentContext } from '@/layout/sider/siderContentContext';
 import type { QueryDirAndFileByLevelItem } from '@/service/knowledgeCenter';
 import { downloadFile } from '@/utils/file';
-import { getKnowledgeFileIconType } from '@/constants/icon';
+import { getFileIconType } from '@/constants/icon';
 import {
   getMimeType,
   isPreviewable,
@@ -245,7 +245,7 @@ function onDragStart(info: Parameters<Required<TreeProps>['onDragStart']>[0]) {
 function getNodeIcon(p: AntdTreeNodeAttribute) {
   const { isLeaf, title } = p;
   const data = p as unknown as Partial<IKnowledgeDetailTreeItem>;
-  const iconType = getKnowledgeFileIconType(title as string, {
+  const iconType = getFileIconType(title as string, {
     isDirectory: data.type === 'directory' || !isLeaf,
     directoryIconType: 'wenjianjialanse',
   });
@@ -408,7 +408,10 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
   const handlePreviewFile = useCallback(
     async (item: IKnowledgeDetailTreeItem) => {
       const fileName = getKnowledgeItemName(item);
-      if (!isPreviewable(fileName)) return;
+      if (!isPreviewable(fileName)) {
+        message.warning(intl.formatMessage({ id: 'fileBrowser.preview.unavailable' }));
+        return;
+      }
 
       const directoryPath = resolveTreeItemDirectoryPath(item);
       if (!directoryPath) {
@@ -710,6 +713,8 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
                 .finally(resolve);
             }),
         });
+      } else if (key === 'preview') {
+        void handlePreviewFile(item);
       } else if (key === 'download') {
         const directoryPath = resolveTreeItemDirectoryPath(item);
         if (!directoryPath) {
@@ -730,7 +735,7 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
         openSaveToFileBrowser(item, 'shared');
       }
     },
-    [dataset.resourceId, intl, message, modal, modalAction, openSaveToFileBrowser]
+    [dataset.resourceId, handlePreviewFile, intl, message, modal, modalAction, openSaveToFileBrowser]
   );
 
   return (
@@ -797,7 +802,16 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
                     { key: 'delete', label: intl.formatMessage({ id: 'common.delete' }) }
                   );
                 }
+                const canPreview = item.type === 'file' && isPreviewable(getKnowledgeItemName(item));
                 const fileBrowserMenus = [
+                  ...(canPreview
+                    ? [
+                      {
+                        key: 'preview',
+                        label: intl.formatMessage({ id: 'fileBrowser.action.preview' }),
+                      },
+                    ]
+                    : []),
                   {
                     key: 'download',
                     label: intl.formatMessage({ id: 'directoryManage.downloadFile' }),

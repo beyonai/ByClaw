@@ -1,9 +1,12 @@
+import { createHmac, randomUUID } from "node:crypto";
 import type {
   CodegraphMode,
   NotificationRobotType,
   ResolvedNotificationConfig,
   ResolvedWikiRepositoryConfig,
 } from "./types.js";
+
+const DINGTALK_CUSTOM_ROBOT_WEBHOOK = "https://oapi.dingtalk.com/robot/send";
 
 export type DocumentationNotificationRequest = {
   config: ResolvedNotificationConfig;
@@ -23,8 +26,38 @@ export type DocumentationNotificationResult = {
   error?: string;
 };
 
+function resolveBaseWebhookUrl(config: ResolvedNotificationConfig): string | undefined {
+  const webhookUrl = config.webhookUrl?.trim();
+  if (!webhookUrl) {
+    if (config.robotType !== "dingtalk" || !config.dingtalkAccessToken?.trim()) {
+      return undefined;
+    }
+    const url = new URL(DINGTALK_CUSTOM_ROBOT_WEBHOOK);
+    url.searchParams.set("access_token", config.dingtalkAccessToken.trim());
+    return url.toString();
+  }
+  return webhookUrl;
+}
+
 function resolveWebhookUrl(config: ResolvedNotificationConfig): string | undefined {
-  return config.webhookUrl?.trim() || undefined;
+  const webhookUrl = resolveBaseWebhookUrl(config);
+  if (!webhookUrl) {
+    return undefined;
+  }
+
+  if (config.robotType !== "dingtalk" || !config.dingtalkSecret?.trim()) {
+    return webhookUrl;
+  }
+
+  const timestamp = String(Date.now());
+  const secret = config.dingtalkSecret.trim();
+  const sign = createHmac("sha256", Buffer.from(secret, "utf8"))
+    .update(`${timestamp}\n${secret}`, "utf8")
+    .digest("base64");
+  const url = new URL(webhookUrl);
+  url.searchParams.set("timestamp", timestamp);
+  url.searchParams.set("sign", sign);
+  return url.toString();
 }
 
 function truncateText(value: string, maxChars: number): string {
@@ -34,8 +67,12 @@ function truncateText(value: string, maxChars: number): string {
   return `${value.slice(0, Math.max(0, maxChars - 30))}\n\n... output truncated ...`;
 }
 
+function resolveNotificationTitle(params: DocumentationNotificationRequest): string {
+  return params.documentTitle || "Byclaw Wiki: 操作文档待更新";
+}
+
 function buildMarkdown(params: DocumentationNotificationRequest): string {
-  const title = params.documentTitle || "Byclaw Wiki: 操作文档待更新";
+  const title = resolveNotificationTitle(params);
   const question = params.question || params.query || "(未提供问题)";
   const documentMarkdown = truncateText(params.documentMarkdown.trim(), params.config.maxOutputChars);
   return [
@@ -53,7 +90,13 @@ function buildMarkdown(params: DocumentationNotificationRequest): string {
   ].join("\n");
 }
 
-function buildPayload(robotType: NotificationRobotType, markdown: string): unknown {
+function buildPayload(params: {
+  robotType: NotificationRobotType;
+  config: ResolvedNotificationConfig;
+  title: string;
+  markdown: string;
+}): unknown {
+  const { robotType, config, title, markdown } = params;
   switch (robotType) {
     case "wecom":
       return {
@@ -63,13 +106,22 @@ function buildPayload(robotType: NotificationRobotType, markdown: string): unkno
         },
       };
     case "dingtalk":
-      return {
-        msgtype: "markdown",
-        markdown: {
-          title: "Byclaw Wiki 文档更新提醒",
-          text: markdown,
-        },
-      };
+      {
+        const btnTitle = config.dingtalkActionCardBtnTitle.trim() || "通过";
+        const btnUrl = config.dingtalkActionCardBtnUrl.trim();
+        return {
+          msgtype: "actionCard",
+          msgUuid: randomUUID(),
+          actionCard: {
+            title,
+            text: markdown,
+            btnTitle,
+            btnUrl,
+            singleTitle: btnTitle,
+            singleURL: btnUrl,
+          },
+        };
+      }
     case "feishu":
       return {
         msg_type: "text",
@@ -86,6 +138,35 @@ function buildPayload(robotType: NotificationRobotType, markdown: string): unkno
   }
 }
 
+async function parseRobotResponse(response: Response): Promise<{ ok: boolean; error?: string }> {
+  const body = await response.text().catch(() => "");
+  if (!body.trim()) {
+    return {
+      ok: response.ok,
+      error: response.ok ? undefined : response.statusText,
+    };
+  }
+
+  try {
+    const payload = JSON.parse(body) as { errcode?: number | string; errmsg?: string };
+    if (payload.errcode !== undefined && String(payload.errcode) !== "0") {
+      return {
+        ok: false,
+        error: `errcode=${payload.errcode}, errmsg=${payload.errmsg ?? ""}`.trim(),
+      };
+    }
+    return {
+      ok: response.ok,
+      error: response.ok ? undefined : body,
+    };
+  } catch {
+    return {
+      ok: response.ok,
+      error: response.ok ? undefined : body,
+    };
+  }
+}
+
 export async function sendDocumentationNotification(
   params: DocumentationNotificationRequest,
 ): Promise<DocumentationNotificationResult> {
@@ -97,34 +178,43 @@ export async function sendDocumentationNotification(
     };
   }
 
-  const webhookUrl = resolveWebhookUrl(params.config);
-  if (!webhookUrl) {
-    return {
-      attempted: false,
-      skippedReason: "webhook_not_configured",
-    };
-  }
-
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10_000);
   timer.unref();
 
   try {
+    const webhookUrl = resolveWebhookUrl(params.config);
+    if (!webhookUrl) {
+      return {
+        attempted: false,
+        skippedReason: "webhook_not_configured",
+      };
+    }
+
+    const title = resolveNotificationTitle(params);
     const markdown = buildMarkdown(params);
     const response = await fetch(webhookUrl, {
       method: "POST",
       headers: {
         "content-type": "application/json; charset=utf-8",
       },
-      body: JSON.stringify(buildPayload(params.config.robotType, markdown)),
+      body: JSON.stringify(
+        buildPayload({
+          robotType: params.config.robotType,
+          config: params.config,
+          title,
+          markdown,
+        }),
+      ),
       signal: controller.signal,
     });
+    const robotResponse = await parseRobotResponse(response);
 
     return {
       attempted: true,
-      ok: response.ok,
+      ok: response.ok && robotResponse.ok,
       statusCode: response.status,
-      error: response.ok ? undefined : await response.text().catch(() => response.statusText),
+      error: response.ok && robotResponse.ok ? undefined : robotResponse.error ?? response.statusText,
     };
   } catch (error) {
     return {

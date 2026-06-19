@@ -66,6 +66,7 @@ import com.iwhalecloud.byai.state.domain.resource.qo.PersonalAgentArchiveQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.ResourceDetailQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.UpdateResourceBasicInfoQo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceApplicationService;
+import com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorageService;
 import com.iwhalecloud.byai.state.domain.resource.service.ToolManService;
 import com.iwhalecloud.byai.state.domain.resource.vo.ResourceDetailVo;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawFileDto;
@@ -122,6 +123,9 @@ public class ToolManController {
 
     @Autowired
     private ByClawPersonalAgentArchivApplicationService byClawPersonalAgentArchivApplicationService;
+
+    @Autowired
+    private ResourceArtifactStorageService resourceArtifactStorageService;
 
     /**
      * 阶段一：解析 curl，返回结构化预览（不入库）
@@ -850,11 +854,11 @@ public class ToolManController {
         @Parameter(description = "技能资源ID，兼容参数名") @RequestParam(value = "resourceId", required = false) Long resourceId) {
         Long resolvedSkillId = skillId != null ? skillId : resourceId;
         if (resolvedSkillId == null) {
-            return ResponseUtil.fail("技能资源ID不能为空");
+            return ResponseUtil.fail(I18nUtil.get("byclaw.skill.resource.id.empty"));
         }
         SsResExtSkill extSkill = ssResExtSkillService.findById(resolvedSkillId);
         if (extSkill == null || StringUtils.isBlank(extSkill.getVersion())) {
-            return ResponseUtil.fail("技能版本不存在");
+            return ResponseUtil.fail(I18nUtil.get("byclaw.skill.version.notfound"));
         }
         boolean innerSkill = StringUtils.equalsIgnoreCase(extSkill.getSkillType(),
             SsResExtSkillService.INNER_SKILL_TYPE);
@@ -865,26 +869,12 @@ public class ToolManController {
         data.put("skillType", extSkill.getSkillType());
         data.put("sourceType", extSkill.getSourceType());
         data.put("needDownload", !innerSkill);
-        data.put("skillUrl", innerSkill ? "" : normalizeSkillUrl(extSkill.getSkillUrl()));
-        return ResponseUtil.successResponse("技能版本查询成功", data);
+        data.put("skillUrl", innerSkill ? "" : buildSkillDownloadUrl(resolvedSkillId));
+        return ResponseUtil.successResponse(I18nUtil.get("byclaw.skill.version.query.success"), data);
     }
 
-    private String normalizeSkillUrl(String skillUrl) {
-        if (StringUtils.isBlank(skillUrl)) {
-            return "";
-        }
-        String normalized = skillUrl.trim().replace('\\', '/').replaceAll("/+", "/");
-        String withoutLeadingSlash = StringUtils.removeStart(normalized, "/");
-        if (StringUtils.startsWith(withoutLeadingSlash, "byclaw/resource/")) {
-            return "/" + withoutLeadingSlash;
-        }
-        if (StringUtils.startsWith(withoutLeadingSlash, "resource/")) {
-            return "/byclaw/" + withoutLeadingSlash;
-        }
-        if (StringUtils.startsWith(withoutLeadingSlash, "skill/")) {
-            return "/byclaw/resource/" + withoutLeadingSlash;
-        }
-        return normalized.startsWith("/") ? normalized : "/" + normalized;
+    private String buildSkillDownloadUrl(Long skillId) {
+        return skillId == null ? "" : "/byaiService/tool/downloadSkillZip?skillId=" + skillId;
     }
 
     /**
@@ -943,9 +933,13 @@ public class ToolManController {
      * query/form 两种形式：body 优先，缺失时退到 query 参数。 - 出参为 application/zip 流，文件名形如 {skillName}.zip。 - 失败场景（路径非法 / skill 不存在 /
      * 读对象异常）返回纯文本 400，避免中途出 zip 时再插入 JSON 错误体。
      */
-    @PostMapping("/downloadSkillZip")
+    @RequestMapping(value = "/downloadSkillZip", method = {
+        RequestMethod.GET, RequestMethod.POST
+    })
     public ResponseEntity<StreamingResponseBody> downloadSkillZip(
         @RequestBody(required = false) DownloadSkillZipQo request,
+        @Parameter(description = "技能资源ID；传入后直接下载资源化技能 zip", required = false) @RequestParam(
+            value = "skillId", required = false) Long skillId,
         @Parameter(
             description = "skill 目录路径，例如 /.openclaw/workspace-baiying-agent-10000417/skills/fol-auto-biztravel") @RequestParam(
                 value = "skillPath", required = false) String skillPath,
@@ -957,6 +951,7 @@ public class ToolManController {
         String finalSkillPath = request != null && StringUtils.isNotBlank(request.getSkillPath())
             ? request.getSkillPath()
             : skillPath;
+        Long finalSkillId = request != null && request.getSkillId() != null ? request.getSkillId() : skillId;
         Long finalResourceId = request != null && request.getResourceId() != null ? request.getResourceId()
             : resourceId;
         String finalUserCode = request != null && StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
@@ -964,6 +959,9 @@ public class ToolManController {
         String resolvedUserCode = StringUtils.isNotBlank(finalUserCode) ? finalUserCode
             : CurrentUserHolder.getCurrentUserCode();
         try {
+            if (finalSkillId != null) {
+                return downloadManagedSkillZip(finalSkillId);
+            }
             if (StringUtils.isBlank(finalSkillPath)) {
                 throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.path.invalid"));
             }
@@ -987,6 +985,51 @@ public class ToolManController {
             return ResponseEntity.badRequest().contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
                 .body(out -> out.write(fallbackMsg.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         }
+    }
+
+    private ResponseEntity<StreamingResponseBody> downloadManagedSkillZip(Long skillId) {
+        SsResExtSkill extSkill = ssResExtSkillService.findById(skillId);
+        if (extSkill == null) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.resource.notfound"));
+        }
+        if (StringUtils.equalsIgnoreCase(extSkill.getSkillType(), SsResExtSkillService.INNER_SKILL_TYPE)) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.inner.download.unneeded"));
+        }
+        String relativePath = stripResourcePrefix(extSkill.getSkillUrl());
+        if (StringUtils.isBlank(relativePath)) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.package.path.notfound"));
+        }
+        if (!resourceArtifactStorageService.existsWithinResourceRoot(relativePath)) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.package.file.notfound"));
+        }
+        String fileName = StringUtils.defaultIfBlank(extSkill.getSkillOriginalFilename(), lastPathSegment(relativePath));
+        String encoded = UriUtils.encode(fileName, java.nio.charset.StandardCharsets.UTF_8);
+        String contentDisposition = "attachment; filename=\"" + encoded + "\"; filename*=UTF-8''" + encoded;
+        StreamingResponseBody body = out -> {
+            try (java.io.InputStream in = resourceArtifactStorageService.readWithinResourceRoot(relativePath)) {
+                if (in == null) {
+                    throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.package.file.notfound"));
+                }
+                in.transferTo(out);
+            }
+        };
+        return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/zip"))
+            .header("Content-Disposition", contentDisposition).body(body);
+    }
+
+    private String stripResourcePrefix(String objectKey) {
+        String normalized = StringUtils.removeStart(StringUtils.defaultString(objectKey), "/");
+        normalized = StringUtils.removeStart(normalized, "byclaw/resource/");
+        return StringUtils.removeStart(normalized, "resource/");
+    }
+
+    private String lastPathSegment(String filename) {
+        if (StringUtils.isBlank(filename)) {
+            return "";
+        }
+        String normalized = filename.replace('\\', '/');
+        int slashIndex = normalized.lastIndexOf('/');
+        return slashIndex >= 0 ? normalized.substring(slashIndex + 1) : normalized;
     }
 
     /**

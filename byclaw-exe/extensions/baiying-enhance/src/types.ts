@@ -120,6 +120,11 @@ export type BaiyingEnhancePluginConfig = {
     /** @deprecated Ignored. Former alias for `agentContentScanIntervalMs`. */
     pollIntervalMs?: number;
     /**
+     * When true (default), object-form `relSkills` with `skillType: "hub"` are version-checked
+     * through ByaiService and installed under `${OPENCLAW_STATE_DIR}/skills/<skillCode>`.
+     */
+    hubSkillAutoSync?: boolean;
+    /**
      * When true (default), merge user-uploaded workspace skills (`skills/<name>/SKILL.md`) into
      * managed agents' `agents.list[].skills` alongside JSON `relSkills` / `skills`.
      */

@@ -123,8 +123,8 @@
       },
       "includeRawOutputInToolResult": {
         "type": "boolean",
-        "description": "Whether code_to_wiki returns raw CodeGraph output to OpenClaw. Default false keeps terminal/tool logs quiet.",
-        "default": false
+        "description": "Whether code_to_wiki returns raw CodeGraph output to OpenClaw. Default true lets agents inspect source and generate documents.",
+        "default": true
       },
       "gitDepth": {
         "type": "number",
@@ -134,6 +134,24 @@
       "notificationWebhookUrl": {
         "type": "string",
         "description": "Optional group robot webhook URL."
+      },
+      "notificationDingtalkAccessToken": {
+        "type": "string",
+        "description": "Optional DingTalk custom robot access token. Used to build the webhook URL when notificationWebhookUrl is not set."
+      },
+      "notificationDingtalkSecret": {
+        "type": "string",
+        "description": "Optional DingTalk robot SEC secret used to sign webhook requests."
+      },
+      "notificationDingtalkActionCardBtnTitle": {
+        "type": "string",
+        "description": "DingTalk ActionCard single button title.",
+        "default": "通过"
+      },
+      "notificationDingtalkActionCardBtnUrl": {
+        "type": "string",
+        "description": "DingTalk ActionCard single button jump URL.",
+        "default": "http://39.105.105.85/beyond/chat"
       },
       "notificationRobotType": {
         "type": "string",

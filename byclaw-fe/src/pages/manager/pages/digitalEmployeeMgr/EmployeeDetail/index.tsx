@@ -62,28 +62,44 @@ export const skillHandler = (it) => {
 };
 
 const parseBundledSkills = (value) => {
-  const normalizeBundledSkillCodes = (items = []) =>
+  const normalizeBundledSkillItems = (items = []) =>
     items
       .map((item) => {
         if (typeof item === 'string') {
-          return item;
+          const skillCode = item.trim();
+          return skillCode ? { skillCode } : null;
         }
-        return item?.skillCode || item?.resourceCode || item?.value || item?.code || item?.resourceId || item?.id;
+
+        const resourceId = item?.resourceId || item?.skillId || item?.id;
+        const skillCode =
+          item?.skillCode || item?.resourceCode || item?.value || item?.code || item?.resourceId || item?.id;
+        const normalized = {
+          resourceId,
+          skillCode: `${skillCode || ''}`.trim(),
+          skillType: item?.skillType,
+          skillUrl: item?.skillUrl,
+          versionUrl: item?.versionUrl,
+        };
+        Object.keys(normalized).forEach((key) => {
+          if (normalized[key] === undefined || normalized[key] === null || normalized[key] === '') {
+            delete normalized[key];
+          }
+        });
+        return normalized.skillCode || normalized.resourceId ? normalized : null;
       })
-      .map((item) => `${item || ''}`.trim())
       .filter(Boolean);
 
   if (Array.isArray(value)) {
-    return normalizeBundledSkillCodes(value);
+    return normalizeBundledSkillItems(value);
   }
   if (typeof value !== 'string' || !value) {
     return [];
   }
   try {
     const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? normalizeBundledSkillCodes(parsed) : [];
+    return Array.isArray(parsed) ? normalizeBundledSkillItems(parsed) : [];
   } catch {
-    return normalizeBundledSkillCodes(value.split(','));
+    return normalizeBundledSkillItems(value.split(','));
   }
 };
 
@@ -1083,7 +1099,6 @@ const EmployeeDetail = ({ loading }) => {
 
         set(param, 'relResourceInfoList', relResourceInfoList);
         set(param, 'createType', effectiveDigitalType);
-        set(param, 'relIds', relIds);
         if (relTools.length > 0) {
           set(param, 'relTools', relTools);
         }
@@ -1107,6 +1122,13 @@ const EmployeeDetail = ({ loading }) => {
         const coreCompetencies = form.getFieldValue('coreCompetencies') || [];
         const currentResourceId = queryData.resourceId || agentId;
         const bundledSkills = Array.isArray(roleJson.bundledSkills) ? parseBundledSkills(roleJson.bundledSkills) : [];
+        bundledSkills.forEach((skill) => {
+          const skillResourceId = skill?.resourceId || skill?.skillId || skill?.id;
+          if (skillResourceId) {
+            relIds.push(`${skillResourceId}`);
+          }
+        });
+        set(param, 'relIds', Array.from(new Set(relIds)));
 
         // 创建/更新使用新接口：扁平化参数 + 新增字段
         const flattened = {
@@ -1747,6 +1769,9 @@ const EmployeeDetail = ({ loading }) => {
         questionList={questionList}
         skills={selectedTools}
         knowledgeBases={knowledgeBases}
+        agentType={effectiveAgentType}
+        resourceId={agentId}
+        modelCode={modelName}
         onOk={(formValue, myQuestionList) => {
           setQuestionList(myQuestionList);
           form.setFieldsValue(formValue);

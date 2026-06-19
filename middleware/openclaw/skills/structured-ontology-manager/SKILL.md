@@ -8,6 +8,14 @@ allowed-tools: execute, read_file
 
 通过自然语言对话，管理结构化本体对象和视图。支持创建、删除操作，对象数据持久化到 SQLite。
 
+## ⚠️ 执行规则（最高优先级，不得违反）
+
+1. **必须直接执行脚本**，禁止自行编写任何 Python/Shell 代码来替代或模拟脚本功能
+2. **禁止重写脚本逻辑**：即使你能理解脚本内容，也不允许复现、改写或内联其逻辑
+3. **所有操作通过 Bash 调用已有脚本完成**，脚本路径见下方意图路由表
+4. **解析脚本输出**：读取脚本 stdout 的 JSON，`ok: true` 为成功，`ok: false` 为失败，失败时将 `error` 字段内容告知用户
+5. **不允许推测结果**：脚本未执行前不得告知用户操作成功或失败
+
 ## 🌐 必需环境变量
 
 以下变量由运行环境自动注入，脚本会自动读取。**调用脚本前确认存在**，缺失则报错提示用户：
@@ -60,18 +68,26 @@ allowed-tools: execute, read_file
 
 ## 意图路由
 
-| 用户表达 | 意图 | 脚本 | 入参示例 |
-|----------|------|------|----------|
-| 查看/列出 + 对象/视图 | 查询列表 | `list_resources.py` | `{}` 或 `{"resource_biz_type":"VIEW"}` |
-| 创建/新建 + 对象（收集阶段） | 收集对象信息 | `create_object.py` | `{"action":"collect","entity_code":"xxx","entity_name":"xxx","entity_desc":"xxx","fields":[...]}` |
-| 确认提交（对象） | 提交对象 | `create_object.py` | `{"action":"submit","entity_code":"xxx"}` |
-| 创建/新建 + 视图（收集阶段） | 收集视图信息 | `create_view.py` | `{"action":"collect","view_code":"xxx","view_name":"xxx"}` |
-| 确认提交（视图） | 提交视图 | `create_view.py` | `{"action":"submit","view_code":"xxx"}` |
-| 删除 + 对象 | 删除对象 | `delete_object.py` | `{"entity_code":"xxx"}` |
-| 删除 + 视图 | 删除视图 | `delete_view.py` | `{"view_code":"xxx"}` |
-| 挂载/添加到助理/数字员工 | 挂载本体 | `mount_resource.py` | `{"agent_id":10004452,"resource_code":"xxx"}` |
-| 查看术语类型 | 查枚举 | `list_term_types.py` | `{}` |
-| 查看术语值 | 查枚举值 | `get_term_type_values.py` | `{"term_type_code":"xxx"}` |
+每条意图对应一条 Bash 命令，**直接执行，不得改写**：
+
+| 用户表达 | Bash 命令（在 skill 根目录执行） |
+|----------|--------------------------------|
+| 查看/列出 + 对象 | `/usr/local/bin/python3 scripts/list_resources.py '{}'` |
+| 查看/列出 + 视图 | `/usr/local/bin/python3 scripts/list_resources.py '{"resource_biz_type":"VIEW"}'` |
+| 创建/新建 + 对象（收集阶段） | `/usr/local/bin/python3 scripts/create_object.py '{"action":"collect","entity_code":"<code>","entity_name":"<name>","entity_desc":"<desc>","fields":[...],"session_id":"<sid>"}'` |
+| 确认提交（对象） | `/usr/local/bin/python3 scripts/create_object.py '{"action":"submit","entity_code":"<code>","session_id":"<sid>"}'` |
+| 创建/新建 + 视图（收集阶段） | `/usr/local/bin/python3 scripts/create_view.py '{"action":"collect","view_code":"<code>","view_name":"<name>","object_codes":[...]}',"session_id":"<sid>"` |
+| 确认提交（视图） | `/usr/local/bin/python3 scripts/create_view.py '{"action":"submit","view_code":"<code>","session_id":"<sid>"}'` |
+| 删除 + 对象 | `/usr/local/bin/python3 scripts/delete_object.py '{"entity_code":"<code>"}'` |
+| 删除 + 视图 | `/usr/local/bin/python3 scripts/delete_view.py '{"view_code":"<code>"}'` |
+| 挂载/添加到助理/数字员工 | `/usr/local/bin/python3 scripts/mount_resource.py '{"agent_id":<id>,"resource_code":"<code>"}'` |
+| 查看术语类型 | `/usr/local/bin/python3 scripts/list_term_types.py '{}'` |
+| 查看术语值 | `/usr/local/bin/python3 scripts/get_term_type_values.py '{"term_type_code":"<code>"}'` |
+
+**输出处理规则**：
+- `{"ok": true, ...}` → 操作成功，向用户展示 `data` 中的关键信息
+- `{"ok": false, "error": "..."}` → 操作失败，将 `error` 原文告知用户，**不要猜测原因或自行重试**
+- `{"ok": true, "missing": [...]}` → 收集阶段还缺字段，根据 `missing` 列表向用户追问，**不要尝试填充默认值**
 
 ## 字段说明
 

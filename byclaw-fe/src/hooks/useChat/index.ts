@@ -352,31 +352,65 @@ function useChat(props: IProps) {
     updateMessage(answerMsg);
     chatSessionRuntimeManager.completeBySession(answerMsg.sessionId || sessionId);
 
-    return webSocketManager.sendMessageWhenReady({
-      type: 'STOP_CHAT',
-      clientRequestId: runningInfo.clientRequestId,
-      sessionId: answerMsg.sessionId || runningInfo.sessionId || sessionId,
-      messageId: answerMsg.messageId || runningInfo.modelAnswerMessageId,
-      agentId: runningInfo.agentId || answerMsg.agentId || null,
-      agentCode: runningInfo.agentCode || null,
-      agentType: runningInfo.agentType || answerMsg.agentType,
-    }).catch((error) => {
-      // STOP_CHAT 尽力发送，WS 未连接时忽略，避免 Unhandled Rejection。
-      console.error('WebSocket 发送 STOP_CHAT 失败:', error);
-    });
+    return webSocketManager
+      .sendMessageWhenReady({
+        type: 'STOP_CHAT',
+        clientRequestId: runningInfo.clientRequestId,
+        sessionId: answerMsg.sessionId || runningInfo.sessionId || sessionId,
+        messageId: answerMsg.messageId || runningInfo.modelAnswerMessageId,
+        agentId: runningInfo.agentId || answerMsg.agentId || null,
+        agentCode: runningInfo.agentCode || null,
+        agentType: runningInfo.agentType || answerMsg.agentType,
+      })
+      .catch((error) => {
+        // STOP_CHAT 尽力发送，WS 未连接时忽略，避免 Unhandled Rejection。
+        console.error('WebSocket 发送 STOP_CHAT 失败:', error);
+      });
   });
 
   useEffect(() => {
     const handler = (message: any) => {
       const data = get(message, 'data') || message;
+      const clientRequestId = get(message, 'clientRequestId');
       const messageSessionId = get(data, 'sessionId') || get(message, 'sessionId');
-      if (!messageSessionId || `${messageSessionId}` !== `${sessionId}`) return;
 
-      const answerMsg = fetchMessageHandler({
+      const newMsg = fetchMessageHandler({
         ...data,
         sessionId: messageSessionId,
       });
-      updateMessage(answerMsg, { allowCreateSession: false });
+      if (clientRequestId) {
+        newMsg.msgId = newMsg.fromBeyond ? getAnswerClientMsgId(clientRequestId) : getQueryClientMsgId(clientRequestId);
+      }
+      updateMessage(newMsg, { allowCreateSession: false });
+      if (!newMsg.fromBeyond && `${sessionId}` === `${messageSessionId}`) {
+        const agentId = get(message, 'agentId');
+        const newAnswerMsg = createMessage({
+          agentId,
+          text: '',
+          fromBeyond: true,
+          messageState: IMessageState.Query,
+          msgId: getAnswerClientMsgId(clientRequestId),
+          queryMsgId: newMsg.msgId,
+          sessionId: messageSessionId,
+          metadata: agentId ? JSON.stringify({ agentId }) : '',
+        });
+        updateMessage(newAnswerMsg, { isAssign: true });
+        registerPendingChatContext({
+          clientRequestId,
+          queryMsg: newMsg,
+          answerMsg: newAnswerMsg,
+          getMessageList,
+          flowHandler,
+          updateMessage,
+        });
+
+        chatSessionRuntimeManager.register({
+          clientRequestId,
+          sessionId: messageSessionId,
+          restored: false,
+          cancel: () => newAnswerMsg.cancelSSE?.(),
+        });
+      }
     };
 
     webSocketManager.onMessage('NEW_MESSAGE', handler);
@@ -682,16 +716,18 @@ function useChat(props: IProps) {
 
       cancel();
 
-      return webSocketManager.sendMessageWhenReady({
-        type: 'STOP_CHAT',
-        clientRequestId,
-        ...pick(newAnswerMsg, ['agentId', 'sessionId', 'messageId', 'agentType']),
-        agentId: Number(_agentId) ? _agentId : null,
-        agentCode: Number(_agentId) ? null : _agentId,
-      }).catch((error) => {
-        // STOP_CHAT 尽力发送，WS 未连接时忽略，避免 Unhandled Rejection。
-        console.error('WebSocket 发送 STOP_CHAT 失败:', error);
-      });
+      return webSocketManager
+        .sendMessageWhenReady({
+          type: 'STOP_CHAT',
+          clientRequestId,
+          ...pick(newAnswerMsg, ['agentId', 'sessionId', 'messageId', 'agentType']),
+          agentId: Number(_agentId) ? _agentId : null,
+          agentCode: Number(_agentId) ? null : _agentId,
+        })
+        .catch((error) => {
+          // STOP_CHAT 尽力发送，WS 未连接时忽略，避免 Unhandled Rejection。
+          console.error('WebSocket 发送 STOP_CHAT 失败:', error);
+        });
     }, 100);
 
     // 更新回答消息

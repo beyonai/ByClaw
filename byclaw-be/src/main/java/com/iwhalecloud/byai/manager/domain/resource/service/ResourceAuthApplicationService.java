@@ -151,8 +151,8 @@ public class ResourceAuthApplicationService {
     }
 
     /**
-     * 技能关联当前存放在数字员工扩展表 skills 字段中，不在 ss_resource_rel_detail 里，
-     * 因此仅查询技能时需要走技能专用 SQL，避免技能列表为空。
+     * 技能列表仍走技能专用 SQL，便于带出 ss_res_ext_skill 扩展字段；
+     * 绑定关系以 ss_resource_rel_detail 为准，避免仅按 skills JSON 中的 skillCode 匹配出同码多资源。
      */
     private boolean isSkillOnlyQuery(DigEmployeeRelResourceQo qo) {
         return qo != null

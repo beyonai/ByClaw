@@ -363,10 +363,6 @@ async function handleCompactionEvent(
   }
   if (phase === "start") {
     markActiveSdkCompactionRetryPending(sessionKey ?? request.sessionKey, true);
-    await emitSdkChunk(request, "", {
-      contentType: "5007",
-      eventType: EventType.ANSWER_DELTA,
-    });
     return;
   }
   if (phase === "end") {
