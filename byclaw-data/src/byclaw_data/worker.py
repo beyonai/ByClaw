@@ -1482,9 +1482,9 @@ class DataCloudWorker(GatewayWorker):
         )
         return None
 
-    async def start_heartbeat(self) -> None:
+    async def start_heartbeat(self, **kwargs) -> None:
         setup_logging(extra_namespaces=("byclaw_data",))
-        await super().start_heartbeat()
+        await super().start_heartbeat(**kwargs)
 
         init_plugin = self.plugin_registry.get_plugin("datacloud_init_agent_conf")
         loaded_agent_ids = (
@@ -1555,7 +1555,7 @@ class DataCloudWorker(GatewayWorker):
         if self._resource_path and self._shared_loader is not None:
             _all_object_codes: list[str] = list(dict.fromkeys(
                 code
-                for cfg in self.plugin_registry.get_agent_configs_snapshot()
+                for cfg in self.plugin_registry.get_agent_configs_snapshot().configs
                 for code in (cfg.extra.get("mounted_objects") or [])
                 if isinstance(code, str)
             ))
