@@ -1268,6 +1268,7 @@ class DataCloudWorker(GatewayWorker):
         self,
         execution: Any,
         session_id: str,
+        target_agent_type: str = "",
     ) -> Any:
         """Return the current in-memory snapshot without dill serialization.
 
