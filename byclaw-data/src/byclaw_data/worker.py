@@ -946,6 +946,9 @@ def _create_early_langfuse_trace(
                 "user_code": user_id,
                 "env": os.getenv("HOST", ""),
                 "worker": os.getenv("DATACLOUD_GATEWAY_WORKER_ID", ""),
+                "host": os.getenv("HOST", ""),
+                "host_ssh_port": os.getenv("HOST_PORT", "22"),
+                "container_name": f"byclaw-data-{os.getenv('CONTAINER_SUFFIX', 'standalone')}",
             },
         )
         return (lf, span)
