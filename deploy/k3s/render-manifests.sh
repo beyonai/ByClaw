@@ -89,6 +89,10 @@ IMAGE_DATA="${IMAGE_DATA:-ghcr.io/beyonai/byclaw/byclaw-data:main}"
 IMAGE_DEMO="${IMAGE_DEMO:-ghcr.io/beyonai/byclaw-middleware/byclaw-demo:main}"
 IMAGE_REDIS="${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}"
 IMAGE_OPENGAUSS="${IMAGE_OPENGAUSS:-ghcr.io/beyonai/byclaw/byclaw-opengauss:main}"
+IMAGE_ALERTMANAGER="${IMAGE_ALERTMANAGER:-quay.io/prometheus/alertmanager:v0.27.0}"
+MONITORING_EXTERNAL_BASE_URL="${MONITORING_EXTERNAL_BASE_URL:-http://${K3S_API_HOST:-127.0.0.1}}"
+MONITORING_ALERTMANAGER_PVC_SIZE="${MONITORING_ALERTMANAGER_PVC_SIZE:-2Gi}"
+ALERTMANAGER_WEBHOOK_URL="${ALERTMANAGER_WEBHOOK_URL:-http://byclaw-be.${NS_SERVICE}.svc.cluster.local:8086/byaiService/sandbox/autoscale/alerts}"
 IMAGE_SANDBOX_SERVER="${IMAGE_SANDBOX_SERVER:-sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server:v0.1.14}"
 
 if [ "$OPENSANDBOX_WORKLOAD_NAMESPACE" != "$NS_SERVICE" ]; then
@@ -1983,6 +1987,92 @@ spec:
           type: Utilization
           averageUtilization: ${OPENSANDBOX_HPA_MEMORY:-80}
 EOF
+    cat > "$OUT_DIR/60-monitoring/alertmanager.yaml" <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: ${NS_MONITORING}
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: byclaw-autoscale
+      group_by: ["alertname", "namespace", "pod", "sandboxId", "alertActionType", "reasonCode"]
+      group_wait: ${ALERTMANAGER_AUTOSCALE_GROUP_WAIT:-5s}
+      group_interval: ${ALERTMANAGER_AUTOSCALE_GROUP_INTERVAL:-1m}
+      repeat_interval: ${ALERTMANAGER_AUTOSCALE_REPEAT_INTERVAL:-1h}
+    receivers:
+      - name: byclaw-autoscale
+        webhook_configs:
+          - url: "${ALERTMANAGER_WEBHOOK_URL}"
+            send_resolved: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: alertmanager-data
+  namespace: ${NS_MONITORING}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: ${STORAGE_CLASS}
+  resources:
+    requests:
+      storage: ${MONITORING_ALERTMANAGER_PVC_SIZE}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: ${NS_MONITORING}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alertmanager
+  template:
+    metadata:
+      labels:
+        app: alertmanager
+    spec:
+      containers:
+        - name: alertmanager
+          image: ${IMAGE_ALERTMANAGER}
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+            - --web.route-prefix=/alertmanager
+            - --web.external-url=${MONITORING_EXTERNAL_BASE_URL}/alertmanager
+          ports:
+            - name: http
+              containerPort: 9093
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alertmanager
+            - name: data
+              mountPath: /alertmanager
+      volumes:
+        - name: config
+          configMap:
+            name: alertmanager-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: alertmanager-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: ${NS_MONITORING}
+spec:
+  selector:
+    app: alertmanager
+  ports:
+    - name: http
+      port: 9093
+      targetPort: http
+EOF
     cat > "$OUT_DIR/60-monitoring/alert-rules.yaml" <<EOF
 apiVersion: v1
 kind: ConfigMap
@@ -2033,6 +2123,9 @@ data:
               serviceType: openclaw
               triggerSource: PROMETHEUS_ALERT
               reasonCode: metrics.cpu.high
+              alertActionType: AUTOSCALE
+              alertActionName: 升配
+              alertActionIcon: "📈"
               resizeType: IN_PLACE
               resizeDirection: up
             annotations:
@@ -2077,6 +2170,9 @@ data:
               serviceType: openclaw
               triggerSource: PROMETHEUS_ALERT
               reasonCode: metrics.memory.high
+              alertActionType: AUTOSCALE
+              alertActionName: 升配
+              alertActionIcon: "📈"
               resizeType: IN_PLACE
               resizeDirection: up
             annotations:
@@ -2121,6 +2217,9 @@ data:
               serviceType: openclaw
               triggerSource: PROMETHEUS_ALERT
               reasonCode: metrics.memory.critical
+              alertActionType: AUTOSCALE
+              alertActionName: 升配
+              alertActionIcon: "📈"
               resizeType: IN_PLACE
               resizeDirection: up
             annotations:
@@ -2160,18 +2259,149 @@ data:
                 * on (sandboxId) group_left(userCode, profileKey)
                 byclaw_sandbox_autoscale_runtime_info
               )
-              unless on (sandboxId)
-              byclaw_sandbox_autoscale_boundary_blacklist{direction="up"} == 1
             labels:
               severity: critical
               serviceType: openclaw
               triggerSource: PROMETHEUS_ALERT
               reasonCode: metrics.memory.oom_killed
-              resizeType: IN_PLACE
-              resizeDirection: up
+              alertActionType: ABNORMAL_RECOVERY
+              alertActionName: 异常自动恢复
+              alertActionIcon: "🧯"
+              resizeType: RECOVERY_RESTART
+              resizeDirection: recovery
             annotations:
               summary: "OpenClaw 沙箱 OOMKilled"
-              reason_detail: "沙箱容器最近 ${SANDBOX_AUTOSCALE_OOM_LOOKBACK:-5m} 发生 OOMKilled，建议按数据库规格立即原地升配。pod={{ \$labels.pod }} value={{ \$value }}"
+              reason_detail: "沙箱容器最近 ${SANDBOX_AUTOSCALE_OOM_LOOKBACK:-5m} 发生 OOMKilled，建议保存目标规格偏好并自动重启恢复。pod={{ \$labels.pod }} value={{ \$value }}"
+
+          - alert: OpenClawSandboxImagePullFailed
+            expr: |
+              (
+                label_replace(
+                  max by (namespace, pod) (
+                    kube_pod_container_status_waiting_reason{
+                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                      container="sandbox",
+                      reason=~"ErrImagePull|ImagePullBackOff|InvalidImageName",
+                      pod=~"[0-9a-f-]{36}-[0-9]+"
+                    } == 1
+                  ),
+                  "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
+                )
+                * on (sandboxId) group_left(userCode, profileKey)
+                byclaw_sandbox_autoscale_runtime_info
+              )
+            for: ${SANDBOX_AUTOSCALE_IMAGE_PULL_FAILED_FOR:-1m}
+            labels:
+              severity: critical
+              serviceType: openclaw
+              triggerSource: PROMETHEUS_ALERT
+              reasonCode: ops.image_pull_failed
+              alertActionType: OPS_INCIDENT
+              alertActionName: 运维异常
+              alertActionIcon: "🚨"
+              resizeType: OPS_INCIDENT
+            annotations:
+              summary: "OpenClaw 沙箱镜像拉取失败"
+              reason_detail: "沙箱容器镜像拉取失败，可能是 Harbor 不可用、镜像 tag 不存在或镜像名非法。pod={{ \$labels.pod }} value={{ \$value }}"
+
+          - alert: OpenClawSandboxStartupFailed
+            expr: |
+              (
+                label_replace(
+                  max by (namespace, pod) (
+                    kube_pod_container_status_waiting_reason{
+                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                      container="sandbox",
+                      reason=~"CrashLoopBackOff|RunContainerError|CreateContainerConfigError|CreateContainerError",
+                      pod=~"[0-9a-f-]{36}-[0-9]+"
+                    } == 1
+                  ),
+                  "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
+                )
+                * on (sandboxId) group_left(userCode, profileKey)
+                byclaw_sandbox_autoscale_runtime_info
+              )
+            for: ${SANDBOX_AUTOSCALE_STARTUP_FAILED_FOR:-1m}
+            labels:
+              severity: critical
+              serviceType: openclaw
+              triggerSource: PROMETHEUS_ALERT
+              reasonCode: recovery.startup_failed
+              alertActionType: ABNORMAL_RECOVERY
+              alertActionName: 异常自动恢复
+              alertActionIcon: "🧯"
+              resizeType: RECOVERY_RESTART
+              resizeDirection: recovery
+            annotations:
+              summary: "OpenClaw 沙箱启动异常"
+              reason_detail: "沙箱容器启动失败或启动脚本异常，建议保存目标规格偏好并重启恢复。pod={{ \$labels.pod }} value={{ \$value }}"
+
+          - alert: OpenClawSandboxRestartLoop
+            expr: |
+              (
+                label_replace(
+                  increase(kube_pod_container_status_restarts_total{
+                    namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                    container="sandbox",
+                    pod=~"[0-9a-f-]{36}-[0-9]+"
+                  }[${SANDBOX_AUTOSCALE_RESTART_LOOP_WINDOW:-5m}]) >= ${SANDBOX_AUTOSCALE_RESTART_LOOP_THRESHOLD:-2},
+                  "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
+                )
+                * on (sandboxId) group_left(userCode, profileKey)
+                byclaw_sandbox_autoscale_runtime_info
+              )
+            for: ${SANDBOX_AUTOSCALE_RESTART_LOOP_FOR:-30s}
+            labels:
+              severity: critical
+              serviceType: openclaw
+              triggerSource: PROMETHEUS_ALERT
+              reasonCode: recovery.restart_loop
+              alertActionType: ABNORMAL_RECOVERY
+              alertActionName: 异常自动恢复
+              alertActionIcon: "🧯"
+              resizeType: RECOVERY_RESTART
+              resizeDirection: recovery
+            annotations:
+              summary: "OpenClaw 沙箱容器反复重启"
+              reason_detail: "沙箱容器 ${SANDBOX_AUTOSCALE_RESTART_LOOP_WINDOW:-5m} 内重启次数达到阈值 ${SANDBOX_AUTOSCALE_RESTART_LOOP_THRESHOLD:-2}，建议自动重启恢复。pod={{ \$labels.pod }} value={{ \$value }}"
+
+          - alert: OpenClawSandboxServiceUnavailable
+            expr: |
+              (
+                label_replace(
+                  (
+                    kube_pod_status_phase{
+                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                      phase="Running",
+                      pod=~"[0-9a-f-]{36}-[0-9]+"
+                    } == 1
+                  )
+                  and on (namespace, pod)
+                  max by (namespace, pod) (
+                    kube_pod_container_status_ready{
+                      namespace="${OPENSANDBOX_WORKLOAD_NAMESPACE}",
+                      container="sandbox",
+                      pod=~"[0-9a-f-]{36}-[0-9]+"
+                    } == 0
+                  ),
+                  "sandboxId", "\$1", "pod", "^([0-9a-f-]{36})-[0-9]+$"
+                )
+                * on (sandboxId) group_left(userCode, profileKey)
+                byclaw_sandbox_autoscale_runtime_info
+              )
+            for: ${SANDBOX_AUTOSCALE_SERVICE_UNAVAILABLE_FOR:-60s}
+            labels:
+              severity: critical
+              serviceType: openclaw
+              triggerSource: PROMETHEUS_ALERT
+              reasonCode: ops.service_unavailable
+              alertActionType: OPS_INCIDENT
+              alertActionName: 运维异常
+              alertActionIcon: "🚨"
+              resizeType: OPS_INCIDENT
+            annotations:
+              summary: "OpenClaw 沙箱服务不可用"
+              reason_detail: "沙箱 Pod 已处于 Running，但容器 ${SANDBOX_AUTOSCALE_SERVICE_UNAVAILABLE_FOR:-60s} 内未 ready，服务端口可能未提供服务。pod={{ \$labels.pod }} value={{ \$value }}"
 
           - alert: OpenClawSandboxLowUsage
             expr: |
@@ -2231,6 +2461,9 @@ data:
               serviceType: openclaw
               triggerSource: PROMETHEUS_ALERT
               reasonCode: metrics.low_usage
+              alertActionType: AUTOSCALE
+              alertActionName: 降配
+              alertActionIcon: "📉"
               resizeType: IN_PLACE
               resizeDirection: down
             annotations:

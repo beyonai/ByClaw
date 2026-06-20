@@ -211,7 +211,9 @@ SANDBOX_AUTOSCALE_DINGTALK_SEND_RESOLVED=false
 
 真实 webhook 和加签只写入私有 `env.k3s` 或部署环境变量，不要提交到仓库。`SANDBOX_AUTOSCALE_DINGTALK_SECRET` 为空时脚本不会生成 `secret` 字段，可用于未开启加签的机器人。
 
-脚本会给 `prometheus-webhook-dingtalk` 下发沙箱告警专用模板：升配类告警的 `Graph` 显示 `📈`，低水位降配告警的 `Graph` 显示 `📉`，不再使用默认模板里的固定 `Graph: 📈` 文案。
+脚本会给 `prometheus-webhook-dingtalk` 下发沙箱告警专用模板：普通自动扩缩容使用 `📈 升配` / `📉 降配`，异常自动恢复使用 `🧯 异常自动恢复`，运维异常告警使用 `🚨 运维异常`，不再使用默认模板里的固定 `Graph: 📈` 文案。Alertmanager 会同时投递 BE webhook 和钉钉 webhook；BE 处理成功后需要依赖 Prometheus 指标恢复来 resolve 告警，不能直接清除 Prometheus 的 firing 状态。
+
+Alertmanager 默认挂载 `alertmanager-data` PVC 到 `/alertmanager`，容量由 `MONITORING_ALERTMANAGER_PVC_SIZE` 控制，默认 `2Gi`。`repeat_interval` 默认 `1h`，用于覆盖 BE 发布或重启窗口内漏消费的持续 firing 告警；如果 BE 处理后指标恢复，Prometheus 会自动 resolve，Alertmanager 不会继续按 1 小时重复发送。
 
 沙箱已达到最高或最低规格后，BE 会暴露 `byclaw_sandbox_autoscale_boundary_blacklist` 指标，Prometheus 告警规则通过 `unless on(sandboxId)` 过滤同方向极值告警，避免 Alertmanager 和钉钉机器人重复发送无意义消息。BE 同时暴露 `byclaw_sandbox_autoscale_runtime_info` 指标，Prometheus 告警会按 `sandboxId` 关联 `userCode` 和 `profileKey`，钉钉详情中可以直接看到用户编码和当前规格。黑名单按当前活跃沙箱和规格链动态计算；新增更高或更低规格后，原极值沙箱会自动恢复监控。
 
