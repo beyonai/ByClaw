@@ -22,6 +22,8 @@ public interface SsSandboxResizeRecordMapper {
                      @Param("opensandboxResponse") String opensandboxResponse,
                      @Param("errorMessage") String errorMessage);
 
+    SsSandboxResizeRecord selectLatestByIdempotencyKey(@Param("idempotencyKey") String idempotencyKey);
+
     List<SsSandboxResizeRecord> selectBySandboxRecordId(@Param("sandboxRecordId") Long sandboxRecordId,
                                                         @Param("limit") int limit);
 

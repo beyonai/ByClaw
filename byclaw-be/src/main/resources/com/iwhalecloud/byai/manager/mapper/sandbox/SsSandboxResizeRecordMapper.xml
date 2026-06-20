@@ -92,6 +92,14 @@
         WHERE id = #{id,jdbcType=BIGINT}
     </update>
 
+    <select id="selectLatestByIdempotencyKey" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM ss_sandbox_resize_record
+        WHERE idempotency_key = #{idempotencyKey,jdbcType=VARCHAR}
+        ORDER BY started_at DESC, id DESC
+        LIMIT 1
+    </select>
+
     <select id="selectBySandboxRecordId" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_resize_record

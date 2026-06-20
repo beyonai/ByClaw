@@ -6,8 +6,8 @@ import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -53,12 +53,18 @@ public class SandboxResizeService {
     private static final String STATUS_SKIPPED_DUPLICATE = "SKIPPED_DUPLICATE";
     private static final String STATUS_SKIPPED_COOLDOWN = "SKIPPED_COOLDOWN";
     private static final String STATUS_SKIPPED_STALE = "SKIPPED_STALE";
+    private static final String STATUS_RECORDED_OPS_INCIDENT = "RECORDED_OPS_INCIDENT";
     private static final String STATUS_RUNNING = "RUNNING";
     private static final String DIRECTION_UP = "UP";
     private static final String DIRECTION_DOWN = "DOWN";
     private static final String DIRECTION_MANUAL = "MANUAL";
     private static final String DEFAULT_TRIGGER_SOURCE = "MANUAL";
     private static final String DEFAULT_RESIZE_TYPE = "IN_PLACE";
+    private static final String ALERT_ACTION_AUTOSCALE = "AUTOSCALE";
+    private static final String ALERT_ACTION_ABNORMAL_RECOVERY = "ABNORMAL_RECOVERY";
+    private static final String ALERT_ACTION_OPS_INCIDENT = "OPS_INCIDENT";
+    private static final String RESIZE_TYPE_RECOVERY_RESTART = "RECOVERY_RESTART";
+    private static final String RESIZE_TYPE_OPS_INCIDENT = "OPS_INCIDENT";
 
     private final SandboxProperties sandboxProperties;
     private final OpenSandboxClient openSandboxClient;
@@ -124,6 +130,12 @@ public class SandboxResizeService {
         String direction = resolveResizeDirection(serviceType, fromProfileKey, toProfileKey, reasonCode);
         String idempotencyKey = buildIdempotencyKey(record, serviceType, fromProfileKey, toProfileKey, resizeType,
             direction);
+        SsSandboxResizeRecord reusableAudit = findReusableAudit(idempotencyKey);
+        if (reusableAudit != null) {
+            LOGGER.info("沙箱扩缩容幂等命中，recordId={}，sandboxId={}，idempotencyKey={}，status={}",
+                record.getId(), record.getSandboxId(), idempotencyKey, reusableAudit.getStatus());
+            return reusableAudit;
+        }
         SandboxServiceSpec targetSpec = null;
         if (StringUtils.isNotBlank(toProfileKey)) {
             targetSpec = specRepository.findByServiceKeyAndProfile(serviceType, toProfileKey).orElse(null);
@@ -335,7 +347,110 @@ public class SandboxResizeService {
         params.putIfAbsent("triggerSource", "PROMETHEUS_ALERT");
         params.putIfAbsent("reasonCode", "prometheus.alert");
         params.putIfAbsent("reasonDetail", toJsonOrNull(payload));
+        String alertActionType = resolveAlertActionType(params);
+        params.putIfAbsent("alertActionType", alertActionType);
+        if (ALERT_ACTION_OPS_INCIDENT.equals(alertActionType)) {
+            return recordOpsIncident(params);
+        }
+        if (ALERT_ACTION_ABNORMAL_RECOVERY.equals(alertActionType)) {
+            return handleAbnormalRecoveryRequest(params);
+        }
         return handleResizeRequest(params);
+    }
+
+    private SsSandboxResizeRecord handleAbnormalRecoveryRequest(Map<String, Object> params) {
+        if (sandboxProperties == null || sandboxProperties.getTierAutoscale() == null
+            || !sandboxProperties.getTierAutoscale().isEnabled()) {
+            throw new IllegalStateException("sandbox tier autoscale is disabled");
+        }
+        SsSandboxRecord record = resolveRecord(params);
+        if (record == null || StringUtils.isBlank(record.getSandboxId())) {
+            throw new IllegalArgumentException("sandbox record not found for abnormal recovery alert");
+        }
+
+        String triggerSource = StringUtils.defaultIfBlank(firstNonBlank(params, "triggerSource", "trigger_source",
+                "source"),
+            "PROMETHEUS_ALERT");
+        String reasonCode = StringUtils.defaultIfBlank(firstNonBlank(params, "reasonCode", "reason_code", "alertName"),
+            "sandbox.abnormal_recovery");
+        String reasonDetail = StringUtils.defaultIfBlank(firstNonBlank(params, "reasonDetail", "reason_detail",
+                "description"),
+            toJsonOrNull(params));
+        String serviceType = StringUtils.defaultIfBlank(record.getServiceType(), record.getSandboxType());
+        String fromProfileKey = record.getProfileKey();
+        String toProfileKey = firstNonBlank(params, "toProfileKey", "targetProfileKey", "to_profile_key",
+            "target_profile_key");
+        if (StringUtils.isBlank(toProfileKey) && isScaleUpAlert(reasonCode)) {
+            toProfileKey = resolveNextProfileKey(serviceType, fromProfileKey);
+        }
+        toProfileKey = StringUtils.defaultIfBlank(toProfileKey, fromProfileKey);
+
+        Date startedAt = new Date();
+        SandboxServiceSpec targetSpec = StringUtils.isNotBlank(toProfileKey)
+            ? specRepository.findByServiceKeyAndProfile(serviceType, toProfileKey).orElse(null)
+            : null;
+        if (targetSpec == null) {
+            return buildSkippedAudit(record, serviceType, toProfileKey, triggerSource, reasonCode, reasonDetail,
+                RESIZE_TYPE_RECOVERY_RESTART, null, startedAt, buildRecoveryIdempotencyKey(record, toProfileKey,
+                    reasonCode), STATUS_SKIPPED_INVALID, "target profile is not enabled or not found", 0);
+        }
+        String resolvedToProfileKey = StringUtils.defaultIfBlank(targetSpec.getProfileKey(), toProfileKey);
+        String idempotencyKey = buildRecoveryIdempotencyKey(record, resolvedToProfileKey, reasonCode);
+        SsSandboxResizeRecord reusableAudit = findReusableAudit(idempotencyKey);
+        if (reusableAudit != null) {
+            LOGGER.info("沙箱异常恢复幂等命中，recordId={}，sandboxId={}，idempotencyKey={}，status={}",
+                record.getId(), record.getSandboxId(), idempotencyKey, reusableAudit.getStatus());
+            return reusableAudit;
+        }
+        return handleRecoveryRestart(record, serviceType, resolvedToProfileKey, triggerSource, reasonCode,
+            reasonDetail, targetSpec, startedAt, idempotencyKey);
+    }
+
+    private SsSandboxResizeRecord recordOpsIncident(Map<String, Object> params) {
+        if (sandboxProperties == null || sandboxProperties.getTierAutoscale() == null
+            || !sandboxProperties.getTierAutoscale().isEnabled()) {
+            throw new IllegalStateException("sandbox tier autoscale is disabled");
+        }
+        SsSandboxRecord record = resolveRecord(params);
+        if (record == null || StringUtils.isBlank(record.getSandboxId())) {
+            return buildPayloadSkippedAudit("sandbox record not found for operations incident alert");
+        }
+
+        String triggerSource = StringUtils.defaultIfBlank(firstNonBlank(params, "triggerSource", "trigger_source",
+                "source"),
+            "PROMETHEUS_ALERT");
+        String reasonCode = StringUtils.defaultIfBlank(firstNonBlank(params, "reasonCode", "reason_code", "alertName"),
+            "ops.incident");
+        String reasonDetail = StringUtils.defaultIfBlank(firstNonBlank(params, "reasonDetail", "reason_detail",
+                "description"),
+            toJsonOrNull(params));
+        String serviceType = StringUtils.defaultIfBlank(record.getServiceType(), record.getSandboxType());
+        String profileKey = record.getProfileKey();
+        String idempotencyKey = buildOpsIncidentIdempotencyKey(record, params, reasonCode);
+        SsSandboxResizeRecord reusableAudit = findReusableAudit(idempotencyKey);
+        if (reusableAudit != null) {
+            LOGGER.info("沙箱运维异常幂等命中，recordId={}，sandboxId={}，idempotencyKey={}，status={}",
+                record.getId(), record.getSandboxId(), idempotencyKey, reusableAudit.getStatus());
+            return reusableAudit;
+        }
+
+        Date startedAt = new Date();
+        SandboxServiceSpec currentSpec = StringUtils.isNotBlank(profileKey)
+            ? specRepository.findByServiceKeyAndProfile(serviceType, profileKey).orElse(null)
+            : null;
+        SsSandboxResizeRecord audit = buildRequestedAudit(record, serviceType, profileKey, triggerSource, reasonCode,
+            reasonDetail, RESIZE_TYPE_OPS_INCIDENT, currentSpec, startedAt);
+        audit.setStatus(STATUS_RECORDED_OPS_INCIDENT);
+        audit.setSuccess(1);
+        audit.setFinishedAt(startedAt);
+        audit.setDurationMs(0L);
+        audit.setSkipReason("operations incident recorded only");
+        audit.setIdempotencyKey(idempotencyKey);
+        resizeRecordMapper.insert(audit);
+        LOGGER.warn("沙箱运维异常已记录，recordId={}，sandboxId={}，reasonCode={}，alertname={}，pod={}",
+            record.getId(), record.getSandboxId(), reasonCode, firstNonBlank(params, "alertname", "alertName"),
+            firstNonBlank(params, "pod"));
+        return audit;
     }
 
     private SsSandboxRecord resolveRecord(Map<String, Object> params) {
@@ -370,6 +485,45 @@ public class SandboxResizeService {
         return StringUtils.containsIgnoreCase(reasonCode, "low")
             || StringUtils.containsIgnoreCase(reasonCode, "idle")
             || StringUtils.containsIgnoreCase(reasonCode, "underutilized");
+    }
+
+    private String resolveAlertActionType(Map<String, Object> params) {
+        String actionType = firstNonBlank(params, "alertActionType", "alert_action_type", "actionType",
+            "action_type");
+        if (StringUtils.isNotBlank(actionType)) {
+            String normalized = actionType.trim().toUpperCase(Locale.ROOT);
+            if (ALERT_ACTION_AUTOSCALE.equals(normalized) || ALERT_ACTION_ABNORMAL_RECOVERY.equals(normalized)
+                || ALERT_ACTION_OPS_INCIDENT.equals(normalized)) {
+                return normalized;
+            }
+        }
+
+        String signal = StringUtils.joinWith(" ",
+            firstNonBlank(params, "reasonCode", "reason_code"),
+            firstNonBlank(params, "alertname", "alertName"),
+            firstNonBlank(params, "reason", "kubeReason"));
+        if (containsAnyIgnoreCase(signal, "imagepullbackoff", "errimagepull", "invalidimagename",
+            "image_pull", "harbor", "tag", "service_unavailable", "not_ready")) {
+            return ALERT_ACTION_OPS_INCIDENT;
+        }
+        if (containsAnyIgnoreCase(signal, "oom", "crashloopbackoff", "runcontainererror",
+            "createcontainerconfigerror", "createcontainererror", "startup_failed", "restart_loop",
+            "restart")) {
+            return ALERT_ACTION_ABNORMAL_RECOVERY;
+        }
+        return ALERT_ACTION_AUTOSCALE;
+    }
+
+    private boolean containsAnyIgnoreCase(String value, String... needles) {
+        if (StringUtils.isBlank(value) || needles == null) {
+            return false;
+        }
+        for (String needle : needles) {
+            if (StringUtils.containsIgnoreCase(value, needle)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private SandboxProperties.TierAutoscaleConfig getTierAutoscaleConfig() {
@@ -524,6 +678,59 @@ public class SandboxResizeService {
         return DIRECTION_UP.equals(previousDirection) || isScaleUpAlert(record.getLastResizeReason());
     }
 
+    private SsSandboxResizeRecord handleRecoveryRestart(SsSandboxRecord record,
+                                                        String serviceType,
+                                                        String resolvedToProfileKey,
+                                                        String triggerSource,
+                                                        String reasonCode,
+                                                        String reasonDetail,
+                                                        SandboxServiceSpec targetSpec,
+                                                        Date startedAt,
+                                                        String idempotencyKey) {
+        SsSandboxResizeRecord audit = buildRequestedAudit(record, serviceType, resolvedToProfileKey, triggerSource,
+            reasonCode, reasonDetail, RESIZE_TYPE_RECOVERY_RESTART, targetSpec, startedAt);
+        audit.setStatus(STATUS_PROCESSING);
+        audit.setIdempotencyKey(idempotencyKey);
+        resizeRecordMapper.insert(audit);
+
+        long startMillis = System.currentTimeMillis();
+        String preferredServiceKey = serviceType + "-" + resolvedToProfileKey;
+        try {
+            sandboxService.savePreferredServiceKey(record.getUserCode(), preferredServiceKey);
+            SandboxLaunchData launchData = sandboxService.restartSandboxAfterRemoteExitWithoutWait(
+                record.getUserCode(), record.getResourceId(), null);
+            Date finishedAt = new Date();
+            long durationMs = System.currentTimeMillis() - startMillis;
+            String responseJson = toJsonOrNull(launchData);
+            resizeRecordMapper.updateResult(audit.getId(), STATUS_SUCCESS, 1, finishedAt, durationMs,
+                null, responseJson, null);
+            audit.setStatus(STATUS_SUCCESS);
+            audit.setSuccess(1);
+            audit.setFinishedAt(finishedAt);
+            audit.setDurationMs(durationMs);
+            audit.setOpensandboxResponse(responseJson);
+            LOGGER.warn("沙箱异常自动恢复已重启，recordId={}，sandboxId={}，status={}，targetProfile={}，preferredServiceKey={}，reasonCode={}",
+                record.getId(), record.getSandboxId(), record.getStatus(), resolvedToProfileKey, preferredServiceKey,
+                reasonCode);
+            return audit;
+        }
+        catch (Exception e) {
+            Date finishedAt = new Date();
+            long durationMs = System.currentTimeMillis() - startMillis;
+            resizeRecordMapper.updateResult(audit.getId(), STATUS_FAILED, 0, finishedAt, durationMs,
+                null, null, e.getMessage());
+            audit.setStatus(STATUS_FAILED);
+            audit.setSuccess(0);
+            audit.setFinishedAt(finishedAt);
+            audit.setDurationMs(durationMs);
+            audit.setErrorMessage(e.getMessage());
+            LOGGER.warn("沙箱异常自动恢复失败，recordId={}，sandboxId={}，status={}，targetProfile={}，reasonCode={}，原因={}",
+                record.getId(), record.getSandboxId(), record.getStatus(), resolvedToProfileKey, reasonCode,
+                e.getMessage());
+            return audit;
+        }
+    }
+
     private SsSandboxResizeRecord handleNonRunningScaleUp(SsSandboxRecord record,
                                                           String serviceType,
                                                           String resolvedToProfileKey,
@@ -597,6 +804,52 @@ public class SandboxResizeService {
             normalizeKey(toProfileKey),
             normalizeKey(resizeType)
         );
+    }
+
+    private String buildRecoveryIdempotencyKey(SsSandboxRecord record, String targetProfileKey, String reasonCode) {
+        return String.join(":",
+            "sandbox-recovery",
+            normalizeKey(record != null ? record.getId() : null),
+            normalizeKey(record != null ? record.getSandboxId() : null),
+            normalizeKey(reasonCode),
+            normalizeKey(targetProfileKey)
+        );
+    }
+
+    private String buildOpsIncidentIdempotencyKey(SsSandboxRecord record, Map<String, Object> params,
+                                                  String reasonCode) {
+        return String.join(":",
+            "sandbox-ops-incident",
+            normalizeKey(record != null ? record.getSandboxId() : null),
+            normalizeKey(firstNonBlank(params, "alertname", "alertName")),
+            normalizeKey(reasonCode),
+            normalizeKey(firstNonBlank(params, "pod"))
+        );
+    }
+
+    private SsSandboxResizeRecord findReusableAudit(String idempotencyKey) {
+        if (StringUtils.isBlank(idempotencyKey)) {
+            return null;
+        }
+        SsSandboxResizeRecord existing = resizeRecordMapper.selectLatestByIdempotencyKey(idempotencyKey);
+        if (existing == null || !isReusableIdempotentStatus(existing.getStatus())) {
+            return null;
+        }
+        return existing;
+    }
+
+    private boolean isReusableIdempotentStatus(String status) {
+        return StringUtils.equalsAnyIgnoreCase(status,
+            STATUS_SUCCESS,
+            STATUS_PROCESSING,
+            STATUS_DEFERRED,
+            STATUS_RECORDED_OPS_INCIDENT,
+            STATUS_SKIPPED_NOOP,
+            STATUS_SKIPPED_BOUNDARY,
+            STATUS_SKIPPED_INVALID,
+            STATUS_SKIPPED_DUPLICATE,
+            STATUS_SKIPPED_COOLDOWN,
+            STATUS_SKIPPED_STALE);
     }
 
     private String normalizeKey(Object value) {

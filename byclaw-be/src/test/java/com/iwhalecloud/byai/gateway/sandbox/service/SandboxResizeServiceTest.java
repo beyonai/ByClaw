@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
@@ -16,6 +17,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
 import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
@@ -140,6 +142,96 @@ class SandboxResizeServiceTest {
     }
 
     @Test
+    void handlePrometheusAlert_routesAbnormalRecoveryToRestart() {
+        SandboxFixture fixture = newFixture();
+        SsSandboxRecord record = runningRecord("s");
+        when(fixture.sandboxRecordMapper.selectLatestBySandboxId("user001", "openclaw", "sandbox-1"))
+            .thenReturn(record);
+        when(fixture.profileEntityMapper.selectEnabledProfiles("openclaw")).thenReturn(profiles("s", "m"));
+        when(fixture.specRepository.findByServiceKeyAndProfile("openclaw", "m"))
+            .thenReturn(Optional.of(spec("m")));
+        SandboxLaunchData launchData = new SandboxLaunchData();
+        launchData.setSandboxId("sandbox-2");
+        when(fixture.sandboxService.restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null))
+            .thenReturn(launchData);
+
+        SsSandboxResizeRecord result = fixture.service.handlePrometheusAlert(prometheusPayload(Map.of(
+            "userCode", "user001",
+            "sandboxType", "openclaw",
+            "sandboxId", "sandbox-1",
+            "alertname", "OpenClawSandboxOOMKilled",
+            "reasonCode", "metrics.memory.oom_killed",
+            "alertActionType", "ABNORMAL_RECOVERY"
+        )));
+
+        assertThat(result.getStatus()).isEqualTo("SUCCESS");
+        assertThat(result.getResizeType()).isEqualTo("RECOVERY_RESTART");
+        assertThat(result.getToProfileKey()).isEqualTo("m");
+        verify(fixture.sandboxService).savePreferredServiceKey("user001", "openclaw-m");
+        verify(fixture.sandboxService).restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null);
+        verify(fixture.openSandboxClient, never()).resizeSandbox(any(), any());
+    }
+
+    @Test
+    void handlePrometheusAlert_recordsOpsIncidentWithoutRestartOrResize() {
+        SandboxFixture fixture = newFixture();
+        SsSandboxRecord record = runningRecord("s");
+        when(fixture.sandboxRecordMapper.selectLatestBySandboxId("user001", "openclaw", "sandbox-1"))
+            .thenReturn(record);
+        when(fixture.specRepository.findByServiceKeyAndProfile("openclaw", "s"))
+            .thenReturn(Optional.of(spec("s")));
+        ArgumentCaptor<SsSandboxResizeRecord> auditCaptor = ArgumentCaptor.forClass(SsSandboxResizeRecord.class);
+
+        SsSandboxResizeRecord result = fixture.service.handlePrometheusAlert(prometheusPayload(Map.of(
+            "userCode", "user001",
+            "sandboxType", "openclaw",
+            "sandboxId", "sandbox-1",
+            "pod", "sandbox-1-0",
+            "alertname", "OpenClawSandboxImagePullFailed",
+            "reasonCode", "ops.image_pull_failed",
+            "alertActionType", "OPS_INCIDENT"
+        )));
+
+        assertThat(result.getStatus()).isEqualTo("RECORDED_OPS_INCIDENT");
+        assertThat(result.getResizeType()).isEqualTo("OPS_INCIDENT");
+        assertThat(result.getSkipReason()).isEqualTo("operations incident recorded only");
+        verify(fixture.resizeRecordMapper).insert(auditCaptor.capture());
+        assertThat(auditCaptor.getValue().getIdempotencyKey()).startsWith("sandbox-ops-incident:");
+        verifyNoInteractions(fixture.openSandboxClient);
+        verify(fixture.sandboxService, never()).savePreferredServiceKey(any(), any());
+        verify(fixture.sandboxService, never()).restartSandboxAfterRemoteExitWithoutWait(any(), any(), any());
+    }
+
+    @Test
+    void handlePrometheusAlert_reusesExistingOpsIncidentForSamePayload() {
+        SandboxFixture fixture = newFixture();
+        SsSandboxRecord record = runningRecord("s");
+        when(fixture.sandboxRecordMapper.selectLatestBySandboxId("user001", "openclaw", "sandbox-1"))
+            .thenReturn(record);
+        SsSandboxResizeRecord existing = new SsSandboxResizeRecord();
+        existing.setId(99L);
+        existing.setStatus("RECORDED_OPS_INCIDENT");
+        existing.setResizeType("OPS_INCIDENT");
+        when(fixture.resizeRecordMapper.selectLatestByIdempotencyKey(any())).thenReturn(existing);
+
+        SsSandboxResizeRecord result = fixture.service.handlePrometheusAlert(prometheusPayload(Map.of(
+            "userCode", "user001",
+            "sandboxType", "openclaw",
+            "sandboxId", "sandbox-1",
+            "pod", "sandbox-1-0",
+            "alertname", "OpenClawSandboxImagePullFailed",
+            "reasonCode", "ops.image_pull_failed",
+            "alertActionType", "OPS_INCIDENT"
+        )));
+
+        assertThat(result.getId()).isEqualTo(99L);
+        verify(fixture.resizeRecordMapper, never()).insert(any());
+        verifyNoInteractions(fixture.openSandboxClient);
+        verify(fixture.sandboxService, never()).savePreferredServiceKey(any(), any());
+        verify(fixture.sandboxService, never()).restartSandboxAfterRemoteExitWithoutWait(any(), any(), any());
+    }
+
+    @Test
     void handleResizeRequest_skipsScaleDownAfterRecentScaleUpProtection() {
         SandboxFixture fixture = newFixture();
         fixture.properties.getTierAutoscale().setScaleDownAfterUpProtection(Duration.ofMinutes(15));
@@ -261,6 +353,16 @@ class SandboxResizeServiceTest {
         spec.setResourceRequests(Map.of("cpu", "1", "memory", "2Gi"));
         spec.setResourceLimits(Map.of("cpu", "2", "memory", "4Gi"));
         return spec;
+    }
+
+    private Map<String, Object> prometheusPayload(Map<String, String> labels) {
+        return Map.of(
+            "alerts", List.of(Map.of(
+                "status", "firing",
+                "labels", labels,
+                "annotations", Map.of("reason_detail", "test alert")
+            ))
+        );
     }
 
     private record SandboxFixture(SandboxResizeService service,
