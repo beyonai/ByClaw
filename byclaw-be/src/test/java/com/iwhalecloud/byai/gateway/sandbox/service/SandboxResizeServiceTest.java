@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 
 import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
 import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
+import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceProfileEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceProfileEntity;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
@@ -109,6 +110,67 @@ class SandboxResizeServiceTest {
     }
 
     @Test
+    void handleResizeRequest_restartsNonRunningSandboxForScaleUpAlert() {
+        SandboxFixture fixture = newFixture();
+        SsSandboxRecord record = runningRecord("xs");
+        record.setStatus("STARTING");
+        when(fixture.sandboxRecordMapper.selectLatestBySandboxId("user001", "openclaw", "sandbox-1"))
+            .thenReturn(record);
+        when(fixture.profileEntityMapper.selectEnabledProfiles("openclaw")).thenReturn(profiles("xs", "s"));
+        when(fixture.specRepository.findByServiceKeyAndProfile("openclaw", "s"))
+            .thenReturn(Optional.of(spec("s")));
+        SandboxLaunchData launchData = new SandboxLaunchData();
+        launchData.setSandboxId("sandbox-2");
+        when(fixture.sandboxService.restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null))
+            .thenReturn(launchData);
+
+        SsSandboxResizeRecord result = fixture.service.handleResizeRequest(Map.of(
+            "userCode", "user001",
+            "sandboxType", "openclaw",
+            "sandboxId", "sandbox-1",
+            "reasonCode", "metrics.memory.oom_killed",
+            "triggerSource", "PROMETHEUS_ALERT"
+        ));
+
+        assertThat(result.getStatus()).isEqualTo("SUCCESS");
+        assertThat(result.getSuccess()).isEqualTo(1);
+        verify(fixture.sandboxService).savePreferredServiceKey("user001", "openclaw-s");
+        verify(fixture.sandboxService).restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null);
+        verify(fixture.openSandboxClient, never()).resizeSandbox(any(), any());
+    }
+
+    @Test
+    void handleResizeRequest_skipsScaleDownAfterRecentScaleUpProtection() {
+        SandboxFixture fixture = newFixture();
+        fixture.properties.getTierAutoscale().setScaleDownAfterUpProtection(Duration.ofMinutes(15));
+        SsSandboxRecord record = runningRecord("s");
+        record.setLastResizeSuccess(1);
+        record.setLastResizeAt(new Date(System.currentTimeMillis() - Duration.ofMinutes(10).toMillis()));
+        record.setLastResizeFromProfile("xs");
+        record.setLastResizeToProfile("s");
+        record.setLastResizeReason("metrics.memory.high");
+        when(fixture.sandboxRecordMapper.selectLatestBySandboxId("user001", "openclaw", "sandbox-1"))
+            .thenReturn(record);
+        when(fixture.profileEntityMapper.selectEnabledProfiles("openclaw")).thenReturn(profiles("xs", "s"));
+        when(fixture.specRepository.findByServiceKeyAndProfile("openclaw", "xs"))
+            .thenReturn(Optional.of(spec("xs")));
+
+        SsSandboxResizeRecord result = fixture.service.handleResizeRequest(Map.of(
+            "userCode", "user001",
+            "sandboxType", "openclaw",
+            "sandboxId", "sandbox-1",
+            "reasonCode", "metrics.low_usage",
+            "triggerSource", "PROMETHEUS_ALERT"
+        ));
+
+        assertThat(result.getStatus()).isEqualTo("SKIPPED_COOLDOWN");
+        assertThat(result.getSkipReason()).contains("protected after recent scale-up");
+        verify(fixture.sandboxRecordMapper, never()).claimResize(any(), any(), any(), any(), any(), any(), any(),
+            any(), any(), any(), any(), any());
+        verify(fixture.openSandboxClient, never()).resizeSandbox(any(), any());
+    }
+
+    @Test
     void buildBoundaryBlacklistMetrics_outputsOnlyBoundaryDirections() {
         SandboxFixture fixture = newFixture();
         SsSandboxRecord lowest = runningRecord("xs");
@@ -160,12 +222,13 @@ class SandboxResizeServiceTest {
         SandboxResizeService service = new SandboxResizeService(properties, openSandboxClient, specRepository,
             profileEntityMapper, sandboxRecordMapper, resizeRecordMapper, sandboxService);
         return new SandboxFixture(service, properties, openSandboxClient, specRepository, profileEntityMapper,
-            sandboxRecordMapper, resizeRecordMapper);
+            sandboxRecordMapper, resizeRecordMapper, sandboxService);
     }
 
     private SsSandboxRecord runningRecord(String profileKey) {
         SsSandboxRecord record = new SsSandboxRecord();
         record.setId(1L);
+        record.setResourceId(-1L);
         record.setUserCode("user001");
         record.setSandboxType("openclaw");
         record.setServiceType("openclaw");
@@ -206,6 +269,7 @@ class SandboxResizeServiceTest {
                                   SandboxServiceSpecRepository specRepository,
                                   SandboxServiceProfileEntityMapper profileEntityMapper,
                                   SsSandboxRecordMapper sandboxRecordMapper,
-                                  SsSandboxResizeRecordMapper resizeRecordMapper) {
+                                  SsSandboxResizeRecordMapper resizeRecordMapper,
+                                  SandboxService sandboxService) {
     }
 }

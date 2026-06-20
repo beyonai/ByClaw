@@ -24,6 +24,7 @@ import org.springframework.stereotype.Service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.ResizeSandboxRequest;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.ResizeSandboxResponse;
@@ -52,6 +53,7 @@ public class SandboxResizeService {
     private static final String STATUS_SKIPPED_DUPLICATE = "SKIPPED_DUPLICATE";
     private static final String STATUS_SKIPPED_COOLDOWN = "SKIPPED_COOLDOWN";
     private static final String STATUS_SKIPPED_STALE = "SKIPPED_STALE";
+    private static final String STATUS_RUNNING = "RUNNING";
     private static final String DIRECTION_UP = "UP";
     private static final String DIRECTION_DOWN = "DOWN";
     private static final String DIRECTION_MANUAL = "MANUAL";
@@ -160,10 +162,24 @@ public class SandboxResizeService {
             finishDeferred(audit, "preferred profile will apply on next sandbox start", 1);
             return audit;
         }
+        if (!STATUS_RUNNING.equalsIgnoreCase(record.getStatus())) {
+            if (DIRECTION_UP.equals(direction)) {
+                return handleNonRunningScaleUp(record, serviceType, resolvedToProfileKey, triggerSource, reasonCode,
+                    reasonDetail, resizeType, targetSpec, startedAt, idempotencyKey);
+            }
+            return buildSkippedAudit(record, serviceType, resolvedToProfileKey, triggerSource, reasonCode,
+                reasonDetail, resizeType, targetSpec, startedAt, idempotencyKey, STATUS_SKIPPED_INVALID,
+                "sandbox is not running and cannot be resized in place", 1);
+        }
         if (isCooldownActive(record, direction, startedAt)) {
             return buildSkippedAudit(record, serviceType, resolvedToProfileKey, triggerSource, reasonCode,
                 reasonDetail, resizeType, targetSpec, startedAt, idempotencyKey, STATUS_SKIPPED_COOLDOWN,
                 "sandbox resize cooldown is active", 1);
+        }
+        if (isScaleDownProtectedAfterRecentUp(record, direction, startedAt)) {
+            return buildSkippedAudit(record, serviceType, resolvedToProfileKey, triggerSource, reasonCode,
+                reasonDetail, resizeType, targetSpec, startedAt, idempotencyKey, STATUS_SKIPPED_COOLDOWN,
+                "sandbox scale-down is protected after recent scale-up or OOM handling", 1);
         }
         Date processingStaleBefore = new Date(startedAt.getTime()
             - toMillis(getTierAutoscaleConfig().getProcessingTimeout()));
@@ -255,10 +271,10 @@ public class SandboxResizeService {
     public String buildBoundaryBlacklistMetrics() {
         StringBuilder metrics = new StringBuilder();
         metrics.append("# HELP byclaw_sandbox_autoscale_runtime_info ")
-            .append("Running sandbox metadata used to enrich autoscale alerts.\n");
+            .append("Active sandbox metadata used to enrich autoscale alerts.\n");
         metrics.append("# TYPE byclaw_sandbox_autoscale_runtime_info gauge\n");
         metrics.append("# HELP byclaw_sandbox_autoscale_boundary_blacklist ")
-            .append("Running sandboxes that are already at an autoscale boundary and should be ignored by same-direction alerts.\n");
+            .append("Active sandboxes that are already at an autoscale boundary and should be ignored by same-direction alerts.\n");
         metrics.append("# TYPE byclaw_sandbox_autoscale_boundary_blacklist gauge\n");
         if (sandboxProperties == null || sandboxProperties.getTierAutoscale() == null
             || !sandboxProperties.getTierAutoscale().isEnabled()) {
@@ -491,6 +507,75 @@ public class SandboxResizeService {
             : DIRECTION_UP.equals(direction) ? getTierAutoscaleConfig().getScaleUpCooldown() : Duration.ZERO;
         long cooldownMillis = toMillis(cooldown);
         return cooldownMillis > 0 && now.getTime() - record.getLastResizeAt().getTime() < cooldownMillis;
+    }
+
+    private boolean isScaleDownProtectedAfterRecentUp(SsSandboxRecord record, String direction, Date now) {
+        if (!DIRECTION_DOWN.equals(direction) || record == null || record.getLastResizeAt() == null
+            || record.getLastResizeSuccess() == null || record.getLastResizeSuccess() != 1) {
+            return false;
+        }
+        long protectionMillis = toMillis(getTierAutoscaleConfig().getScaleDownAfterUpProtection());
+        if (protectionMillis <= 0 || now.getTime() - record.getLastResizeAt().getTime() >= protectionMillis) {
+            return false;
+        }
+        String previousDirection = resolveProfileDirection(
+            StringUtils.defaultIfBlank(record.getServiceType(), record.getSandboxType()),
+            record.getLastResizeFromProfile(), record.getLastResizeToProfile());
+        return DIRECTION_UP.equals(previousDirection) || isScaleUpAlert(record.getLastResizeReason());
+    }
+
+    private SsSandboxResizeRecord handleNonRunningScaleUp(SsSandboxRecord record,
+                                                          String serviceType,
+                                                          String resolvedToProfileKey,
+                                                          String triggerSource,
+                                                          String reasonCode,
+                                                          String reasonDetail,
+                                                          String resizeType,
+                                                          SandboxServiceSpec targetSpec,
+                                                          Date startedAt,
+                                                          String idempotencyKey) {
+        SsSandboxResizeRecord audit = buildRequestedAudit(record, serviceType, resolvedToProfileKey, triggerSource,
+            reasonCode, reasonDetail, resizeType, targetSpec, startedAt);
+        audit.setStatus(STATUS_PROCESSING);
+        audit.setIdempotencyKey(idempotencyKey);
+        resizeRecordMapper.insert(audit);
+
+        long startMillis = System.currentTimeMillis();
+        String preferredServiceKey = serviceType + "-" + resolvedToProfileKey;
+        try {
+            sandboxService.savePreferredServiceKey(record.getUserCode(), preferredServiceKey);
+            SandboxLaunchData launchData = sandboxService.restartSandboxAfterRemoteExitWithoutWait(
+                record.getUserCode(), record.getResourceId(), null);
+            Date finishedAt = new Date();
+            long durationMs = System.currentTimeMillis() - startMillis;
+            String responseJson = toJsonOrNull(launchData);
+            String message = "sandbox was not running; preferred profile saved and sandbox restarted";
+            resizeRecordMapper.updateResult(audit.getId(), STATUS_SUCCESS, 1, finishedAt, durationMs,
+                null, responseJson, null);
+            audit.setStatus(STATUS_SUCCESS);
+            audit.setSuccess(1);
+            audit.setFinishedAt(finishedAt);
+            audit.setDurationMs(durationMs);
+            audit.setOpensandboxResponse(responseJson);
+            LOGGER.warn("非运行态沙箱扩容已转为升配重拉，recordId={}，sandboxId={}，status={}，targetProfile={}，preferredServiceKey={}，message={}",
+                record.getId(), record.getSandboxId(), record.getStatus(), resolvedToProfileKey, preferredServiceKey,
+                message);
+            return audit;
+        }
+        catch (Exception e) {
+            Date finishedAt = new Date();
+            long durationMs = System.currentTimeMillis() - startMillis;
+            resizeRecordMapper.updateResult(audit.getId(), STATUS_FAILED, 0, finishedAt, durationMs,
+                null, null, e.getMessage());
+            audit.setStatus(STATUS_FAILED);
+            audit.setSuccess(0);
+            audit.setFinishedAt(finishedAt);
+            audit.setDurationMs(durationMs);
+            audit.setErrorMessage(e.getMessage());
+            LOGGER.warn("非运行态沙箱升配重拉失败，recordId={}，sandboxId={}，status={}，targetProfile={}，原因={}",
+                record.getId(), record.getSandboxId(), record.getStatus(), resolvedToProfileKey, e.getMessage());
+            return audit;
+        }
     }
 
     private long toMillis(Duration duration) {

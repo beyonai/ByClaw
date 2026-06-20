@@ -109,6 +109,11 @@ public class SandboxProperties {
         private Duration scaleDownCooldown = Duration.ofMinutes(5);
 
         /**
+         * Minimum interval before a scale-down is accepted after a successful scale-up/OOM handling.
+         */
+        private Duration scaleDownAfterUpProtection = Duration.ofMinutes(15);
+
+        /**
          * PROCESSING records older than this are treated as abandoned and can be claimed again.
          */
         private Duration processingTimeout = Duration.ofMinutes(10);

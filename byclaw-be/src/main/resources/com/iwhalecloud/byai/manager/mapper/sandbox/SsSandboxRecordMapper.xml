@@ -167,7 +167,7 @@
     <select id="selectRunningAutoscaleRecords" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM ss_sandbox_record
-        WHERE status = 'RUNNING'
+        WHERE status IN ('STARTING', 'RUNNING')
           AND sandbox_id IS NOT NULL
           AND length(sandbox_id) > 0
           AND profile_key IS NOT NULL

@@ -213,9 +213,12 @@ SANDBOX_AUTOSCALE_DINGTALK_SEND_RESOLVED=false
 
 脚本会给 `prometheus-webhook-dingtalk` 下发沙箱告警专用模板：升配类告警的 `Graph` 显示 `📈`，低水位降配告警的 `Graph` 显示 `📉`，不再使用默认模板里的固定 `Graph: 📈` 文案。
 
-沙箱已达到最高或最低规格后，BE 会暴露 `byclaw_sandbox_autoscale_boundary_blacklist` 指标，Prometheus 告警规则通过 `unless on(sandboxId)` 过滤同方向极值告警，避免 Alertmanager 和钉钉机器人重复发送无意义消息。BE 同时暴露 `byclaw_sandbox_autoscale_runtime_info` 指标，Prometheus 告警会按 `sandboxId` 关联 `userCode` 和 `profileKey`，钉钉详情中可以直接看到用户编码和当前规格。黑名单按当前运行沙箱和规格链动态计算；新增更高或更低规格后，原极值沙箱会自动恢复监控。
+沙箱已达到最高或最低规格后，BE 会暴露 `byclaw_sandbox_autoscale_boundary_blacklist` 指标，Prometheus 告警规则通过 `unless on(sandboxId)` 过滤同方向极值告警，避免 Alertmanager 和钉钉机器人重复发送无意义消息。BE 同时暴露 `byclaw_sandbox_autoscale_runtime_info` 指标，Prometheus 告警会按 `sandboxId` 关联 `userCode` 和 `profileKey`，钉钉详情中可以直接看到用户编码和当前规格。黑名单按当前活跃沙箱和规格链动态计算；新增更高或更低规格后，原极值沙箱会自动恢复监控。
+
+高水位或 OOM 告警会覆盖 `STARTING` 和 `RUNNING` 状态的活跃沙箱。`RUNNING` 沙箱继续走 OpenSandbox 原地调整；非 `RUNNING` 沙箱会先保存目标规格偏好，再触发沙箱重启重拉，避免容器已经 OOM/异常退出时原地调整被 OpenSandbox 拒绝。降配告警只处理可原地调整的运行态沙箱，且默认会在最近一次升配或 OOM 处理后的 15 分钟内跳过降配，防止重负载刚缓解就立刻回落到过低规格。
 
 ```bash
+BYCLAW_SANDBOX_TIER_AUTOSCALE_SCALE_DOWN_AFTER_UP_PROTECTION=PT15M
 BYCLAW_SANDBOX_TIER_AUTOSCALE_BOUNDARY_BLACKLIST_POD_SUFFIX=-0
 BYCLAW_SANDBOX_TIER_AUTOSCALE_PROMETHEUS_BASE_URL=http://prometheus.monitoring.svc.cluster.local:9090/prometheus
 BYCLAW_SANDBOX_TIER_AUTOSCALE_PROMETHEUS_QUERY_WINDOW=PT5M
