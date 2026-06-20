@@ -31,7 +31,7 @@ import {
 } from "./session-dispatch-gate.js";
 import { waitForSdkSessionDispatchSettled } from "./session-dispatch-settle.js";
 import { consumeWorkspaceReloadHint } from "./workspace-reload-hints.js";
-import { waitForManagedBaiyingAgentConfig } from "./managed-agent-config-wait.js";
+import { waitForBaiyingAgentConfig } from "./managed-agent-config-wait.js";
 import { EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import { getAgentNameById } from "./utils.js";
 import { buildAgentReadyTitle } from "./i18n.js";
@@ -244,7 +244,7 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
   });
 
   const { meta } = await runSessionDispatchExclusive(sessionKey, async () => {
-    const dispatchCfg = await waitForManagedBaiyingAgentConfig({
+    const dispatchCfg = await waitForBaiyingAgentConfig({
       runtime: rt,
       cfg,
       agentId: targetAgentId,
