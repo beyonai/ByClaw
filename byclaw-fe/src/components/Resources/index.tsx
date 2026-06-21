@@ -172,12 +172,32 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     setRefreshKey((prevKey) => prevKey + 1);
   }, []);
 
+  const notifySiderResourceListReload = useCallback(() => {
+    EventEmitter.emit('beyond-resourceList-resourceType-reload', {
+      resourceType,
+      resetSkillFilters: false,
+      skipResourceCenterRefresh: true,
+    });
+  }, [EventEmitter, resourceType]);
+
   useEffect(() => {
-    const handleResourceTypeReload = (changedResourceType?: string) => {
-      if (changedResourceType !== resourceType) {
+    const handleResourceTypeReload = (
+      changedResourceType?:
+        | string
+        | { resourceType?: string; resetSkillFilters?: boolean; skipResourceCenterRefresh?: boolean }
+    ) => {
+      if (typeof changedResourceType !== 'string' && changedResourceType?.skipResourceCenterRefresh) {
         return;
       }
-      if (resourceType === 'SKILL') {
+      const nextResourceType =
+        typeof changedResourceType === 'string' ? changedResourceType : changedResourceType?.resourceType;
+      if (nextResourceType !== resourceType) {
+        return;
+      }
+      if (
+        resourceType === 'SKILL' &&
+        (typeof changedResourceType === 'string' || changedResourceType?.resetSkillFilters !== false)
+      ) {
         const nextSearchParams = new URLSearchParams(searchParams);
         nextSearchParams.set('tab', 'personal');
         setCatalogId('');
@@ -633,6 +653,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         onSuccess={() => {
           setImportModalOpen(false);
           refreshList();
+          notifySiderResourceListReload();
         }}
       />
       <ResourceEdit
@@ -652,6 +673,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
             await updateResource(values);
             message.success(intl.formatMessage({ id: 'common.saveSuccess' }));
             refreshList();
+            notifySiderResourceListReload();
           } catch (error: any) {
             console.error('保存失败:', error);
             // 优先透传后端错误信息（msg / message / 字符串），缺失时再回退到通用文案

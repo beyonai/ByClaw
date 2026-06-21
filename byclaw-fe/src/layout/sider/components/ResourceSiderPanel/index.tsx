@@ -31,6 +31,7 @@ import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { getManagerMenuConfig, normalizeMenuUrl } from '@/pages/manager/layout/sider/menuConfig';
 import { getRuntimeActualUrl } from '@/utils';
 import { getToken } from '@/utils/auth';
+import { getFileUrl } from '@/utils/file';
 import styles from './index.module.less';
 
 const { Title, Paragraph } = Typography;
@@ -45,6 +46,12 @@ interface ResourceItem {
   description?: string;
   resourceDesc?: string;
   resourceLogoUrl?: string;
+  avatar?: string;
+  logoUrl?: string;
+  resourceImageUrl?: string;
+  resourceImage?: string;
+  coverUrl?: string;
+  coverImageUrl?: string;
   resourceBizType?: string;
   resourceSourcePkId?: string;
   createTime?: number | string;
@@ -62,6 +69,7 @@ interface ResourceItem {
   skillDocObjectKey?: string;
   useStartTime?: string;
   objectKey?: string;
+  targetContent?: string;
 }
 
 interface Props {
@@ -152,6 +160,39 @@ const isWorkspaceSkill = (item?: ResourceItem) =>
   item?.resourceBizType === ResourceTypeMap.SKILL &&
   (item?.resourceBacked === false || String(item?.resourceId || '').startsWith(WORKSPACE_SKILL_ID_PREFIX));
 
+const parseResourceTargetContent = (item?: ResourceItem) => {
+  const targetContent = item?.extInfo?.targetContent || item?.targetContent;
+  if (!targetContent || typeof targetContent !== 'string') {
+    return null;
+  }
+  try {
+    return JSON.parse(targetContent);
+  } catch {
+    return null;
+  }
+};
+
+const getResourceImageUrl = (item?: ResourceItem) => {
+  const targetContent = parseResourceTargetContent(item);
+  return (
+    item?.resourceLogoUrl ||
+    item?.avatar ||
+    item?.logoUrl ||
+    item?.resourceImageUrl ||
+    item?.resourceImage ||
+    item?.coverUrl ||
+    item?.coverImageUrl ||
+    targetContent?.resourceLogoUrl ||
+    targetContent?.avatar ||
+    targetContent?.logoUrl ||
+    targetContent?.resourceImageUrl ||
+    targetContent?.resourceImage ||
+    targetContent?.coverUrl ||
+    targetContent?.coverImageUrl ||
+    ''
+  );
+};
+
 const getCurrentUserDisplayName = (userInfo?: any) =>
   userInfo?.userName || userInfo?.name || userInfo?.nickName || userInfo?.userCode || userInfo?.userId || '';
 
@@ -161,6 +202,7 @@ const mapBoundSkillRows = (rows: ResourceItem[], resourceType: ResourceSiderType
   }
   return rows.map((item) => ({
     ...item,
+    resourceLogoUrl: getResourceImageUrl(item),
     resourceBacked: true,
   }));
 };
@@ -512,7 +554,8 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   }, [loadResources]);
 
   useEffect(() => {
-    const handleResourceTypeReload = (nextResourceType: string) => {
+    const handleResourceTypeReload = (payload: string | { resourceType?: string }) => {
+      const nextResourceType = typeof payload === 'string' ? payload : payload?.resourceType;
       if (nextResourceType !== 'SKILL' || resourceType !== 'SKILL' || isInDrillDown()) {
         return;
       }
@@ -1218,6 +1261,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
           renderEmpty={<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />}
           renderItem={(item: ResourceItem) => {
             const drillable = canDrillDown(item);
+            const resourceImage = getResourceImageUrl(item);
 
             return (
               <List.Item
@@ -1231,13 +1275,21 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
                   avatar={
                     <span className={styles.resourceAvatar}>
                       {drillable && <AntdIcon type="icon-a-xiangyou" className={styles.drillIcon} />}
-                      <AntdIcon
-                        type={
-                          item.resourceBizType === PROPERTY_RESOURCE_TYPE || String(item.resourceId).includes('-')
-                            ? 'icon-a-Database-networkshujukuwangluo'
-                            : getResourceIcon()
-                        }
-                      />
+                      {resourceType === 'SKILL' && resourceImage ? (
+                        <img className={styles.resourceAvatarImage} src={getFileUrl(resourceImage)} alt="" />
+                      ) : resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL ? (
+                        <span className={styles.skillDefaultAvatar}>
+                          <span className={styles.skillDefaultAvatarOrb} />
+                        </span>
+                      ) : (
+                        <AntdIcon
+                          type={
+                            item.resourceBizType === PROPERTY_RESOURCE_TYPE || String(item.resourceId).includes('-')
+                              ? 'icon-a-Database-networkshujukuwangluo'
+                              : getResourceIcon()
+                          }
+                        />
+                      )}
                     </span>
                   }
                   title={
