@@ -122,6 +122,37 @@
   }
 }
 
+.resourceAvatarImage {
+  width: 32px;
+  height: 32px;
+  display: block;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.skillDefaultAvatar {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: block;
+  overflow: hidden;
+  border-radius: 8px;
+  background: radial-gradient(circle at 74% 22%, rgba(255, 255, 255, 0.78) 0, rgba(255, 255, 255, 0) 34%),
+    linear-gradient(145deg, #fce4c8 0%, #f7f0ff 48%, #d8f5e8 100%);
+  box-shadow: inset 0 0 0 1px rgba(20, 22, 26, 0.04);
+}
+
+.skillDefaultAvatarOrb {
+  position: absolute;
+  top: 6px;
+  right: 5px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(255, 172, 116, 0.42));
+  box-shadow: 0 8px 18px rgba(217, 103, 61, 0.18);
+}
+
 .expandIcon {
   position: absolute;
   left: -8px;
