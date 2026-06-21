@@ -5,8 +5,8 @@ import lombok.Data;
 /**
  * 工作空间目录技能操作入参。
  *
- * @author Codex
- * @date 2026-06-21
+ * @author qin.guoquan
+ * @date 2026-06-21 17:38:38
  */
 @Data
 public class WorkspaceSkillQo {
