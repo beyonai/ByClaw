@@ -177,6 +177,18 @@ export function queryFixedEntryOperationCapability() {
   return GET<FixedEntryOperationCapability>('/byaiService/auth/privilegeGrant/queryFixedEntryOperationCapability');
 }
 
+export interface GeneratedResourceImage {
+  imageBase64: string;
+  mimeType: string;
+  fileName: string;
+}
+
+export function generateResourceImage(params: { resourceName?: string; resourceDesc?: string }) {
+  return POST<GeneratedResourceImage>('/byaiService/tool/generateResourceImage', params, {
+    timeout: 180000,
+  });
+}
+
 /**
  * 申请资源使用权限
  * 当用户没有资源使用权限时，可提交使用申请

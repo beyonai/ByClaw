@@ -62,13 +62,16 @@ import com.iwhalecloud.byai.state.domain.resource.dto.ToolSaveRequest;
 import com.iwhalecloud.byai.state.domain.resource.qo.DeleteResourceQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.DeleteSkillQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.DownloadSkillZipQo;
+import com.iwhalecloud.byai.state.domain.resource.qo.GenerateResourceImageQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.PersonalAgentArchiveQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.ResourceDetailQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.UpdateResourceBasicInfoQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.WorkspaceSkillQo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceApplicationService;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorageService;
+import com.iwhalecloud.byai.state.domain.resource.service.ResourceImageGenerationService;
 import com.iwhalecloud.byai.state.domain.resource.service.ToolManService;
+import com.iwhalecloud.byai.state.domain.resource.vo.GeneratedResourceImageVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.ResourceDetailVo;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawFileDto;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawPersonalAgentArchiveDto;
@@ -85,6 +88,9 @@ public class ToolManController {
 
     @Autowired
     private ToolManService toolManService;
+
+    @Autowired
+    private ResourceImageGenerationService resourceImageGenerationService;
 
     @Autowired
     private SsResExtMcpService ssResExtMcpService;
@@ -781,6 +787,26 @@ public class ToolManController {
             logger.error("updateResourceBasicInfo failed", e);
             return ResponseUtil
                 .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("tool.resource.basic.info.update.failed"));
+        }
+    }
+
+    /**
+     * 根据资源名称和描述调用默认大模型生成资源图片。
+     */
+    @PostMapping("/generateResourceImage")
+    public ResponseUtil<GeneratedResourceImageVo> generateResourceImage(
+        @RequestBody GenerateResourceImageQo request) {
+        try {
+            GeneratedResourceImageVo data = resourceImageGenerationService.generate(request);
+            return ResponseUtil.successResponse(I18nUtil.get("resource.image.generate.success"), data);
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("generateResourceImage failed", e);
+            return ResponseUtil
+                .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("resource.image.generate.failed"));
         }
     }
 
