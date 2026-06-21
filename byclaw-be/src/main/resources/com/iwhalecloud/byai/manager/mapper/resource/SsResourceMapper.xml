@@ -1091,7 +1091,8 @@
             esk.target_content,
             esk.sync_status,
             esk.sync_error,
-            esk.last_sync_time
+            esk.last_sync_time,
+            coalesce(uc.use_count, 0) as use_count
         FROM (
                  SELECT DISTINCT rel_resource_id
                  FROM ss_resource_rel_detail
@@ -1099,6 +1100,16 @@
              ) d
                  INNER JOIN ss_resource a ON d.rel_resource_id = a.resource_id
                  LEFT JOIN ss_res_ext_skill esk ON a.resource_id = esk.resource_id
+                 LEFT JOIN (
+                     SELECT rd.rel_resource_id,
+                            count(distinct rd.resource_id) as use_count
+                       FROM ss_resource_rel_detail rd
+                            INNER JOIN ss_resource de
+                               ON rd.resource_id = de.resource_id
+                              AND de.resource_biz_type = 'DIG_EMPLOYEE'
+                              AND de.resource_status = 2
+                      GROUP BY rd.rel_resource_id
+                 ) uc ON a.resource_id = uc.rel_resource_id
         WHERE 1 = 1
           AND a.resource_status = 2
           <choose>
@@ -1177,7 +1188,8 @@
             esk.target_content,
             esk.sync_status,
             esk.sync_error,
-            esk.last_sync_time
+            esk.last_sync_time,
+            coalesce(uc.use_count, 0) as use_count
         FROM (
                  SELECT DISTINCT rel_resource_id
                  FROM ss_resource_rel_detail
@@ -1187,6 +1199,16 @@
                 ON d.rel_resource_id = a.resource_id
                 AND a.resource_biz_type = 'SKILL'
             LEFT JOIN ss_res_ext_skill esk ON a.resource_id = esk.resource_id
+            LEFT JOIN (
+                SELECT rd.rel_resource_id,
+                       count(distinct rd.resource_id) as use_count
+                  FROM ss_resource_rel_detail rd
+                       INNER JOIN ss_resource de
+                          ON rd.resource_id = de.resource_id
+                         AND de.resource_biz_type = 'DIG_EMPLOYEE'
+                         AND de.resource_status = 2
+                 GROUP BY rd.rel_resource_id
+            ) uc ON a.resource_id = uc.rel_resource_id
         WHERE a.resource_status = 2
           <if test="catalogIds != null and catalogIds.size() > 0">
               AND a.catalog_id IN

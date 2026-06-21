@@ -26,6 +26,165 @@
   }
 }
 
+.skillPosterCard {
+  height: auto;
+  min-height: 0;
+  display: inline-flex;
+  border: none;
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 10px 26px rgba(20, 22, 26, 0.05);
+  overflow: hidden;
+
+  &:hover {
+    box-shadow: 0 18px 42px rgba(20, 22, 26, 0.12);
+    transform: translateY(-2px);
+  }
+}
+
+.skillPosterContent {
+  width: 100%;
+  padding: 12px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skillPosterImageWrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: var(--skill-poster-aspect, 4 / 3);
+  border-radius: 20px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #eaf6ff 0%, #fff0db 100%);
+  box-shadow: inset 0 0 0 1px rgba(20, 22, 26, 0.04);
+}
+
+.skillPosterImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.skillPosterPlaceholder {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  color: #14161a;
+  background: radial-gradient(circle at 78% 18%, rgba(255, 255, 255, 0.86) 0, rgba(255, 255, 255, 0) 28%),
+    linear-gradient(145deg, #fce4c8 0%, #f7f0ff 48%, #d8f5e8 100%);
+}
+
+.skillPosterOrb {
+  position: absolute;
+  top: 18%;
+  right: 16%;
+  width: 42%;
+  aspect-ratio: 1;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(255, 172, 116, 0.5));
+  box-shadow: 0 18px 60px rgba(217, 103, 61, 0.22);
+}
+
+.skillPosterPlaceholderSub {
+  position: relative;
+  width: fit-content;
+  padding: 5px 10px;
+  border-radius: 999px;
+  color: rgba(20, 22, 26, 0.66);
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 14px;
+  font-weight: 700;
+  backdrop-filter: blur(8px);
+}
+
+.skillPosterTag {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  max-width: calc(100% - 24px);
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 6px 16px rgba(20, 22, 26, 0.08);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.skillPosterAction {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.skillPosterActionBtn {
+  border: none;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 6px 18px rgba(20, 22, 26, 0.12);
+}
+
+.skillPosterCard:hover .skillPosterAction {
+  opacity: 1;
+}
+
+.skillPosterTitle {
+  margin: 8px 8px 0 !important;
+  color: #14161a;
+  font-size: 20px;
+  line-height: 27px;
+  font-weight: 800;
+}
+
+.skillPosterDesc {
+  margin: 0 8px !important;
+  color: #737b88;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.skillPosterFooter {
+  margin: 2px 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #a0a7b2;
+}
+
+.skillPosterCreator {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.skillPosterCreatorAvatar {
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #e8f4ff, #fff1da);
+  color: #456078;
+  font-size: 12px;
+}
+
+.skillPosterCreatorName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.skillPosterUseCount {
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
 .tag {
   padding: 0px 4px;
   border-radius: 4px;
@@ -84,6 +243,39 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.skillDefaultAvatar {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  padding: 7px;
+  color: rgba(20, 22, 26, 0.7);
+  background: radial-gradient(circle at 74% 22%, rgba(255, 255, 255, 0.78) 0, rgba(255, 255, 255, 0) 34%),
+    linear-gradient(145deg, #fce4c8 0%, #f7f0ff 48%, #d8f5e8 100%);
+  box-shadow: inset 0 0 0 1px rgba(20, 22, 26, 0.04);
+
+  span {
+    position: relative;
+    z-index: 1;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 700;
+  }
+}
+
+.skillDefaultAvatarOrb {
+  position: absolute;
+  top: 9px;
+  right: 7px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(255, 172, 116, 0.42));
 }
 
 .resourceMeta {

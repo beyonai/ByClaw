@@ -903,7 +903,8 @@ public class ToolManService {
      * 通用更新资源基础信息。 更新资源名称、资源描述、所属目录、更新人和更新时间； 若资源存在 targetContent，则同步回写子表并刷新开放资源目录中的 JSON。
      */
     @Transactional(rollbackFor = Exception.class)
-    public void updateResourceBasicInfo(Long resourceId, String resourceName, String resourceDesc, Long catalogId) {
+    public void updateResourceBasicInfo(Long resourceId, String resourceName, String resourceDesc, String avatar,
+        Long catalogId) {
         // 1. 校验请求参数中的资源ID。
         if (resourceId == null) {
             throw new IllegalArgumentException(I18nUtil.get("resource.resourceid.notnull"));
@@ -922,6 +923,9 @@ public class ToolManService {
         // 3. 更新资源名称、资源描述，以及本次修改的操作人和修改时间。
         resource.setResourceName(resourceName);
         resource.setResourceDesc(resourceDesc);
+        if (avatar != null) {
+            resource.setAvatar(avatar);
+        }
         if (catalogId != null) {
             resource.setCatalogId(catalogId);
         }

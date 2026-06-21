@@ -108,6 +108,7 @@
         <result column="last_sync_time" property="lastSyncTime"/>
         <result column="catalog_name" property="catalogName"/>
         <result column="createUserName" property="createUserName"/>
+        <result column="use_count" property="useCount"/>
         <result column="hasPermission" property="hasPermission"/>
         <result column="manOrgName" property="manOrgName"/>
     </resultMap>
@@ -287,10 +288,22 @@
                esk.sync_status,
                esk.sync_error,
                esk.last_sync_time,
-               b.user_name as createUserName
+               b.user_name as createUserName,
+               coalesce(uc.use_count, 0) as use_count
         from ss_resource a
              left join po_users b on a.create_by = b.user_id
              left join ss_res_ext_skill esk on a.resource_id = esk.resource_id
+             left join (
+                 select rd.rel_resource_id,
+                        count(distinct rd.resource_id) as use_count
+                   from ss_resource_rel_detail rd
+                        inner join ss_resource de
+                           on rd.resource_id = de.resource_id
+                          and de.resource_biz_type = 'DIG_EMPLOYEE'
+                          and de.resource_status = 2
+                  group by rd.rel_resource_id
+             ) uc
+                on a.resource_id = uc.rel_resource_id
              left join (
                  select grant_obj_id,
                         sum(case when grant_to_type = 'RED' and status_cd = 'A' then 1 else 0 end) as red_count,

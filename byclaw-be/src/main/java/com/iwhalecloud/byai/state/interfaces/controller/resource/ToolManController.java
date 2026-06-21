@@ -746,6 +746,8 @@ public class ToolManController {
             required = false) String resourceName,
         @Parameter(description = "资源描述", required = false) @RequestParam(value = "resourceDesc",
             required = false) String resourceDesc,
+        @Parameter(description = "资源图片", required = false) @RequestParam(value = "avatar",
+            required = false) String avatar,
         @Parameter(description = "所属目录ID", required = false) @RequestParam(value = "catalogId",
             required = false) Long catalogId) {
         try {
@@ -755,6 +757,7 @@ public class ToolManController {
                 : resourceName;
             String finalResourceDesc = request != null && request.getResourceDesc() != null ? request.getResourceDesc()
                 : resourceDesc;
+            String finalAvatar = request != null && request.getAvatar() != null ? request.getAvatar() : avatar;
             Long finalCatalogId = request != null && request.getCatalogId() != null ? request.getCatalogId()
                 : catalogId;
 
@@ -764,7 +767,7 @@ public class ToolManController {
             if (finalResourceName == null) {
                 return ResponseUtil.fail(I18nUtil.get("resource.resourcename.notnull"));
             }
-            toolManService.updateResourceBasicInfo(finalResourceId, finalResourceName, finalResourceDesc,
+            toolManService.updateResourceBasicInfo(finalResourceId, finalResourceName, finalResourceDesc, finalAvatar,
                 finalCatalogId);
             return ResponseUtil.success(I18nUtil.get("tool.resource.basic.info.update.success"));
         }

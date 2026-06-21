@@ -7,6 +7,9 @@ import org.apache.commons.lang3.StringUtils;
 
 /**
  * Extracts user-facing metadata from SKILL.md while hiding YAML front matter.
+ *
+ * @author qin.guoquan
+ * @date 2026-06-21 17:38:38
  */
 final class ByClawSkillDocParser {
 
