@@ -261,6 +261,11 @@ export default {
   'fileBrowser.copy.failed': 'Copy failed',
   'fileBrowser.upload.changeDirectory': 'Change Directory',
   'fileBrowser.upload.selectDirectoryTitle': 'Select Upload Directory',
+  'fileBrowser.upload.directoryScopeTip':
+    'Only the current directory, its child directories, or sibling directories can be selected. Parent directories and root are not allowed.',
+  'fileBrowser.upload.bykcTargetRequired':
+    'Unable to identify the target knowledge base. Please enter a specific knowledge-base folder under .bykc before uploading.',
+  'fileBrowser.upload.knowledgeBuildSuccess': 'Uploaded successfully. Knowledge build has been submitted.',
   'fileBrowser.save.missingResource': 'Failed to get {target} resource',
   'fileBrowser.save.saving': 'Saving to {target}',
   'fileBrowser.save.success': 'Saved to {target}',

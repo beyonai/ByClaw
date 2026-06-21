@@ -106,14 +106,15 @@ const ResourceList: React.FC<ResourceListProps> = ({
   const baseResourceBizTypeList = useMemo(() => getBaseResourceBizTypeList(resourceType), [resourceType]);
 
   const intl = useIntl();
-  const { agentInfo } = useGlobal();
+  const { agentId, agentInfo } = useGlobal();
   const { userInfo, defaultDigEmployeeId } = useSelector(
     ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
       userInfo: user.userInfo,
       defaultDigEmployeeId: employees.defaultDigEmployeeId,
     })
   );
-  const activeDigitalEmployeeId = agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
+  const activeDigitalEmployeeId =
+    agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
   const [loading, setLoading] = useState(false);
   const [list, setList] = useState<IResourceItem[]>([]);
   const [installedResourceIds, setInstalledResourceIds] = useState<ReadonlySet<string>>(new Set());

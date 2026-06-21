@@ -204,6 +204,13 @@ function isPathIn(path: string, rootPath: string) {
   return normalizedPath === normalizedRoot.slice(0, -1) || normalizedPath.startsWith(normalizedRoot);
 }
 
+function getCategoryRootPath(categoryKey: FileCategoryKey | undefined) {
+  if (categoryKey === 'session') return SESSION_FILE_PATH;
+  if (categoryKey === 'shared') return SHARED_FILE_PATH;
+  if (categoryKey === 'log') return LOG_FILE_PATH;
+  return ROOT_FILE_PATH;
+}
+
 function getFileActionScope(activeKey: FileCategoryKey | undefined, item: FileBrowserItem) {
   if (activeKey && activeKey !== 'root') {
     return activeKey;
@@ -222,6 +229,30 @@ function getCopyTargetPath(targetType: FileCopyTargetType, sessionId?: string) {
 
 function buildTargetFolderPath(parentPath: string, folderName: string) {
   return `${ensureDirectoryPath(parentPath)}${folderName}/`.replace(/\/+/g, '/');
+}
+
+function getParentDirectoryPath(path: string) {
+  const normalizedPath = ensureDirectoryPath(normalizeFileBrowserPath(path));
+  const segments = normalizedPath.split('/').filter(Boolean);
+  if (segments.length <= 1) return ROOT_FILE_PATH;
+  return `/${segments.slice(0, -1).join('/')}/`;
+}
+
+function isSameDirectoryLevel(path: string, targetPath: string) {
+  const normalizedPath = ensureDirectoryPath(normalizeFileBrowserPath(path));
+  const normalizedTargetPath = ensureDirectoryPath(normalizeFileBrowserPath(targetPath));
+  return getParentDirectoryPath(normalizedPath) === getParentDirectoryPath(normalizedTargetPath);
+}
+
+function isAllowedUploadDirectoryTarget(path: string, basePath: string) {
+  const normalizedPath = ensureDirectoryPath(normalizeFileBrowserPath(path));
+  const normalizedBasePath = ensureDirectoryPath(normalizeFileBrowserPath(basePath || ROOT_FILE_PATH));
+  if (normalizedPath === ROOT_FILE_PATH) return false;
+  return (
+    normalizedPath === normalizedBasePath ||
+    isPathIn(normalizedPath, normalizedBasePath) ||
+    isSameDirectoryLevel(normalizedPath, normalizedBasePath)
+  );
 }
 
 function buildScopedFolderPath(currentPath: string, rootPath: string) {
@@ -244,6 +275,63 @@ function buildScopedFolderPath(currentPath: string, rootPath: string) {
     paths.push({ title: segment, id: accumulated });
   }
   return paths;
+}
+
+function getBykcPathSegments(path: string) {
+  const normalizedPath = ensureDirectoryPath(normalizeFileBrowserPath(path));
+  if (!isPathIn(normalizedPath, BYKC_FILE_PATH)) return [];
+  return normalizedPath.slice(BYKC_FILE_PATH.length).split('/').filter(Boolean);
+}
+
+function normalizeMatchToken(value: unknown) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase();
+}
+
+function getKnowledgeBaseMatchTokens(kb: IKnowledgeBaseItem) {
+  const data = kb as any;
+  return [
+    data.resourceId,
+    data.resourceCode,
+    data.resourceName,
+    data.collectionName,
+    data.name,
+    data.knCode,
+    data.knowledgeCode,
+    data.datasetId,
+  ]
+    .map(normalizeMatchToken)
+    .filter(Boolean);
+}
+
+function buildKnowledgeDirectoryPath(segments: string[]) {
+  return segments.length ? `/${segments.join('/')}/`.replace(/\/+/g, '/') : '/';
+}
+
+function resolveBykcKnowledgeUploadTarget(path: string, knowledgeBases: IKnowledgeBaseItem[]) {
+  const segments = getBykcPathSegments(path);
+  const firstSegment = normalizeMatchToken(segments[0]);
+  if (!knowledgeBases.length) return null;
+
+  if (firstSegment) {
+    const matched = knowledgeBases.find((kb) => getKnowledgeBaseMatchTokens(kb).includes(firstSegment));
+    if (matched) {
+      return {
+        knowledgeBase: matched,
+        directoryPath: buildKnowledgeDirectoryPath(segments.slice(1)),
+      };
+    }
+  }
+
+  if (knowledgeBases.length === 1) {
+    return {
+      knowledgeBase: knowledgeBases[0],
+      directoryPath: buildKnowledgeDirectoryPath(segments),
+    };
+  }
+
+  return null;
 }
 
 interface PendingKnowledgeUpload extends UploadConfirmFile {
@@ -283,6 +371,9 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
   const clickTimerRef = useRef<number | null>(null);
   const categoryCacheRef = useRef<Partial<Record<FileCategoryKey, FileCategoryCache>>>({});
+  const activeCategoryKeyRef = useRef<FileCategoryKey | undefined>('root');
+  const currentPathRef = useRef('');
+  const fetchListRequestSeqRef = useRef(0);
   const [currentPath, setCurrentPath] = useState('');
   const [activeCategoryKey, setActiveCategoryKey] = useState<FileCategoryKey | undefined>('root');
   const [items, setItems] = useState<FileBrowserItem[]>([]);
@@ -307,6 +398,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [uploadDirectoryPickerOpen, setUploadDirectoryPickerOpen] = useState(false);
   const [uploadDirectoryPath, setUploadDirectoryPath] = useState('/');
+  const [uploadDirectoryBasePath, setUploadDirectoryBasePath] = useState('/');
   const [uploadDirectoryFolders, setUploadDirectoryFolders] = useState<FileBrowserItem[]>([]);
   const [uploadDirectoryLoading, setUploadDirectoryLoading] = useState(false);
   const [copyModalOpen, setCopyModalOpen] = useState(false);
@@ -331,7 +423,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       {
         key: 'session',
         titleId: 'fileBrowser.category.session',
-        path: getSessionFilePath(sessionId),
+        path: SESSION_FILE_PATH,
+        ensure: true,
       },
       {
         key: 'shared',
@@ -373,39 +466,64 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const fetchList = useCallback(
     async (path: string, options: { force?: boolean; categoryKey?: FileCategoryKey | undefined } = {}) => {
       const cacheKey = options.categoryKey ?? activeCategoryKey;
+      const categoryRootPath = getCategoryRootPath(cacheKey);
+      const normalizedPath = ensureDirectoryPath(normalizeFileBrowserPath(path || categoryRootPath));
+      const requestPath =
+        cacheKey !== 'root' && !isPathIn(normalizedPath, categoryRootPath) ? categoryRootPath : normalizedPath;
       const cached = cacheKey ? categoryCacheRef.current[cacheKey] : undefined;
-      if (!options.force && cached?.path === path) {
-        setItems(cached.items);
-        setChildrenByPath(cached.childrenByPath);
+      if (!options.force && cached?.path === requestPath) {
+        if (activeCategoryKeyRef.current === cacheKey && currentPathRef.current === requestPath) {
+          setItems(cached.items);
+          setChildrenByPath(cached.childrenByPath);
+        }
         return;
       }
+      const requestSeq = ++fetchListRequestSeqRef.current;
       setLoading(true);
       try {
-        const res: any = await listFiles({ resourceId, path });
+        const res: any = await listFiles({ resourceId, path: requestPath });
         const data = res?.data ?? res ?? [];
         const nextItems = Array.isArray(data) ? data : [];
         const nextChildrenByPath = options.force ? {} : cached?.childrenByPath || {};
-        setItems(nextItems);
-        setChildrenByPath(nextChildrenByPath);
         updateCategoryCache(cacheKey, {
-          path,
+          path: requestPath,
           items: nextItems,
           childrenByPath: nextChildrenByPath,
         });
+        if (
+          requestSeq === fetchListRequestSeqRef.current &&
+          activeCategoryKeyRef.current === cacheKey &&
+          currentPathRef.current === requestPath
+        ) {
+          setItems(nextItems);
+          setChildrenByPath(nextChildrenByPath);
+        }
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
       } finally {
-        setLoading(false);
+        if (requestSeq === fetchListRequestSeqRef.current) {
+          setLoading(false);
+        }
       }
     },
     [activeCategoryKey, intl, resourceId, updateCategoryCache]
   );
 
   useEffect(() => {
+    activeCategoryKeyRef.current = activeCategoryKey;
+  }, [activeCategoryKey]);
+
+  useEffect(() => {
+    currentPathRef.current = currentPath;
+  }, [currentPath]);
+
+  useEffect(() => {
     const defaultCategoryKey = getDefaultFileCategoryKey(sessionId);
-    const defaultCategoryPath = defaultCategoryKey === 'session' ? getSessionFilePath(sessionId) : ROOT_FILE_PATH;
+    const defaultCategoryPath = getCategoryRootPath(defaultCategoryKey);
     setPathInitialized(false);
     categoryCacheRef.current = {};
+    activeCategoryKeyRef.current = defaultCategoryKey;
+    currentPathRef.current = defaultCategoryPath;
     setActiveCategoryKey(defaultCategoryKey);
     setCurrentPath(defaultCategoryPath);
     setItems([]);
@@ -454,6 +572,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.createFolder.failed' }));
         }
       }
+      activeCategoryKeyRef.current = nextCategory.key;
+      currentPathRef.current = nextCategory.path;
       setCurrentPath(nextCategory.path);
     },
     [fileCategories, fetchList, intl, resourceId]
@@ -493,15 +613,17 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     return buildScopedFolderPath(copyDirectoryPath, rootPath);
   }, [copyDirectoryPath, copyTargetType]);
 
+  const uploadDirectoryBrowseRootPath = useMemo(() => {
+    return getParentDirectoryPath(uploadDirectoryBasePath || pendingUploadPath || currentPath || ROOT_FILE_PATH);
+  }, [currentPath, pendingUploadPath, uploadDirectoryBasePath]);
+
   const uploadDirectoryBreadcrumb = useMemo(() => {
-    return [
-      {
-        title: intl.formatMessage({ id: 'fileBrowser.root' }),
-        id: ROOT_FILE_PATH,
-      },
-      ...buildScopedFolderPath(uploadDirectoryPath, ROOT_FILE_PATH),
-    ];
-  }, [intl, uploadDirectoryPath]);
+    return buildScopedFolderPath(uploadDirectoryPath, uploadDirectoryBrowseRootPath);
+  }, [uploadDirectoryBrowseRootPath, uploadDirectoryPath]);
+
+  const canConfirmUploadDirectory = useMemo(() => {
+    return isAllowedUploadDirectoryTarget(uploadDirectoryPath, uploadDirectoryBasePath);
+  }, [uploadDirectoryBasePath, uploadDirectoryPath]);
 
   const loadKnowledgeBases = useCallback(
     async (keyword = knowledgeKeyword) => {
@@ -704,12 +826,68 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     [intl, resourceId]
   );
 
+  const resolveKnowledgeUploadTarget = useCallback(
+    async (targetPath: string) => {
+      const response = await queryDigEmployeeManageKnowledgeResourceAuth({
+        resourceId,
+        pageNum: 1,
+        pageSize: 100,
+        keyword: '',
+      });
+      const rows = Array.isArray(response?.rows) ? response.rows : Array.isArray(response?.list) ? response.list : [];
+      if (!rows.length) {
+        message.warning(intl.formatMessage({ id: 'fileSider.saveToKnowledge.noManagePermission' }));
+        return null;
+      }
+      const target = resolveBykcKnowledgeUploadTarget(targetPath, rows);
+      if (!target) {
+        message.warning(intl.formatMessage({ id: 'fileBrowser.upload.bykcTargetRequired' }));
+      }
+      return target;
+    },
+    [intl, resourceId]
+  );
+
+  const executeKnowledgeDirectoryUpload = useCallback(
+    async (targetPath: string, fileList: File[], processFrontMatter: boolean) => {
+      const target = await resolveKnowledgeUploadTarget(targetPath);
+      if (!target) return;
+
+      const formData = new FormData();
+      fileList.forEach((file) => {
+        formData.append('files', file);
+      });
+      formData.append('resourceId', String(target.knowledgeBase.resourceId));
+      formData.append('directoryPath', target.directoryPath);
+      formData.append('processFrontMatter', String(!processFrontMatter));
+      formData.append('overwrite', 'false');
+
+      await uploadKnowledgeFiles(formData);
+      message.success(intl.formatMessage({ id: 'fileBrowser.upload.knowledgeBuildSuccess' }));
+      setUploadConfirmOpen(false);
+      setPendingUploadFiles([]);
+      setPendingUploadPath('');
+
+      if (isPathIn(currentPath, BYKC_FILE_PATH)) {
+        setSearchValue('');
+        setIsSearching(false);
+        setChildrenByPath({});
+        await fetchList(currentPath, { force: true });
+      }
+    },
+    [currentPath, fetchList, intl, resolveKnowledgeUploadTarget]
+  );
+
   const executeUpload = useCallback(
-    async (targetPath: string, fileList: File[]) => {
+    async (targetPath: string, fileList: File[], processFrontMatter = false) => {
       if (!fileList.length || uploadingFiles) return;
       const uploadPath = ensureDirectoryPath(targetPath || currentPath || '/');
       setUploadingFiles(true);
       try {
+        if (isPathIn(uploadPath, BYKC_FILE_PATH)) {
+          await executeKnowledgeDirectoryUpload(uploadPath, fileList, processFrontMatter);
+          return;
+        }
         await uploadFiles(resourceId, uploadPath, fileList);
         message.success(intl.formatMessage({ id: 'fileBrowser.upload.success' }));
         setUploadConfirmOpen(false);
@@ -746,6 +924,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     [
       activeCategoryKey,
       currentPath,
+      executeKnowledgeDirectoryUpload,
       fetchList,
       intl,
       isSearching,
@@ -798,26 +977,53 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
   const openUploadDirectoryPicker = useCallback(() => {
     const initialPath = ensureDirectoryPath(pendingUploadPath || currentPath || ROOT_FILE_PATH);
+    setUploadDirectoryBasePath(initialPath);
     setUploadDirectoryPickerOpen(true);
     void loadUploadDirectoryFolders(initialPath);
   }, [currentPath, loadUploadDirectoryFolders, pendingUploadPath]);
 
   const handleConfirmUploadDirectory = useCallback(() => {
+    if (!isAllowedUploadDirectoryTarget(uploadDirectoryPath, uploadDirectoryBasePath)) {
+      message.warning(intl.formatMessage({ id: 'fileBrowser.upload.directoryScopeTip' }));
+      return;
+    }
     setPendingUploadPath(ensureDirectoryPath(uploadDirectoryPath || ROOT_FILE_PATH));
     setUploadDirectoryPickerOpen(false);
-  }, [uploadDirectoryPath]);
+  }, [intl, uploadDirectoryBasePath, uploadDirectoryPath]);
 
-  const handleSharedUploadSelect = useCallback(
-    async (fileList: File[]) => {
+  const handleCategoryUploadSelect = useCallback(
+    async (category: FileCategoryItem, fileList: File[]) => {
       if (!fileList.length) return;
       try {
-        await ensureFolder({ resourceId, path: SHARED_FILE_PATH });
-        handleUploadSelect(SHARED_FILE_PATH, fileList);
+        if (category.key !== 'root') {
+          await ensureFolder({ resourceId, path: category.path });
+        }
+        handleUploadSelect(category.path, fileList);
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.createFolder.failed' }));
       }
     },
     [handleUploadSelect, intl, resourceId]
+  );
+
+  const handleRefreshCategory = useCallback(
+    async (category: FileCategoryItem) => {
+      try {
+        if (category.key !== 'root') {
+          await ensureFolder({ resourceId, path: category.path });
+        }
+        delete categoryCacheRef.current[category.key];
+        if (category.key === activeCategoryKey) {
+          setSearchValue('');
+          setIsSearching(false);
+          setChildrenByPath({});
+          await fetchList(currentPath, { force: true, categoryKey: category.key });
+        }
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+      }
+    },
+    [activeCategoryKey, currentPath, fetchList, intl, resourceId]
   );
 
   const openCreateFolder = useCallback((parentPath: string) => {
@@ -864,6 +1070,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     async (node: FileTreeItem) => {
       if (!isDirectory(node)) return;
       const path = ensureDirectoryPath(node.path);
+      const activeRootPath = getCategoryRootPath(activeCategoryKey);
+      if (activeCategoryKey !== 'root' && !isPathIn(path, activeRootPath)) return;
       if (childrenByPath[path]) return;
       try {
         const res: any = await listFiles({ resourceId, path });
@@ -1185,6 +1393,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   }, [savingToKnowledge]);
 
   const isKnowledgeUploadConfirm = knowledgeUploadConfirmOpen;
+  const isBykcUploadConfirm =
+    !isKnowledgeUploadConfirm && Boolean(pendingUploadPath) && isPathIn(pendingUploadPath, BYKC_FILE_PATH);
   const uploadConfirmFiles: UploadConfirmFile[] = isKnowledgeUploadConfirm
     ? pendingKnowledgeUploads
     : pendingUploadFiles;
@@ -1193,11 +1403,15 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     : pendingUploadPath || '/';
   const uploadConfirmConflicts = isKnowledgeUploadConfirm ? pendingKnowledgeConflicts : [];
   const uploadConfirmLoading = isKnowledgeUploadConfirm ? savingToKnowledge : uploadingFiles;
-  const uploadConfirmOkText = isKnowledgeUploadConfirm
-    ? intl.formatMessage({
-      id: pendingKnowledgeConflicts.length ? 'knowledgeDetail.confirmOverwriteUpload' : 'knowledgeDetail.uploadFile',
-    })
-    : intl.formatMessage({ id: 'fileBrowser.toolbar.upload' });
+  let uploadConfirmOkText = intl.formatMessage({ id: 'fileBrowser.toolbar.upload' });
+  if (isKnowledgeUploadConfirm) {
+    const okTextId = pendingKnowledgeConflicts.length
+      ? 'knowledgeDetail.confirmOverwriteUpload'
+      : 'knowledgeDetail.uploadFile';
+    uploadConfirmOkText = intl.formatMessage({ id: okTextId });
+  } else if (isBykcUploadConfirm) {
+    uploadConfirmOkText = intl.formatMessage({ id: 'knowledgeDetail.uploadFile' });
+  }
 
   const handleUploadConfirmOk = useCallback(
     (processFrontMatter: boolean) => {
@@ -1205,7 +1419,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         void handleConfirmKnowledgeUpload(processFrontMatter);
         return;
       }
-      void executeUpload(pendingUploadPath, pendingUploadFiles);
+      void executeUpload(pendingUploadPath, pendingUploadFiles, processFrontMatter);
     },
     [executeUpload, handleConfirmKnowledgeUpload, isKnowledgeUploadConfirm, pendingUploadFiles, pendingUploadPath]
   );
@@ -1221,6 +1435,63 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   useEffect(() => {
     return clearClickTimer;
   }, [clearClickTimer]);
+
+  const renderCategoryActions = useCallback(
+    (category: FileCategoryItem) => {
+      const canManageCategory = category.key !== 'log';
+      const uploadTitle = intl.formatMessage({ id: 'fileBrowser.toolbar.upload' });
+      const createTitle = intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' });
+      const refreshTitle = intl.formatMessage({ id: 'fileBrowser.toolbar.refresh' });
+
+      return (
+        <span className={styles.categoryActions} onClick={(event) => event.stopPropagation()}>
+          {canManageCategory && (
+            <Upload
+              showUploadList={false}
+              multiple
+              beforeUpload={(_, fileList) => {
+                void handleCategoryUploadSelect(category, fileList as unknown as File[]);
+                return false;
+              }}
+            >
+              <Button
+                icon={<AntdIcon type="icon-a-Uploadshangchuan" className={styles.categoryActionIcon} />}
+                size="small"
+                className={styles.categoryActionButton}
+                title={uploadTitle}
+                aria-label={uploadTitle}
+              />
+            </Upload>
+          )}
+          {canManageCategory && (
+            <Button
+              icon={<AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" className={styles.categoryActionIcon} />}
+              size="small"
+              className={styles.categoryActionButton}
+              title={createTitle}
+              aria-label={createTitle}
+              onClick={(event) => {
+                event.stopPropagation();
+                openCreateFolder(category.path);
+              }}
+            />
+          )}
+          <Button
+            icon={<AntdIcon type="icon-a-Refreshshuaxin1" className={styles.categoryActionIcon} />}
+            size="small"
+            className={styles.categoryActionButton}
+            title={refreshTitle}
+            aria-label={refreshTitle}
+            onClick={(event) => {
+              event.stopPropagation();
+              void handleRefreshCategory(category);
+            }}
+          />
+        </span>
+      );
+    },
+    [handleCategoryUploadSelect, handleRefreshCategory, intl, openCreateFolder]
+  );
 
   const getFileActionItems = useCallback(
     (item: FileTreeItem) => {
@@ -1386,63 +1657,10 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
                 .join(' ')}
             >
               <div
-                className={[
-                  styles.categoryHeaderMain,
-                  category.key === 'shared' || category.key === 'session' ? styles.categoryHeaderMainWithActions : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
+                className={[styles.categoryHeaderMain, styles.categoryHeaderMainWithActions].filter(Boolean).join(' ')}
               >
                 <span className={styles.categoryTitle}>{intl.formatMessage({ id: category.titleId })}</span>
-                {category.key === 'shared' && (
-                  <span className={styles.categoryActions} onClick={(event) => event.stopPropagation()}>
-                    <Upload
-                      showUploadList={false}
-                      multiple
-                      beforeUpload={(_, fileList) => {
-                        void handleSharedUploadSelect(fileList as unknown as File[]);
-                        return false;
-                      }}
-                    >
-                      <Button
-                        icon={<AntdIcon type="icon-a-Uploadshangchuan" className={styles.categoryActionIcon} />}
-                        size="small"
-                        className={styles.categoryActionButton}
-                      >
-                        {intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}
-                      </Button>
-                    </Upload>
-                    <Button
-                      icon={
-                        <AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" className={styles.categoryActionIcon} />
-                      }
-                      size="small"
-                      className={styles.categoryActionButton}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openCreateFolder(SHARED_FILE_PATH);
-                      }}
-                    >
-                      {intl.formatMessage({ id: 'common.create' })}
-                    </Button>
-                  </span>
-                )}
-                {category.key === 'session' && (
-                  <span className={styles.categoryActions} onClick={(event) => event.stopPropagation()}>
-                    <Button
-                      icon={<AntdIcon type="icon-a-Refreshshuaxin1" className={styles.categoryActionIcon} />}
-                      size="small"
-                      className={styles.categoryActionButton}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        delete categoryCacheRef.current['session'];
-                        void fetchList(currentPath, { force: true });
-                      }}
-                    >
-                      {intl.formatMessage({ id: 'fileBrowser.toolbar.refresh' })}
-                    </Button>
-                  </span>
-                )}
+                {renderCategoryActions(category)}
               </div>
               <span className={styles.categoryPath}>{category.path}</span>
             </div>
@@ -1456,7 +1674,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         directoryPath={uploadConfirmDirectoryPath}
         conflicts={uploadConfirmConflicts}
         loading={uploadConfirmLoading}
-        showProcessFrontMatter={isKnowledgeUploadConfirm}
+        showProcessFrontMatter={isKnowledgeUploadConfirm || isBykcUploadConfirm}
         okText={uploadConfirmOkText}
         directoryActionText={intl.formatMessage({ id: 'fileBrowser.upload.changeDirectory' })}
         onDirectoryAction={isKnowledgeUploadConfirm ? undefined : openUploadDirectoryPicker}
@@ -1492,10 +1710,12 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         okText={intl.formatMessage({ id: 'common.confirm' })}
         cancelText={intl.formatMessage({ id: 'common.cancel' })}
         confirmLoading={uploadDirectoryLoading}
+        okButtonProps={{ disabled: !canConfirmUploadDirectory }}
         onOk={handleConfirmUploadDirectory}
         onCancel={() => {
           if (uploadDirectoryLoading) return;
           setUploadDirectoryPickerOpen(false);
+          setUploadDirectoryBasePath('/');
         }}
         zIndex={1001}
         destroyOnClose
@@ -1504,6 +1724,9 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
           <Typography.Text>
             {intl.formatMessage({ id: 'fileBrowser.copy.targetDirectory' })}
             {uploadDirectoryPath}
+          </Typography.Text>
+          <Typography.Text type="secondary">
+            {intl.formatMessage({ id: 'fileBrowser.upload.directoryScopeTip' })}
           </Typography.Text>
           <KnowledgeBreadcrumb
             folderPath={uploadDirectoryBreadcrumb}
@@ -1521,7 +1744,12 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
               renderItem={(folder) => (
                 <List.Item
                   onClick={() => {
-                    void loadUploadDirectoryFolders(buildTargetFolderPath(uploadDirectoryPath, folder.name));
+                    const targetPath = buildTargetFolderPath(uploadDirectoryPath, folder.name);
+                    if (!isAllowedUploadDirectoryTarget(targetPath, uploadDirectoryBasePath)) {
+                      message.warning(intl.formatMessage({ id: 'fileBrowser.upload.directoryScopeTip' }));
+                      return;
+                    }
+                    void loadUploadDirectoryFolders(targetPath);
                   }}
                   style={{ cursor: 'pointer' }}
                 >

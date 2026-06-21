@@ -240,14 +240,15 @@ const RenderContent = (props: ResourceCardProps) => {
   } = actionConfig || {};
 
   const intl = useIntl();
-  const { agentInfo } = useGlobal();
+  const { agentId, agentInfo } = useGlobal();
   const { userInfo, defaultDigEmployeeId } = useSelector(
     ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
       userInfo: user.userInfo,
       defaultDigEmployeeId: employees.defaultDigEmployeeId,
     })
   );
-  const activeDigitalEmployeeId = agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
+  const activeDigitalEmployeeId =
+    agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
 
   const { mutate: handleRestore, isLoading: restoring } = useRequest({
     mutationFn: (params: any) => {
