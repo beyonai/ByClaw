@@ -14,6 +14,8 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.context.support.StaticMessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -97,7 +99,7 @@ class ByClawSkillQueryApplicationServiceTest {
     }
 
     @Test
-    void shouldReturnOnlyOneLevelSkillDocFiles() {
+    void shouldReturnSkillDocFilesInNestedDirectories() {
         when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_SKILL_ROOT_PREFIX);
         when(userFS.list(eq(AGENT_SKILL_ROOT_PREFIX), isNull())).thenReturn(Arrays.asList(
             AGENT_SKILL_ROOT_PREFIX + "baiying/SKILL.md",
@@ -107,9 +109,13 @@ class ByClawSkillQueryApplicationServiceTest {
 
         List<ByClawSkillDto> result = byClawSkillQueryApplicationService.qrySkillListByUserCode(USER_CODE, RESOURCE_ID, null);
 
-        assertEquals(1, result.size());
+        assertEquals(3, result.size());
         assertEquals("baiying", result.get(0).getSkillName());
         assertEquals(AGENT_SKILL_ROOT_PREFIX + "baiying/SKILL.md", result.get(0).getSkillDocObjectKey());
+        assertEquals("path", result.get(1).getSkillName());
+        assertEquals(AGENT_SKILL_ROOT_PREFIX + "nested/path/SKILL.md", result.get(1).getSkillDocObjectKey());
+        assertEquals("resources", result.get(2).getSkillName());
+        assertEquals(AGENT_SKILL_ROOT_PREFIX + "baiying/resources/SKILL.md", result.get(2).getSkillDocObjectKey());
     }
 
     @Test
@@ -123,6 +129,25 @@ class ByClawSkillQueryApplicationServiceTest {
 
         assertEquals(1, result.size());
         assertEquals("baiying-agent", result.get(0).getSkillName());
+    }
+
+    @Test
+    void shouldStripSkillDocFrontMatterWhenReadingDescription() {
+        String skillDocObjectKey = AGENT_SKILL_ROOT_PREFIX + "guizang-social-card-skill/SKILL.md";
+        String skillDoc = """
+            --- name: guizang-social-card-skill
+            description: Generate Guizang-style social card image sets.
+            Use when the user asks for social cards.
+            """;
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_SKILL_ROOT_PREFIX);
+        when(userFS.list(eq(AGENT_SKILL_ROOT_PREFIX), isNull())).thenReturn(Collections.singletonList(skillDocObjectKey));
+        when(userFS.read(skillDocObjectKey))
+            .thenReturn(new ByteArrayInputStream(skillDoc.getBytes(StandardCharsets.UTF_8)));
+
+        List<ByClawSkillDto> result = byClawSkillQueryApplicationService.qrySkillListByUserCode(USER_CODE, RESOURCE_ID, null);
+
+        assertEquals(1, result.size());
+        assertEquals("Generate Guizang-style social card image sets.", result.get(0).getSkillDesc());
     }
 
     @Test

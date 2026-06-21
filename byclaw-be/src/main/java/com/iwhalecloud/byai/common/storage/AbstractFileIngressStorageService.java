@@ -6,6 +6,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import com.iwhalecloud.byai.common.storage.model.FileStorageContext;
+import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 
 /**
  * Transitional base class for backends that still expose direct file-ingress
@@ -51,5 +52,10 @@ public abstract class AbstractFileIngressStorageService<T> extends AbstractObjec
     @Override
     public FileMetadata getMetadata(String filePath, String bucketName) {
         return doGetObjectMetadata(filePath, bucketName);
+    }
+
+    @Override
+    public FileMetadata metadata(StorageLocation location) {
+        return doGetObjectMetadata(location.getPath(), location.getBucketOrRoot());
     }
 }

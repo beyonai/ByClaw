@@ -431,9 +431,19 @@ export const previewFile = (filePath: string) => {
  * 技能上传成功后返回的数据
  */
 export interface UploadSkillZipResponse {
+  resourceId?: string | number;
   skillName: string;
   skillPath: string;
   skillDocObjectKey: string;
+  skillDesc?: string;
+  displaySourceType?: string;
+  resourceBacked?: boolean;
+}
+
+export interface QuerySkillListParams {
+  userCode?: string;
+  resourceId?: string | number;
+  keyword?: string;
 }
 
 /**
@@ -453,6 +463,40 @@ export const uploadSkillZip = (data: FormData) => {
       },
     }
   );
+};
+
+/**
+ * 查询当前数字员工 workspace 中未绑定到数字员工关系表的目录技能。
+ */
+export const queryWorkspaceSkillList = (params: QuerySkillListParams) => {
+  return POST<{ code: number; msg: string; data: UploadSkillZipResponse[]; success: boolean }>(
+    '/byaiService/tool/qryWorkspaceSkillList',
+    params
+  );
+};
+
+export const queryLobsterInstalledSkillList = queryWorkspaceSkillList;
+
+export interface WorkspaceSkillParams {
+  skillPath: string;
+  resourceId?: string | number;
+  userCode?: string;
+  overwriteConfirmed?: boolean;
+}
+
+export const queryWorkspaceSkillDetail = (params: WorkspaceSkillParams) => {
+  return POST<{ code: number; msg: string; data: UploadSkillZipResponse; success: boolean }>(
+    '/byaiService/tool/getWorkspaceSkillDetail',
+    params
+  );
+};
+
+export const checkWorkspaceSkillShareConflicts = (params: WorkspaceSkillParams) => {
+  return POST<ResourceImportResult>('/byaiService/tool/checkWorkspaceSkillShareConflicts', params);
+};
+
+export const resourceizeWorkspaceSkill = (params: WorkspaceSkillParams) => {
+  return POST<ResourceImportResult>('/byaiService/tool/resourceizeWorkspaceSkill', params);
 };
 
 /**

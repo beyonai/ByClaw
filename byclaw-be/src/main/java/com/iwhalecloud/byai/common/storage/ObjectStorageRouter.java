@@ -65,6 +65,11 @@ public class ObjectStorageRouter implements ObjectStorage {
     }
 
     @Override
+    public FileMetadata metadata(StorageLocation location) {
+        return getService().metadata(location);
+    }
+
+    @Override
     public boolean exists(StorageLocation location) {
         return getService().exists(location);
     }
