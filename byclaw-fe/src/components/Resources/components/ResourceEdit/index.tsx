@@ -3,6 +3,7 @@ import { Modal, Form, Input, Button, TreeSelect, Upload, Image, Space, message }
 import type { UploadProps } from 'antd';
 import { useIntl } from '@umijs/max';
 import { compressImgFileAndUpload, getFileUrl } from '@/utils/file';
+import { generateResourceImage } from '@/pages/manager/service/resources';
 import styles from './index.module.less';
 
 interface IResourceItem {
@@ -19,102 +20,14 @@ interface IResourceItem {
   catalogId?: string | number;
 }
 
-function wrapText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  maxWidth: number,
-  lineHeight: number,
-  maxLines: number
-) {
-  const chars = Array.from(text || '');
-  let line = '';
-  let lineCount = 0;
-  chars.forEach((char, index) => {
-    const testLine = line + char;
-    const isLast = index === chars.length - 1;
-    if (ctx.measureText(testLine).width > maxWidth && line) {
-      ctx.fillText(line, x, y + lineCount * lineHeight);
-      line = char;
-      lineCount += 1;
-    } else {
-      line = testLine;
-    }
-    if ((isLast || lineCount === maxLines - 1) && lineCount < maxLines) {
-      const suffix = !isLast && lineCount === maxLines - 1 ? '...' : '';
-      ctx.fillText(`${line}${suffix}`, x, y + lineCount * lineHeight);
-      line = '';
-      lineCount = maxLines;
-    }
-  });
-}
-
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
-  ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.arcTo(x + width, y, x + width, y + height, radius);
-  ctx.arcTo(x + width, y + height, x, y + height, radius);
-  ctx.arcTo(x, y + height, x, y, radius);
-  ctx.arcTo(x, y, x + width, y, radius);
-  ctx.closePath();
-}
-
-const createSkillPosterFile = async (name: string, desc: string) => {
-  const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 1024;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    throw new Error('Canvas unsupported');
+const base64ToFile = (base64: string, mimeType = 'image/png', fileName = 'resource-ai-cover.png') => {
+  const pureBase64 = base64.includes(',') ? base64.split(',').pop() || '' : base64;
+  const binary = window.atob(pureBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
   }
-
-  const gradients = [
-    ['#ffe1c6', '#f5efff', '#d7f7e7'],
-    ['#dce9ff', '#fff2c6', '#ffd9e2'],
-    ['#d8fff3', '#e8efff', '#fff0d5'],
-  ];
-  const seed = Array.from(name || 'skill').reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  const colors = gradients[seed % gradients.length];
-  const gradient = ctx.createLinearGradient(0, 0, 1024, 1024);
-  gradient.addColorStop(0, colors[0]);
-  gradient.addColorStop(0.52, colors[1]);
-  gradient.addColorStop(1, colors[2]);
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, 1024, 1024);
-
-  ctx.globalAlpha = 0.42;
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath();
-  ctx.arc(780, 210, 170, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalAlpha = 0.28;
-  ctx.beginPath();
-  ctx.arc(225, 800, 230, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalAlpha = 1;
-
-  ctx.fillStyle = 'rgba(20,22,26,0.86)';
-  ctx.font = '800 82px "PingFang SC", "Microsoft YaHei", sans-serif';
-  ctx.textBaseline = 'top';
-  const title = name || 'Skill';
-  wrapText(ctx, title, 86, 160, 820, 96, 3);
-
-  ctx.fillStyle = 'rgba(20,22,26,0.58)';
-  ctx.font = '500 34px "PingFang SC", "Microsoft YaHei", sans-serif';
-  wrapText(ctx, desc || '智能技能资源', 90, 570, 790, 48, 4);
-
-  ctx.fillStyle = 'rgba(20,22,26,0.88)';
-  roundRect(ctx, 90, 850, 280, 72, 36);
-  ctx.fill();
-  ctx.fillStyle = '#fff';
-  ctx.font = '700 30px "PingFang SC", "Microsoft YaHei", sans-serif';
-  ctx.fillText('BYAI SKILL', 132, 870);
-
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((value) => (value ? resolve(value) : reject(new Error('Generate image failed'))), 'image/png');
-  });
-  return new File([blob], `${name || 'skill'}-poster.png`, { type: 'image/png' });
+  return new File([bytes], fileName, { type: mimeType });
 };
 
 interface ResourceEditProps {
@@ -194,10 +107,14 @@ const ResourceEdit: React.FC<ResourceEditProps> = ({ visible, item, resourceType
     setAvatarGenerateLoading(true);
     try {
       const values = form.getFieldsValue();
-      const file = await createSkillPosterFile(
-        values.resourceName || item?.resourceName,
-        values.resourceDesc || item?.resourceDesc
-      );
+      const image = await generateResourceImage({
+        resourceName: values.resourceName || item?.resourceName,
+        resourceDesc: values.resourceDesc || item?.resourceDesc,
+      });
+      if (!image?.imageBase64) {
+        throw new Error(intl.formatMessage({ id: 'resource.imageGenerateFailed' }));
+      }
+      const file = base64ToFile(image.imageBase64, image.mimeType, image.fileName);
       await uploadAvatarFile(file);
       message.success(intl.formatMessage({ id: 'resource.imageGenerateSuccess' }));
     } catch (error: any) {
