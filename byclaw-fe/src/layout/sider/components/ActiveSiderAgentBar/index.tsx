@@ -18,7 +18,7 @@ const matchAgentById = (item: IAgentCache, resourceId?: string | number) => {
 };
 
 export const useActiveSiderAgent = (): ActiveSiderAgent => {
-  const { agentInfo } = useGlobal();
+  const { agentId, agentInfo } = useGlobal();
   const { userInfo, defaultDigEmployeeId, employeesList, agentList } = useSelector(
     ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
       userInfo: user.userInfo,
@@ -29,7 +29,7 @@ export const useActiveSiderAgent = (): ActiveSiderAgent => {
   );
 
   return useMemo(() => {
-    const selectedAgentId = agentInfo?.agentId;
+    const selectedAgentId = agentId || agentInfo?.agentId;
     const resourceId = selectedAgentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
     const allAgents = [...(agentList || []), ...(employeesList || [])];
     const matchedAgent = allAgents.find((item) => matchAgentById(item, resourceId));
@@ -49,7 +49,7 @@ export const useActiveSiderAgent = (): ActiveSiderAgent => {
       name,
       avatar,
     };
-  }, [agentInfo, agentList, defaultDigEmployeeId, employeesList, userInfo?.defaultDigEmployeeId]);
+  }, [agentId, agentInfo, agentList, defaultDigEmployeeId, employeesList, userInfo?.defaultDigEmployeeId]);
 };
 
 interface ActiveSiderAgentBarProps {

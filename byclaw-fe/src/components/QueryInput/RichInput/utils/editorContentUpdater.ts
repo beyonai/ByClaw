@@ -23,6 +23,22 @@ function getFirstElement(editor: Editor) {
   return firstParagraph.children[0];
 }
 
+function selectEditorEndSafely(editor: Editor): void {
+  try {
+    Transforms.select(editor, Editor.end(editor, []));
+  } catch (e) {
+    Transforms.deselect(editor);
+  }
+}
+
+function updateDefaultAgentSafely(editor: Editor, updater: () => void): void {
+  // 默认员工标签是 inline void 节点。插入/删除前先清掉旧 selection，
+  // 避免 Slate 后续用已移除节点去反查 DOM，触发 Cannot resolve a DOM node。
+  Transforms.deselect(editor);
+  updater();
+  selectEditorEndSafely(editor);
+}
+
 /**
  * 检查第一个子元素是否为指定的defaultAgentElement
  */
@@ -100,25 +116,31 @@ export function removeAllMentionElements(editor: Editor): void {
 export function updateEditorContent(
   editor: Editor,
   defaultAgentElement: MentionElementType | undefined,
-  inAgentRoute: boolean,
+  inAgentRoute: boolean
 ): void {
   // 2. 处理defaultAgentElement的添加/删除
   const shouldShowDefaultAgent = !inAgentRoute && !!defaultAgentElement;
   const hasDefaultAgent = isFirstElementDefaultAgent(editor, defaultAgentElement);
 
   if (shouldShowDefaultAgent && !hasDefaultAgent) {
-    removeDefaultAgentFromStart(editor);
-    // 需要显示defaultAgentElement但当前没有，则添加
-    insertDefaultAgentAtStart(editor, defaultAgentElement);
+    updateDefaultAgentSafely(editor, () => {
+      removeDefaultAgentFromStart(editor);
+      // 需要显示defaultAgentElement但当前没有，则添加
+      insertDefaultAgentAtStart(editor, defaultAgentElement);
+    });
   } else if (!shouldShowDefaultAgent && hasDefaultAgent) {
     // 不需要显示defaultAgentElement但当前有，则删除
-    removeDefaultAgentFromStart(editor);
+    updateDefaultAgentSafely(editor, () => {
+      removeDefaultAgentFromStart(editor);
+    });
   } else if (shouldShowDefaultAgent && hasDefaultAgent) {
     const firstElement = getFirstElement(editor);
     if (firstElement && !firstElement.isDefaultAgent) {
-      // 需要显示defaultAgentElement但当前有，且不是defaultAgentElement，则删除，再添加
-      removeDefaultAgentFromStart(editor);
-      insertDefaultAgentAtStart(editor, defaultAgentElement);
+      updateDefaultAgentSafely(editor, () => {
+        // 需要显示defaultAgentElement但当前有，且不是defaultAgentElement，则删除，再添加
+        removeDefaultAgentFromStart(editor);
+        insertDefaultAgentAtStart(editor, defaultAgentElement);
+      });
     }
   }
 }

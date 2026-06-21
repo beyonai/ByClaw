@@ -43,7 +43,7 @@ class LoginApplicationServiceTest {
         when(enterpriseInfoService.getEnterpriseId()).thenReturn(99L);
         when(organizationService.findUsersOrganizationByUserId(1L)).thenReturn(List.of());
         when(privilegeGrantService.findUserManageOrg(1L)).thenReturn(List.of());
-        when(suasSuperassistService.findByUserId(1L)).thenReturn(superassist);
+        when(suasSuperassistService.findById(7L)).thenReturn(superassist);
 
         LoginInfo result = service.getLoginInfo(users);
 
