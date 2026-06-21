@@ -113,6 +113,7 @@ public class WhaleAgentStorageService extends AbstractFileIngressStorageService<
         metadata.setFileSize(target.getSize());
         metadata.setFileType(FilenameUtils.getExtension(metadata.getFileName()));
         metadata.setStorageType(getStorageType());
+        metadata.setLastModified(target.getLastModified());
         return metadata;
     }
 
@@ -481,6 +482,7 @@ public class WhaleAgentStorageService extends AbstractFileIngressStorageService<
             .bucketOrRoot(prefix == null ? null : prefix.getBucketOrRoot())
             .path(objectPath)
             .size(item.getSize())
+            .lastModified(item.getLastModified())
             .build();
     }
 

@@ -5,6 +5,7 @@ import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.SystemCode;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceArtifactTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
@@ -22,12 +23,13 @@ import com.iwhalecloud.byai.state.domain.resource.dto.ObjectZipImportResult;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorageService;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,6 +38,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import org.apache.commons.compress.archivers.ArchiveEntry;
 import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream;
 import org.apache.commons.codec.digest.DigestUtils;
@@ -96,6 +100,12 @@ public class ByClawSkillResourceApplicationService {
 
     @Autowired
     private AuthApplicationService authApplicationService;
+
+    @Autowired
+    private UserFS userFS;
+
+    @Autowired
+    private ByClawSkillPathResolver skillPathResolver;
 
     @Transactional(rollbackFor = Exception.class)
     public void registerChatUploadedSkills(String userCode, Long digitalEmployeeResourceId,
@@ -185,6 +195,73 @@ public class ByClawSkillResourceApplicationService {
         }
         fillImportSummary(result);
         result.setUpdatedCount(result.getUpdatedItems().size());
+        return result;
+    }
+
+    public ObjectZipImportResult previewWorkspaceSkillShareConflicts(String userCode, Long digitalEmployeeResourceId,
+        String skillPath) {
+        WorkspaceSkillPackage skillPackage = buildWorkspaceSkillPackage(userCode,
+            resolveDigitalEmployeeId(digitalEmployeeResourceId), skillPath);
+        ObjectZipImportResult result = new ObjectZipImportResult();
+        result.setTotal(1);
+        SsResource existing = findExistingSkill(skillPackage.metadata().skillCode(), OwnerType.PERSONAL);
+        if (existing != null) {
+            ObjectZipImportItem item = new ObjectZipImportItem();
+            item.setResourceId(String.valueOf(existing.getResourceId()));
+            item.setResourceCode(existing.getResourceCode());
+            item.setResourceName(existing.getResourceName());
+            item.setResourceDesc(existing.getResourceDesc());
+            item.setResourceBizType(ResourceBizTypeEnum.SKILL.name());
+            item.setCatalogId(existing.getCatalogId());
+            item.setUpdated(true);
+            item.setSuccess(true);
+            item.setMessage(I18nUtil.get("byclaw.skill.import.cover.confirm.item"));
+            result.getUpdatedItems().add(item);
+            result.getItems().add(item);
+        }
+        fillImportSummary(result);
+        result.setUpdatedCount(result.getUpdatedItems().size());
+        return result;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public SkillImportResult resourceizeAndBindWorkspaceSkill(String userCode, Long digitalEmployeeResourceId,
+        String skillPath, boolean overwriteConfirmed) {
+        Long resolvedDigitalEmployeeId = resolveDigitalEmployeeId(digitalEmployeeResourceId);
+        WorkspaceSkillPackage skillPackage = buildWorkspaceSkillPackage(userCode, resolvedDigitalEmployeeId, skillPath);
+        SsResource existing = findExistingSkill(skillPackage.metadata().skillCode(), OwnerType.PERSONAL);
+        if (existing != null && !overwriteConfirmed) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.import.cover.confirm.item"));
+        }
+
+        boolean updated = existing != null;
+        SsResource skillResource = saveOrUpdateSkillResource(skillPackage.metadata(), OwnerType.PERSONAL,
+            DEFAULT_SKILL_CATALOG_ID);
+        if (!updated) {
+            authApplicationService.ensureCreatorDefaultPrivileges(skillResource);
+        }
+        SsResExtSkill extSkill = saveOrUpdateSkillExt(userCode, skillResource, skillPackage.bytes(),
+            skillPackage.metadata(), skillPackage.skillPath(), skillPackage.skillDocObjectKey(),
+            SOURCE_TYPE_SKILL_MANAGE_IMPORT);
+        bindSkillToDigitalEmployee(resolvedDigitalEmployeeId, skillResource.getResourceId());
+        syncSkillTargetContent(userCode, skillResource, extSkill, true);
+        digitalEmployeeApplicationService.rebuildAndSaveDigitalEmployeeRelSkills(resolvedDigitalEmployeeId);
+        digitalEmployeeApplicationService.synOpenClawWorkSpace(resolvedDigitalEmployeeId);
+        return new SkillImportResult(skillResource, extSkill, updated);
+    }
+
+    public ObjectZipImportResult buildSingleSkillImportResult(SkillImportResult itemResult) {
+        ObjectZipImportResult result = new ObjectZipImportResult();
+        result.setTotal(1);
+        ObjectZipImportItem item = buildSuccessItem(itemResult);
+        result.getItems().add(item);
+        if (item.isUpdated()) {
+            result.getUpdatedItems().add(item);
+        }
+        else {
+            result.getCreatedItems().add(item);
+        }
+        fillImportSummary(result);
         return result;
     }
 
@@ -339,12 +416,17 @@ public class ByClawSkillResourceApplicationService {
 
     private SsResExtSkill saveOrUpdateSkillExt(String userCode, SsResource skillResource, MultipartFile uploadFile,
         SkillPackageMetadata metadata, String skillPath, String skillDocObjectKey, String sourceType) {
+        return saveOrUpdateSkillExt(userCode, skillResource, readPackageBytes(uploadFile), metadata, skillPath,
+            skillDocObjectKey, sourceType);
+    }
+
+    private SsResExtSkill saveOrUpdateSkillExt(String userCode, SsResource skillResource, byte[] packageBytes,
+        SkillPackageMetadata metadata, String skillPath, String skillDocObjectKey, String sourceType) {
         SsResExtSkill existing = ssResExtSkillService.findById(skillResource.getResourceId());
         String packageFileName = metadata.originalFilename();
         String skillHubDirectory = buildSkillHubDirectory(skillResource.getOwnerType(), userCode);
         String skillUrl = normalizeResourceObjectKey(EXTERNAL_RESOURCE_ROOT + "/" + skillHubDirectory + "/"
             + packageFileName);
-        byte[] packageBytes = readPackageBytes(uploadFile);
         resourceArtifactStorageService.uploadToSubdirectory(packageBytes, skillHubDirectory, packageFileName,
             PACKAGE_CONTENT_TYPE);
 
@@ -357,7 +439,7 @@ public class ByClawSkillResourceApplicationService {
         extSkill.setSkillUrl(skillUrl);
         extSkill.setSkillPackageFormat(SsResExtSkillService.DEFAULT_PACKAGE_FORMAT);
         extSkill.setSkillOriginalFilename(packageFileName);
-        extSkill.setSkillPackageSize(uploadFile == null ? null : uploadFile.getSize());
+        extSkill.setSkillPackageSize((long)packageBytes.length);
         extSkill.setSkillPackageHash(DigestUtils.sha256Hex(packageBytes));
         extSkill.setSyncStatus("SUCCESS");
         extSkill.setSyncError(null);
@@ -365,6 +447,85 @@ public class ByClawSkillResourceApplicationService {
         extSkill.setTargetContent(buildTargetContent(skillResource, extSkill, skillPath, skillDocObjectKey));
         ssResExtSkillService.saveOrUpdate(extSkill);
         return extSkill;
+    }
+
+    private WorkspaceSkillPackage buildWorkspaceSkillPackage(String userCode, Long digitalEmployeeResourceId,
+        String skillPath) {
+        if (StringUtils.isBlank(userCode)) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.user.code.notempty"));
+        }
+        String normalizedSkillPath = normalizeWorkspaceSkillPath(userCode, digitalEmployeeResourceId, skillPath);
+        List<String> objectKeys = ByClawUserWorkspacePaths.withUserContext(userCode,
+            () -> userFS.list(normalizedSkillPath + "/", null));
+        if (CollectionUtils.isEmpty(objectKeys)) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.empty"));
+        }
+
+        String skillName = lastPathSegment(normalizedSkillPath);
+        String skillDocObjectKey = objectKeys.stream()
+            .filter(objectKey -> StringUtils.equalsIgnoreCase(lastPathSegment(objectKey), SKILL_DOC_FILE_NAME))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.missing.doc")));
+        byte[] zipBytes = zipWorkspaceSkill(userCode, normalizedSkillPath, skillName, objectKeys);
+        SkillPackageMetadata metadata = inspectSkillPackage(
+            new ByteArrayMultipartFile(skillName + ".zip", zipBytes, PACKAGE_CONTENT_TYPE));
+        return new WorkspaceSkillPackage(normalizedSkillPath, skillDocObjectKey, zipBytes, metadata);
+    }
+
+    private byte[] zipWorkspaceSkill(String userCode, String normalizedSkillPath, String skillName,
+        List<String> objectKeys) {
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream();
+            ZipOutputStream zipOutputStream = new ZipOutputStream(out)) {
+            String prefix = normalizedSkillPath + "/";
+            for (String objectKey : objectKeys) {
+                if (StringUtils.isBlank(objectKey) || !StringUtils.startsWith(objectKey, prefix)) {
+                    continue;
+                }
+                String relative = objectKey.substring(prefix.length());
+                if (StringUtils.isBlank(relative)) {
+                    continue;
+                }
+                zipOutputStream.putNextEntry(new ZipEntry(skillName + "/" + relative));
+                try (InputStream inputStream = ByClawUserWorkspacePaths.withUserContext(userCode,
+                    () -> userFS.read(objectKey))) {
+                    if (inputStream != null) {
+                        inputStream.transferTo(zipOutputStream);
+                    }
+                }
+                zipOutputStream.closeEntry();
+            }
+            zipOutputStream.finish();
+            return out.toByteArray();
+        }
+        catch (IOException e) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), e);
+        }
+    }
+
+    private String normalizeWorkspaceSkillPath(String userCode, Long digitalEmployeeResourceId, String skillPath) {
+        String skillRootPrefix = skillPathResolver.resolveSkillRootPrefix(userCode, digitalEmployeeResourceId);
+        String normalized = StringUtils.trimToEmpty(skillPath).replace('\\', '/').replaceAll("/+", "/");
+        if (!normalized.startsWith("/")) {
+            normalized = "/" + normalized;
+        }
+        normalized = StringUtils.removeEnd(normalized, "/");
+        if (!StringUtils.startsWith(normalized, skillRootPrefix) || containsParentPathSegment(normalized)) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.path.invalid"));
+        }
+        String tail = normalized.substring(skillRootPrefix.length());
+        if (StringUtils.isBlank(tail)) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.path.invalid"));
+        }
+        return normalized;
+    }
+
+    private boolean containsParentPathSegment(String path) {
+        for (String segment : StringUtils.split(StringUtils.defaultString(path), '/')) {
+            if ("..".equals(segment)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String buildSkillHubDirectory(String ownerType, String userCode) {
@@ -568,12 +729,7 @@ public class ByClawSkillResourceApplicationService {
 
     private String extractSkillDesc(byte[] skillDocContent) {
         String content = new String(skillDocContent == null ? new byte[0] : skillDocContent, StandardCharsets.UTF_8);
-        return Arrays.stream(content.split("\\R"))
-            .map(StringUtils::trimToEmpty)
-            .filter(StringUtils::isNotBlank)
-            .filter(line -> !line.startsWith("#"))
-            .limit(3)
-            .collect(Collectors.joining(" "));
+        return ByClawSkillDocParser.extractDescription(content);
     }
 
     private String parentDirOf(String path) {
@@ -661,5 +817,53 @@ public class ByClawSkillResourceApplicationService {
     }
 
     private record ZipEntryInfo(String name, byte[] content) {
+    }
+
+    private record WorkspaceSkillPackage(String skillPath, String skillDocObjectKey, byte[] bytes,
+        SkillPackageMetadata metadata) {
+    }
+
+    private record ByteArrayMultipartFile(String originalFilename, byte[] bytes, String contentType)
+        implements MultipartFile {
+
+        @Override
+        public String getName() {
+            return "file";
+        }
+
+        @Override
+        public String getOriginalFilename() {
+            return originalFilename;
+        }
+
+        @Override
+        public String getContentType() {
+            return contentType;
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return bytes == null || bytes.length == 0;
+        }
+
+        @Override
+        public long getSize() {
+            return bytes == null ? 0 : bytes.length;
+        }
+
+        @Override
+        public byte[] getBytes() {
+            return bytes == null ? new byte[0] : bytes;
+        }
+
+        @Override
+        public InputStream getInputStream() {
+            return new ByteArrayInputStream(getBytes());
+        }
+
+        @Override
+        public void transferTo(java.io.File dest) throws IOException {
+            java.nio.file.Files.write(dest.toPath(), getBytes());
+        }
     }
 }

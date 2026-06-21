@@ -65,6 +65,7 @@ import com.iwhalecloud.byai.state.domain.resource.qo.DownloadSkillZipQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.PersonalAgentArchiveQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.ResourceDetailQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.UpdateResourceBasicInfoQo;
+import com.iwhalecloud.byai.state.domain.resource.qo.WorkspaceSkillQo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceApplicationService;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorageService;
 import com.iwhalecloud.byai.state.domain.resource.service.ToolManService;
@@ -840,6 +841,177 @@ public class ToolManController {
                 request == null ? null : request.getKeyword(), e);
             return ResponseUtil
                 .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("byclaw.user.skill.list.query.failed"));
+        }
+    }
+
+    /**
+     * 查询当前数字员工 workspace 下由龙虾安装、但尚未绑定到数字员工关系表的 skill 列表。
+     */
+    @PostMapping("/qryLobsterInstalledSkillList")
+    public ResponseUtil<List<ByClawSkillDto>> qryLobsterInstalledSkillList(
+        @RequestBody QrySkillListByUserCodeQo request) {
+        try {
+            if (request == null) {
+                return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
+            }
+            String requestUserCode = request.getUserCode();
+            String resolvedUserCode = StringUtils.isNotBlank(requestUserCode) ? requestUserCode
+                : CurrentUserHolder.getCurrentUserCode();
+            Long resolvedResourceId = request.getResourceId() == null
+                ? suasSuperassistApplicationService.resolveCurrentUserDefaultDigitalEmployeeId()
+                : request.getResourceId();
+            List<ByClawSkillDto> data = byClawSkillQueryApplicationService.qryLobsterInstalledSkillList(
+                resolvedUserCode, resolvedResourceId, request.getKeyword());
+            return ResponseUtil.successResponse(I18nUtil.get("byclaw.lobster.installed.skill.list.query.success"),
+                data);
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("qryLobsterInstalledSkillList failed, userCode={}, resourceId={}, keyword={}",
+                request == null ? null : request.getUserCode(), request == null ? null : request.getResourceId(),
+                request == null ? null : request.getKeyword(), e);
+            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
+                : I18nUtil.get("byclaw.lobster.installed.skill.list.query.failed"));
+        }
+    }
+
+    /**
+     * 查询当前数字员工工作空间下未资源绑定的目录技能。目录技能展示为“用户开发”。
+     */
+    @PostMapping("/qryWorkspaceSkillList")
+    public ResponseUtil<List<ByClawSkillDto>> qryWorkspaceSkillList(@RequestBody QrySkillListByUserCodeQo request) {
+        try {
+            if (request == null) {
+                return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
+            }
+            String requestUserCode = request.getUserCode();
+            String resolvedUserCode = StringUtils.isNotBlank(requestUserCode) ? requestUserCode
+                : CurrentUserHolder.getCurrentUserCode();
+            Long resolvedResourceId = request.getResourceId() == null
+                ? suasSuperassistApplicationService.resolveCurrentUserDefaultDigitalEmployeeId()
+                : request.getResourceId();
+            List<ByClawSkillDto> data = byClawSkillQueryApplicationService.qryWorkspaceUnboundSkillList(
+                resolvedUserCode, resolvedResourceId, request.getKeyword());
+            return ResponseUtil.successResponse(I18nUtil.get("byclaw.workspace.skill.list.query.success"), data);
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("qryWorkspaceSkillList failed, userCode={}, resourceId={}, keyword={}",
+                request == null ? null : request.getUserCode(), request == null ? null : request.getResourceId(),
+                request == null ? null : request.getKeyword(), e);
+            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
+                : I18nUtil.get("byclaw.workspace.skill.list.query.failed"));
+        }
+    }
+
+    /**
+     * 按工作空间 skillPath 查询目录技能详情。
+     */
+    @PostMapping("/getWorkspaceSkillDetail")
+    public ResponseUtil<ByClawSkillDto> getWorkspaceSkillDetail(@RequestBody WorkspaceSkillQo request) {
+        try {
+            if (request == null) {
+                return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
+            }
+            String resolvedUserCode = StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
+                : CurrentUserHolder.getCurrentUserCode();
+            Long resolvedResourceId = request.getResourceId() == null
+                ? suasSuperassistApplicationService.resolveCurrentUserDefaultDigitalEmployeeId()
+                : request.getResourceId();
+            ByClawSkillDto data = byClawSkillQueryApplicationService.getWorkspaceSkillDetail(resolvedUserCode,
+                resolvedResourceId, request.getSkillPath());
+            return ResponseUtil.successResponse(I18nUtil.get("byclaw.workspace.skill.detail.query.success"), data);
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("getWorkspaceSkillDetail failed, userCode={}, resourceId={}, skillPath={}",
+                request == null ? null : request.getUserCode(), request == null ? null : request.getResourceId(),
+                request == null ? null : request.getSkillPath(), e);
+            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
+                : I18nUtil.get("byclaw.workspace.skill.detail.query.failed"));
+        }
+    }
+
+    /**
+     * 分享目录技能前，预检查资源化是否会覆盖当前用户个人技能。
+     */
+    @PostMapping("/checkWorkspaceSkillShareConflicts")
+    public ResponseUtil<ObjectZipImportResult> checkWorkspaceSkillShareConflicts(@RequestBody WorkspaceSkillQo request) {
+        try {
+            if (request == null) {
+                return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
+            }
+            String resolvedUserCode = StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
+                : CurrentUserHolder.getCurrentUserCode();
+            Long resolvedResourceId = request.getResourceId() == null
+                ? suasSuperassistApplicationService.resolveCurrentUserDefaultDigitalEmployeeId()
+                : request.getResourceId();
+            ObjectZipImportResult data = byClawSkillResourceApplicationService.previewWorkspaceSkillShareConflicts(
+                resolvedUserCode, resolvedResourceId, request.getSkillPath());
+            return ResponseUtil.successResponse(I18nUtil.get("byclaw.skill.import.conflict.query.success"), data);
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("checkWorkspaceSkillShareConflicts failed, userCode={}, resourceId={}, skillPath={}",
+                request == null ? null : request.getUserCode(), request == null ? null : request.getResourceId(),
+                request == null ? null : request.getSkillPath(), e);
+            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
+                : I18nUtil.get("byclaw.skill.import.conflict.query.failed"));
+        }
+    }
+
+    /**
+     * 将工作空间目录技能资源化为个人技能、绑定当前数字员工，并返回导入结果。
+     */
+    @PostMapping("/resourceizeWorkspaceSkill")
+    public ResponseUtil<ObjectZipImportResult> resourceizeWorkspaceSkill(@RequestBody WorkspaceSkillQo request) {
+        try {
+            if (request == null) {
+                return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
+            }
+            String resolvedUserCode = StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
+                : CurrentUserHolder.getCurrentUserCode();
+            Long resolvedResourceId = request.getResourceId() == null
+                ? suasSuperassistApplicationService.resolveCurrentUserDefaultDigitalEmployeeId()
+                : request.getResourceId();
+            ByClawSkillResourceApplicationService.SkillImportResult itemResult =
+                byClawSkillResourceApplicationService.resourceizeAndBindWorkspaceSkill(resolvedUserCode,
+                    resolvedResourceId, request.getSkillPath(), Boolean.TRUE.equals(request.getOverwriteConfirmed()));
+            ObjectZipImportResult data = byClawSkillResourceApplicationService.buildSingleSkillImportResult(itemResult);
+            return ResponseUtil.successResponse(I18nUtil.get("byclaw.workspace.skill.resourceize.success"), data);
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("resourceizeWorkspaceSkill failed, userCode={}, resourceId={}, skillPath={}",
+                request == null ? null : request.getUserCode(), request == null ? null : request.getResourceId(),
+                request == null ? null : request.getSkillPath(), e);
+            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
+                : I18nUtil.get("byclaw.workspace.skill.resourceize.failed"));
         }
     }
 
