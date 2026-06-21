@@ -11,19 +11,29 @@ import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
+import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelProtocol;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.ByaiAimodelDomainService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
+import com.iwhalecloud.byai.manager.dto.resource.SsResExtSkillDto;
 import com.iwhalecloud.byai.manager.entity.aimodel.ByaiAimodel;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.qo.aimodel.DefaultAiModelQo;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
+
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.slf4j.Logger;
@@ -46,6 +56,9 @@ public class SuasSuperassistApplicationService {
 
     @Autowired
     private SsResourceService ssResourceService;
+
+    @Autowired
+    private SsResExtSkillService ssResExtSkillService;
 
     @Autowired
     private ByaiAimodelDomainService byaiAimodelService;
@@ -168,6 +181,7 @@ public class SuasSuperassistApplicationService {
 
             String resourceCode = jsonObject.getString("resourceCode");
             String modelProtocol = jsonObject.getString("modelProtocol");
+            String relSkillCodes = jsonObject.getString("relSkillCodes");
 
             // 如果已经存在了，不再进行初始化
             SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
@@ -197,8 +211,9 @@ public class SuasSuperassistApplicationService {
             else {
 
                 // 其他类型数字员工设置默认模型
-                String resourceDesc = digitalEmployeeDTO.getResourceDesc();
-                digitalEmployeeDTO.setPrologue(this.buildPrologue(resourceDesc, modelProtocol));
+                String prologue = digitalEmployeeDTO.getPrologue();
+                digitalEmployeeDTO.setPrologue(this.buildPrologue(prologue, modelProtocol));
+                digitalEmployeeDTO.setSkills(this.buildJsonSkillByCode(relSkillCodes));
 
                 // 保存数字员工
                 digitalEmployeeApplicationService.saveDigitalEmployee(digitalEmployeeDTO);
@@ -209,19 +224,51 @@ public class SuasSuperassistApplicationService {
     }
 
     /**
+     * 构建关联技能
+     *
+     * @param relSkillCodes 关联技能
+     * @return String
+     */
+    private String buildJsonSkillByCode(String relSkillCodes) {
+
+        if (StringUtil.isEmpty(relSkillCodes)) {
+            return null;
+        }
+
+        String[] split = relSkillCodes.split(",");
+        List<SsResExtSkillDto> ssResExtSkills = ssResExtSkillService.findBySkillCodes(Arrays.asList(split));
+
+        List<Map<String, Object>> skillsList = new ArrayList<>();
+        for (SsResExtSkillDto ssResExtSkillDto : ssResExtSkills) {
+            Map<String, Object> objectMap = new HashMap<>();
+            skillsList.add(objectMap);
+
+            objectMap.put("resourceId", ssResExtSkillDto.getResourceId());
+            objectMap.put("skillCode", ssResExtSkillDto.getResourceCode());
+            SsResExtSkill ssResExtSkill = ssResExtSkillDto.getSsResExtSkill();
+            if (ssResExtSkill == null) {
+                continue;
+            }
+
+            objectMap.put("skillType", ssResExtSkill.getSkillType());
+            objectMap.put("skillUrl", ssResExtSkill.getSkillUrl());
+            objectMap.put("versionUrl", "/byaiService/tool/getSkillVersion?skillId=" + ssResExtSkill.getResourceId());
+        }
+
+        return JSON.toJSONString(skillsList);
+    }
+
+    /**
      * 设置其他初始化数字员工模型信息
      *
-     * @param resourceDesc 描述
+     * @param prologue 描述
      * @param modelProtocol 默认模型协议
      * @return String
      */
-    private String buildPrologue(String resourceDesc, String modelProtocol) {
-        AgentPrologueDto prologue = new AgentPrologueDto();
-        prologue.setDescText(resourceDesc);
-        prologue.setRole(resourceDesc);
-        prologue.setBackground(resourceDesc);
-        prologue.setModelInfo(this.buildDefaultModelInfo(modelProtocol));
-        return JSON.toJSONString(prologue);
+    private String buildPrologue(String prologue, String modelProtocol) {
+        AgentPrologueDto agentPrologueDto = JSON.parseObject(prologue, AgentPrologueDto.class);
+        agentPrologueDto.setModelInfo(this.buildDefaultModelInfo(modelProtocol));
+        return JSON.toJSONString(agentPrologueDto);
     }
 
     /**
