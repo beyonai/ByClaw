@@ -4,6 +4,7 @@ import {
   DownOutlined,
   FileTextOutlined,
   GlobalOutlined,
+  KeyOutlined,
   LockOutlined,
   MailOutlined,
   RightOutlined,
@@ -22,12 +23,13 @@ import { getPublicPath } from '@/utils';
 import classNames from 'classnames';
 import PasswordModal from './components/PasswordModal';
 import PersonalEmailSettings from './components/PersonalEmailSettings';
+import PersonalParamSettings from './components/PersonalParamSettings';
 import styles from './index.module.less';
 
 const { Option } = Select;
 const { Text } = Typography;
 
-type SettingsMenuKey = 'general' | 'email';
+type SettingsMenuKey = 'general' | 'personalParams' | 'email';
 type VersionInfo = {
   version: string;
   branch: string;
@@ -256,6 +258,22 @@ const Settings: React.FC = () => {
     </>
   );
 
+  const settingsTitleIdMap: Record<SettingsMenuKey, string> = {
+    general: 'settings.general',
+    personalParams: 'settings.personalParams',
+    email: 'settings.personalEmail',
+  };
+
+  const renderActiveSettings = () => {
+    if (activeMenu === 'general') {
+      return renderGeneralSettings();
+    }
+    if (activeMenu === 'personalParams') {
+      return <PersonalParamSettings />;
+    }
+    return <PersonalEmailSettings />;
+  };
+
   return (
     <div className={styles.settingsPage}>
       <aside className={styles.settingsSider}>
@@ -279,6 +297,11 @@ const Settings: React.FC = () => {
               label: intl.formatMessage({ id: 'settings.general' }),
             },
             {
+              key: 'personalParams',
+              icon: <KeyOutlined />,
+              label: intl.formatMessage({ id: 'settings.personalParams' }),
+            },
+            {
               key: 'email',
               icon: <MailOutlined />,
               label: intl.formatMessage({ id: 'settings.personalEmail' }),
@@ -290,12 +313,10 @@ const Settings: React.FC = () => {
       <main className={styles.settingsMain}>
         <div className={styles.settingsContent}>
           <span className={styles.settingsTitle}>
-            {activeMenu === 'general'
-              ? intl.formatMessage({ id: 'settings.general' })
-              : intl.formatMessage({ id: 'settings.personalEmail' })}
+            {intl.formatMessage({ id: settingsTitleIdMap[activeMenu] })}
           </span>
 
-          {activeMenu === 'general' ? renderGeneralSettings() : <PersonalEmailSettings />}
+          {renderActiveSettings()}
         </div>
 
         {showPassword && (
