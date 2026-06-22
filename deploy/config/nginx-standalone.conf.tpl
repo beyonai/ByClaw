@@ -32,17 +32,30 @@ server {
 
     {{BACKEND_VARS}}
 
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|json)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
     location /beyond {
+        alias /usr/share/nginx/html;
+        index index.html index.htm;
+        try_files $uri $uri/ /index.html;
+        absolute_redirect off;
+
         if ($request_filename ~* .*\.(?:htm|html)$) {
             add_header Cache-Control "no-cache, must-revalidate, proxy-revalidate";
         }
+
         if ($uri ~* "\.[0-9a-f]{8}\.(async\.|chunk\.)?(js|css)$") {
+            expires 1y;
             add_header Cache-Control "public, max-age=31536000, immutable";
         }
-        alias   /usr/share/nginx/html;
-        index  index.html index.htm;
-        try_files $uri $uri/ /index.html;
-        absolute_redirect off;
+
+        if ($uri ~* "\.(js|css)$") {
+            expires 1y;
+            add_header Cache-Control "public, max-age=31536000";
+        }
     }
 
     location /v1/sandboxes {
