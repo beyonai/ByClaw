@@ -175,6 +175,9 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
     if (!isNil(initialValue)) {
       try {
         initialValue = dayjs(initialValue as string | number, defaultFormat);
+        if (!(initialValue as dayjs.Dayjs).isValid()) {
+          initialValue = undefined;
+        }
       } catch (e) {
         console.error(e);
       }
@@ -185,7 +188,7 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
 
   useEffect(() => {
     if (!name) return;
-
+    console.log('initialValue', initialValue, fieldValue);
     const currentValue = form.getFieldValue(name);
     const shouldSync = fieldValue !== undefined || !form.isFieldTouched(name);
 
