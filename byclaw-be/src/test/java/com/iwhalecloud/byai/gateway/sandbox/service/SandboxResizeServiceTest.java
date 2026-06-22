@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
+import com.iwhalecloud.byai.gateway.sandbox.client.model.ResizeSandboxResponse;
 import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceProfileEntityMapper;
@@ -123,7 +124,7 @@ class SandboxResizeServiceTest {
             .thenReturn(Optional.of(spec("s")));
         SandboxLaunchData launchData = new SandboxLaunchData();
         launchData.setSandboxId("sandbox-2");
-        when(fixture.sandboxService.restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null))
+        when(fixture.sandboxService.restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null, "openclaw"))
             .thenReturn(launchData);
 
         SsSandboxResizeRecord result = fixture.service.handleResizeRequest(Map.of(
@@ -137,7 +138,7 @@ class SandboxResizeServiceTest {
         assertThat(result.getStatus()).isEqualTo("SUCCESS");
         assertThat(result.getSuccess()).isEqualTo(1);
         verify(fixture.sandboxService).savePreferredServiceKey("user001", "openclaw-s");
-        verify(fixture.sandboxService).restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null);
+        verify(fixture.sandboxService).restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null, "openclaw");
         verify(fixture.openSandboxClient, never()).resizeSandbox(any(), any());
     }
 
@@ -152,7 +153,7 @@ class SandboxResizeServiceTest {
             .thenReturn(Optional.of(spec("m")));
         SandboxLaunchData launchData = new SandboxLaunchData();
         launchData.setSandboxId("sandbox-2");
-        when(fixture.sandboxService.restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null))
+        when(fixture.sandboxService.restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null, "openclaw"))
             .thenReturn(launchData);
 
         SsSandboxResizeRecord result = fixture.service.handlePrometheusAlert(prometheusPayload(Map.of(
@@ -168,7 +169,7 @@ class SandboxResizeServiceTest {
         assertThat(result.getResizeType()).isEqualTo("RECOVERY_RESTART");
         assertThat(result.getToProfileKey()).isEqualTo("m");
         verify(fixture.sandboxService).savePreferredServiceKey("user001", "openclaw-m");
-        verify(fixture.sandboxService).restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null);
+        verify(fixture.sandboxService).restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null, "openclaw");
         verify(fixture.openSandboxClient, never()).resizeSandbox(any(), any());
     }
 
@@ -183,7 +184,7 @@ class SandboxResizeServiceTest {
             .thenReturn(Optional.of(spec("m")));
         SandboxLaunchData launchData = new SandboxLaunchData();
         launchData.setSandboxId("sandbox-1");
-        when(fixture.sandboxService.restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null))
+        when(fixture.sandboxService.restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null, "openclaw"))
             .thenReturn(launchData);
 
         SsSandboxResizeRecord result = fixture.service.handlePrometheusAlert(prometheusPayload(Map.of(
@@ -199,8 +200,72 @@ class SandboxResizeServiceTest {
         assertThat(result.getSuccess()).isEqualTo(0);
         assertThat(result.getErrorMessage()).contains("reused the old sandbox id");
         verify(fixture.sandboxService).savePreferredServiceKey("user001", "openclaw-m");
-        verify(fixture.sandboxService).restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null);
+        verify(fixture.sandboxService).restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null, "openclaw");
         verify(fixture.openSandboxClient, never()).resizeSandbox(any(), any());
+    }
+
+    @Test
+    void handleResizeRequest_cleansOldRemoteWhenResizeReturnsNewSandboxId() {
+        SandboxFixture fixture = newFixture();
+        SsSandboxRecord record = runningRecord("s");
+        when(fixture.sandboxRecordMapper.selectLatestBySandboxId("user001", "openclaw", "sandbox-1"))
+            .thenReturn(record);
+        when(fixture.profileEntityMapper.selectEnabledProfiles("openclaw")).thenReturn(profiles("s", "m"));
+        when(fixture.specRepository.findByServiceKeyAndProfile("openclaw", "m"))
+            .thenReturn(Optional.of(spec("m")));
+        when(fixture.sandboxRecordMapper.claimResize(eq(1L), eq("s"), eq("m"), eq("PROCESSING"),
+            any(Date.class), any(), isNull(), eq("s"), eq("m"), isNull(), any(Date.class), eq(3)))
+            .thenReturn(1);
+        ResizeSandboxResponse response = new ResizeSandboxResponse();
+        response.setSandboxId("sandbox-2");
+        when(fixture.openSandboxClient.resizeSandbox(eq("sandbox-1"), any())).thenReturn(response);
+        when(fixture.sandboxRecordMapper.updateResizeSuccess(eq(1L), eq("sandbox-2"), isNull(), isNull(), eq("m"),
+            any(), any(), eq("SUCCESS"), any(Date.class), any(), any(), eq(1), eq("s"), eq("m"), isNull(), eq(3)))
+            .thenReturn(1);
+
+        SsSandboxResizeRecord result = fixture.service.handleResizeRequest(Map.of(
+            "userCode", "user001",
+            "sandboxType", "openclaw",
+            "sandboxId", "sandbox-1",
+            "reasonCode", "metrics.memory.high",
+            "triggerSource", "PROMETHEUS_ALERT"
+        ));
+
+        assertThat(result.getStatus()).isEqualTo("SUCCESS");
+        verify(fixture.sandboxService).cleanupRemoteSandboxQuietly("user001", "openclaw", "sandbox-1",
+            "resize-replaced");
+    }
+
+    @Test
+    void handleResizeRequest_cleansReturnedRemoteWhenResizeWritebackIsStale() {
+        SandboxFixture fixture = newFixture();
+        SsSandboxRecord record = runningRecord("s");
+        when(fixture.sandboxRecordMapper.selectLatestBySandboxId("user001", "openclaw", "sandbox-1"))
+            .thenReturn(record);
+        when(fixture.profileEntityMapper.selectEnabledProfiles("openclaw")).thenReturn(profiles("s", "m"));
+        when(fixture.specRepository.findByServiceKeyAndProfile("openclaw", "m"))
+            .thenReturn(Optional.of(spec("m")));
+        when(fixture.sandboxRecordMapper.claimResize(eq(1L), eq("s"), eq("m"), eq("PROCESSING"),
+            any(Date.class), any(), isNull(), eq("s"), eq("m"), isNull(), any(Date.class), eq(3)))
+            .thenReturn(1);
+        ResizeSandboxResponse response = new ResizeSandboxResponse();
+        response.setSandboxId("sandbox-2");
+        when(fixture.openSandboxClient.resizeSandbox(eq("sandbox-1"), any())).thenReturn(response);
+        when(fixture.sandboxRecordMapper.updateResizeSuccess(eq(1L), eq("sandbox-2"), isNull(), isNull(), eq("m"),
+            any(), any(), eq("SUCCESS"), any(Date.class), any(), any(), eq(1), eq("s"), eq("m"), isNull(), eq(3)))
+            .thenReturn(0);
+
+        SsSandboxResizeRecord result = fixture.service.handleResizeRequest(Map.of(
+            "userCode", "user001",
+            "sandboxType", "openclaw",
+            "sandboxId", "sandbox-1",
+            "reasonCode", "metrics.memory.high",
+            "triggerSource", "PROMETHEUS_ALERT"
+        ));
+
+        assertThat(result.getStatus()).isEqualTo("SKIPPED_STALE");
+        verify(fixture.sandboxService).cleanupRemoteSandboxQuietly("user001", "openclaw", "sandbox-2",
+            "resize-stale-writeback");
     }
 
     @Test
@@ -230,7 +295,7 @@ class SandboxResizeServiceTest {
         assertThat(auditCaptor.getValue().getIdempotencyKey()).startsWith("sandbox-ops-incident:");
         verifyNoInteractions(fixture.openSandboxClient);
         verify(fixture.sandboxService, never()).savePreferredServiceKey(any(), any());
-        verify(fixture.sandboxService, never()).restartSandboxAfterRemoteExitWithoutWait(any(), any(), any());
+        verify(fixture.sandboxService, never()).restartSandboxAfterRemoteExitWithoutWait(any(), any(), any(), any());
     }
 
     @Test
@@ -259,7 +324,7 @@ class SandboxResizeServiceTest {
         verify(fixture.resizeRecordMapper, never()).insert(any());
         verifyNoInteractions(fixture.openSandboxClient);
         verify(fixture.sandboxService, never()).savePreferredServiceKey(any(), any());
-        verify(fixture.sandboxService, never()).restartSandboxAfterRemoteExitWithoutWait(any(), any(), any());
+        verify(fixture.sandboxService, never()).restartSandboxAfterRemoteExitWithoutWait(any(), any(), any(), any());
     }
 
     @Test

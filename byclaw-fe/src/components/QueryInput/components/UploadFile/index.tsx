@@ -49,10 +49,89 @@ const UploadFile = forwardRef<UploadFileRef, IProps>((props, ref) => {
   const intl = useIntl();
   const getNanoid = React.useRef<(size?: number) => string>(customAlphabet('abcdefghijklmnopqrstuvwxyz1234567890', 10));
   const lastInvalidFileListKeyRef = React.useRef('');
+  const scheduledFileListKeyRef = React.useRef('');
+  const uploadBatchTimerRef = React.useRef<number | null>(null);
   const uploadFileTip = intl.formatMessage({ id: 'queryInput.tooltip.uploadFile' });
 
   const getFileListKey = (files: File[]) => {
     return files.map((file) => `${file.name}-${file.size}-${file.lastModified}`).join('|');
+  };
+
+  const onUpload = async (files: File[]) => {
+    const validFiles = files.filter((file) => validateAccept(file, accept));
+    if (!validFiles.length) return;
+
+    const uploadItems = validFiles
+      .map((file) => {
+        const blobUrl = URL.createObjectURL(file as File);
+        const payload: IFile = {
+          uid: getNanoid.current(),
+          file,
+          downloadUrl: blobUrl,
+          status: 'uploading',
+          fileType: 'file',
+        };
+        return {
+          file,
+          payload,
+        };
+      })
+      .filter(({ payload }) => onCreate({ ...payload }));
+
+    if (!uploadItems.length) return;
+
+    const formData = new FormData();
+    uploadItems.forEach(({ file }) => {
+      formData.append('files', file);
+    });
+    Object.keys(extendsPayload || {}).forEach((keyName) => {
+      formData.append(keyName, `${extendsPayload[keyName] || ''}`);
+    });
+
+    try {
+      const data: {
+        sessionId?: string;
+        sessionDatasetid?: string;
+        rebuildFileList?: IQueryFile[];
+        uploadItems?: Partial<IQueryFile>[];
+      } = await uploadFiles(formData);
+
+      const { rebuildFileList = [], uploadItems: responseUploadItems = [], sessionId } = data || {};
+      const uploadedFileList = !isEmpty(rebuildFileList) ? rebuildFileList : responseUploadItems;
+
+      const firstUploadedFile = uploadItems[0]?.file;
+      if (sessionId && firstUploadedFile && setSessionId) {
+        setSessionId(sessionId, firstUploadedFile);
+      }
+
+      if (!isEmpty(uploadedFileList)) {
+        uploadItems.forEach(({ payload }, index) => {
+          onUpdate({
+            ...payload,
+            queryFile: uploadedFileList[index] || head(uploadedFileList),
+            status: 'done',
+          });
+        });
+      }
+    } catch (e: any) {
+      uploadItems.forEach(({ payload }) => {
+        onRemove({ ...payload });
+      });
+    }
+  };
+
+  const scheduleUpload = (files: File[]) => {
+    const fileListKey = getFileListKey(files);
+    if (scheduledFileListKeyRef.current === fileListKey) return;
+    scheduledFileListKeyRef.current = fileListKey;
+    if (uploadBatchTimerRef.current !== null) {
+      window.clearTimeout(uploadBatchTimerRef.current);
+    }
+    uploadBatchTimerRef.current = window.setTimeout(() => {
+      scheduledFileListKeyRef.current = '';
+      uploadBatchTimerRef.current = null;
+      onUpload(files);
+    }, 0);
   };
 
   const handleBeforeUpload: UploadProps['beforeUpload'] = (file, fileList) => {
@@ -70,66 +149,24 @@ const UploadFile = forwardRef<UploadFileRef, IProps>((props, ref) => {
     }
 
     lastInvalidFileListKeyRef.current = '';
-    return true;
+    scheduleUpload(files);
+    return Upload.LIST_IGNORE;
   };
 
-  const onUpload = async (file: File) => {
-    if (!validateAccept(file, accept)) {
-      message.error(`${intl.formatMessage({ id: 'common.supportedFileTypes' })}${accept}`);
-      return;
-    }
-    const blobUrl = URL.createObjectURL(file as File);
-    const payload: any = {
-      uid: getNanoid.current(),
-      file,
-      downloadUrl: blobUrl,
-      status: 'uploading',
-      fileType: 'file',
+  React.useEffect(() => {
+    return () => {
+      if (uploadBatchTimerRef.current !== null) {
+        window.clearTimeout(uploadBatchTimerRef.current);
+      }
     };
-
-    const formData = new FormData();
-    formData.append('files', file);
-    Object.keys(extendsPayload || {}).forEach((keyName) => {
-      formData.append(keyName, `${extendsPayload[keyName] || ''}`);
-    });
-
-    const canUpload = onCreate({ ...payload });
-    if (!canUpload) return;
-
-    try {
-      const data: {
-        sessionId?: string;
-        sessionDatasetid?: string;
-        rebuildFileList?: IQueryFile[];
-        uploadItems?: Partial<IQueryFile>[];
-      } = await uploadFiles(formData);
-
-      const { rebuildFileList = [], uploadItems = [], sessionId } = data || {};
-      const uploadedFileList = !isEmpty(rebuildFileList) ? rebuildFileList : uploadItems;
-
-      if (sessionId && setSessionId) {
-        setSessionId(sessionId, file);
-      }
-
-      if (!isEmpty(uploadedFileList)) {
-        onUpdate({
-          ...payload,
-          queryFile: head(uploadedFileList),
-          status: 'done',
-        });
-      }
-    } catch (e: any) {
-      // message.error(e.toString());
-      onRemove({ ...payload });
-    }
-  };
+  }, []);
 
   useImperativeHandle(ref, () => ({
     uploadFile: (file: File) => {
       if (!validateAccept(file, accept)) {
         return;
       }
-      onUpload(file);
+      onUpload([file]);
     },
   }));
 
@@ -145,7 +182,7 @@ const UploadFile = forwardRef<UploadFileRef, IProps>((props, ref) => {
       beforeUpload={handleBeforeUpload}
       customRequest={async (options) => {
         const { file } = options;
-        onUpload(file as File);
+        onUpload([file as File]);
       }}
     >
       {children || (

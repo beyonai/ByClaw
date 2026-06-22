@@ -28,6 +28,12 @@ interface BaseFormField {
   fieldValue?: FormFieldValue;
 }
 
+// 日期时间类型字段
+interface DateTimeFormField extends BaseFormField {
+  formType: 'date_time';
+  format?: string;
+}
+
 // object 类型字段，包含 children 二维数组
 interface ObjectFormField extends BaseFormField {
   formType: 'object';
@@ -95,6 +101,7 @@ interface TermSelectFormField extends BaseFormField {
 
 // 所有可能的表单字段联合类型
 type FormField =
+  | DateTimeFormField
   | ObjectFormField
   | ArrayFormField
   | InputFormField

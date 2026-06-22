@@ -247,6 +247,7 @@ public class SandboxResizeService {
                 audit.setSkipReason(message);
                 LOGGER.warn("沙箱扩缩容结果写回被跳过，recordId={}，sandboxId={}，fromProfile={}，toProfile={}，原因：{}",
                     record.getId(), record.getSandboxId(), fromProfileKey, resolvedToProfileKey, message);
+                cleanupResizeRemoteAfterStaleWrite(record, newSandboxId);
                 return audit;
             }
             resizeRecordMapper.updateResult(audit.getId(), STATUS_SUCCESS, 1, finishedAt, durationMs,
@@ -258,6 +259,7 @@ public class SandboxResizeService {
             audit.setOpensandboxRequestId(requestId);
             audit.setOpensandboxResponse(responseJson);
 
+            cleanupReplacedRemoteAfterResize(record, newSandboxId);
             LOGGER.info("沙箱扩缩容成功，recordId={}，sandboxId={}，fromProfile={}，toProfile={}，durationMs={}",
                 record.getId(), record.getSandboxId(), fromProfileKey, resolvedToProfileKey, durationMs);
             return audit;
@@ -278,6 +280,27 @@ public class SandboxResizeService {
                 record.getId(), record.getSandboxId(), resolvedToProfileKey, e.getMessage());
             return audit;
         }
+    }
+
+    private void cleanupReplacedRemoteAfterResize(SsSandboxRecord record, String newSandboxId) {
+        if (record == null || StringUtils.isAnyBlank(record.getSandboxId(), newSandboxId)
+            || StringUtils.equals(record.getSandboxId(), newSandboxId)) {
+            return;
+        }
+        sandboxService.cleanupRemoteSandboxQuietly(record.getUserCode(), record.getSandboxType(),
+            record.getSandboxId(), "resize-replaced");
+    }
+
+    private void cleanupResizeRemoteAfterStaleWrite(SsSandboxRecord record, String newSandboxId) {
+        if (record == null) {
+            return;
+        }
+        String sandboxIdToCleanup = StringUtils.defaultIfBlank(newSandboxId, record.getSandboxId());
+        if (StringUtils.isBlank(sandboxIdToCleanup)) {
+            return;
+        }
+        sandboxService.cleanupRemoteSandboxQuietly(record.getUserCode(), record.getSandboxType(),
+            sandboxIdToCleanup, "resize-stale-writeback");
     }
 
     public String buildBoundaryBlacklistMetrics() {
@@ -698,7 +721,7 @@ public class SandboxResizeService {
         try {
             sandboxService.savePreferredServiceKey(record.getUserCode(), preferredServiceKey);
             SandboxLaunchData launchData = sandboxService.restartSandboxAfterRemoteExitWithoutWait(
-                record.getUserCode(), record.getResourceId(), null);
+                record.getUserCode(), record.getResourceId(), null, serviceType);
             if (launchData == null || StringUtils.isBlank(launchData.getSandboxId())) {
                 throw new IllegalStateException("recovery restart did not return a sandbox id");
             }
@@ -759,7 +782,7 @@ public class SandboxResizeService {
         try {
             sandboxService.savePreferredServiceKey(record.getUserCode(), preferredServiceKey);
             SandboxLaunchData launchData = sandboxService.restartSandboxAfterRemoteExitWithoutWait(
-                record.getUserCode(), record.getResourceId(), null);
+                record.getUserCode(), record.getResourceId(), null, serviceType);
             Date finishedAt = new Date();
             long durationMs = System.currentTimeMillis() - startMillis;
             String responseJson = toJsonOrNull(launchData);

@@ -1,5 +1,14 @@
-import { QueueNames, WorkerRegistry, createRedis } from "@byclaw/by-framework";
-import { callAgent, createRedisCallAgentDeps } from "@byclaw/by-framework";
+import {
+  QueueNames,
+  WorkerRegistry,
+  buildAskAgentPublishArtifacts,
+  createRedis,
+  createRedisCallAgentDeps,
+  publishWithExecutionRecord,
+  resolveCallAgentPublishIds,
+  type CallAgentPublishInput,
+  type CallAgentPublishResult,
+} from "@byclaw/by-framework";
 import type { Redis } from "ioredis";
 import type { Capability, Dict, ExecutorFailure, ExecutorResponse } from "./types.js";
 import { asString } from "./types.js";
@@ -50,6 +59,7 @@ export type ExecuteViaCallAgentInput = {
   parentMessageId: string;
   toolCallId?: string;
   langfuseParentObservationId?: string;
+  langfuseTraceId?: string;
 };
 
 export async function executeViaCallAgent(
@@ -80,13 +90,73 @@ export async function executeViaCallAgent(
       input.defaultParentMessageId ||
       asString(input.metadata?.parent_message_id) ||
       `parent-${input.traceId || startedAt}`;
+    const langfuseTraceId = asString(input.langfuseTraceId);
+    const dispatchTraceId = langfuseTraceId || input.traceId;
+    const originalTraceId = dispatchTraceId !== input.traceId ? input.traceId : "";
 
-    const metadata = {
+    const baseMetadata: Dict = {
       ...(input.metadata || {}),
       toolCallId: input.toolCallId,
-      ...(input.langfuseParentObservationId
-        ? { langfuseParentObservationId: input.langfuseParentObservationId }
-        : {}),
+    };
+    if (originalTraceId) {
+      baseMetadata.byclaw_original_trace_id = originalTraceId;
+      baseMetadata.channel_trace_id ??= originalTraceId;
+      baseMetadata.openclaw_trace_id ??= originalTraceId;
+    }
+
+    const metadata = withLangfuseSessionAliases(
+      withLangfuseTraceAliases(
+        withLangfuseParentObservationAliases(
+          baseMetadata,
+          input.langfuseParentObservationId,
+        ),
+        langfuseTraceId,
+      ),
+      input.sessionId,
+      { includePlainSessionAliases: true },
+    );
+    const basePayload: Dict = { ...input.payload };
+    if (originalTraceId) {
+      basePayload.byclaw_original_trace_id = originalTraceId;
+      basePayload.channel_trace_id ??= originalTraceId;
+      basePayload.openclaw_trace_id ??= originalTraceId;
+    }
+    const payload = withLangfuseSessionAliases(
+      withLangfuseTraceAliases(
+        withLangfuseParentObservationAliases(basePayload, input.langfuseParentObservationId),
+        langfuseTraceId,
+      ),
+      input.sessionId,
+    );
+
+    const langfuseSessionId = asString(input.sessionId);
+
+    const langfuseContext = withLangfuseSessionAliases(
+      withLangfuseTraceAliases(
+        withLangfuseParentObservationAliases(
+          originalTraceId ? { byclaw_original_trace_id: originalTraceId } : {},
+          input.langfuseParentObservationId,
+        ),
+        langfuseTraceId,
+      ),
+      langfuseSessionId,
+      { includePlainSessionAliases: true },
+    );
+
+    const payloadLangfuseContext = withLangfuseSessionAliases(
+      withLangfuseTraceAliases(
+        withLangfuseParentObservationAliases(
+          originalTraceId ? { byclaw_original_trace_id: originalTraceId } : {},
+          input.langfuseParentObservationId,
+        ),
+        langfuseTraceId,
+      ),
+      langfuseSessionId,
+    );
+
+    const commandLangfuseContext = {
+      header: langfuseContext,
+      extraPayload: payloadLangfuseContext,
     };
 
     logBaiyingRequest(input.logger, "call_agent.dispatch", {
@@ -98,6 +168,7 @@ export async function executeViaCallAgent(
       source_agent_type: sourceAgentType,
       session_id: input.sessionId,
       trace_id: input.traceId,
+      dispatch_trace_id: dispatchTraceId,
       default_parent_message_id: defaultParentMessageId,
       wait_for_reply: false,
       probe_agent_type: input.probeAgentType ?? false,
@@ -105,56 +176,39 @@ export async function executeViaCallAgent(
       user_name: input.userName ?? nonEmptyEnv("USER_NAME"),
       task_group_id: input.taskGroupId ?? "",
       langfuse_parent_observation_id: input.langfuseParentObservationId,
+      langfuse_trace_id: langfuseTraceId,
+      langfuse_session_id: langfuseSessionId,
       metadata,
       content: input.content,
-      payload: input.payload,
+      payload,
       sync_timeout_sec: input.syncTimeoutSec,
       sync_interval_sec: input.syncIntervalSec,
       target: input.target,
     });
 
-    const callAgentInput = {
-      sessionId: input.sessionId,
-      traceId: input.traceId,
-      sourceAgentType,
-      defaultParentMessageId,
-      targetAgentType: input.targetAgentType,
-      content: input.content,
-      payload: input.payload,
-      waitForReply: false,
-      userCode: input.userCode ?? nonEmptyEnv("USER_CODE"),
-      userName: input.userName ?? nonEmptyEnv("USER_NAME"),
-      taskGroupId: input.taskGroupId,
-      metadata,
-      probeAgentType: input.probeAgentType ?? false,
-      ...(input.langfuseParentObservationId
-        ? { langfuseParentObservationId: input.langfuseParentObservationId }
-        : {}),
-    };
-    const result = await callAgent(deps, callAgentInput as Parameters<typeof callAgent>[1]);
-
-    const commandPayload = {
-      action_type: "CALL_AGENT",
-      header: {
-        message_id: result.messageId,
-        session_id: input.sessionId,
-        trace_id: input.traceId,
-        source_agent_id: sourceAgentType,
-        target_agent_type: input.targetAgentType,
-        parent_message_id: result.parentMessageId ?? defaultParentMessageId,
-        task_group_id: input.taskGroupId ?? "",
-        langfuse_parent_observation_id: input.langfuseParentObservationId ?? "",
-        user_code: input.userCode ?? nonEmptyEnv("USER_CODE") ?? "",
-        user_name: input.userName ?? nonEmptyEnv("USER_NAME") ?? "",
-        metadata,
-      },
-      body: {
+    const dispatch = await publishCallAgentWithLangfuseContext({
+      deps,
+      input: {
+        sessionId: input.sessionId,
+        traceId: dispatchTraceId,
+        sourceAgentType,
+        defaultParentMessageId,
+        targetAgentType: input.targetAgentType,
         content: input.content,
-        wait_for_reply: false,
-        extra_payload: input.payload,
+        payload,
+        waitForReply: false,
+        userCode: input.userCode ?? nonEmptyEnv("USER_CODE"),
+        userName: input.userName ?? nonEmptyEnv("USER_NAME"),
+        taskGroupId: input.taskGroupId,
+        metadata,
+        probeAgentType: input.probeAgentType ?? false,
       },
-    };
-    logBaiyingRequest(input.logger, "call_agent.command_payload", commandPayload);
+      langfuseContext: commandLangfuseContext,
+    });
+    const result = dispatch.result;
+    if (dispatch.commandPayload) {
+      logBaiyingRequest(input.logger, "call_agent.command_payload", dispatch.commandPayload);
+    }
 
     if (result.status !== "QUEUED") {
       return makeError(
@@ -171,7 +225,7 @@ export async function executeViaCallAgent(
     const ack: CallAgentExecutionAck = {
       message_id: result.messageId,
       parent_message_id: result.parentMessageId,
-      trace_id: input.traceId,
+      trace_id: dispatchTraceId,
       session_id: input.sessionId,
       target_agent_type: result.targetAgentType,
       stream_name: QueueNames.ctrl_stream(input.targetAgentType),
@@ -193,7 +247,7 @@ export async function executeViaCallAgent(
     const poll = await pollDocResult({
       redis: ctx.redis,
       sessionId: input.sessionId,
-      traceId: input.traceId,
+      traceId: dispatchTraceId,
       messageId: result.messageId,
       timeoutSec: input.syncTimeoutSec,
       intervalSec: input.syncIntervalSec,
@@ -209,7 +263,7 @@ export async function executeViaCallAgent(
       if (poll.event_type === "timeout") {
         diagnosis = await diagnoseTraceInSessionStreams({
           redis: ctx.redis,
-          traceId: input.traceId,
+          traceId: dispatchTraceId,
         }).catch(() => undefined);
       }
       return makeError("CALL_AGENT_SYNC_FAILED", poll.text || "callAgent sync call failed", {
@@ -241,6 +295,132 @@ export async function executeViaCallAgent(
   }
 }
 
+function withLangfuseParentObservationAliases(
+  value: Dict,
+  langfuseParentObservationId?: string,
+): Dict {
+  if (!langfuseParentObservationId) {
+    return value;
+  }
+  return {
+    ...value,
+    langfuseParentObservationId,
+    langfuse_parent_observation_id: langfuseParentObservationId,
+    parentObservationId: langfuseParentObservationId,
+    parent_observation_id: langfuseParentObservationId,
+  };
+}
+
+function withLangfuseSessionAliases(
+  value: Dict,
+  langfuseSessionId?: string,
+  options: { includePlainSessionAliases?: boolean } = {},
+): Dict {
+  if (!langfuseSessionId) {
+    return value;
+  }
+  return {
+    ...value,
+    ...(options.includePlainSessionAliases
+      ? { sessionId: langfuseSessionId, session_id: langfuseSessionId }
+      : {}),
+    langfuseSessionId,
+    langfuse_session_id: langfuseSessionId,
+    "langfuse.session.id": langfuseSessionId,
+    "session.id": langfuseSessionId,
+  };
+}
+
+function withLangfuseTraceAliases(value: Dict, langfuseTraceId?: string): Dict {
+  if (!langfuseTraceId) {
+    return value;
+  }
+  return {
+    ...value,
+    langfuseTraceId,
+    langfuse_trace_id: langfuseTraceId,
+  };
+}
+
+async function publishCallAgentWithLangfuseContext(params: {
+  deps: ReturnType<typeof createRedisCallAgentDeps>;
+  input: CallAgentPublishInput;
+  langfuseContext: { header: Dict; extraPayload: Dict };
+}): Promise<{ result: CallAgentPublishResult; commandPayload?: Record<string, unknown> }> {
+  if (params.input.probeAgentType ?? true) {
+    const probe = await params.deps.probe.probeAgentTypeOnline(params.input.targetAgentType);
+    if (!probe.ok) {
+      return {
+        result: {
+          status: "FAILED",
+          messageId: "",
+          parentMessageId: params.input.parentMessageId || params.input.defaultParentMessageId,
+          targetAgentType: params.input.targetAgentType,
+          error: probe.error ?? `No alive worker found with agent type '${params.input.targetAgentType}'`,
+          error_code: probe.error_code ?? "AGENT_TYPE_NOT_FOUND",
+        },
+      };
+    }
+  }
+
+  const { messageId, parentMessageId, waitForReply } = resolveCallAgentPublishIds(params.input);
+  const artifacts = buildAskAgentPublishArtifacts(
+    params.input,
+    messageId,
+    parentMessageId,
+    waitForReply,
+    QueueNames,
+  );
+  const commandPayload = withCommandLangfuseContext(
+    artifacts.command.toDict(),
+    params.langfuseContext,
+  );
+  await publishWithExecutionRecord({
+    execution: params.deps.execution,
+    bus: params.deps.bus,
+    executionRecord: artifacts.executionRecord,
+    streamName: artifacts.ctrlStreamName,
+    serializedCommandJson: JSON.stringify(commandPayload),
+  });
+  return {
+    result: {
+      status: "QUEUED",
+      messageId,
+      parentMessageId,
+      targetAgentType: params.input.targetAgentType,
+      runtimeHint: waitForReply ? "suspend" : "transfer",
+    },
+    commandPayload,
+  };
+}
+
+function withCommandLangfuseContext(
+  commandPayload: Record<string, unknown>,
+  langfuseContext: { header: Dict; extraPayload: Dict },
+): Record<string, unknown> {
+  const header = isRecord(commandPayload.header) ? commandPayload.header : {};
+  const body = isRecord(commandPayload.body) ? commandPayload.body : {};
+  const extraPayload = isRecord(body.extra_payload) ? body.extra_payload : {};
+  return {
+    ...commandPayload,
+    header: {
+      ...header,
+      ...langfuseContext.header,
+    },
+    body: {
+      ...body,
+      extra_payload: {
+        ...extraPayload,
+        ...langfuseContext.extraPayload,
+      },
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Dict {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
 function createCallAgentContext(): { redis: Redis; registry: WorkerRegistry } {
   const config = readRedisConfig();
   const redis = createRedis({
@@ -249,14 +429,11 @@ function createCallAgentContext(): { redis: Redis; registry: WorkerRegistry } {
     db: config.db,
     username: config.username,
     password: config.password,
-  }) as Redis;
-  return {
-    redis,
-    registry: new WorkerRegistry(redis),
-  };
+  });
+  return { redis, registry: new WorkerRegistry(redis) };
 }
 
 function nonEmptyEnv(name: string): string | undefined {
-  const value = (process.env[name] ?? "").trim();
+  const value = process.env[name]?.trim();
   return value || undefined;
 }

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Form, Input, Select, Col, Dropdown, Tag } from 'antd';
-import { isString, concat, isEqual } from 'lodash';
+import { Form, Input, Select, Col, Dropdown, Tag, DatePicker } from 'antd';
+import { isString, concat, isEqual, isNil } from 'lodash';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import classnames from 'classnames';
+import dayjs from 'dayjs';
 
 import { buildFormFieldName } from '../utils';
 import TermSelectDropdown from './TermSelectDropdown';
@@ -94,7 +95,7 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
 
   let name: string | undefined = key;
   let rules: any[] | undefined = [{ required }];
-  let initialValue: string | number | (string | number)[] | undefined = fieldValue ?? defaultValue;
+  let initialValue: unknown = fieldValue ?? defaultValue;
   let comp = <Input disabled={myDisabled} />;
 
   if (['array', 'object'].includes(formType) && Array.isArray(children)) {
@@ -168,9 +169,26 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
     comp = <Select mode="tags" />;
   }
 
+  if (formType === 'date_time') {
+    const defaultFormat = (item?.format || 'YYYY-MM-DD').replace(/y/g, 'Y').replace(/d/g, 'D'); // 暂时前端处理日期格式
+    comp = <DatePicker format={{ format: defaultFormat }} showTime={/[hms]/i.test(defaultFormat)} />;
+    if (!isNil(initialValue)) {
+      try {
+        initialValue = dayjs(initialValue as string | number, defaultFormat);
+        if (!(initialValue as dayjs.Dayjs).isValid()) {
+          initialValue = undefined;
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    } else {
+      initialValue = undefined;
+    }
+  }
+
   useEffect(() => {
     if (!name) return;
-
+    console.log('initialValue', initialValue, fieldValue);
     const currentValue = form.getFieldValue(name);
     const shouldSync = fieldValue !== undefined || !form.isFieldTouched(name);
 
