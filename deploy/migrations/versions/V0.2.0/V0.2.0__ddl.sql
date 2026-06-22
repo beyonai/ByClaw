@@ -180,3 +180,44 @@ COMMENT ON COLUMN byai.ss_sandbox_resize_record.idempotency_key IS '扩缩容动
 COMMENT ON COLUMN byai.ss_sandbox_resize_record.skip_reason IS '扩缩容动作跳过原因';
 
 DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
+
+-- 个人中心-个人参数配置表
+-- 数据库保存密文，Redis 同步运行期明文缓存，供外部按用户 key 读取。
+CREATE TABLE IF NOT EXISTS byai.po_user_private_param (
+    param_id BIGINT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    param_key VARCHAR(128) NOT NULL,
+    param_value_cipher TEXT NOT NULL,
+    param_value_last4 VARCHAR(16),
+    description VARCHAR(512),
+    status VARCHAR(32) NOT NULL DEFAULT 'NORMAL',
+    create_by BIGINT,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_by BIGINT,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    delete_flag CHAR(1) NOT NULL DEFAULT '0'
+);
+
+COMMENT ON TABLE byai.po_user_private_param IS '个人中心-个人参数配置表';
+COMMENT ON COLUMN byai.po_user_private_param.param_id IS '个人参数主键ID';
+COMMENT ON COLUMN byai.po_user_private_param.user_id IS '所属用户ID';
+COMMENT ON COLUMN byai.po_user_private_param.param_key IS '参数名，环境变量格式';
+COMMENT ON COLUMN byai.po_user_private_param.param_value_cipher IS '参数值密文';
+COMMENT ON COLUMN byai.po_user_private_param.param_value_last4 IS '参数值后四位，用于前端提示';
+COMMENT ON COLUMN byai.po_user_private_param.description IS '参数说明';
+COMMENT ON COLUMN byai.po_user_private_param.status IS '参数状态，NORMAL正常，DISABLED停用';
+COMMENT ON COLUMN byai.po_user_private_param.create_by IS '创建人ID';
+COMMENT ON COLUMN byai.po_user_private_param.create_time IS '创建时间';
+COMMENT ON COLUMN byai.po_user_private_param.update_by IS '更新人ID';
+COMMENT ON COLUMN byai.po_user_private_param.update_time IS '更新时间';
+COMMENT ON COLUMN byai.po_user_private_param.delete_flag IS '逻辑删除标识，0未删除，1已删除';
+
+CREATE INDEX IF NOT EXISTS idx_po_user_private_param_user
+    ON byai.po_user_private_param (user_id, delete_flag, update_time DESC);
+
+CREATE INDEX IF NOT EXISTS idx_po_user_private_param_status
+    ON byai.po_user_private_param (user_id, delete_flag, status, update_time DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_key
+    ON byai.po_user_private_param (user_id, param_key)
+    WHERE delete_flag = '0';
