@@ -10,6 +10,7 @@ import { resolveChildAction } from "../resolve-action.js";
 import { validateParameters } from "../schema.js";
 import { logBaiyingRequest, type BaiyingEnhanceLogger } from "../debug-channel.js";
 import { getCommonGatewayMetadata } from "../doc-shared.js";
+import { applyPrivateEnvPlaceholders, redactPrivateParamValues } from "../../personal-params.js";
 
 function hasBinaryField(schema: unknown): boolean {
   if (!isRecord(schema) || !isRecord(schema.properties)) return false;
@@ -53,8 +54,10 @@ export async function executeToolkit(params: {
   session?: string;
   timeoutMs?: number;
   logger?: BaiyingEnhanceLogger;
+  privateParams?: Record<string, string>;
 }): Promise<ExecutorResponse> {
   const { capability } = params;
+  const requestParameters = applyPrivateEnvPlaceholders(params.parameters, params.privateParams, params.logger);
   const resourceId = String(capability.metadata?.resource_id ?? capability.name ?? "");
   const resolved = resolveChildAction({
     parentResourceId: resourceId,
@@ -70,12 +73,12 @@ export async function executeToolkit(params: {
     actionName: String(toolInfo.name),
     resourceId,
     resourceType: "TOOLKIT",
-    parameters: params.parameters,
+    parameters: requestParameters,
     rawSchema: toolInfo.input_schema,
   });
   if (validation) return validation;
 
-  const url = asString(toolInfo.url);
+  const url = applyPrivateEnvPlaceholders(asString(toolInfo.url), params.privateParams, params.logger);
   if (!url) {
     return makeError("TOOL_URL_NOT_FOUND", "Toolkit tool URL not found");
   }
@@ -85,11 +88,19 @@ export async function executeToolkit(params: {
     authContext: params.authContext,
     session: params.session,
   });
-  const mergedCustomHeaders = normalizeCustomHeaders(capability.metadata?.default_headers);
-  const toolHeaders = normalizeCustomHeaders(toolInfo.headers);
+  const mergedCustomHeaders = applyPrivateEnvPlaceholders(
+    normalizeCustomHeaders(capability.metadata?.default_headers),
+    params.privateParams,
+    params.logger,
+  );
+  const toolHeaders = applyPrivateEnvPlaceholders(
+    normalizeCustomHeaders(toolInfo.headers),
+    params.privateParams,
+    params.logger,
+  );
   Object.assign(headers, mergedCustomHeaders, toolHeaders);
   applyEnvAuthOverrides(headers);
-  const { request_headers } = getCommonGatewayMetadata(params.parameters);
+  const { request_headers } = getCommonGatewayMetadata(requestParameters);
   if (request_headers) {
     Object.assign(headers, request_headers);
   }
@@ -100,32 +111,32 @@ export async function executeToolkit(params: {
     resource_type: capability.resource_type,
     action: toolInfo.name,
     url,
-    payload: params.parameters,
+    payload: requestParameters,
     headers,
   });
 
   const result = useMultipart
     ? await postMultipartForm({
         url,
-        formData: await buildMultipartPayload(params.parameters),
+        formData: await buildMultipartPayload(requestParameters),
         headers,
         timeoutMs: params.timeoutMs ?? 30_000,
       })
     : await postJson({
         url,
-        payload: params.parameters,
+        payload: requestParameters,
         headers,
         timeoutMs: params.timeoutMs ?? 30_000,
       });
 
   if ("error" in result) {
-    const errorDetail = {
+    const errorDetail = redactPrivateParamValues({
       url,
       headers,
-      request_params: params.parameters,
+      request_params: requestParameters,
       error_code: result.error.error_code,
       error_message: result.error.error,
-    };
+    }, params.privateParams);
     return makeError(
       result.error.error_code,
       `Toolkit request failed: ${result.error.error}`,
@@ -136,14 +147,14 @@ export async function executeToolkit(params: {
   const { response, bodyText } = result;
 
   if (!response.ok) {
-    const errorDetail = {
+    const errorDetail = redactPrivateParamValues({
       url,
       headers,
-      request_params: params.parameters,
+      request_params: requestParameters,
       status: response.status,
       status_text: response.statusText,
       response_body: bodyText.slice(0, 4096),
-    };
+    }, params.privateParams);
     if (response.status === 401 || response.status === 403) {
       return makeError(
         "AUTH_EXPIRED",

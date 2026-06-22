@@ -13,6 +13,8 @@ import { createRedisJsonStore, setSharedRedisJsonStore } from "./redis-json-stor
 import { loadBaiyingRedisEnvDefaults } from "./redis-env.js";
 import { createBaiyingCallToolFactory } from "./baiying-call-tool.js";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
+import { loadAuthContext, resolveAuthFilePath } from "./executor/auth.js";
+import { loadPrivateParamsRuntime } from "./personal-params.js";
 
 function resolvePluginPath(api: OpenClawPluginApi, raw: string): string {
   if (path.isAbsolute(raw)) {
@@ -120,6 +122,31 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     (ctx) => baiyingCallToolFactory(ctx),
     { name: "baiying_call" },
   );
+
+  api.on("resolve_exec_env", async (event) => {
+    if (event.toolName !== "exec") {
+      return {};
+    }
+    try {
+      const authContext = await loadAuthContext(resolveAuthFilePath(pluginCfg.authFilePath));
+      const runtime = await loadPrivateParamsRuntime({
+        authContext,
+        logger: {
+          info: (message) => api.logger.info(message),
+          warn: (message) => api.logger.warn(message),
+          error: (message) => api.logger.error(message),
+        },
+      });
+      return runtime?.params ?? {};
+    } catch (err) {
+      api.logger.warn(
+        `baiying-enhance: resolve_exec_env private params skipped: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return {};
+    }
+  });
 
   registerManagedAgentModelHooks(api, {
     api,
