@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.resource.SsResExtSkillMapper">
+
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill">
+        <id column="resource_id" property="resourceId"/>
+        <result column="skill_type" property="skillType"/>
+        <result column="source_type" property="sourceType"/>
+        <result column="version" property="version"/>
+        <result column="skill_url" property="skillUrl"/>
+        <result column="skill_package_format" property="skillPackageFormat"/>
+        <result column="skill_original_filename" property="skillOriginalFilename"/>
+        <result column="skill_package_size" property="skillPackageSize"/>
+        <result column="skill_package_hash" property="skillPackageHash"/>
+        <result column="target_content" property="targetContent"/>
+        <result column="sync_status" property="syncStatus"/>
+        <result column="sync_error" property="syncError"/>
+        <result column="last_sync_time" property="lastSyncTime"/>
+    </resultMap>
+
+    <resultMap id="ssResExtSkillDtoResultMap"
+               type="com.iwhalecloud.byai.manager.dto.resource.SsResExtSkillDto"
+               extends="com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper.BaseResultMap">
+        <association property="ssResExtSkill"
+                     javaType="com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill"
+                     resultMap="BaseResultMap"/>
+    </resultMap>
+
+    <!-- 根据 resource_code 查询技能资源及扩展信息 -->
+    <select id="findBySkillCodes" resultMap="ssResExtSkillDtoResultMap">
+        SELECT a.resource_id,
+               a.resource_code,
+               a.system_code,
+               a.resource_source_pk_id,
+               a.resource_biz_type,
+               a.resource_type,
+               a.resource_name,
+               a.resource_desc,
+               a.avatar,
+               a.sample,
+               a.tags,
+               a.resource_version_id,
+               a.host_type,
+               a.catalog_id,
+               a.man_org_id,
+               a.man_user_id,
+               a.index_list,
+               a.create_by,
+               a.create_time,
+               a.update_by,
+               a.update_time,
+               a.com_acct_id,
+               a.resource_status,
+               a.resource_d_verid,
+               a.resource_r_verid,
+               a.auth_status,
+               a.publish_time,
+               a.shelf_time,
+               a.unshelf_time,
+               a.publish_portal,
+               a.parent_resource_id,
+               a.impl_type,
+               a.worker_agent_type,
+               b.resource_id,
+               b.skill_type,
+               b.source_type,
+               b.version,
+               b.skill_url,
+               b.skill_package_format,
+               b.skill_original_filename,
+               b.skill_package_size,
+               b.skill_package_hash,
+               b.target_content,
+               b.sync_status,
+               b.sync_error,
+               b.last_sync_time
+        FROM ss_resource a
+        INNER JOIN ss_res_ext_skill b ON a.resource_id = b.resource_id
+        WHERE a.resource_biz_type = 'SKILL'
+          AND a.resource_code IN
+        <foreach collection="skillCodes" item="item" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+    </select>
+
+</mapper>

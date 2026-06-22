@@ -4,19 +4,15 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * 通用资源基础信息更新入参。
+ * 资源图片生成入参。
+ * @author qin.guoquan
+ * @date 2026-06-21 20:38:38
  */
 @Getter
 @Setter
-public class UpdateResourceBasicInfoQo {
-
-    private Long resourceId;
+public class GenerateResourceImageQo {
 
     private String resourceName;
 
     private String resourceDesc;
-
-    private String avatar;
-
-    private Long catalogId;
 }

@@ -1,7 +1,8 @@
-import { createRedis, EventType } from "@byclaw/by-framework";
 import { enqueueAfterAgentEvents } from "./agent-event-serial.js";
+import { createRedis, EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import {
   markActiveSdkContextWindow,
+  emitSdkChunkTracked,
   markActiveSdkOutboundSent,
   markActiveSdkOutboundSending,
   markActiveSdkOverflowContinuePending,
@@ -23,6 +24,7 @@ import {
   BYAI_USER_MD_SECTION_END,
   BYAI_USER_MD_SECTION_START,
   buildChannelExtensionPrompt,
+  buildCompactionNoticeText,
   buildLanguagePrompt,
   buildMaxTokenErrorText,
   buildSessionFilesPrompt,
@@ -68,6 +70,13 @@ type MessageHookContext = {
   conversationId?: string;
 };
 
+type CompactionHookEvent = {
+  messageCount?: number;
+  compactedCount?: number;
+  tokenCount?: number;
+  sessionFile?: string;
+};
+
 type RedisInfo = {
   username?: string;
   password?: string;
@@ -82,6 +91,70 @@ type ByaiUserInfo = {
   userName: string;
   sourceSystem?: string;
 };
+
+const compactionHookNoticeKeys = new Set<string>();
+
+function shouldEmitCompactionHookNotice(key: string): boolean {
+  if (compactionHookNoticeKeys.has(key)) {
+    return false;
+  }
+  compactionHookNoticeKeys.add(key);
+  setTimeout(() => {
+    compactionHookNoticeKeys.delete(key);
+  }, 10 * 60 * 1000).unref?.();
+  return true;
+}
+
+async function emitCompactionHookNotice(
+  api: OpenClawPluginApi,
+  phase: "start" | "end",
+  event: CompactionHookEvent,
+  ctx: PluginHookAgentContext,
+): Promise<void> {
+  const sessionKey = ctx.sessionKey?.trim();
+  if (!sessionKey) {
+    return;
+  }
+  const request = resolveActiveSdkRequestBySessionKey(sessionKey);
+  if (!request) {
+    return;
+  }
+  const key = [
+    request.sessionKey,
+    ctx.runId ?? "",
+    phase,
+    event.sessionFile ?? "",
+  ].join(":");
+  if (!shouldEmitCompactionHookNotice(key)) {
+    return;
+  }
+  await emitSdkChunkTracked(request.sessionKey, {
+    emitter: resolveSdkEmitter(request.accountId),
+    sessionId: request.sessionId,
+    traceId: request.traceId,
+    text: buildCompactionNoticeText(request.language, {
+      phase,
+      completed: phase === "end",
+      willRetry: false,
+    }),
+    options: {
+      messageId: `${ctx.runId || request.sessionKey}:compaction:${phase}:hook`,
+      parentMessageId: "-1",
+      eventType: EventType.REASONING_LOG_DELTA,
+      contentType: SseReasonMessageType.think_status_title,
+      objectType: "compaction",
+      status: phase === "start" ? "_START_" : "_DONE_",
+      metadata: {
+        isCompactionNotice: true,
+        compactionPhase: phase,
+        source: "compaction_hook",
+      },
+    },
+  });
+  api.logger.info(
+    `[byai-channel] emitted compaction ${phase} notice from hook: sessionKey=${request.sessionKey}`,
+  );
+}
 
 function getRedisInfo(): RedisInfo | null {
   const {
@@ -207,6 +280,38 @@ async function syncWorkspaceUserMd(
 }
 
 export function registerByaiHooks(api: OpenClawPluginApi): void {
+  api.on("before_compaction", (event: CompactionHookEvent, ctx: PluginHookAgentContext) => {
+    if (event?.messageCount !== -1) {
+      return;
+    }
+    setImmediate(() => {
+      void enqueueAfterAgentEvents(
+        `before_compaction sessionKey=${ctx.sessionKey ?? ""}`,
+        async () => {
+          await emitCompactionHookNotice(api, "start", event, ctx);
+        },
+      ).catch((err) => {
+        api.logger.error(`[byai-channel] before_compaction enqueue failed: ${String(err)}`);
+      });
+    });
+  });
+
+  api.on("after_compaction", (event: CompactionHookEvent, ctx: PluginHookAgentContext) => {
+    if (event?.compactedCount !== -1) {
+      return;
+    }
+    setImmediate(() => {
+      void enqueueAfterAgentEvents(
+        `after_compaction sessionKey=${ctx.sessionKey ?? ""}`,
+        async () => {
+          await emitCompactionHookNotice(api, "end", event, ctx);
+        },
+      ).catch((err) => {
+        api.logger.error(`[byai-channel] after_compaction enqueue failed: ${String(err)}`);
+      });
+    });
+  });
+
   // USER.md sync runs once per inbound dispatch, not on every before_prompt_build
   // iteration (tool rounds re-enter before_prompt_build while the embedded session
   // lock may be released for model I/O — see attempt.session-lock.ts).

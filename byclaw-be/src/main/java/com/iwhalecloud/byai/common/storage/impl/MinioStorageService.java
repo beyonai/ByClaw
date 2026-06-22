@@ -241,6 +241,11 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
     }
 
     @Override
+    public FileMetadata metadata(StorageLocation location) {
+        return buildObjectMetadata(location.getPath(), location.getBucketOrRoot());
+    }
+
+    @Override
     public boolean exists(StorageLocation location) {
         return objectExists(location.getBucketOrRoot(), location.getPath());
     }
@@ -261,7 +266,8 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
             }
 
             StorageObject storageObject = StorageObject.builder().bucketOrRoot(prefix.getBucketOrRoot())
-                .path(item.objectName()).isDir(item.isDir()).size(item.size()).build();
+                .path(item.objectName()).isDir(item.isDir()).size(item.size())
+                .lastModified(item.lastModified() == null ? null : item.lastModified().toString()).build();
             objects.add(storageObject);
         }
         return objects;
@@ -471,6 +477,10 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
      */
     @Override
     protected FileMetadata doGetObjectMetadata(String objectKey, String bucketName) {
+        return buildObjectMetadata(objectKey, bucketName);
+    }
+
+    private FileMetadata buildObjectMetadata(String objectKey, String bucketName) {
         try {
             objectKey = normalizeObjectKey(objectKey);
             StatObjectArgs statObjectArgs = StatObjectArgs.builder().bucket(bucketName).object(objectKey).build();
@@ -487,6 +497,7 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
             fileMetadata.setBucketName(bucketName);
             fileMetadata.setFileTag(statObjectResponse.etag());
             fileMetadata.setStorageType(getStorageType());
+            fileMetadata.setLastModified(statObjectResponse.lastModified() == null ? null : statObjectResponse.lastModified().toString());
             return fileMetadata;
         }
         catch (ErrorResponseException e) {

@@ -4,12 +4,120 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
 _BY_DATACLOUD_DIRNAME = "by-datacloud"
 _DEFAULT_DATACLOUD_ONTOLOGY_PATH = "/workspace/byclaw-data/resource/ontology"
 _DEFAULT_DATACLOUD_MID_FTP_PATH = "/workspace/byclaw-data/resource/dig_employee"
+
+_platform_initialized = False
+_owl_loaded_path: str | None = None
+"""Track which path was last loaded into the default base, for idempotent reload."""
+
+
+def _load_owl_into_default_base(base_path: str) -> Any:
+    """Load OWL from *base_path* into the platform's default base via formal API.
+
+    Protocol:
+      1. ``platform.load_ontology("default", base_path)`` → OntologyLoader
+      2. ``platform.inject_virtual_actions("default", loader)`` → inject query/compute
+
+    Returns the loader handle so callers can build tools from it.
+
+    This is the **function-based** import path.  Later the same logic can be
+    exposed through an HTTP endpoint without changing the platform layer.
+    """
+    from datacloud_platform import get_platform
+
+    p = get_platform()
+    loader = p.load_ontology("default", base_path)
+    p.inject_virtual_actions("default", loader)
+    return loader
+
+
+def _load_owl_if_configured() -> Any | None:
+    """Load OWL from ``DATACLOUD_ONTOLOGY_PATH`` into the default base (idempotent).
+
+    Called once during ``_init_platform_if_needed()``.
+    Subsequent calls are no-ops unless the path changed.
+    """
+    global _owl_loaded_path
+    ontology_path = os.environ.get("DATACLOUD_ONTOLOGY_PATH", "").strip()
+    if not ontology_path:
+        return None
+    p = Path(ontology_path)
+    if not p.is_absolute():
+        p = Path.cwd() / p
+    resolved = str(p.resolve())
+    if not p.exists():
+        return None
+    if _owl_loaded_path == resolved:
+        return None  # already loaded this path
+    loader = _load_owl_into_default_base(resolved)
+    _owl_loaded_path = resolved
+    return loader
+
+
+def _init_platform_if_needed() -> None:
+    """Register 4-dimension backends + default base; inject global platform singleton (idempotent).
+
+    Must be called before any ``import datacloud_analysis``, otherwise
+    ``ontology_agent.py`` module load triggers
+    ``get_platform()._default_base_id()`` → ``RuntimeError``.
+    """
+    global _platform_initialized
+    if _platform_initialized:
+        return
+
+    from datacloud_platform.adapters.data_adapter import DataCloudDataBackend
+    from datacloud_platform.adapters.local_execution_adapter import LocalExecutionBackend
+    from datacloud_platform.adapters.none_adapters import (
+        _NoopExecutionBackend,
+        _NoopKnowledgeBackend,
+        _NoopStorageBackend,
+    )
+    from datacloud_platform.backends.presets import register_preset
+    from datacloud_platform.backends.registry import (
+        register_backend_type,
+        register_implementation,
+    )
+    from datacloud_platform import DatacloudPlatform, OntologyBaseEntry, OntologyBaseRegistry
+
+    register_backend_type("ontology", "datacloud-data")
+    register_backend_type("knowledge", "none")
+    register_backend_type("execution", "local-exec")
+    register_backend_type("storage", "datacloud-data")
+
+    _onto = DataCloudDataBackend()
+    _exec = LocalExecutionBackend()
+    register_implementation("ontology", "datacloud-data", lambda: _onto)
+    register_implementation("knowledge", "none", lambda: _NoopKnowledgeBackend())
+    register_implementation("execution", "local-exec", lambda: _exec)
+    register_implementation("execution", "none", lambda: _NoopExecutionBackend())
+    register_implementation("storage", "datacloud-data", lambda: _onto)
+    register_implementation("storage", "none", lambda: _NoopStorageBackend())
+
+    register_preset("LOCAL", {})
+
+    registry = OntologyBaseRegistry()
+    registry.register(
+        OntologyBaseEntry(
+            base_id="default",
+            display_name="默认本地库",
+            source_type="LOCAL",
+        )
+    )
+    platform = DatacloudPlatform(_base_registry=registry)
+
+    import datacloud_platform
+
+    datacloud_platform._platform = platform
+    _platform_initialized = True
+
+    # ── 函数式导入 OWL（后续可由 HTTP API 替换调用路径）──
+    _load_owl_if_configured()
 
 
 def load_env_if_exists(*paths: Path) -> None:
@@ -21,12 +129,7 @@ def load_env_if_exists(*paths: Path) -> None:
 
 
 def locate_by_datacloud_repo_root(start: Path | None = None) -> Path | None:
-    """Locate the sibling ``by-datacloud`` repository.
-
-    Resolution order:
-    1. ``BY_DATACLOUD_REPO_DIR`` when set
-    2. walking parent directories and looking for a sibling named ``by-datacloud``
-    """
+    """Locate the sibling ``by-datacloud`` repository."""
 
     configured = os.environ.get("BY_DATACLOUD_REPO_DIR", "").strip()
     if configured:
@@ -43,7 +146,7 @@ def locate_by_datacloud_repo_root(start: Path | None = None) -> Path | None:
 
 
 def resolve_by_datacloud_repo_root(start: Path | None = None) -> Path:
-    """Resolve the sibling ``by-datacloud`` repository or raise a clear error."""
+    """Resolve the sibling ``by-datacloud`` repository."""
 
     repo_root = locate_by_datacloud_repo_root(start=start)
     if repo_root is not None:
@@ -56,6 +159,7 @@ def resolve_by_datacloud_repo_root(start: Path | None = None) -> Path:
 
 def normalize_runtime_environment() -> None:
     """Normalize env vars so byclaw-data consumes DATACLOUD-prefixed settings."""
+    _init_platform_if_needed()
 
     _set_if_empty("DATACLOUD_ONTOLOGY_PATH", _DEFAULT_DATACLOUD_ONTOLOGY_PATH)
     _set_if_empty("DATACLOUD_MID_FTP_PATH", _DEFAULT_DATACLOUD_MID_FTP_PATH)

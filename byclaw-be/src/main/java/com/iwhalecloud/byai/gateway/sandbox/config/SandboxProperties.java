@@ -97,6 +97,39 @@ public class SandboxProperties {
          * Dynamic sandbox resizing is opt-in. ByClaw records and decides, OpenSandbox performs the resize.
          */
         private boolean enabled = false;
+
+        /**
+         * Minimum interval before another scale-up action is accepted for the same sandbox.
+         */
+        private Duration scaleUpCooldown = Duration.ofMinutes(2);
+
+        /**
+         * Minimum interval before another scale-down action is accepted for the same sandbox.
+         */
+        private Duration scaleDownCooldown = Duration.ofMinutes(5);
+
+        /**
+         * Minimum interval before a scale-down is accepted after a successful scale-up/OOM handling.
+         */
+        private Duration scaleDownAfterUpProtection = Duration.ofMinutes(15);
+
+        /**
+         * PROCESSING records older than this are treated as abandoned and can be claimed again.
+         */
+        private Duration processingTimeout = Duration.ofMinutes(10);
+
+        /**
+         * Optional Prometheus API used to select a right-sized downscale target instead of always stepping down once.
+         */
+        private String prometheusBaseUrl;
+
+        private Duration prometheusQueryWindow = Duration.ofMinutes(5);
+
+        private double downscaleCpuHeadroom = 2.0D;
+
+        private double downscaleMemoryHeadroom = 1.25D;
+
+        private String boundaryBlacklistPodSuffix = "-0";
     }
 
     @Data

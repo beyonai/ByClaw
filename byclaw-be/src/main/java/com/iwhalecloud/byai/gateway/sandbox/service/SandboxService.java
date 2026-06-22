@@ -349,7 +349,7 @@ public class SandboxService {
                 }
             }
 
-            SandboxLaunchData launchData = doLaunchSandbox(userCode, resourceId, routing);
+            SandboxLaunchData launchData = doLaunchSandbox(userCode, resourceId, routing, true);
             if (waitForWorkerReady && launchData != null && StringUtils.isNotBlank(targetAgentType)) {
                 waitWorkerReadySync(targetAgentType);
             }
@@ -569,6 +569,11 @@ public class SandboxService {
      * @return 沙箱启动响应数据
      */
     private SandboxLaunchData doLaunchSandbox(String userCode, Long resourceId, SandboxLaunchRouting routing) {
+        return doLaunchSandbox(userCode, resourceId, routing, false);
+    }
+
+    private SandboxLaunchData doLaunchSandbox(String userCode, Long resourceId, SandboxLaunchRouting routing,
+        boolean skipReusableSandbox) {
         // 校验运行中沙箱数量是否超过系统参数上限
         checkRunningSandboxLimit();
 
@@ -586,6 +591,7 @@ public class SandboxService {
             ? AUTO_RELEASE_REMOTE : AUTO_RELEASE_MANUAL;
         request.setEnvs(launchContext.getEnvs());
         request.setUserInfo(launchContext.getUserInfo());
+        request.setSkipReusableSandbox(skipReusableSandbox);
         String gatewayToken = launchContext.getGatewayToken();
 
         Date now = new Date();

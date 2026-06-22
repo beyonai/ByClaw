@@ -36,6 +36,10 @@ public class SandboxLaunchRequest {
     @JsonProperty("metadata")
     private Map<String, String> metadata;
 
+    /** 是否跳过可复用远端沙箱查询，异常恢复等场景需要强制新建。 */
+    @JsonProperty("skip_reusable_sandbox")
+    private Boolean skipReusableSandbox;
+
     @JsonProperty("user_info")
     private Map<String, Object> userInfo;
 }

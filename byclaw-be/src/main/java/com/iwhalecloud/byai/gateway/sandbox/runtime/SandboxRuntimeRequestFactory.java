@@ -134,27 +134,19 @@ final class SandboxRuntimeRequestFactory {
 
     static boolean isReusableSandboxState(SandboxStatus status) {
         if (status == null || StringUtils.isBlank(status.getState())) {
-            return true;
+            return false;
         }
         String state = status.getState().trim().toLowerCase(java.util.Locale.ROOT);
-        return !"failed".equals(state)
-            && !"exited".equals(state)
-            && !"exit".equals(state)
-            && !"stopped".equals(state)
-            && !"terminated".equals(state)
-            && !"deleted".equals(state)
-            && !"removed".equals(state)
-            && !"canceled".equals(state)
-            && !"cancelled".equals(state);
+        return "running".equals(state) || "ready".equals(state);
     }
 
     static int stateRankForReuse(SandboxStatus status) {
         if (status == null || StringUtils.isBlank(status.getState())) {
-            return 0;
+            return 1;
         }
         return switch (status.getState().trim().toLowerCase(java.util.Locale.ROOT)) {
             case "running" -> 3;
-            case "pending" -> 2;
+            case "ready" -> 2;
             default -> 1;
         };
     }
