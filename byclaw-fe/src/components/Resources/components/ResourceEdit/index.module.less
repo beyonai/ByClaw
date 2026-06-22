@@ -1,0 +1,36 @@
+.resourceImageEditor {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.resourceImagePreview {
+  width: 132px;
+  height: 132px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid #e6eaf0;
+  background: linear-gradient(135deg, #f8fbff 0%, #fff6ea 100%);
+
+  :global(.ant-image),
+  :global(.ant-image-img) {
+    width: 100%;
+    height: 100%;
+  }
+
+  :global(.ant-image-img) {
+    object-fit: cover;
+  }
+}
+
+.resourceImagePlaceholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8b95a5;
+  font-size: 16px;
+  font-weight: 700;
+}

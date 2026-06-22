@@ -82,7 +82,8 @@ public class SuasSuperassistApplicationService {
         }
         catch (Exception e) {
             logger.error("初始化超级助手知识库失败:{}", e.getMessage(), e);
-            return new SuasSuperassist();
+            // 返回 null 让调用方知道需要从数据库重新查询
+            return null;
         }
 
     }

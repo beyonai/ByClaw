@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useState, useEffect, useRef } from 'rea
 import { UploadOutlined, SearchOutlined, PlusOutlined } from '@ant-design/icons';
 import { useIntl, getLocale, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
-import { Button, Input, Space, Tooltip, message, Tabs } from 'antd';
+import { Button, Input, Space, Tooltip, message, Tabs, Segmented } from 'antd';
 import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import useModuleEvent from '@/hooks/useModuleEvent';
@@ -165,18 +165,39 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const [brandVersion, setBrandVersion] = useState<'commercial' | 'openSource' | null>(null);
   const [bannerList, setBannerList] = useState<any[]>([]);
   const [bannerLoaded, setBannerLoaded] = useState(false);
+  const [skillCardViewMode, setSkillCardViewMode] = useState<'current' | 'new'>('current');
 
   const topLevelCatalogList = React.useMemo(() => getTopLevelCatalogs(catalogList), [catalogList]);
   const refreshList = useCallback(() => {
     setRefreshKey((prevKey) => prevKey + 1);
   }, []);
 
+  const notifySiderResourceListReload = useCallback(() => {
+    EventEmitter.emit('beyond-resourceList-resourceType-reload', {
+      resourceType,
+      resetSkillFilters: false,
+      skipResourceCenterRefresh: true,
+    });
+  }, [EventEmitter, resourceType]);
+
   useEffect(() => {
-    const handleResourceTypeReload = (changedResourceType?: string) => {
-      if (changedResourceType !== resourceType) {
+    const handleResourceTypeReload = (
+      changedResourceType?:
+        | string
+        | { resourceType?: string; resetSkillFilters?: boolean; skipResourceCenterRefresh?: boolean }
+    ) => {
+      if (typeof changedResourceType !== 'string' && changedResourceType?.skipResourceCenterRefresh) {
         return;
       }
-      if (resourceType === 'SKILL') {
+      const nextResourceType =
+        typeof changedResourceType === 'string' ? changedResourceType : changedResourceType?.resourceType;
+      if (nextResourceType !== resourceType) {
+        return;
+      }
+      if (
+        resourceType === 'SKILL' &&
+        (typeof changedResourceType === 'string' || changedResourceType?.resetSkillFilters !== false)
+      ) {
         const nextSearchParams = new URLSearchParams(searchParams);
         nextSearchParams.set('tab', 'personal');
         setCatalogId('');
@@ -413,6 +434,17 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
 
   const tabBarExtraContent = (
     <Space>
+      {resourceType === 'SKILL' && (
+        <Segmented
+          size="small"
+          value={skillCardViewMode}
+          options={[
+            { label: intl.formatMessage({ id: 'resource.skillView.current' }), value: 'current' },
+            { label: intl.formatMessage({ id: 'resource.skillView.new' }), value: 'new' },
+          ]}
+          onChange={(value) => setSkillCardViewMode(value as 'current' | 'new')}
+        />
+      )}
       <ResourceFilter
         resourceType={resourceType}
         onOk={(param: any) => {
@@ -604,6 +636,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
           onApplyUse={handleApplyUse}
           onAuditUse={handleAuditUse}
           onRefresh={refreshList}
+          skillCardViewMode={skillCardViewMode}
         />
       </div>
       <ResourceImport
@@ -620,6 +653,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         onSuccess={() => {
           setImportModalOpen(false);
           refreshList();
+          notifySiderResourceListReload();
         }}
       />
       <ResourceEdit
@@ -639,6 +673,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
             await updateResource(values);
             message.success(intl.formatMessage({ id: 'common.saveSuccess' }));
             refreshList();
+            notifySiderResourceListReload();
           } catch (error: any) {
             console.error('保存失败:', error);
             // 优先透传后端错误信息（msg / message / 字符串），缺失时再回退到通用文案

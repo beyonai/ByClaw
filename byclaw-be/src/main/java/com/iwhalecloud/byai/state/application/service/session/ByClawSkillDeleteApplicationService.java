@@ -76,7 +76,7 @@ public class ByClawSkillDeleteApplicationService {
             }
         }
         String tail = normalized.substring(skillRootPrefix.length());
-        if (StringUtils.isBlank(tail) || tail.contains("/")) {
+        if (StringUtils.isBlank(tail)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.path.invalid"));
         }
         return normalized;

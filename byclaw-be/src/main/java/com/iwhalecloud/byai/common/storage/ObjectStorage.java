@@ -25,6 +25,10 @@ public interface ObjectStorage {
 
     InputStream get(StorageLocation location);
 
+    default FileMetadata metadata(StorageLocation location) {
+        throw new UnsupportedOperationException("metadata(StorageLocation) is not supported");
+    }
+
     boolean exists(StorageLocation location);
 
     List<StorageObject> list(StoragePrefix prefix, Integer maxDepth);
