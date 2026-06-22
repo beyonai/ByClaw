@@ -18,6 +18,9 @@ COPY byclaw-exe/extensions/baiying-enhance/package.json \
 COPY byclaw-exe/extensions/byai-channel/package.json \
      byclaw-exe/extensions/byai-channel/package-lock.json \
      ./src/byai-channel/
+COPY byclaw-exe/extensions/byai_diagnostics-otel/package.json \
+     byclaw-exe/extensions/byai_diagnostics-otel/package-lock.json \
+     ./src/byai_diagnostics-otel/
 COPY byclaw-exe/extensions/byclaw-sqlite/package.json \
      byclaw-exe/extensions/byclaw-sqlite/package-lock.json \
      ./src/byclaw-sqlite/
@@ -37,6 +40,7 @@ RUN --mount=type=cache,target=/root/.npm \
 
 COPY byclaw-exe/extensions/baiying-enhance/ ./src/baiying-enhance/
 COPY byclaw-exe/extensions/byai-channel/ ./src/byai-channel/
+COPY byclaw-exe/extensions/byai_diagnostics-otel/ ./src/byai_diagnostics-otel/
 COPY byclaw-exe/extensions/byclaw-sqlite/ ./src/byclaw-sqlite/
 
 RUN set -eux; \
