@@ -173,6 +173,37 @@ class SandboxResizeServiceTest {
     }
 
     @Test
+    void handlePrometheusAlert_marksRecoveryFailedWhenRestartReusesOldSandboxId() {
+        SandboxFixture fixture = newFixture();
+        SsSandboxRecord record = runningRecord("s");
+        when(fixture.sandboxRecordMapper.selectLatestBySandboxId("user001", "openclaw", "sandbox-1"))
+            .thenReturn(record);
+        when(fixture.profileEntityMapper.selectEnabledProfiles("openclaw")).thenReturn(profiles("s", "m"));
+        when(fixture.specRepository.findByServiceKeyAndProfile("openclaw", "m"))
+            .thenReturn(Optional.of(spec("m")));
+        SandboxLaunchData launchData = new SandboxLaunchData();
+        launchData.setSandboxId("sandbox-1");
+        when(fixture.sandboxService.restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null))
+            .thenReturn(launchData);
+
+        SsSandboxResizeRecord result = fixture.service.handlePrometheusAlert(prometheusPayload(Map.of(
+            "userCode", "user001",
+            "sandboxType", "openclaw",
+            "sandboxId", "sandbox-1",
+            "alertname", "OpenClawSandboxOOMKilled",
+            "reasonCode", "metrics.memory.oom_killed",
+            "alertActionType", "ABNORMAL_RECOVERY"
+        )));
+
+        assertThat(result.getStatus()).isEqualTo("FAILED");
+        assertThat(result.getSuccess()).isEqualTo(0);
+        assertThat(result.getErrorMessage()).contains("reused the old sandbox id");
+        verify(fixture.sandboxService).savePreferredServiceKey("user001", "openclaw-m");
+        verify(fixture.sandboxService).restartSandboxAfterRemoteExitWithoutWait("user001", -1L, null);
+        verify(fixture.openSandboxClient, never()).resizeSandbox(any(), any());
+    }
+
+    @Test
     void handlePrometheusAlert_recordsOpsIncidentWithoutRestartOrResize() {
         SandboxFixture fixture = newFixture();
         SsSandboxRecord record = runningRecord("s");

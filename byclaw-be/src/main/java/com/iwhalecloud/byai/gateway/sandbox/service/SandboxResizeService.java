@@ -699,6 +699,13 @@ public class SandboxResizeService {
             sandboxService.savePreferredServiceKey(record.getUserCode(), preferredServiceKey);
             SandboxLaunchData launchData = sandboxService.restartSandboxAfterRemoteExitWithoutWait(
                 record.getUserCode(), record.getResourceId(), null);
+            if (launchData == null || StringUtils.isBlank(launchData.getSandboxId())) {
+                throw new IllegalStateException("recovery restart did not return a sandbox id");
+            }
+            if (StringUtils.equals(launchData.getSandboxId(), record.getSandboxId())) {
+                throw new IllegalStateException("recovery restart reused the old sandbox id: "
+                    + record.getSandboxId());
+            }
             Date finishedAt = new Date();
             long durationMs = System.currentTimeMillis() - startMillis;
             String responseJson = toJsonOrNull(launchData);
