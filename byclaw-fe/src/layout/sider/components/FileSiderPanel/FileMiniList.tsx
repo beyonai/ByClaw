@@ -50,6 +50,7 @@ import {
 } from '@/service/knowledgeCenter';
 import type { IKnowledgeBaseItem } from '@/layout/sider/components/Knowledge/components/KnowledgeBase/types';
 import { getFileIconType } from '@/constants/icon';
+import { SSEEventStatus } from '@/constants/message';
 import commonStyles from '../Knowledge/components/common.module.less';
 import styles from './index.module.less';
 
@@ -581,22 +582,44 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
   // 监听会话聊天产生的文件，当打开 session tab 时刷新文件列表
   useEffect(() => {
-    const handleSessionFileCreated = (payload: { fileList?: any[]; imageList?: any[]; sessionId?: string }) => {
-      // 如果当前打开的不是 session tab，不处理
+    const refreshCurrentSessionFiles = (payload?: { sessionId?: string }) => {
       if (activeCategoryKey !== 'session') return;
-      // 检查 payload 是否包含文件信息
-      const hasFiles =
-        (payload.fileList && payload.fileList.length > 0) || (payload.imageList && payload.imageList.length > 0);
-      if (hasFiles) {
-        // 刷新当前路径的文件列表
-        delete categoryCacheRef.current['session'];
-        void fetchList(currentPath, { force: true });
+      const payloadSessionId = getNormalizedSessionId(payload?.sessionId);
+      if (payloadSessionId) {
+        const normalizedCurrentPath = ensureDirectoryPath(normalizeFileBrowserPath(currentPath || SESSION_FILE_PATH));
+        const payloadSessionPath = getSessionFilePath(payloadSessionId);
+        if (normalizedCurrentPath !== SESSION_FILE_PATH && !isPathIn(normalizedCurrentPath, payloadSessionPath)) {
+          return;
+        }
+      }
+      delete categoryCacheRef.current.session;
+      void fetchList(currentPath, { force: true });
+    };
+
+    const hasFiles = (payload?: { fileList?: any[]; imageList?: any[] }) => {
+      return Boolean(payload?.fileList?.length || payload?.imageList?.length);
+    };
+
+    const handleSessionFileCreated = (payload: { fileList?: any[]; imageList?: any[]; sessionId?: string }) => {
+      if (hasFiles(payload)) {
+        refreshCurrentSessionFiles(payload);
+      }
+    };
+
+    const handleSessionFileUpdated = (payload: {
+      message?: { fileList?: any[]; imageList?: any[]; sessionId?: string; status?: string };
+    }) => {
+      const message = payload?.message;
+      if (hasFiles(message) || message?.status === SSEEventStatus.done) {
+        refreshCurrentSessionFiles(message);
       }
     };
 
     EventEmitter.on('beyond-create-message', handleSessionFileCreated);
+    EventEmitter.on('beyond-update-message', handleSessionFileUpdated);
     return () => {
       EventEmitter.off('beyond-create-message', handleSessionFileCreated);
+      EventEmitter.off('beyond-update-message', handleSessionFileUpdated);
     };
   }, [activeCategoryKey, currentPath, fetchList]);
 
@@ -1328,17 +1351,12 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       message.success(intl.formatMessage({ id: 'fileBrowser.copy.success' }));
       setCopyModalOpen(false);
       setCopyTarget(null);
-      delete categoryCacheRef.current[copyTargetType];
-      setChildrenByPath({});
-      if (copyDirectoryPath === ensureDirectoryPath(currentPath)) {
-        await fetchList(currentPath, { force: true });
-      }
     } catch (error: any) {
       message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.copy.failed' }));
     } finally {
       setCopyingToFileBrowser(false);
     }
-  }, [copyDirectoryPath, copyTarget, copyTargetType, currentPath, fetchList, intl, resourceId]);
+  }, [copyDirectoryPath, copyTarget, intl, resourceId]);
 
   const handleConfirmKnowledgeUpload = useCallback(
     async (processFrontMatter: boolean) => {
