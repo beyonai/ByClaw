@@ -1,0 +1,1870 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>用户个人私有 Env 配置运行期注入方案</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23172033'/%3E%3Cpath d='M18 34h28v18H18z' fill='%23fff'/%3E%3Cpath d='M24 34v-8a8 8 0 0 1 16 0v8' fill='none' stroke='%23fff' stroke-width='6'/%3E%3Ccircle cx='32' cy='43' r='3' fill='%231f6feb'/%3E%3C/svg%3E" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --paper: #ffffff;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #d9e1ec;
+      --blue: #1f6feb;
+      --blue-soft: #edf5ff;
+      --green: #16794c;
+      --green-soft: #eaf7f0;
+      --orange: #a85a00;
+      --orange-soft: #fff4e5;
+      --red: #b42318;
+      --red-soft: #fff0ef;
+      --slate: #334155;
+      --code-bg: #101828;
+      --shadow: 0 14px 36px rgba(22, 32, 51, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font: 15px/1.68 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+    }
+
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    header {
+      color: #fff;
+      background:
+        linear-gradient(135deg, rgba(18, 33, 54, 0.96), rgba(31, 111, 235, 0.9)),
+        radial-gradient(circle at 12% 18%, rgba(255, 255, 255, 0.14), transparent 28%),
+        radial-gradient(circle at 92% 8%, rgba(22, 121, 76, 0.22), transparent 30%);
+    }
+
+    .hero {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 42px 0 38px;
+    }
+
+    h1, h2, h3, h4 { margin: 0; line-height: 1.28; letter-spacing: 0; }
+    h1 { font-size: 34px; }
+    h2 { font-size: 24px; margin-top: 36px; padding-top: 2px; }
+    h3 { font-size: 18px; margin-top: 24px; }
+    h4 { font-size: 15px; margin-top: 18px; }
+    p { margin: 9px 0; }
+
+    .subtitle {
+      max-width: 930px;
+      margin-top: 13px;
+      color: rgba(255, 255, 255, 0.88);
+      font-size: 17px;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      color: rgba(255, 255, 255, 0.92);
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .layout {
+      width: min(1380px, calc(100% - 40px));
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr);
+      gap: 22px;
+      align-items: start;
+      padding: 26px 0 60px;
+    }
+
+    nav {
+      position: sticky;
+      top: 18px;
+      max-height: calc(100vh - 36px);
+      overflow: auto;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px 13px;
+      box-shadow: 0 1px 2px rgba(22, 32, 51, 0.05);
+    }
+
+    nav strong {
+      display: block;
+      margin: 0 0 10px;
+      font-size: 15px;
+    }
+
+    nav a {
+      display: block;
+      padding: 7px 8px 7px 10px;
+      border-left: 3px solid transparent;
+      border-radius: 5px;
+      color: #526071;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    nav a:hover {
+      color: var(--blue);
+      background: var(--blue-soft);
+      border-left-color: var(--blue);
+      text-decoration: none;
+    }
+
+    main {
+      min-width: 0;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 28px 30px 38px;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 20px 0 6px;
+    }
+
+    .metric {
+      min-height: 116px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fbfcfe;
+    }
+
+    .metric strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 18px;
+      color: var(--slate);
+    }
+
+    .metric span, .muted { color: var(--muted); }
+
+    .callout {
+      margin: 16px 0;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--blue);
+      border-radius: 8px;
+      background: #fbfdff;
+    }
+
+    .callout.good {
+      border-left-color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .callout.warn {
+      border-left-color: var(--orange);
+      background: var(--orange-soft);
+    }
+
+    .callout.danger {
+      border-left-color: var(--red);
+      background: var(--red-soft);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fbfcfe;
+    }
+
+    ul, ol { margin: 8px 0 8px 22px; padding: 0; }
+    li { margin: 6px 0; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 18px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 14px;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: #334155;
+      background: #f3f6fb;
+      font-weight: 700;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 5px;
+      background: #eef2f7;
+      color: #1f2937;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 12px 0;
+      padding: 14px 16px;
+      overflow: auto;
+      color: #e5e7eb;
+      background: var(--code-bg);
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    pre code {
+      padding: 0;
+      color: inherit;
+      background: transparent;
+      font-size: inherit;
+    }
+
+    .diagram {
+      margin: 14px 0 20px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fbff;
+      overflow: auto;
+    }
+
+    .diagram pre.mermaid {
+      margin: 0;
+      padding: 10px;
+      color: var(--ink);
+      background: #ffffff;
+      border: 1px solid #e3eaf4;
+      border-radius: 8px;
+    }
+
+    .diagram .mermaid {
+      min-width: max-content;
+      color: var(--ink);
+      background: #ffffff;
+    }
+
+    .diagram .mermaid svg {
+      display: block;
+      margin: 0 auto;
+      background: #ffffff;
+    }
+
+    .diagram .mermaid text,
+    .diagram .mermaid tspan,
+    .diagram .mermaid .messageText,
+    .diagram .mermaid .loopText,
+    .diagram .mermaid .noteText,
+    .diagram .mermaid .labelText,
+    .diagram .mermaid .actor {
+      fill: #172033 !important;
+      color: #172033 !important;
+    }
+
+    .diagram .mermaid .actor,
+    .diagram .mermaid .node rect,
+    .diagram .mermaid .node polygon,
+    .diagram .mermaid .node circle,
+    .diagram .mermaid .node ellipse {
+      fill: #edf5ff !important;
+      stroke: #1f6feb !important;
+    }
+
+    .diagram .mermaid .messageLine0,
+    .diagram .mermaid .messageLine1,
+    .diagram .mermaid .flowchart-link,
+    .diagram .mermaid .edgePath path {
+      stroke: #1f6feb !important;
+    }
+
+    .diagram .mermaid .activation0,
+    .diagram .mermaid .activation1,
+    .diagram .mermaid .activation2 {
+      fill: #eaf7f0 !important;
+      stroke: #16794c !important;
+    }
+
+    .diagram .mermaid .sequenceNumber {
+      fill: #ffffff !important;
+      color: #ffffff !important;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      color: #1454cc;
+      background: var(--blue-soft);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .tag.green {
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .tag.orange {
+      color: var(--orange);
+      background: var(--orange-soft);
+    }
+
+    .effect-gallery {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .effect-card.wide {
+      grid-column: 1 / -1;
+    }
+
+    .effect-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+      box-shadow: 0 10px 24px rgba(22, 32, 51, 0.06);
+    }
+
+    .effect-card h3 {
+      margin: 0;
+      padding: 13px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafc;
+      font-size: 16px;
+    }
+
+    .effect-body {
+      padding: 16px;
+    }
+
+    .interaction-strip {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+      margin: 14px 0 18px;
+    }
+
+    .interaction-step {
+      min-height: 88px;
+      padding: 11px;
+      border: 1px solid #d7dfeb;
+      border-radius: 8px;
+      background: #fbfdff;
+    }
+
+    .interaction-step b {
+      display: block;
+      margin-bottom: 5px;
+      color: #172033;
+      font-size: 13px;
+    }
+
+    .interaction-step span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .mock-app {
+      min-height: 290px;
+      display: grid;
+      grid-template-columns: 155px minmax(0, 1fr);
+      border: 1px solid #d7dfeb;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #f7faff;
+    }
+
+    .mock-sidebar {
+      padding: 14px 10px;
+      background: #f3f6fb;
+      border-right: 1px solid #d7dfeb;
+    }
+
+    .mock-profile {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+
+    .avatar-dot {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #dbeafe, #93c5fd);
+      border: 1px solid #bfd4f2;
+    }
+
+    .mock-line {
+      height: 8px;
+      border-radius: 999px;
+      background: #d7dfeb;
+      margin: 5px 0;
+    }
+
+    .mock-line.short { width: 58%; }
+    .mock-line.mid { width: 76%; }
+
+    .mock-menu-item {
+      height: 34px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      border-radius: 7px;
+      color: #526071;
+      font-size: 13px;
+      margin-top: 6px;
+    }
+
+    .mock-menu-item.active {
+      color: var(--blue);
+      background: #eaf3ff;
+      font-weight: 700;
+    }
+
+    .mock-dot {
+      width: 15px;
+      height: 15px;
+      border-radius: 4px;
+      border: 2px solid currentColor;
+    }
+
+    .mock-main {
+      padding: 18px;
+      background: linear-gradient(180deg, #ffffff, #f8fbff);
+    }
+
+    .mock-title {
+      font-size: 22px;
+      font-weight: 800;
+      margin-bottom: 14px;
+    }
+
+    .mock-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .mock-filterbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .mock-filter {
+      min-height: 30px;
+      display: inline-flex;
+      align-items: center;
+      padding: 0 10px;
+      border-radius: 6px;
+      border: 1px solid #d7dfeb;
+      background: #fff;
+      color: #526071;
+      font-size: 12px;
+    }
+
+    .mock-filter.search {
+      min-width: 190px;
+      color: #0f172a;
+    }
+
+    .mock-button {
+      padding: 6px 11px;
+      border-radius: 6px;
+      color: #fff;
+      background: var(--blue);
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .mock-button.ghost {
+      color: var(--blue);
+      background: #edf5ff;
+      border: 1px solid #b7d6ff;
+    }
+
+    .mock-button.danger {
+      color: var(--red);
+      background: var(--red-soft);
+      border: 1px solid #f5b5ae;
+    }
+
+    .mock-table {
+      border: 1px solid #d7dfeb;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+      font-size: 12px;
+    }
+
+    .mock-pagination {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      color: #64748b;
+      font-size: 12px;
+    }
+
+    .mock-page {
+      min-width: 24px;
+      height: 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 5px;
+      border: 1px solid #d7dfeb;
+      background: #fff;
+      color: #334155;
+    }
+
+    .mock-page.active {
+      color: #fff;
+      background: var(--blue);
+      border-color: var(--blue);
+    }
+
+    .mock-table.full .mock-row {
+      grid-template-columns: 1.2fr 1.15fr 0.65fr 0.9fr 1fr 1.35fr;
+    }
+
+    .mock-row {
+      display: grid;
+      grid-template-columns: 1.15fr 1fr 0.7fr 1fr;
+      min-height: 38px;
+      align-items: center;
+      border-top: 1px solid #e5ebf3;
+    }
+
+    .mock-row:first-child {
+      border-top: 0;
+      background: #f3f6fb;
+      font-weight: 700;
+      color: #334155;
+    }
+
+    .mock-cell {
+      padding: 8px 10px;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--green);
+      background: var(--green-soft);
+      border: 1px solid #b7e2c8;
+    }
+
+    .status-pill.off {
+      color: #64748b;
+      background: #f1f5f9;
+      border-color: #cbd5e1;
+    }
+
+    .mock-dialog-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+      gap: 16px;
+      margin-top: 14px;
+    }
+
+    .mock-modal {
+      border: 1px solid #d7dfeb;
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: 0 10px 24px rgba(22, 32, 51, 0.08);
+      overflow: hidden;
+    }
+
+    .mock-modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 11px 13px;
+      border-bottom: 1px solid #e5ebf3;
+      background: #f8fafc;
+      font-weight: 800;
+    }
+
+    .mock-modal-body {
+      padding: 13px;
+    }
+
+    .mock-form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .mock-field {
+      min-height: 62px;
+    }
+
+    .mock-field label {
+      display: block;
+      margin-bottom: 5px;
+      color: #475569;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .mock-input {
+      height: 32px;
+      padding: 6px 9px;
+      border: 1px solid #cfd9e8;
+      border-radius: 6px;
+      background: #fff;
+      color: #172033;
+      font-size: 12px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .mock-input.disabled {
+      color: #64748b;
+      background: #f1f5f9;
+    }
+
+    .mock-help {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    .mock-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      align-items: center;
+    }
+
+    .check-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .check-item {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      padding: 9px 10px;
+      border: 1px solid #d7dfeb;
+      border-radius: 8px;
+      background: #fbfdff;
+      font-size: 13px;
+    }
+
+    .check-item::before {
+      content: "✓";
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 18px;
+      height: 18px;
+      border-radius: 50%;
+      color: #fff;
+      background: var(--green);
+      font-size: 12px;
+      font-weight: 800;
+      margin-top: 1px;
+    }
+
+    .flow-picture {
+      min-height: 290px;
+      border: 1px solid #d7dfeb;
+      border-radius: 8px;
+      background: #fbfdff;
+      padding: 18px;
+    }
+
+    .lane {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      align-items: stretch;
+      margin: 12px 0;
+    }
+
+    .lane.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .step-node {
+      position: relative;
+      min-height: 86px;
+      padding: 12px;
+      border: 1px solid #cfd9e8;
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .step-node:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      top: 42px;
+      right: -13px;
+      width: 13px;
+      height: 2px;
+      background: var(--blue);
+    }
+
+    .step-node strong {
+      display: block;
+      margin-bottom: 5px;
+      color: #334155;
+      font-size: 13px;
+    }
+
+    .step-node span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .code-plate {
+      margin-top: 14px;
+      padding: 12px;
+      border-radius: 8px;
+      color: #dbeafe;
+      background: #0f172a;
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      overflow: auto;
+    }
+
+    .secret-mask {
+      color: #93c5fd;
+      font-weight: 800;
+    }
+
+    .effect-note {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    footer {
+      margin-top: 34px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 960px) {
+      .layout { grid-template-columns: 1fr; }
+      nav { position: static; max-height: none; }
+      .summary, .grid-2, .effect-gallery, .interaction-strip, .lane, .lane.three, .mock-dialog-row, .mock-form-grid { grid-template-columns: 1fr; }
+      .mock-app { grid-template-columns: 1fr; }
+      .mock-sidebar { border-right: 0; border-bottom: 1px solid #d7dfeb; }
+      .mock-table.full { overflow-x: auto; }
+      .mock-table.full .mock-row { min-width: 760px; }
+      .step-node:not(:last-child)::after { display: none; }
+      h1 { font-size: 28px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="hero">
+      <h1>用户个人私有 Env 配置运行期注入方案</h1>
+      <p class="subtitle">
+        在 ByClaw 后端维护用户私有配置，由 baiying-enhance 在 skill 触发工具、工具真实执行、或 exec 环境解析阶段按需读取并注入，避免密钥进入 prompt、skill 文档、模型上下文和持久化消息。
+      </p>
+      <div class="meta">
+        <span class="pill">范围：byclaw-be + baiying-enhance</span>
+        <span class="pill">OpenClaw 源码参考：/Users/chenxiaofeng/code/open/openclaw</span>
+        <span class="pill">日期：2026-06-22</span>
+        <span class="pill">结论：优先不改 OpenClaw 核心</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav>
+      <strong>目录</strong>
+      <a href="#summary">方案结论</a>
+      <a href="#latest-change">本次变更</a>
+      <a href="#current">现状依据</a>
+      <a href="#architecture">目标架构</a>
+      <a href="#interaction-preview">业务交互效果图</a>
+      <a href="#data-model">后端模型</a>
+      <a href="#api">接口契约</a>
+      <a href="#runtime">运行期注入</a>
+      <a href="#flows">流程图</a>
+      <a href="#security">安全边界</a>
+      <a href="#plan">落地计划</a>
+      <a href="#tests">验证项</a>
+    </nav>
+
+    <main>
+      <section id="summary">
+        <h2>方案结论</h2>
+        <div class="summary">
+          <div class="metric">
+            <strong>存储在 BE</strong>
+            <span>新增用户私有 env 配置域模型，按当前登录用户隔离，密文落库。</span>
+          </div>
+          <div class="metric">
+            <strong>运行期读取</strong>
+            <span>baiying-enhance 只在工具调用或 exec 环境解析时读取，短 TTL 缓存。</span>
+          </div>
+          <div class="metric">
+            <strong>不进 Prompt</strong>
+            <span>不通过 skill 文本、AGENTS.md、before_prompt_build 暴露密钥。</span>
+          </div>
+          <div class="metric">
+            <strong>最小改造</strong>
+            <span>优先增强 baiying_call executor，不修改 OpenClaw 核心生命周期。</span>
+          </div>
+        </div>
+
+        <div class="callout good">
+          <strong>推荐路径：</strong>
+          BE 只提供个人参数配置的管理接口，负责密文落库并刷新 Redis 明文运行期缓存；baiying-enhance 在 <code>baiying_call</code> executor 和 <code>resolve_exec_env</code> hook 中直接读取 Redis key <code>byai:user:private_params:{userCode}</code>，把参数仅用于运行期内存替换或 exec 子进程环境。
+        </div>
+
+        <div class="callout warn">
+          <strong>不建议：</strong>
+          不要在 <code>before_tool_call</code> hook 里把 secret 写进 <code>params</code>。OpenClaw 的 before-tool hook 设计允许改写 params，这些 params 可能被日志、回放、消息持久化或模型可见链路间接接触，不适合作为密钥承载通道。
+        </div>
+      </section>
+
+      <section id="latest-change">
+        <h2>本次变更说明</h2>
+        <p class="muted">本次在“个人参数配置”基础能力上补齐列表治理能力，重点解决参数数量增长后的查询、定位和翻页问题。用户界面只展示业务概念，不暴露底层缓存实现。</p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>模块</th>
+              <th>修改内容</th>
+              <th>影响范围</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>BE 列表接口</td>
+              <td><code>GET /byaiService/userPrivateParam/list</code> 改为服务端分页查询，新增 <code>pageNum</code>、<code>pageSize</code>、<code>keyword</code>、<code>status</code>、<code>updateTimeSort</code> 查询参数。</td>
+              <td>只影响当前登录用户的个人参数列表；运行期读取链路不变。</td>
+            </tr>
+            <tr>
+              <td>BE 查询逻辑</td>
+              <td><code>keyword</code> 同时匹配参数名和说明；<code>status</code> 仅接受 <code>NORMAL</code>/<code>DISABLED</code>；更新时间支持升序/降序，默认倒序。</td>
+              <td>返回结构从裸数组调整为分页对象：<code>{ list, total, pageNum, pageSize }</code>。</td>
+            </tr>
+            <tr>
+              <td>SQL 索引</td>
+              <td>新增 <code>(user_id, delete_flag, status, update_time desc)</code> 组合索引，配合状态过滤和更新时间排序。</td>
+              <td>提升启停状态过滤下的分页查询稳定性。</td>
+            </tr>
+            <tr>
+              <td>FE 交互</td>
+              <td>个人参数表格新增“搜索参数名或说明”、状态筛选、更新时间列排序、分页器和每页条数切换。</td>
+              <td>新增/编辑/启停/删除后保持当前查询条件刷新；新增成功默认回到第一页。</td>
+            </tr>
+            <tr>
+              <td>FE 文案</td>
+              <td>新增中英文文案：搜索占位、状态筛选、分页总数展示。</td>
+              <td>界面不出现 Redis、缓存等技术实现词。</td>
+            </tr>
+            <tr>
+              <td>方案文档</td>
+              <td>效果图、接口契约、落地计划、验证项同步补充分页、模糊查询、状态过滤、更新时间排序说明。</td>
+              <td>评审时可直接按本文档确认产品交互和接口变更。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>接口兼容说明：</strong>
+          前端已适配分页对象响应；如果后续存在其他调用方仍按数组读取 <code>list</code> 接口，需要同步调整为读取 <code>data.list</code>。
+        </div>
+      </section>
+
+      <section id="current">
+        <h2>现状依据</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>位置</th>
+              <th>观察</th>
+              <th>对方案的影响</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>byclaw-be/.../CurrentUserHolder.java</code></td>
+              <td>已有 <code>getCurrentUserId()</code>、<code>getCurrentUserCode()</code>，可从登录上下文识别当前用户。</td>
+              <td>BE 接口无需前端传 userId，避免越权。</td>
+            </tr>
+            <tr>
+              <td><code>byclaw-exe/extensions/baiying-enhance/src/register-plugin.ts</code></td>
+              <td>当前注册了 <code>baiying_call</code> tool factory 和 watchdog service，未注册 OpenClaw <code>before_tool_call</code>。</td>
+              <td>最小改造点在 <code>baiying_call</code> executor 内，而不是 OpenClaw 核心。</td>
+            </tr>
+            <tr>
+              <td><code>executor/executor.ts</code></td>
+              <td><code>BaiyingExecutor.execute()</code> 已按 resource type 分派到 <code>executeTool</code>、<code>executeMcp</code>、<code>executeAgent</code>、<code>executeDoc</code>。</td>
+              <td>可在分派前统一解析个人 env，再按资源类型注入。</td>
+            </tr>
+            <tr>
+              <td><code>executor/resource-types/tool.ts</code></td>
+              <td><code>executeTool()</code> 已合并 auth header、自定义 header、request_headers 后发 HTTP 请求。</td>
+              <td>适合在发请求前做 header/url/body 占位符替换。</td>
+            </tr>
+            <tr>
+              <td><code>executor/resource-types/mcp.ts</code></td>
+              <td><code>executeMcp()</code> 已在 <code>tools/call</code> 前合并 auth 和 forward headers。</td>
+              <td>MCP server url、headers、tool arguments 可采用同一套显式模板。</td>
+            </tr>
+            <tr>
+              <td><code>openclaw/src/plugins/hook-types.ts</code></td>
+              <td>OpenClaw 有 <code>before_tool_call</code>、<code>after_tool_call</code>、<code>resolve_exec_env</code>，没有独立 <code>before_skill_call</code>。</td>
+              <td>skill 只作为指令加载；真正可控的生命周期是工具调用和 exec 环境解析。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="architecture">
+        <h2>目标架构</h2>
+        <div class="diagram">
+          <pre class="mermaid">
+flowchart LR
+  subgraph FE["byclaw-fe"]
+    UI["个人配置 UI<br/>新增/编辑/启停/测试"]
+  end
+
+  subgraph BE["byclaw-be"]
+    Controller["UserPrivateParamController"]
+    Service["UserPrivateParamApplicationService"]
+    Crypto["Sm4Util"]
+    DB[("po_user_private_param<br/>密文保存")]
+    Redis[("Redis<br/>byai:user:private_params:{userCode}")]
+  end
+
+  subgraph OC["OpenClaw / baiying-enhance"]
+    Plugin["registerBaiyingEnhancePlugin"]
+    Hook["resolve_exec_env hook"]
+    Tool["baiying_call tool"]
+    Executor["BaiyingExecutor.execute"]
+    Reader["personal-params Redis reader"]
+    Injector["privateEnv placeholder injector"]
+  end
+
+  subgraph Target["外部资源"]
+    HttpTool["HTTP Tool"]
+    McpServer["MCP Server"]
+    ExecTool["exec 脚本环境"]
+  end
+
+  UI -->|"管理接口，当前登录用户"| Controller
+  Controller --> Service
+  Service --> Crypto
+  Service --> DB
+  Service -->|"保存/删除/启停/列表后刷新"| Redis
+  Tool --> Executor
+  Executor --> Reader
+  Hook --> Reader
+  Reader -->|"GET byai:user:private_params:{userCode}"| Redis
+  Reader --> Injector
+  Injector -->|"仅内存占位符替换"| HttpTool
+  Injector -->|"仅内存占位符替换"| McpServer
+  Hook -->|"只对 exec 返回 env map"| ExecTool
+          </pre>
+        </div>
+
+        <div class="grid-2">
+          <div class="box">
+            <h3>边界 1：管理面</h3>
+            <p>前端和后端负责私有 env 的 CRUD、启停、作用域、脱敏展示、审计。管理面可以看 key、描述、作用域、更新时间，但不能返回明文 value。</p>
+          </div>
+          <div class="box">
+            <h3>边界 2：运行面</h3>
+            <p>baiying-enhance 根据 <code>authContext.userId</code> 从 Redis <code>SHARE_BFM_USER_{userId}</code> 解析 <code>userCode</code>，再读取 <code>byai:user:private_params:{userCode}</code>。它不请求 BE 接口，只在一次工具调用或 exec 环境解析的内存对象里使用明文。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="interaction-preview">
+        <h2>完整业务交互效果图</h2>
+        <p class="muted">本章节按用户真实使用路径展开：先在设置页维护个人参数，保存后立即生效，后续工具、MCP、exec 调用会按当前用户配置自动使用。页面、日志、capability、payload、session 文件均不展示参数明文。</p>
+
+        <div class="interaction-strip" aria-label="完整业务交互步骤">
+          <div class="interaction-step">
+            <b>1. 进入配置</b>
+            <span>设置页左侧在“常规”和“个人邮箱”之间新增“个人参数配置”。</span>
+          </div>
+          <div class="interaction-step">
+            <b>2. 查询定位</b>
+            <span>按参数名或说明模糊搜索，按启停状态过滤，并支持更新时间排序和分页。</span>
+          </div>
+          <div class="interaction-step">
+            <b>3. 新增/编辑</b>
+            <span>填写参数名、参数值、说明、启用状态；编辑时值不回显。</span>
+          </div>
+          <div class="interaction-step">
+            <b>4. BE 保存</b>
+            <span>当前用户来自 CurrentUserHolder；DB 写密文和 valueLast4。</span>
+          </div>
+          <div class="interaction-step">
+            <b>5. 保存生效</b>
+            <span>启用参数可用于后续调用；停用或删除后不再使用。</span>
+          </div>
+          <div class="interaction-step">
+            <b>6. 运行期注入</b>
+            <span>baiying_call 只替换 ${privateEnv.KEY}，不改写原始配置。</span>
+          </div>
+          <div class="interaction-step">
+            <b>7. 安全退出</b>
+            <span>日志和错误详情脱敏；删除/停用后后续调用不再使用。</span>
+          </div>
+        </div>
+
+        <div class="effect-gallery">
+          <article class="effect-card wide">
+            <h3>效果图 1：FE 完整配置交互（入口、列表、新增、编辑、启停、删除）</h3>
+            <div class="effect-body">
+              <div class="mock-app" aria-label="设置页个人参数配置入口效果图">
+                <aside class="mock-sidebar">
+                  <div class="mock-profile">
+                    <div class="avatar-dot"></div>
+                    <div style="flex: 1">
+                      <div class="mock-line mid"></div>
+                      <div class="mock-line short"></div>
+                    </div>
+                  </div>
+                  <div class="mock-menu-item"><span class="mock-dot"></span>常规</div>
+                  <div class="mock-menu-item active"><span class="mock-dot"></span>个人参数配置</div>
+                  <div class="mock-menu-item"><span class="mock-dot"></span>个人邮箱</div>
+                </aside>
+                <section class="mock-main">
+                  <div class="mock-title">个人参数配置</div>
+                  <div class="mock-toolbar">
+                    <span class="muted">管理 skill 触发工具、MCP、exec 调用时需要的个人私有参数</span>
+                    <span class="mock-button">新增参数</span>
+                  </div>
+                  <div class="mock-filterbar">
+                    <span class="mock-filter search">搜索参数名或说明：API</span>
+                    <span class="mock-filter">状态筛选：启用</span>
+                    <span class="mock-filter">更新时间：倒序 ↓</span>
+                    <span class="mock-filter">每页 10 条</span>
+                  </div>
+                  <div class="mock-table full">
+                    <div class="mock-row">
+                      <div class="mock-cell">参数名</div>
+                      <div class="mock-cell">说明</div>
+                      <div class="mock-cell">状态</div>
+                      <div class="mock-cell">值状态</div>
+                      <div class="mock-cell">更新时间 ↓</div>
+                      <div class="mock-cell">操作</div>
+                    </div>
+                    <div class="mock-row">
+                      <div class="mock-cell"><strong>API_TOKEN</strong></div>
+                      <div class="mock-cell">客户系统令牌</div>
+                      <div class="mock-cell"><span class="status-pill">启用</span></div>
+                      <div class="mock-cell">已配置 ****9A2F</div>
+                      <div class="mock-cell">2026-06-22 10:00</div>
+                      <div class="mock-cell">
+                        <span class="mock-actions">
+                          <span class="mock-button ghost">停用</span>
+                          <span class="mock-button ghost">编辑</span>
+                          <span class="mock-button danger">删除</span>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="mock-row">
+                      <div class="mock-cell"><strong>TENANT_ID</strong></div>
+                      <div class="mock-cell">租户标识</div>
+                      <div class="mock-cell"><span class="status-pill">启用</span></div>
+                      <div class="mock-cell">已配置 ****nt-a</div>
+                      <div class="mock-cell">2026-06-22 10:00</div>
+                      <div class="mock-cell">
+                        <span class="mock-actions">
+                          <span class="mock-button ghost">停用</span>
+                          <span class="mock-button ghost">编辑</span>
+                          <span class="mock-button danger">删除</span>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="mock-row">
+                      <div class="mock-cell"><strong>OLD_KEY</strong></div>
+                      <div class="mock-cell">历史参数</div>
+                      <div class="mock-cell"><span class="status-pill off">停用</span></div>
+                      <div class="mock-cell">已配置 ****0F21</div>
+                      <div class="mock-cell">2026-06-21 18:30</div>
+                      <div class="mock-cell">
+                        <span class="mock-actions">
+                          <span class="mock-button ghost">启用</span>
+                          <span class="mock-button ghost">编辑</span>
+                          <span class="mock-button danger">删除</span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="mock-pagination">
+                    <span>共 23 条</span>
+                    <span class="mock-page active">1</span>
+                    <span class="mock-page">2</span>
+                    <span class="mock-page">3</span>
+                    <span>跳至第 1 页</span>
+                  </div>
+                </section>
+              </div>
+
+              <div class="mock-dialog-row">
+                <div class="mock-modal">
+                  <div class="mock-modal-head">
+                    <span>新增参数</span>
+                    <span class="mock-button">保存</span>
+                  </div>
+                  <div class="mock-modal-body">
+                    <div class="mock-form-grid">
+                      <div class="mock-field">
+                        <label>参数名</label>
+                        <div class="mock-input">API_TOKEN</div>
+                        <div class="mock-help">必填；格式：[A-Z_][A-Z0-9_]{0,127}</div>
+                      </div>
+                      <div class="mock-field">
+                        <label>启用状态</label>
+                        <div class="mock-input">启用</div>
+                        <div class="mock-help">默认启用；停用后不会用于后续调用。</div>
+                      </div>
+                      <div class="mock-field">
+                        <label>参数值</label>
+                        <div class="mock-input">••••••••••••••••</div>
+                        <div class="mock-help">新增必填；服务端加密保存。</div>
+                      </div>
+                      <div class="mock-field">
+                        <label>说明</label>
+                        <div class="mock-input">客户系统调用令牌</div>
+                        <div class="mock-help">用于识别用途，不参与注入。</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mock-modal">
+                  <div class="mock-modal-head">
+                    <span>编辑参数</span>
+                    <span class="mock-button">保存</span>
+                  </div>
+                  <div class="mock-modal-body">
+                    <div class="mock-form-grid">
+                      <div class="mock-field">
+                        <label>参数名</label>
+                        <div class="mock-input disabled">API_TOKEN</div>
+                        <div class="mock-help">编辑时不建议修改 key，避免外部模板失效。</div>
+                      </div>
+                      <div class="mock-field">
+                        <label>参数值</label>
+                        <div class="mock-input"></div>
+                        <div class="mock-help">不回显；留空表示保留旧值。</div>
+                      </div>
+                      <div class="mock-field">
+                        <label>启用状态</label>
+                        <div class="mock-input">启用 / 停用</div>
+                        <div class="mock-help">切换后立即生效。</div>
+                      </div>
+                      <div class="mock-field">
+                        <label>删除确认</label>
+                        <div class="mock-input">确定删除这个个人参数吗？</div>
+                        <div class="mock-help">删除后不再用于后续调用。</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="check-list">
+                <div class="check-item">列表列完整：参数名、说明、状态、值状态、更新时间、操作。</div>
+                <div class="check-item">支持按“参数名或说明”模糊查询，支持状态过滤。</div>
+                <div class="check-item">列表服务端分页；更新时间列支持升序/降序排序，默认按最新更新时间倒序。</div>
+                <div class="check-item">新增时 key 和 value 必填；key 自动 trim + 大写，并按环境变量格式校验。</div>
+                <div class="check-item">编辑时参数值不回显；value 留空代表保留旧值，不会清空密文。</div>
+                <div class="check-item">启用、停用、删除成功后刷新列表，后续调用立即按最新配置执行。</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="effect-card">
+            <h3>效果图 2：BE 保存、启停、删除后的数据变化</h3>
+            <div class="effect-body">
+              <div class="flow-picture" aria-label="个人参数保存后立即生效效果图">
+                <div class="lane">
+                  <div class="step-node">
+                    <strong>FE 提交</strong>
+                    <span>POST /byaiService/userPrivateParam/save<br>key/value/description/enabled</span>
+                  </div>
+                  <div class="step-node">
+                    <strong>BE 校验</strong>
+                    <span>CurrentUserHolder 取当前用户<br>校验 key 格式和重复</span>
+                  </div>
+                  <div class="step-node">
+                    <strong>DB 密文</strong>
+                    <span>po_user_private_param<br>param_value_cipher</span>
+                  </div>
+                  <div class="step-node">
+                    <strong>运行期可用</strong>
+                    <span>只包含启用参数<br>供后续调用使用</span>
+                  </div>
+                </div>
+                <div class="code-plate">
+{
+  "version": 1719020000000,
+  "updated_at": "2026-06-22T10:00:00+08:00",
+  "params": {
+    "API_TOKEN": "<span class="secret-mask">plain-runtime-value</span>",
+    "TENANT_ID": "tenant-a"
+  }
+}
+                </div>
+              </div>
+              <div class="check-list">
+                <div class="check-item">新增：DB 写入密文 <code>param_value_cipher</code>，VO 只返回 <code>hasValue/valueLast4</code>。</div>
+                <div class="check-item">编辑：value 为空时保留旧密文；value 非空时重新加密并更新 last4。</div>
+                <div class="check-item">停用/删除：后续调用只使用 <code>status=NORMAL</code> 且未删除参数。</div>
+                <div class="check-item">无有效参数：后续调用不会继续使用旧值。</div>
+                <div class="check-item">运行期同步失败：只记录 warn，不影响页面保存成功。</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="effect-card">
+            <h3>效果图 3：baiying_call 的完整运行期注入链路</h3>
+            <div class="effect-body">
+              <div class="flow-picture" aria-label="baiying_call 运行期注入效果图">
+                <div class="lane">
+                  <div class="step-node">
+                    <strong>用户触发能力</strong>
+                    <span>模型调用 baiying_call<br>payload 不包含明文 secret</span>
+                  </div>
+                  <div class="step-node">
+                    <strong>解析 userCode</strong>
+                    <span>authContext.userId -> SHARE_BFM_USER_{userId}<br>解析 userCode</span>
+                  </div>
+                  <div class="step-node">
+                    <strong>读取私有参数</strong>
+                    <span>加载当前用户有效参数<br>只接受字符串值</span>
+                  </div>
+                  <div class="step-node">
+                    <strong>内存态替换</strong>
+                    <span>tool URL / headers / params<br>MCP server URL / headers / params</span>
+                  </div>
+                </div>
+                <div class="code-plate">
+// capability 中的模板
+Authorization: Bearer ${privateEnv.API_TOKEN}
+tenant: ${privateEnv.TENANT_ID}
+
+// 发请求前的内存态
+Authorization: Bearer <span class="secret-mask">***</span>
+tenant: tenant-a
+                </div>
+              </div>
+              <div class="check-list">
+                <div class="check-item">当前用户解析顺序：<code>authContext.userId</code> -> 用户信息 -> <code>USER_CODE</code> -> <code>BAIYING_USER_CODE</code>。</div>
+                <div class="check-item">替换范围：tool URL、tool headers、tool 参数、MCP server URL、MCP headers、MCP/toolkit 参数中的字符串值。</div>
+                <div class="check-item">缺失 key：保留 <code>${privateEnv.KEY}</code> 原占位符并 warn，不阻断调用。</div>
+                <div class="check-item">明文不写回 capability、payload、普通日志或 session 文件；request debug 和 errorDetail 都做 value 脱敏。</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="effect-card">
+            <h3>效果图 4：exec 生命周期完整注入链路</h3>
+            <div class="effect-body">
+              <div class="flow-picture" aria-label="resolve_exec_env 注入效果图">
+                <div class="lane">
+                  <div class="step-node">
+                    <strong>skill 使用 exec</strong>
+                    <span>脚本只读取环境变量<br>不把 secret 写进 params</span>
+                  </div>
+                  <div class="step-node">
+                    <strong>OpenClaw hook</strong>
+                    <span>触发 resolve_exec_env<br>event.toolName === "exec"</span>
+                  </div>
+                  <div class="step-node">
+                    <strong>enhance 返回 env</strong>
+                    <span>Record&lt;string,string&gt;<br>读取失败返回空对象</span>
+                  </div>
+                  <div class="step-node">
+                    <strong>子进程执行</strong>
+                    <span>API_TOKEN/TENANT_ID 仅在进程环境可见<br>结束后不持久化</span>
+                  </div>
+                </div>
+                <div class="code-plate">
+api.on("resolve_exec_env", async (event) => {
+  if (event.toolName !== "exec") return {};
+  return { API_TOKEN: "<span class="secret-mask">***</span>", TENANT_ID: "tenant-a" };
+});
+                </div>
+              </div>
+              <div class="check-list">
+                <div class="check-item">只处理 <code>event.toolName === "exec"</code>，其他工具返回空对象。</div>
+                <div class="check-item">读取参数失败、用户未解析、无参数时返回 <code>{}</code>，不阻断 exec。</div>
+                <div class="check-item">secret 仅进入 exec 子进程环境，不进入 tool params，也不通过 <code>before_tool_call</code> 注入。</div>
+                <div class="check-item">skill 文档只写如何使用环境变量，不写任何明文参数值。</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="effect-card wide">
+            <h3>效果图 5：端到端交互完成态与异常表现</h3>
+            <div class="effect-body">
+              <div class="flow-picture" aria-label="端到端完成态与异常表现">
+                <div class="lane">
+                  <div class="step-node">
+                    <strong>正常调用</strong>
+                    <span>占位符命中 private params<br>发送到外部工具/MCP</span>
+                  </div>
+                  <div class="step-node">
+                    <strong>参数缺失</strong>
+                    <span>保留 ${privateEnv.KEY}<br>warn 一次，不阻断</span>
+                  </div>
+                  <div class="step-node">
+                    <strong>参数读取异常</strong>
+                    <span>保存结果不受影响<br>读取失败跳过注入</span>
+                  </div>
+                  <div class="step-node">
+                    <strong>日志脱敏</strong>
+                    <span>命中的 private param value<br>统一替换为 ***</span>
+                  </div>
+                </div>
+                <div class="code-plate">
+[baiying-enhance] private params loaded userCode=adminvip version=1719020000000 keys=API_TOKEN,TENANT_ID
+[baiying-enhance request] tool.post {
+  "headers": { "Authorization": "Bearer <span class="secret-mask">***</span>" },
+  "payload": { "tenant": "tenant-a" }
+}
+                </div>
+              </div>
+              <div class="check-list">
+                <div class="check-item">产品可见：用户只看到 key、说明、状态、是否已配置、后四位和更新时间。</div>
+                <div class="check-item">运行期可见：baiying-enhance 和 exec 子进程短暂拿到明文，用完不持久化。</div>
+                <div class="check-item">外部调用可用：后续工具、MCP、exec 调用按当前用户有效参数执行。</div>
+                <div class="check-item">安全底线：不通过 <code>before_tool_call</code> 把 secret 写到 params，避免进入 OpenClaw 回放和模型可见链路。</div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="data-model">
+        <h2>后端模型</h2>
+        <p>新增独立表 <code>byai.po_user_private_param</code>。DB 只保存密文，Redis 保存运行期明文 JSON，供 baiying-enhance 和外部系统按 <code>userCode</code> 读取。第一版只做用户级参数，不做资源级、工具级或 namespace 分组。</p>
+
+        <h3>表：<code>byai.po_user_private_param</code></h3>
+        <table>
+          <thead>
+            <tr>
+              <th>字段</th>
+              <th>类型</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>param_id</code></td>
+              <td><code>bigint</code></td>
+              <td>主键，使用项目 <code>SequenceService</code> 生成。</td>
+            </tr>
+            <tr>
+              <td><code>user_id</code></td>
+              <td><code>bigint not null</code></td>
+              <td>归属用户。所有管理接口都从 <code>CurrentUserHolder.getCurrentUserId()</code> 获取，不接受请求体 userId。</td>
+            </tr>
+            <tr>
+              <td><code>param_key</code></td>
+              <td><code>varchar(128)</code></td>
+              <td>参数名，校验格式 <code>[A-Z_][A-Z0-9_]{0,127}</code>。</td>
+            </tr>
+            <tr>
+              <td><code>param_value_cipher</code></td>
+              <td><code>text</code></td>
+              <td>参数值密文。页面、VO、日志均不返回明文。</td>
+            </tr>
+            <tr>
+              <td><code>param_value_last4</code></td>
+              <td><code>varchar(16)</code></td>
+              <td>明文后四位，只用于前端提示。</td>
+            </tr>
+            <tr>
+              <td><code>description</code></td>
+              <td><code>varchar(512)</code></td>
+              <td>参数说明。</td>
+            </tr>
+            <tr>
+              <td><code>status</code></td>
+              <td><code>varchar(32)</code></td>
+              <td><code>NORMAL</code> / <code>DISABLED</code>。只有 <code>NORMAL</code> 写入 Redis 有效参数。</td>
+            </tr>
+            <tr>
+              <td><code>create_by/create_time/update_by/update_time</code></td>
+              <td>审计字段</td>
+              <td>沿用现有审计字段风格。</td>
+            </tr>
+            <tr>
+              <td><code>delete_flag</code></td>
+              <td><code>char(1)</code></td>
+              <td>逻辑删除标识，未删除为 <code>0</code>。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>唯一约束：</strong>
+          同一未删除用户下 <code>param_key</code> 唯一，即 <code>(user_id, param_key)</code> where <code>delete_flag='0'</code>。
+        </div>
+
+        <h3>分层文件</h3>
+        <pre><code>byclaw-be/src/main/java/com/iwhalecloud/byai/manager/entity/users/UserPrivateParam.java
+byclaw-be/src/main/java/com/iwhalecloud/byai/manager/mapper/users/UserPrivateParamMapper.java
+byclaw-be/src/main/java/com/iwhalecloud/byai/manager/dto/users/UserPrivateParamDTO.java
+byclaw-be/src/main/java/com/iwhalecloud/byai/manager/vo/users/UserPrivateParamVO.java
+byclaw-be/src/main/java/com/iwhalecloud/byai/manager/application/service/user/UserPrivateParamApplicationService.java
+byclaw-be/src/main/java/com/iwhalecloud/byai/manager/interfaces/controller/user/UserPrivateParamController.java</code></pre>
+      </section>
+
+      <section id="api">
+        <h2>接口契约</h2>
+        <p>接口只服务配置管理。运行期读取不走 BE API，baiying-enhance 直接读 Redis。</p>
+        <table>
+          <thead>
+            <tr>
+              <th>接口</th>
+              <th>用途</th>
+              <th>返回敏感值</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>GET /byaiService/userPrivateParam/list</code></td>
+              <td>按当前登录用户分页查询个人参数列表；支持 <code>keyword</code> 按参数名/说明模糊查询、<code>status</code> 启停过滤、<code>updateTimeSort</code> 更新时间排序，并刷新 Redis 缓存。</td>
+              <td>否，只返回 <code>hasValue</code>、<code>valueLast4</code>、<code>description</code>、<code>status</code>、<code>updateTime</code>。</td>
+            </tr>
+            <tr>
+              <td><code>POST /byaiService/userPrivateParam/save</code></td>
+              <td>新增或编辑个人参数。新增时 key/value 必填；编辑时 value 为空表示保留旧值。</td>
+              <td>否。</td>
+            </tr>
+            <tr>
+              <td><code>POST /byaiService/userPrivateParam/delete</code></td>
+              <td>软删除当前用户参数，并刷新 Redis。</td>
+              <td>否。</td>
+            </tr>
+            <tr>
+              <td><code>POST /byaiService/userPrivateParam/enable</code></td>
+              <td>启用或停用当前用户参数，并刷新 Redis。</td>
+              <td>否。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>保存请求示例</h3>
+        <pre><code>{
+  "key": "API_TOKEN",
+  "value": "plain-value-from-user-input",
+  "description": "客户系统调用令牌",
+  "enabled": true
+}</code></pre>
+
+        <h3>列表请求示例</h3>
+        <pre><code>GET /byaiService/userPrivateParam/list?pageNum=1&amp;pageSize=10&amp;keyword=API&amp;status=NORMAL&amp;updateTimeSort=descend</code></pre>
+
+        <h3>列表响应示例</h3>
+        <pre><code>{
+  "list": [{
+    "paramId": 10001,
+    "key": "API_TOKEN",
+    "description": "客户系统调用令牌",
+    "status": "NORMAL",
+    "enabled": true,
+    "hasValue": true,
+    "valueLast4": "9A2F",
+    "updateTime": "2026-06-22T10:00:00+08:00"
+  }],
+  "total": 23,
+  "pageNum": 1,
+  "pageSize": 10
+}</code></pre>
+
+        <h3>Redis 运行期缓存</h3>
+        <pre><code>{
+  "key": "byai:user:private_params:{userCode}",
+  "value": {
+    "version": 1719020000000,
+    "updated_at": "2026-06-22T10:00:00+08:00",
+    "params": {
+      "API_TOKEN": "plain-runtime-value",
+      "TENANT_ID": "tenant-a"
+    }
+  }
+}</code></pre>
+
+        <div class="callout danger">
+          <strong>运行期读取边界：</strong>
+          baiying-enhance 不调用 BE 接口获取明文。它只通过现有 Redis JSON store 读取 <code>SHARE_BFM_USER_{userId}</code> 解析 <code>userCode</code>，再读取 <code>byai:user:private_params:{userCode}</code>。
+        </div>
+
+        <div class="callout">
+          <strong>启动一致性：</strong>
+          BE 重启后通过 <code>InitUserPrivateParamRedisRunner</code> 异步全量扫描 <code>po_user_private_param</code> 中出现过的用户，逐用户重建运行期数据；只剩停用或删除参数的用户会清理旧运行期数据。
+        </div>
+      </section>
+
+      <section id="runtime">
+        <h2>运行期注入设计</h2>
+
+        <h3>baiying_call executor 注入</h3>
+        <ol>
+          <li><code>BaiyingExecutor.execute()</code> 读取 auth context，拿到 session、userId、headers。</li>
+          <li>优先通过 <code>authContext.userId</code> 读取 Redis <code>SHARE_BFM_USER_{userId}</code>，解析 <code>userCode</code>；失败时再使用 <code>USER_CODE</code>、<code>BAIYING_USER_CODE</code>。</li>
+          <li>通过现有 <code>getSharedRedisJsonStore()</code> 读取 <code>byai:user:private_params:{userCode}</code>，只接收字符串参数值。</li>
+          <li>把 Redis 中的 <code>params</code> 传给运行期占位符替换函数。</li>
+          <li>只替换资源配置里的显式占位符，例如 <code>${privateEnv.API_TOKEN}</code>，不把整包 env 透传给工具。</li>
+          <li>调用结束后不写回 capability、payload、消息、日志或 session 文件；日志和错误详情按 private param value 脱敏。</li>
+        </ol>
+
+        <h3>推荐占位符</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>位置</th>
+              <th>例子</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>HTTP header</td>
+              <td><code>Authorization: Bearer ${privateEnv.API_TOKEN}</code></td>
+              <td>最常见，替换后直接发请求。</td>
+            </tr>
+            <tr>
+              <td>URL</td>
+              <td><code>https://api.example.com/${privateEnv.TENANT_ID}/query</code></td>
+              <td>仅允许替换完整 segment 或 query value，避免构造任意 host。</td>
+            </tr>
+            <tr>
+              <td>MCP header</td>
+              <td><code>x-api-key: ${privateEnv.MCP_KEY}</code></td>
+              <td>在 <code>executeMcp()</code> 发 <code>tools/call</code> 前替换。</td>
+            </tr>
+            <tr>
+              <td>exec env</td>
+              <td><code>API_TOKEN</code></td>
+              <td>通过 <code>resolve_exec_env</code> 返回给 exec 工具，不写入 tool params。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout warn">
+          <strong>关于 skill 生命周期：</strong>
+          OpenClaw 当前没有独立 skill 调用 hook。skill 是模型可读的指令和文件，不能承载私有 env。若 skill 内脚本需要 env，应在脚本执行的 <code>exec</code> 生命周期使用 <code>resolve_exec_env</code> 注入；若 skill 触发 <code>baiying_call</code>，则在 <code>baiying_call</code> executor 内注入。
+        </div>
+
+        <h3>扩展侧新增模块建议</h3>
+        <pre><code>byclaw-exe/extensions/baiying-enhance/src/personal-params.ts
+byclaw-exe/extensions/baiying-enhance/src/personal-params.test.ts
+byclaw-exe/extensions/baiying-enhance/src/executor/debug-channel.ts
+byclaw-exe/extensions/baiying-enhance/src/register-plugin.ts</code></pre>
+      </section>
+
+      <section id="flows">
+        <h2>流程图</h2>
+
+        <h3>配置保存流程</h3>
+        <div class="diagram">
+          <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant U as 用户
+  participant FE as byclaw-fe
+  participant C as UserPrivateParamController
+  participant S as UserPrivateParamApplicationService
+  participant Crypto as Sm4Util
+  participant DB as po_user_private_param
+  participant Redis as Redis private_params
+
+  U->>FE: 填写 key/value/description/enabled
+  FE->>C: POST /byaiService/userPrivateParam/save
+  C->>C: CurrentUserHolder 获取 userId/userCode
+  C->>S: save(request)
+  S->>S: key 格式、重复校验
+  S->>Crypto: encrypt(value)
+  Crypto-->>S: cipher
+  S->>DB: insert/update 密文
+  S->>Redis: set byai:user:private_params:{userCode}
+  S-->>C: 保存成功
+  C-->>FE: 返回 hasValue/valueLast4/status
+          </pre>
+        </div>
+
+        <h3>baiying_call 工具调用流程</h3>
+        <div class="diagram">
+          <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant LLM as 模型
+  participant OC as OpenClaw Tool Runtime
+  participant Tool as baiying_call
+  participant Exec as BaiyingExecutor
+  participant Reader as personal-params reader
+  participant Redis as Redis
+  participant Target as HTTP Tool / MCP Server
+
+  LLM->>OC: 请求调用 baiying_call(params)
+  OC->>Tool: execute(toolCallId, args)
+  Tool->>Exec: execute(capabilityId, resourceType, payload)
+  Exec->>Exec: resolveCapability + extractBackendParameters
+  Exec->>Reader: loadPrivateParamsRuntime(authContext)
+  Reader->>Redis: GET SHARE_BFM_USER_{userId}
+  Redis-->>Reader: userCode
+  Reader->>Redis: GET byai:user:private_params:{userCode}
+  Redis-->>Reader: {version, params}
+  Reader-->>Exec: Record&lt;string,string&gt;
+  Exec->>Exec: 显式占位符替换，仅内存态
+  Exec->>Target: 发起真实工具或 MCP 请求
+  Target-->>Exec: result
+  Exec-->>Tool: ExecutorResponse
+  Tool-->>OC: tool result
+          </pre>
+        </div>
+
+        <h3>exec 环境注入流程</h3>
+        <div class="diagram">
+          <pre class="mermaid">
+flowchart TD
+  A["skill 指令触发 exec 工具"] --> B["OpenClaw 调用 resolve_exec_env hook"]
+  B --> C{"event.toolName 是否为 exec？"}
+  C -- 否 --> D["返回空 env"]
+  C -- 是 --> E["从 authContext/env 解析 userCode"]
+  E --> R["读取 Redis byai:user:private_params:{userCode}"]
+  R --> F{"有有效 params？"}
+  F -- 否 --> D
+  F -- 是 --> G["返回 Record&lt;string,string&gt; 给 exec"]
+  G --> H["exec 子进程环境可见"]
+  H --> I["进程结束，明文不落库"]
+          </pre>
+        </div>
+      </section>
+
+      <section id="security">
+        <h2>安全边界</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>风险</th>
+              <th>控制措施</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>密钥进入 prompt 或 skill 文档</td>
+              <td>禁止在 <code>before_prompt_build</code>、AGENTS.md、SKILL.md 中渲染 env。只输出 key 名或缺失提示。</td>
+            </tr>
+            <tr>
+              <td>密钥进入 tool params 被持久化</td>
+              <td>不在 <code>before_tool_call</code> 返回的 <code>params</code> 中写 secret。executor 内部替换后直接发请求。</td>
+            </tr>
+            <tr>
+              <td>越权管理他人参数</td>
+              <td>BE 使用 <code>CurrentUserHolder</code> 绑定当前用户，忽略请求体 userId。Redis key 使用 <code>userCode</code>，由 BE 写入和 baiying-enhance 解析。</td>
+            </tr>
+            <tr>
+              <td>日志泄漏</td>
+              <td>baiying-enhance 的 request debug 日志需要对 header 和 payload 做 secret redaction，至少对命中占位符的 key 做脱敏。</td>
+            </tr>
+            <tr>
+              <td>Redis 缓存残留旧值</td>
+              <td>BE 在保存、删除、启停、列表查询后刷新 Redis；无有效参数时删除 <code>byai:user:private_params:{userCode}</code>。</td>
+            </tr>
+            <tr>
+              <td>占位符滥用</td>
+              <td>只解析 <code>${privateEnv.KEY}</code>，不解析任意表达式，不支持嵌套和默认命令执行。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="plan">
+        <h2>落地计划</h2>
+        <ol>
+          <li>
+            <strong>BE 数据层：</strong>
+            新增表、entity、mapper、DTO、VO。完成 key 校验、密文保存、后四位展示字段。
+          </li>
+          <li>
+            <strong>BE 应用层：</strong>
+            新增 <code>list/save/delete/enable</code> 管理接口。列表接口只返回脱敏值；保存、删除、启停、列表查询后刷新 Redis。
+          </li>
+          <li>
+            <strong>BE 启动同步：</strong>
+            新增 <code>InitUserPrivateParamRedisRunner</code>，服务启动后异步全量重建用户个人参数运行期数据，避免 DB 与 Redis 不一致。
+          </li>
+          <li>
+            <strong>baiying-enhance Redis 读取：</strong>
+            新增 personal params 读取模块，复用 <code>createRedisJsonStore/getSharedRedisJsonStore</code>，读取 <code>SHARE_BFM_USER_{userId}</code> 和 <code>byai:user:private_params:{userCode}</code>。
+          </li>
+          <li>
+            <strong>baiying_call 注入：</strong>
+            在 <code>BaiyingExecutor.execute()</code> resolveCapability 后、分派 executeTool/executeMcp 前解析 env，并传给各 resource executor。
+          </li>
+          <li>
+            <strong>模板替换：</strong>
+            在 tool/mcp/agent 资源配置中支持 <code>${privateEnv.KEY}</code>，只替换白名单字段。
+          </li>
+          <li>
+            <strong>可选 hook：</strong>
+            注册 <code>resolve_exec_env</code>，仅当 <code>event.toolName === "exec"</code> 时返回当前用户 Redis params。暂不使用 <code>before_tool_call</code> 传 secret。
+          </li>
+          <li>
+            <strong>前端页面：</strong>
+            增加个人参数配置管理页，支持新增、编辑、启停、删除、脱敏展示、变量名校验、分页、参数名/说明模糊查询、状态过滤和更新时间排序。
+          </li>
+        </ol>
+      </section>
+
+      <section id="tests">
+        <h2>验证项</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>模块</th>
+              <th>测试重点</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>BE 单测</td>
+              <td>key 校验、重复 key、越权保护、分页查询、参数名/说明模糊查询、状态过滤、更新时间排序、密文保存、编辑空 value 保留旧值、脱敏返回、Redis 刷新和删除、服务重启全量同步。</td>
+            </tr>
+            <tr>
+              <td>baiying-enhance 单测</td>
+              <td>userId 到 userCode 解析、Redis key 读取、占位符替换、缺失 key、日志/错误详情脱敏、Redis 异常降级。</td>
+            </tr>
+            <tr>
+              <td>FE 验证</td>
+              <td>菜单顺序、表单校验、编辑不回显 value、分页切换、参数名/说明搜索、状态筛选、更新时间排序、启停/删除后刷新列表、页面不展示明文。</td>
+            </tr>
+            <tr>
+              <td>集成测试</td>
+              <td>用户 A/B 同名 key 隔离；分页/筛选/排序与当前用户隔离同时生效；停用/删除后 Redis 不残留；tool/toolkit/MCP headers、URL、参数替换；exec env 返回。</td>
+            </tr>
+            <tr>
+              <td>安全回归</td>
+              <td>确认 secret 不出现在 prompt、SKILL.md、tool params 持久化、OpenClaw session 文件、普通 request log。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>当前实施口径：</strong>
+          第一版只支持用户级参数；BE 不提供运行期明文读取接口；baiying-enhance 运行期从 Redis 读取并注入。
+        </div>
+      </section>
+
+      <footer>
+        参考代码：<code>CurrentUserHolder</code>、<code>registerBaiyingEnhancePlugin</code>、<code>BaiyingExecutor.execute</code>、<code>executeTool</code>、<code>executeMcp</code>、OpenClaw <code>PluginHookName</code>、<code>runBeforeToolCall</code>、<code>runResolveExecEnv</code>。
+      </footer>
+    </main>
+  </div>
+
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      securityLevel: "strict",
+      theme: "base",
+      themeVariables: {
+        background: "#ffffff",
+        mainBkg: "#edf5ff",
+        secondBkg: "#eaf7f0",
+        tertiaryColor: "#fff4e5",
+        darkMode: false,
+        textColor: "#172033",
+        primaryColor: "#edf5ff",
+        primaryTextColor: "#172033",
+        primaryBorderColor: "#1f6feb",
+        lineColor: "#667085",
+        secondaryColor: "#eaf7f0",
+        actorBkg: "#edf5ff",
+        actorBorder: "#1f6feb",
+        actorTextColor: "#172033",
+        labelBoxBkgColor: "#ffffff",
+        labelBoxBorderColor: "#d9e1ec",
+        signalColor: "#1f6feb",
+        signalTextColor: "#172033",
+        loopTextColor: "#172033",
+        noteBkgColor: "#fff4e5",
+        noteTextColor: "#172033",
+        noteBorderColor: "#a85a00",
+        activationBkgColor: "#eaf7f0",
+        activationBorderColor: "#16794c",
+        sequenceNumberColor: "#1f6feb",
+        fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, Microsoft YaHei, Arial, sans-serif"
+      }
+    });
+  </script>
+</body>
+</html>
