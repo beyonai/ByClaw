@@ -150,6 +150,47 @@ function queryButton(text: string) {
 }
 
 describe('ApprovalForm', () => {
+  it('keeps selected term values visible when multiple term options are not loaded', async () => {
+    const selectedCustomerCode = 'custeea5e07bf20643b598b6faa60cfdc59d';
+    const content: OperationFormConfirmation = {
+      sourceAgentType: 'agent',
+      metadata: '{}',
+      schemaVersion: '1',
+      formId: 'approval-form',
+      title: 'Approval',
+      description: 'Please confirm',
+      substance: [
+        {
+          toolCallId: 'tool-call-1',
+          toolName: 'tool-one',
+          actionCode: 'action-one',
+          actionName: 'Action One',
+          title: 'Step One',
+          description: 'First step',
+          rule: [
+            [
+              {
+                formType: 'term_select',
+                fieldCode: 'customerCodes',
+                fieldPath: 'requestBody.customerCodes',
+                fieldName: '客户编码或名称列表',
+                fieldType: 'array',
+                fieldValue: [selectedCustomerCode],
+                options: [],
+              } as any,
+            ],
+          ],
+        },
+      ],
+    };
+
+    render(<ApprovalForm {...createApprovalFormProps(content)} />);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue(selectedCustomerCode)).toBeInTheDocument();
+    });
+  });
+
   it('updates input value when fieldValue changes after initial render', async () => {
     const initialContent: OperationFormConfirmation = {
       sourceAgentType: 'agent',
