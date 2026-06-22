@@ -167,12 +167,26 @@
 }
 
 .categoryPath {
+  width: fit-content;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--beyond-color-text-tertiary);
+  cursor: pointer;
   font-size: 11px;
   line-height: 16px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
+
+  &:hover,
+  &:focus {
+    color: var(--beyond-color-primary, #1677ff);
+    text-decoration: underline;
+    outline: none;
+  }
 }
 
 .categoryBody {
