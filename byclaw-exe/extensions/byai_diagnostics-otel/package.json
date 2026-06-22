@@ -24,7 +24,7 @@
     "@opentelemetry/semantic-conventions": "1.41.1"
   },
   "devDependencies": {
-    "esbuild": "0.25.0",
+    "esbuild": "0.25.12",
     "vitest": "4.1.8"
   },
   "openclaw": {

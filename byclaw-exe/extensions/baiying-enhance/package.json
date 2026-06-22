@@ -15,10 +15,10 @@
     "ioredis": "5.10.1"
   },
   "devDependencies": {
-    "@types/node": "22.10.0",
-    "esbuild": "0.25.0",
+    "@types/node": "22.19.17",
+    "esbuild": "0.25.12",
     "tsx": "4.21.0",
-    "vitest": "3.0.5"
+    "vitest": "3.2.4"
   },
   "openclaw": {
     "extensions": [
