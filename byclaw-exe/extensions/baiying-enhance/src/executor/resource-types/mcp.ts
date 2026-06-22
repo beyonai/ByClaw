@@ -1,7 +1,7 @@
 import type { Capability, Dict, ExecutorFailure, ExecutorResponse } from "../types.js";
 import { asString, isRecord } from "../types.js";
 import type { AuthContext } from "../auth.js";
-import { applyEnvAuthOverrides, ensureMcpIdentityHeaders, mergeAuthHeaders, normalizeCustomHeaders } from "../auth.js";
+import { applyEnvAuthOverrides, ensureMcpIdentityHeaders, mergeAuthHeaders } from "../auth.js";
 import { makeError } from "../errors.js";
 import { extractJsonRpcPayload, postJson } from "../http.js";
 import { buildOntologyMcpHeaders, debugMcpSessionHeaders } from "../ontology-headers.js";
@@ -13,13 +13,13 @@ import {
   docSyncIntervalSec,
   docSyncTimeoutSec,
   resolveLangfuseParentObservationId,
+  resolveLangfuseTraceId,
   resolveDocChannelTraceId,
   resolveDocSessionId,
 } from "../doc-shared.js";
 import { executeViaCallAgent } from "../call-agent.js";
 import { runLegacySseJsonRpcSequence } from "../mcp-legacy-sse.js";
 import { getCommonGatewayMetadata } from "../doc-shared.js";
-import { applyPrivateEnvPlaceholders, redactPrivateParamValues } from "../../personal-params.js";
 
 /** Mirror of `BaiYingExecutor._execute_mcp`. */
 export async function executeMcp(params: {
@@ -31,21 +31,19 @@ export async function executeMcp(params: {
   session?: string;
   timeoutMs?: number;
   logger?: BaiyingEnhanceLogger;
-  privateParams?: Record<string, string>;
 }): Promise<ExecutorResponse> {
   const { capability } = params;
-  const requestParameters = applyPrivateEnvPlaceholders(params.parameters, params.privateParams, params.logger);
   const resourceType = String(capability.resource_type ?? "").trim().toUpperCase();
   if (resourceType === "OBJECT" || resourceType === "VIEW") {
     return executeOntologyResourceViaCallAgent({
       capability,
-      parameters: requestParameters,
+      parameters: params.parameters,
       logger: params.logger,
     });
   }
 
   const mcp = isRecord(capability.mcp) ? (capability.mcp as Dict) : {};
-  const serverUrl = applyPrivateEnvPlaceholders(asString(mcp.server_url), params.privateParams, params.logger);
+  const serverUrl = asString(mcp.server_url);
   const transferType = normalizeMcpTransferType(
     mcp.transfer_type ?? mcp.transferType ?? mcp.mcpType ?? mcp.mcp_type,
   );
@@ -68,7 +66,7 @@ export async function executeMcp(params: {
     actionName: String(toolInfo.name),
     resourceId,
     resourceType: String(capability.resource_type ?? "MCP"),
-    parameters: requestParameters,
+    parameters: params.parameters,
     rawSchema: toolInfo.input_schema,
   });
   if (validation) return validation;
@@ -77,7 +75,7 @@ export async function executeMcp(params: {
     jsonrpc: "2.0",
     id: 1,
     method: "tools/call",
-    params: { name: toolInfo.name, arguments: requestParameters },
+    params: { name: toolInfo.name, arguments: params.parameters },
   };
 
   const { headers: ontologyHeaders, error: ontologyError } = buildOntologyMcpHeaders(capability);
@@ -94,15 +92,9 @@ export async function executeMcp(params: {
     session: params.session,
     extraHeaders: { ...ontologyHeaders, ...(params.forwardHeaders ?? {}) },
   });
-  const mcpHeaders = applyPrivateEnvPlaceholders(
-    normalizeCustomHeaders(mcp.headers),
-    params.privateParams,
-    params.logger,
-  );
-  Object.assign(headers, mcpHeaders);
   ensureMcpIdentityHeaders(headers);
   applyEnvAuthOverrides(headers);
-  const { request_headers } = getCommonGatewayMetadata(requestParameters);
+  const { request_headers } = getCommonGatewayMetadata(params.parameters);
   if (request_headers) {
     Object.assign(headers, request_headers);
   }
@@ -134,13 +126,13 @@ export async function executeMcp(params: {
     timeoutMs: params.timeoutMs ?? 30_000,
   });
   if ("error" in data) {
-    const errorDetail = redactPrivateParamValues({
+    const errorDetail = {
       url: serverUrl,
       headers,
-      request_params: requestParameters,
+      request_params: params.parameters,
       error_code: (data.error as ExecutorFailure).error_code,
       error_message: (data.error as ExecutorFailure).error,
-    }, params.privateParams);
+    };
     return makeError(
       (data.error as ExecutorFailure).error_code,
       `MCP request failed: ${(data.error as ExecutorFailure).error}`,
@@ -290,6 +282,7 @@ async function executeOntologyResourceViaCallAgent(input: {
   const sessionId = resolveDocSessionId(input.parameters, resourceId || resourceCode);
   const channelTraceId = resolveDocChannelTraceId(input.parameters);
   const langfuseParentObservationId = resolveLangfuseParentObservationId(input.parameters);
+  const langfuseTraceId = resolveLangfuseTraceId(input.parameters);
   const traceId = channelTraceId || `${sessionId}-${Date.now()}`;
   const targetAgentType =
     asString(input.parameters.target_agent_type) ||
@@ -311,6 +304,10 @@ async function executeOntologyResourceViaCallAgent(input: {
   if (langfuseParentObservationId) {
     payload.langfuseParentObservationId = langfuseParentObservationId;
     metadata.langfuseParentObservationId = langfuseParentObservationId;
+  }
+  if (langfuseTraceId) {
+    payload.langfuseTraceId = langfuseTraceId;
+    metadata.langfuseTraceId = langfuseTraceId;
   }
   const toolCallId = input.parameters.tool_call_id as string;
 
@@ -335,6 +332,7 @@ async function executeOntologyResourceViaCallAgent(input: {
     },
     metadata,
     langfuseParentObservationId,
+    langfuseTraceId,
     logger: input.logger,
     parentMessageId: toolCallId,
   });

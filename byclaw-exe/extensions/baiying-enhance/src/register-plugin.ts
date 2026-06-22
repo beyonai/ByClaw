@@ -15,6 +15,11 @@ import { createBaiyingCallToolFactory } from "./baiying-call-tool.js";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
 import { loadAuthContext, resolveAuthFilePath } from "./executor/auth.js";
 import { loadPrivateParamsRuntime } from "./personal-params.js";
+import { resolveChannelSessionIdForTool } from "./channel-session-resolve.js";
+import {
+  extractFinalAssistantOutput,
+  scheduleLangfuseFinalOutputBackfill,
+} from "./langfuse-final-output.js";
 
 function resolvePluginPath(api: OpenClawPluginApi, raw: string): string {
   if (path.isAbsolute(raw)) {
@@ -146,6 +151,37 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
       );
       return {};
     }
+  });
+
+  api.on("agent_end", (event, ctx) => {
+    const run = async () => {
+      const sessionKey = typeof ctx?.sessionKey === "string" ? ctx.sessionKey : "";
+      const channelResolve = resolveChannelSessionIdForTool(ctx, sessionKey);
+      if (channelResolve.source === "child") {
+        return;
+      }
+      const output = extractFinalAssistantOutput(Array.isArray(event.messages) ? event.messages : []);
+      if (!output) {
+        return;
+      }
+      scheduleLangfuseFinalOutputBackfill({
+        traceId: channelResolve.traceId,
+        sessionId: channelResolve.sessionId,
+        userId: process.env.USER_CODE,
+        output,
+        logger: {
+          info: (message) => api.logger.info(message),
+          warn: (message) => api.logger.warn(message),
+        },
+      });
+    };
+    void run().catch((err) => {
+      api.logger.warn(
+        `baiying-enhance: Langfuse final output hook failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    });
   });
 
   registerManagedAgentModelHooks(api, {
