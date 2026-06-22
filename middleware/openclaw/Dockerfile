@@ -217,9 +217,10 @@ RUN chmod +x \
 
 RUN curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh
 
-# 安装 Bun 运行环境（gbrain 必需）
-RUN curl -fsSL https://bun.sh/install | bash
-ENV PATH="/root/.bun/bin:$PATH"
+# 安装 Bun 运行环境（gbrain 必需）— 从官方镜像拷贝二进制，避免 curl 下载超时
+COPY --from=oven/bun:1-debian /usr/local/bin/bun /usr/local/bin/bun
+RUN ln -sf /usr/local/bin/bun /usr/local/bin/bunx
+ENV PATH="/root/.bun/bin:/usr/local/bin:$PATH"
 
 # add gbrain（官方原版）
 RUN bun install -g github:garrytan/gbrain
