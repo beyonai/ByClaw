@@ -193,9 +193,60 @@ BYCLAW_RUNTIME_ENV_EXTRA_BLACKLIST_KEYS=FOO_PASSWORD,BAR_TOKEN
 - Longhorn RWX workspace PVC
 - Redis / openGauss
 - OpenSandbox server / RBAC / ConfigMap / Secret
-- ByClaw BE / FE
+- ByClaw BE / FE / QA / DataCloud / Demo
 - ByClaw ingress
 - OpenSandbox HPA
+
+## 监控告警通知
+
+`deploy/k3s/install-monitoring.sh` 会从 `env.k3s` 读取 Alertmanager 和钉钉机器人配置。启用后会生成 `prometheus-webhook-dingtalk` 的 Secret、Deployment、Service，并在 Alertmanager 的 `byclaw-autoscale` receiver 中同时配置 BE 自动扩缩容 webhook 和钉钉通知 webhook。
+
+```bash
+SANDBOX_AUTOSCALE_DINGTALK_ENABLED=true
+SANDBOX_AUTOSCALE_DINGTALK_WEBHOOK_URL=https://oapi.dingtalk.com/robot/send?access_token=replace-me
+SANDBOX_AUTOSCALE_DINGTALK_SECRET=SECreplace-me
+SANDBOX_AUTOSCALE_DINGTALK_TARGET=sandbox
+SANDBOX_AUTOSCALE_DINGTALK_SEND_RESOLVED=false
+```
+
+真实 webhook 和加签只写入私有 `env.k3s` 或部署环境变量，不要提交到仓库。`SANDBOX_AUTOSCALE_DINGTALK_SECRET` 为空时脚本不会生成 `secret` 字段，可用于未开启加签的机器人。
+
+脚本会给 `prometheus-webhook-dingtalk` 下发沙箱告警专用模板：普通自动扩缩容使用 `📈 升配` / `📉 降配`，异常自动恢复使用 `🧯 异常自动恢复`，运维异常告警使用 `🚨 运维异常`，不再使用默认模板里的固定 `Graph: 📈` 文案。Alertmanager 会同时投递 BE webhook 和钉钉 webhook；BE 处理成功后需要依赖 Prometheus 指标恢复来 resolve 告警，不能直接清除 Prometheus 的 firing 状态。
+
+Alertmanager 默认挂载 `alertmanager-data` PVC 到 `/alertmanager`，容量由 `MONITORING_ALERTMANAGER_PVC_SIZE` 控制，默认 `2Gi`。`repeat_interval` 默认 `1h`，用于覆盖 BE 发布或重启窗口内漏消费的持续 firing 告警；如果 BE 处理后指标恢复，Prometheus 会自动 resolve，Alertmanager 不会继续按 1 小时重复发送。
+
+沙箱已达到最高或最低规格后，BE 会暴露 `byclaw_sandbox_autoscale_boundary_blacklist` 指标，Prometheus 告警规则通过 `unless on(sandboxId)` 过滤同方向极值告警，避免 Alertmanager 和钉钉机器人重复发送无意义消息。BE 同时暴露 `byclaw_sandbox_autoscale_runtime_info` 指标，Prometheus 告警会按 `sandboxId` 关联 `userCode` 和 `profileKey`，钉钉详情中可以直接看到用户编码和当前规格。黑名单按当前活跃沙箱和规格链动态计算；新增更高或更低规格后，原极值沙箱会自动恢复监控。
+
+高水位或 OOM 告警会覆盖 `STARTING` 和 `RUNNING` 状态的活跃沙箱。`RUNNING` 沙箱继续走 OpenSandbox 原地调整；非 `RUNNING` 沙箱会先保存目标规格偏好，再触发沙箱重启重拉，避免容器已经 OOM/异常退出时原地调整被 OpenSandbox 拒绝。降配告警只处理可原地调整的运行态沙箱，且默认会在最近一次升配或 OOM 处理后的 15 分钟内跳过降配，防止重负载刚缓解就立刻回落到过低规格。
+
+```bash
+BYCLAW_SANDBOX_TIER_AUTOSCALE_SCALE_DOWN_AFTER_UP_PROTECTION=PT15M
+BYCLAW_SANDBOX_TIER_AUTOSCALE_BOUNDARY_BLACKLIST_POD_SUFFIX=-0
+BYCLAW_SANDBOX_TIER_AUTOSCALE_PROMETHEUS_BASE_URL=http://prometheus.monitoring.svc.cluster.local:9090/prometheus
+BYCLAW_SANDBOX_TIER_AUTOSCALE_PROMETHEUS_QUERY_WINDOW=PT5M
+```
+
+## byclaw-demo
+
+K3s 部署会生成 `Deployment/byclaw-demo` 和 `Service/byclaw-demo`，默认镜像为：
+
+```bash
+IMAGE_DEMO=ghcr.io/beyonai/byclaw-middleware/byclaw-demo:main
+APIDEMO_PORT=8999
+BYCLAW_DEMO_REPLICAS=1
+BYCLAW_DEMO_DB_DATABASE=postgres
+BYCLAW_DEMO_DB_SCHEMA=demo
+```
+
+`byclaw-demo` 会读取通用 runtime ConfigMap/Secret，并用专属 runtime ConfigMap 覆盖 `DB_DATABASE` / `DB_SCHEMA` 到 demo 数据源，默认连接 `postgres` 数据库的 `demo` schema。它会额外挂载 `logback.xml` 到 `/app/config/logback.xml`，日志写入共享 PVC 的 `logs/demo`。
+
+demo 相关 OpenGauss SQL 可放在 `deploy/k3s/migrations/demo/`，默认只自动执行 `*.auto.sql`，避免普通占位 SQL 在每次 `init|update` 时被重复执行：
+
+```bash
+BYCLAW_K3S_APPLY_DEMO_SQL=true
+BYCLAW_K3S_DEMO_SQL_DIR=deploy/k3s/migrations/demo
+BYCLAW_K3S_DEMO_SQL_GLOB=*.auto.sql
+```
 
 完整部署手册见：
 

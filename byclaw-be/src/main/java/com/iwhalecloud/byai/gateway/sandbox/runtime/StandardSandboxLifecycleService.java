@@ -123,10 +123,16 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
             String idempotencyKey = buildIdempotencyKey(userCode, sandboxType, launchRequest.getMetadata());
             mergeLaunchMetadata(request, launchRequest.getMetadata());
 
-            Optional<SandboxRuntimeInstance> reusable = runtimeProvider.findReusable(userCode, sandboxType);
+            Optional<SandboxRuntimeInstance> reusable = Boolean.TRUE.equals(launchRequest.getSkipReusableSandbox())
+                ? Optional.empty()
+                : runtimeProvider.findReusable(userCode, sandboxType);
             if (reusable.isPresent()) {
                 log.info("生命周期服务命中可复用远端沙箱，provider={}，user={}，type={}，sandboxId={}",
                     runtimeProvider.providerType(), userCode, sandboxType, reusable.get().getSandboxId());
+            }
+            else if (Boolean.TRUE.equals(launchRequest.getSkipReusableSandbox())) {
+                log.info("生命周期服务按请求跳过可复用沙箱，准备创建新沙箱，provider={}，user={}，type={}，idempotencyKey={}",
+                    runtimeProvider.providerType(), userCode, sandboxType, idempotencyKey);
             }
             else {
                 log.info("生命周期服务未命中可复用沙箱，准备创建新沙箱，provider={}，user={}，type={}，idempotencyKey={}",

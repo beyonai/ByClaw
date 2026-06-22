@@ -52,6 +52,8 @@ public interface SsSandboxRecordMapper {
     List<SsSandboxRecord> selectRunningByUserAndSandboxType(@Param("userCode") String userCode,
                                                             @Param("sandboxType") String sandboxType);
 
+    List<SsSandboxRecord> selectRunningAutoscaleRecords();
+
     /**
      * 更新沙箱状态为已释放
      *
@@ -100,6 +102,19 @@ public interface SsSandboxRecordMapper {
                             @Param("lastResizeToProfile") String lastResizeToProfile,
                             @Param("lastResizeError") String lastResizeError,
                             @Param("lockVersion") Integer lockVersion);
+
+    int claimResize(@Param("id") Long id,
+                    @Param("fromProfileKey") String fromProfileKey,
+                    @Param("toProfileKey") String toProfileKey,
+                    @Param("resizeStatus") String resizeStatus,
+                    @Param("lastResizeAt") Date lastResizeAt,
+                    @Param("lastResizeReason") String lastResizeReason,
+                    @Param("lastResizeSuccess") Integer lastResizeSuccess,
+                    @Param("lastResizeFromProfile") String lastResizeFromProfile,
+                    @Param("lastResizeToProfile") String lastResizeToProfile,
+                    @Param("lastResizeError") String lastResizeError,
+                    @Param("processingStaleBefore") Date processingStaleBefore,
+                    @Param("lockVersion") Integer lockVersion);
 
     int updateResizeSummary(@Param("id") Long id,
                             @Param("resizeStatus") String resizeStatus,

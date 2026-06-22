@@ -1,6 +1,7 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 
 export const MANAGED_BAIYING_AGENT_PREFIX = "baiying-agent-" as const;
+export const MAIN_AGENT_ID = "main" as const;
 
 const DEFAULT_WAIT_MS = 15_000;
 const DEFAULT_POLL_MS = 100;
@@ -17,7 +18,7 @@ type Logger = {
   warn?: (msg: string) => void;
 };
 
-export type ManagedAgentConfigReadiness = {
+export type BaiyingAgentConfigReadiness = {
   ready: boolean;
   agentId: string;
   primary?: string;
@@ -25,6 +26,8 @@ export type ManagedAgentConfigReadiness = {
   modelId?: string;
   reason?: string;
 };
+
+export type ManagedAgentConfigReadiness = BaiyingAgentConfigReadiness;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -68,6 +71,32 @@ function resolvePrimaryModelRef(agent: Record<string, unknown>): string {
   return "";
 }
 
+function findAgent(cfg: OpenClawConfig, agentId: string): Record<string, unknown> | undefined {
+  return cfg.agents?.list?.find((candidate) => candidate.id === agentId) as
+    | Record<string, unknown>
+    | undefined;
+}
+
+function resolveMainPrimaryModelRef(
+  cfg: OpenClawConfig,
+  agent: Record<string, unknown>,
+): string {
+  const agentPrimary = resolvePrimaryModelRef(agent);
+  if (agentPrimary) {
+    return agentPrimary;
+  }
+
+  const defaults = cfg.agents?.defaults;
+  if (!isRecord(defaults)) {
+    return "";
+  }
+  return resolvePrimaryModelRef(defaults);
+}
+
+function shouldWaitForBaiyingAgentConfig(agentId: string): boolean {
+  return agentId === MAIN_AGENT_ID || agentId.startsWith(MANAGED_BAIYING_AGENT_PREFIX);
+}
+
 function splitPrimaryModelRef(primary: string): { providerId: string; modelId: string } | null {
   const separator = primary.indexOf("/");
   if (separator <= 0 || separator >= primary.length - 1) {
@@ -98,22 +127,23 @@ function providerHasModel(provider: unknown, modelId: string): boolean {
   return Object.prototype.hasOwnProperty.call(models, modelId);
 }
 
-export function resolveManagedBaiyingAgentConfigReadiness(
+export function resolveBaiyingAgentConfigReadiness(
   cfg: OpenClawConfig,
   agentId: string,
-): ManagedAgentConfigReadiness {
-  if (!agentId.startsWith(MANAGED_BAIYING_AGENT_PREFIX)) {
-    return { ready: true, agentId, reason: "not_managed_baiying_agent" };
+): BaiyingAgentConfigReadiness {
+  if (!shouldWaitForBaiyingAgentConfig(agentId)) {
+    return { ready: true, agentId, reason: "not_baiying_config_wait_target" };
   }
 
-  const agent = cfg.agents?.list?.find((candidate) => candidate.id === agentId) as
-    | Record<string, unknown>
-    | undefined;
+  const agent = findAgent(cfg, agentId);
   if (!agent) {
     return { ready: false, agentId, reason: "agent_missing" };
   }
 
-  const primary = resolvePrimaryModelRef(agent);
+  const primary =
+    agentId === MAIN_AGENT_ID
+      ? resolveMainPrimaryModelRef(cfg, agent)
+      : resolvePrimaryModelRef(agent);
   if (!primary) {
     return { ready: false, agentId, reason: "primary_model_missing" };
   }
@@ -155,7 +185,14 @@ export function resolveManagedBaiyingAgentConfigReadiness(
   };
 }
 
-export async function waitForManagedBaiyingAgentConfig(params: {
+export function resolveManagedBaiyingAgentConfigReadiness(
+  cfg: OpenClawConfig,
+  agentId: string,
+): ManagedAgentConfigReadiness {
+  return resolveBaiyingAgentConfigReadiness(cfg, agentId);
+}
+
+export async function waitForBaiyingAgentConfig(params: {
   runtime: RuntimeConfigReader;
   cfg: OpenClawConfig;
   agentId: string;
@@ -167,30 +204,41 @@ export async function waitForManagedBaiyingAgentConfig(params: {
   const pollMs = params.pollMs ?? DEFAULT_POLL_MS;
   const start = Date.now();
   let cfg = readRuntimeConfig(params.runtime, params.cfg);
-  let readiness = resolveManagedBaiyingAgentConfigReadiness(cfg, params.agentId);
+  let readiness = resolveBaiyingAgentConfigReadiness(cfg, params.agentId);
 
   if (readiness.ready) {
     return cfg;
   }
 
   params.log?.info?.(
-    `[diagnose-sdk] waiting for managed agent config before dispatch: agent=${params.agentId}, reason=${readiness.reason ?? "unknown"}, waitMs=${waitMs}`,
+    `[diagnose-sdk] waiting for baiying agent config before dispatch: agent=${params.agentId}, reason=${readiness.reason ?? "unknown"}, waitMs=${waitMs}`,
   );
 
   while (Date.now() - start < waitMs) {
     await sleep(pollMs);
     cfg = readRuntimeConfig(params.runtime, params.cfg);
-    readiness = resolveManagedBaiyingAgentConfigReadiness(cfg, params.agentId);
+    readiness = resolveBaiyingAgentConfigReadiness(cfg, params.agentId);
     if (readiness.ready) {
       params.log?.info?.(
-        `[diagnose-sdk] managed agent config ready before dispatch: agent=${params.agentId}, model=${readiness.primary ?? "unknown"}, waitedMs=${Date.now() - start}`,
+        `[diagnose-sdk] baiying agent config ready before dispatch: agent=${params.agentId}, model=${readiness.primary ?? "unknown"}, waitedMs=${Date.now() - start}`,
       );
       return cfg;
     }
   }
 
   params.log?.warn?.(
-    `[diagnose-sdk] managed agent config still not ready before dispatch: agent=${params.agentId}, reason=${readiness.reason ?? "unknown"}, waitedMs=${Date.now() - start}`,
+    `[diagnose-sdk] baiying agent config still not ready before dispatch: agent=${params.agentId}, reason=${readiness.reason ?? "unknown"}, waitedMs=${Date.now() - start}`,
   );
   return cfg;
+}
+
+export async function waitForManagedBaiyingAgentConfig(params: {
+  runtime: RuntimeConfigReader;
+  cfg: OpenClawConfig;
+  agentId: string;
+  log?: Logger;
+  waitMs?: number;
+  pollMs?: number;
+}): Promise<OpenClawConfig> {
+  return waitForBaiyingAgentConfig(params);
 }
