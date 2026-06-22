@@ -1485,7 +1485,7 @@ class DataCloudWorker(GatewayWorker):
         )
         return None
 
-    async def start_heartbeat(self, **kwargs) -> None:
+    async def start_heartbeat(self, **kwargs: Any) -> None:
         setup_logging(extra_namespaces=("byclaw_data",))
         await super().start_heartbeat(**kwargs)
 
