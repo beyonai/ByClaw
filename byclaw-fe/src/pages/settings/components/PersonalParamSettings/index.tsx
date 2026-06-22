@@ -159,6 +159,30 @@ const PersonalParamSettings: React.FC = () => {
     });
   };
 
+  const renderValueExtra = () => {
+    if (!editingParam?.hasValue) {
+      return intl.formatMessage({ id: 'settings.params.valueTip' });
+    }
+    return (
+      <div className={styles.valueExtra}>
+        <div>
+          <Tag color="green">{intl.formatMessage({ id: 'settings.params.configured' })}</Tag>
+          <Text type="secondary">
+            {intl.formatMessage(
+              { id: 'settings.params.valueMaskedTip' },
+              {
+                value: editingParam.valueLast4
+                  ? `****${editingParam.valueLast4}`
+                  : intl.formatMessage({ id: 'settings.params.valueHidden' }),
+              }
+            )}
+          </Text>
+        </div>
+        <Text type="secondary">{intl.formatMessage({ id: 'settings.params.valueKeepTip' })}</Text>
+      </div>
+    );
+  };
+
   const columns: ColumnsType<PersonalParam> = [
     {
       title: intl.formatMessage({ id: 'settings.params.key' }),
@@ -297,7 +321,7 @@ const PersonalParamSettings: React.FC = () => {
         onOk={handleSave}
         onCancel={() => setModalOpen(false)}
         width={640}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" preserve={false}>
           <div className={styles.formGrid}>
@@ -327,11 +351,7 @@ const PersonalParamSettings: React.FC = () => {
           <Form.Item
             label={intl.formatMessage({ id: 'settings.params.value' })}
             name="value"
-            extra={
-              editingParam?.hasValue
-                ? intl.formatMessage({ id: 'settings.params.valueKeepTip' })
-                : intl.formatMessage({ id: 'settings.params.valueTip' })
-            }
+            extra={renderValueExtra()}
             rules={[
               {
                 required: !editingParam?.hasValue,
@@ -339,7 +359,14 @@ const PersonalParamSettings: React.FC = () => {
               },
             ]}
           >
-            <Input.Password autoComplete="new-password" />
+            <Input.Password
+              autoComplete="new-password"
+              placeholder={
+                editingParam?.hasValue
+                  ? intl.formatMessage({ id: 'settings.params.valueEditPlaceholder' })
+                  : undefined
+              }
+            />
           </Form.Item>
 
           <Form.Item label={intl.formatMessage({ id: 'settings.params.description' })} name="description">
