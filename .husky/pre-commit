@@ -32,6 +32,43 @@ done
 EXIT_CODE=0
 
 # ────────────────────────────────────────────────────────────
+# Version pinning check: reject unpinned deps in FE & Python
+# ────────────────────────────────────────────────────────────
+check_version_pinning() {
+  local has_unpinned=false
+
+  for pkg_file in $(echo "$STAGED_FILES" | grep -E '(^|/)package\.json$'); do
+    if [ -f "$REPO_ROOT/$pkg_file" ]; then
+      unpinned=$(grep -nE '"[^"]+"\s*:\s*"[\^~]' "$REPO_ROOT/$pkg_file" | grep -v '"name"\|"version"\|"description"')
+      if [ -n "$unpinned" ]; then
+        echo "❌ [pre-commit] Unpinned dependencies in $pkg_file:"
+        echo "$unpinned" | head -10
+        echo "   Remove ^ or ~ prefix to pin exact versions"
+        has_unpinned=true
+      fi
+    fi
+  done
+
+  for toml_file in $(echo "$STAGED_FILES" | grep -E '(^|/)pyproject\.toml$'); do
+    if [ -f "$REPO_ROOT/$toml_file" ]; then
+      unpinned=$(grep -nE '^\s*"[^"]*(>=|<=|~=|!=|>[0-9]|<[0-9])' "$REPO_ROOT/$toml_file" | grep -v 'requires-python')
+      if [ -n "$unpinned" ]; then
+        echo "❌ [pre-commit] Unpinned dependencies in $toml_file:"
+        echo "$unpinned" | head -10
+        echo "   Use exact versions (e.g. \"package==1.2.3\")"
+        has_unpinned=true
+      fi
+    fi
+  done
+
+  if [ "$has_unpinned" = true ]; then
+    EXIT_CODE=1
+  fi
+}
+
+check_version_pinning
+
+# ────────────────────────────────────────────────────────────
 # Frontend checks: lint-staged (on staged files) + tests
 # ────────────────────────────────────────────────────────────
 if [ "$HAS_FE" = true ]; then

@@ -1012,13 +1012,13 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         if (category.key !== 'root') {
           await ensureFolder({ resourceId, path: category.path });
         }
+        // 清除缓存，模拟收起再展开 tab 的效果
         delete categoryCacheRef.current[category.key];
-        if (category.key === activeCategoryKey) {
-          setSearchValue('');
-          setIsSearching(false);
-          setChildrenByPath({});
-          await fetchList(currentPath, { force: true, categoryKey: category.key });
-        }
+        // 清空所有子文件夹的缓存数据
+        setChildrenByPath({});
+        // 清空当前列表并重新获取
+        setItems([]);
+        await fetchList(currentPath, { force: true, categoryKey: category.key });
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
       }
@@ -1446,47 +1446,47 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       return (
         <span className={styles.categoryActions} onClick={(event) => event.stopPropagation()}>
           {canManageCategory && (
-            <Upload
-              showUploadList={false}
-              multiple
-              beforeUpload={(_, fileList) => {
-                void handleCategoryUploadSelect(category, fileList as unknown as File[]);
-                return false;
-              }}
-            >
-              <Button
-                icon={<AntdIcon type="icon-a-Uploadshangchuan" className={styles.categoryActionIcon} />}
-                size="small"
-                className={styles.categoryActionButton}
-                title={uploadTitle}
-                aria-label={uploadTitle}
-              />
-            </Upload>
+            <Tooltip title={uploadTitle}>
+              <Upload
+                showUploadList={false}
+                multiple
+                beforeUpload={(_, fileList) => {
+                  void handleCategoryUploadSelect(category, fileList as unknown as File[]);
+                  return false;
+                }}
+              >
+                <Button
+                  icon={<AntdIcon type="icon-a-Uploadshangchuan" className={styles.categoryActionIcon} />}
+                  size="small"
+                  className={styles.categoryActionButton}
+                />
+              </Upload>
+            </Tooltip>
           )}
           {canManageCategory && (
+            <Tooltip title={createTitle}>
+              <Button
+                icon={<AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" className={styles.categoryActionIcon} />}
+                size="small"
+                className={styles.categoryActionButton}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openCreateFolder(category.path);
+                }}
+              />
+            </Tooltip>
+          )}
+          <Tooltip title={refreshTitle}>
             <Button
-              icon={<AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" className={styles.categoryActionIcon} />}
+              icon={<AntdIcon type="icon-a-Refreshshuaxin1" className={styles.categoryActionIcon} />}
               size="small"
               className={styles.categoryActionButton}
-              title={createTitle}
-              aria-label={createTitle}
               onClick={(event) => {
                 event.stopPropagation();
-                openCreateFolder(category.path);
+                void handleRefreshCategory(category);
               }}
             />
-          )}
-          <Button
-            icon={<AntdIcon type="icon-a-Refreshshuaxin1" className={styles.categoryActionIcon} />}
-            size="small"
-            className={styles.categoryActionButton}
-            title={refreshTitle}
-            aria-label={refreshTitle}
-            onClick={(event) => {
-              event.stopPropagation();
-              void handleRefreshCategory(category);
-            }}
-          />
+          </Tooltip>
         </span>
       );
     },
