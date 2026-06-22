@@ -1,7 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
-import com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto;
 import com.iwhalecloud.byai.manager.dto.resource.SsResExtSkillDto;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtSkillMapper;

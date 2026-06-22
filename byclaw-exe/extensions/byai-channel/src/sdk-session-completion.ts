@@ -10,6 +10,7 @@ import type { OpenClawPluginApi } from "@openclaw/plugin-sdk/core";
 const ACTIVE_SDK_COMPLETION_STATE = Symbol.for("openclaw.byaiChannel.activeSdkCompletionState");
 const ACTIVE_SDK_COMPLETION_DEBOUNCE_MS = 200;
 const ACTIVE_SDK_ERROR_COMPLETION_DEBOUNCE_MS = 1500;
+const ACTIVE_SDK_CONTEXT_OVERFLOW_COMPLETION_DEBOUNCE_MS = 5000;
 
 type ActiveSdkCompletionEntry = {
   token: number;
@@ -33,6 +34,9 @@ function getActiveSdkCompletionState(): ActiveSdkCompletionState {
 }
 
 export function resolveActiveSdkCompletionDebounceMs(reason: string): number {
+  if (reason === "root_lifecycle_context_overflow_error") {
+    return ACTIVE_SDK_CONTEXT_OVERFLOW_COMPLETION_DEBOUNCE_MS;
+  }
   // OpenClaw emits a failed candidate's lifecycle error before the model
   // fallback_step event. Keep error completion open long enough for the fallback
   // lifecycle to cancel it, while successful/message_sent paths stay snappy.

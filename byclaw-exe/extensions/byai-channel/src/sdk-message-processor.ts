@@ -34,7 +34,7 @@ import {
 } from "./session-dispatch-gate.js";
 import { waitForSdkSessionDispatchSettled } from "./session-dispatch-settle.js";
 import { consumeWorkspaceReloadHint } from "./workspace-reload-hints.js";
-import { waitForManagedBaiyingAgentConfig } from "./managed-agent-config-wait.js";
+import { waitForBaiyingAgentConfig } from "./managed-agent-config-wait.js";
 import { EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import { getAgentNameById } from "./utils.js";
 import {
@@ -42,6 +42,10 @@ import {
   buildContextOverflowContinueText,
   buildContextOverflowText,
 } from "./i18n.js";
+import {
+  formatDispatchError,
+  isOpenClawContextOverflowDispatchError,
+} from "./dispatch-error.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 
@@ -263,7 +267,7 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
   });
 
   const { meta } = await runSessionDispatchExclusive(sessionKey, async () => {
-    const dispatchCfg = await waitForManagedBaiyingAgentConfig({
+    const dispatchCfg = await waitForBaiyingAgentConfig({
       runtime: rt,
       cfg,
       agentId: targetAgentId,
@@ -422,6 +426,8 @@ async function deliverReplyToAgentViaSdkUnderGate(
       ...(includeMedia ? inboundMediaPayload : {}),
     };
 
+  let deferDispatchSettleToAgentEvents = false;
+  try {
     const { dispatcher, replyOptions } = rt.channel.reply.createReplyDispatcherWithTyping({
       deliver: () => {},
     });
@@ -476,16 +482,30 @@ async function deliverReplyToAgentViaSdkUnderGate(
     await runOneDispatch(message.text);
     await maybeContinueAfterOverflow();
   } catch (err) {
-    log?.error?.(`[diagnose-sdk] Message dispatch failed: ${String(err)}`);
-    clearActiveSdkRequestByTarget(accountId, To);
-    throw err;
+    const errorText = formatDispatchError(err);
+    if (isOpenClawContextOverflowDispatchError(err)) {
+      deferDispatchSettleToAgentEvents = true;
+      log?.warn?.(
+        `[diagnose-sdk] Message dispatch reported context overflow; keeping SDK stream open for OpenClaw recovery: ${errorText}`,
+      );
+    } else {
+      log?.error?.(`[diagnose-sdk] Message dispatch failed: ${errorText}`);
+      clearActiveSdkRequestByTarget(accountId, To);
+      throw err;
+    }
   } finally {
-    const settle = await waitForSdkSessionDispatchSettled(sessionKey, {
-      abortSignal: deps.abortController?.signal,
-    });
-    log?.info?.(
-      `[diagnose-sdk] session dispatch settled: sessionKey=${sessionKey}, settled=${String(settle.settled)}, timedOut=${String(settle.timedOut)}, waitMs=${settle.waitMs}, rootLifecyclePhase=${settle.rootLifecyclePhase ?? "none"}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
-    );
+    if (deferDispatchSettleToAgentEvents) {
+      log?.info?.(
+        `[diagnose-sdk] session dispatch settle deferred to OpenClaw recovery events: sessionKey=${sessionKey}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
+      );
+    } else {
+      const settle = await waitForSdkSessionDispatchSettled(sessionKey, {
+        abortSignal: deps.abortController?.signal,
+      });
+      log?.info?.(
+        `[diagnose-sdk] session dispatch settled: sessionKey=${sessionKey}, settled=${String(settle.settled)}, timedOut=${String(settle.timedOut)}, waitMs=${settle.waitMs}, rootLifecyclePhase=${settle.rootLifecyclePhase ?? "none"}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
+      );
+    }
   }
 
   // 上下文溢出型 length 截断的自动续跑编排：在已持有的 dispatch gate 内、settle 之前同步执行。
