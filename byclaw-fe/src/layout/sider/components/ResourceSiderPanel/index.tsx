@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Breadcrumb, Button, Dropdown, Empty, Input, List, message, Tooltip, Typography } from 'antd';
+import { Breadcrumb, Button, Dropdown, Empty, Input, List, message, Modal, Tag, Tooltip, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import { trim } from 'lodash';
@@ -10,13 +10,19 @@ import PropertyDetail from '@/components/Resources/components/PropertyDetail';
 import InfiniteScrollAntdList from '@/layout/sider/components/InfiniteScrollAntdList';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import {
+  checkWorkspaceSkillShareConflicts,
+  deleteSkill,
   queryDigEmployeeRelResourceAuth,
   queryResourceMembers,
+  queryWorkspaceSkillDetail,
+  queryWorkspaceSkillList,
+  resourceizeWorkspaceSkill,
   uploadSkillZip,
 } from '@/pages/manager/service/resources';
 import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import { batchHandleAuth, listAuthDetail } from '@/pages/manager/service/DigitalResourceMgr';
+import { uninstallDigitalEmployeeRelResources } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { ResourceTypeMap } from '@/constants/resource';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import useGlobal from '@/hooks/useGlobal';
@@ -25,6 +31,7 @@ import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { getManagerMenuConfig, normalizeMenuUrl } from '@/pages/manager/layout/sider/menuConfig';
 import { getRuntimeActualUrl } from '@/utils';
 import { getToken } from '@/utils/auth';
+import { getFileUrl } from '@/utils/file';
 import styles from './index.module.less';
 
 const { Title, Paragraph } = Typography;
@@ -33,12 +40,18 @@ type ResourceSiderType = 'TOOL' | 'VIEW' | 'OBJECT' | 'SKILL';
 const PAGE_SIZE = 30;
 
 interface ResourceItem {
-  resourceId: string;
+  resourceId: string | number;
   resourceCode?: string;
   resourceName: string;
   description?: string;
   resourceDesc?: string;
   resourceLogoUrl?: string;
+  avatar?: string;
+  logoUrl?: string;
+  resourceImageUrl?: string;
+  resourceImage?: string;
+  coverUrl?: string;
+  coverImageUrl?: string;
   resourceBizType?: string;
   resourceSourcePkId?: string;
   createTime?: number | string;
@@ -50,9 +63,13 @@ interface ResourceItem {
   propertyGroup?: string;
   dataType?: string;
   sourceType?: string;
+  displaySourceType?: string;
+  resourceBacked?: boolean;
   skillPath?: string;
   skillDocObjectKey?: string;
+  useStartTime?: string;
   objectKey?: string;
+  targetContent?: string;
 }
 
 interface Props {
@@ -108,6 +125,8 @@ const PROPERTY_RESOURCE_TYPE = 'PROPERTY';
 const SHARE_GRANT_TYPE = 'FORCE_USE';
 const UI_SKILL_MENU_CODE = 'menu_ui_agent';
 const UI_SKILL_MENU_NAME = '界面技能';
+const SKILL_DISPLAY_SOURCE_USER_DEVELOPED = 'USER_DEVELOPED';
+const WORKSPACE_SKILL_ID_PREFIX = 'WORKSPACE_SKILL:';
 
 const getArrayData = (response: any) => {
   if (Array.isArray(response)) return response;
@@ -116,6 +135,91 @@ const getArrayData = (response: any) => {
   if (Array.isArray(response?.data)) return response.data;
   return [];
 };
+
+const getResourceUniqueKey = (item: ResourceItem, index: number) => {
+  const id = item?.resourceId ?? item?.resourceSourcePkId ?? item?.resourceCode;
+  if (id === undefined || id === null || String(id) === '') {
+    return `__resource_index_${index}`;
+  }
+  return `${item?.resourceBizType || ''}:${String(id)}`;
+};
+
+const dedupeResourceList = (items: ResourceItem[]) => {
+  const seen = new Set<string>();
+  return items.filter((item, index) => {
+    const key = getResourceUniqueKey(item, index);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+};
+
+const isWorkspaceSkill = (item?: ResourceItem) =>
+  item?.resourceBizType === ResourceTypeMap.SKILL &&
+  (item?.resourceBacked === false || String(item?.resourceId || '').startsWith(WORKSPACE_SKILL_ID_PREFIX));
+
+const parseResourceTargetContent = (item?: ResourceItem) => {
+  const targetContent = item?.extInfo?.targetContent || item?.targetContent;
+  if (!targetContent || typeof targetContent !== 'string') {
+    return null;
+  }
+  try {
+    return JSON.parse(targetContent);
+  } catch {
+    return null;
+  }
+};
+
+const getResourceImageUrl = (item?: ResourceItem) => {
+  const targetContent = parseResourceTargetContent(item);
+  return (
+    item?.resourceLogoUrl ||
+    item?.avatar ||
+    item?.logoUrl ||
+    item?.resourceImageUrl ||
+    item?.resourceImage ||
+    item?.coverUrl ||
+    item?.coverImageUrl ||
+    targetContent?.resourceLogoUrl ||
+    targetContent?.avatar ||
+    targetContent?.logoUrl ||
+    targetContent?.resourceImageUrl ||
+    targetContent?.resourceImage ||
+    targetContent?.coverUrl ||
+    targetContent?.coverImageUrl ||
+    ''
+  );
+};
+
+const getCurrentUserDisplayName = (userInfo?: any) =>
+  userInfo?.userName || userInfo?.name || userInfo?.nickName || userInfo?.userCode || userInfo?.userId || '';
+
+const mapBoundSkillRows = (rows: ResourceItem[], resourceType: ResourceSiderType) => {
+  if (resourceType !== 'SKILL') {
+    return rows;
+  }
+  return rows.map((item) => ({
+    ...item,
+    resourceLogoUrl: getResourceImageUrl(item),
+    resourceBacked: true,
+  }));
+};
+
+const mapWorkspaceSkillRows = (rows: any[]): ResourceItem[] =>
+  rows.map((item) => ({
+    resourceId: `${WORKSPACE_SKILL_ID_PREFIX}${item.skillPath || item.skillName}`,
+    resourceCode: item.skillName,
+    resourceName: item.skillName,
+    resourceDesc: item.skillDesc,
+    resourceBizType: ResourceTypeMap.SKILL,
+    displaySourceType: item.displaySourceType || SKILL_DISPLAY_SOURCE_USER_DEVELOPED,
+    resourceBacked: false,
+    skillPath: item.skillPath,
+    skillDocObjectKey: item.skillDocObjectKey,
+    useStartTime: item.useStartTime,
+  }));
 
 const getGrantItem = (item: any) => ({
   ...item,
@@ -159,6 +263,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   const itemClickTimerRef = useRef<number | null>(null);
   const skillUploadInputRef = useRef<HTMLInputElement | null>(null);
   const keywordRef = useRef('');
+  const resourceListRef = useRef<ResourceItem[]>([]);
   const paginationRef = useRef({
     pageNum: 0,
     total: 0,
@@ -185,6 +290,10 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   const [breadcrumb, setBreadcrumb] = useState<BreadcrumbItem[]>([]);
   const [currentLevelOriginalList, setCurrentLevelOriginalList] = useState<ResourceItem[]>([]); // 当前层级的原始列表，用于前端搜索
   const config = resourceConfigMap[resourceType];
+
+  useEffect(() => {
+    resourceListRef.current = resourceList;
+  }, [resourceList]);
 
   /**
    * 获取资源详情数据
@@ -326,20 +435,46 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
           resourceId: activeSiderAgent.resourceId,
           resourceBizTypeList: config.resourceBizTypeList,
         });
-        const rows = getArrayData(response);
+        const rows = mapBoundSkillRows(getArrayData(response), resourceType);
+        let workspaceSkillRows: ResourceItem[] = [];
+        if (resourceType === 'SKILL' && reset && breadcrumb.length === 0) {
+          try {
+            const workspaceSkillResponse = await queryWorkspaceSkillList({
+              keyword: trim(queryKeyword),
+              resourceId: activeSiderAgent.resourceId,
+              userCode: userInfo?.userCode,
+            });
+            workspaceSkillRows = mapWorkspaceSkillRows(getArrayData(workspaceSkillResponse));
+          } catch (error) {
+            console.warn('query workspace skills failed', error);
+          }
+        }
         const responsePageNum = Number(response?.pageNum) || pageNum;
         const responseTotal = Number(response?.total) || 0;
 
-        const loadedCount = reset ? rows.length : paginationRef.current.loadedCount + rows.length;
+        const previousList = reset ? [] : resourceListRef.current;
+        const nextRows = reset ? [...rows, ...workspaceSkillRows] : rows;
+        const nextList = reset ? dedupeResourceList(nextRows) : dedupeResourceList([...previousList, ...nextRows]);
+        const boundLoadedCount = reset
+          ? rows.length
+          : previousList.filter((item) => !isWorkspaceSkill(item)).length + rows.length;
+        const loadedCount = resourceType === 'SKILL' ? boundLoadedCount : nextList.length;
+        const hasNewUniqueRows = nextList.length > previousList.length;
         paginationRef.current = {
           pageNum: responsePageNum,
           total: responseTotal,
           loadedCount,
         };
-        setResourceList((prev) => (reset ? rows : [...prev, ...rows]));
-        setHasMore(responseTotal > 0 ? loadedCount < responseTotal : rows.length >= PAGE_SIZE);
+        resourceListRef.current = nextList;
+        setResourceList(nextList);
+        setHasMore(
+          responseTotal > 0
+            ? rows.length > 0 && loadedCount < responseTotal && (reset || hasNewUniqueRows)
+            : rows.length >= PAGE_SIZE && hasNewUniqueRows
+        );
       } catch {
         if (reset) {
+          resourceListRef.current = [];
           setResourceList([]);
           paginationRef.current = {
             pageNum: 0,
@@ -353,7 +488,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         setLoading(false);
       }
     },
-    [activeSiderAgent.resourceId, config.resourceBizTypeList]
+    [activeSiderAgent.resourceId, breadcrumb.length, config.resourceBizTypeList, resourceType, userInfo?.userCode]
   );
 
   /**
@@ -419,7 +554,8 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   }, [loadResources]);
 
   useEffect(() => {
-    const handleResourceTypeReload = (nextResourceType: string) => {
+    const handleResourceTypeReload = (payload: string | { resourceType?: string }) => {
+      const nextResourceType = typeof payload === 'string' ? payload : payload?.resourceType;
       if (nextResourceType !== 'SKILL' || resourceType !== 'SKILL' || isInDrillDown()) {
         return;
       }
@@ -518,7 +654,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   };
 
   const handleComplexSkillDevelop = () => {
-    message.info('代码智能体开发中，敬请期待');
+    message.info(intl.formatMessage({ id: 'resourceTabs.skillUpload.codeAgentDeveloping' }));
   };
 
   const openManagerMenu = (menu: any) => {
@@ -552,9 +688,9 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         return;
       }
 
-      message.warning('未找到界面技能管理菜单配置');
+      message.warning(intl.formatMessage({ id: 'resourceTabs.skillUpload.noMenuConfig' }));
     } catch (error: any) {
-      message.warning(error?.message || '未找到界面技能管理菜单配置');
+      message.warning(error?.message || intl.formatMessage({ id: 'resourceTabs.skillUpload.noMenuConfig' }));
     }
   };
 
@@ -580,7 +716,19 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     return intl.formatMessage({ id: 'resource.default' });
   };
 
-  const handleDetail = (item: ResourceItem) => {
+  const renderSkillSourceTag = (item: ResourceItem) => {
+    if (resourceType !== 'SKILL' || item.displaySourceType !== SKILL_DISPLAY_SOURCE_USER_DEVELOPED) {
+      return null;
+    }
+
+    return (
+      <Tag className={styles.skillSourceTag} color="gold">
+        {intl.formatMessage({ id: 'resource.skillSource.userDeveloped' })}
+      </Tag>
+    );
+  };
+
+  const handleDetail = async (item: ResourceItem) => {
     const { resourceBizType, resourceId } = item;
     const closeDetailPanel = () => clearDetailPanel?.();
 
@@ -590,6 +738,64 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     }
 
     if (resourceBizType === ResourceTypeMap.SKILL) {
+      if (isWorkspaceSkill(item)) {
+        if (!item.skillPath) {
+          message.error(intl.formatMessage({ id: 'resource.skillDownload.noSkillPath' }));
+          return;
+        }
+        try {
+          const detail = await queryWorkspaceSkillDetail({
+            skillPath: item.skillPath,
+            resourceId: activeSiderAgent.resourceId,
+            userCode: userInfo?.userCode,
+          });
+          const detailData = (detail as any)?.data || detail;
+          const currentDigitalEmployeeName =
+            activeSiderAgent.name || intl.formatMessage({ id: 'resource.currentDigitalEmployee' });
+          const usedDigitalEmployees = [];
+          if (activeSiderAgent.resourceId) {
+            usedDigitalEmployees.push({
+              resourceId: activeSiderAgent.resourceId,
+              resourceName: currentDigitalEmployeeName,
+              useStartTime: detailData?.useStartTime || item.useStartTime,
+            });
+          }
+          const detailItem = {
+            ...item,
+            resourceName: detailData?.skillName || item.resourceName,
+            resourceCode: detailData?.skillName || item.resourceCode,
+            resourceDesc: detailData?.skillDesc || item.resourceDesc,
+            description: detailData?.skillDesc || item.description,
+            useList: [
+              {
+                grantToObjId: userInfo?.userId || userInfo?.id || userInfo?.userCode,
+                grantToObjName: getCurrentUserDisplayName(userInfo),
+              },
+            ],
+            managerList: [
+              {
+                grantToObjId: userInfo?.userId || userInfo?.id || userInfo?.userCode,
+                grantToObjName: getCurrentUserDisplayName(userInfo),
+              },
+            ],
+            usedDigitalEmployees,
+          };
+          setDetailPanel?.(
+            <ResourceDetail
+              visible
+              panel
+              item={detailItem}
+              resourceName={intl.formatMessage({ id: 'common.skill' })}
+              onCancel={closeDetailPanel}
+              onEdit={() => {}}
+            />,
+            { width: 350 }
+          );
+        } catch (error: any) {
+          message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
+        }
+        return;
+      }
       if (resourceId) {
         setDetailPanel?.(
           <SkillDetailDrawer
@@ -651,7 +857,33 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     );
   };
 
-  const handleShare = async (item: ResourceItem) => {
+  const buildImportRangeText = (items: any[] = []) =>
+    items
+      .map((item) => {
+        const catalogSuffix = item.catalogName ? `（${item.catalogName}）` : '';
+        return `${item.resourceCode || ''}：${item.resourceName || ''}${catalogSuffix}`;
+      })
+      .join('、');
+
+  const confirmSkillOverwrite = (updatedItems: any[] = []) => {
+    return new Promise<boolean>((resolve) => {
+      Modal.confirm({
+        title: intl.formatMessage({ id: 'resource.import.skillOverwriteConfirmTitle' }),
+        content: (
+          <div>
+            <div>{intl.formatMessage({ id: 'resource.import.skillOverwriteConfirmDesc' })}</div>
+            <div>{buildImportRangeText(updatedItems)}</div>
+          </div>
+        ),
+        okText: intl.formatMessage({ id: 'common.confirm' }),
+        cancelText: intl.formatMessage({ id: 'common.cancel' }),
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      });
+    });
+  };
+
+  const openShareAuthModal = async (item: ResourceItem) => {
     if (!item.resourceId || !item.resourceBizType) return;
     try {
       const detail = (await listAuthDetail({
@@ -669,6 +901,65 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
       }
 
       message.error(detail?.msg || intl.formatMessage({ id: 'common.operationFailed' }));
+    } catch (error: any) {
+      message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
+    }
+  };
+
+  const firstImportSuccessItem = (result: any) => {
+    const data = result?.data || result;
+    return (data?.items || []).find((item: any) => item?.success && item?.resourceId);
+  };
+
+  const handleShare = async (item: ResourceItem) => {
+    if (!isWorkspaceSkill(item)) {
+      await openShareAuthModal(item);
+      return;
+    }
+    if (!item.skillPath) {
+      message.error(intl.formatMessage({ id: 'resource.skillDownload.noSkillPath' }));
+      return;
+    }
+    try {
+      const baseParams = {
+        skillPath: item.skillPath,
+        resourceId: activeSiderAgent.resourceId,
+        userCode: userInfo?.userCode,
+      };
+      const conflictResult = await checkWorkspaceSkillShareConflicts(baseParams);
+      const conflictData = (conflictResult as any)?.data || conflictResult;
+      const updatedItems = conflictData?.updatedItems || [];
+      let overwriteConfirmed = false;
+      if (updatedItems.length) {
+        overwriteConfirmed = await confirmSkillOverwrite(updatedItems);
+        if (!overwriteConfirmed) {
+          return;
+        }
+      }
+      const importResult = await resourceizeWorkspaceSkill({
+        ...baseParams,
+        overwriteConfirmed,
+      });
+      const successItem = firstImportSuccessItem(importResult);
+      if (!successItem?.resourceId) {
+        message.error(intl.formatMessage({ id: 'common.operationFailed' }));
+        return;
+      }
+      const resourceItem: ResourceItem = {
+        ...item,
+        resourceId: successItem.resourceId,
+        resourceCode: successItem.resourceCode || item.resourceCode,
+        resourceName: successItem.resourceName || item.resourceName,
+        resourceDesc: successItem.resourceDesc || item.resourceDesc,
+        resourceBizType: ResourceTypeMap.SKILL,
+        displaySourceType: undefined,
+        resourceBacked: true,
+      };
+      EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
+      if (!isInDrillDown()) {
+        loadResources({ reset: true });
+      }
+      await openShareAuthModal(resourceItem);
     } catch (error: any) {
       message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
     }
@@ -720,20 +1011,75 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     }
   };
 
+  const handleUninstallSkill = (item: ResourceItem) => {
+    if (!activeSiderAgent.resourceId) {
+      message.error(intl.formatMessage({ id: 'resource.noDefaultDigitalEmployee' }));
+      return;
+    }
+    const employeeName = activeSiderAgent.name || intl.formatMessage({ id: 'resource.currentDigitalEmployee' });
+    const workspaceSkill = isWorkspaceSkill(item);
+
+    Modal.confirm({
+      title: intl.formatMessage({ id: 'resource.uninstallSkill' }),
+      content: intl.formatMessage(
+        {
+          id: workspaceSkill ? 'resource.uninstallWorkspaceSkillConfirm' : 'resource.uninstallSkillConfirm',
+        },
+        { employeeName, skillName: item.resourceName }
+      ),
+      okText: intl.formatMessage({ id: 'common.confirm' }),
+      cancelText: intl.formatMessage({ id: 'common.cancel' }),
+      async onOk() {
+        try {
+          if (workspaceSkill) {
+            if (!item.skillPath) {
+              message.error(intl.formatMessage({ id: 'resource.skillDownload.noSkillPath' }));
+              return;
+            }
+            await deleteSkill({
+              skillPath: item.skillPath,
+              resourceId: activeSiderAgent.resourceId,
+              userCode: userInfo?.userCode,
+            });
+          } else {
+            await uninstallDigitalEmployeeRelResources({
+              digitalEmployeeId: activeSiderAgent.resourceId!,
+              relIds: [item.resourceId],
+            });
+          }
+          message.success(intl.formatMessage({ id: 'resource.uninstallSuccess' }));
+          if (!isInDrillDown()) {
+            loadResources({ reset: true });
+          }
+          EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
+        } catch (error: any) {
+          message.error(error?.message || error || intl.formatMessage({ id: 'common.operationFailed' }));
+        }
+      },
+    });
+  };
+
   /**
    * 渲染资源详情下拉菜单
    */
   const renderDetailDropdown = (item: ResourceItem) => {
-    const menuItems = [
-      {
-        key: 'detail',
-        label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.detail' })}</div>,
-      },
-    ];
+    const menuItems: { key: string; label: React.ReactNode }[] = [];
+    menuItems.push({
+      key: 'detail',
+      label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.detail' })}</div>,
+    });
     if (item.resourceBizType !== PROPERTY_RESOURCE_TYPE) {
       menuItems.push({
         key: 'share',
         label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.share' })}</div>,
+      });
+    }
+    if (resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL) {
+      menuItems.push({
+        key: 'uninstall',
+        label: (
+          <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'resource.uninstallSkill' })}</div>
+        ),
       });
     }
 
@@ -749,6 +1095,10 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
             domEvent.stopPropagation();
             if (key === 'share') {
               void handleShare(item);
+              return;
+            }
+            if (key === 'uninstall') {
+              handleUninstallSkill(item);
               return;
             }
             handleDetail(item);
@@ -849,13 +1199,28 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
           })}
         </Breadcrumb>
       )}
-      <Input
-        value={searchValue}
-        suffix={<SearchOutlined onClick={handleSearch} />}
-        placeholder={placeholder}
-        onChange={(event) => setSearchValue(event.target.value)}
-        onPressEnter={handleSearch}
-      />
+      <div className={styles.searchActionRow}>
+        <Input
+          className={styles.searchInput}
+          value={searchValue}
+          suffix={<SearchOutlined onClick={handleSearch} />}
+          placeholder={placeholder}
+          onChange={(event) => setSearchValue(event.target.value)}
+          onPressEnter={handleSearch}
+        />
+        {resourceType === 'SKILL' && (
+          <Button
+            size="small"
+            className={styles.skillUploadButton}
+            icon={<AntdIcon type="icon-a-Uploadshangchuan" />}
+            loading={skillUploading}
+            disabled={skillUploading}
+            onClick={handleSkillImportClick}
+          >
+            {intl.formatMessage({ id: 'resourceTabs.skillUpload.uploadButton' })}
+          </Button>
+        )}
+      </div>
       {resourceType === 'SKILL' && (
         <>
           <input
@@ -870,17 +1235,18 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
             <Button
               size="small"
               className={styles.skillActionButton}
-              loading={skillUploading}
-              disabled={skillUploading}
-              onClick={handleSkillImportClick}
+              icon={<AntdIcon type="icon-a-changjing-line" />}
+              onClick={handleComplexSkillDevelop}
             >
-              技能导入
+              {intl.formatMessage({ id: 'resourceTabs.skillUpload.complexSkillDevelop' })}
             </Button>
-            <Button size="small" className={styles.skillActionButton} onClick={handleComplexSkillDevelop}>
-              复杂技能开发
-            </Button>
-            <Button size="small" className={styles.skillActionButton} onClick={handlePageSkillDevelop}>
-              页面技能开发
+            <Button
+              size="small"
+              className={styles.skillActionButton}
+              icon={<AntdIcon type="icon-a-yemian-line" />}
+              onClick={handlePageSkillDevelop}
+            >
+              {intl.formatMessage({ id: 'resourceTabs.skillUpload.pageSkillDevelop' })}
             </Button>
           </div>
         </>
@@ -895,6 +1261,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
           renderEmpty={<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />}
           renderItem={(item: ResourceItem) => {
             const drillable = canDrillDown(item);
+            const resourceImage = getResourceImageUrl(item);
 
             return (
               <List.Item
@@ -908,13 +1275,21 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
                   avatar={
                     <span className={styles.resourceAvatar}>
                       {drillable && <AntdIcon type="icon-a-xiangyou" className={styles.drillIcon} />}
-                      <AntdIcon
-                        type={
-                          item.resourceBizType === PROPERTY_RESOURCE_TYPE || String(item.resourceId).includes('-')
-                            ? 'icon-a-Database-networkshujukuwangluo'
-                            : getResourceIcon()
-                        }
-                      />
+                      {resourceType === 'SKILL' && resourceImage ? (
+                        <img className={styles.resourceAvatarImage} src={getFileUrl(resourceImage)} alt="" />
+                      ) : resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL ? (
+                        <span className={styles.skillDefaultAvatar}>
+                          <span className={styles.skillDefaultAvatarOrb} />
+                        </span>
+                      ) : (
+                        <AntdIcon
+                          type={
+                            item.resourceBizType === PROPERTY_RESOURCE_TYPE || String(item.resourceId).includes('-')
+                              ? 'icon-a-Database-networkshujukuwangluo'
+                              : getResourceIcon()
+                          }
+                        />
+                      )}
                     </span>
                   }
                   title={
@@ -922,6 +1297,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
                       <Tooltip title={item.resourceName}>
                         <span className={employeeStyles.nameRow}>
                           <span className={employeeStyles.nameText}>{item.resourceName}</span>
+                          {renderSkillSourceTag(item)}
                         </span>
                       </Tooltip>
                     </Title>

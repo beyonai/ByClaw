@@ -7,6 +7,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.iwhalecloud.byai.common.feign.response.SandboxResponse;
@@ -339,6 +340,52 @@ class SandboxServiceTest {
 
         verify(sandboxRecordMapper).markStartingReleased(eq(1L), eq("release.manual:admin001"), any(Date.class), eq(5));
         verify(sandboxRecordMapper, never()).markReleasing(any(), any(), any(), any());
+    }
+
+    @Test
+    void cleanupRemoteSandboxQuietly_removesRemoteBySandboxId() {
+        SandboxLifecycleFacade sandboxLifecycleFacade = mock(SandboxLifecycleFacade.class);
+        SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", sandboxLifecycleFacade);
+        ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
+        when(sandboxLifecycleFacade.removeSandbox(any(SandboxInfo.class))).thenReturn(SandboxResponse.success(null));
+        ArgumentCaptor<SandboxInfo> sandboxInfoCaptor = ArgumentCaptor.forClass(SandboxInfo.class);
+
+        sandboxService.cleanupRemoteSandboxQuietly("user001", "openclaw", "sandbox-old", "test-cleanup");
+
+        verify(sandboxLifecycleFacade).removeSandbox(sandboxInfoCaptor.capture());
+        assertThat(sandboxInfoCaptor.getValue().getUserCode()).isEqualTo("user001");
+        assertThat(sandboxInfoCaptor.getValue().getSandboxType()).isEqualTo("openclaw");
+        assertThat(sandboxInfoCaptor.getValue().getSandboxId()).isEqualTo("sandbox-old");
+        verify(sandboxMetadataCache, never()).evict("user001", "openclaw");
+    }
+
+    @Test
+    void removeRemoteSandboxesForServiceTypeOrThrow_listsByServiceTypeAndRemovesAll() {
+        SandboxLifecycleFacade sandboxLifecycleFacade = mock(SandboxLifecycleFacade.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", sandboxLifecycleFacade);
+        ReflectionTestUtils.setField(sandboxService, "reconcileRemotePageSize", 200);
+        SandboxRuntimeInstance oldXs = SandboxRuntimeInstance.builder().sandboxId("sandbox-xs").build();
+        SandboxRuntimeInstance oldM = SandboxRuntimeInstance.builder().sandboxId("sandbox-m").build();
+        SandboxRuntimePage<SandboxRuntimeInstance> page = SandboxRuntimePage.<SandboxRuntimeInstance>builder()
+            .items(List.of(oldXs, oldM))
+            .pageNo(1)
+            .pageSize(200)
+            .build();
+        when(sandboxLifecycleFacade.listSandboxesByMetadata(eq(Map.of("userCode", "user001",
+            "serviceType", "openclaw")), eq(1), eq(200))).thenReturn(SandboxResponse.success(page));
+        when(sandboxLifecycleFacade.removeSandbox(any(SandboxInfo.class))).thenReturn(SandboxResponse.success(null));
+        ArgumentCaptor<SandboxInfo> sandboxInfoCaptor = ArgumentCaptor.forClass(SandboxInfo.class);
+
+        ReflectionTestUtils.invokeMethod(sandboxService, "removeRemoteSandboxesForServiceTypeOrThrow",
+            "user001", "openclaw", "openclaw", "sandbox-xs", "test-cleanup");
+
+        verify(sandboxLifecycleFacade, times(2)).removeSandbox(sandboxInfoCaptor.capture());
+        assertThat(sandboxInfoCaptor.getAllValues())
+            .extracting(SandboxInfo::getSandboxId)
+            .containsExactly("sandbox-xs", "sandbox-m");
     }
 
     @Test

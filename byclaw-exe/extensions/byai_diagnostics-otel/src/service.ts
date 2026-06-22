@@ -370,6 +370,21 @@ function normalizeLangfuseSessionId(value: string | undefined): string | undefin
   return normalizeLangfuseTraceAttributeId(value);
 }
 
+function extractDirectChannelSessionId(sessionKey: string | undefined): string | undefined {
+  const marker = ":direct:";
+  const markerIndex = sessionKey?.lastIndexOf(marker) ?? -1;
+  if (markerIndex < 0) {
+    return undefined;
+  }
+  return readOtelSessionValue(sessionKey?.slice(markerIndex + marker.length));
+}
+
+function resolveLangfuseSessionId(evt: { sessionKey?: unknown; sessionId?: unknown }) {
+  const sessionKey = readOtelSessionValue(evt.sessionKey);
+  const sessionId = readOtelSessionValue(evt.sessionId);
+  return normalizeLangfuseSessionId(extractDirectChannelSessionId(sessionKey) ?? sessionKey ?? sessionId);
+}
+
 function readOtelUserId(evt: { userId?: unknown }): string | undefined {
   return readOtelSessionValue(evt.userId);
 }
@@ -418,7 +433,7 @@ function assignDiagnosticSessionAttributes(
     }
   }
   if (options.includeLangfuseSessionAttributes) {
-    const langfuseSessionId = normalizeLangfuseSessionId(sessionKey ?? sessionId);
+    const langfuseSessionId = resolveLangfuseSessionId(evt);
     if (langfuseSessionId) {
       attributes["langfuse.session.id"] = langfuseSessionId;
       attributes["session.id"] = langfuseSessionId;
@@ -1320,7 +1335,13 @@ function assignOtelLogEventAttributes(
 
 function traceFlagsToOtel(traceFlags: string | undefined): TraceFlags {
   const parsed = Number.parseInt(traceFlags ?? "00", 16);
-  return (parsed & TraceFlags.SAMPLED) !== 0 ? TraceFlags.SAMPLED : TraceFlags.NONE;
+  if ((parsed & TraceFlags.SAMPLED) !== 0) {
+    return TraceFlags.SAMPLED;
+  }
+  // BYAI gateway diagnostics can omit or clear the sampled bit while still
+  // handing the span id to downstream Langfuse traces as their parent.
+  // Force sampling here so the advertised parent observation is exported.
+  return TraceFlags.SAMPLED;
 }
 
 function contextForTraceContext(traceContext: DiagnosticTraceContext | undefined) {
@@ -1578,6 +1599,14 @@ export function createDiagnosticsOtelService(
       const activeTrustedSpans = new Map<string, ReturnType<typeof tracer.startSpan>>();
       const activeTrustedSpanAliases = new Map<string, ReturnType<typeof tracer.startSpan>>();
       const pendingTrustedRunFinalizers = new Map<string, ReturnType<typeof setImmediate>>();
+      const activeByaiMessageProcessedSpansBySessionKey = new Map<
+        string,
+        ReturnType<typeof tracer.startSpan>
+      >();
+      const activeByaiMessageProcessedSpansByTraceId = new Map<
+        string,
+        ReturnType<typeof tracer.startSpan>
+      >();
       type ActiveByaiInboundSpan = {
         span: ReturnType<typeof tracer.startSpan>;
         sessionKey: string;
@@ -1600,12 +1629,16 @@ export function createDiagnosticsOtelService(
         for (const span of new Set([
           ...activeTrustedSpans.values(),
           ...activeTrustedSpanAliases.values(),
+          ...activeByaiMessageProcessedSpansBySessionKey.values(),
+          ...activeByaiMessageProcessedSpansByTraceId.values(),
           ...[...activeByaiInboundSpansBySessionKey.values()].map((entry) => entry.span),
         ])) {
           span.end(stopAt);
         }
         activeTrustedSpans.clear();
         activeTrustedSpanAliases.clear();
+        activeByaiMessageProcessedSpansBySessionKey.clear();
+        activeByaiMessageProcessedSpansByTraceId.clear();
         activeByaiInboundSpansBySessionKey.clear();
         activeByaiInboundSpansByRunId.clear();
         langfuseUserContext.sessionUserIdsBySessionKey.clear();
@@ -2058,6 +2091,54 @@ export function createDiagnosticsOtelService(
         }
         return span;
       };
+      const byaiTraceIdForEvent = (evt: DiagnosticEventPayload) =>
+        readDiagnosticExtraString(evt, "byai.traceId") ?? normalizeTraceContext(evt.trace)?.traceId;
+      const trackByaiMessageProcessedSpan = (
+        evt: DiagnosticEventPayload,
+        span: ReturnType<typeof tracer.startSpan>,
+      ) => {
+        const sessionKey = readOtelSessionValue(
+          (evt as { sessionKey?: string | undefined }).sessionKey,
+        );
+        if (sessionKey) {
+          activeByaiMessageProcessedSpansBySessionKey.set(sessionKey, span);
+        }
+        const byaiTraceId = byaiTraceIdForEvent(evt);
+        if (byaiTraceId) {
+          activeByaiMessageProcessedSpansByTraceId.set(byaiTraceId, span);
+        }
+      };
+      const takeByaiMessageProcessedSpan = (evt: DiagnosticEventPayload) => {
+        const sessionKey = readOtelSessionValue(
+          (evt as { sessionKey?: string | undefined }).sessionKey,
+        );
+        const bySession = sessionKey
+          ? activeByaiMessageProcessedSpansBySessionKey.get(sessionKey)
+          : undefined;
+        const byaiTraceId = byaiTraceIdForEvent(evt);
+        const byTrace = byaiTraceId
+          ? activeByaiMessageProcessedSpansByTraceId.get(byaiTraceId)
+          : undefined;
+        const span = bySession ?? byTrace;
+        if (span) {
+          for (const [key, activeSpan] of activeByaiMessageProcessedSpansBySessionKey) {
+            if (activeSpan === span) {
+              activeByaiMessageProcessedSpansBySessionKey.delete(key);
+            }
+          }
+          for (const [key, activeSpan] of activeByaiMessageProcessedSpansByTraceId) {
+            if (activeSpan === span) {
+              activeByaiMessageProcessedSpansByTraceId.delete(key);
+            }
+          }
+          for (const [key, activeSpan] of activeTrustedSpans) {
+            if (activeSpan === span) {
+              activeTrustedSpans.delete(key);
+            }
+          }
+        }
+        return span;
+      };
       const takeTrackedTrustedSpan = (
         evt: DiagnosticEventPayload,
         metadata: DiagnosticEventMetadata,
@@ -2427,11 +2508,34 @@ export function createDiagnosticsOtelService(
 
       const recordMessageDispatchStarted = (
         evt: Extract<DiagnosticEventPayload, { type: "message.dispatch.started" }>,
+        metadata: DiagnosticEventMetadata,
       ) => {
-        messageDispatchStartedCounter.add(1, {
+        const attrs = {
           "openclaw.channel": lowCardinalityAttr(evt.channel),
           "openclaw.source": lowCardinalityAttr(evt.source),
-        });
+        };
+        messageDispatchStartedCounter.add(1, attrs);
+        if (!tracesEnabled || !metadata.trusted || !isByaiSdkDiagnosticEvent(evt)) {
+          return;
+        }
+        const traceContext = trustedTraceContext(evt, metadata);
+        if (!traceContext?.spanId || activeTrustedSpans.has(traceContext.spanId)) {
+          return;
+        }
+        const spanAttrs: Record<string, string | number | boolean> = { ...attrs };
+        assignLangfuseTraceAttributes(spanAttrs, evt, options, langfuseUserContext);
+        const sessionKey = readOtelSessionValue(evt.sessionKey);
+        const byaiInboundSpan = sessionKey
+          ? activeByaiInboundSpansBySessionKey.get(sessionKey)
+          : undefined;
+        const span = spanWithDuration("openclaw.message.processed", spanAttrs, undefined, {
+            parentContext:
+              byaiInboundParentContext(byaiInboundSpan) ??
+              contextForTrustedTraceContext(evt, metadata),
+            startTimeMs: evt.ts,
+          });
+        trackTrustedSpan(evt, metadata, span);
+        trackByaiMessageProcessedSpan(evt, span);
       };
 
       const recordMessageDispatchCompleted = (
@@ -2471,6 +2575,7 @@ export function createDiagnosticsOtelService(
 
       const recordMessageProcessed = (
         evt: Extract<DiagnosticEventPayload, { type: "message.processed" }>,
+        metadata: DiagnosticEventMetadata,
       ) => {
         const attrs = {
           "openclaw.channel": lowCardinalityAttr(evt.channel),
@@ -2483,15 +2588,42 @@ export function createDiagnosticsOtelService(
         if (!tracesEnabled) {
           return;
         }
-        const spanAttrs: Record<string, string | number> = { ...attrs };
+        const spanAttrs: Record<string, string | number | boolean> = { ...attrs };
         if (evt.reason) {
           spanAttrs["openclaw.reason"] = lowCardinalityAttr(evt.reason, "unknown");
         }
-        const span = spanWithDuration("openclaw.message.processed", spanAttrs, evt.durationMs);
+        assignLangfuseTraceAttributes(spanAttrs, evt, options, langfuseUserContext);
+        const sessionKey = readOtelSessionValue(evt.sessionKey);
+        const byaiInboundSpan = sessionKey
+          ? activeByaiInboundSpansBySessionKey.get(sessionKey)
+          : undefined;
+        const trustedTrace = trustedTraceContext(evt, metadata);
+        const trackedSpan = trustedTrace?.spanId
+          ? activeTrustedSpans.get(trustedTrace.spanId)
+          : undefined;
+        const trackedByaiSpan = takeByaiMessageProcessedSpan(evt);
+        const span =
+          trackedSpan ??
+          trackedByaiSpan ??
+          spanWithDuration("openclaw.message.processed", spanAttrs, evt.durationMs, {
+            parentContext:
+              activeTrustedParentContext(evt, metadata) ??
+              byaiInboundParentContext(byaiInboundSpan) ??
+              contextForTrustedTraceContext(evt, metadata),
+            endTimeMs: evt.ts,
+          });
+        setSpanAttrs(span, spanAttrs);
         if (evt.outcome === "error" && evt.error) {
           span.setStatus({ code: SpanStatusCode.ERROR, message: redactSensitiveText(evt.error) });
         }
-        span.end();
+        if (trackedSpan && trustedTrace?.spanId) {
+          activeTrustedSpans.delete(trustedTrace.spanId);
+        }
+        if (trackedSpan || trackedByaiSpan) {
+          span.end(evt.ts);
+          return;
+        }
+        span.end(evt.ts);
       };
 
       const messageDeliveryAttrs = (
@@ -3324,6 +3456,7 @@ export function createDiagnosticsOtelService(
           runId: evt.runId,
           sessionKey: evt.sessionKey,
           observationId: span.spanContext().spanId,
+          traceId: span.spanContext().traceId,
           startedAtMs: evt.ts,
         });
       };
@@ -3643,13 +3776,13 @@ export function createDiagnosticsOtelService(
               recordMessageReceived(evt, metadata);
               return;
             case "message.dispatch.started":
-              recordMessageDispatchStarted(evt);
+              recordMessageDispatchStarted(evt, metadata);
               return;
             case "message.dispatch.completed":
               recordMessageDispatchCompleted(evt, metadata);
               return;
             case "message.processed":
-              recordMessageProcessed(evt);
+              recordMessageProcessed(evt, metadata);
               return;
             case "message.delivery.started":
               recordMessageDeliveryStarted(evt);

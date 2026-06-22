@@ -45,6 +45,8 @@ public class SsSandboxResizeRecord {
 
     private String resizeType;
 
+    private String idempotencyKey;
+
     private String status;
 
     private Integer success;
@@ -62,6 +64,8 @@ public class SsSandboxResizeRecord {
     private String opensandboxResponse;
 
     private String errorMessage;
+
+    private String skipReason;
 
     @JSONField(format = "yyyy-MM-dd HH:mm:ss")
     private Date createTime;

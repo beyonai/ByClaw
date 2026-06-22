@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useState, useEffect, useRef } from 'rea
 import { UploadOutlined, SearchOutlined, PlusOutlined } from '@ant-design/icons';
 import { useIntl, getLocale, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
-import { Button, Input, Space, Tooltip, message, Tabs } from 'antd';
+import { Button, Input, Space, Tooltip, message, Tabs, Segmented } from 'antd';
 import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import useModuleEvent from '@/hooks/useModuleEvent';
@@ -32,6 +32,7 @@ import ResourceList from './components/ResourceList';
 import { saveTool } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
+import useGlobal from '@/hooks/useGlobal';
 import { get, trim, intersection, isEmpty } from 'lodash';
 import styles from './index.module.less';
 
@@ -72,8 +73,9 @@ interface Props {
   resourceType: string; // 对应资源类型
 }
 
-const getBannerUrl = (bannerList: any[], label: string) => {
-  const banner = bannerList.find((item) => item?.label === label);
+const getBannerUrl = (bannerList: any[], labels: string | string[]) => {
+  const labelList = Array.isArray(labels) ? labels : [labels];
+  const banner = bannerList.find((item) => labelList.includes(item?.label));
   return `${banner?.url ?? ''}`.trim().replace(/^`|`$/g, '').trim();
 };
 
@@ -96,6 +98,7 @@ const parseBannerList = (value: any) => {
 
 const Resources: React.FC<Props> = ({ resourceType }) => {
   const intl = useIntl();
+  const { EventEmitter } = useGlobal();
 
   // 根据 resourceType 判断资源名称
   const getResourceName = () => {
@@ -162,11 +165,56 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const [brandVersion, setBrandVersion] = useState<'commercial' | 'openSource' | null>(null);
   const [bannerList, setBannerList] = useState<any[]>([]);
   const [bannerLoaded, setBannerLoaded] = useState(false);
+  const [skillCardViewMode, setSkillCardViewMode] = useState<'current' | 'new'>('current');
 
   const topLevelCatalogList = React.useMemo(() => getTopLevelCatalogs(catalogList), [catalogList]);
   const refreshList = useCallback(() => {
     setRefreshKey((prevKey) => prevKey + 1);
   }, []);
+
+  const notifySiderResourceListReload = useCallback(() => {
+    EventEmitter.emit('beyond-resourceList-resourceType-reload', {
+      resourceType,
+      resetSkillFilters: false,
+      skipResourceCenterRefresh: true,
+    });
+  }, [EventEmitter, resourceType]);
+
+  useEffect(() => {
+    const handleResourceTypeReload = (
+      changedResourceType?:
+        | string
+        | { resourceType?: string; resetSkillFilters?: boolean; skipResourceCenterRefresh?: boolean }
+    ) => {
+      if (typeof changedResourceType !== 'string' && changedResourceType?.skipResourceCenterRefresh) {
+        return;
+      }
+      const nextResourceType =
+        typeof changedResourceType === 'string' ? changedResourceType : changedResourceType?.resourceType;
+      if (nextResourceType !== resourceType) {
+        return;
+      }
+      if (
+        resourceType === 'SKILL' &&
+        (typeof changedResourceType === 'string' || changedResourceType?.resetSkillFilters !== false)
+      ) {
+        const nextSearchParams = new URLSearchParams(searchParams);
+        nextSearchParams.set('tab', 'personal');
+        setCatalogId('');
+        setSearchValue('');
+        setDebouncedSearchValue('');
+        setDropdownParam(getDefaultParams());
+        setActiveTab('personal');
+        setSearchParams(nextSearchParams);
+      }
+      refreshList();
+    };
+
+    EventEmitter.on('beyond-resourceList-resourceType-reload', handleResourceTypeReload);
+    return () => {
+      EventEmitter.off('beyond-resourceList-resourceType-reload', handleResourceTypeReload);
+    };
+  }, [EventEmitter, refreshList, resourceType, searchParams, setSearchParams]);
 
   // 防抖定时器
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
@@ -386,6 +434,17 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
 
   const tabBarExtraContent = (
     <Space>
+      {resourceType === 'SKILL' && (
+        <Segmented
+          size="small"
+          value={skillCardViewMode}
+          options={[
+            { label: intl.formatMessage({ id: 'resource.skillView.current' }), value: 'current' },
+            { label: intl.formatMessage({ id: 'resource.skillView.new' }), value: 'new' },
+          ]}
+          onChange={(value) => setSkillCardViewMode(value as 'current' | 'new')}
+        />
+      )}
       <ResourceFilter
         resourceType={resourceType}
         onOk={(param: any) => {
@@ -484,19 +543,27 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const defaultBannerUrl = getRuntimeActualUrl(isEN ? '/beyond/market-en.png' : '/beyond/market.png');
   const bannerLabel = React.useMemo(() => {
     if (resourceType === 'KG_DOC') {
-      return activeTab === 'personal' ? '个人知识' : '企业知识';
+      return activeTab === 'personal'
+        ? [intl.formatMessage({ id: 'resource.banner.personalKnowledge' }), '个人知识']
+        : [intl.formatMessage({ id: 'resource.banner.enterpriseKnowledge' }), '企业知识'];
     }
     if (resourceType === 'TOOL') {
-      return activeTab === 'personal' ? '个人工具' : '企业工具';
+      return activeTab === 'personal'
+        ? [intl.formatMessage({ id: 'resource.banner.personalTool' }), '个人工具']
+        : [intl.formatMessage({ id: 'resource.banner.enterpriseTool' }), '企业工具'];
     }
     if (resourceType === 'VIEW') {
-      return activeTab === 'personal' ? '个人视图' : '企业视图';
+      return activeTab === 'personal'
+        ? [intl.formatMessage({ id: 'resource.banner.personalView' }), '个人视图']
+        : [intl.formatMessage({ id: 'resource.banner.enterpriseView' }), '企业视图'];
     }
     if (resourceType === 'OBJECT') {
-      return activeTab === 'personal' ? '个人对象' : '企业对象';
+      return activeTab === 'personal'
+        ? [intl.formatMessage({ id: 'resource.banner.personalObject' }), '个人对象']
+        : [intl.formatMessage({ id: 'resource.banner.enterpriseObject' }), '企业对象'];
     }
-    return '';
-  }, [activeTab, resourceType]);
+    return [];
+  }, [activeTab, intl, resourceType]);
   const customBannerUrl = getBannerUrl(bannerList, bannerLabel);
   const bannerUrl = customBannerUrl ? getRuntimeActualUrl(customBannerUrl) : defaultBannerUrl;
 
@@ -569,6 +636,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
           onApplyUse={handleApplyUse}
           onAuditUse={handleAuditUse}
           onRefresh={refreshList}
+          skillCardViewMode={skillCardViewMode}
         />
       </div>
       <ResourceImport
@@ -585,6 +653,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         onSuccess={() => {
           setImportModalOpen(false);
           refreshList();
+          notifySiderResourceListReload();
         }}
       />
       <ResourceEdit
@@ -604,6 +673,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
             await updateResource(values);
             message.success(intl.formatMessage({ id: 'common.saveSuccess' }));
             refreshList();
+            notifySiderResourceListReload();
           } catch (error: any) {
             console.error('保存失败:', error);
             // 优先透传后端错误信息（msg / message / 字符串），缺失时再回退到通用文案

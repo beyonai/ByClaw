@@ -1,7 +1,6 @@
 ---
 name: crm-demo-showcase
-description: CRM 数据查询、统计分析、歧义处理、数据操作（周报生成→信息抽取→客户录入→商机任务创建）、结构化本体创建与视图、非结构化本体管理的综合演示。Use this skill whenever the user mentions CRM 演示、百应数据查询、客户查询、商机统计、项目管理、本体对象、视图管理、新手引导、产品演示、产品理念，or asks「什么是对象/视图」「查询快在哪里」「本体解决了什么问题」「结构化+非结构化融合」「多跳数据查询」「数据安全怎么做」「解决口语表达的歧义」— even if they don't say "演示" explicitly.
-allowed-tools: baiying_call, Bash
+description: 当用户想了解本体如何开发和使用时使用本技能。它能够通过 CRM 的实际 DEMO，演示以下 6 项能力：1）自然语言数据查询（无需 SQL）；2）聚合统计分析；3）字段歧义智能消歧；4）非结构化文本转对象和跨表视图的创建；5）数据操作（周报生成→信息抽取→客户录入→商机任务创建）；6）非结构化本体的文档融合检索。你可以通过以下对话唤起本技能：「给我演示一下」「本体能做什么」「怎么创建对象和视图」「结构化和非结构化怎么融合」「帮我查一下客户数据」。
 ---
 
 # CRM 综合能力演示
@@ -12,10 +11,11 @@ allowed-tools: baiying_call, Bash
 
 ## ⚠️ 脚本执行规则（最高优先级，不得违反）
 
-1. **必须直接用 Bash 执行 `scripts/` 下的现有脚本**，禁止自行编写 Python/Shell 代码来替代或模拟脚本功能
-2. **禁止重写脚本逻辑**：即使理解脚本内容，也不允许复现、改写或内联其逻辑
-3. **解析脚本输出**：读取 stdout 的 JSON，`ok: true` 为成功，`ok: false` 为失败，失败时将 `error` 字段原文告知用户
-4. **不允许推测结果**：脚本未执行前不得告知用户操作成功或失败
+1. **必须严格按照本SKILL的演示流程进行演示，严禁自由发挥、胡乱编造、修改演示用例**
+2. **必须直接用 Bash 执行 `scripts/` 下的现有脚本**，禁止自行编写 Python/Shell 代码来替代或模拟脚本功能
+3. **禁止重写脚本逻辑**：即使理解脚本内容，也不允许复现、改写或内联其逻辑
+4. **解析脚本输出**：读取 stdout 的 JSON，`ok: true` 为成功，`ok: false` 为失败，失败时将 `error` 字段原文告知用户
+5. **不允许推测结果**：脚本未执行前不得告知用户操作成功或失败
 
 ## 演示能力地图
 
@@ -193,20 +193,18 @@ bash scripts/setup.sh
 
 用户直接问产品概念时，优先用**演示结果来解释**，而不是直接回答。匹配下表找到场景文件。
 
+> **⚠️ 强制规则（所有场景通用）**：场景演示**必须先执行实际查询/操作并展示返回结果数据**，再用数据解释。**禁止**纯文字描述产品理念而不展示查询结果数据。各场景文件中的 `## 输出格式（强制）` 段为硬性约束，不得跳过。
+
 | # | 用户典型问法 | 处理策略 |
 |---|------------|---------|
 | 1 | "我是新手""给我演示一下""功能有哪些" | 展示功能清单，等用户选择，见上方"新手引导"块 |
-| 2 | "产品理念是什么""你们产品有什么特点" | [scenarios/02-product-philosophy.md](scenarios/02-product-philosophy.md) — 先演示再解释 |
+| 2 | "产品理念是什么""你们产品有什么特点" | [scenarios/02-product-philosophy.md](scenarios/02-product-philosophy.md) — 先选理念再演示 |
 | 3 | "什么是对象""什么是视图""对象和视图的区别" | [scenarios/03-object-view.md](scenarios/03-object-view.md) |
 | 4 | "查询又快又准""数据查询怎么做的" | [scenarios/04-query-performance.md](scenarios/04-query-performance.md) |
 | 5 | "你用了本体吗""本体解决了什么问题" | [scenarios/05-ontology-showcase.md](scenarios/05-ontology-showcase.md) |
 | 6 | "结构化非结构化融合""异构数据怎么处理" | [scenarios/06-data-fusion.md](scenarios/06-data-fusion.md) |
 | 7 | "多跳数据查询""关联查询怎么实现" | [scenarios/07-multi-hop.md](scenarios/07-multi-hop.md) |
 | 8 | "数据安全怎么保证""会不会误操作" | [scenarios/08-data-security.md](scenarios/08-data-security.md) |
-
-> 场景 2-8 依赖已完成的前置演示。如果用户直接问但还没演示过，先执行演示（从 demo 1 开始），演示结束后再回答概念问题。
->
-> 详细话术和时间分配见 [演示场景指南](references/demo-scenarios.md)。
 
 ## 故障排查
 
@@ -278,4 +276,3 @@ bash scripts/setup.sh
 | [歧义处理指南](references/ambiguity-guide.md) | 五种歧义类型的处理策略与话术模板 |
 | [数据操作指南](references/data-operations.md) | 周报格式、字段映射、校验规则、任务创建 |
 | [本体对象定义](references/ontology-objects.md) | 对象字段定义、Mock 数据、脚本调用规范 |
-| [演示场景指南](references/demo-scenarios.md) | 产品理念话术、FAQ 策略、10min/30min 时间表 |

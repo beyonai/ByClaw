@@ -18,6 +18,9 @@ COPY byclaw-exe/extensions/baiying-enhance/package.json \
 COPY byclaw-exe/extensions/byai-channel/package.json \
      byclaw-exe/extensions/byai-channel/package-lock.json \
      ./src/byai-channel/
+COPY byclaw-exe/extensions/byai_diagnostics-otel/package.json \
+     byclaw-exe/extensions/byai_diagnostics-otel/package-lock.json \
+     ./src/byai_diagnostics-otel/
 COPY byclaw-exe/extensions/byclaw-sqlite/package.json \
      byclaw-exe/extensions/byclaw-sqlite/package-lock.json \
      ./src/byclaw-sqlite/
@@ -37,6 +40,7 @@ RUN --mount=type=cache,target=/root/.npm \
 
 COPY byclaw-exe/extensions/baiying-enhance/ ./src/baiying-enhance/
 COPY byclaw-exe/extensions/byai-channel/ ./src/byai-channel/
+COPY byclaw-exe/extensions/byai_diagnostics-otel/ ./src/byai_diagnostics-otel/
 COPY byclaw-exe/extensions/byclaw-sqlite/ ./src/byclaw-sqlite/
 
 RUN set -eux; \
@@ -217,9 +221,10 @@ RUN chmod +x \
 
 RUN curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh
 
-# 安装 Bun 运行环境（gbrain 必需）
-RUN curl -fsSL https://bun.sh/install | bash
-ENV PATH="/root/.bun/bin:$PATH"
+# 安装 Bun 运行环境（gbrain 必需）— 从官方镜像拷贝二进制，避免 curl 下载超时
+COPY --from=oven/bun:1-debian /usr/local/bin/bun /usr/local/bin/bun
+RUN ln -sf /usr/local/bin/bun /usr/local/bin/bunx
+ENV PATH="/root/.bun/bin:/usr/local/bin:$PATH"
 
 # add gbrain（官方原版）
 RUN bun install -g github:garrytan/gbrain

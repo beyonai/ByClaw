@@ -18,6 +18,7 @@ type SecretProviderConfig = {
   jsonOnly: true;
   allowInsecurePath: true;
   timeoutMs: number;
+  noOutputTimeoutMs: number;
 };
 
 type ConfigWithSecrets = OpenClawConfig & {
@@ -63,6 +64,7 @@ function buildAimodelSecretProviderConfig(params: {
   redisKey: string;
   typeListRedisKey: string;
 }): SecretProviderConfig {
+  const resolverTimeoutMs = resolveAimodelSecretResolverTimeoutMs();
   return {
     source: "exec",
     command: params.command,
@@ -84,8 +86,15 @@ function buildAimodelSecretProviderConfig(params: {
     },
     jsonOnly: true,
     allowInsecurePath: true,
-    timeoutMs: 5000,
+    timeoutMs: resolverTimeoutMs,
+    noOutputTimeoutMs: resolverTimeoutMs,
   };
+}
+
+function resolveAimodelSecretResolverTimeoutMs(): number {
+  const raw = process.env.BAIYING_AIMODEL_SECRET_RESOLVER_TIMEOUT_MS?.trim();
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isInteger(parsed) && parsed >= 1000 && parsed <= 120000 ? parsed : 30000;
 }
 
 function ensureConfigModelContainers(cfg: OpenClawConfig): void {
@@ -107,6 +116,7 @@ function upsertDefaultAimodelProvider(
   ensureConfigModelContainers(cfg);
   cfg.models!.providers![defaultModel.providerKey] = {
     baseUrl: defaultModel.provider.baseUrl,
+    apiKey: defaultModel.provider.apiKey,
     api: defaultModel.provider.api,
     models: [defaultModelDefinition(defaultModel.provider)],
   };
@@ -257,6 +267,7 @@ export function mergeManagedAgentsIntoConfig(params: {
     if (m.provider && m.providerKey) {
       providers[m.providerKey] = {
         baseUrl: m.provider.baseUrl,
+        apiKey: m.provider.apiKey,
         api: m.provider.api,
         models: [defaultModelDefinition(m.provider)],
       };

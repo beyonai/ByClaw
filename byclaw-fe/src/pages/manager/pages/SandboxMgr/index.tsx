@@ -13,6 +13,10 @@ import {
   RocketOutlined,
   ClearOutlined,
   ThunderboltOutlined,
+  FormatPainterOutlined,
+  CopyOutlined,
+  FullscreenOutlined,
+  FullscreenExitOutlined,
 } from '@ant-design/icons';
 import { trim } from 'lodash';
 import {
@@ -37,6 +41,7 @@ import {
 } from 'antd';
 import { useIntl, useDispatch, useSelector } from '@umijs/max';
 import ModalDrawer from '@/pages/manager/components/ModalDrawer';
+import JsonCodeEditor from '@/pages/manager/components/JsonCodeEditor';
 import { getPreferredServiceKey, removePreferredServiceKey } from '@/pages/manager/service/SandboxMgr';
 import { isAdminVip } from '@/pages/manager/utils/auth';
 
@@ -215,6 +220,7 @@ const SandboxMgr = () => {
   const [specList, setSpecList] = useState<ServiceSpecItem[]>([]);
   const [specLoading, setSpecLoading] = useState(false);
   const [specFormVisible, setSpecFormVisible] = useState(false);
+  const [maximizedField, setMaximizedField] = useState<'specJson' | 'templateJson' | null>(null);
   const [editingSpec, setEditingSpec] = useState<ServiceSpecItem | null>(null);
   const [specForm] = Form.useForm();
   const [savingSpec, setSavingSpec] = useState(false);
@@ -1918,7 +1924,49 @@ const SandboxMgr = () => {
           </Form.Item>
 
           <Form.Item
-            label={intl.formatMessage({ id: 'sandboxMgr.config.specJson' })}
+            label={
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                {intl.formatMessage({ id: 'sandboxMgr.config.specJson' })}
+                <Tooltip title={intl.formatMessage({ id: 'sandboxMgr.config.format' })}>
+                  <FormatPainterOutlined
+                    style={{ cursor: 'pointer', color: 'var(--beyond-color-primary, #1677ff)' }}
+                    onClick={() => {
+                      const val = specForm.getFieldValue('specJson');
+                      if (!val) return;
+                      try {
+                        specForm.setFieldsValue({ specJson: JSON.stringify(JSON.parse(val), null, 2) });
+                      } catch { /* ignore */ }
+                    }}
+                  />
+                </Tooltip>
+                <Tooltip title={intl.formatMessage({ id: 'sandboxMgr.config.copy' })}>
+                  <CopyOutlined
+                    style={{ cursor: 'pointer', color: 'var(--beyond-color-primary, #1677ff)' }}
+                    onClick={() => {
+                      const val = specForm.getFieldValue('specJson');
+                      if (val) {
+                        navigator.clipboard.writeText(val).then(() => {
+                          message.success(intl.formatMessage({ id: 'sandboxMgr.config.copySuccess' }));
+                        });
+                      }
+                    }}
+                  />
+                </Tooltip>
+                <Tooltip title={intl.formatMessage({ id: maximizedField === 'specJson' ? 'sandboxMgr.config.exitFullscreen' : 'sandboxMgr.config.maximized' })}>
+                  {maximizedField === 'specJson' ? (
+                    <FullscreenExitOutlined
+                      style={{ cursor: 'pointer', color: 'var(--beyond-color-primary, #1677ff)' }}
+                      onClick={() => setMaximizedField(null)}
+                    />
+                  ) : (
+                    <FullscreenOutlined
+                      style={{ cursor: 'pointer', color: 'var(--beyond-color-primary, #1677ff)' }}
+                      onClick={() => setMaximizedField('specJson')}
+                    />
+                  )}
+                </Tooltip>
+              </span>
+            }
             name="specJson"
             rules={[
               { required: true, message: intl.formatMessage({ id: 'sandboxMgr.config.specJsonRequired' }) },
@@ -1935,15 +1983,58 @@ const SandboxMgr = () => {
               },
             ]}
           >
-            <Input.TextArea
+            <JsonCodeEditor
               rows={12}
               placeholder={intl.formatMessage({ id: 'sandboxMgr.config.specJsonPlaceholder' })}
-              style={{ fontFamily: 'monospace' }}
+              maximized={maximizedField === 'specJson'}
+              onExitMaximize={() => setMaximizedField(null)}
             />
           </Form.Item>
 
           <Form.Item
-            label={intl.formatMessage({ id: 'sandboxMgr.config.templateJson' })}
+            label={
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                {intl.formatMessage({ id: 'sandboxMgr.config.templateJson' })}
+                <Tooltip title={intl.formatMessage({ id: 'sandboxMgr.config.format' })}>
+                  <FormatPainterOutlined
+                    style={{ cursor: 'pointer', color: 'var(--beyond-color-primary, #1677ff)' }}
+                    onClick={() => {
+                      const val = specForm.getFieldValue('templateJson');
+                      if (!val) return;
+                      try {
+                        specForm.setFieldsValue({ templateJson: JSON.stringify(JSON.parse(val), null, 2) });
+                      } catch { /* ignore */ }
+                    }}
+                  />
+                </Tooltip>
+                <Tooltip title={intl.formatMessage({ id: 'sandboxMgr.config.copy' })}>
+                  <CopyOutlined
+                    style={{ cursor: 'pointer', color: 'var(--beyond-color-primary, #1677ff)' }}
+                    onClick={() => {
+                      const val = specForm.getFieldValue('templateJson');
+                      if (val) {
+                        navigator.clipboard.writeText(val).then(() => {
+                          message.success(intl.formatMessage({ id: 'sandboxMgr.config.copySuccess' }));
+                        });
+                      }
+                    }}
+                  />
+                </Tooltip>
+                <Tooltip title={intl.formatMessage({ id: maximizedField === 'templateJson' ? 'sandboxMgr.config.exitFullscreen' : 'sandboxMgr.config.maximized' })}>
+                  {maximizedField === 'templateJson' ? (
+                    <FullscreenExitOutlined
+                      style={{ cursor: 'pointer', color: 'var(--beyond-color-primary, #1677ff)' }}
+                      onClick={() => setMaximizedField(null)}
+                    />
+                  ) : (
+                    <FullscreenOutlined
+                      style={{ cursor: 'pointer', color: 'var(--beyond-color-primary, #1677ff)' }}
+                      onClick={() => setMaximizedField('templateJson')}
+                    />
+                  )}
+                </Tooltip>
+              </span>
+            }
             name="templateJson"
             rules={[
               {
@@ -1959,10 +2050,11 @@ const SandboxMgr = () => {
               },
             ]}
           >
-            <Input.TextArea
+            <JsonCodeEditor
               rows={8}
               placeholder={intl.formatMessage({ id: 'sandboxMgr.config.templateJsonPlaceholder' })}
-              style={{ fontFamily: 'monospace' }}
+              maximized={maximizedField === 'templateJson'}
+              onExitMaximize={() => setMaximizedField(null)}
             />
           </Form.Item>
         </Form>

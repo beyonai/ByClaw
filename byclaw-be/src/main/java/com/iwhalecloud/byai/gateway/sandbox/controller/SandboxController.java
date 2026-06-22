@@ -13,6 +13,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -434,6 +435,12 @@ public class SandboxController {
         catch (Exception e) {
             return ResponseUtil.fail("沙箱扩缩容告警处理失败: " + e.getMessage());
         }
+    }
+
+    @GetMapping(value = "/autoscale/boundary-blacklist/metrics", produces = MediaType.TEXT_PLAIN_VALUE)
+    @Operation(summary = "Prometheus 沙箱扩缩容边界黑名单指标", description = "输出已达到最高/最低规格的运行中沙箱，用于 Prometheus 过滤无意义的同方向告警")
+    public String getAutoscaleBoundaryBlacklistMetrics() {
+        return sandboxResizeService.buildBoundaryBlacklistMetrics();
     }
 
     @PostMapping("/listResizeRecords")

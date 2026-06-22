@@ -34,6 +34,7 @@ import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.common.util.threadPoolUti.ThreadPoolUtil;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthRedisSyncService;
+import com.iwhalecloud.byai.manager.application.service.superassist.SuasSuperassistApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserApplicationService;
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.enterprise.service.EnterpriseInfoService;
@@ -86,6 +87,9 @@ public class LoginApplicationService {
 
     @Autowired
     private SuasSuperassistService suasSuperassistService;
+
+    @Autowired
+    private SuasSuperassistApplicationService suasSuperassistApplicationService;
 
     @Autowired
     private StationService stationService;
@@ -152,7 +156,7 @@ public class LoginApplicationService {
         loginInfo.setUsersOrganizations(organizationService.findUsersOrganizationByUserId(users.getUserId()));
         // 管理组织
         loginInfo.setUserManageOrgs(privilegeGrantService.findUserManageOrg(users.getUserId()));
-        SuasSuperassist suasSuperassist = suasSuperassistService.findByUserId(users.getUserId());
+        SuasSuperassist suasSuperassist = findSuperassistForLogin(users.getAssistantId(), users.getUserId());
         loginInfo.setDefaultDigEmployeeId(suasSuperassist != null ? suasSuperassist.getDefaultDigEmployeeId() : null);
         // 查询驻地
         if (users.getStationId() != null) {
@@ -270,9 +274,8 @@ public class LoginApplicationService {
                 loginInfo.setUserStation(JSON.parseObject(userStationJson, UserStation.class));
             }
 
-            // 初始化超级助
-            SuasSuperassist suasSuperassist = suasSuperassistService.findByUserId(loginInfo.getUserId());
-            loginInfo.setSessionDatasetId(suasSuperassist != null ? suasSuperassist.getSessionDatasetId() : null);
+            // 补齐超级助手、默认个人知识库和默认数字员工信息，避免旧 session 中 defaultDigEmployeeId 为空。
+            ensureSuperassistInfo(loginInfo, httpSession);
 
             // 异步启动用户沙箱（不阻塞接口响应）
             doAsyncJobAfterLogin(loginInfo.getUserCode(), loginInfo.getUserId());
@@ -286,8 +289,8 @@ public class LoginApplicationService {
             logger.info("当前用户登录jwt信息是:{}", JSON.toJSONString(jwtUserInfo));
 
             LoginInfo loginInfo = this.getLoginInfo(jwtUserInfo.getUserCode());
-            SuasSuperassist suasSuperassist = suasSuperassistService.findByUserId(loginInfo.getUserId());
-            loginInfo.setSessionDatasetId(suasSuperassist != null ? suasSuperassist.getSessionDatasetId() : null);
+            // token 场景也做同样兜底，确保返回给前端的默认数字员工不依赖旧 session。
+            ensureSuperassistInfo(loginInfo, httpSession);
 
             // 异步启动用户沙箱（不阻塞接口响应）
             doAsyncJobAfterLogin(loginInfo.getUserCode(), loginInfo.getUserId());
@@ -297,6 +300,46 @@ public class LoginApplicationService {
         else {
             return ResponseUtil.fail(I18nUtil.get("login.user.not.logged.in"));
         }
+    }
+
+    private void ensureSuperassistInfo(LoginInfo loginInfo, HttpSession httpSession) {
+        if (loginInfo == null || loginInfo.getUserId() == null) {
+            return;
+        }
+
+        SuasSuperassist suasSuperassist = findSuperassistForLogin(loginInfo.getAssistantId(), loginInfo.getUserId());
+        if (suasSuperassist == null || suasSuperassist.getSessionDatasetId() == null
+            || suasSuperassist.getDefaultDigEmployeeId() == null) {
+            // currentUser 可能命中一个历史旧 session，这里沿用登录成功时的初始化逻辑做一次轻量兜底。
+            suasSuperassist = suasSuperassistApplicationService.createDatasetIfNotExists(loginInfo);
+        }
+
+        if (suasSuperassist == null) {
+            return;
+        }
+
+        loginInfo.setSessionDatasetId(suasSuperassist.getSessionDatasetId());
+        loginInfo.setDefaultDigEmployeeId(suasSuperassist.getDefaultDigEmployeeId());
+
+        if (httpSession != null) {
+            httpSession.setAttribute("sessionDatasetId", loginInfo.getSessionDatasetId());
+            httpSession.setAttribute("defaultDigEmployeeId", loginInfo.getDefaultDigEmployeeId());
+        }
+    }
+
+    private SuasSuperassist findSuperassistForLogin(Long assistantId, Long userId) {
+        // 超级助手主键是 suas_superassist.superassist_id，优先使用 po_users.assistant_id。
+        // 早期数据里 assistant_id 常等于 user_id，但部分登录链路会生成独立 superassist_id。
+        if (assistantId != null && assistantId > 0) {
+            SuasSuperassist suasSuperassist = suasSuperassistService.findById(assistantId);
+            if (suasSuperassist != null) {
+                return suasSuperassist;
+            }
+        }
+        if (userId != null && userId > 0 && !userId.equals(assistantId)) {
+            return suasSuperassistService.findById(userId);
+        }
+        return null;
     }
 
     /**

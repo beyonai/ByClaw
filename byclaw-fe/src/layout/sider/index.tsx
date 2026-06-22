@@ -23,6 +23,7 @@ import SiderSearch from './siderSearch';
 import useNewChat from '../header/components/NewChat/useNewChat';
 import { getDisplayUserNameInChat } from '@/utils/chat';
 import useGlobal from '@/hooks/useGlobal';
+import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContentContext';
@@ -32,8 +33,15 @@ export const DEF_SIDER = 'sessions';
 const CENTER_TAB_KEYS = new Set(['agent', 'knowledge', 'tool', 'view', 'object', 'skill', 'file']);
 
 const SIDER_ACTIVE_TAB_BY_PATH: Partial<Record<string, (typeof tabItems)[number]['key']>> = {
+  '/dialogueRecord': 'sessions',
   '/knowledgeDetail': 'knowledge',
 };
+
+const CHAT_PANEL_PATHS = ['/chat', '/dialogueRecord', '/employees', '/searchAndQuery', '/functionCloud', '/sandbox'];
+
+const isSameOrChildPath = (pathname: string, path: string) => pathname === path || pathname.startsWith(`${path}/`);
+
+const isChatPanelPath = (pathname: string) => CHAT_PANEL_PATHS.some((path) => isSameOrChildPath(pathname, path));
 
 const getCurrentTabByPathname = (pathname: string) => {
   const matchedTabKey = Object.entries(SIDER_ACTIVE_TAB_BY_PATH).find(([path]) => pathname.startsWith(path))?.[1];
@@ -93,7 +101,7 @@ const Sidebar = () => {
 
   const handleMenuTabClick = React.useCallback(
     (tab: (typeof tabItems)[number]) => {
-      const isChatPage = pathname.startsWith('/chat');
+      const isChatPage = isChatPanelPath(pathname);
 
       // 左侧主菜单切换时，最右侧详情面板要及时关闭；即使重复点击当前菜单也要生效。
       clearDetailPanel?.();
@@ -237,6 +245,7 @@ const Sidebar = () => {
             className={styles.sideIconWrap}
             onClick={() => {
               clearDetailPanel?.();
+              clearEasyConfirmInputDraft();
               handleNewChat();
             }}
           >

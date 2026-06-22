@@ -5,15 +5,15 @@ description = "byclaw-data stack: DataCloud MCP service + Gateway worker"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "python-dotenv>=1.0.0",
-    "by-datacloud>=0.1.41",
-    "langchain-openai>=1.1.11",
+    "python-dotenv==1.0.0",
+    "by-datacloud==0.1.41",
+    "langchain-openai==1.1.11",
     "by-framework==0.2.2.dev5",
     "by-framework-trace-langfuse==0.0.3.dev2",
     "by-framework-langgraph==0.0.3.dev2",
-    "by-framework-history-byclaw>=0.0.3",
-    "langfuse>=2.0.0",
-    "deepagents>=0.4.7",
+    "by-framework-history-byclaw==0.0.3",
+    "langfuse==2.0.0",
+    "deepagents==0.4.7",
 ]
 
 [project.scripts]
@@ -47,10 +47,10 @@ index-strategy = "unsafe-best-match"
 
 [dependency-groups]
 dev = [
-    "pytest>=8.0",
-    "httpx>=0.27",
-    "ruff>=0.8",
-    "pytest-asyncio>=1.3.0",
+    "pytest==8.0",
+    "httpx==0.27",
+    "ruff==0.8",
+    "pytest-asyncio==1.3.0",
 ]
 
 [tool.pytest.ini_options]

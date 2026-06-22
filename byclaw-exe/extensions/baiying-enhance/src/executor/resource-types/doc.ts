@@ -18,6 +18,7 @@ import {
   type DocDeltaCallback,
   getCommonGatewayMetadata,
   resolveLangfuseParentObservationId as resolvePayloadLangfuseParentObservationId,
+  resolveLangfuseTraceId as resolvePayloadLangfuseTraceId,
 } from "../doc-shared.js";
 import { executeDocViaSdk } from "../doc-gateway.js";
 import { executeViaCallAgent } from "../call-agent.js";
@@ -243,6 +244,7 @@ async function executeDatasetDocViaCallAgent(input: {
   const callMode = docCallMode(input.parameters);
   const syncTimeoutSec = docSyncTimeoutSec(input.parameters);
   const syncIntervalSec = docSyncIntervalSec(input.parameters);
+  const langfuseTraceId = resolvePayloadLangfuseTraceId(input.parameters);
   const targetAgentType =
     asString(input.parameters.target_agent_type) ||
     (process.env.BAIYING_DATASET_TARGET_AGENT_TYPE ?? "BYCLAW_QA").trim() ||
@@ -258,12 +260,18 @@ async function executeDatasetDocViaCallAgent(input: {
   if (langfuseParentObservationId) {
     payload.langfuseParentObservationId = langfuseParentObservationId;
   }
+  if (langfuseTraceId) {
+    payload.langfuseTraceId = langfuseTraceId;
+  }
   const metadata = getCommonGatewayMetadata(input.parameters);
   if (channelTraceId) {
     metadata["channel-trace-id"] = channelTraceId;
   }
   if (langfuseParentObservationId) {
     metadata.langfuseParentObservationId = langfuseParentObservationId;
+  }
+  if (langfuseTraceId) {
+    metadata.langfuseTraceId = langfuseTraceId;
   }
 
   return executeViaCallAgent({
@@ -286,6 +294,7 @@ async function executeDatasetDocViaCallAgent(input: {
     },
     metadata,
     langfuseParentObservationId,
+    langfuseTraceId,
     onDelta: input.onDelta,
     signal: input.signal,
     logger: input.logger,

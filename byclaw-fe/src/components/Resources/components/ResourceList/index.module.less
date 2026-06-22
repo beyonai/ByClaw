@@ -32,6 +32,21 @@
   margin: 0 6px;
 }
 
+.skillPosterList {
+  display: grid;
+  grid-template-columns: repeat(var(--skill-poster-column-count, 1), minmax(0, 1fr));
+  margin: 0 6px;
+  gap: 28px;
+  align-items: flex-start;
+}
+
+.skillPosterColumn {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
 .sectionsContainer {
   margin: 20px 0;
   overflow-y: auto;

@@ -1,7 +1,15 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.util.ListUtil;
+import com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto;
+import com.iwhalecloud.byai.manager.dto.resource.SsResExtSkillDto;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtSkillMapper;
+
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -56,7 +64,7 @@ public class SsResExtSkillService {
      */
     public void saveOrUpdate(SsResExtSkill ssResExtSkill) {
         if (ssResExtSkill == null || ssResExtSkill.getResourceId() == null) {
-            throw new IllegalArgumentException("技能资源ID不能为空");
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.resource.id.empty"));
         }
         fillDefaults(ssResExtSkill);
         if (ssResExtSkillMapper.selectById(ssResExtSkill.getResourceId()) == null) {
@@ -129,5 +137,18 @@ public class SsResExtSkillService {
         if (!StringUtils.hasText(ssResExtSkill.getSkillPackageFormat())) {
             ssResExtSkill.setSkillPackageFormat(DEFAULT_PACKAGE_FORMAT);
         }
+    }
+
+    /**
+     * 根据编码查询技能信息
+     *
+     * @param skillCodes 资源标识
+     * @return List<ResourceExtDigEmployeeDto>
+     */
+    public List<SsResExtSkillDto> findBySkillCodes(Collection<String> skillCodes) {
+        if (ListUtil.isEmpty(skillCodes)) {
+            return Collections.emptyList();
+        }
+        return ssResExtSkillMapper.findBySkillCodes(skillCodes);
     }
 }
