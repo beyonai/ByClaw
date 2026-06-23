@@ -1959,6 +1959,9 @@ const SandboxMgr = () => {
                               : 'sandboxMgr.health.hardDisabled',
                           })}
                         </Tag>
+                        <Typography.Text type="secondary">
+                          {intl.formatMessage({ id: 'sandboxMgr.health.runtimeSwitch' })}
+                        </Typography.Text>
                         <Switch
                           checked={!!healthSwitch.runtimeEnabled}
                           disabled={!healthSwitch.hardEnabled}

@@ -104,10 +104,11 @@ export default {
   'sandboxMgr.profile.deleteConfirm': '确定停用此规格吗？停用后不会出现在弹性调整目标规格中。',
 
   // 沙箱健康检测
-  'sandboxMgr.health.switchTitle': '沙箱健康检测',
-  'sandboxMgr.health.switchTip': '复用沙箱心跳作为活跃信号，异步检测资源水位并写入 Redis。',
-  'sandboxMgr.health.hardEnabled': '硬开关已开启',
-  'sandboxMgr.health.hardDisabled': '硬开关未开启',
+  'sandboxMgr.health.switchTitle': '沙箱资源健康检测',
+  'sandboxMgr.health.switchTip': '检测运行中沙箱的 CPU、内存资源水位，结果写入 Redis 用于下发拦截和资源通知。',
+  'sandboxMgr.health.hardEnabled': '环境开关已开启',
+  'sandboxMgr.health.hardDisabled': '环境开关未开启',
+  'sandboxMgr.health.runtimeSwitch': '运行时开关',
   'sandboxMgr.health.switchSaveSuccess': '健康检测开关已保存',
   'sandboxMgr.health.serviceTypePlaceholder': '按服务类型搜索，如 openclaw',
   'sandboxMgr.health.add': '新增水位模型',
@@ -143,8 +144,8 @@ export default {
   'sandboxMgr.health.saveConfirmTitle': '确认保存水位模型？',
   'sandboxMgr.health.saveConfirmContent': '保存后会影响 OpenClaw 下发前拦截和沙箱资源通知。',
   'sandboxMgr.health.modelSaveSuccess': '水位模型保存成功',
-  'sandboxMgr.health.modelDeleteSuccess': '水位模型已停用',
-  'sandboxMgr.health.deleteConfirm': '确定停用此水位模型吗？',
+  'sandboxMgr.health.modelDeleteSuccess': '水位模型删除成功',
+  'sandboxMgr.health.deleteConfirm': '确定删除此水位模型吗？删除后不可恢复。',
 
   // 沙箱弹性计算配置
   'sandboxMgr.elastic.userCode': '用户编码',

@@ -106,11 +106,12 @@ export default {
     'Disable this profile? It will no longer appear as a target profile for elastic resize.',
 
   // Sandbox Health Detection
-  'sandboxMgr.health.switchTitle': 'Sandbox Health Detection',
+  'sandboxMgr.health.switchTitle': 'Sandbox Resource Health Detection',
   'sandboxMgr.health.switchTip':
-    'Reuse sandbox heartbeat as the activity signal, sample resource watermarks asynchronously, and write Redis.',
-  'sandboxMgr.health.hardEnabled': 'Hard switch enabled',
-  'sandboxMgr.health.hardDisabled': 'Hard switch disabled',
+    'Monitor CPU and memory watermarks of running sandboxes and write snapshots to Redis for admission checks and resource notifications.',
+  'sandboxMgr.health.hardEnabled': 'Env switch enabled',
+  'sandboxMgr.health.hardDisabled': 'Env switch disabled',
+  'sandboxMgr.health.runtimeSwitch': 'Runtime switch',
   'sandboxMgr.health.switchSaveSuccess': 'Health switch saved',
   'sandboxMgr.health.serviceTypePlaceholder': 'Search service type, e.g. openclaw',
   'sandboxMgr.health.add': 'Add Watermark Model',
@@ -147,8 +148,8 @@ export default {
   'sandboxMgr.health.saveConfirmContent':
     'Saving this model affects OpenClaw admission checks and sandbox resource notifications.',
   'sandboxMgr.health.modelSaveSuccess': 'Watermark model saved',
-  'sandboxMgr.health.modelDeleteSuccess': 'Watermark model disabled',
-  'sandboxMgr.health.deleteConfirm': 'Disable this watermark model?',
+  'sandboxMgr.health.modelDeleteSuccess': 'Watermark model deleted',
+  'sandboxMgr.health.deleteConfirm': 'Delete this watermark model? This action cannot be undone.',
 
   // Sandbox Elastic Compute
   'sandboxMgr.elastic.userCode': 'User Code',
