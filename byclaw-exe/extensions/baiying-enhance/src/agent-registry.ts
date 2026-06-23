@@ -6,6 +6,7 @@ import {
   resolveAimodelTypeListRedisKey,
   resolveAimodelSecretProviderName,
 } from "./aimodel-config.js";
+import { MANAGED_MODEL_STREAMING_USAGE_COMPAT } from "./config-write.js";
 import { MANAGED_AGENT_PREFIX, MANAGED_PROVIDER_PREFIX } from "./types.js";
 import { resolveDefaultManagedWorkspacePath } from "./workspace-paths.js";
 
@@ -38,13 +39,17 @@ function defaultModelDefinition(provider: ProviderBundle) {
     provider.thinkingBudgets && Object.keys(provider.thinkingBudgets).length > 0
       ? { baiyingThinkingBudgets: provider.thinkingBudgets }
       : undefined;
+  const compat = {
+    ...(provider.compat ?? {}),
+    ...MANAGED_MODEL_STREAMING_USAGE_COMPAT,
+  };
   return {
     id: provider.modelId,
     name: provider.modelName ?? provider.modelId,
     api: provider.api,
     reasoning: provider.reasoning ?? false,
     ...(provider.thinkingLevelMap ? { thinkingLevelMap: provider.thinkingLevelMap } : {}),
-    ...(provider.compat ? { compat: provider.compat } : {}),
+    compat,
     ...(params ? { params } : {}),
     input: provider.input ?? (["text"] as Array<"text" | "image">),
     cost: {

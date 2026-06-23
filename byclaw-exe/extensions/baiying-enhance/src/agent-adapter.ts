@@ -55,6 +55,7 @@ export type AimodelModelCompat = {
     thinkingFormat?: string;
     supportedReasoningEfforts?: string[];
     reasoningEffortMap?: Record<string, string>;
+    supportsUsageInStreaming?: boolean;
 };
 
 export type ProviderBundle = {
