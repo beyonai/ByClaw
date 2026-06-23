@@ -111,6 +111,10 @@
     <logger name="org.springframework.web.servlet.DispatcherServlet" level="WARN"/>
     <logger name="org.springframework.kafka.listener.KafkaMessageListenerContainer" level="WARN"/>
     <logger name="ch.qos.logback.core.rolling.helper" level="WARN"/>
+    <logger name="com.iwhalecloud.byai.common.feign.interceptor" level="WARN"/>
+    <logger name="com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils" level="WARN"/>
+    <logger name="com.iwhalecloud.byai.manager.mapper.superassist.SuasSuperassistMapper" level="WARN"/>
+    <logger name="com.iwhalecloud.byai.manager.mapper.resource" level="WARN"/>
 
     <!-- 特定包日志级别配置 -->
     <logger name="interceptor.com.iwhalecloud.byai.manager.datasource.DataSourceMethodInterceptor" level="WARN"/>
