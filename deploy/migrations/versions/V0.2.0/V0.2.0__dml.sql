@@ -750,5 +750,143 @@ WHERE NOT EXISTS (
       AND enabled = 1
 );
 
+-- 沙箱健康检测-OpenClaw服务规格水位模型初始化
+WITH desired_models (
+    profile_key,
+    model_name,
+    priority,
+    idle_memory_limit_ratio,
+    busy_memory_limit_ratio,
+    critical_memory_limit_ratio,
+    busy_cpu_request_ratio,
+    critical_cpu_request_ratio,
+    consecutive_busy_samples,
+    recover_samples,
+    sample_interval_seconds,
+    snapshot_ttl_seconds,
+    watch_ttl_seconds,
+    remark
+) AS (
+    VALUES
+        ('xs', 'OpenClaw XS sandbox health model', 100, 0.45, 0.65, 0.78, 0.80, 1.40, 2, 3, 15, 90, 75, 'OpenClaw xs: request 0.25C/765Mi, limit 1C/1.5Gi. Conservative thresholds for small memory containers.'),
+        ('s',  'OpenClaw S sandbox health model',  100, 0.50, 0.72, 0.85, 1.00, 1.80, 2, 3, 20, 120, 90, 'OpenClaw s: request 0.5C/1Gi, limit 1.5C/3Gi. Balanced thresholds for standard containers.'),
+        ('m',  'OpenClaw M sandbox health model',  100, 0.55, 0.78, 0.90, 1.20, 2.00, 2, 2, 30, 120, 90, 'OpenClaw m: request 1C/2Gi, limit 2C/4Gi. Moderate thresholds for enhanced containers.'),
+        ('l',  'OpenClaw L sandbox health model',  100, 0.60, 0.82, 0.92, 1.50, 2.50, 2, 2, 30, 180, 120, 'OpenClaw l: request 2.5C/6Gi, limit 4C/8Gi. Wider thresholds for high performance containers.')
+),
+available_models AS (
+    SELECT d.*
+    FROM desired_models d
+    WHERE EXISTS (
+        SELECT 1
+        FROM byai.sandbox_service_profile p
+        WHERE p.service_type = 'openclaw'
+          AND p.profile_key = d.profile_key
+          AND p.enabled = 1
+    )
+),
+target_models AS (
+    SELECT
+        a.*,
+        (
+            SELECT m.id
+            FROM byai.sandbox_health_watermark_model m
+            WHERE m.service_type = 'openclaw'
+              AND COALESCE(m.profile_key, '') = a.profile_key
+            ORDER BY m.enabled DESC, m.priority DESC, m.id ASC
+            LIMIT 1
+        ) AS target_id
+    FROM available_models a
+)
+UPDATE byai.sandbox_health_watermark_model m
+SET model_name = t.model_name,
+    enabled = 1,
+    priority = t.priority,
+    idle_memory_limit_ratio = t.idle_memory_limit_ratio,
+    busy_memory_limit_ratio = t.busy_memory_limit_ratio,
+    critical_memory_limit_ratio = t.critical_memory_limit_ratio,
+    busy_cpu_request_ratio = t.busy_cpu_request_ratio,
+    critical_cpu_request_ratio = t.critical_cpu_request_ratio,
+    consecutive_busy_samples = t.consecutive_busy_samples,
+    recover_samples = t.recover_samples,
+    sample_interval_seconds = t.sample_interval_seconds,
+    snapshot_ttl_seconds = t.snapshot_ttl_seconds,
+    watch_ttl_seconds = t.watch_ttl_seconds,
+    remark = t.remark,
+    updated_at = CURRENT_TIMESTAMP
+FROM target_models t
+WHERE m.id = t.target_id;
+
+WITH desired_models (
+    profile_key,
+    model_name,
+    priority,
+    idle_memory_limit_ratio,
+    busy_memory_limit_ratio,
+    critical_memory_limit_ratio,
+    busy_cpu_request_ratio,
+    critical_cpu_request_ratio,
+    consecutive_busy_samples,
+    recover_samples,
+    sample_interval_seconds,
+    snapshot_ttl_seconds,
+    watch_ttl_seconds,
+    remark
+) AS (
+    VALUES
+        ('xs', 'OpenClaw XS sandbox health model', 100, 0.45, 0.65, 0.78, 0.80, 1.40, 2, 3, 15, 90, 75, 'OpenClaw xs: request 0.25C/765Mi, limit 1C/1.5Gi. Conservative thresholds for small memory containers.'),
+        ('s',  'OpenClaw S sandbox health model',  100, 0.50, 0.72, 0.85, 1.00, 1.80, 2, 3, 20, 120, 90, 'OpenClaw s: request 0.5C/1Gi, limit 1.5C/3Gi. Balanced thresholds for standard containers.'),
+        ('m',  'OpenClaw M sandbox health model',  100, 0.55, 0.78, 0.90, 1.20, 2.00, 2, 2, 30, 120, 90, 'OpenClaw m: request 1C/2Gi, limit 2C/4Gi. Moderate thresholds for enhanced containers.'),
+        ('l',  'OpenClaw L sandbox health model',  100, 0.60, 0.82, 0.92, 1.50, 2.50, 2, 2, 30, 180, 120, 'OpenClaw l: request 2.5C/6Gi, limit 4C/8Gi. Wider thresholds for high performance containers.')
+)
+INSERT INTO byai.sandbox_health_watermark_model (
+    model_name,
+    service_type,
+    profile_key,
+    enabled,
+    priority,
+    idle_memory_limit_ratio,
+    busy_memory_limit_ratio,
+    critical_memory_limit_ratio,
+    busy_cpu_request_ratio,
+    critical_cpu_request_ratio,
+    consecutive_busy_samples,
+    recover_samples,
+    sample_interval_seconds,
+    snapshot_ttl_seconds,
+    watch_ttl_seconds,
+    remark
+)
+SELECT
+    d.model_name,
+    'openclaw',
+    d.profile_key,
+    1,
+    d.priority,
+    d.idle_memory_limit_ratio,
+    d.busy_memory_limit_ratio,
+    d.critical_memory_limit_ratio,
+    d.busy_cpu_request_ratio,
+    d.critical_cpu_request_ratio,
+    d.consecutive_busy_samples,
+    d.recover_samples,
+    d.sample_interval_seconds,
+    d.snapshot_ttl_seconds,
+    d.watch_ttl_seconds,
+    d.remark
+FROM desired_models d
+WHERE EXISTS (
+    SELECT 1
+    FROM byai.sandbox_service_profile p
+    WHERE p.service_type = 'openclaw'
+      AND p.profile_key = d.profile_key
+      AND p.enabled = 1
+)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM byai.sandbox_health_watermark_model m
+      WHERE m.service_type = 'openclaw'
+        AND COALESCE(m.profile_key, '') = d.profile_key
+  );
+
 COMMIT;
 ---平台内置技能初始化------end-----
