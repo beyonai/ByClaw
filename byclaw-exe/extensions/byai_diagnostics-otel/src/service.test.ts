@@ -216,6 +216,8 @@ describe("BYAI diagnostics OTel correlation", () => {
   it("parents OpenClaw run and model spans under BYAI SDK inbound spans", async () => {
     const service = createDiagnosticsOtelService({
       includeDiagnosticSessionAttributes: true,
+      includeLangfuseSessionAttributes: true,
+      includeLangfuseUserAttributes: true,
     });
     const { ctx, emitTrusted } = createContext();
     await service.start(ctx as never);
@@ -224,7 +226,7 @@ describe("BYAI diagnostics OTel correlation", () => {
     const inboundTrace = {
       traceId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       spanId: "bbbbbbbbbbbbbbbb",
-      traceFlags: "01",
+      traceFlags: "00",
     };
     const runTrace = {
       traceId: "cccccccccccccccccccccccccccccccc",
@@ -296,6 +298,7 @@ describe("BYAI diagnostics OTel correlation", () => {
       spanContext: expect.objectContaining({
         traceId: inboundTrace.traceId,
         spanId: inboundTrace.spanId,
+        traceFlags: 1,
       }),
     });
     expect(runCall?.[2]).toEqual({
@@ -307,6 +310,8 @@ describe("BYAI diagnostics OTel correlation", () => {
     expect(inboundCall?.[1]?.attributes).toEqual(
       expect.objectContaining({
         "langfuse.user.id": "0027024710",
+        "langfuse.session.id": "session-1",
+        "session.id": "session-1",
         "user.id": "0027024710",
         "openclaw.userId": "0027024710",
       }),
@@ -315,6 +320,8 @@ describe("BYAI diagnostics OTel correlation", () => {
       expect.objectContaining({
         "byai.inbound.linked": true,
         "openclaw.channel": "byai-channel",
+        "langfuse.session.id": "session-1",
+        "session.id": "session-1",
         "langfuse.user.id": "0027024710",
         "user.id": "0027024710",
       }),
@@ -329,6 +336,7 @@ describe("BYAI diagnostics OTel correlation", () => {
     vi.stubEnv("USER_CODE", "sandbox-user-99");
     const service = createDiagnosticsOtelService({
       includeDiagnosticSessionAttributes: true,
+      includeLangfuseSessionAttributes: true,
       includeLangfuseUserAttributes: true,
     });
     const { ctx, emitTrusted } = createContext();
@@ -364,6 +372,8 @@ describe("BYAI diagnostics OTel correlation", () => {
     expect(runCall?.[1]?.attributes).toEqual(
       expect.objectContaining({
         "langfuse.user.id": "sandbox-user-99",
+        "langfuse.session.id": "session-env",
+        "session.id": "session-env",
         "user.id": "sandbox-user-99",
       }),
     );
@@ -397,11 +407,21 @@ describe("BYAI diagnostics OTel correlation", () => {
       sessionKey: "session-tool",
       toolCallId: "call-tool",
     })).toBe("0000000000000001");
+    expect(bridge?.getToolTraceId?.({
+      runId: "run-tool",
+      sessionKey: "session-tool",
+      toolCallId: "call-tool",
+    })).toBe("4bf92f3577b34da6a3ce929d0e0e4736");
     expect(
       JSON.parse(fs.readFileSync(path.join(dir, "bridge.json"), "utf8")).entries[
         "session:session-tool:tool:call-tool"
       ].observationId,
     ).toBe("0000000000000001");
+    expect(
+      JSON.parse(fs.readFileSync(path.join(dir, "bridge.json"), "utf8")).entries[
+        "session:session-tool:tool:call-tool"
+      ].traceId,
+    ).toBe("4bf92f3577b34da6a3ce929d0e0e4736");
 
     emitTrusted({
       type: "tool.execution.completed",
@@ -416,6 +436,11 @@ describe("BYAI diagnostics OTel correlation", () => {
     } as never);
 
     expect(bridge?.getToolObservationId?.({
+      runId: "run-tool",
+      sessionKey: "session-tool",
+      toolCallId: "call-tool",
+    })).toBeUndefined();
+    expect(bridge?.getToolTraceId?.({
       runId: "run-tool",
       sessionKey: "session-tool",
       toolCallId: "call-tool",

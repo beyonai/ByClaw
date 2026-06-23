@@ -1,4 +1,3 @@
-
 UPDATE byai.sandbox_service_spec SET template_json = '{"mcp": {"servers": {"env": {"GBRAIN_HOME": "/by/.openclaw/gbrain"}, "gbrain": {"args": ["serve"], "command": "gbrain"}}}, "meta": {"lastTouchedAt": "2026-03-27T08:46:51.148Z", "lastTouchedVersion": "2026.3.28"}, "hooks": {"internal": {"enabled": true, "entries": {"boot-md": {"enabled": false}, "session-memory": {"enabled": true}}}}, "tools": {"web": {"search": {"enabled": false}}, "profile": "full"}, "agents": {"list": [{"id": "main", "skills": [], "default": true, "workspace": "${OPENCLAW_STATE_DIR}/workspace"}], "defaults": {"model": {}, "models": {}, "subagents": {"maxConcurrent": 8}, "compaction": {"mode": "safeguard"}, "maxConcurrent": 4, "skipBootstrap": true, "verboseDefault": "full", "thinkingDefault": "high", "blockStreamingBreak": "text_end", "blockStreamingDefault": "on"}}, "models": {"providers": {}}, "skills": {"load": {"watch": true, "watchDebounceMs": 5000}, "install": {"nodeManager": "pnpm"}}, "wizard": {"lastRunAt": "2026-02-03T07:41:55.092Z", "lastRunMode": "local", "lastRunCommand": "configure", "lastRunVersion": "2026.1.30"}, "browser": {"enabled": true, "headless": false, "profiles": {"openclaw": {"color": "#4F7FFF", "driver": "openclaw", "cdpPort": 9222, "headless": false, "executablePath": "/usr/bin/chromium"}}, "extraArgs": ["--load-extension=/opt/opencli/extension", "--disable-extensions-except=/opt/opencli/extension", "--disable-dev-shm-usage", "--window-size=1365,768", "--display=:99"], "noSandbox": true, "ssrfPolicy": {"allowedHostnames": ["localhost", "127.0.0.1"]}, "defaultProfile": "openclaw", "executablePath": "/usr/bin/chromium", "localLaunchTimeoutMs": 60000, "localCdpReadyTimeoutMs": 60000}, "gateway": {"auth": {"mode": "token", "token": "${OPENCLAW_GATEWAY_TOKEN}"}, "bind": "lan", "mode": "local", "port": 18789, "controlUi": {"allowedOrigins": ["*"], "allowInsecureAuth": true, "dangerouslyDisableDeviceAuth": true, "dangerouslyAllowHostHeaderOriginFallback": true}, "tailscale": {"mode": "off", "resetOnExit": false}}, "logging": {"file": "/by/.openclaw/logs/openclaw.log", "level": "info", "maxFileBytes": 104857600}, "plugins": {"load": {"paths": ["/app/dist-runtime/extensions/baiying-enhance", "/app/dist-runtime/extensions/byai-channel", "/app/dist-runtime/extensions/byclaw-sqlite"]}, "allow": ["browser", "byai-channel", "baiying-enhance", "byclaw-sqlite", "diagnostics-otel"], "slots": {"memory": "none"}, "enabled": true, "entries": {"xai": {"enabled": false}, "browser": {"enabled": true}, "byai-channel": {"enabled": true, "hooks": {"allowConversationAccess": true}}, "byclaw-sqlite": {"enabled": true}, "baiying-enhance": {"config": {"watchDebounceMs": 500, "mainParentAgentId": "main", "workspaceAutoSeed": true, "embedApiKeysFromJson": true, "mergeAllowSpawnForMain": true}, "enabled": true}, "diagnostics-otel": {"enabled": false}, "byai_diagnostics-otel": {"enabled": true}}}, "channels": {"byai-channel": {"enabled": true, "dmPolicy": "open", "allowFrom": ["*"], "webhookPath": "/webhook/byai-channel", "streamEnabled": true, "blockStreaming": true, "sessionKeyPerSessionId": true}}, "commands": {"native": "auto", "restart": true, "nativeSkills": "auto", "ownerDisplay": "raw"}, "diagnostics": {"otel": {"logs": false, "traces": true, "enabled": true, "headers": {"Authorization": "Basic ${LANGFUSE_OTEL_AUTH_SECRET}", "x-langfuse-ingestion-version": "4"}, "metrics": false, "endpoint": "${LANGFUSE_BASE_URL}/api/public/otel", "protocol": "http/protobuf", "sampleRate": 1, "serviceName": "openclaw-gateway", "captureContent": {"enabled": true, "toolInputs": true, "toolOutputs": true, "systemPrompt": true, "inputMessages": true, "outputMessages": true, "toolDefinitions": true}, "flushIntervalMs": 5000}, "enabled": true}}' WHERE service_key = 'openclaw';
 
 update byai_aimodel set model_protocol ='OpenAI' where model_type ='LLM' and model_protocol is null and url not like '%anthropic%';
@@ -217,7 +216,6 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
 		}
 	]
 }', '用户登陆初始数字员工助手模板');
-
 
 -- 添加uiagent和code-agent沙箱spec
 DELETE FROM "byai"."sandbox_service_spec"  WHERE "service_key" IN ('byclaw-code-agent','uiagent');
@@ -707,4 +705,187 @@ WHERE e.resource_id = r.resource_id
   AND r.resource_biz_type = 'SKILL'
   AND r.owner_type = 'enterprise'
   AND r.resource_code IN ('podcast-outline','tech-article','podcast-video','podcast-voice','podcast-script','slide-dec','unstructured-ontology-manager','structured-ontology-manager','crm-demo-showcase','github-issues-mgmt','github-code-analysis','iwhalehub','gbrain','bycli','dws','amap-visual-report-generator');
+
+-- 沙箱健康检测-默认水位模型初始化
+INSERT INTO byai.sandbox_health_watermark_model (
+    model_name,
+    service_type,
+    profile_key,
+    enabled,
+    priority,
+    idle_memory_limit_ratio,
+    busy_memory_limit_ratio,
+    critical_memory_limit_ratio,
+    busy_cpu_request_ratio,
+    critical_cpu_request_ratio,
+    consecutive_busy_samples,
+    recover_samples,
+    sample_interval_seconds,
+    snapshot_ttl_seconds,
+    watch_ttl_seconds,
+    remark
+)
+SELECT
+    'Default sandbox health model',
+    'default',
+    NULL,
+    1,
+    0,
+    0.55,
+    0.75,
+    0.88,
+    1.00,
+    1.80,
+    2,
+    2,
+    30,
+    120,
+    90,
+    'Fallback model used when no service/profile model exists.'
+FROM (SELECT 1) seed
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM byai.sandbox_health_watermark_model
+    WHERE service_type = 'default'
+      AND COALESCE(profile_key, '') = ''
+      AND enabled = 1
+);
+
+-- 沙箱健康检测-OpenClaw服务规格水位模型初始化
+WITH desired_models (
+    profile_key,
+    model_name,
+    priority,
+    idle_memory_limit_ratio,
+    busy_memory_limit_ratio,
+    critical_memory_limit_ratio,
+    busy_cpu_request_ratio,
+    critical_cpu_request_ratio,
+    consecutive_busy_samples,
+    recover_samples,
+    sample_interval_seconds,
+    snapshot_ttl_seconds,
+    watch_ttl_seconds,
+    remark
+) AS (
+    VALUES
+        ('xs', 'OpenClaw XS sandbox health model', 100, 0.45, 0.65, 0.78, 0.80, 1.40, 2, 3, 15, 90, 75, 'OpenClaw xs: request 0.25C/765Mi, limit 1C/1.5Gi. Conservative thresholds for small memory containers.'),
+        ('s',  'OpenClaw S sandbox health model',  100, 0.50, 0.72, 0.85, 1.00, 1.80, 2, 3, 20, 120, 90, 'OpenClaw s: request 0.5C/1Gi, limit 1.5C/3Gi. Balanced thresholds for standard containers.'),
+        ('m',  'OpenClaw M sandbox health model',  100, 0.55, 0.78, 0.90, 1.20, 2.00, 2, 2, 30, 120, 90, 'OpenClaw m: request 1C/2Gi, limit 2C/4Gi. Moderate thresholds for enhanced containers.'),
+        ('l',  'OpenClaw L sandbox health model',  100, 0.60, 0.82, 0.92, 1.50, 2.50, 2, 2, 30, 180, 120, 'OpenClaw l: request 2.5C/6Gi, limit 4C/8Gi. Wider thresholds for high performance containers.')
+),
+available_models AS (
+    SELECT d.*
+    FROM desired_models d
+    WHERE EXISTS (
+        SELECT 1
+        FROM byai.sandbox_service_profile p
+        WHERE p.service_type = 'openclaw'
+          AND p.profile_key = d.profile_key
+          AND p.enabled = 1
+    )
+),
+target_models AS (
+    SELECT
+        a.*,
+        (
+            SELECT m.id
+            FROM byai.sandbox_health_watermark_model m
+            WHERE m.service_type = 'openclaw'
+              AND COALESCE(m.profile_key, '') = a.profile_key
+            ORDER BY m.enabled DESC, m.priority DESC, m.id ASC
+            LIMIT 1
+        ) AS target_id
+    FROM available_models a
+)
+UPDATE byai.sandbox_health_watermark_model m
+SET model_name = t.model_name,
+    enabled = 1,
+    priority = t.priority,
+    idle_memory_limit_ratio = t.idle_memory_limit_ratio,
+    busy_memory_limit_ratio = t.busy_memory_limit_ratio,
+    critical_memory_limit_ratio = t.critical_memory_limit_ratio,
+    busy_cpu_request_ratio = t.busy_cpu_request_ratio,
+    critical_cpu_request_ratio = t.critical_cpu_request_ratio,
+    consecutive_busy_samples = t.consecutive_busy_samples,
+    recover_samples = t.recover_samples,
+    sample_interval_seconds = t.sample_interval_seconds,
+    snapshot_ttl_seconds = t.snapshot_ttl_seconds,
+    watch_ttl_seconds = t.watch_ttl_seconds,
+    remark = t.remark,
+    updated_at = CURRENT_TIMESTAMP
+FROM target_models t
+WHERE m.id = t.target_id;
+
+WITH desired_models (
+    profile_key,
+    model_name,
+    priority,
+    idle_memory_limit_ratio,
+    busy_memory_limit_ratio,
+    critical_memory_limit_ratio,
+    busy_cpu_request_ratio,
+    critical_cpu_request_ratio,
+    consecutive_busy_samples,
+    recover_samples,
+    sample_interval_seconds,
+    snapshot_ttl_seconds,
+    watch_ttl_seconds,
+    remark
+) AS (
+    VALUES
+        ('xs', 'OpenClaw XS sandbox health model', 100, 0.45, 0.65, 0.78, 0.80, 1.40, 2, 3, 15, 90, 75, 'OpenClaw xs: request 0.25C/765Mi, limit 1C/1.5Gi. Conservative thresholds for small memory containers.'),
+        ('s',  'OpenClaw S sandbox health model',  100, 0.50, 0.72, 0.85, 1.00, 1.80, 2, 3, 20, 120, 90, 'OpenClaw s: request 0.5C/1Gi, limit 1.5C/3Gi. Balanced thresholds for standard containers.'),
+        ('m',  'OpenClaw M sandbox health model',  100, 0.55, 0.78, 0.90, 1.20, 2.00, 2, 2, 30, 120, 90, 'OpenClaw m: request 1C/2Gi, limit 2C/4Gi. Moderate thresholds for enhanced containers.'),
+        ('l',  'OpenClaw L sandbox health model',  100, 0.60, 0.82, 0.92, 1.50, 2.50, 2, 2, 30, 180, 120, 'OpenClaw l: request 2.5C/6Gi, limit 4C/8Gi. Wider thresholds for high performance containers.')
+)
+INSERT INTO byai.sandbox_health_watermark_model (
+    model_name,
+    service_type,
+    profile_key,
+    enabled,
+    priority,
+    idle_memory_limit_ratio,
+    busy_memory_limit_ratio,
+    critical_memory_limit_ratio,
+    busy_cpu_request_ratio,
+    critical_cpu_request_ratio,
+    consecutive_busy_samples,
+    recover_samples,
+    sample_interval_seconds,
+    snapshot_ttl_seconds,
+    watch_ttl_seconds,
+    remark
+)
+SELECT
+    d.model_name,
+    'openclaw',
+    d.profile_key,
+    1,
+    d.priority,
+    d.idle_memory_limit_ratio,
+    d.busy_memory_limit_ratio,
+    d.critical_memory_limit_ratio,
+    d.busy_cpu_request_ratio,
+    d.critical_cpu_request_ratio,
+    d.consecutive_busy_samples,
+    d.recover_samples,
+    d.sample_interval_seconds,
+    d.snapshot_ttl_seconds,
+    d.watch_ttl_seconds,
+    d.remark
+FROM desired_models d
+WHERE EXISTS (
+    SELECT 1
+    FROM byai.sandbox_service_profile p
+    WHERE p.service_type = 'openclaw'
+      AND p.profile_key = d.profile_key
+      AND p.enabled = 1
+)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM byai.sandbox_health_watermark_model m
+      WHERE m.service_type = 'openclaw'
+        AND COALESCE(m.profile_key, '') = d.profile_key
+  );
 

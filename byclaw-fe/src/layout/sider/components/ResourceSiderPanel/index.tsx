@@ -288,12 +288,17 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     originalList: ResourceItem[];
   }
   const [breadcrumb, setBreadcrumb] = useState<BreadcrumbItem[]>([]);
+  const breadcrumbRef = useRef<BreadcrumbItem[]>([]);
   const [currentLevelOriginalList, setCurrentLevelOriginalList] = useState<ResourceItem[]>([]); // 当前层级的原始列表，用于前端搜索
   const config = resourceConfigMap[resourceType];
 
   useEffect(() => {
     resourceListRef.current = resourceList;
   }, [resourceList]);
+
+  useEffect(() => {
+    breadcrumbRef.current = breadcrumb;
+  }, [breadcrumb]);
 
   /**
    * 获取资源详情数据
@@ -355,13 +360,13 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
   const handleDrillDown = async (item: ResourceItem) => {
     setLoading(true);
     try {
-      const detail = await getResourceDetail(item.resourceId);
+      const detail = await getResourceDetail(String(item.resourceId));
       const targetContent = detail ? parseTargetContent(detail) : parseTargetContent(item);
 
       if (targetContent) {
         // 将当前列表保存到面包屑中
         const newBreadcrumbItem = {
-          resourceId: item.resourceId,
+          resourceId: String(item.resourceId),
           resourceName: item.resourceName,
           resourceType: resourceType,
           originalList: [...resourceList],
@@ -437,7 +442,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         });
         const rows = mapBoundSkillRows(getArrayData(response), resourceType);
         let workspaceSkillRows: ResourceItem[] = [];
-        if (resourceType === 'SKILL' && reset && breadcrumb.length === 0) {
+        if (resourceType === 'SKILL' && reset && breadcrumbRef.current.length === 0) {
           try {
             const workspaceSkillResponse = await queryWorkspaceSkillList({
               keyword: trim(queryKeyword),
@@ -488,7 +493,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         setLoading(false);
       }
     },
-    [activeSiderAgent.resourceId, breadcrumb.length, config.resourceBizTypeList, resourceType, userInfo?.userCode]
+    [activeSiderAgent.resourceId, config.resourceBizTypeList, resourceType, userInfo?.userCode]
   );
 
   /**
@@ -496,6 +501,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
    */
   const handleReset = () => {
     if (breadcrumb.length > 0) {
+      breadcrumbRef.current = [];
       setBreadcrumb([]);
       loadResources({ reset: true }); // 重新加载根层级数据，reset=true 确保从第一页开始
     }
@@ -799,7 +805,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
       if (resourceId) {
         setDetailPanel?.(
           <SkillDetailDrawer
-            resourceId={resourceId}
+            resourceId={String(resourceId)}
             title={intl.formatMessage({ id: 'common.skill' })}
             open
             panel
@@ -832,7 +838,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
       if (resourceId) {
         setDetailPanel?.(
           <SkillDetailDrawer
-            resourceId={resourceId}
+            resourceId={String(resourceId)}
             title={titleMap[resourceBizType] || intl.formatMessage({ id: 'common.detail' })}
             open
             panel

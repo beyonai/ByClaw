@@ -574,9 +574,12 @@ const ConfigForm = (props) => {
   const [uploadImgs, setUploadImgs] = useState([]);
   const [avatarUploadLoading, setAvatarUploadLoading] = useState(false);
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
+  const [brandVersion, setBrandVersion] = useState<'commercial' | 'openSource' | null>(null);
+  const [brandVersionLoaded, setBrandVersionLoaded] = useState(false);
   const [exampleOpen, setExampleOpen] = useState(false);
   const [memoryModalOpen, setMemoryModalOpen] = useState(false);
   const internalSyncRef = useRef(false);
+  const isOpenSource = brandVersionLoaded && brandVersion !== 'commercial';
 
   const [relResourceInfoModalOpen, setRelResourceInfoModalOpen] = useState(false);
   const [selectedToolItem, setSelectedToolItem] = useState(null);
@@ -589,6 +592,31 @@ const ConfigForm = (props) => {
   const [customPromptName, setCustomPromptName] = useState('');
   const [activePromptTabKey, setActivePromptTabKey] = useState();
   const customPromptTabs = Form.useWatch('customPromptTabs', { form, preserve: true }) || [];
+
+  useEffect(() => {
+    let mounted = true;
+
+    getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
+      .then((res: any) => {
+        if (!mounted) return;
+        const nextBrandVersion = res?.paramValue;
+        setBrandVersion(nextBrandVersion === 'commercial' ? 'commercial' : null);
+      })
+      .catch(() => {
+        if (mounted) {
+          setBrandVersion(null);
+        }
+      })
+      .finally(() => {
+        if (mounted) {
+          setBrandVersionLoaded(true);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleRobotModalOk = useCallback((item) => {
     setRobotModalOpen(false);
@@ -935,13 +963,19 @@ const ConfigForm = (props) => {
         ...form.getFieldsValue(allFieldNames),
         ...overrideValues,
       };
+      const hasAgentPromptField =
+        allTabs.some((tab) => tab.key === 'agent') || Object.prototype.hasOwnProperty.call(current, 'agent');
+      const effectiveWorkStandard = hasAgentPromptField
+        ? current.agent || ''
+        : current.workStandard || current.roleAttributes || '';
 
       rolePromptFieldNames.forEach((key) => {
         roleObj[key] =
           current[key] ||
           (key === 'customPromptTabs' ? [] : key === 'customPromptValues' ? {} : key === 'bundledSkills' ? [] : '');
       });
-      roleObj.roleAttributes = current.roleAttributes || current.workStandard || current.agent || '';
+      roleObj.workStandard = effectiveWorkStandard;
+      roleObj.roleAttributes = effectiveWorkStandard;
 
       // 将所有配置存成 JSON 放到 corePersonaDefinition 字段（数组格式）
       const corePersonaDefinition: Array<{ name: string; nameEn?: string; key: string; value: string; tip?: string }> =
@@ -1015,6 +1049,8 @@ const ConfigForm = (props) => {
       form.setFieldsValue({
         role: JSON.stringify(roleObj),
         corePersonaDefinition: corePersonaDefinitionJson,
+        workStandard: effectiveWorkStandard,
+        roleAttributes: effectiveWorkStandard,
       });
       internalSyncRef.current = false;
 
@@ -1257,13 +1293,15 @@ const ConfigForm = (props) => {
       };
     });
   };
-  const avatarMenu = [
-    {
-      key: 'upload',
-      label: intl.formatMessage({ id: 'employeeDetail.uploadImage' }),
-      icon: <AntdIcon type="icon-shouye-icon-wrapper1" />,
-    },
-  ];
+  const avatarMenu = isOpenSource
+    ? [
+        {
+          key: 'upload',
+          label: intl.formatMessage({ id: 'employeeDetail.uploadImage' }),
+          icon: <AntdIcon type="icon-shouye-icon-wrapper1" />,
+        },
+      ]
+    : [];
 
   const onAvatarClick = (url, onLoadCallback?) => () => {
     // 如果url是对象，表示还在上传中，不进行处理

@@ -7,6 +7,8 @@ export type AgentListEntry = NonNullable<NonNullable<OpenClawConfig["agents"]>["
 export type BaiyingEnhancePluginConfig = {
     /** @deprecated Ignored for Baiying resource snapshots; associated resources are read from Redis. */
     executorResourcesDir?: string;
+    /** Optional Baiying session file path. Defaults to `~/.openclaw/workspace/baiying-session.json`. */
+    authFilePath?: string;
     /** @deprecated Ignored; digital employees are read from Redis key `DIG_EMPLOYEE_{resourceId}`. */
     agentConfigDir?: string;
     /** Debounce (ms) for coalescing dig-employee Redis flush triggers. */

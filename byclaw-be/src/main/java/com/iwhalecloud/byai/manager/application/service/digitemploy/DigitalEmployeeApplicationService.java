@@ -978,7 +978,8 @@ public class DigitalEmployeeApplicationService {
         if (ssResource == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
         }
-        if (isCurrentUserBoundDefaultDigitalEmployee(ssResource)) {
+        if (isCurrentUserBoundDefaultDigitalEmployee(ssResource)
+            || isCurrentUserOwnDefaultSuperAssistantResource(ssResource)) {
             return;
         }
         validateDigitalEmployeeManagePermission(ssResource);
@@ -990,6 +991,26 @@ public class DigitalEmployeeApplicationService {
         }
         Long defaultDigEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
         return ssResource.getResourceId().equals(defaultDigEmployeeId);
+    }
+
+    /**
+     * 当前用户自己的超级助手资源使用稳定编码 {userCode}_main；即使用户把其他个人助理设为默认数字员工，
+     * 也应允许用户继续编辑自己的超级助手配置。
+     */
+    private boolean isCurrentUserOwnDefaultSuperAssistantResource(SsResource ssResource) {
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        String currentUserCode = CurrentUserHolder.getCurrentUserCode();
+        if (!isDefaultPersonalResource(ssResource) || currentUserId == null || ssResource.getResourceId() == null) {
+            return false;
+        }
+        if (!StringUtils.equals(ResourceBizTypeEnum.DIG_EMPLOYEE.name(), ssResource.getResourceBizType())) {
+            return false;
+        }
+        if (!Objects.equals(currentUserId, ssResource.getCreateBy())) {
+            return false;
+        }
+        String expectedResourceCode = buildDefaultSuperAssistantResourceCode(currentUserCode, currentUserId);
+        return StringUtils.equals(expectedResourceCode, ssResource.getResourceCode());
     }
 
     private boolean isDefaultPersonalResource(SsResource ssResource) {

@@ -150,6 +150,10 @@ public class SandboxService {
 
     @Lazy
     @Autowired
+    private SandboxHealthWatchService sandboxHealthWatchService;
+
+    @Lazy
+    @Autowired
     private RedisClient redisClient;
 
     /** 系统参数：允许同时使用的沙箱数量上限，paramCode=ENABLE_USE_SANDBOX_NUM */
@@ -303,7 +307,7 @@ public class SandboxService {
 
     /**
      * 远端沙箱退出后的重拉流程。
-     * <p>调用方已确认当前 worker 不可用时使用：先终结旧活跃记录，释放 DB 唯一键，再重新走标准启动流程。</p>
+     * <p>调用方已确认当前 worker 不可用时使用：先清理旧远端沙箱并终结旧活跃记录，释放 DB 唯一键，再重新走标准启动流程。</p>
      */
     public SandboxLaunchData restartSandboxAfterRemoteExit(String userCode, Long resourceId, String targetAgentType) {
         return restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType, true);
@@ -315,11 +319,21 @@ public class SandboxService {
      */
     public SandboxLaunchData restartSandboxAfterRemoteExitWithoutWait(String userCode, Long resourceId,
         String targetAgentType) {
-        return restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType, false);
+        return restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType, null, false);
+    }
+
+    public SandboxLaunchData restartSandboxAfterRemoteExitWithoutWait(String userCode, Long resourceId,
+        String targetAgentType, String serviceType) {
+        return restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType, serviceType, false);
     }
 
     private SandboxLaunchData restartSandboxAfterRemoteExit(String userCode, Long resourceId, String targetAgentType,
         boolean waitForWorkerReady) {
+        return restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType, null, waitForWorkerReady);
+    }
+
+    private SandboxLaunchData restartSandboxAfterRemoteExit(String userCode, Long resourceId, String targetAgentType,
+        String serviceType, boolean waitForWorkerReady) {
         SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
         String lockKey = buildLaunchLockKey(userCode, routing);
         String lockValue = UUID.randomUUID().toString();
@@ -340,13 +354,19 @@ public class SandboxService {
                 routing.getSandboxType(), routing.getEffectiveResourceId());
             if (existingRecord != null) {
                 LOGGER.info("重拉前命中旧活跃记录：{}", sandboxRef(existingRecord));
+                String cleanupServiceType = StringUtils.defaultIfBlank(serviceType,
+                    StringUtils.defaultIfBlank(existingRecord.getServiceType(), routing.getSandboxType()));
+                removeRemoteSandboxesForServiceTypeOrThrow(userCode, routing.getSandboxType(), cleanupServiceType,
+                    existingRecord.getSandboxId(), "remote-exit-restart");
                 int marked = sandboxRecordMapper.markReleased(existingRecord.getId(),
                     RELEASE_REASON_REMOTE_EXIT, new Date(), existingRecord.getLockVersion());
-                if (marked > 0) {
-                    incrementVersions(existingRecord, true);
-                    sandboxMetadataCache.evict(existingRecord.getUserCode(), existingRecord.getSandboxType());
-                    LOGGER.warn("远端沙箱退出，已终结旧沙箱记录：{}", sandboxRef(existingRecord));
+                if (marked == 0) {
+                    throw new BdpRuntimeException(I18nUtil.get("sandbox.launch.busy"));
                 }
+                incrementVersions(existingRecord, true);
+                sandboxMetadataCache.evict(existingRecord.getUserCode(), existingRecord.getSandboxType());
+                unregisterSandboxEndpoint(existingRecord.getUserCode(), existingRecord.getSandboxType());
+                LOGGER.warn("远端沙箱退出，已清理远端并终结旧沙箱记录：{}", sandboxRef(existingRecord));
             }
 
             SandboxLaunchData launchData = doLaunchSandbox(userCode, resourceId, routing, true);
@@ -879,6 +899,7 @@ public class SandboxService {
                 continue;
             }
             sandboxMetadataCache.put(toSandboxInfo(updatedRecord));
+            sandboxHealthWatchService.touch(userCode, resolveHealthServiceType(updatedRecord));
             updatedCount++;
         }
         if (!skippedRecords.isEmpty()) {
@@ -909,6 +930,7 @@ public class SandboxService {
                 continue;
             }
             sandboxMetadataCache.put(toSandboxInfo(updatedRecord));
+            sandboxHealthWatchService.touch(userCode, resolveHealthServiceType(updatedRecord));
             updatedCount++;
         }
         if (!skippedRecords.isEmpty()) {
@@ -921,6 +943,13 @@ public class SandboxService {
         LOGGER.debug("沙箱心跳成功，用户编码：{}，资源ID：{}，命中记录数：{}，更新记录数：{}，lastAccessTime：{}",
             userCode, resourceId, records.size(), updatedCount, now);
         return true;
+    }
+
+    private String resolveHealthServiceType(SsSandboxRecord record) {
+        if (record == null) {
+            return null;
+        }
+        return StringUtils.defaultIfBlank(record.getServiceType(), record.getSandboxType());
     }
 
     /**
@@ -1819,18 +1848,82 @@ public class SandboxService {
     }
 
     private void cleanupLaunchedSandboxAfterRecordReleased(SsSandboxRecord record) {
+        cleanupRemoteSandboxQuietly(record, "cancelled-launch", true);
+    }
+
+    void cleanupRemoteSandboxQuietly(String userCode, String sandboxType, String sandboxId, String reason) {
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setUserCode(userCode);
+        record.setSandboxType(sandboxType);
+        record.setSandboxId(sandboxId);
+        cleanupRemoteSandboxQuietly(record, reason, false);
+    }
+
+    private void cleanupRemoteSandboxQuietly(SsSandboxRecord record, String reason, boolean clearLocalBinding) {
         try {
-            SandboxResponse<Void> response = sandboxLifecycleFacade.removeSandbox(toSandboxInfo(record));
-            if (response == null || !response.isSuccess()) {
-                LOGGER.warn("释放已取消启动的远端沙箱返回失败：{}，原因：{}", sandboxRef(record),
-                    response != null ? response.getMessage() : "响应为空");
-            }
+            removeRemoteSandboxOrThrow(record, reason);
         }
         catch (Exception e) {
-            LOGGER.error("释放已取消启动的远端沙箱异常：{}", sandboxRef(record), e);
+            LOGGER.error("清理远端沙箱异常：{}，reason={}", sandboxRef(record), reason, e);
         }
-        sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
-        unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType());
+        if (clearLocalBinding) {
+            sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
+            unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType());
+        }
+    }
+
+    private void removeRemoteSandboxOrThrow(SsSandboxRecord record, String reason) {
+        if (record == null || StringUtils.isBlank(record.getSandboxId())) {
+            return;
+        }
+        SandboxResponse<Void> response = sandboxLifecycleFacade.removeSandbox(toSandboxInfo(record));
+        if (response == null || !response.isSuccess()) {
+            String message = response != null ? response.getMessage() : "响应为空";
+            LOGGER.warn("清理远端沙箱返回失败：{}，reason={}，原因：{}", sandboxRef(record), reason, message);
+            throw new IllegalStateException("failed to cleanup remote sandbox before restart: " + message);
+        }
+        LOGGER.info("清理远端沙箱完成：{}，reason={}", sandboxRef(record), reason);
+    }
+
+    private void removeRemoteSandboxesForServiceTypeOrThrow(String userCode, String sandboxType, String serviceType,
+        String requiredSandboxId, String reason) {
+        String resolvedServiceType = StringUtils.defaultIfBlank(serviceType, sandboxType);
+        Map<String, String> metadata = new LinkedHashMap<>();
+        metadata.put("userCode", userCode);
+        metadata.put("serviceType", resolvedServiceType);
+        SandboxResponse<SandboxRuntimePage<SandboxRuntimeInstance>> response =
+            sandboxLifecycleFacade.listSandboxesByMetadata(metadata, 1, Math.max(1, reconcileRemotePageSize));
+        if (response == null || !response.isSuccess()) {
+            String message = response != null ? response.getMessage() : "响应为空";
+            throw new IllegalStateException("failed to list remote sandboxes before restart: " + message);
+        }
+        SandboxRuntimePage<SandboxRuntimeInstance> page = response.getData();
+        List<SandboxRuntimeInstance> items = page != null && page.getItems() != null ? page.getItems() : List.of();
+        LOGGER.info("重拉前按 serviceType 清理远端沙箱，userCode={}，sandboxType={}，serviceType={}，count={}，reason={}",
+            userCode, sandboxType, resolvedServiceType, items.size(), reason);
+        boolean removedRequiredSandbox = false;
+        for (SandboxRuntimeInstance instance : items) {
+            if (instance == null || StringUtils.isBlank(instance.getSandboxId())) {
+                continue;
+            }
+            if (StringUtils.equals(instance.getSandboxId(), requiredSandboxId)) {
+                removedRequiredSandbox = true;
+            }
+            SsSandboxRecord remoteRecord = new SsSandboxRecord();
+            remoteRecord.setUserCode(userCode);
+            remoteRecord.setSandboxType(sandboxType);
+            remoteRecord.setServiceType(resolvedServiceType);
+            remoteRecord.setSandboxId(instance.getSandboxId());
+            removeRemoteSandboxOrThrow(remoteRecord, reason);
+        }
+        if (StringUtils.isNotBlank(requiredSandboxId) && !removedRequiredSandbox) {
+            SsSandboxRecord requiredRecord = new SsSandboxRecord();
+            requiredRecord.setUserCode(userCode);
+            requiredRecord.setSandboxType(sandboxType);
+            requiredRecord.setServiceType(resolvedServiceType);
+            requiredRecord.setSandboxId(requiredSandboxId);
+            removeRemoteSandboxOrThrow(requiredRecord, reason);
+        }
     }
 
     private void registerSandboxEndpoint(String userCode, SandboxLaunchRouting routing, String endpoint,
