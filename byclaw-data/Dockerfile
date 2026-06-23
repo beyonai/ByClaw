@@ -13,10 +13,14 @@ WORKDIR /workspace/byclaw-data
 
 RUN set -- packages/by_datacloud-*.whl; \
     if [ -f "$1" ]; then \
+      echo "[install] found local wheel: $1, installing by-datacloud from wheel"; \
       uv sync --frozen --no-dev --no-install-package by-datacloud; \
       uv pip install --python .venv/bin/python "$1"; \
+      echo "[install] done: by-datacloud installed from local wheel"; \
     else \
+      echo "[install] no local wheel found (packages/by_datacloud-*.whl), installing from registry"; \
       uv sync --frozen --no-dev; \
+      echo "[install] done: dependencies installed from registry"; \
     fi
 
 # 构建信息
