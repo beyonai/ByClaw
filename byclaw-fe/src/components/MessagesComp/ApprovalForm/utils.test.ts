@@ -1,4 +1,14 @@
-import { buildFormFieldName, buildFormItemPath, mergeTermOptions, normalizeTermOptions } from './utils';
+import dayjs from 'dayjs';
+
+import {
+  buildFormFieldName,
+  buildFormItemPath,
+  getApprovalFormDateFormat,
+  getApprovalFormDatePickerValue,
+  getApprovalFormDateSubmitValue,
+  mergeTermOptions,
+  normalizeTermOptions,
+} from './utils';
 
 describe('ApprovalForm utils', () => {
   it('builds root form item path', () => {
@@ -66,5 +76,21 @@ describe('ApprovalForm utils', () => {
       { label: '项目2 - updated', value: 'PROJ00000002' },
       { label: '项目3', value: 'PROJ00000003' },
     ]);
+  });
+
+  it('formats date picker values as submit strings with the field format', () => {
+    const format = getApprovalFormDateFormat('yyyy-MM-dd HH:mm:ss');
+
+    expect(format).toBe('YYYY-MM-DD HH:mm:ss');
+    expect(getApprovalFormDateSubmitValue(dayjs('2026-06-23 14:05:06'), format)).toBe('2026-06-23 14:05:06');
+    expect(getApprovalFormDateSubmitValue(undefined, format)).toBeUndefined();
+  });
+
+  it('converts date submit strings back to date picker values', () => {
+    const value = getApprovalFormDatePickerValue('2026-06-23', 'YYYY-MM-DD');
+
+    expect(dayjs.isDayjs(value)).toBe(true);
+    expect(value?.format('YYYY-MM-DD')).toBe('2026-06-23');
+    expect(getApprovalFormDatePickerValue('invalid-date', 'YYYY-MM-DD')).toBeUndefined();
   });
 });
