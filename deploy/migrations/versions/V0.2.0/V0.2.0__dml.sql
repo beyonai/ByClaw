@@ -570,95 +570,107 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
 ]', 'OpenClaw 仓库 skills/ 目录下内置（随安装分发）的 Agent Skill 元数据 JSON 数组');
 
 
----平台内置技能初始化------start-----
-WITH tmp_builtin_skill_seed (resource_name, resource_code, resource_desc) AS (
-    VALUES
-        ('content-to-outline', 'content-to-outline', '将 GitHub URL、微信文章、博客、研究报告或主题关键词解析为结构化 slide-outline.json，提炼核心主张、关键主题、支撑案例和受众问题，规划 8-12 页播客视频幻灯片大纲，并统一驱动 PPT 生成和播客脚本生成，保证幻灯片内容与音频对话按 slide 编号一致。'),
-        ('dingtalk-todo-sync', 'dingtalk-todo-sync', '扫描 GitHub Issues 生成结构化待办清单，并通过钉钉 Webhook 机器人推送到钉钉群；支持 GitHub 授权检查、按优先级和标签整理 open issues、批量待办同步，以及自定义 Markdown 或文本消息通知。'),
-        ('dws', 'dws', '通过 dws CLI 管理钉钉 AI 表格、日历、通讯录、群聊与机器人、待办、OA 审批、考勤、日志、DING 消息、开放平台文档、钉钉文档、云盘、AI 听记、邮箱等能力；支持查询、创建、修改、删除、发送、审批、上传下载和设备登录鉴权流程。'),
-        ('gbrain', 'gbrain', '使用 gbrain CLI 管理 agent 第二大脑和长期记忆，支持 brain-first 查询、全文/向量检索、读取与写入记忆、导入 Markdown 知识库、维护图谱和时间线、embed、sync、dream、onboard 等操作，适用于项目背景、历史决策、人物关系和长期知识沉淀。'),
-        ('github-code-analysis', 'github-code-analysis', '面向 GitHub 仓库的代码分析套件，支持 PR 审查、代码质量扫描、安全扫描、性能扫描、不一致性检测和自动文档生成；可拉取 PR diff 或克隆仓库，从安全、性能、质量、测试等维度生成报告或评论。'),
-        ('github-issues-mgmt', 'github-issues-mgmt', 'GitHub Issues 管理工具，支持从自然语言、CSV 或 Excel 需求描述中提取任务并批量创建 Issues，也支持列出、查询、按状态或标签过滤现有 Issues；默认面向 ByClaw 仓库并内置 OAuth Device Flow 授权流程。'),
-        ('iwhalehub', 'iwhalehub', '连接 iWhale Hub 资源市场，支持按关键词搜索、浏览、比较、校验并安装平台资源，返回资源名称、编码、描述、标签、版本、注册表信息和可安装的 skillId，适用于从技能广场查找和安装技能或后续资源类型。'),
-        ('podcast-script-generator', 'podcast-script-generator', '将主题关键词、文章、博客、URL 提取内容或 slide-outline.json 转换为自然的双人播客对话脚本；生成 host/guest 角色轮次、标题、大纲，并支持按幻灯片编号输出 slide 标注，便于 TTS 合成和视频字幕/画面同步。'),
-        ('podcast-video-composer', 'podcast-video-composer', '将 PPTX 幻灯片、音频文件、播客脚本 JSON、TTS timing 或 slide durations 合成为 1920×1080 MP4；支持按脚本 slide 标注计算每页停留时间、生成并烧录底部字幕、输出最终播客视频和字幕资产。'),
-        ('pptx-generator', 'pptx-generator', 'PowerPoint 生成与编辑工具，支持读取和分析 PPTX、基于模板进行 XML 编辑，以及用 PptxGenJS 从零创建封面、目录、内容页、章节页、总结页等幻灯片；内置设计系统、配色、字体、版式和 QA 流程，也可直接消费 slide-outline.json。'),
-        ('structured-ontology-manager', 'structured-ontology-manager', '对话式结构化个人本体管理工具，支持查询、创建、删除个人结构化本体对象和视图，维护字段与术语绑定，并将对象数据持久化到个人 SQLite 动态表；支持挂载本体到当前数字员工或个人助理。'),
-        ('unstructured-ontology-manager', 'unstructured-ontology-manager', '对话式非结构化个人本体管理工具，支持查询个人知识库和目录、创建或删除绑定知识库目录的非结构化本体对象，并挂载到数字员工或个人助理；适用于以知识库文档作为数据来源而不建 SQLite 表的本体管理。'),
-        ('volcengine-podcast-tts', 'volcengine-podcast-tts', '将 podcast-script-generator 输出的双人播客脚本转换为火山引擎/豆包 TTS V3 双声道语音，生成 podcast.mp3 和包含句子级或轮次级 start、duration、slide 信息的 timing JSON；支持低并发、缓存、重试和字幕精确同步。'),
-        ('wechat-tech-article', 'wechat-tech-article', '将 GitHub 开源项目分析转换为微信公众号风格技术文章，流程包含仓库克隆、README/依赖/架构/基准数据分析、本地实测和文章撰写；输出突出核心数据、项目优势、实战演练和手机友好的技术分享 Markdown，并可衔接播客视频流水线。')
-),
--- 第一步：插入主资源表（仅插入不存在的记录）
-inserted_resources AS (
-    INSERT INTO byai.ss_resource (
-        resource_id, system_code, resource_biz_type, resource_type, resource_name, resource_desc,
-        resource_version_id, host_type, catalog_id, man_org_id, man_user_id,
-        create_by, create_time, update_by, update_time, com_acct_id, resource_status,
-        resource_d_verid, resource_r_verid, resource_code, publish_time, auth_status,
-        publish_portal, parent_resource_id, publish_type, owner_type, impl_type, worker_agent_type
-    )
-    SELECT
-        nextval('byai.seq_any_table'::regclass),
-        'BYAI', 'SKILL', 'ATOM', v.resource_name, v.resource_desc,
-        '1.0', 'hosted', 10, -1, 10001, 10001, CURRENT_TIMESTAMP, 10001, CURRENT_TIMESTAMP,
-        1, 2, -1, -1, v.resource_code, CURRENT_TIMESTAMP, 'passed', 1, -1, 'publish', 'enterprise', 'SKILL', 'NONE'
-    FROM tmp_builtin_skill_seed v
-    WHERE NOT EXISTS (
-        SELECT 1 FROM byai.ss_resource r
-        WHERE r.resource_biz_type = 'SKILL'
-          AND r.owner_type = 'enterprise'
-          AND r.resource_code = v.resource_code
-    )
-    RETURNING resource_id, resource_code
-),
--- 第二步：合并“新插入的资源”与“已存在的资源”
-all_target_resources AS (
-    SELECT resource_id, resource_code FROM inserted_resources
-    UNION ALL
-    SELECT r.resource_id, r.resource_code
-    FROM byai.ss_resource r
-    JOIN tmp_builtin_skill_seed v ON v.resource_code = r.resource_code
-    WHERE r.resource_biz_type = 'SKILL'
-      AND r.owner_type = 'enterprise'
-      AND NOT EXISTS (SELECT 1 FROM inserted_resources ir WHERE ir.resource_id = r.resource_id)
-)
--- 第三步：插入扩展表（仅插入不存在的记录）
-INSERT INTO byai.ss_res_ext_skill (
-    resource_id, skill_type, source_type, version, skill_url, skill_package_format,
-    skill_original_filename, skill_package_size, skill_package_hash, target_content,
-    sync_status, sync_error, last_sync_time
-)
-SELECT
-    atr.resource_id,
-    'inner', 'SYSTEM_BUILTIN', 'v0.1', '', 'zip',
-    NULL, NULL, NULL,
-    json_build_object(
-        'resourceId', atr.resource_id,
-        'resourceCode', atr.resource_code,
-        'resourceName', r.resource_name,
-        'resourceDesc', r.resource_desc,
-        'resourceBizType', r.resource_biz_type,
-        'resourceType', r.resource_type,
-        'ownerType', r.owner_type,
-        'sourceType', 'SYSTEM_BUILTIN',
-        'skillType', 'inner',
-        'skillUrl', '',
-        'version', 'v0.1',
-        'skillPackageFormat', 'zip',
-        'skillOriginalFilename', NULL,
-        'skillPackageSize', NULL,
-        'skillPackageHash', NULL,
-        'syncStatus', 'SUCCESS',
-        'syncError', NULL,
-        'lastSyncTime', to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
-    )::text,
-    'SUCCESS', NULL, CURRENT_TIMESTAMP
-FROM all_target_resources atr
-JOIN byai.ss_resource r ON r.resource_id = atr.resource_id
-WHERE NOT EXISTS (
-    SELECT 1 FROM byai.ss_res_ext_skill e
-    WHERE e.resource_id = atr.resource_id
-);
+-- 平台内置技能初始化start
+delete from ss_resource where resource_biz_type in('SKILL') and resource_id in (select resource_id from byai.ss_res_ext_skill WHERE skill_type in('inner'));
+
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+VALUES(1,'BYAI','SKILL','ATOM','podcast-outline','把任意内容（网页链接、文章、关键词）整理成一份结构化的播客视频大纲，是制作播客视频的第一步，后续的幻灯片和对话脚本都从这份大纲生成，保证两者内容一致。只要用户想制作播客视频、把文章变成视频、做一期播客、先规划内容结构，或者说"做个大纲"、"做播客"、"把这篇文章做成播客"，就必须触发此技能——即使用户没有提到"大纲"，只要目标是制作播客视频就要触发。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'podcast-outline',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+VALUES(2,'BYAI','SKILL','ATOM','tech-article','分析 GitHub 开源项目并写成一篇适合发布的技术文章，带真实安装测试和性能数据，风格接地气、手机友好。只要用户给了一个 GitHub 链接，并提到写文章、做评测、项目推荐、公众号推文、帮我介绍这个项目、把这个项目写成文章、安利一下这个工具，就应该触发此技能——即使用户只说"帮我写写这个"也要触发。生成的文章也可以直接用来制作播客视频。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'tech-article',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+VALUES(3,'BYAI','SKILL','ATOM','podcast-video','把幻灯片和播客配音合成为一个带字幕的视频，幻灯片随着对话内容自动切换，字幕逐句出现，是播客视频的最后一步。只要用户说合成视频、生成视频、把幻灯片和音频合在一起、加字幕、做成视频、最后一步，好了合成吧，或者前面几步都做完了想收尾，就应该触发此技能——即使用户只说"合成"也要触发。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'podcast-video',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+VALUES(4,'BYAI','SKILL','ATOM','podcast-voice','用火山引擎（豆包）语音合成将播客对话脚本转成双声道音频，主持人和嘉宾各用一个声音，同时生成精确到每个句子的时间信息，供视频合成使用。只要用户想给脚本配音、生成播客音频、把对话变成声音、生成语音、脚本转音频，或者正在做播客视频需要录音，就应该触发此技能——即使用户只说"配音"或"生成音频"也要触发。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'podcast-voice',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+VALUES(5,'BYAI','SKILL','ATOM','podcast-script','只要用户想写播客脚本、生成对话、把内容做成两个人聊天的形式、帮我写播客、做播客对白，就应该触发此技能——即使用户只说"写个脚本"或"把这个做成对话"也要触发。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'podcast-script',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+VALUES(6,'BYAI','SKILL','ATOM','slide-dec','根据播客大纲生成专业的演示文稿，是播客视频流水线的视觉环节。也可以独立生成 PPT 或编辑已有演示文稿。只要用户提到生成 PPT、做幻灯片、制作演示文稿、做 slides、幻灯片生成，或者正在制作播客视频需要视觉内容，就应该触发此技能——即使用户只说"帮我做个 PPT"也要触发。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'slide-dec',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+VALUES(7,'BYAI','SKILL','ATOM','unstructured-ontology-manager','当你有文档、图片、视频等非结构化内容存在知识库里，想让 Agent 能像查结构化数据一样精准检索和操作它们时使用本技能。\n\n它能够帮你给非结构化内容打上结构化标签（定义字段，如日期、主题、参会人），让每份文档/图片/视频都带有可查询的属性，实现结构化数据与非结构化内容的融合检索。定义的标签字段相当于表的字段，支持新增、修改、删除操作。与结构化本体的区别在于：内容本身存在知识库里，而不是 SQLite 动态表。\n\n你可以通过以下对话唤起本技能：\n「帮我创建一个会议纪要对象，绑定到我的会议知识库」\n「我的周报存在知识库里，想让 Agent 能按日期和项目名检索」\n「查看我的知识库有哪些」\n「把会议纪要对象挂载到我的助理」','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'unstructured-ontology-manager',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+VALUES(8,'BYAI','SKILL','ATOM','structured-ontology-manager','当你想让 Agent 查询或操作你自己定义的业务数据（而不是系统内置数据）时使用本技能。\n\n它能够帮你用自然语言定义一张新的数据表，并基于这张表开发出本体对象，设定字段和字段含义，数据自动存入专属 SQLite；还能创建跨表视图，让 Agent 同时查询多个对象。定义完成后挂载到当前数字员工，Agent 就能直接查询和操作你的数据了。\n\n你可以通过以下对话唤起本技能：\n「帮我创建一个任务管理对象」\n「我想建一个拜访记录表，包含客户名、拜访日期、跟进结果」\n「查看我有哪些本体对象」\n「把任务对象挂载到我的助理」','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'structured-ontology-manager',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+VALUES(9,'BYAI','SKILL','ATOM','crm-demo-showcase','当用户想了解本体如何开发和使用时使用本技能。\n\n它能够通过 CRM 的实际 DEMO，演示以下 6 项能力：1）自然语言数据查询（无需 SQL）；2）聚合统计分析；3）字段歧义智能消歧；4）非结构化文本转结构化数据录入；5）结构化本体对象和跨表视图的创建；6）非结构化本体的文档融合检索。\n\n你可以通过以下对话唤起本技能：\n「给我演示一下」\n「本体能做什么」\n「怎么创建对象和视图」\n「结构化和非结构化怎么融合」\n「帮我查一下客户数据」\n\n---\n确认后我直接更新三个文件。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'crm-demo-showcase',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+VALUES(10,'BYAI','SKILL','ATOM','github-issues-mgmt','GitHub Issues 管理工具，支持从自然语言、CSV 或 Excel 需求描述中提取任务并批量创建 Issues，也支持列出、查询、按状态或标签过滤现有 Issues；默认面向 ByClaw 仓库并内置 OAuth Device Flow 授权流程。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'github-issues-mgmt',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+VALUES(11,'BYAI','SKILL','ATOM','github-code-analysis','面向 GitHub 仓库的代码分析套件，支持 PR 审查、代码质量扫描、安全扫描、性能扫描、不一致性检测和自动文档生成；可拉取 PR diff 或克隆仓库，从安全、性能、质量、测试等维度生成报告或评论。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'github-code-analysis',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+VALUES(12,'BYAI','SKILL','ATOM','iwhalehub','连接 iWhale Hub 资源市场，支持按关键词搜索、浏览、比较、校验并安装平台资源，返回资源名称、编码、描述、标签、版本、注册表信息和可安装的 skillId，适用于从技能广场查找和安装技能或后续资源类型。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'iwhalehub',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+VALUES(13,'BYAI','SKILL','ATOM','gbrain','使用 gbrain CLI 管理 agent 第二大脑和长期记忆，支持 brain-first 查询、全文/向量检索、读取与写入记忆、导入 Markdown 知识库、维护图谱和时间线、embed、sync、dream、onboard 等操作，适用于项目背景、历史决策、人物关系和长期知识沉淀。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'gbrain',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+VALUES(14,'BYAI','SKILL','ATOM','bycli','bycli 是一个全能力技能，把任意网站、桌面应用或外部 CLI 统一成 bycli <site>无需爬页面就能执行命令、驱动浏览器、修复或编写适配器、并将采集内容入库','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'bycli',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+VALUES(15,'BYAI','SKILL','ATOM','dws','通过 dws CLI 管理钉钉 AI 表格、日历、通讯录、群聊与机器人、待办、OA 审批、考勤、日志、DING 消息、开放平台文档、钉钉文档、云盘、AI 听记、邮箱等能力；支持查询、创建、修改、删除、发送、审批、上传下载和设备登录鉴权流程。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'dws',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+
+INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
+VALUES(16,'BYAI','SKILL','ATOM','amap-visual-report-generator','专注于将各类结构化数据（JSON、CSV、表格、文本、API响应）转化为专业的交互式HTML数据分析报告，支持一键导出高清PDF。核心能力包括：智能图表自动匹配（折线、柱状、饼图、雷达、散点、热力图、地图等）、高德地图点位可视化（店铺/竞品/POI标记、辐射范围圈、商圈边界）、KPI卡片、关键洞察提炼、经营建议生成。支持精简版和完整版两种报告模式，含滚动动画、数字递增、导航栏等交互动效，以及完整的打印/PDF适配。适用于经营分析、选址评估、竞品对比、数据汇报等场景。触发词：生成报告、数据分析、可视化展示、地图展示、商圈分析、导出PDF。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'amap-visual-report-generator',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+
+-- 平台内置技能扩展表
+DELETE from byai.ss_res_ext_skill WHERE skill_type in('inner');
+
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
+VALUES(1,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
+
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
+VALUES(2,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
+
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
+VALUES(3,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
+
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
+VALUES(4,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
+
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
+VALUES(5,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
+
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
+VALUES(6,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
+
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
+VALUES(7,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
+
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
+VALUES(8,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
+
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
+VALUES(9,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
+
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
+VALUES(10,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
+
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
+VALUES(11,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
+
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
+VALUES(12,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
+
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
+VALUES(13,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
+
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
+VALUES(14,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
+
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
+VALUES(15,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
+
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
+VALUES(16,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
 
 -- 第四步：更新已存在的扩展表记录（直接关联主表获取种子数据，避免 CTE 作用域问题）
 UPDATE byai.ss_res_ext_skill e
@@ -690,7 +702,7 @@ SET
         'syncStatus', 'SUCCESS',
         'syncError', NULL,
         'lastSyncTime', to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
-    )::text,
+                     )::text,
     sync_status = 'SUCCESS',
     sync_error = NULL,
     last_sync_time = CURRENT_TIMESTAMP
@@ -698,12 +710,7 @@ FROM byai.ss_resource r
 WHERE e.resource_id = r.resource_id
   AND r.resource_biz_type = 'SKILL'
   AND r.owner_type = 'enterprise'
-  AND r.resource_code IN (
-      'content-to-outline', 'dingtalk-todo-sync', 'dws', 'gbrain', 'github-code-analysis',
-      'github-issues-mgmt', 'iwhalehub', 'podcast-script-generator', 'podcast-video-composer',
-      'pptx-generator', 'structured-ontology-manager', 'unstructured-ontology-manager',
-      'volcengine-podcast-tts', 'wechat-tech-article'
-  );
+  AND r.resource_code IN ('podcast-outline','tech-article','podcast-video','podcast-voice','podcast-script','slide-dec','unstructured-ontology-manager','structured-ontology-manager','crm-demo-showcase','github-issues-mgmt','github-code-analysis','iwhalehub','gbrain','bycli','dws','amap-visual-report-generator');
 
 -- 沙箱健康检测-默认水位模型初始化
 INSERT INTO byai.sandbox_health_watermark_model (
@@ -888,5 +895,3 @@ WHERE EXISTS (
         AND COALESCE(m.profile_key, '') = d.profile_key
   );
 
-COMMIT;
----平台内置技能初始化------end-----
