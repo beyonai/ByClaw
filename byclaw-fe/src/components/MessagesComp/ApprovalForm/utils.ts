@@ -1,3 +1,8 @@
+import dayjs from 'dayjs';
+import customParseFormat from 'dayjs/plugin/customParseFormat';
+
+dayjs.extend(customParseFormat);
+
 export const splitKey = '|';
 
 export function buildFormItemPath(lidx: number, idx: number, parentPath?: string) {
@@ -12,6 +17,33 @@ export function buildFormItemPath(lidx: number, idx: number, parentPath?: string
 
 export function buildFormFieldName(fieldCode: string, path: string) {
   return `${fieldCode}${splitKey}${path}`;
+}
+
+export function getApprovalFormDateFormat(format?: string) {
+  return (format || 'YYYY-MM-DD').replace(/y/g, 'Y').replace(/d/g, 'D');
+}
+
+export function getApprovalFormDatePickerValue(value: unknown, format: string) {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+
+  if (dayjs.isDayjs(value)) {
+    return value.isValid() ? value : undefined;
+  }
+
+  const parsedValue =
+    typeof value === 'string'
+      ? dayjs(value, format, true).isValid()
+        ? dayjs(value, format, true)
+        : dayjs(value)
+      : dayjs(value as string | number | Date);
+
+  return parsedValue.isValid() ? parsedValue : undefined;
+}
+
+export function getApprovalFormDateSubmitValue(value: unknown, format: string) {
+  return getApprovalFormDatePickerValue(value, format)?.format(format);
 }
 
 type TermOptionRecord = Record<string, any>;
