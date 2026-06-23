@@ -387,8 +387,10 @@ async def test_metadata_update_invalid_operation_for_type(lc_client):
     assert body["resultObject"]["errorCode"] == "INVALID_OPERATION_FOR_TYPE"
 
 
-async def test_metadata_update_backend_error_rolls_back_pending(lc_client, lc_pool):
-    """When backend returns resultCode '-1', client receives passthrough; no PENDING binding survives."""
+async def test_metadata_update_backend_error_rolls_back_new_bound_binding(
+    lc_client, lc_pool
+):
+    """When backend returns resultCode '-1', client receives passthrough; new BOUND binding is rolled back."""
     prop_name = "lc_rb"
     file_path = "/docs/rb.md"
 
@@ -427,9 +429,9 @@ async def test_metadata_update_backend_error_rolls_back_pending(lc_client, lc_po
     # Passthrough: backend's envelope
     assert body["resultCode"] == "-1", body
 
-    # No PENDING binding should survive
+    # No binding row created by this request should remain
     count = await _count_bindings(lc_pool, pid, _KN_CODE, file_path)
-    assert count == 0, f"Expected 0 pending bindings, got {count}"
+    assert count == 0, f"Expected 0 new BOUND bindings, got {count}"
 
 
 async def test_metadata_update_response_field_names_translated_back(lc_client, lc_pool):
