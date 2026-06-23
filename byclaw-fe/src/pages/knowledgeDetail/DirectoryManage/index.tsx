@@ -24,6 +24,7 @@ import {
   buildDataset,
   deleteFolder,
   getFileBuildStatus,
+  queryDirAndFileByLevel as queryDirAndFileByLevelService,
   removeFile,
   type BuildDatasetPayload,
 } from '@/service/knowledgeCenter';
@@ -544,6 +545,14 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     [baseInfo?.resourceId, getBuildDirectoryPath, getDirectoryList, getFileRowKey, intl, message]
   );
 
+  const checkDirectoryHasChildren = useCallback(async (resourceId: number, directoryPath: string) => {
+    const res = await queryDirAndFileByLevelService({
+      resourceId,
+      directoryPath,
+    });
+    return Array.isArray(res) && res.length > 0;
+  }, []);
+
   const handleAction = (key: string, record: any) => {
     switch (key) {
       case 'top':
@@ -589,7 +598,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
             { id: 'common.deleteConfirm2' },
             { content: record?.collectionName ?? record?.name }
           ),
-          onOk: () => {
+          onOk: async () => {
             let promise: Promise<any>;
             if (record?.type === 'directory') {
               const directoryPath = getBuildDirectoryPath(record);
@@ -597,6 +606,11 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
               if (!directoryPath || rid === null || rid === undefined || rid === '') {
                 message.error(intl.formatMessage({ id: 'directoryManage.deleteFolderMissingParams' }));
                 return Promise.reject(new Error('invalid delete folder params'));
+              }
+              const hasChildren = await checkDirectoryHasChildren(Number(rid), directoryPath);
+              if (hasChildren) {
+                message.warning(intl.formatMessage({ id: 'directoryManage.deleteFolderNotEmpty' }));
+                return;
               }
               promise = deleteFolder({ resourceId: Number(rid), directoryPath });
             } else {
