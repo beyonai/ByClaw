@@ -14,7 +14,9 @@ import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxHealthWatermarkMo
 @Mapper
 public interface SandboxHealthWatermarkModelMapper extends BaseMapper<SandboxHealthWatermarkModelEntity> {
 
-    String COLUMNS = " id,\n"
+    String TABLE_NAME = "sandbox_health_watermark_model";
+
+    String COLUMNS = "id,\n"
         + "model_name AS \"modelName\",\n"
         + "service_type AS \"serviceType\",\n"
         + "profile_key AS \"profileKey\",\n"
@@ -34,11 +36,12 @@ public interface SandboxHealthWatermarkModelMapper extends BaseMapper<SandboxHea
         + "created_at AS \"createdAt\",\n"
         + "updated_at AS \"updatedAt\"";
 
+    String BASE_SELECT = "SELECT " + COLUMNS + "\nFROM " + TABLE_NAME + "\n";
+
     @Select("""
         <script>
-        SELECT """ + COLUMNS + """
-        FROM sandbox_health_watermark_model
-        WHERE 1 = 1
+        """ + BASE_SELECT + """
+        <where>
         <if test="serviceType != null and serviceType != ''">
           AND service_type = #{serviceType}
         </if>
@@ -48,6 +51,7 @@ public interface SandboxHealthWatermarkModelMapper extends BaseMapper<SandboxHea
         <if test="enabled != null">
           AND enabled = #{enabled}
         </if>
+        </where>
         ORDER BY service_type ASC, profile_key ASC NULLS FIRST, priority DESC, id DESC
         </script>
         """)
@@ -57,8 +61,7 @@ public interface SandboxHealthWatermarkModelMapper extends BaseMapper<SandboxHea
 
     @Select("""
         <script>
-        SELECT """ + COLUMNS + """
-        FROM sandbox_health_watermark_model
+        """ + BASE_SELECT + """
         WHERE service_type = #{serviceType}
           AND COALESCE(profile_key, '') = COALESCE(#{profileKey}, '')
           AND enabled = 1
@@ -73,8 +76,7 @@ public interface SandboxHealthWatermarkModelMapper extends BaseMapper<SandboxHea
                                                         @Param("excludeId") Long excludeId);
 
     @Select("""
-        SELECT """ + COLUMNS + """
-        FROM sandbox_health_watermark_model
+        """ + BASE_SELECT + """
         WHERE service_type = #{serviceType}
           AND COALESCE(profile_key, '') = COALESCE(#{profileKey}, '')
           AND enabled = 1
@@ -85,8 +87,7 @@ public interface SandboxHealthWatermarkModelMapper extends BaseMapper<SandboxHea
                                                          @Param("profileKey") String profileKey);
 
     @Select("""
-        SELECT """ + COLUMNS + """
-        FROM sandbox_health_watermark_model
+        """ + BASE_SELECT + """
         WHERE service_type = #{serviceType}
           AND COALESCE(profile_key, '') = ''
           AND enabled = 1
@@ -96,8 +97,7 @@ public interface SandboxHealthWatermarkModelMapper extends BaseMapper<SandboxHea
     SandboxHealthWatermarkModelEntity selectEnabledServiceDefault(@Param("serviceType") String serviceType);
 
     @Select("""
-        SELECT """ + COLUMNS + """
-        FROM sandbox_health_watermark_model
+        """ + BASE_SELECT + """
         WHERE service_type = 'default'
           AND COALESCE(profile_key, '') = ''
           AND enabled = 1
