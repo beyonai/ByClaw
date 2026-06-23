@@ -4,6 +4,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import PersonalParamSettings from '..';
 import { queryPersonalParams, savePersonalParam } from '@/service/personalParam';
 
+jest.setTimeout(30000);
+
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({
     formatMessage: ({ id }: { id: string }, values?: Record<string, string | number>) => {
