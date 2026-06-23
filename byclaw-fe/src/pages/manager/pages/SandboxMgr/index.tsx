@@ -201,6 +201,26 @@ interface SandboxResizeRecord {
   errorMessage?: string;
 }
 
+interface SandboxHealthWatermarkModel {
+  id?: number;
+  modelName?: string;
+  serviceType?: string;
+  profileKey?: string;
+  enabled?: number;
+  priority?: number;
+  idleMemoryLimitRatio?: number;
+  busyMemoryLimitRatio?: number;
+  criticalMemoryLimitRatio?: number;
+  busyCpuRequestRatio?: number;
+  criticalCpuRequestRatio?: number;
+  consecutiveBusySamples?: number;
+  recoverSamples?: number;
+  sampleIntervalSeconds?: number;
+  snapshotTtlSeconds?: number;
+  watchTtlSeconds?: number;
+  remark?: string;
+}
+
 const SandboxMgr = () => {
   const intl = useIntl();
   const dispatch = useDispatch();
@@ -240,6 +260,18 @@ const SandboxMgr = () => {
   const [editingProfile, setEditingProfile] = useState<ServiceProfileItem | null>(null);
   const [profileForm] = Form.useForm();
   const [savingProfile, setSavingProfile] = useState(false);
+
+  // 沙箱健康检测/水位模型相关状态
+  const [healthSwitch, setHealthSwitch] = useState<any>({});
+  const [healthSwitchLoading, setHealthSwitchLoading] = useState(false);
+  const [watermarkList, setWatermarkList] = useState<SandboxHealthWatermarkModel[]>([]);
+  const [watermarkLoading, setWatermarkLoading] = useState(false);
+  const [watermarkFormVisible, setWatermarkFormVisible] = useState(false);
+  const [editingWatermark, setEditingWatermark] = useState<SandboxHealthWatermarkModel | null>(null);
+  const [watermarkForm] = Form.useForm();
+  const [savingWatermark, setSavingWatermark] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewResult, setPreviewResult] = useState<any>(null);
 
   // 指定用户沙箱相关状态
   const [launchModalOpen, setLaunchModalOpen] = useState(false);
@@ -645,11 +677,41 @@ const SandboxMgr = () => {
     [dispatch]
   );
 
-  const handleOpenSpecDrawer = useCallback(() => {
+  const loadHealthSwitch = useCallback(() => {
+    setHealthSwitchLoading(true);
+    dispatch({
+      type: 'sandboxMgr/getSandboxHealthGlobalSwitch',
+      success: (data: any) => {
+        setHealthSwitch(data || {});
+        setHealthSwitchLoading(false);
+      },
+      fail: () => setHealthSwitchLoading(false),
+    });
+  }, [dispatch]);
+
+  const loadWatermarkList = useCallback(
+    (params: any = {}) => {
+      setWatermarkLoading(true);
+      dispatch({
+        type: 'sandboxMgr/listSandboxHealthWatermarkModels',
+        payload: params,
+        success: (data: SandboxHealthWatermarkModel[]) => {
+          setWatermarkList(data || []);
+          setWatermarkLoading(false);
+        },
+        fail: () => setWatermarkLoading(false),
+      });
+    },
+    [dispatch]
+  );
+
+  const handleOpenSpecDrawer = () => {
     setSpecDrawerOpen(true);
     loadSpecList();
     loadProfileList();
-  }, [loadProfileList, loadSpecList]);
+    loadHealthSwitch();
+    loadWatermarkList();
+  };
 
   const handleCloseSpecDrawer = useCallback(() => {
     setSpecDrawerOpen(false);
@@ -657,14 +719,18 @@ const SandboxMgr = () => {
     setEditingSpec(null);
     setProfileFormVisible(false);
     setEditingProfile(null);
+    setWatermarkFormVisible(false);
+    setEditingWatermark(null);
+    setPreviewResult(null);
     specForm.resetFields();
     profileForm.resetFields();
+    watermarkForm.resetFields();
     setSpecDrawerTab('spec');
     resizeForm.resetFields();
     setResizeSandboxList([]);
     setSelectedResizeRecord(null);
     setResizeRecords([]);
-  }, [profileForm, resizeForm, specForm]);
+  }, [profileForm, resizeForm, specForm, watermarkForm]);
 
   const handleAddSpec = useCallback(() => {
     setEditingSpec(null);
@@ -805,6 +871,160 @@ const SandboxMgr = () => {
     setEditingProfile(null);
     profileForm.resetFields();
   }, [profileForm]);
+
+  // ==================== 沙箱健康检测/水位模型相关方法 ====================
+
+  const handleHealthSwitchChange = useCallback(
+    (checked: boolean) => {
+      setHealthSwitchLoading(true);
+      dispatch({
+        type: 'sandboxMgr/saveSandboxHealthGlobalSwitch',
+        payload: { enabled: checked },
+        success: (data: any) => {
+          setHealthSwitch(data || {});
+          setHealthSwitchLoading(false);
+        },
+        fail: () => setHealthSwitchLoading(false),
+      });
+    },
+    [dispatch]
+  );
+
+  const handleAddWatermark = useCallback(() => {
+    setEditingWatermark(null);
+    setPreviewResult(null);
+    watermarkForm.setFieldsValue({
+      modelName: 'OpenClaw XS health model',
+      serviceType: DEFAULT_SERVICE_TYPE,
+      profileKey: 'xs',
+      enabled: true,
+      priority: 0,
+      idleMemoryLimitRatio: 0.55,
+      busyMemoryLimitRatio: 0.75,
+      criticalMemoryLimitRatio: 0.88,
+      busyCpuRequestRatio: 1,
+      criticalCpuRequestRatio: 1.8,
+      consecutiveBusySamples: 2,
+      recoverSamples: 2,
+      sampleIntervalSeconds: 30,
+      snapshotTtlSeconds: 120,
+      watchTtlSeconds: 90,
+      previewCpuRequestRatio: 1,
+      previewMemoryLimitRatio: 0.8,
+    });
+    setWatermarkFormVisible(true);
+  }, [watermarkForm]);
+
+  const handleEditWatermark = useCallback(
+    (record: SandboxHealthWatermarkModel) => {
+      setEditingWatermark(record);
+      setPreviewResult(null);
+      watermarkForm.setFieldsValue({
+        ...record,
+        enabled: record.enabled !== 0,
+        previewCpuRequestRatio: 1,
+        previewMemoryLimitRatio: record.busyMemoryLimitRatio || 0.75,
+      });
+      setWatermarkFormVisible(true);
+    },
+    [watermarkForm]
+  );
+
+  const buildWatermarkPayload = (values: any) => ({
+    id: editingWatermark?.id,
+    modelName: trim(values.modelName || ''),
+    serviceType: trim(values.serviceType || DEFAULT_SERVICE_TYPE),
+    profileKey: trim(values.profileKey || ''),
+    enabled: values.enabled ? 1 : 0,
+    priority: values.priority || 0,
+    idleMemoryLimitRatio: values.idleMemoryLimitRatio,
+    busyMemoryLimitRatio: values.busyMemoryLimitRatio,
+    criticalMemoryLimitRatio: values.criticalMemoryLimitRatio,
+    busyCpuRequestRatio: values.busyCpuRequestRatio,
+    criticalCpuRequestRatio: values.criticalCpuRequestRatio,
+    consecutiveBusySamples: values.consecutiveBusySamples,
+    recoverSamples: values.recoverSamples,
+    sampleIntervalSeconds: values.sampleIntervalSeconds,
+    snapshotTtlSeconds: values.snapshotTtlSeconds,
+    watchTtlSeconds: values.watchTtlSeconds,
+    remark: trim(values.remark || ''),
+  });
+
+  const handleSaveWatermark = useCallback(() => {
+    watermarkForm.validateFields().then((values) => {
+      Modal.confirm({
+        title: intl.formatMessage({ id: 'sandboxMgr.health.saveConfirmTitle' }),
+        content: intl.formatMessage({ id: 'sandboxMgr.health.saveConfirmContent' }),
+        onOk: () => {
+          setSavingWatermark(true);
+          dispatch({
+            type: 'sandboxMgr/saveSandboxHealthWatermarkModel',
+            payload: buildWatermarkPayload(values),
+            success: () => {
+              setSavingWatermark(false);
+              setWatermarkFormVisible(false);
+              setEditingWatermark(null);
+              setPreviewResult(null);
+              watermarkForm.resetFields();
+              loadWatermarkList();
+            },
+            fail: () => setSavingWatermark(false),
+          });
+        },
+      });
+    });
+  }, [dispatch, intl, loadWatermarkList, watermarkForm, editingWatermark]);
+
+  const handleDeleteWatermark = useCallback(
+    (record: SandboxHealthWatermarkModel) => {
+      if (!record.id) return;
+      dispatch({
+        type: 'sandboxMgr/deleteSandboxHealthWatermarkModel',
+        payload: { id: record.id },
+        success: () => loadWatermarkList(),
+      });
+    },
+    [dispatch, loadWatermarkList]
+  );
+
+  const handleToggleWatermark = useCallback(
+    (record: SandboxHealthWatermarkModel, checked: boolean) => {
+      if (!record.id) return;
+      dispatch({
+        type: 'sandboxMgr/enableSandboxHealthWatermarkModel',
+        payload: { id: record.id, enabled: checked },
+        success: () => loadWatermarkList(),
+      });
+    },
+    [dispatch, loadWatermarkList]
+  );
+
+  const handlePreviewWatermark = useCallback(() => {
+    watermarkForm.validateFields().then((values) => {
+      setPreviewLoading(true);
+      dispatch({
+        type: 'sandboxMgr/previewSandboxHealthWatermark',
+        payload: {
+          serviceType: trim(values.serviceType || DEFAULT_SERVICE_TYPE),
+          profileKey: trim(values.profileKey || ''),
+          cpuRequestRatio: values.previewCpuRequestRatio,
+          memoryLimitRatio: values.previewMemoryLimitRatio,
+        },
+        success: (data: any) => {
+          setPreviewResult(data || null);
+          setPreviewLoading(false);
+        },
+        fail: () => setPreviewLoading(false),
+      });
+    });
+  }, [dispatch, watermarkForm]);
+
+  const handleCancelWatermarkForm = useCallback(() => {
+    setWatermarkFormVisible(false);
+    setEditingWatermark(null);
+    setPreviewResult(null);
+    watermarkForm.resetFields();
+  }, [watermarkForm]);
 
   // ==================== 沙箱弹性计算配置相关方法 ====================
 
@@ -1424,6 +1644,102 @@ const SandboxMgr = () => {
     },
   ];
 
+  const healthLevelColorMap: Record<string, string> = {
+    IDLE: 'green',
+    NORMAL: 'blue',
+    BUSY: 'orange',
+    CRITICAL: 'red',
+    UNKNOWN: 'default',
+  };
+
+  const watermarkColumns = [
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.health.modelName' }),
+      dataIndex: 'modelName',
+      width: 180,
+      ellipsis: true,
+      render: renderEllipsisText,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.profile.serviceType' }),
+      dataIndex: 'serviceType',
+      width: 130,
+      render: renderEllipsisText,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.profile.profileKey' }),
+      dataIndex: 'profileKey',
+      width: 120,
+      render: (value: string, record: SandboxHealthWatermarkModel) =>
+        value ? renderProfileTag(value, record.serviceType) : <Tag>default</Tag>,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.health.memoryWatermark' }),
+      width: 220,
+      render: (_: any, record: SandboxHealthWatermarkModel) => (
+        <Space size={4} wrap>
+          <Tag color="green">I {record.idleMemoryLimitRatio}</Tag>
+          <Tag color="orange">B {record.busyMemoryLimitRatio}</Tag>
+          <Tag color="red">C {record.criticalMemoryLimitRatio}</Tag>
+        </Space>
+      ),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.health.cpuWatermark' }),
+      width: 170,
+      render: (_: any, record: SandboxHealthWatermarkModel) => (
+        <Space size={4} wrap>
+          <Tag color="orange">B {record.busyCpuRequestRatio}</Tag>
+          <Tag color="red">C {record.criticalCpuRequestRatio}</Tag>
+        </Space>
+      ),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.health.samples' }),
+      width: 150,
+      render: (_: any, record: SandboxHealthWatermarkModel) =>
+        `${record.consecutiveBusySamples || 1}/${record.recoverSamples || 1}`,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.health.ttl' }),
+      width: 170,
+      render: (_: any, record: SandboxHealthWatermarkModel) =>
+        `${record.sampleIntervalSeconds || '-'}s / ${record.snapshotTtlSeconds || '-'}s / ${
+          record.watchTtlSeconds || '-'
+        }s`,
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.profile.enabled' }),
+      dataIndex: 'enabled',
+      width: 110,
+      align: 'center' as const,
+      render: (value: number, record: SandboxHealthWatermarkModel) => (
+        <Switch checked={value !== 0} size="small" onChange={(checked) => handleToggleWatermark(record, checked)} />
+      ),
+    },
+    {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.action' }),
+      width: 150,
+      align: 'center' as const,
+      fixed: 'right' as const,
+      render: (_: any, record: SandboxHealthWatermarkModel) => (
+        <Space size="small">
+          <Button size="small" type="link" icon={<EditOutlined />} onClick={() => handleEditWatermark(record)}>
+            {intl.formatMessage({ id: 'SystemParams.params.edit' })}
+          </Button>
+          <Popconfirm
+            title={intl.formatMessage({ id: 'sandboxMgr.health.deleteConfirm' })}
+            onConfirm={() => handleDeleteWatermark(record)}
+          >
+            <Button size="small" type="link" danger icon={<DeleteOutlined />}>
+              {intl.formatMessage({ id: 'SystemParams.params.delete' })}
+            </Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
+
   const selectedResource = selectedResizeRecord
     ? getResourceInfo(selectedResizeRecord.resourceRequests, selectedResizeRecord.resourceLimits)
     : null;
@@ -1614,6 +1930,80 @@ const SandboxMgr = () => {
                     pagination={false}
                     columns={profileColumns}
                     scroll={{ x: 1340 }}
+                  />
+                </div>
+              ),
+            },
+            {
+              key: 'health',
+              label: intl.formatMessage({ id: 'sandboxMgr.config.tab.health' }),
+              children: (
+                <div className={styles.specDrawerContent}>
+                  <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
+                    <Col>
+                      <Space direction="vertical" size={2}>
+                        <Typography.Text strong>
+                          {intl.formatMessage({ id: 'sandboxMgr.health.switchTitle' })}
+                        </Typography.Text>
+                        <Typography.Text type="secondary">
+                          {intl.formatMessage({ id: 'sandboxMgr.health.switchTip' })}
+                        </Typography.Text>
+                      </Space>
+                    </Col>
+                    <Col>
+                      <Space>
+                        <Tag color={healthSwitch.hardEnabled ? 'green' : 'red'}>
+                          {intl.formatMessage({
+                            id: healthSwitch.hardEnabled
+                              ? 'sandboxMgr.health.hardEnabled'
+                              : 'sandboxMgr.health.hardDisabled',
+                          })}
+                        </Tag>
+                        <Switch
+                          checked={!!healthSwitch.runtimeEnabled}
+                          disabled={!healthSwitch.hardEnabled}
+                          loading={healthSwitchLoading}
+                          onChange={handleHealthSwitchChange}
+                        />
+                      </Space>
+                    </Col>
+                  </Row>
+                  <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
+                    <Col>
+                      <Space>
+                        <Input.Search
+                          allowClear
+                          placeholder={intl.formatMessage({ id: 'sandboxMgr.health.serviceTypePlaceholder' })}
+                          onSearch={(value) => loadWatermarkList({ serviceType: trim(value || '') })}
+                          style={{ width: 240 }}
+                        />
+                      </Space>
+                    </Col>
+                    <Col>
+                      <Space>
+                        <Button
+                          icon={<ReloadOutlined />}
+                          onClick={() => {
+                            loadHealthSwitch();
+                            loadWatermarkList();
+                          }}
+                          loading={watermarkLoading}
+                        >
+                          {intl.formatMessage({ id: 'sandboxMgr.action.refresh' })}
+                        </Button>
+                        <Button type="primary" icon={<PlusOutlined />} onClick={handleAddWatermark}>
+                          {intl.formatMessage({ id: 'sandboxMgr.health.add' })}
+                        </Button>
+                      </Space>
+                    </Col>
+                  </Row>
+                  <Table<SandboxHealthWatermarkModel>
+                    rowKey={(record) => String(record.id || `${record.serviceType}-${record.profileKey || 'default'}`)}
+                    dataSource={watermarkList}
+                    loading={watermarkLoading}
+                    pagination={false}
+                    columns={watermarkColumns}
+                    scroll={{ x: 1400 }}
                   />
                 </div>
               ),
@@ -2212,6 +2602,206 @@ const SandboxMgr = () => {
               style={{ fontFamily: 'monospace' }}
             />
           </Form.Item>
+        </Form>
+      </ModalDrawer>
+
+      {/* 沙箱健康水位模型表单 */}
+      <ModalDrawer
+        title={intl.formatMessage({
+          id: editingWatermark ? 'sandboxMgr.health.editTitle' : 'sandboxMgr.health.addTitle',
+        })}
+        open={watermarkFormVisible}
+        onCancel={handleCancelWatermarkForm}
+        onOk={handleSaveWatermark}
+        confirmLoading={savingWatermark}
+        width={760}
+      >
+        <Form form={watermarkForm} layout="vertical" preserve={false}>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item
+                label={intl.formatMessage({ id: 'sandboxMgr.health.modelName' })}
+                name="modelName"
+                rules={[{ required: true, message: intl.formatMessage({ id: 'sandboxMgr.health.modelNameRequired' }) }]}
+              >
+                <Input placeholder={intl.formatMessage({ id: 'sandboxMgr.health.modelNamePlaceholder' })} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                label={intl.formatMessage({ id: 'sandboxMgr.profile.serviceType' })}
+                name="serviceType"
+                rules={[
+                  { required: true, message: intl.formatMessage({ id: 'sandboxMgr.profile.serviceTypeRequired' }) },
+                ]}
+              >
+                <Input placeholder={intl.formatMessage({ id: 'sandboxMgr.profile.serviceTypePlaceholder' })} />
+              </Form.Item>
+            </Col>
+            <Col span={4}>
+              <Form.Item
+                label={intl.formatMessage({ id: 'sandboxMgr.profile.enabled' })}
+                name="enabled"
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={10}>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.profile.profileKey' })} name="profileKey">
+                <Select
+                  allowClear
+                  showSearch
+                  placeholder={intl.formatMessage({ id: 'sandboxMgr.health.profileKeyPlaceholder' })}
+                  optionLabelProp="label"
+                >
+                  {sortedProfileList.map((item) => (
+                    <Option
+                      key={`${item.serviceType}-${item.profileKey}`}
+                      value={item.profileKey}
+                      label={getProfileLabel(item.profileKey, item.serviceType)}
+                    >
+                      {renderProfileOption(item)}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={7}>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.health.priority' })} name="priority">
+                <InputNumber min={0} precision={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={7}>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.health.sampleIntervalSeconds' })} name="sampleIntervalSeconds">
+                <InputNumber min={1} precision={0} style={{ width: '100%' }} addonAfter="s" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item
+                label={intl.formatMessage({ id: 'sandboxMgr.health.idleMemoryLimitRatio' })}
+                name="idleMemoryLimitRatio"
+                rules={[{ required: true }, { type: 'number', min: 0, max: 3 }]}
+              >
+                <InputNumber min={0} max={3} step={0.01} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                label={intl.formatMessage({ id: 'sandboxMgr.health.busyMemoryLimitRatio' })}
+                name="busyMemoryLimitRatio"
+                rules={[{ required: true }, { type: 'number', min: 0, max: 3 }]}
+              >
+                <InputNumber min={0} max={3} step={0.01} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                label={intl.formatMessage({ id: 'sandboxMgr.health.criticalMemoryLimitRatio' })}
+                name="criticalMemoryLimitRatio"
+                dependencies={['idleMemoryLimitRatio', 'busyMemoryLimitRatio']}
+                rules={[
+                  { required: true },
+                  { type: 'number', min: 0, max: 3 },
+                  ({ getFieldValue }) => ({
+                    validator(_, value) {
+                      const idle = getFieldValue('idleMemoryLimitRatio');
+                      const busy = getFieldValue('busyMemoryLimitRatio');
+                      if (idle < busy && busy < value) return Promise.resolve();
+                      return Promise.reject(new Error(intl.formatMessage({ id: 'sandboxMgr.health.memoryOrderError' })));
+                    },
+                  }),
+                ]}
+              >
+                <InputNumber min={0} max={3} step={0.01} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item
+                label={intl.formatMessage({ id: 'sandboxMgr.health.busyCpuRequestRatio' })}
+                name="busyCpuRequestRatio"
+                rules={[{ required: true }, { type: 'number', min: 0, max: 3 }]}
+              >
+                <InputNumber min={0} max={3} step={0.01} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                label={intl.formatMessage({ id: 'sandboxMgr.health.criticalCpuRequestRatio' })}
+                name="criticalCpuRequestRatio"
+                dependencies={['busyCpuRequestRatio']}
+                rules={[
+                  { required: true },
+                  { type: 'number', min: 0, max: 3 },
+                  ({ getFieldValue }) => ({
+                    validator(_, value) {
+                      const busy = getFieldValue('busyCpuRequestRatio');
+                      if (busy < value) return Promise.resolve();
+                      return Promise.reject(new Error(intl.formatMessage({ id: 'sandboxMgr.health.cpuOrderError' })));
+                    },
+                  }),
+                ]}
+              >
+                <InputNumber min={0} max={3} step={0.01} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={4}>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.health.consecutiveBusySamples' })} name="consecutiveBusySamples">
+                <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={4}>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.health.recoverSamples' })} name="recoverSamples">
+                <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.health.snapshotTtlSeconds' })} name="snapshotTtlSeconds">
+                <InputNumber min={1} precision={0} style={{ width: '100%' }} addonAfter="s" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.health.watchTtlSeconds' })} name="watchTtlSeconds">
+                <InputNumber min={1} precision={0} style={{ width: '100%' }} addonAfter="s" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.health.remark' })} name="remark">
+                <Input placeholder={intl.formatMessage({ id: 'sandboxMgr.health.remarkPlaceholder' })} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Typography.Title level={5}>{intl.formatMessage({ id: 'sandboxMgr.health.preview' })}</Typography.Title>
+          <Row gutter={12} align="middle">
+            <Col span={8}>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.health.previewCpu' })} name="previewCpuRequestRatio">
+                <InputNumber min={0} max={3} step={0.01} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.health.previewMemory' })} name="previewMemoryLimitRatio">
+                <InputNumber min={0} max={3} step={0.01} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Button onClick={handlePreviewWatermark} loading={previewLoading}>
+                {intl.formatMessage({ id: 'sandboxMgr.health.previewAction' })}
+              </Button>
+              {previewResult?.healthLevel && (
+                <Tag color={healthLevelColorMap[previewResult.healthLevel] || 'default'} style={{ marginLeft: 12 }}>
+                  {previewResult.healthLevel}
+                </Tag>
+              )}
+            </Col>
+          </Row>
         </Form>
       </ModalDrawer>
 
