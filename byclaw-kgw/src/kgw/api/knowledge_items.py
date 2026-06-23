@@ -233,41 +233,18 @@ def _validate_op(op: dict[str, Any], value_type: str) -> None:
         )
 
 
-async def _rollback_binding(
-    pool: Any,
-    *,
-    attempt_id: int,
-    pending_keys: list[tuple[int, str, str]],  # (property_id, kn_code, file_path)
-) -> None:
-    """Roll back PENDING bindings for an attempt_id.
-
-    Tries delete_by_attempt first. On DB failure, writes an outbox row per
-    affected (property_id, kn_code, file_path) so the reconcile worker can
-    finish the cleanup later.
-    """
-    try:
-        await binding_mod.delete_by_attempt(pool, attempt_id)
-    except Exception as exc:  # noqa: BLE001
-        _log.warning(
-            "metadata.update.rollback_failed",
-            attempt_id=attempt_id,
-            error=str(exc),
-        )
-        for property_id, kn_code, file_path in pending_keys:
-            try:
-                await binding_mod.write_outbox(
-                    pool,
-                    property_id=property_id,
-                    kn_code=kn_code,
-                    file_path=file_path,
-                    attempt_id=attempt_id,
-                )
-            except Exception as outbox_exc:  # noqa: BLE001
-                _log.error(
-                    "metadata.update.outbox_failed",
-                    attempt_id=attempt_id,
-                    property_id=property_id,
-                    error=str(outbox_exc),
+async def _delete_created_bindings(pool: Any, keys: list[tuple[int, str, str]]) -> None:
+    """Best-effort rollback for rows created by the current failed write."""
+    if not keys:
+        return
+    async with pool.connection() as conn:
+        async with conn.transaction():
+            for property_id, kn_code, file_path in keys:
+                await conn.execute(
+                    "DELETE FROM kgw_metadata_property_binding "
+                    "WHERE property_id=%s AND kn_code=%s AND file_path=%s "
+                    "  AND status='BOUND'",
+                    (property_id, kn_code, file_path),
                 )
 
 
@@ -363,8 +340,7 @@ async def knowledge_item_import(
         front_matter = _parse_front_matter(raw_content)
 
         modified_content = raw_content
-        attempt_id: int | None = None
-        pending_keys: list[tuple[int, str, str]] = []
+        created_binding_keys: list[tuple[int, str, str]] = []
 
         if front_matter:
             _log.info(
@@ -377,29 +353,33 @@ async def knowledge_item_import(
             n2b, _, props_by_name = await _resolve_property_map(
                 pool, list(front_matter.keys())
             )
-            # Lazy sync: ensure each property is synced to the backend endpoint
-            for prop in props_by_name.values():
-                await sync_mod.ensure_synced(
-                    state,
-                    property_id=prop.property_id,
-                    kn_code=kn_code,
-                    user_code=x_user_id,
-                )
-            # Write PENDING bindings atomically
-            attempt_id = binding_mod.new_attempt_id()
-            pending_keys = [
-                (p.property_id, kn_code, file_path) for p in props_by_name.values()
-            ]
+            # Bind usage before lazy sync/backend import. Only newly-created
+            # rows are rolled back if this request fails.
             async with pool.connection() as conn:
                 async with conn.transaction():
                     for prop in props_by_name.values():
-                        await binding_mod.upsert_pending(
+                        created = await binding_mod.bind_usage(
                             conn,
                             property_id=prop.property_id,
                             kn_code=kn_code,
                             file_path=file_path,
-                            attempt_id=attempt_id,
                         )
+                        if created:
+                            created_binding_keys.append(
+                                (prop.property_id, kn_code, file_path)
+                            )
+            # Lazy sync: ensure each property is synced to the backend endpoint
+            try:
+                for prop in props_by_name.values():
+                    await sync_mod.ensure_synced(
+                        state,
+                        property_id=prop.property_id,
+                        kn_code=kn_code,
+                        user_code=x_user_id,
+                    )
+            except Exception:
+                await _delete_created_bindings(pool, created_binding_keys)
+                raise
             # Rewrite front-matter keys to backend names
             modified_content = _rewrite_front_matter(raw_content, n2b)
         else:
@@ -433,35 +413,17 @@ async def knowledge_item_import(
             cb.record_success()
         except (httpx.TimeoutException, httpx.StreamError, httpx.ReadError) as exc:
             cb.record_failure()
-            if attempt_id is not None:
-                await _rollback_binding(
-                    pool, attempt_id=attempt_id, pending_keys=pending_keys
-                )
+            await _delete_created_bindings(pool, created_binding_keys)
             raise UploadStreamBroken(
                 f"upload stream broken: {url}", kn_code=kn_code
             ) from exc
         except BackendAuthFailed:
             cb.record_failure()
-            if attempt_id is not None:
-                await _rollback_binding(
-                    pool, attempt_id=attempt_id, pending_keys=pending_keys
-                )
+            await _delete_created_bindings(pool, created_binding_keys)
             raise
 
-        if attempt_id is not None:
-            result_ok = result.get("resultCode") == "0"
-            if result_ok:
-                _log.info(
-                    "import.metadata.synced",
-                    kn_code=kn_code,
-                    file_path=file_path,
-                    keys=list(front_matter.keys()),
-                )
-                await binding_mod.mark_synced_by_attempt(pool, attempt_id=attempt_id)
-            else:
-                await _rollback_binding(
-                    pool, attempt_id=attempt_id, pending_keys=pending_keys
-                )
+        if created_binding_keys and result.get("resultCode") != "0":
+            await _delete_created_bindings(pool, created_binding_keys)
     else:
         _log.info(
             "import.front_matter.skipped",
@@ -581,11 +543,12 @@ async def metadata_update(
 
     Flow:
     1. Validate property names + operation/valueType compatibility.
-    2. Lazy-sync each property to the target KB.
-    3. Write PENDING binding rows for set/append ops.
-    4. Call backend; on failure roll back bindings.
-    5. Mark bindings SYNCED; process unset/clear deletions.
-    6. Reverse-translate response (knCode + metadata field names).
+    2. Bind set/append usage before lazy-sync/backend write.
+    3. Mark unset/clear rows DELETING before backend write.
+    4. Lazy-sync each property to the target KB.
+    5. Call backend; on failure roll back current-request binding writes.
+    6. On success, confirm unset/clear rows absent.
+    7. Reverse-translate response (knCode + metadata field names).
     """
     state = request.app.state
     pool = state.pool
@@ -619,58 +582,89 @@ async def metadata_update(
         op_id, f"/{op_id.value}"
     )
 
-    # 4. Lazy sync for each unique property_id
-    unique_props = {p.property_id: p for p in props_by_name.values()}
-    for p in unique_props.values():
-        await sync_mod.ensure_synced(
-            state, property_id=p.property_id, kn_code=kn_code, user_code=x_user_id
-        )
-
-    # 5. Generate attempt_id and write PENDING bindings for set/append ops
-    attempt_id = binding_mod.new_attempt_id()
-    set_or_append_names = [
-        op["propertyName"]
+    # 4. Bind set/append usage before lazy sync/backend write. Only rows
+    # inserted by this request are deleted if the backend write fails.
+    set_or_append_ops = [
+        op
         for op in op_list
         if op.get("operation") in {MetadataOperation.SET, MetadataOperation.APPEND}
     ]
-
-    pending_keys: list[tuple[int, str, str]] = [
-        (props_by_name[name].property_id, kn_code, file_path)
-        for name in set_or_append_names
-    ]
-
-    if set_or_append_names:
+    created_binding_keys: list[tuple[int, str, str]] = []
+    if set_or_append_ops:
         async with pool.connection() as conn:
             async with conn.transaction():
-                for name in set_or_append_names:
-                    await binding_mod.upsert_pending(
+                for op in set_or_append_ops:
+                    prop = props_by_name[op["propertyName"]]
+                    created = await binding_mod.bind_usage(
                         conn,
-                        property_id=props_by_name[name].property_id,
+                        property_id=prop.property_id,
                         kn_code=kn_code,
                         file_path=file_path,
-                        attempt_id=attempt_id,
+                    )
+                    if created:
+                        created_binding_keys.append(
+                            (prop.property_id, kn_code, file_path)
+                        )
+
+    # 5. Mark unset/clear rows DELETING before backend write.
+    unset_or_clear_ops = [
+        op
+        for op in op_list
+        if op.get("operation") in {MetadataOperation.UNSET, MetadataOperation.CLEAR}
+    ]
+    deleting_keys: list[tuple[int, str, str]] = [
+        (props_by_name[op["propertyName"]].property_id, kn_code, file_path)
+        for op in unset_or_clear_ops
+    ]
+    if unset_or_clear_ops:
+        async with pool.connection() as conn:
+            async with conn.transaction():
+                for op in unset_or_clear_ops:
+                    await binding_mod.mark_deleting_by_property_op(
+                        conn,
+                        property_id=props_by_name[op["propertyName"]].property_id,
+                        kn_code=kn_code,
+                        file_path=file_path,
                     )
 
-    # 6. Translate request body for backend
+    async def _rollback_failed_write() -> None:
+        await _delete_created_bindings(pool, created_binding_keys)
+        for property_id, kc, fp in deleting_keys:
+            await binding_mod.restore_bound(
+                pool,
+                property_id=property_id,
+                kn_code=kc,
+                file_path=fp,
+            )
+
+    # 6. Lazy sync for each unique property_id
+    unique_props = {p.property_id: p for p in props_by_name.values()}
+    try:
+        for p in unique_props.values():
+            await sync_mod.ensure_synced(
+                state, property_id=p.property_id, kn_code=kn_code, user_code=x_user_id
+            )
+    except Exception:
+        await _rollback_failed_write()
+        raise
+
+    # 7. Translate request body for backend
     backend_payload = translate_request_metadata(body, name_to_backend)
     backend_payload["knCode"] = cfg.resource_code
 
-    # 7. Resolve auth headers
+    # 8. Resolve auth headers
     headers = await state.auth_provider.resolve_headers(
         cfg.headers, user_code=x_user_id
     )
 
-    # 8. Circuit breaker gate
+    # 9. Circuit breaker gate
     cb_key = cfg.domain_url or cfg.domain_name
     cb = state.circuit_breakers.get(cb_key)
     if not cb.before_call():
-        if pending_keys:
-            await _rollback_binding(
-                pool, attempt_id=attempt_id, pending_keys=pending_keys
-            )
+        await _rollback_failed_write()
         raise CircuitOpen(f"circuit OPEN for {kn_code}", kn_code=kn_code)
 
-    # 9. Call backend
+    # 10. Call backend
     try:
         resp = await call_backend_json(
             config=cfg,
@@ -682,61 +676,37 @@ async def metadata_update(
         cb.record_success()
     except httpx.TimeoutException as exc:
         cb.record_failure()
-        if pending_keys:
-            await _rollback_binding(
-                pool, attempt_id=attempt_id, pending_keys=pending_keys
-            )
+        await _rollback_failed_write()
         raise UpstreamTimeout(
             f"timeout calling {cfg.domain_url or cfg.domain_name}{op_path}",
             kn_code=kn_code,
         ) from exc
     except (httpx.ConnectError, httpx.NetworkError) as exc:
         cb.record_failure()
-        if pending_keys:
-            await _rollback_binding(
-                pool, attempt_id=attempt_id, pending_keys=pending_keys
-            )
+        await _rollback_failed_write()
         raise UpstreamConnectError(
             f"connect error calling {cfg.domain_url or cfg.domain_name}{op_path}",
             kn_code=kn_code,
         ) from exc
     except BackendAuthError as exc:
         cb.record_failure()
-        if pending_keys:
-            await _rollback_binding(
-                pool, attempt_id=attempt_id, pending_keys=pending_keys
-            )
+        await _rollback_failed_write()
         raise BackendAuthFailed(str(exc), kn_code=kn_code) from exc
 
-    # 10. Backend resultCode check — passthrough on failure
+    # 11. Backend resultCode check — passthrough on failure
     if resp.get("resultCode") != "0":
-        if pending_keys:
-            await _rollback_binding(
-                pool, attempt_id=attempt_id, pending_keys=pending_keys
-            )
+        await _rollback_failed_write()
         _remap_kn_code(resp, resource_code=cfg.resource_code, portal_kn_code=kn_code)
         return resp
 
-    # 11. Mark SYNCED
-    if set_or_append_names:
-        await binding_mod.mark_synced_by_attempt(pool, attempt_id=attempt_id)
-
-    # 12. Process unset/clear — delete binding rows
-    unset_or_clear_ops = [
-        op
-        for op in op_list
-        if op.get("operation") in {MetadataOperation.UNSET, MetadataOperation.CLEAR}
-    ]
-    if unset_or_clear_ops:
-        async with pool.connection() as conn:
-            async with conn.transaction():
-                for op in unset_or_clear_ops:
-                    await binding_mod.delete_by_property_op(
-                        conn,
-                        property_id=props_by_name[op["propertyName"]].property_id,
-                        kn_code=kn_code,
-                        file_path=file_path,
-                    )
+    # 12. Confirm unset/clear rows absent after backend success.
+    for property_id, kc, fp in deleting_keys:
+        await binding_mod.confirm_deleting_absent(
+            pool,
+            property_id=property_id,
+            kn_code=kc,
+            file_path=fp,
+        )
 
     # 13. Reverse-translate response
     _remap_kn_code(resp, resource_code=cfg.resource_code, portal_kn_code=kn_code)

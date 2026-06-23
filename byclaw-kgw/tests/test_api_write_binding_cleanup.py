@@ -53,6 +53,14 @@ _KB_CONFIG = {
             "name": "directoryUpdate",
             "path": "/api/v1/directories/update",
         },
+        {
+            "name": "metadataPropertiesBatchCreate",
+            "path": "/api/v1/metadataProperties/batchCreate",
+        },
+        {
+            "name": "knowledgeItemsMetadataUpdate",
+            "path": "/api/v1/knowledgeItems/metadata/update",
+        },
     ],
 }
 
@@ -61,7 +69,6 @@ _KB_REDIS_KEY = f"KG_DOC_{_KN_CODE}"
 _TABLES_TO_DROP = (
     "kgw_metadata_property_sync",
     "kgw_metadata_property_binding",
-    "kgw_metadata_binding_outbox",
     "kgw_metadata_property",
     "kgw_audit_log",
     "kgw_kb_source_lock",
@@ -195,32 +202,62 @@ async def _pid(pool, property_name: str) -> int:
     return row["property_id"]
 
 
-async def _insert_synced_binding(
+async def _insert_bound_binding(
     pool, *, property_id: int, kn_code: str, file_path: str
 ) -> None:
-    """Manually INSERT a SYNCED binding row for test setup."""
+    """Manually INSERT a BOUND binding row for test setup."""
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
                 "INSERT INTO kgw_metadata_property_binding "
-                "(property_id, kn_code, file_path, status, attempt_id, bound_at) "
-                "VALUES (%s, %s, %s, 'SYNCED', 1, NOW())",
+                "(property_id, kn_code, file_path, status, bound_at, updated_at) "
+                "VALUES (%s, %s, %s, 'BOUND', NOW(), NOW())",
+                (property_id, kn_code, file_path),
+            )
+        await conn.commit()
+
+
+async def _insert_deleting_binding(
+    pool, *, property_id: int, kn_code: str, file_path: str
+) -> None:
+    """Manually INSERT a DELETING binding row for test setup."""
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO kgw_metadata_property_binding "
+                "(property_id, kn_code, file_path, status, bound_at, updated_at) "
+                "VALUES (%s, %s, %s, 'DELETING', NOW(), NOW())",
                 (property_id, kn_code, file_path),
             )
         await conn.commit()
 
 
 async def _count_in_use(pool, property_id: int) -> int:
-    """Count PENDING or SYNCED rows for property_id."""
+    """Count BOUND or DELETING rows for property_id."""
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
                 "SELECT COUNT(*) AS c FROM kgw_metadata_property_binding "
-                "WHERE property_id=%s AND status IN ('PENDING','SYNCED')",
+                "WHERE property_id=%s AND status IN ('BOUND','DELETING')",
                 (property_id,),
             )
             row = await cur.fetchone()
     return int(row["c"])
+
+
+async def _binding_status(
+    pool, property_id: int, kn_code: str, file_path: str
+) -> str | None:
+    """Return binding status for a specific row, if present."""
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT status FROM kgw_metadata_property_binding "
+                "WHERE property_id=%s AND kn_code=%s AND file_path=%s",
+                (property_id, kn_code, file_path),
+            )
+            row = await cur.fetchone()
+    return row["status"] if row else None
 
 
 async def _count_by_file(pool, property_id: int, kn_code: str, file_path: str) -> int:
@@ -252,6 +289,14 @@ def _err_resp() -> dict[str, Any]:
     }
 
 
+def _ok_batch_create_resp() -> dict[str, Any]:
+    return {
+        "resultCode": "0",
+        "resultMsg": "success",
+        "resultObject": {},
+    }
+
+
 # ---------------------------------------------------------------------------
 # Tests: /knowledgeItems/delete
 # ---------------------------------------------------------------------------
@@ -263,7 +308,7 @@ async def test_file_delete_clears_bindings_when_backend_succeeds(bc_client, bc_p
     pid = await _pid(bc_pool, "bc_x")
     file_path = "/d.md"
 
-    await _insert_synced_binding(
+    await _insert_bound_binding(
         bc_pool, property_id=pid, kn_code=_KN_CODE, file_path=file_path
     )
     assert await _count_in_use(bc_pool, pid) == 1
@@ -294,7 +339,7 @@ async def test_file_delete_keeps_bindings_when_backend_fails(bc_client, bc_pool)
     pid = await _pid(bc_pool, "bc_fail")
     file_path = "/fail.md"
 
-    await _insert_synced_binding(
+    await _insert_bound_binding(
         bc_pool, property_id=pid, kn_code=_KN_CODE, file_path=file_path
     )
     assert await _count_in_use(bc_pool, pid) == 1
@@ -324,10 +369,10 @@ async def test_file_delete_ignores_other_files_bindings(bc_client, bc_pool):
     file1 = "/d1.md"
     file2 = "/d2.md"
 
-    await _insert_synced_binding(
+    await _insert_bound_binding(
         bc_pool, property_id=pid, kn_code=_KN_CODE, file_path=file1
     )
-    await _insert_synced_binding(
+    await _insert_bound_binding(
         bc_pool, property_id=pid, kn_code=_KN_CODE, file_path=file2
     )
     assert await _count_in_use(bc_pool, pid) == 2
@@ -363,13 +408,13 @@ async def test_directory_delete_clears_directory_bindings(bc_client, bc_pool):
     await _create_property(bc_client, "bc_dir", "string")
     pid = await _pid(bc_pool, "bc_dir")
 
-    await _insert_synced_binding(
+    await _insert_bound_binding(
         bc_pool, property_id=pid, kn_code=_KN_CODE, file_path="/dir/a.md"
     )
-    await _insert_synced_binding(
+    await _insert_bound_binding(
         bc_pool, property_id=pid, kn_code=_KN_CODE, file_path="/dir/sub/b.md"
     )
-    await _insert_synced_binding(
+    await _insert_bound_binding(
         bc_pool, property_id=pid, kn_code=_KN_CODE, file_path="/other/c.md"
     )
     assert await _count_in_use(bc_pool, pid) == 3
@@ -405,7 +450,7 @@ async def test_directory_delete_keeps_bindings_when_backend_fails(bc_client, bc_
     await _create_property(bc_client, "bc_dir_fail", "string")
     pid = await _pid(bc_pool, "bc_dir_fail")
 
-    await _insert_synced_binding(
+    await _insert_bound_binding(
         bc_pool, property_id=pid, kn_code=_KN_CODE, file_path="/faildir/x.md"
     )
     assert await _count_in_use(bc_pool, pid) == 1
@@ -466,13 +511,13 @@ async def test_directory_update_renames_binding_paths_when_backend_succeeds(
     await _create_property(bc_client, "bc_rn", "string")
     pid = await _pid(bc_pool, "bc_rn")
 
-    await _insert_synced_binding(
+    await _insert_bound_binding(
         bc_pool, property_id=pid, kn_code=_KN_CODE, file_path="/docs/old/a.md"
     )
-    await _insert_synced_binding(
+    await _insert_bound_binding(
         bc_pool, property_id=pid, kn_code=_KN_CODE, file_path="/docs/old/sub/b.md"
     )
-    await _insert_synced_binding(
+    await _insert_bound_binding(
         bc_pool, property_id=pid, kn_code=_KN_CODE, file_path="/docs/older/c.md"
     )
 
@@ -507,7 +552,7 @@ async def test_directory_update_keeps_bindings_when_backend_fails(bc_client, bc_
     await _create_property(bc_client, "bc_rn_fail", "string")
     pid = await _pid(bc_pool, "bc_rn_fail")
 
-    await _insert_synced_binding(
+    await _insert_bound_binding(
         bc_pool, property_id=pid, kn_code=_KN_CODE, file_path="/r_fail/x.md"
     )
 
@@ -532,3 +577,88 @@ async def test_directory_update_keeps_bindings_when_backend_fails(bc_client, bc_
     assert await _count_by_file(bc_pool, pid, _KN_CODE, "/r_fail/x.md") == 1, (
         "Binding should be intact when backend fails"
     )
+
+
+# ---------------------------------------------------------------------------
+# Tests: /knowledgeItems/metadata/update binding writes
+# ---------------------------------------------------------------------------
+
+
+async def test_metadata_update_failed_repeat_set_keeps_existing_bound_binding(
+    bc_client, bc_pool
+):
+    """A failed repeat set must not delete a pre-existing BOUND binding."""
+    prop_name = "bc_meta_repeat_fail"
+    file_path = "/meta/repeat.md"
+
+    await _create_property(bc_client, prop_name, "string")
+    pid = await _pid(bc_pool, prop_name)
+    await _insert_bound_binding(
+        bc_pool, property_id=pid, kn_code=_KN_CODE, file_path=file_path
+    )
+
+    with respx.mock(base_url=_KB_BASE_URL, assert_all_called=False) as mock:
+        batch_route = mock.post("/api/v1/metadataProperties/batchCreate").mock(
+            return_value=httpx.Response(200, json=_ok_batch_create_resp())
+        )
+        update_route = mock.post("/api/v1/knowledgeItems/metadata/update").mock(
+            return_value=httpx.Response(200, json=_err_resp())
+        )
+
+        r = await bc_client.post(
+            f"{_ITEMS_BASE}/metadata/update",
+            json={
+                "knCode": _KN_CODE,
+                "filePath": file_path,
+                "operationList": [
+                    {"propertyName": prop_name, "operation": "set", "value": "x"}
+                ],
+            },
+            headers={"X-User-Id": "user_bc_1"},
+        )
+
+    assert batch_route.called, "lazy sync should run before backend update"
+    assert update_route.called, "backend metadata/update should be called"
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["resultCode"] == "-1", body
+    assert body["resultObject"]["errorCode"] == "Backend"
+    assert await _binding_status(bc_pool, pid, _KN_CODE, file_path) == "BOUND"
+
+
+async def test_metadata_update_successful_set_restores_deleting_binding(
+    bc_client, bc_pool
+):
+    """A successful set restores an existing DELETING binding to BOUND."""
+    prop_name = "bc_meta_restore"
+    file_path = "/meta/restore.md"
+
+    await _create_property(bc_client, prop_name, "string")
+    pid = await _pid(bc_pool, prop_name)
+    await _insert_deleting_binding(
+        bc_pool, property_id=pid, kn_code=_KN_CODE, file_path=file_path
+    )
+
+    with respx.mock(base_url=_KB_BASE_URL, assert_all_called=False) as mock:
+        mock.post("/api/v1/metadataProperties/batchCreate").mock(
+            return_value=httpx.Response(200, json=_ok_batch_create_resp())
+        )
+        mock.post("/api/v1/knowledgeItems/metadata/update").mock(
+            return_value=httpx.Response(200, json=_ok_resp())
+        )
+
+        r = await bc_client.post(
+            f"{_ITEMS_BASE}/metadata/update",
+            json={
+                "knCode": _KN_CODE,
+                "filePath": file_path,
+                "operationList": [
+                    {"propertyName": prop_name, "operation": "set", "value": "x"}
+                ],
+            },
+            headers={"X-User-Id": "user_bc_1"},
+        )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["resultCode"] == "0", r.json()
+    assert await _binding_status(bc_pool, pid, _KN_CODE, file_path) == "BOUND"

@@ -58,7 +58,6 @@ _KB_REDIS_KEY = f"KG_DOC_{_KN_CODE}"
 _TABLES_TO_DROP = (
     "kgw_metadata_property_sync",
     "kgw_metadata_property_binding",
-    "kgw_metadata_binding_outbox",
     "kgw_metadata_property",
     "kgw_audit_log",
     "kgw_kb_source_lock",
@@ -299,9 +298,9 @@ async def test_import_markdown_rewrites_frontmatter_fields(fm_client, fm_pool):
         "original property name key should have been rewritten"
     )
 
-    # A SYNCED binding row exists
+    # A BOUND binding row exists
     status = await _get_binding_status(fm_pool, pid, _KN_CODE, file_path)
-    assert status == "SYNCED", f"expected SYNCED binding, got {status!r}"
+    assert status == "BOUND", f"expected BOUND binding, got {status!r}"
 
 
 async def test_import_markdown_no_frontmatter_uses_normal_path(fm_client, fm_pool):
@@ -419,7 +418,7 @@ async def test_import_non_markdown_not_processed(fm_client, fm_pool):
 async def test_import_markdown_binding_rolled_back_on_backend_failure(
     fm_client, fm_pool
 ):
-    """When the backend returns non-zero resultCode, PENDING bindings are rolled back."""
+    """When the backend returns non-zero resultCode, new BOUND bindings are rolled back."""
     prop_name = "fm_rb"
     await _create_property(fm_client, prop_name, "string")
     prop = await _query_property(fm_pool, prop_name)
@@ -447,7 +446,7 @@ async def test_import_markdown_binding_rolled_back_on_backend_failure(
     # The response carries the backend's error through
     assert r.status_code == 200, r.text
 
-    # No PENDING or SYNCED binding row should remain
+    # No binding row created by this request should remain
     status = await _get_binding_status(fm_pool, pid, _KN_CODE, file_path)
     assert status is None, (
         f"binding should have been rolled back, but status={status!r}"
