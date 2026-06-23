@@ -328,7 +328,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
 
   const { accountId } = account;
   const To = `${sessionAgentId}:${message.sessionId}`;
-  emitByaiSdkMessageReceived(diagnosticRef, diagnosticTrace);
+  const receivedAt = emitByaiSdkMessageReceived(diagnosticRef, diagnosticTrace);
 
   const activeRequest = registerActiveSdkRequest({
     accountId,
@@ -336,6 +336,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     to: To,
     sessionId: message.sessionId,
     traceId: message.traceId,
+    createdAt: receivedAt,
     language: message.language,
     languageProvided: message.languageProvided,
     channelExtension: message.channelExtension,
