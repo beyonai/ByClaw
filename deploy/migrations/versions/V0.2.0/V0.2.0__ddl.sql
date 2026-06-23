@@ -272,3 +272,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_sandbox_health_watermark_enabled
 
 CREATE INDEX IF NOT EXISTS idx_sandbox_health_watermark_scope
     ON byai.sandbox_health_watermark_model (service_type, profile_key, enabled, priority DESC);
+
+alter table byai.ss_res_ext_dig_employee alter column tag_name type varchar(255);
