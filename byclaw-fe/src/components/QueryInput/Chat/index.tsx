@@ -270,6 +270,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
 
     return (
       <>
+        {this.renderContextUsed()}
         {showOnlineSearch && (
           <Button
             aria-label={getIntl().formatMessage({ id: 'queryInput.onlineSearch' })}
