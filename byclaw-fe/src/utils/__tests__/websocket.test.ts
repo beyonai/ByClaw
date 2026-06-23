@@ -1,8 +1,22 @@
 const mockGetToken = jest.fn();
+const mockClearToken = jest.fn();
+const mockLoginRedirect = jest.fn();
 
 jest.mock('../auth', () => ({
   getToken: (...args: any[]) => mockGetToken(...args),
+  clearToken: (...args: any[]) => mockClearToken(...args),
+  loginRedirect: (...args: any[]) => mockLoginRedirect(...args),
 }));
+
+const createJwt = (payload: Record<string, unknown>) => {
+  const encode = (value: Record<string, unknown>) =>
+    Buffer.from(JSON.stringify(value))
+      .toString('base64')
+      .replace(/=/g, '')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_');
+  return `${encode({ alg: 'RS256', typ: 'JWT' })}.${encode(payload)}.signature`;
+};
 
 describe('utils/websocket', () => {
   let socketInstance: any;
@@ -76,6 +90,20 @@ describe('utils/websocket', () => {
     expect(WebSocketMock).not.toHaveBeenCalled();
   });
 
+  it('clears token and redirects when websocket token is expired', async () => {
+    const expiredToken = createJwt({ exp: Math.floor(Date.now() / 1000) - 60 });
+    mockGetToken.mockReturnValue(expiredToken);
+    const ws = require('../websocket').default;
+
+    ws.disconnect();
+    ws.init();
+
+    expect(WebSocketMock).not.toHaveBeenCalled();
+    expect(mockClearToken).toHaveBeenCalled();
+    expect(mockLoginRedirect).toHaveBeenCalledWith({ openLoginModal: '1' });
+    await expect(ws.waitUntilConnected()).rejects.toThrow('WebSocket token unavailable');
+  });
+
   it('creates websocket with correct url in development and reports connecting state', () => {
     process.env.NODE_ENV = 'development';
     mockGetToken.mockReturnValue('token-1');
@@ -86,6 +114,22 @@ describe('utils/websocket', () => {
 
     expect(WebSocketMock).toHaveBeenCalledWith('ws://example.com/byaiService/ws?beyond-token=token-1');
     expect(ws.getConnectionStatus()).toBe('connected');
+  });
+
+  it('recreates websocket when stored token changes after login', () => {
+    process.env.NODE_ENV = 'development';
+    mockGetToken.mockReturnValue('token-1');
+    const ws = require('../websocket').default;
+
+    ws.disconnect();
+    ws.init();
+    const oldSocket = socketInstance;
+
+    mockGetToken.mockReturnValue('token-2');
+    ws.init();
+
+    expect(oldSocket.close).toHaveBeenCalled();
+    expect(WebSocketMock).toHaveBeenLastCalledWith('ws://example.com/byaiService/ws?beyond-token=token-2');
   });
 
   it('starts heartbeat on open and sends notification messages', () => {
