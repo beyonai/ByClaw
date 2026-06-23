@@ -829,7 +829,9 @@ export default {
   'sider.knowledge': 'Knowledge',
   'sider.space': 'Space',
   'sider.knowledgeSource': 'Knowledge sources',
-  'sider.employeeResourceGroup.tooltip': 'Follows the current digital employee',
+  'sider.employeeResourceGroup.tooltip':
+    'Knowledge, tools, views, objects, skills, and files follow the current digital employee.',
+  'sider.employeeResourceGroup.label': 'Linked resources',
   'sider.currentDigitalEmployee': 'Current digital employee',
   'sider.files': 'Files',
   'sider.version': 'Version',
