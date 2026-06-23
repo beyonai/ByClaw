@@ -285,3 +285,73 @@ async def test_upsert_metadata_failure_rolls_back_created_binding_marker():
     assert record.kn_code == "k"
     assert record.file_path == "/b.pdf"
     assert record.updated_at == marker
+
+
+@pytest.mark.asyncio
+async def test_non_markdown_upsert_with_metadata_binds_before_file_import():
+    """Non-markdown metadata bindings must be created before backend file import."""
+    state = _make_state()
+    calls: list[str] = []
+
+    async def post_file_import(*_args, **_kwargs):
+        calls.append("file_import")
+        return httpx.Response(200, json={"resultCode": "0"})
+
+    async def bind_usage(*_args, **_kwargs):
+        calls.append("bind")
+        return True
+
+    async def binding_updated_at(*_args, **_kwargs):
+        calls.append("marker")
+        return datetime(2026, 6, 23, tzinfo=timezone.utc)
+
+    state.http.post = AsyncMock(side_effect=post_file_import)
+    item = StandardItem.model_validate(
+        {
+            "sourceId": "s",
+            "itemId": "i",
+            "op": "upsert",
+            "knCode": "k",
+            "filePath": "/ordered.pdf",
+            "content": "file body",
+            "metadata": {"ingest_field": "value"},
+        }
+    )
+    prop = _metadata_property()
+
+    with (
+        _patch(
+            "kgw.event_processor.resolve_base_url",
+            AsyncMock(return_value="http://kb.test"),
+        ),
+        _patch(
+            "kgw.event_processor.registry.list_active_properties",
+            AsyncMock(return_value=[prop]),
+        ),
+        _patch("kgw.event_processor.sync_mod.ensure_synced", AsyncMock()),
+        _patch(
+            "kgw.event_processor.binding_mod.bind_usage",
+            AsyncMock(side_effect=bind_usage),
+        ),
+        _patch(
+            "kgw.event_processor._binding_updated_at",
+            AsyncMock(side_effect=binding_updated_at),
+            create=True,
+        ),
+        _patch(
+            "kgw.event_processor.call_backend_json",
+            AsyncMock(return_value={"resultCode": "0"}),
+        ),
+        _patch("kgw.event_processor.idempotency.mark_done", AsyncMock()),
+        _patch("kgw.event_processor._audit", AsyncMock()),
+    ):
+        await _process_upsert(
+            state,
+            item,
+            event_id=44,
+            config=state.config_provider.get_kb_config.return_value,
+            user_code="u1",
+            trace_id=None,
+        )
+
+    assert calls[:3] == ["bind", "marker", "file_import"]

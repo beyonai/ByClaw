@@ -462,89 +462,26 @@ async def _process_upsert(
 
     else:
         # --- Non-markdown path: upload original bytes, then separate metadata/update ---
-        filename = item.file_path.split("/")[-1] or "file"
-        try:
-            resp = await state.http.post(
-                url,
-                headers=headers,
-                files={
-                    "fileContent": (
-                        filename,
-                        content_bytes,
-                        content_type or "application/octet-stream",
-                    )
-                },
-                data={"knCode": config.resource_code, "filePath": item.file_path},
-                timeout=25.0,
-            )
-            if resp.status_code in (401, 403):
-                cb.record_failure()
-                await idempotency.mark_failed(
-                    pool,
-                    event_id,
-                    error_type="BACKEND_AUTH_FAILED",
-                    error_message=f"backend auth {resp.status_code}",
-                )
-                await _audit(
-                    state,
-                    item=item,
-                    op_type="ingest.upsert",
-                    result_code="-1",
-                    result_msg=f"auth {resp.status_code}",
-                    size=len(content_bytes),
-                    trace_id=trace_id,
-                    user_code=user_code,
-                )
-                return
-            result = resp.json()
-            cb.record_success()
-        except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as exc:
-            cb.record_failure()
-            await idempotency.mark_failed(
-                pool,
-                event_id,
-                error_type="UPSTREAM_ERROR",
-                error_message=str(exc)[:500],
-            )
-            await _audit(
-                state,
-                item=item,
-                op_type="ingest.upsert",
-                result_code="-1",
-                result_msg=str(exc)[:200],
-                size=len(content_bytes),
-                trace_id=trace_id,
-                user_code=user_code,
-            )
-            return
+        active = []
+        props_by_name = {}
+        created_bindings: list[_CreatedBinding] = []
 
-        if result.get("resultCode") != "0":
-            cb.record_failure()
-            await idempotency.mark_failed(
-                pool,
-                event_id,
-                error_type="UPSTREAM_ERROR",
-                error_message=result.get("resultMsg", "")[:500],
-            )
-            await _audit(
-                state,
-                item=item,
-                op_type="ingest.upsert",
-                result_code="-1",
-                result_msg=result.get("resultMsg", ""),
-                size=len(content_bytes),
-                trace_id=trace_id,
-                user_code=user_code,
-            )
-            return
-
-        # Separate metadata/update call for non-markdown files
         if item.metadata:
             active = await registry.list_active_properties(
                 pool, list(item.metadata.keys())
             )
+            found = {p.property_name for p in active}
+            missing = [k for k in item.metadata if k not in found]
+            if missing:
+                await idempotency.mark_failed(
+                    pool,
+                    event_id,
+                    error_type="MetadataPropertyNotFound",
+                    error_message=f"metadata property not found: {missing[0]}",
+                )
+                return
+
             props_by_name = {p.property_name: p for p in active}
-            created_bindings: list[_CreatedBinding] = []
 
             async with pool.connection() as conn:
                 async with conn.transaction():
@@ -589,6 +526,87 @@ async def _process_upsert(
                 )
                 return
 
+        filename = item.file_path.split("/")[-1] or "file"
+        try:
+            resp = await state.http.post(
+                url,
+                headers=headers,
+                files={
+                    "fileContent": (
+                        filename,
+                        content_bytes,
+                        content_type or "application/octet-stream",
+                    )
+                },
+                data={"knCode": config.resource_code, "filePath": item.file_path},
+                timeout=25.0,
+            )
+            if resp.status_code in (401, 403):
+                cb.record_failure()
+                await _delete_created_bindings(pool, created_bindings)
+                await idempotency.mark_failed(
+                    pool,
+                    event_id,
+                    error_type="BACKEND_AUTH_FAILED",
+                    error_message=f"backend auth {resp.status_code}",
+                )
+                await _audit(
+                    state,
+                    item=item,
+                    op_type="ingest.upsert",
+                    result_code="-1",
+                    result_msg=f"auth {resp.status_code}",
+                    size=len(content_bytes),
+                    trace_id=trace_id,
+                    user_code=user_code,
+                )
+                return
+            result = resp.json()
+            cb.record_success()
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as exc:
+            cb.record_failure()
+            await _delete_created_bindings(pool, created_bindings)
+            await idempotency.mark_failed(
+                pool,
+                event_id,
+                error_type="UPSTREAM_ERROR",
+                error_message=str(exc)[:500],
+            )
+            await _audit(
+                state,
+                item=item,
+                op_type="ingest.upsert",
+                result_code="-1",
+                result_msg=str(exc)[:200],
+                size=len(content_bytes),
+                trace_id=trace_id,
+                user_code=user_code,
+            )
+            return
+
+        if result.get("resultCode") != "0":
+            cb.record_failure()
+            await _delete_created_bindings(pool, created_bindings)
+            await idempotency.mark_failed(
+                pool,
+                event_id,
+                error_type="UPSTREAM_ERROR",
+                error_message=result.get("resultMsg", "")[:500],
+            )
+            await _audit(
+                state,
+                item=item,
+                op_type="ingest.upsert",
+                result_code="-1",
+                result_msg=result.get("resultMsg", ""),
+                size=len(content_bytes),
+                trace_id=trace_id,
+                user_code=user_code,
+            )
+            return
+
+        # Separate metadata/update call for non-markdown files
+        if item.metadata:
             n2b = {p.property_name: p.backend_name for p in active}
             meta_op_path = config.operation_path(
                 KbOp.KNOWLEDGE_ITEMS_METADATA_UPDATE
