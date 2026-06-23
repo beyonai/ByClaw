@@ -86,6 +86,12 @@ describe('ApprovalForm utils', () => {
     expect(getApprovalFormDateSubmitValue(undefined, format)).toBeUndefined();
   });
 
+  it('formats date_time initial strings according to the field format', () => {
+    const format = getApprovalFormDateFormat('yyyy-MM-dd');
+
+    expect(getApprovalFormDateSubmitValue('2026-06-23 22:00:00', format)).toBe('2026-06-23');
+  });
+
   it('converts date submit strings back to date picker values', () => {
     const value = getApprovalFormDatePickerValue('2026-06-23', 'YYYY-MM-DD');
 

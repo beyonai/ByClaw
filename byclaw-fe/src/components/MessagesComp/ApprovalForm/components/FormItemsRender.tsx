@@ -9,6 +9,7 @@ import {
   getApprovalFormDateFormat,
   getApprovalFormDatePickerValue,
   getApprovalFormDateSubmitValue,
+  hasApprovalFormDateTimeFormat,
 } from '../utils';
 import TermSelectDropdown from './TermSelectDropdown';
 
@@ -176,7 +177,7 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
 
   if (formType === 'date_time') {
     const defaultFormat = getApprovalFormDateFormat(item?.format); // 暂时前端处理日期格式
-    comp = <DatePicker format={{ format: defaultFormat }} showTime={/[hms]/i.test(defaultFormat)} />;
+    comp = <DatePicker format={{ format: defaultFormat }} showTime={hasApprovalFormDateTimeFormat(defaultFormat)} />;
     initialValue = getApprovalFormDateSubmitValue(initialValue, defaultFormat);
     formItemValueProps = {
       getValueProps: (value: unknown) => ({
@@ -195,7 +196,15 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
     if (shouldSync && !isEqual(currentValue, initialValue)) {
       form.setFieldValue(name, initialValue);
     }
-  }, [fieldValue, form, initialValue, name]);
+
+    if (formType === 'date_time' && initialValue !== undefined) {
+      if (fieldValue !== undefined && !isEqual(fieldValue, initialValue)) {
+        item.fieldValue = initialValue as typeof item.fieldValue;
+      } else if (defaultValue !== undefined && !isEqual(defaultValue, initialValue)) {
+        item.defaultValue = initialValue as typeof item.defaultValue;
+      }
+    }
+  }, [defaultValue, fieldValue, form, formType, initialValue, item, name]);
 
   const visibleErrorTips = isInitialErrorVisible ? errorTips : undefined;
 
