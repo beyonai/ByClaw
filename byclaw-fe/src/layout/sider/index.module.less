@@ -85,10 +85,39 @@
   width: 100%;
 }
 
-.employeeResourceDivider {
-  width: 28px;
-  height: 1px;
-  background: var(~'--@{antPrefix}-color-border-secondary');
+.employeeResourceGroup {
+  position: relative;
+  display: flex;
+  width: 46px;
+  padding: 5px 1px;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(22, 93, 255, 0.04), rgba(13, 59, 128, 0.03));
+  border: 1px solid transparent;
+  transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: -6px;
+    width: 24px;
+    height: 1px;
+    background: var(~'--@{antPrefix}-color-border-secondary');
+  }
+
+  &:hover {
+    background: linear-gradient(180deg, rgba(22, 93, 255, 0.1), rgba(22, 93, 255, 0.04));
+    border-color: rgba(22, 93, 255, 0.14);
+    box-shadow: inset 0 0 0 1px rgba(22, 93, 255, 0.04);
+  }
+}
+
+.employeeResourceGroupActive {
+  background: linear-gradient(180deg, rgba(22, 93, 255, 0.1), rgba(22, 93, 255, 0.04));
+  border-color: rgba(22, 93, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(22, 93, 255, 0.04);
 }
 
 .commonTabIcon {

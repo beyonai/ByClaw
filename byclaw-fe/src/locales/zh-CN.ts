@@ -833,6 +833,8 @@ export default {
   'sider.knowledge': '知识',
   'sider.space': '空间',
   'sider.knowledgeSource': '知识来源',
+  'sider.employeeResourceGroup.tooltip': '跟随当前数字员工',
+  'sider.currentDigitalEmployee': '当前数字员工',
   'sider.files': '文件',
   'sider.version': '版本号',
   'settings.versionInfo.version': '版本号',
