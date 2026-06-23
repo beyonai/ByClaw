@@ -17,7 +17,7 @@ import { ArrowLeftOutlined, ArrowRightOutlined, EllipsisOutlined, ExclamationCir
 import { Button, Divider, Form, message, Space, Spin, Tooltip } from 'antd';
 import classnames from 'classnames';
 import dayjs from 'dayjs';
-import { debounce, isEmpty, set, noop, isString } from 'lodash';
+import { debounce, isEmpty, set, noop, isString, omit } from 'lodash';
 import { connect, history, useDispatch, useIntl, useLocation, getLocale } from '@umijs/max';
 import { agentHandler } from '@/pages/manager/utils/agent';
 import useGlobal from '@/pages/manager/hooks/useGlobal';
@@ -34,6 +34,29 @@ import Manage from './Manage';
 import Operation from './Operation';
 
 const PREVIEW_HOST = `${window.location.origin}${window.routerBase === '/' ? '/' : window.routerBase}`;
+const DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH = 4000;
+const DIGITAL_EMPLOYEE_TEXT_FIELD_CONFIG = [
+  { key: 'resourceDesc', labelId: 'employeeDetail.digitalEmployeeDesc' },
+  { key: 'ability', labelId: 'employeeDetail.coreAbility' },
+  { key: 'constraints', labelId: 'employeeDetail.abilityBoundary' },
+  { key: 'faqs', labelId: 'employeeDetail.example' },
+  { key: 'processingFlow', labelId: 'employeeDetail.processingFlow' },
+  { key: 'personalityDimensions', labelId: 'employeeDetail.personalityDimensions' },
+  { key: 'wordPreferences', labelId: 'employeeDetail.wordPreferences' },
+  { key: 'sentenceAndTone', labelId: 'employeeDetail.sentenceAndTone' },
+  { key: 'corePersonaDefinition', labelId: 'employeeDetail.promptField.corePersonaDefinition' },
+  { key: 'coreCompetencies', labelId: 'employeeDetail.coreAbility' },
+  { key: 'advancedSettings', labelId: 'employeeDetail.advancedSettings.title' },
+];
+
+const getTextLength = (value) => Array.from(`${value ?? ''}`).length;
+
+const getOverLengthDigitalEmployeeField = (payload) =>
+  DIGITAL_EMPLOYEE_TEXT_FIELD_CONFIG.map((item) => ({
+    ...item,
+    length: getTextLength(payload?.[item.key]),
+    maxLength: item.maxLength || DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH,
+  })).find((item) => item.length > item.maxLength);
 
 export const skillHandler = (it) => {
   const resourceType = it.grantResourceType || it.resourceBizType;
@@ -119,6 +142,43 @@ const parseDigitalEmployeeTemplates = (value) => {
     }
   }
   return [value];
+};
+
+const parseJsonRecursively = (value, maxDepth = 5) => {
+  if (maxDepth <= 0 || typeof value !== 'string') return value;
+  try {
+    const parsed = JSON.parse(value);
+    return typeof parsed === 'string' ? parseJsonRecursively(parsed, maxDepth - 1) : parsed;
+  } catch {
+    return value;
+  }
+};
+
+const normalizePromptConfigKey = (key, item = {}) => {
+  const candidates = [key, item?.name, item?.nameEn, item?.paramName, item?.paramEnName].filter(Boolean);
+  if (candidates.some((value) => ['agent', '工作规范', 'Work Specification'].includes(value))) {
+    return 'agent';
+  }
+  return key;
+};
+
+const extractWorkStandardFromCorePersonaDefinition = (value) => {
+  if (!value) return '';
+  try {
+    const parsedData = parseJsonRecursively(value);
+    const corePersonaData = typeof parsedData === 'string' ? JSON.parse(parsedData) : parsedData;
+    let workStandard = '';
+    if (Array.isArray(corePersonaData)) {
+      const agentPrompt = corePersonaData.find((item) => normalizePromptConfigKey(item?.key, item) === 'agent');
+      workStandard = agentPrompt?.value || '';
+    } else if (corePersonaData && typeof corePersonaData === 'object') {
+      workStandard = corePersonaData.agent || corePersonaData.workStandard || '';
+    }
+    const normalizedValue = parseJsonRecursively(workStandard);
+    return typeof normalizedValue === 'string' ? normalizedValue : JSON.stringify(normalizedValue || '');
+  } catch {
+    return '';
+  }
 };
 
 const getDigitalEmployeeTemplate = (templates, ownerType, agentType) => {
@@ -575,6 +635,8 @@ const EmployeeDetail = ({ loading }) => {
             let customPromptTabsFromCore: Array<{ key: string; name: string }> = [];
             let customPromptValuesFromCore: Record<string, string> = {};
             const corePersonaDefinitionValue = res?.corePersonaDefinition || res?.personalityDefinition || '';
+            const promptWorkStandard = extractWorkStandardFromCorePersonaDefinition(corePersonaDefinitionValue);
+            const effectiveWorkStandard = promptWorkStandard || res?.workStandard || res?.roleAttributes || '';
             try {
               const corePersonaData = JSON.parse(corePersonaDefinitionValue);
               const systemFields = [
@@ -623,13 +685,12 @@ const EmployeeDetail = ({ loading }) => {
             }
 
             const roleJson = JSON.stringify({
-              roleAttributes: res?.roleAttributes || res?.workStandard || '',
               processingFlow: res?.processingFlow || '',
               personalityDimensions: res?.personalityDimensions || '',
               wordPreferences: res?.wordPreferences || '',
               sentenceAndTone: res?.sentenceAndTone || '',
               bundledSkills: parseBundledSkills(res?.skills || res?.bundledSkills || prologueRoleJson?.bundledSkills),
-              workStandard: res?.workStandard || res?.roleAttributes || '',
+              workStandard: effectiveWorkStandard,
               corePersonaDefinition:
                 res?.corePersonaDefinition || res?.personalityDefinition || DEFAULT_PERSONALITY_DEFINITION,
               personalityDefinition:
@@ -707,13 +768,12 @@ const EmployeeDetail = ({ loading }) => {
               abilityBoundary: res?.constraints || '',
               exampleQuestions: res?.faqs || '',
               // 为工作规范五项提供初始值以回显
-              roleAttributes: res?.roleAttributes || res?.workStandard || '',
               processingFlow: res?.processingFlow || '',
               personalityDimensions: res?.personalityDimensions || '',
               wordPreferences: res?.wordPreferences || '',
               sentenceAndTone: res?.sentenceAndTone || '',
               bundledSkills: parseBundledSkills(res?.skills || res?.bundledSkills || prologueRoleJson?.bundledSkills),
-              workStandard: res?.workStandard || res?.roleAttributes || '',
+              workStandard: effectiveWorkStandard,
               corePersonaDefinition:
                 res?.corePersonaDefinition || res?.personalityDefinition || DEFAULT_PERSONALITY_DEFINITION,
               toolStandard: res?.toolStandard || '',
@@ -1031,7 +1091,7 @@ const EmployeeDetail = ({ loading }) => {
           ownerType: formOwnerType,
           advancedSettings = [],
         } = res;
-        const queryData = resultDataRef.current || {};
+        const queryData = omit(resultDataRef.current || {}, ['roleAttributes', 'relPrompt', 'workStandard']);
         const param = {};
 
         set(queryData, 'avatar', avatar);
@@ -1139,14 +1199,12 @@ const EmployeeDetail = ({ loading }) => {
           ability: abilityDescJson.ability || '',
           constraints: abilityDescJson.constraints || '',
           faqs: abilityDescJson.faqs || '',
-          roleAttributes: roleJson.roleAttributes || roleJson.workStandard || '',
           processingFlow: roleJson.processingFlow || '',
           personalityDimensions: roleJson.personalityDimensions || '',
           wordPreferences: roleJson.wordPreferences || '',
           sentenceAndTone: roleJson.sentenceAndTone || '',
           skills: bundledSkills,
           relSkills: bundledSkills,
-          workStandard: roleJson.workStandard || roleJson.roleAttributes || '',
           corePersonaDefinition: roleJson.corePersonaDefinition || roleJson.personalityDefinition || '',
           toolStandard: roleJson.toolStandard || '',
           memoryStandard: roleJson.memoryStandard || '',
@@ -1183,6 +1241,23 @@ const EmployeeDetail = ({ loading }) => {
             })()
           ),
         };
+        const overLengthField = getOverLengthDigitalEmployeeField(flattened);
+        if (overLengthField) {
+          const fieldName = intl.formatMessage({ id: overLengthField.labelId }).replace(/[:：]\s*$/, '');
+          message.error(
+            intl.formatMessage(
+              { id: 'employeeDetail.fieldMaxLength' },
+              {
+                field: fieldName,
+                max: overLengthField.maxLength,
+                current: overLengthField.length,
+              }
+            )
+          );
+          setSubmitLoading(false);
+          setAuditLoading(false);
+          return;
+        }
 
         dispatch({
           type: currentResourceId ? 'employeeMgr/updateResource' : 'employeeMgr/createDigitalEmployee',

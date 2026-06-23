@@ -221,3 +221,54 @@ CREATE INDEX IF NOT EXISTS idx_po_user_private_param_status
 CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_key
     ON byai.po_user_private_param (user_id, param_key)
     WHERE delete_flag = '0';
+
+-- 沙箱健康检测-水位模型配置表
+CREATE TABLE IF NOT EXISTS byai.sandbox_health_watermark_model (
+    id BIGSERIAL PRIMARY KEY,
+    model_name VARCHAR(128) NOT NULL,
+    service_type VARCHAR(64) NOT NULL,
+    profile_key VARCHAR(64),
+    enabled INTEGER NOT NULL DEFAULT 1,
+    priority INTEGER NOT NULL DEFAULT 0,
+    idle_memory_limit_ratio NUMERIC(8,4) NOT NULL,
+    busy_memory_limit_ratio NUMERIC(8,4) NOT NULL,
+    critical_memory_limit_ratio NUMERIC(8,4) NOT NULL,
+    busy_cpu_request_ratio NUMERIC(8,4) NOT NULL,
+    critical_cpu_request_ratio NUMERIC(8,4) NOT NULL,
+    consecutive_busy_samples INTEGER NOT NULL DEFAULT 2,
+    recover_samples INTEGER NOT NULL DEFAULT 2,
+    sample_interval_seconds INTEGER NOT NULL DEFAULT 30,
+    snapshot_ttl_seconds INTEGER NOT NULL DEFAULT 120,
+    watch_ttl_seconds INTEGER NOT NULL DEFAULT 90,
+    remark VARCHAR(512),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE byai.sandbox_health_watermark_model IS '沙箱健康检测-水位模型配置表';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.id IS '主键ID';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.model_name IS '水位模型名称';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.service_type IS '沙箱服务类型，例如openclaw；default表示兜底模型';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.profile_key IS '沙箱规格Key，例如xs/s/m/l；为空表示服务类型默认模型';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.enabled IS '是否启用，1启用，0停用';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.priority IS '匹配优先级，同一匹配范围内数值越大优先级越高';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.idle_memory_limit_ratio IS '空闲内存limit水位阈值';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.busy_memory_limit_ratio IS '繁忙内存limit水位阈值';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.critical_memory_limit_ratio IS '阻断内存limit水位阈值';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.busy_cpu_request_ratio IS '繁忙CPU request水位阈值';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.critical_cpu_request_ratio IS '阻断CPU request水位阈值';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.consecutive_busy_samples IS '连续繁忙采样次数';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.recover_samples IS '连续恢复采样次数';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.sample_interval_seconds IS '采样周期，单位秒';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.snapshot_ttl_seconds IS '健康快照Redis TTL，单位秒';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.watch_ttl_seconds IS '健康检测watch Redis TTL，单位秒';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.remark IS '备注';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.created_at IS '创建时间';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.updated_at IS '更新时间';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sandbox_health_watermark_enabled
+    ON byai.sandbox_health_watermark_model (service_type, COALESCE(profile_key, ''))
+    WHERE enabled = 1;
+
+CREATE INDEX IF NOT EXISTS idx_sandbox_health_watermark_scope
+    ON byai.sandbox_health_watermark_model (service_type, profile_key, enabled, priority DESC);

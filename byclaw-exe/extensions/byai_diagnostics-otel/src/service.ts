@@ -66,8 +66,8 @@ const DROPPED_OTEL_ATTRIBUTE_KEYS = new Set([
   "openclaw.trace_id",
 ]);
 const LOW_CARDINALITY_VALUE_RE = /^[A-Za-z0-9_.:-]{1,120}$/u;
-const MAX_OTEL_CONTENT_ATTRIBUTE_CHARS = 128 * 1024;
-const MAX_OTEL_CONTENT_ARRAY_ITEMS = 200;
+const MAX_OTEL_CONTENT_ATTRIBUTE_CHARS = 16 * 1024;
+const MAX_OTEL_CONTENT_ARRAY_ITEMS = 50;
 const MAX_OTEL_LOG_BODY_CHARS = 4 * 1024;
 const MAX_OTEL_LOG_ATTRIBUTE_COUNT = 64;
 const MAX_OTEL_LOG_ATTRIBUTE_VALUE_CHARS = 4 * 1024;
@@ -631,6 +631,9 @@ function assignLangfuseGenAiUsageAttrs(
       : undefined;
   assignPositiveNumberAttr(attrs, "gen_ai.usage.input_tokens", genAiInputTokens);
   assignPositiveNumberAttr(attrs, "gen_ai.usage.output_tokens", usage.output);
+  assignPositiveNumberAttr(attrs, "gen_ai.usage.prompt_tokens", genAiInputTokens);
+  assignPositiveNumberAttr(attrs, "gen_ai.usage.completion_tokens", usage.output);
+  assignPositiveNumberAttr(attrs, "gen_ai.usage.total_tokens", usage.total);
   assignPositiveNumberAttr(
     attrs,
     "gen_ai.usage.cache_read.input_tokens",
@@ -644,6 +647,54 @@ function assignLangfuseGenAiUsageAttrs(
   if (usage.costUsd !== undefined && usage.costUsd > 0) {
     attrs["gen_ai.usage.cost"] = usage.costUsd;
   }
+  const usageDetails: Record<string, number> = {};
+  assignPositiveNumberAttr(usageDetails, "input", genAiInputTokens);
+  assignPositiveNumberAttr(usageDetails, "output", usage.output);
+  assignPositiveNumberAttr(usageDetails, "total", usage.total);
+  assignPositiveNumberAttr(usageDetails, "cache_read", usage.cacheRead);
+  assignPositiveNumberAttr(usageDetails, "cache_write", usage.cacheWrite);
+  if (Object.keys(usageDetails).length > 0) {
+    attrs["langfuse.observation.usage_details"] = JSON.stringify(usageDetails);
+  }
+}
+
+function assignByaiTokenUsageAttrs(
+  attrs: Record<string, string | number | boolean>,
+  usage: ModelCallUsageSnapshot | undefined,
+): void {
+  if (!usage) {
+    return;
+  }
+  assignPositiveNumberAttr(attrs, "byai.tokens.input", usage.input);
+  assignPositiveNumberAttr(attrs, "byai.tokens.output", usage.output);
+  assignPositiveNumberAttr(attrs, "byai.tokens.cache_read", usage.cacheRead);
+  assignPositiveNumberAttr(attrs, "byai.tokens.cache_write", usage.cacheWrite);
+  assignPositiveNumberAttr(attrs, "byai.tokens.total", usage.total);
+  assignPositiveNumberAttr(
+    attrs,
+    "langfuse.observation.metadata.byai_tokens_input",
+    usage.input,
+  );
+  assignPositiveNumberAttr(
+    attrs,
+    "langfuse.observation.metadata.byai_tokens_output",
+    usage.output,
+  );
+  assignPositiveNumberAttr(
+    attrs,
+    "langfuse.observation.metadata.byai_tokens_cache_read",
+    usage.cacheRead,
+  );
+  assignPositiveNumberAttr(
+    attrs,
+    "langfuse.observation.metadata.byai_tokens_cache_write",
+    usage.cacheWrite,
+  );
+  assignPositiveNumberAttr(
+    attrs,
+    "langfuse.observation.metadata.byai_tokens_total",
+    usage.total,
+  );
 }
 
 function assignModelCallSizeTimingAttrs(
@@ -661,6 +712,26 @@ function assignModelCallSizeTimingAttrs(
     "openclaw.model_call.time_to_first_byte_ms",
     evt.timeToFirstByteMs,
   );
+  assignPositiveNumberAttr(
+    attrs,
+    "langfuse.observation.metadata.openclaw_time_to_first_byte_ms",
+    evt.timeToFirstByteMs,
+  );
+}
+
+function assignLangfuseCompletionStartTimeAttr(
+  attrs: Record<string, string | number | boolean>,
+  evt: { durationMs?: number; timeToFirstByteMs?: number; ts: number },
+): void {
+  const timeToFirstByteMs = positiveFiniteNumber(evt.timeToFirstByteMs);
+  if (timeToFirstByteMs === undefined) {
+    return;
+  }
+  const durationMs = positiveFiniteNumber(evt.durationMs) ?? 0;
+  const startedAtMs = Math.max(0, evt.ts - durationMs);
+  attrs["langfuse.observation.completion_start_time"] = new Date(
+    startedAtMs + timeToFirstByteMs,
+  ).toISOString();
 }
 
 function assignGenAiSpanIdentityAttrs(
@@ -1389,6 +1460,10 @@ function readDiagnosticExtraString(evt: DiagnosticEventPayload, key: string): st
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function readDiagnosticExtraNumber(evt: DiagnosticEventPayload, key: string): number | undefined {
+  return nonNegativeFiniteNumber((evt as unknown as Record<string, unknown>)[key]);
+}
+
 function isByaiSdkDiagnosticEvent(evt: { channel?: string; source?: string }): boolean {
   return evt.channel === BYAI_CHANNEL_ID || evt.source === BYAI_SDK_DIAGNOSTIC_SOURCE;
 }
@@ -2093,6 +2168,19 @@ export function createDiagnosticsOtelService(
       };
       const byaiTraceIdForEvent = (evt: DiagnosticEventPayload) =>
         readDiagnosticExtraString(evt, "byai.traceId") ?? normalizeTraceContext(evt.trace)?.traceId;
+      const findByaiMessageProcessedSpan = (evt: DiagnosticEventPayload) => {
+        const sessionKey = readOtelSessionValue(
+          (evt as { sessionKey?: string | undefined }).sessionKey,
+        );
+        const bySession = sessionKey
+          ? activeByaiMessageProcessedSpansBySessionKey.get(sessionKey)
+          : undefined;
+        const byaiTraceId = byaiTraceIdForEvent(evt);
+        const byTrace = byaiTraceId
+          ? activeByaiMessageProcessedSpansByTraceId.get(byaiTraceId)
+          : undefined;
+        return bySession ?? byTrace;
+      };
       const trackByaiMessageProcessedSpan = (
         evt: DiagnosticEventPayload,
         span: ReturnType<typeof tracer.startSpan>,
@@ -2372,6 +2460,9 @@ export function createDiagnosticsOtelService(
         assignGenAiSpanIdentityAttrs(spanAttrs, evt);
         assignPositiveNumberAttr(spanAttrs, "gen_ai.usage.input_tokens", genAiInputTokens);
         assignPositiveNumberAttr(spanAttrs, "gen_ai.usage.output_tokens", usage.output);
+        assignPositiveNumberAttr(spanAttrs, "gen_ai.usage.prompt_tokens", genAiInputTokens);
+        assignPositiveNumberAttr(spanAttrs, "gen_ai.usage.completion_tokens", usage.output);
+        assignPositiveNumberAttr(spanAttrs, "gen_ai.usage.total_tokens", usage.total);
         assignPositiveNumberAttr(
           spanAttrs,
           "gen_ai.usage.cache_read.input_tokens",
@@ -2384,6 +2475,28 @@ export function createDiagnosticsOtelService(
         );
         if (typeof evt.costUsd === "number" && Number.isFinite(evt.costUsd) && evt.costUsd > 0) {
           spanAttrs["gen_ai.usage.cost"] = evt.costUsd;
+        }
+        assignLangfuseGenAiUsageAttrs(spanAttrs, {
+          input: genAiInputTokens,
+          output: usage.output,
+          total: usage.total,
+          costUsd: evt.costUsd,
+        });
+        const byaiUsageSpan = findByaiMessageProcessedSpan(evt);
+        if (byaiUsageSpan) {
+          const byaiUsageAttrs: Record<string, string | number | boolean> = {};
+          const byaiTotalTokens =
+            genAiInputTokens !== undefined || usage.output !== undefined
+              ? genAiInputTokens + (usage.output ?? 0)
+              : usage.total;
+          assignByaiTokenUsageAttrs(byaiUsageAttrs, {
+            input: genAiInputTokens,
+            output: usage.output,
+            cacheRead: usage.cacheRead,
+            cacheWrite: usage.cacheWrite,
+            total: byaiTotalTokens,
+          });
+          setSpanAttrs(byaiUsageSpan, byaiUsageAttrs);
         }
 
         const span = spanWithDuration("openclaw.model.usage", spanAttrs, evt.durationMs, {
@@ -2827,6 +2940,48 @@ export function createDiagnosticsOtelService(
 
       const recordRunAttempt = (evt: Extract<DiagnosticEventPayload, { type: "run.attempt" }>) => {
         runAttemptCounter.add(1, { "openclaw.attempt": evt.attempt });
+      };
+
+      const recordRunProgress = (
+        evt: Extract<DiagnosticEventPayload, { type: "run.progress" }>,
+      ) => {
+        if (
+          evt.reason !== "byai.first_visible_response" &&
+          evt.reason !== "byai.first_answer_delta"
+        ) {
+          return;
+        }
+        const span = findByaiMessageProcessedSpan(evt);
+        if (!span) {
+          return;
+        }
+        const firstResponseMs = readDiagnosticExtraNumber(evt, "byai.firstResponseMs");
+        if (firstResponseMs === undefined) {
+          return;
+        }
+        const eventType = readDiagnosticExtraString(evt, "byai.firstResponseEventType");
+        const attrs: Record<string, string | number | boolean> = {};
+        if (evt.reason === "byai.first_visible_response") {
+          attrs["byai.first_visible_response_ms"] = firstResponseMs;
+          attrs["langfuse.observation.metadata.byai_first_visible_response_ms"] =
+            firstResponseMs;
+          if (eventType) {
+            const normalizedEventType = lowCardinalityAttr(eventType);
+            attrs["byai.first_visible_response_event_type"] = normalizedEventType;
+            attrs["langfuse.observation.metadata.byai_first_visible_response_event_type"] =
+              normalizedEventType;
+          }
+        } else {
+          attrs["byai.first_answer_delta_ms"] = firstResponseMs;
+          attrs["langfuse.observation.metadata.byai_first_answer_delta_ms"] = firstResponseMs;
+          if (eventType) {
+            const normalizedEventType = lowCardinalityAttr(eventType);
+            attrs["byai.first_answer_delta_event_type"] = normalizedEventType;
+            attrs["langfuse.observation.metadata.byai_first_answer_delta_event_type"] =
+              normalizedEventType;
+          }
+        }
+        setSpanAttrs(span, attrs);
       };
 
       const toolLoopAttrs = (
@@ -3306,6 +3461,7 @@ export function createDiagnosticsOtelService(
           spanAttrs["openclaw.transport"] = evt.transport;
         }
         assignModelCallSizeTimingAttrs(spanAttrs, evt);
+        assignLangfuseCompletionStartTimeAttr(spanAttrs, evt);
         assignOtelModelContentAttributes(spanAttrs, modelContent, contentCapturePolicy);
         assignLangfuseGenAiUsageAttrs(spanAttrs, readAssistantUsageFromModelCallContent(modelContent));
         const span =
@@ -3360,6 +3516,7 @@ export function createDiagnosticsOtelService(
           spanAttrs["openclaw.transport"] = evt.transport;
         }
         assignModelCallSizeTimingAttrs(spanAttrs, evt);
+        assignLangfuseCompletionStartTimeAttr(spanAttrs, evt);
         assignOtelModelContentAttributes(spanAttrs, modelContent, contentCapturePolicy);
         assignLangfuseGenAiUsageAttrs(spanAttrs, readAssistantUsageFromModelCallContent(modelContent));
         const span =
@@ -3753,6 +3910,9 @@ export function createDiagnosticsOtelService(
         ctx.logger.error(`${serviceId}: internal diagnostics capability unavailable`);
         return;
       }
+      ctx.logger.info(
+        `${serviceId}: internal diagnostics subscribed (traces=${tracesEnabled}, metrics=${metricsEnabled}, logs=${logsEnabled}, sdkPreloaded=${sdkPreloaded}, endpoint=${endpoint ? "configured" : "default"})`,
+      );
 
       unsubscribe = subscribe((evt, metadata, privateData) => {
         try {
@@ -3824,6 +3984,7 @@ export function createDiagnosticsOtelService(
               recordRunAttempt(evt);
               return;
             case "run.progress":
+              recordRunProgress(evt);
               return;
             case "diagnostic.heartbeat":
               recordHeartbeat(evt);

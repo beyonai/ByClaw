@@ -101,18 +101,24 @@ function getRawBlob(res: any) {
   return res?.file instanceof Blob ? res.file : res instanceof Blob ? res : new Blob([res?.file || res]);
 }
 
-function toFileTreeData(list: FileBrowserItem[], childrenByPath: Record<string, FileBrowserItem[]>): FileTreeItem[] {
+function toFileTreeData(
+  list: FileBrowserItem[],
+  childrenByPath: Record<string, FileBrowserItem[]>,
+  expandedDirectoryKeySet: Set<string>
+): FileTreeItem[] {
   return sortFileBrowserItems(list).map((item) => {
     const dir = isDirectory(item);
     const directoryPath = ensureDirectoryPath(item.path);
+    const expanded = dir && expandedDirectoryKeySet.has(directoryPath);
     return {
       ...item,
       key: dir ? directoryPath : item.path,
       title: <span>{item.name}</span>,
       isLeaf: !dir,
+      className: expanded ? styles.treeNodeExpanded : undefined,
       children:
         dir && childrenByPath[directoryPath]
-          ? toFileTreeData(childrenByPath[directoryPath], childrenByPath)
+          ? toFileTreeData(childrenByPath[directoryPath], childrenByPath, expandedDirectoryKeySet)
           : undefined,
     };
   });
@@ -152,6 +158,7 @@ interface FileTreeItem extends FileBrowserItem {
   key: string;
   title: React.ReactNode;
   isLeaf: boolean;
+  className?: string;
   children?: FileTreeItem[];
 }
 
@@ -578,6 +585,71 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     [activeSessionId, intl, isSearching, items, resourceId, updateCategoryCache]
   );
 
+  const refreshExpandedDirectories = useCallback(
+    async (payload?: { sessionId?: string }) => {
+      const payloadSessionId = getMessagePayloadSessionId(payload);
+      if (payloadSessionId) {
+        setMessageSessionId(payloadSessionId);
+      }
+
+      const categoryKey = activeCategoryKeyRef.current;
+      if (!categoryKey) return;
+
+      const categoryRootPath = getCategoryRootPath(categoryKey);
+      const normalizedCurrentPath = ensureDirectoryPath(normalizeFileBrowserPath(currentPathRef.current));
+      const requestPath =
+        categoryKey !== 'root' && !isPathIn(normalizedCurrentPath, categoryRootPath)
+          ? categoryRootPath
+          : normalizedCurrentPath;
+      const expandedDirectoryPaths = Array.from(
+        new Set(
+          expandedTreeKeys
+            .map((key) => ensureDirectoryPath(normalizeFileBrowserPath(String(key))))
+            .filter((path) => path !== requestPath && (categoryKey === 'root' || isPathIn(path, categoryRootPath)))
+        )
+      );
+
+      setLoading(true);
+      try {
+        const [rootResponse, ...expandedResponses] = await Promise.all([
+          listFiles({ resourceId, path: requestPath }),
+          ...expandedDirectoryPaths.map((path) => listFiles({ resourceId, path })),
+        ]);
+        const nextItems = unwrapListResponse<FileBrowserItem>(rootResponse);
+        const refreshedChildrenByPath = expandedDirectoryPaths.reduce<Record<string, FileBrowserItem[]>>(
+          (acc, path, index) => {
+            acc[path] = unwrapListResponse<FileBrowserItem>(expandedResponses[index]);
+            return acc;
+          },
+          {}
+        );
+        const nextChildrenByPath = {
+          ...(categoryCacheRef.current[categoryKey]?.childrenByPath || {}),
+          ...refreshedChildrenByPath,
+        };
+
+        updateCategoryCache(categoryKey, {
+          path: requestPath,
+          items: nextItems,
+          childrenByPath: nextChildrenByPath,
+        });
+
+        if (
+          activeCategoryKeyRef.current === categoryKey &&
+          ensureDirectoryPath(normalizeFileBrowserPath(currentPathRef.current)) === requestPath
+        ) {
+          setItems(nextItems);
+          setChildrenByPath(nextChildrenByPath);
+        }
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [expandedTreeKeys, intl, resourceId, updateCategoryCache]
+  );
+
   useEffect(() => {
     activeCategoryKeyRef.current = activeCategoryKey;
   }, [activeCategoryKey]);
@@ -674,29 +746,15 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     [activeSessionId, expandCurrentSessionDirectory, fetchList, fileCategories, intl, resourceId]
   );
 
-  // 监听会话聊天产生的文件，当打开 session tab 时刷新文件列表
+  // 监听会话聊天产生的文件，刷新当前打开分类和已展开目录
   useEffect(() => {
-    const refreshCurrentSessionFiles = (payload?: { sessionId?: string }) => {
-      const payloadSessionId = getMessagePayloadSessionId(payload);
-      if (payloadSessionId) {
-        setMessageSessionId(payloadSessionId);
-      }
-      if (activeCategoryKey !== 'session') return;
-      delete categoryCacheRef.current.session;
-      currentPathRef.current = SESSION_FILE_PATH;
-      setCurrentPath(SESSION_FILE_PATH);
-      void fetchList(SESSION_FILE_PATH, { force: true, categoryKey: 'session' }).then(() =>
-        expandCurrentSessionDirectory(payloadSessionId || activeSessionId)
-      );
-    };
-
     const hasFiles = (payload?: { fileList?: any[]; imageList?: any[] }) => {
       return Boolean(payload?.fileList?.length || payload?.imageList?.length);
     };
 
     const handleSessionFileCreated = (payload: { fileList?: any[]; imageList?: any[]; sessionId?: string }) => {
       if (hasFiles(payload)) {
-        refreshCurrentSessionFiles(payload);
+        void refreshExpandedDirectories(payload);
       }
     };
 
@@ -705,7 +763,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     }) => {
       const message = payload?.message;
       if (hasFiles(message) || message?.status === SSEEventStatus.done) {
-        refreshCurrentSessionFiles(message);
+        void refreshExpandedDirectories(message);
       }
     };
 
@@ -715,15 +773,18 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       EventEmitter.off('beyond-create-message', handleSessionFileCreated);
       EventEmitter.off('beyond-update-message', handleSessionFileUpdated);
     };
-  }, [activeCategoryKey, activeSessionId, expandCurrentSessionDirectory, fetchList]);
+  }, [refreshExpandedDirectories]);
 
   const sortedItems = useMemo(() => {
     return sortFileBrowserItems(items);
   }, [items]);
 
   const fileTreeData = useMemo(() => {
-    return toFileTreeData(sortedItems, childrenByPath);
-  }, [childrenByPath, sortedItems]);
+    const expandedDirectoryKeySet = new Set(
+      expandedTreeKeys.map((key) => ensureDirectoryPath(normalizeFileBrowserPath(String(key))))
+    );
+    return toFileTreeData(sortedItems, childrenByPath, expandedDirectoryKeySet);
+  }, [childrenByPath, expandedTreeKeys, sortedItems]);
 
   const copyFolderPath = useMemo(() => {
     const rootPath = copyTargetType === 'session' ? SESSION_FILE_PATH : SHARED_FILE_PATH;
@@ -1763,10 +1824,16 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
               loadData={(node) => loadTreeNode(node as unknown as FileTreeItem)}
               icon={(node) => {
                 const item = node as unknown as FileTreeItem;
+                const directoryExpanded =
+                  isDirectory(item) &&
+                  expandedTreeKeys.includes(ensureDirectoryPath(normalizeFileBrowserPath(item.path)));
+                const iconType = directoryExpanded
+                  ? 'a-Folder-openwenjianjia-kai'
+                  : getIconType(item.name, isDirectory(item));
                 return (
                   <Tooltip title={item.name} placement="right">
                     <span>
-                      <AntdIcon type={`icon-${getIconType(item.name, isDirectory(item))}`} />
+                      <AntdIcon type={`icon-${iconType}`} />
                     </span>
                   </Tooltip>
                 );
@@ -1775,10 +1842,26 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
               onClick={handleTreeNodeClick as any}
               onDoubleClick={(_, node) => handleItemDoubleClick(node as unknown as FileTreeItem)}
               titleRender={(item) => {
-                const cursor = canPreviewFile(item as FileTreeItem) ? 'pointer' : 'default';
+                const treeItem = item as FileTreeItem;
+                const cursor = canPreviewFile(treeItem) ? 'pointer' : 'default';
+                const directoryExpanded =
+                  isDirectory(treeItem) &&
+                  expandedTreeKeys.includes(ensureDirectoryPath(normalizeFileBrowserPath(treeItem.path)));
+                const directoryCurrent =
+                  isDirectory(treeItem) &&
+                  ensureDirectoryPath(normalizeFileBrowserPath(treeItem.path)) ===
+                    ensureDirectoryPath(normalizeFileBrowserPath(currentPath));
 
                 return (
-                  <span className={styles.treeTitleContent}>
+                  <span
+                    className={[
+                      styles.treeTitleContent,
+                      directoryExpanded ? styles.treeTitleContentExpanded : '',
+                      directoryCurrent ? styles.treeTitleContentCurrent : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                  >
                     <Tooltip title={item.name} placement="right">
                       <span className={styles.treeTitleName} style={{ cursor }}>
                         <span className={styles.treeTitleText} style={{ cursor }}>

@@ -11,7 +11,7 @@ import {
   saveMediaBuffer,
 } from "openclaw/plugin-sdk/media-runtime";
 import { getByaiRuntime } from "./runtime.js";
-import { buildAgentSessionKey, resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
+import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import type { SdkInboundFile, SdkProcessorDeps } from "./types.js";
 import {
   bindActiveSdkRequestRunId,
@@ -40,69 +40,15 @@ import {
   emitByaiSdkMessageReceived,
   runWithByaiSdkDiagnosticTrace,
 } from "./diagnostics.js";
+import {
+  BYAI_CHANNEL_ID,
+  buildBroadcastSessionKey,
+  resolveByaiSessionKey,
+  resolveSdkTargetAgentId,
+} from "./session-key.js";
 
-const CHANNEL_ID = "byai-channel" as const;
-
-export function buildBroadcastSessionKey(
-  baseSessionKey: string,
-  originalAgentId: string,
-  targetAgentId: string,
-): string {
-  const prefix = `agent:${originalAgentId}:`;
-  if (baseSessionKey.startsWith(prefix)) {
-    return `agent:${targetAgentId}:${baseSessionKey.slice(prefix.length)}`;
-  }
-  return baseSessionKey;
-}
-
-function resolveSdkTargetAgentId(
-  routingAgentId: string,
-  extraPayload: {
-    agent_id?: string;
-    agent_code?: string;
-  },
-): string {
-  if (extraPayload.agent_id) {
-    return `baiying-agent-${extraPayload.agent_id}`;
-  }
-  if (extraPayload.agent_code) {
-    return extraPayload.agent_code;
-  }
-  return routingAgentId;
-}
-
-function resolveSdkSessionKey(params: {
-  routing: {
-    sessionKey: string;
-    agentId: string;
-    channel: string;
-    accountId: string;
-  };
-  targetAgentId: string;
-  sessionId: string;
-  userId: string;
-  perSessionId: boolean;
-}): string {
-  if (!params.perSessionId) {
-    if (params.targetAgentId === params.routing.agentId) {
-      return params.routing.sessionKey;
-    }
-    return buildBroadcastSessionKey(
-      params.routing.sessionKey,
-      params.routing.agentId,
-      params.targetAgentId,
-    );
-  }
-
-  const peerId = params.sessionId.trim() || params.userId;
-  return buildAgentSessionKey({
-    agentId: params.targetAgentId,
-    channel: params.routing.channel,
-    accountId: params.routing.accountId,
-    peer: { kind: "direct", id: peerId },
-    dmScope: "per-peer",
-  });
-}
+const CHANNEL_ID = BYAI_CHANNEL_ID;
+export { buildBroadcastSessionKey };
 
 async function resolveSdkInboundMediaPayload(params: {
   cfg: import("openclaw/plugin-sdk").OpenClawConfig;
@@ -236,7 +182,7 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
   };
 
   const targetAgentId = resolveSdkTargetAgentId(routing.agentId, extraPayload);
-  const sessionKey = resolveSdkSessionKey({
+  const sessionKey = resolveByaiSessionKey({
     routing,
     targetAgentId,
     sessionId: message.sessionId,
@@ -328,7 +274,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
 
   const { accountId } = account;
   const To = `${sessionAgentId}:${message.sessionId}`;
-  emitByaiSdkMessageReceived(diagnosticRef, diagnosticTrace);
+  const receivedAt = emitByaiSdkMessageReceived(diagnosticRef, diagnosticTrace);
 
   const activeRequest = registerActiveSdkRequest({
     accountId,
@@ -336,6 +282,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     to: To,
     sessionId: message.sessionId,
     traceId: message.traceId,
+    createdAt: receivedAt,
     language: message.language,
     languageProvided: message.languageProvided,
     channelExtension: message.channelExtension,

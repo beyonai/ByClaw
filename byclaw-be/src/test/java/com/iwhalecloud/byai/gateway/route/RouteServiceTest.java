@@ -16,7 +16,7 @@ import com.iwhalecloud.byai.state.domain.chat.service.ChatStreamRuntimeCoordinat
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.GatewayStreamEventProcessor;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
-import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentTypeResolver;
+import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
 import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -50,7 +50,7 @@ class RouteServiceTest {
     private SandboxService sandboxService;
     private SequenceService sequenceService;
     private JwtService jwtService;
-    private TargetAgentTypeResolver targetAgentTypeResolver;
+    private TargetAgentResolver targetAgentResolver;
     private RouteService routeService;
     private StaticMessageSource messageSource;
 
@@ -63,7 +63,7 @@ class RouteServiceTest {
         sandboxService = mock(SandboxService.class);
         sequenceService = mock(SequenceService.class);
         jwtService = mock(JwtService.class);
-        targetAgentTypeResolver = new TargetAgentTypeResolver();
+        targetAgentResolver = new TargetAgentResolver();
         messageSource = new StaticMessageSource();
         messageSource.addMessage("sandbox.launch.progress.start", Locale.SIMPLIFIED_CHINESE, "个人助理正在启动中，请等待");
         messageSource.addMessage("sandbox.launch.progress.waiting", Locale.SIMPLIFIED_CHINESE, "个人助理仍在启动中，请稍等");
@@ -87,7 +87,7 @@ class RouteServiceTest {
         ReflectionTestUtils.setField(routeService, "sandboxService", sandboxService);
         ReflectionTestUtils.setField(routeService, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(routeService, "jwtService", jwtService);
-        ReflectionTestUtils.setField(routeService, "targetAgentTypeResolver", targetAgentTypeResolver);
+        ReflectionTestUtils.setField(routeService, "targetAgentResolver", targetAgentResolver);
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
         LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
 

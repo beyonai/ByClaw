@@ -269,6 +269,73 @@ class SandboxResizeServiceTest {
     }
 
     @Test
+    void handleResizeRequest_reusesRecentSuccessfulIdempotencyHit() {
+        SandboxFixture fixture = newFixture();
+        SsSandboxRecord record = runningRecord("xs");
+        when(fixture.sandboxRecordMapper.selectLatestBySandboxId("user001", "openclaw", "sandbox-1"))
+            .thenReturn(record);
+        when(fixture.profileEntityMapper.selectEnabledProfiles("openclaw")).thenReturn(profiles("xs", "s"));
+        SsSandboxResizeRecord existing = new SsSandboxResizeRecord();
+        existing.setId(99L);
+        existing.setStatus("SUCCESS");
+        existing.setFinishedAt(new Date());
+        when(fixture.resizeRecordMapper.selectLatestByIdempotencyKey(any())).thenReturn(existing);
+
+        SsSandboxResizeRecord result = fixture.service.handleResizeRequest(Map.of(
+            "userCode", "user001",
+            "sandboxType", "openclaw",
+            "sandboxId", "sandbox-1",
+            "reasonCode", "metrics.memory.high",
+            "triggerSource", "PROMETHEUS_ALERT"
+        ));
+
+        assertThat(result.getId()).isEqualTo(99L);
+        verify(fixture.sandboxRecordMapper, never()).claimResize(any(), any(), any(), any(), any(), any(), any(),
+            any(), any(), any(), any(), any());
+        verify(fixture.resizeRecordMapper, never()).insert(any());
+        verify(fixture.openSandboxClient, never()).resizeSandbox(any(), any());
+    }
+
+    @Test
+    void handleResizeRequest_doesNotReuseStaleSuccessfulIdempotencyHit() {
+        SandboxFixture fixture = newFixture();
+        SsSandboxRecord record = runningRecord("xs");
+        when(fixture.sandboxRecordMapper.selectLatestBySandboxId("user001", "openclaw", "sandbox-1"))
+            .thenReturn(record);
+        when(fixture.profileEntityMapper.selectEnabledProfiles("openclaw")).thenReturn(profiles("xs", "s"));
+        when(fixture.specRepository.findByServiceKeyAndProfile("openclaw", "s"))
+            .thenReturn(Optional.of(spec("s")));
+        SsSandboxResizeRecord existing = new SsSandboxResizeRecord();
+        existing.setId(99L);
+        existing.setStatus("SUCCESS");
+        existing.setFinishedAt(new Date(System.currentTimeMillis() - Duration.ofMinutes(10).toMillis()));
+        when(fixture.resizeRecordMapper.selectLatestByIdempotencyKey(any())).thenReturn(existing);
+        when(fixture.sandboxRecordMapper.claimResize(eq(1L), eq("xs"), eq("s"), eq("PROCESSING"),
+            any(Date.class), any(), isNull(), eq("xs"), eq("s"), isNull(), any(Date.class), eq(3)))
+            .thenReturn(1);
+        ResizeSandboxResponse response = new ResizeSandboxResponse();
+        response.setSandboxId("sandbox-2");
+        when(fixture.openSandboxClient.resizeSandbox(eq("sandbox-1"), any())).thenReturn(response);
+        when(fixture.sandboxRecordMapper.updateResizeSuccess(eq(1L), eq("sandbox-2"), isNull(), isNull(), eq("s"),
+            any(), any(), eq("SUCCESS"), any(Date.class), any(), any(), eq(1), eq("xs"), eq("s"), isNull(), eq(3)))
+            .thenReturn(1);
+
+        SsSandboxResizeRecord result = fixture.service.handleResizeRequest(Map.of(
+            "userCode", "user001",
+            "sandboxType", "openclaw",
+            "sandboxId", "sandbox-1",
+            "reasonCode", "metrics.memory.high",
+            "triggerSource", "PROMETHEUS_ALERT"
+        ));
+
+        assertThat(result.getStatus()).isEqualTo("SUCCESS");
+        verify(fixture.sandboxRecordMapper).claimResize(eq(1L), eq("xs"), eq("s"), eq("PROCESSING"),
+            any(Date.class), any(), isNull(), eq("xs"), eq("s"), isNull(), any(Date.class), eq(3));
+        verify(fixture.resizeRecordMapper).insert(any());
+        verify(fixture.openSandboxClient).resizeSandbox(eq("sandbox-1"), any());
+    }
+
+    @Test
     void handlePrometheusAlert_recordsOpsIncidentWithoutRestartOrResize() {
         SandboxFixture fixture = newFixture();
         SsSandboxRecord record = runningRecord("s");
@@ -308,6 +375,7 @@ class SandboxResizeServiceTest {
         existing.setId(99L);
         existing.setStatus("RECORDED_OPS_INCIDENT");
         existing.setResizeType("OPS_INCIDENT");
+        existing.setFinishedAt(new Date());
         when(fixture.resizeRecordMapper.selectLatestByIdempotencyKey(any())).thenReturn(existing);
 
         SsSandboxResizeRecord result = fixture.service.handlePrometheusAlert(prometheusPayload(Map.of(
@@ -407,8 +475,9 @@ class SandboxResizeServiceTest {
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
         SsSandboxResizeRecordMapper resizeRecordMapper = mock(SsSandboxResizeRecordMapper.class);
         SandboxService sandboxService = mock(SandboxService.class);
+        SandboxHealthCacheService sandboxHealthCacheService = mock(SandboxHealthCacheService.class);
         SandboxResizeService service = new SandboxResizeService(properties, openSandboxClient, specRepository,
-            profileEntityMapper, sandboxRecordMapper, resizeRecordMapper, sandboxService);
+            profileEntityMapper, sandboxRecordMapper, resizeRecordMapper, sandboxService, sandboxHealthCacheService);
         return new SandboxFixture(service, properties, openSandboxClient, specRepository, profileEntityMapper,
             sandboxRecordMapper, resizeRecordMapper, sandboxService);
     }

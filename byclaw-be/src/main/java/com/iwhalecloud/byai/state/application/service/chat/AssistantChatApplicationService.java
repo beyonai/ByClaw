@@ -13,7 +13,9 @@ import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.util.DateUtils;
+import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxEndpointService;
 import com.iwhalecloud.byai.manager.domain.customer.service.FilesService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -24,9 +26,11 @@ import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
+import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.resource.DigEmployeeExtQo;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.common.dto.MessageStructDto;
+import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.chat.dto.FileUploadDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.PrologueDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
@@ -41,14 +45,21 @@ import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.template.enums.DebugModeEnum;
-import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentTypeResolver;
+import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
+
+import java.io.IOException;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author he.duming
@@ -77,7 +88,7 @@ public class AssistantChatApplicationService {
     private ConversationFileStorage conversationFileStorage;
 
     @Autowired
-    private TargetAgentTypeResolver targetAgentTypeResolver;
+    private TargetAgentResolver targetAgentResolver;
 
     @Autowired
     private ByaiSystemConfigService byaiSystemConfigService;
@@ -97,8 +108,51 @@ public class AssistantChatApplicationService {
     @Autowired
     private OutputStreamManager outputStreamManager;
 
+    @Autowired
+    private SandboxEndpointService sandboxEndpointService;
+
     AssistantChatApplicationService(GatewayClient<?> gatewayClient) {
         this.gatewayClient = gatewayClient;
+    }
+
+    public ResponseUtil<Object> getSessionStatus(String sessionId, Long agentId) throws IOException {
+        if (StringUtils.isBlank(sessionId)) {
+            throw new BdpRuntimeException(I18nUtil.get("assistant.chat.session.id.not.empty"));
+        }
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        Map<String, String> searchQuery = new LinkedHashMap<>();
+        searchQuery.put("sessionId", sessionId);
+        Long resolvedAgentId = targetAgentResolver.resolveAgentId(agentId);
+        if (resolvedAgentId != null) {
+            searchQuery.put("agentId", resolvedAgentId.toString());
+        }
+        Request.Builder requestBuilder = sandboxEndpointService.newAuthorizedRequestBuilder(userCode, null,
+            "/plugins/byai-channel/session-status", searchQuery);
+        if (requestBuilder == null) {
+            return ResponseUtil.fail("No running sandbox found");
+        }
+        requestBuilder.get();
+        try (Response response = OkHttpUtil.getHttpClient().newCall(requestBuilder.build()).execute()) {
+            ResponseBody body = response.body();
+            String responseBody = body == null ? null : body.string();
+            Object responseData = parseJsonObjectOrString(responseBody);
+            if (!response.isSuccessful()) {
+                return ResponseUtil.fail(responseBody);
+            }
+            return ResponseUtil.successResponse(responseData);
+        }
+    }
+
+    private Object parseJsonObjectOrString(String responseBody) {
+        if (StringUtils.isBlank(responseBody)) {
+            return responseBody;
+        }
+        try {
+            return JSON.parseObject(responseBody);
+        }
+        catch (Exception e) {
+            return responseBody;
+        }
     }
 
     /**
@@ -116,7 +170,7 @@ public class AssistantChatApplicationService {
             workerAgentType = ssResource.getWorkerAgentType();
         }
 
-        String targetAgentType = targetAgentTypeResolver.resolve(workerAgentType, stopChatDto.getAgentId(), null,
+        String targetAgentType = targetAgentResolver.resolveAgentType(workerAgentType, stopChatDto.getAgentId(), null,
             CurrentUserHolder.getCurrentUserCode());
 
         gatewayClient.cancelTask(String.valueOf(stopChatDto.getMessageId()), String.valueOf(stopChatDto.getSessionId()),

@@ -4,6 +4,7 @@ import type { ByaiInboundMessage, Language } from "./types.js";
 import { isSessionDispatchBusy } from "./session-dispatch-gate.js";
 import { clearPendingMessageToolSends } from "./pending-message-tool.js";
 import { generateRandomId } from "./utils.js";
+import { emitByaiSdkFirstResponse } from "./diagnostics.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 const DEFAULT_ACCOUNT_KEY = "default";
@@ -68,6 +69,8 @@ export interface ActiveSdkRequest {
   sessionId: string;
   traceId: string;
   createdAt: number;
+  firstAnswerDeltaAt?: number;
+  firstVisibleResponseAt?: number;
   boundRunIds: Set<string>;
   pendingChildSessionKeys: Set<string>;
   pendingOutboundCount: number;
@@ -288,6 +291,7 @@ export async function emitSdkChunkTracked(sessionKey: string, params: {
         params.text,
         params.options || {},
     );
+    recordFirstSdkResponse(sessionKey, params);
     sdkEmitterLastChunks.set(sessionKey, {
         traceId: params.traceId || "",
         messageId: params.options?.messageId,
@@ -295,6 +299,63 @@ export async function emitSdkChunkTracked(sessionKey: string, params: {
         eventType: params.options?.eventType,
         contentType: params.options?.contentType,
     });
+}
+
+function hasVisibleSdkText(text: string): boolean {
+    return text.trim().length > 0;
+}
+
+function recordFirstSdkResponse(
+    sessionKey: string,
+    params: {
+        traceId?: string;
+        text: string;
+        options?: EmitOptions;
+    },
+): void {
+    if (!hasVisibleSdkText(params.text)) {
+        return;
+    }
+    const request = resolveActiveSdkRequestBySessionKey(sessionKey);
+    if (!request) {
+        return;
+    }
+    const now = Date.now();
+    if (request.firstVisibleResponseAt === undefined) {
+        request.firstVisibleResponseAt = now;
+        emitByaiSdkFirstResponse(
+            {
+                sessionId: request.sessionId,
+                sessionKey: request.sessionKey,
+                traceId: request.traceId,
+            },
+            {
+                createdAt: request.createdAt,
+                eventType: params.options?.eventType,
+                kind: "visible",
+                traceId: params.traceId ?? request.traceId,
+            },
+        );
+    }
+    if (
+        request.firstAnswerDeltaAt === undefined &&
+        params.options?.eventType === EventType.ANSWER_DELTA
+    ) {
+        request.firstAnswerDeltaAt = now;
+        emitByaiSdkFirstResponse(
+            {
+                sessionId: request.sessionId,
+                sessionKey: request.sessionKey,
+                traceId: request.traceId,
+            },
+            {
+                createdAt: request.createdAt,
+                eventType: params.options?.eventType,
+                kind: "answer_delta",
+                traceId: params.traceId ?? request.traceId,
+            },
+        );
+    }
 }
 
 export function upsertChannelRequestContextBySessionKey(params: {
@@ -339,6 +400,7 @@ export function registerActiveSdkRequest(params: {
     to: string;
     sessionId: string;
     traceId: string;
+    createdAt?: number;
     language: Language;
     languageProvided: boolean;
     channelExtension?: Record<string, unknown> | string;
@@ -371,7 +433,7 @@ export function registerActiveSdkRequest(params: {
         to: params.to,
         sessionId: params.sessionId,
         traceId: params.traceId,
-        createdAt: Date.now(),
+        createdAt: params.createdAt ?? Date.now(),
         boundRunIds: new Set<string>(),
         pendingChildSessionKeys: new Set<string>(),
         pendingOutboundCount: 0,

@@ -67,3 +67,31 @@ export async function saveServiceProfile(params: any) {
 export async function deleteServiceProfile(params: { id?: number; serviceType?: string; profileKey?: string }) {
   return POST('/byaiService/sandbox/deleteServiceProfile', { ...params }, withCustomHandle);
 }
+
+export async function getSandboxHealthGlobalSwitch() {
+  return POST('/byaiService/sandbox/health/config/getGlobalSwitch', {}, withCustomHandle);
+}
+
+export async function saveSandboxHealthGlobalSwitch(params: { enabled: boolean }) {
+  return POST('/byaiService/sandbox/health/config/saveGlobalSwitch', { ...params }, withCustomHandle);
+}
+
+export async function listSandboxHealthWatermarkModels(params: any) {
+  return POST('/byaiService/sandbox/health/watermark/list', { ...params }, withCustomHandle);
+}
+
+export async function saveSandboxHealthWatermarkModel(params: any) {
+  return POST('/byaiService/sandbox/health/watermark/save', { ...params }, withCustomHandle);
+}
+
+export async function deleteSandboxHealthWatermarkModel(params: { id: number }) {
+  return POST('/byaiService/sandbox/health/watermark/delete', { ...params }, withCustomHandle);
+}
+
+export async function enableSandboxHealthWatermarkModel(params: { id: number; enabled: boolean }) {
+  return POST('/byaiService/sandbox/health/watermark/enable', { ...params }, withCustomHandle);
+}
+
+export async function previewSandboxHealthWatermark(params: any) {
+  return POST('/byaiService/sandbox/health/watermark/preview', { ...params }, withCustomHandle);
+}

@@ -363,7 +363,9 @@ export default function useRender({
         return (
           <div className={styles.beyondLogo}>
             <EmployeesDrawer agentInfo={agentInfo as Partial<IAgentCache>}>
-              {getAgentChatAvatar(avatar || `${getPublicPath()}beyond/logo100.svg`)}
+              <div className={styles.avatarWrapper}>
+                {getAgentChatAvatar(avatar || `${getPublicPath()}beyond/logo100.svg`)}
+              </div>
             </EmployeesDrawer>
           </div>
         );

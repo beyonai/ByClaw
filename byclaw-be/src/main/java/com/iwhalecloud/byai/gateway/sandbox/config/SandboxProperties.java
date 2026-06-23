@@ -18,6 +18,8 @@ public class SandboxProperties {
 
     private TierAutoscaleConfig tierAutoscale = new TierAutoscaleConfig();
 
+    private HealthConfig health = new HealthConfig();
+
     /**
      * Redis metadata cache TTL. DB remains the lifecycle source of truth.
      */
@@ -130,6 +132,38 @@ public class SandboxProperties {
         private double downscaleMemoryHeadroom = 1.25D;
 
         private String boundaryBlacklistPodSuffix = "-0";
+    }
+
+    @Data
+    public static class HealthConfig {
+        /**
+         * Hard switch for sandbox health detection. Runtime/admin switch is stored in Redis.
+         */
+        private boolean enabled = false;
+
+        private long switchCacheTtlSeconds = 300L;
+
+        private long modelCacheTtlSeconds = 300L;
+
+        private int watchTtlSeconds = 90;
+
+        private double idleMemoryLimitRatio = 0.55D;
+
+        private double busyMemoryLimitRatio = 0.75D;
+
+        private double criticalMemoryLimitRatio = 0.88D;
+
+        private double busyCpuRequestRatio = 1.0D;
+
+        private double criticalCpuRequestRatio = 1.8D;
+
+        private int consecutiveBusySamples = 2;
+
+        private int recoverSamples = 2;
+
+        private int sampleIntervalSeconds = 30;
+
+        private int snapshotTtlSeconds = 120;
     }
 
     @Data

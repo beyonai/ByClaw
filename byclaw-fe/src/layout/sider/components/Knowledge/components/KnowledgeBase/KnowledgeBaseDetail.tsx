@@ -245,10 +245,15 @@ function onDragStart(info: Parameters<Required<TreeProps>['onDragStart']>[0]) {
 function getNodeIcon(p: AntdTreeNodeAttribute) {
   const { isLeaf, title } = p;
   const data = p as unknown as Partial<IKnowledgeDetailTreeItem>;
-  const iconType = getFileIconType(title as string, {
-    isDirectory: data.type === 'directory' || !isLeaf,
-    directoryIconType: 'wenjianjialanse',
-  });
+  const isDirectory = data.type === 'directory' || !isLeaf;
+  const { expanded } = p as AntdTreeNodeAttribute & { expanded?: boolean };
+  const iconType =
+    isDirectory && expanded
+      ? 'a-Folder-openwenjianjia-kai'
+      : getFileIconType(title as string, {
+        isDirectory,
+        directoryIconType: 'wenjianjialanse',
+      });
 
   return <AntdIcon type={`icon-${iconType}`} />;
 }
@@ -784,7 +789,7 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
                 }
               }}
               icon={getNodeIcon}
-              className={classnames(commonStyles.tree, {
+              className={classnames(commonStyles.tree, styles.knowledgeTree, {
                 [styles.selectable]: !!onSelect,
                 [styles.notselectable]: !onSelect,
               })}

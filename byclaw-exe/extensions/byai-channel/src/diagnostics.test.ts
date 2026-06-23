@@ -24,6 +24,7 @@ import {
   createByaiSdkDiagnosticTrace,
   emitByaiSdkDispatchCompleted,
   emitByaiSdkDispatchStarted,
+  emitByaiSdkFirstResponse,
   emitByaiSdkMessageReceived,
   runWithByaiSdkDiagnosticTrace,
 } from "./diagnostics.js";
@@ -101,5 +102,39 @@ describe("byai SDK diagnostics", () => {
 
     expect(runWithByaiSdkDiagnosticTrace(trace, () => "ok")).toBe("ok");
     expect(diagnosticRuntimeMock.freezeDiagnosticTraceContext).toHaveBeenCalledWith(trace.trace);
+  });
+
+  it("emits first response progress with BYAI timing attributes", () => {
+    diagnosticRuntimeMock.emitTrustedDiagnosticEvent.mockClear();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-23T08:00:01.250Z"));
+
+    emitByaiSdkFirstResponse(
+      {
+        sessionId: "session-1",
+        sessionKey: "agent:main:byai-channel:direct:session-1",
+        traceId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      },
+      {
+        createdAt: Date.now() - 1250,
+        eventType: "ANSWER_DELTA",
+        kind: "answer_delta",
+      },
+    );
+
+    expect(diagnosticRuntimeMock.emitTrustedDiagnosticEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "run.progress",
+        reason: "byai.first_answer_delta",
+        sessionId: "session-1",
+        sessionKey: "agent:main:byai-channel:direct:session-1",
+        "byai.firstResponseMs": 1250,
+        "byai.firstResponseKind": "answer_delta",
+        "byai.firstResponseEventType": "ANSWER_DELTA",
+        "byai.traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      }),
+    );
+
+    vi.useRealTimers();
   });
 });
