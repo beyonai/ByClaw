@@ -148,7 +148,6 @@ async def test_s4_migrations_create_expected_tables(pg_dsn: str):
             for table in (
                 "kgw_metadata_property_sync",
                 "kgw_metadata_property_binding",
-                "kgw_metadata_binding_outbox",
                 "kgw_metadata_property",
                 "kgw_audit_log",
                 "kgw_kb_source_lock",

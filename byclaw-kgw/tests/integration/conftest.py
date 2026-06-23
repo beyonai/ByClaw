@@ -178,7 +178,6 @@ _TABLES_TO_DROP = (
     "kgw_ingest_event",
     "kgw_metadata_property_sync",
     "kgw_metadata_property_binding",
-    "kgw_metadata_binding_outbox",
     "kgw_metadata_property",
     "kgw_audit_log",
     "kgw_kb_source_lock",

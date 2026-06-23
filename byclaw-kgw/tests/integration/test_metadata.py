@@ -997,12 +997,12 @@ async def test_lazy_sync_transitions_to_synced(client: httpx.AsyncClient, pool) 
 
 
 # ---------------------------------------------------------------------------
-# GF13: Binding PENDING → SYNCED
+# GF13: Binding BOUND
 # ---------------------------------------------------------------------------
 
 
-async def test_binding_pending_to_synced(client: httpx.AsyncClient, pool) -> None:
-    """GF13: metadata/update creates binding that transitions PENDING→SYNCED."""
+async def test_binding_bound_after_update(client: httpx.AsyncClient, pool) -> None:
+    """GF13: metadata/update creates a BOUND binding."""
     suffix = uuid.uuid4().hex[:8]
     prop_name = f"gf13_{suffix}"
     file_path = f"/metadata-test/gf13_{suffix}.md"
@@ -1027,7 +1027,7 @@ async def test_binding_pending_to_synced(client: httpx.AsyncClient, pool) -> Non
             )
             row = await cur.fetchone()
     assert row is not None, "GF13 binding should exist"
-    assert row["status"] == "SYNCED", f"GF13 expected SYNCED, got {row['status']}"
+    assert row["status"] == "BOUND", f"GF13 expected BOUND, got {row['status']}"
 
 
 # ---------------------------------------------------------------------------
@@ -1038,7 +1038,7 @@ async def test_binding_pending_to_synced(client: httpx.AsyncClient, pool) -> Non
 async def test_binding_rollback_on_backend_error(
     client: httpx.AsyncClient, pool
 ) -> None:
-    """GF14: When backend metadata/update returns -1, no SYNCED binding survives."""
+    """GF14: When backend metadata/update returns -1, no BOUND binding survives."""
     suffix = uuid.uuid4().hex[:8]
     prop_name = f"gf14_{suffix}"
     file_path = f"/metadata-test/gf14_{suffix}.md"
@@ -1072,7 +1072,7 @@ async def test_binding_rollback_on_backend_error(
 
     assert body["resultCode"] == "-1", f"GF14 expected rollback error: {body}"
 
-    # Verify no SYNCED binding survived
+    # Verify no BOUND binding survived
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -1083,28 +1083,6 @@ async def test_binding_rollback_on_backend_error(
             )
             row = await cur.fetchone()
     assert row["c"] == 0, f"GF14 binding should be rolled back, got {row['c']}"
-
-    # Verify rollback outbox entry
-    # Known implementation detail: outbox entries may not be created for all
-    # rollback paths. The key invariant — no SYNCED binding survived the error
-    # — is already verified by the binding count assertion above (c==0).
-    # When outbox count is 0, the rollback happened silently on the binding
-    # table, which is valid behavior.
-    async with pool.connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                "SELECT COUNT(*) as c FROM kgw_metadata_binding_outbox "
-                "WHERE property_id=(SELECT property_id FROM kgw_metadata_property "
-                "WHERE property_name=%s)",
-                (prop_name,),
-            )
-            row = await cur.fetchone()
-    outbox_count = row["c"] if row else 0
-    # Binding rollback (c==0 above) is the authoritative check. Outbox count
-    # of 0 means rollback was silent — documented and valid.
-    if outbox_count > 0:
-        pass  # Outbox entry exists as expected
-    # else: silent rollback — binding count=0 already verified correctness
 
 
 # ---------------------------------------------------------------------------

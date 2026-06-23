@@ -526,7 +526,7 @@ async def test_upsert_discovery_mode(client) -> None:
 
 
 async def test_upsert_with_metadata_binding(client, pool) -> None:
-    """GU3: Upsert with metadata field triggers metadata/update and binding SYNCED."""
+    """GU3: Upsert with metadata field triggers metadata/update and binding BOUND."""
     prop_name = f"gw_status_{_SESSION}"
 
     # Create a metadata property via gateway API
@@ -559,7 +559,7 @@ async def test_upsert_with_metadata_binding(client, pool) -> None:
     assert body["resultCode"] == "0", f"expected 0, got {body}"
     assert body["resultObject"]["status"] == "done"
 
-    # Query kgw_metadata_property_binding to verify binding status=SYNCED
+    # Query kgw_metadata_property_binding to verify binding status=BOUND
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -569,8 +569,8 @@ async def test_upsert_with_metadata_binding(client, pool) -> None:
             )
             rows = await cur.fetchall()
     assert len(rows) > 0, f"expected at least one binding row, got {rows}"
-    synced = [r for r in rows if r["status"] == "SYNCED"]
-    assert len(synced) > 0, f"expected SYNCED binding, got {rows}"
+    bound = [r for r in rows if r["status"] == "BOUND"]
+    assert len(bound) > 0, f"expected BOUND binding, got {rows}"
 
 
 # ---------------------------------------------------------------------------

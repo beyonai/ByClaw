@@ -44,7 +44,6 @@ async def test_create_then_get_active(pg_dsn: str):
             for table in (
                 "kgw_metadata_property_sync",
                 "kgw_metadata_property_binding",
-                "kgw_metadata_binding_outbox",
                 "kgw_metadata_property",
                 "kgw_audit_log",
                 "kgw_kb_source_lock",
@@ -69,7 +68,6 @@ async def test_create_duplicate_active_raises(pg_dsn: str):
             for table in (
                 "kgw_metadata_property_sync",
                 "kgw_metadata_property_binding",
-                "kgw_metadata_binding_outbox",
                 "kgw_metadata_property",
                 "kgw_audit_log",
                 "kgw_kb_source_lock",
@@ -100,7 +98,6 @@ async def test_delete_then_recreate_same_name(pg_dsn: str):
             for table in (
                 "kgw_metadata_property_sync",
                 "kgw_metadata_property_binding",
-                "kgw_metadata_binding_outbox",
                 "kgw_metadata_property",
                 "kgw_audit_log",
                 "kgw_kb_source_lock",
@@ -124,7 +121,6 @@ async def test_get_active_missing_raises(pg_dsn: str):
             for table in (
                 "kgw_metadata_property_sync",
                 "kgw_metadata_property_binding",
-                "kgw_metadata_binding_outbox",
                 "kgw_metadata_property",
                 "kgw_audit_log",
                 "kgw_kb_source_lock",
