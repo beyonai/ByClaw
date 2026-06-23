@@ -407,8 +407,9 @@ class SandboxResizeServiceTest {
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
         SsSandboxResizeRecordMapper resizeRecordMapper = mock(SsSandboxResizeRecordMapper.class);
         SandboxService sandboxService = mock(SandboxService.class);
+        SandboxHealthCacheService sandboxHealthCacheService = mock(SandboxHealthCacheService.class);
         SandboxResizeService service = new SandboxResizeService(properties, openSandboxClient, specRepository,
-            profileEntityMapper, sandboxRecordMapper, resizeRecordMapper, sandboxService);
+            profileEntityMapper, sandboxRecordMapper, resizeRecordMapper, sandboxService, sandboxHealthCacheService);
         return new SandboxFixture(service, properties, openSandboxClient, specRepository, profileEntityMapper,
             sandboxRecordMapper, resizeRecordMapper, sandboxService);
     }
