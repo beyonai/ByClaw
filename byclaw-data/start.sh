@@ -7,7 +7,7 @@ shift
 # byclaw-data — DataCloud MCP + Gateway Worker 启动（Linux / macOS）
 #
 # 默认同时启动：
-# 1. byclaw_data.mcp（FastAPI / MCP，封装 datacloud_data_service）
+# 1. byclaw_data.platform（FastAPI / MCP，封装 datacloud_data_service）
 # 2. byclaw_data.main（Gateway worker）
 #
 set -euo pipefail
@@ -140,12 +140,12 @@ EOF
 
 service_command() {
   if [[ -x "${VENV_BIN_DIR}/uvicorn" ]]; then
-    printf 'cd "%s" && exec "%s/uvicorn" byclaw_data.mcp.routes:create_app --factory --host "%s" --port "%s" --log-level "%s"' \
+    printf 'cd "%s" && exec "%s/uvicorn" byclaw_data.platform.routes:create_app --factory --host "%s" --port "%s" --log-level "%s"' \
       "$SCRIPT_DIR" "$VENV_BIN_DIR" "$SERVICE_HOST" "$SERVICE_PORT" "$UVICORN_LOG_LEVEL"
     return 0
   fi
 
-  printf 'cd "%s" && exec uv run uvicorn byclaw_data.mcp.routes:create_app --factory --host "%s" --port "%s" --log-level "%s"' \
+  printf 'cd "%s" && exec uv run uvicorn byclaw_data.platform.routes:create_app --factory --host "%s" --port "%s" --log-level "%s"' \
     "$SCRIPT_DIR" "$SERVICE_HOST" "$SERVICE_PORT" "$UVICORN_LOG_LEVEL"
 }
 
