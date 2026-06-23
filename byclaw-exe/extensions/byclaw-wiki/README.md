@@ -88,7 +88,9 @@ and restart Gateway.
           // notificationDingtalkAccessToken: "...",
           notificationDingtalkSecret: "SEC...",
           notificationDingtalkActionCardBtnTitle: "通过",
-          notificationDingtalkActionCardBtnUrl: "http://39.105.105.85/beyond/chat",
+          notificationDingtalkActionCardBtnUrl: "http://39.105.105.85/byaiService/datasetController/buildKnowledgeFromDoc",
+          notificationResourceId: "10024308",
+          notificationDirectoryPath: "/",
           notificationRobotType: "dingtalk"
         }
       }
@@ -133,6 +135,12 @@ button is `通过`, and the default button URL is
 `http://39.105.105.85/beyond/chat`; set
 `notificationDingtalkActionCardBtnTitle` and
 `notificationDingtalkActionCardBtnUrl` to customize it.
+
+When `notificationDingtalkActionCardBtnUrl` points to the backend
+`/byaiService/datasetController/buildKnowledgeFromDoc` endpoint, byclaw-wiki appends
+`resourceId`, `directoryPath`, `docName`, `doc`, and `language=zh-CN` query
+parameters to the button URL. Configure `notificationResourceId` for the target
+knowledge base and optionally `notificationDirectoryPath`; it defaults to `/`.
 
 Supported `notificationRobotType` values:
 

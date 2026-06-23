@@ -31,6 +31,7 @@ describe("sendDocumentationNotification", () => {
         dingtalkSecret: secret,
         dingtalkActionCardBtnTitle: "通过",
         dingtalkActionCardBtnUrl: "",
+        directoryPath: "/",
         robotType: "dingtalk",
         maxOutputChars: 3000,
         minOutputChars: 1,
@@ -65,6 +66,7 @@ describe("sendDocumentationNotification", () => {
         webhookUrl: "https://oapi.dingtalk.com/robot/send?access_token=token",
         dingtalkActionCardBtnTitle: "通过",
         dingtalkActionCardBtnUrl: "",
+        directoryPath: "/",
         robotType: "dingtalk",
         maxOutputChars: 3000,
         minOutputChars: 1,
@@ -101,7 +103,9 @@ describe("sendDocumentationNotification", () => {
       config: {
         dingtalkAccessToken: "token-from-config",
         dingtalkActionCardBtnTitle: "审核通过",
-        dingtalkActionCardBtnUrl: "https://example.test/approve",
+        dingtalkActionCardBtnUrl: "https://example.test/datasetController/buildKnowledgeFromDoc",
+        resourceId: "10024308",
+        directoryPath: "/",
         robotType: "dingtalk",
         maxOutputChars: 3000,
         minOutputChars: 1,
@@ -122,6 +126,7 @@ describe("sendDocumentationNotification", () => {
       msgtype?: string;
       actionCard?: Record<string, unknown>;
     };
+    const buttonUrl = new URL(String(payload.actionCard?.btnUrl ?? ""));
 
     assert.equal(result.ok, true);
     assert.equal(url.origin + url.pathname, "https://oapi.dingtalk.com/robot/send");
@@ -129,9 +134,14 @@ describe("sendDocumentationNotification", () => {
     assert.equal(payload.msgtype, "actionCard");
     assert.equal(payload.actionCard?.title, "Skill 上传文档");
     assert.equal(payload.actionCard?.btnTitle, "审核通过");
-    assert.equal(payload.actionCard?.btnUrl, "https://example.test/approve");
+    assert.equal(buttonUrl.origin + buttonUrl.pathname, "https://example.test/datasetController/buildKnowledgeFromDoc");
+    assert.equal(buttonUrl.searchParams.get("resourceId"), "10024308");
+    assert.equal(buttonUrl.searchParams.get("directoryPath"), "/");
+    assert.equal(buttonUrl.searchParams.get("language"), "zh-CN");
+    assert.match(buttonUrl.searchParams.get("docName") ?? "", /^Skill-上传文档-\d{14}\.md$/);
+    assert.match(buttonUrl.searchParams.get("doc") ?? "", /如何上传 Skill/);
+    assert.equal(payload.actionCard?.btnUrl, String(payload.actionCard?.singleURL));
     assert.equal(payload.actionCard?.singleTitle, "审核通过");
-    assert.equal(payload.actionCard?.singleURL, "https://example.test/approve");
     assert.match(String(payload.actionCard?.text ?? ""), /如何上传 Skill/);
   });
 });

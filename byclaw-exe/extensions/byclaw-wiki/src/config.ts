@@ -110,6 +110,15 @@ export const byclawWikiConfigSchema = {
       description: "DingTalk ActionCard single button jump URL.",
       default: "http://39.105.105.85/beyond/chat",
     },
+    notificationResourceId: {
+      type: ["string", "number"],
+      description: "Optional dataset resourceId appended to the DingTalk ActionCard button URL.",
+    },
+    notificationDirectoryPath: {
+      type: "string",
+      description: "Dataset directoryPath appended to the DingTalk ActionCard button URL.",
+      default: "/",
+    },
     notificationRobotType: {
       enum: ["generic", "wecom", "dingtalk", "feishu"],
       description: "Group robot payload format.",
@@ -134,6 +143,16 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 
 function readString(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(Math.trunc(value));
+  }
+  return undefined;
 }
 
 function readBoolean(value: unknown, fallback: boolean): boolean {
@@ -264,6 +283,8 @@ export function resolveByclawWikiConfig(raw: unknown): ResolvedByclawWikiConfig 
         config.notificationDingtalkActionCardBtnUrl,
         "http://39.105.105.85/beyond/chat",
       ),
+      resourceId: readOptionalString(config.notificationResourceId),
+      directoryPath: readString(config.notificationDirectoryPath, "/"),
       robotType: readRobotType(config.notificationRobotType),
       maxOutputChars: readPositiveInteger(config.notificationMaxOutputChars, 3000),
       minOutputChars: readNonNegativeInteger(config.notificationMinOutputChars, 1),
