@@ -145,7 +145,7 @@ public class SandboxProperties {
 
         private long modelCacheTtlSeconds = 300L;
 
-        private long watchTtlSeconds = 90L;
+        private int watchTtlSeconds = 90;
 
         private double idleMemoryLimitRatio = 0.55D;
 
