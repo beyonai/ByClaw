@@ -84,6 +84,14 @@ class EventResult:
     retry_count: int = 0
 
 
+@dataclass(frozen=True)
+class _CreatedBinding:
+    property_id: int
+    kn_code: str
+    file_path: str
+    updated_at: Any
+
+
 async def process_event(
     state: Any,
     item: StandardItem,
@@ -293,8 +301,7 @@ async def _process_upsert(
         )
 
         upload_bytes = content_bytes
-        attempt_id: int | None = None
-        pending_keys: list[tuple[int, str, str]] = []
+        created_bindings: list[_CreatedBinding] = []
 
         if all_meta_keys:
             # Validate all keys are registered
@@ -313,40 +320,51 @@ async def _process_upsert(
             props_by_name = {p.property_name: p for p in active}
             n2b = {p.property_name: p.backend_name for p in active}
 
-            # Lazy sync each property to the target KB
-            for p in props_by_name.values():
-                try:
+            # Bind usage before lazy sync/backend import. Only rows created by
+            # this request are rolled back if the backend write fails.
+            async with pool.connection() as conn:
+                async with conn.transaction():
+                    for p in props_by_name.values():
+                        created = await binding_mod.bind_usage(
+                            conn,
+                            property_id=p.property_id,
+                            kn_code=item.kn_code,
+                            file_path=item.file_path,
+                        )
+                        if created:
+                            updated_at = await _binding_updated_at(
+                                conn,
+                                property_id=p.property_id,
+                                kn_code=item.kn_code,
+                                file_path=item.file_path,
+                            )
+                            created_bindings.append(
+                                _CreatedBinding(
+                                    p.property_id,
+                                    item.kn_code,
+                                    item.file_path,
+                                    updated_at,
+                                )
+                            )
+
+            try:
+                # Lazy sync each property to the target KB
+                for p in props_by_name.values():
                     await sync_mod.ensure_synced(
                         state,
                         property_id=p.property_id,
                         kn_code=item.kn_code,
                         user_code=user_code,
                     )
-                except Exception as exc:  # noqa: BLE001
-                    await idempotency.mark_failed(
-                        pool,
-                        event_id,
-                        error_type="MetadataPropertySyncFailed",
-                        error_message=str(exc)[:500],
-                    )
-                    return
-
-            # Write PENDING bindings atomically
-            attempt_id = binding_mod.new_attempt_id()
-            pending_keys = [
-                (p.property_id, item.kn_code, item.file_path)
-                for p in props_by_name.values()
-            ]
-            async with pool.connection() as conn:
-                async with conn.transaction():
-                    for p in props_by_name.values():
-                        await binding_mod.upsert_pending(
-                            conn,
-                            property_id=p.property_id,
-                            kn_code=item.kn_code,
-                            file_path=item.file_path,
-                            attempt_id=attempt_id,
-                        )
+            except Exception as exc:  # noqa: BLE001
+                await _delete_created_bindings(pool, created_bindings)
+                await idempotency.mark_failed(
+                    pool,
+                    event_id,
+                    error_type="MetadataPropertySyncFailed",
+                    error_message=str(exc)[:500],
+                )
+                return
 
             # Build merged front matter (item.metadata overrides front_matter on conflict)
             merged_front_matter = {**front_matter, **(item.metadata or {})}
@@ -378,10 +396,7 @@ async def _process_upsert(
             )
             if resp.status_code in (401, 403):
                 cb.record_failure()
-                if attempt_id is not None:
-                    await _rollback_binding(
-                        pool, attempt_id=attempt_id, pending_keys=pending_keys
-                    )
+                await _delete_created_bindings(pool, created_bindings)
                 await idempotency.mark_failed(
                     pool,
                     event_id,
@@ -403,10 +418,7 @@ async def _process_upsert(
             cb.record_success()
         except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as exc:
             cb.record_failure()
-            if attempt_id is not None:
-                await _rollback_binding(
-                    pool, attempt_id=attempt_id, pending_keys=pending_keys
-                )
+            await _delete_created_bindings(pool, created_bindings)
             await idempotency.mark_failed(
                 pool,
                 event_id,
@@ -427,10 +439,7 @@ async def _process_upsert(
 
         if result.get("resultCode") != "0":
             cb.record_failure()
-            if attempt_id is not None:
-                await _rollback_binding(
-                    pool, attempt_id=attempt_id, pending_keys=pending_keys
-                )
+            await _delete_created_bindings(pool, created_bindings)
             await idempotency.mark_failed(
                 pool,
                 event_id,
@@ -448,9 +457,6 @@ async def _process_upsert(
                 user_code=user_code,
             )
             return
-
-        if attempt_id is not None:
-            await binding_mod.mark_synced_by_attempt(pool, attempt_id=attempt_id)
 
         content_bytes = upload_bytes  # for audit size
 
@@ -538,39 +544,50 @@ async def _process_upsert(
                 pool, list(item.metadata.keys())
             )
             props_by_name = {p.property_name: p for p in active}
+            created_bindings: list[_CreatedBinding] = []
 
-            for p in props_by_name.values():
-                try:
+            async with pool.connection() as conn:
+                async with conn.transaction():
+                    for p in props_by_name.values():
+                        created = await binding_mod.bind_usage(
+                            conn,
+                            property_id=p.property_id,
+                            kn_code=item.kn_code,
+                            file_path=item.file_path,
+                        )
+                        if created:
+                            updated_at = await _binding_updated_at(
+                                conn,
+                                property_id=p.property_id,
+                                kn_code=item.kn_code,
+                                file_path=item.file_path,
+                            )
+                            created_bindings.append(
+                                _CreatedBinding(
+                                    p.property_id,
+                                    item.kn_code,
+                                    item.file_path,
+                                    updated_at,
+                                )
+                            )
+
+            try:
+                for p in props_by_name.values():
                     await sync_mod.ensure_synced(
                         state,
                         property_id=p.property_id,
                         kn_code=item.kn_code,
                         user_code=user_code,
                     )
-                except Exception as exc:  # noqa: BLE001
-                    await idempotency.mark_failed(
-                        pool,
-                        event_id,
-                        error_type="MetadataPropertySyncFailed",
-                        error_message=str(exc)[:500],
-                    )
-                    return
-
-            attempt_id = binding_mod.new_attempt_id()
-            pending_keys = [
-                (p.property_id, item.kn_code, item.file_path)
-                for p in props_by_name.values()
-            ]
-            async with pool.connection() as conn:
-                async with conn.transaction():
-                    for p in props_by_name.values():
-                        await binding_mod.upsert_pending(
-                            conn,
-                            property_id=p.property_id,
-                            kn_code=item.kn_code,
-                            file_path=item.file_path,
-                            attempt_id=attempt_id,
-                        )
+            except Exception as exc:  # noqa: BLE001
+                await _delete_created_bindings(pool, created_bindings)
+                await idempotency.mark_failed(
+                    pool,
+                    event_id,
+                    error_type="MetadataPropertySyncFailed",
+                    error_message=str(exc)[:500],
+                )
+                return
 
             n2b = {p.property_name: p.backend_name for p in active}
             meta_op_path = config.operation_path(
@@ -596,9 +613,7 @@ async def _process_upsert(
                     http=state.http,
                 )
             except Exception as exc:  # noqa: BLE001
-                await _rollback_binding(
-                    pool, attempt_id=attempt_id, pending_keys=pending_keys
-                )
+                await _delete_created_bindings(pool, created_bindings)
                 await idempotency.mark_failed(
                     pool,
                     event_id,
@@ -619,9 +634,7 @@ async def _process_upsert(
 
             if meta_resp.get("resultCode") != "0":
                 cb.record_failure()
-                await _rollback_binding(
-                    pool, attempt_id=attempt_id, pending_keys=pending_keys
-                )
+                await _delete_created_bindings(pool, created_bindings)
                 await idempotency.mark_failed(
                     pool,
                     event_id,
@@ -639,8 +652,6 @@ async def _process_upsert(
                     user_code=user_code,
                 )
                 return
-
-            await binding_mod.mark_synced_by_attempt(pool, attempt_id=attempt_id)
 
     # Fire-and-forget build trigger (both paths)
     build_op_path = config.operation_path(KbOp.BUILD_TRIGGER) or _DEFAULT_KB_PATHS.get(
@@ -900,28 +911,37 @@ async def _write_conflict(
         await conn.commit()
 
 
-async def _rollback_binding(
-    pool: Any, *, attempt_id: int, pending_keys: list[tuple[int, str, str]]
-) -> None:
-    try:
-        await binding_mod.delete_by_attempt(pool, attempt_id)
-    except Exception as exc:  # noqa: BLE001
-        _log.warning(
-            "event_processor.rollback_failed",
-            attempt_id=attempt_id,
-            error=str(exc),
+async def _binding_updated_at(
+    conn: Any, *, property_id: int, kn_code: str, file_path: str
+) -> Any:
+    async with conn.cursor() as cur:
+        await cur.execute(
+            "SELECT updated_at FROM kgw_metadata_property_binding "
+            "WHERE property_id=%s AND kn_code=%s AND file_path=%s",
+            (property_id, kn_code, file_path),
         )
-        for property_id, kn_code, file_path in pending_keys:
-            try:
-                await binding_mod.write_outbox(
-                    pool,
-                    property_id=property_id,
-                    kn_code=kn_code,
-                    file_path=file_path,
-                    attempt_id=attempt_id,
+        row = await cur.fetchone()
+    return row["updated_at"] if row else None
+
+
+async def _delete_created_bindings(pool: Any, records: list[_CreatedBinding]) -> None:
+    if not records:
+        return
+    async with pool.connection() as conn:
+        async with conn.transaction():
+            for record in records:
+                await conn.execute(
+                    "DELETE FROM kgw_metadata_property_binding "
+                    "WHERE property_id=%s AND kn_code=%s AND file_path=%s "
+                    "  AND updated_at=%s "
+                    "  AND status IN ('BOUND', 'DELETING')",
+                    (
+                        record.property_id,
+                        record.kn_code,
+                        record.file_path,
+                        record.updated_at,
+                    ),
                 )
-            except Exception:  # noqa: BLE001
-                pass
 
 
 async def _audit(
