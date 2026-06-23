@@ -5,6 +5,7 @@ import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.resource.ImplType;
+import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.common.feign.request.conversation.AgentPrologueDto;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
@@ -22,13 +23,16 @@ import com.iwhalecloud.byai.manager.domain.auth.enums.GrantType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.OperType;
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.RelResourceInfo;
 import com.iwhalecloud.byai.manager.dto.resource.SsResExtSkillDto;
 import com.iwhalecloud.byai.manager.entity.aimodel.ByaiAimodel;
 import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.qo.aimodel.DefaultAiModelQo;
@@ -78,6 +82,9 @@ public class SuasSuperassistApplicationService {
 
     @Autowired
     private DatasetApplicationService datasetApplicationService;
+
+    @Autowired
+    private SsResourceRelDetailService ssResourceRelDetailService;
 
     @Autowired
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
@@ -189,6 +196,7 @@ public class SuasSuperassistApplicationService {
             String resourceCode = jsonObject.getString("resourceCode");
             String modelProtocol = jsonObject.getString("modelProtocol");
             String relSkillCodes = jsonObject.getString("relSkillCodes");
+            String relToolCodes = jsonObject.getString("relToolCodes");
             String isRelDefaultDataset = jsonObject.getString("isRelDefaultDataset");
 
             // 如果已经存在了，不再进行初始化
@@ -227,14 +235,11 @@ public class SuasSuperassistApplicationService {
                     digitalEmployeeDTO.setRelIds(List.of(defaultDatasetId));
                 }
 
-                List<String> splitSkillCodes = StringUtil.splitStr(relSkillCodes, ",");
-                List<SsResExtSkillDto> ssResExtSkills = ssResExtSkillService.findBySkillCodes(splitSkillCodes);
+                // 关联工具agent|tool|view
+                this.handleRelToolCodes(digitalEmployeeDTO, relToolCodes, userId);
 
-                // 授权技能
-                this.authSkill(ssResExtSkills, userId);
-
-                // 写入技能
-                digitalEmployeeDTO.setSkills(this.buildJsonSkillByCode(ssResExtSkills));
+                // 处理关联技能
+                this.handleRelSkillCodes(digitalEmployeeDTO, relSkillCodes, userId);
 
                 // 保存数字员工
                 digitalEmployeeApplicationService.saveDigitalEmployee(digitalEmployeeDTO);
@@ -242,6 +247,102 @@ public class SuasSuperassistApplicationService {
         }
 
         return defaultDigEmployeeId;
+    }
+
+    /**
+     * 构奸关联工具编码
+     *
+     * @param digitalEmployeeDTO 数字员工新增对象
+     * @param relToolCodes 工具编码
+     */
+    private void handleRelToolCodes(DigitalEmployeeDTO digitalEmployeeDTO, String relToolCodes, Long userId) {
+
+        List<String> splitToolCodes = StringUtil.splitStr(relToolCodes, ",");
+        if (ListUtil.isEmpty(splitToolCodes)) {
+            return;
+        }
+
+        for (String resourceCode : splitToolCodes) {
+
+            SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
+            if (ssResource == null) {
+                continue;
+            }
+
+            // 授权资源
+            this.authResource(ssResource, userId);
+
+            // 关联资源标识
+            Long resourceId = ssResource.getResourceId();
+            digitalEmployeeDTO.getRelIds().add(resourceId);
+
+            // 视图类型关联子选项相关
+            if (ResourceBizType.VIEW.getCode().equalsIgnoreCase(ssResource.getResourceBizType())) {
+                List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(resourceId);
+                RelResourceInfo relResourceInfo = new RelResourceInfo();
+                relResourceInfo.setRelId(String.valueOf(ssResource.getResourceId()));
+
+                List<String> activeResourceIds = new ArrayList<>();
+                for (SsResourceRelDetail resourceRelDetail : resourceRelDetails) {
+                    activeResourceIds.add(String.valueOf(resourceRelDetail.getRelResourceId()));
+                }
+                relResourceInfo.setActiveResourceIds(activeResourceIds);
+                digitalEmployeeDTO.getRelResourceInfoList().add(relResourceInfo);
+            }
+        }
+
+    }
+
+    /**
+     * 处理关联技能
+     *
+     * @param digitalEmployeeDTO 保存入参
+     * @param relSkillCodes 关联技能编码
+     * @param userId 用户标识
+     */
+    private void handleRelSkillCodes(DigitalEmployeeDTO digitalEmployeeDTO, String relSkillCodes, Long userId) {
+
+        // 关联技能
+        List<String> splitSkillCodes = StringUtil.splitStr(relSkillCodes, ",");
+        List<SsResExtSkillDto> ssResExtSkills = ssResExtSkillService.findBySkillCodes(splitSkillCodes);
+        if (ListUtil.isEmpty(ssResExtSkills)) {
+            return;
+        }
+
+        // 授权资源
+        for (SsResExtSkillDto ssResExtSkillDto : ssResExtSkills) {
+            this.authResource(ssResExtSkillDto, userId);
+        }
+
+        // 写入技能
+        digitalEmployeeDTO.setSkills(this.buildJsonSkillByCode(ssResExtSkills));
+    }
+
+    /**
+     * 授权资源
+     *
+     * @param ssResource 资源
+     * @param userId 用户标识
+     */
+    private void authResource(SsResource ssResource, Long userId) {
+
+        PrivilegeGrant privilegeGrant = new PrivilegeGrant();
+        privilegeGrant.setPrivilegeGrantId(sequenceService.nextVal());
+        privilegeGrant.setGrantType(GrantType.AVAILABLE_USE);
+        privilegeGrant.setGrantObjType(ssResource.getResourceBizType());
+        privilegeGrant.setGrantObjId(ssResource.getResourceId());
+        privilegeGrant.setGrantToObjId(userId);
+        privilegeGrant.setGrantToObjType(GrantToObjType.USER);
+        privilegeGrant.setGrantToType(Color.RED);
+        privilegeGrant.setOperType(OperType.READ);
+        privilegeGrant.setStatusCd("A");
+        privilegeGrant.setCreateDate(new Date());
+        privilegeGrantService.save(privilegeGrant);
+
+        // 2.还要redis中插入一条红名单数据
+        String key = "DATASET:AUTHORITY:1_RED_READ_PERSON_" + privilegeGrant.getGrantToObjId();
+        String value = ssResource.getResourceBizType() + "_" + ssResource.getResourceId();
+        RedisUtil.addSet(key, value);
     }
 
     /**
@@ -273,41 +374,6 @@ public class SuasSuperassistApplicationService {
         }
 
         return JSON.toJSONString(skillsList);
-    }
-
-    /**
-     * 对技能进行授权
-     *
-     * @param ssResExtSkills 技能
-     * @param userId 用户标识
-     */
-    private void authSkill(List<SsResExtSkillDto> ssResExtSkills, Long userId) {
-
-        if (ListUtil.isEmpty(ssResExtSkills)) {
-            return;
-        }
-
-        for (SsResExtSkillDto ssResExtSkillDto : ssResExtSkills) {
-
-            PrivilegeGrant privilegeGrant = new PrivilegeGrant();
-            privilegeGrant.setPrivilegeGrantId(sequenceService.nextVal());
-            privilegeGrant.setGrantType(GrantType.AVAILABLE_USE);
-            privilegeGrant.setGrantObjType(ssResExtSkillDto.getResourceBizType());
-            privilegeGrant.setGrantObjId(ssResExtSkillDto.getResourceId());
-            privilegeGrant.setGrantToObjId(userId);
-            privilegeGrant.setGrantToObjType(GrantToObjType.USER);
-            privilegeGrant.setGrantToType(Color.RED);
-            privilegeGrant.setOperType(OperType.READ);
-            privilegeGrant.setStatusCd("A");
-            privilegeGrant.setCreateDate(new Date());
-            privilegeGrantService.save(privilegeGrant);
-
-            // 2.还要redis中插入一条红名单数据
-            String key = "DATASET:AUTHORITY:1_RED_READ_PERSON_" + privilegeGrant.getGrantToObjId();
-            String value = ssResExtSkillDto.getResourceBizType() + "_" + ssResExtSkillDto.getResourceId();
-            RedisUtil.addSet(key, value);
-        }
-
     }
 
     /**
