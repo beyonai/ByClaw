@@ -659,6 +659,7 @@ export default {
   'directoryManage.downloadMissingParams': 'Unable to download: missing file path or knowledge base information',
   'directoryManage.deleteFolderMissingParams': 'Unable to delete: missing folder path or knowledge base information',
   'directoryManage.deleteFileMissingParams': 'Unable to delete: missing file path or knowledge base information',
+  'directoryManage.deleteFolderNotEmpty': 'The folder contains subfolders or files and cannot be deleted',
   'permissionManage.member': 'Member',
   'permissionManage.addedBy': 'Added By',
   'permissionManage.permission': 'Permission',

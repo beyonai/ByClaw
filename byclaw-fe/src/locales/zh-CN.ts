@@ -666,6 +666,7 @@ export default {
   'directoryManage.downloadMissingParams': '无法下载：缺少文件路径或文档库信息',
   'directoryManage.deleteFolderMissingParams': '无法删除：缺少目录路径或文档库信息',
   'directoryManage.deleteFileMissingParams': '无法删除：缺少文件路径或文档库信息',
+  'directoryManage.deleteFolderNotEmpty': '文件夹下存在子文件夹或文件，不允许删除',
   'permissionManage.member': '成员',
   'permissionManage.addedBy': '添加人',
   'permissionManage.permission': '权限',
