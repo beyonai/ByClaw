@@ -29,6 +29,22 @@ interface ITemplateItem {
   datasetId?: string | number;
 }
 
+interface ITemplateTabItem {
+  paramValue: string;
+  paramName: string;
+  paramEnName?: string;
+}
+
+function uniqueTemplateTabs(data: ITemplateTabItem[] = []) {
+  const tabMap = new Map<string, ITemplateTabItem>();
+  data.forEach((item) => {
+    if (item?.paramValue && !tabMap.has(item.paramValue)) {
+      tabMap.set(item.paramValue, item);
+    }
+  });
+  return Array.from(tabMap.values());
+}
+
 function buildTemplateCoverDownloadUrl(item: ITemplateItem): string {
   const resourceId = item.templateCoverId;
   if (!resourceId) {
@@ -83,7 +99,7 @@ export default function RecommendTabs() {
   const { modal, message } = App.useApp();
   const [loadingItems, setLoadingItems] = useState<React.Key[]>([]);
   const [templateList, setTemplateList] = useState<ITemplateItem[]>([]);
-  const [tabList, setTabList] = useState([]); // 模板分类列表
+  const [tabList, setTabList] = useState<ITemplateTabItem[]>([]); // 模板分类列表
   const [currentTab, setCurrentTab] = useState(''); // 当前选中的分类
   const [isLoadingList, setIsLoadingList] = useState(false);
   const [imageErrors, setImageErrors] = useState<string[]>([]);
@@ -206,9 +222,10 @@ export default function RecommendTabs() {
     getTemplateTypes({
       standType: 'TEMPLATE_TYPE',
     }).then((data = []) => {
-      setTabList(data || []);
-      if (data?.length) {
-        setCurrentTab(data?.[0]?.paramValue);
+      const nextTabList = uniqueTemplateTabs(data || []);
+      setTabList(nextTabList);
+      if (nextTabList.length) {
+        setCurrentTab(nextTabList[0]?.paramValue);
       }
     });
   }, []);
