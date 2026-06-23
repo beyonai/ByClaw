@@ -429,6 +429,20 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     async (options?: { reset?: boolean; queryKeyword?: string }) => {
       if (listFetchRef.current) return;
       const { reset = false, queryKeyword = keywordRef.current } = options || {};
+      if (!activeSiderAgent.resourceId) {
+        if (reset) {
+          resourceListRef.current = [];
+          setResourceList([]);
+          paginationRef.current = {
+            pageNum: 0,
+            total: 0,
+            loadedCount: 0,
+          };
+        }
+        setHasMore(false);
+        setLoading(false);
+        return;
+      }
       const pageNum = reset ? 1 : paginationRef.current.pageNum + 1;
       listFetchRef.current = true;
       setLoading(true);
