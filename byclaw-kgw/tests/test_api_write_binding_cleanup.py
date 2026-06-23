@@ -662,3 +662,111 @@ async def test_metadata_update_successful_set_restores_deleting_binding(
     assert r.status_code == 200, r.text
     assert r.json()["resultCode"] == "0", r.json()
     assert await _binding_status(bc_pool, pid, _KN_CODE, file_path) == "BOUND"
+
+
+async def test_metadata_update_failed_mixed_set_unset_new_binding_leaves_no_row(
+    bc_client, bc_pool
+):
+    """A failed set+unset on a new binding deletes the row created by this request."""
+    prop_name = "bc_meta_mixed_new"
+    file_path = "/meta/mixed-new.md"
+
+    await _create_property(bc_client, prop_name, "string")
+    pid = await _pid(bc_pool, prop_name)
+
+    with respx.mock(base_url=_KB_BASE_URL, assert_all_called=False) as mock:
+        mock.post("/api/v1/metadataProperties/batchCreate").mock(
+            return_value=httpx.Response(200, json=_ok_batch_create_resp())
+        )
+        mock.post("/api/v1/knowledgeItems/metadata/update").mock(
+            return_value=httpx.Response(200, json=_err_resp())
+        )
+
+        r = await bc_client.post(
+            f"{_ITEMS_BASE}/metadata/update",
+            json={
+                "knCode": _KN_CODE,
+                "filePath": file_path,
+                "operationList": [
+                    {"propertyName": prop_name, "operation": "set", "value": "x"},
+                    {"propertyName": prop_name, "operation": "unset"},
+                ],
+            },
+            headers={"X-User-Id": "user_bc_1"},
+        )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["resultCode"] == "-1", r.json()
+    assert await _binding_status(bc_pool, pid, _KN_CODE, file_path) is None
+
+
+async def test_metadata_update_failed_unset_restores_existing_bound_binding(
+    bc_client, bc_pool
+):
+    """A failed unset restores a row this request moved from BOUND to DELETING."""
+    prop_name = "bc_meta_unset_restore"
+    file_path = "/meta/unset-restore.md"
+
+    await _create_property(bc_client, prop_name, "string")
+    pid = await _pid(bc_pool, prop_name)
+    await _insert_bound_binding(
+        bc_pool, property_id=pid, kn_code=_KN_CODE, file_path=file_path
+    )
+
+    with respx.mock(base_url=_KB_BASE_URL, assert_all_called=False) as mock:
+        mock.post("/api/v1/metadataProperties/batchCreate").mock(
+            return_value=httpx.Response(200, json=_ok_batch_create_resp())
+        )
+        mock.post("/api/v1/knowledgeItems/metadata/update").mock(
+            return_value=httpx.Response(200, json=_err_resp())
+        )
+
+        r = await bc_client.post(
+            f"{_ITEMS_BASE}/metadata/update",
+            json={
+                "knCode": _KN_CODE,
+                "filePath": file_path,
+                "operationList": [{"propertyName": prop_name, "operation": "unset"}],
+            },
+            headers={"X-User-Id": "user_bc_1"},
+        )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["resultCode"] == "-1", r.json()
+    assert await _binding_status(bc_pool, pid, _KN_CODE, file_path) == "BOUND"
+
+
+async def test_metadata_update_failed_unset_keeps_existing_deleting_binding(
+    bc_client, bc_pool
+):
+    """A failed unset must not restore a row that was already DELETING."""
+    prop_name = "bc_meta_unset_keep_deleting"
+    file_path = "/meta/unset-deleting.md"
+
+    await _create_property(bc_client, prop_name, "string")
+    pid = await _pid(bc_pool, prop_name)
+    await _insert_deleting_binding(
+        bc_pool, property_id=pid, kn_code=_KN_CODE, file_path=file_path
+    )
+
+    with respx.mock(base_url=_KB_BASE_URL, assert_all_called=False) as mock:
+        mock.post("/api/v1/metadataProperties/batchCreate").mock(
+            return_value=httpx.Response(200, json=_ok_batch_create_resp())
+        )
+        mock.post("/api/v1/knowledgeItems/metadata/update").mock(
+            return_value=httpx.Response(200, json=_err_resp())
+        )
+
+        r = await bc_client.post(
+            f"{_ITEMS_BASE}/metadata/update",
+            json={
+                "knCode": _KN_CODE,
+                "filePath": file_path,
+                "operationList": [{"propertyName": prop_name, "operation": "unset"}],
+            },
+            headers={"X-User-Id": "user_bc_1"},
+        )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["resultCode"] == "-1", r.json()
+    assert await _binding_status(bc_pool, pid, _KN_CODE, file_path) == "DELETING"

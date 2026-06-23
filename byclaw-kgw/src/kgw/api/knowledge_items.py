@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Annotated, Any
 
 import httpx
@@ -42,6 +43,15 @@ from kgw.upstream import BackendAuthError, call_backend_json
 
 _log = get_logger(__name__)
 router = APIRouter(prefix="/kgw/api/v1")
+
+
+@dataclass(frozen=True)
+class _CreatedBinding:
+    property_id: int
+    kn_code: str
+    file_path: str
+    updated_at: Any
+
 
 # ---------------------------------------------------------------------------
 # Operation × value_type compatibility table
@@ -233,18 +243,69 @@ def _validate_op(op: dict[str, Any], value_type: str) -> None:
         )
 
 
-async def _delete_created_bindings(pool: Any, keys: list[tuple[int, str, str]]) -> None:
+async def _binding_updated_at(
+    conn: Any, *, property_id: int, kn_code: str, file_path: str
+) -> Any:
+    """Return the current row-version marker for a binding in this transaction."""
+    async with conn.cursor() as cur:
+        await cur.execute(
+            "SELECT updated_at FROM kgw_metadata_property_binding "
+            "WHERE property_id=%s AND kn_code=%s AND file_path=%s",
+            (property_id, kn_code, file_path),
+        )
+        row = await cur.fetchone()
+    return row["updated_at"] if row else None
+
+
+async def _mark_deleting_for_rollback(
+    conn: Any,
+    *,
+    property_id: int,
+    kn_code: str,
+    file_path: str,
+    created_binding_keys: set[tuple[int, str, str]],
+) -> bool:
+    """Mark a binding DELETING and return True only if this request should restore it."""
+    async with conn.cursor() as cur:
+        await cur.execute(
+            "SELECT status FROM kgw_metadata_property_binding "
+            "WHERE property_id=%s AND kn_code=%s AND file_path=%s "
+            "FOR UPDATE",
+            (property_id, kn_code, file_path),
+        )
+        row = await cur.fetchone()
+    if row is None:
+        return False
+
+    previous_status = row["status"]
+    await binding_mod.mark_deleting_by_property_op(
+        conn,
+        property_id=property_id,
+        kn_code=kn_code,
+        file_path=file_path,
+    )
+    key = (property_id, kn_code, file_path)
+    return previous_status == binding_mod.BOUND and key not in created_binding_keys
+
+
+async def _delete_created_bindings(pool: Any, records: list[_CreatedBinding]) -> None:
     """Best-effort rollback for rows created by the current failed write."""
-    if not keys:
+    if not records:
         return
     async with pool.connection() as conn:
         async with conn.transaction():
-            for property_id, kn_code, file_path in keys:
+            for record in records:
                 await conn.execute(
                     "DELETE FROM kgw_metadata_property_binding "
                     "WHERE property_id=%s AND kn_code=%s AND file_path=%s "
-                    "  AND status='BOUND'",
-                    (property_id, kn_code, file_path),
+                    "  AND updated_at=%s "
+                    "  AND status IN ('BOUND', 'DELETING')",
+                    (
+                        record.property_id,
+                        record.kn_code,
+                        record.file_path,
+                        record.updated_at,
+                    ),
                 )
 
 
@@ -340,7 +401,7 @@ async def knowledge_item_import(
         front_matter = _parse_front_matter(raw_content)
 
         modified_content = raw_content
-        created_binding_keys: list[tuple[int, str, str]] = []
+        created_bindings: list[_CreatedBinding] = []
 
         if front_matter:
             _log.info(
@@ -365,8 +426,19 @@ async def knowledge_item_import(
                             file_path=file_path,
                         )
                         if created:
-                            created_binding_keys.append(
-                                (prop.property_id, kn_code, file_path)
+                            updated_at = await _binding_updated_at(
+                                conn,
+                                property_id=prop.property_id,
+                                kn_code=kn_code,
+                                file_path=file_path,
+                            )
+                            created_bindings.append(
+                                _CreatedBinding(
+                                    prop.property_id,
+                                    kn_code,
+                                    file_path,
+                                    updated_at,
+                                )
                             )
             # Lazy sync: ensure each property is synced to the backend endpoint
             try:
@@ -378,7 +450,7 @@ async def knowledge_item_import(
                         user_code=x_user_id,
                     )
             except Exception:
-                await _delete_created_bindings(pool, created_binding_keys)
+                await _delete_created_bindings(pool, created_bindings)
                 raise
             # Rewrite front-matter keys to backend names
             modified_content = _rewrite_front_matter(raw_content, n2b)
@@ -413,17 +485,17 @@ async def knowledge_item_import(
             cb.record_success()
         except (httpx.TimeoutException, httpx.StreamError, httpx.ReadError) as exc:
             cb.record_failure()
-            await _delete_created_bindings(pool, created_binding_keys)
+            await _delete_created_bindings(pool, created_bindings)
             raise UploadStreamBroken(
                 f"upload stream broken: {url}", kn_code=kn_code
             ) from exc
         except BackendAuthFailed:
             cb.record_failure()
-            await _delete_created_bindings(pool, created_binding_keys)
+            await _delete_created_bindings(pool, created_bindings)
             raise
 
-        if created_binding_keys and result.get("resultCode") != "0":
-            await _delete_created_bindings(pool, created_binding_keys)
+        if created_bindings and result.get("resultCode") != "0":
+            await _delete_created_bindings(pool, created_bindings)
     else:
         _log.info(
             "import.front_matter.skipped",
@@ -589,12 +661,13 @@ async def metadata_update(
         for op in op_list
         if op.get("operation") in {MetadataOperation.SET, MetadataOperation.APPEND}
     ]
-    created_binding_keys: list[tuple[int, str, str]] = []
+    created_bindings: dict[tuple[int, str, str], _CreatedBinding] = {}
     if set_or_append_ops:
         async with pool.connection() as conn:
             async with conn.transaction():
                 for op in set_or_append_ops:
                     prop = props_by_name[op["propertyName"]]
+                    key = (prop.property_id, kn_code, file_path)
                     created = await binding_mod.bind_usage(
                         conn,
                         property_id=prop.property_id,
@@ -602,8 +675,17 @@ async def metadata_update(
                         file_path=file_path,
                     )
                     if created:
-                        created_binding_keys.append(
-                            (prop.property_id, kn_code, file_path)
+                        updated_at = await _binding_updated_at(
+                            conn,
+                            property_id=prop.property_id,
+                            kn_code=kn_code,
+                            file_path=file_path,
+                        )
+                        created_bindings[key] = _CreatedBinding(
+                            prop.property_id,
+                            kn_code,
+                            file_path,
+                            updated_at,
                         )
 
     # 5. Mark unset/clear rows DELETING before backend write.
@@ -612,24 +694,39 @@ async def metadata_update(
         for op in op_list
         if op.get("operation") in {MetadataOperation.UNSET, MetadataOperation.CLEAR}
     ]
-    deleting_keys: list[tuple[int, str, str]] = [
-        (props_by_name[op["propertyName"]].property_id, kn_code, file_path)
-        for op in unset_or_clear_ops
-    ]
+    restore_bound_keys: list[tuple[int, str, str]] = []
     if unset_or_clear_ops:
         async with pool.connection() as conn:
             async with conn.transaction():
                 for op in unset_or_clear_ops:
-                    await binding_mod.mark_deleting_by_property_op(
+                    prop = props_by_name[op["propertyName"]]
+                    key = (prop.property_id, kn_code, file_path)
+                    should_restore = await _mark_deleting_for_rollback(
                         conn,
-                        property_id=props_by_name[op["propertyName"]].property_id,
+                        property_id=prop.property_id,
                         kn_code=kn_code,
                         file_path=file_path,
+                        created_binding_keys=set(created_bindings),
                     )
+                    if key in created_bindings:
+                        updated_at = await _binding_updated_at(
+                            conn,
+                            property_id=prop.property_id,
+                            kn_code=kn_code,
+                            file_path=file_path,
+                        )
+                        created_bindings[key] = _CreatedBinding(
+                            prop.property_id,
+                            kn_code,
+                            file_path,
+                            updated_at,
+                        )
+                    elif should_restore:
+                        restore_bound_keys.append(key)
 
     async def _rollback_failed_write() -> None:
-        await _delete_created_bindings(pool, created_binding_keys)
-        for property_id, kc, fp in deleting_keys:
+        await _delete_created_bindings(pool, list(created_bindings.values()))
+        for property_id, kc, fp in restore_bound_keys:
             await binding_mod.restore_bound(
                 pool,
                 property_id=property_id,
@@ -700,6 +797,10 @@ async def metadata_update(
         return resp
 
     # 12. Confirm unset/clear rows absent after backend success.
+    deleting_keys = [
+        (props_by_name[op["propertyName"]].property_id, kn_code, file_path)
+        for op in unset_or_clear_ops
+    ]
     for property_id, kc, fp in deleting_keys:
         await binding_mod.confirm_deleting_absent(
             pool,
