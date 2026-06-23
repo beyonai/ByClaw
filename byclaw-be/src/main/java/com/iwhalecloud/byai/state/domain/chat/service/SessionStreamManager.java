@@ -8,6 +8,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,11 +21,14 @@ import org.springframework.data.redis.connection.stream.MapRecord;
 import org.springframework.data.redis.connection.stream.ReadOffset;
 import org.springframework.data.redis.connection.stream.StreamOffset;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.listener.PatternTopic;
+import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.data.redis.stream.StreamMessageListenerContainer;
 import org.springframework.data.redis.stream.StreamMessageListenerContainer.StreamMessageListenerContainerOptions;
 import org.springframework.stereotype.Service;
 
 import com.iwhalecloud.byai.state.domain.ws.handler.RedisStreamMessageListener;
+import com.iwhalecloud.byai.state.domain.ws.handler.SessionStatusRedisMessageListener;
 
 /**
  * Gateway 模式下按 session 动态管理 Redis Stream 监听器的服务。
@@ -52,6 +56,12 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     /** Stream Key 后缀 */
     private static final String STREAM_KEY_SUFFIX = ":data_stream";
 
+    /** Session 状态 Key 前缀 */
+    public static final String SESSION_STATUS_KEY_PREFIX = "byai:session:";
+
+    /** Session 状态 Key 后缀 */
+    public static final String SESSION_STATUS_KEY_SUFFIX = ":session_status";
+
     /** 消费者组名称 */
     public static final String CONSUMER_GROUP = "byai_conversation_service_group";
 
@@ -60,11 +70,16 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
 
     private static final String INIT_EVENT = "{\"event_type\":\"_init\"}";
 
+    private static final long SESSION_STATUS_POLL_INTERVAL_MILLIS = 1000L;
+
     @Autowired
     private RedisConnectionFactory redisConnectionFactory;
 
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
+
+    @Autowired
+    private RedisMessageListenerContainer redisMessageListenerContainer;
 
     @Autowired
     private ApplicationContext applicationContext;
@@ -73,11 +88,26 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     private final Map<String, StreamMessageListenerContainer<String, MapRecord<String, String, String>>> containers =
         new ConcurrentHashMap<>();
 
+    /** sessionId -> Session 状态 Keyspace 监听 topic */
+    private final Map<String, PatternTopic> sessionStatusTopics = new ConcurrentHashMap<>();
+
+    /** sessionId -> Session 状态轮询任务 */
+    private final Map<String, ScheduledFuture<?>> sessionStatusPollTasks = new ConcurrentHashMap<>();
+
+    /** sessionId -> 最近一次已推送的 Session 状态值 */
+    private final Map<String, String> sessionStatusLastValues = new ConcurrentHashMap<>();
+
     /** sessionId -> running 标记续租任务 */
     private final Map<String, ScheduledFuture<?>> keepAliveTasks = new ConcurrentHashMap<>();
 
     private final ScheduledExecutorService keepAliveExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread thread = new Thread(r, "chat-running-lease-keepalive");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    private final ScheduledExecutorService sessionStatusExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "session-status-listener-fallback");
         thread.setDaemon(true);
         return thread;
     });
@@ -130,6 +160,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
             }
         }
         cancelKeepAlive(sessionId);
+        startSessionStatusListener(sessionId);
         startKeepAlive(sessionId, ctx);
 
         log.info("Session Stream 监听已启动, stream: {}, consumer: {}", streamKey, consumerName);
@@ -156,6 +187,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
             }
         }
         cancelKeepAlive(sessionId);
+        stopSessionStatusListener(sessionId);
 
         // 清理 OutputStreamManager 中的上下文（确保不残留）
         OutputStreamManager outputStreamManager = applicationContext.getBean(OutputStreamManager.class);
@@ -181,9 +213,15 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
             }
         }
         containers.clear();
+        sessionStatusTopics.keySet().forEach(this::stopSessionStatusListener);
+        sessionStatusTopics.clear();
+        sessionStatusPollTasks.values().forEach(task -> task.cancel(false));
+        sessionStatusPollTasks.clear();
+        sessionStatusLastValues.clear();
         keepAliveTasks.values().forEach(task -> task.cancel(false));
         keepAliveTasks.clear();
         keepAliveExecutor.shutdownNow();
+        sessionStatusExecutor.shutdownNow();
         log.info("所有 Session Stream 监听器已清理完成");
     }
 
@@ -222,6 +260,99 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
      */
     public String buildStreamKey(String sessionId) {
         return STREAM_KEY_PREFIX + sessionId + STREAM_KEY_SUFFIX;
+    }
+
+    /**
+     * 构建 Session 状态 Key。
+     *
+     * @param sessionId 会话 ID
+     * @return 完整状态 Key，格式：byai:session:{sessionId}:session_status
+     */
+    public String buildSessionStatusKey(String sessionId) {
+        return SESSION_STATUS_KEY_PREFIX + sessionId + SESSION_STATUS_KEY_SUFFIX;
+    }
+
+    public void dispatchSessionStatusChange(String sessionId, String statusValue) {
+        if (StringUtils.isBlank(sessionId) || StringUtils.isBlank(statusValue)) {
+            return;
+        }
+        String previous = sessionStatusLastValues.put(sessionId, statusValue);
+        if (StringUtils.equals(previous, statusValue)) {
+            return;
+        }
+        applicationContext.getBean(SessionStreamEventRouter.class).broadcastSessionStatus(sessionId, statusValue);
+    }
+
+    private void startSessionStatusListener(String sessionId) {
+        PatternTopic topic = new PatternTopic("__keyspace@*__:" + buildSessionStatusKey(sessionId));
+        PatternTopic old = sessionStatusTopics.put(sessionId, topic);
+        SessionStatusRedisMessageListener listener =
+            applicationContext.getBean(SessionStatusRedisMessageListener.class);
+        if (old != null) {
+            redisMessageListenerContainer.removeMessageListener(listener, old);
+        }
+        redisMessageListenerContainer.addMessageListener(listener, topic);
+        log.info("Session 状态 Key 监听已启动, key: {}", buildSessionStatusKey(sessionId));
+        startSessionStatusPolling(sessionId);
+    }
+
+    private void stopSessionStatusListener(String sessionId) {
+        PatternTopic topic = sessionStatusTopics.remove(sessionId);
+        if (topic != null) {
+            try {
+                SessionStatusRedisMessageListener listener =
+                    applicationContext.getBean(SessionStatusRedisMessageListener.class);
+                redisMessageListenerContainer.removeMessageListener(listener, topic);
+                log.info("Session 状态 Key 监听已停止, sessionId: {}", sessionId);
+            }
+            catch (Exception e) {
+                log.warn("停止 Session 状态 Key 监听时发生异常, sessionId: {}", sessionId, e);
+            }
+        }
+        ScheduledFuture<?> pollTask = sessionStatusPollTasks.remove(sessionId);
+        if (pollTask != null) {
+            pollTask.cancel(false);
+        }
+        sessionStatusLastValues.remove(sessionId);
+    }
+
+    private void startSessionStatusPolling(String sessionId) {
+        ScheduledFuture<?> oldTask = sessionStatusPollTasks.remove(sessionId);
+        if (oldTask != null) {
+            oldTask.cancel(false);
+        }
+
+        String currentValue = readSessionStatusValue(sessionId);
+        if (currentValue == null) {
+            sessionStatusLastValues.remove(sessionId);
+        }
+        else {
+            dispatchSessionStatusChange(sessionId, currentValue);
+        }
+
+        ScheduledFuture<?> pollTask = sessionStatusExecutor.scheduleWithFixedDelay(() -> {
+            try {
+                pollSessionStatus(sessionId);
+            }
+            catch (Exception e) {
+                log.warn("轮询 Session 状态 Key 失败, key: {}", buildSessionStatusKey(sessionId), e);
+            }
+        }, SESSION_STATUS_POLL_INTERVAL_MILLIS, SESSION_STATUS_POLL_INTERVAL_MILLIS, TimeUnit.MILLISECONDS);
+        sessionStatusPollTasks.put(sessionId, pollTask);
+    }
+
+    private void pollSessionStatus(String sessionId) {
+        String currentValue = readSessionStatusValue(sessionId);
+        if (currentValue == null) {
+            sessionStatusLastValues.remove(sessionId);
+            return;
+        }
+        dispatchSessionStatusChange(sessionId, currentValue);
+    }
+
+    private String readSessionStatusValue(String sessionId) {
+        Object value = redisTemplate.opsForValue().get(buildSessionStatusKey(sessionId));
+        return value == null ? null : String.valueOf(value);
     }
 
     /**

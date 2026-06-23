@@ -11,7 +11,7 @@ import {
   saveMediaBuffer,
 } from "openclaw/plugin-sdk/media-runtime";
 import { getByaiRuntime } from "./runtime.js";
-import { buildAgentSessionKey, resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
+import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import type { SdkInboundFile, SdkProcessorDeps } from "./types.js";
 import {
   bindActiveSdkRequestRunId,
@@ -52,8 +52,15 @@ import {
   formatDispatchError,
   isOpenClawContextOverflowDispatchError,
 } from "./dispatch-error.js";
+import {
+  BYAI_CHANNEL_ID,
+  buildBroadcastSessionKey,
+  resolveByaiSessionKey,
+  resolveSdkTargetAgentId,
+} from "./session-key.js";
 
-const CHANNEL_ID = "byai-channel" as const;
+const CHANNEL_ID = BYAI_CHANNEL_ID;
+export { buildBroadcastSessionKey };
 
 /**
  * 上下文溢出型 length 截断后自动续跑的最大次数。core 在续跑的 pre-prompt 会压缩历史，
@@ -69,67 +76,6 @@ function buildOverflowContinuePrompt(language: string | undefined): string {
   return language === "en_US" || (language ?? "").toLowerCase().startsWith("en")
     ? "Your previous answer was cut off because the conversation reached the context-window limit. The history has now been compacted. Continue and complete that interrupted answer based on the trimmed context."
     : "上一轮回答因对话达到上下文窗口上限而被截断。历史现已整理(压缩)，请基于整理后的上下文继续并完成上一轮未完成的回答。";
-}
-
-export function buildBroadcastSessionKey(
-  baseSessionKey: string,
-  originalAgentId: string,
-  targetAgentId: string,
-): string {
-  const prefix = `agent:${originalAgentId}:`;
-  if (baseSessionKey.startsWith(prefix)) {
-    return `agent:${targetAgentId}:${baseSessionKey.slice(prefix.length)}`;
-  }
-  return baseSessionKey;
-}
-
-function resolveSdkTargetAgentId(
-  routingAgentId: string,
-  extraPayload: {
-    agent_id?: string;
-    agent_code?: string;
-  },
-): string {
-  if (extraPayload.agent_id) {
-    return `baiying-agent-${extraPayload.agent_id}`;
-  }
-  if (extraPayload.agent_code) {
-    return extraPayload.agent_code;
-  }
-  return routingAgentId;
-}
-
-function resolveSdkSessionKey(params: {
-  routing: {
-    sessionKey: string;
-    agentId: string;
-    channel: string;
-    accountId: string;
-  };
-  targetAgentId: string;
-  sessionId: string;
-  userId: string;
-  perSessionId: boolean;
-}): string {
-  if (!params.perSessionId) {
-    if (params.targetAgentId === params.routing.agentId) {
-      return params.routing.sessionKey;
-    }
-    return buildBroadcastSessionKey(
-      params.routing.sessionKey,
-      params.routing.agentId,
-      params.targetAgentId,
-    );
-  }
-
-  const peerId = params.sessionId.trim() || params.userId;
-  return buildAgentSessionKey({
-    agentId: params.targetAgentId,
-    channel: params.routing.channel,
-    accountId: params.routing.accountId,
-    peer: { kind: "direct", id: peerId },
-    dmScope: "per-peer",
-  });
 }
 
 async function resolveSdkInboundMediaPayload(params: {
@@ -264,7 +210,7 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
   };
 
   const targetAgentId = resolveSdkTargetAgentId(routing.agentId, extraPayload);
-  const sessionKey = resolveSdkSessionKey({
+  const sessionKey = resolveByaiSessionKey({
     routing,
     targetAgentId,
     sessionId: message.sessionId,

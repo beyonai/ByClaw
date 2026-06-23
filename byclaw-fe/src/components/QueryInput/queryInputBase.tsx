@@ -1,7 +1,7 @@
 import React from 'react';
 
 import { getIntl } from '@umijs/max';
-import { Button, ConfigProvider, Divider, message, Popover, Space } from 'antd';
+import { Button, ConfigProvider, Divider, message, Popover, Progress, Space } from 'antd';
 import { get, isBoolean, isEmpty, isNil, pullAllBy, set, trim, compact, omit } from 'lodash';
 import classNames from 'classnames';
 import { agentTypeMap } from '@/constants/agent';
@@ -20,6 +20,7 @@ import type { IGlobalContext } from '@/layout/components/provider/global';
 import type { UploadFileRef } from './components/UploadFile';
 import type { IAgentFileUploadConf } from '../../hooks/useAgentUploadFileConfig';
 import type { DefaultValueSchema } from './RichInput/types';
+import type { ContextUsed } from '@/hooks/useContextUsed';
 
 export type IProps = {
   getMessageList?: () => Array<IMessage>;
@@ -49,6 +50,7 @@ export type IProps = {
   employeesList?: IAgentCache[];
   inputDraft?: DefaultValueSchema;
   onInputDraftChange?: (draft: DefaultValueSchema) => void;
+  contextUsed?: ContextUsed;
 };
 
 export type IState = {
@@ -582,6 +584,24 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           resourceAgentIds={this.getResourceAgentIds()}
         />
         {this.getAssitantTrigger()}
+      </div>
+    );
+  }
+
+  renderContextUsed() {
+    const { contextUsed } = this.props;
+    if (!contextUsed || !contextUsed.percent) return null;
+
+    return (
+      <div>
+        <Progress
+          type="circle"
+          strokeWidth={20}
+          size={16}
+          percent={contextUsed.percent}
+          strokeColor={contextUsed.strokeColor}
+          format={() => contextUsed.format}
+        />
       </div>
     );
   }

@@ -7,7 +7,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
-import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentTypeResolver;
+import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,10 +33,12 @@ class AssistantChatApplicationServiceTest {
         runningOutputStreamRegistry = mock(RunningOutputStreamRegistry.class);
         runningChatSnapshotService = mock(RunningChatSnapshotService.class);
 
+        TargetAgentResolver targetAgentResolver = new TargetAgentResolver();
+        ReflectionTestUtils.setField(targetAgentResolver, "ssResourceService", ssResourceService);
+
         assistantChatApplicationService = new AssistantChatApplicationService(gatewayClient);
         ReflectionTestUtils.setField(assistantChatApplicationService, "ssResourceService", ssResourceService);
-        ReflectionTestUtils.setField(assistantChatApplicationService, "targetAgentTypeResolver",
-            new TargetAgentTypeResolver());
+        ReflectionTestUtils.setField(assistantChatApplicationService, "targetAgentResolver", targetAgentResolver);
         ReflectionTestUtils.setField(assistantChatApplicationService, "runningOutputStreamRegistry",
             runningOutputStreamRegistry);
         ReflectionTestUtils.setField(assistantChatApplicationService, "runningChatSnapshotService",
