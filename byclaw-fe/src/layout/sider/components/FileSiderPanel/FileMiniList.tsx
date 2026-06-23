@@ -101,18 +101,24 @@ function getRawBlob(res: any) {
   return res?.file instanceof Blob ? res.file : res instanceof Blob ? res : new Blob([res?.file || res]);
 }
 
-function toFileTreeData(list: FileBrowserItem[], childrenByPath: Record<string, FileBrowserItem[]>): FileTreeItem[] {
+function toFileTreeData(
+  list: FileBrowserItem[],
+  childrenByPath: Record<string, FileBrowserItem[]>,
+  expandedDirectoryKeySet: Set<string>
+): FileTreeItem[] {
   return sortFileBrowserItems(list).map((item) => {
     const dir = isDirectory(item);
     const directoryPath = ensureDirectoryPath(item.path);
+    const expanded = dir && expandedDirectoryKeySet.has(directoryPath);
     return {
       ...item,
       key: dir ? directoryPath : item.path,
       title: <span>{item.name}</span>,
       isLeaf: !dir,
+      className: expanded ? styles.treeNodeExpanded : undefined,
       children:
         dir && childrenByPath[directoryPath]
-          ? toFileTreeData(childrenByPath[directoryPath], childrenByPath)
+          ? toFileTreeData(childrenByPath[directoryPath], childrenByPath, expandedDirectoryKeySet)
           : undefined,
     };
   });
@@ -152,6 +158,7 @@ interface FileTreeItem extends FileBrowserItem {
   key: string;
   title: React.ReactNode;
   isLeaf: boolean;
+  className?: string;
   children?: FileTreeItem[];
 }
 
@@ -773,8 +780,11 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   }, [items]);
 
   const fileTreeData = useMemo(() => {
-    return toFileTreeData(sortedItems, childrenByPath);
-  }, [childrenByPath, sortedItems]);
+    const expandedDirectoryKeySet = new Set(
+      expandedTreeKeys.map((key) => ensureDirectoryPath(normalizeFileBrowserPath(String(key))))
+    );
+    return toFileTreeData(sortedItems, childrenByPath, expandedDirectoryKeySet);
+  }, [childrenByPath, expandedTreeKeys, sortedItems]);
 
   const copyFolderPath = useMemo(() => {
     const rootPath = copyTargetType === 'session' ? SESSION_FILE_PATH : SHARED_FILE_PATH;
@@ -1814,10 +1824,16 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
               loadData={(node) => loadTreeNode(node as unknown as FileTreeItem)}
               icon={(node) => {
                 const item = node as unknown as FileTreeItem;
+                const directoryExpanded =
+                  isDirectory(item) &&
+                  expandedTreeKeys.includes(ensureDirectoryPath(normalizeFileBrowserPath(item.path)));
+                const iconType = directoryExpanded
+                  ? 'a-Folder-openwenjianjia-kai'
+                  : getIconType(item.name, isDirectory(item));
                 return (
                   <Tooltip title={item.name} placement="right">
                     <span>
-                      <AntdIcon type={`icon-${getIconType(item.name, isDirectory(item))}`} />
+                      <AntdIcon type={`icon-${iconType}`} />
                     </span>
                   </Tooltip>
                 );
@@ -1826,10 +1842,16 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
               onClick={handleTreeNodeClick as any}
               onDoubleClick={(_, node) => handleItemDoubleClick(node as unknown as FileTreeItem)}
               titleRender={(item) => {
-                const cursor = canPreviewFile(item as FileTreeItem) ? 'pointer' : 'default';
+                const treeItem = item as FileTreeItem;
+                const cursor = canPreviewFile(treeItem) ? 'pointer' : 'default';
+                const directoryExpanded =
+                  isDirectory(treeItem) &&
+                  expandedTreeKeys.includes(ensureDirectoryPath(normalizeFileBrowserPath(treeItem.path)));
 
                 return (
-                  <span className={styles.treeTitleContent}>
+                  <span
+                    className={`${styles.treeTitleContent} ${directoryExpanded ? styles.treeTitleContentExpanded : ''}`}
+                  >
                     <Tooltip title={item.name} placement="right">
                       <span className={styles.treeTitleName} style={{ cursor }}>
                         <span className={styles.treeTitleText} style={{ cursor }}>

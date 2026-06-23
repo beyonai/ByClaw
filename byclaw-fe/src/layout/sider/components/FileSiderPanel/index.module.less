@@ -232,6 +232,37 @@
     .@{antPrefix}-tree-switcher {
       width: 18px;
     }
+
+    .@{antPrefix}-tree-node-content-wrapper {
+      min-width: 0;
+      flex: 1;
+      transition: background 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
+    }
+  }
+}
+
+.treeNodeExpanded {
+  margin: 2px 0;
+
+  :global {
+    .@{antPrefix}-tree-switcher {
+      color: var(--beyond-color-primary, #1677ff);
+    }
+
+    .@{antPrefix}-tree-iconEle {
+      color: var(--beyond-color-primary, #1677ff);
+      filter: drop-shadow(0 2px 4px rgba(22, 119, 255, 0.16));
+    }
+
+    .@{antPrefix}-tree-node-content-wrapper {
+      border-radius: 10px;
+      background: linear-gradient(90deg, #edf6ff 0%, #f6fbff 100%);
+      box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.08);
+
+      &:hover {
+        background: linear-gradient(90deg, #e8f3ff 0%, #f2f8ff 100%);
+      }
+    }
   }
 }
 
@@ -241,6 +272,17 @@
   min-width: 0;
   width: 100%;
   max-width: 100%;
+}
+
+.treeTitleContentExpanded {
+  .treeTitleText {
+    color: var(--beyond-color-primary, #1677ff);
+    font-weight: 600;
+  }
+
+  .treeActionTrigger {
+    color: var(--beyond-color-primary, #1677ff);
+  }
 }
 
 .treeTitleName {
