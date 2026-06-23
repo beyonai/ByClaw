@@ -14,27 +14,25 @@ import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxHealthWatermarkMo
 @Mapper
 public interface SandboxHealthWatermarkModelMapper extends BaseMapper<SandboxHealthWatermarkModelEntity> {
 
-    String COLUMNS = """
-        id,
-        model_name AS "modelName",
-        service_type AS "serviceType",
-        profile_key AS "profileKey",
-        enabled,
-        priority,
-        idle_memory_limit_ratio AS "idleMemoryLimitRatio",
-        busy_memory_limit_ratio AS "busyMemoryLimitRatio",
-        critical_memory_limit_ratio AS "criticalMemoryLimitRatio",
-        busy_cpu_request_ratio AS "busyCpuRequestRatio",
-        critical_cpu_request_ratio AS "criticalCpuRequestRatio",
-        consecutive_busy_samples AS "consecutiveBusySamples",
-        recover_samples AS "recoverSamples",
-        sample_interval_seconds AS "sampleIntervalSeconds",
-        snapshot_ttl_seconds AS "snapshotTtlSeconds",
-        watch_ttl_seconds AS "watchTtlSeconds",
-        remark,
-        created_at AS "createdAt",
-        updated_at AS "updatedAt"
-        """;
+    String COLUMNS = " id,\n"
+        + "model_name AS \"modelName\",\n"
+        + "service_type AS \"serviceType\",\n"
+        + "profile_key AS \"profileKey\",\n"
+        + "enabled,\n"
+        + "priority,\n"
+        + "idle_memory_limit_ratio AS \"idleMemoryLimitRatio\",\n"
+        + "busy_memory_limit_ratio AS \"busyMemoryLimitRatio\",\n"
+        + "critical_memory_limit_ratio AS \"criticalMemoryLimitRatio\",\n"
+        + "busy_cpu_request_ratio AS \"busyCpuRequestRatio\",\n"
+        + "critical_cpu_request_ratio AS \"criticalCpuRequestRatio\",\n"
+        + "consecutive_busy_samples AS \"consecutiveBusySamples\",\n"
+        + "recover_samples AS \"recoverSamples\",\n"
+        + "sample_interval_seconds AS \"sampleIntervalSeconds\",\n"
+        + "snapshot_ttl_seconds AS \"snapshotTtlSeconds\",\n"
+        + "watch_ttl_seconds AS \"watchTtlSeconds\",\n"
+        + "remark,\n"
+        + "created_at AS \"createdAt\",\n"
+        + "updated_at AS \"updatedAt\"";
 
     @Select("""
         <script>
