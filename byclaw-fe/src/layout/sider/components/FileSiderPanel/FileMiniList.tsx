@@ -578,6 +578,71 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     [activeSessionId, intl, isSearching, items, resourceId, updateCategoryCache]
   );
 
+  const refreshExpandedDirectories = useCallback(
+    async (payload?: { sessionId?: string }) => {
+      const payloadSessionId = getMessagePayloadSessionId(payload);
+      if (payloadSessionId) {
+        setMessageSessionId(payloadSessionId);
+      }
+
+      const categoryKey = activeCategoryKeyRef.current;
+      if (!categoryKey) return;
+
+      const categoryRootPath = getCategoryRootPath(categoryKey);
+      const normalizedCurrentPath = ensureDirectoryPath(normalizeFileBrowserPath(currentPathRef.current));
+      const requestPath =
+        categoryKey !== 'root' && !isPathIn(normalizedCurrentPath, categoryRootPath)
+          ? categoryRootPath
+          : normalizedCurrentPath;
+      const expandedDirectoryPaths = Array.from(
+        new Set(
+          expandedTreeKeys
+            .map((key) => ensureDirectoryPath(normalizeFileBrowserPath(String(key))))
+            .filter((path) => path !== requestPath && (categoryKey === 'root' || isPathIn(path, categoryRootPath)))
+        )
+      );
+
+      setLoading(true);
+      try {
+        const [rootResponse, ...expandedResponses] = await Promise.all([
+          listFiles({ resourceId, path: requestPath }),
+          ...expandedDirectoryPaths.map((path) => listFiles({ resourceId, path })),
+        ]);
+        const nextItems = unwrapListResponse<FileBrowserItem>(rootResponse);
+        const refreshedChildrenByPath = expandedDirectoryPaths.reduce<Record<string, FileBrowserItem[]>>(
+          (acc, path, index) => {
+            acc[path] = unwrapListResponse<FileBrowserItem>(expandedResponses[index]);
+            return acc;
+          },
+          {}
+        );
+        const nextChildrenByPath = {
+          ...(categoryCacheRef.current[categoryKey]?.childrenByPath || {}),
+          ...refreshedChildrenByPath,
+        };
+
+        updateCategoryCache(categoryKey, {
+          path: requestPath,
+          items: nextItems,
+          childrenByPath: nextChildrenByPath,
+        });
+
+        if (
+          activeCategoryKeyRef.current === categoryKey &&
+          ensureDirectoryPath(normalizeFileBrowserPath(currentPathRef.current)) === requestPath
+        ) {
+          setItems(nextItems);
+          setChildrenByPath(nextChildrenByPath);
+        }
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [expandedTreeKeys, intl, resourceId, updateCategoryCache]
+  );
+
   useEffect(() => {
     activeCategoryKeyRef.current = activeCategoryKey;
   }, [activeCategoryKey]);
@@ -674,29 +739,15 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     [activeSessionId, expandCurrentSessionDirectory, fetchList, fileCategories, intl, resourceId]
   );
 
-  // 监听会话聊天产生的文件，当打开 session tab 时刷新文件列表
+  // 监听会话聊天产生的文件，刷新当前打开分类和已展开目录
   useEffect(() => {
-    const refreshCurrentSessionFiles = (payload?: { sessionId?: string }) => {
-      const payloadSessionId = getMessagePayloadSessionId(payload);
-      if (payloadSessionId) {
-        setMessageSessionId(payloadSessionId);
-      }
-      if (activeCategoryKey !== 'session') return;
-      delete categoryCacheRef.current.session;
-      currentPathRef.current = SESSION_FILE_PATH;
-      setCurrentPath(SESSION_FILE_PATH);
-      void fetchList(SESSION_FILE_PATH, { force: true, categoryKey: 'session' }).then(() =>
-        expandCurrentSessionDirectory(payloadSessionId || activeSessionId)
-      );
-    };
-
     const hasFiles = (payload?: { fileList?: any[]; imageList?: any[] }) => {
       return Boolean(payload?.fileList?.length || payload?.imageList?.length);
     };
 
     const handleSessionFileCreated = (payload: { fileList?: any[]; imageList?: any[]; sessionId?: string }) => {
       if (hasFiles(payload)) {
-        refreshCurrentSessionFiles(payload);
+        void refreshExpandedDirectories(payload);
       }
     };
 
@@ -705,7 +756,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     }) => {
       const message = payload?.message;
       if (hasFiles(message) || message?.status === SSEEventStatus.done) {
-        refreshCurrentSessionFiles(message);
+        void refreshExpandedDirectories(message);
       }
     };
 
@@ -715,7 +766,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       EventEmitter.off('beyond-create-message', handleSessionFileCreated);
       EventEmitter.off('beyond-update-message', handleSessionFileUpdated);
     };
-  }, [activeCategoryKey, activeSessionId, expandCurrentSessionDirectory, fetchList]);
+  }, [refreshExpandedDirectories]);
 
   const sortedItems = useMemo(() => {
     return sortFileBrowserItems(items);
