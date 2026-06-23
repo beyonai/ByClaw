@@ -25,7 +25,6 @@ _SQL_DIR = Path(__file__).resolve().parent.parent / "sql"
 _TABLES_TO_DROP = (
     "kgw_metadata_property_sync",
     "kgw_metadata_property_binding",
-    "kgw_metadata_binding_outbox",
     "kgw_metadata_property",
     "kgw_audit_log",
     "kgw_kb_source_lock",
@@ -200,12 +199,12 @@ async def test_delete_rejected_when_in_use(mp_client, mp_pool):
     pid = await _query_property_id(mp_pool, "t_e4")
     assert pid is not None
 
-    # Manually insert a SYNCED binding row to simulate in-use state
+    # Manually insert a BOUND binding row to simulate in-use state
     async with mp_pool.connection() as conn:
         await conn.execute(
             "INSERT INTO kgw_metadata_property_binding "
-            "(property_id, kn_code, file_path, status, attempt_id, bound_at) "
-            "VALUES (%s, 'kn_test', '/docs/file.pdf', 'SYNCED', 1, NOW())",
+            "(property_id, kn_code, file_path, status, bound_at, updated_at) "
+            "VALUES (%s, 'kn_test', '/docs/file.pdf', 'BOUND', NOW(), NOW())",
             (pid,),
         )
         await conn.commit()
@@ -221,6 +220,7 @@ async def test_delete_rejected_when_in_use(mp_client, mp_pool):
     assert body["resultObject"]["totalReferences"] == 1
     assert isinstance(body["resultObject"]["inUseSamples"], list)
     assert len(body["resultObject"]["inUseSamples"]) >= 1
+    assert body["resultObject"]["inUseSamples"][0]["status"] == "BOUND"
 
 
 async def test_batch_create_atomic_rollback(mp_client):

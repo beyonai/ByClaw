@@ -54,7 +54,6 @@ _KB_REDIS_KEY = f"KG_DOC_{_KN_CODE}"
 _TABLES_TO_DROP = (
     "kgw_metadata_property_sync",
     "kgw_metadata_property_binding",
-    "kgw_metadata_binding_outbox",
     "kgw_metadata_property",
     "kgw_audit_log",
     "kgw_kb_source_lock",
@@ -256,6 +255,33 @@ async def test_full_lifecycle_create_use_delete_recreate(lc_client, lc_pool):
     del_body = r_del.json()
     assert del_body["resultCode"] == "-1", del_body
     assert del_body["resultObject"]["errorCode"] == "MetadataPropertyInUse"
+
+
+async def test_delete_property_rejects_deleting_binding(lc_client, lc_pool):
+    prop_name = "delete_blocked_deleting"
+
+    await _create_property(lc_client, prop_name, "string")
+    pid = await _query_property_id(lc_pool, prop_name)
+    assert pid is not None
+
+    async with lc_pool.connection() as conn:
+        await conn.execute(
+            "INSERT INTO kgw_metadata_property_binding "
+            "(property_id, kn_code, file_path, status, bound_at, updated_at) "
+            "VALUES (%s, 'hr', '/docs/in-use.md', 'DELETING', NOW(), NOW())",
+            (pid,),
+        )
+        await conn.commit()
+
+    resp = await lc_client.post(
+        f"{_MP_BASE}/delete",
+        headers={"X-User-Id": "tester"},
+        json={"propertyName": prop_name},
+    )
+
+    body = resp.json()
+    assert body["resultCode"] != "0", body
+    assert body["resultObject"]["errorCode"] == "MetadataPropertyInUse"
 
 
 async def test_unset_releases_binding_then_delete_passes(lc_client, lc_pool):

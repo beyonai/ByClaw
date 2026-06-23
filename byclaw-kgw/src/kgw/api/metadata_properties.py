@@ -202,7 +202,7 @@ async def metadata_property_delete(
                 # Must run on same conn as FOR UPDATE to avoid a TOCTOU race with concurrent binds.
                 await cur.execute(
                     "SELECT COUNT(*) AS c FROM kgw_metadata_property_binding "
-                    "WHERE property_id=%s AND status IN ('PENDING','SYNCED')",
+                    "WHERE property_id=%s AND status IN ('BOUND','DELETING')",
                     (pid,),
                 )
                 count_row = await cur.fetchone()
