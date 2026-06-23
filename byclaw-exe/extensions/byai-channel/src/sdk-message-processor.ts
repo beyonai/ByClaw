@@ -176,9 +176,9 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
   });
 
   const extraPayload = message.extraPayload as {
-    agent_id?: string;
-    agent_code?: string;
-    agent_name?: string;
+    agent_id?: unknown;
+    agent_code?: unknown;
+    agent_name?: unknown;
   };
 
   const targetAgentId = resolveSdkTargetAgentId(routing.agentId, extraPayload);
@@ -217,9 +217,9 @@ type DeliverReplyUnderGateDeps = SdkProcessorDeps & {
   };
   targetAgentId: string;
   extraPayload: {
-    agent_id?: string;
-    agent_code?: string;
-    agent_name?: string;
+    agent_id?: unknown;
+    agent_code?: unknown;
+    agent_name?: unknown;
   };
 };
 

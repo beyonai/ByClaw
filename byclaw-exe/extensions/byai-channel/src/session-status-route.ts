@@ -6,7 +6,6 @@ import { resolveByaiAccount, resolveDefaultByaiAccountId } from "./config.js";
 import { getByaiRuntime } from "./runtime.js";
 import {
   BYAI_CHANNEL_ID,
-  normalizeByaiAgentId,
   resolveByaiAgentIdFromSessionKey,
   resolveByaiSessionKey,
   resolveSdkTargetAgentId,
@@ -175,7 +174,7 @@ export function registerByaiSessionStatusRoute(api: OpenClawPluginApi): void {
         peer: { kind: "direct", id: sessionId },
       });
       const targetAgentId = resolveSdkTargetAgentId(routing.agentId, {
-        agent_id: normalizeByaiAgentId(rawAgentId),
+        agent_id: rawAgentId,
       });
       const sessionKey = resolveByaiSessionKey({
         routing,
