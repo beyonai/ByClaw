@@ -1091,7 +1091,7 @@ const EmployeeDetail = ({ loading }) => {
           ownerType: formOwnerType,
           advancedSettings = [],
         } = res;
-        const queryData = omit(resultDataRef.current || {}, ['roleAttributes']);
+        const queryData = omit(resultDataRef.current || {}, ['roleAttributes', 'relPrompt', 'workStandard']);
         const param = {};
 
         set(queryData, 'avatar', avatar);
@@ -1205,7 +1205,6 @@ const EmployeeDetail = ({ loading }) => {
           sentenceAndTone: roleJson.sentenceAndTone || '',
           skills: bundledSkills,
           relSkills: bundledSkills,
-          workStandard: roleJson.workStandard || '',
           corePersonaDefinition: roleJson.corePersonaDefinition || roleJson.personalityDefinition || '',
           toolStandard: roleJson.toolStandard || '',
           memoryStandard: roleJson.memoryStandard || '',
