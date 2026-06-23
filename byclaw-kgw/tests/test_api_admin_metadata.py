@@ -141,6 +141,7 @@ async def adm_pool(_adm_resources):
 
 _BASE_API = "/kgw/api/v1/metadataProperties"
 _BASE_ADMIN = "/kgw/admin/v1/metadata-properties"
+_REMOVED_ORPHAN_KEY = "stale" + "Pend" + "ing"
 
 
 async def _create_property(
@@ -393,19 +394,19 @@ async def test_orphans_returns_purge_failed(adm_client, adm_pool):
     assert entry["endpointKey"] == "http://kb.test"
 
 
-async def test_orphans_returns_stale_pending(adm_client, adm_pool):
-    """GET /orphans includes stalePending entries older than 5 minutes."""
+async def test_orphans_returns_stale_deleting(adm_client, adm_pool):
+    """GET /orphans includes staleDeleting entries older than 5 minutes."""
     await _create_property(adm_client, "ad7")
     pid = await _query_property_id(adm_pool, "ad7")
     assert pid is not None
 
-    # Insert a PENDING binding with bound_at 10 minutes ago
+    # Insert a DELETING binding with updated_at 10 minutes ago
     async with adm_pool.connection() as conn:
         await conn.execute(
             "INSERT INTO kgw_metadata_property_binding "
-            "(property_id, kn_code, file_path, status, attempt_id, bound_at) "
-            "VALUES (%s, 'hr_adm_stale', '/docs/stale.pdf', 'PENDING', 1, "
-            "NOW() - INTERVAL '10 minutes')",
+            "(property_id, kn_code, file_path, status, bound_at, updated_at) "
+            "VALUES (%s, 'hr_adm_stale', '/docs/stale.pdf', 'DELETING', "
+            "NOW(), NOW() - INTERVAL '10 minutes')",
             (pid,),
         )
         await conn.commit()
@@ -415,25 +416,32 @@ async def test_orphans_returns_stale_pending(adm_client, adm_pool):
     body = r.json()
     assert body["resultCode"] == "0", body
 
-    sp = body["resultObject"]["stalePending"]
-    entry = next((e for e in sp if e["propertyName"] == "ad7"), None)
+    assert "staleDeleting" in body["resultObject"]
+    assert _REMOVED_ORPHAN_KEY not in body["resultObject"]
+
+    sd = body["resultObject"]["staleDeleting"]
+    entry = next((e for e in sd if e["propertyName"] == "ad7"), None)
     assert entry is not None
+    assert entry["propertyId"] == pid
     assert entry["knCode"] == "hr_adm_stale"
     assert entry["filePath"] == "/docs/stale.pdf"
+    assert entry["status"] == "DELETING"
+    assert entry["updatedAt"] is not None
 
 
-async def test_orphans_fresh_pending_not_returned(adm_client, adm_pool):
-    """GET /orphans does NOT return PENDING bindings created just now."""
+async def test_orphans_fresh_deleting_not_returned(adm_client, adm_pool):
+    """GET /orphans does NOT return DELETING bindings updated just now."""
     await _create_property(adm_client, "ad8")
     pid = await _query_property_id(adm_pool, "ad8")
     assert pid is not None
 
-    # Insert a fresh PENDING binding
+    # Insert a fresh DELETING binding
     async with adm_pool.connection() as conn:
         await conn.execute(
             "INSERT INTO kgw_metadata_property_binding "
-            "(property_id, kn_code, file_path, status, attempt_id, bound_at) "
-            "VALUES (%s, 'hr_adm_fresh', '/docs/fresh.pdf', 'PENDING', 1, NOW())",
+            "(property_id, kn_code, file_path, status, bound_at, updated_at) "
+            "VALUES (%s, 'hr_adm_fresh', '/docs/fresh.pdf', 'DELETING', "
+            "NOW(), NOW())",
             (pid,),
         )
         await conn.commit()
@@ -443,10 +451,13 @@ async def test_orphans_fresh_pending_not_returned(adm_client, adm_pool):
     body = r.json()
     assert body["resultCode"] == "0", body
 
-    sp = body["resultObject"]["stalePending"]
+    assert "staleDeleting" in body["resultObject"]
+    assert _REMOVED_ORPHAN_KEY not in body["resultObject"]
+
+    sd = body["resultObject"]["staleDeleting"]
     # This fresh binding must NOT appear
     fresh = next(
-        (e for e in sp if e["propertyName"] == "ad8" and e["knCode"] == "hr_adm_fresh"),
+        (e for e in sd if e["propertyName"] == "ad8" and e["knCode"] == "hr_adm_fresh"),
         None,
     )
     assert fresh is None

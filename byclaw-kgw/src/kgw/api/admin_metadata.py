@@ -70,8 +70,8 @@ async def admin_orphans(
 
     No backend HTTP calls. Purely local DB queries.
 
-    purgeFailed  — sync rows with sync_status='PURGE_FAILED'
-    stalePending — binding rows with status='PENDING' older than 5 minutes
+    purgeFailed   — sync rows with sync_status='PURGE_FAILED'
+    staleDeleting — binding rows with status='DELETING' older than 5 minutes
     """
     pool = request.app.state.pool
 
@@ -118,21 +118,23 @@ async def admin_orphans(
                 )
             pf_rows = await cur.fetchall()
 
-            # --- stalePending ---
+            # --- staleDeleting ---
             if kn_code is not None:
                 await cur.execute(
                     """
                     SELECT
+                        b.property_id,
                         p.property_name,
                         b.kn_code,
                         b.file_path,
-                        b.bound_at
+                        b.status,
+                        b.updated_at
                     FROM kgw_metadata_property_binding b
                     JOIN kgw_metadata_property p ON p.property_id = b.property_id
-                    WHERE b.status = 'PENDING'
-                      AND b.bound_at < NOW() - (5 * INTERVAL '1 minute')
+                    WHERE b.status = 'DELETING'
+                      AND b.updated_at < NOW() - (5 * INTERVAL '1 minute')
                       AND b.kn_code = %s
-                    ORDER BY b.bound_at
+                    ORDER BY b.updated_at
                     """,
                     (kn_code,),
                 )
@@ -140,18 +142,20 @@ async def admin_orphans(
                 await cur.execute(
                     """
                     SELECT
+                        b.property_id,
                         p.property_name,
                         b.kn_code,
                         b.file_path,
-                        b.bound_at
+                        b.status,
+                        b.updated_at
                     FROM kgw_metadata_property_binding b
                     JOIN kgw_metadata_property p ON p.property_id = b.property_id
-                    WHERE b.status = 'PENDING'
-                      AND b.bound_at < NOW() - (5 * INTERVAL '1 minute')
-                    ORDER BY b.bound_at
+                    WHERE b.status = 'DELETING'
+                      AND b.updated_at < NOW() - (5 * INTERVAL '1 minute')
+                    ORDER BY b.updated_at
                     """
                 )
-            sp_rows = await cur.fetchall()
+            sd_rows = await cur.fetchall()
 
     purge_failed = [
         {
@@ -163,17 +167,19 @@ async def admin_orphans(
         for row in pf_rows
     ]
 
-    stale_pending = [
+    stale_deleting = [
         {
+            "propertyId": row["property_id"],
             "propertyName": row["property_name"],
             "knCode": row["kn_code"],
             "filePath": row["file_path"],
-            "boundAt": row["bound_at"].isoformat() if row["bound_at"] else None,
+            "status": row["status"],
+            "updatedAt": row["updated_at"].isoformat() if row["updated_at"] else None,
         }
-        for row in sp_rows
+        for row in sd_rows
     ]
 
-    return success({"purgeFailed": purge_failed, "stalePending": stale_pending})
+    return success({"purgeFailed": purge_failed, "staleDeleting": stale_deleting})
 
 
 @router.post("/{property_name}/sync-retry")
