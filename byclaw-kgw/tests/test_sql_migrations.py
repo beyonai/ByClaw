@@ -8,6 +8,19 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SQL_DIR = REPO_ROOT / "sql"
 
 
+def test_metadata_binding_migration_uses_bound_deleting_statuses():
+    sql = (SQL_DIR / "006_kgw_metadata_property_binding.sql").read_text()
+
+    assert "DEFAULT 'BOUND'" in sql
+    assert "CHECK (status IN ('BOUND', 'DELETING'))" in sql
+    assert "idx_binding_deleting" in sql
+    assert "WHERE status = 'DELETING'" in sql
+    assert "idx_binding_pending" not in sql
+    assert "WHERE status = 'PENDING'" not in sql
+    assert "attempt_id" not in sql
+    assert "kgw_metadata_binding_outbox" not in sql
+
+
 @pytest.mark.integration
 async def test_s1_migrations_create_expected_tables(pg_dsn: str):
     from kgw.db import build_pool, run_migrations
@@ -128,7 +141,7 @@ async def test_s4_migrations_create_expected_tables(pg_dsn: str):
             row = await cur.fetchone()
             assert row["prop"] >= 1
             assert row["binding"] >= 1
-            assert row["outbox"] >= 1
+            assert row["outbox"] == 0
             assert row["sync"] >= 1
     finally:
         async with pool.connection() as conn:
