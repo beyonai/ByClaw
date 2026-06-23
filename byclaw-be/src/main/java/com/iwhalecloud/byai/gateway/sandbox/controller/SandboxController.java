@@ -496,7 +496,7 @@ public class SandboxController {
     }
 
     @PostMapping("/health/watermark/delete")
-    @Operation(summary = "删除沙箱健康水位模型", description = "逻辑停用指定水位模型")
+    @Operation(summary = "删除沙箱健康水位模型", description = "物理删除指定水位模型")
     public ResponseUtil deleteSandboxHealthWatermarkModel(@RequestBody Map<String, Object> params) {
         Long id = parseLongParam(params.get("id"));
         if (id == null) {

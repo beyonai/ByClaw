@@ -59,7 +59,7 @@ public class SandboxHealthWatermarkModelService {
         if (entity == null) {
             return;
         }
-        mapper.disableModel(id);
+        mapper.deleteById(id);
         refreshCache(entity.getServiceType(), entity.getProfileKey());
     }
 

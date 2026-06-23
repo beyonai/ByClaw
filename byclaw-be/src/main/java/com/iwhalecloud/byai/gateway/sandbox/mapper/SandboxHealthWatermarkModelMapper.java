@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
@@ -119,6 +120,7 @@ public interface SandboxHealthWatermarkModelMapper extends BaseMapper<SandboxHea
           #{sampleIntervalSeconds}, #{snapshotTtlSeconds}, #{watchTtlSeconds}, #{remark}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         )
         """)
+    @Options(useGeneratedKeys = true, keyProperty = "id", keyColumn = "id")
     int insertModel(SandboxHealthWatermarkModelEntity entity);
 
     @Update("""
