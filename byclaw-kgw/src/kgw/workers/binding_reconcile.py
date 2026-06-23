@@ -52,7 +52,8 @@ async def _fetch_stale_deleting(
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT b.property_id, b.kn_code, b.file_path, p.backend_name "
+                "SELECT b.property_id, b.kn_code, b.file_path, b.updated_at, "
+                "p.backend_name "
                 "FROM kgw_metadata_property_binding b "
                 "JOIN kgw_metadata_property p ON p.property_id = b.property_id "
                 "WHERE b.status='DELETING' "
@@ -116,26 +117,82 @@ async def _reconcile_deleting(
     for row in rows:
         has_field = await _backend_has_metadata_field(state, row)
         if has_field is True:
-            restored += await binding_mod.restore_bound(
+            n = await _restore_bound_if_unchanged(
                 pool,
                 property_id=row["property_id"],
                 kn_code=row["kn_code"],
                 file_path=row["file_path"],
+                updated_at=row["updated_at"],
             )
-            kgw_metadata_reconcile_total.labels(
-                action="deleting", result="restored"
-            ).inc()
+            restored += n
+            if n:
+                kgw_metadata_reconcile_total.labels(
+                    action="deleting", result="restored"
+                ).inc(n)
         elif has_field is False:
-            deleted += await binding_mod.confirm_deleting_absent(
+            n = await _confirm_deleting_absent_if_unchanged(
                 pool,
                 property_id=row["property_id"],
                 kn_code=row["kn_code"],
                 file_path=row["file_path"],
+                updated_at=row["updated_at"],
             )
-            kgw_metadata_reconcile_total.labels(
-                action="deleting", result="deleted"
-            ).inc()
+            deleted += n
+            if n:
+                kgw_metadata_reconcile_total.labels(
+                    action="deleting", result="deleted"
+                ).inc(n)
     return deleted, restored
+
+
+async def _restore_bound_if_unchanged(
+    pool: AsyncConnectionPool,
+    *,
+    property_id: int,
+    kn_code: str,
+    file_path: str,
+    updated_at: Any,
+) -> int:
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE kgw_metadata_property_binding "
+                "SET status=%s, updated_at=NOW() "
+                "WHERE property_id=%s AND kn_code=%s AND file_path=%s "
+                "  AND status=%s AND updated_at=%s",
+                (
+                    binding_mod.BOUND,
+                    property_id,
+                    kn_code,
+                    file_path,
+                    binding_mod.DELETING,
+                    updated_at,
+                ),
+            )
+            n = cur.rowcount
+        await conn.commit()
+    return n
+
+
+async def _confirm_deleting_absent_if_unchanged(
+    pool: AsyncConnectionPool,
+    *,
+    property_id: int,
+    kn_code: str,
+    file_path: str,
+    updated_at: Any,
+) -> int:
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM kgw_metadata_property_binding "
+                "WHERE property_id=%s AND kn_code=%s AND file_path=%s "
+                "  AND status=%s AND updated_at=%s",
+                (property_id, kn_code, file_path, binding_mod.DELETING, updated_at),
+            )
+            n = cur.rowcount
+        await conn.commit()
+    return n
 
 
 async def _clear_stale_syncing(

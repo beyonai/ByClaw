@@ -46,7 +46,7 @@ class _FakeResponse:
 
 class _FakeHttp:
     def __init__(self):
-        self._items: list[dict[str, Any] | Exception] = []
+        self._items: list[dict[str, Any] | Exception | Any] = []
 
     def queue_json(self, body: dict[str, Any]) -> None:
         self._items.append(body)
@@ -56,6 +56,8 @@ class _FakeHttp:
 
     async def post(self, *args, **kwargs):  # pylint: disable=unused-argument
         item = self._items.pop(0)
+        if callable(item):
+            item = await item()
         if isinstance(item, Exception):
             raise item
         return _FakeResponse(item)
@@ -114,6 +116,18 @@ async def _clean_rows(pool) -> None:
         await conn.commit()
 
 
+async def _fetch_binding(pool, *, property_id: int, file_path: str) -> dict | None:
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT property_id, kn_code, file_path, status, updated_at "
+                "FROM kgw_metadata_property_binding "
+                "WHERE property_id=%s AND kn_code=%s AND file_path=%s",
+                (property_id, _KN_CODE, file_path),
+            )
+            return await cur.fetchone()
+
+
 async def test_stale_deleting_removed_when_backend_has_no_field(rc_pool, fake_state):
     await _clean_rows(rc_pool)
     prop = await create_property(
@@ -139,6 +153,10 @@ async def test_stale_deleting_removed_when_backend_has_no_field(rc_pool, fake_st
 
     assert deleted_n == 1
     assert restored_n == 0
+    row = await _fetch_binding(
+        rc_pool, property_id=prop.property_id, file_path="/docs/rc_absent.md"
+    )
+    assert row is None
 
 
 async def test_stale_deleting_restored_when_backend_has_field(rc_pool, fake_state):
@@ -171,6 +189,11 @@ async def test_stale_deleting_restored_when_backend_has_field(rc_pool, fake_stat
 
     assert deleted_n == 0
     assert restored_n == 1
+    row = await _fetch_binding(
+        rc_pool, property_id=prop.property_id, file_path="/docs/rc_present.md"
+    )
+    assert row is not None
+    assert row["status"] == "BOUND"
 
 
 async def test_stale_deleting_kept_when_backend_unavailable(rc_pool, fake_state):
@@ -198,3 +221,51 @@ async def test_stale_deleting_kept_when_backend_unavailable(rc_pool, fake_state)
 
     assert deleted_n == 0
     assert restored_n == 0
+    row = await _fetch_binding(
+        rc_pool, property_id=prop.property_id, file_path="/docs/rc_unknown.md"
+    )
+    assert row is not None
+    assert row["status"] == "DELETING"
+
+
+async def test_stale_deleting_race_does_not_delete_refreshed_row(rc_pool, fake_state):
+    await _clean_rows(rc_pool)
+    prop = await create_property(
+        rc_pool, property_name="rc_deleting_race", value_type="string"
+    )
+    async with rc_pool.connection() as conn:
+        await conn.execute(
+            "INSERT INTO kgw_metadata_property_binding "
+            "(property_id, kn_code, file_path, status, bound_at, updated_at) "
+            "VALUES (%s, %s, %s, 'DELETING', NOW(), "
+            "NOW() - INTERVAL '10 minutes')",
+            (prop.property_id, _KN_CODE, "/docs/rc_race.md"),
+        )
+        await conn.commit()
+
+    async def refresh_row_before_backend_response():
+        async with rc_pool.connection() as conn:
+            await conn.execute(
+                "UPDATE kgw_metadata_property_binding "
+                "SET updated_at=NOW() "
+                "WHERE property_id=%s AND kn_code=%s AND file_path=%s",
+                (prop.property_id, _KN_CODE, "/docs/rc_race.md"),
+            )
+            await conn.commit()
+        return {"resultCode": "0", "resultObject": {"metadata": {}}}
+
+    fake_state.http.queue_json(refresh_row_before_backend_response)
+
+    deleted_n, restored_n, _ = await reconcile_iteration(
+        rc_pool,
+        state=fake_state,
+        deleting_threshold_minutes=5,
+    )
+
+    assert deleted_n == 0
+    assert restored_n == 0
+    row = await _fetch_binding(
+        rc_pool, property_id=prop.property_id, file_path="/docs/rc_race.md"
+    )
+    assert row is not None
+    assert row["status"] == "DELETING"
