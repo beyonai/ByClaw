@@ -289,7 +289,7 @@ const Sidebar = () => {
               placement="right"
               title={intl.formatMessage({
                 id: 'sider.employeeResourceGroup.tooltip',
-                defaultMessage: '跟随当前数字员工',
+                defaultMessage: '知识、工具、视图、对象、技能、文件会跟随当前数字员工切换',
               })}
             >
               <div
@@ -298,7 +298,13 @@ const Sidebar = () => {
                   isEmployeeResourceActive && styles.employeeResourceGroupActive
                 )}
               >
-                {employeeResourceTabItems.map(renderTabItem)}
+                <span className={styles.employeeResourceGroupLabel}>
+                  {intl.formatMessage({
+                    id: 'sider.employeeResourceGroup.label',
+                    defaultMessage: '联动资源',
+                  })}
+                </span>
+                <div className={styles.employeeResourceGroupItems}>{employeeResourceTabItems.map(renderTabItem)}</div>
               </div>
             </Tooltip>
           )}

@@ -97,6 +97,7 @@
   background: linear-gradient(180deg, rgba(22, 93, 255, 0.04), rgba(13, 59, 128, 0.03));
   border: 1px solid transparent;
   transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s;
+  overflow: hidden;
 
   &::before {
     content: '';
@@ -112,6 +113,52 @@
     border-color: rgba(22, 93, 255, 0.14);
     box-shadow: inset 0 0 0 1px rgba(22, 93, 255, 0.04);
   }
+
+  &:hover {
+    .employeeResourceGroupLabel {
+      opacity: 1;
+      transform: translateX(0);
+    }
+
+    .employeeResourceGroupItems {
+      transform: translateX(7px) scale(0.92);
+    }
+  }
+}
+
+.employeeResourceGroupLabel {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 2px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(~'--@{antPrefix}-color-primary');
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 1px;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.employeeResourceGroupItems {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  transform-origin: center;
+  transition: transform 0.2s ease;
 }
 
 .employeeResourceGroupActive {
