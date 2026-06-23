@@ -73,6 +73,7 @@ public class SandboxResizeService {
     private final SsSandboxRecordMapper sandboxRecordMapper;
     private final SsSandboxResizeRecordMapper resizeRecordMapper;
     private final SandboxService sandboxService;
+    private final SandboxHealthCacheService sandboxHealthCacheService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newHttpClient();
 
@@ -82,7 +83,8 @@ public class SandboxResizeService {
                                 SandboxServiceProfileEntityMapper profileEntityMapper,
                                 @Lazy SsSandboxRecordMapper sandboxRecordMapper,
                                 SsSandboxResizeRecordMapper resizeRecordMapper,
-                                @Lazy SandboxService sandboxService) {
+                                @Lazy SandboxService sandboxService,
+                                SandboxHealthCacheService sandboxHealthCacheService) {
         this.sandboxProperties = sandboxProperties;
         this.openSandboxClient = openSandboxClient;
         this.specRepository = specRepository;
@@ -90,6 +92,7 @@ public class SandboxResizeService {
         this.sandboxRecordMapper = sandboxRecordMapper;
         this.resizeRecordMapper = resizeRecordMapper;
         this.sandboxService = sandboxService;
+        this.sandboxHealthCacheService = sandboxHealthCacheService;
     }
 
     public SsSandboxResizeRecord handleResizeRequest(Map<String, Object> params) {
@@ -260,6 +263,7 @@ public class SandboxResizeService {
             audit.setOpensandboxResponse(responseJson);
 
             cleanupReplacedRemoteAfterResize(record, newSandboxId);
+            sandboxHealthCacheService.evictSnapshot(record.getUserCode(), serviceType);
             LOGGER.info("沙箱扩缩容成功，recordId={}，sandboxId={}，fromProfile={}，toProfile={}，durationMs={}",
                 record.getId(), record.getSandboxId(), fromProfileKey, resolvedToProfileKey, durationMs);
             return audit;
@@ -739,6 +743,7 @@ public class SandboxResizeService {
             audit.setFinishedAt(finishedAt);
             audit.setDurationMs(durationMs);
             audit.setOpensandboxResponse(responseJson);
+            sandboxHealthCacheService.evictSnapshot(record.getUserCode(), serviceType);
             LOGGER.warn("沙箱异常自动恢复已重启，recordId={}，sandboxId={}，status={}，targetProfile={}，preferredServiceKey={}，reasonCode={}",
                 record.getId(), record.getSandboxId(), record.getStatus(), resolvedToProfileKey, preferredServiceKey,
                 reasonCode);
@@ -794,6 +799,7 @@ public class SandboxResizeService {
             audit.setFinishedAt(finishedAt);
             audit.setDurationMs(durationMs);
             audit.setOpensandboxResponse(responseJson);
+            sandboxHealthCacheService.evictSnapshot(record.getUserCode(), serviceType);
             LOGGER.warn("非运行态沙箱扩容已转为升配重拉，recordId={}，sandboxId={}，status={}，targetProfile={}，preferredServiceKey={}，message={}",
                 record.getId(), record.getSandboxId(), record.getStatus(), resolvedToProfileKey, preferredServiceKey,
                 message);

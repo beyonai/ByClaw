@@ -150,6 +150,10 @@ public class SandboxService {
 
     @Lazy
     @Autowired
+    private SandboxHealthWatchService sandboxHealthWatchService;
+
+    @Lazy
+    @Autowired
     private RedisClient redisClient;
 
     /** 系统参数：允许同时使用的沙箱数量上限，paramCode=ENABLE_USE_SANDBOX_NUM */
@@ -895,6 +899,7 @@ public class SandboxService {
                 continue;
             }
             sandboxMetadataCache.put(toSandboxInfo(updatedRecord));
+            sandboxHealthWatchService.touch(userCode, resolveHealthServiceType(updatedRecord));
             updatedCount++;
         }
         if (!skippedRecords.isEmpty()) {
@@ -925,6 +930,7 @@ public class SandboxService {
                 continue;
             }
             sandboxMetadataCache.put(toSandboxInfo(updatedRecord));
+            sandboxHealthWatchService.touch(userCode, resolveHealthServiceType(updatedRecord));
             updatedCount++;
         }
         if (!skippedRecords.isEmpty()) {
@@ -937,6 +943,13 @@ public class SandboxService {
         LOGGER.debug("沙箱心跳成功，用户编码：{}，资源ID：{}，命中记录数：{}，更新记录数：{}，lastAccessTime：{}",
             userCode, resourceId, records.size(), updatedCount, now);
         return true;
+    }
+
+    private String resolveHealthServiceType(SsSandboxRecord record) {
+        if (record == null) {
+            return null;
+        }
+        return StringUtils.defaultIfBlank(record.getServiceType(), record.getSandboxType());
     }
 
     /**

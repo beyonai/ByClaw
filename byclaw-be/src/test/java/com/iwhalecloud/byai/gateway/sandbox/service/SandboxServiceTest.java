@@ -209,9 +209,11 @@ class SandboxServiceTest {
     void heartbeat_refreshesAllRunningSandboxesForCurrentUser() {
         SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxHealthWatchService sandboxHealthWatchService = mock(SandboxHealthWatchService.class);
         SandboxService sandboxService = new SandboxService();
         ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
         ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
+        ReflectionTestUtils.setField(sandboxService, "sandboxHealthWatchService", sandboxHealthWatchService);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserCode("user001");
@@ -251,15 +253,19 @@ class SandboxServiceTest {
         verify(sandboxRecordMapper).updateLastAccessTime(eq(1L), any(Date.class), eq(3));
         verify(sandboxRecordMapper).updateLastAccessTime(eq(2L), any(Date.class), eq(7));
         verify(sandboxMetadataCache, times(2)).put(any(SandboxInfo.class));
+        verify(sandboxHealthWatchService).touch("user001", "openclaw");
+        verify(sandboxHealthWatchService).touch("user001", "byclaw-code-agent");
     }
 
     @Test
     void heartbeatOpenclawSandbox_refreshesOnlyOpenclawRunningSandboxes() {
         SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxHealthWatchService sandboxHealthWatchService = mock(SandboxHealthWatchService.class);
         SandboxService sandboxService = new SandboxService();
         ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
         ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
+        ReflectionTestUtils.setField(sandboxService, "sandboxHealthWatchService", sandboxHealthWatchService);
 
         SsSandboxRecord openclawRecord = new SsSandboxRecord();
         openclawRecord.setId(1L);
@@ -283,6 +289,7 @@ class SandboxServiceTest {
         verify(sandboxRecordMapper).updateLastAccessTime(eq(1L), any(Date.class), eq(3));
         verify(sandboxRecordMapper, never()).selectRunningByUser("user001");
         verify(sandboxMetadataCache).put(any(SandboxInfo.class));
+        verify(sandboxHealthWatchService).touch("user001", "openclaw");
     }
 
     @Test

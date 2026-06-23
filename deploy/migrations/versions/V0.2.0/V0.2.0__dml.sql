@@ -705,5 +705,50 @@ WHERE e.resource_id = r.resource_id
       'volcengine-podcast-tts', 'wechat-tech-article'
   );
 
+-- 沙箱健康检测-默认水位模型初始化
+INSERT INTO byai.sandbox_health_watermark_model (
+    model_name,
+    service_type,
+    profile_key,
+    enabled,
+    priority,
+    idle_memory_limit_ratio,
+    busy_memory_limit_ratio,
+    critical_memory_limit_ratio,
+    busy_cpu_request_ratio,
+    critical_cpu_request_ratio,
+    consecutive_busy_samples,
+    recover_samples,
+    sample_interval_seconds,
+    snapshot_ttl_seconds,
+    watch_ttl_seconds,
+    remark
+)
+SELECT
+    'Default sandbox health model',
+    'default',
+    NULL,
+    1,
+    0,
+    0.55,
+    0.75,
+    0.88,
+    1.00,
+    1.80,
+    2,
+    2,
+    30,
+    120,
+    90,
+    'Fallback model used when no service/profile model exists.'
+FROM (SELECT 1) seed
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM byai.sandbox_health_watermark_model
+    WHERE service_type = 'default'
+      AND COALESCE(profile_key, '') = ''
+      AND enabled = 1
+);
+
 COMMIT;
 ---平台内置技能初始化------end-----
