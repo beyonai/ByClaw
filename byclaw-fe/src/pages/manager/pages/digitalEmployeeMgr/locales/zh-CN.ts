@@ -216,6 +216,7 @@ export default {
   'employeeDetail.digitalEmployeeDesc': '数字员工描述',
   'employeeDetail.digitalEmployeeDescRequired': '请输入数字员工描述',
   'employeeDetail.digitalEmployeeDescPlaceholder': '请输入数字员工描述',
+  'employeeDetail.fieldMaxLength': '{field}不能超过{max}个字符，当前为{current}个字符',
   'employeeDetail.coreAbility': '岗位职责',
   'employeeDetail.example': '样例',
   'employeeDetail.viewOldVersion': '查看旧版',
