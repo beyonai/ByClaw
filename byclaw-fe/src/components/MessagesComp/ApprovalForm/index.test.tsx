@@ -250,6 +250,57 @@ describe('ApprovalForm', () => {
     });
   });
 
+  it('normalizes date_time fieldValue according to the field format on initial render', async () => {
+    const content: OperationFormConfirmation = {
+      sourceAgentType: 'agent',
+      metadata: '{}',
+      schemaVersion: '1',
+      formId: 'approval-form',
+      title: 'Approval',
+      description: 'Please confirm',
+      substance: [
+        {
+          toolCallId: 'tool-call-1',
+          toolName: 'tool-one',
+          actionCode: 'action-one',
+          actionName: 'Action One',
+          title: 'Step One',
+          description: 'First step',
+          rule: [
+            [
+              {
+                formType: 'date_time',
+                fieldCode: 'planSignDate',
+                fieldPath: 'requestBody.planSignDate',
+                fieldName: 'planSignDate',
+                fieldType: 'string',
+                description: '计划签约日期(yyyy-MM-dd HH:mm:ss)',
+                required: false,
+                readonly: false,
+                disabled: false,
+                isHidden: false,
+                defaultFiles: [],
+                format: 'yyyy-MM-dd',
+                fieldValue: '2026-06-23 22:00:00',
+              },
+            ],
+          ],
+        },
+      ],
+    };
+
+    const dateTimeField = content.substance[0].rule[0][0];
+
+    render(<ApprovalForm {...createApprovalFormProps(content)} />);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('2026-06-23')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(dateTimeField.fieldValue).toBe('2026-06-23');
+    });
+  });
+
   it('renders horizontal steps and only the current step form content', async () => {
     const { container, messageListItemContent } = renderApprovalForm();
 
