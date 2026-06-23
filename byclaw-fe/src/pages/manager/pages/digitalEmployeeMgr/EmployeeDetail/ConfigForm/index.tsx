@@ -91,7 +91,6 @@ const promptFieldGroups = {
 
 const promptFieldNames = Array.from(new Set(Object.values(promptFieldGroups).flat()));
 const rolePromptFieldNames = [
-  'roleAttributes',
   'processingFlow',
   'personalityDimensions',
   'wordPreferences',
@@ -965,9 +964,7 @@ const ConfigForm = (props) => {
       };
       const hasAgentPromptField =
         allTabs.some((tab) => tab.key === 'agent') || Object.prototype.hasOwnProperty.call(current, 'agent');
-      const effectiveWorkStandard = hasAgentPromptField
-        ? current.agent || ''
-        : current.workStandard || current.roleAttributes || '';
+      const effectiveWorkStandard = hasAgentPromptField ? current.agent || '' : current.workStandard || '';
 
       rolePromptFieldNames.forEach((key) => {
         roleObj[key] =
@@ -975,7 +972,6 @@ const ConfigForm = (props) => {
           (key === 'customPromptTabs' ? [] : key === 'customPromptValues' ? {} : key === 'bundledSkills' ? [] : '');
       });
       roleObj.workStandard = effectiveWorkStandard;
-      roleObj.roleAttributes = effectiveWorkStandard;
 
       // 将所有配置存成 JSON 放到 corePersonaDefinition 字段（数组格式）
       const corePersonaDefinition: Array<{ name: string; nameEn?: string; key: string; value: string; tip?: string }> =
@@ -1050,7 +1046,6 @@ const ConfigForm = (props) => {
         role: JSON.stringify(roleObj),
         corePersonaDefinition: corePersonaDefinitionJson,
         workStandard: effectiveWorkStandard,
-        roleAttributes: effectiveWorkStandard,
       });
       internalSyncRef.current = false;
 
@@ -2615,12 +2610,6 @@ const ConfigForm = (props) => {
               coreCompetencies: coreCompetenciesFromTpl,
               abilityBoundary: data.constraints || '',
               exampleQuestions: faqsText,
-              roleAttributes:
-                data.roleAttributes ||
-                data.workStandard ||
-                parsedSystemFields.workStandard ||
-                parsedSystemFields.agent ||
-                '',
               processingFlow: data.processingFlow || '',
               personalityDimensions: data.personalityDimensions || '',
               wordPreferences: data.wordPreferences || '',
@@ -2663,7 +2652,6 @@ const ConfigForm = (props) => {
             } catch {
               roleObj = {};
             }
-            roleObj.roleAttributes = data.roleAttributes || data.workStandard || '';
             roleObj.processingFlow = data.processingFlow || '';
             roleObj.personalityDimensions = data.personalityDimensions || '';
             roleObj.wordPreferences = data.wordPreferences || '';
