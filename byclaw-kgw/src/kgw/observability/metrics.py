@@ -73,7 +73,7 @@ kgw_metadata_purge_total: Counter = Counter(
 kgw_metadata_reconcile_total: Counter = Counter(
     "kgw_metadata_reconcile_total",
     "Reconcile worker actions",
-    ["action", "result"],  # action: outbox_drain / stale_pending / stale_syncing
+    ["action", "result"],  # action: deleting / stale_syncing
     registry=REGISTRY,
 )
 

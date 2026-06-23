@@ -1,14 +1,9 @@
-"""metadataProperty binding reconcile worker — orphan cleanup.
+"""metadataProperty binding reconcile worker.
 
-Handles two kinds of orphans without any backend HTTP calls:
-
-1. ``kgw_metadata_binding_outbox`` (ROLLBACK_FAILED): delete the
-   corresponding binding row by attempt_id, then drain the outbox entry.
-
-2. Stale PENDING binding rows: any PENDING row older than
-   ``pending_threshold_minutes`` is deleted.  Re-running metadata/update
-   will recreate the binding in the correct state; the worker's job is only
-   to prevent accumulation of zombie PENDING rows.
+Stale ``DELETING`` rows are conservative in-use markers for unbind cleanup in
+progress. The worker confirms the backend state for those rows: if the backend
+still has the metadata field, the row returns to ``BOUND``; if the field is
+absent, the row is removed.
 """
 
 from __future__ import annotations
@@ -17,8 +12,11 @@ import asyncio
 import contextlib
 from typing import Any
 
+from kgw.dispatcher import _DEFAULT_KB_PATHS, KbOp
+from kgw.metadata import binding as binding_mod
 from kgw.observability.logger import get_logger
 from kgw.observability.metrics import kgw_metadata_reconcile_total
+from kgw.upstream import call_backend_json
 from psycopg_pool import AsyncConnectionPool
 
 _log = get_logger(__name__)
@@ -27,78 +25,117 @@ _log = get_logger(__name__)
 async def reconcile_iteration(
     pool: AsyncConnectionPool,
     *,
-    pending_threshold_minutes: int = 5,
+    state: Any | None = None,
+    deleting_threshold_minutes: int = 5,
     stale_syncing_threshold_minutes: int = 10,
     batch_size: int = 50,
 ) -> tuple[int, int, int]:
     """Run one reconcile pass.
 
-    Returns (outbox_drained, stale_pending_deleted, stale_syncing_cleared).
+    Returns (deleting_deleted, deleting_restored, stale_syncing_cleared).
     """
-    outbox_n = await _drain_outbox(pool, batch_size)
-    stale_n = await _delete_stale_pending(pool, pending_threshold_minutes)
+    deleted_n = 0
+    restored_n = 0
+    if state is not None:
+        deleted_n, restored_n = await _reconcile_deleting(
+            pool, state, deleting_threshold_minutes, batch_size
+        )
     syncing_n = await _clear_stale_syncing(pool, stale_syncing_threshold_minutes)
-    return outbox_n, stale_n, syncing_n
+    return deleted_n, restored_n, syncing_n
 
 
-async def _drain_outbox(pool: AsyncConnectionPool, batch_size: int) -> int:
-    """Delete binding rows for outbox entries, then remove outbox rows."""
-    drained = 0
-    async with pool.connection() as conn:
-        async with conn.transaction():
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    "SELECT id, property_id, kn_code, file_path, attempt_id "
-                    "FROM kgw_metadata_binding_outbox "
-                    "ORDER BY created_at "
-                    "LIMIT %s "
-                    "FOR UPDATE SKIP LOCKED",
-                    (batch_size,),
-                )
-                rows = await cur.fetchall()
-            for row in rows:
-                async with conn.cursor() as cur2:
-                    await cur2.execute(
-                        "DELETE FROM kgw_metadata_property_binding "
-                        "WHERE property_id=%s AND kn_code=%s "
-                        "  AND file_path=%s AND attempt_id=%s",
-                        (
-                            row["property_id"],
-                            row["kn_code"],
-                            row["file_path"],
-                            row["attempt_id"],
-                        ),
-                    )
-                    await cur2.execute(
-                        "DELETE FROM kgw_metadata_binding_outbox WHERE id=%s",
-                        (row["id"],),
-                    )
-                    drained += 1
-                    kgw_metadata_reconcile_total.labels(
-                        action="outbox_drain", result="success"
-                    ).inc()
-    return drained
-
-
-async def _delete_stale_pending(
-    pool: AsyncConnectionPool, threshold_minutes: int
-) -> int:
-    """Delete PENDING binding rows older than threshold."""
+async def _fetch_stale_deleting(
+    pool: AsyncConnectionPool,
+    threshold_minutes: int,
+    batch_size: int,
+) -> list[dict]:
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "DELETE FROM kgw_metadata_property_binding "
-                "WHERE status='PENDING' "
-                "  AND bound_at < NOW() - (%s * INTERVAL '1 minute')",
-                (threshold_minutes,),
+                "SELECT b.property_id, b.kn_code, b.file_path, p.backend_name "
+                "FROM kgw_metadata_property_binding b "
+                "JOIN kgw_metadata_property p ON p.property_id = b.property_id "
+                "WHERE b.status='DELETING' "
+                "  AND b.updated_at < NOW() - (%s * INTERVAL '1 minute') "
+                "ORDER BY b.updated_at "
+                "LIMIT %s",
+                (threshold_minutes, batch_size),
             )
-            n = cur.rowcount
-        await conn.commit()
-    if n:
-        kgw_metadata_reconcile_total.labels(
-            action="stale_pending", result="deleted"
-        ).inc(n)
-    return n
+            return list(await cur.fetchall())
+
+
+async def _backend_has_metadata_field(state: Any, row: dict) -> bool | None:
+    cfg = await state.config_provider.get_kb_config(row["kn_code"])
+    if cfg is None:
+        return None
+
+    op_id = KbOp.KNOWLEDGE_ITEMS_METADATA_GET
+    op_path = cfg.operation_path(op_id) or _DEFAULT_KB_PATHS.get(
+        op_id, f"/{op_id.value}"
+    )
+    body = {
+        "knCode": cfg.resource_code,
+        "filePath": row["file_path"],
+        "metadataFieldList": [row["backend_name"]],
+    }
+    headers = await state.auth_provider.resolve_headers(cfg.headers, user_code=None)
+
+    try:
+        resp = await call_backend_json(
+            config=cfg,
+            op_path=op_path,
+            body=body,
+            headers=headers,
+            http=state.http,
+        )
+    except Exception:
+        _log.exception(
+            "binding_reconcile.metadata_get_failed",
+            property_id=row["property_id"],
+            kn_code=row["kn_code"],
+            file_path=row["file_path"],
+        )
+        return None
+
+    if resp.get("resultCode") != "0":
+        return None
+
+    metadata = (resp.get("resultObject") or {}).get("metadata") or {}
+    return row["backend_name"] in metadata
+
+
+async def _reconcile_deleting(
+    pool: AsyncConnectionPool,
+    state: Any,
+    threshold_minutes: int,
+    batch_size: int,
+) -> tuple[int, int]:
+    rows = await _fetch_stale_deleting(pool, threshold_minutes, batch_size)
+    deleted = 0
+    restored = 0
+    for row in rows:
+        has_field = await _backend_has_metadata_field(state, row)
+        if has_field is True:
+            restored += await binding_mod.restore_bound(
+                pool,
+                property_id=row["property_id"],
+                kn_code=row["kn_code"],
+                file_path=row["file_path"],
+            )
+            kgw_metadata_reconcile_total.labels(
+                action="deleting", result="restored"
+            ).inc()
+        elif has_field is False:
+            deleted += await binding_mod.confirm_deleting_absent(
+                pool,
+                property_id=row["property_id"],
+                kn_code=row["kn_code"],
+                file_path=row["file_path"],
+            )
+            kgw_metadata_reconcile_total.labels(
+                action="deleting", result="deleted"
+            ).inc()
+    return deleted, restored
 
 
 async def _clear_stale_syncing(
@@ -140,12 +177,14 @@ async def run_reconcile_loop(
         if stop_event is not None and stop_event.is_set():
             return
         try:
-            outbox_n, stale_n, syncing_n = await reconcile_iteration(pool)
-            if outbox_n or stale_n or syncing_n:
+            deleted_n, restored_n, syncing_n = await reconcile_iteration(
+                pool, state=state
+            )
+            if deleted_n or restored_n or syncing_n:
                 _log.info(
                     "reconcile.iteration.done",
-                    outbox_drained=outbox_n,
-                    stale_deleted=stale_n,
+                    deleting_deleted=deleted_n,
+                    deleting_restored=restored_n,
                     stale_syncing_cleared=syncing_n,
                 )
         except Exception:  # noqa: BLE001
