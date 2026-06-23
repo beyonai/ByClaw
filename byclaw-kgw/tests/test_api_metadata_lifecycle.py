@@ -280,8 +280,10 @@ async def test_delete_property_rejects_deleting_binding(lc_client, lc_pool):
     )
 
     body = resp.json()
-    assert body["resultCode"] != "0", body
+    assert body["resultCode"] == "-1", body
     assert body["resultObject"]["errorCode"] == "MetadataPropertyInUse"
+    assert body["resultObject"]["totalReferences"] == 1
+    assert body["resultObject"]["inUseSamples"][0]["status"] == "DELETING"
 
 
 async def test_unset_releases_binding_then_delete_passes(lc_client, lc_pool):
