@@ -4,6 +4,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMapper;
+import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceProfileEntityMapper;
 import com.iwhalecloud.byai.gateway.sandbox.spec.MybatisSandboxServiceSpecRepository;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 
@@ -14,7 +15,9 @@ import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 public class SandboxServiceSpecConfiguration {
 
     @Bean
-    public SandboxServiceSpecRepository sandboxServiceSpecRepository(SandboxServiceSpecEntityMapper mapper) {
-        return new MybatisSandboxServiceSpecRepository(mapper);
+    public SandboxServiceSpecRepository sandboxServiceSpecRepository(SandboxServiceSpecEntityMapper mapper,
+                                                                     SandboxServiceProfileEntityMapper profileMapper,
+                                                                     SandboxProperties properties) {
+        return new MybatisSandboxServiceSpecRepository(mapper, profileMapper, properties);
     }
 }

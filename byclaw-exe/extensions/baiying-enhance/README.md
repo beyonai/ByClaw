@@ -92,8 +92,8 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 
 完整链路如下：
 
-1. **监听层**：百应侧修改数字员工模型后，Redis Pub/Sub `digEmployeeChangeChannel` 或授权视图变化触发 `AgentWatchdog.__flushNow`；插件重新读取 `DIG_EMPLOYEE_{resourceId}`，用其中的 `prologue.modelId` 解析最新模型绑定。
-2. **配置层**：`mergeManagedAgentsIntoConfig` 写入 `agents.list[].model.primary`、`models.providers.baiying-m-*`，并登记 `agents.defaults.models`；网关热重载会刷新内存配置与 model catalog（`resetModelCatalogCache`）。**API Key 不在 `auth-profiles.json`**：`authToken` 通过 `models.providers.*.apiKey` 的 exec SecretRef + `secrets.providers.baiying-aimodel-redis` 解析；每次成功 `writeConfigFile` 后 OpenClaw 会 `prepareSecretsRuntimeSnapshot` 刷新**运行时 secrets 快照**（内存中的 `getRuntimeConfig()`）。插件 sync 后若日志出现 `runtime secrets snapshot did not materialize apiKey`，说明快照未解析成功，请查 `SECRETS_RELOADER_DEGRADED` 或 aimodel resolver CLI/Redis。若 Redis 员工 JSON 未变但 `agents.list` 与托管 `modelRef` 不一致，插件也会强制 `writeConfigFile` 以触发刷新。
+1. **监听层**：百应侧修改数字员工模型后，Redis Pub/Sub `digEmployeeChangeChannel` 或授权视图变化触发 `AgentWatchdog.__flushNow`；插件重新读取 `DIG_EMPLOYEE_{resourceId}`，有 `prologue.modelId` 时按该模型解析，没有时读取 Redis Hash `byai:aimodel:typelist` 的 `LLM` field 作为默认 LLM 模型。**main** 在每次 agent run 的 `before_model_resolve` 会再读 Redis typelist，与 `~/.openclaw/baiying-enhance/aimodel-default-llm-index.json` diff，**仅当默认 LLM 变化时**触发 sync 并自动切换 main 的模型（写 `agents.list[].model.primary` + 运行时 override）。
+2. **配置层**：`mergeManagedAgentsIntoConfig` 写入 `agents.list[].model.primary`、`agents.defaults.model.primary`（供 main/default 使用）、`models.providers.baiying-m-*`，并登记 `agents.defaults.models`；网关热重载会刷新内存配置与 model catalog（`resetModelCatalogCache`）。**API Key 不在 `auth-profiles.json`**：`authToken` 通过 `models.providers.*.apiKey` 的 exec SecretRef + `secrets.providers.baiying-aimodel-redis` 解析；每次成功 `writeConfigFile` 后 OpenClaw 会 `prepareSecretsRuntimeSnapshot` 刷新**运行时 secrets 快照**（内存中的 `getRuntimeConfig()`）。插件 sync 后若日志出现 `runtime secrets snapshot did not materialize apiKey`，说明快照未解析成功，请查 `SECRETS_RELOADER_DEGRADED` 或 aimodel resolver CLI/Redis。若 Redis 员工 JSON 未变但 `agents.list` 与托管 `modelRef` 不一致，插件也会强制 `writeConfigFile` 以触发刷新。
 3. **会话层**：OpenClaw auto-reply 实际读取 `providerOverride` / `modelOverride`；插件在每次成功 `writeConfigFile` 后会对当时已存在的 session 做 reconcile（日志 `reconciled session model for …`），同步 `providerOverride` / `modelOverride` 与 `modelProvider` / `model`，并在模型变化时写入 `liveModelSwitchPending`。**新建的 SDK/byai 会话**（例如 `byai-channel:direct:10006251`）可能在 reconcile 之后才创建，因此插件还会在每条入站消息的 `before_dispatch` 钩子里把当前 session 对齐到 `agents.list[].model.primary`。
 4. **运行层**：`before_model_resolve` 在每轮 embedded run 再次强制 provider/model，避免内存 session 快照滞后；`before_prompt_build` 还会追加当前运行模型事实，减少模型自我介绍沿用旧上下文。上述 conversation hooks 从 `~/.openclaw/extensions/` 等非 bundled 路径加载时需 `plugins.entries.baiying-enhance.hooks.allowConversationAccess=true`，见下。
 5. **Channel 层**：`byai-channel` 的 SDK worker 在每次投递消息时读取 `getByaiRuntime().config.current()`，不再使用插件启动时捕获的旧配置，因此配置热重载后新的入站消息会走最新 agent/model 定义。
@@ -141,7 +141,7 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 
 ### 模型配置与 API Key
 
-生产注册路径不会从 `DIG_EMPLOYEE_{resourceId}` 读取或写出模型密钥。插件只解析数字员工 JSON 中的 `prologue.modelId`，再从 Redis Hash `byai:aimodel:config`（可用 `aimodelConfigRedisKey` 覆盖）按 field `<modelId>` 读取模型详情。
+生产注册路径不会从 `DIG_EMPLOYEE_{resourceId}` 读取或写出模型密钥。插件优先解析数字员工 JSON 中的 `prologue.modelId`，再从 Redis Hash `byai:aimodel:config`（可用 `aimodelConfigRedisKey` 覆盖）按 field `<modelId>` 读取模型详情。若数字员工没有配置 `modelId`，则读取 Redis Hash `byai:aimodel:typelist`（可用 `aimodelTypeListRedisKey` 覆盖）的 `LLM` field，选择可用默认 LLM，并同时写入 `agents.defaults.model.primary` 供 main agent 使用。
 
 模型详情映射到托管 `models.providers.baiying-m-*`：
 
@@ -164,7 +164,7 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 
 `id` 使用 `model:<modelId>` 形式是为了满足 OpenClaw exec SecretRef id 的合法字符约束；resolver 会还原为 Redis field `-2000`。SecretRef provider 由插件自动写入 `secrets.providers.baiying-aimodel-redis`，执行随插件构建产物一起发布的 `dist/aimodel-secret-resolver-cli.js`，并复用 `REDIS_HOST` / `REDIS_PORT` / `REDIS_DATABASE` / `REDIS_USERNAME` / `REDIS_PASSWORD` 以及当前 `.env` 加载规则。
 
-如果 `prologue.modelId` 缺失，或 `byai:aimodel:config` 中找不到可用模型配置，插件仍会注册该数字员工，但不写托管 provider/model，让 OpenClaw 使用默认模型配置。
+如果 `prologue.modelId` 缺失，数字员工会绑定到 `byai:aimodel:typelist`/`LLM` 给出的默认模型；如果对应 Redis 模型配置暂时不可用，插件会尽量保留上一次成功同步的模型绑定，否则仍会注册该数字员工并回退到 OpenClaw 既有默认模型配置。
 
 ### 运行态说明
 
@@ -179,11 +179,13 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 
 - [docs/PLUGIN_OVERVIEW.zh-CN.md](docs/PLUGIN_OVERVIEW.zh-CN.md)
 - [docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md](docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md)（JSON → 工作区 Markdown 映射）
+- [docs/HUB_SKILL_SYNC_SOLUTION.zh-CN.html](docs/HUB_SKILL_SYNC_SOLUTION.zh-CN.html)（Hub Skill 自动更新与动态加载过滤方案）
 
 ## Redis Agent JSON 格式
 
 - **数字员工键**：`DIG_EMPLOYEE_{resourceId}`，值为后端同步的完整数字员工配置 JSON。
 - **关联资源键**：`{BIZTYPE}_{resourceId}`，例如 `TOOLKIT_10000050`、`MCP_10001`、`KG_DOC_10002`。
+- **资源 headers 占位符**：关联资源 JSON 的 `headers` 值若为 `${fieldName}`，执行前会读取 `user:${userId}:login:auth` Hash，并按 Hash field 忽略大小写替换；`userId` 优先来自运行态 auth context，缺省时用 `SHARE_BFM_USER_CODE_${USER_CODE}` 映射，最后回退 `USER_CODE`。
 - **兼容格式**：适配器仍支持百应详情、旧 `agent_list` 导出、原生简化 JSON；生产注册路径只按授权 id 从 Redis 读取。
 
 ### `relSkills` 与网关里的 `agents.list[].skills`
@@ -191,7 +193,8 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 插件把托管 agent 合并进当前生效配置（通常为 **`openclaw.json`**）时，每个 **`baiying-agent-*`** 列表项都会写出 **`skills`** 字段：
 
 - 默认 **`[]`**（不再省略该字段）。
-- 若 JSON **根**上存在非空的 **`relSkills`**（字符串数组，例如 `["dws","clawhub"]`），则写入 **`agents.list[].skills`**（元素会 `trim`，空串丢弃）。
+- 若 JSON **根**上存在非空的 **`relSkills`**，则写入 **`agents.list[].skills`**。兼容旧字符串数组（例如 `["dws","clawhub"]`），也支持对象数组：`{ "skillCode": "dws", "skillType": "inner" }` 只引用内置 skill；`{ "skillCode": "guizang-ppt-skill-main", "skillType": "hub", "skillUrl": "/byaiService/tool/downloadSkillZip?skillId=10026639", "versionUrl": "/byaiService/tool/getSkillVersion?skillId=10026639" }` 会写入 `skillCode`。
+- 对 `skillType: "hub"` 的对象，`hubSkillAutoSync` 默认开启：插件会从 Redis 服务注册表 `byai_gateway:sd:instances:ByaiService` 发现 ByaiService，先请求 `versionUrl`，当本地 `${OPENCLAW_STATE_DIR}/skills/<skillCode>/.baiying-hub-skill.json` 版本不一致或缺少 `SKILL.md` 时，再请求 `skillUrl` 下载 zip 并覆盖 `${OPENCLAW_STATE_DIR}/skills/<skillCode>`。鉴权复用登录态/Redis 登录 Hash/环境变量中的 `Beyond-Token`、`Sso-Token`、`Authorization`、`X-User-Id`。
 - 若无有效 `relSkills`，则回退读取根级 **`skills`**（兼容旧版原生 JSON）；仍无则为 **`[]`**。
 - 若 `workspaceSkillAutoEnable` 未关闭，插件还会自动扫描用户上传的 `skills/<目录>/SKILL.md`，并优先使用 `SKILL.md` frontmatter 里的 `name` 作为 OpenClaw skill filter 名称：默认只把当前 agent workspace 下的 skill 并入该 agent，不读取其它 agent workspace；main workspace (`workspace/skills`) 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 并入托管子 agent。扫描有 `fs.watch` 与 `workspaceSkillScanIntervalMs` 兜底（默认 `500` ms）；兜底扫描只做 skill diff，不重新读取数字员工 Redis，也不会触发托管 Agent 增删。
 - 对 rclone/FUSE 等网盘挂载，`fs.watch` 与目录类型上报可能不可靠；插件会依赖周期扫描，并在 `Dirent` 类型未知时用 `stat()` 兜底识别 skill 目录。

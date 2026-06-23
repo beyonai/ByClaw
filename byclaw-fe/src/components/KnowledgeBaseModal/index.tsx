@@ -9,6 +9,7 @@ import { useIntl } from '@umijs/max';
 import KnowledgeBreadcrumb from '../KnowledgeBreadcrumb';
 import { getResourceListByPage, queryDirAndFileByLevel } from '@/service/knowledgeCenter';
 import { ResourceTypeMap, FileUploadStatusMap, FileUploadStatusColors } from '@/constants/resource';
+import { getFileIconType } from '@/constants/icon';
 import { getRuntimeActualUrl } from '@/utils';
 import { saveShowcaseToDoc } from '@/service/showcase';
 import AntdIcon from '@/components/AntdIcon';
@@ -214,22 +215,7 @@ const KnowledgeBaseModal: React.FC<KnowledgeBaseModalProps> = (props) => {
       dataIndex: 'name',
       title: intl.formatMessage({ id: 'common.fileName' }),
       render: (v: string, record: any) => {
-        let iconType = '';
-        if (/\.(doc|docx)$/.test(v)) {
-          iconType = 'Word';
-        } else if (v?.endsWith('.pdf')) {
-          iconType = 'PDF';
-        } else if (/\.(xls|xlsx)$/.test(v)) {
-          iconType = 'Excel';
-        } else if (v?.endsWith('.txt')) {
-          iconType = 'jishiben';
-        } else if (v?.endsWith('.ppt')) {
-          iconType = 'PPT';
-        } else if (/\.(png|jpg|jpeg)$/.test(v)) {
-          iconType = 'Image';
-        } else if (record.type === 'directory') {
-          iconType = 'wenjianjia';
-        }
+        const iconType = getFileIconType(v, { isDirectory: record.type === 'directory' });
 
         return (
           <div style={{ display: 'flex', alignItems: 'center', columnGap: 12, width: '100%' }}>

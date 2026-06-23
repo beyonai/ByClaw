@@ -28,6 +28,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -76,6 +77,9 @@ public class FilesApplicationService {
 
     @Autowired
     private UserBucketNamingService userBucketNamingService;
+
+    @Value("${file.storage.type:minio}")
+    private String storageType;
 
     /**
      * 上传文件到指定会话
@@ -372,8 +376,10 @@ public class FilesApplicationService {
         commonFileStorage.write(commonFilePathResolver.icon(filePath), multipartFile.getBytes(), contentType);
 
         // 替换请求地址
-        String fileUrl = "/commonFile/preview?style=minio&bucketName={bucketName}&filePath={filePath}";
-        fileUrl = fileUrl.replace("{bucketName}", Constants.BUCKET_NAME_ICON).replace("{filePath}", filePath);
+        String currentStorageType = StringUtils.defaultIfBlank(storageType, StorageType.MINIO);
+        String fileUrl = "/commonFile/preview?style={style}&bucketName={bucketName}&filePath={filePath}";
+        fileUrl = fileUrl.replace("{style}", currentStorageType).replace("{bucketName}", Constants.BUCKET_NAME_ICON)
+            .replace("{filePath}", filePath);
 
         Files byaiFiles = new Files();
         byaiFiles.setFileId(sequenceService.nextVal());
@@ -384,7 +390,7 @@ public class FilesApplicationService {
         byaiFiles.setCreateBy(CurrentUserHolder.getCurrentUserId());
         byaiFiles.setUploadDate(new Date());
         byaiFiles.setCompleteTime(new Date());
-        byaiFiles.setFileSystemType(StorageType.MINIO);
+        byaiFiles.setFileSystemType(currentStorageType);
         byaiFiles.setFileUrl(fileUrl);
         filesService.save(byaiFiles);
 
@@ -432,7 +438,7 @@ public class FilesApplicationService {
      * @param filePath 文件路径
      * @return 输入流
      */
-    private InputStream openCommonFileInputStream(String bucketName, String filePath) {
+    public InputStream openCommonFileInputStream(String bucketName, String filePath) {
         try {
             return commonFileStorage.read(commonFilePathResolver.arbitrary(bucketName, filePath));
         }

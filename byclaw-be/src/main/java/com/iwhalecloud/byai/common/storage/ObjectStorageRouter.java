@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.storage.config.ObjectStorageConfiguration;
+import com.iwhalecloud.byai.common.storage.constants.StorageType;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.storage.model.StorageObject;
@@ -35,7 +36,7 @@ public class ObjectStorageRouter implements ObjectStorage {
     private AbstractObjectStorageService<?> getService() {
         String storageType = objectStorageConfiguration.getStorageConfig().getStorageType();
         for (AbstractObjectStorageService<?> service : storageServices) {
-            if (service.getStorageType().equalsIgnoreCase(storageType)) {
+            if (StorageType.matches(storageType, service.getStorageType())) {
                 return service;
             }
         }
@@ -61,6 +62,11 @@ public class ObjectStorageRouter implements ObjectStorage {
     @Override
     public InputStream get(StorageLocation location) {
         return getService().get(location);
+    }
+
+    @Override
+    public FileMetadata metadata(StorageLocation location) {
+        return getService().metadata(location);
     }
 
     @Override

@@ -128,6 +128,7 @@ const DigitalEmployeesPage: React.FC = () => {
         }}
         defaultParam={dropdownParam}
         activeTab={activeTab}
+        alwaysShowStatusFilter
       />
       <Input
         suffix={

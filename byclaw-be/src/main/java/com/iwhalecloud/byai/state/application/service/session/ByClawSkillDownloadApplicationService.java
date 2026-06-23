@@ -16,8 +16,6 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.storage.UserFS;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
-import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 
 /**
  * 用户工作空间 skill 下载应用服务。
@@ -36,7 +34,7 @@ public class ByClawSkillDownloadApplicationService {
     private UserFS userFS;
 
     @Autowired
-    private SsResourceService ssResourceService;
+    private ByClawSkillPathResolver skillPathResolver;
 
     /**
      * 准备一次 skill 下载。校验路径合规并返回 (zipFileName, body) 二元组；body 由 controller 直接交给 Spring 写回响应。
@@ -51,7 +49,7 @@ public class ByClawSkillDownloadApplicationService {
         if (StringUtils.isBlank(userCode)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.user.code.notempty"));
         }
-        String normalizedSkillPath = normalizeSkillPath(skillPath, resourceId);
+        String normalizedSkillPath = normalizeSkillPath(userCode, skillPath, resourceId);
         String skillName = extractSkillName(normalizedSkillPath);
 
         // 提前列对象一次：让"路径不存在 / skill 为空"在 controller 进入流式输出前就能转成可读错误。
@@ -108,11 +106,11 @@ public class ByClawSkillDownloadApplicationService {
      * - 去除尾部 '/'；
      * - 必须至少落在一个具体的 skill 目录上（前缀本身不允许，避免一次拉走所有 skills）。
      */
-    private String normalizeSkillPath(String skillPath, Long resourceId) {
+    private String normalizeSkillPath(String userCode, String skillPath, Long resourceId) {
         if (StringUtils.isBlank(skillPath)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.path.invalid"));
         }
-        String skillRootPrefix = resolveSkillRootPrefix(resourceId);
+        String skillRootPrefix = skillPathResolver.resolveSkillRootPrefix(userCode, resourceId);
         String normalized = skillPath.replace('\\', '/').replaceAll("/+", "/");
         if (!normalized.startsWith("/")) {
             normalized = "/" + normalized;
@@ -134,15 +132,6 @@ public class ByClawSkillDownloadApplicationService {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.download.path.invalid"));
         }
         return normalized;
-    }
-
-    private String resolveSkillRootPrefix(Long resourceId) {
-        if (resourceId == null) {
-            return ByClawUserWorkspacePaths.WORKSPACE_SKILL_ROOT_PREFIX;
-        }
-        SsResource resource = ssResourceService.findById(resourceId);
-        String resourceCode = resource == null ? null : resource.getResourceCode();
-        return ByClawUserWorkspacePaths.resolveSkillRootPrefix(resourceId, resourceCode);
     }
 
     private String extractSkillName(String normalizedSkillPath) {

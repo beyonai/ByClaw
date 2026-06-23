@@ -10,10 +10,7 @@ import java.util.Locale;
 import java.util.Set;
 
 import org.apache.commons.compress.archivers.ArchiveEntry;
-import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream;
-import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,8 +20,6 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.storage.UserFS;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
-import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 
 /**
@@ -32,7 +27,7 @@ import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
  *
  * 校验范围（明确仅这两条，其它问题用静默忽略而不是抛错）：
  * 1. 压缩包文件大小 ≤ 50MB；
- * 2. 压缩包内必须有且仅有一个 SKILL.md（文件名忽略大小写）。
+ * 2. 压缩包最外层 skill 目录下必须有且仅有一个 SKILL.md（文件名忽略大小写），子目录中的 SKILL.md 不参与唯一性校验。
  *
  * 落盘规则（与 {@link ByClawSkillQueryApplicationService} 完全对齐）：
  * - bucket = byclaw-{userCode}（由 UserFS / UserBucketNameResolver 统一生成）；
@@ -69,13 +64,13 @@ public class ByClawSkillUploadApplicationService {
     private UserFS userFS;
 
     @Autowired
-    private SsResourceService ssResourceService;
+    private ByClawSkillPathResolver skillPathResolver;
 
     /**
      * 上传单个 skill 压缩包。仅做大小、SKILL.md 唯一性两道校验，其它结构问题以静默忽略处理。
      *
      * @param userCode  目标用户编码（决定 bucket 名）
-     * @param zipFile   前端上传的 zip/tar.gz MultipartFile
+     * @param zipFile   前端上传的 zip MultipartFile
      * @return 与 query 接口同口径的 ByClawSkillDto
      */
     public ByClawSkillDto uploadSkillZip(String userCode, Long resourceId, MultipartFile zipFile) {
@@ -87,14 +82,14 @@ public class ByClawSkillUploadApplicationService {
             userFS.init();
 
             // 一次性把压缩包全部 entry 解析到内存中（已被 50MB 总大小约束），便于：
-            // 1. 先做整体校验（必须仅一个 SKILL.md），失败时不写半个 skill；
+            // 1. 先做整体校验（最外层 skill 目录下必须仅一个 SKILL.md），失败时不写半个 skill；
             // 2. 写入前先清空旧目录，最大化避免「写一半失败」的脏状态。
             List<ParsedEntry> entries = parseArchiveEntries(zipFile);
             ParsedEntry skillDocEntry = findUniqueSkillDoc(entries);
             String skillBaseInZip = parentDirOf(skillDocEntry.entryName);
             String skillName = resolveSkillName(skillBaseInZip, zipFile.getOriginalFilename());
 
-            String skillRootPrefix = resolveSkillRootPrefix(resourceId);
+            String skillRootPrefix = skillPathResolver.resolveSkillRootPrefix(userCode, resourceId);
             String skillRoot = skillRootPrefix + skillName;
             // 覆盖语义：清空旧目录再写，避免上一个版本的孤儿文件遗留。
             // 删除前缀本身是幂等的，桶 / 目录不存在时不会抛错。
@@ -119,8 +114,7 @@ public class ByClawSkillUploadApplicationService {
                     // ByteArrayInputStream 关闭不会抛 IOException，这里做兜底；转 IllegalStateException 让上层统一处理。
                     throw new IllegalStateException(I18nUtil.get("byclaw.fs.write.file.failed", objectKey), e);
                 }
-                if (CANONICAL_SKILL_DOC_NAME.equals(normalizedRelative)
-                    || normalizedRelative.endsWith("/" + CANONICAL_SKILL_DOC_NAME)) {
+                if (entry.entryName.equals(skillDocEntry.entryName)) {
                     skillDocObjectKey = objectKey;
                 }
                 writtenCount++;
@@ -152,15 +146,9 @@ public class ByClawSkillUploadApplicationService {
         if (zipFile.getSize() > MAX_ZIP_SIZE_BYTES) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.size.exceeded"));
         }
-    }
-
-    private String resolveSkillRootPrefix(Long resourceId) {
-        if (resourceId == null) {
-            return ByClawUserWorkspacePaths.WORKSPACE_SKILL_ROOT_PREFIX;
+        if (!StringUtils.endsWithIgnoreCase(lastPathSegment(zipFile.getOriginalFilename()), ".zip")) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.file.invalid"));
         }
-        SsResource resource = ssResourceService.findById(resourceId);
-        String resourceCode = resource == null ? null : resource.getResourceCode();
-        return ByClawUserWorkspacePaths.resolveSkillRootPrefix(resourceId, resourceCode);
     }
 
     /**
@@ -168,9 +156,6 @@ public class ByClawSkillUploadApplicationService {
      * 把内容缓存到 byte[]。单文件大小已被 MAX_ZIP_SIZE_BYTES 整体约束，缓存到内存可控。
      */
     private List<ParsedEntry> parseArchiveEntries(MultipartFile zipFile) {
-        if (isTarGzFile(zipFile)) {
-            return parseTarGzEntries(zipFile);
-        }
         return parseZipEntries(zipFile);
     }
 
@@ -198,37 +183,6 @@ public class ByClawSkillUploadApplicationService {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.empty"));
         }
         return result;
-    }
-
-    private List<ParsedEntry> parseTarGzEntries(MultipartFile tarGzFile) {
-        List<ParsedEntry> result = new ArrayList<>();
-        try (InputStream gzipIn = new GzipCompressorInputStream(tarGzFile.getInputStream());
-            TarArchiveInputStream tin = new TarArchiveInputStream(gzipIn)) {
-            TarArchiveEntry tarEntry;
-            while ((tarEntry = tin.getNextTarEntry()) != null) {
-                if (tarEntry.isDirectory() || !tarEntry.isFile()) {
-                    continue;
-                }
-                String normalized = normalizeEntryName(tarEntry.getName());
-                if (normalized == null) {
-                    continue;
-                }
-                byte[] content = tin.readAllBytes();
-                result.add(new ParsedEntry(normalized, content));
-            }
-        }
-        catch (IOException e) {
-            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), e);
-        }
-        if (result.isEmpty()) {
-            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.empty"));
-        }
-        return result;
-    }
-
-    private boolean isTarGzFile(MultipartFile file) {
-        String filename = lastPathSegment(file == null ? null : file.getOriginalFilename()).toLowerCase(Locale.ROOT);
-        return filename.endsWith(".tar.gz");
     }
 
     /**
@@ -263,12 +217,40 @@ public class ByClawSkillUploadApplicationService {
         return entryPath.toString();
     }
 
-    /** 找出有且仅有一个 SKILL.md（文件名忽略大小写）。0 个或 ≥2 个都视为非法 zip。 */
+    /**
+     * 找出最外层 skill 目录直接下的 SKILL.md（文件名忽略大小写）。
+     * 子目录中的 SKILL.md 可能是 nano skill，不参与当前单 skill zip 的唯一性校验。
+     */
     private ParsedEntry findUniqueSkillDoc(List<ParsedEntry> entries) {
         List<ParsedEntry> docs = new ArrayList<>();
+        Set<String> topLevelDirs = new java.util.HashSet<>();
         for (ParsedEntry entry : entries) {
-            String basename = lastSegmentOf(entry.entryName);
-            if (CANONICAL_SKILL_DOC_NAME.equalsIgnoreCase(basename)) {
+            String[] segments = splitEntryName(entry.entryName);
+            if (segments.length == 0) {
+                continue;
+            }
+            if (segments.length == 1 && CANONICAL_SKILL_DOC_NAME.equalsIgnoreCase(segments[0])) {
+                docs.add(entry);
+            }
+            else if (segments.length > 1) {
+                topLevelDirs.add(segments[0]);
+            }
+        }
+        if (!docs.isEmpty()) {
+            if (docs.size() != 1) {
+                throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.missing.doc"));
+            }
+            return docs.get(0);
+        }
+
+        if (topLevelDirs.size() != 1) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.missing.doc"));
+        }
+        String topLevelDir = topLevelDirs.iterator().next();
+        for (ParsedEntry entry : entries) {
+            String[] segments = splitEntryName(entry.entryName);
+            if (segments.length == 2 && topLevelDir.equals(segments[0])
+                && CANONICAL_SKILL_DOC_NAME.equalsIgnoreCase(segments[1])) {
                 docs.add(entry);
             }
         }
@@ -332,9 +314,11 @@ public class ByClawSkillUploadApplicationService {
         return slash > 0 ? entryName.substring(0, slash) : "";
     }
 
-    private String lastSegmentOf(String entryName) {
-        int slash = entryName.lastIndexOf('/');
-        return slash >= 0 ? entryName.substring(slash + 1) : entryName;
+    private String[] splitEntryName(String entryName) {
+        if (StringUtils.isBlank(entryName)) {
+            return new String[0];
+        }
+        return entryName.split("/");
     }
 
     /** 取路径最后一段；处理可能的反斜杠分隔（部分浏览器上传时 originalFilename 含完整路径）。 */
@@ -353,9 +337,6 @@ public class ByClawSkillUploadApplicationService {
             return filename;
         }
         String lower = filename.toLowerCase(Locale.ROOT);
-        if (lower.endsWith(".tar.gz")) {
-            return filename.substring(0, filename.length() - ".tar.gz".length());
-        }
         int dot = filename.lastIndexOf('.');
         return dot > 0 ? filename.substring(0, dot) : filename;
     }

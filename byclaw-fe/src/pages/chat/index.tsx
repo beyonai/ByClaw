@@ -69,6 +69,7 @@ const Chat = () => {
       title={
         <TitleWriter
           showAssistant
+          showAssistantTips
           title={title}
           colorTitleBg="linear-gradient(90deg, #3150ff 0%, #c067ff 100%) text"
           fullText={fullText}

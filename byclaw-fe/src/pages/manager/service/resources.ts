@@ -9,6 +9,7 @@ export interface FixedEntryOperationCapability {
   canImportEnterpriseToolkit: boolean; // 是否能导入企业工具包
   canImportEnterpriseView: boolean; // 是否能导入企业视图
   canImportEnterpriseObject: boolean; // 是否能导入企业对象
+  canImportEnterpriseSkill?: boolean; // 是否能导入企业技能
 }
 
 /**
@@ -129,6 +130,15 @@ export function importResource(resourceType: string, fileType: string, data: For
   });
 }
 
+export function checkSkillImportConflicts(data: FormData) {
+  return POST<ResourceImportResult>('/byaiService/tool/checkSkillZipImportConflicts', data, {
+    timeout: 480000,
+    headers: {
+      'Content-Type': 'multipart/form-data; charset=utf-8',
+    },
+  });
+}
+
 /**
  * 获取当前用户有权限使用的资源列表
  * @param params 查询参数（包含keyword等）
@@ -149,12 +159,34 @@ export function queryDigEmployeeRelResourceAuth(params: any) {
 }
 
 /**
+ * 查询当前用户对数字员工关联知识库中具备管理权限的知识库列表
+ * 用于保存文件到知识库等写入场景，权限口径以后端为准
+ * @param params 查询参数（包含resourceId数字员工ID、keyword搜索关键字等）
+ * @returns Promise 可管理知识库列表
+ */
+export function queryDigEmployeeManageKnowledgeResourceAuth(params: any) {
+  return POST<any>('/byaiService/auth/privilegeGrant/queryDigEmployeeManageKnowledgeResourceAuth', params);
+}
+
+/**
  * 查询固定入口操作能力
  * 获取当前用户在固定入口（如企业工作台）可进行的操作权限
  * @returns Promise<FixedEntryOperationCapability> 操作能力对象
  */
 export function queryFixedEntryOperationCapability() {
   return GET<FixedEntryOperationCapability>('/byaiService/auth/privilegeGrant/queryFixedEntryOperationCapability');
+}
+
+export interface GeneratedResourceImage {
+  imageBase64: string;
+  mimeType: string;
+  fileName: string;
+}
+
+export function generateResourceImage(params: { resourceName?: string; resourceDesc?: string }) {
+  return POST<GeneratedResourceImage>('/byaiService/tool/generateResourceImage', params, {
+    timeout: 180000,
+  });
 }
 
 /**
@@ -225,6 +257,10 @@ export const queryResourceDetail = (params: any) => {
 
 export const queryMCPToolsList = (params: { resourceId: string }) => {
   return POST<any>('/byaiService/tool/mcp/listTools', params);
+};
+
+export const querySkillUsedDigitalEmployees = (params: { resourceId: string | number }) => {
+  return POST<any[]>('/byaiService/tool/querySkillUsedDigitalEmployees', params);
 };
 
 export const queryCallMCPToolRequest = (params: {
@@ -333,9 +369,12 @@ export interface ResourceOperationPermissions {
   resourceId: string; // 资源ID
   ownerType: string; // 所有者类型
   resourceBizType: string; // 资源业务类型
+  hasManagePermission?: boolean; // 是否具备资源管理权限
+  hasUsePermission?: boolean; // 是否具备资源使用权限
+  canViewDetail?: boolean; // 是否允许进入资源详情
   canEdit: boolean; // 是否有编辑权限
   canManageAuth: boolean; // 是否有管理权限权限
-  canUseAuth: boolean; // 是否有使用权限
+  canUseAuth: boolean; // 是否可设置使用授权
   canDelete: boolean; // 是否有删除权限
   canApplyUse: boolean; // 是否可以申请使用
   canAuditUse: boolean; // 是否有审核权限
@@ -404,9 +443,19 @@ export const previewFile = (filePath: string) => {
  * 技能上传成功后返回的数据
  */
 export interface UploadSkillZipResponse {
+  resourceId?: string | number;
   skillName: string;
   skillPath: string;
   skillDocObjectKey: string;
+  skillDesc?: string;
+  displaySourceType?: string;
+  resourceBacked?: boolean;
+}
+
+export interface QuerySkillListParams {
+  userCode?: string;
+  resourceId?: string | number;
+  keyword?: string;
 }
 
 /**
@@ -426,6 +475,40 @@ export const uploadSkillZip = (data: FormData) => {
       },
     }
   );
+};
+
+/**
+ * 查询当前数字员工 workspace 中未绑定到数字员工关系表的目录技能。
+ */
+export const queryWorkspaceSkillList = (params: QuerySkillListParams) => {
+  return POST<{ code: number; msg: string; data: UploadSkillZipResponse[]; success: boolean }>(
+    '/byaiService/tool/qryWorkspaceSkillList',
+    params
+  );
+};
+
+export const queryLobsterInstalledSkillList = queryWorkspaceSkillList;
+
+export interface WorkspaceSkillParams {
+  skillPath: string;
+  resourceId?: string | number;
+  userCode?: string;
+  overwriteConfirmed?: boolean;
+}
+
+export const queryWorkspaceSkillDetail = (params: WorkspaceSkillParams) => {
+  return POST<{ code: number; msg: string; data: UploadSkillZipResponse; success: boolean }>(
+    '/byaiService/tool/getWorkspaceSkillDetail',
+    params
+  );
+};
+
+export const checkWorkspaceSkillShareConflicts = (params: WorkspaceSkillParams) => {
+  return POST<ResourceImportResult>('/byaiService/tool/checkWorkspaceSkillShareConflicts', params);
+};
+
+export const resourceizeWorkspaceSkill = (params: WorkspaceSkillParams) => {
+  return POST<ResourceImportResult>('/byaiService/tool/resourceizeWorkspaceSkill', params);
 };
 
 /**

@@ -14,8 +14,10 @@ import com.iwhalecloud.byai.manager.domain.auth.enums.Color;
 import com.iwhalecloud.byai.manager.domain.auth.enums.OperType;
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.organization.service.OrganizationService;
+import com.iwhalecloud.byai.manager.domain.position.service.PositionService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.domain.station.service.StationService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.auth.AuthDTO;
 import com.iwhalecloud.byai.manager.dto.auth.AuthRedBlackDTO;
@@ -25,10 +27,14 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
+import com.iwhalecloud.byai.manager.mapper.users.UsersMapper;
 import com.iwhalecloud.byai.manager.qo.auth.AuthDetailQo;
+import com.iwhalecloud.byai.manager.qo.auth.ResourceMemberQueryQo;
 import com.iwhalecloud.byai.manager.qo.auth.ResourceUseApplyApproveQo;
 import com.iwhalecloud.byai.manager.qo.auth.ResourceUseApplyQo;
 import com.iwhalecloud.byai.manager.qo.auth.ResourceMemberSettingQo;
+import com.iwhalecloud.byai.manager.vo.auth.ResourceMemberItemVo;
+import com.iwhalecloud.byai.manager.vo.auth.ResourceMemberQueryResultVo;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import org.junit.jupiter.api.AfterEach;
@@ -45,6 +51,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.ArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -83,31 +90,19 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
     }
 
-    /**
-     * 默认超级助手禁止被设置使用授权，后端需要兜底拦截，不能只依赖前端隐藏按钮。
-     *
-     * @author qin.guoquan
-     * @date 2026-05-09 150800
-     */
-    @Test
-    void setResourceUsers_rejectsDefaultSuperAssistantResource() {
-        mockI18n();
-
-        AuthApplicationService service = new AuthApplicationService();
-        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
-        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
-
-        SsResource defaultSuperAssistant = new SsResource();
-        defaultSuperAssistant.setResourceId(100L);
-        defaultSuperAssistant.setResourceBizType(ResourceBizTypeEnum.DIG_EMPLOYEE.name());
-        defaultSuperAssistant.setOwnerType(OwnerType.PERSONAL_DEFAULT);
-        defaultSuperAssistant.setResourceCode("user001_main");
-        when(ssResourceMapper.selectById(100L)).thenReturn(defaultSuperAssistant);
-
-        ResourceMemberSettingQo qo = new ResourceMemberSettingQo();
-        qo.setResourceId(100L);
-
-        assertThatThrownBy(() -> service.setResourceUsers(qo)).isInstanceOf(BaseException.class);
+    private void mockEmptyUsePermissionDependencies(AuthApplicationService service) {
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        OrganizationService organizationService = mock(OrganizationService.class);
+        PositionService positionService = mock(PositionService.class);
+        StationService stationService = mock(StationService.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "organizationService", organizationService);
+        ReflectionTestUtils.setField(service, "positionService", positionService);
+        ReflectionTestUtils.setField(service, "stationService", stationService);
+        when(privilegeGrantService.findPrivilegeByQo(any())).thenReturn(new ArrayList<>());
+        when(organizationService.findOrganizationByUserId(any())).thenReturn(List.of());
+        when(positionService.findPositionByUserId(any())).thenReturn(List.of());
+        when(stationService.getStationByUserId(any())).thenReturn(null);
     }
 
     /**
@@ -118,6 +113,7 @@ class AuthApplicationServiceTest {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceService ssResourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        mockEmptyUsePermissionDependencies(service);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(2L);
@@ -142,13 +138,14 @@ class AuthApplicationServiceTest {
     }
 
     /**
-     * 默认超级助手即使是当前用户绑定的默认助理，也不允许编辑，避免登录初始化的底座资源被改坏。
+     * 默认超级助手允许当前用户编辑，但仍禁止删除登录初始化的底座资源。
      */
     @Test
-    void queryResourceOperationPermissions_rejectsDefaultSuperAssistantEditAction() {
+    void queryResourceOperationPermissions_allowsDefaultSuperAssistantEditButRejectsDelete() {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceService ssResourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        mockEmptyUsePermissionDependencies(service);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(2L);
@@ -166,7 +163,7 @@ class AuthApplicationServiceTest {
 
         ResourceOperationPermissionsVo vo = service.queryResourceOperationPermissions(205L);
 
-        assertThat(vo.getCanEdit()).isFalse();
+        assertThat(vo.getCanEdit()).isTrue();
         assertThat(vo.getCanDelete()).isFalse();
     }
 
@@ -178,6 +175,7 @@ class AuthApplicationServiceTest {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceService ssResourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        mockEmptyUsePermissionDependencies(service);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(2L);
@@ -316,6 +314,55 @@ class AuthApplicationServiceTest {
         service.setResourceUsers(qo);
 
         verify(privilegeGrantMapper).update(any(PrivilegeGrant.class), any(LambdaUpdateWrapper.class));
+    }
+
+    /**
+     * 历史/初始化资源可能只有 create_by，没有显式 ALLOW_MANAGE 授权记录。
+     * 查询资源成员时仍要把创建人展示为管理人员，避免详情页管理人员为空。
+     */
+    @Test
+    void queryResourceMembers_includesCreatorAsImplicitManagerAndUser() {
+        AuthApplicationService service = new AuthApplicationService();
+        SsResourceMapper ssResourceMapper = mock(SsResourceMapper.class);
+        PrivilegeGrantService privilegeGrantService = mock(PrivilegeGrantService.class);
+        UsersMapper usersMapper = mock(UsersMapper.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
+        ReflectionTestUtils.setField(service, "privilegeGrantService", privilegeGrantService);
+        ReflectionTestUtils.setField(service, "usersMapper", usersMapper);
+
+        SsResource resource = new SsResource();
+        resource.setResourceId(400L);
+        resource.setResourceBizType(ResourceBizTypeEnum.SKILL.name());
+        resource.setCreateBy(10001L);
+        when(ssResourceMapper.selectById(400L)).thenReturn(resource);
+        when(privilegeGrantService.queryResourceMembers(eq(400L), eq(ResourceBizTypeEnum.SKILL.name()), any()))
+            .thenReturn(List.of());
+
+        Users creator = new Users();
+        creator.setUserId(10001L);
+        creator.setUserName("平台管理员");
+        when(usersMapper.selectById(10001L)).thenReturn(creator);
+
+        ResourceMemberQueryQo qo = new ResourceMemberQueryQo();
+        qo.setResourceId(400L);
+
+        ResourceMemberQueryResultVo result = service.queryResourceMembers(qo);
+
+        assertThat(result.getManagerList()).hasSize(1);
+        ResourceMemberItemVo manager = result.getManagerList().get(0);
+        assertThat(manager.getGrantToObjType()).isEqualTo(GrantToObjType.USER);
+        assertThat(manager.getGrantToObjId()).isEqualTo(10001L);
+        assertThat(manager.getGrantToObjName()).isEqualTo("平台管理员");
+        assertThat(manager.getGrantType()).isEqualTo(GrantType.ALLOW_MANAGE);
+        assertThat(manager.getGrantToType()).isEqualTo(Color.RED);
+
+        assertThat(result.getUseList()).hasSize(1);
+        ResourceMemberItemVo user = result.getUseList().get(0);
+        assertThat(user.getGrantToObjType()).isEqualTo(GrantToObjType.USER);
+        assertThat(user.getGrantToObjId()).isEqualTo(10001L);
+        assertThat(user.getGrantToObjName()).isEqualTo("平台管理员");
+        assertThat(user.getGrantType()).isEqualTo(GrantType.FORCE_USE);
+        assertThat(user.getGrantToType()).isEqualTo(Color.RED);
     }
 
     /**

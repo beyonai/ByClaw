@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 // @ts-ignore
 import { useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
 import { Badge, Dropdown, Input, Popconfirm } from 'antd';
@@ -13,11 +13,12 @@ import ChatAvatar from '@/components/ChatAvatar';
 
 import { processSessionContent, formatTime } from './util';
 import { getAgentPath } from '@/utils/agent';
-import webSocketManager from '@/utils/websocket';
+import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 import useTracker from '@/hooks/useTracker';
 
 import { ISession } from '@/typescript/session';
 import { IAgentCache } from '@/typescript/agent';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
 
 import styles from './index.module.less';
 
@@ -29,6 +30,25 @@ interface ConnectState {
 const MyBadge = (props: { item: ISession }) => {
   const { item } = props;
   const { unreadCount = 0, mentionCount } = item;
+  const [isRunning, setIsRunning] = useState(() => chatSessionRuntimeManager.isSessionRunning(item.sessionId));
+
+  useEffect(() => {
+    const updateRunningState = () => {
+      setIsRunning(chatSessionRuntimeManager.isSessionRunning(item.sessionId));
+    };
+
+    updateRunningState();
+    return chatSessionRuntimeManager.subscribe(updateRunningState);
+  }, [item.sessionId]);
+
+  // 如果会话的状态是running，那么展示状态
+  if (isRunning) {
+    return (
+      <Badge dot status="processing" size="small" style={{ padding: '0 3px' }}>
+        <ChatAvatar session={item} size={32} />
+      </Badge>
+    );
+  }
 
   if (Number(mentionCount) > 0) {
     return (
@@ -61,6 +81,7 @@ const DialogueCard = ({
 
   const { setAgentId, setSessionId, sessionId } = useGlobal();
   const { trackerEmployeeClick } = useTracker();
+  const { clearDetailPanel } = React.useContext(SiderContentContext);
 
   const { sessionLoading, editLoading, delLoading } = useSelector((state: ConnectState) => state.session);
   const { employeesList } = useSelector(({ employees }) => ({
@@ -195,6 +216,7 @@ const DialogueCard = ({
         }
 
         if (editingSessionId === sessionId) return;
+        clearDetailPanel?.();
 
         if (Array.isArray(item.sessionExts) && item.sessionExts.length > 0) {
           dispatch({
@@ -230,8 +252,12 @@ const DialogueCard = ({
               },
             });
 
-            // 清除websocket产生的红点
-            webSocketManager.clearNotification();
+            dispatch({
+              type: 'session/updateUnreadInfo',
+              payload: {
+                totalUnread: 0,
+              },
+            });
           }
 
           navigate('/notice');

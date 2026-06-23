@@ -7,6 +7,7 @@ interface Props<T = any> {
   dataSource: T[];
   hasMore: boolean;
   loading: boolean;
+  className?: string;
   next: () => any;
   renderItem?: (item: T, index: number) => React.ReactNode;
   renderEmpty?: React.ReactNode;
@@ -33,7 +34,7 @@ function ListHolder({
 }
 
 function InfiniteScrollAntdList<T = any>(props: Props<T>) {
-  const { next, dataSource, hasMore, loading, renderItem, renderEmpty } = props;
+  const { next, dataSource, hasMore, loading, className, renderItem, renderEmpty } = props;
   const scrollableTarget = useRef(`scroll-target-${Math.random().toString(16).slice(2)}`);
 
   return (
@@ -53,7 +54,7 @@ function InfiniteScrollAntdList<T = any>(props: Props<T>) {
         <List
           split={false}
           dataSource={dataSource}
-          className={commonStyles.list}
+          className={[commonStyles.list, className].filter(Boolean).join(' ')}
           renderItem={renderItem}
           locale={{
             emptyText: renderEmpty,

@@ -1,0 +1,31 @@
+{
+    "entity_code": "by_my_object",
+    "entity_name": "我的对象",
+    "entity_desc": "对象描述",
+    "fields": [
+        {
+            "property_code": "title",
+            "property_name": "标题",
+            "data_type": "STRING",
+            "ext_property": {
+                "property_role_rule": {
+                    "property_role": "DIMENSION",
+                    "rule_type": "name"
+                }
+            }
+        },
+        {
+            "property_code": "status",
+            "property_name": "状态",
+            "data_type": "STRING",
+            "ext_property": {
+                "property_role_rule": {
+                    "property_role": "DIMENSION",
+                    "rule_type": "status"
+                }
+            },
+            "term_type_code": "task_status",
+            "rel_term_codeorname": "code"
+        }
+    ]
+}

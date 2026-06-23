@@ -24,6 +24,18 @@ const findParentTreeNode = (result: TreeNode[], parentOrderId: string): TreeNode
   return null;
 };
 
+const sortContentType = (flatList: IMessageListItem[]) => {
+  const ct = [`${SSEMessageType.thinkRootTitle}`, `${SSEMessageType.thinkTitle}`, `${SSEMessageType.thinkStatusTitle}`];
+
+  return [...flatList].sort((a, b) => {
+    const aGtOne = ct.includes(`${a.contentType}`);
+    const bGtOne = ct.includes(`${b.contentType}`);
+    if (aGtOne && !bGtOne) return -1;
+    if (!aGtOne && bGtOne) return 1;
+    return 0;
+  });
+};
+
 const coverExistedNodeHandlers: {
   [key in SSEMessageType]?: (existingNode: TreeNode, item: IMessageListItem) => void;
 } = {
@@ -38,7 +50,7 @@ export const transformList = (flatList: IMessageListItem[], isStreamEnd: boolean
   let currentParent: TreeNode | null = null;
 
   const groupNodes = new Map<string, TreeNode>();
-  flatList.forEach((item, messageIdx) => {
+  sortContentType(flatList).forEach((item, messageIdx) => {
     const newNode: TreeNode = {
       messageIdx,
       ...item,
@@ -137,6 +149,7 @@ export const transformList = (flatList: IMessageListItem[], isStreamEnd: boolean
             case `${SSEMessageType.thinkTaskPrepare}`:
             case `${SSEMessageType.thinkTaskExecute}`:
             case `${SSEMessageType.thinkTaskResult}`:
+            case `${SSEMessageType.jsonBlock}`:
               myShouldOpen = false;
               break;
             case `${SSEMessageType.thinkTaskUserInput}`: {

@@ -1,0 +1,18 @@
+# 需先安装 KEDA: helm install keda kedacore/keda -n keda --create-namespace
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: opensandbox-pool-scaler
+  namespace: by-sandbox
+spec:
+  scaleTargetRef:
+    name: opensandbox-server
+  minReplicaCount: 2
+  maxReplicaCount: 8
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+        metricName: opensandbox_active_sandboxes
+        query: sum(opensandbox_active_sandboxes)
+        threshold: "40"

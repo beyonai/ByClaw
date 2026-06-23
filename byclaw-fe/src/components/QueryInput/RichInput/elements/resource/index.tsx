@@ -24,7 +24,7 @@ export type ResourceElementType = {
   children: { text: string }[];
 };
 
-const ResourceElement = ({ attributes, element }: RenderElementProps) => {
+const ResourceElement = ({ attributes, children, element }: RenderElementProps) => {
   const el = element as ResourceElementType;
   const intl = useIntl();
   const { name, chatAvatar } = el;
@@ -41,15 +41,18 @@ const ResourceElement = ({ attributes, element }: RenderElementProps) => {
   }, [chatAvatar]);
 
   return (
-    <span {...attributes} contentEditable={false} className={styles.mention}>
-      {prefix}
-      {!(
-        el.isFromResourceModule ||
-        el.resourceType === 'TOOL' ||
-        el.resourceType === 'OBJECT' ||
-        el.resourceType === 'VIEW'
-      ) && <span style={{ color: '#00000080', marginRight: 2 }}>{intl.formatMessage({ id: 'quote' })}</span>}
-      {name}
+    <span {...attributes} className={styles.mention}>
+      <span contentEditable={false}>
+        {prefix}
+        {!(
+          el.isFromResourceModule ||
+          el.resourceType === 'TOOL' ||
+          el.resourceType === 'OBJECT' ||
+          el.resourceType === 'VIEW'
+        ) && <span style={{ color: '#00000080', marginRight: 2 }}>{intl.formatMessage({ id: 'quote' })}</span>}
+        {name}
+      </span>
+      {children}
     </span>
   );
 };

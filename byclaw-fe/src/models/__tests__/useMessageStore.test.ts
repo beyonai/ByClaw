@@ -83,27 +83,27 @@ describe('models/useMessageStore', () => {
     });
   });
 
-  it('getSessionMessageByCache returns default when missing', () => {
-    const result = reducers.getSessionMessageByCache({ sessionListMap: new Map() } as any, {
-      payload: { sessionId: 'missing' },
+  it('updateSessionMessageList supports callback updates with latest cache list', () => {
+    const map = new Map([['s1', { list: [{ id: 1 }], pageNum: 1, pageSize: 20, total: 1, pageRange: [1, 1] }]]);
+
+    const first = reducers.updateSessionMessageList({ sessionListMap: map } as any, {
+      payload: { sessionId: 's1', messageList: (list: any[]) => [...list, { id: 2 }] },
+    });
+    const second = reducers.updateSessionMessageList(first, {
+      payload: { sessionId: 's1', messageList: (list: any[]) => [...list, { id: 3 }] },
     });
 
-    expect(result).toEqual({
-      list: [],
-      pageNum: 1,
-      pageSize: 20,
-      total: 1,
-      pageRange: [1, 1],
-    });
+    expect(second.sessionListMap.get('s1').list).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }]);
+    expect(second.sessionListMap.get('s1').total).toBe(3);
   });
 
   it('setInitialSessionDataToLocateMsg stores target message paging info', () => {
     const map = new Map();
-    reducers.setInitialSessionDataToLocateMsg({ sessionListMap: map } as any, {
+    const next = reducers.setInitialSessionDataToLocateMsg({ sessionListMap: map } as any, {
       payload: { sessionId: 's1', index: 25, total: 100, targetMessageId: 'm1' },
     });
 
-    expect(map.get('s1')).toMatchObject({
+    expect(next.sessionListMap.get('s1')).toMatchObject({
       pageNum: 2,
       pageSize: 20,
       total: 100,

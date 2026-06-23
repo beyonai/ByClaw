@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Spin, Modal, Checkbox, Button, List, Tabs, Input, message, Empty, Popconfirm } from 'antd';
+import { Spin, Modal, Checkbox, Button, List, Tabs, Input, message, Empty, Popconfirm, Tooltip } from 'antd';
 import { useIntl, useSelector } from '@umijs/max';
 import { debounce, trim } from 'lodash';
 import classnames from 'classnames';
@@ -9,15 +9,12 @@ import styles from './index.module.less';
 // import Empty from '@/components/Empty';
 import {
   listResourceUseAuth,
+  deleteResource,
   queryDigEmployeeRelResourceAuth,
   queryResourceMembers,
-} from '@/pages/manager/service/resources';
-import {
   qryByClawFileByUserCode,
-  qrySkillListByUserCode,
   readFile,
   downloadSkillZip,
-  deleteSkill,
 } from '@/pages/manager/service/resources';
 import useGlobal from '@/hooks/useGlobal';
 
@@ -159,6 +156,12 @@ const ResourceList = (props: Props) => {
 
     try {
       let rows: any[] = [];
+      const currentResourceBizTypeList =
+        Array.isArray(resourceBizTypeList) && resourceBizTypeList.length
+          ? resourceBizTypeList
+          : myResourceType === 'SKILL'
+            ? ['SKILL']
+            : resourceBizTypeList;
 
       // 当 resourceType 为 SPACE 时，使用新的接口
       if (myResourceType === 'SPACE') {
@@ -174,23 +177,9 @@ const ResourceList = (props: Props) => {
             ...item,
             resourceId: item.objectKey || index,
             resourceName: item.fileName,
+            resourceDesc: item.objectKey,
           }));
         }
-      } else if (myResourceType === 'SKILL') {
-        const response = await qrySkillListByUserCode({
-          userCode: userInfo?.userCode,
-          keyword: searchValue.current.trim(),
-          resourceId: normalizedAgentId,
-        });
-        const dataList = Array.isArray(response) ? response : [];
-        // 将返回的数据映射为组件需要的格式
-        rows = dataList.map((item: any, index: number) => ({
-          ...item,
-          resourceId: item.skillPath || index,
-          resourceName: item.skillName,
-          resourceBizType: 'SKILL',
-          id: item.skillPath || index,
-        }));
       } else {
         const currentPage = reset ? 1 : pageIndex;
         if (normalizedAgentId) {
@@ -199,6 +188,7 @@ const ResourceList = (props: Props) => {
             pageSize,
             pageNum: currentPage,
             keyword: searchValue.current.trim(),
+            resourceBizTypeList: currentResourceBizTypeList,
           });
           const allRows = Array.isArray(response?.rows)
             ? response.rows
@@ -206,15 +196,15 @@ const ResourceList = (props: Props) => {
               ? response.list
               : [];
           rows =
-            Array.isArray(resourceBizTypeList) && resourceBizTypeList.length
-              ? allRows.filter((item: any) => resourceBizTypeList.includes(item.resourceBizType))
+            Array.isArray(currentResourceBizTypeList) && currentResourceBizTypeList.length
+              ? allRows.filter((item: any) => currentResourceBizTypeList.includes(item.resourceBizType))
               : allRows;
         } else {
           const response = await listResourceUseAuth({
             pageSize,
             pageNum: currentPage,
             keyword: searchValue.current.trim(),
-            resourceBizTypeList: resourceBizTypeList,
+            resourceBizTypeList: currentResourceBizTypeList,
             ownerType,
             resourceId: normalizedAgentId,
           });
@@ -476,24 +466,15 @@ const ResourceList = (props: Props) => {
   };
 
   const handleDeleteSkill = async (item: IResourceItem) => {
-    const skillPath = item.skillPath || item.resourceId || item.objectKey;
-    if (!skillPath) {
+    const resourceId = item.resourceId;
+    if (!resourceId) {
       message.error(intl.formatMessage({ id: 'common.deleteFail' }));
       return;
     }
-    setDeletingSkill(skillPath);
+    setDeletingSkill(resourceId);
     try {
-      const params: { skillPath: string; resourceId?: string | number; userCode?: string } = { skillPath };
-      if (normalizedAgentId) {
-        params.resourceId = normalizedAgentId;
-      }
-      if (userInfo?.userCode) {
-        params.userCode = userInfo.userCode;
-      }
-      await deleteSkill(params);
-      setResourceList((prev) =>
-        prev.filter((resource) => (resource.skillPath || resource.resourceId || resource.objectKey) !== skillPath)
-      );
+      await deleteResource({ resourceId });
+      setResourceList((prev) => prev.filter((resource) => resource.resourceId !== resourceId));
       message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
       EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
     } catch (error) {
@@ -752,12 +733,9 @@ const ResourceList = (props: Props) => {
                 <div className={styles.defaultLogo}>
                   <AntdIcon type={getResourceIcon(item.resourceName)} className={styles.defaultLogoIcon} />
                 </div>
-                <div
-                  className={classnames(styles.title, { [styles.spaceTitle]: resourceType === 'SPACE' })}
-                  title={item.resourceName}
-                >
-                  <div className="ub ub-ac">{item.resourceName}</div>
-                </div>
+                <Tooltip title={item.resourceName}>
+                  <div className={styles.title}>{item.resourceName}</div>
+                </Tooltip>
                 {/* 标签 */}
                 {renderResourceBizTypeTag(item.resourceBizType)}
                 {(resourceType === 'OBJECT' || resourceType === 'VIEW') && hoveredCard === item.resourceId && (
@@ -832,7 +810,7 @@ const ResourceList = (props: Props) => {
                       <Button
                         size="small"
                         danger
-                        loading={deletingSkill === (item.skillPath || item.resourceId || item.objectKey)}
+                        loading={deletingSkill === item.resourceId}
                         disabled={!!downloadingSkill}
                       >
                         {intl.formatMessage({ id: 'common.delete' })}
@@ -841,9 +819,9 @@ const ResourceList = (props: Props) => {
                   </div>
                 )}
               </div>
-              <div className={styles.desc} title={item.resourceDesc}>
-                {item.resourceDesc}
-              </div>
+              <Tooltip title={item.resourceDesc}>
+                <div className={styles.desc}>{item.resourceDesc}</div>
+              </Tooltip>
             </div>
           </Draggable>
         ))}

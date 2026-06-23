@@ -1,0 +1,1448 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ByClaw 从单机 Docker + MinIO 升级到 K3s + Longhorn 架构改造汇报</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #5e6a7d;
+      --line: #d8e0ea;
+      --soft: #f6f8fb;
+      --panel: #ffffff;
+      --blue: #1f6feb;
+      --green: #1f883d;
+      --orange: #b65c00;
+      --red: #cf222e;
+      --purple: #7c3aed;
+      --code-bg: #0f172a;
+      --code-fg: #e5edf8;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #f3f6fa;
+      font: 15px/1.72 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .shell {
+      width: min(1480px, calc(100% - 40px));
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 24px;
+      padding: 28px 0 60px;
+    }
+    nav {
+      position: sticky;
+      top: 18px;
+      max-height: calc(100vh - 36px);
+      overflow: auto;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    nav strong { display: block; margin: 0 0 10px; }
+    nav a {
+      display: block;
+      padding: 7px 9px;
+      color: var(--muted);
+      border-left: 3px solid transparent;
+      border-radius: 5px;
+      font-size: 13px;
+    }
+    nav a:hover {
+      color: var(--blue);
+      background: #eef6ff;
+      border-left-color: var(--blue);
+      text-decoration: none;
+    }
+    nav .sub { margin-left: 10px; border-left: 1px solid var(--line); }
+    main { min-width: 0; }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px 24px;
+      margin-bottom: 18px;
+    }
+    h1, h2, h3, h4 { line-height: 1.25; margin: 0 0 12px; }
+    h1 { font-size: 31px; letter-spacing: 0; }
+    h2 { font-size: 22px; padding-top: 2px; }
+    h3 { font-size: 17px; margin-top: 20px; }
+    h4 { font-size: 15px; margin-top: 16px; color: #243147; }
+    p { margin: 8px 0 12px; }
+    ul, ol { margin: 8px 0 14px 22px; padding: 0; }
+    li { margin: 4px 0; }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+    }
+    code {
+      background: #eef2f7;
+      border-radius: 4px;
+      padding: 2px 5px;
+    }
+    pre {
+      overflow: auto;
+      background: var(--code-bg);
+      color: var(--code-fg);
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin: 12px 0;
+    }
+    pre code { background: transparent; color: inherit; padding: 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 16px;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th { background: #eef3fa; }
+    .hero {
+      background: linear-gradient(180deg, #fff, #f7fbff);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 18px;
+    }
+    .lede { color: var(--muted); font-size: 16px; max-width: 1040px; }
+    .meta { color: var(--muted); font-size: 13px; }
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: 12px;
+      border: 1px solid var(--line);
+      background: var(--soft);
+      color: var(--muted);
+      margin-right: 4px;
+      white-space: nowrap;
+    }
+    .tag.ok { background: #dafbe1; color: var(--green); border-color: #aceebb; }
+    .tag.warn { background: #fff4ce; color: var(--orange); border-color: #f0d98c; }
+    .tag.bad { background: #ffebe9; color: var(--red); border-color: #ffb4ad; }
+    .tag.info { background: #eef6ff; color: var(--blue); border-color: #b8d7ff; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcfe;
+      min-width: 0;
+    }
+    .box strong { display: block; margin-bottom: 5px; }
+    .callout {
+      border-left: 5px solid var(--blue);
+      background: #f7fbff;
+      border-radius: 8px;
+      padding: 13px 15px;
+      margin: 12px 0 16px;
+    }
+    .callout.warn { border-left-color: var(--orange); background: #fffaf0; }
+    .callout.good { border-left-color: var(--green); background: #f0fff4; }
+    .diagram {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 12px;
+      margin: 14px 0 18px;
+      overflow: auto;
+    }
+    .diagram-title { font-weight: 800; margin-bottom: 8px; }
+    svg { max-width: 100%; height: auto; display: block; }
+    .svg-box { fill: #fff; stroke: #a8b4c5; stroke-width: 1.2; }
+    .svg-primary { fill: #eef6ff; stroke: var(--blue); }
+    .svg-good { fill: #dafbe1; stroke: var(--green); }
+    .svg-warn { fill: #fff4ce; stroke: var(--orange); }
+    .svg-bad { fill: #ffebe9; stroke: var(--red); }
+    .svg-purple { fill: #f3e8ff; stroke: var(--purple); }
+    .svg-text { font-size: 13px; fill: var(--ink); font-family: sans-serif; }
+    .svg-muted { font-size: 11px; fill: var(--muted); font-family: sans-serif; }
+    .svg-title { font-size: 14px; font-weight: 700; fill: var(--ink); font-family: sans-serif; }
+    .svg-line { stroke: #65758b; stroke-width: 1.5; fill: none; }
+    .svg-dash { stroke-dasharray: 5 5; }
+    .small { font-size: 13px; color: var(--muted); }
+    .kpi {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .kpi div {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .kpi b { display: block; font-size: 20px; margin-bottom: 2px; }
+    @media (max-width: 980px) {
+      .shell { display: block; width: min(100% - 24px, 1100px); }
+      nav { position: static; margin-bottom: 16px; }
+      .grid, .grid.two, .kpi { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <nav>
+      <strong>目录</strong>
+      <a href="#summary">0. 汇报结论</a>
+      <a href="#why">1. 为什么要升级</a>
+      <a href="#comparison">2. 新旧架构对比</a>
+      <a href="#architecture">3. 总体架构与流程</a>
+      <div class="sub">
+        <a href="#topology">3.1 集群拓扑</a>
+        <a href="#namespaces">3.2 Namespace 边界</a>
+        <a href="#sandbox-flow">3.3 沙箱创建流程</a>
+      </div>
+      <a href="#deployment-plan">4. 组件部署规划</a>
+      <div class="sub">
+        <a href="#middleware">4.1 中间件</a>
+        <a href="#business">4.2 业务服务</a>
+        <a href="#sandbox">4.3 Sandbox</a>
+        <a href="#yaml">4.4 YAML 说明</a>
+      </div>
+      <a href="#longhorn">5. Longhorn 存储方案</a>
+      <a href="#ingress">6. 业务出口 Ingress</a>
+      <a href="#one-click">7. 一键部署指引</a>
+      <a href="#ops">8. 运维与验收</a>
+      <a href="#capacity">9. 现网资源与容量规划</a>
+      <a href="#faq">10. FAQ</a>
+      <a href="#source">11. 来源文件</a>
+    </nav>
+
+    <main>
+      <div class="hero">
+        <h1>ByClaw 从单机 Docker + MinIO 升级到 K3s + Longhorn 架构改造汇报</h1>
+        <p class="lede">本方案将 ByClaw 从“单机 Docker Compose + MinIO/rclone 沙箱挂载”升级为“三节点 K3s + Longhorn 分布式 PVC + OpenSandbox Kubernetes Runtime”。升级后，业务入口统一由主节点公网 IP 或域名的 80 端口承载，BE 通过 OpenSandbox API 创建沙箱，沙箱 Pod 使用 Longhorn 共享卷挂载用户工作区 <code>/by</code>，部署流程由 <code>scripts/deploy-k3s.sh &lt;env&gt; init|update</code> 统一编排。</p>
+        <p class="meta">报告范围：部署架构、存储架构、沙箱运行时、业务入口、一键部署、YAML 说明、FAQ。生成日期：2026-06-12。</p>
+        <p>
+          <span class="tag ok">目标架构：K3s + Longhorn</span>
+          <span class="tag ok">OpenSandbox Kubernetes Runtime</span>
+          <span class="tag info">FE/BE/QA/Data 单 Pod 起步</span>
+          <span class="tag warn">生产建议 Longhorn 副本数 2 或 3</span>
+        </p>
+      </div>
+
+      <section id="summary">
+        <h2>0. 汇报结论</h2>
+        <div class="grid">
+          <div class="box">
+            <strong>升级前</strong>
+            Docker Compose 单机部署，OpenSandbox 挂 Docker Socket 创建本机容器，沙箱工作区依赖 MinIO + rclone/FUSE。
+          </div>
+          <div class="box">
+            <strong>升级后</strong>
+            K3s 统一编排 FE、BE、中间件、OpenSandbox 与沙箱 Pod；Longhorn 提供共享工作区 PVC；Traefik/FE nginx 统一入口。
+          </div>
+          <div class="box">
+            <strong>保留边界</strong>
+            ByClaw BE 调 OpenSandbox API 的业务模型不变，OpenClaw 仍使用 <code>/by/.openclaw</code> 作为用户状态目录。
+          </div>
+        </div>
+        <div class="kpi">
+          <div><b>3</b><span>台 K3s 节点起步</span></div>
+          <div><b>4</b><span>核心 Namespace：service、middleware、sandbox、monitoring</span></div>
+          <div><b>1</b><span>共享工作区 PVC：<code>byclaw-workspace</code></span></div>
+          <div><b>80</b><span>主节点公网 IP 或域名统一访问端口</span></div>
+        </div>
+      </section>
+
+      <section id="why">
+        <h2>1. 为什么要升级</h2>
+        <h3>1.1 单机 Docker + MinIO 的主要瓶颈</h3>
+        <table>
+          <tr><th>问题</th><th>旧架构表现</th><th>对业务的影响</th></tr>
+          <tr><td>沙箱容量受限</td><td>沙箱由单机 Docker 守护进程创建，CPU/内存/磁盘集中在一台机器</td><td>并发用户增多后，沙箱启动慢、互相抢资源、故障半径大</td></tr>
+          <tr><td>存储链路复杂</td><td>BE 写 MinIO，沙箱通过 rclone/FUSE 挂对象桶到 <code>/by</code></td><td>小文件、rename、锁、目录遍历性能不稳定，排障链路长</td></tr>
+          <tr><td>运行时耦合宿主机</td><td>OpenSandbox 需要挂载 <code>/var/run/docker.sock</code></td><td>安全边界弱，容器逃逸风险和宿主机依赖更高</td></tr>
+          <tr><td>发布不可控</td><td>服务、端口、卷、配置由 compose 和宿主机目录拼接</td><td>更新后容易残留旧容器、旧配置、旧端口</td></tr>
+          <tr><td>可观测性不足</td><td>主要依赖 docker logs 和宿主机脚本</td><td>Pod 状态、事件、卷挂载失败、镜像拉取失败没有统一视图</td></tr>
+        </table>
+
+        <h3>1.2 升级目标</h3>
+        <ul>
+          <li>把沙箱从单机 Docker 容器改为 K8s Pod，由调度器按节点资源自动分配。</li>
+          <li>把用户工作区从 MinIO/rclone/FUSE 改为 Longhorn RWX PVC 的原生文件系统挂载。</li>
+          <li>把 FE、BE、QA、Data、中间件、OpenSandbox 纳入同一套 YAML 渲染和一键部署流程。</li>
+          <li>把外部访问统一到主节点公网 IP + 80 端口，同时保留域名和 wildcard sandbox 域名的扩展口子。</li>
+          <li>提升部署可恢复性：可重复执行 <code>update</code>，自动清理坏 Pod，打印等待进度和失败原因。</li>
+        </ul>
+      </section>
+
+      <section id="comparison">
+        <h2>2. 与旧架构进行全方面对比</h2>
+        <div class="diagram">
+          <div class="diagram-title">图 1：旧架构与新架构并排对比</div>
+          <svg viewBox="0 0 1180 520" role="img" aria-label="Docker MinIO and K3s Longhorn architecture comparison">
+            <defs>
+              <marker id="arrow1" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+                <path d="M0,0 L10,4 L0,8 z" fill="#65758b"></path>
+              </marker>
+            </defs>
+            <text class="svg-title" x="30" y="30">旧架构：单机 Docker + MinIO + rclone</text>
+            <rect class="svg-box svg-warn" x="30" y="45" width="520" height="210" rx="8"></rect>
+            <rect class="svg-box svg-primary" x="55" y="70" width="100" height="44" rx="5"></rect>
+            <text class="svg-text" x="75" y="97">FE nginx</text>
+            <rect class="svg-box svg-primary" x="180" y="70" width="100" height="44" rx="5"></rect>
+            <text class="svg-text" x="213" y="97">BE</text>
+            <rect class="svg-box" x="305" y="70" width="95" height="44" rx="5"></rect>
+            <text class="svg-text" x="325" y="97">Redis</text>
+            <rect class="svg-box" x="425" y="70" width="100" height="44" rx="5"></rect>
+            <text class="svg-text" x="445" y="97">OpenGauss</text>
+            <rect class="svg-box svg-warn" x="55" y="145" width="105" height="50" rx="5"></rect>
+            <text class="svg-text" x="84" y="168">MinIO</text>
+            <text class="svg-muted" x="68" y="184">对象桶</text>
+            <rect class="svg-box svg-good" x="190" y="145" width="140" height="50" rx="5"></rect>
+            <text class="svg-text" x="205" y="168">OpenSandbox</text>
+            <text class="svg-muted" x="205" y="184">docker runtime</text>
+            <rect class="svg-box" x="360" y="145" width="165" height="50" rx="5"></rect>
+            <text class="svg-text" x="378" y="168">OpenClaw 容器</text>
+            <text class="svg-muted" x="382" y="184">rclone mount /by</text>
+            <path class="svg-line" marker-end="url(#arrow1)" d="M280 92 L305 92"></path>
+            <path class="svg-line" marker-end="url(#arrow1)" d="M160 170 L190 170"></path>
+            <path class="svg-line" marker-end="url(#arrow1)" d="M330 170 L360 170"></path>
+            <text class="svg-muted" x="55" y="225">故障边界：宿主机 / Docker / MinIO / rclone / 本地目录</text>
+
+            <text class="svg-title" x="630" y="30">新架构：K3s + Longhorn + OpenSandbox K8s runtime</text>
+            <rect class="svg-box svg-good" x="630" y="45" width="520" height="210" rx="8"></rect>
+            <rect class="svg-box svg-primary" x="655" y="70" width="145" height="44" rx="5"></rect>
+            <text class="svg-text" x="672" y="97">by-service</text>
+            <rect class="svg-box" x="825" y="70" width="145" height="44" rx="5"></rect>
+            <text class="svg-text" x="842" y="97">by-middleware</text>
+            <rect class="svg-box svg-purple" x="995" y="70" width="130" height="44" rx="5"></rect>
+            <text class="svg-text" x="1012" y="97">by-sandbox</text>
+            <rect class="svg-box svg-warn" x="655" y="145" width="165" height="52" rx="5"></rect>
+            <text class="svg-text" x="674" y="167">Longhorn RWX PVC</text>
+            <text class="svg-muted" x="678" y="184">byclaw-workspace</text>
+            <rect class="svg-box svg-good" x="850" y="145" width="135" height="52" rx="5"></rect>
+            <text class="svg-text" x="868" y="167">Sandbox Pod</text>
+            <text class="svg-muted" x="872" y="184">subPath /by</text>
+            <rect class="svg-box" x="1010" y="145" width="115" height="52" rx="5"></rect>
+            <text class="svg-text" x="1030" y="167">Traefik</text>
+            <text class="svg-muted" x="1025" y="184">80 入口</text>
+            <path class="svg-line" marker-end="url(#arrow1)" d="M800 92 L825 92"></path>
+            <path class="svg-line" marker-end="url(#arrow1)" d="M820 170 L850 170"></path>
+            <path class="svg-line" marker-end="url(#arrow1)" d="M985 170 L1010 170"></path>
+            <text class="svg-muted" x="655" y="225">故障边界：Pod / Namespace / PVC / Node，可调度、可迁移、可观测</text>
+
+            <rect class="svg-box" x="30" y="300" width="1120" height="175" rx="8"></rect>
+            <text class="svg-title" x="55" y="330">架构演进结论</text>
+            <text class="svg-text" x="55" y="360">1. 运行时从 Docker Socket 管理，升级为 Kubernetes CRD + Pod 调度。</text>
+            <text class="svg-text" x="55" y="388">2. 用户工作区从对象存储挂载，升级为 Longhorn 分布式文件卷。</text>
+            <text class="svg-text" x="55" y="416">3. 外部访问从多个宿主机端口，升级为统一 Ingress + FE nginx 路由。</text>
+            <text class="svg-text" x="55" y="444">4. 部署从 compose 脚本拼接，升级为 env.k3s 渲染 YAML 并可重复 apply。</text>
+          </svg>
+        </div>
+
+        <table>
+          <tr><th>维度</th><th>旧架构：Docker + MinIO</th><th>新架构：K3s + Longhorn</th><th>收益</th></tr>
+          <tr><td>基础设施</td><td>Docker Compose，服务运行在固定宿主机</td><td>K3s 多节点，服务由 scheduler 调度</td><td>支持横向扩展和故障迁移</td></tr>
+          <tr><td>沙箱运行时</td><td>OpenSandbox Docker runtime，依赖 docker.sock</td><td>OpenSandbox Kubernetes runtime，使用 BatchSandbox CRD</td><td>降低宿主机耦合，增强资源隔离</td></tr>
+          <tr><td>用户工作区</td><td>MinIO 桶 + rclone/FUSE 挂载</td><td>Longhorn RWX PVC + subPath 挂载</td><td>减少中间层，提升 POSIX 文件语义一致性</td></tr>
+          <tr><td>中间件</td><td>Redis/OpenGauss/MinIO compose 容器</td><td>Redis Deployment、OpenGauss StatefulSet、Longhorn PVC</td><td>中间件纳入 K8s 生命周期管理</td></tr>
+          <tr><td>业务服务</td><td>FE/BE/QA/Data compose 容器</td><td>Deployment + Service，当前每服务 1 Pod 起步</td><td>统一配置、健康检查、滚动更新能力</td></tr>
+          <tr><td>入口</td><td>宿主机端口和 nginx 静态配置</td><td>Traefik 80 + FE nginx 反代内部 Service</td><td>主节点 IP 直接访问，后续可平滑切域名</td></tr>
+          <tr><td>部署</td><td><code>scripts/deploy.sh</code> 本机 compose</td><td><code>scripts/deploy-k3s.sh</code> 远程上传 + 集群部署</td><td>一条命令完成 K3s、Longhorn、YAML、SQL 初始化</td></tr>
+          <tr><td>排障</td><td>docker logs、宿主机目录、手动看日志</td><td>Pod 状态、Events、describe、logs 自动打印</td><td>启动卡住时能看到具体组件和失败原因</td></tr>
+        </table>
+      </section>
+
+      <section id="architecture">
+        <h2>3. 详细架构与流程图</h2>
+
+        <h3 id="topology">3.1 集群拓扑图</h3>
+        <div class="diagram">
+          <div class="diagram-title">图 2：三节点 K3s + Longhorn 部署拓扑</div>
+          <svg viewBox="0 0 1180 560" role="img" aria-label="K3s cluster topology">
+            <defs>
+              <marker id="arrow2" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+                <path d="M0,0 L10,4 L0,8 z" fill="#65758b"></path>
+              </marker>
+            </defs>
+            <rect class="svg-box svg-primary" x="40" y="55" width="310" height="155" rx="8"></rect>
+            <text class="svg-title" x="65" y="85">Node A：server + worker</text>
+            <text class="svg-muted" x="65" y="112">k3s server / kube-apiserver / scheduler</text>
+            <text class="svg-muted" x="65" y="136">Traefik hostPort 80</text>
+            <text class="svg-muted" x="65" y="160">Longhorn replica / data: /data/longhorn</text>
+            <text class="svg-muted" x="65" y="184">label: byclaw.io/node-pool=sandbox-general</text>
+
+            <rect class="svg-box svg-good" x="435" y="55" width="310" height="155" rx="8"></rect>
+            <text class="svg-title" x="460" y="85">Node B：agent</text>
+            <text class="svg-muted" x="460" y="112">kubelet / containerd</text>
+            <text class="svg-muted" x="460" y="136">Longhorn replica / data: /data/longhorn</text>
+            <text class="svg-muted" x="460" y="160">可承载业务 Pod 和 sandbox Pod</text>
+            <text class="svg-muted" x="460" y="184">label: byclaw.io/node-pool=sandbox-general</text>
+
+            <rect class="svg-box svg-good" x="830" y="55" width="310" height="155" rx="8"></rect>
+            <text class="svg-title" x="855" y="85">Node C：agent</text>
+            <text class="svg-muted" x="855" y="112">kubelet / containerd</text>
+            <text class="svg-muted" x="855" y="136">Longhorn replica / data: /data/longhorn</text>
+            <text class="svg-muted" x="855" y="160">可扩展为 browser/heavy pool</text>
+            <text class="svg-muted" x="855" y="184">label: byclaw.io/node-pool=sandbox-general</text>
+
+            <path class="svg-line" marker-end="url(#arrow2)" d="M350 115 L435 115"></path>
+            <path class="svg-line" marker-end="url(#arrow2)" d="M745 115 L830 115"></path>
+            <path class="svg-line svg-dash" d="M195 210 L195 285 L985 285 L985 210"></path>
+            <text class="svg-muted" x="405" y="278">VPC 内网：K3s join、Pod 通信、Longhorn replica 同步</text>
+
+            <rect class="svg-box" x="40" y="325" width="1100" height="165" rx="8"></rect>
+            <text class="svg-title" x="65" y="355">关键目录规划</text>
+            <text class="svg-text" x="65" y="385">K3s 数据目录：/data/rancher/k3s，避免占用 40G 根盘。</text>
+            <text class="svg-text" x="65" y="415">Kubelet 根目录：/data/kubelet，Longhorn CSI 需注册到该路径。</text>
+            <text class="svg-text" x="65" y="445">Longhorn 数据目录：/data/longhorn，建议使用每台机器的数据盘。</text>
+            <text class="svg-text" x="65" y="475">业务工作区挂载点：BE 容器内 /mnt/byclaw-workspace，sandbox 容器内 /by。</text>
+          </svg>
+        </div>
+
+        <h3 id="namespaces">3.2 Namespace 与服务边界</h3>
+        <div class="diagram">
+          <div class="diagram-title">图 3：Namespace 拓扑</div>
+          <svg viewBox="0 0 1180 520" role="img" aria-label="Namespace topology">
+            <defs>
+              <marker id="arrow3" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+                <path d="M0,0 L10,4 L0,8 z" fill="#65758b"></path>
+              </marker>
+            </defs>
+            <rect class="svg-box svg-primary" x="55" y="70" width="300" height="160" rx="8"></rect>
+            <text class="svg-title" x="80" y="100">by-service</text>
+            <text class="svg-text" x="80" y="130">byclaw-fe</text>
+            <text class="svg-text" x="80" y="155">byclaw-be</text>
+            <text class="svg-text" x="80" y="180">byclaw-qa-manager</text>
+            <text class="svg-text" x="80" y="205">byclaw-datacloud</text>
+
+            <rect class="svg-box svg-warn" x="440" y="70" width="300" height="160" rx="8"></rect>
+            <text class="svg-title" x="465" y="100">by-middleware</text>
+            <text class="svg-text" x="465" y="130">opengauss StatefulSet</text>
+            <text class="svg-text" x="465" y="155">redis Deployment</text>
+            <text class="svg-text" x="465" y="180">opengauss-data PVC</text>
+            <text class="svg-text" x="465" y="205">Secret: db / redis auth</text>
+
+            <rect class="svg-box svg-purple" x="825" y="70" width="300" height="160" rx="8"></rect>
+            <text class="svg-title" x="850" y="100">by-sandbox</text>
+            <text class="svg-text" x="850" y="130">opensandbox-server</text>
+            <text class="svg-text" x="850" y="155">ConfigMap: k8s runtime + template</text>
+            <text class="svg-text" x="850" y="180">Secret: OpenSandbox API key</text>
+            <text class="svg-text" x="850" y="205">ServiceAccount / RBAC</text>
+
+            <rect class="svg-box svg-good" x="245" y="305" width="300" height="100" rx="8"></rect>
+            <text class="svg-title" x="270" y="335">by-service 或 workload namespace</text>
+            <text class="svg-text" x="270" y="365">OpenClaw sandbox Pod</text>
+            <text class="svg-muted" x="270" y="388">OPENSANDBOX_WORKLOAD_NAMESPACE=by-service</text>
+
+            <rect class="svg-box" x="635" y="305" width="300" height="100" rx="8"></rect>
+            <text class="svg-title" x="660" y="335">monitoring</text>
+            <text class="svg-text" x="660" y="365">HPA / alert rules / webhook</text>
+            <text class="svg-muted" x="660" y="388">可接 Prometheus/KEDA</text>
+
+            <path class="svg-line" marker-end="url(#arrow3)" d="M355 150 L440 150"></path>
+            <text class="svg-muted" x="365" y="138">DB/Redis</text>
+            <path class="svg-line" marker-end="url(#arrow3)" d="M355 180 C520 270 690 270 825 180"></path>
+            <text class="svg-muted" x="560" y="265">OpenSandbox API</text>
+            <path class="svg-line" marker-end="url(#arrow3)" d="M975 230 C940 285 790 320 545 355"></path>
+            <text class="svg-muted" x="800" y="300">创建 sandbox Pod</text>
+          </svg>
+        </div>
+
+        <h3 id="sandbox-flow">3.3 BE 调用 OpenSandbox 创建沙箱流程</h3>
+        <div class="diagram">
+          <div class="diagram-title">图 4：沙箱创建与用户目录初始化流程</div>
+          <svg viewBox="0 0 1180 460" role="img" aria-label="Sandbox creation flow">
+            <defs>
+              <marker id="arrow4" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+                <path d="M0,0 L10,4 L0,8 z" fill="#65758b"></path>
+              </marker>
+            </defs>
+            <rect class="svg-box svg-primary" x="40" y="80" width="150" height="65" rx="8"></rect>
+            <text class="svg-text" x="72" y="108">用户访问</text>
+            <text class="svg-muted" x="58" y="130">FE / chat / openclaw</text>
+            <path class="svg-line" marker-end="url(#arrow4)" d="M190 112 L245 112"></path>
+            <rect class="svg-box svg-primary" x="245" y="80" width="160" height="65" rx="8"></rect>
+            <text class="svg-text" x="278" y="108">ByClaw BE</text>
+            <text class="svg-muted" x="260" y="130">SandboxLifecycle</text>
+            <path class="svg-line" marker-end="url(#arrow4)" d="M405 112 L460 112"></path>
+            <rect class="svg-box svg-warn" x="460" y="80" width="175" height="65" rx="8"></rect>
+            <text class="svg-text" x="493" y="108">读取服务规格</text>
+            <text class="svg-muted" x="475" y="130">sandbox_service_spec</text>
+            <path class="svg-line" marker-end="url(#arrow4)" d="M635 112 L690 112"></path>
+            <rect class="svg-box svg-good" x="690" y="80" width="190" height="65" rx="8"></rect>
+            <text class="svg-text" x="720" y="108">初始化工作区</text>
+            <text class="svg-muted" x="710" y="130">写 openclaw.json / user_info</text>
+            <path class="svg-line" marker-end="url(#arrow4)" d="M880 112 L935 112"></path>
+            <rect class="svg-box svg-purple" x="935" y="80" width="190" height="65" rx="8"></rect>
+            <text class="svg-text" x="972" y="108">OpenSandbox API</text>
+            <text class="svg-muted" x="952" y="130">POST /v1/sandboxes</text>
+
+            <path class="svg-line" marker-end="url(#arrow4)" d="M1030 145 L1030 205"></path>
+            <rect class="svg-box svg-purple" x="935" y="205" width="190" height="65" rx="8"></rect>
+            <text class="svg-text" x="965" y="233">BatchSandbox CR</text>
+            <text class="svg-muted" x="960" y="255">template + env + image</text>
+            <path class="svg-line" marker-end="url(#arrow4)" d="M935 238 L880 238"></path>
+            <rect class="svg-box svg-good" x="690" y="205" width="190" height="65" rx="8"></rect>
+            <text class="svg-text" x="735" y="233">Sandbox Pod</text>
+            <text class="svg-muted" x="715" y="255">mount /by from PVC subPath</text>
+            <path class="svg-line" marker-end="url(#arrow4)" d="M690 238 L635 238"></path>
+            <rect class="svg-box svg-warn" x="460" y="205" width="175" height="65" rx="8"></rect>
+            <text class="svg-text" x="500" y="233">Longhorn PVC</text>
+            <text class="svg-muted" x="475" y="255">byclaw-{user}/by</text>
+            <path class="svg-line" marker-end="url(#arrow4)" d="M545 270 L545 330 L325 330 L325 145"></path>
+            <text class="svg-muted" x="360" y="320">同一份用户目录，BE 和沙箱可见</text>
+
+            <rect class="svg-box" x="40" y="340" width="1085" height="80" rx="8"></rect>
+            <text class="svg-title" x="65" y="370">关键实现点</text>
+            <text class="svg-muted" x="65" y="396">BE 的 SandboxWorkspaceBootstrapInitializer 写入 /.openclaw/openclaw.json 和 identity/by_user_info.json；OpenSandbox 只负责创建 Pod 和返回 endpoint。</text>
+          </svg>
+        </div>
+      </section>
+
+      <section id="deployment-plan">
+        <h2>4. 中间件、Sandbox、业务服务如何规划部署</h2>
+
+        <h3 id="middleware">4.1 中间件部署规划</h3>
+        <div class="grid two">
+          <div class="box">
+            <strong>OpenGauss</strong>
+            <p>部署为 <code>StatefulSet/opengauss</code>，持久化数据放在 <code>opengauss-data</code> PVC，使用 Longhorn <code>ReadWriteOnce</code> 卷。部署脚本会等待 PVC Bound 和 StatefulSet Ready，并在首次启动后执行初始化 SQL。</p>
+          </div>
+          <div class="box">
+            <strong>Redis</strong>
+            <p>部署为 <code>Deployment/redis</code>，以 Secret 注入密码。当前缓存型组件先按单副本部署，后续可扩展为 Redis Sentinel 或云 Redis。</p>
+          </div>
+        </div>
+
+        <div class="diagram">
+          <div class="diagram-title">图 5：中间件部署拓扑</div>
+          <svg viewBox="0 0 1100 330" role="img" aria-label="Middleware topology">
+            <defs>
+              <marker id="arrow5" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+                <path d="M0,0 L10,4 L0,8 z" fill="#65758b"></path>
+              </marker>
+            </defs>
+            <rect class="svg-box svg-warn" x="55" y="45" width="990" height="235" rx="8"></rect>
+            <text class="svg-title" x="80" y="78">Namespace: by-middleware</text>
+            <rect class="svg-box" x="90" y="110" width="210" height="70" rx="8"></rect>
+            <text class="svg-text" x="120" y="140">StatefulSet/opengauss</text>
+            <text class="svg-muted" x="125" y="162">5432 / gaussdb</text>
+            <rect class="svg-box svg-warn" x="370" y="110" width="210" height="70" rx="8"></rect>
+            <text class="svg-text" x="415" y="140">PVC/opengauss-data</text>
+            <text class="svg-muted" x="430" y="162">Longhorn RWO</text>
+            <path class="svg-line" marker-end="url(#arrow5)" d="M300 145 L370 145"></path>
+            <rect class="svg-box" x="660" y="110" width="170" height="70" rx="8"></rect>
+            <text class="svg-text" x="700" y="140">Deployment/redis</text>
+            <text class="svg-muted" x="705" y="162">6379 / Secret</text>
+            <rect class="svg-box svg-primary" x="870" y="110" width="140" height="70" rx="8"></rect>
+            <text class="svg-text" x="902" y="140">Service DNS</text>
+            <text class="svg-muted" x="888" y="162">*.svc.cluster.local</text>
+            <path class="svg-line" marker-end="url(#arrow5)" d="M830 145 L870 145"></path>
+          </svg>
+        </div>
+
+        <h3 id="business">4.2 业务服务部署规划</h3>
+        <table>
+          <tr><th>服务</th><th>K8s 对象</th><th>当前副本</th><th>端口</th><th>说明</th></tr>
+          <tr><td>byclaw-fe</td><td>Deployment + Service + ConfigMap</td><td>1</td><td>80</td><td>挂载 <code>deploy/config/nginx-standalone.conf</code> 渲染后的 <code>default.conf</code></td></tr>
+          <tr><td>byclaw-be</td><td>Deployment + Service + ConfigMap + Secret</td><td>1</td><td>8086 / 8082</td><td>挂载 BE 配置和 Longhorn 工作区 PVC</td></tr>
+          <tr><td>byclaw-qa-manager</td><td>Deployment + Service</td><td>1</td><td>8000</td><td>QA 服务，DB/Redis/MinIO 兼容 env 注入</td></tr>
+          <tr><td>byclaw-datacloud</td><td>Deployment + Service</td><td>1</td><td>8088</td><td>Data 服务，支持 MCP 和 gateway worker</td></tr>
+        </table>
+
+        <div class="diagram">
+          <div class="diagram-title">图 6：业务服务拓扑</div>
+          <svg viewBox="0 0 1100 360" role="img" aria-label="Business services topology">
+            <defs>
+              <marker id="arrow6" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+                <path d="M0,0 L10,4 L0,8 z" fill="#65758b"></path>
+              </marker>
+            </defs>
+            <rect class="svg-box svg-primary" x="55" y="40" width="990" height="270" rx="8"></rect>
+            <text class="svg-title" x="80" y="72">Namespace: by-service</text>
+            <rect class="svg-box" x="90" y="105" width="170" height="70" rx="8"></rect>
+            <text class="svg-text" x="125" y="135">byclaw-fe</text>
+            <text class="svg-muted" x="118" y="158">nginx :80</text>
+            <rect class="svg-box" x="340" y="105" width="170" height="70" rx="8"></rect>
+            <text class="svg-text" x="378" y="135">byclaw-be</text>
+            <text class="svg-muted" x="365" y="158">8086 / 8082</text>
+            <rect class="svg-box" x="590" y="105" width="170" height="70" rx="8"></rect>
+            <text class="svg-text" x="620" y="135">QA Manager</text>
+            <text class="svg-muted" x="640" y="158">:8000</text>
+            <rect class="svg-box" x="840" y="105" width="170" height="70" rx="8"></rect>
+            <text class="svg-text" x="880" y="135">DataCloud</text>
+            <text class="svg-muted" x="900" y="158">:8088</text>
+            <path class="svg-line" marker-end="url(#arrow6)" d="M260 140 L340 140"></path>
+            <path class="svg-line" marker-end="url(#arrow6)" d="M510 140 L590 140"></path>
+            <path class="svg-line" marker-end="url(#arrow6)" d="M510 155 C600 245 720 245 840 155"></path>
+            <rect class="svg-box svg-warn" x="340" y="220" width="420" height="55" rx="8"></rect>
+            <text class="svg-text" x="385" y="245">PVC/byclaw-workspace mounted at /mnt/byclaw-workspace in BE</text>
+            <text class="svg-muted" x="475" y="264">用户目录 byclaw-{user}/by</text>
+          </svg>
+        </div>
+
+        <h3 id="sandbox">4.3 Sandbox 部署规划</h3>
+        <div class="grid two">
+          <div class="box">
+            <strong>OpenSandbox Server</strong>
+            <p>部署在 <code>by-sandbox</code>，配置文件由 <code>gen-opensandbox-k8s-config.sh</code> 生成，runtime 为 <code>kubernetes</code>，通过 <code>BatchSandbox</code> 模板创建沙箱 Pod。</p>
+          </div>
+          <div class="box">
+            <strong>OpenClaw Sandbox Pod</strong>
+            <p>按用户请求动态创建，镜像来自 <code>IMAGE_OPENCLAW</code> 对应 SQL/服务规格，<code>/by</code> 挂载到 <code>byclaw-workspace</code> 的用户 subPath。</p>
+          </div>
+        </div>
+
+        <div class="diagram">
+          <div class="diagram-title">图 7：Sandbox 运行时拓扑</div>
+          <svg viewBox="0 0 1100 390" role="img" aria-label="Sandbox runtime topology">
+            <defs>
+              <marker id="arrow7" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+                <path d="M0,0 L10,4 L0,8 z" fill="#65758b"></path>
+              </marker>
+            </defs>
+            <rect class="svg-box svg-purple" x="55" y="45" width="450" height="260" rx="8"></rect>
+            <text class="svg-title" x="80" y="75">by-sandbox</text>
+            <rect class="svg-box" x="90" y="105" width="180" height="70" rx="8"></rect>
+            <text class="svg-text" x="118" y="135">opensandbox-server</text>
+            <text class="svg-muted" x="115" y="158">API :9005</text>
+            <rect class="svg-box" x="300" y="105" width="170" height="70" rx="8"></rect>
+            <text class="svg-text" x="337" y="135">ConfigMap</text>
+            <text class="svg-muted" x="315" y="158">toml + template</text>
+            <path class="svg-line" marker-end="url(#arrow7)" d="M270 140 L300 140"></path>
+            <rect class="svg-box" x="90" y="210" width="380" height="60" rx="8"></rect>
+            <text class="svg-text" x="118" y="238">ServiceAccount / RBAC：允许管理 BatchSandbox、Pod、Service、Ingress</text>
+
+            <rect class="svg-box svg-good" x="600" y="45" width="445" height="260" rx="8"></rect>
+            <text class="svg-title" x="625" y="75">OPENSANDBOX_WORKLOAD_NAMESPACE</text>
+            <rect class="svg-box" x="635" y="105" width="180" height="70" rx="8"></rect>
+            <text class="svg-text" x="665" y="135">BatchSandbox CR</text>
+            <text class="svg-muted" x="675" y="158">replicas: 1</text>
+            <rect class="svg-box svg-good" x="845" y="105" width="165" height="70" rx="8"></rect>
+            <text class="svg-text" x="878" y="135">OpenClaw Pod</text>
+            <text class="svg-muted" x="875" y="158">/by + /tmp/scratch</text>
+            <path class="svg-line" marker-end="url(#arrow7)" d="M505 140 L600 140"></path>
+            <path class="svg-line" marker-end="url(#arrow7)" d="M815 140 L845 140"></path>
+            <rect class="svg-box svg-warn" x="635" y="210" width="375" height="60" rx="8"></rect>
+            <text class="svg-text" x="665" y="238">PVC/byclaw-workspace → subPathExpr: byclaw-$(USER_CODE)/by</text>
+          </svg>
+        </div>
+
+        <h3 id="yaml">4.4 YAML 详细说明</h3>
+        <p>当前 <code>deploy/k3s/render-manifests.sh</code> 是生成 YAML 的事实来源。生成目录 <code>deploy/k3s/generated/</code> 包含 Secret <code>stringData</code>，不应提交。</p>
+
+        <h4>Namespace</h4>
+        <pre><code>apiVersion: v1
+kind: Namespace
+metadata:
+  name: by-service
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: by-middleware
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: by-sandbox</code></pre>
+
+        <h4>工作区 PVC</h4>
+        <pre><code>apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: byclaw-workspace
+  namespace: by-service
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 500Gi</code></pre>
+        <p class="small">说明：<code>by-service</code> 中 BE 挂载该 PVC 到 <code>/mnt/byclaw-workspace</code>；沙箱模板也引用同名 PVC，并通过用户 subPath 挂载到沙箱容器 <code>/by</code>。</p>
+
+        <h4>BE Deployment 关键卷配置</h4>
+        <pre><code>containers:
+  - name: be
+    image: ${IMAGE_BE}
+    env:
+      - name: FILE_STORAGE_TYPE
+        value: "file"
+      - name: BYCLAW_SANDBOX_VOLUME_BACKEND
+        value: "file"
+      - name: BYCLAW_SANDBOX_FILE_VOLUME_ROOT
+        value: "/mnt/byclaw-workspace"
+      - name: FILE_STORAGE_LOCAL_PATH
+        value: "/mnt/byclaw-workspace"
+    volumeMounts:
+      - name: config
+        mountPath: /app/config
+        readOnly: true
+      - name: workspace
+        mountPath: /mnt/byclaw-workspace
+volumes:
+  - name: workspace
+    persistentVolumeClaim:
+      claimName: byclaw-workspace</code></pre>
+
+        <h4>OpenSandbox K8s runtime 配置</h4>
+        <pre><code>[runtime]
+type = "kubernetes"
+execd_image = "${IMAGE_SANDBOX_EXECD}"
+
+[kubernetes]
+namespace = "${OPENSANDBOX_WORKLOAD_NAMESPACE}"
+service_account = "opensandbox-runtime"
+workload_provider = "batchsandbox"
+batchsandbox_template_file = "/etc/opensandbox/batchsandbox-template.yaml"
+
+[ingress]
+mode = "gateway"
+
+[ingress.gateway]
+address = "${OPENSANDBOX_GATEWAY_ADDRESS}"
+
+[ingress.gateway.route]
+mode = "${OPENSANDBOX_ROUTE_MODE}"</code></pre>
+
+        <h4>BatchSandbox 模板关键片段</h4>
+        <pre><code>apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: BatchSandbox
+spec:
+  replicas: 1
+  template:
+    spec:
+      serviceAccountName: opensandbox-runtime
+      nodeSelector:
+        byclaw.io/node-pool: sandbox-general
+      containers:
+        - name: main
+          image: "{{ image }}"
+          volumeMounts:
+            - name: workspace
+              mountPath: /by
+              subPathExpr: "byclaw-$(USER_CODE)/by"
+            - name: scratch
+              mountPath: /tmp/scratch
+      volumes:
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: byclaw-workspace
+        - name: scratch
+          emptyDir:
+            sizeLimit: 10Gi</code></pre>
+      </section>
+
+      <section id="longhorn">
+        <h2>5. Longhorn 如何解决存储卷的高性能、分布式和数据不丢</h2>
+        <h3>5.1 存储目标</h3>
+        <p>升级后的核心目标是让 BE 和沙箱看见同一份用户工作区数据：BE 写入 <code>/mnt/byclaw-workspace/byclaw-{user}/by</code>，沙箱 Pod 挂载为 <code>/by</code>。Longhorn 提供的是 K8s 原生 PVC 能力，而不是对象存储模拟文件系统。</p>
+
+        <div class="diagram">
+          <div class="diagram-title">图 8：Longhorn 分布式卷读写路径</div>
+          <svg viewBox="0 0 1180 480" role="img" aria-label="Longhorn storage flow">
+            <defs>
+              <marker id="arrow8" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+                <path d="M0,0 L10,4 L0,8 z" fill="#65758b"></path>
+              </marker>
+            </defs>
+            <rect class="svg-box svg-primary" x="60" y="70" width="180" height="65" rx="8"></rect>
+            <text class="svg-text" x="104" y="100">ByClaw BE</text>
+            <text class="svg-muted" x="92" y="122">LocalStorageService</text>
+            <rect class="svg-box svg-good" x="60" y="210" width="180" height="65" rx="8"></rect>
+            <text class="svg-text" x="98" y="240">Sandbox Pod</text>
+            <text class="svg-muted" x="102" y="262">mount /by</text>
+            <rect class="svg-box svg-warn" x="340" y="135" width="230" height="95" rx="8"></rect>
+            <text class="svg-title" x="382" y="168">RWX PVC</text>
+            <text class="svg-text" x="382" y="194">byclaw-workspace</text>
+            <text class="svg-muted" x="365" y="216">subPath: byclaw-{user}/by</text>
+            <path class="svg-line" marker-end="url(#arrow8)" d="M240 104 C285 104 300 160 340 170"></path>
+            <path class="svg-line" marker-end="url(#arrow8)" d="M240 244 C285 244 300 210 340 200"></path>
+            <rect class="svg-box" x="675" y="55" width="155" height="90" rx="8"></rect>
+            <text class="svg-text" x="708" y="88">Node A</text>
+            <text class="svg-muted" x="705" y="112">Replica 1</text>
+            <text class="svg-muted" x="705" y="132">/data/longhorn</text>
+            <rect class="svg-box" x="675" y="180" width="155" height="90" rx="8"></rect>
+            <text class="svg-text" x="708" y="213">Node B</text>
+            <text class="svg-muted" x="705" y="237">Replica 2</text>
+            <text class="svg-muted" x="705" y="257">/data/longhorn</text>
+            <rect class="svg-box" x="675" y="305" width="155" height="90" rx="8"></rect>
+            <text class="svg-text" x="708" y="338">Node C</text>
+            <text class="svg-muted" x="705" y="362">Replica 3</text>
+            <text class="svg-muted" x="705" y="382">/data/longhorn</text>
+            <path class="svg-line" marker-end="url(#arrow8)" d="M570 178 C620 115 635 100 675 100"></path>
+            <path class="svg-line" marker-end="url(#arrow8)" d="M570 182 L675 225"></path>
+            <path class="svg-line" marker-end="url(#arrow8)" d="M570 205 C620 300 635 350 675 350"></path>
+            <rect class="svg-box svg-purple" x="900" y="135" width="210" height="95" rx="8"></rect>
+            <text class="svg-title" x="938" y="168">K8s 调度</text>
+            <text class="svg-muted" x="925" y="194">Pod 跨节点启动</text>
+            <text class="svg-muted" x="925" y="216">PVC 自动挂载</text>
+            <path class="svg-line svg-dash" marker-end="url(#arrow8)" d="M830 225 L900 180"></path>
+          </svg>
+        </div>
+
+        <table>
+          <tr><th>能力</th><th>Longhorn 方案</th><th>对 ByClaw 的价值</th></tr>
+          <tr><td>高性能</td><td>用户工作区走块存储 + 文件系统挂载，去掉 MinIO S3 API 与 rclone/FUSE 中间层</td><td>提升目录遍历、小文件读写、rename、日志写入等 POSIX 场景稳定性</td></tr>
+          <tr><td>分布式</td><td>卷副本分布在多节点 <code>/data/longhorn</code>，Pod 可在任意满足调度条件的节点挂载</td><td>沙箱不再被固定宿主机限制，支持水平扩容</td></tr>
+          <tr><td>数据不丢</td><td>副本数生产建议 2 或 3；单节点故障时仍有其他副本可恢复</td><td>用户 <code>/by</code> 工作区不会因为单节点盘故障立即丢失</td></tr>
+          <tr><td>RWX 共享</td><td><code>ReadWriteMany</code> PVC 支持 BE 与沙箱同时访问工作区</td><td>BE 初始化配置后，沙箱启动即可看到 <code>/.openclaw/openclaw.json</code></td></tr>
+          <tr><td>运维可观测</td><td>CSI、PVC、PV、Volume、Replica、Events 均可查询</td><td>卷挂载失败可定位到 CSINode、longhorn-csi-plugin、share-manager 或副本状态</td></tr>
+        </table>
+
+        <div class="callout warn">
+          <strong>副本数说明：</strong>当前联调环境可能为了快速验证设置 <code>LONGHORN_REPLICA_COUNT=1</code>。生产环境建议至少 2，三节点资源允许时建议 3。副本数越高，容灾越强，但写入放大会增加网络和磁盘负载。
+        </div>
+
+        <h3>5.2 与 MinIO/rclone 的差异</h3>
+        <table>
+          <tr><th>项目</th><th>MinIO/rclone</th><th>Longhorn PVC</th></tr>
+          <tr><td>文件语义</td><td>对象存储模拟目录，FUSE 层转译</td><td>原生文件系统路径</td></tr>
+          <tr><td>故障点</td><td>BE、MinIO、rclone、FUSE、OpenSandbox 卷驱动</td><td>BE、K8s CSI、Longhorn 卷</td></tr>
+          <tr><td>写入路径</td><td>BE PutObject，沙箱通过 FUSE 读</td><td>BE 和沙箱都读写同一 PVC 子目录</td></tr>
+          <tr><td>扩容方式</td><td>扩容 MinIO 或迁移桶</td><td>扩容 PVC/Longhorn 卷并添加节点磁盘</td></tr>
+        </table>
+      </section>
+
+      <section id="ingress">
+        <h2>6. 业务系统出口 Ingress 详细介绍</h2>
+        <p>当前目标是“不依赖域名也能访问”：主节点公网 IP + 80 端口进入 Traefik，再转到 <code>byclaw-fe</code>。FE nginx 负责静态页面、后端 API、WebSocket、文件预览下载，以及沙箱 URI 模式代理。</p>
+
+        <div class="diagram">
+          <div class="diagram-title">图 9：公网入口与内部路由</div>
+          <svg viewBox="0 0 1180 470" role="img" aria-label="Ingress routing">
+            <defs>
+              <marker id="arrow9" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+                <path d="M0,0 L10,4 L0,8 z" fill="#65758b"></path>
+              </marker>
+            </defs>
+            <rect class="svg-box svg-primary" x="45" y="80" width="180" height="65" rx="8"></rect>
+            <text class="svg-text" x="87" y="108">浏览器</text>
+            <text class="svg-muted" x="65" y="130">http://&lt;master-ip&gt;/</text>
+            <path class="svg-line" marker-end="url(#arrow9)" d="M225 112 L285 112"></path>
+            <rect class="svg-box svg-purple" x="285" y="80" width="180" height="65" rx="8"></rect>
+            <text class="svg-text" x="325" y="108">Traefik</text>
+            <text class="svg-muted" x="318" y="130">hostPort 80</text>
+            <path class="svg-line" marker-end="url(#arrow9)" d="M465 112 L525 112"></path>
+            <rect class="svg-box svg-primary" x="525" y="80" width="190" height="65" rx="8"></rect>
+            <text class="svg-text" x="575" y="108">byclaw-fe</text>
+            <text class="svg-muted" x="555" y="130">nginx default.conf</text>
+            <path class="svg-line" marker-end="url(#arrow9)" d="M715 112 L775 112"></path>
+            <rect class="svg-box svg-good" x="775" y="55" width="170" height="55" rx="8"></rect>
+            <text class="svg-text" x="812" y="88">byclaw-be</text>
+            <rect class="svg-box svg-warn" x="775" y="135" width="170" height="55" rx="8"></rect>
+            <text class="svg-text" x="800" y="168">OpenSandbox</text>
+            <rect class="svg-box" x="775" y="215" width="170" height="55" rx="8"></rect>
+            <text class="svg-text" x="820" y="248">静态资源</text>
+            <text class="svg-muted" x="560" y="250">/byaiService → BE</text>
+            <text class="svg-muted" x="560" y="275">/byaiService/ws → BE WS</text>
+            <text class="svg-muted" x="560" y="300">/v1/sandboxes/{id}/{port} → OpenSandbox /proxy/{port}</text>
+            <text class="svg-muted" x="560" y="325">/filebrowser → BE ingress proxy</text>
+            <rect class="svg-box" x="45" y="355" width="900" height="65" rx="8"></rect>
+            <text class="svg-title" x="70" y="385">域名预留</text>
+            <text class="svg-muted" x="70" y="408">当前可用主节点 IP + 80。后续配置 BYCLAW_INGRESS_HOST、SANDBOX_INGRESS_HOST、TLS Secret 后，可切换为业务域名和 wildcard sandbox 域名。</text>
+          </svg>
+        </div>
+
+        <h3>6.1 Ingress YAML</h3>
+        <pre><code>apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: byclaw
+  namespace: by-service
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: byclaw-fe
+                port:
+                  number: 80</code></pre>
+
+        <h3>6.2 FE nginx 对沙箱 URI 模式的代理</h3>
+        <pre><code>location ~ ^/v1/sandboxes/([^/]+)/([0-9]+)(/.*)?$ {
+    rewrite ^/v1/sandboxes/([^/]+)/([0-9]+)(/.*)?$ /v1/sandboxes/$1/proxy/$2$3 break;
+    proxy_pass http://opensandbox-server.by-sandbox.svc.cluster.local:9005;
+
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+}</code></pre>
+        <p class="small">说明：当没有 wildcard 域名时，OpenSandbox endpoint 可统一返回 <code>http://&lt;master-ip&gt;/v1/sandboxes/&lt;id&gt;/8080</code> 这一类 URI，由 FE nginx rewrite 到 OpenSandbox 的 <code>/proxy/{port}</code>。</p>
+      </section>
+
+      <section id="one-click">
+        <h2>7. 一键部署操作指引说明</h2>
+
+        <h3>7.1 部署前检查</h3>
+        <table>
+          <tr><th>检查项</th><th>要求</th><th>说明</th></tr>
+          <tr><td>服务器</td><td>3 台 Linux 节点</td><td>1 台 server，2 台 agent 起步；也可三台都作为 server+worker，但需评估 etcd HA</td></tr>
+          <tr><td>数据盘</td><td><code>/data</code> 可用空间充足</td><td>K3s、kubelet、Longhorn 均放在 <code>/data</code>，避免占用小 root 盘</td></tr>
+          <tr><td>网络</td><td>SSH 公网可达，K3s/Longhorn 用内网通信</td><td><code>K3S_NODE_INTERNAL_IPS</code> 把 SSH IP 映射到 VPC IP</td></tr>
+          <tr><td>镜像</td><td>业务镜像、OpenSandbox 镜像可拉取</td><td>私有 registry 通过 <code>K3S_PRIVATE_REGISTRIES</code> 配置 containerd</td></tr>
+          <tr><td>Secret</td><td>只写入 env，不提交 git</td><td>DB、Redis、OpenSandbox、registry 密码均通过 Secret 注入</td></tr>
+        </table>
+
+        <h3>7.2 配置 env.k3s</h3>
+        <pre><code># envs/byclaw/env.k3s
+K3S_API_HOST=&lt;master-public-ip&gt;
+K3S_CLUSTER_INTERNAL_ONLY=true
+K3S_JOIN_URL=https://&lt;master-private-ip&gt;:6443
+K3S_NODE_INTERNAL_IPS=&lt;ssh-ip-a&gt;=&lt;private-ip-a&gt;,&lt;ssh-ip-b&gt;=&lt;private-ip-b&gt;,&lt;ssh-ip-c&gt;=&lt;private-ip-c&gt;
+
+K3S_DATA_DIR=/data/rancher/k3s
+K3S_KUBELET_ROOT=/data/kubelet
+LONGHORN_DATA_PATH=/data/longhorn
+
+IMAGE_FE=&lt;registry&gt;/byclaw/byclaw-fe:&lt;tag&gt;
+IMAGE_BE=&lt;registry&gt;/byclaw/byclaw-be:&lt;tag&gt;
+IMAGE_QA=&lt;registry&gt;/byclaw/byclaw-qa:&lt;tag&gt;
+IMAGE_DATA=&lt;registry&gt;/byclaw/byclaw-data:&lt;tag&gt;
+
+FILE_STORAGE_TYPE=file
+FILE_STORAGE_MINIO_MOUNT_ENABLED=false
+BYCLAW_SANDBOX_VOLUME_BACKEND=file
+BYCLAW_SANDBOX_FILE_VOLUME_ROOT=/mnt/byclaw-workspace
+FILE_STORAGE_LOCAL_PATH=/mnt/byclaw-workspace</code></pre>
+
+        <h3>7.3 首次部署</h3>
+        <pre><code># 本地执行，脚本会上传 deploy/k3s 和 deploy/config 到远端
+sh scripts/deploy-k3s.sh byclaw init</code></pre>
+        <p>完整流程如下：</p>
+        <ol>
+          <li>读取 <code>envs/byclaw/env.k3s</code>，确认 server/agent、镜像、Longhorn、DB/Redis、OpenSandbox 参数。</li>
+          <li>安装 K3s：server 使用 <code>--cluster-init</code>，agent 通过 <code>K3S_JOIN_URL</code> 加入。</li>
+          <li>同步 registry 配置，保证 containerd 能拉取业务镜像和 OpenSandbox 镜像。</li>
+          <li>安装 Longhorn，修正 <code>K3S_KUBELET_ROOT</code> 下 CSI 注册路径。</li>
+          <li>安装 OpenSandbox Controller Helm chart。</li>
+          <li>渲染 YAML 到 <code>deploy/k3s/generated</code>。</li>
+          <li>按顺序 apply：namespace → storage → middleware → schema SQL → sandbox → service → ingress → monitoring。</li>
+          <li>等待 <code>by-middleware</code> 和 <code>by-service</code> 中目标工作负载 Ready，打印 Pod 进度和失败事件。</li>
+        </ol>
+
+        <h3>7.4 更新部署</h3>
+        <pre><code># 修改 env.k3s、镜像 tag 或 deploy/config 后执行
+sh scripts/deploy-k3s.sh byclaw update</code></pre>
+        <p><code>update</code> 会同步 registry 配置、确保 Traefik 80 入口、重新渲染并 apply YAML、清理旧的异常 Pod，并按配置决定是否 rollout restart 业务工作负载。</p>
+
+        <h3>7.5 常用验证命令</h3>
+        <pre><code>kubectl get nodes -o wide
+kubectl get pods -n by-middleware -o wide
+kubectl get pods -n by-service -o wide
+kubectl get pods -n by-sandbox -o wide
+kubectl get pvc -A
+kubectl get events -n by-service --sort-by=.lastTimestamp | tail -50
+curl -I http://&lt;master-public-ip&gt;/</code></pre>
+      </section>
+
+      <section id="ops">
+        <h2>8. 运维与验收</h2>
+        <h3>8.1 验收标准</h3>
+        <table>
+          <tr><th>项目</th><th>验收命令</th><th>通过标准</th></tr>
+          <tr><td>K3s 节点</td><td><code>kubectl get nodes -o wide</code></td><td>3 个节点均 Ready，InternalIP 为 VPC IP</td></tr>
+          <tr><td>Longhorn CSI</td><td><code>kubectl get csinode -o yaml | grep driver.longhorn.io</code></td><td>所有可调度节点均注册 driver.longhorn.io</td></tr>
+          <tr><td>中间件</td><td><code>kubectl get pods -n by-middleware</code></td><td>opengauss、redis Ready</td></tr>
+          <tr><td>业务服务</td><td><code>kubectl get pods -n by-service</code></td><td>fe、be、qa、data 各 1 个 Pod Ready</td></tr>
+          <tr><td>外部入口</td><td><code>curl -I http://&lt;master-public-ip&gt;/</code></td><td>返回 200 或 3xx，页面可打开</td></tr>
+          <tr><td>沙箱创建</td><td>通过 BE 触发 OpenClaw</td><td>创建 Sandbox Pod，endpoint 为主节点 IP + 80 URI 模式</td></tr>
+          <tr><td>用户目录</td><td>进入 sandbox Pod 查看 <code>/by/.openclaw/openclaw.json</code></td><td>配置文件和用户信息文件存在</td></tr>
+        </table>
+
+        <h3>8.2 异常定位流程</h3>
+        <div class="diagram">
+          <div class="diagram-title">图 10：部署失败排障流程</div>
+          <svg viewBox="0 0 1100 420" role="img" aria-label="Troubleshooting flow">
+            <defs>
+              <marker id="arrow10" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+                <path d="M0,0 L10,4 L0,8 z" fill="#65758b"></path>
+              </marker>
+            </defs>
+            <rect class="svg-box svg-primary" x="55" y="70" width="160" height="60" rx="8"></rect>
+            <text class="svg-text" x="92" y="105">Pod 未 Ready</text>
+            <path class="svg-line" marker-end="url(#arrow10)" d="M215 100 L275 100"></path>
+            <rect class="svg-box" x="275" y="70" width="180" height="60" rx="8"></rect>
+            <text class="svg-text" x="310" y="105">kubectl describe</text>
+            <path class="svg-line" marker-end="url(#arrow10)" d="M455 100 L515 100"></path>
+            <rect class="svg-box svg-warn" x="515" y="70" width="180" height="60" rx="8"></rect>
+            <text class="svg-text" x="548" y="105">看 Events 原因</text>
+            <path class="svg-line" marker-end="url(#arrow10)" d="M695 100 L755 100"></path>
+            <rect class="svg-box svg-good" x="755" y="70" width="260" height="60" rx="8"></rect>
+            <text class="svg-text" x="785" y="105">镜像 / PVC / Secret / 配置逐项修复</text>
+            <rect class="svg-box" x="120" y="210" width="860" height="120" rx="8"></rect>
+            <text class="svg-title" x="150" y="245">典型原因</text>
+            <text class="svg-muted" x="150" y="275">ImagePullBackOff：registry 配置或镜像 tag 不正确。</text>
+            <text class="svg-muted" x="150" y="300">FailedAttachVolume：Longhorn CSI 未在目标节点注册，检查 csinode 和 longhorn-csi-plugin。</text>
+            <text class="svg-muted" x="150" y="325">CrashLoopBackOff：看容器日志、配置挂载、数据库连接和启动参数。</text>
+          </svg>
+        </div>
+      </section>
+
+      <section id="capacity">
+        <h2>9. 现网部署架构、资源消耗与容量规划</h2>
+        <p>本章节基于 2026-06-12 登录当前 K3s 主节点后的现场数据整理。容量口径以“并发 OpenClaw 沙箱数”为核心，因为沙箱 Pod 是 CPU 和内存的主要消耗者；“用户数”需要结合并发率换算，不能直接等同于沙箱数。</p>
+
+        <h3>9.1 当前集群真实部署状态</h3>
+        <table>
+          <tr><th>项目</th><th>现网状态</th><th>说明</th></tr>
+          <tr><td>K3s 节点</td><td>3 台 Ready：1 台 control-plane/etcd + 2 台 agent</td><td>节点名为 <code>byclaw-master-156</code>、<code>byclaw-node-157</code>、<code>byclaw-node-159</code>，均运行 K3s v1.35.5+k3s1。</td></tr>
+          <tr><td>单节点规格</td><td>24 vCPU / 92GiB 内存 / 1TB 数据盘</td><td>每台数据盘已划分 850G 到 <code>/data</code>，根盘 40G。</td></tr>
+          <tr><td>集群可调度资源</td><td>约 68 vCPU / 267GiB 内存</td><td>扣除 kube/system reserve 后，master allocatable 22C，两个 agent 各 23C。</td></tr>
+          <tr><td>当前资源使用</td><td>CPU 约 74m / 78m / 104m；内存约 6.1Gi / 6.7Gi / 6.5Gi</td><td>当前处于低负载状态，CPU 使用几乎为空闲，内存每节点约 6-7%。</td></tr>
+          <tr><td>Longhorn</td><td>CSI、manager、instance-manager、share-manager 均 Running</td><td>默认数据路径 <code>/data/longhorn</code>，当前副本数为 1，生产建议调为 2 或 3。</td></tr>
+          <tr><td>PVC</td><td><code>opengauss-data</code> 100Gi RWO；<code>byclaw-workspace</code> 500Gi RWX</td><td><code>by-service</code> 与 <code>by-sandbox</code> 各有一个工作区 PVC；现用 by-service 工作区承载 BE 和沙箱。</td></tr>
+          <tr><td>业务 Pod</td><td>FE、BE、QA、Data、OpenSandbox、Redis、OpenGauss 均 Running</td><td>当前还有 1 个运行中的 OpenClaw sandbox Pod。</td></tr>
+        </table>
+
+        <div class="diagram">
+          <div class="diagram-title">图 11：当前现网部署拓扑与资源分布</div>
+          <svg viewBox="0 0 1180 540" role="img" aria-label="Current deployment resource topology">
+            <defs>
+              <marker id="arrow11" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+                <path d="M0,0 L10,4 L0,8 z" fill="#65758b"></path>
+              </marker>
+            </defs>
+            <rect class="svg-box svg-primary" x="40" y="55" width="330" height="170" rx="8"></rect>
+            <text class="svg-title" x="65" y="85">byclaw-master-156</text>
+            <text class="svg-muted" x="65" y="112">Role: control-plane, etcd, worker</text>
+            <text class="svg-muted" x="65" y="136">Capacity: 24C / 92GiB / 850G /data</text>
+            <text class="svg-muted" x="65" y="160">Allocatable: 22C / 87.8GiB</text>
+            <text class="svg-muted" x="65" y="184">Running: Traefik, metrics-server, CoreDNS</text>
+            <text class="svg-muted" x="65" y="208">Current: CPU 74m, Mem 6.1GiB</text>
+
+            <rect class="svg-box svg-good" x="425" y="55" width="330" height="170" rx="8"></rect>
+            <text class="svg-title" x="450" y="85">byclaw-node-157</text>
+            <text class="svg-muted" x="450" y="112">Role: worker</text>
+            <text class="svg-muted" x="450" y="136">Capacity: 24C / 92GiB / 850G /data</text>
+            <text class="svg-muted" x="450" y="160">Allocatable: 23C / 89.8GiB</text>
+            <text class="svg-muted" x="450" y="184">Running: OpenGauss, Redis, QA, Data</text>
+            <text class="svg-muted" x="450" y="208">Current: CPU 78m, Mem 6.7GiB</text>
+
+            <rect class="svg-box svg-good" x="810" y="55" width="330" height="170" rx="8"></rect>
+            <text class="svg-title" x="835" y="85">byclaw-node-159</text>
+            <text class="svg-muted" x="835" y="112">Role: worker</text>
+            <text class="svg-muted" x="835" y="136">Capacity: 24C / 92GiB / 850G /data</text>
+            <text class="svg-muted" x="835" y="160">Allocatable: 23C / 89.8GiB</text>
+            <text class="svg-muted" x="835" y="184">Running: FE, BE, OpenSandbox, 1 sandbox</text>
+            <text class="svg-muted" x="835" y="208">Current: CPU 104m, Mem 6.5GiB</text>
+
+            <rect class="svg-box svg-warn" x="105" y="295" width="970" height="135" rx="8"></rect>
+            <text class="svg-title" x="135" y="325">Longhorn 工作区与数据盘</text>
+            <text class="svg-text" x="135" y="355">每台机器 /data 为 850G 分区，目前可用约 764-773G；Longhorn 默认路径为 /data/longhorn。</text>
+            <text class="svg-text" x="135" y="385">当前 byclaw-workspace 为 500Gi RWX；OpenGauss 数据卷为 100Gi RWO。</text>
+            <text class="svg-text" x="135" y="415">当前副本数为 1，联调可接受；生产建议 2 或 3，以避免单节点盘故障导致数据不可恢复。</text>
+            <path class="svg-line svg-dash" marker-end="url(#arrow11)" d="M205 225 L205 295"></path>
+            <path class="svg-line svg-dash" marker-end="url(#arrow11)" d="M590 225 L590 295"></path>
+            <path class="svg-line svg-dash" marker-end="url(#arrow11)" d="M975 225 L975 295"></path>
+          </svg>
+        </div>
+
+        <h3>9.2 当前 Pod 资源消耗和 requests/limits</h3>
+        <table>
+          <tr><th>组件</th><th>当前实际使用</th><th>requests / limits</th><th>容量含义</th></tr>
+          <tr><td>OpenGauss</td><td>约 8m CPU / 856MiB</td><td>1C / 4GiB request，4C / 8GiB limit</td><td>当前空载，生产需按数据量和连接数提升 CPU、内存、磁盘 IOPS。</td></tr>
+          <tr><td>Redis</td><td>约 3m CPU / 4MiB</td><td>250m / 512MiB request，1C / 2GiB limit</td><td>当前空载，后续会受会话、缓存、消息量影响。</td></tr>
+          <tr><td>OpenSandbox Server</td><td>约 1m CPU / 108MiB</td><td>500m / 1GiB request，2C / 4GiB limit</td><td>控制面较轻，主要压力来自沙箱创建和 endpoint 查询。</td></tr>
+          <tr><td>ByClaw BE</td><td>约 5m CPU / 839MiB</td><td>500m / 2GiB request，2C / 4GiB limit</td><td>当前空载，生产建议至少 2 副本并外置会话/缓存。</td></tr>
+          <tr><td>ByClaw FE</td><td>约 1m CPU / 20MiB</td><td>100m / 256MiB request，500m / 512MiB limit</td><td>静态资源和反向代理压力可水平扩展。</td></tr>
+          <tr><td>QA / Data</td><td>QA 约 1m / 110MiB；Data 约 3m / 219MiB</td><td>各 250m / 512MiB request，1C / 2GiB limit</td><td>当前低负载，需按实际任务队列和数据处理量扩容。</td></tr>
+          <tr><td>当前 OpenClaw Sandbox</td><td>约 3m CPU / 328MiB</td><td>当前实例显示 2C / 4GiB；平台允许范围为最小 0.25C / 765MiB，最高 2C / 4GiB</td><td>容量测算必须按“实际申请规格”分层计算，不能把最高规格当默认规格。</td></tr>
+        </table>
+
+        <h4>9.2.1 现网资源消耗图表</h4>
+        <p class="small">采样时间：2026-06-12 12:24 CST。数据来自 <code>kubectl top nodes</code>、<code>kubectl top pods -A</code>、节点 <code>free -h</code> 和 <code>df -hT /data</code>。图表用于展示当前负载形态，不代表压测峰值。</p>
+
+        <div class="diagram">
+          <div class="diagram-title">图 11b：节点 CPU / 内存 / 数据盘使用率</div>
+          <svg viewBox="0 0 1180 430" role="img" aria-label="Current node resource usage chart">
+            <text class="svg-title" x="40" y="35">节点资源当前使用率</text>
+            <text class="svg-muted" x="40" y="58">CPU 当前几乎空闲；内存约 6-7%；/data 数据盘约 3-4%。</text>
+
+            <text class="svg-title" x="40" y="95">CPU 使用</text>
+            <text class="svg-muted" x="180" y="95">0.3%-0.4% of 24C</text>
+            <rect class="svg-box" x="40" y="112" width="310" height="24" rx="4"></rect>
+            <rect class="svg-primary" x="40" y="112" width="2" height="24" rx="4"></rect>
+            <text class="svg-muted" x="365" y="130">master: 74m</text>
+            <rect class="svg-box" x="40" y="148" width="310" height="24" rx="4"></rect>
+            <rect class="svg-primary" x="40" y="148" width="2" height="24" rx="4"></rect>
+            <text class="svg-muted" x="365" y="166">node-157: 78m</text>
+            <rect class="svg-box" x="40" y="184" width="310" height="24" rx="4"></rect>
+            <rect class="svg-primary" x="40" y="184" width="2" height="24" rx="4"></rect>
+            <text class="svg-muted" x="365" y="202">node-159: 104m</text>
+
+            <text class="svg-title" x="450" y="95">内存使用</text>
+            <text class="svg-muted" x="590" y="95">约 6.1-6.7GiB / 92GiB</text>
+            <rect class="svg-box" x="450" y="112" width="310" height="24" rx="4"></rect>
+            <rect class="svg-good" x="450" y="112" width="21" height="24" rx="4"></rect>
+            <text class="svg-muted" x="775" y="130">master: 6%</text>
+            <rect class="svg-box" x="450" y="148" width="310" height="24" rx="4"></rect>
+            <rect class="svg-good" x="450" y="148" width="23" height="24" rx="4"></rect>
+            <text class="svg-muted" x="775" y="166">node-157: 7%</text>
+            <rect class="svg-box" x="450" y="184" width="310" height="24" rx="4"></rect>
+            <rect class="svg-good" x="450" y="184" width="22" height="24" rx="4"></rect>
+            <text class="svg-muted" x="775" y="202">node-159: 7%</text>
+
+            <text class="svg-title" x="850" y="95">/data 使用</text>
+            <text class="svg-muted" x="970" y="95">850G 分区，当前 22-30G</text>
+            <rect class="svg-box" x="850" y="112" width="250" height="24" rx="4"></rect>
+            <rect class="svg-warn" x="850" y="112" width="10" height="24" rx="4"></rect>
+            <text class="svg-muted" x="1115" y="130">master: 4%</text>
+            <rect class="svg-box" x="850" y="148" width="250" height="24" rx="4"></rect>
+            <rect class="svg-warn" x="850" y="148" width="10" height="24" rx="4"></rect>
+            <text class="svg-muted" x="1115" y="166">node-157: 4%</text>
+            <rect class="svg-box" x="850" y="184" width="250" height="24" rx="4"></rect>
+            <rect class="svg-warn" x="850" y="184" width="8" height="24" rx="4"></rect>
+            <text class="svg-muted" x="1115" y="202">node-159: 3%</text>
+
+            <rect class="svg-box" x="40" y="265" width="1080" height="95" rx="8"></rect>
+            <text class="svg-title" x="65" y="295">现象解读</text>
+            <text class="svg-text" x="65" y="322">1. 当前节点真实 CPU 压力非常低，说明系统处于空载或轻负载。</text>
+            <text class="svg-text" x="65" y="348">2. 内存实际占用主要来自 K3s、Longhorn、OpenGauss、BE 和少量沙箱，仍有较大余量。</text>
+          </svg>
+        </div>
+
+        <div class="diagram">
+          <div class="diagram-title">图 11c：核心 Pod 实际内存消耗 Top</div>
+          <svg viewBox="0 0 1180 430" role="img" aria-label="Current pod memory usage chart">
+            <text class="svg-title" x="40" y="35">核心 Pod 实际内存消耗</text>
+            <text class="svg-muted" x="40" y="58">横向条越长，表示当前实际内存占用越高。当前最高的是 OpenGauss 和 ByClaw BE。</text>
+
+            <text class="svg-text" x="40" y="105">OpenGauss</text>
+            <rect class="svg-box" x="210" y="86" width="420" height="24" rx="4"></rect>
+            <rect class="svg-warn" x="210" y="86" width="400" height="24" rx="4"></rect>
+            <text class="svg-muted" x="650" y="105">856MiB</text>
+
+            <text class="svg-text" x="40" y="145">ByClaw BE</text>
+            <rect class="svg-box" x="210" y="126" width="420" height="24" rx="4"></rect>
+            <rect class="svg-primary" x="210" y="126" width="392" height="24" rx="4"></rect>
+            <text class="svg-muted" x="650" y="145">839MiB</text>
+
+            <text class="svg-text" x="40" y="185">OpenClaw Sandbox</text>
+            <rect class="svg-box" x="210" y="166" width="420" height="24" rx="4"></rect>
+            <rect class="svg-good" x="210" y="166" width="153" height="24" rx="4"></rect>
+            <text class="svg-muted" x="650" y="185">328MiB</text>
+
+            <text class="svg-text" x="40" y="225">DataCloud</text>
+            <rect class="svg-box" x="210" y="206" width="420" height="24" rx="4"></rect>
+            <rect class="svg-good" x="210" y="206" width="102" height="24" rx="4"></rect>
+            <text class="svg-muted" x="650" y="225">219MiB</text>
+
+            <text class="svg-text" x="40" y="265">QA Manager</text>
+            <rect class="svg-box" x="210" y="246" width="420" height="24" rx="4"></rect>
+            <rect class="svg-good" x="210" y="246" width="51" height="24" rx="4"></rect>
+            <text class="svg-muted" x="650" y="265">110MiB</text>
+
+            <text class="svg-text" x="40" y="305">OpenSandbox Server</text>
+            <rect class="svg-box" x="210" y="286" width="420" height="24" rx="4"></rect>
+            <rect class="svg-purple" x="210" y="286" width="50" height="24" rx="4"></rect>
+            <text class="svg-muted" x="650" y="305">108MiB</text>
+
+            <rect class="svg-box" x="760" y="86" width="330" height="225" rx="8"></rect>
+            <text class="svg-title" x="785" y="118">结论</text>
+            <text class="svg-muted" x="785" y="150">当前实际内存并不高。</text>
+            <text class="svg-muted" x="785" y="178">容量瓶颈主要来自 Kubernetes requests 预留。</text>
+            <text class="svg-muted" x="785" y="206">沙箱分层后，可以显著提升同等硬件下的并发数。</text>
+            <text class="svg-muted" x="785" y="234">后续应观察沙箱内存 p95，而不是只看瞬时值。</text>
+          </svg>
+        </div>
+
+        <div class="diagram">
+          <div class="diagram-title">图 11d：Namespace 资源预留对比</div>
+          <svg viewBox="0 0 1180 430" role="img" aria-label="Namespace resource requests chart">
+            <text class="svg-title" x="40" y="35">Namespace requests 预留</text>
+            <text class="svg-muted" x="40" y="58">Kubernetes 调度按 requests 预留资源。Longhorn 系统组件 CPU request 较高，业务侧主要由 by-service 和 sandbox request 决定。</text>
+
+            <text class="svg-title" x="40" y="95">CPU requests</text>
+            <text class="svg-text" x="40" y="130">longhorn-system</text>
+            <rect class="svg-box" x="220" y="112" width="430" height="24" rx="4"></rect>
+            <rect class="svg-warn" x="220" y="112" width="430" height="24" rx="4"></rect>
+            <text class="svg-muted" x="670" y="130">8.16C</text>
+            <text class="svg-text" x="40" y="170">by-service</text>
+            <rect class="svg-box" x="220" y="152" width="430" height="24" rx="4"></rect>
+            <rect class="svg-primary" x="220" y="152" width="163" height="24" rx="4"></rect>
+            <text class="svg-muted" x="670" y="170">3.10C</text>
+            <text class="svg-text" x="40" y="210">by-middleware</text>
+            <rect class="svg-box" x="220" y="192" width="430" height="24" rx="4"></rect>
+            <rect class="svg-good" x="220" y="192" width="66" height="24" rx="4"></rect>
+            <text class="svg-muted" x="670" y="210">1.25C</text>
+            <text class="svg-text" x="40" y="250">by-sandbox</text>
+            <rect class="svg-box" x="220" y="232" width="430" height="24" rx="4"></rect>
+            <rect class="svg-purple" x="220" y="232" width="26" height="24" rx="4"></rect>
+            <text class="svg-muted" x="670" y="250">0.50C</text>
+
+            <text class="svg-title" x="760" y="95">Memory requests</text>
+            <text class="svg-text" x="760" y="130">by-service</text>
+            <rect class="svg-box" x="910" y="112" width="190" height="24" rx="4"></rect>
+            <rect class="svg-primary" x="910" y="112" width="190" height="24" rx="4"></rect>
+            <text class="svg-muted" x="1115" y="130">7.25Gi</text>
+            <text class="svg-text" x="760" y="170">by-middleware</text>
+            <rect class="svg-box" x="910" y="152" width="190" height="24" rx="4"></rect>
+            <rect class="svg-good" x="910" y="152" width="118" height="24" rx="4"></rect>
+            <text class="svg-muted" x="1115" y="170">4.5Gi</text>
+            <text class="svg-text" x="760" y="210">by-sandbox</text>
+            <rect class="svg-box" x="910" y="192" width="190" height="24" rx="4"></rect>
+            <rect class="svg-purple" x="910" y="192" width="26" height="24" rx="4"></rect>
+            <text class="svg-muted" x="1115" y="210">1Gi</text>
+
+            <rect class="svg-box" x="760" y="270" width="330" height="85" rx="8"></rect>
+            <text class="svg-title" x="785" y="300">调度判断</text>
+            <text class="svg-muted" x="785" y="326">实际使用低，不等于可无限开沙箱。</text>
+            <text class="svg-muted" x="785" y="348">需要按沙箱 request 分层控制并发。</text>
+          </svg>
+        </div>
+
+        <div class="callout">
+          <strong>关键结论：</strong>当前实际 CPU 使用很低，但 Kubernetes 调度不是按“当前实际值”计算，而是按 Pod 的 requests 预留。OpenClaw 沙箱的正确容量口径是申请范围：最小 0.25C / 765MiB，最高 2C / 4GiB。现有 68C 可调度 CPU 扣除平台和中间件后，约 45C 可作为沙箱稳定调度水位，因此当前集群可支撑约 160-180 个最小规格并发沙箱，或 22-28 个最高规格并发沙箱。
+        </div>
+
+        <h3>9.3 当前环境可支撑多少人和多少 OpenClaw 沙箱</h3>
+        <table>
+          <tr><th>口径</th><th>当前 3 节点环境</th><th>说明</th></tr>
+          <tr><td>物理资源</td><td>72 vCPU / 276GiB 内存 / 约 2.5TiB 数据盘分区</td><td>每台 24C / 92GiB / 850G <code>/data</code>。</td></tr>
+          <tr><td>K8s 可调度资源</td><td>约 68 vCPU / 267GiB 内存</td><td>已扣除 kube/system reserve。</td></tr>
+          <tr><td>平台基础占用</td><td>约 12-14 vCPU request；实际内存约 20GiB</td><td>包含 Longhorn、Kube System、中间件、业务服务、OpenSandbox 控制面和 1 个 sandbox。</td></tr>
+          <tr><td>按最小 0.25C/765MiB 沙箱规格</td><td>建议 160-180 个并发 OpenClaw 沙箱</td><td>CPU 先成为瓶颈；适合纯聊天、轻量工具、低浏览器依赖场景。</td></tr>
+          <tr><td>按经济 0.5C/1GiB 沙箱规格</td><td>建议 85-100 个并发 OpenClaw 沙箱</td><td>适合普通 OpenClaw 会话和轻量文件操作。</td></tr>
+          <tr><td>按标准 1C/2GiB 沙箱规格</td><td>建议 45-55 个并发 OpenClaw 沙箱</td><td>适合更稳妥的通用任务、少量浏览器或较重工具调用。</td></tr>
+          <tr><td>按最高 2C/4GiB 沙箱规格</td><td>建议 22-28 个并发 OpenClaw 沙箱</td><td>适合浏览器/VNC、较重任务或高峰稳定性优先的会话。</td></tr>
+          <tr><td>换算用户数</td><td>100 用户可支撑；1000 用户按平均沙箱规格扩容；10000 用户必须多集群</td><td>按 10%-25% 同时在线、其中 60%-80% 触发沙箱估算。</td></tr>
+        </table>
+
+        <h3>9.4 推荐沙箱规格分层</h3>
+        <table>
+          <tr><th>规格</th><th>requests</th><th>limits</th><th>适用场景</th><th>备注</th></tr>
+          <tr><td>最小型</td><td>0.25C / 765MiB</td><td>按平台策略最高不超过 2C / 4GiB</td><td>纯聊天、轻量脚本、低工具调用</td><td>最高密度部署规格，需要用监控确认 p95 内存不会接近上限。</td></tr>
+          <tr><td>经济型</td><td>0.5C / 1GiB</td><td>按平台策略最高不超过 2C / 4GiB</td><td>普通 OpenClaw 会话、轻量文件操作</td><td>推荐作为大多数用户的默认调度规格。</td></tr>
+          <tr><td>标准型</td><td>1C / 2GiB</td><td>2C / 4GiB</td><td>较复杂工具调用、少量浏览器、较大 workspace</td><td>适合稳定性优先的生产默认规格。</td></tr>
+          <tr><td>上限型</td><td>2C / 4GiB</td><td>2C / 4GiB</td><td>浏览器/VNC、复杂网页自动化、较重任务</td><td>这是最高允许申请规格，不应作为所有沙箱默认值。</td></tr>
+        </table>
+
+        <h4>9.4.1 为什么必须做规格分层</h4>
+        <p>OpenClaw 沙箱不是单一负载。一个只做聊天和少量文件读写的会话，和一个启动 Chrome/VNC、跑网页自动化、处理大文件的会话，资源曲线完全不同。如果所有沙箱都按最高规格 <code>2C / 4GiB</code> 申请，集群调度会提前被 CPU request 填满，导致大量资源被“预留但未实际使用”；如果全部按最低规格申请，又会让浏览器型和重任务型沙箱更容易 OOM 或被 CPU throttle。因此要把沙箱分层，让资源申请和真实任务形态匹配。</p>
+
+        <table>
+          <tr><th>不分层的问题</th><th>表现</th><th>后果</th></tr>
+          <tr><td>全部按最高规格</td><td>每个沙箱都申请 2C / 4GiB</td><td>现有 3 节点只能调度二十多个沙箱，资源利用率低。</td></tr>
+          <tr><td>全部按最低规格</td><td>每个沙箱只申请 0.25C / 765MiB</td><td>普通聊天可以跑，但浏览器、VNC、大文件任务容易被压垮。</td></tr>
+          <tr><td>没有任务准入</td><td>用户任意启动高消耗能力</td><td>少量重任务会影响大量普通会话，节点负载不可预测。</td></tr>
+          <tr><td>没有节点池隔离</td><td>所有沙箱混跑在 general 节点</td><td>Chrome、FFmpeg 等任务会挤占 BE、FE、普通沙箱资源。</td></tr>
+        </table>
+
+        <h4>9.4.2 推荐分层策略</h4>
+        <table>
+          <tr><th>层级</th><th>准入条件</th><th>典型能力</th><th>建议调度池</th><th>限流策略</th></tr>
+          <tr>
+            <td>最小型</td>
+            <td>默认聊天、轻量 MCP、无浏览器、无批处理</td>
+            <td>模型对话、读取少量配置、轻量脚本</td>
+            <td><code>sandbox-general</code></td>
+            <td>允许高并发；单用户可同时 1-2 个。</td>
+          </tr>
+          <tr>
+            <td>经济型</td>
+            <td>普通工作流、少量文件操作、短时工具调用</td>
+            <td>OpenClaw 常规 workspace、文件浏览、轻量插件</td>
+            <td><code>sandbox-general</code></td>
+            <td>推荐默认规格；按组织/租户做并发上限。</td>
+          </tr>
+          <tr>
+            <td>标准型</td>
+            <td>需要更稳定的工具执行、较大上下文或 workspace</td>
+            <td>复杂插件、较多文件读写、偶发浏览器能力</td>
+            <td><code>sandbox-general</code> 或 <code>sandbox-browser</code></td>
+            <td>需要配额审批或按高级用户套餐开放。</td>
+          </tr>
+          <tr>
+            <td>上限型</td>
+            <td>明确需要 Chrome/VNC、网页自动化、长任务或重任务</td>
+            <td>浏览器调试、多标签网页、批处理、大文件解析</td>
+            <td><code>sandbox-browser</code> / <code>sandbox-heavy</code></td>
+            <td>强制限流和队列化；避免挤占普通用户。</td>
+          </tr>
+        </table>
+
+        <h4>9.4.3 调度和资源隔离建议</h4>
+        <p>分层不只是改 CPU/内存数字，还要和节点池、ResourceQuota、HPA、用户配额一起落地。推荐把节点按任务类型拆成三类：</p>
+        <table>
+          <tr><th>节点池</th><th>承载任务</th><th>节点标签</th><th>建议</th></tr>
+          <tr><td>general</td><td>最小型、经济型、部分标准型沙箱，以及轻量业务服务</td><td><code>byclaw.io/node-pool=sandbox-general</code></td><td>当前三节点都属于该池，适合 100 用户阶段。</td></tr>
+          <tr><td>browser</td><td>Chrome、VNC、网页自动化沙箱</td><td><code>byclaw.io/node-pool=sandbox-browser</code></td><td>1000 用户以上建议单独扩出，避免浏览器内存波动影响普通会话。</td></tr>
+          <tr><td>heavy</td><td>FFmpeg、大文件解析、批处理、长任务</td><td><code>byclaw.io/node-pool=sandbox-heavy</code></td><td>建议配合任务队列和并发阈值，不直接无限制启动。</td></tr>
+        </table>
+
+        <h4>9.4.4 容量换算公式</h4>
+        <p>容量测算建议按 request 计算稳定调度上限，再用实际 p95 使用率校正：</p>
+        <pre><code>可用于沙箱的 CPU = 集群 allocatable CPU - 平台基础 request - 安全余量
+可用于沙箱的内存 = 集群 allocatable memory - 平台基础 request - 安全余量
+
+CPU 维度可承载沙箱数 = 可用于沙箱的 CPU / 单沙箱 CPU request
+内存维度可承载沙箱数 = 可用于沙箱的内存 / 单沙箱 memory request
+
+最终建议并发沙箱数 = min(CPU 维度, 内存维度) * 稳定系数
+稳定系数建议取 0.75 - 0.85</code></pre>
+        <p>以当前三节点为例，集群 allocatable 约 68C / 267GiB。扣除平台基础、Longhorn、中间件、业务服务和安全余量后，按约 45C 作为稳定沙箱 CPU 水位估算：</p>
+        <table>
+          <tr><th>规格</th><th>CPU 口径</th><th>估算并发</th><th>解释</th></tr>
+          <tr><td>最小型</td><td>45C / 0.25C</td><td>约 160-180</td><td>CPU 可覆盖，内存也基本够，但要监控 p95 内存。</td></tr>
+          <tr><td>经济型</td><td>45C / 0.5C</td><td>约 85-100</td><td>适合当前集群作为默认容量口径。</td></tr>
+          <tr><td>标准型</td><td>45C / 1C</td><td>约 45-55</td><td>适合更稳妥的生产体验。</td></tr>
+          <tr><td>上限型</td><td>45C / 2C</td><td>约 22-28</td><td>浏览器/重任务专用，不适合作为全量默认。</td></tr>
+        </table>
+
+        <h4>9.4.5 落地到 OpenSandbox 模板的方式</h4>
+        <p>当前 BatchSandbox 模板支持通过变量渲染资源规格：</p>
+        <pre><code>resources:
+  requests:
+    cpu: "{{ cpu_request | default('1') }}"
+    memory: "{{ memory_request | default('2Gi') }}"
+  limits:
+    cpu: "{{ cpu_limit | default('2') }}"
+    memory: "{{ memory_limit | default('4Gi') }}"</code></pre>
+        <p>建议后续在 BE 创建沙箱时，根据用户套餐、任务类型、是否启用浏览器、是否长任务，写入对应的 <code>cpu_request</code>、<code>memory_request</code>、<code>cpu_limit</code>、<code>memory_limit</code> 和目标节点池。这样普通用户默认走经济型，高消耗任务才申请上限型。</p>
+
+        <h4>9.4.6 推荐默认值</h4>
+        <div class="callout good">
+          <strong>当前阶段建议：</strong>100 用户以内，默认用经济型 <code>0.5C / 1GiB</code>；对体验敏感或工具调用复杂的用户使用标准型 <code>1C / 2GiB</code>；只有浏览器/VNC/重任务申请上限型 <code>2C / 4GiB</code>。最小型 <code>0.25C / 765MiB</code> 可以用于高密度轻量会话，但必须配合监控验证 OOM 和响应延迟。
+        </div>
+
+        <h3>9.5 100 / 1000 / 10000 用户推荐配置方案</h3>
+        <p>下面按“经济型 0.5C/1GiB 到标准型 1C/2GiB”为主口径，最高 2C/4GiB 只用于浏览器或重任务。实际生产需要用 Prometheus 统计 7-14 天的峰值并发、平均会话时长、单沙箱 CPU p95、内存 p95 后再定最终规格。</p>
+
+        <table>
+          <tr><th>目标规模</th><th>建议并发沙箱口径</th><th>推荐集群配置</th><th>存储建议</th><th>适用说明</th></tr>
+          <tr>
+            <td>100 用户</td>
+            <td>20-30 个并发沙箱；峰值可按最小规格支撑 100+ 并发</td>
+            <td>当前 3 台 24C / 92GiB / 850G 可支撑；生产建议 3 台均作为 control-plane+worker 或 1 server + 2 worker，业务服务 1-2 副本。</td>
+            <td>Longhorn 副本数建议 2；如重视容灾设为 3。工作区 PVC 500Gi-1Ti 起步。</td>
+            <td>当前环境可覆盖 100 用户的常规并发；建议默认使用 0.5C/1GiB 或 1C/2GiB，2C/4GiB 仅给浏览器/重任务沙箱。</td>
+          </tr>
+          <tr>
+            <td>1000 用户</td>
+            <td>150-250 个并发沙箱</td>
+            <td>3 台 control-plane（8C/32GiB）+ 6-8 台 worker（32C/128GiB）可覆盖经济型为主；如果标准型 1C/2GiB 占比高，worker 建议 10-12 台；大量浏览器/VNC 时增至 18-24 台或拆 browser pool。</td>
+            <td>工作区逻辑容量 10-20Ti；Longhorn 副本数 2 或 3。推荐为 Longhorn 使用独立数据盘或高 IOPS 云盘。</td>
+            <td>需要 BE/FE/OpenSandbox 多副本、HPA、ResourceQuota、节点池隔离、镜像预拉取和沙箱创建限流。</td>
+          </tr>
+          <tr>
+            <td>10000 用户</td>
+            <td>1500-2500 个并发沙箱</td>
+            <td>不建议单一 K3s 集群承载。推荐 5-10 个资源单元，每个单元 3 control-plane + 12-30 worker，worker 数按平均沙箱规格从 0.5C 到 2C 分层配置；或使用标准 Kubernetes 托管集群 + 多 node pool。</td>
+            <td>工作区逻辑容量 100-300Ti；建议评估 Longhorn 分片部署、Ceph/云文件存储/对象归档混合架构。热数据放 RWX，冷数据归档到对象存储。</td>
+            <td>必须做多集群调度、租户分片、全局网关、统一身份、统一监控告警、容量水位自动扩容和沙箱生命周期治理。</td>
+          </tr>
+        </table>
+
+        <div class="diagram">
+          <div class="diagram-title">图 12：从 100 到 10000 用户的架构演进</div>
+          <svg viewBox="0 0 1180 500" role="img" aria-label="Capacity architecture evolution">
+            <defs>
+              <marker id="arrow12" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+                <path d="M0,0 L10,4 L0,8 z" fill="#65758b"></path>
+              </marker>
+            </defs>
+            <rect class="svg-box svg-good" x="55" y="70" width="280" height="170" rx="8"></rect>
+            <text class="svg-title" x="85" y="100">100 用户</text>
+            <text class="svg-muted" x="85" y="130">单 K3s 集群</text>
+            <text class="svg-muted" x="85" y="155">3 节点：24C / 92GiB</text>
+            <text class="svg-muted" x="85" y="180">20-30 常规并发</text>
+            <text class="svg-muted" x="85" y="205">Longhorn 副本 2-3</text>
+
+            <rect class="svg-box svg-warn" x="455" y="70" width="280" height="170" rx="8"></rect>
+            <text class="svg-title" x="485" y="100">1000 用户</text>
+            <text class="svg-muted" x="485" y="130">单大集群或双集群</text>
+            <text class="svg-muted" x="485" y="155">3 control-plane + 6-12 worker</text>
+            <text class="svg-muted" x="485" y="180">150-250 并发沙箱</text>
+            <text class="svg-muted" x="485" y="205">browser/heavy node pool</text>
+
+            <rect class="svg-box svg-purple" x="855" y="70" width="280" height="170" rx="8"></rect>
+            <text class="svg-title" x="885" y="100">10000 用户</text>
+            <text class="svg-muted" x="885" y="130">多集群 / 多资源单元</text>
+            <text class="svg-muted" x="885" y="155">5-10 个 sandbox cell</text>
+            <text class="svg-muted" x="885" y="180">1500-2500 并发沙箱</text>
+            <text class="svg-muted" x="885" y="205">全局网关 + 分片调度</text>
+
+            <path class="svg-line" marker-end="url(#arrow12)" d="M335 155 L455 155"></path>
+            <path class="svg-line" marker-end="url(#arrow12)" d="M735 155 L855 155"></path>
+
+            <rect class="svg-box" x="115" y="310" width="950" height="110" rx="8"></rect>
+            <text class="svg-title" x="145" y="340">扩容原则</text>
+            <text class="svg-text" x="145" y="370">1. 先用 ResourceQuota/HPA 控制单集群容量边界；超过 250-300 并发沙箱时开始按租户或组织分片。</text>
+            <text class="svg-text" x="145" y="398">2. 将 browser/heavy 沙箱拆到独立 node pool，避免高内存任务影响普通会话。</text>
+          </svg>
+        </div>
+
+        <h3>9.6 推荐落地动作</h3>
+        <ol>
+          <li>生产环境把 <code>LONGHORN_REPLICA_COUNT</code> 从 1 调整为 2 或 3，并验证副本重建、节点下线、Pod 迁移。</li>
+          <li>把 OpenClaw 沙箱规格分层，默认使用 0.5C/1GiB 或 1C/2GiB；平台允许范围为最小 0.25C/765MiB、最高 2C/4GiB，浏览器型和重任务型走独立 node pool。</li>
+          <li>开启 Prometheus 对 sandbox Pod 的 CPU p95、内存 p95、启动耗时、失败率、平均生命周期做 7-14 天观测，再固化容量模型。</li>
+          <li>1000 用户以上将 OpenGauss、Redis 从单副本内置中间件升级为 HA 或托管服务，降低业务状态组件风险。</li>
+          <li>10000 用户规模采用多集群资源单元，不把所有沙箱塞进一个 K3s 集群；由全局网关按租户、地域或组织做调度。</li>
+        </ol>
+      </section>
+
+      <section id="faq">
+        <h2>10. FAQ</h2>
+        <h3>Q1：为什么不继续使用 MinIO 做沙箱工作区？</h3>
+        <p>MinIO 是对象存储，适合附件、归档、静态资源，不适合高频 POSIX 文件系统场景。OpenClaw 在 <code>/by</code> 下会写配置、日志、workspace、插件缓存，rclone/FUSE 会引入语义和性能不确定性。Longhorn PVC 更贴近应用真实文件系统需求。</p>
+
+        <h3>Q2：<code>openclaw_sandbox.sql</code> 里的 <code>hostPath</code> 是否控制 K8s 挂载？</h3>
+        <p>当前 BE 会解析该字段，但最终发给 OpenSandbox 的 volume payload 不包含 Kubernetes hostPath/PVC 语义。实际 K8s 挂载由 BatchSandbox 模板中的 PVC + <code>subPathExpr</code> 决定。因此该字段应理解为兼容旧规格和目录语义，不应当把它当作真实 K8s hostPath 控制面。</p>
+
+        <h3>Q3：业务服务为什么当前每个只启 1 个 Pod？</h3>
+        <p>当前目标是先完成稳定迁移和状态链路验证。FE/BE/QA/Data 都按 1 个副本部署，降低数据库连接、会话、文件写入并发语义的迁移风险。后续确认无状态边界后，可逐步提高副本数。</p>
+
+        <h3>Q4：沙箱 Pod 是随机分配到三台 K3s 节点吗？</h3>
+        <p>不是纯随机，而是由 Kubernetes scheduler 按资源、节点状态、nodeSelector、污点容忍等条件调度。当前模板有 <code>nodeSelector: byclaw.io/node-pool=sandbox-general</code>，所以只会调度到带该标签的节点。</p>
+
+        <h3>Q5：没有域名时怎么访问沙箱服务？</h3>
+        <p>使用 URI 模式：OpenSandbox endpoint 返回主节点公网 IP + <code>/v1/sandboxes/{id}/{port}</code>，FE nginx 将该路径 rewrite 到 OpenSandbox <code>/proxy/{port}</code>。有域名后，可切到 wildcard 模式：<code>{sandboxId}-{port}.sandbox.example.com</code>。</p>
+
+        <h3>Q6：Longhorn 副本数设置为 1 会不会丢数据？</h3>
+        <p>副本数 1 只能用于联调或资源不足场景，不具备节点级容灾。生产建议 2 或 3。三副本可以承受单节点故障，代价是写放大和网络复制成本更高。</p>
+
+        <h3>Q7：执行 <code>update</code> 会清理之前错误的 Pod 吗？</h3>
+        <p>会。当前脚本会清理 <code>ErrImagePull</code>、<code>ImagePullBackOff</code>、<code>CrashLoopBackOff</code>、<code>CreateContainerConfigError</code> 等异常 Pod，并重新 apply 最新 YAML。</p>
+
+        <h3>Q8：数据库 SQL 初始化在哪里执行？</h3>
+        <p><code>deploy/k3s/deploy.sh</code> 的 <code>ensure_opengauss_schema</code> 会在中间件 Ready 后检查 <code>byai.byai_system_config</code> 是否存在，不存在则依次执行 <code>deploy/middleware/initdb/01_init.sql</code> 到 <code>04_dml.sql</code>。</p>
+      </section>
+
+      <section id="source">
+        <h2>11. 方案来源与落地文件</h2>
+        <table>
+          <tr><th>文件</th><th>用途</th></tr>
+          <tr><td><code>scripts/deploy-k3s.sh</code></td><td>本地远程部署包装器，上传 k3s 部署包并执行 <code>deploy/k3s/deploy.sh</code></td></tr>
+          <tr><td><code>envs/byclaw/env.k3s</code></td><td>当前环境的 K3s、Longhorn、镜像、OpenSandbox、DB/Redis、Ingress 参数</td></tr>
+          <tr><td><code>deploy/k3s/deploy.sh</code></td><td>K3s 部署主流程：init、update、storage-init、stop</td></tr>
+          <tr><td><code>deploy/k3s/render-manifests.sh</code></td><td>生成 namespace、PVC、中间件、sandbox、业务服务、ingress、monitoring YAML</td></tr>
+          <tr><td><code>deploy/k3s/install-k3s.sh</code></td><td>安装 K3s、设置数据目录、配置 registry、打节点池标签</td></tr>
+          <tr><td><code>deploy/k3s/install-longhorn.sh</code></td><td>安装 Longhorn，修正 kubelet root，等待 CSI 注册</td></tr>
+          <tr><td><code>deploy/k3s/gen-opensandbox-k8s-config.sh</code></td><td>生成 OpenSandbox Kubernetes runtime TOML</td></tr>
+          <tr><td><code>deploy/config/nginx-standalone.conf</code></td><td>FE nginx 基础配置，k3s 渲染时改为 80 端口和 K8s Service DNS</td></tr>
+          <tr><td><code>deploy/storage-profile.sh</code></td><td>旧部署的 minio/nfs/nfs-hybrid 存储 profile 对比依据</td></tr>
+          <tr><td><code>deploy/middleware/docker-compose.yml</code></td><td>旧架构 Redis、MinIO、OpenGauss、OpenSandbox Docker runtime 对比依据</td></tr>
+        </table>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

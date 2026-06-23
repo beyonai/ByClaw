@@ -1,0 +1,168 @@
+.suggestSkill {
+  // margin-top: 20px;
+  position: relative;
+}
+
+// 滚动容器：限制高度，超出后内部滚动
+.scrollWrap {
+  max-height: 360px;
+  overflow: hidden auto;
+  // 给卡片 hover 的阴影/位移留出空间，避免被裁切
+  padding: 6px 0;
+  // 遮罩切换时做平滑过渡
+  transition: -webkit-mask-image 0.25s ease, mask-image 0.25s ease;
+
+  // 滚动后：顶部内容渐变淡出（滚到顶部时不加该类，避免遮挡首行）
+  &.scrolled {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 40px);
+    mask-image: linear-gradient(to bottom, transparent 0, #000 40px);
+  }
+
+  // 近乎隐形的细滚动条
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: #0000000a;
+    border-radius: 9999px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: #00000014;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+// 栅格容器：交给 antd Row/Col 布局
+.grid {
+  padding: 8px;
+}
+
+// 单列内容容器（加载/空态时用）
+.fullRow {
+  width: 100%;
+}
+
+.skillItem {
+  cursor: pointer;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  // 填满 Col 高度，使同一行卡片等高
+  height: 100%;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 16px;
+  // 默认无阴影，hover 时浮起 + 阴影 + 向左上位移
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+  will-change: transform;
+
+  &.disabled {
+    cursor: default;
+    .action {
+      opacity: 1;
+    }
+  }
+
+  &:not(.disabled):hover {
+    border-color: #fff;
+    transform: translate(-2px, -2px);
+    box-shadow: -3px 8px 24px rgba(17, 17, 26, 0.08), -1px 4px 10px rgba(17, 17, 26, 0.05);
+
+    .action {
+      opacity: 1;
+    }
+  }
+
+  &:active {
+    transform: translate(-1px, -1px);
+  }
+}
+
+// 图标块：圆角方形底色 + 居中图标
+.iconBox {
+  // flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  // display: flex;
+  // align-items: center;
+  // justify-content: center;
+  // border-radius: 10px;
+  // font-size: 18px;
+  // line-height: 1;
+  // background: #f5f5f7;
+  // color: #1d1d1f;
+  .defaultHeaderIconIcon {
+    font-size: 32px;
+  }
+}
+
+.content {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  justify-content: center;
+  min-height: 36px;
+}
+
+// 标题行：技能名占满，回填图标按钮靠右
+.titleRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+// 技能名：单行省略，作为卡片主信息
+.title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: bold;
+  line-height: 1.4;
+  letter-spacing: -0.2px;
+  color: #1d1d1f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// 描述：长短不一，两行省略由 Typography.Paragraph 处理
+.desc {
+  // 覆盖 antd Typography 默认配色与段落下边距
+  margin-bottom: 0 !important;
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: -0.1px;
+  color: #86868b;
+  word-break: break-word;
+}
+
+// 回填小图标按钮：默认隐藏，hover 卡片时浮现
+.action {
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  color: #86868b;
+
+  &:hover {
+    color: var(~'--@{antPrefix}-color-primary');
+  }
+}
+
+.loadingRow,
+.endRow {
+  text-align: center;
+  padding: 12px 0 4px;
+  font-size: 12px;
+  letter-spacing: -0.1px;
+  color: #86868b;
+}
+
+.emptyWrap {
+  padding: 24px 0;
+}

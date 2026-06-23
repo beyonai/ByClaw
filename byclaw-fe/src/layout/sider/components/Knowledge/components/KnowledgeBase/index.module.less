@@ -1,17 +1,29 @@
-.pinBadge {
-  display: inline-block;
-  font-size: 12px;
-  color: #a4aab2;
-  vertical-align: text-top;
-  margin-left: 4px;
+.avatar,
+.defaultAvatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
 }
 
-.nameText {
-  display: inline-block;
-  max-width: calc(100% - 16px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.avatar {
+  display: block;
+  object-fit: cover;
+}
+
+.defaultAvatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(22, 93, 255, 0.08);
+
+  :global(.@{antPrefix}-icon),
+  :global(.anticon) {
+    font-size: 20px;
+  }
+}
+
+.knowledgeItem {
+  cursor: default;
 }
 
 .selectable {
@@ -29,4 +41,67 @@
       cursor: default;
     }
   }
+}
+
+.previewPanel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.previewHeader {
+  height: 48px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(~'--@{antPrefix}-color-border-secondary');
+}
+
+.previewTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.previewClose {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: #707680;
+  cursor: pointer;
+
+  &:hover {
+    background: #f2f6fa;
+    color: #1f2533;
+  }
+}
+
+.previewBody {
+  flex: 1;
+  min-height: 0;
+}
+
+.previewSpin {
+  height: 100%;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      height: 100%;
+    }
+  }
+}
+
+.previewContent {
+  height: 100%;
 }

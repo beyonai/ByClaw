@@ -9,6 +9,10 @@ import { Button, Input } from 'antd';
 import AntdIcon from '@/components/AntdIcon';
 import CommonTabs from '@/components/CommonTabs';
 import useKnowledgeStore from '@/models/useKnowledgeStore';
+import {
+  queryResourceOperationPermissions,
+  type ResourceOperationPermissions,
+} from '@/pages/manager/service/resources';
 import { queryKnowledgeCapability, type KnowledgeCapability } from '@/service/knowledgeCenter';
 import AddFolderModal from './components/AddFolderModal';
 import BaseInfo from './components/BaseInfo';
@@ -39,6 +43,7 @@ const KnowledgeDetail: React.FC = () => {
   const [baseInfo, setBaseInfo] = useState<any>({});
   const [uploadLoading, setUploadLoading] = useState(false);
   const [knowledgeCapability, setKnowledgeCapability] = useState<KnowledgeCapability | null>(null);
+  const [operationPermissions, setOperationPermissions] = useState<ResourceOperationPermissions | null>(null);
 
   const { queryResourceDetail } = useKnowledgeStore();
 
@@ -58,22 +63,60 @@ const KnowledgeDetail: React.FC = () => {
     return `/${segments.join('/')}`;
   }, [folderPath]);
 
+  const canManageKnowledge = Boolean(operationPermissions?.hasManagePermission);
+  const canCreateFolder =
+    canManageKnowledge &&
+    resourceBizType !== ResourceTypeMap.knowledgeBaseQa &&
+    resourceBizType !== ResourceTypeMap.knowledgeBaseTerm;
+
   useEffect(() => {
+    let mounted = true;
+
     setBaseInfo({});
+    setOperationPermissions(null);
     setFolderPath([{ id: '-1', title: intl.formatMessage({ id: 'directoryManage.allFiles' }) }]);
 
     if (resourceId) {
-      queryResourceDetail({
-        resourceId,
-        resourceBizType,
-        resourceSourcePkId,
-      }).then((res) => {
-        if (res) {
-          setBaseInfo(res);
+      const loadDetail = async () => {
+        try {
+          const permissionRes: any = await queryResourceOperationPermissions({ resourceId });
+          if (!mounted) return;
+          const permissions = (permissionRes?.data || permissionRes || {}) as ResourceOperationPermissions;
+          const canViewDetail =
+            permissions?.canViewDetail ??
+            permissions?.hasManagePermission ??
+            permissions?.hasUsePermission ??
+            permissions?.canEdit ??
+            permissions?.canManageAuth ??
+            permissions?.canDelete ??
+            false;
+          if (!canViewDetail) {
+            navigate(knowledgeCenterBackPath, { replace: true });
+            return;
+          }
+          setOperationPermissions(permissions);
+
+          const res = await queryResourceDetail({
+            resourceId,
+            resourceBizType,
+            resourceSourcePkId,
+          });
+          if (mounted && res) {
+            setBaseInfo(res);
+          }
+        } catch {
+          if (mounted) {
+            navigate(knowledgeCenterBackPath, { replace: true });
+          }
         }
-      });
+      };
+      void loadDetail();
     }
-  }, [intl, queryResourceDetail, resourceId, resourceBizType, resourceSourcePkId]);
+
+    return () => {
+      mounted = false;
+    };
+  }, [intl, knowledgeCenterBackPath, navigate, queryResourceDetail, resourceId, resourceBizType, resourceSourcePkId]);
 
   useEffect(() => {
     queryKnowledgeCapability()
@@ -99,8 +142,10 @@ const KnowledgeDetail: React.FC = () => {
         <DirectoryManage
           ref={directoryRef}
           searchValue={searchValue}
+          setSearchValue={setSearchValue}
           baseInfo={baseInfo}
           setShowAddFolder={setShowAddFolder}
+          canManage={canManageKnowledge}
           uploadLoading={uploadLoading}
           setUploadLoading={setUploadLoading}
           folderPath={folderPath}
@@ -139,6 +184,7 @@ const KnowledgeDetail: React.FC = () => {
         data={baseInfo}
         resourceId={resourceId || ''}
         allowKnowledgeBaseDelete={knowledgeCapability?.allowKnowledgeBaseDelete}
+        canManage={canManageKnowledge}
         backPath={knowledgeCenterBackPath}
       />
       <div className={styles.tabsContainer}>
@@ -180,8 +226,7 @@ const KnowledgeDetail: React.FC = () => {
                 />
                 {tabKey === 'directoryManage' && (
                   <>
-                    {resourceBizType !== ResourceTypeMap.knowledgeBaseQa &&
-                      resourceBizType !== ResourceTypeMap.knowledgeBaseTerm && (
+                    {canCreateFolder && (
                       <Button
                         icon={<AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" style={{ fontSize: 18 }} />}
                         onClick={() => setShowAddFolder(true)}
@@ -189,17 +234,19 @@ const KnowledgeDetail: React.FC = () => {
                         {intl.formatMessage({ id: 'knowledgeDetail.newFolder' })}
                       </Button>
                     )}
-                    <UploadFile
-                      baseInfo={baseInfo}
-                      uploadLoading={uploadLoading}
-                      setUploadLoading={setUploadLoading}
-                      reload={() => {
-                        directoryRef.current?.getDirectoryList({
-                          pageIndex: 1,
-                        });
-                      }}
-                      directoryPath={uploadDirectoryPath}
-                    />
+                    {canManageKnowledge && (
+                      <UploadFile
+                        baseInfo={baseInfo}
+                        uploadLoading={uploadLoading}
+                        setUploadLoading={setUploadLoading}
+                        reload={() => {
+                          directoryRef.current?.getDirectoryList({
+                            pageIndex: 1,
+                          });
+                        }}
+                        directoryPath={uploadDirectoryPath}
+                      />
+                    )}
                   </>
                 )}
               </div>

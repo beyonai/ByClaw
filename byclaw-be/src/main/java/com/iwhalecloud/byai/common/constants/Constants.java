@@ -19,6 +19,16 @@ public final class Constants {
     public static final String NO_VALUE_N = "N";
 
     /**
+     * 通用T代表TRUE
+     */
+    public static final String YES_VALUE_T = "T";
+
+    /**
+     * 通用F代表FALSE
+     */
+    public static final String NO_VALUE_F = "F";
+
+    /**
      * 通用true代表真
      */
     public static final String YES_VALUE_TRUE = "true";
@@ -196,6 +206,11 @@ public final class Constants {
 
     public static final String THIRD_AGENT_URL = "THIRD_AGENT_URL";
 
+    /**
+     * 系统参数 code：Web 前端基础地址（协议+域名[+端口]），用于拼接对外可访问的 URL。
+     */
+    public static final String WEB_BASE_URL = "WEB_BASE_URL";
+
     public static final String DB_TABLE = "DB_TABLE";
 
     public static final String OUT_PARAM = "out_param";
@@ -223,11 +238,6 @@ public final class Constants {
     public static final String DEFAULT_BYAI_AGENT = "AGENT_TYPE";
 
     /**
-     * 系统提示词
-     */
-    public static final String SYSTEM_PROMPT = "SYSTEM_PROMPT";
-
-    /**
      * 过滤的数字员工阈值
      */
     public static final String CHAT_DIGITAL_EMPLOYEE_THRESHOLD = "CHAT_DIGITAL_EMPLOYEE_THRESHOLD";
@@ -251,6 +261,16 @@ public final class Constants {
 
     /** 能力-模型关联在 byai_tag_relation 中的 obj_type（Story 一体化保存） */
     public static final String OBJ_TYPE_AIMODEL = "AI_MODEL";
+
+    /**
+     * 默认对话模型标签
+     */
+    public static final Long DEFAULT_MODEL_TAG_ID = 1L;
+
+    /**
+     * 默认LLM对话模型
+     */
+    public static final String DEFAULT_MODEL_TYPE_LLM = "LLM";
 
     /**
      * 图标桶名称

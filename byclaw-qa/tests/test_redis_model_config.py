@@ -2,6 +2,7 @@ import json
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
+import redis_model_config
 from by_qa.core.model_config import LLMModelProfile
 from exceptions import ModelConfigError, ModelNotFoundError
 from redis_model_config import (
@@ -156,6 +157,32 @@ def test_parse_positive_int_non_numeric_returns_none():
 
 
 # --- RedisModelConfigProvider (async) ---
+
+def test_default_providers_share_one_redis_client(monkeypatch):
+    shared_client = MagicMock()
+    monkeypatch.setattr(redis_model_config, "_shared_redis_client", None, raising=False)
+
+    with patch(
+        "redis_model_config._create_redis_client_from_env",
+        return_value=shared_client,
+    ) as create_client:
+        first = RedisModelConfigProvider()
+        second = RedisModelConfigProvider()
+
+    assert first._redis is shared_client
+    assert second._redis is shared_client
+    create_client.assert_called_once_with()
+
+
+def test_injected_redis_client_does_not_create_shared_client(monkeypatch):
+    injected_client = MagicMock()
+    monkeypatch.setattr(redis_model_config, "_shared_redis_client", None, raising=False)
+
+    with patch("redis_model_config._create_redis_client_from_env") as create_client:
+        provider = RedisModelConfigProvider(injected_client)
+
+    assert provider._redis is injected_client
+    create_client.assert_not_called()
 
 def _make_llm_model(model_code="gpt4", url="http://llm", token="key", abilities=None):
     if abilities is None:

@@ -4,11 +4,11 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.util.JsonUtil;
+import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import java.net.URI;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -22,12 +22,12 @@ import org.springframework.stereotype.Service;
 
 /**
  * 模型调试 RERANK 代理 ApplicationService（非流式）。
- *
- * <p>说明：
+ * <p>
+ * 说明：
  * <ul>
- *   <li>入参形态与 debugModelStream 保持一致：body.input 内包含 url/headers 与其余 param</li>
- *   <li>使用 OkHttp 以 POST JSON 方式调用上游，返回上游 status/content-type/body</li>
- *   <li>日志禁止打印敏感 header 与请求体原文</li>
+ * <li>入参形态与 debugModelStream 保持一致：body.input 内包含 url/headers 与其余 param</li>
+ * <li>使用 OkHttp 以 POST JSON 方式调用上游，返回上游 status/content-type/body</li>
+ * <li>日志禁止打印敏感 header 与请求体原文</li>
  * </ul>
  *
  * @author system
@@ -37,7 +37,9 @@ import org.springframework.stereotype.Service;
 public class ModelDebugRerankApplicationService {
 
     private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json; charset=utf-8");
+
     private static final String DEFAULT_ACCEPT = "application/json, */*";
+
     private static final String DEFAULT_CONTENT_TYPE = "application/json";
 
     @Value("${byai.gptproxy.connectTimeoutMs:30000}")
@@ -77,11 +79,12 @@ public class ModelDebugRerankApplicationService {
         inputMap.remove("headers");
         String upstreamBodyJson = JsonUtil.toJSONString(inputMap);
 
-        OkHttpClient client = buildClient();
+        OkHttpClient client = OkHttpUtil.getHttpClient();
         Request request;
         try {
             request = buildRequest(url, headersMap, upstreamBodyJson);
-        } catch (IllegalArgumentException e) {
+        }
+        catch (IllegalArgumentException e) {
             // URL 非法等场景
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.debug.rerank.url.required");
         }
@@ -95,43 +98,29 @@ public class ModelDebugRerankApplicationService {
             ResponseBody responseBody = response.body();
             String bodyStr = responseBody == null ? "" : responseBody.string();
 
-
             // 上游返回非 2xx 时直接抛出 BaseException，便于前端拿到调用接口报的错
             if (statusCode < 200 || statusCode >= 300) {
-                int errorCode = statusCode >= 400 && statusCode < 500
-                    ? CommonErrorCode.AIMODEL_ERROR_CODE_40001
+                int errorCode = statusCode >= 400 && statusCode < 500 ? CommonErrorCode.AIMODEL_ERROR_CODE_40001
                     : CommonErrorCode.AIMODEL_ERROR_CODE_50010;
                 throw new BaseException(errorCode, "aimodel.debug.upstream.error");
             }
 
-            return RerankDebugResult.builder()
-                .statusCode(statusCode)
-                .contentType(contentType)
-                .body(bodyStr)
-                .build();
-        } catch (BaseException e) {
+            return RerankDebugResult.builder().statusCode(statusCode).contentType(contentType).body(bodyStr).build();
+        }
+        catch (BaseException e) {
             throw e;
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             log.error("rerank debug proxy fail, host={}", safeHost(url), e);
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_50010, "aimodel.debug.rerank.call.failed", e);
         }
     }
 
-    private OkHttpClient buildClient() {
-        return new OkHttpClient.Builder()
-            .connectTimeout(connectTimeoutMs, TimeUnit.MILLISECONDS)
-            .readTimeout(readTimeoutMs, TimeUnit.MILLISECONDS)
-            .build();
-    }
-
     private Request buildRequest(String url, Map<String, Object> headersMap, String upstreamBodyJson) {
         RequestBody requestBody = RequestBody.create(upstreamBodyJson, JSON_MEDIA_TYPE);
-        Request.Builder builder = new Request.Builder()
-            .url(url)
-            .post(requestBody)
+        Request.Builder builder = new Request.Builder().url(url).post(requestBody)
             // 固定设置，避免上游不识别或返回非预期类型
-            .header("Accept", DEFAULT_ACCEPT)
-            .header("Content-Type", DEFAULT_CONTENT_TYPE);
+            .header("Accept", DEFAULT_ACCEPT).header("Content-Type", DEFAULT_CONTENT_TYPE);
 
         appendUpstreamHeaders(headersMap, builder);
         return builder.build();
@@ -167,9 +156,9 @@ public class ModelDebugRerankApplicationService {
         try {
             URI uri = URI.create(url);
             return uri.getHost();
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             return "unknown";
         }
     }
 }
-

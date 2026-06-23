@@ -17,9 +17,129 @@
   min-height: 24px;
 }
 
-.uploadDragger {
+.confirmConflictList {
+  max-height: 120px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  overflow-y: auto;
+  color: #1f2937;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.uploadArea {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
+
+  :global {
+    .ant-upload-drag {
+      flex: 1 1 auto;
+      min-height: 116px;
+    }
+  }
+}
+
+.uploadDragger {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.uploadDraggerLoading {
+  cursor: not-allowed;
+  opacity: 0.72;
+
+  :global {
+    .ant-upload-drag {
+      cursor: not-allowed;
+      background: #f7f8fa;
+    }
+  }
+}
+
+.fileCardScroller {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  grid-auto-rows: 76px;
+  gap: 8px;
+  flex: 0 0 auto;
+  max-height: 166px;
+  margin-top: 10px;
+  padding: 2px 4px 6px 2px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
+.fileCard {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 76px;
+  padding: 12px;
+  border: 1px solid #e1e6ef;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.fileCard:hover {
+  border-color: #8ea8ff;
+  box-shadow: 0 4px 12px rgb(31 58 138 / 10%);
+}
+
+.fileCardIcon {
+  display: flex;
+  flex: 0 0 40px;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  background: #eef4ff;
+  color: #2f54eb;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.fileCardMeta {
+  flex: 1;
+  min-width: 0;
+}
+
+.fileCardName {
+  overflow: hidden;
+  color: #14161a;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileCardSize {
+  margin-top: 4px;
+  color: #707680;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.fileCardRemove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: none;
+  color: #707680;
+}
+
+.fileCard:hover .fileCardRemove {
+  display: inline-flex;
 }
 
 .uploadIcon {

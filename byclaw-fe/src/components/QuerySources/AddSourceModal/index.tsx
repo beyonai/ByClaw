@@ -72,9 +72,9 @@ const AddSourceModal: React.FC<AddSourceModalProps> = (props) => {
 
   // ==================== 文件上传处理 ====================
 
-  const { maxFileSize, allowedFileTypes } = uploadFileConfig || {};
+  const { maxFileSize } = uploadFileConfig || {};
 
-  const accept = useMemo(() => allowedFileTypes?.join(','), [allowedFileTypes]);
+  const accept = useMemo(() => '', []); // allowedFileTypes?.join?.(',')
 
   const handleFileUpload = useCallback(
     async (file: File) => {

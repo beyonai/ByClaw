@@ -137,7 +137,11 @@ public class UserApplicationService extends BaseUserApplicationService {
 
         BeanUtils.copyProperties(usersDTO, users);
 
-        users.setPwd(MD5Utils.encrypt(super.getDefaultPwd(), users.getUserCode()));
+        String rawPassword = super.getDefaultPwd();
+        if (StringUtil.isNotEmpty(usersDTO.getPassword())) {
+            rawPassword = Sm4Util.decrypt(usersDTO.getPassword());
+        }
+        users.setPwd(MD5Utils.encrypt(rawPassword, users.getUserCode()));
         userService.addUser(users);
 
         // 创建用户关组织岗位信息
@@ -1250,13 +1254,21 @@ public class UserApplicationService extends BaseUserApplicationService {
 
         String checkDefaultPwd = systemConfigService.getStringParamValueByCode("CHECK_DEFAULT_PWD");
 
-        if (Constants.NO_VALUE_FALSE.equals(checkDefaultPwd) || "adminvip".equalsIgnoreCase(users.getUserCode())) {
+        if (!Constants.YES_VALUE_TRUE.equalsIgnoreCase(checkDefaultPwd)
+            || "adminvip".equalsIgnoreCase(users.getUserCode())) {
 
             return false;
 
         }
 
-        String encryptDefaultPwd = MD5Utils.encrypt(this.getDefaultPwd(), users.getUserCode());
+        String encryptDefaultPwd;
+        try {
+            encryptDefaultPwd = MD5Utils.encrypt(this.getDefaultPwd(), users.getUserCode());
+        }
+        catch (Exception e) {
+            logger.warn("默认密码检查失败，已跳过本次检查: userCode={}", users.getUserCode(), e);
+            return false;
+        }
 
         return encryptDefaultPwd != null && encryptDefaultPwd.equals(users.getPwd());
 

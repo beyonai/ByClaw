@@ -9,6 +9,21 @@ import styles from './index.module.less';
 import { encryptBySM } from '@/pages/manager/utils/encrypt/sm';
 
 const phoneRegex = /^1\d{10}$/;
+const userCodeRegex = /^[A-Za-z0-9_]{3,50}$/;
+const INITIAL_PASSWORD = 'Byai@13579';
+const passwordRegex = /^[A-Za-z0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]*$/;
+
+const hasEnoughComplexity = (password = '') => {
+  let complexityCount = 0;
+  if (/[A-Z]/.test(password)) complexityCount += 1;
+  if (/[a-z]/.test(password)) complexityCount += 1;
+  if (/\d/.test(password)) complexityCount += 1;
+  if (/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password)) complexityCount += 1;
+  return complexityCount >= 4;
+};
+
+const hasOnlyValidChars = (password = '') => passwordRegex.test(password);
+const hasValidLength = (password = '') => password.length >= 8 && password.length <= 32;
 
 const OrganizationMembersModal = (props) => {
   const { visible, onCancel, type, record, positionList, dispatch, selectedOrg, onOk, roleList } = props;
@@ -21,6 +36,31 @@ const OrganizationMembersModal = (props) => {
   const [isCodeModified, setIsCodeModified] = useState(false);
 
   useEffect(() => {
+    if (type === 'add') {
+      form.resetFields();
+      form.setFieldsValue({
+        userName: undefined,
+        userCode: undefined,
+        password: undefined,
+        confirmPassword: undefined,
+        orgName: selectedOrg?.orgName,
+        orgId: selectedOrg?.orgId,
+      });
+      setInitialPhone('');
+      setIsCodeModified(false);
+      const timer = window.setTimeout(() => {
+        form.setFieldsValue({
+          userName: undefined,
+          userCode: undefined,
+          password: undefined,
+          confirmPassword: undefined,
+          orgName: selectedOrg?.orgName,
+          orgId: selectedOrg?.orgId,
+        });
+      }, 100);
+      return () => window.clearTimeout(timer);
+    }
+
     if (record?.userId) {
       dispatch({
         type: 'memberMgr/searchUser',
@@ -54,13 +94,14 @@ const OrganizationMembersModal = (props) => {
         },
       });
     } else {
+      form.resetFields();
       form.setFieldsValue({
         orgName: selectedOrg?.orgName,
         orgId: selectedOrg?.orgId,
       });
       setInitialPhone('');
     }
-  }, [record]);
+  }, [form, record, selectedOrg?.orgId, selectedOrg?.orgName, type, visible]);
 
   // 将汉字转换为拼音
   const handleNameChange = (e) => {
@@ -75,7 +116,7 @@ const OrganizationMembersModal = (props) => {
         .join('');
 
       form.setFieldsValue({
-        userCode: pinyinResult,
+        userCode: pinyinResult.slice(0, 50),
       });
     }
   };
@@ -94,6 +135,34 @@ const OrganizationMembersModal = (props) => {
     return rules;
   }, [type, record?.phone, intl]);
 
+  const validatePasswordComplexity = (_, value) => {
+    if (!value) {
+      return Promise.reject(new Error(intl.formatMessage({ id: 'orgMgr.modal.passwordPlaceholder' })));
+    }
+
+    if (value === INITIAL_PASSWORD) {
+      return Promise.reject(new Error(intl.formatMessage({ id: 'settings.initialPasswordNotAllowed' })));
+    }
+
+    if (!(hasEnoughComplexity(value) && hasValidLength(value) && hasOnlyValidChars(value))) {
+      return Promise.reject(new Error(intl.formatMessage({ id: 'settings.passwordComplexityError' })));
+    }
+
+    return Promise.resolve();
+  };
+
+  const validateConfirmPassword = (_, value) => {
+    if (!value) {
+      return Promise.reject(new Error(intl.formatMessage({ id: 'orgMgr.modal.confirmPasswordPlaceholder' })));
+    }
+
+    if (value !== form.getFieldValue('password')) {
+      return Promise.reject(new Error(intl.formatMessage({ id: 'settings.passwordsMustMatch' })));
+    }
+
+    return Promise.resolve();
+  };
+
   return (
     <Modal
       title={
@@ -105,6 +174,7 @@ const OrganizationMembersModal = (props) => {
       }
       width={500}
       open={visible}
+      maskClosable={false}
       onCancel={onCancel}
       confirmLoading={confirmLoading}
       onOk={() => {
@@ -118,6 +188,12 @@ const OrganizationMembersModal = (props) => {
             userType,
             userTypes,
           };
+          if (type === 'add') {
+            payload.password = encryptBySM(vals.password);
+          } else {
+            delete payload.password;
+          }
+          delete payload.confirmPassword;
           // 如果手机号有填写且与初始展示值不同，则进行加密再提交
           if (vals.phone && vals.phone !== initialPhone) {
             if (!phoneRegex.test(vals.phone)) {
@@ -155,11 +231,23 @@ const OrganizationMembersModal = (props) => {
       }}
       className={styles.organizationMembersModal}
     >
-      <Form form={form} labelCol={{ span: 5 }} wrapperCol={{ span: 19 }} disabled={type === 'detail'}>
+      <Form
+        form={form}
+        labelCol={{ span: 5 }}
+        wrapperCol={{ span: 19 }}
+        disabled={type === 'detail'}
+        autoComplete="off"
+      >
         <Form.Item
           label={intl.formatMessage({ id: 'orgMgr.modal.userName' })}
           name="userName"
           rules={[
+            {
+              required: true,
+              message: intl.formatMessage({
+                id: 'orgMgr.modal.userNamePlaceholder',
+              }),
+            },
             {
               validator: (_, value) => {
                 if (value) {
@@ -186,6 +274,7 @@ const OrganizationMembersModal = (props) => {
             showCount
             maxLength={20}
             onChange={handleNameChange}
+            autoComplete="off"
           />
         </Form.Item>
         <Form.Item
@@ -199,12 +288,8 @@ const OrganizationMembersModal = (props) => {
               }),
             },
             {
-              min: 3,
-              message: intl.formatMessage({ id: 'orgMgr.modal.userCodeRule1' }),
-            },
-            {
-              max: 255,
-              message: intl.formatMessage({ id: 'orgMgr.modal.userCodeRule2' }),
+              pattern: userCodeRegex,
+              message: intl.formatMessage({ id: 'orgMgr.modal.userCodeRule' }),
             },
           ]}
         >
@@ -213,11 +298,42 @@ const OrganizationMembersModal = (props) => {
               id: 'orgMgr.modal.userCodePlaceholder',
             })}
             showCount
-            maxLength={255}
+            maxLength={50}
             onChange={() => setIsCodeModified(true)}
             disabled={type !== 'add'}
+            autoComplete="off"
           />
         </Form.Item>
+
+        {type === 'add' && (
+          <>
+            <Form.Item
+              label={intl.formatMessage({ id: 'orgMgr.modal.password' })}
+              name="password"
+              required
+              rules={[{ validator: validatePasswordComplexity }]}
+            >
+              <Input.Password
+                placeholder={intl.formatMessage({ id: 'orgMgr.modal.passwordPlaceholder' })}
+                maxLength={32}
+                autoComplete="new-password"
+              />
+            </Form.Item>
+
+            <Form.Item
+              label={intl.formatMessage({ id: 'orgMgr.modal.confirmPassword' })}
+              name="confirmPassword"
+              required
+              rules={[{ validator: validateConfirmPassword }]}
+            >
+              <Input.Password
+                placeholder={intl.formatMessage({ id: 'orgMgr.modal.confirmPasswordPlaceholder' })}
+                maxLength={32}
+                autoComplete="new-password"
+              />
+            </Form.Item>
+          </>
+        )}
 
         <Form.Item
           label={intl.formatMessage({ id: 'orgMgr.modal.belongOrgId' })}

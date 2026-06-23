@@ -1,8 +1,8 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import { loadAgentContentIndex, saveAgentContentIndex } from "./agent-content-index.js";
 import {
-    collectModelReconcileTargets,
-    reconcileAgentSessionModelsAfterSync,
+    isManagedModelRegisteredInConfig,
+    parseModelPrimaryRef,
 } from "./agent-session-model-reconcile.js";
 import {
     hasManagedModelConfigDrift,
@@ -11,17 +11,25 @@ import {
     warnUnregisteredManagedModelPrimaries,
 } from "./managed-agent-model-hook.js";
 import { adaptAgentJson, type AdaptedManagedAgent } from "./agent-adapter.js";
-import { mergeManagedAgentsIntoConfig } from "./agent-registry.js";
+import { mergeDefaultAimodelIntoConfig, mergeManagedAgentsIntoConfig } from "./agent-registry.js";
 import { AgentRegistryState } from "./agent-state.js";
-import { MANAGED_AGENT_PREFIX, type BaiyingEnhancePluginConfig } from "./types.js";
+import { mutateOpenClawConfigFile } from "./config-writer.js";
+import {
+    MANAGED_AGENT_PREFIX,
+    MANAGED_PROVIDER_PREFIX,
+    type BaiyingEnhancePluginConfig,
+} from "./types.js";
 import type { BaiyingRedisJsonStore } from "./redis-json-store.js";
 import {
+    DEFAULT_AIMODEL_TYPELIST_FIELD,
     resolveAimodelConfigRedisKey,
     resolveAimodelSecretProviderName,
+    resolveAimodelTypeListRedisKey,
     resolveBaiyingAimodelProviderBundle,
+    resolveDefaultBaiyingAimodelProviderBundle,
 } from "./aimodel-config.js";
 import type { WorkspaceArchiveApi } from "./workspace-archive-api.js";
-import { resolveEffectiveMainAgentsMdMode, seedMainAgentAgentsMd } from "./main-workspace-seed.js";
+import { seedMainSubagentRouting } from "./main-workspace-seed.js";
 import { resolveAgentWorkspaceDir, seedManagedAgentWorkspace } from "./workspace-seed.js";
 import {
     archiveUnauthorizedActiveManagedWorkspaces,
@@ -36,12 +44,20 @@ import {
     skillSignature,
     watchWorkspaceSkillDirs,
 } from "./workspace-skills.js";
+import { syncHubSkillsForManagedAgents } from "./hub-skill-sync.js";
 
 export type LoadedManagedAgent = AdaptedManagedAgent & {
     /** SHA-256 hash of the source JSON content for change detection. */
     contentHash: string;
     /** Redis key that supplied this digital employee snapshot. */
     sourceRedisKey?: string;
+};
+
+type LoadedDefaultModel = {
+    providerKey: string;
+    modelRef: string;
+    provider: NonNullable<AdaptedManagedAgent["provider"]>;
+    hash: string;
 };
 
 function formatAgentDeltaLine(agent: LoadedManagedAgent): string {
@@ -149,6 +165,107 @@ function retainPreviousAimodelBundle(params: {
     };
 }
 
+function attachAimodelBundleToAgent(params: {
+    next: LoadedManagedAgent;
+    resolvedModel: LoadedDefaultModel;
+    sourceHash: string;
+    contentHashLabel: string;
+}): LoadedManagedAgent {
+    return {
+        ...params.next,
+        providerKey: params.resolvedModel.providerKey,
+        modelRef: params.resolvedModel.modelRef,
+        provider: params.resolvedModel.provider,
+        listEntry: {
+            ...params.next.listEntry,
+            model: { primary: params.resolvedModel.modelRef },
+        },
+        contentHash: `${params.sourceHash}:${params.contentHashLabel}:${params.resolvedModel.hash}`,
+    };
+}
+
+function retainedDefaultAimodelBundleFromConfig(cfg: {
+    agents?: { defaults?: { model?: { primary?: string } } };
+    models?: {
+        providers?: Record<
+            string,
+            {
+                baseUrl?: unknown;
+                apiKey?: unknown;
+                api?: unknown;
+                models?: Array<{
+                    id?: string;
+                    name?: string;
+                    api?: unknown;
+                    input?: unknown;
+                    contextWindow?: number;
+                    maxTokens?: number;
+                }>;
+            }
+        >;
+    };
+}): LoadedDefaultModel | null {
+    const primary = cfg.agents?.defaults?.model?.primary?.trim();
+    if (!primary) {
+        return null;
+    }
+    const parsed = parseModelPrimaryRef(primary);
+    if (!parsed || !parsed.provider.startsWith(MANAGED_PROVIDER_PREFIX)) {
+        return null;
+    }
+    const providerEntry = cfg.models?.providers?.[parsed.provider];
+    const modelEntry = providerEntry?.models?.find((entry) => entry.id?.trim() === parsed.model);
+    const baseUrl = typeof providerEntry?.baseUrl === "string" ? providerEntry.baseUrl.trim() : "";
+    if (!providerEntry || !modelEntry || !baseUrl) {
+        return null;
+    }
+    const providerApi =
+        providerEntry.api === "anthropic-messages" ? "anthropic-messages" : "openai-completions";
+    const modelInput = Array.isArray(modelEntry.input)
+        ? modelEntry.input.filter(
+              (item): item is "text" | "image" => item === "text" || item === "image",
+          )
+        : undefined;
+    return {
+        providerKey: parsed.provider,
+        modelRef: primary,
+        provider: {
+            baseUrl,
+            apiKey: providerEntry.apiKey,
+            api: providerApi,
+            modelId: parsed.model,
+            modelName: modelEntry.name?.trim() || parsed.model,
+            contextWindow: modelEntry.contextWindow,
+            maxTokens: modelEntry.maxTokens,
+            input: modelInput?.length ? modelInput : undefined,
+        },
+        hash: "retained",
+    };
+}
+
+function hasDefaultModelConfigDrift(params: {
+    cfg: {
+        agents?: { defaults?: { model?: { primary?: string } } };
+        models?: {
+            providers?: Record<string, { models?: Array<{ id?: string }> }>;
+        };
+    };
+    defaultModel?: LoadedDefaultModel | null;
+}): boolean {
+    if (!params.defaultModel) {
+        return false;
+    }
+    const primary = params.cfg.agents?.defaults?.model?.primary?.trim() || "";
+    if (primary !== params.defaultModel.modelRef) {
+        return true;
+    }
+    const parsed = parseModelPrimaryRef(params.defaultModel.modelRef);
+    if (!parsed) {
+        return true;
+    }
+    return !isManagedModelRegisteredInConfig(params.cfg, parsed.provider, parsed.model);
+}
+
 export async function loadManagedAgentsFromRedis(params: {
     redisJsonStore: BaiyingRedisJsonStore;
     authorizedSourceKeys: Set<string> | undefined;
@@ -157,6 +274,7 @@ export async function loadManagedAgentsFromRedis(params: {
     defaultProxyUrl?: string;
     defaultApiKey?: string;
     aimodelConfigRedisKey?: string;
+    defaultModel?: LoadedDefaultModel | null;
     aimodelSecretProviderName?: string;
     concurrency?: number;
     /** Last successful sync snapshot; used to keep model binding when aimodel Redis lookup fails. */
@@ -224,17 +342,22 @@ export async function loadManagedAgentsFromRedis(params: {
                 log: params.log,
             });
             if (resolvedModel) {
-                next = {
-                    ...next,
-                    providerKey: resolvedModel.providerKey,
-                    modelRef: resolvedModel.modelRef,
-                    provider: resolvedModel.provider,
-                    listEntry: {
-                        ...next.listEntry,
-                        model: { primary: resolvedModel.modelRef },
-                    },
-                    contentHash: `${result.hash}:${resolvedModel.hash}`,
-                };
+                next = attachAimodelBundleToAgent({
+                    next,
+                    resolvedModel,
+                    sourceHash: result.hash,
+                    contentHashLabel: "model",
+                });
+            } else if (params.defaultModel) {
+                params.log.warn(
+                    `baiying-enhance: Redis AI model config unavailable for modelId=${res.baiyingModelId}; falling back to default model ${params.defaultModel.modelRef}`,
+                );
+                next = attachAimodelBundleToAgent({
+                    next,
+                    resolvedModel: params.defaultModel,
+                    sourceHash: result.hash,
+                    contentHashLabel: `default-model-for-missing-${res.baiyingModelId}`,
+                });
             } else {
                 const previous = params.previousByAgentId?.get(next.agentId);
                 if (previous) {
@@ -247,6 +370,13 @@ export async function loadManagedAgentsFromRedis(params: {
                     });
                 }
             }
+        } else if (params.defaultModel) {
+            next = attachAimodelBundleToAgent({
+                next,
+                resolvedModel: params.defaultModel,
+                sourceHash: result.hash,
+                contentHashLabel: "default-model",
+            });
         }
         out[index] = next;
     };
@@ -327,6 +457,7 @@ export function createAgentWatchdog(params: {
     let unauthorizedMountedWorkspaceCheckDeferredLogged = false;
 
     const persistIndex = params.pluginConfig.persistAgentContentIndex !== false;
+    const hubSkillAutoSync = params.pluginConfig.hubSkillAutoSync !== false;
     const workspaceSkillAutoEnable = params.pluginConfig.workspaceSkillAutoEnable !== false;
     const workspaceSkillIncludeMainShared =
         params.pluginConfig.workspaceSkillIncludeMainShared === true;
@@ -335,6 +466,61 @@ export function createAgentWatchdog(params: {
         Number.isFinite(params.pluginConfig.workspaceSkillScanIntervalMs)
             ? params.pluginConfig.workspaceSkillScanIntervalMs
             : 500;
+    const aimodelTypeListRedisKey = resolveAimodelTypeListRedisKey(
+        params.pluginConfig.aimodelTypeListRedisKey,
+    );
+    const warnLog = { warn: (m: string) => params.api.logger.warn(m) };
+
+    const resolveDefaultModelForFlush = async (cfgBeforeLoad: ReturnType<typeof params.api.runtime.config.loadConfig>) => {
+        const defaultModelFromRedis = await resolveDefaultBaiyingAimodelProviderBundle({
+            redisJsonStore: params.redisJsonStore,
+            redisKey: aimodelTypeListRedisKey,
+            modelType: DEFAULT_AIMODEL_TYPELIST_FIELD,
+            secretProviderName: resolveAimodelSecretProviderName(
+                params.pluginConfig.aimodelSecretProviderName,
+            ),
+            log: warnLog,
+        });
+        return defaultModelFromRedis ?? retainedDefaultAimodelBundleFromConfig(cfgBeforeLoad);
+    };
+
+    const syncDefaultModelOnlyIfNeeded = async (paramsIn: {
+        cfgBeforeLoad: ReturnType<typeof params.api.runtime.config.loadConfig>;
+        defaultModel?: LoadedDefaultModel | null;
+        reason: string;
+    }): Promise<boolean> => {
+        const defaultModel = paramsIn.defaultModel;
+        if (!defaultModel) {
+            return false;
+        }
+        if (
+            !hasDefaultModelConfigDrift({
+                cfg: paramsIn.cfgBeforeLoad,
+                defaultModel,
+            })
+        ) {
+            return false;
+        }
+        await mutateOpenClawConfigFile(params.api, (base) =>
+            mergeDefaultAimodelIntoConfig({
+                base,
+                defaultModel,
+                mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
+                aimodelConfigRedisKey: params.pluginConfig.aimodelConfigRedisKey,
+                aimodelTypeListRedisKey: params.pluginConfig.aimodelTypeListRedisKey,
+                aimodelSecretProviderName: params.pluginConfig.aimodelSecretProviderName,
+                aimodelSecretResolverCommand: process.execPath,
+                aimodelSecretResolverArgs: [
+                    params.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js",
+                ],
+            }),
+        );
+        params.api.logger.info(
+            `baiying-enhance: synced platform default LLM ${defaultModel.modelRef} (${paramsIn.reason})`,
+        );
+        return true;
+    };
+
     const schedule = () => {
         if (timer) {
             clearTimeout(timer);
@@ -404,36 +590,41 @@ export function createAgentWatchdog(params: {
                 return;
             }
 
-            const next = structuredClone(cfg);
-            const list = next.agents?.list;
-            if (!Array.isArray(list)) {
-                return;
-            }
-            let touched = 0;
-            for (let i = 0; i < list.length; i += 1) {
-                const entry = list[i];
-                if (!entry.id) {
-                    continue;
-                }
-                const skills = nextSkillsById.get(entry.id);
-                if (!skills) {
-                    continue;
-                }
-                list[i] = { ...entry, skills };
-                touched += 1;
-            }
-            if (touched === 0) {
-                return;
-            }
             attemptedSkillSyncSignature = Array.from(nextSkillsById.entries())
                 .sort(([a], [b]) => a.localeCompare(b))
                 .map(([id, skills]) => `${id}:${skillSignature(skills)}`)
                 .join("|");
-            touchSkillsSnapshotInvalidation(next, {
-                managed: effectiveManaged,
-                reason: "workspace-skill-sync",
+            let touched = 0;
+            await mutateOpenClawConfigFile(params.api, (base) => {
+                const next = structuredClone(base);
+                const list = next.agents?.list;
+                if (!Array.isArray(list)) {
+                    return base;
+                }
+                for (let i = 0; i < list.length; i += 1) {
+                    const entry = list[i];
+                    if (!entry.id) {
+                        continue;
+                    }
+                    const skills = nextSkillsById.get(entry.id);
+                    if (!skills) {
+                        continue;
+                    }
+                    list[i] = { ...entry, skills };
+                    touched += 1;
+                }
+                if (touched === 0) {
+                    return base;
+                }
+                touchSkillsSnapshotInvalidation(next, {
+                    managed: effectiveManaged,
+                    reason: "workspace-skill-sync",
+                });
+                return next;
             });
-            await params.api.runtime.config.writeConfigFile(next);
+            if (touched === 0) {
+                return;
+            }
             lastSkillSyncFailureSignature = "";
             params.registry.replaceAll(effectiveManaged);
             prevSkillSignatures.clear();
@@ -488,8 +679,15 @@ export function createAgentWatchdog(params: {
         const deleteBatchSet = new Set(deleteBatch.map((k) => k.trim()).filter(Boolean));
 
         try {
+            const cfgBeforeLoad = params.api.runtime.config.loadConfig();
+            const defaultModel = await resolveDefaultModelForFlush(cfgBeforeLoad);
             const authorizedSourceKeys = params.authorizationFilter?.getAuthorizedSourceKeys();
             if (authorizedSourceKeys === undefined) {
+                await syncDefaultModelOnlyIfNeeded({
+                    cfgBeforeLoad,
+                    defaultModel,
+                    reason: "dig-employee auth pending",
+                });
                 if (deleteBatchSet.size > 0) {
                     const deletedWorkspaces = [...deleteBatchSet].map((sourceKey) => {
                         const agentId = `${MANAGED_AGENT_PREFIX}${sourceKey}`;
@@ -578,6 +776,7 @@ export function createAgentWatchdog(params: {
                 defaultProxyUrl: params.pluginConfig.defaultProxyUrl,
                 defaultApiKey: params.pluginConfig.defaultApiKey,
                 aimodelConfigRedisKey: params.pluginConfig.aimodelConfigRedisKey,
+                defaultModel,
                 aimodelSecretProviderName: params.pluginConfig.aimodelSecretProviderName,
                 concurrency: params.pluginConfig.redisLoadConcurrency,
                 previousByAgentId,
@@ -597,6 +796,31 @@ export function createAgentWatchdog(params: {
                     warn: (m) => params.api.logger.warn(m),
                 },
             });
+            let hasHubSkillChanges = false;
+            if (hubSkillAutoSync) {
+                try {
+                    const hubSkillSync = await syncHubSkillsForManagedAgents({
+                        managed: filteredManaged,
+                        redisJsonStore: params.redisJsonStore,
+                        logger: {
+                            info: (m) => params.api.logger.info(m),
+                            warn: (m) => params.api.logger.warn(m),
+                        },
+                    });
+                    hasHubSkillChanges = hubSkillSync.changed;
+                    if (hubSkillSync.checked > 0) {
+                        params.api.logger.info(
+                            `baiying-enhance: hub skill sync checked=${hubSkillSync.checked} downloaded=${hubSkillSync.downloaded.length} skipped=${hubSkillSync.skipped.length}`,
+                        );
+                    }
+                } catch (err) {
+                    params.api.logger.warn(
+                        `baiying-enhance: hub skill sync failed; keeping existing local hub skills: ${
+                            err instanceof Error ? err.message : String(err)
+                        }`,
+                    );
+                }
+            }
             if (isColdStartMountedWorkspaceCheck) {
                 await cleanupManagedBootstrapFilesOnColdStart({
                     api: params.api,
@@ -734,10 +958,15 @@ export function createAgentWatchdog(params: {
             let hasConfigModelDrift = false;
             try {
                 const cfgForDrift = params.api.runtime.config.loadConfig();
-                hasConfigModelDrift = hasManagedModelConfigDrift({
-                    cfg: cfgForDrift,
-                    managed: effectiveManaged,
-                });
+                hasConfigModelDrift =
+                    hasManagedModelConfigDrift({
+                        cfg: cfgForDrift,
+                        managed: effectiveManaged,
+                    }) ||
+                    hasDefaultModelConfigDrift({
+                        cfg: cfgForDrift,
+                        defaultModel,
+                    });
             } catch {
                 // ignore config read errors
             }
@@ -750,6 +979,7 @@ export function createAgentWatchdog(params: {
                 hasSkillChanges ||
                 hasToolChanges ||
                 hasConfigModelDrift ||
+                hasHubSkillChanges ||
                 deleteBatchSet.size > 0;
             const forceFullReseed = forceAuthReseed;
             const shouldSync = hasChanges || forceFullReseed;
@@ -762,6 +992,7 @@ export function createAgentWatchdog(params: {
                     updated.length > 0 ||
                     removed.length > 0 ||
                     hasSkillChanges ||
+                    hasHubSkillChanges ||
                     hasToolChanges)
             ) {
                 const trigger =
@@ -769,6 +1000,13 @@ export function createAgentWatchdog(params: {
                         ? `explicit delete (${[...deleteBatchSet].join(", ")})`
                         : forceAuthReseed
                           ? "full workspace reseed (auth)"
+                          : hasHubSkillChanges &&
+                              added.length === 0 &&
+                              updated.length === 0 &&
+                              removed.length === 0 &&
+                              !hasSkillChanges &&
+                              !hasToolChanges
+                            ? "hub skill sync"
                           : hasSkillChanges &&
                               added.length === 0 &&
                               updated.length === 0 &&
@@ -776,7 +1014,7 @@ export function createAgentWatchdog(params: {
                             ? "workspace skill sync"
                             : `managed agent sync (${params.debounceMs}ms coalesce)`;
                 params.api.logger.info(
-                    `baiying-enhance: ${trigger} — delta: +${added.length} ~${updated.length} -${removed.length}; skillChanges=${hasSkillChanges}; toolChanges=${hasToolChanges}; fullWorkspaceReseed=${forceFullReseed}`,
+                    `baiying-enhance: ${trigger} — delta: +${added.length} ~${updated.length} -${removed.length}; skillChanges=${hasSkillChanges}; toolChanges=${hasToolChanges}; hubSkillChanges=${hasHubSkillChanges}; fullWorkspaceReseed=${forceFullReseed}`,
                 );
                 const detailLines: string[] = [];
                 for (const a of added) {
@@ -802,17 +1040,13 @@ export function createAgentWatchdog(params: {
             params.registry.replaceAll(effectiveManaged);
 
             const runMainAgentsSeed =
-                params.pluginConfig.mainWorkspaceAgentsAutoSeed !== false &&
-                resolveEffectiveMainAgentsMdMode(params.pluginConfig) !== "off";
+                params.pluginConfig.mainWorkspaceAgentsAutoSeed !== false;
 
-            const trySeedMainAgentsMd = async () => {
+            const trySeedMainSubagentRouting = async () => {
                 if (!runMainAgentsSeed) {
                     const reasons: string[] = [];
                     if (params.pluginConfig.mainWorkspaceAgentsAutoSeed === false) {
                         reasons.push("mainWorkspaceAgentsAutoSeed=false");
-                    }
-                    if (resolveEffectiveMainAgentsMdMode(params.pluginConfig) === "off") {
-                        reasons.push("mainAgentsMdMode=off");
                     }
                     if (reasons.length > 0) {
                         params.api.logger.info(
@@ -822,7 +1056,9 @@ export function createAgentWatchdog(params: {
                     return;
                 }
                 try {
-                    await seedMainAgentAgentsMd({
+                    // 主 workspace context 已由 main-context-template watcher 独立维护；
+                    // 数字员工同步链路只负责随着员工集合变化刷新路由提示。
+                    await seedMainSubagentRouting({
                         api: params.api,
                         pluginConfig: params.pluginConfig,
                         managedAgents: effectiveManaged,
@@ -833,7 +1069,7 @@ export function createAgentWatchdog(params: {
                     });
                 } catch (err) {
                     params.api.logger.warn(
-                        `baiying-enhance: main workspace AGENTS.md seed failed: ${
+                        `baiying-enhance: main workspace SUBAGENT_ROUTING.md seed failed: ${
                             err instanceof Error ? err.message : String(err)
                         }`,
                     );
@@ -842,7 +1078,7 @@ export function createAgentWatchdog(params: {
 
             if (!shouldSync) {
                 await runMountedWorkspaceCheck("no-sync");
-                await trySeedMainAgentsMd();
+                await trySeedMainSubagentRouting();
                 prevSkillSignatures.clear();
                 prevToolSignatures.clear();
                 for (const m of effectiveManaged) {
@@ -865,38 +1101,40 @@ export function createAgentWatchdog(params: {
                 return;
             }
 
-            const cfgBefore = params.api.runtime.config.loadConfig();
-            const previousConfigModelPrimaryByAgentId = new Map(
-                (cfgBefore.agents?.list ?? [])
-                    .filter((entry) => entry.id?.startsWith(MANAGED_AGENT_PREFIX))
-                    .map((entry) => [entry.id!, entry.model?.primary?.trim() || ""] as const),
-            );
-            const next = mergeManagedAgentsIntoConfig({
-                base: cfgBefore,
-                managed: effectiveManaged,
-                mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
-                mergeAllowSpawnForMain: params.pluginConfig.mergeAllowSpawnForMain !== false,
-                aimodelConfigRedisKey: params.pluginConfig.aimodelConfigRedisKey,
-                aimodelSecretProviderName: params.pluginConfig.aimodelSecretProviderName,
-                aimodelSecretResolverCommand: process.execPath,
-                aimodelSecretResolverArgs: [
-                    params.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js",
-                ],
-            });
-            if (
-                hasSkillChanges ||
-                hasToolChanges ||
-                added.length > 0 ||
-                removed.length > 0 ||
-                deleteBatchSet.size > 0
-            ) {
-                touchSkillsSnapshotInvalidation(next, {
+            await mutateOpenClawConfigFile(params.api, (base) => {
+                const next = mergeManagedAgentsIntoConfig({
+                    base,
                     managed: effectiveManaged,
-                    reason: hasToolChanges ? "agent-tool-policy-sync" : "agent-skill-sync",
+                    defaultModel,
+                    mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
+                    mergeAllowSpawnForMain: params.pluginConfig.mergeAllowSpawnForMain !== false,
+                    aimodelConfigRedisKey: params.pluginConfig.aimodelConfigRedisKey,
+                    aimodelTypeListRedisKey: params.pluginConfig.aimodelTypeListRedisKey,
+                    aimodelSecretProviderName: params.pluginConfig.aimodelSecretProviderName,
+                    aimodelSecretResolverCommand: process.execPath,
+                    aimodelSecretResolverArgs: [
+                        params.aimodelSecretResolverScriptPath ?? "aimodel-secret-resolver-cli.js",
+                    ],
                 });
-            }
-
-            await params.api.runtime.config.writeConfigFile(next);
+                if (
+                    hasSkillChanges ||
+                    hasHubSkillChanges ||
+                    hasToolChanges ||
+                    added.length > 0 ||
+                    removed.length > 0 ||
+                    deleteBatchSet.size > 0
+                ) {
+                    touchSkillsSnapshotInvalidation(next, {
+                        managed: effectiveManaged,
+                        reason: hasToolChanges
+                            ? "agent-tool-policy-sync"
+                            : hasHubSkillChanges
+                              ? "hub-skill-sync"
+                              : "agent-skill-sync",
+                    });
+                }
+                return next;
+            });
             const runtimeCfgAfterWrite = params.api.runtime.config.loadConfig();
             logManagedProviderRuntimeDiagnostics({
                 cfg: runtimeCfgAfterWrite,
@@ -913,25 +1151,13 @@ export function createAgentWatchdog(params: {
                 managed: effectiveManaged,
                 log: { warn: (m) => params.api.logger.warn(m) },
             });
-            // sessions.json runtime model outranks agents.list; active runs need
-            // liveModelSwitchPending to restart on platform model changes.
-            const modelChangedAgents = collectModelReconcileTargets({
-                managed: effectiveManaged,
-                added,
-                updated,
-                forceFullWorkspaceReseed: forceAuthReseed,
-                previousConfigModelPrimaryByAgentId,
-            });
-            if (modelChangedAgents.length > 0) {
-                await reconcileAgentSessionModelsAfterSync({
-                    api: params.api,
-                    agents: modelChangedAgents,
-                    log: {
-                        info: (m) => params.api.logger.info(m),
-                        warn: (m) => params.api.logger.warn(m),
-                    },
-                });
-            }
+            // Keep model alignment prompt-local / dispatch-local. Background
+            // managed-agent sync can run while an embedded model/tool loop has
+            // released its session lock; rewriting the same session store here
+            // can trip OpenClaw's takeover fence. Inbound `before_dispatch`
+            // updates the target session before a run starts, while
+            // `before_model_resolve` and `before_prompt_build` carry the live
+            // model fact without touching the transcript mid-run.
             await deleteManagedAgentWorkspaces({
                 agents: deletedWorkspaces,
                 reason: "DIG_EMPLOYEE_DELETED",
@@ -983,7 +1209,7 @@ export function createAgentWatchdog(params: {
                 }
             }
 
-            await trySeedMainAgentsMd();
+            await trySeedMainSubagentRouting();
 
             prevHashes.clear();
             for (const m of effectiveManaged) {
@@ -1030,7 +1256,7 @@ export function createAgentWatchdog(params: {
     return {
         start: async (options?: { deferInitialFlush?: boolean }) => {
             params.api.logger.info(
-                "baiying-enhance: agent sync engine started (Redis JSON loading only; triggers: Redis Pub/Sub, dig-employee auth, __flushNow)",
+                "baiying-enhance: agent sync engine started (Redis JSON loading only; triggers: Redis Pub/Sub, dig-employee auth, __flushNow; main run aimodel diff)",
             );
             if (persistIndex) {
                 const loaded = await loadAgentContentIndex(params.contentIndexPath, {

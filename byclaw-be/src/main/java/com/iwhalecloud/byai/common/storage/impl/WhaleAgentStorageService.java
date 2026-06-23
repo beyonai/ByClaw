@@ -44,7 +44,7 @@ import feign.Response;
 public class WhaleAgentStorageService extends AbstractFileIngressStorageService<FeignWhaleAgentService> {
 
     private static final Logger logger = LoggerFactory.getLogger(WhaleAgentStorageService.class);
-    private static final String SHARE_TYPE_PUBLIC = "public";
+    public static final String SHARE_TYPE_PUBLIC = "public";
     private static final String SHARE_TYPE_PRIVATE = "private";
     private static final String UPLOAD_FAILED_KEY = "storage.whaleagent.upload.failed";
     private static final String DOWNLOAD_FAILED_KEY = "storage.whaleagent.download.failed";
@@ -113,6 +113,7 @@ public class WhaleAgentStorageService extends AbstractFileIngressStorageService<
         metadata.setFileSize(target.getSize());
         metadata.setFileType(FilenameUtils.getExtension(metadata.getFileName()));
         metadata.setStorageType(getStorageType());
+        metadata.setLastModified(target.getLastModified());
         return metadata;
     }
 
@@ -481,6 +482,7 @@ public class WhaleAgentStorageService extends AbstractFileIngressStorageService<
             .bucketOrRoot(prefix == null ? null : prefix.getBucketOrRoot())
             .path(objectPath)
             .size(item.getSize())
+            .lastModified(item.getLastModified())
             .build();
     }
 

@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Descriptions, Spin } from 'antd';
+import { Button, Modal, Spin, Table } from 'antd';
+import { CloseOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import { queryResourceMembers } from '@/pages/manager/service/resources';
 // import ResourceMembers from '../ResourceMembers';
 import classnames from 'classnames';
+import dayjs from 'dayjs';
 import styles from './index.module.less';
 
 interface IResourceItem {
@@ -17,19 +19,40 @@ interface IResourceItem {
   createTime?: number | string;
   resourceSourcePkId?: string;
   extInfo?: any;
+  useList?: ResourceMemberItem[];
+  managerList?: ResourceMemberItem[];
+  usedDigitalEmployees?: UsedDigitalEmployee[];
+}
+
+interface ResourceMemberItem {
+  grantToObjName?: string;
+  grantToObjId?: string | number;
+}
+
+interface UsedDigitalEmployee {
+  resourceId?: string | number;
+  resourceName?: string;
+  useStartTime?: string | number;
 }
 
 interface ResourceDetailProps {
   visible: boolean;
   resourceId?: string | number;
   item: IResourceItem | null;
-  resourceType: string;
   resourceName: string;
   onCancel: () => void;
   onEdit: () => void;
+  panel?: boolean;
 }
 
-const ResourceDetail: React.FC<ResourceDetailProps> = ({ visible, resourceId, resourceName, item, onCancel }) => {
+const ResourceDetail: React.FC<ResourceDetailProps> = ({
+  visible,
+  resourceId,
+  resourceName,
+  item,
+  onCancel,
+  panel = false,
+}) => {
   const intl = useIntl();
   const [loading, setLoading] = useState(false);
   const [objectLoading, setObjectLoading] = useState(false);
@@ -100,96 +123,176 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({ visible, resourceId, re
     }
   };
 
+  const renderDetailField = (label: React.ReactNode, value: React.ReactNode) => (
+    <div className={styles.detailField}>
+      <div className={styles.detailLabel}>{label}</div>
+      <div className={styles.detailValue}>{value || '-'}</div>
+    </div>
+  );
+
   // 获取属性信息
   const getPropertiesInfo = () => {
     try {
       const targetContent = detailData?.extInfo?.targetContent ? JSON.parse(detailData.extInfo.targetContent) : null;
-      return targetContent?.fields ? (
-        <Descriptions.Item label={`${resourceName}${intl.formatMessage({ id: 'resource.property' })}`} span={2}>
-          <div className={styles.targetContent}>
-            {targetContent.fields.map((field: any) => field.propertyName).join('、')}
-          </div>
-        </Descriptions.Item>
-      ) : null;
+      if (!targetContent?.fields) {
+        return null;
+      }
+      const content = (
+        <div className={styles.targetContent}>
+          {targetContent.fields.map((field: any) => field.propertyName).join('、')}
+        </div>
+      );
+      return renderDetailField(`${resourceName}${intl.formatMessage({ id: 'resource.property' })}`, content);
     } catch (error) {
       return null;
     }
+  };
+
+  const renderMemberNames = (members?: ResourceMemberItem[]) => {
+    const names = (Array.isArray(members) ? members : [])
+      .map((member) => member.grantToObjName || member.grantToObjId)
+      .filter(Boolean);
+
+    return names.length ? names.join('、') : intl.formatMessage({ id: 'common.none' });
+  };
+
+  const formatDateTime = (value?: string | number) => {
+    if (!value) return intl.formatMessage({ id: 'common.none' });
+    const parsed = dayjs(value);
+    return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : String(value);
+  };
+
+  const renderUsedDigitalEmployees = () => {
+    const employees = Array.isArray(item?.usedDigitalEmployees) ? item?.usedDigitalEmployees : [];
+    if (!employees.length) {
+      return null;
+    }
+
+    return renderDetailField(
+      intl.formatMessage({ id: 'skillDetail.usedDigitalEmployees' }),
+      <Table
+        size="small"
+        pagination={false}
+        columns={[
+          {
+            dataIndex: 'resourceName',
+            title: intl.formatMessage({ id: 'skillDetail.digitalEmployeeName' }),
+            render: (text: React.ReactNode) => text || intl.formatMessage({ id: 'common.none' }),
+          },
+          {
+            dataIndex: 'useStartTime',
+            title: intl.formatMessage({ id: 'skillDetail.useStartTime' }),
+            width: 180,
+            render: (text: string | number) => formatDateTime(text),
+          },
+        ]}
+        dataSource={employees.map((employee, index) => ({
+          ...employee,
+          key: employee.resourceId ?? index,
+        }))}
+      />
+    );
   };
 
   // 获取关联对象
   const getRelatedObjects = () => {
     try {
       const targetContent = detailData?.extInfo?.targetContent ? JSON.parse(detailData.extInfo.targetContent) : null;
-      return targetContent?.objects && targetContent.objects.length > 0 ? (
-        <Descriptions.Item label={intl.formatMessage({ id: 'resource.relatedObjects' })} span={2}>
-          <div className={styles.targetContent}>
-            <div className={styles.objectCardGrid}>
-              {targetContent.objects.map((object: any, index: number) => (
-                <div
-                  key={index}
-                  className={classnames(
-                    styles.objectCard,
-                    selectedObject?.resourceCode === object.resourceCode && styles.selectedObjectCard
-                  )}
-                  onClick={() => handleObjectClick(object)}
-                >
-                  <div className={styles.objectCardTitle}>{object.resourceName}</div>
-                  <div className={styles.objectCardCode}>{object.resourceCode}</div>
-                </div>
-              ))}
-            </div>
+      if (!targetContent?.objects?.length) {
+        return null;
+      }
+      const content = (
+        <div className={styles.targetContent}>
+          <div className={styles.objectCardGrid}>
+            {targetContent.objects.map((object: any, index: number) => (
+              <div
+                key={index}
+                className={classnames(
+                  styles.objectCard,
+                  selectedObject?.resourceCode === object.resourceCode && styles.selectedObjectCard
+                )}
+                onClick={() => handleObjectClick(object)}
+              >
+                <div className={styles.objectCardTitle}>{object.resourceName}</div>
+                <div className={styles.objectCardCode}>{object.resourceCode}</div>
+              </div>
+            ))}
           </div>
-        </Descriptions.Item>
-      ) : null;
+        </div>
+      );
+      return renderDetailField(intl.formatMessage({ id: 'resource.relatedObjects' }), content);
     } catch (error) {
       return null;
     }
   };
 
-  return (
-    <Modal
-      title={`${resourceName}${intl.formatMessage({ id: 'common.detail' })}`}
-      open={visible}
-      onCancel={onCancel}
-      width={1000}
-      destroyOnHidden
-      footer={null}
-    >
+  const title = `${resourceName}${intl.formatMessage({ id: 'common.detail' })}`;
+  const detailContent = (
+    <>
       {loading ? (
         <div className={styles.loadingContainer}>
-          <Spin size="large" />
+          <Spin />
         </div>
       ) : (
-        <>
-          <Descriptions bordered column={1} className={styles.descriptions}>
-            <Descriptions.Item label={`${resourceName}${intl.formatMessage({ id: 'common.title' })}`}>
-              {item?.resourceName}
-            </Descriptions.Item>
-            <Descriptions.Item label={`${resourceName}${intl.formatMessage({ id: 'common.code' })}`}>
-              {item?.resourceCode}
-            </Descriptions.Item>
-            <Descriptions.Item label={`${resourceName}${intl.formatMessage({ id: 'common.description' })}`} span={2}>
-              <div className={styles.descriptionContent}>{item?.resourceDesc || item?.description}</div>
-            </Descriptions.Item>
+        <div className={styles.detailFields}>
+          {renderDetailField(`${resourceName}${intl.formatMessage({ id: 'common.title' })}`, item?.resourceName)}
+          {renderDetailField(`${resourceName}${intl.formatMessage({ id: 'common.code' })}`, item?.resourceCode)}
+          {renderDetailField(
+            `${resourceName}${intl.formatMessage({ id: 'common.description' })}`,
+            <div className={styles.descriptionContent}>{item?.resourceDesc || item?.description || '-'}</div>
+          )}
 
-            {getRelatedObjects()}
+          {getRelatedObjects()}
 
-            {selectedObject && (
-              <Descriptions.Item label={intl.formatMessage({ id: 'resource.relatedObjectProperties' })} span={2}>
-                {objectLoading ? (
-                  <div className={styles.loadingContainer}>
-                    <Spin size="small" />
-                  </div>
-                ) : (
-                  <div className={styles.targetContent}>{getObjectProperties()}</div>
-                )}
-              </Descriptions.Item>
+          {selectedObject &&
+            renderDetailField(
+              intl.formatMessage({ id: 'resource.relatedObjectProperties' }),
+              objectLoading ? (
+                <div className={styles.loadingContainer}>
+                  <Spin size="small" />
+                </div>
+              ) : (
+                <div className={styles.targetContent}>{getObjectProperties()}</div>
+              )
             )}
 
-            {getPropertiesInfo()}
-          </Descriptions>
-        </>
+          {getPropertiesInfo()}
+
+          {renderDetailField(
+            intl.formatMessage({ id: 'common.userPerson' }),
+            <div className={styles.memberList}>{renderMemberNames(detailData?.useList || item?.useList)}</div>
+          )}
+
+          {renderDetailField(
+            intl.formatMessage({ id: 'common.manager' }),
+            <div className={styles.memberList}>{renderMemberNames(detailData?.managerList || item?.managerList)}</div>
+          )}
+
+          {renderUsedDigitalEmployees()}
+        </div>
       )}
+    </>
+  );
+
+  if (panel) {
+    if (!visible) {
+      return null;
+    }
+
+    return (
+      <div className={styles.detailPanel}>
+        <div className={styles.panelHeader}>
+          <span className={styles.panelTitle}>{title}</span>
+          <Button type="text" size="small" icon={<CloseOutlined />} onClick={onCancel} />
+        </div>
+        <div className={styles.panelBody}>{detailContent}</div>
+      </div>
+    );
+  }
+
+  return (
+    <Modal title={title} open={visible} onCancel={onCancel} width={1000} destroyOnHidden footer={null}>
+      {detailContent}
     </Modal>
   );
 };

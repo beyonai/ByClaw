@@ -64,6 +64,10 @@ public enum ResourceBizTypeEnum {
     /**
      * 管理组织资源
      */
-    MAN_ORG
+    MAN_ORG,
+    /**
+     * 技能
+     */
+    SKILL
 
 }

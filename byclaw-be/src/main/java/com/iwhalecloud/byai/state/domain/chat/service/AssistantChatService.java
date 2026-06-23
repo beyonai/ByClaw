@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.security.SecureRandom;
 import com.iwhalecloud.byai.manager.entity.men.MenResCom;
 import com.iwhalecloud.byai.manager.entity.men.MenTask;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -670,4 +671,24 @@ public class AssistantChatService {
         }
     }
 
+    private static String getNumericMsgId() {
+        try {
+            // 使用默认的 SecureRandom 实例（算法通常为 SHA1PRNG 或 NativePRNG）
+            SecureRandom random = new SecureRandom();
+            // 生成 32 位有符号整数
+            int randomInt = random.nextInt();
+            // 转换为无符号 32 位整数（0 ~ 2^32-1）
+            long unsigned = randomInt & 0xFFFFFFFFL;
+            return Long.toString(unsigned);
+        } catch (Exception e) {
+            // 降级方案：时间戳反转取前 10 位
+            String timestamp = Long.toString(System.currentTimeMillis());
+            String reversed = new StringBuilder(timestamp).reverse().toString();
+            return reversed.length() > 10 ? reversed.substring(0, 10) : reversed;
+        }
+    }
+
+    public static String getClientRequestId() {
+        return getNumericMsgId() + "_" + getNumericMsgId();
+    }
 }

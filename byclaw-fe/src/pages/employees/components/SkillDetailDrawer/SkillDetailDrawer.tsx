@@ -1,6 +1,7 @@
 /* eslint-disable max-len,@typescript-eslint/no-non-null-assertion */
-import React, { Fragment, useMemo, useCallback, useState, useEffect } from 'react';
+import React, { useMemo, useCallback, useState, useEffect } from 'react';
 import classNames from 'classnames';
+import dayjs from 'dayjs';
 import {
   Button,
   Collapse,
@@ -16,7 +17,7 @@ import {
   message,
 } from 'antd';
 import { createPortal } from 'react-dom';
-import { LinkOutlined } from '@ant-design/icons';
+import { CloseOutlined, LinkOutlined } from '@ant-design/icons';
 import { compact } from 'lodash';
 import Image from '@/components/Image';
 import {
@@ -25,9 +26,15 @@ import {
   queryResourceMembers,
   runResourceCurl,
   queryMCPToolsList,
+  querySkillUsedDigitalEmployees,
 } from '@/pages/manager/service/resources';
 import { copyWithMessage } from '@/utils/copy';
-import { RenderItem, getMCPToolsRenderConfig, getSchemaRenderConfig } from './SkillDetailDrawer.utils';
+import {
+  RenderItem,
+  getMCPToolsRenderConfig,
+  getSchemaRenderConfig,
+  isByclawCodeAgentResource,
+} from './SkillDetailDrawer.utils';
 import styles from './SkillDetailDrawer.module.less';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import { useIntl, getIntl } from '@umijs/max';
@@ -37,9 +44,11 @@ import { getssoToken } from '@/utils/auth';
 import MCPTestPanel from './components/MCPTestPanel';
 
 const { Paragraph } = Typography;
+const SKILL_BIZ_TYPE = 'SKILL';
 
 interface SkillDetailDrawerProps extends DrawerProps {
   resourceId?: string;
+  panel?: boolean;
 }
 
 export type ISkillDetail = {
@@ -55,10 +64,23 @@ export type ISkillDetail = {
   devConfig?: any;
   resourceStatus?: number;
   resourceBizType?: string;
+  systemCode?: string;
   resourceId?: string;
+  resourceCode?: string;
   resourceSourcePkId?: string;
   extInfo?: any;
 };
+
+interface SkillUsedDigitalEmployee {
+  resourceId?: string | number;
+  resourceName?: string;
+  useStartTime?: string | number;
+}
+
+interface ResourceMemberItem {
+  grantToObjName?: string;
+  grantToObjId?: string | number;
+}
 
 // 获取与列表一致的资源图标地址
 const getResourceIconUrl = (data?: any) => {
@@ -96,6 +118,75 @@ const getStatusText = (status?: number) => {
   return '';
 };
 
+const getArrayData = (response: any): any[] => {
+  if (Array.isArray(response)) return response;
+  if (Array.isArray(response?.rows)) return response.rows;
+  if (Array.isArray(response?.list)) return response.list;
+  if (Array.isArray(response?.data)) return response.data;
+  return [];
+};
+
+const formatDateTime = (value?: string | number) => {
+  if (!value) return '-';
+  const parsed = dayjs(value);
+  return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : String(value);
+};
+
+const formatMemberNames = (members?: ResourceMemberItem[], fallback?: string) => {
+  const names = (Array.isArray(members) ? members : [])
+    .map((item) => item?.grantToObjName || item?.grantToObjId)
+    .filter(Boolean);
+  if (names.length) {
+    return names.join('、');
+  }
+  return fallback || '-';
+};
+
+const buildSkillUsedDigitalEmployeeItem = (employees: SkillUsedDigitalEmployee[]): RenderItem => {
+  const intl = getIntl();
+  return {
+    type: 'table',
+    label: intl.formatMessage({ id: 'skillDetail.usedDigitalEmployees' }),
+    columns: [
+      {
+        dataIndex: 'resourceName',
+        title: intl.formatMessage({ id: 'skillDetail.digitalEmployeeName' }),
+        render: (text: React.ReactNode) => text || '-',
+      },
+      {
+        dataIndex: 'useStartTime',
+        title: intl.formatMessage({ id: 'skillDetail.useStartTime' }),
+        width: 180,
+        render: (text: string | number) => formatDateTime(text),
+      },
+    ],
+    dataSource: employees.map((item, index) => ({
+      ...item,
+      key: item.resourceId ?? index,
+    })),
+  };
+};
+
+const buildSkillDetailItems = (resp: any, memberResp: any, usedEmployees: SkillUsedDigitalEmployee[]) => {
+  const intl = getIntl();
+  const schemaItems = getSchemaRenderConfig(resp).filter((item) => item.type !== 'empty');
+  const baseItems: RenderItem[] = [
+    {
+      type: 'text',
+      label: intl.formatMessage({ id: 'skillDetail.manager' }),
+      children: formatMemberNames(memberResp?.managerList, resp?.manUserName),
+    },
+    {
+      type: 'text',
+      label: intl.formatMessage({ id: 'skillDetail.userPerson' }),
+      children: formatMemberNames(memberResp?.useList),
+    },
+    buildSkillUsedDigitalEmployeeItem(usedEmployees),
+  ];
+
+  return [...baseItems, ...schemaItems];
+};
+
 const SchemaTable: React.FC<SchemaTableProps> = ({ columns, dataSource, size = 'small' }) => {
   // 检查数据源是否有树形结构
   const hasTreeStructure = dataSource?.some((record: any) => record.children?.length > 0);
@@ -123,6 +214,14 @@ const SchemaTable: React.FC<SchemaTableProps> = ({ columns, dataSource, size = '
     setExpandedRowKeys(defaultExpandedRowKeys);
   }, [defaultExpandedRowKeys]);
 
+  let expandableConfig;
+  if (hasTreeStructure) {
+    expandableConfig = {
+      expandedRowKeys,
+      onExpandedRowsChange: (keys: React.Key[]) => setExpandedRowKeys([...keys]),
+    };
+  }
+
   return (
     <Table
       rootClassName={styles.schemaTable}
@@ -132,14 +231,7 @@ const SchemaTable: React.FC<SchemaTableProps> = ({ columns, dataSource, size = '
       pagination={false}
       rowKey="key"
       tableLayout="fixed"
-      expandable={
-        hasTreeStructure
-          ? {
-            expandedRowKeys,
-            onExpandedRowsChange: (keys) => setExpandedRowKeys([...keys]),
-          }
-          : undefined
-      }
+      expandable={expandableConfig}
     />
   );
 };
@@ -182,25 +274,26 @@ const ItemRenderer = (props: { item: RenderItem; index: number }) => {
   };
 
   const getRenderItem = () => {
+    const renderItemLabel = () => (
+      <div className={styles.itemLabel}>
+        {item.label && <span className={styles.itemLabelBar} />}
+        {item.label}
+      </div>
+    );
+
     if (item.type === 'text') {
       return (
-        <Fragment key={index}>
-          <div className={styles.itemLabel}>
-            {item.label && <span className={styles.itemLabelBar} />}
-            {item.label}
-          </div>
+        <section className={styles.detailItem} key={index}>
+          {renderItemLabel()}
           <div className={styles.itemText}>{item.children}</div>
-        </Fragment>
+        </section>
       );
     }
 
     if (item.type === 'tags') {
       return (
-        <Fragment key={index}>
-          <div className={styles.itemLabel}>
-            {item.label && <span className={styles.itemLabelBar} />}
-            {item.label}
-          </div>
+        <section className={styles.detailItem} key={index}>
+          {renderItemLabel()}
           <div className={styles.itemTags}>
             {item.children.map((child, i) => (
               <span className={styles.itemTag} key={i}>
@@ -208,66 +301,60 @@ const ItemRenderer = (props: { item: RenderItem; index: number }) => {
               </span>
             ))}
           </div>
-        </Fragment>
+        </section>
       );
     }
 
     if (item.type === 'table') {
-      const columns =
-        (item as any).tableType === 'tools'
-          ? [
-            {
-              dataIndex: 'name',
-              title: intl.formatMessage({ id: 'skillDetail.toolName' }),
-              render: (text: React.ReactNode) => <Paragraph ellipsis={{ rows: 1 }}>{text}</Paragraph>,
-            },
-            {
-              dataIndex: 'description',
-              title: intl.formatMessage({ id: 'skillDetail.toolDescription' }),
-              render: (text: React.ReactNode) => <Paragraph ellipsis={{ rows: 1 }}>{text}</Paragraph>,
-            },
-            {
-              dataIndex: 'statusText',
-              title: intl.formatMessage({ id: 'common.status' }),
-              width: 90,
-              render: (text: React.ReactNode) => text ?? '-',
-            },
-            {
-              title: intl.formatMessage({ id: 'common.operation' }),
-              width: 90,
-              render: (_: any, record: any) => (
-                <a
-                  onClick={() => {
-                    onToolDetail?.(record);
-                  }}
-                >
-                  {intl.formatMessage({ id: 'common.detail' })}
-                </a>
-              ),
-            },
-          ]
-          : item.columns;
+      let columns = item.columns;
+      if ((item as any).tableType === 'tools') {
+        columns = [
+          {
+            dataIndex: 'name',
+            title: intl.formatMessage({ id: 'skillDetail.toolName' }),
+            render: (text: React.ReactNode) => <Paragraph ellipsis={{ rows: 1 }}>{text}</Paragraph>,
+          },
+          {
+            dataIndex: 'description',
+            title: intl.formatMessage({ id: 'skillDetail.toolDescription' }),
+            render: (text: React.ReactNode) => <Paragraph ellipsis={{ rows: 1 }}>{text}</Paragraph>,
+          },
+          {
+            dataIndex: 'statusText',
+            title: intl.formatMessage({ id: 'common.status' }),
+            width: 90,
+            render: (text: React.ReactNode) => text ?? '-',
+          },
+          {
+            title: intl.formatMessage({ id: 'common.operation' }),
+            width: 90,
+            render: (_: any, record: any) => (
+              <a
+                onClick={() => {
+                  onToolDetail?.(record);
+                }}
+              >
+                {intl.formatMessage({ id: 'common.detail' })}
+              </a>
+            ),
+          },
+        ];
+      }
 
       return (
-        <div key={index}>
-          <div className={styles.itemLabel}>
-            {item.label && <span className={styles.itemLabelBar} />}
-            {item.label}
-          </div>
+        <section className={classNames(styles.detailItem, styles.detailItemWide)} key={index}>
+          {renderItemLabel()}
           <div className={styles.itemTable}>
             <SchemaTable columns={columns} dataSource={item.dataSource} size="small" />
           </div>
-        </div>
+        </section>
       );
     }
 
     if (item.type === 'tab1') {
       return (
-        <Fragment key={index}>
-          <div className={styles.itemLabel}>
-            {item.label && <span className={styles.itemLabelBar} />}
-            {item.label}
-          </div>
+        <section className={classNames(styles.detailItem, styles.detailItemWide)} key={index}>
+          {renderItemLabel()}
           <div className={styles.itemTabs1}>
             <Collapse ghost collapsible="icon" defaultActiveKey={['1']}>
               {item.children.map((child, i) => (
@@ -288,44 +375,40 @@ const ItemRenderer = (props: { item: RenderItem; index: number }) => {
               ))}
             </Collapse>
           </div>
-        </Fragment>
+        </section>
       );
     }
 
     if (item.type === 'tab2') {
       return (
-        <Fragment key={index}>
-          <div className={styles.itemLabel}>
-            {item.label && <span className={styles.itemLabelBar} />}
-            {item.label}
-          </div>
+        <section className={classNames(styles.detailItem, styles.detailItemWide)} key={index}>
+          {renderItemLabel()}
           <div className={styles.itemTabs2}>
             <Segmented options={item.children.map((child) => child.label)} />
             <div className={styles.itemTabs2Content}>123</div>
           </div>
-        </Fragment>
+        </section>
       );
     }
 
     if (item.type === 'button') {
       return (
-        <Fragment key={index}>
-          <div className={styles.itemLabel} />
+        <section className={classNames(styles.detailItem, styles.detailItemAction)} key={index}>
           <div className={styles.itemButton} onClick={() => buttonOnClick(item)}>
             {item.children}
             <LinkOutlined className={styles.itemButtonIcon} />
           </div>
-        </Fragment>
+        </section>
       );
     }
 
     if (item.type === 'empty') {
       return (
-        <Fragment key={index}>
+        <section className={classNames(styles.detailItem, styles.detailItemWide)} key={index}>
           <div className={styles.itemEmpty}>
             <Empty description={intl.formatMessage({ id: 'common.noData' })} />
           </div>
-        </Fragment>
+        </section>
       );
     }
 
@@ -342,10 +425,12 @@ const ItemRenderer = (props: { item: RenderItem; index: number }) => {
 
 const RenderDetailPanel = (props: { skillDetail: ISkillDetail }) => {
   const { skillDetail } = props;
+  const headerMeta = compact([skillDetail?.resourceBizType, skillDetail?.systemCode, skillDetail?.version]);
 
   return (
     <div className="ub ub-ver full-height">
       <div className={styles.header}>
+        <span className={styles.headerAura} />
         <figure className={styles.avatar}>
           <Image
             src={skillDetail?.avatar || undefined}
@@ -362,6 +447,15 @@ const RenderDetailPanel = (props: { skillDetail: ISkillDetail }) => {
             )}
           </div>
           {skillDetail?.description && <p className={styles.description}>{skillDetail?.description}</p>}
+          {!!headerMeta.length && (
+            <div className={styles.headerMeta}>
+              {headerMeta.map((item) => (
+                <span className={styles.metaItem} key={item}>
+                  {item}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
       <div className={classNames(styles.content, 'ub-f1 overflow-auto')}>
@@ -374,7 +468,7 @@ const RenderDetailPanel = (props: { skillDetail: ISkillDetail }) => {
 };
 
 export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
-  const { open, loading = false, onClose, resourceId, title = '', ...restProps } = props;
+  const { open, loading = false, onClose, resourceId, title = '', panel = false, ...restProps } = props;
 
   const intl = useIntl();
 
@@ -392,6 +486,8 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
     resourceBizTypeMap.MCP,
     resourceBizTypeMap.AGENT,
   ].includes(skillDetail?.resourceBizType || '');
+  const disableTestTab = isByclawCodeAgentResource(skillDetail);
+  const showTestTab = showToolDebugTabs && !disableTestTab;
   const sourceContent = skillDetail?.extInfo?.sourceContent || '';
   const targetContent = skillDetail?.extInfo?.targetContent || '';
   const copyDebugContent = (content: string) =>
@@ -421,41 +517,52 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
       });
   }, []);
 
-  const myQueryResourceDetail = useCallback((resourceId: string): Promise<ISkillDetail | void> => {
+  const myQueryResourceDetail = useCallback(async (resourceId: string): Promise<ISkillDetail | void> => {
     setIsLoading(true);
-    return Promise.all([queryResourceDetail({ resourceId }), queryResourceMembers({ resourceId }).catch(() => null)])
-      .then(([resp, memberResp]) => {
-        if (resp) {
-          const items: RenderItem[] = getSchemaRenderConfig(resp);
-          // 根据不同参数渲染
-          const item = {
-            items,
-            avatar: getResourceIconUrl(resp),
-            name: resp?.resourceName,
-            description: resp?.resourceDesc,
-            manager: resp?.manUserName,
-            version: resp?.resresourceDVerid,
-            organization: resp?.manOrgName,
-            createUserName: resp?.createUserName,
-            resourceStatus: resp?.resourceStatus,
-            resourceBizType: resp?.resourceBizType,
-            resourceId: resp?.resourceId,
-            extInfo: memberResp?.extInfo || resp?.extInfo,
-          };
+    try {
+      const [resp, memberResp] = await Promise.all([
+        queryResourceDetail({ resourceId }),
+        queryResourceMembers({ resourceId }).catch(() => null),
+      ]);
+      if (resp) {
+        const usedEmployees =
+          resp?.resourceBizType === SKILL_BIZ_TYPE
+            ? getArrayData(await querySkillUsedDigitalEmployees({ resourceId }).catch(() => []))
+            : [];
+        const items: RenderItem[] =
+          resp?.resourceBizType === SKILL_BIZ_TYPE
+            ? buildSkillDetailItems(resp, memberResp, usedEmployees)
+            : getSchemaRenderConfig(resp);
+        // 根据不同参数渲染
+        const item = {
+          items,
+          avatar: getResourceIconUrl(resp),
+          name: resp?.resourceName,
+          description: resp?.resourceDesc,
+          manager: resp?.manUserName,
+          version: resp?.resresourceDVerid,
+          organization: resp?.manOrgName,
+          createUserName: resp?.createUserName,
+          resourceStatus: resp?.resourceStatus,
+          resourceBizType: resp?.resourceBizType,
+          systemCode: resp?.systemCode || resp?.param?.systemCode,
+          resourceId: resp?.resourceId,
+          resourceCode: resp?.resourceCode,
+          extInfo: memberResp?.extInfo || resp?.extInfo,
+        };
 
-          setSkillDetail((v) => ({ ...v, ...item }));
+        setSkillDetail((v) => ({ ...v, ...item }));
 
-          return item;
-        }
+        return item;
+      }
 
-        return undefined;
-      })
-      .catch((e) => {
-        message.error(e);
-      })
-      .finally(() => {
-        setIsLoading(false);
-      });
+      return undefined;
+    } catch (e) {
+      message.error(e);
+      return undefined;
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -479,11 +586,17 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
   }, [open, resourceId]);
 
   useEffect(() => {
+    if (activeDebugTab === 'test' && !showTestTab) {
+      setActiveDebugTab('detail');
+    }
+  }, [activeDebugTab, showTestTab]);
+
+  useEffect(() => {
     const generateCurlScript = async () => {
       if (
         !open ||
         !resourceId ||
-        !showToolDebugTabs ||
+        !showTestTab ||
         activeDebugTab !== 'test' ||
         curlScript ||
         skillDetail?.resourceBizType === resourceBizTypeMap.MCP
@@ -502,7 +615,7 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
     };
 
     generateCurlScript();
-  }, [open, resourceId, showToolDebugTabs, activeDebugTab, curlScript]);
+  }, [open, resourceId, showTestTab, activeDebugTab, curlScript]);
 
   const formatContent = (content: string) => {
     if (!content) {
@@ -608,7 +721,7 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
             label: intl.formatMessage({ id: 'skillDetail.targetJson' }),
             children: renderCodePanel(targetContent),
           },
-          {
+          showTestTab && {
             key: 'test',
             label: intl.formatMessage({ id: 'skillDetail.test' }),
             children: isMCP ? <MCPTestPanel record={record} skillDetail={skillDetail} /> : renderTestPanel(),
@@ -618,6 +731,29 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
     );
   };
 
+  const detailTitle = title || getTitleByBizType(skillDetail?.resourceBizType);
+  const detailContent = (
+    <Spin spinning={panel ? loading || isLoading : loading} wrapperClassName="full-height-spin">
+      <div className={classNames(styles.skillDetailDrawer, 'full-height')}>{renderDrawerContent()}</div>
+    </Spin>
+  );
+
+  if (panel) {
+    if (!open) {
+      return null;
+    }
+
+    return (
+      <div className={classNames(styles.skillDetailPanel, 'full-height')}>
+        <div className={styles.panelHeader}>
+          <span className={styles.panelTitle}>{detailTitle}</span>
+          <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose} />
+        </div>
+        <div className={styles.panelBody}>{detailContent}</div>
+      </div>
+    );
+  }
+
   return (
     <>
       <Drawer
@@ -625,14 +761,12 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
         width={800}
         onClose={onClose}
         bodyStyle={{ padding: '16px 24px' }}
-        title={title || getTitleByBizType(skillDetail?.resourceBizType)}
+        title={detailTitle}
         loading={isLoading}
         mask={false}
         {...restProps}
       >
-        <Spin spinning={loading} wrapperClassName="full-height-spin">
-          <div className={classNames(styles.skillDetailDrawer, 'full-height')}>{renderDrawerContent()}</div>
-        </Spin>
+        {detailContent}
       </Drawer>
     </>
   );

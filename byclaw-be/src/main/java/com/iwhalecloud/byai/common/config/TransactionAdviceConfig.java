@@ -43,7 +43,7 @@ public class TransactionAdviceConfig {
 
     /**
      * 创建事务通知
-     * 
+     *
      * @return TransactionInterceptor
      */
     @Bean(name = "txAdvice")
@@ -86,6 +86,9 @@ public class TransactionAdviceConfig {
         txMap.put("synOpenClawWorkSpace", notSurpportedTx);
         txMap.put("syncResourceJsonByBizType", notSurpportedTx);
         txMap.put("upsertStandardJsonArtifact", notSurpportedTx);
+        txMap.put("prewarmDueCronSandboxes", notSurpportedTx);
+        txMap.put("callAsUser", notSurpportedTx);
+        txMap.put("runAsUser", notSurpportedTx);
         txMap.put("*", requiredTx);
 
         /* 事务管理规则，声明具备事务管理的方法名 **/

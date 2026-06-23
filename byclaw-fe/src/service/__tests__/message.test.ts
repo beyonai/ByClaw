@@ -8,6 +8,7 @@ import {
   createGroupChat,
   addMessage,
   getMessageState,
+  getChatRunningSnapshot,
 } from '../message';
 
 // Mock the request module
@@ -161,6 +162,16 @@ describe('Message Service', () => {
       getMessageState(payload);
 
       expect(mockPOST).toHaveBeenCalledWith('/byaiService/menTaskController/getResComList', payload);
+    });
+  });
+
+  describe('getChatRunningSnapshot', () => {
+    it('should call POST with running snapshot payload', () => {
+      const payload = { sessionId: 'session123', traceId: 'q1_a1', modelAnswerMessageId: 'a1' };
+
+      getChatRunningSnapshot(payload);
+
+      expect(mockPOST).toHaveBeenCalledWith('/byaiService/chat/runningSnapshot', payload);
     });
   });
 });

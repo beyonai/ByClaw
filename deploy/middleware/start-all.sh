@@ -2,12 +2,6 @@
 cd "$(dirname "$0")"
 . ../compose-detect.sh
 
-ENV_FILE="../../.env"
-
-set -a
-. "$ENV_FILE" 2>/dev/null
-set +a
-
 # Generate opensandbox config if needed
 if [ "$MIDDLEWARE_MODULES" != "NONE" ]; then
     if [ -z "$MIDDLEWARE_MODULES" ] || echo "$MIDDLEWARE_MODULES" | grep -q "opensandbox"; then

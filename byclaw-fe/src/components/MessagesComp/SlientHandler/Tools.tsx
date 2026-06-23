@@ -60,7 +60,7 @@ function Tools(props: IMyProps) {
     }
 
     abortControllerRef.current = new AbortController();
-    console.log(url, method);
+
     return request(
       url,
       {

@@ -1,6 +1,6 @@
 import React from 'react';
 import classNames from 'classnames';
-import { Form, Input, Button, message, Divider, Tabs, Space } from 'antd';
+import { Form, Input, Button, message, Tabs, Space } from 'antd';
 import { useIntl, useDispatch, useNavigate } from '@umijs/max';
 
 import { getPublicPath, getRootPagePath } from '@/utils';
@@ -10,7 +10,7 @@ import CaptchaInput from '@/components/Captchainput/byApi';
 import AntdIcon from '@/components/AntdIcon';
 import SMSInput from '@/components/SMSInput';
 
-import { loginByUsername, loginByPhone } from '@/service/user';
+import { loginByUsername, loginByPhone, getLoginInfo } from '@/service/user';
 
 import { encryptByAES } from '@/utils/encrypt/aes';
 import { encryptBySM } from '@/utils/encrypt/sm';
@@ -26,6 +26,30 @@ export default function Login() {
 
   const [loginLoading, setLoginLoading] = React.useState(false);
   const [loginType, setLoginType] = React.useState('account');
+
+  const navigateAfterLogin = () => {
+    const params = new URLSearchParams(window.location.search);
+    const redirectUrl = params.get('redirectUrl');
+    if (redirectUrl) {
+      getLoginInfo()
+        .then(() => {
+          const a = document.createElement('a');
+          a.href = redirectUrl;
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => {
+            navigate(getRootPagePath(), { replace: true });
+          }, 500);
+        })
+        .catch(() => {
+          navigate(getRootPagePath(), { replace: true });
+        });
+    } else {
+      navigate(getRootPagePath());
+    }
+  };
 
   const CaptchaInputRef = React.useRef(null);
 
@@ -46,7 +70,7 @@ export default function Login() {
     [dispatch]
   );
 
-  const onAccountLogin = React.useCallback(() => {
+  const onAccountLogin = () => {
     form.validateFields().then((values) => {
       const loginType = '5';
 
@@ -67,7 +91,7 @@ export default function Login() {
           message.success(intl.formatMessage({ id: 'login.success' }));
 
           setUserInfo(res);
-          navigate(getRootPagePath());
+          navigateAfterLogin();
         })
         .catch((e) => {
           message.error(e || 'Login failed');
@@ -76,7 +100,7 @@ export default function Login() {
           setLoginLoading(false);
         });
     });
-  }, []);
+  };
 
   const onPhoneLogin = async () => {
     try {
@@ -281,7 +305,7 @@ export default function Login() {
           立即登录
         </Button>
         <div className={classNames(styles.loginButtonGroup, 'ub ub-ac ub-pc gap8')}>
-          <span
+          {/* <span
             className={classNames({ [styles.active]: loginType === 'account' })}
             onClick={() => setLoginType('account')}
           >
@@ -293,7 +317,7 @@ export default function Login() {
             onClick={() => setLoginType('phone')}
           >
             手机号登录
-          </span>
+          </span> */}
         </div>
       </div>
     </div>

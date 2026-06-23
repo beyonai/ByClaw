@@ -6,10 +6,12 @@ import java.io.PushbackInputStream;
 import java.time.Duration;
 import java.util.Enumeration;
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.zip.GZIPInputStream;
 
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -36,6 +38,8 @@ public class SandboxIngressTransportService {
     private static final Set<String> HOP_BY_HOP_HEADERS = Set.of(
         "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
         "te", "trailer", "transfer-encoding", "upgrade");
+    private static final Set<String> REQUEST_BODY_REQUIRED_METHODS = Set.of(
+        "POST", "PUT", "PATCH", "PROPPATCH", "REPORT");
 
     private final OkHttpClient httpClient;
     private final SandboxIngressRuntimeResolver runtimeResolver;
@@ -88,18 +92,25 @@ public class SandboxIngressTransportService {
         Request.Builder builder = new Request.Builder()
             .url(requestContext.targetUrl())
             .headers(headers)
-            .method(request.getMethod(), requiresRequestBody(request.getMethod()) ? requestBody : null);
+            .method(request.getMethod(), requestBody);
         runtimeResolver.resolve().customizeRequest(builder, requestContext);
         return builder.build();
     }
 
     private RequestBody buildRequestBody(HttpServletRequest request) {
-        if (!requiresRequestBody(request.getMethod())) {
+        String method = request.getMethod();
+        if (!permitsRequestBody(method)) {
             return null;
         }
         String contentType = request.getContentType();
         MediaType mediaType = StringUtils.hasText(contentType) ? MediaType.parse(contentType) : null;
-        long contentLength = request.getContentLengthLong();
+        boolean hasRequestBody = hasRequestBody(request);
+        if (!requiresRequestBody(method) && !hasRequestBody) {
+            return null;
+        }
+        if (!hasRequestBody) {
+            return RequestBody.create(new byte[0], mediaType);
+        }
         return new RequestBody() {
             @Override
             public MediaType contentType() {
@@ -108,7 +119,7 @@ public class SandboxIngressTransportService {
 
             @Override
             public long contentLength() {
-                return contentLength;
+                return -1;
             }
 
             @Override
@@ -116,6 +127,11 @@ public class SandboxIngressTransportService {
                 try (InputStream inputStream = request.getInputStream()) {
                     StreamUtils.copy(inputStream, sink.outputStream());
                 }
+            }
+
+            @Override
+            public boolean isOneShot() {
+                return true;
             }
         };
     }
@@ -141,6 +157,7 @@ public class SandboxIngressTransportService {
                 }
             }
         }
+        injectFilebrowserXAuthHeader(request, requestContext, builder);
 
         String forwardedFor = appendForwardedFor(request);
         if (StringUtils.hasText(forwardedFor)) {
@@ -158,6 +175,47 @@ public class SandboxIngressTransportService {
             || HttpHeaders.ACCEPT_ENCODING.equalsIgnoreCase(headerName)
             || HttpHeaders.HOST.equalsIgnoreCase(headerName)
             || HttpHeaders.CONTENT_LENGTH.equalsIgnoreCase(headerName);
+    }
+
+    private void injectFilebrowserXAuthHeader(HttpServletRequest request,
+                                              SandboxIngressRequestContext requestContext,
+                                              Headers.Builder builder) {
+        if (!SandboxIngressInstanceType.FILEBROWSER.equals(requestContext.instanceType())) {
+            return;
+        }
+        if (StringUtils.hasText(request.getHeader("X-Auth"))) {
+            return;
+        }
+        String authToken = resolveCookieValue(request, "auth");
+        if (!StringUtils.hasText(authToken)) {
+            return;
+        }
+        builder.set("X-Auth", authToken);
+        log.debug("Injected filebrowser X-Auth header from auth cookie: instance={}, userCode={}, targetUrl={}, token={}",
+            requestContext.instance(), requestContext.userCode(), requestContext.targetUrl(), maskToken(authToken));
+    }
+
+    private String resolveCookieValue(HttpServletRequest request, String cookieName) {
+        Cookie[] cookies = request.getCookies();
+        if (cookies != null) {
+            for (Cookie cookie : cookies) {
+                if (cookieName.equals(cookie.getName()) && StringUtils.hasText(cookie.getValue())) {
+                    return cookie.getValue().trim();
+                }
+            }
+        }
+        String cookieHeader = request.getHeader(HttpHeaders.COOKIE);
+        if (!StringUtils.hasText(cookieHeader)) {
+            return null;
+        }
+        String[] parts = cookieHeader.split(";");
+        for (String part : parts) {
+            String[] pair = part.trim().split("=", 2);
+            if (pair.length == 2 && cookieName.equals(pair[0]) && StringUtils.hasText(pair[1])) {
+                return pair[1].trim();
+            }
+        }
+        return null;
     }
 
     private void copyResponseHeaders(Response proxyResponse, HttpServletResponse response) {
@@ -209,7 +267,30 @@ public class SandboxIngressTransportService {
         return existing + ", " + remoteAddr;
     }
 
-    private boolean requiresRequestBody(String method) {
+    private boolean permitsRequestBody(String method) {
         return !("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method));
+    }
+
+    private boolean requiresRequestBody(String method) {
+        return method != null && REQUEST_BODY_REQUIRED_METHODS.contains(method.toUpperCase(Locale.ROOT));
+    }
+
+    private boolean hasRequestBody(HttpServletRequest request) {
+        if (request.getContentLengthLong() > 0) {
+            return true;
+        }
+        String transferEncoding = request.getHeader(HttpHeaders.TRANSFER_ENCODING);
+        return StringUtils.hasText(transferEncoding) && transferEncoding.toLowerCase(Locale.ROOT).contains("chunked");
+    }
+
+    private String maskToken(String token) {
+        if (!StringUtils.hasText(token)) {
+            return "<empty>";
+        }
+        String normalized = token.trim();
+        if (normalized.length() <= 8) {
+            return normalized;
+        }
+        return normalized.substring(0, 4) + "..." + normalized.substring(normalized.length() - 4);
     }
 }

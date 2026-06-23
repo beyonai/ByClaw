@@ -49,7 +49,13 @@
                     OR (a.in_params IS NOT NULL AND a.in_params LIKE #{keywordPattern}))
             </if>
             <if test="ability != null and ability != ''">
-                AND d.tag_id = #{ability}
+                AND EXISTS (
+                    SELECT 1
+                    FROM byai_tag_relation ability_rel
+                    WHERE ability_rel.obj_type = 'AI_MODEL'
+                      AND ability_rel.obj_id = a.model_id
+                      AND ability_rel.tag_id = #{ability}
+                )
             </if>
             <if test="system != null and system != ''">
                 <bind name="systemPattern" value="'%' + system + '%'"/>
@@ -69,6 +75,7 @@
         LEFT JOIN  byai_tag_relation d
            ON a.model_id = d.obj_id
             AND d.obj_type = 'AI_MODEL'
+            AND d.tag_id = 1
         <include refid="Condition_Where_WithTag"/>
         ORDER BY a.create_time DESC
     </select>
@@ -118,11 +125,14 @@
         and
             d.obj_type = 'AI_MODEL'
         and
-            d.tag_id = 3
+            d.tag_id = 1
         <where>
             and b.obj_type = 'AI_MODEL'
             <if test="status != null and status != ''">
                 AND a.status = #{status}
+            </if>
+            <if test="modelType != null and modelType != ''">
+                AND a.model_type = #{modelType}
             </if>
             <if test="tagId != null and tagId != ''">
                 AND b.tag_id = #{tagId}
@@ -158,11 +168,14 @@
         and
         d.obj_type = 'AI_MODEL'
         and
-        d.tag_id = 3
+        d.tag_id = 1
         <where>
             and b.obj_type = 'AI_MODEL'
             <if test="status != null and status != ''">
                 AND a.status = #{status}
+            </if>
+            <if test="modelType != null and modelType != ''">
+                AND a.model_type = #{modelType}
             </if>
             <if test="tagId != null and tagId != ''">
                 AND b.tag_id = #{tagId}
@@ -170,4 +183,46 @@
         </where>
 
     </select>
+
+    <select id="listDefaultAiModel" resultMap="BaseResultMap">
+        SELECT
+            a.model_id,
+            a.model_type,
+            a.model_name,
+            a.model_no,
+            a.url,
+            a.ori_url,
+            a.auth_token,
+            a.status,
+            a.is_support_chart,
+            a.is_deepthink,
+            a.max_content_token,
+            a.in_params,
+            a.create_by,
+            a.create_time,
+            a.inparam_template,
+            a.model_protocol
+        FROM byai_aimodel a
+        <where>
+            <if test="tagId != null">
+                AND a.model_id IN (
+                    SELECT obj_id
+                    FROM byai_tag_relation
+                    WHERE obj_type = 'AI_MODEL'
+                      AND tag_id = #{tagId}
+                )
+            </if>
+            <if test="status != null and status != ''">
+                AND a.status = #{status}
+            </if>
+            <if test="modelType != null and modelType != ''">
+                AND a.model_type = #{modelType}
+            </if>
+            <if test="modelProtocol != null and modelProtocol != ''">
+                AND a.model_protocol = #{modelProtocol}
+            </if>
+        </where>
+    </select>
+
+
 </mapper>

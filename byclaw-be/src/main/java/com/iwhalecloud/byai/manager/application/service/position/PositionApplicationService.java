@@ -18,6 +18,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -71,7 +72,10 @@ public class PositionApplicationService {
             String orgIdStr = positionUsersVo.getOrgIds();
             positionUsersVo.setPhone(UserApplicationService.decryptAndMaskPhone(positionUsersVo.getPhone()));
             List<Long> orgIds = new ArrayList<>();
-            for (String orgId : orgIdStr.split(",")) {
+            for (String orgId : StringUtils.defaultString(orgIdStr).split(",")) {
+                if (StringUtils.isBlank(orgId)) {
+                    continue;
+                }
                 orgIds.add(Long.parseLong(orgId));
             }
             String pathName = organizationService.buildPathNameByOrgIds(orgIds);

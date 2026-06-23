@@ -20,6 +20,7 @@
     "lint:prettier": "check-prettier lint",
     "lint:style": "stylelint --fix \"src/**/*.less\"",
     "lint:style:check": "stylelint \"src/**/*.less\"",
+    "package:browser-extension": "node scripts/package-browser-extension.mjs",
     "prepare": "node scripts/prepare.js",
     "prettier": "prettier -c --write \"**/*\"",
     "setup": "max setup",

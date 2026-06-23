@@ -1,37 +1,41 @@
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+# Build stage: install dependencies with uv (contains Rust tooling, not needed at runtime)
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS build
 
 ENV UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy \
-    PYTHONUNBUFFERED=1
+    UV_LINK_MODE=copy
 
 WORKDIR /app
 
-ENV PYTHONPATH=/app/src
-
 COPY pyproject.toml uv.lock README.md ./
-# Install the locked stable dependencies first for all branches.
 RUN uv sync --frozen --no-dev --no-install-project
-# Override by-qa only on develop/qa so those images track ByKC main during integration.
-# ADD from the GitHub commits API acts as a cache probe — when ByKC main receives
-# new commits, the JSON response changes, which busts this layer and forces a
-# reinstall of by-qa from the updated main tarball.
-# NOTE: GitHub API rate-limits unauthenticated requests to 60/hour/IP. If builds
-# become frequent, switch to a raw URL instead:
-#   ADD https://raw.githubusercontent.com/beyonai/ByKC/main/pyproject.toml /tmp/bykc_version.txt
+
+# Override by-qa on develop/qa branches to track ByKC main during integration.
+# GitHub's archive URL serves a redirect that Docker's ADD caches — when ByKC main
+# receives new commits, the redirect target changes and the layer is re-executed.
 ARG BRANCH=""
-ADD https://api.github.com/repos/beyonai/ByKC/commits/main /tmp/bykc_version.json
 RUN if [ "${BRANCH}" = "develop" ] || [ "${BRANCH}" = "qa" ]; then \
         echo "BRANCH=${BRANCH}: reinstalling by-qa from ByKC main branch"; \
         uv pip install --python .venv/bin/python --force-reinstall \
             "by-qa[all] @ https://github.com/beyonai/ByKC/archive/refs/heads/main.tar.gz"; \
-    else \
-        rm -f /tmp/bykc_version.json; \
     fi
+
+# Strip build-time bloat from the venv
+RUN uv cache clean \
+    && find .venv -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null; true
+
+# Runtime stage: slim Python image without uv toolchain
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src
+
+WORKDIR /app
+
+COPY --from=build /app/.venv /app/.venv
 
 COPY start.sh ./
 COPY src/ ./src/
 
-# 构建信息
 ARG BUILD_VERSION=unknown
 ARG BUILD_BRANCH=unknown
 ARG BUILD_COMMIT=unknown

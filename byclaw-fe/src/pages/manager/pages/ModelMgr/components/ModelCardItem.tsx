@@ -5,12 +5,15 @@ import React from 'react';
 import styles from '../index.module.less';
 import { renderAbilityTags, renderStatusTag, renderSystemTags, type ModelStatus } from './modelMgrViewUtils';
 
+const DEFAULT_MODEL_TYPES = new Set(['LLM', 'EMBEDDING']);
+
 type Props = {
   intl: any;
   record: any;
   abilityLabelMap: Record<string, string>;
   systemLabelMap: Record<string, string>;
   onSetStatus: (record: any, nextStatus: ModelStatus) => void;
+  onSetDefault: (record: any) => void;
   onEdit: (record: any) => void;
   onDebug: (record: any) => void;
   onDelete: (record: any) => void;
@@ -22,6 +25,7 @@ const ModelCardItem: React.FC<Props> = ({
   abilityLabelMap,
   systemLabelMap,
   onSetStatus,
+  onSetDefault,
   onEdit,
   onDebug,
   onDelete,
@@ -36,39 +40,44 @@ const ModelCardItem: React.FC<Props> = ({
     abilities: abilitiesArr,
     systems: systemsArr,
     updatedAt,
+    isDefault,
   } = record || {};
+  const isDefaultModel =
+    isDefault === 1 ||
+    isDefault === true ||
+    (Array.isArray(abilitiesArr) && abilitiesArr.some((item) => `${item}` === '1'));
+  const normalizedModelType = `${modelType || 'LLM'}`.toUpperCase();
+  const canSetDefault = recordStatus === 'ENABLED' && !isDefaultModel && DEFAULT_MODEL_TYPES.has(normalizedModelType);
 
-  const statusActions: Array<{
+  let statusActions: Array<{
     status: Extract<ModelStatus, 'ENABLED' | 'DISABLED'>;
     label: string;
     confirmText: string;
-  }> =
-    recordStatus === 'TESTING'
-      ? [
-        {
-          status: 'ENABLED',
-          label: intl.formatMessage({ id: 'modelMgr.statusEnabled' }),
-          confirmText: intl.formatMessage({ id: 'modelMgr.confirmEnable' }),
-        },
-        {
-          status: 'DISABLED',
-          label: intl.formatMessage({ id: 'modelMgr.statusDisabled' }),
-          confirmText: intl.formatMessage({ id: 'modelMgr.confirmDisable' }),
-        },
-      ]
-      : [
-        {
-          status: recordStatus === 'ENABLED' ? 'DISABLED' : 'ENABLED',
-          label:
-              recordStatus === 'ENABLED'
-                ? intl.formatMessage({ id: 'modelMgr.statusDisabled' })
-                : intl.formatMessage({ id: 'modelMgr.statusEnabled' }),
-          confirmText:
-              recordStatus === 'ENABLED'
-                ? intl.formatMessage({ id: 'modelMgr.confirmDisable' })
-                : intl.formatMessage({ id: 'modelMgr.confirmEnable' }),
-        },
-      ];
+  }>;
+
+  if (recordStatus === 'TESTING') {
+    statusActions = [
+      {
+        status: 'ENABLED',
+        label: intl.formatMessage({ id: 'modelMgr.statusEnabled' }),
+        confirmText: intl.formatMessage({ id: 'modelMgr.confirmEnable' }),
+      },
+      {
+        status: 'DISABLED',
+        label: intl.formatMessage({ id: 'modelMgr.statusDisabled' }),
+        confirmText: intl.formatMessage({ id: 'modelMgr.confirmDisable' }),
+      },
+    ];
+  } else {
+    const isEnabled = recordStatus === 'ENABLED';
+    statusActions = [
+      {
+        status: isEnabled ? 'DISABLED' : 'ENABLED',
+        label: intl.formatMessage({ id: isEnabled ? 'modelMgr.statusDisabled' : 'modelMgr.statusEnabled' }),
+        confirmText: intl.formatMessage({ id: isEnabled ? 'modelMgr.confirmDisable' : 'modelMgr.confirmEnable' }),
+      },
+    ];
+  }
 
   return (
     <div className={styles.cardItem}>
@@ -85,7 +94,12 @@ const ModelCardItem: React.FC<Props> = ({
             </span>
           </div>
         </div>
-        <div>{recordStatus ? renderStatusTag(intl, recordStatus) : null}</div>
+        <div className={styles.cardStatusGroup}>
+          {isDefaultModel ? (
+            <span className={styles.defaultBadge}>{intl.formatMessage({ id: 'modelMgr.defaultModel' })}</span>
+          ) : null}
+          {recordStatus ? renderStatusTag(intl, recordStatus) : null}
+        </div>
       </div>
 
       <div className={styles.content}>
@@ -176,6 +190,28 @@ const ModelCardItem: React.FC<Props> = ({
           >
             {intl.formatMessage({ id: 'modelMgr.debug' })}
           </Button>
+
+          {canSetDefault ? (
+            <Popconfirm
+              title={intl.formatMessage({ id: 'modelMgr.confirmSetDefault' })}
+              onConfirm={(e) => {
+                e?.stopPropagation?.();
+                onSetDefault(record);
+              }}
+              onCancel={(e) => e?.stopPropagation?.()}
+            >
+              <Button
+                type="link"
+                className={styles.button}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                }}
+              >
+                {intl.formatMessage({ id: 'modelMgr.setDefault' })}
+              </Button>
+            </Popconfirm>
+          ) : null}
 
           <Popconfirm
             title={intl.formatMessage({ id: 'modelMgr.confirmDelete' })}

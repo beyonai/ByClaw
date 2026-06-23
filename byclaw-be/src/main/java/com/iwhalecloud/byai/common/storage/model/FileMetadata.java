@@ -30,4 +30,6 @@ public class FileMetadata {
     private String bucketName;
 
     private String storageType;
+
+    private String lastModified;
 }

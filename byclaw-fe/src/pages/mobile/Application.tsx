@@ -6,7 +6,7 @@ import ApplicationSession from '@/components/ApplicationSession';
 import { EventEmitter$Cls } from '@/utils/eventEmitter';
 import GlobalContext, { Platform } from '@/layout/components/provider/global';
 
-import { ISendConf, ISendProps } from '@/hooks/useChat';
+import type { ISendConf, ISendProps } from '@/hooks/useChat';
 import { IMessage } from '@/typescript/message';
 
 const myEventEmitter = new EventEmitter$Cls();

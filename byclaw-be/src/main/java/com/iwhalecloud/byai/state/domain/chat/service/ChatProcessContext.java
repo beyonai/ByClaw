@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageRelObjDto;
@@ -119,9 +120,41 @@ public class ChatProcessContext {
     public boolean gatewayError = false;
 
     /**
-     * 是否仅发送worker消息，不需要获取redis中响应的消息
+     * 是否仅发送 Gateway/Framework 消息，不重复启动 Redis Stream 监听。
+     * 同一个 session 已有运行态时，后续请求使用该模式兼容旧 SSE 行为。
      */
     public boolean sendByFrameworkMsgOnly = false;
+
+    /**
+     * 是否继续当前正在运行的 trace。
+     * 命中时本次输入只转发给 worker，不作为新的用户消息广播或入库。
+     */
+    public boolean continueRunningTrace = false;
+
+    /**
+     * 是否异步完成响应。WebSocket 场景只负责发送 Gateway 消息，后续 Redis 流由事件路由服务推送和落库。
+     */
+    public boolean asyncResponse = false;
+
+    /**
+     * 消息发往 gateway 的targetAgentType
+     */
+    public String targetAgentType;
+
+    /**
+     * 当前聊天入口的传输方式。
+     */
+    public ChatTransport transport = ChatTransport.HTTP_SSE;
+
+    /**
+     * 前端生成的本轮回答关联标识，通常等于 answerMsg.msgId。
+     */
+    public String clientRequestId;
+
+    /**
+     * 当前正在处理的 Redis Stream 事件 ID，用于前端恢复运行中会话时按版本合并快照和实时流。
+     */
+    public String currentStreamId;
 
     /**
      * 当前请求写入 Redis 运行态标记时使用的所有者 token，用于结束时只清理自己创建的标记。
@@ -150,5 +183,10 @@ public class ChatProcessContext {
         this.assistantChatDto = assistantChatDto;
         this.tokenStatsMap = new HashMap<>();
         this.suggestionQuestion = new SuggestionQuestionVo();
+        this.clientRequestId = assistantChatDto == null ? null : assistantChatDto.getClientRequestId();
+    }
+
+    public boolean isWebSocketTransport() {
+        return ChatTransport.WEBSOCKET.equals(transport);
     }
 }

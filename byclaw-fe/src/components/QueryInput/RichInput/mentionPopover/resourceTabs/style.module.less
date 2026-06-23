@@ -16,6 +16,30 @@
   flex: 1;
   min-width: fit-content;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+
+  :global {
+    .@{antPrefix}-tabs {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .@{antPrefix}-tabs-content-holder {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .@{antPrefix}-tabs-content {
+      height: 100%;
+    }
+
+    .@{antPrefix}-tabs-tabpane {
+      height: 100%;
+    }
+  }
 }
 
 .actionBtn {

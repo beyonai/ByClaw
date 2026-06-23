@@ -12,6 +12,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
+import com.iwhalecloud.byai.state.application.service.fs.FsOperationApplicationService;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawPersonalAgentArchiveDto;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,10 +31,10 @@ import static org.junit.jupiter.api.Assertions.assertIterableEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -69,8 +70,11 @@ class ByClawPersonalAgentArchivApplicationServiceTest {
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
         LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
 
+        FsOperationApplicationService fsOperationApplicationService = new FsOperationApplicationService();
+        ReflectionTestUtils.setField(fsOperationApplicationService, "userFS", userFS);
+
         service = new ByClawPersonalAgentArchivApplicationService();
-        ReflectionTestUtils.setField(service, "userFS", userFS);
+        ReflectionTestUtils.setField(service, "fsOperationApplicationService", fsOperationApplicationService);
     }
 
     @AfterEach
@@ -85,14 +89,14 @@ class ByClawPersonalAgentArchivApplicationServiceTest {
         FileMetadata metadata = new FileMetadata();
         metadata.setFileSize(4L);
         metadata.setContentType("application/gzip");
-        when(userFS.write(any(ByteArrayInputStream.class), anyLong(), anyString(), anyString())).thenReturn(metadata);
+        when(userFS.write(any(MockMultipartFile.class), anyString())).thenReturn(metadata);
 
         ByClawPersonalAgentArchiveDto dto = service.uploadTarGz(USER_CODE, RESOURCE_ID, file);
 
-        verify(userFS).init();
+        verify(userFS, atLeastOnce()).init();
         verify(userFS).delete(ARCHIVE_PATH);
         ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
-        verify(userFS).write(any(ByteArrayInputStream.class), anyLong(), anyString(), pathCaptor.capture());
+        verify(userFS).write(any(MockMultipartFile.class), pathCaptor.capture());
         assertEquals(ARCHIVE_PATH, pathCaptor.getValue());
         assertEquals("assistant-demo.tar.gz", dto.getFileName());
         assertEquals(ARCHIVE_PATH, dto.getArchivePath());
@@ -167,7 +171,7 @@ class ByClawPersonalAgentArchivApplicationServiceTest {
 
         ByClawPersonalAgentArchiveDto dto = service.deleteTarGz(USER_CODE, RESOURCE_ID, ARCHIVE_PATH);
 
-        verify(userFS).init();
+        verify(userFS, atLeastOnce()).init();
         verify(userFS).delete(ARCHIVE_PATH);
         assertEquals("assistant-demo.tar.gz", dto.getFileName());
         assertEquals(ARCHIVE_PATH, dto.getArchivePath());

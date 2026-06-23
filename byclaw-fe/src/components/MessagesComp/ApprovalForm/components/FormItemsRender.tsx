@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Form, Input, Select, Col, Dropdown, Tag } from 'antd';
-import { isString, concat } from 'lodash';
+import { Form, Input, Select, Col, Dropdown, Tag, DatePicker } from 'antd';
+import { isString, concat, isEqual } from 'lodash';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import classnames from 'classnames';
 
-import { buildFormFieldName } from '../utils';
+import {
+  buildFormFieldName,
+  getApprovalFormDateFormat,
+  getApprovalFormDatePickerValue,
+  getApprovalFormDateSubmitValue,
+} from '../utils';
 import TermSelectDropdown from './TermSelectDropdown';
 
 import type { FormField } from '../index.d';
@@ -56,6 +61,7 @@ function getFormValueFromEvent(...args: unknown[]) {
 }
 
 const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRenderProps) => {
+  const form = Form.useFormInstance();
   const {
     formType,
     fieldCode,
@@ -93,8 +99,9 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
 
   let name: string | undefined = key;
   let rules: any[] | undefined = [{ required }];
-  let initialValue: string | number | (string | number)[] | undefined = fieldValue ?? defaultValue;
+  let initialValue: unknown = fieldValue ?? defaultValue;
   let comp = <Input disabled={myDisabled} />;
+  let formItemValueProps = {};
 
   if (['array', 'object'].includes(formType) && Array.isArray(children)) {
     name = undefined;
@@ -167,11 +174,35 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
     comp = <Select mode="tags" />;
   }
 
+  if (formType === 'date_time') {
+    const defaultFormat = getApprovalFormDateFormat(item?.format); // 暂时前端处理日期格式
+    comp = <DatePicker format={{ format: defaultFormat }} showTime={/[hms]/i.test(defaultFormat)} />;
+    initialValue = getApprovalFormDateSubmitValue(initialValue, defaultFormat);
+    formItemValueProps = {
+      getValueProps: (value: unknown) => ({
+        value: getApprovalFormDatePickerValue(value, defaultFormat),
+      }),
+      normalize: (value: unknown) => getApprovalFormDateSubmitValue(value, defaultFormat),
+    };
+  }
+
+  useEffect(() => {
+    if (!name) return;
+
+    const currentValue = form.getFieldValue(name);
+    const shouldSync = fieldValue !== undefined || !form.isFieldTouched(name);
+
+    if (shouldSync && !isEqual(currentValue, initialValue)) {
+      form.setFieldValue(name, initialValue);
+    }
+  }, [fieldValue, form, initialValue, name]);
+
   const visibleErrorTips = isInitialErrorVisible ? errorTips : undefined;
 
   return (
     <Col span={span} key={key}>
       <Form.Item
+        key={key}
         name={name}
         label={fieldName}
         rules={rules}
@@ -179,6 +210,7 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
         initialValue={initialValue}
         validateStatus={visibleErrorTips ? 'error' : undefined}
         help={visibleErrorTips}
+        {...formItemValueProps}
         getValueFromEvent={(...args) => {
           setIsInitialErrorVisible(false);
           return getFormValueFromEvent(...args);

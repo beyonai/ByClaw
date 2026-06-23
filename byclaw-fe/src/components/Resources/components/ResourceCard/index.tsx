@@ -1,12 +1,16 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { Typography, Dropdown, Button, Popconfirm, Tooltip, message } from 'antd';
+import { Typography, Dropdown, Button, Popconfirm, Tooltip, message, Avatar } from 'antd';
 import type { MenuProps } from 'antd';
-import { useIntl } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import classnames from 'classnames';
 import { debounce, noop } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
 import { queryResourceOperationPermissions, restoreResource } from '@/pages/manager/service/resources';
+import { installDigitalEmployeeRelResources } from '@/pages/manager/service/DigitalEmployeeMgr';
+import { getFileUrl } from '@/utils/file';
 import { useRequest } from '@/hooks/useRequest';
+import useGlobal from '@/hooks/useGlobal';
+import type { IState as IEmployeesState } from '@/models/useEmployees';
 import styles from './index.module.less';
 
 const { Paragraph } = Typography;
@@ -20,6 +24,7 @@ export interface IResourceCardItem {
   resourceDesc?: string;
   intro?: string;
   resourceLogoUrl?: string;
+  avatar?: string;
   createdBy?: string;
   createUserName?: string;
   creatorName?: string;
@@ -33,6 +38,9 @@ export interface IResourceCardItem {
   creatorId?: string;
   createBy?: string;
   resourceType?: string;
+  hasManagePermission?: boolean;
+  hasUsePermission?: boolean;
+  canViewDetail?: boolean;
   canEdit?: boolean;
   canManageAuth?: boolean;
   canUseAuth?: boolean;
@@ -45,10 +53,23 @@ export interface IResourceCardItem {
   ownerType?: string;
   openSuperHelper?: string;
   tagName?: string;
+  skillType?: string;
+  sourceType?: string;
+  version?: string;
+  skillUrl?: string;
+  skillPackageFormat?: string;
+  skillOriginalFilename?: string;
+  skillPackageSize?: number | string;
+  skillPackageHash?: string;
+  targetContent?: string;
+  syncStatus?: string;
+  syncError?: string;
+  lastSyncTime?: string;
 }
 
 type ResourceCardActionConfig = {
   scene?: ResourceCardActionScene;
+  installedResourceIds?: ReadonlySet<string>;
   enableKnowledgeManage?: boolean;
   editDisabledTip?: React.ReactNode;
   manageAuthDisabledTip?: React.ReactNode;
@@ -81,6 +102,7 @@ export type ResourceCardProps = {
   metaNode?: React.ReactNode;
   hoverExtra?: React.ReactNode;
   className?: string;
+  variant?: 'default' | 'skillPoster';
 };
 
 const ResourceInfo = (props: { resource: IResourceCardItem; className?: string }) => {
@@ -169,8 +191,43 @@ const ConfirmMenuLabel = ({
   );
 };
 
+const getInstallLabelId = (resource: IResourceCardItem, resourceType?: string) => {
+  const bizType = resource?.resourceBizType || resourceType;
+  if (['KG_DOC', 'KG_QA', 'KG_TERM'].includes(bizType || '')) return 'resource.installKnowledge';
+  if (bizType === 'VIEW' || resourceType === 'VIEW') return 'resource.installView';
+  if (bizType === 'OBJECT' || resourceType === 'OBJECT') return 'resource.installObject';
+  if (bizType === 'SKILL' || resourceType === 'SKILL') return 'resource.installSkill';
+  return 'resource.installTool';
+};
+
+const canInstallResource = (resource: IResourceCardItem, resourceType?: string) => {
+  const bizType = resource?.resourceBizType || resourceType;
+  if (bizType === 'SKILL' || resourceType === 'SKILL') {
+    return Boolean(resource?.resourceId && resource?.hasUsePermission);
+  }
+  return Boolean(resource?.resourceId && bizType && bizType !== 'DIG_EMPLOYEE');
+};
+
+const isSkillResource = (resource: IResourceCardItem, resourceType?: string) => {
+  return resource?.resourceBizType === 'SKILL' || resourceType === 'SKILL';
+};
+
+const isInnerSkillResource = (resource: IResourceCardItem, resourceType?: string) => {
+  return isSkillResource(resource, resourceType) && `${resource?.skillType || ''}`.toLowerCase() === 'inner';
+};
+
 const RenderContent = (props: ResourceCardProps) => {
-  const { resource, onCardClick, actionConfig, avatarNode, description, headerExtra, hoverExtra, resourceType } = props;
+  const {
+    resource,
+    onCardClick,
+    actionConfig,
+    avatarNode,
+    description,
+    headerExtra,
+    hoverExtra,
+    resourceType,
+    variant = 'default',
+  } = props;
   const { ownerType } = resource || {};
   const {
     scene,
@@ -183,6 +240,15 @@ const RenderContent = (props: ResourceCardProps) => {
   } = actionConfig || {};
 
   const intl = useIntl();
+  const { agentId, agentInfo } = useGlobal();
+  const { userInfo, defaultDigEmployeeId } = useSelector(
+    ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
+      userInfo: user.userInfo,
+      defaultDigEmployeeId: employees.defaultDigEmployeeId,
+    })
+  );
+  const activeDigitalEmployeeId =
+    agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
 
   const { mutate: handleRestore, isLoading: restoring } = useRequest({
     mutationFn: (params: any) => {
@@ -199,14 +265,42 @@ const RenderContent = (props: ResourceCardProps) => {
       // message.error(intl.formatMessage({ id: 'common.operationFailed' }));
     },
   });
+  const { mutate: handleInstall, isLoading: installing } = useRequest({
+    mutationFn: () => {
+      return installDigitalEmployeeRelResources({
+        digitalEmployeeId: `${activeDigitalEmployeeId}`,
+        relIds: [`${resource.resourceId}`],
+      });
+    },
+    onSuccess: () => {
+      message.success(intl.formatMessage({ id: 'resource.installSuccess' }));
+      window.dispatchEvent(
+        new CustomEvent('digitalEmployeeResourceInstalled', { detail: { resourceId: resource?.resourceId } })
+      );
+    },
+  });
 
   const displayTitle = resource.resourceName || resource.name || intl.formatMessage({ id: 'common.none' });
   const displayDescription =
     description ?? resource.resourceDesc ?? resource.intro ?? intl.formatMessage({ id: 'common.none' });
+  const displayImage = resource.resourceLogoUrl || resource.avatar;
+  const [skillPosterAspect, setSkillPosterAspect] = useState<string>();
+  const creatorName =
+    resource?.creatorName ||
+    resource?.createUserName ||
+    resource?.memberName ||
+    intl.formatMessage({ id: 'common.none' });
+  const useCount = Number(resource?.useCount || resource?.focusCount || 0);
+  useEffect(() => {
+    setSkillPosterAspect(undefined);
+  }, [displayImage]);
   const getDisplayTopRightTag = () => {
     // 优先展示真实标签。
     if (resource.tagName) {
       return resource.tagName;
+    }
+    if (isInnerSkillResource(resource, resourceType)) {
+      return intl.formatMessage({ id: 'resource.systemBuiltin' });
     }
     // 超级助手只按 resourceCode 后缀识别，不再依赖 ownerType=personal_default。
     if (
@@ -242,6 +336,10 @@ const RenderContent = (props: ResourceCardProps) => {
   const displayTopRightTag = getDisplayTopRightTag();
   const isCancelledResource = `${resource?.resourceStatus ?? ''}` === '3';
   const topRightTag = isCancelledResource ? intl.formatMessage({ id: 'resource.statusCancelled' }) : displayTopRightTag;
+  const isInnerSkill = isInnerSkillResource(resource, resourceType);
+  const isInstalledSkill =
+    isSkillResource(resource, resourceType) &&
+    Boolean(resource?.resourceId && actionConfig?.installedResourceIds?.has(`${resource.resourceId}`));
 
   const menuItems = useMemo<MenuProps['items']>(() => {
     const { canEdit, canManageAuth, canUseAuth, canApplyUse, canAuditUse, canDelete, canRestore } = resource || {};
@@ -277,7 +375,7 @@ const RenderContent = (props: ResourceCardProps) => {
     // }
 
     // 编辑信息
-    if (canEdit) {
+    if (canEdit && !isInnerSkill) {
       items.push({
         key: 'edit',
         label: <BuildMenuLabel icon="icon-a-Editorbianji" text={intl.formatMessage({ id: 'common.editInfo' })} />,
@@ -345,8 +443,31 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
+    // 安装到当前默认数字员工
+    if (canInstallResource(resource, resourceType) && !isInstalledSkill) {
+      const disabled = !activeDigitalEmployeeId;
+      items.push({
+        key: 'install',
+        label: (
+          <ConfirmMenuLabel
+            disabled={disabled || installing}
+            title={intl.formatMessage({ id: 'resource.installConfirm' })}
+            onConfirm={() => handleInstall(undefined)}
+          >
+            <BuildMenuLabel
+              icon="icon-a-Addtianjia"
+              text={intl.formatMessage({ id: getInstallLabelId(resource, resourceType) })}
+              disabled={disabled}
+              disabledTip={intl.formatMessage({ id: 'resource.noDefaultDigitalEmployee' })}
+              loading={installing}
+            />
+          </ConfirmMenuLabel>
+        ),
+      });
+    }
+
     // 注销数据
-    if (canDelete) {
+    if (canDelete && !isInnerSkill) {
       items.push({
         key: 'delete',
         label: (
@@ -363,8 +484,8 @@ const RenderContent = (props: ResourceCardProps) => {
         key: 'restore',
         label: (
           <ConfirmMenuLabel
-            title={intl.formatMessage({ id: 'common.restoreConfirm' })}
             disabled={restoring}
+            title={intl.formatMessage({ id: 'common.restoreConfirm' })}
             onConfirm={() => handleRestore({ resourceId: resource?.resourceId })}
           >
             <BuildMenuLabel
@@ -385,6 +506,8 @@ const RenderContent = (props: ResourceCardProps) => {
     return items;
   }, [
     actionConfig,
+    activeDigitalEmployeeId,
+    handleInstall,
     intl,
     resource?.canSetDefault,
     resource?.canEdit,
@@ -394,8 +517,15 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.canAuditUse,
     resource?.canDelete,
     resource?.canRestore,
+    resource?.hasUsePermission,
     resource?.ownerType,
     resource?.resourceBizType,
+    resource?.resourceId,
+    resource?.skillType,
+    resourceType,
+    isInnerSkill,
+    isInstalledSkill,
+    installing,
     restoring,
   ]);
 
@@ -410,6 +540,95 @@ const RenderContent = (props: ResourceCardProps) => {
         return 'icon-chajiantubiao';
     }
   };
+
+  if (variant === 'skillPoster' && isSkillResource(resource, resourceType)) {
+    return (
+      <div
+        className={classnames(styles.skillPosterContent, {
+          pointer: !!onCardClick && !isCancelledResource,
+          [styles.cancelledContent]: isCancelledResource,
+        })}
+        onClick={() => {
+          if (isCancelledResource) return;
+          onCardClick?.();
+        }}
+      >
+        <div
+          className={styles.skillPosterImageWrap}
+          style={
+            skillPosterAspect ? ({ '--skill-poster-aspect': skillPosterAspect } as React.CSSProperties) : undefined
+          }
+        >
+          {displayImage ? (
+            <img
+              className={styles.skillPosterImage}
+              src={getFileUrl(displayImage)}
+              alt={`${displayTitle}`}
+              onLoad={(event) => {
+                const { naturalWidth, naturalHeight } = event.currentTarget;
+                if (!naturalWidth || !naturalHeight) {
+                  return;
+                }
+                setSkillPosterAspect(`${naturalWidth} / ${naturalHeight}`);
+              }}
+            />
+          ) : (
+            <div className={styles.skillPosterPlaceholder}>
+              <div className={styles.skillPosterOrb} />
+              <div className={styles.skillPosterPlaceholderSub}>{intl.formatMessage({ id: 'common.skill' })}</div>
+            </div>
+          )}
+          {topRightTag ? (
+            <span className={classnames(styles.skillPosterTag, { [styles.cancelledTag]: isCancelledResource })}>
+              <span className={styles.tagText}>{topRightTag}</span>
+            </span>
+          ) : null}
+          {headerExtra}
+          {!!menuItems?.length && (
+            <div
+              className={styles.skillPosterAction}
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+              }}
+            >
+              <Dropdown menu={{ items: menuItems }} placement="bottomRight">
+                <Button
+                  className={styles.skillPosterActionBtn}
+                  icon={<AntdIcon type="icon-a-Moregengduo" className={styles.cardActionBtnIcon} />}
+                />
+              </Dropdown>
+            </div>
+          )}
+        </div>
+        <Paragraph className={styles.skillPosterTitle} ellipsis={{ rows: 2, tooltip: `${displayTitle}` }}>
+          {displayTitle}
+        </Paragraph>
+        <Paragraph
+          className={styles.skillPosterDesc}
+          ellipsis={{
+            rows: 2,
+            tooltip: typeof displayDescription === 'string' ? displayDescription : undefined,
+          }}
+        >
+          {displayDescription}
+        </Paragraph>
+        <div className={styles.skillPosterFooter}>
+          <div className={styles.skillPosterCreator}>
+            <Avatar size={22} className={styles.skillPosterCreatorAvatar}>
+              {creatorName.slice(0, 1)}
+            </Avatar>
+            <span className={styles.skillPosterCreatorName} title={creatorName}>
+              {creatorName}
+            </span>
+          </div>
+          <span className={styles.skillPosterUseCount}>
+            {intl.formatMessage({ id: 'resource.skillUseCount' }, { count: useCount })}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -427,8 +646,13 @@ const RenderContent = (props: ResourceCardProps) => {
           <div className={styles.avatarContainer}>
             {avatarNode ? (
               avatarNode
-            ) : resource.resourceLogoUrl ? (
-              <img className={styles.avatar} src={`/byaiService${resource.resourceLogoUrl}`} alt={`${displayTitle}`} />
+            ) : displayImage ? (
+              <img className={styles.avatar} src={getFileUrl(displayImage)} alt={`${displayTitle}`} />
+            ) : isSkillResource(resource, resourceType) ? (
+              <div className={styles.skillDefaultAvatar}>
+                <div className={styles.skillDefaultAvatarOrb} />
+                <span>{intl.formatMessage({ id: 'common.skill' })}</span>
+              </div>
             ) : (
               <div className={styles.defaultAvatar}>
                 <AntdIcon type={getDefaultIcon()} className={styles.defaultAvatarIcon} />
@@ -509,7 +733,7 @@ const RenderContent = (props: ResourceCardProps) => {
 };
 
 function ResourceCard(props: ResourceCardProps) {
-  const { resource } = props;
+  const { resource, variant = 'default' } = props;
   const resourceCardRef = useRef<HTMLDivElement>(null);
   const fetchedPermissionsRef = useRef(false);
   const [resourceWithPermissions, setResourceWithPermissions] = useState<IResourceCardItem | null>(null);
@@ -539,9 +763,15 @@ function ResourceCard(props: ResourceCardProps) {
                   canAuditUse,
                   canSetDefault,
                   canRestore,
+                  hasManagePermission,
+                  hasUsePermission,
+                  canViewDetail,
                 } = permissions;
                 setResourceWithPermissions({
                   ...resource,
+                  hasManagePermission,
+                  hasUsePermission,
+                  canViewDetail,
                   canEdit,
                   canManageAuth,
                   canUseAuth,
@@ -577,6 +807,7 @@ function ResourceCard(props: ResourceCardProps) {
       key={resource.resourceId}
       className={classnames(styles.resourceCard, props.className, {
         pointer: !!props.onCardClick && !isCancelledResource,
+        [styles.skillPosterCard]: variant === 'skillPoster',
       })}
       ref={resourceCardRef}
     >

@@ -62,21 +62,72 @@ export const skillHandler = (it) => {
 };
 
 const parseBundledSkills = (value) => {
+  const normalizeBundledSkillItems = (items = []) =>
+    items
+      .map((item) => {
+        if (typeof item === 'string') {
+          const skillCode = item.trim();
+          return skillCode ? { skillCode } : null;
+        }
+
+        const resourceId = item?.resourceId || item?.skillId || item?.id;
+        const skillCode =
+          item?.skillCode || item?.resourceCode || item?.value || item?.code || item?.resourceId || item?.id;
+        const normalized = {
+          resourceId,
+          skillCode: `${skillCode || ''}`.trim(),
+          skillType: item?.skillType,
+          skillUrl: item?.skillUrl,
+          versionUrl: item?.versionUrl,
+        };
+        Object.keys(normalized).forEach((key) => {
+          if (normalized[key] === undefined || normalized[key] === null || normalized[key] === '') {
+            delete normalized[key];
+          }
+        });
+        return normalized.skillCode || normalized.resourceId ? normalized : null;
+      })
+      .filter(Boolean);
+
   if (Array.isArray(value)) {
-    return value;
+    return normalizeBundledSkillItems(value);
   }
   if (typeof value !== 'string' || !value) {
     return [];
   }
   try {
     const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? normalizeBundledSkillItems(parsed) : [];
   } catch {
-    return value
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean);
+    return normalizeBundledSkillItems(value.split(','));
   }
+};
+
+const parseDigitalEmployeeTemplates = (value) => {
+  if (!value) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+      return [];
+    }
+  }
+  return [value];
+};
+
+const getDigitalEmployeeTemplate = (templates, ownerType, agentType) => {
+  const effectiveOwnerType = ownerType === 'personal' ? 'personal' : 'enterprise';
+  const findTemplate = (list) =>
+    list.find((item) => item?.ownerType === effectiveOwnerType && item?.agentType === agentType) ||
+    list.find((item) => item?.ownerType === effectiveOwnerType);
+
+  return findTemplate(templates) || {};
 };
 
 const EmployeeDetail = ({ loading }) => {
@@ -261,7 +312,7 @@ const EmployeeDetail = ({ loading }) => {
   const [auditErrors, setAuditErrors] = useState({});
   const [issues, setIssues] = useState([]);
 
-  const [skills, setSkills] = useState([]);
+  const [selectedTools, setSelectedTools] = useState([]);
   const [coreCompetenciesState, setCoreCompetenciesState] = useState([]);
   const [memoryRules, setMemoryRules] = useState([]);
 
@@ -426,6 +477,7 @@ const EmployeeDetail = ({ loading }) => {
             machineChannel: machineChannelRaw,
             robotChannelConfigList: robotChannelConfigListRaw,
             catalogId,
+            relTools,
           } = res || {};
 
           // debugger;
@@ -800,16 +852,28 @@ const EmployeeDetail = ({ loading }) => {
             resultDataRef.current = { ...res, appId: agentId };
             setResourceStatus(res?.resourceStatus);
             prologueRef.current = prologueTemp;
+            const relResourceSkills = (relResourceList || [])
+              .filter((it) =>
+                ['AGENT', 'TOOLKIT', 'TOOL', 'MCP', 'VIEW', 'OBJECT'].includes(
+                  it.grantResourceType || it.resourceBizType
+                )
+              )
+              .map(skillHandler);
+            const relToolSkills = (Array.isArray(relTools) ? relTools : [])
+              .filter(Boolean)
+              .map((toolCode) => ({
+                resourceId: toolCode,
+                resourceName: toolCode === '*' ? '全部工具' : toolCode,
+                grantResourceType: 'TOOLKIT',
+                description: '',
+                relTools: toolCode,
+              }))
+              .filter((tool) => !relResourceSkills.some((skill) => `${skill.resourceId}` === `${tool.resourceId}`));
+
+            if (relResourceSkills.length > 0 || relToolSkills.length > 0) {
+              setSelectedTools([...relResourceSkills, ...relToolSkills]);
+            }
             if (relResourceList?.length > 0) {
-              setSkills(
-                relResourceList
-                  .filter((it) =>
-                    ['AGENT', 'TOOLKIT', 'TOOL', 'MCP', 'VIEW', 'OBJECT'].includes(
-                      it.grantResourceType || it.resourceBizType
-                    )
-                  )
-                  .map(skillHandler)
-              );
               setKnowledgeBases(
                 knowledgeBases.map((it) => ({
                   ...it,
@@ -834,15 +898,10 @@ const EmployeeDetail = ({ loading }) => {
   );
 
   const fetchDefaultTemplate = useCallback(async () => {
-    const paramCode =
-      ownerType === 'personal'
-        ? 'OPENCLAW_AGENT_ROLE_TEMPLATE_PERSONAL_ASSISTANT'
-        : 'OPENCLAW_AGENT_ROLE_TEMPLATE_DIGITAL_EMPLOYEE';
-
-    try {
-      const res = await getDcSystemConfig({ paramCode });
-      const templateConfig = JSON.parse(res?.paramValue || '{}');
-      const { relSkills = [], relTools = [] } = templateConfig;
+    const applyTemplate = (templates = []) => {
+      const templateConfig = getDigitalEmployeeTemplate(templates, ownerType, effectiveAgentType || agentType);
+      const relSkills = Array.isArray(templateConfig?.relSkills) ? templateConfig.relSkills : [];
+      const relTools = Array.isArray(templateConfig?.relTools) ? templateConfig.relTools : [];
 
       if (relSkills.length > 0) {
         form.setFieldsValue({ bundledSkills: relSkills });
@@ -870,12 +929,19 @@ const EmployeeDetail = ({ loading }) => {
       });
 
       if (defaultSkills.length > 0) {
-        setSkills((prev) => [...prev, ...defaultSkills]);
+        setSelectedTools((prev) => [...prev, ...defaultSkills]);
       }
+    };
+
+    try {
+      const res = await getDcSystemConfig({ paramCode: 'TEMPLATE_DIGITAL_EMPLOYEE' });
+      const templates = parseDigitalEmployeeTemplates(res?.paramValue || res);
+      applyTemplate(templates);
     } catch (error) {
       console.error('fetchDefaultTemplate error', error);
+      applyTemplate();
     }
-  }, [ownerType, form]);
+  }, [agentType, effectiveAgentType, ownerType, form]);
 
   useEffect(() => {
     if (agentId) {
@@ -1002,7 +1068,7 @@ const EmployeeDetail = ({ loading }) => {
         const relResourceInfoList = [];
         const relIds = [];
         const relTools = [];
-        skills.forEach((it) => {
+        selectedTools.forEach((it) => {
           if (it.relTools) {
             relTools.push(it.relTools);
           } else {
@@ -1033,7 +1099,6 @@ const EmployeeDetail = ({ loading }) => {
 
         set(param, 'relResourceInfoList', relResourceInfoList);
         set(param, 'createType', effectiveDigitalType);
-        set(param, 'relIds', relIds);
         if (relTools.length > 0) {
           set(param, 'relTools', relTools);
         }
@@ -1056,6 +1121,14 @@ const EmployeeDetail = ({ loading }) => {
         // 从表单中读取核心能力列表（结构化）
         const coreCompetencies = form.getFieldValue('coreCompetencies') || [];
         const currentResourceId = queryData.resourceId || agentId;
+        const bundledSkills = Array.isArray(roleJson.bundledSkills) ? parseBundledSkills(roleJson.bundledSkills) : [];
+        bundledSkills.forEach((skill) => {
+          const skillResourceId = skill?.resourceId || skill?.skillId || skill?.id;
+          if (skillResourceId) {
+            relIds.push(`${skillResourceId}`);
+          }
+        });
+        set(param, 'relIds', Array.from(new Set(relIds)));
 
         // 创建/更新使用新接口：扁平化参数 + 新增字段
         const flattened = {
@@ -1071,7 +1144,8 @@ const EmployeeDetail = ({ loading }) => {
           personalityDimensions: roleJson.personalityDimensions || '',
           wordPreferences: roleJson.wordPreferences || '',
           sentenceAndTone: roleJson.sentenceAndTone || '',
-          skills: Array.isArray(roleJson.bundledSkills) ? roleJson.bundledSkills : [],
+          skills: bundledSkills,
+          relSkills: bundledSkills,
           workStandard: roleJson.workStandard || roleJson.roleAttributes || '',
           corePersonaDefinition: roleJson.corePersonaDefinition || roleJson.personalityDefinition || '',
           toolStandard: roleJson.toolStandard || '',
@@ -1128,7 +1202,7 @@ const EmployeeDetail = ({ loading }) => {
                 resourceBizType: 'DIG_EMPLOYEE',
                 isFrontAccess: _isFrontAccess,
               },
-          success: (resp) => {
+          success: (resp, data) => {
             const savedResourceId = resp?.resourceId || resp?.id || currentResourceId || resp;
             const savedData = resp && typeof resp === 'object' ? resp : {};
 
@@ -1145,7 +1219,7 @@ const EmployeeDetail = ({ loading }) => {
               type: 'employees/updateEmployee',
               payload: {
                 employee: agentHandler({
-                  ...savedData,
+                  ...(currentResourceId ? savedData : data),
                   resourceId: savedResourceId,
                   id: `${savedResourceId || ''}`,
                 }),
@@ -1215,7 +1289,7 @@ const EmployeeDetail = ({ loading }) => {
       prologueRef,
       form,
       questionList,
-      skills,
+      selectedTools,
       knowledgeBases,
       avatar,
       managementAddresses,
@@ -1493,8 +1567,8 @@ const EmployeeDetail = ({ loading }) => {
                 showBaseList={showBaseList}
                 updateResource={noop}
                 updateCompositeAppInfo={null}
-                skills={skills}
-                setSkills={setSkills}
+                selectedTools={selectedTools}
+                setSelectedTools={setSelectedTools}
                 knowledgeBases={knowledgeBases}
                 setKnowledgeBases={setKnowledgeBases}
                 tagOptions={tagOptions}
@@ -1571,7 +1645,7 @@ const EmployeeDetail = ({ loading }) => {
             agentName={agentName}
             agentData={resultDataRef.current}
             knowledgeBases={knowledgeBases}
-            skills={skills}
+            skills={selectedTools}
           />
         )}
       </div>
@@ -1635,11 +1709,11 @@ const EmployeeDetail = ({ loading }) => {
           digitalType={baseListType}
           agentType={effectiveAgentType}
           reload={() => getCompositeAppInfo('reload')}
-          skills={skills}
+          skills={selectedTools}
           knowledgeBases={knowledgeBases}
           handleUpdateItem={(item) => {
             if (baseListType === '005') {
-              setSkills((prev) => {
+              setSelectedTools((prev) => {
                 const targetItem = prev.find((it) => it.resourceId === item.resourceId);
                 if (targetItem) {
                   Object.assign(targetItem, item);
@@ -1660,7 +1734,7 @@ const EmployeeDetail = ({ loading }) => {
           }}
           handleSelect={(item) => {
             if (baseListType === '005') {
-              setSkills((pre) => [...pre, item]);
+              setSelectedTools((pre) => [...pre, item]);
             } else if (baseListType === '006') {
               const knowledgeItem = {
                 ...item,
@@ -1677,7 +1751,7 @@ const EmployeeDetail = ({ loading }) => {
           }}
           handleRemove={(item) => {
             if (baseListType === '005') {
-              setSkills(skills.filter((it) => it.resourceId !== item.resourceId));
+              setSelectedTools(selectedTools.filter((it) => it.resourceId !== item.resourceId));
             } else if (baseListType === '006') {
               setKnowledgeBases(
                 knowledgeBases.map((it) => ({
@@ -1693,8 +1767,11 @@ const EmployeeDetail = ({ loading }) => {
         visible={refineModalOpen}
         form={form}
         questionList={questionList}
-        skills={skills}
+        skills={selectedTools}
         knowledgeBases={knowledgeBases}
+        agentType={effectiveAgentType}
+        resourceId={agentId}
+        modelCode={modelName}
         onOk={(formValue, myQuestionList) => {
           setQuestionList(myQuestionList);
           form.setFieldsValue(formValue);

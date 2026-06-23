@@ -81,6 +81,8 @@ export type ICollectInfo = {
 
 export type IMessage = {
   traceId?: string;
+  streamId?: string;
+  snapshotStreamId?: string;
   creatorId: string,
   creatorName?: string,
   fromBeyond: boolean;

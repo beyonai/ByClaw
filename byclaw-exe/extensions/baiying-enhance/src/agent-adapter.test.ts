@@ -1,16 +1,10 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { adaptAgentJson, extractBaiyingPrologueModelId } from "./agent-adapter.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 
 describe("adaptAgentJson", () => {
     it("extracts modelId from DIG_EMPLOYEE_10000281 prologue", () => {
-        const raw = JSON.parse(
-            readFileSync(
-                new URL("../../../../DIG_EMPLOYEE_10000281.json", import.meta.url),
-                "utf8",
-            ),
-        );
+        const raw = { prologue: JSON.stringify({ modelId: -2000 }) };
         expect(extractBaiyingPrologueModelId(raw)).toBe("-2000");
     });
 
@@ -43,6 +37,7 @@ describe("adaptAgentJson", () => {
         expect(res.modelRef).toBe("");
         expect(res.systemPrompt).toBe("Be brief.");
         expect(res.listEntry.model).toBeUndefined();
+        expect(res.listEntry.experimental).toEqual({ localModelLean: false });
         expect(res.listEntry.skills).toEqual([]);
     });
 
@@ -67,6 +62,7 @@ describe("adaptAgentJson", () => {
         expect(res.modelRef).toBe("");
         expect(res.provider).toBeUndefined();
         expect(res.listEntry.model).toBeUndefined();
+        expect(res.listEntry.experimental).toEqual({ localModelLean: false });
         expect(res.systemPrompt).toBe("Help users.");
         expect(res.listEntry.skills).toEqual([]);
     });
@@ -205,6 +201,96 @@ describe("adaptAgentJson", () => {
         expect(res.listEntry.skills).toEqual(["dws", "clawhub"]);
     });
 
+    it("maps object-form relSkills and retains hub sync metadata", () => {
+        const raw = {
+            resourceId: "10026037",
+            resourceName: "Hub Skill Demo",
+            relSkills: [
+                { skillCode: "dws", skillType: "inner" },
+                {
+                    skillCode: "guizang-ppt-skill-main",
+                    skillType: "hub",
+                    skillUrl: "/byaiService/tool/downloadSkillZip?skillId=10026639",
+                    versionUrl: "/byaiService/tool/getSkillVersion?skillId=10026639",
+                },
+            ],
+        };
+        const res = adaptAgentJson({
+            raw,
+            fileName: "DIG_EMPLOYEE_10026037.json",
+            embedApiKeysFromJson: false,
+        });
+        expect("error" in res).toBe(false);
+        if ("error" in res) {
+            return;
+        }
+        expect(res.listEntry.skills).toEqual(["dws", "guizang-ppt-skill-main"]);
+        expect(res.hubSkills).toEqual([
+            {
+                skillCode: "guizang-ppt-skill-main",
+                skillUrl: "/byaiService/tool/downloadSkillZip?skillId=10026639",
+                versionUrl: "/byaiService/tool/getSkillVersion?skillId=10026639",
+            },
+        ]);
+    });
+
+    it("keeps relSkills compatibility for mixed legacy strings and object refs", () => {
+        const raw = {
+            resourceId: "10026038",
+            resourceName: "Mixed Skill Demo",
+            relSkills: [
+                " dws ",
+                { skillCode: "dws", skillType: "inner" },
+                {
+                    skillCode: "hub-skill",
+                    skillType: "hub",
+                    skillUrl: "/byaiService/tool/downloadSkillZip?skillId=2",
+                    versionUrl: "/byaiService/tool/getSkillVersion?skillId=2",
+                },
+                { skillCode: "inner-skill", skillType: "inner" },
+                { skillCode: "", skillType: "inner" },
+                null,
+            ],
+        };
+        const res = adaptAgentJson({
+            raw,
+            fileName: "DIG_EMPLOYEE_10026038.json",
+            embedApiKeysFromJson: false,
+        });
+        expect("error" in res).toBe(false);
+        if ("error" in res) {
+            return;
+        }
+        expect(res.listEntry.skills).toEqual(["dws", "hub-skill", "inner-skill"]);
+        expect(res.hubSkills).toEqual([
+            {
+                skillCode: "hub-skill",
+                skillUrl: "/byaiService/tool/downloadSkillZip?skillId=2",
+                versionUrl: "/byaiService/tool/getSkillVersion?skillId=2",
+            },
+        ]);
+    });
+
+    it("falls back to legacy skills when relSkills has no usable skill codes", () => {
+        const raw = {
+            resourceId: "10026040",
+            resourceName: "Fallback Skill Demo",
+            relSkills: [{ skillType: "inner" }, null, ""],
+            skills: ["legacy-skill"],
+        };
+        const res = adaptAgentJson({
+            raw,
+            fileName: "DIG_EMPLOYEE_10026040.json",
+            embedApiKeysFromJson: false,
+        });
+        expect("error" in res).toBe(false);
+        if ("error" in res) {
+            return;
+        }
+        expect(res.listEntry.skills).toEqual(["legacy-skill"]);
+        expect(res.hubSkills).toBeUndefined();
+    });
+
     it("maps raw Baiying detail relTools to agents.list tools.allow", () => {
         const raw = {
             resourceId: "10011257",
@@ -224,6 +310,7 @@ describe("adaptAgentJson", () => {
         expect(res.listEntry.tools).toEqual({
             allow: ["*", "read", "write", "baiying_call"],
         });
+        expect(res.listEntry.experimental).toEqual({ localModelLean: false });
     });
 
     it("maps raw Baiying detail (integrationType INTERFACE)", () => {

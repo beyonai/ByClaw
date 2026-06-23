@@ -9,6 +9,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.i18n.LocaleContextHolder;
@@ -18,11 +19,18 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.common.storage.ObjectStorage;
 import com.iwhalecloud.byai.common.storage.UserFS;
+import com.iwhalecloud.byai.common.storage.model.StorageObject;
+import com.iwhalecloud.byai.common.storage.model.StoragePrefix;
+import com.iwhalecloud.byai.state.domain.chat.dto.UserSpaceDto;
+import com.iwhalecloud.byai.state.domain.chat.vo.UserSpaceVo;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawFileDto;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
@@ -38,6 +46,9 @@ class ByClawFileQueryApplicationServiceTest {
     @Mock
     private UserFS userFS;
 
+    @Mock
+    private ObjectStorage objectStorage;
+
     private ByClawFileQueryApplicationService byClawFileQueryApplicationService;
 
     @BeforeEach
@@ -49,6 +60,7 @@ class ByClawFileQueryApplicationServiceTest {
 
         byClawFileQueryApplicationService = new ByClawFileQueryApplicationService();
         ReflectionTestUtils.setField(byClawFileQueryApplicationService, "userFS", userFS);
+        ReflectionTestUtils.setField(byClawFileQueryApplicationService, "objectStorage", objectStorage);
     }
 
     @AfterEach
@@ -134,5 +146,43 @@ class ByClawFileQueryApplicationServiceTest {
             () -> byClawFileQueryApplicationService.qryByClawFileByUserCode("  ", null, SESSION_ID));
 
         assertEquals("userCode不能为空", exception.getMessage());
+    }
+
+    @Test
+    void shouldListUserSpaceThroughConfiguredObjectStorage() {
+        LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserCode(USER_CODE);
+        CurrentUserHolder.setLoginInfo(loginInfo);
+
+        UserSpaceDto userSpaceDto = new UserSpaceDto();
+        userSpaceDto.setResourceId(10005856L);
+        when(objectStorage.list(any(StoragePrefix.class), isNull()))
+            .thenReturn(Arrays.asList(
+                StorageObject.builder()
+                    .bucketOrRoot("byclaw-adminvip")
+                    .path("by/.openclaw/workspace-baiying-agent-10005856/config.json")
+                    .build(),
+                StorageObject.builder()
+                    .bucketOrRoot("byclaw-adminvip")
+                    .path("by/.openclaw/workspace-baiying-agent-10005856/reports/")
+                    .isDir(true)
+                    .build()));
+
+        List<UserSpaceVo> result = byClawFileQueryApplicationService.listUserSpace(userSpaceDto);
+
+        ArgumentCaptor<StoragePrefix> prefixCaptor = ArgumentCaptor.forClass(StoragePrefix.class);
+        verify(objectStorage).list(prefixCaptor.capture(), isNull());
+        StoragePrefix storagePrefix = prefixCaptor.getValue();
+        assertEquals("workspace", storagePrefix.getNamespace());
+        assertEquals("byclaw-adminvip", storagePrefix.getBucketOrRoot());
+        assertEquals("by/.openclaw/workspace-baiying-agent-10005856/", storagePrefix.getPrefix());
+        assertEquals("private", storagePrefix.getShareType());
+
+        assertEquals(2, result.size());
+        assertEquals("config.json", result.get(0).getName());
+        assertEquals("/by/.openclaw/workspace-baiying-agent-10005856/config.json", result.get(0).getFilePath());
+        assertEquals("reports", result.get(1).getName());
+        assertEquals("/by/.openclaw/workspace-baiying-agent-10005856/reports/", result.get(1).getFilePath());
+        assertTrue(result.get(1).isDir());
     }
 }

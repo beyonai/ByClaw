@@ -5,9 +5,11 @@ import {
   debugModelEmbedding,
   debugModelNonStream,
   debugModelStream,
+  completeAllModelConfig,
   deleteModel,
   getModelDetail,
   getModelListByPage,
+  setDefaultModel,
   setModelStatus,
   upsertModel,
 } from '@/pages/manager/service/ModelMgr';
@@ -83,6 +85,38 @@ export default {
         } else {
           showRequestErrorModal(
             response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.updateModelStatusFail' })
+          );
+          fail?.(response || {});
+        }
+      } catch (error) {
+        const err = { msg: getErrorText(error) };
+        message.error(err.msg);
+        fail?.(err);
+      }
+    },
+    *setDefaultModel({ payload, success, fail }, { call }) {
+      try {
+        const response = unwrapResponse(yield call(setDefaultModel, payload));
+        if (response.code === 0) {
+          success?.(response.data || response);
+        } else {
+          showRequestErrorModal(response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.setDefaultModelFail' }));
+          fail?.(response || {});
+        }
+      } catch (error) {
+        const err = { msg: getErrorText(error) };
+        message.error(err.msg);
+        fail?.(err);
+      }
+    },
+    *completeAllModelConfig({ success, fail }, { call }) {
+      try {
+        const response = unwrapResponse(yield call(completeAllModelConfig));
+        if (response.code === 0) {
+          success?.(response.data || response);
+        } else {
+          showRequestErrorModal(
+            response?.msg || getIntl().formatMessage({ id: 'modelMgr.error.completeModelConfigFail' })
           );
           fail?.(response || {});
         }

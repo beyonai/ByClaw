@@ -11,6 +11,7 @@ export interface IKnowledgeBaseItem {
   manUserId: string;
   resourceStatus: string;
   isTop: string;
+  ownerType?: string;
 }
 
 // 知识库文档类型定义
@@ -31,4 +32,5 @@ export interface IKnowledgeDetailTreeItem extends IKnowledgeCollectionItem {
   /** 与 queryDirAndFileByLevel 一致，用于展开子级、请求子列表 */
   directoryPath?: string;
   children?: IKnowledgeDetailTreeItem[];
+  isLeaf?: boolean;
 }

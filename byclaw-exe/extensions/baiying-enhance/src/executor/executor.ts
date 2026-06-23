@@ -91,6 +91,7 @@ export class BaiyingExecutor {
       resourceContext,
       authContext,
       session: this.session,
+      logger: params.logger,
     });
     return describeResource({
       capability,
@@ -134,6 +135,7 @@ export class BaiyingExecutor {
       resourceContext,
       authContext,
       session: this.session,
+      logger: params.logger,
     });
     if (!capability) {
       return makeError("CAPABILITY_NOT_FOUND", `Capability not found: ${params.capabilityId}`);

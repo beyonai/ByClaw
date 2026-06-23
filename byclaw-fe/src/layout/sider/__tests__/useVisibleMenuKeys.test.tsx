@@ -27,7 +27,7 @@ describe('useVisibleMenuKeys', () => {
     });
 
     expect(mockGetDcSystemConfigListByStandType).not.toHaveBeenCalled();
-    expect(result.current).toEqual(getVisibleMenuKeysFromConfig(DEFAULT_MENU_CONFIG));
+    expect(result.current).toEqual([]);
 
     rerender({ userInfo: { userId: 1 } });
 
@@ -38,7 +38,46 @@ describe('useVisibleMenuKeys', () => {
     });
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions']);
+      expect(result.current).toEqual(['sessions', 'skill', 'file']);
+    });
+  });
+
+  it('does not append skill when remote config explicitly hides it', async () => {
+    mockGetDcSystemConfigListByStandType.mockResolvedValue({
+      data: [
+        { paramName: '会话', paramValue: 'true', paramSeq: 1 },
+        { paramName: '技能', paramValue: 'false', paramSeq: 2 },
+      ],
+    });
+
+    const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
+
+    await waitFor(() => {
+      expect(result.current).toEqual(['sessions', 'file']);
+    });
+  });
+
+  it('falls back to default visible keys when menu config is empty', async () => {
+    mockGetDcSystemConfigListByStandType.mockResolvedValue({ data: [] });
+
+    const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
+
+    expect(result.current).toEqual([]);
+
+    await waitFor(() => {
+      expect(result.current).toEqual(getVisibleMenuKeysFromConfig(DEFAULT_MENU_CONFIG));
+    });
+  });
+
+  it('falls back to default visible keys when menu config request fails', async () => {
+    mockGetDcSystemConfigListByStandType.mockRejectedValue(new Error('request failed'));
+
+    const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
+
+    expect(result.current).toEqual([]);
+
+    await waitFor(() => {
+      expect(result.current).toEqual(getVisibleMenuKeysFromConfig(DEFAULT_MENU_CONFIG));
     });
   });
 });
