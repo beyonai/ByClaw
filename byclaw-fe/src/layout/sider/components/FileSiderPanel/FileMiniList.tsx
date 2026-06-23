@@ -1847,10 +1847,20 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
                 const directoryExpanded =
                   isDirectory(treeItem) &&
                   expandedTreeKeys.includes(ensureDirectoryPath(normalizeFileBrowserPath(treeItem.path)));
+                const directoryCurrent =
+                  isDirectory(treeItem) &&
+                  ensureDirectoryPath(normalizeFileBrowserPath(treeItem.path)) ===
+                    ensureDirectoryPath(normalizeFileBrowserPath(currentPath));
 
                 return (
                   <span
-                    className={`${styles.treeTitleContent} ${directoryExpanded ? styles.treeTitleContentExpanded : ''}`}
+                    className={[
+                      styles.treeTitleContent,
+                      directoryExpanded ? styles.treeTitleContentExpanded : '',
+                      directoryCurrent ? styles.treeTitleContentCurrent : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
                   >
                     <Tooltip title={item.name} placement="right">
                       <span className={styles.treeTitleName} style={{ cursor }}>
