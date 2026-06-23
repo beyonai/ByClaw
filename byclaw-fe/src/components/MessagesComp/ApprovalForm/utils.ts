@@ -23,6 +23,10 @@ export function getApprovalFormDateFormat(format?: string) {
   return (format || 'YYYY-MM-DD').replace(/y/g, 'Y').replace(/d/g, 'D');
 }
 
+export function hasApprovalFormDateTimeFormat(format: string) {
+  return /[hms]/i.test(format);
+}
+
 export function getApprovalFormDatePickerValue(value: unknown, format: string) {
   if (value === undefined || value === null || value === '') {
     return undefined;
