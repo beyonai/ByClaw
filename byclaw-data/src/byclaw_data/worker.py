@@ -1512,9 +1512,9 @@ class DataCloudWorker(GatewayWorker):
                 OntologyAgent,
                 OntologyAgentConfig,
             )  # noqa: PLC0415
-            from datacloud_data_service.config import get_settings  # noqa: PLC0415
+            from datacloud_platform.config import get_settings  # noqa: PLC0415
 
-            from byclaw_data.mcp.result_file_storage import (
+            from byclaw_data.platform.result_file_storage import (
                 build_result_file_storage,  # noqa: PLC0415
             )
 
@@ -1784,9 +1784,9 @@ class DataCloudWorker(GatewayWorker):
                                 OntologyAgent,
                                 OntologyAgentConfig,
                             )  # noqa: PLC0415
-                            from datacloud_data_service.config import get_settings  # noqa: PLC0415
+                            from datacloud_platform.config import get_settings  # noqa: PLC0415
 
-                            from byclaw_data.mcp.result_file_storage import (
+                            from byclaw_data.platform.result_file_storage import (
                                 build_result_file_storage,
                             )  # noqa: PLC0415
 

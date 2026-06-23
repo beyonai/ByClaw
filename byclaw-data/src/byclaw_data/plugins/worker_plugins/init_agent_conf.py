@@ -1249,10 +1249,10 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
             # 构造失败时降级为 None，由 configure_loader 自动回退至 LocalResultFileStorage。
             result_file_storage: Any = None
             try:
-                from byclaw_data.mcp.result_file_storage import (  # noqa: PLC0415
+                from byclaw_data.platform.result_file_storage import (  # noqa: PLC0415
                     build_result_file_storage,
                 )
-                from datacloud_data_service.config import get_settings  # noqa: PLC0415
+                from datacloud_platform.config import get_settings  # noqa: PLC0415
 
                 result_file_storage = build_result_file_storage(settings=get_settings())
             except Exception as _rfs_exc:  # noqa: BLE001
