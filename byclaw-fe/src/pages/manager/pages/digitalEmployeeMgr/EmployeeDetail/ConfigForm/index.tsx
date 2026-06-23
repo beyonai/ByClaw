@@ -935,13 +935,19 @@ const ConfigForm = (props) => {
         ...form.getFieldsValue(allFieldNames),
         ...overrideValues,
       };
+      const hasAgentPromptField =
+        allTabs.some((tab) => tab.key === 'agent') || Object.prototype.hasOwnProperty.call(current, 'agent');
+      const effectiveWorkStandard = hasAgentPromptField
+        ? current.agent || ''
+        : current.workStandard || current.roleAttributes || '';
 
       rolePromptFieldNames.forEach((key) => {
         roleObj[key] =
           current[key] ||
           (key === 'customPromptTabs' ? [] : key === 'customPromptValues' ? {} : key === 'bundledSkills' ? [] : '');
       });
-      roleObj.roleAttributes = current.roleAttributes || current.workStandard || current.agent || '';
+      roleObj.workStandard = effectiveWorkStandard;
+      roleObj.roleAttributes = effectiveWorkStandard;
 
       // 将所有配置存成 JSON 放到 corePersonaDefinition 字段（数组格式）
       const corePersonaDefinition: Array<{ name: string; nameEn?: string; key: string; value: string; tip?: string }> =
@@ -1015,6 +1021,8 @@ const ConfigForm = (props) => {
       form.setFieldsValue({
         role: JSON.stringify(roleObj),
         corePersonaDefinition: corePersonaDefinitionJson,
+        workStandard: effectiveWorkStandard,
+        roleAttributes: effectiveWorkStandard,
       });
       internalSyncRef.current = false;
 

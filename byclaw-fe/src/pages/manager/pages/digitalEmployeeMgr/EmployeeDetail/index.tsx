@@ -121,6 +121,43 @@ const parseDigitalEmployeeTemplates = (value) => {
   return [value];
 };
 
+const parseJsonRecursively = (value, maxDepth = 5) => {
+  if (maxDepth <= 0 || typeof value !== 'string') return value;
+  try {
+    const parsed = JSON.parse(value);
+    return typeof parsed === 'string' ? parseJsonRecursively(parsed, maxDepth - 1) : parsed;
+  } catch {
+    return value;
+  }
+};
+
+const normalizePromptConfigKey = (key, item = {}) => {
+  const candidates = [key, item?.name, item?.nameEn, item?.paramName, item?.paramEnName].filter(Boolean);
+  if (candidates.some((value) => ['agent', '工作规范', 'Work Specification'].includes(value))) {
+    return 'agent';
+  }
+  return key;
+};
+
+const extractWorkStandardFromCorePersonaDefinition = (value) => {
+  if (!value) return '';
+  try {
+    const parsedData = parseJsonRecursively(value);
+    const corePersonaData = typeof parsedData === 'string' ? JSON.parse(parsedData) : parsedData;
+    let workStandard = '';
+    if (Array.isArray(corePersonaData)) {
+      const agentPrompt = corePersonaData.find((item) => normalizePromptConfigKey(item?.key, item) === 'agent');
+      workStandard = agentPrompt?.value || '';
+    } else if (corePersonaData && typeof corePersonaData === 'object') {
+      workStandard = corePersonaData.agent || corePersonaData.workStandard || '';
+    }
+    const normalizedValue = parseJsonRecursively(workStandard);
+    return typeof normalizedValue === 'string' ? normalizedValue : JSON.stringify(normalizedValue || '');
+  } catch {
+    return '';
+  }
+};
+
 const getDigitalEmployeeTemplate = (templates, ownerType, agentType) => {
   const effectiveOwnerType = ownerType === 'personal' ? 'personal' : 'enterprise';
   const findTemplate = (list) =>
@@ -575,6 +612,8 @@ const EmployeeDetail = ({ loading }) => {
             let customPromptTabsFromCore: Array<{ key: string; name: string }> = [];
             let customPromptValuesFromCore: Record<string, string> = {};
             const corePersonaDefinitionValue = res?.corePersonaDefinition || res?.personalityDefinition || '';
+            const promptWorkStandard = extractWorkStandardFromCorePersonaDefinition(corePersonaDefinitionValue);
+            const effectiveWorkStandard = promptWorkStandard || res?.workStandard || res?.roleAttributes || '';
             try {
               const corePersonaData = JSON.parse(corePersonaDefinitionValue);
               const systemFields = [
@@ -623,13 +662,13 @@ const EmployeeDetail = ({ loading }) => {
             }
 
             const roleJson = JSON.stringify({
-              roleAttributes: res?.roleAttributes || res?.workStandard || '',
+              roleAttributes: effectiveWorkStandard,
               processingFlow: res?.processingFlow || '',
               personalityDimensions: res?.personalityDimensions || '',
               wordPreferences: res?.wordPreferences || '',
               sentenceAndTone: res?.sentenceAndTone || '',
               bundledSkills: parseBundledSkills(res?.skills || res?.bundledSkills || prologueRoleJson?.bundledSkills),
-              workStandard: res?.workStandard || res?.roleAttributes || '',
+              workStandard: effectiveWorkStandard,
               corePersonaDefinition:
                 res?.corePersonaDefinition || res?.personalityDefinition || DEFAULT_PERSONALITY_DEFINITION,
               personalityDefinition:
@@ -707,13 +746,13 @@ const EmployeeDetail = ({ loading }) => {
               abilityBoundary: res?.constraints || '',
               exampleQuestions: res?.faqs || '',
               // 为工作规范五项提供初始值以回显
-              roleAttributes: res?.roleAttributes || res?.workStandard || '',
+              roleAttributes: effectiveWorkStandard,
               processingFlow: res?.processingFlow || '',
               personalityDimensions: res?.personalityDimensions || '',
               wordPreferences: res?.wordPreferences || '',
               sentenceAndTone: res?.sentenceAndTone || '',
               bundledSkills: parseBundledSkills(res?.skills || res?.bundledSkills || prologueRoleJson?.bundledSkills),
-              workStandard: res?.workStandard || res?.roleAttributes || '',
+              workStandard: effectiveWorkStandard,
               corePersonaDefinition:
                 res?.corePersonaDefinition || res?.personalityDefinition || DEFAULT_PERSONALITY_DEFINITION,
               toolStandard: res?.toolStandard || '',
