@@ -109,7 +109,7 @@ byclaw-kgw/
 在 lifespan 中启动的常驻异步任务：
 
 - **cleanup worker** — 扫描 `PURGING`/`PURGE_FAILED` 同步行，调用后端 `metadataPropertiesDelete` 清理 `__byclaw_kgw__` 列，完成后物理删除属性主记录
-- **reconcile worker** — 处理 outbox 回滚失败场景，清理过期 PENDING binding（防僵尸行堆积）
+- **reconcile worker** — 复核过期 `DELETING` binding：后端仍有字段则恢复为 `BOUND`，后端已无字段则删除 binding（防僵尸行堆积）
 
 ### 核心能力
 
@@ -120,7 +120,7 @@ byclaw-kgw/
 - **熔断保护**：按 KB 后端做独立熔断（失败阈值 / 开路持续时间 / 半开探测）
 - **元数据翻译**：将前端属性名（`propertyName`）翻译为后端安全名称（`backend_name`），请求/响应双向翻译
 - **Lazy Sync**：元数据属性首次使用时自动向后端注册 `__byclaw_kgw__` 列
-- **Binding 事务**：文件导入 / 元数据更新时，先写 PENDING binding → 调后端 → 成功标记 SYNCED / 失败回滚
+- **Binding 事务**：文件导入 / 元数据更新成功后记录 `BOUND` binding；删除/解绑使用 `DELETING` 中间态，失败时由 reconcile worker 按后端实际状态恢复或清理
 - **幂等事件处理**：基于 `sourceId + itemId + version` 的幂等 key，防止重复处理
 - **并发控制**：ingest 信号量限制（默认 100），满时返回 503 + Retry-After
 

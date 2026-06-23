@@ -233,8 +233,8 @@ byclaw-qa 启动为 API 服务后，支持以下 KB 操作：
 
 | 编号 | 用户角色 | 用户目标 | 典型调用链 | 核心预期 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| GF13 | 内容管理员 | binding PENDING → SYNCED | metadata/update set → 检查 kgw_metadata_property_binding | binding 状态为 SYNCED | 已写 |
-| GF14 | 内容管理员 | binding ROLLBACK 机制验证 | mock 后端 metadata/update 返回 -1 → 网关调用 metadata/update | binding 不留下 SYNCED 记录，outbox 写入 ROLLBACK_FAILED 条目 | 已写 |
+| GF13 | 内容管理员 | metadata/update 创建 BOUND binding | metadata/update set → 检查 kgw_metadata_property_binding | binding 状态为 BOUND | 已写 |
+| GF14 | 内容管理员 | binding ROLLBACK 机制验证 | mock 后端 metadata/update 返回 -1 → 网关调用 metadata/update | binding 不留下 BOUND 记录 | 已写 |
 | GF15 | 内容管理员 | front-matter import 与 metadata/update 共享 binding | import md 含 front-matter → metadata/get | 两者共享 binding，状态一致 | 已写 |
 
 ### Ingest 数据导入（S5）
@@ -243,7 +243,7 @@ byclaw-qa 启动为 API 服务后，支持以下 KB 操作：
 | --- | --- | --- | --- | --- | --- |
 | GU1 | Connector | upsert 单事件（直连） | `POST /kgw/ingest/v1/events {sourceId, itemId, version, op=upsert, knCode=200001, filePath, content}` | status=done, eventId>0 | 已写 |
 | GU2 | Connector | upsert 事件（发现） | 同上 knCode=300001 | status=done，discovery 下 multipart 上传成功 | 已写 |
-| GU3 | Connector | upsert 含 metadata | event 带 `metadata: {status: "active"}`（属性已注册） | 文件导入成功后 metadata/update 执行 → binding SYNCED | 已写 |
+| GU3 | Connector | upsert 含 metadata | event 带 `metadata: {status: "active"}`（属性已注册） | 文件导入成功后 metadata/update 执行 → binding BOUND | 已写 |
 | GU4 | Connector | upsert 含未注册 metadata 被拒 | metadata={ghost:"x"}（属性未注册） | 返回 422，event 不落库 | 已写 |
 | GU5 | Connector | 幂等防重 | 同 sourceId + itemId + version 再发 | resultMsg=already-processed | 已写 |
 | GU6 | Connector | version 单调性拒绝旧版本 | done 记录 version=v2 → 发 version=v1 | status=failed, errorType=STALE_VERSION | 已写 |
@@ -294,10 +294,10 @@ byclaw-qa 启动为 API 服务后，支持以下 KB 操作：
 | --- | --- | --- | --- | --- | --- |
 | GW1 | 运维管理员 | cleanup worker 处理 PURGING | metadata/delete 属性（无 binding）→ 等待 cleanup cycle | 后端 `__byclaw_kgw__*` 列被删除；sync 行 PURGED；主表行物理删除 | 已写 |
 | GW2 | 运维管理员 | cleanup worker 处理 PURGE_FAILED | mock 后端 metadataProperties/delete 返回 -1 → 等待 cleanup cycle | purge 标记 PURGE_FAILED，不物理删除；可 admin purge-retry | 已写 |
-| GW3 | 运维管理员 | reconcile worker 清理 stale PENDING | 构造一个 PENDING binding（attempt_id 随机，created_at 超过 threshold）→ 等待 reconcile cycle | PENDING 行被删除 | 已写 |
-| GW4 | 运维管理员 | reconcile worker 处理 outbox | 构造一个 outbox 条目（attempt_id=已知 binding）→ 等待 reconcile cycle | binding 被删除 + outbox 清空 | 已写 |
-| GW5 | 运维管理员 | reconcile 不会误删近期 PENDING | 近 1 分钟内的 PENDING binding → 等待 reconcile cycle | PENDING 行保留 | 已写 |
-| GW6 | 运维管理员 | cleanup 多 Pod 安全（SKIP LOCKED） | 两个 Pod 环境下同时清理 → 等待 cycle | 不重复删除、无锁冲突 | 已写 |
+| GW3 | 运维管理员 | reconcile worker 清理 stale DELETING | 构造一个过期 DELETING binding，后端 metadata/get 不返回该字段 → 等待 reconcile cycle | binding 行被删除 | 已写 |
+| GW4 | 运维管理员 | reconcile worker 恢复 stale DELETING | 构造一个过期 DELETING binding，后端 metadata/get 仍返回该字段 → 等待 reconcile cycle | binding 恢复为 BOUND | 已写 |
+| GW5 | 运维管理员 | reconcile 不会误删近期 DELETING | 近 1 分钟内的 DELETING binding → 等待 reconcile cycle | DELETING 行保留 | 已写 |
+| GW6 | 运维管理员 | worker 并发安全 | cleanup 双任务使用 SKIP LOCKED；reconcile 双任务使用 updated_at 行版本保护 | 不重复删除、无锁冲突，最终行数正确 | 已写 |
 
 ---
 
@@ -375,7 +375,7 @@ byclaw-qa 启动为 API 服务后，支持以下 KB 操作：
 | `POST /kgw/admin/v1/metadata-properties/{name}/purge-retry` | GA13 |
 | `POST /kgw/api/v1/dslGuide` | （静态内容，无需集成测试） |
 | Worker cleanup | GW1, GW2 |
-| Worker reconcile | GW3-GW5 |
+| Worker reconcile | GW3-GW6 |
 
 **所有 34 个端点全部覆盖。** 覆盖场景总数：**~95 个**（含跨 KB 编排、服务发现、worker 验证、故障注入）。
 
@@ -395,7 +395,7 @@ byclaw-qa 启动为 API 服务后，支持以下 KB 操作：
 | `tests/integration/test_ingest_error.py` | GU17/GU22-GU23/ER4：413/CB OPEN/恢复/基本成功 | 5 |
 | `tests/integration/test_error_paths.py` | ER1-ER5/AU1-AU3：未知 knCode×5/auth 缺失/真实列表/参数校验 | 9 |
 | `tests/integration/test_cross_kb.py` | CX1-CX5：跨 KB 列表/导入/审计/检索/锁隔离/cleanup | 6 |
-| `tests/integration/test_workers.py` | GW1-GW6：cleanup PURGING/PURGE_FAILED + reconcile×3 | 5 |
+| `tests/integration/test_workers.py` | GW1-GW6：cleanup PURGING/PURGE_FAILED + reconcile stale DELETING/并发保护 | 6 |
 | `tests/test_integration_s4.py` | S4 元数据属性 CRUD + sync + binding + front-matter import | 3 |
 | `tests/test_integration_s5.py` | S5 ingest 基础场景 | 8 |
 

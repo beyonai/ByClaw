@@ -330,8 +330,8 @@ async def test_cleanup_concurrent_skip_locked(client, pool, app):
     await _delete_by_property_ids(pool, [201, 202, 203])
 
 
-async def test_reconcile_concurrent_skip_locked(client, pool, app):
-    """GW6: Two concurrent reconcile iterations don't process the same bindings (SKIP LOCKED)."""
+async def test_reconcile_concurrent_row_version_guard(client, pool, app):
+    """GW6: Concurrent reconcile iterations delete each stale binding at most once."""
     await _delete_by_property_ids(pool, [301, 302, 303])
     # Insert multiple stale DELETING bindings (updated 10 min ago)
     async with pool.connection() as conn:
@@ -368,9 +368,9 @@ async def test_reconcile_concurrent_skip_locked(client, pool, app):
         await conn.commit()
 
     with respx.mock(assert_all_called=False) as mock:
-        mock.post(f"{_KB_DIRECT_URL}/api/v1/knowledgeItems/metadata/get").mock(
-            return_value=httpx.Response(200, json=_ok_resp({"metadata": {}}))
-        )
+        metadata_get = mock.post(
+            f"{_KB_DIRECT_URL}/api/v1/knowledgeItems/metadata/get"
+        ).mock(return_value=httpx.Response(200, json=_ok_resp({"metadata": {}})))
         results = await asyncio.gather(
             reconcile_iteration(
                 pool,
@@ -386,11 +386,16 @@ async def test_reconcile_concurrent_skip_locked(client, pool, app):
             ),
         )
 
-    # Each returns (deleting_deleted, deleting_restored, stale_syncing_cleared)
-    total_stale = sum(r[0] for r in results)
-    assert total_stale == 3, (
-        f"Expected 3 stale bindings deleted total, got {total_stale}"
+    # Each returns (deleting_deleted, deleting_restored, stale_syncing_cleared).
+    # Updated-at guards may let both iterations inspect the same stale rows, but
+    # only one mutation can win for each row.
+    total_deleted = sum(r[0] for r in results)
+    total_restored = sum(r[1] for r in results)
+    assert total_deleted == 3, (
+        f"Expected 3 stale bindings deleted total, got {total_deleted}"
     )
+    assert total_restored == 0
+    assert metadata_get.call_count >= 3
 
     # No bindings should remain
     async with pool.connection() as conn:
