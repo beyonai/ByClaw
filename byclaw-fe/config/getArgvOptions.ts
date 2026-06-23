@@ -4,15 +4,21 @@ module.exports = function getArgvOptions() {
   if (argv.length > 3) {
     const arg = process.argv.slice(3);
 
-    arg.forEach(_arg => {
+    arg.forEach((_arg) => {
+      if (_arg === '--') {
+        return;
+      }
+
+      const normalizedArg = _arg.replace(/^--?/, '');
+
       if (_arg.indexOf('=') > -1) {
-        const eq = _arg.split('=');
+        const eq = normalizedArg.split('=');
         argvOptions[eq[0]] = eq[1];
       } else {
-        argvOptions[_arg] = _arg;
+        argvOptions[normalizedArg] = true;
       }
     });
   }
 
   return argvOptions;
-}
+};
