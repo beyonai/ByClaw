@@ -43,7 +43,7 @@ function parseConfigList(value: any): ISkillItem[] {
   }
 }
 
-export default function SuggestSkill({ agentId }: { agentId: string }) {
+export default function SuggestSkill({ agentId }: { agentId?: string }) {
   const [messageApi, contextHolder] = message.useMessage();
 
   const { EventEmitter, agentInfo } = useGlobal();
@@ -100,9 +100,9 @@ export default function SuggestSkill({ agentId }: { agentId: string }) {
     setInited(false);
     setSelectedSkills([]);
 
-    if (userInfo) {
+    if (userInfo && agentId) {
       setLoading(true);
-      Promise.all([fetchSkills(), getCurAgentInfo(agentId)]).finally(() => {
+      Promise.all([fetchSkills(), getCurAgentInfo(agentId || '')]).finally(() => {
         setLoading(false);
         setInited(true);
       });
