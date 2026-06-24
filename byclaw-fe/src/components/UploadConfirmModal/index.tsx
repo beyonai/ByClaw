@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, Button, Modal, Space, Switch, Typography } from 'antd';
 import { useIntl } from '@umijs/max';
 
@@ -43,8 +43,6 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
 }) => {
   const intl = useIntl();
   const [processFrontMatter, setProcessFrontMatter] = useState(false);
-  const previewFiles = useMemo(() => files.slice(0, 3), [files]);
-  const remainingFileCount = files.length - previewFiles.length;
   const hasConflicts = conflicts.length > 0;
 
   useEffect(() => {
@@ -109,8 +107,8 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
           <div style={{ width: '100%', padding: 12, borderRadius: 10, background: '#fff' }}>
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
               <Typography.Text strong>{intl.formatMessage({ id: 'knowledgeDetail.fileList' })}</Typography.Text>
-              <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                {previewFiles.map((file, index) => (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
+                {files.map((file, index) => (
                   <div
                     key={`${file.name}-${file.size || 0}-${index}`}
                     style={{
@@ -133,12 +131,7 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
                     )}
                   </div>
                 ))}
-              </Space>
-              {remainingFileCount > 0 && (
-                <Typography.Text type="secondary">
-                  {intl.formatMessage({ id: 'knowledgeDetail.uploadConfirmMoreFiles' }, { count: remainingFileCount })}
-                </Typography.Text>
-              )}
+              </div>
             </Space>
           </div>
         </Space>
