@@ -113,6 +113,7 @@ RUN set -eux; \
         fonts-noto-cjk \
         fonts-wqy-microhei \
         fonts-wqy-zenhei \
+        libreoffice \
         novnc \
         xauth \
         x11vnc \
@@ -147,6 +148,7 @@ RUN set -eux; \
             > /etc/fonts/conf.d/65-microsoft-yahei-alias.conf; \
         fc-cache -f; \
         fc-match "Microsoft YaHei"; \
+        libreoffice --version; \
         ffmpeg -version; \
         ffprobe -version; \
         tmp_mp3="$(mktemp --suffix=.mp3)"; \
