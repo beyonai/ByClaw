@@ -15,6 +15,8 @@ _DEFAULT_DATACLOUD_MID_FTP_PATH = "/workspace/byclaw-data/resource/dig_employee"
 _platform_initialized = False
 _owl_loaded_path: str | None = None
 """Track which path was last loaded into the default base, for idempotent reload."""
+_enterprise_initialized = False
+"""Track whether enterprise base + CRM scene have been initialized."""
 
 
 def _load_owl_into_default_base(base_path: str) -> Any:
@@ -60,6 +62,87 @@ def _load_owl_if_configured() -> Any | None:
     return loader
 
 
+def _init_enterprise_base_and_scene() -> None:
+    """Create enterprise ontology base and CRM scene, then attach all OWL
+    objects and views as scene members.
+
+    Does **not** reload OWL — OWL parsing is handled by
+    ``_load_owl_if_configured()`` into the default base.  Object/view codes
+    are hardcoded from the OWL resource layout; no filesystem scanning.
+
+    Idempotent at every step:
+    - ``create_base`` guarded by ``base_exists``
+    - ``create_scene`` catches ``ValueError`` for duplicates
+    - ``add_scene_members`` deduplicates internally (adapter level)
+
+    Workflow:
+      1. ``platform.create_base(\"enterprise\", ...)`` — 企业本体库
+      2. ``platform.create_scene(\"enterprise\", scene)`` — CRM 场景
+      3. ``platform.add_scene_members(enterprise, crm, objects, views)`` — 挂载
+    """
+    from datacloud_platform import get_platform
+
+    p = get_platform()
+    enterprise_id = "enterprise"
+
+    # ── 1. 创建企业本体库（幂等）──
+    if not p.base_exists(enterprise_id):
+        from datacloud_platform.base_entry import OntologyBaseEntry
+
+        p.create_base(
+            OntologyBaseEntry(
+                base_id=enterprise_id,
+                display_name="企业本体库",
+                source_type="LOCAL",
+            )
+        )
+
+    # ── 2. 创建 CRM 场景（幂等）──
+    scene_id = "crm"
+    try:
+        p.create_scene(
+            enterprise_id,
+            {
+                "scene_name": "CRM客户管理",
+                "scene_code": scene_id,
+                "scene_desc": "CRM场景，包含OWL导入的全部本体",
+            },
+        )
+    except ValueError:
+        pass  # scene already exists
+
+    # ── 3. 将所有 OWL 对象和视图挂到 CRM 场景下（幂等，adapter 层去重）──
+    p.add_scene_members(
+        enterprise_id,
+        scene_id,
+        object_codes=[
+            "by_customer",
+            "by_opp_task",
+            "by_opportunity",
+            "by_project",
+            "by_project_task",
+            "by_rd_task",
+            "po_organization",
+            "po_users",
+        ],
+        view_codes=[
+            "scene_crm_comprehensive_analysis",
+            "scene_project_management",
+            "scene_rd_management",
+            "scene_sales_management",
+        ],
+    )
+
+
+def _ensure_enterprise_initialized() -> None:
+    """Idempotent wrapper: initialize enterprise base + CRM scene once per process."""
+    global _enterprise_initialized
+    if _enterprise_initialized:
+        return
+    _init_enterprise_base_and_scene()
+    _enterprise_initialized = True
+
+
 def _init_platform_if_needed() -> None:
     """Register 4-dimension backends + default base; inject global platform singleton (idempotent).
 
@@ -72,6 +155,7 @@ def _init_platform_if_needed() -> None:
         return
 
     from datacloud_platform.adapters.data_adapter import DataCloudDataBackend
+    from datacloud_platform.adapters.knowledge_adapter import DataCloudKnowledgeBackend
     from datacloud_platform.adapters.local_execution_adapter import LocalExecutionBackend
     from datacloud_platform.adapters.none_adapters import (
         _NoopExecutionBackend,
@@ -86,13 +170,14 @@ def _init_platform_if_needed() -> None:
     from datacloud_platform import DatacloudPlatform, OntologyBaseEntry, OntologyBaseRegistry
 
     register_backend_type("ontology", "datacloud-data")
-    register_backend_type("knowledge", "none")
+    register_backend_type("knowledge", "datacloud-knowledge")
     register_backend_type("execution", "local-exec")
     register_backend_type("storage", "datacloud-data")
 
     _onto = DataCloudDataBackend()
     _exec = LocalExecutionBackend()
     register_implementation("ontology", "datacloud-data", lambda: _onto)
+    register_implementation("knowledge", "datacloud-knowledge", lambda: DataCloudKnowledgeBackend())
     register_implementation("knowledge", "none", lambda: _NoopKnowledgeBackend())
     register_implementation("execution", "local-exec", lambda: _exec)
     register_implementation("execution", "none", lambda: _NoopExecutionBackend())
@@ -118,6 +203,9 @@ def _init_platform_if_needed() -> None:
 
     # ── 函数式导入 OWL（后续可由 HTTP API 替换调用路径）──
     _load_owl_if_configured()
+
+    # ── 初始化企业本体库 + CRM 场景 + 挂载 OWL 本体 ──
+    _ensure_enterprise_initialized()
 
 
 def load_env_if_exists(*paths: Path) -> None:
