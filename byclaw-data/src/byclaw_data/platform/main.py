@@ -12,7 +12,7 @@ def main() -> None:
     port = int(os.environ.get("DATACLOUD_DATA_SERVICE_PORT", "8080"))
     log_level = os.environ.get("DATACLOUD_DATA_SERVICE_LOG_LEVEL", "info")
     uvicorn.run(
-        "byclaw_data.mcp.routes:create_app",
+        "byclaw_data.platform:create_app",
         factory=True,
         host=host,
         port=port,

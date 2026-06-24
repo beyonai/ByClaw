@@ -5,10 +5,8 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import AsyncIterator
 
-from dotenv import load_dotenv
 from redis.asyncio import Redis
 
 from by_framework.core.discovery import ServiceRegistry
@@ -16,14 +14,6 @@ from by_framework.core.discovery import ServiceRegistry
 from byclaw_data.runtime import normalize_runtime_environment
 
 logger = logging.getLogger(__name__)
-
-def _load_local_env() -> None:
-    pkg_dir = Path(__file__).resolve().parents[1]
-    src_dir = pkg_dir.parent
-    project_dir = src_dir.parent
-    for env_path in (project_dir / ".env", src_dir / ".env"):
-        if env_path.is_file():
-            load_dotenv(dotenv_path=env_path, override=False)
 
 
 def _get_service_port() -> int:
@@ -34,49 +24,34 @@ def _get_service_port() -> int:
     )
 
 
-def create_app(
-    *,
-    datasource_configs: dict | None = None,
-    loader_override: Any | None = None,
-):
-    """Create the byclaw MCP app on top of datacloud_data_service."""
+def create_app(**kwargs):
+    """Create the byclaw MCP app on top of datacloud_platform."""
 
-    # _load_local_env()
     normalize_runtime_environment()
 
-    from datacloud_data_sdk.ontology.loader import OntologyLoader
-    from datacloud_data_service.config import get_settings
-    from datacloud_data_service.api.routes import create_app as create_datacloud_app
-    from byclaw_data.mcp.result_file_storage import build_result_file_storage
+    from datacloud_platform import get_platform
+    from datacloud_platform.api.server import create_app as create_platform_app
 
-    settings = get_settings()
-    loader = OntologyLoader()
+    platform = get_platform()
 
-    from datacloud_data_sdk.ontology.term_loader import TermLoader
+    # Inject ByClaw result_file_storage before creating app
+    import datacloud_platform.platform_file_storage as pf_storage
+    from byclaw_data.platform.result_file_storage import build_result_file_storage
 
-    term_loader = TermLoader.from_config({})
-    loader.configure(term_loader=term_loader)
+    pf_storage.build_result_file_storage = build_result_file_storage
 
-    ontology_path = Path(settings.ontology_path)
-    loader.configure(result_file_storage=build_result_file_storage(settings=settings))
-    if ontology_path.exists():
-        loader.load_from_owl_directory(ontology_path)
-        logger.info("Loaded ontology from %s", ontology_path)
+    app = create_platform_app(platform, **kwargs)
+    _wrap_lifespan_with_discovery(app)
+    return app
 
-    # scene_path = Path(settings.scene_path)
-    # if scene_path.exists():
-    #     loader.load_scene_from_path(scene_path)
-    #     logger.info("Loaded scene from %s", scene_path)
 
-    app = create_datacloud_app(
-        datasource_configs=datasource_configs,
-        loader_override=loader,
-    )
-    datacloud_lifespan = app.router.lifespan_context
+def _wrap_lifespan_with_discovery(app) -> None:
+    """Wrap the app's lifespan with service discovery registration."""
+    platform_lifespan = app.router.lifespan_context
 
     @asynccontextmanager
     async def _lifespan(application) -> AsyncIterator[None]:
-        async with datacloud_lifespan(application):
+        async with platform_lifespan(application):
             await register_service(application)
             try:
                 yield
@@ -84,7 +59,6 @@ def create_app(
                 await unregister_service(application)
 
     app.router.lifespan_context = _lifespan
-    return app
 
 
 async def register_service(application) -> None:
@@ -119,8 +93,9 @@ async def register_service(application) -> None:
         "service registry redis configured: host=%s, port=%s, db=%s",
         redis_host,
         redis_port,
-        redis_db
+        redis_db,
     )
+
 
 async def unregister_service(application) -> None:
     """Unregister the running service instance from the service registry."""

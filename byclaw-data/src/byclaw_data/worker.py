@@ -451,12 +451,10 @@ def _load_skills(
     resource_list: list[Any],
     user_code: str,
     tools_dict: dict[str, Any],
-    agent_id: str = "",
 ) -> tuple[str, str, list[dict[str, str]]] | None:
     """加载 skill，返回 (task_prompt, first_skill_path, skill_catalog)；无 skill 时返回 None。
 
-    路径A：resource_list 中有 SKILL 条目，按 resourceId 精确加载。
-    路径B：无 SKILL 条目时，自动扫描 _build_skill_dirs 返回的目录（personal_dir 覆盖 agent_dir）。
+    仅支持路径A：resource_list 中有 SKILL 条目，按 resourceId 精确加载。
 
     skill_catalog 格式：[{"name": ..., "description": ..., "location": "SKILL.md 绝对路径"}]
     由调用方写入 config["configurable"]["extras"]["skill_catalog"]，供 activate_skill 工具按需加载。
@@ -504,47 +502,6 @@ def _load_skills(
                 content,
                 skill_md,
             ))
-    else:
-        # 路径B：无显式条目，自动扫描 skill 目录。
-        # _build_skill_dirs 返回 [agent_dir, personal_dir]，优先级从低到高。
-        # 后扫描的目录（personal_dir）以 skill 目录名为 key 覆盖前者，避免重复注入。
-        skill_dirs = _build_skill_dirs(user_code=user_code, agent_id=agent_id)
-        _log.info(
-            "_load_skills: no explicit SKILL entries, scanning dirs=%s", skill_dirs
-        )
-        # key = skill 目录名，value = skill_md Path；后扫描覆盖前扫描
-        skill_map: dict[str, Path] = {}
-        for skill_dir in skill_dirs:
-            skill_dir_path = Path(skill_dir)
-            if not skill_dir_path.is_dir():
-                continue
-            for skill_md in sorted(skill_dir_path.rglob("SKILL.md")):
-                skill_map[skill_md.parent.name] = skill_md
-
-        for skill_dir_name, skill_md in sorted(skill_map.items()):
-            if not first_skill_path:
-                first_skill_path = str(skill_md.parent)
-            try:
-                content = skill_md.read_text(encoding="utf-8")
-            except OSError as exc:
-                _log.warning(
-                    "_load_skills: failed to read %s: %s, skipping", skill_md, exc
-                )
-                continue
-            meta = _parse_skill_meta(content)
-            content, w = _replace_skill_placeholders(content, tools_dict)
-            all_warnings.extend(w)
-            skill_entries.append((
-                meta.get("name") or skill_dir_name,
-                meta.get("description") or "",
-                content,
-                skill_md,
-            ))
-            _log.info(
-                "_load_skills: auto-loaded skill '%s' from %s",
-                meta.get("name") or skill_dir_name,
-                skill_md,
-            )
 
     if not skill_entries:
         return None
@@ -567,41 +524,6 @@ def _load_skills(
         task_prompt += "\n\n" + "\n".join(all_warnings)
     return task_prompt, first_skill_path, skill_catalog
 
-
-# ── 路径B：自动 skill 发现（路径构建在此，扫描/解析委托 SDK）─────────────────────
-
-
-def _extract_rel_skills(agent_list: list[Any]) -> set[str]:
-    """从 agent_list 第一个 agent 的 relSkills 提取白名单。空集合=不过滤。"""
-    agent_cfg = agent_list[0] if agent_list and isinstance(agent_list, list) else {}
-    if not isinstance(agent_cfg, dict):
-        return set()
-    rel = agent_cfg.get("relSkills") or []
-    if isinstance(rel, str):
-        try:
-            rel = json.loads(rel)
-        except (ValueError, TypeError):
-            rel = []
-    return {str(s).strip() for s in rel if s}
-
-
-def _build_skill_dirs(user_code: str, agent_id: str) -> list[str]:
-    """构建 skill 目录列表（agent 级 + 个人级），供 OntologyAgent.ask(skill_dirs=) 使用。"""
-    minio_root = os.environ.get(
-        "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
-    )
-    agent_dir = os.environ.get("AGENT_SKILLS_DIR", "/app/skills")
-    personal_dir = str(
-        Path(minio_root)
-        / f"byclaw-{user_code}"
-        / "by"
-        / f"byclaw-{user_code}"
-        / "by"
-        / ".bydc"
-        / f"agent_{agent_id}"
-        / "skills"
-    )
-    return [agent_dir, personal_dir]
 
 
 def _normalize_recall(raw: Any) -> list[str]:
@@ -1515,9 +1437,9 @@ class DataCloudWorker(GatewayWorker):
                 OntologyAgent,
                 OntologyAgentConfig,
             )  # noqa: PLC0415
-            from datacloud_data_service.config import get_settings  # noqa: PLC0415
+            from datacloud_platform.config import get_settings  # noqa: PLC0415
 
-            from byclaw_data.mcp.result_file_storage import (
+            from byclaw_data.platform.result_file_storage import (
                 build_result_file_storage,  # noqa: PLC0415
             )
 
@@ -1823,9 +1745,9 @@ class DataCloudWorker(GatewayWorker):
                                 OntologyAgent,
                                 OntologyAgentConfig,
                             )  # noqa: PLC0415
-                            from datacloud_data_service.config import get_settings  # noqa: PLC0415
+                            from datacloud_platform.config import get_settings  # noqa: PLC0415
 
-                            from byclaw_data.mcp.result_file_storage import (
+                            from byclaw_data.platform.result_file_storage import (
                                 build_result_file_storage,
                             )  # noqa: PLC0415
 
@@ -2321,7 +2243,6 @@ class DataCloudWorker(GatewayWorker):
                 resource_list=_resource_list_for_extract,
                 user_code=_dyn_user_code,
                 tools_dict={},  # 动态路径无 AgentConfig，占位符替换跳过
-                agent_id=str(by_agent_id or ""),
             )
             _dyn_minio_root = os.environ.get(
                 "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
@@ -2891,7 +2812,6 @@ class DataCloudWorker(GatewayWorker):
                     resource_list=_resource_list_for_extract,
                     user_code=_user_code_for_skill,
                     tools_dict=tools_dict,
-                    agent_id=str(by_agent_id or ""),
                 )
                 if _skill_task_prompt:
                     _task_prompt, _first_skill_dir, _skill_catalog = _skill_task_prompt

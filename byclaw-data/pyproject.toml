@@ -18,7 +18,7 @@ dependencies = [
 
 [project.scripts]
 byclaw-data-worker = "byclaw_data.main:main"
-byclaw-data-mcp = "byclaw_data.mcp.main:main"
+byclaw-data-mcp = "byclaw_data.platform.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/byclaw_data"]
@@ -51,11 +51,12 @@ dev = [
     "httpx==0.27",
     "ruff==0.8",
     "pytest-asyncio==1.3.0",
+    "mypy>=1.13",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
-    "integration: 需要本机已启动 datacloud_data_service（见 by-datacloud launch）",
+    "integration: 需要本机已启动 datacloud_data_service（见 ByDC launch）",
 ]
