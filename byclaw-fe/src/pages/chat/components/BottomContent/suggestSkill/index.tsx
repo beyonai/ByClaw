@@ -10,6 +10,7 @@ import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import { installDigitalEmployeeRelResources } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
 import { getFileUrl } from '@/utils/file';
+import { queryResourceOperationPermissions } from '@/pages/manager/service/resources';
 
 import styles from './index.module.less';
 
@@ -161,9 +162,9 @@ export default function SuggestSkill({ agentId }: { agentId?: string }) {
 
     return qryEmployeeDetail(myAgentId, AbortControllerRef.current).then((res) => {
       try {
-        const skills = JSON.parse(res?.skills || '[]').map((item: ISkill) => item.resourceId);
+        // const skills = JSON.parse(res?.skills || '[]').map((item: ISkill) => item.resourceId);
         // setSelectedSkills(skills);
-        return skills;
+        return res;
       } catch (error) {
         console.error('获取数字员工详情失败:', error);
         // setSelectedSkills([]);
@@ -179,10 +180,22 @@ export default function SuggestSkill({ agentId }: { agentId?: string }) {
 
     if (userInfo && agentId) {
       setLoading(true);
-      Promise.all([fetchSkills(), getCurAgentInfo(agentId || '')])
-        .then(([res1, res2]) => {
-          setList(sortSkillsBySelected(res1, res2));
-          setSelectedSkills(res2);
+      Promise.all([
+        fetchSkills(),
+        getCurAgentInfo(agentId || ''),
+        queryResourceOperationPermissions({ resourceId: agentId || '' }),
+      ])
+        .then(([res1, res2, res3]) => {
+          let allSkills = res1 || [];
+          const skills = JSON.parse(res2?.skills || '[]').map((item: ISkill) => item.resourceId);
+          const { canManageAuth } = res3 || {};
+
+          if (!canManageAuth) {
+            allSkills = allSkills.filter((s: ISkillItem) => skills.includes(s.grantResourceId));
+          }
+
+          setList(sortSkillsBySelected(allSkills, skills));
+          setSelectedSkills(skills);
         })
         .finally(() => {
           setLoading(false);
