@@ -300,10 +300,10 @@ async function runSync(): Promise<{ result: ExecutorResponse; sinceMs: number }>
     const data = isRecord((result as Dict).data) ? ((result as Dict).data as Dict) : undefined;
     const poll = isRecord(data?.poll) ? (data!.poll as Dict) : undefined;
     const deltaLen = typeof poll?.delta_text === "string" ? (poll.delta_text as string).length : -1;
-    const termLen = typeof poll?.terminal_text === "string" ? (poll.terminal_text as string).length : -1;
+
     const aggLen = typeof poll?.text === "string" ? (poll.text as string).length : -1;
     console.log(
-      `[sync] lengths: delta_text=${deltaLen}b terminal_text=${termLen}b aggregated(poll.text)=${aggLen}b`,
+      `[sync] lengths: delta_text=${deltaLen}b aggregated(poll.text)=${aggLen}b`,
     );
   }
   return { result, sinceMs };
