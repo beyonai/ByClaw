@@ -65,6 +65,7 @@ public class SandboxResizeService {
     private static final String ALERT_ACTION_OPS_INCIDENT = "OPS_INCIDENT";
     private static final String RESIZE_TYPE_RECOVERY_RESTART = "RECOVERY_RESTART";
     private static final String RESIZE_TYPE_OPS_INCIDENT = "OPS_INCIDENT";
+    private static final Duration COMPLETED_IDEMPOTENCY_REUSE_WINDOW = Duration.ofMinutes(2);
 
     private final SandboxProperties sandboxProperties;
     private final OpenSandboxClient openSandboxClient;
@@ -73,6 +74,7 @@ public class SandboxResizeService {
     private final SsSandboxRecordMapper sandboxRecordMapper;
     private final SsSandboxResizeRecordMapper resizeRecordMapper;
     private final SandboxService sandboxService;
+    private final SandboxHealthCacheService sandboxHealthCacheService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newHttpClient();
 
@@ -82,7 +84,8 @@ public class SandboxResizeService {
                                 SandboxServiceProfileEntityMapper profileEntityMapper,
                                 @Lazy SsSandboxRecordMapper sandboxRecordMapper,
                                 SsSandboxResizeRecordMapper resizeRecordMapper,
-                                @Lazy SandboxService sandboxService) {
+                                @Lazy SandboxService sandboxService,
+                                SandboxHealthCacheService sandboxHealthCacheService) {
         this.sandboxProperties = sandboxProperties;
         this.openSandboxClient = openSandboxClient;
         this.specRepository = specRepository;
@@ -90,6 +93,7 @@ public class SandboxResizeService {
         this.sandboxRecordMapper = sandboxRecordMapper;
         this.resizeRecordMapper = resizeRecordMapper;
         this.sandboxService = sandboxService;
+        this.sandboxHealthCacheService = sandboxHealthCacheService;
     }
 
     public SsSandboxResizeRecord handleResizeRequest(Map<String, Object> params) {
@@ -130,7 +134,7 @@ public class SandboxResizeService {
         String direction = resolveResizeDirection(serviceType, fromProfileKey, toProfileKey, reasonCode);
         String idempotencyKey = buildIdempotencyKey(record, serviceType, fromProfileKey, toProfileKey, resizeType,
             direction);
-        SsSandboxResizeRecord reusableAudit = findReusableAudit(idempotencyKey);
+        SsSandboxResizeRecord reusableAudit = findReusableAudit(idempotencyKey, startedAt);
         if (reusableAudit != null) {
             LOGGER.info("沙箱扩缩容幂等命中，recordId={}，sandboxId={}，idempotencyKey={}，status={}",
                 record.getId(), record.getSandboxId(), idempotencyKey, reusableAudit.getStatus());
@@ -247,6 +251,7 @@ public class SandboxResizeService {
                 audit.setSkipReason(message);
                 LOGGER.warn("沙箱扩缩容结果写回被跳过，recordId={}，sandboxId={}，fromProfile={}，toProfile={}，原因：{}",
                     record.getId(), record.getSandboxId(), fromProfileKey, resolvedToProfileKey, message);
+                cleanupResizeRemoteAfterStaleWrite(record, newSandboxId);
                 return audit;
             }
             resizeRecordMapper.updateResult(audit.getId(), STATUS_SUCCESS, 1, finishedAt, durationMs,
@@ -258,6 +263,8 @@ public class SandboxResizeService {
             audit.setOpensandboxRequestId(requestId);
             audit.setOpensandboxResponse(responseJson);
 
+            cleanupReplacedRemoteAfterResize(record, newSandboxId);
+            sandboxHealthCacheService.evictSnapshot(record.getUserCode(), serviceType);
             LOGGER.info("沙箱扩缩容成功，recordId={}，sandboxId={}，fromProfile={}，toProfile={}，durationMs={}",
                 record.getId(), record.getSandboxId(), fromProfileKey, resolvedToProfileKey, durationMs);
             return audit;
@@ -278,6 +285,27 @@ public class SandboxResizeService {
                 record.getId(), record.getSandboxId(), resolvedToProfileKey, e.getMessage());
             return audit;
         }
+    }
+
+    private void cleanupReplacedRemoteAfterResize(SsSandboxRecord record, String newSandboxId) {
+        if (record == null || StringUtils.isAnyBlank(record.getSandboxId(), newSandboxId)
+            || StringUtils.equals(record.getSandboxId(), newSandboxId)) {
+            return;
+        }
+        sandboxService.cleanupRemoteSandboxQuietly(record.getUserCode(), record.getSandboxType(),
+            record.getSandboxId(), "resize-replaced");
+    }
+
+    private void cleanupResizeRemoteAfterStaleWrite(SsSandboxRecord record, String newSandboxId) {
+        if (record == null) {
+            return;
+        }
+        String sandboxIdToCleanup = StringUtils.defaultIfBlank(newSandboxId, record.getSandboxId());
+        if (StringUtils.isBlank(sandboxIdToCleanup)) {
+            return;
+        }
+        sandboxService.cleanupRemoteSandboxQuietly(record.getUserCode(), record.getSandboxType(),
+            sandboxIdToCleanup, "resize-stale-writeback");
     }
 
     public String buildBoundaryBlacklistMetrics() {
@@ -396,7 +424,7 @@ public class SandboxResizeService {
         }
         String resolvedToProfileKey = StringUtils.defaultIfBlank(targetSpec.getProfileKey(), toProfileKey);
         String idempotencyKey = buildRecoveryIdempotencyKey(record, resolvedToProfileKey, reasonCode);
-        SsSandboxResizeRecord reusableAudit = findReusableAudit(idempotencyKey);
+        SsSandboxResizeRecord reusableAudit = findReusableAudit(idempotencyKey, startedAt);
         if (reusableAudit != null) {
             LOGGER.info("沙箱异常恢复幂等命中，recordId={}，sandboxId={}，idempotencyKey={}，status={}",
                 record.getId(), record.getSandboxId(), idempotencyKey, reusableAudit.getStatus());
@@ -426,15 +454,15 @@ public class SandboxResizeService {
             toJsonOrNull(params));
         String serviceType = StringUtils.defaultIfBlank(record.getServiceType(), record.getSandboxType());
         String profileKey = record.getProfileKey();
+        Date startedAt = new Date();
         String idempotencyKey = buildOpsIncidentIdempotencyKey(record, params, reasonCode);
-        SsSandboxResizeRecord reusableAudit = findReusableAudit(idempotencyKey);
+        SsSandboxResizeRecord reusableAudit = findReusableAudit(idempotencyKey, startedAt);
         if (reusableAudit != null) {
             LOGGER.info("沙箱运维异常幂等命中，recordId={}，sandboxId={}，idempotencyKey={}，status={}",
                 record.getId(), record.getSandboxId(), idempotencyKey, reusableAudit.getStatus());
             return reusableAudit;
         }
 
-        Date startedAt = new Date();
         SandboxServiceSpec currentSpec = StringUtils.isNotBlank(profileKey)
             ? specRepository.findByServiceKeyAndProfile(serviceType, profileKey).orElse(null)
             : null;
@@ -698,7 +726,7 @@ public class SandboxResizeService {
         try {
             sandboxService.savePreferredServiceKey(record.getUserCode(), preferredServiceKey);
             SandboxLaunchData launchData = sandboxService.restartSandboxAfterRemoteExitWithoutWait(
-                record.getUserCode(), record.getResourceId(), null);
+                record.getUserCode(), record.getResourceId(), null, serviceType);
             if (launchData == null || StringUtils.isBlank(launchData.getSandboxId())) {
                 throw new IllegalStateException("recovery restart did not return a sandbox id");
             }
@@ -716,6 +744,7 @@ public class SandboxResizeService {
             audit.setFinishedAt(finishedAt);
             audit.setDurationMs(durationMs);
             audit.setOpensandboxResponse(responseJson);
+            sandboxHealthCacheService.evictSnapshot(record.getUserCode(), serviceType);
             LOGGER.warn("沙箱异常自动恢复已重启，recordId={}，sandboxId={}，status={}，targetProfile={}，preferredServiceKey={}，reasonCode={}",
                 record.getId(), record.getSandboxId(), record.getStatus(), resolvedToProfileKey, preferredServiceKey,
                 reasonCode);
@@ -759,7 +788,7 @@ public class SandboxResizeService {
         try {
             sandboxService.savePreferredServiceKey(record.getUserCode(), preferredServiceKey);
             SandboxLaunchData launchData = sandboxService.restartSandboxAfterRemoteExitWithoutWait(
-                record.getUserCode(), record.getResourceId(), null);
+                record.getUserCode(), record.getResourceId(), null, serviceType);
             Date finishedAt = new Date();
             long durationMs = System.currentTimeMillis() - startMillis;
             String responseJson = toJsonOrNull(launchData);
@@ -771,6 +800,7 @@ public class SandboxResizeService {
             audit.setFinishedAt(finishedAt);
             audit.setDurationMs(durationMs);
             audit.setOpensandboxResponse(responseJson);
+            sandboxHealthCacheService.evictSnapshot(record.getUserCode(), serviceType);
             LOGGER.warn("非运行态沙箱扩容已转为升配重拉，recordId={}，sandboxId={}，status={}，targetProfile={}，preferredServiceKey={}，message={}",
                 record.getId(), record.getSandboxId(), record.getStatus(), resolvedToProfileKey, preferredServiceKey,
                 message);
@@ -834,21 +864,26 @@ public class SandboxResizeService {
         );
     }
 
-    private SsSandboxResizeRecord findReusableAudit(String idempotencyKey) {
+    private SsSandboxResizeRecord findReusableAudit(String idempotencyKey, Date now) {
         if (StringUtils.isBlank(idempotencyKey)) {
             return null;
         }
         SsSandboxResizeRecord existing = resizeRecordMapper.selectLatestByIdempotencyKey(idempotencyKey);
-        if (existing == null || !isReusableIdempotentStatus(existing.getStatus())) {
+        if (existing == null || !isReusableIdempotentStatus(existing, now)) {
             return null;
         }
         return existing;
     }
 
-    private boolean isReusableIdempotentStatus(String status) {
-        return StringUtils.equalsAnyIgnoreCase(status,
+    private boolean isReusableIdempotentStatus(SsSandboxResizeRecord record, Date now) {
+        if (record == null || StringUtils.isBlank(record.getStatus())) {
+            return false;
+        }
+        if (StringUtils.equalsAnyIgnoreCase(record.getStatus(), STATUS_PROCESSING)) {
+            return true;
+        }
+        if (!StringUtils.equalsAnyIgnoreCase(record.getStatus(),
             STATUS_SUCCESS,
-            STATUS_PROCESSING,
             STATUS_DEFERRED,
             STATUS_RECORDED_OPS_INCIDENT,
             STATUS_SKIPPED_NOOP,
@@ -856,7 +891,15 @@ public class SandboxResizeService {
             STATUS_SKIPPED_INVALID,
             STATUS_SKIPPED_DUPLICATE,
             STATUS_SKIPPED_COOLDOWN,
-            STATUS_SKIPPED_STALE);
+            STATUS_SKIPPED_STALE)) {
+            return false;
+        }
+        Date reusableAt = record.getFinishedAt() != null ? record.getFinishedAt() : record.getStartedAt();
+        if (reusableAt == null || now == null) {
+            return false;
+        }
+        long elapsedMillis = now.getTime() - reusableAt.getTime();
+        return elapsedMillis >= 0 && elapsedMillis <= COMPLETED_IDEMPOTENCY_REUSE_WINDOW.toMillis();
     }
 
     private String normalizeKey(Object value) {

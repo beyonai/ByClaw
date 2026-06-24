@@ -1,11 +1,12 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.manager.dto.resource.SsResExtSkillDto;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtSkillMapper;
-
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -143,6 +144,9 @@ public class SsResExtSkillService {
      * @return List<ResourceExtDigEmployeeDto>
      */
     public List<SsResExtSkillDto> findBySkillCodes(Collection<String> skillCodes) {
+        if (ListUtil.isEmpty(skillCodes)) {
+            return Collections.emptyList();
+        }
         return ssResExtSkillMapper.findBySkillCodes(skillCodes);
     }
 }

@@ -1,0 +1,23 @@
+{
+  "skill_name": "podcast-video-composer",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "好了，PPT和音频都准备好了。PPT在 /workspace/output/byclaw-podcast/ppt/presentation.pptx，音频在 /workspace/output/byclaw-podcast/audio/dialogue.mp3，脚本在 /workspace/output/byclaw-podcast/script/script.json，TTS时序文件在 /workspace/output/byclaw-podcast/audio/durations.json。帮我合成最终的播客视频，输出到 /workspace/output/byclaw-podcast/video/podcast.mp4。",
+      "expected_output": "运行 assemble.py，生成带字幕的 podcast.mp4，使用精确的 TTS 时序同步字幕",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "把这几个文件合成视频：slides.pptx + audio.mp3，不需要字幕，输出 output.mp4",
+      "expected_output": "运行 assemble.py（不带 --script），生成无字幕视频",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "我的播客制作完了，文件都在 /workspace/output/my-podcast/ 下面：ppt/presentation.pptx、audio/podcast.mp3、script/script.json。帮我做成视频，要有字幕",
+      "expected_output": "询问输出路径（或使用默认），运行 assemble.py --script，生成带字幕视频",
+      "files": []
+    }
+  ]
+}

@@ -15,17 +15,17 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
-class AssistantChatServiceTest {
+class TargetAgentResolverTest {
 
-    private AssistantChatService assistantChatService;
+    private TargetAgentResolver targetAgentResolver;
 
     @Mock
     private SsResourceService ssResourceService;
 
     @BeforeEach
     void setUp() {
-        assistantChatService = new AssistantChatService();
-        ReflectionTestUtils.setField(assistantChatService, "ssResourceService", ssResourceService);
+        targetAgentResolver = new TargetAgentResolver();
+        ReflectionTestUtils.setField(targetAgentResolver, "ssResourceService", ssResourceService);
     }
 
     /**
@@ -35,7 +35,7 @@ class AssistantChatServiceTest {
      * @date 2026-05-09 15:20:00
      */
     @Test
-    void normalizeDefaultSuperAssistantAgentId_clearsAgentIdWhenResourceCodeEndsWithMain() {
+    void resolveAgentIdWithAssistantChatDto_clearsAgentIdWhenResourceCodeEndsWithMain() {
         AssistantChatDto assistantChatDto = new AssistantChatDto();
         assistantChatDto.setAgentId(1001L);
         SsResource resource = new SsResource();
@@ -44,9 +44,9 @@ class AssistantChatServiceTest {
         resource.setResourceCode("user001_main");
         when(ssResourceService.findById(1001L)).thenReturn(resource);
 
-        ReflectionTestUtils.invokeMethod(assistantChatService, "normalizeDefaultSuperAssistantAgentId", assistantChatDto);
+        Long agentId = targetAgentResolver.resolveAgentId(assistantChatDto);
 
-        assertThat(assistantChatDto.getAgentId()).isNull();
+        assertThat(agentId).isNull();
     }
 
     /**
@@ -56,17 +56,15 @@ class AssistantChatServiceTest {
      * @date 2026-05-09 15:20:00
      */
     @Test
-    void normalizeDefaultSuperAssistantAgentId_keepsRegularDigitalEmployeeAgentId() {
-        AssistantChatDto assistantChatDto = new AssistantChatDto();
-        assistantChatDto.setAgentId(1002L);
+    void resolveAgentIdWithLong_keepsRegularDigitalEmployeeAgentId() {
         SsResource resource = new SsResource();
         resource.setResourceId(1002L);
         resource.setResourceBizType(Constants.ResourceBizType.DIG_EMPLOYEE);
         resource.setResourceCode("employee_1002");
         when(ssResourceService.findById(1002L)).thenReturn(resource);
 
-        ReflectionTestUtils.invokeMethod(assistantChatService, "normalizeDefaultSuperAssistantAgentId", assistantChatDto);
+        Long agentId = targetAgentResolver.resolveAgentId(1002L);
 
-        assertThat(assistantChatDto.getAgentId()).isEqualTo(1002L);
+        assertThat(agentId).isEqualTo(1002L);
     }
 }

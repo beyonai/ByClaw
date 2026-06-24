@@ -28,6 +28,9 @@ import com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceSpecEntityMappe
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceProfileEntity;
 import com.iwhalecloud.byai.gateway.sandbox.persistence.SandboxServiceSpecEntity;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxHealthConfigService;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxHealthWatermarkModelService;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxHealthWatermarkService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchRouting;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxResizeService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
@@ -75,6 +78,15 @@ public class SandboxController {
 
     @Autowired
     private SandboxResizeService sandboxResizeService;
+
+    @Autowired
+    private SandboxHealthConfigService sandboxHealthConfigService;
+
+    @Autowired
+    private SandboxHealthWatermarkModelService sandboxHealthWatermarkModelService;
+
+    @Autowired
+    private SandboxHealthWatermarkService sandboxHealthWatermarkService;
 
     @Autowired
     private ByaiSystemConfigService byaiSystemConfigService;
@@ -443,6 +455,88 @@ public class SandboxController {
         return sandboxResizeService.buildBoundaryBlacklistMetrics();
     }
 
+    @PostMapping("/health/config/getGlobalSwitch")
+    @Operation(summary = "查询沙箱健康检测全局开关", description = "查询硬开关和管理端运行期开关状态")
+    public ResponseUtil getSandboxHealthGlobalSwitch() {
+        return ResponseUtil.successResponse(sandboxHealthConfigService.getGlobalSwitch());
+    }
+
+    @PostMapping("/health/config/saveGlobalSwitch")
+    @Operation(summary = "保存沙箱健康检测全局开关", description = "保存管理端运行期开关；硬开关仍由配置文件控制")
+    public ResponseUtil saveSandboxHealthGlobalSwitch(@RequestBody Map<String, Object> params) {
+        Object enabledObj = params.get("enabled");
+        boolean enabled = enabledObj instanceof Boolean
+            ? (Boolean) enabledObj
+            : "true".equalsIgnoreCase(String.valueOf(enabledObj));
+        sandboxHealthConfigService.saveGlobalSwitch(enabled);
+        return ResponseUtil.successResponse(sandboxHealthConfigService.getGlobalSwitch());
+    }
+
+    @PostMapping("/health/watermark/list")
+    @Operation(summary = "查询沙箱健康水位模型", description = "按服务类型、规格和启用状态查询水位模型")
+    public ResponseUtil listSandboxHealthWatermarkModels(@RequestBody Map<String, Object> params) {
+        String serviceType = stringParam(params.get("serviceType"));
+        String profileKey = stringParam(params.get("profileKey"));
+        Integer enabled = params.containsKey("enabled") && params.get("enabled") != null
+            ? parseIntParam(params.get("enabled"), 0)
+            : null;
+        return ResponseUtil.successResponse(sandboxHealthWatermarkModelService.list(serviceType, profileKey, enabled));
+    }
+
+    @PostMapping("/health/watermark/save")
+    @Operation(summary = "保存沙箱健康水位模型", description = "新增或更新沙箱健康水位模型")
+    public ResponseUtil saveSandboxHealthWatermarkModel(@RequestBody Map<String, Object> params) {
+        try {
+            return ResponseUtil.successResponse(
+                sandboxHealthWatermarkModelService.save(sandboxHealthWatermarkModelService.fromParams(params)));
+        }
+        catch (Exception e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+    }
+
+    @PostMapping("/health/watermark/delete")
+    @Operation(summary = "删除沙箱健康水位模型", description = "物理删除指定水位模型")
+    public ResponseUtil deleteSandboxHealthWatermarkModel(@RequestBody Map<String, Object> params) {
+        Long id = parseLongParam(params.get("id"));
+        if (id == null) {
+            return ResponseUtil.fail("id is required");
+        }
+        sandboxHealthWatermarkModelService.delete(id);
+        return ResponseUtil.successResponse();
+    }
+
+    @PostMapping("/health/watermark/enable")
+    @Operation(summary = "启停沙箱健康水位模型", description = "启用或停用指定水位模型")
+    public ResponseUtil enableSandboxHealthWatermarkModel(@RequestBody Map<String, Object> params) {
+        Long id = parseLongParam(params.get("id"));
+        if (id == null) {
+            return ResponseUtil.fail("id is required");
+        }
+        Object enabledObj = params.get("enabled");
+        boolean enabled = enabledObj instanceof Boolean
+            ? (Boolean) enabledObj
+            : "true".equalsIgnoreCase(String.valueOf(enabledObj)) || "1".equals(String.valueOf(enabledObj));
+        try {
+            sandboxHealthWatermarkModelService.enable(id, enabled);
+            return ResponseUtil.successResponse();
+        }
+        catch (Exception e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+    }
+
+    @PostMapping("/health/watermark/preview")
+    @Operation(summary = "预览沙箱健康水位判定", description = "输入 CPU/内存水位，按生效模型返回健康级别")
+    public ResponseUtil previewSandboxHealthWatermark(@RequestBody Map<String, Object> params) {
+        String serviceType = stringParam(params.get("serviceType"));
+        String profileKey = stringParam(params.get("profileKey"));
+        Double cpuRequestRatio = parseDoubleParam(params.get("cpuRequestRatio"));
+        Double memoryLimitRatio = parseDoubleParam(params.get("memoryLimitRatio"));
+        return ResponseUtil.successResponse(
+            sandboxHealthWatermarkService.preview(serviceType, profileKey, cpuRequestRatio, memoryLimitRatio));
+    }
+
     @PostMapping("/listResizeRecords")
     @Operation(summary = "查询沙箱扩缩容记录", description = "按沙箱记录ID、用户编码或 sandboxId 查询扩缩容审计流水")
     public ResponseUtil listResizeRecords(@RequestBody Map<String, Object> params) {
@@ -734,6 +828,18 @@ public class SandboxController {
         }
         catch (NumberFormatException e) {
             return defaultValue;
+        }
+    }
+
+    private Double parseDoubleParam(Object value) {
+        if (value == null || value.toString().trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(value.toString().trim());
+        }
+        catch (NumberFormatException e) {
+            return null;
         }
     }
 

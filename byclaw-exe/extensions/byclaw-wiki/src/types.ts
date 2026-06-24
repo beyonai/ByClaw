@@ -33,6 +33,8 @@ export type ByclawWikiPluginConfig = {
   notificationDingtalkSecret?: unknown;
   notificationDingtalkActionCardBtnTitle?: unknown;
   notificationDingtalkActionCardBtnUrl?: unknown;
+  notificationResourceId?: unknown;
+  notificationDirectoryPath?: unknown;
   notificationRobotType?: unknown;
   notificationMaxOutputChars?: unknown;
   notificationMinOutputChars?: unknown;
@@ -46,6 +48,8 @@ export type ResolvedNotificationConfig = {
   dingtalkSecret?: string;
   dingtalkActionCardBtnTitle: string;
   dingtalkActionCardBtnUrl: string;
+  resourceId?: string;
+  directoryPath: string;
   robotType: NotificationRobotType;
   maxOutputChars: number;
   minOutputChars: number;

@@ -31,6 +31,7 @@ import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContent
 export const DEF_SIDER = 'sessions';
 
 const CENTER_TAB_KEYS = new Set(['agent', 'knowledge', 'tool', 'view', 'object', 'skill', 'file']);
+const EMPLOYEE_RESOURCE_TAB_KEYS = new Set(['knowledge', 'tool', 'view', 'object', 'skill', 'file']);
 
 const SIDER_ACTIVE_TAB_BY_PATH: Partial<Record<string, (typeof tabItems)[number]['key']>> = {
   '/dialogueRecord': 'sessions',
@@ -165,6 +166,15 @@ const Sidebar = () => {
       })
     );
   }, [totalUnread, showSearchAndQueryTab, visibleKeys]);
+  const contextTabItems = React.useMemo(
+    () => myTabItems.filter((tab) => !EMPLOYEE_RESOURCE_TAB_KEYS.has(tab.key)),
+    [myTabItems]
+  );
+  const employeeResourceTabItems = React.useMemo(
+    () => myTabItems.filter((tab) => EMPLOYEE_RESOURCE_TAB_KEYS.has(tab.key)),
+    [myTabItems]
+  );
+  const isEmployeeResourceActive = EMPLOYEE_RESOURCE_TAB_KEYS.has(activeKey);
 
   const { userDropdownItems, onUserDropdownClick, userDropdownRender } = useUserDropdown(userInfo);
 
@@ -233,6 +243,25 @@ const Sidebar = () => {
 
   if (!userInfo) return null;
 
+  const renderTabItem = (tab: (typeof tabItems)[number]) => (
+    <div
+      key={tab.key}
+      className={classnames(styles.tabItem, tab.key === activeKey && styles.activeTab)}
+      onClick={() => handleMenuTabClick(tab)}
+    >
+      <Badge
+        dot={tab.showDot || Number(tab.count) > 0}
+        count={tab.count > 0 ? tab.count : undefined}
+        size="small"
+        style={{ padding: '0 3px' }}
+      >
+        <AntdIcon type={tab.icon} className={styles.tabIcon} />
+      </Badge>
+      <span className={styles.tabLabel}>{intl.formatMessage({ id: tab.label })}</span>
+      <AntdIcon type={tab.activeIcon} className={styles.activeTabIcon} />
+    </div>
+  );
+
   return (
     <>
       <div className={classnames(styles.siderBar, 'hideThumb')}>
@@ -254,28 +283,31 @@ const Sidebar = () => {
         </Tooltip>
         <Divider type="horizontal" />
         <div className={styles.tabsContainer}>
-          {myTabItems.map((tab) => {
-            return (
-              <React.Fragment key={tab.key}>
-                {tab.key === 'knowledge' && <div className={styles.employeeResourceDivider} />}
-                <div
-                  className={classnames(styles.tabItem, tab.key === activeKey && styles.activeTab)}
-                  onClick={() => handleMenuTabClick(tab)}
-                >
-                  <Badge
-                    dot={tab.showDot || Number(tab.count) > 0}
-                    count={tab.count > 0 ? tab.count : undefined}
-                    size="small"
-                    style={{ padding: '0 3px' }}
-                  >
-                    <AntdIcon type={tab.icon} className={styles.tabIcon} />
-                  </Badge>
-                  <span className={styles.tabLabel}>{intl.formatMessage({ id: tab.label })}</span>
-                  <AntdIcon type={tab.activeIcon} className={styles.activeTabIcon} />
-                </div>
-              </React.Fragment>
-            );
-          })}
+          {contextTabItems.map(renderTabItem)}
+          {employeeResourceTabItems.length > 0 && (
+            <Tooltip
+              placement="right"
+              title={intl.formatMessage({
+                id: 'sider.employeeResourceGroup.tooltip',
+                defaultMessage: '知识、工具、视图、对象、技能、文件会跟随当前数字员工切换',
+              })}
+            >
+              <div
+                className={classnames(
+                  styles.employeeResourceGroup,
+                  isEmployeeResourceActive && styles.employeeResourceGroupActive
+                )}
+              >
+                <span className={styles.employeeResourceGroupLabel}>
+                  {intl.formatMessage({
+                    id: 'sider.employeeResourceGroup.label',
+                    defaultMessage: '联动资源',
+                  })}
+                </span>
+                <div className={styles.employeeResourceGroupItems}>{employeeResourceTabItems.map(renderTabItem)}</div>
+              </div>
+            </Tooltip>
+          )}
         </div>
         <Feedback
           userId={userInfo.userId}

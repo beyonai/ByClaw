@@ -7,11 +7,12 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * 数字员工扩展信息DTO 继承 SsResource 获取基础资源字段，手动添加扩展字段
- * 
+ *
  * @author he.duming
  * @date 2025-10-29 00:26:06
  */
@@ -96,16 +97,14 @@ public class DigitalEmployeeDTO extends SsResExtDigEmployee {
     private Long catalogId;
 
     /**
-     * 资源归属类型：enterprise-企业，personal-个人。
-     *
-     * 数字员工个人视角查询依赖该字段落到 ss_resource.owner_type，因此这里显式开放给前端传入。
+     * 资源归属类型：enterprise-企业，personal-个人。 数字员工个人视角查询依赖该字段落到 ss_resource.owner_type，因此这里显式开放给前端传入。
      */
     private String ownerType;
 
     /**
      * 关联热能
      */
-    private List<Long> relIds;
+    private List<Long> relIds = new ArrayList<>();
 
     /***
      * 是否前台创建
@@ -126,34 +125,25 @@ public class DigitalEmployeeDTO extends SsResExtDigEmployee {
     /**
      * 关联资源信息列表
      */
-    private List<RelResourceInfo> relResourceInfoList;
+    private List<RelResourceInfo> relResourceInfoList = new ArrayList<>();
 
     /**
-     * 关联技能列表（前端入参）。兼容历史字符数组，新格式为对象数组：
-     * {skillCode, skillType, skillUrl, versionUrl}。
-     * 写入时序列化为 JSON 字符串落到 {@link SsResExtDigEmployee#getSkills()} 列；
-     * 编辑回显时由 findDetailsById 反序列化重新填充。
-     *
-     * 这里不能声明为 List<Map<String, Object>>，否则历史字符串数组会在 Jackson 反序列化阶段失败，
-     * 无法进入应用层的标准化兼容逻辑。
+     * 关联技能列表（前端入参）。兼容历史字符数组，新格式为对象数组： {skillCode, skillType, skillUrl, versionUrl}。 写入时序列化为 JSON 字符串落到
+     * {@link SsResExtDigEmployee#getSkills()} 列； 编辑回显时由 findDetailsById 反序列化重新填充。 这里不能声明为 List<Map<String,
+     * Object>>，否则历史字符串数组会在 Jackson 反序列化阶段失败， 无法进入应用层的标准化兼容逻辑。
      */
     private List<Object> relSkills;
 
     /**
-     * 关联工具编码列表（前端入参，字符数组）。不入库，仅作为运行期字段：
-     * 1. 同步到 MinIO 的标准 JSON 串里会带这个字段；
-     * 2. 编辑回显时由 findDetailsById 从 ss_res_ext_dig_employee.target_content 反序列化拿回，
-     *    保证保存→编辑→保存的循环不丢数据。
+     * 关联工具编码列表（前端入参，字符数组）。不入库，仅作为运行期字段： 1. 同步到 MinIO 的标准 JSON 串里会带这个字段； 2. 编辑回显时由 findDetailsById 从
+     * ss_res_ext_dig_employee.target_content 反序列化拿回， 保证保存→编辑→保存的循环不丢数据。
      */
     private List<String> relTools;
 
     /**
-     * 提示词文本（运行期字段，不入 DB 独立列）：取自前端入参 corePersonaDefinition，
-     * 在 doSyncOpenClawWorkSpace 阶段被透传到标准 JSON 与 target_content；
-     * findDetailsById 回显时也从 target_content 反序列化拿回，保证保存→编辑→保存的循环不丢数据。
-     *
-     * 注意：corePersonaDefinition 仍按既有逻辑落 ss_res_ext_dig_employee.core_persona_definition 列，
-     *      relPrompt 只是它在 JSON 视角下的别名节点，避免 DB 列与 JSON 节点的命名漂移。
+     * 提示词文本（运行期字段，不入 DB 独立列）：取自前端入参 corePersonaDefinition， 在 doSyncOpenClawWorkSpace 阶段被透传到标准 JSON 与 target_content；
+     * findDetailsById 回显时也从 target_content 反序列化拿回，保证保存→编辑→保存的循环不丢数据。 注意：corePersonaDefinition 仍按既有逻辑落
+     * ss_res_ext_dig_employee.core_persona_definition 列， relPrompt 只是它在 JSON 视角下的别名节点，避免 DB 列与 JSON 节点的命名漂移。
      */
     private String relPrompt;
 

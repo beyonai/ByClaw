@@ -40,6 +40,12 @@ import {
   consumeWorkspaceReloadHint,
   markWorkspaceReloadHint,
 } from "./workspace-reload-hints.js";
+import {
+  resolveByaiAgentIdFromSessionKey,
+  resolveByaiSessionIdFromSessionKey,
+} from "./session-key.js";
+import { resolveByaiSessionStatus } from "./session-status-route.js";
+import { writeDataToRedis } from "./utils.js";
 import path from "node:path";
 import fs from "node:fs/promises";
 
@@ -75,6 +81,30 @@ type CompactionHookEvent = {
   compactedCount?: number;
   tokenCount?: number;
   sessionFile?: string;
+};
+
+type LlmOutputUsage = {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  total?: number;
+  totalTokens?: number;
+};
+
+type LlmOutputHookEvent = {
+  runId?: string;
+  sessionKey?: string;
+  provider?: string;
+  model?: string;
+  contextTokenBudget?: number;
+  contextWindowReferenceTokens?: number;
+  usage?: LlmOutputUsage;
+};
+
+type LlmOutputHookContext = PluginHookAgentContext & {
+  contextTokenBudget?: number;
+  contextWindowReferenceTokens?: number;
 };
 
 type RedisInfo = {
@@ -154,6 +184,102 @@ async function emitCompactionHookNotice(
   api.logger.info(
     `[byai-channel] emitted compaction ${phase} notice from hook: sessionKey=${request.sessionKey}`,
   );
+}
+
+async function refreshSessionStatusRedis(
+  sessionKey: string | undefined,
+  source: string,
+): Promise<void> {
+  const normalizedSessionKey = sessionKey?.trim();
+  if (!normalizedSessionKey) {
+    return;
+  }
+  const sessionId = resolveByaiSessionIdFromSessionKey(normalizedSessionKey);
+  if (!sessionId) {
+    return;
+  }
+  try {
+    const status = await resolveByaiSessionStatus(normalizedSessionKey);
+    await writeDataToRedis(
+      `byai:session:${sessionId}:session_status`,
+      {
+        ...status,
+        sessionId,
+        source,
+      },
+    );
+  } catch (err) {
+    console.warn(
+      `[byai-channel] refresh session status failed: sessionKey=${normalizedSessionKey}, source=${source}, error=${String(err)}`,
+    );
+  }
+}
+
+function normalizeNonNegativeNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : undefined;
+}
+
+function resolveLlmOutputUsedTokens(usage: LlmOutputUsage | undefined): number | undefined {
+  if (!usage) {
+    return undefined;
+  }
+  const input = normalizeNonNegativeNumber(usage.input);
+  const cacheRead = normalizeNonNegativeNumber(usage.cacheRead);
+  const cacheWrite = normalizeNonNegativeNumber(usage.cacheWrite);
+  if (input === undefined && cacheRead === undefined && cacheWrite === undefined) {
+    return undefined;
+  }
+  return (input ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0);
+}
+
+async function refreshRealtimeSessionStatusRedis(
+  event: LlmOutputHookEvent,
+  ctx: LlmOutputHookContext,
+): Promise<void> {
+  const sessionKey = (ctx.sessionKey ?? event.sessionKey)?.trim();
+  if (!sessionKey) {
+    return;
+  }
+  const sessionId = resolveByaiSessionIdFromSessionKey(sessionKey);
+  if (!sessionId) {
+    return;
+  }
+  const usedTokens = resolveLlmOutputUsedTokens(event.usage);
+  if (usedTokens === undefined) {
+    return;
+  }
+  const contextTokens =
+    normalizeNonNegativeNumber(event.contextTokenBudget) ??
+    normalizeNonNegativeNumber(ctx.contextTokenBudget) ??
+    normalizeNonNegativeNumber(event.contextWindowReferenceTokens) ??
+    normalizeNonNegativeNumber(ctx.contextWindowReferenceTokens) ??
+    null;
+  const percent =
+    contextTokens !== null && contextTokens > 0
+      ? Math.min(Math.round((usedTokens / contextTokens) * 100), 100)
+      : null;
+  await writeDataToRedis(`byai:session:${sessionId}:session_status`, {
+    ok: true,
+    exists: true,
+    sessionKey,
+    agentId: resolveByaiAgentIdFromSessionKey(sessionKey),
+    sessionId,
+    fresh: true,
+    realtime: true,
+    source: "llm_output",
+    runId: event.runId ?? ctx.runId,
+    usedTokens,
+    contextTokens,
+    percent,
+    modelProvider: event.provider ?? null,
+    model: event.model ?? null,
+    inputTokens: normalizeNonNegativeNumber(event.usage?.input) ?? null,
+    cacheRead: normalizeNonNegativeNumber(event.usage?.cacheRead) ?? null,
+    cacheWrite: normalizeNonNegativeNumber(event.usage?.cacheWrite) ?? null,
+    outputTokens: normalizeNonNegativeNumber(event.usage?.output) ?? null,
+  });
 }
 
 function getRedisInfo(): RedisInfo | null {
@@ -300,6 +426,7 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     if (event?.compactedCount !== -1) {
       return;
     }
+    refreshSessionStatusRedis(ctx.sessionKey, "after_compaction");
     setImmediate(() => {
       void enqueueAfterAgentEvents(
         `after_compaction sessionKey=${ctx.sessionKey ?? ""}`,
@@ -493,6 +620,12 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     },
   );
 
+  api.on("llm_output", (event: LlmOutputHookEvent, ctx: LlmOutputHookContext) => {
+    void refreshRealtimeSessionStatusRedis(event, ctx).catch((err) => {
+      api.logger.warn(`[byai-channel] llm_output session status refresh failed: ${String(err)}`);
+    });
+  });
+
   api.on("agent_end", (event: PluginHookAgentEndEvent, ctx: PluginHookAgentContext) => {
     const { runId } = ctx;
     if (!runId) {
@@ -500,7 +633,7 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     }
     const runBinding = resolveActiveSdkRunBinding(runId);
     const language = runBinding?.request?.language;
-    const sessionKey = runBinding?.sessionKey;
+    const sessionKey = runBinding?.sessionKey ?? ctx.sessionKey;
     let resolve = getAgentRunEndPromiseResolver(runId);
     let _success = event.success;
     let _error = event.error;
@@ -585,30 +718,6 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
         error: _error,
       });
     }
-  });
-
-
-  api.on("before_compaction", (event: {
-    messageCount: number;
-    compactingCount?: number;
-    tokenCount?: number;
-    messages?: unknown[];
-    sessionFile?: string;
-  }, ctx: PluginHookAgentContext) => {
-    api.logger.info(`before_compaction hook emits, sessionKey=${ctx.sessionKey}`);
-    const { sessionKey, runId } = ctx;
-    let request = resolveActiveSdkRunBinding(runId)?.request;
-    if (!request && sessionKey) {
-      request = resolveActiveSdkRequestBySessionKey(sessionKey);
-    }
-    if (!request) {
-      return;
-    }
-    const emitter = resolveSdkEmitter(request.accountId);
-    emitter?.emitChunk(request.sessionId, request.traceId, "", {
-      parentMessageId: "-1",
-      eventType: EventType.ANSWER_DELTA,
-      contentType: "5007",
-    });
+    refreshSessionStatusRedis(sessionKey, "agent_end");
   });
 }

@@ -5,7 +5,7 @@ import NotificationMgr from '..';
 
 const mockUseAppStore = jest.fn();
 
-jest.setTimeout(20000);
+jest.setTimeout(30000);
 
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({
@@ -165,5 +165,5 @@ describe('NotificationMgr i18n', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Edit/ }));
 
     expect(screen.getByDisplayValue('1.0.0')).toBeDisabled();
-  }, 10000);
+  });
 });

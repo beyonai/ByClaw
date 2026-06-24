@@ -9,7 +9,7 @@
 - `datacloud_data_service`
 - `datacloud_knowledge`
 
-- 启动 `byclaw_data.mcp`，运行时优先加载兄弟仓库 `by-datacloud/packages/*/src` 中的 `datacloud_data_service` / `datacloud_data_sdk`，提供 `/api/v1/mcp` 和 REST 查询接口
+- 启动 `byclaw_data.platform`，运行时优先加载兄弟仓库 `by-datacloud/packages/*/src` 中的 `datacloud_data_service` / `datacloud_data_sdk`，提供 `/api/v1/mcp` 和 REST 查询接口
 - 启动 `byclaw_data.main`，作为 by-framework Gateway worker
 
 ## 安装
@@ -63,7 +63,7 @@ VS Code / Cursor 里可以直接使用调试配置：
 - monorepo 工作区：`DataCloud MCP (byclaw-data)`
 - 仅打开 `byclaw-data/`：`DataCloud MCP (byclaw-data)`
 
-`byclaw_data.mcp` 会优先查找兄弟目录里的 `by-datacloud` 仓库；找不到时会报清晰错误，提示配置 `BY_DATACLOUD_REPO_DIR`。
+`byclaw_data.platform` 会优先查找兄弟目录里的 `by-datacloud` 仓库；找不到时会报清晰错误，提示配置 `BY_DATACLOUD_REPO_DIR`。
 其中结果文件存储会在 loader 初始化时绑定 `byclaw-data` 自己的 `ByclawResultFileStorage` 子类：
 优先走 `DATACLOUD_RESULT_FILE_API_BASE_URL`
 未配置时回退到 `BE_DOMAINNAME` / `DATACLOUD_RESULT_FILE_SERVICE_NAME` 通过 discovery 调后端。
@@ -119,5 +119,5 @@ docker run --rm \
 
 默认会读取 `--env-file` 注入的配置，并在容器内同时拉起：
 
-- `byclaw_data.mcp`
+- `byclaw_data.platform`
 - `byclaw_data.main`

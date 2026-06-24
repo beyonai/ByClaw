@@ -15,13 +15,7 @@ from by_framework.core.discovery import DiscoveryClient
 from by_framework.util.discovery_http_client import DiscoveryHttpClient
 from by_framework.util.http_client import RetryConfig
 
-try:
-    from datacloud_data_sdk.file_storage.base import ResultFileStorage
-except ModuleNotFoundError:
-    from byclaw_data.mcp.by_datacloud_sources import activate_by_datacloud_sources
-
-    activate_by_datacloud_sources()
-    from datacloud_data_sdk.file_storage.base import ResultFileStorage
+from datacloud_data_sdk.file_storage.base import ResultFileStorage
 
 import logging
 def build_result_file_storage(settings: Any) -> Any:
@@ -246,9 +240,9 @@ class ByclawResultFileStorage(ResultFileStorage):
 
 
 def install_result_file_storage_binding() -> None:
-    """Bind byclaw's ResultFileStorage builder into datacloud_data_service."""
+    """Bind byclaw's ResultFileStorage builder into datacloud_platform."""
 
-    import datacloud_data_service.file_storage as file_storage_module
+    import datacloud_platform.platform_file_storage as file_storage_module
 
     file_storage_module.build_result_file_storage = build_result_file_storage
 

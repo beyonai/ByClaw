@@ -9,7 +9,6 @@ from byclaw_data.runtime import resolve_by_datacloud_repo_root
 
 _SOURCE_PACKAGES = (
     "datacloud_data_sdk",
-    "datacloud_data_service",
     "datacloud_analysis",
     "datacloud_knowledge",
     "by_datacloud",

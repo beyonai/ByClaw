@@ -5,20 +5,20 @@ description = "byclaw-data stack: DataCloud MCP service + Gateway worker"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "python-dotenv>=1.0.0",
-    "by-datacloud>=0.1.41",
-    "langchain-openai>=1.1.11",
+    "python-dotenv==1.0.0",
+    "by-datacloud==0.1.41",
+    "langchain-openai==1.1.11",
     "by-framework==0.2.2.dev6",
     "by-framework-trace-langfuse==0.0.3.dev3",
     "by-framework-langgraph==0.0.3.dev3",
-    "by-framework-history-byclaw>=0.0.3",
-    "langfuse>=2.0.0",
-    "deepagents>=0.4.7",
+    "by-framework-history-byclaw==0.0.3",
+    "langfuse==2.0.0",
+    "deepagents==0.4.7",
 ]
 
 [project.scripts]
 byclaw-data-worker = "byclaw_data.main:main"
-byclaw-data-mcp = "byclaw_data.mcp.main:main"
+byclaw-data-mcp = "byclaw_data.platform.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/byclaw_data"]
@@ -47,15 +47,16 @@ index-strategy = "unsafe-best-match"
 
 [dependency-groups]
 dev = [
-    "pytest>=8.0",
-    "httpx>=0.27",
-    "ruff>=0.8",
-    "pytest-asyncio>=1.3.0",
+    "pytest==8.0",
+    "httpx==0.27",
+    "ruff==0.8",
+    "pytest-asyncio==1.3.0",
+    "mypy>=1.13",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
-    "integration: 需要本机已启动 datacloud_data_service（见 by-datacloud launch）",
+    "integration: 需要本机已启动 datacloud_data_service（见 ByDC launch）",
 ]
