@@ -8,7 +8,7 @@
 
 插件按顺序尝试两种结构（取第一个可用的 Agent 条目）：
 
-1. **`agent_list` 数组**：使用 **`agent_list[0]`** 作为条目（字段名与下文「条目字段」一致）。关联资源字段：优先 `relResourceInfoList`；若缺失且存在 **`relResourceList`**，则在读取阶段视为同一列表（与 `src/agent-adapter.ts` 对详情 JSON 的处理一致）。
+1. **`agent_list` 数组**：使用 **`agent_list[0]`** 作为条目（字段名与下文「条目字段」一致）。关联资源字段统一读取 **`relResourceList`**。
 2. **百应详情根对象**：根上同时存在 **`resourceId`** 与 **`resourceName`**（字符串）时，视为详情格式；部分字段会从 JSON 字符串再解析（如 `prologue`、`coreCompetencies`）。
 
 若两种方式都得不到有效条目：
@@ -97,7 +97,7 @@
 | `intro` | `resourceDesc` | `## Capabilities overview` |
 | `coreCompetencies`（数组） | `coreCompetencies`（JSON 字符串解析为数组） | `## Core competencies`，每项包含：`coreCompetency`、`description`、`acceptBoundary`、`rejectBoundary`、`example` |
 | `corePersonaDefinition`（JSON 拓展数组） | 同上 | `## 百应业务拓展属性`：列表摘要 `name`→`value`，并提示详见 `BYAI_BUSINESS_EXTENSIONS.md` |
-| `relResourceInfoList` | `relResourceInfoList`，若无则用 `relResourceList` | `## Associated resources`（列出名称、类型、`resourceDesc`） |
+| `relResourceList` | `relResourceList` | `## Associated resources`（列出名称、类型、`resourceDesc`） |
 
 ---
 
@@ -124,7 +124,7 @@
 
 | 来源 | 作用 |
 |------|------|
-| `relResourceInfoList` 或 `relResourceList` | `## Available resources`：资源名、`resourceId`、`resourceBizType` 或 `resourceType`、`resourceCode`、`resourceDesc` |
+| `relResourceList` | `## Available resources`：资源名、`resourceId`、`resourceBizType` 或 `resourceType`、`resourceCode`、`resourceDesc` |
 | 条目 `resourceId` + 适配层 **`sourceKey`**（作为 fallback） | 对 DOC 类资源（见下）在列表项中补充说明 **`agent_id`** 取值 |
 
 DOC 类资源类型（用于决定是否展示 `agent_id`）：`DOC`、`ATOM`、`KG_DOC`、`KG_DB`、`KG_QA`。

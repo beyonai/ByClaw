@@ -130,7 +130,7 @@ describe("adaptAgentJson", () => {
             coreCompetencies: JSON.stringify([
                 { coreCompetency: "Password Reset", description: "Help reset passwords" },
             ]),
-            relResourceInfoList: [
+            relResourceList: [
                 {
                     resourceId: "doc-001",
                     resourceName: "IT FAQ",
@@ -180,6 +180,39 @@ describe("adaptAgentJson", () => {
         expect(res.coreCompetencies![0].coreCompetency).toBe("Password Reset");
         expect(res.listEntry.skills).toEqual([]);
         expect(res.baiyingModelId).toBeUndefined();
+    });
+
+    it("uses relResourceList for associated resources", () => {
+        const raw = {
+            resourceId: "10039008",
+            resourceName: "Ontology helper",
+            relResourceList: [
+                {
+                    resourceId: "10000045",
+                    resourceName: "销售管理视图",
+                    resourceBizType: "VIEW",
+                    resourceCode: "scene_sales_management",
+                    resourceDesc: "销售漏斗视图",
+                },
+            ],
+        };
+        const res = adaptAgentJson({
+            raw,
+            fileName: "DIG_EMPLOYEE_10039008.json",
+            embedApiKeysFromJson: false,
+        });
+        expect("error" in res).toBe(false);
+        if ("error" in res) {
+            return;
+        }
+        expect(res.associatedResources).toHaveLength(1);
+        expect(res.associatedResources![0]).toMatchObject({
+            resourceId: "10000045",
+            resourceName: "销售管理视图",
+            resourceBizType: "VIEW",
+            resourceCode: "scene_sales_management",
+            resourceDesc: "销售漏斗视图",
+        });
     });
 
     it("smoke: DIG_EMPLOYEE_10000115.json maps relSkills to agents.list skills", () => {

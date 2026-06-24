@@ -73,8 +73,7 @@ INSERT INTO "byai"."byai_system_config" ("param_id", "param_type", "param_code",
         { "resourceDesc": "生成 Capabilities overview" },
         { "coreCompetencies": "生成 Core competencies" },
         { "corePersonaDefinition": "生成百应业务拓展摘要" },
-        { "relResourceInfoList": "生成 Associated resources" },
-        { "relResourceList": "relResourceInfoList 缺失时作为关联资源兜底" }
+        { "relResourceList": "生成 Associated resources" }
       ]
     },
     "SOUL.md": {
@@ -118,8 +117,7 @@ INSERT INTO "byai"."byai_system_config" ("param_id", "param_type", "param_code",
       "priorityPrompt": "",
       "sourceFields": [
         { "resourceId": "生成 DOC 类资源调用所需 agent_id 兜底" },
-        { "relResourceInfoList": "生成 Available resources" },
-        { "relResourceList": "relResourceInfoList 缺失时作为资源列表兜底" },
+        { "relResourceList": "生成 Available resources" },
         { "resourceName": "生成资源展示名称" },
         { "resourceBizType": "生成资源类型，优先于 resourceType" },
         { "resourceType": "生成资源类型兜底" },
@@ -160,8 +158,7 @@ INSERT INTO "byai"."byai_system_config" ("param_id", "param_type", "param_code",
         { "resourceDesc": "生成 Capabilities overview" },
         { "coreCompetencies": "生成 Core competencies" },
         { "corePersonaDefinition": "生成百应业务拓展摘要" },
-        { "relResourceInfoList": "生成 Associated resources" },
-        { "relResourceList": "relResourceInfoList 缺失时作为关联资源兜底" }
+        { "relResourceList": "生成 Associated resources" }
       ]
     },
     "SOUL.md": {
@@ -205,8 +202,7 @@ INSERT INTO "byai"."byai_system_config" ("param_id", "param_type", "param_code",
       "priorityPrompt": "",
       "sourceFields": [
         { "resourceId": "生成 DOC 类资源调用所需 agent_id 兜底" },
-        { "relResourceInfoList": "生成 Available resources" },
-        { "relResourceList": "relResourceInfoList 缺失时作为资源列表兜底" },
+        { "relResourceList": "生成 Available resources" },
         { "resourceName": "生成资源展示名称" },
         { "resourceBizType": "生成资源类型，优先于 resourceType" },
         { "resourceType": "生成资源类型兜底" },

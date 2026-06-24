@@ -170,7 +170,7 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 
 当前实现中，托管 agent 会自动带上 `baiying_call`。该工具会：
 
-- 使用注册时从 `DIG_EMPLOYEE_{resourceId}` 读取的 `relResourceList / relResourceInfoList`
+- 使用注册时从 `DIG_EMPLOYEE_{resourceId}` 读取的 `relResourceList`
 - 按需从 Redis 读取关联资源 `{BIZTYPE}_{resourceId}`，不扫描本地资源目录
 - 在提示词中展开知识库、toolkit、MCP、AGENT 等能力
 - 由插件内置的 **TypeScript 执行器**（`src/executor/`，按资源类型拆分为 `toolkit.ts` / `tool.ts` / `agent.ts` / `mcp.ts` / `doc.ts` 等）在进程内统一执行并做参数校验/回填；历史上的 `~/.openclaw/skills/baiying/executor.py` 已废弃不再调用

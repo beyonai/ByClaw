@@ -314,12 +314,8 @@ function adaptRawBaiyingDetail(params: {
     const agentSseUrl = nonEmpty(detail.agentSseUrl) || undefined;
     const agentHomeUrl = nonEmpty(detail.agentHomeUrl) || undefined;
 
-    // Associated resources (API may return either relResourceInfoList or relResourceList).
-    const relResources = Array.isArray(detail.relResourceInfoList)
-        ? detail.relResourceInfoList
-        : Array.isArray(detail.relResourceList)
-          ? detail.relResourceList
-          : [];
+    // Associated resources from Baiying detail.
+    const relResources = Array.isArray(detail.relResourceList) ? detail.relResourceList : [];
     const associatedResources: BaiyingAssociatedResource[] = relResources
         .filter(
             (r: unknown) =>
