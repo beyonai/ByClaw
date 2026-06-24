@@ -4,12 +4,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
 from kgw.db import build_pool, run_migrations
 from kgw.metadata.binding import (
     bind_usage,
+    bind_usage_with_previous_status,
     confirm_deleting_absent,
     count_in_use,
     delete_by_directory,
@@ -18,6 +20,7 @@ from kgw.metadata.binding import (
     mark_deleting_by_property_op,
     rename_directory_prefix,
     restore_bound,
+    restore_bound_if_unchanged,
     sample_in_use,
 )
 from kgw.metadata.registry import create_property
@@ -86,6 +89,102 @@ async def test_bind_usage_restores_deleting_to_bound(binding_pool):
     assert created is False
     rows = await sample_in_use(binding_pool, prop.property_id, limit=10)
     assert rows[0]["status"] == "BOUND"
+
+
+@pytest.mark.integration
+async def test_bind_usage_with_previous_status_is_safe_for_concurrent_first_bind(
+    binding_pool,
+):
+    prop = await create_property(
+        binding_pool, property_name="t_bound2_race", value_type="string"
+    )
+
+    async def bind_once():
+        async with binding_pool.connection() as conn:
+            result = await bind_usage_with_previous_status(
+                conn,
+                property_id=prop.property_id,
+                kn_code="hr",
+                file_path="/docs/race.md",
+            )
+            await conn.commit()
+            return result
+
+    results = await asyncio.gather(*(bind_once() for _ in range(5)))
+
+    assert sum(1 for r in results if r.created) == 1
+    assert sum(1 for r in results if not r.created) == 4
+    assert {r.previous_status for r in results if not r.created} == {"BOUND"}
+    rows = await sample_in_use(binding_pool, prop.property_id, limit=10)
+    assert rows == [{"knCode": "hr", "filePath": "/docs/race.md", "status": "BOUND"}]
+
+
+@pytest.mark.integration
+async def test_bind_usage_with_previous_status_reports_deleting(binding_pool):
+    prop = await create_property(
+        binding_pool, property_name="t_bound2_prev", value_type="string"
+    )
+    async with binding_pool.connection() as conn:
+        inserted = await bind_usage_with_previous_status(
+            conn, property_id=prop.property_id, kn_code="hr", file_path="/docs/prev.md"
+        )
+        await mark_deleting_by_property_op(
+            conn, property_id=prop.property_id, kn_code="hr", file_path="/docs/prev.md"
+        )
+        restored = await bind_usage_with_previous_status(
+            conn, property_id=prop.property_id, kn_code="hr", file_path="/docs/prev.md"
+        )
+        await conn.commit()
+
+    assert inserted.created is True
+    assert inserted.previous_status is None
+    assert restored.created is False
+    assert restored.previous_status == "DELETING"
+    rows = await sample_in_use(binding_pool, prop.property_id, limit=10)
+    assert rows[0]["status"] == "BOUND"
+
+
+@pytest.mark.integration
+async def test_bind_usage_unique_violation_savepoint_preserves_outer_transaction(
+    binding_pool,
+):
+    prop = await create_property(
+        binding_pool, property_name="t_bound2_outer_tx", value_type="string"
+    )
+
+    async with binding_pool.connection() as conn:
+        async with conn.transaction():
+            inserted = await bind_usage_with_previous_status(
+                conn,
+                property_id=prop.property_id,
+                kn_code="hr",
+                file_path="/docs/outer-tx.md",
+            )
+            repeated = await bind_usage_with_previous_status(
+                conn,
+                property_id=prop.property_id,
+                kn_code="hr",
+                file_path="/docs/outer-tx.md",
+            )
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT 1 AS still_usable")
+                assert (await cur.fetchone())["still_usable"] == 1
+            followup = await bind_usage_with_previous_status(
+                conn,
+                property_id=prop.property_id,
+                kn_code="hr",
+                file_path="/docs/outer-tx-followup.md",
+            )
+
+    assert inserted.created is True
+    assert repeated.created is False
+    assert repeated.previous_status == "BOUND"
+    assert followup.created is True
+    rows = await sample_in_use(binding_pool, prop.property_id, limit=10)
+    assert {(r["filePath"], r["status"]) for r in rows} == {
+        ("/docs/outer-tx.md", "BOUND"),
+        ("/docs/outer-tx-followup.md", "BOUND"),
+    }
 
 
 @pytest.mark.integration
@@ -346,6 +445,46 @@ async def test_restore_bound_restores_deleting_row(binding_pool):
     assert restored == 1
     rows = await sample_in_use(binding_pool, prop.property_id, limit=10)
     assert rows == [{"knCode": "hr", "filePath": "/docs/j.md", "status": "BOUND"}]
+
+
+@pytest.mark.integration
+async def test_restore_bound_if_unchanged_skips_marker_mismatch(binding_pool):
+    prop = await create_property(
+        binding_pool, property_name="t_bound12_marker", value_type="string"
+    )
+    async with binding_pool.connection() as conn:
+        await bind_usage(
+            conn, property_id=prop.property_id, kn_code="hr", file_path="/docs/mk.md"
+        )
+        await mark_deleting_by_property_op(
+            conn, property_id=prop.property_id, kn_code="hr", file_path="/docs/mk.md"
+        )
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT updated_at FROM kgw_metadata_property_binding "
+                "WHERE property_id=%s AND kn_code=%s AND file_path=%s",
+                (prop.property_id, "hr", "/docs/mk.md"),
+            )
+            marker = (await cur.fetchone())["updated_at"]
+        await bind_usage(
+            conn, property_id=prop.property_id, kn_code="hr", file_path="/docs/mk.md"
+        )
+        await mark_deleting_by_property_op(
+            conn, property_id=prop.property_id, kn_code="hr", file_path="/docs/mk.md"
+        )
+        await conn.commit()
+
+    restored = await restore_bound_if_unchanged(
+        binding_pool,
+        property_id=prop.property_id,
+        kn_code="hr",
+        file_path="/docs/mk.md",
+        updated_at=marker,
+    )
+
+    assert restored == 0
+    rows = await sample_in_use(binding_pool, prop.property_id, limit=10)
+    assert rows == [{"knCode": "hr", "filePath": "/docs/mk.md", "status": "DELETING"}]
 
 
 @pytest.mark.integration

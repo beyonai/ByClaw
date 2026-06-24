@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -178,6 +179,7 @@ async def test_upsert_metadata_failure_keeps_existing_bound_binding():
     )
     prop = _metadata_property()
     delete_created = AsyncMock()
+    bind_result = MagicMock(created=False, previous_status="BOUND")
 
     with (
         _patch(
@@ -190,7 +192,8 @@ async def test_upsert_metadata_failure_keeps_existing_bound_binding():
         ),
         _patch("kgw.event_processor.sync_mod.ensure_synced", AsyncMock()),
         _patch(
-            "kgw.event_processor.binding_mod.bind_usage", AsyncMock(return_value=False)
+            "kgw.event_processor.binding_mod.bind_usage_with_previous_status",
+            AsyncMock(return_value=bind_result),
         ) as bind_usage,
         _patch(
             "kgw.event_processor.call_backend_json",
@@ -239,6 +242,7 @@ async def test_upsert_metadata_failure_rolls_back_created_binding_marker():
     prop = _metadata_property()
     marker = datetime(2026, 6, 23, tzinfo=timezone.utc)
     delete_created = AsyncMock()
+    bind_result = MagicMock(created=True, previous_status=None)
 
     with (
         _patch(
@@ -251,7 +255,8 @@ async def test_upsert_metadata_failure_rolls_back_created_binding_marker():
         ),
         _patch("kgw.event_processor.sync_mod.ensure_synced", AsyncMock()),
         _patch(
-            "kgw.event_processor.binding_mod.bind_usage", AsyncMock(return_value=True)
+            "kgw.event_processor.binding_mod.bind_usage_with_previous_status",
+            AsyncMock(return_value=bind_result),
         ),
         _patch(
             "kgw.event_processor._binding_updated_at",
@@ -299,7 +304,7 @@ async def test_non_markdown_upsert_with_metadata_binds_before_file_import():
 
     async def bind_usage(*_args, **_kwargs):
         calls.append("bind")
-        return True
+        return MagicMock(created=True, previous_status=None)
 
     async def binding_updated_at(*_args, **_kwargs):
         calls.append("marker")
@@ -330,7 +335,7 @@ async def test_non_markdown_upsert_with_metadata_binds_before_file_import():
         ),
         _patch("kgw.event_processor.sync_mod.ensure_synced", AsyncMock()),
         _patch(
-            "kgw.event_processor.binding_mod.bind_usage",
+            "kgw.event_processor.binding_mod.bind_usage_with_previous_status",
             AsyncMock(side_effect=bind_usage),
         ),
         _patch(
@@ -355,3 +360,359 @@ async def test_non_markdown_upsert_with_metadata_binds_before_file_import():
         )
 
     assert calls[:3] == ["bind", "marker", "file_import"]
+
+
+@pytest.mark.asyncio
+async def test_non_markdown_upsert_metadata_failure_restores_deleting_binding():
+    """Failed ingest metadata/update restores a binding that was already DELETING."""
+    state = _make_state()
+    state.http.post = AsyncMock(
+        return_value=httpx.Response(200, json={"resultCode": "0"})
+    )
+    item = StandardItem.model_validate(
+        {
+            "sourceId": "s",
+            "itemId": "i",
+            "op": "upsert",
+            "knCode": "k",
+            "filePath": "/restore-deleting.pdf",
+            "content": "file body",
+            "metadata": {"ingest_field": "value"},
+        }
+    )
+    prop = _metadata_property()
+    bind_result = MagicMock(created=False, previous_status="DELETING")
+    restore_deleting = AsyncMock()
+    marker = datetime(2026, 6, 24, tzinfo=timezone.utc)
+
+    with (
+        _patch(
+            "kgw.event_processor.resolve_base_url",
+            AsyncMock(return_value="http://kb.test"),
+        ),
+        _patch(
+            "kgw.event_processor.registry.list_active_properties",
+            AsyncMock(return_value=[prop]),
+        ),
+        _patch("kgw.event_processor.sync_mod.ensure_synced", AsyncMock()),
+        _patch(
+            "kgw.event_processor.binding_mod.bind_usage_with_previous_status",
+            AsyncMock(return_value=bind_result),
+        ) as bind_with_status,
+        _patch(
+            "kgw.event_processor._binding_updated_at",
+            AsyncMock(return_value=marker),
+            create=True,
+        ),
+        _patch(
+            "kgw.event_processor.call_backend_json",
+            AsyncMock(return_value={"resultCode": "-1", "resultMsg": "metadata fail"}),
+        ),
+        _patch("kgw.event_processor.idempotency.mark_failed", AsyncMock()),
+        _patch("kgw.event_processor._audit", AsyncMock()),
+        _patch(
+            "kgw.event_processor._delete_created_bindings",
+            AsyncMock(),
+            create=True,
+        ),
+        _patch(
+            "kgw.event_processor._restore_deleting_bindings",
+            restore_deleting,
+            create=True,
+        ),
+    ):
+        await _process_upsert(
+            state,
+            item,
+            event_id=45,
+            config=state.config_provider.get_kb_config.return_value,
+            user_code="u1",
+            trace_id=None,
+        )
+
+    bind_with_status.assert_awaited_once()
+    restore_deleting.assert_awaited_once()
+    _, records = restore_deleting.await_args.args
+    assert len(records) == 1
+    record = records[0]
+    assert record.property_id == prop.property_id
+    assert record.kn_code == "k"
+    assert record.file_path == "/restore-deleting.pdf"
+    assert record.updated_at == marker
+
+
+@pytest.mark.asyncio
+async def test_non_markdown_upsert_cancelled_after_bind_rolls_back_created_binding():
+    """Cancellation after binding creation rolls back before propagating."""
+    state = _make_state()
+    state.http.post = AsyncMock(side_effect=asyncio.CancelledError)
+    item = StandardItem.model_validate(
+        {
+            "sourceId": "s",
+            "itemId": "i",
+            "op": "upsert",
+            "knCode": "k",
+            "filePath": "/cancel-created.pdf",
+            "content": "file body",
+            "metadata": {"ingest_field": "value"},
+        }
+    )
+    prop = _metadata_property()
+    marker = datetime(2026, 6, 24, tzinfo=timezone.utc)
+    delete_created = AsyncMock()
+
+    with (
+        _patch(
+            "kgw.event_processor.resolve_base_url",
+            AsyncMock(return_value="http://kb.test"),
+        ),
+        _patch(
+            "kgw.event_processor.registry.list_active_properties",
+            AsyncMock(return_value=[prop]),
+        ),
+        _patch("kgw.event_processor.sync_mod.ensure_synced", AsyncMock()),
+        _patch(
+            "kgw.event_processor.binding_mod.bind_usage_with_previous_status",
+            AsyncMock(return_value=MagicMock(created=True, previous_status=None)),
+        ),
+        _patch(
+            "kgw.event_processor._binding_updated_at",
+            AsyncMock(return_value=marker),
+            create=True,
+        ),
+        _patch(
+            "kgw.event_processor._delete_created_bindings",
+            delete_created,
+            create=True,
+        ),
+        _patch(
+            "kgw.event_processor._restore_deleting_bindings",
+            AsyncMock(),
+            create=True,
+        ),
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await _process_upsert(
+                state,
+                item,
+                event_id=46,
+                config=state.config_provider.get_kb_config.return_value,
+                user_code="u1",
+                trace_id=None,
+            )
+
+    delete_created.assert_awaited_once()
+    _, records = delete_created.await_args.args
+    assert len(records) == 1
+    assert records[0].updated_at == marker
+
+
+@pytest.mark.asyncio
+async def test_non_markdown_upsert_cancelled_after_restore_rolls_back_deleting_binding():
+    """Cancellation after restoring DELETING rolls that row back before propagating."""
+    state = _make_state()
+    state.http.post = AsyncMock(side_effect=asyncio.CancelledError)
+    item = StandardItem.model_validate(
+        {
+            "sourceId": "s",
+            "itemId": "i",
+            "op": "upsert",
+            "knCode": "k",
+            "filePath": "/cancel-restored.pdf",
+            "content": "file body",
+            "metadata": {"ingest_field": "value"},
+        }
+    )
+    prop = _metadata_property()
+    marker = datetime(2026, 6, 24, tzinfo=timezone.utc)
+    restore_deleting = AsyncMock()
+
+    with (
+        _patch(
+            "kgw.event_processor.resolve_base_url",
+            AsyncMock(return_value="http://kb.test"),
+        ),
+        _patch(
+            "kgw.event_processor.registry.list_active_properties",
+            AsyncMock(return_value=[prop]),
+        ),
+        _patch("kgw.event_processor.sync_mod.ensure_synced", AsyncMock()),
+        _patch(
+            "kgw.event_processor.binding_mod.bind_usage_with_previous_status",
+            AsyncMock(
+                return_value=MagicMock(created=False, previous_status="DELETING")
+            ),
+        ),
+        _patch(
+            "kgw.event_processor._binding_updated_at",
+            AsyncMock(return_value=marker),
+            create=True,
+        ),
+        _patch(
+            "kgw.event_processor._delete_created_bindings",
+            AsyncMock(),
+            create=True,
+        ),
+        _patch(
+            "kgw.event_processor._restore_deleting_bindings",
+            restore_deleting,
+            create=True,
+        ),
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await _process_upsert(
+                state,
+                item,
+                event_id=48,
+                config=state.config_provider.get_kb_config.return_value,
+                user_code="u1",
+                trace_id=None,
+            )
+
+    restore_deleting.assert_awaited_once()
+    _, records = restore_deleting.await_args.args
+    assert len(records) == 1
+    assert records[0].updated_at == marker
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_at", ["build", "mark_done", "audit"])
+async def test_non_markdown_upsert_cancelled_after_metadata_update_keeps_bindings(
+    cancel_at,
+):
+    """Cancellation after successful file upload + metadata update must not roll back."""
+    state = _make_state()
+    state.http.post = AsyncMock(
+        return_value=httpx.Response(200, json={"resultCode": "0"})
+    )
+    item = StandardItem.model_validate(
+        {
+            "sourceId": "s",
+            "itemId": "i",
+            "op": "upsert",
+            "knCode": "k",
+            "filePath": "/cancel-after-metadata.pdf",
+            "content": "file body",
+            "metadata": {"ingest_field": "value"},
+        }
+    )
+    prop = _metadata_property()
+    marker = datetime(2026, 6, 24, tzinfo=timezone.utc)
+    rollback = AsyncMock()
+    mark_done = AsyncMock()
+    audit = AsyncMock()
+
+    if cancel_at == "build":
+        backend_json = AsyncMock(
+            side_effect=[
+                {"resultCode": "0"},
+                asyncio.CancelledError(),
+            ]
+        )
+    else:
+        backend_json = AsyncMock(return_value={"resultCode": "0"})
+        if cancel_at == "mark_done":
+            mark_done.side_effect = asyncio.CancelledError
+        else:
+            audit.side_effect = asyncio.CancelledError
+
+    with (
+        _patch(
+            "kgw.event_processor.resolve_base_url",
+            AsyncMock(return_value="http://kb.test"),
+        ),
+        _patch(
+            "kgw.event_processor.registry.list_active_properties",
+            AsyncMock(return_value=[prop]),
+        ),
+        _patch("kgw.event_processor.sync_mod.ensure_synced", AsyncMock()),
+        _patch(
+            "kgw.event_processor.binding_mod.bind_usage_with_previous_status",
+            AsyncMock(return_value=MagicMock(created=True, previous_status=None)),
+        ),
+        _patch(
+            "kgw.event_processor._binding_updated_at",
+            AsyncMock(return_value=marker),
+            create=True,
+        ),
+        _patch("kgw.event_processor.call_backend_json", backend_json),
+        _patch("kgw.event_processor.idempotency.mark_done", mark_done),
+        _patch("kgw.event_processor._audit", audit),
+        _patch("kgw.event_processor._rollback_failed_bindings", rollback),
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await _process_upsert(
+                state,
+                item,
+                event_id=49,
+                config=state.config_provider.get_kb_config.return_value,
+                user_code="u1",
+                trace_id=None,
+            )
+
+    rollback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_non_markdown_upsert_invalid_backend_json_rolls_back_binding():
+    """Invalid backend JSON is treated as upstream failure after rollback."""
+    state = _make_state()
+    state.http.post = AsyncMock(return_value=httpx.Response(200, content=b"not-json"))
+    item = StandardItem.model_validate(
+        {
+            "sourceId": "s",
+            "itemId": "i",
+            "op": "upsert",
+            "knCode": "k",
+            "filePath": "/invalid-json.pdf",
+            "content": "file body",
+            "metadata": {"ingest_field": "value"},
+        }
+    )
+    prop = _metadata_property()
+    marker = datetime(2026, 6, 24, tzinfo=timezone.utc)
+    rollback = AsyncMock()
+
+    with (
+        _patch(
+            "kgw.event_processor.resolve_base_url",
+            AsyncMock(return_value="http://kb.test"),
+        ),
+        _patch(
+            "kgw.event_processor.registry.list_active_properties",
+            AsyncMock(return_value=[prop]),
+        ),
+        _patch("kgw.event_processor.sync_mod.ensure_synced", AsyncMock()),
+        _patch(
+            "kgw.event_processor.binding_mod.bind_usage_with_previous_status",
+            AsyncMock(return_value=MagicMock(created=True, previous_status=None)),
+        ),
+        _patch(
+            "kgw.event_processor._binding_updated_at",
+            AsyncMock(return_value=marker),
+            create=True,
+        ),
+        _patch("kgw.event_processor._rollback_failed_bindings", rollback),
+        _patch(
+            "kgw.event_processor.idempotency.mark_failed", AsyncMock()
+        ) as mark_failed,
+        _patch("kgw.event_processor._audit", AsyncMock()) as audit,
+    ):
+        await _process_upsert(
+            state,
+            item,
+            event_id=47,
+            config=state.config_provider.get_kb_config.return_value,
+            user_code="u1",
+            trace_id=None,
+        )
+
+    rollback.assert_awaited_once()
+    mark_failed.assert_awaited_once()
+    state.circuit_breakers.get.return_value.record_failure.assert_called_once()
+    mark_failed_kwargs = mark_failed.await_args.kwargs
+    assert mark_failed_kwargs["error_type"] == "UPSTREAM_INVALID_JSON"
+    audit.assert_awaited_once()
+    audit_kwargs = audit.await_args.kwargs
+    assert audit_kwargs["result_code"] == "-1"
+    assert audit_kwargs["result_msg"] == "invalid backend JSON"

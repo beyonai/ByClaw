@@ -289,6 +289,9 @@ async def _process_upsert(
         )
         return
 
+    created_bindings: list[_CreatedBinding] = []
+    restored_deleting_bindings: list[_CreatedBinding] = []
+
     if _is_markdown(item.file_path):
         # --- Markdown path: parse + rewrite front matter, embed metadata in file ---
         front_matter = _parse_front_matter(content_bytes)
@@ -301,7 +304,6 @@ async def _process_upsert(
         )
 
         upload_bytes = content_bytes
-        created_bindings: list[_CreatedBinding] = []
 
         if all_meta_keys:
             # Validate all keys are registered
@@ -325,13 +327,13 @@ async def _process_upsert(
             async with pool.connection() as conn:
                 async with conn.transaction():
                     for p in props_by_name.values():
-                        created = await binding_mod.bind_usage(
+                        bind_result = await binding_mod.bind_usage_with_previous_status(
                             conn,
                             property_id=p.property_id,
                             kn_code=item.kn_code,
                             file_path=item.file_path,
                         )
-                        if created:
+                        if bind_result.created:
                             updated_at = await _binding_updated_at(
                                 conn,
                                 property_id=p.property_id,
@@ -339,6 +341,21 @@ async def _process_upsert(
                                 file_path=item.file_path,
                             )
                             created_bindings.append(
+                                _CreatedBinding(
+                                    p.property_id,
+                                    item.kn_code,
+                                    item.file_path,
+                                    updated_at,
+                                )
+                            )
+                        elif bind_result.previous_status == binding_mod.DELETING:
+                            updated_at = await _binding_updated_at(
+                                conn,
+                                property_id=p.property_id,
+                                kn_code=item.kn_code,
+                                file_path=item.file_path,
+                            )
+                            restored_deleting_bindings.append(
                                 _CreatedBinding(
                                     p.property_id,
                                     item.kn_code,
@@ -356,8 +373,15 @@ async def _process_upsert(
                         kn_code=item.kn_code,
                         user_code=user_code,
                     )
+            except asyncio.CancelledError:
+                await _rollback_failed_bindings(
+                    pool, created_bindings, restored_deleting_bindings
+                )
+                raise
             except Exception as exc:  # noqa: BLE001
-                await _delete_created_bindings(pool, created_bindings)
+                await _rollback_failed_bindings(
+                    pool, created_bindings, restored_deleting_bindings
+                )
                 await idempotency.mark_failed(
                     pool,
                     event_id,
@@ -396,7 +420,9 @@ async def _process_upsert(
             )
             if resp.status_code in (401, 403):
                 cb.record_failure()
-                await _delete_created_bindings(pool, created_bindings)
+                await _rollback_failed_bindings(
+                    pool, created_bindings, restored_deleting_bindings
+                )
                 await idempotency.mark_failed(
                     pool,
                     event_id,
@@ -414,11 +440,41 @@ async def _process_upsert(
                     user_code=user_code,
                 )
                 return
-            result = resp.json()
+            try:
+                result = resp.json()
+            except ValueError as exc:
+                cb.record_failure()
+                await _rollback_failed_bindings(
+                    pool, created_bindings, restored_deleting_bindings
+                )
+                await idempotency.mark_failed(
+                    pool,
+                    event_id,
+                    error_type="UPSTREAM_INVALID_JSON",
+                    error_message=str(exc)[:500],
+                )
+                await _audit(
+                    state,
+                    item=item,
+                    op_type="ingest.upsert",
+                    result_code="-1",
+                    result_msg="invalid backend JSON",
+                    size=len(upload_bytes),
+                    trace_id=trace_id,
+                    user_code=user_code,
+                )
+                return
             cb.record_success()
+        except asyncio.CancelledError:
+            await _rollback_failed_bindings(
+                pool, created_bindings, restored_deleting_bindings
+            )
+            raise
         except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as exc:
             cb.record_failure()
-            await _delete_created_bindings(pool, created_bindings)
+            await _rollback_failed_bindings(
+                pool, created_bindings, restored_deleting_bindings
+            )
             await idempotency.mark_failed(
                 pool,
                 event_id,
@@ -439,7 +495,9 @@ async def _process_upsert(
 
         if result.get("resultCode") != "0":
             cb.record_failure()
-            await _delete_created_bindings(pool, created_bindings)
+            await _rollback_failed_bindings(
+                pool, created_bindings, restored_deleting_bindings
+            )
             await idempotency.mark_failed(
                 pool,
                 event_id,
@@ -464,7 +522,6 @@ async def _process_upsert(
         # --- Non-markdown path: upload original bytes, then separate metadata/update ---
         active = []
         props_by_name = {}
-        created_bindings: list[_CreatedBinding] = []
 
         if item.metadata:
             active = await registry.list_active_properties(
@@ -486,13 +543,13 @@ async def _process_upsert(
             async with pool.connection() as conn:
                 async with conn.transaction():
                     for p in props_by_name.values():
-                        created = await binding_mod.bind_usage(
+                        bind_result = await binding_mod.bind_usage_with_previous_status(
                             conn,
                             property_id=p.property_id,
                             kn_code=item.kn_code,
                             file_path=item.file_path,
                         )
-                        if created:
+                        if bind_result.created:
                             updated_at = await _binding_updated_at(
                                 conn,
                                 property_id=p.property_id,
@@ -500,6 +557,21 @@ async def _process_upsert(
                                 file_path=item.file_path,
                             )
                             created_bindings.append(
+                                _CreatedBinding(
+                                    p.property_id,
+                                    item.kn_code,
+                                    item.file_path,
+                                    updated_at,
+                                )
+                            )
+                        elif bind_result.previous_status == binding_mod.DELETING:
+                            updated_at = await _binding_updated_at(
+                                conn,
+                                property_id=p.property_id,
+                                kn_code=item.kn_code,
+                                file_path=item.file_path,
+                            )
+                            restored_deleting_bindings.append(
                                 _CreatedBinding(
                                     p.property_id,
                                     item.kn_code,
@@ -516,8 +588,15 @@ async def _process_upsert(
                         kn_code=item.kn_code,
                         user_code=user_code,
                     )
+            except asyncio.CancelledError:
+                await _rollback_failed_bindings(
+                    pool, created_bindings, restored_deleting_bindings
+                )
+                raise
             except Exception as exc:  # noqa: BLE001
-                await _delete_created_bindings(pool, created_bindings)
+                await _rollback_failed_bindings(
+                    pool, created_bindings, restored_deleting_bindings
+                )
                 await idempotency.mark_failed(
                     pool,
                     event_id,
@@ -543,7 +622,9 @@ async def _process_upsert(
             )
             if resp.status_code in (401, 403):
                 cb.record_failure()
-                await _delete_created_bindings(pool, created_bindings)
+                await _rollback_failed_bindings(
+                    pool, created_bindings, restored_deleting_bindings
+                )
                 await idempotency.mark_failed(
                     pool,
                     event_id,
@@ -561,11 +642,41 @@ async def _process_upsert(
                     user_code=user_code,
                 )
                 return
-            result = resp.json()
+            try:
+                result = resp.json()
+            except ValueError as exc:
+                cb.record_failure()
+                await _rollback_failed_bindings(
+                    pool, created_bindings, restored_deleting_bindings
+                )
+                await idempotency.mark_failed(
+                    pool,
+                    event_id,
+                    error_type="UPSTREAM_INVALID_JSON",
+                    error_message=str(exc)[:500],
+                )
+                await _audit(
+                    state,
+                    item=item,
+                    op_type="ingest.upsert",
+                    result_code="-1",
+                    result_msg="invalid backend JSON",
+                    size=len(content_bytes),
+                    trace_id=trace_id,
+                    user_code=user_code,
+                )
+                return
             cb.record_success()
+        except asyncio.CancelledError:
+            await _rollback_failed_bindings(
+                pool, created_bindings, restored_deleting_bindings
+            )
+            raise
         except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as exc:
             cb.record_failure()
-            await _delete_created_bindings(pool, created_bindings)
+            await _rollback_failed_bindings(
+                pool, created_bindings, restored_deleting_bindings
+            )
             await idempotency.mark_failed(
                 pool,
                 event_id,
@@ -586,7 +697,9 @@ async def _process_upsert(
 
         if result.get("resultCode") != "0":
             cb.record_failure()
-            await _delete_created_bindings(pool, created_bindings)
+            await _rollback_failed_bindings(
+                pool, created_bindings, restored_deleting_bindings
+            )
             await idempotency.mark_failed(
                 pool,
                 event_id,
@@ -630,8 +743,15 @@ async def _process_upsert(
                     headers=headers,
                     http=state.http,
                 )
+            except asyncio.CancelledError:
+                await _rollback_failed_bindings(
+                    pool, created_bindings, restored_deleting_bindings
+                )
+                raise
             except Exception as exc:  # noqa: BLE001
-                await _delete_created_bindings(pool, created_bindings)
+                await _rollback_failed_bindings(
+                    pool, created_bindings, restored_deleting_bindings
+                )
                 await idempotency.mark_failed(
                     pool,
                     event_id,
@@ -652,7 +772,9 @@ async def _process_upsert(
 
             if meta_resp.get("resultCode") != "0":
                 cb.record_failure()
-                await _delete_created_bindings(pool, created_bindings)
+                await _rollback_failed_bindings(
+                    pool, created_bindings, restored_deleting_bindings
+                )
                 await idempotency.mark_failed(
                     pool,
                     event_id,
@@ -960,6 +1082,35 @@ async def _delete_created_bindings(pool: Any, records: list[_CreatedBinding]) ->
                         record.updated_at,
                     ),
                 )
+
+
+async def _restore_deleting_bindings(pool: Any, records: list[_CreatedBinding]) -> None:
+    if not records:
+        return
+    async with pool.connection() as conn:
+        async with conn.transaction():
+            for record in records:
+                await conn.execute(
+                    "UPDATE kgw_metadata_property_binding "
+                    "SET status='DELETING', updated_at=clock_timestamp() "
+                    "WHERE property_id=%s AND kn_code=%s AND file_path=%s "
+                    "  AND updated_at=%s AND status='BOUND'",
+                    (
+                        record.property_id,
+                        record.kn_code,
+                        record.file_path,
+                        record.updated_at,
+                    ),
+                )
+
+
+async def _rollback_failed_bindings(
+    pool: Any,
+    created_bindings: list[_CreatedBinding],
+    restored_deleting_bindings: list[_CreatedBinding],
+) -> None:
+    await _delete_created_bindings(pool, created_bindings)
+    await _restore_deleting_bindings(pool, restored_deleting_bindings)
 
 
 async def _audit(

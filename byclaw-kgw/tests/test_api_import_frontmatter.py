@@ -451,3 +451,89 @@ async def test_import_markdown_binding_rolled_back_on_backend_failure(
     assert status is None, (
         f"binding should have been rolled back, but status={status!r}"
     )
+
+
+async def test_import_markdown_backend_failure_restores_deleting_binding(
+    fm_client, fm_pool
+):
+    """A failed markdown import must restore an existing DELETING binding."""
+    prop_name = "fm_rb_deleting"
+    await _create_property(fm_client, prop_name, "string")
+    prop = await _query_property(fm_pool, prop_name)
+    assert prop is not None
+    pid = prop["property_id"]
+
+    file_path = "/docs/rollback_deleting.md"
+    md_content = b"---\nfm_rb_deleting: x\n---\n\n# Rollback deleting test\n"
+    async with fm_pool.connection() as conn:
+        await conn.execute(
+            "INSERT INTO kgw_metadata_property_binding "
+            "(property_id, kn_code, file_path, status, bound_at, updated_at) "
+            "VALUES (%s, %s, %s, 'DELETING', NOW(), NOW())",
+            (pid, _KN_CODE, file_path),
+        )
+        await conn.commit()
+
+    with respx.mock(base_url=_KB_BASE_URL, assert_all_called=False) as mock:
+        mock.post("/api/v1/metadataProperties/batchCreate").mock(
+            return_value=httpx.Response(200, json=_ok_batch_create_resp())
+        )
+        mock.post("/api/v1/knowledgeItems/import").mock(
+            return_value=httpx.Response(200, json=_err_import_resp())
+        )
+
+        r = await fm_client.post(
+            f"{_ITEMS_BASE}/import",
+            files={
+                "fileContent": (
+                    "rollback_deleting.md",
+                    md_content,
+                    "text/markdown",
+                )
+            },
+            data={"knCode": _KN_CODE, "filePath": file_path},
+            headers={"X-User-Id": "user_fm_1"},
+        )
+
+    assert r.status_code == 200, r.text
+    status = await _get_binding_status(fm_pool, pid, _KN_CODE, file_path)
+    assert status == "DELETING"
+
+
+async def test_import_markdown_invalid_backend_json_rolls_back_binding(
+    fm_client, fm_pool
+):
+    """Invalid JSON from backend must roll back front-matter bindings."""
+    prop_name = "fm_rb_invalid_json"
+    await _create_property(fm_client, prop_name, "string")
+    prop = await _query_property(fm_pool, prop_name)
+    assert prop is not None
+    pid = prop["property_id"]
+
+    file_path = "/docs/invalid-json.md"
+    md_content = b"---\nfm_rb_invalid_json: x\n---\n\n# Invalid JSON test\n"
+
+    with respx.mock(base_url=_KB_BASE_URL, assert_all_called=False) as mock:
+        mock.post("/api/v1/metadataProperties/batchCreate").mock(
+            return_value=httpx.Response(200, json=_ok_batch_create_resp())
+        )
+        mock.post("/api/v1/knowledgeItems/import").mock(
+            return_value=httpx.Response(200, content=b"not-json")
+        )
+
+        with pytest.raises(ValueError):
+            await fm_client.post(
+                f"{_ITEMS_BASE}/import",
+                files={
+                    "fileContent": (
+                        "invalid-json.md",
+                        md_content,
+                        "text/markdown",
+                    )
+                },
+                data={"knCode": _KN_CODE, "filePath": file_path},
+                headers={"X-User-Id": "user_fm_1"},
+            )
+
+    status = await _get_binding_status(fm_pool, pid, _KN_CODE, file_path)
+    assert status is None
