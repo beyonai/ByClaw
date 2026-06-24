@@ -850,12 +850,14 @@ public class DigitalEmployeeApplicationService {
         // 技能安装目标是前端当前选中的数字员工：显式 @ 的数字员工优先，没有 @ 时才回退默认数字员工。
         // 因此这里按目标数字员工的管理权限校验，不再强制要求它必须等于 defaultDigEmployeeId。
         if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.skill.install.no.manage.permission", digitalEmployee.getResourceName()));
         }
         for (SsResource resource : installRelResources) {
             if (resource != null && StringUtils.equals(RESOURCE_BIZ_TYPE_SKILL, resource.getResourceBizType())
                 && !authApplicationService.hasResourceUsePermission(resource)) {
-                throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+                throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                    I18nUtil.get("digemployee.skill.install.no.use.permission", resource.getResourceName()));
             }
         }
     }
@@ -866,7 +868,8 @@ public class DigitalEmployeeApplicationService {
         }
         // 技能卸载同安装一样，按请求里的当前数字员工校验管理权限。
         if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.skill.uninstall.no.manage.permission", digitalEmployee.getResourceName()));
         }
     }
 

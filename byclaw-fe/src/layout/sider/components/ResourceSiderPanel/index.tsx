@@ -1062,10 +1062,15 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
               userCode: userInfo?.userCode,
             });
           } else {
-            await uninstallDigitalEmployeeRelResources({
+            // uninstallRelResources 走 customHandle，业务失败（如无管理权限 code!==0）也会 resolve，必须显式校验 code。
+            const res: any = await uninstallDigitalEmployeeRelResources({
               digitalEmployeeId: activeSiderAgent.resourceId!,
               relIds: [item.resourceId],
             });
+            if (res && res.code !== 0) {
+              message.error(res.msg || intl.formatMessage({ id: 'common.operationFailed' }));
+              return;
+            }
           }
           message.success(intl.formatMessage({ id: 'resource.uninstallSuccess' }));
           if (!isInDrillDown()) {

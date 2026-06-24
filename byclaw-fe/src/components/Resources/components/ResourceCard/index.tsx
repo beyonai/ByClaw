@@ -266,11 +266,17 @@ const RenderContent = (props: ResourceCardProps) => {
     },
   });
   const { mutate: handleInstall, isLoading: installing } = useRequest({
-    mutationFn: () => {
-      return installDigitalEmployeeRelResources({
+    mutationFn: async () => {
+      // installRelResources 走 customHandle，业务失败（如无管理权限 code!==0）也会 resolve，
+      // 这里必须显式校验 code，否则 onSuccess 会把“没权限”当成“安装成功”。
+      const res: any = await installDigitalEmployeeRelResources({
         digitalEmployeeId: `${activeDigitalEmployeeId}`,
         relIds: [`${resource.resourceId}`],
       });
+      if (res && res.code !== 0) {
+        throw res.msg || intl.formatMessage({ id: 'common.operationFailed' });
+      }
+      return res;
     },
     onSuccess: () => {
       message.success(intl.formatMessage({ id: 'resource.installSuccess' }));

@@ -268,10 +268,15 @@ export default function SuggestSkill({ agentId }: { agentId?: string }) {
 
       try {
         setInstallingSkillId(item.grantResourceId);
-        await installDigitalEmployeeRelResources({
+        // installRelResources 走 customHandle，业务失败（如无管理权限 code!==0）也会 resolve，必须显式校验 code。
+        const res: any = await installDigitalEmployeeRelResources({
           digitalEmployeeId: agentId,
           relIds: [`${item.resourceId}`],
         });
+        if (res && res.code !== 0) {
+          messageApi.error(res.msg || intl.formatMessage({ id: 'common.operationFailed' }));
+          return;
+        }
 
         messageApi.success(intl.formatMessage({ id: 'resource.installSuccess' }));
         const nextSelectedSkills = selectedSkills.includes(item.grantResourceId)

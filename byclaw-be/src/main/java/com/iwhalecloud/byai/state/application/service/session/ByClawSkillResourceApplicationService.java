@@ -117,6 +117,7 @@ public class ByClawSkillResourceApplicationService {
         if (uploadFiles.size() != uploadedSkills.size()) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.upload.failed"));
         }
+        validateDigitalEmployeeSkillManagePermission(resolvedDigitalEmployeeId);
 
         for (int i = 0; i < uploadedSkills.size(); i++) {
             MultipartFile uploadFile = uploadFiles.get(i);
@@ -228,6 +229,7 @@ public class ByClawSkillResourceApplicationService {
     public SkillImportResult resourceizeAndBindWorkspaceSkill(String userCode, Long digitalEmployeeResourceId,
         String skillPath, boolean overwriteConfirmed) {
         Long resolvedDigitalEmployeeId = resolveDigitalEmployeeId(digitalEmployeeResourceId);
+        validateDigitalEmployeeSkillManagePermission(resolvedDigitalEmployeeId);
         WorkspaceSkillPackage skillPackage = buildWorkspaceSkillPackage(userCode, resolvedDigitalEmployeeId, skillPath);
         SsResource existing = findExistingSkill(skillPackage.metadata().skillCode(), OwnerType.PERSONAL);
         if (existing != null && !overwriteConfirmed) {
@@ -293,6 +295,7 @@ public class ByClawSkillResourceApplicationService {
             return;
         }
         Long resolvedDigitalEmployeeId = resolveDigitalEmployeeId(digitalEmployeeResourceId);
+        validateDigitalEmployeeSkillManagePermission(resolvedDigitalEmployeeId);
         for (MultipartFile file : zipFiles) {
             SkillPackageMetadata metadata = inspectSkillPackage(file);
             SsResource skillResource = saveOrUpdateSkillResource(metadata, OwnerType.PERSONAL,
@@ -352,6 +355,25 @@ public class ByClawSkillResourceApplicationService {
             throw new IllegalArgumentException("数字员工资源ID不能为空");
         }
         return resolved;
+    }
+
+    /**
+     * 技能绑定到数字员工前，统一校验当前用户对该数字员工是否有管理权限。
+     *
+     * <p>与 {@code DigitalEmployeeApplicationService.validateSkillInstallPermission} 同口径：仅有使用权限
+     * （例如别人授权给我的个人助理）的用户不允许安装/绑定技能。此前工作空间、文件管理、对话上传这几条
+     * 绑定链路缺少该校验，会出现“提示安装成功但技能并未真正生效/不展示”的问题。</p>
+     */
+    private void validateDigitalEmployeeSkillManagePermission(Long digitalEmployeeResourceId) {
+        SsResource digitalEmployee = digitalEmployeeResourceId == null ? null
+            : ssResourceService.findById(digitalEmployeeResourceId);
+        if (digitalEmployee == null) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.not.found"));
+        }
+        if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
+            throw new IllegalArgumentException(
+                I18nUtil.get("digemployee.skill.install.no.manage.permission", digitalEmployee.getResourceName()));
+        }
     }
 
     private SsResource saveOrUpdateSkillResource(SkillPackageMetadata metadata, String ownerType, Long catalogId) {
