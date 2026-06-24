@@ -18,10 +18,25 @@ describe("sendDocumentationNotification", () => {
     const expectedSign = createHmac("sha256", Buffer.from(secret, "utf8"))
       .update(`${Date.now()}\n${secret}`, "utf8")
       .digest("base64");
-    let requestedUrl = "";
+    const requestedUrls: string[] = [];
 
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      requestedUrl = String(input);
+      requestedUrls.push(String(input));
+      if (String(input).includes("/api/cos/upload")) {
+        return new Response(
+          JSON.stringify({
+            files: [
+              {
+                key: "uploads/docs/example.md",
+                name: "example.md",
+                size: 42,
+                contentType: "text/markdown; charset=utf-8",
+              },
+            ],
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        );
+      }
       return new Response("ok", { status: 200 });
     }) as typeof fetch;
 
@@ -31,7 +46,8 @@ describe("sendDocumentationNotification", () => {
         dingtalkSecret: secret,
         dingtalkActionCardBtnTitle: "通过",
         dingtalkActionCardBtnUrl: "",
-        directoryPath: "/",
+        documentUploadUrl: "https://upload.example.test/api/cos/upload",
+        documentUploadPrefix: "",
         robotType: "dingtalk",
         maxOutputChars: 3000,
         minOutputChars: 1,
@@ -46,8 +62,10 @@ describe("sendDocumentationNotification", () => {
       documentMarkdown: "## 如何上传 Skill\n\n### 操作步骤\n1. 点击「上传」。",
     });
 
-    const url = new URL(requestedUrl);
+    const url = new URL(requestedUrls[1] ?? "");
     assert.equal(result.ok, true);
+    assert.equal(requestedUrls[0], "https://upload.example.test/api/cos/upload");
+    assert.equal(result.uploadedDocument?.key, "uploads/docs/example.md");
     assert.equal(url.searchParams.get("access_token"), "token");
     assert.equal(url.searchParams.get("timestamp"), "1781760000000");
     assert.equal(url.searchParams.get("sign"), expectedSign);
@@ -66,7 +84,8 @@ describe("sendDocumentationNotification", () => {
         webhookUrl: "https://oapi.dingtalk.com/robot/send?access_token=token",
         dingtalkActionCardBtnTitle: "通过",
         dingtalkActionCardBtnUrl: "",
-        directoryPath: "/",
+        documentUploadUrl: "",
+        documentUploadPrefix: "",
         robotType: "dingtalk",
         maxOutputChars: 3000,
         minOutputChars: 1,
@@ -87,11 +106,26 @@ describe("sendDocumentationNotification", () => {
   });
 
   it("sends DingTalk ActionCard with configurable approve button", async () => {
-    let requestedUrl = "";
+    const requestedUrls: string[] = [];
     let requestedBody = "";
 
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      requestedUrl = String(input);
+      requestedUrls.push(String(input));
+      if (String(input).includes("/api/cos/upload")) {
+        return new Response(
+          JSON.stringify({
+            files: [
+              {
+                key: "uploads/docs/skill-upload.md",
+                name: "skill-upload.md",
+                size: 84,
+                contentType: "text/markdown; charset=utf-8",
+              },
+            ],
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        );
+      }
       requestedBody = String(init?.body ?? "");
       return new Response(JSON.stringify({ errcode: 0, errmsg: "ok" }), {
         status: 200,
@@ -103,9 +137,9 @@ describe("sendDocumentationNotification", () => {
       config: {
         dingtalkAccessToken: "token-from-config",
         dingtalkActionCardBtnTitle: "审核通过",
-        dingtalkActionCardBtnUrl: "https://example.test/datasetController/buildKnowledgeFromDoc",
-        resourceId: "10024308",
-        directoryPath: "/",
+        dingtalkActionCardBtnUrl: "https://example.test/approve",
+        documentUploadUrl: "https://upload.example.test/api/cos/upload",
+        documentUploadPrefix: "",
         robotType: "dingtalk",
         maxOutputChars: 3000,
         minOutputChars: 1,
@@ -121,27 +155,27 @@ describe("sendDocumentationNotification", () => {
       documentMarkdown: "## 如何上传 Skill\n\n### 操作步骤\n1. 点击「上传」。",
     });
 
-    const url = new URL(requestedUrl);
+    const url = new URL(requestedUrls[1] ?? "");
     const payload = JSON.parse(requestedBody) as {
       msgtype?: string;
       actionCard?: Record<string, unknown>;
     };
-    const buttonUrl = new URL(String(payload.actionCard?.btnUrl ?? ""));
 
     assert.equal(result.ok, true);
+    assert.equal(requestedUrls[0], "https://upload.example.test/api/cos/upload");
+    assert.equal(result.uploadedDocument?.key, "uploads/docs/skill-upload.md");
     assert.equal(url.origin + url.pathname, "https://oapi.dingtalk.com/robot/send");
     assert.equal(url.searchParams.get("access_token"), "token-from-config");
     assert.equal(payload.msgtype, "actionCard");
     assert.equal(payload.actionCard?.title, "Skill 上传文档");
     assert.equal(payload.actionCard?.btnTitle, "审核通过");
-    assert.equal(buttonUrl.origin + buttonUrl.pathname, "https://example.test/datasetController/buildKnowledgeFromDoc");
-    assert.equal(buttonUrl.searchParams.get("resourceId"), "10024308");
-    assert.equal(buttonUrl.searchParams.get("directoryPath"), "/");
-    assert.equal(buttonUrl.searchParams.get("language"), "zh-CN");
-    assert.match(buttonUrl.searchParams.get("docName") ?? "", /^Skill-上传文档-\d{14}\.md$/);
-    assert.match(buttonUrl.searchParams.get("doc") ?? "", /如何上传 Skill/);
+    assert.equal(payload.actionCard?.btnUrl, "https://example.test/approve");
     assert.equal(payload.actionCard?.btnUrl, String(payload.actionCard?.singleURL));
     assert.equal(payload.actionCard?.singleTitle, "审核通过");
-    assert.match(String(payload.actionCard?.text ?? ""), /如何上传 Skill/);
+    assert.equal(
+      payload.actionCard?.text,
+      "有新文档需要审核：\n\n用户问：《如何上传 Skill？》\n\n百应平台赋能助手 已生成文档，点击去审核是否更新到知识库",
+    );
+    assert.doesNotMatch(String(payload.actionCard?.text ?? ""), /操作步骤/);
   });
 });
