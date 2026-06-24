@@ -52,7 +52,7 @@ async def test_kb_config_direct_resolves(app: Any) -> None:
     assert cfg is not None
     assert cfg.kn_code == _KN_DIRECT
     assert cfg.domain_url, "domain_url should be set to the QA backend URL"
-    assert cfg.resource_code == "2"
+    assert cfg.resource_code == "1"
 
 
 async def test_kb_config_discovery_resolves(app: Any) -> None:
@@ -62,7 +62,7 @@ async def test_kb_config_discovery_resolves(app: Any) -> None:
     assert cfg.kn_code == _KN_DISCOV
     assert cfg.domain_name == _QA_SVC_NAME
     assert cfg.domain_url == ""
-    assert cfg.resource_code == "3"
+    assert cfg.resource_code == "2"
 
 
 # ---------------------------------------------------------------------------

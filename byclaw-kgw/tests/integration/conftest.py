@@ -31,8 +31,8 @@ _SQL_DIR = Path(__file__).resolve().parent.parent.parent / "sql"
 
 _KN_DIRECT = "200001"
 _KN_DISCOV = "300001"
-_RESOURCE_CODE_DIRECT = "2"
-_RESOURCE_CODE_DISCOV = "3"
+_RESOURCE_CODE_DIRECT = "1"
+_RESOURCE_CODE_DISCOV = "2"
 # Service name used by byclaw-qa lifespan to register in Redis
 _QA_SVC_NAME = os.environ.get("QA_DOMAINNAME", "byclaw-qa-manager")
 _QA_PORT = int(os.environ.get("BYCLAW_QA_PORT", "8000"))
