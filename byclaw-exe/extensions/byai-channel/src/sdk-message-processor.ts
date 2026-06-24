@@ -11,7 +11,7 @@ import {
   saveMediaBuffer,
 } from "openclaw/plugin-sdk/media-runtime";
 import { getByaiRuntime } from "./runtime.js";
-import { buildAgentSessionKey, resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
+import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import type { SdkInboundFile, SdkProcessorDeps } from "./types.js";
 import {
   bindActiveSdkRequestRunId,
@@ -40,68 +40,134 @@ import {
   emitByaiSdkMessageReceived,
   runWithByaiSdkDiagnosticTrace,
 } from "./diagnostics.js";
+import {
+  BYAI_CHANNEL_ID,
+  buildBroadcastSessionKey,
+  resolveByaiSessionKey,
+  resolveSdkTargetAgentId,
+} from "./session-key.js";
+import { waitForManagedBaiyingAgentConfig } from "./managed-agent-config-wait.js";
 
-const CHANNEL_ID = "byai-channel" as const;
+const CHANNEL_ID = BYAI_CHANNEL_ID;
+const MANAGED_BAIYING_AGENT_PREFIX = "baiying-agent-";
+export { buildBroadcastSessionKey };
 
-export function buildBroadcastSessionKey(
-  baseSessionKey: string,
-  originalAgentId: string,
-  targetAgentId: string,
-): string {
-  const prefix = `agent:${originalAgentId}:`;
-  if (baseSessionKey.startsWith(prefix)) {
-    return `agent:${targetAgentId}:${baseSessionKey.slice(prefix.length)}`;
-  }
-  return baseSessionKey;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function resolveSdkTargetAgentId(
-  routingAgentId: string,
-  extraPayload: {
-    agent_id?: string;
-    agent_code?: string;
-  },
-): string {
-  if (extraPayload.agent_id) {
-    return `baiying-agent-${extraPayload.agent_id}`;
+function parsePrimaryModelRef(primary: string): { provider: string; model: string } | null {
+  const trimmed = primary.trim();
+  const slash = trimmed.indexOf("/");
+  if (slash <= 0 || slash >= trimmed.length - 1) {
+    return null;
   }
-  if (extraPayload.agent_code) {
-    return extraPayload.agent_code;
-  }
-  return routingAgentId;
+  const provider = trimmed.slice(0, slash).trim();
+  const model = trimmed.slice(slash + 1).trim();
+  return provider && model ? { provider, model } : null;
 }
 
-function resolveSdkSessionKey(params: {
-  routing: {
-    sessionKey: string;
-    agentId: string;
-    channel: string;
-    accountId: string;
-  };
-  targetAgentId: string;
-  sessionId: string;
-  userId: string;
-  perSessionId: boolean;
-}): string {
-  if (!params.perSessionId) {
-    if (params.targetAgentId === params.routing.agentId) {
-      return params.routing.sessionKey;
-    }
-    return buildBroadcastSessionKey(
-      params.routing.sessionKey,
-      params.routing.agentId,
-      params.targetAgentId,
+function providerHasModel(provider: unknown, modelId: string): boolean {
+  if (!isRecord(provider)) {
+    return false;
+  }
+  const models = provider.models;
+  if (Array.isArray(models)) {
+    return models.some((model) =>
+      typeof model === "string" ? model === modelId : isRecord(model) && model.id === modelId,
     );
   }
+  return isRecord(models) && Object.prototype.hasOwnProperty.call(models, modelId);
+}
 
-  const peerId = params.sessionId.trim() || params.userId;
-  return buildAgentSessionKey({
-    agentId: params.targetAgentId,
-    channel: params.routing.channel,
-    accountId: params.routing.accountId,
-    peer: { kind: "direct", id: peerId },
-    dmScope: "per-peer",
+function resolveManagedAgentPrimaryModel(
+  cfg: import("openclaw/plugin-sdk").OpenClawConfig,
+  agentId: string,
+): { provider: string; model: string; primary: string } | null {
+  if (!agentId.startsWith(MANAGED_BAIYING_AGENT_PREFIX)) {
+    return null;
+  }
+  const entry = cfg.agents?.list?.find((agent) => agent.id === agentId);
+  const rawModel = entry?.model;
+  const primary =
+    typeof rawModel === "string"
+      ? rawModel.trim()
+      : isRecord(rawModel) && typeof rawModel.primary === "string"
+        ? rawModel.primary.trim()
+        : "";
+  if (!primary) {
+    return null;
+  }
+  const parsed = parsePrimaryModelRef(primary);
+  if (!parsed) {
+    return null;
+  }
+  const provider = cfg.models?.providers?.[parsed.provider];
+  if (!providerHasModel(provider, parsed.model)) {
+    return null;
+  }
+  return { ...parsed, primary };
+}
+
+async function alignManagedAgentSessionModel(params: {
+  rt: ReturnType<typeof getByaiRuntime>;
+  cfg: import("openclaw/plugin-sdk").OpenClawConfig;
+  sessionAgentId: string;
+  sessionKey: string;
+  log?: {
+    info?: (msg: string) => void;
+    warn?: (msg: string) => void;
+  };
+}): Promise<void> {
+  const target = resolveManagedAgentPrimaryModel(params.cfg, params.sessionAgentId);
+  if (!target) {
+    return;
+  }
+  const sessionApi = params.rt.agent?.session;
+  if (!sessionApi?.patchSessionEntry || !sessionApi.resolveStorePath) {
+    params.log?.warn?.(
+      `[diagnose-sdk] managed agent session model alignment skipped: runtime session patch API unavailable, agent=${params.sessionAgentId}`,
+    );
+    return;
+  }
+  const storePath = sessionApi.resolveStorePath(params.cfg.session?.store, {
+    agentId: params.sessionAgentId,
   });
+  const now = Date.now();
+  await sessionApi.patchSessionEntry({
+    storePath,
+    sessionKey: params.sessionKey,
+    fallbackEntry: {
+      sessionId: crypto.randomUUID(),
+      updatedAt: now,
+    },
+    preserveActivity: true,
+    update: (entry: Record<string, unknown>) => {
+      const patch: Record<string, unknown> = {};
+      if (entry.modelProvider !== target.provider) {
+        patch.modelProvider = target.provider;
+      }
+      if (entry.model !== target.model) {
+        patch.model = target.model;
+      }
+      if (entry.providerOverride !== target.provider) {
+        patch.providerOverride = target.provider;
+      }
+      if (entry.modelOverride !== target.model) {
+        patch.modelOverride = target.model;
+      }
+      if (entry.modelOverrideSource !== "auto") {
+        patch.modelOverrideSource = "auto";
+      }
+      if (entry.contextTokens !== undefined) {
+        patch.contextTokens = undefined;
+      }
+      return Object.keys(patch).length > 0 ? patch : null;
+    },
+  });
+  params.log?.info?.(
+    `[diagnose-sdk] aligned managed agent session model before dispatch: agent=${params.sessionAgentId}, session=${params.sessionKey}, model=${target.primary}`,
+  );
 }
 
 async function resolveSdkInboundMediaPayload(params: {
@@ -218,11 +284,12 @@ async function resolveSdkInboundMediaPayload(params: {
 }
 
 export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise<void> {
-  const { message, account, cfg, log } = deps;
+  const { message, account, cfg: initialCfg, log } = deps;
 
   const rt = getByaiRuntime();
+  let cfg = initialCfg;
   const routePeerId = message.sessionId?.trim() || message.userId;
-  const routing = rt.channel.routing.resolveAgentRoute({
+  let routing = rt.channel.routing.resolveAgentRoute({
     cfg,
     channel: CHANNEL_ID,
     accountId: account.accountId,
@@ -230,13 +297,26 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
   });
 
   const extraPayload = message.extraPayload as {
-    agent_id?: string;
-    agent_code?: string;
-    agent_name?: string;
+    agent_id?: unknown;
+    agent_code?: unknown;
+    agent_name?: unknown;
   };
 
-  const targetAgentId = resolveSdkTargetAgentId(routing.agentId, extraPayload);
-  const sessionKey = resolveSdkSessionKey({
+  let targetAgentId = resolveSdkTargetAgentId(routing.agentId, extraPayload);
+  cfg = await waitForManagedBaiyingAgentConfig({
+    runtime: rt,
+    cfg,
+    agentId: targetAgentId,
+    log,
+  });
+  routing = rt.channel.routing.resolveAgentRoute({
+    cfg,
+    channel: CHANNEL_ID,
+    accountId: account.accountId,
+    peer: { kind: "direct", id: routePeerId },
+  });
+  targetAgentId = resolveSdkTargetAgentId(routing.agentId, extraPayload);
+  const sessionKey = resolveByaiSessionKey({
     routing,
     targetAgentId,
     sessionId: message.sessionId,
@@ -271,9 +351,9 @@ type DeliverReplyUnderGateDeps = SdkProcessorDeps & {
   };
   targetAgentId: string;
   extraPayload: {
-    agent_id?: string;
-    agent_code?: string;
-    agent_name?: string;
+    agent_id?: unknown;
+    agent_code?: unknown;
+    agent_name?: unknown;
   };
 };
 
@@ -326,9 +406,17 @@ async function deliverReplyToAgentViaSdkUnderGate(
     }
   }
 
+  await alignManagedAgentSessionModel({
+    rt,
+    cfg,
+    sessionAgentId,
+    sessionKey,
+    log,
+  });
+
   const { accountId } = account;
   const To = `${sessionAgentId}:${message.sessionId}`;
-  emitByaiSdkMessageReceived(diagnosticRef, diagnosticTrace);
+  const receivedAt = emitByaiSdkMessageReceived(diagnosticRef, diagnosticTrace);
 
   const activeRequest = registerActiveSdkRequest({
     accountId,
@@ -336,6 +424,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     to: To,
     sessionId: message.sessionId,
     traceId: message.traceId,
+    createdAt: receivedAt,
     language: message.language,
     languageProvided: message.languageProvided,
     channelExtension: message.channelExtension,

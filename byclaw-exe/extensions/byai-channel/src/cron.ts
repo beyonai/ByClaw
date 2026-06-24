@@ -4,7 +4,7 @@ import path from "node:path";
 import { createRedis } from "@byclaw/by-framework";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { getOptionalByaiRuntime } from "./runtime";
-import { emitOutOfBandSdkEvent, getRedisInfo, getUserCode } from "./utils";
+import { createRedisInstance, emitOutOfBandSdkEvent, getUserCode } from "./utils";
 
 type PluginHookGatewayCronRunStatus = "ok" | "error" | "skipped";
 
@@ -258,15 +258,14 @@ async function upsertCronNextRunTimeField(params: {
 }
 
 export async function updateCronNextRunTimeRedis(api?: Pick<OpenClawPluginApi, "logger">) {
-  const redisInfo = getRedisInfo();
-  if (!redisInfo) {
+  const redis = createRedisInstance();
+  if (!redis) {
     return;
   }
   const userCode = getUserCode();
   if (!userCode) {
     return;
   }
-  const redis = createRedis(redisInfo);
   try {
     const nextRunTime = await resolveNearestCronNextRunTime();
     await upsertCronNextRunTimeField({ redis, userCode, nextRunTime });

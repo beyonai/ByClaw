@@ -15,6 +15,13 @@ import {
   listServiceProfiles,
   saveServiceProfile,
   deleteServiceProfile,
+  getSandboxHealthGlobalSwitch,
+  saveSandboxHealthGlobalSwitch,
+  listSandboxHealthWatermarkModels,
+  saveSandboxHealthWatermarkModel,
+  deleteSandboxHealthWatermarkModel,
+  enableSandboxHealthWatermarkModel,
+  previewSandboxHealthWatermark,
 } from '@/pages/manager/service/SandboxMgr';
 import { unwrapResponse, getErrorText } from '@/pages/manager/models/modelMgr';
 
@@ -214,6 +221,114 @@ export default {
           success?.(response.data);
         } else {
           message.error(response?.msg || 'Failed to delete service profile');
+          fail?.(response || {});
+        }
+      } catch (error) {
+        const err = { msg: getErrorText(error) };
+        message.error(err.msg);
+        fail?.(err);
+      }
+    },
+    *getSandboxHealthGlobalSwitch({ success, fail }, { call }) {
+      try {
+        const response = unwrapResponse(yield call(getSandboxHealthGlobalSwitch));
+        if (response.code === 0) {
+          success?.(response.data || {});
+        } else {
+          message.error(response?.msg || 'Failed to fetch sandbox health switch');
+          fail?.(response || {});
+        }
+      } catch (error) {
+        const err = { msg: getErrorText(error) };
+        message.error(err.msg);
+        fail?.(err);
+      }
+    },
+    *saveSandboxHealthGlobalSwitch({ payload, success, fail }, { call }) {
+      try {
+        const response = unwrapResponse(yield call(saveSandboxHealthGlobalSwitch, payload));
+        if (response.code === 0) {
+          message.success(getIntl().formatMessage({ id: 'sandboxMgr.health.switchSaveSuccess' }));
+          success?.(response.data || {});
+        } else {
+          message.error(response?.msg || 'Failed to save sandbox health switch');
+          fail?.(response || {});
+        }
+      } catch (error) {
+        const err = { msg: getErrorText(error) };
+        message.error(err.msg);
+        fail?.(err);
+      }
+    },
+    *listSandboxHealthWatermarkModels({ payload, success, fail }, { call }) {
+      try {
+        const response = unwrapResponse(yield call(listSandboxHealthWatermarkModels, payload || {}));
+        if (response.code === 0) {
+          success?.(response.data || []);
+        } else {
+          message.error(response?.msg || 'Failed to fetch watermark models');
+          fail?.(response || {});
+        }
+      } catch (error) {
+        const err = { msg: getErrorText(error) };
+        message.error(err.msg);
+        fail?.(err);
+      }
+    },
+    *saveSandboxHealthWatermarkModel({ payload, success, fail }, { call }) {
+      try {
+        const response = unwrapResponse(yield call(saveSandboxHealthWatermarkModel, payload));
+        if (response.code === 0) {
+          message.success(getIntl().formatMessage({ id: 'sandboxMgr.health.modelSaveSuccess' }));
+          success?.(response.data || {});
+        } else {
+          message.error(response?.msg || 'Failed to save watermark model');
+          fail?.(response || {});
+        }
+      } catch (error) {
+        const err = { msg: getErrorText(error) };
+        message.error(err.msg);
+        fail?.(err);
+      }
+    },
+    *deleteSandboxHealthWatermarkModel({ payload, success, fail }, { call }) {
+      try {
+        const response = unwrapResponse(yield call(deleteSandboxHealthWatermarkModel, payload));
+        if (response.code === 0) {
+          message.success(getIntl().formatMessage({ id: 'sandboxMgr.health.modelDeleteSuccess' }));
+          success?.(response.data);
+        } else {
+          message.error(response?.msg || 'Failed to delete watermark model');
+          fail?.(response || {});
+        }
+      } catch (error) {
+        const err = { msg: getErrorText(error) };
+        message.error(err.msg);
+        fail?.(err);
+      }
+    },
+    *enableSandboxHealthWatermarkModel({ payload, success, fail }, { call }) {
+      try {
+        const response = unwrapResponse(yield call(enableSandboxHealthWatermarkModel, payload));
+        if (response.code === 0) {
+          success?.(response.data);
+        } else {
+          message.error(response?.msg || 'Failed to update watermark model');
+          fail?.(response || {});
+        }
+      } catch (error) {
+        const err = { msg: getErrorText(error) };
+        message.error(err.msg);
+        fail?.(err);
+      }
+    },
+    *previewSandboxHealthWatermark({ payload, success, fail }, { call }) {
+      try {
+        const response = unwrapResponse(yield call(previewSandboxHealthWatermark, payload));
+        if (response.code === 0) {
+          success?.(response.data || {});
+        } else {
+          message.error(response?.msg || 'Failed to preview watermark model');
           fail?.(response || {});
         }
       } catch (error) {

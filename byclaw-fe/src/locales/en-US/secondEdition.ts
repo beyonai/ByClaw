@@ -337,4 +337,5 @@ export default {
   'fileSider.saveToKnowledge.rootTip': 'No folders in this directory. You can save here directly',
   'fileSider.saveToKnowledge.noManagePermission':
     'You do not have management permission for knowledge bases under the current digital employee.',
+  'context.used.format': '{percent}% context used. {usedTokens} / {contextTokens}',
 };

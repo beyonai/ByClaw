@@ -184,6 +184,20 @@ RUN set -eux; \
 
 COPY --from=ext-builder /build/out/ /app/dist-runtime/extensions/
 
+RUN set -eux; \
+    rm -rf /app/dist/extensions/diagnostics-otel; \
+    mkdir -p /app/dist/extensions; \
+    cp -a /app/dist-runtime/extensions/byai_diagnostics-otel /app/dist/extensions/diagnostics-otel; \
+    rm -rf /app/dist-runtime/extensions/byai_diagnostics-otel; \
+    test -f /app/dist/extensions/diagnostics-otel/dist/index.js; \
+    node --input-type=module -e ' \
+      import { readFileSync } from "node:fs"; \
+      const manifest = JSON.parse(readFileSync("/app/dist/extensions/diagnostics-otel/openclaw.plugin.json", "utf8")); \
+      const pkg = JSON.parse(readFileSync("/app/dist/extensions/diagnostics-otel/package.json", "utf8")); \
+      if (manifest.id !== "diagnostics-otel") throw new Error(`unexpected diagnostics plugin id: ${manifest.id}`); \
+      if (pkg.name !== "@openclaw/diagnostics-otel") throw new Error(`unexpected diagnostics package name: ${pkg.name}`); \
+    '
+
 RUN ln -s /app /app/node_modules/openclaw
 
 

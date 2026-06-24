@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 
 import Settings from '..';
 
@@ -73,15 +73,21 @@ describe('Settings version info', () => {
     });
   });
 
-  it('expands version details after clicking the version button', () => {
-    render(<Settings />);
+  it('expands filtered version details after clicking the version button', async () => {
+    await act(async () => {
+      render(<Settings />);
+    });
 
-    expect(screen.queryByText('main')).not.toBeInTheDocument();
+    expect(screen.queryByText('2026-06-16 10:00:00')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '1.2.3' }));
 
-    expect(screen.getByText('main')).toBeInTheDocument();
+    expect(screen.getByText('settings.versionInfo.buildTime')).toBeInTheDocument();
     expect(screen.getByText('2026-06-16 10:00:00')).toBeInTheDocument();
+    expect(screen.queryByText('main')).not.toBeInTheDocument();
     expect(screen.queryByText('abc123')).not.toBeInTheDocument();
+    expect(screen.queryByText('abc123def456')).not.toBeInTheDocument();
+    expect(screen.queryByText('feat: show version details')).not.toBeInTheDocument();
+    expect(screen.queryByText('byclaw-fe')).not.toBeInTheDocument();
   });
 });

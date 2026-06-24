@@ -3,6 +3,7 @@ import { getLoginInfo, queryMyDepartmentRange } from '@/service/user';
 
 import { setUserToken } from '@/utils/auth';
 import CookieUtil from '@/utils/cookie';
+import webSocketManager from '@/utils/websocket';
 import { isEmpty, isNil, set } from 'lodash';
 
 export const userInfo: Record<string, any> = {};
@@ -138,6 +139,7 @@ export default {
       }
 
       setUserToken(payload);
+      webSocketManager.init();
 
       yield put({
         type: 'save',

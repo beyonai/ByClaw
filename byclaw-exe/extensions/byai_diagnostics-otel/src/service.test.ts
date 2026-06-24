@@ -174,7 +174,10 @@ function createContext() {
         }),
       },
     },
-    emitTrusted(event: Omit<DiagnosticEventPayload, "seq" | "ts"> & { ts?: number }) {
+    emitTrusted(
+      event: Omit<DiagnosticEventPayload, "seq" | "ts"> & { ts?: number },
+      privateData: Record<string, unknown> = {},
+    ) {
       if (!listener) {
         throw new Error("diagnostic listener not registered");
       }
@@ -185,7 +188,7 @@ function createContext() {
           ...event,
         } as DiagnosticEventPayload,
         { trusted: true },
-        {},
+        privateData,
       );
     },
   };
@@ -380,6 +383,176 @@ describe("BYAI diagnostics OTel correlation", () => {
 
     await service.stop?.(ctx as never);
     vi.unstubAllEnvs();
+  });
+
+  it("attaches BYAI first response and token usage attributes to the message span", async () => {
+    const service = createDiagnosticsOtelService({
+      includeDiagnosticSessionAttributes: true,
+      includeLangfuseSessionAttributes: true,
+    });
+    const { ctx, emitTrusted } = createContext();
+    await service.start(ctx as never);
+
+    const sessionKey = "agent:main:byai-channel:direct:session-observable";
+    const trace = {
+      traceId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      spanId: "bbbbbbbbbbbbbbbb",
+      traceFlags: "01",
+    };
+    emitTrusted({
+      type: "message.received",
+      channel: "byai-channel",
+      source: "byai-channel-sdk",
+      sessionId: "session-observable",
+      sessionKey,
+      messageId: "message-observable",
+      trace,
+      "byai.traceId": trace.traceId,
+      ts: 100,
+    } as never);
+    emitTrusted({
+      type: "message.dispatch.started",
+      channel: "byai-channel",
+      source: "byai-channel-sdk",
+      sessionId: "session-observable",
+      sessionKey,
+      trace,
+      "byai.traceId": trace.traceId,
+      ts: 110,
+    } as never);
+    emitTrusted({
+      type: "run.progress",
+      runId: "",
+      reason: "byai.first_visible_response",
+      sessionId: "session-observable",
+      sessionKey,
+      trace,
+      "byai.firstResponseMs": 1234,
+      "byai.firstResponseEventType": "REASONING_LOG_DELTA",
+      "byai.traceId": trace.traceId,
+      ts: 250,
+    } as never);
+    emitTrusted({
+      type: "run.progress",
+      runId: "",
+      reason: "byai.first_answer_delta",
+      sessionId: "session-observable",
+      sessionKey,
+      trace,
+      "byai.firstResponseMs": 2345,
+      "byai.firstResponseEventType": "ANSWER_DELTA",
+      "byai.traceId": trace.traceId,
+      ts: 350,
+    } as never);
+    emitTrusted({
+      type: "model.usage",
+      sessionId: "session-observable",
+      sessionKey,
+      provider: "openai",
+      model: "gpt-5.5",
+      usage: {
+        input: 10,
+        output: 5,
+        cacheRead: 3,
+        cacheWrite: 2,
+        total: 20,
+      },
+      trace,
+      "byai.traceId": trace.traceId,
+      ts: 400,
+    } as never);
+
+    const messageSpan = span("openclaw.message.processed");
+    expect(messageSpan.setAttributes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        "byai.first_visible_response_ms": 1234,
+        "byai.first_visible_response_event_type": "REASONING_LOG_DELTA",
+        "langfuse.observation.metadata.byai_first_visible_response_ms": 1234,
+        "langfuse.observation.metadata.byai_first_visible_response_event_type":
+          "REASONING_LOG_DELTA",
+      }),
+    );
+    expect(messageSpan.setAttributes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        "byai.first_answer_delta_ms": 2345,
+        "byai.first_answer_delta_event_type": "ANSWER_DELTA",
+        "langfuse.observation.metadata.byai_first_answer_delta_ms": 2345,
+        "langfuse.observation.metadata.byai_first_answer_delta_event_type": "ANSWER_DELTA",
+      }),
+    );
+    expect(messageSpan.setAttributes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        "byai.tokens.input": 15,
+        "byai.tokens.output": 5,
+        "byai.tokens.cache_read": 3,
+        "byai.tokens.cache_write": 2,
+        "byai.tokens.total": 20,
+        "langfuse.observation.metadata.byai_tokens_input": 15,
+        "langfuse.observation.metadata.byai_tokens_output": 5,
+        "langfuse.observation.metadata.byai_tokens_cache_read": 3,
+        "langfuse.observation.metadata.byai_tokens_cache_write": 2,
+        "langfuse.observation.metadata.byai_tokens_total": 20,
+      }),
+    );
+    expect(span("openclaw.model.usage").end).toHaveBeenCalledWith(400);
+
+    await service.stop?.(ctx as never);
+  });
+
+  it("exports Langfuse usage and first-token timing on model call spans", async () => {
+    const service = createDiagnosticsOtelService();
+    const { ctx, emitTrusted } = createContext();
+    await service.start(ctx as never);
+
+    emitTrusted(
+      {
+        type: "model.call.completed",
+        runId: "run-model",
+        sessionId: "session-model",
+        sessionKey: "agent:main:byai-channel:direct:session-model",
+        provider: "openai",
+        model: "gpt-5.5",
+        api: "responses",
+        durationMs: 1000,
+        requestPayloadBytes: 100,
+        responseStreamBytes: 200,
+        timeToFirstByteMs: 250,
+        ts: 2000,
+      } as never,
+      {
+        modelContent: {
+          outputMessages: [
+            {
+              role: "assistant",
+              content: "ok",
+              usage: {
+                input: 10,
+                output: 7,
+                cacheRead: 2,
+                cacheWrite: 1,
+                total: 20,
+              },
+            },
+          ],
+        },
+      },
+    );
+
+    expect(span("openclaw.model.call").setAttributes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        "gen_ai.usage.input_tokens": 13,
+        "gen_ai.usage.output_tokens": 7,
+        "gen_ai.usage.prompt_tokens": 13,
+        "gen_ai.usage.completion_tokens": 7,
+        "gen_ai.usage.total_tokens": 20,
+        "langfuse.observation.usage_details":
+          '{"input":13,"output":7,"total":20,"cache_read":2,"cache_write":1}',
+        "langfuse.observation.metadata.openclaw_time_to_first_byte_ms": 250,
+        "langfuse.observation.completion_start_time": new Date(1250).toISOString(),
+      }),
+    );
+
+    await service.stop?.(ctx as never);
   });
 
   it("publishes the active tool span id for plugin tools and clears it after completion", async () => {

@@ -35,6 +35,11 @@ type NativeAgentJson = {
     allowSpawnFrom?: string[];
 };
 
+function isSkillRelResource(raw: Record<string, unknown>): boolean {
+    const t = String(raw.resourceBizType ?? raw.resourceType ?? "").trim().toUpperCase();
+    return t === "SKILL";
+}
+
 export type AimodelProviderApi = "openai-completions" | "openai-responses" | "anthropic-messages";
 export type AimodelModelInput = "text" | "image";
 export type AimodelThinkingLevel =
@@ -55,6 +60,7 @@ export type AimodelModelCompat = {
     thinkingFormat?: string;
     supportedReasoningEfforts?: string[];
     reasoningEffortMap?: Record<string, string>;
+    supportsUsageInStreaming?: boolean;
 };
 
 export type ProviderBundle = {
@@ -313,18 +319,15 @@ function adaptRawBaiyingDetail(params: {
     const agentSseUrl = nonEmpty(detail.agentSseUrl) || undefined;
     const agentHomeUrl = nonEmpty(detail.agentHomeUrl) || undefined;
 
-    // Associated resources (API may return either relResourceInfoList or relResourceList).
-    const relResources = Array.isArray(detail.relResourceInfoList)
-        ? detail.relResourceInfoList
-        : Array.isArray(detail.relResourceList)
-          ? detail.relResourceList
-          : [];
+    // Associated resources from Baiying detail.
+    const relResources = Array.isArray(detail.relResourceList) ? detail.relResourceList : [];
     const associatedResources: BaiyingAssociatedResource[] = relResources
         .filter(
             (r: unknown) =>
                 r &&
                 typeof r === "object" &&
-                typeof (r as Record<string, unknown>).resourceId === "string",
+                typeof (r as Record<string, unknown>).resourceId === "string" &&
+                !isSkillRelResource(r as Record<string, unknown>),
         )
         .map((r: Record<string, unknown>) => ({
             resourceId: String(r.resourceId),

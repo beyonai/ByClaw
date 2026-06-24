@@ -21,6 +21,10 @@ import {
 } from "./session-context.js";
 import type { ResolvedByaiAccount, ByaiSdkInboundMessage, SdkInboundFile } from "./types.js";
 import { getRedisInfo, getUserCode } from "./utils.js";
+import {
+  isBaiyingEnhanceConfigured,
+  waitForBaiyingEnhanceColdStartReady,
+} from "./baiying-enhance-readiness.js";
 
 export interface ByaiSdkAppOptions {
   account: ResolvedByaiAccount;
@@ -277,6 +281,27 @@ export class ByaiSdkApp {
     );
 
     registerSdkEmitter(this.account.accountId, emitter);
+
+    if (isBaiyingEnhanceConfigured(this.currentConfig())) {
+      const rawWaitMs = Number.parseInt(
+        process.env.BAIYING_ENHANCE_COLD_START_WAIT_MS || "60000",
+        10,
+      );
+      const waitMs = Number.isFinite(rawWaitMs) ? Math.max(0, rawWaitMs) : 60000;
+      info?.(
+        `[${this.account.accountId}] waiting for baiying-enhance cold-start readiness before subscribing, waitMs=${waitMs}`,
+      );
+      const readiness = await waitForBaiyingEnhanceColdStartReady(waitMs);
+      if (readiness.ready) {
+        info?.(
+          `[${this.account.accountId}] baiying-enhance cold-start readiness complete before subscribing, waitedMs=${readiness.waitedMs}, reason=${readiness.reason ?? "ready"}`,
+        );
+      } else {
+        error?.(
+          `[${this.account.accountId}] baiying-enhance cold-start readiness not complete before subscribing, waitedMs=${readiness.waitedMs}, reason=${readiness.reason ?? "timeout"}; continuing`,
+        );
+      }
+    }
 
     const subscription = runner.subscribe(async ({ streamName, msgId, data }) => {
       if (data.actionType === ActionType.RESUME) {

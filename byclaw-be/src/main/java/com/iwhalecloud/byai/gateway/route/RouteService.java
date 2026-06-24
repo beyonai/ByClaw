@@ -39,7 +39,7 @@ import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatStreamRuntimeCoordinator;
 import com.iwhalecloud.byai.state.domain.chat.service.GatewayStreamEventProcessor;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
-import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentTypeResolver;
+import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
@@ -76,7 +76,7 @@ public class RouteService {
     private JwtService jwtService;
 
     @Autowired
-    private TargetAgentTypeResolver targetAgentTypeResolver;
+    private TargetAgentResolver targetAgentResolver;
 
     @Autowired
     private InterfaceRouteService interfaceRouteService;
@@ -159,7 +159,7 @@ public class RouteService {
         Long agentId = ctx.assistantChatDto.getAgentId();
         List<ResourceVo> resourceList = chatDto.getResourceList();
 
-        targetAgentType = targetAgentTypeResolver.resolve(targetAgentType, agentId, chatDto.getSourceAgentType(),
+        targetAgentType = targetAgentResolver.resolveAgentType(targetAgentType, agentId, chatDto.getSourceAgentType(),
                 userCode);
         ctx.targetAgentType = targetAgentType;
 
@@ -511,7 +511,7 @@ public class RouteService {
     }
 
     private boolean isUserSandboxAgentType(String targetAgentType, String userCode) {
-        return targetAgentTypeResolver.isUserSandboxAgentType(targetAgentType, userCode);
+        return targetAgentResolver.isUserSandboxAgentType(targetAgentType, userCode);
     }
 
 }

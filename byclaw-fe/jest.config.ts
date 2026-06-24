@@ -29,13 +29,9 @@ const config: Config = {
   testMatch: [
     '<rootDir>/src/**/__tests__/**/*.test.{ts,tsx,js,jsx}',
     '<rootDir>/src/**/*.test.{ts,tsx,js,jsx}',
+    '<rootDir>/config/**/__tests__/**/*.test.{ts,tsx,js,jsx}',
   ],
-  collectCoverageFrom: [
-    'src/**/*.{ts,tsx}',
-    '!src/**/*.d.ts',
-    '!src/.umi/**',
-    '!src/.umi-production/**',
-  ],
+  collectCoverageFrom: ['src/**/*.{ts,tsx}', '!src/**/*.d.ts', '!src/.umi/**', '!src/.umi-production/**'],
   globals: {
     _PUBLIC_PATH_: '/',
     PREFIX_NAME: 'beyond',

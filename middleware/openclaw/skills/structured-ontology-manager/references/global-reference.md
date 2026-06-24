@@ -9,7 +9,7 @@
 | `BEYOND_TOKEN` | 门户服务 API 认证 Token | `eyJhbGci...` |
 | `USER_CODE` | 当前用户编码 | `adminvip` |
 | `BEYOND_SESSION` | 会话 ID | `uuid-xxx` |
-| `OPENCLAW_GATEWAY_TOKEN` | SQLite 服务认证 | `ztesoft` |
+| `OPENCLAW_GATEWAY_TOKEN` | 服务认证 | `ztesoft` |
 | `BE_DOMAINNAME` | 门户服务名称（服务发现） | `ByaiService` |
 | `REDIS_HOST` | 服务发现 Redis 主机 | `10.10.168.203` |
 | `REDIS_PORT` | 服务发现 Redis 端口 | `6379` |
@@ -19,7 +19,7 @@
 | `ONTOLOGY_STORE` | 暂存后端：`redis`（默认）或 `local` | `redis` |
 | `ONTOLOGY_WORKSPACE_DIR` | 本地暂存目录（`ONTOLOGY_STORE=local` 时用） | `~/.ontology_workspace` |
 
-> SQLite 服务名不是固定值，而是按用户动态拼接：`BYCLAW_EXE_{USER_CODE}`（如 `BYCLAW_EXE_adminvip`），由 `table_manager.py` 内部自动构造，无需额外配置。
+> 表数据 服务名不是固定值，而是按用户动态拼接：`BYCLAW_EXE_{USER_CODE}`（如 `BYCLAW_EXE_adminvip`），由 `table_manager.py` 内部自动构造，无需额外配置。
 
 > `DATACLOUD_GATEWAY_REDIS_*` 变量仅供 `model_environment.py` 内部读取模型配置使用，与服务发现无关，Skill 层无需关心。
 

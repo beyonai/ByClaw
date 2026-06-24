@@ -175,14 +175,25 @@ public class SessionApplicationService {
         ByaiSession byaiSession = new ByaiSession();
         // 设置会话ID，这是更新的唯一标识
         byaiSession.setSessionId(sessionOpeartorDto.getSessionId());
-        byaiSession.setSessionName(sessionOpeartorDto.getSessionName());
+        if (StringUtils.isNotBlank(sessionOpeartorDto.getSessionName())) {
+            byaiSession.setSessionName(sessionOpeartorDto.getSessionName());
+        }
         // 如果会话内容不为空，则更新会话内容
         if (StringUtils.isNotBlank(sessionOpeartorDto.getSessionContent())) {
             byaiSession.setSessionContent(sessionOpeartorDto.getSessionContent());
         }
 
         // 设置当前企业ID，确保数据隔离和权限控制
-        byaiSession.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
+        Long enterpriseId = CurrentUserHolder.getEnterpriseId();
+        if (enterpriseId != null) {
+            byaiSession.setEnterpriseId(enterpriseId);
+        }
+        if (StringUtils.isBlank(byaiSession.getSessionName())
+            && StringUtils.isBlank(byaiSession.getSessionContent())
+            && byaiSession.getEnterpriseId() == null) {
+            log.debug("Skip empty session update, sessionId={}", sessionOpeartorDto.getSessionId());
+            return byaiSession;
+        }
         // 调用会话服务执行更新操作
         sessionService.update(byaiSession);
 
