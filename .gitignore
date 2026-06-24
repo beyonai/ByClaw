@@ -106,3 +106,6 @@ byclaw-data/trace_result.json
 byclaw-data/.vscode/launch.json
 byclaw-data/.vscode/settings.json
 .vscode/launch.json
+
+.codegraph
+.workbuddy/

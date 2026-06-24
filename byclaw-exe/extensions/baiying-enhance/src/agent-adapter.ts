@@ -35,6 +35,9 @@ type NativeAgentJson = {
     allowSpawnFrom?: string[];
 };
 
+const CODE_TO_WIKI_EMPLOYEE_NAME = "百应平台赋能助手";
+const CODE_TO_WIKI_TOOL_NAME = "code_to_wiki";
+
 function isSkillRelResource(raw: Record<string, unknown>): boolean {
     const t = String(raw.resourceBizType ?? raw.resourceType ?? "").trim().toUpperCase();
     return t === "SKILL";
@@ -266,12 +269,17 @@ function normalizeAgentListTools(
     raw: Record<string, unknown>,
 ): NonNullable<AgentListEntry["tools"]> {
     const allow = normalizeStringList(raw.relTools);
+    const extraTools =
+        nonEmpty(raw.resourceName) === CODE_TO_WIKI_EMPLOYEE_NAME ||
+        nonEmpty(raw.name) === CODE_TO_WIKI_EMPLOYEE_NAME
+            ? [CODE_TO_WIKI_TOOL_NAME]
+            : [];
     return allow.length > 0
         ? {
-              allow: Array.from(new Set([...allow, "baiying_call"])),
+              allow: Array.from(new Set([...allow, "baiying_call", ...extraTools])),
           }
         : {
-              alsoAllow: ["baiying_call"],
+              alsoAllow: Array.from(new Set(["baiying_call", ...extraTools])),
           };
 }
 

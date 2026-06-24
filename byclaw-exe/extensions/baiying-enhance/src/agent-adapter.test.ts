@@ -356,6 +356,47 @@ describe("adaptAgentJson", () => {
         expect(res.listEntry.experimental).toEqual({ localModelLean: false });
     });
 
+    it("adds code_to_wiki for 百应平台赋能助手 without relTools", () => {
+        const raw = {
+            resourceId: "10011258",
+            resourceName: "百应平台赋能助手",
+            integrationType: "NONE",
+        };
+        const res = adaptAgentJson({
+            raw,
+            fileName: "DIG_EMPLOYEE_10011258.json",
+            embedApiKeysFromJson: false,
+        });
+        expect("error" in res).toBe(false);
+        if ("error" in res) {
+            return;
+        }
+        expect(res.listEntry.tools).toEqual({
+            alsoAllow: ["baiying_call", "code_to_wiki"],
+        });
+    });
+
+    it("adds code_to_wiki for 百应平台赋能助手 with relTools", () => {
+        const raw = {
+            resourceId: "10011259",
+            resourceName: "百应平台赋能助手",
+            integrationType: "NONE",
+            relTools: ["read"],
+        };
+        const res = adaptAgentJson({
+            raw,
+            fileName: "DIG_EMPLOYEE_10011259.json",
+            embedApiKeysFromJson: false,
+        });
+        expect("error" in res).toBe(false);
+        if ("error" in res) {
+            return;
+        }
+        expect(res.listEntry.tools).toEqual({
+            allow: ["read", "baiying_call", "code_to_wiki"],
+        });
+    });
+
     it("maps raw Baiying detail (integrationType INTERFACE)", () => {
         const raw = {
             resourceId: "20001",

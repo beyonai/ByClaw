@@ -497,7 +497,7 @@ async function executeDocViaRaw(input: ExecuteDocViaRawInput): Promise<ExecutorR
       success: true,
       status: "completed",
       backend: "raw",
-      data: { poll },
+      data: { text: poll.text || "" },
       type: "doc_sync",
       target: buildTarget(input),
     };

@@ -279,7 +279,7 @@ export async function executeViaCallAgent(
       success: true,
       status: "completed",
       backend: "call_agent_sdk",
-      data: { ack, poll },
+      data: { ack, text: poll.text || "" },
       type: `${input.responseType}_sync`,
       target: input.target,
     };
