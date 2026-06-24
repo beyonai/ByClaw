@@ -63,12 +63,11 @@ def _load_owl_if_configured() -> Any | None:
 
 
 def _init_enterprise_base_and_scene() -> None:
-    """Create enterprise ontology base and CRM scene, then attach all OWL
+    """Create enterprise ontology base and CRM scene, then attach OWL
     objects and views as scene members.
 
-    Does **not** reload OWL — OWL parsing is handled by
-    ``_load_owl_if_configured()`` into the default base.  Object/view codes
-    are hardcoded from the OWL resource layout; no filesystem scanning.
+    Object/view codes are hardcoded from the OWL resource layout;
+    no filesystem scanning.
 
     Idempotent at every step:
     - ``create_base`` guarded by ``base_exists``
@@ -94,6 +93,11 @@ def _init_enterprise_base_and_scene() -> None:
                 base_id=enterprise_id,
                 display_name="企业本体库",
                 source_type="LOCAL",
+                backend_config={
+                    "ontology": {
+                        "base_path": os.environ.get("DATACLOUD_ONTOLOGY_PATH", ""),
+                    }
+                },
             )
         )
 
@@ -192,6 +196,11 @@ def _init_platform_if_needed() -> None:
             base_id="default",
             display_name="默认本地库",
             source_type="LOCAL",
+            backend_config={
+                "ontology": {
+                    "base_path": os.environ.get("DATACLOUD_ONTOLOGY_PATH", ""),
+                }
+            },
         )
     )
     platform = DatacloudPlatform(_base_registry=registry)
@@ -204,7 +213,7 @@ def _init_platform_if_needed() -> None:
     # ── 函数式导入 OWL（后续可由 HTTP API 替换调用路径）──
     _load_owl_if_configured()
 
-    # ── 初始化企业本体库 + CRM 场景 + 挂载 OWL 本体 ──
+    # ── 初始化企业本体库 + CRM 场景 ──
     _ensure_enterprise_initialized()
 
 
@@ -217,7 +226,12 @@ def load_env_if_exists(*paths: Path) -> None:
 
 
 def locate_by_datacloud_repo_root(start: Path | None = None) -> Path | None:
-    """Locate the sibling ``by-datacloud`` repository."""
+    """Locate the sibling ``by-datacloud`` repository.
+
+    Resolution order:
+    1. ``BY_DATACLOUD_REPO_DIR`` when set
+    2. walking parent directories and looking for a sibling named ``by-datacloud``
+    """
 
     configured = os.environ.get("BY_DATACLOUD_REPO_DIR", "").strip()
     if configured:
@@ -234,7 +248,7 @@ def locate_by_datacloud_repo_root(start: Path | None = None) -> Path | None:
 
 
 def resolve_by_datacloud_repo_root(start: Path | None = None) -> Path:
-    """Resolve the sibling ``by-datacloud`` repository."""
+    """Resolve the sibling ``by-datacloud`` repository or raise a clear error."""
 
     repo_root = locate_by_datacloud_repo_root(start=start)
     if repo_root is not None:
@@ -247,10 +261,12 @@ def resolve_by_datacloud_repo_root(start: Path | None = None) -> Path:
 
 def normalize_runtime_environment() -> None:
     """Normalize env vars so byclaw-data consumes DATACLOUD-prefixed settings."""
-    _init_platform_if_needed()
 
     _set_if_empty("DATACLOUD_ONTOLOGY_PATH", _DEFAULT_DATACLOUD_ONTOLOGY_PATH)
     _set_if_empty("DATACLOUD_MID_FTP_PATH", _DEFAULT_DATACLOUD_MID_FTP_PATH)
+
+    _init_platform_if_needed()
+
     _set_first("DATACLOUD_DB_URL", "DB_URL")
     _set_first("DATACLOUD_DB_USER", "DB_USER")
     _set_first("DATACLOUD_DB_PASSWORD", "DATACLOUD_DB_PASS", "DB_PASS", "DB_PASSWORD")
