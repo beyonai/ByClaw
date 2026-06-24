@@ -10,6 +10,10 @@
   object-fit: cover;
 }
 
+.categoryActionIcon {
+  font-size: 15px;
+}
+
 .defaultAvatar {
   display: inline-flex;
   align-items: center;
@@ -40,6 +44,19 @@
     .@{antPrefix}-tree-node-content-wrapper {
       cursor: default;
     }
+  }
+}
+
+.detailBreadcrumbRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+
+  :global(.@{antPrefix}-breadcrumb) {
+    min-width: 0;
+    flex: 1;
+    margin: 0;
   }
 }
 
@@ -87,6 +104,19 @@
       }
     }
   }
+}
+
+.treeWrap {
+  height: 100%;
+}
+
+.modalContentStack {
+  width: 100%;
+}
+
+.clickableText,
+.clickableListItem {
+  cursor: pointer;
 }
 
 .previewPanel {

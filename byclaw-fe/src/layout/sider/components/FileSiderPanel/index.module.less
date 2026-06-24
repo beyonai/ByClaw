@@ -149,12 +149,22 @@
   font-size: 15px;
 }
 
+.categoryLocateButton {
+  width: auto;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
 .categoryHeaderActive {
   .categoryTitle {
     color: var(--beyond-color-primary, #1677ff);
   }
 
   .categoryPath {
+    color: rgba(22, 119, 255, 0.72);
+  }
+
+  .categoryPathSegment {
     color: rgba(22, 119, 255, 0.72);
   }
 }
@@ -166,25 +176,68 @@
   line-height: 20px;
 }
 
-.categoryPath {
-  width: fit-content;
+.categoryPathRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
+}
+
+.categoryPath {
+  min-width: 0;
+  padding: 0;
+  color: var(--beyond-color-text-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  text-align: left;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.categoryPathSegment {
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--beyond-color-text-tertiary);
   cursor: pointer;
-  font-size: 11px;
-  line-height: 16px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: inherit;
+  line-height: inherit;
   text-align: left;
 
   &:hover,
   &:focus {
     color: var(--beyond-color-primary, #1677ff);
     text-decoration: underline;
+    outline: none;
+  }
+}
+
+.categoryPathCopy {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--beyond-color-text-tertiary);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+
+  &:hover,
+  &:focus {
+    color: var(--beyond-color-primary, #1677ff);
     outline: none;
   }
 }
@@ -315,6 +368,10 @@
   max-width: 100%;
 }
 
+.previewableTreeTitle {
+  cursor: pointer;
+}
+
 .treeTitleText {
   display: inline-block;
   max-width: 100%;
@@ -326,6 +383,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: bottom;
+}
+
+.previewableTreeTitle .treeTitleText {
+  cursor: pointer;
 }
 
 .treeActionTrigger {
@@ -356,6 +417,14 @@
       min-width: 0;
     }
   }
+}
+
+.modalContentStack {
+  width: 100%;
+}
+
+.clickableListItem {
+  cursor: pointer;
 }
 
 .fileAvatar {

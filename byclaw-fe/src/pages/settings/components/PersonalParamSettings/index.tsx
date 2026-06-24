@@ -204,7 +204,7 @@ const PersonalParamSettings: React.FC = () => {
       dataIndex: 'status',
       width: 120,
       render: (_, record) =>
-        (record.enabled ?? record.status === 'NORMAL') ? (
+        record.enabled ?? record.status === 'NORMAL' ? (
           <Tag color="green">{intl.formatMessage({ id: 'settings.params.enabled' })}</Tag>
         ) : (
           <Tag>{intl.formatMessage({ id: 'settings.params.disabled' })}</Tag>
@@ -320,6 +320,8 @@ const PersonalParamSettings: React.FC = () => {
         confirmLoading={saving}
         onOk={handleSave}
         onCancel={() => setModalOpen(false)}
+        okText={intl.formatMessage({ id: 'common.confirm' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
         width={640}
         destroyOnHidden
       >
@@ -362,9 +364,7 @@ const PersonalParamSettings: React.FC = () => {
             <Input.Password
               autoComplete="new-password"
               placeholder={
-                editingParam?.hasValue
-                  ? intl.formatMessage({ id: 'settings.params.valueEditPlaceholder' })
-                  : undefined
+                editingParam?.hasValue ? intl.formatMessage({ id: 'settings.params.valueEditPlaceholder' }) : undefined
               }
             />
           </Form.Item>

@@ -271,6 +271,7 @@ export default {
   'fileBrowser.toolbar.upload': '上传',
   'fileBrowser.toolbar.newFolder': '新建文件夹',
   'fileBrowser.toolbar.refresh': '刷新',
+  'fileBrowser.toolbar.locate': '定位',
   'fileBrowser.toolbar.move': '移动',
   'fileBrowser.toolbar.delete': '删除',
   'fileBrowser.toolbar.back': '返回上一层',
