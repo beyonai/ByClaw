@@ -192,6 +192,16 @@ const BYKC_FILE_PATH = '/.bykc/';
 const SESSION_FILE_PATH = '/.sessions/';
 const SHARED_FILE_PATH = '/.shared/';
 const LOG_FILE_PATH = '/.log/';
+const OPENCLAW_FILE_PATH = '/.openclaw/';
+const UIAGENT_FILE_PATH = '/.uiagent/';
+const PROTECTED_ROOT_DIRECTORY_PATHS = new Set([
+  BYKC_FILE_PATH,
+  LOG_FILE_PATH,
+  OPENCLAW_FILE_PATH,
+  SESSION_FILE_PATH,
+  SHARED_FILE_PATH,
+  UIAGENT_FILE_PATH,
+]);
 
 function getNormalizedSessionId(sessionId?: string) {
   return `${sessionId || ''}`.trim();
@@ -219,6 +229,12 @@ function normalizeFileBrowserPath(path?: string) {
     return '/';
   }
   return normalizedPath.startsWith('/') ? normalizedPath : `/${normalizedPath}`;
+}
+
+function isProtectedRootDirectory(item: FileBrowserItem) {
+  if (!isDirectory(item)) return false;
+  const normalizedPath = ensureDirectoryPath(normalizeFileBrowserPath(item.path)).toLowerCase();
+  return getPathDepth(normalizedPath) === 1 && PROTECTED_ROOT_DIRECTORY_PATHS.has(normalizedPath);
 }
 
 function getDisplayFileBrowserPath(path: string) {
@@ -1299,6 +1315,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
   const handleDeleteFileBrowserItem = useCallback(
     async (item: FileBrowserItem) => {
+      if (isProtectedRootDirectory(item)) return;
       const itemPath = normalizeFileBrowserPath(item.path);
       const parentPath = getParentDirectoryPath(itemPath);
       try {
@@ -1321,6 +1338,11 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const handleRenameOk = useCallback(
     async (newName: string) => {
       if (!renameTarget) return;
+      if (isProtectedRootDirectory(renameTarget)) {
+        setRenameOpen(false);
+        setRenameTarget(null);
+        return;
+      }
       const parentPath = getParentDirectoryPath(renameTarget.path);
       setRenameLoading(true);
       try {
@@ -2039,6 +2061,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       const actionScope = getFileActionScope(activeCategoryKey, item);
       const extraActions: FileActionKey[] = [];
       const isRootCategoryTopLevelDirectory = activeCategoryKey === 'root' && dir && getPathDepth(item.path) === 1;
+      const protectedRootDirectory = activeCategoryKey === 'root' && isProtectedRootDirectory(item);
       if (!isRootCategoryTopLevelDirectory) {
         if (actionScope === 'bykc') {
           extraActions.push('saveToSessionFiles', 'saveToSharedFiles');
@@ -2058,42 +2081,44 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         ...extraActions,
       ];
 
-      return actionKeys.map((key) => {
-        if (key === 'upload') {
+      return actionKeys
+        .filter((key) => !(protectedRootDirectory && (key === 'rename' || key === 'delete')))
+        .map((key) => {
+          if (key === 'upload') {
+            return {
+              key,
+              label: (
+                <Upload
+                  showUploadList={false}
+                  multiple
+                  beforeUpload={(_, fileList) => {
+                    void handleUploadSelect(item.path, fileList as unknown as File[]);
+                    return false;
+                  }}
+                >
+                  <div className={employeeStyles.dropdownMenuItem}>
+                    {intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}
+                  </div>
+                </Upload>
+              ),
+            };
+          }
+          const labelIdMap: Record<FileActionKey, string> = {
+            upload: 'fileBrowser.toolbar.upload',
+            createFolder: 'common.create',
+            preview: 'fileBrowser.action.preview',
+            download: 'directoryManage.downloadFile',
+            rename: 'fileBrowser.action.rename',
+            delete: 'fileBrowser.action.delete',
+            saveToKnowledge: 'fileSider.saveToKnowledge',
+            saveToSessionFiles: 'fileBrowser.save.toSessionFiles',
+            saveToSharedFiles: 'fileBrowser.save.toSharedFiles',
+          };
           return {
             key,
-            label: (
-              <Upload
-                showUploadList={false}
-                multiple
-                beforeUpload={(_, fileList) => {
-                  void handleUploadSelect(item.path, fileList as unknown as File[]);
-                  return false;
-                }}
-              >
-                <div className={employeeStyles.dropdownMenuItem}>
-                  {intl.formatMessage({ id: 'fileBrowser.toolbar.upload' })}
-                </div>
-              </Upload>
-            ),
+            label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: labelIdMap[key] })}</div>,
           };
-        }
-        const labelIdMap: Record<FileActionKey, string> = {
-          upload: 'fileBrowser.toolbar.upload',
-          createFolder: 'common.create',
-          preview: 'fileBrowser.action.preview',
-          download: 'directoryManage.downloadFile',
-          rename: 'fileBrowser.action.rename',
-          delete: 'fileBrowser.action.delete',
-          saveToKnowledge: 'fileSider.saveToKnowledge',
-          saveToSessionFiles: 'fileBrowser.save.toSessionFiles',
-          saveToSharedFiles: 'fileBrowser.save.toSharedFiles',
-        };
-        return {
-          key,
-          label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: labelIdMap[key] })}</div>,
-        };
-      });
+        });
     },
     [activeCategoryKey, handleUploadSelect, intl]
   );
