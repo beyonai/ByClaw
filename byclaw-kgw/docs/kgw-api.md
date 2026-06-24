@@ -129,7 +129,7 @@
 | `POST` | `/kgw/admin/v1/kbs/{knCode}/files/{filePath}/lock` | 锁定文件（防 ingest 覆盖） |
 | `POST` | `/kgw/admin/v1/kbs/{knCode}/files/{filePath}/unlock` | 解锁文件 |
 | `GET` | `/kgw/admin/v1/metadata-properties` | 查看全部元数据属性（含 DELETED 和同步状态） |
-| `GET` | `/kgw/admin/v1/metadata-properties/orphans` | 查询指定 KB 的死列（未在 sync 表中的 backend_name） |
+| `GET` | `/kgw/admin/v1/metadata-properties/orphans` | 查询本地 orphan 诊断（purgeFailed 与 staleDeleting，可按 KB 过滤） |
 | `POST` | `/kgw/admin/v1/metadata-properties/{propertyName}/sync-retry` | 强制重试 FAILED 同步 |
 | `POST` | `/kgw/admin/v1/metadata-properties/{propertyName}/purge-retry` | 强制重试 PURGE_FAILED 清理 |
 
@@ -926,9 +926,12 @@ Ingest 接口面向外部知识源 Connector，通过推送 StandardItem 事件�
 
 ### `GET /kgw/admin/v1/metadata-properties/orphans`
 
-查询指定 KB 的"死列"：后端存在 `__byclaw_kgw__*` 列，但不在网关 sync 表 SYNCED/PURGING 中。通常由手动操作或历史遗留产生。
+查询本地 orphan 诊断结果，用于运维排查清理失败与未收敛的绑定删除状态。响应包含：
 
-查询参数：`knCode`（必填）
+- `purgeFailed`：`kgw_metadata_property_sync` 中 `PURGE_FAILED` 的后端列清理失败项，字段包含 `propertyName`、`backendName`、`endpointKey`、`lastError`。
+- `staleDeleting`：`kgw_metadata_property_binding.status='DELETING'` 且 `updated_at` 早于阈值的本地 binding，字段包含 `propertyId`、`propertyName`、`knCode`、`filePath`、`status`、`updatedAt`。
+
+查询参数：`knCode`（可选）。`staleDeleting` 直接按 `staleDeleting.knCode` 过滤；`purgeFailed` 会先通过 KB 配置把 `knCode` 解析为 `endpointKey`（`domain_url` 或 `domain_name`）后过滤，解析不到 KB 配置时不加 `endpointKey` 过滤。
 
 ### `POST /kgw/admin/v1/metadata-properties/{propertyName}/sync-retry`
 
