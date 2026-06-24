@@ -37,6 +37,8 @@
 
 适用结构：百应详情根对象、`agent_list` 与首条目同文件根上的字段、以及原生根对象——均从**根对象**读取 `relSkills` / `skills`。Workspace skill 只识别一层目录下的 `SKILL.md`，不会采纳更深层级文件。该配置写回默认走 `agents` hot reload；插件会同步更新禁用的内部 `skills.entries.__baiying_enhance_reload` 标记，促使 OpenClaw 刷新 skills/tools 快照，不需要重启 OpenClaw。对 rclone/FUSE 等网盘挂载，插件不只依赖 `fs.watch`，还会用周期扫描兜底；当目录类型上报为 unknown 时会通过 `stat()` 再确认。
 
+`relResourceList` 中 `resourceBizType` / `resourceType` 为 `SKILL` 的条目不会注入 `baiying_call` 或 Workspace Markdown；SKILL 只通过 `relSkills` 进入 OpenClaw skills。
+
 ### `agents.list[].tools`
 
 | 规则 | 说明 |
@@ -97,7 +99,7 @@
 | `intro` | `resourceDesc` | `## Capabilities overview` |
 | `coreCompetencies`（数组） | `coreCompetencies`（JSON 字符串解析为数组） | `## Core competencies`，每项包含：`coreCompetency`、`description`、`acceptBoundary`、`rejectBoundary`、`example` |
 | `corePersonaDefinition`（JSON 拓展数组） | 同上 | `## 百应业务拓展属性`：列表摘要 `name`→`value`，并提示详见 `BYAI_BUSINESS_EXTENSIONS.md` |
-| `relResourceList` | `relResourceList` | `## Associated resources`（列出名称、类型、`resourceDesc`） |
+| `relResourceList` | `relResourceList` | `## Associated resources`（仅非 SKILL 资源；列出名称、类型、`resourceDesc`） |
 
 ---
 
@@ -124,7 +126,7 @@
 
 | 来源 | 作用 |
 |------|------|
-| `relResourceList` | `## Available resources`：资源名、`resourceId`、`resourceBizType` 或 `resourceType`、`resourceCode`、`resourceDesc` |
+| `relResourceList` | `## Available resources`：仅非 SKILL 资源；资源名、`resourceId`、`resourceBizType` 或 `resourceType`、`resourceCode`、`resourceDesc` |
 | 条目 `resourceId` + 适配层 **`sourceKey`**（作为 fallback） | 对 DOC 类资源（见下）在列表项中补充说明 **`agent_id`** 取值 |
 
 DOC 类资源类型（用于决定是否展示 `agent_id`）：`DOC`、`ATOM`、`KG_DOC`、`KG_DB`、`KG_QA`。

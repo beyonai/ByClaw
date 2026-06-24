@@ -35,6 +35,11 @@ type NativeAgentJson = {
     allowSpawnFrom?: string[];
 };
 
+function isSkillRelResource(raw: Record<string, unknown>): boolean {
+    const t = String(raw.resourceBizType ?? raw.resourceType ?? "").trim().toUpperCase();
+    return t === "SKILL";
+}
+
 export type AimodelProviderApi = "openai-completions" | "openai-responses" | "anthropic-messages";
 export type AimodelModelInput = "text" | "image";
 export type AimodelThinkingLevel =
@@ -321,7 +326,8 @@ function adaptRawBaiyingDetail(params: {
             (r: unknown) =>
                 r &&
                 typeof r === "object" &&
-                typeof (r as Record<string, unknown>).resourceId === "string",
+                typeof (r as Record<string, unknown>).resourceId === "string" &&
+                !isSkillRelResource(r as Record<string, unknown>),
         )
         .map((r: Record<string, unknown>) => ({
             resourceId: String(r.resourceId),

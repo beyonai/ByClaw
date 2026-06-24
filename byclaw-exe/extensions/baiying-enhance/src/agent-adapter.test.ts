@@ -186,6 +186,7 @@ describe("adaptAgentJson", () => {
         const raw = {
             resourceId: "10039008",
             resourceName: "Ontology helper",
+            relSkills: ["dws"],
             relResourceList: [
                 {
                     resourceId: "10000045",
@@ -193,6 +194,13 @@ describe("adaptAgentJson", () => {
                     resourceBizType: "VIEW",
                     resourceCode: "scene_sales_management",
                     resourceDesc: "销售漏斗视图",
+                },
+                {
+                    resourceId: "skill-001",
+                    resourceName: "DWS",
+                    resourceBizType: "SKILL",
+                    resourceCode: "dws",
+                    resourceDesc: "DWS skill should be loaded through relSkills",
                 },
             ],
         };
@@ -213,6 +221,8 @@ describe("adaptAgentJson", () => {
             resourceCode: "scene_sales_management",
             resourceDesc: "销售漏斗视图",
         });
+        expect(res.associatedResources!.some((r) => r.resourceBizType === "SKILL")).toBe(false);
+        expect(res.listEntry.skills).toEqual(["dws"]);
     });
 
     it("smoke: DIG_EMPLOYEE_10000115.json maps relSkills to agents.list skills", () => {

@@ -50,7 +50,7 @@
         { "resourceDesc": "生成 Capabilities overview" },
         { "coreCompetencies": "生成 Core competencies" },
         { "corePersonaDefinition": "生成百应业务拓展摘要" },
-        { "relResourceList": "生成 Associated resources" }
+        { "relResourceList": "生成非 SKILL 的 Associated resources" }
       ]
     },
     "SOUL.md": {
@@ -94,7 +94,7 @@
       "priorityPrompt": "",
       "sourceFields": [
         { "resourceId": "生成 DOC 类资源调用所需 agent_id 兜底" },
-        { "relResourceList": "生成 Available resources" },
+        { "relResourceList": "生成非 SKILL 的 Available resources" },
         { "resourceName": "生成资源展示名称" },
         { "resourceBizType": "生成资源类型，优先于 resourceType" },
         { "resourceType": "生成资源类型兜底" },
@@ -267,7 +267,7 @@ type RelPromptFileConfig = {
         { "resourceDesc": "生成 Capabilities overview" },
         { "coreCompetencies": "生成 Core competencies" },
         { "corePersonaDefinition": "生成百应业务拓展摘要" },
-        { "relResourceList": "生成 Associated resources" }
+        { "relResourceList": "生成非 SKILL 的 Associated resources" }
       ]
     },
     "SOUL.md": {
@@ -381,7 +381,7 @@ type RelPromptFileConfig = {
         { "resourceDesc": "生成 Capabilities overview" },
         { "coreCompetencies": "生成 Core competencies" },
         { "corePersonaDefinition": "生成百应业务拓展摘要" },
-        { "relResourceList": "生成 Associated resources" }
+        { "relResourceList": "生成非 SKILL 的 Associated resources" }
       ]
     },
     "SOUL.md": {
@@ -425,7 +425,7 @@ type RelPromptFileConfig = {
       "priorityPrompt": "",
       "sourceFields": [
         { "resourceId": "生成 DOC 类资源调用所需 agent_id 兜底" },
-        { "relResourceList": "生成 Available resources" },
+        { "relResourceList": "生成非 SKILL 的 Available resources" },
         { "resourceName": "生成资源展示名称" },
         { "resourceBizType": "生成资源类型，优先于 resourceType" },
         { "resourceType": "生成资源类型兜底" },
@@ -464,7 +464,7 @@ type RelPromptFileConfig = {
         { "resourceDesc": "生成 Capabilities overview" },
         { "coreCompetencies": "生成 Core competencies" },
         { "corePersonaDefinition": "生成百应业务拓展摘要" },
-        { "relResourceList": "生成 Associated resources" }
+        { "relResourceList": "生成非 SKILL 的 Associated resources" }
       ]
     },
     "SOUL.md": {
@@ -508,7 +508,7 @@ type RelPromptFileConfig = {
       "priorityPrompt": "",
       "sourceFields": [
         { "resourceId": "生成 DOC 类资源调用所需 agent_id 兜底" },
-        { "relResourceList": "生成 Available resources" },
+        { "relResourceList": "生成非 SKILL 的 Available resources" },
         { "resourceName": "生成资源展示名称" },
         { "resourceBizType": "生成资源类型，优先于 resourceType" },
         { "resourceType": "生成资源类型兜底" },
@@ -602,7 +602,7 @@ You are a helpful assistant.
 | 拒绝边界 | `coreCompetencies[].rejectBoundary` | 同左 | `**Out of scope:**` 列表 |
 | 示例 | `coreCompetencies[].example` | 同左 | `**Examples:**` 列表 |
 | 百应业务拓展摘要 | `corePersonaDefinition` JSON 拓展数组 | 同左 | `## 百应业务拓展属性`，以列表摘要展示 |
-| 关联资源 | `relResourceList` | 同左 | `## Associated resources` |
+| 关联资源 | `relResourceList` 的非 SKILL 资源 | 同左 | `## Associated resources` |
 
 关联资源展示字段：
 
@@ -670,7 +670,7 @@ Agent
 
 | 来源字段 | `agent_list[0]` | 百应详情根对象 | 说明 |
 |----------|-----------------|----------------|------|
-| 资源列表 | `relResourceList` | 同左 | 生成 `## Available resources`。 |
+| 资源列表 | `relResourceList` 的非 SKILL 资源 | 同左 | 生成 `## Available resources`。 |
 | Agent ID | 条目 `resourceId`，缺失时用适配层 `sourceKey` | 根 `resourceId`，缺失时用适配层 `sourceKey` | DOC 类资源展示 `agent_id`。 |
 
 资源项展示字段：
@@ -711,7 +711,7 @@ KG_QA
         { "resourceDesc": "生成 Capabilities overview" },
         { "coreCompetencies": "生成 Core competencies" },
         { "corePersonaDefinition": "生成百应业务拓展摘要" },
-        { "relResourceList": "生成 Associated resources" }
+        { "relResourceList": "生成非 SKILL 的 Associated resources" }
       ]
     }
   }
