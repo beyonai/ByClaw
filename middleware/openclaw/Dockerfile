@@ -24,6 +24,8 @@ COPY byclaw-exe/extensions/byai_diagnostics-otel/package.json \
 COPY byclaw-exe/extensions/byclaw-sqlite/package.json \
      byclaw-exe/extensions/byclaw-sqlite/package-lock.json \
      ./src/byclaw-sqlite/
+COPY byclaw-exe/extensions/byclaw-wiki/package.json \
+     ./src/byclaw-wiki/
 
 
 RUN --mount=type=cache,target=/root/.npm \
@@ -32,8 +34,13 @@ RUN --mount=type=cache,target=/root/.npm \
     for dir in src/*/; do \
         [ -f "$dir/package.json" ] || continue; \
         name=$(basename "$dir"); \
-        echo ">>> npm ci --omit=dev: $name"; \
-        (cd "$dir" && npm ci --omit=dev --prefer-offline) & \
+        if [ -f "$dir/package-lock.json" ]; then \
+            echo ">>> npm ci --omit=dev: $name"; \
+            (cd "$dir" && npm ci --omit=dev --prefer-offline) & \
+        else \
+            echo ">>> npm install --omit=dev --no-package-lock: $name"; \
+            (cd "$dir" && npm install --omit=dev --no-package-lock --prefer-offline) & \
+        fi; \
         pids="$pids $!"; \
     done; \
     for pid in $pids; do wait "$pid"; done
@@ -42,6 +49,7 @@ COPY byclaw-exe/extensions/baiying-enhance/ ./src/baiying-enhance/
 COPY byclaw-exe/extensions/byai-channel/ ./src/byai-channel/
 COPY byclaw-exe/extensions/byai_diagnostics-otel/ ./src/byai_diagnostics-otel/
 COPY byclaw-exe/extensions/byclaw-sqlite/ ./src/byclaw-sqlite/
+COPY byclaw-exe/extensions/byclaw-wiki/ ./src/byclaw-wiki/
 
 RUN set -eux; \
     mkdir -p /build/out; \
@@ -167,6 +175,8 @@ RUN set -eux; \
         test -f /opt/opencli/extension/manifest.json; \
         ;; \
     esac; \
+    npm install -g @colbymchenry/codegraph; \
+    codegraph version; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=python312 /usr/local/bin/python3.12 /usr/local/bin/pip3.12 /usr/local/bin/
