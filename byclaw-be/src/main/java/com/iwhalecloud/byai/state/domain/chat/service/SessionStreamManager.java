@@ -60,7 +60,10 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     public static final String SESSION_STATUS_KEY_PREFIX = "byai:session:";
 
     /** Session 状态 Key 后缀 */
-    public static final String SESSION_STATUS_KEY_SUFFIX = ":session_status";
+    public static final String SESSION_STATUS_KEY_SUFFIX = ":status";
+
+    /** Session 状态 Hash 默认 field */
+    public static final String DEFAULT_SESSION_STATUS_FIELD = "main";
 
     /** 消费者组名称 */
     public static final String CONSUMER_GROUP = "byai_conversation_service_group";
@@ -93,6 +96,9 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
 
     /** sessionId -> Session 状态轮询任务 */
     private final Map<String, ScheduledFuture<?>> sessionStatusPollTasks = new ConcurrentHashMap<>();
+
+    /** sessionId -> 当前监听的 Session 状态 Hash field */
+    private final Map<String, String> sessionStatusFields = new ConcurrentHashMap<>();
 
     /** sessionId -> 最近一次已推送的 Session 状态值 */
     private final Map<String, String> sessionStatusLastValues = new ConcurrentHashMap<>();
@@ -160,7 +166,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
             }
         }
         cancelKeepAlive(sessionId);
-        startSessionStatusListener(sessionId);
+        startSessionStatusListener(sessionId, resolveAgentId(ctx));
         startKeepAlive(sessionId, ctx);
 
         log.info("Session Stream 监听已启动, stream: {}, consumer: {}", streamKey, consumerName);
@@ -217,6 +223,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
         sessionStatusTopics.clear();
         sessionStatusPollTasks.values().forEach(task -> task.cancel(false));
         sessionStatusPollTasks.clear();
+        sessionStatusFields.clear();
         sessionStatusLastValues.clear();
         keepAliveTasks.values().forEach(task -> task.cancel(false));
         keepAliveTasks.clear();
@@ -266,10 +273,19 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
      * 构建 Session 状态 Key。
      *
      * @param sessionId 会话 ID
-     * @return 完整状态 Key，格式：byai:session:{sessionId}:session_status
+     * @return 完整状态 Key，格式：byai:session:{sessionId}:status
      */
     public String buildSessionStatusKey(String sessionId) {
         return SESSION_STATUS_KEY_PREFIX + sessionId + SESSION_STATUS_KEY_SUFFIX;
+    }
+
+    public void dispatchSessionStatusChange(String sessionId) {
+        String currentValue = readSessionStatusValue(sessionId);
+        if (currentValue == null) {
+            sessionStatusLastValues.remove(sessionId);
+            return;
+        }
+        dispatchSessionStatusChange(sessionId, currentValue);
     }
 
     public void dispatchSessionStatusChange(String sessionId, String statusValue) {
@@ -283,7 +299,13 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
         applicationContext.getBean(SessionStreamEventRouter.class).broadcastSessionStatus(sessionId, statusValue);
     }
 
-    private void startSessionStatusListener(String sessionId) {
+    private void startSessionStatusListener(String sessionId, Long agentId) {
+        String statusField = resolveSessionStatusField(agentId);
+        String oldField = sessionStatusFields.put(sessionId, statusField);
+        if (!StringUtils.equals(oldField, statusField)) {
+            sessionStatusLastValues.remove(sessionId);
+        }
+
         PatternTopic topic = new PatternTopic("__keyspace@*__:" + buildSessionStatusKey(sessionId));
         PatternTopic old = sessionStatusTopics.put(sessionId, topic);
         SessionStatusRedisMessageListener listener =
@@ -292,7 +314,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
             redisMessageListenerContainer.removeMessageListener(listener, old);
         }
         redisMessageListenerContainer.addMessageListener(listener, topic);
-        log.info("Session 状态 Key 监听已启动, key: {}", buildSessionStatusKey(sessionId));
+        log.info("Session 状态 Key 监听已启动, key: {}, field: {}", buildSessionStatusKey(sessionId), statusField);
         startSessionStatusPolling(sessionId);
     }
 
@@ -313,6 +335,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
         if (pollTask != null) {
             pollTask.cancel(false);
         }
+        sessionStatusFields.remove(sessionId);
         sessionStatusLastValues.remove(sessionId);
     }
 
@@ -342,17 +365,25 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     }
 
     private void pollSessionStatus(String sessionId) {
-        String currentValue = readSessionStatusValue(sessionId);
-        if (currentValue == null) {
-            sessionStatusLastValues.remove(sessionId);
-            return;
-        }
-        dispatchSessionStatusChange(sessionId, currentValue);
+        dispatchSessionStatusChange(sessionId);
     }
 
     private String readSessionStatusValue(String sessionId) {
-        Object value = redisTemplate.opsForValue().get(buildSessionStatusKey(sessionId));
+        Object value = redisTemplate.opsForHash()
+            .get(buildSessionStatusKey(sessionId), resolveSessionStatusField(sessionId));
         return value == null ? null : String.valueOf(value);
+    }
+
+    private Long resolveAgentId(ChatProcessContext ctx) {
+        return ctx == null || ctx.assistantChatDto == null ? null : ctx.assistantChatDto.getAgentId();
+    }
+
+    private String resolveSessionStatusField(Long agentId) {
+        return agentId == null ? DEFAULT_SESSION_STATUS_FIELD : String.valueOf(agentId);
+    }
+
+    private String resolveSessionStatusField(String sessionId) {
+        return StringUtils.defaultIfBlank(sessionStatusFields.get(sessionId), DEFAULT_SESSION_STATUS_FIELD);
     }
 
     /**

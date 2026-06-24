@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.constants.superassist.SessionType;
 import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
 import com.iwhalecloud.byai.common.feign.request.datacloud.TermsOptionsReq;
@@ -345,7 +346,8 @@ public class AssistantChatController {
     @GetMapping("/sessionStatus")
     public ResponseUtil<Object> getSessionStatus(@RequestParam(value = "sessionId", required = false) String sessionId,
         @RequestParam(value = "agentId", required = false) Long agentId) throws IOException {
-        return assistantChatApplicationService.getSessionStatus(sessionId, agentId);
+        JSONObject sessionStatus = assistantChatApplicationService.getSessionStatus(sessionId, agentId);
+        return ResponseUtil.successResponse(sessionStatus);
     }
     
 }
