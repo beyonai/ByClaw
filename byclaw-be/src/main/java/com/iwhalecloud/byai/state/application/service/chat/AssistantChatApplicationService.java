@@ -10,7 +10,9 @@ import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
+import com.iwhalecloud.byai.common.message.entity.ByaiMessageRelObjDto;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
+import com.iwhalecloud.byai.common.message.service.ByaiMessageRelObjService;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.util.DateUtils;
 import com.iwhalecloud.byai.common.util.StringUtil;
@@ -36,6 +38,7 @@ import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
+import com.iwhalecloud.byai.state.domain.chat.service.ScriptService;
 import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager;
 import com.iwhalecloud.byai.state.domain.file.service.ConversationFileStorage;
 import com.iwhalecloud.byai.state.domain.file.service.ConversationStoragePathResolver;
@@ -92,6 +95,9 @@ public class AssistantChatApplicationService {
 
     @Autowired
     private ByaiMessageHotService byaiMessageHotService;
+
+    @Autowired
+    private ByaiMessageRelObjService byaiMessageRelObjService;
 
     @Autowired
     private RunningOutputStreamRegistry runningOutputStreamRegistry;
@@ -455,5 +461,26 @@ public class AssistantChatApplicationService {
             }
         }
         return jsonArray.toJSONString();
+    }
+
+    /**
+     * 根据消息ID获取 traceId。
+     * <p>
+     * 根据 byai_message_relobj 表查询：res_msg_id = messageId 或 ask_msg_id = messageId， 命中后取 ask_msg_id 与 res_msg_id 编码出
+     * traceId。
+     *
+     * @param messageId 消息ID
+     * @return traceId，未查询到关联记录时返回 null
+     */
+    public String getTraceIdByMessageId(Long messageId) {
+        if (messageId == null) {
+            throw new BdpRuntimeException(I18nUtil.get("assistant.chat.message.id.not.empty"));
+        }
+        List<ByaiMessageRelObjDto> relList = byaiMessageRelObjService.findByAskOrResMsgId(messageId);
+        if (CollectionUtils.isEmpty(relList)) {
+            return null;
+        }
+        ByaiMessageRelObjDto rel = relList.get(0);
+        return ScriptService.getTraceId(rel.getAskMsgId(), rel.getResMsgId());
     }
 }

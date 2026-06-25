@@ -191,6 +191,27 @@ public class ByaiMessageRelObjService {
     }
 
     /**
+     * 根据消息ID查询关联消息列表：res_msg_id = messageId 或 ask_msg_id = messageId。
+     *
+     * @param messageId 消息ID
+     * @return List<ByaiMessageRelObjDto>
+     */
+    public List<ByaiMessageRelObjDto> findByAskOrResMsgId(Long messageId) {
+        if (messageId == null) {
+            return Collections.emptyList();
+        }
+        List<ByaiMessageRel> relList = byaiMessageRelMapper.selectByAskOrResMsgId(messageId);
+        if (relList == null || relList.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<ByaiMessageRelObjDto> result = new ArrayList<>(relList.size());
+        for (ByaiMessageRel rel : relList) {
+            result.add(toRelObjDto(rel));
+        }
+        return result;
+    }
+
+    /**
      * 消息关联检索
      *
      * @param request 检索请求
