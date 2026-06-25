@@ -58,6 +58,15 @@ def _load_owl_if_configured() -> Any | None:
     if _owl_loaded_path == resolved:
         return None  # already loaded this path
     loader = _load_owl_into_default_base(resolved)
+    # ── OWL → JSON 持久化（后续重启走 objects_registry.json 快速路径）──
+    from datacloud_platform import get_platform
+
+    p = get_platform()
+    onto = p._ontology_for("default")
+    if hasattr(onto, "save_parsed_content"):
+        base_path = p._base_path_for("default")
+        parsed = onto.parse_owl(Path(resolved))
+        onto.save_parsed_content(base_path, parsed)
     _owl_loaded_path = resolved
     return loader
 
