@@ -6,12 +6,15 @@ import { useIntl } from '@umijs/max';
 
 import { getDcSystemConfig } from '@/pages/manager/service/session';
 import TroubleshootSessionDrawer from './index';
+import { getCachedTroubleshootSession } from './sessionCache';
 
 const TROUBLE_SHOOT_EMPLOYEE_PARAM_CODE = 'TROUBLE_SHOOT_EMPLOYEE_ID';
 
 type DrawerPayload = {
   agentId: string;
   initialText: string;
+  sessionId?: string;
+  traceId?: string;
 };
 
 export default function useTroubleshootDrawer() {
@@ -22,6 +25,7 @@ export default function useTroubleshootDrawer() {
   const open = React.useCallback(
     async (traceId?: string) => {
       const initialText = intl.formatMessage({ id: 'messageList.troubleshootPrompt' }, { traceId: traceId || '' });
+      const cachedSessionId = getCachedTroubleshootSession(traceId);
 
       try {
         setLoading(true);
@@ -36,7 +40,9 @@ export default function useTroubleshootDrawer() {
 
         setPayload({
           agentId,
-          initialText,
+          initialText: cachedSessionId ? '' : initialText,
+          sessionId: cachedSessionId,
+          traceId,
         });
       } catch {
         copy(initialText);
@@ -50,10 +56,13 @@ export default function useTroubleshootDrawer() {
 
   const placeholder = payload ? (
     <TroubleshootSessionDrawer
+      key={payload.sessionId || payload.traceId || payload.agentId}
       agentId={payload.agentId}
       initialText={payload.initialText}
+      initialSessionId={payload.sessionId}
       open={!!payload}
       onClose={() => setPayload(null)}
+      traceId={payload.traceId}
     />
   ) : null;
 
