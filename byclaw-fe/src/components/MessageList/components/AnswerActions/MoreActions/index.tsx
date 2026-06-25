@@ -31,7 +31,7 @@ function MoreActions(porps: { deleteMessage: (message: IMessage) => void; msg: I
   const canDelete = messageId && !disabledList?.includes('delete');
 
   return (
-    <div className="ub ub-ac" style={{ columnGap: '2px' }}>
+    <div className={`ub ub-ac ${btnStyles.moreActions}`}>
       {troubleshootDrawerHolder}
       {traceId && (
         <div className={btnStyles.actionsBarItem} role="presentation">
