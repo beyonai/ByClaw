@@ -2,19 +2,26 @@ jest.mock('@/service/auth', () => ({
   getDcSystemConfigListByStandType: jest.fn(),
 }));
 
+jest.mock('@/pages/manager/service/session', () => ({
+  getDcSystemConfig: jest.fn(),
+}));
+
 import { renderHook, waitFor } from '@testing-library/react';
 
 import { DEFAULT_MENU_CONFIG, getVisibleMenuKeysFromConfig } from '@/constants/system';
 import { getDcSystemConfigListByStandType } from '@/service/auth';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 import useVisibleMenuKeys from '../useVisibleMenuKeys';
 
 const mockGetDcSystemConfigListByStandType = getDcSystemConfigListByStandType as jest.MockedFunction<
   typeof getDcSystemConfigListByStandType
 >;
+const mockGetDcSystemConfig = getDcSystemConfig as jest.MockedFunction<typeof getDcSystemConfig>;
 
 describe('useVisibleMenuKeys', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetDcSystemConfig.mockResolvedValue({ paramValue: '' });
   });
 
   it('waits for userInfo before loading menu config', async () => {
