@@ -2458,11 +2458,19 @@ class DataCloudWorker(GatewayWorker):
                         agent_id=str(by_agent_id).strip() if by_agent_id else None,
                     )
                 self.graphs[cache_key] = target_graph
+                logger.info(
+                    "[DEBUG] Graph built and cached: cache_key=%s agent_id=%s",
+                    cache_key, by_agent_id
+                )
                 while len(self.graphs) > self._GRAPH_CACHE_MAX:
                     evicted_key, _ = self.graphs.popitem(last=False)
                     logger.info("Graph cache evicted: key=%s", evicted_key)
             else:
                 self.graphs.move_to_end(cache_key)
+                logger.info(
+                    "[DEBUG] Using cached graph: cache_key=%s agent_id=%s",
+                    cache_key, by_agent_id
+                )
 
         thread_id = str(
             header_metadata.get("resume_thread_id")
@@ -2962,12 +2970,20 @@ class DataCloudWorker(GatewayWorker):
                 context.session_id,
                 conf_hash,
             )
+            logger.info(
+                "[DEBUG] About to call target_graph.astream_events, graph_input keys=%s",
+                list(graph_input.keys()) if isinstance(graph_input, dict) else type(graph_input).__name__
+            )
             async for event in target_graph.astream_events(
                 graph_input, config=config, version="v2"
             ):
                 stream_event_count += 1
+                if stream_event_count == 1:
+                    logger.info("[DEBUG] First event received, kind=%s", event.get("event"))
                 await context.check_cancelled()
                 kind: str = str(event["event"])
+                if stream_event_count <= 5:
+                    logger.info("[DEBUG] Event #%d kind=%s", stream_event_count, kind)
 
                 if kind == "on_chat_model_start":
                     # _runs 在此时刚写入，记录 LLM 调用的 Langfuse observation id
