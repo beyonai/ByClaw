@@ -139,13 +139,11 @@ export default {
   'thirdPartyCreateModel.homeAddressRequired': '请输入首页地址',
 
   // ModelPopover
-  'modelPopover.largeModel': '大模型',
   'modelPopover.QALargeModelConfiguration': '问答大模型配置',
-  'modelPopover.history': '历史记录',
-  'modelPopover.temperature': '温度',
-  'modelPopover.maxToken': '回复上限',
-  'modelPopover.prompt': '提示词',
-  'modelPopover.promptPlaceholder': '描述图片的内容，要求简洁准确，层次分明',
+  'modelPopover.mine': '我的',
+  'modelPopover.public': '公共',
+  'modelPopover.noModels': '暂无模型',
+  'modelPopover.confirm': '确定',
 
   // BaseListModal
   'baseListModal.createTime': '创建时间',

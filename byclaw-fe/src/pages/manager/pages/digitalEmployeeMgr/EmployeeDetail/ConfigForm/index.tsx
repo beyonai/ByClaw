@@ -360,6 +360,7 @@ const ConfigForm = (props) => {
   const [catalogList, setCatalogList] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [robotModalOpen, setRobotModalOpen] = useState(false);
+  const [modelPopoverOpen, setModelPopoverOpen] = useState(false);
   const [robotItem, setRobotItem] = useState<RobotConfig>({ channel: '' });
   const [templateData, setTemplateData] = useState([]);
   const [configurableTabs, setConfigurableTabs] = useState<
@@ -1737,8 +1738,11 @@ const ConfigForm = (props) => {
                       resultDataRef={resultDataRef}
                       prologueRef={prologueRef}
                       setModelName={setModelName}
+                      onClose={() => setModelPopoverOpen(false)}
                     />
                   }
+                  open={modelPopoverOpen}
+                  onOpenChange={setModelPopoverOpen}
                   trigger={!isReadOnly ? ['click'] : []}
                   placement="bottomRight"
                   arrow={false}

@@ -274,3 +274,39 @@ CREATE INDEX IF NOT EXISTS idx_sandbox_health_watermark_scope
     ON byai.sandbox_health_watermark_model (service_type, profile_key, enabled, priority DESC);
 
 alter table byai.ss_res_ext_dig_employee alter column tag_name type varchar(255);
+
+
+-- 模型表新增 owner_type 字段: 区分个人模型 (PERSONAL) 和公共模型 (PUBLIC)
+ALTER TABLE byai.byai_aimodel ADD COLUMN owner_type VARCHAR(20) DEFAULT 'PUBLIC';
+COMMENT ON COLUMN byai.byai_aimodel.owner_type IS '模型归属: PUBLIC(公共) / PERSONAL(个人)';
+
+-- 模型表新增 source_type 字段: 区分模型来源
+ALTER TABLE byai.byai_aimodel ADD COLUMN source_type VARCHAR(32) DEFAULT NULL;
+COMMENT ON COLUMN byai.byai_aimodel.source_type IS '模型来源: null(用户创建) / TOKEN_SERVER(系统分配)';
+
+-- 用户 Token 额度配置表（管理员可为每位用户分配独立额度）
+CREATE TABLE IF NOT EXISTS byai.po_user_token_quota (
+    quota_id BIGINT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    monthly_quota_limit BIGINT NOT NULL,
+    remark VARCHAR(512),
+    create_by BIGINT,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_by BIGINT,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    delete_flag CHAR(1) NOT NULL DEFAULT '0'
+);
+
+COMMENT ON TABLE byai.po_user_token_quota IS '用户Token额度配置表';
+COMMENT ON COLUMN byai.po_user_token_quota.quota_id IS '主键ID';
+COMMENT ON COLUMN byai.po_user_token_quota.user_id IS '用户ID（关联po_users.user_id）';
+COMMENT ON COLUMN byai.po_user_token_quota.monthly_quota_limit IS '月度Token限额';
+COMMENT ON COLUMN byai.po_user_token_quota.remark IS '备注';
+COMMENT ON COLUMN byai.po_user_token_quota.create_by IS '创建人ID';
+COMMENT ON COLUMN byai.po_user_token_quota.create_time IS '创建时间';
+COMMENT ON COLUMN byai.po_user_token_quota.update_by IS '更新人ID';
+COMMENT ON COLUMN byai.po_user_token_quota.update_time IS '更新时间';
+COMMENT ON COLUMN byai.po_user_token_quota.delete_flag IS '逻辑删除标识，0未删除，1已删除';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_token_quota_user
+    ON byai.po_user_token_quota (user_id) WHERE delete_flag = '0';

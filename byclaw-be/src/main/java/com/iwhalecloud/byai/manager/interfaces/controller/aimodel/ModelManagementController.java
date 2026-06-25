@@ -61,6 +61,7 @@ public class ModelManagementController {
     @ApiOperation("模型列表分页")
     @PostMapping("/getModelListByPage")
     public ResponseUtil<ModelListResponse> getModelListByPage(@RequestBody ModelListRequest request) {
+        request.setOwnerType("PUBLIC");
         ModelListResponse data = modelManagementApplicationService.getModelListByPage(request);
         return ResponseUtil.success(data);
     }
@@ -83,6 +84,7 @@ public class ModelManagementController {
     @ApiOperation("新增或更新模型")
     @PostMapping("/upsertModel")
     public ResponseUtil<Map<String, String>> upsertModel(@RequestBody ModelUpsertRequest request) {
+        request.setOwnerType("PUBLIC");
         Map<String, String> data = modelManagementApplicationService.upsertModel(request, null);
         return ResponseUtil.success(data);
     }
