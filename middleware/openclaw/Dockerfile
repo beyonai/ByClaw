@@ -254,6 +254,8 @@ ENV PATH="/root/.bun/bin:/usr/local/bin:$PATH"
 
 # add gbrain（官方原版）
 RUN bun install -g github:garrytan/gbrain
+# 关键修复：把gbrain软链接到系统全局bin，不受PATH影响
+RUN ln -s /root/.bun/bin/gbrain /usr/local/bin/gbrain
 
 # rm
 RUN rm -fr /root/.agents/skills
