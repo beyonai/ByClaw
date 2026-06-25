@@ -553,9 +553,9 @@ export default {
   'messageForm.pleaseUpload': '请上传{files}',
 
   'messageList.deleteMessageConfirm': '确定删除该消息吗？',
-  'messageList.troubleshoot': '排障',
+  'messageList.troubleshoot': '运维',
   'messageList.troubleshootTooltip': '利用百应运维数字员工，帮您排除故障',
-  'messageList.troubleshootPrompt': '当前消息的traceId为{traceId}，请帮我排除故障',
+  'messageList.troubleshootPrompt': '需要排查的trace_id={traceId}，\n',
 
   'citeRender.title': '引用消息',
   'citeRender.deleteConfirm': '确定删除该引用吗？',
