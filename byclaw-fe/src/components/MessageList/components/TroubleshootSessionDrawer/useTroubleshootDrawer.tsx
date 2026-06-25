@@ -9,6 +9,11 @@ import TroubleshootSessionDrawer from './index';
 import { getCachedTroubleshootSession } from './sessionCache';
 
 const TROUBLE_SHOOT_EMPLOYEE_PARAM_CODE = 'TROUBLE_SHOOT_EMPLOYEE_ID';
+// 运维数字员工 ID 只需要在当前页面生命周期里拉一次，后续直接复用。
+let cachedTroubleshootAgentId: string | undefined;
+let hasLoadedTroubleshootAgentId = false;
+// 复用进行中的请求，避免并发点击时重复打同一个配置接口。
+let troubleshootAgentIdRequest: Promise<string> | null = null;
 
 type DrawerPayload = {
   agentId: string;
@@ -16,6 +21,30 @@ type DrawerPayload = {
   sessionId?: string;
   traceId?: string;
 };
+
+function getTroubleshootAgentId() {
+  if (hasLoadedTroubleshootAgentId) {
+    return Promise.resolve(cachedTroubleshootAgentId || '');
+  }
+
+  if (troubleshootAgentIdRequest) {
+    return troubleshootAgentIdRequest;
+  }
+
+  troubleshootAgentIdRequest = getDcSystemConfig({ paramCode: TROUBLE_SHOOT_EMPLOYEE_PARAM_CODE })
+    .then((res) => {
+      const agentId = `${(res as any)?.paramValue || ''}`.trim();
+      // 成功后把结果落到模块级缓存，后续点击直接命中。
+      cachedTroubleshootAgentId = agentId;
+      hasLoadedTroubleshootAgentId = true;
+      return agentId;
+    })
+    .finally(() => {
+      troubleshootAgentIdRequest = null;
+    });
+
+  return troubleshootAgentIdRequest;
+}
 
 export default function useTroubleshootDrawer() {
   const intl = useIntl();
@@ -29,10 +58,11 @@ export default function useTroubleshootDrawer() {
 
       try {
         setLoading(true);
-        const res = await getDcSystemConfig({ paramCode: TROUBLE_SHOOT_EMPLOYEE_PARAM_CODE });
-        const agentId = `${(res as any)?.paramValue || ''}`.trim();
+        // 先拿缓存过的运维数字员工 ID，没有的话才触发一次接口请求。
+        const agentId = await getTroubleshootAgentId();
 
         if (!agentId) {
+          // 后端未配置运维数字员工时，保留原有兜底行为，直接复制排查文案。
           copy(initialText);
           message.success(intl.formatMessage({ id: 'common.copySuccess' }));
           return;
