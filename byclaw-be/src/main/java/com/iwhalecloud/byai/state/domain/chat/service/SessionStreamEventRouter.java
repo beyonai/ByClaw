@@ -357,31 +357,4 @@ public class SessionStreamEventRouter {
             return statusValue;
         }
     }
-
-    public void broadcastSessionStatus(String sessionIdValue, String statusValue) {
-        Long sessionId = parseLong(sessionIdValue);
-        if (sessionId == null || StringUtils.isBlank(statusValue)) {
-            return;
-        }
-        ByaiSession session = sessionService.findById(sessionId);
-        Long userId = session == null ? null : session.getCreatorId();
-        if (userId == null) {
-            return;
-        }
-
-        JSONObject wsMessage = new JSONObject();
-        wsMessage.put("type", "SESSION_STATUS");
-        wsMessage.put("sessionId", String.valueOf(sessionId));
-        wsMessage.put("data", parseSessionStatusPayload(statusValue));
-        multiDeviceBroadcastService.broadcastRawToUser(userId, wsMessage);
-    }
-
-    private Object parseSessionStatusPayload(String statusValue) {
-        try {
-            return JSON.parse(statusValue);
-        }
-        catch (Exception e) {
-            return statusValue;
-        }
-    }
 }
