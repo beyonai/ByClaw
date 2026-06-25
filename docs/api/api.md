@@ -75,6 +75,8 @@
 | `POST` | `/api/v1/directories/updateByResourceId` | 按资源 ID 修改目录（Agent 工具） |
 | `POST` | `/api/v1/directories/deleteByResourceId` | 按资源 ID 删除目录（Agent 工具） |
 | `POST` | `/api/v1/listDirByResourceId` | 按资源 ID 获取目录内容（Agent 工具） |
+| `POST` | `/api/v1/readFileByResourceId` | 按资源 ID 读取文件内容（Agent 工具） |
+| `POST` | `/api/v1/downloadFileByResourceId` | 按资源 ID 下载原始文件（Agent 工具） |
 
 ## 知识库管理
 
@@ -842,6 +844,8 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
 | `POST` | `/api/v1/directories/updateByResourceId` | 按资源 ID 修改目录 |
 | `POST` | `/api/v1/directories/deleteByResourceId` | 按资源 ID 删除目录 |
 | `POST` | `/api/v1/listDirByResourceId` | 按资源 ID 获取目录内容 |
+| `POST` | `/api/v1/readFileByResourceId` | 按资源 ID 读取文件内容 |
+| `POST` | `/api/v1/downloadFileByResourceId` | 按资源 ID 下载原始文件 |
 
 ### `POST /api/v1/knowledgeItems/importByResourceId`
 
@@ -1158,6 +1162,96 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/importByResourceId \
 ```
 
 说明：响应中 `knCode` 返回的是请求时传入的 `resourceId`，而非系统内部编码。
+
+失败响应示例：
+
+```json
+{
+  "resultCode": "-1",
+  "resultMsg": "cannot resolve resourceId: 99999",
+  "resultObject": {}
+}
+```
+
+### `POST /api/v1/readFileByResourceId`
+
+按资源 ID 读取对应知识库下文件的 Markdown 内容。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `resourceId` | string | 是 | 知识库资源 ID，系统自动映射为内部 `knCode` |
+| `filePath` | string | 是 | 需读取的文件全路径，以 `/` 开头，不包括知识库名称 |
+| `startLine` | integer | 否 | Markdown 起始行，默认不填表示全部读取 |
+| `endLine` | integer | 否 | Markdown 结束行，默认不填表示全部读取 |
+
+请求示例：
+
+```json
+{
+  "resourceId": "10000003",
+  "filePath": "/制度/人事/请假制度.pdf",
+  "startLine": 1,
+  "endLine": 20
+}
+```
+
+成功响应示例：
+
+```json
+{
+  "resultCode": "0",
+  "resultMsg": "success",
+  "resultObject": {
+    "knCode": "10000003",
+    "filePath": "/制度/人事/请假制度.pdf",
+    "startLine": 1,
+    "endLine": 20,
+    "data": "# 请假制度\n\n第一条 适用范围\n...",
+    "reachedEof": false
+  }
+}
+```
+
+说明：响应中 `knCode` 返回的是请求时传入的 `resourceId`，而非系统内部编码。
+
+失败响应示例：
+
+```json
+{
+  "resultCode": "-1",
+  "resultMsg": "cannot resolve resourceId: 99999",
+  "resultObject": {}
+}
+```
+
+### `POST /api/v1/downloadFileByResourceId`
+
+按资源 ID 下载对应知识库下的原始文件。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `resourceId` | string | 是 | 知识库资源 ID，系统自动映射为内部 `knCode` |
+| `filePath` | string | 是 | 需下载的文件全路径，以 `/` 开头，不包括知识库名称 |
+
+请求示例：
+
+```json
+{
+  "resourceId": "10000003",
+  "filePath": "/制度/人事/请假制度.pdf"
+}
+```
+
+成功响应：
+
+- `200 OK`
+- `Content-Type: application/octet-stream`
+- `Content-Disposition: attachment; filename="..."`
+- 响应体为原始文件二进制字节流
 
 失败响应示例：
 

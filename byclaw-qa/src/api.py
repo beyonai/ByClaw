@@ -12,6 +12,8 @@ New routes:
   POST /api/v1/directories/updateByResourceId
   POST /api/v1/directories/deleteByResourceId
   POST /api/v1/listDirByResourceId
+  POST /api/v1/readFileByResourceId
+  POST /api/v1/downloadFileByResourceId
 
 Usage in start.sh:  uvicorn api:app --host ... --port ...
 """
@@ -22,8 +24,11 @@ import asyncio
 import json
 from typing import Any
 
+import mimetypes
+from pathlib import PurePosixPath
+
 from fastapi import BackgroundTasks, Body, File, Form, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
 
 from by_qa.core import logger
@@ -31,8 +36,10 @@ from by_qa.knowledge_base.api.schemas import (
     CreateDirectoryRequest,
     DeleteDirectoryRequest,
     FileToMarkdownIndexRequest,
+    KnowledgeItemDownloadRequest,
     KnowledgeItemListDirRequest,
     KnowledgeItemUploadRequest,
+    ReadFileRequest,
     SearchRequest,
     UpdateDirectoryRequest,
 )
@@ -404,3 +411,91 @@ async def list_dir_by_resource_id(body: dict[str, Any] = Body(...)):
         data.append(row)
 
     return _success({"data": data})
+
+
+def _build_content_disposition(filename: str) -> str:
+    normalized = PurePosixPath(filename or "download").name or "download"
+    safe_ascii = normalized.encode("ascii", "ignore").decode("ascii")
+    if not safe_ascii or safe_ascii.startswith("."):
+        suffix = PurePosixPath(normalized).suffix
+        safe_ascii = f"download{suffix}" if suffix else "download"
+    safe_ascii = safe_ascii.replace('"', "")
+    if safe_ascii == normalized:
+        return f'attachment; filename="{safe_ascii}"'
+    from urllib.parse import quote
+    encoded = quote(normalized, safe="")
+    return f"attachment; filename=\"{safe_ascii}\"; filename*=UTF-8''{encoded}"
+
+
+# -- readFileByResourceId -----------------------------------------------------
+
+@app.post("/api/v1/readFileByResourceId")
+async def read_file_by_resource_id(body: dict[str, Any] = Body(...)):
+    resource_id = body.get("resourceId")
+    if not resource_id:
+        return _error("resourceId is required")
+
+    kn_code = await _resolve_kn_code(str(resource_id))
+    if kn_code is None:
+        return _error(f"cannot resolve resourceId: {resource_id}")
+
+    body_mapped = {**body, "knCode": kn_code}
+    body_mapped.pop("resourceId", None)
+
+    try:
+        request = ReadFileRequest.model_validate(body_mapped)
+    except ValidationError as exc:
+        return _error("request validation failed", {"errors": json.loads(exc.json())})
+
+    try:
+        service = await resolve_knowledge_base_service()
+        result = await service.read_file(request)
+    except KnowledgeBaseConfigurationError as exc:
+        logger.exception("readFileByResourceId configuration error: resourceId=%s", resource_id)
+        return _error(str(exc))
+    except KnowledgeBaseValidationError as exc:
+        logger.exception("readFileByResourceId validation error: resourceId=%s", resource_id)
+        return _error(str(exc))
+
+    result["knCode"] = str(resource_id)
+    result_object = {k: v for k, v in result.items() if v is not None}
+    return _success(result_object)
+
+
+# -- downloadFileByResourceId -------------------------------------------------
+
+@app.post("/api/v1/downloadFileByResourceId")
+async def download_file_by_resource_id(body: dict[str, Any] = Body(...)):
+    resource_id = body.get("resourceId")
+    if not resource_id:
+        return _error("resourceId is required")
+
+    kn_code = await _resolve_kn_code(str(resource_id))
+    if kn_code is None:
+        return _error(f"cannot resolve resourceId: {resource_id}")
+
+    body_mapped = {**body, "knCode": kn_code}
+    body_mapped.pop("resourceId", None)
+
+    try:
+        request = KnowledgeItemDownloadRequest.model_validate(body_mapped)
+    except ValidationError as exc:
+        return _error("request validation failed", {"errors": json.loads(exc.json())})
+
+    try:
+        service = await resolve_knowledge_base_service()
+        result = await service.download_file(request)
+    except KnowledgeBaseConfigurationError as exc:
+        logger.exception("downloadFileByResourceId configuration error: resourceId=%s", resource_id)
+        return _error(str(exc))
+    except KnowledgeBaseValidationError as exc:
+        logger.exception("downloadFileByResourceId validation error: resourceId=%s", resource_id)
+        return _error(str(exc))
+
+    quoted_filename = PurePosixPath(result["filename"]).name.replace('"', "")
+    media_type = result["media_type"] or mimetypes.guess_type(quoted_filename)[0]
+    return Response(
+        content=result["content"],
+        media_type=media_type or "application/octet-stream",
+        headers={"Content-Disposition": _build_content_disposition(quoted_filename)},
+    )
