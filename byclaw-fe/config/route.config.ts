@@ -158,6 +158,11 @@ export default [
             component: './files',
           },
           {
+            path: '/models',
+            name: 'models',
+            component: './models',
+          },
+          {
             path: '/objectCenter',
             name: 'objectCenter',
             component: './objectCenter',

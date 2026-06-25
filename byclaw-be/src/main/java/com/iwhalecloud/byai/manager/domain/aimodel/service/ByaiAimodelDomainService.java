@@ -74,7 +74,8 @@ public class ByaiAimodelDomainService {
 
         PageHelper.startPage(pageNum, pageSize);
         List<ByaiAimodel> list = byaiAimodelMapper.selectByCondition(statusDb, request.getAbility(),
-            request.getSystem(), modelIdLong, request.getModelName(), request.getKeyword());
+            request.getSystem(), modelIdLong, request.getModelName(), request.getKeyword(), request.getCreateBy(),
+            request.getOwnerType());
         com.github.pagehelper.PageInfo<ByaiAimodel> phPageInfo = new com.github.pagehelper.PageInfo<>(list);
         return PageHelperUtil.toPageInfo(phPageInfo);
     }

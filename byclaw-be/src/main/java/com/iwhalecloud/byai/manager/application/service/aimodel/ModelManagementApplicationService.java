@@ -124,7 +124,7 @@ public class ModelManagementApplicationService {
             }
             else {
                 Long modelId = parseModelId(request.getId());
-                if (byaiAimodelDomainService.existsByModelNameExcludeId(displayName, modelId)) {
+                if (byaiAimodelDomainService.existsByModelNameExcludeId(displayName, modelId) && !"PERSONAL".equalsIgnoreCase(request.getOwnerType())) {
                     throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40002, "aimodel.name.duplicate");
                 }
             }
@@ -543,6 +543,7 @@ public class ModelManagementApplicationService {
         entity.setAuthToken(Sm4Util.encrypt(request.getApiToken()));
         entity.setMaxContentToken(request.getContextTokens());
         entity.setInparamTemplate(request.getInparamTemplate());
+        entity.setOwnerType(request.getOwnerType() != null ? request.getOwnerType() : "PUBLIC");
     }
 
     /** 构建 in_params Map：providerName、abilities、systems、headers、超时/重试/采样参数及 updatedAt */

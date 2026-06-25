@@ -37,4 +37,10 @@ public class ModelListRequest implements Serializable {
 
     /** 通用关键字（匹配 displayName/modelCode/providerName） */
     private String keyword;
+
+    /** 按创建人过滤（个人模型管理使用） */
+    private Long createBy;
+
+    /** 模型归属过滤: PUBLIC / PERSONAL */
+    private String ownerType;
 }

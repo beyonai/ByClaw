@@ -1,8 +1,10 @@
 import secondEdition from './en-US/secondEdition';
 import manager from './en-US/manager';
+import personalModel from '@/pages/models/locales/en-US';
 
 export default {
   ...manager,
+  ...personalModel,
   // Common Actions
   'common.add': 'Add',
   'common.create': 'Create',
@@ -171,6 +173,7 @@ export default {
   'common.clickHere': 'Click Here',
   'common.clickToViewDetail': 'Click to View Details',
   'common.file': 'File',
+  'common.model': 'Model',
   'common.todo': 'Todo',
   'common.task': 'Task',
   'common.member': 'Member',

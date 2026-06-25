@@ -11,6 +11,7 @@ const Knowledge = lazy(() => import('@/layout/sider/components/Knowledge'));
 const ResourceSiderPanel = lazy(() => import('@/layout/sider/components/ResourceSiderPanel'));
 const SearchAndQuery = lazy(() => import('@/layout/sider/components/SearchAndQuery'));
 const FileSiderPanel = lazy(() => import('@/layout/sider/components/FileSiderPanel'));
+const ModelSiderPanel = lazy(() => import('@/layout/sider/components/ModelSiderPanel'));
 
 const ToolSiderPanel = () => <ResourceSiderPanel resourceType="TOOL" />;
 const ViewSiderPanel = () => <ResourceSiderPanel resourceType="VIEW" />;
@@ -95,6 +96,14 @@ export const tabItems: any[] = [
     label: 'common.file',
     ChildComponent: FileSiderPanel,
     navigatePath: '/files',
+  },
+  {
+    key: 'model',
+    icon: 'icon-a-Braindanao',
+    activeIcon: 'icon-a-Braindanao',
+    label: 'common.model',
+    ChildComponent: ModelSiderPanel,
+    navigatePath: '/models',
   },
 ] as const;
 

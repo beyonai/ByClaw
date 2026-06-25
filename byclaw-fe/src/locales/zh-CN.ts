@@ -1,8 +1,10 @@
 import secondEdition from './zh-CN/secondEdition';
 import manager from './zh-CN/manager';
+import personalModel from '@/pages/models/locales/zh-CN';
 
 export default {
   ...manager,
+  ...personalModel,
   // 通用操作
   'common.add': '新增',
   'common.create': '新建',
@@ -158,6 +160,7 @@ export default {
   'common.clickHere': '点击这里',
   'common.clickToViewDetail': '点击查看详情',
   'common.file': '文件',
+  'common.model': '模型',
   'common.todo': '待办',
   'common.task': '任务',
   'common.member': '成员',
