@@ -74,7 +74,7 @@ public class OpenSandboxClient {
     public CreateSandboxResponse createSandbox(CreateSandboxRequest request, String idempotencyKey) {
         String url = baseUrl + "/v1/sandboxes";
         String body = toJson(request);
-        log.debug("创建沙箱：{}\t{}", url, body);
+        log.debug("OpenSandbox沙箱 POST {} body={}", url, body);
         Request.Builder rb = newRequestBuilder(url)
                 .post(RequestBody.create(body, JSON_MEDIA_TYPE));
         if (idempotencyKey != null
@@ -108,6 +108,7 @@ public class OpenSandboxClient {
     public List<SandboxDetail> listSandboxesByMetadataStrict(Map<String, String> metadata, int pageNo, int pageSize) {
         SandboxProperties.OpenSandboxConfig cfg = properties.getOpensandbox();
         if (!cfg.isListSandboxesBeforeCreate()) {
+            log.debug("OpenSandbox沙箱 listSandboxes skipped (listSandboxesBeforeCreate=false) metadata={}", metadata);
             return List.of();
         }
         if (metadata == null || metadata.isEmpty()) {
@@ -164,6 +165,7 @@ public class OpenSandboxClient {
 
     public SandboxDetail getSandbox(String sandboxId) {
         String url = baseUrl + "/v1/sandboxes/" + sandboxId;
+        log.debug("OpenSandbox沙箱 GET {}", url);
         Request httpRequest = newRequestBuilder(url).get().build();
         return execute(httpRequest, SandboxDetail.class);
     }
@@ -177,9 +179,11 @@ public class OpenSandboxClient {
     }
 
     private SandboxDetail getSandboxIfExistsByUrl(String url) {
+        log.debug("OpenSandbox沙箱 GET(ifExists) {}", url);
         Request httpRequest = newRequestBuilder(url).get().build();
         try (Response response = httpClient.newCall(httpRequest).execute()) {
             String responseBody = response.body() != null ? response.body().string() : "";
+            log.debug("OpenSandbox沙箱 GET(ifExists) {} -> status={} body={}", url, response.code(), responseBody);
             if (response.code() == 404) {
                 return null;
             }
@@ -196,8 +200,10 @@ public class OpenSandboxClient {
 
     public void deleteSandbox(String sandboxId) {
         String url = baseUrl + "/v1/sandboxes/" + sandboxId;
+        log.debug("OpenSandbox沙箱 DELETE {}", url);
         Request httpRequest = newRequestBuilder(url).delete().build();
         try (Response response = httpClient.newCall(httpRequest).execute()) {
+            log.debug("OpenSandbox沙箱 DELETE {} -> status={}", url, response.code());
             if (!response.isSuccessful() && response.code() != 404) {
                 String responseBody = response.body() != null ? response.body().string() : "";
                 throw new OpenSandboxException("Failed to delete sandbox " + sandboxId
@@ -210,6 +216,7 @@ public class OpenSandboxClient {
 
     public SandboxEndpoint getSandboxEndpoint(String sandboxId, int port) {
         String url = baseUrl + "/v1/sandboxes/" + sandboxId + "/endpoints/" + port;
+        log.debug("OpenSandbox沙箱 GET {}", url);
         Request httpRequest = newRequestBuilder(url).get().build();
         return execute(httpRequest, SandboxEndpoint.class);
     }
@@ -217,6 +224,7 @@ public class OpenSandboxClient {
     public ResizeSandboxResponse resizeSandbox(String sandboxId, ResizeSandboxRequest request) {
         String url = baseUrl + "/v1/sandboxes/" + sandboxId + "/resize";
         String body = toJson(request);
+        log.debug("OpenSandbox沙箱 POST {} body={}", url, body);
         Request httpRequest = newRequestBuilder(url)
             .post(RequestBody.create(body, JSON_MEDIA_TYPE))
             .build();
@@ -229,10 +237,12 @@ public class OpenSandboxClient {
     public void renewExpiration(String sandboxId, RenewSandboxExpirationRequest request) {
         String url = baseUrl + "/v1/sandboxes/" + sandboxId + "/renew-expiration";
         String body = toJson(request);
+        log.debug("OpenSandbox沙箱 POST {} body={}", url, body);
         Request httpRequest = newRequestBuilder(url)
                 .post(RequestBody.create(body, JSON_MEDIA_TYPE))
                 .build();
         try (Response response = httpClient.newCall(httpRequest).execute()) {
+            log.debug("OpenSandbox沙箱 POST {} -> status={}", url, response.code());
             if (!response.isSuccessful()) {
                 String responseBody = response.body() != null ? response.body().string() : "";
                 throw new OpenSandboxException("Failed to renew expiration for sandbox " + sandboxId
@@ -303,8 +313,10 @@ public class OpenSandboxClient {
     }
 
     private <T> T execute(Request request, Class<T> responseType) {
+        log.debug("OpenSandbox沙箱 {} {}", request.method(), request.url());
         try (Response response = httpClient.newCall(request).execute()) {
             String responseBody = response.body() != null ? response.body().string() : "";
+            log.debug("OpenSandbox沙箱 {} {} -> status={} body={}", request.method(), request.url(), response.code(), responseBody);
             if (!response.isSuccessful()) {
                 ErrorResponse error = null;
                 try {
@@ -325,8 +337,10 @@ public class OpenSandboxClient {
     }
 
     private List<SandboxDetail> executeSandboxesList(Request request) {
+        log.debug("OpenSandbox沙箱 GET {}", request.url());
         try (Response response = httpClient.newCall(request).execute()) {
             String responseBody = response.body() != null ? response.body().string() : "";
+            log.debug("OpenSandbox沙箱 GET {} -> status={} body={}", request.url(), response.code(), responseBody);
             if (!response.isSuccessful()) {
                 throw new OpenSandboxException("HTTP " + response.code() + ": " + responseBody);
             }
