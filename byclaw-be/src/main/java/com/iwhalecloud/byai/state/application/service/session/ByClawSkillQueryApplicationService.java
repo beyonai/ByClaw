@@ -14,16 +14,22 @@ import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
+import com.iwhalecloud.byai.common.constants.resource.OwnerType;
+import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
+import com.iwhalecloud.byai.manager.domain.resource.request.ResourceUseAuthQo;
+import com.iwhalecloud.byai.manager.domain.resource.service.ResourceAuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
+import com.iwhalecloud.byai.manager.vo.auth.ResourceAuthVo;
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 
 /**
@@ -46,6 +52,19 @@ public class ByClawSkillQueryApplicationService {
 
     @Autowired
     private SsResourceService ssResourceService;
+
+    /**
+     * 个人技能（资源中心已资源化技能）查询服务，用于右侧个人技能 tab 的去重排除集。
+     * 通过 {@link Lazy} 避免 state ↔ manager 之间潜在的启动期循环依赖。
+     */
+    @Lazy
+    @Autowired
+    private ResourceAuthApplicationService resourceAuthApplicationService;
+
+    /**
+     * 个人技能排除集查询的单页上限。个人技能数量有限，单页足以覆盖全量。
+     */
+    private static final int PERSONAL_SKILL_EXCLUDE_PAGE_SIZE = 1000;
 
     /**
      * 查询指定用户在其工作空间下的 skill 列表。
@@ -94,6 +113,48 @@ public class ByClawSkillQueryApplicationService {
      */
     public List<ByClawSkillDto> qryLobsterInstalledSkillList(String userCode, Long resourceId, String keyword) {
         return qryWorkspaceUnboundSkillList(userCode, resourceId, keyword);
+    }
+
+    /**
+     * 查询工作空间下、尚未进入当前用户“个人技能”资源列表的目录技能。
+     *
+     * 与 {@link #qryWorkspaceUnboundSkillList} 的区别：排除口径是“用户个人 tab 已展示的已资源化技能”
+     * （走 listResourceAuth(ownerType=personal) 的真实数据源），而非“绑定到当前数字员工关系表”。
+     * 这样右侧个人技能 tab 把工作空间技能与已资源化个人技能合并时不会重复。
+     */
+    public List<ByClawSkillDto> qryWorkspacePersonalUnboundSkillList(String userCode, Long resourceId, String keyword) {
+        if (resourceId == null) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.resourceid.notnull"));
+        }
+        Set<String> personalSkillKeys = queryPersonalResourcedSkillKeys();
+        return qrySkillListByUserCode(userCode, resourceId, keyword).stream()
+            .filter(skill -> !personalSkillKeys.contains(normalizeKey(skill.getSkillName())))
+            .peek(skill -> {
+                skill.setDisplaySourceType(ByClawSkillDto.DISPLAY_SOURCE_TYPE_USER_DEVELOPED);
+                skill.setResourceBacked(false);
+            })
+            .collect(Collectors.toList());
+    }
+
+    /**
+     * 取当前用户个人 tab 下已资源化 SKILL 技能的去重 key（resourceCode / resourceName 经归一化）。
+     */
+    private Set<String> queryPersonalResourcedSkillKeys() {
+        ResourceUseAuthQo qo = new ResourceUseAuthQo();
+        qo.setOwnerType(OwnerType.PERSONAL);
+        qo.setResourceBizTypeList(Collections.singletonList(ResourceBizTypeEnum.SKILL.name()));
+        qo.setPageNum(1);
+        qo.setPageSize(PERSONAL_SKILL_EXCLUDE_PAGE_SIZE);
+        PageInfo<ResourceAuthVo> page = resourceAuthApplicationService.listResourceAuth(qo);
+        Set<String> keys = new HashSet<>();
+        if (page == null || page.getList() == null) {
+            return keys;
+        }
+        page.getList().forEach(vo -> {
+            addBoundKey(keys, vo.getResourceCode());
+            addBoundKey(keys, vo.getResourceName());
+        });
+        return keys;
     }
 
     public ByClawSkillDto getWorkspaceSkillDetail(String userCode, Long resourceId, String skillPath) {

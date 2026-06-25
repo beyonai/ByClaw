@@ -32,11 +32,6 @@ server {
 
     {{BACKEND_VARS}}
 
-    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|json)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-
     location /beyond {
         alias /usr/share/nginx/html;
         index index.html index.htm;

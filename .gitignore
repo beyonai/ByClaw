@@ -108,3 +108,6 @@ byclaw-data/.vscode/settings.json
 .vscode/launch.json
 
 .workbuddy/
+
+.codegraph
+.workbuddy/

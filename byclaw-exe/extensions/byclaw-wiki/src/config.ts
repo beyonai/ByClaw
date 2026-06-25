@@ -107,17 +107,19 @@ export const byclawWikiConfigSchema = {
     },
     notificationDingtalkActionCardBtnUrl: {
       type: "string",
-      description: "DingTalk ActionCard single button jump URL.",
-      default: "http://39.105.105.85/beyond/chat",
+      description: "Optional DingTalk ActionCard button URL. Leave empty to send the card without a jump URL.",
+      default: "",
     },
-    notificationResourceId: {
-      type: ["string", "number"],
-      description: "Optional dataset resourceId appended to the DingTalk ActionCard button URL.",
-    },
-    notificationDirectoryPath: {
+    notificationDocumentUploadUrl: {
       type: "string",
-      description: "Dataset directoryPath appended to the DingTalk ActionCard button URL.",
-      default: "/",
+      description:
+        "COS upload endpoint for generated operation documents. Relative paths resolve against BYCLAW_WIKI_COS_UPLOAD_BASE_URL or http://localhost:3000.",
+      default: "/api/cos/upload",
+    },
+    notificationDocumentUploadPrefix: {
+      type: "string",
+      description: "Optional COS object prefix for generated operation documents.",
+      default: "",
     },
     notificationRobotType: {
       enum: ["generic", "wecom", "dingtalk", "feishu"],
@@ -143,16 +145,6 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 
 function readString(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
-}
-
-function readOptionalString(value: unknown): string | undefined {
-  if (typeof value === "string" && value.trim()) {
-    return value.trim();
-  }
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(Math.trunc(value));
-  }
-  return undefined;
 }
 
 function readBoolean(value: unknown, fallback: boolean): boolean {
@@ -281,10 +273,10 @@ export function resolveByclawWikiConfig(raw: unknown): ResolvedByclawWikiConfig 
       ),
       dingtalkActionCardBtnUrl: readString(
         config.notificationDingtalkActionCardBtnUrl,
-        "http://39.105.105.85/beyond/chat",
+        "",
       ),
-      resourceId: readOptionalString(config.notificationResourceId),
-      directoryPath: readString(config.notificationDirectoryPath, "/"),
+      documentUploadUrl: readString(config.notificationDocumentUploadUrl, "/api/cos/upload"),
+      documentUploadPrefix: readString(config.notificationDocumentUploadPrefix, ""),
       robotType: readRobotType(config.notificationRobotType),
       maxOutputChars: readPositiveInteger(config.notificationMaxOutputChars, 3000),
       minOutputChars: readNonNegativeInteger(config.notificationMinOutputChars, 1),

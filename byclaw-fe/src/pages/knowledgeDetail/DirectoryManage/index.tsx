@@ -50,6 +50,7 @@ const PreViewFile = lazy(() =>
 
 export interface DirectoryManageRef {
   getDirectoryList: (params: Record<string, any>) => void;
+  buildSelectedFiles: () => void;
 }
 
 interface IProps {
@@ -62,6 +63,7 @@ interface IProps {
   setUploadLoading: (loading: boolean) => void;
   folderPath: { id: string; title: string }[];
   setFolderPath: React.Dispatch<React.SetStateAction<IProps['folderPath']>>;
+  onBuildSelectionChange?: (count: number) => void;
 }
 
 type ActionItem = {
@@ -148,7 +150,12 @@ function canPreviewRecord(record: any) {
 }
 
 function isBuildNotStartedRecord(record: any) {
-  return `${record?.fileUploadState ?? ''}` === '1';
+  const normalizedState = `${record?.fileUploadState ?? ''}`;
+  return !normalizedState || normalizedState === '1';
+}
+
+function hasRunningBuildTask(record: any) {
+  return `${record?.fileUploadState ?? ''}` === '2';
 }
 
 const FilePreviewPanel = ({ blob, fileName, fileType, loading, onClose }: FilePreviewPanelProps) => (
@@ -299,6 +306,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     setShowAddFolder,
     uploadLoading,
     setUploadLoading,
+    onBuildSelectionChange,
   } = props;
 
   const { folderPath, setFolderPath } = props;
@@ -318,6 +326,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
   const [queryingBuildStatusIds, setQueryingBuildStatusIds] = useState<string[]>([]);
   const [pollingFileIds, setPollingFileIds] = useState<string[]>([]);
   const [visibleFileIds, setVisibleFileIds] = useState<string[]>([]);
+  const [selectedBuildRowKeys, setSelectedBuildRowKeys] = useState<React.Key[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const fileRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
   const queryingFileIdsRef = useRef<Set<string>>(new Set());
@@ -421,15 +430,6 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     };
   }, [setState]);
 
-  // 暴露方法给父组件
-  useImperativeHandle(
-    ref,
-    () => ({
-      getDirectoryList,
-    }),
-    [getDirectoryList]
-  );
-
   const displayDirectoryList = useMemo(() => {
     return directoryList;
   }, [directoryList]);
@@ -489,6 +489,25 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       }),
     [displayDirectoryList, getFileRowKey]
   );
+
+  const buildableFileRecords = useMemo(
+    () => fileRecords.filter((record: any) => !buildingFileIds.includes(getFileRowKey(record))),
+    [buildingFileIds, fileRecords, getFileRowKey]
+  );
+
+  const selectedBuildFileRecords = useMemo(
+    () => buildableFileRecords.filter((record: any) => selectedBuildRowKeys.includes(getFileRowKey(record))),
+    [buildableFileRecords, getFileRowKey, selectedBuildRowKeys]
+  );
+
+  useEffect(() => {
+    const buildableRowKeys = buildableFileRecords.map((record: any) => getFileRowKey(record));
+    setSelectedBuildRowKeys((prev) => prev.filter((key) => buildableRowKeys.includes(`${key}`)));
+  }, [buildableFileRecords, getFileRowKey]);
+
+  useEffect(() => {
+    onBuildSelectionChange?.(selectedBuildFileRecords.length);
+  }, [onBuildSelectionChange, selectedBuildFileRecords.length]);
 
   const pollingFileIdsKey = useMemo(() => pollingFileIds.map((item) => `${item}`).join(','), [pollingFileIds]);
 
@@ -574,7 +593,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         const rowKey = getFileRowKey(record);
         return (
           visibleFileIds.includes(rowKey) &&
-          !isBuildNotStartedRecord(record) &&
+          hasRunningBuildTask(record) &&
           !queryingFileIdsRef.current.has(rowKey) &&
           !queriedFileIdsRef.current.has(rowKey)
         );
@@ -774,59 +793,128 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     isTerminalBuildStatus,
   ]);
 
-  const submitBuildTask = useCallback(
-    (record: any) => {
-      const directoryPath = getBuildDirectoryPath(record);
-      if (!directoryPath) {
-        message.error(intl.formatMessage({ id: 'directoryManage.resolveFilePathFailed' }));
-        return;
-      }
-
-      const rowKey = getFileRowKey(record);
-      if (!rowKey) {
-        message.error(intl.formatMessage({ id: 'directoryManage.resolveFilePathFailed' }));
-        return;
-      }
-
+  const submitBuildTasks = useCallback(
+    (records: any[]) => {
       const rid = baseInfo?.resourceId;
       if (rid === null || rid === undefined || rid === '') {
         message.error(intl.formatMessage({ id: 'directoryManage.missingKnowledgeBaseInfo' }));
         return;
       }
 
-      const payload: BuildDatasetPayload = {
-        directoryPath,
-        resourceId: String(rid),
-      };
+      const taskMap = new Map<
+        string,
+        {
+          rowKey: string;
+          payload: BuildDatasetPayload;
+        }
+      >();
 
-      setBuildingFileIds((prev) => (prev.includes(rowKey) ? prev : [...prev, rowKey]));
-      message.info(intl.formatMessage({ id: 'directoryManage.buildSubmitted' }));
+      records.forEach((record) => {
+        const directoryPath = getBuildDirectoryPath(record);
+        const rowKey = getFileRowKey(record);
+        if (!directoryPath || !rowKey || buildingFileIds.includes(rowKey)) return;
+        taskMap.set(rowKey, {
+          rowKey,
+          payload: {
+            directoryPath,
+            resourceId: String(rid),
+          },
+        });
+      });
+
+      const tasks = Array.from(taskMap.values());
+      if (tasks.length === 0) {
+        message.warning(intl.formatMessage({ id: 'directoryManage.noBuildableFiles' }));
+        return;
+      }
+
+      const taskKeys = tasks.map((task) => task.rowKey);
+      setBuildingFileIds((prev) => [...new Set([...prev, ...taskKeys])]);
+      message.info(
+        intl.formatMessage(
+          { id: tasks.length > 1 ? 'directoryManage.batchBuildSubmitted' : 'directoryManage.buildSubmitted' },
+          { count: tasks.length }
+        )
+      );
 
       window.setTimeout(() => {
-        void buildDataset(payload)
-          .then(() => {
-            queriedFileIdsRef.current.delete(rowKey);
-            postBuildPollingIdsRef.current.add(rowKey);
-            setPollingFileIds((prev) => (prev.includes(rowKey) ? prev : [...prev, rowKey]));
-            getDirectoryList();
-          })
-          .catch((error) => {
-            const errorMessage =
-              error?.response?.data?.msg ||
-              error?.msg ||
-              error?.message ||
-              intl.formatMessage({ id: 'directoryManage.buildFailed' });
-            message.error(errorMessage);
-            postBuildPollingIdsRef.current.delete(rowKey);
-            setPollingFileIds((prev) => prev.filter((k) => k !== rowKey));
+        void Promise.allSettled(tasks.map((task) => buildDataset(task.payload)))
+          .then((results) => {
+            const successKeys = tasks
+              .filter((_, index) => results[index].status === 'fulfilled')
+              .map((task) => task.rowKey);
+            const failedResult = results.find(
+              (result): result is PromiseRejectedResult => result.status === 'rejected'
+            );
+
+            successKeys.forEach((rowKey) => {
+              queriedFileIdsRef.current.delete(rowKey);
+              postBuildPollingIdsRef.current.add(rowKey);
+            });
+
+            if (successKeys.length > 0) {
+              setPollingFileIds((prev) => [...new Set([...prev, ...successKeys])]);
+            }
+
+            if (failedResult) {
+              const error = failedResult.reason;
+              const errorMessage =
+                error?.response?.data?.msg ||
+                error?.msg ||
+                error?.message ||
+                intl.formatMessage({ id: 'directoryManage.buildFailed' });
+              message.error(errorMessage);
+            }
+
             getDirectoryList();
           })
           .finally(() => {
-            setBuildingFileIds((prev) => prev.filter((k) => k !== rowKey));
+            setBuildingFileIds((prev) => prev.filter((key) => !taskKeys.includes(key)));
           });
       }, 0);
     },
-    [baseInfo?.resourceId, getBuildDirectoryPath, getDirectoryList, getFileRowKey, intl, message]
+    [baseInfo?.resourceId, buildingFileIds, getBuildDirectoryPath, getDirectoryList, getFileRowKey, intl, message]
+  );
+
+  const submitBuildTask = useCallback(
+    (record: any) => {
+      const directoryPath = getBuildDirectoryPath(record);
+      const rowKey = getFileRowKey(record);
+      if (!directoryPath || !rowKey) {
+        message.error(intl.formatMessage({ id: 'directoryManage.resolveFilePathFailed' }));
+        return;
+      }
+
+      submitBuildTasks([record]);
+    },
+    [getBuildDirectoryPath, getFileRowKey, intl, message, submitBuildTasks]
+  );
+
+  const handleBatchBuild = useCallback(() => {
+    if (selectedBuildFileRecords.length === 0) {
+      message.warning(intl.formatMessage({ id: 'directoryManage.selectFilesToBuild' }));
+      return;
+    }
+
+    Modal.confirm({
+      title: intl.formatMessage({ id: 'directoryManage.batchBuildFiles' }),
+      content: intl.formatMessage(
+        { id: 'directoryManage.batchBuildConfirm' },
+        { count: selectedBuildFileRecords.length }
+      ),
+      onOk: () => {
+        submitBuildTasks(selectedBuildFileRecords);
+      },
+    });
+  }, [intl, message, selectedBuildFileRecords, submitBuildTasks]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      getDirectoryList,
+      buildSelectedFiles: handleBatchBuild,
+    }),
+    [getDirectoryList, handleBatchBuild]
   );
 
   const renderPreviewPanel = useCallback(
@@ -1246,6 +1334,23 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     ]
   );
 
+  const buildRowSelection = useMemo(
+    () =>
+      canManage
+        ? {
+          type: 'checkbox' as const,
+          selectedRowKeys: selectedBuildRowKeys,
+          onChange: (selectedRowKeys: React.Key[]) => {
+            setSelectedBuildRowKeys(selectedRowKeys);
+          },
+          getCheckboxProps: (record: any) => ({
+            disabled: record?.type !== 'file' || buildingFileIds.includes(getFileRowKey(record)),
+          }),
+        }
+        : undefined,
+    [buildingFileIds, canManage, getFileRowKey, selectedBuildRowKeys]
+  );
+
   const handleBreadcrumbClick = (index: number) => {
     setFolderPath(folderPath.slice(0, index + 1));
   };
@@ -1261,6 +1366,8 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
           hasMore={false}
           dataSource={displayDirectoryList}
           columns={columns}
+          rowKey={getFileRowKey}
+          rowSelection={buildRowSelection}
           emptyLocale={{
             emptyText: (
               <DirectoryEmpty

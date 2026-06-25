@@ -320,6 +320,8 @@ const PersonalParamSettings: React.FC = () => {
         confirmLoading={saving}
         onOk={handleSave}
         onCancel={() => setModalOpen(false)}
+        okText={intl.formatMessage({ id: 'common.confirm' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
         width={640}
         destroyOnHidden
       >

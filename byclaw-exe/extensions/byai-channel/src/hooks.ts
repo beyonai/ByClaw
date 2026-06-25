@@ -45,7 +45,7 @@ import {
   resolveByaiSessionIdFromSessionKey,
 } from "./session-key.js";
 import { resolveByaiSessionStatus } from "./session-status-route.js";
-import { writeDataToRedis } from "./utils.js";
+import { createRedisInstance } from "./utils.js";
 import path from "node:path";
 import fs from "node:fs/promises";
 
@@ -186,6 +186,10 @@ async function emitCompactionHookNotice(
   );
 }
 
+function resolveSessionStatusRedisKey(sessionId: string) {
+  return `byai:session:${sessionId}:status`;
+}
+
 async function refreshSessionStatusRedis(
   sessionKey: string | undefined,
   source: string,
@@ -200,14 +204,16 @@ async function refreshSessionStatusRedis(
   }
   try {
     const status = await resolveByaiSessionStatus(normalizedSessionKey);
-    await writeDataToRedis(
-      `byai:session:${sessionId}:session_status`,
-      {
-        ...status,
-        sessionId,
-        source,
-      },
-    );
+    const agentId = status.agentId as string;
+    const redis = createRedisInstance();
+    if (!redis) {
+      return;
+    }
+    redis.hset(resolveSessionStatusRedisKey(sessionId), agentId, JSON.stringify({
+      ...status,
+      sessionId,
+      source,
+    }));
   } catch (err) {
     console.warn(
       `[byai-channel] refresh session status failed: sessionKey=${normalizedSessionKey}, source=${source}, error=${String(err)}`,
@@ -260,11 +266,16 @@ async function refreshRealtimeSessionStatusRedis(
     contextTokens !== null && contextTokens > 0
       ? Math.min(Math.round((usedTokens / contextTokens) * 100), 100)
       : null;
-  await writeDataToRedis(`byai:session:${sessionId}:session_status`, {
+  const redis = createRedisInstance();
+  if (!redis) {
+    return;
+  }
+  const agentId = resolveByaiAgentIdFromSessionKey(sessionKey);
+  redis.hset(resolveSessionStatusRedisKey(sessionId), agentId, JSON.stringify({
     ok: true,
     exists: true,
     sessionKey,
-    agentId: resolveByaiAgentIdFromSessionKey(sessionKey),
+    agentId,
     sessionId,
     fresh: true,
     realtime: true,
@@ -279,7 +290,7 @@ async function refreshRealtimeSessionStatusRedis(
     cacheRead: normalizeNonNegativeNumber(event.usage?.cacheRead) ?? null,
     cacheWrite: normalizeNonNegativeNumber(event.usage?.cacheWrite) ?? null,
     outputTokens: normalizeNonNegativeNumber(event.usage?.output) ?? null,
-  });
+  }));
 }
 
 function getRedisInfo(): RedisInfo | null {

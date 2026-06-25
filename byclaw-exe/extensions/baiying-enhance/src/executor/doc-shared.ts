@@ -96,11 +96,6 @@ export type DocPollResult = {
    * were observed.
    */
   text: string;
-  /** Terminal event's own content (kept for diagnostics). */
-  terminal_text?: string;
-  /** Concatenation of all `answerDelta` events observed during polling. */
-  delta_text?: string;
-  raw_message?: Dict;
   matched_stream_id?: string;
   stream_name: string;
 };
@@ -408,7 +403,6 @@ export async function pollDocResult(params: {
   const blockMs = Math.max(200, Math.min(Math.round(params.intervalSec * 1000), 5000));
   const drainMs = params.postTerminalDrainMs ?? 1500;
   const deltaParts: string[] = [];
-  let latestDeltaText = "";
 
   // Terminal state captured when we first see a final event; we keep
   // draining the stream after this to pick up trailing deltas.
@@ -480,7 +474,6 @@ export async function pollDocResult(params: {
         const eventText = extractDocTextFromData(msg.data) || stateMsg;
         if (eventType.toLowerCase().includes("answerdelta") && eventText) {
           deltaParts.push(eventText);
-          latestDeltaText = eventText;
           await emitDelta(eventText, deltaParts.join(""), eventType);
           continue;
         }
@@ -515,10 +508,7 @@ export async function pollDocResult(params: {
     };
   }
 
-  const aggregatedText =
-    delta.length >= terminalText.length
-      ? delta || terminalText || latestDeltaText
-      : terminalText;
+  const aggregatedText = terminalText || delta;
 
   // Top-up onDelta: if the final aggregated text differs from what the delta
   // stream pushed (e.g. terminal carries extra content, or worker published
@@ -532,9 +522,7 @@ export async function pollDocResult(params: {
     success: !terminalIsError,
     event_type: terminalEventType,
     text: aggregatedText,
-    terminal_text: terminalText,
     // delta_text: delta,
-    raw_message: terminalMsg,
     matched_stream_id: terminalStreamId,
     stream_name: streamName,
   };

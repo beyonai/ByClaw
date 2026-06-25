@@ -21,6 +21,10 @@ import {
 } from "./session-context.js";
 import type { ResolvedByaiAccount, ByaiSdkInboundMessage, SdkInboundFile } from "./types.js";
 import { getRedisInfo, getUserCode } from "./utils.js";
+import {
+  isBaiyingEnhanceConfigured,
+  waitForBaiyingEnhanceColdStartReady,
+} from "./baiying-enhance-readiness.js";
 
 export interface ByaiSdkAppOptions {
   account: ResolvedByaiAccount;
@@ -77,24 +81,23 @@ function getInboundMessageFromByFramework(data: AskAgentCommand) {
       resourceName: string;
     }[] = data.extraPayload?.resource_list || [];
     const { sessionId } = data.header;
+    const baiyingCallHandledResourceTypes = ["AGENT", "TOOLKIT", "TOOL", "MCP", "OBJECT", "VIEW", "KG_DOC", "KG_DB", "KG_QA"];
     resourceList.forEach((item) => {
       if (item.resourceType !== "DIG_EMPLOYEE") {
         if (item.resourceType === "KG_DOC_FILE") {
           remindTextArr.push(`- file: ${resolveSdkLocalFilePath(item.resourceId, sessionId)}`);
+        } else if (item.resourceType?.toLowerCase() === "skill") {
+          remindTextArr.push(`- skill: ${item.resourceName}`);
         } else {
           remindTextArr.push(
             `- resource: resource_id=${item.resourceId}, resource_type=${item.resourceType}, resource_name=${item.resourceName}`,
           );
-        }
+        } 
       }
     });
     if (remindTextArr.length) {
       let handleResourceTips = "";
-      if (
-        resourceList.some(
-          (item) => item.resourceType !== "KG_DOC_FILE" && item.resourceType !== "DIG_EMPLOYEE",
-        )
-      ) {
+      if (resourceList.some((item) => baiyingCallHandledResourceTypes.includes(item.resourceType))) {
         if (data.extraPayload?.agent_id || data.extraPayload?.agent_code) {
           handleResourceTips =
             "For the resources, you can use \`baiying_call\` tool to handle them.";
@@ -277,6 +280,27 @@ export class ByaiSdkApp {
     );
 
     registerSdkEmitter(this.account.accountId, emitter);
+
+    if (isBaiyingEnhanceConfigured(this.currentConfig())) {
+      const rawWaitMs = Number.parseInt(
+        process.env.BAIYING_ENHANCE_COLD_START_WAIT_MS || "60000",
+        10,
+      );
+      const waitMs = Number.isFinite(rawWaitMs) ? Math.max(0, rawWaitMs) : 60000;
+      info?.(
+        `[${this.account.accountId}] waiting for baiying-enhance cold-start readiness before subscribing, waitMs=${waitMs}`,
+      );
+      const readiness = await waitForBaiyingEnhanceColdStartReady(waitMs);
+      if (readiness.ready) {
+        info?.(
+          `[${this.account.accountId}] baiying-enhance cold-start readiness complete before subscribing, waitedMs=${readiness.waitedMs}, reason=${readiness.reason ?? "ready"}`,
+        );
+      } else {
+        error?.(
+          `[${this.account.accountId}] baiying-enhance cold-start readiness not complete before subscribing, waitedMs=${readiness.waitedMs}, reason=${readiness.reason ?? "timeout"}; continuing`,
+        );
+      }
+    }
 
     const subscription = runner.subscribe(async ({ streamName, msgId, data }) => {
       if (data.actionType === ActionType.RESUME) {

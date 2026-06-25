@@ -1,4 +1,7 @@
 jest.mock('@umijs/max', () => ({
+  getIntl: () => ({
+    formatMessage: ({ id }: { id: string }) => id,
+  }),
   useIntl: () => ({
     formatMessage: ({ id }: { id: string }) => id,
   }),

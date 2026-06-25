@@ -261,7 +261,7 @@ public class ScriptService extends AbstractChatProcess {
         ctx.traceId = runningTraceId;
     }
 
-    private String getTraceId(Long userMessageId, Long modelAnswerMessageId) {
+    public static String getTraceId(Long userMessageId, Long modelAnswerMessageId) {
         return TraceIdCodec.encode(userMessageId, modelAnswerMessageId);
     }
 

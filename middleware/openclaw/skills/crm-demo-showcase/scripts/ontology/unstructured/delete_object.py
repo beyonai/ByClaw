@@ -15,7 +15,7 @@ I/O 协议：stdin JSON → stdout JSON
 删除流程（两步顺序执行）:
     1. delete_owl_scope("OBJECT", entity_code) — 清除术语库数据
     2. deleteResourceByCode(entity_code) — 下架本体（门户服务）
-    注意：不删除知识库，不删除 SQLite 表（非结构化无表）
+    注意：不删除知识库，不删除 表（非结构化无表）
 """
 
 from __future__ import annotations

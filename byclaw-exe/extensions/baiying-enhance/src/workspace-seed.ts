@@ -36,7 +36,7 @@ type BaiyingAgentItem = {
   openingQuestion?: string;
   integrationType?: string;
   agentSseUrl?: string;
-  relResourceInfoList?: Array<{
+  relResourceList?: Array<{
     resourceId?: string;
     resourceName?: string;
     resourceType?: string;
@@ -52,6 +52,32 @@ type BaiyingAgentItem = {
     example?: string[];
   }>;
 };
+
+function isSkillRelResource(
+  raw: NonNullable<BaiyingAgentItem["relResourceList"]>[number],
+): boolean {
+  const t = String(raw.resourceBizType ?? raw.resourceType ?? "").trim().toUpperCase();
+  return t === "SKILL";
+}
+
+function nonSkillRelResources(
+  resources: BaiyingAgentItem["relResourceList"],
+): NonNullable<BaiyingAgentItem["relResourceList"]> | undefined {
+  if (!Array.isArray(resources)) {
+    return undefined;
+  }
+  const filtered = resources.filter((r) => !isSkillRelResource(r));
+  return filtered.length > 0 ? filtered : undefined;
+}
+
+function pickRelResourceList(
+  raw: Record<string, unknown>,
+): NonNullable<BaiyingAgentItem["relResourceList"]> | undefined {
+  const resourceList = Array.isArray(raw.relResourceList)
+    ? (raw.relResourceList as NonNullable<BaiyingAgentItem["relResourceList"]>)
+    : undefined;
+  return nonSkillRelResources(resourceList);
+}
 
 function parseOpeningQuestions(raw: string | undefined): string[] {
   if (!raw || typeof raw !== "string") {
@@ -85,12 +111,8 @@ function getFirstAgentItem(raw: unknown): BaiyingAgentItem | null {
     return null;
   }
   const o = first as Record<string, unknown>;
-  const relResourceInfoList = Array.isArray(o.relResourceInfoList)
-    ? (o.relResourceInfoList as NonNullable<BaiyingAgentItem["relResourceInfoList"]>)
-    : Array.isArray(o.relResourceList)
-      ? (o.relResourceList as NonNullable<BaiyingAgentItem["relResourceInfoList"]>)
-      : undefined;
-  return { ...(first as BaiyingAgentItem), relResourceInfoList } as BaiyingAgentItem;
+  const relResourceList = pickRelResourceList(o);
+  return { ...(first as BaiyingAgentItem), relResourceList } as BaiyingAgentItem;
 }
 
 /** Parse raw Baiying detail format (resourceId + resourceName at root) into BaiyingAgentItem. */
@@ -156,11 +178,7 @@ function getRawDetailItem(raw: unknown): BaiyingAgentItem | null {
       typeof prologue?.openingQuestion === "string" ? prologue.openingQuestion : undefined,
     integrationType: str(d.integrationType) || undefined,
     agentSseUrl: str(d.agentSseUrl) || undefined,
-    relResourceInfoList: Array.isArray(d.relResourceInfoList)
-      ? d.relResourceInfoList
-      : Array.isArray(d.relResourceList)
-        ? d.relResourceList
-        : undefined,
+    relResourceList: pickRelResourceList(d),
     coreCompetencies,
   };
 }
@@ -268,7 +286,7 @@ export function buildAgentsMd(item: BaiyingAgentItem): string {
   }
 
   // Associated resources section.
-  const res = item.relResourceInfoList;
+  const res = nonSkillRelResources(item.relResourceList);
   if (Array.isArray(res) && res.length > 0) {
     lines.push("## Associated resources", "");
     lines.push("The following resources are available via the `baiying_call` tool:", "");
@@ -318,7 +336,7 @@ function isDocResourceType(resourceType: string | undefined): boolean {
   return t === "DOC" || t === "ATOM" || t === "KG_DOC" || t === "KG_DB" || t === "KG_QA";
 }
 
-function buildToolsMd(item: BaiyingAgentItem, fallbackAgentId?: string): string {
+export function buildToolsMd(item: BaiyingAgentItem, fallbackAgentId?: string): string {
   const resolvedAgentId =
     (typeof item.resourceId === "string" && item.resourceId.trim() ? item.resourceId.trim() : "") ||
     (typeof fallbackAgentId === "string" && fallbackAgentId.trim() ? fallbackAgentId.trim() : "");
@@ -356,7 +374,7 @@ function buildToolsMd(item: BaiyingAgentItem, fallbackAgentId?: string): string 
     "",
   );
 
-  const res = item.relResourceInfoList;
+  const res = nonSkillRelResources(item.relResourceList);
   if (Array.isArray(res) && res.length > 0) {
     lines.push("## Available resources", "");
     for (const r of res) {

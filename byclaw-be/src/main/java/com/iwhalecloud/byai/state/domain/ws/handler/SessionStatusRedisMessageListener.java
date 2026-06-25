@@ -6,7 +6,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.connection.MessageListener;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
 import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager;
@@ -20,10 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 public class SessionStatusRedisMessageListener implements MessageListener {
 
-    private static final String SET_EVENT = "set";
-
-    @Autowired
-    private RedisTemplate<String, Object> redisTemplate;
+    private static final String HSET_EVENT = "hset";
 
     @Autowired
     private SessionStreamManager sessionStreamManager;
@@ -34,7 +30,7 @@ public class SessionStatusRedisMessageListener implements MessageListener {
             return;
         }
         String event = new String(message.getBody(), StandardCharsets.UTF_8);
-        if (!SET_EVENT.equalsIgnoreCase(event)) {
+        if (!HSET_EVENT.equalsIgnoreCase(event)) {
             return;
         }
 
@@ -45,14 +41,10 @@ public class SessionStatusRedisMessageListener implements MessageListener {
         }
 
         try {
-            Object statusValue = redisTemplate.opsForValue().get(statusKey);
-            if (statusValue == null) {
-                return;
-            }
-            sessionStreamManager.dispatchSessionStatusChange(sessionId, String.valueOf(statusValue));
+            sessionStreamManager.dispatchSessionStatusChange(sessionId);
         }
         catch (Exception e) {
-            log.warn("处理 Session 状态 Key 变更失败, key: {}", statusKey, e);
+            log.warn("处理 Session 状态 Hash 变更失败, key: {}", statusKey, e);
         }
     }
 

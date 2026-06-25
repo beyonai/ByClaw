@@ -10,7 +10,9 @@ import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
+import com.iwhalecloud.byai.common.message.entity.ByaiMessageRelObjDto;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
+import com.iwhalecloud.byai.common.message.service.ByaiMessageRelObjService;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.util.DateUtils;
 import com.iwhalecloud.byai.common.util.OkHttpUtil;
@@ -39,6 +41,8 @@ import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
+import com.iwhalecloud.byai.state.domain.chat.service.ScriptService;
+import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager;
 import com.iwhalecloud.byai.state.domain.file.service.ConversationFileStorage;
 import com.iwhalecloud.byai.state.domain.file.service.ConversationStoragePathResolver;
 import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
@@ -49,11 +53,9 @@ import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
-import okhttp3.Request;
-import okhttp3.Response;
-import okhttp3.ResponseBody;
 
 import java.io.IOException;
 import java.util.Date;
@@ -100,6 +102,9 @@ public class AssistantChatApplicationService {
     private ByaiMessageHotService byaiMessageHotService;
 
     @Autowired
+    private ByaiMessageRelObjService byaiMessageRelObjService;
+
+    @Autowired
     private RunningOutputStreamRegistry runningOutputStreamRegistry;
 
     @Autowired
@@ -109,50 +114,42 @@ public class AssistantChatApplicationService {
     private OutputStreamManager outputStreamManager;
 
     @Autowired
-    private SandboxEndpointService sandboxEndpointService;
+    private RedisTemplate<String, Object> redisTemplate;
 
     AssistantChatApplicationService(GatewayClient<?> gatewayClient) {
         this.gatewayClient = gatewayClient;
     }
 
-    public ResponseUtil<Object> getSessionStatus(String sessionId, Long agentId) throws IOException {
+    public JSONObject getSessionStatus(String sessionId, Long agentId) throws IOException {
         if (StringUtils.isBlank(sessionId)) {
             throw new BdpRuntimeException(I18nUtil.get("assistant.chat.session.id.not.empty"));
         }
-        String userCode = CurrentUserHolder.getCurrentUserCode();
-        Map<String, String> searchQuery = new LinkedHashMap<>();
-        searchQuery.put("sessionId", sessionId);
-        Long resolvedAgentId = targetAgentResolver.resolveAgentId(agentId);
-        if (resolvedAgentId != null) {
-            searchQuery.put("agentId", resolvedAgentId.toString());
+        Long resolveAgentId = targetAgentResolver.resolveAgentId(agentId);
+        String statusValue = readSessionStatusValue(sessionId, resolveAgentId);
+        if (StringUtils.isBlank(statusValue)) {
+            return new JSONObject();
         }
-        Request.Builder requestBuilder = sandboxEndpointService.newAuthorizedRequestBuilder(userCode, null,
-            "/plugins/byai-channel/session-status", searchQuery);
-        if (requestBuilder == null) {
-            return ResponseUtil.fail("No running sandbox found");
+        try {
+            return JSON.parseObject(statusValue);
         }
-        requestBuilder.get();
-        try (Response response = OkHttpUtil.getHttpClient().newCall(requestBuilder.build()).execute()) {
-            ResponseBody body = response.body();
-            String responseBody = body == null ? null : body.string();
-            Object responseData = parseJsonObjectOrString(responseBody);
-            if (!response.isSuccessful()) {
-                return ResponseUtil.fail(responseBody);
-            }
-            return ResponseUtil.successResponse(responseData);
+        catch (Exception e) {
+            throw new BdpRuntimeException("session status is not valid json", e);
         }
     }
 
-    private Object parseJsonObjectOrString(String responseBody) {
-        if (StringUtils.isBlank(responseBody)) {
-            return responseBody;
-        }
-        try {
-            return JSON.parseObject(responseBody);
-        }
-        catch (Exception e) {
-            return responseBody;
-        }
+    private String readSessionStatusValue(String sessionId, Long agentId) {
+        Object value = redisTemplate.opsForHash()
+            .get(buildSessionStatusKey(sessionId), resolveSessionStatusField(agentId));
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private String buildSessionStatusKey(String sessionId) {
+        return SessionStreamManager.SESSION_STATUS_KEY_PREFIX + sessionId
+            + SessionStreamManager.SESSION_STATUS_KEY_SUFFIX;
+    }
+
+    private String resolveSessionStatusField(Long agentId) {
+        return agentId == null ? SessionStreamManager.DEFAULT_SESSION_STATUS_FIELD : String.valueOf(agentId);
     }
 
     /**
@@ -469,5 +466,26 @@ public class AssistantChatApplicationService {
             }
         }
         return jsonArray.toJSONString();
+    }
+
+    /**
+     * 根据消息ID获取 traceId。
+     * <p>
+     * 根据 byai_message_relobj 表查询：res_msg_id = messageId 或 ask_msg_id = messageId， 命中后取 ask_msg_id 与 res_msg_id 编码出
+     * traceId。
+     *
+     * @param messageId 消息ID
+     * @return traceId，未查询到关联记录时返回 null
+     */
+    public String getTraceIdByMessageId(Long messageId) {
+        if (messageId == null) {
+            throw new BdpRuntimeException(I18nUtil.get("assistant.chat.message.id.not.empty"));
+        }
+        List<ByaiMessageRelObjDto> relList = byaiMessageRelObjService.findByAskOrResMsgId(messageId);
+        if (CollectionUtils.isEmpty(relList)) {
+            return null;
+        }
+        ByaiMessageRelObjDto rel = relList.get(0);
+        return ScriptService.getTraceId(rel.getAskMsgId(), rel.getResMsgId());
     }
 }

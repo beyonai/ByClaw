@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.constants.superassist.SessionType;
 import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
 import com.iwhalecloud.byai.common.feign.request.datacloud.TermsOptionsReq;
@@ -345,7 +346,19 @@ public class AssistantChatController {
     @GetMapping("/sessionStatus")
     public ResponseUtil<Object> getSessionStatus(@RequestParam(value = "sessionId", required = false) String sessionId,
         @RequestParam(value = "agentId", required = false) Long agentId) throws IOException {
-        return assistantChatApplicationService.getSessionStatus(sessionId, agentId);
+        JSONObject sessionStatus = assistantChatApplicationService.getSessionStatus(sessionId, agentId);
+        return ResponseUtil.successResponse(sessionStatus);
     }
-    
+
+    @Operation(summary = "根据消息ID获取traceId", description = "根据消息ID查询关联记录并返回traceId", responses = {
+        @ApiResponse(responseCode = "0", description = "获取成功",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ResponseUtil.class))),
+        @ApiResponse(responseCode = "500", description = "服务器内部错误")
+    })
+    @GetMapping(value = "/getTraceIdByMessageId")
+    public ResponseUtil<String> getTraceIdByMessageId(
+        @Parameter(description = "消息ID", required = true) @RequestParam(name = "messageId") Long messageId) {
+        return ResponseUtil.successResponse(assistantChatApplicationService.getTraceIdByMessageId(messageId));
+    }
+
 }

@@ -272,6 +272,7 @@ export default {
   'fileBrowser.toolbar.upload': 'Upload',
   'fileBrowser.toolbar.newFolder': 'New Folder',
   'fileBrowser.toolbar.refresh': 'Refresh',
+  'fileBrowser.toolbar.locate': 'Locate',
   'fileBrowser.toolbar.move': 'Move',
   'fileBrowser.toolbar.delete': 'Delete',
   'fileBrowser.toolbar.back': 'Go back',

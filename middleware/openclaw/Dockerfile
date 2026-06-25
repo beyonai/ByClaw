@@ -24,6 +24,8 @@ COPY byclaw-exe/extensions/byai_diagnostics-otel/package.json \
 COPY byclaw-exe/extensions/byclaw-sqlite/package.json \
      byclaw-exe/extensions/byclaw-sqlite/package-lock.json \
      ./src/byclaw-sqlite/
+COPY byclaw-exe/extensions/byclaw-wiki/package.json \
+     ./src/byclaw-wiki/
 
 
 RUN --mount=type=cache,target=/root/.npm \
@@ -32,8 +34,13 @@ RUN --mount=type=cache,target=/root/.npm \
     for dir in src/*/; do \
         [ -f "$dir/package.json" ] || continue; \
         name=$(basename "$dir"); \
-        echo ">>> npm ci --omit=dev: $name"; \
-        (cd "$dir" && npm ci --omit=dev --prefer-offline) & \
+        if [ -f "$dir/package-lock.json" ]; then \
+            echo ">>> npm ci --omit=dev: $name"; \
+            (cd "$dir" && npm ci --omit=dev --prefer-offline) & \
+        else \
+            echo ">>> npm install --omit=dev --no-package-lock: $name"; \
+            (cd "$dir" && npm install --omit=dev --no-package-lock --prefer-offline) & \
+        fi; \
         pids="$pids $!"; \
     done; \
     for pid in $pids; do wait "$pid"; done
@@ -42,6 +49,7 @@ COPY byclaw-exe/extensions/baiying-enhance/ ./src/baiying-enhance/
 COPY byclaw-exe/extensions/byai-channel/ ./src/byai-channel/
 COPY byclaw-exe/extensions/byai_diagnostics-otel/ ./src/byai_diagnostics-otel/
 COPY byclaw-exe/extensions/byclaw-sqlite/ ./src/byclaw-sqlite/
+COPY byclaw-exe/extensions/byclaw-wiki/ ./src/byclaw-wiki/
 
 RUN set -eux; \
     mkdir -p /build/out; \
@@ -113,6 +121,7 @@ RUN set -eux; \
         fonts-noto-cjk \
         fonts-wqy-microhei \
         fonts-wqy-zenhei \
+        libreoffice \
         novnc \
         xauth \
         x11vnc \
@@ -147,6 +156,7 @@ RUN set -eux; \
             > /etc/fonts/conf.d/65-microsoft-yahei-alias.conf; \
         fc-cache -f; \
         fc-match "Microsoft YaHei"; \
+        libreoffice --version; \
         ffmpeg -version; \
         ffprobe -version; \
         tmp_mp3="$(mktemp --suffix=.mp3)"; \
@@ -165,6 +175,8 @@ RUN set -eux; \
         test -f /opt/opencli/extension/manifest.json; \
         ;; \
     esac; \
+    npm install -g @colbymchenry/codegraph; \
+    codegraph version; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=python312 /usr/local/bin/python3.12 /usr/local/bin/pip3.12 /usr/local/bin/
@@ -235,10 +247,9 @@ RUN chmod +x \
 
 RUN curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh
 
-# 安装 Bun 运行环境（gbrain 必需）— 从官方镜像拷贝二进制，避免 curl 下载超时
-COPY --from=oven/bun:1-debian /usr/local/bin/bun /usr/local/bin/bun
-RUN ln -sf /usr/local/bin/bun /usr/local/bin/bunx
-ENV PATH="/root/.bun/bin:/usr/local/bin:$PATH"
+# 安装 Bun 运行环境（gbrain 必需）
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:$PATH"
 
 # add gbrain（官方原版）
 RUN bun install -g github:garrytan/gbrain

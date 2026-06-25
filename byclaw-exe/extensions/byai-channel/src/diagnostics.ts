@@ -91,7 +91,8 @@ function byaiDiagnosticExtra(trace: ByaiDiagnosticTrace): Record<string, unknown
 export function emitByaiSdkMessageReceived(
   ref: ByaiSdkDiagnosticRef,
   diagnosticTrace: ByaiDiagnosticTrace,
-): void {
+): number {
+  const receivedAt = Date.now();
   emitTrustedDiagnosticEvent({
     type: "message.received",
     channel: CHANNEL_ID,
@@ -103,6 +104,7 @@ export function emitByaiSdkMessageReceived(
     trace: diagnosticTrace.trace,
     ...byaiDiagnosticExtra(diagnosticTrace),
   } as Parameters<typeof emitTrustedDiagnosticEvent>[0]);
+  return receivedAt;
 }
 
 export function emitByaiSdkDispatchStarted(
@@ -145,6 +147,35 @@ export function emitByaiSdkDispatchCompleted(
     reason: params.reason,
     ...(params.error ? { error: String(params.error) } : {}),
     trace: diagnosticTrace.trace,
+    ...byaiDiagnosticExtra(diagnosticTrace),
+  } as Parameters<typeof emitTrustedDiagnosticEvent>[0]);
+}
+
+export function emitByaiSdkFirstResponse(
+  ref: Pick<ByaiSdkDiagnosticRef, "sessionId" | "sessionKey" | "traceId">,
+  params: {
+    createdAt: number;
+    eventType?: unknown;
+    kind: "answer_delta" | "visible";
+    traceId?: string;
+  },
+): void {
+  const elapsedMs = Math.max(0, Date.now() - params.createdAt);
+  const diagnosticTrace = createByaiSdkDiagnosticTrace(params.traceId ?? ref.traceId);
+  emitTrustedDiagnosticEvent({
+    type: "run.progress",
+    runId: "",
+    reason: params.kind === "answer_delta"
+      ? "byai.first_answer_delta"
+      : "byai.first_visible_response",
+    sessionId: ref.sessionId,
+    sessionKey: ref.sessionKey,
+    trace: diagnosticTrace.trace,
+    "byai.firstResponseMs": elapsedMs,
+    "byai.firstResponseKind": params.kind,
+    ...(params.eventType !== undefined
+      ? { "byai.firstResponseEventType": String(params.eventType) }
+      : {}),
     ...byaiDiagnosticExtra(diagnosticTrace),
   } as Parameters<typeof emitTrustedDiagnosticEvent>[0]);
 }

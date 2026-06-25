@@ -347,6 +347,7 @@ public class AuthApplicationService {
         SsResource ssResource = getRequiredResource(qo.getResourceId());
 
         ResourceMemberQueryResultVo result = new ResourceMemberQueryResultVo();
+        result.setResourceName(ssResource.getResourceName());
         result.setResourceBizType(ssResource.getResourceBizType());
         result.setExtInfo(buildResourceExtInfo(ssResource));
 
