@@ -42,6 +42,11 @@ def create_app(**kwargs):
 
     app = create_platform_app(platform, **kwargs)
     _wrap_lifespan_with_discovery(app)
+
+    # 挂载代码查询路由（无需额外端口）
+    from byclaw_data.code_api import _mount_code_api
+    _mount_code_api(app)
+
     return app
 
 

@@ -318,6 +318,52 @@ def _build_dynamic_cache_key(mounted_objects: list[str]) -> str:
     return f"dynamic:{fingerprint}"
 
 
+_SCOPE_VALID_TYPES = frozenset({"ONTOLOGY_BASE", "SCENE", "OBJECT", "VIEW"})
+
+
+def _build_scope_entries(
+    rel_resource_list: list[dict[str, Any]],
+    mounted_objects: list[str] | None = None,
+) -> "list[Any]":
+    """解析 rel_resource_list → list[ScopeEntry]。
+
+    当 rel_resource_list 非空时以其为准；为空时从 mounted_objects 降级为 OBJECT 类型
+    ScopeEntry（兼容旧格式）。
+    """
+    try:
+        from datacloud_analysis.tools.request_tool_context import ScopeEntry
+    except Exception:
+        return []
+
+    if rel_resource_list:
+        result = []
+        for item in rel_resource_list:
+            if not isinstance(item, dict):
+                continue
+            biz_type = str(item.get("resourceBizType") or "")
+            if biz_type not in _SCOPE_VALID_TYPES:
+                continue
+            code = str(item.get("resourceCode") or "").strip()
+            if not code:
+                continue
+            base_code = str(item.get("ontologyBaseCode") or "").strip()
+            if biz_type == "ONTOLOGY_BASE":
+                base_id = code
+            else:
+                base_id = base_code
+            result.append(ScopeEntry(code=code, scope_type=biz_type, base_id=base_id))
+        return result
+
+    # 降级：从 mounted_objects 生成 OBJECT 类型 ScopeEntry
+    if mounted_objects:
+        return [
+            ScopeEntry(code=c, scope_type="OBJECT", base_id="")
+            for c in mounted_objects
+            if isinstance(c, str) and c.strip()
+        ]
+    return []
+
+
 def _extract_tool_resource_codes(
     resource_list: list[Any],
 ) -> tuple[list[str], list[str]]:
@@ -1874,6 +1920,10 @@ class DataCloudWorker(GatewayWorker):
         _resource_list_for_extract: list[Any] = (
             _resource_list_raw if isinstance(_resource_list_raw, list) else []
         )
+        _rel_resource_list_raw = extra_payload.get("rel_resource_list")
+        _rel_resource_list: list[Any] = (
+            _rel_resource_list_raw if isinstance(_rel_resource_list_raw, list) else []
+        )
         _res_object_codes, _res_view_codes = _extract_tool_resource_codes(
             _resource_list_for_extract
         )
@@ -2272,6 +2322,39 @@ class DataCloudWorker(GatewayWorker):
                     len(_resource_list_for_extract),
                 )
 
+            # ── 情形一：构建 RequestToolContext（per-request 授权范围） ─────────────────
+            tool_context: Any = None
+            try:
+                from datacloud_analysis.tools.request_tool_context import (
+                    RequestToolContext,
+                )
+
+                _scope_entries = _build_scope_entries(
+                    _rel_resource_list,
+                    mounted_objects=list(_dyn_object_ids) + list(_dyn_view_ids),
+                )
+                if _scope_entries and self._shared_loader is not None:
+                    from datacloud_analysis.tools.tool_pool import (
+                        OntologyToolLoader,
+                    )
+
+                    tool_context = RequestToolContext.build(
+                        allowed_scope=_scope_entries,
+                        loader=self._shared_loader,
+                        tool_loader_cls=OntologyToolLoader,
+                    )
+                    logger.info(
+                        "DataCloudWorker: tool_context built scope_len=%d anchor_mode=%s session=%s",
+                        len(_scope_entries),
+                        tool_context.anchor_mode,
+                        context.session_id,
+                    )
+            except Exception as _tc_err:
+                logger.warning(
+                    "DataCloudWorker: tool_context build failed (fallback to TOOL_POOL): %s",
+                    _tc_err,
+                )
+
             if isinstance(command, ResumeCommand) or _paradigm_resume_value is not None:
                 raw_paradigm = (
                     _paradigm_resume_value
@@ -2309,6 +2392,7 @@ class DataCloudWorker(GatewayWorker):
                     user_code=_get_gateway_user_code(context),
                     session_id=context.session_id,
                     extras=_dyn_extras,
+                    tool_context=tool_context,
                 )
 
             logger.info(
@@ -2551,11 +2635,19 @@ class DataCloudWorker(GatewayWorker):
                         agent_id=str(by_agent_id).strip() if by_agent_id else None,
                     )
                 self.graphs[cache_key] = target_graph
+                logger.info(
+                    "[DEBUG] Graph built and cached: cache_key=%s agent_id=%s",
+                    cache_key, by_agent_id
+                )
                 while len(self.graphs) > self._GRAPH_CACHE_MAX:
                     evicted_key, _ = self.graphs.popitem(last=False)
                     logger.info("Graph cache evicted: key=%s", evicted_key)
             else:
                 self.graphs.move_to_end(cache_key)
+                logger.info(
+                    "[DEBUG] Using cached graph: cache_key=%s agent_id=%s",
+                    cache_key, by_agent_id
+                )
 
         thread_id = str(
             header_metadata.get("resume_thread_id")
@@ -3084,12 +3176,20 @@ class DataCloudWorker(GatewayWorker):
                 context.session_id,
                 conf_hash,
             )
+            logger.info(
+                "[DEBUG] About to call target_graph.astream_events, graph_input keys=%s",
+                list(graph_input.keys()) if isinstance(graph_input, dict) else type(graph_input).__name__
+            )
             async for event in target_graph.astream_events(
                 graph_input, config=config, version="v2"
             ):
                 stream_event_count += 1
+                if stream_event_count == 1:
+                    logger.info("[DEBUG] First event received, kind=%s", event.get("event"))
                 await context.check_cancelled()
                 kind: str = str(event["event"])
+                if stream_event_count <= 5:
+                    logger.info("[DEBUG] Event #%d kind=%s", stream_event_count, kind)
 
                 if kind == "on_chat_model_start":
                     # _runs 在此时刚写入，记录 LLM 调用的 Langfuse observation id
