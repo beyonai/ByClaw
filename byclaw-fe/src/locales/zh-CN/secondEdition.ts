@@ -335,5 +335,5 @@ export default {
   'fileSider.saveToKnowledge.rootTip': '当前目录下暂无文件夹，可直接保存到此目录',
   'fileSider.saveToKnowledge.noManagePermission': '您对当前数字员工下的知识库，无管理权限，无法操作',
 
-  'context.used.format': '上下文已使用{percent}%. {usedTokens} / {contextTokens}',
+  'context.used.format': '上下文已使用{percent}%，{usedTokens} / {contextTokens}',
 };
