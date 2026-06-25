@@ -168,3 +168,20 @@ export async function emitOutOfBandSdkEvent(params: {
   });
   redis.quit();
 }
+
+export async function writeDataToRedis(key: string, data: unknown): Promise<boolean> {
+  const redisInfo = getRedisInfo();
+  if (!redisInfo) {
+    return false;
+  }
+  const redis = createRedis(redisInfo);
+  try {
+    await redis.set(
+      key,
+      JSON.stringify(data),
+    );
+    return true;
+  } finally {
+    await redis.quit().catch(() => undefined);
+  }
+}

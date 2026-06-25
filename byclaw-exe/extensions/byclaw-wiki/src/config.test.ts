@@ -100,6 +100,8 @@ describe("resolveByclawWikiConfig", () => {
       notificationDingtalkSecret: "SEC-example",
       notificationDingtalkActionCardBtnTitle: "审核通过",
       notificationDingtalkActionCardBtnUrl: "https://example.test/approve",
+      notificationResourceId: 10024308,
+      notificationDirectoryPath: "/",
       notificationRobotType: "wecom",
       notificationMaxOutputChars: 1200,
       notificationMinOutputChars: 10,
@@ -110,6 +112,8 @@ describe("resolveByclawWikiConfig", () => {
     assert.equal(config.notification.dingtalkSecret, "SEC-example");
     assert.equal(config.notification.dingtalkActionCardBtnTitle, "审核通过");
     assert.equal(config.notification.dingtalkActionCardBtnUrl, "https://example.test/approve");
+    assert.equal(config.notification.resourceId, "10024308");
+    assert.equal(config.notification.directoryPath, "/");
     assert.equal(config.notification.robotType, "wecom");
     assert.equal(config.notification.maxOutputChars, 1200);
     assert.equal(config.notification.minOutputChars, 10);

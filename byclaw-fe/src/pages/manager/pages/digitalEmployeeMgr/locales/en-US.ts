@@ -217,6 +217,7 @@ export default {
   'employeeDetail.digitalEmployeeDesc': 'Digital Employee Description',
   'employeeDetail.digitalEmployeeDescRequired': 'Please enter digital employee description',
   'employeeDetail.digitalEmployeeDescPlaceholder': 'Please enter digital employee description',
+  'employeeDetail.fieldMaxLength': '{field} cannot exceed {max} characters. Current length: {current}',
   'employeeDetail.coreAbility': 'Core Ability',
   'employeeDetail.example': 'Example',
   'employeeDetail.viewOldVersion': 'View Old Version',

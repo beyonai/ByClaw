@@ -153,6 +153,18 @@
         "description": "DingTalk ActionCard single button jump URL.",
         "default": "http://39.105.105.85/beyond/chat"
       },
+      "notificationResourceId": {
+        "type": [
+          "string",
+          "number"
+        ],
+        "description": "Optional dataset resourceId appended to the DingTalk ActionCard button URL."
+      },
+      "notificationDirectoryPath": {
+        "type": "string",
+        "description": "Dataset directoryPath appended to the DingTalk ActionCard button URL.",
+        "default": "/"
+      },
       "notificationRobotType": {
         "type": "string",
         "enum": [

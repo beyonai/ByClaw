@@ -141,6 +141,8 @@ public class DigitalEmployeeApplicationService {
 
     private static final String DEFAULT_SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX = "_main";
 
+    private static final int DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH = 4000;
+
     @Autowired
     private SequenceService sequenceService;
 
@@ -366,16 +368,49 @@ public class DigitalEmployeeApplicationService {
             .setCatalogIds(ssResourceCatalogService.findSelfAndDescendantCatalogIds(digitalEmployeeQo.getCatalogId()));
     }
 
+    private void validateDigitalEmployeeTextFieldLengths(DigitalEmployeeDTO digitalEmployeeDTO) {
+        if (digitalEmployeeDTO == null) {
+            return;
+        }
+        validateDigitalEmployeeTextFieldLength("digemployee.field.ability", digitalEmployeeDTO.getAbility());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.constraints", digitalEmployeeDTO.getConstraints());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.faqs", digitalEmployeeDTO.getFaqs());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.roleAttributes", digitalEmployeeDTO.getRoleAttributes());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.processingFlow", digitalEmployeeDTO.getProcessingFlow());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.personalityDimensions",
+            digitalEmployeeDTO.getPersonalityDimensions());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.wordPreferences", digitalEmployeeDTO.getWordPreferences());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.sentenceAndTone", digitalEmployeeDTO.getSentenceAndTone());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.corePersonaDefinition",
+            digitalEmployeeDTO.getCorePersonaDefinition());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.coreCompetencies", digitalEmployeeDTO.getCoreCompetencies());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.advancedSettings", digitalEmployeeDTO.getAdvancedSettings());
+    }
+
+    private void validateDigitalEmployeeTextFieldLength(String fieldLabelKey, String value) {
+        if (StringUtils.isEmpty(value)) {
+            return;
+        }
+        int length = value.codePointCount(0, value.length());
+        if (length > DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.field.length.exceed", I18nUtil.get(fieldLabelKey),
+                    DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH, length));
+        }
+    }
+
     /**
      * 创建数字员工
      *
      * @param digitalEmployeeDTO 数字员工
      * @return ResponseUtil
      */
+    @Transactional(rollbackFor = Exception.class)
     public SsResource saveDigitalEmployee(DigitalEmployeeDTO digitalEmployeeDTO) {
 
         boolean isFrontAccess = digitalEmployeeDTO.isFrontAccess();
         normalizeRelSkillsForSave(digitalEmployeeDTO);
+        validateDigitalEmployeeTextFieldLengths(digitalEmployeeDTO);
         // 商业版本（dataset.system=WHALE_AGENT）下，企业 tab 不允许创建编码型（011）/ 调试型（010）数字员工
         validateCommercialEditionDigitalEmployeeCreation(digitalEmployeeDTO);
         String resourceName = digitalEmployeeDTO.getResourceName();
@@ -613,10 +648,12 @@ public class DigitalEmployeeApplicationService {
      * @param digitalEmployeeDTO 修改对象
      * @return SsResource
      */
+    @Transactional(rollbackFor = Exception.class)
     public SsResource updateDigitalEmployee(DigitalEmployeeDTO digitalEmployeeDTO) {
 
         boolean isFrontAccess = digitalEmployeeDTO.isFrontAccess();
         normalizeRelSkillsForSave(digitalEmployeeDTO);
+        validateDigitalEmployeeTextFieldLengths(digitalEmployeeDTO);
 
         Long resourceId = digitalEmployeeDTO.getResourceId();
         String resourceName = digitalEmployeeDTO.getResourceName();
@@ -978,7 +1015,8 @@ public class DigitalEmployeeApplicationService {
         if (ssResource == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
         }
-        if (isCurrentUserBoundDefaultDigitalEmployee(ssResource)) {
+        if (isCurrentUserBoundDefaultDigitalEmployee(ssResource)
+            || isCurrentUserOwnDefaultSuperAssistantResource(ssResource)) {
             return;
         }
         validateDigitalEmployeeManagePermission(ssResource);
@@ -990,6 +1028,26 @@ public class DigitalEmployeeApplicationService {
         }
         Long defaultDigEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
         return ssResource.getResourceId().equals(defaultDigEmployeeId);
+    }
+
+    /**
+     * 当前用户自己的超级助手资源使用稳定编码 {userCode}_main；即使用户把其他个人助理设为默认数字员工，
+     * 也应允许用户继续编辑自己的超级助手配置。
+     */
+    private boolean isCurrentUserOwnDefaultSuperAssistantResource(SsResource ssResource) {
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        String currentUserCode = CurrentUserHolder.getCurrentUserCode();
+        if (!isDefaultPersonalResource(ssResource) || currentUserId == null || ssResource.getResourceId() == null) {
+            return false;
+        }
+        if (!StringUtils.equals(ResourceBizTypeEnum.DIG_EMPLOYEE.name(), ssResource.getResourceBizType())) {
+            return false;
+        }
+        if (!Objects.equals(currentUserId, ssResource.getCreateBy())) {
+            return false;
+        }
+        String expectedResourceCode = buildDefaultSuperAssistantResourceCode(currentUserCode, currentUserId);
+        return StringUtils.equals(expectedResourceCode, ssResource.getResourceCode());
     }
 
     private boolean isDefaultPersonalResource(SsResource ssResource) {

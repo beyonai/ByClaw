@@ -24,6 +24,7 @@ import UploadConfirmModal, { type UploadConfirmFile } from '@/components/UploadC
 import { DragType } from '@/components/QueryInput/withDrag';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import useGlobal from '@/hooks/useGlobal';
+import { getHistoryState } from '@/utils/browser';
 import { HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH, SiderContentContext } from '@/layout/sider/siderContentContext';
 import {
   getMimeType,
@@ -50,6 +51,7 @@ import {
 } from '@/service/knowledgeCenter';
 import type { IKnowledgeBaseItem } from '@/layout/sider/components/Knowledge/components/KnowledgeBase/types';
 import { getFileIconType } from '@/constants/icon';
+import { SSEEventStatus } from '@/constants/message';
 import commonStyles from '../Knowledge/components/common.module.less';
 import styles from './index.module.less';
 
@@ -99,18 +101,24 @@ function getRawBlob(res: any) {
   return res?.file instanceof Blob ? res.file : res instanceof Blob ? res : new Blob([res?.file || res]);
 }
 
-function toFileTreeData(list: FileBrowserItem[], childrenByPath: Record<string, FileBrowserItem[]>): FileTreeItem[] {
+function toFileTreeData(
+  list: FileBrowserItem[],
+  childrenByPath: Record<string, FileBrowserItem[]>,
+  expandedDirectoryKeySet: Set<string>
+): FileTreeItem[] {
   return sortFileBrowserItems(list).map((item) => {
     const dir = isDirectory(item);
     const directoryPath = ensureDirectoryPath(item.path);
+    const expanded = dir && expandedDirectoryKeySet.has(directoryPath);
     return {
       ...item,
       key: dir ? directoryPath : item.path,
       title: <span>{item.name}</span>,
       isLeaf: !dir,
+      className: expanded ? styles.treeNodeExpanded : undefined,
       children:
         dir && childrenByPath[directoryPath]
-          ? toFileTreeData(childrenByPath[directoryPath], childrenByPath)
+          ? toFileTreeData(childrenByPath[directoryPath], childrenByPath, expandedDirectoryKeySet)
           : undefined,
     };
   });
@@ -150,6 +158,7 @@ interface FileTreeItem extends FileBrowserItem {
   key: string;
   title: React.ReactNode;
   isLeaf: boolean;
+  className?: string;
   children?: FileTreeItem[];
 }
 
@@ -188,6 +197,24 @@ function getSessionFilePath(sessionId?: string) {
 
 function getDefaultFileCategoryKey(sessionId?: string): FileCategoryKey {
   return getNormalizedSessionId(sessionId) ? 'session' : 'root';
+}
+
+function getCategoryActivePath(category: FileCategoryItem) {
+  return category.path;
+}
+
+function getFallbackCurrentSessionId() {
+  if (typeof window === 'undefined') return '';
+  const querySessionId = new URLSearchParams(window.location.search).get('sessionId');
+  return getNormalizedSessionId(
+    querySessionId || getHistoryState('pcSessionId', '') || getHistoryState('mobileSessionId', '')
+  );
+}
+
+function getMessagePayloadSessionId(payload: any) {
+  return getNormalizedSessionId(
+    payload?.sessionId || payload?.currentSessionId || payload?.message?.sessionId || payload?.message?.currentSessionId
+  );
 }
 
 function normalizeFileBrowserPath(path?: string) {
@@ -339,6 +366,11 @@ interface PendingKnowledgeUpload extends UploadConfirmFile {
   targetDirectoryPath: string;
 }
 
+interface BykcKnowledgeUploadTarget {
+  knowledgeBase: IKnowledgeBaseItem;
+  directoryPath: string;
+}
+
 interface FileCategoryCache {
   path: string;
   items: FileBrowserItem[];
@@ -382,6 +414,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const [searchValue, setSearchValue] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [childrenByPath, setChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
+  const [expandedTreeKeys, setExpandedTreeKeys] = useState<React.Key[]>([]);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [saveTarget, setSaveTarget] = useState<FileBrowserItem | null>(null);
   const [knowledgeKeyword, setKnowledgeKeyword] = useState('');
@@ -395,6 +428,10 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const [uploadConfirmOpen, setUploadConfirmOpen] = useState(false);
   const [pendingUploadFiles, setPendingUploadFiles] = useState<File[]>([]);
   const [pendingUploadPath, setPendingUploadPath] = useState('');
+  const [pendingUploadConflicts, setPendingUploadConflicts] = useState<string[]>([]);
+  const [pendingUploadKnowledgeTarget, setPendingUploadKnowledgeTarget] = useState<BykcKnowledgeUploadTarget | null>(
+    null
+  );
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [uploadDirectoryPickerOpen, setUploadDirectoryPickerOpen] = useState(false);
   const [uploadDirectoryPath, setUploadDirectoryPath] = useState('/');
@@ -412,6 +449,12 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const [createFolderParentPath, setCreateFolderParentPath] = useState('');
   const [createFolderName, setCreateFolderName] = useState('');
   const [creatingFolder, setCreatingFolder] = useState(false);
+  const [messageSessionId, setMessageSessionId] = useState('');
+  const activeSessionId = useMemo(() => {
+    return (
+      getNormalizedSessionId(sessionId) || getNormalizedSessionId(messageSessionId) || getFallbackCurrentSessionId()
+    );
+  }, [messageSessionId, sessionId]);
 
   const fileCategories = useMemo<FileCategoryItem[]>(() => {
     return [
@@ -439,7 +482,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         ensure: true,
       },
     ];
-  }, [sessionId]);
+  }, []);
 
   const activeCategory = useMemo(() => {
     return fileCategories.find((item) => item.key === activeCategoryKey);
@@ -509,6 +552,104 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     [activeCategoryKey, intl, resourceId, updateCategoryCache]
   );
 
+  const expandCurrentSessionDirectory = useCallback(
+    async (targetSessionId = activeSessionId) => {
+      const normalizedSessionId = getNormalizedSessionId(targetSessionId);
+      if (!normalizedSessionId || !resourceId) return;
+
+      const sessionPath = getSessionFilePath(normalizedSessionId);
+      try {
+        await ensureFolder({ resourceId, path: sessionPath });
+        const res: any = await listFiles({ resourceId, path: sessionPath });
+        const sessionChildren = unwrapListResponse<FileBrowserItem>(res);
+
+        setChildrenByPath((prev) => {
+          const nextChildrenByPath = {
+            ...prev,
+            [sessionPath]: sessionChildren,
+          };
+          if (!isSearching && activeCategoryKeyRef.current === 'session') {
+            updateCategoryCache('session', {
+              path: SESSION_FILE_PATH,
+              items: categoryCacheRef.current.session?.items ?? items,
+              childrenByPath: nextChildrenByPath,
+            });
+          }
+          return nextChildrenByPath;
+        });
+        setExpandedTreeKeys((prev) => (prev.includes(sessionPath) ? prev : [...prev, sessionPath]));
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+      }
+    },
+    [activeSessionId, intl, isSearching, items, resourceId, updateCategoryCache]
+  );
+
+  const refreshExpandedDirectories = useCallback(
+    async (payload?: { sessionId?: string }) => {
+      const payloadSessionId = getMessagePayloadSessionId(payload);
+      if (payloadSessionId) {
+        setMessageSessionId(payloadSessionId);
+      }
+
+      const categoryKey = activeCategoryKeyRef.current;
+      if (!categoryKey) return;
+
+      const categoryRootPath = getCategoryRootPath(categoryKey);
+      const normalizedCurrentPath = ensureDirectoryPath(normalizeFileBrowserPath(currentPathRef.current));
+      const requestPath =
+        categoryKey !== 'root' && !isPathIn(normalizedCurrentPath, categoryRootPath)
+          ? categoryRootPath
+          : normalizedCurrentPath;
+      const expandedDirectoryPaths = Array.from(
+        new Set(
+          expandedTreeKeys
+            .map((key) => ensureDirectoryPath(normalizeFileBrowserPath(String(key))))
+            .filter((path) => path !== requestPath && (categoryKey === 'root' || isPathIn(path, categoryRootPath)))
+        )
+      );
+
+      setLoading(true);
+      try {
+        const [rootResponse, ...expandedResponses] = await Promise.all([
+          listFiles({ resourceId, path: requestPath }),
+          ...expandedDirectoryPaths.map((path) => listFiles({ resourceId, path })),
+        ]);
+        const nextItems = unwrapListResponse<FileBrowserItem>(rootResponse);
+        const refreshedChildrenByPath = expandedDirectoryPaths.reduce<Record<string, FileBrowserItem[]>>(
+          (acc, path, index) => {
+            acc[path] = unwrapListResponse<FileBrowserItem>(expandedResponses[index]);
+            return acc;
+          },
+          {}
+        );
+        const nextChildrenByPath = {
+          ...(categoryCacheRef.current[categoryKey]?.childrenByPath || {}),
+          ...refreshedChildrenByPath,
+        };
+
+        updateCategoryCache(categoryKey, {
+          path: requestPath,
+          items: nextItems,
+          childrenByPath: nextChildrenByPath,
+        });
+
+        if (
+          activeCategoryKeyRef.current === categoryKey &&
+          ensureDirectoryPath(normalizeFileBrowserPath(currentPathRef.current)) === requestPath
+        ) {
+          setItems(nextItems);
+          setChildrenByPath(nextChildrenByPath);
+        }
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [expandedTreeKeys, intl, resourceId, updateCategoryCache]
+  );
+
   useEffect(() => {
     activeCategoryKeyRef.current = activeCategoryKey;
   }, [activeCategoryKey]);
@@ -518,8 +659,11 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   }, [currentPath]);
 
   useEffect(() => {
-    const defaultCategoryKey = getDefaultFileCategoryKey(sessionId);
-    const defaultCategoryPath = getCategoryRootPath(defaultCategoryKey);
+    const defaultCategoryKey = getDefaultFileCategoryKey(activeSessionId);
+    const defaultCategory = fileCategories.find((item) => item.key === defaultCategoryKey);
+    const defaultCategoryPath = defaultCategory ? getCategoryActivePath(defaultCategory) : ROOT_FILE_PATH;
+    const defaultExpandedKeys =
+      defaultCategoryKey === 'session' && activeSessionId ? [getSessionFilePath(activeSessionId)] : [];
     setPathInitialized(false);
     categoryCacheRef.current = {};
     activeCategoryKeyRef.current = defaultCategoryKey;
@@ -530,20 +674,35 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     setSearchValue('');
     setIsSearching(false);
     setChildrenByPath({});
+    setExpandedTreeKeys(defaultExpandedKeys);
     if (!resourceId) return;
     setPathInitialized(true);
-  }, [resourceId, sessionId]);
+  }, [activeSessionId, fileCategories, resourceId]);
 
   useEffect(() => {
     if (resourceId && pathInitialized && currentPath) {
-      fetchList(currentPath);
+      void fetchList(currentPath).then(() => {
+        if (activeCategoryKey === 'session' && currentPath === SESSION_FILE_PATH && activeSessionId) {
+          void expandCurrentSessionDirectory(activeSessionId);
+        }
+      });
     }
-  }, [currentPath, fetchList, pathInitialized, resourceId]);
+  }, [
+    activeCategoryKey,
+    activeSessionId,
+    currentPath,
+    expandCurrentSessionDirectory,
+    fetchList,
+    pathInitialized,
+    resourceId,
+  ]);
 
   useEffect(() => {
     if (!activeCategory || !pathInitialized) return;
-    setCurrentPath(activeCategory.path);
-  }, [activeCategory?.path, pathInitialized]);
+    const nextPath = getCategoryActivePath(activeCategory);
+    currentPathRef.current = nextPath;
+    setCurrentPath(nextPath);
+  }, [activeCategory, pathInitialized]);
 
   const handleCategoryChange = useCallback(
     async (key: string | string[]) => {
@@ -554,6 +713,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       }
       const nextCategory = fileCategories.find((item) => item.key === nextKey);
       if (!nextCategory) return;
+      const nextCategoryPath = getCategoryActivePath(nextCategory);
 
       // 清除缓存，确保切换 tab 时强制刷新数据
       const cached = categoryCacheRef.current[nextCategory.key];
@@ -564,49 +724,67 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       setIsSearching(false);
       setItems([]);
       setChildrenByPath({});
+      setExpandedTreeKeys(
+        nextCategory.key === 'session' && activeSessionId ? [getSessionFilePath(activeSessionId)] : []
+      );
       // ensureFolder 只在缓存不存在时调用（即首次访问）
       if (nextCategory.ensure && !cached) {
         try {
-          await ensureFolder({ resourceId, path: nextCategory.path });
+          await ensureFolder({ resourceId, path: nextCategoryPath });
         } catch (error: any) {
           message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.createFolder.failed' }));
         }
       }
       activeCategoryKeyRef.current = nextCategory.key;
-      currentPathRef.current = nextCategory.path;
-      setCurrentPath(nextCategory.path);
+      currentPathRef.current = nextCategoryPath;
+      setCurrentPath(nextCategoryPath);
+      await fetchList(nextCategoryPath, { force: true, categoryKey: nextCategory.key });
+      if (nextCategory.key === 'session') {
+        await expandCurrentSessionDirectory(activeSessionId);
+      }
     },
-    [fileCategories, fetchList, intl, resourceId]
+    [activeSessionId, expandCurrentSessionDirectory, fetchList, fileCategories, intl, resourceId]
   );
 
-  // 监听会话聊天产生的文件，当打开 session tab 时刷新文件列表
+  // 监听会话聊天产生的文件，刷新当前打开分类和已展开目录
   useEffect(() => {
+    const hasFiles = (payload?: { fileList?: any[]; imageList?: any[] }) => {
+      return Boolean(payload?.fileList?.length || payload?.imageList?.length);
+    };
+
     const handleSessionFileCreated = (payload: { fileList?: any[]; imageList?: any[]; sessionId?: string }) => {
-      // 如果当前打开的不是 session tab，不处理
-      if (activeCategoryKey !== 'session') return;
-      // 检查 payload 是否包含文件信息
-      const hasFiles =
-        (payload.fileList && payload.fileList.length > 0) || (payload.imageList && payload.imageList.length > 0);
-      if (hasFiles) {
-        // 刷新当前路径的文件列表
-        delete categoryCacheRef.current['session'];
-        void fetchList(currentPath, { force: true });
+      if (hasFiles(payload)) {
+        void refreshExpandedDirectories(payload);
+      }
+    };
+
+    const handleSessionFileUpdated = (payload: {
+      message?: { fileList?: any[]; imageList?: any[]; sessionId?: string; status?: string };
+    }) => {
+      const message = payload?.message;
+      if (hasFiles(message) || message?.status === SSEEventStatus.done) {
+        void refreshExpandedDirectories(message);
       }
     };
 
     EventEmitter.on('beyond-create-message', handleSessionFileCreated);
+    EventEmitter.on('beyond-update-message', handleSessionFileUpdated);
     return () => {
       EventEmitter.off('beyond-create-message', handleSessionFileCreated);
+      EventEmitter.off('beyond-update-message', handleSessionFileUpdated);
     };
-  }, [activeCategoryKey, currentPath, fetchList]);
+  }, [refreshExpandedDirectories]);
 
   const sortedItems = useMemo(() => {
     return sortFileBrowserItems(items);
   }, [items]);
 
   const fileTreeData = useMemo(() => {
-    return toFileTreeData(sortedItems, childrenByPath);
-  }, [childrenByPath, sortedItems]);
+    const expandedDirectoryKeySet = new Set(
+      expandedTreeKeys.map((key) => ensureDirectoryPath(normalizeFileBrowserPath(String(key))))
+    );
+    return toFileTreeData(sortedItems, childrenByPath, expandedDirectoryKeySet);
+  }, [childrenByPath, expandedTreeKeys, sortedItems]);
 
   const copyFolderPath = useMemo(() => {
     const rootPath = copyTargetType === 'session' ? SESSION_FILE_PATH : SHARED_FILE_PATH;
@@ -827,7 +1005,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   );
 
   const resolveKnowledgeUploadTarget = useCallback(
-    async (targetPath: string) => {
+    async (targetPath: string): Promise<BykcKnowledgeUploadTarget | null> => {
       const response = await queryDigEmployeeManageKnowledgeResourceAuth({
         resourceId,
         pageNum: 1,
@@ -849,8 +1027,13 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   );
 
   const executeKnowledgeDirectoryUpload = useCallback(
-    async (targetPath: string, fileList: File[], processFrontMatter: boolean) => {
-      const target = await resolveKnowledgeUploadTarget(targetPath);
+    async (
+      targetPath: string,
+      fileList: File[],
+      processFrontMatter: boolean,
+      options: { overwrite?: boolean; target?: BykcKnowledgeUploadTarget | null } = {}
+    ) => {
+      const target = options.target || (await resolveKnowledgeUploadTarget(targetPath));
       if (!target) return;
 
       const formData = new FormData();
@@ -860,13 +1043,15 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       formData.append('resourceId', String(target.knowledgeBase.resourceId));
       formData.append('directoryPath', target.directoryPath);
       formData.append('processFrontMatter', String(!processFrontMatter));
-      formData.append('overwrite', 'false');
+      formData.append('overwrite', String(Boolean(options.overwrite)));
 
       await uploadKnowledgeFiles(formData);
       message.success(intl.formatMessage({ id: 'fileBrowser.upload.knowledgeBuildSuccess' }));
       setUploadConfirmOpen(false);
       setPendingUploadFiles([]);
       setPendingUploadPath('');
+      setPendingUploadConflicts([]);
+      setPendingUploadKnowledgeTarget(null);
 
       if (isPathIn(currentPath, BYKC_FILE_PATH)) {
         setSearchValue('');
@@ -885,7 +1070,10 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       setUploadingFiles(true);
       try {
         if (isPathIn(uploadPath, BYKC_FILE_PATH)) {
-          await executeKnowledgeDirectoryUpload(uploadPath, fileList, processFrontMatter);
+          await executeKnowledgeDirectoryUpload(uploadPath, fileList, processFrontMatter, {
+            overwrite: pendingUploadConflicts.length > 0,
+            target: pendingUploadKnowledgeTarget,
+          });
           return;
         }
         await uploadFiles(resourceId, uploadPath, fileList);
@@ -893,6 +1081,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         setUploadConfirmOpen(false);
         setPendingUploadFiles([]);
         setPendingUploadPath('');
+        setPendingUploadConflicts([]);
+        setPendingUploadKnowledgeTarget(null);
         if (uploadPath === ensureDirectoryPath(currentPath)) {
           setSearchValue('');
           setIsSearching(false);
@@ -929,6 +1119,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       intl,
       isSearching,
       items,
+      pendingUploadConflicts.length,
+      pendingUploadKnowledgeTarget,
       resourceId,
       updateCategoryCache,
       uploadingFiles,
@@ -968,12 +1160,36 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     [activeCategoryKey, currentPath, fetchList, isSearching, items, resourceId, updateCategoryCache]
   );
 
-  const handleUploadSelect = useCallback((targetPath: string, fileList: File[]) => {
-    if (!fileList.length) return;
-    setPendingUploadPath(ensureDirectoryPath(targetPath));
-    setPendingUploadFiles(fileList);
-    setUploadConfirmOpen(true);
-  }, []);
+  const handleUploadSelect = useCallback(
+    async (targetPath: string, fileList: File[]) => {
+      if (!fileList.length) return;
+      const uploadPath = ensureDirectoryPath(targetPath);
+      let uploadConflicts: string[] = [];
+      let uploadKnowledgeTarget: BykcKnowledgeUploadTarget | null = null;
+
+      try {
+        if (isPathIn(uploadPath, BYKC_FILE_PATH)) {
+          uploadKnowledgeTarget = await resolveKnowledgeUploadTarget(uploadPath);
+          if (!uploadKnowledgeTarget) return;
+          const response = await checkUploadFileConflicts({
+            resourceId: uploadKnowledgeTarget.knowledgeBase.resourceId,
+            directoryPath: uploadKnowledgeTarget.directoryPath,
+            fileNames: fileList.map((file) => file.name),
+          });
+          uploadConflicts = response?.overwritePaths || [];
+        }
+
+        setPendingUploadPath(uploadPath);
+        setPendingUploadFiles(fileList);
+        setPendingUploadConflicts(uploadConflicts);
+        setPendingUploadKnowledgeTarget(uploadKnowledgeTarget);
+        setUploadConfirmOpen(true);
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
+      }
+    },
+    [intl, resolveKnowledgeUploadTarget]
+  );
 
   const openUploadDirectoryPicker = useCallback(() => {
     const initialPath = ensureDirectoryPath(pendingUploadPath || currentPath || ROOT_FILE_PATH);
@@ -994,11 +1210,12 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const handleCategoryUploadSelect = useCallback(
     async (category: FileCategoryItem, fileList: File[]) => {
       if (!fileList.length) return;
+      const categoryPath = getCategoryActivePath(category);
       try {
         if (category.key !== 'root') {
-          await ensureFolder({ resourceId, path: category.path });
+          await ensureFolder({ resourceId, path: categoryPath });
         }
-        handleUploadSelect(category.path, fileList);
+        await handleUploadSelect(categoryPath, fileList);
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.createFolder.failed' }));
       }
@@ -1008,22 +1225,56 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
   const handleRefreshCategory = useCallback(
     async (category: FileCategoryItem) => {
+      const categoryPath = getCategoryActivePath(category);
       try {
         if (category.key !== 'root') {
-          await ensureFolder({ resourceId, path: category.path });
+          await ensureFolder({ resourceId, path: categoryPath });
         }
+        // 清除缓存，模拟收起再展开 tab 的效果
         delete categoryCacheRef.current[category.key];
-        if (category.key === activeCategoryKey) {
-          setSearchValue('');
-          setIsSearching(false);
-          setChildrenByPath({});
-          await fetchList(currentPath, { force: true, categoryKey: category.key });
+        // 清空所有子文件夹的缓存数据
+        setChildrenByPath({});
+        setExpandedTreeKeys(category.key === 'session' && activeSessionId ? [getSessionFilePath(activeSessionId)] : []);
+        // 清空当前列表并重新获取
+        setItems([]);
+        await fetchList(categoryPath, { force: true, categoryKey: category.key });
+        if (category.key === 'session') {
+          await expandCurrentSessionDirectory(activeSessionId);
         }
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
       }
     },
-    [activeCategoryKey, currentPath, fetchList, intl, resourceId]
+    [activeSessionId, expandCurrentSessionDirectory, fetchList, intl, resourceId]
+  );
+
+  const handleOpenCategoryPath = useCallback(
+    async (category: FileCategoryItem, event: React.MouseEvent<HTMLElement>) => {
+      event.stopPropagation();
+      const categoryPath = getCategoryActivePath(category);
+      try {
+        if (category.key !== 'root') {
+          await ensureFolder({ resourceId, path: categoryPath });
+        }
+        delete categoryCacheRef.current[category.key];
+        setActiveCategoryKey(category.key);
+        activeCategoryKeyRef.current = category.key;
+        currentPathRef.current = categoryPath;
+        setCurrentPath(categoryPath);
+        setSearchValue('');
+        setIsSearching(false);
+        setItems([]);
+        setChildrenByPath({});
+        setExpandedTreeKeys(category.key === 'session' && activeSessionId ? [getSessionFilePath(activeSessionId)] : []);
+        await fetchList(categoryPath, { force: true, categoryKey: category.key });
+        if (category.key === 'session') {
+          await expandCurrentSessionDirectory(activeSessionId);
+        }
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+      }
+    },
+    [activeSessionId, expandCurrentSessionDirectory, fetchList, intl, resourceId]
   );
 
   const openCreateFolder = useCallback((parentPath: string) => {
@@ -1064,6 +1315,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     setUploadConfirmOpen(false);
     setPendingUploadFiles([]);
     setPendingUploadPath('');
+    setPendingUploadConflicts([]);
+    setPendingUploadKnowledgeTarget(null);
   }, [uploadingFiles]);
 
   const loadTreeNode = useCallback(
@@ -1143,7 +1396,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const openCopyToFileBrowser = useCallback(
     (item: FileBrowserItem, targetType: FileCopyTargetType) => {
       clearClickTimer();
-      const defaultPath = getCopyTargetPath(targetType, sessionId);
+      const defaultPath = getCopyTargetPath(targetType, activeSessionId);
       setCopyTarget(item);
       setCopyTargetType(targetType);
       setCopyDirectoryPath(defaultPath);
@@ -1151,7 +1404,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       setCopyModalOpen(true);
       void loadCopyFolders(defaultPath);
     },
-    [clearClickTimer, loadCopyFolders, sessionId]
+    [activeSessionId, clearClickTimer, loadCopyFolders]
   );
 
   const handleSelectKnowledgeBase = useCallback(
@@ -1328,17 +1581,12 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       message.success(intl.formatMessage({ id: 'fileBrowser.copy.success' }));
       setCopyModalOpen(false);
       setCopyTarget(null);
-      delete categoryCacheRef.current[copyTargetType];
-      setChildrenByPath({});
-      if (copyDirectoryPath === ensureDirectoryPath(currentPath)) {
-        await fetchList(currentPath, { force: true });
-      }
     } catch (error: any) {
       message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.copy.failed' }));
     } finally {
       setCopyingToFileBrowser(false);
     }
-  }, [copyDirectoryPath, copyTarget, copyTargetType, currentPath, fetchList, intl, resourceId]);
+  }, [copyDirectoryPath, copyTarget, intl, resourceId]);
 
   const handleConfirmKnowledgeUpload = useCallback(
     async (processFrontMatter: boolean) => {
@@ -1401,7 +1649,12 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const uploadConfirmDirectoryPath = isKnowledgeUploadConfirm
     ? pendingKnowledgeDirectoryPath
     : pendingUploadPath || '/';
-  const uploadConfirmConflicts = isKnowledgeUploadConfirm ? pendingKnowledgeConflicts : [];
+  let uploadConfirmConflicts: string[] = [];
+  if (isKnowledgeUploadConfirm) {
+    uploadConfirmConflicts = pendingKnowledgeConflicts;
+  } else if (isBykcUploadConfirm) {
+    uploadConfirmConflicts = pendingUploadConflicts;
+  }
   const uploadConfirmLoading = isKnowledgeUploadConfirm ? savingToKnowledge : uploadingFiles;
   let uploadConfirmOkText = intl.formatMessage({ id: 'fileBrowser.toolbar.upload' });
   if (isKnowledgeUploadConfirm) {
@@ -1410,7 +1663,9 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       : 'knowledgeDetail.uploadFile';
     uploadConfirmOkText = intl.formatMessage({ id: okTextId });
   } else if (isBykcUploadConfirm) {
-    uploadConfirmOkText = intl.formatMessage({ id: 'knowledgeDetail.uploadFile' });
+    uploadConfirmOkText = intl.formatMessage({
+      id: pendingUploadConflicts.length ? 'knowledgeDetail.confirmOverwriteUpload' : 'knowledgeDetail.uploadFile',
+    });
   }
 
   const handleUploadConfirmOk = useCallback(
@@ -1439,6 +1694,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const renderCategoryActions = useCallback(
     (category: FileCategoryItem) => {
       const canManageCategory = category.key !== 'log';
+      const categoryPath = getCategoryActivePath(category);
       const uploadTitle = intl.formatMessage({ id: 'fileBrowser.toolbar.upload' });
       const createTitle = intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' });
       const refreshTitle = intl.formatMessage({ id: 'fileBrowser.toolbar.refresh' });
@@ -1446,47 +1702,47 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       return (
         <span className={styles.categoryActions} onClick={(event) => event.stopPropagation()}>
           {canManageCategory && (
-            <Upload
-              showUploadList={false}
-              multiple
-              beforeUpload={(_, fileList) => {
-                void handleCategoryUploadSelect(category, fileList as unknown as File[]);
-                return false;
-              }}
-            >
-              <Button
-                icon={<AntdIcon type="icon-a-Uploadshangchuan" className={styles.categoryActionIcon} />}
-                size="small"
-                className={styles.categoryActionButton}
-                title={uploadTitle}
-                aria-label={uploadTitle}
-              />
-            </Upload>
+            <Tooltip title={uploadTitle}>
+              <Upload
+                showUploadList={false}
+                multiple
+                beforeUpload={(_, fileList) => {
+                  void handleCategoryUploadSelect(category, fileList as unknown as File[]);
+                  return false;
+                }}
+              >
+                <Button
+                  icon={<AntdIcon type="icon-a-Uploadshangchuan" className={styles.categoryActionIcon} />}
+                  size="small"
+                  className={styles.categoryActionButton}
+                />
+              </Upload>
+            </Tooltip>
           )}
           {canManageCategory && (
+            <Tooltip title={createTitle}>
+              <Button
+                icon={<AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" className={styles.categoryActionIcon} />}
+                size="small"
+                className={styles.categoryActionButton}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openCreateFolder(categoryPath);
+                }}
+              />
+            </Tooltip>
+          )}
+          <Tooltip title={refreshTitle}>
             <Button
-              icon={<AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" className={styles.categoryActionIcon} />}
+              icon={<AntdIcon type="icon-a-Refreshshuaxin1" className={styles.categoryActionIcon} />}
               size="small"
               className={styles.categoryActionButton}
-              title={createTitle}
-              aria-label={createTitle}
               onClick={(event) => {
                 event.stopPropagation();
-                openCreateFolder(category.path);
+                void handleRefreshCategory(category);
               }}
             />
-          )}
-          <Button
-            icon={<AntdIcon type="icon-a-Refreshshuaxin1" className={styles.categoryActionIcon} />}
-            size="small"
-            className={styles.categoryActionButton}
-            title={refreshTitle}
-            aria-label={refreshTitle}
-            onClick={(event) => {
-              event.stopPropagation();
-              void handleRefreshCategory(category);
-            }}
-          />
+          </Tooltip>
         </span>
       );
     },
@@ -1525,7 +1781,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
                 showUploadList={false}
                 multiple
                 beforeUpload={(_, fileList) => {
-                  handleUploadSelect(item.path, fileList as unknown as File[]);
+                  void handleUploadSelect(item.path, fileList as unknown as File[]);
                   return false;
                 }}
               >
@@ -1563,13 +1819,21 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
               showIcon
               selectable={false}
               treeData={fileTreeData}
+              expandedKeys={expandedTreeKeys}
+              onExpand={(keys) => setExpandedTreeKeys(keys)}
               loadData={(node) => loadTreeNode(node as unknown as FileTreeItem)}
               icon={(node) => {
                 const item = node as unknown as FileTreeItem;
+                const directoryExpanded =
+                  isDirectory(item) &&
+                  expandedTreeKeys.includes(ensureDirectoryPath(normalizeFileBrowserPath(item.path)));
+                const iconType = directoryExpanded
+                  ? 'a-Folder-openwenjianjia-kai'
+                  : getIconType(item.name, isDirectory(item));
                 return (
                   <Tooltip title={item.name} placement="right">
                     <span>
-                      <AntdIcon type={`icon-${getIconType(item.name, isDirectory(item))}`} />
+                      <AntdIcon type={`icon-${iconType}`} />
                     </span>
                   </Tooltip>
                 );
@@ -1578,10 +1842,16 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
               onClick={handleTreeNodeClick as any}
               onDoubleClick={(_, node) => handleItemDoubleClick(node as unknown as FileTreeItem)}
               titleRender={(item) => {
-                const cursor = canPreviewFile(item as FileTreeItem) ? 'pointer' : 'default';
+                const treeItem = item as FileTreeItem;
+                const cursor = canPreviewFile(treeItem) ? 'pointer' : 'default';
+                const directoryExpanded =
+                  isDirectory(treeItem) &&
+                  expandedTreeKeys.includes(ensureDirectoryPath(normalizeFileBrowserPath(treeItem.path)));
 
                 return (
-                  <span className={styles.treeTitleContent}>
+                  <span
+                    className={`${styles.treeTitleContent} ${directoryExpanded ? styles.treeTitleContentExpanded : ''}`}
+                  >
                     <Tooltip title={item.name} placement="right">
                       <span className={styles.treeTitleName} style={{ cursor }}>
                         <span className={styles.treeTitleText} style={{ cursor }}>
@@ -1662,7 +1932,16 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
                 <span className={styles.categoryTitle}>{intl.formatMessage({ id: category.titleId })}</span>
                 {renderCategoryActions(category)}
               </div>
-              <span className={styles.categoryPath}>{category.path}</span>
+              <button
+                type="button"
+                className={styles.categoryPath}
+                title={getCategoryActivePath(category)}
+                onClick={(event) => {
+                  void handleOpenCategoryPath(category, event);
+                }}
+              >
+                {getCategoryActivePath(category)}
+              </button>
             </div>
           ),
           children: category.key === activeCategoryKey ? fileTreeContent : null,

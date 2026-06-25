@@ -7,16 +7,13 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONArray;
-import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.constants.superassist.SessionType;
 import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
 import com.iwhalecloud.byai.common.feign.request.datacloud.TermsOptionsReq;
 import com.iwhalecloud.byai.common.feign.response.DataCloudResponse;
 import com.iwhalecloud.byai.common.feign.response.datacloud.TermsOptionsResp;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
-import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
@@ -56,7 +53,6 @@ import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.session.dto.MessageDto;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
-import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -66,6 +62,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.web.multipart.MultipartFile;
 
 /**
@@ -345,4 +342,10 @@ public class AssistantChatController {
         return ResponseUtil.successResponse(byaiMessage);
     }
 
+    @GetMapping("/sessionStatus")
+    public ResponseUtil<Object> getSessionStatus(@RequestParam(value = "sessionId", required = false) String sessionId,
+        @RequestParam(value = "agentId", required = false) Long agentId) throws IOException {
+        return assistantChatApplicationService.getSessionStatus(sessionId, agentId);
+    }
+    
 }

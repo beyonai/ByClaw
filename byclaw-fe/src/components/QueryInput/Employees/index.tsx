@@ -146,6 +146,7 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
 
     return (
       <>
+        {this.renderContextUsed()}
         {showOnlineSearch && (
           <Button
             onClick={this.onSwitchOnlineSearch}

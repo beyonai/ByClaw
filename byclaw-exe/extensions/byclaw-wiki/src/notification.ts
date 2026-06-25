@@ -71,6 +71,51 @@ function resolveNotificationTitle(params: DocumentationNotificationRequest): str
   return params.documentTitle || "Byclaw Wiki: 操作文档待更新";
 }
 
+function buildDocumentName(params: DocumentationNotificationRequest): string {
+  const rawName = params.documentTitle || params.question || params.query || "openclaw-document";
+  const baseName =
+    rawName
+      .trim()
+      .replace(/[\\/]+/gu, "-")
+      .replace(/[\r\n\t]+/gu, " ")
+      .replace(/\s+/gu, "-")
+      .replace(/[^\p{L}\p{N}._-]+/gu, "-")
+      .replace(/-+/gu, "-")
+      .replace(/^-+|-+$/gu, "")
+      .slice(0, 80) || "byclaw-document";
+  const timestamp = new Date().toISOString().replace(/[-:.TZ]/gu, "").slice(0, 14);
+  return `${baseName}-${timestamp}.md`;
+}
+
+function appendQueryParams(rawUrl: string, queryParams: URLSearchParams): string {
+  const hashIndex = rawUrl.indexOf("#");
+  const beforeHash = hashIndex >= 0 ? rawUrl.slice(0, hashIndex) : rawUrl;
+  const hash = hashIndex >= 0 ? rawUrl.slice(hashIndex) : "";
+  const separator = beforeHash.includes("?")
+    ? beforeHash.endsWith("?") || beforeHash.endsWith("&")
+      ? ""
+      : "&"
+    : "?";
+  return `${beforeHash}${separator}${queryParams.toString()}${hash}`;
+}
+
+function buildActionCardButtonUrl(params: DocumentationNotificationRequest): string {
+  const rawUrl = params.config.dingtalkActionCardBtnUrl.trim();
+  if (!rawUrl) {
+    return "";
+  }
+
+  const queryParams = new URLSearchParams();
+  if (params.config.resourceId?.trim()) {
+    queryParams.set("resourceId", params.config.resourceId.trim());
+  }
+  queryParams.set("directoryPath", params.config.directoryPath.trim() || "/");
+  queryParams.set("docName", buildDocumentName(params));
+  queryParams.set("doc", truncateText(params.documentMarkdown.trim(), params.config.maxOutputChars));
+  queryParams.set("language", "zh-CN");
+  return appendQueryParams(rawUrl, queryParams);
+}
+
 function buildMarkdown(params: DocumentationNotificationRequest): string {
   const title = resolveNotificationTitle(params);
   const question = params.question || params.query || "(未提供问题)";
@@ -95,6 +140,7 @@ function buildPayload(params: {
   config: ResolvedNotificationConfig;
   title: string;
   markdown: string;
+  buttonUrl?: string;
 }): unknown {
   const { robotType, config, title, markdown } = params;
   switch (robotType) {
@@ -108,7 +154,7 @@ function buildPayload(params: {
     case "dingtalk":
       {
         const btnTitle = config.dingtalkActionCardBtnTitle.trim() || "通过";
-        const btnUrl = config.dingtalkActionCardBtnUrl.trim();
+        const btnUrl = params.buttonUrl ?? config.dingtalkActionCardBtnUrl.trim();
         return {
           msgtype: "actionCard",
           msgUuid: randomUUID(),
@@ -193,6 +239,7 @@ export async function sendDocumentationNotification(
 
     const title = resolveNotificationTitle(params);
     const markdown = buildMarkdown(params);
+    const buttonUrl = buildActionCardButtonUrl(params);
     const response = await fetch(webhookUrl, {
       method: "POST",
       headers: {
@@ -204,6 +251,7 @@ export async function sendDocumentationNotification(
           config: params.config,
           title,
           markdown,
+          buttonUrl,
         }),
       ),
       signal: controller.signal,

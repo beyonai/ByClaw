@@ -7,6 +7,7 @@ import { enqueueAfterAgentEvents, replaceAgentEventSubscription } from "./src/ag
 import { byaiChannelPlugin } from "./src/channel.js";
 import { registerByaiHooks } from "./src/hooks.js";
 import { registerContextSnapshotHook } from "./src/context-snapshot.js";
+import { registerByaiSessionStatusRoute } from "./src/session-status-route.js";
 import { setByaiRuntime } from "./src/runtime.js";
 import {
   markActiveSdkRequestSubagentEnded,
@@ -59,6 +60,7 @@ function registerFull(api: OpenClawPluginApi) {
   registerByaiHooks(api);
 
   registerContextSnapshotHook(api);
+  registerByaiSessionStatusRoute(api);
 
   api.on("subagent_spawned", async (event: {
     runId: string;

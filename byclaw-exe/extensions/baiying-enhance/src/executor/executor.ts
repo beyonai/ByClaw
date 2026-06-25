@@ -7,7 +7,7 @@ import {
   extractOpenclawMcpForwardHeaders,
   getResourceContext,
 } from "./capability-builder.js";
-import { logChannelDebug, type BaiyingEnhanceLogger } from "./debug-channel.js";
+import { logChannelDebug, registerPrivateParamLogRedactions, type BaiyingEnhanceLogger } from "./debug-channel.js";
 import { resolveCapability } from "./capability-resolver.js";
 import { describeResource } from "./describe.js";
 import { normalizeResourceType } from "./resource-type.js";
@@ -18,6 +18,7 @@ import { executeMcp } from "./resource-types/mcp.js";
 import { executeTool } from "./resource-types/tool.js";
 import { executeToolkit } from "./resource-types/toolkit.js";
 import type { DocDeltaCallback } from "./doc-shared.js";
+import { loadPrivateParamsRuntime } from "../personal-params.js";
 
 export type BaiyingExecutorOptions = {
   /** Deprecated. Retained for API compatibility; resource snapshots are read from Redis. */
@@ -141,6 +142,18 @@ export class BaiyingExecutor {
       return makeError("CAPABILITY_NOT_FOUND", `Capability not found: ${params.capabilityId}`);
     }
 
+    const privateParamsRuntime = await loadPrivateParamsRuntime({
+      authContext,
+      logger: params.logger,
+    });
+    const privateParams = privateParamsRuntime?.params;
+    if (privateParams && Object.keys(privateParams).length > 0) {
+      registerPrivateParamLogRedactions(Object.values(privateParams));
+      params.logger?.info?.(
+        `baiying-enhance: private params loaded userCode=${privateParamsRuntime.userCode} version=${String(privateParamsRuntime.version ?? "")} keys=${Object.keys(privateParams).join(",")}`,
+      );
+    }
+
     const resType = normalizeResourceType(resolvedType ?? capability.resource_type ?? "");
     if (resType === "agent") {
       return await executeAgent({
@@ -160,6 +173,7 @@ export class BaiyingExecutor {
         authContext,
         session: this.session,
         logger: params.logger,
+        privateParams,
       });
     }
     if (resType === "tool") {
@@ -169,6 +183,7 @@ export class BaiyingExecutor {
         authContext,
         session: this.session,
         logger: params.logger,
+        privateParams,
       });
     }
     if (resType === "mcp" || resType === "object" || resType === "view") {
@@ -181,6 +196,7 @@ export class BaiyingExecutor {
         authContext,
         session: this.session,
         logger: params.logger,
+        privateParams,
       });
     }
     if (resType === "doc") {

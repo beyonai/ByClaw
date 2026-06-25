@@ -623,6 +623,18 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
         rel_resource_list = detail_data.get("relResourceList") or []
         if not isinstance(rel_resource_list, list):
             rel_resource_list = []
+
+        # 读取 extResourceList → ext_codes（加载到 TOOL_POOL，初始 LOCKED，LLM 不可见）
+        ext_resource_list = detail_data.get("extResourceList") or []
+        if not isinstance(ext_resource_list, list):
+            ext_resource_list = []
+        self._ext_codes = [
+            r.get("resourceCode") for r in ext_resource_list
+            if isinstance(r, dict)
+            and r.get("resourceBizType") in {"OBJECT", "VIEW"}
+            and r.get("resourceCode")
+        ]
+
         dynamic_tools, build_diag = self._build_dynamic_tools_with_diagnostics(
             agent_id=agent_id,
             rel_resource_list=rel_resource_list,
@@ -776,11 +788,41 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
 
     @staticmethod
     def _compile_task_prompt(detail: dict[str, Any]) -> str:
-        parts: list[str] = []
-        core_persona = str(detail.get("corePersonaDefinition") or "").strip()
-        if core_persona:
-            parts.append(core_persona)
-        return "\n\n".join(parts)
+        """从 corePersonaDefinition 提取 Work Specification 的 value 作为 task_prompt。
+
+        corePersonaDefinition 格式：
+        [{"name": "工作规范", "key": "Work Specification", "value": "...", "nameEn": "..."}]
+
+        取 key="Work Specification" 的 value。
+        若格式不符（旧版字符串格式），直接使用原始字符串兜底。
+        """
+        raw = detail.get("corePersonaDefinition") or ""
+        if not raw:
+            return ""
+
+        raw_str = str(raw).strip()
+
+        # 尝试解析为 JSON 数组，提取 Work Specification 的 value
+        try:
+            items = json.loads(raw_str) if isinstance(raw_str, str) else raw_str
+            if isinstance(items, list):
+                for item in items:
+                    if isinstance(item, dict) and item.get("key") == "Work Specification":
+                        value = str(item.get("value") or "").strip()
+                        if value:
+                            return value
+                # 未找到 Work Specification，拼接所有非空 value 兜底
+                parts = [
+                    str(item.get("value") or "").strip()
+                    for item in items
+                    if isinstance(item, dict) and item.get("value")
+                ]
+                return "\n\n".join(parts)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        # 旧版：直接是字符串，原样返回
+        return raw_str
 
     @staticmethod
     def _rel_resource_snapshot(rel: dict[str, Any]) -> dict[str, str]:

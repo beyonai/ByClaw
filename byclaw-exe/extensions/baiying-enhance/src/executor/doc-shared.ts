@@ -19,6 +19,11 @@ import { asString, isRecord } from "./types.js";
 import { extractOpenclawMcpForwardHeaders } from "./capability-builder.js";
 import { resolveChannelRequestContextBySessionKey } from "../channel-session-resolve.js";
 
+function normalizeLangfuseTraceId(value: unknown): string {
+  const text = asString(value);
+  return /^[0-9a-f]{32}$/i.test(text) && !/^0+$/i.test(text) ? text.toLowerCase() : "";
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -206,6 +211,19 @@ export function resolveLangfuseParentObservationId(requestPayload: Dict): string
     asString(resourceContext.langfuse_parent_observation_id) ||
     asString(resourceContext.langfuseParentObservationId)
   );
+}
+
+export function resolveLangfuseTraceId(requestPayload: Dict): string {
+  const topLevel = isRecord(requestPayload)
+    ? asString(requestPayload.langfuseTraceId) || asString(requestPayload.langfuse_trace_id)
+    : "";
+  if (topLevel) return normalizeLangfuseTraceId(topLevel) || topLevel;
+  const resourceContext: ResourceContext = isRecord(requestPayload)
+    ? (isRecord(requestPayload.resource_context) ? (requestPayload.resource_context as ResourceContext) : {})
+    : {};
+  const resourceTraceId = asString(resourceContext.langfuse_trace_id) || asString(resourceContext.langfuseTraceId);
+  if (resourceTraceId) return normalizeLangfuseTraceId(resourceTraceId) || resourceTraceId;
+  return normalizeLangfuseTraceId(resolveDocChannelTraceId(requestPayload));
 }
 
 

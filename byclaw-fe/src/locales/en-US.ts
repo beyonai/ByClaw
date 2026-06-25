@@ -660,6 +660,7 @@ export default {
   'directoryManage.downloadMissingParams': 'Unable to download: missing file path or knowledge base information',
   'directoryManage.deleteFolderMissingParams': 'Unable to delete: missing folder path or knowledge base information',
   'directoryManage.deleteFileMissingParams': 'Unable to delete: missing file path or knowledge base information',
+  'directoryManage.deleteFolderNotEmpty': 'The folder contains subfolders or files and cannot be deleted',
   'permissionManage.member': 'Member',
   'permissionManage.addedBy': 'Added By',
   'permissionManage.permission': 'Permission',
@@ -830,6 +831,10 @@ export default {
   'sider.knowledge': 'Knowledge',
   'sider.space': 'Space',
   'sider.knowledgeSource': 'Knowledge sources',
+  'sider.employeeResourceGroup.tooltip':
+    'Knowledge, tools, views, objects, skills, and files follow the current digital employee.',
+  'sider.employeeResourceGroup.label': 'Linked resources',
+  'sider.currentDigitalEmployee': 'Current digital employee',
   'sider.files': 'Files',
   'sider.version': 'Version',
   'settings.versionInfo.version': 'Version',

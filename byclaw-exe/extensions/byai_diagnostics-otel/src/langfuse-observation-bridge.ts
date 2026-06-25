@@ -10,6 +10,7 @@ export type LangfuseToolObservationLookup = {
 
 export type LangfuseToolObservationEntry = LangfuseToolObservationLookup & {
   observationId: string;
+  traceId?: string;
   startedAtMs?: number;
 };
 
@@ -17,6 +18,7 @@ type LangfuseObservationBridge = {
   setToolObservation(entry: LangfuseToolObservationEntry): void;
   clearToolObservation(lookup: LangfuseToolObservationLookup): void;
   getToolObservationId(lookup: LangfuseToolObservationLookup): string | undefined;
+  getToolTraceId(lookup: LangfuseToolObservationLookup): string | undefined;
   snapshot(): LangfuseToolObservationEntry[];
 };
 
@@ -31,6 +33,11 @@ function normalizeText(value: unknown): string | undefined {
 function normalizeSpanId(value: unknown): string | undefined {
   const text = normalizeText(value);
   return text && /^[0-9a-f]{16}$/i.test(text) && !/^0+$/i.test(text) ? text.toLowerCase() : undefined;
+}
+
+function normalizeTraceId(value: unknown): string | undefined {
+  const text = normalizeText(value);
+  return text && /^[0-9a-f]{32}$/i.test(text) && !/^0+$/i.test(text) ? text.toLowerCase() : undefined;
 }
 
 function lookupKeys(lookup: LangfuseToolObservationLookup): string[] {
@@ -78,7 +85,10 @@ function readFileEntries(filePath = resolveBridgeFilePath()): Map<string, Langfu
       const entry = value as LangfuseToolObservationEntry;
       const observationId = normalizeSpanId(entry.observationId);
       if (observationId) {
-        out.set(key, { ...entry, observationId });
+        const traceId = normalizeTraceId(entry.traceId);
+        const rest = { ...entry };
+        delete rest.traceId;
+        out.set(key, { ...rest, observationId, ...(traceId ? { traceId } : {}) });
       }
     }
     return out;
@@ -127,8 +137,11 @@ function createBridge(): LangfuseObservationBridge {
       if (!observationId) {
         return;
       }
+      const traceId = normalizeTraceId(entry.traceId);
       prune(entry.startedAtMs);
-      const normalizedEntry = { ...entry, observationId };
+      const rest = { ...entry };
+      delete rest.traceId;
+      const normalizedEntry = { ...rest, observationId, ...(traceId ? { traceId } : {}) };
       for (const key of lookupKeys(entry)) {
         entries.set(key, normalizedEntry);
       }
@@ -155,6 +168,16 @@ function createBridge(): LangfuseObservationBridge {
         const observationId = entries.get(key)?.observationId;
         if (observationId) {
           return observationId;
+        }
+      }
+      return undefined;
+    },
+    getToolTraceId(lookup) {
+      prune();
+      for (const key of lookupKeys(lookup)) {
+        const traceId = entries.get(key)?.traceId;
+        if (traceId) {
+          return traceId;
         }
       }
       return undefined;
