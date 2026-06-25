@@ -8,6 +8,8 @@ import {
   tokenMarks,
   DEFAULT_CONTEXT_TOKENS,
   CONTEXT_TOKENS_CONFIG,
+  MIN_CONTEXT_TOKENS,
+  MIN_MAX_TOKENS,
   MODEL_PROTOCOL_OPTIONS,
   THINKING_CAPABILITY_OPTIONS,
   THINKING_COMPAT_FORMAT_OPTIONS,
@@ -325,6 +327,14 @@ const ModelFormFields: React.FC<Props> = ({
                 noStyle
                 rules={[
                   { required: true, message: intl.formatMessage({ id: 'modelMgr.modal.contextTokensPlaceholder' }) },
+                  {
+                    type: 'number',
+                    min: MIN_CONTEXT_TOKENS,
+                    message: intl.formatMessage(
+                      { id: 'modelMgr.modal.contextTokensMin' },
+                      { min: MIN_CONTEXT_TOKENS.toLocaleString() }
+                    ),
+                  },
                 ]}
               >
                 <InputNumber {...CONTEXT_TOKENS_CONFIG} className={styles.tokenInput} />
@@ -358,8 +368,21 @@ const ModelFormFields: React.FC<Props> = ({
             <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.topP' })} name="topP">
               <InputNumber className={styles.fullWidth} min={0} max={1} step={0.05} />
             </Form.Item>
-            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.maxTokens' })} name="maxTokens">
-              <InputNumber className={styles.fullWidth} min={1} />
+            <Form.Item
+              label={intl.formatMessage({ id: 'modelMgr.modal.maxTokens' })}
+              name="maxTokens"
+              rules={[
+                {
+                  type: 'number',
+                  min: MIN_MAX_TOKENS,
+                  message: intl.formatMessage(
+                    { id: 'modelMgr.modal.maxTokensMin' },
+                    { min: MIN_MAX_TOKENS.toLocaleString() }
+                  ),
+                },
+              ]}
+            >
+              <InputNumber className={styles.fullWidth} min={MIN_MAX_TOKENS} />
             </Form.Item>
             <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.frequencyPenalty' })} name="frequencyPenalty">
               <InputNumber className={styles.fullWidth} min={-2} max={2} step={0.1} />
