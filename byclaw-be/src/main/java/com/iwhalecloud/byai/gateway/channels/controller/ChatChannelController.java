@@ -13,6 +13,7 @@ import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.annotation.ChatCallLimit;
+import com.iwhalecloud.byai.common.annotation.TokenQuotaCheck;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -36,6 +37,7 @@ public class ChatChannelController {
             @ApiResponse(responseCode = "500", description = "服务器内部错误")
         })
     @ChatCallLimit
+    @TokenQuotaCheck
     @PostMapping(value = "/superAgentChat")
     public void postChat(
         @Parameter(description = "对话请求参数", required = true) @RequestBody AssistantChatDto assistantChatDto,

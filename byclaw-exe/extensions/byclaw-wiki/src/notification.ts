@@ -7,7 +7,7 @@ import type {
 } from "./types.js";
 
 const DINGTALK_CUSTOM_ROBOT_WEBHOOK = "https://oapi.dingtalk.com/robot/send";
-const DEFAULT_DOCUMENT_UPLOAD_BASE_URL = "http://localhost:3000";
+const DEFAULT_DOCUMENT_UPLOAD_BASE_URL = "http://43.139.67.47:8080/";
 
 type UploadedDocumentationFile = {
   key: string;

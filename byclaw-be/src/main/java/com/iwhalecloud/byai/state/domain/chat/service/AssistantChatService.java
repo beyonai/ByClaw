@@ -501,6 +501,11 @@ public class AssistantChatService {
         sessionMembersDto.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
         sessionMembersDto.setSessionType(SessionType.H_AS.getCode());
         sessionMembersDto.setIsDebug(assistantChatDto.getIsDebug());
+        
+        if (assistantChatDto.getIsTroubleshootSession()) {
+            sessionMembersDto.setIsDebug(1);
+        }
+
         sessionMembersDto.setSessionExts(assistantChatDto.getSessionExts());
         sessionMembersDto.setCreateTime(new Date());
         sessionMembersDto.setUpdateTime(new Date());

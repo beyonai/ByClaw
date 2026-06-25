@@ -13,6 +13,8 @@ import {
   addUserByOrg,
   setDataPermission,
   getDataPermission,
+  getTokenQuota,
+  assignTokenQuota,
 } from '@/pages/manager/service/MemberMgr';
 
 const normalizeResponse = (response) => {
@@ -216,6 +218,32 @@ export default {
     *getDataPermission({ payload, success, fail }, { call }) {
       try {
         const response = yield call(getDataPermission, payload);
+        if (response?.code === 0) {
+          success?.(response);
+        } else {
+          fail?.(response || {});
+        }
+      } catch (error) {
+        fail?.({ msg: getErrorText(error) });
+      }
+    },
+    // 查询用户Token额度
+    *getTokenQuota({ payload, success, fail }, { call }) {
+      try {
+        const response = yield call(getTokenQuota, payload);
+        if (response?.code === 0) {
+          success?.(response);
+        } else {
+          fail?.(response || {});
+        }
+      } catch (error) {
+        fail?.({ msg: getErrorText(error) });
+      }
+    },
+    // 分配用户Token额度
+    *assignTokenQuota({ payload, success, fail }, { call }) {
+      try {
+        const response = yield call(assignTokenQuota, payload);
         if (response?.code === 0) {
           success?.(response);
         } else {

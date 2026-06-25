@@ -79,6 +79,15 @@ export const DEFAULT_MENU_CONFIG = [
     paramDesc: '文件',
     paramSeq: 8,
   },
+  {
+    paramId: 10001673,
+    paramGroupCode: 'MENU_ICON_SHOW_TAB',
+    paramName: '模型',
+    paramEnName: 'Model',
+    paramValue: 'true',
+    paramDesc: '模型',
+    paramSeq: 9,
+  },
 ];
 
 export const MENU_NAME_TO_KEY_MAP: Record<string, string> = {
@@ -90,6 +99,7 @@ export const MENU_NAME_TO_KEY_MAP: Record<string, string> = {
   对象: 'object',
   技能: 'skill',
   文件: 'file',
+  模型: 'model',
 };
 
 export const getVisibleMenuKeysFromConfig = (config: any[] = []) => {

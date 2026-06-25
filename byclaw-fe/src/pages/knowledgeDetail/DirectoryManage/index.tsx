@@ -154,9 +154,9 @@ function isBuildNotStartedRecord(record: any) {
   return !normalizedState || normalizedState === '1';
 }
 
-function hasRunningBuildTask(record: any) {
-  return `${record?.fileUploadState ?? ''}` === '2';
-}
+// function hasRunningBuildTask(record: any) {
+//   return `${record?.fileUploadState ?? ''}` === '2';
+// }
 
 const FilePreviewPanel = ({ blob, fileName, fileType, loading, onClose }: FilePreviewPanelProps) => (
   <div className={styles.previewPanel}>
@@ -410,6 +410,13 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
 
   useEffect(() => {
     if (baseInfo?.resourceId === null || baseInfo?.resourceId === undefined || baseInfo?.resourceId === '') return;
+    queryingFileIdsRef.current.clear();
+    queriedFileIdsRef.current.clear();
+    postBuildPollingIdsRef.current.clear();
+    setFileBuildStatusMap({});
+    setQueryingBuildStatusIds([]);
+    setPollingFileIds([]);
+    setVisibleFileIds([]);
     setState({
       directoryList: [],
     });
@@ -516,6 +523,12 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     return !normalizedStatus || normalizedStatus === 'complete' || normalizedStatus === 'failed';
   }, []);
 
+  const isFailedBuildStatus = useCallback((statusInfo?: Partial<IFileBuildStatus> | null) => {
+    const status = `${statusInfo?.status || ''}`;
+    const currentStepStatus = `${statusInfo?.currentStepStatus || ''}`;
+    return status === 'failed' || currentStepStatus === 'failed';
+  }, []);
+
   const collectVisibleFileIds = useCallback(() => {
     if (typeof window === 'undefined') return;
 
@@ -557,12 +570,14 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       if (record?.type === 'directory') return '-';
       const rowKey = getFileRowKey(record);
       if (queryingBuildStatusIds.includes(rowKey)) return <Spin size="small" />;
-      if (isBuildNotStartedRecord(record) && !buildingFileIds.includes(rowKey) && !pollingFileIds.includes(rowKey)) {
-        return '-';
-      }
 
       const statusInfo = rowKey ? fileBuildStatusMap[rowKey] : undefined;
-      if (!statusInfo) return '-';
+      if (!statusInfo) {
+        if (isBuildNotStartedRecord(record) && !buildingFileIds.includes(rowKey) && !pollingFileIds.includes(rowKey)) {
+          return '-';
+        }
+        return '-';
+      }
 
       const { status, currentStep, statusDict = [], stepDict = [] } = statusInfo;
 
@@ -593,7 +608,6 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         const rowKey = getFileRowKey(record);
         return (
           visibleFileIds.includes(rowKey) &&
-          hasRunningBuildTask(record) &&
           !queryingFileIdsRef.current.has(rowKey) &&
           !queriedFileIdsRef.current.has(rowKey)
         );
@@ -718,11 +732,11 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
             (item: any) => item?.type === 'file' && getFileRowKey(item) === rowKey
           );
           if (!record) {
-            return { rowKey, data: null, missingRecord: true as const };
+            return { rowKey, data: null, missingRecord: true as const, error: false as const };
           }
           const directoryPath = getBuildDirectoryPath(record);
           if (!directoryPath) {
-            return { rowKey, data: null, missingRecord: true as const };
+            return { rowKey, data: null, missingRecord: true as const, error: false as const };
           }
           try {
             const res = await getFileBuildStatus({ resourceId: rid, directoryPath });
@@ -730,12 +744,14 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
               rowKey,
               data: res || null,
               missingRecord: false as const,
+              error: false as const,
             };
           } catch (error) {
             return {
               rowKey,
               data: null,
               missingRecord: false as const,
+              error: true as const,
             };
           }
         })
@@ -753,24 +769,31 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         return next;
       });
 
-      setPollingFileIds((prev) =>
-        prev.filter((rowKey) => {
-          const row = results.find((item) => item.rowKey === rowKey);
-          const isPostBuildPolling = postBuildPollingIdsRef.current.has(rowKey);
-          if (row?.missingRecord) {
-            postBuildPollingIdsRef.current.delete(rowKey);
-            return false;
-          }
-          if (!row?.data) return isPostBuildPolling;
+      const nextPollingIds = pollingFileIds.filter((rowKey) => {
+        const row = results.find((item) => item.rowKey === rowKey);
+        if (row?.missingRecord) {
+          postBuildPollingIdsRef.current.delete(rowKey);
+          return false;
+        }
+        if (row?.error) {
+          postBuildPollingIdsRef.current.delete(rowKey);
+          return false;
+        }
+        if (!row?.data) return false;
 
-          const status = `${row?.data?.status || ''}`;
-          if (status === 'complete' || status === 'failed') {
-            postBuildPollingIdsRef.current.delete(rowKey);
-            return false;
-          }
-          return isPostBuildPolling || !isTerminalBuildStatus(status);
-        })
-      );
+        if (isFailedBuildStatus(row.data)) {
+          postBuildPollingIdsRef.current.delete(rowKey);
+          return false;
+        }
+        const status = `${row?.data?.status || ''}`;
+        if (isTerminalBuildStatus(status)) {
+          postBuildPollingIdsRef.current.delete(rowKey);
+          return false;
+        }
+        return true;
+      });
+
+      setPollingFileIds(() => nextPollingIds);
 
       isPolling = false;
     };
@@ -865,8 +888,6 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
                 intl.formatMessage({ id: 'directoryManage.buildFailed' });
               message.error(errorMessage);
             }
-
-            getDirectoryList();
           })
           .finally(() => {
             setBuildingFileIds((prev) => prev.filter((key) => !taskKeys.includes(key)));
