@@ -71,6 +71,10 @@
 | `POST` | `/api/v1/knowledgeItems/importByResourceId` | 按资源 ID 上传文档（Agent 工具） |
 | `POST` | `/api/v1/fileToMarkdownIndexByResourceId` | 按资源 ID 触发知识构建（Agent 工具） |
 | `POST` | `/api/v1/knowledgeItems/searchByResourceId` | 按资源 ID 知识检索（Agent 工具） |
+| `POST` | `/api/v1/directories/createByResourceId` | 按资源 ID 创建目录（Agent 工具） |
+| `POST` | `/api/v1/directories/updateByResourceId` | 按资源 ID 修改目录（Agent 工具） |
+| `POST` | `/api/v1/directories/deleteByResourceId` | 按资源 ID 删除目录（Agent 工具） |
+| `POST` | `/api/v1/listDirByResourceId` | 按资源 ID 获取目录内容（Agent 工具） |
 
 ## 知识库管理
 
@@ -834,6 +838,10 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
 | `POST` | `/api/v1/knowledgeItems/importByResourceId` | 按资源 ID 上传文档 |
 | `POST` | `/api/v1/fileToMarkdownIndexByResourceId` | 按资源 ID 触发知识构建 |
 | `POST` | `/api/v1/knowledgeItems/searchByResourceId` | 按资源 ID 知识检索 |
+| `POST` | `/api/v1/directories/createByResourceId` | 按资源 ID 创建目录 |
+| `POST` | `/api/v1/directories/updateByResourceId` | 按资源 ID 修改目录 |
+| `POST` | `/api/v1/directories/deleteByResourceId` | 按资源 ID 删除目录 |
+| `POST` | `/api/v1/listDirByResourceId` | 按资源 ID 获取目录内容 |
 
 ### `POST /api/v1/knowledgeItems/importByResourceId`
 
@@ -976,6 +984,187 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/importByResourceId \
 {
   "resultCode": "-1",
   "resultMsg": "cannot resolve one or more resourceIds: ['99999']",
+  "resultObject": {}
+}
+```
+
+### `POST /api/v1/directories/createByResourceId`
+
+按资源 ID 在对应知识库下创建目录。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `resourceId` | string | 是 | 知识库资源 ID，系统自动映射为内部 `knCode` |
+| `directoryPath` | string | 是 | 需创建的目录路径，以 `/` 开头，不包括知识库名称，支持递归创建 |
+| `directoryDescription` | string | 否 | 目录描述 |
+
+请求示例：
+
+```json
+{
+  "resourceId": "10000003",
+  "directoryPath": "/制度/人事/考勤",
+  "directoryDescription": "考勤制度目录"
+}
+```
+
+成功响应示例：
+
+```json
+{
+  "resultCode": "0",
+  "resultMsg": "success",
+  "resultObject": {}
+}
+```
+
+失败响应示例：
+
+```json
+{
+  "resultCode": "-1",
+  "resultMsg": "cannot resolve resourceId: 99999",
+  "resultObject": {}
+}
+```
+
+### `POST /api/v1/directories/updateByResourceId`
+
+按资源 ID 修改对应知识库下的目录名称。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `resourceId` | string | 是 | 知识库资源 ID，系统自动映射为内部 `knCode` |
+| `directoryPath` | string | 是 | 需要修改的目录路径，以 `/` 开头，不包括知识库名称 |
+| `directoryName` | string | 是 | 新目录名称，仅修改 `directoryPath` 最后一个层级的名称 |
+
+请求示例：
+
+```json
+{
+  "resourceId": "10000003",
+  "directoryPath": "/制度/人事/考勤",
+  "directoryName": "考勤管理"
+}
+```
+
+成功响应示例：
+
+```json
+{
+  "resultCode": "0",
+  "resultMsg": "success",
+  "resultObject": {}
+}
+```
+
+失败响应示例：
+
+```json
+{
+  "resultCode": "-1",
+  "resultMsg": "cannot resolve resourceId: 99999",
+  "resultObject": {}
+}
+```
+
+### `POST /api/v1/directories/deleteByResourceId`
+
+按资源 ID 删除对应知识库下的目录。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `resourceId` | string | 是 | 知识库资源 ID，系统自动映射为内部 `knCode` |
+| `directoryPath` | string | 是 | 需删除的目录路径，以 `/` 开头，不包括知识库名称 |
+
+请求示例：
+
+```json
+{
+  "resourceId": "10000003",
+  "directoryPath": "/制度/人事/考勤"
+}
+```
+
+成功响应示例：
+
+```json
+{
+  "resultCode": "0",
+  "resultMsg": "success",
+  "resultObject": {}
+}
+```
+
+失败响应示例：
+
+```json
+{
+  "resultCode": "-1",
+  "resultMsg": "cannot resolve resourceId: 99999",
+  "resultObject": {}
+}
+```
+
+### `POST /api/v1/listDirByResourceId`
+
+按资源 ID 获取对应知识库目录下的所有文件和文件夹。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `resourceId` | string | 是 | 知识库资源 ID，系统自动映射为内部 `knCode` |
+| `directoryPath` | string | 是 | 目录路径，以 `/` 开头，不包括知识库名称 |
+
+请求示例：
+
+```json
+{
+  "resourceId": "10000003",
+  "directoryPath": "/制度/人事"
+}
+```
+
+成功响应示例：
+
+```json
+{
+  "resultCode": "0",
+  "resultMsg": "success",
+  "resultObject": {
+    "data": [
+      {
+        "knCode": "10000003",
+        "name": "/制度/人事/考勤",
+        "type": "directory",
+        "size": 0
+      },
+      {
+        "knCode": "10000003",
+        "name": "/制度/人事/请假制度.pdf",
+        "type": "file",
+        "size": 245760
+      }
+    ]
+  }
+}
+```
+
+说明：响应中 `knCode` 返回的是请求时传入的 `resourceId`，而非系统内部编码。
+
+失败响应示例：
+
+```json
+{
+  "resultCode": "-1",
+  "resultMsg": "cannot resolve resourceId: 99999",
   "resultObject": {}
 }
 ```

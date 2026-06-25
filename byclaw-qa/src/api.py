@@ -8,6 +8,10 @@ New routes:
   POST /api/v1/knowledgeItems/importByResourceId
   POST /api/v1/fileToMarkdownIndexByResourceId
   POST /api/v1/knowledgeItems/searchByResourceId
+  POST /api/v1/directories/createByResourceId
+  POST /api/v1/directories/updateByResourceId
+  POST /api/v1/directories/deleteByResourceId
+  POST /api/v1/listDirByResourceId
 
 Usage in start.sh:  uvicorn api:app --host ... --port ...
 """
@@ -24,9 +28,13 @@ from pydantic import ValidationError
 
 from by_qa.core import logger
 from by_qa.knowledge_base.api.schemas import (
+    CreateDirectoryRequest,
+    DeleteDirectoryRequest,
     FileToMarkdownIndexRequest,
+    KnowledgeItemListDirRequest,
     KnowledgeItemUploadRequest,
     SearchRequest,
+    UpdateDirectoryRequest,
 )
 from by_qa.knowledge_base.services.errors import (
     KnowledgeBaseConfigurationError,
@@ -35,6 +43,7 @@ from by_qa.knowledge_base.services.errors import (
 from byclaw_userfs_storage import reset_byclaw_userfs_headers, set_byclaw_userfs_headers
 from by_qa.main import (
     app,
+    resolve_knowledge_base_service,
     resolve_document_chunking_service,
     resolve_knowledge_item_ingestion_service,
     resolve_knowledge_item_search_service,
@@ -254,6 +263,144 @@ async def search_by_resource_id(body: dict[str, Any] = Body(...)):
         row = item.model_dump(by_alias=True)
         kn_code = row.get("knCode", "")
         row["knCode"] = code_to_resource_id.get(kn_code, kn_code)
+        data.append(row)
+
+    return _success({"data": data})
+
+
+# -- directories/createByResourceId -------------------------------------------
+
+@app.post("/api/v1/directories/createByResourceId")
+async def create_directory_by_resource_id(body: dict[str, Any] = Body(...)):
+    resource_id = body.get("resourceId")
+    if not resource_id:
+        return _error("resourceId is required")
+
+    kn_code = await _resolve_kn_code(str(resource_id))
+    if kn_code is None:
+        return _error(f"cannot resolve resourceId: {resource_id}")
+
+    body_mapped = {**body, "knCode": kn_code}
+    body_mapped.pop("resourceId", None)
+
+    try:
+        request = CreateDirectoryRequest.model_validate(body_mapped)
+    except ValidationError as exc:
+        return _error("request validation failed", {"errors": json.loads(exc.json())})
+
+    try:
+        service = await resolve_knowledge_base_service()
+        await service.create_directory(request)
+    except KnowledgeBaseConfigurationError as exc:
+        logger.exception("createDirectoryByResourceId configuration error: resourceId=%s", resource_id)
+        return _error(str(exc))
+    except KnowledgeBaseValidationError as exc:
+        logger.exception("createDirectoryByResourceId validation error: resourceId=%s", resource_id)
+        return _error(str(exc))
+
+    return _success()
+
+
+# -- directories/updateByResourceId -------------------------------------------
+
+@app.post("/api/v1/directories/updateByResourceId")
+async def update_directory_by_resource_id(body: dict[str, Any] = Body(...)):
+    resource_id = body.get("resourceId")
+    if not resource_id:
+        return _error("resourceId is required")
+
+    kn_code = await _resolve_kn_code(str(resource_id))
+    if kn_code is None:
+        return _error(f"cannot resolve resourceId: {resource_id}")
+
+    body_mapped = {**body, "knCode": kn_code}
+    body_mapped.pop("resourceId", None)
+
+    try:
+        request = UpdateDirectoryRequest.model_validate(body_mapped)
+    except ValidationError as exc:
+        return _error("request validation failed", {"errors": json.loads(exc.json())})
+
+    try:
+        service = await resolve_knowledge_base_service()
+        await service.update_directory(request)
+    except KnowledgeBaseConfigurationError as exc:
+        logger.exception("updateDirectoryByResourceId configuration error: resourceId=%s", resource_id)
+        return _error(str(exc))
+    except KnowledgeBaseValidationError as exc:
+        logger.exception("updateDirectoryByResourceId validation error: resourceId=%s", resource_id)
+        return _error(str(exc))
+
+    return _success()
+
+
+# -- directories/deleteByResourceId -------------------------------------------
+
+@app.post("/api/v1/directories/deleteByResourceId")
+async def delete_directory_by_resource_id(body: dict[str, Any] = Body(...)):
+    resource_id = body.get("resourceId")
+    if not resource_id:
+        return _error("resourceId is required")
+
+    kn_code = await _resolve_kn_code(str(resource_id))
+    if kn_code is None:
+        return _error(f"cannot resolve resourceId: {resource_id}")
+
+    body_mapped = {**body, "knCode": kn_code}
+    body_mapped.pop("resourceId", None)
+
+    try:
+        request = DeleteDirectoryRequest.model_validate(body_mapped)
+    except ValidationError as exc:
+        return _error("request validation failed", {"errors": json.loads(exc.json())})
+
+    try:
+        service = await resolve_knowledge_base_service()
+        await service.delete_directory(request)
+    except KnowledgeBaseConfigurationError as exc:
+        logger.exception("deleteDirectoryByResourceId configuration error: resourceId=%s", resource_id)
+        return _error(str(exc))
+    except KnowledgeBaseValidationError as exc:
+        logger.exception("deleteDirectoryByResourceId validation error: resourceId=%s", resource_id)
+        return _error(str(exc))
+
+    return _success()
+
+
+# -- listDirByResourceId ------------------------------------------------------
+
+@app.post("/api/v1/listDirByResourceId")
+async def list_dir_by_resource_id(body: dict[str, Any] = Body(...)):
+    resource_id = body.get("resourceId")
+    if not resource_id:
+        return _error("resourceId is required")
+
+    kn_code = await _resolve_kn_code(str(resource_id))
+    if kn_code is None:
+        return _error(f"cannot resolve resourceId: {resource_id}")
+
+    body_mapped = {**body, "knCode": kn_code}
+    body_mapped.pop("resourceId", None)
+
+    try:
+        request = KnowledgeItemListDirRequest.model_validate(body_mapped)
+    except ValidationError as exc:
+        return _error("request validation failed", {"errors": json.loads(exc.json())})
+
+    try:
+        service = await resolve_knowledge_base_service()
+        result = await service.list_dir(request)
+    except KnowledgeBaseConfigurationError as exc:
+        logger.exception("listDirByResourceId configuration error: resourceId=%s", resource_id)
+        return _error(str(exc))
+    except KnowledgeBaseValidationError as exc:
+        logger.exception("listDirByResourceId validation error: resourceId=%s", resource_id)
+        return _error(str(exc))
+
+    data = []
+    for item in result.data:
+        row = item.model_dump(by_alias=True)
+        row["knCode"] = str(resource_id)
         data.append(row)
 
     return _success({"data": data})
