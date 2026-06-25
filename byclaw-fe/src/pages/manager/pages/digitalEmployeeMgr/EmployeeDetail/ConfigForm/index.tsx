@@ -770,20 +770,18 @@ const ConfigForm = (props) => {
 
   useEffect(() => {
     if (!agentId) return;
-    if (!Array.isArray(templateData) || templateData.length === 0) return;
 
     const parsedConfig = parseCorePersonaDefinition(corePersonaDefinitionValue, isEN);
-    const templateKeys = templateData.map((item) => getPromptConfigKey(item)).filter(Boolean);
-    const templateTipMap = templateData.reduce((result, item) => {
+    const templateTipMap = (Array.isArray(templateData) ? templateData : []).reduce((result, item) => {
       const key = getPromptConfigKey(item);
       if (key && item.tip) {
         result[key] = item.tip;
       }
       return result;
     }, {});
-    const matchesCurrentTemplate = templateKeys.some((key) => parsedConfig.tabs.some((tab) => tab.key === key));
 
-    if (parsedConfig.isArray && parsedConfig.tabs.length > 0 && matchesCurrentTemplate) {
+    // In edit mode, prefer the saved corePersonaDefinition payload over template defaults.
+    if (parsedConfig.isArray && parsedConfig.tabs.length > 0) {
       const parsedTabs = parsedConfig.tabs.map((tab) => ({
         ...tab,
         tip: tab.tip || templateTipMap[tab.key] || '',
@@ -798,6 +796,8 @@ const ConfigForm = (props) => {
       internalSyncRef.current = false;
       return;
     }
+
+    if (!Array.isArray(templateData) || templateData.length === 0) return;
 
     const { tabs, fieldValues, corePersonaDefinitionJson } = buildTemplatePromptConfig(templateData, isEN);
     let roleObj = {};
