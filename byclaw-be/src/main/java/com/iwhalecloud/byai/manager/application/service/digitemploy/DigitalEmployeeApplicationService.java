@@ -862,6 +862,17 @@ public class DigitalEmployeeApplicationService {
         }
     }
 
+    /**
+     * 校验当前用户对指定数字员工是否有管理权限（删除/卸载工作空间技能前置校验）。
+     * 与绑定技能卸载使用同一套校验，避免漂移。
+     *
+     * @param digitalEmployeeId 数字员工资源 ID
+     */
+    public void assertSkillUninstallPermission(Long digitalEmployeeId) {
+        SsResource digitalEmployee = ssResourceService.findById(digitalEmployeeId);
+        validateSkillUninstallPermission(digitalEmployee);
+    }
+
     private void validateSkillUninstallPermission(SsResource digitalEmployee) {
         if (digitalEmployee == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));

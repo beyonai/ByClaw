@@ -93,10 +93,13 @@ export default {
   'resource.installKnowledge': 'Install Knowledge',
   'resource.installConfirm': 'Install to the current default digital employee?',
   'resource.installSuccess': 'Installed successfully',
+  'resource.installing': 'Installing…',
   'resource.uninstallSkill': 'Uninstall',
   'resource.uninstallSkillConfirm': 'Uninstall this skill from "{employeeName}"?',
   'resource.uninstallWorkspaceSkillConfirm':
     'Delete user-developed skill "{skillName}" from "{employeeName}"? This will remove the skill directory.',
+  'resource.deleteWorkspaceSkillConfirm':
+    'Delete user-developed skill "{skillName}"? This will remove the skill directory.',
   'resource.uninstallSuccess': 'Uninstalled successfully',
   'resource.currentDigitalEmployee': 'Current digital employee',
   'resource.noDefaultDigitalEmployee': 'No default digital employee found',

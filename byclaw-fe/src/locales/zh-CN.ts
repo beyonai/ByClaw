@@ -92,10 +92,12 @@ export default {
   'resource.installKnowledge': '安装知识',
   'resource.installConfirm': '确认安装到当前默认数字员工？',
   'resource.installSuccess': '安装成功',
+  'resource.installing': '安装中…',
   'resource.uninstallSkill': '卸载',
   'resource.uninstallSkillConfirm': '确认从当前数字员工“{employeeName}”卸载该技能？',
   'resource.uninstallWorkspaceSkillConfirm':
     '确认删除当前数字员工“{employeeName}”下的用户开发技能“{skillName}”？该操作会删除技能目录。',
+  'resource.deleteWorkspaceSkillConfirm': '确认删除用户开发技能“{skillName}”？该操作会删除技能目录。',
   'resource.uninstallSuccess': '卸载成功',
   'resource.currentDigitalEmployee': '当前数字员工',
   'resource.noDefaultDigitalEmployee': '未找到默认数字员工',

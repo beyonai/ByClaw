@@ -107,6 +107,17 @@ public class ByClawSkillResourceApplicationService {
     @Autowired
     private ByClawSkillPathResolver skillPathResolver;
 
+    /**
+     * 删除工作空间(用户开发)技能前，校验当前用户对目标数字员工是否有管理权限。
+     * 与绑定技能卸载同一口径，必须在真正删除文件之前调用。
+     *
+     * @param digitalEmployeeResourceId 数字员工资源 ID；为空时回退当前用户默认数字员工
+     */
+    public void assertWorkspaceSkillManagePermission(Long digitalEmployeeResourceId) {
+        Long resolvedDigitalEmployeeId = resolveDigitalEmployeeId(digitalEmployeeResourceId);
+        digitalEmployeeApplicationService.assertSkillUninstallPermission(resolvedDigitalEmployeeId);
+    }
+
     @Transactional(rollbackFor = Exception.class)
     public void registerChatUploadedSkills(String userCode, Long digitalEmployeeResourceId,
         List<MultipartFile> uploadFiles, List<ByClawSkillDto> uploadedSkills) {

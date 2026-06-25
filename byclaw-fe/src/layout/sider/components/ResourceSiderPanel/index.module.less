@@ -98,11 +98,28 @@
 
 .skillSourceTag {
   flex: none;
-  margin-inline-end: 0;
   margin-left: 6px;
-  line-height: 18px;
-  border-radius: 10px;
-  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background-color: rgba(22, 93, 255, 0.1);
+  max-width: 150px;
+  color: #088cff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.skillSourceTagText {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  background: linear-gradient(90deg, #088cff 0%, #00cdd5 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: #088cff;
 }
 
 .resourceAvatar {

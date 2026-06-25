@@ -1,5 +1,5 @@
-import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { Typography, Dropdown, Button, Popconfirm, Tooltip, message, Avatar } from 'antd';
+import React, { useRef, useState, useEffect, useMemo, useContext } from 'react';
+import { Typography, Dropdown, Button, Popconfirm, Tooltip, message, Avatar, Spin } from 'antd';
 import type { MenuProps } from 'antd';
 import { useIntl, useSelector } from '@umijs/max';
 import classnames from 'classnames';
@@ -11,6 +11,12 @@ import { getFileUrl } from '@/utils/file';
 import { useRequest } from '@/hooks/useRequest';
 import useGlobal from '@/hooks/useGlobal';
 import type { IState as IEmployeesState } from '@/models/useEmployees';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
+import { isWorkspaceSkill } from '../../workspaceSkill/utils';
+import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
+import { useWorkspaceSkillActions } from '../../workspaceSkill/useWorkspaceSkillActions';
+import WorkspaceSkillShareAuthModal from '../../workspaceSkill/WorkspaceSkillShareAuthModal';
+import type { WorkspaceSkillItem } from '../../workspaceSkill/utils';
 import styles from './index.module.less';
 
 const { Paragraph } = Typography;
@@ -70,6 +76,9 @@ export interface IResourceCardItem {
 type ResourceCardActionConfig = {
   scene?: ResourceCardActionScene;
   installedResourceIds?: ReadonlySet<string>;
+
+  /** 当前用户对该数字员工是否有管理权限，无则隐藏工作空间技能的删除入口。 */
+  canManageWorkspaceSkill?: boolean;
   enableKnowledgeManage?: boolean;
   editDisabledTip?: React.ReactNode;
   manageAuthDisabledTip?: React.ReactNode;
@@ -191,6 +200,31 @@ const ConfirmMenuLabel = ({
   );
 };
 
+/**
+ * 安装进行中遮罩（样式 A）：半透明覆盖整卡 + 居中转圈与「安装中…」+ 底部无限滚动进度条。
+ * 安装为一次性阻塞请求、无真实进度，故进度条为不确定(indeterminate)动画。遮罩吞掉点击防止重复操作。
+ */
+const InstallingOverlay = () => {
+  const intl = useIntl();
+  return (
+    <div
+      className={styles.installingOverlay}
+      onClick={(event) => {
+        event.stopPropagation();
+        event.preventDefault();
+      }}
+    >
+      <div className={styles.installingInner}>
+        <Spin size="small" />
+        <span className={styles.installingText}>{intl.formatMessage({ id: 'resource.installing' })}</span>
+      </div>
+      <div className={styles.installingBar}>
+        <span className={styles.installingBarInner} />
+      </div>
+    </div>
+  );
+};
+
 const getInstallLabelId = (resource: IResourceCardItem, resourceType?: string) => {
   const bizType = resource?.resourceBizType || resourceType;
   if (['KG_DOC', 'KG_QA', 'KG_TERM'].includes(bizType || '')) return 'resource.installKnowledge';
@@ -240,7 +274,7 @@ const RenderContent = (props: ResourceCardProps) => {
   } = actionConfig || {};
 
   const intl = useIntl();
-  const { agentId, agentInfo } = useGlobal();
+  const { agentId, agentInfo, EventEmitter } = useGlobal();
   const { userInfo, defaultDigEmployeeId } = useSelector(
     ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
       userInfo: user.userInfo,
@@ -249,6 +283,22 @@ const RenderContent = (props: ResourceCardProps) => {
   );
   const activeDigitalEmployeeId =
     agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
+
+  // 工作空间(用户开发)技能：复用公共 hook 处理详情 / 分享(资源化) / 删除，与左边栏一致。
+  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
+  // 与左边栏同源解析当前数字员工名，保证“使用它的数字员工”展示一致（agentInfo 在技能中心页常为空）。
+  const activeSiderAgent = useActiveSiderAgent();
+  const isWorkspaceSkillResource = isWorkspaceSkill(resource);
+  const [workspaceShareRecord, setWorkspaceShareRecord] = useState<WorkspaceSkillItem | null>(null);
+  const notifySkillListReload = () => EventEmitter?.emit('beyond-resourceList-resourceType-reload', 'SKILL');
+  const workspaceActions = useWorkspaceSkillActions({
+    resourceId: activeDigitalEmployeeId,
+    agentName: activeSiderAgent.name,
+    setDetailPanel,
+    clearDetailPanel,
+    onShareAuth: (item) => setWorkspaceShareRecord(item),
+    onChanged: notifySkillListReload,
+  });
 
   const { mutate: handleRestore, isLoading: restoring } = useRequest({
     mutationFn: (params: any) => {
@@ -535,6 +585,52 @@ const RenderContent = (props: ResourceCardProps) => {
     restoring,
   ]);
 
+  // 工作空间技能用独立菜单(详情/分享/删除)，不走权限驱动的 menuItems。
+  const workspaceMenuItems = useMemo<MenuProps['items']>(() => {
+    if (!isWorkspaceSkillResource) {
+      return [];
+    }
+    const items: NonNullable<MenuProps['items']> = [
+      {
+        key: 'detail',
+        label: <BuildMenuLabel icon="icon-a-Listliebiao" text={intl.formatMessage({ id: 'common.detail' })} />,
+        onClick: () => workspaceActions.openDetail(resource as WorkspaceSkillItem),
+      },
+      {
+        key: 'share',
+        label: <BuildMenuLabel icon="icon-a-Branch-onefenzhi" text={intl.formatMessage({ id: 'common.share' })} />,
+        onClick: () => workspaceActions.shareSkill(resource as WorkspaceSkillItem),
+      },
+    ];
+    // 仅当对该数字员工有管理权限时，才允许删除工作空间技能（后端同样校验）。
+    if (actionConfig?.canManageWorkspaceSkill) {
+      items.push({
+        key: 'delete',
+        label: (
+          <BuildMenuLabel icon="icon-a-Deleteshanchu" text={intl.formatMessage({ id: 'common.deleteResource' })} />
+        ),
+        onClick: () => workspaceActions.removeSkill(resource as WorkspaceSkillItem),
+      });
+    }
+    return items;
+  }, [isWorkspaceSkillResource, intl, workspaceActions, resource, actionConfig?.canManageWorkspaceSkill]);
+
+  const effectiveMenuItems = isWorkspaceSkillResource ? workspaceMenuItems : menuItems;
+  const effectiveTopRightTag = isWorkspaceSkillResource
+    ? intl.formatMessage({ id: 'resource.skillSource.userDeveloped' })
+    : topRightTag;
+  const effectiveCardClick = isWorkspaceSkillResource
+    ? () => workspaceActions.openDetail(resource as WorkspaceSkillItem)
+    : onCardClick;
+  const workspaceShareModal =
+    isWorkspaceSkillResource && workspaceShareRecord ? (
+      <WorkspaceSkillShareAuthModal
+        record={workspaceShareRecord}
+        onClose={() => setWorkspaceShareRecord(null)}
+        onSuccess={notifySkillListReload}
+      />
+    ) : null;
+
   const getDefaultIcon = () => {
     switch (resourceType) {
       case 'KG_DOC':
@@ -551,12 +647,12 @@ const RenderContent = (props: ResourceCardProps) => {
     return (
       <div
         className={classnames(styles.skillPosterContent, {
-          pointer: !!onCardClick && !isCancelledResource,
+          pointer: !!effectiveCardClick && !isCancelledResource,
           [styles.cancelledContent]: isCancelledResource,
         })}
         onClick={() => {
           if (isCancelledResource) return;
-          onCardClick?.();
+          effectiveCardClick?.();
         }}
       >
         <div
@@ -584,13 +680,13 @@ const RenderContent = (props: ResourceCardProps) => {
               <div className={styles.skillPosterPlaceholderSub}>{intl.formatMessage({ id: 'common.skill' })}</div>
             </div>
           )}
-          {topRightTag ? (
+          {effectiveTopRightTag ? (
             <span className={classnames(styles.skillPosterTag, { [styles.cancelledTag]: isCancelledResource })}>
-              <span className={styles.tagText}>{topRightTag}</span>
+              <span className={styles.tagText}>{effectiveTopRightTag}</span>
             </span>
           ) : null}
           {headerExtra}
-          {!!menuItems?.length && (
+          {!!effectiveMenuItems?.length && (
             <div
               className={styles.skillPosterAction}
               onClick={(e) => {
@@ -598,15 +694,17 @@ const RenderContent = (props: ResourceCardProps) => {
                 e.preventDefault();
               }}
             >
-              <Dropdown menu={{ items: menuItems }} placement="bottomRight">
+              <Dropdown menu={{ items: effectiveMenuItems }} placement="bottomRight">
                 <Button
                   className={styles.skillPosterActionBtn}
                   icon={<AntdIcon type="icon-a-Moregengduo" className={styles.cardActionBtnIcon} />}
                 />
               </Dropdown>
+              {workspaceShareModal}
             </div>
           )}
         </div>
+        {installing && <InstallingOverlay />}
         <Paragraph className={styles.skillPosterTitle} ellipsis={{ rows: 2, tooltip: `${displayTitle}` }}>
           {displayTitle}
         </Paragraph>
@@ -639,14 +737,15 @@ const RenderContent = (props: ResourceCardProps) => {
   return (
     <div
       className={classnames(styles.renderContent, 'full-width full-height', {
-        pointer: !!onCardClick && !isCancelledResource,
+        pointer: !!effectiveCardClick && !isCancelledResource,
         [styles.cancelledContent]: isCancelledResource,
       })}
       onClick={() => {
         if (isCancelledResource) return;
-        onCardClick?.();
+        effectiveCardClick?.();
       }}
     >
+      {installing && <InstallingOverlay />}
       <div className={classnames('ub ub-ver full-width full-height')}>
         <div className="ub gap12 full-height">
           <div className={styles.avatarContainer}>
@@ -673,25 +772,26 @@ const RenderContent = (props: ResourceCardProps) => {
               >
                 {displayTitle}
               </Paragraph>
-              {topRightTag ? (
+              {effectiveTopRightTag ? (
                 <span className={classnames(styles.tag, { [styles.cancelledTag]: isCancelledResource })}>
-                  <span className={styles.tagText}>{topRightTag}</span>
+                  <span className={styles.tagText}>{effectiveTopRightTag}</span>
                 </span>
               ) : null}
               {headerExtra}
-              {!!menuItems?.length && (
+              {!!effectiveMenuItems?.length && (
                 <div
                   onClick={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
                   }}
                 >
-                  <Dropdown menu={{ items: menuItems }} placement="bottomRight">
+                  <Dropdown menu={{ items: effectiveMenuItems }} placement="bottomRight">
                     <Button
                       className={styles.cardActionBtn}
                       icon={<AntdIcon type="icon-a-Moregengduo" className={styles.cardActionBtnIcon} />}
                     />
                   </Dropdown>
+                  {workspaceShareModal}
                 </div>
               )}
             </div>
@@ -745,7 +845,8 @@ function ResourceCard(props: ResourceCardProps) {
   const [resourceWithPermissions, setResourceWithPermissions] = useState<IResourceCardItem | null>(null);
 
   useEffect(() => {
-    if (!resourceCardRef.current || fetchedPermissionsRef.current) return noop;
+    // 工作空间(用户开发)技能没有真实 resourceId，跳过资源权限查询，避免无效请求。
+    if (!resourceCardRef.current || fetchedPermissionsRef.current || isWorkspaceSkill(resource)) return noop;
 
     let observer: IntersectionObserver | undefined;
     let cancelled = false;
